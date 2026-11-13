@@ -1,0 +1,359 @@
+diff --git a/dist/index.d.ts b/dist/index.d.ts
+index 34e5869..f1b4a65 100644
+--- a/dist/index.d.ts
++++ b/dist/index.d.ts
+@@ -6,8 +6,8 @@ import { createFileTreeIconResolver } from "./render/iconResolver.js";
+ import { TreeThemeInput, TreeThemeStyles, themeToTreeStyles } from "./utils/themeToTreeStyles.js";
+ import { FileTreePreparedInput, prepareFileTreeInput, preparePresortedFileTreeInput } from "./preparedInput.js";
+ import { FILE_TREE_DENSITY_PRESETS, FileTreeDensity, FileTreeDensityKeyword, FileTreeDensityPreset } from "./model/density.js";
+-import { FileTreeAddEvent, FileTreeBatchEvent, FileTreeBatchOperation, FileTreeCollisionStrategy, FileTreeCompositionOptions, FileTreeContextMenuButtonVisibility, FileTreeContextMenuItem, FileTreeContextMenuOpenContext, FileTreeContextMenuTriggerMode, FileTreeDirectoryHandle, FileTreeDragAndDropConfig, FileTreeDropContext, FileTreeDropResult, FileTreeDropTarget, FileTreeFileHandle, FileTreeGitStatusPatch, FileTreeHeaderCompositionOptions, FileTreeHydrationProps, FileTreeInitialExpansion, FileTreeItemHandle, FileTreeLabels, FileTreeLabelsOption, FileTreeListener, FileTreeMoveEvent, FileTreeMoveOptions, FileTreeMutationEvent, FileTreeMutationEventForType, FileTreeMutationEventInvalidation, FileTreeMutationEventType, FileTreeMutationHandle, FileTreeMutationSemanticEvent, FileTreeOptions, FileTreeRemoveEvent, FileTreeRemoveOptions, FileTreeRenameEvent, FileTreeRenamingConfig, FileTreeRenamingItem, FileTreeRenderOptions, FileTreeRenderProps, FileTreeResetEvent, FileTreeResetOptions, FileTreeResetPreparedOptions, FileTreeRowDecoration, FileTreeRowDecorationContext, FileTreeRowDecorationRenderer, FileTreeScrollOffset, FileTreeScrollToPathOptions, FileTreeSearchBlurBehavior, FileTreeSearchChangeListener, FileTreeSearchMode, FileTreeSearchSessionHandle, FileTreeSelectionChangeListener, FileTreeSortComparator, FileTreeSortEntry, FileTreeSsrPayload, FileTreeVisibleRow } from "./model/publicTypes.js";
++import { FileTreeAddEvent, FileTreeBatchEvent, FileTreeBatchOperation, FileTreeCollisionStrategy, FileTreeCompositionOptions, FileTreeContextMenuButtonVisibility, FileTreeContextMenuItem, FileTreeContextMenuOpenContext, FileTreeContextMenuTriggerMode, FileTreeDirectoryHandle, FileTreeDragAndDropConfig, FileTreeDropContext, FileTreeDropResult, FileTreeDropTarget, FileTreeFileHandle, FileTreeGitStatusPatch, FileTreeHeaderCompositionOptions, FileTreeHydrationProps, FileTreeInitialExpansion, FileTreeItemHandle, FileTreeLabels, FileTreeLabelsOption, FileTreeListener, FileTreeMoveEvent, FileTreeMoveOptions, FileTreeMutationEvent, FileTreeMutationEventForType, FileTreeMutationEventInvalidation, FileTreeMutationEventType, FileTreeMutationHandle, FileTreeMutationSemanticEvent, FileTreeOptions, FileTreeRemoveEvent, FileTreeRemoveOptions, FileTreeRenameEvent, FileTreeRenamingConfig, FileTreeRenamingItem, FileTreeRenderOptions, FileTreeRenderProps, FileTreeResetEvent, FileTreeResetOptions, FileTreeResetPreparedOptions, FileTreeRowDecoration, FileTreeRowDecorationContext, FileTreeRowDecorationRenderer, FileTreeRowDoubleClickEvent, FileTreeRowPart, FileTreeRowPartClickEvent, FileTreeRowParts, FileTreeRowsOptions, FileTreeScrollOffset, FileTreeScrollToPathOptions, FileTreeSearchBlurBehavior, FileTreeSearchChangeListener, FileTreeSearchMode, FileTreeSearchSessionHandle, FileTreeSelectionChangeListener, FileTreeSortComparator, FileTreeSortEntry, FileTreeSsrPayload, FileTreeVisibleRow } from "./model/publicTypes.js";
+ import { DEFAULT_FILE_TREE_LABELS } from "./utils/fileTreeLabels.js";
+ import { FILE_TREE_DEFAULT_ITEM_HEIGHT } from "./model/virtualization.js";
+ import { FileTree, preloadFileTree, serializeFileTreeSsrPayload } from "./render/FileTree.js";
+-export { CONTEXT_MENU_SLOT_NAME, CONTEXT_MENU_TRIGGER_TYPE, type ContextMenuAnchorRect, type FileTreeContextMenuButtonVisibility as ContextMenuButtonVisibility, type FileTreeContextMenuItem as ContextMenuItem, type FileTreeContextMenuOpenContext as ContextMenuOpenContext, type FileTreeContextMenuTriggerMode as ContextMenuTriggerMode, DEFAULT_FILE_TREE_LABELS, FILE_TREE_DEFAULT_ITEM_HEIGHT, FILE_TREE_DENSITY_PRESETS, FILE_TREE_SCROLLBAR_GUTTER_MEASURED_PROPERTY, FILE_TREE_SCROLLBAR_GUTTER_STYLE_ATTRIBUTE, FILE_TREE_SCROLLBAR_MEASURE_ATTRIBUTE, FILE_TREE_STYLE_ATTRIBUTE, FILE_TREE_TAG_NAME, FILE_TREE_UNSAFE_CSS_ATTRIBUTE, FLATTENED_PREFIX, FileTree, type FileTreeAddEvent, type FileTreeBatchEvent, type FileTreeBatchOperation, type FileTreeBuiltInIconSet, type FileTreeCollisionStrategy, type FileTreeCompositionOptions, type FileTreeDensity, type FileTreeDensityKeyword, type FileTreeDensityPreset, type FileTreeDirectoryHandle, type FileTreeDragAndDropConfig, type FileTreeDropContext, type FileTreeDropResult, type FileTreeDropTarget, type FileTreeFileHandle, type FileTreeGitStatusPatch, type FileTreeHeaderCompositionOptions, type FileTreeHydrationProps, type FileTreeIconConfig, type FileTreeIcons, type FileTreeInitialExpansion, type FileTreeItemHandle, type FileTreeLabels, type FileTreeLabelsOption, type FileTreeListener, type FileTreeMoveEvent, type FileTreeMoveOptions, type FileTreeMutationEvent, type FileTreeMutationEventForType, type FileTreeMutationEventInvalidation, type FileTreeMutationEventType, type FileTreeMutationHandle, type FileTreeMutationSemanticEvent, type FileTreeOptions, type FileTreePreparedInput, type FileTreeRemoveEvent, type FileTreeRemoveOptions, type FileTreeRenameEvent, type FileTreeRenamingConfig, type FileTreeRenamingItem, type FileTreeRenderOptions, type FileTreeRenderProps, type FileTreeResetEvent, type FileTreeResetOptions, type FileTreeResetPreparedOptions, type FileTreeRowDecoration, type FileTreeRowDecorationContext, type FileTreeRowDecorationRenderer, type FileTreeScrollOffset, type FileTreeScrollToPathOptions, type FileTreeSearchBlurBehavior, type FileTreeSearchChangeListener, type FileTreeSearchMode, type FileTreeSearchSessionHandle, type FileTreeSelectionChangeListener, type FileTreeSortComparator, type FileTreeSortEntry, type FileTreeSsrPayload, type FileTreeVisibleRow, type GitStatus, type GitStatusEntry, HEADER_SLOT_NAME, type RemappedIcon, type TreeThemeInput, type TreeThemeStyles, createFileTreeIconResolver, getBuiltInSpriteSheet, preloadFileTree, prepareFileTreeInput, preparePresortedFileTreeInput, serializeFileTreeSsrPayload, themeToTreeStyles };
+\ No newline at end of file
++export { CONTEXT_MENU_SLOT_NAME, CONTEXT_MENU_TRIGGER_TYPE, type ContextMenuAnchorRect, type FileTreeContextMenuButtonVisibility as ContextMenuButtonVisibility, type FileTreeContextMenuItem as ContextMenuItem, type FileTreeContextMenuOpenContext as ContextMenuOpenContext, type FileTreeContextMenuTriggerMode as ContextMenuTriggerMode, DEFAULT_FILE_TREE_LABELS, FILE_TREE_DEFAULT_ITEM_HEIGHT, FILE_TREE_DENSITY_PRESETS, FILE_TREE_SCROLLBAR_GUTTER_MEASURED_PROPERTY, FILE_TREE_SCROLLBAR_GUTTER_STYLE_ATTRIBUTE, FILE_TREE_SCROLLBAR_MEASURE_ATTRIBUTE, FILE_TREE_STYLE_ATTRIBUTE, FILE_TREE_TAG_NAME, FILE_TREE_UNSAFE_CSS_ATTRIBUTE, FLATTENED_PREFIX, FileTree, type FileTreeAddEvent, type FileTreeBatchEvent, type FileTreeBatchOperation, type FileTreeBuiltInIconSet, type FileTreeCollisionStrategy, type FileTreeCompositionOptions, type FileTreeDensity, type FileTreeDensityKeyword, type FileTreeDensityPreset, type FileTreeDirectoryHandle, type FileTreeDragAndDropConfig, type FileTreeDropContext, type FileTreeDropResult, type FileTreeDropTarget, type FileTreeFileHandle, type FileTreeGitStatusPatch, type FileTreeHeaderCompositionOptions, type FileTreeHydrationProps, type FileTreeIconConfig, type FileTreeIcons, type FileTreeInitialExpansion, type FileTreeItemHandle, type FileTreeLabels, type FileTreeLabelsOption, type FileTreeListener, type FileTreeMoveEvent, type FileTreeMoveOptions, type FileTreeMutationEvent, type FileTreeMutationEventForType, type FileTreeMutationEventInvalidation, type FileTreeMutationEventType, type FileTreeMutationHandle, type FileTreeMutationSemanticEvent, type FileTreeOptions, type FileTreePreparedInput, type FileTreeRemoveEvent, type FileTreeRemoveOptions, type FileTreeRenameEvent, type FileTreeRenamingConfig, type FileTreeRenamingItem, type FileTreeRenderOptions, type FileTreeRenderProps, type FileTreeResetEvent, type FileTreeResetOptions, type FileTreeResetPreparedOptions, type FileTreeRowDecoration, type FileTreeRowDecorationContext, type FileTreeRowDecorationRenderer, type FileTreeRowDoubleClickEvent, type FileTreeRowPart, type FileTreeRowPartClickEvent, type FileTreeRowParts, type FileTreeRowsOptions, type FileTreeScrollOffset, type FileTreeScrollToPathOptions, type FileTreeSearchBlurBehavior, type FileTreeSearchChangeListener, type FileTreeSearchMode, type FileTreeSearchSessionHandle, type FileTreeSelectionChangeListener, type FileTreeSortComparator, type FileTreeSortEntry, type FileTreeSsrPayload, type FileTreeVisibleRow, type GitStatus, type GitStatusEntry, HEADER_SLOT_NAME, type RemappedIcon, type TreeThemeInput, type TreeThemeStyles, createFileTreeIconResolver, getBuiltInSpriteSheet, preloadFileTree, prepareFileTreeInput, preparePresortedFileTreeInput, serializeFileTreeSsrPayload, themeToTreeStyles };
+\ No newline at end of file
+diff --git a/dist/model/FileTreeController.js b/dist/model/FileTreeController.js
+index 28da458..6689188 100644
+--- a/dist/model/FileTreeController.js
++++ b/dist/model/FileTreeController.js
+@@ -128,7 +128,8 @@ var FileTreeController = class FileTreeController {
+ 	#visibleCount = 0;
+ 	#unsubscribe;
+ 	constructor(options) {
+-		const { dragAndDrop, fileTreeSearchMode, initialSearchQuery, initialSelectedPaths, renaming, onSearchChange, paths, preparedInput, ...baseOptions } = options;
++		const { dragAndDrop, fileTreeSearchMode, initialSearchQuery, initialSelectedPaths, renaming, onDirectoryExpand, onSearchChange, paths, preparedInput, ...baseOptions } = options;
++		this.#onDirectoryExpand = onDirectoryExpand;
+ 		const resolvedInput = resolveFileTreeInput({
+ 			paths,
+ 			preparedInput
+@@ -1175,9 +1176,11 @@ var FileTreeController = class FileTreeController {
+ 		this.#selectionAnchorPath = canonicalAnchorPath;
+ 		return nextFocusedPath;
+ 	}
++	#onDirectoryExpand;
+ 	#subscribe() {
+ 		return this.#store.on("*", (event) => {
+ 			if (this.#suppressStoreNotifications) return;
++			if (event.operation === "expand") this.#onDirectoryExpand?.(event.path);
+ 			if (event.canonicalChanged) {
+ 				this.#itemHandles.clear();
+ 				this.#invalidateKnownPathCaches();
+diff --git a/dist/model/publicTypes.d.ts b/dist/model/publicTypes.d.ts
+index 06d89e9..f1c6cbe 100644
+--- a/dist/model/publicTypes.d.ts
++++ b/dist/model/publicTypes.d.ts
+@@ -58,6 +58,7 @@ type FileTreeControllerBehaviorOptions = FileTreeStoreOptions & {
+   fileTreeSearchMode?: FileTreeSearchMode;
+   initialSearchQuery?: string | null;
+   initialSelectedPaths?: readonly FileTreePublicId[];
++  onDirectoryExpand?: (path: FileTreePublicId) => void;
+   onSearchChange?: FileTreeSearchChangeListener;
+   renaming?: boolean | FileTreeRenamingConfig;
+ };
+@@ -196,6 +197,7 @@ type FileTreeOptionSurface = FileTreeRenderOptions & {
+   labels?: FileTreeLabelsOption;
+   onSelectionChange?: FileTreeSelectionChangeListener;
+   renderRowDecoration?: FileTreeRowDecorationRenderer;
++  rows?: FileTreeRowsOptions;
+   search?: boolean;
+   searchFakeFocus?: boolean;
+   searchBlurBehavior?: FileTreeSearchBlurBehavior;
+@@ -333,6 +335,38 @@ interface FileTreeRowDecorationContext {
+   row: FileTreeVisibleRow;
+ }
+ type FileTreeRowDecorationRenderer = (context: FileTreeRowDecorationContext) => FileTreeRowDecoration | null;
++interface FileTreeRowPart {
++  id?: string;
++  text?: string;
++  icon?: RemappedIcon;
++  color?: string;
++  title?: string;
++  label?: string;
++  pressed?: boolean;
++  disabled?: boolean;
++}
++interface FileTreeRowParts {
++  lead?: readonly (FileTreeRowPart | null)[];
++  trail?: readonly (FileTreeRowPart | null)[];
++  muted?: boolean;
++  tone?: string;
++  title?: string;
++}
++interface FileTreeRowPartClickEvent {
++  partId: string;
++  path: FileTreePublicId;
++  row: FileTreeVisibleRow;
++}
++interface FileTreeRowDoubleClickEvent {
++  path: FileTreePublicId;
++  row: FileTreeVisibleRow;
++}
++interface FileTreeRowsOptions {
++  renderParts?: (context: FileTreeRowDecorationContext) => FileTreeRowParts | null;
++  onPartClick?: (event: FileTreeRowPartClickEvent) => void;
++  onDoubleClick?: (event: FileTreeRowDoubleClickEvent) => void;
++  gitStatusPlacement?: 'start' | 'end';
++}
+ //#endregion
+-export { FileTreeAddEvent, FileTreeBatchEvent, FileTreeBatchOperation, FileTreeCollisionStrategy, FileTreeCompositionOptions, FileTreeContextMenuButtonVisibility, FileTreeContextMenuCompositionOptions, FileTreeContextMenuItem, FileTreeContextMenuOpenContext, FileTreeContextMenuTriggerMode, FileTreeControllerOptions, FileTreeDirectoryHandle, FileTreeDragAndDropConfig, FileTreeDropContext, FileTreeDropResult, FileTreeDropTarget, FileTreeFileHandle, FileTreeGitStatusPatch, FileTreeHeaderCompositionOptions, FileTreeHydrationProps, FileTreeInitialExpansion, FileTreeItemHandle, FileTreeItemHandleBase, FileTreeLabels, FileTreeLabelsOption, FileTreeListener, FileTreeMoveEvent, FileTreeMoveOptions, FileTreeMutationEvent, FileTreeMutationEventForType, FileTreeMutationEventInvalidation, FileTreeMutationEventType, FileTreeMutationHandle, FileTreeMutationSemanticEvent, FileTreeOptions, FileTreePublicId, FileTreeRemoveEvent, FileTreeRemoveOptions, FileTreeRenameEvent, FileTreeRenamingConfig, FileTreeRenamingItem, FileTreeRenderOptions, FileTreeRenderProps, FileTreeResetEvent, FileTreeResetOptions, FileTreeResetPreparedOptions, FileTreeRowDecoration, FileTreeRowDecorationContext, FileTreeRowDecorationIcon, FileTreeRowDecorationRenderer, FileTreeRowDecorationText, FileTreeRowDecorationTextPart, FileTreeScrollOffset, FileTreeScrollToPathOptions, FileTreeSearchBlurBehavior, FileTreeSearchChangeListener, FileTreeSearchMode, FileTreeSearchSessionHandle, FileTreeSelectionChangeListener, FileTreeSortComparator, FileTreeSortEntry, FileTreeSsrPayload, FileTreeVisibleRow, FileTreeVisibleSegment };
++export { FileTreeAddEvent, FileTreeBatchEvent, FileTreeBatchOperation, FileTreeCollisionStrategy, FileTreeCompositionOptions, FileTreeContextMenuButtonVisibility, FileTreeContextMenuCompositionOptions, FileTreeContextMenuItem, FileTreeContextMenuOpenContext, FileTreeContextMenuTriggerMode, FileTreeControllerOptions, FileTreeDirectoryHandle, FileTreeDragAndDropConfig, FileTreeDropContext, FileTreeDropResult, FileTreeDropTarget, FileTreeFileHandle, FileTreeGitStatusPatch, FileTreeHeaderCompositionOptions, FileTreeHydrationProps, FileTreeInitialExpansion, FileTreeItemHandle, FileTreeItemHandleBase, FileTreeLabels, FileTreeLabelsOption, FileTreeListener, FileTreeMoveEvent, FileTreeMoveOptions, FileTreeMutationEvent, FileTreeMutationEventForType, FileTreeMutationEventInvalidation, FileTreeMutationEventType, FileTreeMutationHandle, FileTreeMutationSemanticEvent, FileTreeOptions, FileTreePublicId, FileTreeRemoveEvent, FileTreeRemoveOptions, FileTreeRenameEvent, FileTreeRenamingConfig, FileTreeRenamingItem, FileTreeRenderOptions, FileTreeRenderProps, FileTreeResetEvent, FileTreeResetOptions, FileTreeResetPreparedOptions, FileTreeRowDecoration, FileTreeRowDecorationContext, FileTreeRowDecorationIcon, FileTreeRowDecorationRenderer, FileTreeRowDecorationText, FileTreeRowDecorationTextPart, FileTreeRowDoubleClickEvent, FileTreeRowPart, FileTreeRowPartClickEvent, FileTreeRowParts, FileTreeRowsOptions, FileTreeScrollOffset, FileTreeScrollToPathOptions, FileTreeSearchBlurBehavior, FileTreeSearchChangeListener, FileTreeSearchMode, FileTreeSearchSessionHandle, FileTreeSelectionChangeListener, FileTreeSortComparator, FileTreeSortEntry, FileTreeSsrPayload, FileTreeVisibleRow, FileTreeVisibleSegment };
+ //# sourceMappingURL=publicTypes.d.ts.map
+\ No newline at end of file
+diff --git a/dist/render/FileTree.d.ts b/dist/render/FileTree.d.ts
+index 316edef..4d2101c 100644
+--- a/dist/render/FileTree.d.ts
++++ b/dist/render/FileTree.d.ts
+@@ -47,6 +47,7 @@ declare class FileTree implements FileTreeMutationHandle, FileTreeSearchSessionH
+   resetPaths(paths: readonly string[], options?: FileTreeResetOptions): void;
+   resetPaths(options: FileTreeResetPreparedOptions): void;
+   setComposition(composition?: FileTreeCompositionOptions): void;
++  refreshRows(): void;
+   setGitStatus(gitStatus?: FileTreeOptions['gitStatus']): void;
+   setIcons(icons?: FileTreeOptions['icons']): void;
+   setLabels(labels?: FileTreeOptions['labels']): void;
+diff --git a/dist/render/FileTree.js b/dist/render/FileTree.js
+index 0b41099..a745685 100644
+--- a/dist/render/FileTree.js
++++ b/dist/render/FileTree.js
+@@ -65,6 +65,8 @@ var FileTree = class {
+ 	#id;
+ 	#onSelectionChange;
+ 	#renderRowDecoration;
++	#rows;
++	#rowsRevision = 0;
+ 	#renamingEnabled;
+ 	#searchBlurBehavior;
+ 	#searchEnabled;
+@@ -85,7 +87,7 @@ var FileTree = class {
+ 	#wroteHostItemHeight = false;
+ 	#wroteHostDensityFactor = false;
+ 	constructor(options) {
+-		const { composition, density, fileTreeSearchMode, gitStatus, id, initialSearchQuery, icons, itemHeight, labels, onSearchChange, onSelectionChange, overscan, renderRowDecoration, renaming, search, searchBlurBehavior, searchFakeFocus, stickyFolders, unsafeCSS, initialVisibleRowCount, ...controllerOptions } = options;
++		const { composition, density, fileTreeSearchMode, gitStatus, id, initialSearchQuery, icons, itemHeight, labels, onSearchChange, onSelectionChange, overscan, renderRowDecoration, renaming, rows, search, searchBlurBehavior, searchFakeFocus, stickyFolders, unsafeCSS, initialVisibleRowCount, ...controllerOptions } = options;
+ 		this.#composition = composition;
+ 		this.#id = createClientId(id);
+ 		this.#gitStatusState = resolveFileTreeGitStatusState(gitStatus);
+@@ -94,6 +96,7 @@ var FileTree = class {
+ 		this.#unsafeCSS = unsafeCSS;
+ 		this.#onSelectionChange = onSelectionChange;
+ 		this.#renderRowDecoration = renderRowDecoration;
++		this.#rows = rows;
+ 		this.#renamingEnabled = renaming != null && renaming !== false;
+ 		this.#searchBlurBehavior = searchBlurBehavior;
+ 		this.#searchEnabled = search === true;
+@@ -265,6 +268,12 @@ var FileTree = class {
+ 		this.#syncHeaderSlotContent();
+ 		renderFileTreeRoot(mountedTree.wrapper, this.#getViewProps());
+ 	}
++	refreshRows() {
++		this.#rowsRevision += 1;
++		const mountedTree = this.#getMountedTreeElements();
++		if (mountedTree == null) return;
++		renderFileTreeRoot(mountedTree.wrapper, this.#getViewProps());
++	}
+ 	setGitStatus(gitStatus) {
+ 		const nextGitStatusState = resolveFileTreeGitStatusState(gitStatus, this.#gitStatusState);
+ 		if (nextGitStatusState === this.#gitStatusState) return;
+@@ -321,6 +330,8 @@ var FileTree = class {
+ 			labels: this.#labels,
+ 			renamingEnabled: this.#renamingEnabled,
+ 			renderRowDecoration: this.#renderRowDecoration,
++			rows: this.#rows,
++			rowsRevision: this.#rowsRevision,
+ 			searchBlurBehavior: this.#searchBlurBehavior,
+ 			searchEnabled: this.#searchEnabled,
+ 			searchFakeFocus: this.#searchFakeFocus,
+@@ -457,7 +468,7 @@ var FileTree = class {
+ 	}
+ };
+ function preloadFileTree(options) {
+-	const { composition, density, fileTreeSearchMode, gitStatus, id, initialSearchQuery, icons, itemHeight, labels, onSearchChange: _onSearchChange, onSelectionChange: _onSelectionChange, overscan, renderRowDecoration, renaming, search, searchBlurBehavior, searchFakeFocus, stickyFolders, unsafeCSS, initialVisibleRowCount, ...controllerOptions } = options;
++	const { composition, density, fileTreeSearchMode, gitStatus, id, initialSearchQuery, icons, itemHeight, labels, onSearchChange: _onSearchChange, onSelectionChange: _onSelectionChange, overscan, renderRowDecoration, renaming, rows, search, searchBlurBehavior, searchFakeFocus, stickyFolders, unsafeCSS, initialVisibleRowCount, ...controllerOptions } = options;
+ 	const resolvedDensity = resolveFileTreeDensity(density, itemHeight);
+ 	const resolvedItemHeight = resolvedDensity.itemHeight;
+ 	const resolvedId = createServerId(id);
+@@ -490,6 +501,7 @@ function preloadFileTree(options) {
+ 		overscan,
+ 		renamingEnabled: renaming != null && renaming !== false,
+ 		renderRowDecoration,
++		rows,
+ 		searchBlurBehavior,
+ 		searchEnabled: search === true,
+ 		searchFakeFocus: searchFakeFocus === true,
+diff --git a/dist/render/FileTreeView.js b/dist/render/FileTreeView.js
+index b4c7ee4..428e358 100644
+--- a/dist/render/FileTreeView.js
++++ b/dist/render/FileTreeView.js
+@@ -362,8 +362,46 @@ function focusFirstMenuElement(menuElement) {
+ 	].join(", "));
+ 	focusElement(focusable ?? menuElement);
+ }
+-function renderFileTreeRowContent(row, resolveIcon, { actionLaneEnabled = false, customDecoration = null, decorationLaneEnabled = false, dragTargetFlattenedSegmentPath = null, gitDecoration = null, gitLaneActive = false, renameInput = null, showDecorativeActionAffordance = false } = {}) {
++function renderFileTreeRowPartLane(lane, parts, resolveIcon, onPartClick) {
++	if (parts == null || parts.length === 0) return null;
++	return /* @__PURE__ */ jsx("div", {
++		"data-item-section": lane,
++		part: `row-${lane}`,
++		children: parts.map((part, index) => {
++			if (part == null) return /* @__PURE__ */ jsx("span", { "data-item-part-empty": "true" }, index);
++			const interactive = part.id != null && part.disabled !== true;
++			const names = ["row-part"];
++			if (part.id != null) names.push(`row-part-${part.id}`);
++			if (part.pressed === true) names.push("row-part-pressed");
++			return /* @__PURE__ */ jsx("span", {
++				"data-item-part-id": part.id,
++				"data-item-part-pressed": part.pressed == null ? void 0 : String(part.pressed),
++				part: names.join(" "),
++				role: interactive ? "button" : void 0,
++				"aria-label": part.label,
++				"aria-pressed": interactive && part.pressed != null ? String(part.pressed) : void 0,
++				title: part.title,
++				style: part.color == null ? void 0 : { color: part.color },
++				onClick: interactive ? (event) => {
++					event.preventDefault();
++					event.stopPropagation();
++					onPartClick(part.id);
++				} : void 0,
++				onDblClick: interactive ? (event) => {
++					event.stopPropagation();
++				} : void 0,
++				children: part.icon != null ? /* @__PURE__ */ jsx(Icon, { ...typeof part.icon === "string" ? resolveIcon(part.icon) : part.icon }) : part.text
++			}, part.id ?? index);
++		})
++	});
++}
++function renderFileTreeRowContent(row, resolveIcon, { actionLaneEnabled = false, customDecoration = null, decorationLaneEnabled = false, dragTargetFlattenedSegmentPath = null, gitDecoration = null, gitLaneActive = false, gitStatusPlacement = "end", onPartClick = null, renameInput = null, rowParts = null, showDecorativeActionAffordance = false } = {}) {
+ 	const targetPath = getFileTreeRowPath(row);
++	const gitLane = gitLaneActive ? /* @__PURE__ */ jsx("div", {
++		"data-item-section": "git",
++		part: `row-git row-git-${row.kind}`,
++		children: renderRowDecoration(gitDecoration, resolveIcon)
++	}) : null;
+ 	return /* @__PURE__ */ jsxs(Fragment, { children: [
+ 		row.depth > 0 ? /* @__PURE__ */ jsx("div", {
+ 			"data-item-section": "spacing",
+@@ -374,10 +412,14 @@ function renderFileTreeRowContent(row, resolveIcon, { actionLaneEnabled = false,
+ 		}) : null,
+ 		/* @__PURE__ */ jsx("div", {
+ 			"data-item-section": "icon",
++			part: `row-icon row-icon-${row.kind}`,
+ 			children: row.kind === "directory" ? /* @__PURE__ */ jsx(Icon, { ...resolveIcon("file-tree-icon-chevron") }) : /* @__PURE__ */ jsx(Icon, { ...resolveIcon("file-tree-icon-file", targetPath) })
+ 		}),
++		renderFileTreeRowPartLane("lead", rowParts?.lead, resolveIcon, onPartClick),
++		gitStatusPlacement === "start" ? gitLane : null,
+ 		/* @__PURE__ */ jsx("div", {
+ 			"data-item-section": "content",
++			part: ["row-content", rowParts?.muted === true ? "row-content-muted" : null, rowParts?.tone != null ? `row-content-${rowParts.tone}` : null].filter(Boolean).join(" "),
+ 			children: row.isFlattened ? formatFlattenedSegments(row, renameInput, dragTargetFlattenedSegmentPath) : renameInput ?? /* @__PURE__ */ jsx(MiddleTruncate, {
+ 				minimumLength: 5,
+ 				split: "extension",
+@@ -388,10 +430,8 @@ function renderFileTreeRowContent(row, resolveIcon, { actionLaneEnabled = false,
+ 			"data-item-section": "decoration",
+ 			children: customDecoration != null ? renderRowDecoration(customDecoration, resolveIcon) : null
+ 		}) : null,
+-		gitLaneActive ? /* @__PURE__ */ jsx("div", {
+-			"data-item-section": "git",
+-			children: renderRowDecoration(gitDecoration, resolveIcon)
+-		}) : null,
++		renderFileTreeRowPartLane("trail", rowParts?.trail, resolveIcon, onPartClick),
++		gitStatusPlacement === "start" ? null : gitLane,
+ 		actionLaneEnabled ? /* @__PURE__ */ jsx("div", {
+ 			"data-item-section": "action",
+ 			children: showDecorativeActionAffordance ? /* @__PURE__ */ jsx("span", {
+@@ -403,13 +443,14 @@ function renderFileTreeRowContent(row, resolveIcon, { actionLaneEnabled = false,
+ 	] });
+ }
+ function renderStyledRow(frame, row, key, options = {}) {
+-	const { controller, renameView, visualFocusPath, contextHoverPath, draggedPathSet, dragTarget, dragAndDropEnabled, shouldSuppressContextMenu, handleRowDragStart, handleRowDragEnd, handleRowTouchStart, instanceId, itemHeight, gitStatusByPath, ignoredGitDirectories, ignoredInheritanceCache, directoriesWithGitChanges, gitLaneActive, labels, contextMenuEnabled, contextMenuTriggerMode, contextMenuButtonTriggerEnabled, contextMenuButtonVisibility, contextMenuRightClickEnabled, registerRenameInput, registerButton, resolveIcon, renderDecorationForRow, openContextMenuForRow, onRowClick, onKeyDown } = frame;
++	const { controller, renameView, visualFocusPath, contextHoverPath, draggedPathSet, dragTarget, dragAndDropEnabled, shouldSuppressContextMenu, handleRowDragStart, handleRowDragEnd, handleRowTouchStart, instanceId, itemHeight, gitStatusByPath, ignoredGitDirectories, ignoredInheritanceCache, directoriesWithGitChanges, gitLaneActive, labels, contextMenuEnabled, contextMenuTriggerMode, contextMenuButtonTriggerEnabled, contextMenuButtonVisibility, contextMenuRightClickEnabled, registerRenameInput, registerButton, resolveIcon, renderDecorationForRow, renderPartsForRow, rowsOptions, openContextMenuForRow, onRowClick, onKeyDown } = frame;
+ 	const targetPath = getFileTreeRowPath(row);
+ 	const { isParked = false, mode = "flow", style } = options;
+ 	const isSticky = mode === "sticky";
+ 	const effectiveGitStatus = gitStatusByPath?.get(targetPath) ?? null ?? getInheritedIgnoredGitStatus(row.ancestorPaths, ignoredGitDirectories, ignoredInheritanceCache);
+ 	const containsGitChange = row.kind === "directory" && (directoriesWithGitChanges?.has(targetPath) ?? false);
+ 	const customDecoration = renderDecorationForRow(row, targetPath);
++	const rowParts = renderPartsForRow(row, targetPath);
+ 	const gitDecoration = getBuiltInGitStatusDecoration(effectiveGitStatus, containsGitChange, labels);
+ 	const actionLaneEnabled = contextMenuEnabled && contextMenuButtonTriggerEnabled;
+ 	const decorationLaneEnabled = customDecoration != null || gitLaneActive || actionLaneEnabled;
+@@ -435,7 +476,12 @@ function renderStyledRow(frame, row, key, options = {}) {
+ 		dragTargetFlattenedSegmentPath: dragTarget?.flattenedSegmentPath ?? null,
+ 		gitDecoration,
+ 		gitLaneActive,
++		gitStatusPlacement: rowsOptions?.gitStatusPlacement,
++		onPartClick: (partId) => {
++			rowsOptions?.onPartClick?.({ partId, path: targetPath, row });
++		},
+ 		renameInput,
++		rowParts,
+ 		showDecorativeActionAffordance
+ 	});
+ 	const commonProps = {
+@@ -464,6 +510,9 @@ function renderStyledRow(frame, row, key, options = {}) {
+ 			},
+ 			targetPath
+ 		}),
++		"data-item-muted": rowParts?.muted === true ? "true" : void 0,
++		"data-item-tone": rowParts?.tone,
++		title: rowParts?.title,
+ 		key,
+ 		onContextMenu: contextMenuEnabled || dragAndDropEnabled ? (event) => {
+ 			if (shouldSuppressContextMenu()) {
+@@ -512,6 +561,9 @@ function renderStyledRow(frame, row, key, options = {}) {
+ 		onClick: (event) => {
+ 			onRowClick(event, row, targetPath, mode);
+ 		},
++		onDblClick: rowsOptions?.onDoubleClick == null ? void 0 : () => {
++			rowsOptions.onDoubleClick({ path: targetPath, row });
++		},
+ 		children: rowContent
+ 	});
+ }
+@@ -519,7 +571,7 @@ function renderRangeChildren(frame, range, hiddenRowPaths) {
+ 	if (range.end < range.start) return [];
+ 	return frame.controller.getVisibleRows(range.start, range.end).filter((row) => !hiddenRowPaths.has(getFileTreeRowPath(row))).map((row, slotIndex) => renderStyledRow(frame, row, range.start + slotIndex));
+ }
+-function FileTreeView({ composition, controller, gitStatusByPath, ignoredGitDirectories, directoriesWithGitChanges, icons, instanceId, itemHeight = FILE_TREE_DEFAULT_ITEM_HEIGHT, labels = DEFAULT_FILE_TREE_LABELS, overscan = 10, renamingEnabled = false, renderRowDecoration, searchBlurBehavior = "close", searchEnabled = false, searchFakeFocus = false, slotHost, stickyFolders = false, initialViewportHeight = 420 }) {
++function FileTreeView({ composition, controller, gitStatusByPath, ignoredGitDirectories, directoriesWithGitChanges, icons, instanceId, itemHeight = FILE_TREE_DEFAULT_ITEM_HEIGHT, labels = DEFAULT_FILE_TREE_LABELS, overscan = 10, renamingEnabled = false, renderRowDecoration, rows, searchBlurBehavior = "close", searchEnabled = false, searchFakeFocus = false, slotHost, stickyFolders = false, initialViewportHeight = 420 }) {
+ 	"use no memo";
+ 	const contextMenuAnchorRef = useRef(null);
+ 	const contextMenuTriggerRef = useRef(null);
+@@ -695,6 +747,10 @@ function FileTreeView({ composition, controller, gitStatusByPath, ignoredGitDire
+ 		item: createContextMenuItem(row, targetPath),
+ 		row
+ 	}) ?? null, [renderRowDecoration]);
++	const renderPartsForRow = useCallback((row, targetPath) => rows?.renderParts?.({
++		item: createContextMenuItem(row, targetPath),
++		row
++	}) ?? null, [rows]);
+ 	const restoreContextMenuFocus = useCallback((restorePath) => {
+ 		const focusedButton = restorePath == null ? null : rowButtonRefs.current.get(restorePath) ?? null;
+ 		if (focusElement(focusedButton)) return true;
+@@ -1776,7 +1832,9 @@ function FileTreeView({ composition, controller, gitStatusByPath, ignoredGitDire
+ 		registerRenameInput,
+ 		renameView,
+ 		renderDecorationForRow,
++		renderPartsForRow,
+ 		resolveIcon,
++		rowsOptions: rows,
+ 		shouldSuppressContextMenu,
+ 		visualFocusPath
+ 	};
+diff --git a/dist/style.js b/dist/style.js
+index 0a25aa3..ffce54d 100644
+--- a/dist/style.js
++++ b/dist/style.js
+@@ -1,6 +1,8 @@
+ //#region src/style.css?inline
+ var style_default = "@layer base {\n  :host {\n    --trees-accent: var(--trees-accent-override, #009fff);\n    --trees-fg: var(--trees-fg-override, var(--trees-theme-sidebar-fg, light-dark(#6c6c71, #adadb1)));\n    --trees-fg-muted: var(--trees-fg-muted-override, var(--trees-theme-sidebar-header-fg, #84848a));\n    --trees-bg: var(--trees-bg-override, var(--trees-theme-sidebar-bg, light-dark(#f8f8f8, #141415)));\n    --trees-bg-muted: var(--trees-bg-muted-override, var(--trees-theme-list-hover-bg, light-dark(color-mix(in lab,\n            var(--trees-accent) var(--trees-bg-alpha-light, 8%),\n            var(--trees-bg)), color-mix(in lab,\n            var(--trees-accent) var(--trees-bg-alpha-dark, 10%),\n            var(--trees-bg)))));\n    --trees-input-bg: var(--trees-input-bg-override, light-dark(#f8f8f8, #070707));\n    --trees-added-light: #16a994;\n    --trees-added-dark: #00cab1;\n    --trees-ignored-light: #adadb1;\n    --trees-ignored-dark: #4a4a4e;\n    --trees-modified-light: #1ca1c7;\n    --trees-modified-dark: #08c0ef;\n    --trees-renamed-light: #d5a910;\n    --trees-renamed-dark: #ffd452;\n    --trees-untracked-light: #16a994;\n    --trees-untracked-dark: #00cab1;\n    --trees-deleted-light: #ff2e3f;\n    --trees-deleted-dark: #ff6762;\n    --trees-border-color: var(--trees-border-color-override, var(--trees-theme-sidebar-border, light-dark(#eeeeef, #070707)));\n    --trees-indent-guide-bg: var(--trees-indent-guide-bg-override, color-mix(in lab, var(--trees-fg-muted) 25%, transparent));\n    --trees-density: var(--trees-density-override, 1);\n    --trees-border-radius: var(--trees-border-radius-override, calc(6px * var(--trees-density)));\n    --trees-font-family: var(--trees-font-family-override, system-ui);\n    --trees-font-size: var(--trees-font-size-override, 13px);\n    --trees-font-weight-regular: var(--trees-font-weight-regular-override, 400);\n    --trees-font-weight-semibold: var(--trees-font-weight-semibold-override, 600);\n    --trees-focus-ring-color: var(--trees-focus-ring-color-override, var(--trees-theme-focus-ring, var(--trees-accent)));\n    --trees-focus-ring-width: var(--trees-focus-ring-width-override, 1px);\n    --trees-focus-ring-offset: var(--trees-focus-ring-offset-override, -1px);\n    --trees-search-fg: var(--trees-search-fg-override, var(--trees-theme-input-fg, var(--trees-fg)));\n    --trees-search-font-weight: var(--trees-search-font-weight-override, 600);\n    --trees-search-bg: var(--trees-search-bg-override, var(--trees-theme-input-bg, var(--trees-input-bg)));\n    --trees-scrollbar-thumb: var(--trees-scrollbar-thumb-override, var(--trees-theme-scrollbar-thumb, color-mix(in lab, var(--trees-fg) 25%, var(--trees-bg))));\n    --trees-selected-fg: var(--trees-selected-fg-override, var(--trees-theme-list-active-selection-fg, var(--trees-fg)));\n    --trees-selected-bg: var(--trees-selected-bg-override, var(--trees-theme-list-active-selection-bg, light-dark(color-mix(in lab, var(--trees-accent) 12%, var(--trees-bg)), color-mix(in lab, var(--trees-accent) 15%, var(--trees-bg)))));\n    --trees-selected-focused-border-color: var(--trees-selected-focused-border-color-override, var(--trees-theme-focus-ring, var(--trees-accent)));\n    --trees-status-added: var(--trees-status-added-override, var(--trees-theme-git-added-fg, light-dark(var(--trees-added-light), var(--trees-added-dark))));\n    --trees-status-ignored: var(--trees-status-ignored-override, var(--trees-theme-git-ignored-fg, light-dark(var(--trees-ignored-light), var(--trees-ignored-dark))));\n    --trees-status-modified: var(--trees-status-modified-override, var(--trees-theme-git-modified-fg, light-dark(var(--trees-modified-light), var(--trees-modified-dark))));\n    --trees-status-renamed: var(--trees-status-renamed-override, var(--trees-theme-git-renamed-fg, light-dark(var(--trees-renamed-light), var(--trees-renamed-dark))));\n    --trees-status-untracked: var(--trees-status-untracked-override, var(--trees-theme-git-untracked-fg, light-dark(var(--trees-untracked-light), var(--trees-untracked-dark))));\n    --trees-status-deleted: var(--trees-status-deleted-override, var(--trees-theme-git-deleted-fg, light-dark(var(--trees-deleted-light), var(--trees-deleted-dark))));\n    --trees-git-modified-color: var(--trees-git-modified-color-override, var(--trees-status-modified));\n    --trees-git-added-color: var(--trees-git-added-color-override, var(--trees-status-added));\n    --trees-git-ignored-color: var(--trees-git-ignored-color-override, var(--trees-status-ignored));\n    --trees-git-deleted-color: var(--trees-git-deleted-color-override, var(--trees-status-deleted));\n    --trees-git-renamed-color: var(--trees-git-renamed-color-override, var(--trees-status-renamed));\n    --trees-git-untracked-color: var(--trees-git-untracked-color-override, var(--trees-status-untracked));\n    --trees-icon-gray: light-dark(#84848a, #adadb1);\n    --trees-icon-red: light-dark(#d52c36, #ff6762);\n    --trees-icon-vermilion: light-dark(#ff8c5b, #d5512f);\n    --trees-icon-orange: light-dark(#d47628, #ffa359);\n    --trees-icon-yellow: light-dark(#d5a910, #ffd452);\n    --trees-icon-green: light-dark(#199f43, #5ecc71);\n    --trees-icon-teal: light-dark(#17a5af, #64d1db);\n    --trees-icon-cyan: light-dark(#1ca1c7, #68cdf2);\n    --trees-icon-blue: light-dark(#1a85d4, #69b1ff);\n    --trees-icon-indigo: light-dark(#693acf, #9d6afb);\n    --trees-icon-purple: light-dark(#a631be, #d568ea);\n    --trees-icon-pink: light-dark(#d32a61, #ff678d);\n    --trees-icon-mauve: light-dark(#594c5b, #79697b);\n    --trees-file-icon-color-default: var(--trees-file-icon-color, var(--trees-icon-gray));\n    --trees-file-icon-color-astro: var(--trees-file-icon-color, var(--trees-icon-purple));\n    --trees-file-icon-color-babel: var(--trees-file-icon-color, var(--trees-icon-yellow));\n    --trees-file-icon-color-bash: var(--trees-file-icon-color, var(--trees-icon-green));\n    --trees-file-icon-color-biome: var(--trees-file-icon-color, var(--trees-icon-blue));\n    --trees-file-icon-color-bootstrap: var(--trees-file-icon-color, var(--trees-icon-indigo));\n    --trees-file-icon-color-browserslist: var(--trees-file-icon-color, var(--trees-icon-yellow));\n    --trees-file-icon-color-bun: var(--trees-file-icon-color, var(--trees-icon-mauve));\n    --trees-file-icon-color-c: var(--trees-file-icon-color, var(--trees-icon-blue));\n    --trees-file-icon-color-cpp: var(--trees-file-icon-color, var(--trees-icon-blue));\n    --trees-file-icon-color-claude: var(--trees-file-icon-color, var(--trees-icon-orange));\n    --trees-file-icon-color-css: var(--trees-file-icon-color, var(--trees-icon-indigo));\n    --trees-file-icon-color-database: var(--trees-file-icon-color, var(--trees-icon-purple));\n    --trees-file-icon-color-docker: var(--trees-file-icon-color, var(--trees-icon-blue));\n    --trees-file-icon-color-eslint: var(--trees-file-icon-color, var(--trees-icon-indigo));\n    --trees-file-icon-color-git: var(--trees-file-icon-vermilion, var(--trees-icon-vermilion));\n    --trees-file-icon-color-go: var(--trees-file-icon-color, var(--trees-icon-cyan));\n    --trees-file-icon-color-graphql: var(--trees-file-icon-color, var(--trees-icon-pink));\n    --trees-file-icon-color-html: var(--trees-file-icon-color, var(--trees-icon-orange));\n    --trees-file-icon-color-image: var(--trees-file-icon-color, var(--trees-icon-pink));\n    --trees-file-icon-color-javascript: var(--trees-file-icon-color, var(--trees-icon-yellow));\n    --trees-file-icon-color-json: var(--trees-file-icon-color, var(--trees-icon-orange));\n    --trees-file-icon-color-markdown: var(--trees-file-icon-color, var(--trees-icon-green));\n    --trees-file-icon-color-mcp: var(--trees-file-icon-color, var(--trees-icon-teal));\n    --trees-file-icon-color-npm: var(--trees-file-icon-color, var(--trees-icon-red));\n    --trees-file-icon-color-oxc: var(--trees-file-icon-cyan, var(--trees-icon-cyan));\n    --trees-file-icon-color-postcss: var(--trees-file-icon-color, var(--trees-icon-red));\n    --trees-file-icon-color-prettier: var(--trees-file-icon-color, var(--trees-icon-teal));\n    --trees-file-icon-color-python: var(--trees-file-icon-color, var(--trees-icon-blue));\n    --trees-file-icon-color-react: var(--trees-file-icon-color, var(--trees-icon-cyan));\n    --trees-file-icon-color-ruby: var(--trees-file-icon-color, var(--trees-icon-red));\n    --trees-file-icon-color-rust: var(--trees-file-icon-color, var(--trees-icon-orange));\n    --trees-file-icon-color-sass: var(--trees-file-icon-color, var(--trees-icon-pink));\n    --trees-file-icon-color-svg: var(--trees-file-icon-color, var(--trees-icon-orange));\n    --trees-file-icon-color-svelte: var(--trees-file-icon-color, var(--trees-icon-red));\n    --trees-file-icon-color-svgo: var(--trees-file-icon-color, var(--trees-icon-green));\n    --trees-file-icon-color-swift: var(--trees-file-icon-color, var(--trees-icon-orange));\n    --trees-file-icon-color-table: var(--trees-file-icon-color, var(--trees-icon-teal));\n    --trees-file-icon-color-text: var(--trees-file-icon-color, var(--trees-icon-gray));\n    --trees-file-icon-color-tailwind: var(--trees-file-icon-color, var(--trees-icon-cyan));\n    --trees-file-icon-color-terraform: var(--trees-file-icon-color, var(--trees-icon-indigo));\n    --trees-file-icon-color-typescript: var(--trees-file-icon-color, var(--trees-icon-blue));\n    --trees-file-icon-color-vite: var(--trees-file-icon-color, var(--trees-icon-purple));\n    --trees-file-icon-color-vscode: var(--trees-file-icon-color, var(--trees-icon-blue));\n    --trees-file-icon-color-vue: var(--trees-file-icon-color, var(--trees-icon-green));\n    --trees-file-icon-color-wasm: var(--trees-file-icon-color, var(--trees-icon-indigo));\n    --trees-file-icon-color-webpack: var(--trees-file-icon-color, var(--trees-icon-blue));\n    --trees-file-icon-color-yml: var(--trees-file-icon-color, var(--trees-icon-red));\n    --trees-file-icon-color-zig: var(--trees-file-icon-color, var(--trees-icon-orange));\n    --trees-file-icon-color-zip: var(--trees-file-icon-color, var(--trees-icon-orange));\n    --trees-level-gap: var(--trees-level-gap-override, calc(8px * var(--trees-density)));\n    --trees-item-padding-x: var(--trees-item-padding-x-override, calc(8px * var(--trees-density)));\n    --trees-item-margin-x: var(--trees-item-margin-x-override, calc(2px * var(--trees-density)));\n    --trees-item-row-gap: var(--trees-item-row-gap-override, calc(6px * var(--trees-density)));\n    --trees-icon-width: var(--trees-icon-width-override, 16px);\n    --trees-icon-nudge: var(--trees-icon-nudge-override, calc(1px * var(--trees-density)));\n    --trees-row-height: var(--trees-item-height, 30px);\n    --trees-git-lane-width: var(--trees-git-lane-width-override, 12px);\n    --trees-action-lane-width: var(--trees-action-lane-width-override, calc(var(--trees-icon-width) + 2px));\n    --trees-context-menu-trigger-inline-offset: calc(var(--trees-padding-inline) + var(--trees-item-padding-x) -\n        var(--trees-focus-ring-width));\n    --trees-scrollbar-gutter: var(--trees-scrollbar-gutter-override, 6px);\n    --trees-padding-inline: var(--trees-padding-inline-override, 16px);\n    color-scheme: light dark;\n    font-size: var(--trees-font-size);\n    color: var(--trees-fg);\n    background-color: var(--trees-bg);\n    --truncate-marker-background-color: var(--trees-bg);\n    --truncate-marker-background-overlay-color: transparent;\n    font-family: var(--trees-font-family);\n    font-weight: var(--trees-font-weight-regular);\n    flex-direction: column;\n    display: flex;\n  }\n\n  :host([data-file-tree-virtualized=\"true\"]) {\n    height: 100%;\n    overflow: hidden;\n  }\n\n  [data-file-tree-virtualized-wrapper=\"true\"], [data-file-tree-virtualized-root=\"true\"] {\n    flex-direction: column;\n    height: 100%;\n    display: flex;\n    overflow: hidden;\n  }\n\n  [data-file-tree-virtualized-scroll=\"true\"], [data-file-tree-scrollbar-measure=\"true\"] {\n    --trees-scrollbar-thumb-current: transparent;\n    scrollbar-gutter: stable;\n    overflow-y: auto;\n\n    &:hover {\n      --trees-scrollbar-thumb-current: var(--trees-scrollbar-thumb);\n    }\n\n    &::-webkit-scrollbar {\n      width: var(--trees-scrollbar-gutter);\n      height: var(--trees-scrollbar-gutter);\n    }\n\n    &::-webkit-scrollbar-track {\n      background: none;\n    }\n\n    &::-webkit-scrollbar-thumb {\n      background-color: var(--trees-scrollbar-thumb-current);\n      border-radius: calc(var(--trees-scrollbar-gutter) / 2);\n      background-clip: content-box;\n      border: 1px solid #0000;\n    }\n\n    &::-webkit-scrollbar-corner {\n      background-color: #0000;\n    }\n  }\n\n  [data-file-tree-scrollbar-measure=\"true\"] {\n    visibility: hidden;\n    pointer-events: none;\n    width: 100px;\n    height: 100px;\n    position: absolute;\n    top: 0;\n    left: 0;\n  }\n\n  @supports ((-moz-appearance: none)) {\n    [data-file-tree-virtualized-scroll=\"true\"], [data-file-tree-scrollbar-measure=\"true\"] {\n      scrollbar-width: thin;\n      scrollbar-color: var(--trees-scrollbar-thumb-current) transparent;\n    }\n  }\n\n  [data-file-tree-virtualized-scroll=\"true\"] {\n    min-height: 0;\n    padding-inline: max(calc(var(--trees-padding-inline) - var(--trees-item-margin-x)),\n        0px)\n      /* NOTE(amadeus): We can assume that all Webkit based browser gutters\n       * will align to the value of '--trees-scrollbar-gutter', however if not, then\n       * `--trees-scrollbar-gutter-measured` should correct it. Mostly we are\n       * hoping to avoid SSR alignment jumps if possible. In non-SSR'd environments\n       * `--trees-scrollbar-gutter-measured` should always be immediately available.\n       */\n      max(calc(var(--trees-padding-inline) - var(--trees-item-margin-x) -\n            var(--trees-scrollbar-gutter-measured, var(--trees-scrollbar-gutter))),\n        0px);\n    flex: 1 1 0;\n    position: relative;\n    overflow-y: auto;\n  }\n\n  @supports ((-moz-appearance: none)) {\n    [data-file-tree-virtualized-scroll=\"true\"] {\n      padding-inline: max(calc(var(--trees-padding-inline) - var(--trees-item-margin-x)),\n          0px)\n        /* NOTE(amadeus): However on Firefox it can vary a little bit, but most\n         * likely the majority of cases will default to a 0px width scrollbar lets\n         * inherit that first to avoid SSR jumps. In non-SSR'd environments\n         * `--trees-scrollbar-gutter-measured` should always be immediately available.\n         */\n        max(calc(var(--trees-padding-inline) - var(--trees-item-margin-x) -\n              var(--trees-scrollbar-gutter-measured, 0px)),\n          0px);\n    }\n  }\n\n  [data-file-tree-sticky-overlay=\"true\"] {\n    z-index: 4;\n    pointer-events: none;\n    height: 0;\n    position: sticky;\n    top: 0;\n    overflow: visible;\n  }\n\n  [data-file-tree-virtualized-root=\"true\"][data-scroll-at-top=\"true\"]:not([data-overlay-reveal]) [data-file-tree-sticky-overlay=\"true\"] {\n    visibility: hidden;\n  }\n\n  [data-file-tree-sticky-overlay-content=\"true\"] {\n    background-color: var(--trees-bg);\n    pointer-events: none;\n    position: relative;\n  }\n\n  [data-file-tree-virtualized-list=\"true\"] {\n    background-color: var(--trees-bg);\n    overflow-anchor: none;\n    width: 100%;\n    min-height: 100%;\n    position: relative;\n\n    &[data-is-scrolling] {\n      pointer-events: none;\n    }\n  }\n\n  [data-file-tree-virtualized-sticky-offset=\"true\"] {\n    contain: layout size;\n  }\n\n  [data-file-tree-virtualized-sticky=\"true\"] {\n    isolation: isolate;\n    will-change: transform;\n    flex-direction: column;\n    width: 100%;\n    display: flex;\n    position: sticky;\n    top: 0;\n  }\n\n  [data-file-tree-search-container] {\n    padding: 0;\n    padding-inline: var(--trees-padding-inline);\n    margin-bottom: var(--trees-item-row-gap);\n    display: flex;\n  }\n\n  [data-file-tree-search-input] {\n    --trees-focus-ring-width: 2px;\n    font-family: var(--trees-font-family);\n    font-size: var(--trees-font-size);\n    height: var(--trees-row-height);\n    padding-inline: var(--trees-item-padding-x);\n    line-height: var(--trees-row-height);\n    color: var(--trees-search-fg);\n    background-color: var(--trees-search-bg);\n    border: 1px solid var(--trees-border-color);\n    border-radius: var(--trees-border-radius);\n    outline: none;\n    flex: 1;\n    margin-block: 1px;\n\n    &::placeholder {\n      color: color-mix(in lab,\n        var(--trees-search-fg) 65%,\n        var(--trees-search-bg));\n    }\n\n    &:focus-visible, &[data-file-tree-search-input-fake-focus=\"true\"] {\n      outline: var(--trees-focus-ring-width) solid var(--trees-focus-ring-color);\n      outline-offset: var(--trees-focus-ring-offset);\n    }\n  }\n\n  [role=\"tree\"] {\n    gap: var(--trees-gap-override, 0);\n    flex-direction: column;\n    display: flex;\n    position: relative;\n  }\n\n  [data-type=\"item\"] {\n    color: inherit;\n    font-family: var(--trees-font-family);\n    font-size: var(--trees-font-size);\n    text-align: start;\n    background-color: var(--trees-bg);\n    padding: 0 var(--trees-item-padding-x);\n    margin: 0 var(--trees-item-margin-x);\n    cursor: pointer;\n    user-select: none;\n    -webkit-touch-callout: none;\n    touch-action: manipulation;\n    flex: 0 0 var(--trees-row-height);\n    height: var(--trees-row-height);\n    line-height: var(--trees-row-height);\n    align-items: center;\n    gap: var(--trees-item-row-gap);\n    border-radius: var(--trees-border-radius);\n    --truncate-marker-background-color: var(--trees-bg);\n    --truncate-marker-background-overlay-color: transparent;\n    --truncate-marker-block-inset: 0px;\n    border: none;\n    outline: none;\n    display: flex;\n    position: relative;\n\n    &:hover, &[data-item-context-hover=\"true\"] {\n      background-color: var(--trees-bg-muted);\n      --truncate-marker-background-overlay-color: var(--trees-bg-muted);\n    }\n\n    &[data-item-focused=\"true\"], &:focus-visible {\n      z-index: 2;\n\n      & [data-item-flattened-subitems] {\n        --truncate-marker-block-inset: var(--trees-focus-ring-width);\n      }\n\n      &:before {\n        content: \"\";\n        border-radius: var(--trees-border-radius);\n        outline: var(--trees-focus-ring-width) solid\n          var(--trees-focus-ring-color);\n        outline-offset: var(--trees-focus-ring-offset);\n        pointer-events: none;\n        display: block;\n        position: absolute;\n        inset: 0;\n      }\n\n      &[data-item-selected=\"true\"]:before {\n        outline-color: var(--trees-selected-focused-border-color);\n      }\n    }\n\n    &[data-item-selected=\"true\"] {\n      color: var(--trees-selected-fg);\n      background-color: var(--trees-selected-bg);\n      --truncate-marker-background-overlay-color: var(--trees-selected-bg);\n      z-index: 3;\n\n      & [data-item-section=\"icon\"] {\n        color: var(--trees-selected-fg);\n      }\n    }\n\n    &[data-item-search-match=\"true\"] {\n      font-weight: var(--trees-search-font-weight);\n    }\n  }\n\n  [data-type=\"item\"][data-file-tree-sticky-row=\"true\"] {\n    pointer-events: auto;\n  }\n\n  [data-file-tree-virtualized-root=\"true\"][data-is-scrolling] [data-type=\"item\"][data-file-tree-sticky-row=\"true\"] {\n    pointer-events: none;\n  }\n\n  [data-file-tree-virtualized-root=\"true\"][data-is-scrolling] [data-type=\"item\"][data-file-tree-sticky-row=\"true\"]:hover:not([data-item-selected=\"true\"]), [data-file-tree-virtualized-root=\"true\"][data-is-scrolling] [data-type=\"item\"][data-file-tree-sticky-row=\"true\"][data-item-context-hover=\"true\"]:not([data-item-selected=\"true\"]) {\n    background-color: var(--trees-bg);\n    --truncate-marker-background-overlay-color: transparent;\n  }\n\n  [data-item-selected=\"true\"]:has( + [data-item-selected=\"true\"]) {\n    border-bottom-right-radius: 0;\n    border-bottom-left-radius: 0;\n  }\n\n  [data-item-selected=\"true\"] + [data-item-selected=\"true\"] {\n    border-top-left-radius: 0;\n    border-top-right-radius: 0;\n  }\n\n  [data-item-flattened-subitems] {\n    align-items: center;\n    gap: 2px;\n    display: inline-flex;\n  }\n\n  [data-item-flattened-subitem]:hover, [data-item-flattened-subitem-drag-target=\"true\"] {\n    text-decoration: underline;\n  }\n\n  [data-item-section=\"icon\"] {\n    color: var(--trees-fg-muted);\n    fill: currentColor;\n    width: var(--trees-icon-width);\n    flex-shrink: 0;\n    justify-content: center;\n    align-items: center;\n    display: flex;\n  }\n\n  :where([data-item-section=\"icon\"] > [data-icon-token]) {\n    color: var(--trees-fg-muted);\n  }\n\n  [data-file-tree-colored-icons=\"true\"] {\n    & [data-icon-token=\"astro\"] {\n      color: var(--trees-file-icon-color-astro);\n    }\n\n    & [data-icon-token=\"babel\"] {\n      color: var(--trees-file-icon-color-babel);\n    }\n\n    & [data-icon-token=\"bash\"] {\n      color: var(--trees-file-icon-color-bash);\n    }\n\n    & [data-icon-token=\"biome\"] {\n      color: var(--trees-file-icon-color-biome);\n    }\n\n    & [data-icon-token=\"bootstrap\"] {\n      color: var(--trees-file-icon-color-bootstrap);\n    }\n\n    & [data-icon-token=\"browserslist\"] {\n      color: var(--trees-file-icon-color-browserslist);\n    }\n\n    & [data-icon-token=\"bun\"] {\n      color: var(--trees-file-icon-color-bun);\n    }\n\n    & [data-icon-token=\"c\"] {\n      color: var(--trees-file-icon-color-c);\n    }\n\n    & [data-icon-token=\"cpp\"] {\n      color: var(--trees-file-icon-color-cpp);\n    }\n\n    & [data-icon-token=\"claude\"] {\n      color: var(--trees-file-icon-color-claude);\n    }\n\n    & [data-icon-token=\"css\"] {\n      color: var(--trees-file-icon-color-css);\n    }\n\n    & [data-icon-token=\"database\"] {\n      color: var(--trees-file-icon-color-database);\n    }\n\n    & [data-icon-token=\"default\"] {\n      color: var(--trees-file-icon-color-default);\n    }\n\n    & [data-icon-token=\"docker\"] {\n      color: var(--trees-file-icon-color-docker);\n    }\n\n    & [data-icon-token=\"eslint\"] {\n      color: var(--trees-file-icon-color-eslint);\n    }\n\n    & [data-icon-token=\"git\"] {\n      color: var(--trees-file-icon-color-git);\n    }\n\n    & [data-icon-token=\"go\"] {\n      color: var(--trees-file-icon-color-go);\n    }\n\n    & [data-icon-token=\"graphql\"] {\n      color: var(--trees-file-icon-color-graphql);\n    }\n\n    & [data-icon-token=\"html\"] {\n      color: var(--trees-file-icon-color-html);\n    }\n\n    & [data-icon-token=\"image\"] {\n      color: var(--trees-file-icon-color-image);\n    }\n\n    & [data-icon-token=\"javascript\"] {\n      color: var(--trees-file-icon-color-javascript);\n    }\n\n    & [data-icon-token=\"json\"] {\n      color: var(--trees-file-icon-color-json);\n    }\n\n    & [data-icon-token=\"markdown\"] {\n      color: var(--trees-file-icon-color-markdown);\n    }\n\n    & [data-icon-token=\"mcp\"] {\n      color: var(--trees-file-icon-color-mcp);\n    }\n\n    & [data-icon-token=\"npm\"] {\n      color: var(--trees-file-icon-color-npm);\n    }\n\n    & [data-icon-token=\"oxc\"] {\n      color: var(--trees-file-icon-color-oxc);\n    }\n\n    & [data-icon-token=\"postcss\"] {\n      color: var(--trees-file-icon-color-postcss);\n    }\n\n    & [data-icon-token=\"prettier\"] {\n      color: var(--trees-file-icon-color-prettier);\n    }\n\n    & [data-icon-token=\"python\"] {\n      color: var(--trees-file-icon-color-python);\n    }\n\n    & [data-icon-token=\"react\"] {\n      color: var(--trees-file-icon-color-react);\n    }\n\n    & [data-icon-token=\"ruby\"] {\n      color: var(--trees-file-icon-color-ruby);\n    }\n\n    & [data-icon-token=\"rust\"] {\n      color: var(--trees-file-icon-color-rust);\n    }\n\n    & [data-icon-token=\"sass\"] {\n      color: var(--trees-file-icon-color-sass);\n    }\n\n    & [data-icon-token=\"svg\"] {\n      color: var(--trees-file-icon-color-svg);\n    }\n\n    & [data-icon-token=\"svelte\"] {\n      color: var(--trees-file-icon-color-svelte);\n    }\n\n    & [data-icon-token=\"svgo\"] {\n      color: var(--trees-file-icon-color-svgo);\n    }\n\n    & [data-icon-token=\"swift\"] {\n      color: var(--trees-file-icon-color-swift);\n    }\n\n    & [data-icon-token=\"table\"] {\n      color: var(--trees-file-icon-color-table);\n    }\n\n    & [data-icon-token=\"text\"] {\n      color: var(--trees-file-icon-color-text);\n    }\n\n    & [data-icon-token=\"tailwind\"] {\n      color: var(--trees-file-icon-color-tailwind);\n    }\n\n    & [data-icon-token=\"terraform\"] {\n      color: var(--trees-file-icon-color-terraform);\n    }\n\n    & [data-icon-token=\"typescript\"] {\n      color: var(--trees-file-icon-color-typescript);\n    }\n\n    & [data-icon-token=\"vite\"] {\n      color: var(--trees-file-icon-color-vite);\n    }\n\n    & [data-icon-token=\"vscode\"] {\n      color: var(--trees-file-icon-color-vscode);\n    }\n\n    & [data-icon-token=\"vue\"] {\n      color: var(--trees-file-icon-color-vue);\n    }\n\n    & [data-icon-token=\"wasm\"] {\n      color: var(--trees-file-icon-color-wasm);\n    }\n\n    & [data-icon-token=\"webpack\"] {\n      color: var(--trees-file-icon-color-webpack);\n    }\n\n    & [data-icon-token=\"yml\"] {\n      color: var(--trees-file-icon-color-yml);\n    }\n\n    & [data-icon-token=\"zig\"] {\n      color: var(--trees-file-icon-color-zig);\n    }\n\n    & [data-icon-token=\"zip\"] {\n      color: var(--trees-file-icon-color-zip);\n    }\n  }\n\n  [data-icon-name=\"file-tree-icon-chevron\"] {\n    &[data-align-capitals=\"false\"] {\n      transform: translate(0, var(--trees-icon-nudge));\n    }\n\n    &[data-align-capitals=\"true\"] {\n      transform: translate(0);\n    }\n  }\n\n  [data-item-section=\"content\"] {\n    text-align: start;\n    text-overflow: ellipsis;\n    flex: 0 auto;\n    min-width: 0;\n    max-width: 100%;\n    overflow: hidden;\n  }\n\n  [data-item-section=\"decoration\"] {\n    text-align: end;\n    min-width: 0;\n    color: var(--trees-fg-muted);\n    flex: 1 1 0;\n    justify-content: flex-end;\n    display: flex;\n    overflow: hidden;\n  }\n\n  [data-item-section=\"decoration\"] > span {\n    text-overflow: ellipsis;\n    white-space: nowrap;\n    justify-content: flex-end;\n    align-items: center;\n    min-width: 0;\n    max-width: 100%;\n    display: inline-flex;\n    overflow: hidden;\n  }\n\n  [data-item-section=\"git\"], [data-item-section=\"action\"] {\n    flex: none;\n    justify-content: center;\n    align-items: center;\n    display: flex;\n  }\n\n  [data-item-section=\"git\"] {\n    width: var(--trees-git-lane-width);\n  }\n\n  [data-item-section=\"action\"] {\n    width: var(--trees-action-lane-width);\n    color: var(--trees-fg-muted);\n    fill: currentColor;\n    pointer-events: none;\n  }\n\n  [data-item-section=\"git\"] > span, [data-item-section=\"action\"] > span {\n    justify-content: center;\n    align-items: center;\n    width: 100%;\n    display: inline-flex;\n  }\n\n  [data-item-action-affordance=\"decorative\"] {\n    opacity: .85;\n  }\n\n  [data-item-rename-input] {\n    appearance: none;\n    width: 100%;\n    min-width: 0;\n    height: calc(var(--trees-row-height) - 4px);\n    font-family: inherit;\n    font-size: inherit;\n    color: inherit;\n    box-sizing: border-box;\n    background-color: #0000;\n    border: 0;\n    outline: none;\n    padding-inline: 6px;\n  }\n\n  [data-item-section=\"content\"]:has([data-item-rename-input]) ~ [data-item-section=\"action\"], [data-item-section=\"content\"]:has([data-item-rename-input]) ~ [data-item-section=\"decoration\"] {\n    display: none;\n  }\n\n  [aria-expanded=\"false\"][data-item-type=\"folder\"] > [data-item-section=\"icon\"] > [data-icon-name=\"file-tree-icon-chevron\"] {\n    &[data-align-capitals=\"true\"] {\n      transform: rotate(-90deg)\n        translate(calc(var(--trees-icon-nudge) / 2),\n          calc(var(--trees-icon-nudge) / 2));\n    }\n\n    &[data-align-capitals=\"false\"] {\n      transform: rotate(-90deg)\n        translate(calc(var(--trees-icon-nudge) / 2 * -1),\n          calc(var(--trees-icon-nudge) / 2));\n    }\n  }\n\n  [data-item-section=\"spacing\"] {\n    height: var(--trees-row-height);\n    padding-left: calc(calc(var(--trees-icon-width) / 2) - .5px);\n    flex-direction: row;\n    justify-content: center;\n    align-items: center;\n    display: flex;\n\n    &:empty {\n      padding-left: 0;\n    }\n  }\n\n  [data-item-section=\"spacing-item\"] {\n    border-left: 1px solid var(--trees-indent-guide-bg);\n    height: 100%;\n    margin-right: calc(var(--trees-level-gap) - 1px);\n    opacity: 0;\n    transition: opacity .15s;\n    display: inline-block;\n    transform: translateX(-.25px);\n\n    & + & {\n      margin-left: calc(var(--trees-item-row-gap) + calc(var(--trees-icon-width) / 2) - .5px);\n    }\n  }\n\n  :host(:hover) [data-item-section=\"spacing-item\"] {\n    opacity: .75;\n  }\n\n  [data-item-contains-git-change=\"true\"] > [data-item-section=\"git\"] {\n    color: var(--trees-git-modified-color);\n    opacity: .5;\n    fill: currentColor;\n  }\n\n  [data-item-git-status] {\n    & > :where([data-item-section=\"icon\"]) > :where(:not([data-icon-name=\"file-tree-icon-chevron\"])), & > [data-item-section=\"content\"] {\n      color: var(--trees-item-git-status-color);\n    }\n\n    & > [data-item-section=\"git\"] {\n      color: var(--trees-item-git-status-color);\n      font-weight: var(--trees-font-weight-semibold);\n    }\n  }\n\n  [data-item-git-status=\"added\"] {\n    --trees-item-git-status-color: var(--trees-git-added-color);\n  }\n\n  [data-item-git-status=\"deleted\"] {\n    --trees-item-git-status-color: var(--trees-git-deleted-color);\n  }\n\n  [data-item-git-status=\"ignored\"] {\n    --trees-item-git-status-color: var(--trees-git-ignored-color);\n\n    & > [data-item-section=\"icon\"] {\n      opacity: .5;\n    }\n  }\n\n  [data-item-section=\"git\"] [data-icon-name=\"file-tree-icon-dot\"] {\n    transform: translateY(calc(.65ex - 50%));\n  }\n\n  [data-item-git-status=\"modified\"] {\n    --trees-item-git-status-color: var(--trees-git-modified-color);\n  }\n\n  [data-item-git-status=\"renamed\"] {\n    --trees-item-git-status-color: var(--trees-git-renamed-color);\n  }\n\n  [data-item-git-status=\"untracked\"] {\n    --trees-item-git-status-color: var(--trees-git-untracked-color);\n  }\n\n  [data-item-drag-target=\"true\"] {\n    background-color: var(--trees-selected-bg);\n  }\n\n  [data-item-dragging=\"true\"] {\n    opacity: .5;\n  }\n\n  [data-item-section=\"lock\"] {\n    color: var(--trees-fg-muted);\n    flex: none;\n    align-items: center;\n    margin-left: auto;\n    display: flex;\n  }\n\n  [data-item-section=\"lock\"] svg {\n    display: block;\n  }\n\n  [data-type=\"header-slot\"] {\n    flex: none;\n    display: block;\n  }\n\n  [data-type=\"context-menu-wash\"] {\n    z-index: 3;\n    touch-action: none;\n    background-color: #0000;\n    position: absolute;\n    inset: 0;\n  }\n\n  [data-type=\"context-menu-anchor\"] {\n    top: 0;\n    right: var(--trees-context-menu-trigger-inline-offset);\n    z-index: 4;\n    align-items: center;\n    display: none;\n    position: absolute;\n\n    &[data-visible=\"true\"] {\n      display: flex;\n    }\n  }\n\n  [data-file-tree-virtualized-root=\"true\"][data-is-scrolling] [data-type=\"context-menu-anchor\"] {\n    display: none;\n  }\n\n  [data-type=\"context-menu-anchor\"] > slot[name=\"context-menu\"] {\n    flex: 0 0 0;\n    width: 0;\n    min-width: 0;\n    display: block;\n    overflow: visible;\n  }\n\n  [data-type=\"context-menu-trigger\"] {\n    all: unset;\n    width: var(--trees-action-lane-width);\n    color: var(--trees-fg-muted);\n    fill: currentColor;\n    cursor: pointer;\n    font-family: var(--trees-font-family);\n    font-size: var(--trees-font-size);\n    border-top-right-radius: var(--trees-border-radius);\n    border-bottom-right-radius: var(--trees-border-radius);\n    margin: var(--trees-focus-ring-width);\n    height: calc(var(--trees-row-height) - var(--trees-focus-ring-width) * 2);\n    border-width: 0;\n    justify-content: center;\n    align-items: center;\n    transition: color .12s;\n    display: flex;\n  }\n\n  [data-type=\"context-menu-trigger\"]:hover, [data-type=\"context-menu-trigger\"][aria-expanded=\"true\"] {\n    color: var(--trees-fg);\n  }\n\n  [data-truncate-container] {\n    --truncate-internal-marker-fade-width: var(--truncate-marker-fade-width, 2px);\n    --truncate-internal-marker-gap: var(--truncate-marker-gap, 0px);\n    --truncate-internal-marker-opacity: var(--truncate-marker-opacity, 50%);\n    --truncate-internal-middle-marker-opacity: var(--truncate-middle-marker-opacity, 80%);\n    --truncate-internal-marker-background-color: var(--truncate-marker-background-color, light-dark(#fff, #000));\n    --truncate-internal-marker-background-overlay-color: var(--truncate-marker-background-overlay-color, transparent);\n    --truncate-internal-marker-block-inset: var(--truncate-marker-block-inset, 0px);\n    --truncate-internal-marker-fade-out-duration: var(--truncate-marker-fade-out-duration, 0s);\n    --truncate-internal-marker-fade-in-duration: var(--truncate-marker-fade-in-duration, .1s);\n    --truncate-internal-fade-marker-color: var(--truncate-fade-marker-color, #000);\n    --truncate-internal-fade-marker-width: var(--truncate-fade-marker-width, .2lh);\n    --truncate-internal-single-line-height: 1lh;\n    height: var(--truncate-internal-single-line-height);\n    min-width: 0;\n    margin-top: -1px;\n    margin-bottom: -1px;\n    overflow: hidden;\n  }\n\n  [data-truncate-marker] {\n    height: var(--truncate-internal-single-line-height);\n    padding-block: var(--truncate-internal-marker-block-inset);\n    box-sizing: border-box;\n    z-index: 2;\n    color: color-mix(in srgb,\n      currentColor var(--truncate-internal-marker-opacity),\n      transparent);\n    opacity: 0;\n    transition: opacity var(--truncate-internal-marker-fade-out-duration)\n      ease-in-out;\n    background-clip: content-box;\n    align-items: center;\n    display: flex;\n    position: absolute;\n  }\n\n  @container measure (height > 1lh) {\n    [data-truncate-marker] {\n      opacity: 1;\n      transition: opacity var(--truncate-internal-marker-fade-in-duration)\n        ease-in-out;\n    }\n  }\n\n  [data-truncate-grid] {\n    display: grid;\n    position: relative;\n  }\n\n  [data-truncate-content=\"visible\"] {\n    white-space: nowrap;\n  }\n\n  [data-truncate-content=\"overflow\"] {\n    opacity: 0;\n    pointer-events: none;\n    user-select: none;\n    word-break: break-all;\n    margin-top: calc(-1 * var(--truncate-internal-single-line-height));\n  }\n\n  [data-truncate-marker-cell] {\n    user-select: none;\n    pointer-events: none;\n    overflow: visible;\n    container: measure / size;\n  }\n\n  [data-truncate-container=\"truncate\"] {\n    & [data-truncate-grid] {\n      grid-template-columns: minmax(0, max-content) 0;\n    }\n\n    & [data-truncate-marker] {\n      right: 0;\n    }\n\n    & [data-truncate-fade] {\n      margin-right: calc(-2 * var(--truncate-internal-fade-marker-width));\n    }\n  }\n\n  [data-truncate-container=\"fruncate\"] {\n    & [data-truncate-grid] {\n      grid-template-columns: 0 minmax(0, max-content) auto;\n    }\n\n    & [data-truncate-content] {\n      direction: rtl;\n    }\n\n    & [data-truncate-content] > span {\n      unicode-bidi: plaintext;\n    }\n\n    & [data-truncate-fade] {\n      margin-left: calc(-2 * var(--truncate-internal-fade-marker-width));\n    }\n  }\n\n  [data-truncate-variant=\"default\"] {\n    & [data-truncate-marker] {\n      background-color: var(--truncate-internal-marker-background-color);\n      background-image: linear-gradient(var(--truncate-internal-marker-background-overlay-color),\n        var(--truncate-internal-marker-background-overlay-color));\n    }\n\n    & [data-truncate-marker]:after, & [data-truncate-marker]:before {\n      content: \"\";\n      width: calc(var(--truncate-internal-marker-fade-width) +\n          var(--truncate-internal-marker-gap));\n      height: max(0px,\n        calc(var(--truncate-internal-single-line-height) -\n            var(--truncate-internal-marker-block-inset) * 2));\n      background-color: var(--truncate-internal-marker-background-color);\n      background-image: linear-gradient(var(--truncate-internal-marker-background-overlay-color),\n        var(--truncate-internal-marker-background-overlay-color));\n      -webkit-mask-image: linear-gradient(var(--truncate-internal-fade-dir),\n        #000 0%,\n        #000 var(--truncate-internal-marker-gap),\n        transparent 100%);\n      mask-image: linear-gradient(var(--truncate-internal-fade-dir),\n        #000 0%,\n        #000 var(--truncate-internal-marker-gap),\n        transparent 100%);\n      position: absolute;\n      inset-block-start: var(--truncate-internal-marker-block-inset);\n    }\n\n    & [data-truncate-marker]:after {\n      --truncate-internal-fade-dir: to right;\n      right: calc(-1 *\n          (\n            var(--truncate-internal-marker-fade-width) +\n              var(--truncate-internal-marker-gap)\n          ));\n    }\n\n    & [data-truncate-marker]:before {\n      --truncate-internal-fade-dir: to left;\n      left: calc(-1 *\n          (\n            var(--truncate-internal-marker-fade-width) +\n              var(--truncate-internal-marker-gap)\n          ));\n    }\n  }\n\n  [data-truncate-variant=\"fade\"] {\n    & [data-truncate-marker] {\n      background: none;\n    }\n  }\n\n  [data-truncate-fade] {\n    box-shadow: 0 0 calc(var(--truncate-internal-fade-marker-width) / 2)\n        var(--truncate-internal-fade-marker-color),\n      0 0 var(--truncate-internal-fade-marker-width)\n        var(--truncate-internal-fade-marker-color);\n    width: calc(var(--truncate-internal-fade-marker-width) * 2);\n    height: calc(var(--truncate-internal-single-line-height) -\n        (var(--truncate-internal-fade-marker-width) * 2));\n    margin: var(--truncate-internal-fade-marker-width) 0;\n  }\n\n  [data-truncate-group-container=\"middle\"] {\n    & [data-truncate-container] {\n      --truncate-marker-opacity: var(--truncate-internal-middle-marker-opacity);\n    }\n\n    min-width: 0;\n    display: flex;\n\n    & > div {\n      min-width: 0;\n    }\n\n    & > div[data-truncate-segment-priority=\"1\"] {\n      flex: 0 1 max-content;\n    }\n\n    & > div[data-truncate-segment-priority=\"2\"] {\n      flex: 0 999999 max-content;\n    }\n  }\n}\n\n@layer theme, unsafe;\n";
+ //#endregion
+-export { style_default as default };
++var fork_rows_style = "@layer base {\n  [data-item-section=\"lead\"], [data-item-section=\"trail\"] {\n    column-gap: var(--trees-row-part-gap, 4px);\n    grid-auto-flow: column;\n    flex: none;\n    align-items: center;\n    display: grid;\n  }\n\n  [data-item-section=\"lead\"] {\n    grid-template-columns: var(--trees-row-lead-columns, none);\n  }\n\n  [data-item-section=\"trail\"] {\n    grid-template-columns: var(--trees-row-trail-columns, none);\n    font-variant-numeric: tabular-nums;\n    justify-items: end;\n    margin-inline-start: auto;\n  }\n\n  [data-item-part-id] {\n    cursor: pointer;\n  }\n\n  [data-item-muted=\"true\"] > [data-item-section=\"content\"] {\n    opacity: var(--trees-row-muted-opacity, .55);\n  }\n}\n";
++var style_with_rows = style_default + fork_rows_style;
++export { style_with_rows as default };
+ 
+ //# sourceMappingURL=style.js.map
+\ No newline at end of file
