@@ -34,7 +34,7 @@ import { INBOX_CONTRACT_EXAMPLE, INBOX_MCP_TOOLS, INBOX_TRADEOFFS_EXAMPLE, inbox
 import { INBOX_BODY_CUT_BYTES, INBOX_EARLIER_PERSON_BYTES, INBOX_THREAD_WINDOW, sizeText } from "@plannotator/server/inbox-mcp-read";
 import { INBOX_AGENT_SEARCH_LIMIT } from "@plannotator/server/inbox-mcp-search";
 import { INBOX_TOOL_DEFAULTS, INBOX_TOOL_HOSTS } from "@plannotator/shared/config";
-import { INBOX_PULLS_FIELD_DESCRIPTION, INBOX_STEPS_LEAD, INBOX_STEPS_START_WAKE_LINE } from "@plannotator/shared/inbox/connection";
+import { INBOX_PRIORITY_FIELD_DESCRIPTION, INBOX_PULLS_FIELD_DESCRIPTION, INBOX_STEPS_LEAD, INBOX_STEPS_START_WAKE_LINE } from "@plannotator/shared/inbox/connection";
 import { INBOX_REVIEW_FIELD_DESCRIPTION, INBOX_WALKTHROUGH_FIELD_DESCRIPTION } from "@plannotator/core/inbox-review";
 import { INBOX_ATTACHMENTS_PICTURES_LINE, INBOX_ATTACHMENTS_PROTOTYPE_CLAUSE, INBOX_DELEGATED_OPTIONS_RULE, INBOX_FILLED_ARGUMENTS, INBOX_FOLLOW_THROUGH_RULE, INBOX_PICTURES_RULE, INBOX_REF_LINK_RULE, INBOX_REPLY_TO_CHECK, INBOX_SUBAGENT_RULE, INBOX_TAGGED_INSTRUCTION, INBOX_THREAD_RULE, INBOX_TOOL_NAME, inboxReaskInstruction } from "@plannotator/shared/inbox/connection";
 import { INBOX_CALL_ACTIONS, INBOX_COMMAND_USAGE } from "./cli";
@@ -100,7 +100,7 @@ export const INBOX_HELP_CODE_EXAMPLES = ["run.sh", "build.mjs", "app.ts", "main.
 /** One block per MCP tool, in INBOX_MCP_TOOLS order. */
 export const TOOL_GUIDE: Record<InboxMcpToolName, InboxToolGuide> = {
   send_message: {
-    args: ["body", "subject", "thread", "reply_to", "supersedes", "done", "attachments", "pulls", "idempotency_key"],
+    args: ["body", "subject", "thread", "reply_to", "supersedes", "done", "attachments", "pulls", "priority", "idempotency_key"],
     lines: [
       "Post a markdown message to the person. `body` is required; question blocks in it render as answerable cards (see \"Asking the reviewer questions\").",
       "- `subject`: used when the message starts a thread; one line of plain text (a line break or leaked tool-call text such as `</subject>` is refused with `validation_error`). Default: the first question's prompt, else the first line.",
@@ -110,6 +110,7 @@ export const TOOL_GUIDE: Record<InboxMcpToolName, InboxToolGuide> = {
       "- `done`: your own action items (`:::action` blocks, see \"Action items only the person can do\") in the thread this message lands in that you saw done yourself, e.g. the deployment you were watching is Ready: `\"<message id>/<key>\"` (the key starts with `a-`; read_thread gives it) or `\"<message id>\"` for every open action item of that message. The card then says you saw it done; nothing is sent to the person. An id that names no open action item of the thread refuses the whole send with `invalid_done: …`, which lists the thread's open action items. The result's `done` lists what it marked. Never mark done what you did not see happen.",
       `- \`attachments\`: files to show the person beside your message, e.g. \`["docs/plan.md", "proto/admin.html", "/tmp/demo.mp4"]\`: absolute (anywhere you can read) or relative to \`project_path\`. ${INBOX_ATTACHMENTS_PICTURES_LINE} Any regular file, of any size. Markdown, plain text, config and data files, Mermaid and Graphviz sources and HTML open in Plannotator's viewers; images (PNG, JPEG, GIF, WebP, SVG, AVIF, BMP, ICO) show below the message; videos (MP4, MOV, WebM) play beside it, and the person comments at moments (each comment comes back with its time, \`At 1:42 (102.4 s of 7:41)\`, and the path of the paused frame, which you can read); source code, scripts (${INBOX_HELP_CODE_EXAMPLES.map(code).join(", ")} and the like) and any other text open as code with line comments (text over 16 MB is offered as a download); PDFs and every other file are offered as a download. The kind is read from the bytes, so an image, video or PDF needs no particular name. Folders and \`.env\` files are refused, and one refused file refuses the whole send. The Inbox keeps the version you sent and shows the file as it is now; the person's annotations, including comments on images and code lines, come back in their reply. Each attachment in the result has a \`kind\` (\`markdown\`, \`text\`, \`html\`, \`mermaid\`, \`graphviz\`, \`code\`, \`image\`, \`video\`, \`pdf\`, \`file\`); treat a kind you do not know as \`file\`.`,
       `- \`pulls\`: ${INBOX_PULLS_FIELD_DESCRIPTION}`,
+      `- \`priority\`: ${INBOX_PRIORITY_FIELD_DESCRIPTION} The Inbox collapses it to one line and cuts it at 120 characters. The person can add or remove any thread themselves; once they remove yours, a later \`priority\` in that thread is ignored until they write in it, and the result says so.`,
       "- `idempotency_key`: any unique string. Sending again with the same key returns the first message instead of posting twice; the same key with another body, thread, `reply_to`, `supersedes` or `done` is refused.",
       `- Pictures: ${INBOX_PICTURES_RULE}`,
       `- ${INBOX_DELEGATED_OPTIONS_RULE}`,

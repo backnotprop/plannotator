@@ -415,8 +415,10 @@ function useAvatarRow(): boolean {
  * person's own), under a named and an unnamed thread alike. A named Sent row keeps its own words (who has the reply,
  * a re-ask that waits), as before. Nothing when it only repeats the title. An older Inbox sends no `latest_preview`:
  * a named thread's subject then, as before, and nothing under an unnamed one, whose subject is its title.
+ * While an agent's ask for Priority stands, its reason takes the line's place (`priority.ask`), in every view.
  */
 export function previewOf(row: InboxListRow): string | null {
+  if (row.priority?.ask?.reason.trim()) return row.priority.ask.reason;
   const named = !!row.thread_name?.trim();
   const sentWords = named ? sentWordsOf(row) : null;
   const text = sentWords ?? (row.latest_preview !== undefined ? row.latest_preview : named ? subjectOf(row) : null);

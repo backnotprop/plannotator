@@ -166,12 +166,15 @@ test.skipIf(!hasDom)('a cut preview shows the whole text in a tooltip on hover; 
   expect([...document.body.querySelectorAll('[data-pn-tooltip]')].some((n) => n.textContent === 'Inbox: project menu')).toBe(false);
 });
 
-test.skipIf(!hasDom)('the grey line is the latest message in every row shape, an unnamed thread\'s too', async () => {
+test.skipIf(!hasDom)('the grey line is the latest message in every row shape, an unnamed thread\'s too, and an agent\'s Priority reason while it stands', async () => {
   const { adoptSavedRows, resetListLookForTests } = await import('./listLook');
   const NAMED = { ...row('msg_named', 'Pagefind or Algolia for docs search?', 'search-index'), latest_preview: 'Pagefind index built: 1.2 MB for 340 pages.' };
   const REPLIED = { ...row('msg_replied', 'Migration plan for the billing tables', null), message_count: 2, latest_preview: 'You: Go with option B.' };
   const FIRST = { ...row('msg_first', 'Can I delete the old fixtures folder?', null), latest_preview: null };
   const ECHO = { ...row('msg_echo', 'Release notes', 'release'), latest_preview: 'release' };
+  // An agent's standing ask for Priority: its reason in the line's place. The person's own add keeps the latest message.
+  const ASKED = { ...row('msg_asked', 'PR #88: retry policy', null), latest_preview: 'Re-review done.', priority: { person: true, at: '2026-10-10T10:00:00.000Z', ask: { reason: 'PR #88 green: approve the merge', agent: 'Reviewer', message_id: 'msg_asked' } } } as InboxListRow;
+  const ADDED = { ...row('msg_added', 'Plan v3', null), latest_preview: 'Plan v3 is up.', priority: { person: true, at: '2026-10-10T10:00:00.000Z', ask: null } } as InboxListRow;
   // A named Sent row keeps the words that say who has the reply (approval "inbox-tag-agents").
   const SENT: InboxListRow = {
     ...row('msg_sent', 'Rotate the staging password', 'staging'),
@@ -190,12 +193,14 @@ test.skipIf(!hasDom)('the grey line is the latest message in every row shape, an
   for (const shape of shapes) {
     resetListLookForTests();
     act(() => adoptSavedRows(['smallNames', ...shape.rows], 1));
-    const el = render(shape.phone, [NAMED, REPLIED, FIRST, ECHO, SENT], shape.wide);
+    const el = render(shape.phone, [NAMED, REPLIED, FIRST, ECHO, SENT, ASKED, ADDED], shape.wide);
     expect([shape.name, preview(el, 'msg_named')]).toEqual([shape.name, 'Pagefind index built: 1.2 MB for 340 pages.']);
     expect([shape.name, preview(el, 'msg_replied')]).toEqual([shape.name, 'You: Go with option B.']);
     expect([shape.name, preview(el, 'msg_first')]).toEqual([shape.name, null]);
     expect([shape.name, preview(el, 'msg_echo')]).toEqual([shape.name, null]);
     expect([shape.name, preview(el, 'msg_sent')?.startsWith('0 of 1 delivered')]).toEqual([shape.name, true]);
+    expect([shape.name, preview(el, 'msg_asked')]).toEqual([shape.name, 'PR #88 green: approve the merge']);
+    expect([shape.name, preview(el, 'msg_added')]).toEqual([shape.name, 'Plan v3 is up.']);
     // Compact puts the title on line 1 and the line under it.
     if (shape.name === 'compact') expect(rowEl(el, 'msg_replied').querySelector('.ib-l2')).toBeNull();
     act(() => root?.unmount());

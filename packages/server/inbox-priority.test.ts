@@ -175,6 +175,45 @@ describe("the person's Priority", () => {
     expect(server.store.listRow(a.thread_id)!.priority).toBeUndefined();
   });
 
+  test("an agent's ask: the row carries its reason; Remove writes `off`, a new ask is then refused, and the Undo brings the ask back; agents read none of it", async () => {
+    const { dataDir, server, client } = await setup();
+    const project = join(dataDir, "..", "docs");
+    const ask = async (body: string, extra: Record<string, unknown>) =>
+      (await client.callTool({ name: "send_message", arguments: { project_path: project, agent_session: "ses_r", agent_name: "Reviewer", body, ...extra } })) as {
+        content: { text: string }[];
+        structuredContent: { thread_id: string; message_id: string; priority?: string };
+      };
+    const first = await ask("Re-review done: checks green, 2 approvals.", { subject: "PR #88", priority: "PR #88 green: approve the merge" });
+    expect(first.structuredContent.priority).toBe("set");
+    const threadId = first.structuredContent.thread_id;
+    const row = (await rowOf(server, threadId))!;
+    expect(row.priority).toMatchObject({ person: false, ask: { reason: "PR #88 green: approve the merge", agent: "Reviewer", message_id: first.structuredContent.message_id } });
+    expect(row.section).toBe("new");
+
+    const removed = (await (await priority(server, threadId, { priority: false })).json()) as Json;
+    expect(removed.before).toEqual({ at: null, off_at: null });
+    expect((await rowOf(server, threadId))!.priority).toBeNull();
+    expect(JSON.parse(readFileSync(join(dataDir, "inbox", "priority.json"), "utf8")).off.map((e: Json) => e.thread_id)).toEqual([threadId]);
+    const refused = await ask("Still green.", { reply_to: threadId, priority: "PR #88 green: approve the merge" });
+    expect(refused.structuredContent.priority).toBe("removed_by_person");
+    expect(refused.content[0]!.text).toContain("Not in Priority: the person took this thread out until they next write in it.");
+
+    // Undo of the Remove: no `off`, so the newest message's ask counts again (the refused one kept none).
+    await priority(server, threadId, { restore: removed.before });
+    expect((await rowOf(server, threadId))!.priority).toBeNull();
+    const again = await ask("Green after a rebase.", { reply_to: threadId, priority: "PR #88 rebased: approve the merge" });
+    expect(again.structuredContent.priority).toBe("set");
+    expect((await rowOf(server, threadId))!.priority!.ask!.reason).toBe("PR #88 rebased: approve the merge");
+
+    const read = await client.callTool({ name: "read_thread", arguments: { thread_id: threadId, agent_session: "ses_r" } });
+    const listed = await client.callTool({ name: "read_thread", arguments: { project_path: project, agent_session: "ses_r", asked_by: "anyone" } });
+    const searched = await client.callTool({ name: "search", arguments: { query: "rebase", agent_session: "ses_r" } });
+    for (const answer of [read, listed, searched]) {
+      expect(JSON.stringify(answer)).not.toMatch(/\\?"priority\\?"/);
+      expect(JSON.stringify(answer)).not.toContain("approve the merge");
+    }
+  });
+
   test("a phone adds through its door; a repeated key is answered from the door's log", async () => {
     const { server, send } = await setup({ phones: true });
     const a = await send("Add me", "ses_a");

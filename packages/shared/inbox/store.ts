@@ -73,6 +73,7 @@ import {
   type InboxQuestionRecord,
   type InboxReplyDraft,
   type InboxPin,
+  type InboxPriorityAsk,
   type InboxPriorityBefore,
   type InboxSupersededBy,
   type InboxListRow,
@@ -106,6 +107,7 @@ import {
   type InboxQuestionState,
   type InboxRowDelivery,
 } from "@plannotator/core/inbox-types";
+import { inboxPriorityReason } from "@plannotator/core/inbox-types";
 import { INBOX_COMMENT_PICTURES_MAX, inboxCommentPicture, inboxCommentPictureUploads } from "@plannotator/core/inbox-types";
 import { inboxHasUnsent, inboxListSections, inboxRowUnread, inboxSectionOf } from "./list";
 import { inboxProjectLabels } from "./project-name";
@@ -239,6 +241,11 @@ export interface InboxSendInput {
    * No agent's own call sets it.
    */
   turn_error?: boolean;
+  /**
+   * send_message's `priority`: the reason this message asks for the person's Priority (`inboxPriorityReason`
+   * normalizes it; blank is none). Not kept while the person has taken the thread out (`priorityOff`).
+   */
+  priority?: string | null;
   body: string;
   subject?: string | null;
   reply_to?: string | null;
@@ -312,6 +319,11 @@ export interface InboxSendResult {
   naming?: InboxThreadNaming;
   /** The action items this send marked done (`done`), `<message id>/<key>`. Absent when none. */
   done?: string[];
+  /**
+   * What became of `priority`: `set`, the message carries it; `removed_by_person`, the person took this thread out
+   * of Priority and has not written in it since, so it was not kept. Absent when the send asked none.
+   */
+  priority?: "set" | "removed_by_person";
 }
 
 export interface InboxAnswerEntry {
@@ -1649,7 +1661,9 @@ export class InboxStore {
    * The person's Add to Priority (`on`) or Remove from Priority. Add writes
    * their entry (adding an added thread keeps its first time) and drops any
    * `off`; an archived thread refuses, since the list does not draw it. Remove
-   * drops the entry. Answers the state before, for the Undo. Writes no store line.
+   * drops the entry and, while an agent's ask stands, writes `off`: later asks
+   * there are not kept until the person next writes in the thread. Answers the
+   * state before, for the Undo. Writes no store line.
    */
   setPriority(threadId: string, on: boolean): InboxPriorityBefore {
     const root = this.messages.get(threadId);
@@ -1659,9 +1673,33 @@ export class InboxStore {
       if (root.resolved_at !== null && !this.agentAfterArchive(threadId)) throw new InboxError("thread_resolved", "This thread is archived; unarchive it first.");
       this.commitPriority(threadId, { at: before.at ?? this.now().toISOString(), off_at: null });
     } else {
-      this.commitPriority(threadId, { at: null, off_at: before.off_at });
+      this.commitPriority(threadId, { at: null, off_at: this.priorityAsk(threadId) ? this.now().toISOString() : before.off_at });
     }
     return before;
+  }
+
+  /** The person took this thread out of Priority (`off`) and has not written in it since. */
+  private priorityOff(threadId: string, messages: readonly InboxMessage[] = this.threadMessages(threadId)): boolean {
+    const off = this.priorityState.off.find((e) => e.thread_id === threadId);
+    if (!off) return false;
+    const since = Date.parse(off.at);
+    return !messages.some((m) => m.author.kind === "person" && !isAckNote(m) && Date.parse(m.created_at) > since);
+  }
+
+  /**
+   * An agent's standing ask for the person's Priority (`InboxPriorityAsk`): the
+   * thread's last word (past the Inbox's notes) is an agent's message carrying
+   * `priority`, the thread is open with no Mark read, and the person has not
+   * taken it out since they last wrote there. Null otherwise.
+   */
+  priorityAsk(threadId: string): InboxPriorityAsk | null {
+    const root = this.messages.get(threadId);
+    if (!root || root.thread_id !== threadId || root.resolved_at !== null) return null;
+    const messages = this.threadMessages(threadId).filter((m) => !isAckNote(m));
+    const last = lastNonNote(messages) ?? root;
+    if (last.author.kind !== "agent" || !last.priority) return null;
+    if (this.readAt(root, messages) !== null || this.priorityOff(threadId, messages)) return null;
+    return { reason: last.priority, agent: last.author.name ?? last.author.host ?? "Agent", message_id: last.id };
   }
 
   /** Undo: one thread's entries exactly as `value` (a `before`) says. Answers the state it replaced. */
@@ -4184,11 +4222,13 @@ export class InboxStore {
           );
         }
         const markedDone = this.doneBy(message.id);
+        const asked = inboxPriorityReason(input.priority) !== null;
         return {
           message: this.wire(message),
           replayed: true,
           ...(message.thread_naming ? { naming: message.thread_naming } : {}),
           ...(markedDone.length > 0 ? { done: markedDone } : {}),
+          ...(asked ? { priority: message.priority ? ("set" as const) : ("removed_by_person" as const) } : {}),
         };
       }
     }
@@ -4225,6 +4265,11 @@ export class InboxStore {
         }
       }
     }
+
+    // An agent's ask for Priority, not kept while the person has the thread out (they took it out and have not
+    // written in it since).
+    const reason = input.author.kind === "agent" ? inboxPriorityReason(input.priority) : null;
+    const priorityKept = reason !== null && !(threadId && this.priorityOff(threadId));
 
     const at = this.stamp();
     const id = inboxId("msg");
@@ -4271,6 +4316,7 @@ export class InboxStore {
       ...(input.turn_error === true ? { turn_error: true as const } : {}),
       ...(replyThread !== null ? { reply_thread: replyThread } : {}),
       ...(naming ? { thread_naming: naming } : {}),
+      ...(priorityKept ? { priority: reason } : {}),
     };
     this.appendMessage(message, at);
     for (const question of parsed) {
@@ -4393,7 +4439,13 @@ export class InboxStore {
       );
     }
     // A reply from the agent reopens nothing: a resolved thread stays resolved.
-    return { message: this.wire(message), replayed: false, ...(naming ? { naming } : {}), ...(doneIds.length > 0 ? { done: doneIds } : {}) };
+    return {
+      message: this.wire(message),
+      replayed: false,
+      ...(naming ? { naming } : {}),
+      ...(doneIds.length > 0 ? { done: doneIds } : {}),
+      ...(reason !== null ? { priority: priorityKept ? ("set" as const) : ("removed_by_person" as const) } : {}),
+    };
   }
 
   /**

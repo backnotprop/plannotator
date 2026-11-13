@@ -1676,10 +1676,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // `pinned_at`, `snoozed` and `priority` (additive) on the window's and the phone's rows only: never on anything an agent reads.
     const pinnedAt = new Map(store.pins().map((pin) => [pin.thread_id, pin.pinned_at]));
     const addedAt = new Map(store.priorities().threads.map((entry) => [entry.thread_id, entry.at]));
-    // Every row of this Inbox carries the key: it is how a window knows this Inbox keeps priority.
+    // Every row of this Inbox carries the key: it is how a window knows this Inbox keeps priority. `ask`: an agent's
+    // standing ask, derived from the thread now (store.priorityAsk), so a reply, Mark read or a later message ends it.
     const withPriority = (row: InboxListRow): InboxListRow => {
+      if (inboxRowArchived(row)) return { ...row, priority: null };
       const at = addedAt.get(row.thread_id);
-      return { ...row, priority: at !== undefined && !inboxRowArchived(row) ? { person: true, at, ask: null } : null };
+      const ask = store.priorityAsk(row.thread_id);
+      if (at === undefined && !ask) return { ...row, priority: null };
+      return { ...row, priority: { person: at !== undefined, at: at ?? store.message(ask!.message_id)?.created_at ?? row.last_at, ask } };
     };
     // Launched threads (only while launch is on): "Starting" / "Working", and a session blocked on a prompt in Stopped on you.
     // Resolved once per list: off, it is the identity and no row costs anything. Only this Inbox's own rows: a linked

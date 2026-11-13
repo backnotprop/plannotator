@@ -453,6 +453,13 @@ export const INBOX_PULLS_FIELD_DESCRIPTION =
 export const INBOX_THREAD_PULLS_DESCRIPTION =
   "A thread's pull/merge requests: `add`, `remove`, or neither to list them with live state and who added each. The thread's agent owns the list; the person can change it too."
 
+/**
+ * Thread priority (approval "inbox-thread-priority"). send_message's `priority` field: through the MCP server's
+ * field, every connection's `plannotator_inbox` tool carries it. The ask rides on the agent's newest message.
+ */
+export const INBOX_PRIORITY_FIELD_DESCRIPTION =
+  "Only when finished work waits on nothing but the person's yes: a PR to approve, a plan to sign off, a release to ship. One short line in your own words (under 80 characters): what is ready and the yes it needs. It puts the thread in Priority, the top of their list, until they reply, answer or mark it read, or your next message here leaves it out. Not for ordinary questions, updates or reports."
+
 /** The `thread_pulls` tool's `add` field (approved text). */
 export const INBOX_THREAD_PULLS_ADD_DESCRIPTION = "PRs to add, any number in one call (a whole stack, or related ones), as send_message's `pulls`."
 

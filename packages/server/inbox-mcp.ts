@@ -53,6 +53,7 @@ import { isInsideFolder, type InboxProjectRoot } from "./inbox-project-root";
 import { registerInboxSnoozeTool, type InboxSnoozeMcpContext } from "./inbox-mcp-snooze";
 import { quietHint } from "./inbox-mcp-hints";
 import type { ProjectHostOf } from "./inbox-thread-pulls";
+import { priorityLine, PRIORITY_FIELD } from "./inbox-mcp-priority";
 import { changePullsAsAgent, checkProjectPullRefs, checkPullRefs, pullsActor, pullsChangeText, PULLS_FIELD, registerInboxThreadPullsTool, threadPullsText, type InboxPullsMcpLive } from "./inbox-mcp-pulls";
 
 export const INBOX_MCP_TOOLS = ["send_message", "read_thread", "search", "resolve_message", "snooze_thread", "thread_pulls", "get_guide_brief", "submit_guide", "card", "steps"] as const;
@@ -520,6 +521,8 @@ export type AgentSendInput = {
   supersedes?: string[];
   /** Its own action items of the thread the agent saw done (`<message id>/<key>`, or `<message id>`). */
   done?: string[];
+  /** send_message only: the reason this message asks for the person's Priority (inbox-mcp-priority.ts). */
+  priority?: string;
   agent_session?: string;
   agent_name?: string;
   agent_host?: string;
@@ -792,7 +795,7 @@ export async function sendAgentMessage(
   input: AgentSendInput,
   guide?: InboxGuideRef,
   wakes = false,
-): Promise<{ structured: Record<string, unknown>; replayed: boolean; questions: number; attachments: number; superseded: number; actions: number; done: number; imagesNotShown: ImageNotShown[]; attachedImagesNotInBody: string[]; questionOpenersWithText: QuestionOpenerWithText[]; noStakes: number; recommendedInLabel: number; questionsToCheck: InboxQuestionToCheck[]; choicesWithoutPictures: { keys: string[]; pictures: number }; naming: InboxSendResult["naming"] | null }> {
+): Promise<{ structured: Record<string, unknown>; replayed: boolean; questions: number; attachments: number; superseded: number; actions: number; done: number; imagesNotShown: ImageNotShown[]; attachedImagesNotInBody: string[]; questionOpenersWithText: QuestionOpenerWithText[]; noStakes: number; recommendedInLabel: number; questionsToCheck: InboxQuestionToCheck[]; choicesWithoutPictures: { keys: string[]; pictures: number }; naming: InboxSendResult["naming"] | null; priority: InboxSendResult["priority"] | null }> {
   const { store } = context;
   refuseIdShapedThread(input.thread, input.reply_to);
   refuseBadSubject(input.subject);
@@ -855,6 +858,7 @@ export async function sendAgentMessage(
       from_project: fromProject,
       supersedes: input.supersedes ?? null,
       done: input.done ?? null,
+      ...(input.priority !== undefined ? { priority: input.priority } : {}),
       ...(wakes ? { wakes: true } : {}),
     });
   } catch (error) {
@@ -921,6 +925,7 @@ export async function sendAgentMessage(
     done: markedDone.length,
     replayed: result.replayed,
     naming: result.naming ?? null,
+    priority: result.priority ?? null,
     questions: questions.length,
     attachments: message.attachments?.length ?? 0,
     structured: {
@@ -945,6 +950,8 @@ export async function sendAgentMessage(
       ...(result.naming ? { named_thread: result.naming.status === "named" ? result.naming.name : null } : {}),
       ...(result.naming?.status === "refused" ? { naming_refused: result.naming.code } : {}),
       ...(result.naming && result.naming.status !== "named" ? { name_this_thread: true } : {}),
+      /** What became of `priority` (inbox-mcp-priority.ts): absent when the send asked none. */
+      ...(result.priority ? { priority: result.priority } : {}),
       /** Images the body shows that the window will not (missing, not an image, too large, hidden, remote). */
       ...(notShown.length > 0 ? { images_not_shown: notShown.slice(0, IMAGES_NOT_SHOWN_MAX) } : {}),
       ...(notShown.length > IMAGES_NOT_SHOWN_MAX ? { images_not_shown_more: notShown.length - IMAGES_NOT_SHOWN_MAX } : {}),
@@ -1137,6 +1144,8 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
             ),
           // A thread's PRs (approval "inbox-pr-binding"): added to the thread the message lands in. Always on.
           pulls: PULLS_FIELD.optional(),
+          // The person's Priority: the reason this message asks for it (inbox-mcp-priority.ts). Always on.
+          priority: PRIORITY_FIELD.optional(),
           // Thread steps (approval "inbox-thread-steps"): a message and its list together, only while the person has steps on.
           ...(context.stepsOn?.() ? { steps: STEPS_FIELD.optional() } : {}),
         })
@@ -1214,7 +1223,7 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
           sent.structured.hint = quiet.line;
         }
         return ok(
-          `${sent.replayed ? "Already sent" : "Sent"} to the Plannotator Inbox${asked} (thread ${sent.structured.thread_id}, ${sent.structured.url}).${stepsLine}${pullsLine}${namingLine(sent.naming)} ${replyNextStepText(wakes, input.agent_host)}${hints.join("")}`,
+          `${sent.replayed ? "Already sent" : "Sent"} to the Plannotator Inbox${asked} (thread ${sent.structured.thread_id}, ${sent.structured.url}).${stepsLine}${pullsLine}${priorityLine(sent.priority)}${namingLine(sent.naming)} ${replyNextStepText(wakes, input.agent_host)}${hints.join("")}`,
           stale ? { ...sent.structured, not_read_since: lastContactOf(stale) } : sent.structured,
         );
       }),
