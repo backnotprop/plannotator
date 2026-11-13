@@ -121,14 +121,15 @@ afterEach(() => {
   globalThis.fetch = savedFetch;
 });
 
-async function render(props: { currentProject?: string | null; phone?: boolean } = {}): Promise<void> {
+async function render(props: { currentProject?: string | null; phone?: boolean; projects?: { id: string; name: string; root: string }[]; projectLabels?: ReadonlyMap<string, string> } = {}): Promise<void> {
   await act(async () => {
     root!.render(
       <SearchPalette
         open
         phone={props.phone ?? false}
         currentProject={props.currentProject ?? null}
-        projects={[{ ...project, root: '/src/plannotator' }, { id: 'prj_01M4V7JERHR0Y3XQERK1MR604B', name: 'api', root: '/w/api' }]}
+        projects={props.projects ?? [{ ...project, root: '/src/plannotator' }, { id: 'prj_01M4V7JERHR0Y3XQERK1MR604B', name: 'api', root: '/w/api' }]}
+        projectLabels={props.projectLabels}
         onClose={(reason) => closed.push(reason)}
         onOpenResult={(hash, land) => opened.push({ hash, land })}
       />,
@@ -1119,4 +1120,22 @@ test.skipIf(!hasDom)('a phone: the order is pinned at the end of the filter line
   expect([...bar().children].map((el) => el.className)).toEqual(['ib-sp-filters', 'ib-sp-pin']);
   expect(bar().querySelector('.ib-sp-pin [data-search-sort]')).not.toBeNull();
   expect(host!.querySelector('.ib-sp-sortrow')).toBeNull();
+});
+
+test.skipIf(!hasDom)("linked machines: another machine's project reads as the list reads it, in its rows and the Project chip", async () => {
+  const far = { id: 'prj_01M4V7JERHR0Y3XQERK1MR604C', name: 'web', root: '/src/web' };
+  const labels = new Map([[project.id, 'plannotator'], [far.id, 'web · MacBook']]);
+  respond = async (call) =>
+    call.url.searchParams.get('q')
+      ? answer({ q: 'deploy', terms: ['deploy'], totals: totals({ threads: 2 }), groups: { threads: [threadRow('msg_far', 'Deploy web', { project: { ...far, machine: 'ibx_01K0000000000000000000000M' } }), threadRow('msg_here', 'Deploy relay')] }, recent: null })
+      : answer({});
+  await render({ projects: [{ ...project, root: '/src/plannotator' }, far], projectLabels: labels });
+  await type('deploy');
+  await waitFor(() => options().length >= 2);
+  expect(host!.querySelector('[data-result-id="msg_far"]')!.textContent).toContain('web · MacBook');
+  expect(host!.querySelector('[data-result-id="msg_here"]')!.textContent).not.toContain('MacBook');
+  await act(async () => {
+    host!.querySelector<HTMLElement>('[data-chip="project"]')!.click();
+  });
+  expect([...host!.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].map((item) => item.textContent)).toEqual(['All projects', 'plannotator', 'web · MacBook']);
 });
