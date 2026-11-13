@@ -10,7 +10,7 @@
  * Decisions page (`#decisions=…`) opens the list.
  */
 
-import { threadPullsBus } from './threadPulls/model';
+import { pullReviewLinks, threadPullsBus } from './threadPulls/model';
 import { inboxRefTransport } from './refTransport';
 import { markInboxPage } from './pageMarks';
 import { perfFirstList, perfStart, perfThreadOpenDropped, perfThreadOpenStart, perfThreadReadLanded, perfUntilNextFrame } from './perfMarks';
@@ -33,12 +33,13 @@ import { storage } from '@plannotator/ui/utils/storage';
 import { setSidebarSectionOpen } from './sidebarSections';
 import type { SkillCatalogEntry } from '@plannotator/ui/utils/skillReferences';
 import { reloadSkillCatalog } from '@plannotator/ui/utils/skillCatalog';
-import type { InboxCardWire, InboxDecision, InboxHealth, InboxListRow, InboxListSection, InboxQuestion, InboxReplyDraftRow, InboxRun, InboxThread } from '@plannotator/core/inbox-types';
+import type { InboxCardWire, InboxDecision, InboxHealth, InboxInitiative, InboxListRow, InboxListSection, InboxPriorityBefore, InboxQuestion, InboxReplyDraftRow, InboxRun, InboxThread } from '@plannotator/core/inbox-types';
 import { DecisionMode } from './decisions/DecisionMode';
 import { DecisionPill, decideEntryShown } from './decisions/entry';
 import { threadDecisions } from './decisions/model';
 import {
   InboxApiError,
+  InboxHeldError,
   inboxApi,
   onReplySent,
   adoptPageSession,
@@ -69,17 +70,17 @@ import { createSignal } from './signal';
 import { onlyQuestionsChanged } from './pickQueue';
 import { keepSame, sameListModel } from './listSame';
 import { draftsReadOwed, replyDraftsDiffer, unsentThreads } from './draftsReads';
-import { filterMachineRows, machineCounts, machineProjectNames, machinesModel, rowSnoozes, snoozeBlockedBy, threadAwayLine, threadOutbox } from './machines';
+import { filterMachineRows, machineCounts, machineProjectNames, machinesModel, machineTakes, rowSnoozes, snoozeBlockedBy, threadAwayLine, threadOutbox } from './machines';
 import { ASK_AGENT_TO_UPDATE, ASK_AGENT_TO_UPDATE_THREAD, MachineUpdateDialog } from './components/MachineUpdate';
 import { discardPreparedInboxEvents, prepareInboxEvents } from './sharedEvents';
 import { flatRows, readListView, useListView, type ListSort } from './listView';
 import { useShowLight, type ListEdge } from './showLight';
-import { appliedFilter, filterListSections, localDay, pickCount, useListFilter } from './listFilter';
+import { appliedFilter, filterListSections, localDay, pickCount, settledHeldRead, useListFilter } from './listFilter';
 import { ListFilterEmpty, clearedFrom } from './components/ListFilter';
-import { addOwnThreads, adoptKeepingOpen, drawnSection, filterSections, heldNews as heldNewsOf, heldNotice, listGroups, lookedRow, markHeldRowArchived, markHeldRowLooked, putReadRowBack, putRowBack, refreshHeldRows, replaceHeldRow, settleOwn, settlesOnBack, settleThread, showBroughtIn, showLandsIn, snoozeChangedRows, waitingCount, type OpenThread } from './held';
+import { addOwnThreads, adoptKeepingOpen, drawnSection, filterSections, heldNews as heldNewsOf, heldNotice, listGroups, lookedRow, markHeldRowArchived, markHeldRowLooked, priorityChangedRows, putReadRowBack, putRowBack, refreshHeldRows, replaceHeldRow, settleOwn, settlesOnBack, settleThread, showBroughtIn, showLandsIn, snoozeChangedRows, waitingCount, type OpenThread } from './held';
 import { inboxSnoozeDelay, inboxSnoozeRunning, inboxSnoozeWhen, type InboxRowSnooze } from '@plannotator/core/inbox-snooze';
 import { deliveriesReadList } from './rowDelivery';
-import { inboxAgentsWatched, setInboxAgents, useAgentListFilter } from './agentsList';
+import { inboxAgentsNow, inboxAgentsWatched, setInboxAgents, useAgentListFilter } from './agentsList';
 import { filterAgentRows } from './agents/model';
 import {
   captureSettle,
@@ -135,7 +136,7 @@ import { useSystemProjects } from './system/projects';
 import { systemDropped, systemEscapeTo, systemHashOf, systemKept, systemRouteOf } from './system/route';
 import { feedbackCopiedToast, feedbackPrompt } from './feedbackPrompt';
 import { connectLineNews, noteQuestionRows } from './agents';
-import type { InboxAgentRow, InboxAgentsModel, InboxTourChange, InboxTourState } from '@plannotator/core/inbox-types';
+import type { InboxAgentRow, InboxAgentsModel, InboxPull, InboxPullStack, InboxTourChange, InboxTourState } from '@plannotator/core/inbox-types';
 import { SettingsPage } from './components/Settings';
 import { createStepsBus } from './steps/useThreadSteps';
 import { threadBoardCard } from './steps/model';
@@ -171,13 +172,16 @@ import { leaveOnPurpose, replyBeingWritten, unsentReply } from './unsent';
 import { reloadOntoInbox, STALE_HEALTH_MS, useStalePage } from './stalePage';
 import { StalePageNotice } from './components/StalePageNotice';
 import { InboxToast, type InboxToastModel, toastSpeech } from './components/Toast';
-import { errorToast } from './toastError';
+import { errorText, errorToast } from './toastError';
 import { pictureFromFile } from './projectPictures';
 import { canToggleRead, confirmSetAside, MARK_READ_LOOK_WAIT_MS, MARK_READ_UNDO_MS, MARK_UNREAD_RETRY_WAIT_MS, markReadToast, markUnreadToast, offersRowMarkRead, seenHeldInNew, setAsideCount, type SetAsideAnswer, type SetAsideCount, warnsBeforeRead } from './markRead';
 import { MarkReadWarning } from './components/MarkReadWarning';
+import { AgentDeleteDialog } from './agents/AgentDeleteDialog';
+import { agentDeleteThreads, deleteAgentSession, type AgentDeleted } from './agents/agentDelete';
 import { summarizeInboxQuestions } from '@plannotator/core/inbox-questions';
 import { threadLink, type RowMenuAction } from './rowMenu';
-import { movePin, unpinnedWhere } from './pins';
+import { movePin, sameMachinePins, unpinnedWhere } from './pins';
+import { priorityAction, priorityBackIn } from './priority';
 import { noteStarred } from './starPop';
 import type { PinnedAction } from './components/PinnedRow';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
@@ -189,6 +193,7 @@ import { isPhone, isTouchPhone, trackKeyboard, usePhone } from './phone';
 import { installPasteFollowsField } from './pasteTarget';
 import { installPlainTextPaste } from '@plannotator/ui/utils/pasteInsert';
 import { LIST_MIN_WIDTH, THREAD_BESIDE_FILE_WIDTH, paneGutters, useStack } from './stack';
+import { usePrPaneFocus } from './pulls/prPaneFocus';
 import { threadPanelShows, useThreadPanel } from './threadPanel';
 import { ListColumnEdge } from './shell/ListColumnEdge';
 import { backBy, backTo, pushScreen, settleLanding, whileWritingRoute, withoutClickSignal } from './history';
@@ -205,16 +210,17 @@ import { ComposeDialog, type ComposeHeld, type ComposeJoined, type ComposeReques
 import { heldLaunchToast } from './compose/heldLaunch';
 import { ArtifactsWall } from './components/ArtifactsWall';
 import { readArtifactPins } from './artifactPins';
-import { hearAgentFacesEvent, readAgentFaces } from './agents/agentFaces';
+import { hearAgentFacesEvent, keepAgentName, onAgentFaceRefused, readAgentFaces } from './agents/agentFaces';
 import { DraftsPage } from './compose/DraftsPage';
 import { BoardPage, type BoardMove } from './board/BoardPage';
 import { PullsPage, ReviewsOff } from './pulls/PullsPage';
 import { PullReview } from './pulls/PullReview';
 import { usePulls } from './pulls/usePulls';
 import { SheetPage, type SheetView } from './prs/SheetPage';
-import { sheetModel } from './prs/sheetModel';
+import { sheetModel, tileOpens } from './prs/sheetModel';
 import { StackPage } from './prs/StackPage';
 import { useSheetPulls } from './prs/useSheetPulls';
+import { sheetLayoutHash, sheetLayoutOf, type SheetLayout } from './prs/tableModel';
 import { inboxPullIsOpen, inboxPullStacks } from '@plannotator/core/inbox-types';
 import { repoLabels } from './pulls/labels';
 import { pullFilterOf, type PullFilter } from './pulls/model';
@@ -227,6 +233,7 @@ import { GrillMeTip } from './components/GrillMeTip';
 import { ListViewIntro } from './components/ListViewIntro';
 import { ChecklistIntro } from './steps/ChecklistIntro';
 import { RulesIntro } from './components/RulesIntro';
+import { PersonalAgentsIntro, usePersonalAgentsBanner } from './components/PersonalAgentsIntro';
 import { rulesSet, wantRulesEditor } from './agentRules';
 import { StarAskCard } from '@plannotator/ui/components/StarAskCard';
 import { CodeReviewOffer } from './components/CodeReviewOffer';
@@ -236,7 +243,10 @@ import { useTabIconChoice } from './tabIconChoice';
 import { ThemeChooser } from './components/ThemeChooser';
 import { openThemeSettings, useThemeChooser } from './themeChooser';
 import { CardChip } from './board/CardChip';
-import { boardFilterHash, boardInitiativeOf, boardViewOf, cardsInInitiative, liveInitiatives, newCardProject, type BoardView } from './board/model';
+import { boardFilterHash, boardInitiativeOf, boardViewOf, cardsInInitiative, initiativeDeletedToast, liveInitiatives, newCardProject, type BoardView } from './board/model';
+import { restoreInitiatives } from './board/initiativeUndo';
+import { canTagThread, filterTagRows, rowTagsHere, tagHref, tagListSummary, tagsSectionShown, tagThreadCounts, tagWaitingCounts, ThreadTagsContext, type ThreadTagsHost } from './threadTags';
+import { TagIcon } from './components/InitiativePeek';
 import { useComposeSessions } from './compose/useComposeSessions';
 import { useComposerOpener } from './compose/openComposer';
 import { COMPOSE_CLONE_EVENT, composeActions, composeTargets, hostLabel, lastLaunchAgent, launchHistory, projectCanStart, projectPlusOn, SCRATCH_PICK, type ComposeAction, type ComposeCloneRequest } from './compose/model';
@@ -244,7 +254,7 @@ import { machineLaunchesKept } from './compose/useMachineLaunches';
 import { reviewBoxPulls } from './compose/reviewBox';
 import type { CardsModel, DraftView, InboxStorageModel, ThreadModel, UpdateCheckFailing } from './api';
 import { NO_RESTART_AGENTS, restartAgentsOf } from './restartAgents';
-import type { InboxComposeLaunch, InboxReaction, InboxRestartAgents } from '@plannotator/core/inbox-types';
+import type { InboxAgent, InboxComposeLaunch, InboxReaction, InboxRestartAgents } from '@plannotator/core/inbox-types';
 import { reactionSpeech } from './components/ReactionTray';
 import { inboxTabCount, setAppBadge, useTabCount } from './tabCount';
 import { pageOffersUpdates, pageOffersWhatsNew, sidebarUpdateNotice, updateForPage } from './updateNotice';
@@ -307,8 +317,9 @@ configurePlannotatorUI({
   // On a phone the selection toolbar sits below the selection, clear of iOS's own edit menu, inside the screen,
   // with thumb-sized buttons (utils/touchToolbarPlacement).
   touchSelectionToolbar: true,
-  // Hover cards for issue, PR and MR links: the server fetches with this computer's gh or glab (ref-cards.ts).
-  // Given up after REF_CARD_READ_MS (the card then shows what the Inbox knows), so no read holds a connection for good.
+  // Hover cards for issue, PR and MR links: the server fetches with this computer's gh or glab, and Bitbucket Cloud
+  // pull requests with the review app's Bitbucket token (ref-cards.ts). Given up after REF_CARD_READ_MS (the card then shows what the Inbox knows), so no read holds a connection for good.
+  refCardBitbucket: true,
   refCardTransport: inboxRefTransport((href, signal) => {
     const within = signalWithin(REF_CARD_READ_MS, signal);
     return fetch(inboxUrl(`/ref?url=${encodeURIComponent(href)}`), { signal: within.signal, headers: { accept: 'application/json' } }).finally(within.done);
@@ -416,6 +427,8 @@ interface Route {
    * the Sheet goes to Reviews there; `#prs` itself is a phone's way in (Reviews' "Pull requests" row).
    */
   prsView?: SheetView;
+  /** Grid or Table (`&layout=table`). */
+  prsLayout?: SheetLayout;
   prsFrom?: 'sheet' | 'stack' | 'reviews';
   /** The Artifacts wall on Pinned (`#artifacts=pinned`; approval "inbox-artifact-stars"); All is `#artifacts`. */
   pinned?: boolean;
@@ -480,6 +493,11 @@ interface Route {
    * place of a project or a machine, never beside them.
    */
   agent?: string | null;
+  /**
+   * A tag's list (`#tag=ini_…`, approval "inbox-thread-tags"): the threads in that tag, in the Inbox's groups. Picked in
+   * place of a project, a machine or an agent, never beside them; Inbox leaves it.
+   */
+  tag?: string | null;
   thread: string | null;
   /**
    * An attachment open beside the thread: `file=att_…`, `v=sent` for the version the agent sent, `at=` an annotation to show,
@@ -540,6 +558,7 @@ function routeOf(fullHash: string): Route {
       project: null,
       thread: null,
       prsView: params.get('state') === 'merged' ? 'merged' : 'open',
+      prsLayout: sheetLayoutOf(params.get('layout')),
       stack,
       layer,
       scope: layer && params.get('scope') === 'stack' ? 'stack' : 'layer',
@@ -581,6 +600,7 @@ function routeOf(fullHash: string): Route {
     project: fromReviews ? null : params.get('project'),
     machine: params.get('machine'),
     agent: fromReviews ? null : params.get('agent'),
+    tag: fromReviews ? null : params.get('tag'),
     thread,
     file: fileId ? { id: fileId, version: params.get('v') === 'sent' ? 'sent' : 'current', focus: params.get('at'), linked: params.get('linked'), view: parseFileView(params.get('view')), set: params.get('set') } : null,
     guide: thread ? params.get('guide') : null,
@@ -623,6 +643,7 @@ function hashOf(route: Route): string {
     hash =
       'prs' +
       (route.prsView === 'merged' ? '&state=merged' : '') +
+      sheetLayoutHash(route.prsLayout) +
       (route.stack ? `&stack=${encodeURIComponent(route.stack)}` : '') +
       (route.stack && route.layer ? `&layer=${encodeURIComponent(route.layer)}${route.scope === 'stack' ? '&scope=stack' : ''}${route.prsFrom === 'sheet' ? '&from=sheet' : route.prsFrom === 'reviews' ? '&from=reviews' : ''}` : '');
   else if (route.page === 'tour') hash = `tour=${route.step ?? 1}`;
@@ -634,6 +655,7 @@ function hashOf(route: Route): string {
     }
     if (route.machine) params.set('machine', route.machine);
     if (route.agent) params.set('agent', route.agent);
+    if (route.tag) params.set('tag', route.tag);
     if (route.project) params.set('project', route.project);
     if (route.thread) params.set('thread', route.thread);
     if (route.thread && route.msg) params.set('msg', route.msg);
@@ -784,7 +806,7 @@ function closeTo(route: Route): void {
 
 /**
  * Which panes cover their list now (a window too narrow for both, stack.ts),
- * kept in step by the window. Closing a covering thread back to the list is
+ * kept in step by the window. Closing a covering thread (or PR pane) back to the list is
  * then the browser's Back, as on a phone, so an iPad's swipe back and
  * `‹ Inbox` agree.
  * Every other close, and every close beside the list, stays a new entry, as on
@@ -796,6 +818,10 @@ function leavesCoveringPane(route: Route): boolean {
   const from = readRoute();
   if (covering.thread && route.page === 'inbox' && !route.thread) {
     return from.page === 'inbox' && !!from.thread && !from.file && !from.guide;
+  }
+  // A PR's pane (a stack, or one PR's launchpad) covers the Reviews list the same way.
+  if (covering.thread && route.page === 'reviews' && !route.stack) {
+    return from.page === 'reviews' && !!from.stack && !from.layer;
   }
   return false;
 }
@@ -1263,6 +1289,18 @@ function Inbox() {
   }, [thread]);
   const routeRef = useRef(route);
   routeRef.current = route;
+  /**
+   * Threads opened while their row was bold, since the list last settled: the list filter's Not seen leaves their rows
+   * where they are (listFilter.ts `filterListSections`), as the list holds still while a thread is open (settle.ts),
+   * so the look that unbolds a row never takes it out of a Not seen list. A settle keeps only the thread open then.
+   */
+  const [heldRead, setHeldRead] = useState<ReadonlySet<string>>(() => new Set());
+  const settleHeldRead = useCallback(() => setHeldRead((current) => settledHeldRead(current, routeRef.current.thread)), []);
+  useEffect(() => {
+    const open = route.thread;
+    if (!open || !shownRowOf(shownRef.current, open)?.unread) return;
+    setHeldRead((current) => (current.has(open) ? current : new Set(current).add(open)));
+  }, [route.thread]);
   // The full-window review is open (set where it is worked out, below), for the Escape ladder.
   const reviewPaneOpenRef = useRef(false);
   // The review a link on a Shape board opened (approval "review-show-me", q-db7db55f): with Code review on it shows the
@@ -1403,7 +1441,7 @@ function Inbox() {
       const beside = !!(from.file || from.guide || next.file || next.guide);
       if (from.page === 'inbox' && from.thread && from.thread === next.thread && !beside) writeRoute({ ...from, msg: next.msg }, { replace: true });
       // As a row click does (openRow): the list stays the one on screen, unless the link names its own.
-      else if (from.page === 'inbox' && next.page === 'inbox' && next.thread) writeRoute({ ...next, project: next.project ?? from.project, machine: next.machine ?? from.machine, agent: next.agent ?? from.agent });
+      else if (from.page === 'inbox' && next.page === 'inbox' && next.thread) writeRoute({ ...next, project: next.project ?? from.project, machine: next.machine ?? from.machine, agent: next.agent ?? from.agent, tag: next.tag ?? from.tag });
       else writeRoute(next);
       focusAfterOpen();
     };
@@ -1581,9 +1619,10 @@ function Inbox() {
       snoozeMoved.current.clear();
       const groups = listGroups(next);
       setShown((current) => (what === 'all' || current === null || !hasRows(current) ? groups : settleOwn(current, groups, openedHere.current, closed)));
+      settleHeldRead();
       sortedWhole();
     },
-    [armSlide, cancelSettle, sortedWhole],
+    [armSlide, cancelSettle, sortedWhole, settleHeldRead],
   );
   useEffect(() => cancelSettle, [cancelSettle]);
 
@@ -1673,7 +1712,10 @@ function Inbox() {
               : groups
             : refreshHeldRows(current, groups, heldOpen()),
       );
-      if (adopt) sortedWhole(keep);
+      if (adopt) {
+        sortedWhole(keep);
+        settleHeldRead();
+      }
       setLoadError(null);
       return next;
     } catch (cause) {
@@ -1681,7 +1723,7 @@ function Inbox() {
       setLoadError(cause instanceof Error ? cause.message : String(cause));
       return null;
     }
-  }, [armSlide, sortedWhole]);
+  }, [armSlide, sortedWhole, settleHeldRead]);
   /**
    * The list read again after a snooze changed or ran out, whichever said so first (`event: snoozes`, or this
    * window's clock). With no thread open only the rows whose snooze changed move (held.ts `snoozeChangedRows`), each
@@ -1700,6 +1742,22 @@ function Inbox() {
     armSlide();
     setShown((current) => (current ? moving.reduce((list, threadId) => settleThread(list, groups, threadId), current) : current));
   }, [refreshList, flushNotifications, refreshDecisions, armSlide]);
+
+  /**
+   * The list read again after another window or a phone changed the person's Priority (`event: priority`). With no
+   * thread open only the rows whose Priority changed move (held.ts `priorityChangedRows`), each alone and with the
+   * settle's slide; the rest of the list holds, as `refreshSnoozes` does.
+   */
+  const refreshPriority = useCallback(async () => {
+    const next = await refreshList(false);
+    const drawn = shownRef.current;
+    if (routeRef.current.thread || !next || !drawn) return;
+    const groups = listGroups(next);
+    const moving = priorityChangedRows(drawn, groups);
+    if (moving.length === 0) return;
+    armSlide();
+    setShown((current) => (current ? moving.reduce((list, threadId) => settleThread(list, groups, threadId), current) : current));
+  }, [refreshList, armSlide]);
 
   /**
    * Seen on sight (seenOnSight.ts): messages that arrived in the open thread
@@ -2093,7 +2151,21 @@ function Inbox() {
     if (Date.now() - cardsReadAt.current < 5_000) return;
     void refreshCards();
   }, [refreshCards]);
+  // With the Board off, the list's tags (approval "inbox-thread-tags"), the same array while their ids and names stay.
+  const listTagsKey = (latest?.tags ?? [])
+    .map((i) => `${i.id}\u0000${i.name}`)
+    .join('\u0001');
+  const keepsTags = latest?.tags !== undefined;
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the ids and names, on purpose
+  const listTags = useMemo(() => latest?.tags ?? null, [listTagsKey, keepsTags]);
   const initiativeTags = useMemo<InitiativeTags>(() => {
+    if (boardEnabled === false && listTags) {
+      // The Board off: `#` lists the tags, each counted by its threads, and a sent tag opens its list.
+      const rows = new Map<string, InboxListRow>();
+      for (const row of [...(latest?.sections.flatMap((s) => s.threads) ?? []), ...(latest?.snoozed ?? []), ...(latest?.pins ?? [])]) if (!rows.has(row.thread_id)) rows.set(row.thread_id, row);
+      const projects = new Map((latest?.projects ?? []).map((p) => [p.id, p.name] as const));
+      return { initiatives: listTags, counts: tagThreadCounts([...rows.values()]), cards: [], rows, projects, mentions: new Map(), href: tagHref };
+    }
     const counts = new Map<string, number>();
     const live = (cards?.cards ?? []).filter((card) => card.column !== 'dropped');
     for (const card of live) if (card.initiative) counts.set(card.initiative, (counts.get(card.initiative) ?? 0) + 1);
@@ -2104,7 +2176,7 @@ function Inbox() {
     const projects = new Map((latest?.projects ?? []).map((p) => [p.id, p.name] as const));
     const mentions = new Map(Object.entries(cards?.initiative_threads ?? {}));
     return { initiatives: tagInitiatives, counts, cards: live, rows, projects, mentions, refresh: refreshForPeek };
-  }, [cards, latest, tagInitiatives, refreshForPeek]);
+  }, [cards, latest, tagInitiatives, refreshForPeek, boardEnabled, listTags]);
   const boardInitiative = route.page === 'board' ? boardInitiativeOf(route.initiative, cards ? liveInitiatives(cards.initiatives) : null) : null;
   useEffect(() => {
     if (!onBoard) {
@@ -2235,6 +2307,7 @@ function Inbox() {
       }, delay);
     };
     let snoozesTimer: ReturnType<typeof setTimeout> | null = null;
+    let priorityTimer: ReturnType<typeof setTimeout> | null = null;
     let cardsTimer: ReturnType<typeof setTimeout> | null = null;
     let machinesTimer: ReturnType<typeof setTimeout> | null = null;
     let machineThreadTimer: ReturnType<typeof setTimeout> | null = null;
@@ -2476,6 +2549,8 @@ function Inbox() {
         onAsk: emitAskChange,
         // The sidebar's pins changed (here, in another window, or a deleted thread left them): read `pins` again.
         onPins: () => listAfterEvents(60),
+        // A thread's tags changed (here, in another window): read the list's `tags` again (approval "inbox-thread-tags").
+        onTags: () => listAfterEvents(60),
         // The pinned artifacts changed (another window, a phone): read them again (artifactPins.ts).
         onArtifactPins: () => void readArtifactPins(),
         // `plannotator inbox --open <thread>` (a tool on this computer): the window the person used last shows the
@@ -2493,6 +2568,12 @@ function Inbox() {
           if (snoozesTimer) clearTimeout(snoozesTimer);
           snoozesTimer = setTimeout(() => void refreshSnoozes(), 60);
         },
+        // The person's Priority changed (another window, a phone, an archive): read the list; with no thread open the
+        // row goes to its place, as a snooze from elsewhere does.
+        onPriority: () => {
+          if (priorityTimer) clearTimeout(priorityTimer);
+          priorityTimer = setTimeout(() => void refreshPriority(), 60);
+        },
         // A thread's PRs read behind the window's answer changed their checks or review: the cards showing them read again.
         onThreadPulls: (threadIds) => {
           for (const id of threadIds) threadPullsBus.emit(id);
@@ -2502,7 +2583,10 @@ function Inbox() {
         onRows: (rows, rev, last) => hearRowsEvent(rows, rev, () => void refreshSettings(), last),
         onSidebar: (sidebar, rev) => hearSidebarEvent(sidebar, rev, () => void refreshSettings()),
         // An agent icon's face was saved (here, another window, a phone): every icon of that agent redraws at once.
-        onAgentFaces: (data) => hearAgentFacesEvent(data),
+        // A linked machine's agent's face or name changed there: its list brings it.
+        onAgentFaces: (data) => {
+          if (!hearAgentFacesEvent(data)) listAfterEvents(60);
+        },
         onReactions: (reactions, rev) => hearReactionsEvent(reactions, rev),
         // A capability switch saved here or in another window (approval "inbox-thread-steps"; the Board too): every window follows.
         onCapabilities: (capabilities) => {
@@ -2656,10 +2740,11 @@ function Inbox() {
       if (draftsTimer) clearTimeout(draftsTimer);
       if (cardsTimer) clearTimeout(cardsTimer);
       if (snoozesTimer) clearTimeout(snoozesTimer);
+      if (priorityTimer) clearTimeout(priorityTimer);
       if (machinesTimer) clearTimeout(machinesTimer);
       if (machineThreadTimer) clearTimeout(machineThreadTimer);
     };
-  }, [refreshList, refreshSnoozes, refreshSettings, refreshThread, refreshDrafts, refreshCards, refreshDecisions, observeEvent, flushNotifications, setNotifyReach, windowReport, reportWindow]);
+  }, [refreshList, refreshSnoozes, refreshPriority, refreshSettings, refreshThread, refreshDrafts, refreshCards, refreshDecisions, observeEvent, flushNotifications, setNotifyReach, windowReport, reportWindow]);
 
   // Opening a thread: read it, record the look, and update its row in place.
   // While any thread is open the list holds still (settle.ts): the look
@@ -2776,16 +2861,16 @@ function Inbox() {
   // slide); where the thread covered the list, COVERED_LIST_SETTLES decides.
   // After a keyboard close, focus that the closed pane took with it goes to
   // the thread's row.
-  const lastRoute = useRef({ page: route.page, project: route.project ?? null, machine: route.machine ?? null, agent: route.agent ?? null, thread: route.thread });
+  const lastRoute = useRef({ page: route.page, project: route.project ?? null, machine: route.machine ?? null, agent: route.agent ?? null, tag: route.tag ?? null, thread: route.thread });
   /** The docked sidebar is held closed beside a file (#1871); the close gives it back, so the settle waits for its spring. */
   const sidebarHeldNow = useRef(false);
   useLayoutEffect(() => {
     const before = lastRoute.current;
-    const now = { page: route.page, project: route.project ?? null, machine: route.machine ?? null, agent: route.agent ?? null, thread: route.thread };
+    const now = { page: route.page, project: route.project ?? null, machine: route.machine ?? null, agent: route.agent ?? null, tag: route.tag ?? null, thread: route.thread };
     lastRoute.current = now;
-    if (before.page === now.page && before.project === now.project && before.machine === now.machine && before.agent === now.agent && before.thread === now.thread) return;
-    // Another project, machine or agent (the sidebar's filters) is another list: it shows whole.
-    if (!(before.page === 'inbox' && now.page === 'inbox' && before.project === now.project && before.machine === now.machine && before.agent === now.agent)) {
+    if (before.page === now.page && before.project === now.project && before.machine === now.machine && before.agent === now.agent && before.tag === now.tag && before.thread === now.thread) return;
+    // Another project, machine, agent or tag (the sidebar's filters) is another list: it shows whole.
+    if (!(before.page === 'inbox' && now.page === 'inbox' && before.project === now.project && before.machine === now.machine && before.agent === now.agent && before.tag === now.tag)) {
       settleList('all', false);
       return;
     }
@@ -2838,7 +2923,7 @@ function Inbox() {
     }
     if (prefersReducedMotion()) settleList('own', false);
     else settleTimer.current = setTimeout(() => settleList('own', true), sidebarHeldNow.current ? SETTLE_AFTER_SIDEBAR_MS : SETTLE_BEAT_MS);
-  }, [route.page, route.project, route.machine, route.agent, route.thread, settleList, cancelSettle]);
+  }, [route.page, route.project, route.machine, route.agent, route.tag, route.thread, settleList, cancelSettle]);
 
   useEffect(() => {
     if (route.page === 'settings') {
@@ -3364,7 +3449,7 @@ function Inbox() {
     covering.thread = stack.thread;
   }, [stack.thread]);
 
-  const openRow = (row: InboxListRow) => go({ page: 'inbox', project: route.project, machine: route.machine, agent: route.agent, thread: row.thread_id });
+  const openRow = (row: InboxListRow) => go({ page: 'inbox', project: route.project, machine: route.machine, agent: route.agent, tag: route.tag, thread: row.thread_id });
 
   const patchQuestions = (messageId: string, questions: InboxQuestion[], stateKept = false) => {
     ownSaves.saved(questions);
@@ -3571,6 +3656,11 @@ function Inbox() {
     onSavedReactionsFailed((cause) => showToast(errorToast(cause, 'Your saved emoji did not change.')));
     return () => onSavedReactionsFailed(null);
   });
+  // A linked machine's agent's face that waits for that machine, or that it refused (agents/agentFaces.ts).
+  useEffect(() => {
+    onAgentFaceRefused((cause) => showToast(errorToast(cause, 'The picture did not change.')));
+    return () => onAgentFaceRefused(null);
+  });
   useEffect(() => () => {
     if (toastTimer.current) clearTimeout(toastTimer.current);
   }, []);
@@ -3753,7 +3843,7 @@ function Inbox() {
             onReply: () => {
               void (async () => {
                 await markRead(threadId, false, listAtPress);
-                if (routeRef.current.thread !== threadId) go({ page: 'inbox', project: routeRef.current.project, machine: routeRef.current.machine, agent: routeRef.current.agent, thread: threadId });
+                if (routeRef.current.thread !== threadId) go({ page: 'inbox', project: routeRef.current.project, machine: routeRef.current.machine, agent: routeRef.current.agent, tag: routeRef.current.tag, thread: threadId });
                 setReplyFor(threadId);
               })();
             },
@@ -4019,12 +4109,16 @@ function Inbox() {
       // From a row's menu, a thread that is not the open one: the subject says which (as Mark read's toast).
       const detail = threadId !== open && before ? `“${before.subject ?? '(no subject)'}”` : undefined;
       const snoozed = before?.snoozed;
+      const priority = (before ?? (threadRow?.thread_id === threadId ? threadRow : null))?.priority;
       showToast({
         icon: 'archive',
         lead: 'Archived',
         ...(detail ? { detail } : {}),
-        // Archive ended the snooze: Undo unarchives first, since an archived thread takes none.
-        onUndo: () => void archive(threadId, rootId, false).then(() => restoreSnooze(threadId, snoozed)),
+        // Archive ended the snooze and the person's Priority: Undo unarchives first, since an archived thread takes neither.
+        onUndo: () =>
+          void archive(threadId, rootId, false)
+            .then(() => restoreSnooze(threadId, snoozed))
+            .then(() => restorePriority(threadId, priority)),
       });
     } else {
       dismissToast();
@@ -4189,6 +4283,91 @@ function Inbox() {
   };
 
   /**
+   * Add to Priority or Remove from Priority, from the row menu, the thread's ⋯ or a phone's long-press sheet. The row
+   * moves at once, with the settle's slide, a thread open beside the list or none (`movePriorityRow`), as a snooze
+   * does; the rest of the list holds still. The toast's Undo writes back exactly what the route said was there before
+   * (the first time of an add included) and puts the row back.
+   */
+  const setPriority = async (row: Pick<InboxListRow, 'thread_id' | 'subject'>, on: boolean) => {
+    const threadId = row.thread_id;
+    const subject = row.subject ?? '(no subject)';
+    // Where Remove sends it, from the row before the write (Priority never changes a row's section).
+    const backIn = priorityBackIn(rowOf(threadId) ?? (threadRow?.thread_id === threadId ? threadRow : null));
+    let before: InboxPriorityBefore;
+    try {
+      ({ before } = await inboxApi.priority(threadId, on));
+    } catch (cause) {
+      showError(cause);
+      return;
+    }
+    await afterWrite([threadId]);
+    const drawnBefore = movePriorityRow(threadId);
+    if (on) {
+      showToast({
+        icon: 'check',
+        lead: 'Added to Priority',
+        detail: `“${subject}”`,
+        speech: `Added “${subject}” to Priority.`,
+        onUndo: () => void undoPriority(threadId, before, drawnBefore, 'Removed from Priority again.'),
+      });
+      return;
+    }
+    showToast({
+      icon: 'check',
+      lead: 'Removed from Priority',
+      ...(backIn ? { detail: backIn } : {}),
+      speech: `Removed “${subject}” from Priority.${backIn ? ` ${backIn}.` : ''}`,
+      onUndo: () => void undoPriority(threadId, before, drawnBefore, 'Back in Priority.'),
+    });
+  };
+  /**
+   * One row to where the latest read puts it after a Priority write, the rest of the list held (held.ts
+   * `settleThread`), with the settle's slide. Nothing where a thread covers the list (Back moves it,
+   * `settlesOnBack`). Returns the list as drawn before, for the Undo, or null when nothing moved.
+   */
+  const movePriorityRow = (threadId: string): InboxListSection[] | null => {
+    const drawn = shownRef.current;
+    if ((routeRef.current.thread && listCovered()) || !drawn || !latestRef.current || drawnSection(drawn, threadId) === null) return null;
+    const groups = listGroups(latestRef.current);
+    if (drawnSection(drawn, threadId) === drawnSection(groups, threadId)) return null;
+    armSlide();
+    setShown((current) => (current ? settleThread(current, groups, threadId) : current));
+    return drawn;
+  };
+  /**
+   * The Undo of Add to Priority or Remove from Priority: the entries as they were, then the row back between the
+   * neighbours it had (held.ts `putRowBack`) when the list still holds them, else to its place.
+   */
+  const undoPriority = async (threadId: string, before: InboxPriorityBefore, drawnBefore: InboxListSection[] | null, words: string) => {
+    dismissToast();
+    try {
+      await inboxApi.priority(threadId, { restore: before });
+    } catch (cause) {
+      showError(cause);
+      return;
+    }
+    await afterWrite([threadId]);
+    const now = rowOf(threadId);
+    if (drawnBefore && now && !(routeRef.current.thread && listCovered()) && drawnSection(drawnBefore, threadId) !== null) {
+      armSlide();
+      setShown((current) => (current ? putRowBack(replaceHeldRow(current, now), drawnBefore, threadId) : current));
+    } else movePriorityRow(threadId);
+    say(words);
+  };
+  /** Archive's Undo puts the person's add back with its first time: the archive dropped it (the store's `endPriority`). */
+  const restorePriority = async (threadId: string, priority: InboxListRow['priority']) => {
+    if (!priority?.person) return;
+    try {
+      await inboxApi.priority(threadId, { restore: { at: priority.at, off_at: null } });
+    } catch (cause) {
+      showError(cause);
+      return;
+    }
+    await afterWrite([threadId]);
+    movePriorityRow(threadId);
+  };
+
+  /**
    * Pin a thread to the sidebar, or unpin it (approval "inbox-pinned-threads"),
    * from the row menu, the thread header or the pinned row's menu. A pin is the
    * person's own write and moves no row. Pin says so in the live region only
@@ -4197,9 +4376,12 @@ function Inbox() {
    */
   const setPin = async (row: Pick<InboxListRow, 'thread_id' | 'subject'>, pinned: boolean) => {
     // Unpin's Undo puts this one thread back where it was, with the time it was first pinned.
+    // Its index among its own machine's stars, where the Undo goes.
     const pinsNow = latestRef.current?.pins ?? [];
-    const index = pinsNow.findIndex((pin) => pin.thread_id === row.thread_id);
-    const pinnedAt = index >= 0 ? (pinsNow[index]!.pinned_at ?? null) : null;
+    const starred = pinsNow.find((pin) => pin.thread_id === row.thread_id);
+    const own = starred ? sameMachinePins(pinsNow, starred) : [];
+    const index = own.findIndex((pin) => pin.thread_id === row.thread_id);
+    const pinnedAt = index >= 0 ? (own[index]!.pinned_at ?? null) : null;
     // Where it still is, from the pinned row (an archived thread has none in the list) or the list.
     const listed = (latestRef.current?.pins ?? []).find((pin) => pin.thread_id === row.thread_id) ?? rowOf(row.thread_id) ?? (threadRow?.thread_id === row.thread_id ? threadRow : null);
     if (pinned) noteStarred(row.thread_id);
@@ -4264,7 +4446,8 @@ function Inbox() {
   const pinAction = async (row: InboxListRow, action: PinnedAction, pills = false) => {
     if (action === 'unpin') return void setPin(row, false);
     if (action === 'copy-link') return void rowAction(row, 'copy-link');
-    const order = (latestRef.current?.pins ?? []).map((pin) => pin.thread_id);
+    // A move stays among its own machine's stars, and that machine keeps the order.
+    const order = sameMachinePins(latestRef.current?.pins ?? [], row).map((pin) => pin.thread_id);
     const next = movePin(order, row.thread_id, action === 'up' ? -1 : 1);
     if (next.every((id, i) => id === order[i])) return;
     try {
@@ -4311,6 +4494,7 @@ function Inbox() {
    */
   const rowAction = (row: InboxListRow, action: RowMenuAction) => {
     if (action === 'pin' || action === 'unpin') return void setPin(row, action === 'pin');
+    if (action === 'priority-add' || action === 'priority-remove') return void setPriority(row, action === 'priority-add');
     if (action === 'read' || action === 'unread') return void markRead(row.thread_id, action === 'read');
     if (action === 'mark-unread') return void markUnread(row.thread_id);
     if (action === 'unsnooze') return void unsnooze(row);
@@ -4413,6 +4597,88 @@ function Inbox() {
     const now = latestRef.current?.projects.find((p) => p.id === projectId)?.name;
     say(name === null ? `Name reset${now ? ` to ${now}` : ''}.` : `Renamed to ${name}.`);
     return true;
+  };
+
+  /** An agent row's Rename… and Reset name, kept with its face (agents/agentFaces.ts); the live region says it as for a project. */
+  const renameAgent = async (agent: InboxAgent, name: string | null, own: string): Promise<boolean> => {
+    try {
+      await keepAgentName(agent, name);
+    } catch (cause) {
+      showToast(errorToast(cause, 'The name did not change.'));
+      // Held for the agent's machine: the field closes, and the name shows once that machine has it.
+      return cause instanceof InboxHeldError;
+    }
+    say(name === null ? `Name reset${own ? ` to ${own}` : ''}.` : `Renamed to ${name}.`);
+    return true;
+  };
+
+  /** The sidebar agent's Delete … session…, asked in place (AgentDeleteDialog): its threads as the list holds them then. */
+  const [agentDelete, setAgentDelete] = useState<{ agent: InboxAgent; machine: string | null; threads: InboxListRow[] } | null>(null);
+  const askAgentDelete = (agent: InboxAgent, machine: string | null) => {
+    if (!agent.launch) return;
+    setAgentDelete({ agent, machine, threads: agentDeleteThreads(agent, inboxAgentsNow(), machines, windowRows) });
+  };
+  /**
+   * Delete the launch, then archive its threads when the box was ticked. The toast is the thread's ("Session
+   * deleted"); with threads archived it says how many, and its Undo unarchives them (snoozes ahead put back, as
+   * Archive's Undo does). The session itself is gone either way.
+   */
+  const deleteAgent = async (archive: boolean) => {
+    const asked = agentDelete;
+    setAgentDelete(null);
+    const launch = asked?.agent.launch;
+    if (!asked || !launch) return;
+    let done: AgentDeleted;
+    try {
+      done = await deleteAgentSession(launch.id, asked.machine, asked.threads.map((row) => row.thread_id), archive);
+    } catch (cause) {
+      showToast(errorToast(cause, 'That did not work; try again.'));
+      return;
+    }
+    const archived = done.archived;
+    if (archived.length > 0) {
+      const at = new Date().toISOString();
+      setShown((current) => (current ? archived.reduce((sections, id) => markHeldRowArchived(sections, id, at), current) : current));
+    }
+    await afterWrite(archived);
+    const kept = done.scratchKept ? 'its scratch folder was kept' : null;
+    const took = archived.length > 0 ? `Archived ${plural(archived.length, 'thread')}` : null;
+    const snoozes = asked.threads.filter((row) => archived.includes(row.thread_id)).map((row) => [row.thread_id, row.snoozed] as const);
+    const failed = done.archiveError ? errorText(done.archiveError, 'That did not work; try again.') : null;
+    showToast({
+      icon: failed ? 'warn' : 'check',
+      lead: 'Session deleted',
+      ...(failed ? { detail: failed, wrap: true } : kept || took ? { detail: [kept, took].filter(Boolean).join(' · ') } : {}),
+      ...(archived.length > 0
+        ? {
+            onUndo: () => {
+              void (async () => {
+                try {
+                  for (const id of archived) await inboxApi.resolve(id, false);
+                } catch (cause) {
+                  showToast(errorToast(cause, 'That did not work; try again.'));
+                  return;
+                }
+                for (const [id, snooze] of snoozes) await restoreSnooze(id, snooze);
+                await afterWrite(archived);
+                dismissToast();
+                say('Moved back.');
+              })();
+            },
+          }
+        : {}),
+    });
+  };
+  /** The sidebar agent's Stop: as the thread's Stop (Thread.tsx `launchAct`), its words on a toast when it fails. */
+  const stopAgent = async (agent: InboxAgent, machine: string | null) => {
+    if (!agent.launch) return;
+    try {
+      await inboxApi.launchStop(agent.launch.id, machine);
+    } catch (cause) {
+      showToast(errorToast(cause, 'That did not work; try again.'));
+      return;
+    }
+    if (thread?.thread_id === agent.launch.thread_id) void refreshThread(agent.launch.thread_id);
   };
 
   /**
@@ -4590,7 +4856,7 @@ function Inbox() {
       const from = section(now.thread);
       if (into && from && into !== from) say(into);
       askArrivalFocus(fromList ? null : step.to);
-      writeRoute({ page: 'inbox', reviews: now.reviews, project: now.project, machine: now.machine, agent: now.agent, thread: step.to }, { replace: true });
+      writeRoute({ page: 'inbox', reviews: now.reviews, project: now.project, machine: now.machine, agent: now.agent, tag: now.tag, thread: step.to }, { replace: true });
       if (fromList) {
         requestAnimationFrame(() => requestAnimationFrame(() => {
           const list = listBody(rootRef.current);
@@ -5100,8 +5366,11 @@ function Inbox() {
   };
 
   const projects = latest?.projects ?? [];
-  /** Settings → Activity reads this Inbox's own store: its own projects only (not a linked machine's). */
-  const activityProjects = useMemo(() => projects.filter((p) => !p.machine || p.machine === selfMachineId()), [projects]);
+  /**
+   * This Inbox's own projects, not a linked machine's: Settings → Activity reads its own store, and the Board's cards
+   * are made in it (no forward route makes one in another machine's project).
+   */
+  const ownProjects = useMemo(() => projects.filter((p) => !p.machine || p.machine === selfMachineId()), [projects]);
   // A project that was combined (here, in another window, by an agent) has no page of its own: its link opens the project it went into.
   const combinedHead = route.project ? projects.find((project) => project.combined?.some((member) => member.id === route.project))?.id : undefined;
   useEffect(() => {
@@ -5228,18 +5497,137 @@ function Inbox() {
   const filterMachine = route.page === 'inbox' && route.machine ? (machines.all.find((m) => m.id === route.machine) ?? null) : null;
   /** Every row the window has (every section, the snoozed too): where an agent's threads are found. */
   const windowRows = useMemo(() => (latest ? [...latest.sections.flatMap((section) => section.threads), ...(latest.snoozed ?? [])] : []), [latest]);
+  // Where a thread with several sessions finds their agents (agents/model.ts `threadSessions`).
+  const threadAgentContext = useMemo(() => ({ rows: windowRows, machines }), [windowRows, machines]);
   // The Agents section's filter (`#agent=<id>`): one agent's threads, named by its row's name.
   const filterAgent = useAgentListFilter(route.page === 'inbox' ? (route.agent ?? null) : null, machines, windowRows);
+  /*
+   * Thread tags (approval "inbox-thread-tags", step 1): a tag is the Board's initiative, with the Board on or off. The
+   * tag the list shows (`#tag=ini_…`); what this window just set on a thread, until the list reads it (`tagPatches`);
+   * the sidebar's Tags; and Add tag's host (threadTags.ts), each write said in the toast with Undo.
+   */
+  const [tagPatches, setTagPatches] = useState<ReadonlyMap<string, readonly string[]>>(() => new Map());
+  const tagsOfRow = useCallback((row: Pick<InboxListRow, 'thread_id' | 'tags' | 'machine'>) => rowTagsHere(row, machines.self, tagPatches), [tagPatches, machines.self]);
+  const filterTag = route.page === 'inbox' && route.tag ? (listTags?.find((tag) => tag.id === route.tag) ?? null) : null;
+  const tagCounts = useMemo(() => tagThreadCounts(windowRows, tagsOfRow), [windowRows, tagsOfRow]);
+  const tagWaiting = useMemo(() => tagWaitingCounts(latestSections, tagsOfRow), [latestSections, tagsOfRow]);
+  const tagsShown = listTags !== null && tagsSectionShown(listTags, windowRows, tagsOfRow);
+  const setThreadTag = async (threadId: string, tag: InboxInitiative, on: boolean, undo = true) => {
+    const before = tagPatches.get(threadId) ?? rowOf(threadId)?.tags ?? [];
+    const next = on ? (before.includes(tag.id) ? before : [...before, tag.id]) : before.filter((id) => id !== tag.id);
+    setTagPatches((current) => withEntry<readonly string[]>(current, threadId, next));
+    const unpatch = () => setTagPatches((current) => withEntry<readonly string[]>(current, threadId, undefined));
+    try {
+      await inboxApi.setThreadTag(threadId, tag.id, on);
+    } catch (cause) {
+      unpatch();
+      showError(cause);
+      return;
+    }
+    // A tag's first thread opens a closed Tags, so the person sees where it went.
+    if (on) setSidebarSectionOpen('tags', true);
+    await refreshList(false).finally(unpatch);
+    if (!undo) {
+      dismissToast();
+      return;
+    }
+    showToast({
+      icon: 'check',
+      lead: on ? 'Tagged' : 'Removed',
+      detail: on ? tag.name : `from ${tag.name}`,
+      speech: on ? `Tagged ${tag.name}.` : `Removed from ${tag.name}.`,
+      onUndo: () => void setThreadTag(threadId, tag, !on, false),
+    });
+  };
+  const createTag = async (name: string): Promise<InboxInitiative | null> => {
+    try {
+      return (await inboxApi.createInitiative(name)).initiative;
+    } catch (cause) {
+      showError(cause);
+      return null;
+    }
+  };
+  const threadTagsHost = useMemo<ThreadTagsHost | null>(
+    () =>
+      listTags === null
+        ? null
+        : {
+            tags: listTags,
+            tagsOf: (threadId) => {
+              const row = windowRows.find((r) => r.thread_id === threadId);
+              return row ? rowTagsHere(row, machines.self, tagPatches) : (tagPatches.get(threadId) ?? []);
+            },
+            counts: tagCounts,
+            can: (threadId) => canTagThread(threadId, windowRows, machines.self, machineOf(threadId)),
+            set: (threadId, tag, on) => void setThreadTagRef.current(threadId, tag, on),
+            createAndSet: (threadId, name) =>
+              void createTagRef.current(name).then((tag) => {
+                if (tag) void setThreadTagRef.current(threadId, tag, true);
+              }),
+            listed: filterTag,
+          },
+    [listTags, tagPatches, windowRows, tagCounts, machines.self, filterTag],
+  );
+  const setThreadTagRef = useRef(setThreadTag);
+  setThreadTagRef.current = setThreadTag;
+  const createTagRef = useRef(createTag);
+  createTagRef.current = createTag;
+  /** The sidebar's Tags: open a tag's list, make one, rename one, delete one (its toast's Undo brings back its threads). */
+  const sidebarTags = listTags === null
+    ? undefined
+    : {
+        tags: listTags,
+        waiting: tagWaiting,
+        shown: tagsShown,
+        tagId: route.page === 'inbox' ? (route.tag ?? null) : null,
+        onOpen: (tagId: string) => leave({ page: 'inbox', project: null, machine: null, agent: null, tag: tagId, thread: null }),
+        onCreate: async (name: string) => {
+          const tag = await createTag(name);
+          if (!tag) return null;
+          await refreshList(false);
+          return tag.id;
+        },
+        onRename: async (tagId: string, name: string) => {
+          try {
+            await inboxApi.changeInitiative(tagId, { op: 'rename', name });
+          } catch (cause) {
+            showError(cause);
+            return false;
+          }
+          await refreshList(false);
+          return true;
+        },
+        onDelete: (tag: InboxInitiative) => void deleteTag(tag),
+      };
+  const deleteTag = async (tag: InboxInitiative) => {
+    try {
+      await inboxApi.changeInitiative(tag.id, { op: 'delete' });
+    } catch (cause) {
+      showError(cause);
+      return;
+    }
+    // Its list goes with it: the Inbox, in its place.
+    if (routeRef.current.page === 'inbox' && routeRef.current.tag === tag.id) writeRoute({ page: 'inbox', project: null, thread: null }, { replace: true });
+    await refreshList(false);
+    showToast({ icon: 'check', ...initiativeDeletedToast([tag]), onUndo: () => void undoDeleteTag(tag) });
+  };
+  const undoDeleteTag = async (tag: InboxInitiative) => {
+    dismissToast();
+    const { left, line } = await restoreInitiatives([tag]);
+    if (line) showToast({ icon: 'warn', wrap: true, lead: line, ...(left.length > 0 ? { onUndo: () => void undoDeleteTag(tag) } : {}) });
+    await refreshList(false);
+  };
   const projectNames = useMemo(
     () => machineProjectNames({ projects, sidebar: shownProjects(projects, sidebarKeeps), sections: shown ?? [], pins: pinRows }, machines, !filterMachine),
     [projects, sidebarKeeps, shown, pinRows, machines, filterMachine],
   );
   /** The sidebar's Machines counts: rows waiting on the person per machine, as Projects counts them. */
   const sidebarMachineCounts = useMemo(() => machineCounts(latestSections, machines), [latestSections, machines]);
-  /** One project's rows, then one machine's, then one agent's, then without the machines the person hid while away. */
+  /** One project's rows, then one machine's, then one agent's, then one tag's, then without the machines the person hid while away. */
   const filterList = useCallback(
-    (sections: readonly InboxListSection[]) => filterAgentRows(filterMachineRows(filterSections(sections, route.project), machines, filterMachine?.id ?? null, hideAway), filterAgent, machines.self),
-    [route.project, machines, filterMachine, filterAgent, hideAway],
+    (sections: readonly InboxListSection[]) =>
+      filterTagRows(filterAgentRows(filterMachineRows(filterSections(sections, route.project), machines, filterMachine?.id ?? null, hideAway), filterAgent, machines.self), route.tag ?? null, tagsOfRow),
+    [route.project, machines, filterMachine, filterAgent, hideAway, route.tag, tagsOfRow],
   );
   // The list's filter (listFilter.ts): this browser's picks; on a project's page its Project picks step aside. The
   // day is in the keys so Today and the last N days move on at midnight.
@@ -5249,9 +5637,9 @@ function Inbox() {
   const listFilterApplied = useMemo(() => appliedFilter(listFilterPicks, listFilterScoped), [listFilterPicks, listFilterScoped]);
   /** The list as the person reads it: `filterList`, then the filter. "N new" and the rows read this. */
   const filterShown = useCallback(
-    (sections: readonly InboxListSection[]) => filterListSections(filterList(sections), listFilterApplied, Date.now()),
+    (sections: readonly InboxListSection[]) => filterListSections(filterList(sections), listFilterApplied, Date.now(), heldRead),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the day: a new one reads the spans again.
-    [filterList, listFilterApplied, listFilterDay],
+    [filterList, listFilterApplied, listFilterDay, heldRead],
   );
   /** The rows before the filter: its menu's counts and choices. */
   const listFilterRows = useMemo(() => {
@@ -5270,7 +5658,7 @@ function Inbox() {
     listSections.every((section) => section.id === 'snoozed' || section.threads.length === 0) &&
     listFilterRows.some((row) => !row.snoozed);
   // The list's name: Inbox, or the project's window name (or the machine's, or the agent's); its back buttons read the same.
-  const listTitle = filterProject ? (projectNames.get(filterProject.id) ?? filterProject.name) : filterMachine ? filterMachine.name : filterAgent ? filterAgent.name : 'Inbox';
+  const listTitle = filterProject ? (projectNames.get(filterProject.id) ?? filterProject.name) : filterMachine ? filterMachine.name : filterAgent ? filterAgent.name : filterTag ? filterTag.name : 'Inbox';
   const heldNews = shown && latest ? heldNotice(filterShown(shown), filterShown(latestGroups), openedHere.current, heldOpen(), projectNames) : null;
   // Show opens the groups the rows it brings in land in (held.ts showLandsIn), so they are on screen.
   // `news`: the same threads, for the pill at the list's edge while the line is out of view (ListNewPill.tsx).
@@ -5559,6 +5947,25 @@ function Inbox() {
     mayClaim: (pageAge) => lineLatch !== null && !firstRun && pageAge >= REVEAL_TIMES.pageAgeMs,
     holds: () => !rulesSet(settingsRef.current?.prompts?.rules),
   });
+  // Personal agents (core/inbox-personal-agents.ts): the Inbox names it only while none is connected. Its banner is
+  // loaded before the claim, so the dialog opens with it or, offline, without it, and never changes while open.
+  const personalAgentsDue = lineLatch?.next === 'personal_agents';
+  const personalAgentsBanner = usePersonalAgentsBanner(personalAgentsDue);
+  const personalAgentsReveal = useLineReveal({
+    id: 'personal_agents',
+    due: personalAgentsDue,
+    blocked: revealBlocked,
+    rows: snoozeIntroRows,
+    toast: toast !== null,
+    thread: route.page === 'inbox' ? (route.thread ?? null) : null,
+    clear: listIntroClear,
+    place: `${route.thread}|${route.project}|${route.machine}`,
+    heldBack: revealHeldBack,
+    leaveCounts: (visit, now) => starRevealLeaveCounts(visit, now),
+    idle: pageIdle,
+    mayClaim: (pageAge) => personalAgentsBanner !== null && lineLatch !== null && !firstRun && pageAge >= REVEAL_TIMES.pageAgeMs,
+    holds: () => true,
+  });
   // The List view's choice, registered with the line (approval "inbox-one-time-dialogs", the change; reveal.ts
   // `useLineReveal`): armed while it is `reveal.next`, or in `reveal.ahead` (it goes at its own moment, ahead of the
   // other offers), back on the list with no thread open or the page idle (any layout), once the list is taller than the
@@ -5635,7 +6042,7 @@ function Inbox() {
   // The "Star the repo" ask (approval "star-ask"): beside the line, never in its order (settings `reveal.aside`), at the
   // same calm moment (a thread read and left, 60 s into the page) while no other reveal is showing or claiming; its
   // claim runs the already-starred check, then the corner card shows.
-  const otherRevealActive = [snoozeIntro.stage, boardReveal.stage, stepsReveal.stage, broReveal.stage, agentRulesReveal.stage, grillMeTipReveal.stage, listViewReveal.stage, tabIconChoice.stage, themeChooser.stage].some((stage) => stage === 'open' || stage === 'claimed');
+  const otherRevealActive = [snoozeIntro.stage, boardReveal.stage, stepsReveal.stage, broReveal.stage, agentRulesReveal.stage, personalAgentsReveal.stage, grillMeTipReveal.stage, listViewReveal.stage, tabIconChoice.stage, themeChooser.stage].some((stage) => stage === 'open' || stage === 'claimed');
   const starReveal = useStarReveal({
     due: lineLatch?.aside.includes('star') === true,
     listLoaded: lineLatch !== null,
@@ -5683,7 +6090,7 @@ function Inbox() {
         phone,
         openThread: now.page === 'inbox' ? (now.thread ?? null) : null,
         left,
-        openLeft: (threadId) => go({ page: 'inbox', project: now.project ?? null, machine: now.machine, agent: now.agent, thread: threadId }),
+        openLeft: (threadId) => go({ page: 'inbox', project: now.project ?? null, machine: now.machine, agent: now.agent, tag: now.tag, thread: threadId }),
       });
     }, 0);
   };
@@ -5719,6 +6126,8 @@ function Inbox() {
     broReveal.stage !== 'claimed' &&
     agentRulesReveal.stage !== 'open' &&
     agentRulesReveal.stage !== 'claimed' &&
+    personalAgentsReveal.stage !== 'open' &&
+    personalAgentsReveal.stage !== 'claimed' &&
     grillMeTipReveal.stage !== 'open' &&
     grillMeTipReveal.stage !== 'claimed' &&
     starReveal.stage !== 'open' &&
@@ -5763,12 +6172,15 @@ function Inbox() {
   // The Pull requests board's own list (everywhere, mine): read only while Reviews (its right pane, a phone's row), the
   // board's page, a stack's page or a PR opened from it shows.
   const sheetPulls = useSheetPulls((route.page === 'prs' || route.page === 'reviews') && pullsShown);
-  // The board in Reviews' pane: Open or Merged, kept while the Inbox is open (Reviews' address has no room for it).
+  // The board in Reviews' pane: Open or Merged, Grid or Table, kept while the Inbox is open (Reviews' address has no room for them).
   const [paneView, setPaneView] = useState<SheetView>('open');
+  const [paneLayout, setPaneLayout] = useState<SheetLayout>('grid');
   const sheetHead = useMemo(() => (sheetPulls.model ? sheetModel(sheetPulls.model, Date.now(), {}).head : null), [sheetPulls.model]);
   // The list a thread from the box opens beside: the one the box opened over.
   const reviewsScope = () => (route.page === 'reviews' ? { project: route.project, view: route.view ?? pullFilterOf(null) } : (route.reviews ?? { project: null, view: pullFilterOf(null) }));
   const reviewPulls = useMemo(() => reviewBoxPulls(pulls.reviews, new Map((projects ?? []).map((p) => [p.id, p.name]))), [pulls.reviews, projects]);
+  // The thread's PR list: where each open PR's "Open review thread" goes, read from Reviews' own list as its launchpad is.
+  const pullReviewOf = useMemo(() => (pullsShown ? pullReviewLinks(pulls.model, pulls.reviews) : null), [pullsShown, pulls.model, pulls.reviews]);
   // A review arrived, a verdict went: the rows and the sidebar's count follow the store, a moment after it changed.
   const pullsReloadRows = pulls.reloadRows;
   const rowsWaitingSince = useRef<number | null>(null);
@@ -6264,7 +6676,7 @@ function Inbox() {
   });
   const offerLinesFree = linesFree && codeReviewOffer.stage !== 'open' && codeReviewOffer.stage !== 'claimed';
   // One of the line's dialogs is claimed or open now: the load arms nothing else meanwhile (`lineLatch`).
-  const stagesBusy = [voiceIntro.stage, snoozeIntro.stage, boardReveal.stage, stepsReveal.stage, broReveal.stage, agentRulesReveal.stage, grillMeTipReveal.stage, listViewReveal.stage, tabIconChoice.stage, themeChooser.stage, starReveal.stage, codeReviewOffer.stage].some(
+  const stagesBusy = [voiceIntro.stage, snoozeIntro.stage, boardReveal.stage, stepsReveal.stage, broReveal.stage, agentRulesReveal.stage, personalAgentsReveal.stage, grillMeTipReveal.stage, listViewReveal.stage, tabIconChoice.stage, themeChooser.stage, starReveal.stage, codeReviewOffer.stage].some(
     (stage) => stage === 'claimed' || stage === 'open',
   );
   useEffect(() => setLineStagesBusy(stagesBusy), [stagesBusy]);
@@ -6549,6 +6961,10 @@ function Inbox() {
       focusFirst([`.ib-listcol .ib-lbody [data-thread-id="${CSS.escape(row)}"]`, `.ib-listcol .ib-lbody [data-thread-id="${CSS.escape(before.thread)}"]`]);
     }
   }, [view, route.thread, stack.thread, phone]);
+  // A PR's pane on the Reviews page (its launchpad, or a stack's page) covers the list the same way, and focus follows
+  // it as it follows a thread (pulls/prPaneFocus.ts): opened or shrunk over the list, to its `‹ Reviews`; back, to its row.
+  const prPane = route.page === 'reviews' && !route.layer ? (route.stack ?? null) : null;
+  usePrPaneFocus(prPane, stack.thread, phone, focusFirst);
 
   // The window resized across the stacking width with a thread open. Into it: a list row that
   // had focus is now hidden under the pane (and redrawn), so focus would drop to the page; it goes to the
@@ -6781,6 +7197,8 @@ function Inbox() {
       projects={projects}
       projectNames={projectNames}
       phone={phone}
+      // A window too narrow for the list and the PR's pane: the pane covers the list, as a thread does (stack.ts).
+      stacked={stack.thread}
       onNew={() => openCompose({ review: {} })}
       onOpenStack={(id) => (id ? writeRoute({ page: 'reviews', project, view, thread: null, stack: id, layer: null, ...drawingKept }, { replace: !!route.stack && !phone }) : close({ page: 'reviews', project, view, thread: null, stack: null, layer: null, ...drawingKept }))}
       onScope={({ filter, project: next }) => go(threadId ? { ...route, reviews: { project: next, view: filter } } : { page: 'reviews', project: next, view: filter, thread: null, stack: null, ...drawingKept })}
@@ -6803,6 +7221,9 @@ function Inbox() {
       onOpenThread={(id) => go({ page: 'inbox', reviews: { project, view }, project: null, thread: id })}
       onOpenCard={boardEnabled ? (cardId) => go({ page: 'board', project: null, thread: null, board: 'lanes', card: cardId }) : undefined}
       onNewReview={(pick, opener) => openCompose({ review: { pick } }, opener)}
+      onOpenGuide={(id, messageId) => go({ page: 'inbox', reviews: { project, view }, project: null, thread: id, guide: messageId })}
+      shapes={shapeOn ? shapes.byThread : null}
+      onOpenShape={(s) => go(s.thread ? { page: 'inbox', project: null, thread: s.thread, shape: s.id } : { page: 'shapes', project: null, thread: null, shape: s.id })}
       prsSummary={sheetHead}
       onPullRequests={() => go({ page: 'prs', project: null, thread: null })}
       prBoard={
@@ -6814,9 +7235,11 @@ function Inbox() {
           phone={phone}
           view={paneView}
           onView={setPaneView}
-          onOpenPull={(pull, stack) => go({ page: 'prs', project: null, thread: null, stack: stack.id, layer: pull.key, scope: 'layer', prsFrom: 'reviews' })}
+          onOpenPull={(pull, stack) => go(boardPull(pull, stack, { page: 'prs', project: null, thread: null, stack: stack.id, layer: pull.key, scope: 'layer', prsFrom: 'reviews' }))}
           onOpenStack={(stack) => go({ page: 'prs', project: null, thread: null, stack: stack.id, layer: null })}
           onMerged={sheetPulls.refresh}
+          layout={paneLayout}
+          onLayout={setPaneLayout}
         />
       }
     />
@@ -6826,6 +7249,11 @@ function Inbox() {
   const refreshBoard = () => {
     void refreshCards();
     void refreshList(false);
+  };
+  /** A board tile's click: a single open PR Reviews lists opens its launchpad; anything else `view`, the PR view. */
+  const boardPull = (pull: InboxPull, stack: InboxPullStack, view: Route): Route => {
+    const opens = tileOpens(pull, stack, pulls.model);
+    return opens === 'pull' ? view : { page: 'reviews', project: null, thread: null, stack: opens.launchpad, layer: null };
   };
   /** Where the board is: its own page on a phone, Reviews' right pane on a desktop. */
   const prsHome = (from: Route): Route => (phone ? { page: 'prs', project: null, thread: null, prsView: from.prsView } : { page: 'reviews', project: null, thread: null });
@@ -6898,7 +7326,7 @@ function Inbox() {
         archived={<ArchivedBlock refreshKey={latest?.cursor ?? null} onUnarchive={unarchiveFromSettings} />}
         activity={
           <ActivityChart
-            projects={activityProjects}
+            projects={ownProjects}
             names={projectNames}
             project={routeOf(settingsReturn.current).project ?? null}
             phone={phone}
@@ -7002,9 +7430,9 @@ function Inbox() {
         error={cardsError}
         visitLook={boardVisit ? boardVisit.look : (cards?.seen_seq ?? null)}
         handled={boardVisit?.handled ?? EMPTY_SET}
-        projects={projects}
+        projects={ownProjects}
         // The filtered project, else the project of the card heard from last, else the first.
-        defaultProject={newCardProject(boardFilter, projects, cards?.cards ?? [])}
+        defaultProject={newCardProject(boardFilter, ownProjects, cards?.cards ?? [])}
         home={settings?.home ?? null}
         mcpCommand={settings?.mcp_command ?? null}
         phone={phone}
@@ -7100,8 +7528,10 @@ function Inbox() {
         phone={phone}
         view={route.prsView ?? 'open'}
         onView={(prsView) => writeRoute({ ...route, prsView }, { replace: true })}
+        layout={route.prsLayout}
+        onLayout={(prsLayout) => writeRoute({ ...route, prsLayout }, { replace: true })}
         onBack={() => close({ page: 'reviews', project: null, thread: null })}
-        onOpenPull={(pull, stack) => go({ ...route, stack: stack.id, layer: pull.key, scope: 'layer', prsFrom: 'sheet' })}
+        onOpenPull={(pull, stack) => go(boardPull(pull, stack, { ...route, stack: stack.id, layer: pull.key, scope: 'layer', prsFrom: 'sheet' }))}
         onOpenStack={(stack) => go({ ...route, stack: stack.id, layer: null })}
         onMerged={sheetPulls.refresh}
       />
@@ -7215,6 +7645,8 @@ function Inbox() {
           scope={route.project}
           // One project's list: its window name, the path beside it.
           title={listTitle}
+          titleMark={filterTag ? <TagIcon className="ib-ic" /> : undefined}
+          titleNote={filterTag && listSections ? tagListSummary(listSections.flatMap((section) => section.threads)) : null}
           path={filterProject ? tildePath(filterProject.root, settings?.home) : null}
           sections={listSections ?? filterShown(listShown ?? shown)}
           listFilter={{ rows: listFilterRows, scoped: listFilterScoped, names: projectNames, filter: listFilterPicks, onChange: setListFilter }}
@@ -7302,6 +7734,11 @@ function Inbox() {
           empty={
             listFilterEmpty ? (
               <ListFilterEmpty onClear={() => setListFilter(clearedFrom(listFilterPicks, listFilterScoped))} />
+            ) : filterTag ? (
+              <div className="ib-empty-list" data-tag-empty="">
+                <b dir="auto">Nothing tagged {filterTag.name} yet</b>
+                Right-click a thread and choose Add tag.
+              </div>
             ) : projectAllArchived(filterProject) ? (
               <div className="ib-empty-list" data-project-archived="">
                 <b dir="auto">Everything in {listTitle} is archived.</b>
@@ -7359,6 +7796,15 @@ function Inbox() {
             thread={thread}
             onNewMessageWith={(source) => openCompose({ reuse: [source] })}
             codeReview={settings?.code_review?.on === true}
+            pullReview={
+              pullReviewOf
+                ? {
+                    linkOf: pullReviewOf,
+                    // A thread opened beside Reviews keeps Reviews beside the one it opens.
+                    onOpen: (link) => leave(link.kind === 'thread' ? { page: 'inbox', project: null, thread: link.threadId, reviews: route.reviews } : { page: 'reviews', project: null, thread: null, stack: link.stackId, layer: null }),
+                  }
+                : undefined
+            }
             inReviews={!!route.reviews}
             reviewView={reviewView}
             onInReviews={pullsShown && !route.reviews ? () => go({ page: 'inbox', reviews: { project: null, view: 'all' }, project: null, thread: thread.thread_id }) : undefined}
@@ -7394,8 +7840,11 @@ function Inbox() {
             onAction={(messageId, key, mark) => markAction(messageId, key, mark)}
             onArchive={(next) => void archive(thread.thread_id, thread.messages[0]!.id, next)}
             pinned={pinnedIds.has(thread.thread_id)}
-            // Pins are this Inbox's own: another machine's thread is pinned on that machine (PLAN Phase 2).
-            onPin={pinsOn && !machineOf(thread.thread_id) ? (next) => setPin(thread, next) : undefined}
+            onPin={pinsOn && machineTakes({ machine: machineOf(thread.thread_id) ?? undefined }, machines, 'star') ? (next) => setPin(thread, next) : undefined}
+            priority={(() => {
+              const action = openThreadRow && machineTakes(openThreadRow, machines, 'priority') ? priorityAction(openThreadRow) : null;
+              return action ? { on: action === 'priority-remove', onToggle: () => void setPriority(thread, action === 'priority-add') } : undefined;
+            })()}
             onSnooze={snoozeOn && rowSnoozes({ machine: machineOf(thread.thread_id) ?? undefined }, machines) ? (until) => void snooze(thread, until) : undefined}
             onUnsnooze={snoozeOn && rowSnoozes({ machine: machineOf(thread.thread_id) ?? undefined }, machines) ? () => void unsnooze(thread) : undefined}
             snoozeBlocked={(() => {
@@ -7403,6 +7852,11 @@ function Inbox() {
               return blocked ? { name: blocked.name, onPress: () => setMachineUpdateOpen({ id: blocked.id, snooze: true }) } : undefined;
             })()}
             machine={machines.linked.find((m) => m.id === machineOf(thread.thread_id)) ?? null}
+            agentContext={threadAgentContext}
+            // A session's name in the thread's header filters the list to that agent, as the sidebar's agent does,
+            // and keeps this thread on screen (the person is reading it); a second click shows everything again.
+            agentFilter={route.page === 'inbox' ? (route.agent ?? null) : null}
+            onAgentFilter={(agentId) => leave({ page: 'inbox', project: null, machine: null, agent: agentId, thread: route.page === 'inbox' ? route.thread : null })}
             // A Delete refused by a machine too old to take one: the error line's Update opens that machine's update dialog.
             onMachineUpdate={pageOffersUpdates(settings) ? (id) => setMachineUpdateOpen({ id, snooze: false }) : undefined}
             outbox={threadOutbox(outbox, thread)}
@@ -7572,6 +8026,7 @@ function Inbox() {
 
   return (
     <InitiativeTagsContext.Provider value={initiativeTags}>
+    <ThreadTagsContext.Provider value={threadTagsHost}>
     <SideButtonContext.Provider value={ask.sideButton}>
     <div
       ref={rootRef}
@@ -7656,6 +8111,7 @@ function Inbox() {
             projectId={route.project}
             machineId={route.page === 'inbox' ? (filterMachine?.id ?? null) : null}
             agentFilter={filterAgent ? { id: filterAgent.id, name: filterAgent.name } : null}
+            tags={sidebarTags}
             inboxCount={waitingCount(latestSections)}
             // One machine's list: that machine's projects only.
             projects={filterMachine ? projects.filter((p) => (p.machine ?? machines.self) === filterMachine.id) : projects}
@@ -7686,12 +8142,18 @@ function Inbox() {
             projectsReadable={projectsReadable}
             onProjectAction={(projectId, action) => void projectAction(projectId, action)}
             onProjectRename={renameProject}
+            onAgentRename={guestPage ? undefined : renameAgent}
+            onAgentStop={(agent, machine) => void stopAgent(agent, machine)}
+            onAgentDelete={askAgentDelete}
             onProjectPicture={setProjectPicture}
             onProjectCombine={async (pair) => (await combineProjects([pair])) === null}
             // "+" on a project row (F1-F7): while agents can be started from New message, and not on a guest's page.
             onProjectNewSession={plusOn ? (projectId, machine) => openCompose({ start: { projectId, machine, agent: composeLastAgent } }) : undefined}
             // Hidden on a row that can't start anything: no agent on that machine, launch off there, or its folder gone.
-            projectCanStart={(project, machine, machineLaunch) => projectCanStart(project, machine ? machineLaunchesKept().get(machine)?.launch : plusHere, machineLaunch)}
+            projectCanStart={(project, machine, machineLaunch, asleep) => {
+              const read = machine ? machineLaunchesKept().get(machine) : undefined;
+              return projectCanStart(project, machine ? read?.launch : plusHere, machineLaunch, machine ? { read: !!read, asleep } : undefined);
+            }}
             announce={say}
             // Not on a tailnet guest's page: the update routes answer it 403 local_only.
             update={pageUpdate}
@@ -7715,7 +8177,7 @@ function Inbox() {
             onShape={shapeOn && shapes.rowShown ? () => leave({ page: 'shapes', project: null, thread: null }) : undefined}
             shapeChanged={shapes.changed}
             // On the list it shows, Inbox (or a project) refreshes; with a thread open it closes it as before, and refreshes.
-            onInbox={() => (route.page === 'inbox' && route.project === null && !route.machine && !route.agent ? void refreshInbox(null, route.thread !== null) : leave({ page: 'inbox', project: null, thread: null }))}
+            onInbox={() => (route.page === 'inbox' && route.project === null && !route.machine && !route.agent && !route.tag ? void refreshInbox(null, route.thread !== null) : leave({ page: 'inbox', project: null, thread: null }))}
             onProject={(projectId) =>
               route.page === 'inbox' && route.project === projectId ? void refreshInbox(projectId, route.thread !== null) : leave({ page: 'inbox', project: projectId, machine: filterMachine?.id ?? null, thread: null })
             }
@@ -7808,6 +8270,15 @@ function Inbox() {
           />
         ) : null;
       })()}
+      {agentDelete?.agent.launch && (
+        <AgentDeleteDialog
+          host={agentDelete.agent.host}
+          scratch={agentDelete.agent.launch.scratch ?? null}
+          threads={agentDelete.threads.length}
+          onCancel={() => setAgentDelete(null)}
+          onDelete={(archive) => void deleteAgent(archive)}
+        />
+      )}
       {readWarning && (
         <MarkReadWarning
           count={readWarning.count}
@@ -7916,6 +8387,9 @@ function Inbox() {
             window.location.hash = '#settings/prompts';
           }}
         />
+      )}
+      {personalAgentsReveal.stage === 'open' && (
+        <PersonalAgentsIntro phone={phone} banner={personalAgentsBanner === true} close={personalAgentsReveal.close} />
       )}
       {broReveal.stage === 'open' && (
         <BroIntro
@@ -8321,6 +8795,7 @@ function Inbox() {
       )}
     </div>
     </SideButtonContext.Provider>
+    </ThreadTagsContext.Provider>
     </InitiativeTagsContext.Provider>
   );
 }

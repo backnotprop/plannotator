@@ -310,6 +310,7 @@ afterAll(async () => {
       TMPDIR: tempRoot,
       TMP: tempRoot,
       TEMP: tempRoot,
+      PLANNOTATOR_RELAY_URL: "http://127.0.0.1:9",
       PLANNOTATOR_DATA_DIR: contributor,
       PLANNOTATOR_FEEDBACK_HISTORY: "1",
     },

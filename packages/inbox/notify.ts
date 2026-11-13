@@ -25,6 +25,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { InboxAuthor, InboxListRow, InboxMessage, InboxNotifyReach, InboxSectionId } from '@plannotator/core/inbox-types';
 import { inboxQuestionWaitsForList } from '@plannotator/core/inbox-questions';
+import { INBOX_TURN_FAILED_WORDS } from '@plannotator/core/inbox-run-line';
 import { inboxApi, type InboxEvent, type ListModel, type NotificationSettings } from './api';
 import { agentName, plural } from './format';
 import { pageInFront } from './sound';
@@ -67,6 +68,8 @@ export function threadNotificationText(input: {
   section: InboxSectionId | null;
   /** The notice is about a question (else a new thread that may ask nothing). Absent: a question. */
   asks?: boolean;
+  /** The notice is about a launched session's turn that ended in an error (and no question): "<agent> couldn't answer". */
+  failed?: boolean;
 }): {
   title: string;
   body: string;
@@ -77,7 +80,9 @@ export function threadNotificationText(input: {
       ? 'stopped on you'
       : asks || input.section === 'holding' || input.section === 'waiting'
         ? 'is waiting on you'
-        : 'started a thread';
+        : input.failed
+          ? INBOX_TURN_FAILED_WORDS
+          : 'started a thread';
   return { title: `${input.project}: ${input.agent} ${what}`, body: input.subject };
 }
 
@@ -116,6 +121,14 @@ export function isNewAgentThread(message: InboxMessage, first: boolean | undefin
   );
 }
 
+/**
+ * A message line that is a launched session's failed-turn note (`turn_error`, written by the Inbox alone): its
+ * FIRST line only (`first`), so a look or an archive rewriting it, or a catch-up after a restart, never notifies.
+ */
+export function isFailedTurnNote(message: InboxMessage, first: boolean | undefined): boolean {
+  return first === true && message.turn_error === true && message.author.kind === 'agent' && message.resolved_at === null;
+}
+
 /** One thread a list read may notify about. */
 export interface NotifyItem {
   threadId: string;
@@ -124,6 +137,8 @@ export interface NotifyItem {
   asks: boolean;
   /** The thread itself is new. */
   fresh: boolean;
+  /** A launched session's turn in it ended in an error (its note, `InboxMessage.turn_error`). */
+  failed?: boolean;
   /** What brought it (`thread:<id>`, `<message id>/<question key>`): what tabs claim, so one tab raises each. */
   keys: string[];
 }
@@ -375,6 +390,8 @@ export function useInboxNotifications(options: {
   const pending = useRef<{ messageId: string; key: string }[]>([]);
   /** New threads an agent started, waiting for the list read. */
   const pendingThreads = useRef<string[]>([]);
+  /** New failed-turn notes (message id and claim key), waiting for the list read. */
+  const pendingFailed = useRef<{ messageId: string; key: string }[]>([]);
   /** The threads of the current burst, with their project names and whether they ask. */
   const burst = useRef(new Map<string, { project: string; asks: boolean }>());
   /** When the last notice was raised, and whether the tab was in front then. */
@@ -483,6 +500,12 @@ export function useInboxNotifications(options: {
         counted.current.add(id);
         pendingThreads.current.push(message.thread_id);
       }
+      // A launched session's failed turn: its note's first line, once (the note is written once per failed turn).
+      const failed = `failed:${message.id}`;
+      if (isFailedTurnNote(message, event.first) && !counted.current.has(failed)) {
+        counted.current.add(failed);
+        pendingFailed.current.push({ messageId: message.id, key: failed });
+      }
     } else if (event.kind === 'question') {
       const q = event.question;
       const id = `${q.message_id}/${q.key}`;
@@ -523,6 +546,7 @@ export function useInboxNotifications(options: {
         subject: row?.subject ?? '(no subject)',
         section: row?.section ?? null,
         asks: burst.current.get(item.threadId)?.asks ?? item.asks,
+        failed: item.failed === true,
       });
       // The question it notified about (`<message id>/<key>`). Unused since decision mode went thread only (2026-10-27).
       const question = item.keys.filter((key) => !key.startsWith('thread:')).at(-1);
@@ -556,8 +580,10 @@ export function useInboxNotifications(options: {
     (list: ListModel) => {
       const questions = pending.current;
       const fresh = pendingThreads.current;
+      const failures = pendingFailed.current;
       pending.current = [];
       pendingThreads.current = [];
+      pendingFailed.current = [];
       const rowList = list.sections.flatMap((section) => section.threads);
       // Snoozed threads (approval "inbox-snooze") are in no section. They are known threads all the same, and
       // nothing notifies for them; what they asked rings when they come back, by the rule below.
@@ -567,7 +593,7 @@ export function useInboxNotifications(options: {
       if (rowList.length > 0 || snoozed.size > 0 || (list.projects ?? []).some((project) => project.threads > 0)) setHasThreads(true);
       const back = returnedItems(rowList, snoozedSeen.current);
       snoozedSeen.current = snoozed;
-      if (questions.length === 0 && fresh.length === 0 && back.length === 0) return;
+      if (questions.length === 0 && fresh.length === 0 && back.length === 0 && failures.length === 0) return;
       // The threads these items landed in, newest last, with the agent that wrote.
       const threads = new Map<string, NotifyItem>();
       for (const item of back) threads.set(item.threadId, item);
@@ -575,6 +601,21 @@ export function useInboxNotifications(options: {
         if (snoozed.has(threadId)) continue;
         const root = messages.current.get(threadId);
         if (root) threads.set(threadId, { threadId, author: root.author, asks: false, fresh: true, keys: [`thread:${threadId}`] });
+      }
+      // A failed turn notifies as a question does (never while its thread is open and visible, nothing while snoozed), in its own words.
+      for (const { messageId, key } of failures) {
+        const message = messages.current.get(messageId);
+        if (!message || snoozed.has(message.threadId)) continue;
+        const before = threads.get(message.threadId);
+        threads.delete(message.threadId);
+        threads.set(message.threadId, {
+          threadId: message.threadId,
+          author: message.author,
+          asks: before?.asks ?? false,
+          fresh: before?.fresh ?? false,
+          failed: true,
+          keys: [...(before?.keys ?? []), key],
+        });
       }
       for (const { messageId, key } of questions) {
         const message = messages.current.get(messageId);
@@ -586,6 +627,7 @@ export function useInboxNotifications(options: {
           author: message.author,
           asks: true,
           fresh: before?.fresh ?? false,
+          ...(before?.failed ? { failed: true } : {}),
           keys: [...(before?.keys ?? []), key],
         });
       }

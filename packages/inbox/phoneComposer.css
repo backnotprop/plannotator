@@ -88,6 +88,13 @@
 .ib-sheet-cap { padding: 8px 10px 4px; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
 .ib-sheet-cap b { color: var(--foreground); font-weight: 500; }
 .ib-sheet-none { padding: 14px 10px; color: var(--muted-foreground); }
+/* To's machine switch on a phone: chips that wrap, two to a line at most, the chosen one filled. */
+.ib-cp-mchips { display: flex; flex-wrap: wrap; gap: 6px; flex: none; padding: 2px 8px 6px; }
+.ib-cp-mchip { display: inline-flex; align-items: center; gap: 6px; flex: none; max-width: calc(50% - 3px); height: 36px; padding: 0 12px; border: 0; border-radius: 999px; background: var(--muted); color: var(--foreground); font: inherit; font-size: var(--ib-fs-15, 15px); cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.ib-cp-mchip[data-on] { background: var(--ib-sel); font-weight: 600; }
+.ib-cp-mchip:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.ib-cp-mchip > svg.ib-ic { flex: none; color: var(--muted-foreground); }
+.ib-sheet-cap.ib-cp-mhd { display: flex; align-items: center; gap: 6px; padding-top: 12px; font-weight: 600; color: var(--foreground); }
 .ib-sheet-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; column-gap: 12px; flex: none; min-height: 56px; padding: 8px 10px; border-radius: 12px; cursor: pointer; -webkit-tap-highlight-color: transparent; }
 .ib-sheet-row[aria-disabled] { opacity: 0.5; cursor: default; }
 /* The chosen row is a fill, never a border. */
@@ -127,6 +134,10 @@
 .ib-cp-picker[data-phone] .ib-cp-lchcols { grid-auto-flow: row; overflow-y: auto; }
 .ib-cp-picker[data-phone] .ib-cp-lchcols > .ib-cp-lchcol + .ib-cp-lchcol { border-left: 0; border-top: 1px solid var(--ib-line); }
 .ib-cp-picker[data-phone] .ib-cp-lchcol { display: grid; }
+.ib-cp-picker[data-phone] .ib-cp-lchcol[data-filterable] { max-height: calc(var(--ib-vvh, 100dvh) * 0.55); overflow-y: auto; }
+.ib-cp-picker[data-phone] .ib-cp-lchfilter { background: var(--card); }
+.ib-cp-picker[data-phone] .ib-cp-lchcol[data-filterable][data-typing] { max-height: calc(var(--ib-vvh, 100dvh) - 52px - env(safe-area-inset-top)); }
+.ib-cp-picker[data-phone] .ib-cp-lchcols:has([data-typing]) > .ib-cp-lchcol:not([data-filterable]) { display: none; }
 .ib-cp-picker[data-phone] .ib-cp-opt.ib-cp-lchopt { display: flex; justify-content: space-between; padding: 0 10px; }
 .ib-cp-hint { flex: none; color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); white-space: nowrap; }
 /* The Launch tip over the row, its arrow pointing down at To. */
@@ -152,6 +163,9 @@
   .pn-inbox .ib-pfoot .ib-rbox .ib-rscroll, :root[data-ib-keyboard-pin] .pn-inbox .ib-pfoot .ib-rbox .ib-rscroll { max-height: calc(var(--ib-vvh, 100dvh) * 0.4); }
   :root .pn-inbox .ib-pfoot .ib-rclose { top: 10px; right: calc(10px + var(--ib-rsb, 0px)); width: 36px; height: 36px; background: transparent; }
   .pn-inbox .ib-pfoot .ib-rclose::after { content: ''; position: absolute; inset: -4px; }
+  /* The quote line (approval "inbox-reply-quote"): one line, clear of the close chevron. */
+  .pn-inbox .ib-pfoot .ib-rquote { padding: 14px 52px 0 18px; }
+  .pn-inbox .ib-pfoot .ib-rbox:has(> .ib-rquote) .ib-rscroll :is(.ib-rtext, .ib-rmirror) { padding-top: 8px; }
   .pn-inbox .ib-pfoot .ib-rline { padding: 0 10px 0 8px; }
   /* The row: every control 36 px and round, 44 px to the touch. */
   .pn-inbox .ib-rrow[data-phone] { gap: 8px; padding: 8px 10px 10px; }

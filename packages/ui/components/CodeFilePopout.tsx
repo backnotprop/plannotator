@@ -316,7 +316,7 @@ const CodeInlineAnnotation: React.FC<{
         <div className="mt-2 flex flex-wrap gap-1.5">
           {annotation.images.map((img) => (
             <div key={img.path} className="text-center">
-              <ImageThumbnail path={img.path} size="sm" showRemove={false} />
+              <ImageThumbnail path={img.path} size="sm" showRemove={false} file={img.kind === 'file'} />
               <div className="max-w-[3rem] truncate text-[9px] text-muted-foreground" title={img.name}>
                 {img.name}
               </div>

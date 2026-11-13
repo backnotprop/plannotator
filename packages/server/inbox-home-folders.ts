@@ -279,7 +279,9 @@ function foldersIn(real: string, realHome: string, places: FolderPlaces): { fold
   }
   folders.sort((a, b) => a.localeCompare(b));
   const kept = folders.slice(0, HOME_FOLDERS_MAX);
-  return { folders: kept, nostart: nostart.filter((name) => kept.includes(name)) };
+  // `nostart` in the folders' order: the disk's read order differs from one file system to the next.
+  const neverStarted = new Set(nostart);
+  return { folders: kept, nostart: kept.filter((name) => neverStarted.has(name)) };
 }
 
 /** A typed folder that isn't there: the nearest folder above it that is, and its folders (home, or `/`, at the latest). */

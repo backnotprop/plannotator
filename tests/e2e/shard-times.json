@@ -110,6 +110,7 @@
   "inbox-open-in-refs.spec.ts": 108,
   "inbox-open-questions.spec.ts": 22,
   "inbox-open-stays-put.spec.ts": 46,
+  "inbox-openclaw.spec.ts": 15,
   "inbox-option-card-desktop.spec.ts": 80,
   "inbox-option-card-phone.spec.ts": 410,
   "inbox-order.spec.ts": 5,

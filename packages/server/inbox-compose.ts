@@ -33,6 +33,7 @@
  * them. Pending uploads no draft names are swept after a day (`sweep`).
  */
 
+import { inboxCommentDraftUploadIds } from "@plannotator/shared/inbox/comment-drafts";
 import { homedir } from "node:os";
 import { basename } from "node:path";
 import { inboxHasUnsent, inboxRowArchived } from "@plannotator/shared/inbox/list";
@@ -424,6 +425,7 @@ export function createInboxCompose(options: {
       // A reply draft's files (long pastes too) are kept as a compose draft's files are, at any age.
       for (const id of store.replyDraftUploadIds()) keep.add(id);
       for (const id of store.commentPictureUploadIds()) keep.add(id);
+      for (const id of inboxCommentDraftUploadIds(store.dir, (threadId: string) => store.thread(threadId) !== null)) keep.add(id);
       sweepInboxUploads(store.dir, { keep, usedBlobs: store.usedBlobs(), now: now().getTime() });
     } catch {
       // Best effort: the next sweep tries again.

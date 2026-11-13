@@ -1,0 +1,16 @@
+{
+  "id": "plannotator",
+  "name": "Plannotator",
+  "description": "The Plannotator Inbox in your own OpenClaw chats: the agent sends you messages and questions, and your replies come back into the same chat.",
+  "activation": {
+    "onStartup": true
+  },
+  "contracts": {
+    "tools": ["plannotator_inbox"]
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}

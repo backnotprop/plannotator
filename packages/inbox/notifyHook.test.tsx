@@ -6,7 +6,12 @@
  * does, a later line of a root (an Unarchive of a thread archived before the
  * page loaded) is never a new thread, a burst collapses into one notice and
  * drops a thread the person opened, a notice is silent only when the bell
- * owns its sound, and two tabs raise each item once.
+ * owns its sound, and two tabs raise each item once. A launched session's
+ * failed turn (its note, `turn_error`) notifies once per note for Claude
+ * Code, Codex and Pi, as "<project>: <agent> couldn't answer", under the
+ * same rules as a question: not while its thread is open and visible, not
+ * while it is snoozed, not with notifications off, and never again for a
+ * later line of the same note (an Inbox restart writes no new one).
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -78,13 +83,15 @@ let onScreen: string | null = null;
 let questionsHeard = 0;
 let bell = false;
 let otherTabInFront = false;
+/** Settings → General's notifications switch. */
+let enabled = true;
 /** What a click on a notice does to the route. */
 let onOpenThread: (threadId: string) => void = () => {};
 let onOpenList: () => void = () => {};
 
 function Probe({ index }: { index: number }) {
   tabs[index] = useInboxNotifications({
-    settings: { enabled: true, dismissed: false, allowed_origin: null },
+    settings: { enabled, dismissed: false, allowed_origin: null },
     onSettings: () => {},
     openThread: (threadId) => onOpenThread(threadId),
     openList: () => onOpenList(),
@@ -194,6 +201,7 @@ describe.if(hasDom)('useInboxNotifications', () => {
     questionsHeard = 0;
     bell = false;
     otherTabInFront = false;
+    enabled = true;
     onOpenThread = () => {};
     onOpenList = () => {};
     tabs.length = 0;
@@ -528,5 +536,57 @@ describe.if(hasDom)('useInboxNotifications', () => {
     expect(report.permission).toBe('granted');
     expect(report.origin).toBe(window.location.origin);
     expect(tabs[0]!.windowReport().id).toBe(report.id);
+  });
+
+  describe('a launched session\'s turn that ended in an error', () => {
+    const agents: InboxAuthor[] = [
+      { kind: 'agent', host: 'claude-code', session: 'ses_c', name: null },
+      { kind: 'agent', host: 'codex', session: 'ses_x', name: 'Codex' },
+      { kind: 'agent', host: 'pi', session: 'ses_p', name: 'Pi' },
+    ];
+    const failedNote = (id: string, author: InboxAuthor, first = true) => message(id, 'old', { author, turn_error: true, body: "Its turn ended with an error: 429" }, first);
+
+    test('notifies once per failed turn for each agent, in the shape of a thread notice', async () => {
+      for (const [i, author] of agents.entries()) {
+        await batch([failedNote(`n${i}`, author)], list([{ id: 'old', section: 'new' }]));
+        // The same note's later line (a look), or the same line again: nothing more.
+        await batch([failedNote(`n${i}`, author, false), failedNote(`n${i}`, author)], list([{ id: 'old', section: 'new' }]));
+      }
+      expect(raised).toHaveLength(3);
+      expect(raised.map((r) => r.body)).toEqual(['Subject old', 'Subject old', 'Subject old']);
+      expect(raised[0]!.title).toMatch(/^billing-svc: Claude Code couldn't answer$/);
+      expect(raised[1]!.title).toBe("billing-svc: Codex couldn't answer");
+      expect(raised[2]!.title).toBe("billing-svc: Pi couldn't answer");
+      // Not a question: the bell is not asked to ring.
+      expect(questionsHeard).toBe(0);
+    });
+
+    test('an agent\'s own plain message never notifies, and only the note\'s first line does (a restart\'s catch-up writes no first line)', async () => {
+      away();
+      await batch([message('plain', 'old', { body: "Claude Code's turn ended with an error: 429" })], list([{ id: 'old', section: 'new' }]));
+      await batch([failedNote('n1', agents[0]!, false)], list([{ id: 'old', section: 'new' }]));
+      expect(raised).toHaveLength(0);
+    });
+
+    test('not while its thread is open and visible, nor snoozed, nor with notifications off', async () => {
+      onScreen = 'old';
+      await batch([failedNote('n1', agents[0]!)], list([{ id: 'old', section: 'new' }]));
+      expect(raised).toHaveLength(0);
+      onScreen = null;
+      const snoozed = { ...list([]), snoozed: [{ thread_id: 'old' } as unknown as InboxListRow] } as ListModel;
+      await batch([failedNote('n2', agents[1]!)], snoozed);
+      expect(raised).toHaveLength(0);
+      enabled = false;
+      act(() => root!.render(<Probe index={0} />));
+      await batch([failedNote('n3', agents[2]!)], list([{ id: 'old', section: 'new' }]));
+      expect(raised).toHaveLength(0);
+      // Away from the open thread, on: it does.
+      enabled = true;
+      act(() => root!.render(<Probe index={0} />));
+      away();
+      onScreen = 'old';
+      await batch([failedNote('n4', agents[2]!)], list([{ id: 'old', section: 'new' }]));
+      expect(raised).toHaveLength(1);
+    });
   });
 });

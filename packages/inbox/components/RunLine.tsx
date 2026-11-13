@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { InboxRun } from '@plannotator/core/inbox-types';
+import { INBOX_TURN_FAILED_WORDS } from '@plannotator/core/inbox-run-line';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 import { InboxApiError, inboxApi } from '../api';
 import { whenTime } from '../format';
@@ -19,6 +20,7 @@ function minutesSince(since: string | null, now: number): string | null {
 const shownCommand = (command: string) => command.replace(/^cd .*? && /, '');
 
 const STOP_TIP = 'Stops the session. Commands it started in the background keep running.';
+
 
 /**
  * A launched thread's run line (UX screens 05, 06, 08, 09, 11, 12, 14, 15): one
@@ -301,6 +303,19 @@ export function RunLine({
       break;
     case 'failed':
       icon = 'warn';
+      if (run.turn_error) {
+        text = (
+          <>
+            <b>
+              {/* The agent's own error is the note above: the line says only that it couldn't answer, and that the message is kept. */}
+              {name} {INBOX_TURN_FAILED_WORDS}.
+            </b>{' '}
+            {kept}
+          </>
+        );
+        actions = retry('Try again');
+        break;
+      }
       // E10: a cloned repo that brings hooks, MCP servers or settings starts once the person trusts it (decision 4a).
       if (clone?.brings && clone.brings.length > 0 && run.untrusted && run.trust) {
         text = (

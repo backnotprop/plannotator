@@ -55,7 +55,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   rmSync(shots, { recursive: true, force: true });
   mkdirSync(shots, { recursive: true });
   const root = inboxScratch('plannotator-inbox-rowmenu-e2e-');
-  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_DATA_DIR: join(root, 'data'), PLANNOTATOR_BROWSER: NO_BROWSER, NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0' };
+  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: join(root, 'data'), PLANNOTATOR_BROWSER: NO_BROWSER, NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0' };
   const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
   expect(started.status, started.stderr).toBe(0);
   const url = started.stdout.trim();
@@ -98,7 +98,7 @@ test('a right-click opens the menu without opening the thread; Copy link copies 
   await expect(row).toBeVisible();
   await row.click({ button: 'right' });
   await expect(menu(page)).toBeVisible();
-  await expect(menu(page).getByRole('menuitem')).toHaveText(['Star thread', 'Copy thread', 'Copy link', 'Copy thread ID', 'Snooze', 'Mark read', 'Archive']);
+  await expect(menu(page).getByRole('menuitem')).toHaveText(['Star thread', 'Add to Priority', 'Add tag', 'Copy thread', 'Copy link', 'Copy thread ID', 'Snooze', 'Mark read', 'Archive']);
   await expect(page.locator(`[data-row="${threads.search}"]`)).toHaveAttribute('data-menu', '');
   expect(page.url()).not.toContain('thread=');
   await shot(page, '01-menu-light.png');
@@ -130,8 +130,12 @@ test('the keyboard: Shift+F10 on a focused row opens the menu, Escape and Tab gi
   // Focus moves into the menu; the arrows walk its items.
   await expect(menu(page)).toBeFocused();
   await page.keyboard.press('ArrowDown');
-  // Star thread leads (approval "inbox-pinned-threads"), then Copy thread and Copy link.
+  // Star thread leads (approval "inbox-pinned-threads"), then Add to Priority, Add tag (approval "inbox-thread-tags"), Copy thread and Copy link.
   await expect(page.locator('[data-row-action="pin"]')).toBeFocused();
+  await page.keyboard.press('ArrowDown');
+  await expect(page.locator('[data-row-action="priority-add"]')).toBeFocused();
+  await page.keyboard.press('ArrowDown');
+  await expect(page.locator('[data-add-tag-item]')).toBeFocused();
   await page.keyboard.press('ArrowDown');
   await expect(page.locator('[data-row-action="copy-thread"]')).toBeFocused();
   await page.keyboard.press('ArrowDown');

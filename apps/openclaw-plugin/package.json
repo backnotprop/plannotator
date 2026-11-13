@@ -1,0 +1,53 @@
+{
+  "name": "@plannotator/openclaw",
+  "version": "0.28.62",
+  "type": "module",
+  "description": "Plannotator plugin for OpenClaw - the Plannotator Inbox in your own OpenClaw chats",
+  "author": "backnotprop",
+  "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/backnotprop/plannotator.git",
+    "directory": "apps/openclaw-plugin"
+  },
+  "homepage": "https://github.com/backnotprop/plannotator",
+  "bugs": {
+    "url": "https://github.com/backnotprop/plannotator/issues"
+  },
+  "keywords": [
+    "openclaw",
+    "openclaw-plugin",
+    "plannotator",
+    "ai-agent"
+  ],
+  "main": "dist/index.js",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "openclaw.plugin.json",
+    "README.md"
+  ],
+  "openclaw": {
+    "extensions": [
+      "./dist/index.js"
+    ],
+    "compat": {
+      "pluginApi": ">=2026.11.5-beta.1",
+      "minGatewayVersion": "2026.11.5-beta.1"
+    },
+    "build": {
+      "openclawVersion": "2026.11.5-beta.2",
+      "pluginSdkVersion": "2026.11.5-beta.2"
+    },
+    "install": {
+      "npmSpec": "@plannotator/openclaw",
+      "minHostVersion": ">=2026.11.5-beta.1"
+    }
+  },
+  "scripts": {
+    "build": "bun build index.ts --outfile dist/index.js --target node",
+    "prepublishOnly": "bun run build"
+  }
+}

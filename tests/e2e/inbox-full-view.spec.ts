@@ -234,13 +234,13 @@ test('an HTML file opens full screen: the page fills the window, one toolbar is 
   // The page fills the window.
   const box = await pane().locator('iframe').first().boundingBox();
   expect(box).toEqual({ x: 0, y: 0, width: 1280, height: 800 });
-  // The toolbar: top right, showing; pen (armed), the count, the position, ⋯, Side by side, » Hide tools.
+  // The toolbar: top right, showing; pen (off: the page opens in Interact), the count, the position, ⋯, Side by side, » Hide tools.
   await expect(bar()).toHaveAttribute('role', 'toolbar');
   await expect(dock()).toHaveAttribute('data-bar', 'pinned');
   const barBox = (await bar().boundingBox())!;
   expect(barBox.x + barBox.width).toBeGreaterThan(1250);
   expect(barBox.y).toBeLessThan(20);
-  await expect(bar().locator('[data-full-view-pen]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(bar().locator('[data-full-view-pen]')).toHaveAttribute('aria-pressed', 'false');
   await expect(count()).toHaveAccessibleName('Comments, 0');
   await expect(bar().locator('[data-full-view-position]')).toHaveText('1/3');
   await expect(bar().getByRole('button', { name: 'Side by side' })).toBeVisible();
@@ -255,6 +255,8 @@ test('an HTML file opens full screen: the page fills the window, one toolbar is 
 
 test('annotating works as before: a pin opens the composer, Comment adds a marker; the drawer does not open, the count goes up', async () => {
   const page = world.page;
+  await bar().locator('[data-full-view-pen]').click();
+  await expect(bar().locator('[data-full-view-pen]')).toHaveAttribute('aria-pressed', 'true');
   await frame().locator('#flagged').click();
   await composer().fill('"Repeats" reads like duplicate charges to a claims team. Say "repeated tool calls".');
   await shot(page, 'html-annotating', ['dark']);
@@ -444,8 +446,9 @@ test('the approved states of an HTML page, in light and dark', async () => {
 });
 
 /**
- * Escape, one rung per press, on an HTML file opened full screen and armed
- * (the toolbar showing, the drawer closed), until full screen ends: an empty
+ * Escape, one rung per press, on an HTML file opened full screen (in Interact,
+ * the pen then turning Annotate on; the toolbar showing, the drawer closed),
+ * until full screen ends: an empty
  * draft closes by its own key, and so does one with typed words (nothing asks);
  * the drawer closes before Annotate (from inside the page); Annotate goes to
  * Interact; in Interact the page's own Escape (its menu, its text field) stays
@@ -455,6 +458,9 @@ test('the approved states of an HTML page, in light and dark', async () => {
 async function climbTheLadder(page: Page, from: 'side' | 'thread' = 'side') {
   const pen = bar(page).locator('[data-full-view-pen]');
   const guard = pane(page).locator('[data-step-guard]');
+  await expect(pen).toHaveAttribute('aria-pressed', 'false');
+  await pen.click();
+  await expect(pen).toHaveAttribute('aria-pressed', 'true');
   // An empty draft: its own Escape closes it; nothing else moves.
   await frame(page).locator('#headline').click();
   await expect(composer(page)).toBeVisible();

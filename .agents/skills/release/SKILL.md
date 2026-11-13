@@ -154,6 +154,8 @@ Read each file, confirm the current version matches expectations, then update al
 
 `node scripts/check-release-version.mjs` (also `bun run check:release-version`) checks exactly these 10 files and fails the release when one differs; `apps/dsh-plugin/package.json` (`@plannotator/dsh`) and `apps/cline-plugin/package.json` (`@plannotator/cline`) are among them.
 
+`@plannotator/openclaw` (`apps/openclaw-plugin`) is not part of a release yet: it is in none of these lists and nothing publishes it. Leave it until the owner asks; the steps to add it are under "Not released yet" in `docs/agent-guides/project-and-development.md`.
+
 The DeepSeek Harness plugin is checked like the other packages: the release workflow's `test` job runs `bun run typecheck` (which includes `apps/dsh-plugin/tsconfig.json`) and `bun test` (which includes `apps/dsh-plugin` and `apps/hook/server/dsh-*.test.ts`).
 
 Do not bump the VS Code extension (`apps/vscode-extension/package.json`) — it has independent versioning. The Droid manifest (`apps/droid-plugin/.factory-plugin/plugin.json`) is exempt too: Droid tracks the plugin by the marketplace's git commit and treats `version` as metadata.

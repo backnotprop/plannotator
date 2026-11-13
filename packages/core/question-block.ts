@@ -1258,6 +1258,15 @@ export const parseQuestionBlock = (
       for (const index of bullet.contextIndices) dropContext.add(index);
     });
   }
+  // Two choices whose text before the dash is the same ("Yes — keep it", "Yes — drop it") would be one answer: each
+  // takes its whole text as its label, so a pick, a stored answer and the reply name one choice.
+  const labelCount = new Map<string, number>();
+  for (const c of choices) labelCount.set(normalizeQuestionText(c.label), (labelCount.get(normalizeQuestionText(c.label)) ?? 0) + 1);
+  choices.forEach((c, i) => {
+    if (!c.description || (labelCount.get(normalizeQuestionText(c.label)) ?? 0) < 2) return;
+    const { description: _d, ...rest } = c;
+    choices[i] = { ...rest, label: raws[i]!.trim() };
+  });
   if (choices.some((c) => c.label.includes('![') || c.description?.includes('!['))) {
     choices.splice(0, choices.length, ...withPictureChoices(choices));
   }

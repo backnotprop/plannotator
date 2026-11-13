@@ -69,6 +69,12 @@ export function ConnectLine({
               <span dir="auto">{band.trusted}</span>
             </p>
           )}
+          {band?.granted.map((line) => (
+            <p className="ib-cline-ok" key={`g-${line.agent}`} data-connect-granted="">
+              <Icon name="checkCircle" />
+              <span dir="auto">{line.text}</span>
+            </p>
+          ))}
           {band &&
             [...band.failed, ...band.trustFailed.map((line) => ({ ...line, agent: `t-${line.agent}` }))].map((line) => (
               <p className="ib-cline-warn" key={`f-${line.agent}`}>

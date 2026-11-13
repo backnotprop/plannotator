@@ -35,6 +35,8 @@ import { activeHandoff, threadParticipants } from '../tags';
 import { errorText } from '../toastError';
 import { useVoiceSession } from '../voice';
 import { floaterName, onFloaterEvent, peekText } from './model';
+import { quoteLineText, quoteToSend } from '../replyQuote';
+import { whenTime } from '../format';
 
 const NO_UPLOADS: readonly InboxDraftFile[] = [];
 /** How long the press waits to learn whether the agent ended (as the thread's Send does). */
@@ -282,6 +284,11 @@ export function FloaterBox({ row, phone, frame, takeFocus, onMinimize, onPutAway
         questions: [],
         ...(feedback ? { feedback } : {}),
         ...(uploads.length > 0 ? { uploads } : {}),
+        // The message the draft quotes rides the words (approval "inbox-reply-quote").
+        ...(() => {
+          const sendQuote = words !== '' ? quoteToSend(draft.draft?.quote ?? null, model.thread.messages, whenTime) : undefined;
+          return sendQuote ? { quote: sendQuote } : {};
+        })(),
         clear_draft: savedAs ?? '',
       });
       sendKey.current = null;
@@ -312,8 +319,11 @@ export function FloaterBox({ row, phone, frame, takeFocus, onMinimize, onPutAway
   const drop = useFileDrop((list) => files.add(list));
   const name = floaterName(row);
   const whole = `${row.subject ?? name}, ${row.project.name}`;
-  const peek = latest ? peekText(latest.body) : '';
-  const questions = (latest?.questions ?? []).filter((q) => q.state === 'open').length;
+  // A draft that quotes a message (approval "inbox-reply-quote"): the peek is that message, or the words quoted.
+  const draftQuote = draft.draft?.quote ?? null;
+  const quoted = draftQuote && thread ? thread.messages.find((m) => m.id === draftQuote.of) : undefined;
+  const peek = quoted ? quoteLineText(quoted, draftQuote?.words) : latest ? peekText(latest.body) : '';
+  const questions = quoted ? 0 : (latest?.questions ?? []).filter((q) => q.state === 'open').length;
   const conflictId = `ib-rf-conflict-${threadId}`;
   const peekId = `ib-rf-peek-${threadId}`;
 

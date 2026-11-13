@@ -53,6 +53,7 @@ export interface RecipientConnection {
    * Absent from an older Inbox and when none.
    */
   uncertain?: string[];
+  polls?: boolean;
 }
 
 /** Whether an item may not have reached the session it was handed to (`connection.uncertain`). */

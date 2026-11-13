@@ -31,11 +31,59 @@ validates and loads the plugin with the `modules` key, ignores it, and runs the
 classic PermissionRequest command hook (the blocking review) exactly as before;
 2.1.288 with modules on runs the mod and never reaches that command hook. The mod
 also stands down by itself (every hook passes through) in `-p` / SDK sessions
-(`isInteractive` false: a later plugin turn would have no session to land in)
+(`isInteractive` false: a later plugin turn would have no session to land in),
+except the VS Code extension's chat panel (next paragraph),
 and where it finds no shell for its scripts ("The shell" below), leaving the classic hook and the
 `/plannotator-*` skills in charge. A mods-capable Claude Code whose rollout
 switch is off could not be reproduced locally; the engine only inserts modules
 into the hook chain when they load, so it should behave like 2.1.150.
+
+**The VS Code extension's chat panel (#3111).** Claude Code's VS Code
+extension hosts the CLI through the Agent SDK, so its sessions raise
+`session.start` with `isInteractive: false` and `surface: null`, and the mod
+stood down there: no `plannotator_inbox`, no reply wake, the blocking flows.
+The panel is the one SDK host with a person reading it, and it shows a
+plugin's turn ("Prompt from the <plugin> plugin", Claude Code's VS Code docs),
+so `resolveAllowed` lets a non-interactive session through when it is a panel
+session (`isVsCodePanelSession` in `enabled.ts`; `panel` on `Allowed`):
+`CLAUDE_CODE_ENTRYPOINT` is exactly `claude-vscode` (the extension sets it in
+the environment it spawns the CLI with; read in the 2.1.322 extension), and
+none of `CLAUDECODE`, `CLAUDE_CODE_CHILD_SESSION` or a `PLANNOTATOR_SESSION_TAG`
+naming another session is set. The entrypoint is inherited (Claude Code
+rewrites only `cli`), so a `claude -p` started from inside a panel session
+(Claude's Bash, or an agent job of a CLI the mod started) would read
+`claude-vscode` too; the extension deletes `CLAUDECODE` and
+`CLAUDE_CODE_CHILD_SESSION` from the panel's own environment, and Claude Code
+sets them in every process it starts, so either one, or the mod's tag for
+another session, keeps such a run inert. The tag naming this session is the
+process's own (a module reload raises `session.start` again). Every other
+non-interactive session stays inert exactly as before: `sdk-cli` (`claude
+-p`), `sdk-ts` / `sdk-py`, `t3-code`, `claude-desktop` (Claude Desktop is out
+of scope), any other or no entrypoint, and Plannotator's own Ask AI children;
+the knob and the other switches apply as everywhere. In a panel session the
+mod runs as in the terminal (the tools, the wake through `$.prompt.submit`,
+the non-blocking flows, Ask this session, auto reload). The person's Enter
+in the panel reaches Claude Code as the SDK host's own turn, `origin.kind`
+`sdk`, so there it reads as `composer` (`promptOriginKind`): a typed prompt
+takes over an Ask question's turn and pulls the leases to this process, as
+in the terminal. What the panel draws differently: status lines and toasts
+show above the prompt box; `$.prompt.suggest` shows nothing (the review
+"address the comments" suggestion is not seen); `$.prompt.read` answers
+empty (auto reload's "a prompt is being typed" gate sees no draft there); the
+`CommandOutput` render hook on `/reload-plugins` does not run (Terminal and
+Desktop only). The `AbovePrompt` band is not built anywhere (see Plan
+review), and the panel has no `AbovePrompt` site either. A wake the host
+refuses resolves `{ drop }` (after Stop, "the host has ended its input", a
+`--max-turns` limit) and is held as after a Stop in the terminal: the reply
+stays pending, no delivery is tried until the person's next prompt or a
+main-loop turn start, and the window says "Stopped". Not seen yet in a real
+panel. Tests: `register-vscode.test.ts` (the real registered hooks on a fake
+`$`: the panel registers both tools, polls as its session and delivers once;
+each refusal is held and goes in once after the person's prompt; the `sdk`
+origin pulls the lease, a task notification does not; every other
+entrypoint, a nested run, an agent job's inherited tag, an Ask AI child and
+the knob off stay inert) and two engine-harness cases in
+`apps/hook/tests/register.test.ts`.
 
 **Files.** `register.ts` holds every `$` call (`claude plugin validate` follows
 `$` only through top-level functions and inline hooks) and builds a `Host` of
@@ -456,10 +504,10 @@ classic path, which falls back to the pre-compaction file.
 blocks and gives Ask AI a separate AI. The mod registers a real tool instead:
 `$.tool.register({ name: "plannotator", description, inputSchema })` at
 `session.start`, right after the commands, and only when the mod is on (the
-knob not turned off, an interactive session, a shell found) and the agent tool
+knob not turned off, an interactive session or a VS Code panel session, a shell found) and the agent tool
 switch is on (on by default here; `PLANNOTATOR_AGENT_TOOL=0` / `{ "agentTool": false }` turn it off; `resolveAgentToolEnabled`
 in `hooks/mod/enabled.ts`, read with the mod switch at the first `session.start`
-of the process, never re-read); with either switch off, in `-p`/SDK runs and
+of the process, never re-read); with either switch off, in `-p`/SDK runs (other than the VS Code panel) and
 where no shell is found nothing is registered and Claude keeps the CLI through the `plannotator`
 skill. With only the agent tool off, the rest of the mod runs: the slash
 commands, non-blocking ExitPlanMode, Ask this session, and the Bash take-over

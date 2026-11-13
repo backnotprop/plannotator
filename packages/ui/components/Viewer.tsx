@@ -15,7 +15,7 @@ import { BlockRenderer } from './BlockRenderer';
 import { BELOW_TITLE_SLOT_MARKER } from '../utils/belowTitleSlot';
 import { indexQuestionBlocks, type IndexedQuestion, type ParsedQuestion, type QuestionAnswer } from '@plannotator/core/question-block';
 import { diagramTargetText, type DiagramAnchor } from '@plannotator/core/diagram-anchor';
-import type { QuestionBlockProps } from './blocks/QuestionBlock';
+import type { QuestionAcceptBehavior, QuestionBlockProps } from './blocks/QuestionBlock';
 import { resolveQuestionAnswers } from '../utils/questionAnswers';
 import { CodeBlock } from './blocks/CodeBlock';
 import { TableBlock } from './blocks/TableBlock';
@@ -367,6 +367,10 @@ export interface ViewerProps {
    *  when the host knows it before the picture loads (see `QuestionBlock`
    *  `pictureSize`). Absent: unknown, and nothing changes. */
   questionPictureSize?: (url: string) => { width: number; height: number } | null;
+  /** Accept recommended, gentler: steps aside while a card field has focus, keeps
+   *  Other… words, tells the host so it can offer Undo (see `QuestionBlock`
+   *  `acceptBehavior`). Absent: today's button. */
+  questionAcceptBehavior?: QuestionAcceptBehavior;
   /** Makes a question's "Records a decision" tag a toggle button
    *  (`aria-pressed`); a click calls this with the question's key and the
    *  next state, which the host stores and returns from
@@ -462,6 +466,19 @@ export interface ViewerProps {
    * The label picker stays off. Absent → unchanged.
    */
   textDeletions?: boolean;
+  /**
+   * Opt-in, with `textComments`: question cards take comments too, as they do
+   * in plan review: the prompt, its context, and each choice's label and
+   * description are ordinary text for the selection toolbar and the
+   * highlights; the card's own controls (the radios and checkboxes,
+   * "Other…", the footer, a picture choice's picture) stay out. A click on a
+   * choice still picks it at once; a drag across its words, or a double-click
+   * on one, selects them and never picks (the card's own guard). For a host
+   * whose reader comments on a whole message, questions included (the
+   * Plannotator Inbox). A host's own card (`renderQuestionCard`) stays out.
+   * Absent → unchanged (cards are left out of selection).
+   */
+  questionTextComments?: boolean;
   /**
    * Opt-in: words a text-selection comment box opens with, for the selected
    * text (a host's suggested comment, kept with one press or written over).
@@ -927,6 +944,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   questionPictureBadge,
   onQuestionPictureZoom,
   questionPictureSize,
+  questionAcceptBehavior,
   onToggleQuestionDecisionRecording,
   onOpenQuestionDecision,
   questionDecisionLocked,
@@ -943,6 +961,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   htmlEmbeds,
   textComments = false,
   textDeletions = false,
+  questionTextComments = false,
   suggestComment,
   vimModeEnabled = false,
   vimHudEnabled = false,
@@ -2203,12 +2222,14 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
                   questionPictureBadge={questionPictureBadge}
                   onQuestionPictureZoom={onQuestionPictureZoom}
                   questionPictureSize={questionPictureSize}
+                  questionAcceptBehavior={questionAcceptBehavior}
                 />
               );
               // `textComments`: a question card's words are not commented on
-              // (its own controls already are excluded); a box-less wrapper
-              // keeps its layout.
-              if (question && textCommentsOnly) {
+              // (its own controls already are excluded) unless the host asks
+              // for them (`questionTextComments`); a box-less wrapper keeps
+              // its layout.
+              if (question && textCommentsOnly && !questionTextComments) {
                 return (
                   <div key={group.block.id} className="annotation-exclude" style={{ display: 'contents' }}>
                     {rendered}
@@ -2240,6 +2261,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
               copyText={toolbarState.selectionText}
               getRichCopy={getRichCopyEnabled() ? toolbarState.getRichCopy : undefined}
               touchAnchorRect={toolbarState.getAnchorRect}
+              touchSide={toolbarState.touchSide}
               hideCopyButton={!isTouchDevice}
               closeOnScrollOut
             />

@@ -32,13 +32,13 @@ export function keepaliveBody(full: Record<string, unknown>): { body: string; ke
   return { body: lean, keepalive: fits(lean) };
 }
 
-const saveBody = (input: ReplyDraftSaveInput) => replyDraftSaveBody(input.body, input.base, input.baseBody, input.files, input.recipients);
+const saveBody = (input: ReplyDraftSaveInput) => replyDraftSaveBody(input.body, input.base, input.baseBody, input.files, input.recipients, input.quote);
 
 /** Reply drafts on this computer's Inbox. */
 export const httpReplyDraftStore: ReplyDraftStore = {
   read: async (threadId) => (await inboxApi.replyDraft(threadId)).draft ?? null,
   save: async (threadId, input, options) => {
-    if (!options.keepalive) return inboxApi.saveReplyDraft(threadId, input.body, input.base, input.baseBody, input.files, input.recipients);
+    if (!options.keepalive) return inboxApi.saveReplyDraft(threadId, input.body, input.base, input.baseBody, input.files, input.recipients, input.quote);
     // As the page goes: its answer is never read (the window reads the draft back when it comes back).
     const session = pageServerSession();
     void fetch(inboxUrl(`/threads/${encodeURIComponent(threadId)}/draft`), {

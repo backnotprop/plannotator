@@ -2,7 +2,7 @@
  * Every read the server makes of the Inbox store, gathered into one plain value, so two stores can be
  * compared whole: the list (rows, sections, the unsent band, open decisions), each thread as the window, an
  * agent and the list read it, each message and its questions, the event log, the Board, steps, PRs,
- * annotations, drafts, pins, snoozes, what agents are owed, Decision data and Settings → Storage.
+ * annotations, drafts, pins, thread tags, snoozes, what agents are owed, Decision data and Settings → Storage.
  *
  * Left out, on purpose: `threadVersion` and `reloadCount` (counters that only say "changed since", and a
  * store that deleted something has counted a re-read a fresh one has not), and the bytes of Settings →
@@ -34,9 +34,12 @@ function plain(value: unknown): unknown {
 
 const byThread = <T extends { thread_id: string }>(rows: T[]) => [...rows].sort((a, b) => a.thread_id.localeCompare(b.thread_id));
 
+/** Storage without its byte counts, and without the order they give (biggest first): projects by id, threads by id. */
 function withoutBytes(usage: ReturnType<InboxStore["diskUsage"]>) {
   return {
-    projects: usage.projects.map(({ bytes: _b, threads, ...rest }) => ({ ...rest, threads: threads.map(({ bytes: _t, ...thread }) => thread).sort((a, b) => a.thread_id.localeCompare(b.thread_id)) })),
+    projects: usage.projects
+      .map(({ bytes: _b, threads, ...rest }) => ({ ...rest, threads: threads.map(({ bytes: _t, ...thread }) => thread).sort((a, b) => a.thread_id.localeCompare(b.thread_id)) }))
+      .sort((a, b) => a.id.localeCompare(b.id)),
   };
 }
 
@@ -109,6 +112,7 @@ export function everyRead(store: InboxStore, options: EveryReadOptions): Record<
       pulls: store.allThreadPulls(),
     },
     pins: store.pins(),
+    threadTags: { tags: store.allThreadTags(), marks: store.threadTagMarkList() },
     snoozes: store.snoozes(),
     artifactPins: store.artifactPins(),
     blobs: store.usedBlobs(),

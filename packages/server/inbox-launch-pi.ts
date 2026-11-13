@@ -60,7 +60,7 @@ import { launchChoiceArgs, parsePiChoices } from "@plannotator/core/inbox-launch
 import { LAUNCH_CHOICES_RUN_MS, launchChoiceCache } from "./inbox-launch-choice";
 import { shellQuote, versionAtLeast } from "./inbox-launch-claude";
 import { launchSpawnEnv, type LaunchEnv } from "./inbox-launch-env";
-import { launchNoteText, writeLaunchNote, type LaunchAvailability, type LaunchHost, type LaunchHostContext, type LaunchHostResult, type LaunchLive, type LaunchPermissionContext } from "./inbox-launch-host";
+import { launchNoteText, launchTurnErrorNote, writeLaunchNote, type LaunchAvailability, type LaunchHost, type LaunchHostContext, type LaunchHostResult, type LaunchLive, type LaunchPermissionContext } from "./inbox-launch-host";
 
 export const PI = "pi" as const;
 export const PI_NAME = "Pi";
@@ -85,8 +85,6 @@ const HANDOFF_MS = 60_000;
 const TERMINAL_OPEN_MS = 30_000;
 /** The longest dialog title the thread note quotes. */
 const NOTE_TITLE_MAX = 80;
-/** The longest error text a turn's error note quotes. */
-const NOTE_ERROR_MAX = 300;
 /**
  * A Pi before 0.80.4 sends no `agent_settled`: how long after a run's last `agent_end` its error is held for
  * one (or for a compaction or retry that may still follow) before the note goes anyway.
@@ -232,10 +230,7 @@ export function piTurnError(messages: unknown): string | undefined {
 }
 
 /** The thread note for a turn that ended in an error: Pi's own words, one line. */
-export function piTurnErrorNote(error: string): string {
-  const shown = launchNoteText(error, NOTE_ERROR_MAX);
-  return shown ? `Pi's turn ended with an error: ${shown}` : "Pi's turn ended with an error.";
-}
+export const piTurnErrorNote = (error: string): string => launchTurnErrorNote("Pi", error);
 
 /** Pi's default sessions folder for `cwd` under `agentDir` (its `getDefaultSessionDirPath`). */
 export function piSessionDirOf(agentDir: string, cwd: string): string {
@@ -478,10 +473,10 @@ export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?
     });
 
   /** One note from the session in the launch's thread (a dialog answered Cancel, a session file that is gone). */
-  const note = (launchId: string, session: string, body: string, key: string) => {
+  const note = (launchId: string, session: string, body: string, key: string, turnError = false) => {
     const root = threads?.rootOf(launchId);
     if (!threads || !root) return;
-    writeLaunchNote(threads, root, { author: { host: PI, session, name: PI_NAME }, body, key }, ctx.log);
+    writeLaunchNote(threads, root, { author: { host: PI, session, name: PI_NAME }, body, key, turnError }, ctx.log);
   };
 
   /** A dialog no one here can show: Cancel at once, and one note in the launch's thread saying so. */
@@ -542,7 +537,7 @@ export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?
     // Never into a launch folder a Delete removed meanwhile.
     if (existsSync(ctx.launchDir(p.launchId))) ctx.startLog(p.launchId, `pi ${p.session}: the turn ended with an error: ${held.text.slice(0, 2000)}`);
     ctx.log(`Inbox launch ${p.launchId}: a Pi turn ended with an error: ${held.text.slice(0, 200)}`);
-    note(p.launchId, p.session, piTurnErrorNote(held.text), `pi-error-${p.launchId}-${Date.now()}-${++errorNotes}`);
+    note(p.launchId, p.session, piTurnErrorNote(held.text), `pi-error-${p.launchId}-${Date.now()}-${++errorNotes}`, true);
   };
 
   type SpawnResult = { ok: true } | { ok: false; cancelled: boolean; missing: boolean; text: string; output: string };
