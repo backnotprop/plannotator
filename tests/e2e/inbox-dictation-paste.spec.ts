@@ -70,7 +70,7 @@ test.beforeAll(async ({ browser }) => {
   expect(existsSync(binary), `build the binary first: ${binary}`).toBe(true);
   const root = inboxScratch('plannotator-inbox-paste-e2e-');
   const dataDir = join(root, 'data');
-  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0' };
+  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0' };
   const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
   expect(started.status, started.stderr).toBe(0);
   rememberInboxOf(dataDir);
@@ -268,6 +268,7 @@ test('a question card note: after a pick on the same card', async () => {
   await card.getByRole('button', { name: 'Add note' }).click();
   const note = card.getByPlaceholder('Context for the agent…');
   await expect(note).toBeFocused();
+  await note.evaluate((el) => el.scrollIntoView({ block: 'center' }));
   await dictate(page, 'Only if the flag is off by default. ');
   await expectLanded(note, 'Only if the flag is off by default.');
   await card.getByText('Yes', { exact: true }).click();

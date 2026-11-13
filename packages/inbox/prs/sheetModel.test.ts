@@ -4,7 +4,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { inboxPullStacks, type InboxPull } from '@plannotator/core/inbox-types';
-import { FOLD_OVER, foldsToStrip, matchesQuery, mergeOffered, mergedModel, needsYou, orderUnits, sheetModel, statusParts, statusWords, topFirst } from './sheetModel';
+import { FOLD_OVER, foldsToStrip, matchesQuery, mergeOffered, mergedModel, needsYou, orderUnits, sheetModel, statusParts, statusWords, tileOpens, topFirst } from './sheetModel';
 
 const NOW = Date.parse('2026-11-09T12:00:00Z');
 const day = (n: number) => new Date(NOW - n * 86_400_000).toISOString();
@@ -168,5 +168,28 @@ describe('sheetModel', () => {
     const model = mergedModel({ pulls: [two, quiet, gone, one] }, NOW);
     expect(model.sections.map((s) => [s.label, s.pulls.map((p) => p.number)])).toEqual([['ledger', [one.number, two.number]]]);
     expect(model.quiet).toEqual(['docs']);
+  });
+});
+
+describe('a tile opens the launchpad for a single open PR Reviews lists (the owner, 2026-11-11), else the PR view', () => {
+  test('a single open or draft PR in Reviews opens its launchpad; a layer of a stack, a merged PR or one Reviews lacks opens the PR view', () => {
+    const one = pr({ number: 7001 });
+    const draft = pr({ number: 7002, state: 'draft' });
+    const merged = pr({ number: 7003, state: 'merged', merged_at: day(1) });
+    const low = pr({ number: 7004, head: 'low' });
+    const high = pr({ number: 7005, base: 'low', head: 'high' });
+    const elsewhere = pr({ number: 7006, repo: 'northwind/not-a-project' });
+    const all = [one, draft, merged, low, high, elsewhere];
+    const stacks = inboxPullStacks(all);
+    const stackOf = (p: InboxPull) => stacks.find((s) => s.layers.some((l) => l.key === p.key))!;
+    const reviews = { pulls: [one, draft, merged, low, high] };
+    expect(tileOpens(one, stackOf(one), reviews)).toEqual({ launchpad: stackOf(one).id });
+    expect(tileOpens(draft, stackOf(draft), reviews)).toEqual({ launchpad: stackOf(draft).id });
+    expect(tileOpens(merged, { id: merged.key, layers: [merged] }, reviews)).toBe('pull');
+    expect(stackOf(high).layers).toHaveLength(2);
+    expect(tileOpens(high, stackOf(high), reviews)).toBe('pull');
+    expect(tileOpens(elsewhere, stackOf(elsewhere), reviews)).toBe('pull');
+    // Reviews not read yet: the PR view, never a blank pane.
+    expect(tileOpens(one, stackOf(one), null)).toBe('pull');
   });
 });

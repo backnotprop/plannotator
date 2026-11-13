@@ -4,6 +4,7 @@ import { join } from "node:path";
 import {
   INBOX_CLOUD_PRESET_NAMES,
   inboxCloudAnswer,
+  inboxCloudPresetWakes,
   inboxCloudRelayHost,
   inboxCloudSetup,
   inboxCloudStatusWords,
@@ -165,6 +166,10 @@ export function createInboxCloudAgents(options: {
     return agent;
   };
 
+  const refuseWake = (preset: InboxCloudPreset): never => {
+    throw new CloudAgentError("no_wake", `${INBOX_CLOUD_PRESET_NAMES[preset]} has no wake address: it checks for your messages itself.`, "url");
+  };
+
   const webhookOf = (body: Record<string, unknown>, required: boolean): { url: string; key: string } | null => {
     const given = (typeof body.url === "string" && body.url.trim() !== "") || (typeof body.key === "string" && body.key.trim() !== "");
     if (!given && !required) return null;
@@ -189,6 +194,7 @@ export function createInboxCloudAgents(options: {
     if (!name || name.length > 60) throw new CloudAgentError("validation_error", "Give it a name (up to 60 characters).", "name");
     if (!isInboxCloudPreset(body.preset)) throw new CloudAgentError("validation_error", "Pick what kind of agent it is.", "preset");
     const preset = body.preset;
+    if (!inboxCloudPresetWakes(preset) && (body.url != null || body.key != null)) refuseWake(preset);
     const webhook = webhookOf(body, false);
     const listed = projects();
     const projectId = typeof body.project_id === "string" && listed.some((p) => p.id === body.project_id) ? body.project_id : (listed[0]?.id ?? null);
@@ -224,6 +230,7 @@ export function createInboxCloudAgents(options: {
 
   const setWake = (session: string, body: Record<string, unknown>): InboxCloudAgent => {
     const agent = find(session);
+    if (!inboxCloudPresetWakes(agent.preset)) refuseWake(agent.preset);
     const webhook = webhookOf(body, true)!;
     const next = { ...agent, url: webhook.url, key: webhook.key, key_set_at: now().toISOString(), key_rejected_at: null };
     save(agents.map((candidate) => (candidate.session === session ? next : candidate)));

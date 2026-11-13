@@ -241,8 +241,9 @@ test('the full-screen card count opens the list above the card; Escape takes the
   await expect(page.locator('[data-fcomp]')).toBeVisible();
   await expect(chip).toBeFocused();
 
-  // From inside the page: the bridge's Escape takes the list, and Annotate stays on.
+  // From inside the page, with Annotate on (the page opens in Interact): the bridge's Escape takes the list, and Annotate stays on.
   const pen = page.locator('[data-full-view-pen]');
+  await pen.click();
   await expect(pen).toHaveAttribute('aria-pressed', 'true');
   await chip.click();
   await expect(list).toBeVisible();
@@ -456,6 +457,11 @@ test('on a phone, the last comment removed from the card leaves focus on the car
 async function pinOnPage(page: Page, t: ListThread): Promise<Locator> {
   await page.goto(fileUrl(world, t, t.page, 'side'));
   const frame = page.frameLocator('[data-attachment-pane] iframe').first();
+  // The page opens in Interact unless Annotate was turned on in this thread: a pin needs Annotate.
+  const pen = page.locator('[data-attachment-pane] [data-html-annotate-toggle]');
+  await expect(pen).toBeVisible();
+  if ((await pen.getAttribute('aria-pressed')) === 'false') await pen.click();
+  await expect(pen).toHaveAttribute('aria-pressed', 'true');
   await frame.getByRole('heading', { name: 'Dead-lettered charges' }).click();
   const composer = page.locator('[data-comment-popover]');
   await composer.locator('textarea').first().fill('Say how many are waiting.');

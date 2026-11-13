@@ -30,6 +30,7 @@ export interface FakeCodexLaunchState {
   refuseSecondTurn?: boolean;
   /** `thread/resume` is refused as another Codex holding the thread. */
   heldElsewhere?: boolean;
+  models?: { id: string; efforts: string[]; hidden?: boolean }[] | "fail";
   /** No `codex` at all: the script exits 127. */
   gone?: boolean;
 }
@@ -77,9 +78,10 @@ if (args[0] !== "app-server") { log({ event: "cli", argv: args }); process.exit(
 
 const env = {};
 for (const name of ["HOME", "CODEX_HOME", "PLANNOTATOR_DATA_DIR", "LOGIN_ONLY", "CODEX_THREAD_ID", "PLANNOTATOR_PORT"]) if (process.env[name] !== undefined) env[name] = process.env[name];
-log({ event: "start", argv: args, cwd: process.cwd(), env, overrides });
+let started = false;
+const logStart = () => { if (!started) { started = true; log({ event: "start", argv: args, cwd: process.cwd(), env, overrides }); } };
 let stopped = false;
-const stop = (why) => { if (stopped) return; stopped = true; log({ event: "stop", why }); process.exit(0); };
+const stop = (why) => { if (stopped) return; stopped = true; if (started) log({ event: "stop", why }); process.exit(0); };
 process.on("SIGTERM", () => stop("SIGTERM"));
 process.stdin.on("end", () => stop("stdin"));
 const send = (msg) => process.stdout.write(JSON.stringify(msg) + "\n");
@@ -134,6 +136,7 @@ function handle(msg) {
     if (pending) { asked.delete(msg.id); log({ event: "answer", method: pending.method, result: msg.result ?? { error: msg.error } }); pending.resolve(msg.result); }
     return;
   }
+  if (msg.method !== "initialize" && msg.method !== "initialized" && msg.method !== "model/list") logStart();
   log({ event: "call", method: msg.method, params: msg.params ?? {} });
   if (msg.id === undefined) return;
   const now = state();
@@ -142,6 +145,11 @@ function handle(msg) {
   const p = msg.params || {};
   switch (msg.method) {
     case "initialize": return reply({ userAgent: "codex/0.165.0", codexHome: process.env.CODEX_HOME || "" });
+    case "model/list": {
+      if (now.models === "fail") return fail("model catalog unavailable");
+      const models = now.models || [{ id: "gpt-6.1-sol", efforts: ["low", "medium", "high", "xhigh", "max", "ultra"] }, { id: "gpt-5.5", efforts: ["low", "medium", "high", "xhigh"] }];
+      return reply({ data: models.map((m, i) => ({ id: m.id, model: m.id, displayName: m.id, hidden: !!m.hidden, isDefault: i === 0, supportedReasoningEfforts: m.efforts.map((e) => ({ reasoningEffort: e, description: e })), defaultReasoningEffort: m.efforts[0] })), nextCursor: null });
+    }
     case "account/read": {
       const login = now.login || "chatgpt";
       return reply({ account: login === "none" ? null : login === "apikey" ? { type: "apiKey" } : { type: "chatgpt", email: "someone@example.com", planType: now.plan || "plus" }, requiresOpenaiAuth: true });

@@ -24,7 +24,7 @@
  *    (`link-back`, `unlink`).
  */
 
-import { inboxRowArchived, isInboxId, type InboxAgentsGroup, type InboxListRow, type InboxMachineAccountsRead } from "@plannotator/core/inbox-types";
+import { INBOX_LINKED_MARKS, inboxRowArchived, isInboxId, type InboxAgentsGroup, type InboxListRow, type InboxMachineAccountsRead } from "@plannotator/core/inbox-types";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { inboxSnoozeRefusal, inboxSnoozeRunning } from "@plannotator/core/inbox-snooze";
@@ -34,7 +34,7 @@ import { INBOX_MACHINE_WINDOW_ONLY_BODY, isWindowRequest } from "./inbox-cross-s
 import { INBOX_MACHINE_ACCOUNTS_MAX_BYTES, INBOX_MACHINE_ACCOUNTS_WAIT_MS, parsePeerAccounts } from "./inbox-accounts";
 import { buildLinkOffer, InboxLinks, parseLinkOffer, type InboxLinkRecord } from "./inbox-links";
 import { doorWriteKind, InboxOutbox, MACHINE_WINDOW_HEADER, type OutboxEntry } from "./inbox-outbox";
-import { farVersion, MACHINE_LINKS_PROTOCOL, parseFarUpdate, PEER_LINK_TIMINGS, PeerLink, readCapped, type PeerLinkTimings, type PeerRecord } from "./inbox-peer-link";
+import { farVersion, MACHINE_LINKS_PROTOCOL, parseFarUpdate, PEER_LINK_TIMINGS, PeerLink, readCapped, type PeerLinkTimings, type PeerRecord, type PeerRereadEvent } from "./inbox-peer-link";
 import { installCommandFor, isNewerStableVersion, normalizeStableVersion } from "@plannotator/shared/update-check";
 import { openTransport, type InboxTransportSpec } from "./inbox-transport";
 import { checkTailnetAddress } from "./inbox-transport-tailnet";
@@ -123,7 +123,7 @@ export interface InboxMachinesContext {
 export type MachineLinkTimings = Partial<PeerLinkTimings> & { updatedShownMs?: number; restartBackMs?: number; accountsMs?: number };
 
 /** A frame for the window's event stream: other machines' records and states never share the local seq (design review, change 2). */
-export type MachineFrame = { event: "machine"; data: PeerRecord } | { event: "machines"; data: { machines: MachineView[] } } | { event: "outbox"; data: OutboxView } | { event: "snoozes"; data: Record<string, never> } | { event: "deliveries"; data: { sessions?: boolean; agents?: boolean } };
+export type MachineFrame = { event: "machine"; data: PeerRecord } | { event: "machines"; data: { machines: MachineView[] } } | { event: "outbox"; data: OutboxView } | { event: PeerRereadEvent; data: Record<string, never> } | { event: "deliveries"; data: { sessions?: boolean; agents?: boolean } };
 
 /** How the window draws a machine's version (approval "inbox-machine-update"). */
 export interface MachineUpdateView {
@@ -257,6 +257,8 @@ export interface MachineView {
   snoozes: boolean;
   /** Its list was read and it keeps no snoozes: an older Inbox, said so instead of Snooze vanishing. A list not read yet says nothing. */
   snooze_old?: boolean;
+  /** The marks it takes for its own threads and agents (inbox-linked-marks): the window offers only those on its rows. Empty until its list is read, and for an older Inbox. */
+  marks: string[];
   /** Its version as the window draws it. Null: nothing to say. */
   update?: MachineUpdateView | null;
   /**
@@ -445,6 +447,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
       waiting: 0,
       list_cursor: null,
       snoozes: true,
+      marks: [...INBOX_LINKED_MARKS],
       launch: null,
       message_deletions: true,
     },
@@ -464,6 +467,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
         list_cursor: peer?.list?.cursor ?? null,
         snoozes: peer?.list?.snoozes ?? false,
         snooze_old: peer?.list ? !peer.list.snoozes : false,
+        marks: peer?.list?.marks ?? [],
         update: peer ? updateView(peer) : null,
         launch: peer?.launch ?? null,
         message_deletions: peer?.messageDeletions ?? false,
@@ -519,8 +523,8 @@ export function createInboxMachines(context: InboxMachinesContext) {
       timings: context.timings,
       onRecord: (record) => emit({ event: "machine", data: record }),
       onChange: machinesChanged,
-      // A snooze moves no cursor, so nothing in the machines block changes: the windows are told in a frame of its own.
-      onSnoozes: () => emit({ event: "snoozes", data: {} }),
+      // A snooze or a star moves no cursor, so nothing in the machines block changes: the windows are told in a frame of its own.
+      onReread: (event) => emit({ event, data: {} }),
       onDeliveries: ({ sessions, agents, labels }) => emit({ event: "deliveries", data: { ...(sessions ? { sessions: true } : {}), ...(agents ? { agents: true } : {}), ...(labels ? { labels: true } : {}) } }),
       onRevoked: () => forget(link.id),
     });
@@ -865,6 +869,8 @@ export function createInboxMachines(context: InboxMachinesContext) {
     if (peer.state === "online") peer.flush();
     else peer.poke();
     const settled = (await outbox.waitSettled(entry.key, peer.state === "online" ? MACHINE_WRITE_WAIT_MS : 0)) ?? entry;
+    // A state that landed is in that machine's list now: read it before answering, so the window's next read shows it.
+    if (settled.state === "delivered" && kind === "set") await peer.refreshList();
     return outboxAnswer(settled, fresh);
   };
 
@@ -1137,6 +1143,8 @@ export function createInboxMachines(context: InboxMachinesContext) {
     }
     return { labels, titles };
   };
+  /** Each linked machine's starred threads, in its own order, from a machine that takes stars from this one. */
+  const pinnedIds = (): string[] => [...peers.values()].flatMap((peer) => (peer.list?.marks.includes("star") ? peer.list.pins : []));
   const projectOwner = (projectId: string): string | null => {
     for (const peer of peers.values()) if (peer.list?.projects.some((p) => p.id === projectId)) return peer.id;
     return null;
@@ -1172,6 +1180,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
     agents,
     sessionNames,
     projectOwner,
+    pinnedIds,
     snoozeThread,
     /** The linked machine a device on this Inbox's door belongs to (a launch it starts here records it), or null. */
     machineOfDevice: (deviceId: string): { machine: string; name: string } | null => {
