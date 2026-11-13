@@ -44,10 +44,14 @@ export async function doorWorld(cleanups: ReturnType<typeof doorCleanups>) {
   writeFileSync(join(project, "secret.png"), "not for the cloud");
   const dataDir = join(root, "data");
   const relayBefore = process.env.PLANNOTATOR_RELAY_URL;
+  const dataBefore = process.env.PLANNOTATOR_DATA_DIR;
   process.env.PLANNOTATOR_RELAY_URL = "http://127.0.0.1:9";
+  process.env.PLANNOTATOR_DATA_DIR = dataDir;
   cleanups.push(() => {
     if (relayBefore === undefined) delete process.env.PLANNOTATOR_RELAY_URL;
     else process.env.PLANNOTATOR_RELAY_URL = relayBefore;
+    if (dataBefore === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
+    else process.env.PLANNOTATOR_DATA_DIR = dataBefore;
   });
   const logs: string[] = [];
   const start = () => startInboxServer({ dataDir, debug: true, phones: true, cloudWake: { gapMs: 50, timeoutMs: 2_000, log: (line) => logs.push(line) } });
