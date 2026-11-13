@@ -1,6 +1,10 @@
 import { HostMark, Icon, type IconName } from '../../icons';
 
-const SEES = ['It started', 'You sent it', 'You tagged it'];
+const SEES: { host: string; why: string }[] = [
+  { host: 'cloud-grok', why: 'It started' },
+  { host: 'claude-code', why: 'Another agent’s' },
+  { host: 'codex', why: 'Another project' },
+];
 
 const CANNOT: { icon: IconName; label: string }[] = [
   { icon: 'questionBubble', label: 'Answer your questions' },
@@ -15,17 +19,13 @@ export function HowLimits() {
       <div className="ib-chow-col">
         <span className="ib-chow-col-t">It sees</span>
         <div className="ib-chow-threads">
-          {SEES.map((why) => (
-            <span key={why} className="ib-chow-thread">
-              <HostMark host="cloud-grok" />
+          {SEES.map((thread) => (
+            <span key={thread.why} className="ib-chow-thread">
+              <HostMark host={thread.host} />
               <span className="ib-chow-bar" />
-              <span className="ib-chow-why">{why}</span>
+              <span className="ib-chow-why">{thread.why}</span>
             </span>
           ))}
-          <span className="ib-chow-thread ib-chow-hidden">
-            <Icon name="eyeOff" size={14} />
-            <span className="ib-chow-why">Your other threads</span>
-          </span>
         </div>
       </div>
       <div className="ib-chow-col">

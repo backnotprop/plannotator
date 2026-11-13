@@ -264,7 +264,7 @@ const pairStep = (kind: string): Step => ({
 const cloudTool = (name: string): Cell => ({
   level: 'yes',
   label: 'Through the relay',
-  detail: `${name} runs \`plannotator inbox call\` on its own computer to read and answer the threads you give it. Each call goes through the relay, sealed end to end.`,
+  detail: `${name} runs \`plannotator inbox call\` on its own computer to read and write across your Inbox. Each call goes through the relay, sealed end to end.`,
   src: 'CA:3,21,35,74-82; MU:3,40,104-116',
 });
 const cloudNo = (what: string): Cell => ({ level: 'no', label: 'No', detail: `A cloud agent has no ${what}: it can do what \`plannotator inbox call --help\` lists.`, src: 'CA:96; MU:134; NA:311' });
@@ -1521,7 +1521,6 @@ export const AGENTS: Agent[] = [
     limits: [
       { text: 'A thread wakes Grok Bot at most once a minute. Replies inside that minute go together, oldest first.', src: 'CL:17; NA:306' },
       { text: 'Files you attach in the Inbox don’t reach Grok Bot. A wake says how many there are.', src: 'CL:126; NA:305,311' },
-      { text: 'Grok Bot reads only the threads you give it.', src: 'CA:3' },
       { text: 'Your computer must be awake for Grok Bot to read. What it sends while the computer sleeps is posted when it is back, within 30 days.', src: 'CA:49,94' },
     ],
     examples: [
@@ -1581,7 +1580,7 @@ export const AGENTS: Agent[] = [
       { text: 'The 10-second check uses hooks in Muse’s runtime, which Meta doesn’t document and can change or remove at any time.', src: 'MU:69' },
       { text: 'Without the hook every check is one of Muse’s runs, about 288 a day.', src: 'MU:91' },
       { text: 'Files you attach in the Inbox don’t reach Muse.', src: 'NA:311' },
-      { text: 'Muse reads only the threads you give it. It can’t answer your own questions or approve anything for you.', src: 'MU:133' },
+      { text: 'Muse can’t answer your own questions or approve anything for you.', src: 'MU:133' },
       { text: 'Your computer must be awake for Muse to read. What Muse sends while it sleeps is posted when the computer is back.', src: 'MU:51,130' },
     ],
     examples: [

@@ -289,7 +289,7 @@ export interface InboxMcpContext extends InboxSnoozeMcpContext {
    * existing repository project holds the folder. Absent: search finds no
    * project for a path.
    */
-  findProjects?: (path: string) => Promise<{ projects: InboxProject[]; unresolved: boolean }>;
+  findProjects?: (path: string) => Promise<{ projects: InboxProject[]; unresolved: boolean; every?: boolean }>;
   /**
    * Whether the Inbox itself knows the sender's session is woken by the
    * person's reply, whatever its own connection said: a Claude Code, Pi or
@@ -1325,9 +1325,11 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
         if (found?.unresolved) {
           throw new InboxError("project_unresolved", "git did not answer in time, so this folder's project is not known yet. Nothing was listed; try the same call again.");
         }
-        const { project, projectIds } = found
-          ? { project: found.projects[0] ?? null, projectIds: new Set(found.projects.flatMap((p) => store.projectGroup(p.id))) }
-          : await threadReadScope(context, input.project_path);
+        const { project, projectIds } = found?.every
+          ? { project: null, projectIds: null }
+          : found
+            ? { project: found.projects[0] ?? null, projectIds: new Set(found.projects.flatMap((p) => store.projectGroup(p.id))) }
+            : await threadReadScope(context, input.project_path);
         const session = input.agent_session?.trim() || null;
         const askedBy = input.asked_by ?? (session ? "me" : "anyone");
         if (askedBy === "me" && !session) throw new InboxError("validation_error", "asked_by: \"me\" needs agent_session.");

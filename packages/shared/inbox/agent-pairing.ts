@@ -1,4 +1,6 @@
-export const INBOX_AGENT_CALL_ACTIONS = ["whoami", "read_thread", "send_message", "search", "resolve_message"] as const;
+import { INBOX_TOOL_ACTIONS } from "./connection";
+
+export const INBOX_AGENT_CALL_ACTIONS = ["whoami", ...INBOX_TOOL_ACTIONS] as const;
 
 export const INBOX_AGENT_PAIRING_PREFIX = "plannotator-pairing-1.";
 export const INBOX_AGENT_PAIRING_RELAY_PREFIX = "plannotator-pairing-2.";
