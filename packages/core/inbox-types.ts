@@ -621,6 +621,7 @@ export interface InboxMessage {
    */
   delivery?: InboxDelivery | null;
   taken_back_at?: string | null;
+  read_by_agent?: { session: string | null; at: string } | null;
   cloud_wake?: InboxCloudWake | null;
   /**
    * On a person's reply or message not yet delivered: the person pressed

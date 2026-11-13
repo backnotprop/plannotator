@@ -16,13 +16,11 @@ export interface InboxHandoverStore {
   readonly dir: string;
   message(id: string): InboxMessage | null;
   recipientOf(message: InboxMessage): { host: string | null; session: string } | null;
-  heldBy(message: InboxMessage): InboxHolder | null;
 }
 
 export interface InboxHandover {
   hand(item: InboxMessage, session: string, way: string): boolean;
   asked(items: readonly InboxMessage[], session: string): void;
-  read(ids: Iterable<string>, reader: string | null): void;
   giveBack(messageId: string, session: string): void;
   holder(message: InboxMessage): InboxHolder | null;
 }
@@ -67,12 +65,6 @@ export function createInboxHandover(store: InboxHandoverStore, now: () => number
       const until = now() + INBOX_ASK_HOLD_MS;
       for (const item of open) record(item.id, { session, way: "ask", until, batch });
     },
-    read(ids, reader) {
-      for (const id of ids) {
-        const item = store.message(id);
-        if (item?.author.kind === "person" && !store.heldBy(item)) hand(item, reader ?? "", "read");
-      }
-    },
     giveBack(messageId, session) {
       const left = (hands.get(messageId) ?? []).filter((h) => h.session !== session || h.until !== null);
       if (left.length > 0) hands.set(messageId, left);
@@ -84,7 +76,7 @@ export function createInboxHandover(store: InboxHandoverStore, now: () => number
       else hands.delete(message.id);
       const held = (by: InboxHolder["by"], session: string): InboxHolder => ({ by, session: session || null, host: hostOf(message, session) });
       const kept = standing.find((h) => h.until === null);
-      if (kept) return held(kept.way === "read" ? "read" : "handed", kept.session);
+      if (kept) return held("handed", kept.session);
       for (const session of new Set([...recipients(message), ...(sessions.get(message.id) ?? [])])) if (claimed(message.id, session)) return held("handed", session);
       return standing[0] ? held("handing", standing[0].session) : null;
     },
