@@ -7230,7 +7230,13 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                   onOpenOptionSet={(key, image, choice) => openOptionSet(message.id, key, image, choice)}
                   onTryPrototype={isAgent ? (key) => setProto({ messageId: message.id, key }) : undefined}
                   // PROPOSED WORDS, waiting on the owner's OK: "Picked" and "Recommended · in your draft" are the card's own words; together on this toast they are new.
-                  onAcceptedRecommended={(undo) => onToast?.({ icon: 'check', lead: 'Picked', detail: 'Recommended · in your draft', onUndo: undo })}
+                  onAcceptedRecommended={(undo) => {
+                    const onUndo = () => {
+                      onToastGone?.(onUndo);
+                      undo();
+                    };
+                    onToast?.({ icon: 'check', lead: 'Picked', detail: 'Recommended · in your draft', onUndo });
+                  }}
                   readOnly={!isAgent || !liveMessage(message) || questions.length === 0 || allSent}
                   answers={answersOf(message)}
                   onPick={(key, answer) => pick(message.id, key, answer)}
