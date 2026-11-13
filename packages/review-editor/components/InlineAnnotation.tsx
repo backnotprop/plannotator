@@ -8,7 +8,8 @@ import { isAgentGeneratedFinding } from '../utils/explainFinding';
 
 interface InlineAnnotationProps {
   metadata: DiffAnnotationMetadata;
-  language?: string;
+  /** The annotated file; a suggestion is coloured as the diff colours it. */
+  filePath?: string;
   isSelected?: boolean;
   onSelect: (id: string) => void;
   onEdit: (id: string) => void;
@@ -21,7 +22,7 @@ interface InlineAnnotationProps {
 /** Renders a single annotation comment inside the diff view */
 export const InlineAnnotation: React.FC<InlineAnnotationProps> = ({
   metadata,
-  language,
+  filePath,
   isSelected = false,
   onSelect,
   onEdit,
@@ -61,7 +62,7 @@ export const InlineAnnotation: React.FC<InlineAnnotationProps> = ({
       )}
       {metadata.suggestedCode && (
         <div className="mt-2">
-          <SuggestionBlock code={metadata.suggestedCode} originalCode={metadata.originalCode} language={language} />
+          <SuggestionBlock code={metadata.suggestedCode} originalCode={metadata.originalCode} filePath={filePath} />
         </div>
       )}
       <CommentActions
