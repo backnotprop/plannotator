@@ -137,6 +137,7 @@ packages/inbox/phoneStepping.test.tsx
 packages/inbox/htmlPageSize.test.tsx
 packages/inbox/imageSwipe.test.tsx
 packages/inbox/sharedPictureChoice.test.tsx
+packages/inbox/reaskPictureChoice.test.tsx
 packages/inbox/sameLabelChoices.test.tsx
 packages/inbox/fullScreenThread.test.tsx
 packages/inbox/fullScreenComposer.test.tsx
@@ -700,6 +701,7 @@ packages/review-editor/components/guide/GuideDiffControls.test.tsx
 packages/review-editor/components/ReviewHeaderMenu.test.tsx
 packages/inbox/prs/prsInReviews.test.tsx
 packages/inbox/prs/sheetTable.test.tsx
+packages/inbox/prs/sheetSelect.test.tsx
 packages/inbox/fileQuestionCards.test.tsx
 packages/inbox/agents/agentsSection.test.tsx
 packages/inbox/agents/faceFan.test.tsx
@@ -711,6 +713,7 @@ packages/inbox/agents/ownAgentIcons.test.tsx
 packages/inbox/agents/setAgentIcons.test.tsx
 packages/inbox/agents/animateAnyIcon.test.tsx
 packages/inbox/agents/agentRename.test.tsx
+packages/inbox/agents/linkedAgentFaces.test.tsx
 packages/review-editor/dock/panels/ReviewCallFlowPanel.states.test.tsx
 packages/review-editor/components/callTree/CallTree.test.tsx
 packages/review-editor/dock/panels/ReviewCallFlowPanel.callTree.test.tsx

@@ -18,17 +18,18 @@ export type AgentIconPlace = 'own' | 'sets';
  * between the two places. Picking an icon (or uploading one) shows its page (SelectedIcon.tsx) and keeps nothing until
  * "Use this icon" or "Animate it". Opened on the place of the icon the agent shows, it starts on that icon's page. One
  * size in both places, so a switch moves no edge; on a phone it is a full-height sheet. No shortcut: its keys are the
- * dialog's own.
+ * dialog's own. `shared`: a linked machine's agent (AgentMark.tsx): Sets alone, only its built-in sets, no switch,
+ * opened on the grid, and its pages without "Animate it".
  */
-export function AgentIconDialog({ place, agent, host, name, face, onClose }: { place: AgentIconPlace; agent: AgentFaceRef; host: string | null; name: string; face: AgentFace; onClose: () => void }) {
-  const [on, setOn] = useState<AgentIconPlace>(place);
+export function AgentIconDialog({ place, agent, host, name, face, shared = false, onClose }: { place: AgentIconPlace; agent: AgentFaceRef; host: string | null; name: string; face: AgentFace; shared?: boolean; onClose: () => void }) {
+  const [on, setOn] = useState<AgentIconPlace>(shared ? 'sets' : place);
   const uid = useId();
   const agentId = typeof agent === 'string' ? agent : agent.id;
   const places: { id: AgentIconPlace; label: string }[] = [
     { id: 'own', label: OWN_LABEL },
     { id: 'sets', label: SETS_LABEL },
   ];
-  const inUse = place === 'own' ? isOwnFace(face) : isSetFace(face);
+  const inUse = !shared && (place === 'own' ? isOwnFace(face) : isSetFace(face));
   const [page, setPage] = useState(inUse);
   // An icon picked in a grid: shown on its page, not kept.
   const [preview, setPreview] = useState<AgentFace | null>(null);
@@ -53,27 +54,29 @@ export function AgentIconDialog({ place, agent, host, name, face, onClose }: { p
         <h2 id={`${uid}-t`} dir="auto">
           {name}
         </h2>
-        <div className="ib-seg" role="tablist" aria-labelledby={`${uid}-t`}>
-          {places.map((p) => (
-            <button key={p.id} type="button" role="tab" className="ib-seg-o" data-on={on === p.id ? '' : undefined} aria-selected={on === p.id} data-agi-place={p.id} onClick={() => {
-                setOn(p.id);
-                toGrid();
-              }}>
-              {p.label}
-            </button>
-          ))}
-        </div>
+        {!shared && (
+          <div className="ib-seg" role="tablist" aria-labelledby={`${uid}-t`}>
+            {places.map((p) => (
+              <button key={p.id} type="button" role="tab" className="ib-seg-o" data-on={on === p.id ? '' : undefined} aria-selected={on === p.id} data-agi-place={p.id} onClick={() => {
+                  setOn(p.id);
+                  toGrid();
+                }}>
+                {p.label}
+              </button>
+            ))}
+          </div>
+        )}
         <button type="button" className="ib-btn ib-ghost ib-icon ib-agi-x" aria-label="Close" onClick={onClose}>
           <Icon name="x" />
         </button>
       </div>
-      <div className="ib-agi-body" role="tabpanel" tabIndex={-1}>
+      <div className="ib-agi-body" role={shared ? undefined : 'tabpanel'} tabIndex={-1}>
         {page && (preview || inUse) ? (
-          <SelectedIcon agent={agent} host={host} name={name} face={preview ?? face} previewing={!!preview} onBack={toGrid} onDone={onClose} />
+          <SelectedIcon agent={agent} host={host} name={name} face={preview ?? face} previewing={!!preview} shared={shared} onBack={toGrid} onDone={onClose} />
         ) : on === 'own' ? (
           <OwnIconsBody face={face} onPick={onPick} />
         ) : (
-          <SetsBody face={face} onPick={onPick} />
+          <SetsBody face={face} builtInOnly={shared} onPick={onPick} />
         )}
       </div>
     </Modal>

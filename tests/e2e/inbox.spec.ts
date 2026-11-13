@@ -101,7 +101,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   // PATH: this world's own bin and the system's tools, never the agents installed on the machine running the
   // spec (the first-run screen speaks about the agents it finds: none here). No test sandbox: Settings → Agents
   // reads the Claude Code setup this spec writes under HOME, which the sandbox's agent home would hide.
-  const env = { PATH: `${binDir}:/usr/bin:/bin`, HOME: home, PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9' };
+  const env = { PATH: `${binDir}:/usr/bin:/bin`, HOME: home, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: dataDir };
   // The first-run connect screen, not the tour's entry screen (inbox-tour.spec.ts proves that one).
   markTourDecided(dataDir);
   const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
@@ -585,9 +585,9 @@ test('Settings: in sections; Settings → Agents switches apply to the next sess
   await expect(page.getByRole('heading', { name: 'General', level: 1 })).toBeVisible();
   const nav = page.getByRole('navigation', { name: 'Settings sections' });
   await expect(nav.getByRole('link')).toHaveText(['General', 'Rows', 'Agents', 'Prompts', 'Devices', 'Machines', 'Accounts', 'Voice', 'Capabilities', 'Activity', 'Archived', 'Storage', 'About']);
-  await nav.getByRole('link', { name: 'Agents' }).click();
+  await nav.getByRole('link', { name: 'Agents', exact: true }).click();
   await expect(page).toHaveURL(/#settings\/agents$/);
-  await expect(nav.getByRole('link', { name: 'Agents' })).toHaveAttribute('aria-current', 'page');
+  await expect(nav.getByRole('link', { name: 'Agents', exact: true })).toHaveAttribute('aria-current', 'page');
   await expect(page.getByRole('heading', { name: 'Agents', level: 1 })).toBeFocused();
   const claudeSwitch = page.getByRole('switch', { name: 'Reaches the Inbox: Claude Code' });
   const piSwitch = page.getByRole('switch', { name: 'Reaches the Inbox: Pi' });
@@ -615,7 +615,7 @@ test('Settings: in sections; Settings → Agents switches apply to the next sess
   // Delete from Inbox, on threads and projects, is live since step 2 (proved in inbox-attachments.spec.ts).
   await expect(store.locator('[data-store-project="billing-svc"]').getByRole('button', { name: 'Delete from Inbox: billing-svc' })).toBeEnabled();
 
-  await nav.getByRole('link', { name: 'Agents' }).click();
+  await nav.getByRole('link', { name: 'Agents', exact: true }).click();
   await piSwitch.click();
   await expect(piSwitch).toHaveAttribute('aria-checked', 'true');
   await expect(page.getByText("Pi's next session").first()).toBeVisible();

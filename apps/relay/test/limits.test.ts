@@ -1,6 +1,9 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { Database } from "bun:sqlite";
+import { existsSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 import { braked } from "../src/brake";
-import { HELD_COMMANDS_MAX, HELD_COMMAND_BYTES_MAX } from "../src/limits";
+import { CREATE_LIMIT, CREATE_WINDOW_MS, HELD_COMMANDS_MAX, HELD_COMMAND_BYTES_MAX, takeCreate, type CreateWindow } from "../src/limits";
 import { dumpMailbox, sha256, sleep, startRelay, until, type Json, type Relay } from "./wrangler-relay";
 
 const PHONE = "dev_01K7LIMITSPHONE0000000000A";
@@ -104,6 +107,24 @@ describe("how much the relay holds, and who it turns away, under wrangler dev", 
     expect(await full.json()).toMatchObject({ code: "too_many_held", held_bytes_max: HELD_COMMAND_BYTES_MAX });
   }, 120_000);
 
+  test("every creation, a refused body too, counts in the client address's CreateBrake object", async () => {
+    const counts = () => {
+      const dir = join(relay.persist, "v3", "do", "plannotator-relay-CreateBrake");
+      const files = existsSync(dir) ? readdirSync(dir).filter((f) => f.endsWith(".sqlite") && f !== "metadata.sqlite") : [];
+      return files.map((f) => {
+        const db = new Database(join(dir, f), { readonly: true });
+        try {
+          return (db.query("SELECT count FROM brake").get() as { count: number }).count;
+        } finally {
+          db.close();
+        }
+      });
+    };
+    expect(counts()).toEqual([1]);
+    for (let i = 0; i < 2; i++) expect((await fetch(`${relay.url}/v1/mailboxes`, { method: "POST", body: "{}" })).status).toBe(400);
+    expect(counts()).toEqual([3]);
+  });
+
   test("the Worker turns strangers away before a mailbox wakes: no bearer, an unknown route, an oversize body", async () => {
     const never = "mbx_AAAAAAAAAAAAAAAAAAAAAA";
     for (const [method, path] of [
@@ -128,6 +149,7 @@ describe("how much the relay holds, and who it turns away, under wrangler dev", 
 
 describe("the creation brake", () => {
   const request = (host: string, ip: string | null) => new Request(`https://${host}/v1/mailboxes`, { method: "POST", headers: ip ? { "CF-Connecting-IP": ip } : {} });
+  // The rate limiting binding in production: approximate and cached per machine, so requests on separate connections pass it.
   const allow = { limit: async () => ({ success: true }) };
   const full = { limit: async () => ({ success: false }) };
   const broken = {
@@ -135,19 +157,54 @@ describe("the creation brake", () => {
       throw new Error("limiter down");
     },
   };
+  // A stand-in for the CreateBrake objects: one window per address, the object's own counting, a clock the test moves.
+  const objects = (clock: { now: number }) => {
+    const windows = new Map<string, CreateWindow>();
+    return (ip: string) => ({
+      take: async () => {
+        const next = takeCreate(windows.get(ip) ?? null, clock.now);
+        if (next.allowed) windows.set(ip, next.window);
+        return { allowed: next.allowed, retryAfter: next.retryAfter };
+      },
+    });
+  };
+  const downObject = () => ({
+    take: async (): Promise<{ allowed: boolean; retryAfter: number }> => {
+      throw new Error("object unreachable");
+    },
+  });
 
-  test("closed off loopback when it cannot brake: no binding, no client address, or a failing limiter", async () => {
-    for (const [limiter, ip] of [
-      [undefined, "203.0.113.9"],
-      [allow, null],
-      [broken, "203.0.113.9"],
+  test("the address's count refuses the 21st creation in a minute even when the binding lets every request through", async () => {
+    const clock = { now: 1_000_000 };
+    const counter = objects(clock);
+    for (let i = 0; i < CREATE_LIMIT; i++) expect(await braked(request("relay.example", "203.0.113.9"), allow, counter, 60)).toBeNull();
+    clock.now += 15_000;
+    const over = await braked(request("relay.example", "203.0.113.9"), allow, counter, 60);
+    expect(over?.status).toBe(429);
+    expect(over?.headers.get("retry-after")).toBe("45");
+    expect(await over!.json()).toEqual({ error: "too many requests", code: "too_many_requests" });
+    // Another address has its own count; the first is let in again once its window ends.
+    expect(await braked(request("relay.example", "198.51.100.7"), allow, counter, 60)).toBeNull();
+    clock.now += CREATE_WINDOW_MS - 15_000;
+    expect(await braked(request("relay.example", "203.0.113.9"), allow, counter, 60)).toBeNull();
+  });
+
+  test("closed off loopback when it cannot brake: no binding, no object, no client address, or either failing", async () => {
+    const counter = objects({ now: 0 });
+    for (const [limiter, objectsOf, ip] of [
+      [undefined, counter, "203.0.113.9"],
+      [allow, undefined, "203.0.113.9"],
+      [allow, counter, null],
+      [broken, counter, "203.0.113.9"],
+      [allow, downObject, "203.0.113.9"],
     ] as const) {
-      const answer = await braked(request("relay.example", ip), limiter, 60);
+      const answer = await braked(request("relay.example", ip), limiter, objectsOf, 60);
       expect(answer?.status).toBe(503);
       expect(((await answer!.json()) as Json).code).toBe("brake_unavailable");
     }
-    expect(await braked(request("relay.example", "203.0.113.9"), allow, 60)).toBeNull();
-    expect((await braked(request("relay.example", "203.0.113.9"), full, 60))?.status).toBe(429);
-    expect(await braked(request("127.0.0.1:8787", null), undefined, 60)).toBeNull();
+    const refused = await braked(request("relay.example", "203.0.113.9"), full, counter, 60);
+    expect(refused?.status).toBe(429);
+    expect(refused?.headers.get("retry-after")).toBe("60");
+    expect(await braked(request("127.0.0.1:8787", null), undefined, undefined, 60)).toBeNull();
   });
 });
