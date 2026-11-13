@@ -345,7 +345,7 @@ function CommentCard({ comment, layer, onFile }: { comment: InboxPullDetailComme
   );
 }
 
-export function PullDetails({ layer, description, headSha, data, failed, heldUntil = null, onRetry, forge, panel, phone, inDiff, onClose, onFile, top, keys, descriptionUnread = false }: {
+export function PullDetails({ layer, description, headSha, data, failed, heldUntil = null, onRetry, forge, panel, phone, inDiff, onClose, onFile, top, keys, descriptionUnread = false, headless = false }: {
   layer: InboxPull;
   description: string | null | undefined;
   headSha?: string | null;
@@ -366,6 +366,8 @@ export function PullDetails({ layer, description, headSha, data, failed, heldUnt
   keys?: Record<string, unknown>;
   /** The description has no other source than the details' read (the full review), and it failed: whether there is one is not known. */
   descriptionUnread?: boolean;
+  /** Laid in a page that already names the author, the branches and the forge (the launchpad): no head of its own, no Close. */
+  headless?: boolean;
 }) {
   const labelsId = useId();
   const [opened, setOpened] = useState<'people' | 'checks' | null>(null);
@@ -430,8 +432,8 @@ export function PullDetails({ layer, description, headSha, data, failed, heldUnt
     );
   };
   return (
-    <aside ref={panel as RefObject<HTMLElement>} className="ib-prd" aria-label="Details" tabIndex={-1} data-pull-details="" data-layout={phone ? 'column' : 'columns'} {...keys}>
-      <header className="ib-prd-head">
+    <aside ref={panel as RefObject<HTMLElement>} className="ib-prd" aria-label="Details" tabIndex={-1} data-pull-details="" data-layout={phone ? 'column' : 'columns'} data-headless={headless ? '' : undefined} {...keys}>
+      {!headless && <header className="ib-prd-head">
         <Face login={layer.author ?? ''} host={layer.host} size={32} />
         <div className="ib-prd-who">
           <Tip cut content={layer.author ?? DELETED}><b>{layer.author ?? DELETED}</b></Tip>
@@ -447,7 +449,7 @@ export function PullDetails({ layer, description, headSha, data, failed, heldUnt
         <Tip content="Close">
           <button type="button" className="ib-prd-iconbtn" aria-label="Close the details" onClick={onClose} data-pull-details-close=""><Icon name="x" size={15} /></button>
         </Tip>
-      </header>
+      </header>}
       <div className="ib-prd-body">
         {top && <div className="ib-prd-top">{top}</div>}
         {phone ? (

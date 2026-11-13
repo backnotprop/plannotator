@@ -2255,6 +2255,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
               copyText={toolbarState.selectionText}
               getRichCopy={getRichCopyEnabled() ? toolbarState.getRichCopy : undefined}
               touchAnchorRect={toolbarState.getAnchorRect}
+              touchSide={toolbarState.touchSide}
               hideCopyButton={!isTouchDevice}
               closeOnScrollOut
             />

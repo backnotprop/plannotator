@@ -6,7 +6,7 @@
  * linked: every label, line and filter needs a linked machine. Pure.
  */
 
-import type { InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
+import type { InboxLinkedMark, InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
 import { shortTime } from './format';
 import type { MachineView, OutboxView } from './api';
 import { windowProjectNames } from './projectLabels';
@@ -59,6 +59,15 @@ export function rowMachine(row: Pick<InboxListRow, 'machine'>, model: MachinesMo
 export function rowSnoozes(row: Pick<InboxListRow, 'machine'>, model: MachinesModel): boolean {
   const id = rowMachine(row, model);
   return id === null || model.linked.some((machine) => machine.id === id && machine.snoozes === true);
+}
+
+/**
+ * Whether a mark (approval "inbox-linked-marks") is offered on a row: this machine's own row always, a linked
+ * machine's only when its list says it takes that mark. One sent to an older Inbox would be refused there.
+ */
+export function machineTakes(row: Pick<InboxListRow, 'machine'>, model: MachinesModel, mark: InboxLinkedMark): boolean {
+  const id = rowMachine(row, model);
+  return id === null || model.linked.some((machine) => machine.id === id && (machine.marks ?? []).includes(mark));
 }
 
 /**

@@ -1,4 +1,5 @@
 import React, { useMemo } from 'react';
+import type { Block } from '../types';
 import { parseMarkdownToBlocks, groupBlocks, computeListIndices } from '../utils/parser';
 import { BlockRenderer } from './BlockRenderer';
 import { LocalLinkContext, type LocalLinkResolver } from './LocalLinkContext';
@@ -38,6 +39,8 @@ export interface RenderedMarkdownProps {
   preserveVideos?: boolean;
   /** With `resolveImage`: keep raw HTML's `<picture><source>` and `srcset`, each candidate resolved (see ResolvedResponsiveImagesContext). */
   responsiveImages?: boolean;
+  /** Optional host rendering for paragraphs; the fallback keeps the standard renderer. */
+  renderParagraph?: (block: Block, fallback: React.ReactNode) => React.ReactNode;
   /**
    * Optional: give headings slug ids (Viewer's slugger, GitHub dedup), so a
    * host can scroll to `#section` links. Absent/false, headings carry no id.
@@ -63,6 +66,7 @@ export const RenderedMarkdown: React.FC<RenderedMarkdownProps> = ({
   resolveImage,
   preserveVideos = false,
   responsiveImages = false,
+  renderParagraph,
   headingAnchors = false,
   softLineBreaks = false,
 }) => {
@@ -73,6 +77,10 @@ export const RenderedMarkdown: React.FC<RenderedMarkdownProps> = ({
     [blocks, headingAnchors],
   );
   const cb = { onImageClick, onOpenLinkedDoc, onOpenCodeFile, githubRepo, repoHost };
+  const renderBlock = (block: Block) => {
+    const fallback = <BlockRenderer block={block} headingAnchorId={headingSlugMap?.get(block.id)} {...cb} />;
+    return block.type === 'paragraph' && renderParagraph ? renderParagraph(block, fallback) : fallback;
+  };
 
   let body = (
     <div className={className}>
@@ -89,7 +97,7 @@ export const RenderedMarkdown: React.FC<RenderedMarkdownProps> = ({
             );
           })()
         ) : (
-          <BlockRenderer key={group.block.id} block={group.block} headingAnchorId={headingSlugMap?.get(group.block.id)} {...cb} />
+          <React.Fragment key={group.block.id}>{renderBlock(group.block)}</React.Fragment>
         ),
       )}
     </div>
