@@ -3118,3 +3118,26 @@ An `<img>` tag inside a table cell or a sentence is not an HTML block, so `Inlin
 
 - **New context `InlineImageTagsContext`** (`components/ImageResolverContext`, default `false`). With it `true` and an image resolver, an inline `<img>` goes through the resolver as `![alt](src)` does: `src` resolved, `unavailable` is the quiet chip. Only `src`, `alt`, `width` and `height` (whole numbers) are read; nothing else of the tag reaches the page.
 - **A host that provides nothing sees no change.** The Plannotator Inbox turns it on for a PR's text.
+
+## `RenderedMarkdown` `renderParagraph` and fullscreen in HTML frames (unreleased; one opt-in prop, fullscreen for every host)
+
+- **`RenderedMarkdown` `renderParagraph?: (block: Block, fallback: React.ReactNode) => React.ReactNode`**: called for each paragraph block, with the standard rendering as `fallback`. Return `fallback` to keep it. Absent: paragraphs render as before, with the same keys and DOM. Plannotator passes it only for a github.com PR description, where a paragraph that is only a bare `github.com/user-attachments` URL becomes a video player once the attachment proxy answers `video/*`.
+- **`HtmlViewer` and the fenced HTML embed frame now set `allowFullScreen` (no seam).** A video inside a rendered document or embed can enter fullscreen from its own control, which needs a user gesture. The sandbox tokens are unchanged. Every host gets this, Workspaces included.
+- Pinned by `review-editor/components/PRDescriptionVideo.test.tsx` (the prop), `components/html-embed/HtmlEmbedBlock.test.tsx` and `components/html-viewer/HtmlViewer.sandbox.test.tsx` (`allowfullscreen`).
+
+## Comment card: files, a host tool slot and a host-kept draft (unreleased; additive, opt-in, no core change)
+
+- **`UploadTransport.files?: boolean`** (`utils/upload`). Under a `CommentUploadContext` whose transport says `files: true`, the comment box's attachments button takes any file: a picture still opens `ImageAnnotator`; any other file uploads at once and is added as `ImageAttachment` with the new optional **`kind: 'file'`**. `ImageThumbnail` takes **`file?: boolean`** and draws a file tile instead of loading the path; `AnnotationPanel` and `CodeFilePopout` pass it. Exports print such entries under `**Attached files:**` (`utils/attachedLines`), pictures under `**Attached images:**` as before.
+- **`CommentCardToolsContext`** (`components/CommentCardTools`): a component the comment card draws in its tool row, given `{ textareaRef, phone, onBusyChange }`; Comment waits while it reports busy. The Plannotator Inbox puts its dictation mic there.
+- **`CommentDraftHostContext`** (`components/CommentDraftHost`, hook `hooks/useHostCommentDraft`): for a global comment with a `draftKey`, the box reads the host's draft on open (filling an empty box, else offering it), writes changes after 400 ms of quiet, and clears it on Comment, Discard, Ask AI and a spending extra action. A write the host answers with `{ conflict }` shows "This comment changed in another window" with Use that one / Keep mine (`data-comment-draft-conflict`); Keep mine writes with `force`.
+- **A host that provides none of these sees no change.**
+
+Pinned by `components/CommentPopover.hostDraft.test.tsx`.
+
+## Questions: `acceptBehavior`, a gentler Accept recommended (unreleased; additive, opt-in, no core change)
+
+- **A host that does nothing sees no change.** `QuestionBlock` takes an optional `acceptBehavior` (`Viewer` / `BlockRenderer` `questionAcceptBehavior`, type `QuestionAcceptBehavior`), each part off when absent:
+  - `asideWhileTyping`: Accept recommended is not drawn while a text field of the card has focus (the note, the Other field, a text question's answer); it is back once focus leaves the card's fields. A choice's radio or checkbox is not a field. The rule for when the button exists is unchanged.
+  - `keepOther`: on a pick-any question, a tap keeps the words typed under Other in the answer, beside the recommended ticks, and the button is then offered until the ticks alone are the recommended ones (PR #1913's rule, read on the ticks). Pick one and text questions never offer the button once Other or the answer holds words, so nothing changes there.
+  - `onAccepted(undo, { key, answer })`: called after a tap, with the question's key and the answer the tap set (so the host can tell when it is no longer current; `sameAnswerParts` is exported for that). `undo` puts back the answer from before it (picks, ticks, Other words, Skip; the note as it is now) and does nothing once the answer has changed since the tap. The card draws no Undo itself: the host shows it (the Plannotator Inbox: an Undo at the end of the card's status line).
+- Pinned by `components/blocks/QuestionBlock.acceptBehavior.test.tsx`.

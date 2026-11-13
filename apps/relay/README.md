@@ -24,7 +24,9 @@ A paired cloud agent (contract section 13, "Through the relay") is a device regi
 - A device may hold at most 50 commands or 64 MiB of them; past that a command answers `429 too_many_held`.
 - The Worker refuses a request before it wakes a mailbox when its route is unknown, it has no bearer where one is needed, or its body is too large by `Content-Length` (64 KiB, or 32 MiB and a little for a command).
 - On a device route, a device the mailbox does not hold answers `401` like a wrong secret, so nobody can probe which devices exist.
-- The creation brake fails closed off loopback: with no rate-limit binding, no `CF-Connecting-IP` or a failing limiter, creation answers `503 brake_unavailable`.
+- Mailbox creation is braked at 20 a minute per client address (`CF-Connecting-IP`; an IPv6 address counts by its /64, so one host cannot rotate through its block), in two steps: Cloudflare's rate limiting binding first, a cheap filter whose counts are approximate and cached per machine (requests on separate connections pass it well over 20), then that address's `CreateBrake` Durable Object (`src/create-brake.ts`), one count in a fixed 60 s window wherever the request lands. Over either: `429 too_many_requests` with `Retry-After`. The object keeps one row (the window's start and count, never the address) and deletes it when the window ends.
+- The Worker answers a plain-http request with a bare `403` and no body, on every route (the zone's Always Use HTTPS redirect is a dashboard setting; this holds without it); only `wrangler dev` on loopback is served over http, and the proof runs it with `--upstream-protocol https` because it rewrites the URL to the custom domain.
+- The creation brake fails closed off loopback: with no rate-limit binding, no `CreateBrake` binding, no `CF-Connecting-IP`, or either failing, creation answers `503 brake_unavailable`.
 - A cloud agent's signal address is a secret inside a URL. Anything that logs URLs (Cloudflare request logs, Logpush, a proxy on the agent's side) keeps it, and whoever holds it learns that something changed in that agent's threads, and when; nothing more. Leave URL logging off, or redact `/signals/`.
 - The signal's limit of 20 reads a minute is counted in the mailbox object's memory, so it starts again whenever Cloudflare unloads the object. It is a brake, not a quota.
 - Not done: mailbox ids that prove themselves (`mbx_` plus random bytes plus a short HMAC under a Worker secret, checked by the Worker before it wakes an object). Today any well-formed id wakes an object, which stores nothing for an id never made. Adding it means a new Worker secret, a longer id the pairing string and `relay.json` must accept, and keeping today's ids working until their Inboxes make new mailboxes.
@@ -42,6 +44,10 @@ wrangler deploy
 ```
 
 `FCM_SERVICE_ACCOUNT` is the key file Google's console downloads for a service account of the Firebase project (it names `project_id`, `client_email`, `private_key_id` and `private_key`); the account needs permission to send through the Firebase Cloud Messaging API. Pipe the file in (`wrangler secret put FCM_SERVICE_ACCOUNT < key.json`) and keep it out of the repository.
+
+`wrangler deploy` also applies the Durable Object migrations in `wrangler.toml` (`v1` the mailboxes, `v2` the `CreateBrake` counts). To check the brake after a deploy, send 21 or more creates with an invalid body (`-d '{}'`), one `curl` per request so each opens its own connection: the first 20 answer `400`, the rest `429` until the minute ends.
+
+After a deploy, `./live-check.sh` (not part of CI) checks the live relay: its plain answers, https only, a wrong token gets 401 or 404, and the creation brake answers 429; it makes no mailbox and leaves no data. Run it at most once a minute: it spends that minute's creations from your address.
 
 No workflow deploys it, and no workflow holds a Cloudflare, Apple or Google secret. Without `APNS_KEY` the relay runs and every push to an APNs token answers `no_apns_key`; without `FCM_SERVICE_ACCOUNT` every push to an FCM token answers `no_fcm_key`.
 

@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type MouseEvent, type ReactNode, type RefObject } from 'react';
 import { KeyboardSettings } from './KeyboardSettings';
-import { INBOX_SOUND_MAX_VOLUME, INBOX_SOUND_MIN_VOLUME, INBOX_TEXT_SIZES } from '@plannotator/core/inbox-types';
+import { INBOX_TEXT_SIZES } from '@plannotator/core/inbox-types';
 import type { InboxSound } from '../sound';
+import { SoundRow, Switch } from './SoundRow';
 import { tailnetGuest, type AgentToolHost, type InboxCookieHost, type InboxExperimentalSettings, type InboxStorageModel, type MachineView, type SettingsModel } from '../api';
 import { cookieHostDescription } from '@plannotator/ui/hooks/useCookieHostSetting';
 import { formatBytes, formatCount, plural, tildePath } from '../format';
@@ -16,6 +17,9 @@ import type { InboxAgentsModel, InboxNotifyReach } from '@plannotator/core/inbox
 import type { TestResult } from '../notify';
 import { blockedSteps, browserName, isMac, notifyStatusKind, notifyStatusText, reachText, testMissHint } from '../notifyStatus';
 import { DevicesSection, devicesNeedAttention, usePhones } from './Devices';
+import { CloudAgentsSection } from '../cloud/CloudAgents';
+import { useCloudAgentsGate } from '../cloud/useCloudAgentsGate';
+import { CloudHowButton } from '../cloud/how/CloudHowButton';
 import { MachinesSection } from './Machines';
 import { SidebarTrigger } from '../shell/sidebar';
 import { useInboxPalettes, useInboxTheme } from '../theme';
@@ -50,6 +54,7 @@ const SECTION_ICON: Record<SettingsSection, IconName> = {
   general: 'settings',
   rows: 'contents',
   agents: 'chip',
+  'cloud-agents': 'cloud',
   accounts: 'user',
   prompts: 'prompt',
   devices: 'phone',
@@ -204,82 +209,6 @@ function CookieHostGroup({ cookieHost, remote, onToggle }: { cookieHost: InboxCo
         </div>
       </div>
     </section>
-  );
-}
-
-/** A row's switch, named by its visible title. */
-function Switch({ on, labelledBy, label, disabled, onClick }: { on: boolean; labelledBy?: string; label?: string; disabled?: boolean; onClick: () => void }) {
-  return <button type="button" role="switch" className="ib-sw" aria-checked={on} aria-labelledby={labelledBy} aria-label={label} disabled={disabled} onClick={onClick} />;
-}
-
-/**
- * The question sound (design of record: .product/approved/inbox-sound/): one
- * row, "Play a sound · when an agent asks you", then the volume, Play and
- * the switch. Off, the slider is disabled and Play still plays. Letting go of
- * the slider plays the sound once at the new level. Before the first click in
- * the tab, one line says Chrome needs it.
- */
-function SoundRow({ sound }: { sound: InboxSound }) {
-  const { enabled, volume } = sound.settings;
-  const [live, setLive] = useState(volume);
-  const slider = useRef<HTMLInputElement>(null);
-  const soundRef = useRef(sound);
-  soundRef.current = sound;
-  useEffect(() => setLive(volume), [volume]);
-  // React's onChange is the input event; letting go is the native change event.
-  useEffect(() => {
-    const el = slider.current;
-    if (!el) return;
-    const release = () => {
-      const next = Number(el.value);
-      soundRef.current.preview(next);
-      void soundRef.current.setVolume(next);
-    };
-    el.addEventListener('change', release);
-    return () => el.removeEventListener('change', release);
-  }, []);
-  return (
-    <>
-      <div className="ib-prow" data-settings-sound={enabled ? 'on' : 'off'}>
-        <span className="ib-txt">
-          <span className="ib-l" id="ib-sound-label">
-            Play a sound
-          </span>
-          <span className="ib-desc">When an agent asks you, while no Inbox tab is in front</span>
-        </span>
-        <span className="ib-ctl">
-          <input
-            ref={slider}
-            type="range"
-            className="ib-vslider"
-            min={INBOX_SOUND_MIN_VOLUME}
-            max={INBOX_SOUND_MAX_VOLUME}
-            step={10}
-            value={live}
-            aria-label="Volume"
-            aria-valuetext={`${live} percent`}
-            disabled={!enabled}
-            onChange={(event) => setLive(Number(event.target.value))}
-          />
-          <button
-            type="button"
-            className="ib-btn ib-sm ib-icon"
-            aria-label={sound.playing ? 'Playing…' : 'Play the sound'}
-            data-sound-play=""
-            onClick={() => sound.preview(live)}
-          >
-            <Icon name="play" />
-          </button>
-          <Switch on={enabled} labelledBy="ib-sound-label" onClick={() => void sound.setEnabled(!enabled)} />
-        </span>
-      </div>
-      {enabled && !sound.armed && (
-        <div className="ib-callout ib-in-card" role="status" data-sound-click-hint="">
-          <Icon name="clickHere" />
-          <span>Click once in this tab to allow sound.</span>
-        </div>
-      )}
-    </>
   );
 }
 
@@ -835,9 +764,11 @@ function AgentsSection({
 }) {
   if (agents && onAgents) {
     return (
-      <section className="ib-sgroup" aria-label="Agents">
-        <AgentsSettings model={agents} onModel={onAgents} context={context} launch={settings.launch ?? null} />
-      </section>
+      <>
+        <section className="ib-sgroup" aria-label="Agents">
+          <AgentsSettings model={agents} onModel={onAgents} context={context} launch={settings.launch ?? null} />
+        </section>
+      </>
     );
   }
   const env = settings.inbox_tool.env;
@@ -846,8 +777,8 @@ function AgentsSection({
       <section className="ib-sgroup" aria-labelledby="ib-g-tool">
         <h2 id="ib-g-tool">The Inbox in your agent&apos;s tools</h2>
         <p>
-          Lets an agent send, read and wait for replies from its own tool list. Pi, OpenCode, DeepSeek Harness, Cline, OpenClaw and Hermes Agent send every tool&apos;s definition with each request, so they start
-          off.
+          Lets an agent send, read and wait for replies from its own tool list. Pi, OpenCode, DeepSeek Harness and Cline send every tool&apos;s definition with each request, so they start off. OpenClaw and
+          Hermes Agent start off too, until you turn them on here or <code>plannotator inbox</code> does.
         </p>
         {env !== null && (
           <div className="ib-callout" data-tool-locked="">
@@ -990,6 +921,7 @@ const LEDE: Record<SettingsSection, string> = {
   // Rows draws its own lede, with Undo and Reset beside it (RowsSettings.tsx).
   rows: '',
   agents: "How each agent on this computer reaches the Inbox and learns when to use it. A change applies to that agent's next session; sessions already running keep what they started with.",
+  'cloud-agents': 'An agent in the cloud or on a server, such as a Claude Code routine, Grok Bot, Muse, Hermes Agent or OpenClaw, that reads and answers its threads here.',
   accounts: '',
   prompts: "What Plannotator tells your agents. A change applies to each agent's next session.",
   devices: 'Your phone, and browsers on your other devices.',
@@ -1037,7 +969,9 @@ export function SettingsPage(props: SettingsPageProps) {
     onRetry,
     phone = false,
   } = props;
-  const section: SettingsSection | null = props.section ?? (phone ? null : 'general');
+  const asked: SettingsSection | null = props.section ?? (phone ? null : 'general');
+  const cloud = useCloudAgentsGate(settings !== null, asked);
+  const section: SettingsSection | null = asked === 'cloud-agents' && cloud.shown === false ? 'agents' : asked;
   // Settings → Storage's sizes walk every file on the server, so they are read only here, each time Storage is shown.
   // The calm wait: nothing moves, and words show only when the count takes longer than STORE_SLOW_MS. Numbers that
   // come after a wait fade in; numbers kept from an earlier visit are there at once.
@@ -1126,7 +1060,7 @@ export function SettingsPage(props: SettingsPageProps) {
   const voice = useVoiceSettings();
   const [look] = useListLook();
   const sections = SETTINGS_SECTIONS.filter(
-    (id) => (id !== 'capabilities' || board !== null || steps !== null || codeReview !== null || shape !== null || bro !== null || floatDrafts !== null || experimental !== null) && (id !== 'machines' || machines.length > 0) && (id !== 'voice' || voice !== null),
+    (id) => (id !== 'capabilities' || board !== null || steps !== null || codeReview !== null || shape !== null || bro !== null || floatDrafts !== null || experimental !== null) && (id !== 'cloud-agents' || cloud.shown === true) && (id !== 'machines' || machines.length > 0) && (id !== 'voice' || voice !== null),
   );
   /** The phone's list of sections, in its groups: settings (Capabilities last of them), then your data and Plannotator. */
   const phoneGroups: { label: string; ids: SettingsSection[] }[] = [
@@ -1173,6 +1107,8 @@ export function SettingsPage(props: SettingsPageProps) {
         const on = TOOL_HOSTS.filter(({ host }) => settings.inbox_tool.hosts[host]).map(({ name }) => name);
         return on.length === 0 ? 'Off' : on.length === 1 ? on[0]! : `${on.length} agents`;
       }
+      case 'cloud-agents':
+        return cloud.count > 0 ? plural(cloud.count, 'agent') : '';
       case 'rows':
         return rowsSummary(look);
       case 'accounts':
@@ -1227,6 +1163,9 @@ export function SettingsPage(props: SettingsPageProps) {
         break;
       case 'agents':
         body = <AgentsSection settings={settings} context={context} onToggleTool={onToggleTool} agents={props.agents} onAgents={props.onAgents} />;
+        break;
+      case 'cloud-agents':
+        body = <CloudAgentsSection />;
         break;
       case 'accounts':
         body = <AccountsSection machine={machines.find((machine) => machine.self)?.name} />;
@@ -1409,7 +1348,14 @@ export function SettingsPage(props: SettingsPageProps) {
             </a>
           </div>
         )}
-        {section === 'accounts' && settings ? (
+        {section === 'cloud-agents' && settings ? (
+          <div className="ib-spg-h">
+            <h1 ref={heading} tabIndex={-1}>
+              {SETTINGS_SECTION_LABEL[section]}
+            </h1>
+            <CloudHowButton />
+          </div>
+        ) : section === 'accounts' && settings ? (
           // Accounts' Refresh reads every machine, so it sits by the page's title (approval "accounts-page").
           <div className="ib-spg-h">
             <h1 ref={heading} tabIndex={-1}>
