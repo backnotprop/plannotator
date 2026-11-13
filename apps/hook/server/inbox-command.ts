@@ -54,6 +54,8 @@ import { isNewerStableVersion } from "@plannotator/shared/update-check";
 import { inboxDir } from "@plannotator/shared/inbox/schema";
 import {
   acquireInboxStartLock,
+  inboxStartLockStale,
+  joinInboxStartLock,
   INBOX_START_LOCK,
   INBOX_START_LOCK_STALE_MS,
   inboxRegistryPath,
@@ -149,7 +151,7 @@ export function detachedInboxEnv(env: Readonly<Record<string, string | undefined
 }
 
 /**
- * Wait for the Inbox to answer as running; null on timeout. With the SQLite switch on (off for everyone), an Inbox
+ * Wait for the Inbox to answer as running; null on timeout. With the SQLite switch on (off by default), an Inbox
  * still moving its records into SQLite is waited for past the usual 20 s, for as long as the move runs (up to
  * `INBOX_UPGRADE_WAIT_MAX_MS`) and the usual wait again after it (the start goes on once the move is done), and
  * past 2 s the move is said once on stderr: the window cannot, the server is not listening yet.
@@ -380,6 +382,8 @@ async function serveInbox(dataDir: string, open: boolean, htmlContent: string | 
   // two people (or a person and an agent) never start two writers on one store.
   const lockHeldByStarter = process.env[LOCK_HELD_ENV] === "1";
   delete process.env[LOCK_HELD_ENV];
+  // Held for this start now too: a starter that exits early never makes it look abandoned.
+  if (lockHeldByStarter) joinInboxStartLock(dataDir);
   const release = lockHeldByStarter ? null : acquireInboxStartLock(dataDir);
   if (!lockHeldByStarter && !release) {
     const running = await waitUntilRunning(dataDir);
@@ -575,7 +579,7 @@ async function statusCommand(dataDir: string, asJson: boolean): Promise<number> 
 /**
  * A start lock another starter holds: wait for its start to finish (it
  * releases the lock), so what it starts is the Inbox this command then
- * stops. One older than the stale age (a starter that died) is removed.
+ * stops. A stale one (its holders gone, or older than the stale age) is removed.
  * Answers whether a stale one was removed.
  */
 async function waitOutStartLock(dataDir: string): Promise<boolean> {
@@ -583,13 +587,13 @@ async function waitOutStartLock(dataDir: string): Promise<boolean> {
   // A lock kept fresh this long (a restart refreshes its own) is left to its holder; the stop goes on.
   const deadline = Date.now() + 2 * INBOX_START_LOCK_STALE_MS;
   for (;;) {
-    let age: number;
+    let stale: boolean;
     try {
-      age = Date.now() - statSync(lock).mtimeMs;
+      stale = inboxStartLockStale(dataDir);
     } catch {
       return false;
     }
-    if (age > INBOX_START_LOCK_STALE_MS) {
+    if (stale) {
       rmSync(lock, { recursive: true, force: true });
       return true;
     }

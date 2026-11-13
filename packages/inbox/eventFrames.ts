@@ -1,9 +1,31 @@
-import type { InboxHealth, InboxNotifyReach, InboxRestartAgents } from '@plannotator/core/inbox-types';
-import { idsIn, INBOX_EVENT_FRAMES, localIdsIn, type InboxEvent, type InboxEventFrame, type InboxEventWindow, type MachineRecordFrame, type MachineView, type OutboxView, type TailscaleSettings, type UpdateCheckFailing } from './api';
+import type { InboxHealth, InboxNotifyReach, InboxRestartAgents, InboxWindowPermission } from '@plannotator/core/inbox-types';
+import { idsIn, localIdsIn, type InboxEvent, type MachineView, type OutboxView, type TailscaleSettings, type UpdateCheckFailing } from './api';
 import { inboxUrl, rememberLocal, rememberMachine } from './inboxUrl';
 import { browserSharedEventsEnv, sharedInboxEventsSupported, subscribeOwnInboxEvents, subscribeSharedInboxEvents } from './sharedEvents';
 import { parseRestartAgents } from './restartAgents';
 import { readHello, type RestartHello } from './sessionAdopt';
+
+
+export interface MachineRecordFrame {
+  machine: string;
+  seq: number;
+  live: boolean;
+  record: InboxEvent | null;
+}
+
+export interface InboxEventWindow {
+  id: string;
+  permission: InboxWindowPermission;
+  origin: string;
+}
+
+export const INBOX_EVENT_FRAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'ask', 'pins', 'priority', 'artifact-pins', 'tags', 'show', 'snoozes', 'thread-pulls', 'rows', 'sidebar', 'agent-faces', 'reactions', 'capabilities', 'tailscale', 'shapes', 'machine', 'machines', 'outbox', 'heartbeat'] as const;
+export type InboxEventFrameName = (typeof INBOX_EVENT_FRAMES)[number];
+export interface InboxEventFrame {
+  name: InboxEventFrameName;
+  data: string;
+  id: string | null;
+}
 
 export interface InboxEventHandlers {
   onRecord: (event: InboxEvent | null) => void;
@@ -14,6 +36,7 @@ export interface InboxEventHandlers {
   onDrafts?: (threadId: string | null) => void;
   onAsk?: (threadId: string) => void;
   onPins?: () => void;
+  onPriority?: () => void;
   onArtifactPins?: () => void;
   onTags?: () => void;
   onShow?: (threadId: string, windowId: string) => void;
@@ -77,6 +100,9 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
     }
     case 'pins':
       handlers.onPins?.();
+      return;
+    case 'priority':
+      handlers.onPriority?.();
       return;
     case 'artifact-pins':
       handlers.onArtifactPins?.();

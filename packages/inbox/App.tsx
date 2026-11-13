@@ -80,8 +80,8 @@ import { flatRows, readListView, useListView, type ListSort } from './listView';
 import { useShowLight, type ListEdge } from './showLight';
 import { appliedFilter, filterListSections, localDay, pickCount, settledHeldRead, useListFilter } from './listFilter';
 import { ListFilterEmpty, clearedFrom } from './components/ListFilter';
-import { addOwnThreads, adoptKeepingOpen, drawnSection, filterSections, heldNews as heldNewsOf, heldNotice, listGroups, lookedRow, markHeldRowArchived, markHeldRowLooked, putReadRowBack, putRowBack, refreshHeldRows, replaceHeldRow, goneRows, hasRows, withoutRows, settleOwn, settlesOnBack, settleThread, showBroughtIn, showLandsIn, snoozeChangedRows, waitingCount, type OpenThread } from './held';
-import { inboxSnoozeDelay, inboxSnoozeRunning, inboxSnoozeWhen, type InboxRowSnooze } from '@plannotator/core/inbox-snooze';
+import { addOwnThreads, adoptKeepingOpen, drawnSection, filterSections, heldNews as heldNewsOf, heldNotice, listGroups, lookedRow, markHeldRowArchived, markHeldRowLooked, goneRows, hasRows, withoutRows, priorityChangedRows, putReadRowBack, putRowBack, refreshHeldRows, replaceHeldRow, settleOwn, settlesOnBack, settleThread, showBroughtIn, showLandsIn, snoozeChangedRows, waitingCount, type OpenThread } from './held';
+import { inboxSnoozeDelay, inboxSnoozeRunning, type InboxRowSnooze } from '@plannotator/core/inbox-snooze';
 import { deliveriesReadList } from './rowDelivery';
 import { inboxAgentsWatched, setInboxAgents, useAgentListFilter } from './agentsList';
 import { filterAgentRows } from './agents/model';
@@ -179,11 +179,14 @@ import { saveTour as saveTourChange, TOUR_DECIDED_COOKIE } from './tour/saveTour
 import { focusFirst, landFocusAfterTour } from './focusLanding';
 import { useThreadTagsHost } from './useThreadTagsHost';
 import { projectWrites } from './projectWrites';
+import { priorityWrites } from './priorityWrites';
+import { snoozeWrites } from './snoozeWrites';
 import { errorToast } from './toastError';
 import { canToggleRead, confirmSetAside, MARK_READ_LOOK_WAIT_MS, MARK_READ_UNDO_MS, MARK_UNREAD_RETRY_WAIT_MS, markReadToast, markUnreadToast, offersRowMarkRead, seenHeldInNew, setAsideCount, setAsideOf, type SetAsideAnswer, type SetAsideCount, warnsBeforeRead } from './markRead';
 import { MarkReadWarning } from './components/MarkReadWarning';
 import { threadLink, type RowMenuAction } from './rowMenu';
 import { movePin, sameMachinePins, unpinnedWhere } from './pins';
+import { priorityAction } from './priority';
 import { noteStarred } from './starPop';
 import type { PinnedAction } from './components/PinnedRow';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
@@ -212,7 +215,7 @@ import { ComposeDialog, type ComposeHeld, type ComposeJoined, type ComposeReques
 import { heldLaunchToast } from './compose/heldLaunch';
 import { ArtifactsWall } from './components/ArtifactsWall';
 import { readArtifactPins } from './artifactPins';
-import { hearAgentFacesEvent, readAgentFaces } from './agents/agentFaces';
+import { hearAgentFacesEvent, onAgentFaceRefused, readAgentFaces } from './agents/agentFaces';
 import { DraftsPage } from './compose/DraftsPage';
 import { BoardPage, type BoardMove } from './board/BoardPage';
 import { PullsPage, ReviewsOff } from './pulls/PullsPage';
@@ -222,6 +225,7 @@ import { SheetPage, type SheetView } from './prs/SheetPage';
 import { sheetModel, tileOpens } from './prs/sheetModel';
 import { StackPage } from './prs/StackPage';
 import { useSheetPulls } from './prs/useSheetPulls';
+import { sheetLayoutHash, sheetLayoutOf, type SheetLayout } from './prs/tableModel';
 import { inboxPullIsOpen, inboxPullStacks } from '@plannotator/core/inbox-types';
 import { repoLabels } from './pulls/labels';
 import { pullFilterOf, type PullFilter } from './pulls/model';
@@ -316,8 +320,9 @@ configurePlannotatorUI({
   // On a phone the selection toolbar sits below the selection, clear of iOS's own edit menu, inside the screen,
   // with thumb-sized buttons (utils/touchToolbarPlacement).
   touchSelectionToolbar: true,
-  // Hover cards for issue, PR and MR links: the server fetches with this computer's gh or glab (ref-cards.ts).
-  // Given up after REF_CARD_READ_MS (the card then shows what the Inbox knows), so no read holds a connection for good.
+  // Hover cards for issue, PR and MR links: the server fetches with this computer's gh or glab, and Bitbucket Cloud
+  // pull requests with the review app's Bitbucket token (ref-cards.ts). Given up after REF_CARD_READ_MS (the card then shows what the Inbox knows), so no read holds a connection for good.
+  refCardBitbucket: true,
   refCardTransport: inboxRefTransport((href, signal) => {
     const within = signalWithin(REF_CARD_READ_MS, signal);
     return fetch(inboxUrl(`/ref?url=${encodeURIComponent(href)}`), { signal: within.signal, headers: { accept: 'application/json' } }).finally(within.done);
@@ -425,6 +430,8 @@ interface Route {
    * the Sheet goes to Reviews there; `#prs` itself is a phone's way in (Reviews' "Pull requests" row).
    */
   prsView?: SheetView;
+  /** Grid or Table (`&layout=table`). */
+  prsLayout?: SheetLayout;
   prsFrom?: 'sheet' | 'stack' | 'reviews';
   /** The Artifacts wall on Pinned (`#artifacts=pinned`; approval "inbox-artifact-stars"); All is `#artifacts`. */
   pinned?: boolean;
@@ -554,6 +561,7 @@ function routeOf(fullHash: string): Route {
       project: null,
       thread: null,
       prsView: params.get('state') === 'merged' ? 'merged' : 'open',
+      prsLayout: sheetLayoutOf(params.get('layout')),
       stack,
       layer,
       scope: layer && params.get('scope') === 'stack' ? 'stack' : 'layer',
@@ -638,6 +646,7 @@ function hashOf(route: Route): string {
     hash =
       'prs' +
       (route.prsView === 'merged' ? '&state=merged' : '') +
+      sheetLayoutHash(route.prsLayout) +
       (route.stack ? `&stack=${encodeURIComponent(route.stack)}` : '') +
       (route.stack && route.layer ? `&layer=${encodeURIComponent(route.layer)}${route.scope === 'stack' ? '&scope=stack' : ''}${route.prsFrom === 'sheet' ? '&from=sheet' : route.prsFrom === 'reviews' ? '&from=reviews' : ''}` : '');
   else if (route.page === 'tour') hash = `tour=${route.step ?? 1}`;
@@ -1696,24 +1705,25 @@ function Inbox() {
       return null;
     }
   }, [armSlide, sortedWhole, queryClient, settleHeldRead]);
-  /**
-   * The list read again after a snooze changed or ran out, whichever said so first (`event: snoozes`, or this
-   * window's clock). With no thread open only the rows whose snooze changed move (held.ts `snoozeChangedRows`), each
-   * alone and with the settle's slide; nothing is sorted whole, so the person's pending reads and archives keep their
-   * places (approval "inbox-list-view", R7) and a return by the clock waits behind "N new".
-   */
+  const settleChanged = useCallback(
+    (next: ListModel | null, changed: (drawn: InboxListSection[], groups: InboxListSection[]) => string[]) => {
+      const drawn = shownRef.current;
+      if (routeRef.current.thread || !next || !drawn) return;
+      const groups = listGroups(next);
+      const moving = changed(drawn, groups);
+      if (moving.length === 0) return;
+      armSlide();
+      setShown((current) => (current ? moving.reduce((list, threadId) => settleThread(list, groups, threadId), current) : current));
+    },
+    [armSlide],
+  );
   const refreshSnoozes = useCallback(async () => {
     const next = await refreshList(false);
     if (next) flushNotifications(next);
     void refreshDecisions();
-    const drawn = shownRef.current;
-    if (routeRef.current.thread || !next || !drawn) return;
-    const groups = listGroups(next);
-    const moving = snoozeChangedRows(drawn, groups);
-    if (moving.length === 0) return;
-    armSlide();
-    setShown((current) => (current ? moving.reduce((list, threadId) => settleThread(list, groups, threadId), current) : current));
-  }, [refreshList, flushNotifications, refreshDecisions, armSlide]);
+    settleChanged(next, snoozeChangedRows);
+  }, [refreshList, flushNotifications, refreshDecisions, settleChanged]);
+  const refreshPriority = useCallback(async () => settleChanged(await refreshList(false), priorityChangedRows), [refreshList, settleChanged]);
 
   /**
    * Seen on sight (seenOnSight.ts): messages that arrived in the open thread
@@ -2255,6 +2265,7 @@ function Inbox() {
       }, delay);
     };
     let snoozesTimer: ReturnType<typeof setTimeout> | null = null;
+    let priorityTimer: ReturnType<typeof setTimeout> | null = null;
     let cardsTimer: ReturnType<typeof setTimeout> | null = null;
     let machinesTimer: ReturnType<typeof setTimeout> | null = null;
     let machineThreadTimer: ReturnType<typeof setTimeout> | null = null;
@@ -2515,6 +2526,12 @@ function Inbox() {
           if (snoozesTimer) clearTimeout(snoozesTimer);
           snoozesTimer = setTimeout(() => void refreshSnoozes(), 60);
         },
+        // The person's Priority changed (another window, a phone, an archive): read the list; with no thread open the
+        // row goes to its place, as a snooze from elsewhere does.
+        onPriority: () => {
+          if (priorityTimer) clearTimeout(priorityTimer);
+          priorityTimer = setTimeout(() => void refreshPriority(), 60);
+        },
         // A thread's PRs read behind the window's answer changed their checks or review: the cards showing them read again.
         onThreadPulls: (threadIds) => {
           for (const id of threadIds) threadPullsBus.emit(id);
@@ -2524,7 +2541,10 @@ function Inbox() {
         onRows: (rows, rev, last) => hearRowsEvent(rows, rev, () => void refreshSettings(), last),
         onSidebar: (sidebar, rev) => hearSidebarEvent(sidebar, rev, () => void refreshSettings()),
         // An agent icon's face was saved (here, another window, a phone): every icon of that agent redraws at once.
-        onAgentFaces: (data) => hearAgentFacesEvent(data),
+        // A linked machine's agent's face or name changed there: its list brings it.
+        onAgentFaces: (data) => {
+          if (!hearAgentFacesEvent(data)) listAfterEvents(60);
+        },
         onReactions: (reactions, rev) => hearReactionsEvent(reactions, rev),
         // A capability switch saved here or in another window (approval "inbox-thread-steps"; the Board too): every window follows.
         onCapabilities: (capabilities) => {
@@ -2678,10 +2698,11 @@ function Inbox() {
       if (draftsTimer) clearTimeout(draftsTimer);
       if (cardsTimer) clearTimeout(cardsTimer);
       if (snoozesTimer) clearTimeout(snoozesTimer);
+      if (priorityTimer) clearTimeout(priorityTimer);
       if (machinesTimer) clearTimeout(machinesTimer);
       if (machineThreadTimer) clearTimeout(machineThreadTimer);
     };
-  }, [refreshList, refreshSnoozes, refreshSettings, refreshThread, refreshDrafts, refreshCards, refreshDecisions, observeEvent, flushNotifications, setNotifyReach, windowReport, reportWindow, queryClient]);
+  }, [refreshList, refreshSnoozes, refreshPriority, refreshSettings, refreshThread, refreshDrafts, refreshCards, refreshDecisions, observeEvent, flushNotifications, setNotifyReach, windowReport, reportWindow, queryClient]);
 
   // Opening a thread: read it, record the look, and update its row in place.
   // While any thread is open the list holds still (settle.ts): the look
@@ -3581,6 +3602,11 @@ function Inbox() {
     onSavedReactionsFailed((cause) => showToast(errorToast(cause, 'Your saved emoji did not change.')));
     return () => onSavedReactionsFailed(null);
   });
+  // A linked machine's agent's face that waits for that machine, or that it refused (agents/agentFaces.ts).
+  useEffect(() => {
+    onAgentFaceRefused((cause) => showToast(errorToast(cause, 'The picture did not change.')));
+    return () => onAgentFaceRefused(null);
+  });
   useEffect(() => () => {
     if (toastTimer.current) clearTimeout(toastTimer.current);
   }, []);
@@ -4003,12 +4029,16 @@ function Inbox() {
       // From a row's menu, a thread that is not the open one: the subject says which (as Mark read's toast).
       const detail = threadId !== open && before ? `“${before.subject ?? '(no subject)'}”` : undefined;
       const snoozed = before?.snoozed;
+      const priority = (before ?? (threadRow?.thread_id === threadId ? threadRow : null))?.priority;
       showToast({
         icon: 'archive',
         lead: 'Archived',
         ...(detail ? { detail } : {}),
-        // Archive ended the snooze: Undo unarchives first, since an archived thread takes none.
-        onUndo: () => void archive(threadId, rootId, false).then(() => restoreSnooze(threadId, snoozed)),
+        // Archive ended the snooze and the person's Priority: Undo unarchives first, since an archived thread takes neither.
+        onUndo: () =>
+          void archive(threadId, rootId, false)
+            .then(() => restoreSnooze(threadId, snoozed))
+            .then(() => restorePriority(threadId, priority)),
       });
     } else {
       dismissToast();
@@ -4032,145 +4062,9 @@ function Inbox() {
     await afterWrite([threadId]);
   };
 
-  /**
-   * Snooze a thread, from its row's menu, the thread header's clock or a
-   * phone's ⋯ (approval "inbox-snooze"). The row leaves its section at once
-   * (the owner, 2026-11-03: "ideally when snoozing they would move in the list
-   * after i snooze it"): only this row moves (`moveSnoozedRow`), a thread open
-   * beside the list or none, and the rest of the list holds still. The toast says
-   * when it comes back; its Undo puts back exactly what was there, an earlier
-   * snooze included, and the row with it.
-   */
-  const snooze = async (row: Pick<InboxListRow, 'thread_id' | 'subject'>, until: string) => {
-    const threadId = row.thread_id;
-    const earlier = (rowOf(threadId) ?? (threadRow?.thread_id === threadId ? threadRow : null))?.snoozed ?? null;
-    snoozedThisLoad.current = true;
-    let answer: Awaited<ReturnType<typeof inboxApi.snooze>>;
-    try {
-      answer = await inboxApi.snooze(threadId, until);
-    } catch (cause) {
-      showError(cause);
-      return;
-    }
-    await afterWrite();
-    // A home machine whose clock is ahead of this one: the time has passed there, so the thread is not snoozed.
-    if (answer.snoozed === null) {
-      showError(new InboxApiError(409, 'snooze_past', 'That time has passed.'));
-      return;
-    }
-    const drawnBefore = moveSnoozedRow(threadId);
-    if (drawnBefore) snoozeMoved.current.set(threadId, drawnBefore);
-    const when = inboxSnoozeWhen(until);
-    showToast({
-      icon: 'clock',
-      lead: 'Snoozed',
-      detail: when,
-      speech: `Snoozed “${row.subject ?? '(no subject)'}” until ${when}.`,
-      onUndo: () => void putSnooze(threadId, earlier, drawnBefore),
-    });
-  };
-  /**
-   * The person's own snooze while the list is on screen (a thread open beside
-   * it, or none): that one row goes to the Snoozed band now (held.ts
-   * `settleThread`), fading from its place while the rows below slide up
-   * (settle.ts; nothing moves under reduced motion). Every other row holds,
-   * and agent activity stays behind "N new" (a write's read never adopts,
-   * approval "inbox-list-view", R7). Nothing to do where the thread covers
-   * the list (Back moves it, `settlesOnBack`).
-   * Only a row the read shows snoozed moves: a write a linked machine's outbox
-   * holds has not snoozed anything yet. Returns the list as drawn before, for
-   * Undo, or null when nothing moved.
-   */
-  const moveSnoozedRow = (threadId: string): InboxListSection[] | null => {
-    const drawn = shownRef.current;
-    // With no thread open the list is on screen and a write's read never moves a row (R7), so this one moves here.
-    if ((routeRef.current.thread && listCovered()) || !drawn || !latestRef.current) return null;
-    if (drawnSection(drawn, threadId) === null || !rowOf(threadId)?.snoozed) return null;
-    const groups = listGroups(latestRef.current);
-    armSlide();
-    setShown((current) => (current ? settleThread(current, groups, threadId) : current));
-    return drawn;
-  };
-  /**
-   * Snooze's Undo: the snooze it replaced, or none. A row the snooze moved
-   * while a thread is open goes back where it was drawn, between the same
-   * neighbours (held.ts `putRowBack`), in its state as it is now.
-   */
-  const putSnooze = async (threadId: string, earlier: InboxRowSnooze | null, drawnBefore: InboxListSection[] | null = null) => {
-    snoozeMoved.current.delete(threadId);
-    try {
-      await inboxApi.snooze(threadId, earlier && inboxSnoozeRunning(earlier.until) ? earlier.until : null, earlier?.at);
-    } catch (cause) {
-      showError(cause);
-      return;
-    }
-    await afterWrite();
-    putSnoozedRowBack(threadId, drawnBefore);
-    dismissToast();
-    say(earlier ? 'Snooze moved back.' : 'Unsnoozed.');
-  };
-  /**
-   * A row this window's own snooze moved (`moveSnoozedRow`) whose snooze then
-   * changed, the list still on screen: unsnoozed, it goes back between the
-   * neighbours it had (held.ts `putRowBack`), in its state as it is now;
-   * snoozed again, it takes its place in the band. Nothing once the list has
-   * settled since (`snoozeMoved` is emptied then) or where a thread covers it.
-   */
-  const putSnoozedRowBack = (threadId: string, drawnBefore: InboxListSection[] | null) => {
-    const now = rowOf(threadId);
-    if (!drawnBefore || !now || (routeRef.current.thread && listCovered()) || drawnSection(shownRef.current, threadId) !== 'snoozed') return;
-    armSlide();
-    setShown((current) => (current ? (now.snoozed ? settleThread(current, listGroups(latestRef.current!), threadId) : putRowBack(replaceHeldRow(current, now), drawnBefore, threadId)) : current));
-  };
-  /**
-   * One row to where the latest read puts it, the rest of the list held (held.ts `settleThread`), with the settle's
-   * slide. False when the list on screen has no row for it.
-   */
-  const moveRowAlone = (threadId: string): boolean => {
-    if (!latestRef.current || drawnSection(shownRef.current, threadId) === null) return false;
-    const groups = listGroups(latestRef.current);
-    armSlide();
-    setShown((current) => (current ? settleThread(current, groups, threadId) : current));
-    return true;
-  };
-  /**
-   * Unsnooze: the thread is back in its section now. A row this window's own
-   * snooze moved comes back at once, as Snooze's Undo brings it (the person's
-   * own snooze undone); any other held row waits for the list to settle. Undo
-   * snoozes it again, to the same time, and sends a row that came back to the
-   * band again.
-   */
-  const unsnooze = async (row: Pick<InboxListRow, 'thread_id' | 'subject'>) => {
-    const threadId = row.thread_id;
-    const earlier = (rowOf(threadId) ?? (threadRow?.thread_id === threadId ? threadRow : null))?.snoozed ?? null;
-    const drawnBefore = snoozeMoved.current.get(threadId) ?? null;
-    try {
-      await inboxApi.snooze(threadId, null);
-    } catch (cause) {
-      showError(cause);
-      return;
-    }
-    snoozeMoved.current.delete(threadId);
-    await afterWrite([threadId]);
-    putSnoozedRowBack(threadId, drawnBefore);
-    // With no thread open the row comes back to its section now (a write's read no longer adopts the list, R7).
-    const cameBack = !drawnBefore && !routeRef.current.thread && moveRowAlone(threadId);
-    showToast({
-      icon: 'clock',
-      lead: 'Unsnoozed',
-      speech: `Unsnoozed “${row.subject ?? '(no subject)'}”.`,
-      onUndo: earlier
-        ? () => {
-            dismissToast();
-            void restoreSnooze(threadId, earlier).then(() => {
-              if (!drawnBefore && !cameBack) return;
-              const moved = moveSnoozedRow(threadId);
-              if (moved) snoozeMoved.current.set(threadId, moved);
-            });
-          }
-        : undefined,
-    });
-  };
+  const { snooze, unsnooze } = snoozeWrites({ rowOf, threadRow: () => threadRow, showError, showToast, dismissToast, afterWrite, say, armSlide, setShown, shownRef, routeRef, latestRef, listCovered, snoozeMoved, snoozedThisLoad, restoreSnooze });
+
+  const { setPriority, restorePriority } = priorityWrites({ rowOf, threadRow: () => threadRow, showError, showToast, dismissToast, afterWrite, say, armSlide, setShown, shownRef, routeRef, latestRef, listCovered });
 
   /**
    * Pin a thread to the sidebar, or unpin it (approval "inbox-pinned-threads"),
@@ -4299,6 +4193,7 @@ function Inbox() {
    */
   const rowAction = (row: InboxListRow, action: RowMenuAction) => {
     if (action === 'pin' || action === 'unpin') return void setPin(row, action === 'pin');
+    if (action === 'priority-add' || action === 'priority-remove') return void setPriority(row, action === 'priority-add');
     if (action === 'read' || action === 'unread') return void markRead(row.thread_id, action === 'read');
     if (action === 'mark-unread') return void markUnread(row.thread_id);
     if (action === 'unsnooze') return void unsnooze(row);
@@ -5688,8 +5583,9 @@ function Inbox() {
   // The Pull requests board's own list (everywhere, mine): read only while Reviews (its right pane, a phone's row), the
   // board's page, a stack's page or a PR opened from it shows.
   const sheetPulls = useSheetPulls((route.page === 'prs' || route.page === 'reviews') && pullsShown);
-  // The board in Reviews' pane: Open or Merged, kept while the Inbox is open (Reviews' address has no room for it).
+  // The board in Reviews' pane: Open or Merged, Grid or Table, kept while the Inbox is open (Reviews' address has no room for them).
   const [paneView, setPaneView] = useState<SheetView>('open');
+  const [paneLayout, setPaneLayout] = useState<SheetLayout>('grid');
   const sheetHead = useMemo(() => (sheetPulls.model ? sheetModel(sheetPulls.model, Date.now(), {}).head : null), [sheetPulls.model]);
   // The list a thread from the box opens beside: the one the box opened over.
   const reviewsScope = () => (route.page === 'reviews' ? { project: route.project, view: route.view ?? pullFilterOf(null) } : (route.reviews ?? { project: null, view: pullFilterOf(null) }));
@@ -6666,6 +6562,8 @@ function Inbox() {
           onOpenPull={(pull, stack) => go(boardPull(pull, stack, { page: 'prs', project: null, thread: null, stack: stack.id, layer: pull.key, scope: 'layer', prsFrom: 'reviews' }))}
           onOpenStack={(stack) => go({ page: 'prs', project: null, thread: null, stack: stack.id, layer: null })}
           onMerged={sheetPulls.refresh}
+          layout={paneLayout}
+          onLayout={setPaneLayout}
         />
       }
     />
@@ -6954,6 +6852,8 @@ function Inbox() {
         phone={phone}
         view={route.prsView ?? 'open'}
         onView={(prsView) => writeRoute({ ...route, prsView }, { replace: true })}
+        layout={route.prsLayout}
+        onLayout={(prsLayout) => writeRoute({ ...route, prsLayout }, { replace: true })}
         onBack={() => close({ page: 'reviews', project: null, thread: null })}
         onOpenPull={(pull, stack) => go(boardPull(pull, stack, { ...route, stack: stack.id, layer: pull.key, scope: 'layer', prsFrom: 'sheet' }))}
         onOpenStack={(stack) => go({ ...route, stack: stack.id, layer: null })}
@@ -7256,6 +7156,10 @@ function Inbox() {
             onArchive={(next) => void archive(thread.thread_id, thread.messages[0]!.id, next)}
             pinned={pinnedIds.has(thread.thread_id)}
             onPin={pinsOn && machineTakes({ machine: machineOf(thread.thread_id) ?? undefined }, machines, 'star') ? (next) => setPin(thread, next) : undefined}
+            priority={(() => {
+              const action = openThreadRow && machineTakes(openThreadRow, machines, 'priority') ? priorityAction(openThreadRow) : null;
+              return action ? { on: action === 'priority-remove', onToggle: () => void setPriority(thread, action === 'priority-add') } : undefined;
+            })()}
             onSnooze={snoozeOn && rowSnoozes({ machine: machineOf(thread.thread_id) ?? undefined }, machines) ? (until) => void snooze(thread, until) : undefined}
             onUnsnooze={snoozeOn && rowSnoozes({ machine: machineOf(thread.thread_id) ?? undefined }, machines) ? () => void unsnooze(thread) : undefined}
             snoozeBlocked={(() => {

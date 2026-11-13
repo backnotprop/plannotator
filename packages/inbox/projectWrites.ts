@@ -1,5 +1,5 @@
 import type { InboxAgent } from '@plannotator/core/inbox-types';
-import { inboxApi } from './api';
+import { InboxHeldError, inboxApi } from './api';
 import { keepAgentName } from './agents/agentFaces';
 import { formatCount } from './format';
 import { pictureFromFile } from './projectPictures';
@@ -34,7 +34,7 @@ export function projectWrites({ showToast, dismissToast, refreshList, say, lates
       await keepAgentName(agent, name);
     } catch (cause) {
       showToast(errorToast(cause, 'The name did not change.'));
-      return false;
+      return cause instanceof InboxHeldError;
     }
     say(name === null ? `Name reset${own ? ` to ${own}` : ''}.` : `Renamed to ${name}.`);
     return true;
