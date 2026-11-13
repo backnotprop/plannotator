@@ -54,7 +54,9 @@ jobs:
       # unpacks Bun with it); a self-hosted stock Ubuntu has neither. There,
       # Node comes from setup-node and Bun from its checksummed release zip,
       # which setup-bun then finds installed and does not download. The machine
-      # itself must have make and g++: `bun install` compiles node-pty on Linux.
+      # itself must have make and g++ (`bun install` compiles node-pty on Linux)
+      # and git 2.47 or later (background git relies on credential.interactive,
+      # which older git ignores; packages/server/git-background.test.ts).
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         if: runner.environment == 'self-hosted'
         with:
@@ -188,6 +190,35 @@ jobs:
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
+
+      # On CI the installer tests require PowerShell (scripts/install.test.ts
+      # drives install.ps1 and install.cmd under it). GitHub's image has 7.6.9;
+      # a self-hosted machine gets the same release's tarball, checked against
+      # its SHA-256 and kept between runs. Bun's shards decide which unit lane
+      # holds that file, so every unit-k lane gets it.
+      - name: Restore the PowerShell download (self-hosted)
+        if: runner.environment == 'self-hosted' && startsWith(matrix.lane, 'unit-')
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ci-tools/pwsh
+          key: pwsh-7.6.9-1da6d6d6035d
+
+      - name: Install PowerShell 7.6.9 (self-hosted)
+        if: runner.environment == 'self-hosted' && startsWith(matrix.lane, 'unit-')
+        env:
+          PWSH_SHA256: 1da6d6d6035d651f20e70ddee7c4c15ac6ab8b9fb40ee92240d91263f28a884b
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          dir="$RUNNER_TEMP/pwsh"
+          tarball="$HOME/.cache/ci-tools/pwsh/powershell-7.6.9-linux-x64.tar.gz"
+          mkdir -p "$dir" "$(dirname "$tarball")"
+          [ -f "$tarball" ] || bash scripts/ci-fetch-release-asset.sh https://github.com/PowerShell/PowerShell/releases/download/v7.6.9/powershell-7.6.9-linux-x64.tar.gz "$tarball"
+          echo "$PWSH_SHA256  $tarball" | sha256sum -c -
+          tar -xzf "$tarball" -C "$dir"
+          chmod +x "$dir/pwsh"
+          echo "$dir" >> "$GITHUB_PATH"
+          "$dir/pwsh" -NoProfile -Command '$PSVersionTable.PSVersion.ToString()'
 
       - name: Generate Pi extension shared copies
         run: bash apps/pi-extension/vendor.sh
