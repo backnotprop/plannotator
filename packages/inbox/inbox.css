@@ -6196,6 +6196,8 @@ ol.ib-rl-two .ib-rw-cmd { font-weight: 400; margin-top: 6px; }
 .pn-inbox .ib-sendnow.ib-sendnow-go { margin-left: 0; height: 28px; padding: 0 12px 0 10px; display: inline-flex; align-items: center; gap: 6px; border-color: transparent; background: var(--primary); color: var(--primary-foreground); font-weight: 600; border-radius: var(--ib-pill-s, 7px); }
 .pn-inbox .ib-sendnow.ib-sendnow-go:hover { background: color-mix(in oklab, var(--primary) 88%, var(--foreground)); }
 .pn-inbox .ib-sendnow.ib-sendnow-go svg { width: 14px; height: 14px; }
+.pn-inbox .ib-dl-acts { display: inline-flex; align-items: center; gap: 6px; flex: none; }
+.pn-inbox .ib-undl .ib-takeback { margin-left: 0; height: 28px; border-radius: var(--ib-pill-s, 7px); }
 /* It can't go in sooner: the same band, quieter, no button, the reason under it. */
 .pn-inbox .ib-delivered.ib-undl[data-stuck] { background: color-mix(in oklab, var(--foreground) 4%, var(--card)); border-color: var(--border); flex-direction: column; align-items: flex-start; gap: 6px; padding: 8px 12px 9px 11px; max-width: min(620px, 100%); }
 .pn-inbox .ib-delivered.ib-undl[data-stuck] .ib-dl-main > svg, .pn-inbox .ib-delivered.ib-undl[data-stuck] strong { color: var(--foreground); }
