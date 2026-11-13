@@ -223,14 +223,14 @@ export function refreshHeldRows(shown: readonly InboxListSection[], latest: read
  * The rows on screen whose thread the read no longer lists: archived or deleted in another window, on the phone, or
  * by its agent. They leave every window's list at once, as a pin or a snooze from elsewhere moves its row (the
  * owner, 2026-11-10). Two stay: the open thread's (`open`), and one this window archived itself (drawn archived in
- * place until the list next settles).
+ * place until the list next settles; `archiving` while its write is on its way).
  */
-export function goneRows(shown: readonly InboxListSection[] | null, latest: readonly InboxListSection[], open: string | null): Set<string> {
+export function goneRows(shown: readonly InboxListSection[] | null, latest: readonly InboxListSection[], open: string | null, archiving: ReadonlySet<string> = new Set()): Set<string> {
   const out = new Set<string>();
   if (!hasRows(shown)) return out;
   const listed = rowsById(latest);
   for (const section of shown!) {
-    for (const row of section.threads) if (!listed.has(row.thread_id) && row.thread_id !== open && row.resolved_at == null) out.add(row.thread_id);
+    for (const row of section.threads) if (!listed.has(row.thread_id) && row.thread_id !== open && row.resolved_at == null && !archiving.has(row.thread_id)) out.add(row.thread_id);
   }
   return out;
 }

@@ -95,6 +95,8 @@ async function world(steps?: boolean): Promise<World> {
       inboxSnoozeIntro: { shownAt: snoozeShown },
       // Personal agents (after Snooze in the line): settled by OpenClaw's Inbox tool turned on.
       inboxTool: { openclaw: true },
+      // Priority (after Snooze in the line): settled by a thread once added to Priority.
+      inboxPriorityIntro: { usedAt: snoozeShown },
       inboxBoard: true,
       inboxBoardIntro: { shownAt: boardShown },
       // The Sidebar tip (outside the line) was seen too: it shares the calm moment, and these cases read the stamps.

@@ -96,6 +96,8 @@ async function world(): Promise<World> {
       inboxReveals: { lastShownAt: snoozeShown },
       // Personal agents (after Snooze in the line): settled by OpenClaw's Inbox tool turned on.
       inboxTool: { openclaw: true },
+      // Priority (after Snooze in the line): settled by a thread once added to Priority.
+      inboxPriorityIntro: { usedAt: snoozeShown },
     }),
   );
   const env = {
