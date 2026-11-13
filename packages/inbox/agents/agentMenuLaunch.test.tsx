@@ -4,15 +4,17 @@
  *
  * What this catches: Stop or Delete offered for an agent the Inbox did not launch, Stop offered for a launch that is
  * stopped, waits on a prompt in the window or never started, the items out of order or without their separator, a
- * linked machine's launched agent losing Stop and Delete (or gaining Rename…, which its machine would never keep), the
- * wrong machine handed to the action, and the sidebar's Delete not opening the thread's own confirm.
+ * linked machine's launched agent losing Stop and Delete (or gaining Rename…, which its machine would not keep), the
+ * wrong machine handed to the action. Delete's dialog (AgentDeleteDialog): its words and box, Cancel, Escape and a
+ * click outside deleting anything, focus not on Cancel; the delete (agentDelete.ts) archiving threads without the
+ * tick, missing one with it, or sending a linked machine's Delete or Archive to this Inbox.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import type { InboxAgent, InboxAgentsGroup, InboxAuthor, InboxMessageWire, InboxProject, InboxRun, InboxRunState, InboxThread } from '@plannotator/core/inbox-types';
+import type { InboxAgent, InboxAgentsGroup, InboxListRow, InboxRunState } from '@plannotator/core/inbox-types';
 import type { MachineView } from '../api';
 
 const hasDom = typeof document !== 'undefined';
@@ -35,7 +37,9 @@ const { AgentsSection } = (hasDom ? await import('./AgentsSection') : {}) as typ
 const faces = (hasDom ? await import('./agentFaces') : {}) as typeof import('./agentFaces');
 const motion = (hasDom ? await import('./motion') : {}) as typeof import('./motion');
 const { setInboxAgents } = (hasDom ? await import('../agentsList') : {}) as typeof import('../agentsList');
-const { ThreadPane } = (hasDom ? await import('../components/Thread') : {}) as typeof import('../components/Thread');
+const { AgentDeleteDialog } = (hasDom ? await import('./AgentDeleteDialog') : {}) as typeof import('./AgentDeleteDialog');
+const { agentDeleteThreads, deleteAgentSession } = await import('./agentDelete');
+const { rememberMachine, resetMachineRoutes, setSelfMachine } = await import('../inboxUrl');
 const { machinesModel } = await import('../machines');
 
 let root: Root | null = null;
@@ -63,6 +67,7 @@ afterEach(() => {
   globalThis.fetch = realFetch;
   setInboxAgents(null);
   faces.resetAgentFaces();
+  resetMachineRoutes();
 });
 
 const SELF = `ibx_01K${'0'.repeat(22)}S`;
@@ -214,65 +219,98 @@ test.skipIf(!hasDom)("a phone: the sheet has the same items, over the sheet's sc
   expect(document.querySelector('.ib-pm-scrim')).not.toBeNull();
 });
 
-const PROJECT: InboxProject = { id: 'prj_1', key: 'app-abcdef', name: 'app', root: '/work/app', created_at: '2026-10-20T09:00:00.000Z' };
-const LAUNCHED: InboxThread = {
-  thread_id: 'msg_L1',
-  project: PROJECT,
-  subject: 'Fix the build',
-  thread_name: null,
-  resolved_at: null,
-  messages: [
-    {
-      id: 'msg_L1',
-      project_id: PROJECT.id,
-      thread_id: 'msg_L1',
-      reply_to: null,
-      author: { kind: 'person' } as InboxAuthor,
-      to: { host: 'claude-code', session: 'sess-a' },
-      subject: 'Fix the build',
-      subject_question: null,
-      body: 'Fix the build.',
-      created_at: '2026-10-20T18:10:00.000Z',
-      resolved_at: null,
-      idempotency_key: 'k-a',
-      launch: { id: 'lch_a', agent: 'claude-code', session_ref: 'sa', folder: '/work/app', scratch: false, started_at: '2026-10-20T18:10:00.000Z' },
-    } as InboxMessageWire,
-  ],
-};
-
-test.skipIf(!hasDom)("the sidebar's Delete opens the thread's own confirm once its launch is read, and says it was asked", async () => {
+/** Draw the dialog; what its Cancel and Delete were called with. */
+function dialog(props: { host?: string; scratch?: string | null; threads: number }) {
+  const said = { cancel: 0, delete: [] as boolean[] };
   const host = document.createElement('div');
   host.className = 'pn-inbox';
   document.body.append(host);
   root = createRoot(host);
-  let asked = 0;
-  const draw = (run: InboxRun | null | undefined) =>
-    act(() =>
-      root!.render(
-        <ThreadPane
-          thread={LAUNCHED}
-          sent={null}
-          onQuestions={() => {}}
-          onChanged={async () => {}}
-          onClose={() => {}}
-          file={null}
-          onOpenFile={() => {}}
-          onOpenGuide={() => {}}
-          run={run}
-          deleteAsk
-          onDeleteAsked={() => asked++}
-        />,
-      ),
-    );
-  // The run not read yet: no launch menu, so nothing is asked.
-  draw(undefined);
+  act(() =>
+    root!.render(
+      <AgentDeleteDialog host={props.host ?? 'claude-code'} scratch={props.scratch ?? null} threads={props.threads} onCancel={() => said.cancel++} onDelete={(archive) => said.delete.push(archive)} />,
+    ),
+  );
+  const el = () => document.querySelector<HTMLDialogElement>('dialog[data-dialog="agent-delete"]')!;
+  const words = () => `${el().querySelector('h2')!.textContent} | ${el().querySelector('.ib-sum')!.textContent}`;
+  return { said, el, words };
+}
+
+test.skipIf(!hasDom)("Delete's dialog: the thread's words, its threads stay unless the box is ticked, focus on Cancel", async () => {
+  const { said, el, words } = dialog({ threads: 3 });
   await settle();
-  expect(host.querySelector('[data-launch-confirm]')).toBeNull();
-  expect(asked).toBe(0);
-  draw(null);
+  expect(words()).toBe('Delete the Claude Code session? | It stops, and its session files are removed. Its threads stay.');
+  expect(document.activeElement?.hasAttribute('data-agent-delete-cancel')).toBe(true);
+  const box = el().querySelector<HTMLInputElement>('[data-agent-delete-archive] input')!;
+  expect(el().querySelector('[data-agent-delete-archive]')!.textContent).toBe('Also archive its 3 threads');
+  expect(box.checked).toBe(false);
+  expect(el().querySelector('[data-agent-delete-go]')!.className).toContain('ib-danger');
+  await press(el().querySelector('[data-agent-delete-go]')!);
+  expect(said.delete).toEqual([false]);
+  await press(box);
+  expect(words()).toBe('Delete the Claude Code session? | It stops, and its session files are removed.');
+  await press(el().querySelector('[data-agent-delete-go]')!);
+  expect(said.delete).toEqual([false, true]);
+  expect(said.cancel).toBe(0);
+});
+
+test.skipIf(!hasDom)('Cancel, Escape and a click outside cancel, and delete nothing', async () => {
+  const { said, el } = dialog({ threads: 2 });
   await settle();
-  const confirm = host.querySelector('[data-launch-confirm]');
-  expect(confirm?.querySelector('b')?.textContent).toBe('Delete the Claude Code session?');
-  expect(confirm?.textContent).toContain('It stops, and its session files are removed. This thread stays.');
-  expect(asked).toBe(1);
+  await press(el().querySelector('[data-agent-delete-cancel]')!);
+  await act(async () => el().dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+  // Outside the box: the click lands on the dialog element itself (its backdrop).
+  await act(async () => el().dispatchEvent(new MouseEvent('click', { bubbles: true })));
+  expect(said.cancel).toBe(3);
+  expect(said.delete).toEqual([]);
+});
+
+test.skipIf(!hasDom)("one thread, a scratch folder: the thread confirm's scratch words, the box in the singular; none: no box", async () => {
+  const one = dialog({ host: 'pi', scratch: 'palette-helper', threads: 1 });
+  await settle();
+  expect(one.words()).toBe('Delete the Pi session? | It stops, and its session files and its scratch folder palette-helper, with everything in it, are removed. Its thread stays.');
+  expect(one.el().querySelector('[data-agent-delete-archive]')!.textContent).toBe('Also archive its thread');
+  act(() => root?.unmount());
+  document.body.innerHTML = '';
+  const none = dialog({ threads: 0 });
+  await settle();
+  expect(none.words()).toBe('Delete the Claude Code session? | It stops, and its session files are removed.');
+  expect(none.el().querySelector('[data-agent-delete-archive]')).toBeNull();
+});
+
+/** Every request the delete makes: method, path and body (a linked machine's write key left out). */
+function recordFetch(): string[] {
+  const calls: string[] = [];
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const { idempotency_key: _key, ...body } = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+    calls.push(`${init?.method ?? 'GET'} ${String(input)} ${JSON.stringify(body)}`);
+    return Response.json({ ok: true });
+  }) as unknown as typeof fetch;
+  return calls;
+}
+
+test.skipIf(!hasDom)('the delete: without the tick, the launch only; with it, then each thread archived as a row\'s Archive is', async () => {
+  let calls = recordFetch();
+  expect(await deleteAgentSession('lch_a', null, ['msg_a', 'msg_b'], false)).toEqual({ scratchKept: false, archived: [], archiveError: null });
+  expect(calls).toEqual(['POST /api/inbox/launch/lch_a/delete {}']);
+  calls = recordFetch();
+  expect((await deleteAgentSession('lch_a', null, ['msg_a', 'msg_b'], true)).archived).toEqual(['msg_a', 'msg_b']);
+  expect(calls).toEqual(['POST /api/inbox/launch/lch_a/delete {}', 'POST /api/inbox/messages/msg_a/resolve {"resolved":true}', 'POST /api/inbox/messages/msg_b/resolve {"resolved":true}']);
+});
+
+test.skipIf(!hasDom)("a linked machine's agent: its Delete and its threads' Archive go to that machine, and its threads are its machine's only", async () => {
+  setSelfMachine(SELF);
+  rememberMachine(['msg_there'], MAC);
+  const calls = recordFetch();
+  await deleteAgentSession('lch_there', MAC, ['msg_there'], true);
+  expect(calls).toEqual([`POST /api/inbox/m/${MAC}/launch/lch_there/delete {}`, `POST /api/inbox/m/${MAC}/messages/msg_there/resolve {"resolved":true}`]);
+
+  const machines = machinesModel([view(SELF, 'Studio'), view(MAC, 'MacBook')]);
+  const there = launched('lch_there', null);
+  const groups = [group([launched('lch_here', null)], SELF), group([there], MAC)];
+  const row = (id: string, session: string, machine: string): InboxListRow =>
+    ({ thread_id: id, subject: id, thread_name: null, author: { kind: 'agent', host: 'claude-code', session, name: null }, last_at: '2026-11-09T09:00:00.000Z', waiting_on_person: false, machine }) as InboxListRow;
+  // The launch's thread, one it wrote since, and a thread on this Inbox by a session of the same id: only the first two.
+  const rows = [row('msg_lch_there', 'ses_lch_there', MAC), row('msg_later', 'ses_lch_there', MAC), row('msg_same_id_here', 'ses_lch_there', SELF)];
+  expect(agentDeleteThreads(there, groups, machines, rows).map((r) => r.thread_id)).toEqual(['msg_lch_there', 'msg_later']);
 });

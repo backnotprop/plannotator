@@ -3349,10 +3349,11 @@ export interface InboxAgent {
    */
   continues?: string[];
   /**
-   * Set when the Inbox launched it: the launch's id and its thread; whether the host started it (`started`) and its
-   * run line's state (`run`, null: no line), absent from an older Inbox.
+   * Set when the Inbox launched it: the launch's id and its thread; whether the host started it (`started`), its
+   * run line's state (`run`, null: no line) and the name of the scratch folder its Delete removes (`scratch`, null in
+   * a project), absent from an older Inbox.
    */
-  launch?: { id: string; thread_id: string; started?: boolean; run?: InboxRunState | null };
+  launch?: { id: string; thread_id: string; started?: boolean; run?: InboxRunState | null; scratch?: string | null };
   /** `claude-code`, `codex`, `pi`, ... (`InboxAuthor.host`); null when nothing said. */
   host: string | null;
   /** Its title as its connection last said it (the To picker's name). Absent when none. */

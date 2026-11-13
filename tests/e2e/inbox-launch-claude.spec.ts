@@ -705,7 +705,7 @@ test('Stop while it starts again for a reply: "You stopped", never a failure, an
   }
 });
 
-test("the sidebar agent's ⋯: Rename…, Stop and Delete … session…; Stop is the thread's Stop, then Delete only, which opens the thread's own confirm", async () => {
+test("the sidebar agent's ⋯: Rename…, Stop and Delete … session…; Stop is the thread's Stop, then Delete only, asked in a dialog over the page as it was", async () => {
   const { page, fake } = world;
   fake.configure({ startDelayMs: 0, hold: false });
   await page.goto(world.url);
@@ -729,12 +729,28 @@ test("the sidebar agent's ⋯: Rename…, Stop and Delete … session…; Stop i
   await row.hover();
   await row.locator('[data-agent-more]').click();
   await expect(items).toHaveText(['Rename…', 'Delete Claude Code session…']);
+  // From the list with no thread open: the dialog asks there, and nothing behind it moves.
+  await page.goto(world.url);
+  const hash = await page.evaluate(() => location.hash);
+  await row.hover();
+  await row.locator('[data-agent-more]').click();
   await page.locator(`[data-agent-menu="${launchId}"] [data-agent-action="delete"]`).click();
-  await expect(p.locator('[data-launch-confirm]')).toContainText('Delete the Claude Code session?');
-  await p.locator('[data-launch-delete]').click();
-  await expect(p.locator('[data-launch-confirm]')).toHaveCount(0);
+  const dialog = page.locator('dialog[data-dialog="agent-delete"]');
+  await expect(dialog.locator('h2')).toHaveText('Delete the Claude Code session?');
+  await expect(dialog.locator('[data-agent-delete-cancel]')).toBeFocused();
+  expect(await page.evaluate(() => location.hash)).toBe(hash);
+  await expect(page.locator('[data-launch-confirm]')).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+  await row.hover();
+  await row.locator('[data-agent-more]').click();
+  await page.locator(`[data-agent-menu="${launchId}"] [data-agent-action="delete"]`).click();
+  await dialog.locator('[data-agent-delete-go]').click();
+  await expect(page.locator('.ib-toast')).toContainText('Session deleted');
   await waitFor('launch folder removed', () => !existsSync(join(world.dataDir, 'inbox', 'launch', launchId)));
   await expect(row).toHaveCount(0, { timeout: 15_000 });
+  // The box was not ticked: its thread stays in the list.
+  await expect(page.locator(`[data-thread-id="${threadId}"]`).first()).toBeVisible();
   expect(world.errors).toEqual([]);
 });
 

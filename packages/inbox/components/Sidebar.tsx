@@ -815,7 +815,7 @@ export function Sidebar(props: SidebarProps) {
             // The sheet stays open on a phone: the field is in it.
             onRename={props.onAgentRename}
             onStop={props.onAgentStop}
-            // Delete opens the launch's thread, where it asks: on a phone the sheet closes for it.
+            // Delete asks in a dialog over the list: on a phone the sheet closes for it.
             onDelete={props.onAgentDelete && ((agent, machine) => pick(() => props.onAgentDelete?.(agent, machine))())}
             announce={props.announce}
           />

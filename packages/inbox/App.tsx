@@ -80,7 +80,7 @@ import { ListFilterEmpty, clearedFrom } from './components/ListFilter';
 import { addOwnThreads, adoptKeepingOpen, drawnSection, filterSections, heldNews as heldNewsOf, heldNotice, listGroups, lookedRow, markHeldRowArchived, markHeldRowLooked, putReadRowBack, putRowBack, refreshHeldRows, replaceHeldRow, settleOwn, settlesOnBack, settleThread, showBroughtIn, showLandsIn, snoozeChangedRows, waitingCount, type OpenThread } from './held';
 import { inboxSnoozeDelay, inboxSnoozeRunning, inboxSnoozeWhen, type InboxRowSnooze } from '@plannotator/core/inbox-snooze';
 import { deliveriesReadList } from './rowDelivery';
-import { inboxAgentsWatched, setInboxAgents, useAgentListFilter } from './agentsList';
+import { inboxAgentsNow, inboxAgentsWatched, setInboxAgents, useAgentListFilter } from './agentsList';
 import { filterAgentRows } from './agents/model';
 import {
   captureSettle,
@@ -172,10 +172,12 @@ import { leaveOnPurpose, replyBeingWritten, unsentReply } from './unsent';
 import { reloadOntoInbox, STALE_HEALTH_MS, useStalePage } from './stalePage';
 import { StalePageNotice } from './components/StalePageNotice';
 import { InboxToast, type InboxToastModel, toastSpeech } from './components/Toast';
-import { errorToast } from './toastError';
+import { errorText, errorToast } from './toastError';
 import { pictureFromFile } from './projectPictures';
 import { canToggleRead, confirmSetAside, MARK_READ_LOOK_WAIT_MS, MARK_READ_UNDO_MS, MARK_UNREAD_RETRY_WAIT_MS, markReadToast, markUnreadToast, offersRowMarkRead, seenHeldInNew, setAsideCount, type SetAsideAnswer, type SetAsideCount, warnsBeforeRead } from './markRead';
 import { MarkReadWarning } from './components/MarkReadWarning';
+import { AgentDeleteDialog } from './agents/AgentDeleteDialog';
+import { agentDeleteThreads, deleteAgentSession, type AgentDeleted } from './agents/agentDelete';
 import { summarizeInboxQuestions } from '@plannotator/core/inbox-questions';
 import { threadLink, type RowMenuAction } from './rowMenu';
 import { movePin, sameMachinePins, unpinnedWhere } from './pins';
@@ -4494,13 +4496,62 @@ function Inbox() {
     return true;
   };
 
-  /** The sidebar agent's Delete … session…: its launch's thread opens with the thread's own confirm. */
-  const [deleteAsk, setDeleteAsk] = useState<string | null>(null);
-  const clearDeleteAsk = useCallback(() => setDeleteAsk(null), []);
-  const askAgentDelete = (agent: InboxAgent) => {
+  /** The sidebar agent's Delete … session…, asked in place (AgentDeleteDialog): its threads as the list holds them then. */
+  const [agentDelete, setAgentDelete] = useState<{ agent: InboxAgent; machine: string | null; threads: InboxListRow[] } | null>(null);
+  const askAgentDelete = (agent: InboxAgent, machine: string | null) => {
     if (!agent.launch) return;
-    setDeleteAsk(agent.launch.thread_id);
-    go({ page: 'inbox', project: route.project, machine: route.machine, agent: route.agent, thread: agent.launch.thread_id });
+    setAgentDelete({ agent, machine, threads: agentDeleteThreads(agent, inboxAgentsNow(), machines, windowRows) });
+  };
+  /**
+   * Delete the launch, then archive its threads when the box was ticked. The toast is the thread's ("Session
+   * deleted"); with threads archived it says how many, and its Undo unarchives them (snoozes ahead put back, as
+   * Archive's Undo does). The session itself is gone either way.
+   */
+  const deleteAgent = async (archive: boolean) => {
+    const asked = agentDelete;
+    setAgentDelete(null);
+    const launch = asked?.agent.launch;
+    if (!asked || !launch) return;
+    let done: AgentDeleted;
+    try {
+      done = await deleteAgentSession(launch.id, asked.machine, asked.threads.map((row) => row.thread_id), archive);
+    } catch (cause) {
+      showToast(errorToast(cause, 'That did not work; try again.'));
+      return;
+    }
+    const archived = done.archived;
+    if (archived.length > 0) {
+      const at = new Date().toISOString();
+      setShown((current) => (current ? archived.reduce((sections, id) => markHeldRowArchived(sections, id, at), current) : current));
+    }
+    await afterWrite(archived);
+    const kept = done.scratchKept ? 'its scratch folder was kept' : null;
+    const took = archived.length > 0 ? `Archived ${plural(archived.length, 'thread')}` : null;
+    const snoozes = asked.threads.filter((row) => archived.includes(row.thread_id)).map((row) => [row.thread_id, row.snoozed] as const);
+    const failed = done.archiveError ? errorText(done.archiveError, 'That did not work; try again.') : null;
+    showToast({
+      icon: failed ? 'warn' : 'check',
+      lead: 'Session deleted',
+      ...(failed ? { detail: failed, wrap: true } : kept || took ? { detail: [kept, took].filter(Boolean).join(' · ') } : {}),
+      ...(archived.length > 0
+        ? {
+            onUndo: () => {
+              void (async () => {
+                try {
+                  for (const id of archived) await inboxApi.resolve(id, false);
+                } catch (cause) {
+                  showToast(errorToast(cause, 'That did not work; try again.'));
+                  return;
+                }
+                for (const [id, snooze] of snoozes) await restoreSnooze(id, snooze);
+                await afterWrite(archived);
+                dismissToast();
+                say('Moved back.');
+              })();
+            },
+          }
+        : {}),
+    });
   };
   /** The sidebar agent's Stop: as the thread's Stop (Thread.tsx `launchAct`), its words on a toast when it fails. */
   const stopAgent = async (agent: InboxAgent, machine: string | null) => {
@@ -7633,8 +7684,6 @@ function Inbox() {
             run={threadRun?.threadId === thread.thread_id ? threadRun.run : undefined}
             attachCommand={threadRun?.threadId === thread.thread_id ? threadRun.attach : null}
             onRunChanged={() => void refreshThread(thread.thread_id)}
-            deleteAsk={deleteAsk === thread.thread_id}
-            onDeleteAsked={clearDeleteAsk}
             openedWith={openedWith?.threadId === thread.thread_id ? openedWith.ids : null}
             drawn={drawnSection(shown, thread.thread_id)}
             onMarkRead={(read) => void markRead(thread.thread_id, read)}
@@ -8069,6 +8118,15 @@ function Inbox() {
           />
         ) : null;
       })()}
+      {agentDelete?.agent.launch && (
+        <AgentDeleteDialog
+          host={agentDelete.agent.host}
+          scratch={agentDelete.agent.launch.scratch ?? null}
+          threads={agentDelete.threads.length}
+          onCancel={() => setAgentDelete(null)}
+          onDelete={(archive) => void deleteAgent(archive)}
+        />
+      )}
       {readWarning && (
         <MarkReadWarning
           count={readWarning.count}
