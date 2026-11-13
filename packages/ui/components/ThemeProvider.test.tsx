@@ -508,6 +508,22 @@ describe('ThemeProvider', () => {
   // buttons, a palette pick, Match system following the OS) swapping the
   // classes without the hold, so every element fades again and the page
   // freezes first; or the hold staying, so hovers stop fading for good.
+  test.skipIf(!hasDom)('the first paint holds nothing: a class change on <html> after the page drew would restyle every element', async () => {
+    stored.set('plannotator-theme', 'dark');
+    installMatchMedia(false);
+    const html = document.documentElement;
+    const seen: string[] = [];
+    const watch = new MutationObserver(() => seen.push(html.className));
+    watch.observe(html, { attributes: true, attributeFilter: ['class'] });
+    await mountTheme();
+    await act(async () => {
+      await new Promise<void>(resolve => setTimeout(resolve, 120));
+    });
+    watch.disconnect();
+    expect(html.classList.contains('transitions-ready')).toBe(true);
+    expect(seen.some(c => c.includes('pn-theme-switching'))).toBe(false);
+  });
+
   test.skipIf(!hasDom)('every change of what is shown lands without the colour fade, and the hold then goes', async () => {
     stored.set('plannotator-theme', 'dark');
     stored.set('plannotator-light-theme', DEFAULT_COLOR_THEME);
