@@ -177,6 +177,8 @@ function mount(marks: string[] | undefined) {
 
 const row = (id: string) => document.querySelector<HTMLElement>(`[data-sidebar-agent="${id}"]`)!;
 const markOf = (id: string) => row(id).querySelector<HTMLElement>(`[data-agent-icon="${id}"]`)!;
+/** The face the mark draws now (motion.ts keeps a face it showed before, hidden, beside it). */
+const drawnFace = (id: string) => markOf(id).querySelector<HTMLElement>('[data-agent-mark]')?.dataset.face;
 /** Opens the agent's picker from the keyboard: the places in it. */
 async function openFan(id: string) {
   // happy-dom lays nothing out: the mark at the sidebar's left, half way down a 1024 × 768 window.
@@ -201,6 +203,8 @@ test.skipIf(!hasDom)("a face chosen on a linked machine's agent is kept in that 
   expect(there.wire().faces.ses_m?.face).toBe('glass');
   expect(here.wire().faces.ses_m).toBeUndefined();
   expect(faces.agentFaceOf('ses_m')).toBe('glass');
+  // The window that chose it draws it with no list read and no reload (that machine's own window is not open).
+  expect(drawnFace('ses_m')).toBe('glass');
   // This machine's own agent: as before, kept in this Inbox's file.
   await pickFace('ses_a', 'glass');
   expect(here.wire().faces.ses_a?.face).toBe('glass');
