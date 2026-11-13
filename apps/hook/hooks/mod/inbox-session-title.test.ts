@@ -357,7 +357,7 @@ function engineOn(configDir: string, folder: string) {
   const polls: unknown[] = []
   const titles: unknown[] = []
   let clock = 1_000_000
-  const env: Record<string, string> = { HOME: '/home/me', PLANNOTATOR_DATA_DIR: DATA, CLAUDE_CONFIG_DIR: configDir }
+  const env: Record<string, string> = { HOME: '/home/me', PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: DATA, CLAUDE_CONFIG_DIR: configDir }
   return {
     polls,
     titles,

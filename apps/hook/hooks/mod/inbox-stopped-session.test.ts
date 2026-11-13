@@ -84,7 +84,7 @@ async function world() {
       .flatMap((section) => section.threads)
       .find((row) => row.thread_id === asked.thread_id)?.delivery?.reason ?? null
   const session = await ClaudeSession.start({
-    env: { PATH: process.env.PATH ?? '', HOME: home, PLANNOTATOR_DATA_DIR: dataDir },
+    env: { PATH: process.env.PATH ?? '', HOME: home, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: dataDir },
     cwd: project,
     store: new Map(),
     sessionId: SESSION,
