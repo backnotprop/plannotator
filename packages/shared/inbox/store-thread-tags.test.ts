@@ -51,6 +51,17 @@ test("Add tag puts a thread in a tag with the Board's records, and it holds acro
   expect([...reopen().allThreadTags()]).toEqual([[t.thread_id, [release.id, windows.id]]]);
 });
 
+test("a pair marked again reads its marks in the same order while open and after a restart", () => {
+  const { store, release, thread, reopen } = world();
+  const a = thread();
+  const b = thread();
+  store.setThreadTag(a.thread_id, release.id, true);
+  store.setThreadTag(b.thread_id, release.id, true);
+  store.setThreadTag(a.thread_id, release.id, false);
+  expect(store.threadTagMarkList().map((m) => m.thread_id)).toEqual([b.thread_id, a.thread_id]);
+  expect(store.threadTagMarkList()).toEqual(reopen().threadTagMarkList());
+});
+
 test("untick takes a menu tag off, and takes a typed #Name off too: the removal wins over a #Name typed before it", () => {
   const { store, release, windows, thread, reply, reopen } = world();
   const t = thread();
