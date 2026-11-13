@@ -60,7 +60,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   expect(existsSync(binary), `build the binary first: ${binary}`).toBe(true);
   const root = inboxScratch('plannotator-inbox-comment-pictures-e2e-');
   const dataDir = join(root, 'data');
-  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0' };
+  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0' };
   const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
   expect(started.status, started.stderr).toBe(0);
   const context = await browser.newContext({ viewport: { width: 1280, height: 900 }, colorScheme: 'light' });
@@ -102,7 +102,9 @@ test('a picture added to a comment shows in the comment box, and Send carries it
   await pictureButton.click();
   await expect(page.getByPlaceholder('Paste path or URL...')).toHaveCount(0);
   const png = await page.screenshot({ type: 'png' });
-  await page.locator('input[type="file"][accept="image/*"]').setInputFiles({ name: 'legend.png', mimeType: 'image/png', buffer: png });
+  const dropZone = page.getByText(/^Drop (a file|image) or click to browse$/);
+  await expect(dropZone).toBeVisible();
+  await dropZone.locator('xpath=ancestor::*[.//input[@type="file"]][1]//input[@type="file"]').setInputFiles({ name: 'legend.png', mimeType: 'image/png', buffer: png });
   await page.locator('button[title^="Save"]').click();
 
   const thumb = pictureButton.locator('img');

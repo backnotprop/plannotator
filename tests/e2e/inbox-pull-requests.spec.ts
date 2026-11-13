@@ -579,6 +579,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const env: Record<string, string> = {
     PATH: `${forgeDir}:${process.env.PATH ?? ''}`,
     HOME: root,
+    PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9',
     PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_INBOX_CONNECT: '0',
     PLANNOTATOR_UPDATE_CHECK: '0',
@@ -1550,9 +1551,9 @@ test("the PR's description in its details: a short one whole, a long one folded,
     '',
     'Charges that fail today are retried by hand.',
     '',
-    '![Retry timeline](https://user-images.githubusercontent.com/1/timeline.png)',
+    '![Retry timeline](https://pictures.example.invalid/timeline.png)',
     '',
-    '<img src="https://github.com/user-attachments/assets/abc" alt="Dashboard after" width="600">',
+    '<img src="https://pictures.example.invalid/after.png" alt="Dashboard after" width="600">',
     '',
     '| Area | Risk |',
     '| --- | --- |',
@@ -1614,7 +1615,7 @@ test("the PR's description in its details: a short one whole, a long one folded,
       await expect(section.getByText('Retry timeline')).toBeVisible();
       await expect(section.getByText('Dashboard after')).toBeVisible();
       await expect(section.locator('img')).toHaveCount(0);
-      expect(asked.filter((url) => /githubusercontent|github\.com\/user-attachments/.test(url))).toEqual([]);
+      expect(asked.filter((url) => url.includes('example.invalid'))).toEqual([]);
       expect(await page.evaluate(() => (window as { scripted?: boolean }).scripted)).toBeUndefined();
 
       await section.getByRole('button', { name: 'Show less' }).click();

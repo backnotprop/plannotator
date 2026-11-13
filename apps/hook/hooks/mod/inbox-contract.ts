@@ -408,6 +408,13 @@ export const INBOX_PULLS_FIELD_DESCRIPTION =
 export const INBOX_THREAD_PULLS_DESCRIPTION =
   "A thread's pull/merge requests: `add`, `remove`, or neither to list them with live state and who added each. The thread's agent owns the list; the person can change it too."
 
+/**
+ * Thread priority (approval "inbox-thread-priority"). send_message's `priority` field: through the MCP server's
+ * field, every connection's `plannotator_inbox` tool carries it. The agent's mark is the person's own mark.
+ */
+export const INBOX_PRIORITY_FIELD_DESCRIPTION =
+  "`true` puts this thread in the person's Priority, the top of their list; `false` takes it out. Follow the person: use it when they told you this matters most to them, or when what they asked for plainly makes it so, and take it out when that is over. It is theirs to change at any time."
+
 /** The `thread_pulls` tool's `add` field (approved text). */
 export const INBOX_THREAD_PULLS_ADD_DESCRIPTION = "PRs to add, any number in one call (a whole stack, or related ones), as send_message's `pulls`."
 
@@ -1481,7 +1488,7 @@ export function inboxHandedAwayLine(to: string): string {
  * Every name in core's INBOX_HOST_NAMES must be here (this contract may not
  * import it); `connection-tags.test.ts` fails when one is missing.
  */
-export const INBOX_WAKE_AGENT_NAMES: readonly string[] = ['Claude Code', 'Pi', 'OpenCode', 'Codex', 'Cursor', 'Grok Build', 'Qwen Code', 'DeepSeek Harness', 'T3 Code', 'Cline', 'Muse Code', 'OpenClaw', 'Hermes Agent', 'Cloud agent', 'Claude Code routine', 'Grok Bot', 'Muse by Meta']
+export const INBOX_WAKE_AGENT_NAMES: readonly string[] = ['Claude Code', 'Pi', 'OpenCode', 'Codex', 'Cursor', 'Grok Build', 'Qwen Code', 'DeepSeek Harness', 'T3 Code', 'Cline', 'Muse Code', 'OpenClaw', 'Hermes Agent', 'Cloud agent', 'Claude Code routine', 'Grok Bot', 'Muse by Meta', 'Hermes Agent server', 'OpenClaw server']
 
 /** An agent name a wake line carries: one of INBOX_WAKE_AGENT_NAMES (spacing folded), else '' (the caller says "another agent"). */
 function wakeName(value: unknown): string {

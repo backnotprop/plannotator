@@ -16,7 +16,7 @@ import type { SystemDrawingAnswer, SystemProjectsAnswer, SystemPullsAnswer } fro
 import type { SystemModel } from '@plannotator/system';
 import type { ShapeDrawnView, ShapeNote, ShapeRecord, ShapeRef, ShapeVersion } from '@plannotator/core/shape';
 import type { InboxArtifactPin, InboxArtifactsPage, InboxArtifactType } from '@plannotator/core/inbox-artifact-pins';
-import type { InboxAgentFaceChange } from '@plannotator/core/inbox-types';
+import type { InboxAgentFaceChange, InboxPriorityBefore } from '@plannotator/core/inbox-types';
 import { isActionRecord, questionsOnly, splitThreadActions } from './actions';
 import { createListReader, type ListReadAnswer } from './listRead';
 import { inboxUrl, isContested, localRoute, machineOf, rememberLocal, rememberMachine, selfMachineId, setSelfMachine } from './inboxUrl';
@@ -100,12 +100,13 @@ import type {
 
 import { browserSharedEventsEnv, sharedInboxEventsSupported, subscribeOwnInboxEvents, subscribeSharedInboxEvents } from './sharedEvents';
 import { newUuid } from './uuid';
+import { trackCommentWrite } from './commentSaves';
 
 /**
  * A dialog of the line of one-time dialogs, as the Inbox names it (the queue: packages/shared/inbox/reveals.ts, server
  * side): the update-day dialogs, then the offers. A registered dialog (Bro mode, List view) adds its id here.
  */
-export type InboxRevealId = 'theme_chooser' | 'code_review' | 'sound' | 'list_intro' | 'voice' | 'tab_icon' | 'snooze' | 'bro' | 'grill_me_tip' | 'board' | 'steps' | 'agent_rules' | 'star' | 'list_view';
+export type InboxRevealId = 'theme_chooser' | 'code_review' | 'sound' | 'list_intro' | 'voice' | 'tab_icon' | 'snooze' | 'bro' | 'grill_me_tip' | 'board' | 'steps' | 'agent_rules' | 'star' | 'list_view' | 'personal_agents' | 'priority';
 /** What the line claims (`POST /api/inbox/reveal`): every offer, and the tab icon, the one update-day dialog claimed through the line. */
 export type InboxRevealOfferId = Exclude<InboxRevealId, 'sound' | 'list_intro' | 'voice'>;
 /** What a page claims through `POST /api/inbox/reveal`: Snooze, an offer, the agent note, the Launch tip or the Sidebar tip (both outside the line). */
@@ -891,6 +892,14 @@ export interface LanState {
 
 /** Where Post decisions puts a thread's decisions: the PR's description (default), a comment, or a short section plus the comment. */
 export type DecisionsPostTo = 'description' | 'comment' | 'both';
+
+type ImageRef = { path: string; name: string; kind?: 'file' };
+
+export interface InboxCommentDraftView {
+  text: string;
+  images: ImageRef[];
+  updated_at: string;
+}
 
 export class InboxApiError extends Error {
   constructor(
@@ -1829,10 +1838,10 @@ export const inboxApi = {
     post<{ message_id: string; viewed: string[] }>(messageUrl(messageId, `/guide/viewed`), { viewed }),
   /** A comment on that guide's diff (the review app's line comment), new or edited; removed through `removeAnnotation`. */
   saveGuideAnnotation: (messageId: string, annotation: object) =>
-    post<{ annotation: InboxAnnotationRecord }>(messageUrl(messageId, `/guide/annotations`), { annotation }),
+    trackCommentWrite(post<{ annotation: InboxAnnotationRecord }>(messageUrl(messageId, `/guide/annotations`), { annotation }), { on: messageId, id: (annotation as { id?: unknown }).id }),
   /** A comment on the text of an agent's message (the words selected), new or edited; removed through `removeAnnotation`. */
   saveMessageAnnotation: (messageId: string, annotation: object) =>
-    post<{ annotation: InboxAnnotationRecord }>(messageUrl(messageId, `/annotations`), { annotation }),
+    trackCommentWrite(post<{ annotation: InboxAnnotationRecord }>(messageUrl(messageId, `/annotations`), { annotation }), { on: messageId, id: (annotation as { id?: unknown }).id }),
   // A question choice's running-app prototype, through the live proxy (packages/server/inbox-live.ts). `probe`: the
   // app is asked first, so a stopped one answers 422 live_not_answering instead of the proxy framing its error.
   liveSite: (threadId: string, siteId: string, probe = false) =>
@@ -1840,7 +1849,7 @@ export const inboxApi = {
   pingLiveSite: (threadId: string, siteId: string) =>
     post<{ running: boolean }>(inboxUrl(`/threads/${encodeURIComponent(threadId)}/live/${encodeURIComponent(siteId)}/ping`), {}),
   saveLiveAnnotation: (threadId: string, siteId: string, annotation: object) =>
-    post<{ annotation: InboxAnnotationRecord }>(inboxUrl(`/threads/${encodeURIComponent(threadId)}/live/${encodeURIComponent(siteId)}/annotations`), { annotation }),
+    trackCommentWrite(post<{ annotation: InboxAnnotationRecord }>(inboxUrl(`/threads/${encodeURIComponent(threadId)}/live/${encodeURIComponent(siteId)}/annotations`), { annotation }), { on: threadId, id: (annotation as { id?: unknown }).id }),
   restart: () => post<{ ok: true }>(inboxUrl('/restart'), {}),
   // The update control: the dialogs' facts, Update now, Remind me tomorrow, Check now, What's new.
   updateDetails: () => get<UpdateDetails>(inboxUrl('/update')),
@@ -1914,9 +1923,9 @@ export const inboxApi = {
   linkedPage: (attachmentId: string, path: string) =>
     get<LinkedPageView>(attachmentUrl(attachmentId, `/linked-page?path=${encodeURIComponent(path)}`)),
   saveAnnotation: (attachmentId: string, version: string, annotation: object) =>
-    post<{ annotation: InboxAnnotationRecord }>(inboxUrl('/annotations', undefined, machineOf(attachmentId)), { attachment_id: attachmentId, version, annotation }),
+    trackCommentWrite(post<{ annotation: InboxAnnotationRecord }>(inboxUrl('/annotations', undefined, machineOf(attachmentId)), { attachment_id: attachmentId, version, annotation }), { on: attachmentId, id: (annotation as { id?: unknown }).id }),
   removeAnnotation: (id: string) =>
-    post<{ annotation: InboxAnnotationRecord }>(inboxUrl(`/annotations/${encodeURIComponent(id)}/remove`, undefined, machineOf(id)), {}),
+    trackCommentWrite(post<{ annotation: InboxAnnotationRecord }>(inboxUrl(`/annotations/${encodeURIComponent(id)}/remove`, undefined, machineOf(id)), {}), { on: id, id, remove: true }),
   /** "Open in": the file as it is now, in a catalog app or the default app, by the attachment's id (on this computer only). */
   openIn: (attachmentId: string, appId: string) =>
     post<{ ok: boolean; error?: string }>(inboxUrl('/open-in'), { attachment_id: attachmentId, app_id: appId }),
@@ -1992,6 +2001,10 @@ export const inboxApi = {
   drafts: () => get<{ serverSession: string; drafts: DraftView[]; replies?: InboxReplyDraftRow[] }>(inboxUrl('/drafts')),
   // Reply drafts (approval "inbox-reply-drafts"): the reply box's words per thread.
   replyDraft: (threadId: string) => get<{ draft: InboxReplyDraft | null }>(threadUrl(threadId, `/draft`)),
+  commentDraft: (threadId: string, key: string) => get<{ draft: InboxCommentDraftView | null }>(threadUrl(threadId, '/comment-draft', `key=${encodeURIComponent(key)}`)),
+  saveCommentDraft: (threadId: string, body: { key: string; text: string; images: readonly ImageRef[]; base: string | null; force?: boolean }) =>
+    post<{ draft: InboxCommentDraftView | null }>(threadUrl(threadId, '/comment-draft'), body),
+  deleteCommentDraft: (threadId: string, key: string) => post<{ ok: true; deleted: boolean }>(threadUrl(threadId, '/comment-draft/delete'), { key }),
   /** Save (compare-and-set on `base`, the `updated_at` last read; null to create); an empty body deletes it. */
   /**
    * `files`: the box's file changes since it last held the draft's files (`files_add`, `files_remove`,
@@ -2071,6 +2084,8 @@ export const inboxApi = {
   /** A PR author's profile picture, served by the Inbox from its own origin (only an author the last list returned). */
   pullDetails: (key: string, signal?: AbortSignal) => get<InboxPullDetailsAnswer>(inboxUrl(`/pulls/details?key=${encodeURIComponent(key)}`), signal),
   pullAvatarUrl: (host: string, login: string) => inboxUrl('/pulls/avatar', `host=${encodeURIComponent(host)}&login=${encodeURIComponent(login)}`),
+  pullMediaUrl: (key: string, url: string) => inboxUrl('/pulls/media', `key=${encodeURIComponent(key)}&url=${encodeURIComponent(url)}`),
+  pullMediaSizes: (key: string, signal?: AbortSignal) => get<{ sizes: Record<string, { width: number; height: number }> }>(inboxUrl(`/pulls/media/sizes?key=${encodeURIComponent(key)}`), signal),
   /** One layer's diff, or the stack's from its base up to that layer (a PR the last list named). */
   pullDiff: (key: string, scope: InboxPullDiffScope, signal?: AbortSignal) =>
     get<InboxPullDiffAnswer>(inboxUrl(`/pulls/diff?key=${encodeURIComponent(key)}&scope=${scope}`), signal),
@@ -2079,8 +2094,8 @@ export const inboxApi = {
   /** New review's change summary for a project's local changes. */
   reviewChanges: (project: string, changes: InboxReviewChanges, signal?: AbortSignal) => get<InboxReviewChangesAnswer>(inboxUrl(`/reviews/changes?project=${encodeURIComponent(project)}&changes=${changes}`), signal),
   /** One changed file's whole text at both ends of that diff, for its expand arrows, while it is the blobs (`old`, `new`) the patch on screen names. */
-  pullFile: (key: string, scope: InboxPullDiffScope, path: string, ids: PatchBlobIds, signal?: AbortSignal) =>
-    get<InboxFileContents>(inboxUrl(`/pulls/file?key=${encodeURIComponent(key)}&scope=${scope}&path=${encodeURIComponent(path)}&old=${ids.oldId}&new=${ids.newId}`), signal),
+  pullFile: (key: string, scope: InboxPullDiffScope, path: string, pin: PatchBlobIds | { head: string }, signal?: AbortSignal) =>
+    get<InboxFileContents>(inboxUrl(`/pulls/file?key=${encodeURIComponent(key)}&scope=${scope}&path=${encodeURIComponent(path)}&${'head' in pin ? `head=${pin.head}` : `old=${pin.oldId}&new=${pin.newId}`}`), signal),
   /** The person started a PR's (a stack's open layers') review thread with an agent: `threadId` is the thread the review picker (or compose's New thread) just started for it. */
   pullOwner: (keys: readonly string[], threadId: string, ask?: 'guide' | 'custom') => post<{ ok: true }>(inboxUrl('/pulls/owner'), { keys: [...keys], thread_id: threadId, ...(ask ? { ask } : {}) }),
   /** Before a hand-off is sent: may these PRs go to an agent in `projectId`? (404 `pull_unknown`, 422 another project's.) */
@@ -2165,8 +2180,11 @@ export const inboxApi = {
   artifactPins: () => get<{ pins: InboxArtifactPin[] }>(inboxUrl('/artifact-pins')),
   /** The face each agent's icon shows (inbox/agent-faces.json, agents/agentFaces.ts). This window's Inbox only. */
   agentFaces: () => get<unknown>(inboxUrl('/agent-faces')),
-  /** One agent's face (`agent`: its own mark again), or this browser's faces from before (`adopt`); every window hears it (`event: agent-faces`). */
-  saveAgentFace: (change: InboxAgentFaceChange) => post<unknown>(inboxUrl('/agent-faces'), change as Record<string, unknown>),
+  /**
+   * One agent's face (`agent`: its own mark again) or given name, or this browser's faces from before (`adopt`); every
+   * window hears it (`event: agent-faces`). `machine`: the agent's own machine, which keeps it (approval "inbox-linked-marks").
+   */
+  saveAgentFace: (change: InboxAgentFaceChange, machine?: string | null) => post<unknown>(inboxUrl('/agent-faces', undefined, machine), change as Record<string, unknown>),
   /** "Your own…": keep an uploaded picture for agents' icons (a data: URL, as Set picture… sends); answers `{ icon, faces, rev, icons }`. */
   uploadAgentIcon: (picture: string) => post<{ icon?: { id?: unknown } } & Record<string, unknown>>(inboxUrl('/agent-icons'), { picture }),
   /** Take an uploaded picture away: the agents showing it go back to their own mark. Answers `{ faces, rev, icons }`. */
@@ -2203,6 +2221,9 @@ export const inboxApi = {
   /** Unpin's Undo, on the thread's own machine: pin this one thread again at its old index there, with the time it was first pinned. */
   pinRestore: (restore: { thread_id: string; index: number; pinned_at: string }) =>
     post<{ pins: { thread_id: string; pinned_at: string }[] }>(inboxUrl('/pins', undefined, machineOf(restore.thread_id)), { restore }),
+  /** Add the thread to Priority (`true`) or remove it, or (`restore`) put back a `before` an earlier write answered. On the thread's own machine. */
+  priority: (threadId: string, change: boolean | { restore: InboxPriorityBefore }) =>
+    post<{ before: InboxPriorityBefore }>(threadUrl(threadId, '/priority'), typeof change === 'boolean' ? { priority: change } : change),
   /** Put a thread in a tag (`on`) or take it out (approval "inbox-thread-tags"): the thread's tags after. */
   setThreadTag: (threadId: string, tag: string, on: boolean) => post<{ tags: string[] }>(inboxUrl(`/threads/${encodeURIComponent(threadId)}/tags`), { tag, on }),
   /** Snooze the thread until a time, or end its snooze (`null`). `at`: an earlier snooze's own time, for an Undo. On the thread's own machine. */
@@ -2465,6 +2486,8 @@ export interface InboxEventHandlers {
   onAsk?: (threadId: string) => void;
   /** The sidebar's pins changed (`event: pins`, approval "inbox-pinned-threads"); never called by an older Inbox. */
   onPins?: () => void;
+  /** The person's Priority changed (`event: priority`); never called by an older Inbox. */
+  onPriority?: () => void;
   /** The pinned artifacts changed (`event: artifact-pins`, approval "inbox-artifact-stars"); never called by an older Inbox. */
   onArtifactPins?: () => void;
   /** A thread's tags changed (`event: tags`, approval "inbox-thread-tags"); never called by an older Inbox. */
@@ -2525,7 +2548,7 @@ export interface InboxEventWindow {
 
 /** The event stream's named frames, as they arrive (and as the tab that holds the shared stream passes them on). */
 // `heartbeat`: a window's stream beats every 10 s (packages/server/inbox.ts); heard by liveStream.ts, handled by nothing.
-export const INBOX_EVENT_FRAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'ask', 'pins', 'artifact-pins', 'tags', 'show', 'snoozes', 'thread-pulls', 'rows', 'sidebar', 'agent-faces', 'reactions', 'capabilities', 'tailscale', 'shapes', 'machine', 'machines', 'outbox', 'heartbeat'] as const;
+export const INBOX_EVENT_FRAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'ask', 'pins', 'priority', 'artifact-pins', 'tags', 'show', 'snoozes', 'thread-pulls', 'rows', 'sidebar', 'agent-faces', 'reactions', 'capabilities', 'tailscale', 'shapes', 'machine', 'machines', 'outbox', 'heartbeat'] as const;
 export type InboxEventFrameName = (typeof INBOX_EVENT_FRAMES)[number];
 export interface InboxEventFrame {
   name: InboxEventFrameName;
@@ -2611,6 +2634,9 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
     }
     case 'pins':
       handlers.onPins?.();
+      return;
+    case 'priority':
+      handlers.onPriority?.();
       return;
     case 'artifact-pins':
       handlers.onArtifactPins?.();

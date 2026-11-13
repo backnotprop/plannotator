@@ -15,7 +15,7 @@ import { BlockRenderer } from './BlockRenderer';
 import { BELOW_TITLE_SLOT_MARKER } from '../utils/belowTitleSlot';
 import { indexQuestionBlocks, type IndexedQuestion, type ParsedQuestion, type QuestionAnswer } from '@plannotator/core/question-block';
 import { diagramTargetText, type DiagramAnchor } from '@plannotator/core/diagram-anchor';
-import type { QuestionBlockProps } from './blocks/QuestionBlock';
+import type { QuestionAcceptBehavior, QuestionBlockProps } from './blocks/QuestionBlock';
 import { resolveQuestionAnswers } from '../utils/questionAnswers';
 import { CodeBlock } from './blocks/CodeBlock';
 import { TableBlock } from './blocks/TableBlock';
@@ -367,6 +367,10 @@ export interface ViewerProps {
    *  when the host knows it before the picture loads (see `QuestionBlock`
    *  `pictureSize`). Absent: unknown, and nothing changes. */
   questionPictureSize?: (url: string) => { width: number; height: number } | null;
+  /** Accept recommended, gentler: steps aside while a card field has focus, keeps
+   *  Other… words, tells the host so it can offer Undo (see `QuestionBlock`
+   *  `acceptBehavior`). Absent: today's button. */
+  questionAcceptBehavior?: QuestionAcceptBehavior;
   /** Makes a question's "Records a decision" tag a toggle button
    *  (`aria-pressed`); a click calls this with the question's key and the
    *  next state, which the host stores and returns from
@@ -940,6 +944,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   questionPictureBadge,
   onQuestionPictureZoom,
   questionPictureSize,
+  questionAcceptBehavior,
   onToggleQuestionDecisionRecording,
   onOpenQuestionDecision,
   questionDecisionLocked,
@@ -2217,6 +2222,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
                   questionPictureBadge={questionPictureBadge}
                   onQuestionPictureZoom={onQuestionPictureZoom}
                   questionPictureSize={questionPictureSize}
+                  questionAcceptBehavior={questionAcceptBehavior}
                 />
               );
               // `textComments`: a question card's words are not commented on

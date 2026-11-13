@@ -11,16 +11,21 @@
  * thread making this one read again; and a read nobody waits for any more
  * left running (a hover that ended, a thread closed: each held one of the
  * browser's six connections to the Inbox until threads stopped opening), or a
- * card left on "Loading…" for ever when the read gets no answer.
+ * card left on "Loading…" for ever when the read gets no answer. With Code
+ * review on, "Open review thread" on a row it should not be on (merged, a PR
+ * Reviews does not list, the thread's own review), missing where it should be,
+ * going to the wrong place, or taking over the row's own link to the forge.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import type { InboxThreadPullWire, InboxThreadPullsAnswer, InboxThreadPullsSummary, InboxThreadPullState } from '@plannotator/core/inbox-types';
-import { inboxThreadPullGroups, inboxThreadPullWire, parseInboxThreadPullRef } from '@plannotator/core/inbox-types';
-import { pullsMarkWords, threadPullsBus } from './model';
+import type { InboxPull, InboxPullLink, InboxPullsAnswer, InboxReviewRow, InboxThreadPullWire, InboxThreadPullsAnswer, InboxThreadPullsSummary, InboxThreadPullState } from '@plannotator/core/inbox-types';
+import { inboxPullStacks, inboxThreadPullGroups, inboxThreadPullWire, parseInboxThreadPullRef } from '@plannotator/core/inbox-types';
+import { pullReviewLinks, pullsMarkWords, threadPullsBus, type PullReviewLink } from './model';
 
 const hasDom = typeof document !== 'undefined';
 const { RowPullsMark, ThreadPullsButton } = (hasDom ? await import('./ThreadPulls') : {}) as typeof import('./ThreadPulls');
@@ -273,6 +278,33 @@ describe.skipIf(!hasDom)("the thread's button and its card", () => {
     expect(popover()!.querySelector('.ib-prpop-head')!.textContent).toBe('o/rStack of 3');
   });
 
+  test("the card's stack lists its layers one under the other; the Pull requests board's stack button stays a flex row", async () => {
+    // The two files' rules for the shared class, in the order the window loads them (inbox.css, then prs/prs.css).
+    const rules = (file: string) =>
+      readFileSync(join(import.meta.dir, file), 'utf8')
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        .split('\n')
+        .filter((line) => /^\.[^{]*\.ib-prpop-stack[^{]*\{[^}]*\}\s*$/.test(line) || /^\.ib-prpop-stack[^{]*\{[^}]*\}\s*$/.test(line));
+    const style = document.createElement('style');
+    style.textContent = [...rules('../inbox.css'), ...rules('../prs/prs.css')].join('\n');
+    document.head.append(style);
+    try {
+      answer = answerOf([pull('o/r#1', 'open', 'main', 'a'), pull('o/r#2', 'open', 'a', 'b')]);
+      render(<ThreadPullsButton threadId={THREAD} summary={undefined} />);
+      await settle();
+      await click(host!.querySelector('[data-pr-button]'));
+      const list = popover()!.querySelector<HTMLElement>('[data-pr-group="stack"] ol')!;
+      expect(list.querySelectorAll('[data-pr-row]')).toHaveLength(2);
+      expect(getComputedStyle(list).display).toBe('block');
+      const board = document.createElement('button');
+      board.className = 'ib-prpop-stack';
+      host!.append(board);
+      expect(getComputedStyle(board).display).toBe('flex');
+    } finally {
+      style.remove();
+    }
+  });
+
   test('remove sends that ref, says so with Undo, and Undo adds it back', async () => {
     const a = pull('o/r#1', 'open', 'main', 'a');
     const b = pull('o/web#2', 'open', 'main', 'b');
@@ -485,4 +517,137 @@ describe.skipIf(!hasDom)("the thread's button and its card", () => {
       }
     });
   }
+});
+
+describe.skipIf(!hasDom)('Open review thread (Code review on)', () => {
+  const REVIEW = 'msg_01M5PR0000000000000000009';
+  /** A PR as Reviews' list has it, from the thread's wire. */
+  const listed = (wire: InboxThreadPullWire, state: InboxPull['state'] = 'open'): InboxPull => ({
+    key: wire.pull,
+    platform: wire.platform === 'gitlab' ? 'gitlab' : 'github',
+    host: wire.host,
+    repo: wire.repo,
+    number: wire.number,
+    url: wire.url,
+    title: wire.title ?? '',
+    author: 'dana',
+    mine: false,
+    requested: true,
+    state,
+    base: wire.base ?? 'main',
+    head: wire.head ?? 'x',
+    head_repo: wire.repo,
+    additions: 1,
+    deletions: 1,
+    files: 1,
+    review: null,
+    approved_by: null,
+    reviewers: [],
+    checks: null,
+    updated_at: '2026-11-08T10:00:00.000Z',
+    merged_at: null,
+  });
+  const link = (thread: string): InboxPullLink => ({ via: 'owner', thread_id: thread, thread_subject: null, project_id: 'prj_1', agent: { host: 'claude-code', session: 'ses_a', name: null }, last: null, guide: null });
+
+  const withThread = pull('acme/bundler-web#9802', 'open', 'main', 'manifest');
+  const noThread = pull('acme/bundler-web#9811', 'open', 'main', 'retry');
+  const draft = pull('acme/bundler-web#9810', 'draft', 'main', 'chunk');
+  const merged = pull('acme/bundler-web#9788', 'merged', 'main', 'names');
+  const elsewhere = pull('https://bitbucket.org/acme/billing/pull-requests/7', 'open', 'main', 'retries');
+  /** Reviews' list: every PR above but the Bitbucket one; #9802's review thread is `REVIEW` (or `thread`). */
+  const reviewsList = (thread = REVIEW) => {
+    const model: InboxPullsAnswer = {
+      fetched_at: null,
+      hosts: [],
+      pulls: [listed(withThread), listed(noThread), listed(draft, 'draft'), listed(merged, 'merged')],
+      links: { [withThread.pull]: link(thread) },
+      projects: {},
+      cards: {},
+    };
+    const rows = { rows: [{ reviewed: true, stacks: inboxPullStacks(model.pulls).filter((s) => s.layers.some((l) => l.key === withThread.pull)) } as unknown as InboxReviewRow] };
+    return { model, linkOf: pullReviewLinks(model, rows) };
+  };
+  const line = (ref: string) => popover()!.querySelector<HTMLButtonElement>(`[data-pr-row="${ref}"] [data-pr-review]`);
+
+  test('open and draft PRs Reviews lists get one line; merged and unlisted ones none; the row still goes to the forge', async () => {
+    answer = answerOf([withThread, noThread, draft, merged, elsewhere]);
+    const opened: PullReviewLink[] = [];
+    render(<ThreadPullsButton threadId={THREAD} summary={undefined} review={{ linkOf: reviewsList().linkOf, onOpen: (l) => opened.push(l) }} />);
+    await settle();
+    await click(host!.querySelector('[data-pr-button]'));
+    expect(popover()!.querySelectorAll('[data-pr-review]')).toHaveLength(3);
+    expect(line(withThread.ref)!.getAttribute('data-pr-review')).toBe('thread');
+    expect(line(withThread.ref)!.textContent).toBe('Open review thread · with Claude Code');
+    expect(line(noThread.ref)!.getAttribute('data-pr-review')).toBe('launchpad');
+    expect(line(noThread.ref)!.textContent).toBe('Open review thread');
+    expect(line(draft.ref)!.getAttribute('data-pr-review')).toBe('launchpad');
+    expect(line(merged.ref)).toBeNull();
+    expect(line(elsewhere.ref)).toBeNull();
+    // A button (Tab reaches it, Enter opens it), apart from the row's own link, which still goes to the forge.
+    expect(line(withThread.ref)!.tagName).toBe('BUTTON');
+    for (const pr of [withThread, noThread, merged, elsewhere]) {
+      const row = popover()!.querySelector(`[data-pr-row="${pr.ref}"]`)!;
+      expect(row.querySelector<HTMLAnchorElement>('a.ib-prpop-link')!.getAttribute('href')).toBe(pr.url);
+      expect(row.querySelector('a.ib-prpop-link [data-pr-review]')).toBeNull();
+      expect(row.querySelector(`[data-pr-remove="${pr.ref}"]`)).not.toBeNull();
+    }
+    expect(opened).toEqual([]);
+  });
+
+  test('a line goes to the review thread, or with none to the PR\'s page in Reviews, and closes the card', async () => {
+    answer = answerOf([withThread, noThread, merged]);
+    const opened: PullReviewLink[] = [];
+    const { model } = reviewsList();
+    render(<ThreadPullsButton threadId={THREAD} summary={undefined} review={{ linkOf: reviewsList().linkOf, onOpen: (l) => opened.push(l) }} />);
+    await settle();
+    await click(host!.querySelector('[data-pr-button]'));
+    await click(line(withThread.ref));
+    expect(opened).toEqual([{ kind: 'thread', threadId: REVIEW, agent: { host: 'claude-code', name: 'Claude Code' } }]);
+    expect(popover()).toBeNull();
+    await click(host!.querySelector('[data-pr-button]'));
+    await click(line(noThread.ref));
+    const stack = inboxPullStacks(model.pulls).find((s) => s.layers.some((l) => l.key === noThread.pull))!;
+    expect(opened.at(-1)).toEqual({ kind: 'launchpad', stackId: stack.id });
+    expect(popover()).toBeNull();
+  });
+
+  test('the row whose review thread is this thread has no line', async () => {
+    answer = answerOf([withThread, noThread]);
+    render(<ThreadPullsButton threadId={THREAD} summary={undefined} review={{ linkOf: reviewsList(THREAD).linkOf, onOpen: () => {} }} />);
+    await settle();
+    await click(host!.querySelector('[data-pr-button]'));
+    expect(line(withThread.ref)).toBeNull();
+    expect(line(noThread.ref)).not.toBeNull();
+  });
+
+  test('Code review off (no review links given): no line on any row', async () => {
+    answer = answerOf([withThread, noThread, draft]);
+    render(<ThreadPullsButton threadId={THREAD} summary={undefined} />);
+    await settle();
+    await click(host!.querySelector('[data-pr-button]'));
+    expect(popover()!.querySelectorAll('[data-pr-row]')).toHaveLength(3);
+    expect(popover()!.querySelector('[data-pr-review]')).toBeNull();
+    expect(popover()!.querySelector('[data-rv]')).toBeNull();
+  });
+
+  test("one PR: the line follows the forge's hover card", async () => {
+    answer = answerOf([withThread]);
+    const { setRefCardTransport } = await import('@plannotator/ui/utils/refCard');
+    setRefCardTransport(async (href) => ({
+      ok: true,
+      fetchedAt: Date.now(),
+      data: { platform: 'github', kind: 'pull', repo: 'acme/bundler-web', number: 9802, url: href, title: 'Cache the manifest', state: 'open', author: null, createdAt: '2026-11-01T00:00:00.000Z', updatedAt: '2026-11-02T00:00:00.000Z', closedAt: null, labels: [], assignees: [], comments: 0, body: '', bodyCut: false, lastComment: null, linked: [] },
+    }));
+    try {
+      const opened: PullReviewLink[] = [];
+      render(<ThreadPullsButton threadId={THREAD} summary={undefined} review={{ linkOf: reviewsList().linkOf, onOpen: (l) => opened.push(l) }} />);
+      await settle();
+      await click(host!.querySelector('[data-pr-button]'));
+      expect(popover()!.textContent).toContain('Cache the manifest');
+      await click(popover()!.querySelector('[data-pr-one] [data-pr-review="thread"]'));
+      expect(opened.map((l) => l.kind)).toEqual(['thread']);
+    } finally {
+      setRefCardTransport(null);
+    }
+  });
 });

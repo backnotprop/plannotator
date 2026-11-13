@@ -46,6 +46,7 @@ interface ImageThumbnailProps {
   onRemove?: () => void;
   showRemove?: boolean;
   className?: string;
+  file?: boolean;
 }
 
 const SIZES = {
@@ -61,6 +62,7 @@ export const ImageThumbnail: React.FC<ImageThumbnailProps> = ({
   onRemove,
   showRemove = true,
   className = '',
+  file = false,
 }) => {
   const [error, setError] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -69,6 +71,17 @@ export const ImageThumbnail: React.FC<ImageThumbnailProps> = ({
 
   return (
     <div className={`group relative ${sizeClass} ${className}`}>
+      {file ? (
+        <div
+          onClick={onClick}
+          data-attachment-file=""
+          className={`${sizeClass} rounded border border-border bg-muted flex items-center justify-center text-muted-foreground`}
+        >
+          <svg className="w-1/2 h-1/2" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden="true">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+          </svg>
+        </div>
+      ) : <>
       {loading && !error && (
         <div className={`absolute inset-0 bg-muted rounded animate-pulse`} />
       )}
@@ -105,6 +118,8 @@ export const ImageThumbnail: React.FC<ImageThumbnailProps> = ({
           className={`${sizeClass} rounded object-cover border border-border ${onClick ? 'cursor-pointer hover:opacity-80' : ''}`}
         />
       )}
+
+      </>}
 
       {/* Remove button */}
       {showRemove && onRemove && (

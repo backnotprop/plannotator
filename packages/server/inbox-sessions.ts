@@ -1076,10 +1076,11 @@ export function createInboxLiveSessions(options: {
   };
 
   /** The fields a list row's delivery reads (`InboxStore.setDeliveryPresence`): `connectionOf` without its plugin checks. */
-  const deliveryConnectionOf = (session: string): { busy: boolean | null; send_now: boolean; held?: true } | null => {
+  const deliveryConnectionOf = (session: string): { busy: boolean | null; send_now: boolean; held?: true; polls?: true } | null => {
     const entry = standInOf(session)?.entry;
-    if (!entry) return options.wakeOnlyStatus?.(session) === "alive" ? { busy: null, send_now: false } : null;
-    return { busy: entry.busy, send_now: entry.sendNow, ...(entry.held === true ? { held: true as const } : {}) };
+    const polls = options.pollsItself?.(session) ? { polls: true as const } : {};
+    if (!entry) return options.wakeOnlyStatus?.(session) === "alive" ? { busy: null, send_now: false, ...polls } : null;
+    return { busy: entry.busy, send_now: entry.sendNow, ...(entry.held === true ? { held: true as const } : {}), ...polls };
   };
 
   /**
