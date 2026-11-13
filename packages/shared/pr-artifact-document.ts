@@ -55,6 +55,7 @@ export interface PRArtifactContentOptions {
   readonly sourceUrl?: string;
   /** Valid single-range header forwarded for video seeking. */
   readonly range?: string;
+  readonly followRedirect?: (next: URL) => boolean;
 }
 
 function contextMarkdown(context: PRContext): readonly string[] {
@@ -561,7 +562,7 @@ async function fetchArtifactContent(
           throw new PRArtifactDocumentError('Artifact document redirected too many times', 502);
         }
         const nextUrl = new URL(location, currentUrl);
-        if (!mayFollowProviderRedirect(currentUrl, nextUrl, metadata)) {
+        if (!mayFollowProviderRedirect(currentUrl, nextUrl, metadata) || (options.followRedirect && !options.followRedirect(nextUrl))) {
           throw new PRArtifactDocumentError('Artifact document redirected to a blocked address', 403);
         }
         // A sign-in hop returns HTTP 200 with a login/SSO page. Following it would render
