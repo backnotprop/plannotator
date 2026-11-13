@@ -2,12 +2,13 @@
  * Thread tags in the window (approval "inbox-thread-tags", step 1), drawn with a host in place of App (no server):
  * Add tag in the row's right-click menu (under Star thread, its list swapped in place with Back, ticks that keep the
  * menu open, untick, `New tag “…”` and Enter), Remove from <tag> in a tag's list, no Add tag on another machine's row;
+ * Snooze by keyboard in a menu long enough that Snooze's index is past the times' end (the arrows go on from the first time);
  * the sidebar's Tags section (New tag's field, the waiting count, Show threads, Rename, Delete tag); and the rules that
  * decide when the section shows, what a tag's list holds and what its header says.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
-import { afterEach, expect, test } from 'bun:test';
+import { afterEach, expect, setSystemTime, test } from 'bun:test';
 import { act, useMemo, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxInitiative, InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
@@ -105,12 +106,12 @@ function tagsHost(rows: InboxListRow[], listed: InboxInitiative | null, calls: s
   };
 }
 
-function RowMenuWith({ rows, listed = null, calls = [] }: { rows: InboxListRow[]; listed?: InboxInitiative | null; calls?: string[] }) {
+function RowMenuWith({ rows, listed = null, calls = [], snooze = false }: { rows: InboxListRow[]; listed?: InboxInitiative | null; calls?: string[]; snooze?: boolean }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps -- one host for the drawing
   const Hosted = useMemo(() => tagsHost(rows, listed, calls), []);
   return (
     <Hosted>
-      <ThreadRowMenu className="ib-lbody" rowOf={(id) => rows.find((r) => r.thread_id === id) ?? null} pinnedOf={() => false} canMarkRead={false} held={false} onAction={() => {}} onTarget={() => {}}>
+      <ThreadRowMenu className="ib-lbody" rowOf={(id) => rows.find((r) => r.thread_id === id) ?? null} pinnedOf={() => false} {...(snooze ? { onSnooze: () => {} } : {})} canMarkRead={false} held={false} onAction={() => {}} onTarget={() => {}}>
         {rows.map((r) => (
           <div key={r.thread_id} data-row={r.thread_id}>
             <button type="button" data-thread-id={r.thread_id}>
@@ -182,6 +183,28 @@ test.skipIf(!hasDom)('a typed name that is no tag offers New tag “…”, and 
   // Letters stay in the field: the menu's type-ahead never takes them.
   await type(field, 'R');
   expect(field.value).toBe('R');
+});
+
+test.skipIf(!hasDom)('with Add to Priority and Add tag above it, Snooze by keyboard: Down from the first time is the second time', async () => {
+  // A Wednesday morning: Back, four times and Pick a date, so Snooze's index (6) is past the times' end.
+  setSystemTime(new Date('2026-11-04T10:00:00Z'));
+  try {
+    draw(<RowMenuWith rows={[row('a', [], { priority: null } as Partial<InboxListRow>)]} snooze />);
+    const button = document.querySelector<HTMLElement>('[data-thread-id="a"]')!;
+    await rightClick(button);
+    await until(() => !!menu(), 'the menu');
+    expect(labels().slice(0, 3)).toEqual(['Star thread', 'Add to Priority', 'Add tag']);
+    await press(menu()!.querySelector('[data-row-action="snooze"]'));
+    const times = () => [...(menu()?.querySelectorAll<HTMLElement>('[data-snooze-choice]') ?? [])];
+    await until(() => document.activeElement === times()[0], 'focus on the first time');
+    await act(async () => {
+      await new Promise((r) => requestAnimationFrame(() => r(null)));
+    });
+    await key(document.activeElement!, 'ArrowDown');
+    await until(() => document.activeElement === times()[1], 'focus on the second time');
+  } finally {
+    setSystemTime();
+  }
 });
 
 test.skipIf(!hasDom)('in a tag’s list a row in it offers Remove from <tag>; another machine’s row offers no Add tag', async () => {

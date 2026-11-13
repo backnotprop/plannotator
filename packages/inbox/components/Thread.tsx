@@ -8,6 +8,7 @@ import { startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useR
 import { createPortal } from 'react-dom';
 import { capturePlace, holdPlace, openerOf, opensFile, parsePlaceLayout, placeInView, placeLayoutKey, placeSelector, placeShown, restorePlace, type ThreadPlace } from '../threadPlace';
 import { Viewer, type ViewerHandle } from '@plannotator/ui/components/Viewer';
+import { sameAnswerParts, type QuestionAcceptBehavior } from '@plannotator/ui/components/blocks/QuestionBlock';
 import { useRefHoverCards } from '@plannotator/ui/components/RefHoverCard';
 import { useInitiativePeek } from './InitiativePeek';
 import { AnnotationType, type Annotation, type Block } from '@plannotator/ui/types';
@@ -930,13 +931,44 @@ export function MessageBody({
   // on a busy thread grew without end).
   const footerRef = useRef(footerFor);
   footerRef.current = footerFor;
+  // The last Accept recommended's Undo, drawn at the end of that card's status line while the answer is still the
+  // one the tap set and the question still takes answers (not sent, closed or replaced).
+  const [acceptedUndo, setAcceptedUndo] = useState<{ key: string; answer: QuestionAnswer; undo: () => void } | null>(null);
+  const undoState = acceptedUndo ? message.questions?.find((q) => q.key === acceptedUndo.key)?.state : undefined;
+  const undoCurrent =
+    acceptedUndo !== null &&
+    !readOnly &&
+    (undoState === undefined || undoState === 'open' || undoState === 'picked') &&
+    !!answers.get(acceptedUndo.key) &&
+    sameAnswerParts(answers.get(acceptedUndo.key)!, acceptedUndo.answer);
+  useEffect(() => {
+    if (acceptedUndo && !undoCurrent) setAcceptedUndo(null);
+  }, [acceptedUndo, undoCurrent]);
   const renderFooter = useCallback(
     (question: IndexedQuestion) => {
       const text = footerRef.current(question.question.key);
-      return text ? <span className="ib-qfoot-st">{text}</span> : null;
+      const undo = undoCurrent && acceptedUndo?.key === question.question.key ? acceptedUndo : null;
+      if (!text && !undo) return null;
+      return (
+        <span className="ib-qfoot-st">
+          {text}
+          {undo && (
+            <button
+              type="button"
+              className="ib-qfoot-undo"
+              onClick={() => {
+                setAcceptedUndo(null);
+                undo.undo();
+              }}
+            >
+              Undo
+            </button>
+          )}
+        </span>
+      );
     },
     // A new identity when the footers may have changed, so the cards redraw.
-    [footerFor],
+    [footerFor, acceptedUndo, undoCurrent],
   );
   // Replaced questions: the host's Quiet card in place of the answer card, and
   // the newer card's "Replaces …" line. Kept stable across renders.
@@ -1074,6 +1106,16 @@ export function MessageBody({
   // window does not offer it (adr/implementation/inbox-thread-state.md, Pick).
   // "Try prototype" (approval "inbox-question-tradeoffs"): a tab hanging from the right end of the options' tray, on a
   // question with a page to try (an attached HTML file, or an app the send checked).
+  const acceptBehavior = useMemo<QuestionAcceptBehavior>(
+    () => ({
+      asideWhileTyping: true,
+      keepOther: true,
+      onAccepted: (undo, accepted) => {
+        setAcceptedUndo({ ...accepted, undo });
+      },
+    }),
+    [],
+  );
   const tryRef = useRef(onTryPrototype);
   tryRef.current = onTryPrototype;
   const afterChoices = useCallback(
@@ -1215,6 +1257,9 @@ export function MessageBody({
         questionStatusLabel={statusLabel}
         questionPictureBadge={pictureBadge}
         questionPictureSize={pictureSizeOf}
+        // Accept recommended steps aside while a card field is typed in, keeps Other… words, and offers Undo
+        // (approval "question-note-vs-accept-recommended").
+        questionAcceptBehavior={acceptBehavior}
         renderQuestionCard={renderReplacedCard ? questionCard : undefined}
         renderQuestionBelowPrompt={renderReplacesLine ? belowPrompt : undefined}
         renderDirectiveBlock={renderActions || noteBlocks.length > 0 ? directiveBlock : undefined}
@@ -1407,6 +1452,8 @@ export interface ThreadPaneProps {
   pinned?: boolean;
   /** Resolves once the pin is written and the list read again (the header waits on it before the next click's request). */
   onPin?: (pinned: boolean) => void | Promise<unknown>;
+  /** Add to Priority or Remove from Priority in the ⋯ menu, after the star. Absent where the row offers neither. */
+  priority?: { on: boolean; onToggle: () => void };
   /** Snooze the thread until a moment (the ⋯ menu, approval "inbox-snooze"). Absent (an older Inbox keeps no snoozes): no item. */
   onSnooze?: (until: string) => void;
   /** This thread's machine must update before Snooze works: Snooze stays and opens the update dialog. */
@@ -1775,7 +1822,7 @@ function labelledAuthorName({ agent, label, open = false, hidden, onFold }: { ag
   );
 }
 
-export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, notice, thread: threadRead, threadSteps = null, codeReview = false, machine = null, onMachineUpdate, onNewMessageWith, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onSentRead, readPending = false, onPickSaves, onChanged, draftChanged = 0, filesChanged = 0, draftSignal = null, filesSignal = null, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, onSnooze, onUnsnooze, snoozeBlocked, replyRequest, onReplyOpened, shapeButton = null, onSide, onSideWords, replyWords = null, onReplyWordsTaken, replyPart = null, onReplyPartTaken, onToastGone, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, guest = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, links: linksRoute = false, onLinks, decide = null, threadAlone = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null, snoozeBack = null, agentContext = null, agentFilter = null, onAgentFilter }: ThreadPaneProps) {
+export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, notice, thread: threadRead, threadSteps = null, codeReview = false, machine = null, onMachineUpdate, onNewMessageWith, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onSentRead, readPending = false, onPickSaves, onChanged, draftChanged = 0, filesChanged = 0, draftSignal = null, filesSignal = null, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, priority, onSnooze, onUnsnooze, snoozeBlocked, replyRequest, onReplyOpened, shapeButton = null, onSide, onSideWords, replyWords = null, onReplyWordsTaken, replyPart = null, onReplyPartTaken, onToastGone, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, guest = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, links: linksRoute = false, onLinks, decide = null, threadAlone = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null, snoozeBack = null, agentContext = null, agentFilter = null, onAgentFilter }: ThreadPaneProps) {
   /**
    * The questions this pane's own saves brought back (by `<message id>/<key>`), and how many saves landed. The thread
    * drawn is the one read, its questions never older than these: a read that left before the last keys were saved
@@ -6629,6 +6676,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
             <ThreadMore
               {...copyHost}
               pin={onPin ? { pinned: pinShown, onToggle: togglePin } : undefined}
+              priority={priority}
               markRead={menuMarkRead}
               moveBack={menuMoveBack}
               markUnread={markUnreadInMenu ? onMarkUnread : undefined}

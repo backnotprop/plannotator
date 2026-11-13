@@ -132,6 +132,7 @@ async function newWorld(browser: Browser, options: { updatedFrom?: string } = {}
     PATH: `${trapDir}:${process.env.PATH ?? ''}`,
     HOME: home,
     TMPDIR: tmpdir(),
+    PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9',
     PLANNOTATOR_DATA_DIR: dataDir,
     // A release version: never the live daily ping (packages/shared/daily-ping.ts).
     NO_ANON_PING: '1',

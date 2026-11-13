@@ -1626,6 +1626,9 @@ button.ib-band:hover { background: var(--ib-band-hover-s, var(--ib-band)); }
 .pn-inbox .question-block > div.border-t button { white-space: nowrap; flex-shrink: 0; }
 .pn-inbox .question-block > div.border-t [data-question-host-footer] { flex: 0 1 auto; min-width: 0; }
 .pn-inbox .question-block > div.border-t .ib-qfoot-st { white-space: normal; }
+/* Accept recommended's Undo, at the end of the card's status line. */
+.ib-qfoot-undo { margin-left: 8px; padding: 1px 6px; border-radius: 5px; font-weight: 500; color: var(--foreground); }
+@media (hover: hover) { .ib-qfoot-undo:hover { background: var(--muted); } }
 /* ui's card gives each footer button an invisible 44 px touch box (its ::before) and, on a touch screen, a 20 px
    gap between wrapped rows so the boxes never cover a neighbour. The Inbox keeps its own footer: rows 4 px apart
    (above), and on a phone 44 px buttons (the phone rules below). So the boxes go: on a tablet a wrapped
@@ -3720,6 +3723,7 @@ body:has([data-shape-layer] .shp-pill) .ib-toast:not(.ib-toast-phone) { bottom: 
   @media (pointer: coarse) {
     .pn-inbox .question-block > div.border-t { flex-wrap: wrap; column-gap: 4px; }
     .pn-inbox .question-block > div.border-t > div.ml-auto > [data-question-host-footer] { order: -1; flex-basis: 100%; margin-left: 0; padding: 2px 0 0 4px; }
+    .pn-inbox .ib-qfoot-undo { min-height: 44px; padding: 0 10px; }
   }
   .pn-inbox .question-block input[data-question-control][type="radio"]::before { width: 10px; height: 10px; }
   .pn-inbox .question-block input[data-question-control][type="checkbox"]::before { width: 12px; height: 12px; }
@@ -4762,6 +4766,12 @@ dialog.ib-cp::backdrop { background: oklch(0 0 0 / 0.45); }
 .pn-inbox .ib-cp-opt.ib-cp-lchopt:hover, .pn-inbox .ib-cp-opt.ib-cp-lchopt:focus-visible { background: color-mix(in oklch, var(--muted) 80%, transparent); outline: none; }
 :root.light .pn-inbox .ib-cp-opt.ib-cp-lchopt:is(:hover, :focus-visible) { background: var(--muted); }
 .ib-cp-lchopt .ib-cp-op { display: block; }
+.ib-cp-lchrows { display: contents; }
+.ib-cp-lchfilter { grid-column: 1 / -1; position: sticky; top: -4px; z-index: 1; margin: 0 -6px; background: var(--popover); }
+.ib-cp-lchopt .ib-cp-lchname { display: flex; align-items: baseline; gap: 0.5em; }
+.ib-cp-lchname > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-cp-lchprov { flex: none; color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); }
+.ib-cp-picker.ib-cp-lch:not([data-phone]):has([data-filterable]) { width: min(480px, calc(100% - 28px)); }
 .ib-cp-to[data-start] { flex-wrap: wrap; row-gap: 0; }
 /* Trust and start (approval "inbox-launch-trust-compose"). The question circle, quiet as any icon button unless the folder has hooks or similar;
    its details, the Inbox's popover at the button (`.ib-state.ib-nmpop`, a sheet on a phone), over the dialog: nothing under it moves. */
