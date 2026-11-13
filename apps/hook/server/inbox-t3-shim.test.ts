@@ -95,7 +95,7 @@ async function serverTools(server: InboxServer): Promise<string[]> {
 }
 
 describe("the T3 thread as the shim's session", () => {
-  test("T3CODE_THREAD_ID comes after the Plannotator tag and before every other host's variable; only a UUID counts", () => {
+  test("T3CODE_THREAD_ID comes after the Plannotator tag and before every other host's variable; a UUID, or `mcp:` plus one, counts", () => {
     const t3 = { host: "t3", session: THREAD, name: "T3 Code" };
     expect(inboxHostSessionFromEnv(T3_CLAUDE)).toEqual(t3);
     expect(inboxHostSessionFromEnv({ PLANNOTATOR_SESSION_TAG: `t3:${THREAD}` })).toEqual(t3);
@@ -103,8 +103,12 @@ describe("the T3 thread as the shim's session", () => {
     expect(inboxHostSessionFromEnv({ ...T3_CLAUDE, CODEX_THREAD_ID: CODEX_THREAD, PI_SESSION_ID: "pi-1" })).toEqual(t3);
     // DSH stands down beside Claude's markers, as before.
     expect(inboxHostSessionFromEnv({ ...T3_CLAUDE, DSH_SHELL: "1", DSH_SESSION_ID: "session-s" })).toEqual(t3);
-    // Threads T3 made through MCP, delegated or forked, are not UUIDs: no session, never a guess.
-    for (const id of [`mcp:${THREAD}`, "thread:mcp:abc:1", `${THREAD}:fork`, "", "not-a-uuid"]) {
+    // A thread T3 made through MCP keeps its `mcp:` prefix and still names the thread, full id included.
+    const mcp = { host: "t3", session: `mcp:${THREAD}`, name: "T3 Code" };
+    expect(inboxHostSessionFromEnv({ ...T3_CLAUDE, T3CODE_THREAD_ID: `mcp:${THREAD}` })).toEqual(mcp);
+    expect(inboxHostSessionFromEnv({ PLANNOTATOR_SESSION_TAG: `t3:mcp:${THREAD}` })).toEqual(mcp);
+    // A delegated or a forked thread is not a UUID: no session, never a guess.
+    for (const id of ["thread:mcp:abc:1", `${THREAD}:fork`, "", "not-a-uuid"]) {
       expect(inboxHostSessionFromEnv({ ...T3_CLAUDE, T3CODE_THREAD_ID: id })).toBeNull();
       expect(inboxHostSessionFromEnv({ PLANNOTATOR_SESSION_TAG: `t3:${id}` })).toBeNull();
     }
@@ -155,6 +159,36 @@ describe("the T3 thread as the shim's session", () => {
     expect(t3.turns).toEqual([{ threadId: THREAD, message: expect.stringContaining("Yes, ship it."), clientRequestId: `plannotator-inbox-${replyId}`, mode: "queue" }]);
     expect((await thread()).messages.at(-1)!.delivery).toMatchObject({ host: "t3", session: THREAD });
   }, 60_000);
+
+  test("a T3 Claude's shim (--t3) in a thread T3 made through MCP sends as that thread, and the person's reply reaches it", async () => {
+    const box = scratch();
+    const mcpThread = `mcp:${THREAD}`;
+    const t3 = startFakeT3({ threads: [mcpThread] });
+    fakes.push(t3);
+    new T3Credentials(box.dataDir, t3.endpoint).save({ endpoint: t3.endpoint.href, epoch: "e1", tokens: { access_token: t3.state.token, token_type: "Bearer" } });
+    const server = await startInboxServer({ dataDir: box.dataDir, binaryPath: null });
+    servers.push(server);
+
+    const client = await shim(box.dataDir, box.project, ["--t3"], { ...T3_CLAUDE, T3CODE_THREAD_ID: mcpThread });
+    expect((await client.listTools()).tools.map((tool) => tool.name).sort()).toEqual(await serverTools(server));
+    const result = await client.callTool({ name: "send_message", arguments: { body: "Ship the worker today?", agent_host: "claude-code", idempotency_key: "t3-mcp-1" } });
+    expect((result.content as { text: string }[])[0]!.text).toContain(INBOX_REPLY_ARRIVES_TEXT);
+    const sent = result.structuredContent as { message_id: string; thread_id: string };
+    const base = `http://127.0.0.1:${server.port}`;
+    const thread = async () => ((await (await fetch(`${base}/api/inbox/threads/${sent.thread_id}`)).json()) as { thread: InboxThread }).thread;
+    expect((await thread()).messages[0]).toMatchObject({ author: { kind: "agent", host: "t3", session: mcpThread, name: "T3 Code" }, wakes: true });
+
+    const response = await fetch(`${base}/api/inbox/messages/${sent.message_id}/reply`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ serverSession: server.serverSession, idempotency_key: "person-mcp-1", words: "Yes, ship it." }),
+    });
+    const replyId = ((await response.json()) as { reply: { id: string } }).reply.id;
+    await server.t3Wake.sweep();
+    await server.t3Wake.sweep();
+    expect(t3.turns).toEqual([{ threadId: mcpThread, message: expect.stringContaining("Yes, ship it."), clientRequestId: `plannotator-inbox-${replyId}`, mode: "queue" }]);
+    expect((await thread()).messages.at(-1)!.delivery).toMatchObject({ host: "t3", session: mcpThread });
+  }, 60_000);
 });
 
 describe("nothing changes for Claude Code users not on T3", () => {
@@ -169,7 +203,7 @@ describe("nothing changes for Claude Code users not on T3", () => {
   }, 60_000);
 
   test("a --t3 entry outside a T3 thread lists no tools, refuses a call, and never starts or reaches the Inbox", async () => {
-    for (const agent of [INTERACTIVE_CLAUDE, {}, { ...INTERACTIVE_CLAUDE, T3CODE_THREAD_ID: `mcp:${THREAD}` }]) {
+    for (const agent of [INTERACTIVE_CLAUDE, {}]) {
       const box = scratch();
       const client = await shim(box.dataDir, box.project, ["--t3"], agent);
       expect((await client.listTools()).tools).toEqual([]);

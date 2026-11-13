@@ -469,8 +469,12 @@ describe("who is calling", () => {
     expect(caller(null, { T3CODE_THREAD_ID: T3_THREAD, CODEX_THREAD_ID: CODEX_THREAD })).toBe("session_ambiguous");
     // The wake's own value settles it.
     expect(caller(`t3:${T3_THREAD}`, { T3CODE_THREAD_ID: T3_THREAD, CODEX_THREAD_ID: CODEX_THREAD, CLAUDECODE: "1" })).toEqual(t3);
-    // A thread T3 made through MCP, a delegated or a forked one is not a UUID: no T3 session, never a guess.
-    for (const id of [`mcp:${T3_THREAD}`, "thread:mcp:abc:1", `${T3_THREAD}:fork`, "not-a-uuid"]) {
+    // A thread T3 made through MCP keeps its `mcp:` prefix and still names the thread, full id included.
+    const mcpThread = { host: "t3", session: `mcp:${T3_THREAD}`, name: "T3 Code" };
+    expect(caller(null, { T3CODE_THREAD_ID: `mcp:${T3_THREAD}`, CLAUDECODE: "1" })).toEqual(mcpThread);
+    expect(caller(`t3:mcp:${T3_THREAD}`, { T3CODE_THREAD_ID: `mcp:${T3_THREAD}`, CLAUDECODE: "1" })).toEqual(mcpThread);
+    // A delegated or a forked thread is not a UUID: no T3 session, never a guess.
+    for (const id of ["thread:mcp:abc:1", `${T3_THREAD}:fork`, "not-a-uuid"]) {
       expect(caller(null, { T3CODE_THREAD_ID: id, CLAUDECODE: "1" })).toBeNull();
     }
     expect(caller("t3:not-a-uuid", {})).toBe("invalid_session");

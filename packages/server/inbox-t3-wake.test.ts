@@ -107,6 +107,24 @@ describe("a reply to a T3 Code thread", () => {
     expect((await w.thread(sent.thread_id)).messages.at(-1)!.delivery).toMatchObject({ host: "t3", session: THREAD });
   });
 
+  test("a reply to a thread T3 made through MCP goes in as a queued T3 turn under the full id", async () => {
+    const mcpThread = `mcp:${THREAD}`;
+    const w = await world({ threads: [mcpThread] });
+    const sent = await w.send("Ship the worker today?", mcpThread);
+    expect(sent.text).toContain(INBOX_REPLY_ARRIVES_TEXT);
+    expect((await w.thread(sent.thread_id)).messages[0]).toMatchObject({ author: { host: "t3", session: mcpThread }, wakes: true });
+
+    const replyId = await w.reply(sent.message_id, "Yes, ship it.");
+    await w.server.t3Wake.sweep();
+    await w.server.t3Wake.sweep();
+
+    expect(w.t3.sends).toHaveLength(1);
+    const call = w.t3.sends[0]!;
+    expect(call).toMatchObject({ threadId: mcpThread, mode: "queue" });
+    expect(call.clientRequestId).toBe(`plannotator-inbox-${replyId}`);
+    expect((await w.thread(sent.thread_id)).messages.at(-1)!.delivery).toMatchObject({ host: "t3", session: mcpThread });
+  });
+
   test("a failed send is tried again under the same request id; a thread T3 lost is ended until it calls again", async () => {
     const w = await world();
     const sent = await w.send("Which cache?");

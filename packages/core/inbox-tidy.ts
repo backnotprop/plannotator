@@ -12,6 +12,8 @@
  * by `inbox-types`.
  */
 
+import { INBOX_T3_HOST, isT3ThreadId } from "./inbox-t3";
+
 /** The person wrote last and the session has not written since, for at least this long. */
 export const INBOX_TIDY_PERSON_LAST_MS = 10 * 60_000;
 /** An open question or action item counts once it is this old. */
@@ -44,6 +46,11 @@ export function isInboxSessionId(value: unknown): value is string {
   return typeof value === "string" && INBOX_SESSION_ID.test(value);
 }
 
+/** A session id this command line can carry: a plain id, or a T3 thread id (`mcp:` plus a UUID). */
+function isCarriableSessionId(host: string | null, session: string): boolean {
+  return isInboxSessionId(session) || (host === INBOX_T3_HOST && isT3ThreadId(session));
+}
+
 /**
  * The value `plannotator inbox call --session` takes for a session:
  * `<host>:<session>`, or the session alone when it has no host. Null for a
@@ -51,7 +58,7 @@ export function isInboxSessionId(value: unknown): value is string {
  * text puts it in a command).
  */
 export function inboxSessionRef(host: string | null, session: string): string | null {
-  if (!isInboxSessionId(session)) return null;
+  if (!isCarriableSessionId(host, session)) return null;
   return host !== null && INBOX_SESSION_HOST.test(host) ? `${host}:${session}` : session;
 }
 
@@ -60,7 +67,7 @@ export function parseInboxSessionRef(value: string): { host: string | null; sess
   const colon = value.indexOf(":");
   const host = colon === -1 ? null : value.slice(0, colon);
   const session = value.slice(colon + 1);
-  if (!isInboxSessionId(session) || (host !== null && !INBOX_SESSION_HOST.test(host))) return null;
+  if (!isCarriableSessionId(host, session) || (host !== null && !INBOX_SESSION_HOST.test(host))) return null;
   return { host, session };
 }
 
