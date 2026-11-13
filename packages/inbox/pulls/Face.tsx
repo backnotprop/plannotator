@@ -7,9 +7,9 @@
  */
 import { Fragment, useState } from 'react';
 import type { InboxPullReviewState } from '@plannotator/core/inbox-types';
-import { inboxApi } from '../api';
 import { Icon } from '../icons';
 import { isPerson, type Words } from './words';
+import { pullAvatarUrl } from './pullUrls';
 
 /** Pictures that failed or drew nothing in this window, so a face drawn again never asks twice. */
 const failedPictures = new Set<string>();
@@ -70,7 +70,7 @@ export function Face({
 }) {
   const isTeam = team || login.includes('/');
   const square = bot || isTeam || login.endsWith('[bot]');
-  const src = login && !isTeam ? inboxApi.pullAvatarUrl(host, login) : null;
+  const src = login && !isTeam ? pullAvatarUrl(host, login) : null;
   const picture = usePicture(src);
   return (
     <span
