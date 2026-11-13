@@ -458,7 +458,7 @@ export const INBOX_THREAD_PULLS_DESCRIPTION =
  * field, every connection's `plannotator_inbox` tool carries it. The agent's mark is the person's own mark.
  */
 export const INBOX_PRIORITY_FIELD_DESCRIPTION =
-  "`true` puts this thread in the person's Priority, the top of their list, until you or they take it out; `false` takes it out. Mark only finished work that waits on nothing but their yes (a PR to approve, a plan to sign off, a release to ship), not ordinary questions, updates or reports, and take it out once that yes came."
+  "`true` puts this thread in the person's Priority, the top of their list; `false` takes it out. Follow the person: use it when they told you this matters most to them, or when what they asked for plainly makes it so, and take it out when that is over. It is theirs to change at any time."
 
 /** The `thread_pulls` tool's `add` field (approved text). */
 export const INBOX_THREAD_PULLS_ADD_DESCRIPTION = "PRs to add, any number in one call (a whole stack, or related ones), as send_message's `pulls`."

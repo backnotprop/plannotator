@@ -81,7 +81,7 @@ export const INBOX_DEFAULT_TOOLS: readonly InboxToolInfo[] = [
         },
         "priority": {
           "type": "boolean",
-          "description": "`true` puts this thread in the person's Priority, the top of their list, until you or they take it out; `false` takes it out. Mark only finished work that waits on nothing but their yes (a PR to approve, a plan to sign off, a release to ship), not ordinary questions, updates or reports, and take it out once that yes came."
+          "description": "`true` puts this thread in the person's Priority, the top of their list; `false` takes it out. Follow the person: use it when they told you this matters most to them, or when what they asked for plainly makes it so, and take it out when that is over. It is theirs to change at any time."
         }
       },
       "required": [
