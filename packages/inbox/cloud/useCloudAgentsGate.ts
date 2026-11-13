@@ -6,6 +6,11 @@ export interface CloudAgentsGate {
   count: number;
 }
 
+/** Settings shows its Cloud agents section: the relay answered once, or an agent is already paired. */
+export function cloudAgentsShown(model: { agents?: unknown; available?: boolean } | null | undefined): boolean {
+  return Array.isArray(model?.agents) && (model.available !== false || model.agents.length > 0);
+}
+
 export function useCloudAgentsGate(enabled: boolean, section: string | null): CloudAgentsGate {
   const [gate, setGate] = useState<CloudAgentsGate>({ shown: null, count: 0 });
   useEffect(() => {
@@ -14,8 +19,7 @@ export function useCloudAgentsGate(enabled: boolean, section: string | null): Cl
     inboxApi.cloudAgents().then(
       (model) => {
         if (!live) return;
-        const agents = Array.isArray(model?.agents) ? model.agents : null;
-        setGate({ shown: agents !== null && (model.available !== false || agents.length > 0), count: agents?.length ?? 0 });
+        setGate({ shown: cloudAgentsShown(model), count: Array.isArray(model?.agents) ? model.agents.length : 0 });
       },
       () => live && setGate({ shown: false, count: 0 }),
     );
