@@ -26,7 +26,7 @@ import { QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import { createInboxQueryClient } from './data/client';
 import { dropThread, heldThread, pruneThreads, putThread, readThread, showableThread, staleThreads, useHeldThread } from './data/queries/thread';
 import { sameThreadFiles } from './data/queries/files';
-import { putList, readList, takeListRead, useListModel } from './data/queries/list';
+import { putList, readListTaking, useListModel } from './data/queries/list';
 import { changeDrafts, heldReplyDrafts, readDrafts, useDrafts } from './data/queries/drafts';
 import { applyListRecord } from './data/apply/list';
 import { createRecordPause } from './data/apply/recordPause';
@@ -1258,6 +1258,7 @@ function Inbox() {
   const [lineAgainAt, setLineAgainAt] = useState<number | null>(null);
   /** The list's rows, for "a question waits in the open thread" (`openThreadAsks`) in checks that run on a timer. */
   const oneTimeRows = useRef<readonly InboxListRow[]>([]);
+  const archivingHere = useRef(new Set<string>());
   /** An update dialog or a restart was on screen in this load: no Snooze announcement on it. */
   const updatingThisLoad = useRef(false);
   /** This page snoozed something in this load: the announcement would tell the person what they just did. */
@@ -1644,7 +1645,7 @@ function Inbox() {
       latestRef.current = next;
       putList(queryClient, next);
       const groups = listGroups(next);
-      const gone = goneRows(shownRef.current, groups, routeRef.current.thread);
+      const gone = goneRows(shownRef.current, groups, routeRef.current.thread, archivingHere.current);
       if (gone.size > 0) armSlide();
       setShown((current) => shownAfter(current, groups, { adopt: false, keep: null, open: heldOpen(), gone }));
     },
@@ -1652,11 +1653,9 @@ function Inbox() {
   );
   const refreshList = useCallback(async (adopt: boolean, slide = false, refresh?: { light?: boolean; keepOpen?: boolean }) => {
     try {
-      const next = await readList();
+      const { next, held, taken } = await readListTaking(() => latestRef.current, () => listCursor.current, { firstDone: firstList.current!.done, adopt, settings: routeRef.current.page === 'settings' });
       const failedBefore = listReadFailure.current !== null;
       listReadFailure.current = null;
-      const held = latestRef.current;
-      const taken = takeListRead(held, next, listCursor.current, { firstDone: firstList.current!.done, adopt, settings: routeRef.current.page === 'settings' });
       // A read that lands after a newer one (a slow answer on a bad network, a catch-up's): the newer list stays.
       if (taken === 'older') return held;
       listCursor.current = { session: next.serverSession, cursor: next.cursor };
@@ -1710,7 +1709,7 @@ function Inbox() {
       const listedIds = new Set(groups.flatMap((group) => group.threads.map((row) => row.thread_id)));
       pruneThreads(queryClient, (id) => listedIds.has(id));
       // Archived or deleted elsewhere: the row leaves at once, with the settle's slide (held.ts `goneRows`).
-      const gone = adopt ? new Set<string>() : goneRows(shownRef.current, groups, routeRef.current.thread);
+      const gone = adopt ? new Set<string>() : goneRows(shownRef.current, groups, routeRef.current.thread, archivingHere.current);
       if (gone.size > 0) armSlide();
       setShown((current) => shownAfter(current, groups, { adopt, keep, open: heldOpen(), gone }));
       if (adopt) {
@@ -4220,12 +4219,11 @@ function Inbox() {
         incomplete = answer.error?.message ?? null;
         undo = () => inboxApi.unmarkProjectRead(projectId, answer.batch.read, looked);
       } else {
-        const answer = await inboxApi.archiveProject(projectId, newBatchId());
+        for (const row of before) archivingHere.current.add(row.thread_id);
+        const answer = await inboxApi.archiveProject(projectId, newBatchId()).finally(() => setTimeout(() => before.forEach((row) => archivingHere.current.delete(row.thread_id)), 1000));
         taken = [...answer.batch.resolved, ...answer.batch.read];
         incomplete = answer.error?.message ?? null;
         undo = () => inboxApi.unarchiveProject(projectId, answer.batch);
-        // The list leaves archived threads out; each taken row stays where it is, shown archived, and goes when the
-        // list next settles (as the single Archive does, a thread open or none).
         const at = new Date().toISOString();
         setShown((current) => (current ? taken.reduce((sections, id) => markHeldRowArchived(sections, id, at), current) : current));
       }

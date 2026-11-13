@@ -54,4 +54,11 @@ describe('applyListRecord', () => {
     const after = list([row('b')], undefined, 11);
     expect(takeListRead(held, after, { session: 's1', cursor: 10 }, { firstDone: true, adopt: false, settings: false })).not.toBe('older');
   });
+
+  test('a refresh the person asked for that lands older than an archive record is read again, never thrown away', () => {
+    const held = applyListRecord(list([row('a'), row('b')]), rootLine('a', 11, { resolved_at: 'x' }))!;
+    const slow = list([row('a'), row('b')], undefined, 10);
+    expect(takeListRead(held, slow, { session: 's1', cursor: 10 }, { firstDone: true, adopt: true, settings: false })).toBe('again');
+    expect(takeListRead(held, slow, { session: 's1', cursor: 10 }, { firstDone: true, adopt: true, settings: false, again: true })).toBe('older');
+  });
 });
