@@ -6,6 +6,8 @@ import {
   setTouchSelectionToolbar,
   TOUCH_TOOLBAR_EDGE_MARGIN,
   IOS_MENU_CLEARANCE,
+  TOUCH_TOOLBAR_GAP_ABOVE,
+  TOUCH_TOOLBAR_GAP_BELOW,
   unionToolbarRect,
   type ToolbarRect,
 } from './touchToolbarPlacement';
@@ -172,6 +174,30 @@ describe('placeTouchToolbar', () => {
     const pos = placeTouchToolbar({ anchor: block, toolbar, viewport: phone, mode: 'top-right' });
     expect(pos.top + toolbar.height).toBeLessThanOrEqual(block.top);
     expect(pos.left + toolbar.width).toBe(block.right);
+  });
+});
+
+describe('placeTouchToolbar: a selection whose end handle the finger was moving (prefer above)', () => {
+  // Below, the toolbar covered the lines the finger was dragging the end handle on to.
+  test('goes above, over the band where iOS draws its edit menu', () => {
+    const anchor = word(150, 400, 90, 50);
+    const pos = placeTouchToolbar({ anchor, toolbar, viewport: phone, mode: 'center-above', prefer: 'above' });
+    expect(pos.placement).toBe('above');
+    expect(pos.top + toolbar.height).toBe(anchor.top - TOUCH_TOOLBAR_GAP_ABOVE - IOS_MENU_CLEARANCE);
+  });
+
+  test('with no room above for the menu and the toolbar, it goes below as before', () => {
+    const anchor = word(150, 100, 90, 50);
+    const pos = placeTouchToolbar({ anchor, toolbar, viewport: phone, mode: 'center-above', prefer: 'above' });
+    expect(pos.placement).toBe('below');
+    expect(pos.top).toBe(anchor.bottom + TOUCH_TOOLBAR_GAP_BELOW);
+  });
+
+  test('a selection near the top (iOS puts its menu below) is placed exactly as without the preference', () => {
+    const anchor = word(150, 30, 90, 50);
+    const plain = placeTouchToolbar({ anchor, toolbar, viewport: phone, mode: 'center-above' });
+    const preferred = placeTouchToolbar({ anchor, toolbar, viewport: phone, mode: 'center-above', prefer: 'above' });
+    expect(preferred).toEqual(plain);
   });
 });
 

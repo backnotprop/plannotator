@@ -191,6 +191,52 @@ test.skipIf(!hasDom)("another machine's row reads its machine beside its project
   expect(document.querySelector('[data-machine-away]')).toBeNull();
 });
 
+test.skipIf(!hasDom)("Star is offered on another machine's row only when that machine takes stars from here; an older one's row has none", async () => {
+  const OLD = `ibx_01K${'0'.repeat(22)}O`;
+  const old = row('msg_old', 'prj_far', OLD);
+  list([machine(SELF, 'Studio', 'online'), machine(MAC, 'MacBook', 'online', { marks: ['star'] }), machine(OLD, 'Mini', 'online', { marks: [] })], [OWN, FAR, old], { pinned: new Set(['msg_far']), onRowAction: () => {} });
+  const offered = async (id: string) => {
+    await act(async () => {
+      document.querySelector(`.ib-lbody [data-thread-id="${id}"]`)!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: 300, clientY: 200 }));
+    });
+    await settle();
+    const menu = document.querySelector(`[data-row-menu="${id}"]`);
+    expect(menu).not.toBeNull();
+    const found = ['pin', 'unpin'].filter((action) => menu!.querySelector(`[data-row-action="${action}"]`) !== null);
+    act(() => void document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    await settle();
+    return found;
+  };
+  expect(await offered('msg_own')).toEqual(['pin']);
+  expect(await offered('msg_far')).toEqual(['unpin']);
+  expect(await offered('msg_old')).toEqual([]);
+});
+
+test.skipIf(!hasDom)("Add to Priority is offered on another machine's row only when that machine takes it from here; Remove on one in that machine's Priority", async () => {
+  const OLD = `ibx_01K${'0'.repeat(22)}O`;
+  const inPriority = { ...row('msg_far', 'prj_far', MAC), priority: { person: true, at: '2026-11-12T10:00:00Z', ask: null } } as InboxListRow;
+  const plain = { ...row('msg_far2', 'prj_far', MAC), priority: null } as InboxListRow;
+  const old = { ...row('msg_old', 'prj_far', OLD), priority: null } as InboxListRow;
+  const own = { ...OWN, priority: null } as InboxListRow;
+  list([machine(SELF, 'Studio', 'online'), machine(MAC, 'MacBook', 'online', { marks: ['star', 'priority'] }), machine(OLD, 'Mini', 'online', { marks: ['star'] })], [own, inPriority, plain, old], { onRowAction: () => {} });
+  const offered = async (id: string) => {
+    await act(async () => {
+      document.querySelector(`.ib-lbody [data-thread-id="${id}"]`)!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: 300, clientY: 200 }));
+    });
+    await settle();
+    const menu = document.querySelector(`[data-row-menu="${id}"]`);
+    expect(menu).not.toBeNull();
+    const found = ['priority-add', 'priority-remove'].filter((action) => menu!.querySelector(`[data-row-action="${action}"]`) !== null);
+    act(() => void document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    await settle();
+    return found;
+  };
+  expect(await offered('msg_own')).toEqual(['priority-add']);
+  expect(await offered('msg_far')).toEqual(['priority-remove']);
+  expect(await offered('msg_far2')).toEqual(['priority-add']);
+  expect(await offered('msg_old')).toEqual([]);
+});
+
 test.skipIf(!hasDom)("an asleep machine's rows are greyed under one line saying since when; the menu offers Hide offline machines", async () => {
   const hidden: boolean[] = [];
   list([machine(SELF, 'Studio', 'online'), machine(MAC, 'MacBook', 'offline')], [OWN, FAR], { onHideAway: (hide) => void hidden.push(hide) });

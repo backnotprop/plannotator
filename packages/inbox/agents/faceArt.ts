@@ -1,5 +1,5 @@
 /**
- * Our faces in the agent marks' picker and click cycle (approval "inbox-agent-icon-motion"): the Glass colours are
+ * Our faces in the agent marks' picker (approval "inbox-agent-icon-motion"): the Glass colours are
  * vectors (glassArt.ts, Black and Yellow redrawing the tab icon's Glass and Yellow), Face is the tab icon dialog's
  * picture (tabIconArt.ts), and Transparent is the yellow glass set's goggles with no tile: on light the ink-frame mark
  * (mark/mark-clean-transparent.svg), on dark the yellow-frame pixel mark (pixel/fav-48-transparent.svg), each framed

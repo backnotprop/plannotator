@@ -16,7 +16,7 @@ import type { SystemDrawingAnswer, SystemProjectsAnswer, SystemPullsAnswer } fro
 import type { SystemModel } from '@plannotator/system';
 import type { ShapeDrawnView, ShapeNote, ShapeRecord, ShapeRef, ShapeVersion } from '@plannotator/core/shape';
 import type { InboxArtifactPin, InboxArtifactsPage, InboxArtifactType } from '@plannotator/core/inbox-artifact-pins';
-import type { InboxAgentFaceChange } from '@plannotator/core/inbox-types';
+import type { InboxAgentFaceChange, InboxPriorityBefore } from '@plannotator/core/inbox-types';
 import { isActionRecord, questionsOnly, splitThreadActions } from './actions';
 import { createListReader, type ListReadAnswer } from './listRead';
 import { inboxUrl, isContested, localRoute, machineOf, rememberLocal, rememberMachine, selfMachineId, setSelfMachine } from './inboxUrl';
@@ -233,6 +233,8 @@ export interface MachineView {
   message_deletions?: boolean;
   /** Its list was read and keeps no snoozes: an older Inbox, so Snooze says why instead of vanishing. */
   snooze_old?: boolean;
+  /** The marks it takes for its own threads and agents (approval "inbox-linked-marks"; `machineTakes`). Absent from an older Inbox. */
+  marks?: string[];
   /** Update on that machine, from its own state. Null: nothing to say (level, ahead, this machine, or no newer release known). */
   update?: MachineUpdateView | null;
 }
@@ -328,6 +330,11 @@ export interface ListModel {
    * offers no pin.
    */
   pins?: InboxListRow[];
+  /**
+   * The live tags, oldest first (approval "inbox-thread-tags"): the sidebar's Tags and the Add tag list; each row's
+   * `tags` names them. Absent from an older Inbox: the window then draws no Tags section and offers no Add tag.
+   */
+  tags?: InboxInitiative[];
   /** The version of this list, named by the next read so only what changed comes back (listRead.ts). Absent from an older Inbox. */
   list_version?: string;
   /**
@@ -677,7 +684,7 @@ export interface InboxStorageModel {
     /** The projects combined into this one, by name: deleting it leaves them. */
     combined?: string[];
   }[];
-  /** The Inbox on SQLite (its switch, off for everyone): the database file's bytes, counted in `bytes`. */
+  /** The Inbox on SQLite (its switch, off by default): the database file's bytes, counted in `bytes`. */
   database?: number;
   /** The dated backups a move into SQLite left, counted in `bytes`: listed with Remove (StorageBackups.tsx). */
   backups?: { name: string; kind: 'jsonl' | 'sqlite'; date: string; bytes: number }[];
@@ -884,6 +891,14 @@ export interface LanState {
 
 /** Where Post decisions puts a thread's decisions: the PR's description (default), a comment, or a short section plus the comment. */
 export type DecisionsPostTo = 'description' | 'comment' | 'both';
+
+type ImageRef = { path: string; name: string; kind?: 'file' };
+
+export interface InboxCommentDraftView {
+  text: string;
+  images: ImageRef[];
+  updated_at: string;
+}
 
 export class InboxApiError extends Error {
   constructor(
@@ -1246,7 +1261,8 @@ const projectUrl = (projectId: string, rest = '') => inboxUrl(`/projects/${encod
 /** The merged list names each row's and project's machine: their routes go there from now on (inboxUrl.ts). */
 function learnMachines(model: ListModel): void {
   setSelfMachine(model.self);
-  const rows = [...model.sections.flatMap((section) => section.threads), ...(model.snoozed ?? [])];
+  // Starred rows too: another machine's archived star is in no section here.
+  const rows = [...model.sections.flatMap((section) => section.threads), ...(model.snoozed ?? []), ...(model.pins ?? [])];
   // This Inbox's own rows and projects first, every id in them (a row's delivery and message ids too): a linked
   // machine's row with the same id never takes one over. Two linked machines naming one id leave it contested.
   rememberLocal(localIdsIn(model));
@@ -1984,6 +2000,10 @@ export const inboxApi = {
   drafts: () => get<{ serverSession: string; drafts: DraftView[]; replies?: InboxReplyDraftRow[] }>(inboxUrl('/drafts')),
   // Reply drafts (approval "inbox-reply-drafts"): the reply box's words per thread.
   replyDraft: (threadId: string) => get<{ draft: InboxReplyDraft | null }>(threadUrl(threadId, `/draft`)),
+  commentDraft: (threadId: string, key: string) => get<{ draft: InboxCommentDraftView | null }>(threadUrl(threadId, '/comment-draft', `key=${encodeURIComponent(key)}`)),
+  saveCommentDraft: (threadId: string, body: { key: string; text: string; images: readonly ImageRef[]; base: string | null; force?: boolean }) =>
+    post<{ draft: InboxCommentDraftView | null }>(threadUrl(threadId, '/comment-draft'), body),
+  deleteCommentDraft: (threadId: string, key: string) => post<{ ok: true; deleted: boolean }>(threadUrl(threadId, '/comment-draft/delete'), { key }),
   /** Save (compare-and-set on `base`, the `updated_at` last read; null to create); an empty body deletes it. */
   /**
    * `files`: the box's file changes since it last held the draft's files (`files_add`, `files_remove`,
@@ -2157,8 +2177,11 @@ export const inboxApi = {
   artifactPins: () => get<{ pins: InboxArtifactPin[] }>(inboxUrl('/artifact-pins')),
   /** The face each agent's icon shows (inbox/agent-faces.json, agents/agentFaces.ts). This window's Inbox only. */
   agentFaces: () => get<unknown>(inboxUrl('/agent-faces')),
-  /** One agent's face (`agent`: its own mark again), or this browser's faces from before (`adopt`); every window hears it (`event: agent-faces`). */
-  saveAgentFace: (change: InboxAgentFaceChange) => post<unknown>(inboxUrl('/agent-faces'), change as Record<string, unknown>),
+  /**
+   * One agent's face (`agent`: its own mark again) or given name, or this browser's faces from before (`adopt`); every
+   * window hears it (`event: agent-faces`). `machine`: the agent's own machine, which keeps it (approval "inbox-linked-marks").
+   */
+  saveAgentFace: (change: InboxAgentFaceChange, machine?: string | null) => post<unknown>(inboxUrl('/agent-faces', undefined, machine), change as Record<string, unknown>),
   /** "Your own…": keep an uploaded picture for agents' icons (a data: URL, as Set picture… sends); answers `{ icon, faces, rev, icons }`. */
   uploadAgentIcon: (picture: string) => post<{ icon?: { id?: unknown } } & Record<string, unknown>>(inboxUrl('/agent-icons'), { picture }),
   /** Take an uploaded picture away: the agents showing it go back to their own mark. Answers `{ faces, rev, icons }`. */
@@ -2185,13 +2208,21 @@ export const inboxApi = {
     if (query.limit) params.set('limit', String(query.limit));
     return get<InboxArtifactsPage & { serverSession: string }>(inboxUrl('/artifacts', params.toString()), signal);
   },
-  pin: (threadId: string, pinned: boolean) =>
-    post<{ pins: { thread_id: string; pinned_at: string }[] }>(inboxUrl(`/threads/${encodeURIComponent(threadId)}/pin`), { pinned }),
-  /** Put the pins in this order (Move up, Move down): pins it does not name keep their place after them; a named thread not pinned now is skipped. */
-  pinOrder: (order: readonly string[]) => post<{ pins: { thread_id: string; pinned_at: string }[] }>(inboxUrl('/pins'), { order }),
-  /** Unpin's Undo: pin this one thread again at its old index, with the time it was first pinned. */
+  /** Star or unstar, on the thread's own machine (approval "inbox-linked-marks"). */
+  pin: (threadId: string, pinned: boolean) => post<{ pins: { thread_id: string; pinned_at: string }[] }>(threadUrl(threadId, '/pin'), { pinned }),
+  /**
+   * Put one machine's stars in this order (Move up, Move down), on that machine: pins it does not name keep their place
+   * after them; a named thread not pinned now is skipped.
+   */
+  pinOrder: (order: readonly string[]) => post<{ pins: { thread_id: string; pinned_at: string }[] }>(inboxUrl('/pins', undefined, machineOf(order[0])), { order }),
+  /** Unpin's Undo, on the thread's own machine: pin this one thread again at its old index there, with the time it was first pinned. */
   pinRestore: (restore: { thread_id: string; index: number; pinned_at: string }) =>
-    post<{ pins: { thread_id: string; pinned_at: string }[] }>(inboxUrl('/pins'), { restore }),
+    post<{ pins: { thread_id: string; pinned_at: string }[] }>(inboxUrl('/pins', undefined, machineOf(restore.thread_id)), { restore }),
+  /** Add the thread to Priority (`true`) or remove it, or (`restore`) put back a `before` an earlier write answered. On the thread's own machine. */
+  priority: (threadId: string, change: boolean | { restore: InboxPriorityBefore }) =>
+    post<{ before: InboxPriorityBefore }>(threadUrl(threadId, '/priority'), typeof change === 'boolean' ? { priority: change } : change),
+  /** Put a thread in a tag (`on`) or take it out (approval "inbox-thread-tags"): the thread's tags after. */
+  setThreadTag: (threadId: string, tag: string, on: boolean) => post<{ tags: string[] }>(inboxUrl(`/threads/${encodeURIComponent(threadId)}/tags`), { tag, on }),
   /** Snooze the thread until a time, or end its snooze (`null`). `at`: an earlier snooze's own time, for an Undo. On the thread's own machine. */
   snooze: (threadId: string, until: string | null, at?: string) =>
     post<{ snoozed: { until: string; at: string } | null }>(threadUrl(threadId, '/snooze'), { until, ...(at ? { at } : {}) }),
@@ -2452,8 +2483,12 @@ export interface InboxEventHandlers {
   onAsk?: (threadId: string) => void;
   /** The sidebar's pins changed (`event: pins`, approval "inbox-pinned-threads"); never called by an older Inbox. */
   onPins?: () => void;
+  /** The person's Priority changed (`event: priority`); never called by an older Inbox. */
+  onPriority?: () => void;
   /** The pinned artifacts changed (`event: artifact-pins`, approval "inbox-artifact-stars"); never called by an older Inbox. */
   onArtifactPins?: () => void;
+  /** A thread's tags changed (`event: tags`, approval "inbox-thread-tags"); never called by an older Inbox. */
+  onTags?: () => void;
   /** Show a thread (`event: show`, `plannotator inbox --open <thread>`): only the window named moves; never called by an older Inbox. */
   onShow?: (threadId: string, windowId: string) => void;
   /** A snooze changed or ran out (`event: snoozes`, approval "inbox-snooze"), here or on a linked machine; never called by an older Inbox. */
@@ -2510,7 +2545,7 @@ export interface InboxEventWindow {
 
 /** The event stream's named frames, as they arrive (and as the tab that holds the shared stream passes them on). */
 // `heartbeat`: a window's stream beats every 10 s (packages/server/inbox.ts); heard by liveStream.ts, handled by nothing.
-export const INBOX_EVENT_FRAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'ask', 'pins', 'artifact-pins', 'show', 'snoozes', 'thread-pulls', 'rows', 'sidebar', 'agent-faces', 'reactions', 'capabilities', 'tailscale', 'shapes', 'machine', 'machines', 'outbox', 'heartbeat'] as const;
+export const INBOX_EVENT_FRAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'ask', 'pins', 'priority', 'artifact-pins', 'tags', 'show', 'snoozes', 'thread-pulls', 'rows', 'sidebar', 'agent-faces', 'reactions', 'capabilities', 'tailscale', 'shapes', 'machine', 'machines', 'outbox', 'heartbeat'] as const;
 export type InboxEventFrameName = (typeof INBOX_EVENT_FRAMES)[number];
 export interface InboxEventFrame {
   name: InboxEventFrameName;
@@ -2597,8 +2632,14 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
     case 'pins':
       handlers.onPins?.();
       return;
+    case 'priority':
+      handlers.onPriority?.();
+      return;
     case 'artifact-pins':
       handlers.onArtifactPins?.();
+      return;
+    case 'tags':
+      handlers.onTags?.();
       return;
     case 'show':
       try {

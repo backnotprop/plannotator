@@ -178,16 +178,18 @@ jobs:
 
       # The site's videos are not in the repository: they are uploaded by hand
       # to assets/ in this bucket. The excludes keep --delete from removing
-      # them (an excluded key is neither uploaded nor deleted). See "Videos" in
-      # docs/agent-guides/project-and-development.md.
+      # them (an excluded key is neither uploaded nor deleted). assets/hosted/
+      # holds other files uploaded by hand, such as pictures an in-app dialog
+      # loads. See "Videos" in docs/agent-guides/project-and-development.md.
       - name: Deploy to S3
         run: >-
           aws s3 sync apps/marketing/dist/ s3://plannotator-marketing/ --delete
           --exclude "assets/*.mp4" --exclude "assets/*.webm"
+          --exclude "assets/hosted/*"
 
       - name: Set the Inbox prompt's content type
         run: |
-          for page in prompt.md cloud-agent.md; do
+          for page in prompt.md cloud-agent.md muse.md; do
             if [ -f "apps/marketing/dist/inbox/$page" ]; then
               aws s3 cp "apps/marketing/dist/inbox/$page" "s3://plannotator-marketing/inbox/$page" \
                 --content-type "text/markdown; charset=utf-8"

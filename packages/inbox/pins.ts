@@ -82,6 +82,20 @@ export function movePin(order: readonly string[], threadId: string, by: -1 | 1):
   return next;
 }
 
+/**
+ * The stars one machine keeps, in its order: those of the machine `row` is on. The merged list carries every linked
+ * machine's after this one's (approval "inbox-linked-marks"), and each machine orders and restores only its own.
+ */
+export function sameMachinePins(pins: readonly InboxListRow[], row: Pick<InboxListRow, 'machine'>): InboxListRow[] {
+  return pins.filter((pin) => (pin.machine ?? null) === (row.machine ?? null));
+}
+
+/** Whether the star at `index` is first or last of its machine's: a move stops there. */
+export function pinEnds(pins: readonly InboxListRow[], index: number): { first: boolean; last: boolean } {
+  const machine = pins[index]?.machine ?? null;
+  return { first: index === 0 || (pins[index - 1]!.machine ?? null) !== machine, last: index === pins.length - 1 || (pins[index + 1]!.machine ?? null) !== machine };
+}
+
 /** Where an unpinned thread still is, for the toast: "Still in Waiting on you", "Still in Archived". */
 export function unpinnedWhere(row: InboxListRow | null | undefined): string {
   if (!row) return 'Still in the Inbox';
