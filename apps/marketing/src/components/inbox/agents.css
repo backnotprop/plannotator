@@ -1,0 +1,90 @@
+/* The agents pages (/inbox/agents/ and /inbox/agents/<slug>/): the /inbox/
+   page's type (src/pages/[inbox].astro, ib-*) with the site's tokens from
+   global.css. Nothing here is new colour. Global because Inline and the other
+   child components render the code pills and links these rules style. */
+
+.ag-main {
+  /* Secondary text: one step down from the foreground, never grey on grey. */
+  --ag-dim: color-mix(in oklab, var(--foreground) 74%, transparent);
+}
+
+.ag-main code {
+  font-family: var(--font-mono);
+}
+
+.ag-display {
+  font-size: clamp(2.5rem, 7vw, 4rem);
+  line-height: 1;
+  font-weight: 700;
+  letter-spacing: -0.04em;
+  text-wrap: balance;
+}
+
+.ag-h2 {
+  font-size: clamp(1.375rem, 2.6vw, 1.75rem);
+  line-height: 1.15;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.ag-lede {
+  font-size: 1.0625rem;
+  line-height: 1.6;
+  color: var(--ag-dim);
+  max-width: 40rem;
+}
+
+/* Inline code in running text (Inline.astro's <code>). */
+.ag-lede code,
+.ag-list code,
+.ag-main p code,
+.ag-main dt code,
+.ag-main li code {
+  font-size: 0.85em;
+  padding: 0.05em 0.35em;
+  border-radius: 5px;
+  background: color-mix(in oklab, var(--foreground) 8%, transparent);
+  color: var(--foreground);
+  overflow-wrap: anywhere;
+}
+
+/* A command box's own code stays as the box sets it. */
+.ag-main .ag-box code {
+  font-size: inherit;
+  padding: 0;
+  border-radius: 0;
+  background: none;
+  overflow-wrap: anywhere;
+}
+
+.ag-link {
+  color: var(--foreground);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in oklab, var(--foreground) 30%, transparent);
+  text-underline-offset: 3px;
+}
+
+.ag-link:hover { text-decoration-color: var(--primary); }
+
+.ag-main a:focus-visible,
+.ag-main button:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+
+.ag-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  list-style: disc;
+  padding-left: 1.25rem;
+}
+
+.ag-list li {
+  font-size: 0.9375rem;
+  line-height: 1.6;
+  color: var(--ag-dim);
+}
+
+.ag-list li::marker { color: var(--muted-foreground); }
