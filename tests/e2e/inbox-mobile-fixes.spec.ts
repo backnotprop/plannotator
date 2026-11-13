@@ -244,7 +244,7 @@ for (const phone of PHONES) {
       await second.locator('textarea').last().fill('Shipped too, after a week.');
       await expect(second.locator('.ib-qfoot-st')).toContainText('in your draft');
       // Accept recommended steps aside while a note has focus, and is back once the note is left.
-      await expect(second.getByRole('button', { name: 'Accept recommended' })).toHaveCount(0);
+      await expect(second.getByRole('button', { name: 'Accept recommended' })).toBeHidden();
       await second.locator('textarea').last().blur();
       await expect(second.getByRole('button', { name: 'Accept recommended' })).toBeVisible();
       await first.scrollIntoViewIfNeeded();
