@@ -6,7 +6,7 @@ This document is the contract the iPhone app (and, by section 10, the Android ap
 
 The posture, in one paragraph. The Inbox stays a loopback server. A phone pairs once and gets its own random bearer token. Three paths carry the same requests: the tailnet (`tailscale serve` in front of the loopback port), the same Wi-Fi (a TLS listener whose certificate the phone pins), and the relay (a Cloudflare Worker that holds only ciphertext under keys made at pairing). Every phone request goes through one door, `/api/inbox/device/*`, which maps an explicit allowlist onto the window's existing handlers. Nothing else answers a phone.
 
-Two limits exist because pairing cannot work without them: an offer lives 10 minutes, and its six-digit code closes after 5 wrong tries. The relay's mailbox creation reuses the brake guides.show already has on its create route (section 4), with no number of its own. Apple's own ceilings apply where Apple sets them (a push body of 4096 bytes, four notification actions). There are no other limits.
+Two limits exist because pairing cannot work without them: an offer lives 10 minutes, and its six-digit code closes after 5 wrong tries. The relay's mailbox creation reuses the number guides.show already puts on its create route, 20 a minute per IP (section 4); because Cloudflare's rate limiting binding counts approximately and per machine, a per-IP Durable Object holds the hard count behind it. Apple's own ceilings apply where Apple sets them (a push body of 4096 bytes, four notification actions). There are no other limits.
 
 ## 1. The pairing offer and its QR payload
 
@@ -884,7 +884,7 @@ curl -sS -X POST "$RELAY/v1/mailboxes" -H 'Content-Type: application/json' \
   -d '{"secret_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}'
 ```
 
-`201 { "mailbox_id": "mbx_AAAAAAAAAAAAAAAAAAAAAA" }`. Past the reused creation brake: `429 { "error": "too many requests", "code": "too_many_requests" }` with `Retry-After: 60`.
+`201 { "mailbox_id": "mbx_AAAAAAAAAAAAAAAAAAAAAA" }`. Past the creation brake (20 a minute per IP: the rate limiting binding, then the address's `CreateBrake` object): `429 { "error": "too many requests", "code": "too_many_requests" }` with `Retry-After` (60 from the binding, the seconds left in the window from the object).
 
 ### 7.27 Register a device
 
@@ -1284,7 +1284,7 @@ The eight questions the first draft left open were ruled on 2026-10-08; each is 
 3. The phone's relay switch is `PUT .../devices/:dev/carriage`. Its state lives in the device record, and a reconnect registers only devices with carriage on (sections 2 and 4).
 4. Pushes go out for questions and guided reviews only (section 4, Push).
 5. The relay had no time sweep until 2026-11-12; it now deletes anything held longer than 30 days (section 4, "What the relay stores and deletes"). A phone reading directly acknowledges by store cursor (section 4).
-6. Mailbox creation reuses guides.show's per-IP brake, with no new number (section 4, Routes).
+6. Mailbox creation reuses guides.show's per-IP number, 20 a minute (section 4, Routes), counted hard by a per-IP Durable Object behind the rate limiting binding, whose counts are approximate.
 7. The certificate and the Bonjour record come from `openssl` and `dns-sd` (`avahi-publish` on Linux) as child processes, with no dependency (section 3).
 8. The tailnet HTTPS port is 8443, kept in `inbox.json`. A mapping held by something else is reported, never overwritten (section 1).
 
