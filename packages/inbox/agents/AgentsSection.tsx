@@ -5,11 +5,11 @@ import type { InboxAgent, InboxListRow } from '@plannotator/core/inbox-types';
 import { agentAsListed, agentIsNamed, useInboxAgents } from '../agentsList';
 import { ProjectNameField } from '../components/ProjectRow';
 import { Icon } from '../icons';
-import { awayLine, isAway, machineNotice, type MachinesModel } from '../machines';
+import { awayLine, isAway, machineNotice, machineTakes, type MachinesModel } from '../machines';
 import type { MachineView } from '../api';
 import { MachineSidebarWord } from '../components/MachineUpdate';
 import { Tip } from '../components/Tip';
-import { AgentMark } from './AgentMark';
+import { AgentMark, type AgentMarkPicks } from './AgentMark';
 import { GOGGLES_FRAME, GOGGLES_LENSES, GOGGLES_MOUTH } from './goggles';
 import { agentFacts, agentHostName, agentRowName, agentsGroups, type AgentEntry } from './model';
 
@@ -136,6 +136,7 @@ const AgentRow = memo(
     phone: boolean;
     onRename?: (entry: AgentEntry, name: string | null) => Promise<boolean>;
     announce?: (text: string) => void;
+    picks: AgentMarkPicks;
   }) {
     const { entry, machine, on, away } = props;
     const [menuOpen, setMenuOpen] = useState(false);
@@ -238,7 +239,7 @@ const AgentRow = memo(
             <span className="ib-sr">, {agentHostName(entry.agent.host)}</span>
           </button>
         </Tip>
-        <AgentMark id={entry.agent.id} host={entry.agent.host} name={entry.name} agent={entry.agent} />
+        <AgentMark id={entry.agent.id} host={entry.agent.host} name={entry.name} agent={entry.agent} picks={props.picks} />
         {onRename && (
           <Menu.Root open={menuOpen} onOpenChange={setMenuOpen} modal={false}>
             <Menu.Trigger ref={more} className="ib-pmore" aria-label={`${entry.name} options`} data-agent-more={entry.agent.id}>
@@ -284,7 +285,8 @@ const AgentRow = memo(
     a.onOpen === b.onOpen &&
     a.phone === b.phone &&
     a.onRename === b.onRename &&
-    a.announce === b.announce,
+    a.announce === b.announce &&
+    a.picks === b.picks,
 );
 
 export function AgentsSection(props: AgentsSectionProps) {
@@ -348,8 +350,11 @@ export function AgentsSection(props: AgentsSectionProps) {
           const captionOn = captions && !!machine && machineOn(machine.id);
           const away = machine ? isAway(machine) : false;
           const notice = machine && props.onMachineUpdate ? machineNotice(machine) : null;
-          // A given name stays on this Inbox and never reaches the machine an agent runs on: another machine's agents
-          // have no Rename….
+          // A face and a given name live on the agent's own machine (inbox-linked-marks): a linked machine's agents
+          // offer them only once its list says it takes them, and never an uploaded picture, which stays here.
+          const linked = machine && !machine.self ? { machine: machine.id } : null;
+          const names = !linked || machineTakes(linked, props.machines, 'agent-name');
+          const picks: AgentMarkPicks = !linked ? 'all' : machineTakes(linked, props.machines, 'agent-face') ? 'shared' : 'none';
           return (
             <div key={machine?.id ?? 'flat'} className="ib-agents-group" data-agents-machine={machine?.id ?? ''}>
               {machine && captions && (
@@ -382,7 +387,8 @@ export function AgentsSection(props: AgentsSectionProps) {
                   opens={entry.thread ? 'filter' : canMessage(entry) ? 'message' : 'none'}
                   onOpen={onOpen}
                   phone={props.phone === true}
-                  onRename={machine && !machine.self ? undefined : onRename}
+                  onRename={names ? onRename : undefined}
+                  picks={picks}
                   announce={props.announce}
                 />
               ))}

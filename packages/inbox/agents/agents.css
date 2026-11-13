@@ -30,6 +30,8 @@
 .pn-inbox .ib-sbagent .am-btn { position: absolute; left: 15px; top: calc(50% - 14px); width: 28px; height: 28px; padding: 0; border: 0; border-radius: var(--ib-rl-sm-s, 7px); background: none; display: grid; place-items: center; cursor: pointer; -webkit-touch-callout: none; user-select: none; -webkit-user-select: none; touch-action: manipulation; }
 .pn-inbox .ib-agents-body[data-flat] .ib-sbagent .am-btn { left: 7px; }
 .pn-inbox .ib-sbagent .am-btn:focus-visible { outline-offset: -2px; }
+/* A linked machine's agent whose face cannot be set from here: the mark alone, and a press on it is the row's. */
+.pn-inbox .ib-sbagent .am-btn[data-picks="none"] { pointer-events: none; }
 .pn-inbox .ib-sbagent:is(:has(> .am-btn:hover), :has(> .am-btn[data-fan-open])) .ib-proj:not(.ib-on) { background: var(--ib-side-hover); }
 /* Its menu, a project row's (inbox.css .ib-pmore): ⋯ on hover, keyboard focus or while the menu is open, at the row's
    middle; the name gives it room. Rename…: the project field in the row's own height. */
