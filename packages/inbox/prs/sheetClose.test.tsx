@@ -218,8 +218,10 @@ test("a phone's pick sheet lifts the window's toast above it while it shows, and
   click($('[data-pr-select="select"]')!);
   click(tile(key(7))!);
   expect($('[data-pr-actions] [data-pr-close]')).not.toBeNull();
+  expect(inbox.hasAttribute('data-prs-sheet')).toBe(true);
   expect(inbox.style.getPropertyValue('--ib-prs-sheet-h')).toMatch(/^\d+px$/);
   click($('[data-pr-clear]')!);
   expect($('[data-pr-actions]')).toBeNull();
+  expect(inbox.hasAttribute('data-prs-sheet')).toBe(false);
   expect(inbox.style.getPropertyValue('--ib-prs-sheet-h')).toBe('');
 });
