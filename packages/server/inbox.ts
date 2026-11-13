@@ -249,6 +249,7 @@ import { createInboxAsk } from "./inbox-ask";
 import type { InboxAskTimes } from "./inbox-ask-live";
 import { createInboxPins } from "./inbox-pins";
 import { createInboxPriority } from "./inbox-priority";
+import { priorityIntroOpen, priorityIntroUnused, priorityIntroUsed } from "./inbox-priority-intro";
 import { createInboxThreadTags } from "./inbox-thread-tags";
 import { createInboxAgentFaces } from "./inbox-agent-faces";
 import { createAgentIcons, createInboxAgentIcons, INBOX_AGENT_ICONS_DIR } from "./inbox-agent-icons";
@@ -2757,6 +2758,23 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const snoozeIntroState = (owner: boolean, load: string | null = null) => ({
     due: owner && revealNow(owner, load) === "snooze",
   });
+  /**
+   * The Priority dialog (inbox-priority-intro.ts): open while the person never added a thread to Priority here, from
+   * the day after the first release start that knows it (stamped here, as the tab icon's is, for someone who could
+   * still get it; claims keep the stamp).
+   */
+  if (normalizeStableVersion(version) !== null && !loadConfig().inboxReveals?.priority?.dueAt && priorityIntroUnused(loadConfig().inboxPriorityIntro, store.priorities().threads.length)) {
+    saveConfig({ inboxReveals: { ...loadConfig().inboxReveals, priority: { ...loadConfig().inboxReveals?.priority, dueAt: new Date().toISOString() } } });
+  }
+  const priorityIntroIsOpen = () => {
+    const config = loadConfig();
+    return priorityIntroOpen(config.inboxPriorityIntro, store.priorities().threads.length, config.inboxReveals?.priority?.dueAt, new Date());
+  };
+  /** After any Priority change: an add standing is a use, kept once, so the dialog never shows. */
+  const markPriorityUsed = () => {
+    const next = priorityIntroUsed(loadConfig().inboxPriorityIntro, store.priorities().threads.length, new Date());
+    if (next) saveConfig({ inboxPriorityIntro: next });
+  };
   /** The person snoozed something: the dialog never shows. Once; a dev build marks too (only showing is release-only). */
   const markSnoozeUsed = () => {
     const saved = loadConfig().inboxSnoozeIntro;
@@ -3090,6 +3108,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     steps: stepsUndecided,
     agent_rules: agentRulesUnset,
     personal_agents: noPersonalAgent,
+    priority: priorityIntroIsOpen,
     // Bro mode (approval "bro-mode"): offered while config.json `inboxBro` is unset; its need (heavy use) is the queue's.
     bro: broUndecided,
     // The grill-me tip (shared/inbox/grill-me-tip.ts): nothing to decide, so open until shown; its need (the gap) is
@@ -4599,6 +4618,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     for (const listener of pinListeners) listener();
   });
   const stopPriorityEvents = store.onPriorityChange(() => {
+    markPriorityUsed();
     for (const listener of priorityListeners) listener();
   });
   const stopThreadTagEvents = store.onThreadTagsChange(() => {

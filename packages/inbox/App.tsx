@@ -248,6 +248,7 @@ import { ListViewIntro } from './components/ListViewIntro';
 import { ChecklistIntro } from './steps/ChecklistIntro';
 import { RulesIntro } from './components/RulesIntro';
 import { PersonalAgentsIntro, usePersonalAgentsBanner } from './components/PersonalAgentsIntro';
+import { usePriorityReveal } from './components/usePriorityReveal';
 import { rulesSet, wantRulesEditor } from './agentRules';
 import { StarAskCard } from '@plannotator/ui/components/StarAskCard';
 import { CodeReviewOffer } from './components/CodeReviewOffer';
@@ -5285,11 +5286,9 @@ function Inbox() {
     due: lineLatch?.next === 'bro',
     ...revealAt,
     leaveCounts: (visit, now, _row, next) => broRevealLeaveCounts(visit, now, next),
-    // Or the page idle on such a thread (a thread kept open beside the list never goes back to it).
     idle: pageIdle,
     idleCounts: broRevealIdleCounts,
     mayClaim: () => true,
-    // Turned on meanwhile (Settings, another window): nothing to offer.
     holds: () => settingsRef.current?.bro?.on !== true,
   });
   // The grill-me tip (shared/inbox/grill-me-tip.ts), beside the line (settings `reveal.aside`; reveals.ts `lastResort`:
@@ -5338,14 +5337,9 @@ function Inbox() {
   const listViewReveal = useLineReveal({
     id: 'list_view',
     due: lineLatch?.next === 'list_view' || (lineLatch?.ahead.includes('list_view') ?? false),
-    blocked: revealBlocked,
-    rows: snoozeIntroRows,
-    toast: toast !== null,
+    ...revealAt,
     thread: listViewThread,
-    // On the list itself, or over a thread while the page is idle (the thread kept open beside the list).
     clear: listViewRevealClear(listIntroClear, listViewThread, pageIdle),
-    place: `${route.thread}|${route.project}|${route.machine}`,
-    heldBack: revealHeldBack,
     leaveCounts: (_visit, _now, _row, next) => listViewRevealLeaveCounts(next),
     idle: pageIdle,
     mayClaim: (pageAge) =>
@@ -5358,7 +5352,6 @@ function Inbox() {
         },
         pageAge,
       ),
-    // Simple list picked meanwhile (the ⋮ menu): nothing to offer.
     holds: () => listView === 'grouped',
   });
   const listViewIntroOpen = listViewReveal.stage === 'open';
@@ -5366,22 +5359,32 @@ function Inbox() {
   // The choice's two pictures: the person's own list as the groups draw it, and as the Simple list draws it.
   const listViewChoiceGroups: ListIntroGroup[] = listViewChoiceOpen && shown ? filterList(shown).flatMap((section) => (section.id !== 'snoozed' && section.threads.length > 0 ? [{ id: section.id, label: section.label, count: section.threads.length, rows: section.threads.slice(0, 8) }] : [])) : [];
   const listViewChoiceFlat = listViewChoiceOpen && shown ? flatRows(filterList(shown), null, { epoch: 0, keep: null }).rows.slice(0, 10) : [];
+  const { reveal: priorityReveal, dialog: priorityDialog } = usePriorityReveal({
+    due: lineLatch?.next === 'priority',
+    revealAt,
+    idle: pageIdle,
+    listLoaded: lineLatch !== null,
+    firstRun,
+    grouped: listView === 'grouped',
+    oneTimeRows: () => oneTimeRows.current,
+    phone,
+    projectNames,
+    openThread: () => (routeRef.current.page === 'inbox' ? (routeRef.current.thread ?? null) : null),
+    openTarget: (threadId) => {
+      const now = routeRef.current;
+      go({ page: 'inbox', project: now.project ?? null, machine: now.machine, agent: now.agent, tag: now.tag, thread: threadId });
+    },
+  });
   // The tab icon dialog ("Which favicon do you prefer?"; tabIconChoice.ts): an update-day dialog of the line, armed
   // while it is `reveal.next`, 15 s into the page (the owner, 2026-11-10; reveal.ts `soonMayClaim`): no leave and no
   // stillness, only Code review's guards (the page clear, nothing typed or open, no toast, settled).
-  const tabIconThread = route.page === 'inbox' ? (route.thread ?? null) : null;
+  const soonClear = listIntroClear && updateDialog === null && !restarting;
   const tabIconChoice = useTabIconChoice({
     due: lineLatch?.next === 'tab_icon',
-    blocked: revealBlocked,
     listLoaded: lineLatch !== null,
     firstRun,
-    thread: tabIconThread,
-    rows: snoozeIntroRows,
-    // Code review's own guard: the Inbox page with nothing over it (a thread open or not), no update on screen.
-    clear: listIntroClear && updateDialog === null && !restarting,
-    place: `${route.thread}|${route.project}|${route.machine}`,
-    heldBack: revealHeldBack,
-    toast: toast !== null,
+    ...revealAt,
+    clear: soonClear,
   });
   // The "themes" dialog (approval "inbox-theme-chooser"; themeChooser.ts): right after the tab icon dialog in the line,
   // for someone still on the default theme, armed while it is `reveal.next`, at the same 15 s moment.
@@ -5389,23 +5392,17 @@ function Inbox() {
   const pickTheme = useInboxThemePick();
   const themeChooser = useThemeChooser({
     due: lineLatch?.next === 'theme_chooser',
-    blocked: revealBlocked,
     listLoaded: lineLatch !== null,
     firstRun,
-    thread: tabIconThread,
-    rows: snoozeIntroRows,
-    // Code review's own guard: the Inbox page with nothing over it (a thread open or not), no update on screen.
-    clear: listIntroClear && updateDialog === null && !restarting,
-    place: `${route.thread}|${route.project}|${route.machine}`,
-    heldBack: revealHeldBack,
-    toast: toast !== null,
+    ...revealAt,
+    clear: soonClear,
     light: themeNow.lightTheme,
     dark: themeNow.darkTheme,
   });
   // The "Star the repo" ask (approval "star-ask"): beside the line, never in its order (settings `reveal.aside`), at the
   // same calm moment (a thread read and left, 60 s into the page) while no other reveal is showing or claiming; its
   // claim runs the already-starred check, then the corner card shows.
-  const otherRevealActive = [snoozeIntro.stage, boardReveal.stage, stepsReveal.stage, broReveal.stage, agentRulesReveal.stage, personalAgentsReveal.stage, grillMeTipReveal.stage, listViewReveal.stage, tabIconChoice.stage, themeChooser.stage].some((stage) => stage === 'open' || stage === 'claimed');
+  const otherRevealActive = [snoozeIntro.stage, boardReveal.stage, stepsReveal.stage, broReveal.stage, agentRulesReveal.stage, personalAgentsReveal.stage, priorityReveal.stage, grillMeTipReveal.stage, listViewReveal.stage, tabIconChoice.stage, themeChooser.stage].some((stage) => stage === 'open' || stage === 'claimed');
   const starReveal = useStarReveal({
     due: lineLatch?.aside.includes('star') === true,
     listLoaded: lineLatch !== null,
@@ -5486,6 +5483,8 @@ function Inbox() {
     agentRulesReveal.stage !== 'claimed' &&
     personalAgentsReveal.stage !== 'open' &&
     personalAgentsReveal.stage !== 'claimed' &&
+    priorityReveal.stage !== 'open' &&
+    priorityReveal.stage !== 'claimed' &&
     grillMeTipReveal.stage !== 'open' &&
     grillMeTipReveal.stage !== 'claimed' &&
     starReveal.stage !== 'open' &&
@@ -5949,7 +5948,7 @@ function Inbox() {
   });
   const offerLinesFree = linesFree && codeReviewOffer.stage !== 'open' && codeReviewOffer.stage !== 'claimed';
   // One of the line's dialogs is claimed or open now: the load arms nothing else meanwhile (`lineLatch`).
-  const stagesBusy = [voiceIntro.stage, snoozeIntro.stage, boardReveal.stage, stepsReveal.stage, broReveal.stage, agentRulesReveal.stage, personalAgentsReveal.stage, grillMeTipReveal.stage, listViewReveal.stage, tabIconChoice.stage, themeChooser.stage, starReveal.stage, codeReviewOffer.stage].some(
+  const stagesBusy = [voiceIntro.stage, snoozeIntro.stage, boardReveal.stage, stepsReveal.stage, broReveal.stage, agentRulesReveal.stage, personalAgentsReveal.stage, priorityReveal.stage, grillMeTipReveal.stage, listViewReveal.stage, tabIconChoice.stage, themeChooser.stage, starReveal.stage, codeReviewOffer.stage].some(
     (stage) => stage === 'claimed' || stage === 'open',
   );
   useEffect(() => setLineStagesBusy(stagesBusy), [stagesBusy]);
@@ -7664,6 +7663,7 @@ function Inbox() {
       {personalAgentsReveal.stage === 'open' && (
         <PersonalAgentsIntro phone={phone} banner={personalAgentsBanner === true} close={personalAgentsReveal.close} />
       )}
+      {priorityDialog}
       {broReveal.stage === 'open' && (
         <BroIntro
           phone={phone}
