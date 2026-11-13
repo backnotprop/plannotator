@@ -1,12 +1,14 @@
 /**
  * An agent's face and given name on a linked machine (approval "inbox-linked-marks"): the real AgentsSection and
  * faces store, this Inbox's faces route and the agent's machine's, each on its own temp folder behind a fetch
- * stand-in (the forward answers as that machine's route does, or holds the write); no Inbox is started.
+ * stand-in (the forward answers as that machine's route does, or holds the write), with the built-in icon sets; no
+ * Inbox is started.
  *
  * What this catches: a face or name for a linked machine's agent kept in this Inbox's file, or drawn before that
  * machine has it (while it is away); an entry this Inbox's file has for that agent drawn over the machine's own; a
- * machine's newer list not redrawing the mark; a picker, "Your own…" or Rename… offered where they cannot land (an
- * older machine), or the mark there still answering a click; this machine's own agents changed by any of it.
+ * machine's newer list not redrawing the mark; a picker, "Your own…", "Animate it", the Your own / Sets switch or
+ * Rename… offered where they cannot land (an older machine, or a picture kept on this computer), or the mark there
+ * still answering a click; "Use this icon" not reaching that machine; this machine's own agents changed by any of it.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -20,6 +22,8 @@ import type { InboxAgent, InboxAgentsGroup } from '@plannotator/core/inbox-types
 import type { MachineView } from '../api';
 import { createInboxAgentFacesFile } from '../../shared/inbox/agent-faces';
 import { createInboxAgentFaces } from '../../server/inbox-agent-faces';
+import { createBuiltInIconSets, createInboxIconSets } from '../../server/inbox-icon-sets';
+import { createIconSetFetcher } from '../../server/inbox-icon-set-fetch';
 
 const hasDom = typeof document !== 'undefined';
 if (hasDom) {
@@ -41,6 +45,7 @@ if (hasDom) {
 const { AgentsSection } = (hasDom ? await import('./AgentsSection') : {}) as typeof import('./AgentsSection');
 const faces = (hasDom ? await import('./agentFaces') : {}) as typeof import('./agentFaces');
 const motion = (hasDom ? await import('./motion') : {}) as typeof import('./motion');
+const iconSets = (hasDom ? await import('./iconSets') : {}) as typeof import('./iconSets');
 const { setInboxAgents } = (hasDom ? await import('../agentsList') : {}) as typeof import('../agentsList');
 const { setSelfMachine } = await import('../inboxUrl');
 const { InboxHeldError } = await import('../api');
@@ -60,14 +65,19 @@ let forwarded: string[] = [];
 let refused: unknown[] = [];
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
-const facesRoute = (file: ReturnType<typeof createInboxAgentFacesFile>) => createInboxAgentFaces({ file, serverSession: 'srv', readBody: async (req) => (await req.json()) as Record<string, unknown>, json }).route;
-const scratchFile = () => createInboxAgentFacesFile(join(mkdtempSync(join(tmpdir(), 'pn-linked-faces-dom-')), 'inbox'), () => {});
+const readBody = async (req: Request) => (await req.json()) as Record<string, unknown>;
+const facesRoute = (file: ReturnType<typeof createInboxAgentFacesFile>) => createInboxAgentFaces({ file, serverSession: 'srv', readBody, json }).route;
+const scratchDir = () => join(mkdtempSync(join(tmpdir(), 'pn-linked-faces-dom-')), 'inbox');
+const scratchFile = () => createInboxAgentFacesFile(scratchDir(), () => {});
 
 function inboxes() {
   here = scratchFile();
   there = scratchFile();
   const own = facesRoute(here);
   const theirs = facesRoute(there);
+  const builtIn = createBuiltInIconSets();
+  const fetcher = createIconSetFetcher({ dir: join(scratchDir(), 'icon-sets'), pointer: null, builtIn: builtIn.ids, fetch: (() => Promise.reject(new Error('offline'))) as unknown as typeof fetch });
+  const setsRoute = createInboxIconSets({ builtIn, fetcher, serverSession: 'srv', localOnly: () => json({ code: 'local_only' }, 403), readBody, json }).route;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input), 'http://localhost');
     const method = init?.method ?? 'GET';
@@ -81,7 +91,7 @@ function inboxes() {
       return (await theirs(new Request(forwardedUrl, { method, body: init?.body ?? null }), forwardedUrl)) ?? json({ error: 'not here' }, 404);
     }
     const req = new Request(url, { method, ...(init?.body ? { body: init.body } : {}) });
-    return (await own(req, url)) ?? json({ error: 'not here' }, 404);
+    return (await own(req, url)) ?? (await setsRoute(req, url, true)) ?? json({ error: 'not here' }, 404);
   }) as typeof fetch;
 }
 
@@ -96,6 +106,7 @@ beforeEach(() => {
   motion.setAgentFaceArt(ART);
   setSelfMachine(SELF);
   setInboxAgents(null);
+  iconSets.resetIconSets();
   faces.resetAgentFaces();
   faces.onAgentFaceRefused((cause) => refused.push(cause));
   inboxes();
@@ -166,21 +177,32 @@ function mount(marks: string[] | undefined) {
 
 const row = (id: string) => document.querySelector<HTMLElement>(`[data-sidebar-agent="${id}"]`)!;
 const markOf = (id: string) => row(id).querySelector<HTMLElement>(`[data-agent-icon="${id}"]`)!;
+/** Opens the agent's picker from the keyboard: the places in it. */
+async function openFan(id: string) {
+  // happy-dom lays nothing out: the mark at the sidebar's left, half way down a 1024 × 768 window.
+  markOf(id).getBoundingClientRect = () => ({ left: 15, top: 370, width: 28, height: 28, right: 43, bottom: 398, x: 15, y: 370, toJSON: () => ({}) }) as DOMRect;
+  await act(async () => markOf(id).dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
+  await settle();
+  return [...document.querySelectorAll<HTMLElement>('[data-face-choice]')].map((el) => el.dataset.faceChoice);
+}
+/** A face picked in the agent's picker. */
+async function pickFace(id: string, face: string) {
+  await openFan(id);
+  await act(async () => document.querySelector<HTMLButtonElement>(`[data-face-choice="${face}"]`)!.click());
+  await settle();
+}
 
 test.skipIf(!hasDom)("a face chosen on a linked machine's agent is kept in that machine's file only, and drawn once it answers", async () => {
   listed();
   mount(TAKES);
   await settle();
-  // The click cycle's next face after the agent's own mark.
-  await act(async () => markOf('ses_m').click());
-  await settle();
+  await pickFace('ses_m', 'glass');
   expect(forwarded).toHaveLength(1);
   expect(there.wire().faces.ses_m?.face).toBe('glass');
   expect(here.wire().faces.ses_m).toBeUndefined();
   expect(faces.agentFaceOf('ses_m')).toBe('glass');
   // This machine's own agent: as before, kept in this Inbox's file.
-  await act(async () => markOf('ses_a').click());
-  await settle();
+  await pickFace('ses_a', 'glass');
   expect(here.wire().faces.ses_a?.face).toBe('glass');
   expect(there.wire().faces.ses_a).toBeUndefined();
   expect(forwarded).toHaveLength(1);
@@ -191,8 +213,7 @@ test.skipIf(!hasDom)('held while that machine is away: nothing drawn, the wait i
   mount(TAKES);
   await settle();
   away = true;
-  await act(async () => markOf('ses_m').click());
-  await settle();
+  await pickFace('ses_m', 'glass');
   expect(faces.agentFaceOf('ses_m')).toBe('agent');
   expect(refused).toHaveLength(1);
   expect(refused[0]).toBeInstanceOf(InboxHeldError);
@@ -245,14 +266,7 @@ test.skipIf(!hasDom)('a machine that takes faces: its agents\' picker has no "Yo
   listed();
   mount(TAKES);
   await settle();
-  const open = async (id: string) => {
-    // happy-dom lays nothing out: the mark at the sidebar's left, half way down a 1024 × 768 window.
-    markOf(id).getBoundingClientRect = () => ({ left: 15, top: 370, width: 28, height: 28, right: 43, bottom: 398, x: 15, y: 370, toJSON: () => ({}) }) as DOMRect;
-    await act(async () => markOf(id).dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
-    await settle();
-    return [...document.querySelectorAll<HTMLElement>('[data-face-choice]')].map((el) => el.dataset.faceChoice);
-  };
-  const theirs = await open('ses_m');
+  const theirs = await openFan('ses_m');
   expect(theirs).toContain('sets');
   expect(theirs).toContain('glass');
   expect(theirs).not.toContain('own');
@@ -261,7 +275,54 @@ test.skipIf(!hasDom)('a machine that takes faces: its agents\' picker has no "Yo
   document.body.innerHTML = '';
   mount(TAKES);
   await settle();
-  expect(await open('ses_a')).toContain('own');
+  expect(await openFan('ses_a')).toContain('own');
+});
+
+test.skipIf(!hasDom)('Sets on a linked machine\'s agent: the grid, no switch; its page has "Use this icon" and no "Animate it", and the icon lands in that machine\'s file', async () => {
+  listed();
+  mount(TAKES);
+  await settle();
+  const sets = async (id: string) => {
+    await openFan(id);
+    await act(async () => document.querySelector<HTMLButtonElement>('[data-face-choice="sets"]')!.click());
+    await settle();
+    return document.querySelector<HTMLElement>('dialog[data-dialog="agent-icon"][open]')!;
+  };
+  const dialog = await sets('ses_m');
+  expect(dialog.querySelector('[data-agi-place]')?.tagName).toBeUndefined();
+  const cell = dialog.querySelector<HTMLButtonElement>('.am-sets-i')!;
+  const icon = cell.getAttribute('data-set-icon');
+  await act(async () => cell.click());
+  await settle();
+  expect(dialog.querySelector('[data-selected-icon]')?.tagName).toBe('DIV');
+  expect(dialog.querySelector('[data-animate-it], .ib-agi-sel-anim')?.tagName).toBeUndefined();
+  expect(forwarded).toHaveLength(0);
+  await act(async () => dialog.querySelector<HTMLButtonElement>('[data-use-icon]')!.click());
+  await settle();
+  expect(forwarded).toHaveLength(1);
+  const kept = there.wire().faces.ses_m?.face;
+  expect(kept).toStartWith('set:');
+  expect(kept).toContain(String(icon));
+  expect(here.wire().faces.ses_m).toBeUndefined();
+  expect(faces.agentFaceOf('ses_m')).toBe(kept!);
+  // Opened again on an agent that shows a set icon: still the grid, not its page.
+  act(() => root?.unmount());
+  root = null;
+  document.body.innerHTML = '';
+  mount(TAKES);
+  await settle();
+  expect((await sets('ses_m')).querySelector('[data-selected-icon]')?.tagName).toBeUndefined();
+  // This machine's agent keeps the switch and "Animate it".
+  act(() => root?.unmount());
+  root = null;
+  document.body.innerHTML = '';
+  mount(TAKES);
+  await settle();
+  const ours = await sets('ses_a');
+  expect(ours.querySelector('[data-agi-place]')?.tagName).toBe('BUTTON');
+  await act(async () => ours.querySelector<HTMLButtonElement>('.am-sets-i')!.click());
+  await settle();
+  expect(ours.querySelector('[data-animate-it]')?.tagName).toBe('DIV');
 });
 
 test.skipIf(!hasDom)('an older machine (its list takes no agent marks): no picker and no Rename… on its agents, and their marks show no face from here', async () => {

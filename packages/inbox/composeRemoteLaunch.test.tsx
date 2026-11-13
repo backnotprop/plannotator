@@ -330,6 +330,27 @@ test.skipIf(!hasDom)("its switch turned on there since the link connected: its s
   expect(inDialog(`[data-compose-folder-notice="${MINI}"]`)).toBeNull();
 });
 
+test.skipIf(!hasDom)("an agent only Mac mini has, picked under this computer's project: To names it in Mac mini's project, and Send starts it there", async () => {
+  miniBlock = { ...MINI_BLOCK, agents: [...MINI_BLOCK.agents, { agent: 'pi', name: 'Pi' }] };
+  machines = [SELF_VIEW, view(MINI, 'Mac mini')];
+  await open();
+  await until(machinesRead, "Mac mini's sessions read");
+  act(() => inDialog('button[data-compose-to]')!.click());
+  await until(() => inDialog('[data-compose-start="pi"]') !== null, 'the Pi start row');
+  act(() => inDialog('[data-compose-start="pi"]')!.click());
+  // The caption's project was web-app on MacBook, which has no Pi: To is not left empty.
+  await until(() => inDialog('[data-compose-folder]') !== null, 'the project in To');
+  expect(inDialog('[data-compose-folder]')!.getAttribute('data-compose-folder')).toBe('prj_infra');
+  expect(inDialog('[data-compose-folder]')!.getAttribute('data-compose-folder-machine')).toBe(MINI);
+  expect(inDialog('[data-compose-to]')!.textContent).toContain('Pi');
+  write('Rotate the staging password.');
+  act(() => inDialog('[data-compose-send]')!.click());
+  await until(() => sent.length === 1, 'the send');
+  const posts = requests.filter((r) => r.method === 'POST');
+  expect(posts.map((r) => r.path)).toEqual([`/api/inbox/m/${MINI}/messages`]);
+  expect(posts[0]!.body!.to).toEqual({ launch: { agent: 'pi', project_id: 'prj_infra' } });
+});
+
 test.skipIf(!hasDom)('the default start is never an asleep machine\'s project while this computer has one, though the menu still leads with the machine used last', async () => {
   machines = [SELF_VIEW, view(MINI, 'Mac mini')];
   await open(new Map([[MINI, { at: '2026-11-06T11:00:00.000Z', project: 'prj_infra' }]]));

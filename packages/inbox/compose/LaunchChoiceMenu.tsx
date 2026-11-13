@@ -1,7 +1,8 @@
 import { useEffect, useRef, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import type { InboxLaunchChoice, InboxLaunchChoices } from '@plannotator/core/inbox-launch-choice';
 import { Icon } from '../icons';
-import { launchChoiceButton, launchModelRows, shortLaunchModel } from './launchChoice';
+import { launchEffortsFor } from '@plannotator/core/inbox-launch-choice';
+import { launchChoiceButton, launchModelRows, pickLaunchModel, shortLaunchModel } from './launchChoice';
 
 export function LaunchChoiceButton({ choice, choices, open, onToggle, className }: { choice: InboxLaunchChoice; choices: InboxLaunchChoices; open: boolean; onToggle: () => void; className: string }) {
   const words = launchChoiceButton(choice, choices);
@@ -69,10 +70,12 @@ export function LaunchChoiceMenu({
             aria-checked={on}
             className="ib-cp-opt ib-cp-lchopt"
             data-compose-choice-value={value ?? 'default'}
+            title={value ?? undefined}
             onClick={() => {
+              if (field === 'model') return onChoice(pickLaunchModel(choice, choices, value));
               const next = { ...choice };
-              if (value === null) delete next[field];
-              else next[field] = value;
+              if (value === null) delete next.effort;
+              else next.effort = value;
               onChoice(next);
             }}
           >
@@ -88,6 +91,7 @@ export function LaunchChoiceMenu({
     </div>
   );
   const models = launchModelRows(choice, choices);
+  const efforts = launchEffortsFor(choices, choice.model);
   return (
     <div className="ib-cp-picker ib-cp-lch" ref={ref} role="menu" aria-label={`Model and ${effortWord.toLowerCase()}`} data-compose-choices="" data-phone={phone ? '' : undefined} onKeyDown={onKey}>
       {phone && (
@@ -101,7 +105,7 @@ export function LaunchChoiceMenu({
       )}
       <div className="ib-cp-lchcols">
         {models.length > 0 && column('model', 'Model', models, shortLaunchModel)}
-        {choices.efforts.length > 0 && column('effort', effortWord, choices.efforts, (v) => v)}
+        {efforts.length > 0 && column('effort', effortWord, efforts, (v) => v)}
       </div>
     </div>
   );

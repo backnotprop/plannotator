@@ -18,6 +18,7 @@ import { parseInboxThreadPullRefs, type InboxAuthor, type InboxThreadPullsAnswer
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { createThreadPullStates, createThreadPullsRoute, THREAD_PULLS_ADD_WAIT_MS, threadPullsChangedForWake, type ThreadPullFixture } from "./inbox-thread-pulls";
+import { createRefCards, type BitbucketRefReader } from "./ref-cards";
 
 /** Let the reads behind an answer land (the stand-in forges answer at once). */
 const settle = async () => {
@@ -49,7 +50,15 @@ function fakeGh(states: Record<number, { state: string; isDraft?: boolean; base?
   return { run, calls };
 }
 
-function world(options: { fixture?: () => ThreadPullFixture | null; gh?: { run: unknown; calls: string[][] }; onLiveChange?: (threadIds: readonly string[]) => void } = {}) {
+function world(
+  options: {
+    fixture?: () => ThreadPullFixture | null;
+    gh?: { run: unknown; calls: string[][] };
+    onLiveChange?: (threadIds: readonly string[]) => void;
+    bitbucket?: BitbucketRefReader;
+    projectHost?: (projectId: string) => Promise<string | null>;
+  } = {},
+) {
   const dir = mkdtempSync(join(tmpdir(), "plannotator-inbox-pulls-route-"));
   roots.push(dir);
   let now = Date.parse("2026-11-08T10:00:00.000Z");
@@ -57,7 +66,8 @@ function world(options: { fixture?: () => ThreadPullFixture | null; gh?: { run: 
   const project = store.ensureProject({ name: "billing", root: "/work/billing" });
   const thread = store.sendMessage({ project_id: project.id, author: AGENT, body: "Opened the retry PR.", subject: "Invoice retries" }).message.id;
   const gh = options.gh ?? fakeGh({});
-  const states = createThreadPullStates({ store, run: gh.run as never, now: () => now, fixture: options.fixture ?? null, onLiveChange: options.onLiveChange });
+  const refCards = options.bitbucket ? createRefCards({ run: gh.run as never, now: () => now, avatar: async () => null, bitbucket: options.bitbucket }) : undefined;
+  const states = createThreadPullStates({ store, run: gh.run as never, ...(refCards ? { refCards } : {}), now: () => now, fixture: options.fixture ?? null, onLiveChange: options.onLiveChange });
   const route = createThreadPullsRoute({
     store,
     states,
@@ -66,6 +76,7 @@ function world(options: { fixture?: () => ThreadPullFixture | null; gh?: { run: 
     readBody: async (req) => (await req.json()) as Record<string, unknown>,
     sessionMismatch: (body) => (typeof body.serverSession === "string" && body.serverSession !== "srv_1" ? Response.json({ error: "stale" }, { status: 409 }) : null),
     localOnly: () => Response.json({ error: "owner only" }, { status: 403 }),
+    projectHost: options.projectHost,
     now: () => now,
   });
   const path = (id: string) => `/api/inbox/threads/${id}/pulls`;
@@ -104,6 +115,23 @@ describe("the window's route", () => {
     expect(error).toBeInstanceOf(InboxError);
     expect((error as InboxError).code).toBe("validation_error");
     expect(w.store.threadPulls(w.thread)).toHaveLength(2);
+  });
+
+  test("the person's short group/project!n is on the thread's project's own GitLab host, and is looked up only for one", async () => {
+    const asked: string[] = [];
+    const w = world({ projectHost: async (projectId) => (asked.push(projectId), "gitlab.acme.dev") });
+    await w.post(w.thread, { add: ["o/r#1", "https://gitlab.acme.dev/acme/api/-/merge_requests/2"] });
+    expect(asked).toEqual([]);
+    const answer = (await (await w.post(w.thread, { add: ["acme/api!3"] }))!.json()) as InboxThreadPullsAnswer;
+    expect(asked).toEqual([w.project.id]);
+    expect(answer.pulls.map((p) => [p.pull, p.url])).toEqual([
+      ["github.com/o/r#1", "https://github.com/o/r/pull/1"],
+      ["gitlab.acme.dev/acme/api#2:pull", "https://gitlab.acme.dev/acme/api/-/merge_requests/2"],
+      ["gitlab.acme.dev/acme/api#3:pull", "https://gitlab.acme.dev/acme/api/-/merge_requests/3"],
+    ]);
+    // Its short form takes it off again.
+    await w.post(w.thread, { remove: ["acme/api!3"] });
+    expect(w.store.threadPulls(w.thread).map((p) => p.pull)).toEqual(["github.com/o/r#1", "gitlab.acme.dev/acme/api#2:pull"]);
   });
 
   test("remove [\"all\"] takes every PR off, and the answer lists them as removed", async () => {
@@ -163,6 +191,32 @@ describe("the state reader", () => {
     expect(gh.calls).toHaveLength(2);
     expect(gh.calls[1]!.join(" ")).toContain("n2: pullRequest");
     expect(gh.calls[1]!.join(" ")).not.toContain("n1: pullRequest");
+  });
+
+  test("a Bitbucket Cloud PR's state, checks and review come through its API reader; no CLI runs", async () => {
+    const gh = fakeGh({});
+    const reads: unknown[] = [];
+    const w = world({
+      gh,
+      bitbucket: async (ref) => {
+        reads.push(ref);
+        return {
+          platform: "bitbucket", kind: "pull", repo: "acme/billing", number: 7, url: "https://bitbucket.org/acme/billing/pull-requests/7",
+          title: "Retry invoices", state: "open", author: null, createdAt: "", updatedAt: "", closedAt: null, labels: [], assignees: [],
+          comments: 0, body: "", bodyCut: false, lastComment: null, linked: [],
+          pull: { base: "main", head: "retries", additions: 0, deletions: 0, files: 0, review: "approved", checks: { state: "failure", passed: 1, failed: 1, pending: 0, total: 2 } },
+        };
+      },
+    });
+    w.agentAdd(w.thread, "https://bitbucket.org/acme/billing/pull-requests/7");
+    // The window's read answers at once and reads Bitbucket behind it; the next read has the answer.
+    await w.get(w.thread);
+    await settle();
+    const answer = (await (await w.get(w.thread))!.json()) as InboxThreadPullsAnswer;
+    expect(gh.calls).toEqual([]);
+    expect(reads).toEqual([{ workspace: "acme", repo: "billing", number: 7 }]);
+    expect(answer.pulls.map((p) => [p.platform, p.label, p.state, p.title, p.checks, p.review])).toEqual([["bitbucket", "#7", "open", "Retry invoices", "failing", "approved"]]);
+    expect(w.store.threadPulls(w.thread)[0]).toMatchObject({ state: "open", base: "main", head: "retries" });
   });
 
   test("a tailnet guest's read runs no gh: it gets the stored state", async () => {

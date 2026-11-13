@@ -137,6 +137,13 @@ interface AnnotationToolbarProps {
    * `element` as before. Absent or null: `element`'s rect.
    */
   touchAnchorRect?: () => ToolbarRect | null;
+  /**
+   * Touch placement only: `above` puts the toolbar over the selection first
+   * (above the band where iOS draws its edit menu) when there is room, for a
+   * selection whose end the finger was moving, so it covers neither the end
+   * handle nor the lines the finger may drag on to. Absent: below first.
+   */
+  touchSide?: 'above';
   /** Close toolbar when element scrolls out of viewport */
   closeOnScrollOut?: boolean;
   /** Exit animation state */
@@ -164,6 +171,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
   showDelete,
   hideCopyButton = false,
   touchAnchorRect,
+  touchSide,
   closeOnScrollOut = false,
   isExiting = false,
   onMouseEnter,
@@ -272,6 +280,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
           viewport: readVisibleViewport(),
           insets: readSafeAreaInsets(),
           mode: positionMode,
+          ...(touchSide ? { prefer: touchSide } : {}),
         });
         hiddenRef.current = placed.placement === 'hidden';
         setPosition({ top: placed.top, left: placed.left, touch: placed.placement, maxWidth: placed.maxWidth });
@@ -310,7 +319,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
       vv?.removeEventListener("resize", updatePosition);
       vv?.removeEventListener("scroll", updatePosition);
     };
-  }, [element, positionMode, closeOnScrollOut, onClose, touchToolbar]);
+  }, [element, positionMode, closeOnScrollOut, onClose, touchToolbar, touchSide]);
 
   // Touch placement needs the toolbar's real size to keep it inside the
   // screen. Its width does not depend on where it sits (width: max-content in

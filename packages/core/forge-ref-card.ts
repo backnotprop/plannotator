@@ -2,26 +2,28 @@
  * Hover cards for issue, pull request and merge request links.
  *
  * A link the UI already draws (a bare `#123` linked through `forgeRefLinks`,
- * or a pasted `https://github.com/o/r/pull/123` or
- * `https://gitlab.com/g/p/-/merge_requests/7`) is read back into a
+ * or a pasted `https://github.com/o/r/pull/123`,
+ * `https://gitlab.com/g/p/-/merge_requests/7` or
+ * `https://bitbucket.org/w/r/pull-requests/3`) is read back into a
  * `ForgeRef`; a host fetches the card's data for it. Browser-safe and
  * dependency-free: the UI parses hrefs with it and the server checks the same
  * shape before it runs anything.
  */
 
-import { classifyForgeHost, type ForgePlatform } from "./forge-refs";
+import { classifyForgeHost, FORGE_SPECS, normalizeForgeHost, type ForgePlatform } from "./forge-refs";
 
 export type { ForgePlatform } from "./forge-refs";
 
 /**
  * One issue or pull/merge request, as a link names it. On GitHub `kind` is a
  * hint (GitHub redirects /issues/N to /pull/N, so the answer decides); on
- * GitLab issues and merge requests are numbered apart, so it is exact.
+ * GitLab and Bitbucket issues and pull requests are numbered apart, so it is
+ * exact.
  */
 export interface ForgeRef {
   platform: ForgePlatform;
   host: string;
-  /** GitHub: the owner. GitLab: the namespace (`group/sub`). */
+  /** GitHub: the owner. GitLab: the namespace (`group/sub`). Bitbucket: the workspace. */
   owner: string;
   repo: string;
   number: number;
@@ -35,6 +37,7 @@ const NUMBER = /^[1-9]\d{0,9}$/;
  * Read an href back into a ref, or null:
  * - GitHub: `https://<host>/<owner>/<repo>/(issues|pull|pulls)/<n>`
  * - GitLab: `https://<host>/<namespace>/<project>/-/(issues|work_items|merge_requests)/<n>`
+ * - Bitbucket Cloud: `https://bitbucket.org/<workspace>/<repo>/(issues|pull-requests)/<n>`
  * A trailing `/files`, `?query` or `#fragment` is ignored. Only https, no
  * credentials, no port.
  */
@@ -55,7 +58,7 @@ export function parseForgeRefUrl(href: string): ForgeRef | null {
   let repo: string | undefined;
   let kindPart: string | undefined;
   let num: string | undefined;
-  if (platform === "github") {
+  if (platform !== "gitlab") {
     [owner, repo, kindPart, num] = parts as [string, string?, string?, string?];
   } else {
     const dash = parts.indexOf("-");
@@ -81,24 +84,33 @@ export function parseForgeRefUrl(href: string): ForgeRef | null {
 export function webForgeHost(hostname: string): string | null {
   const h = hostname.toLowerCase();
   if (!/^[a-z0-9.-]+$/.test(h) || !h.includes(".")) return null;
-  if (/^(github|gitlab)\.com[.-]/.test(h)) return null;
+  if (/^(github\.com|gitlab\.com|bitbucket\.org)[.-]/.test(h)) return null;
   return h;
 }
 
 function refKindOf(platform: ForgePlatform, part: string): ForgeRef["kind"] | null {
-  if (platform === "github") return part === "issues" ? "issue" : part === "pull" || part === "pulls" ? "pull" : null;
-  return part === "issues" || part === "work_items" ? "issue" : part === "merge_requests" ? "pull" : null;
+  switch (platform) {
+    case "github":
+      return part === "issues" ? "issue" : part === "pull" || part === "pulls" ? "pull" : null;
+    case "gitlab":
+      return part === "issues" || part === "work_items" ? "issue" : part === "merge_requests" ? "pull" : null;
+    case "bitbucket":
+      return part === "issues" ? "issue" : part === "pull-requests" ? "pull" : null;
+  }
 }
 
-/** One cache entry per ref. On GitHub an issue link to a PR is the same item, so the kind is not part of it there. */
+/**
+ * One cache entry per ref. On GitHub an issue link to a PR is the same item, so the kind is not part of it there;
+ * GitLab and Bitbucket number them apart (`:pull`, `:issue`).
+ */
 export function forgeRefKey(ref: Pick<ForgeRef, "platform" | "host" | "owner" | "repo" | "number" | "kind">): string {
-  const kind = ref.platform === "gitlab" ? `:${ref.kind}` : "";
+  const kind = FORGE_SPECS[ref.platform].numbersByKind ? `:${ref.kind}` : "";
   return `${ref.host}/${ref.owner}/${ref.repo}#${ref.number}${kind}`.toLowerCase();
 }
 
 /** How the forge itself writes the number: `!7` for a GitLab merge request, `#7` otherwise. */
 export function forgeRefLabel(ref: Pick<ForgeRef, "platform" | "kind" | "number">): string {
-  return `${ref.platform === "gitlab" && ref.kind === "pull" ? "!" : "#"}${ref.number}`;
+  return `${ref.kind === "pull" ? FORGE_SPECS[ref.platform].pullMark : "#"}${ref.number}`;
 }
 
 export interface ForgeRefPerson {
@@ -162,7 +174,7 @@ export interface ForgeRefCardData {
     deletions: number;
     files: number;
     review: "approved" | "changes_requested" | "review_required" | null;
-    /** GitHub: the head commit's checks. GitLab: the head pipeline's jobs. */
+    /** GitHub: the head commit's checks. GitLab: the head pipeline's jobs. Bitbucket: the head commit's build statuses. */
     checks: ForgeRefChecks | null;
   };
 }
@@ -194,10 +206,16 @@ const SHORT_GITLAB_PULL = /^([A-Za-z0-9_.-]{1,100}(?:\/[A-Za-z0-9_.-]{1,100})*)\
 /**
  * A pull or merge request as an agent or the person names one for a thread
  * (the Inbox's PR coupling), or null: `owner/repo#123` (github.com),
- * `group/sub/project!45` (gitlab.com), or the PR's or MR's URL on any GitHub
- * or GitLab host. An issue link, a bare `#123` and anything else are not one.
+ * `group/sub/project!45`, or the PR's or MR's URL on any GitHub or GitLab
+ * host or on bitbucket.org. Bitbucket has no short form of its own
+ * (`workspace/repo#3` reads as GitHub). An issue link, a bare `#123` and
+ * anything else are not one.
+ *
+ * `projectHost` is the host of the thread's project's git remote. A
+ * `group/sub/project!45` is on that host when it is a GitLab (GitLab reads the
+ * short form on its own instance), else on gitlab.com. A URL keeps its own host.
  */
-export function parseForgePullRef(text: string): ForgeRef | null {
+export function parseForgePullRef(text: string, projectHost?: string | null): ForgeRef | null {
   const value = text.trim();
   if (/^https:\/\//i.test(value)) {
     const ref = parseForgeRefUrl(value);
@@ -209,20 +227,25 @@ export function parseForgePullRef(text: string): ForgeRef | null {
   }
   const gitlab = SHORT_GITLAB_PULL.exec(value);
   if (gitlab && ![...gitlab[1]!.split("/"), gitlab[2]!].some((part) => part === "." || part === "..")) {
-    return { platform: "gitlab", host: "gitlab.com", owner: gitlab[1]!, repo: gitlab[2]!, number: Number(gitlab[3]), kind: "pull" };
+    return { platform: "gitlab", host: shortGitlabHost(projectHost), owner: gitlab[1]!, repo: gitlab[2]!, number: Number(gitlab[3]), kind: "pull" };
   }
   return null;
 }
 
+function shortGitlabHost(projectHost: string | null | undefined): string {
+  const host = normalizeForgeHost(projectHost);
+  return host && classifyForgeHost(host) === "gitlab" ? host : "gitlab.com";
+}
+
 /** A pull or merge request's web address. */
 export function forgePullUrl(ref: Pick<ForgeRef, "platform" | "host" | "owner" | "repo" | "number">): string {
-  return `https://${ref.host}/${ref.owner}/${ref.repo}/${ref.platform === "gitlab" ? "-/merge_requests" : "pull"}/${ref.number}`;
+  return `https://${ref.host}/${ref.owner}/${ref.repo}/${FORGE_SPECS[ref.platform].pullPath}/${ref.number}`;
 }
 
 /**
  * How an agent writes a pull or merge request back: `owner/repo#123` on
  * github.com, `group/project!45` on gitlab.com, the URL on any other host
- * (the short forms name only those two).
+ * and on Bitbucket (the short forms name only those two).
  */
 export function forgePullRefText(ref: Pick<ForgeRef, "platform" | "host" | "owner" | "repo" | "number">): string {
   if (ref.platform === "github" && ref.host === "github.com") return `${ref.owner}/${ref.repo}#${ref.number}`;

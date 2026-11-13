@@ -2,7 +2,7 @@
  * HTML attachments on a phone, first step (approval
  * "inbox-html-attachments-phone"), proved against the compiled binary under a
  * temp data dir, on an iPhone 15 (WebKit) and a Pixel 7 (Chromium), plus a
- * desktop that does not change.
+ * desktop, which opens with the pen off as a phone does and otherwise keeps its own ways.
  *
  * What each engine can show, and what is forced here:
  * - Chromium gets real input through the DevTools protocol: a real pinch, and
@@ -484,11 +484,13 @@ test('320 px phone: the card and its controls stay in the window', async () => {
   );
 });
 
-test('desktop: nothing changed: pen on, the reply card open, the selection bridge off, the comment in its popover', async () => {
+test('desktop: the pen starts off as on a phone; turned on, the reply card open, the selection bridge off, the comment in its popover', async () => {
   await withPhone(
     'chromium',
     async (w, page) => {
       await open(w, page, 'report.html');
+      await expect(pen(page)).toHaveAttribute('aria-pressed', 'false');
+      await pen(page).click();
       await expect(pen(page)).toHaveAttribute('aria-pressed', 'true');
       await expect(composer(page)).toBeVisible();
       expect(await frame(page).locator('body').evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(false);

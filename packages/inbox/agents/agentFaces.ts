@@ -285,22 +285,21 @@ export async function keepAgentName(agent: AgentFaceRef, name: string | null): P
 }
 
 /**
- * "Your own…": keep a picked, dropped or pasted picture with the Inbox, then show it on this agent at once. Answers
- * null, or the words a refusal shows (the same as Set picture…'s: too big, not one of the five types).
+ * "Your own…": keep a picked, dropped or pasted picture with the Inbox. Shown on no agent yet: the answer is its face,
+ * or the words a refusal shows (the same as Set picture…'s: too big, not one of the five types).
  */
-export async function keepOwnPicture(agent: AgentFaceRef, file: Blob): Promise<string | null> {
+export async function keepOwnPicture(file: Blob): Promise<{ face: AgentFace } | { refused: string }> {
   boot();
   try {
     const read = await pictureFromFile(file);
-    if ('refused' in read) return read.refused;
+    if ('refused' in read) return { refused: read.refused };
     const answer = await inboxApi.uploadAgentIcon(read.picture);
     const id = (answer.icon as { id?: unknown } | undefined)?.id;
     hear(answer, false);
-    if (typeof id !== 'string') return 'The picture did not change.';
-    keepAgentFace(agent, `own:${id}`);
-    return null;
+    if (typeof id !== 'string') return { refused: 'The picture did not change.' };
+    return { face: `own:${id}` };
   } catch (cause) {
-    return errorText(cause, 'The picture did not change.');
+    return { refused: errorText(cause, 'The picture did not change.') };
   }
 }
 

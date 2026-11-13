@@ -180,6 +180,7 @@
     "./inbox/search": "./inbox/search.ts",
     "./inbox/registry": "./inbox/registry.ts",
     "./inbox/pi-session-claim": "./inbox/pi-session-claim.ts",
+    "./inbox/opencode-launch": "./inbox/opencode-launch.ts",
     "./inbox/qwen-sessions": "./inbox/qwen-sessions.ts",
     "./inbox/devices": "./inbox/devices.ts",
     "./inbox/agent-pairing": "./inbox/agent-pairing.ts",

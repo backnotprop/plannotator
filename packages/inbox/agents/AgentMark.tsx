@@ -7,17 +7,16 @@ import { agentFaceSources, loadAgentFaceArt } from './faceArtLoad';
 import type { AgentFace } from './faceChoices';
 import { FAN_DWELL_MS, FAN_PRESS_MS, FaceFan, type FaceSources, type FanOpenedBy } from './FaceFan';
 import { AgentIconDialog, type AgentIconPlace } from './AgentIconDialog';
-import { agentFaceArtReady, agentRigOf, mountAgentMark, nextAgentFace, showAgentFace, unmountAgentMark } from './motion';
+import { agentFaceArtReady, agentRigOf, mountAgentMark, showAgentFace, unmountAgentMark } from './motion';
 
 export { loadAgentFaceArt } from './faceArtLoad';
 
 /**
  * An agent's animated mark (motion.ts), 24 px, with no tile: always alive, the same whatever the agent is doing, its
  * own life seeded by the agent's id. It is a button of its own beside the row's (the row's click opens the thread;
- * this one never does):
- * - a click shows the next face of the cycle (the agent, Glass, Yellow, Transparent, Face);
- * - the pointer resting on it, Enter or Space, or a long press on a touch screen opens the picker (FaceFan.tsx) with
- *   every face, the Glass colours among them.
+ * this one never does): a click, a tap, the pointer resting on it, Enter or Space, or a long press on a touch screen
+ * opens the picker (FaceFan.tsx) with every face, the Glass colours among them. A click never changes the face; a
+ * second click on the mark closes the picker.
  * The face is kept for that agent until changed (agentFaces.ts), and every other icon of it shows it too. A host
  * with no rig shows its plain mark, moved as a whole, and has the same faces. `agent`: the sessions it is (absent:
  * only its id), so its threads' icons find the face.
@@ -72,6 +71,13 @@ export function AgentMark({ id, host, name, agent, picks = 'all' }: { id: string
   const pressed = useRef(false);
   // Just closed: the pointer resting where it was (the fan's plate gone from under it) opens nothing until it moves.
   const quiet = useRef(false);
+  // Closed by a click on the mark: nothing opens again until the pointer leaves it.
+  const held = useRef(false);
+  // The fan was opened, or kept, by a click: the next click on the mark closes it. One opened by a rest of the pointer
+  // is kept by a click (the click that the rest beat), not closed.
+  const sticky = useRef(false);
+  // The kind of pointer of the last press: a tap opens the finger's fan.
+  const pointer = useRef<string>('mouse');
   useEffect(
     () => () => {
       clearTimeout(dwell.current);
@@ -79,8 +85,9 @@ export function AgentMark({ id, host, name, agent, picks = 'all' }: { id: string
     },
     [],
   );
-  const openFan = (by: FanOpenedBy) => {
+  const openFan = (by: FanOpenedBy, byClick = false) => {
     clearTimeout(dwell.current);
+    sticky.current = byClick;
     setFan({ open: true, by });
     if (agentFaceSources()) setSources(agentFaceSources());
     else
@@ -89,8 +96,10 @@ export function AgentMark({ id, host, name, agent, picks = 'all' }: { id: string
         () => {},
       );
   };
-  const closeFan = () => {
+  const closeFan = (hold = false) => {
     quiet.current = true;
+    sticky.current = false;
+    if (hold) held.current = true;
     clearTimeout(dwell.current);
     setFan((was) => (was ? { ...was, open: false } : was));
   };
@@ -112,7 +121,14 @@ export function AgentMark({ id, host, name, agent, picks = 'all' }: { id: string
     press.current = null;
   };
 
-  const cycle = (event: MouseEvent) => {
+  // A click on the mark (or on the fan's plate over it, FaceFan.tsx) opens the picker, or closes the one it opened.
+  const toggle = (by: FanOpenedBy) => {
+    clearTimeout(dwell.current);
+    if (!fan?.open) return openFan(by, true);
+    if (sticky.current) return closeFan(true);
+    sticky.current = true;
+  };
+  const onClick = (event: MouseEvent) => {
     event.preventDefault();
     event.stopPropagation();
     // A long press opened the picker: its lift is not a click.
@@ -120,9 +136,7 @@ export function AgentMark({ id, host, name, agent, picks = 'all' }: { id: string
       pressed.current = false;
       return;
     }
-    clearTimeout(dwell.current);
-    clicked.current = true;
-    keepAgentFace(agent ?? id, nextAgentFace(face));
+    toggle(event.detail === 0 ? 'keyboard' : pointer.current === 'touch' ? 'touch' : 'hover');
   };
   const rest = () => {
     clearTimeout(dwell.current);
@@ -134,11 +148,13 @@ export function AgentMark({ id, host, name, agent, picks = 'all' }: { id: string
   };
   const onPointerLeave = () => {
     quiet.current = false;
+    held.current = false;
     clearTimeout(dwell.current);
   };
   const onPointerDown = (event: PointerEvent) => {
     clearTimeout(dwell.current);
     pressed.current = false;
+    pointer.current = event.pointerType;
     if (event.pointerType !== 'touch') return;
     endPress();
     press.current = {
@@ -152,13 +168,13 @@ export function AgentMark({ id, host, name, agent, picks = 'all' }: { id: string
     };
   };
   const onPointerMove = (event: PointerEvent) => {
-    if (quiet.current && event.pointerType !== 'touch' && !fan?.open && !dialog) {
+    if (quiet.current && !held.current && event.pointerType !== 'touch' && !fan?.open && !dialog) {
       quiet.current = false;
       rest();
     }
     if (press.current && Math.hypot(event.clientX - press.current.x, event.clientY - press.current.y) > 8) endPress();
   };
-  // Enter or Space opens the picker (its own keys move in it); a click with the pointer still steps the cycle.
+  // Enter or Space opens the picker, focus in it (its own keys move in it).
   const onKeyDown = (event: KeyboardEvent) => {
     if (event.key !== 'Enter' && event.key !== ' ') return;
     event.preventDefault();
@@ -190,7 +206,7 @@ export function AgentMark({ id, host, name, agent, picks = 'all' }: { id: string
         aria-expanded={fan?.open ?? false}
         data-agent-icon={id}
         data-fan-open={fan?.open ? '' : undefined}
-        onClick={cycle}
+        onClick={onClick}
         onPointerEnter={onPointerEnter}
         onPointerLeave={onPointerLeave}
         onPointerDown={onPointerDown}
@@ -209,7 +225,7 @@ export function AgentMark({ id, host, name, agent, picks = 'all' }: { id: string
       </button>
       {plain && createPortal(<HostMark host={host} />, plain)}
       {fan && button.current && (
-        <FaceFan anchor={button.current} open={fan.open} openedBy={fan.by} host={host} name={name} face={face} sources={sources} onChoose={choose} onOwn={picks === 'all' ? () => openDialog('own') : undefined} onSets={() => openDialog('sets')} onClose={closeFan} />
+        <FaceFan anchor={button.current} open={fan.open} openedBy={fan.by} host={host} name={name} face={face} sources={sources} onChoose={choose} onOwn={picks === 'all' ? () => openDialog('own') : undefined} onSets={() => openDialog('sets')} onMark={() => toggle(pointer.current === 'touch' ? 'touch' : 'hover')} onClose={() => closeFan()} />
       )}
       {dialog && (
         <AgentIconDialog

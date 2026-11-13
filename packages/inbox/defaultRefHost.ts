@@ -12,7 +12,7 @@
  * and the thread's Links view reads it through `useDefaultRefHost`.
  */
 import { useSyncExternalStore } from 'react';
-import { classifyForgeHost, normalizeForgeHost } from '@plannotator/core/forge-refs';
+import { forgeRefLinks, normalizeForgeHost } from '@plannotator/core/forge-refs';
 import { setCrossRepoRefsWithoutRepo } from '@plannotator/ui/components/InlineMarkdown';
 
 const GITHUB = 'github.com';
@@ -29,7 +29,7 @@ export function defaultRefHost(projects: readonly { repo_host?: string | null }[
   const tied = [...counts].filter(([, count]) => count === best).map(([host]) => host);
   if (tied.length === 0 || tied.includes(GITHUB)) return GITHUB;
   const winner = tied.sort()[0]!;
-  return classifyForgeHost(winner) ? winner : GITHUB;
+  return forgeRefLinks({ display: 'owner/repo', host: winner }) ? winner : GITHUB;
 }
 
 let lastList: readonly { repo_host?: string | null }[] | null = null;
