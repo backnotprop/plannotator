@@ -15,9 +15,10 @@ export const OPTIONAL = 'Optional';
  * `previewing`: just picked and not kept: the agent still shows its old icon everywhere. "Use this icon" keeps it and
  * closes; "Animate it" keeps it and asks for the animation; the back control (to the grid it came from) and Close
  * change nothing. Not previewing: the icon the agent shows now, with "Animate it" (or "Use the original" for an
- * animated one).
+ * animated one). `shared`: a linked machine's agent: no "Animate it", whose result is an own picture, kept on this
+ * computer.
  */
-export function SelectedIcon({ agent, host, name, face, previewing, onBack, onDone }: { agent: AgentFaceRef; host: string | null; name: string; face: AgentFace; previewing: boolean; onBack: () => void; onDone: () => void }) {
+export function SelectedIcon({ agent, host, name, face, previewing, shared = false, onBack, onDone }: { agent: AgentFaceRef; host: string | null; name: string; face: AgentFace; previewing: boolean; shared?: boolean; onBack: () => void; onDone: () => void }) {
   const sets = useIconSets();
   const parts = isSetFace(face) ? setFaceParts(face) : null;
   const listing = useSetListing(parts?.set ?? null);
@@ -73,10 +74,12 @@ export function SelectedIcon({ agent, host, name, face, previewing, onBack, onDo
             {USE_THIS_ICON}
           </button>
         )}
-        <div className="ib-agi-sel-anim">
-          <span className="ib-agi-sel-opt">{OPTIONAL}</span>
-          <AnimateIt agent={agent} face={face} onDone={onDone} beforeStart={previewing ? keep : undefined} />
-        </div>
+        {!shared && (
+          <div className="ib-agi-sel-anim">
+            <span className="ib-agi-sel-opt">{OPTIONAL}</span>
+            <AnimateIt agent={agent} face={face} onDone={onDone} beforeStart={previewing ? keep : undefined} />
+          </div>
+        )}
       </div>
     </div>
   );

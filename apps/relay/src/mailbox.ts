@@ -26,8 +26,9 @@ import { HELD_COMMANDS_MAX, HELD_COMMAND_BYTES_MAX, heldMaxAgeMs, SIGNAL_LIMIT, 
 
 export interface Env {
   MAILBOX: DurableObjectNamespace<Mailbox>;
-  /** Cloudflare's rate limiting binding on mailbox creation, the rule guides.show uses (wrangler.toml). Absent: no brake. */
+  /** Cloudflare's rate limiting binding on mailbox creation, the rule guides.show uses (wrangler.toml): the cheap first filter. Absent: no creation off loopback. */
   MAILBOX_CREATE_LIMITER?: RateLimit;
+  /** One CreateBrake object per client address: the hard count behind the binding. Absent: no creation off loopback. */
   CREATE_BRAKE?: DurableObjectNamespace<CreateBrake>;
   /** The APNs key (.p8 text), its key id and the team id: Worker secrets. Without the key a push answers `no_apns_key`. */
   APNS_KEY?: string;
