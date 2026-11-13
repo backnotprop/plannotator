@@ -1,7 +1,8 @@
 /**
  * The personal agents dialog in a DOM (components/PersonalAgentsIntro.tsx), driven by the line's hook as App wires it.
  *
- * What regresses: the second button not opening Settings → Agents, or sending a Not now; Got it sending a Not now (it
+ * What regresses: the second button not opening Settings → Cloud agents where Settings shows it, or Settings → Agents
+ * where it does not (no answer, the relay never answered), or sending a Not now; Got it sending a Not now (it
  * settles the dialog: no three-day wait); Escape not being the Not now; the idle clock not running while it is next
  * (its idle moment never coming); the banner drawn after a failed or slow load (a broken picture or a jump), or
  * missing after both loaded; the banner's words missing from its alt text and from the dialog's own text.
@@ -26,6 +27,8 @@ let savedTimes: typeof reveal.REVEAL_TIMES;
 let host: HTMLElement | null = null;
 let savedFetch: typeof fetch;
 let posts: { path: string; body: Record<string, unknown> }[] = [];
+/** What `GET /api/inbox/cloud-agents` answers: null fails the request. */
+let cloudAnswer: { agents: unknown[]; available: boolean } | null = { agents: [], available: true };
 
 const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
 
@@ -35,11 +38,13 @@ beforeEach(() => {
   Object.assign(reveal.REVEAL_TIMES, TIMES);
   savedFetch = globalThis.fetch;
   posts = [];
+  cloudAnswer = { agents: [], available: true };
   window.location.hash = '';
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input).replace(/^https?:\/\/[^/]+/, '');
     if (init?.method === 'POST') posts.push({ path, body: JSON.parse(String(init.body ?? '{}')) as Record<string, unknown> });
     if (path.endsWith('/api/inbox/reveal')) return json({ show: true, reveal: { next: null } });
+    if (path.endsWith('/api/inbox/cloud-agents')) return cloudAnswer ? json(cloudAnswer) : new Response('{}', { status: 500 });
     return new Response('{}', { status: 404 });
   }) as typeof fetch;
 });
@@ -98,13 +103,40 @@ async function open(banner = true) {
 }
 
 describe.skipIf(!hasDom)('the personal agents dialog', () => {
-  test('the second button closes it and opens Settings → Agents, with no Not now', async () => {
-    await open();
+  const pressSecond = async () => {
     act(() => dialog()!.querySelector<HTMLButtonElement>('[data-personal-agents-settings]')!.click());
-    await until(() => dialog() === null);
+    await until(() => dialog() === null && window.location.hash !== '');
     expect(dialog()).toBeNull();
-    expect(route.parseSettingsHash(window.location.hash.slice(1))?.section).toBe('agents');
     expect(notNows()).toHaveLength(0);
+    return route.parseSettingsHash(window.location.hash.slice(1))?.section;
+  };
+
+  test('the second button closes it and opens Settings → Cloud agents when Settings shows that section, with no Not now', async () => {
+    await open();
+    await wait(50);
+    expect(await pressSecond()).toBe('cloud-agents');
+  });
+
+  test('Cloud agents not shown (the relay never answered, nothing paired): Settings → Agents instead', async () => {
+    cloudAnswer = { agents: [], available: false };
+    await open();
+    await wait(50);
+    expect(await pressSecond()).toBe('agents');
+  });
+
+  test('a paired agent shows Cloud agents even with the relay down; a failed request falls back to Settings → Agents', async () => {
+    cloudAnswer = { agents: [{ session: 'cloud.000000000000' }], available: false };
+    await open();
+    await wait(50);
+    expect(await pressSecond()).toBe('cloud-agents');
+    act(() => root?.unmount());
+    root = null;
+    host?.remove();
+    window.location.hash = '';
+    cloudAnswer = null;
+    await open();
+    await wait(50);
+    expect(await pressSecond()).toBe('agents');
   });
 
   test('Got it settles it: closed, no Not now, the page stays where it was', async () => {
@@ -146,6 +178,13 @@ describe.skipIf(!hasDom)('the personal agents dialog', () => {
 describe.skipIf(!hasDom)('its moment', () => {
   test('the page going idle is one: the idle clock runs while it is next', () => {
     expect(reveal.idleClockArmed({ next: 'personal_agents', ahead: [] }, false)).toBe(true);
+  });
+});
+
+describe.skipIf(!hasDom)('where the second button goes', () => {
+  test('no Cloud agents answer in time: Settings → Agents', async () => {
+    expect(await intro.personalAgentsSettingsHash(new Promise(() => {}), 30)).toBe('#settings/agents');
+    expect(await intro.personalAgentsSettingsHash(Promise.resolve(true), 30)).toBe('#settings/cloud-agents');
   });
 });
 

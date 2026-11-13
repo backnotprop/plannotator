@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { PERSONAL_AGENTS_BANNER, PERSONAL_AGENTS_BANNER_WORDS } from '@plannotator/core/inbox-personal-agents';
 import { inboxApi } from '../api';
+import { cloudAgentsShown } from '../cloud/useCloudAgentsGate';
 import { settingsHash } from '../settingsRoute';
 import { Modal } from './Updates';
 
-/** The words (proposed in WORDS.md; the owner has not approved them yet). */
+/** The words (approved by the owner, 2026-11-13). */
 export const PERSONAL_AGENTS_COPY = {
   title: 'Your personal agents are welcome here',
   body: 'Hermes Agent, OpenClaw, Muse and Grok Bot can message you here and ask you questions, next to your coding agents.',
@@ -60,18 +61,45 @@ export function usePersonalAgentsBanner(want: boolean): boolean | null {
   return shown;
 }
 
+/** The second button waits this long for the Cloud agents answer, then opens Settings → Agents. */
+export const PERSONAL_AGENTS_SETTINGS_WAIT_MS = 1_500;
+
+/**
+ * Where the second button goes: Settings → Cloud agents, where all four are added, when Settings shows that section
+ * (the relay answered once, or an agent is paired); otherwise, or with no answer in time, Settings → Agents.
+ */
+export async function personalAgentsSettingsHash(answer: Promise<boolean>, waitMs = PERSONAL_AGENTS_SETTINGS_WAIT_MS): Promise<string> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<boolean>((resolve) => {
+    timer = setTimeout(() => resolve(false), waitMs);
+  });
+  try {
+    const cloud = await Promise.race([answer.catch(() => false), late]);
+    return `#${settingsHash({ section: cloud ? 'cloud-agents' : 'agents' })}`;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /**
  * The dialog, open once the line's claim showed it. Either button settles it (`close`); Escape or a click outside is
- * its Not now, so the line's next offer waits three days. The second button opens Settings → Agents.
+ * its Not now, so the line's next offer waits three days. The second button opens Settings (`personalAgentsSettingsHash`).
  */
 export function PersonalAgentsIntro({ phone, banner, close }: { phone: boolean; banner: boolean; close: () => void }) {
+  const cloud = useRef<Promise<boolean> | null>(null);
+  useEffect(() => {
+    cloud.current = inboxApi.cloudAgents().then(cloudAgentsShown, () => false);
+  }, []);
   const notNow = () => {
     void inboxApi.revealNotNow('personal_agents');
     close();
   };
   const openSettings = () => {
+    const answer = cloud.current ?? Promise.resolve(false);
     close();
-    window.location.hash = `#${settingsHash({ section: 'agents' })}`;
+    void personalAgentsSettingsHash(answer).then((hash) => {
+      window.location.hash = hash;
+    });
   };
   return (
     <Modal labelledBy="ib-pa-title" describedBy="ib-pa-desc" testId="personal-agents-intro" onClose={notNow} ownKeys className={`ib-bi ib-pa${phone ? ' ib-bi-phone' : ''}`}>
