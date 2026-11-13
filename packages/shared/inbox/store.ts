@@ -8053,7 +8053,10 @@ export class InboxStore {
       all.set(`${mark.thread_id}\0${mark.tag}`, mark);
     }
     writeInboxThreadTags(this.dir, [...all.values()]);
-    for (const mark of next) this.placeThreadTagMark(mark);
+    // Placed again from the list just written, as a load places them: a pair marked again moves to the end of
+    // the file, and the marks read in that order after a restart too.
+    this.threadTagMarks = new Map();
+    for (const mark of all.values()) this.placeThreadTagMark(mark);
     this.threadTagsChanged();
   }
 

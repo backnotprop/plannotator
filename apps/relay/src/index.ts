@@ -6,7 +6,7 @@
  * an envelope under a key made at pairing on the computer and the phone.
  *
  * The routes, each JSON, errors `{ error, code }`:
- *   POST   /v1/mailboxes                                the Inbox, at its first pairing (braked per IP)
+ *   POST   /v1/mailboxes                                the Inbox, at its first pairing (braked per IP: src/brake.ts)
  *   PUT    /v1/mailboxes/:mbx/devices/:dev              Inbox bearer: register a phone
  *   DELETE /v1/mailboxes/:mbx/devices/:dev              Inbox bearer: remove it
  *   PUT    /v1/mailboxes/:mbx/devices/:dev/carriage     device bearer: the phone's relay switch
@@ -22,9 +22,10 @@
  * run it under `wrangler dev` only.
  */
 import { braked } from "./brake";
+import { CreateBrake } from "./create-brake";
 import { DEVICE_ID, HASH, Mailbox, SIGNAL_TOKEN, WEBSOCKET_MESSAGE_LIMIT, json, refuse, type Env } from "./mailbox";
 
-export { Mailbox };
+export { CreateBrake, Mailbox };
 
 /**
  * The `simple.period` of the `[[ratelimits]]` block, echoed as `Retry-After`.
@@ -89,7 +90,9 @@ export default {
     const url = new URL(req.url);
     if (url.pathname === "/v1/mailboxes") {
       if (req.method !== "POST") return refuse(404, "not_found");
-      const brake = await braked(req, env.MAILBOX_CREATE_LIMITER, CREATE_PERIOD_SECONDS);
+      const brakes = env.CREATE_BRAKE;
+      const counter = brakes && ((ip: string) => brakes.get(brakes.idFromName(ip)));
+      const brake = await braked(req, env.MAILBOX_CREATE_LIMITER, counter, CREATE_PERIOD_SECONDS);
       if (brake) return brake;
       const raw = await cappedBody(req, SMALL_BODY_MAX);
       if (raw === null) return refuse(413, "body_too_large");
