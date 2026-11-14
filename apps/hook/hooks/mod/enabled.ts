@@ -1,8 +1,9 @@
 /**
  * Whether the mod is switched on. It is ON BY DEFAULT wherever Claude Code
- * runs hooks modules (register.ts still stands down in `-p` / SDK sessions
- * other than the VS Code extension's chat panel, `isVsCodePanelSession`
- * below, and where it finds no shell for its scripts). The user turns it off with:
+ * runs hooks modules, interactive or not (what it does in each kind of
+ * session: `SESSION_KIND_FEATURES` below; register.ts stands down only in
+ * Plannotator's own Ask AI children and where it finds no shell for its
+ * scripts). The user turns it off with:
  *
  *   PLANNOTATOR_CLAUDE_MOD=0            (env; also false/off/disabled; wins over the config file)
  *   { "claudeCodeMod": false }          (config.json in the data dir)
@@ -242,9 +243,7 @@ const setIn = (value: unknown) => typeof value === 'string' && value !== ''
  * mod runs as in the terminal (#3111). The extension hosts Claude Code
  * through the Agent SDK, so its sessions are not interactive, but a person
  * reads the panel and a plugin's turn shows there ("Prompt from the
- * <plugin> plugin"). Every other non-interactive session stays inert:
- * `claude -p`, Agent SDK apps, T3 Code, Claude Desktop, an unknown or
- * missing entrypoint.
+ * <plugin> plugin").
  *
  * The entrypoint is inherited: a `claude -p` started from inside a panel
  * session (Claude's Bash, or an agent job of a Plannotator CLI the mod
@@ -264,14 +263,94 @@ export function isVsCodePanelSession(env: PanelSessionEnv, sessionId: string): b
 }
 
 /**
+ * The entrypoint T3 Code gives the Claude it runs for a thread
+ * (`CLAUDE_CODE_ENTRYPOINT`, set in `mergeClaudeProcessEnvironment`, T3's
+ * `ClaudeHome.ts`), beside `T3CODE_THREAD_ID`.
+ */
+export const T3_ENTRYPOINT = 't3-code'
+
+/**
+ * A T3 Code thread id: `isT3ThreadId` in packages/core/inbox-t3.ts, copied
+ * (a hooks module may import only its own files; session-kind.test.ts keeps them equal).
+ */
+const T3_THREAD_ID = /^[A-Za-z0-9][A-Za-z0-9._~%:!*'()-]{0,4095}$/
+
+export function isT3ThreadId(value: unknown): value is string {
+  return typeof value === 'string' && T3_THREAD_ID.test(value)
+}
+
+/** What `t3ThreadOf` reads, each variable as `$.env.get` answers it. */
+export type T3SessionEnv = PanelSessionEnv & {
+  /** `T3CODE_THREAD_ID`: the thread T3 runs this Claude for. */
+  thread: unknown
+}
+
+/**
+ * The T3 Code thread this session is, or null. T3 runs a thread's Claude
+ * through the Agent SDK with `CLAUDE_CODE_ENTRYPOINT=t3-code` and
+ * `T3CODE_THREAD_ID`, and deletes `CLAUDECODE` and `CLAUDE_CODE_CHILD_SESSION`
+ * from that environment. Both are inherited by everything the session
+ * starts, so a `claude -p` run from inside a thread is told apart as the
+ * panel's is: either Claude Code variable, or a session tag naming another
+ * session. The tag naming this thread is this process's own (a module
+ * reload). A Claude T3 runs for no thread (a title, a probe) has no thread id.
+ */
+export function t3ThreadOf(env: T3SessionEnv): string | null {
+  if (env.entrypoint !== T3_ENTRYPOINT || !isT3ThreadId(env.thread)) return null
+  if (setIn(env.claudecode) || setIn(env.childSession)) return null
+  if (setIn(env.sessionTag) && env.sessionTag !== `t3:${env.thread}`) return null
+  return env.thread
+}
+
+/**
+ * Where the session runs, as the mod sorts it at `session.start`:
+ *
+ * - `terminal`: a person at Claude Code's own prompt (`isInteractive`);
+ * - `panel`: the VS Code extension's chat panel (`isVsCodePanelSession`);
+ * - `t3`: a T3 Code thread (`t3ThreadOf`);
+ * - `headless`: any other session that is not interactive: `claude -p`,
+ *   another Agent SDK app, Claude Desktop, an unknown or missing entrypoint.
+ *
+ * The first three take a later turn from a plugin while the process lives
+ * (the panel and T3 show it as a turn of the thread), so the mod runs there
+ * as in the terminal. A `headless` session may be a one-shot run that exits
+ * as its turn ends, and nothing at `session.start` says whether it is: there
+ * a decision or a reply promised for later could be lost, so the flows that
+ * deliver later keep the classic, blocking path and the Inbox tool sends
+ * without the wake (`SESSION_KIND_FEATURES`).
+ */
+export type SessionKind = 'terminal' | 'panel' | 't3' | 'headless'
+
+export function sessionKindOf(s: { isInteractive: boolean; panel: boolean; t3Thread: string | null }): SessionKind {
+  if (s.isInteractive) return 'terminal'
+  if (s.panel) return 'panel'
+  if (s.t3Thread !== null) return 't3'
+  return 'headless'
+}
+
+/**
+ * What the mod does in each kind of session (the switches still apply on top):
+ * `reviews`, the non-blocking reviews (the slash commands, the `plannotator`
+ * tool, the Bash take-over, Ask this session); `planReview`, ExitPlanMode
+ * (T3 Code owns Plan mode: its own plan card stays); `inboxTool`, the
+ * `plannotator_inbox` tool; `wake`, the Inbox reply as a later turn.
+ */
+export const SESSION_KIND_FEATURES: Readonly<Record<SessionKind, { reviews: boolean; planReview: boolean; inboxTool: boolean; wake: boolean }>> = {
+  terminal: { reviews: true, planReview: true, inboxTool: true, wake: true },
+  panel: { reviews: true, planReview: true, inboxTool: true, wake: true },
+  t3: { reviews: true, planReview: false, inboxTool: true, wake: true },
+  headless: { reviews: false, planReview: false, inboxTool: true, wake: false },
+}
+
+/**
  * A prompt's `origin.kind` as the mod reads it. In a VS Code panel session
- * the person's Enter reaches Claude Code as the SDK host's own turn (`sdk`:
- * the extension sends what the person typed into the panel), so there it
+ * or a T3 Code thread the person's Enter reaches Claude Code as the SDK
+ * host's own turn (`sdk`: the host sends what the person typed), so there it
  * reads as `composer`, the person's Enter in the terminal: a prompt they type
  * takes over the turn answering an "Ask this session" question and pulls the
  * session's leases to this process, as in the terminal. Everywhere else, and
  * for every other origin, the kind as the engine stamped it.
  */
-export function promptOriginKind(kind: string, panel: boolean): string {
-  return panel && kind === 'sdk' ? 'composer' : kind
+export function promptOriginKind(kind: string, sdkHost: boolean): string {
+  return sdkHost && kind === 'sdk' ? 'composer' : kind
 }

@@ -175,6 +175,16 @@ entry: see "T3 Code" in `inbox-notifications-and-agents.md`. That is why
 `plannotator t3` is listed (`plannotator --help` points at it, the skill
 documents it); its help leads with that setup.
 
+Where Claude Code runs hooks modules, the Claude Code mod runs in a T3
+thread's Claude by itself ("A T3 Code thread" in `claude-code-mod.md`): it
+gives the thread `plannotator_inbox` filed as the thread, puts the Inbox's
+reply in as a turn while T3 keeps that Claude (no grant needed), and answers
+`plannotator review` / `annotate` / `last` itself. The hook then stands aside
+(`claudeModServesThread` in `prepareT3Hook`: the mod's tag `t3:<thread>` in
+`PLANNOTATOR_SESSION_TAG`), so no command is acted on twice; it stays for a
+Claude Code without hooks modules or with the mod off. The grant remains the
+Inbox's way into a thread once T3 released its Claude.
+
 - **Opt in / out:** `install.sh --with-t3` writes one `PreToolUse` `Bash` hook
   into `${CLAUDE_CONFIG_DIR:-~/.claude}/settings.json` (`t3-hook install`,
   `packages/t3-code/install-hook.ts`: other hooks and settings kept, a
