@@ -1,5 +1,6 @@
 .review-changes-tree {
   display: block;
+  position: relative;
   --tree-fill-faint: var(--sidebar-fill-faint, color-mix(in oklab, var(--foreground) 5%, transparent));
   --tree-fill: var(--sidebar-fill, color-mix(in oklab, var(--foreground) 6%, transparent));
   --tree-fill-strong: var(--sidebar-fill-strong, color-mix(in oklab, var(--foreground) 9%, transparent));
@@ -137,4 +138,15 @@
 }
 .review-changes-tree::part(row-content-repo) {
   color: var(--muted-foreground);
+}
+.review-changes-tree::part(search) {
+  display: none;
+}
+.review-changes-tree::part(search-open) {
+  display: block;
+  position: absolute;
+  inset: 0 0 auto 0;
+  z-index: 3;
+  padding: 2px 0 4px;
+  background: var(--trees-bg-override, var(--background));
 }

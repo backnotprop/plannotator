@@ -184,7 +184,7 @@ index 0b41099..a745685 100644
  		searchEnabled: search === true,
  		searchFakeFocus: searchFakeFocus === true,
 diff --git a/dist/render/FileTreeView.js b/dist/render/FileTreeView.js
-index b4c7ee4..36a9ea4 100644
+index b4c7ee4..a67f38d 100644
 --- a/dist/render/FileTreeView.js
 +++ b/dist/render/FileTreeView.js
 @@ -362,11 +362,50 @@ function focusFirstMenuElement(menuElement) {
@@ -349,6 +349,14 @@ index b4c7ee4..36a9ea4 100644
  		shouldSuppressContextMenu,
  		visualFocusPath
  	};
+@@ -1816,6 +1876,7 @@ function FileTreeView({ composition, controller, gitStatusByPath, ignoredGitDire
+ 			searchEnabled ? /* @__PURE__ */ jsx("div", {
+ 				"data-file-tree-search-container": true,
+ 				"data-open": isSearchOpen ? "true" : "false",
++				part: isSearchOpen ? "search search-open" : "search",
+ 				children: /* @__PURE__ */ jsx("input", {
+ 					ref: searchInputRef,
+ 					"aria-activedescendant": activeDescendantId,
 diff --git a/dist/style.js b/dist/style.js
 index 0a25aa3..35c99e5 100644
 --- a/dist/style.js
