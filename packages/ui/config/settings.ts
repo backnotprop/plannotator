@@ -279,6 +279,22 @@ export const SETTINGS = {
   },
 
   /**
+   * Show each rendered block's source lines in plan review and annotate
+   * (#1650). Default OFF: today's document with no gutter. Cookie-only, like
+   * Text size and Document font. `42` for one line, `42–45` for a span.
+   */
+  documentSourceLineNumbers: {
+    defaultValue: false as boolean,
+    fromCookie: () => {
+      const value = storage.getItem('plannotator-document-source-line-numbers');
+      return value === 'true' ? true : value === 'false' ? false : undefined;
+    },
+    toCookie: (value: boolean) =>
+      storage.setItem('plannotator-document-source-line-numbers', String(value)),
+    serverKey: undefined, fromServer: undefined, toServer: undefined,
+  },
+
+  /**
    * Enter saves a comment and Shift+Enter adds a new line (#1934). Default
    * OFF: comments save with Cmd/Ctrl+Enter only, as they always have, and
    * Cmd/Ctrl+Enter keeps saving with it on. Read by every comment composer

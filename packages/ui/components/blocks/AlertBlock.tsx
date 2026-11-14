@@ -1,5 +1,6 @@
 import React from 'react';
-import type { AlertKind } from '../../types';
+import type { AlertKind, Block } from '../../types';
+import { SourceLineGutter } from '../SourceLineGutter';
 import { renderProseBody } from './proseBody';
 import { CalloutBlocks, calloutNeedsBlocks, parseQuoteBody, useAtQuoteDepthCap } from './BlockquoteBlock';
 import { InlineMarkdown } from '../InlineMarkdown';
@@ -7,6 +8,7 @@ import { parseAlertTitleLine } from '../../utils/alertTitle';
 
 interface AlertBlockProps {
   blockId: string;
+  sourceBlock?: Block;
   kind: AlertKind;
   body: string;
   onOpenLinkedDoc?: (path: string) => void;
@@ -62,7 +64,7 @@ const Icon: React.FC<{ kind: AlertKind }> = ({ kind }) => {
 };
 
 export const AlertBlock: React.FC<AlertBlockProps> = ({
-  blockId, kind, body, onOpenLinkedDoc, onOpenCodeFile, imageBaseDir, onImageClick, githubRepo, repoHost, onNavigateAnchor,
+  blockId, sourceBlock, kind, body, onOpenLinkedDoc, onOpenCodeFile, imageBaseDir, onImageClick, githubRepo, repoHost, onNavigateAnchor,
 }) => {
   const proseProps = { imageBaseDir, onImageClick, onOpenLinkedDoc, onOpenCodeFile, onNavigateAnchor, githubRepo, repoHost };
 
@@ -91,11 +93,12 @@ export const AlertBlock: React.FC<AlertBlockProps> = ({
 
   return (
     <div
-      className={`alert alert-${kind} my-4 pl-4 pr-3 py-2 border-l-[3px]`}
+      className={`alert alert-${kind} relative my-4 pl-4 pr-3 py-2 border-l-[3px]`}
       data-block-id={blockId}
       data-block-type="alert"
       data-alert-kind={kind}
     >
+      <SourceLineGutter block={sourceBlock} />
       <div className="alert-title flex items-center gap-2 font-semibold mb-1">
         {icon}
         <span>

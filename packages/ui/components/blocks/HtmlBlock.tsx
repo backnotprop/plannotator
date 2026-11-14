@@ -6,6 +6,7 @@ import { parseSrcset, serializeSrcset, type SrcsetCandidate } from "../../utils/
 import { getImageSrc } from "../ImageThumbnail";
 import { UNAVAILABLE_IMAGE_CLASS, PreserveResolvedVideosContext, ResolvedResponsiveImagesContext, useImageResolver, type ImageResolver } from "../ImageResolverContext";
 import { isLocalLinkTarget, isNewTabClick, useLocalLinkResolver, type LocalLinkResolver } from "../LocalLinkContext";
+import { SourceLineGutter } from "../SourceLineGutter";
 
 interface HtmlBlockProps {
   block: Block;
@@ -272,12 +273,15 @@ const HtmlBlockImpl: React.FC<HtmlBlockProps> = ({ block, imageBaseDir, onOpenLi
     return cleanup;
   }, [sanitized, imageBaseDir, onOpenLinkedDoc, onOpenCodeFile, onNavigateAnchor, resolveLocalLink, resolveImage, preserveVideos, responsiveImages]);
   return (
-    <div
-      ref={ref}
-      data-block-id={block.id}
-      data-block-type="html"
-      className="html-block my-4 text-[15px] leading-relaxed text-foreground/90"
-    />
+    <div className="relative my-4">
+      <SourceLineGutter block={block} />
+      <div
+        ref={ref}
+        data-block-id={block.id}
+        data-block-type="html"
+        className="html-block text-[15px] leading-relaxed text-foreground/90"
+      />
+    </div>
   );
 };
 export const HtmlBlock = React.memo(

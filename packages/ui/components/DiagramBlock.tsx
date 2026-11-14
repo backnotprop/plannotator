@@ -17,6 +17,7 @@ import type { DiagramComment, DiagramCreateComment } from './diagram/useDiagramC
 import type { DiagramRenderState } from './diagram/useDiagramRender';
 import type { DiagramReopenRequest } from './diagram/reopen';
 import { useTheme } from './ThemeProvider';
+import { SourceLineGutter } from './SourceLineGutter';
 import { LazyBlockBoundary, LazyLoadNotice } from './LazyBlockBoundary';
 
 /**
@@ -378,6 +379,7 @@ export const DiagramBlock: React.FC<DiagramBlockProps & { kind: DiagramKind }> =
           so a text restore (a reply that lost its anchor, a quote that also
           appears in a node label) can never wrap a <mark> inside the svg. */}
       <div ref={rootRef} className="annotation-exclude my-5 group relative" data-block-id={block.id} data-pinpoint-ignore="" data-diagram-block={kind}>
+        <SourceLineGutter block={block} />
         {svgReady && !showSource && (
           <div data-print-hide="" className="absolute top-2 right-2 z-10 flex items-center gap-1 opacity-0 group-hover:opacity-100 focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity">
             <button

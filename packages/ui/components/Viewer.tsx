@@ -7,11 +7,12 @@ import { AnnotationType, type Block, type Annotation, type EditorMode, type Inpu
 import { applyHighlight, codeBlockClassName, onCodeHighlightSwap } from '../utils/codeHighlight';
 import { paintCodeBlockMark } from '../utils/codeBlockMark';
 import { useFenceTheme } from '../hooks/useFenceTheme';
-import { computeListIndices, groupBlocks, selectionSourceLines, type Frontmatter, type FrontmatterValue } from '../utils/parser';
+import { computeListIndices, extractFrontmatter, groupBlocks, selectionSourceLines, type Frontmatter, type FrontmatterValue } from '../utils/parser';
 import { buildHeadingSlugMap } from '../utils/slugify';
 import { copyTextToClipboard } from '../utils/clipboard';
 import { getRichCopyEnabled } from '../utils/richCopyPolicy';
 import { BlockRenderer } from './BlockRenderer';
+import { SourceLineGutter } from './SourceLineGutter';
 import { BELOW_TITLE_SLOT_MARKER } from '../utils/belowTitleSlot';
 import { indexQuestionBlocks, isQuestionDirectiveKind, type IndexedQuestion, type ParsedQuestion, type QuestionAnswer } from '@plannotator/core/question-block';
 import { diagramTargetText, type DiagramAnchor } from '@plannotator/core/diagram-anchor';
@@ -660,12 +661,15 @@ const FrontmatterRow: React.FC<{ field: string; value: FrontmatterValue }> = ({ 
 /**
  * Renders YAML frontmatter as a styled metadata card.
  */
-const FrontmatterCard: React.FC<{ frontmatter: Frontmatter }> = ({ frontmatter }) => {
+const FrontmatterCard: React.FC<{ frontmatter: Frontmatter; markdown: string }> = ({ frontmatter, markdown }) => {
   const entries = Object.entries(frontmatter);
   if (entries.length === 0) return null;
+  const { contentStartLine } = extractFrontmatter(markdown);
+  const end = Math.max(1, contentStartLine - 1);
 
   return (
-    <div className="mt-4 mb-6 p-4 bg-muted/30 border border-border/50 rounded-lg" data-doc-text="">
+    <div className="relative mt-4 mb-6 p-4 bg-muted/30 border border-border/50 rounded-lg" data-doc-text="">
+      <SourceLineGutter startLine={1} endLine={end} />
       <div className="grid gap-2 text-sm">
         {entries.map(([key, value]) => (
           <FrontmatterRow key={key} field={key} value={value} />
@@ -2027,7 +2031,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
             )}
           </>
         )}
-        {frontmatter && <><div className="clear-right md:hidden" /><FrontmatterCard frontmatter={frontmatter} /></>}
+        {frontmatter && <><div className="clear-right md:hidden" /><FrontmatterCard frontmatter={frontmatter} markdown={markdown} /></>}
         {!frontmatter && blocks.length > 0 && blocks[0].type !== 'heading' && <div className="mt-4" />}
         {withBelowTitle(groupBlocks(blocks).map(group =>
           group.type === 'list-group' ? (
@@ -2188,7 +2192,8 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
                   : undefined;
               if (hostCard !== undefined) {
                 return (
-                  <div key={group.block.id} data-block-id={group.block.id} data-block-type="directive" className={textCommentsOnly ? 'annotation-exclude' : undefined}>
+                  <div key={group.block.id} data-block-id={group.block.id} data-block-type="directive" className={textCommentsOnly ? 'relative annotation-exclude' : 'relative'}>
+                    <SourceLineGutter block={group.block} />
                     {hostCard}
                   </div>
                 );
