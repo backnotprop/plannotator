@@ -72,6 +72,7 @@ export const RepoTreeView: React.FC<RepoTreeViewProps> = (props) => {
     return { add, del, badge };
   }, [files, repo.onDisk, props.annotationCounts, props.markdownPreviewedPaths, props.threadCount]);
 
+  const lastOpened = useRef<string | null>(null);
   const live = useRef({ props, changedIndex, stageColumn, badge: columns.badge });
   live.current = { props, changedIndex, stageColumn, badge: columns.badge };
 
@@ -155,12 +156,14 @@ export const RepoTreeView: React.FC<RepoTreeViewProps> = (props) => {
       const at = index.get(last);
       if (at !== undefined) {
         if (p.files[at].path !== p.activePath) p.onSelectFile(at);
-      } else if (last !== p.activePath) {
+      } else if (last !== p.activePath && last !== lastOpened.current) {
+        lastOpened.current = last;
         p.onOpenRepoFile?.(last, { pin: false });
       }
     },
     rows: {
       gitStatusPlacement: 'start',
+      nameTruncation: 'end',
       renderParts,
       onPartClick: ({ partId, path }) => {
         const { props: p } = live.current;
@@ -214,9 +217,16 @@ export const RepoTreeView: React.FC<RepoTreeViewProps> = (props) => {
       if (focused === p.activePath) return;
       const at = index.get(focused);
       if (at !== undefined) p.onSelectFile(at);
-      else p.onOpenRepoFile?.(focused, { pin: false });
+      else if (focused !== lastOpened.current) {
+        lastOpened.current = focused;
+        p.onOpenRepoFile?.(focused, { pin: false });
+      }
     });
   }, [model]);
+
+  useEffect(() => {
+    if (activePath !== lastOpened.current) lastOpened.current = null;
+  }, [activePath]);
 
   const revealed = useRef<string | null>(null);
   useEffect(() => {
