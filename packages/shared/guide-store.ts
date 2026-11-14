@@ -26,7 +26,7 @@ import { createHash } from "crypto";
 import { getPlannotatorDataDir } from "./data-dir";
 import { parseRemoteUrl, parseRemoteHost } from "./repo";
 import { getDisplayRepo, parsePRUrl } from "./pr-types";
-import type { CodeGuideOutput, SavedGuideListEntry } from "./guide";
+import type { CodeGuideOutput, SavedGuideListEntry, SavedGuideWhere } from "./guide";
 import {
   buildGuideSnapshot,
   type GuideLaunchReview,
@@ -577,6 +577,38 @@ export function listGuides(repoKey: string): Array<{ id: string; envelope: Saved
   return out;
 }
 
+export const GUIDE_TITLE_MAX_CHARS = 200;
+
+export function normalizeGuideTitle(input: unknown): string | null {
+  if (typeof input !== "string") return null;
+  const title = input.replace(/[\u0000-\u001f\u007f]+/g, " ").replace(/\s+/g, " ").trim();
+  if (!title || title.length > GUIDE_TITLE_MAX_CHARS) return null;
+  return title;
+}
+
+export function renameGuide(repoKey: string, id: string, input: unknown): boolean {
+  const title = normalizeGuideTitle(input);
+  if (!title) return false;
+  const envelope = loadGuide(repoKey, id);
+  if (!envelope) return false;
+  return saveGuide(repoKey, id, { ...envelope, title, guide: { ...envelope.guide, title } });
+}
+
+function canonicalPrUrl(url: string | undefined): string | undefined {
+  return url ? url.trim().replace(/\/+$/, "").toLowerCase() : undefined;
+}
+
+export function savedGuideWhere(
+  envelope: Pick<SavedGuideEnvelope, "prUrl" | "label" | "headSha">,
+  current: { prUrl?: string; branch?: string; head?: string },
+): SavedGuideWhere {
+  const sameTarget = current.prUrl
+    ? canonicalPrUrl(envelope.prUrl) === canonicalPrUrl(current.prUrl)
+    : !envelope.prUrl && !!current.branch && envelope.label === current.branch;
+  if (!sameTarget) return "other";
+  return envelope.headSha && current.head && envelope.headSha === current.head ? "diff" : "target";
+}
+
 /** Delete a saved guide. Returns true when a file was actually removed. */
 export function deleteGuide(repoKey: string, id: string): boolean {
   if (!isValidGuideId(id)) return false;
@@ -659,6 +691,7 @@ export interface GuideStoreSession {
   listSaved(): Promise<SavedGuideListEntry[]>;
   /** DELETE /api/guides/:id. */
   deleteSaved(id: string): Promise<boolean>;
+  renameSaved(id: string, title: string): Promise<boolean>;
   /** Portable snapshot for a saved guide, or null when its diff was not retained. */
   getSavedGuideSnapshot(id: string): Promise<GuideSnapshot | null>;
   /** Portable snapshot for a live job that was autosaved this session, else null. */
@@ -812,6 +845,8 @@ export function createGuideStoreSession(options: GuideStoreSessionOptions): Guid
     async listSaved() {
       const repoKey = await resolveRepoKey();
       const head = await currentHeadSha();
+      const pr = getPRInfo();
+      const branch = getBranchLabel();
       return listGuides(repoKey).map(({ id, envelope }) => ({
         id,
         label: envelope.label,
@@ -822,7 +857,14 @@ export function createGuideStoreSession(options: GuideStoreSessionOptions): Guid
           total: envelope.guide.sections.length,
         },
         moved: isMoved(envelope.headSha, head),
+        where: savedGuideWhere(envelope, { prUrl: pr?.url, branch, head }),
+        ...(envelope.engine ? { engine: envelope.engine } : {}),
+        ...(envelope.model ? { model: envelope.model } : {}),
       }));
+    },
+
+    async renameSaved(id, title) {
+      return renameGuide(await resolveRepoKey(), id, title);
     },
 
     async deleteSaved(id) {

@@ -21,6 +21,7 @@ import {
   loadGuidePatch,
   saveGuidePatch,
   updateGuideShare,
+  savedGuideWhere,
   type SavedGuideEnvelope,
 } from "./guide-store";
 import type { GuideLaunchReview } from "@plannotator/core/guide-format";
@@ -565,5 +566,23 @@ describe("share record: a saved guide remembers its link", () => {
     // A job's autosave that was deleted from disk no longer locates.
     deleteGuide(REPO_KEY, located!.id);
     expect(await s.locateEnvelope("job-1")).toBeNull();
+  });
+});
+
+describe("where a saved guide sits against the review on screen", () => {
+  const pr = "https://github.com/acme/widgets/pull/12";
+  test("a PR review: same PR and head is this diff, same PR another head is this PR, another PR is earlier", () => {
+    expect(savedGuideWhere({ prUrl: pr, label: "PR #12", headSha: "aaa" }, { prUrl: pr, head: "aaa" })).toBe("diff");
+    expect(savedGuideWhere({ prUrl: `${pr.toUpperCase()}/`, label: "PR #12", headSha: "aaa" }, { prUrl: pr, head: "aaa" })).toBe("diff");
+    expect(savedGuideWhere({ prUrl: pr, label: "PR #12", headSha: "old" }, { prUrl: pr, head: "aaa" })).toBe("target");
+    expect(savedGuideWhere({ prUrl: "https://github.com/acme/widgets/pull/9", label: "PR #9", headSha: "aaa" }, { prUrl: pr, head: "aaa" })).toBe("other");
+    expect(savedGuideWhere({ label: "feature/x", headSha: "aaa" }, { prUrl: pr, head: "aaa" })).toBe("other");
+  });
+  test("a local review: the branch is the target, and a PR guide never counts as this branch", () => {
+    expect(savedGuideWhere({ label: "feature/x", headSha: "aaa" }, { branch: "feature/x", head: "aaa" })).toBe("diff");
+    expect(savedGuideWhere({ label: "feature/x", headSha: "old" }, { branch: "feature/x", head: "aaa" })).toBe("target");
+    expect(savedGuideWhere({ label: "feature/x" }, { branch: "feature/x", head: "aaa" })).toBe("target");
+    expect(savedGuideWhere({ prUrl: pr, label: "feature/x", headSha: "aaa" }, { branch: "feature/x", head: "aaa" })).toBe("other");
+    expect(savedGuideWhere({ label: "main", headSha: "aaa" }, { branch: "feature/x", head: "aaa" })).toBe("other");
   });
 });

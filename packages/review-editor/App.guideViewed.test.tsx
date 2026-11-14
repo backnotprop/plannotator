@@ -141,6 +141,7 @@ interface Calls {
 }
 
 let calls: Calls = { progress: [], prViewed: [], reviewedPuts: [] };
+let guidesWhere: string | undefined;
 
 function makeFetch(pr: boolean): typeof fetch {
   // SAFETY: the app only ever calls fetch(input, init).
@@ -172,7 +173,7 @@ function makeFetch(pr: boolean): typeof fetch {
     if (url.pathname === "/api/agents/capabilities") return Response.json({ available: true, providers: [] });
     if (url.pathname === "/api/guides") {
       return Response.json([
-        { id: "g1", label: "PR #7", title: "Parser rework", savedAt: 1, progress: { reviewed: 0, total: 2 }, moved: false },
+        { id: "g1", label: "PR #7", title: "Parser rework", savedAt: 1, progress: { reviewed: 0, total: 2 }, moved: false, ...(guidesWhere ? { where: guidesWhere } : {}) },
       ]);
     }
     if (url.pathname.endsWith("/reviewed") && method === "PUT") {
@@ -257,7 +258,7 @@ async function openLiveGuide(): Promise<void> {
   await waitFor(() => tickButtons().length === 2, "the guide's sections");
 }
 
-/** Open the guide takeover, then the saved guide from "Previous guides". */
+/** The Guide button opens the Agents tab while no guide is open; open the saved guide from its list. */
 async function openSavedGuide(): Promise<void> {
   const guideButton = Array.from(document.querySelectorAll<HTMLButtonElement>("button"))
     .find((b) => b.title === "Open guided review");
@@ -361,3 +362,20 @@ describe.if(hasDom)("Guided Review: ticking a section marks its files viewed", (
     ]);
   });
 });
+
+describe.if(hasDom)("the Guide button with a guide written for this diff", () => {
+  test("opens that guide in one click instead of the launch pad", async () => {
+    guidesWhere = "diff";
+    try {
+      await mount(false);
+      const guideButton = Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find((b) => b.title === "Open guided review");
+      if (!guideButton) throw new Error("Guide button did not render");
+      await act(async () => guideButton.click());
+      await waitFor(() => tickButtons().length === 2, "the guide's sections");
+      expect(document.querySelector("[data-launch-pad]")).toBeNull();
+    } finally {
+      guidesWhere = undefined;
+    }
+  });
+});
+

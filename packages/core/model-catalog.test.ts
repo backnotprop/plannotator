@@ -5,6 +5,7 @@ import {
   claudeCatalogFromSdk,
   claudeModelVersion,
   cliVersionFrom,
+  modelFallbackNotice,
   modelSelectOptions,
   piCatalogFromRpc,
   piThinkingLevelsSupported,
@@ -217,8 +218,16 @@ test("claudeModelVersion reads major.minor and ignores date and [1m] suffixes", 
   expect(claudeModelVersion(undefined)).toBeUndefined();
 });
 
-test("the Codex fallback defaults to GPT-6-Sol, which codex >= 0.155 lists", () => {
-  expect(CODEX_FALLBACK_MODELS.filter((m) => m.default).map((m) => m.id)).toEqual(["gpt-6-sol"]);
+test("a saved model the CLI no longer offers gets one quiet line; the same model under its alias gets none", () => {
+  const offered = [
+    { id: "opus", label: "Opus 5.5 (latest)", resolvedId: "claude-opus-5-5" },
+    { id: "sonnet", label: "Sonnet 5.5 (latest)" },
+  ];
+  expect(modelFallbackNotice("claude-opus-4-1", offered, "opus", "Claude")).toBe("claude-opus-4-1 isn't offered by Claude any more. Using Opus 5.5 (latest).");
+  expect(modelFallbackNotice("claude-opus-5-5", offered, "opus", "Claude")).toBeNull();
+  expect(modelFallbackNotice("sonnet", offered, "sonnet", "Claude")).toBeNull();
+  expect(modelFallbackNotice("", offered, "sonnet", "Claude")).toBeNull();
+  expect(modelFallbackNotice("openai/gpt-4o", [{ id: "", label: "Default" }, { id: "openai/gpt-6-sol", label: "GPT-6 Sol" }], "", "Pi")).toBe("openai/gpt-4o isn't offered by Pi any more. Using Default.");
 });
 
 test("cliVersionFrom reads the version from claude --version and the codex userAgent", () => {

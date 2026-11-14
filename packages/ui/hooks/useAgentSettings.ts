@@ -501,6 +501,20 @@ export function useAgentSettings(catalogs?: ModelCatalogs) {
   }, []);
 
   return {
+    savedModels: {
+      claude: state.claude.model,
+      codex: state.codex.model,
+      cursor: state.cursor.model,
+      opencode: state.opencode.model,
+      pi: state.pi.model,
+      copilot: state.copilot.model,
+      guideClaude: state.guideClaude.model,
+      guideCodex: state.guideCodex.model,
+      guideCursor: state.guideCursor.model,
+      guideOpencode: state.guideOpencode.model,
+      guidePi: state.guidePi.model,
+      guideCopilot: state.guideCopilot.model,
+    },
     selectedMode: state.selectedMode,
     reviewEngine: state.reviewEngine,
     reviewProfileId: state.reviewProfileByEngine[state.reviewEngine] ?? BUILTIN_DEFAULT_PROFILE,

@@ -3141,3 +3141,10 @@ Pinned by `components/CommentPopover.hostDraft.test.tsx`.
   - `keepOther`: on a pick-any question, a tap keeps the words typed under Other in the answer, beside the recommended ticks, and the button is then offered until the ticks alone are the recommended ones (PR #1913's rule, read on the ticks). Pick one and text questions never offer the button once Other or the answer holds words, so nothing changes there.
   - `onAccepted(undo, { key, answer })`: called after a tap, with the question's key and the answer the tap set (so the host can tell when it is no longer current; `sameAnswerParts` is exported for that). `undo` puts back the answer from before it (picks, ticks, Other words, Skip; the note as it is now) and does nothing once the answer has changed since the tap. The card draws no Undo itself: the host shows it (the Plannotator Inbox: an Undo at the end of the card's status line).
 - Pinned by `components/blocks/QuestionBlock.acceptBehavior.test.tsx`.
+
+## Agents tab: one launch pad, runs with findings by severity (unreleased; `AgentsTab` props changed, core gains `model-fallbacks`)
+
+- `AgentsTab` draws two launch rows (Guided Review and Review agent, each with Start) that launch with the saved picks in one click; options fold out in place (`hooks/useLaunchFolds`, key `plannotator.launchpad`). The launch logic is `hooks/useLaunchConfig` (one place for both kinds; the old mode menu is gone).
+- New optional props: `scope` (one line above the rows), `guides` (a render function for a host's saved-guides list), `onOpenFinding` (a finished run's click goes to its most severe finding). `externalAnnotations` is typed `FindingLike[]` (id, source, severity, text, filePath, lineStart).
+- Runs: `components/agents/JobRow` with Cancel and Run again; counts from `components/agents/jobFindings`.
+- `useAgentSettings` returns `savedModels` (the raw saved picks). `@plannotator/core/model-catalog` gains `modelFallbackNotice` and re-exports `MODEL_FALLBACKS_CHECKED`; the hand lists live in `@plannotator/core/model-fallbacks`.
