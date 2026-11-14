@@ -2379,7 +2379,7 @@ const ReviewApp: React.FC = () => {
     setAllFilesLineTarget((previous) => ({ path, range, token: (previous?.token ?? 0) + 1 }));
   }, [openAllFilesPanel]);
   const reviewSidebarExtraTabs = useMemo<ReviewSidebarExtraTab[]>(
-    () => (semanticDiffUsable ? [{ id: 'changes', label: 'Semantic', count: semanticChangeCount, render: () => <ReviewSemanticDiffPanel /> }] : []),
+    () => (semanticDiffUsable ? [{ id: 'changes', label: 'Sem', title: 'Semantic changes', count: semanticChangeCount, render: () => <ReviewSemanticDiffPanel /> }] : []),
     [semanticDiffUsable, semanticChangeCount],
   );
 
