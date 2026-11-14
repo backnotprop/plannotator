@@ -21,3 +21,17 @@ export const SEM_DIFF_GRAMMARS = {
   go: 'tree-sitter-go.wasm',
   rust: 'tree-sitter-rust.wasm',
 } as const;
+
+const ROUTE = '/assets/sem-diff/';
+
+export function parseSemDiffAdvert(value: unknown): SemDiffAdvert | null {
+  if (!value || typeof value !== 'object') return null;
+  const { runtime, grammars } = value as { runtime?: unknown; grammars?: unknown };
+  if (typeof runtime !== 'string' || !runtime.startsWith(ROUTE)) return null;
+  if (!grammars || typeof grammars !== 'object') return null;
+  const clean: Record<string, string> = {};
+  for (const [name, path] of Object.entries(grammars as Record<string, unknown>)) {
+    if (typeof path === 'string' && path.startsWith(ROUTE)) clean[name] = path;
+  }
+  return Object.keys(clean).length > 0 ? { runtime, grammars: clean } : null;
+}

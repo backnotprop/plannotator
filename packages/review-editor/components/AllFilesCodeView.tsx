@@ -26,6 +26,11 @@ import type {
 import { CommentPopover } from '@plannotator/ui/components/CommentPopover';
 import { usePierreTheme } from '../hooks/usePierreTheme';
 import { useIsWorkerPoolReadyOrDisabled, useWorkerPoolThemeSync } from '../workerPool';
+import type { SemDiffAdvert } from '@plannotator/shared/sem-diff-assets';
+import { useConfigValue } from '@plannotator/ui/config';
+import { createSemDiffClient, type SemDiffClient } from '../semDiff/semDiffClient';
+import { createSemDiffWorker } from '../semDiff/createSemDiffWorker';
+import { SemanticFileNote, type SemanticFileState } from '../semDiff/SemanticFileNote';
 import type { DiffFile, AnnotationScrollTarget } from '../types';
 import type { MarkdownFileView } from '../utils/markdownPreview';
 import { buildFileTree, getVisualFileOrder } from '../utils/buildFileTree';
@@ -230,6 +235,7 @@ export interface AllFilesCodeViewProps {
   pendingSelection: SelectedLineRange | null;
   reviewBase?: string;
   reviewSnapshotId?: string;
+  semDiff?: SemDiffAdvert | null;
   /** False when there is no source behind the diff to expand into (static
    *  patch review): the augmentation stage completes as a no-op instead of
    *  firing a /api/file-content request the server answers 400. */
@@ -799,6 +805,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   pendingSelection,
   reviewBase,
   reviewSnapshotId,
+  semDiff,
   contextExpansionAvailable = true,
   fetchFileContent,
   renderImagePreview,
@@ -1178,6 +1185,18 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   // full-content augmentation once it lands) waits here until Source.
   const fullDiffsRef = useRef(new Map<string, FileDiffMetadata>());
   const previewAppliedRef = useRef(new Set<string>());
+  const semanticEnabled = useConfigValue('diffSemantic');
+  const semanticEnabledRef = useRef(semanticEnabled);
+  semanticEnabledRef.current = semanticEnabled;
+  const semClient = useMemo<SemDiffClient | null>(
+    () => (semDiff ? createSemDiffClient({ advert: semDiff, origin: window.location.origin, createWorker: createSemDiffWorker }) : null),
+    [semDiff],
+  );
+  useEffect(() => () => semClient?.dispose(), [semClient]);
+  const semClientRef = useRef(semClient);
+  semClientRef.current = semClient;
+  const semStateRef = useRef(new Map<string, SemanticFileState>());
+  const semDiffsRef = useRef(new Map<string, { plain: FileDiffMetadata; semantic: FileDiffMetadata }>());
   // Stable identity of the current diff. Changes whenever the file set or any
   // file's patch CONTENT changes (diff type / base / whitespace / PR switch),
   // and is used as the CodeView `key` to force a remount + fresh seed.
@@ -1209,6 +1228,8 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     seededPreviewKeyRef.current = fileSetKey;
     fullDiffsRef.current = new Map();
     previewAppliedRef.current = new Set();
+    semStateRef.current = new Map();
+    semDiffsRef.current = new Map();
     for (const item of identity.items) {
       if (item.type !== 'diff' || !previewItemIds.has(item.id)) continue;
       fullDiffsRef.current.set(item.id, item.fileDiff);
@@ -1840,6 +1861,83 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     if (augmentFlushTimerRef.current != null) clearTimeout(augmentFlushTimerRef.current);
   }, []);
 
+  const showSemantic = useStableCallback((itemId: string, on: boolean) => {
+    const pair = semDiffsRef.current.get(itemId);
+    const handle = viewerRef.current;
+    const item = handle?.getItem(itemId);
+    if (!pair || handle == null || item == null || item.type !== 'diff') return;
+    if (itemId === editSession.editingItemIdRef.current) return;
+    const state = semStateRef.current.get(itemId);
+    if (state && state.status !== 'working') semStateRef.current.set(itemId, { status: on ? 'semantic' : 'off', summary: state.summary });
+    const next = on ? pair.semantic : pair.plain;
+    if (previewAppliedRef.current.has(itemId)) {
+      fullDiffsRef.current.set(itemId, next);
+      refreshItem(itemId);
+      return;
+    }
+    item.fileDiff = next;
+    item.version = (item.version ?? 0) + 1;
+    handle.updateItem(item);
+  });
+
+  useEffect(() => {
+    for (const itemId of semDiffsRef.current.keys()) showSemantic(itemId, semanticEnabled);
+  }, [semanticEnabled, showSemantic]);
+
+  const runSemantic = useStableCallback((
+    itemId: string,
+    file: DiffFile,
+    oldText: string | null,
+    newText: string | null,
+    generation: string,
+    signal: AbortSignal,
+  ) => {
+    const client = semClientRef.current;
+    if (!client || oldText == null || newText == null || !client.supports(file.path)) return;
+    const stale = () => signal.aborted || fileSetKeyRef.current !== generation;
+    semStateRef.current.set(itemId, { status: 'working' });
+    refreshItem(itemId);
+    const settleEmpty = () => {
+      semStateRef.current.delete(itemId);
+      refreshItem(itemId);
+    };
+    void client.diff(file.path, oldText, newText, signal).then((result) => {
+      if (stale()) return;
+      if (!result) {
+        settleEmpty();
+        return;
+      }
+      queueAugmentApply(itemId, () => {
+        if (stale()) return;
+        const liveHandle = viewerRef.current;
+        const item = liveHandle?.getItem(itemId);
+        if (liveHandle == null || item == null || item.type !== 'diff' || itemId === editSession.editingItemIdRef.current) {
+          settleEmpty();
+          return;
+        }
+        let semantic: FileDiffMetadata | null | undefined;
+        try {
+          semantic = processFile(result.patch, {
+            oldFile: { name: file.oldPath || file.path, contents: oldText },
+            newFile: { name: file.path, contents: newText },
+          });
+        } catch {
+          semantic = null;
+        }
+        if (!semantic || semantic.isPartial) {
+          settleEmpty();
+          return;
+        }
+        Object.assign(semantic, { semanticOperations: result.semanticOperations, semanticFolds: result.semanticFolds });
+        semantic.cacheKey = `${generation}::${itemId}#semantic`;
+        const plain = previewAppliedRef.current.has(itemId) ? fullDiffsRef.current.get(itemId) ?? item.fileDiff : item.fileDiff;
+        semDiffsRef.current.set(itemId, { plain, semantic });
+        semStateRef.current.set(itemId, { status: 'off', summary: result.summary });
+        showSemantic(itemId, semanticEnabledRef.current);
+      });
+    });
+  });
+
   // Fetch full file contents for one item, reparse with processFile, and swap
   // the item's fileDiff in place so hunk expansion (expand-unchanged gutter
   // controls) works against the COMPLETE file. Mirrors LazyFileDiff's per-mount
@@ -1988,6 +2086,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
             // Previewed: keep the hunkless diff on screen; Source swaps this in.
             fullDiffsRef.current.set(itemId, augmented);
             augmentState.set(itemId, { status: 'done', controller, generation });
+            runSemantic(itemId, file, data.oldContent, data.newContent, generation, controller.signal);
             return;
           }
           item.fileDiff = augmented;
@@ -1997,6 +2096,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
           // below the fold — no manual scroll correction needed.
           liveHandle.updateItem(item);
           augmentState.set(itemId, { status: 'done', controller, generation });
+          runSemantic(itemId, file, data.oldContent, data.newContent, generation, controller.signal);
         });
       })
       .catch((err) => {
@@ -2011,7 +2111,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         augmentState.set(itemId, { status: 'error', controller, generation });
         void err;
       });
-  }, [queueAugmentApply]);
+  }, [queueAugmentApply, runSemantic]);
 
   // A host's reader, for the arrows: Pierre shows them on a partial diff once it has a loader, and calls it on the first
   // click. It parks the click's opening, swaps in the whole file and highlights that off the main thread.
@@ -3464,6 +3564,11 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
           </button>
         }
         onCollapseToggle={() => toggleItemCollapsed(item.id)}
+        semanticNote={(() => {
+          const semState = semStateRef.current.get(item.id);
+          if (!semState) return undefined;
+          return <SemanticFileNote state={semState} onToggle={() => showSemantic(item.id, semState.status !== 'semantic')} />;
+        })()}
         />
         {/* A collapsed generated file must read as an intentional fold, never
             a failed render: an explicit placeholder strip with the counts,

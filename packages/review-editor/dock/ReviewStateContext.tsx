@@ -20,6 +20,7 @@ import type { HostLineNote } from '../components/hostLineNotes';
 import type { CodeFileAnnotationInput } from '@plannotator/ui/components/CodeFilePopout';
 import type { ChangedFileView } from '../components/FileViewSwitch';
 import type { DiagramEngineUrls } from '../utils/diagramEngineContract';
+import type { SemDiffAdvert } from '@plannotator/shared/sem-diff-assets';
 
 /** One-shot request to open the native code-annotation composer on a source range. */
 export interface LineAnnotationComposeRequest {
@@ -102,6 +103,7 @@ export interface ReviewState {
    *  and guide overviews draw as diagrams, the engine imported on the first
    *  such fence; absent, they show as code. */
   diagramEngine?: DiagramEngineUrls | null;
+  semDiff?: SemDiffAdvert | null;
   /** Commit a comment made by selecting text in a previewed Markdown file
    *  (file-scoped, carries the quote). */
   onAddMarkdownPreviewComment?: (

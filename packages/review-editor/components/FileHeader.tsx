@@ -64,6 +64,7 @@ interface FileHeaderProps {
   renderMarkdownView?: (fit: { iconOnly: boolean; touch: boolean }) => React.ReactNode;
   /** A host control drawn before the view menu (code review's Changes | Whole file switch). */
   accessory?: React.ReactNode;
+  semanticNote?: React.ReactNode;
   /** A host's own "Open in" (the Inbox's, where a read-only header has none), in the place the app's sits. */
   openIn?: React.ReactNode;
   /**
@@ -159,6 +160,7 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
   isTest = false,
   renderMarkdownView,
   accessory,
+  semanticNote,
   openIn,
   keepsFolder = false,
 }) => {
@@ -356,6 +358,7 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
           </button>
         )}
         <CallFlowFileBadge filePath={filePath} oldPath={oldPath} />
+        {semanticNote}
         <SemanticFileBadge filePath={filePath} />
         {/* Edit entry lives at the far right of the row, next to the file
             actions dropdown, so the experimental affordance stays out of the

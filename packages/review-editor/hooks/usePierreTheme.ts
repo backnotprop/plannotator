@@ -305,6 +305,12 @@ export function usePierreTheme(options?: {
               minmax(0, var(--split-left, 1fr))
               minmax(0, var(--split-right, 1fr)) !important;
           }
+          [data-diff-type='split'][data-overflow='scroll'][data-semantic] {
+            grid-template-columns:
+              minmax(0, var(--split-left, 1fr))
+              var(--diffs-connector-column-width, 40px)
+              minmax(0, var(--split-right, 1fr)) !important;
+          }
           [data-diff-type='split'][data-overflow='scroll'] > [data-code][data-deletions],
           [data-diff-type='split'][data-overflow='scroll'] > [data-code][data-additions],
           [data-diff-type='split'][data-overflow='scroll'] > [data-code][data-deletions] [data-content],
