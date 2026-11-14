@@ -93,7 +93,7 @@ import {
   INBOX_HOST_NAMES,
   INBOX_MCP_WAKING_HOSTS,
   INBOX_THREAD_NAME_MAX,
-  INBOX_SESSION_ID_PATTERN,
+  isInboxTagSessionId,
   type InboxParticipant,
   type InboxSentRecipient,
   type InboxTag,
@@ -598,7 +598,7 @@ export function normalizeInboxTags(value: unknown, owner: string | null): InboxT
   for (const entry of value) {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new InboxError("validation_error", "tags: each one { host, session, wakes }.", { field: "tags" });
     const { host, session, name, wakes, label, joined } = entry as Record<string, unknown>;
-    if (typeof session !== "string" || !INBOX_SESSION_ID_PATTERN.test(session)) {
+    if (!isInboxTagSessionId(host, session)) {
       throw new InboxError("validation_error", "tags: each session an id.", { field: "tags" });
     }
     if (host !== null && (typeof host !== "string" || host.length > 64)) throw new InboxError("validation_error", "tags: host a string or null.", { field: "tags" });
@@ -7390,6 +7390,15 @@ export class InboxStore {
       }
       if (message.to?.host === host) out.add(message.to.session);
       for (const tag of message.tags ?? []) if (tag.host === host && tag.wakes) out.add(tag.session);
+    }
+    return out;
+  }
+
+  /** Every session an agent of `host` wrote as, whether a message of it was promised a wake or not. */
+  agentSessionsOfHost(host: string): Set<string> {
+    const out = new Set<string>();
+    for (const message of this.messages.values()) {
+      if (message.author.kind === "agent" && message.author.host === host && message.author.session) out.add(message.author.session);
     }
     return out;
   }
