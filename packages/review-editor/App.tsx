@@ -5655,7 +5655,7 @@ const ReviewApp: React.FC = () => {
               </div>
             ) : repoInfo ? (
               <div className={isCompactTouchLayout
-                ? 'min-w-0 flex items-center justify-center overflow-hidden px-1'
+                ? 'min-w-0 flex items-center justify-center gap-2 overflow-hidden px-1'
                 : 'min-w-0 flex shrink items-center gap-2 lg:gap-3 overflow-hidden'
               }>
                 {repoInfo.branch && (
