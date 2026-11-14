@@ -91,6 +91,8 @@ import {
 import { applyFileLanguageFixes } from '../utils/highlightLanguage';
 import type { AIChatEntry } from '../hooks/useAIChat';
 import type { ReviewSearchMatch } from '../utils/reviewSearch';
+import { semanticMinimapNotes, type SemanticMinimapNote } from '../semDiff/semanticMinimapNotes';
+import type { SemanticDiffOperation } from '@plannotator/sem-diff';
 import {
   applyItemSearchHighlights,
   clearItemSearchHighlights,
@@ -1919,6 +1921,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     if (augmentFlushTimerRef.current != null) clearTimeout(augmentFlushTimerRef.current);
   }, []);
 
+  const [semanticNotes, setSemanticNotes] = useState<ReadonlyMap<string, SemanticMinimapNote[]>>(new Map());
   const showSemantic = useStableCallback((itemId: string, on: boolean) => {
     const pair = semDiffsRef.current.get(itemId);
     const handle = viewerRef.current;
@@ -1928,6 +1931,14 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     const state = semStateRef.current.get(itemId);
     if (state && state.status !== 'working') semStateRef.current.set(itemId, { status: on ? 'semantic' : 'off', summary: state.summary });
     const next = on ? pair.semantic : pair.plain;
+    const notePath = itemIdToFilePath.get(itemId);
+    setSemanticNotes((current) => {
+      if (!on && !current.has(itemId)) return current;
+      const map = new Map(current);
+      if (on && notePath) map.set(itemId, semanticMinimapNotes(notePath, (pair.semantic as { semanticOperations?: readonly SemanticDiffOperation[] }).semanticOperations ?? []));
+      else map.delete(itemId);
+      return map;
+    });
     if (previewAppliedRef.current.has(itemId)) {
       fullDiffsRef.current.set(itemId, next);
       refreshItem(itemId);
@@ -1937,6 +1948,11 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     item.version = (item.version ?? 0) + 1;
     handle.updateItem(item);
   });
+
+  const allMinimapMarks = useMemo(
+    () => (semanticNotes.size === 0 ? minimapMarks : [...(minimapMarks ?? []), ...[...semanticNotes.values()].flat()]),
+    [minimapMarks, semanticNotes],
+  );
 
   useEffect(() => {
     for (const itemId of semDiffsRef.current.keys()) showSemantic(itemId, semanticEnabled);
@@ -4115,7 +4131,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
           itemIdToFile={identity.itemIdToFile}
           viewedFiles={viewedFiles}
           annotations={annotations}
-          marks={minimapMarks}
+          marks={allMinimapMarks}
           metrics={minimapMetrics}
           split={diffStyle === 'split'}
           expandUnchanged={expandUnchanged === true}
