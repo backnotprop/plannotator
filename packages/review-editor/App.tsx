@@ -196,6 +196,7 @@ import { ReviewDockRightActions } from './dock/ReviewDockRightActions';
 import { ReviewPanelToggle } from './components/ReviewPanelToggle';
 import { focusFileHeaderWhenLost, focusReviewPanelSoon } from './utils/focusFileHeader';
 import { SkipToReviewPanel } from './components/SkipToReviewPanel';
+import { CompactPrimaryAction, compactPrimaryAction } from './components/CompactPrimaryAction';
 import { ReviewHeaderStatus } from './components/ReviewHeaderStatus';
 import { watchLoneTabHeader } from './dock/loneTabHeader';
 import { ReviewCenterArea } from './workspace/ReviewCenterArea';
@@ -5706,6 +5707,7 @@ const ReviewApp: React.FC = () => {
             )}
             </div>
             {!guideVisible && <div ref={setPaneTabsSlot} data-pane-tabs-slot="" className={isCompactTouchLayout ? 'min-w-0 flex-1 self-stretch flex items-center justify-center empty:hidden' : 'min-w-0 flex-1 self-stretch flex items-stretch empty:hidden'} />}
+            {isCompactTouchLayout && !guideVisible && <CompactPrimaryAction action={compactPrimaryAction(compactReviewActions)} />}
             </div>
           </div>
 
