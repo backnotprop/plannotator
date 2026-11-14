@@ -4398,6 +4398,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     stuck: live.stuck,
     autoSendAfterMs: live.autoSendAfterMs,
     waitOf: live.waitOf,
+    // A reply to a T3 thread or a cloud agent waits for it, against other agents' reads, until that wake knows it gone.
+    wakeGone: (session) => t3Wake.gone(session) || cloudWake.status(session) === "dead",
   });
   // A session's turn starting or ending, its connection going away, or an asker grace running out moves a
   // row's delivery without writing a store line. The sessions' delivery signature is compared on a short
