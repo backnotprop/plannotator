@@ -366,6 +366,7 @@ export async function startReviewServer(options: {
 	gitContext?: GitContext;
 	liveReviewAgent?: ReviewLiveTarget | null;
 	liveReviewDataDir?: string;
+	liveReviewKey?: { key: string; title: string } | null;
 	/**
 	 * Initial base branch the caller used to compute `rawPatch`. When a caller
 	 * overrides the detected default (e.g. `openCodeReview({ defaultBranch })`),
@@ -459,11 +460,12 @@ export async function startReviewServer(options: {
 		launchedBy: options.liveReviewAgent ?? null,
 		projectPath: () => clientGitContext?.root ?? clientGitContext?.cwd ?? options.gitContext?.root ?? options.gitContext?.cwd ?? options.agentCwd ?? process.cwd(),
 		review: () =>
-			prMeta?.url
+			options.liveReviewKey ??
+			(prMeta?.url
 				? { key: `pr:${prMeta.url}`, title: prMeta.title || prMeta.url }
 				: clientGitContext?.currentBranch
 					? { key: `branch:${clientGitContext.currentBranch}`, title: clientGitContext.currentBranch }
-					: null,
+					: null),
 	});
 	const isRemote = isRemoteSession();
 	const wslFlag = detectWSL();

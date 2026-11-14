@@ -1,3 +1,7 @@
+import { spawn } from "node:child_process";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { InboxMessage, InboxProject, InboxTag } from "@plannotator/core/inbox-types";
 import { checkReviewAnchor, checkReviewLive, ReviewAnchorError, type InboxReviewAnchor, type InboxReviewLive } from "@plannotator/core/review-threads";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
@@ -8,6 +12,7 @@ import type { createInboxLiveSessions } from "./inbox-sessions";
 export const REVIEW_THREADS_PATH = "/api/inbox/review-threads";
 export const REVIEW_THREADS_SEND_PATH = "/api/inbox/review-threads/send";
 export const REVIEW_COMMENTS_MAX = 200;
+export const REVIEW_OPEN_WAIT_MS = 30_000;
 
 interface Comment {
   anchor: InboxReviewAnchor;
@@ -46,6 +51,8 @@ export function createInboxLiveReview(options: {
   findProjects: (path: string) => Promise<{ projects: InboxProject[] }>;
   readBody: (req: Request) => Promise<Record<string, unknown>>;
   json: (body: unknown, status?: number) => Response;
+  dataDir?: string;
+  reviewCommand?: () => string[];
 }) {
   const { store, serverSession, live, json } = options;
 
@@ -135,7 +142,55 @@ export function createInboxLiveReview(options: {
     return json({ ...answer(root), sent: written.map((m) => m.id) });
   };
 
-  const route = async (req: Request, url: URL): Promise<Response | null> => {
+  const opening = new Map<string, Promise<{ url: string }>>();
+  const openReview = (threadId: string): Promise<{ url: string }> => {
+    const root = store.message(threadId);
+    if (!root || root.thread_id !== threadId || !root.review_live) throw new InboxError("message_not_found", `No live review ${threadId}.`);
+    const project = store.project(root.project_id);
+    if (!project || !existsSync(project.root)) throw new InboxError("project_not_found", "That review's folder is gone from this computer.");
+    const command = options.reviewCommand?.();
+    if (!command || command.length === 0) throw new InboxError("review_unavailable", "This Inbox can't start a review.");
+    const running = opening.get(threadId);
+    if (running) return running;
+    const review = root.review_live;
+    const started = (async () => {
+      const dir = mkdtempSync(join(tmpdir(), "plannotator-live-review-"));
+      const ready = join(dir, "ready.jsonl");
+      const pr = review.key.startsWith("pr:") ? [review.key.slice(3)] : [];
+      const child = spawn(command[0]!, [...command.slice(1), "review", ...pr], {
+        cwd: project.root,
+        detached: true,
+        stdio: "ignore",
+        env: {
+          ...process.env,
+          ...(options.dataDir ? { PLANNOTATOR_DATA_DIR: options.dataDir } : {}),
+          PLANNOTATOR_READY_FILE: ready,
+          PLANNOTATOR_SKIP_BROWSER_OPEN: "1",
+          PLANNOTATOR_REVIEW_LIVE_THREAD: threadId,
+          PLANNOTATOR_REVIEW_LIVE_KEY: review.key,
+          PLANNOTATOR_REVIEW_LIVE_TITLE: review.title,
+        },
+      });
+      child.unref();
+      for (let waited = 0; waited < REVIEW_OPEN_WAIT_MS; waited += 100) {
+        if (existsSync(ready)) {
+          const line = readFileSync(ready, "utf8").split("\n").find((l) => l.includes('"url"'));
+          if (line) {
+            rmSync(dir, { recursive: true, force: true });
+            return { url: (JSON.parse(line) as { url: string }).url };
+          }
+        }
+        if (child.exitCode !== null) break;
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      rmSync(dir, { recursive: true, force: true });
+      throw new InboxError("review_unavailable", "The review did not start. Run plannotator review in the repository to open it.");
+    })().finally(() => opening.delete(threadId));
+    opening.set(threadId, started);
+    return started;
+  };
+
+  const route = async (req: Request, url: URL, owner = true): Promise<Response | null> => {
     const path = url.pathname;
     if (path === REVIEW_THREADS_PATH) {
       if (req.method !== "GET") return json({ error: "Use GET." }, 405);
@@ -149,6 +204,14 @@ export function createInboxLiveReview(options: {
       const body = await options.readBody(req);
       if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
       return send(body);
+    }
+    const open = /^\/api\/inbox\/review-threads\/([A-Za-z0-9_]+)\/open$/.exec(path);
+    if (open) {
+      if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+      if (!owner) return json({ error: "Only this computer's owner can open a review from this Inbox.", code: "owner_only" }, 403);
+      const body = await options.readBody(req);
+      if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+      return json(await openReview(open[1]!));
     }
     const resolve = /^\/api\/inbox\/review-threads\/comments\/([A-Za-z0-9_]+)\/resolve$/.exec(path);
     if (resolve) {

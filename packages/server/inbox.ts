@@ -444,6 +444,7 @@ function isPageOrigin(value: string): boolean {
 export interface InboxServerOptions {
   /** Default: `getPlannotatorDataDir()`. */
   dataDir?: string;
+  liveReviewCommand?: string[];
   /** The running binary's version; `dev` for a source run. */
   version?: string;
   /**
@@ -4498,7 +4499,17 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     },
   });
   compose.sweep();
-  const liveReview = createInboxLiveReview({ store, serverSession, live, resolveProject, findProjects, readBody: (req) => readBody(req), json });
+  const liveReview = createInboxLiveReview({
+    store,
+    serverSession,
+    live,
+    resolveProject,
+    findProjects,
+    readBody: (req) => readBody(req),
+    json,
+    dataDir,
+    reviewCommand: () => options.liveReviewCommand ?? (binaryPath ? [binaryPath] : [process.execPath, join(import.meta.dir, "..", "..", "apps", "hook", "server", "index.ts")]),
+  });
   // Reply drafts: the words typed in a thread's reply box, kept per thread (packages/server/inbox-reply-drafts.ts).
   const replyDrafts = createInboxReplyDrafts({
     store,
@@ -6148,7 +6159,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       const machineDoor = door?.platform === MACHINE_PLATFORM;
       const composed = await compose.route(req, url, isOwner(req, via) && (!door || machineDoor), via, door ? { machine: machineDoor, window: door.window, from: machineDoor ? machines.machineOfDevice(door.device_id) : null } : null);
       if (composed) return composed;
-      const reviewed = await liveReview.route(req, url);
+      const reviewed = await liveReview.route(req, url, isOwner(req, via) && !door);
       if (reviewed) return reviewed;
       // Reply drafts: the reply box's words per thread (approval "inbox-reply-drafts").
       const drafted = await replyDrafts.route(req, url);

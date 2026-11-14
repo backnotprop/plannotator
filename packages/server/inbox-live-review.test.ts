@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
@@ -20,12 +20,12 @@ afterEach(async () => {
 
 const anchor = (line: number, code: string): InboxReviewAnchor => ({ file: "src/billing.ts", side: "new", line_start: line, line_end: line, code: [code], head: "abc1234" });
 
-async function world() {
+async function world(options: { liveReviewCommand?: string[] } = {}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-live-review-")));
   roots.push(root);
   const project = join(root, "billing");
   mkdirSync(project, { recursive: true });
-  const server = await startInboxServer({ dataDir: join(root, "data") });
+  const server = await startInboxServer({ dataDir: join(root, "data"), ...options });
   servers.push(server);
   const client = new Client({ name: "live-review-test", version: "1.0.0" });
   await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${server.port}/mcp`)));
@@ -55,7 +55,7 @@ async function world() {
   };
   await poll("ses-cc", "claude-code");
   await poll("ses-pi", "pi");
-  return { server, project, poll, deliver, send, read, agentReply, readThread };
+  return { root, server, project, poll, deliver, send, read, agentReply, readThread };
 }
 
 test("a comment sent now to the launching agent wakes it with its lines, and its answer lands on them", async () => {
@@ -122,4 +122,25 @@ test("a malformed anchor sends nothing", async () => {
   const w = await world();
   await expect(w.send({ to: { host: "pi", session: "ses-pi" }, comments: [{ anchor: { file: "a.ts", side: "new", line_start: 5, line_end: 2, code: [] }, words: "x" }], idempotency_key: "k1" })).rejects.toThrow("line_start");
   expect((await w.read()).thread).toBeNull();
+});
+
+test("the living review opens again from its thread: the review starts in its folder on its key, and the window gets its address", async () => {
+  const stubDir = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-live-review-stub-")));
+  roots.push(stubDir);
+  const stub = join(stubDir, "review-stub.ts");
+  writeFileSync(
+    stub,
+    [
+      'import { appendFileSync, writeFileSync } from "node:fs";',
+      `writeFileSync(${JSON.stringify(join(stubDir, "seen.json"))}, JSON.stringify({ args: process.argv.slice(2), cwd: process.cwd(), thread: process.env.PLANNOTATOR_REVIEW_LIVE_THREAD, key: process.env.PLANNOTATOR_REVIEW_LIVE_KEY, skip: process.env.PLANNOTATOR_SKIP_BROWSER_OPEN }));`,
+      'appendFileSync(process.env.PLANNOTATOR_READY_FILE!, JSON.stringify({ url: "http://localhost:51234" }) + "\\n");',
+    ].join("\n"),
+  );
+  const w = await world({ liveReviewCommand: [process.execPath, stub] });
+  const sent = await w.send({ to: { host: "pi", session: "ses-pi" }, comments: [{ anchor: anchor(4, "x"), words: "Rename." }], idempotency_key: "k1" });
+  const response = await fetch(`http://127.0.0.1:${w.server.port}/api/inbox/review-threads/${sent.thread!.id}/open`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ serverSession: w.server.serverSession }) });
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual({ url: "http://localhost:51234" });
+  const seen = JSON.parse(readFileSync(join(stubDir, "seen.json"), "utf8"));
+  expect(seen).toEqual({ args: ["review"], cwd: w.project, thread: sent.thread!.id, key: "branch:fix/charge", skip: "1" });
 });

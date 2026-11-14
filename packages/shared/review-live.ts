@@ -121,3 +121,38 @@ export async function handleReviewLiveRequest(request: ReviewLiveRequest, contex
   if (kind === "resolve") return post(`/api/inbox/review-threads/comments/${id}/resolve`, body);
   return post(`/api/inbox/messages/${id}/send-now`, body);
 }
+
+export interface ReviewLiveSession {
+  thread: string;
+  key: string;
+  title: string;
+}
+
+export function reviewLiveSessionOf(env: Record<string, string | undefined>): ReviewLiveSession | null {
+  const thread = env.PLANNOTATOR_REVIEW_LIVE_THREAD;
+  const key = env.PLANNOTATOR_REVIEW_LIVE_KEY;
+  if (!thread || !/^[A-Za-z0-9_]+$/.test(thread) || !key) return null;
+  return { thread, key, title: env.PLANNOTATOR_REVIEW_LIVE_TITLE || key };
+}
+
+export function reviewLiveDecisionWords(result: { approved: boolean; feedback: string; exit?: boolean }): string | null {
+  if (result.exit) return null;
+  const feedback = result.feedback.trim();
+  if (result.approved) return feedback ? `I approved the review, with notes:\n\n${feedback}` : "I approved the review.";
+  return feedback || null;
+}
+
+export async function postReviewLiveDecision(dataDir: string, session: ReviewLiveSession, words: string, doFetch: typeof fetch = fetch): Promise<boolean> {
+  const inbox = inboxAddress(dataDir);
+  if (!inbox) return false;
+  try {
+    const response = await doFetch(`${inbox.base}/api/inbox/messages/${session.thread}/reply`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ serverSession: inbox.serverSession, words, questions: [], idempotency_key: `review-decision-${Date.now().toString(36)}` }),
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
