@@ -173,6 +173,10 @@ export const DOOR_WRITES: Readonly<Record<string, "append" | "set" | "file" | "l
   "POST threads/:id/priority": "set",
   // An agent's face or given name lives on the agent's own machine (approval "inbox-linked-marks"), keyed by its id.
   "POST agent-faces": "set",
+  // A thread's tag lives on the thread's own machine, named by the tag's name, and a tag's rename, delete and
+  // Undo go to each machine that holds it (approval "inbox-thread-tags").
+  "POST threads/:id/tags": "set",
+  "POST initiatives/:id": "set",
   "POST messages/:id/picks": "set",
   "POST messages/:id/reply": "append",
   "POST messages/:id/resolve": "set",

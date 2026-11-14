@@ -1836,6 +1836,129 @@ describe("a star or Priority on a linked machine's thread lives on that machine 
       }
     }
   });
+  test("tagged from A by name, B makes the tag and one tag of that name holds both machines' threads; out, rename and B away the same way", async () => {
+    const dataA = scratch("plannotator-tags-linked-a-");
+    const dataB = scratch("plannotator-tags-linked-b-");
+    const a = await start(dataA);
+    let b = await start(dataB);
+    let client: Client | null = null;
+    try {
+      const offered = (await (await fetch(`${at(b.port)}/api/inbox/machines/offer`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).json()) as Json;
+      const linked = await fetch(`${at(a.port)}/api/inbox/machines/link`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ link: offered.link, address: at(b.port), back: at(a.port) }) });
+      expect(linked.status).toBe(201);
+      const bId = (JSON.parse(readFileSync(join(dataA, "inbox", "machines.json"), "utf8")) as Json).links[0].id as string;
+      client = new Client({ name: "inbox-machines-tags", version: "1.0.0" });
+      await client.connect(new StreamableHTTPClientTransport(new URL(`${at(b.port)}/mcp`)));
+      const project = scratch("plannotator-tags-linked-project-");
+      const send = async (body: string) => ((await client!.callTool({ name: "send_message", arguments: { project_path: project, agent_session: "ses_b", body } })) as { structuredContent: { thread_id: string } }).structuredContent.thread_id;
+      const one = await send("First news");
+      const two = await send("Second news");
+      await waitFor("B's threads on A", async () => JSON.stringify((await list(a.port)).sections).includes(two));
+      const view = async () => (((await (await fetch(`${at(a.port)}/api/inbox/machines`)).json()) as Json).machines as Json[]).find((m) => m.id === bId)!;
+      expect((await view()).marks).toContain("tags");
+      const aId = (await list(a.port)).self as string;
+      const tagsOf = async (port: number, id: string) => ((await list(port)).sections as Json[]).flatMap((s) => s.threads as Json[]).find((row) => row.thread_id === id)?.tags ?? [];
+      const live = (store: typeof a.store) => store.initiatives().filter((tag) => tag.deleted_at === null);
+
+      // A's own Release, with A's own thread in it.
+      const release = a.store.createInitiative({ name: "Release", by: { kind: "person" } });
+      const ownProject = a.store.ensureProject({ name: "app", root: scratch("plannotator-tags-linked-own-") });
+      const mine = a.store.sendMessage({ project_id: ownProject.id, author: { kind: "agent" as const, host: "claude-code", session: "ses_a", name: null }, body: "Own news" }).message.thread_id;
+      expect((await post(a.port, `/api/inbox/threads/${mine}/tags`, { tag: release.id, on: true })).status).toBe(200);
+
+      // Tagged from A by name: B holds no Release, so B makes it (the person's) and the thread is in it there only.
+      expect((await forward(a.port, bId, `threads/${one}/tags`, { name: "Release", on: true })).status).toBe(200);
+      const bRelease = live(b.store).find((tag) => tag.name === "Release")!;
+      expect(bRelease.created_by).toEqual({ kind: "person" });
+      expect(b.store.threadTags(one)).toEqual([bRelease.id]);
+      expect(live(a.store).map((tag) => tag.id)).toEqual([release.id]);
+      // The same name, cased and spaced otherwise, is the same tag there: nothing more is made.
+      expect((await forward(a.port, bId, `threads/${two}/tags`, { name: " RELEASE ", on: true })).status).toBe(200);
+      expect(live(b.store).map((tag) => tag.id)).toEqual([bRelease.id]);
+
+      // A's merged list: one Release, its id on each machine; both machines' threads are in it.
+      expect(((await list(a.port)).tags as Json[]).map((tag) => [tag.id, tag.name, tag.machines])).toEqual([[release.id, "Release", { [aId]: release.id, [bId]: bRelease.id }]]);
+      for (const id of [mine, one, two]) expect(await tagsOf(a.port, id)).toEqual([release.id]);
+      // B's own window: the same tag, B's id standing for it, holding the same threads.
+      await waitFor("A's thread in B's Release", async () => JSON.stringify(await tagsOf(b.port, mine)) === JSON.stringify([bRelease.id]));
+      expect(await tagsOf(b.port, one)).toEqual([bRelease.id]);
+      expect(((await list(b.port)).tags as Json[]).map((tag) => tag.id)).toEqual([bRelease.id]);
+
+      // Out from A, by name, on B.
+      expect((await forward(a.port, bId, `threads/${two}/tags`, { name: "Release", on: false })).status).toBe(200);
+      expect(b.store.threadTags(two)).toEqual([]);
+      expect(await tagsOf(a.port, two)).toEqual([]);
+      // Out in B's own window: A's list follows (`event: tags` on B's stream), with no write of A's.
+      expect((await post(b.port, `/api/inbox/threads/${one}/tags`, { tag: bRelease.id, on: false })).status).toBe(200);
+      await waitFor("the tag gone on A", async () => (await tagsOf(a.port, one)).length === 0);
+
+      // Renamed from A's sidebar: this Inbox's tag, then B's by its id there.
+      expect((await post(a.port, `/api/inbox/initiatives/${release.id}`, { op: "rename", name: "Ship" })).status).toBe(200);
+      expect((await forward(a.port, bId, `initiatives/${bRelease.id}`, { op: "rename", name: "Ship" })).status).toBe(200);
+      expect(b.store.initiative(bRelease.id)!.name).toBe("Ship");
+      expect(((await list(a.port)).tags as Json[]).map((tag) => [tag.name, tag.machines])).toEqual([["Ship", { [aId]: release.id, [bId]: bRelease.id }]]);
+
+      // B away: a tag waits (202, nothing made here) and lands, made there by name.
+      await client.close();
+      client = null;
+      b.stop();
+      await waitFor("B offline on A", async () => (await view()).state === "offline", 30_000);
+      const held = await forward(a.port, bId, `threads/${two}/tags`, { name: "Billing", on: true });
+      expect(held.status).toBe(202);
+      expect(live(a.store).some((tag) => tag.name === "Billing")).toBe(false);
+      b = await start(dataB);
+      await waitFor("the held tag on B", () => live(b.store).some((tag) => tag.name === "Billing" && b.store.threadTags(two).includes(tag.id)), 45_000);
+      await waitFor("Billing on A, B's id standing for it", async () => ((await list(a.port)).tags as Json[]).some((tag) => tag.name === "Billing" && JSON.stringify(tag.machines) === JSON.stringify({ [bId]: tag.id })), 15_000);
+      expect(live(a.store).some((tag) => tag.name === "Billing")).toBe(false);
+    } finally {
+      await client?.close().catch(() => {});
+      a.stop();
+      b.stop();
+    }
+  }, 120_000);
+
+  test("an older machine (its list names no `tags` mark): its rows are in no tag here and its tags are not listed; one that names it joins by name", async () => {
+    const thread = "msg_01K0000000000000000000000T";
+    const farTag = { id: "ini_01K0000000000000000000000F", name: "release", created_at: "2026-11-12T09:00:00.000Z", created_by: { kind: "person" }, updated_at: "2026-11-12T09:00:00.000Z", deleted_at: null };
+    for (const marks of [["star", "priority"], ["star", "priority", "tags"]]) {
+      const id = "ibx_01K0000000000000000000000T";
+      const door = Bun.serve({
+        hostname: "127.0.0.1",
+        port: 0,
+        idleTimeout: 0,
+        fetch(req) {
+          const route = new URL(req.url).pathname.replace("/api/inbox/device/", "");
+          if (route === "health") return Response.json({ ok: true, inbox_id: id, machine_links: 1, version: "0.28.62" });
+          if (route === "events") return new Response(new ReadableStream({ start: (c) => c.enqueue(new TextEncoder().encode(`event: hello\ndata: {"cursor":0}\n\n`)) }), { headers: { "Content-Type": "text/event-stream" } });
+          const row = { thread_id: thread, project: { id: "prj_x" }, resolved_at: null, section: "new", last_at: "2026-11-12T09:00:00.000Z", tags: [farTag.id] };
+          if (route === "threads") return Response.json({ cursor: 0, sections: [{ id: "new", threads: [row] }], projects: [], pins: [], marks, tags: [farTag] });
+          return Response.json({ code: "device_route_not_found", error: "Not a phone route." }, { status: 404 });
+        },
+      });
+      const dataDir = scratch("plannotator-tags-linked-older-");
+      mkdirSync(join(dataDir, "inbox"), { recursive: true });
+      writeFileSync(join(dataDir, "inbox", "machines.json"), JSON.stringify({ v: 1, self: { id: "ibx_01K00000000000000000000009" }, links: [{ id, name: "Mini", token: "tok_0", transport: { kind: "tailnet", url: at(door.port as number) }, device_id: null, linked_at: "2026-10-30T00:00:00Z" }] }), { mode: 0o600 });
+      const inbox = await start(dataDir);
+      try {
+        const own = inbox.store.createInitiative({ name: "Release", by: { kind: "person" } });
+        const view = async () => (((await (await fetch(`${at(inbox.port)}/api/inbox/machines`)).json()) as Json).machines as Json[]).find((m) => m.id === id);
+        await waitFor("that machine's list", async () => typeof (await view())?.list_cursor === "number");
+        const model = await list(inbox.port);
+        const row = (model.sections as Json[]).flatMap((s) => s.threads as Json[]).find((r) => r.thread_id === thread)!;
+        const self = model.self as string;
+        if (marks.includes("tags")) {
+          expect(row.tags).toEqual([own.id]);
+          expect((model.tags as Json[]).map((tag) => [tag.id, tag.machines])).toEqual([[own.id, { [self]: own.id, [id]: farTag.id }]]);
+        } else {
+          expect(row.tags).toBeUndefined();
+          expect((model.tags as Json[]).map((tag) => [tag.id, tag.machines])).toEqual([[own.id, { [self]: own.id }]]);
+        }
+      } finally {
+        inbox.stop();
+        door.stop(true);
+      }
+    }
+  });
 });
 
 describe("an agent's face and given name on a linked machine live on that machine (approval inbox-linked-marks)", () => {

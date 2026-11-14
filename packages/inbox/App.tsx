@@ -247,7 +247,7 @@ import { openThemeSettings, useThemeChooser } from './themeChooser';
 import { CardChip } from './board/CardChip';
 import { boardFilterHash, boardInitiativeOf, boardViewOf, cardsInInitiative, initiativeDeletedToast, liveInitiatives, newCardProject, type BoardView } from './board/model';
 import { restoreInitiatives } from './board/initiativeUndo';
-import { canTagThread, filterTagRows, rowTagsHere, tagHref, tagListSummary, tagsSectionShown, tagThreadCounts, tagWaitingCounts, ThreadTagsContext, type ThreadTagsHost } from './threadTags';
+import { canTagThread, filterTagRows, rowTagsHere, tagById, tagHref, tagIdOn, tagListSummary, tagNamed, tagsSectionShown, tagThreadCounts, tagWaitingCounts, tagWrite, thisInboxTags, ThreadTagsContext, type ListTag, type ThreadTagsHost } from './threadTags';
 import { TagIcon } from './components/InitiativePeek';
 import { useComposeSessions } from './compose/useComposeSessions';
 import { useComposerOpener } from './compose/openComposer';
@@ -2155,7 +2155,7 @@ function Inbox() {
   }, [refreshCards]);
   // With the Board off, the list's tags (approval "inbox-thread-tags"), the same array while their ids and names stay.
   const listTagsKey = (latest?.tags ?? [])
-    .map((i) => `${i.id}\u0000${i.name}`)
+    .map((i) => `${i.id}\u0000${i.name}\u0000${JSON.stringify(i.machines ?? null)}`)
     .join('\u0001');
   const keepsTags = latest?.tags !== undefined;
   // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the ids and names, on purpose
@@ -2166,7 +2166,7 @@ function Inbox() {
       const rows = new Map<string, InboxListRow>();
       for (const row of [...(latest?.sections.flatMap((s) => s.threads) ?? []), ...(latest?.snoozed ?? []), ...(latest?.pins ?? [])]) if (!rows.has(row.thread_id)) rows.set(row.thread_id, row);
       const projects = new Map((latest?.projects ?? []).map((p) => [p.id, p.name] as const));
-      return { initiatives: listTags, counts: tagThreadCounts([...rows.values()]), cards: [], rows, projects, mentions: new Map(), href: tagHref };
+      return { initiatives: thisInboxTags(listTags, machines.self), counts: tagThreadCounts([...rows.values()]), cards: [], rows, projects, mentions: new Map(), href: tagHref };
     }
     const counts = new Map<string, number>();
     const live = (cards?.cards ?? []).filter((card) => card.column !== 'dropped');
@@ -2178,7 +2178,7 @@ function Inbox() {
     const projects = new Map((latest?.projects ?? []).map((p) => [p.id, p.name] as const));
     const mentions = new Map(Object.entries(cards?.initiative_threads ?? {}));
     return { initiatives: tagInitiatives, counts, cards: live, rows, projects, mentions, refresh: refreshForPeek };
-  }, [cards, latest, tagInitiatives, refreshForPeek, boardEnabled, listTags]);
+  }, [cards, latest, tagInitiatives, refreshForPeek, boardEnabled, listTags, machines.self]);
   const boardInitiative = route.page === 'board' ? boardInitiativeOf(route.initiative, cards ? liveInitiatives(cards.initiatives) : null) : null;
   useEffect(() => {
     if (!onBoard) {
@@ -5509,18 +5509,22 @@ function Inbox() {
    * the sidebar's Tags; and Add tag's host (threadTags.ts), each write said in the toast with Undo.
    */
   const [tagPatches, setTagPatches] = useState<ReadonlyMap<string, readonly string[]>>(() => new Map());
-  const tagsOfRow = useCallback((row: Pick<InboxListRow, 'thread_id' | 'tags' | 'machine'>) => rowTagsHere(row, machines.self, tagPatches), [tagPatches, machines.self]);
-  const filterTag = route.page === 'inbox' && route.tag ? (listTags?.find((tag) => tag.id === route.tag) ?? null) : null;
+  const tagsOfRow = useCallback((row: Pick<InboxListRow, 'thread_id' | 'tags' | 'machine'>) => rowTagsHere(row, machines, tagPatches), [tagPatches, machines]);
+  const filterTag = route.page === 'inbox' && route.tag && listTags ? tagById(listTags, route.tag) : null;
+  /** The list a route's tag shows: the merged id, which a tag made here since takes over from another machine's. */
+  const shownTagId = filterTag?.id ?? (route.page === 'inbox' ? (route.tag ?? null) : null);
   const tagCounts = useMemo(() => tagThreadCounts(windowRows, tagsOfRow), [windowRows, tagsOfRow]);
   const tagWaiting = useMemo(() => tagWaitingCounts(latestSections, tagsOfRow), [latestSections, tagsOfRow]);
   const tagsShown = listTags !== null && tagsSectionShown(listTags, windowRows, tagsOfRow);
-  const setThreadTag = async (threadId: string, tag: InboxInitiative, on: boolean, undo = true) => {
+  /** `tag.id` empty: a name no machine holds yet, made on the thread's own machine by this write (nothing drawn early). */
+  const setThreadTag = async (threadId: string, tag: ListTag, on: boolean, undo = true) => {
     const before = tagPatches.get(threadId) ?? rowOf(threadId)?.tags ?? [];
     const next = on ? (before.includes(tag.id) ? before : [...before, tag.id]) : before.filter((id) => id !== tag.id);
-    setTagPatches((current) => withEntry<readonly string[]>(current, threadId, next));
+    if (tag.id) setTagPatches((current) => withEntry<readonly string[]>(current, threadId, next));
     const unpatch = () => setTagPatches((current) => withEntry<readonly string[]>(current, threadId, undefined));
     try {
-      await inboxApi.setThreadTag(threadId, tag.id, on);
+      // On the thread's own machine (a held write there says so in the clock toast, as Priority's does).
+      await inboxApi.setThreadTag(threadId, tagWrite(tag, machineOf(threadId), machines.self), on);
     } catch (cause) {
       unpatch();
       showError(cause);
@@ -5557,18 +5561,21 @@ function Inbox() {
             tags: listTags,
             tagsOf: (threadId) => {
               const row = windowRows.find((r) => r.thread_id === threadId);
-              return row ? rowTagsHere(row, machines.self, tagPatches) : (tagPatches.get(threadId) ?? []);
+              return row ? rowTagsHere(row, machines, tagPatches) : (tagPatches.get(threadId) ?? []);
             },
             counts: tagCounts,
-            can: (threadId) => canTagThread(threadId, windowRows, machines.self, machineOf(threadId)),
+            can: (threadId) => canTagThread(threadId, windowRows, machines, machineOf(threadId)),
             set: (threadId, tag, on) => void setThreadTagRef.current(threadId, tag, on),
+            // Another machine's thread: its machine makes the tag by name, in the same write that tags the thread.
             createAndSet: (threadId, name) =>
-              void createTagRef.current(name).then((tag) => {
-                if (tag) void setThreadTagRef.current(threadId, tag, true);
-              }),
+              machineOf(threadId)
+                ? void setThreadTagRef.current(threadId, { id: '', name, created_at: '', created_by: { kind: 'person' }, updated_at: '', deleted_at: null }, true)
+                : void createTagRef.current(name).then((tag) => {
+                    if (tag) void setThreadTagRef.current(threadId, tag, true);
+                  }),
             listed: filterTag,
           },
-    [listTags, tagPatches, windowRows, tagCounts, machines.self, filterTag],
+    [listTags, tagPatches, windowRows, tagCounts, machines, filterTag],
   );
   const setThreadTagRef = useRef(setThreadTag);
   setThreadTagRef.current = setThreadTag;
@@ -5581,7 +5588,7 @@ function Inbox() {
         tags: listTags,
         waiting: tagWaiting,
         shown: tagsShown,
-        tagId: route.page === 'inbox' ? (route.tag ?? null) : null,
+        tagId: shownTagId,
         onOpen: (tagId: string) => leave({ page: 'inbox', project: null, machine: null, agent: null, tag: tagId, thread: null }),
         onCreate: async (name: string) => {
           const tag = await createTag(name);
@@ -5590,33 +5597,71 @@ function Inbox() {
           return tag.id;
         },
         onRename: async (tagId: string, name: string) => {
-          try {
-            await inboxApi.changeInitiative(tagId, { op: 'rename', name });
-          } catch (cause) {
-            showError(cause);
+          const tag = tagById(listTags, tagId);
+          if (!tag) return false;
+          // A name another machine's tag already has would join the two there: refused as this Inbox refuses its own.
+          const taken = tagNamed(listTags, name);
+          if (taken && taken.id !== tag.id) {
+            showError(new InboxApiError(409, 'initiative_exists', `There is already a tag named ${taken.name}.`));
             return false;
           }
+          const { refused, held } = await changeTagEverywhere(tag, { op: 'rename', name });
           await refreshList(false);
-          return true;
+          if (refused) showError(refused);
+          else if (held) showError(held);
+          return !refused;
         },
         onDelete: (tag: InboxInitiative) => void deleteTag(tag),
       };
-  const deleteTag = async (tag: InboxInitiative) => {
-    try {
-      await inboxApi.changeInitiative(tag.id, { op: 'delete' });
-    } catch (cause) {
-      showError(cause);
+  /**
+   * A tag's rename, delete or Undo on every machine that holds one of its name and takes tags from here: this Inbox
+   * first (its refusal stops the rest), then each linked one. One asleep holds the change and gets it when it is back.
+   * An older one keeps its own tag as it is.
+   */
+  const changeTagEverywhere = async (tag: ListTag, change: { op: 'rename'; name: string } | { op: 'delete' } | { op: 'restore' }) => {
+    let refused: unknown = null;
+    let held: InboxHeldError | null = null;
+    const own = tagIdOn(tag, null, machines.self);
+    if (own) {
+      try {
+        await inboxApi.changeInitiative(own, change);
+      } catch (cause) {
+        return { refused: cause, held };
+      }
+    }
+    for (const [machine, id] of Object.entries(tag.machines ?? {})) {
+      if (machine === machines.self || !machineTakes({ machine }, machines, 'tags')) continue;
+      try {
+        await inboxApi.changeInitiative(id, change, machine);
+      } catch (cause) {
+        if (cause instanceof InboxHeldError) held = cause;
+        // A delete that finds it already gone there has nothing left to do.
+        else if (!(change.op === 'delete' && cause instanceof InboxApiError && cause.code === 'initiative_not_found')) refused ??= cause;
+      }
+    }
+    return { refused, held };
+  };
+  const deleteTag = async (tag: ListTag) => {
+    const { refused } = await changeTagEverywhere(tag, { op: 'delete' });
+    if (refused) {
+      showError(refused);
+      await refreshList(false);
       return;
     }
     // Its list goes with it: the Inbox, in its place.
-    if (routeRef.current.page === 'inbox' && routeRef.current.tag === tag.id) writeRoute({ page: 'inbox', project: null, thread: null }, { replace: true });
+    if (routeRef.current.page === 'inbox' && routeRef.current.tag && tagById([tag], routeRef.current.tag)) writeRoute({ page: 'inbox', project: null, thread: null }, { replace: true });
     await refreshList(false);
     showToast({ icon: 'check', ...initiativeDeletedToast([tag]), onUndo: () => void undoDeleteTag(tag) });
   };
-  const undoDeleteTag = async (tag: InboxInitiative) => {
+  const undoDeleteTag = async (tag: ListTag) => {
     dismissToast();
-    const { left, line } = await restoreInitiatives([tag]);
+    const own = tagIdOn(tag, null, machines.self);
+    const { left, line } = own ? await restoreInitiatives([{ ...tag, id: own }]) : { left: [], line: null };
+    // The linked machines' copies after this Inbox's own, which restoreInitiatives brought back.
+    const far = { ...tag, machines: Object.fromEntries(Object.entries(tag.machines ?? {}).filter(([machine]) => machine !== machines.self)) };
+    const { refused } = await changeTagEverywhere(far, { op: 'restore' });
     if (line) showToast({ icon: 'warn', wrap: true, lead: line, ...(left.length > 0 ? { onUndo: () => void undoDeleteTag(tag) } : {}) });
+    else if (refused) showError(refused);
     await refreshList(false);
   };
   const projectNames = useMemo(
@@ -5628,8 +5673,8 @@ function Inbox() {
   /** One project's rows, then one machine's, then one agent's, then one tag's, then without the machines the person hid while away. */
   const filterList = useCallback(
     (sections: readonly InboxListSection[]) =>
-      filterTagRows(filterAgentRows(filterMachineRows(filterSections(sections, route.project), machines, filterMachine?.id ?? null, hideAway), filterAgent, machines.self), route.tag ?? null, tagsOfRow),
-    [route.project, machines, filterMachine, filterAgent, hideAway, route.tag, tagsOfRow],
+      filterTagRows(filterAgentRows(filterMachineRows(filterSections(sections, route.project), machines, filterMachine?.id ?? null, hideAway), filterAgent, machines.self), shownTagId, tagsOfRow),
+    [route.project, machines, filterMachine, filterAgent, hideAway, shownTagId, tagsOfRow],
   );
   // The list's filter (listFilter.ts): this browser's picks; on a project's page its Project picks step aside. The
   // day is in the keys so Today and the last N days move on at midnight.
