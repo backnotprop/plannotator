@@ -14,6 +14,7 @@ export const TAB_MIN_WIDTH = 72;
 
 const MENU_RESERVE = 44;
 const TAB_GAP = 16;
+const ACTIVE_ROOM = 130;
 
 function naturalWidth(item: HTMLElement): number {
   let width = item.offsetWidth;
@@ -38,12 +39,16 @@ function useHiddenTabs(ref: React.RefObject<HTMLElement | null>, key: string, si
       const ids = new Set<string>();
       const items = [...element.querySelectorAll<HTMLElement>('[data-pane-tab-item]')].map((item) => ({ id: item.getAttribute('data-pane-tab-item')!, width: naturalWidth(item) }));
       const total = items.reduce((sum, item, index) => sum + item.width + (index ? TAB_GAP : 0), 0);
-      if (!single && total > element.clientWidth + 1) {
+      if (!single && element.clientWidth > 0 && total > element.clientWidth + 1) {
         const room = element.clientWidth - MENU_RESERVE;
-        const kept = items.filter((item) => item.id === activeId || item.id === REVIEW_ALL_FILES_PANEL_ID);
+        const active = items.find((item) => item.id === activeId);
+        const home = items.find((item) => item.id === REVIEW_ALL_FILES_PANEL_ID && item.id !== activeId);
+        const homeFits = !home || !active || home.width + TAB_GAP + Math.min(active.width, ACTIVE_ROOM) <= room;
+        const kept = items.filter((item) => item === active || (item === home && homeFits));
+        if (home && !homeFits) ids.add(home.id);
         let used = kept.reduce((sum, item, index) => sum + item.width + (index ? TAB_GAP : 0), 0);
         for (const item of items) {
-          if (kept.includes(item)) continue;
+          if (kept.includes(item) || ids.has(item.id)) continue;
           if (used + TAB_GAP + item.width <= room) used += TAB_GAP + item.width;
           else ids.add(item.id);
         }
