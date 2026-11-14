@@ -121,14 +121,19 @@ function SemanticDiffChangeRow({
   loadSource,
   onOpenLine,
   onOpenFile,
+  onReject,
 }: {
   change: SemanticDiffChange;
   onOpenChange: (change: SemanticDiffChange) => void;
   loadSource?: ReviewFileSourceLoader;
   onOpenLine?: SemanticOpenLine;
   onOpenFile?: SemanticOpenFile;
+  onReject?: (candidateId: string) => void;
 }) {
   const range = lineSelectionForChange(change);
+  const linked = change.origin === 'second-opinion';
+  const band = change.band === 'very-likely' ? 'Very likely' : change.band === 'likely' ? 'Likely' : '';
+  const model = change.model?.split(' ')[0]?.replace(/^jev.*/, 'Jev').replace(/^clef.*/, 'Clef') ?? 'the model';
   const sourcePath = change.changeType === 'deleted' ? change.oldFilePath ?? change.filePath : change.filePath;
   const sourcePreview = useHoverPreview<ReviewFileSource>(
     () => (loadSource && range ? loadSource(sourcePath, range.side === 'deletions' ? 'old' : 'new') : Promise.resolve(null)),
@@ -155,7 +160,10 @@ function SemanticDiffChangeRow({
         </span>
         <span className="semantic-diff-kind">{change.entityType}</span>
         <span className="semantic-diff-name">{getDisplayName(change)}</span>
-        <span className="semantic-diff-status">{change.changeType === 'modified' ? 'edited' : change.changeType}</span>
+        <span className="semantic-diff-status" data-semantic-origin={linked ? 'second-opinion' : undefined}>
+          {change.changeType === 'modified' ? 'edited' : change.changeType}
+          {linked && band ? ` · ${band}` : ''}
+        </span>
       </button>
       {sourcePreview.preview && range && (
         <CodeSnippetPreview
@@ -171,8 +179,27 @@ function SemanticDiffChangeRow({
             sourcePreview.dismiss();
             onOpenLine(sourcePath, line, range.side);
           } : undefined}
-          actions={onOpenFile ? (
-            <button
+          actions={onOpenFile || (linked && onReject && change.candidateId) ? (
+            <>
+            {linked && (
+              <span className="text-[10px]" data-power-up-linked="" title={`Linked by ${model}. The engine alone wasn't sure.`}>
+                Linked by {model}{band ? ` · ${band}` : ''}
+              </span>
+            )}
+            {linked && onReject && change.candidateId && (
+              <button
+                type="button"
+                className="text-[10px] px-1.5 py-0.5 rounded hover:bg-muted hover:text-foreground"
+                data-power-up-reject=""
+                onClick={() => {
+                  sourcePreview.dismiss();
+                  onReject(change.candidateId!);
+                }}
+              >
+                Not moved
+              </button>
+            )}
+            {onOpenFile && (<button
               type="button"
               className="text-[10px] px-1.5 py-0.5 rounded hover:bg-muted hover:text-foreground"
               data-snippet-open-file=""
@@ -182,7 +209,8 @@ function SemanticDiffChangeRow({
               }}
             >
               Open file
-            </button>
+            </button>)}
+            </>
           ) : undefined}
         />
       )}
@@ -202,6 +230,7 @@ export function SemanticDiffRows({
   loadSource,
   onOpenLine,
   onOpenFile,
+  onReject,
 }: {
   changes: SemanticDiffChange[];
   binaryChanges: SemanticDiffBinaryChange[];
@@ -213,6 +242,8 @@ export function SemanticDiffRows({
   onOpenLine?: SemanticOpenLine;
   /** The hover preview's "Open file": the whole file at that line. */
   onOpenFile?: SemanticOpenFile;
+  /** "Not moved" on a link the model made: retracts it and remembers. */
+  onReject?: (candidateId: string) => void;
 }) {
   return (
     <>
@@ -224,6 +255,7 @@ export function SemanticDiffRows({
           loadSource={loadSource}
           onOpenLine={onOpenLine}
           onOpenFile={onOpenFile}
+          onReject={onReject}
         />
       ))}
       {binaryChanges.map((change, index) => {

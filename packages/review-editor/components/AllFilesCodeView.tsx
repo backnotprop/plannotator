@@ -28,7 +28,8 @@ import { CommentPopover } from '@plannotator/ui/components/CommentPopover';
 import { usePierreTheme } from '../hooks/usePierreTheme';
 import { useIsWorkerPoolReadyOrDisabled, useWorkerPoolThemeSync } from '../workerPool';
 import { useConfigValue } from '@plannotator/ui/config';
-import type { SemDiffClient } from '../semDiff/semDiffClient';
+import type { SemDiffClient, SemDiffResult } from '../semDiff/semDiffClient';
+import type { PowerUpConfig, PowerUpFileState, PowerUpStatus } from '../semDiff/powerUp';
 import { SemanticFileNote, type SemanticFileState } from '../semDiff/SemanticFileNote';
 import type { DiffFile, AnnotationScrollTarget } from '../types';
 import type { MarkdownFileView } from '../utils/markdownPreview';
@@ -238,6 +239,8 @@ export interface AllFilesCodeViewProps {
   selectedAnnotationId: string | null;
   scrollTargetAnnotation: AnnotationScrollTarget | null;
   lineTarget?: AllFilesLineTarget | null;
+  powerUp?: PowerUpConfig | null;
+  onPowerUpStatus?: (status: PowerUpStatus) => void;
   pendingSelection: SelectedLineRange | null;
   reviewBase?: string;
   reviewSnapshotId?: string;
@@ -797,6 +800,8 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   selectedAnnotationId,
   scrollTargetAnnotation,
   lineTarget,
+  powerUp,
+  onPowerUpStatus,
   pendingSelection,
   reviewBase,
   reviewSnapshotId,
@@ -1187,6 +1192,10 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   const semClientRef = useRef(semDiffClient ?? null);
   semClientRef.current = semDiffClient ?? null;
   const semStateRef = useRef(new Map<string, SemanticFileState>());
+  const semTextsRef = useRef(new Map<string, { file: DiffFile; oldText: string; newText: string; generation: string; signal: AbortSignal }>());
+  const powerUpFilesRef = useRef(new Map<string, PowerUpFileState>());
+  const powerUpRef = useRef(powerUp ?? null);
+  powerUpRef.current = powerUp ?? null;
   const semDiffsRef = useRef(new Map<string, { plain: FileDiffMetadata; semantic: FileDiffMetadata }>());
   // Stable identity of the current diff. Changes whenever the file set or any
   // file's patch CONTENT changes (diff type / base / whitespace / PR switch),
@@ -1221,6 +1230,8 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     previewAppliedRef.current = new Set();
     semStateRef.current = new Map();
     semDiffsRef.current = new Map();
+    semTextsRef.current = new Map();
+    powerUpFilesRef.current = new Map();
     for (const item of identity.items) {
       if (item.type !== 'diff' || !previewItemIds.has(item.id)) continue;
       fullDiffsRef.current.set(item.id, item.fileDiff);
@@ -1875,6 +1886,97 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     for (const itemId of semDiffsRef.current.keys()) showSemantic(itemId, semanticEnabled);
   }, [semanticEnabled, showSemantic]);
 
+  const reportPowerUp = useStableCallback(() => {
+    if (!onPowerUpStatus) return;
+    let asking = 0;
+    let links = 0;
+    let answered = 0;
+    let unavailable: PowerUpFileState['state'] | null = null;
+    for (const entry of powerUpFilesRef.current.values()) {
+      if (entry.state === 'asking') asking++;
+      else if (entry.state === 'ok') {
+        answered++;
+        links += entry.links.length;
+      } else unavailable ??= entry.state;
+    }
+    onPowerUpStatus({ asking, answered, links, unavailable });
+  });
+
+  const applySemanticResult = useStableCallback((
+    itemId: string,
+    file: DiffFile,
+    oldText: string,
+    newText: string,
+    generation: string,
+    stale: () => boolean,
+    result: SemDiffResult,
+    onDropped: () => void,
+  ) => {
+    queueAugmentApply(itemId, () => {
+      if (stale()) return;
+      const liveHandle = viewerRef.current;
+      const item = liveHandle?.getItem(itemId);
+      if (liveHandle == null || item == null || item.type !== 'diff' || itemId === editSession.editingItemIdRef.current) {
+        onDropped();
+        return;
+      }
+      let semantic: FileDiffMetadata | null | undefined;
+      try {
+        semantic = processFile(result.patch, {
+          oldFile: { name: file.oldPath || file.path, contents: oldText },
+          newFile: { name: file.path, contents: newText },
+        });
+      } catch {
+        semantic = null;
+      }
+      if (!semantic || semantic.isPartial) {
+        onDropped();
+        return;
+      }
+      const links = result.secondOpinion?.links ?? [];
+      const operations = result.semanticOperations.map((op, index) =>
+        links.some((link) => link.operationIndex === index) ? { ...op, origin: 'second-opinion' } : op,
+      );
+      Object.assign(semantic, { semanticOperations: operations, semanticFolds: result.semanticFolds });
+      semantic.cacheKey = `${generation}::${itemId}#semantic${links.length > 0 ? `:${links.map((link) => link.candidateId).join(',')}` : ''}`;
+      const previous = semDiffsRef.current.get(itemId);
+      const plain = previous?.plain ?? (previewAppliedRef.current.has(itemId) ? fullDiffsRef.current.get(itemId) ?? item.fileDiff : item.fileDiff);
+      semDiffsRef.current.set(itemId, { plain, semantic });
+      semStateRef.current.set(itemId, { status: 'off', summary: result.summary });
+      showSemantic(itemId, semanticEnabledRef.current);
+    });
+  });
+
+  const runPowerUp = useStableCallback((itemId: string) => {
+    const client = semClientRef.current;
+    const texts = semTextsRef.current.get(itemId);
+    const powerUp = powerUpRef.current;
+    if (!client || !texts || !powerUp?.active) return;
+    const { file, oldText, newText, generation, signal } = texts;
+    const stale = () => signal.aborted || fileSetKeyRef.current !== generation;
+    const hadLinks = (powerUpFilesRef.current.get(itemId)?.links.length ?? 0) > 0;
+    powerUpFilesRef.current.set(itemId, { state: 'asking', links: [] });
+    reportPowerUp();
+    void client.diff(file.path, oldText, newText, signal, { rejected: powerUp.rejected }).then((result) => {
+      if (stale()) return;
+      const report = result?.secondOpinion;
+      if (!result || !report) {
+        powerUpFilesRef.current.set(itemId, { state: 'failed', links: [] });
+        reportPowerUp();
+        return;
+      }
+      if (report.state !== 'ok') {
+        powerUpFilesRef.current.set(itemId, { state: report.state, links: [] });
+        reportPowerUp();
+        return;
+      }
+      powerUpFilesRef.current.set(itemId, { state: 'ok', links: report.links });
+      reportPowerUp();
+      if (report.links.length === 0 && !hadLinks) return;
+      applySemanticResult(itemId, file, oldText, newText, generation, stale, result, () => {});
+    });
+  });
+
   const runSemantic = useStableCallback((
     itemId: string,
     file: DiffFile,
@@ -1886,6 +1988,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     const client = semClientRef.current;
     if (!client || oldText == null || newText == null || !client.supports(file.path)) return;
     const stale = () => signal.aborted || fileSetKeyRef.current !== generation;
+    semTextsRef.current.set(itemId, { file, oldText, newText, generation, signal });
     semStateRef.current.set(itemId, { status: 'working' });
     refreshItem(itemId);
     const settleEmpty = () => {
@@ -1894,40 +1997,37 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     };
     void client.diff(file.path, oldText, newText, signal).then((result) => {
       if (stale()) return;
-      if (!result) {
-        settleEmpty();
-        return;
-      }
-      queueAugmentApply(itemId, () => {
-        if (stale()) return;
-        const liveHandle = viewerRef.current;
-        const item = liveHandle?.getItem(itemId);
-        if (liveHandle == null || item == null || item.type !== 'diff' || itemId === editSession.editingItemIdRef.current) {
-          settleEmpty();
-          return;
-        }
-        let semantic: FileDiffMetadata | null | undefined;
-        try {
-          semantic = processFile(result.patch, {
-            oldFile: { name: file.oldPath || file.path, contents: oldText },
-            newFile: { name: file.path, contents: newText },
-          });
-        } catch {
-          semantic = null;
-        }
-        if (!semantic || semantic.isPartial) {
-          settleEmpty();
-          return;
-        }
-        Object.assign(semantic, { semanticOperations: result.semanticOperations, semanticFolds: result.semanticFolds });
-        semantic.cacheKey = `${generation}::${itemId}#semantic`;
-        const plain = previewAppliedRef.current.has(itemId) ? fullDiffsRef.current.get(itemId) ?? item.fileDiff : item.fileDiff;
-        semDiffsRef.current.set(itemId, { plain, semantic });
-        semStateRef.current.set(itemId, { status: 'off', summary: result.summary });
-        showSemantic(itemId, semanticEnabledRef.current);
-      });
+      if (!result) settleEmpty();
+      else applySemanticResult(itemId, file, oldText, newText, generation, stale, result, settleEmpty);
+      runPowerUp(itemId);
     });
   });
+
+  const rejectedKey = powerUp?.rejected.join(',') ?? '';
+  const powerUpActive = powerUp?.active === true;
+  const powerUpRetry = powerUp?.retry ?? 0;
+  useEffect(() => {
+    if (!powerUpActive) {
+      const client = semClientRef.current;
+      for (const [itemId, entry] of powerUpFilesRef.current) {
+        const texts = semTextsRef.current.get(itemId);
+        if (entry.links.length === 0 || !client || !texts) continue;
+        const { file, oldText, newText, generation, signal } = texts;
+        const stale = () => signal.aborted || fileSetKeyRef.current !== generation;
+        void client.diff(file.path, oldText, newText, signal).then((result) => {
+          if (result && !stale()) applySemanticResult(itemId, file, oldText, newText, generation, stale, result, () => {});
+        });
+      }
+      powerUpFilesRef.current = new Map();
+      reportPowerUp();
+      return;
+    }
+    for (const [itemId, entry] of powerUpFilesRef.current) {
+      if (entry.state !== 'ok' || entry.links.some((link) => powerUpRef.current?.rejected.includes(link.candidateId))) runPowerUp(itemId);
+    }
+    for (const itemId of semTextsRef.current.keys()) if (!powerUpFilesRef.current.has(itemId)) runPowerUp(itemId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rejectedKey, powerUpActive, powerUpRetry]);
 
   // Fetch full file contents for one item, reparse with processFile, and swap
   // the item's fileDiff in place so hunk expansion (expand-unchanged gutter

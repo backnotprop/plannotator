@@ -109,8 +109,9 @@ import {
 } from '../utils/fileBrowser';
 import { requestVimDocumentFocus } from '../hooks/useVimDocumentFocus';
 import { AnalysisLayerToggle } from './AnalysisLayerToggle';
+import { SemanticDiffsTab } from './settings/SemanticDiffsTab';
 
-type SettingsTab = 'general' | 'theme' | 'review' | 'display' | 'analysis' | 'saving' | 'labels' | 'vim' | 'shortcuts' | 'ai' | 'files' | 'obsidian' | 'bear' | 'octarine' | 'notion' | 'comments' | 'hooks' | 'experimental';
+type SettingsTab = 'general' | 'theme' | 'review' | 'display' | 'semantic' | 'analysis' | 'saving' | 'labels' | 'vim' | 'shortcuts' | 'ai' | 'files' | 'obsidian' | 'bear' | 'octarine' | 'notion' | 'comments' | 'hooks' | 'experimental';
 
 interface SettingsProps {
   taterMode: boolean;
@@ -1273,6 +1274,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
     if (mode === 'review') {
       t.push({ id: 'review', label: 'Review' });
       t.push({ id: 'display', label: 'Editor' });
+      t.push({ id: 'semantic', label: 'Semantic diffs' });
       t.push({ id: 'analysis', label: 'Analysis' });
       t.push({ id: 'comments', label: 'Comments' });
       if (aiProviders.length > 0) {
@@ -1989,6 +1991,8 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                 {activeTab === 'display' && mode === 'review' && (
                   <ReviewDisplayTab isCompactTouchLayout={isCompactTouchLayout} />
                 )}
+
+                {activeTab === 'semantic' && mode === 'review' && <SemanticDiffsTab />}
 
                 {activeTab === 'experimental' && mode === 'review' && <ExperimentalTab />}
 

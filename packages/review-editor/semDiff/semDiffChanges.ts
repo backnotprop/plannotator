@@ -1,4 +1,4 @@
-import type { SemanticDiffOperation } from '@plannotator/sem-diff';
+import type { SecondOpinionLink, SemanticDiffOperation } from '@plannotator/sem-diff';
 import { SKIM_KINDS } from '@plannotator/sem-diff/summary';
 import type { SemanticDiffChange } from '@plannotator/shared/semantic-diff-types';
 
@@ -48,8 +48,10 @@ export function semDiffChanges(
   oldText: string,
   newText: string,
   oldFilePath: string | null = null,
+  links: readonly SecondOpinionLink[] = [],
 ): SemanticDiffChange[] {
-  return operations.map((op) => {
+  return operations.map((op, index) => {
+    const link = links.find((candidate) => candidate.operationIndex === index);
     const oldRange = op.lines.old[0];
     const newRange = op.lines.new[0];
     const oldEnd = op.lines.old.at(-1)?.end ?? null;
@@ -74,6 +76,7 @@ export function semDiffChanges(
       oldStartLine: oldRange?.start ?? null,
       oldEndLine: oldEnd,
       structuralChange: !SKIM_KINDS.includes(op.type),
+      ...(link ? { origin: 'second-opinion' as const, band: link.band, model: link.model, candidateId: link.candidateId } : {}),
     };
   });
 }

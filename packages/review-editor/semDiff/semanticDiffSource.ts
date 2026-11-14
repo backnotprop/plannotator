@@ -1,5 +1,5 @@
 import type { SemanticDiffChange, SemanticDiffResponse } from '@plannotator/shared/semantic-diff-types';
-import type { SemDiffClient } from './semDiffClient';
+import type { SemDiffClient, SemDiffOpinionRequest } from './semDiffClient';
 import { semDiffChanges } from './semDiffChanges';
 
 export interface SemanticDiffSourceFile {
@@ -39,6 +39,7 @@ export async function computeReviewSemanticDiff(
   client: SemDiffClient,
   read: ReadFileContents,
   signal: AbortSignal,
+  opinion?: SemDiffOpinionRequest,
 ): Promise<SemanticDiffResponse> {
   const targets = files.filter((file) => client.supports(file.path)).slice(0, MAX_FILES);
   const perFile: SemanticDiffChange[][] = targets.map(() => []);
@@ -49,9 +50,12 @@ export async function computeReviewSemanticDiff(
       const file = targets[index]!;
       const contents = await read(file, signal).catch(() => null);
       if (!contents || contents.oldContent == null || contents.newContent == null) continue;
-      const result = await client.diff(file.path, contents.oldContent, contents.newContent, signal);
+      const plain = await client.diff(file.path, contents.oldContent, contents.newContent, signal);
+      const powered = opinion ? await client.diff(file.path, contents.oldContent, contents.newContent, signal, opinion) : null;
+      const links = powered?.secondOpinion?.state === 'ok' ? powered.secondOpinion.links : [];
+      const result = links.length > 0 ? powered : plain;
       if (!result) continue;
-      perFile[index] = semDiffChanges(file.path, result.semanticOperations, contents.oldContent, contents.newContent, file.oldPath ?? null);
+      perFile[index] = semDiffChanges(file.path, result.semanticOperations, contents.oldContent, contents.newContent, file.oldPath ?? null, links);
     }
   };
   await Promise.all(Array.from({ length: CONCURRENCY }, work));

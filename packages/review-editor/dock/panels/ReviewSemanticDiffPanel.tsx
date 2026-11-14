@@ -59,6 +59,8 @@ export function ReviewSemanticDiffPanel() {
     onLineSelection,
     revealInAllChanges,
     openRepoFileAt,
+    powerUp,
+    rejectPowerUpLink,
   } = state;
   const [loadState, setLoadState] = useState<LoadState>({ status: 'idle' });
   const [retryCount, setRetryCount] = useState(0);
@@ -96,6 +98,7 @@ export function ReviewSemanticDiffPanel() {
     return () => controller.abort();
   }, [
     rawPatch,
+    powerUp,
     retryCount,
     semanticDiffAvailable,
     onSemanticDiffUnavailable,
@@ -185,6 +188,7 @@ export function ReviewSemanticDiffPanel() {
                 loadSource={loadSource}
                 onOpenLine={openLine}
                 onOpenFile={openRepoFileAt}
+                onReject={rejectPowerUpLink}
               />
             </div>
           </section>
