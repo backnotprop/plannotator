@@ -319,7 +319,7 @@ test('an agent connects: the draft (saved with nobody in To) reopens with To emp
   await expect(pane.locator('[data-started-by]')).toHaveText(/You started this thread\s*to Claude Code in ledger/);
   await expect(pane.locator('[data-attachment-name="notes.md"]').first()).toBeVisible();
   // The session's connection polls idle: it takes it within seconds.
-  await expect(pane.locator('[data-delivery="sending"]')).toHaveText('Sending to Claude Code…');
+  await expect(pane.locator('[data-delivery="sending"]').locator('.ib-dl-text')).toHaveText('Sending to Claude Code…');
   const listRow = page.locator(`.ib-listcol [data-thread-id="${command.thread_id}"]`).first();
   await expect(listRow).toContainText('To Claude Code');
   // The thread's name as compose showed it, the row's title (approval "list-rows-mail-icons").

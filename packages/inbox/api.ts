@@ -71,6 +71,8 @@ import type { RecipientConnection } from './deliveryLine';
 export { dispatchInboxFrame, INBOX_EVENT_FRAMES, openInboxEventFrames, subscribeInboxEvents, type InboxEventFrame, type InboxEventFrameName, type InboxEventHandlers, type InboxEventWindow, type MachineRecordFrame } from './eventFrames';
 import type { PatchBlobIds } from '@plannotator/core/diff-files';
 import type { InboxFileContents, InboxPullDetailsAnswer, InboxPullDiffAnswer, InboxPullDiffScope, InboxPullRiskAnswer, InboxPullRiskModels, InboxPullsAnswer, InboxReviewChanges, InboxReviewChangesAnswer, InboxReviewLinkAnswer, InboxReviewsAnswer, InboxRestartAgents, InboxTidyPlan, InboxTidyRun, InboxActivityModel } from '@plannotator/core/inbox-types';
+import { InboxApiError, readJson } from './apiError';
+export { InboxApiError };
 import type { InboxSearchAnswer, InboxSearchFrom, InboxSearchGroupId, InboxSearchSort, InboxSearchStatus } from '@plannotator/core/inbox-search';
 import type {
   InboxAgentId,
@@ -892,41 +894,6 @@ export interface InboxCommentDraftView {
   text: string;
   images: ImageRef[];
   updated_at: string;
-}
-
-export class InboxApiError extends Error {
-  constructor(
-    readonly status: number,
-    readonly code: string,
-    message: string,
-    /** The request's field the refusal names (`files[1]`), when it names one. */
-    readonly field: string | null = null,
-    /** When a held read may be asked again (ms since the epoch), when the answer says. */
-    readonly retryAt: number | null = null,
-    /** `thread_name_taken`: the one open thread that has the name, when the answer names it. */
-    readonly threadId: string | null = null,
-    /** `question_revision_conflict`: the question's revision on the Inbox now, when the answer names it. */
-    readonly currentRevision: number | null = null,
-  ) {
-    super(message);
-    this.name = 'InboxApiError';
-  }
-}
-
-async function readJson<T>(response: Response): Promise<T> {
-  const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
-  if (!response.ok) {
-    throw new InboxApiError(
-      response.status,
-      typeof body.code === 'string' ? body.code : 'error',
-      typeof body.error === 'string' ? body.error : `The Inbox answered ${response.status}.`,
-      typeof body.field === 'string' ? body.field : null,
-      typeof body.retry_at === 'number' ? body.retry_at : null,
-      typeof body.thread_id === 'string' ? body.thread_id : null,
-      typeof body.current_revision === 'number' ? body.current_revision : null,
-    );
-  }
-  return body as T;
 }
 
 /** A thread read as the window holds it (`thread`, and a Send's `thread_read`). */
@@ -2240,6 +2207,7 @@ export const inboxApi = {
    */
   sendNow: (messageId: string, session?: string | null) =>
     post<{ message: InboxMessage }>(messageUrl(messageId, `/send-now`), session ? { session } : {}),
+  takeBack: (messageId: string) => post<{ message: InboxMessage; draft: InboxReplyDraft | null; compose: InboxDraft | null }>(messageUrl(messageId, '/take-back'), {}),
   newMessage: (threadId: string, input: { session: string; body: string; idempotency_key: string }) =>
     post<{ message: InboxMessage | null; replayed: boolean; held?: OutboxView }>(threadUrl(threadId, `/message`), input).catch((cause) => {
       // To another machine: held in the outbox, as a reply is; the thread shows it waiting.

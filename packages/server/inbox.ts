@@ -244,6 +244,7 @@ import { createLoginEnv } from "./inbox-launch-env";
 import { inboxNamesShown, inboxSessionsShown } from "./inbox-session-names";
 import { createInboxReplyDrafts } from "./inbox-reply-drafts";
 import { createInboxCommentDrafts } from "./inbox-comment-drafts";
+import { createInboxTakeBack } from "./inbox-take-back";
 import { createInboxAsk } from "./inbox-ask";
 import type { InboxAskTimes } from "./inbox-ask-live";
 import { createInboxPins } from "./inbox-pins";
@@ -842,6 +843,9 @@ const ERROR_STATUS: Record<string, number> = {
   handoff_settled: 409,
   // Compose: a new thread the person starts (packages/server/inbox-compose.ts).
   already_delivered: 409,
+  agent_has_it: 409,
+  taken_back: 409,
+  cannot_take_back: 422,
   not_addressed: 422,
   session_still_live: 422,
   // A thread name another open thread of the project already has.
@@ -4015,11 +4019,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     if (sendNow && steer?.busy === true && steer.send_now) autoSendFor(session, tags);
     // What waits for this session, and for the sessions its conversation continues that no longer poll
     // (`continues`, inbox-continuations.ts): each worded for the session it waits for.
-    const commands = () => {
-      const list = live
-        .pendingOf(session, { tags })
-        .filter((item) => !withdrawnTidy(item.message))
-        .map((item) => replyCommand(item.message, sendNow, item.as));
+    const handedOut = () => live.pendingOf(session, { tags }).filter((item) => !withdrawnTidy(item.message));
+    const commands = (items = handedOut()) => {
+      const list = items.map((item) => replyCommand(item.message, sendNow, item.as));
       // Handed an item for the running turn: an older connection does not poll again until it goes in.
       if (body[INBOX_STEER_POLLS_POLL_FIELD] !== true && list.some((command) => command.now === true)) live.steerHanded(session);
       return list;
@@ -4029,7 +4031,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // Auto reload (owner approval "cc-auto-reload"): a Claude Code connection that reloads itself is told,
     // on every answer, the version a /reload-plugins loads while the session is outdated (fix `restart`).
     const reloadOffer = () => live.reloadAnswerFor(session, body);
-    const now = commands();
+    const items = handedOut();
+    const now = commands(items);
+    if (requested === 0) store.handover.asked(items.map((item) => item.message), session);
     if (now.length > 0 || waitMs === 0 || ask.waits(session)) {
       answered();
       return json({ commands: now, ...askWaits(), ...reloadOffer() });
@@ -4508,6 +4512,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     },
   });
   const commentDrafts = createInboxCommentDrafts({ store, serverSession, readBody: (req) => readBody(req), json });
+  const takeBack = createInboxTakeBack({ store, serverSession, readBody: (req) => readBody(req), json });
   // Ask AI: the conversation a thread keeps with its agent (packages/server/inbox-ask.ts).
   const ask = createInboxAsk({
     codeReviewOn,
@@ -6152,6 +6157,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       if (drafted) return drafted;
       const commentDrafted = await commentDrafts.route(req, url);
       if (commentDrafted) return commentDrafted;
+      const takenBack = await takeBack.route(req, url);
+      if (takenBack) return takenBack;
       // Ask AI: on for everyone; only the owner's own window is answered.
       const asked = await ask.route(req, url, via);
       if (asked) return asked;

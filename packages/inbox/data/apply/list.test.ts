@@ -26,6 +26,15 @@ describe('applyListRecord', () => {
     expect(snoozed.snoozed!.map((r) => r.thread_id)).toEqual([]);
   });
 
+  test('a thread whose only message was taken back leaves the list, the snoozed and the pins at once', () => {
+    const held = { ...list([row('a'), row('b')], [row('a')]), pins: [row('a')] } as ListModel;
+    const next = applyListRecord(held, rootLine('a', 11, { author: { kind: 'person' }, taken_back_at: '2026-11-14T10:00:00Z' }))!;
+    expect(next.sections[0]!.threads.map((r) => r.thread_id)).toEqual(['b']);
+    expect(next.snoozed).toEqual([]);
+    expect(next.pins).toEqual([]);
+    expect(next.cursor).toBe(11);
+  });
+
   test('a later line of a thread back after an archive (the same archive time) moves nothing', () => {
     const held = list([row('a', { resolved_at: '2026-11-10T09:00:00Z' })]);
     expect(applyListRecord(held, rootLine('a', 11, { resolved_at: '2026-11-10T09:00:00Z' }))).toBeNull();
