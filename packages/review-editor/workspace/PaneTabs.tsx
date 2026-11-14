@@ -14,7 +14,6 @@ export const TAB_MIN_WIDTH = 72;
 
 const MENU_RESERVE = 44;
 const TAB_GAP = 16;
-const ACTIVE_NEED_WIDTH = 150;
 
 function naturalWidth(item: HTMLElement): number {
   let width = item.offsetWidth;
@@ -44,14 +43,12 @@ function useHiddenTabs(ref: React.RefObject<HTMLElement | null>, key: string, si
       if (!single && total > element.clientWidth + 1) {
         room = element.clientWidth - MENU_RESERVE;
         const kept = items.filter((item) => item.id === activeId || item.id === REVIEW_ALL_FILES_PANEL_ID);
-        used = kept.reduce((sum, item, index) => sum + (item.id === REVIEW_ALL_FILES_PANEL_ID ? item.width : Math.min(item.width, ACTIVE_NEED_WIDTH)) + (index ? TAB_GAP : 0), 0);
+        used = kept.reduce((sum, item, index) => sum + item.width + (index ? TAB_GAP : 0), 0);
         for (const item of items) {
           if (kept.includes(item)) continue;
           if (used + TAB_GAP + item.width <= room) used += TAB_GAP + item.width;
           else ids.add(item.id);
         }
-        const active = items.find((item) => item.id === activeId);
-        if (active && active.width > ACTIVE_NEED_WIDTH) used += active.width - ACTIVE_NEED_WIDTH;
       }
       const directoryRoom = Math.max(0, Math.floor(room - used - 4));
       setHidden((before) => (before.directoryRoom === directoryRoom && before.ids.size === ids.size && [...ids].every((id) => before.ids.has(id)) ? before : { ids, directoryRoom }));
