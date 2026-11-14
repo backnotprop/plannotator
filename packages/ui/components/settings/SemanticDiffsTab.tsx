@@ -20,8 +20,9 @@ function failureText(provider: Provider, failure: Failure): string {
   return `${name} did not answer. Try again in a moment.`;
 }
 
-function KeyField({ caption, label, value, onChange, secret, flagged, saved, onFocus, className }: {
+function KeyField({ caption, label, value, onChange, secret, flagged, message, saved, onFocus, className }: {
   caption?: string;
+  message?: string;
   label: string;
   value: string;
   onChange: (v: string) => void;
@@ -35,7 +36,8 @@ function KeyField({ caption, label, value, onChange, secret, flagged, saved, onF
     <label className={`flex flex-col gap-1 ${className}`}>
       {caption && <span className="text-xs font-medium text-foreground">{caption}</span>}
       <input
-        className={`h-7 w-full min-w-0 rounded-md border bg-background px-2 font-mono text-xs outline-none focus:ring-1 focus:ring-ring ${flagged ? 'border-warning' : 'border-border'}`}
+        className={`h-7 w-full min-w-0 rounded-md border bg-background px-2 font-mono text-xs outline-none ${flagged ? 'border-warning ring-1 ring-warning focus:ring-2 focus:ring-warning' : 'border-border focus:ring-1 focus:ring-ring'}`}
+        style={flagged ? { outlineColor: 'var(--warning)' } : undefined}
         type={secret ? 'password' : 'text'}
         autoComplete="off"
         spellCheck={false}
@@ -45,7 +47,13 @@ function KeyField({ caption, label, value, onChange, secret, flagged, saved, onF
         onFocus={onFocus}
         aria-label={label}
         aria-invalid={flagged || undefined}
+        aria-describedby={message ? `${label.replace(/\W+/g, '-')}-message` : undefined}
       />
+      {message && (
+        <span id={`${label.replace(/\W+/g, '-')}-message`} className="text-xs text-warning" data-power-up-key-failure="">
+          {message}
+        </span>
+      )}
     </label>
   );
 }
@@ -149,6 +157,7 @@ export function SemanticDiffsTab() {
   };
 
   const saved = configured && savedProvider === provider && (!editing || (provider === 'jev' ? !apiKey : !accountId && !apiToken));
+  const failure = check.kind === 'error' ? check.failure : null;
   const complete = provider === 'jev' ? apiKey.trim() !== '' : accountId.trim() !== '' && apiToken.trim() !== '';
   return (
     <div className="space-y-4" data-semantic-diffs-settings="">
@@ -186,7 +195,16 @@ export function SemanticDiffsTab() {
           <Row title="Model" hint="This review host cannot keep a key." />
         ) : (
           <>
-            <Row title="Model" hint={provider === 'jev' ? 'Jev is the faster one, about 0.2 s a file.' : 'Clef runs on your Cloudflare account.'}>
+            <Row
+              title="Model"
+              hint={
+                configured && savedProvider && savedProvider !== provider
+                  ? `${PROVIDER_NAME[savedProvider]} keeps powering up until ${provider === 'clef' ? 'a Clef token' : 'a Jev key'} works.`
+                  : provider === 'jev'
+                    ? 'Jev is the faster one, about 0.2 s a file.'
+                    : 'Clef runs on your Cloudflare account.'
+              }
+            >
               <Segmented
                 label="Model"
                 value={provider}
@@ -203,8 +221,8 @@ export function SemanticDiffsTab() {
               hint={
                 check.kind === 'ok' ? (
                   `✓ Key works · ${check.ms} ms`
-                ) : check.kind === 'error' ? (
-                  <span className="text-foreground" data-power-up-key-failure={check.failure}>{failureText(provider, check.failure)}</span>
+                ) : check.kind === 'error' && check.failure === 'noAnswer' ? (
+                  <span className="text-warning" data-power-up-key-failure="noAnswer">{failureText(provider, check.failure)}</span>
                 ) : check.kind === 'checking' ? (
                   'Checking…'
                 ) : saved ? (
@@ -236,7 +254,8 @@ export function SemanticDiffsTab() {
                     value={apiKey}
                     onChange={setApiKey}
                     secret
-                    flagged={check.kind === 'error' && (check.failure === 'refused' || (check.failure === 'missing' && !apiKey))}
+                    flagged={failure === 'refused' || failure === 'noCredit' || (failure === 'missing' && !apiKey)}
+                    message={failure === 'refused' || failure === 'noCredit' || (failure === 'missing' && !apiKey) ? failureText('jev', failure) : undefined}
                     saved={saved}
                     onFocus={() => setEditing(true)}
                   />
@@ -249,7 +268,8 @@ export function SemanticDiffsTab() {
                       value={accountId}
                       onChange={setAccountId}
                       secret={false}
-                      flagged={check.kind === 'error' && check.failure === 'missing' && !accountId}
+                      flagged={failure === 'missing' && !accountId}
+                      message={failure === 'missing' && !accountId ? 'Add your account ID' : undefined}
                       saved={saved}
                       onFocus={() => setEditing(true)}
                     />
@@ -260,7 +280,8 @@ export function SemanticDiffsTab() {
                       value={apiToken}
                       onChange={setApiToken}
                       secret
-                      flagged={check.kind === 'error' && (check.failure === 'refused' || (check.failure === 'missing' && !apiToken))}
+                      flagged={failure === 'refused' || failure === 'noCredit' || (failure === 'missing' && !apiToken)}
+                      message={failure === 'refused' || failure === 'noCredit' ? failureText('clef', failure) : failure === 'missing' && !apiToken ? 'Add your token' : undefined}
                       saved={saved}
                       onFocus={() => setEditing(true)}
                     />

@@ -70,6 +70,10 @@ describe('Settings › Semantic diffs › Power Up', () => {
     expect(host!.innerHTML).not.toContain(KEY);
     expect(powerUp().disabled).toBe(false);
     expect(host!.textContent).toContain('code is sent to Jev');
+    const clef = [...host!.querySelectorAll<HTMLButtonElement>('[role="radio"]')].find((b) => b.textContent === 'Clef')!;
+    await act(async () => clef.click());
+    expect(host!.textContent).toContain('Jev keeps powering up until a Clef token works.');
+    expect(powerUp().getAttribute('aria-checked')).toBe('true');
   });
 
   test.skipIf(!hasDom)('Clef asks for both fields in one fixed box and says when the account has no credit', async () => {
@@ -86,7 +90,8 @@ describe('Settings › Semantic diffs › Power Up', () => {
     await type('Workers AI token', 'tok');
     await act(async () => host!.querySelector<HTMLButtonElement>('button[type="submit"]')!.click());
     await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
-    expect(host!.textContent).toContain('No credit left on this Clef account');
+    const token = host!.querySelector<HTMLInputElement>('input[aria-label="Workers AI token"]')!;
+    expect(document.getElementById(token.getAttribute('aria-describedby')!)?.textContent).toBe('No credit left on this Clef account');
     expect(host!.querySelector('form')!.className).toContain('w-[250px]');
   });
 });
