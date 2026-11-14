@@ -140,3 +140,16 @@ export function threadLines(now: ReviewThreadNow): string {
   if (now.line_start === 0) return 'whole file';
   return now.line_start === now.line_end ? `line ${now.line_start}` : `lines ${now.line_start}–${now.line_end}`;
 }
+
+export function unsentComments<C extends CommentLike & { text?: string }>(comments: readonly C[], placed: readonly PlacedThread[]): C[] {
+  const sent = new Set(placed.map(({ conversation }) => {
+    const first = conversation.messages[0];
+    return JSON.stringify([conversation.anchor.file, conversation.anchor.side, conversation.anchor.line_start, conversation.anchor.line_end, first?.body.trim() ?? '']);
+  }));
+  return comments.filter((c) => {
+    if ((c.scope ?? 'line') === 'general' || !c.filePath || !c.text?.trim()) return false;
+    const whole = c.scope === 'file' || c.lineStart <= 0;
+    const key = JSON.stringify([c.filePath, c.side, whole ? 0 : c.lineStart, whole ? 0 : Math.max(c.lineEnd, c.lineStart), c.text.trim()]);
+    return !sent.has(key);
+  });
+}

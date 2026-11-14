@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { InboxMessage } from '@plannotator/core/inbox-types';
-import { anchorOfComment, deliveryWord, openThreadIds, placeThreads, stepThread } from './model';
+import { anchorOfComment, deliveryWord, openThreadIds, placeThreads, stepThread, unsentComments } from './model';
 
 const patch = ['@@ -1,6 +1,7 @@', ' export const RETRIES = 3;', ' ', ' export function charge(amount) {', '-  if (amount < 0) throw new Error("bad");', '+  if (amount < 0) throw new RangeError("amount");', '+  if (!Number.isInteger(amount)) throw new Error("cents");', '   return stripe.charge(amount);', ' }'].join('\n');
 const files = [{ path: 'src/billing.ts', patch }];
@@ -54,5 +54,15 @@ describe('next and previous open thread', () => {
     expect(stepThread(order, null, 1)).toBe('a');
     expect(stepThread(order, 'b', 1)).toBe('a');
     expect(stepThread(order, 'a', -1)).toBe('b');
+  });
+});
+
+describe('comments not sent yet', () => {
+  test('a comment that already went as a thread is not offered again, after a reload too; the others are', () => {
+    const comment = { filePath: 'src/billing.ts', lineStart: 4, lineEnd: 4, side: 'new' as const, text: 'Use RangeError.' };
+    const other = { ...comment, lineStart: 5, lineEnd: 5, text: 'Cents?' };
+    const general = { ...comment, scope: 'general' as const, filePath: '', text: 'Overall fine.' };
+    const placed = placeThreads([msg({ id: 'c', body: 'Use RangeError.', review_anchor: anchorOfComment(comment, files) })], files);
+    expect(unsentComments([comment, other, general], placed)).toEqual([other]);
   });
 });

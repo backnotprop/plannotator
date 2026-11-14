@@ -3,7 +3,7 @@ import type { CodeAnnotation } from '@plannotator/ui/types';
 import type { HostLineNote } from '../components/hostLineNotes';
 import type { ReviewSidebarExtraTab } from '../components/ReviewSidebar';
 import { liveApi, liveKey, LiveError, watchLive, type LiveSendTag } from './api';
-import { anchorOfComment, openThreadIds, placeThreads, stepThread, type LiveAgent, type LiveState, type PlacedThread } from './model';
+import { anchorOfComment, openThreadIds, placeThreads, stepThread, unsentComments, type LiveAgent, type LiveState, type PlacedThread } from './model';
 import { LiveThreadCard } from './LiveThreadCard';
 import { LiveThreadsTab } from './LiveThreadsTab';
 
@@ -23,7 +23,7 @@ export interface LiveReviewActions {
 export function useLiveReview(input: {
   files: readonly { path: string; patch: string }[];
   annotations: readonly CodeAnnotation[];
-  dropAnnotations: (ids: readonly string[]) => void;
+  dropAnnotations: ((ids: readonly string[]) => void) | null;
   revealLines: (filePath: string, start: number, end: number, side: 'old' | 'new') => void;
   openTab: (id: string) => void;
 }): { notes: readonly HostLineNote[]; tab: ReviewSidebarExtraTab | null } {
@@ -50,7 +50,7 @@ export function useLiveReview(input: {
 
   const placed = useMemo(() => placeThreads(state?.messages ?? [], input.files), [state?.messages, input.files]);
   const order = useMemo(() => openThreadIds(placed, input.files.map((f) => f.path)), [placed, input.files]);
-  const unsent = useMemo(() => input.annotations.filter((a) => (a.scope ?? 'line') !== 'general' && !!a.filePath && a.text?.trim()), [input.annotations]);
+  const unsent = useMemo(() => unsentComments(input.annotations, placed), [input.annotations, placed]);
 
   const defaultTo = useMemo(() => {
     const to = state?.thread?.to ?? state?.launched_by ?? null;
@@ -75,7 +75,7 @@ export function useLiveReview(input: {
           idempotency_key: liveKey(),
         })
         .catch(failed);
-      input.dropAnnotations(comments.map((c) => c.id));
+      input.dropAnnotations?.(comments.map((c) => c.id));
       refresh();
     },
     [defaultTo, state?.thread, input.files, input.dropAnnotations, failed, refresh],

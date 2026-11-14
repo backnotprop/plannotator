@@ -3119,7 +3119,7 @@ const ReviewApp: React.FC = () => {
     }
   }, [deleteExternalAnnotation, externalAnnotations, reviewHistory]);
   const dropSentComments = useCallback((ids: readonly string[]) => ids.forEach((id) => handleDeleteAnnotation(id)), [handleDeleteAnnotation]);
-  const liveReview = useLiveReview({ files, annotations, dropAnnotations: dropSentComments, revealLines: handleScrollToAILines, openTab: reviewSidebar.open });
+  const liveReview = useLiveReview({ files, annotations, dropAnnotations: prMetadata ? null : dropSentComments, revealLines: handleScrollToAILines, openTab: reviewSidebar.open });
   const hostNotes = useMemo(() => (liveReview.notes.length > 0 ? [...callTreeHunkNotes, ...liveReview.notes] : callTreeHunkNotes), [callTreeHunkNotes, liveReview.notes]);
 
   // Handle identity change - update author on existing annotations
