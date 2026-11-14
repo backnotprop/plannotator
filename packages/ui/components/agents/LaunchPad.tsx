@@ -67,9 +67,11 @@ function LaunchRow({
           <Icon className="shrink-0 text-muted-foreground" size={16} />
           <span className="min-w-0 flex-1">
             <span className="block truncate text-[13px] font-medium text-foreground">{title}</span>
-            <span className="block truncate text-[12px] text-muted-foreground" data-launch-summary="">
-              {side.models === null && !side.experimental ? 'Loading models…' : side.summary}
-            </span>
+            {side.models === null && !side.experimental ? (
+              <span className="block truncate text-[12px] text-muted-foreground" data-launch-summary="">Loading models…</span>
+            ) : (
+              <LaunchSummaryLine summary={side.summary} />
+            )}
           </span>
           <ChevronRight
             size={14}
@@ -148,5 +150,17 @@ export function LaunchPad({
         />
       )}
     </section>
+  );
+}
+
+export function LaunchSummaryLine({ summary }: { summary: string }) {
+  const [engine, model, ...rest] = summary.split(' · ');
+  if (!model) return <span className="block truncate text-[12px] text-muted-foreground" data-launch-summary="">{summary}</span>;
+  return (
+    <span className="flex min-w-0 text-[12px] text-muted-foreground" data-launch-summary="" title={summary}>
+      <span className="min-w-0 shrink-[2] truncate">{engine} ·&nbsp;</span>
+      <span className="max-w-full flex-none truncate" data-launch-model="">{model}</span>
+      {rest.length > 0 && <span className="min-w-0 shrink truncate">&nbsp;· {rest.join(' · ')}</span>}
+    </span>
   );
 }
