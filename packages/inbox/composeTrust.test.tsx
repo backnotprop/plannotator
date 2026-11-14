@@ -30,7 +30,7 @@ const wholeRepo = (): InboxLaunchUntrusted => ({ folder: '/Users/me/work/billing
 let root: Root | null = null;
 let host: HTMLElement | null = null;
 let savedFetch: typeof fetch;
-/** The server's offer by pick; absent: the folder is trusted, has no offer (home), or the reader is a guest. */
+/** The server's offer by pick; absent: the folder is trusted, or has no offer (home). */
 let offered: Record<string, InboxLaunchUntrusted | undefined>;
 /** The agent does not trust the scratch root, and there is no offer for it. */
 let scratchUntrusted: boolean;
@@ -239,7 +239,7 @@ test.skipIf(!hasDom)('a trusted folder: plain Send, no circle, and the Send carr
   expect(sends[0]!.launch).toEqual({ agent: AGENT, project_id: 'p1' });
 });
 
-test.skipIf(!hasDom)('a guest, or home: `untrusted` says nothing, so there is no offer anywhere', async () => {
+test.skipIf(!hasDom)('home: `untrusted` says nothing, so there is no offer anywhere', async () => {
   // The same answer for both: the folder is not listed.
   offered = { p1: undefined };
   await pickStart();
@@ -483,7 +483,7 @@ test.skipIf(!hasDom)('a scratch folder gets the same button, and the row in the 
   expect(sends[0]!.launch).toEqual({ agent: AGENT, scratch: true, trust: { folder: '/data/scratch', facts: [HOOK_FACT] } });
 });
 
-test.skipIf(!hasDom)('a scratch root nobody can trust from here (a guest, a root at home): the row still says so, since no press can', async () => {
+test.skipIf(!hasDom)('a scratch root nobody can trust from here (a root at home): the row still says so, since no press can', async () => {
   scratchUntrusted = true;
   await pickStart();
   await press('[data-compose-folder]');

@@ -120,18 +120,15 @@ export function createInboxIconSets(options: {
   builtIn: BuiltInIconSets;
   fetcher: IconSetFetcher;
   serverSession: string;
-  localOnly: () => Response;
   readBody: (req: Request) => Promise<Record<string, unknown>>;
   json: (body: unknown, status?: number) => Response;
 }) {
   const { builtIn, fetcher, serverSession, json } = options;
   const notFound = () => json({ error: "No such icon.", code: "no_icon" }, 404);
-  /** `owner`: this computer's window, or the owner's over the tailnet (`ownerOrLocal`). */
-  const route = async (req: Request, url: URL, owner: boolean): Promise<Response | null> => {
+  const route = async (req: Request, url: URL): Promise<Response | null> => {
     const path = url.pathname;
     if (path !== INBOX_ICON_SETS_PATH && !path.startsWith(`${INBOX_ICON_SETS_PATH}/`)) return null;
     if (req.method === "POST" && path === INBOX_ICON_SETS_PATH) {
-      if (!owner) return options.localOnly();
       const body = await options.readBody(req);
       if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
       if (typeof body.get !== "string") throw new InboxError("validation_error", "get: a set's id.", { field: "get" });
@@ -143,13 +140,12 @@ export function createInboxIconSets(options: {
     if (isCrossSiteRequest(req)) return json(INBOX_CROSS_SITE_BODY, 403);
     const rest = path.slice(INBOX_ICON_SETS_PATH.length + 1);
     if (path === INBOX_ICON_SETS_PATH) {
-      const fetched = owner ? await fetcher.list(url.searchParams.get("remote") === "1") : [];
+      const fetched = await fetcher.list(url.searchParams.get("remote") === "1");
       return json({ sets: [...(await builtIn.list()), ...fetched] });
     }
     const [set = "", icon, extra] = rest.split("/");
     if (extra !== undefined) return notFound();
     const isBuiltIn = builtIn.ids.has(set);
-    if (!isBuiltIn && !owner) return options.localOnly();
     if (icon === undefined) {
       if (url.searchParams.get("credits") === "1") {
         const credits = isBuiltIn ? await builtIn.credits(set) : null;

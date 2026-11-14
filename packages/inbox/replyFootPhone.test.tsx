@@ -244,7 +244,7 @@ const rowOrder = (el: HTMLElement) =>
 test.skipIf(!hasDom)('a phone: the row is the paperclip first, Skills, then the mic and Send (an arrow named "Send") at the right edge; no bin, and Discard is on the Draft line above the box', async () => {
   // The mic is in the row only with voice on.
   const { adoptVoiceSettings } = await import('./voice');
-  adoptVoiceSettings({ on: true, phones_only: false, engine: 'codex', key: { source: null, last4: null }, computer: null, intro_due: false, guest: false });
+  adoptVoiceSettings({ on: true, phones_only: false, engine: 'codex', key: { source: null, last4: null }, computer: null, intro_due: false });
   try {
     const el = await open({ questions: false });
     // One agent here: no recipient control, as on a computer (it comes only with several agents:
@@ -267,7 +267,7 @@ test.skipIf(!hasDom)('a phone: the row is the paperclip first, Skills, then the 
 
 test.skipIf(!hasDom)('a computer: Send first, the paperclip, Skills and the mic, and the bin at the far right', async () => {
   const { adoptVoiceSettings } = await import('./voice');
-  adoptVoiceSettings({ on: true, phones_only: false, engine: 'codex', key: { source: null, last4: null }, computer: null, intro_due: false, guest: false });
+  adoptVoiceSettings({ on: true, phones_only: false, engine: 'codex', key: { source: null, last4: null }, computer: null, intro_due: false });
   try {
     const el = await open({ questions: false, phone: false });
     expect(rowOrder(el)).toEqual(['send', 'attach', 'skills', 'mic', 'bin']);

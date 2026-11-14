@@ -105,7 +105,7 @@ describe("plannotator inbox --tailscale (processes, a fake tailscale on PATH)", 
     expect(readFileSync(log, "utf8")).not.toContain("funnel");
 
     expect((await throughServe("/api/inbox/threads")).status).toBe(200);
-    expect(await codeOf(await throughServe("/api/inbox/threads", { login: "guest@example.com" }))).toEqual([403, "tailnet_identity_refused"]);
+    expect(await codeOf(await throughServe("/api/inbox/threads", { login: "other@example.com" }))).toEqual([403, "tailnet_identity_refused"]);
     expect(await codeOf(await throughServe("/api/inbox/threads", { login: null }))).toEqual([403, "tailnet_identity_required"]);
     const bearer = { Authorization: `Bearer ${entry.token}`, "Content-Type": "application/json" };
     for (const path of ["/mcp", "/api/inbox/bridge/poll", "/api/inbox/control/stop"]) {
@@ -183,7 +183,7 @@ describe("plannotator inbox --tailscale (processes, a fake tailscale on PATH)", 
     expect(health.status).toBe(200);
     // Still owner rules on the new run, and still no way in for anyone else.
     expect((await throughServe("/api/inbox/agents")).status).toBe(200);
-    expect(await codeOf(await throughServe("/api/inbox/agents", { login: "guest@example.com" }))).toEqual([403, "tailnet_identity_refused"]);
+    expect(await codeOf(await throughServe("/api/inbox/agents", { login: "other@example.com" }))).toEqual([403, "tailnet_identity_refused"]);
 
     await stop("SIGTERM");
     expect(mappings()).toEqual({});

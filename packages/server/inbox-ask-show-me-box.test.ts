@@ -53,7 +53,6 @@ function setup(keep?: (id: string, picture: string) => Promise<string | null>) {
     serverSession: SESSION,
     readBody: async (req) => (await req.json()) as Record<string, unknown>,
     json: (body, status = 200) => Response.json(body, { status }),
-    isGuest: () => false,
     onChange: () => {},
     token: "t",
     hostOf: () => "claude-code",
