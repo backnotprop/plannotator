@@ -540,6 +540,8 @@ export function createInboxLiveSessions(options: {
       tags: false,
     };
     entry.host = host;
+    // A session the Inbox woke itself (a T3 thread its MCP sends named) that now polls is that connection from here.
+    delete entry.wakeOnly;
     setDeliveryFlags(entry, entry.busy, body[INBOX_SEND_NOW_POLL_FIELD] === true);
     setHeld(entry, body[INBOX_HELD_POLL_FIELD] === true);
     entry.tags = body[INBOX_TAGS_POLL_FIELD] === true;
@@ -1233,11 +1235,12 @@ export function createInboxLiveSessions(options: {
   /**
    * Whether `session` of `host` holds or made a bridge poll within the live
    * window now: its connection (the Claude Code mod, Pi, OpenCode 2) will
-   * hand it the person's reply as a turn. MCP activity never counts.
+   * hand it the person's reply as a turn. MCP activity never counts, nor a
+   * session only the Inbox wakes (`seenWakeOnly`).
    */
   const pollsNow = (host: string, session: string): boolean => {
     const entry = sessions.get(session);
-    return !!entry && entry.host === host && isLive(entry);
+    return !!entry && entry.host === host && entry.wakeOnly === undefined && isLive(entry);
   };
 
   /** `{ host?, session }` naming a live session in any project, or null when it is not live (compose's Send). */

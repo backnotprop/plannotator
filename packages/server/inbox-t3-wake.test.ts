@@ -255,6 +255,87 @@ describe("a reply to a T3 Code thread", () => {
 });
 
 /**
+ * A T3 thread whose Claude runs the Claude Code mod: the mod polls the bridge as host t3 and the thread, and puts
+ * the reply in as a turn of the running session itself. The failure these catch: one reply going in twice (the
+ * mod's turn and a T3 send), or a reply left waiting once T3 stopped that Claude.
+ */
+describe("a reply to a T3 thread whose Claude runs the Claude Code mod: one owner", () => {
+  async function modWorld() {
+    const clock = { now: Date.now() };
+    const w = await world({ sessionsNow: () => clock.now });
+    const poll = async () => {
+      const response = await fetch(`http://127.0.0.1:${w.server.port}/api/inbox/bridge/poll`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${w.server.token}` },
+        body: JSON.stringify({ session: THREAD, host: "t3", waitMs: 0, tags: true }),
+      });
+      expect(response.status).toBe(200);
+      return ((await response.json()) as { commands: { id: string }[] }).commands.map((command) => command.id);
+    };
+    const delivered = (id: string) =>
+      fetch(`http://127.0.0.1:${w.server.port}/api/inbox/bridge/event`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${w.server.token}` },
+        body: JSON.stringify({ session: THREAD, host: "t3", type: "delivered", id }),
+      });
+    return { ...w, clock, poll, delivered };
+  }
+
+  test("while the mod polls, the reply is the mod's: handed out on its poll, never sent through T3, and delivered once", async () => {
+    const w = await modWorld();
+    await w.poll();
+    const sent = await w.send("Ship the worker today?");
+    // The send says the reply arrives: the thread's own connection wakes it, grant or not.
+    expect(sent.text).toContain(INBOX_REPLY_ARRIVES_TEXT);
+    const replyId = await w.reply(sent.message_id, "Yes, ship it.");
+    await w.server.t3Wake.sweep();
+    await w.server.t3Wake.sweep();
+    expect(w.t3.sends).toHaveLength(0);
+    expect(await w.poll()).toEqual([replyId]);
+    await w.delivered(replyId);
+    await w.server.t3Wake.sweep();
+    expect(w.t3.sends).toHaveLength(0);
+    expect((await w.thread(sent.thread_id)).messages.at(-1)!.delivery).toMatchObject({ host: "t3", session: THREAD });
+  });
+
+  test("with no grant at all, a polling thread is told its reply arrives: no `plannotator t3 login`", async () => {
+    const clock = { now: Date.now() };
+    const w = await world({ grant: false, sessionsNow: () => clock.now });
+    await fetch(`http://127.0.0.1:${w.server.port}/api/inbox/bridge/poll`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${w.server.token}` },
+      body: JSON.stringify({ session: THREAD, host: "t3", waitMs: 0 }),
+    });
+    expect((await w.send("Anyone there?")).text).toContain(INBOX_REPLY_ARRIVES_TEXT);
+  });
+
+  test("once the mod stopped polling (T3 released that Claude), the T3 wake sends what still waits, once", async () => {
+    const w = await modWorld();
+    await w.poll();
+    const sent = await w.send("Ship the worker today?");
+    const replyId = await w.reply(sent.message_id, "Yes, ship it.");
+    await w.server.t3Wake.sweep();
+    expect(w.t3.sends).toHaveLength(0);
+    w.clock.now += 31_000;
+    await w.server.t3Wake.sweep();
+    expect(w.t3.sends).toEqual([expect.objectContaining({ threadId: THREAD, clientRequestId: `plannotator-inbox-${replyId}` })]);
+    await w.server.t3Wake.sweep();
+    expect(w.t3.sends).toHaveLength(1);
+  });
+
+  test("a mod that polls again while the T3 wake's send is in flight is not handed that reply", async () => {
+    const w = await modWorld();
+    const sent = await w.send("Ship the worker today?");
+    const replyId = await w.reply(sent.message_id, "Yes, ship it.");
+    const message = w.server.store.message(replyId)!;
+    expect(w.server.store.handover.hand(message, THREAD, "t3")).toBe(true);
+    expect(await w.poll()).toEqual([]);
+    w.server.store.handover.giveBack(replyId, THREAD);
+    expect(await w.poll()).toEqual([replyId]);
+  });
+});
+
+/**
  * The same wake over T3's real wire: the T3 client the Inbox ships (T3Client,
  * streamable HTTP, the saved grant's Bearer token) against a scripted T3 on
  * loopback (tests/helpers/fake-t3.ts).
