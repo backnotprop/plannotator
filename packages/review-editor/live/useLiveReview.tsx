@@ -6,6 +6,8 @@ import { liveApi, liveKey, LiveError, watchLive, type LiveSendTag } from './api'
 import { anchorOfComment, openThreadIds, placeThreads, stepThread, unsentComments, type LiveAgent, type LiveState, type PlacedThread } from './model';
 import { LiveThreadCard } from './LiveThreadCard';
 import { LiveThreadsTab } from './LiveThreadsTab';
+import { PRThreadCard, prThreadPlace } from './PRThreadCard';
+import type { PRReviewThread } from '@plannotator/shared/pr-types';
 import { liveMentionSource } from './LiveComposer';
 import { setLiveCommentSource, takeCommentTags } from './commentTags';
 
@@ -19,6 +21,7 @@ export interface LiveReviewActions {
   resolve: (conversationId: string, resolved: boolean) => Promise<void>;
   sendComments: (comments: readonly CodeAnnotation[], words: string, tags: LiveSendTag[]) => Promise<void>;
   reveal: (thread: PlacedThread) => void;
+  revealLines: (filePath: string, line: number, side: 'old' | 'new') => void;
   error: string | null;
 }
 
@@ -28,6 +31,7 @@ export function useLiveReview(input: {
   dropAnnotations: ((ids: readonly string[]) => void) | null;
   revealLines: (filePath: string, start: number, end: number, side: 'old' | 'new') => void;
   openTab: (id: string) => void;
+  pr?: { forge: string; threads: readonly PRReviewThread[] | null; load: () => void } | null;
 }): { notes: readonly HostLineNote[]; tab: ReviewSidebarExtraTab | null } {
   const [state, setState] = useState<LiveState | null>(null);
   const [agents, setAgents] = useState<readonly LiveAgent[]>([]);
@@ -112,13 +116,21 @@ export function useLiveReview(input: {
     [input.revealLines],
   );
 
-  const actions: LiveReviewActions = { agents, defaultTo, loadAgents, reply, resolve, sendComments, reveal, error };
+  const revealLines = useCallback((filePath: string, line: number, side: 'old' | 'new') => input.revealLines(filePath, line, line, side), [input.revealLines]);
+  const actions: LiveReviewActions = { agents, defaultTo, loadAgents, reply, resolve, sendComments, reveal, revealLines, error };
   const actionsRef = useRef(actions);
   actionsRef.current = actions;
 
+  const prThreads = input.pr?.threads ?? null;
+  const prForge = input.pr?.forge ?? 'GitHub';
   const notes = useMemo<HostLineNote[]>(() => {
     if (!state?.inbox) return [];
-    return placed
+    const forgeNotes: HostLineNote[] = (prThreads ?? []).flatMap((thread) => {
+      const place = prThreadPlace(thread);
+      if (!place || thread.isResolved) return [];
+      return [{ id: `pr:${thread.id}`, filePath: thread.path, line: place.line, side: place.side, key: JSON.stringify([thread.comments.length, thread.isOutdated]), render: () => <PRThreadCard thread={thread} forge={prForge} /> }];
+    });
+    return [...forgeNotes, ...placed
       .filter((p) => p.inDiff)
       .map((thread) => ({
         id: `live:${thread.conversation.id}`,
@@ -127,8 +139,8 @@ export function useLiveReview(input: {
         side: thread.conversation.anchor.side,
         key: JSON.stringify([agents.length, thread.now, thread.conversation.resolved, thread.conversation.messages.map((m) => [m.id, m.delivery?.at ?? null, (m.tags ?? []).map((t) => t.delivery?.at ?? null)])]),
         render: () => <LiveThreadCard thread={thread} messages={state.messages} actions={actionsRef} />,
-      }));
-  }, [state, placed, agents.length]);
+      }))];
+  }, [state, placed, agents.length, prThreads, prForge]);
 
   const step = useCallback(
     (direction: 1 | -1) => {
@@ -147,10 +159,10 @@ export function useLiveReview(input: {
             id: LIVE_TAB_ID,
             label: 'Threads',
             ...(order.length > 0 ? { count: order.length } : {}),
-            render: () => <LiveThreadsTab placed={placed} unsent={unsent} order={order} focused={focused} onStep={step} threadUrl={state?.thread_url ?? null} actions={actionsRef} />,
+            render: () => <LiveThreadsTab placed={placed} unsent={unsent} order={order} focused={focused} onStep={step} threadUrl={state?.thread_url ?? null} pr={input.pr ?? null} actions={actionsRef} />,
           }
         : null,
-    [visible, order, placed, unsent, focused, step, agents, error, defaultTo, state?.thread_url],
+    [visible, order, placed, unsent, focused, step, agents, error, defaultTo, state?.thread_url, input.pr],
   );
   useEffect(() => {
     if (error) input.openTab(LIVE_TAB_ID);
