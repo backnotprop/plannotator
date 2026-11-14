@@ -156,6 +156,7 @@ import { InboxError, inboxDir } from "@plannotator/shared/inbox/schema";
 import { inboxPromptsModel, parseInboxPromptsChange, saveInboxPromptsChange } from "./inbox-prompts";
 import { inboxRulesFitError } from "./inbox-rules";
 import { InboxStore } from "@plannotator/shared/inbox/store";
+import { inboxClaimDirs } from "@plannotator/shared/inbox/claims";
 import { INBOX_DB_FILE, inboxReturnHoldFromEnv, returnFromSqlite } from "@plannotator/shared/inbox/store-log/sqlite-return/return";
 import { INBOX_TIDY_WITHDRAWN_HOST, inboxTidyBodyStepsOff, inboxTidyIsStepsOnly, inboxTidyStepsOnlyWakes } from "@plannotator/shared/inbox/tidy";
 import { inboxArchivedRows, inboxListSections, inboxRowArchived } from "@plannotator/shared/inbox/list";
@@ -172,6 +173,7 @@ import {
   INBOX_REMOVED_ACTION,
   INBOX_REMOVED_ACTION_TEXT,
   INBOX_SEND_NOW_POLL_FIELD,
+  INBOX_SESSION_LIVE_MS,
   INBOX_STEER_POLLS_POLL_FIELD,
   INBOX_TAGS_POLL_FIELD,
   inboxStopNoticeId,
@@ -370,8 +372,14 @@ import {
   type InboxStepsWire,
 } from "@plannotator/core/inbox-types";
 
-/** The hosts whose own connection polls the bridge and wakes its session with the reply: the waking hosts but Codex, which the Inbox wakes itself. */
+/**
+ * The hosts whose own connection polls the bridge and wakes its session with the reply: the waking hosts but Codex,
+ * which the Inbox wakes itself, and T3 Code, whose thread's Claude polls only where it runs the Claude Code mod.
+ */
 const BRIDGE_WAKING_HOSTS: ReadonlySet<string> = new Set(INBOX_WAKING_HOSTS.filter((host) => !INBOX_MCP_WAKING_HOSTS.includes(host)));
+
+/** A host whose session's bridge may poll: T3 Code's too, for a thread whose Claude runs the Claude Code mod. */
+const pollingWakeHost = (host: string): boolean => BRIDGE_WAKING_HOSTS.has(host) || host === INBOX_T3_HOST;
 
 /** Where a request came in: the window's loopback port, or the tailnet-only listener `tailscale serve` points at. */
 type RequestVia = "local" | "tailnet";
@@ -1516,11 +1524,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // thread's messages wake it when this Inbox can run `codex queue` (inbox-codex-wake.ts); a running Qwen
     // Code session's, when this Inbox is its trusted sender (inbox-qwen-wake.ts).
     sessionWakes: async (host, session, meta) =>
-      (typeof host === "string" && typeof session === "string" && BRIDGE_WAKING_HOSTS.has(host) && live.pollsNow(host, session)) ||
+      (typeof host === "string" && typeof session === "string" && pollingWakeHost(host) && live.pollsNow(host, session)) ||
       (await codexWake.wakes(host, session, meta)) ||
       (await qwenWake.wakes(host, session, meta)) ||
       (await t3Wake.wakes(host, session)),
-    bridgePolls: (host, session) => BRIDGE_WAKING_HOSTS.has(host) && live.pollsNow(host, session),
+    bridgePolls: (host, session) => pollingWakeHost(host) && live.pollsNow(host, session),
     sessionName: (session) => live.labelOf(session) ?? live.titleOf(session),
     // The Board: the card tool is listed and served only while the person has it on.
     boardOn: () => boardOn(),
@@ -4026,7 +4034,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     if (sendNow && steer?.busy === true && steer.send_now) autoSendFor(session, tags);
     // What waits for this session, and for the sessions its conversation continues that no longer poll
     // (`continues`, inbox-continuations.ts): each worded for the session it waits for.
-    const handedOut = () => live.pendingOf(session, { tags }).filter((item) => !withdrawnTidy(item.message));
+    // A T3 thread's: never what the T3 wake handed for a send in flight (one owner per reply, `t3ModDelivers`).
+    const t3Thread = bridgeHost(body) === INBOX_T3_HOST;
+    const handedOut = () => {
+      const t3Handed = t3Thread ? new Set(store.handover.handedTo(session)) : null;
+      return live.pendingOf(session, { tags }).filter((item) => !withdrawnTidy(item.message) && !t3Handed?.has(item.message.id));
+    };
     const commands = (items = handedOut()) => {
       const list = items.map((item) => replyCommand(item.message, sendNow, item.as));
       // Handed an item for the running turn: an older connection does not poll again until it goes in.
@@ -4282,12 +4295,34 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
 
   // The T3 Code wake: the person's items for a T3 thread go in as a T3 turn through T3's MCP API, under the
   // grant `plannotator t3 login` saved (inbox-t3-wake.ts).
+  /**
+   * One owner per reply to a T3 Code thread. Where the thread's Claude runs the Claude Code mod, the mod polls the
+   * bridge as the thread and puts the reply in as a turn of the running session itself: while it polls, and for an
+   * item its claim folder holds, the T3 wake leaves the item alone (a T3 send then would be a second turn). Once
+   * it stops polling (T3 released the idle Claude), the T3 wake sends what still waits, under a grant. The bridge
+   * poll, for its part, never hands the mod what the T3 wake handed for a send in flight.
+   */
+  let t3Resweep: ReturnType<typeof setTimeout> | null = null;
+  const t3ModDelivers = (item: InboxMessage, session: string): boolean => {
+    if (live.pollsNow(INBOX_T3_HOST, session)) {
+      // Looked at again once the poll would be stale: a Claude T3 stopped leaves its replies to the T3 wake.
+      if (!t3Resweep) {
+        t3Resweep = setTimeout(() => {
+          t3Resweep = null;
+          void t3Wake.sweep();
+        }, INBOX_SESSION_LIVE_MS + 1_000);
+        (t3Resweep as { unref?: () => void }).unref?.();
+      }
+      return true;
+    }
+    return inboxClaimDirs(store.dir, store.deliveryIdOf(item, session), session).some((dir) => existsSync(dir));
+  };
   const t3Wake = createInboxT3Wake({
     store,
     dataDir,
     commandOf: (item, session) => replyCommand(item, false, session),
     // A steps-only Tidy wake with steps off is withdrawn, never handed (a switch turned off in config.json by hand).
-    skip: (item) => withdrawnTidy(item),
+    skip: (item, session) => withdrawnTidy(item) || t3ModDelivers(item, session),
     ...options.t3Wake,
   });
 
