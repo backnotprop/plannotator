@@ -15,7 +15,7 @@
  */
 
 import { type InboxTidyCombine, isInboxId } from "@plannotator/core/inbox-types";
-import type { InboxRegistryEntry } from "@plannotator/shared/inbox/registry";
+import { inboxEnsureFailedWords, type InboxRegistryEntry } from "@plannotator/shared/inbox/registry";
 import { hasHelpFlag, INBOX_PROJECTS_USAGE } from "./cli";
 import { writeWholeToStdout } from "./write-whole-stdout";
 
@@ -134,7 +134,7 @@ export async function runInboxProjectsCommand(argv: readonly string[], deps: Pro
   try {
     entry = await deps.ensureRunning();
   } catch (error) {
-    err(`Plannotator Inbox is not running: ${error instanceof Error ? error.message : String(error)}\n`);
+    err(`${inboxEnsureFailedWords(error)}\n`);
     return 1;
   }
   const request = async (path: string, post?: Record<string, unknown>): Promise<Answer> => {
