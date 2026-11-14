@@ -319,6 +319,8 @@ export interface SessionInfo {
   inboxAs?: InboxAgentIdentity
   /** False: the Inbox tool without the reply wake (`InboxLinkOptions.wake`). */
   inboxWake?: boolean
+  /** Whether this process is the session's own (a T3 Code thread's Claude; `InboxLinkOptions.owner`). */
+  inboxOwner?: () => Promise<boolean>
   /** The session's working folder, read when asked (the Inbox link's polls say where the session works). */
   cwd?: () => Promise<string>
   /** The session's root folder (`$.session.root()`), read once at the link's start: where `claude --resume` runs. */
@@ -428,6 +430,7 @@ export class PlannotatorMod {
           instanceId: this.instanceId,
           ...(session.inboxAs ? { agent: session.inboxAs } : {}),
           ...(session.inboxWake === false ? { wake: false } : {}),
+          ...(session.inboxOwner ? { owner: session.inboxOwner } : {}),
           turns: this.turns,
           ...(this.autoReload ? { reload: this.autoReload } : {}),
         })

@@ -363,6 +363,10 @@ const NOT_DELIVERING_LOG_EVERY_MS = 60_000
 const LEASE_EVERY_MS = 5_000
 /** A lease not renewed for this long belongs to a process that exited, slept or hung. */
 export const INBOX_LEASE_STALE_MS = 20_000
+/** How often a link that waits to know whether it is its session's own process asks again (`InboxLinkOptions.owner`). */
+export const INBOX_OWNER_PROBE_EVERY_MS = 2_000
+/** How long such a link asks before it settles on "not the session's own" for good. */
+export const INBOX_OWNER_WAIT_MS = 180_000
 /** A claimed reply whose claimant stopped saying it is alive for this long is reported as undelivered (shared with the Inbox). */
 export { INBOX_UNDELIVERED_AFTER_MS }
 /**
@@ -1032,6 +1036,16 @@ export interface InboxLinkOptions {
   /** Who the session is in the Inbox (a T3 Code thread); absent: the Claude Code session `sessionId`. */
   agent?: InboxAgentIdentity
   /**
+   * Whether this process is the session's own, asked every
+   * INBOX_OWNER_PROBE_EVERY_MS until it says yes or INBOX_OWNER_WAIT_MS pass
+   * (a T3 Code thread: its `t3-code` tools, which appear a few seconds after
+   * the start). Until it says yes the link takes no lease, polls nothing and
+   * delivers nothing, and its sends carry no wake mark; then a live lease
+   * another process holds stands until the person acts here. Absent: the
+   * process is the session's own from the start.
+   */
+  owner?: () => Promise<boolean>
+  /**
    * False: the tool sends and reads, and nothing polls (no reply wake, no
    * Inbox Ask): a session that may end with its turn (`SESSION_KIND_FEATURES`).
    */
@@ -1132,10 +1146,15 @@ export class InboxLink {
   private firesSeenAt: number | null = null
   /** When each reason a reply was not submitted was last logged (`notDelivering`). */
   private notDeliveringLogged = new Map<string, number>()
+  /** Whether this process is the session's own (`InboxLinkOptions.owner`); null while that is not known yet. */
+  private owns: boolean | null
+  private ownerAskedSince: number | null = null
+  private ownerAskedAt = Number.NEGATIVE_INFINITY
 
   constructor(private readonly options: InboxLinkOptions) {
     this.host = options.host
     this.tools = options.tools
+    this.owns = options.owner ? null : true
     this.agent = options.agent ?? { host: INBOX_HOST, session: options.sessionId, name: INBOX_AGENT_NAME }
     this.dir = inboxSessionDirOf(options.dataDir, inboxSessionDirName(this.agent.session))
   }
@@ -1168,7 +1187,9 @@ export class InboxLink {
       this.startedAt ||= now
       this.idleSince ||= now
     })
-    if (options.touch !== false) void this.touch()
+    // Being made is no touch where the session's own process is still to be found: that one takes a live lease
+    // only when the person acts in it.
+    if (options.touch !== false && !this.options.owner) void this.touch()
     this.arm()
   }
 
@@ -1220,7 +1241,7 @@ export class InboxLink {
   /** The person acted in this process: replies should land here, from now on. */
   async touch(): Promise<void> {
     this.touchedAt = await this.host.now()
-    if (this.disposed) return
+    if (this.disposed || !(await this.ownsSession(true))) return
     // No Inbox has ever run here: nothing to deliver, so nothing is written;
     // the lease is taken on the first tick after a call starts the Inbox.
     if (!(await this.host.exists(this.registryPath))) this.leaseCheckedAt = Number.NEGATIVE_INFINITY
@@ -1286,9 +1307,9 @@ export class InboxLink {
     if ('error' in running) return { deny: running.error }
     let answer: Awaited<ReturnType<typeof mcpCall>>
     try {
-      // This session's wake delivers the reply as a turn: the send tools say to end the turn. Without the wake
-      // they say to read the thread later, as for any agent nothing wakes.
-      const wakes = this.options.wake !== false
+      // This session's wake delivers the reply as a turn: the send tools say to end the turn. Without the wake, or
+      // from a process not yet known as the session's own, they say to read the thread later, as for any agent nothing wakes.
+      const wakes = this.options.wake !== false && this.owns === true
       answer = await mcpCall(this.host, running.port, 'tools/call', inboxToolCallParams(call, { wakes, ...(workingFolder ? { workingFolder } : {}) }))
     } catch (error) {
       return { deny: `The Plannotator Inbox did not answer (${error instanceof Error ? error.message : String(error)}).` }
@@ -1354,7 +1375,32 @@ export class InboxLink {
     return `${this.dir}/claims/${replyId}`
   }
 
+  /**
+   * Whether this process is the session's own (`InboxLinkOptions.owner`),
+   * asked at most every INBOX_OWNER_PROBE_EVERY_MS (`force` asks at once)
+   * and settled on no once INBOX_OWNER_WAIT_MS pass without a yes.
+   */
+  private async ownsSession(force = false): Promise<boolean> {
+    if (this.owns !== null) return this.owns
+    const now = await this.host.now()
+    this.ownerAskedSince ??= now
+    if (!force && now - this.ownerAskedAt < INBOX_OWNER_PROBE_EVERY_MS) return false
+    this.ownerAskedAt = now
+    const yes = await this.options.owner!().catch(() => false)
+    if (this.owns !== null) return this.owns
+    if (yes) {
+      this.owns = true
+      this.leaseCheckedAt = Number.NEGATIVE_INFINITY
+      this.host.debug(`inbox: this process is ${this.agent.session}'s own; it may poll and deliver`)
+    } else if (now - this.ownerAskedSince >= INBOX_OWNER_WAIT_MS) {
+      this.owns = false
+      this.host.debug(`inbox: this process is not ${this.agent.session}'s own; it never polls or delivers`)
+    }
+    return this.owns === true
+  }
+
   private async tick(): Promise<void> {
+    if (this.disposed || !(await this.ownsSession())) return
     // Silent until an Inbox exists (the first plannotator_inbox call starts one): no HTTP, no files.
     if (this.disposed || !(await this.host.exists(this.registryPath)) || !(await this.ensureDir())) return
     const busy = this.options.isBusy()

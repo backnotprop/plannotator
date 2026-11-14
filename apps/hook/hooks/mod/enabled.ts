@@ -286,20 +286,37 @@ export type T3SessionEnv = PanelSessionEnv & {
 }
 
 /**
- * The T3 Code thread this session is, or null. T3 runs a thread's Claude
- * through the Agent SDK with `CLAUDE_CODE_ENTRYPOINT=t3-code` and
- * `T3CODE_THREAD_ID`, and deletes `CLAUDECODE` and `CLAUDE_CODE_CHILD_SESSION`
- * from that environment. Both are inherited by everything the session
- * starts, so a `claude -p` run from inside a thread is told apart as the
- * panel's is: either Claude Code variable, or a session tag naming another
- * session. The tag naming this thread is this process's own (a module
- * reload). A Claude T3 runs for no thread (a title, a probe) has no thread id.
+ * The T3 Code thread this session runs for, or null. T3 (0.1.7 and later)
+ * runs a thread's Claude through the Agent SDK with
+ * `CLAUDE_CODE_ENTRYPOINT=t3-code` and `T3CODE_THREAD_ID`, and deletes
+ * `CLAUDECODE` and `CLAUDE_CODE_CHILD_SESSION` from that environment. Both
+ * are inherited by everything the session starts, so a `claude -p` run from
+ * inside a thread is told apart as the panel's is: either Claude Code
+ * variable, or a `t3:` tag naming another thread. A tag of another host
+ * (`claude-code:<id>`) is what T3 itself inherited from the shell it was
+ * started in, and never decides. T3's own short runs (a title) inherit the
+ * same environment, so a thread read here is only a candidate: the Inbox
+ * link waits for the thread's `t3-code` tools (`isT3ThreadOwnTools`) before
+ * it polls or delivers for it.
  */
 export function t3ThreadOf(env: T3SessionEnv): string | null {
   if (env.entrypoint !== T3_ENTRYPOINT || !isT3ThreadId(env.thread)) return null
   if (setIn(env.claudecode) || setIn(env.childSession)) return null
-  if (setIn(env.sessionTag) && env.sessionTag !== `t3:${env.thread}`) return null
+  if (typeof env.sessionTag === 'string' && env.sessionTag.startsWith('t3:') && env.sessionTag !== `t3:${env.thread}`) return null
   return env.thread
+}
+
+/**
+ * The prefix of the tools T3 Code's own MCP server (`t3-code`) gives a
+ * thread's Claude: T3 adds that server through the Agent SDK options of a
+ * thread's run only, so a title run, a capability probe or a `claude -p` with
+ * the thread's environment never has it, and no environment variable carries it.
+ */
+export const T3_THREAD_TOOL_PREFIX = 'mcp__t3-code__'
+
+/** Whether the session's tools (`$.tool.list()`'s names) show it is a T3 thread's own Claude. */
+export function isT3ThreadOwnTools(names: readonly unknown[]): boolean {
+  return names.some((name) => typeof name === 'string' && name.startsWith(T3_THREAD_TOOL_PREFIX))
 }
 
 /**

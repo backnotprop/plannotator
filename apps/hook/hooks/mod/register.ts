@@ -95,6 +95,7 @@ import {
   sessionKindOf,
   SESSION_KIND_FEATURES,
   t3ThreadOf,
+  isT3ThreadOwnTools,
   T3_ENTRYPOINT,
   type SessionKind,
   resolveAgentToolEnabled,
@@ -607,7 +608,7 @@ async function currentMod($: Engine, options: { healed?: boolean } = {}): Promis
       title: () => title.generatedTitle() ?? '',
       continues: async () => [...new Set([...(await forkedFrom.read()), ...(await continuedIn.read())])],
       ...(inboxTools ? { inboxTools } : {}),
-      ...(settings.t3Thread ? { inboxAs: inboxT3Agent(settings.t3Thread) } : {}),
+      ...(settings.t3Thread ? { inboxAs: inboxT3Agent(settings.t3Thread), inboxOwner: () => t3ThreadOwnHere($) } : {}),
       ...(settings.wake ? {} : { inboxWake: false }),
       ...(options.healed ? { healed: true } : {}),
     })
@@ -625,6 +626,23 @@ async function currentMod($: Engine, options: { healed?: boolean } = {}): Promis
   } finally {
     switching = null
   }
+}
+
+/** Once yes, for the process: T3's `t3-code` server stays for the thread's Claude while it runs. */
+let t3ThreadOwn = false
+
+/**
+ * Whether this process is its T3 thread's own Claude: its tools include T3's
+ * `t3-code` ones (`isT3ThreadOwnTools`). A Claude Code without `$.tool.list`
+ * never says yes, so nothing is promised there.
+ */
+async function t3ThreadOwnHere($: Engine): Promise<boolean> {
+  if (t3ThreadOwn) return true
+  const tools = await Promise.resolve()
+    .then(() => $.tool.list())
+    .catch(() => null)
+  t3ThreadOwn = Array.isArray(tools) && isT3ThreadOwnTools(tools.map((tool: { name?: unknown }) => tool?.name))
+  return t3ThreadOwn
 }
 
 /**
