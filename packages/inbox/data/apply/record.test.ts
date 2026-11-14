@@ -1,12 +1,7 @@
-/**
- * The record applier (record.ts) as a table: each live-stream record against a held thread, and what the thread
- * shows after it. A wrong row here is a window that shows something the server does not (an agent's message
- * missing, an answer going backwards, an archive undone by a late read).
- */
 import { describe, expect, test } from 'bun:test';
 import type { InboxMessageWire, InboxQuestion } from '@plannotator/core/inbox-types';
 import type { InboxEvent, ThreadModel } from '../../api';
-import { applyRecord, reconcileRead, recordMovesFiles, type HeldThread } from './record';
+import { applyRecord, reconcileRead, recordMovesFiles, withSavedQuestions, type HeldThread } from './record';
 
 const T = 'msg_ROOT';
 const at = '2026-11-10T10:00:00.000Z';
@@ -59,13 +54,11 @@ const rows: Row[] = [
     expect([root.questions?.map((x) => x.key), root.actions?.map((x) => x.key)]).toEqual([['q1'], ['a1']]);
   }],
   ['an older revision never takes an answer back', q(20, question('q1', 0)), 'none'],
-  // The thread's subject came from q1 (the agent gave none): the server follows the replacement, so the header does.
   ['the question a subject came from replaced: the thread is read (its subject)', q(25, question('q1', 2, { state: 'superseded', superseded_by: { message_id: 'msg_N', key: 'q1' } })), 'reread'],
   ['a question of a message not held is read', q(21, { ...question('q9', 1), message_id: 'msg_X' }), 'reread'],
   ['a comment that went with a reply is read (its count)', { seq: 22, kind: 'annotation', id: 'ann', annotation: { thread_id: T, sent_reply_id: 'msg_R' } as never }, 'reread'],
   ['a comment waiting on a file changes no message', { seq: 23, kind: 'annotation', id: 'ann', annotation: { thread_id: T, sent_reply_id: null } as never }, 'none'],
   ["another thread's record does nothing here", message(24, { ...msg('msg_O'), thread_id: 'msg_OTHER' }), 'none'],
-  // Safe default: a kind this build has no case for (a newer Inbox's) is read, never left as it was.
   ['a record kind this build does not know is read', { seq: 26, kind: 'reaction', id: 'r' } as unknown as InboxEvent, 'reread'],
   ['a project record (a label the header reads) is read', { seq: 27, kind: 'project', id: 'prj', project: {} } as unknown as InboxEvent, 'reread'],
   ['a reply taken back leaves the thread', message(28, msg('msg_R', { author: person, taken_back_at: at }), false), (after) => {
@@ -98,6 +91,20 @@ describe('one stream record on a held thread', () => {
   });
 });
 
+describe('a reply from another window that carried comments', () => {
+  test('its comment records come first; the reply then draws with their count, so it is never offered for Take back', () => {
+    const ann = (seq: number, id: string): InboxEvent => ({ seq, kind: 'annotation', id, annotation: { thread_id: T, sent_reply_id: 'msg_X' } as never });
+    let now: HeldThread = held;
+    for (const event of [ann(30, 'a1'), ann(31, 'a2'), ann(31, 'a2')]) {
+      const out = applyRecord(now, event);
+      if (out.kind === 'applied') now = out.model;
+    }
+    const out = applyRecord(now, message(32, msg('msg_X', { author: person })));
+    if (out.kind !== 'applied') throw new Error('not applied');
+    expect(out.model.thread.messages.find((m) => m.id === 'msg_X')?.sent_annotations).toBe(2);
+  });
+});
+
 describe('a read landing after records', () => {
   const read = (cursor: number, messages: InboxMessageWire[]): ThreadModel => ({ ...model(messages, cursor) });
   const base = [msg(T, { seq: 1, questions: [question('q1', 1)] }), msg('msg_R', { author: person, seq: 5 })];
@@ -112,6 +119,14 @@ describe('a read landing after records', () => {
     if (after.kind !== 'applied') throw new Error('not applied');
     const fresh = read(30, [...base, msg('msg_N', { seq: 11, body: 'server copy' })]);
     expect(reconcileRead(after.model, fresh)).toBe(fresh);
+  });
+  test("a read that left before this window's saved answer never shows the old answer", () => {
+    const saved = withSavedQuestions(model(base, 10), T, [question('q1', 2, { state: 'picked' })]);
+    const kept = reconcileRead(saved, read(10, base));
+    expect(kept.thread.messages[0]!.questions?.[0]).toMatchObject({ revision: 2, state: 'picked' });
+    const later = reconcileRead(kept, read(20, [msg(T, { seq: 1, questions: [question('q1', 3, { state: 'sent' })] }), base[1]!]));
+    expect(later.thread.messages[0]!.questions?.[0]).toMatchObject({ revision: 3, state: 'sent' });
+    expect(later.saved).toBeUndefined();
   });
   test('an older read never brings back a reply taken back after it left', () => {
     const after = applyRecord(model(base), message(12, msg('msg_R', { author: person, taken_back_at: at }), false));

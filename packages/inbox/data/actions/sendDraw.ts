@@ -1,48 +1,28 @@
-/**
- * A Send drawn in its thread the moment it is pressed (live rule R5: your own action at once), while its replies,
- * and the saves they wait for, are on their way. Its pending mutation is the drawing (as rows.ts's row writes are):
- *  - the reply that carries the words lands: the pane draws it from the Send's answer, then the drawing goes;
- *  - the Send stops or fails (a refusal, no answer, a guard): the drawing goes by itself (a lost answer: once the
- *    thread read says whether the reply went, sendLanded.ts), and the words, shown out of the box while they were
- *    drawn here (ReplyTextField's `sendingWords`), are back in it with the reason.
- * Only the words are drawn ("Sending…" in place of the delivery line, as a reply held for another machine is,
- * HeldWrites.tsx): the server writes the rest of the reply (its answers, tags, files), so they show once it lands.
- *
- * Safe to draw before the server answers: each reply of a Send carries an idempotency key kept across retries, and
- * a Send whose answer was lost looks for its reply by that key before it sends again, so what is drawn never posts
- * twice; the drawing only says what is on its way.
- */
 import { useMutation, useMutationState } from '@tanstack/react-query';
 import { useCallback, useMemo } from 'react';
+import type { InboxMessageWire } from '@plannotator/core/inbox-types';
 import { useInboxQueryClient } from '../client';
 import { inboxKeys } from '../keys';
 
 export interface SendDrawn {
   threadId: string;
-  /** One per drawing: its key on screen. */
   key: string;
   words: string;
-  /** The person's replies in the thread when it was pressed: once as many beyond these as the Send's replies (`goesAs`, one until known), the one with the words landed. */
-  repliesBefore: number;
 }
 
 interface SendDraw extends SendDrawn {
   until: Promise<void>;
 }
 
-/** One drawing on its way: `landed` once the sent reply is drawn from the answer, `stopped` when nothing (or not the words) went. */
 export interface SendDrawing {
   landed: () => void;
   stopped: () => void;
-  goesAs: (replies: number) => number;
+  carries: (idempotencyKey: string | null) => void;
 }
 
-/** The person's replies in a thread (a Send's reply landed: one more). */
-export const personReplies = (thread: { messages: readonly { author: { kind: string } }[] }): number => thread.messages.filter((m) => m.author.kind === 'person').length;
-
-const NOTHING: SendDrawing = { landed: () => {}, stopped: () => {}, goesAs: (replies) => replies };
+const NOTHING: SendDrawing = { landed: () => {}, stopped: () => {}, carries: () => {} };
 let drawings = 0;
-const repliesOf = new Map<string, number>();
+const carriedBy = new Map<string, string>();
 
 export function useDrawSend(): (drawn: Omit<SendDrawn, 'key'>) => SendDrawing {
   const client = useInboxQueryClient();
@@ -56,21 +36,22 @@ export function useDrawSend(): (drawn: Omit<SendDrawn, 'key'>) => SendDrawing {
       const until = new Promise<void>((resolve, reject) => {
         landed = () => resolve();
         stopped = () => reject(new Error('send stopped'));
-      }).finally(() => repliesOf.delete(key));
+      }).finally(() => carriedBy.delete(key));
       mutate({ ...drawn, key, until });
-      const goesAs = (replies: number) => {
-        repliesOf.set(key, replies);
-        return replies;
+      const carries = (idempotencyKey: string | null) => {
+        if (idempotencyKey) carriedBy.set(key, idempotencyKey);
       };
-      return { landed, stopped, goesAs };
+      return { landed, stopped, carries };
     },
     [mutate],
   );
 }
 
-/** The Sends drawn in this thread now, oldest first; one whose reply is in the thread already is not drawn twice. */
-export function useSendsDrawn(threadId: string, personReplies: number): readonly SendDrawn[] {
+export function useSendsDrawn(threadId: string, messages: readonly InboxMessageWire[]): readonly SendDrawn[] {
   const client = useInboxQueryClient();
   const drawn = useMutationState({ filters: { mutationKey: inboxKeys.sendDraw(), status: 'pending' }, select: (m) => m.state.variables as SendDraw }, client);
-  return useMemo(() => drawn.filter((d) => d.threadId === threadId && personReplies < d.repliesBefore + (repliesOf.get(d.key) ?? 1)), [drawn, threadId, personReplies]);
+  return useMemo(() => {
+    const landedKeys = new Set(messages.map((m) => m.idempotency_key).filter((k): k is string => typeof k === 'string'));
+    return drawn.filter((d) => d.threadId === threadId && !landedKeys.has(carriedBy.get(d.key) ?? ''));
+  }, [drawn, threadId, messages]);
 }
