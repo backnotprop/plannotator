@@ -77,7 +77,7 @@ export const ReviewDockRightActions: React.FC<ReviewDiffControlsProps> = (props)
   return (
     <div className="flex items-center gap-0.5" data-review-diff-controls="">
       {navigation && (
-        <div className={`flex items-center gap-0.5 ${navigation.canBack || navigation.canForward ? '' : 'invisible'}`} role="group" aria-label="Jump history" data-jump-history="">
+        <div className="flex items-center gap-0.5" role="group" aria-label="Jump history" data-jump-history="">
           {navButton('back')}
           {navButton('forward')}
         </div>

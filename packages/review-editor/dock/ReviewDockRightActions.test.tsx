@@ -83,7 +83,7 @@ describe('ReviewDockRightActions', () => {
     expect(popup.textContent).not.toContain('Unified');
   });
 
-  test.skipIf(!hasDom)('back and forward keep their place from load, so the cluster does not jump on the first jump', async () => {
+  test.skipIf(!hasDom)('back and forward sit in the header from load, disabled until the first jump, so the cluster never moves', async () => {
     const render = async (canBack: boolean) => {
       const state = {
         diffStyle: 'split',
@@ -105,10 +105,11 @@ describe('ReviewDockRightActions', () => {
     await render(false);
     const group = host.querySelector<HTMLElement>('[data-jump-history]')!;
     expect(group).not.toBeNull();
-    expect(group.className).toContain('invisible');
-    expect(group.querySelectorAll('[data-nav-history]')).toHaveLength(2);
+    const buttons = [...group.querySelectorAll<HTMLButtonElement>('[data-nav-history]')];
+    expect(buttons).toHaveLength(2);
+    expect(buttons.every((button) => button.disabled)).toBe(true);
+    expect(group.className).not.toContain('invisible');
     await render(true);
-    expect(host.querySelector<HTMLElement>('[data-jump-history]')!.className).not.toContain('invisible');
     expect(host.querySelector<HTMLButtonElement>('[data-nav-history="back"]')!.disabled).toBe(false);
   });
 });
