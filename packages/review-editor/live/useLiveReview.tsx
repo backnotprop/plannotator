@@ -6,6 +6,8 @@ import { liveApi, liveKey, LiveError, watchLive, type LiveSendTag } from './api'
 import { anchorOfComment, openThreadIds, placeThreads, stepThread, unsentComments, type LiveAgent, type LiveState, type PlacedThread } from './model';
 import { LiveThreadCard } from './LiveThreadCard';
 import { LiveThreadsTab } from './LiveThreadsTab';
+import { liveMentionSource } from './LiveComposer';
+import { setLiveCommentSource, takeCommentTags } from './commentTags';
 
 export const LIVE_TAB_ID = 'threads';
 
@@ -65,13 +67,15 @@ export function useLiveReview(input: {
   const sendComments = useCallback(
     async (comments: readonly CodeAnnotation[], words: string, tags: LiveSendTag[]) => {
       setError(null);
-      const to = defaultTo ? { host: defaultTo.host, session: defaultTo.session } : tags[0];
+      const fresh = !state?.thread;
+      const to = fresh ? (tags[0] ? { host: tags[0].host, session: tags[0].session } : defaultTo ? { host: defaultTo.host, session: defaultTo.session } : undefined) : undefined;
+      const others = fresh && tags[0] ? tags.slice(1) : tags;
       await liveApi
         .send({
           comments: comments.map((c) => ({ anchor: anchorOfComment({ filePath: c.filePath, lineStart: c.lineStart, lineEnd: c.lineEnd, side: c.side, scope: c.scope }, input.files), words: c.text })),
           ...(words.trim() ? { words: words.trim() } : {}),
-          ...(to && !state?.thread ? { to } : {}),
-          ...(tags.length > 0 ? { tags } : {}),
+          ...(to ? { to } : {}),
+          ...(others.length > 0 ? { tags: others } : {}),
           idempotency_key: liveKey(),
         })
         .catch(failed);
@@ -151,6 +155,22 @@ export function useLiveReview(input: {
   useEffect(() => {
     if (error) input.openTab(LIVE_TAB_ID);
   }, [error, input.openTab]);
+  const live = !!state?.inbox && agents.length > 0;
+  useEffect(() => {
+    setLiveCommentSource(live ? liveMentionSource(agents) : undefined);
+    return () => setLiveCommentSource(undefined);
+  }, [live, agents]);
+  const known = useRef<Set<string> | null>(null);
+  useEffect(() => {
+    const ids = new Set(input.annotations.map((a) => a.id));
+    const before = known.current;
+    known.current = ids;
+    if (!before) return;
+    const added = input.annotations.filter((a) => !before.has(a.id) && (a.scope ?? 'line') !== 'general' && a.filePath && a.text?.trim());
+    if (added.length !== 1) return;
+    const tags = takeCommentTags();
+    if (tags) void actionsRef.current.sendComments(added, '', tags).catch(() => {});
+  }, [input.annotations]);
 
   return { notes, tab };
 }
