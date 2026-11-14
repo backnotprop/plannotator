@@ -1,6 +1,9 @@
 import { expect, test } from 'bun:test';
 import type { InboxThread } from '@plannotator/core/inbox-types';
-import { joinThreadRead, type ThreadFlight } from './threadFlights';
+import { QueryClient } from '@tanstack/react-query';
+import { inboxKeys } from './data/keys';
+import { putThread, staleThread } from './data/queries/thread';
+import { joinThreadRead, watchStaleOpen, type ThreadFlight } from './threadFlights';
 
 test('reads of one thread never overlap; a read asked while one is out gets the next read, which starts after it', async () => {
   const flights = new Map<string, ThreadFlight>();
@@ -69,4 +72,22 @@ test("a thread put from a Send's answer that is still stale is read again", asyn
   await joinThreadRead(flights, 't', { thread: {} } as never, read, () => stale);
   for (let i = 0; i < 10; i++) await Promise.resolve();
   expect(asked).toEqual(['given', 'read']);
+});
+
+test('the open thread left stale by any path is read after a short wait, and only the open one', async () => {
+  const client = new QueryClient();
+  const model = (threadId: string, cursor: number) => ({ cursor, thread: { thread_id: threadId, messages: [] } }) as never;
+  putThread(client, 'open', model('open', 1));
+  putThread(client, 'other', model('other', 1));
+  const reads: string[] = [];
+  const stop = watchStaleOpen(client, () => 'open', (id) => reads.push(id), 20);
+  staleThread(client, 'other');
+  staleThread(client, 'open');
+  await new Promise((r) => setTimeout(r, 60));
+  expect(reads).toEqual(['open']);
+  client.setQueryData(inboxKeys.thread('open'), model('open', 2));
+  await new Promise((r) => setTimeout(r, 60));
+  expect(reads).toEqual(['open']);
+  stop();
+  client.clear();
 });

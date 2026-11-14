@@ -1897,7 +1897,7 @@ function Inbox() {
       if (out) openThreadReadsOut.current.delete(out);
     }
   }, [setThreadLoad, stopLiveThreadRetry, queryClient]);
-  const staleOpenCheck = useStaleOpenRead(queryClient, routeRef, (id) => void refreshThread(id));
+  useStaleOpenRead(queryClient, routeRef, (id) => void refreshThread(id));
   const refreshThread = useCallback(
     (threadId: string, given?: ThreadModel): Promise<InboxThread | null> => joinThreadRead(threadFlights.current, threadId, given, readThreadInto, (id) => routeRef.current.thread === id && isThreadStale(queryClient, id)),
     [readThreadInto, queryClient],
@@ -2490,7 +2490,6 @@ function Inbox() {
             return;
           }
           readAfterRecord(event, own ? { own } : { applied });
-          staleOpenCheck(routeRef.current.thread);
           // A floating draft's window reads its thread again (a new message, a hand-off).
           emitFloaterEvent('record', null);
         },
