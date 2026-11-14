@@ -156,7 +156,7 @@ import { InboxError, inboxDir } from "@plannotator/shared/inbox/schema";
 import { inboxPromptsModel, parseInboxPromptsChange, saveInboxPromptsChange } from "./inbox-prompts";
 import { inboxRulesFitError } from "./inbox-rules";
 import { InboxStore } from "@plannotator/shared/inbox/store";
-import { INBOX_DB_FILE, inboxReturnDelayFromEnv, returnFromSqlite } from "@plannotator/shared/inbox/store-log/sqlite-return/return";
+import { INBOX_DB_FILE, inboxReturnHoldFromEnv, returnFromSqlite } from "@plannotator/shared/inbox/store-log/sqlite-return/return";
 import { INBOX_TIDY_WITHDRAWN_HOST, inboxTidyBodyStepsOff, inboxTidyIsStepsOnly, inboxTidyStepsOnlyWakes } from "@plannotator/shared/inbox/tidy";
 import { inboxArchivedRows, inboxListSections, inboxRowArchived } from "@plannotator/shared/inbox/list";
 import { archiveProject, markProjectRead, unarchiveProject, unmarkProjectRead } from "@plannotator/shared/inbox/project-batch";
@@ -196,9 +196,11 @@ import { markPlannotatorResponse, withPlannotatorServerHeader } from "./plannota
 import { createInboxMcpServer, INBOX_BOARD_OFF_TEXT, INBOX_STEPS_OFF_TEXT } from "./inbox-mcp";
 import { guidePullKey, inboxGuideFileContents, inboxGuideRoute, readInboxReviewSnapshot } from "./inbox-guides";
 import { createInboxRepoCache } from "./inbox-repos";
+import { createGitlabHosts, unnamedForgeHost, type GitlabHosts } from "./inbox-gitlab-hosts";
+import { classifyForgeHost, normalizeForgeHost } from "@plannotator/core/forge-refs";
 import { systemSetupRoute } from "./inbox-system-setup";
 import { SYSTEM_READ_PATHS, systemFilesCache, systemReadRoute, systemSwitch } from "./inbox-system";
-import { bitbucketRefReader, createRefCards, refCliRunner, type BitbucketRefReader, type RefRunner } from "./ref-cards";
+import { bitbucketRefReader, createRefCards, readSignedInHosts, refCliRunner, type BitbucketRefReader, type RefRunner } from "./ref-cards";
 import { mergePull } from "@plannotator/shared/inbox-pull-merge";
 import { createInboxProjectRoots, folderHoldsOtherWork, guessableProjects, isHomeOrRootFolder, nearestProjectHolding, type InboxGitRunner } from "./inbox-project-root";
 import { handleFavicon } from "./shared-handlers";
@@ -245,6 +247,7 @@ import { createLoginEnv } from "./inbox-launch-env";
 import { inboxNamesShown, inboxSessionsShown } from "./inbox-session-names";
 import { createInboxReplyDrafts } from "./inbox-reply-drafts";
 import { createInboxCommentDrafts } from "./inbox-comment-drafts";
+import { createInboxTakeBack } from "./inbox-take-back";
 import { createInboxAsk } from "./inbox-ask";
 import type { InboxAskTimes } from "./inbox-ask-live";
 import { createInboxPins } from "./inbox-pins";
@@ -572,6 +575,7 @@ export interface InboxServerOptions {
   readProjectRepo?: (root: string) => Promise<InboxProjectRepo | null>;
   /** Tests: run the hover cards' `gh` / `glab` through this instead of the real ones (ref-cards.ts). */
   refRunner?: RefRunner;
+  gitlabHosts?: GitlabHosts;
   /** Tests: Bitbucket Cloud PRs' cards and states (default: the real API, unless `refRunner` is given). */
   bitbucketRefReader?: BitbucketRefReader;
   /** Tests: a thread's PRs read their states from this instead of gh / glab (inbox-thread-pulls.ts). */
@@ -843,6 +847,9 @@ const ERROR_STATUS: Record<string, number> = {
   handoff_settled: 409,
   // Compose: a new thread the person starts (packages/server/inbox-compose.ts).
   already_delivered: 409,
+  agent_has_it: 409,
+  taken_back: 409,
+  cannot_take_back: 422,
   not_addressed: 422,
   session_still_live: 422,
   // A thread name another open thread of the project already has.
@@ -1100,7 +1107,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     previousInboxVersion = readUpdateState(dataDir).inboxVersion ?? null;
   } catch {}
   const storeLoadStarted = performance.now();
-  const returned = returnFromSqlite(dataDir, { ...(options.storeNow ? { now: options.storeNow } : {}), step: inboxReturnDelayFromEnv(process.env) });
+  const returned = returnFromSqlite(dataDir, { ...(options.storeNow ? { now: options.storeNow } : {}), step: inboxReturnHoldFromEnv(process.env) });
   if (returned) process.stderr.write(`Inbox: moved back from ${INBOX_DB_FILE} into its files (${returned.lines} lines, ${returned.ms} ms).\n`);
   const store = InboxStore.open(dataDir, options.storeNow ? { now: options.storeNow } : {});
   // Read every project's log and replayed it (store.ts load): the debug log notes how long that took.
@@ -1268,11 +1275,19 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // resolved for every known project once the server listens (below) and
   // when a project is first seen, never while a request waits (inbox-repos.ts).
   const repos = createInboxRepoCache(options.readProjectRepo ? { read: options.readProjectRepo } : {});
+  const gitlabHosts = options.gitlabHosts ?? createGitlabHosts(options.refRunner ? { run: options.refRunner } : {});
+  const learnGitlabRemote = (repo: { host: string | null } | null): Promise<void> => (unnamedForgeHost(repo?.host) ? gitlabHosts.refresh().catch(() => undefined) : Promise.resolve());
+  const gitlabRemote = (host: string | null): boolean => {
+    const name = normalizeForgeHost(host);
+    return !!name && classifyForgeHost(name) === "gitlab";
+  };
   /** A project's remote host. It decides where a short `group/project!45` points, so it waits for a first read (at most INBOX_REPO_GIT_TIMEOUT_MS). */
   const projectRepoHost = async (projectId: string): Promise<string | null> => {
     const project = store.project(projectId);
     if (!project) return null;
-    return (repos.get(project.root) ?? (await repos.refresh(project.root)))?.host ?? null;
+    const repo = repos.get(project.root) ?? (await repos.refresh(project.root));
+    await learnGitlabRemote(repo);
+    return repo?.host ?? null;
   };
   // Until the startup read of every project's origin has begun, an empty cache says nothing yet about Tidy's suggestions.
   let repoReadsBegun = false;
@@ -1453,7 +1468,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         { field: "project_path" },
       );
     }
-    void repos.refresh(root);
+    void repos.refresh(root).then(learnGitlabRemote);
     // One creation per root even when two calls race through the await above.
     let pending = projectLocks.get(root);
     if (!pending) {
@@ -1601,7 +1616,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // Its git origin's host (null: a remote that names none), additive and only for a project with a repo: the window
       // links an owner/repo#123 in a repoless thread on the host most projects use. `peek` never runs git.
       const repo = repos.peek(project.root);
-      return { ...project, ...(combined.length > 0 ? { combined } : {}), ...(picture !== undefined ? { picture } : {}), ...(repo ? { repo_host: repo.host } : {}), threads: mine.length, unread, listed: mine.length - archived, archived };
+      return { ...project, ...(combined.length > 0 ? { combined } : {}), ...(picture !== undefined ? { picture } : {}), ...(repo ? { repo_host: repo.host, ...(gitlabRemote(repo.host) ? { repo_forge: "gitlab" as const } : {}) } : {}), threads: mine.length, unread, listed: mine.length - archived, archived };
     });
   };
 
@@ -4016,11 +4031,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     if (sendNow && steer?.busy === true && steer.send_now) autoSendFor(session, tags);
     // What waits for this session, and for the sessions its conversation continues that no longer poll
     // (`continues`, inbox-continuations.ts): each worded for the session it waits for.
-    const commands = () => {
-      const list = live
-        .pendingOf(session, { tags })
-        .filter((item) => !withdrawnTidy(item.message))
-        .map((item) => replyCommand(item.message, sendNow, item.as));
+    const handedOut = () => live.pendingOf(session, { tags }).filter((item) => !withdrawnTidy(item.message));
+    const commands = (items = handedOut()) => {
+      const list = items.map((item) => replyCommand(item.message, sendNow, item.as));
       // Handed an item for the running turn: an older connection does not poll again until it goes in.
       if (body[INBOX_STEER_POLLS_POLL_FIELD] !== true && list.some((command) => command.now === true)) live.steerHanded(session);
       return list;
@@ -4030,7 +4043,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // Auto reload (owner approval "cc-auto-reload"): a Claude Code connection that reloads itself is told,
     // on every answer, the version a /reload-plugins loads while the session is outdated (fix `restart`).
     const reloadOffer = () => live.reloadAnswerFor(session, body);
-    const now = commands();
+    const items = handedOut();
+    const now = commands(items);
+    if (requested === 0) store.handover.asked(items.map((item) => item.message), session);
     if (now.length > 0 || waitMs === 0 || ask.waits(session)) {
       answered();
       return json({ commands: now, ...askWaits(), ...reloadOffer() });
@@ -4510,6 +4525,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     },
   });
   const commentDrafts = createInboxCommentDrafts({ store, serverSession, readBody: (req) => readBody(req), json });
+  const takeBack = createInboxTakeBack({ store, serverSession, readBody: (req) => readBody(req), json });
   // Ask AI: the conversation a thread keeps with its agent (packages/server/inbox-ask.ts).
   const ask = createInboxAsk({
     codeReviewOn,
@@ -5790,7 +5806,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           }
           const body = await readBody(req);
           if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
-          const result = await postThreadDecisions(store, posting[1]!, { pull: body.pull, tz: body.tz }, { runtime: options.prRuntime ?? prCommandRuntime, version, destination: loadConfig().inboxDecisionsPostTo });
+          const result = await postThreadDecisions(store, posting[1]!, { pull: body.pull, tz: body.tz }, { runtime: options.prRuntime ?? prCommandRuntime, version, destination: loadConfig().inboxDecisionsPostTo, signedIn: (cli) => readSignedInHosts(options.refRunner ?? refCliRunner, cli) });
           return json(result.status === 200 ? { serverSession, ...result.body } : result.body, result.status);
         }
       }
@@ -6155,6 +6171,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       if (drafted) return drafted;
       const commentDrafted = await commentDrafts.route(req, url);
       if (commentDrafted) return commentDrafted;
+      const takenBack = await takeBack.route(req, url);
+      if (takenBack) return takenBack;
       // Ask AI: on for everyone; only the owner's own window is answered.
       const asked = await ask.route(req, url, via);
       if (asked) return asked;
@@ -7143,7 +7161,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // runs at most a few gits at once and queues the rest.
   setTimeout(() => {
     if (stopped) return;
-    for (const project of store.allProjects()) void repos.refresh(project.root);
+    for (const project of store.allProjects()) void repos.refresh(project.root).then(learnGitlabRemote);
     repoReadsBegun = true;
     // Once: an earlier Inbox's folder project for a checkouts folder goes into its repository's project, by
     // Combine projects' own write (inbox-checkout-folders.ts). One debug line per fold.
