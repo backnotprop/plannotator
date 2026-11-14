@@ -28,7 +28,7 @@ export const repoRoot = resolve(import.meta.dir, '..');
 
 /** Files that run on their own, one lane per entry, one process per file. */
 export const HEAVY_LANES: Readonly<Record<string, readonly string[]>> = {
-  'heavy-mod': ['apps/hook/hooks/mod/inbox.test.ts', 'packages/server/inbox-take-back-released.test.ts'],
+  'heavy-mod': ['apps/hook/hooks/mod/inbox.test.ts', 'packages/server/inbox-take-back-released.test.ts', 'packages/server/inbox-live-review-released.test.ts'],
   'heavy-agents': ['apps/opencode-plugin/inbox-v2-wake.test.ts', 'apps/pi-extension/inbox.test.ts'],
 };
 export const UNIT_SHARDS = 3;
