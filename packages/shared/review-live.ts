@@ -38,6 +38,10 @@ export function reviewLiveTargetOf(tag: string | undefined | null): ReviewLiveTa
   return { host: tag.slice(0, at), session: tag.slice(at + 1) };
 }
 
+export function reviewLiveTargetOfOpenCode(value: unknown): ReviewLiveTarget | null {
+  return typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/.test(value) ? { host: "opencode", session: value } : null;
+}
+
 function inboxAddress(dataDir: string): InboxAddress | null {
   try {
     const entry = JSON.parse(readFileSync(join(dataDir, "inbox", "inbox.json"), "utf8")) as { port?: unknown; serverSession?: unknown; url?: unknown };
