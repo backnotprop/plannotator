@@ -3,7 +3,7 @@ import type { FileTreeRowDecorationContext, FileTreeRowParts, FileTreeSortEntry,
 import { FileTree as PierreFileTree, useFileTree } from '@pierre/trees/react';
 import type { FileTreeNode } from '../utils/buildFileTree';
 import type { DiffFile } from '../types';
-import { GROUP_ICONS, ROW_ICONS, TreeRowMenu, ancestorsOf, countColumns, countParts, fileRowParts, gitStatusFor, hasBadge, withoutBadge, type SectionEntry } from './pierreRows';
+import { GROUP_ICONS, ROW_ICONS, TreeRowMenu, ancestorsOf, countParts, fileRowParts, gitStatusFor, tightRow, type SectionEntry } from './pierreRows';
 
 export interface ChangesTreeGroup {
   key: string;
@@ -20,6 +20,7 @@ export interface ChangesTreeHandle {
 }
 
 interface ChangesTreeViewProps {
+  touch?: boolean;
   tree: FileTreeNode[];
   groups: ChangesTreeGroup[] | null;
   initiallyFoldedGroups?: ReadonlySet<string>;
@@ -106,6 +107,9 @@ function layoutTree(tree: FileTreeNode[], groups: ChangesTreeGroup[] | null, hid
   return out;
 }
 
+const ROW_HEIGHT = 24;
+const TOUCH_ROW_HEIGHT = 44;
+
 export const ChangesTreeView: React.FC<ChangesTreeViewProps> = (props) => {
   const {
     tree,
@@ -132,29 +136,15 @@ export const ChangesTreeView: React.FC<ChangesTreeViewProps> = (props) => {
   const sinceBaseMode = props.getSectionEntry != null;
   const stageColumn = showStageControls && (sinceBaseMode ? true : stagedFiles.size > 0);
 
-  const columns = useMemo(() => {
-    let add = 0;
-    let del = 0;
-    let badge = groups != null;
-    for (const entry of layout.entries.values()) {
-      const counts = entry.kind === 'file' ? entry.file : entry.kind === 'folder' ? entry.node : entry.group;
-      add = Math.max(add, counts.additions);
-      del = Math.max(del, counts.deletions);
-      if (!badge && entry.kind === 'file' && hasBadge(entry.file, props)) badge = true;
-    }
-    return { add, del, badge };
-  }, [layout, groups, annotationCounts, markdownPreviewedPaths, props.threadCount]);
-
   const orderRef = useRef(new Map<string, number>());
   orderRef.current = useMemo(() => new Map(layout.paths.map((path, index) => [path, index])), [layout]);
   const orderOf = (entry: FileTreeSortEntry) =>
     orderRef.current.get(entry.path) ?? orderRef.current.get(`${entry.path}/`) ?? Number.MAX_SAFE_INTEGER;
 
-  const live = useRef({ props, layout, stageColumn, badge: columns.badge });
-  live.current = { props, layout, stageColumn, badge: columns.badge };
+  const live = useRef({ props, layout, stageColumn });
+  live.current = { props, layout, stageColumn };
 
-  const renderParts = useCallback((context: FileTreeRowDecorationContext): FileTreeRowParts | null =>
-    withoutBadge(rowParts(context), live.current.badge), []);
+  const renderParts = useCallback((context: FileTreeRowDecorationContext): FileTreeRowParts | null => tightRow(rowParts(context)), []);
 
   const rowParts = ({ row }: FileTreeRowDecorationContext): FileTreeRowParts | null => {
     const { props: p, layout: l, stageColumn: withStage } = live.current;
@@ -196,7 +186,7 @@ export const ChangesTreeView: React.FC<ChangesTreeViewProps> = (props) => {
     initialExpansion: 'closed',
     flattenEmptyDirectories: false,
     initialExpandedPaths: initialExpanded,
-    itemHeight: 24,
+    itemHeight: props.touch ? TOUCH_ROW_HEIGHT : ROW_HEIGHT,
     icons: { set: 'minimal', colored: false, spriteSheet: ROW_ICONS },
     gitStatus,
     composition: { contextMenu: { triggerMode: 'right-click' } },
@@ -212,7 +202,7 @@ export const ChangesTreeView: React.FC<ChangesTreeViewProps> = (props) => {
     },
     rows: {
       gitStatusPlacement: 'start',
-      nameTruncation: 'end',
+      nameTruncation: 'keep-tail',
       renderParts,
       onPartClick: ({ partId, path }) => {
         const { props: p, layout: l } = live.current;
@@ -282,7 +272,7 @@ export const ChangesTreeView: React.FC<ChangesTreeViewProps> = (props) => {
 
   useEffect(() => {
     model.refreshRows();
-  }, [model, viewedFiles, stagedFiles, stagingFile, annotationCounts, markdownPreviewedPaths, showViewedControls, showStageControls, props.threadCount, columns]);
+  }, [model, viewedFiles, stagedFiles, stagingFile, annotationCounts, markdownPreviewedPaths, showViewedControls, showStageControls, props.threadCount]);
 
   useEffect(() => {
     let lastFocused = model.getFocusedPath();
@@ -317,7 +307,7 @@ export const ChangesTreeView: React.FC<ChangesTreeViewProps> = (props) => {
       className="review-changes-tree"
       data-changes-tree=""
       data-tree-grouping={props.grouping ?? 'none'}
-      style={{ '--trees-row-lead-columns': leadColumns, '--trees-row-trail-columns': countColumns(columns.add, columns.del, columns.badge), height: '100%' } as React.CSSProperties}
+      style={{ '--trees-row-lead-columns': leadColumns, height: '100%' } as React.CSSProperties}
       renderContextMenu={(item, context) => {
         const entry = live.current.layout.entries.get(item.path);
         return entry?.kind === 'file' ? <TreeRowMenu path={entry.file.path} repoRoot={live.current.props.repoRoot} close={context.close} anchor={context.anchorRect} /> : null;

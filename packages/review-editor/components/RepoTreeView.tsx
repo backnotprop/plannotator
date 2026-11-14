@@ -6,7 +6,7 @@ import type { DiffFile } from '../types';
 import type { RepoFilesState } from '../hooks/useRepoFiles';
 import { initialRepoExpansion } from '../utils/repoTree';
 import { prefetchRepoFile } from '../hooks/useRepoFileText';
-import { ROW_ICONS, TreeRowMenu, ancestorsOf, countColumns, fileRowParts, gitStatusFor, hasBadge, stageColumnShown, withoutBadge, type FileRowState } from './pierreRows';
+import { ROW_ICONS, TreeRowMenu, ancestorsOf, fileRowParts, gitStatusFor, hasBadge, stageColumnShown, tightRow, type FileRowState } from './pierreRows';
 
 type ReadyRepoFiles = Extract<RepoFilesState, { status: 'ready' }>;
 
@@ -15,6 +15,7 @@ export interface RepoTreeHandle {
 }
 
 interface RepoTreeViewProps extends FileRowState {
+  touch?: boolean;
   repo: ReadyRepoFiles;
   loadDir: (dir: string) => void;
   files: DiffFile[];
@@ -93,7 +94,7 @@ export const RepoTreeView: React.FC<RepoTreeViewProps> = (props) => {
   }, [repo.dirs]);
 
   const renderParts = useCallback((context: FileTreeRowDecorationContext): FileTreeRowParts | null =>
-    withoutBadge(rowParts(context), live.current.badge), []);
+    tightRow(rowParts(context)), []);
 
   const rowParts = ({ row }: FileTreeRowDecorationContext): FileTreeRowParts | null => {
     if (row.kind === 'directory') return null;
@@ -142,7 +143,7 @@ export const RepoTreeView: React.FC<RepoTreeViewProps> = (props) => {
     initialExpansion: 'closed',
     flattenEmptyDirectories: false,
     initialExpandedPaths: initialExpanded,
-    itemHeight: 24,
+    itemHeight: props.touch ? 44 : 24,
     icons: { set: 'minimal', colored: false, spriteSheet: ROW_ICONS },
     gitStatus,
     composition: { contextMenu: { triggerMode: 'right-click' } },
@@ -163,7 +164,7 @@ export const RepoTreeView: React.FC<RepoTreeViewProps> = (props) => {
     },
     rows: {
       gitStatusPlacement: 'start',
-      nameTruncation: 'end',
+      nameTruncation: 'keep-tail',
       renderParts,
       onPartClick: ({ partId, path }) => {
         const { props: p } = live.current;
@@ -274,7 +275,7 @@ export const RepoTreeView: React.FC<RepoTreeViewProps> = (props) => {
       className="review-changes-tree"
       data-repo-file-tree=""
       aria-label="All files"
-      style={{ '--trees-row-lead-columns': leadColumns, '--trees-row-trail-columns': countColumns(columns.add, columns.del, columns.badge), height: '100%' } as React.CSSProperties}
+      style={{ '--trees-row-lead-columns': leadColumns, height: '100%' } as React.CSSProperties}
       renderContextMenu={(item, context) =>
         item.kind === 'file' ? <TreeRowMenu path={item.path} repoRoot={live.current.props.repoRoot} close={context.close} anchor={context.anchorRect} /> : null
       }
