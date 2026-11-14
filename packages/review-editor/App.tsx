@@ -3185,6 +3185,10 @@ const ReviewApp: React.FC = () => {
   }, [deleteExternalAnnotation, externalAnnotations, reviewHistory]);
   const dropSentComments = useCallback((ids: readonly string[]) => ids.forEach((id) => handleDeleteAnnotation(id)), [handleDeleteAnnotation]);
   const liveReview = useLiveReview({ files, annotations, dropAnnotations: prMetadata ? null : dropSentComments, revealLines: handleScrollToAILines, openTab: reviewSidebar.open });
+  const sidebarExtraTabs = useMemo(
+    () => (liveReview.tab ? [...reviewSidebarExtraTabs, liveReview.tab] : reviewSidebarExtraTabs),
+    [reviewSidebarExtraTabs, liveReview.tab],
+  );
   const hostNotes = useMemo(() => (liveReview.notes.length > 0 ? [...callTreeHunkNotes, ...liveReview.notes] : callTreeHunkNotes), [callTreeHunkNotes, liveReview.notes]);
 
   // Handle identity change - update author on existing annotations
@@ -6305,7 +6309,7 @@ const ReviewApp: React.FC = () => {
                 isOpen
                 onClose={reviewSidebar.close}
                 onSelectTab={reviewSidebar.open}
-                extraTabs={reviewSidebarExtraTabs}
+                extraTabs={sidebarExtraTabs}
                 presentation={isCompactTouchLayout ? 'overlay' : 'panel'}
                 activeTab={reviewSidebar.activeTab}
                 annotations={allAnnotations}
@@ -6337,7 +6341,6 @@ const ReviewApp: React.FC = () => {
                 isAIStreaming={aiIsStreaming}
                 onAIStop={abortAI}
                 onScrollToAILines={handleScrollToAILines}
-                {...(liveReview.tab ? { extraTabs: [liveReview.tab] } : {})}
                 activeFilePath={files[activeFileIndex]?.path}
                 scrollToQuestionId={scrollToQuestionId}
                 onAskGeneral={handleAskGeneral}
