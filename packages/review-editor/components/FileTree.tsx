@@ -400,6 +400,10 @@ export const FileTree: React.FC<FileTreeProps> = ({
   const annotationCounts = annotationCountMap;
   const showChangesTree = !searchQuery.trim() && !showAllFiles;
   const showRepoTree = !searchQuery.trim() && showAllFiles && !!repoReady;
+  const [repoVisited, setRepoVisited] = useState(false);
+  useEffect(() => {
+    if (showRepoTree) setRepoVisited(true);
+  }, [showRepoTree]);
 
   const searchField = isSearchVisible ? (
     <PanelSearchField
@@ -556,33 +560,12 @@ export const FileTree: React.FC<FileTreeProps> = ({
           ) : null}
         </div>
       </OverlayScrollArea>
-      {showRepoTree && repoReady && (
-        <div className="flex-1 min-h-0 px-2 pb-2" style={countColumnVars(totalAdditions, totalDeletions)}>
-          <RepoTreeView
-            handleRef={repoTreeRef}
-            repo={repoReady}
-            loadDir={repoFiles!.loadDir}
-            files={files}
-            activePath={activeRepoPath ?? treeActivePath}
-            viewedFiles={viewedFiles}
-            showViewedControls={showViewedControls}
-            onToggleViewed={onToggleViewed}
-            stagedFiles={stagedFiles}
-            stagingFile={stagingFile}
-            showStageControls={showStageControls}
-            onStageFile={onStageFile}
-            getSectionEntry={getSectionEntry}
-            annotationCounts={annotationCounts}
-            markdownPreviewedPaths={markdownPreviewedPaths}
-            repoRoot={repoRoot}
-            onSelectFile={onSelectFile}
-            onDoubleClickFile={onDoubleClickFile}
-            onOpenRepoFile={onOpenRepoFile}
-          />
-        </div>
-      )}
-      {showChangesTree && (
-        <div className="flex-1 min-h-0 px-2 pb-2" style={countColumnVars(totalAdditions, totalDeletions)} data-changes-tree-wrap="">
+      <div className={showChangesTree || showRepoTree ? 'flex-1 min-h-0 relative' : 'hidden'} style={countColumnVars(totalAdditions, totalDeletions)}>
+        <div
+          className={`absolute inset-0 px-2 pb-2 ${showChangesTree ? '' : 'invisible pointer-events-none'}`}
+          inert={!showChangesTree}
+          data-changes-tree-wrap=""
+        >
           <ChangesTreeView
             handleRef={changesTreeRef}
             grouping={blocks ? effectiveGroupBy : 'none'}
@@ -607,7 +590,36 @@ export const FileTree: React.FC<FileTreeProps> = ({
             onDoubleClickFile={onDoubleClickFile}
           />
         </div>
-      )}
+        {repoReady && (showRepoTree || repoVisited) && (
+          <div
+            className={`absolute inset-0 px-2 pb-2 ${showRepoTree ? '' : 'invisible pointer-events-none'}`}
+            inert={!showRepoTree}
+            data-repo-tree-wrap=""
+          >
+            <RepoTreeView
+              handleRef={repoTreeRef}
+              repo={repoReady}
+              loadDir={repoFiles!.loadDir}
+              files={files}
+              activePath={activeRepoPath ?? treeActivePath}
+              viewedFiles={viewedFiles}
+              showViewedControls={showViewedControls}
+              onToggleViewed={onToggleViewed}
+              stagedFiles={stagedFiles}
+              stagingFile={stagingFile}
+              showStageControls={showStageControls}
+              onStageFile={onStageFile}
+              getSectionEntry={getSectionEntry}
+              annotationCounts={annotationCounts}
+              markdownPreviewedPaths={markdownPreviewedPaths}
+              repoRoot={repoRoot}
+              onSelectFile={onSelectFile}
+              onDoubleClickFile={onDoubleClickFile}
+              onOpenRepoFile={onOpenRepoFile}
+            />
+          </div>
+        )}
+      </div>
     </aside>
   );
 };

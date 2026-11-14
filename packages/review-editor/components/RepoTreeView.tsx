@@ -197,9 +197,27 @@ export const RepoTreeView: React.FC<RepoTreeViewProps> = (props) => {
     model.refreshRows();
   }, [model, props.viewedFiles, props.stagedFiles, props.stagingFile, props.annotationCounts, props.markdownPreviewedPaths, props.showViewedControls, props.showStageControls, repo.onDisk, columns]);
 
+  useEffect(() => {
+    let lastFocused = model.getFocusedPath();
+    return model.subscribe(() => {
+      const focused = model.getFocusedPath();
+      if (focused === lastFocused) return;
+      lastFocused = focused;
+      const host = model.getFileTreeContainer();
+      if (!host || document.activeElement !== host || !focused) return;
+      if (focused.endsWith('/') || focused.endsWith(`/${LOADING}`)) return;
+      const { props: p, changedIndex: index } = live.current;
+      if (focused === p.activePath) return;
+      const at = index.get(focused);
+      if (at !== undefined) p.onSelectFile(at);
+      else p.onOpenRepoFile?.(focused, { pin: false });
+    });
+  }, [model]);
+
   const revealed = useRef<string | null>(null);
   useEffect(() => {
-    if (!activePath || !known.current.has(activePath)) return;
+    if (!activePath || !known.current.has(activePath) || revealed.current === activePath) return;
+    revealed.current = activePath;
     const selected = model.getSelectedPaths();
     if (!(selected.length === 1 && selected[0] === activePath)) {
       for (const path of selected) model.getItem(path)?.deselect();
@@ -209,10 +227,7 @@ export const RepoTreeView: React.FC<RepoTreeViewProps> = (props) => {
       }
       model.getItem(activePath)?.select();
     }
-    if (revealed.current !== activePath) {
-      revealed.current = activePath;
-      model.scrollToPath(activePath, { focus: false, offset: 'center' });
-    }
+    model.scrollToPath(activePath, { focus: false, offset: 'nearest' });
   }, [activePath, paths, model]);
 
   React.useImperativeHandle(handleRef, () => ({
