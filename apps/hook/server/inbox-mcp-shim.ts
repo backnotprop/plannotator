@@ -16,7 +16,10 @@
  * `PLANNOTATOR_SESSION_TAG`, a Pi bash call's `PI_SESSION_ID`), so a script or
  * command the session runs sends as that session, exactly as its
  * `plannotator_inbox` tool does: the same author, the same threads, and
- * the person's reply wakes it. A Codex session is its thread: Codex names it
+ * the person's reply wakes it. Claude Code's own MCP client is the session
+ * that started the shim (`inboxClaudeMcpSessionFromEnv`: the
+ * `CLAUDE_CODE_SESSION_ID` Claude Code gives its MCP servers), whether or not
+ * the mod's tag reached the shim. A Codex session is its thread: Codex names it
  * on every tool call (`params._meta.threadId`, from the `codex-mcp-client`)
  * and in the commands its shell runs (`CODEX_THREAD_ID`), and the shim sends
  * as `agent_host: "codex"` with that id, so the Inbox can queue the person's
@@ -63,7 +66,7 @@ import {
   isT3ThreadId,
   qwenSessionOfCall,
 } from "@plannotator/core/inbox-types";
-import { inboxStatus, type InboxRegistryEntry } from "@plannotator/shared/inbox/registry";
+import { inboxEnsureFailedWords, inboxStatus, type InboxRegistryEntry } from "@plannotator/shared/inbox/registry";
 import { qwenHome, qwenSessionOfProcess } from "@plannotator/shared/inbox/qwen-sessions";
 import { INBOX_MAX_REQUEST_BYTES, inboxRequestTooLargeMessage } from "@plannotator/shared/inbox/connection";
 import { statSync } from "node:fs";
@@ -97,16 +100,16 @@ export interface InboxHostSession {
  * The agent session this process belongs to, from the environment it
  * inherited, or null. `PLANNOTATOR_SESSION_TAG` (`<host>:<session id>`, set by
  * the Claude Code mod in every process its session starts) comes first; then
- * `T3CODE_THREAD_ID`, which T3 Code sets for the Claude it runs (a UUID; a
- * thread T3 made through MCP, a delegated or a forked one has another form and
- * names no session); then
+ * `T3CODE_THREAD_ID`, which T3 Code sets for the Claude it runs (a UUID, or
+ * the id T3 derives for a launched, scheduled, delegated or provider thread:
+ * `isT3ThreadId`); then
  * `PI_SESSION_ID`, which Pi sets on each bash tool call; then
  * `CODEX_THREAD_ID`, which Codex sets in the commands its shell runs; Qwen's;
  * last `DSH_SESSION_ID`, DeepSeek Harness's, only beside `DSH_SHELL=1` (its
  * MCP client strips every `DSH_*` variable, so this is a DSH model shell's
  * `plannotator inbox call`). Anything
  * malformed or naming another host is ignored, never guessed at (a Codex
- * session is a thread id, a UUID).
+ * session is a thread id, a UUID; a T3 one any id T3 gives a thread).
  */
 export function inboxHostSessionFromEnv(env: Record<string, string | undefined>): InboxHostSession | null {
   const tag = env.PLANNOTATOR_SESSION_TAG;
@@ -116,10 +119,9 @@ export function inboxHostSessionFromEnv(env: Record<string, string | undefined>)
     const session = tag.slice(colon + 1);
     if (
       Object.hasOwn(INBOX_SESSION_HOST_NAMES, host) &&
-      isInboxSessionId(session) &&
+      (host === INBOX_T3_HOST ? isT3ThreadId(session) : isInboxSessionId(session)) &&
       (host !== INBOX_CODEX_HOST || isCodexThreadId(session)) &&
-      (host !== INBOX_QWEN_HOST || isQwenSessionId(session)) &&
-      (host !== INBOX_T3_HOST || isT3ThreadId(session))
+      (host !== INBOX_QWEN_HOST || isQwenSessionId(session))
     ) {
       return { host, session, name: INBOX_SESSION_HOST_NAMES[host]! };
     }
@@ -270,6 +272,45 @@ export function inboxCallHostSession(
   if (clientName !== null) return other;
   return other ?? qwenHostSession(fromEnv!);
 }
+
+/** The MCP client name Claude Code gives in `initialize` (`clientInfo.name`). */
+export const INBOX_CLAUDE_MCP_CLIENT = "claude-code";
+
+/** A Claude Code session id: a UUID. */
+const CLAUDE_SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * The Claude Code session that started this process as one of its stdio MCP
+ * servers, or null. Claude Code puts `CLAUDECODE=1` and
+ * `CLAUDE_CODE_SESSION_ID` (its session at that moment) in every MCP server's
+ * environment, and takes `CLAUDE_CODE_CHILD_SESSION` out of it; its Bash
+ * commands and hooks get `CLAUDE_CODE_CHILD_SESSION=1` (read in the 2.1.323
+ * binary). So a process with that variable, an agent started from a Claude
+ * Code shell included, is never this. The mod's `PLANNOTATOR_SESSION_TAG` is
+ * not reliably there: Claude Code starts its MCP servers as it starts, beside
+ * or before the mod's `session.start` (#3309). The id
+ * is not moved by `/clear` or an in-process `/resume`, which keep the server
+ * running.
+ */
+export function inboxClaudeMcpSessionFromEnv(env: Record<string, string | undefined>): InboxHostSession | null {
+  if (env.CLAUDECODE !== "1" || env.CLAUDE_CODE_CHILD_SESSION) return null;
+  const session = env.CLAUDE_CODE_SESSION_ID;
+  if (typeof session !== "string" || !CLAUDE_SESSION_ID.test(session)) return null;
+  return { host: "claude-code", session, name: INBOX_SESSION_HOST_NAMES["claude-code"]! };
+}
+
+/**
+ * The host session a tool call is filed as once the client said who it is:
+ * Claude Code's own session (`inboxClaudeMcpSessionFromEnv`) when the client
+ * is Claude Code, over a variable the shim inherited from whatever started
+ * that Claude Code (another session's tag, Pi's, Qwen's). A T3 Code thread
+ * stays the thread: T3 runs Claude through the Agent SDK.
+ */
+export function inboxClaudeCallSession(hostSession: InboxHostSession | null, claude: InboxHostSession | null | undefined, clientName: string | null): InboxHostSession | null {
+  if (!claude || clientName !== INBOX_CLAUDE_MCP_CLIENT || hostSession?.host === INBOX_T3_HOST) return hostSession;
+  return claude;
+}
+
 /** The 2026-07-28 per-request envelope's protocol-version key. */
 const PROTOCOL_VERSION_META_KEY = "io.modelcontextprotocol/protocolVersion";
 
@@ -279,6 +320,8 @@ export interface InboxMcpShimOptions {
   ensureRunning: () => Promise<InboxRegistryEntry>;
   /** The agent host session the shim runs inside (`inboxHostSessionFromEnv`); absent: one `ses_` id per process. */
   hostSession?: InboxHostSession | null;
+  /** The Claude Code session that started the shim as its MCP server (`inboxClaudeMcpSessionFromEnv`); used while the client is Claude Code. */
+  claude?: InboxHostSession | null;
   /** Where a Qwen Code session is read at each call (`inboxQwenShimContext`); absent: Qwen only through `hostSession`. */
   qwen?: InboxQwenShimContext | null;
   /** The host session's own project folder (`inboxSessionProjectFromEnv`): a call filed as that session files there, not in `cwd`. */
@@ -383,7 +426,7 @@ export const INBOX_T3_ENTRY_REFUSAL = "This plannotator-inbox entry (plannotator
 
 /**
  * An entry added with `--t3` that runs outside a T3 Code thread: no
- * T3CODE_THREAD_ID holding a UUID. It reads nothing else (no settings, no
+ * T3CODE_THREAD_ID holding a T3 thread id. It reads nothing else (no settings, no
  * Claude Code version), so an entry without the flag never changes.
  */
 export function inboxT3EntryIdle(t3Flag: boolean, env: Record<string, string | undefined>): boolean {
@@ -467,13 +510,14 @@ export async function runInboxMcpShim(options: InboxMcpShimOptions): Promise<voi
       if (typeof name === "string") clientName = name;
     }
     // Qwen's session is read again for each call: /clear and /resume change it under the same Qwen process.
-    const callHost = message?.method === "tools/call" ? inboxCallHostSession(hostSession, options.qwen, message.params?._meta, clientName) : hostSession;
+    const callHost =
+      message?.method === "tools/call" ? inboxClaudeCallSession(inboxCallHostSession(hostSession, options.qwen, message.params?._meta, clientName), options.claude, clientName) : hostSession;
     const outgoing = fillInboxToolArguments(message, options.cwd, own, callHost, clientName, options.sessionProject);
     let target: InboxRegistryEntry;
     try {
       target = await entry();
     } catch (error) {
-      if (isRequest) write(rpcError(message.id, `Plannotator Inbox is not running: ${error instanceof Error ? error.message : String(error)}`));
+      if (isRequest) write(rpcError(message.id, inboxEnsureFailedWords(error)));
       return;
     }
     // Refused before anything is sent: the Inbox would answer 413 to it anyway.

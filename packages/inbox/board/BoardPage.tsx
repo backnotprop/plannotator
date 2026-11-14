@@ -30,6 +30,7 @@ import { TidyMenu, type TidyController } from '../components/Tidy';
 import { BoardFilter, BoardFilterTokens, initiativeLabel } from './BoardFilter';
 import { InitiativesDialog } from './InitiativesDialog';
 import { restoreInitiatives } from './initiativeUndo';
+import type { TagsAcross } from '../tagsAcross';
 import { projectNames } from '../search/model';
 import {
   agentState,
@@ -129,6 +130,11 @@ export interface BoardPageProps {
    * the lanes from its right-click menu (`cardMenuToast`). Absent: no toast, the live region alone.
    */
   onToast?: (toast: Omit<InboxToastModel, 'id'> | null) => void;
+  /**
+   * The tags as the sidebar has them, one per name across the linked machines, with its rename, delete and Undo on each
+   * (tagsAcross.ts). Absent: this Inbox's initiatives alone.
+   */
+  tagsAcross?: TagsAcross | null;
 }
 
 /**
@@ -158,7 +164,8 @@ export function BoardPage(props: BoardPageProps) {
   // A card names its project while the Board spans projects and none is picked, the Project button's own rule
   // (owner, 2026-11-05): on a row of its own above the title, with the marks and the age.
   const cardsShowProject = project === null && offered.length > 1;
-  const initiatives = useMemo(() => liveInitiatives(model?.initiatives), [model?.initiatives]);
+  const across = props.tagsAcross ?? null;
+  const initiatives = useMemo(() => boardTags(across, liveInitiatives(model?.initiatives)), [across, model?.initiatives]);
   const cards = cardsInInitiative(projectCards, initiative, initiatives);
   const initiativeName = initiativeLabel(initiatives, initiative);
   const counts = boardCounts(cards);
@@ -199,7 +206,7 @@ export function BoardPage(props: BoardPageProps) {
   const setInitiative = async (card: InboxCardWire, next: string | null) => {
     setFailed(null);
     try {
-      const { card: changed } = await inboxApi.setCardInitiative(card.id, next);
+      const { card: changed } = await inboxApi.setCardInitiative(card.id, across ? await across.here(next) : next);
       props.onChanged(changed);
       const name = next ? (initiatives.find((i) => i.id === next)?.name ?? 'the tag') : null;
       setSaid(name ? `“${card.title}” is in ${name} now.` : `“${card.title}” has no tag now.`);
@@ -258,7 +265,7 @@ export function BoardPage(props: BoardPageProps) {
   };
   const undoInitiatives = async (deleted: readonly InboxInitiative[]) => {
     props.onToast?.(null);
-    const { left, line } = await restoreInitiatives(deleted);
+    const { left, line } = await (across ? across.restore(deleted) : restoreInitiatives(deleted));
     if (line) props.onToast?.({ icon: 'warn', wrap: true, lead: line, ...(left.length > 0 ? { onUndo: () => void undoInitiatives(left) } : {}) });
     props.onChanged();
   };
@@ -416,7 +423,7 @@ export function BoardPage(props: BoardPageProps) {
     const key = dialogKey.current || newUuid();
     dialogKey.current = key;
     try {
-      const card = await dialogCardFor(input);
+      const card = await dialogCardFor(across ? { ...input, initiative: await across.here(input.initiative) } : input);
       // Made in another project than the Board shows: the card is not on screen, so the words say where it went.
       const elsewhere = project && card.project_id !== project ? ` in ${names.get(card.project_id) ?? 'another project'}` : '';
       if (input.mode === 'send' && input.to) {
@@ -612,7 +619,7 @@ export function BoardPage(props: BoardPageProps) {
       onChanged={props.onChanged}
       onOpenThread={(threadId) => props.onOpenThread(open, threadId)}
       onCreateThread={(session, opener) => props.onCreateThread(open, session, opener)}
-      initiatives={model?.initiatives ?? []}
+      initiatives={cardInitiatives(model?.initiatives ?? [], initiatives)}
       onInitiative={(next) => void setInitiative(open, next)}
     />
   ) : null;
@@ -737,6 +744,7 @@ export function BoardPage(props: BoardPageProps) {
       {managing && (
         <InitiativesDialog
           initiatives={initiatives}
+          across={across}
           start={managing}
           phone={phone}
           onClose={() => setManaging(null)}
@@ -1525,4 +1533,20 @@ function BoardProjectMark({ projectId }: { projectId: string }) {
       </span>
     </Tip>
   );
+}
+
+/**
+ * The tags the Board offers: one per name across the linked machines, and an initiative of this Inbox's the list has
+ * not read yet. A card's tag is this Inbox's copy, whose id the merged tag carries when this Inbox holds one.
+ */
+function boardTags(across: TagsAcross | null, own: InboxInitiative[]): InboxInitiative[] {
+  if (!across) return own;
+  const known = new Set(across.tags.flatMap((tag) => [tag.id, ...Object.values(tag.machines ?? {})]));
+  return [...across.tags, ...own.filter((i) => !known.has(i.id))];
+}
+
+/** The opened card's: every initiative of this Inbox's, deleted ones too (its history names them), and the linked machines' tags. */
+function cardInitiatives(own: readonly InboxInitiative[], offered: readonly InboxInitiative[]): InboxInitiative[] {
+  const ids = new Set(own.map((i) => i.id));
+  return [...own, ...offered.filter((i) => !ids.has(i.id))];
 }
