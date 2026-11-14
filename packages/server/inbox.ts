@@ -899,7 +899,8 @@ const ERROR_STATUS: Record<string, number> = {
  * The window is one built file: its styles are inline and its scripts are
  * packed behind the page and served by this server (`/assets/`, #2593), so the
  * policy allows inline code and code from this origin only. Nothing may frame
- * it, and it may only talk to this server.
+ * it (but the apps config.json `inboxFrameAncestors` lists, on this
+ * computer's port: inbox-framing.ts), and it may only talk to this server.
  */
 export const WINDOW_CSP = [
   "default-src 'self'",
