@@ -157,12 +157,16 @@ afterAll(() => {
   resetStorageBackend();
 });
 
-const sheetOpen = () => document.querySelector('[aria-label="Close review navigation"]') !== null;
+const sheet = () => document.querySelector<HTMLElement>('[data-review-navigation-sheet]');
+const sheetOpen = () => sheet() !== null;
 
 describe.if(hasDom)("phone width: one thing on screen at a time", () => {
   test("nothing viewed yet: the file sheet opens on load; picking a file closes it; the saved split setting is left alone", async () => {
     await mount();
     await waitFor(sheetOpen, "the file sheet to open on first load");
+    expect(sheet()!.getAttribute("aria-label")).toBe("Review navigation");
+    expect(document.activeElement).toBe(sheet());
+    expect(document.querySelector('[data-header-branch]')?.textContent).not.toContain("payments-service");
     const row = [...document.querySelectorAll<HTMLElement>(".file-tree-item")].find((el) => el.textContent?.includes("ledger.ts"));
     expect(row).toBeDefined();
     await act(async () => row!.click());

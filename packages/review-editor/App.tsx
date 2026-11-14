@@ -357,37 +357,27 @@ const reviewItemId = (item: { id: string }): string => item.id;
 
 interface CompactReviewOverlayProps {
   title: string;
-  onClose: () => void;
   context?: React.ReactNode;
   children: React.ReactNode;
 }
 
 /** Full-stage transient surface used for review navigation on touch layouts. */
-function CompactReviewOverlay({ title, onClose, context, children }: CompactReviewOverlayProps) {
+function CompactReviewOverlay({ title, context, children }: CompactReviewOverlayProps) {
+  const sheetRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    sheetRef.current?.focus({ preventScroll: true });
+  }, []);
   return (
     <section
+      ref={sheetRef}
+      tabIndex={-1}
       data-pn-review-transient-overlay
+      data-review-navigation-sheet=""
       role="dialog"
       aria-label={title}
-      className="absolute inset-0 z-40 flex min-w-0 flex-col bg-background"
+      className="absolute inset-0 z-40 flex min-w-0 flex-col bg-background outline-none"
     >
-      <div className="flex min-h-[52px] shrink-0 items-center gap-2 border-b border-border/50 px-3">
-        <h2 className="shrink-0 text-sm font-semibold text-foreground">{title}</h2>
-        {context && <div className="min-w-0 flex-1 overflow-hidden">{context}</div>}
-        <button
-          data-pn-touch-target
-          data-pn-touch-target-icon
-          autoFocus
-          type="button"
-          onClick={onClose}
-          className="ml-auto inline-flex shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
-          aria-label={`Close ${title.toLowerCase()}`}
-        >
-          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.25}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
-      </div>
+      {context && <div className="flex min-h-11 shrink-0 items-center border-b border-border/50 px-3 overflow-hidden">{context}</div>}
       <div className="flex min-h-0 flex-1 [&>aside]:!w-full [&>aside]:!border-r-0">
         {children}
       </div>
@@ -405,14 +395,13 @@ interface ReviewNavigatorContainerProps {
 
 function ReviewNavigatorContainer({
   isCompactTouchLayout,
-  onClose,
   context,
   resizeHandle,
   children,
 }: ReviewNavigatorContainerProps) {
   if (isCompactTouchLayout) {
     return (
-      <CompactReviewOverlay title="Review navigation" onClose={onClose} context={context}>
+      <CompactReviewOverlay title="Review navigation" context={context}>
         {children}
       </CompactReviewOverlay>
     );
@@ -5593,7 +5582,7 @@ const ReviewApp: React.FC = () => {
                   onClick={toggleNavigator}
                   className={`h-7 w-7 flex shrink-0 items-center justify-center rounded-md transition-all focus-visible:outline-none ${
                     isNavigatorOpen
-                      ? 'text-primary'
+                      ? `text-primary${isCompactTouchLayout ? ' bg-muted' : ''}`
                       : 'text-muted-foreground hover:text-foreground hover:bg-muted'
                   }`}
                   title={isNavigatorOpen ? 'Close review navigation' : 'Open review navigation'}
