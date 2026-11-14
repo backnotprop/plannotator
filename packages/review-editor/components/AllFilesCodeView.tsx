@@ -1846,12 +1846,22 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       return;
     }
     const viewer = viewerRef.current?.getInstance();
+    const scroller = scrollRef.current;
     const pending = pendingOpensRef.current;
-    pendingOpensRef.current = new Set();
-    if (viewer == null) return;
+    if (viewer == null || scroller == null) return;
+    const port = scroller.getBoundingClientRect();
+    const viewTop = Math.max(port.top, 0);
+    const viewBottom = Math.min(port.bottom, window.innerHeight);
     for (const rendered of viewer.getRenderedItems()) {
-      if (!pending.has(rendered.id) || rendered.type !== 'diff' || rendered.item.fileDiff.isPartial !== true) continue;
+      if (!pending.has(rendered.id)) continue;
+      if (eagerWholeFilesRef.current.get(rendered.id) !== fileSetKeyRef.current || rendered.type !== 'diff' || rendered.item.fileDiff.isPartial !== true) {
+        pending.delete(rendered.id);
+        continue;
+      }
       if (previewAppliedRef.current.has(rendered.id) || rendered.id === editSession.editingItemIdRef.current) continue;
+      const box = rendered.element?.getBoundingClientRect();
+      if (box == null || (box.bottom > viewTop && box.top < viewBottom)) continue;
+      pending.delete(rendered.id);
       rendered.instance.expandHunk(0, 'up', 0);
     }
   }, []);
@@ -2847,6 +2857,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   const scrollReportRafRef = useRef<number | null>(null);
   const handleScroll = useStableCallback((position: number) => {
     lastScrollTsRef.current = Date.now();
+    if (pendingOpensRef.current.size > 0 && openTimerRef.current == null) openTimerRef.current = setTimeout(flushWholeFileOpens, WHOLE_FILE_OPEN_IDLE_MS);
     hasScrolledRef.current = true;
     onScrollPositionChange?.(position);
     if (scrollReportRafRef.current != null) return;
