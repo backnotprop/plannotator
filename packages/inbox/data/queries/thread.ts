@@ -5,8 +5,19 @@ import { reconcileRead, type HeldThread } from '../apply/record';
 import { THREAD_KEEP, THREAD_KEEP_MS } from '../client';
 import { inboxKeys } from '../keys';
 
+const readsOut = new Map<string, number>();
+
 export function readThread(threadId: string, timeoutMs: number, signal?: AbortSignal): Promise<ThreadModel> {
-  return inboxApi.thread(threadId, timeoutMs, signal);
+  readsOut.set(threadId, (readsOut.get(threadId) ?? 0) + 1);
+  return inboxApi.thread(threadId, timeoutMs, signal).finally(() => {
+    const left = (readsOut.get(threadId) ?? 1) - 1;
+    if (left > 0) readsOut.set(threadId, left);
+    else readsOut.delete(threadId);
+  });
+}
+
+export function threadReadsOut(threadId: string): number {
+  return readsOut.get(threadId) ?? 0;
 }
 
 export function heldThread(client: QueryClient, threadId: string): HeldThread | undefined {
