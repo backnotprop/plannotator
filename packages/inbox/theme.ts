@@ -104,6 +104,18 @@ export function adoptSavedTheme(theme: InboxThemeConfig | null | undefined): voi
   if (changedThemeFields.size > 0) configStore.set('themePair', configStore.get('themePair'));
 }
 
+/**
+ * A theme saved after this page read its settings (another window, an agent; `event: prefs`): shown at once, the parts
+ * config.json names over the page's. Not while a part chosen here is still to be sent: that save brings its own event.
+ */
+export function takeSavedTheme(theme: InboxThemeConfig | null | undefined): void {
+  if (!theme || changedThemeFields.size > 0) return;
+  const now = configStore.get('themePair');
+  const next = { mode: theme.mode ?? now.mode, light: theme.light ?? now.light, dark: theme.dark ?? now.dark };
+  if (next.mode === now.mode && next.light === now.light && next.dark === now.dark) return;
+  configStore.init({ theme: next });
+}
+
 /** Tests only: forget the first settings read and any choice, as a fresh page would. */
 export function resetInboxThemeForTests(): void {
   adopted = false;

@@ -67,6 +67,11 @@ export function adoptSavedTextSize(size: unknown): void {
   if (!chosenHere && isInboxTextSize(size)) apply(size);
 }
 
+/** A size saved after this page read its settings (another window, an agent; `event: prefs`): shown at once. */
+export function takeSavedTextSize(size: unknown): void {
+  if (isInboxTextSize(size) && size !== current) apply(size);
+}
+
 /** The person's choice: shown at once, then saved to config.json. */
 export function chooseTextSize(size: InboxTextSize): Promise<void> {
   chosenHere = true;

@@ -2513,6 +2513,8 @@ export interface InboxEventHandlers {
   onAgentFaces?: (data: unknown) => void;
   /** The tray's saved emoji changed, here or in another window (`event: reactions`, approval "inbox-reaction-tray"). */
   onReactions?: (reactions: unknown, rev: unknown) => void;
+  /** Preferences were saved (`event: prefs`, core inbox-prefs.ts), here, in another window or by an agent: their keys. Never called by an older Inbox. */
+  onPrefs?: (keys: string[]) => void;
   /** A capability switch was saved, here or in another window (`event: capabilities`: the Board, thread steps, ...); never called by an older Inbox. */
   onCapabilities?: (capabilities: { board?: { on: boolean }; steps?: { on: boolean }; bro?: { on: boolean }; float_drafts?: { on: boolean }; mark_read_warning?: { on: boolean }; code_review?: { on: boolean }; shape?: { on: boolean }; system?: { on: boolean }; chapter_diagrams?: { on: boolean } }) => void;
   /** "Over your tailnet" published by itself once Tailscale came back (`event: tailscale`): its new state. Never called by an older Inbox. */
@@ -2554,7 +2556,7 @@ export interface InboxEventWindow {
 
 /** The event stream's named frames, as they arrive (and as the tab that holds the shared stream passes them on). */
 // `heartbeat`: a window's stream beats every 10 s (packages/server/inbox.ts); heard by liveStream.ts, handled by nothing.
-export const INBOX_EVENT_FRAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'ask', 'pins', 'priority', 'artifact-pins', 'tags', 'show', 'snoozes', 'thread-pulls', 'rows', 'sidebar', 'agent-faces', 'reactions', 'capabilities', 'tailscale', 'shapes', 'machine', 'machines', 'outbox', 'heartbeat'] as const;
+export const INBOX_EVENT_FRAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'ask', 'pins', 'priority', 'artifact-pins', 'tags', 'show', 'snoozes', 'thread-pulls', 'rows', 'sidebar', 'agent-faces', 'reactions', 'prefs', 'capabilities', 'tailscale', 'shapes', 'machine', 'machines', 'outbox', 'heartbeat'] as const;
 export type InboxEventFrameName = (typeof INBOX_EVENT_FRAMES)[number];
 export interface InboxEventFrame {
   name: InboxEventFrameName;
@@ -2697,6 +2699,15 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
       try {
         const data = JSON.parse(frame.data) as { reactions?: unknown; rev?: unknown };
         handlers.onReactions?.(data.reactions, data.rev);
+      } catch {
+        // A malformed frame changes nothing.
+      }
+      return;
+    case 'prefs':
+      try {
+        const data = JSON.parse(frame.data) as { keys?: unknown };
+        const keys = Array.isArray(data.keys) ? data.keys.filter((key): key is string => typeof key === 'string') : [];
+        if (keys.length > 0) handlers.onPrefs?.(keys);
       } catch {
         // A malformed frame changes nothing.
       }
