@@ -211,7 +211,7 @@ describe.if(hasDom)("opening panel view", () => {
     });
 
     expect(selectedPanelSegment()).toBe("Tree");
-    expect(document.querySelector("[data-file-status-block]")).not.toBeNull();
+    expect(document.querySelector('[data-tree-grouping="status"]')).not.toBeNull();
   });
 
   test("the last-used memo still layers over the persisted default", async () => {
@@ -223,6 +223,6 @@ describe.if(hasDom)("opening panel view", () => {
     });
 
     expect(selectedPanelSegment()).toBe("Tree");
-    expect(document.querySelector("[data-file-status-block]")).not.toBeNull();
+    expect(document.querySelector('[data-tree-grouping="status"]')).not.toBeNull();
   });
 });

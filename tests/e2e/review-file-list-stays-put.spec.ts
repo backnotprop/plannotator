@@ -259,7 +259,7 @@ test('All changes: Collapse all files clicked while the code is still loading fo
 test('Hide viewed: the file you leave keeps its row while the pointer is in the list', async ({ browser }) => {
   await withReview(browser, async (page) => {
     await page.getByRole('button', { name: 'Hide viewed files' }).click();
-    const row = (path: string) => page.locator(`[data-review-sidebar] .file-tree-item[title="${path}"]`);
+    const row = (path: string) => page.locator(`[data-review-sidebar] [data-item-type="file"][title="${path}"]`);
     const first = row('src/services/operation.hpp');
     const next = row('src/services/service.hpp');
     await first.click();
@@ -276,7 +276,11 @@ test('Hide viewed: the file you leave keeps its row while the pointer is in the 
     // The row you left is still there, and nothing moved under the pointer.
     await expect(first).toHaveCount(1);
     expect((await next.boundingBox())!.y).toBe(box.y);
-    const underTitle = await page.evaluate(([px, py]) => document.elementFromPoint(px!, py!)?.closest('.file-tree-item')?.getAttribute('title') ?? null, [x, y]);
+    const underTitle = await page.evaluate(([px, py]) => {
+      const outer = document.elementFromPoint(px!, py!);
+      const inner = outer?.shadowRoot?.elementFromPoint(px!, py!) ?? outer;
+      return inner?.closest('[data-type="item"]')?.getAttribute('title') ?? null;
+    }, [x, y]);
     expect(underTitle).toBe('src/services/service.hpp');
 
     // Leaving the list hides it.

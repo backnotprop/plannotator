@@ -181,6 +181,7 @@ packages/inbox/rowsNotesLook.test.tsx
 packages/inbox/relativeTime.test.tsx
 packages/inbox/composeThread.test.tsx
 packages/inbox/sendNow.test.tsx
+packages/inbox/takeBack.test.tsx
 packages/inbox/sendWaitsForComments.test.tsx
 packages/inbox/undelivered.test.tsx
 packages/inbox/tagAgents.test.tsx
@@ -399,12 +400,10 @@ packages/review-editor/components/CallFlowTreeView.sourcePreview.test.tsx
 packages/review-editor/dock/panels/semanticDiffShared.sourcePreview.test.tsx
 packages/review-editor/components/PanelChrome.test.tsx
 packages/review-editor/components/FileTree.search-placement.test.tsx
-packages/review-editor/components/FileTree.fileKinds.test.tsx
-packages/review-editor/components/FileTree.statusGroups.test.tsx
+packages/review-editor/components/ChangesTreeView.test.tsx
 packages/review-editor/components/FileHeader.fileKind.test.tsx
 packages/review-editor/components/FileHeader.narrow.test.tsx
 packages/review-editor/components/PackageChangesCard.test.tsx
-packages/review-editor/components/FileTreeNode.controls.test.tsx
 packages/ui/components/Settings.analysis.test.tsx
 packages/ui/components/AnnotationPanel.props.test.tsx
 packages/ui/components/AnnotationPanel.cardHeader.test.tsx

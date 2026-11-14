@@ -82,6 +82,7 @@
   },
   "patchedDependencies": {
     "@opencode-ai/sdk@1.19.3": "patches/@opencode-ai%2Fsdk@1.19.3.patch",
-    "@pierre/diffs@1.6.4": "patches/@pierre%2Fdiffs@1.6.4.patch"
+    "@pierre/diffs@1.6.4": "patches/@pierre%2Fdiffs@1.6.4.patch",
+    "@pierre/trees@1.0.0": "patches/@pierre%2Ftrees@1.0.0.patch"
   }
 }

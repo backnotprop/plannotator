@@ -5244,6 +5244,7 @@ svg.ib-ic.ib-openin-check { width: 14px; height: 14px; stroke: currentColor; fil
 .pn-inbox .ib-sendnow { margin-left: 4px; height: 26px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--card); color: var(--foreground); font-size: var(--ib-fs-12-5, 12.5px); font-weight: 500; cursor: pointer; white-space: nowrap; }
 .pn-inbox .ib-sendnow:hover { background: var(--muted); }
 .pn-inbox .ib-sendnow:disabled { opacity: 0.6; cursor: progress; }
+.pn-inbox .ib-takeback-note { margin: 0 0 6px; color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); }
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
   .pn-inbox .ib-sendnow { position: relative; }
   .pn-inbox .ib-sendnow::after { content: ''; position: absolute; inset: -9px -4px; }
@@ -6200,6 +6201,8 @@ ol.ib-rl-two .ib-rw-cmd { font-weight: 400; margin-top: 6px; }
 .pn-inbox .ib-sendnow.ib-sendnow-go { margin-left: 0; height: 28px; padding: 0 12px 0 10px; display: inline-flex; align-items: center; gap: 6px; border-color: transparent; background: var(--primary); color: var(--primary-foreground); font-weight: 600; border-radius: var(--ib-pill-s, 7px); }
 .pn-inbox .ib-sendnow.ib-sendnow-go:hover { background: color-mix(in oklab, var(--primary) 88%, var(--foreground)); }
 .pn-inbox .ib-sendnow.ib-sendnow-go svg { width: 14px; height: 14px; }
+.pn-inbox .ib-dl-acts { display: inline-flex; align-items: center; gap: 6px; flex: none; }
+.pn-inbox .ib-undl .ib-takeback { margin-left: 0; height: 28px; border-radius: var(--ib-pill-s, 7px); }
 /* It can't go in sooner: the same band, quieter, no button, the reason under it. */
 .pn-inbox .ib-delivered.ib-undl[data-stuck] { background: color-mix(in oklab, var(--foreground) 4%, var(--card)); border-color: var(--border); flex-direction: column; align-items: flex-start; gap: 6px; padding: 8px 12px 9px 11px; max-width: min(620px, 100%); }
 .pn-inbox .ib-delivered.ib-undl[data-stuck] .ib-dl-main > svg, .pn-inbox .ib-delivered.ib-undl[data-stuck] strong { color: var(--foreground); }
@@ -6210,7 +6213,13 @@ ol.ib-rl-two .ib-rw-cmd { font-weight: 400; margin-top: 6px; }
 .pn-inbox .ib-undl .ib-m-whybox .ib-rl-lead, .pn-inbox .ib-undl .ib-m-whybox .ib-rl-fold { padding-left: 20px; }
 /* OpenCode's one quiet line (approval "reload-hosts"): under the lead, in its column and tone. */
 .pn-inbox .ib-undl .ib-m-whybox > .ib-rw-after { padding-left: 20px; margin: 0; color: var(--muted-foreground); line-height: 1.7; }
+.pn-inbox .ib-delivered.ib-undl:not([data-stuck]) { flex-wrap: nowrap; }
+.pn-inbox .ib-delivered.ib-undl:not([data-stuck]) .ib-dl-main { min-width: 0; flex: 0 1 auto; }
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  .pn-inbox .ib-delivered.ib-undl:not([data-stuck]) { flex-wrap: wrap; }
+  .pn-inbox .ib-delivered.ib-undl .ib-dl-acts { margin-left: 20px; gap: 8px; }
+  .pn-inbox .ib-delivered.ib-undl .ib-dl-acts .ib-sendnow.ib-sendnow-go { margin-left: 0; }
+  .pn-inbox .ib-undl .ib-takeback { height: 36px; padding: 0 14px; font-size: var(--ib-fs-14, 14px); }
   .pn-inbox .ib-delivered.ib-undl { width: 100%; flex-wrap: wrap; padding: 10px 10px 10px 12px; }
   .pn-inbox .ib-delivered.ib-undl .ib-dl-main { flex: 1 1 100%; }
   .pn-inbox .ib-sendnow.ib-sendnow-go { height: 36px; margin-left: 20px; padding: 0 14px 0 12px; font-size: var(--ib-fs-14, 14px); }
@@ -10630,6 +10639,8 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
 /* The tree: one column. */
 /* From nothing, not from the tree's height: a big tree otherwise squeezes the layers above it to a row, hiding the one you are on. */
 .ib-prp-files { flex: 1 1 0; min-height: 0; overflow-y: auto; padding: 12px 8px 12px; scrollbar-width: thin; }
+.ib-prp-files.ib-prp-pierre { display: flex; flex-direction: column; overflow: hidden; }
+.ib-prp-pierre > .review-changes-tree { flex: 1 1 0; min-height: 0; }
 .ib-prp-fileshead { display: flex; align-items: center; padding: 0 6px 4px; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
 .ib-prp-list { list-style: none; margin: 0; padding: 0; }
 .pn-inbox .ib-prp-file, .pn-inbox .ib-prp-folder { display: flex; align-items: center; gap: 5px; width: 100%; min-height: 25px; padding-right: 6px; border-radius: 6px; font-size: var(--ib-fs-12-5, 12.5px); text-align: left; color: var(--foreground); }

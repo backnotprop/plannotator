@@ -47,6 +47,7 @@ export default defineConfig({
       '@plannotator/shared': path.resolve(__dirname, '../../packages/shared'),
       '@plannotator/ui': path.resolve(__dirname, '../../packages/ui'),
       '@plannotator/review-editor/styles': path.resolve(__dirname, '../../packages/review-editor/index.css'),
+      '@plannotator/review-editor/tree-styles': path.resolve(__dirname, '../../packages/review-editor/pierreTree.css'),
       '@plannotator/review-editor/worker-pool': path.resolve(__dirname, '../../packages/review-editor/workerPool.tsx'),
       '@plannotator/review-editor': path.resolve(__dirname, '../../packages/review-editor/App.tsx'),
     }

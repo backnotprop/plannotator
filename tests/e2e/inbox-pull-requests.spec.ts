@@ -1944,10 +1944,10 @@ test("the rail: Changes | All files, the repository at the head read; a file the
     await expect(rail.locator('[data-tree-scope="all"]')).toHaveText('All files');
     // All files: the repository at the head the patch was read at, a file the PR does not change among them.
     await rail.locator('[data-tree-scope="all"]').click();
-    await expect(rail.locator('[data-repo-file="package.json"]')).toBeVisible();
+    await expect(rail.locator('[data-repo-file-tree] [data-item-path="package.json"]')).toBeVisible();
     expect(forgeCalls()).toContain(`gh read repos/northwind/web-app/git/trees/${head}?recursive=1`);
     // Picked, it shows whole in place of the diff, in the review app's file view.
-    await rail.locator('[data-repo-file="package.json"]').click();
+    await rail.locator('[data-repo-file-tree] [data-item-path="package.json"]').click();
     const shown = review.locator('[data-pull-repo-file="package.json"]');
     await expect(shown.locator('[data-not-in-review]')).toBeVisible();
     await expect(shown).toContainText('web-app-settings');
