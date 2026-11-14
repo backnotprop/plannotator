@@ -87,7 +87,9 @@ export const test = base.extend<{ heldDrift: void }, { browser: Browser }>({
   browser: [async ({ browser }, use) => use(track(browser)), { scope: 'worker' }],
   heldDrift: [
     async ({}, use, info) => {
+      const before = new Set(contexts);
       await use();
+      if (off(info)) for (const context of [...contexts]) if (!before.has(context)) contexts.delete(context);
       if (off(info) || info.status !== info.expectedStatus) return;
       const drift = await heldDriftOfPages();
       if (drift) throw new Error(`The window's held copy differs from a fresh read of the Inbox (tests/e2e/inbox-test.ts):\n${drift}`);
