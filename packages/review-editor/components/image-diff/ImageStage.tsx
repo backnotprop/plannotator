@@ -47,7 +47,7 @@ export function StageLabel({ children, side }: { children: React.ReactNode; side
 
 function LabelRow({ left, right, width, offset = 0 }: { left: string; right?: string; width?: number; offset?: number }) {
   return (
-    <div className="mb-1 flex justify-between text-xs leading-5 text-muted-foreground" style={{ width, marginLeft: offset }} data-stage-labels-above="">
+    <div className="mb-1 flex justify-between gap-3 text-xs leading-5 text-muted-foreground" style={{ width: width === undefined ? undefined : Math.max(width, 96), marginLeft: offset }} data-stage-labels-above="">
       <span data-stage-label="left">{left}</span>
       {right && <span data-stage-label="right">{right}</span>}
     </div>
@@ -254,11 +254,13 @@ export function StackedStage(props: {
         {swipe && (
           <div aria-hidden="true" data-swipe-divider="" className="pointer-events-none absolute top-0 bottom-0" style={{ left: clipX }}>
             <div className="absolute inset-y-0 -left-px w-0.5 bg-primary" />
-            <div className="absolute top-1/2 -left-3 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full border border-border bg-background text-muted-foreground">
-              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-                <path d="m9 7-5 5 5 5M15 7l5 5-5 5" />
-              </svg>
-            </div>
+            {layout.stage.width >= 96 && (
+              <div className="absolute top-1/2 -left-3 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full border border-border bg-background text-muted-foreground">
+                <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                  <path d="m9 7-5 5 5 5M15 7l5 5-5 5" />
+                </svg>
+              </div>
+            )}
           </div>
         )}
       </div>
