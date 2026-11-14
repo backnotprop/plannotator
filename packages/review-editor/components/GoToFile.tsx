@@ -81,7 +81,7 @@ export const GoToFile: React.FC<GoToFileProps> = ({
   const changed = useMemo(() => new Map(files.map((file) => [file.path, file])), [files]);
   const changedSet = useMemo(() => new Set(changed.keys()), [changed]);
   const localPaths = useMemo(() => {
-    if (repo.status !== 'ready') return null;
+    if (repo.status !== 'ready' || !repo.paths) return null;
     const listed = new Set(repo.paths);
     const missing = files.filter((file) => !listed.has(file.path)).map((file) => file.path);
     return missing.length ? [...repo.paths, ...missing] : repo.paths;
