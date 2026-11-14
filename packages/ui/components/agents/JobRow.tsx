@@ -97,21 +97,23 @@ export function JobRow({
         }
       }}
       data-agent-job-row={job.status}
+      title={`${isGuide ? 'Guided Review' : job.label} · started ${new Date(job.startedAt).toLocaleString()}`}
       className="group -mx-1 flex items-start gap-2 rounded-md px-1 py-1.5 hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
     >
       <span className="pt-0.5"><StatusIcon status={job.status} /></span>
       <span className="min-w-0 flex-1">
         <span className="flex items-baseline gap-2">
-          <span className="min-w-0 flex-1 truncate text-[13px] text-foreground">
+          <span className="min-w-0 flex-1 truncate text-[13px] text-foreground" data-agent-job-label="">
             {isGuide ? 'Guided Review' : job.label}
-            <span className="text-muted-foreground"> · {[engine, modelName].filter(Boolean).join(' ')}</span>
           </span>
           <span className="shrink-0 text-[12px] tabular-nums text-muted-foreground">
             {terminal && job.endedAt ? formatDuration(job.endedAt - job.startedAt) : <ElapsedTime startedAt={job.startedAt} />}
           </span>
         </span>
-        <span className="block truncate text-[12px] text-muted-foreground" data-agent-job-detail="" title={detail}>
-          {detail}
+        <span className="flex min-w-0 items-baseline text-[12px] text-muted-foreground">
+          <span className="flex-none whitespace-nowrap" data-agent-job-engine="">{[engine, modelName ?? job.model, job.effort ?? job.reasoningEffort ?? job.thinking].filter(Boolean).join(' · ')}</span>
+          <span className="flex-none whitespace-pre" aria-hidden="true"> · </span>
+          <span className="min-w-0 truncate" data-agent-job-detail="" title={detail}>{detail}</span>
         </span>
         {job.warning && <span className="block text-[12px] leading-5 text-muted-foreground" role="status" data-agent-job-warning="">{job.warning}</span>}
       </span>
