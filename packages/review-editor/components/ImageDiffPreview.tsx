@@ -8,6 +8,9 @@ import { SinglePane, StackedStage, type StageImage } from './image-diff/ImageSta
 import { computeDifferences, differencesSupported, type DifferenceMask } from './image-diff/differences';
 import { describeImageError, imageCaption, sizeChange } from './image-diff/imageWords';
 
+const LABELS_OVER_MIN_WIDTH = 320;
+const LABELS_OVER_MIN_HEIGHT = 160;
+
 export interface ImageDiffPreviewProps {
   filePath: string;
   status: DiffFileStatus;
@@ -170,7 +173,7 @@ export const ImageDiffPreview: React.FC<ImageDiffPreviewProps> = ({
             mask={side === 'new' ? mask : null}
             maskColor={accent}
             label={label}
-            labelAbove={narrow || layout.stage.width < 320}
+            labelAbove={labelsAboveImage}
             onScrollPosition={twoColumns ? (left, top) => setScroll({ left, top }) : undefined}
             scrollTo={twoColumns ? scroll : null}
           />
@@ -206,6 +209,7 @@ export const ImageDiffPreview: React.FC<ImageDiffPreviewProps> = ({
     );
   };
 
+  const labelsAboveImage = narrow || !layout || layout.stage.width < LABELS_OVER_MIN_WIDTH || Math.min(layout.stage.height, maxHeight) < LABELS_OVER_MIN_HEIGHT;
   const differencesText = mask && comparable
     ? `${((mask.changed / mask.total) * 100).toFixed(mask.changed / mask.total < 0.01 ? 2 : 1)}% of pixels differ`
     : null;
@@ -227,7 +231,7 @@ export const ImageDiffPreview: React.FC<ImageDiffPreviewProps> = ({
               opacity={opacity}
               mask={mask}
               maskColor={accent}
-              labelsAbove={narrow || layout!.stage.width < 320}
+              labelsAbove={labelsAboveImage}
             />
             <div className="mt-1 flex flex-wrap items-center gap-x-2 text-xs leading-5 text-muted-foreground tabular-nums" data-image-meta="">
               <span className="whitespace-nowrap">Before {imageCaption(null, beforeSize, before!.bytes)}</span>
