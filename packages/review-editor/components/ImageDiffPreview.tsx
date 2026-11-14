@@ -167,6 +167,7 @@ export const ImageDiffPreview: React.FC<ImageDiffPreviewProps> = ({
             maxHeight={maxHeight}
             mask={side === 'new' ? mask : null}
             maskColor={accent}
+            label={label}
             onScrollPosition={twoColumns ? (left, top) => setScroll({ left, top }) : undefined}
             scrollTo={twoColumns ? scroll : null}
           />
@@ -190,16 +191,21 @@ export const ImageDiffPreview: React.FC<ImageDiffPreviewProps> = ({
         ) : (
           <div className="animate-pulse rounded-sm bg-muted/50 motion-reduce:animate-none" style={reserve ?? { height: Math.min(maxHeight, 160) }} aria-label="Loading image" />
         )}
-        <figcaption className="mt-1 text-xs leading-5 text-muted-foreground tabular-nums">
-          {image ? imageCaption(label, sizeOf(side, image), image.bytes) : label}
+        <figcaption className="mt-1 text-xs leading-5 text-muted-foreground tabular-nums" data-image-unchanged={unchanged ? '' : undefined}>
+          {image ? imageCaption(null, sizeOf(side, image), image.bytes) : label}
           {image && side === 'new' && comparable && before && (
             <span data-image-delta="" className="ml-1">{sizeChange(beforeSize, afterSize, before.bytes, image.bytes)}</span>
           )}
+          {unchanged && <span className="ml-1">· contents unchanged</span>}
+          {image && side === 'new' && differencesText && <span className="ml-1">· {differencesText}</span>}
         </figcaption>
       </figure>
     );
   };
 
+  const differencesText = mask && comparable
+    ? `${((mask.changed / mask.total) * 100).toFixed(mask.changed / mask.total < 0.01 ? 2 : 1)}% of pixels differ`
+    : null;
   const stacked = comparable && (mode === 'swipe' || mode === 'onion') && before && after && layout;
 
   return (
@@ -219,9 +225,9 @@ export const ImageDiffPreview: React.FC<ImageDiffPreviewProps> = ({
               mask={mask}
               maskColor={accent}
             />
-            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs leading-5 text-muted-foreground tabular-nums">
-              <span>{imageCaption('Before', beforeSize, before!.bytes)}</span>
-              {mode === 'onion' && (
+            <div className="mt-1 flex flex-wrap items-center gap-x-2 text-xs leading-5 text-muted-foreground tabular-nums" data-image-meta="">
+              <span>Before {imageCaption(null, beforeSize, before!.bytes)}</span>
+              {mode === 'onion' ? (
                 <input
                   type="range"
                   min={0}
@@ -230,13 +236,21 @@ export const ImageDiffPreview: React.FC<ImageDiffPreviewProps> = ({
                   onChange={(event) => setOpacity(Number(event.target.value) / 100)}
                   aria-label="After opacity"
                   data-onion-opacity=""
-                  className="h-1 w-32 accent-[var(--primary)]"
+                  className="h-1 w-28 accent-[var(--primary)]"
                 />
+              ) : (
+                <span aria-hidden="true">→</span>
               )}
               <span>
-                {imageCaption('After', afterSize, after!.bytes)}
+                After {imageCaption(null, afterSize, after!.bytes)}
                 <span data-image-delta="" className="ml-1">{sizeChange(beforeSize, afterSize, before!.bytes, after!.bytes)}</span>
               </span>
+              {dimensionsDiffer && (
+                <span data-image-sizes-differ="" title="Both images are aligned top left at one scale; neither is stretched" className="rounded border border-border px-1 leading-4">
+                  sizes differ
+                </span>
+              )}
+              {differencesText && <span>· {differencesText}</span>}
             </div>
           </>
         ) : (
@@ -247,15 +261,6 @@ export const ImageDiffPreview: React.FC<ImageDiffPreviewProps> = ({
             {(unchanged ? (['new'] as ReviewImageSide[]) : sides).map(pane)}
           </div>
         )}
-        {(dimensionsDiffer && mode !== 'side') || unchanged || (mask && comparable) ? (
-          <p className="mt-1 text-xs leading-5 text-muted-foreground" data-image-note="" data-image-unchanged={unchanged ? '' : undefined}>
-            {[
-              unchanged && 'Contents unchanged',
-              dimensionsDiffer && mode !== 'side' && 'Sizes differ: both aligned top left, not stretched',
-              mask && comparable && `${((mask.changed / mask.total) * 100).toFixed(mask.changed / mask.total < 0.01 ? 2 : 1)}% of pixels differ`,
-            ].filter(Boolean).join(' · ')}
-          </p>
-        ) : null}
       </div>
     </div>
   );

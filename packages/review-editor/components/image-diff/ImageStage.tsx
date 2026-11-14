@@ -34,6 +34,17 @@ function ImageLayer({ image, box, pixelated, style, side }: { image: StageImage;
   );
 }
 
+export function StageLabel({ children, side }: { children: React.ReactNode; side: 'left' | 'right' }) {
+  return (
+    <span
+      data-stage-label={side}
+      className={`pointer-events-none absolute top-2 z-10 rounded bg-background/80 px-1.5 text-xs leading-5 text-foreground ${side === 'left' ? 'left-2' : 'right-2'}`}
+    >
+      {children}
+    </span>
+  );
+}
+
 export function DifferenceOverlay({ mask, stage, color }: { mask: DifferenceMask; stage: Size; color: string }) {
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
@@ -98,6 +109,7 @@ export function SinglePane(props: {
   maxHeight: number;
   mask?: DifferenceMask | null;
   maskColor: string;
+  label?: string;
   onScrollPosition?: (left: number, top: number) => void;
   scrollTo?: { left: number; top: number } | null;
 }) {
@@ -107,6 +119,7 @@ export function SinglePane(props: {
       <div data-image-stage="" className="relative" style={{ width: layout.stage.width, height: layout.stage.height }}>
         <ImageLayer image={props.image} box={props.box} pixelated={layout.pixelated} side={props.side} />
         {props.mask && <DifferenceOverlay mask={props.mask} stage={layout.stage} color={props.maskColor} />}
+        {props.label && <StageLabel side="left">{props.label}</StageLabel>}
       </div>
     </Viewport>
   );
@@ -191,6 +204,8 @@ export function StackedStage(props: {
           style={swipe ? { clipPath: `inset(0 0 0 ${clipX}px)` } : { opacity: props.opacity }}
         />
         {props.mask && <DifferenceOverlay mask={props.mask} stage={layout.stage} color={props.maskColor} />}
+        {swipe && <StageLabel side="left">Before</StageLabel>}
+        {swipe && <StageLabel side="right">After</StageLabel>}
         {swipe && (
           <div aria-hidden="true" data-swipe-divider="" className="pointer-events-none absolute top-0 bottom-0" style={{ left: clipX }}>
             <div className="absolute inset-y-0 -left-px w-0.5 bg-primary" />
