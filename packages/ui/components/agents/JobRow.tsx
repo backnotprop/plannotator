@@ -75,6 +75,7 @@ export function JobRow({
   const terminal = isTerminalStatus(job.status);
   const isGuide = job.provider === 'guide';
   const engine = GUIDE_ENGINE_LABEL[(isGuide ? job.engine : job.provider) as keyof typeof GUIDE_ENGINE_LABEL] ?? job.engine ?? job.provider;
+  const runTitle = isGuide ? 'Guided Review' : job.reviewProfileLabel && job.reviewProfileLabel !== 'Default' ? `${job.label}: ${job.reviewProfileLabel}` : job.label;
   const detail = !terminal
     ? STATUS_WORD[job.status]
     : job.status === 'failed'
@@ -97,14 +98,14 @@ export function JobRow({
         }
       }}
       data-agent-job-row={job.status}
-      title={`${isGuide ? 'Guided Review' : job.label} · started ${new Date(job.startedAt).toLocaleString()}`}
+      title={`${runTitle} · started ${new Date(job.startedAt).toLocaleString()}`}
       className="group -mx-1 flex items-start gap-2 rounded-md px-1 py-1.5 hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
     >
       <span className="pt-0.5"><StatusIcon status={job.status} /></span>
       <span className="min-w-0 flex-1">
         <span className="flex items-baseline gap-2">
           <span className="min-w-0 flex-1 truncate text-[13px] text-foreground" data-agent-job-label="">
-            {isGuide ? 'Guided Review' : job.label}
+            {runTitle}
           </span>
           <span className="shrink-0 text-[12px] tabular-nums text-muted-foreground">
             {terminal && job.endedAt ? formatDuration(job.endedAt - job.startedAt) : <ElapsedTime startedAt={job.startedAt} />}
