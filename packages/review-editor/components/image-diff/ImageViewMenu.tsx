@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import { Menu } from '@base-ui/react/menu';
 import {
+  IMAGE_BACKGROUNDS,
+  IMAGE_BACKGROUND_LABEL,
   IMAGE_DIFF_MODES,
   IMAGE_DIFF_MODE_LABEL,
   setImageDiffSettings,
@@ -55,7 +57,8 @@ export const ImageViewMenu: React.FC<ImageViewMenuProps> = ({ filePath, comparab
   const trigger = touch ? (
     <button
       type="button"
-      className="relative ml-1 flex h-9 flex-none items-center gap-1 rounded-md px-2 text-xs text-muted-foreground transition-colors after:absolute after:-inset-1 after:content-[''] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60"
+      data-pn-touch-target=""
+      className="relative ml-1 flex h-11 min-w-11 flex-none items-center justify-center gap-1 rounded-md px-2 text-xs text-muted-foreground transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60"
     />
   ) : (
     <button
@@ -145,6 +148,16 @@ export const ImageViewMenu: React.FC<ImageViewMenuProps> = ({ filePath, comparab
                     <Menu.CheckboxItemIndicator className="flex-none self-center text-primary">{check}</Menu.CheckboxItemIndicator>
                   </Menu.CheckboxItem>
                 )}
+                <Menu.Separator className="my-1 border-t border-border/60" />
+                <Menu.RadioGroup value={settings.background} onValueChange={(value) => setImageDiffSettings({ background: value as (typeof IMAGE_BACKGROUNDS)[number] })}>
+                  <Menu.GroupLabel className={`px-2.5 pb-0.5 pt-1 text-muted-foreground ${touch ? 'text-sm' : 'text-[11px]'}`}>Background</Menu.GroupLabel>
+                  {IMAGE_BACKGROUNDS.map((background) => (
+                    <Menu.RadioItem key={background} value={background} label={IMAGE_BACKGROUND_LABEL[background]} closeOnClick={false} data-image-background-option={background} className={itemClass}>
+                      <span className={`min-w-0 flex-1 font-medium text-foreground ${touch ? 'text-base' : 'text-xs'}`}>{IMAGE_BACKGROUND_LABEL[background]}</span>
+                      <Menu.RadioItemIndicator className="flex-none self-center text-primary">{check}</Menu.RadioItemIndicator>
+                    </Menu.RadioItem>
+                  ))}
+                </Menu.RadioGroup>
               </>
             )}
           </Menu.Popup>

@@ -5,6 +5,9 @@ export interface Size {
 
 export type ImageZoom = 'fit' | 'actual';
 
+export const MIN_THICKNESS = 48;
+export const MIN_TINY_SIDE = 64;
+export const MAX_DRAWN_SIDE = 16384;
 export const SIDE_BY_SIDE_GAP = 16;
 export const SIDE_BY_SIDE_MIN_WIDTH = 480;
 
@@ -39,6 +42,15 @@ export function fitScale(canvas: Size, available: Size): number {
   return Math.min(1, available.width / canvas.width, available.height / canvas.height);
 }
 
+export function readableScale(canvas: Size, fit: number): number {
+  const short = Math.min(canvas.width, canvas.height);
+  const long = Math.max(canvas.width, canvas.height);
+  if (short <= 0) return fit;
+  let scale = Math.max(fit, Math.min(1, MIN_THICKNESS / short));
+  if (long * scale < MIN_TINY_SIDE) scale = Math.ceil(MIN_TINY_SIDE / long);
+  return Math.min(scale, MAX_DRAWN_SIDE / long);
+}
+
 export function sideBySideColumns(canvas: Size, width: number): boolean {
   if (width <= 0 || canvas.width <= 0) return false;
   return width >= SIDE_BY_SIDE_MIN_WIDTH || canvas.width * 2 + SIDE_BY_SIDE_GAP <= width;
@@ -56,7 +68,7 @@ export function stageLayout(options: {
   dpr: number;
 }): StageLayout {
   const canvas = unionCanvas(options.old, options.new);
-  const scale = options.zoom === 'actual' ? 1 : fitScale(canvas, options.available);
+  const scale = options.zoom === 'actual' ? 1 : readableScale(canvas, fitScale(canvas, options.available));
   const size = (s: Size | null): Size | null =>
     s ? { width: floorToDevice(s.width * scale, options.dpr), height: floorToDevice(s.height * scale, options.dpr) } : null;
   const stage = size(canvas)!;

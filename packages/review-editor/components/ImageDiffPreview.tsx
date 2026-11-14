@@ -4,7 +4,8 @@ import type { ReviewImageData, ReviewImageSide } from '../utils/reviewImage';
 import { SIDE_BY_SIDE_GAP, SIDE_BY_SIDE_MIN_WIDTH, sideBySideColumns, sideBySidePaneWidth, stageLayout, type Size } from './image-diff/geometry';
 import { useImageDiffSettings } from './image-diff/imageDiffSettings';
 import { sidesFor, useImageSides, useNearViewport } from './image-diff/useImageSides';
-import { SinglePane, StackedStage, type StageImage } from './image-diff/ImageStage';
+import { SinglePane, StackedStage, StageLabelRow, type StageImage } from './image-diff/ImageStage';
+import { peekImageSizes } from './image-diff/imageSizes';
 import { computeDifferences, differencesSupported, type DifferenceMask } from './image-diff/differences';
 import { describeImageError, imageCaption, sizeChange } from './image-diff/imageWords';
 
@@ -20,6 +21,7 @@ export interface ImageDiffPreviewProps {
   fallback: React.ReactNode;
   tooLargeFallback?: React.ReactNode;
   onHeightChange?: () => void;
+  patch?: string;
 }
 
 
@@ -56,10 +58,19 @@ export const ImageDiffPreview: React.FC<ImageDiffPreviewProps> = ({
   fallback,
   tooLargeFallback,
   onHeightChange,
+  patch,
 }) => {
   const sides = sidesFor(status);
   const [rootRef, visible] = useNearViewport();
-  const { states, markDecodeError } = useImageSides({ snapshotId, filePath, status, visible });
+  const knownEntry = peekImageSizes(snapshotId)?.[filePath];
+  const { states, markDecodeError } = useImageSides({
+    snapshotId,
+    filePath,
+    status,
+    visible,
+    patch,
+    knownBytes: { old: knownEntry?.old?.bytes, new: knownEntry?.new?.bytes },
+  });
   const [natural, setNatural] = useState<Partial<Record<ReviewImageSide, Size>>>({});
   const settings = useImageDiffSettings();
   const [position, setPosition] = useState(0.5);
@@ -74,12 +85,20 @@ export const ImageDiffPreview: React.FC<ImageDiffPreviewProps> = ({
   const errors = sides.flatMap((side) => (states[side].state === 'error' ? [{ side, error: (states[side] as { error: { reason: string; status: number } }).error }] : []));
   const before = loaded.find((s) => s.side === 'old')?.image;
   const after = loaded.find((s) => s.side === 'new')?.image;
+  const known = peekImageSizes(snapshotId)?.[filePath];
+  const knownSize = (side: ReviewImageSide): Size | null => {
+    const entry = known?.[side];
+    return entry?.width && entry?.height ? { width: entry.width, height: entry.height } : null;
+  };
   const sizeOf = (side: ReviewImageSide, image?: ReviewImageData): Size | null =>
-    image?.width && image?.height ? { width: image.width, height: image.height } : natural[side] ?? null;
+    image?.width && image?.height ? { width: image.width, height: image.height } : natural[side] ?? knownSize(side);
+  const bytesOf = (side: ReviewImageSide, image?: ReviewImageData): number | undefined => image?.bytes ?? known?.[side]?.bytes;
   const beforeSize = sizeOf('old', before);
   const afterSize = sizeOf('new', after);
+  const beforeBytes = bytesOf('old', before);
+  const afterBytes = bytesOf('new', after);
   const unchanged = sides.length === 2 && !!before && !!after && before.digest === after.digest;
-  const comparable = sides.length === 2 && !!before && !!after && !unchanged;
+  const comparable = sides.length === 2 && !unchanged && !!beforeSize && !!afterSize && states.old.state !== 'error' && states.new.state !== 'error';
   const mode = comparable ? settings.mode : 'side';
   const maxHeight = variant === 'all-files' ? 480 : 640;
   const narrow = width > 0 && width < SIDE_BY_SIDE_MIN_WIDTH;
@@ -88,7 +107,7 @@ export const ImageDiffPreview: React.FC<ImageDiffPreviewProps> = ({
   const twoColumns = columnsFit && mode === 'side';
   const paneWidth = sideBySidePaneWidth(width, columnsFit);
   const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
-  const sized = comparable ? !!beforeSize && !!afterSize : loaded.length > 0 && !!(beforeSize ?? afterSize);
+  const sized = comparable || !!(beforeSize ?? afterSize);
   const layout = sized && width > 0
     ? stageLayout({
         old: unchanged ? null : beforeSize,
@@ -189,6 +208,16 @@ export const ImageDiffPreview: React.FC<ImageDiffPreviewProps> = ({
             }}
             onError={() => markDecodeError(side)}
           />
+        ) : layout && state.state === 'loading' ? (
+          <>
+          {labelsAboveImage && <StageLabelRow left={label} />}
+          <div
+            className="animate-pulse rounded-sm bg-muted/50 motion-reduce:animate-none"
+            style={{ width: ((side === 'old' ? layout.old : layout.new) ?? layout.stage).width, height: Math.min(layout.stage.height, maxHeight), marginLeft: layout.offsetX }}
+            aria-label="Loading image"
+            data-image-reserved=""
+          />
+          </>
         ) : state.state === 'error' ? (
           <p className="py-6 text-xs text-muted-foreground" data-image-error={state.error.reason}>
             {label}: {describeImageError(state.error)}
@@ -197,9 +226,9 @@ export const ImageDiffPreview: React.FC<ImageDiffPreviewProps> = ({
           <div className="animate-pulse rounded-sm bg-muted/50 motion-reduce:animate-none" style={reserve ?? { height: Math.min(maxHeight, 160) }} aria-label="Loading image" />
         )}
         <figcaption className="mt-1 text-xs leading-5 text-muted-foreground tabular-nums" data-image-unchanged={unchanged ? '' : undefined}>
-          <span className="whitespace-nowrap">{image ? imageCaption(null, sizeOf(side, image), image.bytes) : label}</span>
-          {image && side === 'new' && comparable && before && (
-            <span data-image-delta="" className="ml-1 whitespace-nowrap">{sizeChange(beforeSize, afterSize, before.bytes, image.bytes)}</span>
+          <span className="whitespace-nowrap">{bytesOf(side, image) !== undefined ? imageCaption(null, sizeOf(side, image), bytesOf(side, image)!) : label}</span>
+          {side === 'new' && comparable && beforeBytes !== undefined && afterBytes !== undefined && (
+            <span data-image-delta="" className="ml-1 whitespace-nowrap">{sizeChange(beforeSize, afterSize, beforeBytes, afterBytes)}</span>
           )}
           {unchanged && <span className="ml-1 whitespace-nowrap">· contents unchanged</span>}
           {image && side === 'new' && differencesText && <span className="ml-1 whitespace-nowrap">· {differencesText}</span>}
@@ -212,12 +241,26 @@ export const ImageDiffPreview: React.FC<ImageDiffPreviewProps> = ({
   const differencesText = mask && comparable
     ? `${((mask.changed / mask.total) * 100).toFixed(mask.changed / mask.total < 0.01 ? 2 : 1)}% of pixels differ`
     : null;
-  const stacked = comparable && (mode === 'swipe' || mode === 'onion') && before && after && layout;
+  const stackedMode = comparable && (mode === 'swipe' || mode === 'onion') && !!layout;
+  const stacked = stackedMode && before && after;
 
   return (
     <div ref={rootRef} data-image-diff-preview="" data-image-diff-mode={comparable ? mode : 'single'} className="relative border-b border-border px-4 py-3">
       <div ref={contentRef} className="min-w-0">
-        {stacked ? (
+        {stackedMode && !stacked ? (
+          <>
+            {mode === 'swipe' && labelsAboveImage && <StageLabelRow left="Before" right="After" width={layout!.stage.width} />}
+            <div
+              className="animate-pulse rounded-sm bg-muted/50 motion-reduce:animate-none"
+              style={{ width: layout!.stage.width, height: Math.min(layout!.stage.height, maxHeight) }}
+              aria-label="Loading image"
+              data-image-reserved=""
+            />
+            <div className="mt-1 flex flex-wrap items-center gap-x-2 text-xs leading-5 text-muted-foreground tabular-nums">
+              <span className="whitespace-nowrap">Before {beforeBytes !== undefined ? imageCaption(null, beforeSize, beforeBytes) : ''}</span>
+            </div>
+          </>
+        ) : stacked ? (
           <>
             <StackedStage
               mode={mode as 'swipe' | 'onion'}
