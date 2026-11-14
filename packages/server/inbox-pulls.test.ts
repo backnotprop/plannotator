@@ -319,6 +319,8 @@ function gitlabForge(): Forge {
     others: () => f.calls.filter((c) => othersCall(c.args)),
     run: async (cli, args) => {
       f.calls.push({ cli, args });
+      const rest = f.rest?.(cli, args);
+      if (rest) return rest;
       if (cli === "glab" && args[0] === "auth") return { stdout: "gitlab.com\n  ✓ Logged in to gitlab.com as dana (keyring)\n", stderr: "", exitCode: 0 };
       if (cli === "gh" && args[0] === "auth") return { stdout: "", stderr: "not logged in", exitCode: 1 };
       if (cli === "glab" && othersCall(args)) {
@@ -583,6 +585,34 @@ describe("close and reopen (the board's Close and its Undo)", () => {
     expect(await stateOf(w)).toBe("open");
     // Not closed here, so no Undo either.
     expect(((await (await call(w.base, "reopen", { key: KEY })).json()) as { code: string }).code).toBe("reopen_not_closed_here");
+  });
+
+  test("GitLab: a listed MR closes and reopens through glab on its own host; a host no CLI here is signed in to is never asked", async () => {
+    const w = await world({ codeReview: true, gitlab: true });
+    await w.send("Ready.", "posting");
+    await w.pulls();
+    const MR_KEY = "gitlab.com/northwind/data/ledger#61:pull";
+    const MR = "projects/northwind%2Fdata%2Fledger/merge_requests/61";
+    let state = "opened";
+    w.forge.rest = (cli, args) => {
+      if (cli !== "glab" || !args.includes(MR)) return null;
+      if (args.includes("PUT")) state = args.at(-1) === "state_event=close" ? "closed" : "opened";
+      return ok({ state });
+    };
+    const mrState = async () => ((await (await w.pulls()).json()) as InboxPullsAnswer).pulls.find((p) => p.key === MR_KEY)?.state;
+    const puts = () => w.forge.calls.filter((c) => c.args.includes("PUT"));
+
+    expect((await call(w.base, "close", { key: MR_KEY })).status).toBe(200);
+    expect(puts().map((c) => [c.cli, ...c.args])).toEqual([["glab", "api", "--hostname", "gitlab.com", "-X", "PUT", MR, "-f", "state_event=close"]]);
+    expect(await mrState()).toBe("closed");
+    expect((await call(w.base, "reopen", { key: MR_KEY })).status).toBe(200);
+    expect(puts().map((c) => c.args.at(-1))).toEqual(["state_event=close", "state_event=reopen"]);
+    expect(await mrState()).toBe("open");
+
+    const res = await call(w.base, "close", { key: "gitlab.evil.example/northwind/data/ledger#61:pull" });
+    expect(res.status).toBe(404);
+    expect(w.forge.calls.some((c) => c.args.some((a) => a.includes("gitlab.evil.example")))).toBe(false);
+    expect(puts()).toHaveLength(2);
   });
 });
 
