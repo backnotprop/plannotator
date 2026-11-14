@@ -177,4 +177,15 @@ describe.skipIf(!hasDom)('The Changes tree on Pierre trees', () => {
     expect(rows(el).slice(0, 2)).toEqual(['committed.ts', 'edited.ts']);
     expect(onSelectFile).toHaveBeenCalledWith(2);
   });
+
+  test('picking another file keeps every drawn row element and draws only the rows in view', async () => {
+    const many: DiffFile[] = Array.from({ length: 400 }, (_, i) => file(`src/area-${i % 4}/file-${String(i).padStart(3, '0')}.ts`));
+    const el = await mount(<Tree files={many} activeFileIndex={0} />);
+    const before = rowEls(el);
+    expect(before.length).toBeLessThan(80);
+    await rerender(<Tree files={many} activeFileIndex={4} />);
+    const after = rowEls(el);
+    expect(after.length).toBe(before.length);
+    expect(after.every((row, i) => row === before[i])).toBe(true);
+  });
 });
