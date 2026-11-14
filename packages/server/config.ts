@@ -13,6 +13,7 @@ export {
   resolveGitRemoteCheck,
   parseReviewAnalysisConfig,
   parsePackageChangesConfig,
+  parseDisplayOptionsConfig,
   resolvePackageLookup,
   isAgentTerminalSide,
   agentToolSaveFailed,

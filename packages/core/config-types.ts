@@ -35,3 +35,30 @@ export interface DiffOptions {
   defaultDiffType?: DefaultDiffType;
   lineBgIntensity?: DiffLineBgIntensity;
 }
+
+/**
+ * The plan / annotate Display settings (Settings > Display) and the markdown
+ * selection mode (the toolbar's Select / Pinpoint toggle), saved under
+ * `displayOptions` in config.json. Values are the UI's own values; the UI
+ * validates each one and ignores what it does not recognize.
+ */
+export interface DisplayOptions {
+  /** Document text size in px: 13 / 15 / 17 / 19 / 21. */
+  textSize?: number;
+  /** Document font family; an empty string means the theme's font. */
+  fontFamily?: string;
+  /** Grid background behind the document. */
+  showGrid?: boolean;
+  /** Diagram shadow strength, 0-100. */
+  diagramShadow?: number;
+  /** Auto-open the sidebar (table of contents). */
+  autoOpenSidebar?: boolean;
+  /** Sticky action buttons in the header. */
+  stickyActions?: boolean;
+  /** Plan width: 'compact' / 'default' / 'wide'. */
+  planWidth?: string;
+  /** Tater mode. */
+  taterMode?: boolean;
+  /** Markdown selection mode: 'drag' (shown as Select) or 'pinpoint'. */
+  inputMethod?: string;
+}
