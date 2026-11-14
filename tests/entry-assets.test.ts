@@ -129,7 +129,7 @@ describe('review entry assets', () => {
     const build = read('apps/review/diagram-engine/build.ts');
     expect(build).toContain("path.join(uiRoot, 'utils/mermaid.ts')");
     expect(build).toContain("path.join(uiRoot, 'utils/graphviz.ts')");
-    expect(read('apps/review/package.json')).toContain('"build": "vite build && bun diagram-engine/build.ts"');
+    expect(read('apps/review/package.json')).toContain('"build": "vite build && bun diagram-engine/build.ts && bun ../../packages/sem-diff/scripts/copy-wasm.ts dist/sem-diff"');
   });
 
   // The other half of the optimization: the renderers must stay OFF the

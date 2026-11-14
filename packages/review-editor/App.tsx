@@ -77,6 +77,7 @@ import { useHasSavedGuides } from './hooks/guide/useHasSavedGuides';
 import { generateId } from './utils/generateId';
 import { parseDiagramEngineUrls } from './utils/diagramEngine';
 import { parseSemDiffAdvert } from './semDiff/protocol';
+
 import type { SemDiffAdvert } from '@plannotator/shared/sem-diff-assets';
 import type { DiagramEngineUrls } from './utils/diagramEngineContract';
 import type { SuggestionHunk } from './edit/deriveSuggestions';
@@ -255,6 +256,8 @@ import {
   type ReviewSubmissionRecovery,
   type ReviewRecoveryStorage,
 } from './utils/reviewSubmissionRecovery';
+
+const loadSemDiffWorker = (): Promise<Worker> => import('./semDiff/createSemDiffWorker').then((m) => m.createSemDiffWorker());
 
 declare const __APP_VERSION__: string;
 
@@ -4377,6 +4380,7 @@ const ReviewApp: React.FC = () => {
     markdownPreview,
     diagramEngine,
     semDiff,
+    createSemDiffWorker: loadSemDiffWorker,
     onAddMarkdownPreviewComment: handleAddMarkdownPreviewComment,
     onAskAIForMarkdownPreview: aiAvailable ? handleAskAIForMarkdownPreview : undefined,
     // Outdated comments (#1590) carry line numbers from an earlier version of

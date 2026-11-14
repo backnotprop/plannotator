@@ -104,6 +104,7 @@ export interface ReviewState {
    *  such fence; absent, they show as code. */
   diagramEngine?: DiagramEngineUrls | null;
   semDiff?: SemDiffAdvert | null;
+  createSemDiffWorker?: () => Promise<Worker>;
   /** Commit a comment made by selecting text in a previewed Markdown file
    *  (file-scoped, carries the quote). */
   onAddMarkdownPreviewComment?: (

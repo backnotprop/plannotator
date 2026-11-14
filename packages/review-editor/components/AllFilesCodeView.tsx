@@ -236,6 +236,7 @@ export interface AllFilesCodeViewProps {
   reviewBase?: string;
   reviewSnapshotId?: string;
   semDiff?: SemDiffAdvert | null;
+  createSemDiffWorker?: () => Promise<Worker>;
   /** False when there is no source behind the diff to expand into (static
    *  patch review): the augmentation stage completes as a no-op instead of
    *  firing a /api/file-content request the server answers 400. */
@@ -793,6 +794,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   reviewBase,
   reviewSnapshotId,
   semDiff,
+  createSemDiffWorker,
   contextExpansionAvailable = true,
   fetchFileContent,
   renderImagePreview,
@@ -1177,8 +1179,8 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   const semanticEnabledRef = useRef(semanticEnabled);
   semanticEnabledRef.current = semanticEnabled;
   const semClient = useMemo<SemDiffClient | null>(
-    () => (semDiff ? createSemDiffClient({ advert: semDiff, origin: window.location.origin, createWorker: () => import('../semDiff/createSemDiffWorker').then((m) => m.createSemDiffWorker()) }) : null),
-    [semDiff],
+    () => (semDiff && createSemDiffWorker ? createSemDiffClient({ advert: semDiff, origin: window.location.origin, createWorker: createSemDiffWorker }) : null),
+    [semDiff, createSemDiffWorker],
   );
   useEffect(() => () => semClient?.dispose(), [semClient]);
   const semClientRef = useRef(semClient);
