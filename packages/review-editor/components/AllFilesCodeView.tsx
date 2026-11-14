@@ -61,6 +61,7 @@ import { ToolbarHost, type ToolbarHostHandle } from './ToolbarHost';
 import type { DiffSelectionActions } from './SelectionChooser';
 import { FileHeader } from './FileHeader';
 import { createKeptWholeFiles, opensWholeFileEagerly, type WholeFileText } from '../utils/wholeFileText';
+import { collectHeaderHeightHints, headerHeightFor, type HeaderHeightHint } from '../utils/headerHeightHints';
 import { ReviewStateProvider, useReviewStateOptional, type ReviewState } from '../dock/ReviewStateContext';
 import { DiffBottomBar } from './DiffBottomBar';
 import { BinaryFileNotice } from './BinaryFileNotice';
@@ -244,6 +245,7 @@ export interface AllFilesCodeViewProps {
    * guides.show) that leave it unset never fetch or draw it.
    */
   renderPackageChanges?: (args: { file: DiffFile; onHeightChange: () => void }) => React.ReactNode;
+  headerHeightHint?: HeaderHeightHint;
   /**
    * Rendered Markdown previews. A previewed Markdown file shows its card in
    * the header slot (measured like an image preview) and its item's diff is
@@ -792,6 +794,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   fetchFileContent,
   renderImagePreview,
   renderPackageChanges,
+  headerHeightHint,
   markdownPreview,
   compactTouchLayout,
   onLineSelection,
@@ -1155,12 +1158,18 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   }, [hostFileNotes]);
   const hostFileNotesByPathRef = useRef(hostFileNotesByPath);
   hostFileNotesByPathRef.current = hostFileNotesByPath;
+  const headerHeightHints = useMemo(
+    () => collectHeaderHeightHints([...itemIdToFile].map(([itemId, file]) => [itemId, file.path] as const), headerHeightHint),
+    [itemIdToFile, headerHeightHint],
+  );
+  const headerHeightHintsRef = useRef(headerHeightHints);
+  headerHeightHintsRef.current = headerHeightHints;
   const measuredHeaderItemIds = useMemo(() => {
-    if (previewItemIds.size === 0 && hostFileNotesByPath.size === 0) return imagePreviewItemIds;
-    const ids = new Set([...imagePreviewItemIds, ...previewItemIds]);
+    if (previewItemIds.size === 0 && hostFileNotesByPath.size === 0 && headerHeightHints.size === 0) return imagePreviewItemIds;
+    const ids = new Set([...imagePreviewItemIds, ...previewItemIds, ...headerHeightHints.keys()]);
     for (const path of hostFileNotesByPath.keys()) for (const id of filePathToItemIds.get(path) ?? []) ids.add(id);
     return ids;
-  }, [imagePreviewItemIds, previewItemIds, hostFileNotesByPath, filePathToItemIds]);
+  }, [imagePreviewItemIds, previewItemIds, hostFileNotesByPath, filePathToItemIds, headerHeightHints]);
   const imagePreviewItemIdsRef = useRef(measuredHeaderItemIds);
   imagePreviewItemIdsRef.current = measuredHeaderItemIds;
 
@@ -1194,9 +1203,11 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   // starts previewed files hunkless. An identity rebuilt without a remount
   // (an equal file set re-parsed) is never seen by CodeView, so it re-seeds
   // nothing. Idempotent per key (render may run twice).
+  const measuredHeaderOnceRef = useRef(new Set<string>());
   const seededPreviewKeyRef = useRef<string | null>(null);
   if (seededPreviewKeyRef.current !== fileSetKey) {
     seededPreviewKeyRef.current = fileSetKey;
+    measuredHeaderOnceRef.current = new Set();
     fullDiffsRef.current = new Map();
     previewAppliedRef.current = new Set();
     for (const item of identity.items) {
@@ -1654,6 +1665,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   const itemMetricsRef = useRef<Partial<VirtualFileMetrics>>({});
   /** Measured header-slot height per image-preview item id. */
   const measuredHeaderHeightsRef = useRef(new Map<string, number>());
+  const relayoutQueuedRef = useRef(false);
   /** The item's VirtualizedFileDiff, captured from onPostRender. */
   const headerMetricsInstancesRef = useRef(new Map<string, HeaderMetricsTarget>());
   /** What was last applied to each instance (header height + shared metrics). */
@@ -1667,7 +1679,12 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       if (instance == null) return;
       const base = itemMetricsRef.current;
       const baseHeight = base.diffHeaderHeight ?? DEFAULT_CODE_VIEW_FILE_METRICS?.diffHeaderHeight ?? 0;
-      const height = measuredHeaderHeightsRef.current.get(itemId) ?? baseHeight;
+      const height = headerHeightFor(itemId, {
+        measured: measuredHeaderHeightsRef.current,
+        measuredOnce: measuredHeaderOnceRef.current,
+        hints: headerHeightHintsRef.current,
+        baseHeight,
+      });
       const applied = appliedHeaderMetricsRef.current.get(instance);
       // Nothing to do when this exact height is already applied over the
       // current shared metrics, or when the item never had an override and
@@ -1680,6 +1697,12 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       // setMetrics only marks the instance dirty; the version bump makes
       // CodeView re-lay out from this item down.
       refreshItem(itemId);
+      if (relayoutQueuedRef.current) return;
+      relayoutQueuedRef.current = true;
+      queueMicrotask(() => {
+        relayoutQueuedRef.current = false;
+        viewerRef.current?.getInstance()?.render(true);
+      });
     },
     [refreshItem],
   );
@@ -1701,6 +1724,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
           // the last measurement instead of collapsing the card.
           if (height <= 0) return;
           const baseHeight = itemMetricsRef.current.diffHeaderHeight ?? 0;
+          measuredHeaderOnceRef.current.add(itemId);
           if (height === baseHeight) measuredHeaderHeightsRef.current.delete(itemId);
           else measuredHeaderHeightsRef.current.set(itemId, height);
           syncHeaderMetrics(itemId);
