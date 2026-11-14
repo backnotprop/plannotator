@@ -3,6 +3,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { InboxCloudAgentView } from "@plannotator/core/inbox-cloud";
 import type { InboxListRow } from "@plannotator/core/inbox-types";
+import { decodeInboxAgentPairing } from "@plannotator/shared/inbox/agent-pairing";
 import { cloudAgentsPath } from "./inbox-cloud-agents";
 import { doorCleanups, doorWorld } from "../../tests/helpers/inbox-agent-door-world";
 
@@ -46,6 +47,24 @@ describe("a cloud agent uses the whole Inbox", () => {
     expect((await w.door(pairing.token, "get_guide_brief")).error).toBeNull();
     expect((await w.door(pairing.token, "resolve_message", { message_id: local.message_id })).error).toBeNull();
     expect((await w.thread(local.thread_id)).resolved_at).not.toBeNull();
+  });
+
+  test("a reply it reads through the door counts as read: the person can no longer take it back", async () => {
+    const w = await doorWorld(cleanups);
+    const paired = await w.call("/api/inbox/cloud-agents", { name: "Poller", preset: "other" });
+    const pairing = decodeInboxAgentPairing(paired.json.pairing)!;
+    const asked = (await w.door(pairing.token, "send_message", { project: "ledger", subject: "Runner", body: "Which runner?" })).result!.structuredContent as { thread_id: string; message_id: string };
+    const replyIn = async (words: string, key: string) => {
+      expect((await w.call(`/api/inbox/messages/${asked.message_id}/reply`, { words, idempotency_key: key })).status).toBe(200);
+      return (await w.thread(asked.thread_id)).messages.filter((m) => m.author.kind === "person").at(-1)!.id;
+    };
+    const early = await replyIn("Use ARM.", "tb-1");
+    expect((await w.call(`/api/inbox/messages/${early}/take-back`, {})).status).toBe(200);
+    const late = await replyIn("Use x86.", "tb-2");
+    const read = await w.door(pairing.token, "read_thread", { thread_id: asked.thread_id });
+    expect(read.result!.content[0]!.text).toContain("Use x86.");
+    expect(read.result!.content[0]!.text).not.toContain("Use ARM.");
+    expect(await w.call(`/api/inbox/messages/${late}/take-back`, {})).toMatchObject({ status: 409, json: { code: "agent_has_it", by: "read" } });
   });
 
   test("it starts a thread in a project it names; with none named, in a place of its own named after it, apart from another agent of the same name", async () => {

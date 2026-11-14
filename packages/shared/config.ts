@@ -381,13 +381,6 @@ export interface PlannotatorConfig {
    */
   inboxDebug?: boolean;
   /**
-   * The Plannotator Inbox keeps its records in SQLite (`inbox/inbox.db`) instead of the JSONL files, as
-   * `PLANNOTATOR_INBOX_SQLITE=1`. Off by default, for everyone. Config-only, read when the Inbox starts: on moves
-   * the files into the database (kept as a dated backup); turned off again, everything goes back into the files
-   * (`packages/shared/inbox/store-log/sqlite/open-store.ts`).
-   */
-  inboxSqlite?: boolean;
-  /**
    * The Plannotator Inbox's browser notifications, set from the Inbox page
    * (its one-time ask and its Settings), kept here rather than in the page's
    * localStorage so they survive the Inbox moving to another port (another
@@ -740,6 +733,7 @@ export interface PlannotatorConfig {
    * a tagged machine, which has no owner. Config only. Default: none.
    */
   inboxTailscaleAllow?: string[];
+  gitlabHosts?: string[];
   /**
    * Launch agents from the Inbox (New message's "New session" rows;
    * packages/server/inbox-launch.ts). `enabled`: Settings → Agents' "Start

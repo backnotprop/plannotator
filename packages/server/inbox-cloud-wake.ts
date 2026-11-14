@@ -102,9 +102,11 @@ export function createInboxCloudWake(options: {
 
   const wakeItem = (item: InboxMessage): InboxCloudWakeItem => ({ id: item.id, at: item.created_at, body: item.body, files: item.attachments?.length ?? 0 });
 
-  const wakeThread = async (agent: InboxCloudWakeAgent, threadId: string, items: InboxMessage[]): Promise<number | null> => {
+  const wakeThread = async (agent: InboxCloudWakeAgent, threadId: string, listed: InboxMessage[]): Promise<number | null> => {
     const thread = store.thread(threadId);
     if (!thread) return null;
+    const items = listed.filter((item) => store.handover.hand(item, agent.session, "cloud"));
+    if (items.length === 0) return null;
     const at = now();
     lastWake.set(threadId, at);
     for (const item of items) setWake(item, agent.session, { state: "sending", name: agent.name, preset: agent.preset, at: iso(at) });
@@ -120,7 +122,11 @@ export function createInboxCloudWake(options: {
     const settle = (wake: Omit<InboxCloudWake, "name" | "at">) => {
       for (const item of items) setWake(item, agent.session, { ...wake, name: agent.name, preset: agent.preset, at: iso(done) } as InboxCloudWake);
     };
+    const giveBack = () => {
+      for (const item of items) store.handover.giveBack(item.id, agent.session);
+    };
     const retryLater = (status?: number): number => {
+      giveBack();
       const wait = Math.min((backoff.get(threadId) ?? (options.retryMs ?? RETRY_FIRST_MS) / 2) * 2, RETRY_MAX_MS);
       backoff.set(threadId, wait);
       lastWake.set(threadId, 0);
@@ -143,18 +149,21 @@ export function createInboxCloudWake(options: {
       case "retry":
         return retryLater(answer.status);
       case "rate_limited":
+        giveBack();
         lastWake.set(threadId, 0);
         limitedUntil.set(agent.session, done + answer.wait_ms);
         settle({ state: "rate_limited", next_at: iso(done + answer.wait_ms) });
         log(`The cloud agent "${agent.name}" is at its hourly limit; the next wake waits.`);
         return done + answer.wait_ms;
       case "key_rejected":
+        giveBack();
         lastWake.set(threadId, 0);
         settle({ state: "key_rejected", status: answer.status });
         agents.markKeyRejected(agent.session);
         log(`The cloud agent "${agent.name}" refused its key. Paste the new key in Settings → Devices.`);
         return null;
       case "failed":
+        giveBack();
         settle({ state: "failed", status: answer.status });
         log(`Could not wake the cloud agent "${agent.name}" (it answered ${answer.status}).`);
         return null;
@@ -172,6 +181,7 @@ export function createInboxCloudWake(options: {
       const agent = agents.agent(session);
       if (!agent || !hasCloudWake(agent)) continue;
       if (startPass) for (const item of all) if (item.cloud_wake?.state === "sending") setWake(item, session, { ...item.cloud_wake, state: "uncertain" });
+      for (const item of all) if (POSTED.has(item.cloud_wake?.state ?? "")) store.handover.hand(item, session, "cloud");
       const open = all.filter((item) => !inboxCloudWakeSettled(store.message(item.id)?.cloud_wake));
       const byThread = new Map<string, InboxMessage[]>();
       for (const item of open) (byThread.get(item.thread_id) ?? byThread.set(item.thread_id, []).get(item.thread_id)!).push(item);

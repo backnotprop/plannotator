@@ -1289,6 +1289,7 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
             noteSessionRead(store, reader, threadId, clock());
             // The full records, as before the window (tests, scripts, a jq over the result).
             const records = store.agentThread(threadId, reader)!;
+            store.recordAgentRead(records.messages.map((m) => m.id), reader);
             // What was on screen reads the same here as in the transcript: the line, not its parts.
             const thread = { ...records, messages: records.messages.map((m) => (m.viewing ? { ...m, viewing: inboxViewingLine(m) } : m)) };
             const replies = thread.messages.filter((m) => m.author.kind === "person").length;
@@ -1306,6 +1307,7 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
           }
           // What this session was owed in the messages it was shown, and no wake is left to settle.
           if (reader) store.recordOwnRead(threadId, reader, shown);
+          store.recordAgentRead(shown, reader);
           noteSessionRead(store, reader, threadId, clock());
           // The thread's steps (approval "inbox-thread-steps"), the reader's own first: only while the person has steps on.
           const steps = context.stepsOn?.() ? threadStepsText(store, threadId, reader, context.sessionName) : [];

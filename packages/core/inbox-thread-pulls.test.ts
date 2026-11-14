@@ -8,6 +8,8 @@
  * open.
  */
 import { describe, expect, test } from "bun:test";
+import { parseForgePullRef } from "./forge-ref-card";
+import { gitlabHostsSnapshot, learnGitlabHosts } from "./forge-refs";
 import {
   inboxThreadPullGroups,
   inboxThreadPullHeadline,
@@ -55,6 +57,33 @@ describe("refs", () => {
     expect("refs" in list && list.refs.map((ref) => ref.key)).toEqual(["gitlab.acme.dev/acme/api#3:pull"]);
     // Written back as its URL: the short form would read as gitlab.com in a thread of another project.
     expect(inboxThreadPullText({ pull: "gitlab.acme.dev/acme/api#3:pull", url: "https://gitlab.acme.dev/acme/api/-/merge_requests/3" })).toBe("https://gitlab.acme.dev/acme/api/-/merge_requests/3");
+  });
+
+  test("a self-managed GitLab at any address: its MR URL reads by shape, its short ref once its host is known", () => {
+    const keyOf = (text: string, host?: string | null) => {
+      const parsed = parseInboxThreadPullRef(text, host);
+      return "key" in parsed ? [parsed.key, parsed.url] : parsed.error;
+    };
+    const before = [...gitlabHostsSnapshot()];
+    try {
+      const url = "https://git.acme.com/acme/platform/api/-/merge_requests/61";
+      expect(parseForgePullRef(url)).toEqual({ platform: "gitlab", host: "git.acme.com", owner: "acme/platform", repo: "api", number: 61, kind: "pull" });
+      expect(keyOf(url)).toEqual(["git.acme.com/acme/platform/api#61:pull", url]);
+      expect(keyOf("https://git.acme.com:8443/acme/api/-/merge_requests/2")).toEqual(["git.acme.com:8443/acme/api#2:pull", "https://git.acme.com:8443/acme/api/-/merge_requests/2"]);
+      expect(inboxThreadPullText({ pull: "git.acme.com:8443/acme/api#2:pull", url: "https://moved.example/x" })).toBe("https://git.acme.com:8443/acme/api/-/merge_requests/2");
+      expect(keyOf("acme/platform/api!61", "git.acme.com")).toEqual(["gitlab.com/acme/platform/api#61:pull", "https://gitlab.com/acme/platform/api/-/merge_requests/61"]);
+      learnGitlabHosts(["git.acme.com"]);
+      expect(parseForgePullRef("acme/platform/api!61", "git.acme.com")).toMatchObject({ platform: "gitlab", host: "git.acme.com" });
+      expect(keyOf("acme/platform/api!61", "git.acme.com")).toEqual(["git.acme.com/acme/platform/api#61:pull", url]);
+      expect(keyOf("acme/platform/api!61", "source.acme.io")).toEqual(["gitlab.com/acme/platform/api#61:pull", "https://gitlab.com/acme/platform/api/-/merge_requests/61"]);
+      expect(keyOf("northwind/billing-svc#412", "git.acme.com")).toEqual(["github.com/northwind/billing-svc#412", "https://github.com/northwind/billing-svc/pull/412"]);
+      expect(keyOf("https://github.com/northwind/billing-svc/pull/412", "git.acme.com")).toEqual(["github.com/northwind/billing-svc#412", "https://github.com/northwind/billing-svc/pull/412"]);
+      expect(keyOf("https://gitlab.com/acme/platform/api/-/merge_requests/61", "git.acme.com")).toEqual(["gitlab.com/acme/platform/api#61:pull", "https://gitlab.com/acme/platform/api/-/merge_requests/61"]);
+      expect(keyOf("acme/platform/api!61")).toEqual(["gitlab.com/acme/platform/api#61:pull", "https://gitlab.com/acme/platform/api/-/merge_requests/61"]);
+      expect(keyOf("https://git.acme.com/acme/api/-/issues/3", "git.acme.com")).toEqual(inboxThreadPullRefError("https://git.acme.com/acme/api/-/issues/3"));
+    } finally {
+      learnGitlabHosts(before);
+    }
   });
 
   test("a bare #123, an issue URL or a repo alone is refused with how to write a full ref", () => {
