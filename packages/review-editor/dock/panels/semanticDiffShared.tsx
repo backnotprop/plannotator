@@ -119,10 +119,14 @@ function SemanticDiffChangeRow({
   change,
   onOpenChange,
   loadSource,
+  onOpenLine,
+  onOpenFile,
 }: {
   change: SemanticDiffChange;
   onOpenChange: (change: SemanticDiffChange) => void;
   loadSource?: ReviewFileSourceLoader;
+  onOpenLine?: SemanticOpenLine;
+  onOpenFile?: SemanticOpenFile;
 }) {
   const range = lineSelectionForChange(change);
   const sourcePath = change.changeType === 'deleted' ? change.oldFilePath ?? change.filePath : change.filePath;
@@ -163,6 +167,23 @@ function SemanticDiffChangeRow({
           lineEnd={range.end > range.start ? range.end : undefined}
           onDismiss={sourcePreview.dismiss}
           {...sourcePreview.previewHandlers}
+          onLineClick={onOpenLine ? (line) => {
+            sourcePreview.dismiss();
+            onOpenLine(sourcePath, line, range.side);
+          } : undefined}
+          actions={onOpenFile ? (
+            <button
+              type="button"
+              className="text-[10px] px-1.5 py-0.5 rounded hover:bg-muted hover:text-foreground"
+              data-snippet-open-file=""
+              onClick={() => {
+                sourcePreview.dismiss();
+                onOpenFile(sourcePath, range.start);
+              }}
+            >
+              Open file
+            </button>
+          ) : undefined}
         />
       )}
     </>
@@ -170,12 +191,17 @@ function SemanticDiffChangeRow({
 }
 
 /** The terminal-style entity rows, shared by the semantic panel and the file-header popover. */
+export type SemanticOpenLine = (path: string, line: number, side: 'deletions' | 'additions') => void;
+export type SemanticOpenFile = (path: string, line: number) => void;
+
 export function SemanticDiffRows({
   changes,
   binaryChanges,
   onOpenChange,
   onOpenBinary,
   loadSource,
+  onOpenLine,
+  onOpenFile,
 }: {
   changes: SemanticDiffChange[];
   binaryChanges: SemanticDiffBinaryChange[];
@@ -183,6 +209,10 @@ export function SemanticDiffRows({
   onOpenBinary: (change: SemanticDiffBinaryChange) => void;
   /** Loads an entity's source for its hover preview; absent, rows have no preview (the file-header popover). */
   loadSource?: ReviewFileSourceLoader;
+  /** Clicking a line of the hover preview: show it in the diff. */
+  onOpenLine?: SemanticOpenLine;
+  /** The hover preview's "Open file": the whole file at that line. */
+  onOpenFile?: SemanticOpenFile;
 }) {
   return (
     <>
@@ -192,6 +222,8 @@ export function SemanticDiffRows({
           change={change}
           onOpenChange={onOpenChange}
           loadSource={loadSource}
+          onOpenLine={onOpenLine}
+          onOpenFile={onOpenFile}
         />
       ))}
       {binaryChanges.map((change, index) => {

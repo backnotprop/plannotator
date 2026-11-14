@@ -207,6 +207,12 @@ export type AllFilesOrder = 'tree' | 'kind' | 'list';
  * because Pierre's editor mutates the metadata in place. See
  * ../edit/useEditSession.ts and ../edit/pierreEditAdapter.ts.
  */
+export interface AllFilesLineTarget {
+  path: string;
+  range: SelectedLineRange;
+  token: number;
+}
+
 export interface AllFilesCodeViewProps {
   files: DiffFile[];
   diffStyle: 'split' | 'unified';
@@ -231,6 +237,7 @@ export interface AllFilesCodeViewProps {
   hostFileNotes?: readonly HostFileNote[];
   selectedAnnotationId: string | null;
   scrollTargetAnnotation: AnnotationScrollTarget | null;
+  lineTarget?: AllFilesLineTarget | null;
   pendingSelection: SelectedLineRange | null;
   reviewBase?: string;
   reviewSnapshotId?: string;
@@ -766,6 +773,7 @@ const FLUSH_FILES_CSS = `
 const AUGMENT_APPLY_IDLE_MS = 150;
 // How long revealing a comment on a closed line waits for its file's whole text.
 const REVEAL_WAIT_MS = 30_000;
+const LINE_TARGET_FLASH_MS = 1_600;
 
 const EMPTY_AI_MESSAGES: AIChatEntry[] = [];
 const EMPTY_CONTEXT_NOTES: readonly ContextNoteAnchor[] = [];
@@ -788,6 +796,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   hostFileNotes = NO_HOST_FILE_NOTES,
   selectedAnnotationId,
   scrollTargetAnnotation,
+  lineTarget,
   pendingSelection,
   reviewBase,
   reviewSnapshotId,
@@ -2160,10 +2169,10 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
 
   // A comment on a line an arrow opened, after a reload: the gap is closed again. Open what holds it (a first read if
   // need be), then scroll, once the rows are there. Answers whether it took the jump on.
-  const revealClosedLines = useStableCallback((itemId: string, ann: CodeAnnotation, range: SelectedLineRange, onDone: () => void): (() => void) | null => {
+  const revealClosedLines = useStableCallback((itemId: string, ann: CodeAnnotation | null, range: SelectedLineRange, onDone: () => void): (() => void) | null => {
     const file = itemIdToFileRef.current.get(itemId);
     const side = range.side === 'deletions' ? 'old' : 'new';
-    if (!file || !fetchFileContentRef.current || isFileScopedAnnotation(ann)) return null;
+    if (!file || !fetchFileContentRef.current || (ann && isFileScopedAnnotation(ann))) return null;
     if (isLineRangeInPatch(file.patch, Math.min(range.start, range.end), Math.max(range.start, range.end), side)) return null;
     let frame = 0;
     let asked = false;
@@ -3134,6 +3143,43 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   // to the comment. Keyed on the navigation token so it fires per sidebar click
   // (re-clicking the same comment re-centers it) and NEVER on a bare in-diff
   // selection. rAF defers the scroll a frame so the expand's layout has settled.
+  const handledLineTargetRef = useRef<AllFilesLineTarget | null>(null);
+  useEffect(() => {
+    if (!lineTarget || handledLineTargetRef.current === lineTarget) return;
+    const itemId = filePathToItemId.get(lineTarget.path);
+    const handle = viewerRef.current;
+    if (itemId == null || handle == null) return;
+    handledLineTargetRef.current = lineTarget;
+    const item = handle.getItem(itemId);
+    if (item != null && item.collapsed === true) {
+      item.collapsed = false;
+      item.version = (item.version ?? 0) + 1;
+      handle.updateItem(item);
+      syncAllCollapsedMirror();
+      reportFileCollapsed(itemId, false);
+    }
+    const { range } = lineTarget;
+    let raf = 0;
+    let clear: ReturnType<typeof setTimeout> | undefined;
+    const jump = () => {
+      raf = requestAnimationFrame(() => {
+        viewerRef.current?.scrollTo({ type: 'range', id: itemId, range });
+        if (pendingSelectionRef.current != null) return;
+        const flash: CodeViewLineSelection = { id: itemId, range };
+        setSelectedLines(flash);
+        clear = setTimeout(() => setSelectedLines((current) => (current === flash ? null : current)), LINE_TARGET_FLASH_MS);
+      });
+    };
+    const stopOpening = revealClosedLines(itemId, null, range, jump);
+    if (!stopOpening) jump();
+    return () => {
+      stopOpening?.();
+      cancelAnimationFrame(raf);
+      if (clear) clearTimeout(clear);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lineTarget, filePathToItemId]);
+
   const handledScrollTargetRef = useRef<AnnotationScrollTarget | null>(null);
   useEffect(() => {
     if (!scrollTargetAnnotation) return;

@@ -21,6 +21,7 @@ import type { CodeFileAnnotationInput } from '@plannotator/ui/components/CodeFil
 import type { ChangedFileView } from '../components/FileViewSwitch';
 import type { DiagramEngineUrls } from '../utils/diagramEngineContract';
 import type { SemDiffClient } from '../semDiff/semDiffClient';
+import type { AllFilesLineTarget } from '../components/AllFilesCodeView';
 
 /** One-shot request to open the native code-annotation composer on a source range. */
 export interface LineAnnotationComposeRequest {
@@ -104,6 +105,9 @@ export interface ReviewState {
    *  such fence; absent, they show as code. */
   diagramEngine?: DiagramEngineUrls | null;
   semDiffClient?: SemDiffClient | null;
+  revealInAllChanges?: (path: string, range: SelectedLineRange) => void;
+  allFilesLineTarget?: AllFilesLineTarget | null;
+  openRepoFileAt?: (path: string, line: number) => void;
   /** Commit a comment made by selecting text in a previewed Markdown file
    *  (file-scoped, carries the quote). */
   onAddMarkdownPreviewComment?: (

@@ -11,6 +11,7 @@ import {
   SemanticDiffRows,
   groupSemanticChangesByFile,
   lineSelectionForChange,
+  type SemanticOpenLine,
 } from './semanticDiffShared';
 
 type SemanticDiffOkResponse = Extract<SemanticDiffResponse, { status: 'ok' }>;
@@ -56,6 +57,8 @@ export function ReviewSemanticDiffPanel() {
     onSemanticDiffLoadSuccess,
     openDiffFile,
     onLineSelection,
+    revealInAllChanges,
+    openRepoFileAt,
   } = state;
   const [loadState, setLoadState] = useState<LoadState>({ status: 'idle' });
   const [retryCount, setRetryCount] = useState(0);
@@ -106,9 +109,18 @@ export function ReviewSemanticDiffPanel() {
   }, [loadState]);
 
   const openChange = useCallback((change: SemanticDiffChange) => {
+    const range = lineSelectionForChange(change);
+    if (revealInAllChanges && range) {
+      revealInAllChanges(change.filePath, range);
+      return;
+    }
     openDiffFile(change.filePath);
-    onLineSelection(lineSelectionForChange(change));
-  }, [openDiffFile, onLineSelection]);
+    onLineSelection(range);
+  }, [openDiffFile, onLineSelection, revealInAllChanges]);
+  const openLine = useMemo<SemanticOpenLine | undefined>(
+    () => (revealInAllChanges ? (path, line, side) => revealInAllChanges(path, { start: line, end: line, side }) : undefined),
+    [revealInAllChanges],
+  );
 
   const openBinaryChange = useCallback((change: SemanticDiffBinaryChange) => {
     openDiffFile(change.filePath);
@@ -171,6 +183,8 @@ export function ReviewSemanticDiffPanel() {
                 onOpenChange={openChange}
                 onOpenBinary={openBinaryChange}
                 loadSource={loadSource}
+                onOpenLine={openLine}
+                onOpenFile={openRepoFileAt}
               />
             </div>
           </section>

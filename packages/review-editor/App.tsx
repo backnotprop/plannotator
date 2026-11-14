@@ -78,7 +78,8 @@ import { generateId } from './utils/generateId';
 import { parseDiagramEngineUrls } from './utils/diagramEngine';
 import { parseSemDiffAdvert } from './semDiff/protocol';
 import { createSemDiffClient } from './semDiff/semDiffClient';
-import { computeReviewSemanticDiff, setSemanticDiffSource, type ReadFileContents } from './semDiff/semanticDiffSource';
+import { computeReviewSemanticDiff, loadReviewSemanticDiff, setSemanticDiffSource, type ReadFileContents } from './semDiff/semanticDiffSource';
+import { ReviewSemanticDiffPanel } from './dock/panels/ReviewSemanticDiffPanel';
 import { resetSemanticDiffCache } from './hooks/useFileSemanticChanges';
 import type { SemanticDiffResponse } from '@plannotator/shared/semantic-diff-types';
 
@@ -159,7 +160,7 @@ import {
   type CompactReviewDestination,
 } from './components/ReviewHeaderMenu';
 import { ReviewSidebar } from './components/ReviewSidebar';
-import type { ReviewSidebarTab } from './components/ReviewSidebar';
+import type { ReviewSidebarExtraTab, ReviewSidebarTab } from './components/ReviewSidebar';
 import { useSidebar } from '@plannotator/ui/hooks/useSidebar';
 import { useViewportEnvironment } from '@plannotator/ui/hooks/useViewportEnvironment';
 import { useCompactTouchLayout } from '@plannotator/ui/hooks/useIsMobile';
@@ -173,7 +174,7 @@ import { useTreeScope } from './hooks/useTreeScope';
 import { useRepoFiles } from './hooks/useRepoFiles';
 import { useAutoViewed } from './hooks/useAutoViewed';
 import { useGroupByKind } from './hooks/useGroupByKind';
-import type { AllFilesOrder } from './components/AllFilesCodeView';
+import type { AllFilesLineTarget, AllFilesOrder } from './components/AllFilesCodeView';
 import { useReviewProgress } from './hooks/useReviewProgress';
 import { resolveDiffSwitchUnviews } from './utils/autoViewed';
 import { needsAutoViewedNotice, markAutoViewedNoticeSeen, turnOffAutoViewed, toggleAutoViewed } from './utils/autoViewedNotice';
@@ -2298,22 +2299,38 @@ const ReviewApp: React.FC = () => {
   }, [dockApi]);
 
   const openSemanticDiffPanel = useCallback((options?: { autoFallbackOnError?: boolean }) => {
-    if (!dockApi) return;
     semanticDiffAutoFallbackPending.current = options?.autoFallbackOnError === true;
     if (!semanticDiffUsable) {
       openAllFilesPanel();
       return;
     }
-    const existing = dockApi.getPanel(REVIEW_SEMANTIC_DIFF_PANEL_ID);
-    if (existing) { existing.api.setActive(); return; }
-    const beside = semDiffClient != null ? dockApi.getPanel(REVIEW_ALL_FILES_PANEL_ID) : undefined;
-    dockApi.addPanel({
-      id: REVIEW_SEMANTIC_DIFF_PANEL_ID,
-      component: REVIEW_PANEL_TYPES.SEMANTIC_DIFF,
-      title: 'Semantic changes',
-      ...(beside ? { position: { referencePanel: beside.id, direction: 'right' as const }, initialWidth: 400 } : {}),
-    });
-  }, [dockApi, openAllFilesPanel, semanticDiffUsable, semDiffClient]);
+    reviewSidebar.open('changes');
+  }, [openAllFilesPanel, semanticDiffUsable, reviewSidebar.open]);
+
+  const [semanticChangeCount, setSemanticChangeCount] = useState<number | undefined>(undefined);
+  useEffect(() => {
+    setSemanticChangeCount(undefined);
+    if (!semanticDiffUsable || !diffData?.rawPatch) return;
+    let cancelled = false;
+    loadReviewSemanticDiff()
+      .then((data) => {
+        if (!cancelled) setSemanticChangeCount(data.status === 'ok' ? data.changes.length : undefined);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [semanticDiffUsable, diffData?.rawPatch, semDiffClient]);
+  const semanticTabActive = reviewSidebar.isOpen && reviewSidebar.activeTab === 'changes';
+  const [allFilesLineTarget, setAllFilesLineTarget] = useState<AllFilesLineTarget | null>(null);
+  const revealInAllChanges = useCallback((path: string, range: SelectedLineRange) => {
+    openAllFilesPanel();
+    setAllFilesLineTarget((previous) => ({ path, range, token: (previous?.token ?? 0) + 1 }));
+  }, [openAllFilesPanel]);
+  const reviewSidebarExtraTabs = useMemo<ReviewSidebarExtraTab[]>(
+    () => (semanticDiffUsable ? [{ id: 'changes', label: 'Changes', count: semanticChangeCount, render: () => <ReviewSemanticDiffPanel /> }] : []),
+    [semanticDiffUsable, semanticChangeCount],
+  );
 
   const openCallFlowPanel = useCallback(() => {
     if (!dockApi || !callFlowEnabled) return;
@@ -4427,6 +4444,9 @@ const ReviewApp: React.FC = () => {
     markdownPreview,
     diagramEngine,
     semDiffClient,
+    revealInAllChanges: semDiffClient ? revealInAllChanges : undefined,
+    allFilesLineTarget,
+    openRepoFileAt: (path: string, line: number) => jumpTo({ path, line }, 'file'),
     onAddMarkdownPreviewComment: handleAddMarkdownPreviewComment,
     onAskAIForMarkdownPreview: aiAvailable ? handleAskAIForMarkdownPreview : undefined,
     // Outdated comments (#1590) carry line numbers from an earlier version of
@@ -4560,7 +4580,7 @@ const ReviewApp: React.FC = () => {
   }), [
     files, diffData?.rawPatch, activeFileIndex, guideOpen, isDiffPanelActive, effectiveDiffStyle, handleDiffStyleChange, isCompactTouchLayout, diffOverflow, diffIndicators,
     diffLineDiffType, diffShowLineNumbers, diffShowBackground,
-    diffExpandUnchanged, diffFontFamily, diffFontSize, activeDiffBase, committedBase, feedbackDiffContext, prReviewScopeLabel, prDiffScope, agentCwd, canUseLiveWorkspaceActions, isStaticPatch, imagePreviewSupported, snapshotId, markdownPreview, diagramEngine, semDiffClient, handleAddMarkdownPreviewComment, handleAskAIForMarkdownPreview,
+    diffExpandUnchanged, diffFontFamily, diffFontSize, activeDiffBase, committedBase, feedbackDiffContext, prReviewScopeLabel, prDiffScope, agentCwd, canUseLiveWorkspaceActions, isStaticPatch, imagePreviewSupported, snapshotId, markdownPreview, diagramEngine, semDiffClient, revealInAllChanges, allFilesLineTarget, jumpTo, handleAddMarkdownPreviewComment, handleAskAIForMarkdownPreview,
     diffAnnotations, externalAnnotations,
     visibleDescriptionAnnotations, selectedDescriptionAnnotationId, handleAddDescriptionAnnotation,
     handleSelectDescriptionAnnotation, handleDeleteDescriptionAnnotation, handleAskAIForDescription,
@@ -6072,7 +6092,7 @@ const ReviewApp: React.FC = () => {
                 isPRArtifactsActive={isPRArtifactsActive}
                 prArtifactCount={prCapabilities?.artifacts ? prArtifacts.length : undefined}
                 onSelectSemanticDiff={() => completeNavigatorSelection(openSemanticDiffPanel)}
-                isSemanticDiffActive={isSemanticDiffActive}
+                isSemanticDiffActive={semanticTabActive}
                 semanticDiffAvailable={semanticDiffUsable}
                 onSelectCallFlow={() => completeNavigatorSelection(openCallFlowPanel)}
                 isCallFlowActive={isCallFlowActive}
@@ -6280,6 +6300,7 @@ const ReviewApp: React.FC = () => {
                 isOpen
                 onClose={reviewSidebar.close}
                 onSelectTab={reviewSidebar.open}
+                extraTabs={reviewSidebarExtraTabs}
                 presentation={isCompactTouchLayout ? 'overlay' : 'panel'}
                 activeTab={reviewSidebar.activeTab}
                 annotations={allAnnotations}
