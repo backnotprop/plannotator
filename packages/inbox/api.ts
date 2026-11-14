@@ -685,10 +685,6 @@ export interface InboxStorageModel {
     /** The projects combined into this one, by name: deleting it leaves them. */
     combined?: string[];
   }[];
-  /** The Inbox on SQLite (its switch, off by default): the database file's bytes, counted in `bytes`. */
-  database?: number;
-  /** The dated backups a move into SQLite left, counted in `bytes`: listed with Remove (StorageBackups.tsx). */
-  backups?: { name: string; kind: 'jsonl' | 'sqlite'; date: string; bytes: number }[];
 }
 
 /** Settings → Agents: starting agents from New message (config.json `inboxLaunch`). Off, only `enabled` and a false `full_permissions`. */
@@ -914,6 +910,7 @@ export class InboxApiError extends Error {
     readonly threadId: string | null = null,
     /** `question_revision_conflict`: the question's revision on the Inbox now, when the answer names it. */
     readonly currentRevision: number | null = null,
+    readonly by: string | null = null,
   ) {
     super(message);
     this.name = 'InboxApiError';
@@ -931,6 +928,7 @@ async function readJson<T>(response: Response): Promise<T> {
       typeof body.retry_at === 'number' ? body.retry_at : null,
       typeof body.thread_id === 'string' ? body.thread_id : null,
       typeof body.current_revision === 'number' ? body.current_revision : null,
+      typeof body.by === 'string' ? body.by : null,
     );
   }
   return body as T;
@@ -2250,6 +2248,7 @@ export const inboxApi = {
    */
   sendNow: (messageId: string, session?: string | null) =>
     post<{ message: InboxMessage }>(messageUrl(messageId, `/send-now`), session ? { session } : {}),
+  takeBack: (messageId: string) => post<{ message: InboxMessage; draft: InboxReplyDraft | null; compose: InboxDraft | null }>(messageUrl(messageId, '/take-back'), {}),
   newMessage: (threadId: string, input: { session: string; body: string; idempotency_key: string }) =>
     post<{ message: InboxMessage | null; replayed: boolean; held?: OutboxView }>(threadUrl(threadId, `/message`), input).catch((cause) => {
       // To another machine: held in the outbox, as a reply is; the thread shows it waiting.
@@ -2319,8 +2318,6 @@ export const inboxApi = {
   askSeen: (threadId: string, seenAt: string) => post<unknown>(inboxUrl(`/threads/${threadId}/ask/seen`), { seen_at: seenAt }),
   askStop: (threadId: string, turnId: string) => post<{ stopped: boolean }>(inboxUrl(`/threads/${threadId}/ask/stop`), { turn_id: turnId }),
   deleteProject: (projectId: string) => post<{ store: InboxStorageModel }>(inboxUrl(`/projects/${encodeURIComponent(projectId)}/delete`), {}),
-  /** Settings → Storage's Remove on a dated backup (the Inbox on SQLite only). */
-  removeBackup: (name: string) => post<{ store: InboxStorageModel }>(inboxUrl(`/settings/storage/backups/${encodeURIComponent(name)}/remove`), {}),
 };
 
 /** One question and what came of it (`packages/shared/inbox/ask.ts`). */
