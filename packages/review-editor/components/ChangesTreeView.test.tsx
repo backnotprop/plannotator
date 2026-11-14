@@ -110,8 +110,8 @@ describe.skipIf(!hasDom)('The Changes tree on Pierre trees', () => {
       'Generated/',
     ]);
     expect(row(el, 'Generated/').getAttribute('aria-expanded')).toBe('false');
-    expect(trail(el, 'Code/')).toEqual(['0/1', '+19', '']);
-    expect(trail(el, 'Code/retry.ts')).toEqual(['+19', '']);
+    expect(trail(el, 'Code/')).toEqual(['0/1', '+19']);
+    expect(trail(el, 'Code/retry.ts')).toEqual(['+19']);
     expect(selected(el)).toEqual(['Code/retry.ts']);
   });
 
@@ -204,22 +204,22 @@ describe.skipIf(!hasDom)('The Changes tree on Pierre trees', () => {
     expect(row(el, 'Generated/').getAttribute('aria-expanded')).toBe('true');
   });
 
-  test('a file name is one whole string cut at its end, not split in the middle', async () => {
+  test('a long file name is cut in the middle so its extension stays, with the full path in the title', async () => {
     const el = await mount(<Tree files={[file('src/an-extremely-long-file-name-for-the-tree.ts')]} activeFileIndex={0} />);
-    const name = row(el, 'an-extremely-long-file-name-for-the-tree.ts').querySelector('[data-item-name]')!;
-    expect(name.textContent).toBe('an-extremely-long-file-name-for-the-tree.ts');
-    expect(row(el, 'an-extremely-long-file-name-for-the-tree.ts').querySelector('[data-truncate-container]')).toBeNull();
+    const target = row(el, 'an-extremely-long-file-name-for-the-tree.ts');
+    expect(target.querySelector('[data-truncate-container]')).not.toBeNull();
+    expect(target.getAttribute('title') ?? target.querySelector('[title]')?.getAttribute('title')).toContain('src/an-extremely-long-file-name-for-the-tree.ts');
   });
 
-  test("a group's viewed count does not reserve room on every file row, so names keep it", async () => {
-    const el = await mount(<Tree groupByKind />);
+  test('each row carries its own tight counts: nothing reserved from other rows, a huge count reads 12.3k with the exact number in its tooltip', async () => {
+    const el = await mount(<Tree groupByKind files={[file('src/huge.ts', 12345, 9876), file('src/small.ts', 7, 0), file('README.md', 1, 1)]} activeFileIndex={0} />);
     const host = el.querySelector<HTMLElement>('[data-changes-tree]')!;
-    const fileColumns = host.style.getPropertyValue('--trees-row-trail-columns');
-    const headingColumns = host.style.getPropertyValue('--review-tree-heading-trail-columns');
-    expect(fileColumns.startsWith('max-content')).toBe(false);
-    expect(headingColumns.startsWith('max-content')).toBe(true);
-    expect(trail(el, 'Code/')[0]).toBe('0/1');
-    expect(trail(el, 'Code/retry.ts')).toHaveLength(2);
+    expect(host.style.getPropertyValue('--trees-row-trail-columns')).toBe('');
+    const path = (name: string) => rows(el).find((p) => p?.endsWith(name))!;
+    expect(trail(el, path('huge.ts'))).toEqual(['+12.3k', '-9,876']);
+    expect(trail(el, path('small.ts'))).toEqual(['+7']);
+    const added = row(el, path('huge.ts')).querySelector<HTMLElement>('[data-item-section="trail"] > span')!;
+    expect(added.getAttribute('title') ?? added.querySelector('[title]')?.getAttribute('title')).toBe('12,345 lines added');
   });
 });
 

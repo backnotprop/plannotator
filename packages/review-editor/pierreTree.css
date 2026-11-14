@@ -67,7 +67,8 @@
   font-weight: 600;
 }
 .review-changes-tree::part(row-trail) {
-  column-gap: 4px;
+  grid-template-columns: none;
+  column-gap: 6px;
   font-size: 12px;
   color: var(--tree-text-tertiary);
 }
@@ -157,6 +158,9 @@ html:has([data-pn-compact-touch-layout='true']) .review-changes-tree::part(row-p
   width: var(--pn-touch-target);
   height: var(--pn-touch-target);
 }
-.review-changes-tree::part(row-trail-heading) {
-  grid-template-columns: var(--review-tree-heading-trail-columns);
+.review-changes-tree::part(row-part-viewed) { position: relative; }
+.review-changes-tree::part(row-part-viewed)::before {
+  content: '';
+  position: absolute;
+  inset: -5px -1px -5px -9px;
 }
