@@ -42,7 +42,7 @@ index 28da458..6689188 100644
  				this.#itemHandles.clear();
  				this.#invalidateKnownPathCaches();
 diff --git a/dist/model/publicTypes.d.ts b/dist/model/publicTypes.d.ts
-index 06d89e9..4366c33 100644
+index 06d89e9..dace0e7 100644
 --- a/dist/model/publicTypes.d.ts
 +++ b/dist/model/publicTypes.d.ts
 @@ -58,6 +58,7 @@ type FileTreeControllerBehaviorOptions = FileTreeStoreOptions & {
@@ -96,7 +96,7 @@ index 06d89e9..4366c33 100644
 +  onPartClick?: (event: FileTreeRowPartClickEvent) => void;
 +  onDoubleClick?: (event: FileTreeRowDoubleClickEvent) => void;
 +  gitStatusPlacement?: 'start' | 'end';
-+  nameTruncation?: 'middle' | 'end';
++  nameTruncation?: 'middle' | 'end' | 'keep-tail';
 +}
  //#endregion
 -export { FileTreeAddEvent, FileTreeBatchEvent, FileTreeBatchOperation, FileTreeCollisionStrategy, FileTreeCompositionOptions, FileTreeContextMenuButtonVisibility, FileTreeContextMenuCompositionOptions, FileTreeContextMenuItem, FileTreeContextMenuOpenContext, FileTreeContextMenuTriggerMode, FileTreeControllerOptions, FileTreeDirectoryHandle, FileTreeDragAndDropConfig, FileTreeDropContext, FileTreeDropResult, FileTreeDropTarget, FileTreeFileHandle, FileTreeGitStatusPatch, FileTreeHeaderCompositionOptions, FileTreeHydrationProps, FileTreeInitialExpansion, FileTreeItemHandle, FileTreeItemHandleBase, FileTreeLabels, FileTreeLabelsOption, FileTreeListener, FileTreeMoveEvent, FileTreeMoveOptions, FileTreeMutationEvent, FileTreeMutationEventForType, FileTreeMutationEventInvalidation, FileTreeMutationEventType, FileTreeMutationHandle, FileTreeMutationSemanticEvent, FileTreeOptions, FileTreePublicId, FileTreeRemoveEvent, FileTreeRemoveOptions, FileTreeRenameEvent, FileTreeRenamingConfig, FileTreeRenamingItem, FileTreeRenderOptions, FileTreeRenderProps, FileTreeResetEvent, FileTreeResetOptions, FileTreeResetPreparedOptions, FileTreeRowDecoration, FileTreeRowDecorationContext, FileTreeRowDecorationIcon, FileTreeRowDecorationRenderer, FileTreeRowDecorationText, FileTreeRowDecorationTextPart, FileTreeScrollOffset, FileTreeScrollToPathOptions, FileTreeSearchBlurBehavior, FileTreeSearchChangeListener, FileTreeSearchMode, FileTreeSearchSessionHandle, FileTreeSelectionChangeListener, FileTreeSortComparator, FileTreeSortEntry, FileTreeSsrPayload, FileTreeVisibleRow, FileTreeVisibleSegment };
@@ -185,10 +185,10 @@ index 0b41099..a745685 100644
  		searchEnabled: search === true,
  		searchFakeFocus: searchFakeFocus === true,
 diff --git a/dist/render/FileTreeView.js b/dist/render/FileTreeView.js
-index b4c7ee4..3ef6e96 100644
+index b4c7ee4..0ccedf1 100644
 --- a/dist/render/FileTreeView.js
 +++ b/dist/render/FileTreeView.js
-@@ -362,11 +362,50 @@ function focusFirstMenuElement(menuElement) {
+@@ -362,11 +362,134 @@ function focusFirstMenuElement(menuElement) {
  	].join(", "));
  	focusElement(focusable ?? menuElement);
  }
@@ -226,6 +226,90 @@ index b4c7ee4..3ef6e96 100644
 +		})
 +	});
 +}
++const fork_name_segmenter = typeof Intl !== "undefined" && typeof Intl.Segmenter === "function" ? new Intl.Segmenter(void 0, { granularity: "grapheme" }) : null;
++function fork_graphemes(text) {
++	return fork_name_segmenter ? Array.from(fork_name_segmenter.segment(text), (part) => part.segment) : Array.from(text);
++}
++const FORK_ELLIPSIS = "\u2026";
++function fork_measurer(element) {
++	const host = element.parentNode;
++	if (typeof document === "undefined" || !host) return null;
++	const probe = document.createElement("span");
++	probe.style.cssText = "position:absolute;visibility:hidden;white-space:pre;left:0;top:0;pointer-events:none";
++	host.appendChild(probe);
++	return {
++		width: (text) => {
++			probe.textContent = text;
++			return probe.getBoundingClientRect().width;
++		},
++		done: () => probe.remove()
++	};
++}
++function fork_fit_tail(name, available, width) {
++	if (width(name) <= available) return name;
++	const dot = name.lastIndexOf(".");
++	const extension = dot > 0 ? name.slice(dot) : "";
++	const base = fork_graphemes(extension ? name.slice(0, dot) : name);
++	const keep = Math.min(3, base.length);
++	const stem = base.slice(0, base.length - keep);
++	const tail = base.slice(base.length - keep).join("") + extension;
++	let low = -1;
++	let high = stem.length - 1;
++	while (low < high) {
++		const mid = low + high + 1 >> 1;
++		if (width(stem.slice(0, mid).join("") + FORK_ELLIPSIS + tail) <= available) low = mid;
++		else high = mid - 1;
++	}
++	if (low >= 0) return stem.slice(0, low).join("") + FORK_ELLIPSIS + tail;
++	const tailParts = fork_graphemes(tail);
++	let size = tailParts.length - 1;
++	while (size > 0 && width(FORK_ELLIPSIS + tailParts.slice(tailParts.length - size).join("")) > available) size--;
++	return FORK_ELLIPSIS + tailParts.slice(tailParts.length - size).join("");
++}
++function TailKeptName({ name }) {
++	const ref = useRef(null);
++	const [text, setText] = useState(name);
++	useLayoutEffect(() => {
++		const element = ref.current;
++		if (!element) return;
++		const fit = () => {
++			const available = element.clientWidth;
++			const measure = available > 0 ? fork_measurer(element) : null;
++			if (!measure) {
++				setText(name);
++				return;
++			}
++			setText(fork_fit_tail(name, available - 0.5, measure.width));
++			measure.done();
++		};
++		fit();
++		const fonts = typeof document !== "undefined" ? document.fonts : void 0;
++		fonts?.addEventListener?.("loadingdone", fit);
++		fonts?.ready?.then(fit);
++		const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(fit);
++		observer?.observe(element);
++		return () => {
++			observer?.disconnect();
++			fonts?.removeEventListener?.("loadingdone", fit);
++		};
++	}, [name]);
++	return /* @__PURE__ */ jsx("span", {
++		ref,
++		"data-item-name": "true",
++		"data-item-name-fitted": text === name ? void 0 : "true",
++		"aria-label": text === name ? void 0 : name,
++		part: "row-name",
++		children: text
++	});
++}
++function renderTailKeptName(row) {
++	if (row.kind === "directory") return /* @__PURE__ */ jsx("span", {
++		"data-item-name": "true",
++		part: "row-name",
++		children: row.name
++	});
++	return /* @__PURE__ */ jsx(TailKeptName, { name: row.name });
++}
 +function renderFileTreeRowContent(row, resolveIcon, { actionLaneEnabled = false, customDecoration = null, decorationLaneEnabled = false, dragTargetFlattenedSegmentPath = null, gitDecoration = null, gitLaneActive = false, gitStatusPlacement = "end", nameTruncation = "middle", onPartClick = null, renameInput = null, rowParts = null, showDecorativeActionAffordance = false } = {}) {
  	const targetPath = getFileTreeRowPath(row);
 +	const gitLane = gitLaneActive ? /* @__PURE__ */ jsx("div", {
@@ -240,7 +324,7 @@ index b4c7ee4..3ef6e96 100644
  			children: Array.from({ length: row.depth }).map((_, index) => /* @__PURE__ */ jsx("div", {
  				"data-item-section": "spacing-item",
  				"data-ancestor-path": row.ancestorPaths[index]
-@@ -374,24 +413,31 @@ function renderFileTreeRowContent(row, resolveIcon, { actionLaneEnabled = false,
+@@ -374,24 +497,31 @@ function renderFileTreeRowContent(row, resolveIcon, { actionLaneEnabled = false,
  		}) : null,
  		/* @__PURE__ */ jsx("div", {
  			"data-item-section": "icon",
@@ -253,7 +337,7 @@ index b4c7ee4..3ef6e96 100644
  			"data-item-section": "content",
 -			children: row.isFlattened ? formatFlattenedSegments(row, renameInput, dragTargetFlattenedSegmentPath) : renameInput ?? /* @__PURE__ */ jsx(MiddleTruncate, {
 +			part: ["row-content", rowParts?.muted === true ? "row-content-muted" : null, rowParts?.tone != null ? `row-content-${rowParts.tone}` : null].filter(Boolean).join(" "),
-+			children: row.isFlattened ? formatFlattenedSegments(row, renameInput, dragTargetFlattenedSegmentPath) : renameInput ?? (nameTruncation === "end" ? /* @__PURE__ */ jsx("span", {
++			children: row.isFlattened ? formatFlattenedSegments(row, renameInput, dragTargetFlattenedSegmentPath) : renameInput ?? (nameTruncation === "keep-tail" ? renderTailKeptName(row) : nameTruncation === "end" ? /* @__PURE__ */ jsx("span", {
 +				"data-item-name": "true",
 +				part: "row-name",
 +				children: row.name
@@ -278,7 +362,7 @@ index b4c7ee4..3ef6e96 100644
  		actionLaneEnabled ? /* @__PURE__ */ jsx("div", {
  			"data-item-section": "action",
  			children: showDecorativeActionAffordance ? /* @__PURE__ */ jsx("span", {
-@@ -403,13 +449,14 @@ function renderFileTreeRowContent(row, resolveIcon, { actionLaneEnabled = false,
+@@ -403,13 +533,14 @@ function renderFileTreeRowContent(row, resolveIcon, { actionLaneEnabled = false,
  	] });
  }
  function renderStyledRow(frame, row, key, options = {}) {
@@ -294,7 +378,7 @@ index b4c7ee4..3ef6e96 100644
  	const gitDecoration = getBuiltInGitStatusDecoration(effectiveGitStatus, containsGitChange, labels);
  	const actionLaneEnabled = contextMenuEnabled && contextMenuButtonTriggerEnabled;
  	const decorationLaneEnabled = customDecoration != null || gitLaneActive || actionLaneEnabled;
-@@ -435,7 +482,13 @@ function renderStyledRow(frame, row, key, options = {}) {
+@@ -435,7 +566,13 @@ function renderStyledRow(frame, row, key, options = {}) {
  		dragTargetFlattenedSegmentPath: dragTarget?.flattenedSegmentPath ?? null,
  		gitDecoration,
  		gitLaneActive,
@@ -308,7 +392,7 @@ index b4c7ee4..3ef6e96 100644
  		showDecorativeActionAffordance
  	});
  	const commonProps = {
-@@ -464,6 +517,9 @@ function renderStyledRow(frame, row, key, options = {}) {
+@@ -464,6 +601,9 @@ function renderStyledRow(frame, row, key, options = {}) {
  			},
  			targetPath
  		}),
@@ -318,7 +402,7 @@ index b4c7ee4..3ef6e96 100644
  		key,
  		onContextMenu: contextMenuEnabled || dragAndDropEnabled ? (event) => {
  			if (shouldSuppressContextMenu()) {
-@@ -512,6 +568,9 @@ function renderStyledRow(frame, row, key, options = {}) {
+@@ -512,6 +652,9 @@ function renderStyledRow(frame, row, key, options = {}) {
  		onClick: (event) => {
  			onRowClick(event, row, targetPath, mode);
  		},
@@ -328,7 +412,7 @@ index b4c7ee4..3ef6e96 100644
  		children: rowContent
  	});
  }
-@@ -519,7 +578,7 @@ function renderRangeChildren(frame, range, hiddenRowPaths) {
+@@ -519,7 +662,7 @@ function renderRangeChildren(frame, range, hiddenRowPaths) {
  	if (range.end < range.start) return [];
  	return frame.controller.getVisibleRows(range.start, range.end).filter((row) => !hiddenRowPaths.has(getFileTreeRowPath(row))).map((row, slotIndex) => renderStyledRow(frame, row, range.start + slotIndex));
  }
@@ -337,7 +421,7 @@ index b4c7ee4..3ef6e96 100644
  	"use no memo";
  	const contextMenuAnchorRef = useRef(null);
  	const contextMenuTriggerRef = useRef(null);
-@@ -695,6 +754,10 @@ function FileTreeView({ composition, controller, gitStatusByPath, ignoredGitDire
+@@ -695,6 +838,10 @@ function FileTreeView({ composition, controller, gitStatusByPath, ignoredGitDire
  		item: createContextMenuItem(row, targetPath),
  		row
  	}) ?? null, [renderRowDecoration]);
@@ -348,7 +432,7 @@ index b4c7ee4..3ef6e96 100644
  	const restoreContextMenuFocus = useCallback((restorePath) => {
  		const focusedButton = restorePath == null ? null : rowButtonRefs.current.get(restorePath) ?? null;
  		if (focusElement(focusedButton)) return true;
-@@ -1776,7 +1839,9 @@ function FileTreeView({ composition, controller, gitStatusByPath, ignoredGitDire
+@@ -1776,7 +1923,9 @@ function FileTreeView({ composition, controller, gitStatusByPath, ignoredGitDire
  		registerRenameInput,
  		renameView,
  		renderDecorationForRow,
@@ -358,7 +442,7 @@ index b4c7ee4..3ef6e96 100644
  		shouldSuppressContextMenu,
  		visualFocusPath
  	};
-@@ -1816,6 +1881,7 @@ function FileTreeView({ composition, controller, gitStatusByPath, ignoredGitDire
+@@ -1816,6 +1965,7 @@ function FileTreeView({ composition, controller, gitStatusByPath, ignoredGitDire
  			searchEnabled ? /* @__PURE__ */ jsx("div", {
  				"data-file-tree-search-container": true,
  				"data-open": isSearchOpen ? "true" : "false",

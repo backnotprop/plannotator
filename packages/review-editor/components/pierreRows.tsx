@@ -1,4 +1,5 @@
 import React from 'react';
+import { plural, shortCount } from '@plannotator/ui/utils/countFormat';
 import type { FileTreeRowPart, FileTreeRowParts, GitStatusEntry } from '@pierre/trees';
 import type { DiffFile } from '../types';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
@@ -69,8 +70,8 @@ export function ancestorsOf(path: string): string[] {
 
 export function countParts(additions: number, deletions: number, quiet: boolean): (FileTreeRowPart | null)[] {
   return [
-    additions > 0 ? { text: `+${additions}`, color: quiet ? undefined : 'var(--success)' } : null,
-    deletions > 0 ? { text: `-${deletions}`, color: quiet ? undefined : 'var(--destructive)' } : null,
+    additions > 0 ? { text: `+${shortCount(additions)}`, title: `${plural(additions, 'line')} added`, color: quiet ? undefined : 'var(--success)' } : null,
+    deletions > 0 ? { text: `-${shortCount(deletions)}`, title: `${plural(deletions, 'line')} removed`, color: quiet ? undefined : 'var(--destructive)' } : null,
   ];
 }
 
@@ -78,14 +79,9 @@ export function stageColumnShown(state: Pick<FileRowState, 'getSectionEntry' | '
   return showStageControls && (state.getSectionEntry != null || state.stagedFiles.size > 0);
 }
 
-export function countColumns(widestAdd: number, widestDel: number, withBadge: boolean): string {
-  const col = (n: number) => `minmax(calc(${String(n).length + 1}ch + 2px), max-content)`;
-  return `${withBadge ? 'max-content ' : ''}${col(widestAdd)} ${col(widestDel)}`;
-}
-
-export function withoutBadge(parts: FileTreeRowParts | null, withBadge: boolean): FileTreeRowParts | null {
-  if (withBadge || !parts?.trail) return parts;
-  return { ...parts, trail: parts.trail.slice(1) };
+export function tightRow(parts: FileTreeRowParts | null): FileTreeRowParts | null {
+  if (!parts?.trail) return parts;
+  return { ...parts, trail: parts.trail.filter((part) => part !== null) };
 }
 
 export function hasBadge(file: DiffFile, p: FileRowState): boolean {
@@ -124,9 +120,9 @@ export function fileRowParts(file: DiffFile, p: FileRowState, withStage: boolean
     lead,
     trail: [
       threads > 0
-        ? { icon: THREAD_ICON, text: String(threads), title: `${threads} open ${threads === 1 ? 'thread' : 'threads'}` }
+        ? { icon: THREAD_ICON, text: shortCount(threads), title: `${plural(threads, 'open thread')}` }
         : notes > 0
-          ? { text: String(notes), title: `${notes} annotation${notes === 1 ? '' : 's'}`, color: 'var(--primary)' }
+          ? { text: shortCount(notes), title: plural(notes, 'comment'), color: 'var(--primary)' }
           : previewed
             ? { icon: EYE_ICON, title: 'Shown rendered' }
             : null,
