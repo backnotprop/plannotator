@@ -2,7 +2,7 @@ import React, { useLayoutEffect, useRef, useState } from 'react';
 import { Crosshair, Diff, FileText } from 'lucide-react';
 import { EllipsisName } from '../components/EllipsisName';
 import type { Pane } from './paneLayout';
-import { isReviewFilePreviewParams } from '../dock/reviewPanelTypes';
+import { REVIEW_ALL_FILES_PANEL_ID, isReviewFilePreviewParams } from '../dock/reviewPanelTypes';
 import { TITLE_SETTLE_MS, useSettledValue } from './useSettledValue';
 import { PaneTabsMenu } from './PaneTabsMenu';
 import { isClosableTab, isReferencesTab, tabKind, tabLabel, tabTooltip } from './tabLabel';
@@ -23,6 +23,7 @@ function useHiddenTabs(ref: React.RefObject<HTMLElement | null>, key: string, si
     const element = ref.current;
     if (!element) return;
     const measure = () => {
+      element.scrollLeft = 0;
       const ids = new Set<string>();
       let end = 0;
       if (!single) {
@@ -30,10 +31,10 @@ function useHiddenTabs(ref: React.RefObject<HTMLElement | null>, key: string, si
         const total = items.reduce((sum, item, index) => sum + item.width + (index ? TAB_GAP : 0), 0);
         if (total > element.clientWidth + 1) {
           const limit = element.clientWidth - MENU_RESERVE;
-          const active = items.find((item) => item.id === activeId);
-          let used = active ? active.width : 0;
+          const kept = items.filter((item) => item.id === activeId || item.id === REVIEW_ALL_FILES_PANEL_ID);
+          let used = kept.reduce((sum, item, index) => sum + item.width + (index ? TAB_GAP : 0), 0);
           for (const item of items) {
-            if (item.id === activeId) continue;
+            if (kept.includes(item)) continue;
             if (used + TAB_GAP + item.width <= limit) used += TAB_GAP + item.width;
             else ids.add(item.id);
           }
@@ -102,6 +103,7 @@ export const PaneTabs: React.FC<{
       aria-label={paneIndex === 0 ? 'Open files' : 'Open files beside'}
       data-pane-tabs=""
       onKeyDown={onKeyDown}
+      onScroll={inHeader ? (event) => { event.currentTarget.scrollLeft = 0; } : undefined}
       data-pane-tabs-for={paneIndex}
       className={inHeader
         ? 'relative min-w-0 h-full flex items-stretch gap-4 overflow-hidden'

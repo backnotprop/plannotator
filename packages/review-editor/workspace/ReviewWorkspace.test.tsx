@@ -207,6 +207,7 @@ describe.skipIf(!hasDom)('the review panes', () => {
       await act(async () => { api!.getPanel('review-file:d.ts')!.api.setActive(); });
       const hidden = [...slot.querySelectorAll('[data-pane-tab-item][aria-hidden="true"]')].map((item) => item.getAttribute('data-pane-tab-item'));
       expect(hidden).not.toContain('review-file:d.ts');
+      expect(hidden).not.toContain('review-all-files');
       expect(hidden.length).toBe(3);
       expect(slot.querySelector('[data-pane-tabs-overflow]')?.textContent).toBe('3');
     } finally {
