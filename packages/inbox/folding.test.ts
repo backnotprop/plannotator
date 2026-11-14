@@ -106,6 +106,10 @@ test("a folded line's first words: question blocks, fences, tables and images ou
   expect(firstWords('word '.repeat(100), 40)).toBe(`${'word '.repeat(8).trim()}…`);
 });
 
+test("an author's coloured words (#3345) preview as words, with no tag or style", () => {
+  expect(firstWords('Coverage fell to <span style="color: #d00000">73.0%</span> and <font color=green>**ok**</font>.')).toBe('Coverage fell to 73.0% and ok.');
+});
+
 test('emphasis marks go only where they pair at word boundaries; snake_case, arithmetic and inline code keep their characters', () => {
   expect(firstWords('Rename retry_count to max_retry_count in `queue_worker.ts`.')).toBe('Rename retry_count to max_retry_count in queue_worker.ts.');
   expect(firstWords('It costs 2 * 3 = 6 seconds, and **this** is _the_ ~~old~~ *new* plan.')).toBe('It costs 2 * 3 = 6 seconds, and this is the old new plan.');

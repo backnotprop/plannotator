@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { buildCsv } from './TableBlock';
 import { copyTextToClipboard } from '../../utils/clipboard';
+import { stripAuthorColor } from '../../utils/authorColor';
 
 interface TableToolbarProps {
   element: HTMLElement;
@@ -53,7 +54,7 @@ export const TableToolbar: React.FC<TableToolbarProps> = ({
   }, [element]);
 
   const handleCopyMarkdown = async () => {
-    if (await copyTextToClipboard(markdown)) {
+    if (await copyTextToClipboard(stripAuthorColor(markdown))) {
       setCopiedMd(true);
       setTimeout(() => setCopiedMd(false), 1500);
     } else {
