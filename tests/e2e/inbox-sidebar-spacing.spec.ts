@@ -35,6 +35,20 @@ interface World {
 }
 let world: World;
 
+/**
+ * A route handler whose request outlives its page: `open()` navigates the one page away while the list's last read
+ * may still be in `route.fetch()`, and the navigation disposes that response. Only that ends quietly; any other
+ * failure (a server error, a bad answer) still fails the test.
+ */
+async function unlessGone(handle: () => Promise<void>): Promise<void> {
+  try {
+    await handle();
+  } catch (error) {
+    if (/has been disposed|has been closed|Target closed/.test(error instanceof Error ? error.message : String(error))) return;
+    throw error;
+  }
+}
+
 /** The sections top to bottom, as one line: `Pin -2- Ag -0- rows -12- Proj`. Agents' rows are its groups, or its empty line. */
 const layout = (page: Page, scope: string) =>
   page.evaluate((selector) => {
@@ -104,27 +118,32 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
     return (await fetch(`/api/inbox/threads/${id}/pin`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ serverSession: list.serverSession, pinned: true }) })).status;
   }, thread);
   expect(status).toBeLessThan(300);
-  await page.route(/\/api\/inbox\/threads(\?|$)/, async (route) => {
-    if (route.request().method() !== 'GET') return route.fallback();
-    const response = await route.fetch();
-    const json = (await response.json()) as Record<string, unknown>;
-    const machine = { state: 'online', since: '2026-11-05T10:00:00.000Z', reason: null, version: '0.0.0', address: null, both_ways: true, waiting: 0 };
-    json.self = SELF;
-    json.machines = [{ ...machine, id: SELF, name: 'Studio', self: true }, { ...machine, id: OTHER, name: 'MacBook', self: false }];
-    await route.fulfill({ response, json });
-  });
+  await page.route(/\/api\/inbox\/threads(\?|$)/, (route) =>
+    unlessGone(async () => {
+      if (route.request().method() !== 'GET') return route.fallback();
+      const response = await route.fetch();
+      const json = (await response.json()) as Record<string, unknown>;
+      const machine = { state: 'online', since: '2026-11-05T10:00:00.000Z', reason: null, version: '0.0.0', address: null, both_ways: true, waiting: 0 };
+      json.self = SELF;
+      json.machines = [{ ...machine, id: SELF, name: 'Studio', self: true }, { ...machine, id: OTHER, name: 'MacBook', self: false }];
+      await route.fulfill({ response, json });
+    }),
+  );
   // The stream's own snapshot would say nothing is linked and take the section away again.
-  await page.route(/\/api\/inbox\/events\?/, async (route) => {
-    const stream = new URL(route.request().url());
-    stream.searchParams.delete('agents');
-    await route.continue({ url: stream.toString() });
-  });
+  await page.route(/\/api\/inbox\/events\?/, (route) =>
+    unlessGone(async () => {
+      const stream = new URL(route.request().url());
+      stream.searchParams.delete('agents');
+      await route.continue({ url: stream.toString() });
+    }),
+  );
   world = { url, thread, agent, context, page };
 });
 
 test.afterAll(async () => {
   try {
     await world?.agent.close().catch(() => {});
+    await world?.page.unrouteAll({ behavior: 'ignoreErrors' });
     await world?.context.close();
   } finally {
     await removeInboxScratch();
