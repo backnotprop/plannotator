@@ -3,11 +3,11 @@
   "packages/inbox/components/Thread.tsx": 7371,
   "packages/inbox/components/AttachmentPane.tsx": 3223,
   "packages/inbox/api.ts": 2477,
-  "packages/inbox/pulls/pullReviewKept.test.tsx": 2302,
+  "packages/inbox/pulls/pullReviewKept.test.tsx": 2299,
   "packages/inbox/compose/ComposeDialog.tsx": 1896,
   "packages/inbox/components/InboxList.tsx": 1853,
   "packages/inbox/tour/Tour.tsx": 1847,
-  "packages/inbox/pulls/pullReview.test.tsx": 1670,
+  "packages/inbox/pulls/pullReview.test.tsx": 1666,
   "packages/inbox/board/BoardPage.tsx": 1528,
   "packages/inbox/accountsSection.test.tsx": 1501
 }
