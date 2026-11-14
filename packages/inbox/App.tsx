@@ -261,7 +261,8 @@ import { ThemeChooser } from './components/ThemeChooser';
 import { openThemeSettings, useThemeChooser } from './themeChooser';
 import { CardChip } from './board/CardChip';
 import { boardFilterHash, boardInitiativeOf, boardViewOf, cardsInInitiative, liveInitiatives, newCardProject, type BoardView } from './board/model';
-import { filterTagRows, tagHref, tagListSummary, tagThreadCounts, ThreadTagsContext } from './threadTags';
+import { tagsAcross } from './tagsAcross';
+import { filterTagRows, tagById, tagHref, tagListSummary, tagThreadCounts, thisInboxTags, ThreadTagsContext } from './threadTags';
 import { TagIcon } from './components/InitiativePeek';
 import { useComposeSessions } from './compose/useComposeSessions';
 import { useComposerOpener } from './compose/openComposer';
@@ -2109,18 +2110,20 @@ function Inbox() {
   }, [refreshCards]);
   // With the Board off, the list's tags (approval "inbox-thread-tags"), the same array while their ids and names stay.
   const listTagsKey = (latest?.tags ?? [])
-    .map((i) => `${i.id}\u0000${i.name}`)
+    .map((i) => `${i.id}\u0000${i.name}\u0000${JSON.stringify(i.machines ?? null)}`)
     .join('\u0001');
   const keepsTags = latest?.tags !== undefined;
   // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the ids and names, on purpose
   const listTags = useMemo(() => latest?.tags ?? null, [listTagsKey, keepsTags]);
+  /** The tags' rename, delete and Undo on every linked machine that holds one of the name: the sidebar's and the Board's. */
+  const across = useMemo(() => (listTags ? tagsAcross(listTags, machines) : null), [listTags, machines]);
   const initiativeTags = useMemo<InitiativeTags>(() => {
     if (boardEnabled === false && listTags) {
       // The Board off: `#` lists the tags, each counted by its threads, and a sent tag opens its list.
       const rows = new Map<string, InboxListRow>();
       for (const row of [...(latest?.sections.flatMap((s) => s.threads) ?? []), ...(latest?.snoozed ?? []), ...(latest?.pins ?? [])]) if (!rows.has(row.thread_id)) rows.set(row.thread_id, row);
       const projects = new Map((latest?.projects ?? []).map((p) => [p.id, p.name] as const));
-      return { initiatives: listTags, counts: tagThreadCounts([...rows.values()]), cards: [], rows, projects, mentions: new Map(), href: tagHref };
+      return { initiatives: thisInboxTags(listTags, machines.self), counts: tagThreadCounts([...rows.values()]), cards: [], rows, projects, mentions: new Map(), href: tagHref };
     }
     const counts = new Map<string, number>();
     const live = (cards?.cards ?? []).filter((card) => card.column !== 'dropped');
@@ -2132,8 +2135,10 @@ function Inbox() {
     const projects = new Map((latest?.projects ?? []).map((p) => [p.id, p.name] as const));
     const mentions = new Map(Object.entries(cards?.initiative_threads ?? {}));
     return { initiatives: tagInitiatives, counts, cards: live, rows, projects, mentions, refresh: refreshForPeek };
-  }, [cards, latest, tagInitiatives, refreshForPeek, boardEnabled, listTags]);
-  const boardInitiative = route.page === 'board' ? boardInitiativeOf(route.initiative, cards ? liveInitiatives(cards.initiatives) : null) : null;
+  }, [cards, latest, tagInitiatives, refreshForPeek, boardEnabled, listTags, machines.self]);
+  // A tag only a linked machine held takes this Inbox's id once a card here is put in it: its link still filters.
+  const boardInitiativeAsked = route.page === 'board' && route.initiative && listTags ? (tagById(listTags, route.initiative)?.id ?? route.initiative) : route.page === 'board' ? route.initiative : null;
+  const boardInitiative = route.page === 'board' ? boardInitiativeOf(boardInitiativeAsked, cards ? [...(listTags ?? []), ...liveInitiatives(cards.initiatives)] : null) : null;
   useEffect(() => {
     if (!onBoard) {
       setBoardVisit(null);
@@ -3463,10 +3468,10 @@ function Inbox() {
   const rowOf = (threadId: string): InboxListRow | undefined =>
     (latestRef.current ? listGroups(latestRef.current) : []).flatMap((section) => section.threads).find((row) => row.thread_id === threadId);
 
-  const say = (text: string) => {
+  const say = useCallback((text: string) => {
     setSaid('');
     setTimeout(() => setSaid(text), 30);
-  };
+  }, []);
   // The live region says "Reconnecting…" once when the stream dies, never its return, and not again within
   // RECONNECT_SAY_GAP_MS (a network that comes and goes would say it over and over).
   useEffect(() => {
@@ -3883,26 +3888,6 @@ function Inbox() {
     });
   };
 
-  /**
-   * 👍 Looks good (design record "inbox-acknowledge", approved 2026-10-15,
-   * amended 2026-10-16), or take it back (the toast's Undo, `Z`, the pressed
-   * button). The ack is recorded on the agent's latest message and the thread
-   * is marked read; once the Undo window passes the Inbox sends it to the
-   * agent. The held-order rules of Mark read apply: with the thread open its
-   * row changes in place.
-   *
-   * `reaction` (approval "inbox-reaction-tray"): the emoji picked in the 👍's
-   * tray, null for 👍 Looks good, undefined for the plain button (today's call).
-   * The agent gets the one the Undo window closes on. A reaction draws no toast: the
-   * emoji flies to the message; the toast is kept unseen, so `Z` still undoes it
-   * and the live region still says it. Taking one back, `reaction` is the one
-   * taken back, for the words only.
-   *
-   * `was` (defined only when the message already had the person's mark): the
-   * reaction it had (null: 👍 Looks good). Then only the emoji changes (the
-   * store keeps the ack, its time and whether it went), so `Z` puts the one it
-   * had back, never takes the mark away, and nothing says it goes in 10 s.
-   */
   const acknowledge = async (threadId: string, messageId: string, on: boolean, agent: string, reaction?: InboxReaction | null, was?: InboxReaction | null) => {
     try {
       await inboxApi.ack(messageId, on, reaction);
@@ -4995,10 +4980,11 @@ function Inbox() {
   const threadAgentContext = useMemo(() => ({ rows: windowRows, machines }), [windowRows, machines]);
   // The Agents section's filter (`#agent=<id>`): one agent's threads, named by its row's name.
   const filterAgent = useAgentListFilter(route.page === 'inbox' ? (route.agent ?? null) : null, machines, windowRows);
-  const { tagsOfRow, filterTag, threadTagsHost, sidebarTags } = useThreadTagsHost({
+  const { tagsOfRow, filterTag, shownTagId, threadTagsHost, sidebarTags } = useThreadTagsHost({
     listTags,
+    across,
     routeTag: route.page === 'inbox' ? (route.tag ?? null) : null,
-    self: machines.self,
+    machines,
     windowRows,
     latestSections,
     rowOf,
@@ -5007,8 +4993,8 @@ function Inbox() {
     dismissToast,
     refreshList,
     openTag: (tagId) => leave({ page: 'inbox', project: null, machine: null, agent: null, tag: tagId, thread: null }),
-    tagGone: (tagId) => {
-      if (routeRef.current.page === 'inbox' && routeRef.current.tag === tagId) writeRoute({ page: 'inbox', project: null, thread: null }, { replace: true });
+    tagGone: (tag) => {
+      if (routeRef.current.page === 'inbox' && routeRef.current.tag && tagById([tag], routeRef.current.tag)) writeRoute({ page: 'inbox', project: null, thread: null }, { replace: true });
     },
   });
   const projectNames = useMemo(
@@ -5020,8 +5006,8 @@ function Inbox() {
   /** One project's rows, then one machine's, then one agent's, then one tag's, then without the machines the person hid while away. */
   const filterList = useCallback(
     (sections: readonly InboxListSection[]) =>
-      filterTagRows(filterAgentRows(filterMachineRows(filterSections(sections, route.project), machines, filterMachine?.id ?? null, hideAway), filterAgent, machines.self), route.tag ?? null, tagsOfRow),
-    [route.project, machines, filterMachine, filterAgent, hideAway, route.tag, tagsOfRow],
+      filterTagRows(filterAgentRows(filterMachineRows(filterSections(sections, route.project), machines, filterMachine?.id ?? null, hideAway), filterAgent, machines.self), shownTagId, tagsOfRow),
+    [route.project, machines, filterMachine, filterAgent, hideAway, shownTagId, tagsOfRow],
   );
   // The list's filter (listFilter.ts): this browser's picks; on a project's page its Project picks step aside. The
   // day is in the keys so Today and the last N days move on at midnight.
@@ -6507,6 +6493,7 @@ function Inbox() {
           onOpenPull={(pull, stack) => go(boardPull(pull, stack, { page: 'prs', project: null, thread: null, stack: stack.id, layer: pull.key, scope: 'layer', prsFrom: 'reviews' }))}
           onOpenStack={(stack) => go({ page: 'prs', project: null, thread: null, stack: stack.id, layer: null })}
           onMerged={sheetPulls.refresh}
+          onToast={(next, ms) => showToast(next, ms)}
           layout={paneLayout}
           onLayout={setPaneLayout}
         />
@@ -6746,8 +6733,11 @@ function Inbox() {
             setCards((model) => (model ? { ...model, cards: [card, ...model.cards.filter((c) => c.id !== card.id)] } : model));
           }
           refreshBoard();
+          // A tag changed in the Tags dialog: the sidebar's merged list too.
+          if (!card) void refreshList(false);
         }}
         onSeeDrops={seeDrops}
+        tagsAcross={across}
         tidy={boardTidy}
         onOpenThread={(card, threadId) =>
           go({ page: 'inbox', project: null, thread: threadId, card: card.id, board: route.board ?? 'lanes', boardProject: boardFilter, boardInitiative })
@@ -6803,6 +6793,7 @@ function Inbox() {
         onOpenPull={(pull, stack) => go(boardPull(pull, stack, { ...route, stack: stack.id, layer: pull.key, scope: 'layer', prsFrom: 'sheet' }))}
         onOpenStack={(stack) => go({ ...route, stack: stack.id, layer: null })}
         onMerged={sheetPulls.refresh}
+        onToast={(next, ms) => showToast(next, ms)}
       />
     );
   } else if (route.page === 'prs') {

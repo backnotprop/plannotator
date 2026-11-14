@@ -6,12 +6,14 @@
 /* The heading's goggles: one filled shape in the heading's grey (currentColor), both themes. */
 .pn-inbox .ib-side-sec > svg.ib-ic.ib-agents-mk,
 .pn-inbox .ib-sheet-now-n > svg.ib-ic.ib-agents-mk { fill: currentColor; stroke: none; overflow: visible; }
-/* Add agent and Add machine: the heading's quiet icon buttons, always shown while the section is open (not only on
-   hover), the chevron's place kept. */
-.pn-inbox .ib-agentsec .ib-agents-add { opacity: 1; }
-.pn-inbox .ib-agentsec .ib-agents-add[data-agents-add="agent"] { right: 50px; }
-.pn-inbox .ib-agentsec .ib-agents-add[data-agents-add="machine"] { right: 24px; }
-.pn-inbox .ib-agentsec [data-one-add] .ib-agents-add[data-agents-add="agent"] { right: 24px; }
+/* Add machine, then Add agent: the heading's quiet icon buttons, the chevron's place kept, so Add agent is right under
+   Tags' New tag. Shown while the section is open; closed, on the heading's hover or focus (always where nothing
+   hovers), as New tag. */
+.pn-inbox .ib-agentsec:not([data-closed]) .ib-agents-add { opacity: 1; }
+.pn-inbox .ib-agentsec .ib-agents-add[data-agents-add="machine"] { right: 50px; }
+/* The phone's sheet lays the heading's buttons out in a row: Add agent first there, and none on a closed heading. */
+.pn-inbox .ib-sb-sheet-in .ib-agentsec .ib-agents-add[data-agents-add="machine"] { order: 1; }
+.pn-inbox .ib-sb-sheet-in .ib-agentsec[data-closed] .ib-agents-add { display: none; }
 .pn-inbox .ib-agents-body { margin-top: 2px; }
 .pn-inbox .ib-agents-body[data-closed] { margin-top: 0; }
 .pn-inbox .ib-agents-group + .ib-agents-group { margin-top: 10px; }
