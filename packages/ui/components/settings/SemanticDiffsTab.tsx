@@ -272,8 +272,8 @@ export function SemanticDiffsTab() {
                 </button>
               </form>
             </Row>
-            <Row title="Motion" hint="The stream on powered bands. Follows your system's reduce-motion setting.">
-              <Segmented label="Motion" value={motion} options={[['stream', 'Stream'], ['still', 'Still']]} onChange={(v) => configStore.set('diffPowerUpMotion', v)} />
+            <Row title="Motion" hint="Stream moves the bands slowly. It is experimental: it costs some smoothness while you scroll. Both follow your system's reduce-motion setting.">
+              <Segmented label="Motion" value={motion} options={[['still', 'Still'], ['stream', 'Stream']]} onChange={(v) => configStore.set('diffPowerUpMotion', v)} />
             </Row>
             <p className="pt-1 text-xs text-muted-foreground">
               Your key, your account; code is sent to {PROVIDER_NAME[provider]}. Only the functions a link is about, never the rest of the repository.
