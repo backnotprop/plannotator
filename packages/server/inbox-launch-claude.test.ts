@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { InboxLaunchRecord } from "@plannotator/core/inbox-types";
 import { resolveInboxLaunch } from "@plannotator/shared/config";
-import { createAgentEnvironmentFor, type AgentEnvironment } from "./inbox-agents";
+import { CLAUDE_PROJECT_SETTINGS_MAX_BYTES, claudePluginStateFromScopes, createAgentEnvironmentFor, type AgentEnvironment } from "./inbox-agents";
 import type { LaunchHostContext } from "./inbox-launch-host";
 import { agentByShort, CLAUDE_AUTH_SIGNED_OUT_TTL_MS, CLAUDE_OTHER_SIGN_IN_ENV, claudeAttachCommand, claudeAuthState, createClaudeHost, createClaudeLaunchHost, parseAgentsJson, parseBackgrounded, refusedForMode, startFailureOf, versionAtLeast, type ClaudeLaunchMode } from "./inbox-launch-claude";
 
@@ -65,6 +65,21 @@ test("versionAtLeast compares numerically, not as text", () => {
   expect(versionAtLeast("2.1.314", "2.1.314")).toBe(true);
   expect(versionAtLeast("2.10.0", "2.1.314")).toBe(true);
   expect(versionAtLeast("2.1.99", "2.1.314")).toBe(false);
+});
+
+test("the plugin's scopes by Claude Code's precedence: managed, then the project's local and shared files, then the user's", () => {
+  const state = (on: Partial<Record<"managed" | "local" | "project" | "user", boolean>>) =>
+    claudePluginStateFromScopes(
+      (["managed", "local", "project", "user"] as const).map((scope) => ({ scope, on: on[scope] })),
+      false,
+    );
+  expect(state({ managed: false, local: true, project: true, user: true })).toEqual({ state: "disabled", managed: true });
+  expect(state({ local: false, project: true, user: true }).state).toBe("disabled");
+  expect(state({ local: true, project: false, user: false }).state).toBe("enabled");
+  expect(state({ project: true, user: false }).state).toBe("enabled");
+  expect(state({ project: false, user: true }).state).toBe("disabled");
+  expect(state({ user: true }).state).toBe("enabled");
+  expect(state({}).state).toBe("absent");
 });
 
 test("the attach command quotes the folder for the shell", () => {
@@ -299,6 +314,103 @@ describe("Claude Code as a launch host", () => {
     expect((await onlyInHome.host.available()).ok).toBe(false);
     onlyInHome.pluginOn(other);
     expect((await onlyInHome.host.available()).ok).toBe(true);
+  });
+
+  describe("a launch folder's own Claude Code settings turn the plugin on or off for that folder (#3065)", () => {
+    const PLUGIN = "plannotator@plannotator";
+    const settings = (dir: string, name: "settings.json" | "settings.local.json", on: boolean | string) => {
+      mkdirSync(join(dir, ".claude"), { recursive: true });
+      writeFileSync(join(dir, ".claude", name), typeof on === "string" ? on : JSON.stringify({ enabledPlugins: { [PLUGIN]: on } }));
+    };
+    const userSettings = (w: ReturnType<typeof world>, on: boolean) => writeFileSync(join(w.home, ".claude", "settings.json"), JSON.stringify({ enabledPlugins: { [PLUGIN]: on } }));
+    const project = (w: ReturnType<typeof world>, name: string) => {
+      const dir = join(w.root, "projects", name);
+      mkdirSync(dir, { recursive: true });
+      return dir;
+    };
+    const code = async (w: ReturnType<typeof world>, folders?: string[]) => {
+      const answer = await w.host.available(folders);
+      return answer.ok ? "ok" : answer.code;
+    };
+
+    test("off for the user, on in the project's shared or local settings: on there, still off for the machine and in other folders", async () => {
+      const w = world();
+      userSettings(w, false);
+      const shared = project(w, "shared");
+      const local = project(w, "local");
+      const other = project(w, "other");
+      settings(shared, "settings.json", true);
+      settings(local, "settings.local.json", true);
+      expect(await code(w)).toBe("plugin_off");
+      expect(await code(w, [shared])).toBe("ok");
+      expect(await code(w, [local])).toBe("ok");
+      expect(await code(w, [other])).toBe("plugin_off");
+      // To offers it when at least one of the projects turns it on.
+      expect(await code(w, [other, shared])).toBe("ok");
+    });
+
+    test("on for the user, off in a project: off for that folder only", async () => {
+      const w = world();
+      userSettings(w, true);
+      const optedOut = project(w, "opted-out");
+      settings(optedOut, "settings.json", false);
+      expect(await code(w)).toBe("ok");
+      expect(await code(w, [optedOut])).toBe("plugin_off");
+      expect(await code(w, [project(w, "plain")])).toBe("ok");
+    });
+
+    test("the local file beats the shared one, both ways", async () => {
+      const w = world();
+      userSettings(w, false);
+      const outOfShared = project(w, "out-of-shared");
+      settings(outOfShared, "settings.json", true);
+      settings(outOfShared, "settings.local.json", false);
+      const intoLocal = project(w, "into-local");
+      settings(intoLocal, "settings.json", false);
+      settings(intoLocal, "settings.local.json", true);
+      expect(await code(w, [outOfShared])).toBe("plugin_off");
+      expect(await code(w, [intoLocal])).toBe("ok");
+    });
+
+    test.skipIf(process.platform === "win32")("in a folder inside a repository, the local file is the repository root's (as Claude reads it); the shared one is the folder's", async () => {
+      const w = world();
+      userSettings(w, false);
+      const repo = project(w, "repo");
+      mkdirSync(join(repo, ".git"));
+      const sub = join(repo, "packages", "app");
+      mkdirSync(sub, { recursive: true });
+      settings(sub, "settings.local.json", true);
+      expect(await code(w, [sub])).toBe("plugin_off");
+      settings(repo, "settings.local.json", true);
+      expect(await code(w, [sub])).toBe("ok");
+      // The root's shared file is not the subfolder's.
+      const other = project(w, "repo2");
+      mkdirSync(join(other, ".git"));
+      const inner = join(other, "app");
+      mkdirSync(inner, { recursive: true });
+      settings(other, "settings.json", true);
+      expect(await code(w, [inner])).toBe("plugin_off");
+    });
+
+    test.skipIf(process.platform === "win32")("a settings file that leads out of its folder, is too big, or is not JSON counts as not set", async () => {
+      const w = world();
+      userSettings(w, false);
+      const outside = project(w, "outside");
+      settings(outside, "settings.json", true);
+      const linked = project(w, "linked");
+      symlinkSync(join(outside, ".claude"), join(linked, ".claude"));
+      const fileLinked = project(w, "file-linked");
+      mkdirSync(join(fileLinked, ".claude"));
+      symlinkSync(join(outside, ".claude", "settings.json"), join(fileLinked, ".claude", "settings.json"));
+      const big = project(w, "big");
+      settings(big, "settings.json", JSON.stringify({ enabledPlugins: { [PLUGIN]: true }, padding: "x".repeat(CLAUDE_PROJECT_SETTINGS_MAX_BYTES) }));
+      const broken = project(w, "broken");
+      settings(broken, "settings.json", "{ not json");
+      for (const folder of [linked, fileLinked, big, broken]) expect(await code(w, [folder])).toBe("plugin_off");
+      // A broken project file hides nothing below it: the user's own true still counts there.
+      userSettings(w, true);
+      expect(await code(w, [broken])).toBe("ok");
+    });
   });
 
   test("the settings file gives Read on the Inbox's uploads, by an absolute rule, and the login PATH", async () => {

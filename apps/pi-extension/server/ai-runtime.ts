@@ -59,6 +59,7 @@ function whichCmd(cmd: string): string | null {
 		const bin = process.platform === "win32" ? "where" : "which";
 		const output = execFileSync(bin, [cmd], {
 			env: process.env,
+			windowsHide: true,
 			encoding: "utf-8",
 			stdio: ["pipe", "pipe", "pipe"],
 		});

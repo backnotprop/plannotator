@@ -101,7 +101,7 @@ export function createFolderReader(options: {
     if (options.platform === "win32") {
       for (const name of WINDOWS_PLACES_ENV) if (env[name]) childEnv[name] = env[name]!;
     }
-    const child = Bun.spawn([execPath, "-e", code], { cwd: "/", env: childEnv, stdin: "ignore", stdout: "pipe", stderr: "ignore" });
+    const child = Bun.spawn([execPath, "-e", code], { cwd: "/", env: childEnv, stdin: "ignore", stdout: "pipe", stderr: "ignore", windowsHide: true });
     let timedOut = false;
     const timer = setTimeout(() => {
       timedOut = true;

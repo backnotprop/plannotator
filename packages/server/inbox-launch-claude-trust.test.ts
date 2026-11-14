@@ -270,7 +270,7 @@ describe("Claude's lock", () => {
     const writer = join(root, "writer.ts");
     writeFileSync(writer, `import { acceptClaudeTrust } from ${JSON.stringify(join(import.meta.dir, "inbox-launch-claude-trust.ts"))};\nconst [config, ...keys] = process.argv.slice(2);\nfor (const key of keys) await acceptClaudeTrust(config!, key, 30_000);\n`);
     const keys = (writerId: number) => Array.from({ length: 12 }, (_, i) => `/w${writerId}/k${i}`);
-    const writers = [0, 1, 2, 3, 4, 5].map((id) => Bun.spawn([process.execPath, writer, config, ...keys(id)], { stdout: "pipe", stderr: "pipe", env: { PATH: "/usr/bin:/bin", HOME: root, PLANNOTATOR_DATA_DIR: join(root, "data") } }));
+    const writers = [0, 1, 2, 3, 4, 5].map((id) => Bun.spawn([process.execPath, writer, config, ...keys(id)], { stdout: "pipe", stderr: "pipe", env: { PATH: "/usr/bin:/bin", HOME: root, PLANNOTATOR_RELAY_URL: "http://127.0.0.1:9", PLANNOTATOR_DATA_DIR: join(root, "data") } }));
     const exits = await Promise.all(writers.map(async (w) => [await w.exited, await new Response(w.stderr).text()] as const));
     expect(exits).toEqual(writers.map(() => [0, ""] as const));
     const saved = JSON.parse(readFileSync(config, "utf8"));
@@ -293,7 +293,7 @@ describe("the key, as Claude Code uses it", () => {
     for (const fifo of [join(named, ".git"), join(gitDir, "commondir")]) expect(Bun.spawnSync(["mkfifo", fifo]).exitCode).toBe(0);
     const probe = join(root, "probe.ts");
     writeFileSync(probe, `import { claudeTrustKey } from ${JSON.stringify(join(import.meta.dir, "inbox-launch-claude-trust.ts"))};\nconsole.log(JSON.stringify(process.argv.slice(2).map((f) => claudeTrustKey(f))));\n`);
-    const run = Bun.spawnSync([process.execPath, probe, named, pointed], { timeout: 15_000, env: { PATH: "/usr/bin:/bin", HOME: root, PLANNOTATOR_DATA_DIR: join(root, "data") } });
+    const run = Bun.spawnSync([process.execPath, probe, named, pointed], { timeout: 15_000, env: { PATH: "/usr/bin:/bin", HOME: root, PLANNOTATOR_RELAY_URL: "http://127.0.0.1:9", PLANNOTATOR_DATA_DIR: join(root, "data") } });
     expect(run.exitCode).toBe(0);
     expect(JSON.parse(run.stdout.toString())).toEqual([repo, pointed]);
   }, 20_000);

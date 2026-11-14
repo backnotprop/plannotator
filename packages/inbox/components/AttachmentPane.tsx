@@ -52,6 +52,7 @@ import {
 import { whenTime, formatBytes } from '../format';
 import { useRefRepo } from '../links';
 import { inboxMarkdownImageBase } from '../images';
+import { useCommentPictures } from '../commentPictures';
 import { ImageAttachmentView, type ImageSwipeEdges } from './ImageAttachmentView';
 import type { WheelHintGate } from '@plannotator/ui/components/ImageZoomStage';
 import { VideoAttachmentView, type VideoAttachmentViewHandle } from './VideoAttachmentView';
@@ -269,6 +270,13 @@ export interface AttachmentPaneProps {
    */
   phone?: boolean;
   /**
+   * An HTML file's Annotate (true) or Interact (false) as a file opens in this pane: the thread's last choice,
+   * which `onArmed` reports. Absent: Interact.
+   */
+  armedStart?: boolean;
+  /** The person chose Annotate (true) or Interact (false) on an HTML file. */
+  onArmed?: (armed: boolean) => void;
+  /**
    * A link in an attached HTML page names another file of the thread: open it
    * in this pane as a new history entry (Back returns to the page), in the
    * frame it is in now. Absent: `onStep`.
@@ -460,12 +468,20 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   const [unanchored, setUnanchored] = useState<ReadonlySet<string>>(new Set());
   const [inputMethod, setInputMethod] = useState<InputMethod>('drag');
   const [mode, setMode] = useState<EditorMode>('selection');
-  // The pen. On a phone it starts off, so a tap does what the page says.
-  const [armed, setArmed] = useState(props.phone !== true);
+  // The pen. It starts off (a click does what the page says) unless the person turned it on in this thread.
+  const [armed, setArmed] = useState(props.armedStart === true);
+  const armedStartRef = useRef(props.armedStart === true);
+  armedStartRef.current = props.armedStart === true;
+  const onArmedRef = useRef(props.onArmed);
+  onArmedRef.current = props.onArmed;
+  useEffect(() => onArmedRef.current?.(armed), [armed]);
+  // A read-only file takes no comments, and has no pen to turn Annotate off: it always runs in Interact.
+  const annotating = armed && !props.readOnly;
   const [scope, setScope] = useState<AnnotationScope>('all');
   const viewerRef = useRef<ViewerHandle>(null);
   const [scrollViewport, setScrollViewport] = useState<HTMLDivElement | null>(null);
   const source = useInboxFileSource();
+  const pictures = useCommentPictures();
   const suggestion = source.suggestion?.(attachment) ?? null;
 
   // The current file cannot be read (gone, or no longer the file that was sent): the sent version opens.
@@ -915,13 +931,14 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   const stepRef = useRef(step);
   stepRef.current = step;
 
-  // Each file opens armed (Annotate; on a phone, in Interact) and without the last file's note; a step is announced once.
+  // Each file opens in the thread's Annotate or Interact (another thread's file in Interact) and without the last
+  // file's note; a step is announced once.
   const stepsRef = useRef(steps);
   stepsRef.current = steps;
   const indexRef = useRef(index);
   indexRef.current = index;
   useEffect(() => {
-    setArmed(!phone);
+    setArmed(armedStartRef.current);
     setEndNote(null);
     setSheet(false);
     // The comments panel was about the file left: the next one opens without it, unless a pick in it opened this file.
@@ -1184,7 +1201,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
       // Gathered with the tools, the panel is not on screen: Escape has nothing of it to close.
       panelOpen: panelOpen && !(drawerMode && toolbar === 'tucked'),
       linkedOpen: linkedTop !== null,
-      annotating: isHtml && armed && !props.readOnly,
+      annotating: isHtml && annotating,
     });
   }
 
@@ -2649,8 +2666,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
               // A phone's comment goes in the composer's card (HtmlPageComment.tsx), and a selection made with a finger counts.
               onHostDraft={phoneHtml && hasComposer ? htmlComment.onHostDraft : undefined}
               touchSelection={phoneHtml && hasComposer}
-              // The Inbox's upload takes no image: the page's comment boxes draw no image button (the owner, 2026-11-07).
-              allowCommentImages={false}
+              allowCommentImages={pictures}
               // Desktop size scales the page down: what the page measures converts through it.
               frameScale={fitted ? fitScale : undefined}
               onContentWidth={phoneHtml ? onContentWidth : undefined}
@@ -2671,7 +2687,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
               sideButton={sideButton}
               mode="selection"
               inputMethod="pinpoint"
-              annotateModeActive={armed}
+              annotateModeActive={annotating}
               // Annotate's Escape (from the page, or the viewer's own rung with focus out here): in full screen it is a
               // rung of the ladder (the drawer closes first); beside the thread it goes to Interact, as before.
               onAnnotateModeExit={() => {
@@ -2679,11 +2695,12 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
               }}
               // In Interact, an Escape the page did not use climbs the ladder (full screen only).
               onPageEscape={full ? () => void escapeFromPage() : undefined}
-              onAnnotateModeToggle={() => setArmed((v) => !v)}
+              onAnnotateModeToggle={props.readOnly ? undefined : () => setArmed((v) => !v)}
               // ⌘⇧X pressed inside the page: the bridge forwards it (Hide / Show the full-screen toolbar).
               onToolsToggle={full ? () => barRef.current?.toggle() : undefined}
-              // A plain ] or [ pressed in the page while armed (the bridge forwards nothing in Interact).
-              onStep={multi ? (dir) => !blockedRef.current && armed && stepRef.current(dir, 'key') : undefined}
+              // A plain ] or [ pressed in the page: in Annotate, and in Interact when the page did not use it.
+              onStep={multi ? (dir) => !blockedRef.current && stepRef.current(dir, 'key') : undefined}
+              stepInInteract
               // A link the page's bridge handed over: another file of the thread, a page or image beside it, another site (htmlLinks.ts).
               onOpenLink={(href) => followLinkRef.current(href, pageFolder)}
               initialFragment={linkFragment?.id === attachment.id ? linkFragment.hash : undefined}
@@ -2889,15 +2906,16 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
                   props.readOnly
                     ? undefined
                     : (input) =>
-                        void save(
-                          codeCommentAnnotation({
+                        void save({
+                          ...codeCommentAnnotation({
                             id: `ann-code-${typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : Date.now().toString(36)}`,
                             lineStart: input.lineStart,
                             lineEnd: input.lineEnd,
                             text: input.text,
                             code: input.originalCode,
                           }),
-                        )
+                          ...(input.images?.length ? { images: input.images } : {}),
+                        })
                 }
                 onEditAnnotation={props.readOnly ? undefined : (id, updates) => edit(id, { text: updates.text })}
                 reopenComment={codeReopen}
@@ -2906,7 +2924,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
                   codeLines.current = lines;
                 }}
                 onDeleteAnnotation={props.readOnly ? undefined : (id) => void remove(id)}
-                allowImages={false}
+                allowImages={pictures}
                 lang={view.text.length > CODE_HIGHLIGHT_MAX_CHARS ? 'text' : undefined}
                 // A minified file's one line wraps (no toggle: a line this long is never read by scrolling sideways).
                 overflow={wrapCode ? 'wrap' : undefined}
@@ -2947,7 +2965,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
                 stickyActions={false}
                 disableCodePathValidation
                 copyLabel="Copy file"
-                allowImages={false}
+                allowImages={pictures}
                 quickLabels={false}
                 onSide={sideFrom}
                 sideButton={sideButton}

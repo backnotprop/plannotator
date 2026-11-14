@@ -38,7 +38,7 @@ export interface InboxAgentSearchRow {
   project?: string;
 }
 
-function rowOf(row: InboxSearchMessageRow, withProject: boolean): InboxAgentSearchRow {
+export function rowOf(row: InboxSearchMessageRow, withProject: boolean): InboxAgentSearchRow {
   return {
     thread_id: row.thread_id,
     message_id: row.id,

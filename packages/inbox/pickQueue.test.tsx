@@ -11,7 +11,10 @@
  * The queue's own rules run everywhere; the window's parts are DOM-gated: they
  * run under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
-import { afterEach, beforeEach, expect, test } from 'bun:test';
+import { afterEach, beforeEach, expect, setDefaultTimeout, test } from 'bun:test';
+
+// Typed words wait for their pause (typedAnswers.ts, 500 ms) before they save: a test that types waits for it.
+setDefaultTimeout(20_000);
 import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { parseInboxQuestionBlocks } from '@plannotator/core/inbox-questions';
@@ -19,6 +22,8 @@ import type { InboxAuthor, InboxMessageWire, InboxProject, InboxQuestion, InboxT
 import type { QuestionAnswer } from '@plannotator/core/question-block';
 import type { InboxToastModel } from './components/Toast';
 import { createPickQueue } from './pickQueue';
+
+import { TYPED_ANSWER_SAVE_MS } from './typedAnswers';
 
 const hasDom = typeof document !== 'undefined';
 // Viewer pulls in web-highlighter, which reads `window` at module-eval time.
@@ -55,6 +60,8 @@ interface PickPost {
   key: string;
   revision: number;
   answer: QuestionAnswer | null;
+  /** Sent as the page went (`keepalive`). */
+  keepalive?: boolean;
 }
 interface ReplyPost {
   questions: { message_id?: string; key: string; revision: number }[];
@@ -157,7 +164,7 @@ beforeEach(() => {
     if (path.endsWith('/picks') && init?.method === 'POST') {
       const body = JSON.parse(String(init.body)) as { questions: PickPost[]; unsent_only?: boolean };
       const entry = body.questions[0]!;
-      picks.push(entry);
+      picks.push({ ...entry, ...(init.keepalive ? { keepalive: true } : {}) });
       log.push('pick');
       const waiting = gate;
       if (waiting) await new Promise<void>((resolve) => waiting.push(resolve));
@@ -167,7 +174,7 @@ beforeEach(() => {
       const question = saved.get(entry.key)!;
       if (question.superseded) return Response.json({ error: 'Replaced.', code: 'question_superseded' }, { status: 422 });
       // As the store does: a stale revision is refused, so a test that passes sent the right one.
-      if (question.revision !== entry.revision) return Response.json({ error: 'That question changed since you read it.', code: 'question_revision_conflict' }, { status: 409 });
+      if (question.revision !== entry.revision) return Response.json({ error: 'That question changed since you read it.', code: 'question_revision_conflict', current_revision: question.revision }, { status: 409 });
       if (body.unsent_only === true && question.sent) return Response.json({ error: 'Already sent.', code: 'question_already_sent' }, { status: 409 });
       saved.set(entry.key, { ...question, answer: entry.answer, revision: question.revision + 1, sent: false });
       return Response.json({ message_id: M1, questions: wire(), reply: null });
@@ -212,8 +219,8 @@ async function settle(ms = 0) {
   });
 }
 
-async function until(check: () => boolean, what: string) {
-  for (let i = 0; i < 200; i += 1) {
+async function until(check: () => boolean, what: string, tries = 600) {
+  for (let i = 0; i < tries; i += 1) {
     if (check()) return;
     await settle(2);
   }
@@ -340,7 +347,8 @@ test.skipIf(!hasDom)('a question changing 80 times against a slow server: far fe
   const final = steps.at(-1)!;
   await until(() => saved.get(FIRST)!.answer?.other === final, 'the final answer saved');
   await settle(70);
-  expect(picks.length).toBeLessThan(20);
+  // The first words save at once (they answer the question); the rest wait for the typing to pause (typedAnswers.ts).
+  expect(picks.length).toBeLessThan(5);
   expect(picks.at(-1)!.answer?.other).toBe(final);
   // Each one went with the revision the one before made.
   expect(picks.map((pick) => pick.revision)).toEqual(picks.map((_, i) => 3 + i));
@@ -460,13 +468,15 @@ test.skipIf(!hasDom)('a first answer refused stays on the card, and later keys b
   expect(el.textContent).not.toContain('The disk is full.');
 });
 
-test.skipIf(!hasDom)('another window took the revision: the words stay, the conflict shows, and the Send goes with what the field shows', async () => {
+test.skipIf(!hasDom)('another window took the revision: the later answer is saved over it quietly, and the Send goes with what the field shows', async () => {
   const el = await render();
   await answered(el, 'mine');
   saved.set(FIRST, { ...saved.get(FIRST)!, answer: { ...saved.get(FIRST)!.answer!, other: 'theirs' }, revision: 9 });
   type(el, 'mine, longer');
-  await until(() => el.textContent?.includes('That question changed since you read it.') === true, 'the conflict said');
+  // The rule in pickConflict.ts ('later-click-wins'): this window's answer came later, so it goes again on top.
+  await until(() => saved.get(FIRST)!.answer?.other === 'mine, longer', 'the later answer saved over the other window');
   await settle(5);
+  expect(el.textContent).not.toContain('changed since you read it');
   expect(otherField(el).value).toBe('mine, longer');
   await press(el);
   await until(() => replies.length === 1, 'the reply');
@@ -586,7 +596,8 @@ test.skipIf(!hasDom)('dictation that never stops cannot hold the Send: it goes w
   // The server took the reply at the revision it named: no save raced it.
   expect(saved.get(FIRST)!.sent).toBe(true);
   expect(el.textContent).not.toContain('That question changed since you read it.');
-  await settle(30);
+  // The words typed after the line closed save once their pause passes: let them land here, not in the next test.
+  await settle(TYPED_ANSWER_SAVE_MS + 100);
 });
 
 test.skipIf(!hasDom)('a question replaced behind the saves, with an answer saved on it: nothing goes until the person has read that', async () => {
@@ -706,6 +717,86 @@ test.skipIf(!hasDom)('a saved pick reads the files once at most: only a read of 
   }
   expect(picks).toHaveLength(4);
   expect(attachmentReads).toBe(1);
+});
+
+// ── Typed words wait for a pause (typedAnswers.ts): never a save per key, and every way out saves them. ──
+
+test.skipIf(!hasDom)('typing in "Other…" saves once the typing pauses, never per key, and the field draws every key at once', async () => {
+  const el = await render();
+  await answered(el, 'c');
+  const before = picks.length;
+  let words = 'c';
+  for (const ch of 'ards with totals') {
+    words += ch;
+    type(el, words);
+    // The field shows the key at once, with no save behind it.
+    expect(otherField(el).value).toBe(words);
+    await settle(20);
+  }
+  expect(picks.length).toBe(before);
+  await until(() => picks.length === before + 1, 'the save after the pause');
+  expect(picks.at(-1)!.answer?.other).toBe('cards with totals');
+  await settle(TYPED_ANSWER_SAVE_MS + 50);
+  expect(picks.length).toBe(before + 1);
+});
+
+test.skipIf(!hasDom)('a click on another question saves the words waiting in this one at once, before its pause', async () => {
+  const el = await render();
+  await answered(el, 'p');
+  type(el, 'pin it later');
+  await act(async () => option(el, 'One minute').click());
+  await settle(5);
+  // Both went now: the waiting words first, then the click.
+  expect(picks.map((p) => [p.key, p.answer?.other ?? p.answer?.selected[0]])).toEqual([
+    [FIRST, 'p'],
+    [FIRST, 'pin it later'],
+    [SECOND, 'One minute'],
+  ]);
+});
+
+test.skipIf(!hasDom)('leaving the field saves its words at once', async () => {
+  const el = await render();
+  await answered(el, 'p');
+  type(el, 'pin it');
+  act(() => otherField(el).dispatchEvent(new FocusEvent('focusout', { bubbles: true })));
+  await settle(5);
+  expect(picks.at(-1)!.answer?.other).toBe('pin it');
+});
+
+test.skipIf(!hasDom)('closing the thread saves the words waiting', async () => {
+  const el = await render();
+  await answered(el, 'p');
+  type(el, 'pin it now');
+  act(() => root!.unmount());
+  root = null;
+  await until(() => saved.get(FIRST)!.answer?.other === 'pin it now', 'the words saved as the pane closed');
+});
+
+test.skipIf(!hasDom)('the page going saves the words waiting with a request that outlives it', async () => {
+  const el = await render();
+  await answered(el, 'p');
+  type(el, 'pin it before I go');
+  act(() => {
+    window.dispatchEvent(new Event('pagehide'));
+  });
+  await settle(5);
+  const last = picks.at(-1)!;
+  expect(last.answer?.other).toBe('pin it before I go');
+  expect(last.keepalive).toBe(true);
+  expect(saved.get(FIRST)!.answer?.other).toBe('pin it before I go');
+});
+
+test.skipIf(!hasDom)('typed fast, then Send at once: the reply carries every key', async () => {
+  const el = await render();
+  await answered(el, 'p');
+  let words = 'p';
+  for (const ch of 'in it, and keep the totals') {
+    words += ch;
+    type(el, words);
+  }
+  await press(el);
+  await until(() => replies.length === 1, 'the reply');
+  expect(replies[0]!.saved[FIRST]).toBe(words);
 });
 
 /** Types `words` one key at a time, each key saved before the next, as a person typing at a steady pace. */

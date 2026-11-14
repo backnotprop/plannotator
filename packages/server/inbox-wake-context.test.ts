@@ -249,6 +249,20 @@ describe("the Replying to line", () => {
     expect(inboxWakeText(command!).split("\n")[3]).toBe(`[Replying to your message from just now (${first.message_id}): "The first update, about the retry budget and how it…"]`);
   });
 
+  test("a reply that quotes the older message it answers (approval \"inbox-reply-quote\") says so once, in the words' lead", async () => {
+    const w = await setup();
+    const first = await w.send("The first update, about the retry budget and how it grows.");
+    await w.send("Second update.", { reply_to: first.message_id });
+    const sent = await w.reply(first.message_id, "That one.", { quote: { of: first.message_id, time: "10:04 AM" } });
+    expect(sent.body.startsWith(`Replying to your message from 10:04 AM (${first.message_id}):\n> The first update`)).toBe(true);
+    const [command] = await w.poll();
+    expect(command!.context!.replying_to).toBeUndefined();
+    const text = inboxWakeText(command!);
+    expect(text).not.toContain("[Replying to");
+    expect(text).toContain(`Replying to your message from 10:04 AM (${first.message_id}):`);
+    expect(text).toContain("That one.");
+  });
+
   test("a message opening with a question quotes the question's own words, and its fence never shows", async () => {
     const w = await setup();
     const first = await w.send(QUESTION);

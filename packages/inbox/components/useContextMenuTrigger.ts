@@ -1,10 +1,19 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type TouchEvent as ReactTouchEvent } from 'react';
 import type { ContextMenu } from '@base-ui/react/context-menu';
 import type { Menu } from '@base-ui/react/menu';
 import { rowInSlot } from '../settle';
 
-/** A touch (or a long press that a phone turns into `contextmenu`) never opens the menu: phones have none. */
+/** A touch's own `contextmenu` (a long press a phone turns into one) never opens the menu: only a hold does (`longPress`). */
 const TOUCH_WINDOW_MS = 1500;
+/** How long a finger rests on an item before its menu opens (`longPress`), and how far it may drift: a scroll or a swipe is never a press. */
+export const LONG_PRESS_MS = 450;
+export const LONG_PRESS_SLOP = 10;
+/** The item takes its muted look this far into a hold: a tap, or a scroll's first moves, never flash it. */
+const PRESS_LOOK_MS = 120;
+/** After the lift that ends a long press, its click (on the item, the menu or the scrim now under it) does nothing for this long. */
+const LIFT_MS = 400;
+/** A finger held on an open menu whose lift is never heard is let go after this long. */
+const HELD_LOST_MS = 10_000;
 
 /** Where focus goes when the item the menu was aimed at has left the screen. */
 export interface MenuSlot {
@@ -38,6 +47,12 @@ export interface ContextMenuTriggerOptions {
   followMoves?: boolean;
   /** The item the menu is aimed at (its muted look), or null when it closes. */
   onTarget: (id: string | null) => void;
+  /**
+   * A finger held on an item (LONG_PRESS_MS, still within LONG_PRESS_SLOP) opens its menu, as a right-click does
+   * (the thread rows). A second finger, a move, a scroll or a lift before then cancels it, and a tap is a tap. The
+   * lift after the menu opens activates nothing. Off (every other menu): a touch never opens it.
+   */
+  longPress?: boolean;
 }
 
 /**
@@ -45,7 +60,8 @@ export interface ContextMenuTriggerOptions {
  * rows, the Board's cards): one menu for the whole body, aimed at the item a
  * right-click (or the platform's context-menu key, or Shift+F10, on a focused
  * item) lands on. Anywhere else in the body the browser's own menu shows. A
- * touch never opens it (no long press: phones have no menu here). Escape, Tab
+ * touch never opens it, unless the caller turns on `longPress` (a finger held on
+ * an item opens the same menu). Escape, Tab
  * and an item put focus on the item's own button (wherever focus was before
  * the right-click); a write that takes the item off screen puts it on the item
  * now in its slot (`follow`). The caller draws the items and acts on them.
@@ -67,6 +83,12 @@ export function useContextMenuTrigger(options: ContextMenuTriggerOptions) {
   /** The guard against the browser's own menu for the key's keyup (Chromium on Windows), while ours is open. */
   const keyGuard = useRef<(() => void) | null>(null);
   const lastTouch = useRef(0);
+  /** A finger resting on an item (`longPress`): its menu opens unless it moves, lifts or another finger comes. */
+  const press = useRef<{ id: string; x: number; finger: EventTarget; looked: boolean; stop: () => void } | null>(null);
+  /** The hold's own `contextmenu` is being sent: it is not a touch's, so the menu takes it. */
+  const pressFiring = useRef(false);
+  /** The finger that opened the menu is down, or has just lifted: its moves, its lift and its click do nothing. */
+  const held = useRef<(() => void) | null>(null);
   const aim = (id: string | null) => {
     if (id) focusId.current = id;
     setTargetId(id);
@@ -113,7 +135,136 @@ export function useContextMenuTrigger(options: ContextMenuTriggerOptions) {
     if (!focusFell()) return;
     focusTarget(pending.id, pending.slot)?.focus({ preventScroll: true });
   });
-  useEffect(() => () => keyGuard.current?.(), []);
+  useEffect(
+    () => () => {
+      keyGuard.current?.();
+      press.current?.stop();
+      held.current?.();
+    },
+    [],
+  );
+  /** The hold ends before the menu opens: the item loses the look it took. */
+  const cancelPress = () => {
+    const now = press.current;
+    if (!now) return;
+    press.current = null;
+    now.stop();
+    if (now.looked && !openRef.current) options.onTarget(null);
+  };
+  /**
+   * The hold opened the menu while the finger is still down. Until it lifts its moves scroll nothing (nor pull the
+   * list); its lift sends no click (nor the mouse events a browser makes of a touch), and for LIFT_MS after it any
+   * click is swallowed: the item under the finger stays shut and the thread stays closed.
+   */
+  const holdFinger = (finger: EventTarget) => {
+    held.current?.();
+    let lift: ReturnType<typeof setTimeout> | null = null;
+    const move = (event: Event) => {
+      if (lift) return;
+      if (event.cancelable) event.preventDefault();
+      event.stopPropagation();
+    };
+    const lifted = (event: Event) => {
+      if ((event as TouchEvent).touches?.length > 0) return;
+      if (event.type === 'touchend' && event.cancelable) event.preventDefault();
+      lift ??= setTimeout(() => done(), LIFT_MS);
+    };
+    // A new finger alone on the screen: the one that opened the menu has lifted, heard or not (a browser that took
+    // the touch for its own long press may send no touchend). This touch is a new tap, and is the person's.
+    const again = (event: Event) => {
+      if ((event as TouchEvent).touches?.length === 1) done();
+    };
+    const swallow = (event: Event) => {
+      event.preventDefault();
+      event.stopPropagation();
+    };
+    const off = listen(finger, [
+      ['touchmove', move, false],
+      ['touchend', lifted, false],
+      ['touchcancel', lifted, true],
+      // The lift as pointer events say it, when the touch's own events stop.
+      ['pointerup', lifted, true],
+      ['pointercancel', lifted, true],
+    ]);
+    const next = listen(null, [['touchstart', again, true]]);
+    const clicks = listen(null, [
+      ['click', swallow, false],
+      ['mousedown', swallow, false],
+      ['mouseup', swallow, false],
+    ]);
+    // A lift never heard (the finger's element left and took its events with it): let go after a while all the same.
+    const lost = setTimeout(() => done(), HELD_LOST_MS);
+    const done = () => {
+      if (lift) clearTimeout(lift);
+      clearTimeout(lost);
+      off();
+      next();
+      clicks();
+      if (held.current === done) held.current = null;
+    };
+    held.current = done;
+  };
+  /** The hold is long enough: the item's menu opens as a right-click at the finger opens it (under the item). */
+  const openPress = () => {
+    const now = press.current;
+    if (!now) return;
+    press.current = null;
+    now.stop();
+    const button = options.buttonFor(now.id);
+    if (button && options.has(now.id)) {
+      const rect = button.getBoundingClientRect();
+      pressFiring.current = true;
+      try {
+        button.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: now.x, clientY: rect.bottom }));
+      } finally {
+        pressFiring.current = false;
+      }
+    }
+    if (openRef.current) holdFinger(now.finger);
+    else if (now.looked) options.onTarget(null);
+  };
+  /** One finger lands on an item (`longPress`): the hold starts. */
+  const startPress = (event: ReactTouchEvent) => {
+    cancelPress();
+    if (!options.longPress || disabled || openRef.current || event.touches.length !== 1) return;
+    const button = options.itemOf(event.target);
+    const id = button ? options.idOf(button) : null;
+    if (!button || !id || !options.has(id)) return;
+    const { clientX: x, clientY: y } = event.touches[0]!;
+    const finger = event.target;
+    const move = (next: Event) => {
+      const touches = (next as TouchEvent).touches;
+      const touch = touches?.[0];
+      if (touches?.length !== 1 || !touch || Math.hypot(touch.clientX - x, touch.clientY - y) > LONG_PRESS_SLOP) cancelPress();
+    };
+    // A scroll of the list (or the page) the item is in, however it began.
+    const scroll = (next: Event) => {
+      if (next.target === document || (next.target instanceof Node && next.target.contains(button))) cancelPress();
+    };
+    // Another finger anywhere, a move past the slop, a lift, the system taking the touch (a scroll): no press.
+    const off = listen(finger, [
+      ['touchmove', move, true],
+      ['touchend', cancelPress, true],
+      ['touchcancel', cancelPress, true],
+    ]);
+    const others = listen(null, [
+      ['touchstart', cancelPress, true],
+      ['scroll', scroll, true],
+    ]);
+    const look = setTimeout(() => {
+      if (press.current?.id !== id) return;
+      press.current.looked = true;
+      options.onTarget(id);
+    }, PRESS_LOOK_MS);
+    const timer = setTimeout(openPress, LONG_PRESS_MS);
+    const stop = () => {
+      clearTimeout(timer);
+      clearTimeout(look);
+      off();
+      others();
+    };
+    press.current = { id, x, finger, looked: false, stop };
+  };
   /**
    * Chromium on Windows sends the context-menu key's `contextmenu` on keyup, after ours opened on keydown:
    * while our menu is open, that one event is cancelled before the browser draws its own menu. One listener,
@@ -145,6 +296,8 @@ export function useContextMenuTrigger(options: ContextMenuTriggerOptions) {
     disabled,
     open,
     onOpenChange: (next: boolean) => {
+      // The finger that opened it is still down or just lifted: whatever its lift lands on closes nothing.
+      if (!next && held.current) return;
       setOpenNow(next);
       if (!next) aim(null);
     },
@@ -156,8 +309,11 @@ export function useContextMenuTrigger(options: ContextMenuTriggerOptions) {
     onPointerDown: (event) => {
       if (event.pointerType === 'touch') lastTouch.current = Date.now();
     },
-    // No long press: Base UI's touch handler never runs.
-    onTouchStart: (event) => event.preventBaseUIHandler(),
+    // Base UI's own long press never runs: `longPress` is ours (the item's menu, its press rules).
+    onTouchStart: (event) => {
+      event.preventBaseUIHandler();
+      startPress(event);
+    },
     onKeyDown: (event) => {
       // The context-menu key and Shift+F10 on a focused item. Chromium on macOS (and Safari) send no
       // `contextmenu` for them, so the body sends one at the item; where the browser would, its own is
@@ -181,7 +337,16 @@ export function useContextMenuTrigger(options: ContextMenuTriggerOptions) {
     onContextMenu: (event) => {
       if (disabled) return;
       const pointerType = (event.nativeEvent as Partial<PointerEvent>).pointerType;
-      const touch = pointerType === 'touch' || (!pointerType && Date.now() - lastTouch.current < TOUCH_WINDOW_MS);
+      const touch = !pressFiring.current && (pointerType === 'touch' || (!pointerType && Date.now() - lastTouch.current < TOUCH_WINDOW_MS));
+      if (touch && (press.current || held.current) && options.itemOf(event.target)) {
+        // A phone's own `contextmenu` for the finger being held (Android sends one): no browser menu, no selection;
+        // the hold opens the menu now if it has not yet.
+        event.preventDefault();
+        event.preventBaseUIHandler();
+        event.stopPropagation();
+        openPress();
+        return;
+      }
       const button = touch ? null : options.itemOf(event.target);
       const id = button ? options.idOf(button) : null;
       if (!id || !options.has(id)) {
@@ -227,6 +392,19 @@ export function useContextMenuTrigger(options: ContextMenuTriggerOptions) {
     root,
     trigger,
     popup,
+  };
+}
+
+/**
+ * Listens on the window (capture) and, when `finger` is given, on the element the finger landed on too: a touch's
+ * events keep going to that element, and once it has left the document (the list drew it again) they reach nothing
+ * else. Each listener is the window's capture one, or passive (`true`) or not. Returns the removal.
+ */
+function listen(finger: EventTarget | null, entries: [type: string, listener: (event: Event) => void, passive: boolean][]): () => void {
+  const targets: EventTarget[] = finger ? [window, finger] : [window];
+  for (const target of targets) for (const [type, listener, passive] of entries) target.addEventListener(type, listener, { capture: true, passive });
+  return () => {
+    for (const target of targets) for (const [type, listener] of entries) target.removeEventListener(type, listener, true);
   };
 }
 

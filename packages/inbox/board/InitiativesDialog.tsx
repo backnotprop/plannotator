@@ -6,15 +6,18 @@ import { Icon } from '../icons';
 import { Tip } from '../components/Tip';
 import { InboxToast, type InboxToastModel } from '../components/Toast';
 import { Modal } from '../components/Updates';
+import type { TagChanged, TagsAcross } from '../tagsAcross';
 import { initiativeDeletedToast } from './model';
 
 /**
- * Initiatives (the filter's New initiative… and Edit initiatives…): every
+ * Tags (the filter's New tag… and Edit tags…): every
  * live one as a name to edit in place (Enter or leaving the field renames it)
  * with Delete, one click and no question (the owner, 2026-11-04: "delete
  * initiatives very simply without friction"): the toast's Undo brings it and
  * its cards back; a field to add one. Every change is its own write; the Board
- * reads the cards again.
+ * reads the cards again. With `across` the list is the sidebar's, one tag per name
+ * across the linked machines, and a rename, delete or Undo reaches each machine
+ * that holds it as the sidebar's does (tagsAcross.ts); a new tag is this Inbox's.
  *
  * The window's toast is under a modal dialog (showModal: the page behind is
  * inert), so while this is open the same toast draws inside it; closed with
@@ -31,8 +34,10 @@ export function InitiativesDialog({
   onChanged,
   onCloseWithUndo,
   fallbackFocus,
+  across = null,
 }: {
   initiatives: readonly InboxInitiative[];
+  across?: TagsAcross | null;
   start: 'new' | 'edit';
   phone: boolean;
   onClose: () => void;
@@ -84,7 +89,12 @@ export function InitiativesDialog({
   };
   const visible = initiatives.filter((i) => !deleted.some((gone) => gone.id === i.id));
   const remove = async (i: InboxInitiative) => {
-    const gone = await run(async () => (await inboxApi.changeInitiative(i.id, { op: 'delete' })).initiative);
+    const gone = await run(async () => {
+      if (!across) return (await inboxApi.changeInitiative(i.id, { op: 'delete' })).initiative;
+      const { refused } = await across.change(i, { op: 'delete' });
+      if (refused) throw refused;
+      return i;
+    });
     if (!gone) return;
     // Focus moves to the next row's Delete (the one before when it was the last), else the name field.
     const at = visible.findIndex((other) => other.id === i.id);
@@ -100,14 +110,14 @@ export function InitiativesDialog({
   const undo = async () => {
     if (undoing.current) return;
     const back = deleted;
-    const run = restoreInitiatives(back);
+    const run: Promise<InitiativesRestored & Partial<TagChanged>> = across ? across.restore(back) : restoreInitiatives(back);
     undoing.current = { back, run };
     setBusy(true);
     setError(null);
-    const { restored, left, line } = await run;
+    const { restored, left, line, refused } = await run;
     undoing.current = null;
     setBusy(false);
-    setError(line);
+    setError(line ?? (refused ? (initiativeRefusal(refused) ?? INITIATIVE_SAVE_FAILED) : null));
     // What came back shows on the next read; a refusal's read shows who took the name.
     onChanged();
     // By id, so one deleted meanwhile keeps its Undo. A failed save keeps it too, to try again.
@@ -133,7 +143,7 @@ export function InitiativesDialog({
     }
     onClose();
   };
-  // The dialog first focuses its primary button: New initiative… lands in the name field instead.
+  // The dialog first focuses its primary button: New tag… lands in the name field instead.
   useEffect(() => {
     if (start !== 'new') return;
     const frame = requestAnimationFrame(() => newField.current?.focus());
@@ -166,14 +176,24 @@ export function InitiativesDialog({
   let body: ReactNode = null;
   if (visible.length > 0) {
     body = (
-      <ul className="ib-inid-list" aria-label="Initiatives">
+      <ul className="ib-inid-list" aria-label="Tags">
         {visible.map((i) => (
           <InitiativeRow
             key={i.id}
             initiative={i}
             busy={busy}
             onRename={async (name) => {
-              const renamed = await run(async () => (await inboxApi.changeInitiative(i.id, { op: 'rename', name })).initiative);
+              let held: string | null = null;
+              const renamed = await run(async () => {
+                if (!across) return (await inboxApi.changeInitiative(i.id, { op: 'rename', name })).initiative;
+                const taken = across.renameTaken(i, name);
+                if (taken) throw taken;
+                const done = await across.change(i, { op: 'rename', name });
+                if (done.refused) throw done.refused;
+                held = done.held?.message ?? null;
+                return { ...i, name };
+              });
+              if (held) setError(held);
               if (renamed) onChanged();
               return renamed !== null;
             }}
@@ -186,10 +206,10 @@ export function InitiativesDialog({
   const words = deleted.length > 0 ? initiativeDeletedToast(deleted) : null;
   const toast: InboxToastModel | null = words ? { id: toastId, icon: 'check', lead: words.lead, detail: words.detail, onUndo: () => void undo(), noKey: true } : null;
   return (
-    <Modal label="Initiatives" testId="initiatives" onClose={close} ownKeys fallbackFocus={fallbackFocus} className={`ib-inid${phone ? ' ib-inid-phone' : ''}`}>
+    <Modal label="Tags" testId="initiatives" onClose={close} ownKeys fallbackFocus={fallbackFocus} className={`ib-inid${phone ? ' ib-inid-phone' : ''}`}>
       <div className="ib-dlg-in" ref={inner}>
         <div className="ib-dlg-head">
-          <h2>Initiatives</h2>
+          <h2>Tags</h2>
           <button type="button" className="ib-ncd-x" aria-label="Close" onClick={close}>
             <Icon name="x" size={16} />
           </button>
@@ -209,8 +229,8 @@ export function InitiativesDialog({
             ref={newField}
             type="text"
             className="ib-inid-in"
-            placeholder="New initiative"
-            aria-label="New initiative"
+            placeholder="New tag"
+            aria-label="New tag"
             maxLength={INBOX_INITIATIVE_NAME_MAX}
             value={adding}
             onChange={(event) => setAdding(event.target.value)}

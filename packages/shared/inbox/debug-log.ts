@@ -69,6 +69,7 @@ export function isDebugRequestId(value: unknown): value is string {
 
 const WINDOW_EVENTS = new Set([
   "page_load",
+  "protocol",
   "page_show",
   "page_hide",
   "visibility",

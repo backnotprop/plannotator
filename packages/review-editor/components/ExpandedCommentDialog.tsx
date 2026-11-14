@@ -83,6 +83,7 @@ export const ExpandedCommentDialog: React.FC<ExpandedCommentDialogProps> = ({
         <div className="pn-visible-viewport-overlay z-[2000] pointer-events-none flex items-center justify-center">
           <Dialog.Popup
             ref={dialogRef}
+            data-highlight-composer=""
             aria-modal="true"
             initialFocus={autoFocus
               ? () => {

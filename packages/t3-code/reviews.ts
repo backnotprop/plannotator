@@ -247,7 +247,7 @@ export class T3Reviews {
     this.openingIds.add(id);
     try {
       const [executable, ...prefix] = this.command;
-      const child = spawn(executable!, [...prefix, ...args], { cwd: this.cwd, detached: true, stdio: [stdin === undefined ? "ignore" : "pipe", log, log],
+      const child = spawn(executable!, [...prefix, ...args], { cwd: this.cwd, detached: true, windowsHide: true, stdio: [stdin === undefined ? "ignore" : "pipe", log, log],
         env: { ...process.env, PLANNOTATOR_DATA_DIR: this.dataDir, PLANNOTATOR_CWD: this.cwd,
           PLANNOTATOR_ORIGIN: "claude-code", PLANNOTATOR_REMOTE: "0", PLANNOTATOR_READY_FILE: this.path(review, "ready.jsonl"),
           PLANNOTATOR_HOST_RESULT_FILE: this.path(review, "result.json"), PLANNOTATOR_HOST_REVIEW_ID: id,

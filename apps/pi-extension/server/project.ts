@@ -14,6 +14,7 @@ function git(cmd: string, cwd: string): string {
 		return execSync(`git ${cmd}`, {
 			cwd,
 			env: process.env,
+			windowsHide: true,
 			encoding: "utf-8",
 			stdio: ["pipe", "pipe", "pipe"],
 		}).trim();
@@ -27,6 +28,7 @@ export function detectProjectName(cwd = process.cwd()): string {
 		const toplevel = execSync("git rev-parse --show-toplevel", {
 			cwd,
 			env: process.env,
+			windowsHide: true,
 			encoding: "utf-8",
 			stdio: ["pipe", "pipe", "pipe"],
 		}).trim();

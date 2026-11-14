@@ -28,7 +28,7 @@ import { isFaviconStyle, type FaviconStyle } from './favicon';
 import { isAnnotateAgentTerminalSide, type AnnotateAgentTerminalSide } from './agent-terminal';
 import { parseAgentSwitchConfig, agentSwitchConfigValue, type AgentSwitchConfigValue } from './agent-switch';
 import { isLocalhostSubdomain } from './loopback-host';
-import { INBOX_TOOL_NAME, inboxReminderCustomText, inboxReminderFor } from './inbox/connection';
+import { INBOX_TOOL_NAME, inboxReminderCustomText, inboxReminderFor, inboxReminderRulesText } from './inbox/connection';
 export type { DefaultDiffType, DiffLineBgIntensity, DiffOptions, JjDefaultDiffType, ReviewDefaults, ThemeConfig, FaviconStyle };
 
 /** Single conventional comment label entry stored in config.json */
@@ -91,7 +91,8 @@ export interface PromptConfig {
    */
   inbox?: {
     reminder?: string;
-    runtimes?: Partial<Record<InboxToolHost, { reminder?: string }>>;
+    rules?: string;
+    runtimes?: Partial<Record<InboxToolHost, { reminder?: string; rules?: string }>>;
   };
 }
 
@@ -500,6 +501,12 @@ export interface PlannotatorConfig {
    */
   inboxSnoozeIntro?: { firstUseAt?: string; snoozedAt?: string; shownAt?: string };
   /**
+   * The one-time Priority dialog (reveals.ts `priority`; packages/server/inbox-priority-intro.ts). `usedAt`: the person
+   * added a thread to Priority on this machine, so the dialog never shows; inbox/priority.json cannot say so, it deletes
+   * itself with its last entry. Its claim is the line's (`inboxReveals.priority`).
+   */
+  inboxPriorityIntro?: { usedAt?: string };
+  /**
    * The Board (approval "inbox-board", 2026-10-26 amendment): something the
    * person turns on. On: the sidebar's Board row and page, and the Inbox
    * serves the agents' `card` tool. Off: neither, every card kept. Written by
@@ -643,11 +650,19 @@ export interface PlannotatorConfig {
     notNowAt?: string;
     shownLoad?: string;
     agentNote?: { shownFor?: string[] };
-    waitingSince?: { theme_chooser?: string; code_review?: string; sound?: string; list_intro?: string; voice?: string; tab_icon?: string; snooze?: string; bro?: string; grill_me_tip?: string; board?: string; steps?: string; list_view?: string };
+    waitingSince?: { theme_chooser?: string; code_review?: string; sound?: string; list_intro?: string; voice?: string; tab_icon?: string; snooze?: string; bro?: string; grill_me_tip?: string; board?: string; steps?: string; agent_rules?: string; list_view?: string; personal_agents?: string; priority?: string };
     /** Code review's day-0 offer (approval "code-review-offer-card"): claimed once, as the Board's. */
     code_review?: { shownAt?: string; key?: string };
     board?: { shownAt?: string; key?: string };
     steps?: { shownAt?: string; key?: string };
+    agent_rules?: { shownAt?: string; key?: string };
+    /** The personal agents dialog (core/inbox-personal-agents.ts): claimed once, as the Board's; nothing to turn on. */
+    personal_agents?: { shownAt?: string; key?: string };
+    /**
+     * The Priority dialog (reveals.ts `priority`): claimed once, as the Board's; nothing to turn on. `dueAt`: the first
+     * release start that knew it; it is never due on that local day (packages/server/inbox-priority-intro.ts).
+     */
+    priority?: { shownAt?: string; key?: string; dueAt?: string };
     /** The Bro mode offer (approval "bro-mode"): claimed once, as the Board's. */
     bro?: { shownAt?: string; key?: string };
     /** The grill-me tip (shared/inbox/grill-me-tip.ts): claimed once, as the Board's; nothing to turn on. */
@@ -718,6 +733,7 @@ export interface PlannotatorConfig {
    * a tagged machine, which has no owner. Config only. Default: none.
    */
   inboxTailscaleAllow?: string[];
+  gitlabHosts?: string[];
   /**
    * Launch agents from the Inbox (New message's "New session" rows;
    * packages/server/inbox-launch.ts). `enabled`: Settings → Agents' "Start
@@ -732,7 +748,7 @@ export interface PlannotatorConfig {
    * absolute path; default `<dataDir>/scratch`). Moving it applies to new
    * folders only.
    */
-  inboxLaunch?: { enabled?: boolean; fullPermissions?: boolean; model?: string; scratchDir?: string };
+  inboxLaunch?: { enabled?: boolean; fullPermissions?: boolean; model?: string; settingsFile?: string; scratchDir?: string };
   /**
    * Inject a Plannotator Flavored Markdown reminder into every EnterPlanMode
    * call so the agent is aware it can enrich plans with code-file links,
@@ -776,6 +792,16 @@ export interface PlannotatorConfig {
    * browser: getServerConfig() allowlists its keys.
    */
   bitbucketToken?: string;
+  /**
+   * A command that prints the Atlassian API token for Bitbucket Cloud, as an
+   * argument list run without a shell, e.g. `["security",
+   * "find-generic-password", "-s", "bitbucket", "-w"]`. Plannotator runs it
+   * only when it is about to call Bitbucket and keeps the token in memory: it
+   * never lands in an environment variable, a file or a child process. Pairs
+   * with `bitbucketEmail`. PLANNOTATOR_BITBUCKET_TOKEN still takes precedence;
+   * this takes precedence over `bitbucketToken`.
+   */
+  bitbucketTokenCommand?: string[];
   /**
    * Pass `--sandbox enabled` when launching Cursor's `agent` CLI for review
    * jobs. When true (default), review jobs run with Cursor's sandbox forced
@@ -1203,7 +1229,7 @@ export function saveConfig(partial: Partial<PlannotatorConfig>): boolean {
  */
 export function detectGitUser(cwd?: string): string | null {
   try {
-    const name = execSync("git config user.name", { cwd, env: childEnv(), encoding: "utf-8", timeout: 3000 }).trim();
+    const name = execSync("git config user.name", { cwd, env: childEnv(), encoding: "utf-8", timeout: 3000, windowsHide: true }).trim();
     return name || null;
   } catch {
     return null;
@@ -1419,12 +1445,13 @@ function parseLaunchFlag(value: unknown): boolean | undefined {
  * there): only an explicit true turns it on. Any false-like value (`false`, `0`, `"false"`, `"0"`, `"off"`, `"no"`),
  * in `enabled` or as `inboxLaunch` itself, is off. A config.json that does not parse reads as `{}` (`loadConfig`),
  * so as the default. `model` only when it is a plain model name;
+ * `settingsFile` (Claude settings file) as typed, read at each start;
  * `scratchDir` only when it is an absolute path other than `/` (null: the default, `<dataDir>/scratch`).
  */
 export function resolveInboxLaunch(
   config: PlannotatorConfig,
   platform: NodeJS.Platform = process.platform,
-): { enabled: boolean; fullPermissions: boolean | null; model: string | null; scratchDir: string | null } {
+): { enabled: boolean; fullPermissions: boolean | null; model: string | null; settingsFile: string | null; scratchDir: string | null } {
   const raw: unknown = config.inboxLaunch;
   const value = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as NonNullable<PlannotatorConfig["inboxLaunch"]>) : {};
   // `"inboxLaunch": false` (or "off") by hand: the whole feature off.
@@ -1434,6 +1461,7 @@ export function resolveInboxLaunch(
     // null: the person never set the switch (a launch follows their login shell).
     fullPermissions: parseConfigBoolean(value.fullPermissions) ?? null,
     model: typeof value.model === "string" && LAUNCH_MODEL.test(value.model) ? value.model : null,
+    settingsFile: typeof value.settingsFile === "string" && value.settingsFile.trim() ? value.settingsFile.trim() : null,
     scratchDir: typeof value.scratchDir === "string" && isAbsolute(value.scratchDir) && resolve(value.scratchDir) !== resolve("/") ? resolve(value.scratchDir) : null,
   };
 }
@@ -1757,7 +1785,7 @@ export function resolvePlanReview(config: PlannotatorConfig, env: NodeJS.Process
  * `dsh` is the DeepSeek Harness plugin (`@plannotator/dsh`), `cline` the
  * Cline plugin (`@plannotator/cline`).
  */
-export type InboxToolHost = "claude-code" | "pi" | "opencode" | "dsh" | "cline";
+export type InboxToolHost = "claude-code" | "pi" | "opencode" | "dsh" | "cline" | "openclaw" | "hermes";
 
 /**
  * Whether each host registers the Inbox's `plannotator_inbox` tool when
@@ -1774,9 +1802,11 @@ export const INBOX_TOOL_DEFAULTS: Readonly<Record<InboxToolHost, boolean>> = {
   opencode: AGENT_TOOL_DEFAULTS.opencode,
   dsh: AGENT_TOOL_DEFAULTS.dsh,
   cline: false,
+  openclaw: false,
+  hermes: false,
 };
 
-export const INBOX_TOOL_HOSTS: readonly InboxToolHost[] = ["claude-code", "pi", "opencode", "dsh", "cline"];
+export const INBOX_TOOL_HOSTS: readonly InboxToolHost[] = ["claude-code", "pi", "opencode", "dsh", "cline", "openclaw", "hermes"];
 
 /**
  * The hosts that give a session the Inbox reminder (INBOX_REMINDER_TEXT) with
@@ -1878,7 +1908,7 @@ export function resolveInboxReminderText(
   host: InboxToolHost,
   options: { wakes?: boolean; toolName?: string } = {},
 ): string {
-  return inboxReminderFor(inboxReminderCustomText(config, host), options.toolName ?? INBOX_TOOL_NAME, { wakes: options.wakes });
+  return inboxReminderFor(inboxReminderCustomText(config, host), options.toolName ?? INBOX_TOOL_NAME, { wakes: options.wakes, rules: inboxReminderRulesText(config, host) });
 }
 
 /**
@@ -2448,7 +2478,8 @@ export interface BitbucketCredentials {
  * Resolve Bitbucket Cloud API credentials.
  *
  * Priority (highest wins):
- *   PLANNOTATOR_BITBUCKET_TOKEN / _EMAIL env vars  →  config.bitbucketToken / bitbucketEmail
+ *   PLANNOTATOR_BITBUCKET_TOKEN / _EMAIL env vars  →  config.bitbucketTokenCommand / bitbucketEmail
+ *   (`resolveBitbucketTokenCommand`; this function answers null for it)  →  config.bitbucketToken / bitbucketEmail
  *
  * The token and email are resolved together from one source: an env token
  * never pairs with a config-file email (a stale email would turn a valid
@@ -2466,12 +2497,35 @@ export function resolveBitbucketCredentials(
     const email = clean(env.PLANNOTATOR_BITBUCKET_EMAIL);
     return { token: envToken, ...(email ? { email } : {}) };
   }
+  if (resolveBitbucketTokenCommand(config, env)) return null;
   const cfgToken = clean(config.bitbucketToken);
   if (cfgToken) {
     const email = clean(config.bitbucketEmail);
     return { token: cfgToken, ...(email ? { email } : {}) };
   }
   return null;
+}
+
+/** A configured token command: what runs, and the email the token pairs with. */
+export interface BitbucketTokenCommand {
+  argv: string[];
+  email?: string;
+}
+
+/**
+ * The configured `bitbucketTokenCommand`, or null when there is none or the
+ * PLANNOTATOR_BITBUCKET_TOKEN env var wins over it. A value that is not a
+ * non-empty list of non-empty strings counts as unset.
+ */
+export function resolveBitbucketTokenCommand(
+  config: PlannotatorConfig,
+  env: Record<string, string | undefined> = process.env,
+): BitbucketTokenCommand | null {
+  if (typeof env.PLANNOTATOR_BITBUCKET_TOKEN === "string" && env.PLANNOTATOR_BITBUCKET_TOKEN.trim() !== "") return null;
+  const argv = config.bitbucketTokenCommand;
+  if (!Array.isArray(argv) || argv.length === 0 || !argv.every((part) => typeof part === "string" && part !== "")) return null;
+  const email = typeof config.bitbucketEmail === "string" && config.bitbucketEmail.trim() !== "" ? config.bitbucketEmail.trim() : undefined;
+  return { argv: [...argv], ...(email ? { email } : {}) };
 }
 
 /**

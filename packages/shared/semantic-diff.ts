@@ -66,6 +66,7 @@ function defaultRunCommand(
       proc = spawn(command, args, {
         cwd: options.cwd,
         stdio: ["pipe", "pipe", "pipe"],
+        windowsHide: true,
       });
     } catch (error) {
       resolveResult({

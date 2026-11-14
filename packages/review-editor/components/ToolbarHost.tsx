@@ -9,6 +9,7 @@ import type {
 } from '@plannotator/ui/types';
 import type { DiffTokenEventBaseProps } from '@pierre/diffs';
 import { useConfigValue } from '@plannotator/ui/config';
+import { useHighlightCopy } from '@plannotator/ui/utils/highlightCopy';
 import { useAnnotationToolbar } from '../hooks/useAnnotationToolbar';
 import { AnnotationToolbar } from './AnnotationToolbar';
 import { SuggestionModal } from './SuggestionModal';
@@ -91,6 +92,13 @@ export const ToolbarHost = forwardRef<ToolbarHostHandle, ToolbarHostProps>(funct
     askOnly,
     chooser: !!selectionActions && !askOnly,
   });
+
+  // A drag over the diff becomes a line range (or a token) and the composer's
+  // textarea takes the focus, so the browser's copy has nothing: Ctrl+C copies
+  // the selected lines' code (the clicked token's text) as plain text. Text
+  // selected in the textarea, or anywhere in the page, still copies natively.
+  const selectedCode = toolbar.toolbarState?.tokenSelection?.fullText || toolbar.selectedOriginalCode;
+  useHighlightCopy(toolbar.toolbarState ? selectedCode : null);
 
   const conventionalCommentsEnabled = useConfigValue('conventionalComments');
   const conventionalLabelsJson = useConfigValue('conventionalLabels');

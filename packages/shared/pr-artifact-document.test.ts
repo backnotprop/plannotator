@@ -257,7 +257,7 @@ describe('fetchPRArtifactDocument', () => {
     }
   });
 
-  test('does not forward provider credentials to a redirect on another port', async () => {
+  test('refuses a github.com redirect to another port, before sending anything there', async () => {
     const artifactUrl = 'https://github.com/user-attachments/files/123/explainer.html';
     const runtime: PRRuntime = {
       async runCommand() {
@@ -265,21 +265,14 @@ describe('fetchPRArtifactDocument', () => {
       },
     };
     const originalFetch = globalThis.fetch;
-    const authorizations: string[] = [];
-    globalThis.fetch = async (_input, init) => {
-      authorizations.push(new Headers(init?.headers).get('authorization') ?? '');
-      if (authorizations.length === 1) {
-        return new Response(null, {
-          status: 302,
-          headers: { location: 'https://github.com:8443/download/explainer.html' },
-        });
-      }
-      return new Response('<main>Review</main>', { headers: { 'content-type': 'text/html' } });
+    const requested: string[] = [];
+    globalThis.fetch = async (input) => {
+      requested.push(String(input));
+      return new Response(null, { status: 302, headers: { location: 'https://github.com:8443/download/explainer.html' } });
     };
     try {
-      const result = await fetchPRArtifactDocument(runtime, github, context, artifactUrl);
-      expect(result.content).toBe('<main>Review</main>');
-      expect(authorizations).toEqual(['Bearer test-token', '']);
+      await expect(fetchPRArtifactDocument(runtime, github, context, artifactUrl)).rejects.toMatchObject({ status: 403 });
+      expect(requested).toEqual([artifactUrl]);
     } finally {
       globalThis.fetch = originalFetch;
     }
@@ -441,13 +434,12 @@ describe('fetchPRArtifactDocument', () => {
       // text/plain, so refining these here would only put an active type on the media
       // route and leave its safety resting on a CSP header.
       for (const filename of ['payload.html', 'payload.js']) {
-        const result = await fetchPRArtifactContent(
+        await expect(fetchPRArtifactContent(
           runtime,
           gitlabMetadata,
           { ...context, body: `[x](/uploads/${uploadSecret}/${filename})` },
           `https://gitlab.example.com/uploads/${uploadSecret}/${filename}`,
-        );
-        expect(result.contentType).toBe('application/octet-stream');
+        )).rejects.toMatchObject({ status: 415 });
       }
     } finally {
       globalThis.fetch = originalFetch;
@@ -774,23 +766,17 @@ describe('fetchPRArtifactContent', () => {
     },
   };
 
-  // #2328: a private attachment loads through github.com (token), which
-  // redirects to private-user-images (token) and then to a storage host
-  // (no token). Failure caught: the token missing where GitHub needs it, or
-  // sent to a host outside the provider.
-  test('sends the token to github.com and private-user-images only, across the attachment redirects', async () => {
+  // A private attachment as GitHub serves it to a token (checked live): github.com needs the token,
+  // then 302 to a signed S3 URL that needs none.
+  test('sends the token to github.com only; the S3 upload bucket gets none', async () => {
     const attachment = 'https://github.com/user-attachments/assets/0f1e2d3c';
-    const hops = [
-      'https://private-user-images.githubusercontent.com/1/shot.png?jwt=abc',
-      'https://objects.githubusercontent.com/shot.png?sig=xyz',
-    ];
+    const bucket = 'https://github-production-user-asset-6210df.s3.amazonaws.com/1/shot.png?X-Amz-Signature=x';
     const originalFetch = globalThis.fetch;
     const seen: Array<[string, string]> = [];
     globalThis.fetch = async (input, init) => {
       seen.push([new URL(String(input)).host, new Headers(init?.headers).get('authorization') ?? '']);
-      const next = hops[seen.length - 1];
-      return next
-        ? new Response(null, { status: 302, headers: { location: next } })
+      return seen.length === 1
+        ? new Response(null, { status: 302, headers: { location: bucket } })
         : new Response(Uint8Array.from([137, 80]), { headers: { 'content-type': 'image/png' } });
     };
     try {
@@ -798,11 +784,107 @@ describe('fetchPRArtifactContent', () => {
       expect(result.contentType).toBe('image/png');
       expect(seen).toEqual([
         ['github.com', 'Bearer test-token'],
-        ['private-user-images.githubusercontent.com', 'Bearer test-token'],
-        ['objects.githubusercontent.com', ''],
+        ['github-production-user-asset-6210df.s3.amazonaws.com', ''],
       ]);
     } finally {
       globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('the token never crosses a redirect, even to private-user-images', async () => {
+    const attachment = 'https://github.com/user-attachments/assets/0f1e2d3c';
+    const signed = 'https://private-user-images.githubusercontent.com/1/shot.png?jwt=abc';
+    const originalFetch = globalThis.fetch;
+    const tokens: string[] = [];
+    globalThis.fetch = async (_input, init) => {
+      tokens.push(new Headers(init?.headers).get('authorization') ?? '');
+      return tokens.length === 1
+        ? new Response(null, { status: 302, headers: { location: signed } })
+        : new Response(Uint8Array.from([137, 80]), { headers: { 'content-type': 'image/png' } });
+    };
+    try {
+      await fetchPRArtifactContent(tokenRuntime, github, { ...context, body: `![shot](${attachment})` }, attachment);
+      expect(tokens).toEqual(['Bearer test-token', '']);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('a github.com redirect off GitHub and its bucket is refused', async () => {
+    const attachment = 'https://github.com/user-attachments/assets/0f1e2d3c';
+    for (const location of [
+      'https://evil.example/shot.png',
+      'https://objects.githubusercontent.com/shot.png',
+      'https://github-production-user-asset-6210df.s3.amazonaws.com.evil.example/shot.png',
+      'https://other-bucket.s3.amazonaws.com/shot.png',
+    ]) {
+      const originalFetch = globalThis.fetch;
+      const requested: string[] = [];
+      globalThis.fetch = async (input) => {
+        requested.push(String(input));
+        return new Response(null, { status: 302, headers: { location } });
+      };
+      try {
+        await expect(
+          fetchPRArtifactContent(tokenRuntime, github, { ...context, body: `![shot](${attachment})` }, attachment),
+        ).rejects.toMatchObject({ status: 403 });
+        expect(requested).toEqual([attachment]);
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    }
+  });
+
+  test('Git LFS media only as raw.githubusercontent.com hands off this repository\'s file, without the token', async () => {
+    const blob = 'https://github.com/acme/widgets/blob/main/assets/demo.png';
+    const lfs = 'https://media.githubusercontent.com/media/acme/widgets/main/assets/demo.png?token=signed';
+    const originalFetch = globalThis.fetch;
+    const seen: Array<[string, string]> = [];
+    globalThis.fetch = async (input, init) => {
+      seen.push([String(input), new Headers(init?.headers).get('authorization') ?? '']);
+      return seen.length === 1
+        ? new Response(null, { status: 302, headers: { location: lfs } })
+        : new Response(Uint8Array.from([137, 80]), { headers: { 'content-type': 'image/png' } });
+    };
+    try {
+      await fetchPRArtifactContent(tokenRuntime, github, context, blob);
+      expect(seen).toEqual([
+        ['https://raw.githubusercontent.com/acme/widgets/main/assets/demo.png', 'Bearer test-token'],
+        [lfs, ''],
+      ]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+    for (const [from, location] of [
+      ['https://github.com/user-attachments/assets/0f1e2d3c', lfs],
+      [blob, 'https://media.githubusercontent.com/media/other/repo/main/x.png'],
+    ]) {
+      const requested: string[] = [];
+      globalThis.fetch = async (input) => {
+        requested.push(String(input));
+        return new Response(null, { status: 302, headers: { location } });
+      };
+      try {
+        await expect(fetchPRArtifactContent(tokenRuntime, github, { ...context, body: `${context.body}\n![x](${from})` }, from)).rejects.toMatchObject({ status: 403 });
+        expect(requested).toHaveLength(1);
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+    }
+  });
+
+  test('a picture or video request answered with another type is refused', async () => {
+    const attachment = 'https://github.com/user-attachments/assets/0f1e2d3c';
+    for (const type of ['text/html', 'image/svg+xml', 'application/javascript']) {
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = async () => new Response('<svg onload=alert(1)>', { headers: { 'content-type': type } });
+      try {
+        await expect(
+          fetchPRArtifactContent(tokenRuntime, github, { ...context, body: `![shot](${attachment})` }, attachment),
+        ).rejects.toMatchObject({ status: 415 });
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
     }
   });
 

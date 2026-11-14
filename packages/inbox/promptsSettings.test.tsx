@@ -57,16 +57,21 @@ function server(start: InboxPromptsSettings) {
   globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
     const body = JSON.parse(String(init?.body));
     sent.push(body.prompts);
-    const inbox = body.prompts.inbox;
+    const inbox = body.prompts.inbox ?? {};
     const clean = (value: string | null) => (value === null || value.trim() === '' ? null : value);
+    if ('guide' in body.prompts) state.guide = { text: clean(body.prompts.guide), max: 12000 };
     if ('reminder' in inbox) state.reminder.shared = clean(inbox.reminder);
-    for (const [agent, entry] of Object.entries(inbox.runtimes ?? {})) state.reminder.runtimes[agent as InboxPromptHost] = clean((entry as { reminder: string | null }).reminder);
+    if ('rules' in inbox && state.rules) state.rules.shared = clean(inbox.rules);
+    for (const [agent, entry] of Object.entries(inbox.runtimes ?? {}) as [InboxPromptHost, { reminder?: string | null; rules?: string | null }][]) {
+      if ('reminder' in entry) state.reminder.runtimes[agent] = clean(entry.reminder ?? null);
+      if ('rules' in entry && state.rules) state.rules.runtimes[agent] = clean(entry.rules ?? null);
+    }
     return new Response(JSON.stringify({ prompts: structuredClone(state) }), { status: 200, headers: { 'Content-Type': 'application/json' } });
   }) as typeof fetch;
   return sent;
 }
 
-function mount(start: InboxPromptsSettings) {
+function mount(start: InboxPromptsSettings, open = true) {
   host = document.createElement('div');
   host.className = 'pn-inbox';
   document.body.appendChild(host);
@@ -87,6 +92,8 @@ function mount(start: InboxPromptsSettings) {
     root = createRoot(host!);
     render();
   });
+  const fold = q<HTMLButtonElement>(host!, '[data-prompts-reminder-fold]');
+  if (open && fold?.getAttribute('aria-expanded') === 'false') act(() => fold.click());
   return host;
 }
 
@@ -277,6 +284,7 @@ test.skipIf(!hasDom)("OpenCode 1: its row shows the default it really gets (the 
     root = createRoot(host!);
     root.render(<PromptsSection prompts={shared} />);
   });
+  act(() => q<HTMLButtonElement>(host!, '[data-prompts-reminder-fold]')!.click());
   expect(q(host!, '[data-prompt-status="opencode"]')?.textContent).toBe('Uses the shared text · Reminder off in Agents');
   expect(q(host!, '[data-prompt-text="opencode"]')).toBeNull();
 });
@@ -297,3 +305,75 @@ test.skipIf(!hasDom)('config.json is named with the home folder as ~, the full p
   expect(await tooltipOf(outside)).toBeNull();
 });
 
+test.skipIf(!hasDom)('Guided reviews: Default with only Edit; Save writes `guide` and shows it as Custom; Reset to default deletes it', async () => {
+  const start: InboxPromptsSettings = { ...model(), guide: { text: null, max: 12000 } };
+  const sent = server(start);
+  const el = mount(start);
+  const row = q(el, '[data-prompt-slot="guide"]')!;
+  expect(q(row, '.ib-chip')?.textContent).toBe('Default');
+  expect(q(row, '[data-prompt-text="guide"], [data-prompt-reset]')).toBeNull();
+  await click(q(row, '[data-prompt-edit="guide"]'));
+  const box = q<HTMLTextAreaElement>(el, '[data-prompt-field="guide"]')!;
+  expect(box.value).toBe('');
+  expect(document.activeElement).toBe(box);
+  type(box, 'Start with the riskiest change.');
+  await click(q(el, '[data-prompt-save="guide"]'));
+  expect(sent).toEqual([{ guide: 'Start with the riskiest change.' }]);
+  expect(q(row, '.ib-chip')?.textContent).toBe('Custom');
+  expect(q(row, '[data-prompt-text="guide"]')?.textContent).toBe('Start with the riskiest change.');
+  // The reminder is untouched: the phone's list still reads Custom for the page.
+  expect(q(el, '[data-prompt-slot="shared"] .ib-chip')?.textContent).toBe('Default');
+  expect(promptsSummary({ ...model(), guide: { text: 'x', max: 12000 } })).toBe('Custom');
+  // Past the cap Save is refused.
+  await click(q(row, '[data-prompt-edit="guide"]'));
+  type(q<HTMLTextAreaElement>(el, '[data-prompt-field="guide"]')!, 'a'.repeat(12001));
+  expect(q<HTMLButtonElement>(el, '[data-prompt-save="guide"]')!.disabled).toBe(true);
+  expect(q(el, '[data-prompt-count]')?.textContent).toBe('12,001 / 12,000');
+  await click(q(el, '[data-prompt-cancel="guide"]'));
+  await click(q(row, '[data-prompt-reset="guide"]'));
+  expect(sent.at(-1)).toEqual({ guide: null });
+  expect(q(row, '.ib-chip')?.textContent).toBe('Default');
+});
+
+function withRules(rules: Partial<NonNullable<InboxPromptsSettings['rules']>> = {}): InboxPromptsSettings {
+  return {
+    ...model(),
+    rules: {
+      shared: null,
+      runtimes: { 'claude-code': null, pi: null, opencode: null },
+      room: { shared: 8000, runtimes: { 'claude-code': 8000, pi: 8000, opencode: 8000 } },
+      dropped: [],
+      ...rules,
+    },
+  };
+}
+
+test.skipIf(!hasDom)('Rules for your agents: on top, the reminder folded under it; the box starts empty, Save writes the rules for all agents, Back to default deletes them', async () => {
+  const sent = server(withRules());
+  const el = mount(withRules(), false);
+  expect(q(el, '[data-rules-section] + section [data-prompts-reminder-fold]')).not.toBeNull();
+  expect(q(el, '[data-prompts-reminder]')).toBeNull();
+  await click(q(el, '[data-rules-add]'));
+  expect(q<HTMLTextAreaElement>(document.body, '[data-rules-field]')!.value).toBe('');
+  type(q<HTMLTextAreaElement>(document.body, '[data-rules-field]')!, 'Only message me when you are blocked or done.');
+  await click(q(document.body, '[data-rules-save]'));
+  expect(sent.at(-1)).toEqual({ inbox: { rules: 'Only message me when you are blocked or done.' } });
+  expect(q(el, '[data-rules-text="shared"]')?.textContent).toBe('Only message me when you are blocked or done.');
+  await click(q(el, '[data-rules-edit="shared"]'));
+  await click(q(document.body, '[data-rules-reset]'));
+  expect(sent.at(-1)).toEqual({ inbox: { rules: null } });
+  expect(q(el, '[data-rules-add]')).not.toBeNull();
+});
+
+test.skipIf(!hasDom)("Rules for one agent: For picks the agent's own box; Save writes only its key", async () => {
+  const sent = server(withRules({ shared: 'Keep messages short.' }));
+  const el = mount(withRules({ shared: 'Keep messages short.' }), false);
+  await click(q(el, '[data-rules-edit="shared"]'));
+  await click(q(document.body, '[data-rules-for="pi"]'));
+  expect(q<HTMLTextAreaElement>(document.body, '[data-rules-field]')!.value).toBe('');
+  type(q<HTMLTextAreaElement>(document.body, '[data-rules-field]')!, 'Never send from reviewer sessions.');
+  await click(q(document.body, '[data-rules-save]'));
+  expect(sent.at(-1)).toEqual({ inbox: { runtimes: { pi: { rules: 'Never send from reviewer sessions.' } } } });
+  expect(q(el, '[data-rules-text="pi"]')?.textContent).toBe('Never send from reviewer sessions.');
+  expect(q(el, '[data-rules-text="shared"]')?.textContent).toBe('Keep messages short.');
+});

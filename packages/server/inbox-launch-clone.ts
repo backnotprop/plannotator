@@ -215,7 +215,7 @@ function runGit(input: {
       return;
     }
     try {
-      child = spawn(input.git, input.args, { cwd: input.cwd, env: input.env, stdio: ["ignore", "ignore", "pipe"], detached: true, shell: false });
+      child = spawn(input.git, input.args, { cwd: input.cwd, env: input.env, stdio: ["ignore", "ignore", "pipe"], detached: true, shell: false, windowsHide: true });
     } catch (error) {
       resolve({ code: null, stderr: error instanceof Error ? error.message : String(error), timedOut: false });
       return;

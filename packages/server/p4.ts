@@ -27,6 +27,7 @@ async function runP4(
       env: childEnv(),
       stdout: "pipe",
       stderr: "pipe",
+      windowsHide: true,
     });
 
     const [stdout, stderr, exitCode] = await Promise.all([

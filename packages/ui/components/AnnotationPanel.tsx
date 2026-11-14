@@ -1340,6 +1340,7 @@ const AnnotationCard: React.FC<{
                 path={img.path}
                 size="sm"
                 showRemove={false}
+                file={img.kind === 'file'}
               />
               <HostTitle title={img.name} cut>
                 <div className="text-[9px] text-muted-foreground truncate max-w-[3rem]">{img.name}</div>
@@ -1528,7 +1529,7 @@ const CodeAnnotationCard: React.FC<{
         <div className="mt-2 flex flex-wrap gap-1.5">
           {annotation.images.map((img) => (
             <div key={img.path} className="text-center">
-              <ImageThumbnail path={img.path} size="sm" showRemove={false} />
+              <ImageThumbnail path={img.path} size="sm" showRemove={false} file={img.kind === 'file'} />
               <HostTitle title={img.name} cut>
                 <div className="text-[9px] text-muted-foreground truncate max-w-[3rem]">{img.name}</div>
               </HostTitle>

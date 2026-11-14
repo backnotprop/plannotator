@@ -1,10 +1,27 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useContext } from 'react';
 import { createPortal } from 'react-dom';
 import { ImageThumbnail, getImageSrc } from './ImageThumbnail';
 import { ImageAnnotator } from './ImageAnnotator';
 import type { ImageAttachment } from '../types';
 import { modKey } from '../utils/platform';
-import { getUploadTransport } from '../utils/upload';
+import { CommentUploadContext, getUploadTransport } from '../utils/upload';
+
+export function pictureFileName(name: string, file: File): string {
+  const types: Record<string, string> = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp', 'image/avif': 'avif', 'image/svg+xml': 'svg' };
+  const ext = types[file.type] ?? /\.([a-z0-9]{1,5})$/i.exec(file.name)?.[1]?.toLowerCase() ?? 'png';
+  // eslint-disable-next-line no-control-regex
+  const base = name.replace(/[\/\\\u0000-\u001f\u007f]+/g, '-').trim().slice(0, 120) || 'image';
+  return `${base}.${ext}`;
+}
+
+interface PendingPicture {
+  file: File;
+  name: string;
+  replaces: string | null;
+  kind?: 'file';
+  progress: number;
+  error: string | null;
+}
 
 /**
  * Derive a clean, human-readable name from an original filename.
@@ -50,6 +67,7 @@ interface AttachmentsButtonProps {
   /** Hide the "Images" label (icon-only). When images.length > 0 the
    *  numeric badge still shows so the user can see the count. */
   hideLabel?: boolean;
+  onPendingChange?: (pending: boolean) => void;
 }
 
 export const AttachmentsButton: React.FC<AttachmentsButtonProps> = ({
@@ -58,7 +76,18 @@ export const AttachmentsButton: React.FC<AttachmentsButtonProps> = ({
   onRemove,
   variant = 'toolbar',
   hideLabel = false,
+  onPendingChange,
 }) => {
+  const hostUpload = useContext(CommentUploadContext);
+  const anyFile = hostUpload?.files === true;
+  const pictures = images.filter((image) => image.kind !== 'file');
+  const [pending, setPending] = useState<PendingPicture | null>(null);
+  const pendingAbort = useRef<AbortController | null>(null);
+  const isPending = pending !== null;
+  useEffect(() => {
+    if (hostUpload) onPendingChange?.(isPending);
+  }, [hostUpload, isPending, onPendingChange]);
+  useEffect(() => () => pendingAbort.current?.abort(), []);
   const [isOpen, setIsOpen] = useState(false);
   const [manualPath, setManualPath] = useState('');
   const [uploading, setUploading] = useState(false);
@@ -102,7 +131,7 @@ export const AttachmentsButton: React.FC<AttachmentsButtonProps> = ({
       const items = e.clipboardData?.items;
       if (!items) return;
       for (const item of items) {
-        if (item.type.startsWith('image/')) {
+        if (item.type.startsWith('image/') || (anyFile && item.kind === 'file')) {
           e.preventDefault();
           e.stopPropagation();
           const file = item.getAsFile();
@@ -113,9 +142,14 @@ export const AttachmentsButton: React.FC<AttachmentsButtonProps> = ({
     };
     document.addEventListener('paste', handlePaste, true);
     return () => document.removeEventListener('paste', handlePaste, true);
-  }, [isOpen, annotatorImage]);
+  }, [isOpen, annotatorImage, anyFile]);
 
   const handleFileSelect = (file: File) => {
+    if (hostUpload && anyFile && !file.type.startsWith('image/')) {
+      uploadThroughHost(hostUpload, { file, name: file.name, replaces: null, kind: 'file' });
+      setIsOpen(false);
+      return;
+    }
     // Derive name before opening annotator so user sees it immediately
     const initialName = deriveImageName(file.name, images.map(i => i.name));
     const blobUrl = URL.createObjectURL(file);
@@ -123,7 +157,45 @@ export const AttachmentsButton: React.FC<AttachmentsButtonProps> = ({
     setIsOpen(false); // Close popover when annotator opens
   };
 
+  const uploadThroughHost = (transport: NonNullable<typeof hostUpload>, picture: Omit<PendingPicture, 'progress' | 'error'>) => {
+    pendingAbort.current?.abort();
+    const abort = new AbortController();
+    pendingAbort.current = abort;
+    setPending({ ...picture, progress: 0, error: null });
+    const named = picture.kind === 'file' ? picture.file : new File([picture.file], pictureFileName(picture.name, picture.file), { type: picture.file.type });
+    transport
+      .upload(named, {
+        signal: abort.signal,
+        onProgress: (loaded, total) => {
+          if (!abort.signal.aborted) setPending((current) => (current ? { ...current, progress: total > 0 ? loaded / total : 0 } : current));
+        },
+      })
+      .then((data) => {
+        if (abort.signal.aborted) return;
+        if (picture.replaces) onRemove(picture.replaces);
+        onAdd({ path: data.path, name: picture.kind === 'file' ? data.originalName ?? picture.name : picture.name, ...(picture.kind ? { kind: picture.kind } : {}) });
+        setPending(null);
+      })
+      .catch((err: unknown) => {
+        if (abort.signal.aborted) return;
+        const message = err instanceof Error && err.message ? err.message : 'The upload failed.';
+        setPending((current) => (current ? { ...current, error: message } : current));
+      });
+  };
+
+  const stopPending = () => {
+    pendingAbort.current?.abort();
+    pendingAbort.current = null;
+    setPending(null);
+  };
+
   const handleAnnotatorAccept = async (blob: Blob, hasDrawings: boolean, name: string) => {
+    if (hostUpload) {
+      const file = annotatorImage && !hasDrawings ? annotatorImage.file : new File([blob], 'annotated.png', { type: 'image/png' });
+      uploadThroughHost(hostUpload, { file, name, replaces: editingImage?.path ?? null });
+      handleAnnotatorClose();
+      return;
+    }
     setUploading(true);
     try {
       // Use annotated blob if drawings exist, otherwise original file
@@ -180,7 +252,7 @@ export const AttachmentsButton: React.FC<AttachmentsButtonProps> = ({
     e.preventDefault();
     setDragOver(false);
     const file = e.dataTransfer.files[0];
-    if (file && file.type.startsWith('image/')) {
+    if (file && (anyFile || file.type.startsWith('image/'))) {
       handleFileSelect(file);
     }
   };
@@ -199,7 +271,7 @@ export const AttachmentsButton: React.FC<AttachmentsButtonProps> = ({
 
   const handleClearAll = (e: React.MouseEvent) => {
     e.stopPropagation();
-    images.forEach(img => onRemove(img.path));
+    pictures.forEach(img => onRemove(img.path));
   };
 
   // Determine annotator props
@@ -219,10 +291,10 @@ export const AttachmentsButton: React.FC<AttachmentsButtonProps> = ({
         className="group relative flex items-center gap-1.5 px-2 py-1.5 rounded-md text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
       >
         {/* Show stacked thumbnails if we have images */}
-        {images.length > 0 ? (
+        {pictures.length > 0 ? (
           <>
             <div className="relative flex items-center">
-              {images.slice(0, 3).map((img, idx) => (
+              {pictures.slice(0, 3).map((img, idx) => (
                 <div
                   key={img.path}
                   className="relative w-5 h-5 rounded border border-background"
@@ -236,12 +308,12 @@ export const AttachmentsButton: React.FC<AttachmentsButtonProps> = ({
                   />
                 </div>
               ))}
-              {images.length > 3 && (
+              {pictures.length > 3 && (
                 <div
                   className="relative w-5 h-5 rounded bg-muted border border-background flex items-center justify-center text-[9px] font-medium"
                   style={{ marginLeft: '-6px', zIndex: 0 }}
                 >
-                  +{images.length - 3}
+                  +{pictures.length - 3}
                 </div>
               )}
             </div>
@@ -255,6 +327,10 @@ export const AttachmentsButton: React.FC<AttachmentsButtonProps> = ({
               </svg>
             </button>
           </>
+        ) : anyFile ? (
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M18.375 12.739l-7.693 7.693a4.5 4.5 0 01-6.364-6.364l10.94-10.94A3 3 0 1119.5 7.372L8.552 18.32m.009-.01l-.01.01m5.699-9.941l-7.81 7.81a1.5 1.5 0 002.112 2.13" />
+          </svg>
         ) : (
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5zm10.5-11.25h.008v.008h-.008V8.25zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" />
@@ -266,6 +342,36 @@ export const AttachmentsButton: React.FC<AttachmentsButtonProps> = ({
           </span>
         )}
       </button>
+
+      {pending && (
+        <span className="pn-picture-status inline-flex items-center gap-1 text-xs whitespace-nowrap" role="status" data-picture-status={pending.error ? 'failed' : 'uploading'}>
+          {pending.error ? (
+            <>
+              <span style={{ color: 'var(--destructive)' }} title={pending.error}>{pending.kind === 'file' ? 'File not added' : 'Picture not added'}</span>
+              <button
+                type="button"
+                className="px-1.5 py-1 rounded-md font-medium text-foreground hover:bg-muted/50"
+                onClick={() => hostUpload && uploadThroughHost(hostUpload, pending)}
+              >
+                Retry
+              </button>
+            </>
+          ) : (
+            <span className="text-muted-foreground tabular-nums">Uploading {pending.kind === 'file' ? 'file' : 'picture'} {Math.round(pending.progress * 100)}%</span>
+          )}
+          <button
+            type="button"
+            aria-label={pending.error ? `Remove the ${pending.kind === 'file' ? 'file' : 'picture'}` : 'Stop the upload'}
+            title={pending.error ? `Remove the ${pending.kind === 'file' ? 'file' : 'picture'}` : 'Stop the upload'}
+            className="w-6 h-6 inline-flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/50"
+            onClick={stopPending}
+          >
+            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5} aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </span>
+      )}
 
       {/* Popover */}
       {isOpen && createPortal(
@@ -290,12 +396,12 @@ export const AttachmentsButton: React.FC<AttachmentsButtonProps> = ({
                 <div className="text-sm font-medium">Attachments</div>
                 {images.length > 0 && (
                   <span className="text-[10px] text-muted-foreground">
-                    {images.length} image{images.length !== 1 ? 's' : ''}
+                    {anyFile ? `${images.length} attached` : `${images.length} image${images.length !== 1 ? 's' : ''}`}
                   </span>
                 )}
               </div>
               <p className="text-[11px] text-muted-foreground -mt-1">
-                Add images to include with your feedback
+                {anyFile ? 'Add pictures or files to include with your comment' : 'Add images to include with your feedback'}
               </p>
 
               {/* Drop zone / file picker */}
@@ -324,7 +430,7 @@ export const AttachmentsButton: React.FC<AttachmentsButtonProps> = ({
                       <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
                     </svg>
                     <span className="text-xs text-muted-foreground">
-                      Drop image or click to browse
+                      {anyFile ? 'Drop a file or click to browse' : 'Drop image or click to browse'}
                     </span>
                     <span className="text-[10px] text-muted-foreground/70">
                       {modKey}+V to paste from clipboard
@@ -335,13 +441,13 @@ export const AttachmentsButton: React.FC<AttachmentsButtonProps> = ({
               <input
                 ref={fileInputRef}
                 type="file"
-                accept="image/*"
+                accept={anyFile ? undefined : 'image/*'}
                 onChange={handleFileInputChange}
                 className="hidden"
               />
 
-              {/* Manual path input */}
-              <div className="flex gap-2">
+              {/* Manual path input (not under a host's upload: a typed path or URL is not carried there) */}
+              {!hostUpload && <div className="flex gap-2">
                 <input
                   type="text"
                   value={manualPath}
@@ -358,7 +464,7 @@ export const AttachmentsButton: React.FC<AttachmentsButtonProps> = ({
                 >
                   Add
                 </button>
-              </div>
+              </div>}
 
               {/* Grid of current attachments */}
               {images.length > 0 && (
@@ -370,7 +476,8 @@ export const AttachmentsButton: React.FC<AttachmentsButtonProps> = ({
                         <ImageThumbnail
                           path={img.path}
                           size="md"
-                          onClick={() => {
+                          file={img.kind === 'file'}
+                          onClick={img.kind === 'file' ? undefined : () => {
                             setEditingImage({ path: img.path, name: img.name });
                             setIsOpen(false);
                           }}
@@ -402,6 +509,7 @@ export const AttachmentsButton: React.FC<AttachmentsButtonProps> = ({
           initialName={annotatorInitialName}
           onAccept={handleAnnotatorAccept}
           onClose={handleAnnotatorClose}
+          sourceBlob={hostUpload ? annotatorImage?.file : undefined}
         />,
         document.body
       )}

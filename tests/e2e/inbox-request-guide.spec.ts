@@ -99,7 +99,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   rmSync(shots, { recursive: true, force: true });
   mkdirSync(shots, { recursive: true });
   const root = inboxScratch('plannotator-inbox-request-guide-e2e-');
-  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_DATA_DIR: join(root, 'data'), PLANNOTATOR_BROWSER: NO_BROWSER, NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0' };
+  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: join(root, 'data'), PLANNOTATOR_BROWSER: NO_BROWSER, NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0' };
   const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
   expect(started.status, started.stderr).toBe(0);
   const url = started.stdout.trim();
@@ -135,7 +135,8 @@ test('the item sits above Archive; a click puts the request in the thread, Queue
   await openThread(page, 'light');
   await page.locator('[data-thread-more]').click();
   await expect(threadMenu(page)).toBeVisible();
-  await expect(threadMenu(page).getByRole('menuitem')).toHaveText(['Star thread', 'Copy thread', 'Copy link', 'Copy thread ID', 'Add a pull request…', 'Request guided review', 'Archive thread']);
+  // The read action and Snooze lead the menu (the owner, 2026-11-11); the rest follows in this order.
+  await expect(threadMenu(page).locator('[role="menuitem"]:not(:is([data-thread-read-item], [data-thread-move-back-item], [data-thread-unread-item], [data-thread-snooze-item], [data-thread-unsnooze-item]))')).toHaveText(['Star thread', 'Add to Priority', 'Add tag', 'Copy thread', 'Copy link', 'Copy thread ID', 'Add a pull request…', 'Request guided review', 'Archive thread']);
   await requestItem(page).hover();
   await shot(page, 'desktop-light-menu-open.png');
   await requestItem(page).click();

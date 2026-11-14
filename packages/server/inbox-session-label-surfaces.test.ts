@@ -7,7 +7,7 @@
  * session cleared it, or vanishes from a finished thread the moment the session
  * ends; a label written into a message record, where every reader (an agent's
  * read_thread, a linked machine, an export) would carry it; a window never told
- * a label changed; or an owner over the tailnet who is shut out.
+ * a label changed; or an agent that reads a name in place of the session's id.
  *
  * A real Inbox under a temp data dir; connections are plain HTTP with the
  * registry's token, agents the MCP client, the tailnet a scripted `tailscale`.
@@ -71,7 +71,7 @@ function fakeTailscale(): TailscaleRunner {
 }
 
 /** A real Inbox on the tailnet, one project, and the MCP client agents write through. */
-async function setup() {
+async function setup(sessionsNow?: () => number) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-label-surfaces-")));
   roots.push(root);
   const project = join(root, "ai-collab");
@@ -81,7 +81,7 @@ async function setup() {
   setEnv("PLANNOTATOR_DATA_DIR", dataDir);
   for (const name of ["PLANNOTATOR_INBOX_TAILSCALE", "PLANNOTATOR_URL_HOST"]) setEnv(name, undefined);
   writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxTailscale: true, updateCheck: false }));
-  const server = await startInboxServer({ dataDir, binaryPath: null, tailscale: fakeTailscale() });
+  const server = await startInboxServer({ dataDir, binaryPath: null, tailscale: fakeTailscale(), ...(sessionsNow ? { sessionsNow } : {}) });
   servers.push(server);
   const client = new Client({ name: "inbox-label-surfaces-test", version: "1.0.0" });
   await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${server.port}/mcp`)));
@@ -115,11 +115,11 @@ async function read(server: InboxServer, caller: Caller, path: string): Promise<
 }
 
 /** One poll from a Claude Code session's connection; `label` absent is an older connection. */
-async function poll(server: InboxServer, session: string, project: string, label?: string) {
+async function poll(server: InboxServer, session: string, project: string, label?: string, extra: Json = {}) {
   const response = await fetch(`http://127.0.0.1:${server.port}${INBOX_BRIDGE_POLL_PATH}`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${server.token}` },
-    body: JSON.stringify({ session, host: "claude-code", waitMs: 0, project_path: project, started_at: Date.now(), busy: false, tags: true, ...(label === undefined ? {} : { label }) }),
+    body: JSON.stringify({ session, host: "claude-code", waitMs: 0, project_path: project, started_at: Date.now(), busy: false, tags: true, ...(label === undefined ? {} : { label }), ...extra }),
   });
   expect(response.status).toBe(200);
 }
@@ -135,8 +135,8 @@ async function sends(client: Client, project: string, session: string, body: str
 }
 
 /** Three named Claude Code sessions and an unnamed one, the first three writing in one thread. */
-async function threeNamed() {
-  const s = await setup();
+async function threeNamed(sessionsNow?: () => number) {
+  const s = await setup(sessionsNow);
   await poll(s.server, "ses-login", s.project, "Fix login redirect");
   await poll(s.server, "ses-docs", s.project, "Docs pass");
   await poll(s.server, "ses-billing", s.project, "Billing cleanup");
@@ -190,8 +190,8 @@ describe("the routes carry each session's own label", () => {
     expect(liveLabels(await read(server, "local", `/api/inbox/threads/${threadId}/taggable`))["ses-docs"]).toBeUndefined();
   });
 
-  test("the label is never written into a message, and no agent's read carries it", async () => {
-    const { server, client, threadId, rootId } = await threeNamed();
+  test("the label is never written into a message; an agent reads it only beside the id of a session it is told of", async () => {
+    const { server, client, project, threadId, rootId } = await threeNamed();
     const thread = (await read(server, "local", `/api/inbox/threads/${threadId}`)).thread as Json;
     expect(JSON.stringify(thread)).not.toContain("Fix login redirect");
     expect(server.store.message(rootId)!.author).toEqual({ kind: "agent", host: "claude-code", session: "ses-login", name: "Claude Code" });
@@ -199,6 +199,25 @@ describe("the routes carry each session's own label", () => {
       const result = await client.callTool({ name: "read_thread", arguments: { ...args, agent_session: "ses-docs" } });
       expect(JSON.stringify(result)).not.toMatch(/Fix login redirect|Docs pass|Billing cleanup/);
     }
+    await poll(server, "ses-plain", project, "", { title: "Cookie audit" });
+    const origin = `http://127.0.0.1:${server.port}`;
+    const tagged = await fetch(`${origin}/api/inbox/messages/${rootId}/reply`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Origin: origin },
+      body: JSON.stringify({ serverSession: server.serverSession, idempotency_key: "tag-1", words: "Docs and cookies, check this.", tags: [{ host: "claude-code", session: "ses-docs" }, { host: "claude-code", session: "ses-plain" }] }),
+    });
+    expect(tagged.status).toBe(200);
+    const result = (await client.callTool({ name: "read_thread", arguments: { thread_id: threadId, agent_session: "ses-billing" } })) as Json;
+    const text = (result.content as Json[]).map((c) => c.text).join("\n");
+    expect(text).toContain('tagged "Docs pass" (Claude Code ses-docs), "Cookie audit" (Claude Code ses-plain)');
+    const reply = (result.structuredContent.thread.messages as Json[]).findLast((m) => m.tagged);
+    expect(reply.tagged).toEqual([
+      { agent: "Claude Code", session: "ses-docs", name: "Docs pass", you: false },
+      { agent: "Claude Code", session: "ses-plain", name: "Cookie audit", you: false },
+    ]);
+    // The tagged session itself reads `you`, never its own name.
+    const own = (await client.callTool({ name: "read_thread", arguments: { thread_id: threadId, agent_session: "ses-docs" } })) as Json;
+    expect((own.structuredContent.thread.messages as Json[]).findLast((m) => m.tagged).tagged[0]).toEqual({ agent: "Claude Code", session: "ses-docs", you: true });
   });
 
   test("a session that ended keeps its label in the list while the Inbox runs, so a finished thread keeps its names", async () => {
@@ -217,13 +236,15 @@ describe("the routes carry each session's own label", () => {
 
 describe("who sees them", () => {
   test("the owner over the tailnet reads what this computer reads", async () => {
-    const { server, threadId } = await threeNamed();
+    const { server, project, threadId } = await threeNamed();
+    await poll(server, "ses-plain", project, "", { title: "Cookie audit" });
     const routes = ["/api/inbox/threads", `/api/inbox/threads/${threadId}/taggable`, `/api/inbox/threads/${threadId}/sessions`];
     for (const path of routes) {
       const local = await read(server, "local", path);
       const owner = await read(server, "owner", path);
       expect(JSON.stringify(owner)).toContain("Fix login redirect");
       expect(owner.session_labels).toEqual(local.session_labels);
+      expect(owner.session_titles).toEqual(local.session_titles);
     }
   });
 });

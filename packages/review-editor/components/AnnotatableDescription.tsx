@@ -1,10 +1,13 @@
 import React, { useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { RenderedMarkdown } from '@plannotator/ui/components/RenderedMarkdown';
+import { InlineImageTagsContext } from '@plannotator/ui/components/ImageResolverContext';
 import { CommentPopover } from '@plannotator/ui/components/CommentPopover';
 import { useAnnotationHighlighter } from '@plannotator/ui/hooks/useAnnotationHighlighter';
 import { proxiesGitHubImages, resolvePRImage } from '../utils/prImage';
 import { useReviewState } from '../dock/ReviewStateContext';
+import { renderPRDescriptionVideo } from './PRDescriptionVideo';
+import { PRMediaScope } from './PRMediaScope';
 
 /**
  * The PR description, made annotatable. Mounts the shared text-anchored
@@ -45,6 +48,7 @@ export const AnnotatableDescription = React.memo(function AnnotatableDescription
     onSelectAnnotation: onSelectDescriptionAnnotation,
     selectedAnnotationId: selectedDescriptionAnnotationId,
     mode: 'comment',
+    verifyRestoredContent: true,
   });
 
   // Reconcile marks off the store: apply new ones (idempotent) and remove marks
@@ -62,13 +66,18 @@ export const AnnotatableDescription = React.memo(function AnnotatableDescription
 
   return (
     <div ref={containerRef}>
-      <RenderedMarkdown
-        markdown={markdown}
-        className={className}
-        resolveImage={proxiedImages ? resolvePRImage : undefined}
-        preserveVideos
-        responsiveImages
-      />
+      <PRMediaScope>
+        <InlineImageTagsContext.Provider value={proxiedImages}>
+          <RenderedMarkdown
+            markdown={markdown}
+            className={className}
+            resolveImage={proxiedImages ? resolvePRImage : undefined}
+            renderParagraph={proxiedImages ? renderPRDescriptionVideo : undefined}
+            preserveVideos
+            responsiveImages
+          />
+        </InlineImageTagsContext.Provider>
+      </PRMediaScope>
 
       {hook.commentPopover &&
         createPortal(

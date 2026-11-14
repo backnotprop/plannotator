@@ -63,6 +63,7 @@ import {
   INBOX_ASK_POLL_FIELD,
   INBOX_AUTO_RELOAD_POLL_FIELD,
   INBOX_CONTINUES_POLL_FIELD,
+  INBOX_TITLE_POLL_FIELD,
   INBOX_BRIDGE_EVENT_PATH,
   INBOX_BRIDGE_POLL_PATH,
   inboxAskBridgeBase,
@@ -206,9 +207,9 @@ export function withReminderSession(record: Record<string, number>, sessionId: s
  * is, a custom text's backslashes, leading `-`, `%`, quotes and `$(...)`
  * included, and nothing in it runs.
  */
-export function inboxReminderEnvValue(on: boolean, toolName: string | null, custom: string | null = null): string | undefined {
+export function inboxReminderEnvValue(on: boolean, toolName: string | null, custom: string | null = null, rules: string | null = null): string | undefined {
   if (!on || !toolName) return undefined
-  return inboxReminderFor(custom, toolName)
+  return inboxReminderFor(custom, toolName, { rules })
 }
 
 /**
@@ -443,14 +444,15 @@ export const TRANSCRIPT_TITLE_RETRY_MAX_MS = 5 * 60_000
 /** Failed reads in a row of one region before it is skipped, so a region that always times out is not tried forever. */
 export const TRANSCRIPT_TITLE_FAILURES_MAX = 3
 /**
- * `$1` the 1-based byte to start at, `$2` the file, `$3` how many bytes:
+ * `$1` the 1-based byte to start at, `$2` the file, `$3` how many bytes, `$4`
+ * the session id (only its own `ai-title` is kept, the last one in the region):
  * `id:<inode>` (`ls -di`, on macOS and Linux alike), each title line (the
  * last few), then `end:<bytes counted>:<last line's bytes>`. `awk` in the C
  * locale counts bytes on every platform. A title's quotes are bare only in a
  * real record: inside any other line's string they are escaped
  * (`\"type\":…`), so the pattern finds no message text.
  */
-export const TRANSCRIPT_TITLE_SCRIPT = `ls -di -- "$2" 2>/dev/null | LC_ALL=C awk 'NR == 1 { print "id:" $1 }'; tail -c +"$1" -- "$2" 2>/dev/null | head -c "$3" | LC_ALL=C awk 'index($0, "\\"type\\":\\"custom-title\\"") { print substr($0, 1, ${TRANSCRIPT_TITLE_LINE_MAX}) } { o += length($0) + 1; last = length($0) } END { print "end:" o ":" last }' | tail -n 20; exit 0`
+export const TRANSCRIPT_TITLE_SCRIPT = `ls -di -- "$2" 2>/dev/null | LC_ALL=C awk 'NR == 1 { print "id:" $1 }'; tail -c +"$1" -- "$2" 2>/dev/null | head -c "$3" | LC_ALL=C awk -v sid="$4" 'index($0, "\\"type\\":\\"custom-title\\"") { print substr($0, 1, ${TRANSCRIPT_TITLE_LINE_MAX}) } index($0, "\\"type\\":\\"ai-title\\"") && (index($0, "\\"sessionId\\":\\"" sid "\\"") || !index($0, "\\"sessionId\\"")) { ai = substr($0, 1, ${TRANSCRIPT_TITLE_LINE_MAX}) } { o += length($0) + 1; last = length($0) } END { if (ai != "") print ai; print "end:" o ":" last }' | tail -n 20; exit 0`
 
 /** The file's identity in TRANSCRIPT_TITLE_SCRIPT's output (its inode), or null when the output has none. */
 export function transcriptFileIdOf(output: string): string | null {
@@ -483,8 +485,9 @@ export function claudeTranscriptPaths(configDir: string, folders: readonly strin
  * it), so that line is read again whole. Null when the output has no `end:`
  * (the read did not run through). `title`: undefined when the region had none.
  */
-export function transcriptTitleOf(output: string, sessionId: string, start: number, length: number): { title: string | undefined; next: number } | null {
+export function transcriptTitleOf(output: string, sessionId: string, start: number, length: number): { title: string | undefined; generated?: string; next: number } | null {
   let title: string | undefined
+  let generated: string | undefined
   let end: { counted: number; last: number } | null = null
   for (const line of output.split('\n')) {
     const counts = /^end:(\d*):(\d*)$/.exec(line)
@@ -492,7 +495,7 @@ export function transcriptTitleOf(output: string, sessionId: string, start: numb
       end = { counted: Number(counts[1] || 0), last: Number(counts[2] || 0) }
       continue
     }
-    let record: { type?: unknown; customTitle?: unknown; sessionId?: unknown } | null = null
+    let record: { type?: unknown; customTitle?: unknown; aiTitle?: unknown; sessionId?: unknown } | null = null
     try {
       const parsed = JSON.parse(line)
       record = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null
@@ -500,15 +503,18 @@ export function transcriptTitleOf(output: string, sessionId: string, start: numb
       // Cut short (the region's end, or the line cap): never a title.
       continue
     }
+    if (typeof record?.sessionId === 'string' && record.sessionId !== sessionId) continue
+    if (record?.type === 'ai-title' && typeof record.aiTitle === 'string') generated = cappedTitle(record.aiTitle)
     if (record?.type !== 'custom-title' || typeof record.customTitle !== 'string') continue
-    if (typeof record.sessionId === 'string' && record.sessionId !== sessionId) continue
-    title = Array.from(record.customTitle.slice(0, INBOX_SESSION_LABEL_INPUT_MAX * 2)).slice(0, INBOX_SESSION_LABEL_INPUT_MAX).join('').trim()
+    title = cappedTitle(record.customTitle)
   }
   if (!end) return null
   // Every line but the last ended with a newline; one more byte counted than read says the last did not.
   const cut = end.counted > length ? end.last : 0
-  return { title, next: start + length - cut }
+  return { title, ...(generated === undefined ? {} : { generated }), next: start + length - cut }
 }
+
+const cappedTitle = (text: string) => Array.from(text.slice(0, INBOX_SESSION_LABEL_INPUT_MAX * 2)).slice(0, INBOX_SESSION_LABEL_INPUT_MAX).join('').trim()
 
 /**
  * The session this conversation was branched from, as Claude Code records it:
@@ -723,6 +729,7 @@ export class TranscriptTitle {
   private streak = 0
   private retryAt = Number.NEGATIVE_INFINITY
   private title: string | null = null
+  private generated: string | null = null
 
   constructor(
     private readonly host: Pick<Host, 'fileSize' | 'run' | 'now'>,
@@ -730,6 +737,10 @@ export class TranscriptTitle {
     /** Where the transcript may be (`claudeTranscriptPaths`), asked only while it is not found. */
     private readonly candidates: () => Promise<readonly string[]>,
   ) {}
+
+  generatedTitle(): string | null {
+    return this.generated
+  }
 
   /** The latest title (`''`: the transcript says none), or null when the transcript says nothing or cannot be read. */
   async read(): Promise<string | null> {
@@ -753,7 +764,7 @@ export class TranscriptTitle {
     if (size < this.offset || size - this.offset > TRANSCRIPT_TITLE_FIRST_READ_BYTES) this.fresh = true
     const start = this.fresh ? Math.max(0, size - TRANSCRIPT_TITLE_FIRST_READ_BYTES) : this.offset
     const length = size - start
-    const result = await this.host.run(shellArgv('transcript-title', TRANSCRIPT_TITLE_SCRIPT, 'sh', [String(start + 1), path, String(length)]), { timeoutMs: 5_000 }).catch(() => null)
+    const result = await this.host.run(shellArgv('transcript-title', TRANSCRIPT_TITLE_SCRIPT, 'sh', [String(start + 1), path, String(length), this.sessionId]), { timeoutMs: 5_000 }).catch(() => null)
     const found = result && result.exitCode === 0 ? transcriptTitleOf(result.stdout, this.sessionId, start, length) : null
     if (!found) return this.failed(size)
     const id = transcriptFileIdOf(result!.stdout)
@@ -763,12 +774,14 @@ export class TranscriptTitle {
       // Another file under the same name (rewritten, at any size): the old file's title is not its title. Read its
       // end as new, once, when this read was not that already.
       this.title = null
+      this.generated = null
       if (!this.fresh) {
         this.fresh = true
         return again ? this.readFrom(path, size, false) : this.title
       }
     }
     if (found.title !== undefined) this.title = found.title
+    if (found.generated !== undefined) this.generated = found.generated
     this.fresh = false
     this.offset = found.next
     // Read through: a last line with no newline yet starts the next read (`offset`), but only once the file grows.
@@ -973,6 +986,8 @@ export interface InboxLinkOptions {
    * by the host, never by the model: it is no tool argument. Absent: no `label`.
    */
   label?: () => string | Promise<string>
+  /** Set by the host, never by the model. */
+  title?: () => string | Promise<string>
   /**
    * The session ids this conversation continues (`TranscriptForkedFrom`), read
    * for every poll and sent as INBOX_CONTINUES_POLL_FIELD when there is one.
@@ -1468,6 +1483,7 @@ export class InboxLink {
     const loaded = await this.loadedNow()
     const folder = await this.folderNow()
     const label = await this.labelNow()
+    const title = this.options.title ? await Promise.resolve().then(this.options.title).catch(() => '') : null
     const continues = this.options.continues ? await this.options.continues().catch(() => [] as readonly string[]) : []
     const response = await this.bridge(INBOX_BRIDGE_POLL_PATH, {
       waitMs,
@@ -1476,6 +1492,7 @@ export class InboxLink {
       ...(project ? { project_path: project } : {}),
       // The session's title (additive): the To picker's name for it; empty clears it.
       ...(label === null ? {} : { label }),
+      ...(title === null ? {} : { [INBOX_TITLE_POLL_FIELD]: title }),
       ...(this.startedAt ? { started_at: this.startedAt } : {}),
       ...(this.busy === null ? {} : { busy: this.busy, idle_since: this.idleSince }),
       // Send now: this engine can put a reply into a running turn (`$.session.append`).

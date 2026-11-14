@@ -216,6 +216,7 @@ async function openGlimpse(url: string): Promise<boolean> {
       resolve(opened);
     };
 
+    // windows-hide-guard: starts the app window the person asked for, which windowsHide would start hidden.
     const child = spawn(command, spawnArgs, {
       detached: true,
       stdio: ["pipe", "ignore", "ignore"],
@@ -363,6 +364,7 @@ export async function openBrowser(
       }
     }
 
+    // windows-hide-guard: starts the app window the person asked for, which windowsHide would start hidden.
     await $`${await browserLaunchArgv(url, browser, plannotatorBrowser)}`.quiet();
     return true;
   } catch (error) {

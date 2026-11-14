@@ -109,7 +109,7 @@ test.skipIf(!process.env.T3_TEST_EXECUTABLE)("the compiled installer helper regi
   const { file, executable, dataDir } = fixture();
   mkdirSync(join(executable, ".."), { recursive: true });
   symlinkSync(resolve(process.env.T3_TEST_EXECUTABLE!), executable);
-  const env = { HOME: join(file, ".."), PLANNOTATOR_DATA_DIR: dataDir, PATH: "/usr/bin:/bin" };
+  const env = { HOME: join(file, ".."), PLANNOTATOR_RELAY_URL: "http://127.0.0.1:9", PLANNOTATOR_DATA_DIR: dataDir, PATH: "/usr/bin:/bin" };
   const installed = Bun.spawnSync([executable, "t3-hook", "install", "--settings", file, "--executable", executable], { env, stdout: "pipe", stderr: "pipe" });
   expect(installed.exitCode).toBe(0);
   const command = JSON.parse(readFileSync(file, "utf8")).hooks.PreToolUse[0].hooks[0].command;

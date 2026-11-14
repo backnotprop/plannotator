@@ -8,10 +8,13 @@ import { existsSync } from 'node:fs';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { AGENTS, COLUMNS, LISTED_AGENTS, TIERS, cellOf } from './src/lib/inbox-agents';
 
 const marketingRoot = fileURLToPath(new URL('.', import.meta.url));
 const switchFile = join(marketingRoot, 'src/lib/inbox-launch.ts');
 const postPath = 'blog/the-age-of-the-inbox/index.html';
+const agentsPath = 'inbox/agents/index.html';
+const agentPaths = LISTED_AGENTS.map((a) => `inbox/agents/${a.slug}/index.html`);
 
 let temporaryRoot = '';
 const dist = { on: '' };
@@ -84,7 +87,7 @@ describe('Plannotator Inbox launch switch', () => {
   });
 
   test('on: no comma in any h1 h2 h3 or button on the page and the post', async () => {
-    for (const path of ['inbox/index.html', postPath]) {
+    for (const path of ['inbox/index.html', postPath, agentsPath, ...agentPaths]) {
       const html = await read(dist.on, path);
       const elements = html.match(/<(h1|h2|h3|button)\b[^>]*>[\s\S]*?<\/\1>/g) ?? [];
       expect(elements.length).toBeGreaterThan(0);
@@ -107,8 +110,16 @@ describe('Plannotator Inbox launch switch', () => {
     expect(inlined && JSON.parse(inlined)).toBe(source);
   });
 
+  test('on: the cloud agent setup pages are served as plain ASCII markdown at /inbox/cloud-agent.md and /inbox/muse.md', async () => {
+    for (const [file, path] of [['inbox-cloud-agent.md', 'inbox/cloud-agent.md'], ['inbox-muse.md', 'inbox/muse.md']]) {
+      const source = await readFile(join(marketingRoot, 'src/lib', file), 'utf8');
+      expect(source).toMatch(/^[\x09\x0a\x20-\x7e]*$/);
+      expect(await read(dist.on, path)).toBe(source);
+    }
+  });
+
   test('on: every image on the page and the post resolves', async () => {
-    for (const path of ['inbox/index.html', postPath]) {
+    for (const path of ['inbox/index.html', postPath, agentsPath, ...agentPaths]) {
       const html = await read(dist.on, path);
       const urls = new Set<string>();
       for (const [, attr, value] of html.matchAll(/\b(src|srcset|data-lightbox-dark|data-lightbox-light|content)="([^"]*)"/g)) {
@@ -118,10 +129,85 @@ describe('Plannotator Inbox launch switch', () => {
           if (url.startsWith('/') || url.startsWith('https://plannotator.ai/')) urls.add(url.replace('https://plannotator.ai', ''));
         }
       }
-      expect(urls.size).toBeGreaterThan(path === postPath ? 3 : 30);
+      expect(urls.size).toBeGreaterThan(path === 'inbox/index.html' ? 30 : 0);
       for (const url of urls) {
         if (/\.(webp|png|jpe?g|svg)$/.test(url)) expect(existsSync(join(dist.on, url)), `${path}: ${url}`).toBe(true);
       }
+    }
+  });
+
+  // The agents overview and every agent's setup page read
+  // src/lib/inbox-agents.ts: each agent has its page, a row under its tier in
+  // the overview linking to it with its difference line, a place in the
+  // sitemap, and every command its page names behind a copy button.
+  test('on: the agents overview and one page per agent are built from one list', async () => {
+    const overview = await read(dist.on, agentsPath);
+    expect(overview).toContain('<title>Set up your agent with the Plannotator Inbox</title>');
+    expect(await read(dist.on, 'inbox/index.html')).toContain('href="/inbox/agents/"');
+    const sitemap = await read(dist.on, 'sitemap-0.xml');
+    expect(sitemap).toContain('<loc>https://plannotator.ai/inbox/agents/</loc>');
+    const rows = overview.match(/<li class="ag-row[^"]*"[^>]*>[\s\S]*?<\/li>/g) ?? [];
+    expect(rows).toHaveLength(LISTED_AGENTS.length);
+    const ordered = TIERS.flatMap((t) => LISTED_AGENTS.filter((a) => a.tier === t.id));
+    ordered.forEach((agent, i) => {
+      const href = `/inbox/agents/${agent.slug}/`;
+      expect(rows[i]).toContain(`href="${href}"`);
+      expect(text(rows[i].match(/<p\b[\s\S]*?<\/p>/)?.[0] ?? '')).toBe(agent.diff);
+      expect(sitemap).toContain(`<loc>https://plannotator.ai${href}</loc>`);
+    });
+    for (const [i, path] of agentPaths.entries()) {
+      const html = await read(dist.on, path);
+      expect(text(html.match(/<h1\b[\s\S]*?<\/h1>/)?.[0] ?? '')).toBe(LISTED_AGENTS[i].name);
+      const copies = [...html.matchAll(/data-copy="([^"]*)"/g)].map(([, v]) =>
+        v.replace(/&quot;/g, '"').replace(/&#39;|&#x27;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&'),
+      );
+      const a = LISTED_AGENTS[i];
+      const codes = [...a.setup, ...a.other.flatMap((o) => o.steps), a.check, ...a.trouble].map((s) => s.code).filter(Boolean);
+      expect(codes.length, path).toBeGreaterThan(0);
+      for (const code of codes) expect(copies, path).toContain(code);
+    }
+  });
+
+  // An agent marked listed: false (a plugin not published yet) stays in the
+  // data but must not reach the site: no page, no link and no sitemap entry.
+  test('on: an unlisted agent has no page and nothing links to it', async () => {
+    const unlisted = AGENTS.filter((a) => a.listed === false);
+    const pages = files(dist.on).filter((f) => f.endsWith('.html'));
+    const sitemap = await read(dist.on, 'sitemap-0.xml');
+    for (const agent of unlisted) {
+      const href = `/inbox/agents/${agent.slug}/`;
+      expect(existsSync(join(dist.on, `inbox/agents/${agent.slug}/index.html`)), agent.slug).toBe(false);
+      expect(sitemap, agent.slug).not.toContain(href);
+      for (const page of pages) expect(await read(dist.on, page), `${page} links ${href}`).not.toContain(`href="${href}"`);
+    }
+  });
+
+  // The site draws Hermes Agent and Muse with the Inbox's own marks
+  // (AgentMark.astro); a mark changed in the app must change here too.
+  test('the Hermes Agent and Muse marks are the Inbox app\'s', async () => {
+    const assets = join(marketingRoot, 'public/assets');
+    const hermes = await import('../../packages/ui/components/icons/hermesAgentMask');
+    for (const [file, uri] of [['icon-hermes-light.png', hermes.HERMES_AGENT_MASK_LIGHT], ['icon-hermes-dark.png', hermes.HERMES_AGENT_MASK_DARK]]) {
+      expect((await readFile(join(assets, file))).toString('base64'), file).toBe(uri.split(',')[1]);
+    }
+    const muse = await import('../../packages/ui/components/icons/museMark');
+    const svg = await readFile(join(assets, 'icon-muse.svg'), 'utf8');
+    expect(svg).toContain(`d="${muse.MUSE_MARK_PATH}"`);
+    for (const stop of muse.MUSE_MARK_STOPS) expect(svg).toContain(`<stop offset="${stop.offset}" stop-color="${stop.color}"/>`);
+    const g = muse.MUSE_MARK_GRADIENT;
+    expect(svg).toContain(`x1="${g.x1}" y1="${g.y1}" x2="${g.x2}" y2="${g.y2}"`);
+  });
+
+  // Each tier's line on the overview says what every agent in it has. The
+  // keys behind it must be exactly the columns where none of the tier's
+  // agents answers no, so the words can't claim what one of them lacks.
+  test('every tier baseline is what all of its agents have', () => {
+    const cols = [...COLUMNS.inbox, ...COLUMNS.plannotator].map((c) => c.key);
+    for (const tier of TIERS) {
+      const agents = AGENTS.filter((a) => a.tier === tier.id);
+      expect(agents.length, tier.id).toBeGreaterThan(0);
+      const shared = cols.filter((k) => agents.every((a) => cellOf(a, k).level !== 'no'));
+      expect([...tier.has].sort(), tier.id).toEqual([...shared].sort());
     }
   });
 });

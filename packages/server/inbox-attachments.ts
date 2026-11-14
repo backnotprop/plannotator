@@ -39,6 +39,7 @@ import { INBOX_ANNOTATION_CURRENT, isInboxTextKind, readInboxAttachmentKind, typ
 import {
   checkCurrentAsync,
   inboxAttachmentState,
+  inboxBlobPath,
   isPdfHead,
   openInboxAttachmentVersion,
   readInboxAttachmentText,
@@ -47,6 +48,7 @@ import { INBOX_MESSAGE_IMAGE_CSP, readInboxMessageImageAsync, readInboxPictureAs
 import { inboxImageScales, inboxImageWidth, scaledEtag, scaleInboxImage } from "./inbox-image-scale";
 import { contentDisposition, inboxImageResponse } from "./inbox-message-images";
 import { readInboxMarkup, readInboxMarkupBody, writeInboxMarkup } from "@plannotator/shared/inbox/markups";
+import { readInboxUpload } from "@plannotator/shared/inbox/uploads";
 import { readImageDimensions, sniffImageContentType } from "@plannotator/shared/review-image";
 import { sniffInboxVideo } from "@plannotator/shared/inbox/video";
 import { inboxAudioServedType } from "@plannotator/shared/inbox/audio";
@@ -600,6 +602,25 @@ export function createInboxAttachmentRoutes(context: InboxAttachmentRoutesContex
           "Content-Type": markup.contentType,
           "Content-Security-Policy": INBOX_MESSAGE_IMAGE_CSP,
           "Content-Length": String(markup.bytes.length),
+          "Cache-Control": "private, max-age=31536000, immutable",
+        },
+      });
+    }
+
+    const uploadImage = /^\/api\/inbox\/uploads\/(upl_[0-9A-HJKMNP-TV-Z]{26})\/image$/.exec(path);
+    if (uploadImage) {
+      if (req.method !== "GET" && req.method !== "HEAD") return json({ error: "Use GET." }, 405);
+      if (crossSite(req)) return json(CROSS_SITE_BODY, 403);
+      const upload = readInboxUpload(store.dir, uploadImage[1]!);
+      const file = upload?.kind === "image" ? Bun.file(inboxBlobPath(store.dir, upload.sha256)) : null;
+      const contentType = file && (await file.exists()) ? sniffImageContentType(new Uint8Array(await file.slice(0, 4096).arrayBuffer())) : null;
+      if (!file || !contentType) return json({ error: "That picture is no longer here.", code: "upload_not_found" }, 404);
+      return new Response(req.method === "HEAD" ? null : file, {
+        headers: {
+          ...BYTE_GUARD_HEADERS,
+          "Content-Type": contentType,
+          "Content-Security-Policy": INBOX_MESSAGE_IMAGE_CSP,
+          "Content-Length": String(file.size),
           "Cache-Control": "private, max-age=31536000, immutable",
         },
       });

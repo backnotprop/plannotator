@@ -50,7 +50,7 @@ test.beforeAll(async () => {
   mkdirSync(proofDir, { recursive: true });
   const root = inboxScratch('plannotator-inbox-phone-head-e2e-');
   const dataDir = join(root, 'data');
-  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0', PLANNOTATOR_UPDATE_CHECK: '0' };
+  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0', PLANNOTATOR_UPDATE_CHECK: '0' };
   const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
   expect(started.status, started.stderr).toBe(0);
   const url = started.stdout.trim();
@@ -152,7 +152,7 @@ for (const size of [14, 15]) {
           expect(m.subject!).toBeGreaterThanOrEqual(SUBJECT_FLOOR - 0.5);
           // No keyboard hints on a phone.
           expect(m.kbds).toBe(0);
-          // The read button and the clock are in the ⋯ sheet, not the bar.
+          // The read action and Snooze are in the ⋯ sheet, not the bar.
           await expect(head.locator('[data-mark-read], [data-mark-unread], [data-thread-snooze]')).toHaveCount(0);
           // Whatever gave way keeps its name.
           await expect(pane.locator('[data-artifacts-button]')).toHaveAccessibleName('Artifacts, 11');

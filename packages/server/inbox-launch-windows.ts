@@ -141,6 +141,20 @@ export function windowsFolderRefusal(
   return null;
 }
 
+/**
+ * A typed drive path that is not under home (`D:\\x`, `C:\\Windows`), judged by its path alone, never by touching the
+ * drive: a system folder or a hidden name by `windowsFolderRefusal`'s path rules, else `home_only` (on Windows a folder
+ * is picked under home for now). Null: not a drive path (then it is no full path at all).
+ */
+export function windowsOutsideHomeRefusal(
+  typed: string,
+  env: { systemRoot?: string; programFiles?: readonly string[]; programData?: string; home: string },
+): "system" | "hidden" | "home_only" | null {
+  const text = typed.trim();
+  if (!DRIVE_PATH.test(text)) return null;
+  return windowsFolderRefusal(text, env, () => undefined) ?? "home_only";
+}
+
 let getAttributes: ((path: string) => number) | null | undefined;
 
 /**

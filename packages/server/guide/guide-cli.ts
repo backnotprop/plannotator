@@ -161,7 +161,7 @@ export function runGuideList(): GuideCliResult {
 
 function git(args: string[], cwd: string): string | undefined {
   try {
-    return execFileSync("git", args, { cwd, env: childEnv(), encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] }).trim() || undefined;
+    return execFileSync("git", args, { cwd, env: childEnv(), encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"], windowsHide: true }).trim() || undefined;
   } catch {
     return undefined;
   }

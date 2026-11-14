@@ -6,7 +6,9 @@
  * presets, Reset and Escape; an item a capability turns off keeping its place; another window's save arriving; the
  * tour's sidebar ignoring the saved layout; and the Agents section as an item that hides (listed in the menu and the
  * panel only while the sidebar draws it, the whole section gone when hidden, on a phone too, kept across a reload,
- * and shown by a layout saved before it was an item). The model itself is packages/core/inbox-sidebar.test.ts.
+ * and shown by a layout saved before it was an item); Starred and Projects the same way (always listed, Projects shown
+ * by default, the whole section gone when hidden on a desktop and a phone, and both shown by a layout saved before they
+ * were items). The model itself is packages/core/inbox-sidebar.test.ts.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -14,6 +16,7 @@ import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxSidebarItem } from '@plannotator/core/inbox-sidebar';
+import type { InboxListRow } from '@plannotator/core/inbox-types';
 import type { SidebarProps } from './components/Sidebar';
 
 const hasDom = typeof document !== 'undefined';
@@ -124,7 +127,7 @@ test.skipIf(!hasDom)('the right-click menu: a checkbox per item that hides and i
   await rightClick(document.querySelector('[data-board-nav]')!);
   expect(menu()).not.toBeNull();
   // No Inbox or Settings (they never hide), no Reviews, Shape or Usage (not drawn here).
-  expect(toggles()).toEqual(['logo', 'search', 'new-message', 'board', 'drafts', 'copy-prompt', 'feedback', 'shortcuts', 'theme']);
+  expect(toggles()).toEqual(['logo', 'search', 'new-message', 'board', 'drafts', 'starred', 'projects', 'copy-prompt', 'feedback', 'shortcuts', 'theme']);
   const boxes = [...document.querySelectorAll('[data-sidebar-toggle]')];
   expect(boxes.every((box) => box.getAttribute('role') === 'menuitemcheckbox' && box.getAttribute('aria-checked') === 'true')).toBe(true);
   expect(menu()!.textContent).toContain('Customize sidebar…');
@@ -319,7 +322,7 @@ test.skipIf(!hasDom)('Agents is listed in the menu and the panel only while the 
   expect(panel()!.querySelector('[data-sbc-zone="top"]')!.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(panel()!.querySelector('[data-sbc-zone="bottom"]')!.compareDocumentPosition(row) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
   await rightClick(agentsHeading()!);
-  expect(toggles()).toEqual(['logo', 'search', 'new-message', 'board', 'drafts', 'agents', 'copy-prompt', 'feedback', 'shortcuts', 'theme']);
+  expect(toggles()).toEqual(['logo', 'search', 'new-message', 'board', 'drafts', 'starred', 'agents', 'projects', 'copy-prompt', 'feedback', 'shortcuts', 'theme']);
 });
 
 test.skipIf(!hasDom)('hiding Agents takes the whole section away, saves it, and a reload keeps it; showing puts it back', async () => {
@@ -381,4 +384,77 @@ test.skipIf(!hasDom)('the tour\'s sidebar shows Agents whatever is saved', async
   expect(agentsSection()).toBeNull();
   draw({ rememberSections: false });
   expect(agentsSection()).not.toBeNull();
+});
+
+const starredSection = () => document.querySelector('.ib-side [data-pinned-section]');
+const starredHeading = () => document.querySelector('.ib-side [data-sidebar-section="pinned"]');
+const projectsHeading = () => document.querySelector('.ib-side [data-sidebar-section="projects"]');
+const projectsBody = () => document.querySelector('.ib-side .ib-projs');
+const STARRED = [{ thread_id: 't_star', subject: 'A starred thread', project: { id: 'prj_a', name: 'alpha' }, author: { kind: 'agent', host: 'claude-code', session: 's', name: null }, section: 'quiet', unread: false, unseen: 0, read_at: null, resolved_at: null, back_from_archive: false, questions: { open: 0, holds_up: [] } } as unknown as InboxListRow];
+const PROJECTS = [{ id: 'prj_a', key: 'alpha-abc123', name: 'alpha', root: '/tmp/alpha', created_at: '2026-10-11T10:00:00.000Z', threads: 1, unread: 0, listed: 1 }];
+const WITH_BOTH: Partial<SidebarProps> = { pins: STARRED, projects: PROJECTS as never };
+
+test.skipIf(!hasDom)('the panel lists Starred and Projects between Top and Bottom, both on by default, nothing starred included', async () => {
+  draw({ projects: PROJECTS as never });
+  expect(projectsHeading()).not.toBeNull();
+  await act(async () => openSidebarCustomizer(null));
+  const rows = [...panel()!.querySelectorAll('[data-sbc-fixed]')].map((row) => row.getAttribute('data-sbc-fixed'));
+  expect(rows).toEqual(['logo', 'starred', 'projects', 'shortcuts', 'theme']);
+  for (const id of ['starred', 'projects']) {
+    const row = panel()!.querySelector(`[data-sbc-fixed="${id}"]`)!;
+    expect(row.textContent).toBe(id === 'starred' ? 'Starred' : 'Projects');
+    expect(row.closest('[data-sbc-zone]')).toBeNull();
+    expect(row.querySelector('.ib-sbc-grip')).toBeNull();
+    expect(row.querySelector('[role="switch"]')!.getAttribute('aria-checked')).toBe('true');
+  }
+});
+
+test.skipIf(!hasDom)('hiding Starred or Projects takes the whole section away, heading and all, and a reload keeps it', async () => {
+  draw(WITH_BOTH);
+  expect(starredHeading()).not.toBeNull();
+  expect(starredSection()).not.toBeNull();
+  await act(async () => openSidebarCustomizer(null));
+  await click(panel()!.querySelector('[data-sidebar-switch="starred"]'));
+  expect(starredHeading()).toBeNull();
+  expect(starredSection()).toBeNull();
+  expect(projectsHeading()).not.toBeNull();
+  expect(saves.at(-1)).toEqual({ ...INBOX_SIDEBAR_DEFAULT, hidden: ['starred'] });
+  await click(panel()!.querySelector('[data-sidebar-switch="projects"]'));
+  expect(projectsHeading()).toBeNull();
+  expect(projectsBody()).toBeNull();
+  expect(document.querySelector('.ib-side')!.textContent).not.toContain('alpha');
+  expect(saves.at(-1)).toEqual({ ...INBOX_SIDEBAR_DEFAULT, hidden: ['starred', 'projects'] });
+  reload(WITH_BOTH);
+  expect(starredHeading()).toBeNull();
+  expect(projectsHeading()).toBeNull();
+  await rightClick(document.querySelector('[data-board-nav]')!);
+  await click(document.querySelector('[data-sidebar-toggle="projects"]'));
+  expect(projectsHeading()).not.toBeNull();
+  expect(starredHeading()).toBeNull();
+});
+
+test.skipIf(!hasDom)('a layout saved before Starred and Projects were items shows both', async () => {
+  stored.set(SIDEBAR_LAYOUT_COOKIE, `${INBOX_SIDEBAR_DEFAULT.top.join(',')};${INBOX_SIDEBAR_DEFAULT.bottom.join(',')};feedback`);
+  draw(WITH_BOTH);
+  expect(document.querySelector('[data-feedback-nav]')).toBeNull();
+  expect(starredSection()).not.toBeNull();
+  expect(projectsHeading()).not.toBeNull();
+  await act(async () => hearSidebarEvent({ top: [...INBOX_SIDEBAR_DEFAULT.top], bottom: [...INBOX_SIDEBAR_DEFAULT.bottom], hidden: ['logo', 'agents'] }, 3));
+  expect(starredSection()).not.toBeNull();
+  expect(projectsHeading()).not.toBeNull();
+});
+
+test.skipIf(!hasDom)('on a phone: hidden Starred and Projects are gone from the sheet too', async () => {
+  window.matchMedia = ((query: string) => ({ media: query, matches: true, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {} })) as unknown as typeof window.matchMedia;
+  draw(WITH_BOTH, drawnSidebarItems({ board: true, reviews: false, shape: false, usage: false, phone: true }));
+  expect(starredHeading()).not.toBeNull();
+  expect(projectsHeading()).not.toBeNull();
+  await act(async () => openSidebarCustomizer(null));
+  expect(panel()!.hasAttribute('data-phone')).toBe(true);
+  await click(panel()!.querySelector('[data-sidebar-switch="starred"]'));
+  await click(panel()!.querySelector('[data-sidebar-switch="projects"]'));
+  expect(starredHeading()).toBeNull();
+  expect(starredSection()).toBeNull();
+  expect(projectsHeading()).toBeNull();
+  expect(projectsBody()).toBeNull();
 });

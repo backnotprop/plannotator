@@ -1657,6 +1657,491 @@ describe("an agent's snooze_thread of a linked machine's thread", () => {
   });
 });
 
+describe("a star or Priority on a linked machine's thread lives on that machine (approval inbox-linked-marks)", () => {
+  const dirs: string[] = [];
+  const sandboxWas = process.env.PLANNOTATOR_TEST_SANDBOX;
+  beforeAll(() => {
+    process.env.PLANNOTATOR_TEST_SANDBOX = "1";
+  });
+  afterAll(() => {
+    if (sandboxWas === undefined) delete process.env.PLANNOTATOR_TEST_SANDBOX;
+    else process.env.PLANNOTATOR_TEST_SANDBOX = sandboxWas;
+    for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
+  });
+  const scratch = (prefix: string) => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
+    dirs.push(dir);
+    return dir;
+  };
+  const start = (dataDir: string) => startInboxServer({ dataDir, binaryPath: null, phones: false, tailscale: scriptedTailscale().run });
+  const at = (port: number) => `http://127.0.0.1:${port}`;
+  const list = async (port: number) => (await (await fetch(`${at(port)}/api/inbox/threads?archived=exclude&snoozed=exclude&machines=1`)).json()) as Json;
+  /** The Starred rows of a merged list, each with the machine that holds it. */
+  const starred = async (port: number) => ((await list(port)).pins as Json[]).map((row) => [row.thread_id, row.machine]);
+  const post = async (port: number, path: string, body: Json) => {
+    const health = (await (await fetch(`${at(port)}/api/inbox/health`)).json()) as Json;
+    return fetch(`${at(port)}${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ serverSession: health.serverSession, ...body }) });
+  };
+  let keys = 0;
+  /** A's window writing to B through the forward, with the key the window adds. */
+  const forward = (port: number, machine: string, route: string, body: Json) => post(port, `/api/inbox/m/${machine}/${route}`, { idempotency_key: `window-star-${++keys}`, ...body });
+
+  test("starred from A, it is stored on B and shows on both; unstarred on B, A follows; order and Undo go to B; B away, it waits and lands", async () => {
+    const dataA = scratch("plannotator-star-linked-a-");
+    const dataB = scratch("plannotator-star-linked-b-");
+    const a = await start(dataA);
+    let b = await start(dataB);
+    let client: Client | null = null;
+    try {
+      const offered = (await (await fetch(`${at(b.port)}/api/inbox/machines/offer`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).json()) as Json;
+      const linked = await fetch(`${at(a.port)}/api/inbox/machines/link`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ link: offered.link, address: at(b.port), back: at(a.port) }) });
+      expect(linked.status).toBe(201);
+      const bId = (JSON.parse(readFileSync(join(dataA, "inbox", "machines.json"), "utf8")) as Json).links[0].id as string;
+      client = new Client({ name: "inbox-machines-star", version: "1.0.0" });
+      await client.connect(new StreamableHTTPClientTransport(new URL(`${at(b.port)}/mcp`)));
+      const project = scratch("plannotator-star-linked-project-");
+      const send = async (body: string) => ((await client!.callTool({ name: "send_message", arguments: { project_path: project, agent_session: "ses_b", body } })) as { structuredContent: { thread_id: string } }).structuredContent.thread_id;
+      const one = await send("First news");
+      const two = await send("Second news");
+      await waitFor("B's threads on A", async () => JSON.stringify((await list(a.port)).sections).includes(two));
+      const view = async () => (((await (await fetch(`${at(a.port)}/api/inbox/machines`)).json()) as Json).machines as Json[]).find((m) => m.id === bId)!;
+      expect((await view()).marks).toContain("star");
+      expect((await view()).marks).toContain("priority");
+
+      // Starred from A: one copy, on B. A's answer comes after its list of B was read, so its next read shows the star.
+      expect((await forward(a.port, bId, `threads/${one}/pin`, { pinned: true })).status).toBe(200);
+      expect(b.store.pins().map((pin) => pin.thread_id)).toEqual([one]);
+      expect(a.store.pins()).toEqual([]);
+      expect(existsSync(join(dataA, "inbox", "pins.json"))).toBe(false);
+      expect(await starred(a.port)).toEqual([[one, bId]]);
+      expect(await starred(b.port)).toEqual([[one, bId]]);
+
+      // Unstarred in B's own window: A's list follows, with no write of A's.
+      expect((await post(b.port, `/api/inbox/threads/${one}/pin`, { pinned: false })).status).toBe(200);
+      await waitFor("the star gone on A", async () => (await starred(a.port)).length === 0);
+
+      // Move and Undo from A act on B's order.
+      for (const id of [one, two]) expect((await forward(a.port, bId, `threads/${id}/pin`, { pinned: true })).status).toBe(200);
+      expect((await forward(a.port, bId, "pins", { order: [two, one] })).status).toBe(200);
+      expect(b.store.pins().map((pin) => pin.thread_id)).toEqual([two, one]);
+      const pinnedAt = b.store.pins()[1]!.pinned_at;
+      expect((await forward(a.port, bId, `threads/${one}/pin`, { pinned: false })).status).toBe(200);
+      expect((await forward(a.port, bId, "pins", { restore: { thread_id: one, index: 1, pinned_at: pinnedAt } })).status).toBe(200);
+      expect(b.store.pins().map((pin) => [pin.thread_id, pin.pinned_at])).toEqual([[two, expect.any(String)], [one, pinnedAt]]);
+      expect(await starred(a.port)).toEqual([[two, bId], [one, bId]]);
+
+      // B away: the star waits (202, nothing drawn here) and lands when B is back.
+      expect((await forward(a.port, bId, `threads/${two}/pin`, { pinned: false })).status).toBe(200);
+      await client.close();
+      client = null;
+      b.stop();
+      await waitFor("B offline on A", async () => (await view()).state === "offline", 30_000);
+      const held = await forward(a.port, bId, `threads/${two}/pin`, { pinned: true });
+      expect(held.status).toBe(202);
+      expect(a.store.pins()).toEqual([]);
+      b = await start(dataB);
+      await waitFor("the held star on B", () => b.store.pins().some((pin) => pin.thread_id === two), 45_000);
+      await waitFor("the star on A", async () => JSON.stringify(await starred(a.port)) === JSON.stringify([[one, bId], [two, bId]]), 15_000);
+    } finally {
+      await client?.close().catch(() => {});
+      a.stop();
+      b.stop();
+    }
+  }, 120_000);
+
+  test("added to Priority from A, it is stored on B and drawn on both; removed on B, A follows; B away, it waits and lands", async () => {
+    const dataA = scratch("plannotator-priority-linked-a-");
+    const dataB = scratch("plannotator-priority-linked-b-");
+    const a = await start(dataA);
+    let b = await start(dataB);
+    let client: Client | null = null;
+    try {
+      const offered = (await (await fetch(`${at(b.port)}/api/inbox/machines/offer`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).json()) as Json;
+      const linked = await fetch(`${at(a.port)}/api/inbox/machines/link`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ link: offered.link, address: at(b.port), back: at(a.port) }) });
+      expect(linked.status).toBe(201);
+      const bId = (JSON.parse(readFileSync(join(dataA, "inbox", "machines.json"), "utf8")) as Json).links[0].id as string;
+      client = new Client({ name: "inbox-machines-priority", version: "1.0.0" });
+      await client.connect(new StreamableHTTPClientTransport(new URL(`${at(b.port)}/mcp`)));
+      const project = scratch("plannotator-priority-linked-project-");
+      const send = async (body: string) => ((await client!.callTool({ name: "send_message", arguments: { project_path: project, agent_session: "ses_b", body } })) as { structuredContent: { thread_id: string } }).structuredContent.thread_id;
+      const one = await send("First news");
+      const two = await send("Second news");
+      await waitFor("B's threads on A", async () => JSON.stringify((await list(a.port)).sections).includes(two));
+      const view = async () => (((await (await fetch(`${at(a.port)}/api/inbox/machines`)).json()) as Json).machines as Json[]).find((m) => m.id === bId)!;
+      /** A thread's `priority` as a merged list draws it. */
+      const priorityOn = async (port: number, id: string) => ((await list(port)).sections as Json[]).flatMap((s) => s.threads as Json[]).find((row) => row.thread_id === id)?.priority ?? null;
+
+      // Added from A: one copy, on B, and A's answer comes after its list of B was read.
+      const added = await forward(a.port, bId, `threads/${one}/priority`, { priority: true });
+      expect(added.status).toBe(200);
+      expect(((await added.json()) as Json).before).toEqual({ at: null, off_at: null });
+      expect(b.store.priorities().threads.map((e) => e.thread_id)).toEqual([one]);
+      expect(a.store.priorities().threads).toEqual([]);
+      expect(existsSync(join(dataA, "inbox", "priority.json"))).toBe(false);
+      const first = b.store.priorities().threads[0]!.at;
+      expect(await priorityOn(a.port, one)).toEqual({ person: true, at: first, ask: null });
+      expect(await priorityOn(b.port, one)).toEqual({ person: true, at: first, ask: null });
+
+      // Removed in B's own window: A's list follows (`event: priority` on B's stream), with no write of A's.
+      expect((await post(b.port, `/api/inbox/threads/${one}/priority`, { priority: false })).status).toBe(200);
+      await waitFor("Priority gone on A", async () => (await priorityOn(a.port, one)) === null);
+
+      // B away: the add waits (202, nothing drawn here) and lands when B is back.
+      await client.close();
+      client = null;
+      b.stop();
+      await waitFor("B offline on A", async () => (await view()).state === "offline", 30_000);
+      const held = await forward(a.port, bId, `threads/${two}/priority`, { priority: true });
+      expect(held.status).toBe(202);
+      expect(a.store.priorities().threads).toEqual([]);
+      b = await start(dataB);
+      await waitFor("the held add on B", () => b.store.priorities().threads.some((e) => e.thread_id === two), 45_000);
+      await waitFor("the add on A", async () => (await priorityOn(a.port, two)) !== null, 15_000);
+    } finally {
+      await client?.close().catch(() => {});
+      a.stop();
+      b.stop();
+    }
+  }, 120_000);
+
+  test("an older machine (its list names no marks): its stars are not drawn here and it is not offered a star; one that names `star` is", async () => {
+    const thread = "msg_01K0000000000000000000000S";
+    for (const marks of [undefined, ["star"]]) {
+      const id = "ibx_01K0000000000000000000000S";
+      const door = Bun.serve({
+        hostname: "127.0.0.1",
+        port: 0,
+        idleTimeout: 0,
+        fetch(req) {
+          const route = new URL(req.url).pathname.replace("/api/inbox/device/", "");
+          if (route === "health") return Response.json({ ok: true, inbox_id: id, machine_links: 1, version: "0.28.62" });
+          if (route === "events") return new Response(new ReadableStream({ start: (c) => c.enqueue(new TextEncoder().encode(`event: hello\ndata: {"cursor":0}\n\n`)) }), { headers: { "Content-Type": "text/event-stream" } });
+          const row = { thread_id: thread, project: { id: "prj_x" }, resolved_at: null };
+          if (route === "threads") return Response.json({ cursor: 0, sections: [{ id: "new", threads: [row] }], projects: [], pins: [row], ...(marks ? { marks } : {}) });
+          return Response.json({ code: "device_route_not_found", error: "Not a phone route." }, { status: 404 });
+        },
+      });
+      const dataDir = scratch("plannotator-star-linked-older-");
+      mkdirSync(join(dataDir, "inbox"), { recursive: true });
+      writeFileSync(join(dataDir, "inbox", "machines.json"), JSON.stringify({ v: 1, self: { id: "ibx_01K00000000000000000000009" }, links: [{ id, name: "Mini", token: "tok_0", transport: { kind: "tailnet", url: at(door.port as number) }, device_id: null, linked_at: "2026-10-30T00:00:00Z" }] }), { mode: 0o600 });
+      const inbox = await start(dataDir);
+      try {
+        const view = async () => (((await (await fetch(`${at(inbox.port)}/api/inbox/machines`)).json()) as Json).machines as Json[]).find((m) => m.id === id);
+        await waitFor("that machine's list", async () => typeof (await view())?.list_cursor === "number");
+        expect((await view())!.marks).toEqual(marks ?? []);
+        expect(await starred(inbox.port)).toEqual(marks ? [[thread, id]] : []);
+      } finally {
+        inbox.stop();
+        door.stop(true);
+      }
+    }
+  });
+  test("tagged from A by name, B makes the tag and one tag of that name holds both machines' threads; out, rename and B away the same way", async () => {
+    const dataA = scratch("plannotator-tags-linked-a-");
+    const dataB = scratch("plannotator-tags-linked-b-");
+    const a = await start(dataA);
+    let b = await start(dataB);
+    let client: Client | null = null;
+    try {
+      const offered = (await (await fetch(`${at(b.port)}/api/inbox/machines/offer`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).json()) as Json;
+      const linked = await fetch(`${at(a.port)}/api/inbox/machines/link`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ link: offered.link, address: at(b.port), back: at(a.port) }) });
+      expect(linked.status).toBe(201);
+      const bId = (JSON.parse(readFileSync(join(dataA, "inbox", "machines.json"), "utf8")) as Json).links[0].id as string;
+      client = new Client({ name: "inbox-machines-tags", version: "1.0.0" });
+      await client.connect(new StreamableHTTPClientTransport(new URL(`${at(b.port)}/mcp`)));
+      const project = scratch("plannotator-tags-linked-project-");
+      const send = async (body: string) => ((await client!.callTool({ name: "send_message", arguments: { project_path: project, agent_session: "ses_b", body } })) as { structuredContent: { thread_id: string } }).structuredContent.thread_id;
+      const one = await send("First news");
+      const two = await send("Second news");
+      await waitFor("B's threads on A", async () => JSON.stringify((await list(a.port)).sections).includes(two));
+      const view = async () => (((await (await fetch(`${at(a.port)}/api/inbox/machines`)).json()) as Json).machines as Json[]).find((m) => m.id === bId)!;
+      expect((await view()).marks).toContain("tags");
+      const aId = (await list(a.port)).self as string;
+      const tagsOf = async (port: number, id: string) => ((await list(port)).sections as Json[]).flatMap((s) => s.threads as Json[]).find((row) => row.thread_id === id)?.tags ?? [];
+      const live = (store: typeof a.store) => store.initiatives().filter((tag) => tag.deleted_at === null);
+
+      // A's own Release, with A's own thread in it.
+      const release = a.store.createInitiative({ name: "Release", by: { kind: "person" } });
+      const ownProject = a.store.ensureProject({ name: "app", root: scratch("plannotator-tags-linked-own-") });
+      const mine = a.store.sendMessage({ project_id: ownProject.id, author: { kind: "agent" as const, host: "claude-code", session: "ses_a", name: null }, body: "Own news" }).message.thread_id;
+      expect((await post(a.port, `/api/inbox/threads/${mine}/tags`, { tag: release.id, on: true })).status).toBe(200);
+
+      // Tagged from A by name: B holds no Release, so B makes it (the person's) and the thread is in it there only.
+      expect((await forward(a.port, bId, `threads/${one}/tags`, { name: "Release", on: true })).status).toBe(200);
+      const bRelease = live(b.store).find((tag) => tag.name === "Release")!;
+      expect(bRelease.created_by).toEqual({ kind: "person" });
+      expect(b.store.threadTags(one)).toEqual([bRelease.id]);
+      expect(live(a.store).map((tag) => tag.id)).toEqual([release.id]);
+      // The same name, cased and spaced otherwise, is the same tag there: nothing more is made.
+      expect((await forward(a.port, bId, `threads/${two}/tags`, { name: " RELEASE ", on: true })).status).toBe(200);
+      expect(live(b.store).map((tag) => tag.id)).toEqual([bRelease.id]);
+
+      // A's merged list: one Release, its id on each machine; both machines' threads are in it.
+      expect(((await list(a.port)).tags as Json[]).map((tag) => [tag.id, tag.name, tag.machines])).toEqual([[release.id, "Release", { [aId]: release.id, [bId]: bRelease.id }]]);
+      for (const id of [mine, one, two]) expect(await tagsOf(a.port, id)).toEqual([release.id]);
+      // B's own window: the same tag, B's id standing for it, holding the same threads.
+      await waitFor("A's thread in B's Release", async () => JSON.stringify(await tagsOf(b.port, mine)) === JSON.stringify([bRelease.id]));
+      expect(await tagsOf(b.port, one)).toEqual([bRelease.id]);
+      expect(((await list(b.port)).tags as Json[]).map((tag) => tag.id)).toEqual([bRelease.id]);
+
+      // Out from A, by name, on B.
+      expect((await forward(a.port, bId, `threads/${two}/tags`, { name: "Release", on: false })).status).toBe(200);
+      expect(b.store.threadTags(two)).toEqual([]);
+      expect(await tagsOf(a.port, two)).toEqual([]);
+      // Out in B's own window: A's list follows (`event: tags` on B's stream), with no write of A's.
+      expect((await post(b.port, `/api/inbox/threads/${one}/tags`, { tag: bRelease.id, on: false })).status).toBe(200);
+      await waitFor("the tag gone on A", async () => (await tagsOf(a.port, one)).length === 0);
+
+      // Renamed from A's sidebar: this Inbox's tag, then B's by its id there.
+      expect((await post(a.port, `/api/inbox/initiatives/${release.id}`, { op: "rename", name: "Ship" })).status).toBe(200);
+      expect((await forward(a.port, bId, `initiatives/${bRelease.id}`, { op: "rename", name: "Ship" })).status).toBe(200);
+      expect(b.store.initiative(bRelease.id)!.name).toBe("Ship");
+      expect(((await list(a.port)).tags as Json[]).map((tag) => [tag.name, tag.machines])).toEqual([["Ship", { [aId]: release.id, [bId]: bRelease.id }]]);
+
+      // B away: a tag waits (202, nothing made here) and lands, made there by name.
+      await client.close();
+      client = null;
+      b.stop();
+      await waitFor("B offline on A", async () => (await view()).state === "offline", 30_000);
+      const held = await forward(a.port, bId, `threads/${two}/tags`, { name: "Billing", on: true });
+      expect(held.status).toBe(202);
+      expect(live(a.store).some((tag) => tag.name === "Billing")).toBe(false);
+      b = await start(dataB);
+      await waitFor("the held tag on B", () => live(b.store).some((tag) => tag.name === "Billing" && b.store.threadTags(two).includes(tag.id)), 45_000);
+      await waitFor("Billing on A, B's id standing for it", async () => ((await list(a.port)).tags as Json[]).some((tag) => tag.name === "Billing" && JSON.stringify(tag.machines) === JSON.stringify({ [bId]: tag.id })), 15_000);
+      expect(live(a.store).some((tag) => tag.name === "Billing")).toBe(false);
+    } finally {
+      await client?.close().catch(() => {});
+      a.stop();
+      b.stop();
+    }
+  }, 120_000);
+
+  test("a tag made in A's Board Tags dialog, with no thread in it, is listed on B by name; renamed, deleted and brought back from B, on A", async () => {
+    const dataA = scratch("plannotator-tags-board-a-");
+    const dataB = scratch("plannotator-tags-board-b-");
+    const a = await start(dataA);
+    const b = await start(dataB);
+    try {
+      const offered = (await (await fetch(`${at(b.port)}/api/inbox/machines/offer`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).json()) as Json;
+      const linked = await fetch(`${at(a.port)}/api/inbox/machines/link`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ link: offered.link, address: at(b.port), back: at(a.port) }) });
+      expect(linked.status).toBe(201);
+      const aId = (await list(a.port)).self as string;
+      const tagsOn = async (port: number) => ((await list(port)).tags as Json[]).map((tag) => [tag.name, tag.machines]);
+      const made = await post(a.port, "/api/inbox/initiatives", { name: "Roadmap" });
+      expect(made.status).toBe(200);
+      const roadmap = ((await made.json()) as Json).initiative as Json;
+      await waitFor("A's Roadmap on B", async () => JSON.stringify(await tagsOn(b.port)) === JSON.stringify([["Roadmap", { [aId]: roadmap.id }]]), 30_000);
+      expect(b.store.initiatives()).toEqual([]);
+
+      expect((await forward(b.port, aId, `initiatives/${roadmap.id}`, { op: "rename", name: "Plan" })).status).toBe(200);
+      expect(a.store.initiative(roadmap.id as string)!.name).toBe("Plan");
+      await waitFor("the rename on B", async () => JSON.stringify(await tagsOn(b.port)) === JSON.stringify([["Plan", { [aId]: roadmap.id }]]), 30_000);
+
+      expect((await forward(b.port, aId, `initiatives/${roadmap.id}`, { op: "delete" })).status).toBe(200);
+      expect(a.store.initiative(roadmap.id as string)!.deleted_at).not.toBeNull();
+      await waitFor("gone on B", async () => (await tagsOn(b.port)).length === 0, 30_000);
+      expect((await forward(b.port, aId, `initiatives/${roadmap.id}`, { op: "restore" })).status).toBe(200);
+      await waitFor("back on B", async () => JSON.stringify(await tagsOn(b.port)) === JSON.stringify([["Plan", { [aId]: roadmap.id }]]), 30_000);
+    } finally {
+      a.stop();
+      b.stop();
+    }
+  }, 120_000);
+
+  test("an older machine (its list names no `tags` mark): its rows are in no tag here and its tags are not listed; one that names it joins by name", async () => {
+    const thread = "msg_01K0000000000000000000000T";
+    const farTag = { id: "ini_01K0000000000000000000000F", name: "release", created_at: "2026-11-12T09:00:00.000Z", created_by: { kind: "person" }, updated_at: "2026-11-12T09:00:00.000Z", deleted_at: null };
+    for (const marks of [["star", "priority"], ["star", "priority", "tags"]]) {
+      const id = "ibx_01K0000000000000000000000T";
+      const door = Bun.serve({
+        hostname: "127.0.0.1",
+        port: 0,
+        idleTimeout: 0,
+        fetch(req) {
+          const route = new URL(req.url).pathname.replace("/api/inbox/device/", "");
+          if (route === "health") return Response.json({ ok: true, inbox_id: id, machine_links: 1, version: "0.28.62" });
+          if (route === "events") return new Response(new ReadableStream({ start: (c) => c.enqueue(new TextEncoder().encode(`event: hello\ndata: {"cursor":0}\n\n`)) }), { headers: { "Content-Type": "text/event-stream" } });
+          const row = { thread_id: thread, project: { id: "prj_x" }, resolved_at: null, section: "new", last_at: "2026-11-12T09:00:00.000Z", tags: [farTag.id] };
+          if (route === "threads") return Response.json({ cursor: 0, sections: [{ id: "new", threads: [row] }], projects: [], pins: [], marks, tags: [farTag] });
+          return Response.json({ code: "device_route_not_found", error: "Not a phone route." }, { status: 404 });
+        },
+      });
+      const dataDir = scratch("plannotator-tags-linked-older-");
+      mkdirSync(join(dataDir, "inbox"), { recursive: true });
+      writeFileSync(join(dataDir, "inbox", "machines.json"), JSON.stringify({ v: 1, self: { id: "ibx_01K00000000000000000000009" }, links: [{ id, name: "Mini", token: "tok_0", transport: { kind: "tailnet", url: at(door.port as number) }, device_id: null, linked_at: "2026-10-30T00:00:00Z" }] }), { mode: 0o600 });
+      const inbox = await start(dataDir);
+      try {
+        const own = inbox.store.createInitiative({ name: "Release", by: { kind: "person" } });
+        const view = async () => (((await (await fetch(`${at(inbox.port)}/api/inbox/machines`)).json()) as Json).machines as Json[]).find((m) => m.id === id);
+        await waitFor("that machine's list", async () => typeof (await view())?.list_cursor === "number");
+        const model = await list(inbox.port);
+        const row = (model.sections as Json[]).flatMap((s) => s.threads as Json[]).find((r) => r.thread_id === thread)!;
+        const self = model.self as string;
+        if (marks.includes("tags")) {
+          expect(row.tags).toEqual([own.id]);
+          expect((model.tags as Json[]).map((tag) => [tag.id, tag.machines])).toEqual([[own.id, { [self]: own.id, [id]: farTag.id }]]);
+        } else {
+          expect(row.tags).toBeUndefined();
+          expect((model.tags as Json[]).map((tag) => [tag.id, tag.machines])).toEqual([[own.id, { [self]: own.id }]]);
+        }
+      } finally {
+        inbox.stop();
+        door.stop(true);
+      }
+    }
+  });
+});
+
+describe("an agent's face and given name on a linked machine live on that machine (approval inbox-linked-marks)", () => {
+  const dirs: string[] = [];
+  const sandboxWas = process.env.PLANNOTATOR_TEST_SANDBOX;
+  beforeAll(() => {
+    process.env.PLANNOTATOR_TEST_SANDBOX = "1";
+  });
+  afterAll(() => {
+    if (sandboxWas === undefined) delete process.env.PLANNOTATOR_TEST_SANDBOX;
+    else process.env.PLANNOTATOR_TEST_SANDBOX = sandboxWas;
+    for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
+  });
+  const scratch = (prefix: string) => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
+    dirs.push(dir);
+    return dir;
+  };
+  const start = (dataDir: string) => startInboxServer({ dataDir, binaryPath: null, phones: false, tailscale: scriptedTailscale().run });
+  const at = (port: number) => `http://127.0.0.1:${port}`;
+  const list = async (port: number) => (await (await fetch(`${at(port)}/api/inbox/threads?archived=exclude&snoozed=exclude&machines=1`)).json()) as Json;
+  /** The faces a merged list carries for one machine's agents. */
+  const facesOn = async (port: number, machine: string) => ((((await list(port)).agents as Json[]).find((group) => group.machine === machine)?.faces ?? null) as Json | null);
+  const ownFaces = async (port: number) => ((await (await fetch(`${at(port)}/api/inbox/agent-faces`)).json()) as Json).faces as Json;
+  const post = async (port: number, path: string, body: Json) => {
+    const health = (await (await fetch(`${at(port)}/api/inbox/health`)).json()) as Json;
+    return fetch(`${at(port)}${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ serverSession: health.serverSession, ...body }) });
+  };
+  let keys = 0;
+  /** A's window writing to B through the forward, with the key the window adds. */
+  const forward = (port: number, machine: string, body: Json) => post(port, `/api/inbox/m/${machine}/agent-faces`, { idempotency_key: `window-face-${++keys}`, ...body });
+  /** A's window stream, read until `want` is heard (or the time is up): the frames heard. */
+  const heard = async (port: number, want: (event: string) => boolean, act: () => Promise<unknown>) => {
+    const abort = new AbortController();
+    const timer = setTimeout(() => abort.abort(), 15_000);
+    const events: string[] = [];
+    try {
+      const response = await fetch(`${at(port)}/api/inbox/events?machines=1`, { signal: abort.signal });
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let acted = false;
+      for await (const chunk of response.body as unknown as AsyncIterable<Uint8Array>) {
+        buffer += decoder.decode(chunk, { stream: true });
+        let cut: number;
+        while ((cut = buffer.indexOf("\n\n")) >= 0) {
+          const event = /^event: (.+)$/m.exec(buffer.slice(0, cut))?.[1] ?? "message";
+          buffer = buffer.slice(cut + 2);
+          events.push(event);
+          if (!acted && event === "machines") {
+            acted = true;
+            await act();
+          }
+          if (acted && want(event)) return events;
+        }
+      }
+    } catch {
+      // Timed out: the caller's expectation fails.
+    } finally {
+      clearTimeout(timer);
+      abort.abort();
+    }
+    return events;
+  };
+
+  test("set from A on B's agent: stored only on B, shown by both, B's own change reaches A without a read of A's; B away, it waits and lands", async () => {
+    const dataA = scratch("plannotator-face-linked-a-");
+    const dataB = scratch("plannotator-face-linked-b-");
+    const a = await start(dataA);
+    let b = await start(dataB);
+    try {
+      const offered = (await (await fetch(`${at(b.port)}/api/inbox/machines/offer`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).json()) as Json;
+      const linked = await fetch(`${at(a.port)}/api/inbox/machines/link`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ link: offered.link, address: at(b.port), back: at(a.port) }) });
+      expect(linked.status).toBe(201);
+      const bId = (JSON.parse(readFileSync(join(dataA, "inbox", "machines.json"), "utf8")) as Json).links[0].id as string;
+      const view = async () => (((await (await fetch(`${at(a.port)}/api/inbox/machines`)).json()) as Json).machines as Json[]).find((m) => m.id === bId)!;
+      await waitFor("B's list on A", async () => typeof (await view()).list_cursor === "number");
+      expect((await view()).marks).toEqual(expect.arrayContaining(["agent-face", "agent-name"]));
+      // Nothing set yet: B's group carries its (empty) faces, so A knows B keeps them.
+      expect(await facesOn(a.port, bId)).toEqual({});
+
+      // A face from A: one copy, in B's file. A's answer comes after its list of B was read, so its next read shows it.
+      const set = await forward(a.port, bId, { agent: "ses_b", sessions: ["ses_b_before"], face: "glass-red" });
+      expect(set.status).toBe(200);
+      expect((((await set.json()) as Json).faces as Json).ses_b.face).toBe("glass-red");
+      expect((await ownFaces(b.port)).ses_b).toEqual({ face: "glass-red", sessions: ["ses_b_before"] });
+      expect((await ownFaces(a.port)).ses_b).toBeUndefined();
+      expect(existsSync(join(dataA, "inbox", "agent-faces.json"))).toBe(false);
+      expect(((await facesOn(a.port, bId)) as Json).ses_b.face).toBe("glass-red");
+      // This Inbox's own group never carries faces to its own window (it reads them apart).
+      expect(((await list(a.port)).agents as Json[])[0]!.faces).toBeUndefined();
+
+      // A given name from A, in the same entry on B.
+      expect((await forward(a.port, bId, { agent: "ses_b", name: "Retry worker" })).status).toBe(200);
+      expect((await ownFaces(b.port)).ses_b).toEqual({ face: "glass-red", sessions: ["ses_b_before"], name: "Retry worker" });
+      expect(((await facesOn(a.port, bId)) as Json).ses_b.name).toBe("Retry worker");
+
+      // Changed in B's own window: A's windows hear `agent-faces` and A's list follows, with no write of A's.
+      const frames = await heard(a.port, (event) => event === "agent-faces", () => post(b.port, "/api/inbox/agent-faces", { agent: "ses_b", face: "yellow" }));
+      expect(frames).toContain("agent-faces");
+      expect(((await facesOn(a.port, bId)) as Json).ses_b.face).toBe("yellow");
+
+      // B away: the face waits in A's outbox (202, nothing stored on A) and lands when B is back.
+      b.stop();
+      await waitFor("B offline on A", async () => (await view()).state === "offline", 30_000);
+      const held = await forward(a.port, bId, { agent: "ses_b", face: "glass-teal" });
+      expect(held.status).toBe(202);
+      expect(existsSync(join(dataA, "inbox", "agent-faces.json"))).toBe(false);
+      b = await start(dataB);
+      await waitFor("the held face on B", async () => (await ownFaces(b.port)).ses_b?.face === "glass-teal", 45_000);
+      await waitFor("the face on A", async () => ((await facesOn(a.port, bId)) as Json | null)?.ses_b?.face === "glass-teal", 15_000);
+      expect((await ownFaces(a.port)).ses_b).toBeUndefined();
+    } finally {
+      a.stop();
+      b.stop();
+    }
+  }, 120_000);
+
+  test("an older machine (its list names no agent marks, its agents group no faces): its group here carries none", async () => {
+    const id = "ibx_01K0000000000000000000000F";
+    for (const marks of [["star"], ["star", "agent-face", "agent-name"]]) {
+      const faces: Json = marks.length > 1 ? { faces: { ses_m: { face: "glass-blue", sessions: [], name: "Docs pass" } }, faces_rev: 3 } : {};
+      const door = Bun.serve({
+        hostname: "127.0.0.1",
+        port: 0,
+        idleTimeout: 0,
+        fetch(req) {
+          const route = new URL(req.url).pathname.replace("/api/inbox/device/", "");
+          if (route === "health") return Response.json({ ok: true, inbox_id: id, machine_links: 1, version: "0.29.0" });
+          if (route === "events") return new Response(new ReadableStream({ start: (c) => c.enqueue(new TextEncoder().encode(`event: hello\ndata: {"cursor":0}\n\n`)) }), { headers: { "Content-Type": "text/event-stream" } });
+          const agent = { id: "ses_m", session: "ses_m", host: "pi", state: "idle", project: null };
+          if (route === "threads") return Response.json({ cursor: 0, sections: [], projects: [], marks, agents: [{ agents: [agent], total: 1, ended_today: 0, ...faces }] });
+          return Response.json({ code: "device_route_not_found", error: "Not a phone route." }, { status: 404 });
+        },
+      });
+      const dataDir = scratch("plannotator-face-linked-older-");
+      mkdirSync(join(dataDir, "inbox"), { recursive: true });
+      writeFileSync(join(dataDir, "inbox", "machines.json"), JSON.stringify({ v: 1, self: { id: "ibx_01K00000000000000000000008" }, links: [{ id, name: "Mini", token: "tok_0", transport: { kind: "tailnet", url: at(door.port as number) }, device_id: null, linked_at: "2026-10-30T00:00:00Z" }] }), { mode: 0o600 });
+      const inbox = await start(dataDir);
+      try {
+        const view = async () => (((await (await fetch(`${at(inbox.port)}/api/inbox/machines`)).json()) as Json).machines as Json[]).find((m) => m.id === id);
+        await waitFor("that machine's list", async () => typeof (await view())?.list_cursor === "number");
+        expect((await view())!.marks).toEqual(marks);
+        expect(await facesOn(inbox.port, id)).toEqual(marks.length > 1 ? faces.faces : null);
+      } finally {
+        inbox.stop();
+        door.stop(true);
+      }
+    }
+  });
+});
+
 describe("linked machines through the forward, over the tailnet", () => {
   const MAGIC = "laptop.tail0000.ts.net";
   const OWNER = "owner@example.com";

@@ -15,7 +15,7 @@ import { INBOX_HOST_NAMES, type InboxMessageWire, type InboxParticipant, type In
 import { sanitizeMentionLabel, type MentionPerson } from '@plannotator/ui/utils/mentions';
 import type { TagMode, TaggableModel, TaggableSession } from './api';
 import { shortLabel } from './sessionLabels';
-import { deliveryLine, uncertainItem, waitInputs, type DeliveryLine, type RecipientConnection } from './deliveryLine';
+import { deliveryLine, handedItem, uncertainItem, waitInputs, type DeliveryLine, type RecipientConnection } from './deliveryLine';
 
 /** The longest session label an `@` token carries, in characters; a longer one is cut in the middle. */
 export const TAG_LABEL_MAX = 40;
@@ -307,6 +307,7 @@ export function tagDeliveryLine(
     wakes: true,
     sendingNow: !!tag.deliver_now_at,
     connection,
+    handed: !!messageId && handedItem(connection, messageId),
     ...(messageId ? waitInputs(connection, messageId, { ...tag, into_turn: tag.delivery?.into_turn ?? null }) : {}),
   });
 }
@@ -332,19 +333,6 @@ export function threadParticipants(thread: InboxThread): InboxParticipant[] {
     for (const tag of messageTags(message)) add(tag.host, tag.session, tag.name);
   }
   return out;
-}
-
-/**
- * The names of a thread's participants, for the head ("Claude Code and Pi"):
- * each agent once, two sessions of one agent named once.
- */
-export function participantsWords(participants: readonly InboxParticipant[]): string {
-  const names: string[] = [];
-  for (const p of participants) {
-    const name = agentName(p.host, p.name);
-    if (!names.includes(name)) names.push(name);
-  }
-  return namesList(names);
 }
 
 /**

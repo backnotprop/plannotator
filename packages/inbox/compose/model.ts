@@ -74,12 +74,12 @@ export function composeGroups(
   return [{ ...lead, sessions }, ...ordered.filter((_, i) => i !== at)];
 }
 
-/** The groups narrowed by the picker's filter: host, label, project name or path, and the last thread's subject. */
-export function filterGroups(groups: readonly ComposeGroup[], query: string): ComposeGroup[] {
+/** The groups narrowed by the picker's filter: host, label, project name or path, the last thread's subject, and `machine` (its name, in To's switch). */
+export function filterGroups(groups: readonly ComposeGroup[], query: string, machine = ''): ComposeGroup[] {
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
   if (words.length === 0) return [...groups];
   const matches = (target: ComposeTarget) => {
-    const hay = [hostLabel(target.host), target.host, target.label ?? '', target.project.name, target.project.root, target.last_thread?.subject ?? ''].join(' ').toLowerCase();
+    const hay = [hostLabel(target.host), target.host, target.label ?? '', target.project.name, target.project.root, target.last_thread?.subject ?? '', machine].join(' ').toLowerCase();
     return words.every((word) => hay.includes(word));
   };
   return groups.map((group) => ({ ...group, sessions: group.sessions.filter(matches) })).filter((group) => group.sessions.length > 0);
@@ -342,7 +342,7 @@ export function composeActions(query: string, targets: readonly ComposeTarget[],
   // "New review…" (Settings → Capabilities → Code review): "review", "pull", and "new" as New message's own.
   if (reviews && words.some((word) => callsReview(word) || word === 'new')) out.push({ kind: 'review' });
   const named = targets.filter((target) => {
-    const hay = `${hostLabel(target.host)} ${target.host} ${target.project.name}`.toLowerCase();
+    const hay = `${hostLabel(target.host)} ${target.host} ${target.label ?? ''} ${target.project.name}`.toLowerCase();
     return words.every((word) => hay.includes(word) || callsAction(word));
   });
   // Only when a word names the session (not the action words alone).
@@ -352,7 +352,11 @@ export function composeActions(query: string, targets: readonly ComposeTarget[],
 }
 
 export const actionLabel = (action: ComposeAction): string =>
-  action.kind === 'new' ? 'New message…' : action.kind === 'review' ? 'New review…' : `Message ${hostLabel(action.target.host)} in ${action.target.project.name}`;
+  action.kind === 'new'
+    ? 'New message…'
+    : action.kind === 'review'
+      ? 'New review…'
+      : `Message ${hostLabel(action.target.host)}${action.target.label ? ` · ${action.target.label}` : ''} in ${action.target.project.name}`;
 
 // ── Launch: start a new session from To (behind `inboxLaunch.enabled`, on unless false; docs/agent-guides/inbox-launch.md) ──
 
@@ -453,27 +457,14 @@ export function defaultStartProject(launch: InboxComposeLaunch | undefined, curr
 }
 
 /**
- * The picker's "Start a new session in <project>" block for a filter: the
- * project the caption names and the agents to offer. Words naming an agent
- * ("claude") narrow the rows; the other words pick the project ("billing"
- * moves the caption to billing-svc). No match: no block.
+ * To's "<agent> New session" when the caption's project is on a machine without that agent (To offers every
+ * machine's agents): the project it starts in instead, from `groups` (the folder menu's for that agent). An awake
+ * machine's first, as the default start; the same folder, else a project of the same name, first of all. Null: no
+ * machine offers one.
  */
-export function startBlock(
-  launch: InboxComposeLaunch | undefined,
-  current: { id: string | null; root: string | null } | null,
-  query: string,
-): { project: LaunchProject; agents: InboxComposeLaunch['agents'] } | null {
-  const fallback = defaultStartProject(launch, current);
-  if (!launch || !fallback || launch.agents.length === 0) return null;
-  const all = queryWords(query);
-  const agentHay = (name: string) => `${name} new session`.toLowerCase();
-  const namesAgent = (word: string) => launch.agents.some((a) => agentHay(a.name).includes(word));
-  const projectWords = all.filter((word) => !namesAgent(word));
-  const project = projectWords.length === 0 ? fallback : launch.projects.find((p) => projectWords.every((w) => `${p.name} ${p.root}`.toLowerCase().includes(w)));
-  if (!project) return null;
-  const agentWords = all.filter(namesAgent);
-  const agents = launch.agents.filter((a) => agentWords.every((w) => agentHay(a.name).includes(w)));
-  return agents.length ? { project, agents } : null;
+export function projectWithAgent(groups: readonly LaunchGroup[], picked: { root: string; name: string }): MachineLaunchProject | null {
+  const projects = [...groups.filter((g) => !g.asleep), ...groups.filter((g) => g.asleep)].flatMap((g) => g.projects);
+  return projects.find((p) => p.root === picked.root) ?? projects.find((p) => p.name === picked.name) ?? projects[0] ?? null;
 }
 
 /** The folder menu's rows for its filter: name or path. */
@@ -502,10 +493,12 @@ export interface LaunchMachine {
   launch?: boolean | null;
 }
 
-/** A linked machine's last good sessions read (its launch block and home), kept while it sleeps. */
+/** A linked machine's last good sessions read (its launch block, home and live sessions), kept while it sleeps. */
 export interface MachineLaunchRead {
   launch?: InboxComposeLaunch;
   home: string | null;
+  /** Its live sessions by project, for To's machine switch; absent from a read made before it kept them. */
+  projects?: InboxComposeProject[];
 }
 
 /** A folder-menu project with the machine it is on: absent for this computer's. */
@@ -551,7 +544,9 @@ export function lastLaunchAgent(rows: readonly { created_at: string; run?: unkno
 
 /** "+" on a project row's tip and name (F1, F4): the project, its machine when it is another, and that it waits while asleep. */
 export function newSessionTip(name: string, machineName: string | null, asleep: boolean): string {
-  return `New session in ${name}${machineName ? ` · ${machineName}` : ''}${asleep ? ", starts when it's back" : ''}`;
+  // The window's project names already carry another machine's name wherever it shows several (`machineProjectNames`).
+  const named = !machineName || name.endsWith(` · ${machineName}`) ? name : `${name} · ${machineName}`;
+  return `New session in ${named}${asleep ? ", starts when it's back" : ''}`;
 }
 
 /** "+" on project rows at all (F1-F7): while agents can be started from New message here. */
@@ -562,12 +557,19 @@ export function projectPlusOn(launchEnabled: boolean | undefined): boolean {
 /**
  * "+" on one project row: hidden where it can't start anything, so a press never opens New message with an empty To
  * or a folder to pick again. That machine's launch block (this computer's, or a linked machine's last read): no
- * agent to start there, or the project's folder isn't there any more. A linked machine with launch off (`launch:
- * false`) has none either. Not read yet, or asleep: shown (F4: it starts when the machine is back).
+ * agent to start there, or the project's folder isn't there any more. A linked machine with launch off has none
+ * either: its last read says so when there is one (a read with no launch block), else its health (`launch: false`,
+ * as of the link's last connect). Not read yet: shown while awake (New message reads it), not while asleep, since
+ * nothing says what could start there. Asleep and read: shown (F4: it starts when the machine is back).
  */
-export function projectCanStart(project: { id: string; root: string }, block: InboxComposeLaunch | null | undefined, machineLaunch?: boolean | null): boolean {
-  if (machineLaunch === false) return false;
-  if (!block) return true;
+export function projectCanStart(
+  project: { id: string; root: string },
+  block: InboxComposeLaunch | null | undefined,
+  machineLaunch?: boolean | null,
+  linked?: { read: boolean; asleep: boolean },
+): boolean {
+  if (linked?.read ? !block : machineLaunch === false) return false;
+  if (!block) return !linked?.asleep;
   if (block.agents.length === 0) return false;
   const known = block.projects.find((p) => p.id === project.id) ?? block.projects.find((p) => p.root === project.root);
   return known?.exists !== false;
@@ -581,6 +583,15 @@ export function launchHistory(rows: readonly { machine?: string; project: { id: 
     if (!had || row.created_at > had.at) out.set(row.machine, { at: row.created_at, project: row.project.id });
   }
   return out;
+}
+
+/** Why nothing starts on a linked machine from here, in its words: launch is off there, or its Inbox is too old to say. Null: it can. */
+export function machineLaunchNotice(m: LaunchMachine, read: MachineLaunchRead | undefined): string | null {
+  // Its health says whether launch is on there, but only as of the link's last connect; the machine's own switch
+  // (Settings → Agents) is live, so its last sessions read, which carries a launch block only while on, decides.
+  const off = m.launch === true || m.launch === false ? (read ? read.launch === undefined : m.launch === false) : false;
+  if (off) return inboxMachineLaunchWords(m.name, 'off');
+  return m.launch === null || m.launch === undefined || m.state === 'needs_update' ? inboxMachineLaunchWords(m.name, 'update') : null;
 }
 
 /**
@@ -623,11 +634,7 @@ export function launchGroups(input: {
   const theirs = linked.map((m, i) => {
     const asleep = m.state === 'offline';
     const read = reads.get(m.id);
-    // Its health says whether launch is on there, but only as of the link's last connect; the machine's own switch
-    // (Settings → Agents) is live, so its last sessions read, which carries a launch block only while on, decides.
-    const off = m.launch === true || m.launch === false ? (read ? read.launch === undefined : m.launch === false) : false;
-    const words = off ? inboxMachineLaunchWords(m.name, 'off') : m.launch === null || m.launch === undefined || m.state === 'needs_update' ? inboxMachineLaunchWords(m.name, 'update') : null;
-    return { group: groupOf(m.id, m.name, false, asleep, read?.launch, read?.home ?? null, words), order: i + 1, id: m.id };
+    return { group: groupOf(m.id, m.name, false, asleep, read?.launch, read?.home ?? null, machineLaunchNotice(m, read)), order: i + 1, id: m.id };
   });
   const all = [{ group: mine, order: 0, id: self.id ?? '' }, ...theirs].filter((g): g is { group: LaunchGroup; order: number; id: string } => {
     const group = g.group;

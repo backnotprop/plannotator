@@ -6,15 +6,21 @@
  * names each machine, a filter beside Projects; the list's ⋯ menu offers "Hide offline
  * machines"; Settings → Machines lists each machine with its state and
  * version, Unlink asks twice, and the link form sends a pasted link or an
- * address and six digits. With no machine linked none of it is drawn.
+ * address and six digits. With no machine linked none of it is drawn. Tags:
+ * Add tag on a machine's rows only when it takes tags, sent there by name; one
+ * sidebar tag per name across machines; a held tag says it waits; the Board's
+ * Tags dialog lists and changes them on each machine as the sidebar does.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import type { InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
-import type { MachineView, OutboxView } from './api';
+import { inboxMachineTags, type InboxInitiative, type InboxListRow, type InboxListSection } from '@plannotator/core/inbox-types';
+import { InboxHeldError, inboxApi, type MachineView, type OutboxView } from './api';
+import { machineOf, rememberMachine, resetMachineRoutes, setSelfMachine } from './inboxUrl';
+import { canTagThread, filterTagRows, rowTagsHere, tagWaitingCounts, tagWrite, ThreadTagsContext, type ListTag, type ThreadTagsHost } from './threadTags';
+import { errorToast } from './toastError';
 import type { SidebarProps } from './components/Sidebar';
 
 const hasDom = typeof document !== 'undefined';
@@ -189,6 +195,52 @@ test.skipIf(!hasDom)("another machine's row reads its machine beside its project
   // Online: nothing greyed, no line.
   expect(document.querySelector('[data-away]')).toBeNull();
   expect(document.querySelector('[data-machine-away]')).toBeNull();
+});
+
+test.skipIf(!hasDom)("Star is offered on another machine's row only when that machine takes stars from here; an older one's row has none", async () => {
+  const OLD = `ibx_01K${'0'.repeat(22)}O`;
+  const old = row('msg_old', 'prj_far', OLD);
+  list([machine(SELF, 'Studio', 'online'), machine(MAC, 'MacBook', 'online', { marks: ['star'] }), machine(OLD, 'Mini', 'online', { marks: [] })], [OWN, FAR, old], { pinned: new Set(['msg_far']), onRowAction: () => {} });
+  const offered = async (id: string) => {
+    await act(async () => {
+      document.querySelector(`.ib-lbody [data-thread-id="${id}"]`)!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: 300, clientY: 200 }));
+    });
+    await settle();
+    const menu = document.querySelector(`[data-row-menu="${id}"]`);
+    expect(menu).not.toBeNull();
+    const found = ['pin', 'unpin'].filter((action) => menu!.querySelector(`[data-row-action="${action}"]`) !== null);
+    act(() => void document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    await settle();
+    return found;
+  };
+  expect(await offered('msg_own')).toEqual(['pin']);
+  expect(await offered('msg_far')).toEqual(['unpin']);
+  expect(await offered('msg_old')).toEqual([]);
+});
+
+test.skipIf(!hasDom)("Add to Priority is offered on another machine's row only when that machine takes it from here; Remove on one in that machine's Priority", async () => {
+  const OLD = `ibx_01K${'0'.repeat(22)}O`;
+  const inPriority = { ...row('msg_far', 'prj_far', MAC), priority: { person: true, at: '2026-11-12T10:00:00Z', ask: null } } as InboxListRow;
+  const plain = { ...row('msg_far2', 'prj_far', MAC), priority: null } as InboxListRow;
+  const old = { ...row('msg_old', 'prj_far', OLD), priority: null } as InboxListRow;
+  const own = { ...OWN, priority: null } as InboxListRow;
+  list([machine(SELF, 'Studio', 'online'), machine(MAC, 'MacBook', 'online', { marks: ['star', 'priority'] }), machine(OLD, 'Mini', 'online', { marks: ['star'] })], [own, inPriority, plain, old], { onRowAction: () => {} });
+  const offered = async (id: string) => {
+    await act(async () => {
+      document.querySelector(`.ib-lbody [data-thread-id="${id}"]`)!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: 300, clientY: 200 }));
+    });
+    await settle();
+    const menu = document.querySelector(`[data-row-menu="${id}"]`);
+    expect(menu).not.toBeNull();
+    const found = ['priority-add', 'priority-remove'].filter((action) => menu!.querySelector(`[data-row-action="${action}"]`) !== null);
+    act(() => void document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    await settle();
+    return found;
+  };
+  expect(await offered('msg_own')).toEqual(['priority-add']);
+  expect(await offered('msg_far')).toEqual(['priority-remove']);
+  expect(await offered('msg_far2')).toEqual(['priority-add']);
+  expect(await offered('msg_old')).toEqual([]);
 });
 
 test.skipIf(!hasDom)("an asleep machine's rows are greyed under one line saying since when; the menu offers Hide offline machines", async () => {
@@ -471,4 +523,197 @@ test.skipIf(!hasDom)('a link code asked for on a dropped connection says the Inb
   const { linkErrorText } = await import('./components/Machines');
   const { INBOX_UNREACHABLE } = await import('./toastError');
   for (const words of ['Failed to fetch', 'Load failed', 'NetworkError when attempting to fetch resource.']) expect(linkErrorText(new TypeError(words))).toBe(INBOX_UNREACHABLE);
+});
+
+// ── Tags across machines (approval "inbox-thread-tags"): one tag per name, a thread's tag on its own machine. ──
+
+const tagRecord = (id: string, name: string): InboxInitiative => ({ id, name, created_at: '2026-11-12T09:00:00.000Z', created_by: { kind: 'person' }, updated_at: '2026-11-12T09:00:00.000Z', deleted_at: null });
+const OLD = `ibx_01K${'0'.repeat(22)}O`;
+
+/** The list inside a tags host built as App builds it: the real rules (canTagThread, rowTagsHere, tagWrite) and the real write. */
+function taggedList(machines: MachineView[], rows: InboxListRow[], tags: ListTag[]) {
+  const model = machinesModel(machines);
+  for (const row of rows) if (row.machine) rememberMachine([row.thread_id], row.machine);
+  const host: ThreadTagsHost = {
+    tags,
+    tagsOf: (id) => rowTagsHere(rows.find((r) => r.thread_id === id)!, model, new Map()),
+    counts: new Map(),
+    can: (id) => canTagThread(id, rows, model, machineOf(id)),
+    set: (id, tag, on) => void inboxApi.setThreadTag(id, tagWrite(tag, machineOf(id), model.self), on).catch(() => {}),
+    createAndSet: () => {},
+    listed: null,
+  };
+  mount(<ThreadTagsContext.Provider value={host}>{rowsList(machines, rows)}</ThreadTagsContext.Provider>);
+}
+function rowsList(machines: MachineView[], rows: InboxListRow[]) {
+  const model = machinesModel(machines);
+  const sections: InboxListSection[] = [{ id: 'waiting', label: 'Waiting on you', threads: rows }];
+  const projects = PROJECTS.filter((p) => rows.some((r) => r.project.id === p.id));
+  return (
+    <InboxList
+      title="Inbox"
+      path={null}
+      sections={sections}
+      filtered={false}
+      narrow={false}
+      selectedThreadId={null}
+      notice={null}
+      onShowNew={() => {}}
+      onOpen={() => {}}
+      projectNames={machineProjectNames({ projects, sidebar: projects, sections }, model, true)}
+      machines={model}
+      tidy={{ surface: 'list', scope: null, plan: null, run: null, start: async () => null, refresh: () => {} }}
+      onHideAway={() => {}}
+      onRowAction={() => {}}
+    />
+  );
+}
+async function rowMenu(id: string) {
+  await act(async () => {
+    document.querySelector(`.ib-lbody [data-thread-id="${id}"]`)!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: 300, clientY: 200 }));
+  });
+  await settle();
+  return document.querySelector<HTMLElement>(`[data-row-menu="${id}"]`);
+}
+async function closeMenu() {
+  act(() => void document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+  await settle();
+}
+
+test.skipIf(!hasDom)("Add tag is offered on another machine's row only when that machine takes tags from here; a tick there tags it on that machine, by name", async () => {
+  setSelfMachine(SELF);
+  try {
+    const old = row('msg_old', 'prj_far', OLD);
+    const release = { ...tagRecord('ini_s_rel', 'Release'), machines: { [SELF]: 'ini_s_rel' } };
+    taggedList([machine(SELF, 'Studio', 'online'), machine(MAC, 'MacBook', 'online', { marks: ['star', 'priority', 'tags'] }), machine(OLD, 'Mini', 'online', { marks: ['star', 'priority'] })], [OWN, FAR, old], [release]);
+    for (const [id, offered] of [['msg_own', true], ['msg_old', false], ['msg_far', true]] as const) {
+      const menu = await rowMenu(id);
+      expect(menu).not.toBeNull();
+      expect(menu!.querySelector('[data-add-tag-item]') !== null).toBe(offered);
+      if (id !== 'msg_far') await closeMenu();
+    }
+    // The far row's list shows this Inbox's tags; a tick goes to MacBook, naming the tag (MacBook makes it there).
+    await act(async () => document.querySelector<HTMLElement>('[data-add-tag-item]')!.click());
+    await settle();
+    expect(document.querySelector(`[data-tag-pick="${release.id}"]`)?.textContent).toContain('Release');
+    posted.length = 0;
+    await act(async () => document.querySelector<HTMLElement>(`[data-tag-pick="${release.id}"]`)!.click());
+    await settle();
+    expect(posted).toEqual([{ url: `/api/inbox/m/${MAC}/threads/msg_far/tags`, body: expect.objectContaining({ name: 'Release', on: true }) }]);
+    await closeMenu();
+    // This Inbox's own thread names this Inbox's id.
+    posted.length = 0;
+    await rowMenu('msg_own');
+    await act(async () => document.querySelector<HTMLElement>('[data-add-tag-item]')!.click());
+    await settle();
+    await act(async () => document.querySelector<HTMLElement>(`[data-tag-pick="${release.id}"]`)!.click());
+    await settle();
+    expect(posted).toEqual([{ url: '/api/inbox/threads/msg_own/tags', body: expect.objectContaining({ tag: release.id, on: true }) }]);
+  } finally {
+    resetMachineRoutes();
+  }
+});
+
+test.skipIf(!hasDom)('a tag of the same name on two machines is ONE sidebar tag: its list holds both machines’ threads and its count includes them; an older machine’s tagged row stays out', async () => {
+  const merged = inboxMachineTags(SELF, [tagRecord('ini_s_rel', 'Release')], [{ machine: MAC, tags: [tagRecord('ini_m_rel', 'release'), tagRecord('ini_m_bill', 'Billing')] }]);
+  expect(merged.tags.map((t) => t.name)).toEqual(['Release', 'Billing']);
+  const model = machinesModel([machine(SELF, 'Studio', 'online'), machine(MAC, 'MacBook', 'online', { marks: ['tags'] }), machine(OLD, 'Mini', 'online', { marks: [] })]);
+  // As the merged list sends them: a far row's tags read as the merged ids. (An older machine's row arrives with none;
+  // one that still carried a tag id stays out here too.)
+  const rows = [
+    { ...OWN, tags: [merged.idOn(SELF, 'ini_s_rel')!] },
+    { ...FAR, tags: [merged.idOn(MAC, 'ini_m_rel')!] },
+    { ...row('msg_far2', 'prj_far', MAC), tags: [merged.idOn(MAC, 'ini_m_bill')!] },
+    { ...row('msg_old', 'prj_far', OLD), tags: ['ini_s_rel'] },
+  ] as InboxListRow[];
+  const sections: InboxListSection[] = [{ id: 'waiting', label: 'Waiting on you', threads: rows }];
+  const tagsOf = (r: Pick<InboxListRow, 'thread_id' | 'tags' | 'machine'>) => rowTagsHere(r, model, new Map());
+  expect(filterTagRows(sections, 'ini_s_rel', tagsOf)[0]!.threads.map((r) => r.thread_id)).toEqual(['msg_own', 'msg_far']);
+  const waiting = tagWaitingCounts(sections, tagsOf);
+  expect(waiting.get('ini_s_rel')).toBe(2);
+  expect(waiting.get('ini_m_bill')).toBe(1);
+  mount(<Sidebar {...sidebarProps({ machines: model, tags: { tags: merged.tags, waiting, shown: true, tagId: null, onOpen: noop, onCreate: async () => null, onRename: async () => true, onDelete: noop } })} />);
+  const names = [...document.querySelectorAll('[data-tag-row]')].map((el) => el.getAttribute('data-tag-row'));
+  expect(names).toEqual(['ini_s_rel', 'ini_m_bill']);
+  expect(document.querySelector('[data-tag-row="ini_s_rel"]')!.textContent).toContain('2');
+});
+
+test.skipIf(!hasDom)('a tag for an asleep machine’s thread waits there and says so, as Priority’s does; nothing is drawn as done', async () => {
+  setSelfMachine(SELF);
+  rememberMachine(['msg_far'], MAC);
+  const before = globalThis.fetch;
+  const urls: string[] = [];
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    urls.push(String(input));
+    return Response.json({ outbox: { key: 'k1', machine: MAC, route: 'threads/msg_far/tags', state: 'queued', queued_at: '2026-11-13T09:00:00.000Z', settled_at: null, status: null, answer: null, notice: null, dismissed: false, words: null, thread: 'msg_far', machine_name: null }, machine: machine(MAC, 'MacBook', 'offline') }, { status: 202 });
+  }) as typeof fetch;
+  try {
+    const held = await inboxApi.setThreadTag('msg_far', { name: 'Release' }, true).then(() => null, (cause: unknown) => cause);
+    expect(urls).toEqual([`/api/inbox/m/${MAC}/threads/msg_far/tags`]);
+    expect(held).toBeInstanceOf(InboxHeldError);
+    expect(errorToast(held, 'x')).toEqual({ icon: 'clock', lead: 'Waiting for MacBook: this applies when MacBook is back.', wrap: true });
+  } finally {
+    globalThis.fetch = before;
+    resetMachineRoutes();
+  }
+});
+
+/** The Board's Tags dialog on the sidebar's path (tagsAcross.ts), over a fetch that answers each tag write. */
+async function boardTagsDialog(tags: ListTag[], machines: MachineView[]) {
+  const { InitiativesDialog } = await import('./board/InitiativesDialog');
+  const { tagsAcross } = await import('./tagsAcross');
+  const writes: string[] = [];
+  const before = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
+    writes.push(`${url} ${String(body.op ?? body.name)}`);
+    const id = url.split('/').at(-1)!;
+    return Response.json({ initiative: id === 'initiatives' ? tagRecord('ini_s_new', String(body.name)) : { ...tagRecord(id, 'x'), deleted_at: body.op === 'delete' ? SINCE : null } });
+  }) as typeof fetch;
+  mount(<InitiativesDialog initiatives={tags} across={tagsAcross(tags, machinesModel(machines))} start="edit" phone={false} onClose={noop} onChanged={noop} />);
+  await settle();
+  return {
+    writes,
+    restore: () => void (globalThis.fetch = before),
+    dialog: () => document.querySelector<HTMLElement>('[data-dialog="initiatives"]')!,
+  };
+}
+
+test.skipIf(!hasDom)("the Board's Tags dialog: a tag only the other machine holds is listed; delete and its Undo reach each machine that takes tags; an older one is never written; a new tag is this Inbox's", async () => {
+  const machines = [machine(SELF, 'Studio', 'online'), machine(MAC, 'MacBook', 'online', { marks: ['tags'] }), machine(OLD, 'Mini', 'online', { marks: ['star', 'priority'] })];
+  // Mini's id under Release stands for a machine that stopped taking tags since the list was read.
+  const release: ListTag = { ...tagRecord('ini_s_rel', 'Release'), machines: { [SELF]: 'ini_s_rel', [MAC]: 'ini_m_rel', [OLD]: 'ini_o_rel' } };
+  const billing: ListTag = { ...tagRecord('ini_m_bill', 'Billing'), machines: { [MAC]: 'ini_m_bill' } };
+  const drawn = await boardTagsDialog([release, billing], machines);
+  try {
+    const dialog = drawn.dialog();
+    expect([...dialog.querySelectorAll('[data-initiative-row]')].map((r) => r.getAttribute('data-initiative-row'))).toEqual(['ini_s_rel', 'ini_m_bill']);
+
+    await act(async () => dialog.querySelector<HTMLElement>('[data-initiative-row="ini_s_rel"] [data-initiative-delete]')!.click());
+    await settle();
+    expect(drawn.writes).toEqual(['/api/inbox/initiatives/ini_s_rel delete', `/api/inbox/m/${MAC}/initiatives/ini_m_rel delete`]);
+    drawn.writes.length = 0;
+    await act(async () => dialog.querySelector<HTMLElement>('.ib-toast [data-toast-undo]')!.click());
+    await settle();
+    expect(drawn.writes).toEqual(['/api/inbox/initiatives/ini_s_rel restore', `/api/inbox/m/${MAC}/initiatives/ini_m_rel restore`]);
+
+    drawn.writes.length = 0;
+    await act(async () => dialog.querySelector<HTMLElement>('[data-initiative-row="ini_m_bill"] [data-initiative-delete]')!.click());
+    await settle();
+    expect(drawn.writes).toEqual([`/api/inbox/m/${MAC}/initiatives/ini_m_bill delete`]);
+
+    // A new tag is made here; the other machine lists it by name from this Inbox's list.
+    drawn.writes.length = 0;
+    const field = dialog.querySelector<HTMLInputElement>('[data-initiative-new-name]')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(field, 'Docs');
+      field.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => dialog.querySelector<HTMLElement>('[data-initiative-add]')!.click());
+    await settle();
+    expect(drawn.writes).toEqual(['/api/inbox/initiatives Docs']);
+  } finally {
+    drawn.restore();
+  }
 });

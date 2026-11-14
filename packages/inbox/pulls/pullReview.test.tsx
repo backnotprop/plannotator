@@ -60,6 +60,7 @@ if (hasDom) {
   const seam: string = '../guide/PlatformPost.tsx';
   const real = (await import(seam)) as Record<string, unknown>;
   mock.module('#platform-post', () => real);
+  await (await import('../threadDrawReady')).diffDrawReady(['typescript']);
 }
 const { PullReview } = (hasDom ? await import('./PullReview') : {}) as typeof import('./PullReview');
 const { PullsPage } = (hasDom ? await import('./PullsPage') : {}) as typeof import('./PullsPage');

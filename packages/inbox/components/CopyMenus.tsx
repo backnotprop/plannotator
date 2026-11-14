@@ -7,17 +7,20 @@ import { focusAfterSwap, SnoozeTimes, type SnoozeView } from '@plannotator/ui/co
 import { matchesShortcutBinding } from '@plannotator/ui/shortcuts';
 import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
 import { isEditableTarget, keyTarget } from '../shortcuts/guards';
-import { useShortcutAria, withShortcut } from '../shortcuts/hint';
+import { useShortcutAria } from '../shortcuts/hint';
 import { copyAuthor, copyMarkdown, messageMarkdown, threadMarkdown } from '../copyMarkdown';
 import { plural, shortAgentName, whenTime } from '../format';
 import { Icon } from '../icons';
 import { DECISIONS_POST_TO_WORDS, decisionExportUrl, threadHasQuestionCards } from '../decisionExport';
 import { inboxApi, type DecisionsPostTo } from '../api';
 import { RefMarkIcon } from '../board/RefMark';
-import { useThreadPulls } from '../threadPulls/ThreadPulls';
+import { canPostDecisionsOn, useThreadPulls } from '../threadPulls/ThreadPulls';
 import { Tip } from './Tip';
+import { useThreadTags } from '../threadTags';
+import { AddTagItem, AddTagList } from './AddTagMenu';
 import { useMessageArm } from '../messageArming';
 import type { InboxToastModel } from './Toast';
+import { TAKE_BACK_LABEL } from '../takeBack';
 
 /**
  * Copy a message, copy a thread (design record "inbox-copy-message", option
@@ -79,7 +82,7 @@ function usePortal<T extends HTMLElement>() {
  * One open message's menu: its ⋯ (handed to `head` to place after Reply) and,
  * off a phone, a right-click on the head line `head` draws.
  */
-export function MessageMenu(props: CopyMenuHost & { message: InboxMessageWire; head: (more: ReactElement) => ReactElement }) {
+export function MessageMenu(props: CopyMenuHost & { message: InboxMessageWire; head: (more: ReactElement) => ReactElement; onTakeBack?: (() => void) | null }) {
   const { message, phone } = props;
   const copies = useCopies(props);
   const { ref: more, portal } = usePortal<HTMLButtonElement>();
@@ -127,6 +130,15 @@ export function MessageMenu(props: CopyMenuHost & { message: InboxMessageWire; h
       <div className="ib-pm-title" aria-hidden="true">
         {copyAuthor(message)} · {whenTime(message.created_at)}
       </div>
+      {props.onTakeBack && (
+        <>
+          <Menu.Item className="ib-pmi" label={TAKE_BACK_LABEL} onClick={props.onTakeBack} data-take-back-item="">
+            <Icon name="reply" size={15} />
+            {TAKE_BACK_LABEL}
+          </Menu.Item>
+          <Menu.Separator className="ib-pm-sep" />
+        </>
+      )}
       <Menu.Item className="ib-pmi" label="Copy message" onClick={() => copies.message(message)} data-copy-item="message">
         <Icon name="copy" size={15} />
         Copy message
@@ -240,28 +252,28 @@ export interface ThreadMoreLaunch {
  *
  * A launched thread (`launch`) leads with its own group above all of these, on desktop and phone alike.
  *
- * Off a phone the read button and Snooze are icons in the bar (`ThreadSnooze`), so the menu leads with Unsnooze (a
- * snoozed thread), Pin thread (Unpin thread while pinned; only when the Inbox keeps pins: `pin` is absent on an older
- * one) and Mark unread where the bar's read button does not offer it (`markUnread`; markRead.ts `canMarkUnread`).
- * Then Copy thread, then Copy link and Copy thread ID, then, in its own group, Archive thread (Unarchive thread on an
+ * It leads, on desktop and phone alike (the owner, 2026-11-11: the read and Snooze icons left the bar to give the title
+ * its room), with every read action (`markRead`, `moveBack` on a thread marked read, `markUnread`; markRead.ts
+ * `canMarkUnread`), then Snooze, which swaps the menu in place for "‹ Snooze until" and its times (H opens it there:
+ * `snoozeRequest`), and Unsnooze; then a divider, Pin thread in its own group (only when the Inbox keeps pins: `pin`
+ * is absent on an older one), with Add to Priority (Remove from Priority on a thread in it) after it, then Add tag (its tags swap in place; only when the Inbox keeps tags, approval "inbox-thread-tags"). Then Copy thread, then Copy link and Copy thread ID, then, in its own group, Archive thread (Unarchive thread on an
  * archived one; the owner, 2026-11-01: move it into the ⋯). None has a key. Request guided review (`requestGuide`)
  * has its own group above Archive, on desktop and in the phone sheet alike, only where the thread offers it.
- *
- * On a phone the bar has neither, and the sheet leads with them: every read action a desktop has (`markRead`,
- * `moveBack` on a thread marked read, `markUnread`), then
- * Snooze, which swaps the sheet in place for "‹ Snooze until" and its times, and Unsnooze; then a divider, Pin thread
- * in its own group, and the rest as above.
  */
 export function ThreadMore(
   props: CopyMenuHost & {
     pin?: { pinned: boolean; onToggle: () => void };
-    /** A phone's Mark read: the header's read button, moved into the sheet. */
+    /** Add to Priority (`on` false) or Remove from Priority; absent where the thread's row offers neither. */
+    priority?: { on: boolean; onToggle: () => void };
+    /** Mark read (E), offered while something here waits on the person. */
     markRead?: () => void;
-    /** A phone's Move back to the top on a thread marked read: the pressed Read button's click, moved into the sheet. */
+    /** Move back to the top, on a thread marked read. */
     moveBack?: () => void;
     markUnread?: () => void;
     archive?: { archived: boolean; onToggle: () => void };
     snooze?: ThreadSnoozeProps;
+    /** H (Thread.tsx): each new request opens the menu at Snooze's times. */
+    snoozeRequest?: number;
     /** Request guided review (guideRequest.ts): its own group above Archive, only where the thread offers it. */
     requestGuide?: () => void;
     /** Add a pull request to the thread (approval "inbox-pr-binding"): opens the PRs card on its Add field. */
@@ -275,18 +287,34 @@ export function ThreadMore(
     launch?: ThreadMoreLaunch | null;
   },
 ) {
-  const { thread, phone, pin, markRead, moveBack, markUnread, archive, snooze, requestGuide, addPull, postDecisions, launch } = props;
+  const { thread, phone, pin, priority, markRead, moveBack, markUnread, archive, snooze, snoozeRequest = 0, requestGuide, addPull, postDecisions, launch } = props;
+  const markReadKeys = useShortcutAria({ scope: inboxThreadShortcuts, action: 'markRead' });
+  const snoozeKeys = useShortcutAria({ scope: inboxThreadShortcuts, action: 'snooze' });
   const copies = useCopies(props);
   const { ref, portal } = usePortal<HTMLButtonElement>();
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<SnoozeView | null>(null);
+  // Add tag's list, swapped in as Snooze's times are (approval "inbox-thread-tags").
+  const [tagView, setTagView] = useState(false);
+  const tags = useThreadTags();
+  const tagging = !!tags?.can(thread.thread_id);
+  // Only a new request opens it: the menu mounting again (J/K into a thread) keeps it shut.
+  const seenRequest = useRef(snoozeRequest);
+  useEffect(() => {
+    if (snoozeRequest === seenRequest.current) return;
+    seenRequest.current = snoozeRequest;
+    if (!snooze || snooze.blocked) return;
+    setView('times');
+    setOpen(true);
+  }, [snoozeRequest, snooze]);
   // A phone's "‹ Export decisions" sub-view (the sheet swaps in place, as Snooze's times do).
   const [exportView, setExportView] = useState(false);
   const exportOffered = threadHasQuestionCards(thread);
   const exportBack = useRef(false);
   // The thread's PRs for the Post group: read while the menu is open (the PR button keeps them current otherwise).
   const { answer: pullsAnswer } = useThreadPulls(thread.thread_id, open && exportOffered && !!postDecisions);
-  const linked = pullsAnswer?.pulls ?? [];
+  // Only the PRs decisions can post on (a Bitbucket PR is refused by the server, so it gets no row).
+  const linked = (pullsAnswer?.pulls ?? []).filter(canPostDecisionsOn);
   // Where to post (config.json `inboxDecisionsPostTo`): read when the menu opens, saved on a pick.
   const [postTo, setPostTo] = useState<DecisionsPostTo | null>(null);
   const postOffered = open && exportOffered && !!postDecisions;
@@ -305,14 +333,16 @@ export function ThreadMore(
   }, [postOffered]);
   // Back from the times: focus goes to Snooze again, not to the item now at its old index.
   const backed = useRef(false);
+  const tagBack = useRef(false);
   const popup = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
-    if (view !== null || exportView || !backed.current) return;
+    if (view !== null || exportView || tagView || !backed.current) return;
     backed.current = false;
-    const item = exportBack.current ? '[data-thread-export-item]' : '[data-thread-snooze-item]';
+    const item = exportBack.current ? '[data-thread-export-item]' : tagBack.current ? '[data-add-tag-item]' : '[data-thread-snooze-item]';
     exportBack.current = false;
+    tagBack.current = false;
     return focusAfterSwap(() => popup.current?.querySelector<HTMLElement>(item));
-  }, [view, exportView]);
+  }, [view, exportView, tagView]);
   useLayoutEffect(() => {
     if (!exportView) return;
     return focusAfterSwap(() => popup.current?.querySelector<HTMLElement>('[data-decision-export]'));
@@ -409,7 +439,7 @@ export function ThreadMore(
   const readItems = (
     <>
       {markRead && (
-        <Menu.Item className="ib-pmi" label="Mark read" onClick={markRead} data-thread-read-item="">
+        <Menu.Item className="ib-pmi" label="Mark read" onClick={markRead} aria-keyshortcuts={phone ? undefined : markReadKeys} data-thread-read-item="">
           <Icon name="mailOpen" size={15} />
           Mark read
         </Menu.Item>
@@ -440,8 +470,14 @@ export function ThreadMore(
       {pin.pinned ? 'Unstar thread' : 'Star thread'}
     </Menu.Item>
   );
-  const phoneLeads = !!(markRead || moveBack || markUnread || snooze);
-  const lead = phone ? (
+  const priorityItem = priority && (
+    <Menu.Item className="ib-pmi" label={priority.on ? 'Remove from Priority' : 'Add to Priority'} onClick={priority.onToggle} data-thread-priority-item="">
+      <Icon name={priority.on ? 'toBottom' : 'toTop'} size={15} />
+      {priority.on ? 'Remove from Priority' : 'Add to Priority'}
+    </Menu.Item>
+  );
+  const leadItems = !!(markRead || moveBack || markUnread || snooze);
+  const lead = (
     <>
       {readItems}
       {snooze?.blocked && (
@@ -452,7 +488,7 @@ export function ThreadMore(
         </Menu.Item>
       )}
       {snooze && !snooze.blocked && (
-        <Menu.Item className="ib-pmi" label="Snooze" closeOnClick={false} onClick={() => setView('times')} data-thread-snooze-item="">
+        <Menu.Item className="ib-pmi" label="Snooze" closeOnClick={false} onClick={() => setView('times')} aria-keyshortcuts={phone ? undefined : snoozeKeys} data-thread-snooze-item="">
           <Icon name="clock" size={15} />
           Snooze
           <span className="ib-zsub">
@@ -461,18 +497,14 @@ export function ThreadMore(
         </Menu.Item>
       )}
       {unsnoozeItem}
-      {phoneLeads && pin && <Menu.Separator className="ib-pm-sep" />}
+      {leadItems && (pin || priority || tagging) && <Menu.Separator className="ib-pm-sep" />}
       {pinItem}
-    </>
-  ) : (
-    <>
-      {unsnoozeItem}
-      {pinItem}
-      {readItems}
+      {priorityItem}
+      <AddTagItem threadId={thread.thread_id} onOpen={() => setTagView(true)} />
     </>
   );
-  // Whether anything leads the menu (the divider before Copy thread): off a phone, Snooze itself is in the bar.
-  const leads = phone ? phoneLeads || !!pin : !!(snooze?.snoozed || pin || markRead || moveBack || markUnread);
+  // Whether anything leads the menu (the divider before Copy thread).
+  const leads = leadItems || !!pin || !!priority || tagging;
   return (
     <Menu.Root
       modal={false}
@@ -482,18 +514,19 @@ export function ThreadMore(
         if (!next) {
           setView(null);
           setExportView(false);
+          setTagView(false);
         }
       }}
     >
       <Tip content="More">
-        <Menu.Trigger ref={ref} className="ib-iconbtn ib-tmore" aria-label="More" data-thread-more="">
+        <Menu.Trigger ref={ref} className="ib-iconbtn ib-tmore" aria-label="More" data-thread-more="" data-snooze-key={!phone && snooze && !snooze.blocked ? '' : undefined}>
           <Icon name="dots" size={18} />
         </Menu.Trigger>
       </Tip>
       <Menu.Portal container={portal ?? undefined}>
         {phone && <Menu.Backdrop className="ib-pm-scrim" />}
         <Menu.Positioner className="ib-pm-pos" side="bottom" align="end" sideOffset={4} data-phone={phone ? '' : undefined}>
-          <Menu.Popup ref={popup} className="ib-pm" aria-label={thread.subject ?? 'Thread'} data-thread-menu="">
+          <Menu.Popup ref={popup} className="ib-pm" aria-label={thread.subject ?? 'Thread'} data-thread-menu="" data-thread-snooze-menu={view ? '' : undefined}>
             {view && snooze ? (
               <>
                 {/* A phone's sheet keeps its title over the times (the approved phone sheet). */}
@@ -511,6 +544,22 @@ export function ThreadMore(
                   }}
                   onPick={snooze.onPick}
                   onClose={() => setOpen(false)}
+                />
+              </>
+            ) : tagView && tagging ? (
+              <>
+                {phone && (
+                  <div className="ib-pm-title" dir="auto" aria-hidden="true">
+                    {thread.subject ?? '(no subject)'}
+                  </div>
+                )}
+                <AddTagList
+                  threadId={thread.thread_id}
+                  onBack={() => {
+                    backed.current = true;
+                    tagBack.current = true;
+                    setTagView(false);
+                  }}
                 />
               </>
             ) : exportView && exportOffered ? (
@@ -614,71 +663,6 @@ export function ThreadMore(
                 )}
               </>
             )}
-          </Menu.Popup>
-        </Menu.Positioner>
-      </Menu.Portal>
-    </Menu.Root>
-  );
-}
-
-/**
- * The thread header's Snooze clock, off a phone (approval "inbox-thread-header", 2026-11-02): an icon after the read
- * button, before the subject. It opens the times as a menu of their own, titled "Snooze until" (Later today,
- * Tomorrow, In 3 days, Next week, then Pick a time, which swaps in its two lists, "‹ Pick a time" going back), as
- * inbox-snooze defines them. Base UI carries the keys (arrows, type-ahead, Escape, focus back to the clock); no new
- * shortcut. Unsnooze stays in ⋯ More.
- */
-export function ThreadSnooze({ snooze, openRequest = 0 }: { snooze: ThreadSnoozeProps; openRequest?: number }) {
-  const { ref, portal } = usePortal<HTMLButtonElement>();
-  const [open, setOpen] = useState(false);
-  const [view, setView] = useState<SnoozeView>('times');
-  // H (Thread.tsx): each request opens the menu at its times, focus on the first; picking still snoozes.
-  const popup = useRef<HTMLDivElement>(null);
-  const keyOpened = useRef(false);
-  const snoozeKeys = useShortcutAria({ scope: inboxThreadShortcuts, action: 'snooze' });
-  // Only a new request opens it: the clock mounting again (Z after Shift+E, J/K into a thread) keeps it shut.
-  const seenRequest = useRef(openRequest);
-  useEffect(() => {
-    if (openRequest === seenRequest.current) return;
-    seenRequest.current = openRequest;
-    keyOpened.current = true;
-    setView('times');
-    setOpen(true);
-  }, [openRequest]);
-  useEffect(() => {
-    if (!open || !keyOpened.current) return;
-    keyOpened.current = false;
-    const frame = requestAnimationFrame(() => popup.current?.querySelector<HTMLElement>('[data-snooze-choice]')?.focus());
-    return () => cancelAnimationFrame(frame);
-  }, [open]);
-  // A machine that must update first (approval "inbox-machine-update"): Snooze stays, and says why. After the hooks.
-  if (snooze.blocked) {
-    return (
-      <Tip content={`Update ${snooze.blocked.name} to snooze here`}>
-        <button type="button" className="ib-iconbtn ib-snooze-blocked" aria-label={`Snooze: update ${snooze.blocked.name} first`} onClick={snooze.blocked.onPress} data-thread-snooze="" data-snooze-blocked="">
-          <Icon name="clock" size={17} />
-        </button>
-      </Tip>
-    );
-  }
-  return (
-    <Menu.Root
-      modal={false}
-      open={open}
-      onOpenChange={(next) => {
-        setOpen(next);
-        if (!next) setView('times');
-      }}
-    >
-      <Tip content={withShortcut('Snooze', { scope: inboxThreadShortcuts, action: 'snooze' })}>
-        <Menu.Trigger ref={ref} className="ib-iconbtn" aria-label="Snooze" aria-keyshortcuts={snoozeKeys} data-thread-snooze="">
-          <Icon name="clock" size={17} />
-        </Menu.Trigger>
-      </Tip>
-      <Menu.Portal container={portal ?? undefined}>
-        <Menu.Positioner className="ib-pm-pos" side="bottom" align="start" sideOffset={4}>
-          <Menu.Popup ref={popup} className="ib-pm" aria-label="Snooze until" data-thread-snooze-menu="" finalFocus={ref}>
-            <SnoozeTimes view={view} onView={setView} onPick={snooze.onPick} onClose={() => setOpen(false)} />
           </Menu.Popup>
         </Menu.Positioner>
       </Menu.Portal>

@@ -1,12 +1,27 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react';
 import type { InboxIconSet, InboxIconSetIcon } from '@plannotator/core/inbox-types';
-import { keepAgentFace, type AgentFaceRef } from './agentFaces';
 import type { AgentFace } from './faceChoices';
 import { SETS_LABEL } from './FaceFan';
 import { getIconSet, isSetFace, setArtStyle, readIconSets, refreshFetchable, setCreditsHref, setFaceParts, setIconSrc, setLookOf, useIconSets, useSetListing } from './iconSets';
 
-/** The set last looked at in this page: the panel opens on it again. */
-let lastSet: string | null = null;
+/** The set last looked at, kept by this browser: Sets opens on it again, after a reload too. */
+export const LAST_SET_KEY = 'plannotator-inbox-icon-set-last';
+
+function readLastSet(): string | null {
+  try {
+    return window.localStorage.getItem(LAST_SET_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function keepLastSet(id: string): void {
+  try {
+    window.localStorage.setItem(LAST_SET_KEY, id);
+  } catch {
+    // Storage refused: not kept.
+  }
+}
 
 /** "#007", or "#0025" in a set of a thousand or more. */
 export const setNumber = (n: number, count: number) => `#${String(n).padStart(count >= 1000 ? 4 : 3, '0')}`;
@@ -26,15 +41,17 @@ const licenceLabel = (spdx: string | undefined) => (spdx ? spdx.replace(/-(\d+\.
 
 /**
  * "Sets" in the agent icon dialog (AgentIconDialog.tsx): the icon sets, then a numbered grid of the chosen one with a
- * search by name or number, the Pokédex feel. Choosing an icon shows it on this agent at once, in every window
- * (`set:<set>/<icon>` in the faces). A fetchable set shows "Get" until it is downloaded; its icons then fill in as
+ * search by name or number, the Pokédex feel. Choosing an icon goes to `onPick` as `set:<set>/<icon>` (its page,
+ * AgentIconDialog.tsx). A fetchable set shows "Get" until it is downloaded; its icons then fill in as
  * they arrive. Icons load only as they scroll into view.
  *
  * Its keys are the dialog's own (the arrows move in the grid, Enter in the search picks the first found): it adds no
- * shortcut. Choosing an icon closes the dialog (`onDone`). The one credit a set's licence asks for (game-icons.net's) is a muted line under its grid.
+ * shortcut. The one credit a set's licence asks for (game-icons.net's) is a muted line under its grid.
+ * `builtInOnly`: a linked machine's agent, whose machine has the built-in sets and maybe not a set fetched here.
  */
-export function SetsBody({ agent, face, onDone }: { agent: AgentFaceRef; face: AgentFace; onDone: () => void }) {
-  const sets = useIconSets();
+export function SetsBody({ face, builtInOnly = false, onPick }: { face: AgentFace; builtInOnly?: boolean; onPick: (face: AgentFace) => void }) {
+  const listed = useIconSets();
+  const sets = useMemo(() => (builtInOnly ? listed?.filter((s) => s.kind === 'built-in') : listed), [listed, builtInOnly]);
   // The pointer of fetchable sets is read only here, when the person opens Sets.
   useEffect(() => {
     void readIconSets(true);
@@ -42,6 +59,7 @@ export function SetsBody({ agent, face, onDone }: { agent: AgentFaceRef; face: A
   const current = isSetFace(face) ? setFaceParts(face) : null;
   const [picked, setPicked] = useState<string | null>(null);
   const [query, setQuery] = useState('');
+  const [lastSet] = useState(readLastSet);
   const setId = picked ?? current?.set ?? lastSet ?? sets?.[0]?.id ?? null;
   const set: InboxIconSet | null = sets?.find((s) => s.id === setId) ?? sets?.[0] ?? null;
   const fetchable = set?.kind === 'fetchable';
@@ -85,9 +103,8 @@ export function SetsBody({ agent, face, onDone }: { agent: AgentFaceRef; face: A
 
   const choose = (icon: InboxIconSetIcon) => {
     if (!set) return;
-    lastSet = set.id;
-    keepAgentFace(agent, `set:${set.id}/${icon.id}`);
-    onDone();
+    keepLastSet(set.id);
+    onPick(`set:${set.id}/${icon.id}`);
   };
   const onGridKey = (event: KeyboardEvent) => {
     // The grid's own column count (it fills the dialog's width).
@@ -140,7 +157,7 @@ export function SetsBody({ agent, face, onDone }: { agent: AgentFaceRef; face: A
             aria-selected={s.id === set?.id}
             data-set={s.id}
             onClick={() => {
-              lastSet = s.id;
+              keepLastSet(s.id);
               setPicked(s.id);
               scroller.current?.scrollTo({ top: 0 });
             }}
@@ -191,7 +208,7 @@ export function SetsBody({ agent, face, onDone }: { agent: AgentFaceRef; face: A
                   onClick={() => choose(icon)}
                 >
                   <span ref={lazy} className="am-sets-art" data-src={src} data-pixel={look?.pixelated ? '' : undefined} data-mono={look?.mono ? '' : undefined} style={setArtStyle(look, null) as CSSProperties}>
-                    {look?.mono ? <span className="am-sets-mono" /> : <img alt="" draggable={false} decoding="async" />}
+                    {look?.mono ? <span className="am-sets-mono" /> : <img alt="" draggable={false} decoding="async" onLoad={(event) => event.currentTarget.parentElement?.setAttribute('data-loaded', '')} onError={(event) => askAgain(event.currentTarget)} />}
                   </span>
                   <span className="am-sets-n">{number}</span>
                 </button>
@@ -217,4 +234,31 @@ function reveal(el: HTMLElement): void {
   if (!src) return;
   if (el.dataset.mono !== undefined) el.style.setProperty('--set-src', `url("${src}")`);
   else el.querySelector('img')?.setAttribute('src', src);
+}
+
+/** When an icon that did not load is asked for again: the link back, else after 2, 8 and 30 s. */
+const ICON_RETRY_MS = [2_000, 8_000, 30_000];
+
+/**
+ * An icon in the grid that did not load (a dropped link, a request that failed): hidden behind its faint tile, never
+ * the browser's broken picture, and asked for again (the link back, else after a while), a few times at most.
+ */
+function askAgain(img: HTMLImageElement): void {
+  img.dataset.failed = '';
+  const tries = Number(img.dataset.tries ?? 0);
+  if (tries >= ICON_RETRY_MS.length) return;
+  img.dataset.tries = String(tries + 1);
+  const src = img.getAttribute('src');
+  if (!src) return;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const again = () => {
+    clearTimeout(timer);
+    window.removeEventListener('online', again);
+    if (!img.isConnected) return;
+    delete img.dataset.failed;
+    img.removeAttribute('src');
+    img.setAttribute('src', src);
+  };
+  timer = setTimeout(again, ICON_RETRY_MS[tries]);
+  window.addEventListener('online', again);
 }

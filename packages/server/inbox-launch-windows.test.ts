@@ -29,6 +29,7 @@ import {
   windowsAttributesOf,
   windowsFolderHidden,
   windowsFolderRefusal,
+  windowsOutsideHomeRefusal,
   windowsTypedUnderHome,
 } from "./inbox-launch-windows";
 
@@ -155,6 +156,14 @@ describe("typed folders on Windows", () => {
     expect(windowsFolderRefusal("D:\\footage", env, () => undefined)).toBeNull();
   });
 
+  test("a typed path outside home is judged by its path alone: system, hidden, else home-only; no drive path is none", () => {
+    const env = { systemRoot: "C:\\WINDOWS", programFiles: ["C:\\Program Files"], programData: "C:\\ProgramData", home };
+    for (const typed of ["C:\\Windows", "c:/windows/system32", "C:\\Program Files\\Git", "C:\\Users\\Other"]) expect(windowsOutsideHomeRefusal(typed, env)).toBe("system");
+    expect(windowsOutsideHomeRefusal("D:\\work\\.git", env)).toBe("hidden");
+    for (const typed of ["D:\\x", "d:/footage", "E:\\", " D:\\x "]) expect(windowsOutsideHomeRefusal(typed, env)).toBe("home_only");
+    for (const typed of ["code", "\\\\server\\share", "/usr/bin"]) expect(windowsOutsideHomeRefusal(typed, env)).toBeNull();
+  });
+
   test("Hidden and System attributes hide; plain folders, and no attribute reader, do not", () => {
     expect(hiddenByAttributes(FILE_ATTRIBUTE_HIDDEN | 0x10)).toBe(true);
     expect(hiddenByAttributes(FILE_ATTRIBUTE_SYSTEM | 0x10)).toBe(true);
@@ -223,7 +232,9 @@ describe.skipIf(!WINDOWS)("on Windows, for real", () => {
     // Typed with backslashes, another drive-letter case, another folder case: the same folder.
     const typed = `${home.slice(0, 1).toLowerCase()}${home.slice(1).toUpperCase()}\\code`;
     expect(resolveHomeFolder(home, typed)).toMatchObject({ ok: true, exists: true, shown: "~/code" });
-    expect(resolveHomeFolder(home, "D:\\elsewhere")).toEqual({ ok: false, refused: "outside" });
+    // Outside home: another drive is home-only for now, the Windows folder is a system one (never "isn't a full path").
+    expect(resolveHomeFolder(home, "D:\\elsewhere")).toEqual({ ok: false, refused: "home_only" });
+    expect(resolveHomeFolder(home, process.env.SystemRoot ?? "C:\\Windows")).toEqual({ ok: false, refused: "system" });
   });
 
   test("a junction in home that leads to the Windows folder is never listed or opened", () => {

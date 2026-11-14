@@ -143,6 +143,12 @@ describe("favicon surfaces", () => {
       STATIC_FAVICON_LINK,
     );
 
+    // Only the Inbox is installed as an app: its server answers the manifest
+    // and the touch icon (packages/server/inbox-app-icons.ts).
+    const inbox = (await readRepoFile("apps/inbox/index.html")).toString();
+    expect(inbox).toContain('<link rel="manifest" href="/manifest.webmanifest">');
+    expect(inbox).toContain('<link rel="apple-touch-icon" href="/apple-touch-icon.png">');
+
     for (const path of [
       "apps/marketing/src/layouts/Base.astro",
       "apps/marketing/public/tui-annotate/index.html",

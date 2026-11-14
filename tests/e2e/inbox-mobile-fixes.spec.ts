@@ -120,7 +120,7 @@ test.beforeAll(async () => {
   if (extraShots) mkdirSync(extraShots, { recursive: true });
   const root = inboxScratch('plannotator-inbox-mobile-fixes-e2e-');
   const dataDir = join(root, 'data');
-  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0' };
+  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0' };
   const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
   expect(started.status, started.stderr).toBe(0);
   const url = started.stdout.trim();
@@ -243,6 +243,9 @@ for (const phone of PHONES) {
       await second.getByRole('button', { name: 'Add note' }).click();
       await second.locator('textarea').last().fill('Shipped too, after a week.');
       await expect(second.locator('.ib-qfoot-st')).toContainText('in your draft');
+      // Accept recommended steps aside while a note has focus, and is back once the note is left.
+      await expect(second.getByRole('button', { name: 'Accept recommended' })).toBeHidden();
+      await second.locator('textarea').last().blur();
       await expect(second.getByRole('button', { name: 'Accept recommended' })).toBeVisible();
       await first.scrollIntoViewIfNeeded();
       await shot(page, `${phone.tag}-card-footer-390`);

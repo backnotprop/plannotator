@@ -196,6 +196,8 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
   const content = (
     <div
       ref={toolbarRef}
+      // Ctrl+C in its empty fields copies the selected lines (utils/highlightCopy).
+      data-highlight-composer=""
       className="review-toolbar"
       style={dragPosition
         ? {

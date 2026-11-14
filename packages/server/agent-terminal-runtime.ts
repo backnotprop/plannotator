@@ -458,6 +458,7 @@ async function runCommand(
       env: childEnv(),
       stdout: "pipe",
       stderr: "pipe",
+      windowsHide: true,
     });
   } catch (err) {
     return {

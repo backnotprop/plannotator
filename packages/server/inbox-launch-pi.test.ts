@@ -213,6 +213,8 @@ describe("Pi's launch host, against the fake pi", () => {
     expect(note.author).toMatchObject({ kind: "agent", host: "pi", session, name: "Pi" });
     expect(note.body).toStartWith("Pi asked something the Inbox can't show yet (“⚠️ Dangerous command: :::question - \\[ \\] Yes \\`rm -rf \\~\\` Allow? xxx");
     expect(note.body).toEndWith("…”); answered Cancel.");
+    // A dialog's note is no failed turn: nothing notifies for it.
+    expect(note.turn_error).toBeUndefined();
     // One line, no control or invisible character, no block of its own: it can never become a question.
     expect(note.body).not.toContain("\n");
     expect(note.body).not.toContain("‮");
@@ -227,6 +229,8 @@ describe("Pi's launch host, against the fake pi", () => {
     const note = await until("the error note in the thread", () => agentNotes(root)[0]);
     expect(note.author).toMatchObject({ kind: "agent", host: "pi", session, name: "Pi" });
     expect(note.body).toBe(`Pi's turn ended with an error: ${error}`);
+    // Marked for the window's notification ("Pi couldn't answer").
+    expect(note.turn_error).toBe(true);
     // The runs Pi retried say nothing of their own.
     await Bun.sleep(2_000);
     expect(agentNotes(root)).toHaveLength(1);
@@ -541,7 +545,7 @@ describe("Pi's launch host, against the fake pi", () => {
     expect(host.attach(launch)).not.toBeNull();
     // The attach command's Pi once its shell exec'd it: nothing in the process list names the session. Its
     // Inbox tool off keeps it off the bridge, as one still reconnecting to the new Inbox; it claims the session all the same.
-    const attached = Bun.spawn([join(bin, "pi"), "--session-id", session], { cwd: folder, env: { ...env, PLANNOTATOR_INBOX_TOOL: "0", PLANNOTATOR_DATA_DIR: dataDir }, stdout: "ignore", stderr: "ignore" });
+    const attached = Bun.spawn([join(bin, "pi"), "--session-id", session], { cwd: folder, env: { ...env, PLANNOTATOR_INBOX_TOOL: "0", PLANNOTATOR_RELAY_URL: "http://127.0.0.1:9", PLANNOTATOR_DATA_DIR: dataDir }, stdout: "ignore", stderr: "ignore" });
     cleanup.push(() => void attached.kill("SIGTERM"));
     const terminal = await until("the attach command's Pi", () => fake.terminals()[0]);
     await until("ps to list it as pi", () => Bun.spawnSync(["/bin/ps", "-o", "command=", "-p", String(terminal.pid)]).stdout.toString().trim() === "pi");

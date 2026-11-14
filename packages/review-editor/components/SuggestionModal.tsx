@@ -3,6 +3,7 @@ import { HighlightedCode } from './HighlightedCode';
 import { ToolbarState } from '../hooks/useAnnotationToolbar';
 import { useTabIndent } from '../hooks/useTabIndent';
 import { detectLanguage } from '../utils/detectLanguage';
+import { fileHighlightLanguage } from '../utils/highlightLanguage';
 
 interface SuggestionModalProps {
   filePath: string;
@@ -32,7 +33,7 @@ export const SuggestionModal: React.FC<SuggestionModalProps> = ({
   return (
     <div className="fixed inset-0 z-[2000] flex items-center justify-center">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
-      <div className="relative w-[960px] max-w-[95vw] max-h-[85vh] flex flex-col bg-popover border border-border rounded-xl shadow-2xl">
+      <div data-highlight-composer="" className="relative w-[960px] max-w-[95vw] max-h-[85vh] flex flex-col bg-popover border border-border rounded-xl shadow-2xl">
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-border">
           <div className="flex items-center gap-2">
@@ -86,7 +87,7 @@ export const SuggestionModal: React.FC<SuggestionModalProps> = ({
               <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Original</span>
             </div>
             <pre className="flex-1 overflow-auto p-3 m-0 text-xs leading-relaxed suggestion-modal-original">
-              <HighlightedCode code={selectedOriginalCode || '(no lines selected)'} language={language} />
+              <HighlightedCode code={selectedOriginalCode || '(no lines selected)'} language={fileHighlightLanguage(filePath)} />
             </pre>
           </div>
 

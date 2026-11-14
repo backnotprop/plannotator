@@ -160,6 +160,11 @@ interface Forge {
   bodies: Record<string, string | null>;
   /** The commits GitHub says the PR has; null, that read fails. */
   prCommits?: string[] | null;
+  /** A REST call's own answer (close and reopen read the PR, then write it); null: the default answers. */
+  rest?: (cli: string, args: string[]) => { stdout: string; stderr: string; exitCode: number } | null;
+  /** The commits and the version heads GitLab says the MR has. */
+  mrCommits?: string[];
+  mrVersions?: string[];
 }
 
 /** gh signed in to github.com only; glab signed in nowhere. */
@@ -175,6 +180,8 @@ function forge(answer: unknown = GH_ANSWER): Forge {
     others: () => f.calls.filter((c) => othersCall(c.args)),
     run: async (cli, args) => {
       f.calls.push({ cli, args });
+      const rest = f.rest?.(cli, args);
+      if (rest) return rest;
       if (cli === "gh" && args.some((a) => a.includes("/commits?"))) return f.prCommits ? { stdout: `${f.prCommits.join("\n")}\n`, stderr: "", exitCode: 0 } : { stdout: "", stderr: "HTTP 502", exitCode: 1 };
       if (cli === "gh" && args.includes("--jq")) {
         const number = String(args[3]!.split("/").at(-1));
@@ -312,6 +319,8 @@ function gitlabForge(): Forge {
     others: () => f.calls.filter((c) => othersCall(c.args)),
     run: async (cli, args) => {
       f.calls.push({ cli, args });
+      const rest = f.rest?.(cli, args);
+      if (rest) return rest;
       if (cli === "glab" && args[0] === "auth") return { stdout: "gitlab.com\n  ✓ Logged in to gitlab.com as dana (keyring)\n", stderr: "", exitCode: 0 };
       if (cli === "gh" && args[0] === "auth") return { stdout: "", stderr: "not logged in", exitCode: 1 };
       if (cli === "glab" && othersCall(args)) {
@@ -321,6 +330,8 @@ function gitlabForge(): Forge {
       if (cli === "glab" && args.includes("graphql")) {
         return { stdout: JSON.stringify({ data: { currentUser: { username: "dana", requested: { nodes: [GL_MR(61)] }, authored: { nodes: [] }, merged: { nodes: [] } } } }), stderr: "", exitCode: 0 };
       }
+      if (cli === "glab" && args[3]?.endsWith("/commits?per_page=100")) return { stdout: JSON.stringify((f.mrCommits ?? []).map((id) => ({ id }))), stderr: "", exitCode: 0 };
+      if (cli === "glab" && args[3]?.endsWith("/versions?per_page=100")) return { stdout: JSON.stringify((f.mrVersions ?? []).map((head_commit_sha, id) => ({ id, head_commit_sha }))), stderr: "", exitCode: 0 };
       return { stdout: "", stderr: "unexpected", exitCode: 1 };
     },
   };
@@ -481,6 +492,127 @@ describe("merge (the Pull requests page)", () => {
     expect(((await res.json()) as { code: string }).code).toBe("pull_merge_unknown");
     expect(w.forge.calls.some((c) => c.args.includes("repos/northwind/billing-svc/pulls/412"))).toBe(true);
     expect(puts(w)).toEqual([]);
+  });
+});
+
+describe("close and reopen (the board's Close and its Undo)", () => {
+  const KEY = "github.com/northwind/billing-svc#412";
+  const PULL = "repos/northwind/billing-svc/pulls/412";
+  const call = (base: string, route: "close" | "reopen", fields: Record<string, unknown>, headers: Record<string, string> = {}) =>
+    fetch(`${base}/api/inbox/pulls/${route}`, { method: "POST", headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify(fields) });
+  const writes = (w: { forge: Forge }) => w.forge.calls.filter((c) => c.args.includes("PATCH"));
+  const ok = (body: unknown) => ({ stdout: JSON.stringify(body), stderr: "", exitCode: 0 });
+  /** GitHub as the PR is now: the read answers `state`, a PATCH changes it. */
+  const hostSays = (w: { forge: Forge }, start: "open" | "closed") => {
+    let state: string = start;
+    w.forge.rest = (_cli, args) => {
+      if (!args.includes(PULL)) return null;
+      if (args.includes("PATCH")) {
+        state = args.at(-1) === "state=closed" ? "closed" : "open";
+        return ok({ state });
+      }
+      return ok({ state, merged: false, merged_at: null });
+    };
+  };
+  const stateOf = async (w: { pulls: () => Promise<Response> }) => ((await (await w.pulls()).json()) as InboxPullsAnswer).pulls.find((p) => p.key === KEY)?.state;
+
+  test("Code review off: refused before anything runs", async () => {
+    const w = await world();
+    const before = w.forge.calls.length;
+    for (const route of ["close", "reopen"] as const) {
+      const res = await call(w.base, route, { key: KEY });
+      expect(res.status).toBe(409);
+      expect(((await res.json()) as { code: string }).code).toBe("code_review_off");
+    }
+    expect(w.forge.calls.length).toBe(before);
+  });
+
+  test("closes after asking the host, shows it closed, and Undo reopens it; a second reopen is refused", async () => {
+    const w = await world({ codeReview: true });
+    await w.send("Working.", "retries");
+    expect(await stateOf(w)).toBe("open");
+    hostSays(w, "open");
+    const closed = await call(w.base, "close", { key: KEY });
+    expect(closed.status).toBe(200);
+    expect(writes(w).map((c) => c.args.slice(-3))).toEqual([[PULL, "-f", "state=closed"]]);
+    // Read before the write, never after it alone.
+    const read = w.forge.calls.findIndex((c) => c.args.includes(PULL) && !c.args.includes("PATCH"));
+    expect(read).toBeLessThan(w.forge.calls.findIndex((c) => c.args.includes("PATCH")));
+    expect(await stateOf(w)).toBe("closed");
+    // Closing it again: the host says it's closed, nothing is written.
+    expect(((await (await call(w.base, "close", { key: KEY })).json()) as { code: string }).code).toBe("pull_closed");
+    expect(writes(w)).toHaveLength(1);
+
+    const reopened = await call(w.base, "reopen", { key: KEY });
+    expect(reopened.status).toBe(200);
+    expect(writes(w).map((c) => c.args.at(-1))).toEqual(["state=closed", "state=open"]);
+    expect(await stateOf(w)).toBe("open");
+    // The reopen spent the close: Undo can't run twice.
+    const again = await call(w.base, "reopen", { key: KEY });
+    expect(again.status).toBe(409);
+    expect(((await again.json()) as { code: string }).code).toBe("reopen_not_closed_here");
+    expect(writes(w)).toHaveLength(2);
+  });
+
+  test("a reopen of a PR this Inbox did not close is refused before the host is asked; another site and an unknown PR too", async () => {
+    const w = await world({ codeReview: true });
+    await w.send("Working.", "retries");
+    await w.pulls();
+    hostSays(w, "closed");
+    const asked = w.forge.calls.length;
+    const res = await call(w.base, "reopen", { key: KEY });
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { code: string }).code).toBe("reopen_not_closed_here");
+    expect(w.forge.calls.length).toBe(asked);
+    expect((await call(w.base, "close", { key: KEY }, { Origin: "https://evil.example", "Sec-Fetch-Site": "cross-site" })).status).toBe(403);
+    expect((await call(w.base, "close", { key: "github.com/northwind/billing-svc#999" })).status).toBe(404);
+    expect((await call(w.base, "close", {})).status).toBe(422);
+    expect(writes(w)).toEqual([]);
+  });
+
+  test("a refusal comes back in the host's words and the PR stays open", async () => {
+    const w = await world({ codeReview: true });
+    await w.send("Working.", "retries");
+    await w.pulls();
+    w.forge.rest = (_cli, args) => {
+      if (!args.includes(PULL)) return null;
+      if (args.includes("PATCH")) return { stdout: JSON.stringify({ message: "Must have admin rights to Repository." }), stderr: "gh: Must have admin rights to Repository. (HTTP 403)", exitCode: 1 };
+      return ok({ state: "open", merged: false, merged_at: null });
+    };
+    const res = await call(w.base, "close", { key: KEY });
+    expect(res.status).toBe(502);
+    expect(await res.json()).toMatchObject({ error: "Must have admin rights to Repository.", code: "pull_close_failed" });
+    expect(await stateOf(w)).toBe("open");
+    // Not closed here, so no Undo either.
+    expect(((await (await call(w.base, "reopen", { key: KEY })).json()) as { code: string }).code).toBe("reopen_not_closed_here");
+  });
+
+  test("GitLab: a listed MR closes and reopens through glab on its own host; a host no CLI here is signed in to is never asked", async () => {
+    const w = await world({ codeReview: true, gitlab: true });
+    await w.send("Ready.", "posting");
+    await w.pulls();
+    const MR_KEY = "gitlab.com/northwind/data/ledger#61:pull";
+    const MR = "projects/northwind%2Fdata%2Fledger/merge_requests/61";
+    let state = "opened";
+    w.forge.rest = (cli, args) => {
+      if (cli !== "glab" || !args.includes(MR)) return null;
+      if (args.includes("PUT")) state = args.at(-1) === "state_event=close" ? "closed" : "opened";
+      return ok({ state });
+    };
+    const mrState = async () => ((await (await w.pulls()).json()) as InboxPullsAnswer).pulls.find((p) => p.key === MR_KEY)?.state;
+    const puts = () => w.forge.calls.filter((c) => c.args.includes("PUT"));
+
+    expect((await call(w.base, "close", { key: MR_KEY })).status).toBe(200);
+    expect(puts().map((c) => [c.cli, ...c.args])).toEqual([["glab", "api", "--hostname", "gitlab.com", "-X", "PUT", MR, "-f", "state_event=close"]]);
+    expect(await mrState()).toBe("closed");
+    expect((await call(w.base, "reopen", { key: MR_KEY })).status).toBe(200);
+    expect(puts().map((c) => c.args.at(-1))).toEqual(["state_event=close", "state_event=reopen"]);
+    expect(await mrState()).toBe("open");
+
+    const res = await call(w.base, "close", { key: "gitlab.evil.example/northwind/data/ledger#61:pull" });
+    expect(res.status).toBe(404);
+    expect(w.forge.calls.some((c) => c.args.some((a) => a.includes("gitlab.evil.example")))).toBe(false);
+    expect(puts()).toHaveLength(2);
   });
 });
 
@@ -949,24 +1081,28 @@ describe("the whole stack's diff (finding C and merged layers)", () => {
     ]);
   });
 
-  test("GitLab: a fork layer's whole stack is refused with a note, and nothing runs", async () => {
+  test("GitLab: a fork layer's whole stack compares in the fork's project, from the target project's base", async () => {
     const mr = {
       iid: "5", title: "MR 5", webUrl: "https://gitlab.com/northwind/ledger/-/merge_requests/5", state: "opened", draft: false, updatedAt: "2026-11-03T10:00:00Z", mergedAt: null,
       sourceBranch: "feat", targetBranch: "main", approved: false, detailedMergeStatus: "NOT_APPROVED", diffStatsSummary: { additions: 1, deletions: 0, fileCount: 1 },
       headPipeline: null, project: { fullPath: "northwind/ledger" }, sourceProject: { fullPath: "dana/ledger" }, author: { username: "dana" }, approvedBy: { nodes: [] }, reviewers: { nodes: [] },
     };
+    const compare = { diffs: [{ old_path: "a.ts", new_path: "a.ts", diff: "@@ -1 +1 @@\n-old\n+new\n", new_file: false, renamed_file: false, deleted_file: false }] };
     const calls: string[][] = [];
     const run = async (cli: string, args: string[]) => {
       calls.push([cli, ...args]);
       if (cli === "glab" && args[0] === "auth") return { stdout: "  ✓ Logged in to gitlab.com as dana", stderr: "", exitCode: 0 };
       if (cli === "glab" && args.includes("graphql")) return { stdout: JSON.stringify({ data: { currentUser: { username: "dana", requested: { nodes: [] }, authored: { nodes: [mr] }, merged: { nodes: [] } } } }), stderr: "", exitCode: 0 };
-      return { stdout: "", stderr: "", exitCode: 1 };
+      if (args[3] === "projects/northwind%2Fledger/merge_requests/5") return { stdout: JSON.stringify({ sha: "f".repeat(40), source_project_id: 77, target_project_id: 12 }), stderr: "", exitCode: 0 };
+      if (args[3]?.startsWith("projects/77/repository/compare?")) return { stdout: JSON.stringify(compare), stderr: "", exitCode: 0 };
+      return { stdout: "", stderr: "404 Not Found", exitCode: 1 };
     };
     const pulls = createInboxPulls({ run: run as never });
     expect((await pulls.list([{ host: "gitlab.com", repo: "northwind/ledger", project_id: "prj_1" }])).pulls).toHaveLength(1);
-    const before = calls.length;
-    await expect(pulls.diff("gitlab.com/northwind/ledger#5:pull", "stack")).rejects.toMatchObject({ code: "pull_diff_fork" });
-    expect(calls.length).toBe(before);
+    const answer = await pulls.diff("gitlab.com/northwind/ledger#5:pull", "stack");
+    expect(calls.filter((c) => c[4]?.includes("/compare")).map((c) => c[4])).toEqual(["projects/77/repository/compare?from=main&to=feat&from_project_id=12&straight=false"]);
+    expect(answer).toMatchObject({ head: "dana:feat", head_sha: "f".repeat(40) });
+    expect(answer.patch).toContain("+new");
   });
 
   describe("the PR's description", () => {
@@ -1801,6 +1937,7 @@ describe("Post to GitHub/GitLab (the owner's answer C: the person chooses at the
     const res = await w.review({ key, head_sha: sha, action: "approve", body: "Looks right.", fileComments: [{ path: "ledger.py", line: 4, side: "RIGHT", body: "Nit." }] });
     expect(res.status).toBe(200);
     expect(((await res.json()) as { submission: { status: string } }).submission.status).toBe("complete");
+    expect(w.post.calls.some((c) => String(c.args[1]).includes("/versions"))).toBe(false);
     const posts = w.post.calls.filter((c) => c.args.includes("POST"));
     expect(posts.map((c) => c.args[1])).toEqual([
       "projects/northwind%2Fdata%2Fledger/merge_requests/61/notes",
@@ -1928,14 +2065,47 @@ describe("Post to GitHub/GitLab (the owner's answer C: the person chooses at the
     expect(((await gone.json()) as { code: string }).code).toBe("pull_commit_gone");
   });
 
-  test("GitLab: a commit the Inbox does not name is refused, and nothing posts, whatever the commit list could say", async () => {
+  test("GitLab: an older commit of the MR takes the review at that commit's version, in that version's lines", async () => {
     const w = await world({ codeReview: true, gitlab: true });
     await w.send("Ready.", "posting");
     await w.pulls();
-    const res = await w.review({ key: "gitlab.com/northwind/data/ledger#61:pull", head_sha: "e".repeat(40), action: "comment", body: "x" });
-    expect(res.status).toBe(409);
-    expect(((await res.json()) as { code: string }).code).toBe("pull_moved");
-    expect(w.post.calls.filter((c) => c.args.includes("POST"))).toEqual([]);
+    const head = "61".padStart(40, "b");
+    const older = "e".repeat(40);
+    w.forge.mrCommits = [head, older];
+    w.forge.mrVersions = [head, older];
+    const mr = "projects/northwind%2Fdata%2Fledger/merge_requests/61";
+    const versionDiff = "@@ -1,3 +1,3 @@\n one\n-two\n+TWO\n three\n";
+    w.post.answer = (_cmd, args) => {
+      if (args[1] === mr) return { stdout: JSON.stringify({ diff_refs: { base_sha: "c".repeat(40), start_sha: "d".repeat(40), head_sha: head } }), stderr: "", exitCode: 0 };
+      if (args[1] === `${mr}/versions?per_page=100`) return { stdout: JSON.stringify([{ id: 9, head_commit_sha: head, base_commit_sha: "c".repeat(40), start_commit_sha: "d".repeat(40) }, { id: 8, head_commit_sha: older, base_commit_sha: "1".repeat(40), start_commit_sha: "2".repeat(40) }]), stderr: "", exitCode: 0 };
+      if (args[1] === `${mr}/versions/8`) return { stdout: JSON.stringify({ diffs: [{ diff: versionDiff, old_path: "ledger.py", new_path: "ledger.py", new_file: false, deleted_file: false, renamed_file: false }] }), stderr: "", exitCode: 0 };
+      return { stdout: "{}", stderr: "", exitCode: 0 };
+    };
+    const res = await w.review({ key: "gitlab.com/northwind/data/ledger#61:pull", head_sha: older, action: "comment", body: "", fileComments: [{ path: "ledger.py", line: 3, side: "RIGHT", body: "On what I read." }] });
+    expect(res.status).toBe(200);
+    expect(w.post.calls.some((c) => String(c.args[1]).endsWith("/raw_diffs"))).toBe(false);
+    const discussion = w.post.calls.find((c) => c.args[1] === `${mr}/discussions`)!;
+    expect(discussion.input).toEqual({
+      body: "On what I read.",
+      position: { position_type: "text", base_sha: "1".repeat(40), head_sha: older, start_sha: "2".repeat(40), new_path: "ledger.py", old_path: "ledger.py", old_line: 3, new_line: 3 },
+    });
+  });
+
+  test("GitLab: a commit no longer on the MR, or one with line comments and no version of its own, is refused for the page to fall back; nothing posts", async () => {
+    const w = await world({ codeReview: true, gitlab: true });
+    await w.send("Ready.", "posting");
+    await w.pulls();
+    const key = "gitlab.com/northwind/data/ledger#61:pull";
+    const head = "61".padStart(40, "b");
+    const between = "e".repeat(40);
+    w.forge.mrCommits = [head];
+    w.forge.mrVersions = [head];
+    const gone = await w.review({ key, head_sha: between, action: "comment", body: "x" });
+    expect(((await gone.json()) as { code: string }).code).toBe("pull_commit_gone");
+    w.forge.mrCommits = [head, between];
+    const unplaced = await w.review({ key, head_sha: between, action: "comment", body: "x", fileComments: [{ path: "ledger.py", line: 3, side: "RIGHT", body: "Here." }] });
+    expect(((await unplaced.json()) as { code: string }).code).toBe("pull_commit_gone");
+    expect(w.post.calls).toEqual([]);
   });
 
   test("file-level comments over the limit, or one malformed: all refused and nothing posted, never cut for the page to forget", async () => {

@@ -306,6 +306,7 @@ async function openGlimpse(url: string): Promise<boolean> {
 			resolve(opened);
 		};
 
+		// windows-hide-guard: starts the app window the person asked for, which windowsHide would start hidden.
 		const child = spawn(glimpseCli, args, {
 			detached: true,
 			stdio: ["pipe", "ignore", "ignore"],
@@ -393,6 +394,7 @@ export async function openBrowser(url: string): Promise<{
 			args = [url];
 		}
 
+		// windows-hide-guard: starts the app window the person asked for, which windowsHide would start hidden.
 		const child = spawn(cmd, args, { detached: true, stdio: "ignore" });
 		// A failed launch exists only as an async "error" event; reporting
 		// opened: true unconditionally hides it (#1472).

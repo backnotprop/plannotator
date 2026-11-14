@@ -18,6 +18,7 @@ import type { InboxAnnotationRecord } from '@plannotator/core/inbox-types';
 import { inboxReviewVerdictWords, type InboxReviewVerdict } from '@plannotator/core/inbox-review';
 import type { DecisionActionId } from '@plannotator/ui/utils/decisionSpec';
 import { guideFeedback } from './attachments';
+import { commentPictureUploads } from './commentPictureFiles';
 import { newUuid } from './uuid';
 
 export interface VerdictPlan {
@@ -51,10 +52,11 @@ export function verdictReply(
   title: string,
   records: readonly InboxAnnotationRecord[],
   note?: string,
-): { words: string; feedback?: string; annotation_ids?: string[] } {
+): { words: string; feedback?: string; annotation_ids?: string[]; uploads?: string[] } {
   const carried = plan.withComments ? records : [];
   const words = [inboxReviewVerdictWords(plan.verdict, title, carried.length), note?.trim() ?? ''].filter((part) => part !== '').join('\n\n');
-  return carried.length > 0 ? { words, feedback: guideFeedback(carried), annotation_ids: carried.map((r) => r.id) } : { words };
+  const uploads = commentPictureUploads(carried);
+  return carried.length > 0 ? { words, feedback: guideFeedback(carried), annotation_ids: carried.map((r) => r.id), ...(uploads.length > 0 ? { uploads } : {}) } : { words };
 }
 
 /**

@@ -5,6 +5,7 @@
  * writing into a store it did not read.
  */
 
+import type { InboxCloudAgentView, InboxCloudPreset, InboxCloudSetup } from '@plannotator/core/inbox-cloud';
 import { readHello, type RestartHello } from './sessionAdopt';
 import type { InboxSidebarLayout } from '@plannotator/core/inbox-sidebar';
 import type { DecisionDataSummary, InboxAgentsGroup } from '@plannotator/core/inbox-types';
@@ -15,7 +16,7 @@ import type { SystemDrawingAnswer, SystemProjectsAnswer, SystemPullsAnswer } fro
 import type { SystemModel } from '@plannotator/system';
 import type { ShapeDrawnView, ShapeNote, ShapeRecord, ShapeRef, ShapeVersion } from '@plannotator/core/shape';
 import type { InboxArtifactPin, InboxArtifactsPage, InboxArtifactType } from '@plannotator/core/inbox-artifact-pins';
-import type { InboxAgentFaceChange } from '@plannotator/core/inbox-types';
+import type { InboxAgentFaceChange, InboxPriorityBefore } from '@plannotator/core/inbox-types';
 import { isActionRecord, questionsOnly, splitThreadActions } from './actions';
 import { createListReader, type ListReadAnswer } from './listRead';
 import { inboxUrl, isContested, localRoute, machineOf, rememberLocal, rememberMachine, selfMachineId, setSelfMachine } from './inboxUrl';
@@ -49,6 +50,7 @@ import type {
   InboxDraft,
   InboxDraftPasted,
   InboxReplyDraft,
+  InboxReplyQuote,
   InboxReplyDraftRow,
   InboxDraftStatus,
   InboxUpload,
@@ -60,6 +62,7 @@ import type {
   InboxVoiceSettings,
   InboxVoiceStatus,
 } from '@plannotator/core/inbox-types';
+import { inboxCommentPicture } from '@plannotator/core/inbox-types';
 import type { QuestionAnswer } from '@plannotator/core/question-block';
 import { inboxSectionsAsOf } from '@plannotator/core/inbox-snooze';
 import { NO_FILE_OPS, type ReplyDraftFileOps } from '@plannotator/core/inbox-reply-draft';
@@ -97,12 +100,13 @@ import type {
 
 import { browserSharedEventsEnv, sharedInboxEventsSupported, subscribeOwnInboxEvents, subscribeSharedInboxEvents } from './sharedEvents';
 import { newUuid } from './uuid';
+import { trackCommentWrite } from './commentSaves';
 
 /**
  * A dialog of the line of one-time dialogs, as the Inbox names it (the queue: packages/shared/inbox/reveals.ts, server
  * side): the update-day dialogs, then the offers. A registered dialog (Bro mode, List view) adds its id here.
  */
-export type InboxRevealId = 'theme_chooser' | 'code_review' | 'sound' | 'list_intro' | 'voice' | 'tab_icon' | 'snooze' | 'bro' | 'grill_me_tip' | 'board' | 'steps' | 'star' | 'list_view';
+export type InboxRevealId = 'theme_chooser' | 'code_review' | 'sound' | 'list_intro' | 'voice' | 'tab_icon' | 'snooze' | 'bro' | 'grill_me_tip' | 'board' | 'steps' | 'agent_rules' | 'star' | 'list_view' | 'personal_agents' | 'priority';
 /** What the line claims (`POST /api/inbox/reveal`): every offer, and the tab icon, the one update-day dialog claimed through the line. */
 export type InboxRevealOfferId = Exclude<InboxRevealId, 'sound' | 'list_intro' | 'voice'>;
 /** What a page claims through `POST /api/inbox/reveal`: Snooze, an offer, the agent note, the Launch tip or the Sidebar tip (both outside the line). */
@@ -132,7 +136,7 @@ function noteReplySent(words: string): void {
   for (const listener of replyListeners) listener(lastReply);
 }
 
-export type AgentToolHost = 'claude-code' | 'pi' | 'opencode' | 'dsh' | 'cline';
+export type AgentToolHost = 'claude-code' | 'pi' | 'opencode' | 'dsh' | 'cline' | 'openclaw' | 'hermes';
 
 /** The browser notifications as the Inbox keeps them (config.json, so they survive a port change). */
 export interface NotificationSettings {
@@ -161,6 +165,7 @@ export interface ProjectFolder extends InboxProject {
    * repo (or none resolved yet), and from an older Inbox. Read for `defaultRefHost.ts`.
    */
   repo_host?: string | null;
+  repo_forge?: 'gitlab';
 }
 
 /** The project menu's batches (POST /api/inbox/projects/:id/read and /resolve): the threads each took. */
@@ -230,6 +235,8 @@ export interface MachineView {
   message_deletions?: boolean;
   /** Its list was read and keeps no snoozes: an older Inbox, so Snooze says why instead of vanishing. */
   snooze_old?: boolean;
+  /** The marks it takes for its own threads and agents (approval "inbox-linked-marks"; `machineTakes`). Absent from an older Inbox. */
+  marks?: string[];
   /** Update on that machine, from its own state. Null: nothing to say (level, ahead, this machine, or no newer release known). */
   update?: MachineUpdateView | null;
 }
@@ -325,13 +332,20 @@ export interface ListModel {
    * offers no pin.
    */
   pins?: InboxListRow[];
+  /**
+   * The live tags, oldest first (approval "inbox-thread-tags"): the sidebar's Tags and the Add tag list; each row's
+   * `tags` names them. Absent from an older Inbox: the window then draws no Tags section and offers no Add tag.
+   * Merged: one per name across the linked machines that take tags, `machines` its id on each (InboxMachineTag).
+   */
+  tags?: (InboxInitiative & { machines?: Record<string, string> })[];
   /** The version of this list, named by the next read so only what changed comes back (listRead.ts). Absent from an older Inbox. */
   list_version?: string;
   /**
    * Each session's label by id (issue #2450; sessionLabels.ts): the rows' agents and a message's author. Absent from
-   * an older Inbox, which then read every session as before.
+   * an older Inbox, which then reads every session as before.
    */
   session_labels?: Record<string, string>;
+  session_titles?: Record<string, string>;
   /**
    * Each machine's agents (the Agents section; agentsList.ts holds them): this Inbox's group, then each linked
    * machine's on the merged view. Absent from an older Inbox.
@@ -369,6 +383,8 @@ export interface ReplyResult {
   reply: unknown;
   questions: InboxQuestion[];
   replayed: boolean;
+  /** Asked with `with_thread`: the thread as a read of it answers now (the sent reply in it). Absent from an older Inbox. */
+  thread_read?: ThreadModel;
   /** To another machine: held in this Inbox's outbox until that machine's Inbox answers (the thread shows it waiting). */
   held?: OutboxView;
 }
@@ -689,6 +705,9 @@ export interface InboxLaunchSettings {
   /** Where new scratch folders go (absolute), and as shown (`~/…`). Absent from an older Inbox. */
   scratch_dir?: string;
   scratch_dir_shown?: string;
+  /** Only the path: the file may hold a secret. */
+  settings_file?: string | null;
+  settings_file_shown?: string;
 }
 
 /**
@@ -861,6 +880,14 @@ export interface LanState {
 /** Where Post decisions puts a thread's decisions: the PR's description (default), a comment, or a short section plus the comment. */
 export type DecisionsPostTo = 'description' | 'comment' | 'both';
 
+type ImageRef = { path: string; name: string; kind?: 'file' };
+
+export interface InboxCommentDraftView {
+  text: string;
+  images: ImageRef[];
+  updated_at: string;
+}
+
 export class InboxApiError extends Error {
   constructor(
     readonly status: number,
@@ -872,6 +899,9 @@ export class InboxApiError extends Error {
     readonly retryAt: number | null = null,
     /** `thread_name_taken`: the one open thread that has the name, when the answer names it. */
     readonly threadId: string | null = null,
+    /** `question_revision_conflict`: the question's revision on the Inbox now, when the answer names it. */
+    readonly currentRevision: number | null = null,
+    readonly by: string | null = null,
   ) {
     super(message);
     this.name = 'InboxApiError';
@@ -888,9 +918,24 @@ async function readJson<T>(response: Response): Promise<T> {
       typeof body.field === 'string' ? body.field : null,
       typeof body.retry_at === 'number' ? body.retry_at : null,
       typeof body.thread_id === 'string' ? body.thread_id : null,
+      typeof body.current_revision === 'number' ? body.current_revision : null,
+      typeof body.by === 'string' ? body.by : null,
     );
   }
   return body as T;
+}
+
+/** A thread read as the window holds it (`thread`, and a Send's `thread_read`). */
+function threadModelOf(threadId: string, model: ThreadModel): ThreadModel {
+  if (machineOf(threadId)) {
+    // Another machine's thread: which thread each message is in, and the newest seq the person now sees there.
+    for (const message of model.thread.messages) threadOfMessage.set(message.id, threadId);
+    remoteThreadCursor.set(threadId, model.cursor);
+  } else {
+    // This Inbox's own thread: every id in it is this Inbox's for good.
+    rememberLocal(idsIn(model));
+  }
+  return { ...model, thread: splitThreadActions(model.thread) };
 }
 
 /** The machine a forwarded URL goes to (`/api/inbox/m/<machine>/…`), or null for this Inbox's own route. */
@@ -918,6 +963,10 @@ export function idsIn(value: unknown, out: Set<string> = new Set(), depth = 0, o
   for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
     if (typeof item === 'string') {
       if (ROUTED_ID_KEYS.has(key) && /^[A-Za-z0-9_-]{16,80}$/.test(item) && !item.startsWith('ibx_')) out.add(item);
+      else if (key === 'path') {
+        const picture = inboxCommentPicture(item);
+        if (picture) out.add(picture.upload_id);
+      }
     } else idsIn(item, out, depth + 1, onlyLocal);
   }
   return out;
@@ -1024,19 +1073,24 @@ export const REF_CARD_READ_MS = 20_000;
 export const STORAGE_READ_MS = 20_000;
 
 /** `get`, given up after `timeoutMs`: the fetch is aborted and the read fails with InboxReadTimeout. */
-async function getWithin<T>(path: string, timeoutMs: number): Promise<T> {
+/** `outer`: the caller gave the read up (the person moved on): it ends at once, with that abort. */
+async function getWithin<T>(path: string, timeoutMs: number, outer?: AbortSignal): Promise<T> {
   const controller = new AbortController();
   let timedOut = false;
   const timer = setTimeout(() => {
     timedOut = true;
     controller.abort();
   }, timeoutMs);
+  const onAbort = () => controller.abort(outer?.reason);
+  if (outer?.aborted) onAbort();
+  else outer?.addEventListener('abort', onAbort, { once: true });
   try {
     return await get<T>(path, controller.signal);
   } catch (cause) {
     throw timedOut ? new InboxReadTimeout(timeoutMs) : cause;
   } finally {
     clearTimeout(timer);
+    outer?.removeEventListener('abort', onAbort);
   }
 }
 
@@ -1051,7 +1105,14 @@ function actionMarkBody(mark: ActionMarkBody | null, staged: boolean): Record<st
 }
 
 /** A reply draft save's JSON body (the page's save as it goes builds the same one by hand). */
-export function replyDraftSaveBody(body: string, base: string | null, baseBody: string | null, files: ReplyDraftFileOps, recipients?: readonly string[]): Record<string, unknown> {
+export function replyDraftSaveBody(
+  body: string,
+  base: string | null,
+  baseBody: string | null,
+  files: ReplyDraftFileOps,
+  recipients?: readonly string[],
+  quote?: InboxReplyQuote | null,
+): Record<string, unknown> {
   // The box's file changes (the Inbox applies them to the draft's files as they are), always sent, even empty:
   // a save without them is an older page's, which names long pastes only. `recipients` (the recipient pill) only
   // once chosen: without it the draft keeps its own.
@@ -1063,6 +1124,8 @@ export function replyDraftSaveBody(body: string, base: string | null, baseBody: 
     files_remove: files.remove,
     files_place: files.place,
     ...(recipients !== undefined ? { recipients } : {}),
+    // The message the reply quotes (approval "inbox-reply-quote"): null takes it away; absent, the draft keeps its own.
+    ...(quote !== undefined ? { quote } : {}),
   };
 }
 
@@ -1117,15 +1180,24 @@ function threadPullsOf(answer: unknown): InboxThreadPullsAnswer {
   };
 }
 
-async function post<T>(path: string, body: Record<string, unknown>): Promise<T> {
+/** A browser takes at most 64 KiB of keepalive bodies in flight: a larger one goes as an ordinary request. */
+const KEEPALIVE_BODY_MAX = 60_000;
+
+/**
+ * `keepalive`: the request outlives the page (a save made as the page hides or goes). The answer is read as ever when
+ * the page stays. The fetch starts before this function first waits, so a caller in a `pagehide` handler gets it out.
+ */
+async function post<T>(path: string, body: Record<string, unknown>, init: { keepalive?: boolean } = {}): Promise<T> {
   refuseContested(path);
   const machine = forwardedTo(path);
   // A write to another machine is keyed end to end (rule 1): the window's own key, or one made for it here.
   const sent = machine && typeof body.idempotency_key !== 'string' ? { ...body, idempotency_key: newUuid() } : body;
+  const text = JSON.stringify(pageSession ? { ...sent, serverSession: pageSession } : sent);
   const response = await fetch(path, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'X-Plannotator-Load': pageLoad, ...(machine ? threadHeader(path) : {}) },
-    body: JSON.stringify(pageSession ? { ...sent, serverSession: pageSession } : sent),
+    body: text,
+    ...(init.keepalive && text.length <= KEEPALIVE_BODY_MAX ? { keepalive: true } : {}),
   });
   if (machine && (await localInstead(response))) return post<T>(localRoute(path), body);
   if (machine && response.status === 202) {
@@ -1179,7 +1251,8 @@ const projectUrl = (projectId: string, rest = '') => inboxUrl(`/projects/${encod
 /** The merged list names each row's and project's machine: their routes go there from now on (inboxUrl.ts). */
 function learnMachines(model: ListModel): void {
   setSelfMachine(model.self);
-  const rows = [...model.sections.flatMap((section) => section.threads), ...(model.snoozed ?? [])];
+  // Starred rows too: another machine's archived star is in no section here.
+  const rows = [...model.sections.flatMap((section) => section.threads), ...(model.snoozed ?? []), ...(model.pins ?? [])];
   // This Inbox's own rows and projects first, every id in them (a row's delivery and message ids too): a linked
   // machine's row with the same id never takes one over. Two linked machines naming one id leave it contested.
   rememberLocal(localIdsIn(model));
@@ -1261,6 +1334,18 @@ export interface SearchRequest {
 }
 
 /** GET /api/inbox/sessions: every live session, grouped by project (compose). */
+export interface CloudAgentsModel {
+  agents: InboxCloudAgentView[];
+  projects: { id: string; name: string }[];
+  available?: boolean;
+}
+
+export interface CloudAgentTest {
+  started: boolean;
+  run_url?: string;
+  words: string;
+}
+
 export interface ComposeSessionsModel {
   serverSession: string;
   home: string;
@@ -1322,7 +1407,7 @@ export type CloneReach = 'ok' | 'auth' | 'not_found' | 'network' | 'failed';
 /** What compose sends: a new thread to one live session. */
 export interface StartThreadInput {
   /** A live session, or (launch on) a new session of `agent` started in the project, a new scratch folder, or a folder under home (`~/…`); `trust`: Trust and start, on this reading. */
-  to: { host: string; session: string } | { launch: ({ agent: InboxLaunchAgent; project_id: string } | { agent: InboxLaunchAgent; scratch: true } | { agent: InboxLaunchAgent; folder: string; create?: true; clone?: { url: string; branch?: string } }) & { trust?: InboxLaunchTrust } };
+  to: { host: string; session: string } | { launch: ({ agent: InboxLaunchAgent; project_id: string } | { agent: InboxLaunchAgent; scratch: true } | { agent: InboxLaunchAgent; folder: string; create?: true; clone?: { url: string; branch?: string } }) & { trust?: InboxLaunchTrust; model?: string; effort?: string } };
   body: string;
   idempotency_key: string;
   uploads?: string[];
@@ -1474,18 +1559,9 @@ export const inboxApi = {
   },
   /** One thread; with `timeoutMs`, a read with no answer by then fails (InboxReadTimeout) instead of waiting for good. */
   // A thread's action items move out of `questions` into `actions` here (actions.ts), so nothing that picks or sends answers meets one.
-  thread: (threadId: string, timeoutMs?: number) =>
-    (timeoutMs === undefined ? get<ThreadModel>(threadUrl(threadId)) : getWithin<ThreadModel>(threadUrl(threadId), timeoutMs)).then((model) => {
-      if (machineOf(threadId)) {
-        // Another machine's thread: which thread each message is in, and the newest seq the person now sees there.
-        for (const message of model.thread.messages) threadOfMessage.set(message.id, threadId);
-        remoteThreadCursor.set(threadId, model.cursor);
-      } else {
-        // This Inbox's own thread: every id in it is this Inbox's for good.
-        rememberLocal(idsIn(model));
-      }
-      return { ...model, thread: splitThreadActions(model.thread) };
-    }),
+  /** `signal`: the person moved on to another thread before it answered; the read is given up (an AbortError). */
+  thread: (threadId: string, timeoutMs?: number, signal?: AbortSignal) =>
+    (timeoutMs === undefined ? get<ThreadModel>(threadUrl(threadId), signal) : getWithin<ThreadModel>(threadUrl(threadId), timeoutMs, signal)).then((model) => threadModelOf(threadId, model)),
   /** `store=0`: without the Storage sizes (the server sends them only to a page older than `storage()`). */
   settings: () => get<SettingsModel>(inboxUrl('/settings', 'store=0')),
   /** Settings → Storage's sizes, asked for only while that panel is shown (the server walks every file for them). Given up after STORAGE_READ_MS. */
@@ -1635,12 +1711,12 @@ export const inboxApi = {
   combineProject: (projectId: string, into: string | null) =>
     post<{ project: ProjectFolder | null }>(projectUrl(projectId, `/combine`), { into }),
   /** `unsentOnly`: refused (`question_already_sent`) when a reply already sent the question (decision mode, where a pick can race a Send). */
-  pick: (messageId: string, key: string, revision: number, answer: QuestionAnswer | null, options: { unsentOnly?: boolean; confirmFull?: boolean } = {}) =>
+  pick: (messageId: string, key: string, revision: number, answer: QuestionAnswer | null, options: { unsentOnly?: boolean; confirmFull?: boolean; keepalive?: boolean } = {}) =>
     post<{ questions: InboxQuestion[] }>(messageUrl(messageId, `/picks`), {
       questions: [{ key, revision, answer }],
       ...(options.unsentOnly ? { unsent_only: true } : {}),
       ...(options.confirmFull ? { confirm_full: true } : {}),
-    }).then((result) => ({ ...result, questions: questionsOnly(result.questions) })),
+    }, { keepalive: options.keepalive }).then((result) => ({ ...result, questions: questionsOnly(result.questions) })),
   /**
    * An action item's Done (with an optional note) or Can't do it (with the reason),
    * or taking it back (`null`). `staged` (the thread's checklist; approval
@@ -1699,6 +1775,13 @@ export const inboxApi = {
       clear_draft?: string;
       /** The person's verdict on the review this message carries (Approve / Send feedback in the review's header; Code review on). */
       review_verdict?: 'approved' | 'changes_requested';
+      /**
+       * The message this reply quotes (approval "inbox-reply-quote"), with the words selected in it and its time as this
+       * window shows it: the Inbox writes the lead the agent reads in front of the words.
+       */
+      quote?: { of: string; words?: string; time?: string };
+      /** The answer carries the thread as a read of it would (`thread_read`): the Send's last reply asks, and reads nothing after. */
+      with_thread?: boolean;
     },
   ) =>
     // To another machine: the newest seq the person saw there rides along (rule 11), and a reply its Inbox has not
@@ -1706,7 +1789,10 @@ export const inboxApi = {
     post<ReplyResult>(messageUrl(messageId, `/reply`), { ...input, ...seenThrough(messageId) }).then(
       (result) => {
         noteReplySent(input.words);
-        return { ...result, questions: questionsOnly(result.questions) };
+        // Only this Inbox's own thread, read as `thread` reads one; a linked machine's thread is read after, as before.
+        const read = result.thread_read && !machineOf(messageId) && result.thread_read.thread?.thread_id ? threadModelOf(result.thread_read.thread.thread_id, result.thread_read) : undefined;
+        const { thread_read: _read, ...rest } = result;
+        return { ...rest, questions: questionsOnly(result.questions), ...(read ? { thread_read: read } : {}) };
       },
       heldReply,
     ),
@@ -1741,10 +1827,10 @@ export const inboxApi = {
     post<{ message_id: string; viewed: string[] }>(messageUrl(messageId, `/guide/viewed`), { viewed }),
   /** A comment on that guide's diff (the review app's line comment), new or edited; removed through `removeAnnotation`. */
   saveGuideAnnotation: (messageId: string, annotation: object) =>
-    post<{ annotation: InboxAnnotationRecord }>(messageUrl(messageId, `/guide/annotations`), { annotation }),
+    trackCommentWrite(post<{ annotation: InboxAnnotationRecord }>(messageUrl(messageId, `/guide/annotations`), { annotation }), { on: messageId, id: (annotation as { id?: unknown }).id }),
   /** A comment on the text of an agent's message (the words selected), new or edited; removed through `removeAnnotation`. */
   saveMessageAnnotation: (messageId: string, annotation: object) =>
-    post<{ annotation: InboxAnnotationRecord }>(messageUrl(messageId, `/annotations`), { annotation }),
+    trackCommentWrite(post<{ annotation: InboxAnnotationRecord }>(messageUrl(messageId, `/annotations`), { annotation }), { on: messageId, id: (annotation as { id?: unknown }).id }),
   // A question choice's running-app prototype, through the live proxy (packages/server/inbox-live.ts). `probe`: the
   // app is asked first, so a stopped one answers 422 live_not_answering instead of the proxy framing its error.
   liveSite: (threadId: string, siteId: string, probe = false) =>
@@ -1752,7 +1838,7 @@ export const inboxApi = {
   pingLiveSite: (threadId: string, siteId: string) =>
     post<{ running: boolean }>(inboxUrl(`/threads/${encodeURIComponent(threadId)}/live/${encodeURIComponent(siteId)}/ping`), {}),
   saveLiveAnnotation: (threadId: string, siteId: string, annotation: object) =>
-    post<{ annotation: InboxAnnotationRecord }>(inboxUrl(`/threads/${encodeURIComponent(threadId)}/live/${encodeURIComponent(siteId)}/annotations`), { annotation }),
+    trackCommentWrite(post<{ annotation: InboxAnnotationRecord }>(inboxUrl(`/threads/${encodeURIComponent(threadId)}/live/${encodeURIComponent(siteId)}/annotations`), { annotation }), { on: threadId, id: (annotation as { id?: unknown }).id }),
   restart: () => post<{ ok: true }>(inboxUrl('/restart'), {}),
   // The update control: the dialogs' facts, Update now, Remind me tomorrow, Check now, What's new.
   updateDetails: () => get<UpdateDetails>(inboxUrl('/update')),
@@ -1776,7 +1862,7 @@ export const inboxApi = {
    * restarted under this tab (whose serverSession is new) so the count of
    * windows that may notify is right again.
    */
-  reportWindow: async (report: { window: string; permission: Exclude<InboxWindowPermission, 'unknown'>; origin: string; served_by?: string | null }) =>
+  reportWindow: async (report: { window: string; permission: Exclude<InboxWindowPermission, 'unknown'>; origin: string; served_by?: string | null; used?: boolean }) =>
     readJson<{ notify_reach: InboxNotifyReach }>(
       await fetch(inboxUrl('/window'), {
         method: 'POST',
@@ -1826,9 +1912,9 @@ export const inboxApi = {
   linkedPage: (attachmentId: string, path: string) =>
     get<LinkedPageView>(attachmentUrl(attachmentId, `/linked-page?path=${encodeURIComponent(path)}`)),
   saveAnnotation: (attachmentId: string, version: string, annotation: object) =>
-    post<{ annotation: InboxAnnotationRecord }>(inboxUrl('/annotations', undefined, machineOf(attachmentId)), { attachment_id: attachmentId, version, annotation }),
+    trackCommentWrite(post<{ annotation: InboxAnnotationRecord }>(inboxUrl('/annotations', undefined, machineOf(attachmentId)), { attachment_id: attachmentId, version, annotation }), { on: attachmentId, id: (annotation as { id?: unknown }).id }),
   removeAnnotation: (id: string) =>
-    post<{ annotation: InboxAnnotationRecord }>(inboxUrl(`/annotations/${encodeURIComponent(id)}/remove`, undefined, machineOf(id)), {}),
+    trackCommentWrite(post<{ annotation: InboxAnnotationRecord }>(inboxUrl(`/annotations/${encodeURIComponent(id)}/remove`, undefined, machineOf(id)), {}), { on: id, id, remove: true }),
   /** "Open in": the file as it is now, in a catalog app or the default app, by the attachment's id (on this computer only). */
   openIn: (attachmentId: string, appId: string) =>
     post<{ ok: boolean; error?: string }>(inboxUrl('/open-in'), { attachment_id: attachmentId, app_id: appId }),
@@ -1895,6 +1981,7 @@ export const inboxApi = {
   launchSettings: (fullPermissions: boolean) => post<{ launch: InboxLaunchSettings }>(inboxUrl('/launch/settings'), { full_permissions: fullPermissions }),
   /** Settings → Agents' "Start agents from New message": writes config.json `inboxLaunch.enabled`; New message follows at once. */
   launchEnabled: (enabled: boolean) => post<{ launch: InboxLaunchSettings }>(inboxUrl('/launch/settings'), { enabled }),
+  launchSettingsFile: (path: string | null) => post<{ launch: InboxLaunchSettings }>(inboxUrl('/launch/settings'), { settings_file: path }),
   /** Settings → Agents' "Scratch folders": a full path (`~/…` too), or null for the default. */
   launchScratchDir: (path: string | null) => post<{ launch: InboxLaunchSettings }>(inboxUrl('/launch/settings'), { scratch_dir: path }),
   readdress: (messageId: string, to: { host: string; session: string }) =>
@@ -1903,14 +1990,25 @@ export const inboxApi = {
   drafts: () => get<{ serverSession: string; drafts: DraftView[]; replies?: InboxReplyDraftRow[] }>(inboxUrl('/drafts')),
   // Reply drafts (approval "inbox-reply-drafts"): the reply box's words per thread.
   replyDraft: (threadId: string) => get<{ draft: InboxReplyDraft | null }>(threadUrl(threadId, `/draft`)),
+  commentDraft: (threadId: string, key: string) => get<{ draft: InboxCommentDraftView | null }>(threadUrl(threadId, '/comment-draft', `key=${encodeURIComponent(key)}`)),
+  saveCommentDraft: (threadId: string, body: { key: string; text: string; images: readonly ImageRef[]; base: string | null; force?: boolean }) =>
+    post<{ draft: InboxCommentDraftView | null }>(threadUrl(threadId, '/comment-draft'), body),
+  deleteCommentDraft: (threadId: string, key: string) => post<{ ok: true; deleted: boolean }>(threadUrl(threadId, '/comment-draft/delete'), { key }),
   /** Save (compare-and-set on `base`, the `updated_at` last read; null to create); an empty body deletes it. */
   /**
    * `files`: the box's file changes since it last held the draft's files (`files_add`, `files_remove`,
    * `files_place`); the Inbox applies them to the draft's files as they are and answers the result. Only
    * different words refuse a save (`base_body`: the words this window saved last).
    */
-  saveReplyDraft: (threadId: string, body: string, base: string | null, baseBody: string | null = null, files: ReplyDraftFileOps = NO_FILE_OPS, recipients?: readonly string[]) =>
-    post<{ draft: InboxReplyDraft | null }>(threadUrl(threadId, `/draft`), replyDraftSaveBody(body, base, baseBody, files, recipients)),
+  saveReplyDraft: (
+    threadId: string,
+    body: string,
+    base: string | null,
+    baseBody: string | null = null,
+    files: ReplyDraftFileOps = NO_FILE_OPS,
+    recipients?: readonly string[],
+    quote?: InboxReplyQuote | null,
+  ) => post<{ draft: InboxReplyDraft | null }>(threadUrl(threadId, `/draft`), replyDraftSaveBody(body, base, baseBody, files, recipients, quote)),
   /** A pending pasted-text upload's words (Put back after a reload, or in another window); `machine`: another machine's thread. */
   uploadText: (uploadId: string, machine: string | null = null) =>
     get<{ text: string }>(inboxUrl(`/uploads/${encodeURIComponent(uploadId)}/text`, undefined, machine)),
@@ -1938,9 +2036,9 @@ export const inboxApi = {
     post<{ card: InboxCardWire }>(inboxUrl(`/cards/${encodeURIComponent(id)}`), { op: 'initiative', initiative }),
   /** A new initiative, named. */
   createInitiative: (name: string) => post<{ initiative: InboxInitiative }>(inboxUrl('/initiatives'), { name }),
-  /** An initiative renamed, or deleted (its cards read as in none). */
-  changeInitiative: (id: string, change: { op: 'rename'; name: string } | { op: 'delete' } | { op: 'restore' }) =>
-    post<{ initiative: InboxInitiative }>(inboxUrl(`/initiatives/${encodeURIComponent(id)}`), change),
+  /** An initiative renamed, or deleted (its cards read as in none). `machine`: a linked machine's tag, changed there. */
+  changeInitiative: (id: string, change: { op: 'rename'; name: string } | { op: 'delete' } | { op: 'restore' }, machine?: string | null) =>
+    post<{ initiative: InboxInitiative }>(inboxUrl(`/initiatives/${encodeURIComponent(id)}`, undefined, machine), change),
   /** The person's move: `move` to a column, `drop` (Cancel, reason optional), `restore`. */
   moveCard: (id: string, change: { op: 'move'; column: InboxCardColumn } | { op: 'drop'; reason?: string | null } | { op: 'restore' }) =>
     post<{ card: InboxCardWire }>(inboxUrl(`/cards/${encodeURIComponent(id)}`), change),
@@ -1975,6 +2073,8 @@ export const inboxApi = {
   /** A PR author's profile picture, served by the Inbox from its own origin (only an author the last list returned). */
   pullDetails: (key: string, signal?: AbortSignal) => get<InboxPullDetailsAnswer>(inboxUrl(`/pulls/details?key=${encodeURIComponent(key)}`), signal),
   pullAvatarUrl: (host: string, login: string) => inboxUrl('/pulls/avatar', `host=${encodeURIComponent(host)}&login=${encodeURIComponent(login)}`),
+  pullMediaUrl: (key: string, url: string) => inboxUrl('/pulls/media', `key=${encodeURIComponent(key)}&url=${encodeURIComponent(url)}`),
+  pullMediaSizes: (key: string, signal?: AbortSignal) => get<{ sizes: Record<string, { width: number; height: number }> }>(inboxUrl(`/pulls/media/sizes?key=${encodeURIComponent(key)}`), signal),
   /** One layer's diff, or the stack's from its base up to that layer (a PR the last list named). */
   pullDiff: (key: string, scope: InboxPullDiffScope, signal?: AbortSignal) =>
     get<InboxPullDiffAnswer>(inboxUrl(`/pulls/diff?key=${encodeURIComponent(key)}&scope=${scope}`), signal),
@@ -1983,8 +2083,8 @@ export const inboxApi = {
   /** New review's change summary for a project's local changes. */
   reviewChanges: (project: string, changes: InboxReviewChanges, signal?: AbortSignal) => get<InboxReviewChangesAnswer>(inboxUrl(`/reviews/changes?project=${encodeURIComponent(project)}&changes=${changes}`), signal),
   /** One changed file's whole text at both ends of that diff, for its expand arrows, while it is the blobs (`old`, `new`) the patch on screen names. */
-  pullFile: (key: string, scope: InboxPullDiffScope, path: string, ids: PatchBlobIds, signal?: AbortSignal) =>
-    get<InboxFileContents>(inboxUrl(`/pulls/file?key=${encodeURIComponent(key)}&scope=${scope}&path=${encodeURIComponent(path)}&old=${ids.oldId}&new=${ids.newId}`), signal),
+  pullFile: (key: string, scope: InboxPullDiffScope, path: string, pin: PatchBlobIds | { head: string }, signal?: AbortSignal) =>
+    get<InboxFileContents>(inboxUrl(`/pulls/file?key=${encodeURIComponent(key)}&scope=${scope}&path=${encodeURIComponent(path)}&${'head' in pin ? `head=${pin.head}` : `old=${pin.oldId}&new=${pin.newId}`}`), signal),
   /** The person started a PR's (a stack's open layers') review thread with an agent: `threadId` is the thread the review picker (or compose's New thread) just started for it. */
   pullOwner: (keys: readonly string[], threadId: string, ask?: 'guide' | 'custom') => post<{ ok: true }>(inboxUrl('/pulls/owner'), { keys: [...keys], thread_id: threadId, ...(ask ? { ask } : {}) }),
   /** Before a hand-off is sent: may these PRs go to an agent in `projectId`? (404 `pull_unknown`, 422 another project's.) */
@@ -2003,6 +2103,10 @@ export const inboxApi = {
   },
   /** Merge a PR the person confirmed (the popover's second click), at the head they saw. The server asks the forge first. */
   pullMerge: (key: string, headSha: string) => post<{ ok: true; key: string; method: 'merge' | 'squash' | 'rebase' | null; url: string }>(inboxUrl('/pulls/merge'), { key, head_sha: headSha, confirmed: true }),
+  /** The board's Close (approval "inbox-pr-board-bulk"): the host is asked first; a refusal throws its words. */
+  pullClose: (key: string) => post<{ ok: true; key: string; url: string }>(inboxUrl('/pulls/close'), { key }),
+  /** Close's Undo: taken only for a PR this Inbox closed in the last few minutes. */
+  pullReopen: (key: string) => post<{ ok: true; key: string; url: string }>(inboxUrl('/pulls/reopen'), { key }),
   pullOwnerCheck: (keys: readonly string[], projectId: string) => post<{ ok: true }>(inboxUrl('/pulls/owner'), { keys: [...keys], project_id: projectId, validate_only: true }),
   seeBoard: (throughSeq: number) => post<{ seen_seq: number }>(inboxUrl('/cards/seen'), { through_seq: throughSeq }),
   /** The Board's first-visit dialog: the first page on this computer to ask gets `show: true`, once per machine. */
@@ -2069,8 +2173,11 @@ export const inboxApi = {
   artifactPins: () => get<{ pins: InboxArtifactPin[] }>(inboxUrl('/artifact-pins')),
   /** The face each agent's icon shows (inbox/agent-faces.json, agents/agentFaces.ts). This window's Inbox only. */
   agentFaces: () => get<unknown>(inboxUrl('/agent-faces')),
-  /** One agent's face (`agent`: its own mark again), or this browser's faces from before (`adopt`); every window hears it (`event: agent-faces`). */
-  saveAgentFace: (change: InboxAgentFaceChange) => post<unknown>(inboxUrl('/agent-faces'), change as Record<string, unknown>),
+  /**
+   * One agent's face (`agent`: its own mark again) or given name, or this browser's faces from before (`adopt`); every
+   * window hears it (`event: agent-faces`). `machine`: the agent's own machine, which keeps it (approval "inbox-linked-marks").
+   */
+  saveAgentFace: (change: InboxAgentFaceChange, machine?: string | null) => post<unknown>(inboxUrl('/agent-faces', undefined, machine), change as Record<string, unknown>),
   /** "Your own…": keep an uploaded picture for agents' icons (a data: URL, as Set picture… sends); answers `{ icon, faces, rev, icons }`. */
   uploadAgentIcon: (picture: string) => post<{ icon?: { id?: unknown } } & Record<string, unknown>>(inboxUrl('/agent-icons'), { picture }),
   /** Take an uploaded picture away: the agents showing it go back to their own mark. Answers `{ faces, rev, icons }`. */
@@ -2097,13 +2204,24 @@ export const inboxApi = {
     if (query.limit) params.set('limit', String(query.limit));
     return get<InboxArtifactsPage & { serverSession: string }>(inboxUrl('/artifacts', params.toString()), signal);
   },
-  pin: (threadId: string, pinned: boolean) =>
-    post<{ pins: { thread_id: string; pinned_at: string }[] }>(inboxUrl(`/threads/${encodeURIComponent(threadId)}/pin`), { pinned }),
-  /** Put the pins in this order (Move up, Move down): pins it does not name keep their place after them; a named thread not pinned now is skipped. */
-  pinOrder: (order: readonly string[]) => post<{ pins: { thread_id: string; pinned_at: string }[] }>(inboxUrl('/pins'), { order }),
-  /** Unpin's Undo: pin this one thread again at its old index, with the time it was first pinned. */
+  /** Star or unstar, on the thread's own machine (approval "inbox-linked-marks"). */
+  pin: (threadId: string, pinned: boolean) => post<{ pins: { thread_id: string; pinned_at: string }[] }>(threadUrl(threadId, '/pin'), { pinned }),
+  /**
+   * Put one machine's stars in this order (Move up, Move down), on that machine: pins it does not name keep their place
+   * after them; a named thread not pinned now is skipped.
+   */
+  pinOrder: (order: readonly string[]) => post<{ pins: { thread_id: string; pinned_at: string }[] }>(inboxUrl('/pins', undefined, machineOf(order[0])), { order }),
+  /** Unpin's Undo, on the thread's own machine: pin this one thread again at its old index there, with the time it was first pinned. */
   pinRestore: (restore: { thread_id: string; index: number; pinned_at: string }) =>
-    post<{ pins: { thread_id: string; pinned_at: string }[] }>(inboxUrl('/pins'), { restore }),
+    post<{ pins: { thread_id: string; pinned_at: string }[] }>(inboxUrl('/pins', undefined, machineOf(restore.thread_id)), { restore }),
+  /** Add the thread to Priority (`true`) or remove it, or (`restore`) put back a `before` an earlier write answered. On the thread's own machine. */
+  priority: (threadId: string, change: boolean | { restore: InboxPriorityBefore }) =>
+    post<{ before: InboxPriorityBefore }>(threadUrl(threadId, '/priority'), typeof change === 'boolean' ? { priority: change } : change),
+  /**
+   * Put a thread in a tag (`on`) or take it out (approval "inbox-thread-tags"): the thread's tags after. On the thread's
+   * own machine, by the tag's id there or by its name (`{ name }`: that machine makes the tag when it has none).
+   */
+  setThreadTag: (threadId: string, tag: { tag: string } | { name: string }, on: boolean) => post<{ tags: string[] }>(threadUrl(threadId, '/tags'), { ...tag, on }),
   /** Snooze the thread until a time, or end its snooze (`null`). `at`: an earlier snooze's own time, for an Undo. On the thread's own machine. */
   snooze: (threadId: string, until: string | null, at?: string) =>
     post<{ snoozed: { until: string; at: string } | null }>(threadUrl(threadId, '/snooze'), { until, ...(at ? { at } : {}) }),
@@ -2128,6 +2246,7 @@ export const inboxApi = {
    */
   sendNow: (messageId: string, session?: string | null) =>
     post<{ message: InboxMessage }>(messageUrl(messageId, `/send-now`), session ? { session } : {}),
+  takeBack: (messageId: string) => post<{ message: InboxMessage; draft: InboxReplyDraft | null; compose: InboxDraft | null }>(messageUrl(messageId, '/take-back'), {}),
   newMessage: (threadId: string, input: { session: string; body: string; idempotency_key: string }) =>
     post<{ message: InboxMessage | null; replayed: boolean; held?: OutboxView }>(threadUrl(threadId, `/message`), input).catch((cause) => {
       // To another machine: held in the outbox, as a reply is; the thread shows it waiting.
@@ -2159,6 +2278,15 @@ export const inboxApi = {
   pairingChecks: (fresh = false) => get<{ checks: PairingChecks; lan: LanState; tailnet: TailnetState }>(inboxUrl(`/pairing/checks${fresh ? '?fresh=1' : ''}`)),
   devices: () => get<{ devices: PairedDevice[] }>(inboxUrl('/devices')),
   removeDevice: (id: string) => post<{ device: PairedDevice }>(inboxUrl(`/devices/${encodeURIComponent(id)}/revoke`), {}),
+  cloudAgents: () => get<CloudAgentsModel>(inboxUrl('/cloud-agents')),
+  pairCloudAgent: (fields: { name: string; preset: InboxCloudPreset; project_id: string | null }) =>
+    post<CloudAgentsModel & { agent: InboxCloudAgentView; setup: InboxCloudSetup | null }>(inboxUrl('/cloud-agents'), fields),
+  newCloudPairing: (session: string) =>
+    post<CloudAgentsModel & { agent: InboxCloudAgentView; setup: InboxCloudSetup | null }>(inboxUrl(`/cloud-agents/${encodeURIComponent(session)}/pairing`), {}),
+  setCloudWake: (session: string, url: string, key: string) => post<CloudAgentsModel>(inboxUrl(`/cloud-agents/${encodeURIComponent(session)}/wake`), { url, key }),
+  testCloudAgent: (session: string) => post<CloudAgentsModel & { test: CloudAgentTest }>(inboxUrl(`/cloud-agents/${encodeURIComponent(session)}/test`), {}),
+  rekeyCloudAgent: (session: string, key: string) => post<CloudAgentsModel>(inboxUrl(`/cloud-agents/${encodeURIComponent(session)}/key`), { key }),
+  removeCloudAgent: (session: string) => post<CloudAgentsModel>(inboxUrl(`/cloud-agents/${encodeURIComponent(session)}/remove`), {}),
   tailnet: () => get<{ tailnet: TailnetState }>(inboxUrl('/tailnet')),
   setTailnet: (on: boolean) => post<{ tailnet: TailnetState }>(inboxUrl('/tailnet'), { on }),
   lan: () => get<{ lan: LanState }>(inboxUrl('/lan')),
@@ -2353,8 +2481,14 @@ export interface InboxEventHandlers {
   onAsk?: (threadId: string) => void;
   /** The sidebar's pins changed (`event: pins`, approval "inbox-pinned-threads"); never called by an older Inbox. */
   onPins?: () => void;
+  /** The person's Priority changed (`event: priority`); never called by an older Inbox. */
+  onPriority?: () => void;
   /** The pinned artifacts changed (`event: artifact-pins`, approval "inbox-artifact-stars"); never called by an older Inbox. */
   onArtifactPins?: () => void;
+  /** A thread's tags changed (`event: tags`, approval "inbox-thread-tags"); never called by an older Inbox. */
+  onTags?: () => void;
+  /** Show a thread (`event: show`, `plannotator inbox --open <thread>`): only the window named moves; never called by an older Inbox. */
+  onShow?: (threadId: string, windowId: string) => void;
   /** A snooze changed or ran out (`event: snoozes`, approval "inbox-snooze"), here or on a linked machine; never called by an older Inbox. */
   onSnoozes?: () => void;
   /** A read of these threads' PRs changed their checks or review (`event: thread-pulls`, no record); never called by an older Inbox. */
@@ -2370,6 +2504,8 @@ export interface InboxEventHandlers {
   onReactions?: (reactions: unknown, rev: unknown) => void;
   /** A capability switch was saved, here or in another window (`event: capabilities`: the Board, thread steps, ...); never called by an older Inbox. */
   onCapabilities?: (capabilities: { board?: { on: boolean }; steps?: { on: boolean }; bro?: { on: boolean }; float_drafts?: { on: boolean }; mark_read_warning?: { on: boolean }; code_review?: { on: boolean }; shape?: { on: boolean }; system?: { on: boolean }; chapter_diagrams?: { on: boolean } }) => void;
+  /** "Over your tailnet" published by itself once Tailscale came back (`event: tailscale`): its new state. Never called by an older Inbox. */
+  onTailscale?: (tailscale: TailscaleSettings) => void;
   /** Shape's boards changed (`event: shapes`, only while Shape is on): their ids. */
   onShapes?: (ids: string[]) => void;
   /**
@@ -2407,7 +2543,7 @@ export interface InboxEventWindow {
 
 /** The event stream's named frames, as they arrive (and as the tab that holds the shared stream passes them on). */
 // `heartbeat`: a window's stream beats every 10 s (packages/server/inbox.ts); heard by liveStream.ts, handled by nothing.
-export const INBOX_EVENT_FRAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'ask', 'pins', 'artifact-pins', 'snoozes', 'thread-pulls', 'rows', 'sidebar', 'agent-faces', 'reactions', 'capabilities', 'shapes', 'machine', 'machines', 'outbox', 'heartbeat'] as const;
+export const INBOX_EVENT_FRAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'ask', 'pins', 'priority', 'artifact-pins', 'tags', 'show', 'snoozes', 'thread-pulls', 'rows', 'sidebar', 'agent-faces', 'reactions', 'capabilities', 'tailscale', 'shapes', 'machine', 'machines', 'outbox', 'heartbeat'] as const;
 export type InboxEventFrameName = (typeof INBOX_EVENT_FRAMES)[number];
 export interface InboxEventFrame {
   name: InboxEventFrameName;
@@ -2494,8 +2630,22 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
     case 'pins':
       handlers.onPins?.();
       return;
+    case 'priority':
+      handlers.onPriority?.();
+      return;
     case 'artifact-pins':
       handlers.onArtifactPins?.();
+      return;
+    case 'tags':
+      handlers.onTags?.();
+      return;
+    case 'show':
+      try {
+        const data = JSON.parse(frame.data) as { thread_id?: unknown; window?: unknown };
+        if (typeof data.thread_id === 'string' && typeof data.window === 'string') handlers.onShow?.(data.thread_id, data.window);
+      } catch {
+        // A malformed frame changes nothing.
+      }
       return;
     case 'snoozes':
       handlers.onSnoozes?.();
@@ -2554,6 +2704,15 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
           ...(typeof data.system?.on === 'boolean' ? { system: { on: data.system.on } } : {}),
           ...(typeof data.chapter_diagrams?.on === 'boolean' ? { chapter_diagrams: { on: data.chapter_diagrams.on } } : {}),
         });
+      } catch {
+        // A malformed frame changes nothing.
+      }
+      return;
+    case 'tailscale':
+      try {
+        const data = JSON.parse(frame.data) as { tailscale?: unknown };
+        const tailscale = data.tailscale as TailscaleSettings | null | undefined;
+        if (tailscale && typeof tailscale === 'object' && typeof tailscale.on === 'boolean') handlers.onTailscale?.(tailscale);
       } catch {
         // A malformed frame changes nothing.
       }

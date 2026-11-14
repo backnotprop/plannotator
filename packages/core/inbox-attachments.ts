@@ -272,6 +272,24 @@ export const INBOX_MESSAGE_COMMENT_QUOTE_MAX = 20_000;
 /** The longest comment on a message's text, in characters. */
 export const INBOX_MESSAGE_COMMENT_TEXT_MAX = 10_000;
 
+const COMMENT_PICTURE_PATH_RE = /^(upl_[0-9A-HJKMNP-TV-Z]{26})\/([^/\\]{1,255})$/;
+
+export const INBOX_COMMENT_PICTURES_MAX = 10;
+
+export function inboxCommentPicture(path: unknown): { upload_id: string; file: string } | null {
+  const match = typeof path === "string" ? COMMENT_PICTURE_PATH_RE.exec(path) : null;
+  return match ? { upload_id: match[1]!, file: match[2]! } : null;
+}
+
+export function inboxCommentPictureUploads(annotation: { images?: unknown } | null | undefined): string[] {
+  const images = annotation?.images;
+  if (!Array.isArray(images)) return [];
+  return images.flatMap((image) => {
+    const picture = inboxCommentPicture(image && typeof image === "object" ? (image as { path?: unknown }).path : undefined);
+    return picture ? [picture.upload_id] : [];
+  });
+}
+
 /**
  * The largest text the window reads whole (the `view` and raw routes). A
  * text or code file over it is attached as a `file` (a download), and a text

@@ -41,7 +41,7 @@ describe("sessionTailnetAskAllowed", () => {
   });
 });
 
-// The owner rule the Inbox follows (#2564, isOwnerRequest): when Tailscale
+// The owner rule the Inbox follows (#2564): when Tailscale
 // names no owner, the inboxTailscaleAllow logins count as the owner. The
 // failures guarded: the one person using a tagged machine is refused Ask this
 // session from their other devices, or the allowlist lets someone else in

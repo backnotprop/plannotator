@@ -64,7 +64,7 @@ export function ensureInboxCertificate(dataDir: string): { cert: string; key: st
   if (!existsSync(certPath) || !existsSync(keyPath)) {
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     chmodSync(dir, 0o700);
-    const run = (args: string[]) => spawnSync("openssl", args, { encoding: "utf8", timeout: 15_000, env: process.env });
+    const run = (args: string[]) => spawnSync("openssl", args, { encoding: "utf8", timeout: 15_000, env: process.env, windowsHide: true });
     const made =
       [
         ["ecparam", "-name", "prime256v1", "-genkey", "-noout", "-out", keyPath],
@@ -116,6 +116,7 @@ function publishBonjour(name: string, port: number, fingerprint: string): ChildP
       ? [avahi, "-s", name, INBOX_BONJOUR_TYPE, String(port), ...txt]
       : null;
   if (!command) return null;
+  // windows-hide-guard: dns-sd (macOS) or avahi-publish (Linux) through /bin/sh; never on Windows.
   const child = spawn("/bin/sh", ["-c", '"$@" >/dev/null 2>&1 & child=$!; read _; kill "$child"', "sh", ...command], {
     stdio: ["pipe", "ignore", "ignore"],
   });

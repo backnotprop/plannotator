@@ -533,7 +533,7 @@ export const PRCommentsTab: React.FC<PRCommentsTabProps> = React.memo(({ context
 
                 {!isCollapsed && entry.data.body && (
                   <div className="mt-2 review-comment-markdown">
-                    <MarkdownBody authenticatedImages={authenticatedImages} markdown={entry.data.body} textClassName="text-[13px]" />
+                    <MarkdownBody prMedia authenticatedImages={authenticatedImages} markdown={entry.data.body} textClassName="text-[13px]" />
                   </div>
                 )}
 
@@ -674,7 +674,7 @@ function ThreadCard({ thread, isSelected, isCollapsed, onSelect, onToggleCollaps
           {first.body && (
             <div className={`relative mt-2 ${isDimmed && !isExpanded ? 'max-h-16 overflow-hidden' : ''}`}>
               <div className={`leading-relaxed review-comment-markdown ${isDimmed && !isExpanded ? 'text-muted-foreground' : 'text-foreground/85'}`}>
-                <MarkdownBody authenticatedImages={authenticatedImages} markdown={first.body} textClassName="text-[13px]" />
+                <MarkdownBody prMedia authenticatedImages={authenticatedImages} markdown={first.body} textClassName="text-[13px]" />
               </div>
               {isDimmed && !isExpanded && (
                 <div className="absolute bottom-0 left-0 right-0 h-10 bg-gradient-to-t from-card to-transparent pointer-events-none" />
@@ -706,7 +706,7 @@ function ThreadCard({ thread, isSelected, isCollapsed, onSelect, onToggleCollaps
                     <span className="text-[10px] text-muted-foreground">{formatRelativeTime(reply.createdAt)}</span>
                   </div>
                   <div className="pl-6 leading-relaxed review-comment-markdown text-foreground/85">
-                    <MarkdownBody authenticatedImages={authenticatedImages} markdown={reply.body} textClassName="text-[13px]" />
+                    <MarkdownBody prMedia authenticatedImages={authenticatedImages} markdown={reply.body} textClassName="text-[13px]" />
                   </div>
                 </div>
               ))}

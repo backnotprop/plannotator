@@ -21,6 +21,7 @@ describe('marketing videos live outside the repository', () => {
     expect(sync).toContain('--delete');
     expect(sync).toContain('--exclude "assets/*.mp4"');
     expect(sync).toContain('--exclude "assets/*.webm"');
+    expect(sync).toContain('--exclude "assets/hosted/*"');
   });
 
   test('pages point at the hosted videos, not at public/', () => {

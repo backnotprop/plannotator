@@ -39,7 +39,7 @@ export const inboxThreadShortcuts = defineShortcutScope({
       displayOrder: 5.1,
     },
     snooze: {
-      // InboxList.tsx (a row the keyboard is on: its menu at the times) and Thread.tsx (the header clock's menu).
+      // InboxList.tsx (a row the keyboard is on: its menu at the times) and Thread.tsx (the header ⋯ menu at the times).
       description: 'Snooze…',
       bindings: ['H'],
       section: 'List',

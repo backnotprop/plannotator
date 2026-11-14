@@ -586,7 +586,7 @@ async function createCodeReviewBrowserSession(
 				// A fork URL fetch must never stop to prompt for credentials.
 				const fetchHead = async (args: string[], cwd: string) => {
 					if (!headFetch.remote) return checkoutRuntime.runGit(args, { cwd });
-					const r = spawnSync("git", args, { cwd, encoding: "utf-8", env: { ...process.env, ...ghAccountEnv, GIT_TERMINAL_PROMPT: "0" } });
+					const r = spawnSync("git", args, { cwd, encoding: "utf-8", env: { ...process.env, ...ghAccountEnv, GIT_TERMINAL_PROMPT: "0" }, windowsHide: true });
 					return { stdout: r.stdout ?? "", stderr: r.stderr ?? "", exitCode: r.status ?? 1 };
 				};
 
@@ -634,7 +634,7 @@ async function createCodeReviewBrowserSession(
 					exitHandler = () => {
 						try {
 							for (const entry of worktreePool?.entries() ?? []) {
-								spawnSync("git", ["worktree", "remove", "--force", entry.path], { cwd: wtRepoDir, env: process.env });
+								spawnSync("git", ["worktree", "remove", "--force", entry.path], { cwd: wtRepoDir, env: process.env, windowsHide: true });
 							}
 						} catch {}
 						if (sessionDir) try { rmSync(sessionDir, { recursive: true, force: true }); } catch {}
@@ -656,7 +656,7 @@ async function createCodeReviewBrowserSession(
 					const [cloneCmd, ...cloneArgs] = cloneCommand.argv;
 
 					setCodeReviewProgress(ctx, `Cloning ${prRepo}...`);
-					const cloneResult = spawnSync(cloneCmd, cloneArgs, { encoding: "utf-8", env: cloneEnv ?? process.env });
+					const cloneResult = spawnSync(cloneCmd, cloneArgs, { encoding: "utf-8", env: cloneEnv ?? process.env, windowsHide: true });
 					if ((cloneResult.status ?? 1) !== 0) {
 						throw new Error(`${cloneCmd === "git" ? "git clone" : `${cloneCmd} repo clone`} failed: ${(cloneResult.stderr ?? "").trim()}`);
 					}

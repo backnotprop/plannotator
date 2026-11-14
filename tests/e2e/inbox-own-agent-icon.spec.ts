@@ -3,8 +3,8 @@
  * binary (temp data dir and HOME, sandboxed agent PATH, no browser opened, nothing real asked).
  *
  *  1. The face picker's fourth inner place, "Your own…", opens the pictures; "+" takes a file, a drop and a paste
- *     take one too. A new picture shows on its agent at once: the sidebar, the list row, the message author, the
- *     thread's participants, the reply box's "to" pill and the Board card.
+ *     take one too. A new picture shows its page, and "Use this icon" shows it on its agent at once: the sidebar, the
+ *     list row, the message author, the thread's participants, the reply box's "to" pill and the Board card.
  *  2. No row changes size: every list row's height and every mark's tile box are the same before and after.
  *  3. A picture is shown as uploaded, scaled to fit the tile (its own aspect ratio, nothing cropped, no tile colour).
  *  4. A GIF and a CSS + SMIL SVG move in the sidebar only (the marks' own motion paused, the picture's pixels
@@ -18,7 +18,7 @@
  */
 import { expect, test, type Browser, type BrowserContext, type Locator, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { E2E_LAUNCH_OFF, inboxScratch, removeInboxScratch } from './inbox-scratch';
@@ -109,7 +109,10 @@ async function agentIds(page: Page): Promise<string[]> {
   });
 }
 
-/** Open the fan on an agent's sidebar mark (a key: the pointer's rest is timing) and choose "Your own…". */
+/**
+ * Open the fan on an agent's sidebar mark (a key: the pointer's rest is timing) and choose "Your own…": the pictures
+ * (an agent showing one opens on its page first; the back control leads to them).
+ */
 async function openOwn(page: Page, agentId: string): Promise<Locator> {
   await sidebarMark(page, agentId).focus();
   await page.keyboard.press('Enter');
@@ -119,7 +122,16 @@ async function openOwn(page: Page, agentId: string): Promise<Locator> {
   await place.click();
   const panel = page.locator('dialog[data-dialog="agent-icon"][open]');
   await expect(panel).toBeVisible();
+  if (await panel.locator('[data-selected-icon]').count()) await panel.locator('.ib-agi-back').click();
+  await expect(panel.locator('.am-own-up')).toBeVisible();
   return panel;
+}
+
+/** "Use this icon" on the page a new or picked picture shows. */
+async function useIt(page: Page, timeout = 5_000): Promise<void> {
+  const panel = page.locator('dialog[data-dialog="agent-icon"][open]');
+  await panel.locator('[data-use-icon]').click({ timeout });
+  await expect(panel).toHaveCount(0);
 }
 
 async function upload(page: Page, agentId: string, file: string): Promise<void> {
@@ -127,7 +139,7 @@ async function upload(page: Page, agentId: string, file: string): Promise<void> 
   const chooser = page.waitForEvent('filechooser');
   await panel.locator('.am-own-up').click();
   await (await chooser).setFiles(file);
-  await expect(page.locator('dialog[data-dialog="agent-icon"][open]')).toHaveCount(0);
+  await useIt(page);
   await expect(sidebarMark(page, agentId).locator('[data-agent-mark]')).toHaveAttribute('data-face', /^own:[0-9a-f]{64}$/);
   // The sidebar's picture takes the mark's box exactly, whatever its own size (a wide one once spilled over the rows
   // below and opened their pickers).
@@ -146,6 +158,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const env = {
     PATH: process.env.PATH ?? '',
     HOME: root,
+    PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9',
     PLANNOTATOR_DATA_DIR: data,
     PLANNOTATOR_TEST_SANDBOX: '1',
     PLANNOTATOR_BROWSER: NO_BROWSER,
@@ -190,6 +203,8 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   world = { root, url: started.stdout.trim(), agents, context, page, threads, files, outside: [] };
   page.on('request', (request) => {
     const url = new URL(request.url());
+    // A blob: address is a picture already in the page (a big photo being shrunk): nothing leaves.
+    if (url.protocol === 'blob:') return;
     if (url.host !== new URL(world.url).host || url.pathname.startsWith('/__')) world.outside.push(request.url());
   });
 });
@@ -245,6 +260,7 @@ test('"Your own…" takes a file, a drop and a paste; each shows on its agent ev
     el.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: data }));
     el.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: data }));
   }, gifBytes);
+  await useIt(page);
   await expect(sidebarMark(page, byKey.gif!).locator('[data-agent-mark]')).toHaveAttribute('data-face', /^own:/);
 
   // A paste while the panel is open.
@@ -254,6 +270,7 @@ test('"Your own…" takes a file, a drop and a paste; each shows on its agent ev
     data.items.add(new File([text], 'hostile.svg', { type: 'image/svg+xml' }));
     document.dispatchEvent(new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: data }));
   }, PICTURES.hostile);
+  await useIt(page);
   await expect(sidebarMark(page, byKey.hostile!).locator('[data-agent-mark]')).toHaveAttribute('data-face', /^own:/);
 
   // Every place shows the picture; the sidebar plays it, the row tile asks for the still.
@@ -304,6 +321,57 @@ test('"Your own…" takes a file, a drop and a paste; each shows on its agent ev
   await shot(page, 'board-dark');
   await page.emulateMedia({ colorScheme: 'light' });
   await page.evaluate(() => (location.hash = ''));
+});
+
+test('a phone photo over 512 KB is shrunk in the window, its proportions kept, and sent quickly on a poor link', async () => {
+  test.setTimeout(120_000);
+  const { page, context } = world;
+  // A 4:3 photo of noise (it barely compresses): a few MB, as a phone's.
+  const photo = join(world.root, 'pictures', 'phone-photo.jpg');
+  const base64 = await page.evaluate(async () => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 2400;
+    canvas.height = 1800;
+    const ctx = canvas.getContext('2d')!;
+    const data = ctx.createImageData(canvas.width, canvas.height);
+    for (let i = 0; i < data.data.length; i++) data.data[i] = i % 4 === 3 ? 255 : (Math.random() * 256) | 0;
+    ctx.putImageData(data, 0, 0);
+    const blob = await new Promise<Blob>((done) => canvas.toBlob((b) => done(b!), 'image/jpeg', 0.95));
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    let out = '';
+    for (let at = 0; at < bytes.length; at += 0x8000) out += String.fromCharCode(...bytes.subarray(at, at + 0x8000));
+    return btoa(out);
+  });
+  writeFileSync(photo, Buffer.from(base64, 'base64'));
+  expect(statSync(photo).size).toBeGreaterThan(2 * 1024 * 1024);
+  const cdp = await context.newCDPSession(page);
+  await cdp.send('Network.emulateNetworkConditions', { offline: false, latency: 400, downloadThroughput: 50_000, uploadThroughput: 50_000 });
+  try {
+    const id = (await agentIds(page))[1]!;
+    const before = await sidebarMark(page, id).locator('[data-agent-mark]').getAttribute('data-face');
+    const panel = await openOwn(page, id);
+    const chooser = page.waitForEvent('filechooser');
+    await panel.locator('.am-own-up').click();
+    const started = Date.now();
+    await (await chooser).setFiles(photo);
+    await useIt(page, 20_000);
+    expect(Date.now() - started).toBeLessThan(20_000);
+    await expect(sidebarMark(page, id).locator('[data-agent-mark]')).not.toHaveAttribute('data-face', before ?? '');
+    const face = (await sidebarMark(page, id).locator('[data-agent-mark]').getAttribute('data-face'))!;
+    expect(face).toMatch(/^own:[0-9a-f]{64}$/);
+    const kept = await page.evaluate(async (hash) => {
+      const blob = await (await fetch(`/api/inbox/agent-icons/${hash}`)).blob();
+      const img = new Image();
+      img.src = URL.createObjectURL(blob);
+      await img.decode();
+      return { size: blob.size, type: blob.type, width: img.naturalWidth, height: img.naturalHeight };
+    }, face.slice(4));
+    expect(kept).toMatchObject({ type: 'image/jpeg', width: 256, height: 192 });
+    expect(kept.size).toBeLessThan(512 * 1024);
+  } finally {
+    await cdp.send('Network.emulateNetworkConditions', { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 });
+    await cdp.detach();
+  }
 });
 
 test('a picture is shown as uploaded: its own shape, scaled to fit the tile, nothing cropped, no tile colour', async () => {

@@ -15,6 +15,8 @@
  * - A reply's respawn that failed, or never connected within the grace →
  *   failed (missing when the CLI is gone), with Try again; it is never
  *   retried by itself.
+ * - Live and idle after a turn that ended in an error the session wrote down
+ *   (`turnErrorAt`), with nothing waiting for it → failed with `turn_error`.
  * - Live and busy → working; live and idle → no line, except while the turn
  *   the start was for has not visibly begun (not taken yet, or taken but not
  *   polled busy nor answered): still starting, so the line does not blink out.
@@ -25,6 +27,13 @@
  */
 
 import type { InboxLaunchRecord, InboxRun } from "./inbox-types";
+
+/**
+ * A launched session's turn that ended in an error (approval "inbox-failed-turn-note"): after the agent's name, on its
+ * run line ("Claude Code couldn't answer. Your message is kept.") and in the notification for it
+ * ("<project>: Codex couldn't answer").
+ */
+export const INBOX_TURN_FAILED_WORDS = "couldn't answer";
 
 /** A start that has not connected within this long is not "starting" any more. */
 export const INBOX_RUN_START_GRACE_MS = 60_000;
@@ -56,6 +65,8 @@ export interface InboxRunEvidence {
   respawnFailed: string | null;
   /** That respawn was refused because Claude Code does not trust the folder: the line offers Open in Terminal. */
   respawnUntrusted?: boolean;
+  /** The session's last turn ended in an error it wrote down (Claude Code's transcript): when (ms); null otherwise. */
+  turnErrorAt?: number | null;
   /** When the person pressed Stop, while it still holds. */
   stoppedByPersonAt: number | null;
   /** The host's words for a stop that was not the person's (`LaunchHost.stoppedNote`): the stopped line's `cause`. */
@@ -139,7 +150,12 @@ export function inboxRunOf(e: InboxRunEvidence): InboxRun | null {
   if (!e.live && e.respawnFailed && e.turnWaiting) return e.cliAvailable === false ? line("missing") : line("failed", { cause: e.respawnFailed, again: true, untrusted: e.respawnUntrusted === true });
   const starting = () => line("starting", { since: iso(e.startedAt), again: e.again });
   const inGrace = e.now - e.startedAt < INBOX_RUN_START_GRACE_MS;
-  if (e.live) return e.live.busy === true ? line("working", { since: iso(e.live.busySince) }) : e.turnWaiting && inGrace ? starting() : null;
+  if (e.live) {
+    if (e.live.busy === true) return line("working", { since: iso(e.live.busySince) });
+    // Its last turn ended in an error (its note is in the thread): it couldn't answer, with Try again.
+    if (e.turnErrorAt != null && !e.turnWaiting) return line("failed", { turn_error: true, since: iso(e.turnErrorAt) });
+    return e.turnWaiting && inGrace ? starting() : null;
+  }
   if (e.cliAvailable === false) return e.turnWaiting ? line("missing") : null;
   if (inGrace) return starting();
   const hostStopped = e.host === "absent" || host?.state === "stopped" || host?.state === "done";
