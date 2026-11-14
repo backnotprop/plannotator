@@ -54,6 +54,12 @@ async function pageDrift(page: Page): Promise<string | null> {
   for (;;) {
     const now = await read(page);
     if (!now) return null;
+    if (now.error) {
+      if (Date.now() > deadline) return `the held-copy probe could not read the Inbox: ${now.error}`;
+      await page.waitForTimeout(RETRY_MS).catch(() => {});
+      if (page.isClosed()) return null;
+      continue;
+    }
     const drift = driftOf(now);
     if ((!drift && now.busy === 0) || Date.now() > deadline) return drift;
     await page.waitForTimeout(RETRY_MS).catch(() => {});

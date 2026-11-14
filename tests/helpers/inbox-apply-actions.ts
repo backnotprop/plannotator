@@ -41,6 +41,8 @@ export const ACTIONS = [
   'agent-checked',
   'take-back',
   'agent-read',
+  'person-reply-elsewhere',
+  'late-read',
 ] as const;
 
 export type ActionKind = (typeof ACTIONS)[number];
@@ -148,6 +150,25 @@ export async function runAction(w: ApplyWorld, action: Action, step: number): Pr
         with_thread: true,
       }).catch(() => null);
       if (answer?.thread_read) putThread(w.window.client, t, answer.thread_read);
+      return;
+    }
+    case 'person-reply-elsewhere': {
+      if (!latestAgent || resolved) return;
+      const notes = store.pendingAnnotations(t);
+      await inboxApi.reply(latestAgent.id, {
+        idempotency_key: `elsewhere-${step}`,
+        words: `From another window ${step}.`,
+        questions: [],
+        ...(notes.length > 0 ? { annotation_ids: notes.map((r) => r.id), feedback: 'Notes.' } : {}),
+      }).catch(() => null);
+      return;
+    }
+    case 'late-read': {
+      if (!held.includes(t)) return;
+      const old = await inboxApi.thread(t).catch(() => null);
+      if (!old) return;
+      agentSend(w, t, { body: `Written while a read was out ${step}.` });
+      w.window.late = { threadId: t, read: old };
       return;
     }
     case 'pick':

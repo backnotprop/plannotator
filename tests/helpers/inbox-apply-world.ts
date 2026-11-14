@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { InboxAuthor, InboxThread } from '@plannotator/core/inbox-types';
-import { inboxApi, resetListReads, type AttachmentsModel, type InboxEvent, type ListModel } from '../../packages/inbox/api';
+import { inboxApi, resetListReads, type AttachmentsModel, type InboxEvent, type ListModel, type ThreadModel } from '../../packages/inbox/api';
 import { drawNow } from '../../packages/inbox/data/apply/drawGap';
 import { applyListRecord } from '../../packages/inbox/data/apply/list';
 import { applyStreamRecord } from '../../packages/inbox/data/apply/stream';
@@ -84,6 +84,7 @@ export class WindowCopy {
   private filesThread: InboxThread | null = null;
   private touched = new Set<string>();
   outcomes = new Map<string, number>();
+  late: { threadId: string; read: ThreadModel } | null = null;
 
   async openThread(threadId: string): Promise<void> {
     putThread(this.client, threadId, await inboxApi.thread(threadId));
@@ -135,6 +136,10 @@ export class WindowCopy {
   async settle(): Promise<void> {
     await Bun.sleep(0);
     drawNow();
+    if (this.late) {
+      putThread(this.client, this.late.threadId, this.late.read);
+      this.late = null;
+    }
     if (!this.open) return;
     if (isThreadStale(this.client, this.open)) {
       putThread(this.client, this.open, await inboxApi.thread(this.open));
