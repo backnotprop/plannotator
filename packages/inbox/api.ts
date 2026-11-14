@@ -1870,6 +1870,7 @@ export const inboxApi = {
   // app is asked first, so a stopped one answers 422 live_not_answering instead of the proxy framing its error.
   liveSite: (threadId: string, siteId: string, probe = false) =>
     get<{ site: LiveSiteWire }>(inboxUrl(`/threads/${encodeURIComponent(threadId)}/live/${encodeURIComponent(siteId)}${probe ? '?probe=1' : ''}`)),
+  liveFrameUrl: (threadId: string, siteId: string) => inboxUrl(`/threads/${encodeURIComponent(threadId)}/live/${encodeURIComponent(siteId)}/frame`),
   pingLiveSite: (threadId: string, siteId: string) =>
     post<{ running: boolean }>(inboxUrl(`/threads/${encodeURIComponent(threadId)}/live/${encodeURIComponent(siteId)}/ping`), {}),
   saveLiveAnnotation: (threadId: string, siteId: string, annotation: object) =>

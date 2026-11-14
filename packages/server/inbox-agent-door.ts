@@ -9,6 +9,7 @@ import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { inboxUploadAttachments, receiveInboxUpload, removeInboxUploads } from "@plannotator/shared/inbox/uploads";
 import { hasCloudWake, type InboxCloudAgent, type InboxCloudAgents } from "./inbox-cloud-agents";
 import { prototypePlace } from "./inbox-live";
+import { isWebPrototype } from "./inbox-web-prototypes";
 import { createInboxMcpServer, type InboxMcpContext } from "./inbox-mcp";
 import { fail, okComplete, type ToolResult } from "./inbox-mcp-result";
 
@@ -82,11 +83,12 @@ export function createInboxAgentDoor(context: InboxAgentDoorContext) {
       if (ids.length !== uploads.length || ids.some((id, i) => id !== uploads[i])) throw new InboxError("attachment_path_refused", "attachments: uploaded bytes only.");
       return inboxUploadAttachments(store.dir, [...uploads], new Date(context.mcp.now?.() ?? Date.now()).toISOString());
     },
-    checkPrototypeApps: async (apps) => {
-      const app = apps[0]!;
+    checkPrototypeApps: async (apps, probing) => {
+      const app = apps.find((candidate) => !isWebPrototype(candidate.target));
+      if (!app && context.mcp.checkPrototypeApps) return context.mcp.checkPrototypeApps(apps, probing);
       throw new InboxError(
         "validation_error",
-        `body: ${prototypePlace(app)}: Prototype: ${app.target}: the Inbox opens a running app only on the person's computer, and yours runs elsewhere. Attach the page's HTML file in this send and name it instead (Prototype: mock.html).`,
+        `body: ${prototypePlace(app ?? apps[0]!)}: Prototype: ${(app ?? apps[0]!).target}: the Inbox opens a running app only on the person's computer, and yours runs elsewhere. Give its https:// address, or attach the page's HTML file in this send and name it (Prototype: mock.html).`,
         { field: "body" },
       );
     },
