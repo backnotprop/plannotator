@@ -13,6 +13,7 @@ import { readSavedLayout, snapshotLayout, writeSavedLayout } from './layoutMemor
 
 export const PANE_RATIO_KEY = 'plannotator-review-pane-ratio';
 const SAVE_DELAY_MS = 300;
+const SECOND_GROUP_MIN_WIDTH = 160;
 
 function readRatio(): number {
   return clampRatio(Number.parseFloat(storage.getItem(PANE_RATIO_KEY) ?? '0.5'));
@@ -66,8 +67,9 @@ function useSecondGroupOffset(store: WorkspaceStore, rowRef: React.RefObject<HTM
     const measure = () => {
       const side = store.paneElement(1);
       if (!side) return;
-      const left = side.getBoundingClientRect().left - row.getBoundingClientRect().left;
-      setOffset(left > 0 ? Math.round(left) : null);
+      const box = row.getBoundingClientRect();
+      const left = side.getBoundingClientRect().left - box.left;
+      setOffset(left > 0 && box.width - left >= SECOND_GROUP_MIN_WIDTH ? Math.round(left) : null);
     };
     const frame = requestAnimationFrame(measure);
     const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
