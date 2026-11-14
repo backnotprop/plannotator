@@ -381,7 +381,7 @@ import { configurePlannotatorUI } from '@plannotator/ui/configure';
 // copies rich text, and on a touch screen the toolbar sits below the selection
 // (clear of iOS's edit menu), inside the screen, with thumb-sized buttons;
 // @plannotator/ui hosts keep both unchanged unless they opt in.
-configurePlannotatorUI({ richCopy: true, touchSelectionToolbar: true });
+configurePlannotatorUI({ richCopy: true, touchSelectionToolbar: true, deferOffscreenCodeHighlight: true });
 
 type NoteAutoSaveResults = {
   obsidian?: boolean;
