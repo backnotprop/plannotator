@@ -216,7 +216,7 @@ export function ReviewSemanticDiffPanel() {
 
         {loadState.status === 'empty' && (
           <div className="semantic-diff-empty">
-            {data.unreadFiles?.length ? 'No semantic changes found in the files that could be read.' : 'No semantic changes found.'}
+            {data.unreadFiles?.length ? 'No moved, renamed, reformatted, extracted or inlined code in the files that could be read.' : 'No moved, renamed, reformatted, extracted or inlined code.'}
           </div>
         )}
         {unread && (
