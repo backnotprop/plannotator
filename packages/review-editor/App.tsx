@@ -5506,7 +5506,7 @@ const ReviewApp: React.FC = () => {
       : undefined,
     repo: repoFiles.state.status === 'ready' && treeScope === 'all' ? repoFiles.state : null,
     diff:
-      effectivePanelView === 'tree' && !showCommitsPanel && panelDiffOptions && panelDiffOptions.length > 0
+      (effectivePanelView === 'tree' || effectivePanelView === 'sections') && !showCommitsPanel && panelDiffOptions && panelDiffOptions.length > 0
         ? {
             options: panelDiffOptions,
             active: activeDiffBase || 'uncommitted',
