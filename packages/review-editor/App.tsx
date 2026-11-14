@@ -989,6 +989,7 @@ const ReviewApp: React.FC = () => {
   // Dockview center panel API for the review workspace.
   const [dockApi, setDockApi] = useState<DockviewApi | null>(null);
   const [dockActivePanelId, setDockActivePanelId] = useState<string | null>(null);
+  const [paneTabsSlot, setPaneTabsSlot] = useState<HTMLElement | null>(null);
   const [allChangesOpen, setAllChangesOpen] = useState(false);
   const filesRef = useRef(files);
   filesRef.current = files;
@@ -5578,7 +5579,7 @@ const ReviewApp: React.FC = () => {
         <RefHoverCards rootRef={refCardRootRef} onlyWithData />
         {/* Header */}
         <header style={{ '--review-header-h': `${isCompactTouchLayout ? COMPACT_REVIEW_HEADER_HEIGHT : REVIEW_HEADER_HEIGHT}px` } as React.CSSProperties} className={isCompactTouchLayout
-          ? 'min-h-[var(--review-header-h)] grid grid-cols-[44px_minmax(0,1fr)_44px] items-center border-b border-border/50 bg-card/50 backdrop-blur-xl z-50'
+          ? 'relative min-h-[var(--review-header-h)] grid grid-cols-[44px_minmax(0,1fr)_44px] items-center border-b border-border/50 bg-card/50 backdrop-blur-xl z-50'
           : 'py-1 min-[480px]:py-0 min-[480px]:h-[var(--review-header-h)] flex flex-col min-[480px]:flex-row items-stretch min-[480px]:items-center min-[480px]:justify-between gap-1 min-[480px]:gap-0 px-2 border-b border-border bg-card/50 z-50'
         }>
           <div className={isCompactTouchLayout
@@ -5636,7 +5637,7 @@ const ReviewApp: React.FC = () => {
             {prMetadata ? (
               <div className={isCompactTouchLayout
                 ? 'min-w-0 flex items-center justify-center overflow-hidden px-1'
-                : 'min-w-0 flex flex-1 items-center gap-2 lg:gap-3 overflow-hidden'
+                : 'min-w-0 flex shrink items-center gap-2 lg:gap-3 overflow-hidden'
               }>
                 <span
                   className="min-w-0 max-w-[160px] xl:max-w-[240px] text-xs text-muted-foreground/60 hidden sm:inline-flex items-center gap-1"
@@ -5671,7 +5672,7 @@ const ReviewApp: React.FC = () => {
             ) : repoInfo ? (
               <div className={isCompactTouchLayout
                 ? 'min-w-0 flex items-center justify-center overflow-hidden px-1'
-                : 'min-w-0 flex flex-1 items-center gap-2 lg:gap-3 overflow-hidden'
+                : 'min-w-0 flex shrink items-center gap-2 lg:gap-3 overflow-hidden'
               }>
                 {repoInfo.branch && (
                   <span
@@ -5713,7 +5714,9 @@ const ReviewApp: React.FC = () => {
                 : 'text-xs text-muted-foreground/70'
               }>Review</span>
             )}
+            {!isCompactTouchLayout && !guideVisible && <div ref={setPaneTabsSlot} data-pane-tabs-slot="" className="min-w-0 flex-1 self-stretch flex items-stretch empty:hidden" />}
           </div>
+            {isCompactTouchLayout && !guideVisible && <div ref={setPaneTabsSlot} data-pane-tabs-slot="" className="absolute inset-y-0 left-11 right-11 flex items-center justify-center bg-background empty:hidden" />}
 
           <div className={isCompactTouchLayout
             ? 'contents'
@@ -6147,7 +6150,7 @@ const ReviewApp: React.FC = () => {
               showCancel
             />
             {files.length > 0 ? (
-              <ReviewCenterArea onReady={handleDockReady} mode={resolvedMode === 'light' ? 'light' : 'dark'} singlePane={isCompactTouchLayout} />
+              <ReviewCenterArea onReady={handleDockReady} mode={resolvedMode === 'light' ? 'light' : 'dark'} singlePane={isCompactTouchLayout} tabsSlot={paneTabsSlot} reviewKey={prMetadata?.url ?? (repoInfo ? `${repoInfo.display}#${repoInfo.branch ?? ''}` : undefined)} />
             ) : (
               <div className="h-full flex items-center justify-center">
                 <div className="text-center space-y-3 max-w-md px-8">

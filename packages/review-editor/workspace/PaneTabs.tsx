@@ -1,6 +1,16 @@
 import React, { useRef } from 'react';
 import type { Pane } from './paneLayout';
 import { isReviewFilePreviewParams } from '../dock/reviewPanelTypes';
+import { useSettledValue } from './useSettledValue';
+
+export const TITLE_SETTLE_MS = 200;
+
+const TabTitle: React.FC<{ title: string }> = ({ title }) => <>{useSettledValue(title, TITLE_SETTLE_MS)}</>;
+
+function focusTreeRow() {
+  const row = document.querySelector<HTMLElement>('[data-review-sidebar] .file-tree-item.active') ?? document.querySelector<HTMLElement>('[data-review-sidebar] .file-tree-item');
+  row?.focus();
+}
 
 export const PaneTabs: React.FC<{
   pane: Pane;
@@ -8,7 +18,8 @@ export const PaneTabs: React.FC<{
   onActivate: (id: string) => void;
   onClose: (id: string) => void;
   onKeep?: (id: string) => void;
-}> = ({ pane, paneIndex, onActivate, onClose, onKeep }) => {
+  inHeader?: boolean;
+}> = ({ pane, paneIndex, onActivate, onClose, onKeep, inHeader = false }) => {
   const listRef = useRef<HTMLDivElement>(null);
 
   const focusTab = (id: string | null) => {
@@ -32,6 +43,7 @@ export const PaneTabs: React.FC<{
     const neighbour = pane.tabs[at + 1] ?? pane.tabs[at - 1];
     onClose(id);
     if (neighbour) focusTab(neighbour.id);
+    else requestAnimationFrame(focusTreeRow);
   };
 
   return (
@@ -41,7 +53,10 @@ export const PaneTabs: React.FC<{
       aria-label={paneIndex === 0 ? 'Open files' : 'Open files beside'}
       data-pane-tabs=""
       onKeyDown={onKeyDown}
-      className="flex-none h-8 flex items-stretch gap-4 px-3 overflow-x-auto shadow-[inset_0_-1px_0_var(--border)] bg-background [scrollbar-width:none]"
+      data-pane-tabs-for={paneIndex}
+      className={inHeader
+        ? 'min-w-0 h-full flex items-stretch gap-4 overflow-x-auto [scrollbar-width:none]'
+        : 'flex-none h-8 flex items-stretch gap-4 px-3 overflow-x-auto shadow-[inset_0_-1px_0_var(--border)] bg-background [scrollbar-width:none]'}
     >
       {pane.tabs.map((tab) => {
         const active = tab.id === pane.activeId;
@@ -67,7 +82,7 @@ export const PaneTabs: React.FC<{
                 active ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'
               } ${preview ? 'italic' : ''}`}
             >
-              {tab.title}
+              <TabTitle title={tab.title} />
             </button>
             <button
               type="button"

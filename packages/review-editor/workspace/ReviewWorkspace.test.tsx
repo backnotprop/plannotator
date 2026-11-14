@@ -36,7 +36,7 @@ afterEach(async () => {
   kept.length = 0;
 });
 
-async function mount(singlePane = false) {
+async function mount(singlePane = false, extra: { tabsSlot?: HTMLElement; reviewKey?: string } = {}) {
   host = document.createElement('div');
   document.body.appendChild(host);
   root = createRoot(host);
@@ -44,7 +44,7 @@ async function mount(singlePane = false) {
   await act(async () => {
     root!.render(
       <ReviewStateProvider value={state}>
-        <ReviewWorkspace singlePane={singlePane} onReady={(event) => { api = event.api; }} />
+        <ReviewWorkspace singlePane={singlePane} tabsSlot={extra.tabsSlot} reviewKey={extra.reviewKey} onReady={(event) => { api = event.api; }} />
       </ReviewStateProvider>,
     );
   });
@@ -111,5 +111,52 @@ describe.skipIf(!hasDom)('the review panes', () => {
     expect(el.querySelector('[data-probe="review-file:a.ts"] [data-probe-path]')?.textContent).toBe('c.ts');
     await act(async () => tabButton(el, 'review-all-files').click());
     expect(input().value).toBe('kept');
+  });
+
+  test('with the header slot, tabs appear in the header row and nothing is added above the code', async () => {
+    const slot = document.createElement('div');
+    document.body.appendChild(slot);
+    const el = await mount(false, { tabsSlot: slot });
+    await act(async () => { api!.addPanel({ id: 'review-file:a.ts', component: 'review-file', title: 'a.ts', params: { filePath: 'a.ts' } }); });
+    expect(slot.querySelector('[data-pane-tab="review-file:a.ts"]')).not.toBeNull();
+    expect(el.querySelector('[data-pane] [data-pane-tabs]')).toBeNull();
+    slot.remove();
+  });
+
+  test('a preview tab shows a new title only once the file settles, so arrowing does not flicker it', async () => {
+    const slot = document.createElement('div');
+    document.body.appendChild(slot);
+    await mount(false, { tabsSlot: slot });
+    await act(async () => { api!.addPanel({ id: 'review-file-preview:1', component: 'review-file', title: 'one.ts', params: { filePath: 'one.ts', preview: true } }); });
+    const title = () => slot.querySelector('[data-pane-tab="review-file-preview:1"]')?.textContent;
+    await act(async () => {
+      api!.getPanel('review-file-preview:1')!.api.setTitle('two.ts');
+      api!.getPanel('review-file-preview:1')!.api.setTitle('three.ts');
+    });
+    expect(title()).toBe('one.ts');
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 260)); });
+    expect(title()).toBe('three.ts');
+    slot.remove();
+  });
+
+  test('a review reopened comes back with its two panes, kept tabs and divider, never its previews', async () => {
+    const { writeSavedLayout } = await import('./layoutMemory');
+    const { setStorageBackend, resetStorageBackend } = await import('@plannotator/ui/utils/storage');
+    const memory = new Map<string, string>();
+    setStorageBackend({ getItem: (key) => memory.get(key) ?? null, setItem: (key, value) => { memory.set(key, value); }, removeItem: (key) => { memory.delete(key); } });
+    writeSavedLayout('repo#branch', {
+      panes: [
+        { tabs: [{ id: 'review-all-files', component: 'review-all-files', title: 'All changes', params: {} }], activeId: 'review-all-files' },
+        { tabs: [{ id: 'review-file:a.ts', component: 'review-file', title: 'a.ts', params: { filePath: 'a.ts' } }], activeId: 'review-file:a.ts' },
+      ],
+      activePane: 0,
+      ratio: 0.62,
+    });
+    const el = await mount(false, { reviewKey: 'repo#branch' });
+    await act(async () => { await Promise.resolve(); });
+    expect(el.querySelectorAll('[data-pane]').length).toBe(2);
+    expect(api!.getPanel('review-file:a.ts')).toBeDefined();
+    expect(el.querySelector('[data-pane-divider]')?.getAttribute('aria-valuenow')).toBe('62');
+    resetStorageBackend();
   });
 });

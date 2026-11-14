@@ -9,10 +9,12 @@ export const ReviewCenterArea: React.FC<{
   onReady: (event: DockviewReadyEvent) => void;
   mode: 'light' | 'dark';
   singlePane: boolean;
-}> = ({ onReady, mode, singlePane }) => {
+  tabsSlot?: HTMLElement | null;
+  reviewKey?: string;
+}> = ({ onReady, mode, singlePane, tabsSlot, reviewKey }) => {
   const [panes] = useState(usesPaneLayout);
   if (panes) {
-    return <ReviewWorkspace onReady={onReady as unknown as Parameters<typeof ReviewWorkspace>[0]['onReady']} singlePane={singlePane} />;
+    return <ReviewWorkspace onReady={onReady as unknown as Parameters<typeof ReviewWorkspace>[0]['onReady']} singlePane={singlePane} tabsSlot={tabsSlot} reviewKey={reviewKey} />;
   }
   return (
     <DockviewReact

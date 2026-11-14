@@ -90,6 +90,20 @@ export class WorkspaceStore {
     this.paneElements[index] = element;
   }
 
+  restore(saved: { panes: { tabs: PaneTab[]; activeId: string | null }[]; activePane: number }) {
+    const present = new Set(this.layout.panes.flatMap((pane) => pane.tabs.map((tab) => tab.id)));
+    const panes = saved.panes.slice(0, this.singlePane ? 1 : 2).map((savedPane, index) => {
+      const current = this.layout.panes[index]?.tabs ?? [];
+      const added = savedPane.tabs.filter((tab) => !present.has(tab.id));
+      const tabs = [...current, ...added];
+      const activeId = tabs.some((tab) => tab.id === savedPane.activeId) ? savedPane.activeId : tabs[0]?.id ?? null;
+      return { tabs, activeId };
+    });
+    for (const pane of this.layout.panes.slice(panes.length)) panes[panes.length - 1]?.tabs.push(...pane.tabs);
+    if (panes.some((pane) => pane.tabs.length === 0)) return;
+    this.commit({ panes, activePane: Math.min(saved.activePane, panes.length - 1) });
+  }
+
   focusPane(index: number) {
     this.commit(focusPane(this.layout, index));
   }
