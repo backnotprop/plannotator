@@ -1,12 +1,12 @@
 diff --git a/packages/diffs/package.json b/packages/diffs/package.json
-index be0fba76..2e05424f 100644
+index be0fba76..d4945af9 100644
 --- a/packages/diffs/package.json
 +++ b/packages/diffs/package.json
 @@ -1,6 +1,6 @@
  {
    "name": "@pierre/diffs",
 -  "version": "1.7.0-beta.3",
-+  "version": "1.7.0-beta.3-sem.2",
++  "version": "1.7.0-beta.3-sem.3",
    "license": "apache-2.0",
    "files": [
      "dist",
@@ -28,6 +28,47 @@ index 66542ee4..7d626b01 100644
      }
  
      const promise = this.loadFilesForDiff(fileDiff, loadDiffFiles);
+diff --git a/packages/diffs/src/components/SemanticConnector.ts b/packages/diffs/src/components/SemanticConnector.ts
+index 89cf1423..25c5ac2c 100644
+--- a/packages/diffs/src/components/SemanticConnector.ts
++++ b/packages/diffs/src/components/SemanticConnector.ts
+@@ -30,6 +30,8 @@ export interface Connector {
+   kind: ConnectorKind;
+   /** The host sorts by this rank. Higher paints later and ends up on top. */
+   rank: number;
++  /** Where the operation came from, when a host marked it (e.g. "second-opinion"). */
++  origin?: string;
+ }
+ 
+ interface SemanticConnectorOptions {
+@@ -345,12 +347,19 @@ export class SemanticConnector {
+         const path = document.createElementNS(SVG_NS, 'path');
+         path.setAttribute('data-connector-id', connector.id);
+         path.setAttribute('data-connector-kind', connector.kind);
++        if (connector.origin != null)
++          path.setAttribute('data-connector-origin', connector.origin);
+         entry = { path, connector };
+         added.push(entry);
+       } else if (!areConnectorsEqual(entry.connector, connector)) {
+         if (entry.connector.kind !== connector.kind) {
+           entry.path.setAttribute('data-connector-kind', connector.kind);
+         }
++        if (entry.connector.origin !== connector.origin) {
++          if (connector.origin != null)
++            entry.path.setAttribute('data-connector-origin', connector.origin);
++          else entry.path.removeAttribute('data-connector-origin');
++        }
+         entry.connector = connector;
+       }
+       nextEntries.set(connector.id, entry);
+@@ -461,6 +470,7 @@ function areConnectorsEqual(a: Connector, b: Connector): boolean {
+     a.id === b.id &&
+     a.kind === b.kind &&
+     a.rank === b.rank &&
++    a.origin === b.origin &&
+     a.base.top === b.base.top &&
+     a.base.bottom === b.base.bottom &&
+     a.target.top === b.target.top &&
 diff --git a/packages/diffs/src/layout/DiffLayout.ts b/packages/diffs/src/layout/DiffLayout.ts
 index 79f7703b..10185460 100644
 --- a/packages/diffs/src/layout/DiffLayout.ts
@@ -50,3 +91,114 @@ index 79f7703b..10185460 100644
        row.lineNumber,
        row.altLineNumber,
        row.lineIndexText
+diff --git a/packages/diffs/src/renderers/DiffHunksRenderer.ts b/packages/diffs/src/renderers/DiffHunksRenderer.ts
+index f4dbfccf..0509c04b 100644
+--- a/packages/diffs/src/renderers/DiffHunksRenderer.ts
++++ b/packages/diffs/src/renderers/DiffHunksRenderer.ts
+@@ -795,13 +795,22 @@ export class DiffHunksRenderer<LAnnotation = undefined> {
+         contentProperties: { 'data-line-type': lineType },
+       };
+     }
++    // The last line of a run and the lines of a run a second opinion added
++    // are marked so a host can paint a region whole without reading geometry.
++    const origin = (line.operation as { origin?: unknown }).origin;
+     return {
+       gutterLineType: line.lineType,
+       gutterIcon:
+         line.showsIcon && line.start === lineNumber
+           ? getSemanticLineIcon(line.lineType, side)
+           : undefined,
+-      contentProperties: { 'data-line-type': line.lineType },
++      contentProperties: {
++        'data-line-type': line.lineType,
++        ...(line.end === lineNumber ? { 'data-semantic-end': '' } : {}),
++        ...(typeof origin === 'string'
++          ? { 'data-semantic-origin': origin }
++          : {}),
++      },
+     };
+   }
+ 
+diff --git a/packages/diffs/src/utils/measureSemanticDiffConnectors.ts b/packages/diffs/src/utils/measureSemanticDiffConnectors.ts
+index 05948014..60bbc2d3 100644
+--- a/packages/diffs/src/utils/measureSemanticDiffConnectors.ts
++++ b/packages/diffs/src/utils/measureSemanticDiffConnectors.ts
+@@ -199,6 +199,7 @@ export function measureSemanticDiffConnectors(
+       id: region.id,
+       kind: region.kind,
+       rank: region.rank,
++      ...(region.origin != null ? { origin: region.origin } : {}),
+       base,
+       target,
+     });
+diff --git a/packages/diffs/src/utils/semanticDiffConnectors.ts b/packages/diffs/src/utils/semanticDiffConnectors.ts
+index 3a05887d..4545c8a3 100644
+--- a/packages/diffs/src/utils/semanticDiffConnectors.ts
++++ b/packages/diffs/src/utils/semanticDiffConnectors.ts
+@@ -17,6 +17,7 @@ interface BaseSemanticDiffConnectorRegion {
+   id: string;
+   kind: ConnectorKind;
+   rank: number;
++  origin?: string;
+   /**
+    * Set when the region is drawn in only one state of a semantic fold.
+    * `start` is the fold's first old line. A region with `closed: true` is
+@@ -87,6 +88,8 @@ export function prepareSemanticDiffConnectorRegions(
+   if (operations == null || operations.length === 0) return [];
+   const connectors: SemanticDiffConnectorRegion[] = [];
+   for (const [operationIndex, operation] of operations.entries()) {
++    const marked = (operation as { origin?: unknown }).origin;
++    const origin = typeof marked === 'string' ? { origin: marked } : {};
+     for (const [spanIndex, span] of operation.spans.entries()) {
+       const kind =
+         CONNECTOR_KIND_BY_LINE_TYPE[semanticLineType(operation, span)];
+@@ -106,8 +109,8 @@ export function prepareSemanticDiffConnectorRegions(
+           const id = `${operationIndex}:${spanIndex}:${side}:${run.start}-${run.end}`;
+           connectors.push(
+             side === 'new'
+-              ? { id, kind, rank: 2, target: region, attachment }
+-              : { id, kind, rank: 2, base: region, attachment }
++              ? { id, kind, rank: 2, target: region, attachment, ...origin }
++              : { id, kind, rank: 2, base: region, attachment, ...origin }
+           );
+         }
+         continue;
+@@ -125,6 +128,7 @@ export function prepareSemanticDiffConnectorRegions(
+           rank,
+           base,
+           target,
++          ...origin,
+         });
+       }
+     }
+@@ -220,8 +224,28 @@ function addJoinedRegion(
+   const target = { start: first.top, end: bottom - 1 };
+   regions.push(
+     first.region.base != null
+-      ? { id, kind, rank, fold, base: first.region.base, target }
+-      : { id, kind, rank, fold, target, attachment: first.region.attachment }
++      ? {
++          id,
++          kind,
++          rank,
++          fold,
++          base: first.region.base,
++          target,
++          ...(first.region.origin != null
++            ? { origin: first.region.origin }
++            : {}),
++        }
++      : {
++          id,
++          kind,
++          rank,
++          fold,
++          target,
++          attachment: first.region.attachment,
++          ...(first.region.origin != null
++            ? { origin: first.region.origin }
++            : {}),
++        }
+   );
+ }
+ 

@@ -234,6 +234,8 @@ export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
       reviewSnapshotId={state.feedbackDiffContext?.snapshotId}
       semDiffClient={state.semDiffClient}
       lineTarget={state.allFilesLineTarget}
+      powerUp={state.powerUp}
+      onPowerUpStatus={state.onPowerUpStatus}
       contextExpansionAvailable={state.contextExpansionAvailable}
       renderImagePreview={renderImagePreview}
       renderImageViewControl={renderImageViewControl}

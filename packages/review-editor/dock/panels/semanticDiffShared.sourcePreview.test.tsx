@@ -155,4 +155,34 @@ describe('Semantic Changes source preview', () => {
     await act(async () => document.querySelector<HTMLButtonElement>('[data-snippet-open-file]')!.click());
     expect(files).toEqual([['src/checkout.ts', 4]]);
   });
+  test.skipIf(!hasDom)('a link the model made says so, with its band, and Not moved retracts it by candidate', async () => {
+    const loadSource = createReviewFileSourceLoader({ files: [{ path: 'src/checkout.ts' }], fetchImpl: fakeFileContent([]) });
+    const rejected: string[] = [];
+    await mount(
+      <SemanticDiffRows
+        changes={[change({ changeType: 'extracted', entityName: 'subtotal', origin: 'second-opinion', band: 'likely', model: 'jev-1.14.0', candidateId: '0123456789abcdef' })]}
+        binaryChanges={[]}
+        onOpenChange={() => {}}
+        onOpenBinary={() => {}}
+        loadSource={loadSource}
+        onOpenFile={() => {}}
+        onReject={(id) => rejected.push(id)}
+      />,
+    );
+    const row = [...host!.querySelectorAll<HTMLButtonElement>('.semantic-diff-row')].find((r) => r.textContent?.includes('subtotal'))!;
+    expect(row.textContent).toContain('extracted · Likely');
+    await hoverRow('subtotal');
+    await act(async () => { await wait(250); });
+    expect(document.querySelector('[data-power-up-linked]')?.textContent).toBe('Linked by Jev · Likely');
+    await act(async () => document.querySelector<HTMLButtonElement>('[data-power-up-reject]')!.click());
+    expect(rejected).toEqual(['0123456789abcdef']);
+  });
+
+  test.skipIf(!hasDom)('an engine-made entry offers no Not moved', async () => {
+    const loadSource = createReviewFileSourceLoader({ files: [{ path: 'src/checkout.ts' }], fetchImpl: fakeFileContent([]) });
+    await mount(<SemanticDiffRows changes={[change({ changeType: 'moved' })]} binaryChanges={[]} onOpenChange={() => {}} onOpenBinary={() => {}} loadSource={loadSource} onOpenFile={() => {}} onReject={() => {}} />);
+    await hoverRow('checkout');
+    await act(async () => { await wait(250); });
+    expect(document.querySelector('[data-power-up-reject]')).toBeNull();
+  });
 });

@@ -78,6 +78,9 @@ import { generateId } from './utils/generateId';
 import { parseDiagramEngineUrls } from './utils/diagramEngine';
 import { parseSemDiffAdvert } from './semDiff/protocol';
 import { createSemDiffClient } from './semDiff/semDiffClient';
+import { readPowerUpRejected, writePowerUpRejected, type PowerUpConfig, type PowerUpStatus } from './semDiff/powerUp';
+import { PowerUpStatusSlot } from './semDiff/PowerUpStatusSlot';
+import { POWER_UP_CHANGED_EVENT } from '@plannotator/ui/components/settings/SemanticDiffsTab';
 import { computeReviewSemanticDiff, loadReviewSemanticDiff, setSemanticDiffSource, type ReadFileContents } from './semDiff/semanticDiffSource';
 import { ReviewSemanticDiffPanel } from './dock/panels/ReviewSemanticDiffPanel';
 import { resetSemanticDiffCache } from './hooks/useFileSemanticChanges';
@@ -531,7 +534,7 @@ const ReviewApp: React.FC = () => {
     useState<LineAnnotationComposeRequest | null>(null);
   const nextLineAnnotationComposeRequestId = useRef(0);
   const [showExportModal, setShowExportModal] = useState(false);
-  const [openSettingsMenu, setOpenSettingsMenu] = useState(false);
+  const [openSettingsMenu, setOpenSettingsMenu] = useState<boolean | 'semantic'>(false);
   const [showNoAnnotationsDialog, setShowNoAnnotationsDialog] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const diffStyle = useConfigValue('diffStyle');
@@ -801,7 +804,54 @@ const ReviewApp: React.FC = () => {
   );
   useEffect(() => () => semDiffClient?.dispose(), [semDiffClient]);
   const semanticDiffUsable = semDiffClient != null || (semanticDiffEnabled && semanticDiffAvailable);
-  const semContentRef = useRef<{ files: DiffFile[]; base?: string; snapshot?: string }>({ files: [] });
+  const diffSemanticOn = useConfigValue('diffSemantic');
+  const diffPowerUpOn = useConfigValue('diffPowerUp');
+  const [powerUpConfigured, setPowerUpConfigured] = useState<{ configured: boolean; provider: 'jev' | 'clef' | null }>({ configured: false, provider: null });
+  useEffect(() => {
+    if (!semDiffClient) return;
+    let cancelled = false;
+    const load = () => {
+      fetch('/api/sem-diff/opinion/settings')
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data: { configured: boolean; provider: 'jev' | 'clef' | null } | null) => {
+          if (!cancelled && data) setPowerUpConfigured(data);
+        })
+        .catch(() => {});
+    };
+    load();
+    window.addEventListener(POWER_UP_CHANGED_EVENT, load);
+    return () => {
+      cancelled = true;
+      window.removeEventListener(POWER_UP_CHANGED_EVENT, load);
+    };
+  }, [semDiffClient]);
+  const [powerUpRejected, setPowerUpRejected] = useState<readonly string[]>(() => readPowerUpRejected());
+  const rejectPowerUpLink = useCallback((candidateId: string) => {
+    setPowerUpRejected((previous) => {
+      const next = writePowerUpRejected([...previous.filter((id) => id !== candidateId), candidateId]);
+      return next;
+    });
+  }, []);
+  const powerUpActive = semDiffClient != null && diffSemanticOn && diffPowerUpOn && powerUpConfigured.configured;
+  const [powerUpRetry, setPowerUpRetry] = useState(0);
+  const powerUp = useMemo(() => ({ active: powerUpActive, rejected: powerUpRejected, provider: powerUpConfigured.provider, retry: powerUpRetry }), [powerUpActive, powerUpRejected, powerUpConfigured.provider, powerUpRetry]);
+  const [powerUpStatus, setPowerUpStatus] = useState<PowerUpStatus | null>(null);
+  useEffect(() => {
+    const root = document.documentElement;
+    const state = !powerUpActive
+      ? null
+      : powerUpStatus?.unavailable
+        ? 'unavailable'
+        : (powerUpStatus?.asking ?? 0) > 0
+          ? 'asking'
+          : (powerUpStatus?.links ?? 0) > 0
+            ? 'powered'
+            : 'idle';
+    if (state) root.setAttribute('data-power-up', state);
+    else root.removeAttribute('data-power-up');
+    return () => root.removeAttribute('data-power-up');
+  }, [powerUpActive, powerUpStatus]);
+  const semContentRef = useRef<{ files: DiffFile[]; base?: string; snapshot?: string; powerUp?: PowerUpConfig }>({ files: [] });
   useEffect(() => {
     if (!semDiffClient) {
       setSemanticDiffSource(null);
@@ -819,10 +869,11 @@ const ReviewApp: React.FC = () => {
     };
     let cached: { key: string; promise: Promise<SemanticDiffResponse> } | null = null;
     setSemanticDiffSource(() => {
-      const { files, base, snapshot } = semContentRef.current;
-      const key = `${base ?? ''}|${snapshot ?? ''}|${files.map((file) => `${file.path}#${file.patch.length}`).join('|')}`;
+      const { files, base, snapshot, powerUp: current } = semContentRef.current;
+      const opinion = current?.active ? { rejected: current.rejected } : undefined;
+      const key = `${base ?? ''}|${snapshot ?? ''}|${opinion ? `power:${opinion.rejected.join(',')}:${current?.retry ?? 0}` : 'plain'}|${files.map((file) => `${file.path}#${file.patch.length}`).join('|')}`;
       if (cached?.key === key) return cached.promise;
-      const promise = computeReviewSemanticDiff(files, semDiffClient, read, new AbortController().signal);
+      const promise = computeReviewSemanticDiff(files, semDiffClient, read, new AbortController().signal, opinion);
       cached = { key, promise };
       return promise;
     });
@@ -2351,7 +2402,7 @@ const ReviewApp: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [semanticDiffUsable, diffData?.rawPatch, semDiffClient]);
+  }, [semanticDiffUsable, diffData?.rawPatch, semDiffClient, powerUp]);
   const semanticTabActive = reviewSidebar.isOpen && reviewSidebar.activeTab === 'changes';
   const [allFilesLineTarget, setAllFilesLineTarget] = useState<AllFilesLineTarget | null>(null);
   const revealInAllChanges = useCallback((path: string, range: SelectedLineRange) => {
@@ -4438,6 +4489,7 @@ const ReviewApp: React.FC = () => {
       ? committedBase ?? undefined
       : undefined,
     snapshot: feedbackDiffContext?.snapshotId,
+    powerUp,
   };
   const reviewStateValue = useMemo<ReviewState>(() => ({
     files,
@@ -4482,6 +4534,9 @@ const ReviewApp: React.FC = () => {
     diagramEngine,
     semDiffClient,
     revealInAllChanges: semDiffClient ? revealInAllChanges : undefined,
+    powerUp,
+    onPowerUpStatus: setPowerUpStatus,
+    rejectPowerUpLink,
     allFilesLineTarget,
     openRepoFileAt: (path: string, line: number) => jumpTo({ path, line }, 'file'),
     onAddMarkdownPreviewComment: handleAddMarkdownPreviewComment,
@@ -4618,7 +4673,7 @@ const ReviewApp: React.FC = () => {
   }), [
     files, diffData?.rawPatch, activeFileIndex, guideOpen, isDiffPanelActive, effectiveDiffStyle, handleDiffStyleChange, isCompactTouchLayout, diffOverflow, diffIndicators,
     diffLineDiffType, diffShowLineNumbers, diffShowBackground,
-    diffExpandUnchanged, diffFontFamily, diffFontSize, activeDiffBase, committedBase, feedbackDiffContext, prReviewScopeLabel, prDiffScope, agentCwd, canUseLiveWorkspaceActions, isStaticPatch, imagePreviewSupported, snapshotId, markdownPreview, diagramEngine, semDiffClient, revealInAllChanges, allFilesLineTarget, jumpTo, handleAddMarkdownPreviewComment, handleAskAIForMarkdownPreview,
+    diffExpandUnchanged, diffFontFamily, diffFontSize, activeDiffBase, committedBase, feedbackDiffContext, prReviewScopeLabel, prDiffScope, agentCwd, canUseLiveWorkspaceActions, isStaticPatch, imagePreviewSupported, snapshotId, markdownPreview, diagramEngine, semDiffClient, revealInAllChanges, allFilesLineTarget, jumpTo, powerUp, rejectPowerUpLink, handleAddMarkdownPreviewComment, handleAskAIForMarkdownPreview,
     diffAnnotations, externalAnnotations,
     visibleDescriptionAnnotations, selectedDescriptionAnnotationId, handleAddDescriptionAnnotation,
     handleSelectDescriptionAnnotation, handleDeleteDescriptionAnnotation, handleAskAIForDescription,
@@ -5914,6 +5969,14 @@ const ReviewApp: React.FC = () => {
                   </div>
                 )}
 
+                {powerUpActive && powerUpStatus && (
+                  <PowerUpStatusSlot
+                    status={powerUpStatus}
+                    provider={powerUpConfigured.provider}
+                    onRetry={() => setPowerUpRetry((n) => n + 1)}
+                    onSettings={() => setOpenSettingsMenu('semantic')}
+                  />
+                )}
                 {!isCompactTouchLayout && <ReviewHeaderStatus variant="pill" {...reviewStatusProps} />}
 
                 {/* Agent mode: ghost-X Close + the adaptive decision control
@@ -6466,7 +6529,8 @@ const ReviewApp: React.FC = () => {
             packageChangesSetting={packageChangesSetting}
             agentToolSetting={agentTool.setting}
             onAgentToolChange={agentTool.save}
-            externalOpen={openSettingsMenu}
+            externalOpen={openSettingsMenu !== false}
+            externalTab={openSettingsMenu === 'semantic' ? 'semantic' : undefined}
             onExternalClose={() => setOpenSettingsMenu(false)}
             // Local git session where since-base isn't offered (base ref
             // unresolvable): Settings → Review → Git notes that the Git-status preference

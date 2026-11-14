@@ -28,6 +28,8 @@ import {
   isSemDiffRequest,
   type SemDiffSource,
 } from "@plannotator/shared/sem-diff-assets";
+import { answerSemDiffOpinionRequest, isSemDiffOpinionRequest } from "@plannotator/shared/sem-diff-opinion";
+import { getPlannotatorDataDir as semDiffOpinionDataDir } from "@plannotator/shared/data-dir";
 import { isRemoteSession, getServerHostname, startBunServerOnAvailablePort, buildAdvertisedUrl, getLocalUrlHostname } from "./remote";
 import { isSshTunnelRequest, notePeer } from "./this-machine";
 import { createRequestHostGuard } from "./request-host-guard";
@@ -4633,6 +4635,11 @@ export async function startReviewServer(
               compressAppHtml,
             );
             return new Response(answer.body as BodyInit, { status: answer.status, headers: answer.headers });
+          }
+
+          if (isSemDiffOpinionRequest(url.pathname)) {
+            const answer = await answerSemDiffOpinionRequest(url.pathname, req.method, () => req.json(), semDiffOpinionDataDir());
+            return Response.json(answer.body, { status: answer.status, headers: { "Cache-Control": "no-store" } });
           }
 
           // API 404 guard: unknown /api/* routes should return JSON, not HTML

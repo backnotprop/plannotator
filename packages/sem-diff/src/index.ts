@@ -18,6 +18,7 @@ export { configure, type Candidate, type SemDiffSetup, type WasmSource } from '.
 export { reviewSummary, READ_KINDS, SKIM_KINDS, type ReviewSummary } from './summary.ts';
 import type { Candidate } from './runtime.ts';
 import { flags } from './runtime.ts';
+import { OpinionKeyError, type OpinionAnswer, type OpinionBand } from './opinions.ts';
 
 export interface SemanticFileDiff {
   semanticOperations: SemanticDiffOperation[];
@@ -30,6 +31,33 @@ export interface SemanticFileDiff {
   patch: string;
   /** What each semantic pass did: how long it took, and whether it ran, failed or was skipped. */
   diagnostics: PassReport[];
+  /** Present when a second opinion was asked for: what it was asked, what it added, and how it went. */
+  secondOpinion?: SecondOpinionReport;
+}
+
+export type SecondOpinionState = 'ok' | 'failed' | 'refusedKey' | 'noCredit';
+
+/** One link the model made: an extract or inline the rules alone rejected. */
+export interface SecondOpinionLink {
+  operationIndex: number;
+  candidateId: string;
+  kind: 'extract' | 'inline';
+  helper: string;
+  caller: string;
+  band?: OpinionBand;
+  score: number;
+  model: string;
+  question: string;
+  answer: string;
+}
+
+export interface SecondOpinionReport {
+  state: SecondOpinionState;
+  asked: number;
+  answered: number;
+  accepted: number;
+  links: SecondOpinionLink[];
+  reason?: string;
 }
 
 export interface PassReport {
@@ -53,7 +81,9 @@ export interface DiffOptions {
    * them, calls this once per file with all of them, and accepts those answered `true`. Never
    * asked about code still present in the caller. If it throws, the diff goes ahead without it.
    */
-  secondOpinion?: (candidates: Candidate[]) => Promise<boolean[]>;
+  secondOpinion?: (candidates: Candidate[]) => Promise<Array<boolean | OpinionAnswer>>;
+  /** Candidate ids the reader turned down ("Not moved"): never asked, never accepted. */
+  rejectedCandidates?: Iterable<string>;
 }
 
 const DEFAULT_MAX_CHARS = 2_000_000;
@@ -225,6 +255,23 @@ function stringInteriors(root: Node, language?: LanguageId): Set<number> {
 
 const candidateKey = (c: Candidate) => [c.kind, c.helper, c.caller, c.code.helper, c.code.caller, c.code.callerNew].join('\u0000');
 
+function fnv(text: string, seed: number): string {
+  let h = seed >>> 0;
+  for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 0x01000193) >>> 0;
+  return h.toString(16).padStart(8, '0');
+}
+
+/** A stable id for a candidate: the same code always gets the same id. */
+export function candidateId(c: Candidate): string {
+  const key = candidateKey(c);
+  return fnv(key, 0x811c9dc5) + fnv(key, 0x050c5d1f);
+}
+
+function opinionState(e: unknown): SecondOpinionState {
+  if (e instanceof OpinionKeyError) return e.status === 402 ? 'noCredit' : 'refusedKey';
+  return 'failed';
+}
+
 /**
  * A move with edits must still be mostly the same code. Two blocks sharing under a fifth of their
  * tokens are different code that happens to sit in the same place (an import paired with another
@@ -252,6 +299,8 @@ export async function semanticDiffFile(language: LanguageId, oldText: string, ne
   // Bring-your-own-model second opinion: the engine is synchronous, the model is not. Collect the
   // candidates first, ask once, then run the diff with the answers looked up.
   let opinion: ((c: Candidate) => boolean) | undefined;
+  let report: SecondOpinionReport | undefined;
+  const acceptedAnswers = new Map<string, { c: Candidate; a: OpinionAnswer | undefined }>();
   const early: PassReport[] = [];
   const skipAll = oldText.length + newText.length > (options.maxChars ?? DEFAULT_MAX_CHARS) || minified(oldText) || minified(newText) || nestingDepth(oldText) > 80 || nestingDepth(newText) > 80;
   if (options.secondOpinion && !skipAll) {
@@ -263,16 +312,24 @@ export async function semanticDiffFile(language: LanguageId, oldText: string, ne
         detectInlined(a.rootNode, b.rootNode, oldText, cfg, collect);
         detectExtracted(a.rootNode, b.rootNode, newText, cfg, collect);
       });
-      const answers = asked.length ? await options.secondOpinion(asked) : [];
-      const yes = new Set(asked.filter((_, i) => answers[i] === true).map(candidateKey));
-      opinion = (c) => yes.has(candidateKey(c));
-      early.push({ pass: 'second-opinion', ms: performance.now() - t0, status: 'ok', reason: `${asked.length} asked, ${yes.size} accepted` });
+      const rejected = new Set(options.rejectedCandidates ?? []);
+      const toAsk = asked.filter((c) => !rejected.has(candidateId(c)));
+      const answers = toAsk.length ? await options.secondOpinion(toAsk) : [];
+      toAsk.forEach((c, i) => {
+        const a = answers[i];
+        const accept = typeof a === 'boolean' ? a : a?.accept === true;
+        if (accept) acceptedAnswers.set(candidateKey(c), { c, a: typeof a === 'object' ? a : undefined });
+      });
+      opinion = (c) => acceptedAnswers.has(candidateKey(c));
+      report = { state: 'ok', asked: toAsk.length, answered: answers.length, accepted: acceptedAnswers.size, links: [] };
+      early.push({ pass: 'second-opinion', ms: performance.now() - t0, status: 'ok', reason: `${toAsk.length} asked, ${acceptedAnswers.size} accepted` });
     } catch (e) {
+      report = { state: opinionState(e), asked: 0, answered: 0, accepted: 0, links: [], reason: String(e instanceof Error ? e.message : e).slice(0, 200) };
       early.push({ pass: 'second-opinion', ms: performance.now() - t0, status: 'failed', reason: String(e).slice(0, 200) });
     }
   }
   const inlineOptions = opinion ? { ...DEFAULT_INLINE_OPTIONS, secondOpinion: opinion } : DEFAULT_INLINE_OPTIONS;
-  return withTrees(language, oldText, newText, (a, b) => {
+  const result = await withTrees(language, oldText, newText, (a, b) => {
     // Order matters: earlier passes own the lines they explain (see assignLines).
     // Inline explains a whole helper's disappearance; declaration moves explain
     // whole functions; text moves cover statement blocks moved anywhere else.
@@ -389,6 +446,43 @@ export async function semanticDiffFile(language: LanguageId, oldText: string, ne
       .sort((x, y) => x.old.start - y.old.start);
     return { semanticOperations: withinFile(operations, dOld.length, dNew.length), semanticFolds, patch: toPatch(name, blocks, dOld, dNew), diagnostics };
   });
+  if (!report) return result;
+  return { ...result, secondOpinion: { ...report, links: linksFor(result.semanticOperations, acceptedAnswers, oldText, newText) } };
+}
+
+function linksFor(
+  operations: SemanticDiffOperation[],
+  accepted: Map<string, { c: Candidate; a: OpinionAnswer | undefined }>,
+  oldText: string,
+  newText: string,
+): SecondOpinionLink[] {
+  if (accepted.size === 0) return [];
+  const oldLines = oldText.split('\n');
+  const newLines = newText.split('\n');
+  const textOf = (lines: string[], ranges: SemanticDiffLineRange[]) => ranges.flatMap((r) => lines.slice(r.start - 1, r.end)).join('\n');
+  const left = [...accepted.values()];
+  const links: SecondOpinionLink[] = [];
+  operations.forEach((op, operationIndex) => {
+    if (op.type !== 'extractedFunction' && op.type !== 'inlinedFunction') return;
+    const kind = op.type === 'extractedFunction' ? 'extract' : 'inline';
+    const text = kind === 'extract' ? textOf(newLines, op.lines.new) : textOf(oldLines, op.lines.old);
+    const at = left.findIndex(({ c }) => c.kind === kind && new RegExp(`\\b${c.helper.split('.').pop()!.replace(/[$]/g, '\\$')}\\s*[(<=:]`).test(text));
+    if (at < 0) return;
+    const { c, a } = left.splice(at, 1)[0]!;
+    links.push({
+      operationIndex,
+      candidateId: candidateId(c),
+      kind,
+      helper: c.helper,
+      caller: c.caller,
+      band: a?.band,
+      score: a?.score ?? 1,
+      model: a?.model ?? 'second opinion',
+      question: a?.question ?? '',
+      answer: a?.answer ?? 'moved',
+    });
+  });
+  return links;
 }
 
 export async function semanticDiff(language: LanguageId, oldText: string, newText: string): Promise<SemanticDiffOperation[]> {

@@ -30,7 +30,9 @@ import { CommentPopover } from '@plannotator/ui/components/CommentPopover';
 import { usePierreTheme } from '../hooks/usePierreTheme';
 import { useIsWorkerPoolReadyOrDisabled, useWorkerPoolThemeSync } from '../workerPool';
 import { useConfigValue } from '@plannotator/ui/config';
-import type { SemDiffClient } from '../semDiff/semDiffClient';
+import type { SemDiffClient, SemDiffResult } from '../semDiff/semDiffClient';
+import type { PowerUpConfig, PowerUpFileState, PowerUpStatus } from '../semDiff/powerUp';
+import { POWER_UP_PERIOD_MS, POWER_UP_ROW, powerUpCss } from '../semDiff/powerUpCss';
 import { SemanticFileNote, type SemanticFileState } from '../semDiff/SemanticFileNote';
 import type { DiffFile, AnnotationScrollTarget } from '../types';
 import type { MarkdownFileView } from '../utils/markdownPreview';
@@ -240,6 +242,8 @@ export interface AllFilesCodeViewProps {
   selectedAnnotationId: string | null;
   scrollTargetAnnotation: AnnotationScrollTarget | null;
   lineTarget?: AllFilesLineTarget | null;
+  powerUp?: PowerUpConfig | null;
+  onPowerUpStatus?: (status: PowerUpStatus) => void;
   pendingSelection: SelectedLineRange | null;
   reviewBase?: string;
   reviewSnapshotId?: string;
@@ -780,6 +784,52 @@ const AUGMENT_APPLY_IDLE_MS = 150;
 const REVEAL_WAIT_MS = 30_000;
 const LINE_TARGET_FLASH_MS = 1_600;
 
+const inStepRoots = new WeakSet<ShadowRoot>();
+
+const streamRoots = new Set<ShadowRoot>();
+const POWER_UP_SCROLL_REST_MS = 150;
+const streamState = { scrolling: false };
+
+function restartPowerUpStream(): void {
+  for (const root of streamRoots) {
+    if (!root.host.isConnected) {
+      streamRoots.delete(root);
+      continue;
+    }
+    stampPowerUpPhase(root.querySelectorAll(POWER_UP_ROW));
+  }
+}
+
+function stampPowerUpPhase(rows: Iterable<Element>): void {
+  const now = document.timeline.currentTime;
+  const phase = `${-((typeof now === 'number' ? now : performance.now()) % POWER_UP_PERIOD_MS)}ms`;
+  for (const row of rows) (row as HTMLElement).style.setProperty('--pu-phase', phase);
+}
+
+function keepPowerUpInStep(node: HTMLElement): void {
+  const root = node.shadowRoot;
+  if (!root || inStepRoots.has(root)) return;
+  inStepRoots.add(root);
+  streamRoots.add(root);
+  stampPowerUpPhase(root.querySelectorAll(POWER_UP_ROW));
+  new MutationObserver((records) => {
+    if (streamState.scrolling) return;
+    const rows: Element[] = [];
+    for (const record of records) {
+      if (record.type === 'attributes') {
+        if (record.oldValue === null && record.target instanceof Element && record.target.matches(POWER_UP_ROW)) rows.push(record.target);
+        continue;
+      }
+      for (const added of record.addedNodes) {
+        if (!(added instanceof Element)) continue;
+        if (added.matches(POWER_UP_ROW)) rows.push(added);
+        if (added.firstElementChild) rows.push(...added.querySelectorAll(POWER_UP_ROW));
+      }
+    }
+    if (rows.length > 0) stampPowerUpPhase(rows);
+  }).observe(root, { childList: true, subtree: true, attributes: true, attributeOldValue: true, attributeFilter: ['data-semantic-origin'] });
+}
+
 const EMPTY_AI_MESSAGES: AIChatEntry[] = [];
 const EMPTY_CONTEXT_NOTES: readonly ContextNoteAnchor[] = [];
 const noopAIMarkerClick = () => {};
@@ -802,6 +852,8 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   selectedAnnotationId,
   scrollTargetAnnotation,
   lineTarget,
+  powerUp,
+  onPowerUpStatus,
   pendingSelection,
   reviewBase,
   reviewSnapshotId,
@@ -1190,11 +1242,16 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   const fullDiffsRef = useRef(new Map<string, FileDiffMetadata>());
   const previewAppliedRef = useRef(new Set<string>());
   const semanticEnabled = useConfigValue('diffSemantic');
+  const powerUpMotion = useConfigValue('diffPowerUpMotion');
   const semanticEnabledRef = useRef(semanticEnabled);
   semanticEnabledRef.current = semanticEnabled;
   const semClientRef = useRef(semDiffClient ?? null);
   semClientRef.current = semDiffClient ?? null;
   const semStateRef = useRef(new Map<string, SemanticFileState>());
+  const semTextsRef = useRef(new Map<string, { file: DiffFile; oldText: string; newText: string; generation: string; signal: AbortSignal }>());
+  const powerUpFilesRef = useRef(new Map<string, PowerUpFileState>());
+  const powerUpRef = useRef(powerUp ?? null);
+  powerUpRef.current = powerUp ?? null;
   const semDiffsRef = useRef(new Map<string, { plain: FileDiffMetadata; semantic: FileDiffMetadata }>());
   // Stable identity of the current diff. Changes whenever the file set or any
   // file's patch CONTENT changes (diff type / base / whitespace / PR switch),
@@ -1229,6 +1286,8 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     previewAppliedRef.current = new Set();
     semStateRef.current = new Map();
     semDiffsRef.current = new Map();
+    semTextsRef.current = new Map();
+    powerUpFilesRef.current = new Map();
     for (const item of identity.items) {
       if (item.type !== 'diff' || !previewItemIds.has(item.id)) continue;
       fullDiffsRef.current.set(item.id, item.fileDiff);
@@ -1883,6 +1942,98 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     for (const itemId of semDiffsRef.current.keys()) showSemantic(itemId, semanticEnabled);
   }, [semanticEnabled, showSemantic]);
 
+  const reportPowerUp = useStableCallback(() => {
+    if (!onPowerUpStatus) return;
+    let asking = 0;
+    let links = 0;
+    let answered = 0;
+    let unavailable: PowerUpFileState['state'] | null = null;
+    for (const entry of powerUpFilesRef.current.values()) {
+      if (entry.state === 'asking') asking++;
+      else if (entry.state === 'ok') {
+        answered++;
+        links += entry.links.length;
+      } else unavailable ??= entry.state;
+    }
+    onPowerUpStatus({ asking, answered, links, unavailable });
+  });
+
+  const applySemanticResult = useStableCallback((
+    itemId: string,
+    file: DiffFile,
+    oldText: string,
+    newText: string,
+    generation: string,
+    stale: () => boolean,
+    result: SemDiffResult,
+    onDropped: () => void,
+  ) => {
+    queueAugmentApply(itemId, () => {
+      if (stale()) return;
+      const liveHandle = viewerRef.current;
+      const item = liveHandle?.getItem(itemId);
+      if (liveHandle == null || item == null || item.type !== 'diff' || itemId === editSession.editingItemIdRef.current) {
+        onDropped();
+        return;
+      }
+      let semantic: FileDiffMetadata | null | undefined;
+      try {
+        semantic = processFile(result.patch, {
+          oldFile: { name: file.oldPath || file.path, contents: oldText },
+          newFile: { name: file.path, contents: newText },
+        });
+      } catch {
+        semantic = null;
+      }
+      if (!semantic || semantic.isPartial) {
+        onDropped();
+        return;
+      }
+      const links = result.secondOpinion?.links ?? [];
+      const powered = powerUpRef.current?.active === true;
+      const operations = result.semanticOperations.map((op, index) =>
+        links.some((link) => link.operationIndex === index) ? { ...op, origin: 'second-opinion' } : powered ? { ...op, origin: 'engine' } : op,
+      );
+      Object.assign(semantic, { semanticOperations: operations, semanticFolds: result.semanticFolds });
+      semantic.cacheKey = `${generation}::${itemId}#semantic${links.length > 0 ? `:${links.map((link) => link.candidateId).join(',')}` : ''}`;
+      const previous = semDiffsRef.current.get(itemId);
+      const plain = previous?.plain ?? (previewAppliedRef.current.has(itemId) ? fullDiffsRef.current.get(itemId) ?? item.fileDiff : item.fileDiff);
+      semDiffsRef.current.set(itemId, { plain, semantic });
+      semStateRef.current.set(itemId, { status: 'off', summary: result.summary });
+      showSemantic(itemId, semanticEnabledRef.current);
+    });
+  });
+
+  const runPowerUp = useStableCallback((itemId: string) => {
+    const client = semClientRef.current;
+    const texts = semTextsRef.current.get(itemId);
+    const powerUp = powerUpRef.current;
+    if (!client || !texts || !powerUp?.active) return;
+    const { file, oldText, newText, generation, signal } = texts;
+    const stale = () => signal.aborted || fileSetKeyRef.current !== generation;
+    const hadLinks = (powerUpFilesRef.current.get(itemId)?.links.length ?? 0) > 0;
+    powerUpFilesRef.current.set(itemId, { state: 'asking', links: [] });
+    reportPowerUp();
+    void client.diff(file.path, oldText, newText, signal, { rejected: powerUp.rejected }).then((result) => {
+      if (stale()) return;
+      const report = result?.secondOpinion;
+      if (!result || !report) {
+        powerUpFilesRef.current.set(itemId, { state: 'failed', links: [] });
+        reportPowerUp();
+        return;
+      }
+      if (report.state !== 'ok') {
+        powerUpFilesRef.current.set(itemId, { state: report.state, links: [] });
+        reportPowerUp();
+        return;
+      }
+      powerUpFilesRef.current.set(itemId, { state: 'ok', links: report.links });
+      reportPowerUp();
+      if (report.links.length === 0 && !hadLinks && !semDiffsRef.current.has(itemId)) return;
+      applySemanticResult(itemId, file, oldText, newText, generation, stale, result, () => {});
+    });
+  });
+
   const runSemantic = useStableCallback((
     itemId: string,
     file: DiffFile,
@@ -1894,6 +2045,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     const client = semClientRef.current;
     if (!client || oldText == null || newText == null || !client.supports(file.path)) return;
     const stale = () => signal.aborted || fileSetKeyRef.current !== generation;
+    semTextsRef.current.set(itemId, { file, oldText, newText, generation, signal });
     semStateRef.current.set(itemId, { status: 'working' });
     refreshItem(itemId);
     const settleEmpty = () => {
@@ -1902,40 +2054,45 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     };
     void client.diff(file.path, oldText, newText, signal).then((result) => {
       if (stale()) return;
-      if (!result) {
-        settleEmpty();
-        return;
-      }
-      queueAugmentApply(itemId, () => {
-        if (stale()) return;
-        const liveHandle = viewerRef.current;
-        const item = liveHandle?.getItem(itemId);
-        if (liveHandle == null || item == null || item.type !== 'diff' || itemId === editSession.editingItemIdRef.current) {
-          settleEmpty();
-          return;
-        }
-        let semantic: FileDiffMetadata | null | undefined;
-        try {
-          semantic = processFile(result.patch, {
-            oldFile: { name: file.oldPath || file.path, contents: oldText },
-            newFile: { name: file.path, contents: newText },
-          });
-        } catch {
-          semantic = null;
-        }
-        if (!semantic || semantic.isPartial) {
-          settleEmpty();
-          return;
-        }
-        Object.assign(semantic, { semanticOperations: result.semanticOperations, semanticFolds: result.semanticFolds });
-        semantic.cacheKey = `${generation}::${itemId}#semantic`;
-        const plain = previewAppliedRef.current.has(itemId) ? fullDiffsRef.current.get(itemId) ?? item.fileDiff : item.fileDiff;
-        semDiffsRef.current.set(itemId, { plain, semantic });
-        semStateRef.current.set(itemId, { status: 'off', summary: result.summary });
-        showSemantic(itemId, semanticEnabledRef.current);
-      });
+      if (!result) settleEmpty();
+      else applySemanticResult(itemId, file, oldText, newText, generation, stale, result, settleEmpty);
+      runPowerUp(itemId);
     });
   });
+
+  const rejectedKey = powerUp?.rejected.join(',') ?? '';
+  const powerUpActive = powerUp?.active === true;
+  const powerUpStream = powerUpActive && powerUpMotion === 'stream';
+  const powerUpStreamRef = useRef(powerUpStream);
+  powerUpStreamRef.current = powerUpStream;
+  useEffect(() => {
+    if (!powerUpStream) return;
+    for (const node of scrollRef.current?.querySelectorAll<HTMLElement>('diffs-container') ?? []) keepPowerUpInStep(node);
+    restartPowerUpStream();
+  }, [powerUpStream]);
+  const powerUpRetry = powerUp?.retry ?? 0;
+  useEffect(() => {
+    if (!powerUpActive) {
+      const client = semClientRef.current;
+      for (const [itemId, entry] of powerUpFilesRef.current) {
+        const texts = semTextsRef.current.get(itemId);
+        if (entry.links.length === 0 || !client || !texts) continue;
+        const { file, oldText, newText, generation, signal } = texts;
+        const stale = () => signal.aborted || fileSetKeyRef.current !== generation;
+        void client.diff(file.path, oldText, newText, signal).then((result) => {
+          if (result && !stale()) applySemanticResult(itemId, file, oldText, newText, generation, stale, result, () => {});
+        });
+      }
+      powerUpFilesRef.current = new Map();
+      reportPowerUp();
+      return;
+    }
+    for (const [itemId, entry] of powerUpFilesRef.current) {
+      if (entry.state !== 'ok' || entry.links.some((link) => powerUpRef.current?.rejected.includes(link.candidateId))) runPowerUp(itemId);
+    }
+    for (const itemId of semTextsRef.current.keys()) if (!powerUpFilesRef.current.has(itemId)) runPowerUp(itemId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rejectedKey, powerUpActive, powerUpRetry]);
 
   // Fetch full file contents for one item, reparse with processFile, and swap
   // the item's fileDiff in place so hunk expansion (expand-unchanged gutter
@@ -2262,6 +2419,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       // CodeView recycles elements across items.
       nodeToItemIdRef.current.set(node, context.id);
       if (flushesFiles) syncTrailingRow(node, context);
+      if (powerUpStreamRef.current) keepPowerUpInStep(node);
       augmentItem(context.id);
       const itemId = context.id;
       requestAnimationFrame(() => applyItemHighlights(node, itemId));
@@ -3035,8 +3193,22 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   // scroll EVENT, which can outpace frames during momentum scrolling. Also
   // stamps scroll activity for the augmentation idle-flush.
   const scrollReportRafRef = useRef<number | null>(null);
+  const streamRestTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const handleScroll = useStableCallback((position: number) => {
     lastScrollTsRef.current = Date.now();
+    const scroller = scrollRef.current;
+    if (scroller && powerUpStreamRef.current) {
+      if (streamRestTimerRef.current == null) {
+        streamState.scrolling = true;
+        scroller.style.setProperty('--pu-content', 'none');
+      } else clearTimeout(streamRestTimerRef.current);
+      streamRestTimerRef.current = setTimeout(() => {
+        streamRestTimerRef.current = null;
+        streamState.scrolling = false;
+        restartPowerUpStream();
+        scroller.style.removeProperty('--pu-content');
+      }, POWER_UP_SCROLL_REST_MS);
+    }
     hasScrolledRef.current = true;
     onScrollPositionChange?.(position);
     if (scrollReportRafRef.current != null) return;
@@ -3048,6 +3220,8 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
 
   useEffect(() => () => {
     if (scrollReportRafRef.current != null) cancelAnimationFrame(scrollReportRafRef.current);
+    if (streamRestTimerRef.current != null) clearTimeout(streamRestTimerRef.current);
+    streamState.scrolling = false;
   }, []);
 
   // CodeView's onScroll only fires on actual scroll, so seed the initial
@@ -3750,7 +3924,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   const options = useMemo<CodeViewOptions<DiffAnnotationMetadata>>(
     () => ({
       themeType: pierreTheme.type,
-      unsafeCSS: scrollsWithPage ? `${pierreTheme.css}${SCROLLS_WITH_PAGE_CSS}${flushFiles ? FLUSH_FILES_CSS : STUCK_HEADER_LINE_CSS}` : pierreTheme.css,
+      unsafeCSS: `${scrollsWithPage ? `${pierreTheme.css}${SCROLLS_WITH_PAGE_CSS}${flushFiles ? FLUSH_FILES_CSS : STUCK_HEADER_LINE_CSS}` : pierreTheme.css}${powerUpActive ? powerUpCss(powerUpMotion, diffIndicators ?? 'bars') : ''}`,
       ...(pierreTheme.syntaxTheme && { theme: pierreTheme.syntaxTheme }),
       diffStyle,
       overflow: diffOverflow,
@@ -3823,6 +3997,8 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       pierreTheme.type,
       pierreTheme.css,
       pierreTheme.syntaxTheme,
+      powerUpActive,
+      powerUpMotion,
       diffStyle,
       diffOverflow,
       diffIndicators,

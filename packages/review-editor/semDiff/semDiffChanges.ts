@@ -1,4 +1,4 @@
-import type { SemanticDiffOperation } from '@plannotator/sem-diff';
+import type { SecondOpinionLink, SemanticDiffOperation } from '@plannotator/sem-diff';
 import { SKIM_KINDS } from '@plannotator/sem-diff/summary';
 import type { SemanticDiffChange } from '@plannotator/shared/semantic-diff-types';
 
@@ -97,8 +97,10 @@ export function semDiffChanges(
   oldText: string,
   newText: string,
   oldFilePath: string | null = null,
+  links: readonly SecondOpinionLink[] = [],
 ): SemanticDiffChange[] {
-  const rows: Folded[] = operations.map((op) => {
+  const rows: Folded[] = operations.map((op, index) => {
+    const link = links.find((candidate) => candidate.operationIndex === index);
     const oldRange = op.lines.old[0];
     const newRange = op.lines.new[0];
     const oldEnd = op.lines.old.at(-1)?.end ?? null;
@@ -124,26 +126,27 @@ export function semDiffChanges(
       oldStartLine: oldRange?.start ?? null,
       oldEndLine: oldEnd,
       structuralChange: !SKIM_KINDS.includes(op.type),
-      folded: owner !== null,
+      ...(link ? { origin: 'second-opinion' as const, band: link.band, model: link.model, candidateId: link.candidateId } : {}),
+      folded: owner !== null && !link,
     };
   });
   const out: Folded[] = [];
   const byName = new Map<string, Folded>();
   for (const row of rows) {
     if (MEANINGLESS.test(row.entityName.trim())) continue;
-    const kept = byName.get(row.entityName);
-    if (kept && (kept.folded || row.folded)) {
+    const kept = row.candidateId ? undefined : byName.get(row.entityName);
+    if (kept && !kept.candidateId && (kept.folded || row.folded)) {
       mergeInto(kept, row);
       kept.folded = true;
       continue;
     }
-    const pair = kept && kept.changeType !== row.changeType && [kept.changeType, row.changeType].every((type) => type === 'added' || type === 'deleted');
+    const pair = kept && !kept.candidateId && kept.changeType !== row.changeType && [kept.changeType, row.changeType].every((type) => type === 'added' || type === 'deleted');
     if (kept && pair) {
       mergeInto(kept, row);
       kept.changeType = 'modified';
       continue;
     }
-    if (!kept) byName.set(row.entityName, row);
+    if (!kept && !row.candidateId) byName.set(row.entityName, row);
     out.push(row);
   }
   return out.map(({ folded: _folded, ...change }) => change);

@@ -742,6 +742,7 @@ packages/ui/components/AgentsTab.launch.dom.test.tsx
 packages/ui/hooks/useLaunchConfig.dom.test.tsx
 packages/review-editor/components/image-diff/ImageStage.test.tsx
 packages/review-editor/workspace/ReviewWorkspace.test.tsx
+packages/ui/components/settings/SemanticDiffsTab.test.tsx
 packages/ui/components/Viewer.blockRedraws.test.tsx
 packages/editor/hooks/useCheckboxOverrides.viewer.test.tsx
 packages/ui/components/TaterSpriteSlots.test.tsx
@@ -750,3 +751,4 @@ packages/review-editor/live/toolbarTag.dom.test.tsx
 packages/review-editor/components/FileHeader.toolbar.test.tsx
 packages/review-editor/components/AutoViewedNotice.test.tsx
 packages/inbox/agents/faceSources.test.tsx
+packages/ui/components/agentFace/PowerUpGuy.test.tsx

@@ -17,6 +17,8 @@ import {
 	isSemDiffRequest,
 	type SemDiffSource,
 } from "../generated/sem-diff-assets.ts";
+import { answerSemDiffOpinionRequest, isSemDiffOpinionRequest } from "../generated/sem-diff-opinion.ts";
+import { getPlannotatorDataDir as semDiffOpinionDataDir } from "../generated/data-dir.ts";
 import { readFileSync, existsSync } from "node:fs";
 import { createServer } from "node:http";
 import os from "node:os";
@@ -4162,6 +4164,10 @@ export async function startReviewServer(options: {
 			);
 			res.writeHead(answer.status, answer.headers);
 			res.end(answer.body);
+		} else if (isSemDiffOpinionRequest(url.pathname)) {
+			const answer = await answerSemDiffOpinionRequest(url.pathname, req.method, () => parseBody(req), semDiffOpinionDataDir());
+			res.setHeader("Cache-Control", "no-store");
+			json(res, answer.body, answer.status);
 		} else if (isSemDiffRequest(url.pathname)) {
 			const answer = await answerSemDiffRequest(
 				semDiffAssets,

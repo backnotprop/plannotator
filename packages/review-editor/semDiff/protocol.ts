@@ -1,4 +1,4 @@
-import type { SemanticDiffFold, SemanticDiffOperation } from '@plannotator/sem-diff';
+import type { SecondOpinionReport, SemanticDiffFold, SemanticDiffOperation } from '@plannotator/sem-diff';
 import type { SemDiffAdvert } from '@plannotator/shared/sem-diff-assets';
 
 export interface SemDiffRequest {
@@ -8,10 +8,11 @@ export interface SemDiffRequest {
   path: string;
   oldText: string;
   newText: string;
+  opinion?: { rejected: string[] };
 }
 
 export type SemDiffReply =
-  | { id: number; ok: true; semanticOperations: SemanticDiffOperation[]; semanticFolds: SemanticDiffFold[]; patch: string }
+  | { id: number; ok: true; semanticOperations: SemanticDiffOperation[]; semanticFolds: SemanticDiffFold[]; patch: string; secondOpinion?: SecondOpinionReport }
   | { id: number; ok: false; error: string };
 
 export const SEM_DIFF_GRAMMARS = {

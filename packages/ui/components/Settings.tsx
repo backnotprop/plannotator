@@ -109,8 +109,9 @@ import {
 } from '../utils/fileBrowser';
 import { requestVimDocumentFocus } from '../hooks/useVimDocumentFocus';
 import { AnalysisLayerToggle } from './AnalysisLayerToggle';
+import { SemanticDiffsTab } from './settings/SemanticDiffsTab';
 
-type SettingsTab = 'general' | 'theme' | 'review' | 'display' | 'analysis' | 'saving' | 'labels' | 'vim' | 'shortcuts' | 'ai' | 'files' | 'obsidian' | 'bear' | 'octarine' | 'notion' | 'comments' | 'hooks' | 'experimental';
+type SettingsTab = 'general' | 'theme' | 'review' | 'display' | 'semantic' | 'analysis' | 'saving' | 'labels' | 'vim' | 'shortcuts' | 'ai' | 'files' | 'obsidian' | 'bear' | 'octarine' | 'notion' | 'comments' | 'hooks' | 'experimental';
 
 interface SettingsProps {
   taterMode: boolean;
@@ -158,6 +159,7 @@ interface SettingsProps {
   onPermissionModeChange?: (mode: PermissionMode) => void;
   /** Externally controlled open state (for mobile menu integration) */
   externalOpen?: boolean;
+  externalTab?: 'semantic';
   onExternalClose?: () => void;
   /** Available AI providers (from /api/ai/capabilities). */
   aiProviders?: Array<{ id: string; name: string; capabilities: Record<string, boolean>; models?: Array<{ id: string; label: string; default?: boolean }> }>;
@@ -1184,7 +1186,7 @@ const CommentsTab: React.FC = () => {
   );
 };
 
-export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange, onIdentityChange, origin, mode = 'plan', annotateParity = false, onUIPreferencesChange, onPermissionModeChange, externalOpen, onExternalClose, aiProviders = [], gitUser, autoUpdateSetting, updateCheckSetting, cookieHostSetting, packageChangesSetting, agentToolSetting, onAgentToolChange, sinceBaseUnavailable, isCompactTouchLayout = false, onDetectObsidianVaults, agentTerminalAvailable = false, webmcpAvailable = false, hideEnterSavesComment = false, hideRepoOwnerSetting = false, showDocumentTextSize = false, showDocumentFont = false }) => {
+export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange, onIdentityChange, origin, mode = 'plan', annotateParity = false, onUIPreferencesChange, onPermissionModeChange, externalOpen, externalTab, onExternalClose, aiProviders = [], gitUser, autoUpdateSetting, updateCheckSetting, cookieHostSetting, packageChangesSetting, agentToolSetting, onAgentToolChange, sinceBaseUnavailable, isCompactTouchLayout = false, onDetectObsidianVaults, agentTerminalAvailable = false, webmcpAvailable = false, hideEnterSavesComment = false, hideRepoOwnerSetting = false, showDocumentTextSize = false, showDocumentFont = false }) => {
   const webmcpTools = useWebMcpToolsEnabled();
   const autoUpdate = useConfigValue('autoUpdate');
   const updateChecksOn = updateCheckSetting ? updateCheckSetting.on : true;
@@ -1273,6 +1275,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
     if (mode === 'review') {
       t.push({ id: 'review', label: 'Review' });
       t.push({ id: 'display', label: 'Editor' });
+      t.push({ id: 'semantic', label: 'Semantic diffs' });
       t.push({ id: 'analysis', label: 'Analysis' });
       t.push({ id: 'comments', label: 'Comments' });
       if (aiProviders.length > 0) {
@@ -1306,10 +1309,11 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
   // Sync external open state
   useEffect(() => {
     if (externalOpen) {
+      if (externalTab) setActiveTab(externalTab);
       setShowDialog(true);
       onExternalClose?.();
     }
-  }, [externalOpen, onExternalClose]);
+  }, [externalOpen, externalTab, onExternalClose]);
 
   useEffect(() => {
     if (showDialog) {
@@ -1989,6 +1993,8 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                 {activeTab === 'display' && mode === 'review' && (
                   <ReviewDisplayTab isCompactTouchLayout={isCompactTouchLayout} />
                 )}
+
+                {activeTab === 'semantic' && mode === 'review' && <SemanticDiffsTab />}
 
                 {activeTab === 'experimental' && mode === 'review' && <ExperimentalTab />}
 
