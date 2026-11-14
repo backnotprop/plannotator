@@ -139,7 +139,7 @@ export const ChangesTreeView: React.FC<ChangesTreeViewProps> = (props) => {
   const columns = useMemo(() => {
     let add = 0;
     let del = 0;
-    let badge = groups != null;
+    let badge = false;
     for (const entry of layout.entries.values()) {
       const counts = entry.kind === 'file' ? entry.file : entry.kind === 'folder' ? entry.node : entry.group;
       add = Math.max(add, counts.additions);
@@ -157,8 +157,10 @@ export const ChangesTreeView: React.FC<ChangesTreeViewProps> = (props) => {
   const live = useRef({ props, layout, stageColumn, badge: columns.badge });
   live.current = { props, layout, stageColumn, badge: columns.badge };
 
-  const renderParts = useCallback((context: FileTreeRowDecorationContext): FileTreeRowParts | null =>
-    withoutBadge(rowParts(context), live.current.badge), []);
+  const renderParts = useCallback((context: FileTreeRowDecorationContext): FileTreeRowParts | null => {
+    const parts = rowParts(context);
+    return parts?.tone === 'heading' ? parts : withoutBadge(parts, live.current.badge);
+  }, []);
 
   const rowParts = ({ row }: FileTreeRowDecorationContext): FileTreeRowParts | null => {
     const { props: p, layout: l, stageColumn: withStage } = live.current;
@@ -321,7 +323,7 @@ export const ChangesTreeView: React.FC<ChangesTreeViewProps> = (props) => {
       className="review-changes-tree"
       data-changes-tree=""
       data-tree-grouping={props.grouping ?? 'none'}
-      style={{ '--trees-row-lead-columns': leadColumns, '--trees-row-trail-columns': countColumns(columns.add, columns.del, columns.badge), height: '100%' } as React.CSSProperties}
+      style={{ '--trees-row-lead-columns': leadColumns, '--trees-row-trail-columns': countColumns(columns.add, columns.del, columns.badge), '--review-tree-heading-trail-columns': countColumns(columns.add, columns.del, true), height: '100%' } as React.CSSProperties}
       renderContextMenu={(item, context) => {
         const entry = live.current.layout.entries.get(item.path);
         return entry?.kind === 'file' ? <TreeRowMenu path={entry.file.path} repoRoot={live.current.props.repoRoot} close={context.close} anchor={context.anchorRect} /> : null;

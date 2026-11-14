@@ -111,7 +111,7 @@ describe.skipIf(!hasDom)('The Changes tree on Pierre trees', () => {
     ]);
     expect(row(el, 'Generated/').getAttribute('aria-expanded')).toBe('false');
     expect(trail(el, 'Code/')).toEqual(['0/1', '+19', '']);
-    expect(trail(el, 'Code/retry.ts')).toEqual(['', '+19', '']);
+    expect(trail(el, 'Code/retry.ts')).toEqual(['+19', '']);
     expect(selected(el)).toEqual(['Code/retry.ts']);
   });
 
@@ -210,4 +210,16 @@ describe.skipIf(!hasDom)('The Changes tree on Pierre trees', () => {
     expect(name.textContent).toBe('an-extremely-long-file-name-for-the-tree.ts');
     expect(row(el, 'an-extremely-long-file-name-for-the-tree.ts').querySelector('[data-truncate-container]')).toBeNull();
   });
+
+  test("a group's viewed count does not reserve room on every file row, so names keep it", async () => {
+    const el = await mount(<Tree groupByKind />);
+    const host = el.querySelector<HTMLElement>('[data-changes-tree]')!;
+    const fileColumns = host.style.getPropertyValue('--trees-row-trail-columns');
+    const headingColumns = host.style.getPropertyValue('--review-tree-heading-trail-columns');
+    expect(fileColumns.startsWith('max-content')).toBe(false);
+    expect(headingColumns.startsWith('max-content')).toBe(true);
+    expect(trail(el, 'Code/')[0]).toBe('0/1');
+    expect(trail(el, 'Code/retry.ts')).toHaveLength(2);
+  });
 });
+
