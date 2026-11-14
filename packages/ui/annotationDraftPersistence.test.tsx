@@ -21,7 +21,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { useAnnotationDraft, type DraftEditedDocument, type DraftSavedFileChange } from './hooks/useAnnotationDraft';
 import { AnnotationType, type Annotation } from './types';
-import { saveDraft, loadDraft, deleteDraft, contentHash, getDraftGeneration } from '../shared/draft';
+import { saveDraft, loadDraft, deleteDraft, contentHash, getDraftGeneration, missingDraftHeaders } from '../shared/draft';
 
 const hasDom = typeof document !== 'undefined';
 
@@ -115,13 +115,7 @@ function installFetchShim() {
         const data = loadDraft(DRAFT_KEY);
         return data
           ? new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } })
-          : new Response(
-              JSON.stringify({
-                found: false,
-                ...(getDraftGeneration(DRAFT_KEY) !== null ? { draftGeneration: getDraftGeneration(DRAFT_KEY) } : {}),
-              }),
-              { status: 404, headers: { 'Content-Type': 'application/json' } },
-            );
+          : new Response(null, { status: 204, headers: missingDraftHeaders(getDraftGeneration(DRAFT_KEY)) });
       }
       if (method === 'POST') {
         saveDraft(DRAFT_KEY, JSON.parse(String(init?.body)));

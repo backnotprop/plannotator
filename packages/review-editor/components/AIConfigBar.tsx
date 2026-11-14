@@ -47,7 +47,7 @@ export const AIConfigBar: React.FC<AIConfigBarProps> = ({
   if (providers.length === 0) {
     return (
       <>
-      <div className="border-t border-border/50 px-2 py-1.5 text-[11px] text-muted-foreground/50">
+      <div className="border-t border-border/50 px-2 py-1.5 text-xs text-muted-foreground/50">
         No AI providers available
       </div>
       <AskSessionSetupHint text={setupHint} />
@@ -132,7 +132,7 @@ export const AIConfigBar: React.FC<AIConfigBarProps> = ({
     <ModelSourceHint
       tool={modelSourceToolForProvider(currentProvider.name)}
       info={currentProvider}
-      className="-mt-1 px-2 pb-1.5 text-[10px] text-muted-foreground/50"
+      className="-mt-1 px-2 pb-1.5 text-xs text-muted-foreground"
     />
     <AskSessionSetupHint text={setupHint} />
     </>

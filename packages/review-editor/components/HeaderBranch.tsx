@@ -28,10 +28,12 @@ export const HeaderBranch: React.FC<{
         {branch.length > BRANCH_TAIL * 2 && <span className="flex-none">{branch.slice(-BRANCH_TAIL)}</span>}
       </span>
     )}
-    <span className="text-xs text-muted-foreground inline-flex items-center gap-1 truncate max-w-[220px] flex-none" data-header-shed="">
-      <RepoIcon className="w-3 h-3 flex-shrink-0" />
-      {repo}
-    </span>
+    {!(compact && branch) && (
+      <span className="text-xs text-muted-foreground inline-flex items-center gap-1 truncate max-w-[220px] flex-none" data-header-shed="">
+        <RepoIcon className="w-3 h-3 flex-shrink-0" />
+        {repo}
+      </span>
+    )}
     {!compact && <span className="flex-none" data-header-shed=""><HeaderTotals files={files} /></span>}
   </div>
 );

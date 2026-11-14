@@ -27,6 +27,7 @@ import type { TreeScope } from '../hooks/useTreeScope';
 import type { RepoFilesState } from '../hooks/useRepoFiles';
 import { BaseBranchPicker } from './BaseBranchPicker';
 import { DiffTypePicker, displayRef } from './DiffTypePicker';
+import { TOOLS_ONE_ROW_WIDTH } from './PanelChrome';
 
 export type ReviewPanelView = 'commits' | 'tree';
 
@@ -74,6 +75,7 @@ const VIEW_META: Record<ReviewPanelView, { label: string; title: string; Icon: R
 
 /** Below this the view tabs become icons and the scope reads "All". */
 export const NARROW_HEADER_WIDTH = 200;
+export const SCOPE_FULL_LABELS_WIDTH = 320;
 /** Below this Go to File drops its keys. */
 
 const FOCUS =
@@ -433,7 +435,7 @@ export const ReviewPanelHeader: React.FC<{ model: ReviewPanelHeaderModel; width:
               <BaseBranchPicker
                 {...model.base}
                 trigger={{
-                  className: `${token.replace('max-w-full ', '')} font-mono text-[11.5px]`,
+                  className: `${token.replace('max-w-full ', '')} font-mono text-xs`,
                   ariaLabel: `${model.base.copy.triggerTitlePrefix}: ${model.base.selectedBase}`,
                   content: (
                     <>
@@ -487,14 +489,17 @@ export const ScopeSwitch: React.FC<{ model: ReviewPanelHeaderModel; width: numbe
       </span>
     );
   }
+  const changed = model.scope.changed;
+  const all = model.scope.all;
   const narrow = width < NARROW_HEADER_WIDTH;
+  const shortAll = narrow || (width >= TOOLS_ONE_ROW_WIDTH && width < SCOPE_FULL_LABELS_WIDTH);
+  const hasCount = !!progress?.showViewed || changed !== undefined;
+  const countOnly = narrow && hasCount;
   const listing = scope === 'all' ? model.repo : null;
   const pill = (active: boolean) =>
     `h-6 flex items-center gap-1 rounded-md text-[13px] font-medium whitespace-nowrap transition-colors ${FOCUS} ${
       active ? 'bg-[var(--sidebar-fill-strong)] text-foreground' : 'text-muted-foreground hover:bg-[var(--sidebar-fill)] hover:text-foreground'
     }`;
-  const changed = model.scope.changed;
-  const all = model.scope.all;
   return (
     <div className="min-w-0" data-tree-scope-row="">
       <div className="flex min-w-0 items-center" role="group" aria-label="Files shown in the tree" data-tree-scope-switch="">
@@ -506,7 +511,7 @@ export const ScopeSwitch: React.FC<{ model: ReviewPanelHeaderModel; width: numbe
           title={progress && progressTitle(progress) ? `The files this review changes: ${progressTitle(progress)}` : 'The files this review changes'}
           className={`flex-shrink-0 px-1.5 ${pill(scope === 'changes')}`}
         >
-          <span>Changes</span>
+          <span className={countOnly ? 'sr-only' : undefined}>Changes</span>
           {progress?.showViewed ? (
             <span
               className={`tabular-nums text-[12px] font-normal ${progress.total > 0 && progress.viewed >= progress.total ? 'text-success' : 'text-muted-foreground'}`}
@@ -524,15 +529,15 @@ export const ScopeSwitch: React.FC<{ model: ReviewPanelHeaderModel; width: numbe
           onClick={() => selectScope(model, 'all')}
           data-tree-scope="all"
           title={`Every file of the repository at the revision the diff reads${all !== undefined ? ` (${formatCount(all)} files)` : ''}`}
-          className={`relative min-w-0 pl-1.5 pr-2.5 ${pill(scope === 'all')}`}
+          className={`relative flex-shrink-0 pl-1.5 pr-2.5 ${pill(scope === 'all')}`}
         >
-          <span className="truncate">{narrow ? 'All' : 'All files'}</span>
+          <span data-tree-scope-label="">{shortAll ? <>All<span className="sr-only"> files</span></> : 'All files'}</span>
           {all !== undefined && <span className="sr-only">{formatCount(all)}</span>}
           {scope === 'all' && <LiveDot repo={model.repo} className="absolute top-1 right-1 flex" />}
         </button>
       </div>
       {listing && !listing.live && listing.truncated && (
-        <p className="pt-1 px-2 flex items-center gap-1.5 text-[11px] leading-4 text-muted-foreground" data-repo-listing-status="partial">
+        <p className="pt-1 px-2 flex items-center gap-1.5 text-xs leading-4 text-muted-foreground" data-repo-listing-status="partial">
           <span className="w-1.5 h-1.5 flex-shrink-0 rounded-full border border-warning" aria-hidden="true" />
           <span>{PARTIAL_LISTING_TEXT}</span>
         </p>

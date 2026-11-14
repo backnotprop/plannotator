@@ -350,9 +350,10 @@ describe.skipIf(!hasDom)('ScopeSwitch (Changes | All files)', () => {
     expect(el.querySelector('[data-review-progress-caption]')?.textContent).toBe('1 of 4 viewed · 2 staged');
   });
 
-  test('narrow: All files reads "All"', async () => {
+  test('narrow: All files reads "All", and its name stays "All files"', async () => {
     const el = await mount(<ScopeSwitch model={model()} width={160} />);
-    expect(el.querySelector('[data-tree-scope="all"]')?.textContent).toBe('All8');
+    expect(el.querySelector('[data-tree-scope-label]')?.firstChild?.textContent).toBe('All');
+    expect(el.querySelector('[data-tree-scope="all"]')?.textContent).toBe('All files8');
   });
 
   test('a scope reaches the app', async () => {
@@ -406,4 +407,29 @@ describe.skipIf(!hasDom)('ScopeSwitch (Changes | All files)', () => {
     );
     expect(el.querySelector('[data-repo-listing-status="partial"]')?.textContent).toBe('Part of the repository is listed (the platform stopped early).');
   });
+
+  test('neither label is cut at the default 256 px panel nor at the 160 px minimum: the switch shortens its words instead', async () => {
+    const at = async (width: number) => {
+      const el = await mount(<ScopeSwitch model={model()} width={width} progress={{ viewed: 10, total: 27, staged: 0, showViewed: true }} />);
+      const changes = el.querySelector<HTMLElement>('[data-tree-scope="changes"]')!;
+      const all = el.querySelector<HTMLElement>('[data-tree-scope="all"]')!;
+      const shown = (button: HTMLElement) => [...button.querySelectorAll('span')].filter((span) => !span.className.includes('sr-only') && !span.closest('.sr-only')).map((span) => span.textContent).join('|');
+      const result = { changes: shown(changes), all: el.querySelector('[data-tree-scope-label]')!.firstChild!.textContent, cut: !!el.querySelector('[data-tree-scope-switch] .truncate'), shrinks: [changes, all].some((b) => !b.className.includes('flex-shrink-0')), name: all.textContent };
+      await act(async () => root!.unmount());
+      root = null;
+      return result;
+    };
+    const wide = await at(400);
+    expect(wide.all).toBe('All files');
+    const standard = await at(256);
+    expect(standard.all).toBe('All');
+    expect(standard.changes).toContain('10/27');
+    expect(standard.cut).toBe(false);
+    expect(standard.shrinks).toBe(false);
+    expect(standard.name).toContain('All files');
+    const minimum = await at(160);
+    expect(minimum.changes).toBe('10/27');
+    expect(minimum.cut).toBe(false);
+  });
 });
+

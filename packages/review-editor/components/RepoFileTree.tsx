@@ -200,7 +200,7 @@ export const RepoFileTree: React.FC<RepoFileTreeProps> = ({
     const paddingLeft = diffFileTreeIndent(row.depth);
     if (row.kind === 'loading') {
       return (
-        <div className="flex items-center h-full text-[11px] text-muted-foreground/60" style={{ paddingLeft: paddingLeft + 16 }}>
+        <div className="flex items-center h-full text-xs text-muted-foreground/60" style={{ paddingLeft: paddingLeft + 16 }}>
           Loading…
         </div>
       );
@@ -212,7 +212,7 @@ export const RepoFileTree: React.FC<RepoFileTreeProps> = ({
           data-repo-folder={row.path}
           aria-expanded={row.expanded}
           onClick={() => onToggleFolder(row.path)}
-          className="w-full h-full flex items-center gap-1.5 px-2 text-[11px] text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors rounded-sm"
+          className="w-full h-full flex items-center gap-1.5 px-2 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors rounded-sm"
           style={{ paddingLeft }}
         >
           <svg
@@ -288,7 +288,7 @@ export const RepoFileTree: React.FC<RepoFileTreeProps> = ({
         {showViewedControls && <span className="w-4 h-4 flex-shrink-0" aria-hidden="true" />}
         {onDisk === 'A' || onDisk === 'M' ? (
           <span
-            className={`w-3 text-center text-[10px] flex-shrink-0 font-semibold ${onDisk === 'A' ? 'text-success' : 'text-muted-foreground/60'}`}
+            className={`w-3 text-center text-xs flex-shrink-0 font-semibold ${onDisk === 'A' ? 'text-success' : 'text-muted-foreground/60'}`}
             aria-hidden="true"
           >
             {onDisk}
@@ -301,7 +301,7 @@ export const RepoFileTree: React.FC<RepoFileTreeProps> = ({
         <span className={`truncate ${isActive ? '' : 'text-muted-foreground/80'}`}>{row.name}</span>
         {onDisk && <OnDiskDot change={onDisk} />}
         {annotationCount > 0 && (
-          <span className="ml-auto text-[10px] text-primary tabular-nums flex-shrink-0" title={`${annotationCount} comment${annotationCount === 1 ? '' : 's'}`}>
+          <span className="ml-auto text-xs text-primary tabular-nums flex-shrink-0" title={`${annotationCount} comment${annotationCount === 1 ? '' : 's'}`}>
             {annotationCount}
           </span>
         )}

@@ -742,3 +742,7 @@ packages/ui/components/Viewer.blockRedraws.test.tsx
 packages/editor/hooks/useCheckboxOverrides.viewer.test.tsx
 packages/ui/components/TaterSpriteSlots.test.tsx
 packages/inbox/sidebarRedraws.test.tsx
+packages/review-editor/components/FileHeader.toolbar.test.tsx
+packages/review-editor/components/AutoViewedNotice.test.tsx
+packages/review-editor/components/CompactPrimaryAction.test.tsx
+packages/review-editor/App.phoneLayout.test.tsx

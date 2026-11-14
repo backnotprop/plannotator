@@ -126,7 +126,7 @@ function renderBlocks(blocks: Block[], authenticatedImages: boolean, depth = 0):
       }
       case 'code':
         return (
-          <pre key={block.id} className="bg-muted/50 rounded-md p-2 text-[11px] font-mono overflow-x-auto whitespace-pre-wrap">
+          <pre key={block.id} className="bg-muted/50 rounded-md p-2 text-xs font-mono overflow-x-auto whitespace-pre-wrap">
             <code>{block.content}</code>
           </pre>
         );
@@ -196,7 +196,7 @@ function renderBlocks(blocks: Block[], authenticatedImages: boolean, depth = 0):
                   target="_blank"
                   rel="noopener noreferrer"
                   {...{ [PR_MEDIA_SKIP_ATTR]: '' }}
-                  className="block min-w-0 truncate text-[11px] text-muted-foreground hover:text-foreground"
+                  className="block min-w-0 truncate text-xs text-muted-foreground hover:text-foreground"
                 >
                   {video.label}
                 </a>

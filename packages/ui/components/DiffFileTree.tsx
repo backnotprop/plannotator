@@ -5,6 +5,7 @@ import {
   type DiffFileTreeNode,
   type DiffFileTreeStatus,
 } from '../utils/diffFileTree';
+import { fileStatusLetter } from '../utils/fileStatusLetter';
 import { useDiffFileTreeExpansion, type DiffFileTreeDefaultExpanded } from '../hooks/useDiffFileTreeExpansion';
 
 export type { DiffFileTreeFile, DiffFileTreeNode, DiffFileTreeStatus } from '../utils/diffFileTree';
@@ -31,23 +32,14 @@ export const ChangeTypeLetter: React.FC<{
   status: DiffFileTreeStatus;
   oldPath?: string;
   untracked?: boolean;
-}> = ({ status, oldPath, untracked }) => (
-  <span className="w-3.5 text-center text-[12px] leading-none flex-shrink-0" data-change-letter="">
-    {untracked ? (
-      <span className="font-semibold text-muted-foreground" title="Untracked file">U</span>
-    ) : status === 'added' ? (
-      <span className="font-semibold text-success" title="Added file">A</span>
-    ) : status === 'deleted' ? (
-      <span className="font-semibold text-destructive" title="Deleted file">D</span>
-    ) : status === 'renamed' ? (
-      <span className="font-semibold text-muted-foreground" title={oldPath ? `Renamed from ${oldPath}` : 'Renamed file'}>R</span>
-    ) : status === 'binary' ? (
-      <span className="font-semibold text-muted-foreground" title="Binary file">B</span>
-    ) : (
-      <span className="text-muted-foreground/60" title="Modified file">M</span>
-    )}
-  </span>
-);
+}> = ({ status, oldPath, untracked }) => {
+  const meta = fileStatusLetter(status, { oldPath, untracked });
+  return (
+    <span className="w-3.5 text-center text-[12px] leading-none flex-shrink-0" data-change-letter="">
+      <span className={meta.className} title={meta.title}>{meta.letter}</span>
+    </span>
+  );
+};
 
 /** Right-anchored +/- pair — one fixed-width block so the numbers always end
  * flush at the row edge, stay tight together, and add-only rows leave no

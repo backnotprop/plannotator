@@ -65,6 +65,7 @@ export interface PanelControlsProps {
   /** The tools row's lead: the Changes / All files switch (`ScopeSwitch`).
    *  Unset: the row is labelled "Files". */
   scope?: React.ReactNode;
+  notice?: React.ReactNode;
 }
 
 /** 24 px icon buttons (WCAG 2.2 target size); pressed is a quiet grey fill. */
@@ -191,7 +192,7 @@ function ListOptionsMenu({
       <Menu.Portal>
         <Menu.Positioner align="end" side="bottom" sideOffset={6} className="z-[110] outline-none">
           <Menu.Popup
-            className="w-60 rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-lg outline-none"
+            className="w-60 rounded-lg border border-transparent bg-popover p-1 text-popover-foreground shadow-[var(--float-shadow)] outline-none"
             data-review-tree-settings=""
           >
             {onToggleAllFolders && (
@@ -263,7 +264,7 @@ function ListOptionsMenu({
             {perFile && (
               <Menu.Group>
                 {(onCopyRawDiff || settings) && <Menu.Separator className="my-1 h-px bg-border/70" />}
-                <Menu.GroupLabel className="px-2 pt-1 pb-0.5 text-[11px] font-medium text-muted-foreground">On each file</Menu.GroupLabel>
+                <Menu.GroupLabel className="px-2 pt-1 pb-0.5 text-xs font-medium text-muted-foreground">On each file</Menu.GroupLabel>
                 <Menu.CheckboxItem
                   className={MENU_ITEM}
                   checked={showViewedControls}
@@ -309,6 +310,7 @@ export function PanelControlsRow(props: PanelControlsProps) {
     showViewedControls = true,
     hideViewedFiles = false,
     onToggleHideViewed,
+    notice,
   } = props;
   const searchToggles = !!onCloseSearch;
   return (
@@ -340,6 +342,7 @@ export function PanelControlsRow(props: PanelControlsProps) {
           {copyRawDiffStatus === "success" ? "All diffs copied" : copyRawDiffStatus === "error" ? "Copy failed" : ""}
         </span>
       </div>
+      {notice}
     </StickyTools>
   );
 }
@@ -401,7 +404,7 @@ export function PanelSearchField({
         />
         <div className="absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-1">
           {hasQuery && !isPending && (
-            <span className="text-[10px] tabular-nums text-muted-foreground/40">
+            <span className="text-xs tabular-nums text-muted-foreground/40">
               {resultCount}
             </span>
           )}

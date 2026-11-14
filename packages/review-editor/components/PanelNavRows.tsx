@@ -1,4 +1,5 @@
 import React from 'react';
+import { Diff } from 'lucide-react';
 import { useDiffCountColors } from '../hooks/useDiffCountColors';
 import { CountColumns } from './FileRowBits';
 
@@ -11,7 +12,7 @@ import { CountColumns } from './FileRowBits';
  */
 
 /** Shared shell for the panel action rows (PR overview, Semantic diff, All
- *  changes): 28 px rows touching, the icon on the panel's content edge and
+ *  changes): 24 px rows touching, the icon on the panel's content edge and
  *  the label on its label edge; the selected row is a quiet grey fill. */
 export function SidebarActionRow({
   active,
@@ -31,7 +32,7 @@ export function SidebarActionRow({
       title={title}
       aria-current={active ? 'true' : undefined}
       data-nav-row=""
-      className={`w-full min-w-0 flex items-center gap-1 h-7 px-2 rounded-md text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/70 focus-visible:ring-inset ${
+      className={`w-full min-w-0 flex items-center gap-1 h-6 px-2 rounded-md text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/70 focus-visible:ring-inset ${
         active
           ? 'bg-[var(--sidebar-fill-strong)] text-foreground'
           : 'text-muted-foreground hover:bg-[var(--sidebar-fill)] hover:text-foreground'
@@ -45,7 +46,7 @@ export function SidebarActionRow({
 export function SemanticDiffRow({ active, onClick }: { active: boolean; onClick: () => void }) {
   return (
     <SidebarActionRow active={active} onClick={onClick}>
-      <span className="w-3.5 h-3.5 flex flex-shrink-0 items-center justify-center" aria-hidden="true">∆</span>
+      <Diff className="w-3.5 h-3.5 flex-shrink-0" aria-hidden="true" data-semantic-diff-icon="" />
       <span>Semantic diff</span>
     </SidebarActionRow>
   );
@@ -73,7 +74,7 @@ export function CallFlowRow({
       <span className="w-3.5 h-3.5 flex flex-shrink-0 items-center justify-center font-mono" aria-hidden="true">⑂</span>
       <span>Call flow</span>
       <span
-        className={`ml-auto rounded bg-muted px-1.5 py-0.5 font-mono text-[9px] tabular-nums ${error ? 'text-warning' : 'text-muted-foreground'}`}
+        className={`ml-auto rounded bg-muted px-1.5 py-0.5 font-mono text-xs tabular-nums ${error ? 'text-warning' : 'text-muted-foreground'}`}
       >
         {error ? (
           <><span aria-hidden="true">!</span><span className="sr-only">Call flow setup needs attention</span></>
