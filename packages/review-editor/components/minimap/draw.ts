@@ -105,7 +105,7 @@ export function drawMinimap(ctx: CanvasRenderingContext2D, input: MinimapDrawInp
   ctx.clearRect(0, 0, width, height);
 
   ctx.fillStyle = colors.line;
-  const gap = Math.round(3 * dpr);
+  const gap = Math.round(6 * dpr);
   let last = -Infinity;
   for (const y of boundaries) {
     const row = Math.floor(y);
