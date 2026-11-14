@@ -144,8 +144,10 @@ async function pixel(page: Page, x: number, y: number): Promise<[number, number,
   }, shot.toString('base64'));
 }
 
-const near = (actual: [number, number, number], expected: [number, number, number]) =>
-  actual.every((value, i) => Math.abs(value - expected[i]!) <= 2);
+function expectColor(actual: [number, number, number], expected: [number, number, number], where: string) {
+  const near = actual.every((value, i) => Math.abs(value - expected[i]!) <= 2);
+  expect(near, `${where}: got rgb(${actual.join(', ')}), wanted rgb(${expected.join(', ')})`).toBe(true);
+}
 
 async function withReview(browser: Browser, dpr: number, run: (page: Page) => Promise<void>) {
   test.skip(!existsSync(binary), `compile the binary first: ${binary}`);
@@ -203,21 +205,21 @@ for (const dpr of [1, 2]) {
 
       await stage.focus();
       await page.keyboard.press('End');
-      expect(near(await at(inside.x, inside.y), GREY)).toBe(true);
+      expectColor(await at(inside.x, inside.y), GREY, 'at inside.x, inside.y');
 
       await page.keyboard.press('Home');
-      expect(near(await at(inside.x, inside.y), MAGENTA)).toBe(true);
-      expect(near(await at(BLOCK.x - 1, inside.y), GREY)).toBe(true);
-      expect(near(await at(BLOCK.x + BLOCK.size, inside.y), GREY)).toBe(true);
-      expect(near(await at(BLOCK.x, BLOCK.y), MAGENTA)).toBe(true);
-      expect(near(await at(BLOCK.x + BLOCK.size - 1, BLOCK.y + BLOCK.size - 1), MAGENTA)).toBe(true);
-      expect(near(await at(inside.x, BLOCK.y - 1), GREY)).toBe(true);
+      expectColor(await at(inside.x, inside.y), MAGENTA, 'at inside.x, inside.y');
+      expectColor(await at(BLOCK.x - 1, inside.y), GREY, 'at BLOCK.x - 1, inside.y');
+      expectColor(await at(BLOCK.x + BLOCK.size, inside.y), GREY, 'at BLOCK.x + BLOCK.size, inside.y');
+      expectColor(await at(BLOCK.x, BLOCK.y), MAGENTA, 'at BLOCK.x, BLOCK.y');
+      expectColor(await at(BLOCK.x + BLOCK.size - 1, BLOCK.y + BLOCK.size - 1), MAGENTA, 'at BLOCK.x + BLOCK.size - 1, BLOCK.y + BLOCK.size - 1');
+      expectColor(await at(inside.x, BLOCK.y - 1), GREY, 'at inside.x, BLOCK.y - 1');
 
       for (let i = 0; i < 75; i++) await page.keyboard.press('ArrowRight');
       await expect(stage).toHaveAttribute('aria-valuenow', '75');
       const divider = 0.75 * WIDTH;
-      expect(near(await at(divider - 2, inside.y), GREY)).toBe(true);
-      expect(near(await at(divider + 1, inside.y), MAGENTA)).toBe(true);
+      expectColor(await at(divider - 2, inside.y), GREY, 'at divider - 2, inside.y');
+      expectColor(await at(divider + 1, inside.y), MAGENTA, 'at divider + 1, inside.y');
       if (shots) await page.screenshot({ path: join(shots, `swipe-registration-dpr${dpr}.png`) });
     });
   });
