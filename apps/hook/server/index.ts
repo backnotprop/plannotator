@@ -83,7 +83,7 @@
  *   PLANNOTATOR_PORT   - Fixed port to use (default: random locally, 19432 for remote)
  */
 
-import { reviewLiveTargetOf } from "@plannotator/shared/review-live";
+import { postReviewLiveDecision, reviewLiveDecisionWords, reviewLiveSessionOf, reviewLiveTargetOf, reviewLiveTargetOfOpenCode } from "@plannotator/shared/review-live";
 import { childEnv, isAskAiChild } from "@plannotator/shared/child-env";
 import {
   startPlannotatorServer as startPlannotatorServerUnguarded,
@@ -1710,8 +1710,10 @@ if (args[0] === "sessions") {
   setServerReadyTarget(reviewTarget);
 
   // Start review server (even if empty - user can switch diff types in local mode)
+  const liveSession = reviewLiveSessionOf(process.env);
   const server = await startReviewServer({
     liveReviewAgent: reviewLiveTargetOf(process.env.PLANNOTATOR_SESSION_TAG),
+    liveReviewKey: liveSession ? { key: liveSession.key, title: liveSession.title } : null,
     rawPatch,
     gitRef,
     error: diffError,
@@ -1776,6 +1778,11 @@ if (args[0] === "sessions") {
 
   // Cleanup
   server.stop();
+
+  if (liveSession) {
+    const words = reviewLiveDecisionWords(result);
+    if (words) await postReviewLiveDecision(getPlannotatorDataDir(), liveSession, words);
+  }
 
   // Output feedback (captured by slash command)
   result.feedback = withReviewDirectory(result.feedback, result.reviewDirectory);
@@ -2609,7 +2616,7 @@ if (args[0] === "sessions") {
   // in a host that cannot import Bun-only server modules directly.
 
   const inputJson = await Bun.stdin.text();
-  const input = parseOpenCodeBridgeInput<{ arguments?: unknown; supportsApprovalNotes?: unknown }>(
+  const input = parseOpenCodeBridgeInput<{ arguments?: unknown; supportsApprovalNotes?: unknown; inboxSession?: unknown }>(
     "opencode-review",
     inputJson,
   );
@@ -2769,6 +2776,7 @@ if (args[0] === "sessions") {
     gitRef,
     error: diffError,
     origin: "opencode",
+    liveReviewAgent: reviewLiveTargetOfOpenCode(input.inboxSession),
     project: reviewProject,
     includeReviewDirectory: !!reviewDirectory,
     diffType: isPRMode ? undefined : userDiffType,

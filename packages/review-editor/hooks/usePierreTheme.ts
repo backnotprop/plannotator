@@ -277,6 +277,7 @@ export function usePierreTheme(options?: {
           pre, code { background-color: ${bg} !important; }
           [data-file-info] { background-color: ${muted} !important; }
           [data-column-number] { background-color: ${bg} !important; }
+          :is([data-line-annotation], [data-gutter-buffer='annotation'])[data-selected-line] { --diffs-computed-selected-line-bg: var(--diffs-computed-diff-line-bg) !important; }
           ${showFileHeader ? '' : '[data-diffs-header] [data-title] { display: none !important; }'}
           [data-diff-type='split'][data-overflow='scroll'] {
             grid-template-columns:

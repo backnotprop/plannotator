@@ -15,10 +15,12 @@
 @source "../guide-viewer/**/*.tsx";
 @source "./dock/**/*.tsx";
 @source "./utils/**/*.tsx";
+@source "./live/**/*.tsx";
 
 @import "../ui/theme.css";
 @import "./comments.css";
 @import "./components/callTree/callTree.css";
+@import "./live/live.css";
 
 /* =====================================================
    Code Review Specific Styles

@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
@@ -20,12 +20,12 @@ afterEach(async () => {
 
 const anchor = (line: number, code: string): InboxReviewAnchor => ({ file: "src/billing.ts", side: "new", line_start: line, line_end: line, code: [code], head: "abc1234" });
 
-async function world() {
+async function world(options: { liveReviewCommand?: string[] } = {}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-live-review-")));
   roots.push(root);
   const project = join(root, "billing");
   mkdirSync(project, { recursive: true });
-  const server = await startInboxServer({ dataDir: join(root, "data") });
+  const server = await startInboxServer({ dataDir: join(root, "data"), ...options });
   servers.push(server);
   const client = new Client({ name: "live-review-test", version: "1.0.0" });
   await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${server.port}/mcp`)));
@@ -55,7 +55,7 @@ async function world() {
   };
   await poll("ses-cc", "claude-code");
   await poll("ses-pi", "pi");
-  return { server, project, poll, deliver, send, read, agentReply, readThread };
+  return { root, server, project, poll, deliver, send, read, agentReply, readThread };
 }
 
 test("a comment sent now to the launching agent wakes it with its lines, and its answer lands on them", async () => {
@@ -76,8 +76,14 @@ test("a comment sent now to the launching agent wakes it with its lines, and its
   expect(conversation!.anchor.line_start).toBe(4);
   expect(conversation!.messages.map((m) => m.body)).toEqual(["Use RangeError here.", "Done in def5678."]);
 
+  const agentAnswer = again.messages.find((m) => m.body === "Done in def5678.")!;
+  const followUp = await fetch(`http://127.0.0.1:${w.server.port}/api/inbox/messages/${agentAnswer.id}/reply`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ serverSession: w.server.serverSession, words: "And the message?", questions: [], idempotency_key: "f1" }) });
+  const followId = ((await followUp.json()) as { reply: { id: string } }).reply.id;
+  const woken = (await w.poll("ses-cc", "claude-code")).find((c) => c.id === followId)!;
+  expect(woken.body).toBe(`And the message?\n\n(On the review thread about \`src/billing.ts\` line 4 (new side, at abc1234); answer with reply_to ${followId}.)`);
+
   const replay = await w.send({ to: { host: "claude-code", session: "ses-cc" }, comments: [{ anchor: anchor(4, "  if (amount < 0) throw new Error();"), words: "Use RangeError here." }], idempotency_key: "k1" });
-  expect(replay.messages.length).toBe(again.messages.length);
+  expect(replay.messages.length).toBe((await w.read()).messages.length);
 });
 
 test("send all: one wake per agent carries every comment by its own id, and each answer threads on its comment", async () => {
@@ -122,4 +128,41 @@ test("a malformed anchor sends nothing", async () => {
   const w = await world();
   await expect(w.send({ to: { host: "pi", session: "ses-pi" }, comments: [{ anchor: { file: "a.ts", side: "new", line_start: 5, line_end: 2, code: [] }, words: "x" }], idempotency_key: "k1" })).rejects.toThrow("line_start");
   expect((await w.read()).thread).toBeNull();
+});
+
+test("the living review opens again from its thread: the review starts in its folder on its key, and the window gets its address", async () => {
+  const stubDir = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-live-review-stub-")));
+  roots.push(stubDir);
+  const stub = join(stubDir, "review-stub.ts");
+  writeFileSync(
+    stub,
+    [
+      'import { appendFileSync, writeFileSync } from "node:fs";',
+      `writeFileSync(${JSON.stringify(join(stubDir, "seen.json"))}, JSON.stringify({ args: process.argv.slice(2), cwd: process.cwd(), thread: process.env.PLANNOTATOR_REVIEW_LIVE_THREAD, key: process.env.PLANNOTATOR_REVIEW_LIVE_KEY, skip: process.env.PLANNOTATOR_SKIP_BROWSER_OPEN }));`,
+      'appendFileSync(process.env.PLANNOTATOR_READY_FILE!, JSON.stringify({ url: "http://localhost:51234" }) + "\\n");',
+    ].join("\n"),
+  );
+  const w = await world({ liveReviewCommand: [process.execPath, stub] });
+  const sent = await w.send({ to: { host: "pi", session: "ses-pi" }, comments: [{ anchor: anchor(4, "x"), words: "Rename." }], idempotency_key: "k1" });
+  const response = await fetch(`http://127.0.0.1:${w.server.port}/api/inbox/review-threads/${sent.thread!.id}/open`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ serverSession: w.server.serverSession }) });
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual({ url: "http://localhost:51234" });
+  const seen = JSON.parse(readFileSync(join(stubDir, "seen.json"), "utf8"));
+  expect(seen).toEqual({ args: ["review"], cwd: w.project, thread: sent.thread!.id, key: "branch:fix/charge", skip: "1" });
+});
+
+test("Take back: a comment not yet with its agent comes back, a review sent all at once comes back whole, a delivered one stays", async () => {
+  const w = await world();
+  const takeBack = (id: string) =>
+    fetch(`http://127.0.0.1:${w.server.port}/api/inbox/review-threads/comments/${id}/take-back`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ serverSession: w.server.serverSession }) });
+  const first = await w.send({ to: { host: "pi", session: "ses-pi" }, comments: [{ anchor: anchor(2, "a"), words: "One." }], idempotency_key: "k1" });
+  await w.deliver("ses-pi", "pi", first.sent[0]!);
+  expect((await takeBack(first.sent[0]!)).status).toBe(409);
+  const bulk = await w.send({ comments: [{ anchor: anchor(4, "b"), words: "Two." }, { anchor: anchor(6, "c"), words: "Three." }], idempotency_key: "k2" });
+  const sibling = bulk.sent[0]!;
+  const response = await takeBack(sibling);
+  expect(response.status).toBe(200);
+  expect(((await response.json()) as { taken: string[] }).taken.sort()).toEqual([...bulk.sent].sort());
+  expect(reviewConversations((await w.read()).messages).map((c) => c.anchor.line_start)).toEqual([2]);
+  expect((await w.poll("ses-pi", "pi")).map((c) => c.id)).not.toContain(bulk.sent[2]);
 });

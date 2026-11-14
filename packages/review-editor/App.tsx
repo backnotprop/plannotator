@@ -97,6 +97,7 @@ import { CallTreeHunkEntry } from './components/callTree/CallTreeHunkEntry';
 import { selectionForCallFlowNode } from './components/CallFlowTreeView';
 import { useSemanticDiffChanges } from './hooks/useFileSemanticChanges';
 import type { HostLineNote } from './components/hostLineNotes';
+import { useLiveReview } from './live/useLiveReview';
 import {
   shouldHandleReviewSearchShortcut,
   isTypingTarget,
@@ -3117,6 +3118,16 @@ const ReviewApp: React.FC = () => {
       });
     }
   }, [deleteExternalAnnotation, externalAnnotations, reviewHistory]);
+  const livePR = useMemo(() => (prMetadata ? { forge: prMetadata.platform === 'gitlab' ? 'GitLab' : prMetadata.platform === 'bitbucket' ? 'Bitbucket' : 'GitHub', platform: prMetadata.platform, threads: prContext?.reviewThreads ?? null, load: () => void fetchPRContext() } : null), [prMetadata, prContext, fetchPRContext]);
+  const revealLiveLines = useCallback((filePath: string, start: number, end: number, side: 'old' | 'new') => {
+    handleScrollToAILines(filePath, start, end, side);
+    window.setTimeout(() => setPendingSelection((current) => (current && current.start === start && current.end === end ? null : current)), 900);
+  }, [handleScrollToAILines]);
+  const dropSentComments = useCallback((ids: readonly string[]) => ids.forEach((id) => handleDeleteAnnotation(id)), [handleDeleteAnnotation]);
+  const restoreTakenComments = useCallback((back: CodeAnnotation[]) => setAnnotations((current) => [...current, ...back.filter((c) => !current.some((a) => a.id === c.id))]), []);
+  const liveReview = useLiveReview({ files, annotations, dropAnnotations: prMetadata ? null : dropSentComments, restoreAnnotations: restoreTakenComments, revealLines: revealLiveLines, openTab: reviewSidebar.open, pr: livePR });
+  const sidebarExtraTabs = useMemo(() => (liveReview.tab ? [liveReview.tab] : []), [liveReview.tab]);
+  const hostNotes = useMemo(() => (liveReview.notes.length > 0 ? [...callTreeHunkNotes, ...liveReview.notes] : callTreeHunkNotes), [callTreeHunkNotes, liveReview.notes]);
 
   // Handle identity change - update author on existing annotations
   const handleIdentityChange = useCallback((oldIdentity: string, newIdentity: string) => {
@@ -4489,7 +4500,7 @@ const ReviewApp: React.FC = () => {
     isCallFlowActive,
     openCallFlowPanel,
     callFlowInstall,
-    callTreeHunkNotes,
+    callTreeHunkNotes: hostNotes,
     callTreeRequest,
     openCallTreeNode,
     returnFromCallTree,
@@ -6128,6 +6139,7 @@ const ReviewApp: React.FC = () => {
                 </div>
               </div>
             )}
+            {liveReview.overlay}
             <ConfirmDialog
               isOpen={!!draftBanner}
               onClose={dismissDraft}
@@ -6224,6 +6236,7 @@ const ReviewApp: React.FC = () => {
                 isOpen
                 onClose={reviewSidebar.close}
                 onSelectTab={reviewSidebar.open}
+                {...(sidebarExtraTabs.length > 0 ? { extraTabs: sidebarExtraTabs } : {})}
                 presentation={isCompactTouchLayout ? 'overlay' : 'panel'}
                 activeTab={reviewSidebar.activeTab}
                 annotations={allAnnotations}

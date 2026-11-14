@@ -39,7 +39,7 @@ import {
   type ParsedInboxQuestion,
 } from "@plannotator/core/inbox-questions";
 import { withoutInboxSkillsBlock } from "@plannotator/core/skill-reference-block";
-import type { InboxReviewAddressed, InboxReviewAnchor, InboxReviewBatch, InboxReviewLive } from "@plannotator/core/review-threads";
+import type { InboxReviewAnchor, InboxReviewBatch, InboxReviewLive } from "@plannotator/core/review-threads";
 import { inboxRowPreview, inboxRowPreviewWords } from "@plannotator/core/inbox-folding";
 import {
   checkInboxActionResult,
@@ -337,7 +337,6 @@ export interface InboxReplyInput {
   words?: string;
   review_anchor?: InboxReviewAnchor;
   review_batch?: InboxReviewBatch;
-  review_addressed?: InboxReviewAddressed;
   questions?: InboxAnswerEntry[];
   idempotency_key: string;
   /** `to` takes the place of a session the server read as ended (`InboxMessage.took_over`). */
@@ -7216,6 +7215,16 @@ export class InboxStore {
       if (!found || message.created_at > found.created_at) found = message;
     }
     return found;
+  }
+
+  reviewAnchorAbove(message: InboxMessage): InboxReviewAnchor | null {
+    let at = message.reply_to ? this.messages.get(message.reply_to) : undefined;
+    for (let hops = 0; at && hops < 200; hops++) {
+      if (at.review_anchor) return at.review_anchor;
+      if (at.review_batch?.lead) return null;
+      at = at.reply_to ? this.messages.get(at.reply_to) : undefined;
+    }
+    return null;
   }
 
   reviewBatchOf(message: InboxMessage): InboxMessage[] {
