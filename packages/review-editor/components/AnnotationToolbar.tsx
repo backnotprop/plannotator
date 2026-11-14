@@ -329,7 +329,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
           {showSuggestedCode ? (
             <div className="mt-2">
               <div className="flex items-center justify-between mb-1">
-                <span className="text-[10px] text-muted-foreground">Suggested code</span>
+                <span className="text-xs text-muted-foreground">Suggested code</span>
                 <button
                   onClick={() => setShowCodeModal(true)}
                   className="p-0.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
@@ -396,7 +396,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
                 <SparklesIcon className="w-3 h-3" />
                 Ask AI
                 {aiHistoryMessages.length > 0 && (
-                  <span className="text-[9px] font-mono bg-muted px-1 py-0.5 rounded">
+                  <span className="text-xs font-mono bg-muted px-1 py-0.5 rounded">
                     {aiHistoryMessages.length}
                   </span>
                 )}

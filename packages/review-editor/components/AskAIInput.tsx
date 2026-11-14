@@ -120,9 +120,9 @@ export const AskAIInput: React.FC<AskAIInputProps> = ({
               onClick={() => onViewResponse?.(q.id)}
               className="w-full text-left p-1.5 rounded border border-border/50 hover:border-primary/30 hover:bg-primary/5 transition-colors"
             >
-              <p className="text-[10px] text-muted-foreground truncate">{q.prompt}</p>
+              <p className="text-xs text-muted-foreground truncate">{q.prompt}</p>
               {r.text && (
-                <p className="text-[10px] text-foreground/60 truncate mt-0.5">
+                <p className="text-xs text-foreground/60 truncate mt-0.5">
                   {r.text.slice(0, 80)}
                 </p>
               )}

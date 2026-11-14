@@ -154,7 +154,7 @@ export function StackedPRLabel({
             type="button"
             disabled={isSwitchingScope}
             title={`Stack: comparing vs ${scopeTarget}`}
-            className="h-7 text-[10px] text-annotation-comment/70 hover:text-annotation-comment inline-flex items-center gap-1 whitespace-nowrap transition-colors rounded px-1.5 hover:bg-muted/20 disabled:opacity-60 disabled:cursor-wait"
+            className="h-7 text-xs text-annotation-comment/70 hover:text-annotation-comment inline-flex items-center gap-1 whitespace-nowrap transition-colors rounded px-1.5 hover:bg-muted/20 disabled:opacity-60 disabled:cursor-wait"
           />
         }
       >
@@ -180,10 +180,10 @@ export function StackedPRLabel({
           {/* Section 1: Stack Tree */}
           <div className="px-3 pt-3 pb-2">
             <div className="flex items-center justify-between mb-2">
-              <span className="text-[11px] font-medium text-muted-foreground">
+              <span className="text-xs font-medium text-muted-foreground">
                 Stack ({prNodes.length} {prNodes.length === 1 ? changeLabel : `${changeLabel}s`})
                 {hideMerged && showToggle && (
-                  <span className="ml-1 text-[10px] text-muted-foreground/50">
+                  <span className="ml-1 text-xs text-muted-foreground/50">
                     · {mergedCount} merged hidden
                   </span>
                 )}
@@ -219,7 +219,7 @@ export function StackedPRLabel({
                   >
                     <div className="flex items-center flex-shrink-0 mt-[5px]">
                       {depth > 0 && (
-                        <span className="text-[10px] text-border/70 font-mono leading-none mr-0.5">
+                        <span className="text-xs text-border/70 font-mono leading-none mr-0.5">
                           {isLast ? '└─' : '├─'}
                         </span>
                       )}
@@ -247,10 +247,10 @@ export function StackedPRLabel({
                     >
                       <span className={`truncate ${merged ? 'line-through' : ''}`}>{nodeLabel(node, numberPrefix)}</span>
                       {node.isCurrent && (
-                        <span className="text-[9px] text-annotation-comment/60 whitespace-nowrap">reviewing</span>
+                        <span className="text-xs text-annotation-comment/60 whitespace-nowrap">reviewing</span>
                       )}
                       {merged && (
-                        <span className="text-[9px] text-muted-foreground/40 whitespace-nowrap border border-muted-foreground/20 rounded px-0.5 leading-tight">merged</span>
+                        <span className="text-xs text-muted-foreground/40 whitespace-nowrap border border-muted-foreground/20 rounded px-0.5 leading-tight">merged</span>
                       )}
                       {action.kind === 'navigate' && node.url && !disabled && (
                         <svg className="w-2.5 h-2.5 flex-shrink-0 opacity-40" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -270,7 +270,7 @@ export function StackedPRLabel({
 
           {/* Section 2: Scope Selector */}
           <div className="px-3 py-2">
-            <div className="text-[11px] font-medium text-muted-foreground mb-1.5">
+            <div className="text-xs font-medium text-muted-foreground mb-1.5">
               Comparing against
             </div>
             {layerOption && (
@@ -294,7 +294,7 @@ export function StackedPRLabel({
                   <span className="block text-xs font-medium truncate">
                     {parentNode ? nodeLabel(parentNode, numberPrefix) : (stackInfo?.baseBranch ?? 'base')}
                   </span>
-                  <span className="block text-[11px] leading-snug text-muted-foreground">
+                  <span className="block text-xs leading-snug text-muted-foreground">
                     Only changes in this PR
                   </span>
                 </span>
@@ -320,7 +320,7 @@ export function StackedPRLabel({
                 </span>
                 <span className="min-w-0">
                   <span className="block text-xs font-medium">{fullStackTarget}</span>
-                  <span className="block text-[11px] leading-snug text-muted-foreground">
+                  <span className="block text-xs leading-snug text-muted-foreground">
                     All changes from {fullStackTarget} to here
                   </span>
                 </span>
@@ -338,7 +338,7 @@ export function StackedPRLabel({
               href={metadata.url}
               target="_blank"
               rel="noopener noreferrer"
-              className="text-[11px] text-muted-foreground hover:text-foreground transition-colors inline-flex items-center gap-1"
+              className="text-xs text-muted-foreground hover:text-foreground transition-colors inline-flex items-center gap-1"
             >
               View {mrNumberLabel} on {getPlatformLabel(metadata)}
               <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>

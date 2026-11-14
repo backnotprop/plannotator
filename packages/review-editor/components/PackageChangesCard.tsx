@@ -101,7 +101,7 @@ const Skeleton: React.FC<{ w?: string }> = ({ w = 'w-10' }) => (
 );
 
 const Pill: React.FC<{ tone?: 'warning' | 'muted'; children: React.ReactNode }> = ({ tone = 'muted', children }) => (
-  <span className={`inline-flex flex-none items-center rounded px-1 text-[10px] font-medium leading-4 ${tone === 'warning' ? 'bg-warning/15 text-warning' : 'border border-border text-muted-foreground'}`}>
+  <span className={`inline-flex flex-none items-center rounded px-1 text-xs font-medium leading-4 ${tone === 'warning' ? 'bg-warning/15 text-warning' : 'border border-border text-muted-foreground'}`}>
     {children}
   </span>
 );
@@ -139,7 +139,7 @@ const NameTags: React.FC<{ change: PackageChange; meta?: PackageMetadata; withhe
     ) : change.section !== 'dependencies' ? (
       <Pill>{SECTION_TAG[change.section] ?? change.section}</Pill>
     ) : null}
-    {change.workspace && <span className="flex-none truncate font-mono text-[10px] text-muted-foreground">{change.workspace}</span>}
+    {change.workspace && <span className="flex-none truncate font-mono text-xs text-muted-foreground">{change.workspace}</span>}
     {withheld && (
       <Tooltip content="Not sent to npm">
         <span className="flex-none text-muted-foreground"><LockIcon /><span className="sr-only">Not sent to npm</span></span>
@@ -274,7 +274,7 @@ export const CardBody: React.FC<CardBodyProps> = ({ card, folded, lookup, lookup
   useLayoutEffect(() => { onHeightChange?.(); });
 
   const touch = compactTouchLayout || undefined;
-  const quietButton = 'rounded px-1.5 py-0.5 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
+  const quietButton = 'rounded px-1.5 py-0.5 text-xs text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
 
   if (card.error) {
     return (
@@ -300,13 +300,13 @@ export const CardBody: React.FC<CardBodyProps> = ({ card, folded, lookup, lookup
         disabled={consent.asking}
         onClick={consent.onAllow}
         aria-label={`Look up ${consent.names} package ${consent.names === 1 ? 'name' : 'names'} from every card in this review on npm: sends them to registry.npmjs.org`}
-        className="ml-auto flex-none rounded border border-border bg-background px-2 py-0.5 text-[11px] text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
+        className="ml-auto flex-none rounded border border-border bg-background px-2 py-0.5 text-xs text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
       >
         Look up {consent.names} on npm
       </button>
     </Tooltip>
   ) : failure ? (
-    <span className="ml-auto flex flex-none items-center gap-1 text-[11px] text-muted-foreground" role="status" data-package-lookup-state="failed">
+    <span className="ml-auto flex flex-none items-center gap-1 text-xs text-muted-foreground" role="status" data-package-lookup-state="failed">
       <span>{failure === 'offline' || failure === 'timed out' ? 'npm unreachable' : failure === 'rate limited' ? 'npm rate limited' : 'npm lookup failed'}</span>
       <button type="button" data-pn-touch-target={touch} onClick={onRetry} className={quietButton}>Retry</button>
     </span>
@@ -320,7 +320,7 @@ export const CardBody: React.FC<CardBodyProps> = ({ card, folded, lookup, lookup
         className={`inline-flex items-center gap-0.5 rounded px-0.5 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${sort === key ? 'text-foreground' : ''}`}
       >
         {label}
-        <span aria-hidden="true" className={`text-[9px] ${sort === key ? 'opacity-100' : 'opacity-0'}`}>▼</span>
+        <span aria-hidden="true" className={`text-xs ${sort === key ? 'opacity-100' : 'opacity-0'}`}>▼</span>
       </button>
     );
     return (
@@ -330,7 +330,7 @@ export const CardBody: React.FC<CardBodyProps> = ({ card, folded, lookup, lookup
     );
   };
 
-  const downloadsCls = 'px-2 py-1.5 text-right text-[11px] tabular-nums text-muted-foreground/70';
+  const downloadsCls = 'px-2 py-1.5 text-right text-xs tabular-nums text-muted-foreground/70';
   const metaCells = (c: PackageChange) => {
     const dash = <span className="text-muted-foreground">—</span>;
     // npm was not asked about this row: one blank span, not a row of dashes.
@@ -392,7 +392,7 @@ export const CardBody: React.FC<CardBodyProps> = ({ card, folded, lookup, lookup
           <Chevron open={!folded} />
           <PackageIcon className="h-3.5 w-3.5 flex-none text-muted-foreground" />
           <span className="whitespace-nowrap font-medium text-foreground">Packages</span>
-          {total > 0 && <span className="rounded bg-muted px-1.5 text-[10px] tabular-nums text-muted-foreground">{total}</span>}
+          {total > 0 && <span className="rounded bg-muted px-1.5 text-xs tabular-nums text-muted-foreground">{total}</span>}
         </button>
         {!folded && narrow && total > 1 && (
           <label className="flex flex-none items-center text-muted-foreground">
@@ -400,7 +400,7 @@ export const CardBody: React.FC<CardBodyProps> = ({ card, folded, lookup, lookup
             <select
               value={sort}
               onChange={(e) => setSort(e.target.value as SortKey)}
-              className="rounded border border-border bg-background px-1 py-0.5 text-[11px] text-foreground"
+              className="rounded border border-border bg-background px-1 py-0.5 text-xs text-foreground"
             >
               <option value="change">Change</option>
               <option value="name">Name</option>
@@ -431,7 +431,7 @@ export const CardBody: React.FC<CardBodyProps> = ({ card, folded, lookup, lookup
                     {c.kind !== 'removed' && <VersionText version={c.afterVersion} spec={c.after} major={c.major} />}
                   </div>
                   {showMeta && c.registryName && sendable.has(c.registryName) && (
-                    <div className="mt-0.5 flex items-center gap-2 pl-[18px] text-[11px] text-muted-foreground">
+                    <div className="mt-0.5 flex items-center gap-2 pl-[18px] text-xs text-muted-foreground">
                       {loading ? <Skeleton w="w-32" /> : ok ? (
                         <>
                           {m.license && <span>{m.license}</span>}
@@ -449,7 +449,7 @@ export const CardBody: React.FC<CardBodyProps> = ({ card, folded, lookup, lookup
           <div className="mt-2 overflow-x-auto rounded border border-border/70 bg-background/60">
             <table className="w-full border-collapse text-left" aria-busy={loading || undefined}>
               <caption className="sr-only">Package changes in {card.path}</caption>
-              <thead className="border-b border-border/70 text-[11px] text-muted-foreground">
+              <thead className="border-b border-border/70 text-xs text-muted-foreground">
                 <tr>
                   {sortHeader('name', 'Package')}
                   <th scope="col" className="px-2 py-1 font-medium">Previous</th>
@@ -496,7 +496,7 @@ export const CardBody: React.FC<CardBodyProps> = ({ card, folded, lookup, lookup
         {showIndirect && indirect.length > 0 && (
           <ul className="mt-1 max-h-64 overflow-y-auto rounded border border-border/60 bg-background/40 py-1" aria-label={`Indirect package changes in ${card.lockfile ?? card.path}`}>
             {indirect.slice(0, indirectShown).map((i) => (
-              <li key={i.name} className="flex min-w-0 items-center gap-2 px-2.5 py-0.5 font-mono text-[11px] text-muted-foreground">
+              <li key={i.name} className="flex min-w-0 items-center gap-2 px-2.5 py-0.5 font-mono text-xs text-muted-foreground">
                 <span className="truncate text-foreground/80">{i.name}</span>
                 <span className="ml-auto flex-none tabular-nums">
                   {indirectVersions(i, 'before')} <span aria-hidden="true">→</span><span className="sr-only">to</span> {indirectVersions(i, 'after')}

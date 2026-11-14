@@ -46,7 +46,7 @@ export const CopyButton: React.FC<CopyButtonProps> = ({ text, className = '', va
       >
         {copied ? <CheckIcon /> : <CopyIcon />}
         {label && (
-          <span className="text-[10px]">
+          <span className="text-xs">
             {copied ? 'Copied' : label}
           </span>
         )}
