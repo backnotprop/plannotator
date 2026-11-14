@@ -2,7 +2,7 @@
   "packages/inbox/App.tsx": 7193,
   "packages/inbox/components/Thread.tsx": 6142,
   "packages/inbox/components/AttachmentPane.tsx": 3223,
-  "packages/inbox/api.ts": 2477,
+  "packages/inbox/api.ts": 2471,
   "packages/inbox/pulls/pullReviewKept.test.tsx": 2299,
   "packages/inbox/compose/ComposeDialog.tsx": 1896,
   "packages/inbox/components/InboxList.tsx": 1853,
