@@ -390,6 +390,7 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
             matching the plan/annotate side. */}
         {openIn}
         {!readOnly && <OpenInAppButton
+          extraItems={state?.onOpenToSide ? [{ label: 'Open to the side', onSelect: () => state.onOpenToSide!(filePath), icon: <OpenToSideIcon /> }] : undefined}
           filePath={filePath}
           base={state?.agentCwd ?? null}
           diffText={patch}
@@ -404,3 +405,10 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
     </div>
   );
 };
+
+const OpenToSideIcon: React.FC = () => (
+  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+    <rect x="3" y="4" width="18" height="16" rx="2" />
+    <path d="M12 4v16" />
+  </svg>
+);

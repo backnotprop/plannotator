@@ -4,6 +4,8 @@ import { useReviewState } from '../ReviewStateContext';
 import { isReviewFilePreviewParams, type ReviewFilePanelParams } from '../reviewPanelTypes';
 import { RepoFileView } from '../../components/RepoFileView';
 import { ReviewDiffBody } from './ReviewDiffPanel';
+import { usesPaneLayout } from '../../workspace/layoutEngine';
+import { paneFileView, type PaneFileViewParams } from '../../workspace/paneFileView';
 
 /**
  * Any file of the repository in a tab (approved design record
@@ -38,7 +40,17 @@ export const ReviewFilePanel: React.FC<IDockviewPanelProps<ReviewFilePanelParams
   };
   if (!filePath) return null;
   const changed = state.files.some((file) => file.path === filePath);
-  if (changed) return <ReviewDiffBody filePath={filePath} onKeep={keep} />;
+  if (changed) {
+    const panes = usesPaneLayout();
+    return (
+      <ReviewDiffBody
+        filePath={filePath}
+        onKeep={keep}
+        view={panes ? paneFileView(params as PaneFileViewParams | undefined, filePath) : undefined}
+        onViewChange={panes ? (next) => props.api.updateParameters({ ...params, view: next, viewPath: filePath }) : undefined}
+      />
+    );
+  }
   return (
     <RepoFileView
       key={filePath}

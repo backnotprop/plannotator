@@ -145,7 +145,7 @@ import { exportEditorAnnotations } from '@plannotator/ui/utils/parser';
 import { buildReviewAgentInstructions } from '@plannotator/ui/utils/reviewAgentInstructions';
 import { ResizeHandle } from '@plannotator/ui/components/ResizeHandle';
 import { FolderTree } from 'lucide-react';
-import { DockviewReact, type DockviewReadyEvent, type DockviewApi, type IDockviewPanel } from 'dockview-react';
+import type { DockviewReadyEvent, DockviewApi, IDockviewPanel } from 'dockview-react';
 import {
   ReviewHeaderMenu,
   type CompactReviewAction,
@@ -190,12 +190,14 @@ import {
   type ReviewState,
 } from './dock/ReviewStateContext';
 import { JobLogsProvider } from './dock/JobLogsContext';
-import { reviewPanelComponents } from './dock/reviewPanelComponents';
-import { ReviewDockTabRenderer } from './dock/ReviewDockTabRenderer';
 import { ReviewDockRightActions } from './dock/ReviewDockRightActions';
 import { ReviewPanelToggle } from './components/ReviewPanelToggle';
 import { ReviewHeaderStatus } from './components/ReviewHeaderStatus';
 import { watchLoneTabHeader } from './dock/loneTabHeader';
+import { ReviewCenterArea } from './workspace/ReviewCenterArea';
+import { usesPaneLayout } from './workspace/layoutEngine';
+import { referencesPlacement } from './workspace/paneLayout';
+import { REFERENCES_TAB_ID, useReferencesTab } from './workspace/useReferencesTab';
 import { HeaderTotals } from './components/HeaderTotals';
 import { COMPACT_REVIEW_HEADER_HEIGHT, REVIEW_HEADER_HEIGHT } from './utils/diffChromeMetrics';
 import { usePRContext } from './hooks/usePRContext';
@@ -217,7 +219,7 @@ import {
   type ReviewDiffPanelParams,
   type ReviewFilePanelParams,
 } from './dock/reviewPanelTypes';
-import type { ChangedFileView } from './components/FileViewSwitch';
+import { useFileViews } from './hooks/useFileViews';
 import type { CodeFileAnnotationInput, CodeFileTokenTarget } from '@plannotator/ui/components/CodeFilePopout';
 import type { DiffFile, AnnotationScrollTarget } from './types';
 import { annotationMatchesPrScope, proseAnnotationMatchesPr } from './utils/annotationScope';
@@ -503,17 +505,7 @@ const ReviewApp: React.FC = () => {
   // it is not in the review (highlighted in All files), and which changed
   // files show their Whole file view (per file, for this review).
   const [activeRepoPath, setActiveRepoPath] = useState<string | null>(null);
-  const [wholeFilePaths, setWholeFilePaths] = useState<ReadonlySet<string>>(() => new Set());
-  const fileViewOf = useCallback((path: string): ChangedFileView => (wholeFilePaths.has(path) ? 'whole' : 'changes'), [wholeFilePaths]);
-  const handleFileViewChange = useCallback((path: string, view: ChangedFileView) => {
-    setWholeFilePaths((current) => {
-      if (current.has(path) === (view === 'whole')) return current;
-      const next = new Set(current);
-      if (view === 'whole') next.add(path);
-      else next.delete(path);
-      return next;
-    });
-  }, []);
+  const [fileViewOf, handleFileViewChange] = useFileViews();
   const [allFilesVisibleFile, setAllFilesVisibleFile] = useState<string | null>(null);
   const [pendingSelection, setPendingSelection] = useState<SelectedLineRange | null>(null);
   const [lineAnnotationComposeRequest, setLineAnnotationComposeRequest] =
@@ -574,6 +566,9 @@ const ReviewApp: React.FC = () => {
   }, [diffFontFamily, diffFontSize, diffTabSize]);
 
   const reviewSidebar = useSidebar<ReviewSidebarTab>(false, 'annotations');
+  const closeReviewSidebar = reviewSidebar.close;
+  const openReviewSidebarTab = reviewSidebar.open;
+  const { tab: referencesTab, show: showReferencesTab } = useReferencesTab(closeReviewSidebar);
   const [isFileTreeOpen, setIsFileTreeOpen] = useState(true);
   const [isCompactNavigatorOpen, setIsCompactNavigatorOpen] = useState(false);
   const isNavigatorOpen = isCompactTouchLayout ? isCompactNavigatorOpen : isFileTreeOpen;
@@ -1143,6 +1138,8 @@ const ReviewApp: React.FC = () => {
     });
     setActiveRepoPath(filePath);
   }, [dockApi, files, findFilePanel, openDiffFile]);
+  const handleOpenToSide = useCallback((filePath: string) => openRepoFile(filePath, { pin: true, side: true }), [openRepoFile]);
+
 
   // Keep the preview tab's file (a comment in it, or a double click on the
   // tab): the same panel, now kept, so it keeps its place and its scroll.
@@ -1467,6 +1464,11 @@ const ReviewApp: React.FC = () => {
       return;
     }
     codeNav.resolve(request);
+    if (usesPaneLayout() && referencesPlacement(window.innerWidth, isCompactTouchLayout) === 'panel') {
+      showReferencesTab();
+      openReviewSidebarTab(REFERENCES_TAB_ID);
+      return;
+    }
     if (!dockApi) return;
     const existing = dockApi.getPanel(REVIEW_CODE_NAV_PANEL_ID);
     if (existing) {
@@ -1497,7 +1499,7 @@ const ReviewApp: React.FC = () => {
         initialWidth: 420,
       });
     }
-  }, [closeTokenHover, codeNav.resolve, dockApi, isAllFilesActive, isCallFlowActive, isSemanticDiffActive, gitContext, agentCwd]);
+  }, [closeTokenHover, codeNav.resolve, dockApi, isAllFilesActive, isCallFlowActive, isSemanticDiffActive, gitContext, agentCwd, isCompactTouchLayout, showReferencesTab, openReviewSidebarTab]);
 
   // Which capabilities request has settled, keyed by its input: on the render
   // where aiUIEnabled changes the key no longer matches, so nothing reads a
@@ -4395,6 +4397,7 @@ const ReviewApp: React.FC = () => {
     onFileViewChange: repoFilesSupported ? handleFileViewChange : undefined,
     onAddWholeFileAnnotation: handleAddWholeFileAnnotation,
     onKeepFileTab: handleKeepFileTab,
+    onOpenToSide: isCompactTouchLayout ? undefined : handleOpenToSide,
     revealTarget,
     jumpCrumb,
     navigation: reviewNavigation,
@@ -4513,7 +4516,7 @@ const ReviewApp: React.FC = () => {
     selectedAnnotationId, scrollTargetAnnotation, pendingSelection, handleLineSelection,
     handleRequestLineAnnotation, handleAddCallFlowAnnotation,
     handleAddAnnotation, handleAddFileComment, handleAddFileCommentForFile, handleEditAnnotation,
-    repoFilesSupported, fileViewOf, handleFileViewChange, handleAddWholeFileAnnotation, handleKeepFileTab,
+    repoFilesSupported, fileViewOf, handleFileViewChange, handleAddWholeFileAnnotation, handleOpenToSide, isCompactTouchLayout, handleKeepFileTab,
     revealTarget, jumpCrumb, reviewNavigation, handleTokenTarget, fileTokens, handleOpenCodeNavLocation,
     handleSelectAnnotation, handleNavigateToAnnotation, handleDeleteAnnotation, handleExplainAnnotation, agentFindingSources, viewedFiles,
     generatedFiles, expandedGeneratedFiles, handleGeneratedFileCollapsedChange,
@@ -6144,13 +6147,7 @@ const ReviewApp: React.FC = () => {
               showCancel
             />
             {files.length > 0 ? (
-              <DockviewReact
-                className={`h-full ${resolvedMode === 'light' ? 'dockview-theme-light' : 'dockview-theme-dark'}`}
-                components={reviewPanelComponents}
-                defaultTabComponent={ReviewDockTabRenderer}
-                onReady={handleDockReady}
-                disableFloatingGroups
-              />
+              <ReviewCenterArea onReady={handleDockReady} mode={resolvedMode === 'light' ? 'light' : 'dark'} singlePane={isCompactTouchLayout} />
             ) : (
               <div className="h-full flex items-center justify-center">
                 <div className="text-center space-y-3 max-w-md px-8">
@@ -6224,6 +6221,7 @@ const ReviewApp: React.FC = () => {
                 isOpen
                 onClose={reviewSidebar.close}
                 onSelectTab={reviewSidebar.open}
+                extraTabs={referencesTab ? [referencesTab] : undefined}
                 presentation={isCompactTouchLayout ? 'overlay' : 'panel'}
                 activeTab={reviewSidebar.activeTab}
                 annotations={allAnnotations}

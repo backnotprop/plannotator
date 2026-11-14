@@ -40,6 +40,7 @@ interface OpenInAppButtonProps {
   /** When true, render the primary label text alongside the icon. */
   showLabel?: boolean;
   disabled?: boolean;
+  extraItems?: readonly { label: string; onSelect: () => void; icon?: React.ReactNode }[];
 }
 
 // The host app catalog is static for the session, but the all-files view
@@ -54,6 +55,7 @@ export const OpenInAppButton: React.FC<OpenInAppButtonProps> = ({
   canOpen = true,
   showLabel = false,
   disabled = false,
+  extraItems,
 }) => {
   const detected = useOpenInApps(OPEN_IN_APPS_URL);
   const apps = detected?.apps ?? null;
@@ -82,7 +84,7 @@ export const OpenInAppButton: React.FC<OpenInAppButtonProps> = ({
   // "hide when unavailable" behavior for surfaces whose only copy action is the
   // path (annotate in a remote session) — show the standalone menu only when
   // there's a diff to copy.
-  if (!openable && !diffText) return null;
+  if (!openable && !diffText && !extraItems?.length) return null;
 
   // Resolve the active app: last-used if still detected, else reveal, else first.
   const resolvedId = list.some((a) => a.id === currentId)
@@ -205,6 +207,13 @@ export const OpenInAppButton: React.FC<OpenInAppButtonProps> = ({
             // the menu closes — that left-edge bar reads as a stray artifact.
             finalFocus={false}
           >
+            {extraItems?.map((item) => (
+              <DropdownMenuItem key={item.label} onClick={item.onSelect} className="text-xs" data-open-in-extra={item.label}>
+                {item.icon}
+                <span className="flex-1">{item.label}</span>
+              </DropdownMenuItem>
+            ))}
+            {!!extraItems?.length && (openable || filePath || diffText) && <DropdownMenuSeparator />}
             {openable &&
               grouped.map((group, gi) => (
                 <React.Fragment key={group[0].kind}>

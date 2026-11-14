@@ -1,3 +1,4 @@
+import { useReviewStateOptional } from '../dock/ReviewStateContext';
 import React from 'react';
 import { ContextMenu } from '@base-ui/react/context-menu';
 import type { FileTreeNode as TreeNode } from '../utils/buildFileTree';
@@ -144,6 +145,7 @@ export const FileTreeNodeItem: React.FC<FileTreeNodeProps> = ({
   markdownPreviewedPaths,
 }) => {
   const paddingLeft = indent(node.depth);
+  const openToSide = useReviewStateOptional()?.onOpenToSide;
 
   if (node.type === 'folder') {
     if (!hasVisibleChildren(node, hiddenFiles, activeFileIndex, hideViewedFiles)) {
@@ -264,6 +266,15 @@ export const FileTreeNodeItem: React.FC<FileTreeNodeProps> = ({
       <ContextMenu.Portal>
         <ContextMenu.Positioner className="z-50">
           <ContextMenu.Popup className="min-w-[160px] bg-popover text-popover-foreground border border-border rounded shadow-lg overflow-hidden py-1 transition-opacity data-starting-style:opacity-0 data-ending-style:opacity-0">
+          {openToSide && (
+            <ContextMenu.Item
+              onClick={() => openToSide(node.path)}
+              data-tree-open-to-side=""
+              className="flex items-center gap-2 mx-1 px-2 py-1.5 text-xs rounded cursor-pointer outline-none text-foreground/80 data-[highlighted]:bg-muted data-[highlighted]:text-foreground"
+            >
+              Open to the side
+            </ContextMenu.Item>
+          )}
           <ContextMenu.Item
             onClick={() => { void copyTextToClipboard(node.path); }}
             className="flex items-center gap-2 mx-1 px-2 py-1.5 text-xs rounded cursor-pointer outline-none text-foreground/80 data-[highlighted]:bg-muted data-[highlighted]:text-foreground"
