@@ -165,6 +165,7 @@ export interface ProjectFolder extends InboxProject {
    * repo (or none resolved yet), and from an older Inbox. Read for `defaultRefHost.ts`.
    */
   repo_host?: string | null;
+  repo_forge?: 'gitlab';
 }
 
 /** The project menu's batches (POST /api/inbox/projects/:id/read and /resolve): the threads each took. */

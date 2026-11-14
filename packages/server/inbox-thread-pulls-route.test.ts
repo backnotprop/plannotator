@@ -56,6 +56,7 @@ function world(
     gh?: { run: unknown; calls: string[][] };
     onLiveChange?: (threadIds: readonly string[]) => void;
     bitbucket?: BitbucketRefReader;
+    cards?: boolean;
     projectHost?: (projectId: string) => Promise<string | null>;
   } = {},
 ) {
@@ -66,7 +67,7 @@ function world(
   const project = store.ensureProject({ name: "billing", root: "/work/billing" });
   const thread = store.sendMessage({ project_id: project.id, author: AGENT, body: "Opened the retry PR.", subject: "Invoice retries" }).message.id;
   const gh = options.gh ?? fakeGh({});
-  const refCards = options.bitbucket ? createRefCards({ run: gh.run as never, now: () => now, avatar: async () => null, bitbucket: options.bitbucket }) : undefined;
+  const refCards = options.bitbucket || options.cards ? createRefCards({ run: gh.run as never, now: () => now, avatar: async () => null, bitbucket: options.bitbucket }) : undefined;
   const states = createThreadPullStates({ store, run: gh.run as never, ...(refCards ? { refCards } : {}), now: () => now, fixture: options.fixture ?? null, onLiveChange: options.onLiveChange });
   const route = createThreadPullsRoute({
     store,
@@ -217,6 +218,32 @@ describe("the state reader", () => {
     expect(reads).toEqual([{ workspace: "acme", repo: "billing", number: 7 }]);
     expect(answer.pulls.map((p) => [p.platform, p.label, p.state, p.title, p.checks, p.review])).toEqual([["bitbucket", "#7", "open", "Retry invoices", "failing", "approved"]]);
     expect(w.store.threadPulls(w.thread)[0]).toMatchObject({ state: "open", base: "main", head: "retries" });
+  });
+
+  test("a self-managed GitLab's MR reads its state through the glab signed in there; a host glab is not signed in to is never asked", async () => {
+    const calls: string[][] = [];
+    const run = async (cli: string, args: string[]) => {
+      calls.push([cli, ...args]);
+      if (args[0] === "auth") return { stdout: "", stderr: "git.acme.com\n  ✓ Logged in to git.acme.com as dev (keyring)\n", exitCode: 0 };
+      if (cli === "glab" && args.includes("git.acme.com")) {
+        const mergeRequest = { iid: "61", title: "Retry invoices", webUrl: "https://git.acme.com/acme/api/-/merge_requests/61", state: "opened", draft: false, createdAt: "", updatedAt: "", closedAt: null, mergedAt: null, description: "", author: null, labels: { nodes: [] }, assignees: { nodes: [] }, userNotesCount: 0, notes: { nodes: [] }, sourceBranch: "retries", targetBranch: "main", diffStatsSummary: {}, approved: true, detailedMergeStatus: "MERGEABLE", headPipeline: null };
+        return { stdout: JSON.stringify({ data: { project: { fullPath: "acme/api", mergeRequest } } }), stderr: "", exitCode: 0 };
+      }
+      return { stdout: "", stderr: "unexpected", exitCode: 1 };
+    };
+    const w = world({ gh: { run, calls }, cards: true });
+    w.agentAdd(w.thread, "https://git.acme.com/acme/api/-/merge_requests/61", "https://gitlab.evil.example/acme/api/-/merge_requests/1", "https://evil.example/acme/api/-/merge_requests/2");
+    await w.get(w.thread);
+    await settle();
+    const answer = (await (await w.get(w.thread))!.json()) as InboxThreadPullsAnswer;
+    expect(answer.pulls.map((p) => [p.host, p.platform, p.label, p.state])).toEqual([
+      ["git.acme.com", "gitlab", "!61", "open"],
+      ["gitlab.evil.example", "gitlab", "!1", "unknown"],
+      ["evil.example", "gitlab", "!2", "unknown"],
+    ]);
+    expect(w.store.threadPulls(w.thread)[0]).toMatchObject({ state: "open", base: "main", head: "retries" });
+    expect(calls.filter((call) => call.includes("--hostname")).map((call) => call[call.indexOf("--hostname") + 1])).toEqual(["git.acme.com"]);
+    expect(calls.some((call) => call.some((arg) => arg.includes("evil.example")))).toBe(false);
   });
 
   test("a tailnet guest's read runs no gh: it gets the stored state", async () => {
