@@ -109,6 +109,31 @@ test('Add tag from the row menu makes a tag and tags the thread; the Tags sectio
   expect(world.errors).toEqual([]);
 });
 
+// New tag stands over the tag rows' counts, with no empty place beside it while the chevron is hidden; on the
+// header's hover the chevron comes in left of it and the "+" stays put.
+test('New tag stands over the tag rows’ counts, and the header’s hover brings the chevron in left of it without moving it', async () => {
+  const { page } = world;
+  await page.mouse.move(900, 600);
+  const head = page.locator('[data-tags-head]');
+  const add = head.locator('[data-tags-add]');
+  const chevron = head.locator('svg.ib-side-sec-chev');
+  await expect(add).toBeVisible();
+  await expect(chevron).toBeHidden();
+  const counts = await tagRows(page).first().evaluate((row) => {
+    const box = row.getBoundingClientRect();
+    return { end: box.right - parseFloat(getComputedStyle(row).paddingRight), right: box.right };
+  });
+  const away = (await add.boundingBox())!;
+  expect(away.x + away.width).toBeGreaterThanOrEqual(counts.end);
+  expect(away.x + away.width).toBeLessThanOrEqual(counts.right);
+  await head.locator('[data-sidebar-section="tags"]').hover({ position: { x: 40, y: 10 } });
+  await expect(chevron).toBeVisible();
+  expect(await add.boundingBox()).toEqual(away);
+  const shown = (await chevron.boundingBox())!;
+  expect(shown.x + shown.width).toBeLessThanOrEqual(away.x);
+  await page.mouse.move(900, 600);
+});
+
 test('the thread’s ⋯ ticks a second thread into the tag; the tag’s list shows both, then Remove from takes one out', async () => {
   const { page, threads } = world;
   await rowButton(page, threads.signing).click();
