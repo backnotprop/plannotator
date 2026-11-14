@@ -7,6 +7,7 @@ import { agentLabel, authorName, threadLines, type PlacedThread } from './model'
 import { prThreadPlace } from './PRThreadCard';
 
 const short = (path: string) => path.split('/').pop() ?? path;
+const ICON = 'inline-flex h-7 w-7 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40';
 
 function UnsentRow({ comment, onSend }: { comment: CodeAnnotation; onSend: () => void }) {
   const lines = comment.scope === 'file' || comment.lineStart <= 0 ? 'file' : comment.lineStart === comment.lineEnd ? `${comment.lineStart}` : `${comment.lineStart}–${comment.lineEnd}`;
@@ -67,20 +68,21 @@ export function LiveThreadsTab(props: {
   const resolvedCount = props.placed.filter((p) => p.conversation.resolved).length;
   return (
     <div className="flex flex-col text-[13px]" data-live-tab>
-      <div className="flex items-center gap-2 border-b border-border px-3 py-2">
-        <span className="min-w-0 flex-1 truncate whitespace-nowrap text-[12px] text-muted-foreground" data-live-count>
+      <div className="flex items-center gap-1 border-b border-border px-3 py-1.5">
+        <span className="whitespace-nowrap text-[12px] text-muted-foreground" data-live-count>
           {props.order.length} open{resolvedCount > 0 ? ` · ${resolvedCount} resolved` : ''}
         </span>
+        <span className="flex-1" />
         {props.threadUrl ? (
-          <a href={props.threadUrl} target="_blank" rel="noreferrer" className="h-7 shrink-0 whitespace-nowrap rounded px-2 text-[12px] leading-7 text-muted-foreground hover:bg-muted hover:text-foreground" data-live-inbox-link>
-            Open in Inbox
+          <a href={props.threadUrl} target="_blank" rel="noreferrer" title="Open in Inbox" aria-label="Open in Inbox" className={ICON} data-live-inbox-link>
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M9 3h4v4M13 3 7.5 8.5M11 9.5V13H3V5h3.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
           </a>
         ) : null}
-        <button type="button" disabled={props.order.length === 0} className="h-7 shrink-0 rounded px-2 text-[12px] hover:bg-muted disabled:opacity-40" onClick={() => props.onStep(-1)}>
-          Previous
+        <button type="button" disabled={props.order.length === 0} title="Previous open thread" aria-label="Previous open thread" className={ICON} onClick={() => props.onStep(-1)}>
+          <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="m4 10 4-4 4 4" strokeLinecap="round" strokeLinejoin="round" /></svg>
         </button>
-        <button type="button" disabled={props.order.length === 0} className="h-7 shrink-0 rounded px-2 text-[12px] hover:bg-muted disabled:opacity-40" onClick={() => props.onStep(1)}>
-          Next
+        <button type="button" disabled={props.order.length === 0} title="Next open thread" aria-label="Next open thread" className={ICON} onClick={() => props.onStep(1)}>
+          <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="m4 6 4 4 4-4" strokeLinecap="round" strokeLinejoin="round" /></svg>
         </button>
       </div>
       {actions.error ? (
