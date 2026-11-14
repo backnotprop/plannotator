@@ -105,6 +105,8 @@ export interface InboxT3Wake {
   wakes(host: unknown, session: unknown): Promise<boolean>;
   /** `alive` (a T3 thread the Inbox wakes), `dead` (T3 no longer has it), null (not a T3 thread, or one no saved grant reaches). */
   status(session: string): "alive" | "dead" | null;
+  /** T3 said it no longer has the thread, promised or not, and the thread has not called the Inbox since. */
+  gone(session: string): boolean;
   /** The thread called an Inbox tool: it is there. */
   noteToolCall(session: string): void;
   /** A send T3Delivery refused: the window says it is saved for the agent's next read. */
@@ -522,6 +524,7 @@ export function createInboxT3Wake(options: {
       if (home && (!home.credentials.token() || !sendsInto(session, home))) return null;
       return dead.has(session) ? "dead" : "alive";
     },
+    gone: (session) => dead.has(session),
     noteToolCall: (session) => {
       if (!isT3ThreadId(session) || !dead.delete(session)) return;
       // Back: what waited on a retry goes now too.
