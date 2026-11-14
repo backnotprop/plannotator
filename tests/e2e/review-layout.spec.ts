@@ -162,7 +162,7 @@ const headerShape = (page: Page) =>
       .join(' '),
   );
 
-test('tabs live in the panes: the header never changes, a file's own header row carries them, All changes gets one slim row', async ({ browser }) => {
+test('tabs live in the panes: the header never changes, a file header row carries them, All changes gets one slim row', async ({ browser }) => {
   await withReview(browser, 900, async (page) => {
     await expect.poll(() => firstCodeTop(page)).not.toBeNull();
     const header = await headerShape(page);
