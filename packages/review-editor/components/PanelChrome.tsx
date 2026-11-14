@@ -192,7 +192,7 @@ function ListOptionsMenu({
       <Menu.Portal>
         <Menu.Positioner align="end" side="bottom" sideOffset={6} className="z-[110] outline-none">
           <Menu.Popup
-            className="w-60 rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-lg outline-none"
+            className="w-60 rounded-lg border border-transparent bg-popover p-1 text-popover-foreground shadow-[var(--float-shadow)] outline-none"
             data-review-tree-settings=""
           >
             {onToggleAllFolders && (
