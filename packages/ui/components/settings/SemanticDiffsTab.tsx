@@ -232,7 +232,7 @@ export function SemanticDiffsTab() {
                 {provider === 'jev' ? (
                   <KeyField
                     className="w-full"
-                    caption="API key"
+                    caption="TypeSafe key"
                     label="TypeSafe API key"
                     value={apiKey}
                     onChange={setApiKey}
