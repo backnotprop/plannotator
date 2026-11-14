@@ -47,7 +47,7 @@ function GuideRow({
   const [error, setError] = useState<string | null>(null);
   const mismatch = guideMismatchText(entry);
   const meta = [
-    entry.where === 'other' ? entry.label : null,
+    (entry.where ?? 'other') === 'other' ? entry.label : null,
     guideProgressText(entry.progress),
   ].filter(Boolean).join(' · ');
   return (

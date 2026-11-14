@@ -121,6 +121,11 @@ export function LaunchPad({
           {scope}
         </p>
       )}
+      {!config.guide.available && !config.review.available && (
+        <p className="px-1 py-1.5 text-[12px] leading-5 text-muted-foreground" data-launch-none="">
+          No agent CLI on this machine. Install Claude Code, Codex, Cursor, OpenCode, Pi or Copilot to start reviews here.
+        </p>
+      )}
       {config.guide.available && (
         <LaunchRow
           side={config.guide}
