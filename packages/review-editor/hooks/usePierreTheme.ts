@@ -283,11 +283,11 @@ export function usePierreTheme(options?: {
               minmax(0, var(--split-left, 1fr))
               minmax(0, var(--split-right, 1fr)) !important;
           }
-          [data-semantic-start] { position: relative; }
           [data-semantic-start]::after {
-            position: absolute; right: 10px; top: 0;
+            margin-left: 3ch;
             font: 500 10.5px/inherit ui-sans-serif, system-ui, sans-serif;
             letter-spacing: 0.02em; color: ${fg}; opacity: 0.55; pointer-events: none;
+            user-select: none; white-space: nowrap;
           }
           [data-semantic-start][data-line-type='change-moved']::after { content: 'moved'; }
           [data-semantic-start][data-line-type='change-moved-with-edit']::after { content: 'moved & edited'; }
