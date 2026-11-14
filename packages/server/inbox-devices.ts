@@ -185,6 +185,10 @@ const ALLOWLIST: readonly DoorRoute[] = [
   { method: "POST", route: /^threads\/([^/]+)\/priority$/, window: (m) => `/api/inbox/threads/${m[1]}/priority` },
   // An agent's face or given name (approval "inbox-linked-marks"): a linked machine's window sets them for this Inbox's agents.
   { method: "POST", route: /^agent-faces$/, window: () => "/api/inbox/agent-faces", machineOnly: true },
+  // A thread's tags, and a tag's rename, delete and Undo (approval "inbox-thread-tags"): a linked machine's window
+  // tags this Inbox's threads by a tag's name and changes the tag of that name here. Phones do not take tags.
+  { method: "POST", route: /^threads\/([^/]+)\/tags$/, window: (m) => `/api/inbox/threads/${m[1]}/tags`, machineOnly: true },
+  { method: "POST", route: /^initiatives\/([^/]+)$/, window: (m) => `/api/inbox/initiatives/${m[1]}`, machineOnly: true },
   { method: "GET", route: /^events$/, window: () => "/api/inbox/events" },
   // `to`: Send to another session (7.41), a person message no session took yet. `ack`: 👍 Looks good and its Undo (7.56).
   // `reask`: Re-ask, the agent asks its open questions again in one message (7.61).

@@ -93,7 +93,7 @@ import {
   INBOX_HOST_NAMES,
   INBOX_MCP_WAKING_HOSTS,
   INBOX_THREAD_NAME_MAX,
-  INBOX_SESSION_ID_PATTERN,
+  isInboxTagSessionId,
   type InboxParticipant,
   type InboxSentRecipient,
   type InboxTag,
@@ -598,7 +598,7 @@ export function normalizeInboxTags(value: unknown, owner: string | null): InboxT
   for (const entry of value) {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new InboxError("validation_error", "tags: each one { host, session, wakes }.", { field: "tags" });
     const { host, session, name, wakes, label, joined } = entry as Record<string, unknown>;
-    if (typeof session !== "string" || !INBOX_SESSION_ID_PATTERN.test(session)) {
+    if (!isInboxTagSessionId(host, session)) {
       throw new InboxError("validation_error", "tags: each session an id.", { field: "tags" });
     }
     if (host !== null && (typeof host !== "string" || host.length > 64)) throw new InboxError("validation_error", "tags: host a string or null.", { field: "tags" });
@@ -7394,6 +7394,15 @@ export class InboxStore {
     return out;
   }
 
+  /** Every session an agent of `host` wrote as, whether a message of it was promised a wake or not. */
+  agentSessionsOfHost(host: string): Set<string> {
+    const out = new Set<string>();
+    for (const message of this.messages.values()) {
+      if (message.author.kind === "agent" && message.author.host === host && message.author.session) out.add(message.author.session);
+    }
+    return out;
+  }
+
   /** The sessions of `host` with a message of their own that wakes. A person's message or tag only names a session, however it runs. */
   sessionsThatWoke(host: string): Set<string> {
     const out = new Set<string>();
@@ -8065,6 +8074,20 @@ export class InboxStore {
     if (this.threadTags(threadId).includes(tag.id) === on) return this.threadTags(threadId);
     this.commitThreadTagMarks([{ thread_id: threadId, tag: tag.id, on, seq: this.seq, at: this.stamp() }]);
     return this.threadTags(threadId);
+  }
+
+  /**
+   * The same by the tag's name (`inboxInitiativeNameKey`), as a linked machine names a tag: the live tag of that name,
+   * made first (the person's) when none is and the thread goes in. A name no tag has takes nothing out.
+   */
+  setThreadTagNamed(threadId: string, name: unknown, on: boolean): string[] {
+    if (!this.isThreadRoot(threadId)) throw new InboxError("thread_not_found", `No thread ${threadId}.`);
+    const text = this.cardText(name, "name", INBOX_INITIATIVE_NAME_MAX);
+    const key = inboxInitiativeNameKey(text);
+    const found = [...this.initiativesById.values()].find((tag) => tag.deleted_at === null && inboxInitiativeNameKey(tag.name) === key);
+    if (found) return this.setThreadTag(threadId, found.id, on);
+    if (!on) return this.threadTags(threadId);
+    return this.setThreadTag(threadId, this.appendNewInitiative(text, { kind: "person" }).id, true);
   }
 
   /** Before a rename that changes a tag's key: each thread in it only through a typed `#Name` gets an `on` mark. */

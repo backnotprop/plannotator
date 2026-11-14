@@ -335,8 +335,9 @@ export interface ListModel {
   /**
    * The live tags, oldest first (approval "inbox-thread-tags"): the sidebar's Tags and the Add tag list; each row's
    * `tags` names them. Absent from an older Inbox: the window then draws no Tags section and offers no Add tag.
+   * Merged: one per name across the linked machines that take tags, `machines` its id on each (InboxMachineTag).
    */
-  tags?: InboxInitiative[];
+  tags?: (InboxInitiative & { machines?: Record<string, string> })[];
   /** The version of this list, named by the next read so only what changed comes back (listRead.ts). Absent from an older Inbox. */
   list_version?: string;
   /**
@@ -2046,9 +2047,9 @@ export const inboxApi = {
     post<{ card: InboxCardWire }>(inboxUrl(`/cards/${encodeURIComponent(id)}`), { op: 'initiative', initiative }),
   /** A new initiative, named. */
   createInitiative: (name: string) => post<{ initiative: InboxInitiative }>(inboxUrl('/initiatives'), { name }),
-  /** An initiative renamed, or deleted (its cards read as in none). */
-  changeInitiative: (id: string, change: { op: 'rename'; name: string } | { op: 'delete' } | { op: 'restore' }) =>
-    post<{ initiative: InboxInitiative }>(inboxUrl(`/initiatives/${encodeURIComponent(id)}`), change),
+  /** An initiative renamed, or deleted (its cards read as in none). `machine`: a linked machine's tag, changed there. */
+  changeInitiative: (id: string, change: { op: 'rename'; name: string } | { op: 'delete' } | { op: 'restore' }, machine?: string | null) =>
+    post<{ initiative: InboxInitiative }>(inboxUrl(`/initiatives/${encodeURIComponent(id)}`, undefined, machine), change),
   /** The person's move: `move` to a column, `drop` (Cancel, reason optional), `restore`. */
   moveCard: (id: string, change: { op: 'move'; column: InboxCardColumn } | { op: 'drop'; reason?: string | null } | { op: 'restore' }) =>
     post<{ card: InboxCardWire }>(inboxUrl(`/cards/${encodeURIComponent(id)}`), change),
@@ -2223,8 +2224,11 @@ export const inboxApi = {
   /** Add the thread to Priority (`true`) or remove it, or (`restore`) put back a `before` an earlier write answered. On the thread's own machine. */
   priority: (threadId: string, change: boolean | { restore: InboxPriorityBefore }) =>
     post<{ before: InboxPriorityBefore }>(threadUrl(threadId, '/priority'), typeof change === 'boolean' ? { priority: change } : change),
-  /** Put a thread in a tag (`on`) or take it out (approval "inbox-thread-tags"): the thread's tags after. */
-  setThreadTag: (threadId: string, tag: string, on: boolean) => post<{ tags: string[] }>(inboxUrl(`/threads/${encodeURIComponent(threadId)}/tags`), { tag, on }),
+  /**
+   * Put a thread in a tag (`on`) or take it out (approval "inbox-thread-tags"): the thread's tags after. On the thread's
+   * own machine, by the tag's id there or by its name (`{ name }`: that machine makes the tag when it has none).
+   */
+  setThreadTag: (threadId: string, tag: { tag: string } | { name: string }, on: boolean) => post<{ tags: string[] }>(threadUrl(threadId, '/tags'), { ...tag, on }),
   /** Snooze the thread until a time, or end its snooze (`null`). `at`: an earlier snooze's own time, for an Undo. On the thread's own machine. */
   snooze: (threadId: string, until: string | null, at?: string) =>
     post<{ snoozed: { until: string; at: string } | null }>(threadUrl(threadId, '/snooze'), { until, ...(at ? { at } : {}) }),

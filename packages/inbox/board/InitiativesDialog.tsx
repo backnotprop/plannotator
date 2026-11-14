@@ -6,6 +6,7 @@ import { Icon } from '../icons';
 import { Tip } from '../components/Tip';
 import { InboxToast, type InboxToastModel } from '../components/Toast';
 import { Modal } from '../components/Updates';
+import type { TagChanged, TagsAcross } from '../tagsAcross';
 import { initiativeDeletedToast } from './model';
 
 /**
@@ -14,7 +15,9 @@ import { initiativeDeletedToast } from './model';
  * with Delete, one click and no question (the owner, 2026-11-04: "delete
  * initiatives very simply without friction"): the toast's Undo brings it and
  * its cards back; a field to add one. Every change is its own write; the Board
- * reads the cards again.
+ * reads the cards again. With `across` the list is the sidebar's, one tag per name
+ * across the linked machines, and a rename, delete or Undo reaches each machine
+ * that holds it as the sidebar's does (tagsAcross.ts); a new tag is this Inbox's.
  *
  * The window's toast is under a modal dialog (showModal: the page behind is
  * inert), so while this is open the same toast draws inside it; closed with
@@ -31,8 +34,10 @@ export function InitiativesDialog({
   onChanged,
   onCloseWithUndo,
   fallbackFocus,
+  across = null,
 }: {
   initiatives: readonly InboxInitiative[];
+  across?: TagsAcross | null;
   start: 'new' | 'edit';
   phone: boolean;
   onClose: () => void;
@@ -84,7 +89,12 @@ export function InitiativesDialog({
   };
   const visible = initiatives.filter((i) => !deleted.some((gone) => gone.id === i.id));
   const remove = async (i: InboxInitiative) => {
-    const gone = await run(async () => (await inboxApi.changeInitiative(i.id, { op: 'delete' })).initiative);
+    const gone = await run(async () => {
+      if (!across) return (await inboxApi.changeInitiative(i.id, { op: 'delete' })).initiative;
+      const { refused } = await across.change(i, { op: 'delete' });
+      if (refused) throw refused;
+      return i;
+    });
     if (!gone) return;
     // Focus moves to the next row's Delete (the one before when it was the last), else the name field.
     const at = visible.findIndex((other) => other.id === i.id);
@@ -100,14 +110,14 @@ export function InitiativesDialog({
   const undo = async () => {
     if (undoing.current) return;
     const back = deleted;
-    const run = restoreInitiatives(back);
+    const run: Promise<InitiativesRestored & Partial<TagChanged>> = across ? across.restore(back) : restoreInitiatives(back);
     undoing.current = { back, run };
     setBusy(true);
     setError(null);
-    const { restored, left, line } = await run;
+    const { restored, left, line, refused } = await run;
     undoing.current = null;
     setBusy(false);
-    setError(line);
+    setError(line ?? (refused ? (initiativeRefusal(refused) ?? INITIATIVE_SAVE_FAILED) : null));
     // What came back shows on the next read; a refusal's read shows who took the name.
     onChanged();
     // By id, so one deleted meanwhile keeps its Undo. A failed save keeps it too, to try again.
@@ -173,7 +183,17 @@ export function InitiativesDialog({
             initiative={i}
             busy={busy}
             onRename={async (name) => {
-              const renamed = await run(async () => (await inboxApi.changeInitiative(i.id, { op: 'rename', name })).initiative);
+              let held: string | null = null;
+              const renamed = await run(async () => {
+                if (!across) return (await inboxApi.changeInitiative(i.id, { op: 'rename', name })).initiative;
+                const taken = across.renameTaken(i, name);
+                if (taken) throw taken;
+                const done = await across.change(i, { op: 'rename', name });
+                if (done.refused) throw done.refused;
+                held = done.held?.message ?? null;
+                return { ...i, name };
+              });
+              if (held) setError(held);
               if (renamed) onChanged();
               return renamed !== null;
             }}
