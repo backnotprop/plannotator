@@ -8,7 +8,9 @@ export const TITLE_SETTLE_MS = 200;
 const TabTitle: React.FC<{ title: string }> = ({ title }) => <>{useSettledValue(title, TITLE_SETTLE_MS)}</>;
 
 function focusTreeRow() {
-  const row = document.querySelector<HTMLElement>('[data-review-sidebar] .file-tree-item.active') ?? document.querySelector<HTMLElement>('[data-review-sidebar] .file-tree-item');
+  const tree = document.querySelector<HTMLElement>('[data-review-sidebar] [data-changes-tree]');
+  const rows = tree?.shadowRoot;
+  const row = rows?.querySelector<HTMLElement>('[data-type="item"][aria-selected="true"]') ?? rows?.querySelector<HTMLElement>('[data-type="item"]');
   row?.focus();
 }
 

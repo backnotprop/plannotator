@@ -2,6 +2,7 @@ import React from 'react';
 import type { FileTreeRowPart, FileTreeRowParts, GitStatusEntry } from '@pierre/trees';
 import type { DiffFile } from '../types';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
+import { useReviewStateOptional } from '../dock/ReviewStateContext';
 
 export interface SectionEntry {
   group: 'committed' | 'changes' | 'untracked';
@@ -141,12 +142,26 @@ export const TreeRowMenu: React.FC<{
   anchor: { left: number; bottom: number };
 }> = ({ path, repoRoot, close, anchor }) => {
   const name = path.split('/').pop() ?? path;
+  const openToSide = useReviewStateOptional()?.onOpenToSide;
   const choose = (text: string) => {
     void copyTextToClipboard(text);
     close();
   };
   return (
     <div role="menu" className="review-tree-menu" style={{ position: 'fixed', left: anchor.left, top: anchor.bottom }}>
+      {openToSide && (
+        <button
+          type="button"
+          role="menuitem"
+          data-tree-open-to-side=""
+          onClick={() => {
+            openToSide(path);
+            close();
+          }}
+        >
+          Open to the side
+        </button>
+      )}
       <button type="button" role="menuitem" onClick={() => choose(path)}>Copy path</button>
       <button type="button" role="menuitem" onClick={() => choose(name)}>Copy filename</button>
       {repoRoot && (

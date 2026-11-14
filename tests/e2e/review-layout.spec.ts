@@ -151,7 +151,7 @@ const firstCodeTop = (page: Page) =>
     return lines.length ? Math.round(Math.min(...lines)) : null;
   });
 const paneTop = (page: Page) => page.evaluate(() => Math.round(document.querySelector('[data-pane="0"]')!.getBoundingClientRect().top));
-const row = (page: Page, name: string) => page.locator('[data-review-sidebar] .file-tree-item', { hasText: name }).first();
+const row = (page: Page, name: string) => page.locator(`[data-review-sidebar] [data-changes-tree] [data-type="item"][data-item-path$="${name}"]`).first();
 
 test('opening files never moves the code: the tabs appear in the header row', async ({ browser }) => {
   await withReview(browser, 900, async (page) => {
@@ -185,7 +185,7 @@ test('a phone keeps one pane, and its open files are a menu in the header title:
     await expect(page.locator('[data-pane="0"]')).toBeVisible();
     const top = await paneTop(page);
     await page.locator('button[aria-label="Open review navigation"]').click();
-    await page.locator('.file-tree-item', { hasText: 'routes.ts' }).first().tap();
+    await page.locator('[data-changes-tree] [data-type="item"][data-item-path$="routes.ts"]').first().tap();
     await expect(page.locator('[data-pane-tabs-menu]')).toBeVisible();
     expect(await paneTop(page)).toBe(top);
     await expect(page.locator('[data-pane]')).toHaveCount(1);
