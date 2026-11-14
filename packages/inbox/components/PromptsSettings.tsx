@@ -215,7 +215,7 @@ export function PromptsSection({
       <div className="pm-head">
         <Chip custom={sharedCustom} />
         <span className="pm-sp" />
-        {reminder.editable && !sharedEditing && (
+        {!sharedEditing && (
           <>
             {(sharedCustom || overShared !== null) && (
               <Tip content="Delete prompts.inbox.reminder: every agent gets Plannotator's text again">
@@ -293,7 +293,7 @@ export function PromptsSection({
             </span>
           </span>
           <span className="ib-ctl">
-            {reminder.editable && !isEditing && (
+            {!isEditing && (
               <>
                 {(own !== null || over !== null) && (
                   <Tip content={`Delete ${name}'s own text: it gets the shared text again`}>
@@ -343,10 +343,10 @@ export function PromptsSection({
 
   return (
     <div ref={root} data-prompts-page="">
-      {prompts.rules && <AgentRulesSection rules={prompts.rules} editable={reminder.editable} onPrompts={onPrompts} />}
+      {prompts.rules && <AgentRulesSection rules={prompts.rules} onPrompts={onPrompts} />}
       <section className={prompts.rules ? 'ib-sgroup' : 'ib-sgroup ib-sgroup-first'} aria-labelledby={`${id}-rem`}>
         <h2 id={`${id}-rem`}>Inbox reminder</h2>
-        <p>{reminder.editable ? 'Sent once, when a session starts.' : 'Sent once, when a session starts. Change it on this computer.'}</p>
+        <p>Sent once, when a session starts.</p>
         <div className="ib-card">
           <button type="button" className="pm-fold" aria-expanded={reminderOpen} aria-controls={`${id}-rem-body`} onClick={() => setReminderOpen((open) => !open)} data-prompts-reminder-fold="">
             <Chevron />
@@ -370,7 +370,7 @@ export function PromptsSection({
               <div className="pm-head">
                 <Chip custom={guide.text !== null} />
                 <span className="pm-sp" />
-                {reminder.editable && editing !== 'guide' && (
+                {editing !== 'guide' && (
                   <>
                     {guide.text !== null && (
                       <Tip content="Delete your instructions: guides follow Plannotator's method alone">

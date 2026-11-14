@@ -23,7 +23,8 @@
  *    (`tailscale status --json`, Self.UserID -> LoginName), or, when
  *    Tailscale names no owner (a tagged machine, or an untagged one whose
  *    owner it does not report), one of the logins in `inboxTailscaleAllow`,
- *    the rule the Inbox's `isOwnerRequest` follows.
+ *    the Inbox's rule. A `--tailscale` session refuses everyone else
+ *    (`refuseTailnetPeer` in packages/server/session-tailnet.ts).
  *  - `peer`: through serve and anything else (another login, a tagged device
  *    with no login, a funnel request, or no owner named and no allowlist).
  *
