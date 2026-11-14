@@ -1,3 +1,5 @@
+import { CodeViewMinimap } from './minimap/CodeViewMinimap';
+import type { MinimapNote } from './minimap/DiffMinimapSlot';
 import { COMPACT_FILE_HEADER_HEIGHT, COMPACT_HUNK_SEPARATOR_HEIGHT, FILE_HEADER_HEIGHT, HUNK_SEPARATOR_HEIGHT } from '../utils/diffChromeMetrics';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ContextNoteAnchor } from '../utils/contextNoteAnchor';
@@ -416,6 +418,8 @@ export interface AllFilesCodeViewProps {
    * a portal into CodeView's scroll container, since CodeView owns both the
    * scroller and the virtualized items. */
   leadingContent?: React.ReactNode;
+  minimap?: boolean;
+  minimapMarks?: readonly MinimapNote[];
   // Only handle [/]/z/v/a/c/x keyboard nav when this surface is the active panel.
   isActive?: boolean;
   // AI props (optional — surfaced into the toolbar). File-aware variants: this
@@ -836,6 +840,8 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   onScrollPositionChange,
   onFileCollapsedChange,
   leadingContent,
+  minimap = false,
+  minimapMarks,
   isActive = true,
   readOnly = false,
   commentOnly = false,
@@ -3576,6 +3582,20 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     [compactTouchLayout, customLineHeight, hunkSeparators, hostHeaderExtra, separatorHeight],
   );
   itemMetricsRef.current = itemMetrics;
+  const minimapPulseRef = useRef<(() => void) | null>(null);
+  const [minimapShown, setMinimapShown] = useState(false);
+  const minimapOn = minimap && !scrollsWithPage && !compactTouchLayout;
+  const minimapMetrics = useMemo(
+    () => ({
+      headerHeight: itemMetrics.diffHeaderHeight ?? FILE_HEADER_HEIGHT,
+      lineHeight: itemMetrics.lineHeight ?? 20,
+      separatorHeight: hunkSeparators === 'line-info' ? separatorHeight : 4,
+      paddingBottom: itemMetrics.paddingBottom ?? 8,
+    }),
+    [itemMetrics, hunkSeparators, separatorHeight],
+  );
+  const getMinimapViewer = useCallback(() => viewerRef.current?.getInstance(), []);
+  const getMinimapScroller = useCallback(() => scrollRef.current, []);
 
   const options = useMemo<CodeViewOptions<DiffAnnotationMetadata>>(
     () => ({
@@ -3646,6 +3666,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       // survive recycling. CodeView appends the item context as the final arg.
       onPostRender(node, _instance, phase, context) {
         handlePostRender(node, _instance, phase, context.item);
+        minimapPulseRef.current?.();
       },
     }),
     [
@@ -3723,7 +3744,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       // `:focus-visible` outline (theme.css, the Inbox's inbox.css) then rings
       // the whole diff, and the clipping around it leaves only stray lines
       // above and below the file. `!`: theme.css's rule is unlayered.
-      className={`relative ${scrollsWithPage ? 'overflow-x-clip [contain:layout_style]' : `h-full overflow-y-auto overflow-x-clip ${allowScrollChaining ? 'overscroll-auto' : 'overscroll-contain'} [contain:strict] [will-change:scroll-position]`} [overflow-anchor:none] focus-visible:outline-none! [&_diffs-container]:overflow-clip [&_diffs-container]:[contain:layout_paint_style]`}
+      className={`relative ${minimapOn && minimapShown ? 'mr-6' : ''} ${scrollsWithPage ? 'overflow-x-clip [contain:layout_style]' : `h-full overflow-y-auto overflow-x-clip ${allowScrollChaining ? 'overscroll-auto' : 'overscroll-contain'} [contain:strict] [will-change:scroll-position]`} [overflow-anchor:none] focus-visible:outline-none! [&_diffs-container]:overflow-clip [&_diffs-container]:[contain:layout_paint_style]`}
       initialItems={identity.items}
       options={options}
       selectedLines={selectedLines}
@@ -3759,6 +3780,23 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         codeView
       )}
       {diffOverflow !== 'wrap' && <DiffBottomBar root={scrollEl} />}
+      {minimapOn && (
+        <CodeViewMinimap
+          key={fileSetKey}
+          getViewer={getMinimapViewer}
+          getScrollElement={getMinimapScroller}
+          items={identity.items}
+          itemIdToFile={identity.itemIdToFile}
+          viewedFiles={viewedFiles}
+          annotations={annotations}
+          marks={minimapMarks}
+          metrics={minimapMetrics}
+          split={diffStyle === 'split'}
+          expandUnchanged={expandUnchanged === true}
+          pulseRef={minimapPulseRef}
+          onShownChange={setMinimapShown}
+        />
+      )}
 
       {/* Leading content (commit description card) lives INSIDE the scroll
           container at content-top: absolutely positioned children of a scroller

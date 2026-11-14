@@ -123,6 +123,12 @@ function writeAgentSwitchCookies(choice: AgentSwitchChoice | null): void {
   else if (choice.switchTo === 'custom') storage.removeItem(AGENT_SWITCH_CUSTOM_COOKIE);
 }
 
+export type DiffMinimapMode = 'auto' | 'always' | 'off';
+const DIFF_MINIMAP_MODES = ['auto', 'always', 'off'] as const;
+function isDiffMinimapMode(v: unknown): v is DiffMinimapMode {
+  return typeof v === 'string' && (DIFF_MINIMAP_MODES as readonly string[]).includes(v);
+}
+
 const DIFF_LINE_BG_INTENSITY_VALUES = ['subtle', 'normal', 'strong'] as const;
 function isDiffLineBgIntensity(v: unknown): v is DiffLineBgIntensity {
   return typeof v === 'string' && (DIFF_LINE_BG_INTENSITY_VALUES as readonly string[]).includes(v);
@@ -689,6 +695,17 @@ export const SETTINGS = {
       return isDiffLineBgIntensity(v) ? v : undefined;
     },
     toServer: (v: DiffLineBgIntensity) => ({ diffOptions: { lineBgIntensity: v } }),
+  },
+  diffMinimap: {
+    defaultValue: 'auto' as DiffMinimapMode,
+    fromCookie: () => {
+      const v = storage.getItem('plannotator-diff-minimap');
+      return isDiffMinimapMode(v) ? v : undefined;
+    },
+    toCookie: (v: DiffMinimapMode) => storage.setItem('plannotator-diff-minimap', v),
+    serverKey: undefined,
+    fromServer: undefined,
+    toServer: undefined,
   },
   /** Experimental: author suggestions by editing code in place in the review
    *  all-files view. Cookie-only (no server sync) while the feature is

@@ -30,7 +30,8 @@ export type DiffDisplaySetting =
   | 'diffLineDiffType'
   | 'diffTabSize'
   | 'diffExpandUnchanged'
-  | 'diffHideWhitespace';
+  | 'diffHideWhitespace'
+  | 'diffMinimap';
 
 export type DiffDisplayChange = <K extends DiffDisplaySetting & SettingName>(key: K, value: SettingValue<K>) => void;
 
@@ -44,6 +45,11 @@ const LINE_DIFF = [
   { value: 'word' as const, label: 'Word' },
   { value: 'char' as const, label: 'Char' },
   { value: 'none' as const, label: 'None' },
+];
+const MINIMAP = [
+  { value: 'auto' as const, label: 'Auto' },
+  { value: 'always' as const, label: 'Always' },
+  { value: 'off' as const, label: 'Off' },
 ];
 const MARK = 'w-3.5 h-3.5';
 const INDICATORS = [
@@ -142,6 +148,8 @@ export interface DiffDisplayOptionsPopoverProps {
   /** Where the gear's hover text opens when the host draws ui's tooltips (`componentTooltips`). Default: top. */
   triggerTitleSide?: 'top' | 'right' | 'bottom' | 'left';
   actions?: React.ReactNode;
+  /** The Minimap switch, for a host that draws the diff overview strip. Default: hidden. */
+  minimapOption?: boolean;
 }
 
 const GEAR = (
@@ -155,7 +163,8 @@ export const DiffDisplayOptionsBody: React.FC<{
   repositoryOptions?: boolean;
   onChange?: DiffDisplayChange;
   actions?: React.ReactNode;
-}> = ({ repositoryOptions = true, onChange, actions }) => {
+  minimapOption?: boolean;
+}> = ({ repositoryOptions = true, onChange, actions, minimapOption = false }) => {
   const set: DiffDisplayChange = onChange ?? ((key, value) => configStore.set(key, value));
   const overflow = useConfigValue('diffOverflow');
   const indicators = useConfigValue('diffIndicators');
@@ -166,6 +175,7 @@ export const DiffDisplayOptionsBody: React.FC<{
   const tabSize = useConfigValue('diffTabSize');
   const expandUnchanged = useConfigValue('diffExpandUnchanged');
   const hideWhitespace = useConfigValue('diffHideWhitespace');
+  const minimap = useConfigValue('diffMinimap');
   const stepTab = (n: number) => set('diffTabSize', Math.max(1, Math.min(8, n)));
   return (
     <>
@@ -182,6 +192,11 @@ export const DiffDisplayOptionsBody: React.FC<{
         <div className="flex justify-end pb-1">
           <Segmented label="Background strength" options={INTENSITY} value={intensity} onChange={(v) => set('diffLineBgIntensity', v)} />
         </div>
+      )}
+      {minimapOption && (
+        <Row label="Minimap">
+          <Segmented label="Minimap" options={MINIMAP} value={minimap} onChange={(v) => set('diffMinimap', v)} />
+        </Row>
       )}
       <div className="border-t border-border/60 my-1.5 -mx-2.5" />
       <Row label="Change marks">
@@ -217,6 +232,7 @@ export const DiffDisplayOptionsPopover: React.FC<DiffDisplayOptionsPopoverProps>
   compactTouchLayout = false,
   triggerTitleSide = 'top',
   actions,
+  minimapOption = false,
 }) => {
   return (
     <Popover.Root>
@@ -246,7 +262,7 @@ export const DiffDisplayOptionsPopover: React.FC<DiffDisplayOptionsPopoverProps>
             className="w-[min(18rem,calc(100vw-1rem))] max-h-[calc(var(--pn-viewport-height,100vh)-2rem-var(--pn-safe-top)-var(--pn-safe-bottom))] overflow-y-auto bg-popover text-popover-foreground border border-border rounded-lg shadow-lg origin-[var(--transform-origin)] transition-opacity data-starting-style:opacity-0 data-ending-style:opacity-0"
           >
             <div className="px-2.5 py-2">
-              <DiffDisplayOptionsBody repositoryOptions={repositoryOptions} onChange={onChange} actions={actions} />
+              <DiffDisplayOptionsBody repositoryOptions={repositoryOptions} onChange={onChange} actions={actions} minimapOption={minimapOption} />
             </div>
           </Popover.Popup>
         </Popover.Positioner>
