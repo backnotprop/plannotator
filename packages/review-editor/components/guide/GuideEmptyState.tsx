@@ -304,7 +304,7 @@ export const GuideEmptyState: React.FC<GuideEmptyStateProps> = ({ capabilities, 
   // The previous guides (#1112): under the launch controls, or alone while AI features are off.
   const savedSection = savedGuides && savedGuides.length > 0 ? (
     <div className="mt-10 max-w-[820px]">
-      <div className="mb-2.5 font-mono text-[10px] uppercase tracking-widest text-muted-foreground/60">
+      <div className="mb-2.5 font-mono text-xs text-muted-foreground/60">
         Previous guides
       </div>
       <div className="divide-y divide-border/30 overflow-hidden rounded-lg border border-border/50 bg-card/50">
@@ -316,20 +316,20 @@ export const GuideEmptyState: React.FC<GuideEmptyStateProps> = ({ capabilities, 
               onClick={() => onOpenSavedGuide?.(`saved:${entry.id}`)}
               className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1 text-left sm:flex-nowrap"
             >
-              <span className="shrink-0 rounded border border-border/50 bg-muted/40 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+              <span className="shrink-0 rounded border border-border/50 bg-muted/40 px-1.5 py-0.5 font-mono text-xs text-muted-foreground">
                 {entry.label}
               </span>
               <span className="order-last line-clamp-2 min-w-0 basis-full text-[12.5px] text-foreground transition-colors group-hover:text-primary sm:order-none sm:line-clamp-none sm:flex-1 sm:basis-0 sm:truncate">
                 {entry.title}
               </span>
-              <span className="shrink-0 font-mono text-[10.5px] text-muted-foreground/60">
+              <span className="shrink-0 font-mono text-xs text-muted-foreground/60">
                 {formatSavedAge(entry.savedAt)}
               </span>
-              <span className="shrink-0 font-mono text-[10.5px] text-muted-foreground/60">
+              <span className="shrink-0 font-mono text-xs text-muted-foreground/60">
                 {entry.progress.reviewed}/{entry.progress.total}
               </span>
               {entry.moved && (
-                <span className="shrink-0 font-mono text-[10px] text-amber-600/80 dark:text-amber-500/70" title="The diff has changed since this guide was generated">
+                <span className="shrink-0 font-mono text-xs text-amber-600/80 dark:text-amber-500/70" title="The diff has changed since this guide was generated">
                   diff changed
                 </span>
               )}
@@ -391,7 +391,7 @@ export const GuideEmptyState: React.FC<GuideEmptyStateProps> = ({ capabilities, 
                 type="button"
                 onClick={handleFixOutput}
                 disabled={repairing}
-                className="rounded-md border border-border/50 px-2.5 py-1.5 text-[11.5px] font-medium text-foreground transition-colors hover:bg-muted/40 disabled:cursor-not-allowed disabled:opacity-50"
+                className="rounded-md border border-border/50 px-2.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted/40 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {repairing ? 'Starting repair…' : 'Fix output'}
               </button>
@@ -399,7 +399,7 @@ export const GuideEmptyState: React.FC<GuideEmptyStateProps> = ({ capabilities, 
                 type="button"
                 onClick={() => setShowOutput((v) => !v)}
                 aria-expanded={showOutput}
-                className="flex items-center gap-1 rounded-md px-2 py-1.5 text-[11.5px] text-muted-foreground/70 transition-colors hover:text-foreground"
+                className="flex items-center gap-1 rounded-md px-2 py-1.5 text-xs text-muted-foreground/70 transition-colors hover:text-foreground"
               >
                 <ChevronRight className={`transition-transform ${showOutput ? 'rotate-90' : ''}`} size={12} />
                 {showOutput ? 'Hide output' : 'Show output'}
@@ -413,19 +413,19 @@ export const GuideEmptyState: React.FC<GuideEmptyStateProps> = ({ capabilities, 
                 value={editedPayload}
                 onChange={(e) => setEditedPayload(e.target.value)}
                 spellCheck={false}
-                className="h-[320px] w-full resize-none overflow-y-auto rounded-md border border-border/50 bg-background p-2.5 font-mono text-[11px] leading-relaxed text-foreground outline-none focus:border-border"
+                className="h-[320px] w-full resize-none overflow-y-auto rounded-md border border-border/50 bg-background p-2.5 font-mono text-xs leading-relaxed text-foreground outline-none focus:border-border"
               />
               <div className="mt-2 flex items-center gap-2">
                 <button
                   type="button"
                   onClick={handleSubmitFixedOutput}
                   disabled={submitting}
-                  className="rounded-md bg-primary px-3 py-1.5 text-[11.5px] font-semibold text-primary-foreground transition-colors hover:bg-primary/90 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
+                  className="rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground transition-colors hover:bg-primary/90 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {submitting ? 'Submitting…' : 'Submit fixed output'}
                 </button>
               </div>
-              {submitError && <p className="mt-1.5 text-[11px] leading-snug text-destructive/80">{submitError}</p>}
+              {submitError && <p className="mt-1.5 text-xs leading-snug text-destructive/80">{submitError}</p>}
             </div>
           )}
         </div>
@@ -438,7 +438,7 @@ export const GuideEmptyState: React.FC<GuideEmptyStateProps> = ({ capabilities, 
       ) : (
         <>
           <div className="mt-6 w-fit max-w-full rounded-lg border border-border/50 bg-card/50 px-4 py-3.5">
-            <div className="mb-2.5 font-mono text-[10px] uppercase tracking-widest text-muted-foreground/60">
+            <div className="mb-2.5 font-mono text-xs text-muted-foreground/60">
               Model defaults
             </div>
             <div className="flex flex-wrap items-center gap-2">
@@ -463,10 +463,10 @@ export const GuideEmptyState: React.FC<GuideEmptyStateProps> = ({ capabilities, 
               <ModelSourceHint
                 tool={engine}
                 info={catalogs[engine]}
-                className="mt-2.5 text-[11px] leading-snug text-muted-foreground/60"
+                className="mt-2.5 text-xs leading-snug text-muted-foreground/60"
               />
             )}
-            <p className="mt-2.5 text-[11px] leading-snug text-muted-foreground/60">
+            <p className="mt-2.5 text-xs leading-snug text-muted-foreground/60">
               Newer models with lower effort are recommended — guides generate quicker.
             </p>
           </div>
@@ -476,12 +476,12 @@ export const GuideEmptyState: React.FC<GuideEmptyStateProps> = ({ capabilities, 
               type="button"
               onClick={() => setShowInstructions((v) => !v)}
               aria-expanded={showInstructions}
-              className="flex items-center gap-1 rounded-md px-1 py-1 text-[11.5px] text-muted-foreground/70 transition-colors hover:text-foreground"
+              className="flex items-center gap-1 rounded-md px-1 py-1 text-xs text-muted-foreground/70 transition-colors hover:text-foreground"
             >
               <ChevronRight className={`transition-transform ${showInstructions ? 'rotate-90' : ''}`} size={12} />
               Custom instructions
               {hasInstructions && !showInstructions && (
-                <span className="ml-1 rounded border border-border/50 bg-muted/40 px-1 py-px font-mono text-[9px] uppercase tracking-wider text-muted-foreground/60">
+                <span className="ml-1 rounded border border-border/50 bg-muted/40 px-1 py-px font-mono text-xs text-muted-foreground/60">
                   on
                 </span>
               )}
@@ -497,7 +497,7 @@ export const GuideEmptyState: React.FC<GuideEmptyStateProps> = ({ capabilities, 
                   placeholder={'Standing preferences for guide generation, e.g. "prefer product vocabulary over internal codenames".'}
                   className="w-full resize-y rounded-md border border-border/50 bg-background p-2.5 text-xs leading-relaxed text-foreground outline-none placeholder:text-muted-foreground/40 focus:border-border"
                 />
-                <p className="mt-1 text-[11px] leading-snug text-muted-foreground/60">
+                <p className="mt-1 text-xs leading-snug text-muted-foreground/60">
                   Added on top of the built-in guide methodology for every guide you generate. Saved for next time.
                   {instructions.length >= GUIDE_EXTRA_INSTRUCTIONS_MAX_CHARS - 1000 && (
                     <span data-guide-instructions-count="" className="ml-1 whitespace-nowrap tabular-nums">

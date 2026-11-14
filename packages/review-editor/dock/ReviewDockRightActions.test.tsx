@@ -82,4 +82,33 @@ describe('ReviewDockRightActions', () => {
     expect(rows).toEqual(['Wrap long lines', 'Line numbers', 'Backgrounds', 'Minimap on long diffs', 'Whole file', 'Hide whitespace', 'Show moved & renamed code']);
     expect(popup.textContent).not.toContain('Unified');
   });
+
+  test.skipIf(!hasDom)('back and forward keep their place from load, so the cluster does not jump on the first jump', async () => {
+    const render = async (canBack: boolean) => {
+      const state = {
+        diffStyle: 'split',
+        onDiffStyleChange: () => {},
+        isCompactTouchLayout: false,
+        allFilesAllCollapsed: false,
+        onToggleAllFilesCollapsed: () => {},
+        navigation: { canBack, canForward: false, back: () => {}, forward: () => {} },
+      } as unknown as ReviewState;
+      await act(async () => root?.render(
+        <ReviewStateProvider value={state}>
+          <ReviewDockRightActions {...({ activePanel: null } as unknown as IDockviewHeaderActionsProps)} />
+        </ReviewStateProvider>,
+      ));
+    };
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    root = createRoot(host);
+    await render(false);
+    const group = host.querySelector<HTMLElement>('[data-jump-history]')!;
+    expect(group).not.toBeNull();
+    expect(group.className).toContain('invisible');
+    expect(group.querySelectorAll('[data-nav-history]')).toHaveLength(2);
+    await render(true);
+    expect(host.querySelector<HTMLElement>('[data-jump-history]')!.className).not.toContain('invisible');
+    expect(host.querySelector<HTMLButtonElement>('[data-nav-history="back"]')!.disabled).toBe(false);
+  });
 });

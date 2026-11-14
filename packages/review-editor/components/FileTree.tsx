@@ -1,4 +1,5 @@
 import React, { useEffect, useCallback, useState, useMemo, useRef } from 'react';
+import { focusFileHeaderWhenLost } from '../utils/focusFileHeader';
 import { CodeAnnotation } from '@plannotator/ui/types';
 import type {
   JjEvoLogEntry,
@@ -12,7 +13,7 @@ import { FileKindIcon, FILE_KIND_LABELS } from '@plannotator/guide-viewer/FileKi
 import { ChangesTreeView, type ChangesTreeHandle } from './ChangesTreeView';
 import { EvoLogPicker } from './EvoLogPicker';
 import { WorktreePicker } from './WorktreePicker';
-import { getReviewSearchSideLabel, type ReviewSearchFileGroup, type ReviewSearchMatch } from '../utils/reviewSearch';
+import { type ReviewSearchFileGroup, type ReviewSearchMatch } from '../utils/reviewSearch';
 import type { DiffFile } from '../types';
 import { OverlayScrollArea } from '@plannotator/ui/components/OverlayScrollArea';
 import { PRPlatformIcon } from '@plannotator/ui/components/PRPlatformIcon';
@@ -30,6 +31,7 @@ import { countColumnVars, compactRowsProps } from './FileRowBits';
 import { useHiddenViewedFiles } from '../hooks/useHiddenViewedFiles';
 
 interface FileTreeProps {
+  controlsNotice?: React.ReactNode;
   /** The top of the panel (views, the comparison sentence, Changes | All
    *  files, Go to File), shared with the other views. Absent: no header. */
   header?: ReviewPanelHeaderModel;
@@ -179,6 +181,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
   onToggleShowStageControls,
   autoViewed,
   onToggleAutoViewed,
+  controlsNotice,
   onCopyRawDiff,
   canCopyRawDiff = false,
   copyRawDiffStatus = 'idle',
@@ -300,25 +303,29 @@ export const FileTree: React.FC<FileTreeProps> = ({
 
       const visualPos = visualOrder.indexOf(activeFileIndex);
 
+      const select = (index: number) => {
+        onSelectFile(index);
+        focusFileHeaderWhenLost(files[index]?.path);
+      };
       if (e.key === 'j' || e.key === 'ArrowDown') {
         e.preventDefault();
         if (visualPos < visualOrder.length - 1) {
-          onSelectFile(visualOrder[visualPos + 1]);
+          select(visualOrder[visualPos + 1]);
         }
       } else if (e.key === 'k' || e.key === 'ArrowUp') {
         e.preventDefault();
         if (visualPos > 0) {
-          onSelectFile(visualOrder[visualPos - 1]);
+          select(visualOrder[visualPos - 1]);
         }
       } else if (e.key === 'Home') {
         e.preventDefault();
-        onSelectFile(visualOrder[0]);
+        select(visualOrder[0]);
       } else if (e.key === 'End') {
         e.preventDefault();
-        onSelectFile(visualOrder[visualOrder.length - 1]);
+        select(visualOrder[visualOrder.length - 1]);
       }
     },
-    [enableKeyboardNav, activeFileIndex, visualOrder, onSelectFile],
+    [enableKeyboardNav, activeFileIndex, visualOrder, onSelectFile, files],
   );
 
   useEffect(() => {
@@ -385,6 +392,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
       onToggleShowStageControls={onToggleShowStageControls}
       autoViewed={autoViewed}
       onToggleAutoViewed={onToggleAutoViewed}
+      notice={controlsNotice}
       groupByKind={groupByKind}
       onToggleGroupByKind={onToggleGroupByKind}
       groupBy={onSelectGroupBy ? effectiveGroupBy : undefined}
@@ -469,7 +477,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
         jjEvologs.length >= 2 &&
         detectedEvoBase && (
           <div className="px-2 py-1.5 border-b border-border/30 flex items-center gap-2">
-            <span className="text-[10px] uppercase tracking-wide text-muted-foreground flex-shrink-0">
+            <span className="text-xs text-muted-foreground flex-shrink-0">
               from evolution
             </span>
             <div className="flex-1 min-w-0">
@@ -767,7 +775,6 @@ const SearchMatchRow: React.FC<{
   isActive: boolean;
   onSelect: () => void;
 }> = ({ match, searchQuery, isActive, onSelect }) => {
-  const sideLabel = getReviewSearchSideLabel(match.side);
   const sideColor =
     match.side === 'addition'
       ? 'text-success'
@@ -783,7 +790,7 @@ const SearchMatchRow: React.FC<{
       onClick={onSelect}
     >
       <span className="flex-shrink-0 text-muted-foreground/40 w-7 text-right tabular-nums">{match.lineNumber}</span>
-      <span className={`flex-shrink-0 w-6 text-[10px] font-semibold uppercase ${sideColor}`}>{sideLabel}</span>
+      <span className={`flex-shrink-0 w-3 text-center ${sideColor}`} title={match.side === 'addition' ? 'Added line' : match.side === 'deletion' ? 'Removed line' : 'Unchanged line'} data-search-side={match.side}>{match.side === 'addition' ? '+' : match.side === 'deletion' ? '−' : ''}</span>
       <span className="truncate leading-relaxed">{highlightQuery(match.snippet, searchQuery)}</span>
     </button>
   );

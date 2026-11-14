@@ -13,7 +13,7 @@ import { browserNoneReason, resolveBrowserIntent } from "@plannotator/shared/bro
 import { isLocalOnlyAdvertisedUrl } from "@plannotator/shared/advertised-url";
 import { writeUrlQr } from "./qr";
 import { validateImagePath, validateUploadExtension, UPLOAD_DIR } from "./image";
-import { saveDraft, loadDraft, deleteDraft, getDraftGeneration } from "./draft";
+import { saveDraft, loadDraft, deleteDraft, getDraftGeneration, missingDraftHeaders } from "./draft";
 import { faviconBody, faviconIcoBody } from "@plannotator/shared/favicon";
 import { getServerConfig } from "./config";
 import { saveToObsidian, saveToBear, saveToOctarine, saveToNotion } from "./integrations";
@@ -153,14 +153,12 @@ export async function handleDraftSave(req: Request, contentKey: string): Promise
 /** Load annotation draft. Used by all 3 servers. */
 export function handleDraftLoad(contentKey: string): Response {
   const draft = loadDraft(contentKey);
-  if (!draft) {
-    const draftGeneration = getDraftGeneration(contentKey);
-    return Response.json(
-      { found: false, ...(draftGeneration !== null ? { draftGeneration } : {}) },
-      { status: 404 },
-    );
-  }
+  if (!draft) return missingDraftResponse(getDraftGeneration(contentKey));
   return Response.json(draft);
+}
+
+export function missingDraftResponse(draftGeneration: number | null): Response {
+  return new Response(null, { status: 204, headers: missingDraftHeaders(draftGeneration) });
 }
 
 /** Delete annotation draft. Used by all 3 servers. */

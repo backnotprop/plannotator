@@ -175,6 +175,11 @@ export function buildLineBgOverrides(intensity: DiffLineBgIntensity, mode: 'ligh
 /** Pierre's own display for the slot, until a host's selection bar is open (comments.css). */
 const SELECTION_BAR_PLUS_CSS = `[data-gutter-utility-slot] { display: var(--review-selection-plus, flex); }`;
 
+export const ANNOTATED_LINE_TINT_CSS = `
+  [data-selected-line] { --mix-selection-light: 92% !important; --mix-selection-dark: 88% !important; }
+  :is([data-line-annotation], [data-gutter-buffer='annotation'])[data-selected-line] { --mix-selection-light: 100% !important; --mix-selection-dark: 100% !important; }
+`;
+
 /**
  * Pierre's gutter comment button (`[data-utility-button]`) is `1lh` square —
  * 20px at the default line height — plus a 4px leftward bleed on its invisible
@@ -378,6 +383,7 @@ export function usePierreTheme(options?: {
 
           ${compactTouchCSS}
           ${SELECTION_BAR_PLUS_CSS}
+          ${ANNOTATED_LINE_TINT_CSS}
 
           ${HOST_SURFACE_HOOKS_CSS}
       `,

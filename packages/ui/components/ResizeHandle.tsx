@@ -110,7 +110,7 @@ export const ResizeHandle: React.FC<Props> = ({
           title="Collapse sidebar"
           aria-label="Collapse sidebar"
           data-collapse={side}
-          className="absolute top-1/2 left-1/2 z-20 flex h-6 w-4 -translate-x-1/2 -translate-y-1/2 items-center justify-center before:absolute before:-inset-2 before:content-[''] rounded-sm bg-surface-1 text-muted-foreground/60 opacity-0 ring-1 ring-border/40 transition-opacity hover:text-foreground group-hover:opacity-100 group-hover/sidebar:opacity-100"
+          className={`absolute top-1/2 ${side === 'right' ? 'left-2.5' : side === 'left' ? '-left-2.5' : 'left-1/2'} z-20 flex h-6 w-4 -translate-x-1/2 -translate-y-1/2 items-center justify-center before:absolute before:-inset-2 before:content-[''] rounded-sm bg-surface-1 text-muted-foreground/60 opacity-0 ring-1 ring-border/40 transition-opacity hover:text-foreground group-hover:opacity-100 group-hover/sidebar:opacity-100`}
         >
           <svg className="size-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path

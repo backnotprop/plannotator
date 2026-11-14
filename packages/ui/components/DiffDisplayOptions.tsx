@@ -42,7 +42,7 @@ const INTENSITY = [
   { value: 'strong' as const, label: 'Strong' },
 ];
 const LINE_DIFF = [
-  { value: 'word-alt' as const, label: 'Word-Alt' },
+  { value: 'word-alt' as const, label: 'Smart' },
   { value: 'word' as const, label: 'Word' },
   { value: 'char' as const, label: 'Char' },
   { value: 'none' as const, label: 'None' },
@@ -179,7 +179,7 @@ export const DiffDisplayOptionsBody: React.FC<{
       {actions && (
         <>
           {actions}
-          <div className="border-t border-border/60 my-1.5 -mx-2.5" />
+          <div className="border-t border-border/60 my-2 -mx-2" />
         </>
       )}
       <Switch label="Wrap long lines" checked={overflow === 'wrap'} onChange={(v) => set('diffOverflow', v ? 'wrap' : 'scroll')} />
@@ -191,7 +191,7 @@ export const DiffDisplayOptionsBody: React.FC<{
         </div>
       )}
       {minimapOption && <Switch label="Minimap on long diffs" checked={minimap} onChange={(v) => set('diffMinimap', v)} />}
-      <div className="border-t border-border/60 my-1.5 -mx-2.5" />
+      <div className="border-t border-border/60 my-2 -mx-2" />
       <Row label="Change marks">
         <Segmented label="Change marks" options={INDICATORS} value={indicators} onChange={(v) => set('diffIndicators', v)} />
       </Row>
@@ -208,7 +208,7 @@ export const DiffDisplayOptionsBody: React.FC<{
       </Row>
       {repositoryOptions && (
         <>
-          <div className="border-t border-border/60 my-1.5 -mx-2.5" />
+          <div className="border-t border-border/60 my-2 -mx-2" />
           <Switch label="Whole file" checked={expandUnchanged} onChange={(v) => set('diffExpandUnchanged', v)} />
           <Switch label="Hide whitespace" checked={hideWhitespace} onChange={(v) => set('diffHideWhitespace', v)} />
           <Switch label="Show moved & renamed code" checked={semantic} onChange={(v) => set('diffSemantic', v)} />
@@ -253,9 +253,9 @@ export const DiffDisplayOptionsPopover: React.FC<DiffDisplayOptionsPopoverProps>
             aria-label="Diff display"
             data-pn-compact-diff-options={compactTouchLayout || undefined}
             data-diff-display-popup=""
-            className="w-[min(18rem,calc(100vw-1rem))] max-h-[calc(var(--pn-viewport-height,100vh)-2rem-var(--pn-safe-top)-var(--pn-safe-bottom))] overflow-y-auto bg-popover text-popover-foreground border border-border rounded-lg shadow-lg origin-[var(--transform-origin)] transition-opacity data-starting-style:opacity-0 data-ending-style:opacity-0"
+            className="w-[min(18rem,calc(100vw-1rem))] max-h-[calc(var(--pn-viewport-height,100vh)-2rem-var(--pn-safe-top)-var(--pn-safe-bottom))] overflow-y-auto bg-popover text-popover-foreground border border-transparent rounded-lg shadow-[var(--float-shadow)] origin-[var(--transform-origin)] transition-opacity data-starting-style:opacity-0 data-ending-style:opacity-0"
           >
-            <div className="px-2.5 py-2">
+            <div className="p-2">
               <DiffDisplayOptionsBody repositoryOptions={repositoryOptions} onChange={onChange} actions={actions} minimapOption={minimapOption} />
             </div>
           </Popover.Popup>

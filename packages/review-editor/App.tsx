@@ -178,7 +178,9 @@ import { useGroupByKind } from './hooks/useGroupByKind';
 import type { AllFilesLineTarget, AllFilesOrder } from './components/AllFilesCodeView';
 import { useReviewProgress } from './hooks/useReviewProgress';
 import { resolveDiffSwitchUnviews } from './utils/autoViewed';
-import { needsAutoViewedNotice, markAutoViewedNoticeSeen, turnOffAutoViewed, toggleAutoViewed } from './utils/autoViewedNotice';
+import { toggleAutoViewed } from './utils/autoViewedNotice';
+import { useAutoViewedNotice } from './hooks/useAutoViewedNotice';
+import { AutoViewedNotice } from './components/AutoViewedNotice';
 import { usePRSession, type PRSessionUpdate } from './hooks/usePRSession';
 import { useAnnotationFactory } from './hooks/useAnnotationFactory';
 import { DEMO_DIFF } from './demoData';
@@ -201,6 +203,8 @@ import {
 import { JobLogsProvider } from './dock/JobLogsContext';
 import { ReviewDockRightActions } from './dock/ReviewDockRightActions';
 import { ReviewPanelToggle } from './components/ReviewPanelToggle';
+import { focusFileHeaderWhenLost, focusReviewPanelSoon } from './utils/focusFileHeader';
+import { SkipToReviewPanel } from './components/SkipToReviewPanel';
 import { ReviewHeaderStatus } from './components/ReviewHeaderStatus';
 import { watchLoneTabHeader } from './dock/loneTabHeader';
 import { ReviewCenterArea } from './workspace/ReviewCenterArea';
@@ -244,7 +248,6 @@ import { resolvePanelView } from './utils/resolvePanelView';
 import { isCommitDiffType, resolveCommitExitDiff, type CommitViewRestoreTarget } from './utils/commitViewRestore';
 import { needsGuideHint, markGuideHintSeen } from './utils/guideIntro';
 import { ExternalLineAnnotationComposer } from './components/ExternalLineAnnotationComposer';
-import { TextShimmer } from '@plannotator/ui/components/TextShimmer';
 import type { PRMetadata, PRReviewAction } from '@plannotator/shared/pr-types';
 import type { PRDiffScope, PRDiffScopeOption, PRStackInfo, PRStackTree } from '@plannotator/shared/pr-stack';
 import { altKey, isMac } from '@plannotator/ui/utils/platform';
@@ -457,6 +460,8 @@ const ReviewApp: React.FC = () => {
   const [diffData, setDiffData] = useState<DiffData | null>(null);
   const [files, setFiles] = useState<DiffFile[]>([]);
   const [activeFileIndex, setActiveFileIndex] = useState(0);
+  const activeFileIndexRef = useRef(activeFileIndex);
+  activeFileIndexRef.current = activeFileIndex;
   const [annotations, setAnnotations] = useState<CodeAnnotation[]>([]);
   const annotationsRef = useRef(annotations);
   annotationsRef.current = annotations;
@@ -582,6 +587,10 @@ const ReviewApp: React.FC = () => {
   const reviewSidebar = useSidebar<ReviewSidebarTab>(false, 'annotations');
   const closeReviewSidebar = reviewSidebar.close;
   const openReviewSidebarTab = reviewSidebar.open;
+  const skipToReviewPanel = useCallback(() => {
+    if (!reviewSidebar.isOpen) reviewSidebar.open(reviewSidebar.activeTab);
+    focusReviewPanelSoon(reviewSidebar.activeTab);
+  }, [reviewSidebar]);
   const { tab: referencesTab, show: showReferencesTab } = useReferencesTab(closeReviewSidebar);
   const [isFileTreeOpen, setIsFileTreeOpen] = useState(true);
   const [isCompactNavigatorOpen, setIsCompactNavigatorOpen] = useState(false);
@@ -2592,6 +2601,7 @@ const ReviewApp: React.FC = () => {
       if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'b' && !isTypingTarget(e.target)) {
         e.preventDefault();
         toggleNavigator();
+        focusFileHeaderWhenLost(filesRef.current[activeFileIndexRef.current]?.path);
       }
       // Cmd/Ctrl+Shift+G to toggle the guided review takeover — gated on the
       // same hasSearchableFiles condition as the header badge so the shortcut
@@ -3327,32 +3337,11 @@ const ReviewApp: React.FC = () => {
     for (const path of newlyViewed) applyAutoViewSuppression(path, true);
     syncPlatformViewed(newlyViewed, true);
   }, [markFilesViewed, applyAutoViewSuppression, syncPlatformViewed]);
-  const handleAutoView = useCallback(() => {
-    // The notice fires the first time auto-view demonstrates itself. Deferred
-    // (not lost) behind the guide takeover or a first-run dialog — the file
-    // still marks and the next auto-view retries the toast.
-    if (!needsAutoViewedNotice()) return;
-    if (guideOpen) return;
-    markAutoViewedNoticeSeen();
-    toast('Files are marked viewed as you scroll', {
-      description: "Scroll past a file or move on to the next and it's checked off. Turn this off in Settings → Review, or from the … menu above the file list.",
-      duration: 10000,
-      position: 'top-right',
-      classNames: { toast: '!w-auto', description: '!text-foreground/70' },
-      action: {
-        label: 'Turn off',
-        onClick: () => {
-          turnOffAutoViewed();
-          toast('Auto-mark viewed is off', {
-            description: 'Re-enable it in Settings → Review.',
-            duration: 5000,
-            position: 'top-right',
-            classNames: { toast: '!w-auto', description: '!text-foreground/70' },
-          });
-        },
-      },
-    });
-  }, [guideOpen]);
+  const autoViewedNotice = useAutoViewedNotice({
+    blocked: guideOpen || !isNavigatorOpen,
+    fileKey: isAllFilesActive ? 'all' : activeFileIndex,
+  });
+  const handleAutoView = autoViewedNotice.show;
   // The update toast waits behind the guide takeover and every first-run
   // dialog of this load (useUpdateToast).
   useUpdateToast({
@@ -5745,18 +5734,13 @@ const ReviewApp: React.FC = () => {
                     toggleGuideOrLaunchPad();
                   }}
                   className={`relative flex h-7 shrink-0 items-center gap-1 px-2 rounded-md text-xs font-medium transition-colors ${
-                    guideOpen ? 'bg-primary/15 text-primary' : 'bg-muted hover:bg-muted/80'
+                    guideOpen ? 'bg-primary/15 text-primary' : 'bg-muted text-foreground hover:bg-muted/80'
                   }`}
                   title={guideOpen ? 'Back to the diff workspace' : 'Open guided review'}
+                  data-guide-button=""
                 >
-                  {guideHintActive && !guideOpen ? (
-                    <>
-                      <TextShimmer>Guide</TextShimmer>
-                      <span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
-                    </>
-                  ) : (
-                    guideOpen ? 'Go back' : 'Guide'
-                  )}
+                  {guideOpen ? 'Go back' : 'Guide'}
+                  {guideHintActive && !guideOpen && <span data-guide-hint-dot="" className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-primary" />}
                 </button>
                 <div className="w-px h-5 bg-border mx-1 hidden lg:block" />
               </>
@@ -5798,7 +5782,7 @@ const ReviewApp: React.FC = () => {
               </div>
             ) : repoInfo ? (
               <div className={isCompactTouchLayout
-                ? 'min-w-0 flex items-center justify-center overflow-hidden px-1'
+                ? 'min-w-0 flex items-center justify-center gap-2 overflow-hidden px-1'
                 : 'min-w-0 flex shrink items-center gap-2 lg:gap-3 overflow-hidden'
               }>
                 {repoInfo.branch && (
@@ -6194,6 +6178,7 @@ const ReviewApp: React.FC = () => {
                 onToggleShowStageControls={handleToggleReviewStageControls}
                 autoViewed={autoViewedEnabled}
                 onToggleAutoViewed={handleToggleAutoViewed}
+                controlsNotice={<AutoViewedNotice notice={autoViewedNotice.notice} onTurnOff={autoViewedNotice.turnOff} />}
                 onCopyRawDiff={handleCopyDiff}
                 canCopyRawDiff={!!diffData?.rawPatch}
                 copyRawDiffStatus={copyRawDiffStatus}
@@ -6253,6 +6238,7 @@ const ReviewApp: React.FC = () => {
             inert={isCompactTransientSurfaceOpen || undefined}
             aria-hidden={isCompactTransientSurfaceOpen || undefined}
           >
+            {!isCompactTouchLayout && files.length > 0 && <SkipToReviewPanel onSkip={skipToReviewPanel} />}
             {/* Commit navigation veil: while a commit switch is in flight (or
                 the view was just entered and HEAD auto-select hasn't landed),
                 cover the stale previous diff instead of letting it sit there
