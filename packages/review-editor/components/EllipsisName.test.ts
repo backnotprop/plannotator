@@ -4,13 +4,15 @@ import { fitDirectory, fitMiddle } from './EllipsisName';
 const monospace = (text: string) => text.length * 7;
 
 describe('a name too long for its room', () => {
-  test('keeps its extension and puts the ellipsis right against it, with no space', () => {
-    expect(fitMiddle('reviewDecision.ts', 70, monospace)).toBe('reviewD…ts');
-    expect(fitMiddle('CountBadge.tsx', 70, monospace)).toBe('CountB…tsx');
+  test('keeps its end, so two names that differ only at the end still differ', () => {
+    expect(fitMiddle('quarterly-revenue-summary-v12-final.ts', 91, monospace)).toBe('…v12-final.ts');
+    expect(fitMiddle('quarterly-revenue-summary-v12-final-2.ts', 91, monospace)).toBe('…2-final-2.ts');
   });
 
-  test('never loses its end, however narrow', () => {
-    expect(fitMiddle('reviewDecision.ts', 10, monospace).endsWith('ts')).toBe(true);
+  test('cuts between whole characters: an emoji family is never split', () => {
+    const family = '👨‍👩‍👧‍👦';
+    const width = (text: string) => Array.from(new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(text)).length * 7;
+    expect(fitMiddle(`report-${family}${family}.md`, 49, width)).toBe(`…-${family}${family}.md`);
   });
 
   test('a name that fits is left whole', () => {

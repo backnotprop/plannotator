@@ -2,7 +2,7 @@ import React, { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncEx
 import { storage } from '@plannotator/ui/utils/storage';
 import { PaneDivider } from './PaneDivider';
 import { PanePanels } from './PanePanels';
-import { clampRatio } from './paneLayout';
+import { clampRatio, PANE_MIN_WIDTH } from './paneLayout';
 import { WorkspaceStore, type WorkspaceApi } from './workspaceStore';
 import { readSavedLayout, snapshotLayout, writeSavedLayout } from './layoutMemory';
 
@@ -101,7 +101,7 @@ export const ReviewWorkspace: React.FC<{
             data-active-pane-group={layout.activePane === index ? '' : undefined}
             aria-label={index === 0 ? 'Main pane' : 'Side pane'}
             className="min-w-0 min-h-0 flex flex-col"
-            style={two ? { flex: `${index === 0 ? ratio : 1 - ratio} 1 0` } : { flex: '1 1 0' }}
+            style={two ? { flex: `${index === 0 ? ratio : 1 - ratio} 1 0`, minWidth: `min(${PANE_MIN_WIDTH}px, 50%)` } : { flex: '1 1 0' }}
             onPointerDownCapture={() => store.focusPane(index)}
             onFocusCapture={() => store.focusPane(index)}
           >

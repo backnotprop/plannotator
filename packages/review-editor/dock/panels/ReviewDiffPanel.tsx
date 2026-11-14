@@ -13,6 +13,7 @@ import type { ChangedFileView } from '../../components/FileViewSwitch';
 import { usesPaneLayout } from '../../workspace/layoutEngine';
 import { paneFileView, type PaneFileViewParams } from '../../workspace/paneFileView';
 import { JumpCrumb } from '../../components/JumpCrumb';
+import { usePaneDiffStyle } from '../../workspace/paneContext';
 
 /**
  * Thin adapter between dockview's panel API and the existing DiffViewer.
@@ -47,6 +48,7 @@ export const ReviewDiffBody: React.FC<{
   onViewChange?: (view: ChangedFileView) => void;
 }> = ({ filePath, onKeep, view, onViewChange }) => {
   const state = useReviewState();
+  const paneDiffStyle = usePaneDiffStyle(state.diffStyle);
   const file = filePath
     ? state.files.find(candidate => candidate.path === filePath)
     : undefined;
@@ -176,7 +178,7 @@ export const ReviewDiffBody: React.FC<{
         prDiffScope={state.prDiffScope}
         isFocused={isFocusedFile}
         changeNavigation={isFocusedFile && state.isDiffPanelActive === true}
-        diffStyle={state.diffStyle}
+        diffStyle={paneDiffStyle}
         diffOverflow={state.diffOverflow}
         diffIndicators={state.diffIndicators}
         lineDiffType={state.lineDiffType}

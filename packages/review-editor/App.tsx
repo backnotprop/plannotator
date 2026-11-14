@@ -222,6 +222,7 @@ import {
   type ReviewFilePanelParams,
 } from './dock/reviewPanelTypes';
 import { useFileViews } from './hooks/useFileViews';
+import { useOneSidePanelWhenNarrow } from './hooks/useOneSidePanelWhenNarrow';
 import type { CodeFileAnnotationInput, CodeFileTokenTarget } from '@plannotator/ui/components/CodeFilePopout';
 import type { DiffFile, AnnotationScrollTarget } from './types';
 import { annotationMatchesPrScope, proseAnnotationMatchesPr } from './utils/annotationScope';
@@ -572,8 +573,10 @@ const ReviewApp: React.FC = () => {
   const openReviewSidebarTab = reviewSidebar.open;
   const { tab: referencesTab, show: showReferencesTab } = useReferencesTab(closeReviewSidebar);
   const [isFileTreeOpen, setIsFileTreeOpen] = useState(true);
+  const closeFileTree = useCallback(() => setIsFileTreeOpen(false), []);
   const [isCompactNavigatorOpen, setIsCompactNavigatorOpen] = useState(false);
   const isNavigatorOpen = isCompactTouchLayout ? isCompactNavigatorOpen : isFileTreeOpen;
+  useOneSidePanelWhenNarrow(isFileTreeOpen && !isCompactTouchLayout, reviewSidebar.isOpen && !isCompactTouchLayout, closeFileTree, closeReviewSidebar);
   const isCompactTransientSurfaceOpen = isCompactTouchLayout && (isCompactNavigatorOpen || reviewSidebar.isOpen);
   const toggleNavigator = useCallback(() => {
     if (isCompactTouchLayout) {

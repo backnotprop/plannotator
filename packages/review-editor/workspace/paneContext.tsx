@@ -1,4 +1,5 @@
-import React, { createContext, useContext, useSyncExternalStore } from 'react';
+import React, { createContext, useContext, useEffect, useState, useSyncExternalStore } from 'react';
+import { phoneDiffStyle } from '../utils/phoneLayout';
 import type { WorkspaceStore } from './workspaceStore';
 import { REVIEW_PANEL_TYPES } from '../dock/reviewPanelTypes';
 import { PaneTabRow } from './PaneTabRow';
@@ -31,4 +32,22 @@ export function usePaneTabsInHeader(): React.ReactNode {
 
 function noopSubscribe() {
   return () => {};
+}
+
+export const UNIFIED_PANE_WIDTH = 640;
+
+export function usePaneDiffStyle(saved: 'split' | 'unified'): 'split' | 'unified' {
+  const slot = useContext(PaneSlotContext);
+  const [narrow, setNarrow] = useState(false);
+  useEffect(() => {
+    const pane = slot?.store.paneElement(slot.paneIndex);
+    if (!pane) return;
+    const measure = () => setNarrow(pane.clientWidth > 0 && pane.clientWidth < UNIFIED_PANE_WIDTH);
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(pane);
+    return () => observer.disconnect();
+  }, [slot]);
+  return phoneDiffStyle(narrow, saved);
 }

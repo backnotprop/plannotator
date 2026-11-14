@@ -80,7 +80,7 @@ const DirectoryPrefix: React.FC<{ directory: string; room: number }> = ({ direct
     setShown(next);
   }, [directory, room]);
   return (
-    <span aria-hidden="true" className="relative flex-none -mr-1 whitespace-nowrap text-[13px] text-muted-foreground" data-pane-tab-directory="">
+    <span aria-hidden="true" className="relative flex-none -mr-1 whitespace-nowrap text-[13px] text-muted-foreground [font-variant-ligatures:no-contextual]" data-pane-tab-directory="">
       {shown}
       <span ref={probeRef} className="pointer-events-none invisible absolute left-0 top-0 whitespace-nowrap" />
     </span>
@@ -98,9 +98,7 @@ const TabIcon: React.FC<{ tab: PaneTab; onClick: () => void }> = ({ tab, onClick
   );
 };
 
-const TabTitle: React.FC<{ title: string; keepExtension: boolean }> = ({ title, keepExtension }) => (
-  <EllipsisName text={useSettledValue(title, TITLE_SETTLE_MS)} keepExtension={keepExtension} />
-);
+const TabTitle: React.FC<{ title: string }> = ({ title }) => <EllipsisName text={useSettledValue(title, TITLE_SETTLE_MS)} />;
 
 function focusTreeRow() {
   const row = document.querySelector<HTMLElement>('[data-review-sidebar] .file-tree-item.active') ?? document.querySelector<HTMLElement>('[data-review-sidebar] .file-tree-item');
@@ -189,11 +187,11 @@ export const PaneTabs: React.FC<{
                 event.preventDefault();
                 close(tab.id);
               }}
-              className={`h-full min-w-0 ${active ? 'max-w-[240px]' : 'max-w-[180px]'} flex items-center text-[13px] font-medium transition-colors outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary/60 rounded-sm ${
+              className={`h-full min-w-0 ${hidden.ids.size === 0 ? '' : active ? 'max-w-[240px]' : 'max-w-[180px]'} flex items-center text-[13px] font-medium transition-colors outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary/60 rounded-sm ${
                 active ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'
               } ${preview ? 'italic' : ''}`}
             >
-              <span className="min-w-0 flex"><TabTitle title={tabLabel(tab)} keepExtension={!isReferencesTab(tab)} /></span>
+              <span className="min-w-0 flex"><TabTitle title={tabLabel(tab)} /></span>
             </button>
             {closable && <button
               type="button"
@@ -201,7 +199,9 @@ export const PaneTabs: React.FC<{
               data-pane-tab-close={tab.id}
               tabIndex={-1}
               onClick={() => close(tab.id)}
-              className={`h-4 w-4 flex-none flex items-center justify-center rounded-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-opacity ${
+              data-pn-touch-target=""
+              data-pn-touch-target-icon=""
+              className={`h-6 w-6 -mx-1 flex-none flex items-center justify-center rounded-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-opacity ${
                 active ? 'opacity-70' : 'opacity-0 group-hover:opacity-70 [@media(hover:none)]:opacity-70 focus-visible:opacity-100'
               }`}
             >

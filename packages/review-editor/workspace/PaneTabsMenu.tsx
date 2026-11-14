@@ -30,7 +30,7 @@ export const PaneTabsMenu: React.FC<{
                   data-pane-tabs-menu-item={tab.id}
                   className={`flex-1 min-w-0 h-8 [@media(pointer:coarse)]:h-11 flex items-center px-2 rounded-md text-[13px] outline-none data-[highlighted]:bg-muted ${tab.id === pane.activeId ? 'font-medium text-foreground' : 'text-muted-foreground'}`}
                 >
-                  <span className="truncate">{tabLabel(tab)}</span>
+                  <span className="truncate [font-variant-ligatures:no-contextual]">{tabLabel(tab)}</span>
                 </Menu.Item>
                 {pane.tabs.length > 1 && isClosableTab(tab) && (
                   <button
