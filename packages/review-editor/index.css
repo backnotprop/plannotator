@@ -2502,7 +2502,7 @@ diffs-container {
   }
 }
 
-html:has([data-pn-compact-touch-layout='true']) :is(.review-sidebar .file-tree-item, .review-sidebar .review-folder-row, .review-sidebar .panel-section-heading) {
+html:has([data-pn-compact-touch-layout='true']) :is(.review-sidebar .file-tree-item, .review-sidebar .review-folder-row, .review-sidebar .panel-section-heading, .review-sidebar [data-nav-row]) {
   min-height: var(--pn-touch-target);
   height: var(--pn-touch-target);
 }
