@@ -28,13 +28,14 @@ export function inboxReturnFailedWords(dataDir: string): string {
   return `The Inbox could not start: its messages are in ${db}, they are safe, and nothing was changed. Free about ${mb} MB of disk, then run plannotator inbox again.`;
 }
 
-export function inboxReturnDelayFromEnv(env: Record<string, string | undefined>): ((name: InboxReturnStep) => void) | undefined {
-  const ms = env.PLANNOTATOR_TEST_SANDBOX ? Number(env.PLANNOTATOR_INBOX_RETURN_DELAY_MS) : 0;
-  if (!Number.isSafeInteger(ms) || ms <= 0) return undefined;
+export function inboxReturnHoldFromEnv(env: Record<string, string | undefined>): ((name: InboxReturnStep) => void) | undefined {
+  const release = env.PLANNOTATOR_TEST_SANDBOX ? env.PLANNOTATOR_INBOX_RETURN_HOLD?.trim() : undefined;
+  if (!release) return undefined;
   return (name) => {
     if (name !== "exported") return;
-    process.stderr.write(`Inbox: the way back held ${ms} ms in ${process.pid}\n`);
-    Bun.sleepSync(ms);
+    process.stderr.write(`Inbox: the way back held in ${process.pid}\n`);
+    const until = Date.now() + 120_000;
+    while (!existsSync(release) && Date.now() < until) Bun.sleepSync(20);
   };
 }
 
