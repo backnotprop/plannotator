@@ -60,10 +60,11 @@
     "README.md",
     "plannotator.html",
     "review-editor.html",
-    "diagram-engine/"
+    "diagram-engine/",
+    "sem-diff/"
   ],
   "scripts": {
-    "build": "cp ../hook/dist/index.html plannotator.html && cp ../hook/dist/review.html review-editor.html && rm -rf diagram-engine && cp -R ../hook/dist/diagram-engine diagram-engine && bash vendor.sh",
+    "build": "cp ../hook/dist/index.html plannotator.html && cp ../hook/dist/review.html review-editor.html && rm -rf diagram-engine && cp -R ../hook/dist/diagram-engine diagram-engine && rm -rf sem-diff && cp -R ../hook/dist/sem-diff sem-diff && bash vendor.sh",
     "prepublishOnly": "cd ../.. && bun run build:viewer-pin && bun run build:pi"
   },
   "dependencies": {

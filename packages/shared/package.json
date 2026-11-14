@@ -12,6 +12,7 @@
     "./file-browser-files": "./file-browser-files.ts",
     "./app-html": "./app-html.ts",
     "./diagram-engine-assets": "./diagram-engine-assets.ts",
+    "./sem-diff-assets": "./sem-diff-assets.ts",
     "./compress": "./compress.ts",
     "./crypto": "./crypto.ts",
     "./diff-paths": "./diff-paths.ts",

@@ -22,6 +22,12 @@ import {
   isDiagramEngineRequest,
   type DiagramEngineSource,
 } from "@plannotator/shared/diagram-engine-assets";
+import {
+  answerSemDiffRequest,
+  createSemDiffAssets,
+  isSemDiffRequest,
+  type SemDiffSource,
+} from "@plannotator/shared/sem-diff-assets";
 import { isRemoteSession, getServerHostname, startBunServerOnAvailablePort, buildAdvertisedUrl, getLocalUrlHostname } from "./remote";
 import { isSshTunnelRequest, notePeer } from "./this-machine";
 import { createRequestHostGuard } from "./request-host-guard";
@@ -268,6 +274,7 @@ export interface ReviewServerOptions {
    * null) the fences show as code. See @plannotator/shared/diagram-engine-assets.
    */
   diagramEngine?: DiagramEngineSource;
+  semDiff?: SemDiffSource;
   /** Origin identifier for UI customization */
   origin?: Origin;
   /** Current diff type being displayed */
@@ -1979,6 +1986,8 @@ export async function startReviewServer(
   // Hashed off the request path, so `/api/diff` finds it ready.
   const diagramEngineAssets = createDiagramEngineAssets(options.diagramEngine);
   diagramEngineAssets.warm();
+  const semDiffAssets = createSemDiffAssets(options.semDiff);
+  semDiffAssets.warm();
   const wslFlag = await isWSL();
   const gitUser = detectGitUser(workspace?.root ?? gitContext?.cwd);
 
@@ -2656,6 +2665,7 @@ export async function startReviewServer(
               repoFilesSupported,
               // Session-constant, read once by the page at mount.
               diagramEngine: await diagramEngineAssets.advert(),
+              semDiff: await semDiffAssets.advert(),
               ...sourceKindAdvert,
               // Mount is the only place the pin matters, so it rides /api/diff
               // alone (not the switch endpoints).
@@ -4626,6 +4636,17 @@ export async function startReviewServer(
           if (isDiagramEngineRequest(url.pathname)) {
             const answer = await answerDiagramEngineRequest(
               diagramEngineAssets,
+              url.pathname,
+              req.method,
+              req.headers.get("accept-encoding"),
+              compressAppHtml,
+            );
+            return new Response(answer.body as BodyInit, { status: answer.status, headers: answer.headers });
+          }
+
+          if (isSemDiffRequest(url.pathname)) {
+            const answer = await answerSemDiffRequest(
+              semDiffAssets,
               url.pathname,
               req.method,
               req.headers.get("accept-encoding"),

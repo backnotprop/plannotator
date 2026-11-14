@@ -377,6 +377,7 @@
         "@pierre/diffs": "1.7.0-beta.3",
         "@plannotator/core": "workspace:*",
         "@plannotator/guide-viewer": "workspace:*",
+        "@plannotator/sem-diff": "workspace:*",
         "@plannotator/shared": "workspace:*",
         "@plannotator/ui": "workspace:*",
         "lucide-react": "^1.59.0",

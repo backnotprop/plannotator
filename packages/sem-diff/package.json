@@ -7,7 +7,9 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./opinions": "./src/opinions.ts"
+    "./opinions": "./src/opinions.ts",
+    "./summary": "./src/summary.ts",
+    "./languages": "./src/languages.ts"
   },
   "scripts": {
     "test": "bun test test/",

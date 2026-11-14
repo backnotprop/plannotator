@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build && bun diagram-engine/build.ts",
+    "build": "vite build && bun diagram-engine/build.ts && bun ../../packages/sem-diff/scripts/copy-wasm.ts dist/sem-diff",
     "serve": "bun run server/index.ts"
   },
   "dependencies": {
