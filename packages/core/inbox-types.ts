@@ -3430,6 +3430,11 @@ export interface InboxAgent {
   started_at: string | null;
   /** When this Inbox last heard from it (a poll, a state change, an Inbox tool call, its latest message); null when never. */
   last_seen_at: string | null;
+  /** Its model id (`claude-opus-5-5`) and latest request's effort (`low` to `max`), as its connection last said (live only). Additive. */
+  model?: string;
+  effort?: string;
+  /** How full its context window is, 0 to 100, as its connection last said (live only). Absent when not said. Additive. */
+  context?: number;
 }
 
 /** The most agents a list names per machine; `total` says how many there are past that. */

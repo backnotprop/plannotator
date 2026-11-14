@@ -103,7 +103,10 @@ import {
   claudeTranscriptPaths,
   conversationResumed,
   discoverInboxTools,
+  engineAtLeast,
   engineHasSessionAppend,
+  effortLevelOf,
+  SESSION_USAGE_MIN_ENGINE,
   inboxFirstPromptContext,
   inboxRegistryPathOf,
   inboxReminderEnvValue,
@@ -195,6 +198,26 @@ function readEngineVersion($: Engine): Promise<string | null> {
     }
   })()
   return engineVersion
+}
+
+/** The main loop's model id, as `/model` shows it; null when the engine does not say. */
+async function readModel($: Engine): Promise<string | null> {
+  const model = await $.session.model()
+  return typeof model === 'string' && model ? model : null
+}
+
+/** The main loop's latest request's effort (`turn.step`): the engine has no call that reads it. */
+let mainEffort: string | null = null
+
+/**
+ * How full the context window is, as the status line has it (`$.session.usage()`'s `context.percent`, free to
+ * read), on an engine that has the call (SESSION_USAGE_MIN_ENGINE); null otherwise or before a first response.
+ */
+async function readContextPercent($: Engine): Promise<number | null> {
+  if (!engineAtLeast(await readEngineVersion($), SESSION_USAGE_MIN_ENGINE)) return null
+  const usage = await $.session.usage()
+  const percent = usage?.context?.percent
+  return typeof percent === 'number' && Number.isFinite(percent) ? Math.min(100, Math.max(0, Math.round(percent))) : null
 }
 
 /** Every closure over `$` the logic uses. `debugPath` set: lines go to that file. */
@@ -584,6 +607,9 @@ async function currentMod($: Engine, options: { healed?: boolean } = {}): Promis
       root: async () => String(await $.session.root()),
       label: async () => (await title.read().catch(() => null)) ?? sessionNameOf($, String(sessionId)),
       title: () => title.generatedTitle() ?? '',
+      model: () => readModel($),
+      effort: () => mainEffort,
+      contextPercent: () => readContextPercent($),
       continues: async () => [...new Set([...(await forkedFrom.read()), ...(await continuedIn.read())])],
       ...(inboxTools ? { inboxTools } : {}),
       ...(options.healed ? { healed: true } : {}),
@@ -1207,7 +1233,10 @@ export function register(on: On) {
   })
 
   on('turn.step', async function* ($: Engine, e: any, next: Next) {
-    if (!e.agentId) await plainReminderAgain($)
+    if (!e.agentId) {
+      mainEffort = effortLevelOf(e.effort)
+      await plainReminderAgain($)
+    }
     const instance = allowed ? mod : null
     // A main-loop model request is going out: a reply Send now put into the turn is in it (inbox.ts).
     if (instance && !instance.isDisposed && !e.agentId && typeof e.turnId === 'string') instance.onMainStep(e.turnId)
