@@ -231,7 +231,7 @@ export function SemanticDiffsTab() {
                   'Checking…'
                 ) : saved ? (
                   <>
-                    Kept by this computer, never shown again ·{' '}
+                    Kept on this computer ·{' '}
                     <button type="button" className="underline-offset-2 hover:text-foreground hover:underline" onClick={() => void remove()}>Remove</button>
                   </>
                 ) : (
@@ -240,7 +240,7 @@ export function SemanticDiffsTab() {
               }
             >
               <form
-                className="flex w-[340px] flex-col gap-1"
+                className={`flex flex-col gap-1 ${provider === 'jev' ? 'w-[280px]' : 'w-[340px]'}`}
                 data-power-up-key-set={saved ? '' : undefined}
                 onSubmit={(e) => {
                   e.preventDefault();
@@ -297,10 +297,10 @@ export function SemanticDiffsTab() {
                     <button
                       type="submit"
                       className="h-7 shrink-0 whitespace-nowrap rounded-md px-2 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
-                      disabled={check.kind === 'checking' || (saved && check.kind === 'ok')}
+                      disabled={check.kind === 'checking' || (saved && !complete)}
                       data-power-up-key-save=""
                     >
-                      {check.kind === 'checking' ? 'Checking…' : saved && check.kind === 'ok' ? 'Saved' : 'Check and save'}
+                      {check.kind === 'checking' ? 'Checking…' : saved && !complete ? 'Saved' : 'Check and save'}
                     </button>
                   </span>
                 </span>
