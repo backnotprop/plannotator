@@ -307,7 +307,6 @@ diffs-container {
   color: var(--semantic-moved);
 }
 
-.semantic-diff-symbol-modified,
 .semantic-diff-symbol-renamed {
   color: var(--semantic-edited);
 }
