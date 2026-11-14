@@ -155,7 +155,8 @@ import { ReviewSidebar } from './components/ReviewSidebar';
 import type { ReviewSidebarTab } from './components/ReviewSidebar';
 import { useSidebar } from '@plannotator/ui/hooks/useSidebar';
 import { useViewportEnvironment } from '@plannotator/ui/hooks/useViewportEnvironment';
-import { useCompactTouchLayout } from '@plannotator/ui/hooks/useIsMobile';
+import { opensNavigatorOnLoad, phoneDiffStyle } from './utils/phoneLayout';
+import { CompactLayoutQueryProvider, PHONE_REVIEW_LAYOUT_MEDIA_QUERY, useCompactTouchLayout } from '@plannotator/ui/hooks/useIsMobile';
 import { FileTree } from './components/FileTree';
 import { StackedPRLabel } from './components/StackedPRLabel';
 import { PRSelector } from './components/PRSelector';
@@ -444,7 +445,7 @@ const ReviewApp: React.FC = () => {
   // A plain-text paste into our text fields is inserted by the page: Chrome 155-156 on macOS drops
   // dictated (synthetic ⌘V) text otherwise. Remove once Chrome 157 is stable (pasteInsert.ts).
   useEffect(() => installPlainTextPaste(), []);
-  const isCompactTouchLayout = useCompactTouchLayout();
+  const isCompactTouchLayout = useCompactTouchLayout(PHONE_REVIEW_LAYOUT_MEDIA_QUERY);
   const { resolvedMode } = useTheme();
   const [diffData, setDiffData] = useState<DiffData | null>(null);
   const [files, setFiles] = useState<DiffFile[]>([]);
@@ -524,13 +525,9 @@ const ReviewApp: React.FC = () => {
   const [showNoAnnotationsDialog, setShowNoAnnotationsDialog] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const diffStyle = useConfigValue('diffStyle');
-  const [compactDiffStyle, setCompactDiffStyle] = useState<'split' | 'unified'>('unified');
-  const effectiveDiffStyle = isCompactTouchLayout ? compactDiffStyle : diffStyle;
+  const effectiveDiffStyle = phoneDiffStyle(isCompactTouchLayout, diffStyle);
   const handleDiffStyleChange = useCallback((style: 'split' | 'unified') => {
-    if (isCompactTouchLayout) {
-      setCompactDiffStyle(style);
-      return;
-    }
+    if (isCompactTouchLayout) return;
     configStore.set('diffStyle', style);
   }, [isCompactTouchLayout]);
   const diffOverflow = useConfigValue('diffOverflow');
@@ -810,6 +807,12 @@ const ReviewApp: React.FC = () => {
     snapshotId, contextKey: JSON.stringify([prMetadata?.url, committedBase]),
     enabled: !!origin, setViewedFiles, setSuppressedFiles: setAutoViewSuppressed,
   });
+  const navigatorOpenedOnLoad = useRef(false);
+  useEffect(() => {
+    if (navigatorOpenedOnLoad.current || isLoading || files.length === 0 || reviewProgressStatus === 'loading') return;
+    navigatorOpenedOnLoad.current = true;
+    if (opensNavigatorOnLoad(isCompactTouchLayout, viewedFiles.size)) setIsCompactNavigatorOpen(true);
+  }, [isLoading, files.length, reviewProgressStatus, isCompactTouchLayout, viewedFiles.size]);
   const reviewHistoryContext = snapshotId ?? prMetadata?.url ?? diffData?.gitRef ?? 'loading';
   const applyReviewHistory = useCallback((action: ReviewHistoryAction, direction: HistoryDirection) => {
     switch (action.kind) {
@@ -5559,6 +5562,7 @@ const ReviewApp: React.FC = () => {
   }
 
   return (
+    <CompactLayoutQueryProvider value={PHONE_REVIEW_LAYOUT_MEDIA_QUERY}>
     <ThemeProvider defaultTheme="dark" manageFavicon>
       <TooltipProvider>
       <ReviewStateProvider value={reviewStateValue}>
@@ -5690,6 +5694,15 @@ const ReviewApp: React.FC = () => {
             </div>
             {!guideVisible && <div ref={setPaneTabsSlot} data-pane-tabs-slot="" className={isCompactTouchLayout ? 'min-w-0 flex-1 self-stretch flex items-center justify-center empty:hidden' : 'min-w-0 flex-1 self-stretch flex items-stretch empty:hidden'} />}
             {isCompactTouchLayout && !guideVisible && <CompactPrimaryAction action={compactPrimaryAction(compactReviewActions)} />}
+            {isCompactTouchLayout && !guideVisible && (
+              <ReviewPanelToggle
+                touch
+                isOpen={reviewSidebar.isOpen}
+                commentCount={totalAnnotationCount}
+                attention={(aiMessages.length > 0 && !(reviewSidebar.isOpen && reviewSidebar.activeTab === 'ai')) || agentJobs.jobs.some(j => j.status === 'running' || j.status === 'starting')}
+                onToggle={() => reviewSidebar.isOpen ? reviewSidebar.close() : reviewSidebar.open()}
+              />
+            )}
             </div>
           </div>
 
@@ -6517,6 +6530,7 @@ const ReviewApp: React.FC = () => {
     </ReviewStateProvider>
     </TooltipProvider>
     </ThemeProvider>
+    </CompactLayoutQueryProvider>
   );
 };
 

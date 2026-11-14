@@ -124,7 +124,7 @@ describe.if(hasDom)('FileHeader edit affordance (DOM)', () => {
     expect(el.querySelector('[data-testid="edit-session-cancel"]')).toBeNull();
   });
 
-  test('compact touch header keeps the file identity and removes desktop-only file actions', async () => {
+  test('compact touch header keeps the file identity, Viewed, and one menu that holds the other file actions', async () => {
     const longPath = 'packages/review-editor/components/ExtremelyDescriptiveMobileFilename.tsx';
     const el = await mount(
       <FileHeader
@@ -148,8 +148,17 @@ describe.if(hasDom)('FileHeader edit affordance (DOM)', () => {
     expect(compactPath?.className).toContain('[direction:rtl]');
     expect(header.textContent).toContain('+1');
     expect(header.textContent).toContain('−1');
-    expect(Array.from(header.querySelectorAll('button')).map((button) => button.getAttribute('aria-label'))).toEqual(['Collapse diff']);
+    expect(Array.from(header.querySelectorAll('button')).map((button) => button.getAttribute('aria-label'))).toEqual(['Collapse diff', 'Mark as viewed', 'File actions']);
     expect(header.querySelector('[data-testid="edit-session-start"]')).toBeNull();
+    const more = header.querySelector<HTMLButtonElement>('button[aria-label="File actions"]')!;
+    await act(async () => {
+      more.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerType: 'mouse' }));
+      more.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
+      more.click();
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    const items = Array.from(document.querySelectorAll('[role="menuitem"]')).map((item) => item.textContent?.trim());
+    expect(items).toEqual(expect.arrayContaining(['Comment on this file', 'Stage this file (git add)', 'Edit to suggest a change', 'Copy path', 'Copy file diff']));
   });
 });
 

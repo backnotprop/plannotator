@@ -6,6 +6,7 @@ import { CallFlowFileBadge } from './CallFlowFileBadge';
 import { OpenInAppButton } from '@plannotator/ui/components/OpenInAppButton';
 import { useReviewStateOptional } from '../dock/ReviewStateContext';
 import { useRovingToolbar } from '../hooks/useRovingToolbar';
+import { CompactFileActions } from './CompactFileActions';
 import type { DiffFileStatus } from '../types';
 import { FileKindIcon } from '@plannotator/guide-viewer/FileKindIcon';
 import { fileStatusLetter } from '@plannotator/ui/utils/fileStatusLetter';
@@ -368,7 +369,20 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
           }
         />}
       </div>}
-      {isCompactTouchLayout && renderMarkdownView?.({ iconOnly: false, touch: true })}
+      {isCompactTouchLayout && (readOnly ? renderMarkdownView?.({ iconOnly: false, touch: true }) : (
+        <CompactFileActions
+          filePath={filePath}
+          patch={patch}
+          canOpen={state?.canUseLiveWorkspaceActions !== false && !(state?.prMetadata && !state?.agentCwd) && status !== 'deleted'}
+          base={state?.agentCwd ?? null}
+          markdownView={renderMarkdownView?.({ iconOnly: true, touch: true })}
+          viewSwitch={accessory}
+          viewed={showViewedControl && onToggleViewed ? { isViewed, onToggle: onToggleViewed } : null}
+          onComment={onFileComment ? () => headerRef.current && onFileComment(headerRef.current) : undefined}
+          stage={showStageControl && canStage && onStage ? { isStaged, isStaging, onStage } : null}
+          onEdit={onEditFile && !isEditing && !editDisabledReason ? onEditFile : undefined}
+        />
+      ))}
     </div>
   );
 };
