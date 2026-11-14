@@ -270,6 +270,14 @@ diffs-container {
   outline-offset: 2px;
 }
 
+.semantic-diff-row:has(> .semantic-diff-kind:empty) {
+  grid-template-columns: 2ch minmax(0, 1fr) max-content;
+}
+
+.semantic-diff-kind:empty {
+  display: none;
+}
+
 @media (hover: hover) {
   .semantic-diff-row:hover,
   .semantic-diff-retry:hover {
@@ -293,11 +301,28 @@ diffs-container {
   color: var(--destructive);
 }
 
-.semantic-diff-symbol-modified,
-.semantic-diff-symbol-renamed,
 .semantic-diff-symbol-moved,
 .semantic-diff-symbol-reordered {
-  color: var(--primary);
+  color: #69b1ff;
+}
+
+.light .semantic-diff-symbol-moved,
+.light .semantic-diff-symbol-reordered {
+  color: #009fff;
+}
+
+.semantic-diff-symbol-modified,
+.semantic-diff-symbol-renamed {
+  color: #bf91f3;
+}
+
+.light .semantic-diff-symbol-modified,
+.light .semantic-diff-symbol-renamed {
+  color: #9954d8;
+}
+
+.semantic-diff-symbol-reformatted {
+  color: var(--muted-foreground);
 }
 
 .semantic-diff-kind,

@@ -11,6 +11,8 @@ import { createRoot, type Root } from 'react-dom/client';
 import type { SemanticDiffChange } from '@plannotator/shared/semantic-diff-types';
 import { SemanticDiffRows } from './semanticDiffShared';
 import { createReviewFileSourceLoader } from '../../hooks/useReviewFileSource';
+import { semanticDiffFile } from '@plannotator/sem-diff';
+import { semDiffChanges } from '../../semDiff/semDiffChanges';
 
 const hasDom = typeof document !== 'undefined';
 let host: HTMLDivElement | null = null;
@@ -110,5 +112,47 @@ describe('Semantic Changes source preview', () => {
     await hoverRow('checkout');
     await act(async () => { await wait(250); });
     expect(document.querySelector('[data-code-snippet-preview]')).toBeNull();
+  });
+  test.skipIf(!hasDom)('an entry from the built-in engine previews where the moved code went', async () => {
+    const before = `export function load(id: string) {\n  return db.find(id);\n}\n\nexport function save(user: User) {\n  db.put(user.id, user);\n  return user;\n}\n`;
+    const after = `export function save(user: User) {\n  db.put(user.id, user);\n  return user;\n}\n\nexport function load(id: string) {\n  return db.find(id);\n}\n`;
+    const result = await semanticDiffFile('typescript', before, after, 'src/users.ts');
+    const changes = semDiffChanges('src/users.ts', result.semanticOperations, before, after);
+    const moved = changes.find((c) => c.changeType === 'moved')!;
+    expect(moved).toBeDefined();
+    const fetchImpl = (async () => new Response(JSON.stringify({ oldContent: before, newContent: after }), { status: 200 })) as unknown as typeof fetch;
+    const loadSource = createReviewFileSourceLoader({ files: [{ path: 'src/users.ts' }], fetchImpl });
+    await mount(<SemanticDiffRows changes={[moved]} binaryChanges={[]} onOpenChange={() => {}} onOpenBinary={() => {}} loadSource={loadSource} />);
+    await hoverRow(moved.entityName);
+    await act(async () => { await wait(250); });
+    const preview = document.querySelector('[data-code-snippet-preview="src/users.ts"]');
+    expect(preview).not.toBeNull();
+    const shown = after.split('\n')[(moved.startLine ?? 1) - 1]!;
+    expect(preview!.textContent).toContain(shown.trim());
+  });
+  test.skipIf(!hasDom)('a click on a preview line shows that line in the diff; Open file opens the whole file there', async () => {
+    const loadSource = createReviewFileSourceLoader({ files: [{ path: 'src/checkout.ts' }], fetchImpl: fakeFileContent([]) });
+    const lines: Array<[string, number, string]> = [];
+    const files: Array<[string, number]> = [];
+    await mount(
+      <SemanticDiffRows
+        changes={[change({})]}
+        binaryChanges={[]}
+        onOpenChange={() => {}}
+        onOpenBinary={() => {}}
+        loadSource={loadSource}
+        onOpenLine={(path, line, side) => lines.push([path, line, side])}
+        onOpenFile={(path, line) => files.push([path, line])}
+      />,
+    );
+    await hoverRow('checkout');
+    await act(async () => { await wait(250); });
+    const row = document.querySelector<HTMLTableRowElement>('[data-snippet-line="5"]')!;
+    await act(async () => row.click());
+    expect(lines).toEqual([['src/checkout.ts', 5, 'additions']]);
+    await hoverRow('checkout');
+    await act(async () => { await wait(250); });
+    await act(async () => document.querySelector<HTMLButtonElement>('[data-snippet-open-file]')!.click());
+    expect(files).toEqual([['src/checkout.ts', 4]]);
   });
 });

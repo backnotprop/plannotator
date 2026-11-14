@@ -308,6 +308,7 @@ const shapeHtmlGzip = () => (shapeHtmlGz ??= readFileSync(shapeHtmlGzPath as unk
 
 // Code review's diagram engine: embedded too, read on first need.
 import { loadEmbeddedDiagramEngine } from "./diagram-engine";
+import { loadEmbeddedSemDiff } from "./sem-diff";
 
 // The optional T3 Code hook (`t3-hook` with no arguments) runs on EVERY Bash
 // call of a Claude session that loads it. Only an Agent SDK session can be a
@@ -1737,6 +1738,7 @@ if (args[0] === "sessions") {
     approvalNotesSupported: supportsReviewApprovalNotes(detectedOrigin),
     htmlContent: reviewHtmlContent(),
     diagramEngine: loadEmbeddedDiagramEngine,
+    semDiff: loadEmbeddedSemDiff,
     tailnetPublished: tailscaleFlag,
     onCleanup: worktreeCleanup,
     onReady: async (url, isRemote, port) => {
@@ -2793,6 +2795,7 @@ if (args[0] === "sessions") {
       supportsReviewApprovalNotes("opencode") && input.supportsApprovalNotes === true,
     htmlContent: reviewHtmlContent(),
     diagramEngine: loadEmbeddedDiagramEngine,
+    semDiff: loadEmbeddedSemDiff,
     opencodeClient: makeOpenCodeBridgeClient(input.agents),
     onReady: (url, isRemote, port) => {
       handleReviewServerReady(url, isRemote, port);

@@ -289,7 +289,7 @@ describe.if(hasDom)('DiffViewer full-content swap (DOM)', () => {
     const instance = new PierreFileDiff({ expandUnchanged: true });
     try {
       instance.render({ fileDiff: getSingularPatch(PATCH), fileContainer: document.createElement('diffs-container') });
-      await expect(instance.prepareForEditing()).rejects.toThrow('a partial diff requires loadDiffFiles');
+      await expect(instance.prepareForEditing()).rejects.toThrow('the diff is not ready to edit');
     } finally {
       instance.cleanUp();
     }

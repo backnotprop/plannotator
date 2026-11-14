@@ -60,15 +60,16 @@
     "README.md",
     "plannotator.html",
     "review-editor.html",
-    "diagram-engine/"
+    "diagram-engine/",
+    "sem-diff/"
   ],
   "scripts": {
-    "build": "cp ../hook/dist/index.html plannotator.html && cp ../hook/dist/review.html review-editor.html && rm -rf diagram-engine && cp -R ../hook/dist/diagram-engine diagram-engine && bash vendor.sh",
+    "build": "cp ../hook/dist/index.html plannotator.html && cp ../hook/dist/review.html review-editor.html && rm -rf diagram-engine && cp -R ../hook/dist/diagram-engine diagram-engine && rm -rf sem-diff && cp -R ../hook/dist/sem-diff sem-diff && bash vendor.sh",
     "prepublishOnly": "cd ../.. && bun run build:viewer-pin && bun run build:pi"
   },
   "dependencies": {
     "@joplin/turndown-plugin-gfm": "^1.0.68",
-    "@pierre/diffs": "1.6.4",
+    "@pierre/diffs": "1.7.0-beta.3",
     "@plannotator/webtui": "0.1.0",
     "chokidar": "^5.0.0",
     "diff": "^8.0.4",

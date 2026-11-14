@@ -5,6 +5,7 @@ import type {
   SemanticDiffResponse,
 } from '@plannotator/shared/semantic-diff-types';
 import { isOrphanChange } from '../dock/panels/semanticDiffShared';
+import { hasSemanticDiffSource, loadReviewSemanticDiff } from '../semDiff/semanticDiffSource';
 
 /**
  * Single shared fetch of the semantic diff, cached by the active patch so every
@@ -26,10 +27,13 @@ const RETRY_DELAYS_MS = [5_000, 15_000, 30_000];
 // stampede whenever sem was erroring.
 const FAILURE_RETRY_COOLDOWN_MS = 60_000;
 
-async function fetchSemanticDiff(): Promise<SemanticDiffResponse> {
-  const res = await fetch('/api/semantic-diff');
-  if (!res.ok) throw new Error('Semantic diff failed');
-  return res.json() as Promise<SemanticDiffResponse>;
+function fetchSemanticDiff(): Promise<SemanticDiffResponse> {
+  return loadReviewSemanticDiff();
+}
+
+export function resetSemanticDiffCache(): void {
+  cacheKey = null;
+  cachePromise = null;
 }
 
 function loadSemanticDiff(rawPatch: string): Promise<SemanticDiffResponse> {
@@ -127,7 +131,7 @@ const NO_CHANGES: readonly SemanticDiffChange[] = [];
 export function useSemanticDiffChanges(rawPatch: string, enabled: boolean): readonly SemanticDiffChange[] {
   const [changes, setChanges] = useState<readonly SemanticDiffChange[]>(NO_CHANGES);
   useEffect(() => {
-    if (!enabled) {
+    if (!enabled || hasSemanticDiffSource()) {
       setChanges(NO_CHANGES);
       return;
     }

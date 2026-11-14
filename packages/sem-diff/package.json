@@ -1,0 +1,30 @@
+{
+  "name": "@plannotator/sem-diff",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Semantic diff for code review: tells moved, renamed, reformatted, extracted and inlined code apart from real edits. Produces the semanticOperations and semanticFolds that the semantic build of @pierre/diffs draws.",
+  "license": "MIT OR Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./opinions": "./src/opinions.ts",
+    "./summary": "./src/summary.ts",
+    "./languages": "./src/languages.ts"
+  },
+  "scripts": {
+    "test": "bun test test/",
+    "typecheck": "tsc --noEmit -p .",
+    "pierre-drift": "bun scripts/pierre-drift.ts"
+  },
+  "dependencies": {
+    "@vscode/diff": "^0.0.2-133",
+    "diff": "^8.0.4",
+    "tree-sitter-c-sharp": "^0.23.5",
+    "tree-sitter-go": "^0.25.0",
+    "tree-sitter-java": "^0.23.5",
+    "tree-sitter-python": "^0.25.0",
+    "tree-sitter-rust": "^0.24.0",
+    "tree-sitter-typescript": "^0.23.2",
+    "web-tree-sitter": "^0.27.1"
+  }
+}

@@ -63,6 +63,8 @@ export interface CodeSnippetPreviewProps {
   sheet?: boolean;
   /** The window's element, for a host that moves focus into `actions`. */
   windowRef?: React.Ref<HTMLDivElement>;
+  /** Makes each code row a button: clicking it answers the row's one-based line. Absent: read-only rows. */
+  onLineClick?: (line: number) => void;
 }
 
 export const CodeSnippetPreview: React.FC<CodeSnippetPreviewProps> = ({
@@ -80,6 +82,7 @@ export const CodeSnippetPreview: React.FC<CodeSnippetPreviewProps> = ({
   container,
   sheet = false,
   windowRef: hostWindowRef,
+  onLineClick,
 }) => {
   const allLines = contents.split('\n');
   const targetStart = Math.max(0, line - 1);
@@ -191,8 +194,13 @@ export const CodeSnippetPreview: React.FC<CodeSnippetPreviewProps> = ({
               return (
                 <tr
                   key={index}
-                  className={target ? 'bg-primary/15' : 'hover:bg-white/5'}
+                  className={`${target ? 'bg-primary/15' : 'hover:bg-white/5'}${onLineClick ? ' cursor-pointer' : ''}`}
                   data-target-line={target ? 'true' : undefined}
+                  data-snippet-line={index + 1}
+                  onClick={onLineClick ? () => {
+                    if (window.getSelection()?.toString()) return;
+                    onLineClick(index + 1);
+                  } : undefined}
                 >
                   <td className={`select-none text-right pr-3 pl-3 py-0 align-top font-mono w-8 whitespace-nowrap ${target ? 'text-primary' : 'text-muted-foreground/40'}`} style={{ userSelect: 'none' }}>{index + 1}</td>
                   <td
