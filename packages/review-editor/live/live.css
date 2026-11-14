@@ -23,3 +23,7 @@
 .live-mk .ib-hermes { --ib-hermes-mask: var(--ib-hermes-dark); }
 .light .live-mk .ib-hermes { --ib-hermes-mask: var(--ib-hermes-light); }
 .live-mk-big { margin: -2px 0; }
+.live-body > div { line-height: 20px; }
+.live-body pre { white-space: pre; }
+.live-body table { width: max-content; min-width: 100%; }
+.live-body :is(th, td) { white-space: nowrap; }
