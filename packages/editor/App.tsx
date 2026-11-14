@@ -11,6 +11,7 @@
 // or reorder any of these lines.
 import '@plannotator/ui/utils/math-eager';
 import '@plannotator/ui/utils/identity-tater';
+import '@plannotator/ui/utils/tater-sprites-eager';
 import React, { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from 'react';
 import { shouldPrintOnKey } from './printShortcut';
 import { toast, Toaster } from 'sonner';
