@@ -59,7 +59,8 @@ export type InboxDeliveryReason =
   | "away"
   | "next_turn"
   | "ack_pending"
-  | "stopped";
+  | "stopped"
+  | "handed";
 
 /** How the session the item goes to is connected now: the fields the rule reads. */
 export interface InboxDeliveryConnection {
@@ -79,6 +80,7 @@ export interface InboxDeliveryInput {
   undelivered: boolean;
   /** Its session's connection took it and stopped while delivering it: that session never gets it. Absent: no. */
   stuck?: boolean;
+  handed?: boolean;
   /** The session that asked has ended (a reply). */
   askerEnded: boolean;
   /** The session it goes to is woken by its connection. */
@@ -140,6 +142,7 @@ export function inboxDeliveryState(input: InboxDeliveryInput): InboxDeliveryDeci
   if (input.delivered) return { state: "delivered", reason: "delivered", ...no, ...auto, ...(marked && input.intoTurn === false ? { turnEnded: true } : {}) };
   if (input.stuck) return { state: "undelivered", reason: "stuck", ...no };
   if (input.undelivered) return { state: "undelivered", reason: "undelivered", ...no };
+  if (input.handed) return { state: "queued", reason: "handed", ...no };
   if (input.askerEnded) return { state: "saved", reason: "ended", ...no };
   if (!input.wakes || input.connection?.polls === true) return { state: "saved", reason: "reads", ...no };
   const connection = input.connection;
