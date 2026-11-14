@@ -14,6 +14,7 @@ import { buildCodeNavRequest } from '../utils/buildCodeNavRequest';
 import { ToolbarHost, type ToolbarHostHandle } from './ToolbarHost';
 import { OverlayScrollArea } from '@plannotator/ui/components/OverlayScrollArea';
 import { useOverlayViewport } from '@plannotator/ui/hooks/useOverlayViewport';
+import { FileMinimap } from './minimap/FileMinimap';
 import { FileHeader } from './FileHeader';
 // Lazy: the rendered views bring the text highlighter (which needs a DOM at
 // import), so it loads the first time a file is shown as Changes or Read.
@@ -411,6 +412,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   // is state so effects re-run once the library has mounted the viewport.
   const { ref: containerRef, viewport, onViewportReady } =
     useOverlayViewport<HTMLDivElement>();
+  const [minimapShown, setMinimapShown] = useState(false);
   const splitSurfaceRef = useRef<HTMLDivElement>(null);
   const diffContentRef = useRef<HTMLDivElement>(null);
   const selectionSnapshotRef = useRef<DiffSelectionSnapshot | null>(null);
@@ -1093,8 +1095,9 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
     return lineRangeForAnnotation(ann);
   }, [selectedAnnotationId, annotations]);
 
+  const minimapOn = !collapsed && !bodyOverride && !markdownPreviewEnabled && !compactTouchLayout;
   return (
-    <div className="h-full flex flex-col">
+    <div className="relative h-full flex flex-col">
       <FileHeader
         filePath={filePath}
         patch={patch}
@@ -1145,7 +1148,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
         <div className="flex-1 min-h-0 relative flex flex-col" data-diff-body-override>{bodyOverride}</div>
       ) : !collapsed && (
         <OverlayScrollArea
-          className={`flex-1 min-h-0 relative ${isDraggingSplit ? 'select-none' : ''}`}
+          className={`flex-1 min-h-0 relative ${minimapOn && minimapShown ? 'mr-3' : ''} ${isDraggingSplit ? 'select-none' : ''}`}
           overflowX="scroll"
           overflowY="auto"
           onViewportReady={onViewportReady}
@@ -1276,6 +1279,19 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
         </OverlayScrollArea>
       )}
       {!collapsed && !bodyOverride && !markdownPreviewEnabled && diffOverflow !== 'wrap' && <DiffBottomBar root={viewport} />}
+      {minimapOn && (
+        <FileMinimap
+          viewport={viewport}
+          content={diffContentRef.current}
+          filePath={filePath}
+          patch={patch}
+          viewed={isViewed === true}
+          annotations={annotations}
+          split={diffStyle === 'split'}
+          expandUnchanged={expandUnchanged === true}
+          onShownChange={setMinimapShown}
+        />
+      )}
 
       {/* The header's Comment button works in every view (diff, preview,
           collapsed), so its composer is mounted outside them. */}

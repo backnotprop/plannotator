@@ -85,6 +85,7 @@ export const ReviewDockRightActions: React.FC<ReviewDiffControlsProps> = (props)
       <DiffLayoutToggle value={diffStyle} onChange={setDiffStyle} className={ICON_BUTTON} />
       <DiffDisplayOptionsPopover
         actions={collapseAction}
+        minimapOption
         triggerClassName={`${ICON_BUTTON} data-popup-open:bg-muted data-popup-open:text-foreground`}
       />
     </div>

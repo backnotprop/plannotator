@@ -705,6 +705,17 @@ export const SETTINGS = {
     },
     toServer: (v: DiffLineBgIntensity) => ({ diffOptions: { lineBgIntensity: v } }),
   },
+  diffMinimap: {
+    defaultValue: true as boolean,
+    fromCookie: () => {
+      const v = storage.getItem('plannotator-diff-minimap');
+      return v === 'true' ? true : v === 'false' ? false : undefined;
+    },
+    toCookie: (v: boolean) => storage.setItem('plannotator-diff-minimap', String(v)),
+    serverKey: undefined,
+    fromServer: undefined,
+    toServer: undefined,
+  },
   /** Experimental: author suggestions by editing code in place in the review
    *  all-files view. Cookie-only (no server sync) while the feature is
    *  experimental — default OFF, and when off no edit UI renders and no
