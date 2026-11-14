@@ -12294,12 +12294,12 @@ button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(-
 }
 /* A review comment's lines (live review threads): where, then the code as it read. */
 .ib-ranchor { margin: 0 0 6px; font-size: var(--ib-fs-13, 13px); line-height: 1.5; }
-.ib-ranchor-where { display: flex; gap: 6px; min-width: 0; color: var(--muted-foreground); font-family: var(--font-mono, ui-monospace, monospace); font-size: 12px; overflow-wrap: anywhere; }
+.ib-ranchor-where { display: flex; gap: 6px; min-width: 0; color: var(--muted-foreground); font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--ib-fs-12, 12px); overflow-wrap: anywhere; }
 .ib-ranchor-state { white-space: nowrap; font-family: inherit; }
-.ib-ranchor-code { margin: 4px 0 0; padding: 6px 8px; overflow-x: auto; border: 1px solid var(--border); border-radius: 6px; background: var(--muted); color: var(--foreground); font-family: var(--font-mono, ui-monospace, monospace); font-size: 12px; line-height: 1.6; white-space: pre; }
+.ib-ranchor-code { margin: 4px 0 0; padding: 6px 8px; overflow-x: auto; border: 1px solid var(--border); border-radius: 6px; background: var(--muted); color: var(--foreground); font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--ib-fs-12, 12px); line-height: 1.6; white-space: pre; }
 .ib-ranchor-open { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 6px; }
-.ib-ranchor-btn { height: 28px; padding: 0 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--background); color: var(--foreground); font: inherit; font-size: 12px; cursor: pointer; }
+.ib-ranchor-btn { height: 28px; padding: 0 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--background); color: var(--foreground); font: inherit; font-size: var(--ib-fs-12, 12px); cursor: pointer; }
 .ib-ranchor-btn:hover { background: var(--muted); }
 .ib-ranchor-btn:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
 .ib-ranchor-btn:disabled { opacity: 0.6; cursor: default; }
-.ib-ranchor-err { color: var(--muted-foreground); font-size: 12px; }
+.ib-ranchor-err { color: var(--muted-foreground); font-size: var(--ib-fs-12, 12px); }
