@@ -26,19 +26,48 @@ concurrency:
   group: test-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.event_name == 'push' && format('push-{0}', github.ref) || format('run-{0}', github.run_id) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+# The repo variable TEST_RUNNER moves the checks, unit, dom and opencode-v2
+# jobs to that runner label (e.g. `burst-e2e`, the rented machines); unset or
+# empty, they run on GitHub's ubuntu-24.04. guides-show stays there: it runs
+# for a minute or less, shorter than a rented machine takes to start. A
+# self-hosted runner must never run a fork's code, so only a push, a manual run
+# (both need write access) or a PR whose head branch is in this repository goes
+# to it; a PR from a fork stays on ubuntu-24.04 whatever the variable says. So
+# does a PR a bot opened (Dependabot, Renovate: the PR author's account type is
+# Bot, whoever pushed last): its freshly bumped packages run their install
+# scripts unreviewed. The push to main that merges one is reviewed code by then.
 jobs:
   # Everything that is not a sharded test file: the checks that used to lead
   # the single test job, and the two DOM steps that must run in processes of
   # their own.
   checks:
     name: Checks (types, packages, own-process DOM tests, lane guards)
-    runs-on: ubuntu-24.04
+    runs-on: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.type != 'Bot')) && vars.TEST_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 20
 
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
+
+      # GitHub's image has Node (tests and npm run it) and unzip (setup-bun
+      # unpacks Bun with it); a self-hosted stock Ubuntu has neither. There,
+      # Node comes from setup-node and Bun from its checksummed release zip,
+      # which setup-bun then finds installed and does not download. The machine
+      # itself must have make and g++ (`bun install` compiles node-pty on Linux)
+      # and git 2.47 or later (background git relies on credential.interactive,
+      # which older git ignores; packages/server/git-background.test.ts).
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        if: runner.environment == 'self-hosted'
+        with:
+          node-version: 22
+          package-manager-cache: false
+
+      - name: Install Bun 1.4.4 (self-hosted)
+        if: runner.environment == 'self-hosted'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/ci-install-bun.sh 1.4.4
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
@@ -127,7 +156,7 @@ jobs:
   # test file always lands in some shard.
   unit:
     name: Unit tests (${{ matrix.lane }})
-    runs-on: ubuntu-24.04
+    runs-on: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.type != 'Bot')) && vars.TEST_RUNNER || 'ubuntu-24.04' }}
     # A backstop, not a budget: lanes take about 4-7 min. Some tests run on
     # fake timers, where bun's per-test timeout cannot fire, so a stuck await
     # would otherwise idle until GitHub's 6-hour default.
@@ -142,6 +171,19 @@ jobs:
         with:
           persist-credentials: false
 
+      # Node and Bun on a self-hosted machine: see the checks job.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        if: runner.environment == 'self-hosted'
+        with:
+          node-version: 22
+          package-manager-cache: false
+
+      - name: Install Bun 1.4.4 (self-hosted)
+        if: runner.environment == 'self-hosted'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/ci-install-bun.sh 1.4.4
+
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.4.4
@@ -149,8 +191,41 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      # On CI the installer tests require PowerShell (scripts/install.test.ts
+      # drives install.ps1 and install.cmd under it). GitHub's image has 7.6.9;
+      # a self-hosted machine gets the same release's tarball, checked against
+      # its SHA-256 and kept between runs. Bun's shards decide which unit lane
+      # holds that file, so every unit-k lane gets it.
+      - name: Restore the PowerShell download (self-hosted)
+        if: runner.environment == 'self-hosted' && startsWith(matrix.lane, 'unit-')
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ci-tools/pwsh
+          key: pwsh-7.6.9-1da6d6d6035d
+
+      - name: Install PowerShell 7.6.9 (self-hosted)
+        if: runner.environment == 'self-hosted' && startsWith(matrix.lane, 'unit-')
+        env:
+          PWSH_SHA256: 1da6d6d6035d651f20e70ddee7c4c15ac6ab8b9fb40ee92240d91263f28a884b
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          dir="$RUNNER_TEMP/pwsh"
+          tarball="$HOME/.cache/ci-tools/pwsh/powershell-7.6.9-linux-x64.tar.gz"
+          mkdir -p "$dir" "$(dirname "$tarball")"
+          [ -f "$tarball" ] || bash scripts/ci-fetch-release-asset.sh https://github.com/PowerShell/PowerShell/releases/download/v7.6.9/powershell-7.6.9-linux-x64.tar.gz "$tarball"
+          echo "$PWSH_SHA256  $tarball" | sha256sum -c -
+          tar -xzf "$tarball" -C "$dir"
+          chmod +x "$dir/pwsh"
+          echo "$dir" >> "$GITHUB_PATH"
+          "$dir/pwsh" -NoProfile -Command '$PSVersionTable.PSVersion.ToString()'
+
       - name: Generate Pi extension shared copies
         run: bash apps/pi-extension/vendor.sh
+
+      - name: Fetch the released plugins' tags
+        if: matrix.lane == 'heavy-mod'
+        run: git fetch --no-tags --depth 1 origin tag v0.28.8 tag v0.28.30
 
       - name: Run tests
         env:
@@ -163,7 +238,7 @@ jobs:
   # differently across platforms; without it most of the list fails.
   dom:
     name: DOM tests (${{ matrix.lane }})
-    runs-on: ubuntu-24.04
+    runs-on: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.type != 'Bot')) && vars.TEST_RUNNER || 'ubuntu-24.04' }}
     # A backstop, not a budget: lanes take about 3-6 min. Some DOM tests run on
     # fake timers, where bun's per-test timeout cannot fire.
     timeout-minutes: 20
@@ -176,6 +251,19 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
+
+      # Node and Bun on a self-hosted machine: see the checks job.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        if: runner.environment == 'self-hosted'
+        with:
+          node-version: 22
+          package-manager-cache: false
+
+      - name: Install Bun 1.4.4 (self-hosted)
+        if: runner.environment == 'self-hosted'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/ci-install-bun.sh 1.4.4
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
@@ -194,7 +282,7 @@ jobs:
 
   opencode-v2:
     name: OpenCode 2 installed package
-    runs-on: ubuntu-24.04
+    runs-on: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.type != 'Bot')) && vars.TEST_RUNNER || 'ubuntu-24.04' }}
     # The smoke's own budgets (health 120s, plugin activation 300s) are the real assertion;
     # this is only a backstop so a genuinely wedged runner cannot idle for hours.
     timeout-minutes: 25
@@ -202,6 +290,19 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
+
+      # Node and Bun on a self-hosted machine: see the checks job.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        if: runner.environment == 'self-hosted'
+        with:
+          node-version: 22
+          package-manager-cache: false
+
+      - name: Install Bun 1.4.4 (self-hosted)
+        if: runner.environment == 'self-hosted'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/ci-install-bun.sh 1.4.4
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:

@@ -4,7 +4,7 @@
  * words come from the registry; this says only where they go.
  */
 import type { ShortcutScopeDefinition } from '@plannotator/ui/shortcuts';
-import { inboxAppShortcuts, inboxArtifactsShortcuts, inboxBoardShortcuts, inboxFileViewerShortcuts, inboxListShortcuts, inboxSearchShortcuts, inboxThreadShortcuts, inboxTileShortcuts } from './index';
+import { inboxAppShortcuts, inboxArtifactsShortcuts, inboxBoardShortcuts, inboxFileViewerShortcuts, inboxListShortcuts, inboxPrBoardShortcuts, inboxSearchShortcuts, inboxThreadShortcuts, inboxTileShortcuts } from './index';
 
 export type Ref = { scope: ShortcutScopeDefinition<any>; action: string; only?: number };
 
@@ -79,7 +79,7 @@ export const MAP_COLUMNS: MapGroup[][] = [
         { label: 'Next or previous message', keys: [thread('nextMessage'), thread('previousMessage')] },
         { keys: [thread('firstNew')] },
         { keys: [thread('openItems')] },
-        { keys: [thread('close')], also: [app('leavePage'), file('escape')] },
+        { keys: [thread('close')], also: [app('leavePage'), file('escape'), { scope: inboxPrBoardShortcuts, action: 'leaveSelect' }] },
       ],
     },
     {

@@ -76,6 +76,7 @@ function sandbox() {
     ...agents.env,
     HOME: join(root, "home"),
     TMPDIR: tmpdir(),
+    PLANNOTATOR_RELAY_URL: "http://127.0.0.1:9",
     PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_BROWSER: NO_BROWSER,
     PLANNOTATOR_INBOX_CONNECT: "0",

@@ -121,6 +121,7 @@ export interface InboxRecipientConnection {
    * agent's next read, not queued. Absent when none. Additive.
    */
   uncertain?: string[];
+  handed?: string[];
   /**
    * The items waiting on this session, by id: since when it waits on the
    * busy session (`since`, the "Undelivered N min"), and since when it may go
@@ -715,9 +716,10 @@ export function createInboxLiveSessions(options: {
     waits: {},
   });
   /** `uncertain` on a connection: the items that may not have reached the session (absent when none). */
-  const uncertainOf = (session: string): { uncertain?: string[] } => {
+  const uncertainOf = (session: string): { uncertain?: string[]; handed?: string[] } => {
     const items = options.uncertainItemsOf?.(session) ?? [];
-    return items.length > 0 ? { uncertain: items } : {};
+    const handed = store.handover.handedTo(session).filter((id) => !items.includes(id));
+    return { ...(items.length > 0 ? { uncertain: items } : {}), ...(handed.length > 0 ? { handed } : {}) };
   };
 
   /**
@@ -1060,10 +1062,11 @@ export function createInboxLiveSessions(options: {
   };
 
   /** The fields a list row's delivery reads (`InboxStore.setDeliveryPresence`): `connectionOf` without its plugin checks. */
-  const deliveryConnectionOf = (session: string): { busy: boolean | null; send_now: boolean; held?: true } | null => {
+  const deliveryConnectionOf = (session: string): { busy: boolean | null; send_now: boolean; held?: true; polls?: true } | null => {
     const entry = standInOf(session)?.entry;
-    if (!entry) return options.wakeOnlyStatus?.(session) === "alive" ? { busy: null, send_now: false } : null;
-    return { busy: entry.busy, send_now: entry.sendNow, ...(entry.held === true ? { held: true as const } : {}) };
+    const polls = options.pollsItself?.(session) ? { polls: true as const } : {};
+    if (!entry) return options.wakeOnlyStatus?.(session) === "alive" ? { busy: null, send_now: false, ...polls } : null;
+    return { busy: entry.busy, send_now: entry.sendNow, ...(entry.held === true ? { held: true as const } : {}), ...polls };
   };
 
   /**

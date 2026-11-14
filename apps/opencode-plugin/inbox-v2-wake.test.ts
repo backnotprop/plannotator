@@ -20,6 +20,7 @@ import { clearInboxDuplicates, dropInboxDuplicates, findInboxConnection, inboxRe
 import {
   createInboxWorld,
   destroyInboxWorld,
+  personComposes,
   personSends,
   pressSendNow,
   QUESTION,
@@ -519,5 +520,53 @@ describe.skipIf(process.platform === "win32")("OpenCode 2's Send now: the steer 
     await Bun.sleep(4_000);
     expect(prompts.map((prompt) => prompt.delivery)).toEqual(["steer"]);
     expect(await deliveryOf(w, asked.thread_id, replyId)).toBeUndefined();
+  }, 60_000);
+});
+
+describe.skipIf(process.platform === "win32")("OpenCode 2 started by the Inbox (launch)", () => {
+  test("a launched server watches a session from its creation, so the Inbox's first message reaches it; a restart watches the session it names at once; an ordinary server waits for a run", async () => {
+    const w = createInboxWorld("plannotator-inbox-oc2-launch-", "08-opencode2-launch-watch", "opencode2");
+    worlds.push(w);
+    startInbox(w);
+    mkdirSync(w.dataDir, { recursive: true });
+    writeFileSync(path.join(w.dataDir, "config.json"), JSON.stringify({ inboxTool: { opencode: true } }));
+    process.env.PLANNOTATOR_DATA_DIR = w.dataDir;
+    process.env.PLANNOTATOR_BIN = path.join(w.bin, "plannotator");
+    const connection = await findInboxConnection();
+    const listed = async (sessionID: string) => {
+      const model = (await (await fetch(`http://127.0.0.1:${registry(w).port}/api/inbox/sessions`)).json()) as { projects: { sessions: { session: string }[] }[] };
+      return model.projects.some((group) => group.sessions.some((s) => s.session === sessionID));
+    };
+    const host = async (launch: { created: boolean; session: string | null } | undefined) => {
+      const events = eventStream();
+      const prompts: { sessionID: string; text: string }[] = [];
+      const v2 = {
+        location: { directory: w.project },
+        event: { subscribe: events.subscribe },
+        session: {
+          get: async () => ({ location: { directory: w.project } }),
+          wait: async () => undefined,
+          prompt: async (input: { sessionID: string; text: string }) => void prompts.push({ sessionID: input.sessionID, text: input.text }),
+        },
+      };
+      const stop = new AbortController();
+      stops.push(stop);
+      await registerInboxOpenCode2({ transform: () => {} }, v2 as never, connection!, async (sessionID) => ({ root: sessionID }), { signal: stop.signal, ...(launch ? { launch } : {}) });
+      return { events, prompts };
+    };
+
+    const plain = await host(undefined);
+    plain.events.emit({ type: "session.created", data: { sessionID: "ses_plain" } });
+
+    const launched = await host({ created: true, session: null });
+    launched.events.emit({ type: "session.created", data: { sessionID: "ses_launched" } });
+    await waitFor("the launched session's wake to poll", () => listed("ses_launched"));
+    await personComposes(w, { host: "opencode", session: "ses_launched" }, "Tidy the readme.");
+    const first = await waitFor("the first message to reach it", () => launched.prompts.find((p) => p.text.includes("Tidy the readme.")));
+    expect(first.sessionID).toBe("ses_launched");
+
+    await host({ created: false, session: "ses_resumed" });
+    await waitFor("the named session's wake to poll", () => listed("ses_resumed"));
+    expect(await listed("ses_plain")).toBe(false);
   }, 60_000);
 });

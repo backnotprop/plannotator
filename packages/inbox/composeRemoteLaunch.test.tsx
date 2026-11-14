@@ -330,15 +330,18 @@ test.skipIf(!hasDom)("its switch turned on there since the link connected: its s
   expect(inDialog(`[data-compose-folder-notice="${MINI}"]`)).toBeNull();
 });
 
-test.skipIf(!hasDom)("an agent only Mac mini has, picked under this computer's project: To names it in Mac mini's project, and Send starts it there", async () => {
+test.skipIf(!hasDom)("an agent only Mac mini has: this computer says it is not there, Mac mini's row names its project, and Send starts it there", async () => {
   miniBlock = { ...MINI_BLOCK, agents: [...MINI_BLOCK.agents, { agent: 'pi', name: 'Pi' }] };
   machines = [SELF_VIEW, view(MINI, 'Mac mini')];
   await open();
   await until(machinesRead, "Mac mini's sessions read");
   act(() => inDialog('button[data-compose-to]')!.click());
+  await until(() => inDialog('[data-compose-start-missing="pi"]') !== null, "this computer's Pi row");
+  expect(inDialog('[data-compose-start-missing="pi"]')!.textContent).toContain('Not on MacBook');
+  expect(inDialog('[data-compose-start="pi"]')).toBeNull();
+  act(() => inDialog(`[data-compose-switch="${MINI}"]`)!.click());
   await until(() => inDialog('[data-compose-start="pi"]') !== null, 'the Pi start row');
   act(() => inDialog('[data-compose-start="pi"]')!.click());
-  // The caption's project was web-app on MacBook, which has no Pi: To is not left empty.
   await until(() => inDialog('[data-compose-folder]') !== null, 'the project in To');
   expect(inDialog('[data-compose-folder]')!.getAttribute('data-compose-folder')).toBe('prj_infra');
   expect(inDialog('[data-compose-folder]')!.getAttribute('data-compose-folder-machine')).toBe(MINI);

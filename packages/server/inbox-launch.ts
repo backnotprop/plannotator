@@ -102,6 +102,7 @@ import { createAgentEnvironmentFor, type AgentEnvironment } from "./inbox-agents
 import { createClaudeLaunchHost } from "./inbox-launch-claude";
 import { createPiLaunchHost } from "./inbox-launch-pi";
 import { createCodexLaunchHost } from "./inbox-launch-codex";
+import { createOpenCodeLaunchHost } from "./inbox-launch-opencode";
 import { launchPlainEnv, launchSpawnEnv, type LaunchEnv } from "./inbox-launch-env";
 import { pathFoldersOf } from "./env-path";
 import type { LaunchAvailability, LaunchDelivery, LaunchHost, LaunchHostContext, LaunchHostPermissions, LaunchHostResult, LaunchLive, LaunchSessions, LaunchTrustOffer } from "./inbox-launch-host";
@@ -487,6 +488,7 @@ export function createInboxLaunch(options: {
     claude,
     createPiLaunchHost(context),
     createCodexLaunchHost(context),
+    createOpenCodeLaunchHost(context),
   ];
   /** By each host's own `agent`, so the key a record is looked up by is the agent the host writes. */
   const hosts: Record<string, LaunchHost> = Object.fromEntries([...ownHosts, ...(options.hosts?.(context) ?? [])].map((host) => [host.agent, host]));
@@ -2089,12 +2091,12 @@ ${result.text}`);
      * run line's state (null: no line, which is live and idle, or resting with nothing waiting on it). An agent with
      * no host here (a downgrade) is left out, as it has no line.
      */
-    agents(): { launch_id: string; session: string; thread_id: string; host: string; project_id: string; started_at: string; run: InboxRun["state"] | null }[] {
+    agents(): { launch_id: string; session: string; thread_id: string; host: string; project_id: string; started_at: string; started: boolean; run: InboxRun["state"] | null; scratch: string | null }[] {
       return roots().flatMap((root) => {
         const launch = root.launch!;
         const session = inboxLaunchedSession(root);
         if (launch.deleted_at || !session || !hostOf(launch)) return [];
-        return [{ launch_id: launch.id, session, thread_id: root.thread_id, host: launch.agent, project_id: root.project_id, started_at: launch.started_at, run: runOfRoot(root)?.state ?? null }];
+        return [{ launch_id: launch.id, session, thread_id: root.thread_id, host: launch.agent, project_id: root.project_id, started_at: launch.started_at, started: !!launch.session_ref, run: runOfRoot(root)?.state ?? null, scratch: launch.scratch ? basename(launch.folder) : null }];
       });
     },
 

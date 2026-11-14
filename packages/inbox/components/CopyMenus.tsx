@@ -20,6 +20,7 @@ import { useThreadTags } from '../threadTags';
 import { AddTagItem, AddTagList } from './AddTagMenu';
 import { useMessageArm } from '../messageArming';
 import type { InboxToastModel } from './Toast';
+import { TAKE_BACK_LABEL } from '../takeBack';
 
 /**
  * Copy a message, copy a thread (design record "inbox-copy-message", option
@@ -81,7 +82,7 @@ function usePortal<T extends HTMLElement>() {
  * One open message's menu: its ⋯ (handed to `head` to place after Reply) and,
  * off a phone, a right-click on the head line `head` draws.
  */
-export function MessageMenu(props: CopyMenuHost & { message: InboxMessageWire; head: (more: ReactElement) => ReactElement }) {
+export function MessageMenu(props: CopyMenuHost & { message: InboxMessageWire; head: (more: ReactElement) => ReactElement; onTakeBack?: (() => void) | null }) {
   const { message, phone } = props;
   const copies = useCopies(props);
   const { ref: more, portal } = usePortal<HTMLButtonElement>();
@@ -129,6 +130,15 @@ export function MessageMenu(props: CopyMenuHost & { message: InboxMessageWire; h
       <div className="ib-pm-title" aria-hidden="true">
         {copyAuthor(message)} · {whenTime(message.created_at)}
       </div>
+      {props.onTakeBack && (
+        <>
+          <Menu.Item className="ib-pmi" label={TAKE_BACK_LABEL} onClick={props.onTakeBack} data-take-back-item="">
+            <Icon name="reply" size={15} />
+            {TAKE_BACK_LABEL}
+          </Menu.Item>
+          <Menu.Separator className="ib-pm-sep" />
+        </>
+      )}
       <Menu.Item className="ib-pmi" label="Copy message" onClick={() => copies.message(message)} data-copy-item="message">
         <Icon name="copy" size={15} />
         Copy message
@@ -246,13 +256,15 @@ export interface ThreadMoreLaunch {
  * its room), with every read action (`markRead`, `moveBack` on a thread marked read, `markUnread`; markRead.ts
  * `canMarkUnread`), then Snooze, which swaps the menu in place for "‹ Snooze until" and its times (H opens it there:
  * `snoozeRequest`), and Unsnooze; then a divider, Pin thread in its own group (only when the Inbox keeps pins: `pin`
- * is absent on an older one) with Add tag (its tags swap in place; only when the Inbox keeps tags, approval "inbox-thread-tags"). Then Copy thread, then Copy link and Copy thread ID, then, in its own group, Archive thread (Unarchive thread on an
+ * is absent on an older one), with Add to Priority (Remove from Priority on a thread in it) after it, then Add tag (its tags swap in place; only when the Inbox keeps tags, approval "inbox-thread-tags"). Then Copy thread, then Copy link and Copy thread ID, then, in its own group, Archive thread (Unarchive thread on an
  * archived one; the owner, 2026-11-01: move it into the ⋯). None has a key. Request guided review (`requestGuide`)
  * has its own group above Archive, on desktop and in the phone sheet alike, only where the thread offers it.
  */
 export function ThreadMore(
   props: CopyMenuHost & {
     pin?: { pinned: boolean; onToggle: () => void };
+    /** Add to Priority (`on` false) or Remove from Priority; absent where the thread's row offers neither. */
+    priority?: { on: boolean; onToggle: () => void };
     /** Mark read (E), offered while something here waits on the person. */
     markRead?: () => void;
     /** Move back to the top, on a thread marked read. */
@@ -275,7 +287,7 @@ export function ThreadMore(
     launch?: ThreadMoreLaunch | null;
   },
 ) {
-  const { thread, phone, pin, markRead, moveBack, markUnread, archive, snooze, snoozeRequest = 0, requestGuide, addPull, postDecisions, launch } = props;
+  const { thread, phone, pin, priority, markRead, moveBack, markUnread, archive, snooze, snoozeRequest = 0, requestGuide, addPull, postDecisions, launch } = props;
   const markReadKeys = useShortcutAria({ scope: inboxThreadShortcuts, action: 'markRead' });
   const snoozeKeys = useShortcutAria({ scope: inboxThreadShortcuts, action: 'snooze' });
   const copies = useCopies(props);
@@ -458,6 +470,12 @@ export function ThreadMore(
       {pin.pinned ? 'Unstar thread' : 'Star thread'}
     </Menu.Item>
   );
+  const priorityItem = priority && (
+    <Menu.Item className="ib-pmi" label={priority.on ? 'Remove from Priority' : 'Add to Priority'} onClick={priority.onToggle} data-thread-priority-item="">
+      <Icon name={priority.on ? 'toBottom' : 'toTop'} size={15} />
+      {priority.on ? 'Remove from Priority' : 'Add to Priority'}
+    </Menu.Item>
+  );
   const leadItems = !!(markRead || moveBack || markUnread || snooze);
   const lead = (
     <>
@@ -479,13 +497,14 @@ export function ThreadMore(
         </Menu.Item>
       )}
       {unsnoozeItem}
-      {leadItems && (pin || tagging) && <Menu.Separator className="ib-pm-sep" />}
+      {leadItems && (pin || priority || tagging) && <Menu.Separator className="ib-pm-sep" />}
       {pinItem}
+      {priorityItem}
       <AddTagItem threadId={thread.thread_id} onOpen={() => setTagView(true)} />
     </>
   );
   // Whether anything leads the menu (the divider before Copy thread).
-  const leads = leadItems || !!pin || tagging;
+  const leads = leadItems || !!pin || !!priority || tagging;
   return (
     <Menu.Root
       modal={false}

@@ -99,6 +99,22 @@ export function DraftHead({ conflict }: { conflict: DraftConflict }) {
   );
 }
 
+export const DRAFT_OFFER_TEXT = 'A saved draft of this reply is waiting.';
+
+export function DraftOffer({ onRestore }: { onRestore: () => void }) {
+  return (
+    <div className="ib-reply-l ib-draft-head" data-draft-head="" data-draft-offer="">
+      <span className="ib-draft-pill">Draft</span>
+      <span className="ib-draft-saved">{DRAFT_OFFER_TEXT}</span>
+      <span className="ib-draft-acts">
+        <button type="button" className="ib-draft-discard" data-draft-restore="" onClick={onRestore}>
+          Restore draft
+        </button>
+      </span>
+    </div>
+  );
+}
+
 /**
  * Above the open reply box, at the right, on a phone (the owner, 2026-11-03): "Draft  Saved 4:51 PM  Discard",
  * nothing until the first save. "Not saved …" in place of the time when the words are longer than a draft holds

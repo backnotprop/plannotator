@@ -180,10 +180,15 @@ const ALLOWLIST: readonly DoorRoute[] = [
   // "inbox-starred-pills". A linked machine sends the same two for this Inbox's threads (approval "inbox-linked-marks").
   { method: "POST", route: /^threads\/([^/]+)\/pin$/, window: (m) => `/api/inbox/threads/${m[1]}/pin` },
   { method: "POST", route: /^pins$/, window: () => "/api/inbox/pins" },
+  // Add to Priority, Remove from Priority and their Undo (contract 7.66). A linked machine sends the same for this
+  // Inbox's threads (approval "inbox-linked-marks").
+  { method: "POST", route: /^threads\/([^/]+)\/priority$/, window: (m) => `/api/inbox/threads/${m[1]}/priority` },
+  // An agent's face or given name (approval "inbox-linked-marks"): a linked machine's window sets them for this Inbox's agents.
+  { method: "POST", route: /^agent-faces$/, window: () => "/api/inbox/agent-faces", machineOnly: true },
   { method: "GET", route: /^events$/, window: () => "/api/inbox/events" },
   // `to`: Send to another session (7.41), a person message no session took yet. `ack`: 👍 Looks good and its Undo (7.56).
   // `reask`: Re-ask, the agent asks its open questions again in one message (7.61).
-  { method: "POST", route: /^messages\/([^/]+)\/(picks|reply|resolve|to|ack|send-now|reask)$/, window: (m) => `/api/inbox/messages/${m[1]}/${m[2]}` },
+  { method: "POST", route: /^messages\/([^/]+)\/(picks|reply|resolve|to|ack|send-now|take-back|reask)$/, window: (m) => `/api/inbox/messages/${m[1]}/${m[2]}` },
   // A hand-off's Undo inside its window (approval "inbox-tag-handoff", contract 7.64): the reply goes as an Ask.
   { method: "POST", route: /^messages\/([^/]+)\/handoff\/undo$/, window: (m) => `/api/inbox/messages/${m[1]}/handoff/undo` },
   // An action item's Done or Can't do it, and its Undo (approval "inbox-next-actions", contract 7.63).

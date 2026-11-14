@@ -465,19 +465,26 @@ test.skipIf(!hasDom)('Add agent opens New message with "New … session" chosen:
 
 const ART = Object.fromEntries((motion.AGENT_FACES ?? []).filter((face) => face !== 'agent').map((face) => [face, `<i data-art="${face}"></i>`])) as Parameters<typeof motion.setAgentFaceArt>[0];
 
-test.skipIf(!hasDom)('a click on a mark shows the next face (agent, Glass, Yellow, Transparent, Face, agent), never opens the row, and the face is kept until the next click', async () => {
+// A pointer's click (detail 1).
+const press = (el: Element) => act(() => void el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, detail: 1 })));
+const fanChoice = (face: string) => document.querySelector<HTMLButtonElement>(`[data-face-choice="${face}"]`);
+
+test.skipIf(!hasDom)('a click on a mark opens its picker and changes no face, never opens the row; a face chosen there is kept for a new draw', async () => {
   motion.setAgentFaceArt(ART);
   setInboxAgents([group([agent('ses_s1')], SELF)]);
   const opened: string[] = [];
   const props = sidebarProps({ machines: three(), agentRows: [threadRow('thr_1', 'ses_s1', 'Invoice retries')], onAgentFilter: (id) => opened.push(String(id)) });
   mount(<Sidebar {...props} />);
   expect(mark('ses_s1').dataset.face).toBe('agent');
-  const seen: string[] = [];
-  for (let i = 0; i < 2; i++) {
-    act(() => mark('ses_s1').click());
-    await wait(20);
-    seen.push(mark('ses_s1').dataset.face!);
-  }
+  press(mark('ses_s1'));
+  await wait(20);
+  expect(mark('ses_s1').closest('button')!.getAttribute('aria-expanded')).toBe('true');
+  expect(fanChoice('yellow')).not.toBeNull();
+  expect(mark('ses_s1').dataset.face).toBe('agent');
+  expect(opened).toEqual([]);
+  act(() => fanChoice('yellow')!.click());
+  await wait(20);
+  expect(mark('ses_s1').dataset.face).toBe('yellow');
   expect(opened).toEqual([]);
   // Kept: a new draw (a reload's) shows the same face, with no click.
   unmountAll();
@@ -485,14 +492,6 @@ test.skipIf(!hasDom)('a click on a mark shows the next face (agent, Glass, Yello
   mount(<Sidebar {...props} />);
   await wait(20);
   expect(mark('ses_s1').dataset.face).toBe('yellow');
-  for (let i = 0; i < 3; i++) {
-    act(() => mark('ses_s1').click());
-    await wait(20);
-    seen.push(mark('ses_s1').dataset.face!);
-  }
-  expect(seen).toEqual(['glass', 'yellow', 'transparent', 'totman', 'agent']);
-  expect(JSON.parse(window.localStorage.getItem(faces.AGENT_FACES_PAINT_KEY)!).faces).toEqual({});
-  expect(opened).toEqual([]);
 });
 
 test.skipIf(!hasDom)('reduced motion: every mark holds still (no loop, no spin, no fidget), and a face swap is a plain fade', async () => {
@@ -510,8 +509,11 @@ test.skipIf(!hasDom)('reduced motion: every mark holds still (no loop, no spin, 
   const before = made.length;
   await wait(120);
   expect(made.length).toBe(before);
-  act(() => mark('ses_c').click());
+  press(mark('ses_c'));
   await wait(20);
+  act(() => fanChoice('glass')!.click());
+  await wait(20);
+  expect(mark('ses_c').dataset.face).toBe('glass');
   const swap = made.slice(before);
   expect(swap.length).toBeGreaterThan(0);
   expect(swap.every((an) => an.frames.every((f) => !('transform' in f)))).toBe(true);
@@ -542,7 +544,7 @@ test.skipIf(!hasDom)('perf: off screen a mark pauses everything and starts no fi
   expect(motion.agentMarkActivity(el)!.playing).toBeGreaterThan(0);
   // To Glass: once the swap is done, the agent's face runs nothing.
   motion.agentMotionOptions.clock = 1;
-  act(() => el.click());
+  act(() => faces.keepAgentFace('ses_c', 'glass'));
   await wait(60);
   const agentFace = el.querySelector('.am-f-agent')!;
   expect((agentFace as HTMLElement).hidden).toBe(true);

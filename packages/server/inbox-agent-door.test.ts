@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import type { InboxCloudAgentView } from "@plannotator/core/inbox-cloud";
-import type { InboxThread } from "@plannotator/core/inbox-types";
+import type { InboxListRow, InboxThread } from "@plannotator/core/inbox-types";
 import { decodeInboxAgentPairing } from "@plannotator/shared/inbox/agent-pairing";
 import { sha256Hex } from "@plannotator/shared/inbox/devices";
 import { runInboxCallCommand } from "../../apps/hook/server/inbox-call-command";
@@ -23,14 +23,14 @@ afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
 
-function stubRoutine() {
+function stubRoutine(status = 200) {
   const seen: Record<string, unknown>[] = [];
   const server = Bun.serve({
     port: 0,
     hostname: "127.0.0.1",
     async fetch(req) {
       seen.push((await req.json()) as Record<string, unknown>);
-      return Response.json({ ok: true });
+      return Response.json({ ok: true }, { status });
     },
   });
   cleanups.push(() => server.stop(true));
@@ -76,8 +76,8 @@ async function world() {
     answers.push(text);
     return { status: response.status, json: JSON.parse(text) as Record<string, any> };
   };
-  const pair = async (preset = "grok-bot", name = "Nightly fixer") => {
-    const hook = stubRoutine();
+  const pair = async (preset = "grok-bot", name = "Nightly fixer", status = 200) => {
+    const hook = stubRoutine(status);
     const answer = await fetch(`${base}/api/inbox/cloud-agents`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -154,6 +154,20 @@ describe("the agent door", () => {
     expect(readFileSync(cloudAgentsPath(w.dataDir), "utf8")).not.toContain(KEY);
     // Its old messages stay.
     expect((await w.thread(threadId)).messages.map((m) => m.body)).toContain("Found the flaky test. Fix it now?");
+  });
+
+  test("Hermes or OpenClaw on a server pairs like Other: it posts under its own kind, and a webhook that answers 202 counts as woken", async () => {
+    const w = await world();
+    for (const preset of ["hermes", "openclaw"] as const) {
+      const { agent, pairing, hook } = await w.pair(preset, `Server ${preset}`, 202);
+      const sent = await w.door(pairing.token, "send_message", { body: "Nightly run finished.", idempotency_key: `s-${preset}` });
+      const threadId = sent.result!.structuredContent!.thread_id as string;
+      const posted = (await w.thread(threadId)).messages[0]!;
+      expect(posted.author).toEqual({ kind: "agent", host: `cloud-${preset}`, session: agent.session, name: `Server ${preset}` });
+      await w.call(`/api/inbox/messages/${posted.id}/reply`, { words: "Thanks.", idempotency_key: `r-${preset}` });
+      await until(() => hook.seen.length === 1);
+      await until(async () => (await w.thread(threadId)).messages.some((message) => message.cloud_wake?.state === "started"));
+    }
   });
 
   test("an agent token opens no route but its own tools, and a phone's or a stranger's token does not open the agent door", async () => {
@@ -323,16 +337,31 @@ describe("the agent door", () => {
     const connection = async (session: string) => (await w.call(`/api/inbox/threads/${threadId}/sessions?asker=${encodeURIComponent(session)}`)).json.asker?.connection;
     const unread = async () => ((await w.door(token, "read_thread")).result!.structuredContent!.threads as { thread_id: string; unread?: boolean }[]).find((row) => row.thread_id === threadId)?.unread === true;
 
+    const line = async (id: string) => {
+      const list = (await w.call("/api/inbox/threads")).json as { sections: { threads: InboxListRow[] }[] };
+      const delivery = list.sections.flatMap((s) => s.threads).find((r) => r.thread_id === id)?.delivery;
+      return delivery ? `${delivery.state}/${delivery.reason}` : null;
+    };
+
     expect((await connection(poller.session))?.polls).toBe(true);
     expect((await w.thread(threadId)).messages[0]!.delivery ?? null).toBeNull();
+    expect(await line(threadId)).toBe("saved/reads");
     expect(await unread()).toBe(true);
     expect((await w.door(token, "read_thread", { thread_id: threadId })).error).toBeNull();
     expect(await unread()).toBe(false);
     expect((await w.thread(threadId)).messages[0]!.delivery?.at).toEqual(expect.any(String));
+    expect(await line(threadId)).toBe("delivered/delivered");
+
+    const asked = (await w.door(token, "send_message", { body: "The export is done. Ship it?" })).result!.structuredContent as { message_id: string; thread_id: string };
+    expect((await w.call(`/api/inbox/messages/${asked.message_id}/reply`, { words: "Ship it.", idempotency_key: "poll-reply-1" })).status).toBe(200);
+    expect(await line(asked.thread_id)).toBe("saved/reads");
+    expect((await w.door(token, "read_thread", { thread_id: asked.thread_id })).error).toBeNull();
+    expect(await line(asked.thread_id)).toBe("delivered/delivered");
 
     const woken = await w.pair("other", "Woken");
     const toWoken = await w.call("/api/inbox/messages", { to: { session: woken.agent.session }, body: "Run the nightly export.", idempotency_key: "wake-1" });
     const wokenConnection = (await w.call(`/api/inbox/threads/${toWoken.json.thread_id}/sessions?asker=${encodeURIComponent(woken.agent.session)}`)).json.asker?.connection;
     expect(wokenConnection?.polls).toBeUndefined();
+    expect(["queued/next_turn", "queued/handed", "delivered/delivered"]).toContain((await line(toWoken.json.thread_id))!);
   });
 });

@@ -131,6 +131,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const env = {
     PATH: process.env.PATH ?? '',
     HOME: root,
+    PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9',
     PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_BROWSER: NO_BROWSER,
     PLANNOTATOR_INBOX_CONNECT: '0',
@@ -232,7 +233,7 @@ test('Claude Code at work: the reply reads "Undelivered · … is working" with 
 
   await button.click();
   await expect(line).toHaveAttribute('data-delivery', 'sending');
-  await expect(line).toHaveText('Sending to Claude Code now…');
+  await expect(line.locator('.ib-dl-text')).toHaveText('Sending to Claude Code now…');
   await expect(button).toHaveCount(0);
   await expect.poll(() => connection.commands[0]?.now, { timeout: 15_000 }).toBe(true);
   await expect(tick).toHaveAttribute('data-tick', 'sending');
@@ -261,7 +262,7 @@ test('idle: "Sending to Claude Code…", no Send now', async () => {
   await replyInWindow(page, 'Great. Post the numbers in the PR.');
   const line = pane.locator('[data-delivery]');
   await expect(line).toHaveAttribute('data-delivery', 'sending');
-  await expect(line).toHaveText('Sending to Claude Code…');
+  await expect(line.locator('.ib-dl-text')).toHaveText('Sending to Claude Code…');
   await expect(pane.locator('[data-send-now]')).toHaveCount(0);
   await shot(page, '4-sending-idle');
 });
@@ -276,7 +277,7 @@ test('an MCP-only agent: "Saved for … It sees it when it next reads this threa
   await expect(pane.getByRole('heading', { name: 'Docs pass done' })).toBeVisible();
   await replyInWindow(page, 'Thanks.');
   const line = pane.locator('[data-delivery]');
-  await expect(line).toHaveText('Saved for Claude Code. It sees it when it next reads this thread.');
+  await expect(line.locator('.ib-dl-text')).toHaveText('Saved for Claude Code. It sees it when it next reads this thread.');
   await expect(pane.locator('[data-send-now]')).toHaveCount(0);
   // The list holds still while the thread is open: when its first read came after the look, the row sits in
   // Quiet (folded), where the reply shows in place.

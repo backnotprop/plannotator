@@ -287,7 +287,7 @@ export function parsePRReviewAction(value: unknown): PRReviewAction | null {
 
 /**
  * A comment on a whole file rather than a line (#1599). GitHub posts it as a
- * file-level review thread; GitLab has no equivalent and folds it into the body.
+ * file-level review thread, GitLab as a file discussion; Bitbucket folds it into the body.
  */
 export interface PRReviewFileLevelComment {
   path: string;
@@ -480,7 +480,7 @@ const PLATFORM_CAPABILITIES: Record<Platform, PRPlatformCapabilities> = {
     selfReviewBlocked: false,
     // An MR author may mark their own MR as needing changes.
     selfRequestChangesBlocked: false,
-    fileLevelComments: false,
+    fileLevelComments: true,
     viewedSync: false,
     artifacts: true,
     reviewBodyRequired: false,

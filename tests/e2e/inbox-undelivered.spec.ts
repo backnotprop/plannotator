@@ -206,6 +206,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const env = {
     PATH: process.env.PATH ?? '',
     HOME: root,
+    PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9',
     PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_BROWSER: NO_BROWSER,
     PLANNOTATOR_INBOX_CONNECT: '0',
@@ -403,7 +404,7 @@ test('it goes into the running turn by itself after the wait, counted again from
   await page.clock.setFixedTime(new Date());
   await page.goto(`${world.url}#thread=${hero.thread}`);
   const pane = page.locator('section.ib-pane');
-  await expect(pane.locator('[data-delivery]')).toHaveText('Sending to Claude Code now…');
+  await expect(pane.locator('[data-delivery]').locator('.ib-dl-text')).toHaveText('Sending to Claude Code now…');
   // The connection put it into the running turn.
   await hero.connection.deliver(hero.reply);
   expect((await message(hero.thread, hero.reply)).delivery).toMatchObject({ into_turn: true });

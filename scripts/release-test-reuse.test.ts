@@ -115,7 +115,7 @@ const deps = (runs: FakeRun[] | Error, calls: string[] = []): Deps => ({
 });
 
 describe('a version-only tag reuses the nearest passed Test run on main', () => {
-  test('a full bump (10 version files, the search index, release notes) on a passed commit is reused', () => {
+  test('a full bump (11 version files, the search index, release notes) on a passed commit is reused', () => {
     const base = fresh();
     const mid = commit({ 'src/a.ts': 'export const a = 2;\n' }, 'feature');
     commit({ ...bumpFiles('1.0.1', ['a', 'b']), 'RELEASE_NOTES_v1.0.1.md': '# notes\n' }, 'chore: bump version to 1.0.1');

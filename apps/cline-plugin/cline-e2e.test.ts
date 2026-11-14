@@ -115,6 +115,7 @@ test.skipIf(!RUNS)(
       TERM: "xterm-256color",
       CLINE_TELEMETRY_DISABLED: "1",
       CLINE_HUB_PORT: String(await freePort()),
+      PLANNOTATOR_RELAY_URL: "http://127.0.0.1:9",
       PLANNOTATOR_DATA_DIR: dataDir,
       PLANNOTATOR_BROWSER: NO_BROWSER,
       PLANNOTATOR_UPDATE_CHECK: "0",
