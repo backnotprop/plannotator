@@ -22,7 +22,7 @@ export interface SemDiffClient {
 export interface SemDiffClientOptions {
   advert: SemDiffAdvert | undefined | null;
   origin: string;
-  createWorker: () => Worker;
+  createWorker: () => Worker | Promise<Worker>;
   timeoutMs?: number;
 }
 
@@ -34,7 +34,7 @@ export function hasSomethingToSay(operations: SemanticDiffOperation[]): boolean 
 
 export function createSemDiffClient(options: SemDiffClientOptions): SemDiffClient {
   const { advert, origin, createWorker, timeoutMs = SEM_DIFF_TIMEOUT_MS } = options;
-  let worker: Worker | null = null;
+  let worker: Promise<Worker> | null = null;
   let nextId = 1;
   const pending = new Map<number, (reply: SemDiffReply | null) => void>();
 
@@ -43,20 +43,25 @@ export function createSemDiffClient(options: SemDiffClientOptions): SemDiffClien
     pending.clear();
   };
   const restart = () => {
-    worker?.terminate();
+    const old = worker;
     worker = null;
+    void old?.then((w) => w.terminate(), () => {});
     settleAll();
   };
-  const ensureWorker = (): Worker => {
+  const ensureWorker = (): Promise<Worker> => {
     if (worker) return worker;
-    const created = createWorker();
-    created.onmessage = (event: MessageEvent<SemDiffReply>) => {
-      const resolve = pending.get(event.data.id);
-      if (!resolve) return;
-      pending.delete(event.data.id);
-      resolve(event.data);
-    };
-    created.onerror = () => restart();
+    const created = Promise.resolve().then(createWorker).then((w) => {
+      w.onmessage = (event: MessageEvent<SemDiffReply>) => {
+        const resolve = pending.get(event.data.id);
+        if (!resolve) return;
+        pending.delete(event.data.id);
+        resolve(event.data);
+      };
+      w.onerror = () => {
+        if (worker === created) restart();
+      };
+      return w;
+    });
     worker = created;
     return created;
   };
@@ -89,12 +94,15 @@ export function createSemDiffClient(options: SemDiffClientOptions): SemDiffClien
         };
         signal?.addEventListener('abort', onAbort, { once: true });
         pending.set(id, finish);
-        try {
-          ensureWorker().postMessage(request);
-        } catch {
-          pending.delete(id);
-          finish(null);
-        }
+        ensureWorker().then(
+          (w) => {
+            if (pending.has(id)) w.postMessage(request);
+          },
+          () => {
+            pending.delete(id);
+            finish(null);
+          },
+        );
       });
       if (!reply || !reply.ok || signal?.aborted) return null;
       if (!hasSomethingToSay(reply.semanticOperations)) return null;

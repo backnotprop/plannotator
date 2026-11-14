@@ -30,7 +30,6 @@ import { useIsWorkerPoolReadyOrDisabled, useWorkerPoolThemeSync } from '../worke
 import type { SemDiffAdvert } from '@plannotator/shared/sem-diff-assets';
 import { useConfigValue } from '@plannotator/ui/config';
 import { createSemDiffClient, type SemDiffClient } from '../semDiff/semDiffClient';
-import { createSemDiffWorker } from '../semDiff/createSemDiffWorker';
 import { SemanticFileNote, type SemanticFileState } from '../semDiff/SemanticFileNote';
 import type { DiffFile, AnnotationScrollTarget } from '../types';
 import type { MarkdownFileView } from '../utils/markdownPreview';
@@ -1178,7 +1177,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   const semanticEnabledRef = useRef(semanticEnabled);
   semanticEnabledRef.current = semanticEnabled;
   const semClient = useMemo<SemDiffClient | null>(
-    () => (semDiff ? createSemDiffClient({ advert: semDiff, origin: window.location.origin, createWorker: createSemDiffWorker }) : null),
+    () => (semDiff ? createSemDiffClient({ advert: semDiff, origin: window.location.origin, createWorker: () => import('../semDiff/createSemDiffWorker').then((m) => m.createSemDiffWorker()) }) : null),
     [semDiff],
   );
   useEffect(() => () => semClient?.dispose(), [semClient]);
