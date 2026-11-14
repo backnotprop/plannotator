@@ -1,6 +1,6 @@
 /**
  * The Inbox's start lock (`acquireInboxStartLock`): one starter at a time, and a start that crashed (a force quit,
- * a kill during a long move into SQLite) does not hold the next one back. The failure this guards: after such a
+ * a power cut) does not hold the next one back. The failure this guards: after such a
  * crash, every start for the next 30 s waits 20 s and gives up with "try again"; or, the other way, a live starter's
  * lock taken as stale, so two Inboxes write one store.
  */
