@@ -397,6 +397,27 @@ Browsers allow notifications per address. Each device asks once.
 
 The Inbox's MCP address (`/mcp`) now answers only when the request names `127.0.0.1` or `localhost` with the Inbox's own port. An `ssh -L` forward to a different local port is refused. Forward the same port number, or run `plannotator inbox mcp` on the Inbox's computer.
 
+## Inside another app on this computer
+
+By default, no page may show the Inbox in a frame. To show it inside an app of your own on this computer, such as an agent's desktop app, list that app's origin in `~/.plannotator/config.json` and restart the Inbox:
+
+```json
+{ "inboxFrameAncestors": ["app://myapp"] }
+```
+
+Each entry is one exact origin, which is what the app's page reports as `location.origin`:
+
+- an app scheme with a name, such as `app://myapp` or `tauri://localhost`;
+- `http://` or `https://` on `localhost`, a `.localhost` name, `127.0.0.1` or `[::1]`, with its port, such as `http://localhost:5173`.
+
+Use an app scheme when you can. A port trusts any program that later runs on that port.
+
+The Inbox ignores any other entry and says so when it starts: `*` or any other wildcard, `file://`, a scheme without a name, a path or a trailing slash, an address without a port, and every website. An app loaded from `file://` cannot be listed. Register a scheme for it instead, or show the Inbox in a view of its own (in Electron, a `WebContentsView`), which needs no setting.
+
+The setting changes only the Inbox on this computer. The tailnet address can never be framed. The app's page can show the Inbox, but it cannot read it or use its API. Pages that agents attach, `html` blocks and the tour show inside the app too. A running app that an agent opened for you (a live site) does not show inside the app yet.
+
+Inside a frame, the browser or the app decides some things. Allow notifications in the app if you want them. For voice dictation, give the frame `allow="microphone"`, and for Copy, `allow="clipboard-write"`. Links that open a new tab go through the app: in Electron, send them to the browser with `setWindowOpenHandler`. The sidebar's open or closed state may reset when the app reloads.
+
 ## Data on disk
 
 Everything lives under `~/.plannotator/inbox/` (or `$PLANNOTATOR_DATA_DIR/inbox/`):
@@ -419,7 +440,7 @@ Everything lives under `~/.plannotator/inbox/` (or `$PLANNOTATOR_DATA_DIR/inbox/
 | `claims/`, `leases/` and `connection-tools.json` | Bookkeeping for the Pi and OpenCode connections |
 | `acp/sessions.json` | Left by Plannotator 0.28.34 to 0.28.36, which could run Grok Build sessions itself. No longer read; you can delete it |
 
-The Inbox stores the files agents attached as they were when sent, the messages and your replies. It sets no size limits. To free space, use **Delete from Inbox** on a thread or a project in **Settings → Storage**, which also remove sent files that nothing else uses. Your choices for the inbox tool, notifications and the tailnet are kept in `~/.plannotator/config.json` (`inboxTool`, `inboxReminder`, `prompts.inbox`, `inboxNotifications`, `inboxSound`, `inboxBoard`, `inboxTailscale`, `inboxTailscaleAllow`, `inboxRun`).
+The Inbox stores the files agents attached as they were when sent, the messages and your replies. It sets no size limits. To free space, use **Delete from Inbox** on a thread or a project in **Settings → Storage**, which also remove sent files that nothing else uses. Your choices for the inbox tool, notifications and the tailnet are kept in `~/.plannotator/config.json` (`inboxTool`, `inboxReminder`, `prompts.inbox`, `inboxNotifications`, `inboxSound`, `inboxBoard`, `inboxTailscale`, `inboxTailscaleAllow`, `inboxFrameAncestors`, `inboxRun`).
 
 ## Uninstall
 
