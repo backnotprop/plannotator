@@ -162,7 +162,7 @@ export const OpenInAppButton: React.FC<OpenInAppButtonProps> = ({
   const isDisabled = disabled || busy;
 
   return (
-    <div className={`flex items-center gap-1 ${quiet ? '[@media(hover:hover)]:opacity-0 group-hover/file-header:opacity-100 focus-within:opacity-100 has-[[data-popup-open]]:opacity-100 transition-opacity' : ''}`} data-open-in-quiet={quiet ? '' : undefined}>
+    <div className={`flex items-center gap-1 ${quiet ? 'opacity-0 group-hover/file-header:opacity-100 [@media(hover:none)]:opacity-100 focus-within:opacity-100 has-[[data-popup-open]]:opacity-100 transition-opacity' : ''}`} data-open-in-quiet={quiet ? '' : undefined}>
       <div className="flex items-center">
         {/* Primary: open in the current app (only when launchable). */}
         {openable && currentApp && (
