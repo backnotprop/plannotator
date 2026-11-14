@@ -1,13 +1,10 @@
 /**
- * One message's body, drawn again only when what it draws from changed (the thread pane's messages are many, and a
+ * One message's body or head, drawn again only when what it draws from changed (the thread pane's messages are many, and a
  * key typed in "Other" or the reply box changes one card at most).
  *
- * `data` holds everything the body draws from, as plain values: the message (the cache keeps an unchanged message
- * the same object), its answers as shown, each question's footer, its cards' replacements, its comments, and the
- * thread's values it reads. `draw` builds the body from them. The two rules that keep it right:
- *  - `draw` reads nothing a render can change besides `data` (a value the body shows goes into `data`);
- *  - the body's event handlers call the pane's newest functions (the pane hands them through a ref), since a body
- *    that did not draw again keeps the handlers of its last draw.
+ * `data` holds everything the message draws from, as plain values, and a stable ref to the pane's newest handlers.
+ * `draw` is a module-level function of `data` alone: a message that did not draw again keeps its last props, so
+ * nothing in them may reach the pane's render (a closure made there would keep each earlier thread alive).
  * Compared field by field: a value is the same object, or an array or a Map holding the same objects.
  */
 import { memo, type ReactNode } from 'react';
@@ -32,9 +29,11 @@ export function sameMessageData(a: MessageViewData, b: MessageViewData): boolean
   return keys.every((key) => Object.prototype.hasOwnProperty.call(b, key) && sameValue(a[key], b[key]));
 }
 
+type Props<D extends MessageViewData> = { data: D; draw: (data: D) => ReactNode };
+
 export const MessageView = memo(
-  function MessageView({ draw }: { data: MessageViewData; draw: () => ReactNode }) {
-    return <>{draw()}</>;
+  function MessageView({ data, draw }: Props<MessageViewData>) {
+    return <>{draw(data)}</>;
   },
-  (before, after) => sameMessageData(before.data, after.data),
-);
+  (before, after) => before.draw === after.draw && sameMessageData(before.data, after.data),
+) as <D extends MessageViewData>(props: Props<D>) => ReactNode;

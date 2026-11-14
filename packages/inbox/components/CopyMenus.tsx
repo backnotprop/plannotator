@@ -49,17 +49,20 @@ function who(message: InboxMessageWire, short = false): string {
   return `${short ? shortAgentName(name) : name}, ${whenTime(message.created_at)}`;
 }
 
-function useCopies({ thread, linkOf, onToast }: CopyMenuHost) {
+function useCopies(host: () => CopyMenuHost) {
   const say = (ok: boolean, lead: string, detail: string, speech?: string) =>
-    onToast?.(ok ? { icon: 'check', lead, detail, ...(speech && speech !== `${lead}. ${detail}` ? { speech } : {}) } : { icon: 'warn', lead: "Couldn't copy" });
+    host().onToast?.(ok ? { icon: 'check', lead, detail, ...(speech && speech !== `${lead}. ${detail}` ? { speech } : {}) } : { icon: 'warn', lead: "Couldn't copy" });
   const named = (lead: string, message: InboxMessageWire) => say(true, lead, who(message, true), `${lead}. ${who(message)}`);
-  const subject = `“${thread.subject ?? '(no subject)'}”`;
+  const subject = () => `“${host().thread.subject ?? '(no subject)'}”`;
   return {
     message: (message: InboxMessageWire) => void copyMarkdown(messageMarkdown(message)).then((ok) => (ok ? named('Message copied', message) : say(false, '', ''))),
-    messageLink: (message: InboxMessageWire) => void copyTextToClipboard(linkOf(message.id)).then((ok) => (ok ? named('Link copied', message) : say(false, '', ''))),
-    thread: () => void copyMarkdown(threadMarkdown(thread)).then((ok) => say(ok, 'Thread copied', plural(thread.messages.length, 'message'))),
-    threadLink: () => void copyTextToClipboard(linkOf()).then((ok) => say(ok, 'Link copied', subject)),
-    threadId: () => void copyTextToClipboard(thread.thread_id).then((ok) => say(ok, 'Thread ID copied', subject)),
+    messageLink: (message: InboxMessageWire) => void copyTextToClipboard(host().linkOf(message.id)).then((ok) => (ok ? named('Link copied', message) : say(false, '', ''))),
+    thread: () => {
+      const { thread } = host();
+      void copyMarkdown(threadMarkdown(thread)).then((ok) => say(ok, 'Thread copied', plural(thread.messages.length, 'message')));
+    },
+    threadLink: () => void copyTextToClipboard(host().linkOf()).then((ok) => say(ok, 'Link copied', subject())),
+    threadId: () => void copyTextToClipboard(host().thread.thread_id).then((ok) => say(ok, 'Thread ID copied', subject())),
   };
 }
 
@@ -82,12 +85,13 @@ function usePortal<T extends HTMLElement>() {
  * One open message's menu: its ⋯ (handed to `head` to place after Reply) and,
  * off a phone, a right-click on the head line `head` draws.
  */
-export function MessageMenu(props: CopyMenuHost & { message: InboxMessageWire; head: (more: ReactElement) => ReactElement; onTakeBack?: (() => void) | null }) {
-  const { message, phone } = props;
-  const copies = useCopies(props);
+export function MessageMenu(props: { phone: boolean; newest: { readonly current: CopyMenuHost }; message: InboxMessageWire; head: (more: ReactElement) => ReactElement; takeBackOf?: () => (() => void) | null }) {
+  const { message, phone, newest } = props;
+  const copies = useCopies(() => newest.current);
   const { ref: more, portal } = usePortal<HTMLButtonElement>();
   const [open, setOpen] = useState(false);
   const [contextOpen, setContextOpen] = useState(false);
+  const onTakeBack = open || contextOpen ? (props.takeBackOf?.() ?? null) : null;
   const arm = useMessageArm();
   const named = who(message);
   // Shift+F10 or the context-menu key on the message's head (approval "inbox-keyboard-keys-2026-11-07", item 6): its
@@ -130,9 +134,9 @@ export function MessageMenu(props: CopyMenuHost & { message: InboxMessageWire; h
       <div className="ib-pm-title" aria-hidden="true">
         {copyAuthor(message)} · {whenTime(message.created_at)}
       </div>
-      {props.onTakeBack && (
+      {onTakeBack && (
         <>
-          <Menu.Item className="ib-pmi" label={TAKE_BACK_LABEL} onClick={props.onTakeBack} data-take-back-item="">
+          <Menu.Item className="ib-pmi" label={TAKE_BACK_LABEL} onClick={onTakeBack} data-take-back-item="">
             <Icon name="reply" size={15} />
             {TAKE_BACK_LABEL}
           </Menu.Item>
@@ -290,7 +294,7 @@ export function ThreadMore(
   const { thread, phone, pin, priority, markRead, moveBack, markUnread, archive, snooze, snoozeRequest = 0, requestGuide, addPull, postDecisions, launch } = props;
   const markReadKeys = useShortcutAria({ scope: inboxThreadShortcuts, action: 'markRead' });
   const snoozeKeys = useShortcutAria({ scope: inboxThreadShortcuts, action: 'snooze' });
-  const copies = useCopies(props);
+  const copies = useCopies(() => props);
   const { ref, portal } = usePortal<HTMLButtonElement>();
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<SnoozeView | null>(null);
