@@ -4,11 +4,52 @@ import { AnalysisLayerToggle } from '../AnalysisLayerToggle';
 import { PowerUpGuy } from '../agentFace/PowerUpGuy';
 
 type Provider = 'jev' | 'clef';
-type Check = { kind: 'idle' } | { kind: 'checking' } | { kind: 'ok'; ms: number } | { kind: 'error'; reason: string };
+type Failure = 'missing' | 'refused' | 'noCredit' | 'noAnswer';
+type Check = { kind: 'idle' } | { kind: 'checking' } | { kind: 'ok'; ms: number } | { kind: 'error'; failure: Failure };
 
 const ROUTE = '/api/sem-diff/opinion/settings';
 export const POWER_UP_CHANGED_EVENT = 'plannotator:power-up-changed';
 const PROVIDER_NAME: Record<Provider, string> = { jev: 'Jev', clef: 'Clef' };
+const ADD_KEY: Record<Provider, string> = { jev: 'Add your Jev key', clef: 'Add your account ID and token' };
+
+function failureText(provider: Provider, failure: Failure): string {
+  const name = PROVIDER_NAME[provider];
+  if (failure === 'missing') return ADD_KEY[provider];
+  if (failure === 'refused') return provider === 'jev' ? 'Jev refused this key' : 'Clef refused this token';
+  if (failure === 'noCredit') return `No credit left on this ${name} account`;
+  return `${name} did not answer. Try again in a moment.`;
+}
+
+function KeyField({ caption, label, value, onChange, secret, flagged, saved, onFocus, className }: {
+  caption: string;
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  secret: boolean;
+  flagged: boolean;
+  saved: boolean;
+  onFocus: () => void;
+  className: string;
+}) {
+  return (
+    <label className={`relative flex h-7 items-center ${className}`}>
+      <span className="pointer-events-none absolute left-2 text-[10px] text-muted-foreground">{caption}</span>
+      <input
+        className={`h-7 w-full min-w-0 rounded-md border bg-background pr-2 font-mono text-xs outline-none focus:ring-1 focus:ring-ring ${flagged ? 'border-warning' : 'border-border'}`}
+        style={{ paddingLeft: `${caption.length * 0.55 + 1.1}em` }}
+        type={secret ? 'password' : 'text'}
+        autoComplete="off"
+        spellCheck={false}
+        placeholder={saved ? '••••••••' : ''}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onFocus={onFocus}
+        aria-label={label}
+        aria-invalid={flagged || undefined}
+      />
+    </label>
+  );
+}
 
 function Segmented<T extends string>({ label, value, options, onChange }: { label: string; value: T; options: Array<[T, string]>; onChange: (v: T) => void }) {
   return (
@@ -47,6 +88,7 @@ export function SemanticDiffsTab() {
   const motion = useConfigValue('diffPowerUpMotion');
   const [available, setAvailable] = useState<boolean | null>(null);
   const [configured, setConfigured] = useState(false);
+  const [savedProvider, setSavedProvider] = useState<Provider | null>(null);
   const [provider, setProvider] = useState<Provider>('jev');
   const [editing, setEditing] = useState(false);
   const [apiKey, setApiKey] = useState('');
@@ -61,6 +103,7 @@ export function SemanticDiffsTab() {
       const data = (await res.json()) as { configured: boolean; provider: Provider | null };
       setAvailable(true);
       setConfigured(data.configured);
+      setSavedProvider(data.provider);
       if (data.provider) setProvider(data.provider);
       setEditing(!data.configured);
     } catch {
@@ -78,32 +121,36 @@ export function SemanticDiffsTab() {
     const body = provider === 'jev' ? { provider, apiKey } : { provider, accountId, apiToken };
     try {
       const res = await fetch(ROUTE, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-      const reply = (await res.json()) as { ok: true; ms: number } | { ok: false; reason: string };
+      const reply = (await res.json()) as { ok: true; ms: number } | { ok: false; failure?: Failure };
       setApiKey('');
       setApiToken('');
       if (reply.ok === false) {
-        setCheck({ kind: 'error', reason: reply.reason });
+        setCheck({ kind: 'error', failure: reply.failure ?? 'noAnswer' });
         return;
       }
       setCheck({ kind: 'ok', ms: reply.ms });
+      setAccountId('');
+      setSavedProvider(provider);
       setConfigured(true);
       setEditing(false);
       configStore.set('diffPowerUp', true);
       changed();
     } catch {
-      setCheck({ kind: 'error', reason: 'The review server did not answer.' });
+      setCheck({ kind: 'error', failure: 'noAnswer' });
     }
   };
 
   const remove = async () => {
     await fetch(ROUTE, { method: 'DELETE' }).catch(() => {});
     setConfigured(false);
+    setSavedProvider(null);
     setEditing(true);
     setCheck({ kind: 'idle' });
     changed();
   };
 
-  const field = 'w-56 rounded-md border border-border bg-background px-2 py-1 font-mono text-xs';
+  const saved = configured && savedProvider === provider && (!editing || (provider === 'jev' ? !apiKey : !accountId && !apiToken));
+  const complete = provider === 'jev' ? apiKey.trim() !== '' : accountId.trim() !== '' && apiToken.trim() !== '';
   return (
     <div className="space-y-4" data-semantic-diffs-settings="">
       <div>
@@ -155,44 +202,76 @@ export function SemanticDiffsTab() {
             <Row
               title={provider === 'jev' ? 'API key' : 'Account and token'}
               hint={
-                check.kind === 'ok'
-                  ? `✓ Key works · ${check.ms} ms`
-                  : check.kind === 'error'
-                    ? check.reason
-                    : check.kind === 'checking'
-                      ? 'Checking the key…'
-                      : configured && !editing
-                        ? 'Kept by this computer, never shown again.'
-                        : undefined
+                check.kind === 'ok' ? (
+                  `✓ Key works · ${check.ms} ms`
+                ) : check.kind === 'error' ? (
+                  <span className="text-foreground" data-power-up-key-failure={check.failure}>{failureText(provider, check.failure)}</span>
+                ) : check.kind === 'checking' ? (
+                  'Checking…'
+                ) : saved ? (
+                  <>
+                    Kept by this computer, never shown again ·{' '}
+                    <button type="button" className="underline-offset-2 hover:text-foreground hover:underline" onClick={() => void remove()}>Remove</button>
+                  </>
+                ) : (
+                  ADD_KEY[provider]
+                )
               }
             >
-              {configured && !editing ? (
-                <div className="flex items-center gap-2 text-xs">
-                  <span className="font-mono text-muted-foreground" data-power-up-key-set="">•••• set</span>
-                  <button type="button" className="rounded px-1.5 py-0.5 hover:bg-muted" onClick={() => setEditing(true)}>Change</button>
-                  <button type="button" className="rounded px-1.5 py-0.5 hover:bg-muted" onClick={() => void remove()}>Remove</button>
-                </div>
-              ) : (
-                <form
-                  className="flex flex-col items-end gap-1.5"
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    void save();
-                  }}
-                >
-                  {provider === 'jev' ? (
-                    <input className={field} type="password" autoComplete="off" placeholder="TypeSafe API key" value={apiKey} onChange={(e) => setApiKey(e.target.value)} aria-label="TypeSafe API key" />
-                  ) : (
-                    <>
-                      <input className={field} autoComplete="off" placeholder="Cloudflare account ID" value={accountId} onChange={(e) => setAccountId(e.target.value)} aria-label="Cloudflare account ID" />
-                      <input className={field} type="password" autoComplete="off" placeholder="Workers AI token" value={apiToken} onChange={(e) => setApiToken(e.target.value)} aria-label="Workers AI token" />
-                    </>
-                  )}
-                  <button type="submit" disabled={check.kind === 'checking'} className="rounded-md border border-border px-2 py-0.5 text-xs hover:bg-muted disabled:opacity-50">
-                    Check and save
-                  </button>
-                </form>
-              )}
+              <form
+                className="flex h-7 w-[250px] items-center gap-1.5"
+                data-power-up-key-set={saved ? '' : undefined}
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (complete) void save();
+                  else setCheck({ kind: 'error', failure: 'missing' });
+                }}
+                onBlur={(e) => {
+                  if (!e.currentTarget.contains(e.relatedTarget as Node | null) && complete && check.kind !== 'checking') void save();
+                }}
+              >
+                {provider === 'jev' ? (
+                  <KeyField
+                    className="w-full"
+                    caption="Key"
+                    label="TypeSafe API key"
+                    value={apiKey}
+                    onChange={setApiKey}
+                    secret
+                    flagged={check.kind === 'error' && (check.failure === 'refused' || (check.failure === 'missing' && !apiKey))}
+                    saved={saved}
+                    onFocus={() => setEditing(true)}
+                  />
+                ) : (
+                  <>
+                    <KeyField
+                      className="w-[78px] shrink-0"
+                      caption="ID"
+                      label="Cloudflare account ID"
+                      value={accountId}
+                      onChange={setAccountId}
+                      secret={false}
+                      flagged={check.kind === 'error' && check.failure === 'missing' && !accountId}
+                      saved={saved}
+                      onFocus={() => setEditing(true)}
+                    />
+                    <KeyField
+                      className="min-w-0 flex-1"
+                      caption="Token"
+                      label="Workers AI token"
+                      value={apiToken}
+                      onChange={setApiToken}
+                      secret
+                      flagged={check.kind === 'error' && (check.failure === 'refused' || (check.failure === 'missing' && !apiToken))}
+                      saved={saved}
+                      onFocus={() => setEditing(true)}
+                    />
+                  </>
+                )}
+                <button type="submit" className="sr-only" tabIndex={-1} disabled={check.kind === 'checking'}>
+                  Check and save
+                </button>
+              </form>
             </Row>
             <Row title="Motion" hint="The stream on powered bands. Follows your system's reduce-motion setting.">
               <Segmented label="Motion" value={motion} options={[['stream', 'Stream'], ['still', 'Still']]} onChange={(v) => configStore.set('diffPowerUpMotion', v)} />

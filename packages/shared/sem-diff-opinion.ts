@@ -29,7 +29,8 @@ export type OpinionReply =
   | { ok: true; answers: OpinionAnswer[] }
   | { ok: false; state: OpinionState; reason: string };
 
-export type KeySaveReply = { ok: true; provider: OpinionProvider; ms: number } | { ok: false; reason: string };
+export type KeySaveFailure = "missing" | "refused" | "noCredit" | "noAnswer";
+export type KeySaveReply = { ok: true; provider: OpinionProvider; ms: number } | { ok: false; failure: KeySaveFailure; reason: string };
 
 type Fetch = typeof fetch;
 
@@ -83,20 +84,20 @@ export async function opinionSettings(dataDir: string): Promise<OpinionSettings>
 
 export async function saveOpinionKey(dataDir: string, body: unknown, fetchImpl: Fetch = fetch): Promise<KeySaveReply> {
   const secret = parseSecret(body);
-  if (!secret) return { ok: false, reason: "Enter a key for Jev, or an account ID and token for Clef." };
+  if (!secret) return { ok: false, failure: "missing", reason: "Enter a key for Jev, or an account ID and token for Clef." };
   const check =
     secret.provider === "jev"
       ? await checkKey({ provider: "jev", apiKey: secret.apiKey }, fetchImpl)
       : await checkKey({ provider: "clef", accountId: secret.accountId, apiToken: secret.apiToken }, fetchImpl);
-  if (!check.ok) return { ok: false, reason: plainReason(check.reason) };
+  if (!check.ok) return { ok: false, ...plainReason(check.reason) };
   await writeOpinionSecret(dataDir, secret);
   return { ok: true, provider: secret.provider, ms: check.ms };
 }
 
-function plainReason(reason: string): string {
-  if (/no credit/i.test(reason)) return "The account has no credit left.";
-  if (/refused/i.test(reason)) return "The key was refused.";
-  return "The provider did not answer. Try again in a moment.";
+function plainReason(reason: string): { failure: KeySaveFailure; reason: string } {
+  if (/no credit/i.test(reason)) return { failure: "noCredit", reason: "The account has no credit left." };
+  if (/refused/i.test(reason)) return { failure: "refused", reason: "The key was refused." };
+  return { failure: "noAnswer", reason: "The provider did not answer. Try again in a moment." };
 }
 
 function parseCandidates(body: unknown): Candidate[] | null {

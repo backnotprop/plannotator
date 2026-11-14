@@ -1,4 +1,5 @@
-export const POWER_UP_FLOW_ANIMATION = 'pu-flow';
+export const POWER_UP_PERIOD_MS = 24_000;
+export const POWER_UP_ROW = '[data-line][data-semantic-origin]';
 
 const STILL = `
 [data-line][data-semantic-origin] {
@@ -35,6 +36,7 @@ const STREAM = `
   background-repeat: repeat-x;
   opacity: .55;
   animation: pu-flow 24s linear infinite;
+  animation-delay: var(--pu-phase, 0ms);
 }
 @keyframes pu-flow { to { transform: translate3d(480px, 0, 0); } }
 @media (prefers-reduced-motion: reduce) {

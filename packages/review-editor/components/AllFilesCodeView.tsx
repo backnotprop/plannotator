@@ -30,7 +30,7 @@ import { useIsWorkerPoolReadyOrDisabled, useWorkerPoolThemeSync } from '../worke
 import { useConfigValue } from '@plannotator/ui/config';
 import type { SemDiffClient, SemDiffResult } from '../semDiff/semDiffClient';
 import type { PowerUpConfig, PowerUpFileState, PowerUpStatus } from '../semDiff/powerUp';
-import { POWER_UP_FLOW_ANIMATION, powerUpCss } from '../semDiff/powerUpCss';
+import { POWER_UP_PERIOD_MS, POWER_UP_ROW, powerUpCss } from '../semDiff/powerUpCss';
 import { SemanticFileNote, type SemanticFileState } from '../semDiff/SemanticFileNote';
 import type { DiffFile, AnnotationScrollTarget } from '../types';
 import type { MarkdownFileView } from '../utils/markdownPreview';
@@ -781,17 +781,32 @@ const LINE_TARGET_FLASH_MS = 1_600;
 
 const inStepRoots = new WeakSet<ShadowRoot>();
 
+function stampPowerUpPhase(rows: Iterable<Element>): void {
+  const now = document.timeline.currentTime;
+  const phase = `${-((typeof now === 'number' ? now : performance.now()) % POWER_UP_PERIOD_MS)}ms`;
+  for (const row of rows) (row as HTMLElement).style.setProperty('--pu-phase', phase);
+}
+
 function keepPowerUpInStep(node: HTMLElement): void {
   const root = node.shadowRoot;
   if (!root || inStepRoots.has(root)) return;
   inStepRoots.add(root);
-  root.addEventListener('animationstart', (event) => {
-    const { animationName, target } = event as AnimationEvent;
-    if (animationName !== POWER_UP_FLOW_ANIMATION || !(target instanceof Element)) return;
-    for (const animation of target.getAnimations({ subtree: true })) {
-      if ((animation as CSSAnimation).animationName === POWER_UP_FLOW_ANIMATION && animation.startTime !== 0) animation.startTime = 0;
+  stampPowerUpPhase(root.querySelectorAll(POWER_UP_ROW));
+  new MutationObserver((records) => {
+    const rows: Element[] = [];
+    for (const record of records) {
+      if (record.type === 'attributes') {
+        if (record.oldValue === null && record.target instanceof Element && record.target.matches(POWER_UP_ROW)) rows.push(record.target);
+        continue;
+      }
+      for (const added of record.addedNodes) {
+        if (!(added instanceof Element)) continue;
+        if (added.matches(POWER_UP_ROW)) rows.push(added);
+        if (added.firstElementChild) rows.push(...added.querySelectorAll(POWER_UP_ROW));
+      }
     }
-  });
+    if (rows.length > 0) stampPowerUpPhase(rows);
+  }).observe(root, { childList: true, subtree: true, attributes: true, attributeOldValue: true, attributeFilter: ['data-semantic-origin'] });
 }
 
 const EMPTY_AI_MESSAGES: AIChatEntry[] = [];

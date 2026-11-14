@@ -26,7 +26,7 @@ describe("Power Up key and opinion routes", () => {
   test("a key is checked before it is kept, kept 0600 outside config.json, and never answered back", async () => {
     dir = mkdtempSync(join(tmpdir(), "pn-opinion-"));
     const refused = await route("/api/sem-diff/opinion/settings", "POST", { provider: "jev", apiKey: KEY }, stub(401, { error: "nope" }));
-    expect(refused.body).toEqual({ ok: false, reason: "The key was refused." });
+    expect(refused.body).toEqual({ ok: false, failure: "refused", reason: "The key was refused." });
     expect(existsSync(semDiffOpinionPath(dir))).toBe(false);
     const saved = await route("/api/sem-diff/opinion/settings", "POST", { provider: "jev", apiKey: KEY }, okCheck);
     expect(saved.body).toMatchObject({ ok: true, provider: "jev" });
