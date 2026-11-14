@@ -9,7 +9,7 @@ const hasDom = typeof document !== 'undefined';
 describe.if(hasDom)('the swipe and onion stages stack both images in one box (DOM)', () => {
   let root: Root | null = null;
   let host: HTMLDivElement | null = null;
-  const originalDpr = window.devicePixelRatio;
+  const originalDpr = hasDom ? window.devicePixelRatio : 1;
 
   afterEach(() => {
     act(() => root?.unmount());
