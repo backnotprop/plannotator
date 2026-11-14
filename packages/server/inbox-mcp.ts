@@ -22,7 +22,7 @@ import { checkSendPrototypes } from "./inbox-prototypes";
 import { questionsToCheckText } from "@plannotator/shared/inbox/questions-to-check";
 import { INBOX_ACTION_EXAMPLE, INBOX_ACTION_GUIDE, INBOX_DONE_DESCRIPTION } from "@plannotator/core/inbox-actions";
 import { INBOX_NOTE_BLOCK_LINE } from "@plannotator/core/inbox-review";
-import { checkInboxSubject, INBOX_CARD_ACTION_ON, INBOX_MCP_WAKING_HOSTS, inboxTidyMcpLine, INBOX_NAME_THIS_THREAD_HINT, INBOX_SECTIONS, isInboxNote, INBOX_THREAD_NAME_MAX, type InboxGuideRef, type InboxSectionId, type InboxMessage, type InboxProject } from "@plannotator/core/inbox-types";
+import { checkInboxSubject, INBOX_CARD_ACTION_ON, INBOX_MCP_WAKING_HOSTS, INBOX_T3_HOST, inboxTidyMcpLine, INBOX_NAME_THIS_THREAD_HINT, INBOX_SECTIONS, isInboxNote, INBOX_THREAD_NAME_MAX, type InboxGuideRef, type InboxSectionId, type InboxMessage, type InboxProject } from "@plannotator/core/inbox-types";
 import { inboxBodyWithBro, inboxStopNoticeReply, INBOX_AGENT_RULES, INBOX_OPTION_LINES_RULE, INBOX_ATTACHMENTS_PICTURES_LINE, INBOX_ATTACHMENTS_PROTOTYPE_CLAUSE, INBOX_DELEGATED_OPTIONS_RULE, INBOX_PEEK_META_KEY, INBOX_PICTURES_RULE, INBOX_REF_LINK_RULE, INBOX_REPLY_TO_CHECK, INBOX_WAKES_META_KEY, INBOX_WORKING_FOLDER_META_KEY } from "@plannotator/shared/inbox/connection";
 import { inboxSectionOf } from "@plannotator/shared/inbox/list";
 import { bodyShowsLocalImages, captureInboxInlineImages, type InlineImageFailure } from "@plannotator/shared/inbox/inline-images";
@@ -302,6 +302,13 @@ export interface InboxMcpContext extends InboxSnoozeMcpContext {
    */
   sessionWakes?: (host: unknown, session: unknown, meta: unknown) => Promise<boolean>;
   /**
+   * Whether the T3 wake itself can put a reply into this T3 thread (a saved
+   * sign-in reaches it and covers its mode). A thread whose Claude runs the
+   * Claude Code mod is woken by the mod only while T3 keeps that Claude.
+   * Absent: the send's last sentence does not depend on it.
+   */
+  t3WakeReaches?: (session: string) => Promise<boolean>;
+  /**
    * Whether this session's bridge polls the Inbox now, so a Tidy for that host
    * reaches it by itself. Never a Codex or Qwen Code wake. Absent: never.
    */
@@ -453,10 +460,32 @@ export const INBOX_REPLY_LOOK_TEXT = "If it has not arrived when you next work, 
 export const INBOX_REPLY_READ_LATER_TEXT =
   "The person's reply won't arrive in this session by itself: go on with your work and call read_thread with this thread_id later.";
 
-/** What a send tool's result ends with, for this caller. */
-export function replyNextStepText(wakes: boolean, host: string | undefined): string {
+/**
+ * A T3 Code thread whose Claude runs the Claude Code mod, with no T3 sign-in that can send into it: the mod puts
+ * the reply in only while T3 keeps that Claude running. Proposed words: the owner approves them word for word.
+ */
+export const INBOX_REPLY_T3_WHILE_RUNNING_TEXT =
+  "The person's reply arrives in this session by itself while T3 Code keeps it running: end your turn, or go on with other work. If T3 stops this session first, the reply waits in the Inbox until the person connects T3 (`plannotator t3 --help`); when you next work, call read_thread with this thread_id.";
+
+/** What a send tool's result ends with, for this caller. `t3WhileRunning`: woken only while T3 keeps the session. */
+export function replyNextStepText(wakes: boolean, host: string | undefined, t3WhileRunning = false): string {
   if (!wakes) return INBOX_REPLY_READ_LATER_TEXT;
+  if (t3WhileRunning) return INBOX_REPLY_T3_WHILE_RUNNING_TEXT;
   return INBOX_MCP_WAKING_HOSTS.includes(host?.trim() ?? "") ? `${INBOX_REPLY_ARRIVES_TEXT} ${INBOX_REPLY_LOOK_TEXT}` : INBOX_REPLY_ARRIVES_TEXT;
+}
+
+/**
+ * Whether a woken T3 thread is woken only while T3 keeps its Claude: its wake is the Claude Code mod's, and no
+ * saved sign-in lets the T3 wake send into it once T3 stops that Claude.
+ */
+export async function t3WokenOnlyWhileRunning(
+  context: Pick<InboxMcpContext, "t3WakeReaches">,
+  wakes: boolean,
+  input: { agent_host?: string; agent_session?: string },
+): Promise<boolean> {
+  const session = input.agent_session?.trim();
+  if (!wakes || input.agent_host?.trim() !== INBOX_T3_HOST || !session || !context.t3WakeReaches) return false;
+  return !(await context.t3WakeReaches(session).catch(() => false));
 }
 
 
@@ -1224,7 +1253,7 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
           sent.structured.hint = quiet.line;
         }
         return ok(
-          `${sent.replayed ? "Already sent" : "Sent"} to the Plannotator Inbox${asked} (thread ${sent.structured.thread_id}, ${sent.structured.url}).${stepsLine}${pullsLine}${priorityLine(sent.priority)}${namingLine(sent.naming)} ${replyNextStepText(wakes, input.agent_host)}${hints.join("")}`,
+          `${sent.replayed ? "Already sent" : "Sent"} to the Plannotator Inbox${asked} (thread ${sent.structured.thread_id}, ${sent.structured.url}).${stepsLine}${pullsLine}${priorityLine(sent.priority)}${namingLine(sent.naming)} ${replyNextStepText(wakes, input.agent_host, await t3WokenOnlyWhileRunning(context, wakes, input))}${hints.join("")}`,
           stale ? { ...sent.structured, not_read_since: lastContactOf(stale) } : sent.structured,
         );
       }),
