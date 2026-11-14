@@ -87,27 +87,15 @@ export const PI_THINKING: Array<{ value: string; label: string }> = PI_THINKING_
 
 const MODE_LABEL: Record<AgentMode, string> = {
   review: 'Code Review',
-  tour: 'Code Tour',
   guide: 'Guided Review',
 };
 
-const ENGINE_LABEL: Record<AgentEngine, string> = {
-  claude: 'Claude',
-  codex: 'Codex',
-};
-
-const ENGINE_ICON: Record<AgentEngine, React.FC<{ className?: string }>> = {
-  claude: ClaudeIcon,
-  codex: CodexIcon,
-};
-
-// Review-only label map. Keeps Tour's narrow AgentEngine maps valid while the
-// review surface offers the wider set (Cursor/OpenCode). Exported so the guide
+// Review engine label map. Exported so the guide
 // takeover surfaces (GuideScreen, GuideEmptyState in packages/review-editor)
 // share this one source of truth instead of keeping their own copies in sync.
 export const REVIEW_ENGINE_LABEL: Record<ReviewEngine, string> = GUIDE_ENGINE_LABEL;
 
-// Review-only icon map — the wide set. Tour keeps the narrow ENGINE_ICON.
+// Review engine icon map.
 const REVIEW_ENGINE_ICON: Record<ReviewEngine, React.FC<{ className?: string }>> = {
   claude: ClaudeIcon,
   codex: CodexIcon,
@@ -216,8 +204,8 @@ function formatModel(provider: string, engine: string | undefined, model: string
   if (provider === 'pi') return model || 'Default';
   if (provider === 'copilot') return model || 'Default';
   if (provider === 'codex' || engine === 'codex') return codexLabel();
-  if ((provider === 'tour' || provider === 'guide') && engine === 'claude') return claudeLabel();
-  if (provider === 'tour' || provider === 'guide') {
+  if (provider === 'guide' && engine === 'claude') return claudeLabel();
+  if (provider === 'guide') {
     if (engine === 'cursor') return catalogLabel(CURSOR_MODELS, model);
     if (engine === 'opencode' || engine === 'pi' || engine === 'copilot') return model || 'Default';
   }
@@ -517,7 +505,6 @@ export const AgentsTab: React.FC<AgentsTabProps> = ({
     selectedMode,
     reviewEngine,
     reviewProfileId,
-    tourEngine,
     guideEngine,
     claudeModel,
     claudeEffort,
@@ -529,11 +516,6 @@ export const AgentsTab: React.FC<AgentsTabProps> = ({
     piModel,
     piThinking,
     copilotModel,
-    tourClaudeModel,
-    tourClaudeEffort,
-    tourCodexModel,
-    tourCodexReasoning,
-    tourCodexFast,
     guideClaudeModel,
     guideClaudeEffort,
     guideCodexModel,
@@ -546,7 +528,6 @@ export const AgentsTab: React.FC<AgentsTabProps> = ({
     setSelectedMode,
     setReviewEngine,
     setReviewProfileId,
-    setTourEngine,
     setGuideEngine,
     setClaudeModel,
     setClaudeEffort,
@@ -558,11 +539,6 @@ export const AgentsTab: React.FC<AgentsTabProps> = ({
     setPiModel,
     setPiThinking,
     setCopilotModel,
-    setTourClaudeModel,
-    setTourClaudeEffort,
-    setTourCodexModel,
-    setTourCodexReasoning,
-    setTourCodexFast,
     setGuideClaudeModel,
     setGuideClaudeEffort,
     setGuideCodexModel,
@@ -573,7 +549,7 @@ export const AgentsTab: React.FC<AgentsTabProps> = ({
     setGuidePiThinking,
     setGuideCopilotModel,
   } = settings;
-  const activeEngine = selectedMode === 'review' ? reviewEngine : selectedMode === 'tour' ? tourEngine : guideEngine;
+  const activeEngine = selectedMode === 'review' ? reviewEngine : guideEngine;
   const loadCatalog = catalogs.load;
   useEffect(() => loadCatalog(activeEngine), [loadCatalog, activeEngine]);
 
@@ -604,7 +580,6 @@ export const AgentsTab: React.FC<AgentsTabProps> = ({
 
   const claudeAvailable = capabilities?.providers.some((p) => p.id === 'claude' && p.available) ?? false;
   const codexAvailable = capabilities?.providers.some((p) => p.id === 'codex' && p.available) ?? false;
-  const tourAvailable = capabilities?.providers.some((p) => p.id === 'tour' && p.available) ?? false;
   const guideAvailable = capabilities?.providers.some((p) => p.id === 'guide' && p.available) ?? false;
   const cursorAvailable = capabilities?.providers.some((p) => p.id === 'cursor' && p.available) ?? false;
   const opencodeAvailable = capabilities?.providers.some((p) => p.id === 'opencode' && p.available) ?? false;
@@ -644,7 +619,7 @@ export const AgentsTab: React.FC<AgentsTabProps> = ({
     return opts.length > 0 ? [...COPILOT_MODELS, ...opts] : COPILOT_MODELS;
   }, [capabilities]);
 
-  // Tour engines (narrow union). Cursor is NOT included here — it is review-only.
+  // Claude/Codex engines (narrow union).
   const availableEngines = useMemo<AgentEngine[]>(() => {
     const engines: AgentEngine[] = [];
     if (claudeAvailable) engines.push('claude');
@@ -652,7 +627,7 @@ export const AgentsTab: React.FC<AgentsTabProps> = ({
     return engines;
   }, [claudeAvailable, codexAvailable]);
 
-  // Review engines (wide union) = tour engines + cursor/opencode when available.
+  // Review engines (wide union) = Claude/Codex + cursor/opencode when available.
   const availableReviewEngines = useMemo<ReviewEngine[]>(() => {
     const engines: ReviewEngine[] = [...availableEngines];
     if (cursorAvailable) engines.push('cursor');
@@ -665,17 +640,15 @@ export const AgentsTab: React.FC<AgentsTabProps> = ({
   const availableModes = useMemo<AgentMode[]>(() => {
     const modes: AgentMode[] = [];
     if (availableReviewEngines.length > 0) modes.push('review');
-    if (tourAvailable && availableEngines.length > 0) modes.push('tour');
     // Guide runs on the wide union — marker engines generate guides too.
     // Also gated on guideLaunchable: a guide organizes changed files into
     // chapters, so it has nothing to do against a diff with no files (same
     // gate the review-editor header applies to the "Guide" badge/shortcut).
     if (guideAvailable && availableReviewEngines.length > 0 && guideLaunchable) modes.push('guide');
     return modes;
-  }, [availableReviewEngines.length, availableEngines.length, tourAvailable, guideAvailable, guideLaunchable]);
+  }, [availableReviewEngines.length, guideAvailable, guideLaunchable]);
   // (availableReviewEngines.length covers the guide gate above.)
 
-  const firstAvailableEngine = availableEngines[0] ?? null;
   const firstAvailableReviewEngine = availableReviewEngines[0] ?? null;
   const engineAvailable = (engine: AgentEngine) => engine === 'claude' ? claudeAvailable : codexAvailable;
   const reviewEngineAvailable = (engine: ReviewEngine) =>
@@ -695,24 +668,18 @@ export const AgentsTab: React.FC<AgentsTabProps> = ({
     if (firstAvailableReviewEngine && !reviewEngineAvailable(reviewEngine)) {
       setReviewEngine(firstAvailableReviewEngine);
     }
-    if (firstAvailableEngine && !engineAvailable(tourEngine)) {
-      setTourEngine(firstAvailableEngine);
-    }
     if (firstAvailableReviewEngine && !reviewEngineAvailable(guideEngine)) {
       setGuideEngine(firstAvailableReviewEngine);
     }
   }, [
     capabilities,
     availableModes,
-    firstAvailableEngine,
     firstAvailableReviewEngine,
     selectedMode,
     reviewEngine,
-    tourEngine,
     guideEngine,
     setSelectedMode,
     setReviewEngine,
-    setTourEngine,
     setGuideEngine,
   ]);
 
@@ -851,15 +818,6 @@ export const AgentsTab: React.FC<AgentsTabProps> = ({
       ...review,
     };
   };
-  const buildTourLaunch = (): LaunchParams => ({
-    provider: 'tour',
-    label: 'Code Tour',
-    engine: tourEngine,
-    model: tourEngine === 'claude' ? tourClaudeModel : tourCodexModel,
-    ...(tourEngine === 'claude'
-      ? { effort: tourClaudeEffort }
-      : { reasoningEffort: tourCodexReasoning, ...(tourCodexFast && { fastMode: true }) }),
-  });
   // Guide extra instructions (#1265) are server-stored: this surface has no
   // editor, so it sends none and the server applies the stored standing
   // instructions itself, keeping sidebar launches identical to launch-page
@@ -923,19 +881,15 @@ export const AgentsTab: React.FC<AgentsTabProps> = ({
     engine === 'claude' || engine === 'codex' ? catalogs[engine].settled : true;
   const canLaunch = selectedMode === 'review'
     ? reviewEngineAvailable(reviewEngine) && reviewReady && modelsReady(reviewEngine)
-    : selectedMode === 'tour'
-      ? tourAvailable && engineAvailable(tourEngine) && modelsReady(tourEngine)
-      : selectedMode === 'guide'
-        ? guideAvailable && reviewEngineAvailable(guideEngine) && guideLaunchable && modelsReady(guideEngine)
-        : false;
+    : selectedMode === 'guide'
+      ? guideAvailable && reviewEngineAvailable(guideEngine) && guideLaunchable && modelsReady(guideEngine)
+      : false;
 
   const handleLaunch = async () => {
     if (!canLaunch || launchingRef.current) return;
     const params = selectedMode === 'review'
       ? buildReviewLaunch(reviewEngine)
-      : selectedMode === 'tour'
-        ? buildTourLaunch()
-        : buildGuideLaunch();
+      : buildGuideLaunch();
     launchingRef.current = true;
     setPendingLaunch({
       label: params.label ?? 'Agent job',
@@ -965,10 +919,8 @@ export const AgentsTab: React.FC<AgentsTabProps> = ({
     </div>
   );
 
-  // Icon-button engine row, shared by Tour (narrow claude/codex set) and Review
-  // (wide claude/codex/cursor/opencode set). The caller passes the engine list
-  // plus its icon/label maps so the same control renders four equal options for
-  // Review exactly as it renders two for Tour.
+  // Icon-button engine row, shared by Review and Guide. The caller passes the
+  // engine list plus its icon/label maps.
   function renderEngineSelect<E extends string>(
     value: E,
     onChange: (engine: E) => void,
@@ -1148,31 +1100,6 @@ export const AgentsTab: React.FC<AgentsTabProps> = ({
               </>
             )}
 
-            {selectedMode === 'tour' && (
-              <>
-                {renderEngineSelect(tourEngine, setTourEngine, availableEngines, ENGINE_ICON, ENGINE_LABEL)}
-                {tourEngine === 'claude'
-                  ? renderCatalogModelPicker('claude', tourClaudeModel, setTourClaudeModel)
-                  : renderCatalogModelPicker('codex', tourCodexModel, setTourCodexModel)}
-
-                {/* Claude-only: effort level */}
-                {tourEngine === 'claude' &&
-                  renderEffortPicker('Effort', catalogs.claude.models, tourClaudeModel, tourClaudeEffort, setTourClaudeEffort)}
-
-                {/* Codex-only: reasoning effort + fast mode */}
-                {tourEngine === 'codex' && (
-                  <>
-                    {renderEffortPicker('Reasoning', catalogs.codex.models, tourCodexModel, tourCodexReasoning, setTourCodexReasoning)}
-                    {modelSupportsFast(catalogs.codex.models, tourCodexModel) && (
-                      <ConfigRow label="Fast mode">
-                        <Toggle checked={tourCodexFast} onChange={setTourCodexFast} />
-                      </ConfigRow>
-                    )}
-                  </>
-                )}
-              </>
-            )}
-
             {selectedMode === 'guide' && (
               <>
                 {renderEngineSelect(guideEngine, setGuideEngine, availableReviewEngines, REVIEW_ENGINE_ICON, REVIEW_ENGINE_LABEL)}
@@ -1184,7 +1111,7 @@ export const AgentsTab: React.FC<AgentsTabProps> = ({
                   renderEffortPicker('Effort', catalogs.claude.models, guideClaudeModel, guideClaudeEffort, setGuideClaudeEffort)}
 
                 {/* Codex-only: reasoning effort. No "Fast mode" toggle here
-                    (unlike review/tour's codex blocks above) — fast mode is
+                    (unlike review's codex block above) — fast mode is
                     deliberately not offered for guide. */}
                 {guideEngine === 'codex' &&
                   renderEffortPicker('Reasoning', catalogs.codex.models, guideCodexModel, guideCodexReasoning, setGuideCodexReasoning)}
