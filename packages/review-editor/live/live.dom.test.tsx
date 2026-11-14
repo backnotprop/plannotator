@@ -148,3 +148,20 @@ describe.skipIf(!hasDom)('a thread by keyboard', () => {
     expect(document.activeElement).toBe(el.querySelector('[data-live-reply]'));
   });
 });
+
+describe.skipIf(!hasDom)('who wrote each message', () => {
+  test('a message shows its sender as the Inbox does: the reply glyph for you, the brand mark for a known agent, the neutral glyph for an unknown one', async () => {
+    const messages = [
+      message({ id: 'c1', reply_to: 'root', body: 'Why?', review_anchor: anchor }),
+      message({ id: 'a1', reply_to: 'c1', body: 'Because.', author: { kind: 'agent', host: 'pi', session: 's', name: null } as never, created_at: '2026-11-14T05:01:00.000Z' }),
+      message({ id: 'a2', reply_to: 'a1', body: 'Also.', author: { kind: 'agent', host: 'some-new-agent', session: 't', name: null } as never, created_at: '2026-11-14T05:02:00.000Z' }),
+    ];
+    const [thread] = placeThreads(messages, []);
+    const el = await render(<LiveThreadCard thread={thread!} messages={messages} actions={actionsRef()} />);
+    const glyph = (id: string) => {
+      const svg = el.querySelector(`[data-live-message="${id}"] [data-live-mark] svg`);
+      return svg ? (svg.getAttribute('data-icon') ?? 'brand') : null;
+    };
+    expect(['c1', 'a1', 'a2'].map(glyph)).toEqual(['reply', 'brand', 'code']);
+  });
+});

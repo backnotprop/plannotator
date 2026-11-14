@@ -9,3 +9,17 @@
 }
 .live-thread { font-family: var(--font-sans, ui-sans-serif, system-ui, sans-serif); white-space: normal; }
 [data-mention-picker] { z-index: 1001; }
+.live-mk { display: inline-flex; flex: none; color: var(--foreground); }
+.live-mk .ib-mk { width: 16px; height: 16px; flex: none; display: inline-flex; align-items: center; justify-content: center; }
+.live-mk .ib-mk > :is(svg, img) { width: 16px; height: 16px; display: block; }
+.live-mk .ib-mk.ib-big { width: 24px; height: 24px; border-radius: 6px; background: var(--muted); }
+.live-mk .ib-mk.ib-big > :is(svg, img) { width: 14px; height: 14px; }
+.live-mk svg.ib-ic { stroke: currentColor; fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.live-mk svg.ib-glyph { stroke: var(--muted-foreground); fill: none; stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; }
+.live-mk .ib-gk-body { fill: #fff; }
+.live-mk .ib-gk-eyes { fill: #0b0b0c; }
+.light .live-mk .ib-gk-body { fill: #0b0b0c; }
+.light .live-mk .ib-gk-eyes { fill: #fff; }
+.live-mk .ib-hermes { --ib-hermes-mask: var(--ib-hermes-dark); }
+.light .live-mk .ib-hermes { --ib-hermes-mask: var(--ib-hermes-light); }
+.live-mk-big { margin: -2px 0; }

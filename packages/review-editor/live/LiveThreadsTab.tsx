@@ -5,6 +5,7 @@ import { LiveComposer } from './LiveComposer';
 import type { PRReviewThread } from '@plannotator/shared/pr-types';
 import { agentLabel, authorName, threadLines, type PlacedThread } from './model';
 import { prThreadPlace } from './PRThreadCard';
+import { LiveAuthorMark } from './LiveMark';
 
 const short = (path: string) => path.split('/').pop() ?? path;
 const ICON = 'inline-flex h-7 w-7 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40';
@@ -45,8 +46,10 @@ function ThreadRow({ thread, focused, posted, onOpen }: { thread: PlacedThread; 
         </span>
         <span className={`line-clamp-2 text-[13px] leading-5 ${conversation.resolved ? 'text-muted-foreground' : 'text-foreground'}`}>{conversation.messages[0]!.body}</span>
         {conversation.messages.length > 1 ? (
-          <span className="text-[12px] text-muted-foreground">
-            {conversation.messages.length - 1} {conversation.messages.length === 2 ? 'reply' : 'replies'}, last from {authorName(last)}
+          <span className="flex items-center gap-1 text-[12px] text-muted-foreground">
+            <span>{conversation.messages.length - 1} {conversation.messages.length === 2 ? 'reply' : 'replies'}, last from</span>
+            <LiveAuthorMark message={last} />
+            <span className="truncate">{authorName(last)}</span>
           </span>
         ) : null}
       </button>

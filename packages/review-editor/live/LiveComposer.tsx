@@ -4,10 +4,11 @@ import { MentionAutocompleteMenu, mentionActiveOptionId } from '@plannotator/ui/
 import type { MentionSource } from '@plannotator/ui/utils/mentions';
 import type { LiveSendTag } from './api';
 import { agentLabel, type LiveAgent } from './model';
+import { LiveHostMark } from './LiveMark';
 
 export function liveMentionSource(agents: readonly LiveAgent[]): MentionSource {
   return {
-    people: agents.map((agent) => ({ id: `${agent.host}:${agent.session}`, kind: 'agent' as const, label: agentLabel(agent), detail: agent.here ? null : agent.project, canOpen: true })),
+    people: agents.map((agent) => ({ id: `${agent.host}:${agent.session}`, kind: 'agent' as const, label: agentLabel(agent), mark: <LiveHostMark host={agent.host} />, detail: agent.here ? null : agent.project, canOpen: true })),
     kinds: ['agent'],
     emptyNotice: 'No agent is connected to the Inbox.',
     heading: 'Agents',

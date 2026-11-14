@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type MutableRefObject, type ReactNode } from 'react';
 import type { LiveReviewActions } from './useLiveReview';
 import { LiveComposer } from './LiveComposer';
+import { LiveAuthorMark } from './LiveMark';
 import { authorName, deliveryWord, type LiveMessage, type PlacedThread } from './model';
 
 const time = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
@@ -10,19 +11,22 @@ export const LIVE_THREAD_SHOWN_WHOLE = 3;
 export function LiveMessageRow({ message, messages, onTakeBack, tail }: { message: LiveMessage; messages: readonly LiveMessage[]; onTakeBack?: (id: string) => void; tail?: ReactNode }) {
   const delivery = deliveryWord(message, messages);
   return (
-    <div className="px-3 py-1" data-live-message={message.id} data-author={message.author.kind}>
-      <div className="flex flex-wrap items-baseline gap-x-1.5 whitespace-nowrap text-[12px] leading-5 text-muted-foreground">
-        <span className="font-medium text-foreground">{authorName(message)}</span>
-        <span>{time(message.created_at)}</span>
-        {delivery ? <span data-live-delivery={delivery}>· {delivery}</span> : null}
-        {delivery === 'Queued' && onTakeBack ? (
-          <button type="button" className={QUIET} data-live-take-back onClick={() => onTakeBack(message.id)}>
-            Take back
-          </button>
-        ) : null}
-        {tail ? <span className="ml-auto flex items-baseline gap-0.5">{tail}</span> : null}
+    <div className="flex gap-2 px-3 py-1" data-live-message={message.id} data-author={message.author.kind}>
+      <LiveAuthorMark message={message} big />
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-baseline gap-x-1.5 whitespace-nowrap text-[12px] leading-5 text-muted-foreground">
+          <span className="font-medium text-foreground">{authorName(message)}</span>
+          <span>{time(message.created_at)}</span>
+          {delivery ? <span data-live-delivery={delivery}>· {delivery}</span> : null}
+          {delivery === 'Queued' && onTakeBack ? (
+            <button type="button" className={QUIET} data-live-take-back onClick={() => onTakeBack(message.id)}>
+              Take back
+            </button>
+          ) : null}
+          {tail ? <span className="ml-auto flex items-baseline gap-0.5">{tail}</span> : null}
+        </div>
+        <div className="whitespace-pre-wrap break-words text-[13px] leading-5 text-foreground">{message.body}</div>
       </div>
-      <div className="whitespace-pre-wrap break-words text-[13px] leading-5 text-foreground">{message.body}</div>
     </div>
   );
 }
