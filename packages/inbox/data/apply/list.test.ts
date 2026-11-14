@@ -1,9 +1,3 @@
-/**
- * A record the list takes in place (list.ts), and the list read that left before it (queries/list.ts
- * `takeListRead`). Failures to catch: an archive elsewhere that leaves the row on this list until the next read;
- * a later line of a thread that came back after an archive taking its row away; a slow read that left before the
- * archive putting the row back.
- */
 import { describe, expect, test } from 'bun:test';
 import type { InboxListRow } from '@plannotator/core/inbox-types';
 import type { InboxEvent, ListModel } from '../../api';
