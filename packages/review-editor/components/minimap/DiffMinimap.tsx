@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { DiffLayoutSource, ScrollElementModel } from './layoutSource';
 import { buildFileRowModel, modelItemHeight, type RowMetrics } from './rowModel';
+import { buildWholeFileRowModel } from './wholeFileModel';
 import { changeBands, fileBoundaries, hitTest, markBands, placeFiles, rasterize, type Band, type MinimapFile, type MinimapHit, type MinimapLayout, type MinimapMark } from './scene';
 import { drawMinimap, resolveMinimapColors, type MinimapColors } from './draw';
 import type { MinimapFileInput, MinimapNote } from './DiffMinimapSlot';
@@ -65,7 +66,10 @@ const DiffMinimap: React.FC<DiffMinimapProps> = ({ source, fallbackModel, files,
 
   const models = useMemo(() => {
     const map = new Map<string, { path: string; model: ReturnType<typeof buildFileRowModel> }>();
-    for (const file of files) map.set(file.id, { path: file.path, model: buildFileRowModel(file.patch, { split, expandUnchanged }) });
+    for (const file of files) {
+      const model = file.wholeFile ? buildWholeFileRowModel(file.patch, file.wholeFile.side, file.wholeFile.lineCount) : buildFileRowModel(file.patch, { split, expandUnchanged });
+      map.set(file.id, { path: file.path, model });
+    }
     return map;
   }, [files, split, expandUnchanged]);
 

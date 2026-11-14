@@ -159,6 +159,7 @@ export const ReviewDiffBody: React.FC<{
             onSelectAnnotation={state.onSelectAnnotation}
             revealTarget={state.revealTarget}
             tokens={state.fileTokens?.(file.path)}
+            minimap={!state.isCompactTouchLayout}
           />
         ) : undefined}
         patch={file.patch}

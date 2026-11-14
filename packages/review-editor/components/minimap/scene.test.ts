@@ -3,6 +3,8 @@ import { buildFileRowModel, type RowMetrics } from './rowModel';
 import { changeBands, hitTest, markBands, placeFiles, rasterize, type MinimapFile } from './scene';
 import { densityAlpha } from './draw';
 import { hasBigFile, isLongContent } from './DiffMinimapSlot';
+import { buildWholeFileRowModel } from './wholeFileModel';
+import { ROW_ADD, ROW_DEL } from './rowModel';
 
 const PATCH = [
   'diff --git a/a.ts b/a.ts',
@@ -138,5 +140,17 @@ describe('minimap marker positions', () => {
     expect(isLongContent(1_200, 800, true)).toBe(true);
     expect(isLongContent(1_200, 800, false)).toBe(false);
     expect(isLongContent(700, 800, true)).toBe(false);
+  });
+
+  test('a whole-file strip marks the changed lines of its own side, and a wedge where the other side changed', () => {
+    const patch = ['@@ -10,4 +10,5 @@', ' a', '-old', '+new one', '+new two', ' b', ' c'].join('\n');
+    const current = buildWholeFileRowModel(patch, 'new', 500);
+    expect(current.rows).toBe(500);
+    expect([10, 11, 12, 13].map((line) => current.flags[line - 1] & ROW_ADD)).toEqual([0, ROW_ADD, ROW_ADD, 0]);
+    expect(current.flags[13 - 1] & ROW_DEL).toBe(ROW_DEL);
+    const original = buildWholeFileRowModel(patch, 'old', 500);
+    expect(original.flags[11 - 1] & ROW_DEL).toBe(ROW_DEL);
+    expect(original.flags[12 - 1] & ROW_ADD).toBe(ROW_ADD);
+    expect(original.oldLine[199]).toBe(200);
   });
 });
