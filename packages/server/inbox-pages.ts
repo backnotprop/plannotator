@@ -30,6 +30,7 @@
 import { createHmac, randomBytes } from "node:crypto";
 import { gunzipSync } from "node:zlib";
 import { SERVED_FRAME_GONE } from "@plannotator/core/html-embed";
+import { NO_FRAME_ANCESTORS, withFrameAncestors } from "./inbox-framing";
 
 export const INBOX_PAGES_PATH = "/api/inbox/pages";
 const PAGE_PATH = /^\/api\/inbox\/pages\/([^/]+)$/;
@@ -69,11 +70,11 @@ export const INBOX_PAGE_GONE_MESSAGE = SERVED_FRAME_GONE;
 const GONE_PAGE = `<!doctype html><meta charset="utf-8"><script>parent.postMessage({ type: ${JSON.stringify(INBOX_PAGE_GONE_MESSAGE)} }, "*");</script>`;
 const GONE_CSP = "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; frame-ancestors 'self'";
 
-/** A page document's headers. */
-export function inboxPageHeaders(): Record<string, string> {
+/** A page document's headers; `framers`: the app origins that may frame the window (inbox-framing.ts). */
+export function inboxPageHeaders(framers: readonly string[] = NO_FRAME_ANCESTORS): Record<string, string> {
   return {
     "Content-Type": "text/html; charset=utf-8",
-    "Content-Security-Policy": INBOX_PAGE_CSP,
+    "Content-Security-Policy": withFrameAncestors(INBOX_PAGE_CSP, framers),
     "X-Content-Type-Options": "nosniff",
     // No Referer on the page's requests: a web picture's site never learns the Inbox's URL.
     "Referrer-Policy": "no-referrer",
@@ -128,7 +129,7 @@ export function createInboxPages(options: {
     return id;
   };
 
-  const route = async (req: Request, url: URL): Promise<Response | null> => {
+  const route = async (req: Request, url: URL, framers: readonly string[] = NO_FRAME_ANCESTORS): Promise<Response | null> => {
     if (url.pathname === INBOX_PAGES_PATH) {
       if (req.method !== "POST") return json({ error: "Use POST.", code: "method_not_allowed" }, 405);
       const body = await pageBody(req, options.readBody);
@@ -152,10 +153,10 @@ export function createInboxPages(options: {
     if (page === undefined) {
       return new Response(req.method === "HEAD" ? null : GONE_PAGE, {
         status: 404,
-        headers: { ...inboxPageHeaders(), "Content-Security-Policy": GONE_CSP },
+        headers: { ...inboxPageHeaders(framers), "Content-Security-Policy": withFrameAncestors(GONE_CSP, framers) },
       });
     }
-    return new Response(req.method === "HEAD" ? null : page, { headers: inboxPageHeaders() });
+    return new Response(req.method === "HEAD" ? null : page, { headers: inboxPageHeaders(framers) });
   };
 
   return { route, size: () => pages.size, bytes: () => bytes };
