@@ -32,11 +32,10 @@ function KeyField({ caption, label, value, onChange, secret, flagged, saved, onF
   className: string;
 }) {
   return (
-    <label className={`relative flex h-7 items-center ${className}`}>
-      <span className="pointer-events-none absolute left-2 text-[10px] text-muted-foreground">{caption}</span>
+    <label className={`flex flex-col gap-1 ${className}`}>
+      <span className="text-xs font-medium text-foreground">{caption}</span>
       <input
-        className={`h-7 w-full min-w-0 rounded-md border bg-background pr-2 font-mono text-xs outline-none focus:ring-1 focus:ring-ring ${flagged ? 'border-warning' : 'border-border'}`}
-        style={{ paddingLeft: `${caption.length * 0.55 + 1.1}em` }}
+        className={`h-7 w-full min-w-0 rounded-md border bg-background px-2 font-mono text-xs outline-none focus:ring-1 focus:ring-ring ${flagged ? 'border-warning' : 'border-border'}`}
         type={secret ? 'password' : 'text'}
         autoComplete="off"
         spellCheck={false}
@@ -219,7 +218,7 @@ export function SemanticDiffsTab() {
               }
             >
               <form
-                className="flex h-7 w-[250px] items-center gap-1.5"
+                className="flex w-[250px] items-start gap-1.5"
                 data-power-up-key-set={saved ? '' : undefined}
                 onSubmit={(e) => {
                   e.preventDefault();
@@ -233,7 +232,7 @@ export function SemanticDiffsTab() {
                 {provider === 'jev' ? (
                   <KeyField
                     className="w-full"
-                    caption="Key"
+                    caption="API key"
                     label="TypeSafe API key"
                     value={apiKey}
                     onChange={setApiKey}
@@ -245,8 +244,8 @@ export function SemanticDiffsTab() {
                 ) : (
                   <>
                     <KeyField
-                      className="w-[78px] shrink-0"
-                      caption="ID"
+                      className="w-[96px] shrink-0"
+                      caption="Account ID"
                       label="Cloudflare account ID"
                       value={accountId}
                       onChange={setAccountId}
