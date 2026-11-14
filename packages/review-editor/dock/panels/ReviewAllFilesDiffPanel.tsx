@@ -8,6 +8,8 @@ import { ImageDiffPreview } from '../../components/ImageDiffPreview';
 import { ImageViewMenu } from '../../components/image-diff/ImageViewMenu';
 import { differencesSupported } from '../../components/image-diff/differences';
 import { isSvgPath, setSvgView, svgViewOf, useSvgView, useSvgViewVersion } from '../../components/image-diff/svgView';
+import { useImageSizesReady } from '../../components/image-diff/imageSizes';
+import { isImagePreviewCandidate } from '@plannotator/core/diff-paths';
 import { MarkdownViewMenu } from '../../components/MarkdownViewMenu';
 import { PackageChangesCard } from '../../components/PackageChangesCard';
 // Lazy: loaded the first time a Markdown file is previewed.
@@ -76,6 +78,7 @@ export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
               key={`${snapshotId ?? ''}:${file.path}`}
               filePath={file.path}
               status={file.status}
+              patch={file.patch}
               snapshotId={snapshotId}
               variant="all-files"
               compact={compact}
@@ -196,6 +199,7 @@ export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
             key={`${snapshotId ?? ''}:${args.file.path}`}
             filePath={args.file.path}
             status={args.file.status}
+            patch={args.file.patch}
             snapshotId={snapshotId}
             variant="all-files"
             compact={compact}
@@ -212,6 +216,13 @@ export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
     () => (commitInfo ? <CommitDescriptionHeader key={commitInfo.sha} info={commitInfo} /> : undefined),
     [commitInfo],
   );
+
+  const hasImages = useMemo(
+    () => imagesAvailable && state.files.some((file) => isImagePreviewCandidate(file.patch, file.path, file.oldPath) || isSvgPath(file.path)),
+    [imagesAvailable, state.files],
+  );
+  const imageSizesReady = useImageSizesReady(snapshotId, hasImages);
+  if (!imageSizesReady) return null;
 
   return (
     <AllFilesCodeView

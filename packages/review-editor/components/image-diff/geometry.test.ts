@@ -45,7 +45,7 @@ describe('stageLayout keeps both images registered', () => {
     expect(icon.pixelated).toBe(false);
   });
 
-  test('fit draws an SVG at its own size too, so icon sizes compare honestly', () => {
+  test('fit draws an SVG of 64 px or more at its own size, so icon sizes compare honestly', () => {
     const logo = stageLayout({ old: { width: 64, height: 64 }, new: { width: 64, height: 64 }, available: { width: 900, height: 640 }, zoom: 'fit', dpr: 1 });
     expect(logo.stage).toEqual({ width: 64, height: 64 });
   });
@@ -53,6 +53,26 @@ describe('stageLayout keeps both images registered', () => {
   test('the image starts at the left edge of its column, under its label', () => {
     const layout = stageLayout({ old: { width: 96, height: 96 }, new: { width: 96, height: 96 }, available: { width: 900, height: 640 }, zoom: 'fit', dpr: 2 });
     expect(layout.offsetX).toBe(0);
+  });
+
+  test('extreme shapes stay readable: the short side is drawn at least about 48 px, the long side scrolls', () => {
+    const wide = stageLayout({ old: { width: 8000, height: 40 }, new: { width: 8000, height: 40 }, available: { width: 900, height: 480 }, zoom: 'fit', dpr: 2 });
+    expect(wide.stage).toEqual({ width: 8000, height: 40 });
+    const tall = stageLayout({ old: { width: 40, height: 8000 }, new: { width: 40, height: 8000 }, available: { width: 900, height: 480 }, zoom: 'fit', dpr: 2 });
+    expect(tall.stage).toEqual({ width: 40, height: 8000 });
+    const strip = stageLayout({ old: { width: 4000, height: 200 }, new: { width: 4000, height: 200 }, available: { width: 900, height: 480 }, zoom: 'fit', dpr: 1 });
+    expect(strip.stage.height).toBeGreaterThanOrEqual(48);
+    expect(strip.stage.width).toBeGreaterThan(900);
+  });
+
+  test('a tiny image is drawn at least 64 px by whole steps, pixelated; before and after keep one scale', () => {
+    const dot = stageLayout({ old: { width: 1, height: 1 }, new: { width: 1, height: 1 }, available: { width: 900, height: 480 }, zoom: 'fit', dpr: 2 });
+    expect(dot.stage).toEqual({ width: 64, height: 64 });
+    expect(dot.pixelated).toBe(true);
+    const icons = stageLayout({ old: { width: 16, height: 16 }, new: { width: 32, height: 32 }, available: { width: 900, height: 480 }, zoom: 'fit', dpr: 1 });
+    expect(icons.scale).toBe(2);
+    expect(icons.old).toEqual({ width: 32, height: 32 });
+    expect(icons.new).toEqual({ width: 64, height: 64 });
   });
 
   test('Actual size is 100% for every kind', () => {

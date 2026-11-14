@@ -8,6 +8,17 @@ import {
   type ReviewImageSide,
 } from '../../utils/reviewImage';
 import type { DiffFileStatus } from '../../types';
+import { MAX_REVIEW_IMAGE_PREVIEW_BYTES, oversizedReviewStubBytes } from '@plannotator/core/diff-paths';
+
+export function knownTooLarge(patch: string | undefined, knownBytes?: Partial<Record<ReviewImageSide, number>>): Partial<Record<ReviewImageSide, number>> {
+  const sizes = patch ? oversizedReviewStubBytes(patch) : null;
+  const out: Partial<Record<ReviewImageSide, number>> = {};
+  for (const side of ['old', 'new'] as const) {
+    const bytes = sizes?.[side] ?? knownBytes?.[side];
+    if (typeof bytes === 'number' && bytes > MAX_REVIEW_IMAGE_PREVIEW_BYTES) out[side] = bytes;
+  }
+  return out;
+}
 
 export type SideState =
   | { state: 'loading' }
@@ -17,7 +28,8 @@ export type SideState =
 export const sidesFor = (status: DiffFileStatus): ReviewImageSide[] =>
   status === 'added' ? ['new'] : status === 'deleted' ? ['old'] : ['old', 'new'];
 
-function initialState(snapshotId: string | undefined, path: string, side: ReviewImageSide): SideState {
+function initialState(snapshotId: string | undefined, path: string, side: ReviewImageSide, tooLarge?: number): SideState {
+  if (tooLarge !== undefined) return { state: 'error', error: { status: 413, reason: 'too-large', bytes: tooLarge } };
   const cached = snapshotId ? peekReviewImage(snapshotId, path, side) : undefined;
   return cached ? { state: 'ok', image: cached } : { state: 'loading' };
 }
@@ -43,11 +55,12 @@ export function useNearViewport(): [React.RefObject<HTMLDivElement | null>, bool
   return [ref, visible];
 }
 
-export function useImageSides(options: { snapshotId?: string; filePath: string; status: DiffFileStatus; visible: boolean }) {
+export function useImageSides(options: { snapshotId?: string; filePath: string; status: DiffFileStatus; visible: boolean; patch?: string; knownBytes?: Partial<Record<ReviewImageSide, number>> }) {
   const { snapshotId, filePath, status, visible } = options;
+  const tooLarge = knownTooLarge(options.patch, options.knownBytes);
   const [states, setStates] = useState<Record<ReviewImageSide, SideState>>(() => ({
-    old: initialState(snapshotId, filePath, 'old'),
-    new: initialState(snapshotId, filePath, 'new'),
+    old: initialState(snapshotId, filePath, 'old', tooLarge.old),
+    new: initialState(snapshotId, filePath, 'new', tooLarge.new),
   }));
 
   const oldUrl = states.old.state === 'ok' ? states.old.image.url : undefined;
@@ -55,9 +68,9 @@ export function useImageSides(options: { snapshotId?: string; filePath: string; 
   useEffect(() => (oldUrl ? retainReviewImageUrl(oldUrl) : undefined), [oldUrl]);
   useEffect(() => (newUrl ? retainReviewImageUrl(newUrl) : undefined), [newUrl]);
 
-  const sidesKey = sidesFor(status).join(',');
+  const sidesKey = sidesFor(status).filter((side) => tooLarge[side] === undefined).join(',');
   useEffect(() => {
-    if (!snapshotId || !visible) return;
+    if (!snapshotId || !visible || !sidesKey) return;
     const controller = new AbortController();
     for (const side of sidesKey.split(',') as ReviewImageSide[]) {
       const cached = peekReviewImage(snapshotId, filePath, side);

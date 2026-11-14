@@ -220,6 +220,26 @@ for (const [runtime, startServer] of [
       }
     }, 20_000);
 
+    test("one sizes request gives every image's dimensions and bytes, and an over-cap side its size, before any image loads", async () => {
+      const fixture = buildRepo();
+      const { server, payload } = await start(fixture);
+      try {
+        const response = await fetch(`${server.url}/api/review-image-sizes?snapshot=${encodeURIComponent(payload.snapshotId)}`);
+        expect(response.status).toBe(200);
+        const { sizes } = (await response.json()) as { sizes: Record<string, { old?: { bytes: number; width?: number; height?: number }; new?: { bytes: number; width?: number; height?: number } }> };
+        expect(sizes["mod.png"]).toEqual({
+          old: { bytes: fixture.files["mod-before"].byteLength, width: 4, height: 3 },
+          new: { bytes: fixture.files["mod-after"].byteLength, width: 8, height: 6 },
+        });
+        expect(sizes["added.png"]?.old).toBeUndefined();
+        expect(sizes["big.png"]?.new?.bytes).toBeGreaterThan(10 * 1024 * 1024);
+        const stale = await fetch(`${server.url}/api/review-image-sizes?snapshot=nope`);
+        expect(stale.status).toBe(409);
+      } finally {
+        server.stop();
+      }
+    }, 20_000);
+
     test("refuses everything that is not a previewable image in this diff", async () => {
       const fixture = buildRepo();
       const { server, image } = await start(fixture);

@@ -1,10 +1,17 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { stepSwipe, swipeClipX, type Size, type StageLayout } from './geometry';
 import type { DifferenceMask } from './differences';
+import { useImageDiffSettings, type ImageBackground } from './imageDiffSettings';
 
 export const CHECKERBOARD: React.CSSProperties = {
   backgroundImage: 'repeating-conic-gradient(var(--muted) 0% 25%, var(--background) 0% 50%)',
   backgroundSize: '16px 16px',
+};
+
+export const IMAGE_BACKGROUND_STYLE: Record<ImageBackground, React.CSSProperties> = {
+  checker: CHECKERBOARD,
+  light: { backgroundColor: '#ffffff' },
+  dark: { backgroundColor: '#111111' },
 };
 
 export interface StageImage {
@@ -16,6 +23,7 @@ export interface StageImage {
 }
 
 function ImageLayer({ image, box, pixelated, style, side }: { image: StageImage; box: Size; pixelated: boolean; style?: React.CSSProperties; side: 'old' | 'new' }) {
+  const { background } = useImageDiffSettings();
   return (
     <img
       src={image.url}
@@ -23,8 +31,9 @@ function ImageLayer({ image, box, pixelated, style, side }: { image: StageImage;
       draggable={false}
       decoding="async"
       data-image-layer={side}
+      data-image-background={background}
       className="absolute left-0 top-0 block max-w-none select-none"
-      style={{ ...CHECKERBOARD, width: box.width, height: box.height, imageRendering: pixelated ? 'pixelated' : 'auto', ...style }}
+      style={{ ...IMAGE_BACKGROUND_STYLE[background], width: box.width, height: box.height, imageRendering: pixelated ? 'pixelated' : 'auto', ...style }}
       onLoad={(event) => {
         const el = event.currentTarget;
         if (el.naturalWidth && el.naturalHeight) image.onNatural?.({ width: el.naturalWidth, height: el.naturalHeight });
@@ -45,7 +54,7 @@ export function StageLabel({ children, side }: { children: React.ReactNode; side
   );
 }
 
-function LabelRow({ left, right, width, offset = 0 }: { left: string; right?: string; width?: number; offset?: number }) {
+export function StageLabelRow({ left, right, width, offset = 0 }: { left: string; right?: string; width?: number; offset?: number }) {
   return (
     <div className="mb-1 flex justify-between gap-3 text-xs leading-5 text-muted-foreground" style={{ width: width === undefined ? undefined : Math.max(width, 96), marginLeft: offset }} data-stage-labels-above="">
       <span data-stage-label="left">{left}</span>
@@ -154,7 +163,7 @@ export function SinglePane(props: {
   const { layout } = props;
   return (
     <>
-    {props.label && props.labelAbove && <LabelRow left={props.label} />}
+    {props.label && props.labelAbove && <StageLabelRow left={props.label} />}
     <Viewport layout={layout} maxHeight={props.maxHeight} onScrollPosition={props.onScrollPosition} scrollTo={props.scrollTo}>
       <div data-image-stage="" className="relative" style={{ width: layout.stage.width, height: layout.stage.height }}>
         <ImageLayer image={props.image} box={props.box} pixelated={layout.pixelated} side={props.side} />
@@ -193,7 +202,7 @@ export function StackedStage(props: {
   const overlayLabels = swipe && !props.labelsAbove;
   return (
     <>
-    {swipe && props.labelsAbove && <LabelRow left="Before" right="After" width={layout.stage.width} offset={layout.offsetX} />}
+    {swipe && props.labelsAbove && <StageLabelRow left="Before" right="After" width={layout.stage.width} offset={layout.offsetX} />}
     <Viewport layout={layout} maxHeight={props.maxHeight}>
       <div
         ref={stageRef}

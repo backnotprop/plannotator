@@ -1207,6 +1207,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
               {isImagePreview || svgShown ? (
                 <ImageDiffPreview
                   filePath={filePath}
+                  patch={patch}
                   status={status ?? 'modified'}
                   snapshotId={imageSnapshotId ?? reviewSnapshotId}
                   variant="single"
