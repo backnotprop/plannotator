@@ -10,6 +10,7 @@ import { CompactFileActions } from './CompactFileActions';
 import type { DiffFileStatus } from '../types';
 import { FileKindIcon } from '@plannotator/guide-viewer/FileKindIcon';
 import { fileStatusLetter } from '@plannotator/ui/utils/fileStatusLetter';
+import { formatCount } from '@plannotator/ui/utils/countFormat';
 
 interface FileHeaderProps {
   /** Read-only host: no open-in affordance (it probes the review server). */
@@ -181,7 +182,7 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
       role={viewedKeyHint ? 'toolbar' : undefined}
       aria-label={viewedKeyHint ? filePath : undefined}
     >
-      <div className="min-w-0 flex flex-1 items-center" onClick={onCollapseToggle} style={onCollapseToggle ? { cursor: 'pointer' } : undefined}>
+      <div className="min-w-0 flex flex-1 items-center overflow-hidden" onClick={onCollapseToggle} style={onCollapseToggle ? { cursor: 'pointer' } : undefined}>
         {collapseToggle}
         <span
           className={`min-w-0 flex items-center text-[13px] font-medium leading-normal whitespace-nowrap ${isCompactTouchLayout ? 'flex-1' : ''}`}
@@ -228,9 +229,9 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
         </span>
         {isTest && <FileKindIcon kind="test" size={13} className="ml-1.5 flex-none text-muted-foreground" title="Test file" />}
         {(additions > 0 || deletions > 0 || (status && status !== 'modified') || isGenerated) && (
-          <span className="flex-none ml-3 flex items-center gap-1.5 text-[12px] leading-none tabular-nums">
-            {additions > 0 && <span className="text-success">+{additions}</span>}
-            {deletions > 0 && <span className="text-destructive">−{deletions}</span>}
+          <span className="min-w-0 shrink-[1000] ml-3 flex h-4 flex-wrap items-center gap-x-1.5 overflow-hidden text-[12px] leading-4 tabular-nums" data-file-header-counts="">
+            {additions > 0 && <span className="text-success">+{formatCount(additions)}</span>}
+            {deletions > 0 && <span className="text-destructive">−{formatCount(deletions)}</span>}
             {status && <FileStatusLetter status={status} oldPath={oldPath} />}
             {isGenerated && (
               <span
