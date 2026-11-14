@@ -1,3 +1,5 @@
+import { revealFirstChange } from '../utils/revealFirstChange';
+import { MAX_LINE_DIFF_LENGTH } from '../utils/diffChromeMetrics';
 import React, { useMemo, useRef, useEffect, useLayoutEffect, useCallback, useState } from 'react';
 import { FileDiff, type DiffLineAnnotation } from '@pierre/diffs/react';
 import { LazyBlockBoundary } from '@plannotator/ui/components/LazyBlockBoundary';
@@ -127,6 +129,7 @@ const PierreDiffContent = React.memo(({
         overflow: diffOverflow,
         diffIndicators,
         lineDiffType,
+        maxLineDiffLength: MAX_LINE_DIFF_LENGTH,
         disableLineNumbers,
         disableBackground,
         expandUnchanged,
@@ -606,6 +609,24 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
     containerRef.current.scrollTo({ top: 0, left: 0, behavior: 'auto' });
     previousScrollFilePathRef.current = filePath;
   }, [filePath, viewport]);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container || markdownPreviewEnabled) return;
+    let frame = 0;
+    let tries = 0;
+    const attempt = () => {
+      const hosts = [...container.querySelectorAll<HTMLElement>('diffs-container')];
+      const ready = hosts.some((host) => host.shadowRoot?.querySelector('[data-diff-span]'));
+      if (ready) {
+        for (const host of hosts) revealFirstChange(host);
+        return;
+      }
+      if (++tries < 20) frame = requestAnimationFrame(attempt);
+    };
+    frame = requestAnimationFrame(attempt);
+    return () => cancelAnimationFrame(frame);
+  }, [filePath, viewport, markdownPreviewEnabled]);
 
   // Clear pending selection when file changes
   const prevFilePathRef = useRef(filePath);

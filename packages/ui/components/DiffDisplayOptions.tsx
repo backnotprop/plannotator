@@ -30,7 +30,8 @@ export type DiffDisplaySetting =
   | 'diffLineDiffType'
   | 'diffTabSize'
   | 'diffExpandUnchanged'
-  | 'diffHideWhitespace';
+  | 'diffHideWhitespace'
+  | 'diffSemantic';
 
 export type DiffDisplayChange = <K extends DiffDisplaySetting & SettingName>(key: K, value: SettingValue<K>) => void;
 
@@ -166,6 +167,7 @@ export const DiffDisplayOptionsBody: React.FC<{
   const tabSize = useConfigValue('diffTabSize');
   const expandUnchanged = useConfigValue('diffExpandUnchanged');
   const hideWhitespace = useConfigValue('diffHideWhitespace');
+  const semantic = useConfigValue('diffSemantic');
   const stepTab = (n: number) => set('diffTabSize', Math.max(1, Math.min(8, n)));
   return (
     <>
@@ -203,6 +205,7 @@ export const DiffDisplayOptionsBody: React.FC<{
           <div className="border-t border-border/60 my-1.5 -mx-2.5" />
           <Switch label="Whole file" checked={expandUnchanged} onChange={(v) => set('diffExpandUnchanged', v)} />
           <Switch label="Hide whitespace" checked={hideWhitespace} onChange={(v) => set('diffHideWhitespace', v)} />
+          <Switch label="Show moved & renamed code" checked={semantic} onChange={(v) => set('diffSemantic', v)} />
         </>
       )}
     </>

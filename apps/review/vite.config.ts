@@ -7,6 +7,7 @@ import { packedApp } from '../../build/pack-app';
 import { DEMO_FILE_CONTENTS } from '../../packages/review-editor/demoData';
 import { katexWoff2Only } from '../../build/katex-woff2-only';
 import { diffsWorkerCatalogs } from '../../build/diffs-worker-catalogs';
+import { webTreeSitterServedWasm } from '../../build/web-tree-sitter-served-wasm';
 
 function demoFileContentPlugin(): Plugin {
   return {
@@ -43,6 +44,8 @@ export default defineConfig({
       // highlights with Shiki. See build/pierre-highlights-stub.ts.
       '@pierre/highlights/themes/loader': path.resolve(__dirname, '../../build/pierre-highlights-stub.ts'),
       '@pierre/highlights': path.resolve(__dirname, '../../build/pierre-highlights-stub.ts'),
+      '@pierre/patches': path.resolve(__dirname, '../../build/pierre-patches-stub.ts'),
+      '@pierre/diffs': '@pierre/diffs-sem',
       '@': path.resolve(__dirname, '.'),
       '@plannotator/shared': path.resolve(__dirname, '../../packages/shared'),
       '@plannotator/ui': path.resolve(__dirname, '../../packages/ui'),
@@ -59,7 +62,7 @@ export default defineConfig({
   worker: {
     format: 'es',
     // Pierre's language and theme catalogs, dead code in its worker (see the plugin).
-    plugins: () => [diffsWorkerCatalogs()],
+    plugins: () => [diffsWorkerCatalogs(), webTreeSitterServedWasm()],
     rollupOptions: {
       output: {
         inlineDynamicImports: true,

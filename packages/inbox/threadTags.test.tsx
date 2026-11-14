@@ -1,7 +1,7 @@
 /**
  * Thread tags in the window (approval "inbox-thread-tags", step 1), drawn with a host in place of App (no server):
  * Add tag in the row's right-click menu (under Star thread, its list swapped in place with Back, ticks that keep the
- * menu open, untick, `New tag “…”` and Enter), Remove from <tag> in a tag's list, no Add tag on another machine's row;
+ * menu open, untick, `New tag “…”` and Enter), Remove from <tag> in a tag's list, no Add tag on a row the host refuses;
  * Snooze by keyboard in a menu long enough that Snooze's index is past the times' end (the arrows go on from the first time);
  * the sidebar's Tags section (New tag's field, the waiting count, Show threads, Rename, Delete tag); and the rules that
  * decide when the section shows, what a tag's list holds and what its header says.
@@ -13,7 +13,8 @@ import { act, useMemo, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxInitiative, InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
 import { INBOX_SIDEBAR_DEFAULT } from '@plannotator/core/inbox-sidebar';
-import { canTagThread, filterTagRows, rowTagsHere, tagListSummary, tagsSectionShown, tagWaitingCounts, ThreadTagsContext, type ThreadTagsHost } from './threadTags';
+import { canTagThread, filterTagRows, rowTagsHere, tagById, tagIdOn, tagListSummary, tagNamed, tagsSectionShown, tagWaitingCounts, tagWrite, thisInboxTags, ThreadTagsContext, type ThreadTagsHost } from './threadTags';
+import type { MachinesModel } from './machines';
 import { drawnSidebarItems } from './sidebarItems';
 import { sidebarMenuItems } from './components/SidebarMenu';
 
@@ -207,7 +208,7 @@ test.skipIf(!hasDom)('with Add to Priority and Add tag above it, Snooze by keybo
   }
 });
 
-test.skipIf(!hasDom)('in a tag’s list a row in it offers Remove from <tag>; another machine’s row offers no Add tag', async () => {
+test.skipIf(!hasDom)('in a tag’s list a row in it offers Remove from <tag>; a row the host cannot tag offers no Add tag', async () => {
   const rows = [row('a', [RELEASE.id]), row('b', [], { machine: 'ibx_other' } as Partial<InboxListRow>)];
   const calls: string[] = [];
   draw(<RowMenuWith rows={rows} listed={RELEASE} calls={calls} />);
@@ -342,24 +343,60 @@ test('a tag’s list keeps every group with only the tag’s rows; the count is 
   expect(tagListSummary([row('a')])).toBe('1 thread · 1 project');
 });
 
-test('another machine’s thread is never offered Add tag and never listed in a tag, whatever tags its row carries', () => {
+test('a linked machine’s thread is offered Add tag and listed in a tag only when that machine takes tags from here', () => {
   const self = 'ibx_self';
+  const mac = { id: 'ibx_mac', marks: ['star', 'priority', 'tags'] };
+  const old = { id: 'ibx_old', marks: ['star', 'priority'] };
+  const model = { self, linked: [mac, old] } as unknown as Pick<MachinesModel, 'self' | 'linked'>;
   const mine = row('a', [RELEASE.id], { machine: self } as Partial<InboxListRow>);
   const plain = row('b', [RELEASE.id]);
-  // A newer linked Inbox sends its own rows' tags: never this Inbox's tags, even naming the same id.
-  const theirs = row('c', [RELEASE.id], { machine: 'ibx_other' } as Partial<InboxListRow>);
-  const rows = [mine, plain, theirs];
-  const patches = new Map([['c', [RELEASE.id]]]);
-  expect(canTagThread('a', rows, self, null)).toBe(true);
-  expect(canTagThread('b', rows, self, null)).toBe(true);
-  expect(canTagThread('c', rows, self, null)).toBe(false);
+  // The merged list names a far row's tags by the merged tags' ids.
+  const theirs = row('c', [RELEASE.id], { machine: mac.id } as Partial<InboxListRow>);
+  const older = row('o', [RELEASE.id], { machine: old.id } as Partial<InboxListRow>);
+  const stranger = row('s', [RELEASE.id], { machine: 'ibx_unlinked' } as Partial<InboxListRow>);
+  const rows = [mine, plain, theirs, older, stranger];
+  expect(rows.map((r) => canTagThread(r.thread_id, rows, model, null))).toEqual([true, true, true, false, false]);
   // A thread opened from a link or search with no row here, which a linked machine owns (the thread's ⋯).
-  expect(canTagThread('d', rows, self, 'ibx_other')).toBe(false);
-  expect(canTagThread('d', rows, self, null)).toBe(true);
-  expect(rowTagsHere(theirs, self, patches)).toEqual([]);
+  expect(canTagThread('d', rows, model, mac.id)).toBe(true);
+  expect(canTagThread('d', rows, model, old.id)).toBe(false);
+  expect(canTagThread('d', rows, model, null)).toBe(true);
+  // Nothing linked: this Inbox's own threads only, as before.
+  expect(canTagThread('c', rows, { self: null, linked: [] }, null)).toBe(false);
+  expect(canTagThread('b', rows, { self: null, linked: [] }, null)).toBe(true);
+  // What the window just set on a far thread stands until the list reads it; an older machine's row lists in no tag.
+  const patches = new Map([['c', [WINDOWS.id]], ['o', [WINDOWS.id]]]);
+  expect(rowTagsHere(theirs, model, patches)).toEqual([WINDOWS.id]);
+  expect(rowTagsHere(older, model, patches)).toEqual([]);
+  expect(rowTagsHere(stranger, model, new Map())).toEqual([]);
   const sections = [{ id: 'new', label: 'New', threads: rows }] as unknown as InboxListSection[];
-  const tagsOf = (r: Pick<InboxListRow, 'thread_id' | 'tags' | 'machine'>) => rowTagsHere(r, self, patches);
-  expect(filterTagRows(sections, RELEASE.id, tagsOf).flatMap((s) => s.threads.map((r) => r.thread_id))).toEqual(['a', 'b']);
+  const tagsOf = (r: Pick<InboxListRow, 'thread_id' | 'tags' | 'machine'>) => rowTagsHere(r, model, new Map());
+  expect(filterTagRows(sections, RELEASE.id, tagsOf).flatMap((s) => s.threads.map((r) => r.thread_id))).toEqual(['a', 'b', 'c']);
+});
+
+test('one tag across machines: found by any machine’s id, written by this Inbox’s id on its own thread and by name on another’s', () => {
+  const self = 'ibx_self';
+  // Release is on both machines (this Inbox's id is the merged one); Billing only on the Mac (its id stands for it).
+  const release = { ...RELEASE, machines: { [self]: RELEASE.id, ibx_mac: 'ini_mac_release' } };
+  const billing = { ...tag('ini_mac_billing', 'Billing'), machines: { ibx_mac: 'ini_mac_billing' } };
+  const tags = [release, billing];
+  expect(tagById(tags, 'ini_mac_release')).toBe(release);
+  expect(tagById(tags, RELEASE.id)).toBe(release);
+  expect(tagById(tags, 'ini_mac_billing')).toBe(billing);
+  expect(tagById(tags, 'ini_gone')).toBeNull();
+  expect(tagIdOn(release, null, self)).toBe(RELEASE.id);
+  expect(tagIdOn(release, 'ibx_mac', self)).toBe('ini_mac_release');
+  expect(tagIdOn(billing, null, self)).toBeNull();
+  expect(tagWrite(release, null, self)).toEqual({ tag: RELEASE.id });
+  expect(tagWrite(release, 'ibx_mac', self)).toEqual({ name: 'Release' });
+  // This Inbox has no Billing: its own thread names it, and this Inbox makes it.
+  expect(tagWrite(billing, null, self)).toEqual({ name: 'Billing' });
+  expect(thisInboxTags(tags, self)).toEqual([release]);
+  // Nothing linked: the list's tags carry no machines and are all this Inbox's.
+  expect(tagWrite(RELEASE, null, null)).toEqual({ tag: RELEASE.id });
+  expect(thisInboxTags([RELEASE, WINDOWS], null)).toEqual([RELEASE, WINDOWS]);
+  // The name rule is the store's: trimmed, case ignored.
+  expect(tagNamed(tags, '  billing ')).toBe(billing);
+  expect(tagNamed(tags, 'RELEASE')).toBe(release);
 });
 
 test('Tags is in the sidebar’s menu and Customize only while the section is drawn, just above Agents', () => {

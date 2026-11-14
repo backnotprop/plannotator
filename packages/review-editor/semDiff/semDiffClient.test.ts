@@ -1,0 +1,221 @@
+import { describe, expect, test } from 'bun:test';
+import { semanticDiffFile, languageForPath } from '@plannotator/sem-diff';
+import { createSemDiffClient } from './semDiffClient';
+import type { SemDiffReply, SemDiffRequest } from './protocol';
+import { semDiffChanges } from './semDiffChanges';
+
+const advert = {
+  runtime: '/assets/sem-diff/web-tree-sitter-0.wasm',
+  grammars: {
+    'tree-sitter-typescript.wasm': '/assets/sem-diff/tree-sitter-typescript-0.wasm',
+    'tree-sitter-tsx.wasm': '/assets/sem-diff/tree-sitter-tsx-0.wasm',
+  },
+};
+
+type Behaviour = 'engine' | 'hang' | 'fail' | 'stuck-on-big';
+
+function fakeWorker(behaviour: Behaviour, log: { created: number; terminated: number }) {
+  return () => {
+    log.created++;
+    const worker = {
+      onmessage: null as ((e: MessageEvent<SemDiffReply>) => void) | null,
+      onerror: null as (() => void) | null,
+      queue: [] as SemDiffRequest[],
+      stuck: false,
+      postMessage(request: SemDiffRequest) {
+        if (behaviour === 'hang') return;
+        if (behaviour === 'stuck-on-big') {
+          worker.queue.push(request);
+          const drain = async () => {
+            while (!worker.stuck && worker.queue.length > 0) {
+              const next = worker.queue.shift()!;
+              if (next.path.includes('big')) {
+                worker.stuck = true;
+                return;
+              }
+              const r = await semanticDiffFile(languageForPath(next.path)!, next.oldText, next.newText, next.path);
+              worker.onmessage?.({ data: { id: next.id, ok: true, semanticOperations: r.semanticOperations, semanticFolds: r.semanticFolds, patch: r.patch } } as MessageEvent<SemDiffReply>);
+            }
+          };
+          if (worker.queue.length === 1) void drain();
+          return;
+        }
+        void (async () => {
+          let reply: SemDiffReply;
+          if (behaviour === 'fail') reply = { id: request.id, ok: false, error: 'boom' };
+          else {
+            const r = await semanticDiffFile(languageForPath(request.path)!, request.oldText, request.newText, request.path);
+            reply = { id: request.id, ok: true, semanticOperations: r.semanticOperations, semanticFolds: r.semanticFolds, patch: r.patch };
+          }
+          worker.onmessage?.({ data: reply } as MessageEvent<SemDiffReply>);
+        })();
+      },
+      terminate() {
+        log.terminated++;
+      },
+    };
+    return worker as unknown as Worker;
+  };
+}
+
+const before = `export function load(id: string) {\n  return db.find(id);\n}\n\nexport function save(user: User) {\n  db.put(user.id, user);\n  return user;\n}\n`;
+const moved = `export function save(user: User) {\n  db.put(user.id, user);\n  return user;\n}\n\nexport function load(id: string) {\n  return db.find(id);\n}\n`;
+const edited = before.replace('db.find(id)', 'db.find(id) ?? null');
+
+describe('semantic diff client', () => {
+  test('returns operations, folds, the engine patch and a summary when code moved', async () => {
+    const log = { created: 0, terminated: 0 };
+    const client = createSemDiffClient({ advert, origin: 'http://127.0.0.1:1', createWorker: fakeWorker('engine', log) });
+    const result = await client.diff('src/users.ts', before, moved);
+    expect(result).not.toBeNull();
+    expect(result!.semanticOperations.some((op) => op.type === 'moved')).toBe(true);
+    expect(result!.patch).toContain('@@');
+    expect(result!.summary.skim.length).toBeGreaterThan(0);
+    client.dispose();
+  });
+
+  test('answers null for a plain edit, so the view keeps its own diff', async () => {
+    const log = { created: 0, terminated: 0 };
+    const client = createSemDiffClient({ advert, origin: 'http://127.0.0.1:1', createWorker: fakeWorker('engine', log) });
+    expect(await client.diff('src/users.ts', before, edited)).toBeNull();
+    client.dispose();
+  });
+
+  test('never starts a worker for a file it has no grammar for', async () => {
+    const log = { created: 0, terminated: 0 };
+    const client = createSemDiffClient({ advert, origin: 'http://127.0.0.1:1', createWorker: fakeWorker('engine', log) });
+    expect(client.supports('main.go')).toBe(false);
+    expect(client.supports('README.md')).toBe(false);
+    expect(await client.diff('main.go', 'a', 'b')).toBeNull();
+    expect(log.created).toBe(0);
+  });
+
+  test('without an advert nothing is supported', async () => {
+    const log = { created: 0, terminated: 0 };
+    const client = createSemDiffClient({ advert: undefined, origin: 'http://127.0.0.1:1', createWorker: fakeWorker('engine', log) });
+    expect(client.supports('src/users.ts')).toBe(false);
+    expect(await client.diff('src/users.ts', before, moved)).toBeNull();
+    expect(log.created).toBe(0);
+  });
+
+  test('gives up after the cutoff and replaces the stuck worker', async () => {
+    const log = { created: 0, terminated: 0 };
+    const client = createSemDiffClient({ advert, origin: 'http://127.0.0.1:1', createWorker: fakeWorker('hang', log), timeoutMs: 30 });
+    expect(await client.diff('src/users.ts', before, moved)).toBeNull();
+    expect(log.terminated).toBe(1);
+    expect((await client.attempt('src/users.ts', before, moved)).failed).toBe(true);
+    expect(log.created).toBe(2);
+    client.dispose();
+  });
+
+  test('one file that stalls the worker fails alone; the files queued behind it still get their answers', async () => {
+    const log = { created: 0, terminated: 0 };
+    const client = createSemDiffClient({ advert, origin: 'http://127.0.0.1:1', createWorker: fakeWorker('stuck-on-big', log), timeoutMs: 200 });
+    const big = client.attempt('src/big.ts', before, moved);
+    const others = [client.attempt('src/a.ts', before, moved), client.attempt('src/b.ts', before, `${moved}\n`)];
+    expect((await big).failed).toBe(true);
+    const settled = await Promise.all(others);
+    expect(settled.map((outcome) => outcome.failed)).toEqual([false, false]);
+    expect(settled.every((outcome) => outcome.result?.semanticOperations.some((op) => op.type === 'moved'))).toBe(true);
+    client.dispose();
+  });
+
+  test('an abort settles at once with null', async () => {
+    const log = { created: 0, terminated: 0 };
+    const client = createSemDiffClient({ advert, origin: 'http://127.0.0.1:1', createWorker: fakeWorker('hang', log), timeoutMs: 10_000 });
+    const controller = new AbortController();
+    const pending = client.diff('src/users.ts', before, moved, controller.signal);
+    controller.abort();
+    expect(await pending).toBeNull();
+    client.dispose();
+  });
+
+  test('an engine error is a plain diff, not a failure', async () => {
+    const log = { created: 0, terminated: 0 };
+    const client = createSemDiffClient({ advert, origin: 'http://127.0.0.1:1', createWorker: fakeWorker('fail', log) });
+    expect(await client.diff('src/users.ts', before, moved)).toBeNull();
+    client.dispose();
+  });
+});
+
+test('each file and content pair is worked out once', async () => {
+  let posted = 0;
+  const log = { created: 0, terminated: 0 };
+  const base = fakeWorker('engine', log);
+  const client = createSemDiffClient({
+    advert,
+    origin: 'http://127.0.0.1:1',
+    createWorker: () => {
+      const w = base() as unknown as { postMessage: (r: SemDiffRequest) => void };
+      const post = w.postMessage.bind(w);
+      w.postMessage = (r) => {
+        posted++;
+        post(r);
+      };
+      return w as unknown as Worker;
+    },
+  });
+  const [a, b] = await Promise.all([client.diff('src/users.ts', before, moved), client.diff('src/users.ts', before, moved)]);
+  expect(a).not.toBeNull();
+  expect(b).toBe(a);
+  expect(posted).toBe(1);
+  client.dispose();
+});
+
+describe('semantic changes for the file badge', () => {
+  test('a move becomes a non-structural "moved" change named by its first line', async () => {
+    const r = await semanticDiffFile('typescript', before, moved, 'src/users.ts');
+    const changes = semDiffChanges('src/users.ts', r.semanticOperations, before, moved);
+    const move = changes.find((c) => c.changeType === 'moved');
+    expect(move).toBeDefined();
+    expect(move!.structuralChange).toBe(false);
+    expect(['load', 'save']).toContain(move!.entityName);
+    expect(move!.startLine).not.toBeNull();
+  });
+});
+
+test('names are the declared identifier where there is one', async () => {
+  const { shortName } = await import('./semDiffChanges');
+  expect(shortName('export async function sumLineItems(items: Item[]) {')).toBe('sumLineItems');
+  expect(shortName('const taxRate = 0.08;')).toBe('taxRate');
+  expect(shortName('def walk(tree):')).toBe('walk');
+  expect(shortName('return db.save({')).toBe('return db.save({');
+});
+
+describe('the Sem tab lists declarations, not lines', () => {
+  const op = (type: string, oldLines: [number, number] | null, newLines: [number, number] | null) =>
+    ({ type, lines: { old: oldLines ? [{ start: oldLines[0], end: oldLines[1] }] : [], new: newLines ? [{ start: newLines[0], end: newLines[1] }] : [] } }) as never;
+  const oldText = ['export function total(items) {', '  let sum = 0;', '  for (const i of items) sum += i;', '  return sum;', '}', '', 'function titleCase(s) {', "  return s.split(' ');", '}'].join('\n');
+  const newText = ['export function total(items) {', '  let sum = 0;', '  for (const i of items) sum += i * 2;', '  return sum;', '}', '', 'const titleCase = (s) =>', "  s.split(' ');", '}'].join('\n');
+
+  test('statements fold into their function, braces and blank names are dropped, a delete plus add of one name is edited', () => {
+    const changes = semDiffChanges('src/a.ts', [
+      op('edited', [3, 3], [3, 3]),
+      op('edited', [4, 4], [4, 4]),
+      op('deleted', [5, 5], null),
+      op('deleted', [7, 9], null),
+      op('added', null, [7, 9]),
+      op('added', null, [6, 6]),
+    ], oldText, newText);
+    expect(changes.map((c) => [c.entityName, c.changeType])).toEqual([
+      ['total', 'modified'],
+      ['titleCase', 'modified'],
+    ]);
+    expect(changes[0]!.startLine).toBe(3);
+    expect(changes[0]!.endLine).toBe(4);
+  });
+
+  test('a rename inside a function keeps its own row', () => {
+    const before = ['export function addTax(amount) {', '  const rate = 0.2;', '  return amount * rate;', '}'].join('\n');
+    const after = ['export function addTax(amount) {', '  const taxRate = 0.2;', '  return amount * taxRate;', '}'].join('\n');
+    const changes = semDiffChanges('src/tax.ts', [op('renamed', [2, 3], [2, 3])], before, after);
+    expect(changes.map((c) => [c.oldEntityName, c.entityName, c.changeType])).toEqual([['rate', 'taxRate', 'renamed']]);
+  });
+
+  test('a method line names the method, not the statement inside it', async () => {
+    const { shortName } = await import('./semDiffChanges');
+    expect(shortName('  async listEntries(dir: string): Promise<Entry[]> {')).toBe('listEntries');
+    expect(shortName('func (s *Store) Save(u User) error {')).toBe('Save');
+    expect(shortName('if (user.coupon) {')).toBe('if (user.coupon) {');
+  });
+});

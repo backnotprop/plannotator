@@ -1,4 +1,5 @@
 import React from 'react';
+import { ArrowDownLeft, ArrowUpDown, ArrowUpRight, Minus, MoveRight, PenLine, Pilcrow, Plus, type LucideIcon } from 'lucide-react';
 import type { SelectedLineRange } from '@plannotator/ui/types';
 import type {
   SemanticDiffBinaryChange,
@@ -8,26 +9,39 @@ import { CodeSnippetPreview } from '@plannotator/ui/components/CodeSnippetPrevie
 import { useHoverPreview } from '@plannotator/ui/hooks/useHoverPreview';
 import type { ReviewFileSource, ReviewFileSourceLoader } from '../../hooks/useReviewFileSource';
 
-// `renamed`/`moved` are handled by the early return in getChangeSymbol, so they
-// intentionally have no entry here.
-const changeSymbols: Record<string, string> = {
-  added: '⊕',
-  deleted: '⊖',
-  modified: '∆',
-  reordered: '↕',
+const CHANGE_ICONS: Record<string, LucideIcon> = {
+  added: Plus,
+  deleted: Minus,
+  moved: MoveRight,
+  renamed: PenLine,
+  modified: PenLine,
+  reordered: ArrowUpDown,
+  reformatted: Pilcrow,
+  extracted: ArrowUpRight,
+  inlined: ArrowDownLeft,
 };
 
-export function getChangeSymbol(changeType: string): string {
-  if (changeType.includes('renamed') || changeType.includes('moved')) return '↻';
-  return changeSymbols[changeType] ?? '∆';
+export function ChangeIcon({ changeType }: { changeType: string }) {
+  const kind = changeType === 'extracted' || changeType === 'inlined' || changeType === 'reordered' ? changeType : getChangeClass(changeType);
+  const Icon = CHANGE_ICONS[kind] ?? PenLine;
+  return <Icon className={`semantic-diff-symbol semantic-diff-symbol-${getChangeClass(changeType)}`} size={14} strokeWidth={1.75} aria-hidden="true" />;
+}
+
+const SHORT_STATUS: Record<string, string> = { modified: 'edited', 'moved & edited': 'moved, edited' };
+
+export function statusWord(changeType: string): string {
+  return SHORT_STATUS[changeType] ?? changeType;
 }
 
 export function getChangeClass(changeType: string): string {
   if (changeType.includes('added')) return 'added';
   if (changeType.includes('deleted')) return 'deleted';
   if (changeType.includes('renamed')) return 'renamed';
+  if (changeType === 'moved & edited') return 'modified';
   if (changeType.includes('moved')) return 'moved';
   if (changeType.includes('reordered')) return 'reordered';
+  if (changeType === 'reformatted') return 'reformatted';
+  if (changeType === 'extracted' || changeType === 'inlined') return 'moved';
   return 'modified';
 }
 
@@ -113,10 +127,14 @@ function SemanticDiffChangeRow({
   change,
   onOpenChange,
   loadSource,
+  onOpenLine,
+  onOpenFile,
 }: {
   change: SemanticDiffChange;
   onOpenChange: (change: SemanticDiffChange) => void;
   loadSource?: ReviewFileSourceLoader;
+  onOpenLine?: SemanticOpenLine;
+  onOpenFile?: SemanticOpenFile;
 }) {
   const range = lineSelectionForChange(change);
   const sourcePath = change.changeType === 'deleted' ? change.oldFilePath ?? change.filePath : change.filePath;
@@ -140,12 +158,10 @@ function SemanticDiffChangeRow({
         }}
         title={`${change.filePath}${change.startLine ? `:${change.startLine}` : ''}`}
       >
-        <span className={`semantic-diff-symbol semantic-diff-symbol-${getChangeClass(change.changeType)}`}>
-          {getChangeSymbol(change.changeType)}
-        </span>
+        <ChangeIcon changeType={change.changeType} />
         <span className="semantic-diff-kind">{change.entityType}</span>
         <span className="semantic-diff-name">{getDisplayName(change)}</span>
-        <span className="semantic-diff-status">{change.changeType}</span>
+        <span className="semantic-diff-status">{statusWord(change.changeType)}</span>
       </button>
       {sourcePreview.preview && range && (
         <CodeSnippetPreview
@@ -157,6 +173,23 @@ function SemanticDiffChangeRow({
           lineEnd={range.end > range.start ? range.end : undefined}
           onDismiss={sourcePreview.dismiss}
           {...sourcePreview.previewHandlers}
+          onLineClick={onOpenLine ? (line) => {
+            sourcePreview.dismiss();
+            onOpenLine(sourcePath, line, range.side);
+          } : undefined}
+          actions={onOpenFile ? (
+            <button
+              type="button"
+              className="text-[10px] px-1.5 py-0.5 rounded hover:bg-muted hover:text-foreground"
+              data-snippet-open-file=""
+              onClick={() => {
+                sourcePreview.dismiss();
+                onOpenFile(sourcePath, range.start);
+              }}
+            >
+              Open file
+            </button>
+          ) : undefined}
         />
       )}
     </>
@@ -164,12 +197,17 @@ function SemanticDiffChangeRow({
 }
 
 /** The terminal-style entity rows, shared by the semantic panel and the file-header popover. */
+export type SemanticOpenLine = (path: string, line: number, side: 'deletions' | 'additions') => void;
+export type SemanticOpenFile = (path: string, line: number) => void;
+
 export function SemanticDiffRows({
   changes,
   binaryChanges,
   onOpenChange,
   onOpenBinary,
   loadSource,
+  onOpenLine,
+  onOpenFile,
 }: {
   changes: SemanticDiffChange[];
   binaryChanges: SemanticDiffBinaryChange[];
@@ -177,6 +215,10 @@ export function SemanticDiffRows({
   onOpenBinary: (change: SemanticDiffBinaryChange) => void;
   /** Loads an entity's source for its hover preview; absent, rows have no preview (the file-header popover). */
   loadSource?: ReviewFileSourceLoader;
+  /** Clicking a line of the hover preview: show it in the diff. */
+  onOpenLine?: SemanticOpenLine;
+  /** The hover preview's "Open file": the whole file at that line. */
+  onOpenFile?: SemanticOpenFile;
 }) {
   return (
     <>
@@ -186,6 +228,8 @@ export function SemanticDiffRows({
           change={change}
           onOpenChange={onOpenChange}
           loadSource={loadSource}
+          onOpenLine={onOpenLine}
+          onOpenFile={onOpenFile}
         />
       ))}
       {binaryChanges.map((change, index) => {
@@ -198,9 +242,7 @@ export function SemanticDiffRows({
             onClick={() => onOpenBinary(change)}
             title={change.filePath}
           >
-            <span className={`semantic-diff-symbol semantic-diff-symbol-${getChangeClass(status)}`}>
-              {getChangeSymbol(status)}
-            </span>
+            <ChangeIcon changeType={status} />
             <span className="semantic-diff-kind">binary</span>
             <span className="semantic-diff-name">{getBinaryDisplayName(change)}</span>
             <span className="semantic-diff-status">{status}</span>

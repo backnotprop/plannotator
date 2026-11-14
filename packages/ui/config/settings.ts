@@ -619,6 +619,21 @@ export const SETTINGS = {
     toServer: (v: string) => ({ diffOptions: { fontFamily: v } }),
   },
 
+  diffSemantic: {
+    defaultValue: true as boolean,
+    fromCookie: () => {
+      const v = storage.getItem('plannotator-diff-semantic');
+      return v === 'true' ? true : v === 'false' ? false : undefined;
+    },
+    toCookie: (v: boolean) => storage.setItem('plannotator-diff-semantic', String(v)),
+    serverKey: 'diffOptions',
+    fromServer: (sc: Record<string, unknown>) => {
+      const v = (sc.diffOptions as Record<string, unknown> | undefined)?.semantic;
+      return typeof v === 'boolean' ? v : undefined;
+    },
+    toServer: (v: boolean) => ({ diffOptions: { semantic: v } }),
+  },
+
   diffHideWhitespace: {
     defaultValue: false as boolean,
     fromCookie: () => {

@@ -35,6 +35,13 @@ export interface SemanticDiffBinaryChange {
   fileStatus: string | null;
 }
 
+export type SemanticDiffUnreadReason = "generated" | "too-large" | "unreadable" | "timed-out";
+
+export interface SemanticDiffUnreadFile {
+  path: string;
+  reason: SemanticDiffUnreadReason;
+}
+
 export interface SemanticDiffOkResponse {
   status: "ok";
   summary: SemanticDiffSummary;
@@ -42,6 +49,7 @@ export interface SemanticDiffOkResponse {
   binaryChanges: SemanticDiffBinaryChange[];
   semVersion: string;
   semSource: string;
+  unreadFiles?: SemanticDiffUnreadFile[];
 }
 
 export interface SemanticDiffUnavailableResponse {

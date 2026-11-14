@@ -65,6 +65,7 @@ export function getPlanBrowserHtml(): string {
  * serves the files (generated/diagram-engine-assets.ts).
  */
 export const reviewDiagramEngineDirectory = resolve(moduleDirectory, "diagram-engine");
+export const reviewSemDiffDirectory = resolve(moduleDirectory, "sem-diff");
 
 /** Read and cache the built code-review UI on first use. */
 export function getReviewBrowserHtml(): string {

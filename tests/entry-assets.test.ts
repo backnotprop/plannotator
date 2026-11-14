@@ -129,7 +129,7 @@ describe('review entry assets', () => {
     const build = read('apps/review/diagram-engine/build.ts');
     expect(build).toContain("path.join(uiRoot, 'utils/mermaid.ts')");
     expect(build).toContain("path.join(uiRoot, 'utils/graphviz.ts')");
-    expect(read('apps/review/package.json')).toContain('"build": "vite build && bun diagram-engine/build.ts"');
+    expect(read('apps/review/package.json')).toContain('"build": "vite build && bun diagram-engine/build.ts && bun ../../packages/sem-diff/scripts/copy-wasm.ts dist/sem-diff"');
   });
 
   // The other half of the optimization: the renderers must stay OFF the
@@ -346,6 +346,17 @@ describe('review entry assets', () => {
       'apps/inbox/vite.config.ts',
     ]) {
       expect(read(config)).toContain("'shiki/wasm': path.resolve(");
+    }
+  });
+
+  test('the opt-in @pierre/patches WASM is aliased out of every bundled app', () => {
+    for (const config of [
+      'apps/review/vite.config.ts',
+      'apps/hook/vite.config.ts',
+      'apps/portal/vite.config.ts',
+      'apps/inbox/vite.config.ts',
+    ]) {
+      expect(read(config)).toContain("'@pierre/patches': path.resolve(");
     }
   });
 

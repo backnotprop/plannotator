@@ -11,6 +11,12 @@ import {
 	isDiagramEngineRequest,
 	type DiagramEngineSource,
 } from "../generated/diagram-engine-assets.ts";
+import {
+	answerSemDiffRequest,
+	createSemDiffAssets,
+	isSemDiffRequest,
+	type SemDiffSource,
+} from "../generated/sem-diff-assets.ts";
 import { readFileSync, existsSync } from "node:fs";
 import { createServer } from "node:http";
 import os from "node:os";
@@ -359,6 +365,7 @@ export async function startReviewServer(options: {
 	 * show as code.
 	 */
 	diagramEngine?: DiagramEngineSource;
+	semDiff?: SemDiffSource;
 	origin?: string;
 	diffType?: DiffType | WorkspaceDiffType;
 	gitContext?: GitContext;
@@ -1959,6 +1966,8 @@ export async function startReviewServer(options: {
 	// Hashed off the request path, so `/api/diff` finds it ready.
 	const diagramEngineAssets = createDiagramEngineAssets(options.diagramEngine);
 	diagramEngineAssets.warm();
+	const semDiffAssets = createSemDiffAssets(options.semDiff);
+	semDiffAssets.warm();
 	// Where the current mode reads one side of a repository path, as bytes:
 	// shared by /api/review-image (#1598) and the Markdown preview's
 	// /api/review-markdown-image, mirroring packages/server/review.ts.
@@ -2596,6 +2605,7 @@ export async function startReviewServer(options: {
 				repoFilesSupported,
 				// Session-constant, read once by the page at mount.
 				diagramEngine: await diagramEngineAssets.advert(),
+				semDiff: await semDiffAssets.advert(),
 				...sourceKindAdvert,
 				// Mount is the only place the pin matters, so it rides /api/diff
 				// alone (not the switch endpoints).
@@ -4105,6 +4115,16 @@ export async function startReviewServer(options: {
 			// preview or guide overview that holds a diagram fence.
 			const answer = await answerDiagramEngineRequest(
 				diagramEngineAssets,
+				url.pathname,
+				req.method,
+				req.headers["accept-encoding"],
+				isRemoteSession(),
+			);
+			res.writeHead(answer.status, answer.headers);
+			res.end(answer.body);
+		} else if (isSemDiffRequest(url.pathname)) {
+			const answer = await answerSemDiffRequest(
+				semDiffAssets,
 				url.pathname,
 				req.method,
 				req.headers["accept-encoding"],

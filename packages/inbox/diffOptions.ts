@@ -18,7 +18,7 @@ import type { SettingValue } from '@plannotator/ui/config';
 import type { InboxDiffOptions } from './api';
 
 /** The settings the Inbox shows and saves. */
-export type InboxDiffSetting = 'diffStyle' | Exclude<DiffDisplaySetting, 'diffExpandUnchanged' | 'diffHideWhitespace'>;
+export type InboxDiffSetting = 'diffStyle' | Exclude<DiffDisplaySetting, 'diffExpandUnchanged' | 'diffHideWhitespace' | 'diffSemantic'>;
 type WireKey = keyof InboxDiffOptions;
 
 /** Each setting's name on the wire, and its field in config.json `diffOptions` (what the config store's sync payload carries). */
