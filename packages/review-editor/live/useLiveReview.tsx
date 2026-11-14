@@ -3,7 +3,7 @@ import type { CodeAnnotation } from '@plannotator/ui/types';
 import type { HostLineNote } from '../components/hostLineNotes';
 import type { ReviewSidebarExtraTab } from '../components/ReviewSidebar';
 import { liveApi, liveKey, LiveError, watchLive, type LiveSendTag } from './api';
-import { anchorOfComment, openThreadIds, placeThreads, stepThread, unsentComments, type LiveAgent, type LiveState, type PlacedThread } from './model';
+import { anchorOfComment, commentOfMessage, openThreadIds, placeThreads, stepThread, unsentComments, type LiveAgent, type LiveState, type PlacedThread } from './model';
 import { LiveThreadCard } from './LiveThreadCard';
 import { LiveThreadsTab } from './LiveThreadsTab';
 import { PRThreadCard, prThreadPlace } from './PRThreadCard';
@@ -21,6 +21,7 @@ export interface LiveReviewActions {
   resolve: (conversationId: string, resolved: boolean) => Promise<void>;
   sendComments: (comments: readonly CodeAnnotation[], words: string, tags: LiveSendTag[]) => Promise<void>;
   reveal: (thread: PlacedThread) => void;
+  takeBack: (messageId: string) => Promise<void>;
   revealLines: (filePath: string, line: number, side: 'old' | 'new') => void;
   error: string | null;
 }
@@ -29,6 +30,7 @@ export function useLiveReview(input: {
   files: readonly { path: string; patch: string }[];
   annotations: readonly CodeAnnotation[];
   dropAnnotations: ((ids: readonly string[]) => void) | null;
+  restoreAnnotations?: (comments: CodeAnnotation[]) => void;
   revealLines: (filePath: string, start: number, end: number, side: 'old' | 'new') => void;
   openTab: (id: string) => void;
   pr?: { forge: string; threads: readonly PRReviewThread[] | null; load: () => void } | null;
@@ -116,8 +118,25 @@ export function useLiveReview(input: {
     [input.revealLines],
   );
 
+  const takeBack = useCallback(
+    async (messageId: string) => {
+      setError(null);
+      const answer = await liveApi.takeBack(messageId).catch(failed);
+      if (input.dropAnnotations && input.restoreAnnotations) {
+        const back = answer.taken
+          .map((id) => (state?.messages ?? []).find((m) => m.id === id))
+          .flatMap((m) => {
+            const comment = m ? commentOfMessage(m) : null;
+            return comment ? [{ id: `taken-${m!.id}`, type: 'comment' as const, createdAt: Date.now(), ...comment }] : [];
+          });
+        if (back.length > 0) input.restoreAnnotations(back as CodeAnnotation[]);
+      }
+      refresh();
+    },
+    [failed, refresh, state?.messages, input.dropAnnotations, input.restoreAnnotations],
+  );
   const revealLines = useCallback((filePath: string, line: number, side: 'old' | 'new') => input.revealLines(filePath, line, line, side), [input.revealLines]);
-  const actions: LiveReviewActions = { agents, defaultTo, loadAgents, reply, resolve, sendComments, reveal, revealLines, error };
+  const actions: LiveReviewActions = { agents, defaultTo, loadAgents, reply, resolve, sendComments, reveal, takeBack, revealLines, error };
   const actionsRef = useRef(actions);
   actionsRef.current = actions;
 

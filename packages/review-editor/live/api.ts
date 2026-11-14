@@ -28,6 +28,7 @@ export const liveApi = {
   reply: (messageId: string, input: { words: string; tags?: LiveSendTag[]; idempotency_key: string }) => post<{ reply: { id: string } }>(`/api/live/reply/${messageId}`, input),
   resolve: (messageId: string, resolved: boolean) => post<unknown>(`/api/live/resolve/${messageId}`, { resolved }),
   sendNow: (messageId: string) => post<unknown>(`/api/live/send-now/${messageId}`, {}),
+  takeBack: (messageId: string) => post<{ taken: string[] }>(`/api/live/take-back/${messageId}`, {}),
 };
 
 export function liveKey(): string {

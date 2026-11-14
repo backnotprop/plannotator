@@ -190,6 +190,26 @@ export function createInboxLiveReview(options: {
     return started;
   };
 
+  const takeBackComment = (messageId: string): string[] => {
+    const message = store.message(messageId);
+    if (!message || message.author.kind !== "person") throw new InboxError("message_not_found", `No message ${messageId}.`);
+    const batch = message.review_batch;
+    if (!batch) {
+      store.takeBack(messageId);
+      return [messageId];
+    }
+    const members = store.thread(message.thread_id)?.messages.filter((m) => m.review_batch?.id === batch.id) ?? [];
+    const lead = members.find((m) => m.review_batch?.lead) ?? message;
+    store.takeBack(lead.id);
+    const taken = [lead.id];
+    for (const member of members) {
+      if (member.id === lead.id) continue;
+      store.takeBack(member.id);
+      taken.push(member.id);
+    }
+    return taken;
+  };
+
   const route = async (req: Request, url: URL, owner = true): Promise<Response | null> => {
     const path = url.pathname;
     if (path === REVIEW_THREADS_PATH) {
@@ -212,6 +232,13 @@ export function createInboxLiveReview(options: {
       const body = await options.readBody(req);
       if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
       return json(await openReview(open[1]!));
+    }
+    const takeBack = /^\/api\/inbox\/review-threads\/comments\/([A-Za-z0-9_]+)\/take-back$/.exec(path);
+    if (takeBack) {
+      if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+      const body = await options.readBody(req);
+      if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+      return json({ taken: takeBackComment(takeBack[1]!) });
     }
     const resolve = /^\/api\/inbox\/review-threads\/comments\/([A-Za-z0-9_]+)\/resolve$/.exec(path);
     if (resolve) {

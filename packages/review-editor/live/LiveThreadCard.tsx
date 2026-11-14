@@ -5,7 +5,7 @@ import { authorName, deliveryWord, type LiveMessage, type PlacedThread } from '.
 
 const time = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 
-export function LiveMessageRow({ message, messages }: { message: LiveMessage; messages: readonly LiveMessage[] }) {
+export function LiveMessageRow({ message, messages, onTakeBack }: { message: LiveMessage; messages: readonly LiveMessage[]; onTakeBack?: (id: string) => void }) {
   const delivery = deliveryWord(message, messages);
   return (
     <div className="flex flex-col gap-0.5 px-3 py-2" data-live-message={message.id} data-author={message.author.kind}>
@@ -13,6 +13,11 @@ export function LiveMessageRow({ message, messages }: { message: LiveMessage; me
         <span className="font-medium text-foreground">{authorName(message)}</span>
         <span>{time(message.created_at)}</span>
         {delivery ? <span data-live-delivery={delivery}>· {delivery}</span> : null}
+        {delivery === 'Queued' && onTakeBack ? (
+          <button type="button" className="text-foreground hover:underline" data-live-take-back onClick={() => onTakeBack(message.id)}>
+            Take back
+          </button>
+        ) : null}
         {message.review_addressed ? <span>· marked addressed{message.review_addressed.commit ? ` in ${message.review_addressed.commit.slice(0, 7)}` : ''}</span> : null}
       </div>
       <div className="whitespace-pre-wrap break-words text-[13px] leading-5 text-foreground">{message.body}</div>
@@ -57,11 +62,11 @@ export function LiveThreadCard({ thread, messages, actions }: { thread: PlacedTh
           return arriving ? (
             <div key={message.id} className="live-arrive">
               <div>
-                <LiveMessageRow message={message} messages={messages} />
+                <LiveMessageRow message={message} messages={messages} onTakeBack={(id) => void actions.current.takeBack(id).catch(() => {})} />
               </div>
             </div>
           ) : (
-            <LiveMessageRow key={message.id} message={message} messages={messages} />
+            <LiveMessageRow key={message.id} message={message} messages={messages} onTakeBack={(id) => void actions.current.takeBack(id).catch(() => {})} />
           );
         })}
       </div>

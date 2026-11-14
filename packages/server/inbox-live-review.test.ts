@@ -144,3 +144,19 @@ test("the living review opens again from its thread: the review starts in its fo
   const seen = JSON.parse(readFileSync(join(stubDir, "seen.json"), "utf8"));
   expect(seen).toEqual({ args: ["review"], cwd: w.project, thread: sent.thread!.id, key: "branch:fix/charge", skip: "1" });
 });
+
+test("Take back: a comment not yet with its agent comes back, a review sent all at once comes back whole, a delivered one stays", async () => {
+  const w = await world();
+  const takeBack = (id: string) =>
+    fetch(`http://127.0.0.1:${w.server.port}/api/inbox/review-threads/comments/${id}/take-back`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ serverSession: w.server.serverSession }) });
+  const first = await w.send({ to: { host: "pi", session: "ses-pi" }, comments: [{ anchor: anchor(2, "a"), words: "One." }], idempotency_key: "k1" });
+  await w.deliver("ses-pi", "pi", first.sent[0]!);
+  expect((await takeBack(first.sent[0]!)).status).toBe(409);
+  const bulk = await w.send({ comments: [{ anchor: anchor(4, "b"), words: "Two." }, { anchor: anchor(6, "c"), words: "Three." }], idempotency_key: "k2" });
+  const sibling = bulk.sent[0]!;
+  const response = await takeBack(sibling);
+  expect(response.status).toBe(200);
+  expect(((await response.json()) as { taken: string[] }).taken.sort()).toEqual([...bulk.sent].sort());
+  expect(reviewConversations((await w.read()).messages).map((c) => c.anchor.line_start)).toEqual([2]);
+  expect((await w.poll("ses-pi", "pi")).map((c) => c.id)).not.toContain(bulk.sent[2]);
+});

@@ -55,7 +55,7 @@ function inboxAddress(dataDir: string): InboxAddress | null {
 
 const NO_INBOX = { status: 503, json: { error: "The Plannotator Inbox is not running, so no agent can be reached from this review.", code: "inbox_off" } };
 
-const INBOX_LIVE_PATHS = /^\/api\/live\/(state|agents|send|events|reply\/[A-Za-z0-9_]+|resolve\/[A-Za-z0-9_]+|send-now\/[A-Za-z0-9_]+)$/;
+const INBOX_LIVE_PATHS = /^\/api\/live\/(state|agents|send|events|reply\/[A-Za-z0-9_]+|resolve\/[A-Za-z0-9_]+|send-now\/[A-Za-z0-9_]+|take-back\/[A-Za-z0-9_]+)$/;
 
 export function isReviewLivePath(pathname: string): boolean {
   return INBOX_LIVE_PATHS.test(pathname);
@@ -123,6 +123,7 @@ export async function handleReviewLiveRequest(request: ReviewLiveRequest, contex
   const [kind, id] = route.split("/") as [string, string];
   if (kind === "reply") return post(`/api/inbox/messages/${id}/reply`, { questions: [], ...body });
   if (kind === "resolve") return post(`/api/inbox/review-threads/comments/${id}/resolve`, body);
+  if (kind === "take-back") return post(`/api/inbox/review-threads/comments/${id}/take-back`, body);
   return post(`/api/inbox/messages/${id}/send-now`, body);
 }
 
