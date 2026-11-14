@@ -2606,8 +2606,8 @@ test('the flat PR view: quiet words on the controls\' row, the comments column\'
     expect(sheet.inner).toBe(sheet.card);
     await review.getByRole('button', { name: 'Close the comments' }).click();
 
-    // The file's header keeps its 33 px.
-    expect((await shell.locator('[data-file-header]').first().boundingBox())!.height).toBe(33);
+    // The file's header keeps its 32 px.
+    expect((await shell.locator('[data-file-header]').first().boundingBox())!.height).toBe(32);
   } finally {
     await context.close();
   }

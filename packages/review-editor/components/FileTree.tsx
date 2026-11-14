@@ -399,7 +399,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
 
   const panelControls = (
     <PanelControlsRow
-      scope={header ? <ScopeSwitch model={header} width={panelWidth} /> : undefined}
+      scope={header ? <ScopeSwitch model={header} width={panelWidth} progress={{ viewed: viewedFiles.size, total: files.length, staged: stagedFiles.size, showViewed: showViewedControls !== false }} /> : undefined}
       stagedCount={stagedFiles.size}
       isSearchVisible={isSearchVisible}
       onOpenSearch={onOpenSearch}
@@ -543,7 +543,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
           className="px-2 pb-2"
           style={countColumnVars(totalAdditions, totalDeletions)}
         >
-          <nav aria-label="Review views" className="pb-3 flex flex-col empty:hidden" data-review-views-nav="">
+          <nav aria-label="Review views" className="pb-1 flex flex-col empty:hidden" data-review-views-nav="">
           {onSelectAllFiles && (
             <AllChangesRow
               active={isAllFilesActive}

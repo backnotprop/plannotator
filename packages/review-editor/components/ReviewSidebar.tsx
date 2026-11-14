@@ -1,3 +1,4 @@
+import { ReviewSidebarTabs, REVIEW_SIDEBAR_BODY_ID } from './ReviewSidebarTabs';
 import React, { useRef, useState } from 'react';
 import { CodeAnnotation, type CodeAnnotationScope, type EditorAnnotation, type Annotation, type CommentAnnotation } from '@plannotator/ui/types';
 import { Button } from '@plannotator/ui/components/ui/button';
@@ -26,7 +27,15 @@ import { isCommentSubmitKey } from '@plannotator/ui/utils/commentSubmitKey';
 import { artifactAnchorLabel, artifactAnnotationQuote } from '../utils/artifactAnnotations';
 import { isAgentGeneratedFinding } from '../utils/explainFinding';
 
-export type ReviewSidebarTab = 'annotations' | 'ai' | 'agents';
+export type ReviewSidebarTab = 'annotations' | 'ai' | 'agents' | (string & {});
+
+export interface ReviewSidebarExtraTab {
+  id: string;
+  label: string;
+  count?: number;
+  attention?: boolean;
+  render: () => React.ReactNode;
+}
 
 
 interface ReviewSidebarProps {
@@ -34,6 +43,8 @@ interface ReviewSidebarProps {
   onClose: () => void;
   presentation?: 'panel' | 'overlay';
   activeTab: ReviewSidebarTab;
+  onSelectTab?: (tab: ReviewSidebarTab) => void;
+  extraTabs?: readonly ReviewSidebarExtraTab[];
   annotations: CodeAnnotation[];
   files: DiffFile[];
   selectedAnnotationId: string | null;
@@ -250,9 +261,13 @@ function compareCodeAnnotations(a: CodeAnnotation, b: CodeAnnotation): number {
 }
 
 
+const NO_EXTRA_TABS: readonly ReviewSidebarExtraTab[] = [];
+
 export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
   isOpen,
   onClose,
+  onSelectTab,
+  extraTabs = NO_EXTRA_TABS,
   presentation = 'panel',
   activeTab,
   annotations,
@@ -617,34 +632,26 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
       aria-label={presentation === 'overlay' ? 'Review sidebar' : undefined}
       className={presentation === 'overlay'
         ? 'absolute inset-0 z-40 flex min-w-0 flex-col bg-background'
-        : 'border-l border-border/50 bg-card/30 backdrop-blur-sm flex flex-col flex-shrink-0'
+        : 'border-l border-border bg-card/30 flex flex-col flex-shrink-0'
       }
       style={presentation === 'overlay' ? undefined : { width: width ?? 288 }}
     >
         {/* Header */}
         <div
-          className={`px-3 flex items-center border-b border-border/50 ${presentation === 'overlay' ? 'min-h-[52px]' : ''}`}
+          className={`px-3 flex items-stretch border-b border-border ${presentation === 'overlay' ? 'min-h-[52px]' : ''}`}
           style={presentation === 'overlay' ? undefined : { height: 'var(--panel-header-h)' }}
         >
-          <div className="flex items-center gap-2 w-full min-w-0">
-            <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground truncate">
-              {activeTab === 'annotations' ? 'Annotations' : activeTab === 'ai' ? 'AI' : 'Review Agents'}
-            </h2>
-            {activeTab === 'annotations' && totalCount > 0 && (
-              <span className="text-[10px] font-mono bg-muted px-1.5 py-0.5 rounded text-muted-foreground">
-                {totalCount}
-              </span>
-            )}
-            {activeTab === 'agents' && (agentJobs?.length ?? 0) > 0 && (
-              <span className="text-[10px] font-mono bg-muted px-1.5 py-0.5 rounded text-muted-foreground">
-                {agentJobs!.length}
-              </span>
-            )}
-            {activeTab === 'ai' && aiMessages.length > 0 && (
-              <span className="text-[10px] font-mono bg-muted px-1.5 py-0.5 rounded text-muted-foreground">
-                {aiMessages.length}
-              </span>
-            )}
+          <div className="flex items-stretch gap-2 w-full min-w-0">
+            <ReviewSidebarTabs
+              active={activeTab}
+              onSelect={(tab) => onSelectTab?.(tab)}
+              tabs={[
+                { id: 'annotations', label: 'Comments', count: totalCount },
+                ...(aiAvailable ? [{ id: 'ai' as const, label: 'AI', attention: aiMessages.length > 0 }] : []),
+                ...(agentCapabilities?.available ? [{ id: 'agents' as const, label: 'Agents', count: agentJobs?.length ?? 0, attention: (agentJobs ?? []).some((job) => job.status === 'running' || job.status === 'starting') }] : []),
+                ...extraTabs.map(({ id, label, count, attention }) => ({ id, label, count, attention })),
+              ]}
+            />
             {presentation === 'overlay' && (
               <button
                 data-pn-touch-target
@@ -664,7 +671,7 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
         </div>
 
         {/* Content */}
-        <OverlayScrollArea className="flex-1 min-h-0">
+        <OverlayScrollArea className="flex-1 min-h-0" id={REVIEW_SIDEBAR_BODY_ID} role="tabpanel" aria-labelledby={`review-sidebar-tab-${activeTab}`}>
           {/* Annotations tab */}
           {activeTab === 'annotations' && (
             <div className="p-2 space-y-1.5">
@@ -857,6 +864,7 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
             />
           )}
 
+          {extraTabs.find((tab) => tab.id === activeTab)?.render()}
         </OverlayScrollArea>
 
         {/* Quick Copy Footer — annotations tab only */}

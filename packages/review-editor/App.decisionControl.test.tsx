@@ -626,7 +626,7 @@ describe.if(hasDom)("review decision control (agent mode)", () => {
     expect(primaryButton()!.textContent).toContain("Approve");
 
     await act(async () => {
-      document.querySelector<HTMLButtonElement>('button[title="Annotations"]')!.click();
+      document.querySelector<HTMLButtonElement>('button[data-review-panel-toggle]')!.click();
     });
     await settle();
 

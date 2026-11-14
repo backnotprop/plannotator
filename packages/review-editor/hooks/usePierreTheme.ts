@@ -1,3 +1,4 @@
+import { COMPACT_HUNK_SEPARATOR_HEIGHT, HUNK_SEPARATOR_HEIGHT } from '../utils/diffChromeMetrics';
 import { useState, useEffect } from 'react';
 import type { DiffLineBgIntensity } from '@plannotator/shared/config';
 import { extendThemeSwitch, useTheme } from '@plannotator/ui/components/ThemeProvider';
@@ -246,6 +247,7 @@ export function usePierreTheme(options?: {
   const showFileHeader = options?.showFileHeader ?? false;
   const compactTouchLayout = options?.compactTouchLayout === true;
   const compactTouchCSS = compactTouchLayout ? COMPACT_TOUCH_GUTTER_UTILITY_CSS : '';
+  const separatorPx = compactTouchLayout ? COMPACT_HUNK_SEPARATOR_HEIGHT : HUNK_SEPARATOR_HEIGHT;
   const lineBgIntensity = useConfigValue('diffLineBgIntensity');
 
   const [pierreTheme, setPierreTheme] = useState<PierreTheme>(() => {
@@ -260,8 +262,8 @@ export function usePierreTheme(options?: {
       }
       pre, code { background-color: ${bg} !important; }
       :host { --diffs-bg-separator-override: color-mix(in srgb, ${fg} 8%, ${bg}); }
-      [data-separator='line-info'], [data-separator='line-info-basic'] { height: 24px !important; }
-      [data-separator='line-info'] { margin-block: 4px !important; }
+      [data-separator='line-info'], [data-separator='line-info-basic'] { height: ${separatorPx}px !important; }
+      [data-separator='line-info'] { margin-block: 0 !important; }
       ${buildLineBgOverrides(lineBgIntensity, resolvedMode ?? 'dark')}
       ${compactTouchCSS}
       ${SELECTION_BAR_PLUS_CSS}
@@ -338,18 +340,17 @@ export function usePierreTheme(options?: {
           }
           [data-separator='line-info'],
           [data-separator='line-info-basic'] {
-            height: 24px !important;
+            height: ${separatorPx}px !important;
           }
           [data-separator='line-info'] {
-            margin-block: 4px !important;
+            margin-block: 0 !important;
           }
           [data-separator-content] {
-            font-size: 11px !important;
+            font-size: 12px !important;
             color: ${mutedFg || fg} !important;
-            opacity: 0.7;
           }
           [data-separator-content]:hover {
-            opacity: 1;
+            color: ${fg} !important;
           }
           [data-expand-button] {
             min-width: 24px !important;
@@ -386,7 +387,7 @@ export function usePierreTheme(options?: {
         `,
       });
     });
-  }, [resolvedMode, colorTheme, fontFamily, fontSize, showFileHeader, lineBgIntensity, compactTouchCSS]);
+  }, [resolvedMode, colorTheme, fontFamily, fontSize, showFileHeader, lineBgIntensity, compactTouchCSS, separatorPx]);
 
   return pierreTheme;
 }

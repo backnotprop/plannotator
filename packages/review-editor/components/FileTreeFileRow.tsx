@@ -68,7 +68,7 @@ export const FileTreeFileRow = React.memo(function FileTreeFileRow({
           <button
             onClick={() => onSelectFile(fileIndex)}
             onDoubleClick={() => onDoubleClickFile?.(fileIndex)}
-            className={`file-tree-item w-full text-left group ${isActive ? 'active' : isScrollActive ? 'scroll-active' : ''} ${annotationCount > 0 ? 'has-annotations' : ''} ${isStaged && !sinceBaseMode ? 'staged' : ''}`}
+            className={`file-tree-item w-full text-left group ${isActive ? 'active' : isScrollActive ? 'scroll-active' : ''} ${annotationCount > 0 ? 'has-annotations' : ''} ${isStaged && !sinceBaseMode ? 'staged' : ''} ${isViewed && showViewedControls ? 'viewed' : ''}`}
             style={{ paddingLeft }}
             title={path}
           />

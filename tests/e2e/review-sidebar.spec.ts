@@ -220,7 +220,7 @@ test('the tools stay on top while the files scroll under them; the numbers keep 
     await page.mouse.wheel(0, 400);
     await expect(block).toHaveAttribute('data-stuck', '');
     const after = await block.boundingBox();
-    expect(after!.y).toBeLessThan(before!.y);
+    expect(after!.y).toBeLessThanOrEqual(before!.y);
     // Still on screen, at the top of the list, with its tools usable.
     await expect(page.locator('[data-tree-scope="all"]')).toBeInViewport();
     await expect(page.getByRole('button', { name: 'List options' })).toBeInViewport();

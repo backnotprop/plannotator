@@ -78,7 +78,6 @@ const VIEW_META: Record<ReviewPanelView, { label: string; title: string; Icon: R
 /** Below this the view tabs become icons and the scope reads "All". */
 export const NARROW_HEADER_WIDTH = 200;
 /** Below this Go to File drops its keys. */
-const GO_TO_FILE_KEYS_WIDTH = 210;
 
 const FOCUS =
   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/70 focus-visible:ring-offset-1 focus-visible:ring-offset-background';
@@ -210,31 +209,23 @@ export function middleTruncateRef(base: string, width: number): string {
 }
 
 
-/**
- * Go to File as a quiet field at the top of the panel: a faint fill, no
- * border, shadow or key boxes. The icon sits on the panel's content edge and
- * the words on its label edge. Opens the existing palette (⌘P / Ctrl+P).
- */
-const GoToFileField: React.FC<{ onClick: () => void; showKeys: boolean }> = ({ onClick, showKeys }) => {
+const GoToFileButton: React.FC<{ onClick: () => void }> = ({ onClick }) => {
   const binding = resolveShortcutBindings(reviewExplorerShortcuts.shortcuts.goToFile)[0] ?? '';
   const keys = formatShortcutBindingTokens(binding);
+  const label = keys.length > 0 ? `Go to file (${keys.join('')})` : 'Go to file';
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-label="Go to File…"
-      aria-keyshortcuts={binding ? ariaKeyShortcut(binding) : undefined}
-      data-go-to-file-button=""
-      className={`w-full min-w-0 flex items-center gap-1 h-8 px-2 rounded-md bg-[var(--sidebar-fill-faint)] text-[13px] text-muted-foreground hover:bg-[var(--sidebar-fill)] hover:text-foreground transition-colors ${FOCUS}`}
-    >
-      <FileSearch className="w-3.5 h-3.5 flex-shrink-0" aria-hidden="true" />
-      <span className="truncate">Go to file…</span>
-      {showKeys && keys.length > 0 && (
-        <kbd className="ml-auto pl-2 font-sans text-[12px] tracking-[0.08em] text-[var(--sidebar-text-tertiary)]" aria-hidden="true">
-          {keys.join('')}
-        </kbd>
-      )}
-    </button>
+    <Tooltip content={label} side="bottom">
+      <button
+        type="button"
+        onClick={onClick}
+        aria-label="Go to File…"
+        aria-keyshortcuts={binding ? ariaKeyShortcut(binding) : undefined}
+        data-go-to-file-button=""
+        className={`ml-auto -mr-1 h-6 w-6 flex flex-shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-[var(--sidebar-fill)] hover:text-foreground transition-colors ${FOCUS}`}
+      >
+        <FileSearch className="w-3.5 h-3.5" aria-hidden="true" />
+      </button>
+    </Tooltip>
   );
 };
 
@@ -305,7 +296,7 @@ let pendingTabFocus: ReviewPanelView | null = null;
  * track is the panel's one line: above it stays the same on every tab, below
  * it belongs to the tab.
  */
-const ViewTabs: React.FC<{ model: ReviewPanelHeaderModel; views: ReviewPanelView[]; narrow: boolean }> = ({ model, views, narrow }) => {
+const ViewTabs: React.FC<{ model: ReviewPanelHeaderModel; views: ReviewPanelView[]; narrow: boolean; trailing?: React.ReactNode }> = ({ model, views, narrow, trailing }) => {
   const listRef = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     if (pendingTabFocus === null) return;
@@ -339,13 +330,14 @@ const ViewTabs: React.FC<{ model: ReviewPanelHeaderModel; views: ReviewPanelView
   };
 
   return (
+    <div className="-mx-2 px-4 flex items-center shadow-[inset_0_-1px_0_var(--sidebar-line)]" data-panel-tabs-row="">
     <div
       ref={listRef}
       role="tablist"
       aria-label="Panel view"
       data-panel-view-switch=""
       onKeyDown={onKeyDown}
-      className="-mx-2 px-4 flex items-center gap-4 shadow-[inset_0_-1px_0_var(--sidebar-line)]"
+      className="flex items-center gap-4"
     >
       {views.map((view) => {
         const active = model.view === view;
@@ -380,6 +372,8 @@ const ViewTabs: React.FC<{ model: ReviewPanelHeaderModel; views: ReviewPanelView
         );
       })}
     </div>
+      {trailing}
+    </div>
   );
 };
 
@@ -400,22 +394,23 @@ export const ReviewPanelHeader: React.FC<{ model: ReviewPanelHeaderModel; width:
   const views = panelViews(model);
   const { noun, connector } = diffWords(model);
   const showSentence = model.view !== 'commits' && (!!model.diff || !!model.base || model.view === 'sections');
+  const goToFile = model.onGoToFile ? <GoToFileButton onClick={model.onGoToFile} /> : null;
   const token = `inline-flex min-w-0 max-w-full items-center gap-0.5 rounded px-1 -mx-0.5 py-0.5 min-h-6 font-medium text-foreground underline decoration-dotted decoration-muted-foreground/60 underline-offset-[3px] hover:bg-[var(--sidebar-fill)] hover:decoration-transparent transition-colors disabled:opacity-50 disabled:cursor-wait ${FOCUS}`;
 
   return (
-    <div className="flex-shrink-0 flex flex-col px-2 pt-3" data-review-panel-header="">
-      {model.onGoToFile && <GoToFileField onClick={model.onGoToFile} showKeys={width >= GO_TO_FILE_KEYS_WIDTH} />}
-      <div className={model.onGoToFile ? 'mt-2' : ''}>
+    <div className="flex-shrink-0 flex flex-col px-2 pt-1" data-review-panel-header="">
+      <div>
         {views.length > 1 ? (
-          <ViewTabs model={model} views={views} narrow={narrow} />
+          <ViewTabs model={model} views={views} narrow={narrow} trailing={goToFile} />
         ) : (
           <div className="-mx-2 px-4 h-7 flex items-center shadow-[inset_0_-1px_0_var(--sidebar-line)]">
             <span className="text-[13px] font-medium text-muted-foreground">Files</span>
+            {goToFile}
           </div>
         )}
       </div>
       {showSentence ? (
-        <div className="mt-2 mb-1 px-2 text-[13px] leading-6 text-muted-foreground flex flex-wrap items-center gap-x-1" data-panel-sentence="">
+        <div className="mt-1 px-2 text-[13px] leading-6 text-muted-foreground flex flex-wrap items-center gap-x-1" data-panel-sentence="">
           {model.diff ? (
             <DiffTypePicker
               options={model.diff.options}
@@ -458,7 +453,7 @@ export const ReviewPanelHeader: React.FC<{ model: ReviewPanelHeaderModel; width:
           )}
         </div>
       ) : (
-        <div className="h-2" aria-hidden="true" />
+        <div className="h-1" aria-hidden="true" />
       )}
     </div>
   );
@@ -474,9 +469,30 @@ export const ReviewPanelHeader: React.FC<{ model: ReviewPanelHeaderModel; width:
  * listing, and a polite status region for a live one. Draws nothing when the
  * panel shows no scope (Commits, a search, a session without All files).
  */
-export const ScopeSwitch: React.FC<{ model: ReviewPanelHeaderModel; width: number }> = ({ model, width }) => {
+export interface ScopeProgress {
+  viewed: number;
+  total: number;
+  staged: number;
+  showViewed: boolean;
+}
+
+function progressTitle(progress: ScopeProgress): string {
+  const parts: string[] = [];
+  if (progress.showViewed) parts.push(progress.viewed >= progress.total && progress.total > 0 ? `All ${progress.total} viewed` : `${progress.viewed} of ${progress.total} viewed`);
+  if (progress.staged > 0) parts.push(`${progress.staged} staged`);
+  return parts.join(' · ');
+}
+
+export const ScopeSwitch: React.FC<{ model: ReviewPanelHeaderModel; width: number; progress?: ScopeProgress }> = ({ model, width, progress }) => {
   const scope = shownScope(model);
-  if (!scope || !model.scope) return null;
+  if (!scope || !model.scope) {
+    if (!progress || !progressTitle(progress)) return null;
+    return (
+      <span className="px-2 text-[12px] tabular-nums text-muted-foreground" data-review-progress-caption="">
+        {progressTitle(progress)}
+      </span>
+    );
+  }
   const narrow = width < NARROW_HEADER_WIDTH;
   const listing = scope === 'all' ? model.repo : null;
   const pill = (active: boolean) =>
@@ -493,11 +509,20 @@ export const ScopeSwitch: React.FC<{ model: ReviewPanelHeaderModel; width: numbe
           aria-pressed={scope === 'changes'}
           onClick={() => selectScope(model, 'changes')}
           data-tree-scope="changes"
-          title="The files this review changes"
-          className={`flex-shrink-0 ${narrow ? 'px-1.5' : 'px-2'} ${pill(scope === 'changes')}`}
+          title={progress && progressTitle(progress) ? `The files this review changes: ${progressTitle(progress)}` : 'The files this review changes'}
+          className={`flex-shrink-0 px-1.5 ${pill(scope === 'changes')}`}
         >
           <span>Changes</span>
-          {changed !== undefined && <span className="tabular-nums text-[11px] font-normal text-muted-foreground">{formatCount(changed)}</span>}
+          {progress?.showViewed ? (
+            <span
+              className={`tabular-nums text-[12px] font-normal ${progress.total > 0 && progress.viewed >= progress.total ? 'text-success' : 'text-muted-foreground'}`}
+              data-panel-viewed-controls=""
+              data-review-progress-caption=""
+            >
+              {progress.viewed}/{formatCount(progress.total)}
+            </span>
+          ) : changed !== undefined && <span className="tabular-nums text-[12px] font-normal text-muted-foreground">{formatCount(changed)}</span>}
+          {progress && progress.staged > 0 && <span className="sr-only" data-panel-staged-count="">{progress.staged} staged</span>}
         </button>
         <button
           type="button"
@@ -505,7 +530,7 @@ export const ScopeSwitch: React.FC<{ model: ReviewPanelHeaderModel; width: numbe
           onClick={() => selectScope(model, 'all')}
           data-tree-scope="all"
           title={`Every file of the repository at the revision the diff reads${all !== undefined ? ` (${formatCount(all)} files)` : ''}`}
-          className={`relative min-w-0 ${narrow ? 'pl-1.5 pr-2.5' : 'pl-1.5 pr-3'} ${pill(scope === 'all')}`}
+          className={`relative min-w-0 pl-1.5 pr-2.5 ${pill(scope === 'all')}`}
         >
           <span className="truncate">{narrow ? 'All' : 'All files'}</span>
           {all !== undefined && <span className="sr-only">{formatCount(all)}</span>}
