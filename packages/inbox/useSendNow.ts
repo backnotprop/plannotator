@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { InboxApiError, inboxApi } from '../api';
+import { InboxApiError, inboxApi } from './api';
 
 const NOT_SENT = 'It was not sent now. Try again.';
 
