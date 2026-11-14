@@ -22,10 +22,12 @@ interface Fill {
 }
 
 let fills: Fill[] = [];
-const ElementProto = Object.getPrototypeOf(Object.getPrototypeOf(document.createElement('div'))) as object;
+const hasDom = typeof document !== 'undefined';
 const restore: Array<() => void> = [];
 
 beforeAll(() => {
+  if (!hasDom) return;
+  const ElementProto = Object.getPrototypeOf(Object.getPrototypeOf(document.createElement('div'))) as object;
   const proto = Object.getPrototypeOf(document.createElement('canvas')) as { getContext: unknown };
   const realGetContext = proto.getContext;
   proto.getContext = function () {
@@ -97,7 +99,7 @@ const flush = () => act(async () => {
 });
 
 describe('diff minimap stays in step with the diff layout', () => {
-  test('collapse, expand and viewed redraw the strip from the new layout', async () => {
+  test.skipIf(!hasDom)('collapse, expand and viewed redraw the strip from the new layout', async () => {
     let state = layoutFor(new Set());
     const source: DiffLayoutSource = {
       items: () => state.items,
