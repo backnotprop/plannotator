@@ -4,7 +4,7 @@
  * "review-sidebar-header", variant "sentence"): every control one click away.
  *
  *  1. Go to file, a quiet field (⌘P).
- *  2. Tree / Git status / Commits as underlined tabs (icons under 200 px),
+ *  2. Tree / Commits as underlined tabs (icons under 200 px),
  *     with the panel's one line under them.
  *  3. The comparison read as one sentence whose words are the controls:
  *     "All changes ⌄ since main ⌄". Each word opens its existing menu (the
@@ -18,7 +18,7 @@
  * fed one model built by App, so nothing moves between views.
  */
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { ChevronDown, FileSearch, FolderTree, GitCommitHorizontal, Layers3 } from 'lucide-react';
+import { ChevronDown, FileSearch, FolderTree, GitCommitHorizontal } from 'lucide-react';
 import { Tooltip } from '@plannotator/ui/components/Tooltip';
 import { isMac } from '@plannotator/ui/utils/platform';
 import { formatShortcutBindingTokens, resolveShortcutBindings, reviewExplorerShortcuts } from '@plannotator/ui/shortcuts';
@@ -28,19 +28,17 @@ import type { RepoFilesState } from '../hooks/useRepoFiles';
 import { BaseBranchPicker } from './BaseBranchPicker';
 import { DiffTypePicker, displayRef } from './DiffTypePicker';
 
-export type ReviewPanelView = 'sections' | 'commits' | 'tree';
+export type ReviewPanelView = 'commits' | 'tree';
 
 type ReadyRepo = Extract<RepoFilesState, { status: 'ready' }>;
 
 export interface ReviewPanelHeaderModel {
   /** The view on screen. */
   view: ReviewPanelView;
-  /** Offer Git status (a session with since-base sections). */
-  showSections: boolean;
   /** Offer Commits (git-local and jj sessions). */
   showCommits: boolean;
   onSelectView: (view: ReviewPanelView) => void;
-  /** Changes | All files. Choosing a scope from Git status or Commits goes to the tree. */
+  /** Changes | All files. Choosing a scope from Commits goes to the tree. */
   scope?: { value: TreeScope; onSelect: (scope: TreeScope) => void; changed: number; all?: number };
   /** The All files listing once it is ready, for the live dot. */
   repo?: ReadyRepo | null;
@@ -71,7 +69,6 @@ export interface ReviewPanelHeaderModel {
 
 const VIEW_META: Record<ReviewPanelView, { label: string; title: string; Icon: React.FC<{ className?: string }> }> = {
   tree: { label: 'Tree', title: 'Tree view', Icon: FolderTree },
-  sections: { label: 'Git status', title: 'Git status view (Committed / Changes / Untracked)', Icon: Layers3 },
   commits: { label: 'Commits', title: 'Commit history: click a commit to review its diff', Icon: GitCommitHorizontal },
 };
 
@@ -167,11 +164,10 @@ export function diffWords(model: Pick<ReviewPanelHeaderModel, 'view' | 'diff' | 
   noun: string;
   connector: string | null;
 } {
-  const id = model.view === 'sections' ? 'since-base' : model.diff?.active;
+  const id = model.diff?.active;
   const option = model.diff?.options.find((o) => o.id === id);
   if (!model.base) {
     // No base in the sentence: the option's own words say everything.
-    if (id === 'since-base' && model.view === 'sections') return { noun: 'All changes', connector: null };
     if (id === 'since-base' && model.diff?.activeBase) return { noun: `All changes since ${displayRef(model.diff.activeBase)}`, connector: null };
     return { noun: option?.label ?? 'Changes', connector: null };
   }
@@ -239,25 +235,23 @@ const Chevron: React.FC<{ loading?: boolean }> = ({ loading }) =>
     <ChevronDown className="w-3 h-3 flex-shrink-0 text-muted-foreground" aria-hidden="true" />
   );
 
-/** Choosing All files from Git status goes to the tree; Changes is already on there. */
+/** Choosing a scope from Commits goes to the tree. */
 function selectScope(model: ReviewPanelHeaderModel, scope: TreeScope) {
   if (!model.scope) return;
-  if (model.view === 'sections' && scope === 'changes') return;
   if (model.view !== 'tree') model.onSelectView('tree');
   model.scope.onSelect(scope);
 }
 
-/** The scope shown as on (Git status counts as Changes; Commits shows none). */
+/** The scope shown as on (Commits shows none). */
 function shownScope(model: ReviewPanelHeaderModel): TreeScope | null {
   if (!model.scope || model.view === 'commits' || model.searching) return null;
-  return model.view === 'sections' ? 'changes' : model.scope.value;
+  return model.scope.value;
 }
 
 /** The views a session offers, in tab order. */
 function panelViews(model: ReviewPanelHeaderModel): ReviewPanelView[] {
   return [
     'tree',
-    ...(model.showSections ? (['sections'] as const) : []),
     ...(model.showCommits ? (['commits'] as const) : []),
   ];
 }
@@ -393,7 +387,7 @@ export const ReviewPanelHeader: React.FC<{ model: ReviewPanelHeaderModel; width:
   const narrow = width < NARROW_HEADER_WIDTH;
   const views = panelViews(model);
   const { noun, connector } = diffWords(model);
-  const showSentence = model.view !== 'commits' && (!!model.diff || !!model.base || model.view === 'sections');
+  const showSentence = model.view !== 'commits' && (!!model.diff || !!model.base);
   const goToFile = model.onGoToFile ? <GoToFileButton onClick={model.onGoToFile} /> : null;
   const token = `inline-flex min-w-0 max-w-full items-center gap-0.5 rounded px-1 -mx-0.5 py-0.5 min-h-6 font-medium text-foreground underline decoration-dotted decoration-muted-foreground/60 underline-offset-[3px] hover:bg-[var(--sidebar-fill)] hover:decoration-transparent transition-colors disabled:opacity-50 disabled:cursor-wait ${FOCUS}`;
 

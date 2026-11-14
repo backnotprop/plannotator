@@ -348,7 +348,6 @@ packages/review-editor/App.guideViewed.test.tsx
 packages/review-editor/App.commitsJj.test.tsx
 packages/review-editor/App.emptyDiffSwitch.test.tsx
 packages/review-editor/App.sessionTitle.test.tsx
-packages/review-editor/App.planLookTwoTabs.test.tsx
 packages/review-editor/components/AnnotationToolbar.placement.test.tsx
 packages/review-editor/dock/panels/ReviewPROverviewPanel.ui.test.tsx
 packages/review-editor/components/FileHeader.edit.test.tsx
@@ -384,7 +383,6 @@ packages/review-editor/components/guide/GuideExportButton.test.tsx
 packages/review-editor/hooks/useReviewSearch.test.tsx
 packages/review-editor/hooks/useTokenHover.test.tsx
 packages/review-editor/components/TokenHoverCard.test.tsx
-packages/review-editor/components/TokenHoverAnnouncementDialog.test.tsx
 packages/review-editor/utils/stitchTokenIdentifier.test.ts
 packages/review-editor/utils/diffSelection.test.ts
 packages/review-editor/hooks/useAutoViewed.test.tsx
@@ -402,6 +400,7 @@ packages/review-editor/dock/panels/semanticDiffShared.sourcePreview.test.tsx
 packages/review-editor/components/PanelChrome.test.tsx
 packages/review-editor/components/FileTree.search-placement.test.tsx
 packages/review-editor/components/FileTree.fileKinds.test.tsx
+packages/review-editor/components/FileTree.statusGroups.test.tsx
 packages/review-editor/components/FileHeader.fileKind.test.tsx
 packages/review-editor/components/FileHeader.narrow.test.tsx
 packages/review-editor/components/PackageChangesCard.test.tsx
@@ -557,8 +556,6 @@ packages/ui/hooks/useScrollKeyRouting.test.tsx
 packages/ui/hooks/useScrollViewport.test.ts
 packages/review-editor/components/ExpandedCommentDialog.mobile.test.tsx
 packages/review-editor/components/DiffTypePicker.openState.test.tsx
-packages/review-editor/components/EditModeAnnouncementDialog.test.tsx
-packages/review-editor/components/DestinationSpotlight.test.tsx
 packages/review-editor/dock/panels/PRArtifactGallery.test.tsx
 packages/review-editor/dock/panels/artifactDocument.test.ts
 packages/review-editor/dock/ReviewDockRightActions.test.tsx

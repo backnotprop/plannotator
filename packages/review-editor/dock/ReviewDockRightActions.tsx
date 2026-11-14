@@ -1,6 +1,6 @@
 import React from 'react';
 import { configStore, useConfigValue } from '@plannotator/ui/config';
-import { DiffOptionsPopover } from '../components/DiffOptionsPopover';
+import { DiffDisplayOptionsPopover } from '@plannotator/ui/components/DiffDisplayOptions';
 import { DiffLayoutToggle } from '@plannotator/ui/components/DiffLayoutToggle';
 import { useReviewStateOptional } from './ReviewStateContext';
 import { REVIEW_ALL_FILES_PANEL_ID, REVIEW_CODE_NAV_PANEL_ID } from './reviewPanelTypes';
@@ -83,7 +83,7 @@ export const ReviewDockRightActions: React.FC<ReviewDiffControlsProps> = (props)
         </div>
       )}
       <DiffLayoutToggle value={diffStyle} onChange={setDiffStyle} className={ICON_BUTTON} />
-      <DiffOptionsPopover
+      <DiffDisplayOptionsPopover
         actions={collapseAction}
         triggerClassName={`${ICON_BUTTON} data-popup-open:bg-muted data-popup-open:text-foreground`}
       />

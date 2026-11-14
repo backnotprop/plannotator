@@ -812,7 +812,7 @@ export interface PlannotatorConfig {
    */
   cursorSandbox?: boolean;
   /**
-   * Let Claude Code agent jobs (code review, Code Tour, Guided Review) run
+   * Let Claude Code agent jobs (code review, Guided Review) run
    * under the user's own Claude Code sandbox setting. When true (default),
    * Plannotator passes nothing sandbox-related and the user's settings decide.
    * Set to false on systems where Claude Code's sandbox cannot start (Linux

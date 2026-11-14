@@ -5,9 +5,10 @@ import type {
   SinceBaseSections,
   WorktreeInfo,
 } from '@plannotator/shared/types';
-import { buildFileTree, getVisualFileOrder } from '../utils/buildFileTree';
+import { buildFileTree, getVisualFileOrder, type FileTreeNode } from '../utils/buildFileTree';
 import { buildFileKindBlocks, kindFolderPath, type FileKindBlock } from '../utils/fileKindTree';
-import { fileKind, type FileKind } from '@plannotator/core/file-kind';
+import { buildFileStatusBlocks, fileStatusGroup, FILE_STATUS_COVERS, FILE_STATUS_LABELS } from '../utils/fileStatusTree';
+import { fileKind } from '@plannotator/core/file-kind';
 import { FileKindIcon, FILE_KIND_LABELS } from '@plannotator/guide-viewer/FileKindIcon';
 import { useDiffFileTreeExpansion } from '@plannotator/ui/hooks/useDiffFileTreeExpansion';
 import { FileTreeNodeItem, alignedTreeIndent, maxTreeIndent } from './FileTreeNode';
@@ -48,6 +49,9 @@ interface FileTreeProps {
    *  two or more kinds ("Group by kind" in the list options menu). */
   groupByKind?: boolean;
   onToggleGroupByKind?: () => void;
+  groupBy?: FileGroupBy;
+  onSelectGroupBy?: (groupBy: FileGroupBy) => void;
+  statusGroupingAvailable?: boolean;
   /** The server's generated set: which files form the Generated block. */
   generatedFiles?: ReadonlySet<string>;
   /** Markdown files shown rendered, Changes or Read (an eye after the name). */
@@ -144,6 +148,9 @@ export const FileTree: React.FC<FileTreeProps> = ({
   activeRepoPath,
   groupByKind = false,
   onToggleGroupByKind,
+  groupBy,
+  onSelectGroupBy,
+  statusGroupingAvailable = false,
   generatedFiles,
   markdownPreviewedPaths,
   files,
@@ -217,18 +224,56 @@ export const FileTree: React.FC<FileTreeProps> = ({
 }) => {
   const isSearchVisible = !!onSearchChange && (isSearchOpen || !!searchQuery.trim());
 
-  // Kind blocks (Code / Tests / Generated) when the switch is on and the change
-  // holds two or more kinds; null keeps today's single tree.
-  const kindBlocks = useMemo(
-    () => (groupByKind ? buildFileKindBlocks(files, generatedFiles) : null),
-    [files, groupByKind, generatedFiles],
+  const effectiveGroupBy: FileGroupBy = groupBy ?? (groupByKind ? 'kind' : 'none');
+  const statusBlocks = useMemo(
+    () => (effectiveGroupBy === 'status' && sinceBaseSections ? buildFileStatusBlocks(files, sinceBaseSections, stagedFiles) : null),
+    [effectiveGroupBy, files, sinceBaseSections, stagedFiles],
   );
-  // Every block's nodes in block order: the expansion state and j/k order run
-  // over this one list, so they follow the blocks.
-  const tree = useMemo(() => (kindBlocks ? kindBlocks.flatMap((block) => block.tree) : buildFileTree(files)), [files, kindBlocks]);
-  // Folding a block hides it in the tree only. Generated starts folded.
-  const [foldedKinds, setFoldedKinds] = useState<ReadonlySet<FileKind>>(() => new Set(['generated']));
-  const setKindFolded = useCallback((kind: FileKind, folded: boolean) => {
+  const kindBlocks = useMemo(
+    () => (effectiveGroupBy === 'kind' ? buildFileKindBlocks(files, generatedFiles) : null),
+    [files, effectiveGroupBy, generatedFiles],
+  );
+  const blocks = useMemo<FileGroupBlock[] | null>(() => {
+    if (statusBlocks) {
+      return statusBlocks.map((block) => ({
+        key: block.status,
+        group: 'status',
+        label: FILE_STATUS_LABELS[block.status],
+        tooltip: FILE_STATUS_COVERS[block.status],
+        tree: block.tree,
+        paths: block.paths,
+        additions: block.additions,
+        deletions: block.deletions,
+      }));
+    }
+    if (kindBlocks) {
+      return kindBlocks.map((block) => ({
+        key: block.kind,
+        group: 'kind',
+        label: FILE_KIND_LABELS[block.kind],
+        icon: <FileKindIcon kind={block.kind} />,
+        tooltip: KIND_COVERS[block.kind],
+        tree: block.tree,
+        paths: block.paths,
+        additions: block.additions,
+        deletions: block.deletions,
+      }));
+    }
+    return null;
+  }, [statusBlocks, kindBlocks]);
+  const blockKeyOf = useCallback(
+    (path: string): string => {
+      if (statusBlocks && sinceBaseSections) {
+        const file = files.find((candidate) => candidate.path === path);
+        return file ? fileStatusGroup(file, sinceBaseSections, stagedFiles) : 'committed';
+      }
+      return fileKind(path, generatedFiles);
+    },
+    [statusBlocks, sinceBaseSections, files, stagedFiles, generatedFiles],
+  );
+  const tree = useMemo(() => (blocks ? blocks.flatMap((block) => block.tree) : buildFileTree(files)), [files, blocks]);
+  const [foldedKinds, setFoldedKinds] = useState<ReadonlySet<string>>(() => new Set(['generated']));
+  const setKindFolded = useCallback((kind: string, folded: boolean) => {
     setFoldedKinds((prev) => {
       if (prev.has(kind) === folded) return prev;
       const next = new Set(prev);
@@ -318,7 +363,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
   // file's path is too (its ancestors are then the block's folders).
   const activePath = files[activeFileIndex]?.path;
   const activeExpansionPath =
-    kindBlocks && activePath ? kindFolderPath(fileKind(activePath, generatedFiles), activePath) : activePath;
+    blocks && activePath ? kindFolderPath(blockKeyOf(activePath), activePath) : activePath;
 
   // A file that becomes active by any route (j/k, a click in all-files, the
   // scroll highlight, an annotation or search jump) opens its folded kind
@@ -330,10 +375,10 @@ export const FileTree: React.FC<FileTreeProps> = ({
   useEffect(() => {
     const before = revealedRef.current;
     revealedRef.current = { files, active: activePath, scroll: scrollPath };
-    if (!before || before.files !== files || !kindBlocks) return;
-    if (activePath && activePath !== before.active) setKindFolded(fileKind(activePath, generatedFiles), false);
-    if (scrollPath && scrollPath !== before.scroll) setKindFolded(fileKind(scrollPath, generatedFiles), false);
-  }, [files, activePath, scrollPath, kindBlocks, generatedFiles, setKindFolded]);
+    if (!before || before.files !== files || !blocks) return;
+    if (activePath && activePath !== before.active) setKindFolded(blockKeyOf(activePath), false);
+    if (scrollPath && scrollPath !== before.scroll) setKindFolded(blockKeyOf(scrollPath), false);
+  }, [files, activePath, scrollPath, blocks, blockKeyOf, setKindFolded]);
 
   // Folder open/closed state is the shared diff-file-tree hook (expand all on a
   // new tree, keep the active file's ancestors open), the same one the
@@ -417,6 +462,9 @@ export const FileTree: React.FC<FileTreeProps> = ({
       onToggleAutoViewed={onToggleAutoViewed}
       groupByKind={groupByKind}
       onToggleGroupByKind={onToggleGroupByKind}
+      groupBy={onSelectGroupBy ? effectiveGroupBy : undefined}
+      onSelectGroupBy={onSelectGroupBy}
+      statusGroupingAvailable={statusGroupingAvailable}
     />
   );
 
@@ -634,25 +682,28 @@ export const FileTree: React.FC<FileTreeProps> = ({
             )
           ) : (
             <>
-              {kindBlocks
-                ? kindBlocks.map((block) => {
-                    const folded = foldedKinds.has(block.kind);
-                    // Hide-viewed hides a viewed row unless it is the active
-                    // one; a block with no row left hides its header too.
+              {blocks
+                ? blocks.map((block) => {
+                    const folded = foldedKinds.has(block.key);
                     if (hideViewedFiles && block.paths.every((path) => hiddenFiles.has(path) && path !== files[rowActiveIndex]?.path)) {
                       return null;
                     }
                     return (
-                      <div key={block.kind} className="review-panel-group" data-file-kind-block={block.kind}>
+                      <div
+                        key={block.key}
+                        className="review-panel-group"
+                        data-file-kind-block={block.group === 'kind' ? block.key : undefined}
+                        data-file-status-block={block.group === 'status' ? block.key : undefined}
+                      >
                         <PanelSectionHeader
-                          label={FILE_KIND_LABELS[block.kind]}
+                          label={block.label}
                           collapsed={folded}
-                          onToggle={() => setKindFolded(block.kind, !folded)}
-                          icon={<FileKindIcon kind={block.kind} />}
-                          tooltip={KIND_COVERS[block.kind]}
-                          ariaLabel={kindHeadingName(block, viewedFiles)}
+                          onToggle={() => setKindFolded(block.key, !folded)}
+                          icon={block.icon}
+                          tooltip={block.tooltip}
+                          ariaLabel={blockHeadingName(block, viewedFiles)}
                         >
-                          <KindBlockCounts block={block} viewedFiles={viewedFiles} />
+                          <BlockCounts block={block} viewedFiles={viewedFiles} />
                         </PanelSectionHeader>
                         {!folded && renderNodes(block.tree)}
                       </div>
@@ -701,19 +752,28 @@ const KIND_COVERS: Record<FileKindBlock['kind'], string> = {
   generated: 'Generated files: lockfiles, minified and source-map files, and files marked linguist-generated in .gitattributes',
 };
 
-/** A kind heading's spoken name: "Code: 9 files, 0 viewed, 66 lines added,
- *  9 removed. Everything that is not a test …" (the numbers the heading
- *  draws, in words, then what the group holds). */
-function kindHeadingName(block: FileKindBlock, viewedFiles: Set<string>): string {
+export type FileGroupBy = 'none' | 'kind' | 'status';
+
+interface FileGroupBlock {
+  key: string;
+  group: 'kind' | 'status';
+  label: string;
+  icon?: React.ReactNode;
+  tooltip: string;
+  tree: FileTreeNode[];
+  paths: string[];
+  additions: number;
+  deletions: number;
+}
+
+function blockHeadingName(block: FileGroupBlock, viewedFiles: Set<string>): string {
   const total = block.paths.length;
   const viewed = block.paths.filter((path) => viewedFiles.has(path)).length;
   const files = `${total} file${total === 1 ? '' : 's'}`;
-  return `${FILE_KIND_LABELS[block.kind]}: ${files}, ${viewed} viewed, ${block.additions} lines added, ${block.deletions} removed. ${KIND_COVERS[block.kind]}.`;
+  return `${block.label}: ${files}, ${viewed} viewed, ${block.additions} lines added, ${block.deletions} removed. ${block.tooltip}.`;
 }
 
-/** A kind heading's numbers: viewed/total as a third column, then +/- in the
- *  panel's two number columns. No bare file count: "0/9" already says 9. */
-const KindBlockCounts: React.FC<{ block: FileKindBlock; viewedFiles: Set<string> }> = ({ block, viewedFiles }) => {
+const BlockCounts: React.FC<{ block: FileGroupBlock; viewedFiles: Set<string> }> = ({ block, viewedFiles }) => {
   const total = block.paths.length;
   const viewed = block.paths.filter((path) => viewedFiles.has(path)).length;
   return (
