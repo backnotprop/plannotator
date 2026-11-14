@@ -35,7 +35,7 @@ function ThreadRow({ thread, focused, posted, onOpen }: { thread: PlacedThread; 
         onClick={onOpen}
         aria-current={focused ? 'true' : undefined}
         data-live-row={conversation.id}
-        className={`flex w-full flex-col gap-0.5 px-3 py-1.5 text-left hover:bg-muted ${focused ? 'bg-muted' : ''} ${conversation.resolved ? 'opacity-60' : ''}`}
+        className={`flex w-full flex-col gap-0.5 px-3 py-1.5 text-left hover:bg-muted ${focused ? 'bg-muted' : ''}`}
       >
         <span className="flex gap-1.5 text-[12px] text-muted-foreground">
           <span className="truncate" title={conversation.anchor.file}>{short(conversation.anchor.file)}</span>
@@ -43,7 +43,7 @@ function ThreadRow({ thread, focused, posted, onOpen }: { thread: PlacedThread; 
           {state ? <span>· {state}</span> : null}
           {posted ? <span>· On the forge</span> : null}
         </span>
-        <span className="line-clamp-2 text-[13px] leading-5 text-foreground">{conversation.messages[0]!.body}</span>
+        <span className={`line-clamp-2 text-[13px] leading-5 ${conversation.resolved ? 'text-muted-foreground' : 'text-foreground'}`}>{conversation.messages[0]!.body}</span>
         {conversation.messages.length > 1 ? (
           <span className="text-[12px] text-muted-foreground">
             {conversation.messages.length - 1} {conversation.messages.length === 2 ? 'reply' : 'replies'}, last from {authorName(last)}
