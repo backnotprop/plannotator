@@ -910,6 +910,7 @@ export class InboxApiError extends Error {
     readonly threadId: string | null = null,
     /** `question_revision_conflict`: the question's revision on the Inbox now, when the answer names it. */
     readonly currentRevision: number | null = null,
+    readonly by: string | null = null,
   ) {
     super(message);
     this.name = 'InboxApiError';
@@ -927,6 +928,7 @@ async function readJson<T>(response: Response): Promise<T> {
       typeof body.retry_at === 'number' ? body.retry_at : null,
       typeof body.thread_id === 'string' ? body.thread_id : null,
       typeof body.current_revision === 'number' ? body.current_revision : null,
+      typeof body.by === 'string' ? body.by : null,
     );
   }
   return body as T;
@@ -2246,6 +2248,7 @@ export const inboxApi = {
    */
   sendNow: (messageId: string, session?: string | null) =>
     post<{ message: InboxMessage }>(messageUrl(messageId, `/send-now`), session ? { session } : {}),
+  takeBack: (messageId: string) => post<{ message: InboxMessage; draft: InboxReplyDraft | null; compose: InboxDraft | null }>(messageUrl(messageId, '/take-back'), {}),
   newMessage: (threadId: string, input: { session: string; body: string; idempotency_key: string }) =>
     post<{ message: InboxMessage | null; replayed: boolean; held?: OutboxView }>(threadUrl(threadId, `/message`), input).catch((cause) => {
       // To another machine: held in the outbox, as a reply is; the thread shows it waiting.
