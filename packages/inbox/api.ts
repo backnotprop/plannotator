@@ -550,8 +550,6 @@ export interface SettingsModel {
   tailscale?: TailscaleSettings;
   /** This page reached the Inbox through the tailnet (the switch cannot be turned on from there). */
   via?: 'local' | 'tailnet';
-  /** A tailnet login other than the owner's (`tailnetGuest` reads it). Absent from an older Inbox. */
-  guest?: boolean;
   version: string;
   port: number;
   url: string;
@@ -586,9 +584,9 @@ export interface SettingsModel {
   updates?: UpdateSwitches;
   /** Whether this Inbox serves phones (PLANNOTATOR_INBOX_PHONES): the Phones block shows only then. */
   phones: boolean;
-  /** Ask AI is on for this reader: always true now (Ask has no switch), kept for older windows. Absent for a tailnet guest and from an older Inbox. */
+  /** Ask AI is on for this reader: always true now (Ask has no switch), kept for older windows. Absent from an older Inbox. */
   ask_ai?: true;
-  /** `cswap` is on this computer: the sidebar's Usage row is there before the first read. False for a tailnet guest. Absent from an older Inbox. */
+  /** `cswap` is on this computer: the sidebar's Usage row is there before the first read. Absent from an older Inbox. */
   cswap?: boolean;
   /**
    * Plannotator's appearance in config.json (`theme`), the value plan review
@@ -617,7 +615,7 @@ export interface SettingsModel {
   sidebar?: unknown;
   /** How many times `sidebar` was saved (config.json `inboxSidebarRev`): a window takes a layout only when it is newer. */
   sidebar_rev?: number;
-  /** The name on this person's comments (config.json `displayName`): null when never set. Absent for a guest and from an older Inbox. */
+  /** The name on this person's comments (config.json `displayName`): null when never set. Absent from an older Inbox. */
   display_name?: string | null;
   /**
    * The diff layout guided reviews draw (config.json `diffOptions.diffStyle`),
@@ -656,8 +654,7 @@ export interface SettingsModel {
   /**
    * Settings → General: "Open Plannotator at plannotator.localhost" (#2184): config.json
    * `urlHost: "plannotator.localhost"`. `env` is PLANNOTATOR_URL_HOST and `url_host`
-   * another config.json `urlHost`; either locks it. Absent for a tailnet guest
-   * and from an older Inbox.
+   * another config.json `urlHost`; either locks it. Absent from an older Inbox.
    */
   cookie_host?: InboxCookieHost;
   /** The onboarding tour (config.json `inboxTour`): started, finished, skipped. Absent from an Inbox that predates it. */
@@ -714,19 +711,11 @@ export interface InboxLaunchSettings {
 }
 
 /**
- * A page from a tailnet login other than the owner's: what is about this computer stays closed to it. Over the
- * tailnet an Inbox that does not say counts as a guest, so a page never offers what its server may refuse.
- */
-export function tailnetGuest(settings: Pick<SettingsModel, 'via' | 'guest'> | null | undefined): boolean {
-  return settings?.via === 'tailnet' && settings.guest !== false;
-}
-
-/**
  * Whether this page offers Ask AI: in every Inbox, with no switch (approval "inbox-ask-ai-flow", addendum
- * 2026-11-07), once the settings say whose page it is; never for a tailnet guest, and never in the tour.
+ * 2026-11-07), once the settings are read; never in the tour.
  */
-export function inboxAskOn(settings: Pick<SettingsModel, 'via' | 'guest'> | null | undefined, tourOn: boolean): boolean {
-  return settings != null && !tailnetGuest(settings) && !tourOn;
+export function inboxAskOn(settings: Pick<SettingsModel, 'via'> | null | undefined, tourOn: boolean): boolean {
+  return settings != null && !tourOn;
 }
 
 /** Settings → Capabilities → Experimental: each feature's switch, and whether the env var decides it. */
@@ -747,7 +736,7 @@ export interface LiveSession {
   wrote_thread: boolean;
   /** Its connection can put a message into a running turn (Send now). Absent from an older Inbox. */
   send_now?: boolean;
-  /** The session's label (issue #2450): Send to another session's rows. Absent when it has none, from an older Inbox, and for a tailnet guest. */
+  /** The session's label (issue #2450): Send to another session's rows. Absent when it has none and from an older Inbox. */
   label?: string;
 }
 
@@ -792,7 +781,7 @@ export interface TaggableSession {
   /** `live`: its connection polls and wakes it; `mcp`: it reads the Inbox only. */
   kind: 'live' | 'mcp';
   name: string | null;
-  /** A live session's label (issue #2450). Absent when it has none, from an older Inbox, and for a tailnet guest. */
+  /** A live session's label (issue #2450). Absent when it has none and from an older Inbox. */
   label?: string;
   project: { id: string | null; name: string; root: string | null } | null;
   started_at: string | null;
@@ -1011,14 +1000,14 @@ async function localInstead(response: Response): Promise<boolean> {
   return true;
 }
 
-async function get<T>(path: string, signal?: AbortSignal): Promise<T> {
+async function get<T>(path: string, signal?: AbortSignal, arriving?: (response: Response) => Promise<Response>): Promise<T> {
   refuseContested(path);
   const machine = forwardedTo(path);
   resumeDebugLog();
   const response = await fetch(path, { headers: { Accept: 'application/json', 'X-Plannotator-Load': pageLoad }, cache: 'no-store', signal });
   learnDebugLog(response);
-  if (machine && (await localInstead(response))) return get<T>(localRoute(path), signal);
-  const answer = await readJson<T>(response);
+  if (machine && (await localInstead(response))) return get<T>(localRoute(path), signal, arriving);
+  const answer = await readJson<T>(arriving ? await arriving(response) : response);
   // Local ids come only from this Inbox's own records (list rows, the archived list, thread reads, its own
   // events): any other answer can echo another machine's id (a kept draft names its project).
   if (machine) rememberMachine(idsIn(answer), machine);
@@ -1083,20 +1072,46 @@ export const REF_CARD_READ_MS = 20_000;
 /** A storage read with no answer by then (a held connection on a phone over the tailnet) fails, so Try again or a reopen reads anew. XL counts in about 1.3 s. */
 export const STORAGE_READ_MS = 20_000;
 
-/** `get`, given up after `timeoutMs`: the fetch is aborted and the read fails with InboxReadTimeout. */
+/** `get`, given up after `timeoutMs` with nothing arriving: the fetch is aborted and the read fails with InboxReadTimeout. */
 /** `outer`: the caller gave the read up (the person moved on): it ends at once, with that abort. */
 async function getWithin<T>(path: string, timeoutMs: number, outer?: AbortSignal): Promise<T> {
   const controller = new AbortController();
   let timedOut = false;
-  const timer = setTimeout(() => {
+  const expire = () => {
     timedOut = true;
     controller.abort();
-  }, timeoutMs);
+  };
+  let timer = setTimeout(expire, timeoutMs);
+  const progress = () => {
+    clearTimeout(timer);
+    timer = setTimeout(expire, timeoutMs);
+  };
+  const arriving = async (response: Response): Promise<Response> => {
+    progress();
+    const reader = response.body?.getReader();
+    if (!reader) return response;
+    const parts: Uint8Array[] = [];
+    let size = 0;
+    for (let part = await reader.read(); !part.done; part = await reader.read()) {
+      progress();
+      parts.push(part.value);
+      size += part.value.length;
+    }
+    const bytes = new Uint8Array(size);
+    let at = 0;
+    for (const part of parts) {
+      bytes.set(part, at);
+      at += part.length;
+    }
+    return new Response(bytes, { status: response.status, statusText: response.statusText, headers: response.headers });
+  };
   const onAbort = () => controller.abort(outer?.reason);
   if (outer?.aborted) onAbort();
   else outer?.addEventListener('abort', onAbort, { once: true });
   try {
-    return await get<T>(path, controller.signal);
+    const answer = await get<T>(path, controller.signal, arriving);
+    if (timedOut) throw new InboxReadTimeout(timeoutMs);
+    return answer;
   } catch (cause) {
     throw timedOut ? new InboxReadTimeout(timeoutMs) : cause;
   } finally {
@@ -1198,16 +1213,26 @@ const KEEPALIVE_BODY_MAX = 60_000;
  * `keepalive`: the request outlives the page (a save made as the page hides or goes). The answer is read as ever when
  * the page stays. The fetch starts before this function first waits, so a caller in a `pagehide` handler gets it out.
  */
-async function post<T>(path: string, body: Record<string, unknown>, init: { keepalive?: boolean } = {}): Promise<T> {
+async function gzipped(text: string): Promise<ArrayBuffer | null> {
+  if (typeof CompressionStream === 'undefined') return null;
+  try {
+    return await new Response(new Blob([text]).stream().pipeThrough(new CompressionStream('gzip'))).arrayBuffer();
+  } catch {
+    return null;
+  }
+}
+
+async function post<T>(path: string, body: Record<string, unknown>, init: { keepalive?: boolean; gzip?: boolean } = {}): Promise<T> {
   refuseContested(path);
   const machine = forwardedTo(path);
   // A write to another machine is keyed end to end (rule 1): the window's own key, or one made for it here.
   const sent = machine && typeof body.idempotency_key !== 'string' ? { ...body, idempotency_key: newUuid() } : body;
   const text = JSON.stringify(pageSession ? { ...sent, serverSession: pageSession } : sent);
+  const zipped = init.gzip && !machine ? await gzipped(text) : null;
   const response = await fetch(path, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'X-Plannotator-Load': pageLoad, ...(machine ? threadHeader(path) : {}) },
-    body: text,
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'X-Plannotator-Load': pageLoad, ...(machine ? threadHeader(path) : {}), ...(zipped ? { 'Content-Encoding': 'gzip' } : {}) },
+    body: zipped ?? text,
     ...(init.keepalive && text.length <= KEEPALIVE_BODY_MAX ? { keepalive: true } : {}),
   });
   if (machine && (await localInstead(response))) return post<T>(localRoute(path), body);
@@ -1538,7 +1563,7 @@ export const inboxApi = {
   /** Keep a ```html fence's page and get the URL of its sandboxed document (approval "inbox-inline-html"). */
   embed: (html: string) => post<{ id: string; url: string }>(inboxUrl('/embeds'), { html }),
   /** An attached HTML page's frame document, kept by the Inbox and served under its own policy (inbox-pages.ts). */
-  page: (html: string) => post<{ id: string; url: string }>(inboxUrl('/pages'), { html }),
+  page: (html: string) => post<{ id: string; url: string }>(inboxUrl('/pages'), { html }, { gzip: true }),
   /** The global skills the composers' `/` and `$` picker lists (raw entries; ui's catalog layer normalizes them). */
   skills: () => get<{ skills?: unknown }>(inboxUrl('/skills')),
   /** One human-only skill's SKILL.md, read when the person sends a message that references it. */
@@ -1958,7 +1983,7 @@ export const inboxApi = {
    * /api/inbox/launch/folders?path=~/…` or a full path), one level, no hidden or system ones. `machine`: a linked
    * machine's, through the forward; null: this computer's. A path that isn't there is `exists: false`; a hidden or
    * system one is a 422 (`folder_hidden`, `folder_system`; an older Inbox's `folder_outside_home`), a drive that
-   * doesn't answer a 504 (`folder_slow`; `fresh`: Try again, asked of the drive at once), a guest or a call from
+   * doesn't answer a 504 (`folder_slow`; `fresh`: Try again, asked of the drive at once), a call from
    * outside the window a 403.
    */
   homeFolders: (path: string, machine?: string | null, signal?: AbortSignal, fresh = false) =>

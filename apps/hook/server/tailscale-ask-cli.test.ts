@@ -7,9 +7,11 @@
  * (`X-Forwarded-For`, `Tailscale-User-Login`, the served Host).
  *
  * What it guards: the owner's tab over the tailnet loses Ask this session (it
- * used to be discarded), anyone else on the tailnet gains it, the host's own
- * bridge and host-control routes become reachable through serve, or a session
- * without --tailscale behaves any differently than before.
+ * used to be discarded); anyone else on the tailnet gets anything but the
+ * refusal (single player: a 403 page, or JSON for an API call); the host's own
+ * bridge and host-control routes become reachable through serve; a session
+ * that cannot tell who owns the machine publishes anyway; or a session without
+ * --tailscale behaves any differently than before.
  *
  * The real `tailscale` never runs, no browser opens, ~/.plannotator is never
  * touched; every process this file starts is stopped in afterEach.
@@ -24,6 +26,8 @@ import { NO_BROWSER } from "../../../tests/helpers/no-browser";
 
 const MAGIC = "studio.tail0000.ts.net";
 const OWNER = "owner@example.com";
+/** Another account on the tailnet. */
+const OTHER = "other@example.com";
 const TOKEN = "t".repeat(40);
 const cliEntry = join(import.meta.dir, "index.ts");
 
@@ -190,8 +194,23 @@ const SESSION_BODY = JSON.stringify({ providerId: "session-bridge", context: { m
 
 const unix = test.skipIf(process.platform === "win32");
 
+/** The single-player refusal: 403, with `tailnet_identity_refused` as JSON for an API call. */
+const refusedJson = async (response: Response) => [response.status, ((await response.json()) as Json).code];
+
+/** The CLI run to its end (it never becomes ready): exit code and stderr. */
+async function runToEnd(flags: string[], options: StartOptions = {}): Promise<{ code: number; stderr: string }> {
+  const proc = Bun.spawn([process.execPath, cliEntry, ...(options.argv ?? ["annotate", "notes.md"]), ...flags], {
+    cwd: options.cwd ?? root,
+    env: cliEnv(options, join(root, `ready-${Date.now()}`)),
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const [code, stderr] = await Promise.all([proc.exited, new Response(proc.stderr).text()]);
+  return { code, stderr };
+}
+
 describe("--tailscale with a host's bridge: Ask this session for this machine and its owner (#2166)", () => {
-  unix("the owner's tab over the tailnet asks this session end to end; a guest gets Ask AI without it", async () => {
+  unix("the owner's tab over the tailnet asks this session end to end; anyone else gets the refusal", async () => {
     const { port, ready } = await start(["--tailscale"]);
     expect(ready.url).toBe(`https://${MAGIC}:${port}`);
     expect(ready.tailnet).toEqual({ ask: true });
@@ -201,20 +220,23 @@ describe("--tailscale with a host's bridge: Ask this session for this machine an
     expect(await providerIds(await local(port, "/api/ai/capabilities"))).toEqual(["session-bridge"]);
     expect(await providerIds(await throughServe(port, "/api/ai/capabilities"))).toEqual(["session-bridge"]);
 
-    // Everyone else through serve: what --tailscale always served, never the bridge.
-    for (const login of ["guest@example.com", null]) {
-      const ids = await providerIds(await throughServe(port, "/api/ai/capabilities", { login }));
-      expect(ids).not.toContain("session-bridge");
-      const refused = await throughServe(port, "/api/ai/session", { method: "POST", login, headers: ownerPage(port), body: SESSION_BODY });
-      expect(refused.status).toBe(503);
+    // Everyone else through serve (another account, a tagged device): the refusal, a page for the browser, JSON for the API.
+    for (const login of [OTHER, null]) {
+      expect([login, ...(await refusedJson(await throughServe(port, "/api/ai/capabilities", { login })))]).toEqual([login, 403, "tailnet_identity_refused"]);
+      expect([login, ...(await refusedJson(await throughServe(port, "/api/ai/session", { method: "POST", login, headers: ownerPage(port), body: SESSION_BODY })))]).toEqual([login, 403, "tailnet_identity_refused"]);
+      const page = await throughServe(port, "/", { login, headers: { Accept: "text/html" } });
+      expect([login, page.status, page.headers.get("content-type")]).toEqual([login, 403, "text/html; charset=utf-8"]);
+      expect(await page.text()).toContain("only for the Tailscale account that owns this computer");
     }
+    // The owner's page and this computer's: the session itself.
+    expect((await throughServe(port, "/", { headers: { Accept: "text/html" } })).status).toBe(200);
+    expect((await local(port, "/")).status).toBe(200);
     // The owner's login with a forwarded address that is not (only) Tailscale's: a forged header behind a local proxy.
     for (const forwarded of ["192.168.1.5", "100.64.0.9, 192.168.1.5"]) {
-      const ids = await providerIds(await throughServe(port, "/api/ai/capabilities", { headers: { "X-Forwarded-For": forwarded } }));
-      expect([forwarded, ids.includes("session-bridge")]).toEqual([forwarded, false]);
+      expect([forwarded, (await throughServe(port, "/api/ai/capabilities", { headers: { "X-Forwarded-For": forwarded } })).status]).toEqual([forwarded, 403]);
     }
     // Funnel is never the owner, whatever login it carries.
-    expect(await providerIds(await throughServe(port, "/api/ai/capabilities", { headers: { "Tailscale-Funnel-Request": "?1" } }))).not.toContain("session-bridge");
+    expect((await throughServe(port, "/api/ai/capabilities", { headers: { "Tailscale-Funnel-Request": "?1" } })).status).toBe(403);
 
     // The owner asks; the test plays the host on its loopback poll.
     const created = await throughServe(port, "/api/ai/session", { method: "POST", headers: ownerPage(port), body: SESSION_BODY });
@@ -242,7 +264,7 @@ describe("--tailscale with a host's bridge: Ask this session for this machine an
     const { port } = await start(["--tailscale"]);
     const bearer = { Authorization: `Bearer ${TOKEN}`, "Content-Type": "application/json" };
     // Even the owner, with the token, whether it sends the served name or claims a loopback Host.
-    for (const login of [OWNER, "guest@example.com"]) {
+    for (const login of [OWNER]) {
       for (const host of [`${MAGIC}:${port}`, `127.0.0.1:${port}`]) {
         const poll = await throughServe(port, "/api/ai/bridge/poll", { method: "POST", login, headers: { ...bearer, Host: host }, body: JSON.stringify({ waitMs: 0 }) });
         // Refused before the token is looked at: 403 by the Host guard, else 404 (no bridge for this caller).
@@ -287,17 +309,21 @@ describe("--tailscale with a host's bridge: Ask this session for this machine an
     expect(ready.tailnet).toEqual({ ask: true });
     expect(await providerIds(await local(port, "/api/ai/capabilities"))).toEqual(["session-bridge"]);
     expect(await providerIds(await throughServe(port, "/api/ai/capabilities"))).toEqual(["session-bridge"]);
-    expect(await providerIds(await throughServe(port, "/api/ai/capabilities", { login: "guest@example.com" }))).not.toContain("session-bridge");
+    expect(await refusedJson(await throughServe(port, "/api/ai/capabilities", { login: OTHER }))).toEqual([403, "tailnet_identity_refused"]);
     const bearer = { Authorization: `Bearer ${TOKEN}` };
     expect((await throughServe(port, "/api/host/status", { headers: bearer })).status).toBe(404);
     expect((await local(port, "/api/host/status", { headers: bearer })).status).toBe(200);
   }, 30_000);
 
-  unix("a tagged machine with no inboxTailscaleAllow has no owner: Ask this session stays on this computer, the ready line says so", async () => {
-    const { port, ready } = await start(["--tailscale"], { mode: "tagged" });
-    expect(ready.tailnet).toEqual({ ask: false });
-    expect(await providerIds(await local(port, "/api/ai/capabilities"))).toEqual(["session-bridge"]);
-    expect(await providerIds(await throughServe(port, "/api/ai/capabilities"))).not.toContain("session-bridge");
+  unix("a tagged machine with no inboxTailscaleAllow has no owner: nothing is published, and it says why and how to go on", async () => {
+    rmSync(join(root, "calls.txt"), { force: true });
+    const { code, stderr } = await runToEnd(["--tailscale"], { mode: "tagged" });
+    expect(code).toBe(1);
+    expect(stderr).toContain("Over Tailscale, Plannotator opens only for the Tailscale account that owns this computer, and it cannot tell which account that is");
+    expect(stderr).toContain("inboxTailscaleAllow");
+    expect(stderr).toContain("without --tailscale");
+    expect(mappings()).toEqual({});
+    expect(readFileSync(join(root, "calls.txt"), "utf8")).not.toContain("serve --bg");
   });
 
   unix("a tagged machine with inboxTailscaleAllow: the listed login is the owner and asks; anyone else does not", async () => {
@@ -309,24 +335,29 @@ describe("--tailscale with a host's bridge: Ask this session for this machine an
       expect(await providerIds(await throughServe(port, "/api/ai/capabilities"))).toEqual(["session-bridge"]);
       const created = await throughServe(port, "/api/ai/session", { method: "POST", headers: ownerPage(port), body: SESSION_BODY });
       expect(created.status).toBe(200);
-      for (const login of ["guest@example.com", null]) {
-        expect(await providerIds(await throughServe(port, "/api/ai/capabilities", { login }))).not.toContain("session-bridge");
-        const refused = await throughServe(port, "/api/ai/session", { method: "POST", login, headers: ownerPage(port), body: SESSION_BODY });
-        expect(refused.status).toBe(503);
+      for (const login of [OTHER, null]) {
+        expect([login, ...(await refusedJson(await throughServe(port, "/api/ai/capabilities", { login })))]).toEqual([login, 403, "tailnet_identity_refused"]);
       }
     } finally {
       rmSync(config, { force: true });
     }
   }, 30_000);
 
-  unix("a machine with an owner ignores inboxTailscaleAllow: a listed login that is not the owner does not ask", async () => {
+  unix("a machine with an owner ignores inboxTailscaleAllow: a listed login that is not the owner is refused, and startup says so once", async () => {
     const config = join(root, "data", "config.json");
-    writeFileSync(config, JSON.stringify({ inboxTailscaleAllow: ["friend@example.com"] }));
+    writeFileSync(config, JSON.stringify({ inboxTailscaleAllow: [OTHER] }));
     try {
       const { port, ready } = await start(["--tailscale"]);
       expect(ready.tailnet).toEqual({ ask: true });
       expect(await providerIds(await throughServe(port, "/api/ai/capabilities"))).toEqual(["session-bridge"]);
-      expect(await providerIds(await throughServe(port, "/api/ai/capabilities", { login: "friend@example.com" }))).not.toContain("session-bridge");
+      expect(await refusedJson(await throughServe(port, "/api/ai/capabilities", { login: OTHER }))).toEqual([403, "tailnet_identity_refused"]);
+      const proc = running!.proc;
+      running = null;
+      proc.kill("SIGTERM");
+      await proc.exited;
+      const stderr = await new Response(proc.stderr as ReadableStream).text();
+      expect(stderr.split("inboxTailscaleAllow in config.json is ignored").length - 1).toBe(1);
+      expect(stderr).toContain(`over Tailscale, Plannotator opens only for this computer's owner, ${OWNER}.`);
     } finally {
       rmSync(config, { force: true });
     }
@@ -387,7 +418,7 @@ describe("nothing changes without --tailscale or without a bridge", () => {
 // Hover cards (ref-cards.ts) answer the owner's tab in every --tailscale
 // session, so the CLI reads the owner without a bridge too. The failure
 // guarded: the owner's own tab gets `404 ref_cards_disabled` because no host
-// handed the CLI a bridge, or a guest gets cards. The link asked for is not a
+// handed the CLI a bridge, or anyone else gets past the refusal. The link asked for is not a
 // forge link, so an allowed tab gets 422 and nothing (no gh, no glab) runs.
 describe("--tailscale hover cards follow the owner rule, with or without a bridge", () => {
   const refCard = async (port: number, login: string | null) => {
@@ -396,11 +427,11 @@ describe("--tailscale hover cards follow the owner rule, with or without a bridg
     return response.status === 404 ? body.code : response.status;
   };
 
-  unix("no bridge, a machine with an owner: the owner's tab gets cards, a guest and a tagged peer do not", async () => {
+  unix("no bridge, a machine with an owner: the owner's tab gets cards; another account and a tagged peer are refused", async () => {
     const { port } = await start(["--tailscale"], { bridge: false });
     expect(await refCard(port, OWNER)).toBe(422);
-    expect(await refCard(port, "guest@example.com")).toBe("ref_cards_disabled");
-    expect(await refCard(port, null)).toBe("ref_cards_disabled");
+    expect(await refCard(port, OTHER)).toBe(403);
+    expect(await refCard(port, null)).toBe(403);
     expect((await local(port, `/api/ref?url=${encodeURIComponent("https://example.com/not-a-ref")}`)).status).toBe(422);
   });
 
@@ -410,15 +441,10 @@ describe("--tailscale hover cards follow the owner rule, with or without a bridg
     try {
       const { port } = await start(["--tailscale"], { bridge: false, mode: "tagged" });
       expect(await refCard(port, OWNER)).toBe(422);
-      expect(await refCard(port, "guest@example.com")).toBe("ref_cards_disabled");
+      expect(await refCard(port, OTHER)).toBe(403);
     } finally {
       rmSync(config, { force: true });
     }
-  });
-
-  unix("no bridge, a tagged machine with no allowlist: nobody over the tailnet gets cards", async () => {
-    const { port } = await start(["--tailscale"], { bridge: false, mode: "tagged" });
-    expect(await refCard(port, OWNER)).toBe("ref_cards_disabled");
   });
 });
 
@@ -456,11 +482,10 @@ describe('PLANNOTATOR_TAILSCALE / config "tailscale" (#2533)', () => {
     expect(ready.url).toBe(`https://${MAGIC}:${port}`);
     expect(ready.tailnet).toEqual({ ask: false });
     expect(serveCalls()).toEqual([`serve --bg --https=${port} http://127.0.0.1:${port}`]);
-    // The owner's tab gets hover cards; a guest does not.
+    // The owner's tab gets hover cards; another account gets the refusal.
     const refUrl = `/api/ref?url=${encodeURIComponent("https://example.com/not-a-ref")}`;
     expect((await throughServe(port, refUrl)).status).toBe(422);
-    const guest = await throughServe(port, refUrl, { login: "guest@example.com" });
-    expect([guest.status, ((await guest.json()) as Json).code]).toEqual([404, "ref_cards_disabled"]);
+    expect(await refusedJson(await throughServe(port, refUrl, { login: OTHER }))).toEqual([403, "tailnet_identity_refused"]);
     const proc = running!.proc;
     running = null;
     proc.kill("SIGTERM");
