@@ -161,6 +161,10 @@ import {
 import { useScrollKeyRouting } from '@plannotator/ui/hooks/useScrollKeyRouting';
 import { useOverlayViewport } from '@plannotator/ui/hooks/useOverlayViewport';
 import { useCompactTouchLayout, useIsMobile } from '@plannotator/ui/hooks/useIsMobile';
+import { useEdgeSwipe } from '@plannotator/ui/hooks/useEdgeSwipe';
+import { usePanelDrag } from '@plannotator/ui/hooks/usePanelDrag';
+import { usePanelPresence } from '@plannotator/ui/hooks/usePanelPresence';
+import { usePanelScrollLock } from '@plannotator/ui/hooks/usePanelScrollLock';
 import { useViewportEnvironment } from '@plannotator/ui/hooks/useViewportEnvironment';
 import {
   getPermissionModeSettings,
@@ -936,6 +940,7 @@ const App: React.FC = () => {
   const [compactPlanSurface, setCompactPlanSurface] = useState<CompactPlanSurface>(COMPACT_PLAN_ARTIFACT);
   const compactPlanSurfaceTriggerRef = useRef<HTMLElement | null>(null);
   const [compactNavigatorTab, setCompactNavigatorTab] = useState<SidebarTab>('toc');
+  const navigationScrollPositions = useRef(new Map<string, number>());
   const [compactPendingFilePath, setCompactPendingFilePath] = useState<string | null>(null);
   const compactPendingFileRef = useRef<string | null>(null);
   const isCompactNavigatorOpen = isCompactTouchLayout && compactPlanSurface.type === 'navigator';
@@ -946,6 +951,17 @@ const App: React.FC = () => {
   const isCompactAnnotationsOpen = isCompactTouchLayout && compactPlanSurface.type === 'annotations';
   const isCompactAIOpen = isCompactTouchLayout && compactPlanSurface.type === 'ai';
   const isCompactReviewOpen = isCompactTouchLayout && compactPlanSurface.type === 'review';
+  const navigatorSelector = '#pn-compact-plan-navigator';
+  const navigatorDrag = usePanelDrag({
+    selector: navigatorSelector,
+    onClose: () => closeCompactNavigator(),
+  });
+  const navigatorPresence = usePanelPresence(isCompactNavigatorOpen, isCompactTouchLayout);
+  const annotationsPresence = usePanelPresence(isCompactAnnotationsOpen, isCompactTouchLayout);
+  const aiPresence = usePanelPresence(isCompactAIOpen, isCompactTouchLayout);
+  usePanelScrollLock(isCompactTouchLayout && (
+    navigatorPresence.present || annotationsPresence.present || aiPresence.present || isCompactReviewOpen
+  ));
   const effectivePanelOpen = shouldPresentDesktopPlanPanel(isCompactTouchLayout, isPanelOpen);
 
   // Resolved high, not at render time, because `isRightPanelVisible` is what
@@ -7244,6 +7260,17 @@ const App: React.FC = () => {
     ? compactNavigatorTab
     : (compactNavigatorTabs[0] ?? 'toc');
 
+  useEdgeSwipe({
+    enabled: isCompactTouchLayout && (compactNavigatorAvailable || isCompactAnnotationsOpen || isCompactAIOpen)
+      && compactPlanSurface.type !== 'review' && !goalSetupMode,
+    drag: { left: navigatorDrag.gesture },
+    panel: isCompactNavigatorOpen ? {
+      side: 'left', selector: navigatorSelector, onClose: closeCompactNavigator, trackDrag: true,
+    } : isCompactAnnotationsOpen || isCompactAIOpen ? {
+      side: 'right', selector: `#pn-compact-plan-${compactPlanSurface.type}`, onClose: closeCompactPlanSurface,
+    } : undefined,
+  });
+
   useEffect(() => {
     if (isCompactNavigatorOpen && !compactNavigatorAvailable) {
       closeCompactNavigator(false);
@@ -7315,6 +7342,8 @@ const App: React.FC = () => {
     return (
       <SidebarContainer
         presentation={presentation}
+        closing={compact && navigatorPresence.closing}
+        scrollPositions={compact ? navigationScrollPositions.current : undefined}
         activeTab={compact ? effectiveCompactNavigatorTab : sidebar.activeTab}
         onTabChange={handleNavigatorTabChange}
         onClose={compact ? closeCompactNavigator : sidebar.close}
@@ -7608,11 +7637,12 @@ const App: React.FC = () => {
             viewport, which makes every "jump to heading" tap a silent no-op. */}
         <ScrollViewportProvider viewport={scrollViewport}>
 
-        {isCompactNavigatorOpen && compactNavigatorAvailable && renderPlanSidebar('overlay')}
+        {navigatorPresence.present && compactNavigatorAvailable && renderPlanSidebar('overlay')}
 
-        {isCompactAnnotationsOpen && (
+        {annotationsPresence.present && (
           <CompactPlanStage
             id="pn-compact-plan-annotations"
+            closing={annotationsPresence.closing}
             title="Annotations"
             subtitle={compactDocumentTitle}
             count={feedbackAnnotationCount}
@@ -7624,9 +7654,10 @@ const App: React.FC = () => {
           </CompactPlanStage>
         )}
 
-        {isCompactAIOpen && canUseAskAI && (
+        {aiPresence.present && canUseAskAI && (
           <CompactPlanStage
             id="pn-compact-plan-ai"
+            closing={aiPresence.closing}
             title="Ask AI"
             subtitle={compactDocumentTitle}
             count={visibleAIMessages.length}
@@ -7641,6 +7672,7 @@ const App: React.FC = () => {
         {isCompactReviewOpen && compactReviewActions.length > 0 && (
           <CompactPlanStage
             id="pn-compact-plan-review"
+            animated={false}
             title="Review"
             subtitle={compactDocumentTitle}
             onClose={closeCompactPlanSurface}

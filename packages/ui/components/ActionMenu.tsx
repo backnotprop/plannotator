@@ -1,10 +1,14 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useId, useRef, useState } from 'react';
 import { useDismissablePopover } from '../hooks/useDismissablePopover';
+import { useEdgeSwipe } from '../hooks/useEdgeSwipe';
+import { usePanelScrollLock } from '../hooks/usePanelScrollLock';
 
 interface ActionMenuProps {
   className?: string;
   panelClassName?: string;
   panelWidth?: 'default' | 'wide';
+  /** Allow a swipe from inside the open compact Options menu to dismiss it. */
+  compactEdgeSwipe?: boolean;
   renderTrigger: (props: {
     isOpen: boolean;
     toggleMenu: () => void;
@@ -16,37 +20,46 @@ export const ActionMenu: React.FC<ActionMenuProps> = ({
   className,
   panelClassName,
   panelWidth = 'default',
+  compactEdgeSwipe = false,
   renderTrigger,
   children,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
-
-  // Shared dismissal (outside pointerdown + Escape). The hook consumes the
-  // dismissing Escape, so closing an open Options menu no longer also runs
-  // the host app's own Escape ladder — one Escape, one rung.
+  const panelId = useId();
+  const selector = `[data-pn-options-menu="${panelId}"]`;
+  usePanelScrollLock(compactEdgeSwipe && isOpen);
   const dismiss = useCallback(() => setIsOpen(false), []);
+  useEdgeSwipe({
+    enabled: compactEdgeSwipe,
+    panel: isOpen ? { side: 'right', selector, onClose: dismiss } : undefined,
+  });
   useDismissablePopover({
     enabled: isOpen,
     ref: menuRef,
     onDismiss: dismiss,
   });
 
+  const panel = isOpen ? (
+    <div
+      data-pn-dismissable-popover="true"
+      data-pn-options-menu={compactEdgeSwipe ? panelId : undefined}
+      data-pn-compact-touch-layout={compactEdgeSwipe ? 'true' : undefined}
+      role={compactEdgeSwipe ? 'dialog' : undefined}
+      aria-label={compactEdgeSwipe ? 'Options' : undefined}
+      data-pn-panel-side={compactEdgeSwipe ? 'right' : undefined}
+      className={compactEdgeSwipe
+          ? 'absolute top-full right-0 mt-1 w-[min(18rem,calc(100vw-1rem))] max-h-[calc(var(--pn-viewport-height,100vh)-4.5rem-var(--pn-safe-top)-var(--pn-safe-bottom))] overflow-y-auto rounded-lg border border-border bg-popover py-1 shadow-xl z-[70]'
+          : panelClassName ?? `absolute top-full right-0 mt-1 ${panelWidth === 'wide' ? 'w-64' : 'w-56'} rounded-lg border border-border bg-popover py-1 shadow-xl z-[70]`}
+    >
+      {children({ closeMenu: dismiss })}
+    </div>
+  ) : null;
+
   return (
     <div ref={menuRef} className={className ? `relative ${className}` : 'relative'}>
-      {renderTrigger({
-        isOpen,
-        toggleMenu: () => setIsOpen(open => !open),
-      })}
-
-      {isOpen && (
-        <div
-          data-pn-dismissable-popover="true"
-          className={panelClassName ?? `absolute top-full right-0 mt-1 ${panelWidth === 'wide' ? 'w-64' : 'w-56'} rounded-lg border border-border bg-popover py-1 shadow-xl z-[70]`}
-        >
-          {children({ closeMenu: () => setIsOpen(false) })}
-        </div>
-      )}
+      {renderTrigger({ isOpen, toggleMenu: () => setIsOpen(open => !open) })}
+      {panel}
     </div>
   );
 };

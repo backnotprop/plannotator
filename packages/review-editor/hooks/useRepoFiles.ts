@@ -45,6 +45,11 @@ export interface RepoFiles {
 
 type ReadyState = Extract<RepoFilesState, { status: 'ready' }>;
 
+function addListedDirectory(dirs: Map<string, RepoDirEntry[]>, dir: string, entries: RepoDirEntry[]) {
+  const parent = dir.slice(0, Math.max(0, dir.lastIndexOf('/')));
+  if (dirs.get(parent)?.some(entry => entry.type === 'dir' && entry.path === dir)) dirs.set(dir, entries);
+}
+
 export function useRepoFiles({
   enabled,
   snapshotId,
@@ -98,8 +103,19 @@ export function useRepoFiles({
       const previous = stateRef.current;
       const dirs = new Map<string, RepoDirEntry[]>();
       if (body.lazy && body.entries) dirs.set(body.dir ?? '', body.entries);
-      // A live refresh of a lazy listing re-asks every folder already open.
-      const reopen = quiet && previous.status === 'ready' && body.lazy ? [...previous.dirs.keys()].filter((d) => d !== '') : [];
+      if (quiet && previous.status === 'ready' && body.lazy && previous.dirs.size > 1) {
+        // Keep the old rows (and their scroll range) until the refreshed tree
+        // is ready. A root-only intermediate render clamps the scroll offset.
+        const reopen = [...previous.dirs.keys()].filter(Boolean).sort((a, b) => a.length - b.length);
+        const refreshed = await Promise.all(reopen.map(dir => fetchListing(snapshot, dir)));
+        if (seq !== requestSeq.current) return;
+        for (const [i, dir] of reopen.entries()) {
+          // Old child responses must not recreate a directory that the new
+          // parent listing no longer contains.
+          const sub = refreshed[i];
+          if (sub && !('error' in sub) && sub.available && sub.entries) addListedDirectory(dirs, dir, sub.entries);
+        }
+      }
       const next: ReadyState = {
         status: 'ready',
         revision: body.revision,
@@ -112,18 +128,16 @@ export function useRepoFiles({
         updatedAt: Date.now(),
         liveVersion: previous.status === 'ready' && quiet ? previous.liveVersion + 1 : 0,
       };
-      setState(next);
-      for (const dir of reopen) {
-        void fetchListing(snapshot, dir).then((sub) => {
-          if (seq !== requestSeq.current || !sub || 'error' in sub || !sub.available || !sub.entries) return;
-          setState((current) => {
-            if (current.status !== 'ready') return current;
-            const merged = new Map(current.dirs);
-            merged.set(dir, sub.entries!);
-            return { ...current, dirs: merged };
-          });
-        });
-      }
+      setState(current => {
+        if (seq !== requestSeq.current) return current;
+        if (!quiet || !body.lazy || previous.status !== 'ready' || current.status !== 'ready' || current === previous) return next;
+        // A folder opened while refresh was in flight already has fresh rows.
+        // Keep it if it is still reachable in the new tree.
+        const merged = new Map(dirs);
+        const added = [...current.dirs.keys()].filter(dir => !previous.dirs.has(dir)).sort((a, b) => a.length - b.length);
+        for (const dir of added) addListedDirectory(merged, dir, current.dirs.get(dir)!);
+        return { ...next, dirs: merged };
+      });
     },
     [fetchListing],
   );

@@ -2,7 +2,7 @@ import React from 'react';
 import type { CommitListEntry } from '@plannotator/shared/types';
 import { ReviewPanelHeader, reviewPanelBodyProps, type ReviewPanelHeaderModel } from './ReviewPanelHeader';
 import { Avatar } from './Avatar';
-import { OverlayScrollArea } from '@plannotator/ui/components/OverlayScrollArea';
+import { OverlayScrollArea, type ScrollMemory } from '@plannotator/ui/components/OverlayScrollArea';
 import { formatRelativeTime } from '@plannotator/ui/utils/aiChatFormat';
 
 /**
@@ -17,6 +17,7 @@ import { formatRelativeTime } from '@plannotator/ui/utils/aiChatFormat';
  */
 
 interface CommitsPanelProps {
+  scrollMemory?: ScrollMemory;
   width?: number;
   commits: CommitListEntry[];
   /** Base ref the group boundary represents (e.g. `origin/main`). */
@@ -93,6 +94,7 @@ const GroupHeader: React.FC<{ label: string; title: string }> = ({ label, title 
 );
 
 export const CommitsPanel: React.FC<CommitsPanelProps> = ({
+  scrollMemory,
   width,
   commits,
   base,
@@ -128,7 +130,7 @@ export const CommitsPanel: React.FC<CommitsPanelProps> = ({
         </div>
       )}
 
-      <OverlayScrollArea className="flex-1 min-h-0">
+      <OverlayScrollArea scrollMemory={scrollMemory} className="flex-1 min-h-0">
         {/* Containers on the panel's 8 px edge, text on its 16 px edge. */}
         <div className="px-2 py-1" {...reviewPanelBodyProps(header)}>
           {error && commits.length === 0 ? (
