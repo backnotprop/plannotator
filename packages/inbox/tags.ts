@@ -15,7 +15,7 @@ import { INBOX_HOST_NAMES, type InboxMessageWire, type InboxParticipant, type In
 import { sanitizeMentionLabel, type MentionPerson } from '@plannotator/ui/utils/mentions';
 import type { TagMode, TaggableModel, TaggableSession } from './api';
 import { shortLabel } from './sessionLabels';
-import { deliveryLine, uncertainItem, waitInputs, type DeliveryLine, type RecipientConnection } from './deliveryLine';
+import { deliveryLine, handedItem, uncertainItem, waitInputs, type DeliveryLine, type RecipientConnection } from './deliveryLine';
 
 /** The longest session label an `@` token carries, in characters; a longer one is cut in the middle. */
 export const TAG_LABEL_MAX = 40;
@@ -307,6 +307,7 @@ export function tagDeliveryLine(
     wakes: true,
     sendingNow: !!tag.deliver_now_at,
     connection,
+    handed: !!messageId && handedItem(connection, messageId),
     ...(messageId ? waitInputs(connection, messageId, { ...tag, into_turn: tag.delivery?.into_turn ?? null }) : {}),
   });
 }

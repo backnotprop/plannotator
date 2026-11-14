@@ -53,12 +53,17 @@ export interface RecipientConnection {
    * Absent from an older Inbox and when none.
    */
   uncertain?: string[];
+  handed?: string[];
   polls?: boolean;
 }
 
 /** Whether an item may not have reached the session it was handed to (`connection.uncertain`). */
 export function uncertainItem(connection: RecipientConnection | null | undefined, itemId: string): boolean {
   return connection?.uncertain?.includes(itemId) === true;
+}
+
+export function handedItem(connection: RecipientConnection | null | undefined, itemId: string): boolean {
+  return connection?.handed?.includes(itemId) === true;
 }
 
 /** The wait inputs of `deliveryLine` for one item: the server's clock while it waits, its own record after the mark. */
@@ -242,6 +247,7 @@ export interface DeliveryLineInput {
   undelivered?: { host: string } | null;
   /** Its session's connection took it and stopped while delivering it (the sessions route's `asker.stuck`). */
   stuck?: boolean;
+  handed?: boolean;
   /** When it began to wait on the busy session (the server's clock): the line says how long. */
   waitingSince?: string | null;
   /** When the clock toward going in by itself started (the server's); null: it does not go in by itself yet. */
@@ -264,6 +270,7 @@ export function deliveryLine(input: DeliveryLineInput): DeliveryLine {
     delivered: !!input.deliveredAt,
     undelivered: !!input.undelivered,
     stuck: !!input.stuck,
+    handed: !!input.handed,
     askerEnded: !!input.askerEnded,
     wakes: input.wakes,
     sendingNow: input.sendingNow,
@@ -353,6 +360,8 @@ export function deliveryText(
       return `Goes to ${name} in a few seconds`;
     case 'stopped':
       return INBOX_STOPPED_REPLY_TEXT;
+    case 'handed':
+      return `Handed to ${name}; it takes this at its next step.`;
   }
 }
 
