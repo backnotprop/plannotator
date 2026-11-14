@@ -1,4 +1,5 @@
 import { COMPACT_FILE_HEADER_HEIGHT } from '../utils/diffChromeMetrics';
+import { EllipsisName } from './EllipsisName';
 import React, { useEffect, useRef, useState } from 'react';
 import { SemanticFileBadge } from './SemanticFileBadge';
 import { CallFlowFileBadge } from './CallFlowFileBadge';
@@ -89,10 +90,6 @@ function splitFilePath(filePath: string): { directory: string; name: string } {
   };
 }
 
-function frontEllipsize(text: string, visibleChars: number): string {
-  if (text.length <= visibleChars) return text;
-  return `...${text.slice(-visibleChars)}`;
-}
 
 const FileStatusLetter: React.FC<{ status: DiffFileStatus; oldPath?: string }> = ({ status, oldPath }) => {
   if (status === 'modified') return null;
@@ -157,15 +154,6 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
   const { directory, name } = splitFilePath(filePath);
   const isVeryTight = headerWidth > 0 && headerWidth < 480;
   const narrow = headerWidth > 0 && headerWidth < 560;
-  // Narrow, with keepsFolder: the folder gives way first, from its start (`direction: rtl` puts the ellipsis there).
-  const foldedFolder = narrow && keepsFolder && !!directory;
-  const showFilenameOnly = narrow && !foldedFolder;
-  const truncatedName = showFilenameOnly
-    ? frontEllipsize(
-        name,
-        headerWidth < 360 ? 14 : headerWidth < 420 ? 18 : headerWidth < 500 ? 24 : 32,
-      )
-    : name;
 
   useEffect(() => {
     if (!headerRef.current || typeof ResizeObserver === 'undefined') return;
@@ -228,26 +216,14 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
             >
               <bdi>{filePath}</bdi>
             </span>
-          ) : foldedFolder ? (
-            <>
-              <span data-file-header-folder="" className="min-w-0 shrink-[1000] overflow-hidden text-ellipsis whitespace-nowrap font-normal text-muted-foreground [direction:rtl]">
-                <bdi>{directory}</bdi>
-              </span>
-              <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-foreground">{name}</span>
-            </>
           ) : (
             <>
-              {!showFilenameOnly && directory && (
-                <span className="min-w-0 shrink-[1000] overflow-hidden text-ellipsis font-normal text-muted-foreground">
-                  {directory}
+              {directory && (!narrow || keepsFolder) && (
+                <span data-file-header-folder={keepsFolder ? '' : undefined} className="min-w-0 shrink-[1000] overflow-hidden text-ellipsis whitespace-nowrap font-normal text-muted-foreground [direction:rtl]">
+                  <bdi>{directory}</bdi>
                 </span>
               )}
-              <span
-                data-file-header-name=""
-                className={showFilenameOnly ? 'block min-w-0 overflow-hidden whitespace-nowrap text-foreground' : 'min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-foreground'}
-              >
-                {truncatedName}
-              </span>
+              <EllipsisName text={name} className="text-foreground" />
             </>
           )}
         </span>

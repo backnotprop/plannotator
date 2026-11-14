@@ -1,36 +1,44 @@
 import React, { useLayoutEffect, useRef, useState } from 'react';
-import { Crosshair } from 'lucide-react';
+import { Crosshair, Diff, FileText } from 'lucide-react';
+import { EllipsisName } from '../components/EllipsisName';
 import type { Pane } from './paneLayout';
-import { isReviewFilePreviewParams } from '../dock/reviewPanelTypes';
+import { REVIEW_ALL_FILES_PANEL_ID, isReviewFilePreviewParams } from '../dock/reviewPanelTypes';
 import { TITLE_SETTLE_MS, useSettledValue } from './useSettledValue';
 import { PaneTabsMenu } from './PaneTabsMenu';
-import { isClosableTab, isReferencesTab, tabLabel } from './tabLabel';
+import { isClosableTab, isReferencesTab, tabKind, tabLabel, tabTooltip } from './tabLabel';
 
 export { TITLE_SETTLE_MS };
 
 export const TAB_MIN_WIDTH = 72;
 
 const MENU_RESERVE = 44;
+const TAB_GAP = 16;
 
 type HiddenTabs = { ids: Set<string>; end: number };
 const NONE_HIDDEN: HiddenTabs = { ids: new Set(), end: 0 };
 
-function useHiddenTabs(ref: React.RefObject<HTMLElement | null>, key: string, single: boolean): HiddenTabs {
+function useHiddenTabs(ref: React.RefObject<HTMLElement | null>, key: string, single: boolean, activeId: string | null): HiddenTabs {
   const [hidden, setHidden] = useState<HiddenTabs>(NONE_HIDDEN);
   useLayoutEffect(() => {
     const element = ref.current;
     if (!element) return;
     const measure = () => {
+      element.scrollLeft = 0;
       const ids = new Set<string>();
       let end = 0;
       if (!single) {
-        const items = [...element.querySelectorAll<HTMLElement>('[data-pane-tab-item]')];
-        const overflows = items.some((item) => item.offsetLeft + item.offsetWidth > element.clientWidth + 1);
-        const limit = element.clientWidth - (overflows ? MENU_RESERVE : 0) + 1;
-        for (const item of items) {
-          const right = item.offsetLeft + item.offsetWidth;
-          if (overflows && right > limit) ids.add(item.getAttribute('data-pane-tab-item')!);
-          else end = Math.max(end, right);
+        const items = [...element.querySelectorAll<HTMLElement>('[data-pane-tab-item]')].map((item) => ({ id: item.getAttribute('data-pane-tab-item')!, width: item.offsetWidth }));
+        const total = items.reduce((sum, item, index) => sum + item.width + (index ? TAB_GAP : 0), 0);
+        if (total > element.clientWidth + 1) {
+          const limit = element.clientWidth - MENU_RESERVE;
+          const kept = items.filter((item) => item.id === activeId || item.id === REVIEW_ALL_FILES_PANEL_ID);
+          let used = kept.reduce((sum, item, index) => sum + item.width + (index ? TAB_GAP : 0), 0);
+          for (const item of items) {
+            if (kept.includes(item)) continue;
+            if (used + TAB_GAP + item.width <= limit) used += TAB_GAP + item.width;
+            else ids.add(item.id);
+          }
+          end = used;
         }
       }
       setHidden((before) => (before.end === end && before.ids.size === ids.size && [...ids].every((id) => before.ids.has(id)) ? before : ids.size ? { ids, end } : NONE_HIDDEN));
@@ -40,27 +48,13 @@ function useHiddenTabs(ref: React.RefObject<HTMLElement | null>, key: string, si
     const observer = new ResizeObserver(measure);
     observer.observe(element);
     return () => observer.disconnect();
-  }, [ref, key, single]);
+  }, [ref, key, single, activeId]);
   return hidden;
 }
 
-const FILE_EXTENSION = /^(.+?)(\.[A-Za-z0-9]{1,8})$/;
-
-export function splitTabTitle(title: string): { stem: string; extension: string } {
-  const match = FILE_EXTENSION.exec(title);
-  return match ? { stem: match[1]!, extension: match[2]! } : { stem: title, extension: '' };
-}
-
-const TabTitle: React.FC<{ title: string; keepExtension: boolean }> = ({ title, keepExtension }) => {
-  const settled = useSettledValue(title, TITLE_SETTLE_MS);
-  const { stem, extension } = keepExtension ? splitTabTitle(settled) : { stem: settled, extension: '' };
-  return (
-    <>
-      <span className="truncate min-w-0">{stem}</span>
-      {extension && <span className="flex-none">{extension}</span>}
-    </>
-  );
-};
+const TabTitle: React.FC<{ title: string; keepExtension: boolean }> = ({ title, keepExtension }) => (
+  <EllipsisName text={useSettledValue(title, TITLE_SETTLE_MS)} keepExtension={keepExtension} />
+);
 
 function focusTreeRow() {
   const tree = document.querySelector<HTMLElement>('[data-review-sidebar] [data-changes-tree]');
@@ -78,7 +72,7 @@ export const PaneTabs: React.FC<{
   inHeader?: boolean;
 }> = ({ pane, paneIndex, onActivate, onClose, onKeep, inHeader = false }) => {
   const listRef = useRef<HTMLDivElement>(null);
-  const hidden = useHiddenTabs(listRef, pane.tabs.map((tab) => `${tab.id}\0${tab.title}`).join('\n'), pane.tabs.length < 2 || !inHeader);
+  const hidden = useHiddenTabs(listRef, pane.tabs.map((tab) => `${tab.id}\0${tab.title}`).join('\n'), pane.tabs.length < 2 || !inHeader, pane.activeId);
 
   const focusTab = (id: string | null) => {
     if (!id) return;
@@ -111,9 +105,10 @@ export const PaneTabs: React.FC<{
       aria-label={paneIndex === 0 ? 'Open files' : 'Open files beside'}
       data-pane-tabs=""
       onKeyDown={onKeyDown}
+      onScroll={inHeader ? (event) => { event.currentTarget.scrollLeft = 0; } : undefined}
       data-pane-tabs-for={paneIndex}
       className={inHeader
-        ? 'min-w-0 h-full flex items-stretch gap-4 overflow-hidden'
+        ? 'relative min-w-0 h-full flex items-stretch gap-4 overflow-hidden'
         : 'flex-none h-8 flex items-stretch gap-4 px-3 overflow-x-auto shadow-[inset_0_-1px_0_var(--border)] bg-background [scrollbar-width:none]'}
     >
       {pane.tabs.map((tab) => {
@@ -126,7 +121,7 @@ export const PaneTabs: React.FC<{
             data-pane-tab-item={tab.id}
             aria-hidden={hidden.ids.has(tab.id) || undefined}
             style={inHeader && pane.tabs.length === 1 ? { minWidth: TAB_MIN_WIDTH } : undefined}
-            className={`group relative flex items-center gap-1 ${inHeader && pane.tabs.length === 1 ? 'min-w-0 shrink' : 'flex-none'} ${hidden.ids.has(tab.id) ? 'invisible' : ''}`}
+            className={`group flex items-center gap-1 ${inHeader && pane.tabs.length === 1 ? 'min-w-0 shrink' : 'flex-none'} ${hidden.ids.has(tab.id) ? 'invisible absolute' : 'relative'}`}
           >
             <button
               type="button"
@@ -135,7 +130,7 @@ export const PaneTabs: React.FC<{
               tabIndex={active ? 0 : -1}
               data-pane-tab={tab.id}
               data-preview-tab={preview || undefined}
-              title={preview ? `${tab.title} (preview: double-click to keep it open)` : tab.title}
+              title={preview ? `${tabTooltip(tab)} (preview: double-click to keep it open)` : tabTooltip(tab)}
               onClick={() => onActivate(tab.id)}
               onDoubleClick={preview && onKeep ? () => onKeep(tab.id) : undefined}
               onAuxClick={(event) => {
@@ -148,6 +143,8 @@ export const PaneTabs: React.FC<{
               } ${preview ? 'italic' : ''}`}
             >
               {isReferencesTab(tab) && <Crosshair className="w-3.5 h-3.5 flex-none mr-1" aria-hidden="true" data-references-tab-icon="" />}
+              {tabKind(tab) === 'diff' && <Diff className="w-3.5 h-3.5 flex-none mr-1 text-muted-foreground" aria-hidden="true" data-tab-kind-icon="diff" />}
+              {tabKind(tab) === 'file' && <FileText className="w-3.5 h-3.5 flex-none mr-1 text-muted-foreground" aria-hidden="true" data-tab-kind-icon="file" />}
               <span className="min-w-0 flex"><TabTitle title={tabLabel(tab)} keepExtension={!isReferencesTab(tab)} /></span>
             </button>
             {closable && <button
