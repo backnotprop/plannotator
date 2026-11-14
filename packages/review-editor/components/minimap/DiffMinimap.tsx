@@ -11,8 +11,8 @@ export interface DiffMinimapProps {
   files: readonly MinimapFileInput[];
   viewedPaths: ReadonlySet<string> | undefined;
   notes: readonly MinimapNote[];
-  extraMarks?: readonly MinimapMark[];
   metrics: RowMetrics;
+  labelTop: number;
   split: boolean;
   expandUnchanged: boolean;
   pulseRef: React.MutableRefObject<(() => void) | null>;
@@ -50,8 +50,9 @@ function regionsOf(bands: readonly Band[], gap: number): number[] {
   return starts;
 }
 
-const DiffMinimap: React.FC<DiffMinimapProps> = ({ source, fallbackModel, files, viewedPaths, notes, extraMarks, metrics, split, expandUnchanged, pulseRef }) => {
+const DiffMinimap: React.FC<DiffMinimapProps> = ({ source, fallbackModel, files, viewedPaths, notes, metrics, labelTop, split, expandUnchanged, pulseRef }) => {
   const stripRef = useRef<HTMLDivElement>(null);
+  const columnRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const outlineRef = useRef<HTMLDivElement>(null);
   const probeRef = useRef<HTMLSpanElement>(null);
@@ -96,11 +97,11 @@ const DiffMinimap: React.FC<DiffMinimapProps> = ({ source, fallbackModel, files,
     const out: MinimapMark[] = [];
     for (const note of notes) {
       for (const itemId of idsByPath.get(note.filePath) ?? []) {
-        out.push({ itemId, kind: 'comment', side: note.side, lineStart: note.lineStart, lineEnd: note.lineEnd });
+        out.push({ itemId, kind: note.kind ?? 'comment', side: note.side, lineStart: note.lineStart, lineEnd: note.lineEnd });
       }
     }
-    return extraMarks ? out.concat(extraMarks) : out;
-  }, [files, notes, extraMarks]);
+    return out;
+  }, [files, notes]);
 
   const signatureRef = useRef('');
   const measure = useCallback(() => {
@@ -126,7 +127,7 @@ const DiffMinimap: React.FC<DiffMinimapProps> = ({ source, fallbackModel, files,
   }, [measure, pulseRef]);
 
   useLayoutEffect(() => {
-    const strip = stripRef.current;
+    const strip = columnRef.current;
     if (!strip) return;
     const read = () => setSize({ width: strip.clientWidth, height: strip.clientHeight, dpr: window.devicePixelRatio || 1 });
     read();
@@ -145,7 +146,10 @@ const DiffMinimap: React.FC<DiffMinimapProps> = ({ source, fallbackModel, files,
     return () => observer.disconnect();
   }, []);
 
-  const bands = useMemo(() => (layout ? [...changeBands(layout, metrics), ...markBands(layout, marks, metrics)] : []), [layout, marks, metrics]);
+  const bands = useMemo(
+    () => (layout && size.height > 0 ? [...changeBands(layout, metrics, size.height / Math.max(1, layout.contentHeight)), ...markBands(layout, marks, metrics)] : []),
+    [layout, marks, metrics, size.height],
+  );
   const regions = useMemo(() => regionsOf(bands, source.viewportHeight() / 4), [bands, source]);
 
   const placeOutline = useCallback(() => {
@@ -172,7 +176,7 @@ const DiffMinimap: React.FC<DiffMinimapProps> = ({ source, fallbackModel, files,
       width,
       height,
       dpr: size.dpr,
-      coverage: rasterize(bands, layout.contentHeight, height),
+      coverage: rasterize(bands, layout.contentHeight, height, { smoothRadius: Math.round(1.5 * size.dpr), minSegmentBins: Math.max(1, Math.round(size.dpr)) }),
       boundaries: fileBoundaries(layout).map((top) => (top / layout.contentHeight) * height),
       colors,
     });
@@ -278,7 +282,7 @@ const DiffMinimap: React.FC<DiffMinimapProps> = ({ source, fallbackModel, files,
       aria-valuenow={Math.max(0, Math.min(100, percent))}
       aria-valuetext={valueText || undefined}
       data-diff-minimap=""
-      className="group absolute inset-y-0 right-0 w-3 touch-none select-none cursor-pointer border-l border-border/50 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-primary"
+      className="group absolute inset-y-0 right-0 w-5 touch-none select-none cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-primary"
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
@@ -286,26 +290,33 @@ const DiffMinimap: React.FC<DiffMinimapProps> = ({ source, fallbackModel, files,
         dragRef.current = null;
         setDragging(false);
       }}
-      onPointerLeave={() => setHover(null)}
+      onPointerLeave={() => {
+        if (!dragRef.current) setHover(null);
+      }}
       onKeyDown={onKeyDown}
     >
       <span ref={probeRef} aria-hidden="true" className="hidden" />
-      <canvas ref={canvasRef} aria-hidden="true" className="absolute inset-0 h-full w-full" />
-      <div
-        ref={outlineRef}
-        aria-hidden="true"
-        data-diff-minimap-viewport=""
-        className={`pointer-events-none absolute inset-x-0 top-0 rounded-[2px] border transition-colors ${
-          dragging ? 'border-foreground/45 bg-foreground/10' : 'border-foreground/25 bg-foreground/[0.04] group-hover:border-foreground/40'
-        }`}
-        style={{ willChange: 'transform' }}
-      />
-      {hover && !dragging && (
+      <div ref={columnRef} data-diff-minimap-strip="" className="absolute inset-y-0 right-0 w-3 border-l border-border/60">
+        <canvas ref={canvasRef} aria-hidden="true" className="absolute inset-0 h-full w-full" />
+        <div
+          ref={outlineRef}
+          aria-hidden="true"
+          data-diff-minimap-viewport=""
+          className={`pointer-events-none absolute inset-x-0 top-0 border-y transition-colors ${
+            dragging ? 'border-foreground/70 bg-foreground/[0.16]' : 'border-foreground/50 bg-foreground/[0.09] group-hover:border-foreground/65'
+          }`}
+          style={{ willChange: 'transform' }}
+        />
+        {hover && (
+          <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 h-px bg-foreground/70" style={{ top: hover.y }} />
+        )}
+      </div>
+      {hover && (
         <div
           aria-hidden="true"
           data-diff-minimap-label=""
           className="pointer-events-none absolute right-full mr-1 whitespace-nowrap rounded border border-border bg-popover px-1.5 py-0.5 text-[12px] leading-4 text-popover-foreground tabular-nums"
-          style={{ top: hover.y, transform: 'translateY(-50%)' }}
+          style={{ top: labelTop }}
         >
           {baseName(hover.hit.file.path)}
           {hover.hit.line ? <span className="text-muted-foreground">:{hover.hit.line}</span> : null}

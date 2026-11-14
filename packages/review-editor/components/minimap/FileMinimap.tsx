@@ -3,7 +3,7 @@ import type { CodeAnnotation } from '@plannotator/ui/types';
 import { isFileScopedAnnotation } from '../../utils/annotationScope';
 import { scrollElementLayoutSource } from './layoutSource';
 import { DiffMinimapSlot, type MinimapNote } from './DiffMinimapSlot';
-import { HUNK_SEPARATOR_HEIGHT } from '../../utils/diffChromeMetrics';
+import { FILE_HEADER_HEIGHT, HUNK_SEPARATOR_HEIGHT } from '../../utils/diffChromeMetrics';
 
 export interface FileMinimapProps {
   viewport: HTMLElement | null;
@@ -58,7 +58,7 @@ export const FileMinimap: React.FC<FileMinimapProps> = ({ viewport, content, fil
 
   if (!box) return null;
   return (
-    <div className="pointer-events-none absolute right-0 w-3" style={{ top: box.top, height: box.height }}>
+    <div className="pointer-events-none absolute right-0 w-5" style={{ top: box.top, height: box.height }}>
       <div className="pointer-events-auto absolute inset-0">
         <DiffMinimapSlot
           source={source}
@@ -66,6 +66,7 @@ export const FileMinimap: React.FC<FileMinimapProps> = ({ viewport, content, fil
           viewedPaths={viewedPaths}
           notes={notes}
           metrics={METRICS}
+          labelTop={-(FILE_HEADER_HEIGHT + 22) / 2}
           split={split}
           expandUnchanged={expandUnchanged}
           pulseRef={pulseRef}

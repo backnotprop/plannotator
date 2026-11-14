@@ -52,13 +52,13 @@ beforeAll(() => {
   Object.defineProperty(ElementProto, 'clientHeight', {
     configurable: true,
     get() {
-      return (this as HTMLElement).hasAttribute('data-diff-minimap') ? STRIP_HEIGHT : 0;
+      return (this as HTMLElement).hasAttribute('data-diff-minimap-strip') ? STRIP_HEIGHT : 0;
     },
   });
   Object.defineProperty(ElementProto, 'clientWidth', {
     configurable: true,
     get() {
-      return (this as HTMLElement).hasAttribute('data-diff-minimap') ? 12 : 0;
+      return (this as HTMLElement).hasAttribute('data-diff-minimap-strip') ? 12 : 0;
     },
   });
   restore.push(() => {
@@ -117,7 +117,7 @@ describe('diff minimap stays in step with the diff layout', () => {
     const render = (viewed: Set<string>) =>
       act(() => {
         root.render(
-          <DiffMinimap source={source} files={files} viewedPaths={viewed} notes={[]} metrics={metrics} split={false} expandUnchanged={false} pulseRef={pulseRef} />,
+          <DiffMinimap source={source} files={files} viewedPaths={viewed} notes={[]} metrics={metrics} labelTop={0} split={false} expandUnchanged={false} pulseRef={pulseRef} />,
         );
       });
 
@@ -132,7 +132,7 @@ describe('diff minimap stays in step with the diff layout', () => {
     const collapsedRuns = addRuns();
     expect(collapsedRuns).toHaveLength(2);
     const k = STRIP_HEIGHT / state.content;
-    expect(collapsedRuns[1][0].y).toBeCloseTo(Math.floor((open + 32 + 32 + 20) * k), -0.5);
+    expect(Math.abs(collapsedRuns[1][0].y - Math.floor((open + 32 + 32 + 20) * k))).toBeLessThanOrEqual(3);
     expect(collapsedRuns[1][0].y).not.toBe(thirdBefore);
 
     state = layoutFor(new Set());
@@ -144,8 +144,8 @@ describe('diff minimap stays in step with the diff layout', () => {
     await render(new Set(['one.ts']));
     await flush();
     const [viewedRun, ...others] = addRuns();
-    expect(Math.max(...viewedRun.map((fill) => fill.alpha))).toBeLessThan(0.3);
-    for (const run of others) expect(Math.min(...run.map((fill) => fill.alpha))).toBeGreaterThan(0.29);
+    const peak = (run: Fill[]) => Math.max(...run.map((fill) => fill.alpha));
+    for (const run of others) expect(peak(viewedRun)).toBeLessThan(peak(run) * 0.5);
 
     await act(() => root.unmount());
     host.remove();

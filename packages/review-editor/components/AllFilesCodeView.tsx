@@ -1,4 +1,5 @@
 import { CodeViewMinimap } from './minimap/CodeViewMinimap';
+import type { MinimapNote } from './minimap/DiffMinimapSlot';
 import { COMPACT_FILE_HEADER_HEIGHT, COMPACT_HUNK_SEPARATOR_HEIGHT, FILE_HEADER_HEIGHT, HUNK_SEPARATOR_HEIGHT } from '../utils/diffChromeMetrics';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ContextNoteAnchor } from '../utils/contextNoteAnchor';
@@ -430,6 +431,7 @@ export interface AllFilesCodeViewProps {
    * scroller and the virtualized items. */
   leadingContent?: React.ReactNode;
   minimap?: boolean;
+  minimapMarks?: readonly MinimapNote[];
   // Only handle [/]/z/v/a/c/x keyboard nav when this surface is the active panel.
   isActive?: boolean;
   // AI props (optional — surfaced into the toolbar). File-aware variants: this
@@ -855,6 +857,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   onFileCollapsedChange,
   leadingContent,
   minimap = false,
+  minimapMarks,
   isActive = true,
   readOnly = false,
   commentOnly = false,
@@ -3891,7 +3894,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       // `:focus-visible` outline (theme.css, the Inbox's inbox.css) then rings
       // the whole diff, and the clipping around it leaves only stray lines
       // above and below the file. `!`: theme.css's rule is unlayered.
-      className={`relative ${minimapOn && minimapShown ? 'mr-3' : ''} ${scrollsWithPage ? 'overflow-x-clip [contain:layout_style]' : `h-full overflow-y-auto overflow-x-clip ${allowScrollChaining ? 'overscroll-auto' : 'overscroll-contain'} [contain:strict] [will-change:scroll-position]`} [overflow-anchor:none] focus-visible:outline-none! [&_diffs-container]:overflow-clip [&_diffs-container]:[contain:layout_paint_style]`}
+      className={`relative ${minimapOn && minimapShown ? 'mr-5' : ''} ${scrollsWithPage ? 'overflow-x-clip [contain:layout_style]' : `h-full overflow-y-auto overflow-x-clip ${allowScrollChaining ? 'overscroll-auto' : 'overscroll-contain'} [contain:strict] [will-change:scroll-position]`} [overflow-anchor:none] focus-visible:outline-none! [&_diffs-container]:overflow-clip [&_diffs-container]:[contain:layout_paint_style]`}
       initialItems={identity.items}
       options={options}
       selectedLines={selectedLines}
@@ -3936,6 +3939,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
           itemIdToFile={identity.itemIdToFile}
           viewedFiles={viewedFiles}
           annotations={annotations}
+          marks={minimapMarks}
           metrics={minimapMetrics}
           split={diffStyle === 'split'}
           expandUnchanged={expandUnchanged === true}
