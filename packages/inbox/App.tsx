@@ -187,6 +187,7 @@ import { priorityWrites } from './priorityWrites';
 import { snoozeWrites } from './snoozeWrites';
 import { agentWrites, type AgentDeleteAsk } from './agentWrites';
 import { joinThreadRead, useStaleOpenRead, type ThreadFlight } from './threadFlights';
+import { afterListPaint } from './firstListPaint';
 import { openTakenBack } from './takenBackCompose';
 import { restartInbox } from './restartInbox';
 import { errorToast } from './toastError';
@@ -1927,14 +1928,14 @@ function Inbox() {
       .catch(() => {});
   }, [noteLineAgain]);
 
-  const refreshSettings = useCallback(async () => {
-    // The agent icons' faces ride with every settings read: on load, and after the stream was away.
+  const refreshSettings = useCallback(async (afterFirstList = false) => {
     void readAgentFaces();
     try {
       const mark = listLookReadMark();
       const reactionsMark = reactionsReadMark();
       const sidebarMark = sidebarLayoutReadMark();
       const next = await inboxApi.settings();
+      if (afterFirstList) await afterListPaint();
       adoptSavedTheme(next.theme);
       adoptSavedTextSize(next.text_size);
       adoptSavedFavicon(next.favicon);
@@ -2408,8 +2409,7 @@ function Inbox() {
       const first = await readFirstList({
         read: async () => {
           const next = await refreshList(true);
-          // As before, right after the first try, landed or not.
-          if (!settingsAsked) void refreshSettings();
+          if (!settingsAsked) void refreshSettings(routeRef.current.page === 'inbox' && !!next?.sections.some((section) => section.threads.length > 0));
           settingsAsked = true;
           return next;
         },
