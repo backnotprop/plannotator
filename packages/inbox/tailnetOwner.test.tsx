@@ -347,3 +347,29 @@ test.skipIf(!hasDom)('Restart from the phone when the Inbox does not answer: the
   await wait(100);
   expect((document.body.textContent ?? '').includes(say)).toBe(false);
 }, 30_000);
+
+test.skipIf(!hasDom)('Devices over the tailnet: the owner gets Remove and the tailnet switch; a guest neither (the server refuses both)', async () => {
+  const { DevicesSection } = await import('./components/Devices');
+  const phone = { id: 'dev_1', name: 'iPhone', platform: 'ios', created_at: '2026-11-01T00:00:00Z', last_seen_at: '2026-11-01T00:00:00Z', revoked_at: null, carriage: false };
+  const phones = { devices: [phone], lan: null, tailnet: null, busy: false, error: null, readDevices: async () => [phone], refreshWays: () => {}, switchLan: async () => true, switchTailnet: async () => true, remove: async () => {}, clearError: () => {} };
+  const tailscale = { on: true, source: 'config' as const, env: null, url: 'https://studio.tail0000.ts.net:4321/', error: null, owner: 'owner@example.com', allowed: [] };
+  const draw = (guest: boolean) => {
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    act(() => {
+      root = createRoot(host!);
+      root.render(<DevicesSection phones={phones} tailscale={tailscale} via="tailnet" guest={guest} tailscaleBusy={false} onToggleTailscale={() => {}} pairing={false} onPairing={() => {}} />);
+    });
+    return host;
+  };
+  const tailnetSwitch = (el: HTMLElement) => $(el, '[data-settings-tailscale] [role="switch"]') as HTMLButtonElement;
+  const owner = draw(false);
+  expect(has(owner, '[data-device="dev_1"] button')).toBe(true);
+  expect(tailnetSwitch(owner).disabled).toBe(false);
+  leave();
+
+  const guest = draw(true);
+  expect(has(guest, '[data-device="dev_1"]')).toBe(true);
+  expect(has(guest, '[data-device="dev_1"] button')).toBe(false);
+  expect(tailnetSwitch(guest).disabled).toBe(true);
+});

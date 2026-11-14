@@ -324,6 +324,50 @@ describe("what the approval opened, by caller", () => {
   });
 });
 
+describe("the owner's ways in are the owner's: a guest removes no phone and turns nothing off", () => {
+  /** A phone paired from this computer over the phones' tailnet door: its id, and a read through the door with its token. */
+  async function pairedPhone(w: World) {
+    const base = `http://127.0.0.1:${w.inbox.port}`;
+    const post = (path: string, body: Json = {}) => fetch(`${base}${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    expect((await post("/api/inbox/tailnet", { on: true })).status).toBe(200);
+    const offer = (await (await post("/api/inbox/pairing")).json()) as Json;
+    const paired = (await (await post("/api/inbox/device/pair", { code: offer.offer.code, name: "iPhone", platform: "ios" })).json()) as Json;
+    const doorPort = (JSON.parse(readFileSync(join(w.dataDir, "inbox", "inbox.json"), "utf8")) as Json).tailnet.door_port as number;
+    const read = () => fetch(`http://127.0.0.1:${doorPort}/api/inbox/device/threads`, { headers: { Authorization: `Bearer ${paired.token}`, Host: `${MAGIC}:8443`, "X-Forwarded-Proto": "https" } });
+    return { id: paired.device.id as string, read };
+  }
+
+  test("Remove a phone: a guest is refused and the phone keeps working; the owner over the tailnet removes it", async () => {
+    const w = await world();
+    const phone = await pairedPhone(w);
+    const remove = (caller: Caller) => call(w, caller, { path: `/api/inbox/devices/${phone.id}/revoke`, body: {} });
+    expect(await answerOf(await remove("guest"))).toEqual(REFUSED);
+    expect((await phone.read()).status).toBe(200);
+    expect((await remove("owner")).status).toBe(200);
+    expect(await answerOf(await phone.read())).toEqual([401, "device_revoked"]);
+  });
+
+  test("Over your tailnet off: a guest is refused and the address stays up; the owner turns it off", async () => {
+    const w = await world();
+    const mappings = [...w.ts.serve];
+    expect(mappings.length).toBeGreaterThan(0);
+    const off = (caller: Caller) => call(w, caller, { path: "/api/inbox/settings", body: { tailscale: { on: false } } });
+    expect(await answerOf(await off("guest"))).toEqual(REFUSED);
+    expect(w.config().inboxTailscale).toBe(true);
+    expect([...w.ts.serve]).toEqual(mappings);
+    expect((await call(w, "owner", { path: "/api/inbox/settings" })).status).toBe(200);
+    expect((await off("owner")).status).toBe(200);
+    expect(w.config().inboxTailscale).toBe(false);
+  });
+
+  test("a guest still reads the phones list and Devices, as before", async () => {
+    const w = await world();
+    await pairedPhone(w);
+    expect((await call(w, "guest", { path: "/api/inbox/devices" })).status).toBe(200);
+    expect((await call(w, "guest", { path: "/api/inbox/tailnet" })).status).toBe(200);
+  });
+});
+
 describe("starting an agent is the owner's (a guest's Send never runs code on this computer)", () => {
   /** Launch on, and the project's folder there: only the agent check (no `claude` in the sandbox) stands before a start. */
   async function launchWorld() {
