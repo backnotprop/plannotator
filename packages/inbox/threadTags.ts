@@ -3,10 +3,15 @@
  * or off. The list model carries the live tags (`tags`) and each row's (`row.tags`); the sidebar's Tags section, a
  * tag's list (`#tag=ini_…`) and Add tag (the row's right-click menu and the thread's ⋯) read them from here.
  * Pure helpers, and the context App fills (`ThreadTagsContext`): absent on an older Inbox, which keeps no tags.
+ *
+ * Across linked machines a tag is one name (the store's rule, `inboxInitiativeNameKey`: trimmed, case ignored): the
+ * merged list gives one tag per name with its id on each machine that holds it (`machines`), and a linked machine's
+ * rows name those. A thread's tag lives on the thread's own machine, like its Priority.
  */
 import { createContext, useContext } from 'react';
 import { inboxInitiativeNameKey, type InboxInitiative, type InboxListRow, type InboxListSection } from '@plannotator/core/inbox-types';
 import { plural } from '@plannotator/core/inbox-format';
+import type { MachinesModel } from './machines';
 
 /** What Add tag and the sidebar do with tags; null on an Inbox that keeps none. */
 export interface ThreadTagsHost {
@@ -16,7 +21,7 @@ export interface ThreadTagsHost {
   tagsOf: (threadId: string) => readonly string[];
   /** Threads per tag, every thread the window lists: the Add tag list's quiet number. */
   counts: ReadonlyMap<string, number>;
-  /** A thread this Inbox holds (another machine's thread keeps no tag here). */
+  /** Add tag is offered: a thread this Inbox holds, or a linked machine's that takes tags from here. */
   can: (threadId: string) => boolean;
   /** Put the thread in the tag or take it out; the toast says so, with Undo. */
   set: (threadId: string, tag: InboxInitiative, on: boolean) => void;
@@ -33,23 +38,56 @@ export const useThreadTags = () => useContext(ThreadTagsContext);
 export type RowTags = (row: Pick<InboxListRow, 'thread_id' | 'tags' | 'machine'>) => readonly string[];
 const ownTags: RowTags = (row) => row.tags ?? [];
 
+/** A tag of the list: on the merged view, with its id on each machine that holds one of its name. */
+export type ListTag = InboxInitiative & { machines?: Record<string, string> };
+
+/** Whether `machine` (a row's, or a thread's owner) is this Inbox, or a linked machine that takes tags from it. */
+function takesTags(machine: string | null | undefined, model: Pick<MachinesModel, 'self' | 'linked'>): boolean {
+  if (!machine || machine === model.self) return true;
+  return model.linked.some((m) => m.id === machine && (m.marks ?? []).includes('tags'));
+}
+
 /**
- * A row's tags in this window: what it just set, else `row.tags`; none on another machine's row (its tags name that
- * machine's initiatives, and step 1 sends no tag there), so a tag's list never shows it.
+ * A row's tags in this window: what it just set, else `row.tags` (on the merged view, the merged tags' ids). None on
+ * the row of a machine that takes no tags from here (an older Inbox: its tags stay its own), so no tag lists it.
  */
-export function rowTagsHere(row: Pick<InboxListRow, 'thread_id' | 'tags' | 'machine'>, self: string | null, patches: ReadonlyMap<string, readonly string[]>): readonly string[] {
-  if (row.machine && row.machine !== self) return [];
+export function rowTagsHere(row: Pick<InboxListRow, 'thread_id' | 'tags' | 'machine'>, machines: Pick<MachinesModel, 'self' | 'linked'>, patches: ReadonlyMap<string, readonly string[]>): readonly string[] {
+  if (!takesTags(row.machine, machines)) return [];
   return patches.get(row.thread_id) ?? row.tags ?? [];
 }
 
 /**
- * Whether Add tag is offered on a thread: only one this Inbox owns. Another machine's (its id claimed by a linked
- * machine, `owner`, or its row named for one) gets no Add tag, as it gets no Star thread.
+ * Whether Add tag is offered on a thread: one this Inbox owns, or a linked machine's (its id claimed by that machine,
+ * `owner`, or its row named for it) when that machine takes tags, as Add to Priority is offered.
  */
-export function canTagThread(threadId: string, rows: readonly Pick<InboxListRow, 'thread_id' | 'machine'>[], self: string | null, owner: string | null): boolean {
-  if (owner) return false;
-  const row = rows.find((r) => r.thread_id === threadId);
-  return !row?.machine || row.machine === self;
+export function canTagThread(threadId: string, rows: readonly Pick<InboxListRow, 'thread_id' | 'machine'>[], machines: Pick<MachinesModel, 'self' | 'linked'>, owner: string | null): boolean {
+  return takesTags(owner ?? rows.find((r) => r.thread_id === threadId)?.machine, machines);
+}
+
+/** The tag a list route names (`#tag=ini_…`): by its id, or by its id on any machine (the merged id can move to this Inbox's). */
+export function tagById<T extends ListTag>(tags: readonly T[], id: string): T | null {
+  return tags.find((tag) => tag.id === id) ?? tags.find((tag) => Object.values(tag.machines ?? {}).includes(id)) ?? null;
+}
+
+/** The tag's id on `machine` (null or `self`: this Inbox), or null when that machine holds no tag of its name. */
+export function tagIdOn(tag: ListTag, machine: string | null, self: string | null): string | null {
+  const on = machine ?? self;
+  if (!tag.machines) return on === self ? tag.id : null;
+  return on ? (tag.machines[on] ?? null) : null;
+}
+
+/**
+ * What a tag write names on the thread's own machine: this Inbox's id for its own thread, else the tag's name, which
+ * that machine matches by the same rule and makes when it has none (an id kept from its list may be gone there).
+ */
+export function tagWrite(tag: ListTag, machine: string | null, self: string | null): { tag: string } | { name: string } {
+  const id = !machine || machine === self ? tagIdOn(tag, null, self) : null;
+  return id ? { tag: id } : { name: tag.name };
+}
+
+/** This Inbox's own tags (the `#` picker's: a typed `#Name` tags only by a tag this Inbox holds). */
+export function thisInboxTags<T extends ListTag>(tags: readonly T[], self: string | null): T[] {
+  return tags.filter((tag) => tagIdOn(tag, null, self) !== null);
 }
 
 /** The sections with only the rows in `tag` (each section kept, as a project's list keeps them). */

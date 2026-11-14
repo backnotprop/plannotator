@@ -22,12 +22,12 @@
  */
 
 import { randomBytes } from "node:crypto";
-import { appendFileSync, chmodSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { isInboxHealth, type InboxHealth } from "@plannotator/core/inbox-types";
 import { inboxDir } from "./schema";
 import { proveInboxProcess } from "./process-proof";
-import { inboxUpgradeRunning } from "./store-log/sqlite/upgrade-marker";
+import { INBOX_DB_FILE, INBOX_RETURN_PARTIAL } from "./store-log/sqlite-return/names";
 
 export const INBOX_REGISTRY_FILE = "inbox.json";
 export const INBOX_START_LOCK = "start.lock";
@@ -317,7 +317,7 @@ export async function inboxStatus(dataDir: string, timeoutMs = 2000): Promise<In
  * The lock folder names the processes that hold it (`holders`: the starter,
  * and the detached Inbox it started, which joins with `joinInboxStartLock`).
  * When every one of them is gone (a start that crashed: a force quit, a power
- * cut, a kill during a long move into SQLite), the lock is stale at once
+ * cut), the lock is stale at once
  * instead of after `INBOX_START_LOCK_STALE_MS`, so the next start goes ahead
  * rather than giving up with "try again". A lock with no holders file (an
  * older Plannotator's) is stale by age alone, as before.
@@ -328,24 +328,40 @@ export function acquireInboxStartLock(dataDir: string): (() => void) | null {
   const lock = join(dir, INBOX_START_LOCK);
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      mkdirSync(lock);
-      joinInboxStartLock(dataDir);
-      return () => rmSync(lock, { recursive: true, force: true });
+      if (!existsSync(lock) && createStartLock(lock)) return () => rmSync(lock, { recursive: true, force: true });
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-      try {
-        // Never stale while the Inbox it started moves into SQLite: a second Inbox would start beside it.
-        if (!inboxStartLockStale(dataDir) || inboxUpgradeRunning(dataDir)) return null;
-        rmSync(lock, { recursive: true, force: true });
-      } catch {
-        // Gone in between: try again.
-      }
+    }
+    try {
+      if (!inboxStartLockStale(dataDir) || inboxReturnRunning(dataDir)) return null;
+      rmSync(lock, { recursive: true, force: true });
+    } catch {
+      // Gone in between: try again.
     }
   }
   return null;
 }
 
 const START_LOCK_HOLDERS = "holders";
+
+function createStartLock(lock: string): boolean {
+  const named = `${lock}.${process.pid}`;
+  try {
+    mkdirSync(named, { recursive: true });
+    writeFileSync(join(named, START_LOCK_HOLDERS), `${process.pid}\n`, { mode: 0o600 });
+    renameSync(named, lock);
+    return true;
+  } catch {
+    if (existsSync(lock)) return false;
+    mkdirSync(lock);
+    try {
+      appendFileSync(join(lock, START_LOCK_HOLDERS), `${process.pid}\n`, { mode: 0o600 });
+    } catch {}
+    return true;
+  } finally {
+    rmSync(named, { recursive: true, force: true });
+  }
+}
 
 /** Name this process as a holder of the start lock (the detached Inbox its starter started); best effort. */
 export function joinInboxStartLock(dataDir: string): void {
@@ -360,13 +376,22 @@ export function joinInboxStartLock(dataDir: string): void {
 export function inboxStartLockStale(dataDir: string): boolean {
   const lock = join(inboxDir(dataDir), INBOX_START_LOCK);
   if (Date.now() - statSync(lock).mtimeMs > INBOX_START_LOCK_STALE_MS) return true;
-  let pids: number[];
+  const pids = startLockHolders(dataDir);
+  return pids !== null && pids.length > 0 && !pids.some(isPidAlive);
+}
+
+function startLockHolders(dataDir: string): number[] | null {
   try {
-    pids = readFileSync(join(lock, START_LOCK_HOLDERS), "utf8").split("\n").map(Number).filter((pid) => Number.isSafeInteger(pid) && pid > 0);
+    return readFileSync(join(inboxDir(dataDir), INBOX_START_LOCK, START_LOCK_HOLDERS), "utf8").split("\n").map(Number).filter((pid) => Number.isSafeInteger(pid) && pid > 0);
   } catch {
-    return false;
+    return null;
   }
-  return pids.length > 0 && !pids.some(isPidAlive);
+}
+
+export function inboxReturnRunning(dataDir: string): boolean {
+  const dir = inboxDir(dataDir);
+  if (!existsSync(join(dir, INBOX_DB_FILE)) && !existsSync(join(dir, INBOX_RETURN_PARTIAL))) return false;
+  return (startLockHolders(dataDir) ?? []).some((pid) => pid !== process.pid && isPidAlive(pid));
 }
 
 /** Wait until `check` answers non-null, polling; null on timeout. */
@@ -375,7 +400,6 @@ export async function waitForInbox<T>(check: () => Promise<T | null>, timeoutMs:
   for (;;) {
     const value = await check();
     if (value !== null) return value;
-    // `keepWaiting`: past the deadline, wait on while it says so (an Inbox still moving into SQLite).
     if (Date.now() >= deadline && !keepWaiting?.()) return null;
     await new Promise((resolve) => setTimeout(resolve, intervalMs));
   }

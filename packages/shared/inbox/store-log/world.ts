@@ -207,6 +207,10 @@ export function writeInboxWorld(options: InboxWorldOptions): InboxWorld {
     [3, personStarts],
     [2, agentNames],
     [1, personReaddresses],
+    [2, () => {
+      const waiting = store.pendingReplies(pick(AGENTS).session);
+      if (waiting.length > 0) store.takeBack(pick(waiting).id);
+    }],
     [2, () => store.markAgentChecked(pick(roots), Number.POSITIVE_INFINITY, now().toISOString(), pick(AGENTS).session)],
     [3, () => store.setThreadSteps({ thread_id: pick(roots), agent: pick(AGENTS), steps: [{ step: words(3), status: "done" }, { step: words(3), status: pick(["doing", "waiting"]) }] })],
     [2, () => store.changeThreadPulls({ thread_id: pick(roots), add: pullRefs(`o/r#${1 + Math.floor(random() * 5)}`), by: pick(AGENTS) })],

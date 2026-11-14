@@ -294,7 +294,7 @@ test('the asking session stopped and another is live: the thread says so, Send a
   const mine = pane.locator('article.ib-message[data-author="person"]');
   await expect(mine.locator('.ib-to')).toHaveText('to Pi (another session)');
   // The taker's connection polls idle: it takes it within seconds.
-  await expect(pane.locator('[data-delivery="sending"]')).toHaveText('Sending to Pi (another session)…');
+  await expect(pane.locator('[data-delivery="sending"]').locator('.ib-dl-text')).toHaveText('Sending to Pi (another session)…');
 
   await taker.deliver(command.id);
   await expect(pane.locator('[data-delivery="delivered"]')).toHaveText(/^Delivered to Pi \(another session\), \d{1,2}:\d{2} [AP]M$/);
@@ -320,7 +320,7 @@ test('nothing live: the note says the reply will wait, Send sends at once, and t
   await shot('3-none-live');
   await pane.locator('.ib-pfoot').getByRole('button', { name: 'Send', exact: true }).click();
   await expect(pane.locator('[data-route-choice]')).toHaveCount(0);
-  await expect(pane.locator('[data-delivery="saved"]')).toHaveText(
+  await expect(pane.locator('[data-delivery="saved"]').locator('.ib-dl-text')).toHaveText(
     "Saved for Pi. That session has ended; it gets this only if it's resumed.",
   );
   const last = (await threadMessages()).at(-1)!;

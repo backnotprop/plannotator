@@ -5,11 +5,13 @@
  * `serverSession`; the owner over the tailnet like every window route):
  *
  *   POST /api/inbox/threads/:id/tags   `{ tag: "ini_…", on: boolean }`: Add tag, untick, Remove from; `{ tags }`, the thread's tags
+ *                                      `{ name, on }` in place of `tag`: the live tag of that name, made when none is
  *
  * The person's marks live in `inbox/tags.json`, outside the event log (shared/inbox/thread-tags.ts): agents,
  * the MCP, search and the phone's event stream never see them. The list model carries the live tags (`tags`) and
- * each row's (`row.tags`), and a change tells every window (`event: tags`, as `event: pins`). The device door does
- * not forward it, and a linked machine's forward never carries it.
+ * each row's (`row.tags`), and a change tells every window (`event: tags`, as `event: pins`) and a linked machine
+ * that asks (`tags=1`). The device door takes this route and the initiative's from a linked machine only: one tag
+ * across machines is the tags of one name, each kept on the machine whose thread it marks.
  */
 
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
@@ -33,6 +35,7 @@ export function createInboxThreadTags(options: {
     const body = await options.readBody(req);
     if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
     if (typeof body.on !== "boolean") throw new InboxError("validation_error", "on: a boolean.", { field: "on" });
+    if (body.tag === undefined && body.name !== undefined) return json({ tags: store.setThreadTagNamed(match[1]!, body.name, body.on) });
     return json({ tags: store.setThreadTag(match[1]!, body.tag, body.on) });
   };
 

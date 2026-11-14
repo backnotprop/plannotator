@@ -25,7 +25,7 @@ const standaloneQuestion = (block: Block, contractLines: boolean): IndexedQuesti
   return indexed ? { ...indexed, number: 0 } : undefined;
 };
 
-export const BlockRenderer: React.FC<{
+const BlockRendererBody: React.FC<{
   block: Block;
   onOpenLinkedDoc?: (path: string) => void;
   onOpenCodeFile?: (path: string) => void;
@@ -270,3 +270,5 @@ export const BlockRenderer: React.FC<{
       );
   }
 };
+
+export const BlockRenderer = React.memo(BlockRendererBody);
