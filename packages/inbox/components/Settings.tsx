@@ -994,7 +994,7 @@ const LEDE: Record<SettingsSection, string> = {
   // Rows draws its own lede, with Undo and Reset beside it (RowsSettings.tsx).
   rows: '',
   agents: "How each agent on this computer reaches the Inbox and learns when to use it. A change applies to that agent's next session; sessions already running keep what they started with.",
-  'cloud-agents': 'An agent in the cloud or on a server, such as a Claude Code routine, Grok Bot, Muse, Hermes Agent or OpenClaw, that reads and answers its threads here.',
+  'cloud-agents': 'An agent in the cloud or on a server, such as a Claude Code routine, Grok Bot, Muse, Hermes Agent or OpenClaw, that reads and writes across this Inbox.',
   accounts: '',
   prompts: "What Plannotator tells your agents. A change applies to each agent's next session.",
   devices: 'Your phone, and browsers on your other devices.',

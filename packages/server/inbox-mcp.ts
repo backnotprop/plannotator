@@ -289,7 +289,7 @@ export interface InboxMcpContext extends InboxSnoozeMcpContext {
    * existing repository project holds the folder. Absent: search finds no
    * project for a path.
    */
-  findProjects?: (path: string) => Promise<{ projects: InboxProject[]; unresolved: boolean }>;
+  findProjects?: (path: string) => Promise<{ projects: InboxProject[]; unresolved: boolean; every?: boolean }>;
   /**
    * Whether the Inbox itself knows the sender's session is woken by the
    * person's reply, whatever its own connection said: a Claude Code, Pi or
@@ -1076,8 +1076,9 @@ function personFacts(store: InboxStore, threadId: string, caller: string | null)
 }
 
 /** One row of read_thread's list as a line of text: every field the structured row holds. */
-export function threadRowText(row: InboxAgentThreadRow & { tagged_you?: true }): string {
+export function threadRowText(row: InboxAgentThreadRow & { tagged_you?: true; project?: string }): string {
   const parts = [`- ${row.thread_id}`];
+  if (row.project) parts.push(`in ${row.project}`);
   if (row.subject) parts.push(JSON.stringify(row.subject));
   if (row.thread_name) parts.push(`name ${JSON.stringify(row.thread_name)}`);
   parts.push(row.section, `${row.message_count} message${row.message_count === 1 ? "" : "s"}`);
@@ -1327,9 +1328,11 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
         if (found?.unresolved) {
           throw new InboxError("project_unresolved", "git did not answer in time, so this folder's project is not known yet. Nothing was listed; try the same call again.");
         }
-        const { project, projectIds } = found
-          ? { project: found.projects[0] ?? null, projectIds: new Set(found.projects.flatMap((p) => store.projectGroup(p.id))) }
-          : await threadReadScope(context, input.project_path);
+        const { project, projectIds } = found?.every
+          ? { project: null, projectIds: null }
+          : found
+            ? { project: found.projects[0] ?? null, projectIds: new Set(found.projects.flatMap((p) => store.projectGroup(p.id))) }
+            : await threadReadScope(context, input.project_path);
         const session = input.agent_session?.trim() || null;
         const askedBy = input.asked_by ?? (session ? "me" : "anyone");
         if (askedBy === "me" && !session) throw new InboxError("validation_error", "asked_by: \"me\" needs agent_session.");
@@ -1347,7 +1350,7 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
         // One short row per thread: the window's row is the person's view (and its `ack` shows a 👍 before it settles).
         const rows = threads.slice(0, limit).map((row) => {
           const steps = rowSteps(context, row.thread_id, session);
-          return { ...agentThreadRow(store, row, session), ...(tagged.has(row.thread_id) ? { tagged_you: true as const } : {}), ...(steps ? { steps } : {}) };
+          return { ...agentThreadRow(store, row, session), ...(found?.every ? { project: row.project.name } : {}), ...(tagged.has(row.thread_id) ? { tagged_you: true as const } : {}), ...(steps ? { steps } : {}) };
         });
         // The session saw these subjects (the check INBOX_REPLY_TO_CHECK asks for), unless a connection read them for it.
         if (!peek) for (const row of rows) noteSessionRead(store, session, row.thread_id, clock());

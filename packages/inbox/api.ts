@@ -1372,7 +1372,6 @@ export interface SearchRequest {
 /** GET /api/inbox/sessions: every live session, grouped by project (compose). */
 export interface CloudAgentsModel {
   agents: InboxCloudAgentView[];
-  projects: { id: string; name: string }[];
   available?: boolean;
 }
 
@@ -2315,7 +2314,7 @@ export const inboxApi = {
   devices: () => get<{ devices: PairedDevice[] }>(inboxUrl('/devices')),
   removeDevice: (id: string) => post<{ device: PairedDevice }>(inboxUrl(`/devices/${encodeURIComponent(id)}/revoke`), {}),
   cloudAgents: () => get<CloudAgentsModel>(inboxUrl('/cloud-agents')),
-  pairCloudAgent: (fields: { name: string; preset: InboxCloudPreset; project_id: string | null }) =>
+  pairCloudAgent: (fields: { name: string; preset: InboxCloudPreset }) =>
     post<CloudAgentsModel & { agent: InboxCloudAgentView; setup: InboxCloudSetup | null }>(inboxUrl('/cloud-agents'), fields),
   newCloudPairing: (session: string) =>
     post<CloudAgentsModel & { agent: InboxCloudAgentView; setup: InboxCloudSetup | null }>(inboxUrl(`/cloud-agents/${encodeURIComponent(session)}/pairing`), {}),

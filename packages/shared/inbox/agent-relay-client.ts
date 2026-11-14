@@ -7,7 +7,7 @@ export const INBOX_AGENT_WRITE_WAIT_MS = 30_000;
 const POLL_MS = 300;
 const REQUEST_MS = 10_000;
 
-export const INBOX_AGENT_WRITE_ACTIONS: readonly string[] = ["send_message", "resolve_message"];
+export const INBOX_AGENT_WRITE_ACTIONS: readonly string[] = ["send_message", "resolve_message", "snooze_thread", "thread_pulls", "submit_guide", "card", "steps"];
 
 export type InboxAgentRelayOutcome =
   | { kind: "answer"; status: number; body: string }

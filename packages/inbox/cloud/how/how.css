@@ -116,8 +116,6 @@ dialog.ib-dlg.ib-chow[open] { display: flex; flex-direction: column; }
 .ib-chow-thread { display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 10px; border: 1px solid var(--ib-line, var(--border)); border-radius: 8px; background: var(--card); box-shadow: 0 1px 2px oklch(0 0 0 / 0.05); }
 .ib-chow-thread > .ib-chow-bar { flex: 1 1 auto; max-width: 64px; }
 .ib-chow-why { margin-left: auto; font-size: var(--ib-fs-11-5, 11.5px); color: var(--muted-foreground); white-space: nowrap; }
-.ib-chow-hidden { border-style: dashed; background: transparent; box-shadow: none; color: var(--muted-foreground); }
-.ib-chow-hidden > .ib-chow-why { margin-left: 0; }
 .ib-chow-cannot { display: grid; grid-template-columns: repeat(2, 96px); gap: 12px 10px; }
 .ib-chow-no { display: flex; flex-direction: column; align-items: center; gap: 6px; }
 .ib-chow-no-i { position: relative; display: flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: 10px; border: 1px solid var(--ib-line, var(--border)); background: var(--card); color: var(--muted-foreground); }

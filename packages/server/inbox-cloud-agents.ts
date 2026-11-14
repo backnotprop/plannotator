@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import {
   INBOX_CLOUD_PRESET_NAMES,
@@ -19,11 +19,13 @@ import {
 import { inboxDir } from "@plannotator/shared/inbox/schema";
 import { encodeInboxAgentPairing } from "@plannotator/shared/inbox/agent-pairing";
 import type { InboxDevice } from "@plannotator/shared/inbox/devices";
+import type { InboxProject } from "@plannotator/core/inbox-types";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { writeAgentFileAtomic } from "./agent-files";
 import { postCloudWebhook } from "./inbox-cloud-post";
 
 export const INBOX_CLOUD_AGENTS_FILE = "cloud-agents.json";
+export const INBOX_CLOUD_PLACES_DIR = "cloud-agents";
 
 export interface InboxCloudAgent {
   session: string;
@@ -153,12 +155,23 @@ export function createInboxCloudAgents(options: {
     link: link(agent),
   });
 
-  const projects = () =>
-    store
-      .listProjects()
-      .map((project) => ({ id: project.id, name: project.display_name ?? project.name, last: store.threadsOf(project.id).reduce((max, t) => (t.last_at > max ? t.last_at : max), project.created_at) }))
-      .sort((a, b) => b.last.localeCompare(a.last))
-      .map(({ id, name }) => ({ id, name }));
+  const chosen = (agent: InboxCloudAgent): InboxProject | null => (agent.project_id ? store.project(store.canonicalProjectId(agent.project_id)) : null);
+
+  const placeRoot = (agent: InboxCloudAgent): string => {
+    const folder = agent.name.replace(/[\u0000-\u001f/\\:*?"<>|]/g, "-").replace(/^[.\s]+|[.\s]+$/g, "") || agent.session;
+    const dir = join(inboxDir(dataDir), INBOX_CLOUD_PLACES_DIR, agent.session, folder);
+    mkdirSync(dir, { recursive: true });
+    return realpathSync(dir);
+  };
+
+  const homeRoot = (agent: InboxCloudAgent): string => chosen(agent)?.root ?? placeRoot(agent);
+
+  const home = (agent: InboxCloudAgent): InboxProject => chosen(agent) ?? store.ensureProject({ name: agent.name, root: placeRoot(agent) });
+
+  const homeName = (agent: InboxCloudAgent): string => {
+    const project = chosen(agent) ?? store.projectByRoot(placeRoot(agent));
+    return project ? project.name : agent.name;
+  };
 
   const find = (session: string) => {
     const agent = agents.find((candidate) => candidate.session === session);
@@ -196,8 +209,6 @@ export function createInboxCloudAgents(options: {
     const preset = body.preset;
     if (!inboxCloudPresetWakes(preset) && (body.url != null || body.key != null)) refuseWake(preset);
     const webhook = webhookOf(body, false);
-    const listed = projects();
-    const projectId = typeof body.project_id === "string" && listed.some((p) => p.id === body.project_id) ? body.project_id : (listed[0]?.id ?? null);
     const at = now().toISOString();
     const minted = await mintPairing(name, preset);
     const agent: InboxCloudAgent = {
@@ -206,7 +217,7 @@ export function createInboxCloudAgents(options: {
       preset,
       url: webhook?.url ?? null,
       key: webhook?.key ?? null,
-      project_id: projectId,
+      project_id: null,
       created_at: at,
       key_set_at: webhook ? at : null,
       key_rejected_at: null,
@@ -296,7 +307,9 @@ export function createInboxCloudAgents(options: {
     agent: (session: string) => agents.find((agent) => agent.session === session) ?? null,
     byDevice: (deviceId: string) => agents.find((agent) => agent.device_id === deviceId) ?? null,
     view,
-    projects,
+    home,
+    homeRoot,
+    homeName,
     pair,
     repair,
     setWake,

@@ -267,17 +267,17 @@ describe("a paired cloud agent reaches the Inbox through the relay, under wrangl
     expect(last).toBe(429);
   }, 30_000);
 
-  test("security through the relay: out-of-scope threads and non-agent routes are refused, a tampered or re-filed envelope is never applied, a replay posts once", async () => {
+  test("security through the relay: non-agent routes and tools the Inbox does not serve are refused, a tampered or re-filed envelope is never applied, a replay posts once", async () => {
     const drained = () => until(() => rows("commands").length, (n) => n === 0, "the relay to let the commands go");
     const bodies = async () => (await agentMessages(agentThread)).map((m) => m.body);
 
-    const scoped = await sealed("read_thread", { thread_id: localThread.thread_id });
-    expect((await post(scoped)).status).toBe(202);
-    expect((await resultOf(scoped.id)).result.content[0].text).toStartWith("thread_not_found:");
+    const across = await sealed("read_thread", { thread_id: localThread.thread_id });
+    expect((await post(across)).status).toBe(202);
+    expect((await resultOf(across.id)).result.content[0].text).toContain(PRIVATE);
 
-    const snooze = await sealed("snooze_thread", { thread_id: agentThread });
-    await post(snooze);
-    expect((await resultOf(snooze.id)).result.content[0].text).toStartWith("tool_not_allowed:");
+    const shell = await sealed("shell", { command: "id" });
+    await post(shell);
+    expect((await resultOf(shell.id)).result.content[0].text).toStartWith("tool_not_allowed:");
 
     const windowId = `cmd_${crypto.randomUUID()}`;
     const windowRoute = {

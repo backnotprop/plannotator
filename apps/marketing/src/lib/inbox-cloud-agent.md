@@ -1,10 +1,10 @@
 # Connect yourself to the person's Plannotator Inbox
 
-The person uses Plannotator Inbox, an app on their computer where they talk with their coding agents. They sent you this page and a pairing string (it starts with `plannotator-pairing-2.`). Follow these steps once. After that you can read the Inbox threads the person gives you and answer in them under your own name. Everything you send and read is sealed end to end; the relay in between cannot read it.
+The person uses Plannotator Inbox, an app on their computer where they talk with their coding agents. They sent you this page and a pairing string (it starts with `plannotator-pairing-2.`). Follow these steps once. After that you can read, search and write in every thread of the person's Inbox, in every project, under your own name. Everything you send and read is sealed end to end; the relay in between cannot read it.
 
 Two rules, always:
 
-- Never print, echo, log or repeat the pairing string. Never put it in a repository, a commit, a pull request, an issue or a message. Anyone holding it can read your threads and post as you.
+- Never print, echo, log or repeat the pairing string. Never put it in a repository, a commit, a pull request, an issue or a message. Anyone holding it can read the person's Inbox and post as you.
 - Never ask the person for a webhook key, token or password. When a webhook wakes you, the person pastes its key into their Inbox themselves.
 
 ## 1. Install the `plannotator` command
@@ -90,6 +90,7 @@ Do what the person asked, with your own tools and repositories. Then answer in t
       :::
 
 - If read_thread says `name_this_thread: true`, add `"thread": "<a few words>"` to that reply: it names the thread.
+- Any thread, any project: `read_thread '{"asked_by":"anyone"}'` lists every thread with its project, `search '{"query":"<words>"}'` finds messages in every project, and `"project": "<its name>"` on `send_message` starts the thread in that project (without it, it goes in the project `whoami` names: the one the person chose, or a place of your own, named after you, made with your first thread).
 - Files: `"attachments": ["report.md", "shot.png"]`, paths on your machine; they are sent as bytes and show below your message.
 - If `send_message` prints `"queued": true`, the person's computer is asleep. It is posted once when the computer is back (within 30 days). Do not send it again.
 - A wake that says it is a test from Settings needs nothing: end the run.

@@ -132,20 +132,14 @@ describe("one paired cloud agent against another, and a removed one, through the
     expect(await threadBodies(threadA)).not.toContain("Re-filed under B.");
   }, 60_000);
 
-  test("B cannot read, find, answer in or resolve A's thread", async () => {
-    expect(text(await call(b, "read_thread", { thread_id: threadA }))).toStartWith("thread_not_found:");
-    expect(text(await call(b, "read_thread", { message_id: messageA }))).toStartWith("message_not_found:");
-    const listed = await call(b, "read_thread", {});
-    expect(JSON.stringify(listed)).not.toContain(threadA);
-    expect(JSON.stringify(listed)).not.toContain("Quokka");
-    await until(async () => JSON.stringify(await call(a, "search", { query: "quokka merger" })), (own) => own.includes("Quokka"), "A to find its own thread", 30_000);
-    const found = await call(b, "search", { query: "quokka merger" });
-    expect(JSON.stringify(found)).not.toContain("Quokka");
-    expect(JSON.stringify(found)).not.toContain(threadA);
-    expect(text(await call(b, "send_message", { reply_to: messageA, body: "B writes in A's thread." }))).toStartWith("message_not_found:");
-    expect(text(await call(b, "resolve_message", { message_id: messageA, resolved: true }))).toStartWith("message_not_found:");
-    expect(await threadBodies(threadA)).not.toContain("B writes in A's thread.");
-    expect(text(await call(a, "read_thread", { thread_id: threadA }))).toContain("merger closes on the ninth");
+  test("B reads, finds, answers in and resolves A's thread, under B's own name", async () => {
+    expect(text(await call(b, "read_thread", { thread_id: threadA }))).toContain("merger closes on the ninth");
+    expect(JSON.stringify(await call(b, "read_thread", { asked_by: "anyone" }))).toContain(threadA);
+    await until(async () => JSON.stringify(await call(b, "search", { query: "quokka merger" })), (found) => found.includes(threadA), "B to find A's thread", 30_000);
+    expect((await call(b, "send_message", { reply_to: messageA, body: "B writes in A's thread." })).isError).not.toBe(true);
+    expect(await threadBodies(threadA)).toContain("B writes in A's thread.");
+    expect((await call(b, "resolve_message", { message_id: messageA, resolved: true })).isError).not.toBe(true);
+    expect((await call(b, "resolve_message", { message_id: messageA, resolved: false })).isError).not.toBe(true);
   }, 90_000);
 
   test("an envelope of another version or type, under A's own key, is refused and writes nothing", async () => {

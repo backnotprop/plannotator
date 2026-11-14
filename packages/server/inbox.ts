@@ -195,7 +195,7 @@ import { openBrowser } from "./browser";
 import { isAddressInUseError } from "./remote";
 import { createRequestHostGuard } from "./request-host-guard";
 import { markPlannotatorResponse, withPlannotatorServerHeader } from "./plannotator-server-marker";
-import { createInboxMcpServer, INBOX_BOARD_OFF_TEXT, INBOX_STEPS_OFF_TEXT } from "./inbox-mcp";
+import { createInboxMcpServer, INBOX_BOARD_OFF_TEXT, INBOX_STEPS_OFF_TEXT, type InboxMcpContext } from "./inbox-mcp";
 import { guidePullKey, inboxGuideFileContents, inboxGuideRoute, readInboxReviewSnapshot } from "./inbox-guides";
 import { createInboxRepoCache } from "./inbox-repos";
 import { createGitlabHosts, unnamedForgeHost, type GitlabHosts } from "./inbox-gitlab-hosts";
@@ -1507,54 +1507,51 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     return { projects, unresolved: !settled && projects.length === 0 };
   };
 
-  const mcp = createMcpHandler(
-    () =>
-      createInboxMcpServer({
-        store,
-        baseUrl: () => baseUrl,
-        resolveProject,
-        projectRootOf: (path) => projectRoots.resolve(path),
-        recordAttachments: (paths, project, base) =>
-          recordInboxAttachments(store.dir, paths, { base, at: new Date().toISOString() }),
-        // A question's running-app prototypes, checked and probed before anything is written (inbox-live.ts).
-        checkPrototypeApps: (apps, probing) => liveSites.checkPrototypeApps(apps, probing),
-        // The agents' read-only search reads the window's own ⌘K index, and finds projects without making one.
-        searchIndex: search.index,
-        findProjects,
-        // A Claude Code, Pi or OpenCode session whose bridge polls now is woken by the reply, whoever sent for it
-        // (the stdio shim run inside that session sends as it: PLANNOTATOR_SESSION_TAG, PI_SESSION_ID). A Codex
-        // thread's messages wake it when this Inbox can run `codex queue` (inbox-codex-wake.ts); a running Qwen
-        // Code session's, when this Inbox is its trusted sender (inbox-qwen-wake.ts).
-        sessionWakes: async (host, session, meta) =>
-          (typeof host === "string" && typeof session === "string" && pollingWakeHost(host) && live.pollsNow(host, session)) ||
-          (await codexWake.wakes(host, session, meta)) ||
-          (await qwenWake.wakes(host, session, meta)) ||
-          (await t3Wake.wakes(host, session)),
-        bridgePolls: (host, session) => pollingWakeHost(host) && live.pollsNow(host, session),
-        sessionName: (session) => live.labelOf(session) ?? live.titleOf(session),
-        // The Board: the card tool is listed and served only while the person has it on.
-        boardOn,
-        // Thread steps: the steps tool and field are listed and served only while the person has them on.
-        stepsOn,
-        // A thread's PRs: the reader's live checks, and a read of the PRs an agent just added.
-        pulls: threadPullStates,
-        projectHost: projectRepoHost,
-        // Bro mode: send_message's `body` field carries the line only while the person has it on.
-        broOn,
-        // Code review: submit_guide's `review` field is listed and served only while the person has it on.
-        codeReviewOn,
-        walkthroughThread: (threadId) => pullOwners.started().get(threadId)?.kind === "walkthrough",
-        // Shape: get_guide_brief names the overview's drawing only while Code review and Shape are both on.
-        shapeOn: () => shapeOn(),
-        // Chapter diagrams: get_guide_brief and submit_guide name a chapter's diagram only while it is on.
-        chapterDiagramsOn: () => chapterDiagramsOn(),
-        // A thread only a linked machine holds goes through the window's own forward (inbox-machines.ts).
-        snoozeOnMachine: async (threadId, until) => (machines ? machines.snoozeThread(threadId, until) : null),
-        snoozeMade: () => markSnoozeUsed(),
-        ...(options.mcpNow ? { now: options.mcpNow } : {}),
-      }),
-    { legacy: "stateless", maxRequestBodySize: INBOX_MAX_REQUEST_BYTES },
-  );
+  const mcpContext: InboxMcpContext = {
+    store,
+    baseUrl: () => baseUrl,
+    resolveProject,
+    projectRootOf: (path) => projectRoots.resolve(path),
+    recordAttachments: (paths, project, base) =>
+      recordInboxAttachments(store.dir, paths, { base, at: new Date().toISOString() }),
+    // A question's running-app prototypes, checked and probed before anything is written (inbox-live.ts).
+    checkPrototypeApps: (apps, probing) => liveSites.checkPrototypeApps(apps, probing),
+    // The agents' read-only search reads the window's own ⌘K index, and finds projects without making one.
+    searchIndex: search.index,
+    findProjects,
+    // A Claude Code, Pi or OpenCode session whose bridge polls now is woken by the reply, whoever sent for it
+    // (the stdio shim run inside that session sends as it: PLANNOTATOR_SESSION_TAG, PI_SESSION_ID). A Codex
+    // thread's messages wake it when this Inbox can run `codex queue` (inbox-codex-wake.ts); a running Qwen
+    // Code session's, when this Inbox is its trusted sender (inbox-qwen-wake.ts).
+    sessionWakes: async (host, session, meta) =>
+      (typeof host === "string" && typeof session === "string" && pollingWakeHost(host) && live.pollsNow(host, session)) ||
+      (await codexWake.wakes(host, session, meta)) ||
+      (await qwenWake.wakes(host, session, meta)) ||
+      (await t3Wake.wakes(host, session)),
+    bridgePolls: (host, session) => pollingWakeHost(host) && live.pollsNow(host, session),
+    sessionName: (session) => live.labelOf(session) ?? live.titleOf(session),
+    // The Board: the card tool is listed and served only while the person has it on.
+    boardOn: () => boardOn(),
+    // Thread steps: the steps tool and field are listed and served only while the person has them on.
+    stepsOn: () => stepsOn(),
+    // A thread's PRs: the reader's live checks, and a read of the PRs an agent just added.
+    pulls: threadPullStates,
+    projectHost: projectRepoHost,
+    // Bro mode: send_message's `body` field carries the line only while the person has it on.
+    broOn: () => broOn(),
+    // Code review: submit_guide's `review` field is listed and served only while the person has it on.
+    codeReviewOn: () => codeReviewOn(),
+    walkthroughThread: (threadId) => pullOwners.started().get(threadId)?.kind === "walkthrough",
+    // Shape: get_guide_brief names the overview's drawing only while Code review and Shape are both on.
+    shapeOn: () => shapeOn(),
+    // Chapter diagrams: get_guide_brief and submit_guide name a chapter's diagram only while it is on.
+    chapterDiagramsOn: () => chapterDiagramsOn(),
+    // A thread only a linked machine holds goes through the window's own forward (inbox-machines.ts).
+    snoozeOnMachine: async (threadId, until) => (machines ? machines.snoozeThread(threadId, until) : null),
+    snoozeMade: () => markSnoozeUsed(),
+    ...(options.mcpNow ? { now: options.mcpNow } : {}),
+  };
+  const mcp = createMcpHandler(() => createInboxMcpServer(mcpContext), { legacy: "stateless", maxRequestBodySize: INBOX_MAX_REQUEST_BYTES });
 
   const health = (): InboxHealth => ({
     ok: true,
@@ -4350,7 +4347,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       .list()
       .flatMap((agent) => (agent.device_id && agentDoor.inScopeOf(threadId, agent.device_id) ? [agent.device_id] : []));
   };
-  const agentDoor = createInboxAgentDoor({ store, agents: cloudAgents, devices: () => phones?.agentDevices ?? null, baseUrl: () => baseUrl, searchIndex: search.index });
+  const agentDoor = createInboxAgentDoor({ store, agents: cloudAgents, devices: () => phones?.agentDevices ?? null, mcp: mcpContext });
   const cloudWake = createInboxCloudWake({
     store,
     agents: cloudAgents,
@@ -5749,7 +5746,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       }
       if (path === "/api/inbox/cloud-agents" || path.startsWith("/api/inbox/cloud-agents/")) {
         if (isCrossSiteRequest(req)) return json(INBOX_CROSS_SITE_BODY, 403);
-        const cloudView = () => ({ agents: cloudAgents.list().map(cloudAgents.view), projects: cloudAgents.projects() });
+        const cloudView = () => ({ agents: cloudAgents.list().map(cloudAgents.view) });
         if (path === "/api/inbox/cloud-agents" && req.method === "GET") return json({ ...cloudView(), available: await cloudGate.available(cloudAgents.list().length) });
         if (req.method !== "POST") return json({ error: "Use POST." }, 405);
         const body = await readBody(req);

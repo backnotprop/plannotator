@@ -3,6 +3,7 @@ import { GUIDE_CLI_USAGE } from "@plannotator/server/guide-cli";
 import { T3_CLI_USAGE } from "@plannotator/t3-code/usage";
 import { INBOX_CARD_COLUMNS, INBOX_CARD_INITIATIVE_CLEAR_OUT, INBOX_CARD_INITIATIVE_FIELD, INBOX_CARD_INITIATIVE_RULE } from "@plannotator/core/inbox-types";
 import { INBOX_REF_LINK_RULE, INBOX_TOOL_ACTIONS } from "@plannotator/shared/inbox/connection";
+import { INBOX_AGENT_CALL_ACTIONS } from "@plannotator/shared/inbox/agent-pairing";
 import { FEEDBACK_HEREDOC_END } from "@plannotator/core/product-feedback";
 import { SHAPE_GUIDE, SHAPE_HELP_INTRO } from "@plannotator/core/shape-skill";
 import { INBOX_LINK_USAGE } from "./inbox-link-command";
@@ -520,22 +521,30 @@ export const INBOX_PROJECTS_USAGE = [
 /** What `plannotator inbox call` runs: the Inbox tool's actions. */
 export const INBOX_CALL_ACTIONS: readonly string[] = INBOX_TOOL_ACTIONS;
 
+const INBOX_PAIRED_CALL_ACTIONS = INBOX_AGENT_CALL_ACTIONS.filter((action) => action !== "steps");
+
 export const INBOX_PAIRED_CALL_USAGE = [
   "Usage, as a paired cloud agent (PLANNOTATOR_PAIRING is set):",
   "  plannotator inbox call <action> [<json> | -]",
   "",
   "Talks to the person's Plannotator Inbox as the cloud agent the pairing string names, through",
-  "the Inbox's relay, sealed end to end. You see only the threads you started, were sent or were",
-  "tagged in; you post under your own name. Actions: whoami, read_thread, send_message, search, resolve_message.",
+  "the Inbox's relay, sealed end to end. You can read, search and write in every thread of every",
+  "project; you post under your own name.",
+  `Actions: ${INBOX_PAIRED_CALL_ACTIONS.join(", ")}. The JSON holds the action's fields, as in`,
+  "'plannotator inbox --help', except that you name a project by its name (\"project\": \"api\"), never",
+  "by a folder. With no project, read_thread and search cover every project, and a new thread",
+  "goes in the project whoami names.",
   "",
   "  plannotator inbox call whoami        check the setup: who you are, or exactly what is wrong",
   "  plannotator inbox call read_thread '{\"thread_id\":\"thr_1\"}'",
+  "  plannotator inbox call send_message '{\"project\":\"api\",\"subject\":\"Release\",\"body\":\"Ready to tag?\"}'",
   "  plannotator inbox call send_message '{\"reply_to\":\"msg_2\",\"body\":\"Done: the tests pass.\"}'",
   "  plannotator inbox call send_message '{\"reply_to\":\"msg_2\",\"body\":\"The screenshot is below.\",\"attachments\":[\"shot.png\"]}'",
   "",
   "A path in attachments is read from this machine and sent as bytes; the Inbox opens no path for you.",
-  "When the person's computer is asleep, a read fails and says so, and send_message waits at the",
-  "relay and is posted once when it is back (stdout then says queued: true; do not send it again).",
+  "When the person's computer is asleep, a read fails and says so, and an action that changes",
+  "something (send_message, resolve_message and the like) waits at the relay and is applied once",
+  "when it is back (stdout then says queued: true; do not send it again).",
   "whoami also prints signal_url: an address whose value changes when the person writes in one",
   "of your threads, for a routine that can only poll.",
   "stdout: the result as one JSON value. A failure: <code>: <message> on stderr, exit 1.",
