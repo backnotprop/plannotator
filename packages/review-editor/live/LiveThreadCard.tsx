@@ -1,4 +1,4 @@
-import { useState, type MutableRefObject } from 'react';
+import { useRef, useState, type MutableRefObject } from 'react';
 import type { LiveReviewActions } from './useLiveReview';
 import { LiveComposer } from './LiveComposer';
 import { authorName, deliveryWord, type LiveMessage, type PlacedThread } from './model';
@@ -23,6 +23,9 @@ export function LiveMessageRow({ message, messages }: { message: LiveMessage; me
 export function LiveThreadCard({ thread, messages, actions }: { thread: PlacedThread; messages: readonly LiveMessage[]; actions: MutableRefObject<LiveReviewActions> }) {
   const { conversation, now } = thread;
   const [open, setOpen] = useState(false);
+  const shown = useRef<Set<string> | null>(null);
+  const firstPaint = shown.current === null;
+  if (!shown.current) shown.current = new Set(conversation.messages.map((m) => m.id));
   const resolved = !!conversation.resolved;
   const last = conversation.messages[conversation.messages.length - 1]!;
   const first = conversation.messages[0]!;
@@ -48,9 +51,19 @@ export function LiveThreadCard({ thread, messages, actions }: { thread: PlacedTh
         </div>
       ) : null}
       <div className="divide-y divide-border">
-        {conversation.messages.map((message) => (
-          <LiveMessageRow key={message.id} message={message} messages={messages} />
-        ))}
+        {conversation.messages.map((message) => {
+          const arriving = !firstPaint && !shown.current!.has(message.id);
+          shown.current!.add(message.id);
+          return arriving ? (
+            <div key={message.id} className="live-arrive">
+              <div>
+                <LiveMessageRow message={message} messages={messages} />
+              </div>
+            </div>
+          ) : (
+            <LiveMessageRow key={message.id} message={message} messages={messages} />
+          );
+        })}
       </div>
       <div className="border-t border-border px-3 py-2">
         <LiveComposer

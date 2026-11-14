@@ -1,0 +1,9 @@
+.live-arrive { display: grid; grid-template-rows: 1fr; animation: live-arrive 200ms ease-out; }
+.live-arrive > * { min-height: 0; overflow: hidden; }
+@keyframes live-arrive {
+  from { grid-template-rows: 0fr; opacity: 0; }
+  to { grid-template-rows: 1fr; opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .live-arrive { animation: none; }
+}
