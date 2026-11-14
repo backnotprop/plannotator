@@ -27,6 +27,8 @@ export function LiveComposer(props: {
   sendLabel: string;
   allowEmpty?: boolean;
   onFocus?: () => void;
+  onCancel?: () => void;
+  autoFocus?: boolean;
   onSend: (words: string, tags: LiveSendTag[]) => Promise<void>;
 }) {
   const [text, setText] = useState('');
@@ -52,6 +54,7 @@ export function LiveComposer(props: {
       <textarea
         ref={ref}
         rows={2}
+        autoFocus={props.autoFocus}
         value={text}
         placeholder={props.placeholder}
         aria-controls={mention.menu ? listbox : undefined}
@@ -65,14 +68,22 @@ export function LiveComposer(props: {
         onSelect={mention.onSelect}
         onKeyDown={(e) => {
           if (mention.onKeyDown(e)) return;
-          if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+          if (e.key === 'Escape' && props.onCancel && !text.trim()) {
+            e.preventDefault();
+            props.onCancel();
+          } else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
             e.preventDefault();
             void send();
           }
         }}
       />
       <MentionAutocompleteMenu id={listbox} menu={mention.menu} onSelect={mention.select} />
-      <div className="flex items-center justify-end">
+      <div className="flex items-center justify-end gap-1">
+        {props.onCancel ? (
+          <button type="button" onClick={props.onCancel} className="h-7 rounded px-2.5 text-[12px] text-muted-foreground hover:bg-muted hover:text-foreground">
+            Cancel
+          </button>
+        ) : null}
         <button
           type="button"
           disabled={!canSend}

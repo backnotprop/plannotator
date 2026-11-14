@@ -28,6 +28,7 @@ export function LiveMessageRow({ message, messages, onTakeBack }: { message: Liv
 export function LiveThreadCard({ thread, messages, actions }: { thread: PlacedThread; messages: readonly LiveMessage[]; actions: MutableRefObject<LiveReviewActions> }) {
   const { conversation, now } = thread;
   const [open, setOpen] = useState(false);
+  const [replying, setReplying] = useState(false);
   const shown = useRef<Set<string> | null>(null);
   const firstPaint = shown.current === null;
   if (!shown.current) shown.current = new Set(conversation.messages.map((m) => m.id));
@@ -70,15 +71,26 @@ export function LiveThreadCard({ thread, messages, actions }: { thread: PlacedTh
           );
         })}
       </div>
-      <div className="border-t border-border px-3 py-2">
-        <LiveComposer
-          agents={actions.current.agents}
-          placeholder="Reply, or @ an agent"
-          sendLabel="Reply"
-          onFocus={actions.current.loadAgents}
-          onSend={(words, tags) => actions.current.reply(last.id, words, tags)}
-        />
-        <div className="mt-1 flex justify-start">
+      {replying ? (
+        <div className="border-t border-border px-3 py-2">
+          <LiveComposer
+            agents={actions.current.agents}
+            placeholder="Reply, or @ an agent"
+            sendLabel="Reply"
+            autoFocus
+            onFocus={actions.current.loadAgents}
+            onCancel={() => setReplying(false)}
+            onSend={async (words, tags) => {
+              await actions.current.reply(last.id, words, tags);
+              setReplying(false);
+            }}
+          />
+        </div>
+      ) : (
+        <div className="flex items-center gap-1 border-t border-border px-1.5 py-1">
+          <button type="button" className="h-7 rounded px-2 text-[12px] text-muted-foreground hover:bg-muted hover:text-foreground" data-live-reply onClick={() => setReplying(true)}>
+            Reply
+          </button>
           <button
             type="button"
             className="h-7 rounded px-2 text-[12px] text-muted-foreground hover:bg-muted hover:text-foreground"
@@ -91,7 +103,7 @@ export function LiveThreadCard({ thread, messages, actions }: { thread: PlacedTh
             {resolved ? 'Reopen' : 'Resolve'}
           </button>
         </div>
-      </div>
+      )}
     </div>
   );
 }

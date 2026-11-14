@@ -94,7 +94,10 @@ test('a comment reaches the agent that opened the review, its answer lands live 
     await context.addCookies(Object.entries(FIRST_RUN).map(([name, value]) => ({ name, value, url })));
     const page = await context.newPage();
     await page.goto(url);
-    await expect(page.locator('[data-review-sidebar-tab="threads"]')).toBeVisible();
+    const threadsTab = page.locator('[data-review-sidebar-tab="threads"]');
+    await expect(page.locator('[data-review-panel-toggle]')).toBeVisible();
+    if (!(await threadsTab.isVisible())) await page.locator('[data-review-panel-toggle]').click();
+    await expect(threadsTab).toBeVisible();
 
     const sent = await page.evaluate(async () => {
       const res = await fetch('/api/live/send', {
@@ -110,7 +113,7 @@ test('a comment reaches the agent that opened the review, its answer lands live 
     await owner.deliver(commentId);
 
     const card = page.locator(`[data-live-thread="${commentId}"]`);
-    await page.locator('[data-review-sidebar-tab="threads"]').click();
+    await threadsTab.click();
     await page.locator(`[data-live-row="${commentId}"]`).click();
     await expect(card).toBeVisible();
     await expect(card.locator('[data-live-delivery]')).toHaveText('· Delivered');
@@ -124,6 +127,7 @@ test('a comment reaches the agent that opened the review, its answer lands live 
     await expect(card.locator('[data-live-message][data-author="agent"]')).toContainText('RangeError');
     await expect(card.locator('[data-live-delivery]')).toHaveText('· Read');
 
+    await card.locator('[data-live-reply]').click();
     const box = card.locator('[data-live-composer] textarea');
     await box.click();
     await box.pressSequentially('Pi, can you add a test? @');
