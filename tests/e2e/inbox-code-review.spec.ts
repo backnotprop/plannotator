@@ -347,8 +347,8 @@ test('the review card, the full-window review with a comment and a Viewed tick, 
   const added = (line: number) => retry.locator(`[data-line-type="change-addition"][data-column-number="${line}"]`);
   await expect(added(12)).toBeVisible({ timeout: 30_000 });
   await shot(page, '4-review-mode');
-  // Its file head is 33 px, as in every reader.
-  expect((await retry.locator('[data-file-header]').first().boundingBox())!.height).toBe(33);
+  // Its file head is 32 px, as in every reader.
+  expect((await retry.locator('[data-file-header]').first().boundingBox())!.height).toBe(32);
 
   await retry.hover();
   await added(12).click();
@@ -1239,10 +1239,10 @@ test('Code review off: the same review opens in the full-window review, with no 
     // The diff controls sit in the bar (approval "diff-controls-headers"), no card has a tab.
     await expect(pane.locator('[data-guide-section-tab]')).toHaveCount(0);
     await expect(pane.locator('.ib-vhead [data-diff-controls] [data-diff-layout-toggle]')).toBeVisible();
-    // The 33 px file head is every reader's, this one's too.
+    // The 32 px file head is every reader's, this one's too.
     const shell = pane.locator('[data-guide-file-shell="src/payouts/retry.ts"]');
     await expect(shell.locator('[data-line-type="change-addition"]').first()).toBeVisible({ timeout: 30_000 });
-    expect((await shell.locator('[data-file-header]').first().boundingBox())!.height).toBe(33);
+    expect((await shell.locator('[data-file-header]').first().boundingBox())!.height).toBe(32);
 
     // A comment here reads as on main: no name line, on the card or in the comments.
     const added = shell.locator('[data-line-type="change-addition"][data-column-number="12"]');
