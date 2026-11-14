@@ -29,9 +29,9 @@ describe.if(hasDom)('FileHeader as one toolbar', () => {
   test('a long name truncates instead of printing over the counts, with the full path in its title', async () => {
     const path = 'packages/some/deep/folder/a-really-long-file-name-that-would-print-over-the-counts.test.ts';
     const el = await mount(<FileHeader filePath={path} patch={patch} status="renamed" oldPath="old.ts" onToggleViewed={() => {}} />);
-    const name = el.querySelector<HTMLElement>('[data-file-header-name]')!;
+    const name = el.querySelector<HTMLElement>('[data-ellipsis-name]')!;
     expect(name.className).toContain('min-w-0');
-    expect(name.className).toContain('text-ellipsis');
+    expect(name.className).toContain('overflow-hidden');
     expect(name.className).not.toContain('flex-none');
     expect(name.closest('[title]')!.getAttribute('title')).toBe(`old.ts → ${path}`);
   });
