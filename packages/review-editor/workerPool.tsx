@@ -1,3 +1,4 @@
+import { MAX_LINE_DIFF_LENGTH } from './utils/diffChromeMetrics';
 import React, { useEffect, useRef, useState, type ReactNode } from 'react';
 import { WorkerPoolContextProvider, useWorkerPool } from '@pierre/diffs/react';
 import type { WorkerInitializationRenderOptions, WorkerPoolOptions } from '@pierre/diffs/react';
@@ -31,6 +32,7 @@ const highlighterOptions: WorkerInitializationRenderOptions = {
   // options — decide whether the token transformer runs. Without this, tokens
   // render highlighted but un-interactable and code-nav silently no-ops.
   useTokenTransformer: true,
+  maxLineDiffLength: MAX_LINE_DIFF_LENGTH,
   // Preload the common languages; anything else resolves on demand.
   langs: ['typescript', 'tsx', 'javascript', 'json', 'css', 'html', 'python', 'go', 'rust', 'sh', 'yaml', 'markdown'],
 };

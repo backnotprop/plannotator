@@ -4,6 +4,7 @@ import { COMPACT_FILE_HEADER_HEIGHT, COMPACT_HUNK_SEPARATOR_HEIGHT, FILE_HEADER_
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ContextNoteAnchor } from '../utils/contextNoteAnchor';
 import { createPortal } from 'react-dom';
+import { revealFirstChange } from '../utils/revealFirstChange';
 import { DEFAULT_CODE_VIEW_FILE_METRICS, getSingularPatch, processFile } from '@pierre/diffs';
 import type {
   CodeViewItem,
@@ -29,6 +30,7 @@ import type {
 import { CommentPopover } from '@plannotator/ui/components/CommentPopover';
 import { usePierreTheme } from '../hooks/usePierreTheme';
 import { useIsWorkerPoolReadyOrDisabled, useWorkerPoolThemeSync } from '../workerPool';
+import { MAX_LINE_DIFF_LENGTH } from '../utils/diffChromeMetrics';
 import { useConfigValue } from '@plannotator/ui/config';
 import type { SemDiffClient, SemDiffResult } from '../semDiff/semDiffClient';
 import type { PowerUpConfig, PowerUpFileState, PowerUpStatus } from '../semDiff/powerUp';
@@ -2407,6 +2409,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   // recycles <diffs-container> elements across items, so this is re-registered
   // on every mount/update and dropped on unmount.
   const nodeToItemIdRef = useRef(new WeakMap<HTMLElement, string>());
+  const firstChangeShownRef = useRef(new Set<string>());
 
   const handlePostRender = useStableCallback(
     (
@@ -2439,6 +2442,10 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       augmentItem(context.id);
       const itemId = context.id;
       requestAnimationFrame(() => applyItemHighlights(node, itemId));
+      if (!firstChangeShownRef.current.has(itemId)) {
+        firstChangeShownRef.current.add(itemId);
+        requestAnimationFrame(() => revealFirstChange(node));
+      }
     },
   );
 
@@ -3946,6 +3953,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       overflow: diffOverflow,
       diffIndicators,
       lineDiffType,
+      maxLineDiffLength: MAX_LINE_DIFF_LENGTH,
       disableLineNumbers,
       disableBackground,
       expandUnchanged,

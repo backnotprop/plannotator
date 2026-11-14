@@ -26,9 +26,15 @@ export interface SemDiffOpinionRequest {
   rejected: readonly string[];
 }
 
+export interface SemDiffAttempt {
+  result: SemDiffResult | null;
+  failed: boolean;
+}
+
 export interface SemDiffClient {
   supports(path: string): boolean;
   diff(path: string, oldText: string, newText: string, signal?: AbortSignal, opinion?: SemDiffOpinionRequest): Promise<SemDiffResult | null>;
+  attempt(path: string, oldText: string, newText: string, signal?: AbortSignal, opinion?: SemDiffOpinionRequest): Promise<SemDiffAttempt>;
   dispose(): void;
 }
 
@@ -49,29 +55,67 @@ export function createSemDiffClient(options: SemDiffClientOptions): SemDiffClien
   const { advert, origin, createWorker, timeoutMs = SEM_DIFF_TIMEOUT_MS } = options;
   let worker: Promise<Worker> | null = null;
   let nextId = 1;
-  const pending = new Map<number, (reply: SemDiffReply | null) => void>();
+  interface Pending {
+    request: SemDiffRequest;
+    settle: (reply: SemDiffReply | null) => void;
+    limitMs: number;
+  }
+  const pending = new Map<number, Pending>();
+  let watchdog: ReturnType<typeof setTimeout> | null = null;
 
-  const settleAll = () => {
-    for (const resolve of pending.values()) resolve(null);
-    pending.clear();
+  const watchHead = () => {
+    if (watchdog) clearTimeout(watchdog);
+    watchdog = null;
+    const head = pending.keys().next();
+    if (head.done) return;
+    const id = head.value;
+    watchdog = setTimeout(() => headTimedOut(id), pending.get(id)!.limitMs);
   };
-  const restart = () => {
+  const settle = (id: number, reply: SemDiffReply | null) => {
+    const entry = pending.get(id);
+    if (!entry) return;
+    pending.delete(id);
+    entry.settle(reply);
+  };
+  const dropWorker = () => {
     const old = worker;
     worker = null;
     void old?.then((w) => w.terminate(), () => {});
-    settleAll();
+  };
+  const post = (id: number) => {
+    const entry = pending.get(id);
+    if (!entry) return;
+    ensureWorker().then(
+      (w) => {
+        if (pending.has(id)) w.postMessage(entry.request);
+      },
+      () => {
+        settle(id, null);
+        watchHead();
+      },
+    );
+  };
+  const headTimedOut = (id: number) => {
+    watchdog = null;
+    if (!pending.has(id)) return;
+    settle(id, null);
+    dropWorker();
+    for (const other of pending.keys()) post(other);
+    watchHead();
   };
   const ensureWorker = (): Promise<Worker> => {
     if (worker) return worker;
     const created = Promise.resolve().then(createWorker).then((w) => {
       w.onmessage = (event: MessageEvent<SemDiffReply>) => {
-        const resolve = pending.get(event.data.id);
-        if (!resolve) return;
-        pending.delete(event.data.id);
-        resolve(event.data);
+        if (!pending.has(event.data.id)) return;
+        settle(event.data.id, event.data);
+        watchHead();
       };
       w.onerror = () => {
-        if (worker === created) restart();
+        if (worker !== created) return;
+        dropWorker();
+        for (const id of [...pending.keys()]) settle(id, null);
+        watchHead();
       };
       return w;
     });
@@ -86,71 +130,66 @@ export function createSemDiffClient(options: SemDiffClientOptions): SemDiffClien
     return advert.grammars[SEM_DIFF_GRAMMARS[language as keyof typeof SEM_DIFF_GRAMMARS]] != null;
   };
 
-  const results = new Map<string, Promise<SemDiffResult | null>>();
+  const results = new Map<string, Promise<SemDiffAttempt>>();
 
-  const compute = (path: string, oldText: string, newText: string, opinion?: SemDiffOpinionRequest): Promise<SemDiffResult | null> => {
+  const compute = (path: string, oldText: string, newText: string, opinion?: SemDiffOpinionRequest): Promise<SemDiffAttempt> => {
     const id = nextId++;
     const request: SemDiffRequest = { id, advert: advert!, origin, path, oldText, newText, ...(opinion ? { opinion: { rejected: [...opinion.rejected] } } : {}) };
     return new Promise<SemDiffReply | null>((resolve) => {
-      const timer = setTimeout(() => {
-        if (pending.has(id)) restart();
-      }, opinion ? Math.max(timeoutMs, SEM_DIFF_OPINION_TIMEOUT_MS) : timeoutMs);
-      pending.set(id, (value) => {
-        clearTimeout(timer);
-        resolve(value);
-      });
-      ensureWorker().then(
-        (w) => {
-          if (pending.has(id)) w.postMessage(request);
-        },
-        () => {
-          pending.get(id)?.(null);
-          pending.delete(id);
-        },
-      );
+      pending.set(id, { request, settle: resolve, limitMs: opinion ? Math.max(timeoutMs, SEM_DIFF_OPINION_TIMEOUT_MS) : timeoutMs });
+      post(id);
+      if (pending.size === 1) watchHead();
     }).then((reply) => {
-      if (!reply || !reply.ok) return null;
-      if (!opinion && !hasSomethingToSay(reply.semanticOperations)) return null;
+      if (!reply || !reply.ok) return { result: null, failed: true };
+      if (!opinion && !hasSomethingToSay(reply.semanticOperations)) return { result: null, failed: false };
       return {
-        semanticOperations: reply.semanticOperations,
-        semanticFolds: reply.semanticFolds,
-        patch: reply.patch,
-        summary: reviewSummary(reply.semanticOperations),
-        ...(reply.secondOpinion ? { secondOpinion: reply.secondOpinion } : {}),
+        result: {
+          semanticOperations: reply.semanticOperations,
+          semanticFolds: reply.semanticFolds,
+          patch: reply.patch,
+          summary: reviewSummary(reply.semanticOperations),
+          ...(reply.secondOpinion ? { secondOpinion: reply.secondOpinion } : {}),
+        },
+        failed: false,
       };
+    });
+  };
+
+  const attempt = async (path: string, oldText: string, newText: string, signal?: AbortSignal, opinion?: SemDiffOpinionRequest): Promise<SemDiffAttempt> => {
+    if (!advert || !supports(path) || signal?.aborted || oldText === newText) return { result: null, failed: false };
+    const key = `${path}\0${hashText(oldText)}\0${hashText(newText)}${opinion ? `\0opinion\0${[...opinion.rejected].sort().join(',')}` : ''}`;
+    let found = results.get(key);
+    if (!found) {
+      found = compute(path, oldText, newText, opinion);
+      results.set(key, found);
+      void found.then((outcome) => {
+        const keep = !outcome.failed && (!opinion || outcome.result?.secondOpinion?.state === 'ok');
+        if (!keep && results.get(key) === found) results.delete(key);
+      });
+      if (results.size > MAX_CACHED) results.delete(results.keys().next().value!);
+    }
+    if (!signal) return found;
+    return new Promise<SemDiffAttempt>((resolve) => {
+      const onAbort = () => resolve({ result: null, failed: false });
+      signal.addEventListener('abort', onAbort, { once: true });
+      found!.then((value) => {
+        signal.removeEventListener('abort', onAbort);
+        resolve(signal.aborted ? { result: null, failed: false } : value);
+      });
     });
   };
 
   return {
     supports,
+    attempt,
     async diff(path, oldText, newText, signal, opinion) {
-      if (!advert || !supports(path) || signal?.aborted || oldText === newText) return null;
-      const key = `${path}\0${hashText(oldText)}\0${hashText(newText)}${opinion ? `\0opinion\0${[...opinion.rejected].sort().join(',')}` : ''}`;
-      let result = results.get(key);
-      if (!result) {
-        result = compute(path, oldText, newText, opinion);
-        results.set(key, result);
-        if (opinion) {
-          const kept = result;
-          void kept.then((value) => {
-            if (!value || value.secondOpinion?.state !== 'ok') results.delete(key);
-          });
-        }
-        if (results.size > MAX_CACHED) results.delete(results.keys().next().value!);
-      }
-      if (!signal) return result;
-      return new Promise<SemDiffResult | null>((resolve) => {
-        const onAbort = () => resolve(null);
-        signal.addEventListener('abort', onAbort, { once: true });
-        result!.then((value) => {
-          signal.removeEventListener('abort', onAbort);
-          resolve(signal.aborted ? null : value);
-        });
-      });
+      return (await attempt(path, oldText, newText, signal, opinion)).result;
     },
     dispose() {
       results.clear();
-      restart();
+      dropWorker();
+      for (const id of [...pending.keys()]) settle(id, null);
+      watchHead();
     },
   };
 }

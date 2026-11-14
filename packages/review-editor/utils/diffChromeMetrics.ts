@@ -3,6 +3,7 @@ export const COMPACT_REVIEW_HEADER_HEIGHT = 52;
 export const FILE_HEADER_HEIGHT = 32;
 export const COMPACT_FILE_HEADER_HEIGHT = 44;
 export const HUNK_SEPARATOR_HEIGHT = 20;
+export const MAX_LINE_DIFF_LENGTH = 10_000;
 export const COMPACT_HUNK_SEPARATOR_HEIGHT = 24;
 
 export function firstCodeLineOffset(compact: boolean): number {
