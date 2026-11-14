@@ -3,7 +3,7 @@ import { QueryClient, QueryObserver } from '@tanstack/react-query';
 import type { InboxMessageWire, InboxQuestion } from '@plannotator/core/inbox-types';
 import type { InboxEvent } from '../../api';
 import { inboxKeys } from '../keys';
-import { putThread } from '../queries/thread';
+import { isThreadStale, putThread, staleThread } from '../queries/thread';
 import type { HeldThread } from './record';
 import { applyStreamRecord } from './stream';
 
@@ -49,4 +49,16 @@ test('an agent message with a question and an action item draws with its cards, 
   expect(client.getQueryState(inboxKeys.thread(T))?.isInvalidated).toBe(false);
   stop();
   client.clear();
+});
+
+test('a record that came while the thread was stale keeps it stale until a read that has the record lands', () => {
+  const client = new QueryClient();
+  const base = { serverSession: 's', cursor: 10, thread: { thread_id: T, project: { id: 'prj', name: 'billing', root: '/r' } as never, subject: 'Release', thread_name: null, resolved_at: null, archive_seq: null, messages: [msg(T)] } } as never;
+  putThread(client, T, base);
+  staleThread(client, T);
+  expect(applyStreamRecord(client, { seq: 20, kind: 'message', id: 'msg_N', first: true, message: msg('msg_N') } as InboxEvent).kind).toBe('unheld');
+  putThread(client, T, { ...(base as object), cursor: 15 } as never);
+  expect(isThreadStale(client, T)).toBe(true);
+  putThread(client, T, { ...(base as object), cursor: 20 } as never);
+  expect(isThreadStale(client, T)).toBe(false);
 });

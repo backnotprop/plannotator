@@ -13,10 +13,18 @@ export function heldThread(client: QueryClient, threadId: string): HeldThread | 
   return client.getQueryData<HeldThread>(inboxKeys.thread(threadId));
 }
 
+const missed = new Map<string, number>();
+
+export function noteMissed(threadId: string, seq: number): void {
+  missed.set(threadId, Math.max(seq, missed.get(threadId) ?? 0));
+}
+
 export function putThread(client: QueryClient, threadId: string, read: ThreadModel): HeldThread {
   const held = reconcileRead(heldThread(client, threadId), read);
   client.setQueryData<HeldThread>(inboxKeys.thread(threadId), held);
   trimThreads(client);
+  if (read.cursor < (missed.get(threadId) ?? 0)) staleThread(client, threadId);
+  else missed.delete(threadId);
   return heldThread(client, threadId) ?? held;
 }
 
