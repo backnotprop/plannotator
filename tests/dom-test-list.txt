@@ -753,3 +753,4 @@ packages/review-editor/components/AutoViewedNotice.test.tsx
 packages/inbox/agents/faceSources.test.tsx
 packages/ui/components/agentFace/PowerUpGuy.test.tsx
 packages/review-editor/components/CompactPrimaryAction.test.tsx
+packages/ui/components/agents/LaunchSummaryLine.test.tsx
