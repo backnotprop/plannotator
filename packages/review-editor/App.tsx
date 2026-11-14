@@ -169,7 +169,9 @@ import { useGroupByKind } from './hooks/useGroupByKind';
 import type { AllFilesOrder } from './components/AllFilesCodeView';
 import { useReviewProgress } from './hooks/useReviewProgress';
 import { resolveDiffSwitchUnviews } from './utils/autoViewed';
-import { needsAutoViewedNotice, markAutoViewedNoticeSeen, turnOffAutoViewed, toggleAutoViewed } from './utils/autoViewedNotice';
+import { toggleAutoViewed } from './utils/autoViewedNotice';
+import { useAutoViewedNotice } from './hooks/useAutoViewedNotice';
+import { AutoViewedNotice } from './components/AutoViewedNotice';
 import { usePRSession, type PRSessionUpdate } from './hooks/usePRSession';
 import { useAnnotationFactory } from './hooks/useAnnotationFactory';
 import { DEMO_DIFF } from './demoData';
@@ -3238,32 +3240,11 @@ const ReviewApp: React.FC = () => {
     for (const path of newlyViewed) applyAutoViewSuppression(path, true);
     syncPlatformViewed(newlyViewed, true);
   }, [markFilesViewed, applyAutoViewSuppression, syncPlatformViewed]);
-  const handleAutoView = useCallback(() => {
-    // The notice fires the first time auto-view demonstrates itself. Deferred
-    // (not lost) behind the guide takeover or a first-run dialog — the file
-    // still marks and the next auto-view retries the toast.
-    if (!needsAutoViewedNotice()) return;
-    if (guideOpen) return;
-    markAutoViewedNoticeSeen();
-    toast('Files are marked viewed as you scroll', {
-      description: "Scroll past a file or move on to the next and it's checked off. Turn this off in Settings → Review, or from the … menu above the file list.",
-      duration: 10000,
-      position: 'top-right',
-      classNames: { toast: '!w-auto', description: '!text-foreground/70' },
-      action: {
-        label: 'Turn off',
-        onClick: () => {
-          turnOffAutoViewed();
-          toast('Auto-mark viewed is off', {
-            description: 'Re-enable it in Settings → Review.',
-            duration: 5000,
-            position: 'top-right',
-            classNames: { toast: '!w-auto', description: '!text-foreground/70' },
-          });
-        },
-      },
-    });
-  }, [guideOpen]);
+  const autoViewedNotice = useAutoViewedNotice({
+    blocked: guideOpen || !isNavigatorOpen,
+    fileKey: isAllFilesActive ? 'all' : activeFileIndex,
+  });
+  const handleAutoView = autoViewedNotice.show;
   // The update toast waits behind the guide takeover and every first-run
   // dialog of this load (useUpdateToast).
   useUpdateToast({
@@ -6068,6 +6049,7 @@ const ReviewApp: React.FC = () => {
                 onToggleShowStageControls={handleToggleReviewStageControls}
                 autoViewed={autoViewedEnabled}
                 onToggleAutoViewed={handleToggleAutoViewed}
+                controlsNotice={<AutoViewedNotice notice={autoViewedNotice.notice} onTurnOff={autoViewedNotice.turnOff} />}
                 onCopyRawDiff={handleCopyDiff}
                 canCopyRawDiff={!!diffData?.rawPatch}
                 copyRawDiffStatus={copyRawDiffStatus}

@@ -35,6 +35,7 @@ import { useHiddenViewedFiles } from '../hooks/useHiddenViewedFiles';
 import { useLatestCallback } from '../hooks/useLatestCallback';
 
 interface FileTreeProps {
+  controlsNotice?: React.ReactNode;
   /** The top of the panel (views, the comparison sentence, Changes | All
    *  files, Go to File), shared with the other views. Absent: no header. */
   header?: ReviewPanelHeaderModel;
@@ -183,6 +184,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
   onToggleShowStageControls,
   autoViewed,
   onToggleAutoViewed,
+  controlsNotice,
   onCopyRawDiff,
   canCopyRawDiff = false,
   copyRawDiffStatus = 'idle',
@@ -471,6 +473,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
       onToggleShowStageControls={onToggleShowStageControls}
       autoViewed={autoViewed}
       onToggleAutoViewed={onToggleAutoViewed}
+      notice={controlsNotice}
       groupByKind={groupByKind}
       onToggleGroupByKind={onToggleGroupByKind}
       groupBy={onSelectGroupBy ? effectiveGroupBy : undefined}
