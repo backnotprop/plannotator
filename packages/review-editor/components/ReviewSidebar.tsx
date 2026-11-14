@@ -27,7 +27,15 @@ import { isCommentSubmitKey } from '@plannotator/ui/utils/commentSubmitKey';
 import { artifactAnchorLabel, artifactAnnotationQuote } from '../utils/artifactAnnotations';
 import { isAgentGeneratedFinding } from '../utils/explainFinding';
 
-export type ReviewSidebarTab = 'annotations' | 'ai' | 'agents';
+export type ReviewSidebarTab = 'annotations' | 'ai' | 'agents' | (string & {});
+
+export interface ReviewSidebarExtraTab {
+  id: string;
+  label: string;
+  count?: number;
+  attention?: boolean;
+  render: () => React.ReactNode;
+}
 
 
 interface ReviewSidebarProps {
@@ -36,6 +44,7 @@ interface ReviewSidebarProps {
   presentation?: 'panel' | 'overlay';
   activeTab: ReviewSidebarTab;
   onSelectTab?: (tab: ReviewSidebarTab) => void;
+  extraTabs?: readonly ReviewSidebarExtraTab[];
   annotations: CodeAnnotation[];
   files: DiffFile[];
   selectedAnnotationId: string | null;
@@ -252,10 +261,13 @@ function compareCodeAnnotations(a: CodeAnnotation, b: CodeAnnotation): number {
 }
 
 
+const NO_EXTRA_TABS: readonly ReviewSidebarExtraTab[] = [];
+
 export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
   isOpen,
   onClose,
   onSelectTab,
+  extraTabs = NO_EXTRA_TABS,
   presentation = 'panel',
   activeTab,
   annotations,
@@ -637,6 +649,7 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
                 { id: 'annotations', label: 'Comments', count: totalCount },
                 ...(aiAvailable ? [{ id: 'ai' as const, label: 'AI', attention: aiMessages.length > 0 }] : []),
                 ...(agentCapabilities?.available ? [{ id: 'agents' as const, label: 'Agents', count: agentJobs?.length ?? 0, attention: (agentJobs ?? []).some((job) => job.status === 'running' || job.status === 'starting') }] : []),
+                ...extraTabs.map(({ id, label, count, attention }) => ({ id, label, count, attention })),
               ]}
             />
             {presentation === 'overlay' && (
@@ -851,6 +864,7 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
             />
           )}
 
+          {extraTabs.find((tab) => tab.id === activeTab)?.render()}
         </OverlayScrollArea>
 
         {/* Quick Copy Footer — annotations tab only */}
