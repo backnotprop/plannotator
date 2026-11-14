@@ -1,5 +1,4 @@
 import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { listPainted } from '../firstListPaint';
 import { HueDot, LetterMark, ProjectMark, showsProjects, showsThreads, useRowMarks } from '../letterMarks';
 import { inboxListShortcuts } from '../shortcuts/list.shortcuts';
 import { shortcutAria, useShortcutAria, withShortcut } from '../shortcuts/hint';
@@ -1227,7 +1226,8 @@ const NO_NEWS: readonly HeldNews[] = [];
 const NO_UNSEEN: readonly UnseenRow[] = [];
 
 export function InboxList(props: InboxListProps) {
-  useEffect(() => listPainted(), []);
+  // Every group closes by a click on its header, this browser's choice (listGroups.ts). Quiet and the Snoozed band
+  // under it start closed (approval "inbox-snooze"), every other group open.
   const groups = useListGroups(props.rememberLook !== false);
   // Each linked machine that is away, in the list it shows (every machine, or the one the filter shows).
   const awayLines = (props.machines?.linked ?? []).flatMap((machine) => {

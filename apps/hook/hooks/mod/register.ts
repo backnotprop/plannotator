@@ -10,8 +10,10 @@
  * Loaded from `hooks/hooks.json` ("modules") only where Claude Code runs
  * hooks modules (function hooks, 2.1.287+, CLI). Elsewhere the same plugin's
  * classic command hooks and the `/plannotator-*` skills behave exactly as
- * before; the mod also stands down in `-p`/SDK sessions and where it finds no
- * shell for its scripts (shell.ts), leaving those classic paths in place.
+ * before. It runs in every session, interactive or not (what it does in each
+ * kind of session: `SESSION_KIND_FEATURES` in enabled.ts), and stands down in
+ * Plannotator's own Ask AI children and where it finds no shell for its
+ * scripts (shell.ts), leaving those classic paths in place.
  *
  * What it does:
  * - ExitPlanMode (`tool.call`): answers `deny` with "waiting for review" text
@@ -72,9 +74,10 @@
  *   carries a title, costs a "hook was skipped" line under
  *   `cc-plugin-sec-default` (#2243). `command.run` on `/rename` and `/clear` keeps
  *   the name in `$.store` by session id, and each Inbox poll reads it.
- * - `PLANNOTATOR_SESSION_TAG=claude-code:<session id>` in the environment
- *   every process the session starts inherits, so a Plannotator server can be
- *   matched to the session that started it. Beside it,
+ * - `PLANNOTATOR_SESSION_TAG=claude-code:<session id>` (`t3:<thread id>` in a
+ *   T3 Code thread) in the environment every process the session starts
+ *   inherits, so a Plannotator server can be matched to the session that
+ *   started it. Beside it,
  *   `PLANNOTATOR_SESSION_PROJECT=claude-code:<session id>:<folder>`, the
  *   folder the session files under in the Inbox, so its shell's
  *   `plannotator inbox call` and `plannotator card` land where its
@@ -89,6 +92,11 @@ import { PlannotatorMod } from './controller'
 import {
   isVsCodePanelSession,
   promptOriginKind,
+  sessionKindOf,
+  SESSION_KIND_FEATURES,
+  t3ThreadOf,
+  T3_ENTRYPOINT,
+  type SessionKind,
   resolveAgentToolEnabled,
   resolveClaudeModEnabled,
   resolveInboxReminderCustom,
@@ -106,6 +114,7 @@ import {
   engineHasSessionAppend,
   inboxFirstPromptContext,
   inboxRegistryPathOf,
+  inboxT3Agent,
   inboxReminderEnvValue,
   inboxReminderWithThreads,
   INBOX_SESSION_NAME_COMMANDS,
@@ -307,6 +316,18 @@ interface Allowed {
   inboxReminderRules: string | null
   /** A chat panel of Claude Code's VS Code extension (`isVsCodePanelSession`): not interactive, a person reading it. */
   panel: boolean
+  /** The T3 Code thread this session is (`t3ThreadOf`), or null. */
+  t3Thread: string | null
+  kind: SessionKind
+  /** The non-blocking reviews: the slash commands, the `plannotator` tool, the Bash take-over (`SESSION_KIND_FEATURES`). */
+  reviews: boolean
+  /** The Inbox reply wake: the link polls and delivers replies as turns. */
+  wake: boolean
+}
+
+/** The session the Inbox files this one under: the T3 Code thread, else the Claude Code session itself. */
+function inboxSessionOf(settings: Allowed | null, sessionId: string): string {
+  return settings?.t3Thread ?? sessionId
 }
 
 // One plugin instance per Claude Code process.
@@ -565,7 +586,7 @@ async function currentMod($: Engine, options: { healed?: boolean } = {}): Promis
     // `session.end` has usually disposed it already; its tracker is read after (carryQueued below).
     const previous = mod
     mod?.dispose()
-    await $.env.set('PLANNOTATOR_SESSION_TAG', `claude-code:${sessionId}`)
+    await $.env.set('PLANNOTATOR_SESSION_TAG', settings.t3Thread ? `t3:${settings.t3Thread}` : `claude-code:${sessionId}`)
     const host = hostOf($, settings.debugPath)
     const title = sessionTitleOf($, host, String(sessionId))
     // A branched conversation (a new session id) says which session it continues: the Inbox hands it that one's replies.
@@ -586,6 +607,8 @@ async function currentMod($: Engine, options: { healed?: boolean } = {}): Promis
       title: () => title.generatedTitle() ?? '',
       continues: async () => [...new Set([...(await forkedFrom.read()), ...(await continuedIn.read())])],
       ...(inboxTools ? { inboxTools } : {}),
+      ...(settings.t3Thread ? { inboxAs: inboxT3Agent(settings.t3Thread) } : {}),
+      ...(settings.wake ? {} : { inboxWake: false }),
       ...(options.healed ? { healed: true } : {}),
     })
     // A question queued behind the old session's turn still enters as a turn of the new one: the new instance drops it.
@@ -705,35 +728,34 @@ async function pickShellOf($: Engine, dataDir: string): Promise<ModShell | null>
 }
 
 /**
- * Whether this non-interactive session is a chat panel of Claude Code's VS
- * Code extension (`isVsCodePanelSession` in enabled.ts). Each variable is
- * named as a literal (env-get-literal.test.ts).
+ * Which SDK host this non-interactive session is: a chat panel of Claude
+ * Code's VS Code extension (`isVsCodePanelSession`) or a T3 Code thread
+ * (`t3ThreadOf`), both in enabled.ts. Each variable is named as a literal
+ * (env-get-literal.test.ts).
  */
-async function vsCodePanelSessionOf($: Engine): Promise<boolean> {
+async function sdkHostOf($: Engine): Promise<{ panel: boolean; t3Thread: string | null }> {
   const entrypoint = await $.env.get('CLAUDE_CODE_ENTRYPOINT')
-  // Read the rest only for the panel's entrypoint: every other session decides on the first read.
-  if (entrypoint !== VSCODE_PANEL_ENTRYPOINT) return false
-  return isVsCodePanelSession(
-    {
-      entrypoint,
-      claudecode: await $.env.get('CLAUDECODE'),
-      childSession: await $.env.get('CLAUDE_CODE_CHILD_SESSION'),
-      sessionTag: await $.env.get('PLANNOTATOR_SESSION_TAG'),
-    },
-    String(await $.session.id()),
-  )
+  // Read the rest only for the panel's or T3's entrypoint: every other session decides on the first read.
+  if (entrypoint !== VSCODE_PANEL_ENTRYPOINT && entrypoint !== T3_ENTRYPOINT) return { panel: false, t3Thread: null }
+  const env = {
+    entrypoint,
+    claudecode: await $.env.get('CLAUDECODE'),
+    childSession: await $.env.get('CLAUDE_CODE_CHILD_SESSION'),
+    sessionTag: await $.env.get('PLANNOTATOR_SESSION_TAG'),
+  }
+  if (entrypoint === VSCODE_PANEL_ENTRYPOINT) return { panel: isVsCodePanelSession(env, String(await $.session.id())), t3Thread: null }
+  return { panel: false, t3Thread: t3ThreadOf({ ...env, thread: await $.env.get('T3CODE_THREAD_ID') }) }
 }
 
-/** Whether the mod runs here (on unless the user turned it off) and where its data dir is; null: stay inert. */
+/** Whether the mod runs here (on unless the user turned it off), in which kind of session, and where its data dir is; null: stay inert. */
 async function resolveAllowed($: Engine, e: { isInteractive?: unknown }): Promise<Allowed | null> {
-  // A person at the prompt is what makes a later plugin turn mean anything;
-  // `-p` and SDK runs keep the classic, blocking flows. The one SDK host with
-  // a person reading it is the VS Code extension's chat panel, which shows a
-  // plugin's turn (#3111): there the mod runs as in the terminal.
-  const panel = !e.isInteractive && (await vsCodePanelSessionOf($))
-  if (!e.isInteractive && !panel) return null
-  // A `claude` Plannotator's Ask AI started (`isAskAiChild` in packages/shared/child-env.ts).
+  // A `claude` Plannotator's Ask AI started (`isAskAiChild` in packages/shared/child-env.ts): the mod
+  // there would hand Plannotator's own agent Plannotator's tools and the person's Inbox.
   if ((await $.env.get('PLANNOTATOR_ASK_AI_CHILD')) === '1') return null
+  const isInteractive = e.isInteractive === true
+  const host = isInteractive ? { panel: false, t3Thread: null } : await sdkHostOf($)
+  const kind = sessionKindOf({ isInteractive, ...host })
+  const features = SESSION_KIND_FEATURES[kind]
   const dataDir = await resolveDataDir(
     {
       home: await homeOf($),
@@ -756,13 +778,17 @@ async function resolveAllowed($: Engine, e: { isInteractive?: unknown }): Promis
   return {
     dataDir,
     debugPath: debug && debug !== '0' ? `${dataDir}/claude-code-mod/debug.log` : null,
-    agentTool: resolveAgentToolEnabled(await $.env.get('PLANNOTATOR_AGENT_TOOL'), configText),
-    planReview: resolvePlanReviewEnabled(await $.env.get('PLANNOTATOR_PLAN_REVIEW'), configText),
-    inboxTool: resolveInboxToolEnabled(await $.env.get('PLANNOTATOR_INBOX_TOOL'), configText),
-    inboxReminder: resolveInboxReminderEnabled(await $.env.get('PLANNOTATOR_INBOX_TOOL'), configText),
+    agentTool: features.reviews && resolveAgentToolEnabled(await $.env.get('PLANNOTATOR_AGENT_TOOL'), configText),
+    planReview: features.planReview && resolvePlanReviewEnabled(await $.env.get('PLANNOTATOR_PLAN_REVIEW'), configText),
+    inboxTool: features.inboxTool && resolveInboxToolEnabled(await $.env.get('PLANNOTATOR_INBOX_TOOL'), configText),
+    inboxReminder: features.wake && features.inboxTool && resolveInboxReminderEnabled(await $.env.get('PLANNOTATOR_INBOX_TOOL'), configText),
     inboxReminderCustom: resolveInboxReminderCustom(configText),
     inboxReminderRules: resolveInboxReminderRules(configText),
-    panel,
+    panel: host.panel,
+    t3Thread: host.t3Thread,
+    kind,
+    reviews: features.reviews,
+    wake: features.wake,
   }
 }
 
@@ -859,7 +885,8 @@ export function register(on: On) {
     if (!instance) return result
     // A module the auto reload loaded says so first (auto-reload.ts); off the hook's path.
     const checkedIn = instance.checkInAfterReload()
-    await registerCommands($)
+    // A headless session keeps the `/plannotator-*` skills: their CLI waits for the decision inside the run.
+    if (allowed.reviews) await registerCommands($)
     // Decided once per process, here: the tool list is part of Claude's
     // prompt, so it never changes under a running session.
     if (allowed.agentTool) await registerTool($)
@@ -930,7 +957,7 @@ export function register(on: On) {
           const threads = await readSessionThreads(
             hostOf($, allowed.debugPath),
             allowed.dataDir,
-            String(await $.session.id()),
+            inboxSessionOf(allowed, String(await $.session.id())),
             await inboxProjectFolderOf($),
             inboxToolName,
           )
@@ -947,7 +974,7 @@ export function register(on: On) {
   // Matched by name: an unmatched hook makes the engine credit Plannotator on every plugin's command answer.
   on('command.run', { command: [...Object.keys(COMMANDS), INBOX_COMMAND.name] }, async ($: Engine, e: any, next: Next) => {
     const name: string = typeof e.command === 'string' ? e.command : ''
-    if (!allowed || (!isModCommand(name) && name !== INBOX_COMMAND.name)) return next(e)
+    if (!allowed?.reviews || (!isModCommand(name) && name !== INBOX_COMMAND.name)) return next(e)
     const instance = await currentMod($)
     if (!instance) return next(e)
     // `/plannotator-inbox`: open the Inbox and say where it is; no review opens.
@@ -1018,7 +1045,7 @@ export function register(on: On) {
     // Claude running `plannotator annotate|review|last` in Bash on the main
     // loop: the same launch and result as the tool (take-over.ts); anything
     // the tool cannot represent, and every subagent's command, runs as written.
-    if (allowed && e.tool === SHELL_TOOL) {
+    if (allowed?.reviews && e.tool === SHELL_TOOL) {
       // A worktree move in this turn moved the project: the command's `plannotator inbox call` / `card` follow it
       // (written only on a change).
       const current = mod
@@ -1116,7 +1143,7 @@ export function register(on: On) {
     const ref = {
       fromUs: !!origin && origin.kind === 'plugin' && origin.name === PLUGIN_NAME,
       ...(typeof e.turnId === 'string' ? { turnId: e.turnId } : {}),
-      ...(origin && typeof origin.kind === 'string' ? { originKind: promptOriginKind(origin.kind, !!allowed?.panel) } : {}),
+      ...(origin && typeof origin.kind === 'string' ? { originKind: promptOriginKind(origin.kind, !!allowed?.panel || !!allowed?.t3Thread) } : {}),
     }
     if (live) instance.onPromptSubmitting(ref)
     // The Inbox reminder (#2243): the conversation's first prompt here carries
@@ -1150,7 +1177,7 @@ export function register(on: On) {
         if (carries?.reminder) texts.push(inboxReminderFor(settings.inboxReminderCustom, toolName, { rules: settings.inboxReminderRules }))
         if (carries?.threads) {
           const threads = await withinMs($, SESSION_THREADS_RESUME_MS, async () =>
-            readSessionThreads(hostOf($, settings.debugPath), settings.dataDir, sessionId, await inboxProjectFolderOf($), toolName),
+            readSessionThreads(hostOf($, settings.debugPath), settings.dataDir, inboxSessionOf(settings, sessionId), await inboxProjectFolderOf($), toolName),
           )
           if (threads) texts.push(threads)
         }
