@@ -22,6 +22,41 @@ function remember(key: string, value: RepoFileText) {
   while (cache.size > CACHE_LIMIT) cache.delete(cache.keys().next().value!);
 }
 
+const inflight = new Map<string, Promise<RepoFileText>>();
+
+function readRepoFile(key: string, path: string, snapshotId: string, fetchImpl: typeof fetch): Promise<RepoFileText> {
+  const cached = cache.get(key);
+  if (cached) return Promise.resolve(cached);
+  const pending = inflight.get(key);
+  if (pending) return pending;
+  const read = fetchImpl(`/api/repo-file?snapshot=${encodeURIComponent(snapshotId)}&path=${encodeURIComponent(path)}`)
+    .then(async (response): Promise<RepoFileText> => {
+      const body = (await response.json()) as RepoFileResponse & { error?: string; reason?: string };
+      if (!response.ok) {
+        return {
+          status: 'error',
+          message: response.status === 409
+            ? 'The diff changed since this tab opened. Refresh to read the file again.'
+            : body.error ?? `HTTP ${response.status}`,
+        };
+      }
+      const next: RepoFileText = body.content !== null && body.content !== undefined
+        ? { status: 'ready', content: body.content, revision: body.revision }
+        : { status: 'empty', reason: body.reason ?? 'unavailable', size: body.size, revision: body.revision };
+      remember(key, next);
+      return next;
+    })
+    .catch((error): RepoFileText => ({ status: 'error', message: error instanceof Error ? error.message : 'The file could not be read.' }))
+    .finally(() => inflight.delete(key));
+  inflight.set(key, read);
+  return read;
+}
+
+export function prefetchRepoFile(path: string, snapshotId: string | undefined, fetchImpl: typeof fetch = fetch): void {
+  if (!snapshotId) return;
+  void readRepoFile(`${snapshotId}\0${path}`, path, snapshotId, fetchImpl);
+}
+
 export function useRepoFileText(
   path: string | null,
   snapshotId: string | undefined,
@@ -38,32 +73,13 @@ export function useRepoFileText(
       return;
     }
     setState({ status: 'loading' });
-    const controller = new AbortController();
-    fetchImpl(`/api/repo-file?snapshot=${encodeURIComponent(snapshotId)}&path=${encodeURIComponent(path)}`, { signal: controller.signal })
-      .then(async (response) => {
-        const body = (await response.json()) as RepoFileResponse & { error?: string; reason?: string };
-        let next: RepoFileText;
-        if (!response.ok) {
-          next = {
-            status: 'error',
-            message: response.status === 409
-              ? 'The diff changed since this tab opened. Refresh to read the file again.'
-              : body.error ?? `HTTP ${response.status}`,
-          };
-        } else if (body.content !== null && body.content !== undefined) {
-          next = { status: 'ready', content: body.content, revision: body.revision };
-          remember(key, next);
-        } else {
-          next = { status: 'empty', reason: body.reason ?? 'unavailable', size: body.size, revision: body.revision };
-          remember(key, next);
-        }
-        if (!controller.signal.aborted) setState(next);
-      })
-      .catch((error) => {
-        if (controller.signal.aborted) return;
-        setState({ status: 'error', message: error instanceof Error ? error.message : 'The file could not be read.' });
-      });
-    return () => controller.abort();
+    let live = true;
+    void readRepoFile(key, path, snapshotId, fetchImpl).then((next) => {
+      if (live) setState(next);
+    });
+    return () => {
+      live = false;
+    };
   }, [key, path, snapshotId, fetchImpl]);
 
   return key ? state : { status: 'loading' };
@@ -86,4 +102,5 @@ export function repoFileEmptyMessage(reason: RepoFileNoContentReason, size?: num
 /** Tests only. */
 export function __clearRepoFileTextCache() {
   cache.clear();
+  inflight.clear();
 }

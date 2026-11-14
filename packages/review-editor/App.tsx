@@ -6149,6 +6149,7 @@ const ReviewApp: React.FC = () => {
                 sinceBaseSections={activeDiffBase === 'since-base' ? sections : null}
                 onStageFile={canStageFiles ? stageFile : undefined}
                 stagingFile={stagingFile}
+                snapshotId={snapshotId}
               />
             </ReviewNavigatorContainer>
           )}

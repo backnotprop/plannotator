@@ -30,7 +30,7 @@ export function kindFolderPath(kind: string, path: string): string {
 /** The repository path of a folder, without the kind scope `kindFolderPath`
  *  adds (what a person reads in a tooltip). */
 export function folderDisplayPath(path: string): string {
-  const match = /^(code|test|generated|committed|staged|unstaged|untracked):/.exec(path);
+  const match = /^(code|test|docs|generated|committed|staged|unstaged|untracked):/.exec(path);
   return match ? path.slice(match[0].length) : path;
 }
 

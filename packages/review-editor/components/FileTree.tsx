@@ -135,6 +135,7 @@ interface FileTreeProps {
   sinceBaseSections?: SinceBaseSections | null;
   onStageFile?: (filePath: string) => void;
   stagingFile?: string | null;
+  snapshotId?: string;
 }
 
 export const FileTree: React.FC<FileTreeProps> = ({
@@ -218,6 +219,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
   sinceBaseSections,
   onStageFile,
   stagingFile,
+  snapshotId,
 }) => {
   const isSearchVisible = !!onSearchChange && (isSearchOpen || !!searchQuery.trim());
 
@@ -294,7 +296,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
         return;
       }
 
-      if (e.composedPath?.().some((node) => node instanceof HTMLElement && node.hasAttribute('data-changes-tree'))) return;
+      if (e.composedPath?.().some((node) => node instanceof HTMLElement && (node.hasAttribute('data-changes-tree') || node.hasAttribute('data-repo-file-tree')))) return;
 
       const visualPos = visualOrder.indexOf(activeFileIndex);
 
@@ -400,6 +402,10 @@ export const FileTree: React.FC<FileTreeProps> = ({
   const annotationCounts = annotationCountMap;
   const showChangesTree = !searchQuery.trim() && !showAllFiles;
   const showRepoTree = !searchQuery.trim() && showAllFiles && !!repoReady;
+  const [repoVisited, setRepoVisited] = useState(false);
+  useEffect(() => {
+    if (showRepoTree) setRepoVisited(true);
+  }, [showRepoTree]);
 
   const searchField = isSearchVisible ? (
     <PanelSearchField
@@ -556,33 +562,12 @@ export const FileTree: React.FC<FileTreeProps> = ({
           ) : null}
         </div>
       </OverlayScrollArea>
-      {showRepoTree && repoReady && (
-        <div className="flex-1 min-h-0 px-2 pb-2" style={countColumnVars(totalAdditions, totalDeletions)}>
-          <RepoTreeView
-            handleRef={repoTreeRef}
-            repo={repoReady}
-            loadDir={repoFiles!.loadDir}
-            files={files}
-            activePath={activeRepoPath ?? treeActivePath}
-            viewedFiles={viewedFiles}
-            showViewedControls={showViewedControls}
-            onToggleViewed={onToggleViewed}
-            stagedFiles={stagedFiles}
-            stagingFile={stagingFile}
-            showStageControls={showStageControls}
-            onStageFile={onStageFile}
-            getSectionEntry={getSectionEntry}
-            annotationCounts={annotationCounts}
-            markdownPreviewedPaths={markdownPreviewedPaths}
-            repoRoot={repoRoot}
-            onSelectFile={onSelectFile}
-            onDoubleClickFile={onDoubleClickFile}
-            onOpenRepoFile={onOpenRepoFile}
-          />
-        </div>
-      )}
-      {showChangesTree && (
-        <div className="flex-1 min-h-0 px-2 pb-2" style={countColumnVars(totalAdditions, totalDeletions)} data-changes-tree-wrap="">
+      <div className={showChangesTree || showRepoTree ? 'flex-1 min-h-0 relative' : 'hidden'} style={countColumnVars(totalAdditions, totalDeletions)}>
+        <div
+          className={`absolute inset-0 px-2 pb-2 ${showChangesTree ? '' : 'invisible pointer-events-none'}`}
+          inert={!showChangesTree}
+          data-changes-tree-wrap=""
+        >
           <ChangesTreeView
             handleRef={changesTreeRef}
             grouping={blocks ? effectiveGroupBy : 'none'}
@@ -607,7 +592,37 @@ export const FileTree: React.FC<FileTreeProps> = ({
             onDoubleClickFile={onDoubleClickFile}
           />
         </div>
-      )}
+        {repoReady && (showRepoTree || repoVisited) && (
+          <div
+            className={`absolute inset-0 px-2 pb-2 ${showRepoTree ? '' : 'invisible pointer-events-none'}`}
+            inert={!showRepoTree}
+            data-repo-tree-wrap=""
+          >
+            <RepoTreeView
+              handleRef={repoTreeRef}
+              repo={repoReady}
+              loadDir={repoFiles!.loadDir}
+              files={files}
+              activePath={activeRepoPath ?? treeActivePath}
+              viewedFiles={viewedFiles}
+              showViewedControls={showViewedControls}
+              onToggleViewed={onToggleViewed}
+              stagedFiles={stagedFiles}
+              stagingFile={stagingFile}
+              showStageControls={showStageControls}
+              onStageFile={onStageFile}
+              getSectionEntry={getSectionEntry}
+              annotationCounts={annotationCounts}
+              markdownPreviewedPaths={markdownPreviewedPaths}
+              repoRoot={repoRoot}
+              onSelectFile={onSelectFile}
+              onDoubleClickFile={onDoubleClickFile}
+              onOpenRepoFile={onOpenRepoFile}
+              snapshotId={snapshotId}
+            />
+          </div>
+        )}
+      </div>
     </aside>
   );
 };
@@ -641,8 +656,9 @@ export const RepoListingPlaceholder: React.FC<{ state: RepoFiles['state'] | unde
  *  for its heading's tooltip and spoken name. The label stays "Code"
  *  (approved design record "review-file-kinds"); this says what it means. */
 const KIND_COVERS: Record<FileKindBlock['kind'], string> = {
-  code: 'Everything that is not a test or a generated file, docs and config included',
+  code: 'Everything that is not a test, documentation or a generated file, config included',
   test: 'Test files (such as *.test.ts, *_test.go, test_*.py) and files in test folders (tests, __tests__, spec, e2e, fixtures)',
+  docs: 'Documentation: Markdown and other prose, READMEs, changelogs, licences, and files in docs folders',
   generated: 'Generated files: lockfiles, minified and source-map files, and files marked linguist-generated in .gitattributes',
 };
 

@@ -1,5 +1,5 @@
 /**
- * The kind of a changed file: code, tests, or generated. One rule for the code
+ * The kind of a changed file: code, tests, docs, or generated. One rule for the code
  * review file tree, diff headers and Guided Reviews (approved design record
  * "review-file-kinds"). Pure and browser-safe: it reads the path only.
  *
@@ -11,13 +11,16 @@
  *   `test_*.py`, `conftest.py`, `tests.py`, `*.stories.*`, `*.snap`) or a file
  *   under a test folder (`__tests__`, `test`, `tests`, `spec`, `e2e`,
  *   `fixtures`, `src/<name>Test`, `testFixtures`, `Acme.Tests`, ...).
- * - **Code:** everything else, docs and config included.
+ * - **Docs:** prose (`.md`, `.mdx`, `.markdown`, `.rst`, `.adoc`), files
+ *   under a `docs` / `doc` / `documentation` folder, and project notes by name
+ *   (README, CHANGELOG, LICENSE, CONTRIBUTING, ...).
+ * - **Code:** everything else, config included.
  */
 
-export type FileKind = 'code' | 'test' | 'generated';
+export type FileKind = 'code' | 'test' | 'docs' | 'generated';
 
-/** Display order of the kinds: code first, then tests, then generated. */
-export const FILE_KINDS: readonly FileKind[] = ['code', 'test', 'generated'];
+/** Display order of the kinds: code first, then tests, docs, generated. */
+export const FILE_KINDS: readonly FileKind[] = ['code', 'test', 'docs', 'generated'];
 
 /**
  * Built-in name-based generated defaults: files GitHub's linguist collapses
@@ -125,13 +128,26 @@ export function isTestPath(path: string): boolean {
   );
 }
 
+const DOCS_FOLDERS = new Set(['docs', 'doc', 'documentation']);
+const DOCS_EXT = /\.(?:md|mdx|markdown|rst|adoc)$/i;
+const DOCS_NAME = /^(?:readme|changelog|changes|history|license|licence|copying|notice|contributing|authors|code_of_conduct|security|support)(?:\.[^/]*)?$|^(?:license|licence)-[^/]+$/i;
+
+/** Is the path documentation, by its extension, its name or a docs folder above it? */
+export function isDocsPath(path: string): boolean {
+  const segments = path.split('/');
+  const name = segments.pop() ?? '';
+  if (DOCS_EXT.test(name) || DOCS_NAME.test(name)) return true;
+  return segments.some((segment) => DOCS_FOLDERS.has(segment.toLowerCase()));
+}
+
 /**
  * The kind of one changed file. `generated` is the host's generated set when
  * it has one; without it the built-in name list decides.
  */
 export function fileKind(path: string, generated?: ReadonlySet<string> | null): FileKind {
   if (generated ? generated.has(path) : isDefaultGeneratedPath(path)) return 'generated';
-  return isTestPath(path) ? 'test' : 'code';
+  if (isTestPath(path)) return 'test';
+  return isDocsPath(path) ? 'docs' : 'code';
 }
 
 export interface FileKindGroup<T> {

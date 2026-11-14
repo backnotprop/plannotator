@@ -229,6 +229,67 @@ describe.skipIf(!hasDom)('FileTree: Changes | All files', () => {
     expect(loadDir).toHaveBeenLastCalledWith('packages/ui');
   });
 
+  test('going to Changes and back keeps All files as it was left', async () => {
+    const el = await mount(<Tree />);
+    await settle();
+    await act(async () => repoRow(el, 'packages/').click());
+    await settle();
+    expect(repoRow(el, 'packages/').getAttribute('aria-expanded')).toBe('false');
+    const elsewhere = document.createElement('input');
+    document.body.appendChild(elsewhere);
+    elsewhere.focus();
+    await act(async () => root?.render(<Tree treeScope="changes" />));
+    await settle();
+    await act(async () => root?.render(<Tree treeScope="all" />));
+    await settle();
+    expect(repoRow(el, 'packages/').getAttribute('aria-expanded')).toBe('false');
+    expect(visibleRows(el)).toContain('dir:apps');
+    elsewhere.remove();
+  });
+
+  test('arrow keys in All files open each file as they reach it', async () => {
+    const onOpenRepoFile = mock((_path: string, _options: { pin: boolean }) => {});
+    const onSelectFile = mock((_index: number) => {});
+    const el = await mount(<Tree onOpenRepoFile={onOpenRepoFile} onSelectFile={onSelectFile} />);
+    await settle();
+    const start = repoRow(el, 'packages/review-editor/utils/buildFileTree.ts');
+    await act(async () => start.focus());
+    await settle();
+    expect(onOpenRepoFile).toHaveBeenLastCalledWith('packages/review-editor/utils/buildFileTree.ts', { pin: false });
+    await act(async () => start.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, composed: true })));
+    await settle();
+    expect(onSelectFile).toHaveBeenLastCalledWith(1);
+    const changed = repoRow(el, 'packages/review-editor/utils/explorerTree.ts');
+    await act(async () => changed.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, composed: true })));
+    await act(async () => repoRow(el, 'packages/review-editor/utils/fileKindTree.ts').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, composed: true })));
+    await settle();
+    expect(onOpenRepoFile).toHaveBeenCalledTimes(1);
+    await act(async () => repoRow(el, 'packages/shared/').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, composed: true })));
+    await act(async () => repoRow(el, 'packages/shared/old.ts').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, composed: true })));
+    await settle();
+    expect(onOpenRepoFile).toHaveBeenLastCalledWith('packages/shared/review-core.ts', { pin: false });
+  });
+
+  test('the files next to the one opened are read ahead', async () => {
+    const asked: string[] = [];
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      const url = new URL(String(input), 'http://x');
+      asked.push(url.searchParams.get('path') ?? '');
+      return new Response(JSON.stringify({ content: 'x', revision: { kind: 'worktree', label: 'working tree' } }), { status: 200 });
+    }) as typeof fetch;
+    try {
+      const el = await mount(<Tree snapshotId="snap-1" />);
+      await settle();
+      expect(repoRow(el, 'README.md')).toBeTruthy();
+      await act(async () => root?.render(<Tree snapshotId="snap-1" activeRepoPath="README.md" />));
+      await settle();
+      expect(asked).toContain('.gitignore');
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+
   test('says why when the session cannot list the repository', async () => {
     const el = await mount(
       <Tree repoFiles={repo({ status: 'unavailable', reason: 'no-checkout', message: 'All files needs the local checkout.' })} />,

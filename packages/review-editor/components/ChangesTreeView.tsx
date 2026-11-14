@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef } from 'react';
-import { preparePresortedFileTreeInput, type FileTreeRowDecorationContext, type FileTreeRowParts, type GitStatusEntry } from '@pierre/trees';
+import type { FileTreeRowDecorationContext, FileTreeRowParts, FileTreeSortEntry, GitStatusEntry } from '@pierre/trees';
 import { FileTree as PierreFileTree, useFileTree } from '@pierre/trees/react';
 import type { FileTreeNode } from '../utils/buildFileTree';
 import type { DiffFile } from '../types';
@@ -44,6 +44,14 @@ interface ChangesTreeViewProps {
   threadCount?: (path: string) => number;
 }
 
+const NO_PATHS: ReadonlySet<string> = new Set();
+
+function expandAll(model: { getItem: (path: string) => unknown }, dirs: readonly string[]) {
+  for (const dir of dirs) {
+    const item = model.getItem(dir) as { expand?: () => void; isExpanded?: () => boolean } | null;
+    if (item?.expand && !item.isExpanded?.()) item.expand();
+  }
+}
 const CHAIN_JOIN = '∕';
 
 type Entry =
@@ -117,7 +125,7 @@ export const ChangesTreeView: React.FC<ChangesTreeViewProps> = (props) => {
   } = props;
 
   const layout = useMemo(
-    () => layoutTree(tree, groups, hideViewedFiles ? hiddenFiles : new Set<string>(), activePath),
+    () => layoutTree(tree, groups, hideViewedFiles ? hiddenFiles : NO_PATHS, activePath),
     [tree, groups, hideViewedFiles, hiddenFiles, activePath],
   );
 
@@ -136,6 +144,11 @@ export const ChangesTreeView: React.FC<ChangesTreeViewProps> = (props) => {
     }
     return { add, del, badge };
   }, [layout, groups, annotationCounts, markdownPreviewedPaths, props.threadCount]);
+
+  const orderRef = useRef(new Map<string, number>());
+  orderRef.current = useMemo(() => new Map(layout.paths.map((path, index) => [path, index])), [layout]);
+  const orderOf = (entry: FileTreeSortEntry) =>
+    orderRef.current.get(entry.path) ?? orderRef.current.get(`${entry.path}/`) ?? Number.MAX_SAFE_INTEGER;
 
   const live = useRef({ props, layout, stageColumn, badge: columns.badge });
   live.current = { props, layout, stageColumn, badge: columns.badge };
@@ -178,7 +191,8 @@ export const ChangesTreeView: React.FC<ChangesTreeViewProps> = (props) => {
   }, []);
 
   const { model } = useFileTree({
-    preparedInput: preparePresortedFileTreeInput(layout.paths),
+    paths: layout.paths,
+    sort: (a: FileTreeSortEntry, b: FileTreeSortEntry) => orderOf(a) - orderOf(b),
     initialExpansion: 'closed',
     flattenEmptyDirectories: false,
     initialExpandedPaths: initialExpanded,
@@ -214,6 +228,12 @@ export const ChangesTreeView: React.FC<ChangesTreeViewProps> = (props) => {
     },
   });
 
+  const expandedOnce = useRef(false);
+  if (!expandedOnce.current) {
+    expandedOnce.current = true;
+    expandAll(model, initialExpanded);
+  }
+
   const syncSelection = useCallback(() => {
     const { props: p, layout: l } = live.current;
     const target = p.activePath ? l.treePathOf.get(p.activePath) ?? null : null;
@@ -238,10 +258,9 @@ export const ChangesTreeView: React.FC<ChangesTreeViewProps> = (props) => {
       const item = model.getItem(dir);
       return item != null && 'isExpanded' in item && !item.isExpanded();
     }));
-    model.resetPaths({
-      preparedInput: preparePresortedFileTreeInput(layout.paths),
-      initialExpandedPaths: layout.dirs.filter((dir) => !collapsed.has(dir)),
-    });
+    const open = layout.dirs.filter((dir) => !collapsed.has(dir));
+    model.resetPaths(layout.paths, { initialExpandedPaths: open });
+    expandAll(model, open);
     model.setGitStatus(gitStatus);
     syncSelection();
   }, [layout, gitStatus, model, syncSelection]);
@@ -261,7 +280,7 @@ export const ChangesTreeView: React.FC<ChangesTreeViewProps> = (props) => {
       if (focused === lastFocused) return;
       lastFocused = focused;
       const host = model.getFileTreeContainer();
-      if (!host || document.activeElement !== host) return;
+      if (!host?.shadowRoot?.activeElement) return;
       const { props: p, layout: l } = live.current;
       const entry = focused ? l.entries.get(focused) : undefined;
       if (entry?.kind === 'file' && entry.file.path !== p.activePath) p.onSelectFile(entry.index);
@@ -272,7 +291,8 @@ export const ChangesTreeView: React.FC<ChangesTreeViewProps> = (props) => {
     setAllFoldersExpanded: (expanded: boolean) => {
       const { layout: l } = live.current;
       const keep = expanded ? l.dirs : [...l.groupDirs.values()];
-      model.resetPaths({ preparedInput: preparePresortedFileTreeInput(l.paths), initialExpandedPaths: keep });
+      model.resetPaths(l.paths, { initialExpandedPaths: keep });
+      expandAll(model, keep);
       model.setGitStatus(gitStatus);
       syncSelection();
     },
