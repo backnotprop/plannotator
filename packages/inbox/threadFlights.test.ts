@@ -51,3 +51,17 @@ test('a read that leaves the open thread stale is followed by another, a few tim
   for (let i = 0; i < 30; i++) await Promise.resolve();
   expect(reads).toBeLessThanOrEqual(14);
 });
+
+test("a thread put from a Send's answer that is still stale is read again", async () => {
+  const flights = new Map<string, ThreadFlight>();
+  const asked: (string | undefined)[] = [];
+  let stale = true;
+  const read = async (threadId: string, given?: unknown) => {
+    asked.push(given ? 'given' : 'read');
+    if (!given) stale = false;
+    return { thread_id: threadId } as InboxThread;
+  };
+  await joinThreadRead(flights, 't', { thread: {} } as never, read, () => stale);
+  for (let i = 0; i < 10; i++) await Promise.resolve();
+  expect(asked).toEqual(['given', 'read']);
+});
