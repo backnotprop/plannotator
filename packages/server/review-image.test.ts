@@ -93,7 +93,8 @@ function buildRepo(): Fixture {
     "dots-before": png(6, 6, 10),
     "dots-after": png(6, 6, 11),
   };
-  writeFileSync(join(repo, ".gitattributes"), "*.svg binary\n");
+  writeFileSync(join(repo, ".gitattributes"), "*.svg binary\nplain.svg diff\n");
+  writeFileSync(join(repo, "plain.svg"), SVG_OLD);
   writeFileSync(join(repo, "mod.png"), files["mod-before"]);
   writeFileSync(join(repo, "gone.png"), files.gone);
   writeFileSync(join(repo, "ren-old.png"), files.renamed);
@@ -111,6 +112,7 @@ function buildRepo(): Fixture {
   git(repo, ["mv", "ren-old.png", "ren-new.png"]);
   writeFileSync(join(repo, "added.png"), files.added);
   writeFileSync(join(repo, "logo.svg"), SVG_NEW);
+  writeFileSync(join(repo, "plain.svg"), SVG_NEW);
   writeFileSync(join(repo, "fake.png"), new Uint8Array([0x50, 0x4b, 0x03, 0x04, 9, 9, 9]));
   writeFileSync(join(repo, "notes.txt"), "two\n");
   writeFileSync(join(repo, "logo..v2.png"), files["dots-after"]);
@@ -210,6 +212,9 @@ for (const [runtime, startServer] of [
         const svg = await image("logo.svg", "new");
         expect(svg.headers.get("content-type")).toBe("image/svg+xml");
         expect(await svg.text()).toBe(SVG_NEW);
+        const textSvg = await image("plain.svg", "old");
+        expect(textSvg.status).toBe(200);
+        expect(await textSvg.text()).toBe(SVG_OLD);
       } finally {
         server.stop();
       }
