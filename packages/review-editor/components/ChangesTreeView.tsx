@@ -208,7 +208,7 @@ export const ChangesTreeView: React.FC<ChangesTreeViewProps> = (props) => {
         if (entry.file.path !== p.activePath) p.onSelectFile(entry.index);
         return;
       }
-      queueMicrotask(syncSelection);
+      queueMicrotask(() => syncSelection());
     },
     rows: {
       gitStatusPlacement: 'start',
@@ -234,17 +234,20 @@ export const ChangesTreeView: React.FC<ChangesTreeViewProps> = (props) => {
     expandAll(model, initialExpanded);
   }
 
-  const syncSelection = useCallback(() => {
+  const lastActive = useRef<string | null | undefined>(undefined);
+  const syncSelection = useCallback((reveal = false) => {
     const { props: p, layout: l } = live.current;
     const target = p.activePath ? l.treePathOf.get(p.activePath) ?? null : null;
     const selected = model.getSelectedPaths();
     if (target && selected.length === 1 && selected[0] === target) return;
     for (const path of selected) model.getItem(path)?.deselect();
     if (!target) return;
-    for (const dir of ancestorsOf(target)) {
+    const folded = ancestorsOf(target).filter((dir) => {
       const item = model.getItem(dir);
-      if (item && 'expand' in item && !item.isExpanded()) item.expand();
-    }
+      return item != null && 'isExpanded' in item && !item.isExpanded();
+    });
+    if (folded.length > 0 && !reveal) return;
+    for (const dir of folded) (model.getItem(dir) as { expand?: () => void } | null)?.expand?.();
     model.getItem(target)?.select();
     model.scrollToPath(target, { focus: false, offset: 'nearest' });
   }, [model]);
@@ -258,15 +261,22 @@ export const ChangesTreeView: React.FC<ChangesTreeViewProps> = (props) => {
       const item = model.getItem(dir);
       return item != null && 'isExpanded' in item && !item.isExpanded();
     }));
-    const open = layout.dirs.filter((dir) => !collapsed.has(dir));
+    const seen = new Set(before.dirs);
+    for (const key of initiallyFoldedGroups ?? []) {
+      const dir = layout.groupDirs.get(key);
+      if (dir && !seen.has(dir)) collapsed.add(dir);
+    }
+    const open = layout.dirs.filter((dir) => !collapsed.has(dir) && !ancestorsOf(dir).some((a) => collapsed.has(a) && !seen.has(a)));
     model.resetPaths(layout.paths, { initialExpandedPaths: open });
     expandAll(model, open);
     model.setGitStatus(gitStatus);
     syncSelection();
-  }, [layout, gitStatus, model, syncSelection]);
+  }, [layout, gitStatus, model, syncSelection, initiallyFoldedGroups]);
 
   useEffect(() => {
-    syncSelection();
+    const previous = lastActive.current;
+    lastActive.current = activePath;
+    syncSelection(previous !== undefined && previous !== activePath);
   }, [activePath, syncSelection]);
 
   useEffect(() => {

@@ -14,7 +14,7 @@ export type RepoFileText =
   | { status: 'error'; message: string };
 
 const cache = new Map<string, RepoFileText>();
-const CACHE_LIMIT = 40;
+const CACHE_LIMIT = 80;
 
 function remember(key: string, value: RepoFileText) {
   cache.delete(key);
