@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import type { CodeAnnotation } from '@plannotator/ui/types';
 import { isFileScopedAnnotation } from '../../utils/annotationScope';
-import { scrollElementLayoutSource } from './layoutSource';
+import { scrollElementLayoutSource, type LineSide } from './layoutSource';
 import { DiffMinimapSlot, type MinimapNote } from './DiffMinimapSlot';
 import { FILE_HEADER_HEIGHT, HUNK_SEPARATOR_HEIGHT } from '../../utils/diffChromeMetrics';
 
@@ -14,12 +14,13 @@ export interface FileMinimapProps {
   annotations: readonly CodeAnnotation[];
   split: boolean;
   expandUnchanged: boolean;
+  wholeFile?: { side: LineSide; lineCount: number };
   onShownChange: (shown: boolean) => void;
 }
 
 const METRICS = { headerHeight: 0, lineHeight: 20, separatorHeight: HUNK_SEPARATOR_HEIGHT, paddingBottom: 0 };
 
-export const FileMinimap: React.FC<FileMinimapProps> = ({ viewport, content, filePath, patch, viewed, annotations, split, expandUnchanged, onShownChange }) => {
+export const FileMinimap: React.FC<FileMinimapProps> = ({ viewport, content, filePath, patch, viewed, annotations, split, expandUnchanged, wholeFile, onShownChange }) => {
   const pulseRef = useRef<(() => void) | null>(null);
   const [box, setBox] = useState<{ top: number; height: number } | null>(null);
 
@@ -49,11 +50,16 @@ export const FileMinimap: React.FC<FileMinimapProps> = ({ viewport, content, fil
     return () => observer.disconnect();
   }, [viewport, content]);
 
-  const files = useMemo(() => [{ id: filePath, path: filePath, patch }], [filePath, patch]);
+  const wholeSide = wholeFile?.side;
+  const wholeLines = wholeFile?.lineCount;
+  const files = useMemo(
+    () => [{ id: filePath, path: filePath, patch, ...(wholeSide && wholeLines != null && { wholeFile: { side: wholeSide, lineCount: wholeLines } }) }],
+    [filePath, patch, wholeSide, wholeLines],
+  );
   const viewedPaths = useMemo(() => (viewed ? new Set([filePath]) : undefined), [viewed, filePath]);
   const notes = useMemo<MinimapNote[]>(
-    () => annotations.filter((a) => !isFileScopedAnnotation(a)).map((a) => ({ filePath, side: a.side, lineStart: a.lineStart, lineEnd: a.lineEnd })),
-    [annotations, filePath],
+    () => annotations.filter((a) => !isFileScopedAnnotation(a) && (!wholeSide || a.side === wholeSide)).map((a) => ({ filePath, side: a.side, lineStart: a.lineStart, lineEnd: a.lineEnd })),
+    [annotations, filePath, wholeSide],
   );
 
   if (!box) return null;

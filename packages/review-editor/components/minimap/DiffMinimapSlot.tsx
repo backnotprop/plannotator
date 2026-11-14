@@ -26,7 +26,10 @@ export interface MinimapFileInput {
   id: string;
   path: string;
   patch: string;
+  wholeFile?: { side: LineSide; lineCount: number };
 }
+
+export const MINIMAP_WHOLE_FILE_LINES = 400;
 
 export interface MinimapNote {
   filePath: string;
@@ -60,7 +63,10 @@ export function isLongContent(contentHeight: number, viewportHeight: number, big
 export const DiffMinimapSlot: React.FC<DiffMinimapSlotProps> = ({ pulseRef, onShownChange, ...props }) => {
   const enabled = useConfigValue('diffMinimap');
   const { source } = props;
-  const bigFile = useMemo(() => hasBigFile(props.files.map((file) => file.patch)), [props.files]);
+  const bigFile = useMemo(
+    () => props.files.some((file) => (file.wholeFile?.lineCount ?? 0) >= MINIMAP_WHOLE_FILE_LINES) || hasBigFile(props.files.filter((file) => !file.wholeFile).map((file) => file.patch)),
+    [props.files],
+  );
   const [long, setLong] = useState(false);
   const innerPulseRef = useRef<(() => void) | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
