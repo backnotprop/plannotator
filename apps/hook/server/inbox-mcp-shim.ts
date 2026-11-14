@@ -66,7 +66,7 @@ import {
   isT3ThreadId,
   qwenSessionOfCall,
 } from "@plannotator/core/inbox-types";
-import { inboxStatus, type InboxRegistryEntry } from "@plannotator/shared/inbox/registry";
+import { inboxEnsureFailedWords, inboxStatus, type InboxRegistryEntry } from "@plannotator/shared/inbox/registry";
 import { qwenHome, qwenSessionOfProcess } from "@plannotator/shared/inbox/qwen-sessions";
 import { INBOX_MAX_REQUEST_BYTES, inboxRequestTooLargeMessage } from "@plannotator/shared/inbox/connection";
 import { statSync } from "node:fs";
@@ -517,7 +517,7 @@ export async function runInboxMcpShim(options: InboxMcpShimOptions): Promise<voi
     try {
       target = await entry();
     } catch (error) {
-      if (isRequest) write(rpcError(message.id, `Plannotator Inbox is not running: ${error instanceof Error ? error.message : String(error)}`));
+      if (isRequest) write(rpcError(message.id, inboxEnsureFailedWords(error)));
       return;
     }
     // Refused before anything is sent: the Inbox would answer 413 to it anyway.

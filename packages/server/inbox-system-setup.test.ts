@@ -5,7 +5,7 @@
  * (`<data dir>/system/<key>/setup.json`, `{ v: 1, repos, docs, agent, thread_message }`), a bad entry saved, the
  * drawing's thread lost on a second save, or a project offered that has no folder or no remote.
  * The route (`systemSetupRoute`, as inbox.ts calls it): anything read or written while System or Code review is
- * off, for a tailnet guest, for another site's page, on another method, or for a project the Inbox does not have.
+ * off, for another site's page, on another method, or for a project the Inbox does not have.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -126,8 +126,6 @@ describe('/api/inbox/system/setup', () => {
         },
         store,
         serverSession: 'srv',
-        // As inbox.ts's ownerOrLocal: this computer, or the owner's login over the tailnet.
-        ownerOrLocal: (r) => via === 'local' || r.headers.get('tailscale-user-login') === OWNER,
         // As inbox.ts's systemOn: System counts only while Code review is on.
         systemOn: () => switches.codeReview && switches.system,
         readBody: async (r) => (await r.json()) as Record<string, unknown>,
@@ -150,11 +148,8 @@ describe('/api/inbox/system/setup', () => {
     });
   }
 
-  test('a tailnet guest, another site\'s page and another method are refused, and nothing is written', async () => {
+  test('another site\'s page and another method are refused, and nothing is written', async () => {
     const { app, call, save, repoReads } = route({ codeReview: true, system: true });
-    const guest = { via: 'tailnet' as const, headers: { 'tailscale-user-login': 'guest@example.com' } };
-    expect(await call('GET', guest)).toMatchObject({ status: 403, body: { code: 'local_only' } });
-    expect(await call('POST', { ...guest, body: save })).toMatchObject({ status: 403, body: { code: 'local_only' } });
     expect(await call('POST', { body: save, headers: { origin: 'https://evil.example' } })).toMatchObject({ status: 403, body: { code: 'cross_origin' } });
     expect(await call('POST', { body: save, headers: { 'sec-fetch-site': 'cross-site' } })).toMatchObject({ status: 403, body: { code: 'cross_origin' } });
     expect((await call('PUT', { body: save })).status).toBe(405);

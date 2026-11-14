@@ -373,7 +373,7 @@ test('Shift+R runs the refresh of the page on screen, route by route; none where
     ['the Board turned off or loading', { page: 'board', boardOn: false }, null],
     ['the Reviews list', { page: 'reviews' }, 'reviews'],
     ['a pull request’s review', { page: 'reviews', pullReview: true }, null],
-    ['Reviews hidden (Code review off, a tailnet guest)', { page: 'reviews', pullsShown: false }, null],
+    ['Reviews hidden (Code review off)', { page: 'reviews', pullsShown: false }, null],
     ['Drafts', { page: 'drafts' }, null],
     ['Settings', { page: 'settings' }, null],
     ['What’s new', { page: 'whats-new' }, null],

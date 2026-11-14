@@ -7,7 +7,7 @@
  * Who (config.json `inboxSnoozeIntro`): a release build, first use at least two days ago (rebuilt once from the event
  * log on upgrade), never snoozed anything (a mark of its own: snoozes.json deletes itself with the last snooze), and
  * not shown yet. There is no active-days rule (the owner, 2026-11-02). It shows on this computer and on the owner's
- * phone, never to a tailnet guest (the owner, q-e29f8cd6).
+ * phone (the owner, q-e29f8cd6).
  */
 
 /** First use must be at least this long ago: two days (the owner: "I think this needs to be 2 days"). */
