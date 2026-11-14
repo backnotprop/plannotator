@@ -2,7 +2,7 @@
  * Image diffs in code review: the swipe view stacks the two images with no
  * drift, so the divider reveals exactly the pixels that changed, where they
  * are, at device pixel ratio 1 and 2. Two synthetic PNGs differ in one known
- * 80 x 80 block; the test reads the screen's pixels on both sides of the
+ * 40 x 40 block; the test reads the screen's pixels on both sides of the
  * divider.
  *
  * Nothing is mocked: `plannotator review` runs in a scratch git repository
@@ -37,9 +37,9 @@ const FIRST_RUN: Record<string, string> = {
   'plannotator-image-diff-view': 'swipe',
 };
 
-const WIDTH = 800;
-const HEIGHT = 480;
-const BLOCK = { x: 560, y: 120, size: 80 };
+const WIDTH = 400;
+const HEIGHT = 240;
+const BLOCK = { x: 280, y: 60, size: 40 };
 const GREY: [number, number, number] = [128, 128, 128];
 const MAGENTA: [number, number, number] = [255, 0, 255];
 
@@ -199,7 +199,7 @@ for (const dpr of [1, 2]) {
       const scale = box.width / WIDTH;
       expect(scale).toBe(1);
       const at = (x: number, y: number) => pixel(page, box.x + (x + 0.5) * scale, box.y + (y + 0.5) * scale);
-      const inside = { x: BLOCK.x + 40, y: BLOCK.y + 40 };
+      const inside = { x: BLOCK.x + 20, y: BLOCK.y + 20 };
 
       await stage.focus();
       await page.keyboard.press('End');

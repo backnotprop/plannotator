@@ -38,7 +38,7 @@ export function StageLabel({ children, side }: { children: React.ReactNode; side
   return (
     <span
       data-stage-label={side}
-      className={`pointer-events-none absolute top-2 z-10 rounded bg-background/80 px-1.5 text-xs leading-5 text-foreground ${side === 'left' ? 'left-2' : 'right-2'}`}
+      className={`pointer-events-none absolute top-2 z-10 rounded bg-black/70 px-1.5 text-xs leading-5 text-white ${side === 'left' ? 'left-2' : 'right-2'}`}
     >
       {children}
     </span>

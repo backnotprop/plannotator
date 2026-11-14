@@ -170,7 +170,7 @@ export const ImageDiffPreview: React.FC<ImageDiffPreviewProps> = ({
             mask={side === 'new' ? mask : null}
             maskColor={accent}
             label={label}
-            labelAbove={narrow}
+            labelAbove={narrow || layout.stage.width < 320}
             onScrollPosition={twoColumns ? (left, top) => setScroll({ left, top }) : undefined}
             scrollTo={twoColumns ? scroll : null}
           />
@@ -227,7 +227,7 @@ export const ImageDiffPreview: React.FC<ImageDiffPreviewProps> = ({
               opacity={opacity}
               mask={mask}
               maskColor={accent}
-              labelsAbove={narrow}
+              labelsAbove={narrow || layout!.stage.width < 320}
             />
             <div className="mt-1 flex flex-wrap items-center gap-x-2 text-xs leading-5 text-muted-foreground tabular-nums" data-image-meta="">
               <span className="whitespace-nowrap">Before {imageCaption(null, beforeSize, before!.bytes)}</span>
