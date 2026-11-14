@@ -220,9 +220,9 @@ describe.skipIf(!hasDom)('the review panes', () => {
     const el = await mount();
     await act(async () => { api!.addPanel({ id: 'review-diff', component: 'review-diff', title: 'a.ts', params: { filePath: 'a.ts' } }); });
     await act(async () => { api!.addPanel({ id: 'review-file:a.ts', component: 'review-file', title: 'a.ts', params: { filePath: 'a.ts' } }); });
-    expect(tabButton(el, 'review-diff').querySelector('[data-tab-kind-icon="diff"]')).not.toBeNull();
+    expect(el.querySelector('[data-pane-tab-item="review-diff"] [data-tab-kind-icon="diff"]')).not.toBeNull();
     expect(tabButton(el, 'review-diff').title).toBe('Diff of a.ts');
-    expect(tabButton(el, 'review-file:a.ts').querySelector('[data-tab-kind-icon="file"]')).not.toBeNull();
+    expect(el.querySelector('[data-pane-tab-item="review-file:a.ts"] [data-tab-kind-icon="file"]')).not.toBeNull();
     expect(tabButton(el, 'review-file:a.ts').title).toBe('File a.ts');
   });
 
@@ -231,7 +231,7 @@ describe.skipIf(!hasDom)('the review panes', () => {
     await act(async () => { api!.addPanel({ id: 'review-code-nav', component: 'review-code-nav', title: 'References: validateEntryBoundaries' }); });
     const tab = slot.querySelector<HTMLElement>('[data-pane-tab="review-code-nav"]')!;
     expect(tab.textContent).toBe('validateEntryBoundaries');
-    expect(tab.querySelector('[data-references-tab-icon]')).not.toBeNull();
+    expect(slot.querySelector('[data-pane-tab-item="review-code-nav"] [data-tab-kind-icon="references"]')).not.toBeNull();
     expect(tab.className).toContain('max-w-[240px]');
   });
 

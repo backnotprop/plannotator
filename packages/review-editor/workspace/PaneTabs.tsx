@@ -1,7 +1,7 @@
 import React, { useLayoutEffect, useRef, useState } from 'react';
 import { Crosshair, Diff, FileText } from 'lucide-react';
 import { EllipsisName } from '../components/EllipsisName';
-import type { Pane } from './paneLayout';
+import type { Pane, PaneTab } from './paneLayout';
 import { REVIEW_ALL_FILES_PANEL_ID, isReviewFilePreviewParams } from '../dock/reviewPanelTypes';
 import { TITLE_SETTLE_MS, useSettledValue } from './useSettledValue';
 import { PaneTabsMenu } from './PaneTabsMenu';
@@ -53,6 +53,17 @@ function useHiddenTabs(ref: React.RefObject<HTMLElement | null>, key: string, si
   return hidden;
 }
 
+const TabIcon: React.FC<{ tab: PaneTab; onClick: () => void }> = ({ tab, onClick }) => {
+  const kind = isReferencesTab(tab) ? 'references' : tabKind(tab);
+  if (!kind) return null;
+  const Icon = kind === 'references' ? Crosshair : kind === 'diff' ? Diff : FileText;
+  return (
+    <span aria-hidden="true" onClick={onClick} className="flex-none text-muted-foreground" data-tab-kind-icon={kind}>
+      <Icon className="w-3.5 h-3.5" />
+    </span>
+  );
+};
+
 const TabTitle: React.FC<{ title: string; keepExtension: boolean }> = ({ title, keepExtension }) => (
   <EllipsisName text={useSettledValue(title, TITLE_SETTLE_MS)} keepExtension={keepExtension} />
 );
@@ -74,7 +85,12 @@ export const PaneTabs: React.FC<{
 
   const focusTab = (id: string | null) => {
     if (!id) return;
-    requestAnimationFrame(() => listRef.current?.querySelector<HTMLButtonElement>(`[data-pane-tab="${CSS.escape(id)}"]`)?.focus());
+    const focus = (tries: number) => {
+      const tab = document.querySelector<HTMLButtonElement>(`[data-pane="${paneIndex}"] [data-pane-tab="${CSS.escape(id)}"]`);
+      if (tab) tab.focus();
+      else if (tries > 0) requestAnimationFrame(() => focus(tries - 1));
+    };
+    requestAnimationFrame(() => focus(3));
   };
 
   const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
@@ -121,6 +137,7 @@ export const PaneTabs: React.FC<{
             style={shrinks ? { minWidth: TAB_MIN_WIDTH } : undefined}
             className={`group flex items-center gap-1 ${shrinks ? 'min-w-0 shrink' : 'flex-none'} ${hidden.ids.has(tab.id) ? 'invisible absolute' : 'relative'}`}
           >
+            <TabIcon tab={tab} onClick={() => onActivate(tab.id)} />
             {directory && (
               <span aria-hidden="true" className="min-w-0 shrink-[1000] max-w-[40%] overflow-hidden text-ellipsis whitespace-nowrap text-[13px] text-muted-foreground [direction:rtl]" data-pane-tab-directory="">
                 <bdi>{directory}</bdi>
@@ -145,9 +162,6 @@ export const PaneTabs: React.FC<{
                 active ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'
               } ${preview ? 'italic' : ''}`}
             >
-              {isReferencesTab(tab) && <Crosshair className="w-3.5 h-3.5 flex-none mr-1" aria-hidden="true" data-references-tab-icon="" />}
-              {tabKind(tab) === 'diff' && <Diff className="w-3.5 h-3.5 flex-none mr-1 text-muted-foreground" aria-hidden="true" data-tab-kind-icon="diff" />}
-              {tabKind(tab) === 'file' && <FileText className="w-3.5 h-3.5 flex-none mr-1 text-muted-foreground" aria-hidden="true" data-tab-kind-icon="file" />}
               <span className="min-w-0 flex"><TabTitle title={tabLabel(tab)} keepExtension={!isReferencesTab(tab)} /></span>
             </button>
             {closable && <button
@@ -168,16 +182,12 @@ export const PaneTabs: React.FC<{
           </div>
         );
       })}
-    </div>
-  );
-  return (
-    <div className="relative min-w-0 flex-1 h-full flex items-stretch">
-      {list}
       {hidden.ids.size > 0 && (
-        <div className="absolute inset-y-0 flex items-center" style={{ left: hidden.end + 8 }}>
+        <div className="flex-none flex items-center -ml-2">
           <PaneTabsMenu pane={pane} onActivate={onActivate} onClose={onClose} overflow={hidden.ids.size} />
         </div>
       )}
     </div>
   );
+  return list;
 };
