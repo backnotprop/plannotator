@@ -35,6 +35,7 @@ function takeOpenMarker(): string | null {
 }
 
 let askedToOpen = takeOpenMarker();
+let autoOpen: Promise<void> | null = null;
 
 export function OpenLiveReview({ threadId, title }: { threadId: string; title: string }) {
   const [state, setState] = useState<'idle' | 'opening' | 'failed'>('idle');
@@ -64,7 +65,7 @@ export function OpenLiveReview({ threadId, title }: { threadId: string; title: s
   useEffect(() => {
     if (askedToOpen !== threadId) return;
     askedToOpen = null;
-    void open(true);
+    autoOpen ??= open(true);
   }, [threadId]);
   return (
     <div className="ib-ranchor-open" data-open-live-review="">
