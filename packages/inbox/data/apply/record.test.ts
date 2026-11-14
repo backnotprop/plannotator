@@ -60,6 +60,11 @@ const rows: Row[] = [
   ['a comment that went with a reply is read (its count)', { seq: 22, kind: 'annotation', id: 'ann', annotation: { thread_id: T, sent_reply_id: 'msg_R' } as never }, 'reread'],
   ['a comment waiting on a file changes no message', { seq: 23, kind: 'annotation', id: 'ann', annotation: { thread_id: T, sent_reply_id: null } as never }, 'none'],
   ["another thread's record does nothing here", message(24, { ...msg('msg_O'), thread_id: 'msg_OTHER' }), 'none'],
+  ['a reply taken back leaves the thread', message(25, msg('msg_R', { author: person, taken_back_at: at }), false), (after) => {
+    expect(after.thread.messages.map((m) => m.id)).toEqual([T]);
+    expect(after.applied).toEqual({ msg_R: 25 });
+  }],
+  ['a thread whose only message was taken back is read (it is gone)', message(26, msg(T, { author: person, taken_back_at: at }), false), 'reread'],
 ];
 
 describe('one stream record on a held thread', () => {
@@ -94,6 +99,11 @@ describe('a read landing after records', () => {
     if (after.kind !== 'applied') throw new Error('not applied');
     const fresh = read(30, [...base, msg('msg_N', { seq: 11, body: 'server copy' })]);
     expect(reconcileRead(after.model, fresh)).toBe(fresh);
+  });
+  test('an older read never brings back a reply taken back after it left', () => {
+    const after = applyRecord(model(base), message(12, msg('msg_R', { author: person, taken_back_at: at }), false));
+    if (after.kind !== 'applied') throw new Error('not applied');
+    expect(reconcileRead(after.model, read(11, base)).thread.messages.map((m) => m.id)).toEqual([T]);
   });
   test('an older read never takes back a newer answer or an archive', () => {
     let now: HeldThread = model(base);

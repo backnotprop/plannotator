@@ -97,9 +97,12 @@ import { conflictText, DRAFT_OFFER_TEXT, DraftHead, DraftFootNote, DraftOffer, D
 import { canMarkUnread, canToggleRead } from '../markRead';
 import { NewMessageButton, NewMessageComposer, NewMessagePopover, hostName, useLiveSessions, type NewMessageMode } from './NewMessage';
 import { debugNote } from '../debugLog';
-import { deliveryLine, restartNote, uncertainItem, waitInputs, type DeliveryLine } from '../deliveryLine';
+import { deliveryLine, handedItem, restartNote, uncertainItem, waitInputs, type DeliveryLine } from '../deliveryLine';
 import { RestartLine } from './RestartNote';
-import { UndeliveredBand, UndeliveredText } from './Undelivered';
+import { TakeBackButton, UndeliveredBand, UndeliveredText } from './Undelivered';
+import { useThreadTakeBack } from '../thread/useThreadTakeBack';
+import { useSendNow } from '../thread/useSendNow';
+import { TakeBackLine, TakeBackNote } from '../parts/TakeBackLines';
 import { SendToAnotherSession } from '../compose/SendToAnotherSession';
 import { COMPOSE_CLONE_EVENT, type ComposeCloneRequest } from '../compose/model';
 import { authorWithLabel, labelOf, shortLabel, useSessionLabels } from '../sessionLabels';
@@ -1205,7 +1208,7 @@ function labelledAuthorName({ agent, label, open = false, hidden, onFold }: { ag
   );
 }
 
-export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, notice, thread: threadRead, threadSteps = null, codeReview = false, pullReview, machine = null, onMachineUpdate, onNewMessageWith, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onSentRead, readPending = false, onPickSaves, onChanged, draftChanged = 0, filesChanged = 0, draftSignal = null, filesSignal = null, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, priority, onSnooze, onUnsnooze, snoozeBlocked, replyRequest, onReplyOpened, shapeButton = null, onSide, onSideWords, replyWords = null, onReplyWordsTaken, replyPart = null, onReplyPartTaken, onToastGone, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, guest = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, links: linksRoute = false, onLinks, decide = null, threadAlone = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null, snoozeBack = null, agentContext = null, agentFilter = null, onAgentFilter }: ThreadPaneProps) {
+export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, notice, thread: threadRead, threadSteps = null, codeReview = false, pullReview, machine = null, onMachineUpdate, onNewMessageWith, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onSentRead, readPending = false, onPickSaves, onChanged, onTakenBack, draftChanged = 0, filesChanged = 0, draftSignal = null, filesSignal = null, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, priority, onSnooze, onUnsnooze, snoozeBlocked, replyRequest, onReplyOpened, shapeButton = null, onSide, onSideWords, replyWords = null, onReplyWordsTaken, replyPart = null, onReplyPartTaken, onToastGone, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, guest = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, links: linksRoute = false, onLinks, decide = null, threadAlone = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null, snoozeBack = null, agentContext = null, agentFilter = null, onAgentFilter }: ThreadPaneProps) {
   /**
    * The questions this pane's own saves brought back (by `<message id>/<key>`), and how many saves landed. The thread
    * drawn is the one read, its questions never older than these: a read that left before the last keys were saved
@@ -4786,6 +4789,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
             connection: recipientConnection,
             undelivered: undelivered ? { host: hostName(lastTo.host) } : null,
             stuck,
+            handed: handedItem(recipientConnection, last.id),
             ...waitInputs(recipientConnection, last.id, { ...last, into_turn: last.delivery?.into_turn ?? null }),
           })
         : deliveryLine({
@@ -4799,6 +4803,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
             connection: recipientConnection,
             askerEnded: wordsEnded && wordsAsking ? { name: wordsAsking.name } : null,
             stuck,
+            handed: handedItem(recipientConnection, last.id),
             ...waitInputs(recipientConnection, last.id, { ...last, into_turn: last.delivery?.into_turn ?? null }),
           });
   // A hand-off inside its Undo window (approval "inbox-tag-handoff") goes to nobody yet: its line says when.
@@ -4812,7 +4817,6 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   // No Send now because that session runs an older plugin than a restart loads (the "Steps" line,
   // owner approval "restart-warning"): only while the reply waits for a working session.
   const restart = delivered?.state === 'queued' && !last.deliver_now_at ? restartNote(recipientConnection) : null;
-  // Oh My Pi polls as host `pi`: its runtime names it (owner approval "reload-hosts").
   const restartName =
     restart?.runtime === 'oh-my-pi'
       ? 'Oh My Pi'
@@ -4821,40 +4825,29 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         : repliedTo?.author.kind === 'agent' && repliedTo.author.host
           ? hostName(repliedTo.author.host)
           : asker;
-  // The name the waiting band uses ("Claude Code", "Claude Code (another session)").
   const ownerLineName = lastTo
     ? last.to
       ? toName(last, last.to)
       : hostName(lastTo.host)
     : recipientName(repliedTo);
-  const [sendNowState, setSendNowState] = useState<{ id: string; busy: boolean; error: string | null } | null>(null);
-  const sendNow = async () => {
-    setSendNowState({ id: last.id, busy: true, error: null });
-    try {
-      await inboxApi.sendNow(last.id);
-      setSendNowState({ id: last.id, busy: false, error: null });
-      await onChanged();
-      void loadPendingLive();
-    } catch (cause) {
-      setSendNowState({ id: last.id, busy: false, error: cause instanceof InboxApiError ? cause.message : 'It was not sent now. Try again.' });
-      void loadPendingLive();
-    }
-  };
-  const sendNowError = sendNowState?.id === last.id ? sendNowState.error : null;
-  /** Send now for one tagged session's own line. */
-  const [tagSendNow, setTagSendNow] = useState<{ id: string; session: string; busy: boolean; error: string | null } | null>(null);
-  const sendTagNow = async (session: string) => {
-    setTagSendNow({ id: last.id, session, busy: true, error: null });
-    try {
-      await inboxApi.sendNow(last.id, session);
-      setTagSendNow({ id: last.id, session, busy: false, error: null });
-      await onChanged();
-      void loadTagConnections();
-    } catch (cause) {
-      setTagSendNow({ id: last.id, session, busy: false, error: cause instanceof InboxApiError ? cause.message : 'It was not sent now. Try again.' });
-      void loadTagConnections();
-    }
-  };
+  const { sendNowState, sendNow, sendNowError, tagSendNow, sendTagNow } = useSendNow(last.id, onChanged, loadPendingLive, loadTagConnections);
+  const { takeBack, takeBackOf } = useThreadTakeBack({
+    threadId: thread.thread_id,
+    only: thread.messages.length === 1,
+    allowed: !guest && (!machine || (machine.marks ?? []).includes('take-back')),
+    lastBlocked: (message) => message === last && (delivered?.state === 'delivered' || delivered?.state === 'undelivered' || handedItem(recipientConnection, last.id)),
+    nameOf: (message) => (message.to ? toName(message, message.to) : recipientName(askedBy(message))),
+    settle: () => (boxRef.current.open ? replyDraft.settle(boxRef.current.text, replyFiles.draftFiles(boxRef.current.text)) : replyDraft.settle(null)),
+    reload: async () => (await replyDraft.reload(() => null))?.draft,
+    fill: (body, files) => {
+      setBox({ open: true, text: body });
+      takeDraftFiles([...files], body);
+    },
+    compose: (draft) => onTakenBack?.(draft),
+    changed: onChanged,
+  });
+  const takeBackLast = takeBackOf(last);
+  const takingBack = takeBack.state?.id === last.id && takeBack.state.busy;
 
   // Take a hand-off back inside its Undo window (the toast's Undo, or the line's): the reply goes as an Ask.
   const [handoffUndo, setHandoffUndo] = useState<{ id: string; busy: boolean; error: string | null } | null>(null);
@@ -6506,6 +6499,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
               <MessageMenu
                 {...copyHost}
                 message={message}
+                onTakeBack={takeBackOf(message)}
                 head={(more) => (
                   <div className="ib-fline ib-is-open" data-open-head="" data-revealed={revealed ? '' : undefined}>
                     {!one && (
@@ -6714,6 +6708,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                     <li data-tag-line={replySession ?? ''} data-delivery={delivered.state} data-owner="">
                       <HostMark host={ownerHost} agent={replySession} />
                       {delivered.wait ? <UndeliveredText wait={delivered.wait} name={ownerLineName} /> : <span className="ib-dl-text">{delivered.text}</span>}
+                      {takeBackLast && <TakeBackButton busy={takingBack} onPress={takeBackLast} />}
                       {delivered.sendNow && (
                         <button type="button" className="ib-sendnow" data-send-now="" disabled={sendNowState?.id === last.id && sendNowState.busy} onClick={() => void sendNow()}>
                           Send now
@@ -6752,6 +6747,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                     name={ownerLineName}
                     onSendNow={delivered.sendNow ? () => void sendNow() : null}
                     sending={sendNowState?.id === last.id && sendNowState.busy}
+                    onTakeBack={takeBackLast}
+                    takingBack={takingBack}
                     restart={restart}
                     restartName={restartName}
                   />
@@ -6768,6 +6765,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                       />
                       <span className="ib-dl-text">{delivered.text}</span>
                     </span>
+                    {takeBackLast && <TakeBackButton busy={takingBack} onPress={takeBackLast} />}
                     {delivered.sendNow && (
                       <Tip content="Put it into the running turn now: the agent reads it at its next step, without waiting for the turn to end.">
                         <button
@@ -6784,6 +6782,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                     {restart && <RestartLine note={restart} name={restartName} />}
                   </div>
                 )}
+                <TakeBackLine state={takeBack.state} id={message.id} />
                 {message === last && sendNowError && (
                   <p className="ib-error" role="alert" data-send-now-error="">
                     {sendNowError}
@@ -6934,6 +6933,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                 }}
               />
             )}
+            <TakeBackNote state={takeBack.state} />
             {staleQuestions.length > 0 && <ChangedNotice questions={staleQuestions} thread={thread} onJump={jumpTo} />}
             {/* On a phone "Draft  Saved 4:51 PM  Discard" sits above the box, at the right, once something is saved.
                 While the live-session choice stands in for the box's Send it goes, as a computer's bin does, so

@@ -182,6 +182,7 @@ import { projectWrites } from './projectWrites';
 import { priorityWrites } from './priorityWrites';
 import { snoozeWrites } from './snoozeWrites';
 import { agentWrites, type AgentDeleteAsk } from './agentWrites';
+import { openTakenBack } from './takenBackCompose';
 import { restartInbox } from './restartInbox';
 import { errorToast } from './toastError';
 import { canToggleRead, confirmSetAside, MARK_READ_LOOK_WAIT_MS, MARK_READ_UNDO_MS, MARK_UNREAD_RETRY_WAIT_MS, markReadToast, markUnreadToast, offersRowMarkRead, seenHeldInNew, setAsideCount, setAsideOf, type SetAsideAnswer, type SetAsideCount, warnsBeforeRead } from './markRead';
@@ -7136,7 +7137,6 @@ function Inbox() {
             // and keeps this thread on screen (the person is reading it); a second click shows everything again.
             agentFilter={route.page === 'inbox' ? (route.agent ?? null) : null}
             onAgentFilter={(agentId) => leave({ page: 'inbox', project: null, machine: null, agent: agentId, thread: route.page === 'inbox' ? route.thread : null })}
-            // A Delete refused by a machine too old to take one: the error line's Update opens that machine's update dialog.
             onMachineUpdate={pageOffersUpdates(settings) ? (id) => setMachineUpdateOpen({ id, snooze: false }) : undefined}
             outbox={threadOutbox(outbox, thread)}
             onDismissOutbox={dismissOutbox}
@@ -7159,9 +7159,9 @@ function Inbox() {
             onQuestions={patchQuestions}
             onPickSaves={onPickSaves}
             onChanged={afterWrite}
+            onTakenBack={(draft) => openTakenBack(draft, openCompose, afterWrite)}
             readPending={rowPatches.get(thread.thread_id)?.read_at !== undefined}
             onSentRead={async (model) => {
-              // The Send's answer carried the thread: drawn from it, and only the list is read after (afterWrite reads both).
               if (routeRef.current.thread !== model.thread.thread_id) return false;
               const drawn = await refreshThread(model.thread.thread_id, model);
               if (!drawn) return false;
