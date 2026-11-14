@@ -12,4 +12,5 @@ The Inbox details are split by topic. Read the foundation guide for command, ser
 - [`inbox-phones-and-security.md`](inbox-phones-and-security.md) — phone pairing and surface, security boundaries, and proofs.
 - [`inbox-machines.md`](inbox-machines.md) — linked machines: one Inbox across machines, the link, the merged view, the forward and the outbox.
 - [`inbox-accounts.md`](inbox-accounts.md) — Settings → Accounts: the Claude accounts and usage of this computer and its linked machines, read through claude-swap.
+- [`inbox-prefs.md`](inbox-prefs.md) — the preference list: one key per setting, `GET`/`POST /api/inbox/prefs` through the window's own routes and guards, secrets, `event: prefs`.
 - [`inbox-system.md`](inbox-system.md) — System: a drawing of each project's code (config.json `inboxSystem`, hidden in 0.29; Settings → Capabilities → System, only with Code review on); the switch, the Reviews System button and a project's drawing, the project setup dialog and its `setup.json`.

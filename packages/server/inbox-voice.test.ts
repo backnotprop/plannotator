@@ -454,6 +454,37 @@ describe("the OpenAI API key", () => {
     expect(existsSync(path)).toBe(false);
   });
 
+  test("set through /api/inbox/prefs: saved, and the key in no answer, no read and no event frame", async () => {
+    const w = await world();
+    const controller = new AbortController();
+    const stream = await fetch(`${w.base}/api/inbox/events?cursor=0&window=window-voice-key&permission=granted`, { signal: controller.signal });
+    const reader = stream.body!.getReader();
+    const decoder = new TextDecoder();
+    let frames = "";
+    while (!frames.includes("event: hello")) frames += decoder.decode((await reader.read()).value);
+
+    const bad = await (await w.json("/api/inbox/prefs", { set: { "voice.api_key": `two words ${KEY}` } })).text();
+    expect(bad).not.toContain(KEY);
+    expect(existsSync(join(w.dataDir, "inbox", "voice-key"))).toBe(false);
+    const saved = await (await w.json("/api/inbox/prefs", { set: { "voice.api_key": KEY } })).text();
+    expect(JSON.parse(saved)).toEqual({ changes: [{ key: "voice.api_key", from: "not set", to: "set" }] });
+    expect(readFileSync(join(w.dataDir, "inbox", "voice-key"), "utf8").trim()).toBe(KEY);
+    const list = await (await fetch(`${w.base}/api/inbox/prefs`)).text();
+    expect(list).not.toContain(KEY);
+    expect((JSON.parse(list) as { prefs: { key: string; value: unknown; secret?: boolean }[] }).prefs.find((p) => p.key === "voice.api_key")).toMatchObject({ value: "set", secret: true });
+
+    const deadline = Date.now() + 1500;
+    while (!frames.includes("event: prefs") && Date.now() < deadline) {
+      const chunk = await Promise.race([reader.read(), new Promise<null>((resolve) => setTimeout(() => resolve(null), 200))]);
+      if (chunk && chunk.value) frames += decoder.decode(chunk.value);
+    }
+    controller.abort();
+    expect(frames).toContain('event: prefs\ndata: {"keys":["voice.api_key"]');
+    expect(frames).not.toContain(KEY);
+    expect(await (await w.json("/api/inbox/prefs", { reset: ["voice.api_key"] })).json()).toEqual({ changes: [{ key: "voice.api_key", from: "set", to: "not set" }] });
+    expect(existsSync(join(w.dataDir, "inbox", "voice-key"))).toBe(false);
+  });
+
   test("a saved key wins over OPENAI_API_KEY; with none saved the env key works and shows no digits", async () => {
     const openai = fakeEndpoint([ok("Heard.")]);
     const w = await world({ openai, env: { OPENAI_API_KEY: "sk-from-the-environment" } });

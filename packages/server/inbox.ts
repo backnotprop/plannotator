@@ -41,6 +41,8 @@
 
 import { INBOX_LINKED_MARKS, INBOX_PROMPT_HOSTS, inboxMachineTags, inboxRowsBy, type InboxRowsBy } from "@plannotator/core/inbox-types";
 import { inboxDiffOptionsOf, inboxDiffOptionsSaved, parseInboxDiffOptionsChange } from "./inbox-diff-options";
+import { INBOX_PREF_GROUPS, INBOX_PREFS } from "@plannotator/core/inbox-prefs";
+import { INBOX_SETTINGS_FIELDS, inboxPrefKeysOf, inboxPrefsCatalogue, inboxPrefsNeeds, inboxPrefsPost, type InboxPrefsSources } from "./inbox-prefs";
 import { listIntroAtStart, listIntroDue, listIntroLookPicked } from "./inbox-list-intro";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -113,6 +115,7 @@ import {
   cookieHostState,
   inboxChapterDiagramsOn,
   loadConfig,
+  resolveInboxTailscaleAllow,
   saveCookieHost,
   parseAutoUpdateEnv,
   parseExperimentalEnv,
@@ -1248,6 +1251,17 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const capabilityListeners = new Set<(changed?: "code_review" | "shape" | "float_drafts" | "mark_read_warning") => void>();
   /** "Over your tailnet" published by itself once Tailscale came back: the windows' streams say `event: tailscale` with the new state. */
   const tailscaleListeners = new Set<() => void>();
+  /**
+   * A preference was saved (core inbox-prefs.ts), by any window or an agent's call: the windows' streams
+   * say `event: prefs` with the keys, and each reads its settings again. A route call made by POST /api/inbox/prefs
+   * carries `X-Plannotator-Prefs-Call`, and that call sends one frame for all its routes instead.
+   */
+  const prefsListeners = new Set<(frame: { keys: readonly string[]; by: InboxRowsBy | null }) => void>();
+  const prefsCalls = new Set<string>();
+  const notifyPrefs = (keys: readonly string[], by: InboxRowsBy | null = null, req: Request | null = null) => {
+    if (keys.length === 0 || (req && prefsCalls.has(req.headers.get("x-plannotator-prefs-call") ?? ""))) return;
+    for (const listener of prefsListeners) listener({ keys, by });
+  };
   // The Inbox windows open now and whether any can show a notification (inbox-windows.ts).
   const windows = createInboxWindows({ graceMs: options.windowGraceMs });
   /** Event streams open now (health's `event_streams`): Inbox tabs of one origin share one. */
@@ -3723,6 +3737,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // The tray's saved emoji changed (any window's, a phone's too): every window takes the list at once. Windows only.
         const onReactions = (reactions: readonly InboxReaction[], rev: number) => send(`event: reactions\ndata: ${JSON.stringify({ reactions, rev })}\n\n`);
         if (windowId) reactionsListeners.add(onReactions);
+        // A preference was saved (any window's, an agent's): every window reads its settings again. Windows only.
+        const onPrefs = (frame: { keys: readonly string[]; by: InboxRowsBy | null }) => send(`event: prefs\ndata: ${JSON.stringify(frame)}\n\n`);
+        if (windowId) prefsListeners.add(onPrefs);
         // The steps switch was saved (any window's): every window reads its settings and the open thread's steps again. Windows only.
         // Shape's boards changed (a version, a note, a delivery, seen): `event: shapes` on this one stream, so a window
         // opens no second connection (sharedEvents.ts holds every tab to one). Only while boards are on, and only for a
@@ -3786,6 +3803,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           sidebarListeners.delete(onSidebar);
           agentFaceListeners.delete(onAgentFaces);
           reactionsListeners.delete(onReactions);
+          prefsListeners.delete(onPrefs);
           capabilityListeners.delete(onCapabilities);
           tailscaleListeners.delete(onTailscale);
           stopShapes?.();
@@ -5236,6 +5254,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           const body = await readBody(req);
           if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
           pullRisk.save(body);
+          notifyPrefs(inboxPrefKeysOf("risk", body), null, req);
         }
         return json({ serverSession, ...pullRisk.answer() });
       }
@@ -5783,7 +5802,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (req.method !== "POST") return json({ error: "Use POST." }, 405);
         const body = await readBody(req);
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
-        if (path === "/api/inbox/agents") return json(await saveAgent(body));
+        if (path === "/api/inbox/agents") {
+          const saved = await saveAgent(body);
+          notifyPrefs(inboxPrefKeysOf("agents", body), null, req);
+          return json(saved);
+        }
         if (path === "/api/inbox/agents/notes") return json(await answerNotes(body));
         if (path === "/api/inbox/agents/seen") {
           // The window's line said the last run's news and the notes written by themselves: only what it showed
@@ -5865,11 +5888,78 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         saveConfig({ inboxDecisionsPostTo: body.post_to as "description" | "comment" | "both" });
         const saved = decisionPostDestinationOf(loadConfig().inboxDecisionsPostTo);
         if (saved !== body.post_to) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
+        notifyPrefs(inboxPrefKeysOf("decisions", body), null, req);
         return json({ serverSession, post_to: saved });
+      }
+      // config.json `inboxTailscaleAllow`: on a tagged machine (Tailscale names no owner), the logins that count as the
+      // owner over the tailnet. The gate takes a saved list at once while published (inbox-tailscale.ts allowListChanged).
+      if (path === "/api/inbox/settings/tailscale-allow") {
+        if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
+          return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
+        }
+        if (req.method === "GET") return json({ allow: resolveInboxTailscaleAllow(loadConfig()) });
+        if (req.method !== "POST") return json({ error: "Use GET or POST." }, 405);
+        const body = await readBody(req);
+        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+        const allow = resolveInboxTailscaleAllow({ inboxTailscaleAllow: body.allow as string[] });
+        if (!Array.isArray(body.allow) || allow.length !== body.allow.length) throw new InboxError("validation_error", "allow: a list of Tailscale logins, each once, with no spaces.", { field: "allow" });
+        saveConfig({ inboxTailscaleAllow: allow });
+        tailscale.allowListChanged();
+        notifyPrefs(inboxPrefKeysOf("tailscale_allow", body), null, req);
+        return json({ allow: resolveInboxTailscaleAllow(loadConfig()) });
       }
       if (path === "/api/inbox/settings/storage") {
         if (req.method !== "GET") return json({ error: "Use GET." }, 405);
         return json(perfPhase("disk", () => store.diskUsage()));
+      }
+      // The preference list (inbox-prefs.ts): read from what the settings routes answer, written through those routes
+      // with this request's headers, so each key keeps its route's guard. Another site is refused, reads too.
+      if (path === "/api/inbox/prefs") {
+        if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
+          return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
+        }
+        // The phones' doors are read through their own route: an Inbox that serves no phones reads nothing.
+        const doorOn = async (route: string, field: string): Promise<boolean | null> => {
+          const answer = await handle(new Request(new URL(route, url), { headers: req.headers }), via);
+          if (answer.status !== 200) return null;
+          const on = ((await answer.json().catch(() => null)) as Record<string, { on?: unknown }> | null)?.[field]?.on;
+          return typeof on === "boolean" ? on : null;
+        };
+        const readPrefs = async (needs: ReturnType<typeof inboxPrefsNeeds>): Promise<InboxPrefsSources> => ({
+          settings: settingsModel(via, false) as unknown as Record<string, unknown>,
+          config: loadConfig(),
+          agents: needs.agents ? ((await agentsModel()).agents as unknown as Record<string, unknown>[]) : null,
+          devices: needs.devices ? { lan: await doorOn("/api/inbox/lan", "lan"), tailnet: await doorOn("/api/inbox/tailnet", "tailnet") } : null,
+          cloud: needs.cloud ? (cloudAgents.list().map(cloudAgents.view) as unknown as Record<string, unknown>[]) : null,
+        });
+        if (req.method === "GET") {
+          const group = url.searchParams.get("group");
+          if (group !== null && !INBOX_PREF_GROUPS.includes(group)) throw new InboxError("validation_error", `group: one of ${INBOX_PREF_GROUPS.join(", ")}.`, { field: "group" });
+          return json(inboxPrefsCatalogue(await readPrefs(inboxPrefsNeeds(group === null ? null : INBOX_PREFS.filter((pref) => pref.group === group).map((pref) => pref.key).concat(group === "cloud_agents" ? ["cloud_agents."] : []))), group));
+        }
+        if (req.method !== "POST") return json({ error: "Use GET or POST." }, 405);
+        const body = await readBody(req);
+        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+        const call = crypto.randomUUID();
+        prefsCalls.add(call);
+        let answer: Awaited<ReturnType<typeof inboxPrefsPost>>;
+        try {
+          answer = await inboxPrefsPost(body, {
+            read: readPrefs,
+            dispatch: async (route, routeBody) => {
+              const headers = new Headers(req.headers);
+              headers.delete("content-length");
+              headers.set("content-type", "application/json");
+              headers.set("x-plannotator-prefs-call", call);
+              const routed = await handle(new Request(new URL(route, url), { method: "POST", headers, body: JSON.stringify(routeBody) }), via);
+              return { status: routed.status, body: ((await routed.json().catch(() => null)) as Record<string, unknown> | null) ?? null };
+            },
+          });
+        } finally {
+          prefsCalls.delete(call);
+        }
+        notifyPrefs(answer.saved, inboxRowsBy(body.by));
+        return json(answer.body, answer.status);
       }
       if (path === "/api/inbox/settings") {
         if (req.method === "GET") {
@@ -5881,37 +5971,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const body = await readBody(req);
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
         const updateSwitches = body.update_check !== undefined || body.auto_update !== undefined;
-        if (
-          body.inbox_tool === undefined &&
-          body.notifications === undefined &&
-          body.sound === undefined &&
-          body.tailscale === undefined &&
-          body.theme === undefined &&
-          body.text_size === undefined &&
-          body.favicon === undefined &&
-          body.reactions === undefined &&
-          body.reaction_change === undefined &&
-          body.rows === undefined &&
-          body.rows_undo === undefined &&
-          body.sidebar === undefined &&
-          body.diff_style === undefined &&
-          body.diff_options === undefined &&
-          body.experimental === undefined &&
-          body.tour === undefined &&
-          body.prompts === undefined &&
-          body.board === undefined &&
-          body.steps === undefined &&
-          body.bro === undefined &&
-          body.float_drafts === undefined &&
-          body.mark_read_warning === undefined &&
-          body.code_review === undefined &&
-          body.shape === undefined &&
-          body.system === undefined &&
-          body.chapter_diagrams === undefined &&
-          body.cookie_host === undefined &&
-          body.voice === undefined &&
-          !updateSwitches
-        ) {
+        if (INBOX_SETTINGS_FIELDS.every((field) => field === "rows_by" || body[field] === undefined)) {
           throw new InboxError("validation_error", "body: inbox_tool, notifications, sound, tailscale, theme, text_size, favicon, reactions, reaction_change, rows, sidebar, diff_style, diff_options, experimental, tour, prompts, board, steps, bro, float_drafts, mark_read_warning, code_review, shape, system, chapter_diagrams, voice, update_check, auto_update or cookie_host is required.");
         }
         // System: a malformed value throws here.
@@ -5996,6 +6056,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const chapterDiagrams = body.chapter_diagrams === undefined ? chapterDiagramsWire() : { chapter_diagrams: saveChapterDiagrams(body.chapter_diagrams) };
         if (body.voice !== undefined) voice.save(body.voice);
         if (promptsChange) saveInboxPromptsChange(promptsChange);
+        notifyPrefs(inboxPrefKeysOf("settings", body), rowsBy, req);
         return json({ inbox_tool: inboxTool, notifications, sound, tailscale: tailnet, updates: updateState, theme, text_size: textSize, favicon, ...reactions, ...rows, ...sidebar, diff_style: diffOptions.diff_style, diff_options: diffOptions, experimental, tour, board, steps, bro, float_drafts: floatDrafts, mark_read_warning: markReadWarning, ...heldSwitch("code_review", codeReview.on, body.code_review !== undefined), ...heldSwitch("shape", shape.on, body.shape !== undefined), ...systemAnswer, ...chapterDiagrams, voice: voice.settings(via), prompts: promptsState(), cookie_host: cookieHost ?? cookieHostWire() });
       }
       // Voice dictation (inbox-voice.ts). A read here can start a `codex`, so another site's is refused too.
@@ -6156,8 +6217,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
 
       // Launch: Stop, Open in Terminal, Delete, Try again, Trust folder and its settings (404 while `inboxLaunch.enabled` is off, but for the settings route).
       const door = fromDeviceDoor.get(req) ?? null;
+      const launchSettings = path === "/api/inbox/launch/settings" && req.method === "POST" ? await req.clone().json().catch(() => null) : null;
       const launched = await launch.route(req, path, via, door);
-      if (launched) return launched;
+      if (launched) {
+        if (launchSettings && launched.status === 200) notifyPrefs(inboxPrefKeysOf("launch", launchSettings as Record<string, unknown>), null, req);
+        return launched;
+      }
       // Compose: live sessions in every project, a new thread, Send to another session, drafts and uploads.
       // The device door is never the owner here: it may not trust a folder, so it is offered none.
       // A linked machine is the owner's other computer: it may trust a folder for a press in its window (remote launch).

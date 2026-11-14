@@ -383,4 +383,33 @@ describe("the agent door", () => {
     await until(() => hook.seen.length === 1);
     expect(String(hook.seen[0]!.text)).toContain("Yes, fix it.");
   });
+
+  test("a wake address and key set through /api/inbox/prefs: saved, and the key in no answer and no read", async () => {
+    const w = await world();
+    const paired = await w.call("/api/inbox/cloud-agents", { name: "Nightly fixer", preset: "grok-bot" });
+    const agent = paired.json.agent as InboxCloudAgentView;
+    const key = `cloud_agents.${agent.session.slice("cloud.".length)}.wake`;
+    const listed = async () => JSON.stringify((await w.call("/api/inbox/prefs?group=cloud_agents")).json);
+    expect(JSON.parse(await listed()).prefs).toEqual([expect.objectContaining({ key, value: "not set", secret: true })]);
+
+    const hook = stubRoutine();
+    const bad = await w.call("/api/inbox/prefs", { set: { [key]: { url: "http://not-https.example/hook", key: KEY } } });
+    expect(bad.status).toBe(422);
+    expect(JSON.stringify(bad.json)).not.toContain(KEY);
+    const saved = await w.call("/api/inbox/prefs", { set: { [key]: { url: hook.url, key: KEY } } });
+    expect(saved.status).toBe(200);
+    expect(JSON.stringify(saved.json)).not.toContain(KEY);
+    expect(saved.json.changes).toEqual([{ key, from: "not set", to: "set" }]);
+    expect(readFileSync(cloudAgentsPath(w.dataDir), "utf8")).toContain(hook.url);
+    expect(await listed()).not.toContain(KEY);
+    expect(JSON.parse(await listed()).prefs[0].value).toBe("set");
+
+    // Reset removes it: the address and key leave the file and the agent polls.
+    const removed = await w.call("/api/inbox/prefs", { reset: [key] });
+    expect(removed.status).toBe(200);
+    expect(removed.json.changes).toEqual([{ key, from: "set", to: "not set" }]);
+    const file = readFileSync(cloudAgentsPath(w.dataDir), "utf8");
+    expect(file).not.toContain(hook.url);
+    expect(file).not.toContain(KEY);
+  });
 });

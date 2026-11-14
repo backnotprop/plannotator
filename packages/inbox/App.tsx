@@ -198,10 +198,10 @@ import { ListColumnEdge } from './shell/ListColumnEdge';
 import { backBy, backTo, pushScreen, settleLanding, whileWritingRoute, withoutClickSignal } from './history';
 import { parseFileView, sameScreenAnyView } from './fileView';
 import { fileEntryOp, fullExitFile, fullFromSide, pageBackPastSwitch, withFullMark, type FrameMove, type FullMark } from './fullScreenOrigin';
-import { adoptSavedTheme, inboxServerSync, useInboxThemePick } from './theme';
-import { adoptSavedDiffOptions } from './diffOptions';
-import { adoptSavedTextSize, applyRememberedTextSize } from './textSize';
-import { adoptSavedFavicon, chooseFavicon, useInboxFavicon, useInboxFaviconBadgeHref, useInboxFaviconHref } from './faviconChoice';
+import { adoptSavedTheme, inboxServerSync, takeSavedTheme, useInboxThemePick } from './theme';
+import { adoptSavedDiffOptions, takeSavedDiffOptions } from './diffOptions';
+import { adoptSavedTextSize, applyRememberedTextSize, takeSavedTextSize, textSizeReadMark } from './textSize';
+import { adoptSavedFavicon, chooseFavicon, takeSavedFavicon, faviconReadMark, useInboxFavicon, useInboxFaviconBadgeHref, useInboxFaviconHref } from './faviconChoice';
 import { adoptSavedReactions, hearReactionsEvent, onSavedReactionsFailed, reactionsReadMark } from './reactions';
 import { movedSettingsHash, parseSettingsHash, settingsHash, type SettingsSection } from './settingsRoute';
 import { hiddenKnownAnswers } from './feedbackKnown';
@@ -1997,6 +1997,36 @@ function Inbox() {
     }
   }, []);
 
+  /**
+   * `event: prefs` (core inbox-prefs.ts): the settings read again, and the keys that paint (the theme, the text size, the
+   * tab icon, the diffs) taken at once, which the first-read adoption above never does. Only the newest read lands.
+   * Quiet: a read that fails waits for the next frame or reconnect.
+   */
+  const prefsReadSeq = useRef(0);
+  const takeSavedPrefs = useCallback(async (keys: readonly string[]) => {
+    const mine = ++prefsReadSeq.current;
+    try {
+      const mark = listLookReadMark();
+      const reactionsMark = reactionsReadMark();
+      const sidebarMark = sidebarLayoutReadMark();
+      const textSizeMark = textSizeReadMark();
+      const faviconMark = faviconReadMark();
+      const next = await inboxApi.settings();
+      if (mine !== prefsReadSeq.current) return;
+      if (keys.some((key) => key === 'appearance.theme' || key.endsWith('_palette'))) takeSavedTheme(next.theme);
+      if (keys.includes('appearance.text_size')) takeSavedTextSize(next.text_size, textSizeMark);
+      if (keys.includes('appearance.tab_icon')) takeSavedFavicon(next.favicon, faviconMark);
+      if (keys.some((key) => key.startsWith('diff.'))) takeSavedDiffOptions(next.diff_options);
+      adoptSavedReactions(next.reactions, next.reactions_rev, reactionsMark);
+      adoptSavedRows(next.rows, next.rows_rev, mark);
+      adoptSavedSidebar(next.sidebar, next.sidebar_rev, sidebarMark);
+      if (keys.some((key) => key.startsWith('voice.'))) adoptVoiceSettings(next.voice);
+      setSettings(next);
+    } catch {
+      // Kept as it is: the next frame, or the stream's reconnect, reads again.
+    }
+  }, []);
+
   // Settings → Storage's sizes (GET /api/inbox/settings/storage): the server walks every file for them, so only that
   // panel asks, each time it is shown. Kept for the visit. One read at a time, given up after STORAGE_READ_MS so a
   // held connection never locks Storage; a Delete's answer carries fresh sizes and wins over a read that started
@@ -2312,6 +2342,9 @@ function Inbox() {
       }, delay);
     };
     let snoozesTimer: ReturnType<typeof setTimeout> | null = null;
+    let prefsTimer: ReturnType<typeof setTimeout> | null = null;
+    /** The keys of `event: prefs` frames heard since the last settings read they asked for. */
+    const prefsHeard = new Set<string>();
     let priorityTimer: ReturnType<typeof setTimeout> | null = null;
     let cardsTimer: ReturnType<typeof setTimeout> | null = null;
     let machinesTimer: ReturnType<typeof setTimeout> | null = null;
@@ -2593,6 +2626,17 @@ function Inbox() {
           if (!hearAgentFacesEvent(data)) listAfterEvents(60);
         },
         onReactions: (reactions, rev) => hearReactionsEvent(reactions, rev),
+        // Preferences saved here, in another window or by an agent: the settings read again, what paints taken at once.
+        onPrefs: (keys) => {
+          for (const key of keys) prefsHeard.add(key);
+          if (prefsTimer) clearTimeout(prefsTimer);
+          prefsTimer = setTimeout(() => {
+            const heard = [...prefsHeard];
+            prefsHeard.clear();
+            void takeSavedPrefs(heard);
+            if (heard.some((key) => key.startsWith('agents.'))) void refreshAgents();
+          }, 60);
+        },
         // A capability switch saved here or in another window (approval "inbox-thread-steps"; the Board too): every window follows.
         onCapabilities: (capabilities) => {
           // Code review and Shape move the "/" list: the next box reads the catalog again.
@@ -2745,11 +2789,12 @@ function Inbox() {
       if (draftsTimer) clearTimeout(draftsTimer);
       if (cardsTimer) clearTimeout(cardsTimer);
       if (snoozesTimer) clearTimeout(snoozesTimer);
+      if (prefsTimer) clearTimeout(prefsTimer);
       if (priorityTimer) clearTimeout(priorityTimer);
       if (machinesTimer) clearTimeout(machinesTimer);
       if (machineThreadTimer) clearTimeout(machineThreadTimer);
     };
-  }, [refreshList, refreshSnoozes, refreshPriority, refreshSettings, refreshThread, refreshDrafts, refreshCards, refreshDecisions, observeEvent, flushNotifications, setNotifyReach, windowReport, reportWindow]);
+  }, [refreshList, refreshSnoozes, refreshPriority, refreshSettings, takeSavedPrefs, refreshAgents, refreshThread, refreshDrafts, refreshCards, refreshDecisions, observeEvent, flushNotifications, setNotifyReach, windowReport, reportWindow]);
 
   // Opening a thread: read it, record the look, and update its row in place.
   // While any thread is open the list holds still (settle.ts): the look
