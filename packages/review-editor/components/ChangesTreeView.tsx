@@ -212,6 +212,7 @@ export const ChangesTreeView: React.FC<ChangesTreeViewProps> = (props) => {
     },
     rows: {
       gitStatusPlacement: 'start',
+      nameTruncation: 'end',
       renderParts,
       onPartClick: ({ partId, path }) => {
         const { props: p, layout: l } = live.current;

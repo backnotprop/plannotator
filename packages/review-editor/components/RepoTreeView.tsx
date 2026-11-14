@@ -163,6 +163,7 @@ export const RepoTreeView: React.FC<RepoTreeViewProps> = (props) => {
     },
     rows: {
       gitStatusPlacement: 'start',
+      nameTruncation: 'end',
       renderParts,
       onPartClick: ({ partId, path }) => {
         const { props: p } = live.current;

@@ -14,6 +14,7 @@ Our review tree puts controls and numbers in its rows. Upstream rows take one no
 | A part with an `id` is a button (`role="button"`, `aria-pressed` from `pressed`) and calls `rows.onPartClick({ partId, path, row })`; a part may carry an icon and text together | Clicking the viewed circle or git add must not select or open the file; an open-threads count is an icon and a number |
 | `rows.onDoubleClick({ path, row })` | Double-click pins a file |
 | `rows.gitStatusPlacement: 'start'` | The status letter before the name, as in our tree |
+| `rows.nameTruncation: 'end'` | A name as one string with an end ellipsis (`row-name` part), cut at a whole letter; Pierre's middle truncation left slivers of cut letters and cut names that still had room |
 | `onDirectoryExpand(path)` (a tree option) | All files lists folders lazily: an unloaded folder is a path ending in `/`; when it opens we load its children and `batch` them in |
 | `model.refreshRows()` | Re-runs `renderParts` and `renderRowDecoration` after the host's state (viewed, staged, comments) changes |
 | Shadow parts on row sections: `row-spacing`, `row-icon row-icon-file|directory`, `row-lead`, `row-git row-git-file|directory`, `row-content` (+ `row-content-muted`, `row-content-<tone>`), `row-decoration`, `row-trail` (+ `row-lead-<tone>`, `row-trail-<tone>`), `row-part`, `row-part-<id>`, `row-part-pressed`, and `search` / `search-open` on the find box | Stable styling from outside the shadow root with `::part()`, instead of CSS against internal attributes |

@@ -203,4 +203,11 @@ describe.skipIf(!hasDom)('The Changes tree on Pierre trees', () => {
     await rerender(<Tree groupByKind activeFileIndex={0} />);
     expect(row(el, 'Generated/').getAttribute('aria-expanded')).toBe('true');
   });
+
+  test('a file name is one whole string cut at its end, not split in the middle', async () => {
+    const el = await mount(<Tree files={[file('src/an-extremely-long-file-name-for-the-tree.ts')]} activeFileIndex={0} />);
+    const name = row(el, 'an-extremely-long-file-name-for-the-tree.ts').querySelector('[data-item-name]')!;
+    expect(name.textContent).toBe('an-extremely-long-file-name-for-the-tree.ts');
+    expect(row(el, 'an-extremely-long-file-name-for-the-tree.ts').querySelector('[data-truncate-container]')).toBeNull();
+  });
 });

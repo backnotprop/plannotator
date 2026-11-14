@@ -30,7 +30,7 @@
   --trees-git-lane-width-override: 12px;
   --trees-git-added-color-override: var(--success);
   --trees-git-deleted-color-override: var(--destructive);
-  --trees-git-modified-color-override: color-mix(in oklab, var(--muted-foreground) 60%, transparent);
+  --trees-git-modified-color-override: var(--muted-foreground);
   --trees-git-renamed-color-override: var(--muted-foreground);
   --trees-git-untracked-color-override: var(--muted-foreground);
   --trees-scrollbar-thumb-override: color-mix(in oklab, var(--foreground) 18%, transparent);
@@ -44,6 +44,7 @@
 }
 .review-changes-tree::part(row-git) {
   font-size: 12px;
+  font-weight: 500;
   line-height: 1;
 }
 .review-changes-tree::part(row-content) {
@@ -83,7 +84,7 @@
   border-radius: 4px;
 }
 .review-changes-tree::part(row-part-viewed) {
-  color: color-mix(in oklab, var(--muted-foreground) 60%, transparent);
+  color: var(--muted-foreground);
 }
 .review-changes-tree::part(row-part-viewed row-part-pressed) {
   color: var(--success);
@@ -116,14 +117,13 @@
   flex-direction: column;
   background: var(--popover);
   color: var(--popover-foreground);
-  border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 8px;
   box-shadow: var(--float-shadow);
 }
 .review-tree-menu > button {
   padding: 6px 8px;
   border-radius: 4px;
-  font-size: 12px;
+  font-size: 13px;
   text-align: left;
   color: color-mix(in oklab, var(--foreground) 80%, transparent);
 }
