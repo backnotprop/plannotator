@@ -74,7 +74,7 @@ export function LiveThreadCard({ thread, messages, actions }: { thread: PlacedTh
     <div className="live-thread mx-2 my-1 rounded border border-border bg-card py-1" data-live-thread={conversation.id} data-place={now.place}>
       {now.place === 'changed' ? (
         <div className="px-3 py-1 text-[12px] leading-5 text-muted-foreground" data-live-changed>
-          <div>Outdated: the code here changed after this comment. It read:</div>
+          <div>Code changed since this comment. It was:</div>
           <pre className="mt-0.5 overflow-x-auto rounded bg-muted px-2 py-0.5 font-mono text-[12px] leading-5 text-muted-foreground">{conversation.anchor.code.join('\n')}</pre>
         </div>
       ) : now.place === 'moved' ? (
