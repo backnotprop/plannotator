@@ -3,13 +3,6 @@ import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { Settings } from './Settings';
 
-/**
- * The compact review shell renders a session-only unified diff, so the
- * Display tab's Split/Unified control had no effect there while still writing
- * the persisted DESKTOP preference. Hide it on compact and say what the phone
- * is doing; leave the desktop control exactly as it was.
- */
-
 const hasDom = typeof document !== 'undefined';
 let host: HTMLDivElement | null = null;
 let root: Root | null = null;
@@ -49,21 +42,22 @@ afterEach(async () => {
   if (hasDom) document.body.replaceChildren();
 });
 
-describe.if(hasDom)('review Display tab diff style', () => {
-  test('desktop keeps the Split/Unified control', async () => {
+describe.if(hasDom)('review Editor tab diff display', () => {
+  test('desktop points to the header button and the gear instead of repeating their rows', async () => {
     await openDisplayTab(false);
 
-    const options = styleControlButtons();
-    expect(options.map((button) => button.textContent?.trim()).sort()).toEqual(['Split', 'Unified']);
+    expect(styleControlButtons()).toHaveLength(0);
+    expect(document.querySelector('[data-settings-diff-display]')?.textContent).toContain('the gear above the diff');
+    expect(document.body.textContent).not.toContain('Wrap long lines');
     expect(document.body.textContent).not.toContain('unified diffs for the session');
   });
 
-  test('compact hides the control and explains the session behavior', async () => {
+  test('a phone has no gear, so the same options sit in Settings, with the session note and no Split/Unified', async () => {
     await openDisplayTab(true);
 
     expect(styleControlButtons()).toHaveLength(0);
     expect(document.body.textContent).toContain('unified diffs for the session');
-    // The rest of the tab is unaffected.
-    expect(document.body.textContent).toContain('Diff Style');
+    const wrap = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="switch"]')).find((b) => b.textContent?.includes('Wrap long lines'));
+    expect(wrap).toBeDefined();
   });
 });

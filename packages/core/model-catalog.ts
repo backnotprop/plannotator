@@ -1,6 +1,6 @@
 /**
  * Model catalogs — the per-provider model lists every picker (Ask AI and the
- * review / Guided Review / Code Tour launchers) reads.
+ * review / Guided Review launchers) reads.
  *
  * The real lists come from the tool the user runs: Claude from the Agent SDK's
  * `supportedModels()` against the installed `claude`, Codex from the

@@ -190,14 +190,21 @@ const headerUnder = (page: Page, x: number, y: number) =>
     [x, y],
   );
 
+async function openAllChanges(page: Page): Promise<void> {
+  const row = page.locator('[data-review-sidebar] [title="Every change of this review in one view"]');
+  if (await row.count()) await row.click();
+  await expect(page.locator('[data-review-sidebar] [title="Every change of this review in one view"]')).toHaveCount(0);
+}
+
 test('All changes: opening a folded file leaves every header where it was', async ({ browser }) => {
   await withReview(browser, async (page) => {
-    await page.locator('[data-review-sidebar] [title="Every change of this review in one view"]').click();
-    // Fold every file (the dock button reads "Expand all files" once they all are).
-    const foldToggle = page.getByRole('button', { name: /^(Collapse|Expand) all files$/ });
+    await openAllChanges(page);
+    await page.locator('[data-diff-display-options]').click();
+    const foldToggle = page.locator('[data-collapse-all-files]');
     await expect(foldToggle).toBeVisible();
-    if ((await foldToggle.getAttribute('aria-label')) === 'Collapse all files') await foldToggle.click();
-    await expect(page.getByRole('button', { name: 'Expand all files' })).toBeVisible();
+    if ((await foldToggle.textContent())?.includes('Collapse all files')) await foldToggle.click();
+    await expect(foldToggle).toHaveText('Expand all files');
+    await page.keyboard.press('Escape');
     await expect.poll(async () => (await mainHeaders(page)).length).toBe(15);
     await expect.poll(async () => (await mainHeaders(page)).filter((h) => h.height > 40).length).toBe(0);
 
@@ -228,9 +235,11 @@ test('All changes: Collapse all files clicked while the code is still loading fo
   await withReview(
     browser,
     async (page) => {
-      await page.locator('[data-review-sidebar] [title="Every change of this review in one view"]').click();
-      await page.getByRole('button', { name: 'Collapse all files' }).click();
-      await expect(page.getByRole('button', { name: 'Expand all files' })).toBeVisible();
+      await openAllChanges(page);
+      await page.locator('[data-diff-display-options]').click();
+      await page.locator('[data-collapse-all-files]').click();
+      await expect(page.locator('[data-collapse-all-files]')).toHaveText('Expand all files');
+      await page.keyboard.press('Escape');
       await expect.poll(async () => (await mainHeaders(page)).length).toBe(15);
       await expect.poll(async () => (await mainHeaders(page)).filter((h) => h.height > 40).length).toBe(0);
     },
@@ -262,7 +271,7 @@ test('Hide viewed: the file you leave keeps its row while the pointer is in the 
     const y = box.y + box.height / 2;
     await page.mouse.move(x, y);
     await page.mouse.click(x, y);
-    await expect(page.locator('[data-panel-viewed-controls]')).toHaveText(/^1 of 15 viewed$/);
+    await expect(page.locator('[data-panel-viewed-controls]')).toHaveText(/^1\/15$/);
 
     // The row you left is still there, and nothing moved under the pointer.
     await expect(first).toHaveCount(1);

@@ -1,3 +1,4 @@
+import { DiffDisplayOptionsBody } from './DiffDisplayOptions';
 import type { UpdateCheckSetting } from '../hooks/useUpdateCheckSetting';
 import { cookieHostDescription, type CookieHostSetting } from '../hooks/useCookieHostSetting';
 import type { PackageChangesSetting } from '../hooks/usePackageChangesSetting';
@@ -5,7 +6,6 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import type { AnnotateAgentTerminalSide } from '@plannotator/core/agent-terminal';
 import type { Origin } from '@plannotator/core/agents';
-import type { DiffLineBgIntensity } from '@plannotator/core/config-types';
 import type { TokenHoverDelay } from '@plannotator/core/token-hover';
 import { basenameFromPath } from '@plannotator/core/source-save';
 import {
@@ -220,10 +220,6 @@ const DIFF_FONT_OPTIONS = [
   { value: 'Atkinson Hyperlegible Mono', label: 'Atkinson Hyperlegible' },
 ];
 
-export const DIFF_STYLE_OPTIONS = [
-  { value: 'split' as const, label: 'Split' },
-  { value: 'unified' as const, label: 'Unified' },
-];
 /**
  * The modifier gate is the platform's primary modifier: Cmd on macOS, Ctrl on
  * Windows and Linux. Labeled through modKeyWord so the control names the key
@@ -240,26 +236,6 @@ export const TOKEN_HOVER_DELAY_OPTIONS = [
   { value: '150' as const, label: 'Fast' },
   { value: '300' as const, label: 'Default' },
   { value: '700' as const, label: 'Relaxed' },
-];
-export const OVERFLOW_OPTIONS = [
-  { value: 'scroll' as const, label: 'Scroll' },
-  { value: 'wrap' as const, label: 'Wrap' },
-];
-export const INDICATOR_OPTIONS = [
-  { value: 'bars' as const, label: 'Bars' },
-  { value: 'classic' as const, label: 'Classic' },
-  { value: 'none' as const, label: 'None' },
-];
-export const LINE_DIFF_OPTIONS = [
-  { value: 'word-alt' as const, label: 'Word-Alt' },
-  { value: 'word' as const, label: 'Word' },
-  { value: 'char' as const, label: 'Char' },
-  { value: 'none' as const, label: 'None' },
-];
-export const LINE_BG_INTENSITY_OPTIONS: { value: DiffLineBgIntensity; label: string }[] = [
-  { value: 'subtle', label: 'Subtle' },
-  { value: 'normal', label: 'Normal' },
-  { value: 'strong', label: 'Strong' },
 ];
 const DEFAULT_DIFF_TYPE_OPTIONS = [
   // "All Changes" belongs to since-base (the flagship composite); uncommitted
@@ -641,16 +617,16 @@ const ReviewTab: React.FC<{ sinceBaseUnavailable?: boolean }> = ({ sinceBaseUnav
         <div id="settings-review-git" className={REVIEW_SECTION_HEADING}>Git</div>
         <div className="space-y-2">
           <div>
-            <div className="text-sm font-medium">Default review view</div>
-            <div className="text-xs text-muted-foreground">Which panel a code review opens in</div>
+            <div className="text-sm font-medium">Default file grouping</div>
+            <div className="text-xs text-muted-foreground">How the file tree groups a code review's files when it opens</div>
             {/* This is a GLOBAL preference — never hide the options because the
                 CURRENT repo can't serve them; just say so. Without this note,
                 picking Git status on a repo whose base ref doesn't resolve
                 silently falls back to Tree and the setting looks broken. */}
             {sinceBaseUnavailable && (
               <div className="text-xs text-warning mt-1">
-                Git status view isn't available in this repository (its base branch
-                couldn't be resolved) — reviews here open in Tree. The preference
+                Grouping by git status isn't available in this repository (its base branch
+                couldn't be resolved), so reviews here open grouped by kind. The preference
                 still applies in repositories where it works.
               </div>
             )}
@@ -659,8 +635,8 @@ const ReviewTab: React.FC<{ sinceBaseUnavailable?: boolean }> = ({ sinceBaseUnav
               via the panel toggle) and is never the opening view. */}
           <SegmentedControl
             options={[
-              { value: 'sections' as const, label: 'Git status' },
-              { value: 'tree' as const, label: 'Tree' },
+              { value: 'sections' as const, label: 'By git status' },
+              { value: 'tree' as const, label: 'By kind' },
             ]}
             value={reviewPanelView}
             onChange={setReviewPanelView}
@@ -886,15 +862,6 @@ const ExperimentalTab: React.FC = () => {
 };
 
 const ReviewDisplayTab: React.FC<{ isCompactTouchLayout?: boolean }> = ({ isCompactTouchLayout = false }) => {
-  const diffStyle = useConfigValue('diffStyle');
-  const diffOverflow = useConfigValue('diffOverflow');
-  const diffIndicators = useConfigValue('diffIndicators');
-  const diffLineDiffType = useConfigValue('diffLineDiffType');
-  const diffShowLineNumbers = useConfigValue('diffShowLineNumbers');
-  const diffShowBackground = useConfigValue('diffShowBackground');
-  const diffLineBgIntensity = useConfigValue('diffLineBgIntensity');
-  const diffHideWhitespace = useConfigValue('diffHideWhitespace');
-  const diffExpandUnchanged = useConfigValue('diffExpandUnchanged');
   const diffFontFamily = useConfigValue('diffFontFamily');
   const diffFontSize = useConfigValue('diffFontSize');
   const tokenHoverTrigger = useConfigValue('tokenHoverTrigger');
@@ -989,110 +956,25 @@ const ReviewDisplayTab: React.FC<{ isCompactTouchLayout?: boolean }> = ({ isComp
 
       <div className="border-t border-border" />
 
-      {/* Diff Style. The compact touch shell renders a session-only unified
-          diff, so the control there would look dead while quietly rewriting
-          the DESKTOP preference. Say what the phone is doing instead. */}
-      <div className="space-y-2">
-        <div>
-          <div className="text-sm font-medium">Diff Style</div>
-          <div className="text-xs text-muted-foreground">Split: side by side. Unified: one column.</div>
-          {isCompactTouchLayout && (
-            <div className="text-xs text-muted-foreground mt-1">
-              This layout shows unified diffs for the session; your desktop
-              preference is unchanged.
-            </div>
-          )}
-        </div>
-        {!isCompactTouchLayout && (
-          <SegmentedControl options={DIFF_STYLE_OPTIONS} value={diffStyle} onChange={(v) => configStore.set('diffStyle', v)} />
-        )}
-      </div>
-
-      <div className="border-t border-border" />
-
-      {/* Line Overflow */}
-      <div className="space-y-2">
-        <div>
-          <div className="text-sm font-medium">Line Overflow</div>
-          <div className="text-xs text-muted-foreground">How to handle long lines in diffs</div>
-        </div>
-        <SegmentedControl options={OVERFLOW_OPTIONS} value={diffOverflow} onChange={(v) => configStore.set('diffOverflow', v)} />
-      </div>
-
-      <div className="border-t border-border" />
-
-      {/* Change Indicators */}
-      <div className="space-y-2">
-        <div>
-          <div className="text-sm font-medium">Change Indicators</div>
-          <div className="text-xs text-muted-foreground">Style of +/- markers in the gutter</div>
-        </div>
-        <SegmentedControl options={INDICATOR_OPTIONS} value={diffIndicators} onChange={(v) => configStore.set('diffIndicators', v)} />
-      </div>
-
-      <div className="border-t border-border" />
-
-      {/* Inline Diff Granularity */}
-      <div className="space-y-2">
-        <div>
-          <div className="text-sm font-medium">Inline Diff Granularity</div>
-          <div className="text-xs text-muted-foreground">Highlight granularity for inline changes</div>
-        </div>
-        <SegmentedControl options={LINE_DIFF_OPTIONS} value={diffLineDiffType} onChange={(v) => configStore.set('diffLineDiffType', v)} />
-      </div>
-
-      <div className="border-t border-border" />
-
-      {/* Show Line Numbers */}
-      <ToggleSwitch
-        checked={diffShowLineNumbers}
-        onChange={(v) => configStore.set('diffShowLineNumbers', v)}
-        label="Show Line Numbers"
-      />
-
-      <div className="border-t border-border" />
-
-      {/* Show Diff Background */}
-      <ToggleSwitch
-        checked={diffShowBackground}
-        onChange={(v) => configStore.set('diffShowBackground', v)}
-        label="Show Diff Background"
-        description="Colored backgrounds on added/deleted lines"
-      />
-
-      {/* Line Background Intensity */}
-      {diffShowBackground && (
-        <div className="space-y-2 pl-4">
+      {isCompactTouchLayout ? (
+        <div className="space-y-2" data-settings-diff-display="">
           <div>
-            <div className="text-sm font-medium">Line Background Intensity</div>
-            <div className="text-xs text-muted-foreground">How prominent the colored line backgrounds appear</div>
+            <div className="text-sm font-medium">Diff display</div>
+            <div className="text-xs text-muted-foreground">
+              This layout shows unified diffs for the session; your desktop preference is unchanged.
+            </div>
           </div>
-          <SegmentedControl options={LINE_BG_INTENSITY_OPTIONS} value={diffLineBgIntensity} onChange={(v) => configStore.set('diffLineBgIntensity', v)} />
+          <DiffDisplayOptionsBody />
+        </div>
+      ) : (
+        <div className="space-y-1" data-settings-diff-display="">
+          <div className="text-sm font-medium">Diff display</div>
+          <div className="text-xs text-muted-foreground">
+            Split or Unified is the button next to the gear above the diff. The gear holds the rest: wrap, line numbers,
+            backgrounds, change marks, changed words, tab size, whole file and hide whitespace.
+          </div>
         </div>
       )}
-
-      <div className="border-t border-border" />
-
-      {/* Expand Unchanged Regions */}
-      <ToggleSwitch
-        checked={diffExpandUnchanged}
-        onChange={(v) => configStore.set('diffExpandUnchanged', v)}
-        label="Expand Unchanged Regions"
-        description="Show full file content around changes by default"
-      />
-
-      <div className="border-t border-border" />
-
-      {/* Hide Whitespace */}
-      <ToggleSwitch
-        checked={diffHideWhitespace}
-        onChange={(v) => configStore.set('diffHideWhitespace', v)}
-        label="Hide Whitespace"
-        description="Ignore whitespace-only changes in diffs"
-      />
-
-      <div className="border-t border-border" />
-
 
     </>
   );

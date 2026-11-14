@@ -2,7 +2,7 @@ import React from 'react';
 import { ContextMenu } from '@base-ui/react/context-menu';
 import type { FileTreeNode as TreeNode } from '../utils/buildFileTree';
 import { folderDisplayPath } from '../utils/fileKindTree';
-import { ViewedControl, StageControl, AnnotationBadge, CommittedDot, ChangeTypeLetter, CountColumns } from './FileRowBits';
+import { ViewedControl, StageControl, AnnotationBadge, ChangeTypeLetter, CountColumns } from './FileRowBits';
 import { diffFileTreeIndent } from '@plannotator/ui/components/DiffFileTree';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 
@@ -212,7 +212,7 @@ export const FileTreeNodeItem: React.FC<FileTreeNodeProps> = ({
           <button
             onClick={() => onSelectFile(node.fileIndex!)}
             onDoubleClick={() => onDoubleClickFile?.(node.fileIndex!)}
-            className={`file-tree-item w-full text-left group ${isActive ? 'active' : isScrollActive ? 'scroll-active' : ''} ${annotationCount > 0 ? 'has-annotations' : ''} ${isStaged && !sinceBaseMode ? 'staged' : ''}`}
+            className={`file-tree-item w-full text-left group ${isActive ? 'active' : isScrollActive ? 'scroll-active' : ''} ${annotationCount > 0 ? 'has-annotations' : ''} ${isStaged && !sinceBaseMode ? 'staged' : ''} ${isViewed && showViewedControls ? 'viewed' : ''}`}
             style={{ paddingLeft }}
             title={node.path}
           />
@@ -225,7 +225,7 @@ export const FileTreeNodeItem: React.FC<FileTreeNodeProps> = ({
               sit in the panel's two number columns. */}
           <div className="review-file-row-main">
             {showViewedControls && (
-              <ViewedControl isViewed={isViewed} onToggle={onToggleViewed ? () => onToggleViewed(node.path) : undefined} forceVisible={isActive} />
+              <ViewedControl isViewed={isViewed} onToggle={onToggleViewed ? () => onToggleViewed(node.path) : undefined} />
             )}
             {showStageControls && (
               sinceBaseMode && (isStageable || isStaged) ? (
@@ -234,9 +234,7 @@ export const FileTreeNodeItem: React.FC<FileTreeNodeProps> = ({
                   isStaging={stagingFile === node.path}
                   onStage={onStageFile ? () => onStageFile(node.path) : undefined}
                 />
-              ) : sinceBaseMode && sectionEntry?.group === 'committed' ? (
-                <CommittedDot />
-              ) : sinceBaseMode && onStageFile ? (
+              ) : sinceBaseMode && (onStageFile || sectionEntry?.group === 'committed') ? (
                 <span className="w-4 h-4 flex-shrink-0" aria-hidden="true" />
               ) : isStaged && !sinceBaseMode ? (
                 <span className="text-[10px] text-primary font-medium flex items-center justify-center w-4 flex-shrink-0" title="Staged (git add)">+</span>

@@ -47,7 +47,6 @@ import {
 } from './utils/pendingExternalTab';
 import { PRPlatformIcon } from '@plannotator/ui/components/PRPlatformIcon';
 import { RepoIcon } from '@plannotator/ui/components/RepoIcon';
-import { PullRequestIcon } from '@plannotator/ui/components/PullRequestIcon';
 import { getPlatformLabel, getMRLabel, getMRNumberLabel, getDisplayRepo, getPRNumber, getPRPlatformCapabilities, prBlobPermalink } from '@plannotator/shared/pr-types';
 import type { SemanticDiffAdvert } from '@plannotator/shared/semantic-diff-types';
 import type { CallFlowAdvert, CallFlowNode } from '@plannotator/shared/call-flow-types';
@@ -64,39 +63,11 @@ import { useAIProviderConfig } from '@plannotator/ui/hooks/useAIProviderConfig';
 import { useAIProviderActivation } from '@plannotator/ui/hooks/useAIProviderActivation';
 import { isSessionBridgeProvider } from '@plannotator/ui/utils/aiProvider';
 import type { SessionAskAction } from '@plannotator/ui/components/ai/SessionAskNotice';
-import { LookAndFeelAnnouncementDialog } from '@plannotator/ui/components/LookAndFeelAnnouncementDialog';
-import { usePlanLookDialog } from '@plannotator/ui/hooks/usePlanLookDialog';
-import { TerminalToolsAnnouncementDialog } from '@plannotator/ui/components/TerminalToolsAnnouncementDialog';
 import {
-  markTerminalToolsAnnouncementSeen,
-  needsTerminalToolsAnnouncement,
-  terminalToolsAnnouncementCanShow,
-} from '@plannotator/ui/utils/terminalToolsAnnouncement';
-import { InboxAnnouncementDialog } from '@plannotator/ui/components/InboxAnnouncementDialog';
-import {
-  inboxAnnouncementEligible,
   isVSCodeWebview,
-  markInboxAnnouncementSeen,
-  needsInboxAnnouncement,
 } from '@plannotator/ui/utils/inboxAnnouncement';
-import { AskSessionAnnouncementDialog } from '@plannotator/ui/components/AskSessionAnnouncementDialog';
-import {
-  askSessionAnnouncementEligible,
-  askSessionAnnouncementPendingThisLoad,
-  connectedAskSessionAgent,
-  markAskSessionAnnouncementSeen,
-} from '@plannotator/ui/utils/askSessionAnnouncement';
 import { askSessionSetupHint } from '@plannotator/ui/utils/askSessionSetupHint';
-import { useFirstRunAnnouncementWindow } from '@plannotator/ui/hooks/useFirstRunAnnouncementWindow';
-import { AgentToolAnnouncementDialog } from '@plannotator/ui/components/AgentToolAnnouncementDialog';
-import {
-  agentToolAnnouncementEligible,
-  agentToolAnnouncementPendingThisLoad,
-  agentToolOfferHostOf,
-  markAgentToolAnnouncementSeen,
-} from '@plannotator/ui/utils/agentToolAnnouncement';
 import { useAgentToolSetting } from '@plannotator/ui/hooks/useAgentToolSetting';
-import { useLatchedTrue } from '@plannotator/ui/hooks/useLatchedTrue';
 import { CodeAnnotation, CodeAnnotationType, SelectedLineRange, TokenAnnotationMeta, ConventionalLabel, ConventionalDecoration, Annotation, CommentAnnotation, AgentJobInfo, type ArtifactAnnotationMeta, type CallFlowAnnotationTarget, type ImageAttachment, type MarkdownPreviewAnchor } from '@plannotator/ui/types';
 import type { CommentAskAIHandler } from '@plannotator/ui/components/CommentPopover';
 import { useResizablePanel } from '@plannotator/ui/hooks/useResizablePanel';
@@ -184,8 +155,6 @@ import {
 } from './components/ReviewHeaderMenu';
 import { ReviewSidebar } from './components/ReviewSidebar';
 import type { ReviewSidebarTab } from './components/ReviewSidebar';
-import { SparklesIcon } from '@plannotator/ui/components/SparklesIcon';
-import { ReviewAgentsIcon } from '@plannotator/ui/components/ReviewAgentsIcon';
 import { useSidebar } from '@plannotator/ui/hooks/useSidebar';
 import { useViewportEnvironment } from '@plannotator/ui/hooks/useViewportEnvironment';
 import { useCompactTouchLayout } from '@plannotator/ui/hooks/useIsMobile';
@@ -226,6 +195,11 @@ import { JobLogsProvider } from './dock/JobLogsContext';
 import { reviewPanelComponents } from './dock/reviewPanelComponents';
 import { ReviewDockTabRenderer } from './dock/ReviewDockTabRenderer';
 import { ReviewDockRightActions } from './dock/ReviewDockRightActions';
+import { ReviewPanelToggle } from './components/ReviewPanelToggle';
+import { ReviewHeaderStatus } from './components/ReviewHeaderStatus';
+import { watchLoneTabHeader } from './dock/loneTabHeader';
+import { HeaderTotals } from './components/HeaderTotals';
+import { COMPACT_REVIEW_HEADER_HEIGHT, REVIEW_HEADER_HEIGHT } from './utils/diffChromeMetrics';
 import { usePRContext } from './hooks/usePRContext';
 import {
   REVIEW_PANEL_TYPES,
@@ -251,40 +225,20 @@ import type { DiffFile, AnnotationScrollTarget } from './types';
 import { annotationMatchesPrScope, proseAnnotationMatchesPr } from './utils/annotationScope';
 import { annotationNavigation, reanchorCodeAnnotations, restorableViewedFiles } from '@plannotator/ui/utils/codeAnnotationAnchor';
 import { localReviewDraftTransport, withLocalReviewTarget } from './utils/localReviewDraft';
-import type { DiffOption, WorktreeInfo, GitContext, SinceBaseSections, CommitDiffInfo, ReviewSourceKind } from '@plannotator/shared/types';
-import { SectionsPanel } from './components/SectionsPanel';
+import type { DiffOption, GitContext, SinceBaseSections, CommitDiffInfo, ReviewSourceKind } from '@plannotator/shared/types';
 import type { ReviewPanelHeaderModel } from './components/ReviewPanelHeader';
 import { CommitsPanel } from './components/CommitsPanel';
 import { useCommitsView } from './hooks/useCommitsView';
 import { shouldRepairPanelPair } from './utils/panelPairRepair';
 import { resolvePanelView } from './utils/resolvePanelView';
 import { isCommitDiffType, resolveCommitExitDiff, type CommitViewRestoreTarget } from './utils/commitViewRestore';
-import { GuideIntroDialog } from './components/GuideIntroDialog';
-import { needsGuideIntro, markGuideIntroSeen, needsGuideHint, markGuideHintSeen } from './utils/guideIntro';
-import { EditModeAnnouncementDialog } from './components/EditModeAnnouncementDialog';
-import {
-  editModeAnnouncementCanShow,
-  enableEditSuggestionsFromAnnouncement,
-  markEditModeAnnouncementSeen,
-  needsEditModeAnnouncement,
-} from './utils/editModeAnnouncement';
-import { TokenHoverAnnouncementDialog } from './components/TokenHoverAnnouncementDialog';
-import {
-  markTokenHoverAnnouncementSeen,
-  resolveTokenHoverAnnouncementPending,
-  shouldConsumeTokenHoverAnnouncement,
-  tokenHoverAnnouncementCanShow,
-} from './utils/tokenHoverAnnouncement';
+import { needsGuideHint, markGuideHintSeen } from './utils/guideIntro';
 import { ExternalLineAnnotationComposer } from './components/ExternalLineAnnotationComposer';
-import { DestinationSpotlight } from './components/DestinationSpotlight';
-import { needsDestinationSpotlight, markDestinationSpotlightSeen } from './utils/destinationSpotlight';
 import { TextShimmer } from '@plannotator/ui/components/TextShimmer';
 import type { PRMetadata, PRReviewAction } from '@plannotator/shared/pr-types';
 import type { PRDiffScope, PRDiffScopeOption, PRStackInfo, PRStackTree } from '@plannotator/shared/pr-stack';
 import { altKey, isMac } from '@plannotator/ui/utils/platform';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
-import { TourDialog } from './components/tour/TourDialog';
-import { DEMO_TOUR_ID } from './demoTour';
 import { GuideScreen } from './components/guide/GuideScreen';
 import { DEMO_GUIDE_ID } from './demoGuide';
 import { buildPRArtifacts } from './utils/prArtifacts';
@@ -568,7 +522,6 @@ const ReviewApp: React.FC = () => {
     useState<LineAnnotationComposeRequest | null>(null);
   const nextLineAnnotationComposeRequestId = useRef(0);
   const [showExportModal, setShowExportModal] = useState(false);
-  const [showWorktreeDialog, setShowWorktreeDialog] = useState(false);
   const [openSettingsMenu, setOpenSettingsMenu] = useState(false);
   const [showNoAnnotationsDialog, setShowNoAnnotationsDialog] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -603,7 +556,6 @@ const ReviewApp: React.FC = () => {
   const confirmedAnalysisSettings = useRef({ semanticDiff: semanticDiffEnabled, callFlow: callFlowEnabled });
   // Global plan-look preference. Code review can resolve this shared first-use
   // choice even though the visual result applies to plan/document surfaces.
-  const gridEnabled = useConfigValue('gridEnabled');
 
   // Load custom diff font and override --font-mono for surrounding review elements
   useEffect(() => {
@@ -928,11 +880,6 @@ const ReviewApp: React.FC = () => {
   // One-time spotlight pointing first-time PR reviewers at the destination
   // switcher. Renders only after the first-run dialog chain has fully cleared.
   const destToggleRef = useRef<HTMLButtonElement | null>(null);
-  const [showDestSpotlight, setShowDestSpotlight] = useState(needsDestinationSpotlight);
-  const dismissDestSpotlight = useCallback(() => {
-    markDestinationSpotlightSeen();
-    setShowDestSpotlight(false);
-  }, []);
   const [isPlatformActioning, setIsPlatformActioning] = useState(false);
   const [platformActionError, setPlatformActionError] = useState<string | null>(null);
   const [platformUser, setPlatformUser] = useState<string | null>(null);
@@ -1047,11 +994,10 @@ const ReviewApp: React.FC = () => {
     [agentFindingSourcesKey],
   );
 
-  // Tour dialog state — opens as an overlay instead of a dock panel
-  const [tourDialogJobId, setTourDialogJobId] = useState<string | null>(null);
-
   // Dockview center panel API for the review workspace.
   const [dockApi, setDockApi] = useState<DockviewApi | null>(null);
+  const [dockActivePanelId, setDockActivePanelId] = useState<string | null>(null);
+  const [allChangesOpen, setAllChangesOpen] = useState(false);
   const filesRef = useRef(files);
   filesRef.current = files;
   const needsInitialDiffPanel = useRef(true);
@@ -1432,35 +1378,7 @@ const ReviewApp: React.FC = () => {
       setAiDefaultProvider(defaultProvider);
     },
   });
-  // The first-run chooser, or the one-time "moved to Clean" notice. Shared
-  // with the plan editor (one cookie marker), two-tab handling included.
-  const {
-    prompt: lookAndFeelPrompt,
-    open: showLookAndFeel,
-    dismiss: dismissLookAndFeel,
-  } = usePlanLookDialog(gridEnabled);
-  // One-time guided-review intro dialog + header Guide-button hint. The hint
-  // (shimmer + dot) is independent of the dialog: it runs until the first
-  // Guide click, even for users who dismissed the dialog without reading.
-  const [showGuideIntro, setShowGuideIntro] = useState(needsGuideIntro);
   const [guideHintActive, setGuideHintActive] = useState(needsGuideHint);
-  // FIRST in the dialog chain (guide intro → look-and-feel → review setup →
-  // edit mode). The intro only shows when a Guide button exists to point at
-  // (hasSearchableFiles) — on an empty diff it is skipped WITHOUT consuming
-  // the one-shot cookie, so the next session with files shows it. The other
-  // chain dialogs' gates must use this same visibility (not the raw
-  // showGuideIntro), or an empty diff would block them forever.
-  //
-  // Eligibility is LATCHED at the first post-load render (dialogs only mount
-  // once isLoading clears, so the latch is always set before they render):
-  // hasSearchableFiles changes on mid-session diff switches, and an
-  // empty→non-empty switch must not pop the intro over work in progress or
-  // yank an open look-and-feel dialog out from under the user.
-  const guideIntroEligibleRef = useRef<boolean | null>(null);
-  if (!isLoading && guideIntroEligibleRef.current === null) {
-    guideIntroEligibleRef.current = hasSearchableFiles;
-  }
-  const guideIntroVisible = aiUIEnabled && showGuideIntro && guideIntroEligibleRef.current === true;
   // Ack the hint on ANY path that opens the guide — keyboard shortcut,
   // job-completion auto-open, job cards — not just the header button's own
   // onClick; otherwise the shimmer resumes after the user closes a guide
@@ -1470,92 +1388,7 @@ const ReviewApp: React.FC = () => {
     markGuideHintSeen();
     setGuideHintActive(false);
   }, [guideOpen, guideHintActive]);
-  // One-time Edit Mode (edit-to-suggest) announcement. LAST in the dialog
-  // chain (guide intro → look-and-feel → edit mode) — the
-  // chain dialogs never stack. Skipped forever when the user already enabled
-  // the setting from Settings (latched at mount so enabling from the dialog
-  // itself doesn't unmount it mid-click).
-  const [editModeIntroPending, setEditModeIntroPending] = useState(
-    () => needsEditModeAnnouncement() && !configStore.get('editSuggestions'),
-  );
-  const editModeIntroVisible = editModeAnnouncementCanShow({
-    announcementPending: editModeIntroPending,
-    isLoading,
-    guideIntroVisible,
-    lookAndFeelVisible: showLookAndFeel,
-  });
-  const dismissEditModeIntro = useCallback(() => {
-    markEditModeAnnouncementSeen();
-    setEditModeIntroPending(false);
-  }, []);
-  const enableEditModeIntro = useCallback(() => {
-    enableEditSuggestionsFromAnnouncement();
-    setEditModeIntroPending(false);
-  }, []);
-  // One-time token hover card announcement. LAST in the dialog chain (guide
-  // intro → look-and-feel → edit mode → token hover) — the
-  // chain dialogs never stack. Latched at mount so choosing a trigger inside
-  // the dialog does not unmount it mid-click; a user who already has a
-  // non-default trigger never sees it (resolveTokenHoverAnnouncementPending).
-  const [tokenHoverIntroPending, setTokenHoverIntroPending] = useState(
-    resolveTokenHoverAnnouncementPending,
-  );
-  const dismissTokenHoverIntro = useCallback(() => {
-    markTokenHoverAnnouncementSeen();
-    setTokenHoverIntroPending(false);
-  }, []);
-  // Retiring the announcement for a reviewer who already chose a trigger is a
-  // WRITE, so it belongs here rather than in the state initializer above.
-  useEffect(() => {
-    if (shouldConsumeTokenHoverAnnouncement()) markTokenHoverAnnouncementSeen();
-  }, []);
-  // One-time terminal-tools announcement (Plannotator TUI + Herdr Annotate).
-  // LAST in the dialog chain, after every dialog that asks the reviewer to
-  // decide something. Latched at mount like its siblings: the dismiss writes
-  // the cookie, and re-reading it per render would unmount the dialog under
-  // its own click handler.
-  const [terminalToolsIntroPending, setTerminalToolsIntroPending] = useState(
-    needsTerminalToolsAnnouncement,
-  );
-  const dismissTerminalToolsIntro = useCallback(() => {
-    markTerminalToolsAnnouncementSeen();
-    setTerminalToolsIntroPending(false);
-  }, []);
-  // One-time Plannotator Inbox announcement, after the terminal-tools one
-  // (never on the same load). Latched at mount for the same reason.
-  const [inboxIntroPending, setInboxIntroPending] = useState(needsInboxAnnouncement);
-  const dismissInboxIntro = useCallback(() => {
-    markInboxAnnouncementSeen();
-    setInboxIntroPending(false);
-  }, []);
-  // One-time "Ask this session" announcement, after the terminal-tools one
-  // (never on the same load). Latched at mount for the same reason.
-  const [askSessionIntroPending, setAskSessionIntroPending] = useState(
-    askSessionAnnouncementPendingThisLoad,
-  );
-  const dismissAskSessionIntro = useCallback(() => {
-    markAskSessionAnnouncementSeen();
-    setAskSessionIntroPending(false);
-  }, []);
-  // The `plannotator` agent tool switch (Settings row + the one-time offer on
-  // Pi and OpenCode 2), from the server's serverConfig.
   const agentTool = useAgentToolSetting();
-  // One-time offer to turn the agent tool on, after the terminal-tools
-  // announcement (never on the same load). Latched at mount for the same reason.
-  const [agentToolIntroPending, setAgentToolIntroPending] = useState(
-    agentToolAnnouncementPendingThisLoad,
-  );
-  const dismissAgentToolIntro = useCallback(() => {
-    markAgentToolAnnouncementSeen();
-    setAgentToolIntroPending(false);
-  }, []);
-  // "Turn it on": the offer stays open to show the outcome, so only the
-  // cookie is written here; Done closes it.
-  const saveAgentTool = agentTool.save;
-  const turnOnAgentTool = useCallback(async () => {
-    await saveAgentTool(true);
-    markAgentToolAnnouncementSeen();
-  }, [saveAgentTool]);
   const aiChat = useAIChat({
     patch: diffData?.rawPatch ?? '',
     diffType,
@@ -1851,6 +1684,7 @@ const ReviewApp: React.FC = () => {
 
     // Sync activeFileIndex when user switches between dock tabs
     event.api.onDidActivePanelChange((panel) => {
+      setDockActivePanelId(panel?.id ?? null);
       if (!panel) {
         setIsAllFilesActive(false);
         setIsSemanticDiffActive(false);
@@ -1885,12 +1719,7 @@ const ReviewApp: React.FC = () => {
       }
     });
 
-    // Note: we intentionally no longer hide the tab header for a lone diff /
-    // all-files / semantic panel. The Split/Unified toggle lives in the tab
-    // strip's right-actions slot (ReviewDockRightActions), so the header must
-    // stay visible in single-panel diff views — otherwise the toggle would
-    // vanish exactly when it's most needed. The trade is a single tab showing
-    // in those views, which is acceptable.
+    watchLoneTabHeader(event.api, setAllChangesOpen);
   }, []);
 
   // Open agent job detail as center dock panel
@@ -1912,11 +1741,6 @@ const ReviewApp: React.FC = () => {
     });
   }, [dockApi, agentJobs.jobs]);
 
-  // Open tour as a dialog overlay
-  const handleOpenTour = useCallback((jobId: string) => {
-    setTourDialogJobId(jobId);
-  }, []);
-
   // Open guide as a takeover (manual reopen from a completed job's card, distinct
   // from the auto-open-on-completion effect below).
   const handleOpenGuide = useCallback((jobId: string) => {
@@ -1927,19 +1751,6 @@ const ReviewApp: React.FC = () => {
     setGuideRevealFile(null);
     setActiveGuideJobId(jobId);
     setGuideOpen(true);
-  }, []);
-
-  // Dev-only: Cmd/Ctrl+Shift+T toggles the demo tour for fast UI iteration.
-  useEffect(() => {
-    if (!import.meta.env.DEV) return;
-    const handler = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === 'T' || e.key === 't')) {
-        e.preventDefault();
-        setTourDialogJobId(prev => (prev === DEMO_TOUR_ID ? null : DEMO_TOUR_ID));
-      }
-    };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
   }, []);
 
   // Derive worktree path and base diff type from the composite diffType
@@ -2020,136 +1831,6 @@ const ReviewApp: React.FC = () => {
   // their own setting. Off means no handler props reach the diff views, so
   // there are no listeners, no requests and no card in the tree.
   const tokenHoverEnabled = canUseLiveWorkspaceActions && tokenHoverTrigger !== 'off';
-  // Announcing a feature this session cannot run is noise, so a stack/branch
-  // view skips it — and skips it WITHOUT consuming the cookie, so the next
-  // ordinary review still shows it (same rule the guide intro uses for an
-  // empty diff). `off` is not part of the availability test: a user who
-  // reaches the dialog has, by construction, never chosen a trigger.
-  //
-  // Eligibility is LATCHED once the initial load clears:
-  // canUseLiveWorkspaceActions changes on mid-session diff switches, and a
-  // stack→ordinary switch must not pop the announcement over work in
-  // progress, nor an ordinary→stack switch yank an open one away mid-read.
-  //
-  // In an effect rather than in the render body: a latch written during render
-  // is a side effect React may discard (a concurrent render that never
-  // commits would still have stamped the ref). The commit ordering is safe
-  // because the gate below independently requires !isLoading, so the render
-  // that first clears the flag shows no dialog and the effect has latched
-  // before the next one.
-  const [tokenHoverAvailable, setTokenHoverAvailable] = useState<boolean | null>(null);
-  useEffect(() => {
-    if (isLoading) return;
-    setTokenHoverAvailable((current) => (current === null ? canUseLiveWorkspaceActions : current));
-  }, [isLoading, canUseLiveWorkspaceActions]);
-  const tokenHoverIntroVisible = tokenHoverAnnouncementCanShow({
-    announcementPending: tokenHoverIntroPending,
-    isLoading,
-    featureAvailable: tokenHoverAvailable === true,
-    guideIntroVisible,
-    lookAndFeelVisible: showLookAndFeel,
-    editModeVisible: editModeIntroVisible,
-  });
-  // LAST in the first-run dialog chain: it asks for no decision, so it waits
-  // behind every dialog that does. terminalToolsAnnouncementCanShow explains
-  // why last rather than first.
-  const terminalToolsIntroVisible = terminalToolsAnnouncementCanShow({
-    announcementPending: terminalToolsIntroPending,
-    isLoading,
-    // The code review editor has no archive or shared-session mode; the
-    // portable guide viewer never mounts this App.
-    readOnlySession: false,
-    compact: isCompactTouchLayout,
-    otherFirstRunDialogVisible:
-      guideIntroVisible
-      || showLookAndFeel
-      || editModeIntroVisible
-      || tokenHoverIntroVisible,
-  });
-  const terminalToolsShownThisLoad = useLatchedTrue(terminalToolsIntroVisible);
-  // The Plannotator Inbox announcement: after the terminal-tools one (never on
-  // the same load: that one takes the load while it is pending and can show
-  // here, i.e. not on the compact shell), before "Ask this session" and the
-  // agent-tool offer, which wait while this one takes the load. Shown on the
-  // compact shell too; never in the VS Code webview. Same first-run window.
-  const inboxEligibleNow = inboxAnnouncementEligible({
-    announcementPending: inboxIntroPending,
-    isLoading,
-    readOnlySession: false,
-    vscodeWebview: isVSCodeWebview(),
-    otherFirstRunDialogVisible:
-      guideIntroVisible
-      || showLookAndFeel
-      || editModeIntroVisible
-      || tokenHoverIntroVisible
-      || terminalToolsIntroVisible,
-    earlierAnnouncementTakesThisLoad:
-      terminalToolsShownThisLoad || (terminalToolsIntroPending && !isCompactTouchLayout),
-  });
-  const inboxIntroVisible = useFirstRunAnnouncementWindow({
-    pending: inboxIntroPending,
-    armed: !isLoading,
-    eligible: inboxEligibleNow,
-  });
-  const inboxShownThisLoad = useLatchedTrue(inboxIntroVisible);
-  const inboxTakesThisLoad = inboxShownThisLoad || inboxEligibleNow;
-  // After the terminal-tools announcement, and only while this review is
-  // actually connected to its agent (Claude Code, Pi, OpenCode) and the Ask AI
-  // button is there. It may only open before the reviewer starts working
-  // (useFirstRunAnnouncementWindow); otherwise it waits for a later load.
-  const askSessionAgent = connectedAskSessionAgent(aiProviders);
-  const askSessionEligibleNow = askSessionAnnouncementEligible({
-    announcementPending: askSessionIntroPending,
-    isLoading,
-    connectedAgent: askSessionAgent,
-    askAIUsable: aiAvailable,
-    readOnlySession: false,
-    compact: isCompactTouchLayout,
-    otherFirstRunDialogVisible:
-      guideIntroVisible
-      || showLookAndFeel
-      || editModeIntroVisible
-      || tokenHoverIntroVisible
-      || terminalToolsIntroVisible
-      || inboxTakesThisLoad,
-  });
-  const askSessionIntroVisible = useFirstRunAnnouncementWindow({
-    pending: askSessionIntroPending,
-    armed: !isLoading,
-    eligible: askSessionEligibleNow,
-  });
-  const askSessionShownThisLoad = useLatchedTrue(askSessionIntroVisible);
-  // LAST: the one-time offer to turn the `plannotator` agent tool on (Pi and
-  // OpenCode 2, where it is off by default). It waits while the "Ask this
-  // session" announcement can still take this load (its capabilities answer
-  // is outstanding, or it is eligible), so a reviewer never gets both on one
-  // load; one who is never connected still gets the offer.
-  const agentToolIntroVisible = useFirstRunAnnouncementWindow({
-    pending: agentToolIntroPending,
-    armed: !isLoading,
-    eligible: agentToolAnnouncementEligible({
-      announcementPending: agentToolIntroPending,
-      isLoading,
-      setting: agentTool.setting,
-      readOnlySession: false,
-      compact: isCompactTouchLayout,
-      otherFirstRunDialogVisible:
-        guideIntroVisible
-        || showLookAndFeel
-        || editModeIntroVisible
-        || tokenHoverIntroVisible
-        || terminalToolsIntroVisible
-        || inboxIntroVisible
-        || askSessionIntroVisible,
-      earlierAnnouncementMayShow:
-        inboxTakesThisLoad
-        || askSessionShownThisLoad
-        || (askSessionIntroPending && (!aiCapabilitiesSettled || askSessionEligibleNow)),
-    }),
-  });
-  // Read from the host alone: once "Turn it on" succeeds the setting is on,
-  // and the open offer must stay to say so.
-  const agentToolOfferHost = agentToolOfferHostOf(agentTool.setting);
   const hoveredTokenSymbol = tokenHover.hover?.request.symbol;
   const startTokenHover = tokenHover.onTokenHoverEnter;
   // Stitching lives here, not in the diff views: rebuilding a fragmented
@@ -2470,28 +2151,10 @@ const ReviewApp: React.FC = () => {
     setActiveGuideJobId(prev => (prev?.startsWith('saved:') ? null : prev));
   }, [prMetadata?.url, activeWorktreePath]);
 
-  // Auto-open tour dialog when a tour job completes — scoped to the current
-  // review context, same rule and same deferred-open semantics as the guide
-  // effect below (an away-context tour stays unmarked so it opens when the
-  // reviewer returns to its context).
-  const tourAutoOpenRef = useRef(new Set<string>());
-  useEffect(() => {
-    for (const job of agentJobs.jobs) {
-      if (job.provider !== 'tour' || job.status !== 'done' || tourAutoOpenRef.current.has(job.id)) {
-        continue;
-      }
-      if (!jobMatchesCurrentContext(job)) continue;
-      tourAutoOpenRef.current.add(job.id);
-      setTourDialogJobId(job.id);
-    }
-  }, [agentJobs.jobs, jobMatchesCurrentContext]);
-
-  // Auto-switch to the guide takeover when a guide job completes — mirrors the
-  // tour dialog's auto-open above, including the same caveat: on an SSE
+  // Auto-switch to the guide takeover when a guide job completes. On an SSE
   // snapshot that already contains a done guide job (e.g. a page reload while
   // one is in flight from a previous session), the ref-Set dedupe treats it as
-  // "not yet seen" and opens the guide takeover immediately. That matches
-  // tour's existing behavior; kept consistent rather than special-cased here.
+  // "not yet seen" and opens the guide takeover immediately.
   const guideAutoOpenRef = useRef(new Set<string>());
   useEffect(() => {
     for (const job of agentJobs.jobs) {
@@ -2516,7 +2179,7 @@ const ReviewApp: React.FC = () => {
 
   // Standalone/demo mode (no origin ⇒ no real agent-jobs backend): opening the
   // guide takeover shows the demo fixture so the UI can be iterated on without
-  // a live agent run, same spirit as the dev-only demo tour toggle below.
+  // a live agent run.
   useEffect(() => {
     if (import.meta.env.DEV && guideOpen && !origin && !activeGuideJobId) {
       setGuideRevealFile(null); // same-batch clear — see handleOpenGuide
@@ -3573,7 +3236,7 @@ const ReviewApp: React.FC = () => {
     // (not lost) behind the guide takeover or a first-run dialog — the file
     // still marks and the next auto-view retries the toast.
     if (!needsAutoViewedNotice()) return;
-    if (guideOpen || guideIntroVisible || showLookAndFeel || editModeIntroVisible || tokenHoverIntroVisible || terminalToolsIntroVisible || inboxIntroVisible || askSessionIntroVisible || agentToolIntroVisible) return;
+    if (guideOpen) return;
     markAutoViewedNoticeSeen();
     toast('Files are marked viewed as you scroll', {
       description: "Scroll past a file or move on to the next and it's checked off. Turn this off in Settings → Review, or from the … menu above the file list.",
@@ -3593,22 +3256,12 @@ const ReviewApp: React.FC = () => {
         },
       },
     });
-  }, [guideOpen, guideIntroVisible, showLookAndFeel, editModeIntroVisible, tokenHoverIntroVisible, terminalToolsIntroVisible, inboxIntroVisible, askSessionIntroVisible, agentToolIntroVisible]);
+  }, [guideOpen]);
   // The update toast waits behind the guide takeover and every first-run
   // dialog of this load (useUpdateToast).
   useUpdateToast({
     advert: updateAdvert,
-    blocked:
-      isLoading
-      || guideOpen
-      || guideIntroVisible
-      || showLookAndFeel
-      || editModeIntroVisible
-      || tokenHoverIntroVisible
-      || terminalToolsIntroVisible
-      || inboxIntroVisible
-      || askSessionIntroVisible
-      || agentToolIntroVisible,
+    blocked: isLoading || guideOpen,
     autoUpdateActive,
     position: 'top-right',
   });
@@ -3655,7 +3308,7 @@ const ReviewApp: React.FC = () => {
   // The all-files surface mirrors whichever left panel is showing: sections
   // order when the sections view is active, the tree's kind blocks when it is
   // grouped by kind, tree order otherwise (the commits view never regroups).
-  const [groupByKind, toggleGroupByKind] = useGroupByKind();
+  const [groupByKind, toggleGroupByKind, setGroupByKind] = useGroupByKind();
   // Changes | All files in the Tree view: opens on Changes; All files is
   // remembered per browser once chosen, and the repository is only listed
   // while All files is chosen.
@@ -4174,6 +3827,15 @@ const ReviewApp: React.FC = () => {
     }
     selectPanelView(view);
   }, [handleSwitchToSections, selectPanelView, searchQuery, isSearchOpen, clearSearch, closeSearch, panelView, diffType, isLoadingDiff, gitContext, activeWorktreePath, fetchDiffSwitch]);
+  const handleSelectGroupBy = useCallback((groupBy: 'none' | 'kind' | 'status') => {
+    if (groupBy === 'status') {
+      handlePanelViewSelect('sections');
+      return;
+    }
+    setGroupByKind(groupBy === 'kind');
+    if (effectivePanelView === 'sections') handlePanelViewSelect('tree');
+  }, [handlePanelViewSelect, setGroupByKind, effectivePanelView]);
+
 
   // Open a commit's own diff (vs its first parent) in the center dock. The
   // switch resets the dock to the all-files surface via the existing
@@ -4838,7 +4500,6 @@ const ReviewApp: React.FC = () => {
     openCallTreeNode,
     returnFromCallTree,
     clearCallTreeRequest,
-    openTourPanel: handleOpenTour,
     openGuide: handleOpenGuide,
     onCodeNavRequest: canUseLiveWorkspaceActions ? handleCodeNavRequest : undefined,
     onTokenHoverEnter: tokenHoverEnabled ? handleTokenHoverEnter : undefined,
@@ -4870,7 +4531,7 @@ const ReviewApp: React.FC = () => {
     aiHistoryForSelection, getAIHistoryForFile, agentJobs.jobs, prMetadata, prContext, prArtifacts, openPRArtifact, prArtifactFocus, handlePRArtifactFocusHandled,
     isPRContextLoading, prContextError, fetchPRContext, platformUser, openDiffFile,
     handleAllFilesVisibleFileChange, handleFileScrolledPast,
-    handleOpenTour, handleOpenGuide, isAllFilesActive, allFilesOrder, allFilesAllCollapsed, onToggleAllFilesCollapsed, registerAllFilesCollapseToggle, commitInfo, isSemanticDiffActive, semanticDiffUsable,
+    handleOpenGuide, isAllFilesActive, allFilesOrder, allFilesAllCollapsed, onToggleAllFilesCollapsed, registerAllFilesCollapseToggle, commitInfo, isSemanticDiffActive, semanticDiffUsable,
     handleSemanticDiffUnavailable, handleSemanticDiffLoadError, handleSemanticDiffLoadSuccess, handleAddAnnotationForFile,
     callFlowAvailable, callFlowAdvert, callFlowAnalysis, retryCallFlowAnalysis, isCallFlowNodeInPatch, isCallFlowActive, openCallFlowPanel, callFlowInstall,
     callTreeHunkNotes, callTreeRequest, openCallTreeNode, returnFromCallTree, clearCallTreeRequest,
@@ -5510,7 +5171,6 @@ const ReviewApp: React.FC = () => {
         // Alt to switch") — performing it must dismiss the coachmark. Its own
         // keydown handler deliberately ignores modifier keys, so this keyup
         // path is the only place that can see the gesture complete.
-        if (showDestSpotlight) dismissDestSpotlight();
       } : undefined,
     },
   });
@@ -5518,8 +5178,7 @@ const ReviewApp: React.FC = () => {
   const canHandleReviewHistoryShortcut = useCallback((event: KeyboardEvent): boolean => {
     if (event.defaultPrevented || isNativeHistoryOwner(event)) return false;
     if (submitted || isSendingFeedback || isApproving || isExiting || isPlatformActioning || isLoadingDiff) return false;
-    if (guideOpen || openSettingsMenu || showDestinationMenu || platformCommentDialog || showExportModal || showWorktreeDialog || showNoAnnotationsDialog || showExitWarning) return false;
-    if (showLookAndFeel || showGuideIntro || editModeIntroVisible || tokenHoverIntroVisible || terminalToolsIntroVisible || inboxIntroVisible || askSessionIntroVisible || agentToolIntroVisible || tourDialogJobId) return false;
+    if (guideOpen || openSettingsMenu || showDestinationMenu || platformCommentDialog || showExportModal || showNoAnnotationsDialog || showExitWarning) return false;
     return !hasActiveHistoryOverlay(document);
   }, [
     guideOpen,
@@ -5528,23 +5187,13 @@ const ReviewApp: React.FC = () => {
     isLoadingDiff,
     isPlatformActioning,
     isSendingFeedback,
-    editModeIntroVisible,
-    tokenHoverIntroVisible,
-    terminalToolsIntroVisible,
-    inboxIntroVisible,
-    askSessionIntroVisible,
-    agentToolIntroVisible,
     openSettingsMenu,
     platformCommentDialog,
     showDestinationMenu,
     showExitWarning,
     showExportModal,
     showNoAnnotationsDialog,
-    showWorktreeDialog,
-    showGuideIntro,
-    showLookAndFeel,
     submitted,
-    tourDialogJobId,
   ]);
 
   useHistoryShortcuts({
@@ -5574,8 +5223,7 @@ const ReviewApp: React.FC = () => {
   const canHandleExplorerKey = useCallback((event: KeyboardEvent, options: { inText?: boolean } = {}): boolean => {
     if (event.defaultPrevented || !dockApi || isLoading) return false;
     if (submitted || isSendingFeedback || isApproving || isExiting || isPlatformActioning) return false;
-    if (guideOpen || goToFileOpen || openSettingsMenu || showDestinationMenu || platformCommentDialog || showExportModal || showWorktreeDialog || showNoAnnotationsDialog || showExitWarning) return false;
-    if (showLookAndFeel || showGuideIntro || editModeIntroVisible || tokenHoverIntroVisible || terminalToolsIntroVisible || askSessionIntroVisible || agentToolIntroVisible || tourDialogJobId) return false;
+    if (guideOpen || goToFileOpen || openSettingsMenu || showDestinationMenu || platformCommentDialog || showExportModal || showNoAnnotationsDialog || showExitWarning) return false;
     if (hasActiveHistoryOverlay(document)) return false;
     const origin = event.composedPath?.()[0] ?? event.target;
     const typing = origin instanceof HTMLElement && (origin.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(origin.tagName));
@@ -5585,10 +5233,10 @@ const ReviewApp: React.FC = () => {
     if (typing && isMac && !event.metaKey) return false;
     return true;
   }, [
-    agentToolIntroVisible, askSessionIntroVisible, dockApi, editModeIntroVisible, goToFileOpen, guideOpen, isApproving,
+    dockApi, goToFileOpen, guideOpen, isApproving,
     isExiting, isLoading, isPlatformActioning, isSendingFeedback, openSettingsMenu, platformCommentDialog,
-    showDestinationMenu, showExitWarning, showExportModal, showGuideIntro, showLookAndFeel, showNoAnnotationsDialog,
-    showWorktreeDialog, submitted, terminalToolsIntroVisible, tokenHoverIntroVisible, tourDialogJobId,
+    showDestinationMenu, showExitWarning, showExportModal, showNoAnnotationsDialog,
+    submitted,
   ]);
 
   useReviewExplorerShortcuts({
@@ -5740,8 +5388,7 @@ const ReviewApp: React.FC = () => {
           platform: prMetadata.platform,
           platformLabel,
           onChange: (destination) => {
-            if (showDestSpotlight) dismissDestSpotlight();
-            setReviewDestination(destination);
+                setReviewDestination(destination);
             storage.setItem('plannotator-review-dest', destination);
             setPlatformActionError(null);
           },
@@ -5852,10 +5499,9 @@ const ReviewApp: React.FC = () => {
       (effectivePanelView === 'tree' && !!activeDiffBase && activeDiffBase !== 'jj-evolog' && panelCompareTarget.diffTypes.includes(activeDiffBase))
     );
   const panelHeader: ReviewPanelHeaderModel = {
-    view: showCommitsPanel ? 'commits' : effectivePanelView,
-    showSections: sectionsCapable,
+    view: showCommitsPanel ? 'commits' : 'tree',
     showCommits: commitsCapable,
-    onSelectView: handlePanelViewSelect,
+    onSelectView: (view) => handlePanelViewSelect(view === 'tree' && lastUsedPanelView === 'sections' && sectionsCapable ? 'sections' : view),
     scope: repoFilesSupported
       ? {
           value: treeScope,
@@ -5891,6 +5537,24 @@ const ReviewApp: React.FC = () => {
     searching: hasSearchableFiles && !!searchQuery.trim(),
   };
 
+  const reviewStatusProps = {
+    platformActionError,
+    workspaceDiffError: reviewMode === 'workspace' ? diffError : null,
+    partialDiff: !!prPatchIncomplete && prDiffScope === 'layer' && !isSwitchingPRScope,
+    staleDiff: diffFreshness.isStale && !isLoadingDiff,
+    baseBehind: !!baseBehindRemote && !prMetadata && !isLoadingDiff,
+    hasFiles: files.length > 0,
+    platformLabel,
+    canLoadFullDiff: !!prPatchUpgradeAvailable,
+    isLoadingFullDiff,
+    onLoadFullDiff: handleLoadFullDiff,
+    onRefreshStaleDiff: handleRefreshStaleDiff,
+    onDismissStaleDiff: diffFreshness.dismiss,
+    isFetchingBase,
+    onFetchBase: handleFetchBase,
+  };
+  const headerTotals = isCompactTouchLayout ? null : <HeaderTotals files={files} />;
+
   if (isLoading) {
     return (
       <ThemeProvider defaultTheme="dark" manageFavicon>
@@ -5916,9 +5580,9 @@ const ReviewApp: React.FC = () => {
       >
         <RefHoverCards rootRef={refCardRootRef} onlyWithData />
         {/* Header */}
-        <header className={isCompactTouchLayout
-          ? 'min-h-[52px] grid grid-cols-[44px_minmax(0,1fr)_44px] items-center border-b border-border/50 bg-card/50 backdrop-blur-xl z-50'
-          : 'py-1 flex flex-col min-[480px]:flex-row items-stretch min-[480px]:items-center min-[480px]:justify-between gap-1 min-[480px]:gap-0 px-2 lg:px-4 border-b border-border/50 bg-card/50 backdrop-blur-xl z-50'
+        <header style={{ '--review-header-h': `${isCompactTouchLayout ? COMPACT_REVIEW_HEADER_HEIGHT : REVIEW_HEADER_HEIGHT}px` } as React.CSSProperties} className={isCompactTouchLayout
+          ? 'min-h-[var(--review-header-h)] grid grid-cols-[44px_minmax(0,1fr)_44px] items-center border-b border-border/50 bg-card/50 backdrop-blur-xl z-50'
+          : 'py-1 min-[480px]:py-0 min-[480px]:h-[var(--review-header-h)] flex flex-col min-[480px]:flex-row items-stretch min-[480px]:items-center min-[480px]:justify-between gap-1 min-[480px]:gap-0 px-2 border-b border-border bg-card/50 z-50'
         }>
           <div className={isCompactTouchLayout
             ? 'contents'
@@ -5941,7 +5605,7 @@ const ReviewApp: React.FC = () => {
                 >
                   <FolderTree className="w-3.5 h-3.5" />
                 </button>
-                <div className="w-px h-5 bg-border/50 mx-1 hidden lg:block" />
+                <div className="w-px h-5 bg-border mx-1 hidden lg:block" />
               </>
             )}
             {isCompactTouchLayout && !shouldShowFileTree && <span aria-hidden />}
@@ -5969,7 +5633,7 @@ const ReviewApp: React.FC = () => {
                     guideOpen ? 'Go back' : 'Guide'
                   )}
                 </button>
-                <div className="w-px h-5 bg-border/50 mx-1 hidden lg:block" />
+                <div className="w-px h-5 bg-border mx-1 hidden lg:block" />
               </>
             )}
             {prMetadata ? (
@@ -6005,6 +5669,7 @@ const ReviewApp: React.FC = () => {
                     onNavigatePR={handlePRSwitch}
                   />
                 )}
+                {headerTotals}
               </div>
             ) : repoInfo ? (
               <div className={isCompactTouchLayout
@@ -6020,12 +5685,13 @@ const ReviewApp: React.FC = () => {
                   </span>
                 )}
                 <span
-                  className="text-xs text-muted-foreground/60 inline-flex items-center gap-1 truncate max-w-[220px]"
+                  className="text-xs text-muted-foreground inline-flex items-center gap-1 truncate max-w-[220px]"
                   title={repoInfo.display}
                 >
                   <RepoIcon className="w-3 h-3 flex-shrink-0" />
                   {repoName}
                 </span>
+                {headerTotals}
               </div>
             ) : isStaticPatch ? (
               // Honest label for a repo-less session: name the patch that IS
@@ -6056,9 +5722,6 @@ const ReviewApp: React.FC = () => {
             ? 'contents'
             : 'min-w-0 w-full min-[480px]:w-auto flex flex-wrap min-[480px]:flex-nowrap shrink-0 items-center justify-end gap-1 lg:gap-2'
           }>
-            {/* Split/Unified toggle + diff options moved to the dock tab strip
-                (rightHeaderActionsComponent → ReviewDockRightActions). An open
-                guide hides the dock; it draws them below, before the tool icons. */}
             {!isCompactTouchLayout && (origin ? (
               <>
                 {/* Destination dropdown (PR mode only) */}
@@ -6071,8 +5734,7 @@ const ReviewApp: React.FC = () => {
                       onClick={() => {
                         // Opening the menu is discovery — the spotlight has
                         // nothing left to teach.
-                        if (showDestSpotlight) dismissDestSpotlight();
-                        setShowDestinationMenu(prev => !prev);
+                                        setShowDestinationMenu(prev => !prev);
                       }}
                       className="flex h-7 items-center gap-1 px-2 rounded-md text-xs font-medium bg-muted hover:bg-muted/80 transition-colors"
                       title={reviewDestination === 'platform' ? `Posting to ${platformLabel} ${mrLabel}` : 'Sending to agent session'}
@@ -6138,115 +5800,7 @@ const ReviewApp: React.FC = () => {
                   </div>
                 )}
 
-                {/* GitHub error message */}
-                {!isCompactTouchLayout && platformActionError && (
-                  <div
-                    className="text-xs text-destructive px-2 py-1 bg-destructive/10 rounded border border-destructive/20 max-w-[200px] truncate"
-                    title={platformActionError}
-                  >
-                    {platformActionError}
-                  </div>
-                )}
-
-                {!isCompactTouchLayout && reviewMode === 'workspace' && diffError && (
-                  <div
-                    className="text-xs text-amber-700 dark:text-amber-300 px-2 py-1 bg-amber-500/10 rounded border border-amber-500/25 max-w-[240px] truncate"
-                    title={diffError}
-                  >
-                    {files.length > 0 ? 'Some workspace changes could not be loaded' : 'Workspace changes could not be loaded'}
-                  </div>
-                )}
-
-                {/* Partial PR diff notice — the platform withheld per-file
-                    content (PR too large). "Load full diff" re-requests the
-                    layer scope; the server recomputes the exact diff from the
-                    local checkout (waiting out the warmup if needed). The
-                    request is non-blocking on purpose: it can park for
-                    minutes behind a cold clone, and the reviewer keeps
-                    working with the partial diff meanwhile. */}
-                {!isCompactTouchLayout && prPatchIncomplete && prDiffScope === 'layer' && !isSwitchingPRScope && (
-                  <div className="flex items-center gap-2 text-xs text-amber-700 dark:text-amber-300 px-2 py-1 bg-amber-500/10 rounded border border-amber-500/25">
-                    <span className="hidden md:inline" title={`${platformLabel} omitted diff content for some files because this PR is too large`}>
-                      Partial diff
-                    </span>
-                    <span className="md:hidden">Partial</span>
-                    {!prPatchUpgradeAvailable ? (
-                      // Partiality without a local checkout: informational
-                      // only — never offer a button that cannot work. The
-                      // visible text stays runtime-neutral (--local is a CLI
-                      // remedy that not every runtime supports).
-                      <span
-                        className="hidden sm:inline text-amber-700/70 dark:text-amber-300/70"
-                        title="The platform omitted diff content for some files and this session has no local checkout to recompute from. CLI sessions can re-run the review with --local."
-                      >
-                        (no local checkout — full diff unavailable)
-                      </span>
-                    ) : isLoadingFullDiff ? (
-                      <span className="flex items-center gap-1.5 font-medium" title="Recomputing the full diff from the local checkout — waiting for the background clone if it's still running. You can keep reviewing.">
-                        <span className="inline-block w-3 h-3 border-[1.5px] border-current border-t-transparent rounded-full animate-spin" aria-hidden />
-                        Loading full diff…
-                      </span>
-                    ) : (
-                      <button
-                        onClick={handleLoadFullDiff}
-                        className="font-medium underline underline-offset-2 hover:text-amber-900 dark:hover:text-amber-100 transition-colors"
-                        title="Recompute the full diff from the local checkout (may wait for the background clone to finish — you can keep reviewing meanwhile)"
-                      >
-                        Load full diff
-                      </button>
-                    )}
-                  </div>
-                )}
-
-                {/* Diff staleness notice — files changed since this snapshot
-                    was computed (agent editing mid-review). Non-blocking; the
-                    user refreshes when ready. */}
-                {!isCompactTouchLayout && diffFreshness.isStale && !isLoadingDiff && (
-                  <div className="flex items-center gap-2 text-xs text-amber-700 dark:text-amber-300 px-2 py-1 bg-amber-500/10 rounded border border-amber-500/25">
-                    <span className="hidden md:inline">Diff out of date</span>
-                    <span className="md:hidden">Stale</span>
-                    <button
-                      onClick={handleRefreshStaleDiff}
-                      className="font-medium underline underline-offset-2 hover:text-amber-900 dark:hover:text-amber-100 transition-colors"
-                      title="Re-run the diff with the current settings"
-                    >
-                      Refresh
-                    </button>
-                    <button
-                      onClick={diffFreshness.dismiss}
-                      className="text-amber-700/60 dark:text-amber-300/60 hover:text-amber-900 dark:hover:text-amber-100 transition-colors leading-none"
-                      title="Dismiss"
-                      aria-label="Dismiss stale diff notice"
-                    >
-                      ×
-                    </button>
-                  </div>
-                )}
-
-                {/* Baseline staleness — origin/<default> is behind the actual
-                    remote, so the "since main" comparison is against stale
-                    GitHub state. Fetch catches the tracking ref up and
-                    recomputes the diff in place. */}
-                {!isCompactTouchLayout && baseBehindRemote && !prMetadata && !isLoadingDiff && (
-                  <div className="flex items-center gap-2 text-xs text-amber-700 dark:text-amber-300 px-2 py-1 bg-amber-500/10 rounded border border-amber-500/25">
-                    <span className="hidden md:inline">Baseline is behind GitHub</span>
-                    <span className="md:hidden">Base behind</span>
-                    {isFetchingBase ? (
-                      <span className="flex items-center gap-1.5 font-medium">
-                        <span className="inline-block w-3 h-3 border-[1.5px] border-current border-t-transparent rounded-full animate-spin" aria-hidden />
-                        Fetching…
-                      </span>
-                    ) : (
-                      <button
-                        onClick={handleFetchBase}
-                        className="font-medium underline underline-offset-2 hover:text-amber-900 dark:hover:text-amber-100 transition-colors"
-                        title="git fetch the default branch and recompute the diff"
-                      >
-                        Fetch
-                      </button>
-                    )}
-                  </div>
-                )}
+                {!isCompactTouchLayout && <ReviewHeaderStatus variant="pill" {...reviewStatusProps} />}
 
                 {/* Agent mode: ghost-X Close + the adaptive decision control
                     (Approve at zero, Send Feedback · n otherwise; the caret
@@ -6322,70 +5876,27 @@ const ReviewApp: React.FC = () => {
               </button>
             ))}
 
-            <div className="w-px h-5 bg-border/50 mx-1 hidden lg:block" />
+            <div className="w-px h-5 bg-border mx-1 hidden lg:block" />
 
             {/* An open guide's Split/Unified, Collapse all and gear (with their
                 own divider after): GuideScreen portals GuideDiffControls in
                 here, between Close/Approve and the tool icons. */}
             {guideVisible && !isCompactTouchLayout && <div ref={setGuideBarSlot} className="contents" />}
+            {!guideVisible && !isCompactTouchLayout && files.length > 0 && (
+              <>
+                <ReviewDockRightActions activePanel={dockActivePanelId ? { id: dockActivePanelId } : null} />
+                <div className="w-px h-5 bg-border mx-1 hidden lg:block" />
+              </>
+            )}
 
-            {/* Sidebar tab toggles */}
             {!isCompactTouchLayout && (
-              <button
-                data-pn-touch-target={isCompactTouchLayout || undefined}
-                data-pn-touch-target-icon={isCompactTouchLayout || undefined}
-                onClick={() => reviewSidebar.toggleTab('annotations')}
-                className={`relative p-1.5 rounded-md transition-all ${
-                  reviewSidebar.isOpen && reviewSidebar.activeTab === 'annotations'
-                    ? 'bg-primary/15 text-primary'
-                    : 'text-muted-foreground hover:text-foreground hover:bg-muted'
-                }`}
-                title="Annotations"
-              >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
-                </svg>
-                {totalAnnotationCount > 0 && (
-                  <span className="absolute -top-1 -right-1 min-w-[14px] h-[14px] flex items-center justify-center rounded-full bg-primary text-[8px] font-bold text-primary-foreground px-0.5">
-                    {totalAnnotationCount > 99 ? '99+' : totalAnnotationCount}
-                  </span>
-                )}
-              </button>
+              <ReviewPanelToggle
+                isOpen={reviewSidebar.isOpen}
+                commentCount={totalAnnotationCount}
+                attention={(aiMessages.length > 0 && !(reviewSidebar.isOpen && reviewSidebar.activeTab === 'ai')) || agentJobs.jobs.some(j => j.status === 'running' || j.status === 'starting')}
+                onToggle={() => reviewSidebar.isOpen ? reviewSidebar.close() : reviewSidebar.open()}
+              />
             )}
-            {!isCompactTouchLayout && aiAvailable && (
-              <button
-                onClick={() => reviewSidebar.toggleTab('ai')}
-                className={`relative p-1.5 rounded-md transition-all ${
-                  reviewSidebar.isOpen && reviewSidebar.activeTab === 'ai'
-                    ? 'bg-primary/15 text-primary'
-                    : 'text-muted-foreground hover:text-foreground hover:bg-muted'
-                }`}
-                title="AI Chat"
-              >
-                <SparklesIcon className="w-4 h-4" />
-                {aiMessages.length > 0 && !(reviewSidebar.isOpen && reviewSidebar.activeTab === 'ai') && (
-                  <span className="absolute top-0 right-0 w-1.5 h-1.5 rounded-full bg-primary" />
-                )}
-              </button>
-            )}
-            {!isCompactTouchLayout && agentJobs.capabilities?.available && (
-              <button
-                onClick={() => reviewSidebar.toggleTab('agents')}
-                className={`relative p-1.5 rounded-md transition-all ${
-                  reviewSidebar.isOpen && reviewSidebar.activeTab === 'agents'
-                    ? 'bg-primary/15 text-primary'
-                    : 'text-muted-foreground hover:text-foreground hover:bg-muted'
-                }`}
-                title="Review Agents"
-              >
-                <ReviewAgentsIcon className="w-4 h-4" />
-                {agentJobs.jobs.some(j => j.status === 'running' || j.status === 'starting') && !(reviewSidebar.isOpen && reviewSidebar.activeTab === 'agents') && (
-                  <span className="absolute top-0 right-0 w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
-                )}
-              </button>
-            )}
-
-            <div className="w-px h-5 bg-border/50 mx-1 hidden lg:block" />
 
             <ReviewHeaderMenu
               onOpenSettings={() => setOpenSettingsMenu(true)}
@@ -6428,44 +5939,7 @@ const ReviewApp: React.FC = () => {
           </div>
         )}
 
-        {isCompactTouchLayout && (
-          platformActionError ? (
-            <div className="shrink-0 border-b border-destructive/20 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-              {platformActionError}
-            </div>
-          ) : reviewMode === 'workspace' && diffError ? (
-            <div className="shrink-0 border-b border-warning/20 bg-warning/10 px-3 py-2 text-xs text-warning">
-              {files.length > 0 ? 'Some workspace changes could not be loaded.' : 'Workspace changes could not be loaded.'}
-            </div>
-          ) : prPatchIncomplete && prDiffScope === 'layer' && !isSwitchingPRScope ? (
-            <div className="shrink-0 flex items-center justify-between gap-3 border-b border-warning/20 bg-warning/10 px-3 py-1.5 text-xs text-warning">
-              <span className="min-w-0 truncate">The platform omitted part of this diff.</span>
-              {prPatchUpgradeAvailable && (
-                <button
-                  data-pn-touch-target
-                  type="button"
-                  onClick={handleLoadFullDiff}
-                  disabled={isLoadingFullDiff}
-                  className="shrink-0 font-medium underline underline-offset-2 disabled:opacity-60"
-                >
-                  {isLoadingFullDiff ? 'Loading…' : 'Load full diff'}
-                </button>
-              )}
-            </div>
-          ) : diffFreshness.isStale && !isLoadingDiff ? (
-            <div className="shrink-0 flex items-center justify-between gap-3 border-b border-warning/20 bg-warning/10 px-3 py-1.5 text-xs text-warning">
-              <span>Diff out of date</span>
-              <button data-pn-touch-target type="button" onClick={handleRefreshStaleDiff} className="font-medium underline underline-offset-2">Refresh</button>
-            </div>
-          ) : baseBehindRemote && !prMetadata && !isLoadingDiff ? (
-            <div className="shrink-0 flex items-center justify-between gap-3 border-b border-warning/20 bg-warning/10 px-3 py-1.5 text-xs text-warning">
-              <span>Baseline is behind the remote.</span>
-              <button data-pn-touch-target type="button" onClick={handleFetchBase} disabled={isFetchingBase} className="font-medium underline underline-offset-2 disabled:opacity-60">
-                {isFetchingBase ? 'Fetching…' : 'Fetch'}
-              </button>
-            </div>
-          ) : null
-        )}
+        {isCompactTouchLayout && <ReviewHeaderStatus variant="strip" {...reviewStatusProps} />}
 
         {gitContext?.diffFallback && (
           <div className="shrink-0 border-b border-warning/20 bg-warning/10 px-3 py-2 text-xs text-warning">
@@ -6494,69 +5968,6 @@ const ReviewApp: React.FC = () => {
 
         {/* Main content */}
         <div className={`relative flex-1 flex overflow-hidden ${isResizing ? 'select-none' : ''}`}>
-          {!guideOpen && shouldShowFileTree && isNavigatorOpen && sectionsAvailable && panelView === 'sections' && (
-            <ReviewNavigatorContainer
-              isCompactTouchLayout={isCompactTouchLayout}
-              onClose={() => setIsCompactNavigatorOpen(false)}
-              context={compactNavigatorContext}
-              resizeHandle={fileTreeResizeHandle}
-            >
-              <SectionsPanel
-                header={panelHeader}
-                generatedFiles={generatedFiles}
-                files={files}
-                sections={sections!}
-                width={fileTreeResize.width}
-                activeFileIndex={isAllFilesActive || isSemanticDiffActive || isCallFlowActive || isPROverviewActive ? -1 : activeFileIndex}
-                scrollHighlightIndex={isAllFilesActive && allFilesVisibleFile ? files.findIndex(f => f.path === allFilesVisibleFile) : undefined}
-                onSelectFile={(index) => completeNavigatorSelection(() => handleFilePreview(index))}
-                onDoubleClickFile={(index) => completeNavigatorSelection(() => handleFilePinned(index))}
-                enableKeyboardNav={!showExportModal && hasSearchableFiles}
-                annotations={allAnnotations}
-                viewedFiles={viewedFiles}
-                onToggleViewed={handleToggleViewed}
-                hideViewedFiles={hideViewedFiles}
-                onToggleHideViewed={() => setHideViewedFiles(prev => !prev)}
-                showViewedControls={reviewShowViewedControls}
-                onToggleShowViewedControls={handleToggleReviewViewedControls}
-                stagedFiles={stagedFiles}
-                stagingFile={stagingFile}
-                canStage={canStageFiles}
-                onStageFile={stageFile}
-                showStageControls={reviewShowStageControls}
-                onToggleShowStageControls={handleToggleReviewStageControls}
-                autoViewed={autoViewedEnabled}
-                onToggleAutoViewed={handleToggleAutoViewed}
-                onSelectAllFiles={() => completeNavigatorSelection(openAllFilesPanel)}
-                isAllFilesActive={isAllFilesActive}
-                onSelectSemanticDiff={() => completeNavigatorSelection(openSemanticDiffPanel)}
-                isSemanticDiffActive={isSemanticDiffActive}
-                semanticDiffAvailable={semanticDiffUsable}
-                onSelectCallFlow={() => completeNavigatorSelection(openCallFlowPanel)}
-                isCallFlowActive={isCallFlowActive}
-                callFlowEnabled={callFlowEnabled}
-                callFlowCount={callFlowAnalysis.status === 'ready' ? callFlowAnalysis.data.summary.changedNodes : undefined}
-                callFlowLoading={callFlowNavLoading}
-                callFlowError={callFlowNavError}
-                onCopyRawDiff={handleCopyDiff}
-                canCopyRawDiff={!!diffData?.rawPatch}
-                copyRawDiffStatus={copyRawDiffStatus}
-                searchQuery={hasSearchableFiles ? searchQuery : ''}
-                isSearchOpen={hasSearchableFiles ? isSearchOpen : false}
-                isSearchPending={isSearchPending}
-                searchInputRef={hasSearchableFiles ? searchInputRef : undefined}
-                onOpenSearch={hasSearchableFiles ? openSearch : undefined}
-                onSearchChange={hasSearchableFiles ? handleSearchInputChange : undefined}
-                onSearchClear={hasSearchableFiles ? clearSearch : undefined}
-                onSearchClose={hasSearchableFiles ? closeSearch : undefined}
-                searchGroups={hasSearchableFiles ? searchGroups : []}
-                searchMatches={hasSearchableFiles ? searchMatches : []}
-                activeSearchMatchId={hasSearchableFiles ? activeSearchMatchId : null}
-                onSelectSearchMatch={hasSearchableFiles ? (match) => completeNavigatorSelection(() => handleSelectSearchMatch(match)) : undefined}
-                onStepSearchMatch={hasSearchableFiles ? stepSearchMatch : undefined}
-              />
-            </ReviewNavigatorContainer>
-          )}
           {!guideOpen && shouldShowFileTree && isNavigatorOpen && showCommitsPanel && (
             <ReviewNavigatorContainer
               isCompactTouchLayout={isCompactTouchLayout}
@@ -6580,7 +5991,7 @@ const ReviewApp: React.FC = () => {
               />
             </ReviewNavigatorContainer>
           )}
-          {!guideOpen && shouldShowFileTree && isNavigatorOpen && !(sectionsAvailable && panelView === 'sections') && !showCommitsPanel && (
+          {!guideOpen && shouldShowFileTree && isNavigatorOpen && !showCommitsPanel && (
             <ReviewNavigatorContainer
               isCompactTouchLayout={isCompactTouchLayout}
               onClose={() => setIsCompactNavigatorOpen(false)}
@@ -6595,6 +6006,9 @@ const ReviewApp: React.FC = () => {
                 activeRepoPath={activeRepoPath}
                 groupByKind={groupByKind}
                 onToggleGroupByKind={toggleGroupByKind}
+                groupBy={effectivePanelView === 'sections' ? 'status' : groupByKind ? 'kind' : 'none'}
+                onSelectGroupBy={handleSelectGroupBy}
+                statusGroupingAvailable={sectionsCapable}
                 generatedFiles={generatedFiles}
                 markdownPreviewedPaths={markdownPreview?.previewedPaths}
                 files={files}
@@ -6616,7 +6030,7 @@ const ReviewApp: React.FC = () => {
                 callFlowCount={callFlowAnalysis.status === 'ready' ? callFlowAnalysis.data.summary.changedNodes : undefined}
                 callFlowLoading={callFlowNavLoading}
                 callFlowError={callFlowNavError}
-                onSelectAllFiles={() => completeNavigatorSelection(openAllFilesPanel)}
+                onSelectAllFiles={allChangesOpen ? undefined : () => completeNavigatorSelection(openAllFilesPanel)}
                 isAllFilesActive={isAllFilesActive}
                 scrollHighlightIndex={isAllFilesActive && allFilesVisibleFile ? files.findIndex(f => f.path === allFilesVisibleFile) : undefined}
                 onSelectFile={(index) => completeNavigatorSelection(() => handleFilePreview(index))}
@@ -6740,7 +6154,6 @@ const ReviewApp: React.FC = () => {
                 className={`h-full ${resolvedMode === 'light' ? 'dockview-theme-light' : 'dockview-theme-dark'}`}
                 components={reviewPanelComponents}
                 defaultTabComponent={ReviewDockTabRenderer}
-                rightHeaderActionsComponent={ReviewDockRightActions}
                 onReady={handleDockReady}
                 disableFloatingGroups
               />
@@ -6816,6 +6229,7 @@ const ReviewApp: React.FC = () => {
               <ReviewSidebar
                 isOpen
                 onClose={reviewSidebar.close}
+                onSelectTab={reviewSidebar.open}
                 presentation={isCompactTouchLayout ? 'overlay' : 'panel'}
                 activeTab={reviewSidebar.activeTab}
                 annotations={allAnnotations}
@@ -6945,32 +6359,6 @@ const ReviewApp: React.FC = () => {
           />
         </div>
 
-        {/* Worktree info dialog */}
-        {(gitContext?.cwd || agentCwd) && prMetadata && (
-          <ConfirmDialog
-            isOpen={showWorktreeDialog}
-            onClose={() => setShowWorktreeDialog(false)}
-            title="Local Worktree"
-            wide
-            message={
-              <div className="space-y-3">
-                <p>This PR is checked out locally so review agents have full file access.</p>
-                <div>
-                  <span className="text-[10px] uppercase tracking-wider text-muted-foreground/60 font-semibold">Path</span>
-                  <button
-                    onClick={() => { void copyTextToClipboard((agentCwd || gitContext?.cwd)!); }}
-                    className="mt-1 w-full text-left font-mono text-xs bg-muted/50 border border-border/50 rounded-md px-3 py-2 text-foreground hover:bg-muted transition-colors cursor-pointer break-all"
-                    title="Click to copy"
-                  >
-                    {agentCwd || gitContext?.cwd}
-                  </button>
-                </div>
-                <p className="text-xs text-muted-foreground/60">Automatically removed when this review session ends.</p>
-              </div>
-            }
-            variant="info"
-          />
-        )}
 
         {/* No annotations dialog */}
         <ConfirmDialog
@@ -7032,103 +6420,6 @@ const ReviewApp: React.FC = () => {
           variant="warning"
           showCancel
         />
-
-        {/* First-use Grid/Clean choice. Its explicit-choice marker is shared
-            with the plan editor, so resolving it in either app suppresses it everywhere.
-            Second in the dialog chain (guide intro → look-and-feel → review
-            setup → edit mode) — the chain dialogs never stack. */}
-        <LookAndFeelAnnouncementDialog
-          isOpen={showLookAndFeel && !guideIntroVisible}
-          variant={lookAndFeelPrompt === 'moved' ? 'moved' : 'first-run'}
-          gridEnabled={gridEnabled}
-          onToggleGrid={(v) => configStore.set('gridEnabled', v)}
-          onDismiss={dismissLookAndFeel}
-        />
-
-        {/* One-time guided-review intro. First in the dialog chain, ahead of
-            the look-and-feel chooser, review setup, and edit-mode
-            announcement — the chain dialogs never stack. */}
-        {guideIntroVisible && (
-          <GuideIntroDialog
-            isOpen
-            onDismiss={() => {
-              markGuideIntroSeen();
-              setShowGuideIntro(false);
-            }}
-          />
-        )}
-
-        {/* One-time Edit Mode (edit-to-suggest) announcement. LAST in the
-            dialog chain (guide intro → look-and-feel → edit mode) —
-            editModeAnnouncementCanShow gates on every earlier dialog, so the
-            chain dialogs never stack. */}
-        {editModeIntroVisible && (
-          <EditModeAnnouncementDialog
-            isOpen
-            onEnable={enableEditModeIntro}
-            onDismiss={dismissEditModeIntro}
-          />
-        )}
-
-        {/* One-time token hover card announcement. Fourth in the dialog chain
-            (guide intro → look-and-feel → edit mode → token hover → terminal
-            tools) — tokenHoverAnnouncementCanShow gates on every earlier
-            dialog, so the chain dialogs never stack. */}
-        {tokenHoverIntroVisible && (
-          <TokenHoverAnnouncementDialog isOpen onDismiss={dismissTokenHoverIntro} />
-        )}
-
-        {/* One-time Plannotator TUI + Herdr Annotate announcement. LAST in the
-            dialog chain (guide intro → look-and-feel → edit mode → token hover
-            → terminal tools) — terminalToolsAnnouncementCanShow gates on every
-            earlier dialog, so the chain dialogs never stack. */}
-        {terminalToolsIntroVisible && (
-          <TerminalToolsAnnouncementDialog isOpen onDismiss={dismissTerminalToolsIntro} />
-        )}
-
-        {/* One-time Plannotator Inbox announcement, shared with the plan and
-            annotate editor; after terminal tools (never on the same load),
-            before "Ask this session". */}
-        {inboxIntroVisible && (
-          <InboxAnnouncementDialog isOpen onDismiss={dismissInboxIntro} />
-        )}
-
-        {/* One-time "Ask this session" announcement. LAST in the dialog chain,
-            and never on the same load as the terminal-tools one
-            (askSessionAnnouncementPendingThisLoad). */}
-        {askSessionIntroVisible && askSessionAgent && (
-          <AskSessionAnnouncementDialog
-            isOpen
-            agent={askSessionAgent}
-            onDismiss={dismissAskSessionIntro}
-          />
-        )}
-
-        {/* One-time offer to turn the agent tool on (Pi, OpenCode 2). LAST in
-            the dialog chain, never on the same load as another announcement. */}
-        {agentToolIntroVisible && agentToolOfferHost && (
-          <AgentToolAnnouncementDialog
-            isOpen
-            host={agentToolOfferHost}
-            onTurnOn={turnOnAgentTool}
-            onDismiss={dismissAgentToolIntro}
-          />
-        )}
-
-        {/* One-time PR feedback-destination spotlight. Strictly AFTER the
-            first-run dialog chain (guide intro → look-and-feel → edit mode →
-            token hover → terminal tools → Inbox → Ask this session → agent tool
-            offer): it only mounts once none of the eight is showing, so it never stacks with them. PR mode only — the
-            switcher it points at doesn't render otherwise. */}
-        {showDestSpotlight && !isCompactTouchLayout && !!prMetadata && !isLoading && !showLookAndFeel && !guideIntroVisible && !editModeIntroVisible && !tokenHoverIntroVisible && !terminalToolsIntroVisible && !inboxIntroVisible && !askSessionIntroVisible && !agentToolIntroVisible && (
-          <DestinationSpotlight
-            targetRef={destToggleRef}
-            platformLabel={platformLabel}
-            mrLabel={mrLabel}
-            compactTouchLayout={isCompactTouchLayout}
-            onDismiss={dismissDestSpotlight}
-          />
-        )}
 
         {/* Completion overlay - shown after approve/feedback/exit */}
         <CompletionOverlay
@@ -7192,9 +6483,6 @@ const ReviewApp: React.FC = () => {
         />
       </div>
 
-      {/* Tour dialog overlay */}
-      <TourDialog jobId={tourDialogJobId} onClose={() => setTourDialogJobId(null)} />
-
       {lineAnnotationComposeRequest && (() => {
         const targetFile = files.find(file => file.path === lineAnnotationComposeRequest.filePath);
         if (!targetFile) return null;
@@ -7214,18 +6502,6 @@ const ReviewApp: React.FC = () => {
           />
         );
       })()}
-
-      {/* Dev-only: open a fully-formed demo tour without running the agent.
-          Stripped from production builds via import.meta.env.DEV. */}
-      {import.meta.env.DEV && (
-        <button
-          onClick={() => setTourDialogJobId(tourDialogJobId === DEMO_TOUR_ID ? null : DEMO_TOUR_ID)}
-          title="Open the demo tour (dev only). Cmd+Shift+T also works."
-          className="fixed bottom-3 right-3 z-[60] px-2.5 py-1 rounded-md bg-foreground/80 text-background text-[10px] font-mono uppercase tracking-wider shadow-lg hover:bg-foreground transition-colors"
-        >
-          {tourDialogJobId === DEMO_TOUR_ID ? 'Close tour' : 'Demo tour'}
-        </button>
-      )}
 
     {/* One instance for the whole app, portaled to <body> so it escapes the
         Dockview panels' overflow and stacking context. */}

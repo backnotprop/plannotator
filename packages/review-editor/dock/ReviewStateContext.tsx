@@ -221,7 +221,7 @@ export interface ReviewState {
   canStagePath?: (filePath: string) => boolean;
   /** Worktree path parsed from the live diffType when it's a
    *  `worktree:<path>:<subType>` string; null for the main tree and PR mode.
-   *  Feeds jobMatchesReviewContext's third argument so guide/tour context
+   *  Feeds jobMatchesReviewContext's third argument so guide context
    *  matching is worktree-aware (populated from App.tsx's
    *  activeWorktreePath memo — the same parse that drives the sections/tree
    *  UI, so context matching aligns with what's on screen). */
@@ -326,9 +326,6 @@ export interface ReviewState {
   returnFromCallTree?: () => void;
   /** Stop showing the hunk's tree (the tab's own trees again). */
   clearCallTreeRequest?: () => void;
-
-  // Tour
-  openTourPanel: (jobId: string) => void;
 
   // Guide — optional because not every host wires a guide takeover surface.
   openGuide?: (jobId: string) => void;

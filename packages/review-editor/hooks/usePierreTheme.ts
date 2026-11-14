@@ -1,3 +1,4 @@
+import { COMPACT_HUNK_SEPARATOR_HEIGHT, HUNK_SEPARATOR_HEIGHT } from '../utils/diffChromeMetrics';
 import { useState, useEffect } from 'react';
 import type { DiffLineBgIntensity } from '@plannotator/shared/config';
 import { extendThemeSwitch, useTheme } from '@plannotator/ui/components/ThemeProvider';
@@ -246,48 +247,25 @@ export function usePierreTheme(options?: {
   const showFileHeader = options?.showFileHeader ?? false;
   const compactTouchLayout = options?.compactTouchLayout === true;
   const compactTouchCSS = compactTouchLayout ? COMPACT_TOUCH_GUTTER_UTILITY_CSS : '';
+  const separatorPx = compactTouchLayout ? COMPACT_HUNK_SEPARATOR_HEIGHT : HUNK_SEPARATOR_HEIGHT;
   const lineBgIntensity = useConfigValue('diffLineBgIntensity');
 
-  const [pierreTheme, setPierreTheme] = useState<PierreTheme>(() => {
+  const buildTheme = (): PierreTheme => {
+    const mode = resolvedMode ?? 'dark';
     const styles = getComputedStyle(document.documentElement);
     const bg = styles.getPropertyValue('--background').trim();
     const fg = styles.getPropertyValue('--foreground').trim();
-    if (!bg || !fg) return { type: resolvedMode ?? 'dark', css: '', syntaxTheme: resolveSyntaxTheme(colorTheme, resolvedMode ?? 'dark') };
-    return { type: resolvedMode ?? 'dark', syntaxTheme: resolveSyntaxTheme(colorTheme, resolvedMode ?? 'dark'), css: `
-      :host, [data-diff], [data-file], [data-diffs-header], [data-error-wrapper], [data-virtualizer-buffer] {
-        --diffs-bg: ${bg} !important; --diffs-fg: ${fg} !important;
-        --diffs-dark-bg: ${bg}; --diffs-light-bg: ${bg}; --diffs-dark: ${fg}; --diffs-light: ${fg};
-      }
-      pre, code { background-color: ${bg} !important; }
-      :host { --diffs-bg-separator-override: color-mix(in srgb, ${fg} 8%, ${bg}); }
-      [data-separator='line-info'], [data-separator='line-info-basic'] { height: 24px !important; }
-      [data-separator='line-info'] { margin-block: 4px !important; }
-      ${buildLineBgOverrides(lineBgIntensity, resolvedMode ?? 'dark')}
-      ${compactTouchCSS}
-      ${SELECTION_BAR_PLUS_CSS}
-      ${HOST_SURFACE_HOOKS_CSS}
-    `};
-  });
-
-  useEffect(() => {
-    requestAnimationFrame(() => {
-      const styles = getComputedStyle(document.documentElement);
-      const bg = styles.getPropertyValue('--background').trim();
-      const fg = styles.getPropertyValue('--foreground').trim();
-      const muted = styles.getPropertyValue('--muted').trim();
-      const mutedFg = styles.getPropertyValue('--muted-foreground').trim();
-      const border = styles.getPropertyValue('--border').trim();
-      const primary = styles.getPropertyValue('--primary').trim();
-      if (!bg || !fg) return;
-
-      const fontCSS = buildPierreFontCSS(fontFamily, fontSize);
-
-      // A frame after a theme switch: keep the switch's no-fade hold over this redraw too.
-      extendThemeSwitch();
-      setPierreTheme({
-        type: resolvedMode,
-        syntaxTheme: resolveSyntaxTheme(colorTheme, resolvedMode),
-        css: `
+    const muted = styles.getPropertyValue('--muted').trim();
+    const mutedFg = styles.getPropertyValue('--muted-foreground').trim();
+    const border = styles.getPropertyValue('--border').trim();
+    const primary = styles.getPropertyValue('--primary').trim();
+    const syntaxTheme = resolveSyntaxTheme(colorTheme, mode);
+    if (!bg || !fg) return { type: mode, css: '', syntaxTheme };
+    const fontCSS = buildPierreFontCSS(fontFamily, fontSize);
+    return {
+      type: mode,
+      syntaxTheme,
+      css: `
           :host, [data-diff], [data-file], [data-diffs-header], [data-error-wrapper], [data-virtualizer-buffer] {
             --diffs-bg: ${bg} !important;
             --diffs-fg: ${fg} !important;
@@ -344,18 +322,17 @@ export function usePierreTheme(options?: {
           }
           [data-separator='line-info'],
           [data-separator='line-info-basic'] {
-            height: 24px !important;
+            height: ${separatorPx}px !important;
           }
           [data-separator='line-info'] {
-            margin-block: 4px !important;
+            margin-block: 0 !important;
           }
           [data-separator-content] {
-            font-size: 11px !important;
+            font-size: 12px !important;
             color: ${mutedFg || fg} !important;
-            opacity: 0.7;
           }
           [data-separator-content]:hover {
-            opacity: 1;
+            color: ${fg} !important;
           }
           [data-expand-button] {
             min-width: 24px !important;
@@ -383,16 +360,24 @@ export function usePierreTheme(options?: {
 
           ${fontCSS}
 
-          ${buildLineBgOverrides(lineBgIntensity, resolvedMode)}
+          ${buildLineBgOverrides(lineBgIntensity, mode)}
 
           ${compactTouchCSS}
           ${SELECTION_BAR_PLUS_CSS}
 
           ${HOST_SURFACE_HOOKS_CSS}
-        `,
-      });
+      `,
+    };
+  };
+
+  const [pierreTheme, setPierreTheme] = useState<PierreTheme>(buildTheme);
+
+  useEffect(() => {
+    requestAnimationFrame(() => {
+      extendThemeSwitch();
+      setPierreTheme(buildTheme());
     });
-  }, [resolvedMode, colorTheme, fontFamily, fontSize, showFileHeader, lineBgIntensity, compactTouchCSS]);
+  }, [resolvedMode, colorTheme, fontFamily, fontSize, showFileHeader, lineBgIntensity, compactTouchCSS, separatorPx]);
 
   return pierreTheme;
 }

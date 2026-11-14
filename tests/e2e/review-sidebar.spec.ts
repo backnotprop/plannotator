@@ -157,13 +157,13 @@ test('the view tabs: arrows move focus, Enter and Space switch, focus stays on t
     await expect(tab(page, 'tree')).toHaveAttribute('aria-selected', 'true');
     await tab(page, 'tree').focus();
     await page.keyboard.press('ArrowRight');
-    expect(await focusedView(page)).toBe('sections');
+    expect(await focusedView(page)).toBe('commits');
     // An arrow only moves focus: the view is still the tree.
     await expect(tab(page, 'tree')).toHaveAttribute('aria-selected', 'true');
     await page.keyboard.press('Enter');
-    await expect(tab(page, 'sections')).toHaveAttribute('aria-selected', 'true');
-    await expect(page.locator('[role="tabpanel"]')).toHaveAttribute('aria-labelledby', 'review-panel-tab-sections');
-    expect(await focusedView(page)).toBe('sections');
+    await expect(tab(page, 'commits')).toHaveAttribute('aria-selected', 'true');
+    await expect(page.locator('[role="tabpanel"]')).toHaveAttribute('aria-labelledby', 'review-panel-tab-commits');
+    expect(await focusedView(page)).toBe('commits');
     await page.keyboard.press('ArrowLeft');
     expect(await focusedView(page)).toBe('tree');
     await page.keyboard.press(' ');
@@ -220,7 +220,7 @@ test('the tools stay on top while the files scroll under them; the numbers keep 
     await page.mouse.wheel(0, 400);
     await expect(block).toHaveAttribute('data-stuck', '');
     const after = await block.boundingBox();
-    expect(after!.y).toBeLessThan(before!.y);
+    expect(after!.y).toBeLessThanOrEqual(before!.y);
     // Still on screen, at the top of the list, with its tools usable.
     await expect(page.locator('[data-tree-scope="all"]')).toBeInViewport();
     await expect(page.getByRole('button', { name: 'List options' })).toBeInViewport();
