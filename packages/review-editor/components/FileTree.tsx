@@ -656,8 +656,9 @@ export const RepoListingPlaceholder: React.FC<{ state: RepoFiles['state'] | unde
  *  for its heading's tooltip and spoken name. The label stays "Code"
  *  (approved design record "review-file-kinds"); this says what it means. */
 const KIND_COVERS: Record<FileKindBlock['kind'], string> = {
-  code: 'Everything that is not a test or a generated file, docs and config included',
+  code: 'Everything that is not a test, documentation or a generated file, config included',
   test: 'Test files (such as *.test.ts, *_test.go, test_*.py) and files in test folders (tests, __tests__, spec, e2e, fixtures)',
+  docs: 'Documentation: Markdown and other prose, READMEs, changelogs, licences, and files in docs folders',
   generated: 'Generated files: lockfiles, minified and source-map files, and files marked linguist-generated in .gitattributes',
 };
 

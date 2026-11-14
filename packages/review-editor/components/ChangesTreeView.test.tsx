@@ -95,29 +95,29 @@ afterEach(async () => {
 });
 
 describe.skipIf(!hasDom)('The Changes tree on Pierre trees', () => {
-  test('group by kind: Code, Tests, Generated in that order, Generated folded, folder sums beside folders', async () => {
+  test('group by kind: Code, Tests, Docs, Generated in that order, Generated folded, folder sums beside folders', async () => {
     const el = await mount(<Tree groupByKind />);
     expect(rows(el)).toEqual([
       'Code/',
-      'Code/src∕sync/',
-      'Code/src∕sync/retry.ts',
-      'Code/README.md',
+      'Code/retry.ts',
       'Tests/',
-      'Tests/src∕sync∕__tests__/',
-      'Tests/src∕sync∕__tests__/retry.test.ts',
-      'Tests/tests∕e2e/',
-      'Tests/tests∕e2e/sync.spec.ts',
+      'Tests/src\u2215sync\u2215__tests__/',
+      'Tests/src\u2215sync\u2215__tests__/retry.test.ts',
+      'Tests/tests\u2215e2e/',
+      'Tests/tests\u2215e2e/sync.spec.ts',
+      'Docs/',
+      'Docs/README.md',
       'Generated/',
     ]);
     expect(row(el, 'Generated/').getAttribute('aria-expanded')).toBe('false');
-    expect(trail(el, 'Code/')).toEqual(['0/2', '+20', '-1']);
-    expect(trail(el, 'Code/src∕sync/retry.ts')).toEqual(['', '+19', '']);
-    expect(selected(el)).toEqual(['Code/src∕sync/retry.ts']);
+    expect(trail(el, 'Code/')).toEqual(['0/1', '+19', '']);
+    expect(trail(el, 'Code/retry.ts')).toEqual(['', '+19', '']);
+    expect(selected(el)).toEqual(['Code/retry.ts']);
   });
 
   test('j/k follow the grouped order and open the folded group they land in', async () => {
     const onSelectFile = mock((_index: number) => {});
-    const el = await mount(<Tree groupByKind activeFileIndex={4} onSelectFile={onSelectFile} />);
+    const el = await mount(<Tree groupByKind activeFileIndex={3} onSelectFile={onSelectFile} />);
     await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'j' })));
     expect(onSelectFile).toHaveBeenLastCalledWith(0);
     await rerender(<Tree groupByKind activeFileIndex={0} onSelectFile={onSelectFile} />);
