@@ -2051,7 +2051,7 @@ const ReviewApp: React.FC = () => {
       handleFileViewChange(path, 'whole');
       flipped = { path, view: 'changes' };
     }
-    openRepoFile(path, { pin: false });
+    openRepoFile(path, { pin: false, browse: !!flipped && usesPaneLayout() });
     if (target.line) {
       revealCounterRef.current += 1;
       setRevealTarget({ path, line: target.line, symbol: target.symbol, token: revealCounterRef.current });

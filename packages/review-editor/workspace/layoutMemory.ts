@@ -1,5 +1,4 @@
 import { storage } from '@plannotator/ui/utils/storage';
-import { isReviewFilePreviewParams } from '../dock/reviewPanelTypes';
 import type { PaneLayout, PaneTab } from './paneLayout';
 
 export const LAYOUT_MEMORY_KEY = 'plannotator-review-layouts';
@@ -24,7 +23,7 @@ function readMemory(): Memory {
 }
 
 export function restorableTab(tab: PaneTab): boolean {
-  return RESTORABLE.has(tab.component) && !isReviewFilePreviewParams(tab.params);
+  return RESTORABLE.has(tab.component);
 }
 
 export function snapshotLayout(layout: PaneLayout, ratio: number): SavedLayout | null {

@@ -1,3 +1,5 @@
+export const TITLE_SETTLE_MS = 200;
+
 import { useEffect, useState } from 'react';
 
 export function useSettledValue<T>(value: T, delayMs: number): T {
