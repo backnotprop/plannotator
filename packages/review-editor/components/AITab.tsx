@@ -262,7 +262,7 @@ export const AITab: React.FC<AITabProps> = ({
             {fileGroups.length > 0 && (
               <div className="flex items-center gap-2 px-2 mb-1.5">
                 <div className="flex-1 border-t border-border/40" />
-                <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/50">General</span>
+                <span className="text-xs font-medium text-muted-foreground/50">General</span>
                 <div className="flex-1 border-t border-border/40" />
               </div>
             )}
@@ -362,7 +362,7 @@ const GeneralInput: React.FC<{
             title={observationOnly ? 'Stop listening; the question keeps running in the session' : 'Stop generating'}
             aria-label={observationOnly ? 'Stop listening' : 'Stop generating'}
           >
-            {observationOnly && <span className="text-[10px] mr-1">Stop listening</span>}
+            {observationOnly && <span className="text-xs mr-1">Stop listening</span>}
             <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
               <rect x="6" y="6" width="12" height="12" rx="2" />
             </svg>
@@ -416,7 +416,7 @@ const QAPair = memo<{
               <FileNameChip path={question.filePath} />
             )}
           </div>
-          <span className="text-[10px] text-muted-foreground/50">
+          <span className="text-xs text-muted-foreground/50">
             {formatRelativeTime(question.createdAt)}
           </span>
         </div>

@@ -528,7 +528,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
             >
               <Paperclip className="w-3.5 h-3.5 flex-shrink-0" />
               <span>Artifacts</span>
-              <span className="ml-auto rounded bg-muted px-1.5 py-0.5 font-mono text-[9px] tabular-nums text-muted-foreground">
+              <span className="ml-auto rounded bg-muted px-1.5 py-0.5 font-mono text-xs tabular-nums text-muted-foreground">
                 {prArtifactCount}
               </span>
             </SidebarActionRow>
@@ -743,8 +743,8 @@ export const SearchFileGroup: React.FC<{
           />
         </svg>
         <span className="truncate text-foreground font-medium">{fileName}</span>
-        {dirPath && <span className="truncate text-muted-foreground/50 text-[10px]">{dirPath}</span>}
-        <span className="ml-auto flex-shrink-0 text-[10px] text-muted-foreground/50 bg-muted rounded px-1.5 py-0.5">
+        {dirPath && <span className="truncate text-muted-foreground/50 text-xs">{dirPath}</span>}
+        <span className="ml-auto flex-shrink-0 text-xs text-muted-foreground/50 bg-muted rounded px-1.5 py-0.5">
           {group.matches.length}
         </span>
       </button>

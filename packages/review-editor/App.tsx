@@ -208,6 +208,7 @@ import { ReviewDockRightActions } from './dock/ReviewDockRightActions';
 import { ReviewPanelToggle } from './components/ReviewPanelToggle';
 import { focusFileHeaderWhenLost, focusReviewPanelSoon } from './utils/focusFileHeader';
 import { SkipToReviewPanel } from './components/SkipToReviewPanel';
+import { CompactPrimaryAction, compactPrimaryAction } from './components/CompactPrimaryAction';
 import { ReviewHeaderStatus } from './components/ReviewHeaderStatus';
 import { watchLoneTabHeader } from './dock/loneTabHeader';
 import { ReviewCenterArea } from './workspace/ReviewCenterArea';
@@ -5884,6 +5885,7 @@ const ReviewApp: React.FC = () => {
             )}
             </div>
             {!guideVisible && <div ref={setPaneTabsSlot} data-pane-tabs-slot="" className={isCompactTouchLayout ? 'min-w-0 flex-1 self-stretch flex items-center justify-center empty:hidden' : 'min-w-0 flex-1 self-stretch flex items-stretch empty:hidden'} />}
+            {isCompactTouchLayout && !guideVisible && <CompactPrimaryAction action={compactPrimaryAction(compactReviewActions)} />}
             </div>
           </div>
 
@@ -5957,9 +5959,9 @@ const ReviewApp: React.FC = () => {
                             <div className="text-muted-foreground/60">Send to session</div>
                           </button>
                           {!isCompactTouchLayout && <div className="border-t border-border/50 mt-1 pt-1 px-3 py-1">
-                            <span className="text-[10px] text-muted-foreground/40">
-                              <kbd className="inline-flex items-center justify-center min-w-[18px] h-[16px] px-1 rounded bg-muted border border-border/60 border-b-[2px] text-[9px] font-mono leading-none text-foreground/60 shadow-sm">{altKey}</kbd>
-                              <kbd className="inline-flex items-center justify-center min-w-[18px] h-[16px] px-1 rounded bg-muted border border-border/60 border-b-[2px] text-[9px] font-mono leading-none text-foreground/60 shadow-sm ml-0.5">{altKey}</kbd>
+                            <span className="text-xs text-muted-foreground/40">
+                              <kbd className="inline-flex items-center justify-center min-w-[18px] h-[16px] px-1 rounded bg-muted border border-border/60 border-b-[2px] text-xs font-mono leading-none text-foreground/60 shadow-sm">{altKey}</kbd>
+                              <kbd className="inline-flex items-center justify-center min-w-[18px] h-[16px] px-1 rounded bg-muted border border-border/60 border-b-[2px] text-xs font-mono leading-none text-foreground/60 shadow-sm ml-0.5">{altKey}</kbd>
                               <span className="ml-1.5">to toggle</span>
                             </span>
                           </div>}

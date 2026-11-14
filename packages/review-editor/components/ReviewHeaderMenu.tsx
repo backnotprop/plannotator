@@ -134,7 +134,7 @@ export const ReviewHeaderMenu: React.FC<ReviewHeaderMenuProps> = ({
                           key={destination}
                           aria-pressed={selected}
                           onClick={() => compactDestination.onChange(destination)}
-                          className={`flex min-w-0 items-center justify-center gap-1.5 rounded-md px-2 py-1 text-[11px] font-medium transition-colors ${
+                          className={`flex min-w-0 items-center justify-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium transition-colors ${
                             selected
                               ? 'bg-background text-foreground shadow-sm'
                               : 'text-muted-foreground hover:text-foreground'
@@ -179,7 +179,7 @@ export const ReviewHeaderMenu: React.FC<ReviewHeaderMenuProps> = ({
                     closeMenu();
                     setTheme(id);
                   }}
-                  className={`flex flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1 text-[11px] font-medium transition-colors ${
+                  className={`flex flex-1 items-center justify-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium transition-colors ${
                     theme === id
                       ? 'bg-background text-foreground shadow-sm'
                       : 'text-muted-foreground hover:text-foreground'
@@ -344,7 +344,7 @@ const FileTreeMenuIcon = () => (
 const KbdHint: React.FC<{ keys: string[] }> = ({ keys }) => (
   <span className="inline-flex items-center gap-0.5 ml-auto">
     {keys.map((k, i) => (
-      <kbd key={i} className="inline-flex items-center justify-center h-[18px] min-w-[18px] px-1 rounded bg-muted border border-border/60 text-[10px] font-mono leading-none text-muted-foreground">
+      <kbd key={i} className="inline-flex items-center justify-center h-[18px] min-w-[18px] px-1 rounded bg-muted border border-border/60 text-xs font-mono leading-none text-muted-foreground">
         {k}
       </kbd>
     ))}

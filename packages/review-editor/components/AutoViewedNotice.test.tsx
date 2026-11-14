@@ -10,11 +10,12 @@ const hasDom = typeof document !== 'undefined';
 let host: HTMLDivElement | null = null;
 let root: Root | null = null;
 let show: (() => void) | null = null;
+let clock = 0;
 const realFetch = globalThis.fetch;
 const before = hasDom ? configStore.get('reviewAutoViewed') : true;
 
 function Harness({ fileKey }: { fileKey: number }) {
-  const notice = useAutoViewedNotice({ blocked: false, fileKey });
+  const notice = useAutoViewedNotice({ blocked: false, fileKey, now: () => clock });
   show = notice.show;
   return <AutoViewedNotice notice={notice.notice} onTurnOff={notice.turnOff} />;
 }
@@ -44,7 +45,8 @@ afterEach(async () => {
 });
 
 describe.if(hasDom)('auto-viewed notice, inline and once', () => {
-  test('shows in the list once, keeps Turn off, and clears on the next file change', async () => {
+  test('shows in the list once, survives the file change that marked it, keeps Turn off, and clears on a later file change', async () => {
+    clock = 0;
     configStore.set('reviewAutoViewed', true);
     await render(1);
     await act(async () => show!());
@@ -53,6 +55,9 @@ describe.if(hasDom)('auto-viewed notice, inline and once', () => {
     expect(document.querySelector('[data-sonner-toast]')).toBeNull();
 
     await render(2);
+    expect(host!.querySelector('[data-auto-viewed-notice]')).not.toBeNull();
+    clock += 5000;
+    await render(3);
     expect(host!.querySelector('[data-auto-viewed-notice]')).toBeNull();
     await act(async () => show!());
     expect(host!.querySelector('[data-auto-viewed-notice]')).toBeNull();

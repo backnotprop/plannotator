@@ -14,7 +14,7 @@ export const PRSummaryTab: React.FC<PRSummaryTabProps> = React.memo(({ context, 
       {/* PR title + state */}
       <div className="space-y-2">
         <div className="flex items-start gap-2">
-          <span className={`shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded ${
+          <span className={`shrink-0 text-xs font-medium px-1.5 py-0.5 rounded ${
             context.state === 'MERGED'
               ? 'bg-violet-500/15 text-violet-400'
               : context.state === 'CLOSED'
@@ -35,12 +35,12 @@ export const PRSummaryTab: React.FC<PRSummaryTabProps> = React.memo(({ context, 
           </a>
         </div>
 
-        <div className="text-[10px] text-muted-foreground font-mono break-words">
+        <div className="text-xs text-muted-foreground font-mono break-words">
           {metadata.author} wants to merge <code className="bg-muted px-1 rounded break-all">{metadata.headBranch}</code> into <code className="bg-muted px-1 rounded break-all">{metadata.baseBranch}</code>
         </div>
         {metadata.defaultBranch && metadata.baseBranch !== metadata.defaultBranch && (
-          <div className="inline-flex items-center gap-1.5 rounded border border-accent/20 bg-accent/10 px-2 py-1 text-[10px] text-accent">
-            <span className="font-medium uppercase tracking-wide">Stacked</span>
+          <div className="inline-flex items-center gap-1.5 rounded border border-accent/20 bg-accent/10 px-2 py-1 text-xs text-accent">
+            <span className="font-medium">Stacked</span>
             <span className="text-accent/80">
               Diffs against <code className="font-mono">{metadata.baseBranch}</code>, default branch is <code className="font-mono">{metadata.defaultBranch}</code>
             </span>
@@ -54,7 +54,7 @@ export const PRSummaryTab: React.FC<PRSummaryTabProps> = React.memo(({ context, 
           {context.labels.map((label) => (
             <span
               key={label.name}
-              className="text-[10px] px-1.5 py-0.5 rounded-full font-medium text-foreground"
+              className="text-xs px-1.5 py-0.5 rounded-full font-medium text-foreground"
               style={{
                 backgroundColor: `#${label.color}18`,
                 border: `1px solid #${label.color}50`,
@@ -69,8 +69,8 @@ export const PRSummaryTab: React.FC<PRSummaryTabProps> = React.memo(({ context, 
       {/* Linked issues */}
       {context.linkedIssues.length > 0 && (
         <div className="space-y-1">
-          <h3 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-            Linked Issues
+          <h3 className="text-xs font-semibold text-muted-foreground">
+            Linked issues
           </h3>
           {context.linkedIssues.map((issue) => (
             <a
@@ -84,7 +84,7 @@ export const PRSummaryTab: React.FC<PRSummaryTabProps> = React.memo(({ context, 
                 <path d="M448 64C200.562 64 0 264.562 0 512c0 247.438 200.562 448 448 448 247.438 0 448-200.562 448-448C896 264.562 695.438 64 448 64zM448 832c-176.781 0-320-143.25-320-320 0-176.781 143.219-320 320-320 176.75 0 320 143.219 320 320C768 688.75 624.75 832 448 832zM384 768h128V640H384V768zM384 576h128V256H384V576z" />
               </svg>
               #{issue.number}
-              {issue.repo && <span className="text-muted-foreground text-[10px]">({issue.repo})</span>}
+              {issue.repo && <span className="text-muted-foreground text-xs">({issue.repo})</span>}
             </a>
           ))}
         </div>
@@ -93,7 +93,7 @@ export const PRSummaryTab: React.FC<PRSummaryTabProps> = React.memo(({ context, 
       {/* PR body */}
       {context.body ? (
         <div className="space-y-1">
-          <h3 className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+          <h3 className="text-xs font-semibold text-muted-foreground">
             Description
           </h3>
           <AnnotatableDescription markdown={context.body} className="md-compact" />
