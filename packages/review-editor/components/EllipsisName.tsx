@@ -34,6 +34,16 @@ export function fitMiddle(name: string, available: number, width: (text: string)
   return `${stem.slice(0, Math.max(1, low))}${ELLIPSIS}${extension.slice(1)}`;
 }
 
+export function fitDirectory(directory: string, available: number, width: (text: string) => number): string {
+  if (width(directory) <= available) return directory;
+  const parts = directory.split('/').filter(Boolean);
+  for (let drop = 1; drop < parts.length; drop++) {
+    const candidate = `${ELLIPSIS}/${parts.slice(drop).join('/')}/`;
+    if (width(candidate) <= available) return candidate;
+  }
+  return '';
+}
+
 export const EllipsisName: React.FC<{ text: string; keepExtension?: boolean; className?: string; title?: string }> = ({
   text,
   keepExtension = true,
