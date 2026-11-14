@@ -66,3 +66,13 @@ describe('comments not sent yet', () => {
     expect(unsentComments([comment, other, general], placed)).toEqual([other]);
   });
 });
+
+describe('a pull request thread on the diff', () => {
+  test('sits on its last line, on the side the forge names; a file-level one has no line', async () => {
+    const { prThreadPlace } = await import('./PRThreadCard');
+    const base = { id: 't', isResolved: false, isOutdated: false, path: 'src/a.ts', comments: [] };
+    expect(prThreadPlace({ ...base, line: 12, startLine: 10, diffSide: 'RIGHT' })).toEqual({ line: 12, side: 'new' });
+    expect(prThreadPlace({ ...base, line: 4, startLine: null, diffSide: 'LEFT' })).toEqual({ line: 4, side: 'old' });
+    expect(prThreadPlace({ ...base, line: null, startLine: null, diffSide: null })).toBeNull();
+  });
+});

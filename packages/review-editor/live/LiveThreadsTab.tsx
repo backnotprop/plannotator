@@ -2,7 +2,9 @@ import type { MutableRefObject } from 'react';
 import type { CodeAnnotation } from '@plannotator/ui/types';
 import type { LiveReviewActions } from './useLiveReview';
 import { LiveComposer } from './LiveComposer';
+import type { PRReviewThread } from '@plannotator/shared/pr-types';
 import { agentLabel, authorName, threadLines, type PlacedThread } from './model';
+import { prThreadPlace } from './PRThreadCard';
 
 const short = (path: string) => path.split('/').pop() ?? path;
 
@@ -57,6 +59,7 @@ export function LiveThreadsTab(props: {
   focused: string | null;
   onStep: (direction: 1 | -1) => void;
   threadUrl: string | null;
+  pr: { forge: string; threads: readonly PRReviewThread[] | null; load: () => void } | null;
   actions: MutableRefObject<LiveReviewActions>;
 }) {
   const actions = props.actions.current;
@@ -105,6 +108,7 @@ export function LiveThreadsTab(props: {
           </div>
         </section>
       ) : null}
+      {props.pr ? <PRThreadsSection pr={props.pr} onOpen={(path, line, side) => actions.revealLines(path, line, side)} /> : null}
       {props.placed.length === 0 && props.unsent.length === 0 ? (
         <p className="px-3 py-3 text-[12px] leading-5 text-muted-foreground">
           Comments you send to an agent become threads here. Write a comment on a line, then send it from this tab.
@@ -117,5 +121,49 @@ export function LiveThreadsTab(props: {
         </ul>
       )}
     </div>
+  );
+}
+
+function PRThreadsSection({ pr, onOpen }: { pr: { forge: string; threads: readonly PRReviewThread[] | null; load: () => void }; onOpen: (path: string, line: number, side: 'old' | 'new') => void }) {
+  const where = pr.forge === 'GitLab' ? 'merge request' : 'pull request';
+  const open = (pr.threads ?? []).filter((t) => !t.isResolved);
+  return (
+    <section className="border-b border-border py-1" aria-label={`On the ${where}`}>
+      <h3 className="px-3 py-1 text-[12px] font-medium text-muted-foreground">On the {where}</h3>
+      {pr.threads === null ? (
+        <div className="px-3 pb-2">
+          <button type="button" className="h-7 rounded px-2 text-[12px] text-muted-foreground hover:bg-muted hover:text-foreground" onClick={pr.load} data-pr-threads-load>
+            Show its threads on the lines
+          </button>
+        </div>
+      ) : open.length === 0 ? (
+        <p className="px-3 pb-2 text-[12px] text-muted-foreground">No open threads on the {where}.</p>
+      ) : (
+        <ul>
+          {open.map((thread) => {
+            const place = prThreadPlace(thread);
+            return (
+              <li key={thread.id}>
+                <button
+                  type="button"
+                  disabled={!place}
+                  onClick={() => place && onOpen(thread.path, place.line, place.side)}
+                  className="flex w-full flex-col gap-0.5 px-3 py-1.5 text-left hover:bg-muted disabled:cursor-default"
+                  data-pr-row={thread.id}
+                >
+                  <span className="flex gap-1.5 text-[12px] text-muted-foreground">
+                    <span className="truncate" title={thread.path}>{short(thread.path)}</span>
+                    {place ? <span>line {place.line}</span> : null}
+                    {thread.isOutdated ? <span>· Outdated</span> : null}
+                    <span>· {thread.comments[0]?.author ?? ''}</span>
+                  </span>
+                  <span className="line-clamp-2 text-[13px] leading-5 text-foreground">{thread.comments[0]?.body ?? ''}</span>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </section>
   );
 }

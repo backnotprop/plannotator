@@ -153,3 +153,10 @@ export function unsentComments<C extends CommentLike & { text?: string }>(commen
     return !sent.has(key);
   });
 }
+
+export function commentOfMessage(message: LiveMessage): { filePath: string; lineStart: number; lineEnd: number; side: 'old' | 'new'; scope: 'line' | 'file'; text: string } | null {
+  const anchor = message.review_anchor;
+  if (!anchor) return null;
+  const whole = anchor.line_start === 0;
+  return { filePath: anchor.file, lineStart: anchor.line_start, lineEnd: anchor.line_end, side: anchor.side, scope: whole ? 'file' : 'line', text: message.body };
+}

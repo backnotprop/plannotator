@@ -83,7 +83,7 @@
  *   PLANNOTATOR_PORT   - Fixed port to use (default: random locally, 19432 for remote)
  */
 
-import { postReviewLiveDecision, reviewLiveDecisionWords, reviewLiveSessionOf, reviewLiveTargetOf } from "@plannotator/shared/review-live";
+import { postReviewLiveDecision, reviewLiveDecisionWords, reviewLiveSessionOf, reviewLiveTargetOf, reviewLiveTargetOfOpenCode } from "@plannotator/shared/review-live";
 import { childEnv, isAskAiChild } from "@plannotator/shared/child-env";
 import {
   startPlannotatorServer as startPlannotatorServerUnguarded,
@@ -2775,7 +2775,7 @@ if (args[0] === "sessions") {
     gitRef,
     error: diffError,
     origin: "opencode",
-    liveReviewAgent: typeof input.inboxSession === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/.test(input.inboxSession) ? { host: "opencode", session: input.inboxSession } : null,
+    liveReviewAgent: reviewLiveTargetOfOpenCode(input.inboxSession),
     project: reviewProject,
     includeReviewDirectory: !!reviewDirectory,
     diffType: isPRMode ? undefined : userDiffType,
