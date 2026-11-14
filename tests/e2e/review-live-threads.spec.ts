@@ -145,7 +145,7 @@ test('the Inbox thread shows a review comment on its lines and opens the living 
     await review.locator('body').click({ position: { x: 5, y: 300 } });
     await review.keyboard.press('ControlOrMeta+Enter');
     await expect(review.locator('[data-live-ended]')).toBeVisible({ timeout: 30_000 });
-    await expect(review.locator('[data-live-ended] a')).toHaveAttribute('href', new RegExp(`#thread=${thread}&open-review=1$`));
+    await expect(review.locator('[data-live-ended] a')).toHaveAttribute('href', new RegExp(`/\\?open-review=${thread}#thread=${thread}$`));
     await expect.poll(async () => {
       const read = (await (await fetch(`${inboxUrl}/api/inbox/threads/${thread}`)).json()) as { thread?: { messages?: { body: string }[] } };
       return (read.thread?.messages ?? []).map((m) => m.body);

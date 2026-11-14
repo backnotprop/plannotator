@@ -25,11 +25,12 @@ export const OPEN_REVIEW_MARKER = 'open-review';
 
 function takeOpenMarker(): string | null {
   if (typeof window === 'undefined') return null;
-  const params = new URLSearchParams(window.location.hash.replace(/^#/, ''));
-  if (params.get(OPEN_REVIEW_MARKER) !== '1') return null;
-  const thread = params.get('thread');
-  params.delete(OPEN_REVIEW_MARKER);
-  window.history.replaceState(window.history.state, '', `#${params.toString()}`);
+  const search = new URLSearchParams(window.location.search);
+  const thread = search.get(OPEN_REVIEW_MARKER);
+  if (!thread) return null;
+  search.delete(OPEN_REVIEW_MARKER);
+  const rest = search.toString();
+  window.history.replaceState(window.history.state, '', `${window.location.pathname}${rest ? `?${rest}` : ''}${window.location.hash}`);
   return thread;
 }
 

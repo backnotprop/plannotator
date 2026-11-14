@@ -121,3 +121,10 @@ describe('a review with many threads', () => {
     expect(positions[0]).toEqual({ id: 't0_0', file: 'src/mod00.ts', line: 5, side: 'new', changed: false });
   });
 });
+
+describe('the ended review', () => {
+  test('Open it again names the thread in the address the Inbox acts on once', async () => {
+    const { reopenUrl } = await import('./LiveEndedBar');
+    expect(reopenUrl('http://localhost:49606/#thread=msg_01ABC')).toBe('http://localhost:49606/?open-review=msg_01ABC#thread=msg_01ABC');
+  });
+});
