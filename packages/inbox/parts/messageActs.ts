@@ -25,6 +25,7 @@ export interface MessageActs {
   setHeaderOpen: (id: string, open: boolean) => void;
   closeHeaderOnEscape: (id: string) => (event: KeyboardEvent) => void;
   tryPrototype: (messageId: string, key: string) => void;
+  takeBackOf: (message: InboxMessageWire) => (() => void) | null;
 }
 
 export type MessageActsRef = { readonly current: MessageActs };

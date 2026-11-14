@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import type { InboxListGroupId, InboxListRow, InboxQuestion, InboxReaction, InboxRun, InboxSentRecipient, InboxThread } from '@plannotator/core/inbox-types';
+import type { InboxDraft, InboxListGroupId, InboxListRow, InboxQuestion, InboxReaction, InboxRun, InboxSentRecipient, InboxThread } from '@plannotator/core/inbox-types';
 import type { MachineView, OutboxView, ThreadModel } from '../api';
 import type { MachinesModel } from '../machines';
 import type { FrameMove } from '../fullScreenOrigin';
@@ -33,6 +33,7 @@ export interface ThreadPaneProps {
   readPending?: boolean;
   onPickSaves?: (ids: ReadonlySet<string>, paneClosed?: boolean) => void;
   onChanged: () => Promise<void>;
+  onTakenBack?: (draft: InboxDraft) => void;
   draftChanged?: number;
   filesChanged?: number;
   draftSignal?: Signal | null;

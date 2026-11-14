@@ -68,6 +68,11 @@ const rows: Row[] = [
   // Safe default: a kind this build has no case for (a newer Inbox's) is read, never left as it was.
   ['a record kind this build does not know is read', { seq: 26, kind: 'reaction', id: 'r' } as unknown as InboxEvent, 'reread'],
   ['a project record (a label the header reads) is read', { seq: 27, kind: 'project', id: 'prj', project: {} } as unknown as InboxEvent, 'reread'],
+  ['a reply taken back leaves the thread', message(28, msg('msg_R', { author: person, taken_back_at: at }), false), (after) => {
+    expect(after.thread.messages.map((m) => m.id)).toEqual([T]);
+    expect(after.applied).toEqual({ msg_R: 28 });
+  }],
+  ['a thread whose only message was taken back is read (it is gone)', message(29, msg(T, { author: person, taken_back_at: at }), false), 'reread'],
 ];
 
 describe('one stream record on a held thread', () => {
@@ -107,6 +112,11 @@ describe('a read landing after records', () => {
     if (after.kind !== 'applied') throw new Error('not applied');
     const fresh = read(30, [...base, msg('msg_N', { seq: 11, body: 'server copy' })]);
     expect(reconcileRead(after.model, fresh)).toBe(fresh);
+  });
+  test('an older read never brings back a reply taken back after it left', () => {
+    const after = applyRecord(model(base), message(12, msg('msg_R', { author: person, taken_back_at: at }), false));
+    if (after.kind !== 'applied') throw new Error('not applied');
+    expect(reconcileRead(after.model, read(11, base)).thread.messages.map((m) => m.id)).toEqual([T]);
   });
   test('an older read never takes back a newer answer or an archive', () => {
     let now: HeldThread = model(base);
