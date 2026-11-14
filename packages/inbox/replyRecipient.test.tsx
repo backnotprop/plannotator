@@ -285,7 +285,8 @@ test.skipIf(!hasDom)('a computer, sessions with titles: the pill and its list na
     expect(replies().map((r) => r.path)).toEqual([`/api/inbox/messages/${M1}/reply`]);
     expect(replies()[0]!.body.to).toBeUndefined();
   } finally {
-    setSessionLabels({});
+    // The labels are global: clear them inside act, while the pane is still mounted, so no other test reads them.
+    act(() => setSessionLabels({}));
   }
 });
 
