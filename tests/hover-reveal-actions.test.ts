@@ -20,7 +20,7 @@ const SCANNED = ['packages/review-editor', 'packages/ui/components', 'packages/e
 const DECORATIVE: Array<{ file: string; marker: string; why: string }> = [
   { file: 'packages/ui/components/KeyboardShortcuts.tsx', marker: 'pointer-events-none group-hover:opacity-100', why: 'an explanatory tooltip, not a control' },
   { file: 'packages/review-editor/components/PRChecksTab.tsx', marker: 'text-muted-foreground/30 ml-auto', why: 'an external-link glyph inside a row that is itself the link' },
-  { file: 'packages/ui/components/ResizeHandle.tsx', marker: 'group-hover/sidebar:opacity-100', why: 'a grip drawing; the handle works without it' },
+  { file: 'packages/ui/components/ResizeHandle.tsx', marker: 'group-hover/handle:opacity-100', why: 'a grip drawing on the panel edge; the edge drags and Mod+B hides the panel without it' },
 ];
 
 const GROUP_HOVER_OPACITY = /\bgroup-hover(?:\/[\w-]+)?:opacity-(\d+)\b/;
