@@ -1,7 +1,7 @@
 import React, { useEffect, useLayoutEffect, useState } from 'react';
 import type { DiffFileStatus } from '../types';
 import type { ReviewImageData, ReviewImageSide } from '../utils/reviewImage';
-import { stageLayout, type Size } from './image-diff/geometry';
+import { SIDE_BY_SIDE_GAP, SIDE_BY_SIDE_MIN_WIDTH, sideBySideColumns, sideBySidePaneWidth, stageLayout, type Size } from './image-diff/geometry';
 import { useImageDiffSettings } from './image-diff/imageDiffSettings';
 import { sidesFor, useImageSides, useNearViewport } from './image-diff/useImageSides';
 import { SinglePane, StackedStage, type StageImage } from './image-diff/ImageStage';
@@ -19,8 +19,6 @@ export interface ImageDiffPreviewProps {
   onHeightChange?: () => void;
 }
 
-const SIDE_GAP = 16;
-const TWO_COLUMN_MIN = 480;
 
 function useWidth(ref: React.RefObject<HTMLDivElement | null>): number {
   const [width, setWidth] = useState(0);
@@ -81,9 +79,11 @@ export const ImageDiffPreview: React.FC<ImageDiffPreviewProps> = ({
   const comparable = sides.length === 2 && !!before && !!after && !unchanged;
   const mode = comparable ? settings.mode : 'side';
   const maxHeight = variant === 'all-files' ? 480 : 640;
-  const narrow = width > 0 && width < TWO_COLUMN_MIN;
-  const twoColumns = comparable && mode === 'side' && !compact && width >= TWO_COLUMN_MIN;
-  const paneWidth = twoColumns ? Math.floor((width - SIDE_GAP) / 2) : width;
+  const narrow = width > 0 && width < SIDE_BY_SIDE_MIN_WIDTH;
+  const canvasNatural = { width: Math.max(beforeSize?.width ?? 0, afterSize?.width ?? 0), height: Math.max(beforeSize?.height ?? 0, afterSize?.height ?? 0) };
+  const columnsFit = comparable && sideBySideColumns(canvasNatural, width);
+  const twoColumns = columnsFit && mode === 'side';
+  const paneWidth = sideBySidePaneWidth(width, columnsFit);
   const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
   const sized = comparable ? !!beforeSize && !!afterSize : loaded.length > 0 && !!(beforeSize ?? afterSize);
   const layout = sized && width > 0
@@ -258,7 +258,7 @@ export const ImageDiffPreview: React.FC<ImageDiffPreviewProps> = ({
         ) : (
           <div
             className="grid"
-            style={{ gridTemplateColumns: twoColumns ? `${paneWidth}px ${paneWidth}px` : 'minmax(0, 1fr)', columnGap: SIDE_GAP, rowGap: 12 }}
+            style={{ gridTemplateColumns: twoColumns ? `${paneWidth}px ${paneWidth}px` : 'minmax(0, 1fr)', columnGap: SIDE_BY_SIDE_GAP, rowGap: 12 }}
           >
             {(unchanged ? (['new'] as ReviewImageSide[]) : sides).map(pane)}
           </div>
