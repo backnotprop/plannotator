@@ -991,7 +991,6 @@ const ReviewApp: React.FC = () => {
   // Dockview center panel API for the review workspace.
   const [dockApi, setDockApi] = useState<DockviewApi | null>(null);
   const [dockActivePanelId, setDockActivePanelId] = useState<string | null>(null);
-  const [paneTabsSlot, setPaneTabsSlot] = useState<HTMLElement | null>(null);
   const treeScopeRef = useRef<string>('changes');
   const [allChangesOpen, setAllChangesOpen] = useState(false);
   const filesRef = useRef(files);
@@ -5585,7 +5584,7 @@ const ReviewApp: React.FC = () => {
         {/* Header */}
         <header style={{ '--review-header-h': `${isCompactTouchLayout ? COMPACT_REVIEW_HEADER_HEIGHT : REVIEW_HEADER_HEIGHT}px` } as React.CSSProperties} className={isCompactTouchLayout
           ? 'relative min-h-[var(--review-header-h)] grid grid-cols-[44px_minmax(0,1fr)_44px] items-center border-b border-border/50 bg-card/50 backdrop-blur-xl z-50'
-          : '[&:has([data-pane-tabs-for="1"])_[data-header-shed]]:hidden py-1 min-[480px]:py-0 min-[480px]:h-[var(--review-header-h)] flex flex-col min-[480px]:flex-row items-stretch min-[480px]:items-center min-[480px]:justify-between gap-1 min-[480px]:gap-0 px-2 border-b border-border bg-card/50 z-50'
+          : 'py-1 min-[480px]:py-0 min-[480px]:h-[var(--review-header-h)] flex flex-col min-[480px]:flex-row items-stretch min-[480px]:items-center min-[480px]:justify-between gap-1 min-[480px]:gap-0 px-2 border-b border-border bg-card/50 z-50'
         }>
           <div className={isCompactTouchLayout
             ? 'contents'
@@ -5640,7 +5639,7 @@ const ReviewApp: React.FC = () => {
               </>
             )}
             <div className={isCompactTouchLayout ? 'min-w-0 flex items-center gap-1' : 'contents'} data-header-middle="">
-            <div className={isCompactTouchLayout ? 'min-w-0 flex-1 flex justify-center [&:has(+[data-pane-tabs-slot]:not(:empty))]:hidden' : 'contents'}>
+            <div className={isCompactTouchLayout ? 'min-w-0 flex-1 flex justify-center' : 'contents'}>
             {prMetadata ? (
               <div className={isCompactTouchLayout
                 ? 'min-w-0 flex items-center justify-center overflow-hidden px-1'
@@ -5649,7 +5648,6 @@ const ReviewApp: React.FC = () => {
                 <span
                   className="min-w-0 max-w-[160px] xl:max-w-[240px] text-xs text-muted-foreground/60 hidden sm:inline-flex items-center gap-1"
                   title={displayRepo}
-                  data-header-shed=""
                 >
                   <RepoIcon className="w-3 h-3 flex-shrink-0" />
                   <span className="truncate">{displayRepo}</span>
@@ -5675,7 +5673,7 @@ const ReviewApp: React.FC = () => {
                     onNavigatePR={handlePRSwitch}
                   />
                 )}
-                {headerTotals && <span className="flex-none" data-header-shed="">{headerTotals}</span>}
+                {headerTotals}
               </div>
             ) : repoInfo ? (
               <HeaderBranch branch={repoInfo.branch} repo={repoName ?? ''} repoTitle={repoInfo.display} files={files} compact={isCompactTouchLayout} />
@@ -5703,7 +5701,6 @@ const ReviewApp: React.FC = () => {
               }>Review</span>
             )}
             </div>
-            {!guideVisible && <div ref={setPaneTabsSlot} data-pane-tabs-slot="" className={isCompactTouchLayout ? 'min-w-0 flex-1 self-stretch flex items-center justify-center empty:hidden' : 'min-w-0 flex-1 self-stretch flex items-stretch empty:hidden'} />}
             </div>
           </div>
 
@@ -6139,7 +6136,7 @@ const ReviewApp: React.FC = () => {
               showCancel
             />
             {files.length > 0 ? (
-              <ReviewCenterArea onReady={handleDockReady} mode={resolvedMode === 'light' ? 'light' : 'dark'} singlePane={isCompactTouchLayout} tabsSlot={paneTabsSlot} reviewKey={prMetadata?.url ?? (repoInfo ? `${repoInfo.display}#${repoInfo.branch ?? ''}` : undefined)} />
+              <ReviewCenterArea onReady={handleDockReady} mode={resolvedMode === 'light' ? 'light' : 'dark'} singlePane={isCompactTouchLayout} reviewKey={prMetadata?.url ?? (repoInfo ? `${repoInfo.display}#${repoInfo.branch ?? ''}` : undefined)} />
             ) : (
               <div className="h-full flex items-center justify-center">
                 <div className="text-center space-y-3 max-w-md px-8">
