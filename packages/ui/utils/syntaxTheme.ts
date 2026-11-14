@@ -53,6 +53,7 @@ export const SHIKI_THEME_MAP: Record<string, { dark: string | null; light: strin
   'synthwave-84': { dark: 'synthwave-84', light: null },
   'tokyo-night': { dark: 'tokyo-night', light: null },
   'tokyo-night-moon': { dark: 'tokyo-night', light: null },
+  'tritanopia': { dark: 'pierre-dark-tritanopia', light: 'pierre-light-tritanopia' },
   'vesper': { dark: 'vesper', light: null },
   'vitesse': { dark: 'vitesse-dark', light: 'vitesse-light' },
   'vitesse-black': { dark: 'vitesse-black', light: null },

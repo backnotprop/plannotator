@@ -167,6 +167,17 @@ export const BUILT_IN_THEMES: ThemeInfo[] = [
       light: { primary: '#1a63b8', secondary: '#e7eaef', accent: '#946300', background: '#f8f9fb', foreground: '#22262e' },
     },
   },
+    {
+    id: 'tritanopia',
+    name: 'Tritanopia',
+    builtIn: true,
+    modeSupport: 'both',
+    syntaxHighlighting: true,
+    colors: {
+      dark: { primary: '#3cc6d9', secondary: '#2a2e37', accent: '#f0657d', background: '#16181d', foreground: '#eaedf2' },
+      light: { primary: '#0b7a8c', secondary: '#e7eaef', accent: '#b82944', background: '#f8f9fb', foreground: '#22262e' },
+    },
+  },
   {
     id: 'dark-plus',
     name: 'Dark+',
