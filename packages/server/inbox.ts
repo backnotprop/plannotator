@@ -1530,6 +1530,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       (await t3Wake.wakes(host, session)),
     bridgePolls: (host, session) => pollingWakeHost(host) && live.pollsNow(host, session),
     sessionName: (session) => live.labelOf(session) ?? live.titleOf(session),
+    t3WakeReaches: (session) => t3Wake.wakes(INBOX_T3_HOST, session),
     // The Board: the card tool is listed and served only while the person has it on.
     boardOn: () => boardOn(),
     // Thread steps: the steps tool and field are listed and served only while the person has them on.
