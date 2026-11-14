@@ -338,7 +338,6 @@ export interface InboxReplyInput {
   words?: string;
   review_anchor?: InboxReviewAnchor;
   review_batch?: InboxReviewBatch;
-  review_addressed?: InboxReviewAddressed;
   questions?: InboxAnswerEntry[];
   idempotency_key: string;
   /** `to` takes the place of a session the server read as ended (`InboxMessage.took_over`). */

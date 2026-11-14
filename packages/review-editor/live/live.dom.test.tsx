@@ -118,7 +118,7 @@ describe.skipIf(!hasDom)('a long thread', () => {
     const el = await render(<LiveThreadCard thread={thread!} messages={messages} actions={actionsRef()} />);
     const bodies = () => [...el.querySelectorAll('[data-live-message]')].map((m) => m.getAttribute('data-live-message'));
     expect(bodies()).toEqual(['c1', 'a2', 'p2']);
-    expect(el.querySelector('[data-live-earlier]')?.textContent).toBe('2 earlier');
+    expect(el.querySelector('[data-live-earlier]')?.textContent).toBe('2 earlier replies');
     await act(async () => el.querySelector<HTMLButtonElement>('[data-live-earlier]')!.click());
     expect(bodies()).toEqual(['c1', 'a1', 'p1', 'a2', 'p2']);
   });

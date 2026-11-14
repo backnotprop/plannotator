@@ -211,7 +211,7 @@ export function createInboxLiveReview(options: {
     return taken;
   };
 
-  const route = async (req: Request, url: URL, owner = true): Promise<Response | null> => {
+  const route = async (req: Request, url: URL, onThisComputer = true): Promise<Response | null> => {
     const path = url.pathname;
     if (path === REVIEW_THREADS_PATH) {
       if (req.method !== "GET") return json({ error: "Use GET." }, 405);
@@ -229,7 +229,7 @@ export function createInboxLiveReview(options: {
     const open = /^\/api\/inbox\/review-threads\/([A-Za-z0-9_]+)\/open$/.exec(path);
     if (open) {
       if (req.method !== "POST") return json({ error: "Use POST." }, 405);
-      if (!owner) return json({ error: "Only this computer's owner can open a review from this Inbox.", code: "owner_only" }, 403);
+      if (!onThisComputer) return json({ error: "A review opens from this computer's own Inbox window, not from a paired device.", code: "local_only" }, 403);
       const body = await options.readBody(req);
       if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
       return json(await openReview(open[1]!));

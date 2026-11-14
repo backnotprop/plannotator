@@ -46,10 +46,10 @@ function ThreadRow({ thread, focused, posted, onOpen }: { thread: PlacedThread; 
         </span>
         <span className={`line-clamp-2 text-[13px] leading-5 ${conversation.resolved ? 'text-muted-foreground' : 'text-foreground'}`}>{conversation.messages[0]!.body}</span>
         {conversation.messages.length > 1 ? (
-          <span className="flex items-center gap-1 text-[12px] text-muted-foreground">
-            <span>{conversation.messages.length - 1} {conversation.messages.length === 2 ? 'reply' : 'replies'}, last from</span>
+          <span className="flex min-w-0 max-w-full items-center gap-1 text-[12px] text-muted-foreground">
+            <span className="shrink-0 whitespace-nowrap">{conversation.messages.length - 1} {conversation.messages.length === 2 ? 'reply' : 'replies'}, last from</span>
             <LiveAuthorMark message={last} />
-            <span className="truncate">{authorName(last)}</span>
+            <span className="min-w-0 truncate" title={authorName(last)} data-live-row-author>{authorName(last)}</span>
           </span>
         ) : null}
       </button>

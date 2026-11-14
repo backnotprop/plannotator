@@ -2,10 +2,11 @@ import { useEffect, useRef, useState, type MutableRefObject, type ReactNode } fr
 import type { LiveReviewActions } from './useLiveReview';
 import { LiveComposer } from './LiveComposer';
 import { LiveAuthorMark } from './LiveMark';
+import { LiveBody } from './LiveBody';
 import { authorName, deliveryWord, type LiveMessage, type PlacedThread } from './model';
 
 const time = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-const QUIET = 'rounded px-1 text-[12px] text-muted-foreground hover:bg-muted hover:text-foreground';
+const QUIET = 'inline-flex h-6 -my-0.5 items-center rounded px-1 text-[12px] text-muted-foreground hover:bg-muted hover:text-foreground';
 export const LIVE_THREAD_SHOWN_WHOLE = 3;
 
 export function LiveMessageRow({ message, messages, onTakeBack, tail }: { message: LiveMessage; messages: readonly LiveMessage[]; onTakeBack?: (id: string) => void; tail?: ReactNode }) {
@@ -14,18 +15,20 @@ export function LiveMessageRow({ message, messages, onTakeBack, tail }: { messag
     <div className="flex gap-2 px-3 py-1" data-live-message={message.id} data-author={message.author.kind}>
       <LiveAuthorMark message={message} big />
       <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-baseline gap-x-1.5 whitespace-nowrap text-[12px] leading-5 text-muted-foreground">
-          <span className="font-medium text-foreground">{authorName(message)}</span>
-          <span>{time(message.created_at)}</span>
-          {delivery ? <span data-live-delivery={delivery}>· {delivery}</span> : null}
-          {delivery === 'Queued' && onTakeBack ? (
-            <button type="button" className={QUIET} data-live-take-back onClick={() => onTakeBack(message.id)}>
-              Take back
-            </button>
-          ) : null}
-          {tail ? <span className="ml-auto flex items-baseline gap-0.5">{tail}</span> : null}
+        <div className="flex flex-wrap items-baseline gap-x-1.5 text-[12px] leading-5 text-muted-foreground">
+          <span className="flex min-w-0 max-w-full items-baseline gap-x-1.5 whitespace-nowrap">
+            <span className="min-w-0 truncate font-medium text-foreground" title={authorName(message)} data-live-author>{authorName(message)}</span>
+            <span className="shrink-0">{time(message.created_at)}</span>
+            {delivery ? <span className="shrink-0" data-live-delivery={delivery}>· {delivery}</span> : null}
+            {delivery === 'Queued' && onTakeBack ? (
+              <button type="button" className={`${QUIET} shrink-0`} data-live-take-back data-pn-touch-target onClick={() => onTakeBack(message.id)}>
+                Take back
+              </button>
+            ) : null}
+          </span>
+          {tail ? <span className="ml-auto flex shrink-0 items-baseline gap-0.5 whitespace-nowrap">{tail}</span> : null}
         </div>
-        <div className="whitespace-pre-wrap break-words text-[13px] leading-5 text-foreground">{message.body}</div>
+        <LiveBody body={message.body} quiet={QUIET} />
       </div>
     </div>
   );
@@ -54,7 +57,7 @@ export function LiveThreadCard({ thread, messages, actions }: { thread: PlacedTh
       <div className="live-thread mx-2 my-1 flex items-center gap-2 rounded border border-border bg-card px-3 py-1 text-[12px] leading-5 text-muted-foreground" data-live-thread={conversation.id} data-resolved>
         <span>Resolved</span>
         <span className="min-w-0 flex-1 truncate">{first.body}</span>
-        <button type="button" className={QUIET} onClick={() => setOpen(true)}>Show</button>
+        <button type="button" className={QUIET} data-pn-touch-target onClick={() => setOpen(true)}>Show</button>
       </div>
     );
   }
@@ -63,7 +66,7 @@ export function LiveThreadCard({ thread, messages, actions }: { thread: PlacedTh
   const takeBack = (id: string) => void actions.current.takeBack(id).catch(() => {});
   const controls = (
     <>
-      <button ref={replyButton} type="button" className={QUIET} data-live-reply onClick={() => setReplying(true)}>
+      <button ref={replyButton} type="button" className={QUIET} data-live-reply data-pn-touch-target onClick={() => setReplying(true)}>
         Reply
       </button>
       <span aria-hidden="true">·</span>
@@ -71,6 +74,7 @@ export function LiveThreadCard({ thread, messages, actions }: { thread: PlacedTh
         type="button"
         className={QUIET}
         data-live-resolve
+        data-pn-touch-target
         onClick={() => {
           void actions.current.resolve(conversation.id, !resolved).catch(() => {});
           setOpen(false);
@@ -84,7 +88,7 @@ export function LiveThreadCard({ thread, messages, actions }: { thread: PlacedTh
         ) : (
           <>
             <span aria-hidden="true">·</span>
-            <button type="button" className={QUIET} data-live-post onClick={() => void actions.current.postToPR?.([conversation.id]).catch(() => {})}>
+            <button type="button" className={QUIET} data-live-post data-pn-touch-target onClick={() => void actions.current.postToPR?.([conversation.id]).catch(() => {})}>
               Post
             </button>
           </>
@@ -112,8 +116,8 @@ export function LiveThreadCard({ thread, messages, actions }: { thread: PlacedTh
         return (
           <div key={message.id}>
             {folded > 0 && index === 1 ? (
-              <button type="button" className={`${QUIET} mx-2`} data-live-earlier onClick={() => setExpanded(true)}>
-                {folded} earlier
+              <button type="button" className={`${QUIET} mx-2`} data-live-earlier data-pn-touch-target onClick={() => setExpanded(true)}>
+                {folded} earlier {folded === 1 ? 'reply' : 'replies'}
               </button>
             ) : null}
             {arriving ? (
