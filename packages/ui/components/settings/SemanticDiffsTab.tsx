@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { configStore, useConfigValue } from '../../config';
 import { AnalysisLayerToggle } from '../AnalysisLayerToggle';
-import { PowerUpGuy } from '../agentFace/PowerUpGuy';
 
 type Provider = 'jev' | 'clef';
 type Failure = 'missing' | 'refused' | 'noCredit' | 'noAnswer';
@@ -172,10 +171,7 @@ export function SemanticDiffsTab() {
         description="Draw moved, renamed, reformatted, extracted and inlined code as what it is."
       />
       <div data-power-up-settings="">
-        <div className="flex items-center justify-between gap-3 border-t border-border pt-3">
-          <span data-power-up-settings-slot="" aria-hidden="true">
-            <PowerUpGuy state={powerUp && configured && semantic ? 'alive' : 'still'} size={28} wakeKey={powerUp} />
-          </span>
+        <div className="border-t border-border pt-3">
           <AnalysisLayerToggle
             checked={powerUp && configured}
             disabled={!configured || !semantic}
