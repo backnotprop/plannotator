@@ -1,9 +1,23 @@
 import { describe, expect, test } from 'bun:test';
-import { createKeptWholeFiles } from './wholeFileText';
+import { createKeptWholeFiles, warmsUpAtRest, WHOLE_FILE_WARM_UP_LINE_LIMIT } from './wholeFileText';
 
 const linesOf = (count: number) => Array.from({ length: count }, (_, index) => `line ${index}`).join('\n') + '\n';
 
 describe('whole file text read ahead of an expand', () => {
+  test('a file up to the warm-up limit is coloured ahead at rest, a larger one waits for the reader', () => {
+    expect(warmsUpAtRest({ oldContent: linesOf(WHOLE_FILE_WARM_UP_LINE_LIMIT), newContent: linesOf(10) })).toBe(true);
+    expect(warmsUpAtRest({ oldContent: linesOf(10), newContent: linesOf(WHOLE_FILE_WARM_UP_LINE_LIMIT + 1) })).toBe(false);
+  });
+
+  test('peeking at kept text leaves it for the expand', async () => {
+    const kept = createKeptWholeFiles();
+    const text = { oldContent: 'a\n', newContent: 'b\n' };
+    kept.keep('item-1', 'diff-a', text);
+    expect(kept.peek('item-1', 'diff-a')).toBe(text);
+    expect(kept.peek('item-1', 'diff-b')).toBeNull();
+    expect(await kept.read('item-1', 'diff-a', async () => null)).toBe(text);
+  });
+
   test('the kept text serves the first expand without a second read, once', async () => {
     const kept = createKeptWholeFiles();
     const text = { oldContent: linesOf(21000), newContent: linesOf(21002) };

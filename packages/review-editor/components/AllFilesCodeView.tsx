@@ -2,7 +2,7 @@ import { COMPACT_FILE_HEADER_HEIGHT, COMPACT_HUNK_SEPARATOR_HEIGHT, FILE_HEADER_
 import React, { memo, startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ContextNoteAnchor } from '../utils/contextNoteAnchor';
 import { createPortal } from 'react-dom';
-import { DEFAULT_CODE_VIEW_FILE_METRICS, getSingularPatch } from '@pierre/diffs';
+import { DEFAULT_CODE_VIEW_FILE_METRICS, getSingularPatch, hydratePartialDiff } from '@pierre/diffs';
 import type {
   CodeViewItem,
   CodeViewLineSelection,
@@ -14,7 +14,7 @@ import type {
   SelectedLineRange,
   VirtualFileMetrics,
 } from '@pierre/diffs';
-import { CodeView, EditProvider, type CodeViewAnnotationArgs, type CodeViewHandle, useStableCallback } from '@pierre/diffs/react';
+import { CodeView, EditProvider, type CodeViewAnnotationArgs, type CodeViewHandle, useStableCallback, useWorkerPool } from '@pierre/diffs/react';
 import type { DiffTokenEventBaseProps } from '@pierre/diffs';
 import type {
   CodeAnnotation,
@@ -60,7 +60,7 @@ import { OversizedFileNotice } from './OversizedFileNotice';
 import { ToolbarHost, type ToolbarHostHandle } from './ToolbarHost';
 import type { DiffSelectionActions } from './SelectionChooser';
 import { FileHeader } from './FileHeader';
-import { createKeptWholeFiles, type WholeFileText } from '../utils/wholeFileText';
+import { createKeptWholeFiles, warmsUpAtRest, wholeFileLines, type WholeFileText } from '../utils/wholeFileText';
 import { collectHeaderHeightHints, headerHeightFor, type HeaderHeightHint } from '../utils/headerHeightHints';
 import { ReviewStateProvider, useReviewStateOptional, type ReviewState } from '../dock/ReviewStateContext';
 import { DiffBottomBar } from './DiffBottomBar';
@@ -762,6 +762,8 @@ const FLUSH_FILES_CSS = `
   :host([data-trailing-unread]) [data-separator][data-separator-last] { display: none; }
 `;
 
+const WARM_UP_REST_MS = 1000;
+const WARM_UP_STEP_MS = 120;
 // How long revealing a comment on a closed line waits for its file's whole text.
 const REVEAL_WAIT_MS = 30_000;
 
@@ -1828,6 +1830,61 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     refreshEditSessionMarkers();
   }, [annotations, refreshEditSessionMarkers]);
 
+  const lastScrollTsRef = useRef(0);
+  const warmUpTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const warmedUpRef = useRef(new Map<string, string>());
+  const highlightPool = useWorkerPool();
+  const highlightPoolRef = useRef(highlightPool);
+  highlightPoolRef.current = highlightPool;
+  const scheduleWarmUp = useCallback((delay: number) => {
+    if (warmUpTimerRef.current != null) clearTimeout(warmUpTimerRef.current);
+    warmUpTimerRef.current = setTimeout(() => warmUpVisibleFile(), delay);
+  }, []);
+  const warmUpVisibleFile = useStableCallback(() => {
+    warmUpTimerRef.current = null;
+    const restingFor = Date.now() - lastScrollTsRef.current;
+    if (restingFor < WARM_UP_REST_MS) return scheduleWarmUp(WARM_UP_REST_MS - restingFor + 10);
+    const poolStats = highlightPoolRef.current?.getStats();
+    if (poolStats != null && poolStats.queuedTasks + poolStats.activeTasks > 0) return scheduleWarmUp(WARM_UP_STEP_MS);
+    const viewer = viewerRef.current?.getInstance();
+    const scroller = scrollRef.current;
+    if (viewer == null || scroller == null) return;
+    const port = scroller.getBoundingClientRect();
+    const viewTop = Math.max(port.top, 0);
+    const viewBottom = Math.min(port.bottom, window.innerHeight);
+    const generation = fileSetKeyRef.current;
+    const pool = highlightPoolRef.current;
+    if (pool == null || !pool.isWorkingPool()) return;
+    let next: { id: string; lines: number; fileDiff: FileDiffMetadata; text: WholeFileText } | null = null;
+    for (const rendered of viewer.getRenderedItems()) {
+      if (rendered.type !== 'diff' || rendered.item.fileDiff.isPartial !== true || rendered.item.fileDiff.cacheKey == null) continue;
+      if (warmedUpRef.current.get(rendered.id) === generation || previewAppliedRef.current.has(rendered.id)) continue;
+      const box = rendered.element?.getBoundingClientRect();
+      if (box == null || box.bottom <= viewTop || box.top >= viewBottom) continue;
+      const text = keptWholeFilesRef.current.peek(rendered.id, generation);
+      if (text == null || text.oldContent == null || text.newContent == null || !warmsUpAtRest(text)) continue;
+      const lines = wholeFileLines(text);
+      if (next == null || lines < next.lines) next = { id: rendered.id, lines, fileDiff: rendered.item.fileDiff, text };
+    }
+    if (next == null) return;
+    warmedUpRef.current.set(next.id, generation);
+    const file = itemIdToFileRef.current.get(next.id);
+    if (file == null) return scheduleWarmUp(WARM_UP_STEP_MS);
+    try {
+      const whole = hydratePartialDiff('clone', next.fileDiff, {
+        oldFile: { name: file.oldPath || file.path, contents: next.text.oldContent ?? '' },
+        newFile: { name: file.path, contents: next.text.newContent ?? '' },
+      });
+      pool.primeDiffHighlightCache(whole).catch(() => {});
+    } catch {
+      return scheduleWarmUp(WARM_UP_STEP_MS);
+    }
+    scheduleWarmUp(WARM_UP_STEP_MS);
+  });
+  useEffect(() => () => {
+    if (warmUpTimerRef.current != null) clearTimeout(warmUpTimerRef.current);
+  }, []);
+
   const prefetchWholeFile = useCallback((itemId: string) => {
     if (fetchFileContentRef.current) return;
     const augmentState = augmentRef.current;
@@ -1851,13 +1908,14 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         if (isStale()) return;
         if (data) keptWholeFilesRef.current.keep(itemId, generation, data);
         augmentState.set(itemId, { status: 'done', controller, generation });
+        if (warmUpTimerRef.current == null) scheduleWarmUp(WARM_UP_REST_MS);
       },
       () => {
         if (!isStale()) augmentState.set(itemId, { status: 'error', controller, generation });
         else if (augmentState.get(itemId)?.controller === controller) augmentState.delete(itemId);
       },
     );
-  }, [readWholeFileFromReview]);
+  }, [readWholeFileFromReview, scheduleWarmUp]);
 
   // A host's reader, for the arrows: Pierre shows them on a partial diff once it has a loader, and calls it on the first
   // click. It parks the click's opening, swaps in the whole file and highlights that off the main thread.
@@ -1986,7 +2044,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   useEffect(() => {
     if (!scrollEl || !opensWholeFiles) return;
     const readAheadOfExpand = (event: Event) => {
-      if (event instanceof PointerEvent && event.movementX === 0 && event.movementY === 0) return;
+      if (event.type === 'pointermove' && event instanceof PointerEvent && event.movementX === 0 && event.movementY === 0) return;
       const path = event.composedPath();
       if (!path.some((node) => node instanceof Element && node.hasAttribute('data-expand-button'))) return;
       const host = path.find((node): node is HTMLElement => node instanceof HTMLElement && node.tagName === 'DIFFS-CONTAINER');
@@ -1997,9 +2055,13 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       rendered.instance.expandHunk(0, 'up', 0);
     };
     scrollEl.addEventListener('pointermove', readAheadOfExpand, { passive: true });
+    scrollEl.addEventListener('pointerdown', readAheadOfExpand, { passive: true, capture: true });
+    scrollEl.addEventListener('touchstart', readAheadOfExpand, { passive: true, capture: true });
     scrollEl.addEventListener('focusin', readAheadOfExpand);
     return () => {
       scrollEl.removeEventListener('pointermove', readAheadOfExpand);
+      scrollEl.removeEventListener('pointerdown', readAheadOfExpand, { capture: true });
+      scrollEl.removeEventListener('touchstart', readAheadOfExpand, { capture: true });
       scrollEl.removeEventListener('focusin', readAheadOfExpand);
     };
   }, [scrollEl, opensWholeFiles]);
@@ -2805,6 +2867,8 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   // stamps scroll activity for the augmentation idle-flush.
   const scrollReportRafRef = useRef<number | null>(null);
   const handleScroll = useStableCallback((position: number) => {
+    lastScrollTsRef.current = Date.now();
+    scheduleWarmUp(WARM_UP_REST_MS);
     hasScrolledRef.current = true;
     onScrollPositionChange?.(position);
     if (scrollReportRafRef.current != null) return;
