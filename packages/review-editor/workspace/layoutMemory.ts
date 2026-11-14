@@ -1,11 +1,10 @@
 import { storage } from '@plannotator/ui/utils/storage';
-import { isReviewFilePreviewParams } from '../dock/reviewPanelTypes';
 import type { PaneLayout, PaneTab } from './paneLayout';
 
 export const LAYOUT_MEMORY_KEY = 'plannotator-review-layouts';
 const MAX_REVIEWS = 6;
 const MAX_TABS_PER_PANE = 8;
-const RESTORABLE = new Set(['review-all-files', 'review-file', 'review-pr-overview', 'review-pr-artifacts', 'review-semantic-diff', 'review-call-flow']);
+const RESTORABLE = new Set(['review-all-files', 'review-diff', 'review-file', 'review-pr-overview', 'review-pr-artifacts', 'review-semantic-diff', 'review-call-flow']);
 
 export interface SavedLayout {
   panes: { tabs: PaneTab[]; activeId: string | null }[];
@@ -24,7 +23,7 @@ function readMemory(): Memory {
 }
 
 export function restorableTab(tab: PaneTab): boolean {
-  return RESTORABLE.has(tab.component) && !isReviewFilePreviewParams(tab.params);
+  return RESTORABLE.has(tab.component);
 }
 
 export function snapshotLayout(layout: PaneLayout, ratio: number): SavedLayout | null {

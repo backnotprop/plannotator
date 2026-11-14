@@ -13,6 +13,7 @@ import { readSavedLayout, snapshotLayout, writeSavedLayout } from './layoutMemor
 
 export const PANE_RATIO_KEY = 'plannotator-review-pane-ratio';
 const SAVE_DELAY_MS = 300;
+const SECOND_GROUP_MIN_WIDTH = 160;
 
 function readRatio(): number {
   return clampRatio(Number.parseFloat(storage.getItem(PANE_RATIO_KEY) ?? '0.5'));
@@ -55,20 +56,58 @@ function useLayoutMemory(store: WorkspaceStore, reviewKey: string | undefined, r
   }, [ratio]);
 }
 
+function useSecondGroupOffset(store: WorkspaceStore, rowRef: React.RefObject<HTMLDivElement | null>, two: boolean): number | null {
+  const [offset, setOffset] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    const row = rowRef.current;
+    if (!two || !row) {
+      setOffset(null);
+      return;
+    }
+    const measure = () => {
+      const side = store.paneElement(1);
+      if (!side) return;
+      const box = row.getBoundingClientRect();
+      const left = side.getBoundingClientRect().left - box.left;
+      setOffset(left > 0 && box.width - left >= SECOND_GROUP_MIN_WIDTH ? Math.round(left) : null);
+    };
+    const frame = requestAnimationFrame(measure);
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
+    observer?.observe(row);
+    const main = store.paneElement(0);
+    if (main) observer?.observe(main);
+    return () => {
+      cancelAnimationFrame(frame);
+      observer?.disconnect();
+    };
+  }, [store, rowRef, two]);
+  return offset;
+}
+
 const HeaderTabs: React.FC<{ layout: PaneLayout; store: WorkspaceStore; compact: boolean; onKeep?: (id: string) => void }> = ({ layout, store, compact, onKeep }) => {
+  const rowRef = useRef<HTMLDivElement>(null);
+  const two = layout.panes.length === 2;
+  const offset = useSecondGroupOffset(store, rowRef, two && !compact);
   const activate = (id: string) => store.api.getPanel(id)?.api.setActive();
   const close = (id: string) => store.api.getPanel(id)?.api.close();
   if (compact) return <PaneTabsMenu pane={layout.panes[0]!} onActivate={activate} onClose={close} />;
+  const aligned = two && offset !== null;
   return (
-    <div className="min-w-0 h-full flex items-stretch gap-3" data-header-pane-tabs="">
+    <div ref={rowRef} className="relative min-w-0 flex-1 h-full flex items-stretch gap-3 pr-4" data-header-pane-tabs="">
       {layout.panes.map((pane, index) => (
         <React.Fragment key={index}>
-          {index === 1 && <span aria-hidden="true" className="self-center w-px h-4 bg-border flex-none" />}
-          <div data-active-pane-group={layout.activePane === index || undefined} className={`min-w-0 flex items-stretch ${layout.panes.length === 2 && layout.activePane !== index ? 'opacity-70' : ''}`}>
+          {index === 1 && !aligned && <span aria-hidden="true" className="self-center w-px h-4 bg-border flex-none" />}
+          <div
+            data-active-pane-group={layout.activePane === index || undefined}
+            data-header-group={index}
+            className={`min-w-0 flex items-stretch ${two && layout.activePane !== index ? 'opacity-70' : ''} ${aligned && index === 1 ? 'absolute inset-y-0 right-4' : ''}`}
+            style={aligned ? (index === 0 ? { maxWidth: Math.max(0, offset! - 16) } : { left: offset! + 12 }) : undefined}
+          >
             <PaneTabs pane={pane} paneIndex={index} inHeader onActivate={activate} onClose={close} onKeep={onKeep} />
           </div>
         </React.Fragment>
       ))}
+      <span aria-hidden="true" className="absolute right-0 top-1/2 -translate-y-1/2 w-px h-4 bg-border" data-header-tabs-end="" />
     </div>
   );
 };

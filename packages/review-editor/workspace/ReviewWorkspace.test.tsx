@@ -71,6 +71,15 @@ describe.skipIf(!hasDom)('the review panes', () => {
     expect(tabRow(el)).toBeNull();
   });
 
+  test('All changes is the fixed home tab: no close button and a middle click leaves it; other tabs close', async () => {
+    const el = await mount();
+    await act(async () => { api!.addPanel({ id: 'review-file:a.ts', component: 'review-file', title: 'a.ts', params: { filePath: 'a.ts' } }); });
+    expect(el.querySelector('[data-pane-tab-close="review-all-files"]')).toBeNull();
+    expect(el.querySelector('[data-pane-tab-close="review-file:a.ts"]')).not.toBeNull();
+    await act(async () => { tabButton(el, 'review-all-files').dispatchEvent(new MouseEvent('auxclick', { bubbles: true, button: 1 })); });
+    expect(api!.getPanel('review-all-files')).toBeDefined();
+  });
+
   test('a preview tab is italic and a double click keeps it', async () => {
     const el = await mount();
     await act(async () => { api!.addPanel({ id: 'review-file-preview:1', component: 'review-file', title: 'b.ts', params: { filePath: 'b.ts', preview: true } }); });
@@ -139,7 +148,7 @@ describe.skipIf(!hasDom)('the review panes', () => {
     slot.remove();
   });
 
-  test('a review reopened comes back with its two panes, kept tabs and divider, never its previews', async () => {
+  test('a review reopened comes back with its two panes, kept tabs and divider', async () => {
     const { writeSavedLayout } = await import('./layoutMemory');
     const { setStorageBackend, resetStorageBackend } = await import('@plannotator/ui/utils/storage');
     const memory = new Map<string, string>();
@@ -158,5 +167,56 @@ describe.skipIf(!hasDom)('the review panes', () => {
     expect(api!.getPanel('review-file:a.ts')).toBeDefined();
     expect(el.querySelector('[data-pane-divider]')?.getAttribute('aria-valuenow')).toBe('62');
     resetStorageBackend();
+  });
+
+  test('every tab opened is remembered, a preview or one opened into the pane that is not focused, and comes back on reload', async () => {
+    const { setStorageBackend, resetStorageBackend } = await import('@plannotator/ui/utils/storage');
+    const memory = new Map<string, string>();
+    setStorageBackend({ getItem: (key) => memory.get(key) ?? null, setItem: (key, value) => { memory.set(key, value); }, removeItem: (key) => { memory.delete(key); } });
+    await mount(false, { reviewKey: 'repo#reload' });
+    await act(async () => { api!.addPanel({ id: 'review-file:balance.ts', component: 'review-file', title: 'balance.ts', params: { filePath: 'balance.ts' }, position: { referencePanel: 'review-all-files', direction: 'right' } }); });
+    await act(async () => { api!.addPanel({ id: 'review-file-preview:1', component: 'review-file', title: 'validate.ts', params: { filePath: 'validate.ts', preview: true }, position: { referencePanel: 'review-all-files', direction: 'within' } }); });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 350)); });
+    await act(async () => root?.unmount());
+    host?.remove();
+    const el = await mount(false, { reviewKey: 'repo#reload' });
+    await act(async () => { await Promise.resolve(); });
+    expect([...el.querySelectorAll('[data-pane="0"] [data-pane-tab]')].map((tab) => tab.getAttribute('data-pane-tab'))).toEqual(['review-all-files', 'review-file-preview:1']);
+    expect(el.querySelector('[data-pane="1"] [data-pane-tab="review-file:balance.ts"]')).not.toBeNull();
+    resetStorageBackend();
+  });
+
+  test('a References tab reads as the symbol with an icon, and a long title is capped', async () => {
+    const slot = document.createElement('div');
+    document.body.appendChild(slot);
+    await mount(false, { tabsSlot: slot });
+    await act(async () => { api!.addPanel({ id: 'review-code-nav', component: 'review-code-nav', title: 'References: validateEntryBoundaries' }); });
+    const tab = slot.querySelector<HTMLElement>('[data-pane-tab="review-code-nav"]')!;
+    expect(tab.textContent).toBe('validateEntryBoundaries');
+    expect(tab.querySelector('[data-references-tab-icon]')).not.toBeNull();
+    expect(tab.className).toContain('max-w-[180px]');
+    slot.remove();
+  });
+
+  test('with two panes the second tab group starts over the second pane', async () => {
+    const slot = document.createElement('div');
+    document.body.appendChild(slot);
+    const original = Element.prototype.getBoundingClientRect;
+    Element.prototype.getBoundingClientRect = function (this: Element) {
+      const left = this.matches('[data-pane="1"]') ? 700 : this.matches('[data-header-pane-tabs]') ? 200 : 0;
+      const width = this.matches('[data-header-pane-tabs]') ? 900 : 0;
+      return { left, right: left + width, top: 0, bottom: 0, width, height: 0, x: left, y: 0, toJSON: () => ({}) } as DOMRect;
+    };
+    try {
+      await mount(false, { tabsSlot: slot });
+      await act(async () => { api!.addPanel({ id: 'review-file:b.ts', component: 'review-file', title: 'b.ts', params: { filePath: 'b.ts' }, position: { referencePanel: 'review-all-files', direction: 'right' } }); });
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 40)); });
+      const second = slot.querySelector<HTMLElement>('[data-header-group="1"]')!;
+      expect(second.style.left).toBe('512px');
+      expect(slot.querySelector<HTMLElement>('[data-header-group="0"]')!.style.maxWidth).toBe('484px');
+    } finally {
+      Element.prototype.getBoundingClientRect = original;
+      slot.remove();
+    }
   });
 });
