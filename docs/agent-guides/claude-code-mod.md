@@ -30,22 +30,43 @@ with the mod or the classic hook exactly as above.
 validates and loads the plugin with the `modules` key, ignores it, and runs the
 classic PermissionRequest command hook (the blocking review) exactly as before;
 2.1.288 with modules on runs the mod and never reaches that command hook. The mod
-also stands down by itself (every hook passes through) in `-p` / SDK sessions
-(`isInteractive` false: a later plugin turn would have no session to land in),
-except the VS Code extension's chat panel (next paragraph),
-and where it finds no shell for its scripts ("The shell" below), leaving the classic hook and the
-`/plannotator-*` skills in charge. A mods-capable Claude Code whose rollout
-switch is off could not be reproduced locally; the engine only inserts modules
-into the hook chain when they load, so it should behave like 2.1.150.
+stands down by itself (every hook passes through) only for Plannotator's own Ask
+AI child (`PLANNOTATOR_ASK_AI_CHILD=1`: Plannotator's agent must never get
+Plannotator's tools or reach the person's Inbox), where the user turned it off
+(the knob, "Off switch" below), and where it finds no shell for its scripts
+("The shell" below), leaving the classic hook and the `/plannotator-*` skills in
+charge. A mods-capable Claude Code whose rollout switch is off could not be
+reproduced locally; the engine only inserts modules into the hook chain when
+they load, so it should behave like 2.1.150.
+
+**Every session, interactive or not.** The mod runs in every Claude Code
+session; a feature stays classic only where it cannot work. `resolveAllowed`
+sorts the session (`sessionKindOf`, `SESSION_KIND_FEATURES` in `enabled.ts`)
+and each kind gets what works there:
+
+| Session | `plannotator_inbox` | Reply wake | `plannotator` tool, commands, Bash take-over | Plan review |
+| --- | --- | --- | --- | --- |
+| `terminal` (interactive) | yes | yes | yes | the mod's |
+| `panel` (VS Code chat panel) | yes | yes | yes | the mod's |
+| `t3` (a T3 Code thread) | yes, as the thread | yes, as the thread | yes | T3's own Plan mode |
+| `headless` (`claude -p`, any other SDK app) | yes | no | no: the classic CLI | the classic hook |
+
+The one real barrier is that a run without a person (`claude -p`, an SDK
+script) ends when its turn ends, and at `session.start` the mod cannot tell a
+one-shot run from a long-lived host. So nothing a headless session is promised
+for later may depend on its process: its Inbox sends carry no wake mark (the
+Inbox tells the agent to read the thread later), no reminder is added, the
+bridge is never polled, and reviews, annotations and plans keep the classic
+flows, which wait for the decision inside the run (the plan hook is bounded
+by its 4-day `timeout` in `hooks.json`). What changes for a `-p` user: the
+model has `plannotator_inbox` with no MCP entry to add; nothing else.
 
 **The VS Code extension's chat panel (#3111).** Claude Code's VS Code
 extension hosts the CLI through the Agent SDK, so its sessions raise
-`session.start` with `isInteractive: false` and `surface: null`, and the mod
-stood down there: no `plannotator_inbox`, no reply wake, the blocking flows.
-The panel is the one SDK host with a person reading it, and it shows a
-plugin's turn ("Prompt from the <plugin> plugin", Claude Code's VS Code docs),
-so `resolveAllowed` lets a non-interactive session through when it is a panel
-session (`isVsCodePanelSession` in `enabled.ts`; `panel` on `Allowed`):
+`session.start` with `isInteractive: false` and `surface: null`. The panel has
+a person reading it and shows a plugin's turn ("Prompt from the <plugin>
+plugin", Claude Code's VS Code docs), so it is its own kind
+(`isVsCodePanelSession` in `enabled.ts`; `panel` on `Allowed`):
 `CLAUDE_CODE_ENTRYPOINT` is exactly `claude-vscode` (the extension sets it in
 the environment it spawns the CLI with; read in the 2.1.322 extension), and
 none of `CLAUDECODE`, `CLAUDE_CODE_CHILD_SESSION` or a `PLANNOTATOR_SESSION_TAG`
@@ -55,35 +76,70 @@ rewrites only `cli`), so a `claude -p` started from inside a panel session
 `claude-vscode` too; the extension deletes `CLAUDECODE` and
 `CLAUDE_CODE_CHILD_SESSION` from the panel's own environment, and Claude Code
 sets them in every process it starts, so either one, or the mod's tag for
-another session, keeps such a run inert. The tag naming this session is the
-process's own (a module reload raises `session.start` again). Every other
-non-interactive session stays inert exactly as before: `sdk-cli` (`claude
--p`), `sdk-ts` / `sdk-py`, `t3-code`, `claude-desktop` (Claude Desktop is out
-of scope), any other or no entrypoint, and Plannotator's own Ask AI children;
-the knob and the other switches apply as everywhere. In a panel session the
-mod runs as in the terminal (the tools, the wake through `$.prompt.submit`,
-the non-blocking flows, Ask this session, auto reload). The person's Enter
-in the panel reaches Claude Code as the SDK host's own turn, `origin.kind`
-`sdk`, so there it reads as `composer` (`promptOriginKind`): a typed prompt
-takes over an Ask question's turn and pulls the leases to this process, as
-in the terminal. What the panel draws differently: status lines and toasts
-show above the prompt box; `$.prompt.suggest` shows nothing (the review
-"address the comments" suggestion is not seen); `$.prompt.read` answers
+another session, makes such a run headless. The tag naming this session is the
+process's own (a module reload raises `session.start` again). In a panel
+session the mod runs as in the terminal (the tools, the wake through
+`$.prompt.submit`, the non-blocking flows, Ask this session, auto reload). The
+person's Enter in the panel reaches Claude Code as the SDK host's own turn,
+`origin.kind` `sdk`, so there it reads as `composer` (`promptOriginKind`): a
+typed prompt takes over an Ask question's turn and pulls the leases to this
+process, as in the terminal. What the panel draws differently: status lines
+and toasts show above the prompt box; `$.prompt.suggest` shows nothing (the
+review "address the comments" suggestion is not seen); `$.prompt.read` answers
 empty (auto reload's "a prompt is being typed" gate sees no draft there); the
 `CommandOutput` render hook on `/reload-plugins` does not run (Terminal and
-Desktop only). The `AbovePrompt` band is not built anywhere (see Plan
-review), and the panel has no `AbovePrompt` site either. A wake the host
-refuses resolves `{ drop }` (after Stop, "the host has ended its input", a
+Desktop only). The `AbovePrompt` band is not built anywhere (see Plan review),
+and the panel has no `AbovePrompt` site either. A wake the host refuses
+resolves `{ drop }` (after Stop, "the host has ended its input", a
 `--max-turns` limit) and is held as after a Stop in the terminal: the reply
 stays pending, no delivery is tried until the person's next prompt or a
 main-loop turn start, and the window says "Stopped". Not seen yet in a real
-panel. Tests: `register-vscode.test.ts` (the real registered hooks on a fake
-`$`: the panel registers both tools, polls as its session and delivers once;
-each refusal is held and goes in once after the person's prompt; the `sdk`
-origin pulls the lease, a task notification does not; every other
-entrypoint, a nested run, an agent job's inherited tag, an Ask AI child and
-the knob off stay inert) and two engine-harness cases in
-`apps/hook/tests/register.test.ts`.
+panel.
+
+**A T3 Code thread.** T3 Code (pingdotgg/t3code) runs a thread's Claude through
+the Agent SDK with no `settingSources`, so the user's plugins, this one
+included, load as in the terminal. Its environment carries
+`CLAUDE_CODE_ENTRYPOINT=t3-code` (`mergeClaudeProcessEnvironment`, unless the
+person's settings override it) and, for a thread's Claude only,
+`T3CODE_THREAD_ID`; T3 deletes `CLAUDECODE` and `CLAUDE_CODE_CHILD_SESSION`
+from it, as the VS Code extension does. `t3ThreadOf` in `enabled.ts` reads a
+thread when the entrypoint is exactly `t3-code`, the thread id is one T3 gives
+(`isT3ThreadId`, core's rule), and no nested-run variable or other session's
+tag is set. The mod then works as the thread, not as the Claude session:
+`plannotator_inbox` files as host `t3`, the thread id and "T3 Code"
+(`inboxT3Agent`), the tag is `t3:<thread id>` (so the shim and every
+`plannotator inbox call` the thread runs are the same agent,
+`inboxHostSessionFromEnv`), the wake polls the bridge as host `t3` and the
+thread, and its files live under the thread id with every character a file
+name cannot hold read `_` (`inboxSessionDirName`; the Inbox's
+`inboxModClaimDir` reads the same name). `PLANNOTATOR_SESSION_PROJECT` is left
+unset for a thread id holding `:` (its parser splits on the first two colons);
+the tag still names the thread. The reply goes in through `$.prompt.submit`,
+which T3 takes as a turn Claude started by itself (its wake continuation, as
+for a Monitor event), so a T3 thread needs no `plannotator t3 login` while T3
+keeps its Claude. One owner per reply (`t3ModDelivers` in
+`packages/server/inbox.ts`): while the thread polls, and for an item the mod's
+claim folder holds, the T3 wake leaves the reply alone; once the poll is stale
+(T3 releases an idle Claude after 30 minutes, later while it has background
+work), the T3 wake sends what still waits, under a grant, and the bridge poll
+never hands the mod what the T3 wake handed for a send in flight. ExitPlanMode
+passes on to T3's own Plan mode. Commands and the Bash take-over are the mod's,
+and the opt-in T3 Bash hook (`prepareT3Hook`, `claudeModServesThread`) stands
+aside in a thread whose tag the mod set. Not seen yet in a real T3: how T3
+draws a plugin-started turn. A review decision after T3 released the Claude is
+restored by the Claude session id, which T3 resumes under the same thread.
+
+Tests: `session-kind.test.ts` (the thread rule against core's for every id
+form, the allow/deny table, the identity against the shim's, the claim folder
+against the Inbox's, the feature table), `register-vscode.test.ts` (the real
+registered hooks on a fake `$`: the panel and a T3 thread register both tools,
+poll as their session or thread and deliver once; each refusal is held and
+goes in once after the person's prompt; the `sdk` origin pulls the lease, a
+task notification does not; each headless session gets `plannotator_inbox`
+alone, filed as its session, without the wake mark, no poll, the classic
+flows; an Ask AI child and the knob off stay inert),
+`packages/server/inbox-t3-wake.test.ts` (one owner per reply) and engine-harness
+cases in `apps/hook/tests/register.test.ts`.
 
 **Files.** `register.ts` holds every `$` call (`claude plugin validate` follows
 `$` only through top-level functions and inline hooks) and builds a `Host` of
@@ -504,10 +560,10 @@ classic path, which falls back to the pre-compaction file.
 blocks and gives Ask AI a separate AI. The mod registers a real tool instead:
 `$.tool.register({ name: "plannotator", description, inputSchema })` at
 `session.start`, right after the commands, and only when the mod is on (the
-knob not turned off, an interactive session or a VS Code panel session, a shell found) and the agent tool
+knob not turned off, any session but a headless one ("Every session, interactive or not"), a shell found) and the agent tool
 switch is on (on by default here; `PLANNOTATOR_AGENT_TOOL=0` / `{ "agentTool": false }` turn it off; `resolveAgentToolEnabled`
 in `hooks/mod/enabled.ts`, read with the mod switch at the first `session.start`
-of the process, never re-read); with either switch off, in `-p`/SDK runs (other than the VS Code panel) and
+of the process, never re-read); with either switch off, in a headless session (`claude -p`, an SDK app) and
 where no shell is found nothing is registered and Claude keeps the CLI through the `plannotator`
 skill. With only the agent tool off, the rest of the mod runs: the slash
 commands, non-blocking ExitPlanMode, Ask this session, and the Bash take-over
@@ -657,8 +713,8 @@ subcommands, every other flag (`--require-approval`, `--result-file`, `--hook`,
 flags, several targets that are not all file paths (prose, which the CLI's
 tolerant resolution reads) or several review targets, environment prefixes, and any compound command
 (`cd x && plannotator ...`, pipes, redirects, substitutions), so scripted
-strict gates keep the real CLI and its exit codes. With the mod off, in `-p`/SDK
-runs and where no shell is found nothing is taken over. The CLI the mod launches runs in the
+strict gates keep the real CLI and its exit codes. With the mod off, in a headless
+session and where no shell is found nothing is taken over. The CLI the mod launches runs in the
 session's cwd (`$.process.run`'s default), the same as for the tool. Pi and
 OpenCode do not take over shell runs: there an agent-run `plannotator` command
 still runs the CLI (Pi registers the tool itself; see "Pi: the `plannotator`
@@ -778,8 +834,8 @@ nothing changes, and the debug log gets no line for Bash asks. With it and
 prompt (…): allowed, as the variable asks` or `left to the dialog: <what kept
 it>` line for every Bash prompt (the rule kind, the settings hook, the
 plugin's id, the mode, a part that asked for another reason). Plannotator
-judges no removal itself. Not covered: `-p`/SDK runs and a mod turned off (the
-mod is inert there); hooks the mod cannot see: those in an agent's or skill's
+judges no removal itself. Not covered: headless sessions and a mod turned off (the
+mod does not take over a prompt there); hooks the mod cannot see: those in an agent's or skill's
 frontmatter (Claude Code keeps them in the session's hooks registry, which no
 mod API reads), plugins loaded with `--plugin-dir` or from a session-only
 source rather than the registry, and another plugin's hooks module with a
@@ -804,7 +860,7 @@ Claude Code only, #2299).** Read at the first `session.start` like the other
 switches: the `tool.call` and `classic.PermissionRequest` hooks on
 ExitPlanMode call `next(e)`, and the classic command hook exits 0 with no
 decision, so Claude Code shows its own dialog ("Yes, clear context" only with
-its `showClearContextOnPlanAccept` setting on). In `-p` / SDK runs there is no
+its `showClearContextOnPlanAccept` setting on). In a headless session there is no
 dialog; the run's own permissions decide (see the env table row). Older Claude
 Code: before 2.1.268 PermissionRequest hooks did not run in `-p` at all, and
 before 2.1.287 (no mods) the command hook alone decides, with the same result.

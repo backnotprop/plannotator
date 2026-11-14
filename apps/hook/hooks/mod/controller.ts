@@ -11,7 +11,7 @@ import { AutoReload } from './auto-reload'
 import { BRIDGE_HOST, BRIDGE_MODES, bridgeBaseUrl, createBridge, type BridgeEnd, type BridgeHandle } from './bridge'
 import { deliveryFor, legacyResult, parseHostResult, type HostResultRecord, type SessionKind } from './delivery'
 import { PromptDropped, type Host, type HttpResult } from './host'
-import { InboxLink, inboxSessionProjectEnvValue, sessionProjectFolder } from './inbox'
+import { inboxAgentProjectEnvValue, InboxLink, inboxSessionProjectEnvValue, sessionProjectFolder, type InboxAgentIdentity } from './inbox'
 import { isAbsolutePath } from './paths'
 import { inboxCommandBriefing, type InboxToolInfo } from './inbox-contract'
 import {
@@ -315,6 +315,10 @@ export interface SessionInfo {
    * at its first session start (inbox.ts); absent: no Inbox connection.
    */
   inboxTools?: readonly InboxToolInfo[]
+  /** Who the session is in the Inbox (a T3 Code thread); absent: this Claude Code session. */
+  inboxAs?: InboxAgentIdentity
+  /** False: the Inbox tool without the reply wake (`InboxLinkOptions.wake`). */
+  inboxWake?: boolean
   /** The session's working folder, read when asked (the Inbox link's polls say where the session works). */
   cwd?: () => Promise<string>
   /** The session's root folder (`$.session.root()`), read once at the link's start: where `claude --resume` runs. */
@@ -422,6 +426,8 @@ export class PlannotatorMod {
           ...(session.title ? { title: session.title } : {}),
           ...(session.continues ? { continues: session.continues } : {}),
           instanceId: this.instanceId,
+          ...(session.inboxAs ? { agent: session.inboxAs } : {}),
+          ...(session.inboxWake === false ? { wake: false } : {}),
           turns: this.turns,
           ...(this.autoReload ? { reload: this.autoReload } : {}),
         })
@@ -475,8 +481,9 @@ export class PlannotatorMod {
             this.session.cwd ? await this.session.cwd().catch(() => null) : null,
           )
       if (!folder) return
-      const value = inboxSessionProjectEnvValue(this.session.sessionId, folder)
-      if (value === this.exportedProject) return
+      const agent = this.inbox?.agent ?? this.session.inboxAs
+      const value = agent ? inboxAgentProjectEnvValue(agent, folder) : inboxSessionProjectEnvValue(this.session.sessionId, folder)
+      if (value === null || value === this.exportedProject) return
       this.exportedProject = value
       await this.host.setSessionProject(value)
     } catch {

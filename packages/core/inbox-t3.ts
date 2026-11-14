@@ -45,3 +45,41 @@ export function isT3ThreadId(value: unknown): value is string {
 export function isPlainT3ThreadId(value: unknown): value is string {
   return typeof value === "string" && T3_THREAD_ID_PLAIN.test(value);
 }
+
+/**
+ * Why the T3 wake cannot put a person's reply into its T3 thread now, as the
+ * thread's own machine knows it (`InboxMessage.t3_wait`): no sign-in is saved
+ * (`sign_in`), T3 refused the saved one as lapsed or revoked
+ * (`sign_in_again`), its mode does not cover the thread (`access`), or T3
+ * does not answer (`closed`). It never carries the grant or its URL.
+ */
+export type InboxT3WaitReason = "sign_in" | "sign_in_again" | "access" | "closed";
+
+export const INBOX_T3_WAIT_REASONS: readonly InboxT3WaitReason[] = ["sign_in", "sign_in_again", "access", "closed"];
+
+export function isInboxT3WaitReason(value: unknown): value is InboxT3WaitReason {
+  return typeof value === "string" && (INBOX_T3_WAIT_REASONS as readonly string[]).includes(value);
+}
+
+/** The sign-in command (`plannotator t3 --help`); the URL is T3's Copy MCP URL. */
+export const INBOX_T3_LOGIN_COMMAND = "plannotator t3 login --url <T3 MCP URL>";
+
+/** In T3, where the URL the sign-in command takes is. */
+export const INBOX_T3_URL_WHERE = "In T3: Settings → Environments, the environment's menu, Copy MCP URL.";
+
+/**
+ * The line under a reply that waits on T3, and the command to copy beside it.
+ * Proposed words: the owner approves them word for word before release.
+ */
+export function inboxT3WaitLine(reason: InboxT3WaitReason): { text: string; command: string | null } {
+  switch (reason) {
+    case "sign_in":
+      return { text: "Waiting for T3 Code. Sign in to T3 once and replies go in by themselves:", command: INBOX_T3_LOGIN_COMMAND };
+    case "sign_in_again":
+      return { text: "Waiting for T3 Code. Your T3 sign-in ran out. Sign in again and this goes in by itself:", command: INBOX_T3_LOGIN_COMMAND };
+    case "access":
+      return { text: "Waiting for T3 Code. Your T3 sign-in can't send into this thread. Sign in again and choose at least the thread's mode:", command: INBOX_T3_LOGIN_COMMAND };
+    case "closed":
+      return { text: "Waiting for T3 Code. T3 isn't answering. Open T3 and this goes in by itself.", command: null };
+  }
+}

@@ -250,6 +250,39 @@ export function inboxSessionProjectEnvValue(sessionId: string, folder: string): 
 }
 
 /**
+ * Who the session is in the Inbox when it is not the Claude Code session
+ * itself: a T3 Code thread files as `t3` and the thread's id, the identity
+ * T3's own processes give it (`inboxHostSessionFromEnv` in
+ * apps/hook/server/inbox-mcp-shim.ts), so the thread is one agent whichever
+ * way it reaches the Inbox.
+ */
+export interface InboxAgentIdentity {
+  host: string
+  session: string
+  name: string
+}
+
+/** A T3 Code thread as the Inbox knows it: `INBOX_T3_HOST` and `INBOX_T3_NAME` in packages/core/inbox-t3.ts. */
+export function inboxT3Agent(thread: string): InboxAgentIdentity {
+  return { host: 't3', session: thread, name: 'T3 Code' }
+}
+
+/**
+ * PLANNOTATOR_SESSION_PROJECT's value for `agent`, or null when its session
+ * id holds a `:` (a T3 thread made by an agent or a scheduled task), which
+ * the variable's `<host>:<session>:<folder>` cannot carry: such a session's
+ * shell commands file in their own folder, as before.
+ */
+export function inboxAgentProjectEnvValue(agent: InboxAgentIdentity, folder: string): string | null {
+  return agent.session.includes(':') ? null : `${agent.host}:${agent.session}:${folder}`
+}
+
+/** The folder name a session's Inbox files live under: an id's characters a file name cannot hold read `_`. */
+export function inboxSessionDirName(session: string): string {
+  return session.replace(/[^A-Za-z0-9._-]/g, '_')
+}
+
+/**
  * The folder a session files under (`InboxLink.projectFolder`'s rule): `live`
  * (the root now, while INBOX_PROJECT_FOLLOWS_SLASH_CD), else `first` (the root
  * first seen), each only while it exists; else the working folder. Null when
@@ -996,6 +1029,13 @@ export interface InboxLinkOptions {
   continues?: () => Promise<readonly string[]>
   /** Names this process in the lease and the claims. */
   instanceId: string
+  /** Who the session is in the Inbox (a T3 Code thread); absent: the Claude Code session `sessionId`. */
+  agent?: InboxAgentIdentity
+  /**
+   * False: the tool sends and reads, and nothing polls (no reply wake, no
+   * Inbox Ask): a session that may end with its turn (`SESSION_KIND_FEATURES`).
+   */
+  wake?: boolean
   /** The session's turns, which a question from Ask AI runs in. Absent: the connection never offers to answer one. */
   turns?: TurnTracker
   /**
@@ -1096,8 +1136,12 @@ export class InboxLink {
   constructor(private readonly options: InboxLinkOptions) {
     this.host = options.host
     this.tools = options.tools
-    this.dir = inboxSessionDirOf(options.dataDir, options.sessionId)
+    this.agent = options.agent ?? { host: INBOX_HOST, session: options.sessionId, name: INBOX_AGENT_NAME }
+    this.dir = inboxSessionDirOf(options.dataDir, inboxSessionDirName(this.agent.session))
   }
+
+  /** Who this session is in the Inbox: its sends, its polls and its Ask AI bridge name it. */
+  readonly agent: InboxAgentIdentity
 
   get isDisposed(): boolean {
     return this.disposed
@@ -1119,7 +1163,7 @@ export class InboxLink {
    * live process holds it).
    */
   start(options: { touch?: boolean } = {}): void {
-    if (this.timer || this.disposed) return
+    if (this.timer || this.disposed || this.options.wake === false) return
     void this.host.now().then((now) => {
       this.startedAt ||= now
       this.idleSince ||= now
@@ -1215,9 +1259,9 @@ export class InboxLink {
     const project = (await this.projectFolder()) ?? cwd
     const call = inboxToolCall(input, this.tools, {
       project_path: project,
-      agent_session: this.options.sessionId,
-      agent_host: INBOX_HOST,
-      agent_name: INBOX_AGENT_NAME,
+      agent_session: this.agent.session,
+      agent_host: this.agent.host,
+      agent_name: this.agent.name,
     })
     if ('error' in call) return { deny: call.error }
     let workingFolder: string | undefined
@@ -1242,8 +1286,10 @@ export class InboxLink {
     if ('error' in running) return { deny: running.error }
     let answer: Awaited<ReturnType<typeof mcpCall>>
     try {
-      // This session's wake delivers the reply as a turn: the send tools say to end the turn.
-      answer = await mcpCall(this.host, running.port, 'tools/call', inboxToolCallParams(call, { wakes: true, ...(workingFolder ? { workingFolder } : {}) }))
+      // This session's wake delivers the reply as a turn: the send tools say to end the turn. Without the wake
+      // they say to read the thread later, as for any agent nothing wakes.
+      const wakes = this.options.wake !== false
+      answer = await mcpCall(this.host, running.port, 'tools/call', inboxToolCallParams(call, { wakes, ...(workingFolder ? { workingFolder } : {}) }))
     } catch (error) {
       return { deny: `The Plannotator Inbox did not answer (${error instanceof Error ? error.message : String(error)}).` }
     }
@@ -1456,7 +1502,7 @@ export class InboxLink {
       .fetch(`http://127.0.0.1:${registry.port}${path}`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', authorization: `Bearer ${registry.token}` },
-        body: JSON.stringify({ session: this.options.sessionId, host: INBOX_HOST, ...body }),
+        body: JSON.stringify({ session: this.agent.session, host: this.agent.host, ...body }),
       })
       .catch(() => null)
   }
@@ -1534,7 +1580,7 @@ export class InboxLink {
     if (!registry || this.askClient || this.disposed || !this.leader) return
     const client = createBridge({
       host: this.host,
-      baseUrl: `${bridgeBaseUrl(registry.port)}${inboxAskBridgeBase(this.options.sessionId)}`,
+      baseUrl: `${bridgeBaseUrl(registry.port)}${inboxAskBridgeBase(this.agent.session)}`,
       token: registry.token,
       turns,
       isLive: () => !this.disposed && (this.leader || turns.askInFlight),
