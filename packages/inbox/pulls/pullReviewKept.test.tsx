@@ -51,11 +51,7 @@ if (hasDom) {
       return null;
     },
   }));
-  // The real review-app dialog and submit, by a path in a variable (the window's strict typecheck must not follow it).
-  const seam: string = '../guide/PlatformPost.tsx';
-  const real = (await import(seam)) as Record<string, unknown>;
-  mock.module('#platform-post', () => real);
-  await (await import('../threadDrawReady')).diffDrawReady(['typescript']);
+  await (await import('./platformPostSeam')).realPlatformPost();
 }
 const { PullReview } = (hasDom ? await import('./PullReview') : {}) as typeof import('./PullReview');
 

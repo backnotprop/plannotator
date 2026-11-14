@@ -7,7 +7,6 @@
 import { useMemo, useState } from 'react';
 import { inboxPullRepoKey, inboxReviewGroups, type InboxPullLink, type InboxPullsAnswer, type InboxPullStack, type InboxReviewMove, type InboxReviewRow, type InboxReviewsAnswer } from '@plannotator/core/inbox-types';
 import { formatCount, plural } from '@plannotator/core/inbox-format';
-import { inboxApi } from '../api';
 import { HostMark, Icon } from '../icons';
 import { RefMarkIcon } from '../board/RefMark';
 import { Tip } from '../components/Tip';
@@ -21,6 +20,7 @@ import { riskOrder, rowStack, stackRisk, stackRiskFailure, type RiskFailures, ty
 import { RiskMark } from './RiskMark';
 import { Named, usePicture } from './Face';
 import { facesOnce } from './words';
+import { pullAvatarUrl } from './pullUrls';
 
 const NO_ROWS: readonly InboxReviewRow[] = [];
 const NO_JUDGMENTS: RiskJudgments = {};
@@ -34,7 +34,7 @@ const NO_FAILURES: RiskFailures = {};
 function AuthorLead({ stack }: { stack: InboxPullStack }) {
   const bottom = stack.layers[0]!;
   const author = bottom.author;
-  const src = author ? inboxApi.pullAvatarUrl(bottom.host, author) : null;
+  const src = author ? pullAvatarUrl(bottom.host, author) : null;
   // The same picture state as every face (`Face.tsx`), so a picture that failed in one is never asked again here.
   const { shown, failed, state, onLoad, onError } = usePicture(src);
   if (!author || !src) {

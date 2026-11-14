@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type FocusEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
+import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { HueDot, LetterMark, ProjectMark, showsProjects, showsThreads, useRowMarks } from '../letterMarks';
 import { inboxListShortcuts } from '../shortcuts/list.shortcuts';
 import { shortcutAria, useShortcutAria, withShortcut } from '../shortcuts/hint';
@@ -51,6 +51,8 @@ import { RowSlot } from './RowSlot';
 import { useShortcutScope } from '@plannotator/ui/shortcuts';
 import { bareKeyAllowed, isComposingKey, keyboardFocused, keyTarget, modalOpen } from '../shortcuts/guards';
 import { listKeyTarget, LIST_STOPS, type ListMove } from '../listKeys';
+import { fitCountsColumn, useDevicePixelRatio } from './listFit';
+import { useKeyboardFocus } from './useKeyboardFocus';
 
 export interface InboxListProps {
   /** Beside an open thread, a click on the list's edge hides the list (the thread in full screen); drag still resizes. Absent: the edge only resizes. */
@@ -229,41 +231,6 @@ function RowMark({ row }: { row: InboxListRow }) {
   if (hideAgents) return null;
   if ((row.participants?.length ?? 0) > 1) return <TagStack participants={row.participants!} />;
   return <AuthorMark author={rowAgent(row)} />;
-}
-
-/**
- * The row has keyboard focus (`:focus-visible`): its badge's card shows, as it
- * does on hover (approval "inbox-row-badges"). A click's focus does not count.
- * Escape closes the card and keeps focus on the row; that Escape is used up
- * (default prevented), so the window's Escape does not also close the thread.
- * The card comes back the next time the row takes keyboard focus.
- */
-function useKeyboardFocus(enabled: boolean): [
-  boolean,
-  { onFocus: (e: FocusEvent<HTMLElement>) => void; onBlur: () => void; onKeyDown: (e: ReactKeyboardEvent<HTMLElement>) => void },
-] {
-  const [on, setOn] = useState(false);
-  return [
-    on,
-    {
-      onKeyDown: (e) => {
-        if (!on || e.key !== 'Escape' || e.target !== e.currentTarget || e.defaultPrevented) return;
-        e.preventDefault();
-        setOn(false);
-      },
-      onFocus: (e) => {
-        if (!enabled || e.target !== e.currentTarget) return;
-        let visible = false;
-        try {
-          visible = e.currentTarget.matches(':focus-visible');
-        } catch {
-          visible = false;
-        }
-        setOn(visible);
-      },
-      onBlur: () => setOn(false),
-    },
-  ];
 }
 
 /** A blocked row's hover card (wide and three-line rows), or undefined: its filled marks' tooltip. */
@@ -743,69 +710,6 @@ export const ONE_PROJECT_WIDE_ROWS_MIN_LIST_WIDTH = 496;
  * keep approval "inbox-row-byline", option A (the short forms, the marks alone), so the subject keeps its room.
  */
 export const FULL_WORDS_MIN_LIST_WIDTH = 1150;
-
-/** The wide rows' open counts column, as inbox.css draws it (`.ib-row`'s grid). */
-const COUNTS_COLUMN_PX = 84;
-
-/**
- * In a list with the pin's column (`.ib-pincol`), widen the open counts' column for the whole list to the widest
- * counts drawn ("[□ 12] ?12", "[□ 99+] ?99+" pass its 84px), so every pin stays in one column 8px before its row's
- * counts and none runs under a pin. The counts sit at their column's right edge, so their width is the column's right
- * edge less their leftmost part, whatever the column's width: a second pass gives the same answer. Without pins, or
- * with counts that fit, the column keeps its 84px (`--ib-cq-w` unset).
- *
- * Cells with the same parts and text draw the same counts at the same width (no row state restyles them), so only
- * one cell of each is read. A read lays out its row (rows are `content-visibility: auto`), and a list has far fewer
- * different counts than rows: reading every row cost about 25 ms at 700 rows, on every open of a thread and every
- * return to the list. False when the list is not drawn (nothing in it has a box), so the caller fits it again later.
- */
-function fitCountsColumn(list: HTMLElement, pinColumn: boolean): boolean {
-  let widest = 0;
-  let drawn = true;
-  if (pinColumn) {
-    const alike = new Map<string, HTMLElement[]>();
-    for (const cell of list.querySelectorAll<HTMLElement>('.ib-row > .ib-cq')) {
-      if (!cell.firstElementChild) continue;
-      // What the cell draws: each part's classes and text (its tooltip's id differs on every row).
-      const key = [...cell.children].map((part) => `${part.getAttribute('class')}\t${part.textContent}`).join('\n');
-      const cells = alike.get(key);
-      if (cells) cells.push(cell);
-      else alike.set(key, [cell]);
-    }
-    groups: for (const cells of alike.values()) {
-      for (const cell of cells) {
-        const lefts = [...cell.children].map((part) => part.getBoundingClientRect()).filter((box) => box.width > 1).map((box) => box.left);
-        if (lefts.length) {
-          widest = Math.max(widest, cell.getBoundingClientRect().right - Math.min(...lefts));
-          break;
-        }
-        // Nothing of this cell drawn: try the next alike cell, unless the whole list is undrawn (then none is).
-        if (list.getClientRects().length === 0) {
-          drawn = false;
-          widest = 0;
-          break groups;
-        }
-      }
-    }
-  }
-  const width = widest > COUNTS_COLUMN_PX ? `${Math.ceil(widest)}px` : '';
-  if (list.style.getPropertyValue('--ib-cq-w') !== width) {
-    if (width) list.style.setProperty('--ib-cq-w', width);
-    else list.style.removeProperty('--ib-cq-w');
-  }
-  return drawn;
-}
-
-/** The page's zoom (device pixels per CSS pixel), read again on each resize: a zoom changes it, and text widths with it. */
-function useDevicePixelRatio(): number {
-  const [ratio, setRatio] = useState(() => (typeof window === 'undefined' ? 1 : window.devicePixelRatio));
-  useEffect(() => {
-    const read = () => setRatio(window.devicePixelRatio);
-    window.addEventListener('resize', read);
-    return () => window.removeEventListener('resize', read);
-  }, []);
-  return ratio;
-}
 
 /**
  * One row of the wide list, on one line (approval "inbox-row-byline", the

@@ -137,17 +137,6 @@ export interface BoardPageProps {
   tagsAcross?: TagsAcross | null;
 }
 
-/**
- * The Board (approval "inbox-board", step 2; columns v2): five lanes, Backlog,
- * Todo, In progress, In review and Done (its last seven days), cards in
- * variant C "Lean", All done and Cancelled as links to their own lists, the
- * agents' unseen drops above the lanes. A card opens in
- * a panel beside the Board (the lanes narrow and scroll, so the card's lane
- * stays in view); on a phone the lanes are one stacked list (Done and
- * Cancelled folded at the end) and an opened card is a full screen. Every move
- * is on the opened card's column menu (the keyboard's way), and on a desktop
- * a card can be dragged to another lane.
- */
 export function BoardPage(props: BoardPageProps) {
   const { model, view, phone } = props;
   const allCards = model?.cards ?? [];
@@ -939,21 +928,6 @@ const LANE_EMPTY: Partial<Record<InboxCardColumn, string>> = {
 /** A lane card's title is cut (clamped at three lines, or a word cut at the edge): its button overflows. */
 const titleCut = (trigger: Element) => isTextCut(trigger.closest('.ib-bc-main'));
 
-/**
- * One card, "Title row" (approval board-lane-card, r1, 2026-10-27): the
- * title, with the linked PR's or issue's mark, the agent's small round mark (a
- * dashed ring for the person's card) and how long ago anyone last wrote to it
- * at the right of its first line. A second line only when the person owes
- * something ("You: …", in the person's columns) or a send is pending ("Sent to
- * <agent>" with the delivery tick, until it moves). The agent's last word is
- * not on the lane card: the opened card has it. Bold while unread. The title
- * is the button that opens the card (a click anywhere else on the card does
- * too); "You: …" is its own button, to the thread where the person makes the
- * call (`youThread`); with no thread linked it is plain words, and a click on
- * it opens the card. While the Board spans projects (`projectOfCard`), the
- * project's name gets a row of its own above the title, with the marks and the
- * age at its right, and the title takes the card's whole width.
- */
 function BoardCard({
   card,
   visitLook,

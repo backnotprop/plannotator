@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type MouseEvent, type ReactNode, type RefObject } from 'react';
 import { KeyboardSettings } from './KeyboardSettings';
-import { INBOX_SOUND_MAX_VOLUME, INBOX_SOUND_MIN_VOLUME, INBOX_TEXT_SIZES } from '@plannotator/core/inbox-types';
+import { INBOX_TEXT_SIZES } from '@plannotator/core/inbox-types';
 import type { InboxSound } from '../sound';
+import { SoundRow, Switch } from './SoundRow';
 import { type AgentToolHost, type InboxCookieHost, type InboxExperimentalSettings, type InboxStorageModel, type MachineView, type SettingsModel } from '../api';
 import { cookieHostDescription } from '@plannotator/ui/hooks/useCookieHostSetting';
 import { formatBytes, formatCount, plural, tildePath } from '../format';
@@ -206,82 +207,6 @@ function CookieHostGroup({ cookieHost, remote, onToggle }: { cookieHost: InboxCo
         </div>
       </div>
     </section>
-  );
-}
-
-/** A row's switch, named by its visible title. */
-function Switch({ on, labelledBy, label, disabled, onClick }: { on: boolean; labelledBy?: string; label?: string; disabled?: boolean; onClick: () => void }) {
-  return <button type="button" role="switch" className="ib-sw" aria-checked={on} aria-labelledby={labelledBy} aria-label={label} disabled={disabled} onClick={onClick} />;
-}
-
-/**
- * The question sound (design of record: .product/approved/inbox-sound/): one
- * row, "Play a sound · when an agent asks you", then the volume, Play and
- * the switch. Off, the slider is disabled and Play still plays. Letting go of
- * the slider plays the sound once at the new level. Before the first click in
- * the tab, one line says Chrome needs it.
- */
-function SoundRow({ sound }: { sound: InboxSound }) {
-  const { enabled, volume } = sound.settings;
-  const [live, setLive] = useState(volume);
-  const slider = useRef<HTMLInputElement>(null);
-  const soundRef = useRef(sound);
-  soundRef.current = sound;
-  useEffect(() => setLive(volume), [volume]);
-  // React's onChange is the input event; letting go is the native change event.
-  useEffect(() => {
-    const el = slider.current;
-    if (!el) return;
-    const release = () => {
-      const next = Number(el.value);
-      soundRef.current.preview(next);
-      void soundRef.current.setVolume(next);
-    };
-    el.addEventListener('change', release);
-    return () => el.removeEventListener('change', release);
-  }, []);
-  return (
-    <>
-      <div className="ib-prow" data-settings-sound={enabled ? 'on' : 'off'}>
-        <span className="ib-txt">
-          <span className="ib-l" id="ib-sound-label">
-            Play a sound
-          </span>
-          <span className="ib-desc">When an agent asks you, while no Inbox tab is in front</span>
-        </span>
-        <span className="ib-ctl">
-          <input
-            ref={slider}
-            type="range"
-            className="ib-vslider"
-            min={INBOX_SOUND_MIN_VOLUME}
-            max={INBOX_SOUND_MAX_VOLUME}
-            step={10}
-            value={live}
-            aria-label="Volume"
-            aria-valuetext={`${live} percent`}
-            disabled={!enabled}
-            onChange={(event) => setLive(Number(event.target.value))}
-          />
-          <button
-            type="button"
-            className="ib-btn ib-sm ib-icon"
-            aria-label={sound.playing ? 'Playing…' : 'Play the sound'}
-            data-sound-play=""
-            onClick={() => sound.preview(live)}
-          >
-            <Icon name="play" />
-          </button>
-          <Switch on={enabled} labelledBy="ib-sound-label" onClick={() => void sound.setEnabled(!enabled)} />
-        </span>
-      </div>
-      {enabled && !sound.armed && (
-        <div className="ib-callout ib-in-card" role="status" data-sound-click-hint="">
-          <Icon name="clickHere" />
-          <span>Click once in this tab to allow sound.</span>
-        </div>
-      )}
-    </>
   );
 }
 
