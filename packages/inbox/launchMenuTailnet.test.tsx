@@ -1,11 +1,8 @@
 /**
- * A launched thread on a tailnet guest's page: Stop and Delete in its ⋯ and
- * Stop on its run line, as on the owner's (owner ruling 2026-11-11); only Try
- * again, which starts an agent, stays the owner's (the server answers it
- * `owner_only`, inbox-tailnet-owner.test.ts).
+ * A launched thread on the owner's page over the tailnet: Stop and Delete in its ⋯, Stop on its run line, and Try
+ * again when it failed, as on this computer (owner ruling 2026-11-11).
  *
- * The failure this catches: a guest losing Stop or Delete again, a guest
- * offered Try again only to get an error, or the owner losing one.
+ * The failure this catches: the owner over the tailnet losing Stop, Delete or Try again.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -79,8 +76,8 @@ async function press(el: Element) {
   });
 }
 
-/** Draws the launched thread, on the owner's page or a guest's, with `run` as its run line. */
-async function draw(guest: boolean, run: InboxRun | null) {
+/** Draws the launched thread on the owner's page over the tailnet, with `run` as its run line. */
+async function draw(run: InboxRun | null) {
   const savedFetch = globalThis.fetch;
   globalThis.fetch = (async (_input: RequestInfo | URL) => Response.json({})) as typeof fetch;
   restore.push(() => {
@@ -103,7 +100,6 @@ async function draw(guest: boolean, run: InboxRun | null) {
         onOpenGuide={() => {}}
         run={run}
         remote={true}
-        guest={guest}
       />,
     );
   });
@@ -118,8 +114,8 @@ function undraw() {
 }
 
 /** The launch items of the open thread's ⋯ (`data-launch-item`), top to bottom. A resting agent (no run line): the owner's ⋯ offers Stop then too. */
-async function launchItems(guest: boolean): Promise<string[]> {
-  await draw(guest, null);
+async function launchItems(): Promise<string[]> {
+  await draw(null);
   await press(host!.querySelector('[data-thread-more]')!);
   await until(() => !!document.querySelector('[data-thread-menu]'), 'the ⋯ menu');
   const items = [...document.querySelectorAll('[data-thread-menu] [data-launch-item]')].map((el) => el.getAttribute('data-launch-item')!);
@@ -127,45 +123,37 @@ async function launchItems(guest: boolean): Promise<string[]> {
   return items;
 }
 
-test.skipIf(!hasDom)("a tailnet guest's ⋯ has Stop and Delete for a launched agent, as the owner's over the tailnet does", async () => {
-  expect(await launchItems(false)).toEqual(['stop', 'delete']);
-  expect(await launchItems(true)).toEqual(['stop', 'delete']);
+test.skipIf(!hasDom)("the owner's ⋯ over the tailnet has Stop and Delete for a launched agent", async () => {
+  expect(await launchItems()).toEqual(['stop', 'delete']);
 });
 
 const runOf = (over: Partial<InboxRun>): InboxRun =>
   ({ state: 'working', launch_id: 'lch_a', agent: 'claude-code', project: 'app', folder: '/work/app', since: '2026-10-20T18:10:00.000Z', again: false, stopped_by_person: false, cause: null, untrusted: false, attach_command: null, ...over }) as InboxRun;
 
 /** The run line's Stop and Try again (`data-run-stop`, `data-run-retry`) on the drawn page. */
-async function runButtons(guest: boolean, run: InboxRun): Promise<string[]> {
-  await draw(guest, run);
+async function runButtons(run: InboxRun): Promise<string[]> {
+  await draw(run);
   await until(() => !!host!.querySelector('[data-run]'), 'the run line');
   const buttons = [...host!.querySelectorAll('[data-run-stop], [data-run-retry]')].map((el) => (el.hasAttribute('data-run-stop') ? 'stop' : 'retry'));
   undraw();
   return buttons;
 }
 
-test.skipIf(!hasDom)("a tailnet guest's run line has Stop (working, or waiting on a prompt) and no Try again (failed); the owner's has both", async () => {
-  const working = runOf({ state: 'working' });
-  const waiting = runOf({ state: 'waiting_terminal' });
-  const failed = runOf({ state: 'failed', cause: 'Claude Code exited.' });
-  expect(await runButtons(false, working)).toEqual(['stop']);
-  expect(await runButtons(false, waiting)).toEqual(['stop']);
-  expect(await runButtons(false, failed)).toEqual(['retry']);
-  expect(await runButtons(true, working)).toEqual(['stop']);
-  expect(await runButtons(true, waiting)).toEqual(['stop']);
-  expect(await runButtons(true, failed)).toEqual([]);
+test.skipIf(!hasDom)("the owner's run line over the tailnet has Stop (working, or waiting on a prompt) and Try again (failed)", async () => {
+  expect(await runButtons(runOf({ state: 'working' }))).toEqual(['stop']);
+  expect(await runButtons(runOf({ state: 'waiting_terminal' }))).toEqual(['stop']);
+  expect(await runButtons(runOf({ state: 'failed', cause: 'Claude Code exited.' }))).toEqual(['retry']);
 });
 
 /** The stopped run line's words on the drawn page. */
-async function stoppedLine(guest: boolean): Promise<string> {
-  await draw(guest, runOf({ state: 'stopped', stopped_by_person: true }));
+async function stoppedLine(): Promise<string> {
+  await draw(runOf({ state: 'stopped', stopped_by_person: true }));
   await until(() => !!host!.querySelector('[data-run="stopped"]'), 'the stopped line');
   const text = host!.querySelector('[data-run="stopped"] .ib-run-text')!.textContent ?? '';
   undraw();
   return text;
 }
 
-test.skipIf(!hasDom)("a stopped session: every page's line says a reply starts it again, as the server does for anyone's reply", async () => {
-  expect(await stoppedLine(false)).toContain('Your reply starts it again.');
-  expect(await stoppedLine(true)).toContain('Your reply starts it again.');
+test.skipIf(!hasDom)("a stopped session: the line says a reply starts it again", async () => {
+  expect(await stoppedLine()).toContain('Your reply starts it again.');
 });

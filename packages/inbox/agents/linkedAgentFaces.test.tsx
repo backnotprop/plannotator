@@ -77,7 +77,7 @@ function inboxes() {
   const theirs = facesRoute(there);
   const builtIn = createBuiltInIconSets();
   const fetcher = createIconSetFetcher({ dir: join(scratchDir(), 'icon-sets'), pointer: null, builtIn: builtIn.ids, fetch: (() => Promise.reject(new Error('offline'))) as unknown as typeof fetch });
-  const setsRoute = createInboxIconSets({ builtIn, fetcher, serverSession: 'srv', localOnly: () => json({ code: 'local_only' }, 403), readBody, json }).route;
+  const setsRoute = createInboxIconSets({ builtIn, fetcher, serverSession: 'srv', readBody, json }).route;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input), 'http://localhost');
     const method = init?.method ?? 'GET';
@@ -91,7 +91,7 @@ function inboxes() {
       return (await theirs(new Request(forwardedUrl, { method, body: init?.body ?? null }), forwardedUrl)) ?? json({ error: 'not here' }, 404);
     }
     const req = new Request(url, { method, ...(init?.body ? { body: init.body } : {}) });
-    return (await own(req, url)) ?? (await setsRoute(req, url, true)) ?? json({ error: 'not here' }, 404);
+    return (await own(req, url)) ?? (await setsRoute(req, url)) ?? json({ error: 'not here' }, 404);
   }) as typeof fetch;
 }
 
