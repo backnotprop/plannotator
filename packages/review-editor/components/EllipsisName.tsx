@@ -47,21 +47,19 @@ export const EllipsisName: React.FC<{ text: string; keepExtension?: boolean; cla
   useLayoutEffect(() => {
     const element = ref.current;
     if (!element) return;
-    const probe = probeRef.current;
-    const width = measurer(probe);
-    if (!width || !probe) {
-      setFitted({ text });
-      return;
-    }
-    const full = Math.ceil(width(text)) + 1;
-    probe.textContent = '';
     const fit = () => {
+      const probe = probeRef.current;
+      const width = measurer(probe);
+      if (!width || !probe) {
+        setFitted((before) => (before.text === text && !before.width ? before : { text }));
+        return;
+      }
+      const full = Math.ceil(width(text)) + 1;
       const available = element.clientWidth;
-      const next = available > 0 ? fitMiddle(text, available, width, keepExtension) : text;
+      const next = available > 0 && available < full ? fitMiddle(text, available, width, keepExtension) : text;
       probe.textContent = '';
-      setFitted({ text: next, width: full });
+      setFitted((before) => (before.text === next && before.width === full ? before : { text: next, width: full }));
     };
-    setFitted({ text, width: full });
     fit();
     if (typeof ResizeObserver === 'undefined') return;
     const observer = new ResizeObserver(fit);
