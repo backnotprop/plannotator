@@ -19,6 +19,8 @@ function failureText(provider: Provider, failure: Failure): string {
   return `${name} did not answer. Try again in a moment.`;
 }
 
+const KEY_MESSAGE_ID = 'power-up-key-message';
+
 function KeyField({ caption, label, value, onChange, secret, flagged, message, saved, onFocus, className }: {
   caption?: string;
   message?: string;
@@ -46,13 +48,9 @@ function KeyField({ caption, label, value, onChange, secret, flagged, message, s
         onFocus={onFocus}
         aria-label={label}
         aria-invalid={flagged || undefined}
-        aria-describedby={message ? `${label.replace(/\W+/g, '-')}-message` : undefined}
+        aria-describedby={message ? KEY_MESSAGE_ID : undefined}
       />
-      {message && (
-        <span id={`${label.replace(/\W+/g, '-')}-message`} className="text-xs text-warning" data-power-up-key-failure="">
-          {message}
-        </span>
-      )}
+
     </label>
   );
 }
@@ -157,6 +155,16 @@ export function SemanticDiffsTab() {
 
   const saved = configured && savedProvider === provider && (!editing || (provider === 'jev' ? !apiKey : !accountId && !apiToken));
   const failure = check.kind === 'error' ? check.failure : null;
+  const fieldMessage =
+    failure === 'refused' || failure === 'noCredit'
+      ? failureText(provider, failure)
+      : failure === 'missing'
+        ? provider === 'jev'
+          ? 'Add your TypeSafe key'
+          : !accountId
+            ? 'Add your account ID'
+            : 'Add your token'
+        : null;
   const complete = provider === 'jev' ? apiKey.trim() !== '' : accountId.trim() !== '' && apiToken.trim() !== '';
   return (
     <div className="space-y-4" data-semantic-diffs-settings="">
@@ -213,7 +221,7 @@ export function SemanticDiffsTab() {
               />
             </Row>
             <Row
-              title={provider === 'jev' ? 'TypeSafe key' : 'Workers AI'}
+              title={provider === 'jev' ? 'Jev key' : 'Workers AI'}
               hint={
                 check.kind === 'ok' ? (
                   `✓ Key works · ${check.ms} ms`
@@ -222,17 +230,14 @@ export function SemanticDiffsTab() {
                 ) : check.kind === 'checking' ? (
                   'Checking…'
                 ) : saved ? (
-                  <>
-                    Kept by this computer, never shown again ·{' '}
-                    <button type="button" className="underline-offset-2 hover:text-foreground hover:underline" onClick={() => void remove()}>Remove</button>
-                  </>
+                  'Kept on this computer'
                 ) : (
                   ADD_KEY[provider]
                 )
               }
             >
               <form
-                className="flex w-[250px] items-start gap-1.5"
+                className={`flex flex-col gap-1 ${provider === 'jev' ? 'w-[280px]' : 'w-[340px]'}`}
                 data-power-up-key-set={saved ? '' : undefined}
                 onSubmit={(e) => {
                   e.preventDefault();
@@ -243,56 +248,81 @@ export function SemanticDiffsTab() {
                   if (!e.currentTarget.contains(e.relatedTarget as Node | null) && complete && check.kind !== 'checking') void save();
                 }}
               >
-                {provider === 'jev' ? (
-                  <KeyField
-                    className="w-full"
-                    label="TypeSafe API key"
-                    value={apiKey}
-                    onChange={setApiKey}
-                    secret
-                    flagged={failure === 'refused' || failure === 'noCredit' || (failure === 'missing' && !apiKey)}
-                    message={failure === 'refused' || failure === 'noCredit' || (failure === 'missing' && !apiKey) ? failureText('jev', failure) : undefined}
-                    saved={saved}
-                    onFocus={() => setEditing(true)}
-                  />
-                ) : (
-                  <>
+                <span className="flex items-start gap-1.5">
+                  {provider === 'jev' ? (
                     <KeyField
-                      className="w-[96px] shrink-0"
-                      caption="Account ID"
-                      label="Cloudflare account ID"
-                      value={accountId}
-                      onChange={setAccountId}
-                      secret={false}
-                      flagged={failure === 'missing' && !accountId}
-                      message={failure === 'missing' && !accountId ? 'Add your account ID' : undefined}
-                      saved={saved}
-                      onFocus={() => setEditing(true)}
-                    />
-                    <KeyField
-                      className="min-w-0 flex-1"
-                      caption="Token"
-                      label="Workers AI token"
-                      value={apiToken}
-                      onChange={setApiToken}
+                      className="w-full"
+                      label="TypeSafe API key"
+                      value={apiKey}
+                      onChange={setApiKey}
                       secret
-                      flagged={failure === 'refused' || failure === 'noCredit' || (failure === 'missing' && !apiToken)}
-                      message={failure === 'refused' || failure === 'noCredit' ? failureText('clef', failure) : failure === 'missing' && !apiToken ? 'Add your token' : undefined}
+                      flagged={failure === 'refused' || failure === 'noCredit' || (failure === 'missing' && !apiKey)}
+                      message={failure === 'refused' || failure === 'noCredit' || (failure === 'missing' && !apiKey) ? failureText('jev', failure) : undefined}
                       saved={saved}
                       onFocus={() => setEditing(true)}
                     />
-                  </>
+                  ) : (
+                    <>
+                      <KeyField
+                        className="w-[96px] shrink-0"
+                        caption="Account ID"
+                        label="Cloudflare account ID"
+                        value={accountId}
+                        onChange={setAccountId}
+                        secret={false}
+                        flagged={failure === 'missing' && !accountId}
+                        message={failure === 'missing' && !accountId ? 'Add your account ID' : undefined}
+                        saved={saved}
+                        onFocus={() => setEditing(true)}
+                      />
+                      <KeyField
+                        className="min-w-0 flex-1"
+                        caption="Token"
+                        label="Workers AI token"
+                        value={apiToken}
+                        onChange={setApiToken}
+                        secret
+                        flagged={failure === 'refused' || failure === 'noCredit' || (failure === 'missing' && !apiToken)}
+                        message={failure === 'refused' || failure === 'noCredit' ? failureText('clef', failure) : failure === 'missing' && !apiToken ? 'Add your token' : undefined}
+                        saved={saved}
+                        onFocus={() => setEditing(true)}
+                      />
+                    </>
+                  )}
+                  <span className="flex shrink-0 flex-col gap-1">
+                    {provider === 'clef' && <span aria-hidden="true" className="invisible text-xs font-medium">Token</span>}
+                    <button
+                      type="submit"
+                      className="h-7 shrink-0 whitespace-nowrap rounded-md px-2 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
+                      disabled={check.kind === 'checking' || (saved && !complete)}
+                      data-power-up-key-save=""
+                    >
+                      {check.kind === 'checking' ? 'Checking…' : saved && !complete ? 'Saved' : 'Check and save'}
+                    </button>
+                  </span>
+                  {saved && !complete && (
+                    <button
+                      type="button"
+                      className="h-7 shrink-0 whitespace-nowrap rounded-md px-2 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+                      onClick={() => void remove()}
+                      data-power-up-key-remove=""
+                    >
+                      Remove
+                    </button>
+                  )}
+                </span>
+                {fieldMessage && (
+                  <span id={KEY_MESSAGE_ID} className="text-xs text-warning" data-power-up-key-failure="">
+                    {fieldMessage}
+                  </span>
                 )}
-                <button type="submit" className="sr-only" tabIndex={-1} disabled={check.kind === 'checking'}>
-                  Check and save
-                </button>
               </form>
             </Row>
             <Row title="Motion" hint="Stream moves the bands slowly. It is experimental: it costs some smoothness while you scroll. Both follow your system's reduce-motion setting.">
               <Segmented label="Motion" value={motion} options={[['still', 'Still'], ['stream', 'Stream']]} onChange={(v) => configStore.set('diffPowerUpMotion', v)} />
             </Row>
             <p className="pt-1 text-xs text-muted-foreground">
-              Your key, your account; code is sent to {PROVIDER_NAME[provider]}. Only the functions a link is about, never the rest of the repository.
+              Your key, your account; code is sent to {PROVIDER_NAME[provider]}. Only the functions the engine asks about are sent, never the rest of the repository.
             </p>
           </>
         )}

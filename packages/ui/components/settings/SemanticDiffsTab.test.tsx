@@ -66,6 +66,7 @@ describe('Settings › Semantic diffs › Power Up', () => {
     await act(async () => host!.querySelector<HTMLButtonElement>('button[type="submit"]')!.click());
     await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
     expect(host!.textContent).toContain('Key works · 182 ms');
+    expect(host!.querySelector('[data-power-up-key-save]')!.textContent).toBe('Saved');
     expect(host!.querySelector('[data-power-up-key-set]')).not.toBeNull();
     expect(host!.innerHTML).not.toContain(KEY);
     expect(powerUp().disabled).toBe(false);
@@ -92,6 +93,6 @@ describe('Settings › Semantic diffs › Power Up', () => {
     await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
     const token = host!.querySelector<HTMLInputElement>('input[aria-label="Workers AI token"]')!;
     expect(document.getElementById(token.getAttribute('aria-describedby')!)?.textContent).toBe('No credit left on this Clef account');
-    expect(host!.querySelector('form')!.className).toContain('w-[250px]');
+    expect(host!.querySelector('form')!.className).toContain('w-[340px]');
   });
 });
