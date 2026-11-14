@@ -3,16 +3,17 @@ import React, { useLayoutEffect, useRef, useState } from 'react';
 const ELLIPSIS = '…';
 const FILE_EXTENSION = /^(.+?)(\.[A-Za-z0-9]{1,8})$/;
 
-let canvas: HTMLCanvasElement | null = null;
-
-function measurer(element: HTMLElement): ((text: string) => number) | null {
-  if (typeof document === 'undefined') return null;
-  canvas ??= document.createElement('canvas');
-  const context = canvas.getContext?.('2d');
-  if (!context) return null;
-  const style = getComputedStyle(element);
-  context.font = style.font || `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
-  return (text) => context.measureText(text).width;
+function measurer(probe: HTMLElement | null): ((text: string) => number) | null {
+  if (!probe || typeof probe.getBoundingClientRect !== 'function') return null;
+  probe.textContent = 'M';
+  if (probe.getBoundingClientRect().width === 0) {
+    probe.textContent = '';
+    return null;
+  }
+  return (text) => {
+    probe.textContent = text;
+    return probe.getBoundingClientRect().width;
+  };
 }
 
 export function splitExtension(name: string): { stem: string; extension: string } {
@@ -40,22 +41,25 @@ export const EllipsisName: React.FC<{ text: string; keepExtension?: boolean; cla
   title,
 }) => {
   const ref = useRef<HTMLSpanElement>(null);
+  const probeRef = useRef<HTMLSpanElement>(null);
   const [fitted, setFitted] = useState<{ text: string; width?: number }>({ text });
 
   useLayoutEffect(() => {
     const element = ref.current;
     if (!element) return;
-    const width = measurer(element);
-    if (!width) {
-      setFitted({ text });
-      return;
-    }
-    const full = Math.ceil(width(text)) + 1;
     const fit = () => {
+      const probe = probeRef.current;
+      const width = measurer(probe);
+      if (!width || !probe) {
+        setFitted((before) => (before.text === text && !before.width ? before : { text }));
+        return;
+      }
+      const full = Math.ceil(width(text)) + 1;
       const available = element.clientWidth;
-      setFitted({ text: available > 0 ? fitMiddle(text, available, width, keepExtension) : text, width: full });
+      const next = available > 0 && available < full ? fitMiddle(text, available, width, keepExtension) : text;
+      probe.textContent = '';
+      setFitted((before) => (before.text === next && before.width === full ? before : { text: next, width: full }));
     };
-    setFitted({ text, width: full });
     fit();
     if (typeof ResizeObserver === 'undefined') return;
     const observer = new ResizeObserver(fit);
@@ -68,10 +72,11 @@ export const EllipsisName: React.FC<{ text: string; keepExtension?: boolean; cla
       ref={ref}
       title={title}
       data-ellipsis-name={text}
-      className={`block min-w-0 shrink overflow-hidden whitespace-nowrap ${className ?? ''}`}
+      className={`relative block min-w-0 shrink overflow-hidden whitespace-nowrap ${className ?? ''}`}
       style={fitted.width ? { width: fitted.width } : undefined}
     >
       {fitted.text}
+      <span ref={probeRef} aria-hidden="true" className="pointer-events-none invisible absolute left-0 top-0 whitespace-nowrap" />
     </span>
   );
 };

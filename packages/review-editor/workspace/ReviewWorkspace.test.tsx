@@ -1,13 +1,16 @@
 import { afterEach, describe, expect, mock, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { usePaneTabsInHeader } from './paneContext';
 
 const hasDom = typeof document !== 'undefined';
 
 function Probe(props: { params: Record<string, unknown>; api: { id: string } }) {
   const [text, setText] = React.useState('');
+  const tabs = usePaneTabsInHeader();
   return (
     <div data-probe={props.api.id}>
+      {tabs && <div data-probe-header="">{tabs}</div>}
       <input data-probe-input={props.api.id} value={text} onChange={(event) => setText(event.target.value)} />
       <span data-probe-path="">{String(props.params.filePath ?? '')}</span>
     </div>
@@ -36,7 +39,7 @@ afterEach(async () => {
   kept.length = 0;
 });
 
-async function mount(singlePane = false, extra: { tabsSlot?: HTMLElement; reviewKey?: string } = {}) {
+async function mount(singlePane = false, extra: { reviewKey?: string } = {}) {
   host = document.createElement('div');
   document.body.appendChild(host);
   root = createRoot(host);
@@ -44,7 +47,7 @@ async function mount(singlePane = false, extra: { tabsSlot?: HTMLElement; review
   await act(async () => {
     root!.render(
       <ReviewStateProvider value={state}>
-        <ReviewWorkspace singlePane={singlePane} tabsSlot={extra.tabsSlot} reviewKey={extra.reviewKey} onReady={(event) => { api = event.api; }} />
+        <ReviewWorkspace singlePane={singlePane} reviewKey={extra.reviewKey} onReady={(event) => { api = event.api; }} />
       </ReviewStateProvider>,
     );
   });
@@ -122,20 +125,20 @@ describe.skipIf(!hasDom)('the review panes', () => {
     expect(input().value).toBe('kept');
   });
 
-  test('with the header slot, tabs appear in the header row and nothing is added above the code', async () => {
-    const slot = document.createElement('div');
-    document.body.appendChild(slot);
-    const el = await mount(false, { tabsSlot: slot });
-    await act(async () => { api!.addPanel({ id: 'review-file:a.ts', component: 'review-file', title: 'a.ts', params: { filePath: 'a.ts' } }); });
-    expect(slot.querySelector('[data-pane-tab="review-file:a.ts"]')).not.toBeNull();
-    expect(el.querySelector('[data-pane] [data-pane-tabs]')).toBeNull();
-    slot.remove();
+  test('only All changes: no tab row; All changes with others: one slim row; a file tab: its own header row carries the tabs', async () => {
+    const el = await mount();
+    expect(el.querySelector('[data-pane-tab-row]')).toBeNull();
+    await act(async () => { api!.addPanel({ id: 'review-file:a.ts', component: 'review-file', title: 'a.ts', params: { filePath: 'src/a.ts' } }); });
+    expect(el.querySelector('[data-pane-tab-row="slim"]')).toBeNull();
+    expect(el.querySelector('[data-probe="review-file:a.ts"] [data-probe-header] [data-pane-tab="review-file:a.ts"]')).not.toBeNull();
+    expect(el.querySelector('[data-pane-tab-directory]')?.textContent).toBe('src/');
+    await act(async () => tabButton(el, 'review-all-files').click());
+    expect(el.querySelector('[data-pane-tab-row="slim"] [data-pane-tab="review-file:a.ts"]')).not.toBeNull();
+    expect(el.querySelectorAll('[data-pane-tab="review-all-files"]').length).toBe(1);
   });
 
   test('a preview tab shows a new title only once the file settles, so arrowing does not flicker it', async () => {
-    const slot = document.createElement('div');
-    document.body.appendChild(slot);
-    await mount(false, { tabsSlot: slot });
+    const slot = await mount();
     await act(async () => { api!.addPanel({ id: 'review-file-preview:1', component: 'review-file', title: 'one.ts', params: { filePath: 'one.ts', preview: true } }); });
     const title = () => slot.querySelector('[data-pane-tab="review-file-preview:1"]')?.textContent;
     await act(async () => {
@@ -145,7 +148,6 @@ describe.skipIf(!hasDom)('the review panes', () => {
     expect(title()).toBe('one.ts');
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 260)); });
     expect(title()).toBe('three.ts');
-    slot.remove();
   });
 
   test('a review reopened comes back with its two panes, kept tabs and divider', async () => {
@@ -181,15 +183,13 @@ describe.skipIf(!hasDom)('the review panes', () => {
     await act(async () => root?.unmount());
     host?.remove();
     const el = await mount(false, { reviewKey: 'repo#reload' });
-    await act(async () => { await Promise.resolve(); });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 40)); });
     expect([...el.querySelectorAll('[data-pane="0"] [data-pane-tab]')].map((tab) => tab.getAttribute('data-pane-tab'))).toEqual(['review-all-files', 'review-diff', 'review-file-preview:1']);
     expect(el.querySelector('[data-pane="1"] [data-pane-tab="review-file:balance.ts"]')).not.toBeNull();
     resetStorageBackend();
   });
 
   test('tabs that do not fit hide whole into a menu counting them, never the active tab; one tab never gets a menu', async () => {
-    const slot = document.createElement('div');
-    document.body.appendChild(slot);
     const restore = (name: 'offsetWidth' | 'clientWidth', own: PropertyDescriptor | undefined) => {
       if (own) Object.defineProperty(HTMLElement.prototype, name, own);
       else delete (HTMLElement.prototype as unknown as Record<string, unknown>)[name];
@@ -199,7 +199,7 @@ describe.skipIf(!hasDom)('the review panes', () => {
     Object.defineProperty(HTMLElement.prototype, 'offsetWidth', { configurable: true, get(this: HTMLElement) { return this.hasAttribute('data-pane-tab-item') ? 100 : 0; } });
     Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get(this: HTMLElement) { return this.hasAttribute('data-pane-tabs') ? 300 : 0; } });
     try {
-      await mount(false, { tabsSlot: slot });
+      const slot = await mount();
       expect(slot.querySelector('[data-pane-tabs-overflow]')).toBeNull();
       for (const name of ['a', 'b', 'c', 'd']) {
         await act(async () => { api!.addPanel({ id: `review-file:${name}.ts`, component: 'review-file', title: `${name}.ts`, params: { filePath: `${name}.ts` } }); });
@@ -213,51 +213,26 @@ describe.skipIf(!hasDom)('the review panes', () => {
     } finally {
       restore('offsetWidth', width);
       restore('clientWidth', client);
-      slot.remove();
-    }
+      }
   });
 
   test('a diff tab and a file tab of one file read apart: their own icon and tooltip', async () => {
     const el = await mount();
     await act(async () => { api!.addPanel({ id: 'review-diff', component: 'review-diff', title: 'a.ts', params: { filePath: 'a.ts' } }); });
     await act(async () => { api!.addPanel({ id: 'review-file:a.ts', component: 'review-file', title: 'a.ts', params: { filePath: 'a.ts' } }); });
-    expect(tabButton(el, 'review-diff').querySelector('[data-tab-kind-icon="diff"]')).not.toBeNull();
+    expect(el.querySelector('[data-pane-tab-item="review-diff"] [data-tab-kind-icon="diff"]')).not.toBeNull();
     expect(tabButton(el, 'review-diff').title).toBe('Diff of a.ts');
-    expect(tabButton(el, 'review-file:a.ts').querySelector('[data-tab-kind-icon="file"]')).not.toBeNull();
+    expect(el.querySelector('[data-pane-tab-item="review-file:a.ts"] [data-tab-kind-icon="file"]')).not.toBeNull();
     expect(tabButton(el, 'review-file:a.ts').title).toBe('File a.ts');
   });
 
   test('a References tab reads as the symbol with an icon, and a long title is capped', async () => {
-    const slot = document.createElement('div');
-    document.body.appendChild(slot);
-    await mount(false, { tabsSlot: slot });
+    const slot = await mount();
     await act(async () => { api!.addPanel({ id: 'review-code-nav', component: 'review-code-nav', title: 'References: validateEntryBoundaries' }); });
     const tab = slot.querySelector<HTMLElement>('[data-pane-tab="review-code-nav"]')!;
     expect(tab.textContent).toBe('validateEntryBoundaries');
-    expect(tab.querySelector('[data-references-tab-icon]')).not.toBeNull();
-    expect(tab.className).toContain('max-w-[180px]');
-    slot.remove();
+    expect(slot.querySelector('[data-pane-tab-item="review-code-nav"] [data-tab-kind-icon="references"]')).not.toBeNull();
+    expect(tab.className).toContain('max-w-[240px]');
   });
 
-  test('with two panes the second tab group starts over the second pane', async () => {
-    const slot = document.createElement('div');
-    document.body.appendChild(slot);
-    const original = Element.prototype.getBoundingClientRect;
-    Element.prototype.getBoundingClientRect = function (this: Element) {
-      const left = this.matches('[data-pane="1"]') ? 700 : this.matches('[data-header-pane-tabs]') ? 200 : 0;
-      const width = this.matches('[data-header-pane-tabs]') ? 900 : 0;
-      return { left, right: left + width, top: 0, bottom: 0, width, height: 0, x: left, y: 0, toJSON: () => ({}) } as DOMRect;
-    };
-    try {
-      await mount(false, { tabsSlot: slot });
-      await act(async () => { api!.addPanel({ id: 'review-file:b.ts', component: 'review-file', title: 'b.ts', params: { filePath: 'b.ts' }, position: { referencePanel: 'review-all-files', direction: 'right' } }); });
-      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 40)); });
-      const second = slot.querySelector<HTMLElement>('[data-header-group="1"]')!;
-      expect(second.style.left).toBe('512px');
-      expect(slot.querySelector<HTMLElement>('[data-header-group="0"]')!.style.maxWidth).toBe('484px');
-    } finally {
-      Element.prototype.getBoundingClientRect = original;
-      slot.remove();
-    }
-  });
 });

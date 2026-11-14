@@ -1,5 +1,6 @@
 import { COMPACT_FILE_HEADER_HEIGHT } from '../utils/diffChromeMetrics';
 import { EllipsisName } from './EllipsisName';
+import { usePaneTabsInHeader } from '../workspace/paneContext';
 import React, { useEffect, useRef, useState } from 'react';
 import { SemanticFileBadge } from './SemanticFileBadge';
 import { CallFlowFileBadge } from './CallFlowFileBadge';
@@ -152,6 +153,7 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
   const fileCommentRef = useRef<HTMLButtonElement>(null);
   useRovingToolbar(headerRef, viewedKeyHint);
   const { directory, name } = splitFilePath(filePath);
+  const paneTabs = usePaneTabsInHeader();
   const isVeryTight = headerWidth > 0 && headerWidth < 480;
   const narrow = headerWidth > 0 && headerWidth < 560;
 
@@ -176,75 +178,79 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
     <div
       ref={headerRef}
       data-file-header=""
-      className={`group/file-header @container/file-header flex-shrink-0 border-b border-border flex items-center justify-between gap-2 transition-colors duration-150 hover:bg-muted/30 ${isCompactTouchLayout ? 'pr-3' : 'pl-2 pr-2'}`}
+      className={`group/file-header @container/file-header flex-shrink-0 border-b border-border flex items-center justify-between gap-2 transition-colors duration-150 ${paneTabs ? '' : 'hover:bg-muted/30'} ${isCompactTouchLayout ? (paneTabs ? 'px-3' : 'pr-3') : paneTabs ? 'pl-3 pr-2' : 'pl-2 pr-2'}`}
       style={{ height: isCompactTouchLayout ? `${COMPACT_FILE_HEADER_HEIGHT}px` : 'var(--panel-header-h)' }}
       data-file-header-path={filePath}
       role={viewedKeyHint ? 'toolbar' : undefined}
       aria-label={viewedKeyHint ? filePath : undefined}
     >
-      <div className="min-w-0 flex flex-1 items-center" onClick={onCollapseToggle} style={onCollapseToggle ? { cursor: 'pointer' } : undefined}>
-        {collapseToggle}
-        <span
-          className={`min-w-0 flex items-center text-[13px] font-medium leading-normal whitespace-nowrap ${isCompactTouchLayout ? 'flex-1' : ''}`}
-          title={status === 'renamed' && oldPath ? `${oldPath} → ${filePath}` : filePath}
-        >
-          {/* Rename: dimmed old path → new path (diffshub treatment). Dropped
-              under tight widths — the icon + tooltip still carry it. */}
-          {status === 'renamed' && oldPath && !narrow && !isCompactTouchLayout && (
-            <>
-              <span className="min-w-0 overflow-hidden text-ellipsis text-muted-foreground/60">
-                {oldPath}
-              </span>
-              <svg
-                className="w-3 h-3 mx-1 flex-none text-muted-foreground/60"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                strokeWidth={2}
-              >
-                <path strokeLinecap="round" strokeLinejoin="round" d="M5 12h14M13 6l6 6-6 6" />
-              </svg>
-            </>
-          )}
-          {isCompactTouchLayout ? (
-            /* Match Diffshub's filename treatment: retain the complete path in
-             * the accessible DOM and place the ellipsis at the leading edge so
-             * the basename/extension receive the available phone width. */
-            <span
-              data-pn-compact-file-path
-              className="block min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-left text-foreground [direction:rtl]"
-            >
-              <bdi>{filePath}</bdi>
-            </span>
-          ) : (
-            <>
-              {directory && (!narrow || keepsFolder) && (
-                <span data-file-header-folder={keepsFolder ? '' : undefined} className="min-w-0 shrink-[1000] overflow-hidden text-ellipsis whitespace-nowrap font-normal text-muted-foreground [direction:rtl]">
-                  <bdi>{directory}</bdi>
+      {paneTabs ? (
+        <div className="min-w-0 flex flex-1 self-stretch items-stretch" data-file-header-tabs="">{paneTabs}</div>
+      ) : (
+        <div className="min-w-0 flex flex-1 items-center" onClick={onCollapseToggle} style={onCollapseToggle ? { cursor: 'pointer' } : undefined}>
+          {collapseToggle}
+          <span
+            className={`min-w-0 flex items-center text-[13px] font-medium leading-normal whitespace-nowrap ${isCompactTouchLayout ? 'flex-1' : ''}`}
+            title={status === 'renamed' && oldPath ? `${oldPath} → ${filePath}` : filePath}
+          >
+            {/* Rename: dimmed old path → new path (diffshub treatment). Dropped
+                under tight widths — the icon + tooltip still carry it. */}
+            {status === 'renamed' && oldPath && !narrow && !isCompactTouchLayout && (
+              <>
+                <span className="min-w-0 overflow-hidden text-ellipsis text-muted-foreground/60">
+                  {oldPath}
                 </span>
-              )}
-              <EllipsisName text={name} className="text-foreground" />
-            </>
-          )}
-        </span>
-        {isTest && <FileKindIcon kind="test" size={13} className="ml-1.5 flex-none text-muted-foreground" title="Test file" />}
-        {(additions > 0 || deletions > 0 || (status && status !== 'modified') || isGenerated) && (
-          <span className="flex-none ml-3 flex items-center gap-1.5 text-[12px] leading-none tabular-nums">
-            {additions > 0 && <span className="text-success">+{additions}</span>}
-            {deletions > 0 && <span className="text-destructive">−{deletions}</span>}
-            {status && <FileStatusLetter status={status} oldPath={oldPath} />}
-            {isGenerated && (
+                <svg
+                  className="w-3 h-3 mx-1 flex-none text-muted-foreground/60"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  strokeWidth={2}
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 12h14M13 6l6 6-6 6" />
+                </svg>
+              </>
+            )}
+            {isCompactTouchLayout ? (
+              /* Match Diffshub's filename treatment: retain the complete path in
+               * the accessible DOM and place the ellipsis at the leading edge so
+               * the basename/extension receive the available phone width. */
               <span
-                data-pn-generated-badge
-                className="flex-none rounded-sm border border-border/60 bg-muted/60 px-1.5 py-0.5 text-xs font-medium leading-none text-muted-foreground"
-                title="Marked linguist-generated in .gitattributes"
+                data-pn-compact-file-path
+                className="block min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-left text-foreground [direction:rtl]"
               >
-                generated
+                <bdi>{filePath}</bdi>
               </span>
+            ) : (
+              <>
+                {directory && (!narrow || keepsFolder) && (
+                  <span data-file-header-folder={keepsFolder ? '' : undefined} className="min-w-0 shrink-[1000] overflow-hidden text-ellipsis whitespace-nowrap font-normal text-muted-foreground [direction:rtl]">
+                    <bdi>{directory}</bdi>
+                  </span>
+                )}
+                <EllipsisName text={name} className="text-foreground" />
+              </>
             )}
           </span>
-        )}
-      </div>
+          {isTest && <FileKindIcon kind="test" size={13} className="ml-1.5 flex-none text-muted-foreground" title="Test file" />}
+          {(additions > 0 || deletions > 0 || (status && status !== 'modified') || isGenerated) && (
+            <span className="flex-none ml-3 flex items-center gap-1.5 text-[12px] leading-none tabular-nums">
+              {additions > 0 && <span className="text-success">+{additions}</span>}
+              {deletions > 0 && <span className="text-destructive">−{deletions}</span>}
+              {status && <FileStatusLetter status={status} oldPath={oldPath} />}
+              {isGenerated && (
+                <span
+                  data-pn-generated-badge
+                  className="flex-none rounded-sm border border-border/60 bg-muted/60 px-1.5 py-0.5 text-xs font-medium leading-none text-muted-foreground"
+                  title="Marked linguist-generated in .gitattributes"
+                >
+                  generated
+                </span>
+              )}
+            </span>
+          )}
+        </div>
+      )}
       {!isCompactTouchLayout && <div className={`flex flex-shrink-0 items-center pl-2 gap-1`}>
         {accessory}
         {renderMarkdownView?.({ iconOnly: isVeryTight, touch: false })}

@@ -153,22 +153,43 @@ const firstCodeTop = (page: Page) =>
 const paneTop = (page: Page) => page.evaluate(() => Math.round(document.querySelector('[data-pane="0"]')!.getBoundingClientRect().top));
 const row = (page: Page, name: string) => page.locator(`[data-review-sidebar] [data-changes-tree] [data-type="item"][data-item-path$="${name}"]`).first();
 
-test('opening files never moves the code: the tabs appear in the header row', async ({ browser }) => {
+const headerShape = (page: Page) =>
+  page.evaluate(() =>
+    [...document.querySelectorAll('header button, header [data-header-branch], header [data-header-totals]')]
+      .map((el) => el.getBoundingClientRect())
+      .filter((box) => box.width > 0)
+      .map((box) => `${Math.round(box.left)},${Math.round(box.top)},${Math.round(box.width)}`)
+      .join(' '),
+  );
+
+test('tabs live in the panes: the header never changes, a file's own header row carries them, All changes gets one slim row', async ({ browser }) => {
   await withReview(browser, 900, async (page) => {
     await expect.poll(() => firstCodeTop(page)).not.toBeNull();
+    const header = await headerShape(page);
     const top = await paneTop(page);
-    const code = await firstCodeTop(page);
+    await expect(page.locator('[data-pane-tab-row]')).toHaveCount(0);
     await row(page, 'routes.ts').click();
-    await expect(page.locator('[data-pane-tabs-slot] [data-pane-tab]')).toHaveCount(2);
+    await expect(page.locator('[data-pane="0"] [data-file-header] [data-pane-tab]')).toHaveCount(2);
+    expect(await headerShape(page)).toBe(header);
     expect(await paneTop(page)).toBe(top);
-    await page.locator('[data-pane-tab="review-all-files"]').click();
-    await page.waitForTimeout(300);
-    expect(await paneTop(page)).toBe(top);
-    expect(code).not.toBeNull();
+
+    await page.locator('[data-pane-tab][aria-selected="true"]').focus();
+    await page.keyboard.press('ArrowLeft');
+    await expect(page.locator('[data-pane-tab="review-all-files"]')).toHaveAttribute('aria-selected', 'true');
+    await expect(page.locator('[data-pane-tab="review-all-files"]')).toBeFocused();
+    const slim = page.locator('[data-pane-tab-row="slim"]');
+    await expect(slim).toHaveCount(1);
+    expect(Math.round((await slim.boundingBox())!.height)).toBe(28);
+    expect(await headerShape(page)).toBe(header);
+
+    await row(page, 'routes.ts').click({ button: 'right' });
+    await page.locator('[data-tree-open-to-side]').click();
+    await expect(page.locator('[data-pane="1"] [data-pane-tab]')).toHaveCount(1);
+    expect(await headerShape(page)).toBe(header);
   });
 });
 
-test('a phone keeps one pane, and its open files are a menu in the header title: nothing moves', async ({ browser }) => {
+test('a phone keeps one pane, its tabs in the pane, and the header never changes', async ({ browser }) => {
   test.skip(!existsSync(binary), `compile the binary first: ${binary}`);
   const root = mkdtempSync(join(tmpdir(), 'plannotator-review-layout-phone-'));
   const repo = buildRepo(root);
@@ -184,10 +205,12 @@ test('a phone keeps one pane, and its open files are a menu in the header title:
     await page.goto(url);
     await expect(page.locator('[data-pane="0"]')).toBeVisible();
     const top = await paneTop(page);
+    const header = await headerShape(page);
     await page.locator('button[aria-label="Open review navigation"]').click();
     await page.locator('[data-changes-tree] [data-type="item"][data-item-path$="routes.ts"]').first().tap();
-    await expect(page.locator('[data-pane-tabs-menu]')).toBeVisible();
+    await expect(page.locator('[data-pane="0"] [data-pane-tab][aria-selected="true"]')).toBeVisible();
     expect(await paneTop(page)).toBe(top);
+    expect(await headerShape(page)).toBe(header);
     await expect(page.locator('[data-pane]')).toHaveCount(1);
     await context.close();
   } finally {
@@ -224,16 +247,16 @@ test('two files side by side, the original next to the current, and the layout b
     await page.reload({ waitUntil: 'domcontentloaded' });
     await expect(page.locator('[data-pane]')).toHaveCount(2);
     await expect(page.locator('[data-pane-divider]')).toHaveAttribute('aria-valuenow', ratio!);
-    await expect(page.locator('[data-pane="1"] [data-pane-tab]')).toHaveCount(0);
-    await expect(page.locator('[data-pane-tabs-slot] [data-pane-tabs-for="1"] [data-pane-tab]')).toHaveCount(1);
+    await expect(page.locator('[data-pane="1"] [data-pane-tab]')).toHaveCount(1);
+    await expect(page.locator('[data-pane="0"] [data-pane-tab]')).toHaveCount(2);
   });
 });
 
 test('closing a tab keeps focus in the window: the next tab, or the tree', async ({ browser }) => {
   await withReview(browser, 900, async (page) => {
     await row(page, 'routes.ts').dblclick();
-    await expect.poll(() => page.locator('[data-pane-tabs-slot] [data-pane-tab]').count()).toBeGreaterThan(1);
-    await page.locator('[data-pane-tabs-slot] [data-pane-tab-close]').last().click();
+    await expect.poll(() => page.locator('[data-pane-tab]').count()).toBeGreaterThan(1);
+    await page.locator('[data-pane-tab-close]').last().click();
     await expect.poll(() => page.evaluate(() => document.activeElement?.tagName ?? 'BODY')).not.toBe('BODY');
   });
 });

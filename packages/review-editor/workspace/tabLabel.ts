@@ -23,7 +23,15 @@ export function tabKind(tab: PaneTab): 'diff' | 'file' | null {
 
 export function tabTooltip(tab: PaneTab): string {
   const kind = tabKind(tab);
-  if (kind === 'diff') return `Diff of ${tab.title}`;
-  if (kind === 'file') return `File ${tab.title}`;
+  const path = typeof tab.params.filePath === 'string' && tab.params.filePath ? tab.params.filePath : tab.title;
+  if (kind === 'diff') return `Diff of ${path}`;
+  if (kind === 'file') return `File ${path}`;
   return tab.title;
+}
+
+export function tabDirectory(tab: PaneTab): string {
+  if (!tabKind(tab)) return '';
+  const path = typeof tab.params.filePath === 'string' ? tab.params.filePath : '';
+  const slash = path.lastIndexOf('/');
+  return slash > 0 ? path.slice(0, slash + 1) : '';
 }
