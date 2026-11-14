@@ -37,6 +37,7 @@ function KeyField({ caption, label, value, onChange, secret, flagged, message, s
       {caption && <span className="text-xs font-medium text-foreground">{caption}</span>}
       <input
         className={`h-7 w-full min-w-0 rounded-md border bg-background px-2 font-mono text-xs outline-none ${flagged ? 'border-warning ring-1 ring-warning focus:ring-2 focus:ring-warning' : 'border-border focus:ring-1 focus:ring-ring'}`}
+        style={flagged ? { outlineColor: 'var(--warning)' } : undefined}
         type={secret ? 'password' : 'text'}
         autoComplete="off"
         spellCheck={false}
