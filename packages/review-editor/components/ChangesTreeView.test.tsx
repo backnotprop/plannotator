@@ -195,4 +195,12 @@ describe.skipIf(!hasDom)('The Changes tree on Pierre trees', () => {
     expect(row(el, 'Generated/').getAttribute('aria-expanded')).toBe('false');
     expect(row(el, 'Code/').getAttribute('aria-expanded')).toBe('true');
   });
+
+  test('a diff that loads on a generated file keeps Generated folded; moving to it later opens it', async () => {
+    const el = await mount(<Tree groupByKind activeFileIndex={0} />);
+    expect(row(el, 'Generated/').getAttribute('aria-expanded')).toBe('false');
+    await rerender(<Tree groupByKind activeFileIndex={2} />);
+    await rerender(<Tree groupByKind activeFileIndex={0} />);
+    expect(row(el, 'Generated/').getAttribute('aria-expanded')).toBe('true');
+  });
 });
