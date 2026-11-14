@@ -25,8 +25,8 @@ function naturalWidth(item: HTMLElement): number {
   return directory ? width - directory.offsetWidth : width;
 }
 
-type HiddenTabs = { ids: Set<string>; directoryRoom: number };
-const NONE_HIDDEN: HiddenTabs = { ids: new Set(), directoryRoom: 0 };
+type HiddenTabs = { ids: Set<string> };
+const NONE_HIDDEN: HiddenTabs = { ids: new Set() };
 
 function useHiddenTabs(ref: React.RefObject<HTMLElement | null>, key: string, single: boolean, activeId: string | null): HiddenTabs {
   const [hidden, setHidden] = useState<HiddenTabs>(NONE_HIDDEN);
@@ -38,20 +38,17 @@ function useHiddenTabs(ref: React.RefObject<HTMLElement | null>, key: string, si
       const ids = new Set<string>();
       const items = [...element.querySelectorAll<HTMLElement>('[data-pane-tab-item]')].map((item) => ({ id: item.getAttribute('data-pane-tab-item')!, width: naturalWidth(item) }));
       const total = items.reduce((sum, item, index) => sum + item.width + (index ? TAB_GAP : 0), 0);
-      let used = total;
-      let room = element.clientWidth;
       if (!single && total > element.clientWidth + 1) {
-        room = element.clientWidth - MENU_RESERVE;
+        const room = element.clientWidth - MENU_RESERVE;
         const kept = items.filter((item) => item.id === activeId || item.id === REVIEW_ALL_FILES_PANEL_ID);
-        used = kept.reduce((sum, item, index) => sum + item.width + (index ? TAB_GAP : 0), 0);
+        let used = kept.reduce((sum, item, index) => sum + item.width + (index ? TAB_GAP : 0), 0);
         for (const item of items) {
           if (kept.includes(item)) continue;
           if (used + TAB_GAP + item.width <= room) used += TAB_GAP + item.width;
           else ids.add(item.id);
         }
       }
-      const directoryRoom = Math.max(0, Math.floor(room - used - 4));
-      setHidden((before) => (before.directoryRoom === directoryRoom && before.ids.size === ids.size && [...ids].every((id) => before.ids.has(id)) ? before : { ids, directoryRoom }));
+      setHidden((before) => (before.ids.size === ids.size && [...ids].every((id) => before.ids.has(id)) ? before : ids.size ? { ids } : NONE_HIDDEN));
     };
     measure();
     if (typeof ResizeObserver === 'undefined') return;
@@ -62,23 +59,44 @@ function useHiddenTabs(ref: React.RefObject<HTMLElement | null>, key: string, si
   return hidden;
 }
 
-const DirectoryPrefix: React.FC<{ directory: string; room: number }> = ({ directory, room }) => {
+const DirectoryPrefix: React.FC<{ directory: string }> = ({ directory }) => {
+  const boxRef = useRef<HTMLSpanElement>(null);
   const probeRef = useRef<HTMLSpanElement>(null);
-  const [shown, setShown] = useState('');
+  const [fit, setFit] = useState<{ text: string; width?: number }>({ text: directory });
   useLayoutEffect(() => {
+    const box = boxRef.current;
     const probe = probeRef.current;
-    if (!probe || typeof probe.getBoundingClientRect !== 'function') return;
+    if (!box || !probe || typeof probe.getBoundingClientRect !== 'function') return;
     const width = (text: string) => {
       probe.textContent = text;
       return probe.getBoundingClientRect().width;
     };
-    const next = width('M') === 0 ? directory : room > 0 ? fitDirectory(directory, room, width) : '';
-    probe.textContent = '';
-    setShown(next);
-  }, [directory, room]);
+    const measure = () => {
+      if (width('M') === 0) {
+        probe.textContent = '';
+        setFit((before) => (before.text === directory && !before.width ? before : { text: directory }));
+        return;
+      }
+      const full = Math.ceil(width(directory)) + 1;
+      const next = box.clientWidth > 0 && box.clientWidth < full ? fitDirectory(directory, box.clientWidth, width) : directory;
+      probe.textContent = '';
+      setFit((before) => (before.text === next && before.width === full ? before : { text: next, width: full }));
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(box);
+    return () => observer.disconnect();
+  }, [directory]);
   return (
-    <span aria-hidden="true" className="relative flex-none -mr-1 whitespace-nowrap text-[13px] text-muted-foreground [font-variant-ligatures:no-contextual]" data-pane-tab-directory="">
-      {shown}
+    <span
+      ref={boxRef}
+      aria-hidden="true"
+      style={fit.width ? { width: fit.width } : undefined}
+      className="relative min-w-0 shrink-[1000] -mr-1 overflow-hidden whitespace-nowrap text-right text-[13px] text-muted-foreground [font-variant-ligatures:no-contextual]"
+      data-pane-tab-directory=""
+    >
+      {fit.text}
       <span ref={probeRef} className="pointer-events-none invisible absolute left-0 top-0 whitespace-nowrap" />
     </span>
   );
@@ -168,7 +186,7 @@ export const PaneTabs: React.FC<{
             className={`group flex items-center gap-1 ${shrinks ? 'min-w-0 shrink' : 'flex-none'} ${hidden.ids.has(tab.id) ? 'invisible absolute' : 'relative'}`}
           >
             <TabIcon tab={tab} onClick={() => onActivate(tab.id)} />
-            {directory && <DirectoryPrefix directory={directory} room={hidden.directoryRoom} />}
+            {directory && <DirectoryPrefix directory={directory} />}
             <button
               type="button"
               role="tab"
