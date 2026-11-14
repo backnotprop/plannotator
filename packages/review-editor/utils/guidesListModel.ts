@@ -40,8 +40,7 @@ export function guideProgressText(progress: SavedGuideListEntry['progress']): st
 }
 
 export function guideMismatchText(entry: Pick<SavedGuideListEntry, 'moved' | 'where'>): string | null {
-  if (entry.where === 'diff') return null;
-  if (entry.moved || entry.where === 'target') return 'Written for an earlier version of this diff';
+  if (entry.where === 'target' || (entry.where === undefined && entry.moved)) return 'Written for an earlier version of this diff';
   return null;
 }
 
