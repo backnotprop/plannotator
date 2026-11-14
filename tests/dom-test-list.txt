@@ -741,3 +741,5 @@ packages/editor/hooks/useCheckboxOverrides.viewer.test.tsx
 packages/ui/components/TaterSpriteSlots.test.tsx
 packages/inbox/sidebarRedraws.test.tsx
 packages/review-editor/components/minimap/DiffMinimap.sync.test.tsx
+packages/ui/components/AgentsTab.launch.dom.test.tsx
+packages/ui/hooks/useLaunchConfig.dom.test.tsx

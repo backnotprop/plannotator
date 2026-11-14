@@ -257,7 +257,7 @@ async function openLiveGuide(): Promise<void> {
   await waitFor(() => tickButtons().length === 2, "the guide's sections");
 }
 
-/** Open the guide takeover, then the saved guide from "Previous guides". */
+/** The Guide button opens the Agents tab while no guide is open; open the saved guide from its list. */
 async function openSavedGuide(): Promise<void> {
   const guideButton = Array.from(document.querySelectorAll<HTMLButtonElement>("button"))
     .find((b) => b.title === "Open guided review");
