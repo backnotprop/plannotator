@@ -185,10 +185,10 @@ index 0b41099..a745685 100644
  		searchEnabled: search === true,
  		searchFakeFocus: searchFakeFocus === true,
 diff --git a/dist/render/FileTreeView.js b/dist/render/FileTreeView.js
-index b4c7ee4..d0093ce 100644
+index b4c7ee4..02badaa 100644
 --- a/dist/render/FileTreeView.js
 +++ b/dist/render/FileTreeView.js
-@@ -362,11 +362,123 @@ function focusFirstMenuElement(menuElement) {
+@@ -362,11 +362,129 @@ function focusFirstMenuElement(menuElement) {
  	].join(", "));
  	focusElement(focusable ?? menuElement);
  }
@@ -231,14 +231,19 @@ index b4c7ee4..d0093ce 100644
 +	return fork_name_segmenter ? Array.from(fork_name_segmenter.segment(text), (part) => part.segment) : Array.from(text);
 +}
 +const FORK_ELLIPSIS = "\u2026";
-+let fork_canvas = null;
 +function fork_measurer(element) {
-+	if (typeof document === "undefined") return null;
-+	fork_canvas ??= document.createElement("canvas");
-+	const context = fork_canvas.getContext?.("2d");
-+	if (!context) return null;
-+	context.font = getComputedStyle(element).font;
-+	return (text) => context.measureText(text).width;
++	const host = element.parentNode;
++	if (typeof document === "undefined" || !host) return null;
++	const probe = document.createElement("span");
++	probe.style.cssText = "position:absolute;visibility:hidden;white-space:pre;left:0;top:0;pointer-events:none";
++	host.appendChild(probe);
++	return {
++		width: (text) => {
++			probe.textContent = text;
++			return probe.getBoundingClientRect().width;
++		},
++		done: () => probe.remove()
++	};
 +}
 +function fork_fit_tail(name, available, width) {
 +	if (width(name) <= available) return name;
@@ -267,14 +272,15 @@ index b4c7ee4..d0093ce 100644
 +	useLayoutEffect(() => {
 +		const element = ref.current;
 +		if (!element) return;
-+		const width = fork_measurer(element);
-+		if (!width) {
-+			setText(name);
-+			return;
-+		}
 +		const fit = () => {
 +			const available = element.clientWidth;
-+			setText(available > 0 ? fork_fit_tail(name, available, width) : name);
++			const measure = available > 0 ? fork_measurer(element) : null;
++			if (!measure) {
++				setText(name);
++				return;
++			}
++			setText(fork_fit_tail(name, available - 0.5, measure.width));
++			measure.done();
 +		};
 +		fit();
 +		if (typeof ResizeObserver === "undefined") return;
@@ -313,7 +319,7 @@ index b4c7ee4..d0093ce 100644
  			children: Array.from({ length: row.depth }).map((_, index) => /* @__PURE__ */ jsx("div", {
  				"data-item-section": "spacing-item",
  				"data-ancestor-path": row.ancestorPaths[index]
-@@ -374,24 +486,31 @@ function renderFileTreeRowContent(row, resolveIcon, { actionLaneEnabled = false,
+@@ -374,24 +492,31 @@ function renderFileTreeRowContent(row, resolveIcon, { actionLaneEnabled = false,
  		}) : null,
  		/* @__PURE__ */ jsx("div", {
  			"data-item-section": "icon",
@@ -351,7 +357,7 @@ index b4c7ee4..d0093ce 100644
  		actionLaneEnabled ? /* @__PURE__ */ jsx("div", {
  			"data-item-section": "action",
  			children: showDecorativeActionAffordance ? /* @__PURE__ */ jsx("span", {
-@@ -403,13 +522,14 @@ function renderFileTreeRowContent(row, resolveIcon, { actionLaneEnabled = false,
+@@ -403,13 +528,14 @@ function renderFileTreeRowContent(row, resolveIcon, { actionLaneEnabled = false,
  	] });
  }
  function renderStyledRow(frame, row, key, options = {}) {
@@ -367,7 +373,7 @@ index b4c7ee4..d0093ce 100644
  	const gitDecoration = getBuiltInGitStatusDecoration(effectiveGitStatus, containsGitChange, labels);
  	const actionLaneEnabled = contextMenuEnabled && contextMenuButtonTriggerEnabled;
  	const decorationLaneEnabled = customDecoration != null || gitLaneActive || actionLaneEnabled;
-@@ -435,7 +555,13 @@ function renderStyledRow(frame, row, key, options = {}) {
+@@ -435,7 +561,13 @@ function renderStyledRow(frame, row, key, options = {}) {
  		dragTargetFlattenedSegmentPath: dragTarget?.flattenedSegmentPath ?? null,
  		gitDecoration,
  		gitLaneActive,
@@ -381,7 +387,7 @@ index b4c7ee4..d0093ce 100644
  		showDecorativeActionAffordance
  	});
  	const commonProps = {
-@@ -464,6 +590,9 @@ function renderStyledRow(frame, row, key, options = {}) {
+@@ -464,6 +596,9 @@ function renderStyledRow(frame, row, key, options = {}) {
  			},
  			targetPath
  		}),
@@ -391,7 +397,7 @@ index b4c7ee4..d0093ce 100644
  		key,
  		onContextMenu: contextMenuEnabled || dragAndDropEnabled ? (event) => {
  			if (shouldSuppressContextMenu()) {
-@@ -512,6 +641,9 @@ function renderStyledRow(frame, row, key, options = {}) {
+@@ -512,6 +647,9 @@ function renderStyledRow(frame, row, key, options = {}) {
  		onClick: (event) => {
  			onRowClick(event, row, targetPath, mode);
  		},
@@ -401,7 +407,7 @@ index b4c7ee4..d0093ce 100644
  		children: rowContent
  	});
  }
-@@ -519,7 +651,7 @@ function renderRangeChildren(frame, range, hiddenRowPaths) {
+@@ -519,7 +657,7 @@ function renderRangeChildren(frame, range, hiddenRowPaths) {
  	if (range.end < range.start) return [];
  	return frame.controller.getVisibleRows(range.start, range.end).filter((row) => !hiddenRowPaths.has(getFileTreeRowPath(row))).map((row, slotIndex) => renderStyledRow(frame, row, range.start + slotIndex));
  }
@@ -410,7 +416,7 @@ index b4c7ee4..d0093ce 100644
  	"use no memo";
  	const contextMenuAnchorRef = useRef(null);
  	const contextMenuTriggerRef = useRef(null);
-@@ -695,6 +827,10 @@ function FileTreeView({ composition, controller, gitStatusByPath, ignoredGitDire
+@@ -695,6 +833,10 @@ function FileTreeView({ composition, controller, gitStatusByPath, ignoredGitDire
  		item: createContextMenuItem(row, targetPath),
  		row
  	}) ?? null, [renderRowDecoration]);
@@ -421,7 +427,7 @@ index b4c7ee4..d0093ce 100644
  	const restoreContextMenuFocus = useCallback((restorePath) => {
  		const focusedButton = restorePath == null ? null : rowButtonRefs.current.get(restorePath) ?? null;
  		if (focusElement(focusedButton)) return true;
-@@ -1776,7 +1912,9 @@ function FileTreeView({ composition, controller, gitStatusByPath, ignoredGitDire
+@@ -1776,7 +1918,9 @@ function FileTreeView({ composition, controller, gitStatusByPath, ignoredGitDire
  		registerRenameInput,
  		renameView,
  		renderDecorationForRow,
@@ -431,7 +437,7 @@ index b4c7ee4..d0093ce 100644
  		shouldSuppressContextMenu,
  		visualFocusPath
  	};
-@@ -1816,6 +1954,7 @@ function FileTreeView({ composition, controller, gitStatusByPath, ignoredGitDire
+@@ -1816,6 +1960,7 @@ function FileTreeView({ composition, controller, gitStatusByPath, ignoredGitDire
  			searchEnabled ? /* @__PURE__ */ jsx("div", {
  				"data-file-tree-search-container": true,
  				"data-open": isSearchOpen ? "true" : "false",

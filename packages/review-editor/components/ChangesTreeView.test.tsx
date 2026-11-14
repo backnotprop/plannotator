@@ -205,19 +205,21 @@ describe.skipIf(!hasDom)('The Changes tree on Pierre trees', () => {
   });
 
   test('a file name too long for its row keeps its start, one ellipsis and a tail of three letters plus the extension, cut by whole letters', async () => {
-    const realGetContext = HTMLCanvasElement.prototype.getContext;
+    const realRect = HTMLElement.prototype.getBoundingClientRect;
     const realWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth');
-    HTMLCanvasElement.prototype.getContext = (() => ({ font: '', measureText: (text: string) => ({ width: [...text].length * 7 }) })) as unknown as typeof realGetContext;
+    HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement) {
+      return { width: [...(this.textContent ?? '')].length * 7, height: 16, x: 0, y: 0, top: 0, left: 0, right: 0, bottom: 0, toJSON() {} } as DOMRect;
+    };
     Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get() { return 70; } });
     try {
       const el = await mount(<Tree files={[file('src/an-extremely-long-file-name.ts'), file('legacy/step0.py'), file('legacy/step1.py'), file('src/a.ts')]} activeFileIndex={0} />);
       const name = (end: string) => row(el, rows(el).find((p) => p?.endsWith(end))!).querySelector<HTMLElement>('[data-item-name]')!;
-      expect(name('file-name.ts').textContent).toBe('an-…ame.ts');
+      expect(name('file-name.ts').textContent).toBe('an…ame.ts');
       expect(name('file-name.ts').getAttribute('aria-label')).toBe('an-extremely-long-file-name.ts');
       expect(name('step0.py').textContent).toBe('step0.py');
       expect(name('a.ts').textContent).toBe('a.ts');
     } finally {
-      HTMLCanvasElement.prototype.getContext = realGetContext;
+      HTMLElement.prototype.getBoundingClientRect = realRect;
       if (realWidth) Object.defineProperty(HTMLElement.prototype, 'clientWidth', realWidth);
       else delete (HTMLElement.prototype as { clientWidth?: number }).clientWidth;
     }
