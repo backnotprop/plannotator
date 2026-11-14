@@ -26,7 +26,7 @@ import { removeStubbedHtml, stubHookDistHtml } from "../../../tests/helpers/hook
 import { stubbedAgentClis } from "../../../tests/helpers/agent-cli-guard";
 import { type FakeT3, startFakeT3, T3_THREAD_ID_FORMS } from "../../../tests/helpers/fake-t3";
 import { NO_BROWSER } from "../../../tests/helpers/no-browser";
-import { fillInboxToolArguments, inboxHostSessionFromEnv, inboxT3EntryIdle, runInboxMcpShim } from "./inbox-mcp-shim";
+import { fillInboxToolArguments, inboxClaudeCallSession, inboxClaudeMcpSessionFromEnv, inboxHostSessionFromEnv, inboxT3EntryIdle, runInboxMcpShim } from "./inbox-mcp-shim";
 
 const entry = resolve(import.meta.dir, "index.ts");
 const THREAD = "6f1c2d3e-4a5b-4c6d-8e7f-0a1b2c3d4e5f";
@@ -115,6 +115,16 @@ describe("the T3 thread as the shim's session", () => {
     }
   });
 
+  test("Claude Code's own session never takes a T3 thread's call, whatever form the thread's id has", () => {
+    // T3 runs Claude through the Agent SDK: its MCP servers get CLAUDECODE and CLAUDE_CODE_SESSION_ID too.
+    const call = (env: Record<string, string>) => inboxClaudeCallSession(inboxHostSessionFromEnv(env), inboxClaudeMcpSessionFromEnv(env), "claude-code");
+    for (const id of Object.values(T3_THREAD_ID_FORMS)) {
+      expect(call({ ...T3_CLAUDE, T3CODE_THREAD_ID: id, CLAUDE_CODE_SESSION_ID: CLAUDE_SESSION })).toEqual({ host: "t3", session: id, name: "T3 Code" });
+    }
+    // Without a T3 thread id the same variables are that Claude Code session.
+    expect(call({ CLAUDECODE: "1", CLAUDE_CODE_SESSION_ID: CLAUDE_SESSION })).toMatchObject({ host: "claude-code", session: CLAUDE_SESSION });
+  });
+
   test("the agent naming no host, t3 or claude-code is the thread; naming any other host is not", () => {
     const fill = (args: Record<string, unknown>, host: { host: string; session: string; name: string }) =>
       fillInboxToolArguments({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "send_message", arguments: args } }, "/work", "ses_OWN", host).params!.arguments;
@@ -139,7 +149,8 @@ describe("the T3 thread as the shim's session", () => {
     const server = await startInboxServer({ dataDir: box.dataDir, binaryPath: null });
     servers.push(server);
 
-    const client = await shim(box.dataDir, box.project, ["--t3"], { ...T3_CLAUDE, T3CODE_THREAD_ID: THREAD });
+    // Claude Code's own session variables beside the thread's, as the Agent SDK gives them: still the thread.
+    const client = await shim(box.dataDir, box.project, ["--t3"], { ...T3_CLAUDE, T3CODE_THREAD_ID: THREAD, CLAUDE_CODE_SESSION_ID: CLAUDE_SESSION });
     expect((await client.listTools()).tools.map((tool) => tool.name).sort()).toEqual(await serverTools(server));
     // The agent names itself claude-code, as Claude in T3 may: still the thread.
     const result = await client.callTool({ name: "send_message", arguments: { body: "Ship the worker today?", agent_host: "claude-code", idempotency_key: "t3-1" } });
