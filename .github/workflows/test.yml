@@ -223,6 +223,10 @@ jobs:
       - name: Generate Pi extension shared copies
         run: bash apps/pi-extension/vendor.sh
 
+      - name: Fetch the released plugins' tags
+        if: matrix.lane == 'heavy-mod'
+        run: git fetch --no-tags --depth 1 origin tag v0.28.8 tag v0.28.30
+
       - name: Run tests
         env:
           LANE: ${{ matrix.lane }}
