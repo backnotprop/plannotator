@@ -154,7 +154,7 @@ test('names are the declared identifier where there is one', async () => {
   expect(shortName('return db.save({')).toBe('return db.save({');
 });
 
-describe('the Changes tab lists declarations, not lines', () => {
+describe('the Semantic tab lists declarations, not lines', () => {
   const op = (type: string, oldLines: [number, number] | null, newLines: [number, number] | null) =>
     ({ type, lines: { old: oldLines ? [{ start: oldLines[0], end: oldLines[1] }] : [], new: newLines ? [{ start: newLines[0], end: newLines[1] }] : [] } }) as never;
   const oldText = ['export function total(items) {', '  let sum = 0;', '  for (const i of items) sum += i;', '  return sum;', '}', '', 'function titleCase(s) {', "  return s.split(' ');", '}'].join('\n');
