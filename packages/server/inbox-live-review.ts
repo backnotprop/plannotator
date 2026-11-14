@@ -91,18 +91,24 @@ export function createInboxLiveReview(options: {
       if (!target) throw new InboxError("session_not_live", "That agent is not connected any more: nothing was sent. Tag another agent with @.");
       const project = await options.resolveProject(body.project_path);
       const single = comments.length === 1 && !words ? comments[0]! : null;
-      root = store.startPersonThread({
-        project_id: project.id,
-        body: single ? single.words : words || reviewLeadWords(comments.length),
-        to: { host: target.host, session: target.session },
-        idempotency_key: `${key}:root`,
-        thread_name: `Review: ${review.title}`,
-        thread_name_auto: true,
-        thread_name_numbered: true,
-        review_live: review,
-        ...(single ? { review_anchor: single.anchor } : {}),
-        ...(batch ? { review_batch: { id: batch, lead: true } } : {}),
-      }).message;
+      const start = (named: Record<string, unknown>) =>
+        store.startPersonThread({
+          project_id: project.id,
+          body: single ? single.words : words || reviewLeadWords(comments.length),
+          to: { host: target.host, session: target.session },
+          idempotency_key: `${key}:root`,
+          ...named,
+          review_live: review,
+          ...(single ? { review_anchor: single.anchor } : {}),
+          ...(batch ? { review_batch: { id: batch, lead: true } } : {}),
+        }).message;
+      const name = `Review: ${review.title}`;
+      try {
+        root = start({ thread_name: name });
+      } catch (error) {
+        if (!(error instanceof InboxError) || (error.code !== "thread_name_taken" && error.code !== "validation_error")) throw error;
+        root = start({ thread_name: name, thread_name_auto: true, thread_name_numbered: true });
+      }
       written.push(root);
       if (single) return json({ ...answer(root), sent: written.map((m) => m.id) });
       for (const [i, comment] of comments.entries()) {

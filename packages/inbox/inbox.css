@@ -12283,3 +12283,8 @@ button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(-
 @media (pointer: coarse) {
   .pn-cbox .ib-vmic { width: 44px; height: 44px; border-radius: 10px; }
 }
+/* A review comment's lines (live review threads): where, then the code as it read. */
+.ib-ranchor { margin: 0 0 6px; font-size: var(--ib-fs-13, 13px); line-height: 1.5; }
+.ib-ranchor-where { display: flex; gap: 6px; min-width: 0; color: var(--muted-foreground); font-family: var(--font-mono, ui-monospace, monospace); font-size: 12px; overflow-wrap: anywhere; }
+.ib-ranchor-state { white-space: nowrap; font-family: inherit; }
+.ib-ranchor-code { margin: 4px 0 0; padding: 6px 8px; overflow-x: auto; border: 1px solid var(--border); border-radius: 6px; background: var(--muted); color: var(--foreground); font-family: var(--font-mono, ui-monospace, monospace); font-size: 12px; line-height: 1.6; white-space: pre; }
