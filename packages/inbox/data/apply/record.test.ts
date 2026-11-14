@@ -1,12 +1,7 @@
-/**
- * The record applier (record.ts) as a table: each live-stream record against a held thread, and what the thread
- * shows after it. A wrong row here is a window that shows something the server does not (an agent's message
- * missing, an answer going backwards, an archive undone by a late read).
- */
 import { describe, expect, test } from 'bun:test';
 import type { InboxMessageWire, InboxQuestion } from '@plannotator/core/inbox-types';
 import type { InboxEvent, ThreadModel } from '../../api';
-import { applyRecord, reconcileRead, type HeldThread } from './record';
+import { applyRecord, reconcileRead, withSavedQuestions, type HeldThread } from './record';
 
 const T = 'msg_ROOT';
 const at = '2026-11-10T10:00:00.000Z';
@@ -85,6 +80,20 @@ describe('one stream record on a held thread', () => {
   });
 });
 
+describe('a reply from another window that carried comments', () => {
+  test('its comment records come first; the reply then draws with their count, so it is never offered for Take back', () => {
+    const ann = (seq: number, id: string): InboxEvent => ({ seq, kind: 'annotation', id, annotation: { thread_id: T, sent_reply_id: 'msg_X' } as never });
+    let now: HeldThread = held;
+    for (const event of [ann(30, 'a1'), ann(31, 'a2'), ann(31, 'a2')]) {
+      const out = applyRecord(now, event);
+      if (out.kind === 'applied') now = out.model;
+    }
+    const out = applyRecord(now, message(32, msg('msg_X', { author: person })));
+    if (out.kind !== 'applied') throw new Error('not applied');
+    expect(out.model.thread.messages.find((m) => m.id === 'msg_X')?.sent_annotations).toBe(2);
+  });
+});
+
 describe('a read landing after records', () => {
   const read = (cursor: number, messages: InboxMessageWire[]): ThreadModel => ({ ...model(messages, cursor) });
   const base = [msg(T, { seq: 1, questions: [question('q1', 1)] }), msg('msg_R', { author: person, seq: 5 })];
@@ -99,6 +108,14 @@ describe('a read landing after records', () => {
     if (after.kind !== 'applied') throw new Error('not applied');
     const fresh = read(30, [...base, msg('msg_N', { seq: 11, body: 'server copy' })]);
     expect(reconcileRead(after.model, fresh)).toBe(fresh);
+  });
+  test("a read that left before this window's saved answer never shows the old answer", () => {
+    const saved = withSavedQuestions(model(base, 10), T, [question('q1', 2, { state: 'picked' })]);
+    const kept = reconcileRead(saved, read(10, base));
+    expect(kept.thread.messages[0]!.questions?.[0]).toMatchObject({ revision: 2, state: 'picked' });
+    const later = reconcileRead(kept, read(20, [msg(T, { seq: 1, questions: [question('q1', 3, { state: 'sent' })] }), base[1]!]));
+    expect(later.thread.messages[0]!.questions?.[0]).toMatchObject({ revision: 3, state: 'sent' });
+    expect(later.saved).toBeUndefined();
   });
   test('an older read never brings back a reply taken back after it left', () => {
     const after = applyRecord(model(base), message(12, msg('msg_R', { author: person, taken_back_at: at }), false));
