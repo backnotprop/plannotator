@@ -3,7 +3,7 @@ import { Menu } from '@base-ui/react/menu';
 import { ChevronDown, X } from 'lucide-react';
 import type { Pane } from './paneLayout';
 import { TITLE_SETTLE_MS, useSettledValue } from './useSettledValue';
-import { tabLabel } from './tabLabel';
+import { isClosableTab, tabLabel } from './tabLabel';
 
 export const PaneTabsMenu: React.FC<{
   pane: Pane;
@@ -48,7 +48,7 @@ export const PaneTabsMenu: React.FC<{
                 >
                   <span className="truncate">{tabLabel(tab)}</span>
                 </Menu.Item>
-                {pane.tabs.length > 1 && (
+                {pane.tabs.length > 1 && isClosableTab(tab) && (
                   <button
                     type="button"
                     data-pn-touch-target

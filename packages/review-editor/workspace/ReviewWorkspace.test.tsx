@@ -71,6 +71,15 @@ describe.skipIf(!hasDom)('the review panes', () => {
     expect(tabRow(el)).toBeNull();
   });
 
+  test('All changes is the fixed home tab: no close button and a middle click leaves it; other tabs close', async () => {
+    const el = await mount();
+    await act(async () => { api!.addPanel({ id: 'review-file:a.ts', component: 'review-file', title: 'a.ts', params: { filePath: 'a.ts' } }); });
+    expect(el.querySelector('[data-pane-tab-close="review-all-files"]')).toBeNull();
+    expect(el.querySelector('[data-pane-tab-close="review-file:a.ts"]')).not.toBeNull();
+    await act(async () => { tabButton(el, 'review-all-files').dispatchEvent(new MouseEvent('auxclick', { bubbles: true, button: 1 })); });
+    expect(api!.getPanel('review-all-files')).toBeDefined();
+  });
+
   test('a preview tab is italic and a double click keeps it', async () => {
     const el = await mount();
     await act(async () => { api!.addPanel({ id: 'review-file-preview:1', component: 'review-file', title: 'b.ts', params: { filePath: 'b.ts', preview: true } }); });

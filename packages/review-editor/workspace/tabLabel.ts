@@ -1,5 +1,5 @@
 import type { PaneTab } from './paneLayout';
-import { REVIEW_PANEL_TYPES } from '../dock/reviewPanelTypes';
+import { REVIEW_ALL_FILES_PANEL_ID, REVIEW_PANEL_TYPES } from '../dock/reviewPanelTypes';
 
 const REFERENCES_PREFIX = 'References: ';
 
@@ -9,4 +9,8 @@ export function isReferencesTab(tab: PaneTab): boolean {
 
 export function tabLabel(tab: PaneTab): string {
   return isReferencesTab(tab) && tab.title.startsWith(REFERENCES_PREFIX) ? tab.title.slice(REFERENCES_PREFIX.length) : tab.title;
+}
+
+export function isClosableTab(tab: PaneTab): boolean {
+  return tab.id !== REVIEW_ALL_FILES_PANEL_ID;
 }

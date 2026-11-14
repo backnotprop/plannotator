@@ -4,7 +4,7 @@ import type { Pane } from './paneLayout';
 import { isReviewFilePreviewParams } from '../dock/reviewPanelTypes';
 import { TITLE_SETTLE_MS, useSettledValue } from './useSettledValue';
 import { PaneTabsMenu } from './PaneTabsMenu';
-import { isReferencesTab, tabLabel } from './tabLabel';
+import { isClosableTab, isReferencesTab, tabLabel } from './tabLabel';
 
 export { TITLE_SETTLE_MS };
 
@@ -80,6 +80,7 @@ export const PaneTabs: React.FC<{
       {pane.tabs.map((tab) => {
         const active = tab.id === pane.activeId;
         const preview = isReviewFilePreviewParams(tab.params);
+        const closable = isClosableTab(tab);
         return (
           <div key={tab.id} className="group relative flex flex-none items-center gap-1">
             <button
@@ -93,7 +94,7 @@ export const PaneTabs: React.FC<{
               onClick={() => onActivate(tab.id)}
               onDoubleClick={preview && onKeep ? () => onKeep(tab.id) : undefined}
               onAuxClick={(event) => {
-                if (event.button !== 1) return;
+                if (event.button !== 1 || !closable) return;
                 event.preventDefault();
                 close(tab.id);
               }}
@@ -104,7 +105,7 @@ export const PaneTabs: React.FC<{
               {isReferencesTab(tab) && <Crosshair className="w-3.5 h-3.5 flex-none" aria-hidden="true" data-references-tab-icon="" />}
               <span className="truncate"><TabTitle title={tabLabel(tab)} /></span>
             </button>
-            <button
+            {closable && <button
               type="button"
               aria-label={`Close ${tab.title}`}
               data-pane-tab-close={tab.id}
@@ -117,7 +118,7 @@ export const PaneTabs: React.FC<{
               <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.25} aria-hidden="true">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
               </svg>
-            </button>
+            </button>}
             {active && <span aria-hidden="true" className="pointer-events-none absolute inset-x-0 bottom-0 h-0.5 rounded-full bg-foreground" />}
           </div>
         );
