@@ -39,7 +39,7 @@
  * No CORS headers anywhere, so another site cannot read an answer.
  */
 
-import { INBOX_LINKED_MARKS, INBOX_PROMPT_HOSTS, inboxRowsBy, type InboxRowsBy } from "@plannotator/core/inbox-types";
+import { INBOX_LINKED_MARKS, INBOX_PROMPT_HOSTS, inboxMachineTags, inboxRowsBy, type InboxRowsBy } from "@plannotator/core/inbox-types";
 import { inboxDiffOptionsOf, inboxDiffOptionsSaved, parseInboxDiffOptionsChange } from "./inbox-diff-options";
 import { listIntroAtStart, listIntroDue, listIntroLookPicked } from "./inbox-list-intro";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
@@ -201,6 +201,7 @@ import { classifyForgeHost, normalizeForgeHost } from "@plannotator/core/forge-r
 import { systemSetupRoute } from "./inbox-system-setup";
 import { SYSTEM_READ_PATHS, systemFilesCache, systemReadRoute, systemSwitch } from "./inbox-system";
 import { bitbucketRefReader, createRefCards, readSignedInHosts, refCliRunner, type BitbucketRefReader, type RefRunner } from "./ref-cards";
+import { closePull, reopenAllowed, reopenPull, PULL_REOPEN_WINDOW_MS } from "@plannotator/shared/inbox-pull-close";
 import { mergePull } from "@plannotator/shared/inbox-pull-merge";
 import { createInboxProjectRoots, folderHoldsOtherWork, guessableProjects, isHomeOrRootFolder, nearestProjectHolding, type InboxGitRunner } from "./inbox-project-root";
 import { handleFavicon } from "./shared-handlers";
@@ -633,7 +634,7 @@ export interface InboxServerOptions {
   /** The Qwen Code wake's clock and time limits (inbox-qwen-wake.ts): tests shorten them. */
   qwenWake?: { now?: () => number; sendTimeoutMs?: number; receiptTimeoutMs?: number; comebackMs?: number; socketParent?: string };
   /** The T3 Code wake (inbox-t3-wake.ts): tests pass a scripted T3, a clock and a log. */
-  t3Wake?: { connect?: T3Connect; now?: () => number; log?: (line: string) => void; lookupTimeoutMs?: number };
+  t3Wake?: { connect?: T3Connect; now?: () => number; log?: (line: string) => void; lookupTimeoutMs?: number; grantCheckMs?: number };
   cloudWake?: { now?: () => number; gapMs?: number; timeoutMs?: number; retryMs?: number; log?: (line: string) => void };
 }
 
@@ -1321,6 +1322,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const pullRepoRead = new Set<string>();
   const pullRepoReading = new Map<string, Promise<InboxProjectRepo | null>>();
   const pulls = createInboxPulls(options.refRunner ? { run: options.refRunner } : {});
+  /** PRs this Inbox closed (the board's Close), by key: when. A reopen is taken only for these (`reopenAllowed`). */
+  const closedByInbox = new Map<string, number>();
   // The PR authors' pictures (inbox-pull-avatars.ts): only for logins the last list showed, served from this origin.
   const pullAvatars = createPullAvatars({ ...options.pullAvatars, dir: options.pullAvatars?.dir ?? join(inboxDir(dataDir), "pull-avatars") });
   // The projects' letter-mark pictures (inbox-project-pictures.ts; Settings → Rows, all off by default).
@@ -1728,8 +1731,19 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // A linked machine never lists an id this store holds (archived and pinned included): its row is dropped, never merged.
     // The same clock over its rows: a machine asleep past a thread's `until` still gives that thread back.
     // A linked machine's row loses its `steps_waiting`: this window never shows that machine's checklists.
+    // Tags across machines (approval "inbox-thread-tags"): one tag per name over this Inbox and every linked machine that
+    // takes tags, and a far row's tags read as those; a row of a machine that does not take them carries none here.
+    const ownTags = store.initiatives().filter((tag) => tag.deleted_at === null);
+    const farTagLists = merged ? machines.tagLists() : [];
+    const machineTags = merged ? inboxMachineTags(machines.selfId, ownTags, farTagLists) : null;
+    const tagsTaken = new Set(farTagLists.map((list) => list.machine));
+    const withFarTags = (row: InboxListRow & { machine: string }): InboxListRow => {
+      const { tags: farTags, ...rest } = row;
+      const tags = tagsTaken.has(row.machine) ? [...new Set((farTags ?? []).flatMap((id) => machineTags?.idOn(row.machine, id) ?? []))] : [];
+      return tags.length > 0 ? { ...rest, tags } : rest;
+    };
     const rows: InboxListRow[] = merged
-      ? [...own.map((row) => ({ ...row, machine: machines.selfId })), ...machines.rows().filter((row) => !store.message(row.thread_id)).map((row) => inboxRowAsOf(withoutStepsWaiting(row), now))]
+      ? [...own.map((row) => ({ ...row, machine: machines.selfId })), ...machines.rows().filter((row) => !store.message(row.thread_id)).map((row) => inboxRowAsOf(withoutStepsWaiting(withFarTags(row)), now))]
       : own;
     // Rows carry the head of a combined project; an id from before the combine (a phone, an API client) means that head.
     const shownProject = projectFilter ? store.canonicalProjectId(projectFilter) : null;
@@ -1779,8 +1793,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       ],
       /** The marks a linked machine may send to this Inbox for its own threads and agents (inbox-linked-marks). Additive. */
       marks: INBOX_LINKED_MARKS,
-      /** The live tags, oldest first (approval "inbox-thread-tags"): the sidebar's Tags and the Add tag list. Additive. */
-      tags: store.initiatives().filter((tag) => tag.deleted_at === null),
+      /**
+       * The live tags, oldest first (approval "inbox-thread-tags"): the sidebar's Tags and the Add tag list. Additive.
+       * Merged: one per name across the machines, each with `machines`, its id on every machine that holds it.
+       */
+      tags: machineTags ? machineTags.tags : ownTags,
       ...(merged ? { self: machines.selfId, machines: machines.machinesView() } : {}),
       /**
        * Each machine's agents (additive; the Agents section, inbox-agents-list.ts): one group, this Inbox's own; on the
@@ -3685,9 +3702,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // is read again. Windows, and a linked machine that asks (`priority=1`, as `pins=1`).
         const onPriority = () => send(`event: priority\ndata: {}\n\n`);
         if (windowId || url.searchParams.get("priority") === "1") priorityListeners.add(onPriority);
-        // A thread's tags changed (any window's, a rename's marks, or a deletion): the list reads `tags` again. Windows only.
+        // A thread's tags changed (any window's, a linked machine's, a rename's marks, or a deletion): the list reads
+        // `tags` again. Windows, and a linked machine that asks (`tags=1`, as `pins=1`).
         const onThreadTags = () => send(`event: tags\ndata: {}\n\n`);
-        if (windowId) threadTagListeners.add(onThreadTags);
+        if (windowId || url.searchParams.get("tags") === "1") threadTagListeners.add(onThreadTags);
         // The pinned artifacts changed (any window's, a phone's, or a deletion): the window reads them again. Windows only.
         const onArtifactPins = () => send(`event: artifact-pins\ndata: {}\n\n`);
         if (windowId) artifactPinListeners.add(onArtifactPins);
@@ -4382,6 +4400,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     stuck: live.stuck,
     autoSendAfterMs: live.autoSendAfterMs,
     waitOf: live.waitOf,
+    // A reply to a T3 thread or a cloud agent waits for it, against other agents' reads, until that wake knows it gone.
+    wakeGone: (session) => t3Wake.gone(session) || cloudWake.status(session) === "dead",
   });
   // A session's turn starting or ending, its connection going away, or an asker grace running out moves a
   // row's delivery without writing a store line. The sessions' delivery signature is compared on a short
@@ -5608,6 +5628,40 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // The next list shows it merged at once, even from the read cache or a forge search that still says open.
         pulls.markMerged(key);
         return json({ serverSession, ok: true, key, method: result.method, url: pull.url });
+      }
+      // Close and reopen from the board (approval "inbox-pr-board-bulk": Close with the count and Undo). The person's
+      // action from the window: merge's guards (the owner only, same origin, Code review on, the server session). The
+      // forge is asked first (`closePull` / `reopenPull`); a reopen is taken only for a PR this Inbox closed in the last
+      // `PULL_REOPEN_WINDOW_MS`, so Undo can never reopen anything else.
+      if (path === "/api/inbox/pulls/close" || path === "/api/inbox/pulls/reopen") {
+        if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+        if (!ownerOrLocal(req, via)) return localOnly();
+        if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
+          return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
+        }
+        if (!codeReviewOn()) return json({ error: "Code review is off.", code: "code_review_off" }, 409);
+        const body = await readBody(req);
+        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+        const key = typeof body.key === "string" && body.key.length > 0 && body.key.length <= 600 ? body.key : null;
+        if (!key) throw new InboxError("validation_error", "key: a pull request key from the list.", { field: "key" });
+        const reopen = path === "/api/inbox/pulls/reopen";
+        if (reopen && !reopenAllowed(closedByInbox.get(key), Date.now())) {
+          return json({ error: `Only a pull request closed here in the last ${PULL_REOPEN_WINDOW_MS / 60_000} minutes can be reopened here.`, code: "reopen_not_closed_here" }, 409);
+        }
+        if (!pulls.find(key)) await findPulls([key], (await pullProjects()).wanted);
+        const pull = pulls.find(key);
+        if (!pull) return json({ error: "That pull request is not in the list. Refresh the list and try again.", code: "pull_unknown" }, 404);
+        if (!reopen && !inboxPullIsOpen(pull)) return json({ error: pull.state === "merged" ? "It is already merged." : "It is already closed.", code: pull.state === "merged" ? "pull_merged" : "pull_closed" }, 409);
+        const result = reopen ? await reopenPull(options.refRunner ?? refCliRunner, pull) : await closePull(options.refRunner ?? refCliRunner, pull);
+        if (!result.ok) return json({ error: result.message, code: result.code }, result.code === "pull_close_failed" ? 502 : 409);
+        if (reopen) {
+          closedByInbox.delete(key);
+          pulls.markReopened(key);
+        } else {
+          closedByInbox.set(key, Date.now());
+          pulls.markClosed(key);
+        }
+        return json({ serverSession, ok: true, key, url: pull.url });
       }
       if (path === "/api/inbox/events" && req.method === "GET") {
       // Another site's page must not hold (or time) a stream of everything the Inbox holds:

@@ -187,3 +187,37 @@ test("what else a version-1 file holds beside the marks (a later version's tag c
   expect(kept.v).toBe(1);
   expect(kept.looks).toEqual({ [release.id]: { colour: "#7a9e7e", rows: true } });
 });
+
+test("by name, as a linked machine tags: the live tag of that name (case and space ignored), made when none is", () => {
+  const { store, release, thread, reopen } = world();
+  const t = thread();
+  // The same tag as the one of that name.
+  expect(store.setThreadTagNamed(t.thread_id, "  release ", true)).toEqual([release.id]);
+  const before = store.initiatives().length;
+  // No tag of that name: made (the person's), and the thread is in it.
+  const tags = store.setThreadTagNamed(t.thread_id, "Billing", true);
+  const billing = store.initiatives().find((i) => i.name === "Billing")!;
+  expect(store.initiatives()).toHaveLength(before + 1);
+  expect(billing.created_by).toEqual(PERSON);
+  expect(tags).toEqual([release.id, billing.id]);
+  // A second copy of the same write makes nothing more.
+  store.setThreadTagNamed(t.thread_id, "billing", true);
+  expect(store.initiatives()).toHaveLength(before + 1);
+  // Out by name; a name no tag has takes nothing out and makes nothing.
+  expect(store.setThreadTagNamed(t.thread_id, "BILLING", false)).toEqual([release.id]);
+  expect(store.setThreadTagNamed(t.thread_id, "Nowhere", false)).toEqual([release.id]);
+  expect(store.initiatives()).toHaveLength(before + 1);
+  expect(reopen().threadTags(t.thread_id)).toEqual([release.id]);
+});
+
+test("by name: a deleted tag's name makes a new one; a missing thread makes no tag", () => {
+  const { store, windows, thread } = world();
+  const t = thread();
+  store.deleteInitiative(windows.id);
+  const [made] = store.setThreadTagNamed(t.thread_id, "Windows", true);
+  expect(made).not.toBe(windows.id);
+  const count = store.initiatives().length;
+  expect(() => store.setThreadTagNamed("msg_missing", "Fresh", true)).toThrow();
+  expect(() => store.setThreadTagNamed(t.thread_id, "", true)).toThrow();
+  expect(store.initiatives()).toHaveLength(count);
+});

@@ -460,6 +460,9 @@ describe("rule 8: every door write is classified, and only small JSON is held", 
     expect(doorWriteKind("threads/msg_1/priority")).toBe("set");
     // An agent's face and given name live on the agent's own machine: held and sent there too.
     expect(doorWriteKind("agent-faces")).toBe("set");
+    // A thread's tag lives on the thread's own machine, and a tag's rename, delete and Undo on each machine holding it.
+    expect(doorWriteKind("threads/msg_1/tags")).toBe("set");
+    expect(doorWriteKind("initiatives/ini_1")).toBe("set");
   });
 
   test("an Inbox that never holds a write keeps no outbox folder", () => {
