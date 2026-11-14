@@ -155,12 +155,8 @@ test('the Inbox thread shows a review comment on its lines and opens the living 
     await owner?.stop();
     const sessions = join(dataDir, 'sessions');
     for (const file of existsSync(sessions) ? readdirSync(sessions).filter((f) => f.endsWith('.json')) : []) {
-      const { pid, mode } = JSON.parse(readFileSync(join(sessions, file), 'utf8')) as { pid: number; mode: string };
-      if (mode === 'review') {
-        try {
-          process.kill(pid, 'SIGTERM');
-        } catch {}
-      }
+      const { url, mode } = JSON.parse(readFileSync(join(sessions, file), 'utf8')) as { url: string; mode: string };
+      if (mode === 'review') await fetch(`${url}/api/exit`, { method: 'POST' }).catch(() => {});
     }
     await removeInboxScratch(root);
   }
