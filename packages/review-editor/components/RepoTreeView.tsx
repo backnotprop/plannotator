@@ -5,6 +5,7 @@ import type { RepoOnDiskChange } from '@plannotator/shared/repo-files';
 import type { DiffFile } from '../types';
 import type { RepoFilesState } from '../hooks/useRepoFiles';
 import { initialRepoExpansion } from '../utils/repoTree';
+import { prefetchRepoFile } from '../hooks/useRepoFileText';
 import { ROW_ICONS, TreeRowMenu, ancestorsOf, countColumns, fileRowParts, gitStatusFor, hasBadge, stageColumnShown, withoutBadge, type FileRowState } from './pierreRows';
 
 type ReadyRepoFiles = Extract<RepoFilesState, { status: 'ready' }>;
@@ -25,6 +26,7 @@ interface RepoTreeViewProps extends FileRowState {
   onOpenRepoFile?: (path: string, options: { pin: boolean }) => void;
   repoRoot?: string | null;
   handleRef?: React.Ref<RepoTreeHandle>;
+  snapshotId?: string;
 }
 
 const ON_DISK_TITLES: Record<RepoOnDiskChange, string> = {
@@ -144,6 +146,8 @@ export const RepoTreeView: React.FC<RepoTreeViewProps> = (props) => {
     gitStatus,
     composition: { contextMenu: { triggerMode: 'right-click' } },
     onDirectoryExpand: ensureLoaded,
+    search: true,
+    fileTreeSearchMode: 'expand-matches',
     onSelectionChange: (selected) => {
       const { props: p, changedIndex: index } = live.current;
       const last = selected[selected.length - 1];
@@ -204,7 +208,7 @@ export const RepoTreeView: React.FC<RepoTreeViewProps> = (props) => {
       if (focused === lastFocused) return;
       lastFocused = focused;
       const host = model.getFileTreeContainer();
-      if (!host || document.activeElement !== host || !focused) return;
+      if (!host?.shadowRoot?.activeElement || !focused) return;
       if (focused.endsWith('/') || focused.endsWith(`/${LOADING}`)) return;
       const { props: p, changedIndex: index } = live.current;
       if (focused === p.activePath) return;
@@ -229,6 +233,19 @@ export const RepoTreeView: React.FC<RepoTreeViewProps> = (props) => {
     }
     model.scrollToPath(activePath, { focus: false, offset: 'nearest' });
   }, [activePath, paths, model]);
+
+  useEffect(() => {
+    const snapshotId = props.snapshotId;
+    if (!activePath || !snapshotId) return;
+    const all = model.getVisibleRows(0, model.getVisibleCount() - 1);
+    const at = all.findIndex((row) => row.path === activePath);
+    if (at < 0) return;
+    const rows = model.getVisibleRows(Math.max(0, at - 2), at + 3);
+    for (const row of rows) {
+      if (row.kind !== 'file' || row.path === activePath || row.name === LOADING || changedIndex.has(row.path)) continue;
+      prefetchRepoFile(row.path, snapshotId);
+    }
+  }, [activePath, model, props.snapshotId, changedIndex]);
 
   React.useImperativeHandle(handleRef, () => ({
     setAllFoldersExpanded: (expanded: boolean) => {

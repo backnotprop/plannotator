@@ -135,6 +135,7 @@ interface FileTreeProps {
   sinceBaseSections?: SinceBaseSections | null;
   onStageFile?: (filePath: string) => void;
   stagingFile?: string | null;
+  snapshotId?: string;
 }
 
 export const FileTree: React.FC<FileTreeProps> = ({
@@ -218,6 +219,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
   sinceBaseSections,
   onStageFile,
   stagingFile,
+  snapshotId,
 }) => {
   const isSearchVisible = !!onSearchChange && (isSearchOpen || !!searchQuery.trim());
 
@@ -294,7 +296,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
         return;
       }
 
-      if (e.composedPath?.().some((node) => node instanceof HTMLElement && node.hasAttribute('data-changes-tree'))) return;
+      if (e.composedPath?.().some((node) => node instanceof HTMLElement && (node.hasAttribute('data-changes-tree') || node.hasAttribute('data-repo-file-tree')))) return;
 
       const visualPos = visualOrder.indexOf(activeFileIndex);
 
@@ -616,6 +618,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
               onSelectFile={onSelectFile}
               onDoubleClickFile={onDoubleClickFile}
               onOpenRepoFile={onOpenRepoFile}
+              snapshotId={snapshotId}
             />
           </div>
         )}
