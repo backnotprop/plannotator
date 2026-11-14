@@ -181,6 +181,7 @@ packages/inbox/rowsNotesLook.test.tsx
 packages/inbox/relativeTime.test.tsx
 packages/inbox/composeThread.test.tsx
 packages/inbox/sendNow.test.tsx
+packages/inbox/takeBack.test.tsx
 packages/inbox/sendWaitsForComments.test.tsx
 packages/inbox/undelivered.test.tsx
 packages/inbox/tagAgents.test.tsx
@@ -604,6 +605,7 @@ packages/ui/components/RenderedMarkdown.softLineBreaks.test.tsx
 packages/inbox/personLineBreaks.test.tsx
 packages/inbox/aboutPrivacy.test.tsx
 packages/inbox/snoozeIntroDialog.test.tsx
+packages/inbox/priorityIntro.test.tsx
 packages/inbox/boardReveal.test.tsx
 packages/inbox/broReveal.test.tsx
 packages/inbox/broRevealApp.test.tsx
@@ -729,6 +731,7 @@ packages/review-editor/components/callTree/CallTree.test.tsx
 packages/review-editor/dock/panels/ReviewCallFlowPanel.callTree.test.tsx
 packages/review-editor/components/guide/GuideEmptyState.aiOff.test.tsx
 packages/review-editor/components/PRMediaScope.test.tsx
+packages/inbox/pulls/forgeMedia.test.tsx
 packages/ui/components/InlineMarkdown.imgTags.test.tsx
 packages/inbox/composeMachineSwitch.test.tsx
 packages/inbox/attachmentTileKeys.test.tsx

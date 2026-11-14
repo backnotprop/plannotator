@@ -7,6 +7,7 @@
     "./agents": "./agents.ts",
     "./product-feedback": "./product-feedback.ts",
     "./diff-paths": "./diff-paths.ts",
+    "./pr-attachment-url": "./pr-attachment-url.ts",
     "./diff-files": "./diff-files.ts",
     "./call-tree": "./call-tree.ts",
     "./stack-layers": "./stack-layers.ts",

@@ -156,8 +156,7 @@ import { InboxError, inboxDir } from "@plannotator/shared/inbox/schema";
 import { inboxPromptsModel, parseInboxPromptsChange, saveInboxPromptsChange } from "./inbox-prompts";
 import { inboxRulesFitError } from "./inbox-rules";
 import { InboxStore } from "@plannotator/shared/inbox/store";
-import { INBOX_UPGRADING_LINE, storeMoveNote } from "@plannotator/shared/inbox/store-log/sqlite/move-words";
-import { inboxImportDelayFromEnv, openInboxStore, resolveInboxSqlite } from "@plannotator/shared/inbox/store-log/sqlite/open-store";
+import { INBOX_DB_FILE, inboxReturnHoldFromEnv, returnFromSqlite } from "@plannotator/shared/inbox/store-log/sqlite-return/return";
 import { INBOX_TIDY_WITHDRAWN_HOST, inboxTidyBodyStepsOff, inboxTidyIsStepsOnly, inboxTidyStepsOnlyWakes } from "@plannotator/shared/inbox/tidy";
 import { inboxArchivedRows, inboxListSections, inboxRowArchived } from "@plannotator/shared/inbox/list";
 import { archiveProject, markProjectRead, unarchiveProject, unmarkProjectRead } from "@plannotator/shared/inbox/project-batch";
@@ -197,9 +196,11 @@ import { markPlannotatorResponse, withPlannotatorServerHeader } from "./plannota
 import { createInboxMcpServer, INBOX_BOARD_OFF_TEXT, INBOX_STEPS_OFF_TEXT } from "./inbox-mcp";
 import { guidePullKey, inboxGuideFileContents, inboxGuideRoute, readInboxReviewSnapshot } from "./inbox-guides";
 import { createInboxRepoCache } from "./inbox-repos";
+import { createGitlabHosts, unnamedForgeHost, type GitlabHosts } from "./inbox-gitlab-hosts";
+import { classifyForgeHost, normalizeForgeHost } from "@plannotator/core/forge-refs";
 import { systemSetupRoute } from "./inbox-system-setup";
 import { SYSTEM_READ_PATHS, systemFilesCache, systemReadRoute, systemSwitch } from "./inbox-system";
-import { bitbucketRefReader, createRefCards, refCliRunner, type BitbucketRefReader, type RefRunner } from "./ref-cards";
+import { bitbucketRefReader, createRefCards, readSignedInHosts, refCliRunner, type BitbucketRefReader, type RefRunner } from "./ref-cards";
 import { closePull, reopenAllowed, reopenPull, PULL_REOPEN_WINDOW_MS } from "@plannotator/shared/inbox-pull-close";
 import { mergePull } from "@plannotator/shared/inbox-pull-merge";
 import { createInboxProjectRoots, folderHoldsOtherWork, guessableProjects, isHomeOrRootFolder, nearestProjectHolding, type InboxGitRunner } from "./inbox-project-root";
@@ -246,10 +247,12 @@ import { createLoginEnv } from "./inbox-launch-env";
 import { inboxNamesShown, inboxSessionsShown } from "./inbox-session-names";
 import { createInboxReplyDrafts } from "./inbox-reply-drafts";
 import { createInboxCommentDrafts } from "./inbox-comment-drafts";
+import { createInboxTakeBack } from "./inbox-take-back";
 import { createInboxAsk } from "./inbox-ask";
 import type { InboxAskTimes } from "./inbox-ask-live";
 import { createInboxPins } from "./inbox-pins";
 import { createInboxPriority } from "./inbox-priority";
+import { priorityIntroOpen, priorityIntroUnused, priorityIntroUsed } from "./inbox-priority-intro";
 import { createInboxThreadTags } from "./inbox-thread-tags";
 import { createInboxAgentFaces } from "./inbox-agent-faces";
 import { createAgentIcons, createInboxAgentIcons, INBOX_AGENT_ICONS_DIR } from "./inbox-agent-icons";
@@ -304,6 +307,7 @@ import { prCommandRuntime } from "./pr";
 import { createInboxPullLinks } from "./inbox-pull-links";
 import { createPullRisk, type PullRiskOptions } from "./inbox-pull-risk";
 import { createPullAvatars, type PullAvatarOptions } from "./inbox-pull-avatars";
+import { pullMediaResponse, pullMediaSizesResponse } from "./inbox-pull-media";
 import { createProjectPictures, pictureSources, type ProjectPictureOptions } from "./inbox-project-pictures";
 import { INBOX_INITIATIVE_PEEK_THREADS, INBOX_PULL_OWNER_KEYS_MAX, inboxPullIsOpen, inboxPullItems, inboxPullStacks, inboxReviewLandingChanges, inboxReviewLinkOf, inboxReviewRows, inboxReviewStartOf, type InboxPullReason, type InboxReviewStart, inboxPullRepoKey } from "@plannotator/core/inbox-types";
 import { createInboxPullStates, createInboxReviewIndex, readInboxReviewLink } from "./inbox-reviews";
@@ -501,8 +505,6 @@ export interface InboxServerOptions {
   feedbackUrl?: string;
   /** Tests: the debug log on or off. Default: `PLANNOTATOR_INBOX_DEBUG=1` or the config's `inboxDebug`. */
   debug?: boolean;
-  /** Tests: the SQLite switch. Default: `PLANNOTATOR_INBOX_SQLITE` or the config's `inboxSqlite` (off). */
-  sqlite?: boolean;
   /** Tests: how long a window's record outlives its last event stream (default `WINDOW_GRACE_MS`). */
   windowGraceMs?: number;
   /** Tests: the clock (epoch ms) send_message's "not read since" line reads (packages/server/inbox-session-reads.ts). Default: the wall clock. */
@@ -573,6 +575,7 @@ export interface InboxServerOptions {
   readProjectRepo?: (root: string) => Promise<InboxProjectRepo | null>;
   /** Tests: run the hover cards' `gh` / `glab` through this instead of the real ones (ref-cards.ts). */
   refRunner?: RefRunner;
+  gitlabHosts?: GitlabHosts;
   /** Tests: Bitbucket Cloud PRs' cards and states (default: the real API, unless `refRunner` is given). */
   bitbucketRefReader?: BitbucketRefReader;
   /** Tests: a thread's PRs read their states from this instead of gh / glab (inbox-thread-pulls.ts). */
@@ -844,6 +847,9 @@ const ERROR_STATUS: Record<string, number> = {
   handoff_settled: 409,
   // Compose: a new thread the person starts (packages/server/inbox-compose.ts).
   already_delivered: 409,
+  agent_has_it: 409,
+  taken_back: 409,
+  cannot_take_back: 422,
   not_addressed: 422,
   session_still_live: 422,
   // A thread name another open thread of the project already has.
@@ -1051,7 +1057,7 @@ const INBOX_SNOOZE_WRITE = /^\/api\/inbox\/(?:m\/[^/]+\/)?threads\/[^/]+\/snooze
  * Whether an Inbox ran on this machine before this start, from evidence that
  * predates it (read before this start writes the version, the store or the
  * registry): the version an earlier Inbox recorded (0.28.12 and later), the
- * registry every Inbox writes, a project in the store (or its database), or a setting the Inbox
+ * registry every Inbox writes, a project in the store, or a setting the Inbox
  * page wrote. Builds 0.28.7 to 0.28.11 recorded no version, so the version
  * alone would call their people fresh.
  */
@@ -1063,7 +1069,6 @@ export function inboxUsedBefore(dataDir: string): boolean {
   try {
     if (readdirSync(join(dataDir, "inbox", "projects")).length > 0) return true;
   } catch {}
-  if (existsSync(join(dataDir, "inbox", "inbox.db"))) return true;
   const config = loadConfig();
   return config.inboxNotifications !== undefined || config.inboxTool !== undefined;
 }
@@ -1090,9 +1095,6 @@ function switchesHeld(): boolean {
   return process.env.PLANNOTATOR_INBOX_PREVIEW !== "1";
 }
 
-/** `POST /api/inbox/settings/storage/backups/<name>/remove`: Settings → Storage's Remove (`store-log/sqlite/backups.ts` checks the name). */
-const INBOX_BACKUP_REMOVE_ROUTE = /^\/api\/inbox\/settings\/storage\/backups\/(backup-[0-9a-z-]+)\/remove$/;
-
 /** Start the Inbox server and write the registry. */
 export async function startInboxServer(options: InboxServerOptions = {}): Promise<InboxServer> {
   assertTestHome();
@@ -1105,22 +1107,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     previousInboxVersion = readUpdateState(dataDir).inboxVersion ?? null;
   } catch {}
   const storeLoadStarted = performance.now();
-  // The SQLite switch (off by default, for every install): with it off and no inbox.db, this is today's InboxStore.open, nothing more.
-  const opened = await openInboxStore(dataDir, {
-    sqlite: options.sqlite ?? resolveInboxSqlite(loadConfig(), process.env),
-    now: options.storeNow,
-    onSlow: () => process.stderr.write(`${INBOX_UPGRADING_LINE}\n`),
-    importStep: inboxImportDelayFromEnv(process.env),
-    // A move checks its files' side in a second run of this program, beside the write.
-    checkFilesCommand: options.selfCommand?.length ? options.selfCommand : undefined,
-  });
-  const store = opened.store;
-  // A move that did not finish leaves the Inbox as it was; why goes to the terminal and inbox.log (never the debug
-  // log, whose values are words from a list: the reason names paths).
-  if (opened.moved && (opened.moved.status === "kept_files" || opened.moved.status === "kept_db")) {
-    const kept = opened.moved.status === "kept_files" ? "into SQLite did not finish; the Inbox stays on its files" : "back to the files did not finish; the Inbox stays on its database";
-    process.stderr.write(`Inbox: the move ${kept} (${opened.moved.reason}: ${opened.moved.detail}).\n`);
-  }
+  const returned = returnFromSqlite(dataDir, { ...(options.storeNow ? { now: options.storeNow } : {}), step: inboxReturnHoldFromEnv(process.env) });
+  if (returned) process.stderr.write(`Inbox: moved back from ${INBOX_DB_FILE} into its files (${returned.lines} lines, ${returned.ms} ms).\n`);
+  const store = InboxStore.open(dataDir, options.storeNow ? { now: options.storeNow } : {});
   // Read every project's log and replayed it (store.ts load): the debug log notes how long that took.
   const storeLoadMs = performance.now() - storeLoadStarted;
   // A send a crash interrupted leaves a temp blob; the next start removes it once it is stale.
@@ -1286,11 +1275,19 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // resolved for every known project once the server listens (below) and
   // when a project is first seen, never while a request waits (inbox-repos.ts).
   const repos = createInboxRepoCache(options.readProjectRepo ? { read: options.readProjectRepo } : {});
+  const gitlabHosts = options.gitlabHosts ?? createGitlabHosts(options.refRunner ? { run: options.refRunner } : {});
+  const learnGitlabRemote = (repo: { host: string | null } | null): Promise<void> => (unnamedForgeHost(repo?.host) ? gitlabHosts.refresh().catch(() => undefined) : Promise.resolve());
+  const gitlabRemote = (host: string | null): boolean => {
+    const name = normalizeForgeHost(host);
+    return !!name && classifyForgeHost(name) === "gitlab";
+  };
   /** A project's remote host. It decides where a short `group/project!45` points, so it waits for a first read (at most INBOX_REPO_GIT_TIMEOUT_MS). */
   const projectRepoHost = async (projectId: string): Promise<string | null> => {
     const project = store.project(projectId);
     if (!project) return null;
-    return (repos.get(project.root) ?? (await repos.refresh(project.root)))?.host ?? null;
+    const repo = repos.get(project.root) ?? (await repos.refresh(project.root));
+    await learnGitlabRemote(repo);
+    return repo?.host ?? null;
   };
   // Until the startup read of every project's origin has begun, an empty cache says nothing yet about Tidy's suggestions.
   let repoReadsBegun = false;
@@ -1473,7 +1470,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         { field: "project_path" },
       );
     }
-    void repos.refresh(root);
+    void repos.refresh(root).then(learnGitlabRemote);
     // One creation per root even when two calls race through the await above.
     let pending = projectLocks.get(root);
     if (!pending) {
@@ -1621,7 +1618,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // Its git origin's host (null: a remote that names none), additive and only for a project with a repo: the window
       // links an owner/repo#123 in a repoless thread on the host most projects use. `peek` never runs git.
       const repo = repos.peek(project.root);
-      return { ...project, ...(combined.length > 0 ? { combined } : {}), ...(picture !== undefined ? { picture } : {}), ...(repo ? { repo_host: repo.host } : {}), threads: mine.length, unread, listed: mine.length - archived, archived };
+      return { ...project, ...(combined.length > 0 ? { combined } : {}), ...(picture !== undefined ? { picture } : {}), ...(repo ? { repo_host: repo.host, ...(gitlabRemote(repo.host) ? { repo_forge: "gitlab" as const } : {}) } : {}), threads: mine.length, unread, listed: mine.length - archived, archived };
     });
   };
 
@@ -2760,6 +2757,23 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const snoozeIntroState = (owner: boolean, load: string | null = null) => ({
     due: owner && revealNow(owner, load) === "snooze",
   });
+  /**
+   * The Priority dialog (inbox-priority-intro.ts): open while the person never added a thread to Priority here, from
+   * the day after the first release start that knows it (stamped here, as the tab icon's is, for someone who could
+   * still get it; claims keep the stamp).
+   */
+  if (normalizeStableVersion(version) !== null && !loadConfig().inboxReveals?.priority?.dueAt && priorityIntroUnused(loadConfig().inboxPriorityIntro, store.priorities().threads.length)) {
+    saveConfig({ inboxReveals: { ...loadConfig().inboxReveals, priority: { ...loadConfig().inboxReveals?.priority, dueAt: new Date().toISOString() } } });
+  }
+  const priorityIntroIsOpen = () => {
+    const config = loadConfig();
+    return priorityIntroOpen(config.inboxPriorityIntro, store.priorities().threads.length, config.inboxReveals?.priority?.dueAt, new Date());
+  };
+  /** After any Priority change: an add standing is a use, kept once, so the dialog never shows. */
+  const markPriorityUsed = () => {
+    const next = priorityIntroUsed(loadConfig().inboxPriorityIntro, store.priorities().threads.length, new Date());
+    if (next) saveConfig({ inboxPriorityIntro: next });
+  };
   /** The person snoozed something: the dialog never shows. Once; a dev build marks too (only showing is release-only). */
   const markSnoozeUsed = () => {
     const saved = loadConfig().inboxSnoozeIntro;
@@ -3093,6 +3107,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     steps: stepsUndecided,
     agent_rules: agentRulesUnset,
     personal_agents: noPersonalAgent,
+    priority: priorityIntroIsOpen,
     // Bro mode (approval "bro-mode"): offered while config.json `inboxBro` is unset; its need (heavy use) is the queue's.
     bro: broUndecided,
     // The grill-me tip (shared/inbox/grill-me-tip.ts): nothing to decide, so open until shown; its need (the gap) is
@@ -4018,11 +4033,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     if (sendNow && steer?.busy === true && steer.send_now) autoSendFor(session, tags);
     // What waits for this session, and for the sessions its conversation continues that no longer poll
     // (`continues`, inbox-continuations.ts): each worded for the session it waits for.
-    const commands = () => {
-      const list = live
-        .pendingOf(session, { tags })
-        .filter((item) => !withdrawnTidy(item.message))
-        .map((item) => replyCommand(item.message, sendNow, item.as));
+    const handedOut = () => live.pendingOf(session, { tags }).filter((item) => !withdrawnTidy(item.message));
+    const commands = (items = handedOut()) => {
+      const list = items.map((item) => replyCommand(item.message, sendNow, item.as));
       // Handed an item for the running turn: an older connection does not poll again until it goes in.
       if (body[INBOX_STEER_POLLS_POLL_FIELD] !== true && list.some((command) => command.now === true)) live.steerHanded(session);
       return list;
@@ -4032,7 +4045,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // Auto reload (owner approval "cc-auto-reload"): a Claude Code connection that reloads itself is told,
     // on every answer, the version a /reload-plugins loads while the session is outdated (fix `restart`).
     const reloadOffer = () => live.reloadAnswerFor(session, body);
-    const now = commands();
+    const items = handedOut();
+    const now = commands(items);
+    if (requested === 0) store.handover.asked(items.map((item) => item.message), session);
     if (now.length > 0 || waitMs === 0 || ask.waits(session)) {
       answered();
       return json({ commands: now, ...askWaits(), ...reloadOffer() });
@@ -4511,6 +4526,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     },
   });
   const commentDrafts = createInboxCommentDrafts({ store, serverSession, readBody: (req) => readBody(req), json });
+  const takeBack = createInboxTakeBack({ store, serverSession, readBody: (req) => readBody(req), json });
   // Ask AI: the conversation a thread keeps with its agent (packages/server/inbox-ask.ts).
   const ask = createInboxAsk({
     codeReviewOn,
@@ -4602,6 +4618,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     for (const listener of pinListeners) listener();
   });
   const stopPriorityEvents = store.onPriorityChange(() => {
+    markPriorityUsed();
     for (const listener of priorityListeners) listener();
   });
   const stopThreadTagEvents = store.onThreadTagsChange(() => {
@@ -5211,7 +5228,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         }
         return json({ serverSession, ...pullRisk.answer() });
       }
-      if (path === "/api/inbox/pulls" || path === "/api/inbox/pulls/diff" || path === "/api/inbox/pulls/details" || path === "/api/inbox/pulls/file" || path === "/api/inbox/pulls/avatar" || path === "/api/inbox/pulls/repo-files" || path === "/api/inbox/pulls/repo-file") {
+      if (path === "/api/inbox/pulls" || path === "/api/inbox/pulls/diff" || path === "/api/inbox/pulls/details" || path === "/api/inbox/pulls/file" || path === "/api/inbox/pulls/avatar" || path === "/api/inbox/pulls/repo-files" || path === "/api/inbox/pulls/repo-file" || path === "/api/inbox/pulls/media" || path === "/api/inbox/pulls/media/sizes") {
         if (req.method !== "GET") return json({ error: "Use GET." }, 405);
         if (!ownerOrLocal(req, via)) return localOnly();
         if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
@@ -5220,6 +5237,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (!codeReviewOn()) return json({ error: "Code review is off.", code: "code_review_off" }, 409);
         // A PR author's picture (the list's top-left spot): only a login the last list showed on that host, fetched by
         // the Inbox from the URL the forge gave (inbox-pull-avatars.ts); the window's CSP never loads a remote image.
+        if (path === "/api/inbox/pulls/media/sizes") return pullMediaSizesResponse(pulls, url.searchParams.get("key") ?? "");
+        if (path === "/api/inbox/pulls/media") {
+          return pullMediaResponse(pulls, url.searchParams.get("key") ?? "", url.searchParams.get("url") ?? "", req.headers.get("range"));
+        }
         if (path === "/api/inbox/pulls/avatar") {
           const host = url.searchParams.get("host") ?? "";
           const login = url.searchParams.get("login") ?? "";
@@ -5287,9 +5308,15 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
             const ids = oldId && newId && /^[0-9a-f]{7,64}$/.test(oldId) && /^[0-9a-f]{7,64}$/.test(newId) ? { oldId, newId } : null;
             // Only a file the diff changes: the route is for that diff's arrows, not for any file whose blob id one knows.
             // Parsed once per diff (`changedFileOf`): the PR page asks for every changed file as it nears the viewport.
-            const changed = ids ? changedFileOf(await pulls.diff(key, scope), filePath) : null;
-            if (ids && !changed) return json({ serverSession, oldContent: null, newContent: null });
-            return json({ serverSession, ...(await pulls.fileContents(key, scope, filePath, ids ? await pullRoots(key) : [], ids, changed?.oldPath)) });
+            const head = ids ? null : url.searchParams.get("head");
+            const pinned = head && /^[0-9a-f]{40,64}$/.test(head) ? head : null;
+            const answer = ids || pinned ? await pulls.diff(key, scope) : null;
+            const changed = answer ? changedFileOf(answer, filePath) : null;
+            if (answer && (!changed || (pinned && (answer.head_sha !== pinned || (changed.status !== "modified" && changed.status !== "renamed"))))) {
+              return json({ serverSession, oldContent: null, newContent: null });
+            }
+            const check = ids ?? (pinned && changed ? { patch: changed.patch } : null);
+            return json({ serverSession, ...(await pulls.fileContents(key, scope, filePath, check ? await pullRoots(key) : [], check, changed?.oldPath)) });
           } catch (cause) {
             if (cause instanceof InboxPullsError) return json({ error: cause.message, code: cause.code }, 404);
             throw cause;
@@ -5498,16 +5525,17 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // Pinned to the commit the person read: the list's head, or the head of the patch they read (the list can be a
         // minute behind the forge). On GitHub also an older commit of this PR, as GitHub takes a review there and marks
         // what moved outdated; one no longer on the PR (a force-push) is refused for the page to put its words in the
-        // review's body. GitLab's docs do not say it takes one, so there a commit the Inbox no longer names is refused.
+        // review's body. GitLab likewise, at the MR version whose head is that commit.
         const heads = [pull.head_sha, pulls.readHead(key)].filter((sha): sha is string => !!sha);
         const named = typeof body.head_sha === "string" && /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/i.test(body.head_sha) ? body.head_sha : null;
         const known = !!named && heads.includes(named);
-        if (!known && (!named || pull.platform !== "github")) {
+        if (!known && (!named || (pull.platform !== "github" && pull.platform !== "gitlab"))) {
           if (heads.length === 0) return json({ error: "The forge did not say which commit this pull request is at. Refresh the list and try again.", code: "pull_head_unknown" }, 409);
           return json({ error: "This pull request has new commits since you read it.", code: "pull_moved" }, 409);
         }
         const commitGone = () => json({ error: "The commit you read is no longer on this pull request.", code: "pull_commit_gone" }, 409);
         if (!known && (await pulls.hasCommit(key, named!)) === false) return commitGone();
+        if (!known && pull.platform === "gitlab" && fileComments.length > 0 && (await pulls.hasVersion(key, named!)) === false) return commitGone();
         const headSha = named!;
         const ref: PRRef | null =
           pull.platform === "github"
@@ -5813,7 +5841,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           }
           const body = await readBody(req);
           if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
-          const result = await postThreadDecisions(store, posting[1]!, { pull: body.pull, tz: body.tz }, { runtime: options.prRuntime ?? prCommandRuntime, version, destination: loadConfig().inboxDecisionsPostTo });
+          const result = await postThreadDecisions(store, posting[1]!, { pull: body.pull, tz: body.tz }, { runtime: options.prRuntime ?? prCommandRuntime, version, destination: loadConfig().inboxDecisionsPostTo, signedIn: (cli) => readSignedInHosts(options.refRunner ?? refCliRunner, cli) });
           return json(result.status === 200 ? { serverSession, ...result.body } : result.body, result.status);
         }
       }
@@ -5847,15 +5875,6 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       if (path === "/api/inbox/settings/storage") {
         if (req.method !== "GET") return json({ error: "Use GET." }, 405);
         return json(perfPhase("disk", () => store.diskUsage()));
-      }
-      // Remove on a dated backup a move into SQLite left (behind its switch, off for everyone): the answer's sizes, as a Delete's.
-      const backup = INBOX_BACKUP_REMOVE_ROUTE.exec(path);
-      if (backup) {
-        if (req.method !== "POST") return json({ error: "Use POST." }, 405);
-        const body = await readBody(req);
-        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
-        if (!store.removeBackup(backup[1]!)) return json({ error: "No such backup.", code: "backup_not_found" }, 404);
-        return json({ ok: true, store: store.diskUsage() });
       }
       if (path === "/api/inbox/settings") {
         if (req.method === "GET") {
@@ -6185,6 +6204,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       if (drafted) return drafted;
       const commentDrafted = await commentDrafts.route(req, url);
       if (commentDrafted) return commentDrafted;
+      const takenBack = await takeBack.route(req, url);
+      if (takenBack) return takenBack;
       // Ask AI: on for everyone; only the owner's own window is answered.
       const asked = await ask.route(req, url, via);
       if (asked) return asked;
@@ -7003,8 +7024,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           let messages = 0;
           const threadIds = store.threadIds();
           for (const id of threadIds) messages += store.threadMessageIds(id).length;
-          debugLog.note("store_load", { ms: Math.round(storeLoadMs), threads: threadIds.length, messages, log: opened.log });
-          if (opened.moved) debugLog.note("store_move", storeMoveNote(opened.moved));
+          debugLog.note("store_load", { ms: Math.round(storeLoadMs), threads: threadIds.length, messages });
         }
         return handleMarkingSnoozes(req, via);
       }, isOwner)
@@ -7174,7 +7194,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // runs at most a few gits at once and queues the rest.
   setTimeout(() => {
     if (stopped) return;
-    for (const project of store.allProjects()) void repos.refresh(project.root);
+    for (const project of store.allProjects()) void repos.refresh(project.root).then(learnGitlabRemote);
     repoReadsBegun = true;
     // Once: an earlier Inbox's folder project for a checkouts folder goes into its repository's project, by
     // Combine projects' own write (inbox-checkout-folders.ts). One debug line per fold.

@@ -44,6 +44,7 @@
 import {
   FORGE_REF_BODY_MAX,
   FORGE_REF_COMMENT_MAX,
+  forgeHostTrusted,
   forgeRefKey,
   parseForgeRefUrl,
   type ForgeRef,
@@ -477,7 +478,7 @@ export function refErrorOf(cli: RefCli, result: RefCommandResult): ForgeRefCardE
 export async function readSignedInHosts(run: RefRunner, cli: RefCli): Promise<Set<string>> {
   const hosts = new Set<string>();
   const fromText = (text: string) => {
-    for (const m of text.replace(/\u001b\[[0-9;]*m/g, "").matchAll(/Logged in to ([A-Za-z0-9.-]+)/g)) hosts.add(m[1].toLowerCase());
+    for (const m of text.replace(/\u001b\[[0-9;]*m/g, "").matchAll(/Logged in to ([A-Za-z0-9.-]+(?::\d+)?)/g)) hosts.add(m[1].toLowerCase());
   };
   if (cli === "gh") {
     const json = await run("gh", ["auth", "status", "--json", "hosts"]);
@@ -653,8 +654,8 @@ export function createRefCards(options: {
    */
   const fetchesFrom = async (ref: ForgeRef): Promise<boolean> => {
     if (ref.platform === "bitbucket") return !!options.bitbucket && ref.host === "bitbucket.org" && ref.kind === "pull";
-    if (ref.host === (ref.platform === "github" ? "github.com" : "gitlab.com")) return true;
-    return (await signedInHosts(ref.platform === "github" ? "gh" : "glab")).has(ref.host);
+    if (forgeHostTrusted(ref, new Set())) return true;
+    return forgeHostTrusted(ref, await signedInHosts(ref.platform === "github" ? "gh" : "glab"));
   };
 
   const fail = (error: ForgeRefCardError): ForgeRefCardResult => ({ ok: false, error, fetchedAt: now() });

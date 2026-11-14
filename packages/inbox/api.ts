@@ -106,7 +106,7 @@ import { trackCommentWrite } from './commentSaves';
  * A dialog of the line of one-time dialogs, as the Inbox names it (the queue: packages/shared/inbox/reveals.ts, server
  * side): the update-day dialogs, then the offers. A registered dialog (Bro mode, List view) adds its id here.
  */
-export type InboxRevealId = 'theme_chooser' | 'code_review' | 'sound' | 'list_intro' | 'voice' | 'tab_icon' | 'snooze' | 'bro' | 'grill_me_tip' | 'board' | 'steps' | 'agent_rules' | 'star' | 'list_view' | 'personal_agents';
+export type InboxRevealId = 'theme_chooser' | 'code_review' | 'sound' | 'list_intro' | 'voice' | 'tab_icon' | 'snooze' | 'bro' | 'grill_me_tip' | 'board' | 'steps' | 'agent_rules' | 'star' | 'list_view' | 'personal_agents' | 'priority';
 /** What the line claims (`POST /api/inbox/reveal`): every offer, and the tab icon, the one update-day dialog claimed through the line. */
 export type InboxRevealOfferId = Exclude<InboxRevealId, 'sound' | 'list_intro' | 'voice'>;
 /** What a page claims through `POST /api/inbox/reveal`: Snooze, an offer, the agent note, the Launch tip or the Sidebar tip (both outside the line). */
@@ -165,6 +165,7 @@ export interface ProjectFolder extends InboxProject {
    * repo (or none resolved yet), and from an older Inbox. Read for `defaultRefHost.ts`.
    */
   repo_host?: string | null;
+  repo_forge?: 'gitlab';
 }
 
 /** The project menu's batches (POST /api/inbox/projects/:id/read and /resolve): the threads each took. */
@@ -685,10 +686,6 @@ export interface InboxStorageModel {
     /** The projects combined into this one, by name: deleting it leaves them. */
     combined?: string[];
   }[];
-  /** The Inbox on SQLite (its switch, off by default): the database file's bytes, counted in `bytes`. */
-  database?: number;
-  /** The dated backups a move into SQLite left, counted in `bytes`: listed with Remove (StorageBackups.tsx). */
-  backups?: { name: string; kind: 'jsonl' | 'sqlite'; date: string; bytes: number }[];
 }
 
 /** Settings → Agents: starting agents from New message (config.json `inboxLaunch`). Off, only `enabled` and a false `full_permissions`. */
@@ -914,6 +911,7 @@ export class InboxApiError extends Error {
     readonly threadId: string | null = null,
     /** `question_revision_conflict`: the question's revision on the Inbox now, when the answer names it. */
     readonly currentRevision: number | null = null,
+    readonly by: string | null = null,
   ) {
     super(message);
     this.name = 'InboxApiError';
@@ -931,6 +929,7 @@ async function readJson<T>(response: Response): Promise<T> {
       typeof body.retry_at === 'number' ? body.retry_at : null,
       typeof body.thread_id === 'string' ? body.thread_id : null,
       typeof body.current_revision === 'number' ? body.current_revision : null,
+      typeof body.by === 'string' ? body.by : null,
     );
   }
   return body as T;
@@ -2084,6 +2083,8 @@ export const inboxApi = {
   /** A PR author's profile picture, served by the Inbox from its own origin (only an author the last list returned). */
   pullDetails: (key: string, signal?: AbortSignal) => get<InboxPullDetailsAnswer>(inboxUrl(`/pulls/details?key=${encodeURIComponent(key)}`), signal),
   pullAvatarUrl: (host: string, login: string) => inboxUrl('/pulls/avatar', `host=${encodeURIComponent(host)}&login=${encodeURIComponent(login)}`),
+  pullMediaUrl: (key: string, url: string) => inboxUrl('/pulls/media', `key=${encodeURIComponent(key)}&url=${encodeURIComponent(url)}`),
+  pullMediaSizes: (key: string, signal?: AbortSignal) => get<{ sizes: Record<string, { width: number; height: number }> }>(inboxUrl(`/pulls/media/sizes?key=${encodeURIComponent(key)}`), signal),
   /** One layer's diff, or the stack's from its base up to that layer (a PR the last list named). */
   pullDiff: (key: string, scope: InboxPullDiffScope, signal?: AbortSignal) =>
     get<InboxPullDiffAnswer>(inboxUrl(`/pulls/diff?key=${encodeURIComponent(key)}&scope=${scope}`), signal),
@@ -2092,8 +2093,8 @@ export const inboxApi = {
   /** New review's change summary for a project's local changes. */
   reviewChanges: (project: string, changes: InboxReviewChanges, signal?: AbortSignal) => get<InboxReviewChangesAnswer>(inboxUrl(`/reviews/changes?project=${encodeURIComponent(project)}&changes=${changes}`), signal),
   /** One changed file's whole text at both ends of that diff, for its expand arrows, while it is the blobs (`old`, `new`) the patch on screen names. */
-  pullFile: (key: string, scope: InboxPullDiffScope, path: string, ids: PatchBlobIds, signal?: AbortSignal) =>
-    get<InboxFileContents>(inboxUrl(`/pulls/file?key=${encodeURIComponent(key)}&scope=${scope}&path=${encodeURIComponent(path)}&old=${ids.oldId}&new=${ids.newId}`), signal),
+  pullFile: (key: string, scope: InboxPullDiffScope, path: string, pin: PatchBlobIds | { head: string }, signal?: AbortSignal) =>
+    get<InboxFileContents>(inboxUrl(`/pulls/file?key=${encodeURIComponent(key)}&scope=${scope}&path=${encodeURIComponent(path)}&${'head' in pin ? `head=${pin.head}` : `old=${pin.oldId}&new=${pin.newId}`}`), signal),
   /** The person started a PR's (a stack's open layers') review thread with an agent: `threadId` is the thread the review picker (or compose's New thread) just started for it. */
   pullOwner: (keys: readonly string[], threadId: string, ask?: 'guide' | 'custom') => post<{ ok: true }>(inboxUrl('/pulls/owner'), { keys: [...keys], thread_id: threadId, ...(ask ? { ask } : {}) }),
   /** Before a hand-off is sent: may these PRs go to an agent in `projectId`? (404 `pull_unknown`, 422 another project's.) */
@@ -2252,6 +2253,7 @@ export const inboxApi = {
    */
   sendNow: (messageId: string, session?: string | null) =>
     post<{ message: InboxMessage }>(messageUrl(messageId, `/send-now`), session ? { session } : {}),
+  takeBack: (messageId: string) => post<{ message: InboxMessage; draft: InboxReplyDraft | null; compose: InboxDraft | null }>(messageUrl(messageId, '/take-back'), {}),
   newMessage: (threadId: string, input: { session: string; body: string; idempotency_key: string }) =>
     post<{ message: InboxMessage | null; replayed: boolean; held?: OutboxView }>(threadUrl(threadId, `/message`), input).catch((cause) => {
       // To another machine: held in the outbox, as a reply is; the thread shows it waiting.
@@ -2321,8 +2323,6 @@ export const inboxApi = {
   askSeen: (threadId: string, seenAt: string) => post<unknown>(inboxUrl(`/threads/${threadId}/ask/seen`), { seen_at: seenAt }),
   askStop: (threadId: string, turnId: string) => post<{ stopped: boolean }>(inboxUrl(`/threads/${threadId}/ask/stop`), { turn_id: turnId }),
   deleteProject: (projectId: string) => post<{ store: InboxStorageModel }>(inboxUrl(`/projects/${encodeURIComponent(projectId)}/delete`), {}),
-  /** Settings → Storage's Remove on a dated backup (the Inbox on SQLite only). */
-  removeBackup: (name: string) => post<{ store: InboxStorageModel }>(inboxUrl(`/settings/storage/backups/${encodeURIComponent(name)}/remove`), {}),
 };
 
 /** One question and what came of it (`packages/shared/inbox/ask.ts`). */
