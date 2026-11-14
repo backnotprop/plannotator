@@ -17,6 +17,7 @@
 import { useEffect, useRef, type ReactNode } from 'react';
 import { HostMark, Icon } from '../icons';
 import { canAddRecipient, type RecipientRow } from '../replyRecipients';
+import { labelOf, shortLabel, type SessionLabels } from '../sessionLabels';
 import { namesList } from '../tags';
 import { TagStack } from './TagPicker';
 import { Tip } from './Tip';
@@ -53,6 +54,7 @@ export function ReplyRecipient({
   onOnly,
   onToggle,
   onTagAnother,
+  labels,
 }: {
   /** Every agent the list offers, live first, ended last. */
   rows: readonly RecipientRow[];
@@ -63,11 +65,20 @@ export function ReplyRecipient({
   onOnly: (row: RecipientRow) => void;
   onToggle: (row: RecipientRow) => void;
   onTagAnother: () => void;
+  /** Each session's title, where it has one: the pill and the list show it over the fallback name. */
+  labels?: SessionLabels;
 }) {
   const listId = useRef(`ib-rpick-${Math.random().toString(36).slice(2)}`).current;
   const chosenIds = chosen.map((r) => r.session);
   const one = chosen.length === 1 ? chosen[0]! : null;
-  const names = namesList(chosen.map((r) => r.label));
+  /** What the pill and the list show for a row: its session's title where it has one, else its fallback name. */
+  const nameOf = (row: RecipientRow) => labelOf(labels ?? {}, row.session) ?? row.label;
+  /** The narrow name: the title cut short where it has one, else the row's short name. */
+  const shortOf = (row: RecipientRow) => {
+    const label = labelOf(labels ?? {}, row.session);
+    return label ? shortLabel(label) : row.short;
+  };
+  const names = namesList(chosen.map(nameOf));
   const ended = one?.state === 'ended';
 
   // A press outside the pill and its list closes the list; so does Escape, before anything else hears it.
@@ -98,7 +109,7 @@ export function ReplyRecipient({
   ) : (
     <TagStack participants={chosen} />
   );
-  const words = one ? one.label : `${chosen.length} agents`;
+  const words = one ? nameOf(one) : `${chosen.length} agents`;
   const button = (
     <button
       type="button"
@@ -112,7 +123,7 @@ export function ReplyRecipient({
       onMouseDown={(event) => event.preventDefault()}
       onClick={() => onOpen(!open)}
     >
-      <Face tile={tile} full={words} short={one ? one.short : words} ended={ended} />
+      <Face tile={tile} full={words} short={one ? shortOf(one) : words} ended={ended} />
     </button>
   );
 
@@ -128,7 +139,7 @@ export function ReplyRecipient({
                 <HostMark host={row.host} agent={row.session} />
               </span>
               <span className="ib-rpick-l" dir="auto">
-                {row.label}
+                {nameOf(row)}
               </span>
               {quiet && <span className="ib-rpick-q">{quiet}</span>}
             </button>
@@ -136,7 +147,7 @@ export function ReplyRecipient({
               type="button"
               role="checkbox"
               aria-checked={on}
-              aria-label={`Also send to ${row.label}`}
+              aria-label={`Also send to ${nameOf(row)}`}
               className="ib-rpick-tick"
               data-recipient-tick={row.session}
               disabled={!canAddRecipient(row, chosenIds)}
@@ -166,7 +177,7 @@ export function ReplyRecipient({
     <span className="ib-rto-slot">
       {rows.map((row) => (
         <span key={row.session} className="ib-rto ib-rto-ghost" aria-hidden="true">
-          <Face tile={<span className="ib-atile" />} full={row.label} short={row.short} ended={row.state === 'ended'} />
+          <Face tile={<span className="ib-atile" />} full={nameOf(row)} short={shortOf(row)} ended={row.state === 'ended'} />
         </span>
       ))}
       {pill}
