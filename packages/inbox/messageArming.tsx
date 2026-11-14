@@ -78,6 +78,8 @@ export function createMessageArms(): MessageArms {
     if (!armedIds.has(id) || !element) return;
     // Never under the person's hands: focus inside, or a menu or tooltip of it open.
     if (element.contains(document.activeElement) || element.querySelector('[data-popup-open]')) return;
+    const box = element.getBoundingClientRect();
+    if (box.width === 0 && box.height === 0) return;
     armedIds.delete(id);
     notify(id);
   };
