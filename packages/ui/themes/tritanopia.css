@@ -1,0 +1,72 @@
+/* Tritanopia — tuned for blue-yellow color vision deficiency (tritanopia /
+ * tritanomaly). Additions are cyan/teal, deletions are rose/crimson: the pair
+ * differs along the red-cyan axis that remains distinct in tritanopia, while
+ * keeping >= 4.7:1 WCAG contrast over the strongest tint in both modes. */
+.theme-tritanopia {
+  --background: #16181d;
+  --foreground: #eaedf2;
+  --card: #1c1f26;
+  --card-foreground: #eaedf2;
+  --popover: #22262e;
+  --popover-foreground: #eaedf2;
+  --primary: #3cc6d9;
+  --primary-foreground: #10131a;
+  --secondary: #2a2e37;
+  --secondary-foreground: #dfe3ea;
+  --muted: #232730;
+  --muted-foreground: #a7aeba;
+  --accent: #f0657d;
+  --accent-foreground: #16181d;
+  --destructive: #d94862;
+  --destructive-foreground: #ffffff;
+  --border: #343945;
+  --input: #232730;
+  --ring: #3cc6d9;
+  --success: #18a4b8;
+  --success-foreground: #10131a;
+  --warning: #e86b82;
+  --warning-foreground: #16181d;
+
+  --font-sans: 'Inter Variable', 'Inter', system-ui, sans-serif;
+  --font-mono: 'Geist Mono Variable', 'Geist Mono', 'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+  --radius: 0.625rem;
+
+  --code-bg: #1d212a;
+  --focus-highlight: #3cc6d9;
+
+  /* Review-editor diff pair (Pierre pipeline). */
+  --diffs-addition-color-override: #18a4b8;
+  --diffs-deletion-color-override: #d94862;
+}
+
+.theme-tritanopia.light {
+  --background: #f8f9fb;
+  --foreground: #22262e;
+  --card: #ffffff;
+  --card-foreground: #22262e;
+  --popover: #ffffff;
+  --popover-foreground: #22262e;
+  --primary: #0b7a8c;
+  --primary-foreground: #ffffff;
+  --secondary: #e7eaef;
+  --secondary-foreground: #333a45;
+  --muted: #eceef3;
+  --muted-foreground: #565e6b;
+  --accent: #b82944;
+  --accent-foreground: #ffffff;
+  --destructive: #c42b47;
+  --destructive-foreground: #ffffff;
+  --border: #d8dce3;
+  --input: #eceef3;
+  --ring: #0b7a8c;
+  --success: #0d8294;
+  --success-foreground: #ffffff;
+  --warning: #b82944;
+  --warning-foreground: #ffffff;
+
+  --code-bg: #eef0f4;
+  --focus-highlight: #0b7a8c;
+
+  --diffs-addition-color-override: #0d8294;
+  --diffs-deletion-color-override: #c42b47;
+}
