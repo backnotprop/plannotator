@@ -45,7 +45,7 @@ describe('guide rows', () => {
   test('a guide for another head of this review says it was written for an earlier version', () => {
     expect(guideMismatchText({ where: 'diff', moved: false })).toBeNull();
     expect(guideMismatchText({ where: 'target', moved: true })).toBe('Written for an earlier version of this diff');
-    expect(guideMismatchText({ where: 'other', moved: false })).toBeNull();
+    expect(guideMismatchText({ where: 'other', moved: true })).toBeNull();
   });
 
   test('resume lands on the first unread chapter whose file is still in the diff', () => {
