@@ -506,4 +506,11 @@ describe('marketing embeds', () => {
     expect(toolstrip).not.toContain('www.youtube.com/embed/');
     expect(toolstrip).toContain('www.youtube-nocookie.com/embed/');
   });
+
+  test('the Tater sprite sheets reach only the plan editor, which registers them', () => {
+    const sprite = /from\s+['"][^'"]*TaterSprite(?:Pullup|Sitting)['"]/;
+    expect(read('packages/ui/components/Viewer.tsx')).not.toMatch(sprite);
+    expect(read('packages/ui/components/AnnotationToolstrip.tsx')).not.toMatch(sprite);
+    expect(read('packages/editor/App.tsx')).toContain("import '@plannotator/ui/utils/tater-sprites-eager';");
+  });
 });

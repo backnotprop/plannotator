@@ -415,6 +415,7 @@ export function createInboxQwenWake(options: {
   }
   const dropClaim = (key: string) => {
     const claim = claims.get(key);
+    if (claim) store.handover.giveBack(claim.itemId, claim.session);
     if (claim?.msgId) byMsgId.delete(claim.msgId);
     claims.delete(key);
     rmSync(claimPath(key), { recursive: true, force: true });
@@ -693,6 +694,7 @@ export function createInboxQwenWake(options: {
     if (retry && retry.at > now()) return;
     const from = await bindReceipts();
     if (!from || stopped) return;
+    if (id === item.id && !store.handover.hand(item, session, "qwen")) return;
     try {
       mkdirSync(dir, { recursive: true });
       mkdirSync(claimPath(key));
