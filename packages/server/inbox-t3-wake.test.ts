@@ -12,6 +12,7 @@ import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/cli
 import { T3Credentials } from "@plannotator/t3-code/auth";
 import type { T3Rpc } from "@plannotator/t3-code/t3-client";
 import type { InboxThread } from "@plannotator/core/inbox-types";
+import { INBOX_WAKES_META_KEY } from "@plannotator/shared/inbox/connection";
 import { startInboxServer, type InboxServer } from "./inbox";
 import { INBOX_ASKER_RESTART_GRACE_MS } from "./inbox-sessions";
 import { INBOX_REPLY_ARRIVES_TEXT, INBOX_REPLY_READ_LATER_TEXT, INBOX_REPLY_T3_WHILE_RUNNING_TEXT } from "./inbox-mcp";
@@ -309,6 +310,36 @@ describe("a reply to a T3 thread whose Claude runs the Claude Code mod: one owne
     const text = (await w.send("Anyone there?")).text;
     expect(text).toContain(INBOX_REPLY_T3_WHILE_RUNNING_TEXT);
     expect(text).not.toContain(INBOX_REPLY_ARRIVES_TEXT);
+  });
+
+  test("only a T3 thread the mod wakes, with no grant, gets the while-running line: every other sender's line is unchanged", async () => {
+    const ARRIVES = "The person's reply arrives in this session by itself, as a new message once the session is idle: end your turn, or go on with other work.";
+    const LOOK = "If it has not arrived when you next work, call read_thread with this thread_id.";
+    const LATER = "The person's reply won't arrive in this session by itself: go on with your work and call read_thread with this thread_id later.";
+    for (const grant of [false, true]) {
+      const w = await world({ grant });
+      // `wakes`: the sender's own connection says it wakes the session, as the Claude Code mod and the plugins do.
+      const send = async (host: string | undefined, session: string, wakes: boolean) => {
+        const result = await w.client.callTool({
+          name: "send_message",
+          arguments: { body: "Which queue?", project_path: "/tmp", agent_session: session, ...(host ? { agent_host: host } : {}) },
+          ...(wakes ? { _meta: { [INBOX_WAKES_META_KEY]: true } } : {}),
+        });
+        return (result.content as { text: string }[])[0]!.text.split("\n")[0]!;
+      };
+      const ends = (text: string, line: string) => expect(text.endsWith(` ${line}`)).toBe(true);
+      // An interactive Claude Code session, Pi and OpenCode 2, each woken by its own connection.
+      for (const host of ["claude-code", "pi", "opencode"]) ends(await send(host, `ses_${host}`, true), ARRIVES);
+      // `claude -p` or another SDK session not under T3: the mod sends without the wake. An MCP-over-HTTP agent.
+      ends(await send("claude-code", "ses_headless", false), LATER);
+      ends(await send(undefined, "ses_http", false), LATER);
+      // Codex with no `codex queue` here is not woken: its line is unchanged.
+      ends(await send("codex", "019a0000-0000-7000-8000-000000000001", false), LATER);
+      // The T3 thread its mod wakes: unchanged with a grant that reaches it, the while-running line without one.
+      const t3 = await send("t3", THREAD, true);
+      if (grant) ends(t3, `${ARRIVES} ${LOOK}`);
+      else ends(t3, INBOX_REPLY_T3_WHILE_RUNNING_TEXT);
+    }
   });
 
   test("with no grant, once T3 released that Claude, the thread's reply says it waits for a sign-in, and clears when it goes in", async () => {

@@ -187,4 +187,32 @@ describe("the send's result line for a T3 thread", () => {
     expect(await t3WokenOnlyWhileRunning({ t3WakeReaches: async () => Promise.reject(new Error("down")) }, true, t3)).toBe(true);
     expect(await t3WokenOnlyWhileRunning({}, true, t3)).toBe(false);
   });
+
+  test("every agent but a T3 thread with no usable sign-in keeps its line, byte for byte", async () => {
+    // The words as they were before the T3 sentence existed, written out: a change to them fails here.
+    const ARRIVES = "The person's reply arrives in this session by itself, as a new message once the session is idle: end your turn, or go on with other work.";
+    const LOOK = "If it has not arrived when you next work, call read_thread with this thread_id.";
+    const LATER = "The person's reply won't arrive in this session by itself: go on with your work and call read_thread with this thread_id later.";
+    // The T3 wake cannot reach anything: only a sender filed as a T3 thread is asked at all.
+    const noSignIn = { t3WakeReaches: async () => false };
+    const line = async (wakes: boolean, host: string | undefined, session = "ses_1", context: Parameters<typeof t3WokenOnlyWhileRunning>[0] = noSignIn) =>
+      replyNextStepText(wakes, host, await t3WokenOnlyWhileRunning(context, wakes, { agent_host: host, agent_session: session }));
+    // An interactive Claude Code session (the mod wakes it), Pi, OpenCode 2 and the other plugin hosts.
+    for (const host of ["claude-code", "pi", "opencode", "dsh", "cline", "openclaw", "hermes"]) expect([host, await line(true, host)]).toEqual([host, ARRIVES]);
+    // `claude -p` and other SDK sessions not under T3: the mod sends without the wake.
+    expect(await line(false, "claude-code")).toBe(LATER);
+    // Codex and Qwen Code, woken by the Inbox; and not woken (codex exec, no queue).
+    for (const host of ["codex", "qwen"]) {
+      expect(await line(true, host, "019a0000-0000-7000-8000-000000000001")).toBe(`${ARRIVES} ${LOOK}`);
+      expect(await line(false, host, "019a0000-0000-7000-8000-000000000001")).toBe(LATER);
+    }
+    // An MCP-over-HTTP agent, naming no host or its own.
+    expect(await line(false, undefined)).toBe(LATER);
+    expect(await line(false, "cursor")).toBe(LATER);
+    // A T3 thread with a sign-in the T3 wake can send under, and one nothing wakes.
+    expect(await line(true, "t3", THREAD, { t3WakeReaches: async () => true })).toBe(`${ARRIVES} ${LOOK}`);
+    expect(await line(false, "t3", THREAD)).toBe(LATER);
+    // The one case that changes: a T3 thread its mod wakes, with no sign-in that can send into it.
+    expect(await line(true, "t3", THREAD)).toBe(INBOX_REPLY_T3_WHILE_RUNNING_TEXT);
+  });
 });
