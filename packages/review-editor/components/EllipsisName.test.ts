@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { fitMiddle } from './EllipsisName';
+import { fitDirectory, fitMiddle } from './EllipsisName';
 
 const monospace = (text: string) => text.length * 7;
 
@@ -15,5 +15,13 @@ describe('a name too long for its room', () => {
 
   test('a name that fits is left whole', () => {
     expect(fitMiddle('a.ts', 70, monospace)).toBe('a.ts');
+  });
+});
+
+describe('a folder prefix too long for its room', () => {
+  test('drops whole leading folders, cut at a separator, never mid-word', () => {
+    expect(fitDirectory('src/ui/components/', 200, monospace)).toBe('src/ui/components/');
+    expect(fitDirectory('src/ui/components/', 98, monospace)).toBe('…/components/');
+    expect(fitDirectory('src/ui/components/', 40, monospace)).toBe('');
   });
 });

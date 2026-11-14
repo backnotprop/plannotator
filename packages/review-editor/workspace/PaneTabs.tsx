@@ -14,7 +14,16 @@ export const TAB_MIN_WIDTH = 72;
 
 const MENU_RESERVE = 44;
 const TAB_GAP = 16;
-const ACTIVE_MIN_WIDTH = 120;
+const ACTIVE_NEED_WIDTH = 150;
+
+function naturalWidth(item: HTMLElement): number {
+  let extra = 0;
+  for (const name of item.querySelectorAll<HTMLElement>('[data-ellipsis-name]')) {
+    const full = Number.parseFloat(name.style.width);
+    if (full > name.clientWidth) extra += full - name.clientWidth;
+  }
+  return item.offsetWidth + extra;
+}
 
 type HiddenTabs = { ids: Set<string>; end: number };
 const NONE_HIDDEN: HiddenTabs = { ids: new Set(), end: 0 };
@@ -29,12 +38,12 @@ function useHiddenTabs(ref: React.RefObject<HTMLElement | null>, key: string, si
       const ids = new Set<string>();
       let end = 0;
       if (!single) {
-        const items = [...element.querySelectorAll<HTMLElement>('[data-pane-tab-item]')].map((item) => ({ id: item.getAttribute('data-pane-tab-item')!, width: item.offsetWidth }));
+        const items = [...element.querySelectorAll<HTMLElement>('[data-pane-tab-item]')].map((item) => ({ id: item.getAttribute('data-pane-tab-item')!, width: naturalWidth(item) }));
         const total = items.reduce((sum, item, index) => sum + item.width + (index ? TAB_GAP : 0), 0);
         if (total > element.clientWidth + 1) {
           const limit = element.clientWidth - MENU_RESERVE;
           const kept = items.filter((item) => item.id === activeId || item.id === REVIEW_ALL_FILES_PANEL_ID);
-          let used = kept.reduce((sum, item, index) => sum + (item.id === REVIEW_ALL_FILES_PANEL_ID ? item.width : Math.min(item.width, ACTIVE_MIN_WIDTH)) + (index ? TAB_GAP : 0), 0);
+          let used = kept.reduce((sum, item, index) => sum + (item.id === REVIEW_ALL_FILES_PANEL_ID ? item.width : Math.min(item.width, ACTIVE_NEED_WIDTH)) + (index ? TAB_GAP : 0), 0);
           for (const item of items) {
             if (kept.includes(item)) continue;
             if (used + TAB_GAP + item.width <= limit) used += TAB_GAP + item.width;
@@ -141,8 +150,8 @@ export const PaneTabs: React.FC<{
           >
             <TabIcon tab={tab} onClick={() => onActivate(tab.id)} />
             {directory && (
-              <span aria-hidden="true" className="min-w-0 shrink-[1000] max-w-[40%] overflow-hidden text-ellipsis whitespace-nowrap text-[13px] text-muted-foreground [direction:rtl]" data-pane-tab-directory="">
-                <bdi>{directory}</bdi>
+              <span aria-hidden="true" className="min-w-0 shrink-[1000] max-w-[40%] -mr-1 flex text-[13px] text-muted-foreground" data-pane-tab-directory="">
+                <EllipsisName text={directory} directory />
               </span>
             )}
             <button

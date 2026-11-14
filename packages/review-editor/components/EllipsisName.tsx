@@ -34,9 +34,20 @@ export function fitMiddle(name: string, available: number, width: (text: string)
   return `${stem.slice(0, Math.max(1, low))}${ELLIPSIS}${extension.slice(1)}`;
 }
 
-export const EllipsisName: React.FC<{ text: string; keepExtension?: boolean; className?: string; title?: string }> = ({
+export function fitDirectory(directory: string, available: number, width: (text: string) => number): string {
+  if (width(directory) <= available) return directory;
+  const parts = directory.split('/').filter(Boolean);
+  for (let drop = 1; drop < parts.length; drop++) {
+    const candidate = `${ELLIPSIS}/${parts.slice(drop).join('/')}/`;
+    if (width(candidate) <= available) return candidate;
+  }
+  return '';
+}
+
+export const EllipsisName: React.FC<{ text: string; keepExtension?: boolean; directory?: boolean; className?: string; title?: string }> = ({
   text,
   keepExtension = true,
+  directory = false,
   className,
   title,
 }) => {
@@ -56,7 +67,7 @@ export const EllipsisName: React.FC<{ text: string; keepExtension?: boolean; cla
       }
       const full = Math.ceil(width(text)) + 1;
       const available = element.clientWidth;
-      const next = available > 0 && available < full ? fitMiddle(text, available, width, keepExtension) : text;
+      const next = available > 0 && available < full ? (directory ? fitDirectory(text, available, width) : fitMiddle(text, available, width, keepExtension)) : text;
       probe.textContent = '';
       setFitted((before) => (before.text === next && before.width === full ? before : { text: next, width: full }));
     };
@@ -65,7 +76,7 @@ export const EllipsisName: React.FC<{ text: string; keepExtension?: boolean; cla
     const observer = new ResizeObserver(fit);
     observer.observe(element);
     return () => observer.disconnect();
-  }, [text, keepExtension]);
+  }, [text, keepExtension, directory]);
 
   return (
     <span

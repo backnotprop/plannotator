@@ -185,7 +185,8 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
 
   const stageLabel = '';
   const commentLabel = '';
-  const viewedLabel = isVeryTight ? '' : 'Viewed';
+  const foldActions = !!paneTabs && narrow && !readOnly;
+  const viewedLabel = isVeryTight || (paneTabs && narrow) ? '' : 'Viewed';
   const { additions, deletions } = React.useMemo(() => countChanges(patch), [patch]);
 
   return (
@@ -287,7 +288,7 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
             {viewedLabel && <span>{viewedLabel}</span>}
           </button>
         )}
-        {showStageControl && canStage && onStage && (
+        {showStageControl && canStage && onStage && !foldActions && (
           <button
             onClick={onStage}
             disabled={isStaging}
@@ -323,7 +324,7 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
             {stageError}
           </span>
         )}
-        {onFileComment && (
+        {onFileComment && !foldActions && (
           <button
             ref={(el) => {
               fileCommentRef.current = el;
@@ -373,7 +374,11 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
             matching the plan/annotate side. */}
         {openIn}
         {!readOnly && <OpenInAppButton
-          extraItems={state?.onOpenToSide ? [{ label: 'Open to the side', onSelect: () => state.onOpenToSide!(filePath), icon: <OpenToSideIcon /> }] : undefined}
+          extraItems={[
+            ...(foldActions && showStageControl && canStage && onStage ? [{ label: isStaged ? 'Unstage this file' : 'Stage this file', onSelect: onStage }] : []),
+            ...(foldActions && onFileComment ? [{ label: 'Comment on this file', onSelect: () => headerRef.current && onFileComment(headerRef.current) }] : []),
+            ...(state?.onOpenToSide ? [{ label: 'Open to the side', onSelect: () => state.onOpenToSide!(filePath), icon: <OpenToSideIcon /> }] : []),
+          ]}
           filePath={filePath}
           base={state?.agentCwd ?? null}
           diffText={patch}
