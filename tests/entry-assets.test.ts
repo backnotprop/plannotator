@@ -349,6 +349,17 @@ describe('review entry assets', () => {
     }
   });
 
+  test('the opt-in @pierre/patches WASM is aliased out of every bundled app', () => {
+    for (const config of [
+      'apps/review/vite.config.ts',
+      'apps/hook/vite.config.ts',
+      'apps/portal/vite.config.ts',
+      'apps/inbox/vite.config.ts',
+    ]) {
+      expect(read(config)).toContain("'@pierre/patches': path.resolve(");
+    }
+  });
+
   // The alias assertions above only read SOURCE. A future @pierre/diffs bump
   // could reach the same inlined blob through a different import specifier and
   // every source check would still pass, so this reads the ARTIFACT: a base64

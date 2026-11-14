@@ -44,6 +44,7 @@ export default defineConfig({
       // highlights with Shiki. See build/pierre-highlights-stub.ts.
       '@pierre/highlights/themes/loader': path.resolve(__dirname, '../../build/pierre-highlights-stub.ts'),
       '@pierre/highlights': path.resolve(__dirname, '../../build/pierre-highlights-stub.ts'),
+      '@pierre/patches': path.resolve(__dirname, '../../build/pierre-patches-stub.ts'),
       '@pierre/diffs': '@pierre/diffs-sem',
       '@': path.resolve(__dirname, '.'),
       '@plannotator/shared': path.resolve(__dirname, '../../packages/shared'),
