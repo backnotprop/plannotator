@@ -17,6 +17,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { delimiter, dirname, isAbsolute, join, relative, sep } from "node:path";
 import { inboxGitRemoteKey } from "@plannotator/core/inbox-git-url";
+import { GIT_REPO_ENV } from "@plannotator/shared/child-env";
 import { prepareGitCommand } from "@plannotator/shared/review-core";
 
 /** Why a clone or a check failed, as the run line and the clone row say it. */
@@ -170,9 +171,6 @@ export function gitBinary(env: Readonly<Record<string, string>>): string {
   }
   return "/usr/bin/git";
 }
-
-/** What git is never handed from the login env: they point git at another repository's files. */
-const GIT_REPO_ENV = ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR", "GIT_NAMESPACE", "GIT_CEILING_DIRECTORIES"];
 
 /**
  * One git command as it runs: the person's own env (their SSH agent, their credential helper, their proxy) with
