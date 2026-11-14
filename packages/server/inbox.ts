@@ -5127,9 +5127,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       return debugLog.accept(req);
     }
 
-    // Pairing a phone, its checks, and Phones' tailnet and Wi-Fi switches: this computer's, and its owner's
+    // Pairing a phone, its checks, removing one, and Phones' tailnet and Wi-Fi switches: this computer's, and its owner's
     // from any of their own devices over the tailnet (owner ruling 2026-11-11); never a guest the allow list let in.
-    if (path === "/api/inbox/pairing" || path === "/api/inbox/pairing/checks" || (req.method === "POST" && (path === "/api/inbox/tailnet" || path === "/api/inbox/lan"))) {
+    const removesDevice = /^\/api\/inbox\/devices\/[^/]+\/revoke$/.test(path);
+    if (path === "/api/inbox/pairing" || path === "/api/inbox/pairing/checks" || removesDevice || (req.method === "POST" && (path === "/api/inbox/tailnet" || path === "/api/inbox/lan"))) {
       if (!ownerOrLocal(req, via)) return localOnly();
     }
 
@@ -5975,8 +5976,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           ) {
             throw new InboxError("validation_error", "tailscale: { on: boolean, replace_exposed?: boolean }.", { field: "tailscale" });
           }
-          // Turning tailnet publishing on (Keep it on at every start, Replace a hand-made mapping): the owner's, from any of their devices.
-          if (value.on && !owner) return localOnly();
+          // Tailnet publishing, on or off (Keep it on at every start, Replace a hand-made mapping): the owner's, from any of their devices.
+          if (!owner) return localOnly();
           tailscaleChange = { on: value.on, replaceExposed: value.replace_exposed === true };
         }
         // Every part is checked before anything is written, and the tailnet
