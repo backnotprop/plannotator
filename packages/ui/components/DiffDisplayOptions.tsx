@@ -47,6 +47,11 @@ const LINE_DIFF = [
   { value: 'char' as const, label: 'Char' },
   { value: 'none' as const, label: 'None' },
 ];
+const MINIMAP = [
+  { value: 'auto' as const, label: 'Auto' },
+  { value: 'always' as const, label: 'Always' },
+  { value: 'off' as const, label: 'Off' },
+];
 const MARK = 'w-3.5 h-3.5';
 const INDICATORS = [
   {
@@ -190,7 +195,11 @@ export const DiffDisplayOptionsBody: React.FC<{
           <Segmented label="Background strength" options={INTENSITY} value={intensity} onChange={(v) => set('diffLineBgIntensity', v)} />
         </div>
       )}
-      {minimapOption && <Switch label="Minimap on long diffs" checked={minimap} onChange={(v) => set('diffMinimap', v)} />}
+      {minimapOption && (
+        <Row label="Minimap">
+          <Segmented label="Minimap" options={MINIMAP} value={minimap} onChange={(v) => set('diffMinimap', v)} />
+        </Row>
+      )}
       <div className="border-t border-border/60 my-2 -mx-2" />
       <Row label="Change marks">
         <Segmented label="Change marks" options={INDICATORS} value={indicators} onChange={(v) => set('diffIndicators', v)} />

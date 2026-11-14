@@ -117,7 +117,7 @@ describe('diff minimap stays in step with the diff layout', () => {
     const render = (viewed: Set<string>) =>
       act(() => {
         root.render(
-          <DiffMinimap source={source} files={files} viewedPaths={viewed} notes={[]} metrics={metrics} labelTop={0} split={false} expandUnchanged={false} pulseRef={pulseRef} />,
+          <DiffMinimap source={source} files={files} viewedPaths={viewed} notes={[]} metrics={metrics} labelMinTop={0} split={false} expandUnchanged={false} pulseRef={pulseRef} />,
         );
       });
 

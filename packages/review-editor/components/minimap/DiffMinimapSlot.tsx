@@ -3,6 +3,7 @@ import { useConfigValue } from '@plannotator/ui/config';
 import type { DiffLayoutSource, LineSide, ScrollElementModel } from './layoutSource';
 import type { RowMetrics } from './rowModel';
 import type { MinimapKind } from './scene';
+import type { DiffMinimapMode } from '@plannotator/ui/config/settings';
 
 export const MINIMAP_LONG_SCREENS = 3;
 export const MINIMAP_BIG_FILE_LINES = 1000;
@@ -29,8 +30,6 @@ export interface MinimapFileInput {
   wholeFile?: { side: LineSide; lineCount: number };
 }
 
-export const MINIMAP_WHOLE_FILE_LINES = 400;
-
 export interface MinimapNote {
   filePath: string;
   side: LineSide;
@@ -46,7 +45,7 @@ export interface DiffMinimapSlotProps {
   viewedPaths: ReadonlySet<string> | undefined;
   notes: readonly MinimapNote[];
   metrics: RowMetrics;
-  labelTop: number;
+  labelMinTop: number;
   split: boolean;
   expandUnchanged: boolean;
   pulseRef: React.MutableRefObject<(() => void) | null>;
@@ -55,26 +54,27 @@ export interface DiffMinimapSlotProps {
 
 const DiffMinimap = React.lazy(() => import('./DiffMinimap'));
 
-export function isLongContent(contentHeight: number, viewportHeight: number, bigFile = false): boolean {
-  if (viewportHeight <= 0) return false;
+export function minimapShows(mode: DiffMinimapMode, contentHeight: number, viewportHeight: number, bigFile: boolean): boolean {
+  if (mode === 'off' || viewportHeight <= 0 || contentHeight <= 0) return false;
+  if (mode === 'always') return true;
   return contentHeight > viewportHeight * (bigFile ? 1 : MINIMAP_LONG_SCREENS);
 }
 
 export const DiffMinimapSlot: React.FC<DiffMinimapSlotProps> = ({ pulseRef, onShownChange, ...props }) => {
-  const enabled = useConfigValue('diffMinimap');
+  const mode = useConfigValue('diffMinimap');
   const { source } = props;
   const bigFile = useMemo(
-    () => props.files.some((file) => (file.wholeFile?.lineCount ?? 0) >= MINIMAP_WHOLE_FILE_LINES) || hasBigFile(props.files.filter((file) => !file.wholeFile).map((file) => file.patch)),
+    () => props.files.some((file) => (file.wholeFile?.lineCount ?? 0) > MINIMAP_BIG_FILE_LINES) || hasBigFile(props.files.filter((file) => !file.wholeFile).map((file) => file.patch)),
     [props.files],
   );
-  const [long, setLong] = useState(false);
+  const [shown, setShown] = useState(false);
   const innerPulseRef = useRef<(() => void) | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const check = useCallback(() => {
-    setLong(isLongContent(source.contentHeight(), source.viewportHeight(), bigFile));
+    setShown(minimapShows(mode, source.contentHeight(), source.viewportHeight(), bigFile));
     innerPulseRef.current?.();
-  }, [source, bigFile]);
+  }, [source, bigFile, mode]);
 
   const pulse = useCallback(() => {
     if (timerRef.current != null) return;
@@ -108,7 +108,6 @@ export const DiffMinimapSlot: React.FC<DiffMinimapSlotProps> = ({ pulseRef, onSh
     innerPulseRef.current?.();
   }, [props.files, props.viewedPaths, props.notes]);
 
-  const shown = enabled && long;
   useEffect(() => {
     onShownChange?.(shown);
   }, [shown, onShownChange]);

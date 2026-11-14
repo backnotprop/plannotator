@@ -79,7 +79,7 @@ describe('ReviewDockRightActions', () => {
     await act(async () => gear.click());
     const popup = document.querySelector('[data-diff-display-popup]')!;
     const rows = Array.from(popup.querySelectorAll('[role="switch"]')).map((row) => row.textContent);
-    expect(rows).toEqual(['Wrap long lines', 'Line numbers', 'Backgrounds', 'Minimap on long diffs', 'Whole file', 'Hide whitespace', 'Show moved & renamed code']);
+    expect(rows).toEqual(['Wrap long lines', 'Line numbers', 'Backgrounds', 'Whole file', 'Hide whitespace', 'Show moved & renamed code']);
     expect(popup.textContent).not.toContain('Unified');
   });
 

@@ -13,7 +13,7 @@ export interface DiffMinimapProps {
   viewedPaths: ReadonlySet<string> | undefined;
   notes: readonly MinimapNote[];
   metrics: RowMetrics;
-  labelTop: number;
+  labelMinTop: number;
   split: boolean;
   expandUnchanged: boolean;
   pulseRef: React.MutableRefObject<(() => void) | null>;
@@ -23,6 +23,9 @@ interface Hover {
   y: number;
   hit: MinimapHit;
 }
+
+const LABEL_HEIGHT = 22;
+const LABEL_GAP = 4;
 
 function layoutSignature(layout: MinimapLayout): string {
   let sum = 0;
@@ -51,7 +54,7 @@ function regionsOf(bands: readonly Band[], gap: number): number[] {
   return starts;
 }
 
-const DiffMinimap: React.FC<DiffMinimapProps> = ({ source, fallbackModel, files, viewedPaths, notes, metrics, labelTop, split, expandUnchanged, pulseRef }) => {
+const DiffMinimap: React.FC<DiffMinimapProps> = ({ source, fallbackModel, files, viewedPaths, notes, metrics, labelMinTop, split, expandUnchanged, pulseRef }) => {
   const stripRef = useRef<HTMLDivElement>(null);
   const columnRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -339,7 +342,7 @@ const DiffMinimap: React.FC<DiffMinimapProps> = ({ source, fallbackModel, files,
           aria-hidden="true"
           data-diff-minimap-label=""
           className="pointer-events-none absolute right-full mr-1 whitespace-nowrap rounded border border-border bg-popover px-1.5 py-0.5 text-[12px] leading-4 text-popover-foreground tabular-nums"
-          style={{ top: labelTop }}
+          style={{ top: Math.max(labelMinTop + LABEL_GAP, Math.min(size.height - LABEL_HEIGHT - LABEL_GAP, hover.y - LABEL_HEIGHT / 2)) }}
         >
           {baseName(hover.hit.file.path)}
           {hover.hit.line ? <span className="text-muted-foreground">:{hover.hit.line}</span> : null}
