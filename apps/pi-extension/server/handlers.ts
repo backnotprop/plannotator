@@ -8,7 +8,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import type { IncomingMessage } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
-import { saveDraft, loadDraft, deleteDraft, getDraftGeneration } from "../generated/draft.ts";
+import { saveDraft, loadDraft, deleteDraft, getDraftGeneration, missingDraftHeaders } from "../generated/draft.ts";
 import { type createReviewDraftSession, type ReviewDraftKeys } from "../generated/review-draft.ts";
 import { faviconBody, faviconIcoBody } from "../generated/favicon.ts";
 import { getServerConfig } from "../generated/config.ts";
@@ -201,8 +201,7 @@ export function handleDraftRequest(
 	} else {
 		const draft = loadDraft(draftKey);
 		if (!draft) {
-			const draftGeneration = getDraftGeneration(draftKey);
-			json(res, { found: false, ...(draftGeneration !== null ? { draftGeneration } : {}) }, 404);
+			sendMissingDraft(res, getDraftGeneration(draftKey));
 			return;
 		}
 		json(res, draft);
@@ -247,12 +246,13 @@ export function handleReviewDraftRequest(
 			json(res, loaded.draft);
 			return;
 		}
-		json(
-			res,
-			{ found: false, ...(loaded.draftGeneration !== null ? { draftGeneration: loaded.draftGeneration } : {}) },
-			404,
-		);
+		sendMissingDraft(res, loaded.draftGeneration);
 	}
+}
+
+export function sendMissingDraft(res: Res, draftGeneration: number | null): void {
+	res.writeHead(204, missingDraftHeaders(draftGeneration));
+	res.end();
 }
 
 function readDraftGenerationFromUrl(req: IncomingMessage): number | undefined {

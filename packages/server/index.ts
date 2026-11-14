@@ -61,7 +61,7 @@ import { appendFeedbackRecord, type FeedbackDecision } from "@plannotator/shared
 import { isFaviconStyle, type FaviconStyle } from "@plannotator/shared/favicon";
 import { readImprovementHook, getImprovementHookExpectedPath } from "@plannotator/shared/improvement-hooks";
 import { composeImproveContext } from "@plannotator/shared/pfm-reminder";
-import { handleImage, handleStarAsk, handleUpload, handleAgents, handleServerReady, handleDraftSave, handleDraftLoad, handleDraftDelete, handleApiNotFound, handleFavicon, handleReferenceSkills, handleReferenceSkillContent, handleSaveNotes, readDraftGenerationFromBody, type OpencodeClient } from "./shared-handlers";
+import { handleImage, handleStarAsk, handleUpload, handleAgents, handleServerReady, handleDraftSave, handleDraftLoad, handleDraftDelete, missingDraftResponse, handleApiNotFound, handleFavicon, handleReferenceSkills, handleReferenceSkillContent, handleSaveNotes, readDraftGenerationFromBody, type OpencodeClient } from "./shared-handlers";
 import { contentHash, deleteDraft, loadDraft } from "./draft";
 import { handleDoc, handleDocExists, handleObsidianVaults, handleObsidianFiles, handleObsidianDoc, handleFileBrowserFiles } from "./reference-handlers";
 import { closeAllFileBrowserWatchers, handleFileBrowserFilesStream } from "./reference-watch";
@@ -736,10 +736,7 @@ export async function startPlannotatorServer(
             if (!planDocumentDrafts) return handleDraftLoad(draftKey);
             const loaded = loadSessionDraftWithDocuments({ patchKey: draftKey }, planDocumentDrafts);
             if (loaded.found) return Response.json(loaded.draft);
-            return Response.json(
-              { found: false, ...(loaded.draftGeneration !== null ? { draftGeneration: loaded.draftGeneration } : {}) },
-              { status: 404 },
-            );
+            return missingDraftResponse(loaded.draftGeneration);
           }
 
           // API: per-document draft copies of the plan's linked documents

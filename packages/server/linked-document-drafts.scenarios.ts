@@ -144,7 +144,7 @@ export function defineLinkedDocumentDraftScenarios(runtime: string, start: Linke
 
     const loadDraft = async (server: LinkedDraftServer): Promise<{ status: number; body: LoadedDraft }> => {
       const res = await fetch(`${server.url}/api/draft`);
-      return { status: res.status, body: (await res.json()) as LoadedDraft };
+      return { status: res.status, body: (res.status === 204 ? {} : await res.json()) as LoadedDraft };
     };
 
     test("plan review advertises per-document copies", async () => {
@@ -199,7 +199,7 @@ export function defineLinkedDocumentDraftScenarios(runtime: string, start: Linke
       expect(body).toEqual(JSON.parse(JSON.stringify(stored)));
 
       const empty = await openPlan(planText());
-      expect((await loadDraft(empty)).status).toBe(404);
+      expect((await loadDraft(empty)).status).toBe(204);
     });
 
     test("a document read back is offered on the next reload", async () => {
@@ -246,7 +246,7 @@ export function defineLinkedDocumentDraftScenarios(runtime: string, start: Linke
         await close(server);
 
         const reopened = await openPlan(plan);
-        expect((await loadDraft(reopened)).status).toBe(404);
+        expect((await loadDraft(reopened)).status).toBe(204);
         for (const path of [design, notes]) {
           expect((await fetch(`${reopened.url}/api/draft/document?path=${encodeURIComponent(path)}`)).status).toBe(404);
         }
@@ -365,7 +365,7 @@ export function defineLinkedDocumentDraftScenarios(runtime: string, start: Linke
           headers: { "Sec-Fetch-Site": "cross-site" },
         });
         expect(read.status).toBe(403);
-        expect((await loadDraft(second)).status).toBe(404);
+        expect((await loadDraft(second)).status).toBe(204);
         expect(second.unsent()).toBe(0);
       });
     }
