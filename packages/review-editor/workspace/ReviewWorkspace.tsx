@@ -1,12 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import { storage } from '@plannotator/ui/utils/storage';
-import { reviewPanelComponents } from '../dock/reviewPanelComponents';
 import { hidesDockHeader } from '../dock/loneTabHeader';
 import { useReviewStateOptional } from '../dock/ReviewStateContext';
 import { PaneTabs } from './PaneTabs';
 import { PaneTabsMenu } from './PaneTabsMenu';
 import { PaneDivider } from './PaneDivider';
+import { PanePanels } from './PanePanels';
 import { clampRatio, type PaneLayout } from './paneLayout';
 import { WorkspaceStore, type WorkspaceApi } from './workspaceStore';
 import { readSavedLayout, snapshotLayout, writeSavedLayout } from './layoutMemory';
@@ -18,33 +18,41 @@ function readRatio(): number {
   return clampRatio(Number.parseFloat(storage.getItem(PANE_RATIO_KEY) ?? '0.5'));
 }
 
-type PanelComponent = React.ComponentType<{ api: unknown; params: Record<string, unknown>; containerApi: unknown }>;
+function useLayoutMemory(store: WorkspaceStore, reviewKey: string | undefined, ratio: number, setRatio: (ratio: number) => void) {
+  const restoredRef = useRef(false);
+  const ratioRef = useRef(ratio);
+  ratioRef.current = ratio;
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const save = useRef(() => {});
+  save.current = () => {
+    if (!reviewKey || !restoredRef.current) return;
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => writeSavedLayout(reviewKey, snapshotLayout(store.getLayout(), ratioRef.current)), SAVE_DELAY_MS);
+  };
 
-function useLayoutMemory(store: WorkspaceStore, reviewKey: string | undefined, ratioRef: React.RefObject<number>, setRatio: (ratio: number) => void) {
   useEffect(() => {
     if (!reviewKey) return;
     const saved = readSavedLayout(reviewKey);
-    let restored = !saved;
+    restoredRef.current = !saved;
     const added = store.api.onDidAddPanel(() => {
-      if (restored || !saved) return;
-      restored = true;
+      if (restoredRef.current || !saved) return;
+      restoredRef.current = true;
       queueMicrotask(() => {
         store.restore(saved);
         setRatio(clampRatio(saved.ratio));
       });
     });
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    const unsubscribe = store.subscribe(() => {
-      if (!restored) return;
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(() => writeSavedLayout(reviewKey, snapshotLayout(store.getLayout(), ratioRef.current ?? 0.5)), SAVE_DELAY_MS);
-    });
+    const unsubscribe = store.subscribe(() => save.current());
     return () => {
       added.dispose();
       unsubscribe();
-      if (timer) clearTimeout(timer);
+      if (timer.current) clearTimeout(timer.current);
     };
-  }, [store, reviewKey, ratioRef, setRatio]);
+  }, [store, reviewKey, setRatio]);
+
+  useEffect(() => {
+    save.current();
+  }, [ratio]);
 }
 
 const HeaderTabs: React.FC<{ layout: PaneLayout; store: WorkspaceStore; compact: boolean; onKeep?: (id: string) => void }> = ({ layout, store, compact, onKeep }) => {
@@ -76,8 +84,6 @@ export const ReviewWorkspace: React.FC<{
   const layout = useSyncExternalStore(store.subscribe, store.getLayout, store.getLayout);
   const state = useReviewStateOptional();
   const [ratio, setRatio] = useState(readRatio);
-  const ratioRef = useRef(ratio);
-  ratioRef.current = ratio;
   const rowRef = useRef<HTMLDivElement>(null);
   const readyRef = useRef(onReady);
   readyRef.current = onReady;
@@ -90,7 +96,7 @@ export const ReviewWorkspace: React.FC<{
     readyRef.current({ api: store.api });
   }, [store]);
 
-  useLayoutMemory(store, reviewKey, ratioRef, setRatio);
+  useLayoutMemory(store, reviewKey, ratio, setRatio);
 
   const commitRatio = (next: number) => {
     setRatio(next);
@@ -129,27 +135,7 @@ export const ReviewWorkspace: React.FC<{
                 onKeep={state?.onKeepFileTab}
               />
             )}
-            <div className="relative flex-1 min-h-0">
-              {pane.tabs.map((tab) => {
-                const Component = (reviewPanelComponents as unknown as Record<string, PanelComponent>)[tab.component];
-                const handle = store.api.getPanel(tab.id);
-                if (!Component || !handle) return null;
-                const visible = tab.id === pane.activeId;
-                return (
-                  <div
-                    key={tab.id}
-                    role="tabpanel"
-                    data-pane-panel={tab.id}
-                    aria-hidden={!visible || undefined}
-                    inert={!visible || undefined}
-                    data-pane-panel-visible={visible || undefined}
-                    className={`absolute inset-0 overflow-hidden ${visible ? '' : 'invisible pointer-events-none'}`}
-                  >
-                    <Component api={handle.api} params={tab.params} containerApi={store.api} />
-                  </div>
-                );
-              })}
-            </div>
+            <PanePanels pane={pane} store={store} />
           </section>
         </React.Fragment>
       ))}

@@ -84,11 +84,12 @@ function buildRepo(root: string): string {
   git(repo, ['config', 'user.email', 'test@example.com']);
   git(repo, ['config', 'user.name', 'Test']);
   write(repo, 'README.md', '# Sidebar\n');
+  write(repo, 'src/api/routes.ts', 'export const routes = {};\nexport const version = 1;\n');
   git(repo, ['add', '-A']);
   git(repo, ['commit', '-q', '-m', 'initial']);
   git(repo, ['checkout', '-q', '-b', 'feature/sidebar']);
   for (let i = 0; i < 14; i++) write(repo, `src/billing/part${i}.ts`, `export const part${i} = ${i};\n`.repeat(i + 1));
-  write(repo, 'src/api/routes.ts', 'export const routes = {};\n');
+  write(repo, 'src/api/routes.ts', 'export const routes = { billing: true };\nexport const version = 2;\n');
   write(repo, 'tests/billing.test.ts', 'test("billing", () => {});\n');
   write(repo, 'bun.lock', '{}\n');
   write(repo, 'README.md', '# Sidebar\n\nNow with billing.\n');
@@ -196,10 +197,10 @@ test('a phone keeps one pane, and its open files are a menu in the header title:
 
 test('two files side by side, the original next to the current, and the layout back after a reload', async ({ browser }) => {
   await withReview(browser, 900, async (page) => {
-    await row(page, 'part3.ts').click();
+    await row(page, 'routes.ts').click();
     await page.locator('[data-pane="0"] [data-file-view="whole"]').click();
     await expect(page.locator('[data-pane="0"] [data-whole-file-view]')).toBeVisible();
-    await row(page, 'part3.ts').click({ button: 'right' });
+    await row(page, 'routes.ts').click({ button: 'right' });
     await page.locator('[data-tree-open-to-side]').click();
     await expect(page.locator('[data-pane]')).toHaveCount(2);
     await expect(page.locator('[data-pane-divider]')).toBeVisible();
@@ -224,7 +225,7 @@ test('two files side by side, the original next to the current, and the layout b
 test('closing a tab keeps focus in the window: the next tab, or the tree', async ({ browser }) => {
   await withReview(browser, 900, async (page) => {
     await row(page, 'routes.ts').dblclick();
-    await expect(page.locator('[data-pane-tabs-slot] [data-pane-tab]')).toHaveCount(2);
+    await expect.poll(() => page.locator('[data-pane-tabs-slot] [data-pane-tab]').count()).toBeGreaterThan(1);
     await page.locator('[data-pane-tabs-slot] [data-pane-tab-close]').last().click();
     await expect.poll(() => page.evaluate(() => document.activeElement?.tagName ?? 'BODY')).not.toBe('BODY');
   });

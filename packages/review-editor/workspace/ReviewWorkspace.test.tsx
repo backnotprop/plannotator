@@ -106,7 +106,7 @@ describe.skipIf(!hasDom)('the review panes', () => {
       input().dispatchEvent(new Event('input', { bubbles: true }));
     });
     await act(async () => { api!.addPanel({ id: 'review-file:a.ts', component: 'review-file', title: 'a.ts', params: { filePath: 'a.ts' } }); });
-    expect(el.querySelector('[data-pane-panel="review-all-files"]')?.getAttribute('aria-hidden')).toBe('true');
+    expect(el.querySelector('[data-pane-panel="review-all-files"]')).toBeNull();
     await act(async () => api!.getPanel('review-file:a.ts')!.api.updateParameters({ filePath: 'c.ts' }));
     expect(el.querySelector('[data-probe="review-file:a.ts"] [data-probe-path]')?.textContent).toBe('c.ts');
     await act(async () => tabButton(el, 'review-all-files').click());
