@@ -3,8 +3,8 @@
  * and the saves they wait for, are on their way. Its pending mutation is the drawing (as rows.ts's row writes are):
  *  - the reply that carries the words lands: the pane draws it from the Send's answer, then the drawing goes;
  *  - the Send stops or fails (a refusal, no answer, a guard): the drawing goes by itself (a lost answer: once the
- *    thread read says whether the reply went, sendLanded.ts), and the words never left
- *    the box, which says why (Thread.tsx's Send keeps them there until a reply carrying them landed).
+ *    thread read says whether the reply went, sendLanded.ts), and the words, shown out of the box while they were
+ *    drawn here (ReplyTextField's `sendingWords`), are back in it with the reason.
  * Only the words are drawn ("Sending…" in place of the delivery line, as a reply held for another machine is,
  * HeldWrites.tsx): the server writes the rest of the reply (its answers, tags, files), so they show once it lands.
  *
