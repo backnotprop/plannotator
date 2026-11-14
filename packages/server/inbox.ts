@@ -238,6 +238,7 @@ import {
   piSessionOutdated,
 } from "./inbox-restart";
 import { createInboxCompose, INBOX_UPLOAD_SWEEP_MS } from "./inbox-compose";
+import { createInboxLiveReview } from "./inbox-live-review";
 import { INBOX_CROSS_SITE_BODY, isCrossSiteRequest, isWindowRequest } from "./inbox-cross-site";
 import { createInboxLaunch } from "./inbox-launch";
 import { createInboxCodexAccount } from "./inbox-codex-account";
@@ -3953,7 +3954,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         thread_id: reply.thread_id,
         reply_to: reply.reply_to,
         subject,
-        body: inboxBodyForAgent(reply),
+        body: inboxBodyForAgent(reply, store.reviewBatchOf(reply)),
         url: threadPageUrl(baseUrl, reply.thread_id),
         tagged: { owner: hostAgentName(store.recipientOf(reply)?.host) },
         // Added to the thread ("Add instead"): it works alongside the owner.
@@ -3986,7 +3987,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       thread_id: reply.thread_id,
       reply_to: reply.reply_to,
       subject,
-      body: inboxBodyForAgent(reply),
+      body: inboxBodyForAgent(reply, store.reviewBatchOf(reply)),
       url: threadPageUrl(baseUrl, reply.thread_id),
       ...(redirected ? { redirected_from: redirected } : {}),
       // A thread the person started: the wake says so (INBOX_NEW_THREAD_INSTRUCTION).
@@ -4512,6 +4513,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     },
   });
   compose.sweep();
+  const liveReview = createInboxLiveReview({ store, serverSession, live, resolveProject, findProjects, readBody: (req) => readBody(req), json });
   // Reply drafts: the words typed in a thread's reply box, kept per thread (packages/server/inbox-reply-drafts.ts).
   const replyDrafts = createInboxReplyDrafts({
     store,
@@ -6162,6 +6164,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       const machineDoor = door?.platform === MACHINE_PLATFORM;
       const composed = await compose.route(req, url, isOwner(req, via) && (!door || machineDoor), via, door ? { machine: machineDoor, window: door.window, from: machineDoor ? machines.machineOfDevice(door.device_id) : null } : null);
       if (composed) return composed;
+      const reviewed = await liveReview.route(req, url);
+      if (reviewed) return reviewed;
       // Reply drafts: the reply box's words per thread (approval "inbox-reply-drafts").
       const drafted = await replyDrafts.route(req, url);
       if (drafted) return drafted;

@@ -14,6 +14,7 @@
  * Browser-safe and dependency-free apart from core's own question model.
  */
 
+import type { InboxReviewAddressed, InboxReviewAnchor, InboxReviewBatch, InboxReviewLive, InboxReviewResolved } from "./review-threads";
 import type { QuestionAnswer, QuestionKind } from "./question-block";
 import type { InboxAnnotationRecord, InboxAttachment, InboxAttachmentKind, InboxInlineImage, InboxLiveSiteRef } from "./inbox-attachments";
 import type { InboxDeliverNowBy, InboxRowDelivery } from "./inbox-delivery";
@@ -861,6 +862,11 @@ export interface InboxMessage {
    * checks the session really ended; a reply aimed elsewhere while the asker is live does not carry it.
    */
   took_over?: boolean;
+  review_live?: InboxReviewLive;
+  review_anchor?: InboxReviewAnchor;
+  review_batch?: InboxReviewBatch;
+  review_resolved?: InboxReviewResolved | null;
+  review_addressed?: InboxReviewAddressed;
 }
 
 /** A hand-off a person's reply carries (`InboxMessage.handoff`). */
