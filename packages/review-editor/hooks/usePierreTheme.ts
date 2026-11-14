@@ -283,6 +283,7 @@ export function usePierreTheme(options?: {
               minmax(0, var(--split-left, 1fr))
               minmax(0, var(--split-right, 1fr)) !important;
           }
+          [data-code]:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
           [data-semantic-start]::after {
             margin-left: 3ch;
             font: 500 10.5px/inherit ui-sans-serif, system-ui, sans-serif;
