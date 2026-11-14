@@ -258,7 +258,7 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
             {isGenerated && (
               <span
                 data-pn-generated-badge
-                className="flex-none rounded-sm border border-border/60 bg-muted/60 px-1.5 py-0.5 text-[10px] font-medium leading-none text-muted-foreground"
+                className="flex-none rounded-sm border border-border/60 bg-muted/60 px-1.5 py-0.5 text-xs font-medium leading-none text-muted-foreground"
                 title="Marked linguist-generated in .gitattributes"
               >
                 generated

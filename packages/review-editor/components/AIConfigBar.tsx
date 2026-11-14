@@ -47,7 +47,7 @@ export const AIConfigBar: React.FC<AIConfigBarProps> = ({
   if (providers.length === 0) {
     return (
       <>
-      <div className="border-t border-border/50 px-2 py-1.5 text-[11px] text-muted-foreground/50">
+      <div className="border-t border-border/50 px-2 py-1.5 text-xs text-muted-foreground/50">
         No AI providers available
       </div>
       <AskSessionSetupHint text={setupHint} />

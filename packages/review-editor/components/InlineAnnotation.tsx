@@ -56,7 +56,7 @@ export const InlineAnnotation: React.FC<InlineAnnotationProps> = ({
         <div className="review-comment-body">{renderInlineMarkdown(metadata.text)}</div>
       )}
       {metadata.reasoning && (
-        <div className="review-comment-reasoning text-[11px] text-muted-foreground/60 leading-relaxed mt-1.5">
+        <div className="review-comment-reasoning text-xs text-muted-foreground/60 leading-relaxed mt-1.5">
           {metadata.reasoning}
         </div>
       )}

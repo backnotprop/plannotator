@@ -95,7 +95,7 @@ export const FileTreeFileRow = React.memo(function FileTreeFileRow({
               ) : sinceBaseMode && (onStageFile || sectionGroup === 'committed') ? (
                 <span className="w-4 h-4 flex-shrink-0" aria-hidden="true" />
               ) : isStaged && !sinceBaseMode ? (
-                <span className="text-[10px] text-primary font-medium flex items-center justify-center w-4 flex-shrink-0" title="Staged (git add)">+</span>
+                <span className="text-xs text-primary font-medium flex items-center justify-center w-4 flex-shrink-0" title="Staged (git add)">+</span>
               ) : null
             )}
             <span className="review-change-letter">

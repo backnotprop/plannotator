@@ -116,7 +116,7 @@ export const FileCommentCard: React.FC<{
       {comment.markdownPreview && !collapsed && (
         <div
           data-file-comment-markdown-quote=""
-          className="mt-1 mb-1 border-l-2 border-border/40 pl-1.5 text-[11px] italic text-muted-foreground/80 line-clamp-2"
+          className="mt-1 mb-1 border-l-2 border-border/40 pl-1.5 text-xs italic text-muted-foreground/80 line-clamp-2"
           title="Commented in the rendered Markdown preview"
         >
           {comment.markdownPreview.originalText}
