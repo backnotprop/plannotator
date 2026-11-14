@@ -109,7 +109,7 @@ describe("the T3 thread as the shim's session", () => {
       expect(inboxHostSessionFromEnv({ PLANNOTATOR_SESSION_TAG: `t3:${id}` })).toEqual({ ...t3, session: id });
     }
     // Nothing T3 would give a thread: no session, never a guess.
-    for (const id of ["", " ", `:${THREAD}`, `${THREAD} `, `${THREAD}\nPI_SESSION_ID=x`, "thread/../x", `a${"b".repeat(1024)}`]) {
+    for (const id of ["", " ", `:${THREAD}`, `${THREAD} `, `${THREAD}\nPI_SESSION_ID=x`, "thread/../x", `a${"b".repeat(4096)}`]) {
       expect(inboxHostSessionFromEnv({ ...T3_CLAUDE, T3CODE_THREAD_ID: id })).toBeNull();
       expect(inboxHostSessionFromEnv({ PLANNOTATOR_SESSION_TAG: `t3:${id}` })).toBeNull();
     }

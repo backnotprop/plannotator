@@ -38,16 +38,23 @@ export interface FakeT3 {
 }
 
 /**
- * One thread id of each form T3 Code gives a thread, as T3 forms them: an app thread (a UUID), an agent's
- * t3_thread_launch (`mcp:launch:` and a SHA-256), a scheduled task's run, a delegated task (its command id
- * URI-encoded, a task name's parentheses left as `encodeURIComponent` leaves them) and a provider-native thread.
+ * One thread id of each form T3 Code gives a thread, as T3 forms them: an app thread (a UUID), a thread made
+ * over T3's MCP (`mcp:` and a UUID, the form in issue #3311), an agent's t3_thread_launch (`mcp:launch:` and a
+ * SHA-256), a fork, an imported session, a create_threads child (a 256-character request id URI-encoded, over
+ * 2,000 characters), a scheduled task's run, a delegated task (its command id URI-encoded, a task name's
+ * parentheses left as `encodeURIComponent` leaves them), a provider-native thread and a subagent's thread (16 hex).
  */
 export const T3_THREAD_ID_FORMS = {
   app: "6f1c2d3e-4a5b-4c6d-8e7f-0a1b2c3d4e5f",
+  mcp: "mcp:2b7e9c41-5d3a-4f68-9a0b-1c2d3e4f5a6b",
   launched: `mcp:launch:${"516a2801f994e37f7b141931e19a9c846af2dbc38866a7a8b1ddc2fd079ce967"}`,
+  forked: "mcp:2b7e9c41-5d3a-4f68-9a0b-1c2d3e4f5a6b:fork",
+  imported: "import:claudeAgent:7c8d9e0f-1a2b-4c3d-9e4f-5a6b7c8d9e0f",
+  created: `thread:mcp:${encodeURIComponent("client:8a9b0c1d-2e3f-4a5b-8c6d-7e8f9a0b1c2d")}:${encodeURIComponent("日".repeat(256))}:0`,
   scheduled: "thread:project:9b2e4c1a-0d3f-4e5a-8b6c-7d8e9f0a1b2c:3c4d5e6f-7a8b-4c9d-8e0f-1a2b3c4d5e6f",
   delegated: "thread:delegated-task:command%3Amcp%3Aafafed4f-6fe6-436b-a561-273f0b6a0791%3Adelegate-task%3Afix-(part-2)",
   provider: `thread:provider:claudeAgent:native-thread:${encodeURIComponent(`pending:${"a".repeat(280)}`)}`,
+  subagent: "thread:subagent:9f3c2a7b1e4d6c08",
 } as const;
 
 export type T3RuntimeMode = "approval-required" | "auto-accept-edits" | "auto" | "full-access";
@@ -86,7 +93,7 @@ export function startFakeT3(options: { threads: string[]; token?: string; access
         const name = rpc.params?.name;
         const args = rpc.params?.arguments ?? {};
         const threadId = String(args.threadId);
-        if (!fake.threads.includes(threadId)) result = failure("thread_not_found", "The thread was not found.");
+        if (!fake.threads.includes(threadId)) result = failure("thread_not_found", `Thread ${threadId} was not found.`);
         else if (name === "t3_thread_read" && state.readFailure) result = failure(state.readFailure.code, state.readFailure.message);
         else if (name === "t3_thread_read") {
           result = text({

@@ -20,19 +20,22 @@ export const INBOX_T3_THREAD_ENV = "T3CODE_THREAD_ID";
 /**
  * A T3 Code thread id. A thread made in the app is a UUID; T3 derives every
  * other thread's id from what made it, so a retry makes the same thread:
- * `mcp:launch:<sha-256 hex>` (an agent's t3_thread_launch),
+ * `mcp:<uuid>` and `mcp:launch:<sha-256 hex>` (an agent's t3_thread_launch),
+ * `mcp:<uuid>:fork`, `import:<provider>:<session>` (an imported session),
+ * `thread:mcp:<namespace>:<request>:<n>` (create_threads),
  * `thread:project:<project>:<uuid>` (a scheduled task's run),
- * `thread:delegated-task:<command>` and
+ * `thread:delegated-task:<command>`, `thread:subagent:<16 hex>` and
  * `thread:provider:<driver>:native-thread:<native id>` (T3's IdAllocator:
  * each part `encodeURIComponent`ed, joined with `:`). T3 takes a send into
  * any of them, so each is the thread. The characters are those parts' (what
- * `encodeURIComponent` leaves, `%`, `:`); a provider's native id makes some
- * of them long (300+ characters seen), hence the bound.
+ * `encodeURIComponent` leaves, `%`, `:`); a short plain word passes too, as
+ * T3's own rule takes any. An encoded request id of up to 256 characters
+ * makes a create_threads id run past 2,000, hence the bound.
  */
-const T3_THREAD_ID = /^[A-Za-z0-9][A-Za-z0-9._~%:!*'()-]{0,1023}$/;
+const T3_THREAD_ID = /^[A-Za-z0-9][A-Za-z0-9._~%:!*'()-]{0,4095}$/;
 
 /** A T3 thread id that a shell command line carries as it is: none of the quoting characters `encodeURIComponent` leaves. */
-const T3_THREAD_ID_PLAIN = /^[A-Za-z0-9][A-Za-z0-9._~%:-]{0,1023}$/;
+const T3_THREAD_ID_PLAIN = /^[A-Za-z0-9][A-Za-z0-9._~%:-]{0,4095}$/;
 
 export function isT3ThreadId(value: unknown): value is string {
   return typeof value === "string" && T3_THREAD_ID.test(value);
