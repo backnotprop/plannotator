@@ -217,7 +217,7 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
              * the basename/extension receive the available phone width. */
             <span
               data-pn-compact-file-path
-              className="block min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-foreground [direction:rtl]"
+              className="block min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-left text-foreground [direction:rtl]"
             >
               <bdi>{filePath}</bdi>
             </span>
@@ -231,12 +231,13 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
           ) : (
             <>
               {!showFilenameOnly && directory && (
-                <span className="min-w-0 overflow-hidden text-ellipsis font-normal text-muted-foreground">
+                <span className="min-w-0 shrink-[1000] overflow-hidden text-ellipsis font-normal text-muted-foreground">
                   {directory}
                 </span>
               )}
               <span
-                className={showFilenameOnly ? 'block min-w-0 overflow-hidden whitespace-nowrap text-foreground' : 'flex-none whitespace-nowrap text-foreground'}
+                data-file-header-name=""
+                className={showFilenameOnly ? 'block min-w-0 overflow-hidden whitespace-nowrap text-foreground' : 'min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-foreground'}
               >
                 {truncatedName}
               </span>
