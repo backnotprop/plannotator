@@ -169,21 +169,62 @@ describe.skipIf(!hasDom)('the review panes', () => {
     resetStorageBackend();
   });
 
-  test('every tab opened is remembered, a preview or one opened into the pane that is not focused, and comes back on reload', async () => {
+  test('every tab opened is remembered, the diff tab Go to file uses, a preview, one opened into the pane that is not focused, and comes back on reload', async () => {
     const { setStorageBackend, resetStorageBackend } = await import('@plannotator/ui/utils/storage');
     const memory = new Map<string, string>();
     setStorageBackend({ getItem: (key) => memory.get(key) ?? null, setItem: (key, value) => { memory.set(key, value); }, removeItem: (key) => { memory.delete(key); } });
     await mount(false, { reviewKey: 'repo#reload' });
     await act(async () => { api!.addPanel({ id: 'review-file:balance.ts', component: 'review-file', title: 'balance.ts', params: { filePath: 'balance.ts' }, position: { referencePanel: 'review-all-files', direction: 'right' } }); });
-    await act(async () => { api!.addPanel({ id: 'review-file-preview:1', component: 'review-file', title: 'validate.ts', params: { filePath: 'validate.ts', preview: true }, position: { referencePanel: 'review-all-files', direction: 'within' } }); });
+    await act(async () => { api!.addPanel({ id: 'review-diff', component: 'review-diff', title: 'validate.ts', params: { filePath: 'validate.ts' }, position: { referencePanel: 'review-all-files', direction: 'within' } }); });
+    await act(async () => { api!.addPanel({ id: 'review-file-preview:1', component: 'review-file', title: 'entries.ts', params: { filePath: 'entries.ts', preview: true }, position: { referencePanel: 'review-all-files', direction: 'within' } }); });
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 350)); });
     await act(async () => root?.unmount());
     host?.remove();
     const el = await mount(false, { reviewKey: 'repo#reload' });
     await act(async () => { await Promise.resolve(); });
-    expect([...el.querySelectorAll('[data-pane="0"] [data-pane-tab]')].map((tab) => tab.getAttribute('data-pane-tab'))).toEqual(['review-all-files', 'review-file-preview:1']);
+    expect([...el.querySelectorAll('[data-pane="0"] [data-pane-tab]')].map((tab) => tab.getAttribute('data-pane-tab'))).toEqual(['review-all-files', 'review-diff', 'review-file-preview:1']);
     expect(el.querySelector('[data-pane="1"] [data-pane-tab="review-file:balance.ts"]')).not.toBeNull();
     resetStorageBackend();
+  });
+
+  test('tabs that do not fit hide whole into a menu counting them, never the active tab; one tab never gets a menu', async () => {
+    const slot = document.createElement('div');
+    document.body.appendChild(slot);
+    const restore = (name: 'offsetWidth' | 'clientWidth', own: PropertyDescriptor | undefined) => {
+      if (own) Object.defineProperty(HTMLElement.prototype, name, own);
+      else delete (HTMLElement.prototype as unknown as Record<string, unknown>)[name];
+    };
+    const width = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetWidth');
+    const client = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth');
+    Object.defineProperty(HTMLElement.prototype, 'offsetWidth', { configurable: true, get(this: HTMLElement) { return this.hasAttribute('data-pane-tab-item') ? 100 : 0; } });
+    Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get(this: HTMLElement) { return this.hasAttribute('data-pane-tabs') ? 300 : 0; } });
+    try {
+      await mount(false, { tabsSlot: slot });
+      expect(slot.querySelector('[data-pane-tabs-overflow]')).toBeNull();
+      for (const name of ['a', 'b', 'c', 'd']) {
+        await act(async () => { api!.addPanel({ id: `review-file:${name}.ts`, component: 'review-file', title: `${name}.ts`, params: { filePath: `${name}.ts` } }); });
+      }
+      await act(async () => { api!.getPanel('review-file:d.ts')!.api.setActive(); });
+      const hidden = [...slot.querySelectorAll('[data-pane-tab-item][aria-hidden="true"]')].map((item) => item.getAttribute('data-pane-tab-item'));
+      expect(hidden).not.toContain('review-file:d.ts');
+      expect(hidden).not.toContain('review-all-files');
+      expect(hidden.length).toBe(3);
+      expect(slot.querySelector('[data-pane-tabs-overflow]')?.textContent).toBe('3');
+    } finally {
+      restore('offsetWidth', width);
+      restore('clientWidth', client);
+      slot.remove();
+    }
+  });
+
+  test('a diff tab and a file tab of one file read apart: their own icon and tooltip', async () => {
+    const el = await mount();
+    await act(async () => { api!.addPanel({ id: 'review-diff', component: 'review-diff', title: 'a.ts', params: { filePath: 'a.ts' } }); });
+    await act(async () => { api!.addPanel({ id: 'review-file:a.ts', component: 'review-file', title: 'a.ts', params: { filePath: 'a.ts' } }); });
+    expect(tabButton(el, 'review-diff').querySelector('[data-tab-kind-icon="diff"]')).not.toBeNull();
+    expect(tabButton(el, 'review-diff').title).toBe('Diff of a.ts');
+    expect(tabButton(el, 'review-file:a.ts').querySelector('[data-tab-kind-icon="file"]')).not.toBeNull();
+    expect(tabButton(el, 'review-file:a.ts').title).toBe('File a.ts');
   });
 
   test('a References tab reads as the symbol with an icon, and a long title is capped', async () => {
