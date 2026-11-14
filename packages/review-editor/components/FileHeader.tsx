@@ -270,10 +270,12 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
             onClick={onToggleViewed}
             className={`text-xs rounded transition-colors flex items-center ${viewedLabel ? 'gap-1 px-2 py-1' : 'px-1.5 py-1'} ${
               isViewed
-                ? 'bg-success/15 text-success'
+                ? 'text-foreground hover:bg-muted'
                 : 'text-muted-foreground hover:text-foreground hover:bg-muted'
             }`}
             title={`${isViewed ? 'Mark as not viewed' : 'Mark as viewed'}${viewedKeyHint ? ' (V)' : ''}`}
+            aria-pressed={isViewed}
+            data-file-header-viewed=""
           >
             {isViewed ? (
               <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
