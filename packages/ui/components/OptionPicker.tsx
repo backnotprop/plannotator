@@ -103,7 +103,6 @@ export function OptionPicker({
       <button
         type="button"
         title={title}
-        aria-haspopup="listbox"
         aria-expanded={open}
         onClick={() => (open ? close() : setOpen(true))}
         className={TRIGGER[trigger]}
@@ -117,7 +116,6 @@ export function OptionPicker({
         <>
           <div className="fixed inset-0 z-10" onClick={close} />
           <div
-            role="listbox"
             className={cn(
               'absolute z-20 rounded-lg border border-border bg-popover shadow-lg',
               side === 'top' ? 'bottom-full mb-1' : 'top-full mt-1',
@@ -158,8 +156,7 @@ export function OptionPicker({
                     <button
                       key={o.value}
                       type="button"
-                      role="option"
-                      aria-selected={value === o.value}
+                      aria-pressed={value === o.value}
                       onClick={() => select(o.value)}
                       className={cn(
                         'flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left text-xs transition-colors',

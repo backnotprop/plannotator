@@ -294,7 +294,7 @@ export function PanelControlsRow(props: PanelControlsProps) {
         data-panel-controls-row=""
       >
         {scope ?? <span className="px-2 text-[13px] font-medium text-muted-foreground">Files</span>}
-        <div className="ml-auto flex flex-shrink-0 items-center pr-1">
+        <div className="ml-auto flex flex-shrink-0 items-center">
           {showViewedControls && onToggleHideViewed && (
             <ToolButton label="Hide viewed files" onClick={onToggleHideViewed} pressed={hideViewedFiles}>
               {hideViewedFiles ? <EyeOff className="w-3.5 h-3.5" aria-hidden="true" /> : <Eye className="w-3.5 h-3.5" aria-hidden="true" />}

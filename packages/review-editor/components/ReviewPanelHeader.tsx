@@ -510,7 +510,7 @@ export const ScopeSwitch: React.FC<{ model: ReviewPanelHeaderModel; width: numbe
           onClick={() => selectScope(model, 'changes')}
           data-tree-scope="changes"
           title={progress && progressTitle(progress) ? `The files this review changes: ${progressTitle(progress)}` : 'The files this review changes'}
-          className={`flex-shrink-0 ${narrow ? 'px-1.5' : 'px-2'} ${pill(scope === 'changes')}`}
+          className={`flex-shrink-0 px-1.5 ${pill(scope === 'changes')}`}
         >
           <span>Changes</span>
           {progress?.showViewed ? (
@@ -530,7 +530,7 @@ export const ScopeSwitch: React.FC<{ model: ReviewPanelHeaderModel; width: numbe
           onClick={() => selectScope(model, 'all')}
           data-tree-scope="all"
           title={`Every file of the repository at the revision the diff reads${all !== undefined ? ` (${formatCount(all)} files)` : ''}`}
-          className={`relative min-w-0 ${narrow ? 'pl-1.5 pr-2.5' : 'pl-1.5 pr-3'} ${pill(scope === 'all')}`}
+          className={`relative min-w-0 pl-1.5 pr-2.5 ${pill(scope === 'all')}`}
         >
           <span className="truncate">{narrow ? 'All' : 'All files'}</span>
           {all !== undefined && <span className="sr-only">{formatCount(all)}</span>}
