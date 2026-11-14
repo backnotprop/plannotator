@@ -39,6 +39,9 @@ export const SANDBOX_NO_KEYCHAIN_ENV: Readonly<Record<string, string>> = Object.
   GH_NO_UPDATE_NOTIFIER: "1",
 });
 
+/** Variables that point git at another repository's files, whatever its cwd. */
+export const GIT_REPO_ENV = ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR", "GIT_NAMESPACE", "GIT_CEILING_DIRECTORIES"] as const;
+
 /**
  * A fresh copy of the live `process.env`, with `extra` laid over it. A key in
  * `extra` whose value is `undefined` removes that variable from the child's
