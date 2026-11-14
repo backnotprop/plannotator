@@ -101,7 +101,7 @@ import { deliveryLine, handedItem, restartNote, uncertainItem, waitInputs, type 
 import { RestartLine } from './RestartNote';
 import { TakeBackButton, UndeliveredBand, UndeliveredText } from './Undelivered';
 import { useThreadTakeBack } from '../thread/useThreadTakeBack';
-import { useSendNow } from '../thread/useSendNow';
+import { useSendNow } from '../useSendNow';
 import { TakeBackLine, TakeBackNote } from '../parts/TakeBackLines';
 import { SendToAnotherSession } from '../compose/SendToAnotherSession';
 import { COMPOSE_CLONE_EVENT, type ComposeCloneRequest } from '../compose/model';
