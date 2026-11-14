@@ -92,6 +92,12 @@ export function applyRecord(model: HeldThread, event: InboxEvent): RecordOutcome
     const before = at >= 0 ? thread.messages[at]! : undefined;
     // Applied already: a replay changes nothing.
     if ((model.applied?.[record.id] ?? -1) >= event.seq) return NONE;
+    if (record.taken_back_at) {
+      if (record.id === thread.thread_id) return REREAD;
+      if (!before) return { kind: 'applied', model: { ...model, applied: withApplied(model, record.id, event.seq) } };
+      const messages = thread.messages.filter((m) => m.id !== record.id);
+      return { kind: 'applied', model: { ...model, thread: { ...thread, messages }, applied: withApplied(model, record.id, event.seq) } };
+    }
     // A 👍 given, changed or taken back: its delivery and its note come only with a read.
     if ((record.ack?.at ?? null) !== (before?.ack?.at ?? null) || (record.ack && before?.ack && record.ack.reaction !== before.ack.reaction)) {
       if (record.ack || before?.ack) return REREAD;
@@ -182,13 +188,13 @@ export function reconcileRead(held: HeldThread | undefined, read: ThreadModel): 
   const keep = new Map(newer);
   const heldById = new Map(held.thread.messages.map((m) => [m.id, m] as const));
   const readIds = new Set(read.thread.messages.map((m) => m.id));
-  let messages = read.thread.messages.map((m) => {
+  let messages = read.thread.messages.flatMap((m) => {
     const mine = heldById.get(m.id);
-    if (!mine) return m;
+    if (!mine) return keep.has(m.id) ? [] : [m];
     let out = keep.has(m.id) ? { ...mine, questions: m.questions, actions: m.actions } : m;
     // Questions applied after the read keep their newer revision.
     for (const q of [...(mine.questions ?? []), ...(mine.actions ?? [])]) if (keep.has(`${m.id}/${q.key}`)) out = withQuestion(out, q);
-    return out;
+    return [out];
   });
   for (const m of held.thread.messages) if (!readIds.has(m.id) && keep.has(m.id)) messages = [...messages, m];
   const root = keep.has(read.thread.thread_id) ? { resolved_at: held.thread.resolved_at, thread_name: held.thread.thread_name, archive_seq: held.thread.archive_seq } : {};
