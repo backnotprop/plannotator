@@ -188,4 +188,11 @@ describe.skipIf(!hasDom)('The Changes tree on Pierre trees', () => {
     expect(after.length).toBe(before.length);
     expect(after.every((row, i) => row === before[i])).toBe(true);
   });
+
+  test('grouping turned on after the first draw still starts Generated folded', async () => {
+    const el = await mount(<Tree />);
+    await rerender(<Tree groupByKind />);
+    expect(row(el, 'Generated/').getAttribute('aria-expanded')).toBe('false');
+    expect(row(el, 'Code/').getAttribute('aria-expanded')).toBe('true');
+  });
 });

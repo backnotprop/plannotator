@@ -258,12 +258,17 @@ export const ChangesTreeView: React.FC<ChangesTreeViewProps> = (props) => {
       const item = model.getItem(dir);
       return item != null && 'isExpanded' in item && !item.isExpanded();
     }));
-    const open = layout.dirs.filter((dir) => !collapsed.has(dir));
+    const seen = new Set(before.dirs);
+    for (const key of initiallyFoldedGroups ?? []) {
+      const dir = layout.groupDirs.get(key);
+      if (dir && !seen.has(dir)) collapsed.add(dir);
+    }
+    const open = layout.dirs.filter((dir) => !collapsed.has(dir) && !ancestorsOf(dir).some((a) => collapsed.has(a) && !seen.has(a)));
     model.resetPaths(layout.paths, { initialExpandedPaths: open });
     expandAll(model, open);
     model.setGitStatus(gitStatus);
     syncSelection();
-  }, [layout, gitStatus, model, syncSelection]);
+  }, [layout, gitStatus, model, syncSelection, initiallyFoldedGroups]);
 
   useEffect(() => {
     syncSelection();
