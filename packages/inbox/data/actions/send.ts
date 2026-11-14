@@ -1,11 +1,3 @@
-/**
- * One reply of a Send (the pane builds each reply, its idempotency key and what it carries, as before). The last
- * reply of a Send on this Inbox asks for the thread with its answer (`with_thread`): that thread goes into the cache
- * once its code and math can draw, so the sent reply appears with no read of the thread after it.
- *
- * The reply itself is drawn from that answer: the server writes its body (its answers, actions, tags). Until then
- * the Send's words are drawn as on their way (sendDraw.ts).
- */
 import { useMutation } from '@tanstack/react-query';
 import { useInboxQueryClient } from '../client';
 import { inboxApi, type ReplyResult } from '../../api';

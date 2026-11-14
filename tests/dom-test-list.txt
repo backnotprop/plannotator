@@ -294,6 +294,7 @@ packages/inbox/skillReferences.test.tsx
 packages/inbox/skillListRoom.test.tsx
 packages/inbox/messageComments.test.tsx
 packages/inbox/messageDelete.test.tsx
+packages/inbox/messageRedraws.test.tsx
 packages/inbox/linkedMessageDelete.test.tsx
 packages/inbox/messageArming.test.tsx
 packages/inbox/feedbackDialog.test.tsx
@@ -739,3 +740,4 @@ packages/inbox/threadTags.test.tsx
 packages/review-editor/components/PRDescriptionVideo.test.tsx
 packages/ui/components/CommentPopover.hostDraft.test.tsx
 packages/inbox/data/queries/heldThreadOpen.test.tsx
+packages/inbox/inlineReuseMark.test.tsx
