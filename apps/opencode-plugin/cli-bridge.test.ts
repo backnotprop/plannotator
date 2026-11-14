@@ -415,6 +415,29 @@ process.exit(1);
     ]);
   });
 
+  test("prefers a human reply while keeping synthetic replies in the picker", async () => {
+    const text = (value: string) => ({ type: "text", text: value });
+    const client = {
+      session: {
+        messages: mock(async () => ({
+          data: [
+            { info: { role: "user", id: "person" }, parts: [text("Explain the fix")] },
+            { info: { role: "assistant", id: "explanation" }, parts: [text("Here is the fix")] },
+            { info: { role: "synthetic", id: "notice" }, parts: [] },
+            { info: { role: "assistant", id: "status" }, parts: [text("Background task done")] },
+            { info: { role: "user", id: "injected" }, parts: [{ ...text("Wake"), synthetic: true }] },
+            { info: { role: "assistant", id: "ack", parentID: "injected" }, parts: [text("Done")] },
+          ],
+        })),
+      },
+    };
+
+    const messages = await getRecentAssistantMessages(client, "session-1");
+    expect(messages.map(({ messageId }) => messageId)).toEqual(["explanation", "ack", "status"]);
+    const limited = await getRecentAssistantMessages(client, "session-1", 1);
+    expect(limited.map(({ messageId }) => messageId)).toEqual(["explanation"]);
+  });
+
   test("formats structured review outcomes for OpenCode prompt injection", () => {
     expect(buildReviewPromptFromBridgeOutcome({
       decision: "dismissed",

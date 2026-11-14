@@ -855,24 +855,37 @@ export async function getRecentAssistantMessages(
   if (!messages) return [];
 
   const recentMessages: RecentAssistantMessage[] = [];
-  for (let i = messages.length - 1; i >= 0; i--) {
-    if (recentMessages.length >= limit) break;
+  const syntheticReplies: RecentAssistantMessage[] = [];
+  const syntheticByPromptId = new Map<string, boolean>();
+  let lastPromptWasSynthetic = false;
+  for (let i = 0; i < messages.length; i++) {
     const msg = messages[i];
-    if (msg.info?.role !== "assistant") continue;
+    const info = msg.info;
+    if (info?.role === "user" || info?.role === "synthetic") {
+      const parts = msg.parts ?? [];
+      lastPromptWasSynthetic = info.role === "synthetic"
+        || (parts.length > 0 && parts.every((part: { synthetic?: boolean; type?: string }) =>
+          part.synthetic === true || part.type === "synthetic"));
+      if (typeof info.id === "string") syntheticByPromptId.set(info.id, lastPromptWasSynthetic);
+      continue;
+    }
+    if (info?.role !== "assistant") continue;
     const textParts = (msg.parts ?? [])
       .filter((part: any) => part.type === "text" && part.text?.trim())
       .map((part: any) => part.text);
     if (textParts.length === 0) continue;
-    const agent = readMessageAgent(msg.info);
-    recentMessages.push({
-      messageId: msg.info?.id ?? `opencode-${i}`,
+    const agent = readMessageAgent(info);
+    const synthetic = syntheticByPromptId.get(info.parentID) ?? lastPromptWasSynthetic;
+    const replies = synthetic ? syntheticReplies : recentMessages;
+    replies.push({
+      messageId: info.id ?? `opencode-${i}`,
       text: textParts.join("\n"),
-      timestamp: msg.info?.time?.created ? new Date(msg.info.time.created).toISOString() : undefined,
+      timestamp: info.time?.created ? new Date(info.time.created).toISOString() : undefined,
       ...(agent && { agent }),
     });
   }
 
-  return recentMessages;
+  return recentMessages.reverse().concat(syntheticReplies.reverse()).slice(0, Math.max(0, limit));
 }
 
 /** The agent of the session's latest user message, or undefined on any failure. */
