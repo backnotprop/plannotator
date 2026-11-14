@@ -74,6 +74,7 @@ export class WorkspaceStore {
   private removed = new Emitter<WorkspacePanel>();
   private groupsChanged = new Emitter<void>();
   private singlePane = false;
+  private sideWidth: number | null = null;
 
   readonly api = this.createApi();
 
@@ -102,6 +103,12 @@ export class WorkspaceStore {
     for (const pane of this.layout.panes.slice(panes.length)) panes[panes.length - 1]?.tabs.push(...pane.tabs);
     if (panes.some((pane) => pane.tabs.length === 0)) return;
     this.commit({ panes, activePane: Math.min(saved.activePane, panes.length - 1) });
+  }
+
+  takeSideWidth(): number | null {
+    const width = this.sideWidth;
+    this.sideWidth = null;
+    return width;
   }
 
   focusPane(index: number) {
@@ -199,7 +206,9 @@ export class WorkspaceStore {
       getPanel: (id: string) => store.handle(id),
       addPanel: (options: AddPanelOptions) => {
         const tab: PaneTab = { id: options.id, component: options.component, title: options.title ?? options.id, params: options.params ?? {} };
-        store.commit(addTab(store.layout, tab, store.placementOf(options), store.singlePane));
+        const next = addTab(store.layout, tab, store.placementOf(options), store.singlePane);
+        if (store.layout.panes.length === 1 && next.panes.length === 2 && options.initialWidth) store.sideWidth = options.initialWidth;
+        store.commit(next);
         return store.handle(options.id)!;
       },
       onDidActivePanelChange: store.activeChanges.on,

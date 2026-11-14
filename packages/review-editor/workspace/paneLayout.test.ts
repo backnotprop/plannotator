@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { EMPTY_LAYOUT, activeTabId, addTab, closeTab, collapseToOnePane, referencesPlacement, type PaneTab } from './paneLayout';
-import { paneFileView } from './paneFileView';
+import { browseView, paneFileView } from './paneFileView';
 import { removedOldLines } from '../utils/wholeFileMarks';
 
 const tab = (id: string): PaneTab => ({ id, component: 'c', title: id, params: {} });
@@ -51,5 +51,12 @@ describe('a file tab remembers its own view', () => {
   test('the original side marks the lines the diff removed, by their old line numbers', () => {
     const patch = 'diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -10,4 +10,3 @@\n ctx\n-gone\n-also\n+new\n ctx\n';
     expect(removedOldLines(patch)).toEqual([11, 12]);
+  });
+});
+
+describe('browsing All files', () => {
+  test('a changed file met while browsing opens whole, with its change bars; any other file stays plain', () => {
+    expect(paneFileView(browseView('a.ts', true), 'a.ts')).toBe('whole');
+    expect(paneFileView(browseView('b.ts', false), 'b.ts')).toBe('changes');
   });
 });
