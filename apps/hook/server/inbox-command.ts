@@ -58,11 +58,14 @@ import {
   INBOX_START_LOCK,
   INBOX_START_LOCK_STALE_MS,
   inboxRegistryPath,
+  inboxOutOfReach,
   inboxStatus,
+  InboxUnreachableError,
   readInboxRegistry,
   stopInbox,
   waitForInbox,
   type InboxRegistryEntry,
+  type InboxStatus,
   type InboxStopResult,
 } from "@plannotator/shared/inbox/registry";
 import { handleInboxServerReady, startInboxServer } from "@plannotator/server/inbox";
@@ -200,7 +203,19 @@ export async function ensureInboxRunning(dataDir: string, options: { tailscale?:
     trace.step("busy_wait", { inbox: status.entry.pid });
     return waitForBusyInbox(dataDir, status.entry.pid);
   }
+  const unreachable = await outOfReach(status);
+  if (unreachable) {
+    trace.step("out_of_reach", { inbox: unreachable.pid });
+    throw unreachable.error;
+  }
   return startDetachedInbox(dataDir, acquireInboxStartLock(dataDir), options.tailscale === true);
+}
+
+/** The running Inbox this process cannot reach (`inboxOutOfReach`): its pid and the error a start gives. Null when there is none. */
+async function outOfReach(status: InboxStatus): Promise<{ pid: number; error: InboxUnreachableError } | null> {
+  if (status.state !== "stopped" || status.reason !== "no_answer") return null;
+  const detail = await inboxOutOfReach(status.entry);
+  return detail === null ? null : { pid: status.entry.pid, error: new InboxUnreachableError(detail) };
 }
 
 /**
@@ -398,6 +413,14 @@ async function serveInbox(dataDir: string, open: boolean, htmlContent: string | 
       if (open) await openBrowser(entry.url);
       if (connect) await connectRunningInbox(entry);
       process.exit(0);
+    }
+    // A detached Inbox's starter has decided already (the window's Restart runs inside the Inbox it replaces).
+    const unreachable = lockHeldByStarter ? null : await outOfReach(status);
+    if (unreachable) {
+      trace.step("out_of_reach", { inbox: unreachable.pid });
+      release?.();
+      process.stderr.write(`${unreachable.error.message}\n`);
+      process.exit(1);
     }
     inbox = await startInboxServer({
       dataDir,
@@ -662,6 +685,11 @@ async function stopCommand(dataDir: string): Promise<number> {
  * in between waits for this start instead of racing it.
  */
 async function restartCommand(dataDir: string, tailscale: boolean): Promise<number> {
+  const unreachable = await outOfReach(await inboxStatus(dataDir));
+  if (unreachable) {
+    process.stderr.write(`${unreachable.error.message}\n`);
+    return 1;
+  }
   const release = await takeStartLock(dataDir);
   if (!release) {
     process.stderr.write("Another Plannotator Inbox start holds the start lock and did not finish; try again.\n");
