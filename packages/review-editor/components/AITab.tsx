@@ -345,7 +345,7 @@ const GeneralInput: React.FC<{
           onChange={(e) => onChange(e.target.value)}
           placeholder="Ask about the overall changes..."
           rows={1}
-          className="flex-1 px-2.5 py-1.5 bg-muted rounded-md text-xs text-foreground placeholder:text-muted-foreground/50 resize-none focus:outline-none focus:ring-1 focus:ring-primary/50 leading-relaxed"
+          className="flex-1 px-2.5 py-1.5 bg-background border border-border rounded-md text-xs text-foreground placeholder:text-muted-foreground resize-none focus:outline-none focus:ring-1 focus:ring-primary/50 leading-relaxed"
           style={{ maxHeight: 120 }}
           disabled={disabled}
           onKeyDown={(e) => {

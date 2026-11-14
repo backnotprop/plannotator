@@ -63,7 +63,7 @@ export const AskAIInput: React.FC<AskAIInputProps> = ({
         value={question}
         onChange={(e) => setQuestion(e.target.value)}
         placeholder="Ask about this code..."
-        className="w-full px-3 py-2 bg-muted rounded-lg text-xs resize-none focus:outline-none focus:ring-1 focus:ring-primary/50"
+        className="w-full px-3 py-2 bg-background border border-border rounded-lg text-xs placeholder:text-muted-foreground resize-none focus:outline-none focus:ring-1 focus:ring-primary/50"
         rows={2}
         autoFocus
         disabled={isLoading}
