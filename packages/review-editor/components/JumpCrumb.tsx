@@ -18,7 +18,7 @@ function viaLabel(via: JumpCrumbData['via']): string {
 export const JumpCrumb: React.FC<{ crumb: JumpCrumbData; onBack?: () => void; right?: React.ReactNode }> = ({ crumb, onBack, right }) => {
   const back = resolveShortcutBindings(reviewExplorerShortcuts.shortcuts.navigateBack)[0];
   return (
-    <div className="flex-none flex items-center gap-1.5 px-2 h-7 border-b border-border/40 text-xs text-muted-foreground min-w-0" data-jump-crumb>
+    <div className="flex-none flex items-center gap-1.5 min-w-0 max-w-[45%] text-xs text-muted-foreground" data-jump-crumb>
       {onBack && (
         <button
           type="button"
