@@ -1,4 +1,5 @@
 import React, { useMemo, useState, useEffect, useRef, useCallback } from 'react';
+import { PanelEmptyState } from './PanelEmptyState';
 import type { PRContext, PRComment, PRReview, PRReviewThread } from '@plannotator/shared/pr-types';
 import { MarkdownBody } from './MarkdownBody';
 import { CopyButton } from './CopyButton';
@@ -297,14 +298,9 @@ export const PRCommentsTab: React.FC<PRCommentsTabProps> = React.memo(({ context
   // --- Empty state (no comments at all) ---
   if (baseTimeline.length === 0) {
     return (
-      <div className="h-full flex flex-col items-center justify-center text-center px-8">
-        <div className="w-10 h-10 rounded-full bg-muted/50 flex items-center justify-center mb-3">
-          <svg className="w-5 h-5 text-muted-foreground" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-          </svg>
-        </div>
-        <p className="text-xs text-muted-foreground">No comments on this PR.</p>
-      </div>
+      <PanelEmptyState>
+        <p>No comments on this PR yet.</p>
+      </PanelEmptyState>
     );
   }
 
