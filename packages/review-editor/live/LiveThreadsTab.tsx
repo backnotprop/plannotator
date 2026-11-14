@@ -68,18 +68,18 @@ export function LiveThreadsTab(props: {
   return (
     <div className="flex flex-col text-[13px]" data-live-tab>
       <div className="flex items-center gap-2 border-b border-border px-3 py-2">
-        <span className="flex-1 text-[12px] text-muted-foreground" data-live-count>
+        <span className="min-w-0 flex-1 truncate whitespace-nowrap text-[12px] text-muted-foreground" data-live-count>
           {props.order.length} open{resolvedCount > 0 ? ` · ${resolvedCount} resolved` : ''}
         </span>
         {props.threadUrl ? (
-          <a href={props.threadUrl} target="_blank" rel="noreferrer" className="h-7 rounded px-2 text-[12px] leading-7 text-muted-foreground hover:bg-muted hover:text-foreground" data-live-inbox-link>
+          <a href={props.threadUrl} target="_blank" rel="noreferrer" className="h-7 shrink-0 whitespace-nowrap rounded px-2 text-[12px] leading-7 text-muted-foreground hover:bg-muted hover:text-foreground" data-live-inbox-link>
             Open in Inbox
           </a>
         ) : null}
-        <button type="button" disabled={props.order.length === 0} className="h-7 rounded px-2 text-[12px] hover:bg-muted disabled:opacity-40" onClick={() => props.onStep(-1)}>
+        <button type="button" disabled={props.order.length === 0} className="h-7 shrink-0 rounded px-2 text-[12px] hover:bg-muted disabled:opacity-40" onClick={() => props.onStep(-1)}>
           Previous
         </button>
-        <button type="button" disabled={props.order.length === 0} className="h-7 rounded px-2 text-[12px] hover:bg-muted disabled:opacity-40" onClick={() => props.onStep(1)}>
+        <button type="button" disabled={props.order.length === 0} className="h-7 shrink-0 rounded px-2 text-[12px] hover:bg-muted disabled:opacity-40" onClick={() => props.onStep(1)}>
           Next
         </button>
       </div>
@@ -115,7 +115,7 @@ export function LiveThreadsTab(props: {
         </p>
       ) : (
         <ul className="py-1">
-          {props.placed.map((thread) => (
+          {[...props.placed].sort((a, b) => a.conversation.anchor.file.localeCompare(b.conversation.anchor.file) || a.now.line_start - b.now.line_start).map((thread) => (
             <ThreadRow key={thread.conversation.id} thread={thread} focused={props.focused === thread.conversation.id} onOpen={() => actions.reveal(thread)} />
           ))}
         </ul>
