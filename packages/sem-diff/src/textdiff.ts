@@ -39,6 +39,9 @@ export const WORK_PER_SECOND = 75_000_000;
 /** Work used by the most recent `computeTextDiff`. */
 export let lastWork = 0;
 
+/** Work used by every `computeTextDiff` so far, for tests that bound the engine by work instead of time. */
+export let totalWork = 0;
+
 /** `maxWork` bounds the diff by work done, not by time, so the result is repeatable. */
 export function computeTextDiff(oldText: string, newText: string, maxWork = WORK_PER_SECOND): TextDiff {
   const computeMoves = oldText.split('\n').length <= MAX_TEXT_MOVE_LINES;
@@ -51,6 +54,7 @@ export function computeTextDiff(oldText: string, newText: string, maxWork = WORK
   } finally {
     Date.now = clock;
     lastWork = work;
+    totalWork += work;
   }
 }
 
