@@ -237,8 +237,8 @@ function ListOptionsMenu({
                 <Menu.RadioGroup value={groupBy} onValueChange={(value) => onSelectGroupBy(value as "none" | "kind" | "status")}>
                   {([
                     ["none", "No groups"],
-                    ["kind", "By kind: code, tests, generated"],
-                    ...(statusGroupingAvailable ? [["status", "By git status: staged, unstaged, untracked"]] : []),
+                    ["kind", "By kind"],
+                    ...(statusGroupingAvailable ? [["status", "By git status"]] : []),
                   ] as [string, string][]).map(([value, label]) => (
                     <Menu.RadioItem key={value} value={value} className={MENU_ITEM} closeOnClick={false} data-review-group-by={value}>
                       {label}
