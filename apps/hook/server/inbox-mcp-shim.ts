@@ -16,7 +16,10 @@
  * `PLANNOTATOR_SESSION_TAG`, a Pi bash call's `PI_SESSION_ID`), so a script or
  * command the session runs sends as that session, exactly as its
  * `plannotator_inbox` tool does: the same author, the same threads, and
- * the person's reply wakes it. A Codex session is its thread: Codex names it
+ * the person's reply wakes it. Claude Code's own MCP client is the session
+ * that started the shim (`inboxClaudeMcpSessionFromEnv`: the
+ * `CLAUDE_CODE_SESSION_ID` Claude Code gives its MCP servers), whether or not
+ * the mod's tag reached the shim. A Codex session is its thread: Codex names it
  * on every tool call (`params._meta.threadId`, from the `codex-mcp-client`)
  * and in the commands its shell runs (`CODEX_THREAD_ID`), and the shim sends
  * as `agent_host: "codex"` with that id, so the Inbox can queue the person's
@@ -269,6 +272,45 @@ export function inboxCallHostSession(
   if (clientName !== null) return other;
   return other ?? qwenHostSession(fromEnv!);
 }
+
+/** The MCP client name Claude Code gives in `initialize` (`clientInfo.name`). */
+export const INBOX_CLAUDE_MCP_CLIENT = "claude-code";
+
+/** A Claude Code session id: a UUID. */
+const CLAUDE_SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * The Claude Code session that started this process as one of its stdio MCP
+ * servers, or null. Claude Code puts `CLAUDECODE=1` and
+ * `CLAUDE_CODE_SESSION_ID` (its session at that moment) in every MCP server's
+ * environment, and takes `CLAUDE_CODE_CHILD_SESSION` out of it; its Bash
+ * commands and hooks get `CLAUDE_CODE_CHILD_SESSION=1` (read in the 2.1.323
+ * binary). So a process with that variable, an agent started from a Claude
+ * Code shell included, is never this. The mod's `PLANNOTATOR_SESSION_TAG` is
+ * not reliably there: Claude Code starts its MCP servers as it starts, beside
+ * or before the mod's `session.start` (#3309). The id
+ * is not moved by `/clear` or an in-process `/resume`, which keep the server
+ * running.
+ */
+export function inboxClaudeMcpSessionFromEnv(env: Record<string, string | undefined>): InboxHostSession | null {
+  if (env.CLAUDECODE !== "1" || env.CLAUDE_CODE_CHILD_SESSION) return null;
+  const session = env.CLAUDE_CODE_SESSION_ID;
+  if (typeof session !== "string" || !CLAUDE_SESSION_ID.test(session)) return null;
+  return { host: "claude-code", session, name: INBOX_SESSION_HOST_NAMES["claude-code"]! };
+}
+
+/**
+ * The host session a tool call is filed as once the client said who it is:
+ * Claude Code's own session (`inboxClaudeMcpSessionFromEnv`) when the client
+ * is Claude Code, over a variable the shim inherited from whatever started
+ * that Claude Code (another session's tag, Pi's, Qwen's). A T3 Code thread
+ * stays the thread: T3 runs Claude through the Agent SDK.
+ */
+export function inboxClaudeCallSession(hostSession: InboxHostSession | null, claude: InboxHostSession | null | undefined, clientName: string | null): InboxHostSession | null {
+  if (!claude || clientName !== INBOX_CLAUDE_MCP_CLIENT || hostSession?.host === INBOX_T3_HOST) return hostSession;
+  return claude;
+}
+
 /** The 2026-07-28 per-request envelope's protocol-version key. */
 const PROTOCOL_VERSION_META_KEY = "io.modelcontextprotocol/protocolVersion";
 
@@ -278,6 +320,8 @@ export interface InboxMcpShimOptions {
   ensureRunning: () => Promise<InboxRegistryEntry>;
   /** The agent host session the shim runs inside (`inboxHostSessionFromEnv`); absent: one `ses_` id per process. */
   hostSession?: InboxHostSession | null;
+  /** The Claude Code session that started the shim as its MCP server (`inboxClaudeMcpSessionFromEnv`); used while the client is Claude Code. */
+  claude?: InboxHostSession | null;
   /** Where a Qwen Code session is read at each call (`inboxQwenShimContext`); absent: Qwen only through `hostSession`. */
   qwen?: InboxQwenShimContext | null;
   /** The host session's own project folder (`inboxSessionProjectFromEnv`): a call filed as that session files there, not in `cwd`. */
@@ -466,7 +510,8 @@ export async function runInboxMcpShim(options: InboxMcpShimOptions): Promise<voi
       if (typeof name === "string") clientName = name;
     }
     // Qwen's session is read again for each call: /clear and /resume change it under the same Qwen process.
-    const callHost = message?.method === "tools/call" ? inboxCallHostSession(hostSession, options.qwen, message.params?._meta, clientName) : hostSession;
+    const callHost =
+      message?.method === "tools/call" ? inboxClaudeCallSession(inboxCallHostSession(hostSession, options.qwen, message.params?._meta, clientName), options.claude, clientName) : hostSession;
     const outgoing = fillInboxToolArguments(message, options.cwd, own, callHost, clientName, options.sessionProject);
     let target: InboxRegistryEntry;
     try {
