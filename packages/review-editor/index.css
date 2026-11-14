@@ -28,6 +28,12 @@
    search bar vertically aligned across all three columns. */
 :root {
   --panel-header-h: 32px;
+  --semantic-moved: #69b1ff;
+  --semantic-edited: #bf91f3;
+  --semantic-reformatted: #a0a0a0;
+  --diffs-moved-color: var(--semantic-moved);
+  --diffs-edited-color: var(--semantic-edited);
+  --diffs-reformatted-color: var(--semantic-reformatted);
 
   /* Code-review-only readable-text bump. `text-xs` is the app's small/body
      tier; Tailwind's default leaves it at 12px, which reads cramped here.
@@ -181,7 +187,6 @@ diffs-container {
   max-width: 56rem;
   margin: 0 auto;
   padding: 1.5rem;
-  font-family: var(--diff-font-override, var(--font-mono));
   font-size: 0.8125rem;
   line-height: 1.55;
   font-variant-numeric: tabular-nums;
@@ -235,9 +240,9 @@ diffs-container {
 /* Entity row — grid-aligned, full-width, rounded hover target */
 .semantic-diff-row {
   display: grid;
-  grid-template-columns: 2ch 9ch minmax(0, 1fr) max-content;
-  column-gap: 1ch;
-  align-items: baseline;
+  grid-template-columns: 14px 9ch minmax(0, 1fr) max-content;
+  column-gap: 0.5rem;
+  align-items: center;
   width: 100%;
   min-height: 1.75rem;
   border: 0;
@@ -271,7 +276,7 @@ diffs-container {
 }
 
 .semantic-diff-row:has(> .semantic-diff-kind:empty) {
-  grid-template-columns: 2ch minmax(0, 1fr) max-content;
+  grid-template-columns: 14px minmax(0, 1fr) max-content;
 }
 
 .semantic-diff-kind:empty {
@@ -285,12 +290,8 @@ diffs-container {
   }
 }
 
-/* Nudge the add/remove glyphs up slightly so they read at the weight of the
-   modified triangle; line-height pinned so the larger size doesn't grow rows. */
-.semantic-diff-symbol-added,
-.semantic-diff-symbol-deleted {
-  font-size: 1.15em;
-  line-height: 1;
+.semantic-diff-symbol {
+  color: var(--muted-foreground);
 }
 
 .semantic-diff-symbol-added {
@@ -303,26 +304,16 @@ diffs-container {
 
 .semantic-diff-symbol-moved,
 .semantic-diff-symbol-reordered {
-  color: #69b1ff;
-}
-
-.light .semantic-diff-symbol-moved,
-.light .semantic-diff-symbol-reordered {
-  color: #009fff;
+  color: var(--semantic-moved);
 }
 
 .semantic-diff-symbol-modified,
 .semantic-diff-symbol-renamed {
-  color: #bf91f3;
-}
-
-.light .semantic-diff-symbol-modified,
-.light .semantic-diff-symbol-renamed {
-  color: #9954d8;
+  color: var(--semantic-edited);
 }
 
 .semantic-diff-symbol-reformatted {
-  color: var(--muted-foreground);
+  color: var(--semantic-reformatted);
 }
 
 .semantic-diff-kind,
@@ -331,6 +322,7 @@ diffs-container {
 }
 
 .semantic-diff-name {
+  font-family: var(--diff-font-override, var(--font-mono));
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -340,6 +332,13 @@ diffs-container {
 .semantic-diff-status {
   justify-self: end;
   white-space: nowrap;
+  font-size: 0.75rem;
+}
+
+.light {
+  --semantic-moved: #009fff;
+  --semantic-edited: #9954d8;
+  --semantic-reformatted: gray;
 }
 
 .semantic-diff-summary {
