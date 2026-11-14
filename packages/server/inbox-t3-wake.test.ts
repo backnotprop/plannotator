@@ -260,9 +260,9 @@ describe("a reply to a T3 Code thread", () => {
  * mod's turn and a T3 send), or a reply left waiting once T3 stopped that Claude.
  */
 describe("a reply to a T3 thread whose Claude runs the Claude Code mod: one owner", () => {
-  async function modWorld() {
+  async function modWorld(options: { grant?: boolean } = {}) {
     const clock = { now: Date.now() };
-    const w = await world({ sessionsNow: () => clock.now });
+    const w = await world({ ...options, sessionsNow: () => clock.now });
     const poll = async () => {
       const response = await fetch(`http://127.0.0.1:${w.server.port}/api/inbox/bridge/poll`, {
         method: "POST",
@@ -324,7 +324,8 @@ describe("a reply to a T3 thread whose Claude runs the Claude Code mod: one owne
   });
 
   test("a mod that polls again while the T3 wake's send is in flight is not handed that reply", async () => {
-    const w = await modWorld();
+    // No grant: the T3 wake sends nothing by itself here; the hand stands for its send in flight.
+    const w = await modWorld({ grant: false });
     const sent = await w.send("Ship the worker today?");
     const replyId = await w.reply(sent.message_id, "Yes, ship it.");
     const message = w.server.store.message(replyId)!;
