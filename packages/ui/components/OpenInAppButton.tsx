@@ -40,6 +40,8 @@ interface OpenInAppButtonProps {
   /** When true, render the primary label text alongside the icon. */
   showLabel?: boolean;
   disabled?: boolean;
+  /** 1-based line to open at, when the catalog app's launcher takes one. */
+  line?: number;
 }
 
 // The host app catalog is static for the session, but the all-files view
@@ -54,6 +56,7 @@ export const OpenInAppButton: React.FC<OpenInAppButtonProps> = ({
   canOpen = true,
   showLabel = false,
   disabled = false,
+  line,
 }) => {
   const detected = useOpenInApps(OPEN_IN_APPS_URL);
   const apps = detected?.apps ?? null;
@@ -107,7 +110,12 @@ export const OpenInAppButton: React.FC<OpenInAppButtonProps> = ({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         // The stale-tab guard: a server that took over this port refuses it.
-        body: JSON.stringify(withServerSession({ filePath, base: base ?? null, appId })),
+        body: JSON.stringify(withServerSession({
+          filePath,
+          base: base ?? null,
+          appId,
+          ...(typeof line === 'number' && Number.isSafeInteger(line) && line > 0 ? { line } : {}),
+        })),
       });
       if (await noteServerSessionMismatch(res)) {
         flashError('This review was replaced. Reload the page.');

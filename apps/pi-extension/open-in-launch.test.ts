@@ -4,6 +4,7 @@ import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { openFileInApp } from "./server/open-in-apps.ts";
+import { getOpenInApp } from "./generated/open-in-apps.ts";
 
 // Launch semantics for the Pi mirror of POST /api/open-in: the launcher must
 // be a concurrent side concern of the review session, mirroring the Bun
@@ -174,4 +175,32 @@ describe("openFileInApp launch semantics (Pi mirror)", () => {
 		},
 		15000,
 	);
+
+	launchTest("WebStorm opens at --line n path (or at the top on macOS)", async () => {
+		const shimDir = makeDir();
+		const log = join(shimDir, "launches.log");
+		for (const name of ["open", "webstorm"]) {
+			writeFileSync(
+				join(shimDir, name),
+				`#!/bin/sh\nfor a in "$@"; do echo "${name}|$a" >> "${log}"; done\nexit 0\n`,
+			);
+			chmodSync(join(shimDir, name), 0o755);
+		}
+		const file = join(makeDir(), "my app.ts");
+		writeFileSync(file, "x");
+		const oldPath = process.env.PATH;
+		process.env.PATH = `${shimDir}${delimiter}${oldPath ?? ""}`;
+		try {
+			expect(await openFileInApp(file, "webstorm", 42)).toEqual({ ok: true });
+		} finally {
+			process.env.PATH = oldPath;
+		}
+		const lines = readFileSync(log, "utf-8").trim().split("\n");
+		if (process.platform === "darwin") {
+			expect(lines).toEqual(["open|-a", "open|WebStorm", `open|${file}`]);
+		} else {
+			expect(lines).toEqual([`webstorm|--line`, `webstorm|42`, `webstorm|${file}`]);
+		}
+		expect(getOpenInApp("webstorm")?.line).toEqual({ cli: "line-flag" });
+	});
 });

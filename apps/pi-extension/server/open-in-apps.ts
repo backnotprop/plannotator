@@ -18,6 +18,9 @@ import { resolveOpenInTarget } from "../generated/html-assets-node.ts";
 import {
 	OPEN_IN_APPS,
 	checkOpenInAppId,
+	openInFileArgv,
+	openInMacOpened,
+	parseOpenInLine,
 	resolveRevealIcon,
 	resolveRevealLabel,
 	type OpenInApp,
@@ -250,6 +253,7 @@ function spawnDetached(
 export function openFileInApp(
 	absPath: string,
 	appId: string,
+	line?: number,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
 	const platform = currentPlatform();
 	const checked = checkOpenInAppId(appId);
@@ -286,20 +290,20 @@ export function openFileInApp(
 		return run(app.linux.bin, [dir], app.label);
 	}
 
-	// editor -> open the file itself.
+	// editor -> open the file itself, at `line` when its launcher can.
 	if (platform === "mac") {
 		if (!app.mac?.appName)
 			return Promise.resolve({ ok: false, error: `${app.label} is not available on this platform.` });
-		return run("open", ["-a", app.mac.appName, absPath], app.label);
+		return run("open", ["-a", app.mac.appName, openInMacOpened(app, absPath, line)], app.label);
 	}
 	if (platform === "win") {
 		if (!app.win?.bin)
 			return Promise.resolve({ ok: false, error: `${app.label} is not available on this platform.` });
-		return run(app.win.bin, [absPath], app.label);
+		return run(app.win.bin, openInFileArgv(app, absPath, line), app.label);
 	}
 	if (!app.linux?.bin)
 		return Promise.resolve({ ok: false, error: `${app.label} is not available on this platform.` });
-	return run(app.linux.bin, [absPath], app.label);
+	return run(app.linux.bin, openInFileArgv(app, absPath, line), app.label);
 }
 
 /**
@@ -339,7 +343,7 @@ export async function handleOpenInRequest(
 			json(res, serverSessionMismatchBody(), 409);
 			return;
 		}
-		const { filePath, appId } = body as { filePath?: unknown; appId?: unknown };
+		const { filePath, appId, line } = body as { filePath?: unknown; appId?: unknown; line?: unknown };
 		if (typeof filePath !== "string" || !filePath) {
 			json(res, { ok: false, error: "Missing filePath" }, 400);
 			return;
@@ -356,7 +360,7 @@ export async function handleOpenInRequest(
 			json(res, { ok: false, error: "Path is outside the allowed directory" }, 403);
 			return;
 		}
-		json(res, await openFileInApp(abs, app.app.id), 200);
+		json(res, await openFileInApp(abs, app.app.id, parseOpenInLine(line)), 200);
 	} catch (err) {
 		json(res, { ok: false, error: err instanceof Error ? err.message : "Failed to open file" }, 500);
 	}

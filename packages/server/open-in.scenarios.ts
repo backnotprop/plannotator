@@ -30,7 +30,7 @@ export type StartOpenInScenarioServer = (
 ) => Promise<OpenInScenarioServer>;
 
 const HTML = "<!doctype html><html><body>open-in-scenario-app</body></html>";
-const LAUNCHERS = ["open", "xdg-open", "code"] as const;
+const LAUNCHERS = ["open", "xdg-open", "code", "webstorm"] as const;
 
 /** The JSON read whose payload advertises `serverSession`. */
 const FIRST_READ: Record<OpenInScenarioKind, string> = {
@@ -221,6 +221,26 @@ export function defineOpenInScenarios(runtime: string, start: StartOpenInScenari
         const answer = await send({ origin: `http://${host}` }, { filePath: "/etc/hosts", appId: "reveal", serverSession });
         expect(answer.status).toBe(403);
         expect(launches()).toEqual([]);
+      });
+
+      test("WebStorm opens the file at the given line on its CLI", async () => {
+        await setUp();
+        const answer = await send(
+          { origin: `http://${host}`, "sec-fetch-site": "same-origin" },
+          { filePath: docPath, appId: "webstorm", line: 42, serverSession },
+        );
+        expect(answer.status).toBe(200);
+        expect(answer.body).toEqual({ ok: true });
+        const lines = launches();
+        expect(lines.length).toBe(1);
+        if (process.platform === "darwin") {
+          // `open -a` takes no line and JetBrains has no matching URL scheme.
+          expect(lines[0].startsWith("open -a WebStorm ")).toBe(true);
+          expect(lines[0].endsWith("/notes.md")).toBe(true);
+        } else {
+          expect(lines[0].startsWith("webstorm --line 42 ")).toBe(true);
+          expect(lines[0].endsWith("/notes.md")).toBe(true);
+        }
       });
     });
   }

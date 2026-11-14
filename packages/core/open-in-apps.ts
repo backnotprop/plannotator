@@ -39,10 +39,31 @@ export interface OpenInApp {
   linux?: { bin: string };
   /**
    * How it opens a file at a line. `mac`: the app's URL scheme, `<scheme>://file/<path>:<line>`
-   * through `open -a`. `cli`: `--goto <path>:<line>` or `<path>:<line>` on its Windows and Linux
-   * binary. Absent: the file opens at its top.
+   * through `open -a`. `cli`: `--goto <path>:<line>`, `<path>:<line>`, or `--line n <path>` on
+   * its Windows and Linux binary. Absent: the file opens at its top. A `cli` with no `mac`
+   * (JetBrains) still opens at the top on macOS: `open -a` has no line, and those IDEs have no
+   * matching `scheme://file/path:line` URL.
    */
-  line?: { mac?: string; cli?: 'goto' | 'suffix' };
+  line?: { mac?: string; cli?: 'goto' | 'suffix' | 'line-flag' };
+}
+
+/**
+ * One JetBrains IDE in the catalog. Toolbox and the "Create Command-line Launcher"
+ * scripts are `idea`, `webstorm`, … (`idea.cmd` on Windows is what `which idea` finds).
+ * `--line <n> <path>` is the documented CLI; Community Edition bundles (`IntelliJ IDEA CE`,
+ * `PyCharm CE`) are skipped because they share the same linux/win bin as Ultimate.
+ */
+function jetbrainsIde(id: string, label: string, bin: string, appName: string): OpenInApp {
+  return {
+    id,
+    label,
+    kind: 'editor',
+    icon: 'jetbrains',
+    mac: { appName },
+    win: { bin },
+    linux: { bin },
+    line: { cli: 'line-flag' },
+  };
 }
 
 /**
@@ -137,6 +158,15 @@ export const OPEN_IN_APPS: OpenInApp[] = [
     icon: 'android-studio',
     mac: { appName: 'Android Studio' },
   },
+  jetbrainsIde('intellij-idea', 'IntelliJ IDEA', 'idea', 'IntelliJ IDEA'),
+  jetbrainsIde('webstorm', 'WebStorm', 'webstorm', 'WebStorm'),
+  jetbrainsIde('pycharm', 'PyCharm', 'pycharm', 'PyCharm'),
+  jetbrainsIde('goland', 'GoLand', 'goland', 'GoLand'),
+  jetbrainsIde('rider', 'Rider', 'rider', 'Rider'),
+  jetbrainsIde('phpstorm', 'PhpStorm', 'phpstorm', 'PhpStorm'),
+  jetbrainsIde('rubymine', 'RubyMine', 'rubymine', 'RubyMine'),
+  jetbrainsIde('clion', 'CLion', 'clion', 'CLion'),
+  jetbrainsIde('rustrover', 'RustRover', 'rustrover', 'RustRover'),
 
   // ── Terminals ──────────────────────────────────────────────────────────
   {
@@ -228,4 +258,31 @@ export function checkOpenInAppId(raw: unknown): OpenInAppIdCheck {
   const app = getOpenInApp(raw);
   if (!app) return { ok: false, error: 'Unknown app' };
   return { ok: true, app };
+}
+
+/**
+ * The catalog binary's argv for a file, at `line` when the app's launcher takes one.
+ * Shared so the Bun and Pi launchers cannot drift.
+ */
+export function openInFileArgv(app: OpenInApp, target: string, line?: number): string[] {
+  if (!line || app.kind !== 'editor') return [target];
+  if (app.line?.cli === 'goto') return ['--goto', `${target}:${line}`];
+  if (app.line?.cli === 'suffix') return [`${target}:${line}`];
+  if (app.line?.cli === 'line-flag') return ['--line', String(line), target];
+  return [target];
+}
+
+/**
+ * What macOS `open -a` is handed: a URL with the line when the app has a scheme,
+ * otherwise the path (which opens at the top).
+ */
+export function openInMacOpened(app: OpenInApp, target: string, line?: number): string {
+  const scheme = line && app.kind === 'editor' ? app.line?.mac : undefined;
+  if (!scheme) return target;
+  return `${scheme}://file${target.split('/').map(encodeURIComponent).join('/')}:${line}`;
+}
+
+/** A 1-based line from a POST body. Anything else is ignored (open at the top). */
+export function parseOpenInLine(raw: unknown): number | undefined {
+  return typeof raw === 'number' && Number.isSafeInteger(raw) && raw > 0 ? raw : undefined;
 }

@@ -11,7 +11,8 @@ import {
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { resolveOpenInTarget } from "@plannotator/shared/html-assets-node";
-import { openFileInApp } from "./open-in";
+import { getAvailableOpenInApps, openFileInApp, openWithApp } from "./open-in";
+import { getOpenInApp } from "@plannotator/core/open-in-apps";
 
 // resolveOpenInTarget is the security boundary for POST /api/open-in: it decides
 // which absolute file a launch is allowed to touch. Real temp dirs/files are
@@ -288,3 +289,54 @@ describe("openFileInApp launch semantics", () => {
     15000,
   );
 });
+
+const linuxTest = process.platform === "linux" ? test : test.skip;
+
+describe("JetBrains Open in", () => {
+  linuxTest("a JetBrains CLI on PATH is offered; one that is not is not", () => {
+    const shimDir = makeDir();
+    for (const name of ["webstorm", "rider"]) {
+      writeFileSync(join(shimDir, name), `#!/bin/sh\nexit 0\n`);
+      chmodSync(join(shimDir, name), 0o755);
+    }
+    const oldPath = process.env.PATH;
+    process.env.PATH = shimDir;
+    try {
+      const ids = getAvailableOpenInApps().map((app) => app.id);
+      expect(ids).toContain("webstorm");
+      expect(ids).toContain("rider");
+      expect(ids).not.toContain("pycharm");
+      expect(ids).not.toContain("intellij-idea");
+    } finally {
+      process.env.PATH = oldPath;
+    }
+  });
+
+  launchTest("WebStorm's CLI is --line n path, and a space in the path stays one argument", async () => {
+    const shimDir = makeDir();
+    const log = join(shimDir, "launches.log");
+    for (const name of ["open", "webstorm"]) {
+      writeFileSync(
+        join(shimDir, name),
+        `#!/bin/sh\nfor a in "$@"; do echo "${name}|$a" >> "${log}"; done\nexit 0\n`,
+      );
+      chmodSync(join(shimDir, name), 0o755);
+    }
+    const file = join(makeDir(), "my app.ts");
+    writeFileSync(file, "x");
+    const oldPath = process.env.PATH;
+    process.env.PATH = shimDir;
+    try {
+      expect(await openWithApp(getOpenInApp("webstorm")!, file, 42)).toEqual({ ok: true });
+    } finally {
+      process.env.PATH = oldPath;
+    }
+    const lines = readFileSync(log, "utf-8").trim().split("\n");
+    if (process.platform === "darwin") {
+      expect(lines).toEqual(["open|-a", "open|WebStorm", `open|${file}`]);
+    } else {
+      expect(lines).toEqual([`webstorm|--line`, `webstorm|42`, `webstorm|${file}`]);
+    }
+  });
+});
+

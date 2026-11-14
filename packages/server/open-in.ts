@@ -25,6 +25,9 @@ import { spawn } from "node:child_process";
 import {
   OPEN_IN_APPS,
   checkOpenInAppId,
+  openInFileArgv,
+  openInMacOpened,
+  parseOpenInLine,
   resolveRevealLabel,
   resolveRevealIcon,
   type OpenInApp,
@@ -203,10 +206,7 @@ export function revealFile(absPath: string): Promise<OpenInLaunchResult> {
 
 /** The catalog binary's argv for a file, at `line` when the app's launcher takes one. */
 function fileArgv(app: OpenInApp, target: string, line?: number): string[] {
-  if (!line || app.kind !== "editor") return [target];
-  if (app.line?.cli === "goto") return ["--goto", `${target}:${line}`];
-  if (app.line?.cli === "suffix") return [`${target}:${line}`];
-  return [target];
+  return openInFileArgv(app, target, line);
 }
 
 /**
@@ -231,9 +231,7 @@ export function openWithApp(
       });
     }
     // `open -a` takes no line: an app with a URL scheme takes it in the URL.
-    const scheme = line && app.kind === "editor" ? app.line?.mac : undefined;
-    const opened = scheme ? `${scheme}://file${target.split("/").map(encodeURIComponent).join("/")}:${line}` : target;
-    return runArgv("open", ["-a", appName, opened], app.label);
+    return runArgv("open", ["-a", appName, openInMacOpened(app, target, line)], app.label);
   }
 
   if (platform === "win") {
@@ -291,6 +289,7 @@ export function openWithSystemDefault(absPath: string): Promise<OpenInLaunchResu
 export async function openFileInApp(
   absPath: string,
   appId: string,
+  line?: number,
 ): Promise<OpenInLaunchResult> {
   const checked = checkOpenInAppId(appId);
   if (!checked.ok) return { ok: false, error: checked.error };
@@ -300,7 +299,7 @@ export async function openFileInApp(
     return revealFile(absPath);
   }
 
-  return openWithApp(app, absPath);
+  return openWithApp(app, absPath, line);
 }
 
 /**
@@ -438,7 +437,8 @@ export interface HandleOpenInOptions {
  * POST /api/open-in handler. Refuses another site's page (including the
  * sandboxed annotated-HTML frame, which sends `Origin: null`) and a stale tab,
  * requires a catalog `appId`, resolves + containment-checks the target via
- * resolveOpenInTarget (shared), then launches via openFileInApp.
+ * resolveOpenInTarget (shared), then launches via openFileInApp. Optional
+ * `line` (1-based) is passed through when the catalog app's launcher takes one.
  */
 export async function handleOpenIn(
   req: Request,
@@ -466,7 +466,7 @@ export async function handleOpenIn(
     );
   }
 
-  let body: { filePath?: unknown; base?: unknown; appId?: unknown };
+  let body: { filePath?: unknown; base?: unknown; appId?: unknown; line?: unknown };
   try {
     body = (await req.json()) as typeof body;
   } catch {
@@ -500,7 +500,7 @@ export async function handleOpenIn(
     return Response.json({ ok: false, error: "Access denied" }, { status: 403 });
   }
 
-  const result = await openFileInApp(abs, app.app.id);
+  const result = await openFileInApp(abs, app.app.id, parseOpenInLine(body.line));
   // A failed launch is a valid request with the result in the body (ok:false),
   // not a server error — return 200 and let the client read `ok`. Matches Pi.
   return Response.json(result);
