@@ -30,7 +30,7 @@ import { useIsWorkerPoolReadyOrDisabled, useWorkerPoolThemeSync } from '../worke
 import { useConfigValue } from '@plannotator/ui/config';
 import type { SemDiffClient, SemDiffResult } from '../semDiff/semDiffClient';
 import type { PowerUpConfig, PowerUpFileState, PowerUpStatus } from '../semDiff/powerUp';
-import { powerUpCss } from '../semDiff/powerUpCss';
+import { POWER_UP_FLOW_ANIMATION, powerUpCss } from '../semDiff/powerUpCss';
 import { SemanticFileNote, type SemanticFileState } from '../semDiff/SemanticFileNote';
 import type { DiffFile, AnnotationScrollTarget } from '../types';
 import type { MarkdownFileView } from '../utils/markdownPreview';
@@ -778,6 +778,21 @@ const AUGMENT_APPLY_IDLE_MS = 150;
 // How long revealing a comment on a closed line waits for its file's whole text.
 const REVEAL_WAIT_MS = 30_000;
 const LINE_TARGET_FLASH_MS = 1_600;
+
+const inStepRoots = new WeakSet<ShadowRoot>();
+
+function keepPowerUpInStep(node: HTMLElement): void {
+  const root = node.shadowRoot;
+  if (!root || inStepRoots.has(root)) return;
+  inStepRoots.add(root);
+  root.addEventListener('animationstart', (event) => {
+    const { animationName, target } = event as AnimationEvent;
+    if (animationName !== POWER_UP_FLOW_ANIMATION || !(target instanceof Element)) return;
+    for (const animation of target.getAnimations({ subtree: true })) {
+      if ((animation as CSSAnimation).animationName === POWER_UP_FLOW_ANIMATION && animation.startTime !== 0) animation.startTime = 0;
+    }
+  });
+}
 
 const EMPTY_AI_MESSAGES: AIChatEntry[] = [];
 const EMPTY_CONTEXT_NOTES: readonly ContextNoteAnchor[] = [];
@@ -2357,6 +2372,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       // CodeView recycles elements across items.
       nodeToItemIdRef.current.set(node, context.id);
       if (flushesFiles) syncTrailingRow(node, context);
+      keepPowerUpInStep(node);
       augmentItem(context.id);
       const itemId = context.id;
       requestAnimationFrame(() => applyItemHighlights(node, itemId));

@@ -1,3 +1,5 @@
+export const POWER_UP_FLOW_ANIMATION = 'pu-flow';
+
 const STILL = `
 [data-line][data-semantic-origin] {
   --pu-c: var(--diffs-moved-base);
