@@ -52,16 +52,27 @@ export function joinThreadRead(
 
 export const STALE_OPEN_MS = 1500;
 
-export function useStaleOpenRead(client: QueryClient, route: { readonly current: { thread: string | null } }, read: (threadId: string) => void) {
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => () => {
-    if (timer.current) clearTimeout(timer.current);
-  }, []);
-  return (threadId: string | null) => {
-    if (!threadId || timer.current || !heldThread(client, threadId) || !isThreadStale(client, threadId)) return;
-    timer.current = setTimeout(() => {
-      timer.current = null;
-      if (route.current.thread === threadId && heldThread(client, threadId) && isThreadStale(client, threadId)) read(threadId);
-    }, STALE_OPEN_MS);
+export function watchStaleOpen(client: QueryClient, open: () => string | null, read: (threadId: string) => void, ms = STALE_OPEN_MS): () => void {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const arm = () => {
+    const threadId = open();
+    if (!threadId || timer || !heldThread(client, threadId) || !isThreadStale(client, threadId)) return;
+    timer = setTimeout(() => {
+      timer = null;
+      if (open() === threadId && heldThread(client, threadId) && isThreadStale(client, threadId)) read(threadId);
+    }, ms);
   };
+  const stop = client.getQueryCache().subscribe((event) => {
+    if (event.query.queryKey[1] === 'thread' && event.query.queryKey[2] === open()) arm();
+  });
+  return () => {
+    stop();
+    if (timer) clearTimeout(timer);
+  };
+}
+
+export function useStaleOpenRead(client: QueryClient, route: { readonly current: { thread: string | null } }, read: (threadId: string) => void): void {
+  const latest = useRef(read);
+  latest.current = read;
+  useEffect(() => watchStaleOpen(client, () => route.current.thread, (id) => latest.current(id)), [client, route]);
 }
