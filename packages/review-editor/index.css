@@ -14,9 +14,9 @@
 @source "./components/**/*.tsx";
 @source "../guide-viewer/**/*.tsx";
 @source "./dock/**/*.tsx";
+@source "./workspace/**/*.tsx";
 @source "./utils/**/*.tsx";
 @source "./live/**/*.tsx";
-@source "./workspace/**/*.tsx";
 
 @import "../ui/theme.css";
 @import "./comments.css";

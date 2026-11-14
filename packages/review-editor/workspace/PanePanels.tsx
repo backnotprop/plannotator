@@ -1,6 +1,6 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import type { Pane } from './paneLayout';
+import type { Pane, PaneTab } from './paneLayout';
 import type { WorkspaceStore } from './workspaceStore';
 import { reviewPanelComponents } from '../dock/reviewPanelComponents';
 
@@ -61,6 +61,13 @@ function useAfterFirstPaint(defer: boolean): boolean {
   return ready;
 }
 
+const PanelSlot = React.memo<{ tab: PaneTab; store: WorkspaceStore }>(({ tab, store }) => {
+  const Component = (reviewPanelComponents as unknown as Record<string, PanelComponent>)[tab.component];
+  const handle = store.api.getPanel(tab.id);
+  if (!Component || !handle) return null;
+  return createPortal(<Component api={handle.api} params={tab.params} containerApi={store.api} />, hostFor(store, tab.id));
+});
+
 export const PanePanels: React.FC<{ pane: Pane; store: WorkspaceStore; deferFirstMount?: boolean }> = ({ pane, store, deferFirstMount = false }) => {
   const frameRef = useRef<HTMLDivElement>(null);
   const scrolls = useRef(new Map<string, ScrollMemory>());
@@ -93,16 +100,7 @@ export const PanePanels: React.FC<{ pane: Pane; store: WorkspaceStore; deferFirs
 
   return (
     <div ref={frameRef} className="relative flex-1 min-h-0" data-pane-frame="">
-      {ready && pane.tabs.map((tab) => {
-        const Component = (reviewPanelComponents as unknown as Record<string, PanelComponent>)[tab.component];
-        const handle = store.api.getPanel(tab.id);
-        if (!Component || !handle) return null;
-        return (
-          <React.Fragment key={tab.id}>
-            {createPortal(<Component api={handle.api} params={tab.params} containerApi={store.api} />, hostFor(store, tab.id))}
-          </React.Fragment>
-        );
-      })}
+      {ready && pane.tabs.map((tab) => <PanelSlot key={tab.id} tab={tab} store={store} />)}
     </div>
   );
 };

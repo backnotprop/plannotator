@@ -129,10 +129,9 @@ export const ReviewDiffBody: React.FC<{
   // context mismatch" warnings in the console.
   return (
     <div key={`${file.path}:${state.reviewBase ?? ''}:${state.activeDiffBase ?? ''}:${state.feedbackDiffContext?.snapshotId ?? ''}`} className="h-full flex flex-col">
-      {crumb && <JumpCrumb crumb={crumb} onBack={state.navigation?.back} />}
       <div className="flex-1 min-h-0 relative">
       <DiffViewer
-        headerAccessory={switchControl}
+        headerAccessory={crumb ? <><JumpCrumb crumb={crumb} onBack={state.navigation?.back} />{switchControl}</> : switchControl}
         bodyOverride={originalView ? (
           <OriginalFileView
             filePath={file.path}

@@ -5745,6 +5745,8 @@ const ReviewApp: React.FC = () => {
                 <div className="w-px h-5 bg-border mx-1 hidden lg:block" />
               </>
             )}
+            <div className={isCompactTouchLayout ? 'min-w-0 flex items-center gap-1' : 'contents'} data-header-middle="">
+            <div className={isCompactTouchLayout ? 'min-w-0 flex-1 flex justify-center [&:has(+[data-pane-tabs-slot]:not(:empty))]:hidden' : 'contents'}>
             {prMetadata ? (
               <div className={isCompactTouchLayout
                 ? 'min-w-0 flex items-center justify-center overflow-hidden px-1'
@@ -5825,9 +5827,10 @@ const ReviewApp: React.FC = () => {
                 : 'text-xs text-muted-foreground/70'
               }>Review</span>
             )}
-            {!isCompactTouchLayout && !guideVisible && <div ref={setPaneTabsSlot} data-pane-tabs-slot="" className="min-w-0 flex-1 self-stretch flex items-stretch empty:hidden" />}
+            </div>
+            {!guideVisible && <div ref={setPaneTabsSlot} data-pane-tabs-slot="" className={isCompactTouchLayout ? 'min-w-0 flex-1 self-stretch flex items-center justify-center empty:hidden' : 'min-w-0 flex-1 self-stretch flex items-stretch empty:hidden'} />}
+            </div>
           </div>
-            {isCompactTouchLayout && !guideVisible && <div ref={setPaneTabsSlot} data-pane-tabs-slot="" className="absolute inset-y-0 left-11 right-11 flex items-center justify-center bg-background empty:hidden" />}
 
           <div className={isCompactTouchLayout
             ? 'contents'

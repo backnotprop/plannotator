@@ -120,6 +120,7 @@ export const RepoFileView: React.FC<RepoFileViewProps> = ({
   return (
     <div className="h-full flex flex-col" data-repo-file-view={filePath}>
       <div className="flex-none flex items-center gap-2 px-3 border-b border-border/50 min-w-0" style={{ height: 'var(--panel-header-h, 36px)' }}>
+        {crumb && crumb.targetPath === filePath && <JumpCrumb crumb={crumb} onBack={onNavigateBack} />}
         <span className="truncate text-sm min-w-0" title={filePath}>
           <span className="text-muted-foreground">{dir}</span>
           <span className="font-medium text-foreground">{name}</span>
@@ -138,16 +139,9 @@ export const RepoFileView: React.FC<RepoFileViewProps> = ({
         )}
         <span className="ml-auto flex-none text-[11px] text-muted-foreground/80">
           {onAddAnnotation ? 'Select lines to comment' : null}
-          {preview && !crumb && <span className="ml-3" data-preview-hint>Double-click the tab to keep it</span>}
+          {preview && <span className="ml-3" data-preview-hint>Double-click the tab to keep it</span>}
         </span>
       </div>
-      {crumb && crumb.targetPath === filePath && (
-        <JumpCrumb
-          crumb={crumb}
-          onBack={onNavigateBack}
-          right={preview ? <span data-preview-hint>Double-click the tab to keep it</span> : undefined}
-        />
-      )}
       {missed && <RevealMissedNote missed={missed} />}
       <div className="flex-1 min-h-0 overflow-auto" ref={scroll.ref} onScroll={scroll.onScroll}>
         {text.status === 'loading' && lastReady.current ? (
