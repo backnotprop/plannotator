@@ -6231,7 +6231,7 @@ const ReviewApp: React.FC = () => {
                 isOpen
                 onClose={reviewSidebar.close}
                 onSelectTab={reviewSidebar.open}
-                extraTabs={referencesTab ? [referencesTab] : undefined}
+                extraTabs={[...(referencesTab ? [referencesTab] : [])]}
                 presentation={isCompactTouchLayout ? 'overlay' : 'panel'}
                 activeTab={reviewSidebar.activeTab}
                 annotations={allAnnotations}
