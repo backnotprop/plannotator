@@ -1,40 +1,44 @@
 import React from 'react';
 
-export type ChangedFileView = 'changes' | 'whole';
+export type ChangedFileView = 'changes' | 'whole' | 'original';
 
-/**
- * Changes | Whole file, in a changed file's header (approved design record
- * "review-explorer", step 2). Changes is the diff; Whole file is the new side,
- * every line, with change bars in the gutter.
- */
+const LABELS: Record<ChangedFileView, { label: string; title: string }> = {
+  changes: { label: 'Diff', title: 'The diff' },
+  whole: { label: 'Current', title: "The whole file at the diff's new side, with change bars" },
+  original: { label: 'Original', title: "The whole file at the diff's old side, with the removed lines marked" },
+};
+
 export const FileViewSwitch: React.FC<{
   view: ChangedFileView;
   onSelect: (view: ChangedFileView) => void;
-  /** Why Whole file cannot be shown (static patch, deleted file). */
   wholeUnavailableReason?: string | null;
-}> = ({ view, onSelect, wholeUnavailableReason }) => {
-  const segment = (key: ChangedFileView, label: string) => {
-    const disabled = key === 'whole' && !!wholeUnavailableReason;
+  originalUnavailableReason?: string | null;
+}> = ({ view, onSelect, wholeUnavailableReason, originalUnavailableReason }) => {
+  const segment = (key: ChangedFileView) => {
+    const reason = key === 'whole' ? wholeUnavailableReason : key === 'original' ? originalUnavailableReason : null;
+    const disabled = !!reason;
     return (
       <button
+        key={key}
         type="button"
         data-file-view={key}
         aria-pressed={view === key}
         disabled={disabled}
-        title={disabled ? wholeUnavailableReason ?? undefined : key === 'whole' ? 'The whole file at the diff\'s new side, with change bars' : 'The diff'}
+        title={disabled ? reason ?? undefined : LABELS[key].title}
         onClick={() => onSelect(key)}
         className={`px-2 py-0.5 rounded-sm text-xs whitespace-nowrap transition-colors ${
-          view === key ? 'bg-background text-foreground shadow-sm font-medium' : 'text-muted-foreground hover:text-foreground'
+          view === key ? 'bg-background text-foreground font-medium' : 'text-muted-foreground hover:text-foreground'
         } disabled:opacity-40 disabled:cursor-not-allowed`}
       >
-        {label}
+        {LABELS[key].label}
       </button>
     );
   };
   return (
     <div className="flex-none flex items-center bg-muted/50 rounded p-0.5 mr-1" role="group" aria-label="File view" data-file-view-switch>
-      {segment('changes', 'Changes')}
-      {segment('whole', 'Whole file')}
+      {segment('changes')}
+      {segment('whole')}
+      {segment('original')}
     </div>
   );
 };

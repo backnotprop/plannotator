@@ -154,6 +154,7 @@ export interface ReviewState {
   onAddWholeFileAnnotation?: (input: CodeFileAnnotationInput, options: { inDiff: boolean }) => void;
   /** Keep a preview tab (a comment in it, a double click on its tab). */
   onKeepFileTab?: (panelId: string) => void;
+  onOpenToSide?: (filePath: string) => void;
   /** Explorer (step 3): a jump's landing line, and where it came from. */
   revealTarget?: import('../utils/explorerNavigation').RevealTarget | null;
   jumpCrumb?: import('../utils/explorerNavigation').JumpCrumb | null;

@@ -75,3 +75,34 @@ export function wholeFileMarksCss(marks: WholeFileMarks): string {
   }
   return rules.join('\n');
 }
+
+export function removedOldLines(patch: string): number[] {
+  const lines: number[] = [];
+  let oldLine = 0;
+  let inHunk = false;
+  for (const line of patch.split('\n')) {
+    const header = /^@@ -(\d+)/.exec(line);
+    if (header) {
+      oldLine = Number(header[1]);
+      inHunk = true;
+      continue;
+    }
+    if (!inHunk || line.startsWith('\\')) continue;
+    if (line.startsWith('diff --git')) {
+      inHunk = false;
+      continue;
+    }
+    if (line[0] === '-') {
+      lines.push(oldLine);
+      oldLine += 1;
+    } else if (line[0] === ' ') {
+      oldLine += 1;
+    }
+  }
+  return lines;
+}
+
+export function removedLinesCss(lines: readonly number[]): string {
+  if (lines.length === 0) return '';
+  return `${selectorList(lines)} { box-shadow: inset -3px 0 0 var(--diffs-deletion-base, #f85149); }`;
+}

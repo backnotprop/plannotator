@@ -741,6 +741,7 @@ packages/review-editor/components/minimap/DiffMinimap.sync.test.tsx
 packages/ui/components/AgentsTab.launch.dom.test.tsx
 packages/ui/hooks/useLaunchConfig.dom.test.tsx
 packages/review-editor/components/image-diff/ImageStage.test.tsx
+packages/review-editor/workspace/ReviewWorkspace.test.tsx
 packages/ui/components/Viewer.blockRedraws.test.tsx
 packages/editor/hooks/useCheckboxOverrides.viewer.test.tsx
 packages/ui/components/TaterSpriteSlots.test.tsx

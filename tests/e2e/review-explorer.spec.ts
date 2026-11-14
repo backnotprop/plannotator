@@ -245,19 +245,19 @@ test('Any file in a tab: preview, keep, Whole file with change bars, and a comme
     await expect(view.locator('[data-not-in-review]')).toHaveText('Not in this review');
     await expect(view.locator('[data-repo-file-revision]')).toHaveText('at working tree');
     await expect(page.locator('[data-preview-tab]')).toHaveCount(1);
-    await expect(page.locator('[data-preview-tab] .dv-review-tab-label')).toHaveText('buildFileTree.ts');
+    await expect(page.locator('[data-preview-tab][data-pane-tab], [data-preview-tab] .dv-review-tab-label')).toHaveText('buildFileTree.ts');
 
     // The next single click replaces the preview: still one preview tab.
     await repoRow(page, 'README.md').click();
     await expect(page.locator('[data-repo-file-view="README.md"]')).toBeVisible();
     await expect(page.locator('[data-preview-tab]')).toHaveCount(1);
-    await expect(page.locator('[data-preview-tab] .dv-review-tab-label')).toHaveText('README.md');
-    await expect(page.locator('.dv-review-tab', { hasText: 'buildFileTree.ts' })).toHaveCount(0);
+    await expect(page.locator('[data-preview-tab][data-pane-tab], [data-preview-tab] .dv-review-tab-label')).toHaveText('README.md');
+    await expect(page.locator('[data-pane-tab], .dv-review-tab', { hasText: 'buildFileTree.ts' })).toHaveCount(0);
 
     // A double click on the tab keeps it.
     await page.locator('[data-preview-tab]').dblclick();
     await expect(page.locator('[data-preview-tab]')).toHaveCount(0);
-    await expect(page.locator('.dv-review-tab', { hasText: 'README.md' })).toHaveCount(1);
+    await expect(page.locator('[data-pane-tab], .dv-review-tab', { hasText: 'README.md' })).toHaveCount(1);
     await expect(page.locator('[data-repo-file-view="README.md"] [data-preview-hint]')).toHaveCount(0);
 
     // A changed file: Changes | Whole file, the new side with change bars.
@@ -289,7 +289,7 @@ test('Any file in a tab: preview, keep, Whole file with change bars, and a comme
       expect(top).toBeGreaterThan(5_000);
     }).toPass({ timeout: 10_000 });
     await page.waitForTimeout(300);
-    const tabOrder = () => page.locator('.dv-review-tab-label').allTextContents();
+    const tabOrder = () => page.locator('[data-pane-tab], .dv-review-tab-label').allTextContents();
     const tabsBefore = await tabOrder();
     // The same view, scrolled where it was: not remounted at line 1.
     await longView.evaluate((el) => { (window as Window & { __longView?: Element }).__longView = el; });
@@ -364,7 +364,7 @@ test('Go to File, Go to Definition and References into tabs, Back / Forward, nex
     await expect.poll(() => (existsSync(readyFile) ? readFileSync(readyFile, 'utf8') : ''), { timeout: 30_000 }).toContain('"url"');
     const url = (JSON.parse(readFileSync(readyFile, 'utf8').trim().split('\n')[0]!) as { url: string }).url;
     const page = await openReview(browser, url);
-    const activeTab = page.locator('.dv-active-tab .dv-review-tab-label').first();
+    const activeTab = page.locator('[data-active-pane-group] [data-pane-tab][aria-selected="true"], .dv-active-tab .dv-review-tab-label').first();
 
     // With no symbol under the pointer F12 is left to the browser (developer tools).
     expect(await page.evaluate(() => {
@@ -451,7 +451,7 @@ test('Go to File, Go to Definition and References into tabs, Back / Forward, nex
     await expect(activeTab).toHaveText('long.ts');
     // In a diff taller than the screen it walks the runs of changes, down and back up.
     const scrollTop = () => page.evaluate(() => {
-      const host = document.querySelector('.dv-active-group diffs-container');
+      const host = document.querySelector('[data-pane-active] [data-pane-panel-visible] diffs-container, [data-pane-panel-visible] diffs-container, .dv-active-group diffs-container');
       let node: Element | null = host;
       while (node) {
         if (node instanceof HTMLElement && node.scrollHeight > node.clientHeight && /(auto|scroll)/.test(getComputedStyle(node).overflowY)) return node.scrollTop;
