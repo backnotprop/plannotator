@@ -2,8 +2,9 @@ import type { QueryClient } from '@tanstack/react-query';
 import type { InboxEvent } from '../../api';
 import { threadOfRecord } from '../../openThreadReads';
 import { threadDrawReady } from '../../threadDrawReady';
-import { changeThread, heldThread, isThreadStale, staleThread, staleThreads } from '../queries/thread';
+import { changeThread, heldThread, isThreadStale, noteMissed, staleThread, staleThreads } from '../queries/thread';
 import { drawSoon } from './drawGap';
+import { machineOf } from '../../inboxUrl';
 import { applyRecord, type HeldThread } from './record';
 
 export type StreamOutcome = { threadId: string; kind: 'applied' | 'none' | 'reread' | 'unheld' } | { threadId: null; kind: 'any' };
@@ -21,6 +22,7 @@ export function applyStreamRecord(client: QueryClient, event: InboxEvent | null)
   const held = heldThread(client, threadId);
   if (!held || isThreadStale(client, threadId)) {
     ahead.delete(threadId);
+    if (held && !machineOf(threadId) && 'seq' in event && typeof event.seq === 'number') noteMissed(threadId, event.seq);
     return { threadId, kind: 'unheld' };
   }
   const outcome = applyRecord(ahead.get(threadId) ?? held, event);
