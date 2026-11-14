@@ -144,6 +144,11 @@ const el = (selector: string) => {
   if (!found) throw new Error(`${selector} did not render`);
   return found;
 };
+const repoRow = (path: string) => {
+  const found = document.querySelector<HTMLElement>('[data-repo-file-tree]')?.shadowRoot?.querySelector<HTMLElement>(`[data-item-path="${path}"]`);
+  if (!found) throw new Error(`${path} has no row`);
+  return found;
+};
 const listed = () => reads.filter((read) => read.includes('/pulls/repo-files'));
 
 test.skipIf(!hasDom)('Changes | All files: the repository at the head read, a file opened in place of the diff, and back', async () => {
@@ -165,23 +170,21 @@ test.skipIf(!hasDom)('Changes | All files: the repository at the head read, a fi
   expect(storage.getItem(TREE_SCOPE_COOKIE)).toBe('all');
 
   // A file the PR does not change opens in place of the diff, at that head.
-  await act(async () => el('[data-repo-file="README.md"]').click());
+  await act(async () => repoRow('README.md').click());
   await settle();
   expect(el('[data-pull-repo-file]').getAttribute('data-pull-repo-file')).toBe('README.md');
   expect(el('[data-pull-repo-file]').getAttribute('data-sha')).toBe(HEAD);
   expect(el('.ib-gbody').hasAttribute('data-repo-open')).toBe(true);
 
   // A changed file picked in All files: the diff again, on it.
-  await act(async () => el('[data-repo-folder="src"]').click());
-  await settle();
-  await act(async () => el('[data-repo-file="src/app.ts"] button').click());
+  await act(async () => repoRow('src/app.ts').click());
   await settle();
   expect(!!document.querySelector('[data-pull-repo-file]')).toBe(false);
   expect(el('.ib-gbody').hasAttribute('data-repo-open')).toBe(false);
   expect(reveals.at(-1)).toBe('src/app.ts');
 
   // Changes: the PR's own files again, and the diff.
-  await act(async () => el('[data-repo-file="README.md"]').click());
+  await act(async () => repoRow('README.md').click());
   await settle();
   await act(async () => el('[data-tree-scope="changes"]').click());
   await settle();

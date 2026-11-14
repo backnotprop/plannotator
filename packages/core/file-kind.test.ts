@@ -100,20 +100,30 @@ describe('fileKind', () => {
     expect(fileKind('bun.lock', generated)).toBe('code');
   });
 
-  test('generated wins over tests, tests over code; docs and config are code', () => {
+  test('generated wins over tests, tests over docs, docs over code; config is code', () => {
     expect(fileKind('tests/fixtures/data.min.js')).toBe('generated');
     expect(fileKind('src/a.test.ts')).toBe('test');
+    expect(fileKind('tests/fixtures/notes.md')).toBe('test');
     expect(fileKind('package.json')).toBe('code');
-    expect(fileKind('docs/sync.md')).toBe('code');
+    expect(fileKind('docs/sync.md')).toBe('docs');
     expect(fileKind('.github/workflows/ci.yml')).toBe('code');
+  });
+
+  test('docs: prose, project notes by name, and docs folders; not text files or code beside them', () => {
+    for (const path of ['README.md', 'packages/ui/README', 'CHANGELOG.md', 'LICENSE', 'LICENSE-MIT', 'apps/marketing/src/content/docs/install.mdx', 'docs/agent-guides/inbox.md', 'guide/intro.rst', 'doc/diagram.svg', 'SECURITY.md', 'packages/ui/AGENTS.md']) {
+      expect(fileKind(path)).toBe('docs');
+    }
+    for (const path of ['requirements.txt', 'CMakeLists.txt', 'src/docsify.ts', 'packages/docs-site/src/index.ts', 'src/readme-parser.ts', 'licenses.json']) {
+      expect(fileKind(path)).toBe('code');
+    }
   });
 });
 
 describe('groupByFileKind', () => {
-  test('code, tests, generated; items keep their order inside a kind; empty kinds left out', () => {
-    const paths = ['bun.lock', 'src/b.test.ts', 'src/z.ts', 'src/a.test.ts', 'src/a.ts'];
+  test('code, tests, docs, generated; items keep their order inside a kind; empty kinds left out', () => {
+    const paths = ['bun.lock', 'README.md', 'src/b.test.ts', 'src/z.ts', 'src/a.test.ts', 'src/a.ts'];
     const groups = groupByFileKind(paths, (p) => p);
-    expect(groups.map((g) => g.kind)).toEqual(['code', 'test', 'generated']);
+    expect(groups.map((g) => g.kind)).toEqual(['code', 'test', 'docs', 'generated']);
     expect(groups[0].items).toEqual(['src/z.ts', 'src/a.ts']);
     expect(groups[1].items).toEqual(['src/b.test.ts', 'src/a.test.ts']);
     expect(groupByFileKind(['a.ts', 'b.ts'], (p) => p).map((g) => g.kind)).toEqual(['code']);
