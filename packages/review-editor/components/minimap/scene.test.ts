@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { buildFileRowModel, type RowMetrics } from './rowModel';
 import { changeBands, hitTest, markBands, placeFiles, rasterize, type MinimapFile } from './scene';
 import { densityAlpha } from './draw';
-import { hasBigFile, isLongContent } from './DiffMinimapSlot';
+import { hasBigFile, minimapShows } from './DiffMinimapSlot';
 import { buildWholeFileRowModel } from './wholeFileModel';
 import { ROW_ADD, ROW_DEL } from './rowModel';
 
@@ -132,14 +132,17 @@ describe('minimap marker positions', () => {
     expect(dense).toBeGreaterThan(single * 3);
   });
 
-  test('a big file shows the strip even when its diff is short; a short diff in a small file does not', () => {
+  test('Auto shows the strip past three screens, or past one for a file over 1,000 lines; Always and Off override it', () => {
     const big = '@@ -2398,3 +2398,4 @@\n a\n+b\n c\n d';
     const small = '@@ -10,3 +10,4 @@\n a\n+b\n c\n d';
     expect(hasBigFile([small, big])).toBe(true);
     expect(hasBigFile([small])).toBe(false);
-    expect(isLongContent(1_200, 800, true)).toBe(true);
-    expect(isLongContent(1_200, 800, false)).toBe(false);
-    expect(isLongContent(700, 800, true)).toBe(false);
+    expect(minimapShows('auto', 2_400, 800, false)).toBe(false);
+    expect(minimapShows('auto', 2_401, 800, false)).toBe(true);
+    expect(minimapShows('auto', 1_200, 800, true)).toBe(true);
+    expect(minimapShows('auto', 700, 800, true)).toBe(false);
+    expect(minimapShows('always', 700, 800, false)).toBe(true);
+    expect(minimapShows('off', 90_000, 800, true)).toBe(false);
   });
 
   test('a whole-file strip marks the changed lines of its own side, and a wedge where the other side changed', () => {
