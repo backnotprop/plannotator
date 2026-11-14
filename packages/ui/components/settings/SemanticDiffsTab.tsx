@@ -10,18 +10,18 @@ type Check = { kind: 'idle' } | { kind: 'checking' } | { kind: 'ok'; ms: number 
 const ROUTE = '/api/sem-diff/opinion/settings';
 export const POWER_UP_CHANGED_EVENT = 'plannotator:power-up-changed';
 const PROVIDER_NAME: Record<Provider, string> = { jev: 'Jev', clef: 'Clef' };
-const ADD_KEY: Record<Provider, string> = { jev: 'Add your Jev key', clef: 'Add your account ID and token' };
+const ADD_KEY: Record<Provider, string> = { jev: 'Paste the key from your TypeSafe account', clef: 'Your Cloudflare account ID and a Workers AI token' };
 
 function failureText(provider: Provider, failure: Failure): string {
   const name = PROVIDER_NAME[provider];
-  if (failure === 'missing') return ADD_KEY[provider];
+  if (failure === 'missing') return provider === 'jev' ? 'Add your TypeSafe key' : 'Add your account ID and token';
   if (failure === 'refused') return provider === 'jev' ? 'Jev refused this key' : 'Clef refused this token';
   if (failure === 'noCredit') return `No credit left on this ${name} account`;
   return `${name} did not answer. Try again in a moment.`;
 }
 
 function KeyField({ caption, label, value, onChange, secret, flagged, saved, onFocus, className }: {
-  caption: string;
+  caption?: string;
   label: string;
   value: string;
   onChange: (v: string) => void;
@@ -33,7 +33,7 @@ function KeyField({ caption, label, value, onChange, secret, flagged, saved, onF
 }) {
   return (
     <label className={`flex flex-col gap-1 ${className}`}>
-      <span className="text-xs font-medium text-foreground">{caption}</span>
+      {caption && <span className="text-xs font-medium text-foreground">{caption}</span>}
       <input
         className={`h-7 w-full min-w-0 rounded-md border bg-background px-2 font-mono text-xs outline-none focus:ring-1 focus:ring-ring ${flagged ? 'border-warning' : 'border-border'}`}
         type={secret ? 'password' : 'text'}
@@ -163,9 +163,9 @@ export function SemanticDiffsTab() {
         description="Draw moved, renamed, reformatted, extracted and inlined code as what it is."
       />
       <div data-power-up-settings="">
-        <div className="flex items-start justify-between gap-4 border-t border-border pt-3">
-          <span data-power-up-settings-slot="" aria-hidden="true" className="pt-0.5">
-            <PowerUpGuy state={powerUp && configured && semantic ? 'alive' : 'grey'} size={20} wakeKey={powerUp} />
+        <div className="flex items-center justify-between gap-3 border-t border-border pt-3">
+          <span data-power-up-settings-slot="" aria-hidden="true">
+            <PowerUpGuy state={powerUp && configured && semantic ? 'alive' : 'still'} size={28} wakeKey={powerUp} />
           </span>
           <AnalysisLayerToggle
             checked={powerUp && configured}
@@ -177,8 +177,8 @@ export function SemanticDiffsTab() {
             label="Power Up"
             description={
               configured
-                ? 'A decision model answers the calls the engine was too strict to make. When it is on, every semantic diff is powered up.'
-                : 'A decision model answers the calls the engine was too strict to make. Add a key below to turn it on.'
+                ? 'A model takes a second look at changes the engine could not label on its own. When it is on, every semantic diff gets that second look.'
+                : 'A model takes a second look at changes the engine could not label on its own. Add a key below to turn it on.'
             }
           />
         </div>
@@ -199,7 +199,7 @@ export function SemanticDiffsTab() {
               />
             </Row>
             <Row
-              title={provider === 'jev' ? 'API key' : 'Account and token'}
+              title={provider === 'jev' ? 'TypeSafe key' : 'Workers AI'}
               hint={
                 check.kind === 'ok' ? (
                   `✓ Key works · ${check.ms} ms`
@@ -232,7 +232,6 @@ export function SemanticDiffsTab() {
                 {provider === 'jev' ? (
                   <KeyField
                     className="w-full"
-                    caption="TypeSafe key"
                     label="TypeSafe API key"
                     value={apiKey}
                     onChange={setApiKey}

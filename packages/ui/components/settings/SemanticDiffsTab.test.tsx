@@ -77,8 +77,8 @@ describe('Settings › Semantic diffs › Power Up', () => {
     await mount();
     const clef = [...host!.querySelectorAll<HTMLButtonElement>('[role="radio"]')].find((b) => b.textContent === 'Clef')!;
     await act(async () => clef.click());
-    expect(host!.textContent).toContain('Account and token');
-    expect(host!.textContent).toContain('Add your account ID and token');
+    expect(host!.textContent).toContain('Workers AI');
+    expect(host!.textContent).toContain('Account ID');
     await type('Cloudflare account ID', 'acct');
     await act(async () => host!.querySelector<HTMLButtonElement>('button[type="submit"]')!.click());
     expect(host!.querySelector('input[aria-label="Workers AI token"]')!.getAttribute('aria-invalid')).toBe('true');
