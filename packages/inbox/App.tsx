@@ -7964,6 +7964,10 @@ function Inbox() {
             onQuestions={patchQuestions}
             onPickSaves={onPickSaves}
             onChanged={afterWrite}
+            onTakenBack={(draft) => {
+              void inboxApi.drafts().then((model) => openCompose({ draft: model.drafts.find((d) => d.id === draft.id) ?? { ...draft, status: 'none' } }));
+              void afterWrite();
+            }}
             readPending={rowPatches.get(thread.thread_id)?.read_at !== undefined}
             onSentRead={async (model) => {
               // The Send's answer carried the thread: drawn from it, and only the list is read after (afterWrite reads both).

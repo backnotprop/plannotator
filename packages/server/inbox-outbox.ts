@@ -183,6 +183,7 @@ export const DOOR_WRITES: Readonly<Record<string, "append" | "set" | "file" | "l
   "POST messages/:id/to": "set",
   "POST messages/:id/ack": "set",
   "POST messages/:id/send-now": "set",
+  "POST messages/:id/take-back": "set",
   "POST messages/:id/reask": "append",
   "POST messages/:id/handoff/undo": "set",
   "POST messages/:id/actions/(a-[0-9a-f]{8}(?:-\\d{1,3})?)": "set",

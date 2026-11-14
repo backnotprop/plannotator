@@ -620,6 +620,8 @@ export interface InboxMessage {
    * step 6: older records lack it.
    */
   delivery?: InboxDelivery | null;
+  taken_back_at?: string | null;
+  read_by_agent?: { session: string | null; at: string } | null;
   cloud_wake?: InboxCloudWake | null;
   /**
    * On a person's reply or message not yet delivered: the person pressed
@@ -3290,7 +3292,7 @@ export const INBOX_DRAFT_PASTED_LEAD_MAX = 2;
  * (approval "inbox-linked-marks"). The list says them (`marks`), so a linked machine offers a mark on this Inbox's
  * rows only once this Inbox takes it; an older Inbox says none.
  */
-export const INBOX_LINKED_MARKS = ["star", "priority", "agent-face", "agent-name", "tags"] as const;
+export const INBOX_LINKED_MARKS = ["star", "priority", "agent-face", "agent-name", "take-back", "tags"] as const;
 export type InboxLinkedMark = (typeof INBOX_LINKED_MARKS)[number];
 
 /**

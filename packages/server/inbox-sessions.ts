@@ -121,6 +121,7 @@ export interface InboxRecipientConnection {
    * agent's next read, not queued. Absent when none. Additive.
    */
   uncertain?: string[];
+  handed?: string[];
   /**
    * The items waiting on this session, by id: since when it waits on the
    * busy session (`since`, the "Undelivered N min"), and since when it may go
@@ -715,9 +716,10 @@ export function createInboxLiveSessions(options: {
     waits: {},
   });
   /** `uncertain` on a connection: the items that may not have reached the session (absent when none). */
-  const uncertainOf = (session: string): { uncertain?: string[] } => {
+  const uncertainOf = (session: string): { uncertain?: string[]; handed?: string[] } => {
     const items = options.uncertainItemsOf?.(session) ?? [];
-    return items.length > 0 ? { uncertain: items } : {};
+    const handed = store.handover.handedTo(session).filter((id) => !items.includes(id));
+    return { ...(items.length > 0 ? { uncertain: items } : {}), ...(handed.length > 0 ? { handed } : {}) };
   };
 
   /**
