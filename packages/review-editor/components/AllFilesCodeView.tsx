@@ -760,7 +760,7 @@ const FLUSH_FILES_CSS = `
   :host([data-trailing-unread]) [data-separator][data-separator-last] { display: none; }
 `;
 
-const WHOLE_FILE_OPEN_IDLE_MS = 150;
+const WHOLE_FILE_OPEN_IDLE_MS = 500;
 // How long revealing a comment on a closed line waits for its file's whole text.
 const REVEAL_WAIT_MS = 30_000;
 
