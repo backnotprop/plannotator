@@ -15,6 +15,7 @@ export interface RepoTreeHandle {
 }
 
 interface RepoTreeViewProps extends FileRowState {
+  touch?: boolean;
   repo: ReadyRepoFiles;
   loadDir: (dir: string) => void;
   files: DiffFile[];
@@ -142,7 +143,7 @@ export const RepoTreeView: React.FC<RepoTreeViewProps> = (props) => {
     initialExpansion: 'closed',
     flattenEmptyDirectories: false,
     initialExpandedPaths: initialExpanded,
-    itemHeight: 24,
+    itemHeight: props.touch ? 44 : 24,
     icons: { set: 'minimal', colored: false, spriteSheet: ROW_ICONS },
     gitStatus,
     composition: { contextMenu: { triggerMode: 'right-click' } },

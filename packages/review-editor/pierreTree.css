@@ -150,3 +150,13 @@
   padding: 2px 0 4px;
   background: var(--trees-bg-override, var(--background));
 }
+html:has([data-pn-compact-touch-layout='true']) .review-changes-tree::part(row-part-viewed),
+html:has([data-pn-compact-touch-layout='true']) .review-changes-tree::part(row-part-stage),
+html:has([data-pn-compact-touch-layout='true']) .review-changes-tree::part(row-part-unstage),
+html:has([data-pn-compact-touch-layout='true']) .review-changes-tree::part(row-part-staged) {
+  width: var(--pn-touch-target);
+  height: var(--pn-touch-target);
+}
+.review-changes-tree::part(row-trail-heading) {
+  grid-template-columns: var(--review-tree-heading-trail-columns);
+}

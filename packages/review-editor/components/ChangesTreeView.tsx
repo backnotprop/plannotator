@@ -20,6 +20,7 @@ export interface ChangesTreeHandle {
 }
 
 interface ChangesTreeViewProps {
+  touch?: boolean;
   tree: FileTreeNode[];
   groups: ChangesTreeGroup[] | null;
   initiallyFoldedGroups?: ReadonlySet<string>;
@@ -105,6 +106,9 @@ function layoutTree(tree: FileTreeNode[], groups: ChangesTreeGroup[] | null, hid
   }
   return out;
 }
+
+const ROW_HEIGHT = 24;
+const TOUCH_ROW_HEIGHT = 44;
 
 export const ChangesTreeView: React.FC<ChangesTreeViewProps> = (props) => {
   const {
@@ -196,7 +200,7 @@ export const ChangesTreeView: React.FC<ChangesTreeViewProps> = (props) => {
     initialExpansion: 'closed',
     flattenEmptyDirectories: false,
     initialExpandedPaths: initialExpanded,
-    itemHeight: 24,
+    itemHeight: props.touch ? TOUCH_ROW_HEIGHT : ROW_HEIGHT,
     icons: { set: 'minimal', colored: false, spriteSheet: ROW_ICONS },
     gitStatus,
     composition: { contextMenu: { triggerMode: 'right-click' } },
