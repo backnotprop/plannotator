@@ -19,6 +19,10 @@
  * A send is idempotent by `clientRequestId`, as T3's is: a retry under the
  * same id returns the first receipt and records no second turn.
  */
+import { Database } from "bun:sqlite";
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+
 export interface FakeT3 {
   endpoint: URL;
   /** Every t3_thread_send T3 took as a new turn. */
@@ -66,6 +70,66 @@ export function t3ScopeOf(access: T3Access): string {
   if (access === "read-only") return "orchestration:read";
   if (access === "full-access") return "orchestration:read orchestration:operate settings:write source-control:write";
   return "orchestration:read orchestration:operate";
+}
+
+/**
+ * A T3 Code home on disk (`<home>/.t3`) as the Codex-in-T3 route reads it: T3's state database with one provider
+ * thread row per Codex thread T3 runs (`orchestration_v2_projection_provider_threads`, as T3 v0.1.9 writes it), and
+ * the `bin/t3` launcher T3's desktop app writes, faked: it logs its argv and answers `thread send` as T3's command
+ * does. `state` "down" answers as T3's command does with no server running, "gone" as for a thread T3 deleted, "hang"
+ * never answers. No T3 is ever run.
+ */
+export interface FakeT3Home {
+  dir: string;
+  launcher: string;
+  /** Every `t3` call's argv after the command. */
+  calls(): string[][];
+  setState(state: "up" | "down" | "hang" | "gone"): void;
+}
+
+export function makeFakeT3Home(home: string, threads: Record<string, string>): FakeT3Home {
+  const dir = join(home, ".t3");
+  mkdirSync(join(dir, "userdata"), { recursive: true });
+  mkdirSync(join(dir, "bin"), { recursive: true });
+  const db = new Database(join(dir, "userdata", "statev2.sqlite"));
+  db.run(`CREATE TABLE orchestration_v2_projection_provider_threads (provider_thread_id TEXT PRIMARY KEY, thread_id TEXT, owner_node_id TEXT, provider TEXT NOT NULL, driver TEXT, provider_instance_id TEXT, provider_session_id TEXT, status TEXT NOT NULL, first_run_ordinal INTEGER, last_run_ordinal INTEGER, updated_at TEXT NOT NULL, payload_json TEXT NOT NULL)`);
+  for (const [codexThread, t3Thread] of Object.entries(threads)) {
+    const id = `provider-thread:${t3Thread}`;
+    const payload = { id, driver: "codex", providerInstanceId: "codex", providerSessionId: null, appThreadId: t3Thread, ownerNodeId: null, nativeThreadRef: { driver: "codex", nativeId: codexThread, strength: "strong" }, status: "idle", updatedAt: "2026-11-14T00:00:00.000Z" };
+    db.query(`INSERT INTO orchestration_v2_projection_provider_threads VALUES (?, ?, NULL, 'codex', 'codex', 'codex', NULL, 'idle', 1, 1, ?, ?)`).run(id, t3Thread, payload.updatedAt, JSON.stringify(payload));
+  }
+  db.close();
+  const log = join(dir, "calls.log");
+  const stateFile = join(dir, "fake-state");
+  writeFileSync(log, "");
+  writeFileSync(stateFile, "up");
+  const script = join(dir, "fake-t3.js");
+  writeFileSync(
+    script,
+    `const fs = require("node:fs");
+const args = process.argv.slice(2);
+fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify(args) + "\\n");
+const state = fs.readFileSync(${JSON.stringify(stateFile)}, "utf8").trim();
+const known = ${JSON.stringify(Object.values(threads))};
+if (state === "hang") setTimeout(() => {}, 60000);
+else if (state === "gone") { process.stderr.write("The thread was not found.\\n"); process.exit(1); }
+else if (state === "down") { process.stderr.write("No running T3 Code server uses ${dir}. Start T3 Code, then retry.\\n"); process.exit(1); }
+else if (args[0] === "thread" && args[1] === "send") {
+  const thread = args.filter((a) => !a.startsWith("--"))[2];
+  if (!known.includes(thread)) { process.stderr.write("The thread was not found.\\n"); process.exit(1); }
+  process.stdout.write(JSON.stringify({ threadId: thread, messageId: "message-1", runId: "run-1", status: "queued", delivery: "started" }) + "\\n");
+} else { process.stderr.write("unknown command\\n"); process.exit(2); }
+`,
+  );
+  const launcher = join(dir, "bin", "t3");
+  writeFileSync(launcher, `#!/bin/sh\nexec '${process.execPath}' '${script}' "$@"\n`);
+  chmodSync(launcher, 0o755);
+  return {
+    dir,
+    launcher,
+    calls: () => (existsSync(log) ? readFileSync(log, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line) as string[]) : []),
+    setState: (state) => writeFileSync(stateFile, state),
+  };
 }
 
 export function startFakeT3(options: { threads: string[]; token?: string; access?: T3Access; modes?: Record<string, T3RuntimeMode> }): FakeT3 {

@@ -5,8 +5,9 @@
  * person typed and runs it with whatever provider the thread uses.
  *
  * T3 runs Claude through the Agent SDK, where the Claude Code mod stands down,
- * so no Plannotator plugin polls. T3 sets T3CODE_THREAD_ID in every process an
- * agent starts, its MCP servers included, and the stdio shim sends as
+ * so no Plannotator plugin polls. T3 sets T3CODE_THREAD_ID in every process its
+ * Claude starts, its MCP servers included (a Codex thread in T3 is the Codex
+ * wake's: inbox-codex-t3.ts), and the stdio shim sends as
  * `agent_host: "t3"` with that id (apps/hook/server/inbox-mcp-shim.ts). A
  * message wakes when this Inbox holds a T3 grant (`plannotator t3 login`,
  * packages/t3-code) whose environment has that thread.
