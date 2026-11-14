@@ -9,7 +9,7 @@
  * Inbox may run on another host than code review, where the cookies are not
  * shared, so config.json is what carries a choice across.
  *
- * Whole file and Hide whitespace are not here: the Inbox does not show them.
+ * Whole file, Hide whitespace and the minimap are not here: the Inbox does not show them.
  */
 
 import { configStore } from '@plannotator/ui/config';
@@ -18,7 +18,7 @@ import type { SettingValue } from '@plannotator/ui/config';
 import type { InboxDiffOptions } from './api';
 
 /** The settings the Inbox shows and saves. */
-export type InboxDiffSetting = 'diffStyle' | Exclude<DiffDisplaySetting, 'diffExpandUnchanged' | 'diffHideWhitespace'>;
+export type InboxDiffSetting = 'diffStyle' | Exclude<DiffDisplaySetting, 'diffExpandUnchanged' | 'diffHideWhitespace' | 'diffMinimap'>;
 type WireKey = keyof InboxDiffOptions;
 
 /** Each setting's name on the wire, and its field in config.json `diffOptions` (what the config store's sync payload carries). */
