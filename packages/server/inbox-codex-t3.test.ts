@@ -79,7 +79,7 @@ describe("a Codex thread T3 Code runs", () => {
 
     expect(w.queues()).toEqual([]);
     const text = codexQueueMessage(commandOf(w.store.message(reply.id)!));
-    expect(w.t3!.calls()).toEqual([["thread", "send", "--json", T3_THREAD, text]]);
+    expect(w.t3!.calls()).toEqual([["thread", "send", T3_THREAD, text, "--json"]]);
     expect(w.store.message(reply.id)?.delivery).toMatchObject({ state: "delivered", host: "codex", session: IN_T3 });
 
     // Once, across a restart too.

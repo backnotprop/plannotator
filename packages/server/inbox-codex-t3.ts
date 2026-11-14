@@ -13,10 +13,11 @@
  *    (`<T3 home>/userdata/statev2.sqlite`, the provider thread whose native id
  *    is the Codex thread's). Nothing inside Codex names it: T3 puts
  *    T3CODE_THREAD_ID in the thread's shells only, never in its MCP servers;
- *  - the text goes in with `<T3 home>/bin/t3 thread send --json <thread>
- *    <text>`, the launcher T3's desktop app writes at its first start. It
- *    signs in as the machine's owner for that one call, so the person signs
- *    in to nothing, and T3 queues the message behind a running turn;
+ *  - the text goes in with `<T3 home>/bin/t3 thread send <thread> <text>
+ *    --json`, the launcher T3's desktop app writes at its first start (T3's
+ *    way for scripts on its host). It signs in as the machine's owner for
+ *    that one call, so the person signs in to nothing, and T3 queues the
+ *    message behind a running turn;
  *  - the command sends no request id, so each item is sent once (the Codex
  *    wake's claim); a call that ran out of time is never sent again.
  */
@@ -131,7 +132,7 @@ export function createCodexT3Route(options: {
     send: async (t3Thread, text, signal) => {
       const launcher = t3LauncherOf(environment);
       if (!agentHomeAllowed(environment) || !existsSync(launcher)) return { closed: `no t3 command at ${launcher}` };
-      const run = await environment.run([launcher, "thread", "send", "--json", t3Thread, text], {
+      const run = await environment.run([launcher, "thread", "send", t3Thread, text, "--json"], {
         timeoutMs: options.sendTimeoutMs ?? INBOX_CODEX_T3_SEND_TIMEOUT_MS,
         ...(signal ? { signal } : {}),
       });
