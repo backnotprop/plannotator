@@ -31,6 +31,7 @@ import { SidebarActionRow, SemanticDiffRow, CallFlowRow, AllChangesRow } from '.
 import { PanelControlsRow, PanelSearchField, TOOLS_ONE_ROW_WIDTH } from './PanelChrome';
 import { PanelSectionHeader, CountColumns, countColumnVars, compactRowsProps } from './FileRowBits';
 import { useHiddenViewedFiles } from '../hooks/useHiddenViewedFiles';
+import { useLatestCallback } from '../hooks/useLatestCallback';
 
 interface FileTreeProps {
   /** The top of the panel (views, the comparison sentence, Changes | All
@@ -283,6 +284,11 @@ export const FileTree: React.FC<FileTreeProps> = ({
     });
   }, []);
 
+  const selectFile = useLatestCallback(onSelectFile);
+  const doubleClickFile = useLatestCallback(onDoubleClickFile);
+  const toggleViewed = useLatestCallback(onToggleViewed);
+  const stageFile = useLatestCallback(onStageFile);
+
   // Since-base sidecar lookup for per-row lifecycle markers + stage buttons.
   const getSectionEntry = useMemo(() => {
     if (!sinceBaseSections) return undefined;
@@ -482,10 +488,10 @@ export const FileTree: React.FC<FileTreeProps> = ({
         onToggleFolder={handleToggleFolder}
         activeFileIndex={rowActiveIndex}
         scrollHighlightIndex={isAllFilesActive ? scrollHighlightIndex : undefined}
-        onSelectFile={onSelectFile}
-        onDoubleClickFile={onDoubleClickFile}
+        onSelectFile={selectFile}
+        onDoubleClickFile={doubleClickFile}
         viewedFiles={viewedFiles}
-        onToggleViewed={onToggleViewed}
+        onToggleViewed={toggleViewed}
         showViewedControls={showViewedControls}
         hideViewedFiles={hideViewedFiles}
         hiddenFiles={hiddenFiles}
@@ -493,7 +499,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
         stagedFiles={stagedFiles}
         repoRoot={repoRoot}
         getSectionEntry={getSectionEntry}
-        onStageFile={onStageFile}
+        onStageFile={stageFile}
         stagingFile={stagingFile}
         showStageControls={showStageControls}
         markdownPreviewedPaths={markdownPreviewedPaths}
@@ -660,17 +666,17 @@ export const FileTree: React.FC<FileTreeProps> = ({
                 activeRepoPath={activeRepoPath}
                 expanded={repoExpanded ?? EMPTY_SET}
                 onToggleFolder={toggleRepoFolder}
-                onSelectFile={onSelectFile}
-                onDoubleClickFile={onDoubleClickFile}
+                onSelectFile={selectFile}
+                onDoubleClickFile={doubleClickFile}
                 onOpenRepoFile={onOpenRepoFile}
                 viewedFiles={viewedFiles}
-                onToggleViewed={onToggleViewed}
+                onToggleViewed={toggleViewed}
                 showViewedControls={showViewedControls}
                 annotations={annotations}
                 stagedFiles={stagedFiles}
                 repoRoot={repoRoot}
                 getSectionEntry={getSectionEntry}
-                onStageFile={onStageFile}
+                onStageFile={stageFile}
                 stagingFile={stagingFile}
                 showStageControls={showStageControls}
                 markdownPreviewedPaths={markdownPreviewedPaths}
