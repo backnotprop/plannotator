@@ -3,7 +3,8 @@ import type { ThreadModel } from './api';
 
 export interface ThreadFlight {
   promise: Promise<InboxThread | null>;
-  again: boolean;
+  next: Promise<InboxThread | null> | null;
+  settleNext: ((read: Promise<InboxThread | null>) => void) | null;
 }
 
 const STALE_AGAIN_MAX = 3;
@@ -23,22 +24,25 @@ export function joinThreadRead(
     });
   const out = flights.get(threadId);
   if (out) {
-    out.again = true;
-    return out.promise;
+    if (!out.next) out.next = new Promise((resolve) => (out.settleNext = (p) => resolve(p)));
+    return out.next;
   }
-  const flight: ThreadFlight = { promise: Promise.resolve(null), again: false };
+  const flight: ThreadFlight = { promise: Promise.resolve(null), next: null, settleNext: null };
   let landed = false;
-  flight.promise = read(threadId).then((thread) => {
-    landed = thread !== null;
-    return thread;
-  }).finally(() => {
-    flights.delete(threadId);
-    const stale = landed && stillStale(threadId);
-    const tries = stale ? (staleAgain.get(threadId) ?? 0) + 1 : 0;
-    if (tries === 0) staleAgain.delete(threadId);
-    else staleAgain.set(threadId, tries);
-    if (flight.again || (stale && tries <= STALE_AGAIN_MAX)) void joinThreadRead(flights, threadId, undefined, read, stillStale);
-  });
+  flight.promise = read(threadId)
+    .then((thread) => {
+      landed = thread !== null;
+      return thread;
+    })
+    .finally(() => {
+      flights.delete(threadId);
+      const stale = landed && stillStale(threadId);
+      const tries = stale ? (staleAgain.get(threadId) ?? 0) + 1 : 0;
+      if (tries === 0) staleAgain.delete(threadId);
+      else staleAgain.set(threadId, tries);
+      if (flight.settleNext) flight.settleNext(joinThreadRead(flights, threadId, undefined, read, stillStale));
+      else if (stale && tries <= STALE_AGAIN_MAX) void joinThreadRead(flights, threadId, undefined, read, stillStale);
+    });
   flights.set(threadId, flight);
   return flight.promise;
 }
