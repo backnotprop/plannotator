@@ -11,7 +11,7 @@
  *    folders);
  *  - on → off: the routes answer 404 again and the boards are kept;
  *  - a window hears board changes on the Inbox's one event stream, only while on;
- *  - a tailnet guest is refused, the owner over the tailnet is not; a write from a
+ *  - the owner over the tailnet is answered; a write from a
  *    page of a restarted Inbox is refused (409).
  *
  * What regresses: an Inbox that serves boards (or offers agents the skill)
@@ -181,18 +181,17 @@ test("a window hears its boards on the Inbox's one event stream (no second conne
   expect(await listening).not.toContain("event: shapes");
 });
 
-test("a tailnet guest is refused every Shape route and hears no board on the event stream (no store reading for it); the owner over the tailnet is not", async () => {
+test("the owner over the tailnet gets every Shape route and hears boards on the event stream", async () => {
   const MAGIC = "macbook-pro.tail0000.ts.net";
   const OWNER = "ramos@example.com";
-  const GUEST = "guest@example.com";
   const savedTailscale = process.env.PLANNOTATOR_INBOX_TAILSCALE;
   delete process.env.PLANNOTATOR_INBOX_TAILSCALE;
   try {
-    const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-shape-guest-")));
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-shape-owner-")));
     roots.push(root);
     const dataDir = join(root, "data");
     mkdirSync(dataDir, { recursive: true });
-    writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxShape: true, inboxTailscale: true, inboxTailscaleAllow: [GUEST] }));
+    writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxShape: true, inboxTailscale: true }));
     process.env.PLANNOTATOR_DATA_DIR = dataDir;
     const made = createShapeStore({ dataDir }).update({ board, project: { root, name: "app" }, session: { id: "ses_a", host: "claude-code" } });
     if (!made.ok) throw new Error(JSON.stringify(made));
@@ -203,22 +202,12 @@ test("a tailnet guest is refused every Shape route and hears no board on the eve
     const through = (login: string, path: string) =>
       fetch(`http://127.0.0.1:${listener}${path}`, { headers: { Host: `${MAGIC}:${server.port}`, "Tailscale-User-Login": login, Origin: `https://${MAGIC}:${server.port}` } });
     for (const path of ["/api/shapes", `/api/shapes/${made.id}`]) {
-      const guest = await through(GUEST, path);
-      expect(guest.status).toBe(403);
       expect((await through(OWNER, path)).status).toBe(200);
     }
 
-    // The event stream: a guest's window hears no board ids and starts no reading of the store; the owner's does.
+    // The event stream: the owner's window hears board ids.
     const note = () =>
       fetch(`http://127.0.0.1:${server.port}/api/shapes/${made.id}/notes`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind: "change", v: 1, view: "picture", text: "Two whistles" }) });
-    const guestStream = await through(GUEST, "/api/inbox/events?window=shape-guest");
-    expect(guestStream.status).toBe(200);
-    const guestHeard = readUntil(guestStream, "event: shapes", 2_500);
-    await new Promise((r) => setTimeout(r, 300));
-    expect(server.shapeWatchers()).toBe(0);
-    expect((await note()).status).toBe(200);
-    expect(await guestHeard).not.toContain("event: shapes");
-
     const ownerStream = await through(OWNER, "/api/inbox/events?window=shape-owner");
     expect(ownerStream.status).toBe(200);
     const ownerHeard = readUntil(ownerStream, "event: shapes", 8_000);

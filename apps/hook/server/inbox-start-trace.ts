@@ -21,6 +21,7 @@ export type InboxStartStep =
   | "lock_wait"
   | "busy_wait"
   | "already_running"
+  | "out_of_reach"
   | "spawned"
   | "serving"
   | "restart";

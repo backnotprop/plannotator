@@ -27,11 +27,8 @@ export const INBOX_DEBUG_PENDING_MAX_BYTES = 4 * 1024 * 1024;
 
 export interface InboxDebugLog {
   path: string;
-  /**
-   * `handle`, logging each `/api/inbox/` request. `owner` answers whether this request may be told debug is on and
-   * may name its own id; a request from anyone else gets a server id and no mark.
-   */
-  wrap<Via extends string>(handle: (req: Request, via: Via) => Promise<Response>, owner: (req: Request, via: Via) => boolean): (req: Request, via: Via) => Promise<Response>;
+  /** `handle`, logging each `/api/inbox/` request; the window's request may name its own id. */
+  wrap<Via extends string>(handle: (req: Request, via: Via) => Promise<Response>): (req: Request, via: Via) => Promise<Response>;
   /** The window's records: a same-origin, owner-only POST, checked by the caller. */
   accept(req: Request): Promise<Response>;
   /** One line the server writes about something it did on its own (`ev` names it), stamped now. */
@@ -338,14 +335,7 @@ export function createInboxDebugLog(inboxDir: string, maxBytes = INBOX_DEBUG_MAX
     note(ev, fields) {
       append(line({ t: Date.now(), ev, side: "server", ...fields }));
     },
-    wrap(handle, owner) {
-      const isOwner: typeof owner = (req, via) => {
-        try {
-          return owner(req, via);
-        } catch {
-          return false;
-        }
-      };
+    wrap(handle) {
       return async (req, via) => {
         let pathname: string;
         try {
@@ -354,8 +344,7 @@ export function createInboxDebugLog(inboxDir: string, maxBytes = INBOX_DEBUG_MAX
           return handle(req, via);
         }
         if (!pathname.startsWith("/api/inbox/") || pathname === INBOX_DEBUG_PATH) return handle(req, via);
-        const ours = isOwner(req, via);
-        const given = ours ? req.headers.get(INBOX_DEBUG_ID_HEADER) : null;
+        const given = req.headers.get(INBOX_DEBUG_ID_HEADER);
         serial += 1;
         const id = isDebugRequestId(given) ? given : `s${serial}`;
         const started = Date.now();
@@ -370,7 +359,7 @@ export function createInboxDebugLog(inboxDir: string, maxBytes = INBOX_DEBUG_MAX
         }
         append(line({ t: Date.now(), ev: "req_end", ...base, status: response.status, ms: Date.now() - started }));
         try {
-          if (ours) response.headers.set(INBOX_DEBUG_ON_HEADER, "1");
+          response.headers.set(INBOX_DEBUG_ON_HEADER, "1");
         } catch {
           // Headers that cannot change: the answer matters more than the mark.
         }
