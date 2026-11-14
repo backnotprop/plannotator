@@ -59,6 +59,8 @@ function world(config: Json = {}): string {
   setEnv("PLANNOTATOR_DATA_DIR", dataDir);
   setEnv("PLANNOTATOR_INBOX_TAILSCALE", undefined);
   setEnv("PLANNOTATOR_INBOX_PHONES", undefined);
+  // Paired phones: never the hosted relay.
+  setEnv("PLANNOTATOR_RELAY_URL", "http://127.0.0.1:9");
   writeFileSync(join(dataDir, "config.json"), JSON.stringify(config));
   return dataDir;
 }
@@ -84,9 +86,12 @@ function fakeTailscale(): TailscaleRunner {
       return ok(JSON.stringify({ TCP, Web }));
     }
     const httpsPort = Number(/--https=(\d+)/.exec(args.join(" "))![1]);
-    if (args.includes("off")) serve.delete(httpsPort);
-    else serve.set(httpsPort, args.at(-1)!);
-    return ok();
+    if (args.includes("off")) {
+      serve.delete(httpsPort);
+      return ok();
+    }
+    serve.set(httpsPort, args.at(-1)!);
+    return ok(`Available within your tailnet:\n\nhttps://${MAGIC}:${httpsPort}/\n|-- proxy ${args.at(-1)}\n`);
   };
 }
 
