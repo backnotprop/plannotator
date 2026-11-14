@@ -152,7 +152,7 @@ describe.if(hasDom)('Agents tab launch pad', () => {
   });
 
   test('runs read apart: the engine whole, each run its own model and effort, and its start time in the tooltip', async () => {
-    await render({ jobs: [job({ id: 'a', effort: 'low' }), job({ id: 'b', effort: 'high', reviewProfileLabel: 'Security' })] });
+    await render({ jobs: [job({ id: 'a', effort: 'low', launchLabel: 'Review: money rounding' }), job({ id: 'b', effort: 'high', reviewProfileLabel: 'Security' })] });
     const rows = [...host.querySelectorAll<HTMLElement>('[data-agent-job-row]')];
     expect(rows).toHaveLength(2);
     const engines = rows.map((row) => row.querySelector('[data-agent-job-engine]')!.textContent);
@@ -160,7 +160,7 @@ describe.if(hasDom)('Agents tab launch pad', () => {
     expect(engines.every((text) => text!.startsWith('Claude'))).toBe(true);
     expect(rows.every((row) => !row.querySelector('[data-agent-job-engine]')!.className.includes('truncate'))).toBe(true);
     expect(rows[0].getAttribute('title')).toContain('started');
-    expect(rows.map((row) => row.querySelector('[data-agent-job-label]')!.textContent)).toContain('Code Review: Security');
+    expect(rows.map((row) => row.querySelector('[data-agent-job-label]')!.textContent)).toEqual(expect.arrayContaining(['Review: money rounding', 'Code Review: Security']));
   });
 });
 

@@ -75,7 +75,7 @@ export function JobRow({
   const terminal = isTerminalStatus(job.status);
   const isGuide = job.provider === 'guide';
   const engine = GUIDE_ENGINE_LABEL[(isGuide ? job.engine : job.provider) as keyof typeof GUIDE_ENGINE_LABEL] ?? job.engine ?? job.provider;
-  const runTitle = isGuide ? 'Guided Review' : job.reviewProfileLabel && job.reviewProfileLabel !== 'Default' ? `${job.label}: ${job.reviewProfileLabel}` : job.label;
+  const runTitle = job.launchLabel ?? (isGuide ? 'Guided Review' : job.reviewProfileLabel && job.reviewProfileLabel !== 'Default' ? `${job.label}: ${job.reviewProfileLabel}` : job.label);
   const detail = !terminal
     ? STATUS_WORD[job.status]
     : job.status === 'failed'
