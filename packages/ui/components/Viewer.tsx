@@ -13,7 +13,7 @@ import { copyTextToClipboard } from '../utils/clipboard';
 import { getRichCopyEnabled } from '../utils/richCopyPolicy';
 import { BlockRenderer } from './BlockRenderer';
 import { BELOW_TITLE_SLOT_MARKER } from '../utils/belowTitleSlot';
-import { indexQuestionBlocks, type IndexedQuestion, type ParsedQuestion, type QuestionAnswer } from '@plannotator/core/question-block';
+import { indexQuestionBlocks, isQuestionDirectiveKind, type IndexedQuestion, type ParsedQuestion, type QuestionAnswer } from '@plannotator/core/question-block';
 import { diagramTargetText, type DiagramAnchor } from '@plannotator/core/diagram-anchor';
 import type { QuestionAcceptBehavior, QuestionBlockProps } from './blocks/QuestionBlock';
 import { resolveQuestionAnswers } from '../utils/questionAnswers';
@@ -73,7 +73,7 @@ class ToolbarErrorBoundary extends React.Component<
 }
 
 import { CommentPopover, hasCommentDraft, type CommentAskAIHandler } from './CommentPopover';
-import { TaterSpriteSitting } from './TaterSpriteSitting';
+import { TaterSittingSlot } from './TaterSpriteSlots';
 import { AttachmentsButton } from './AttachmentsButton';
 import { MessagesIcon } from './icons/MessagesIcon';
 import { DiagramAnchorClaims, DiagramAnchorClaimsContext } from './diagram/anchorClaims';
@@ -113,6 +113,8 @@ import {
   resolveCompactHeaderGeometry,
   snapCompactHeaderWidth,
 } from './compactHeaderLayout';
+
+const asksQuestion = (block: Block): boolean => block.type === 'directive' && isQuestionDirectiveKind(block.directiveKind || 'note');
 
 /** Typed controls required for Viewer's opt-in, in-flow annotation header. */
 export interface ViewerAnnotationHeaderConfig {
@@ -1002,6 +1004,9 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     }
     setLightboxState(imageLightboxStepping || imageRegionComments ? { ...image, images: documentImages() } : image);
   };
+  const setLightboxRef = useRef(setLightbox);
+  setLightboxRef.current = setLightbox;
+  const onBlockImageClick = useCallback((src: string, alt: string) => setLightboxRef.current({ src, alt }), []);
   // Region comments made in the lightbox are selected by the host as they are
   // added; that selection must not reopen or refocus the lightbox.
   const regionCreatedHere = useRef(new Set<string>());
@@ -1937,7 +1942,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
       data-viewer-fill-height={fillHeight ? '' : undefined}
       style={maxWidth === null ? undefined : { maxWidth: maxWidth ?? 832 }}
     >
-      {taterMode && <TaterSpriteSitting />}
+      {taterMode && <TaterSittingSlot />}
       <article
         ref={containerRef}
         data-print-region="article"
@@ -2033,7 +2038,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
                   {group.blocks.map((block, i) => (
                     <BlockRenderer
                       imageBaseDir={imageBaseDir}
-                      onImageClick={(src, alt) => setLightbox({ src, alt })}
+                      onImageClick={onBlockImageClick}
                       key={block.id}
                       block={block}
                       orderedIndex={indices[i]}
@@ -2103,7 +2108,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
               key={group.block.id}
               block={group.block}
               imageBaseDir={imageBaseDir}
-              onImageClick={(src, alt) => setLightbox({ src, alt })}
+              onImageClick={onBlockImageClick}
               onOpenLinkedDoc={onOpenLinkedDoc}
               onOpenCodeFile={onOpenCodeFile}
               githubRepo={linkRepo?.display}
@@ -2191,7 +2196,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
               const rendered = (
                 <BlockRenderer
                   imageBaseDir={imageBaseDir}
-                  onImageClick={(src, alt) => setLightbox({ src, alt })}
+                  onImageClick={onBlockImageClick}
                   key={group.block.id}
                   block={group.block}
                   onOpenLinkedDoc={onOpenLinkedDoc}
@@ -2208,7 +2213,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
                   onAnswerQuestion={readOnly || (question && questionReadOnly?.(question)) ? undefined : onAnswerQuestion}
                   onSaveQuestionAnswer={readOnly || (question && questionReadOnly?.(question)) ? undefined : onSaveQuestionAnswer}
                   saveQuestionAnswerLabel={saveQuestionAnswerLabel}
-                  renderQuestionFooter={renderQuestionFooter}
+                  renderQuestionFooter={asksQuestion(group.block) ? renderQuestionFooter : undefined}
                   questionDecisionRecording={question ? questionDecisionRecording?.(question) : undefined}
                   questionDecisionScope={questionDecisionScope}
                   onToggleQuestionDecisionRecording={readOnly || (question && (questionDecisionLocked?.(question) || questionReadOnly?.(question))) ? undefined : onToggleQuestionDecisionRecording}
@@ -2350,7 +2355,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
             onClose={() => setPopoutTable(null)}
             container={containerRef.current}
             imageBaseDir={imageBaseDir}
-            onImageClick={(src, alt) => setLightbox({ src, alt })}
+            onImageClick={onBlockImageClick}
             onOpenLinkedDoc={onOpenLinkedDoc}
             onOpenCodeFile={onOpenCodeFile}
             githubRepo={linkRepo?.display}
