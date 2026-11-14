@@ -25,6 +25,9 @@ let current: FaviconStyle | null = null;
 let chosenHere: FaviconStyle | null = null;
 /** An icon saved elsewhere after this page loaded (`event: prefs`): the tab shows it until a pick here. */
 let taken: FaviconStyle | null = null;
+/** Picks on this page whose save has not answered yet, and every pick made here. */
+let saving = 0;
+let picks = 0;
 /** An icon tried on this tab only (the tab icon dialog's choices), never saved; null when none is. */
 let previewing: FaviconStyle | null = null;
 const listeners = new Set<() => void>();
@@ -52,10 +55,14 @@ export function chooseFavicon(style: FaviconStyle): Promise<void> {
   taken = null;
   previewing = null;
   notify();
+  picks++;
+  saving++;
   return inboxApi.saveFavicon(style).then(
     () => {},
     () => {},
-  );
+  ).finally(() => {
+    saving--;
+  });
 }
 
 /**
@@ -74,7 +81,14 @@ export function faviconPickedHere(): boolean {
 }
 
 /** A favicon saved after this page read its settings (another window, an agent): the tab shows it at once. */
-export function takeSavedFavicon(style: unknown): void {
+/** Taken before a settings read starts: a read that a pick here could have raced is not applied (`takeSavedFavicon`). */
+export function faviconReadMark(): { picks: number; busy: boolean } {
+  return { picks, busy: saving > 0 };
+}
+
+export function takeSavedFavicon(style: unknown, mark: { picks: number; busy: boolean }): void {
+  // A pick here being saved when the read started, or made since, is newer than the read; that save's own event reads again.
+  if (mark.busy || saving > 0 || mark.picks !== picks) return;
   if (!isFaviconStyle(style) || style === (taken ?? chosenHere ?? current)) return;
   current = style;
   taken = style;

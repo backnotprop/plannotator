@@ -231,8 +231,10 @@ export function createInboxCloudAgents(options: {
   const setWake = (session: string, body: Record<string, unknown>): InboxCloudAgent => {
     const agent = find(session);
     if (!inboxCloudPresetWakes(agent.preset)) refuseWake(agent.preset);
-    const webhook = webhookOf(body, true)!;
-    const next = { ...agent, url: webhook.url, key: webhook.key, key_set_at: now().toISOString(), key_rejected_at: null };
+    // `{ url: null, key: null }`: no wake address any more; the agent polls (`hasCloudWake`).
+    const cleared = body.url === null && body.key === null;
+    const webhook = cleared ? null : webhookOf(body, true)!;
+    const next = { ...agent, url: webhook?.url ?? null, key: webhook?.key ?? null, key_set_at: webhook ? now().toISOString() : null, key_rejected_at: null };
     save(agents.map((candidate) => (candidate.session === session ? next : candidate)));
     return next;
   };

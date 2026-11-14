@@ -5,7 +5,8 @@
  * rows` reaches the settings) refused; another site, a stale page's serverSession or another Tailscale account
  * getting a write through, or any key of a call written when one of its values is refused; reset not putting the
  * default; the group filter; a key that no longer reads back what it wrote, or no longer saves to the config.json
- * field its `stored` names; `event: prefs` not reaching an open window, for a write here and for a save from Settings.
+ * field its `stored` names; `event: prefs` not reaching an open window, for a write here and for a save from Settings;
+ * `reset: "all"` refused on a default install; a Tailscale login taken off the list keeping its access.
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -42,11 +43,13 @@ function setEnv(name: string, value: string | undefined): void {
 }
 
 /** A scripted `tailscale` (the real one never runs): the owner's machine. */
-function fakeTailscale(): TailscaleRunner {
+function fakeTailscale(tagged = false): TailscaleRunner {
   const serve = new Map<number, string>();
   return (args) => {
     const ok = (stdout = "") => ({ status: 0, stdout, stderr: "" });
-    if (args[0] === "status") return ok(JSON.stringify({ Self: { DNSName: `${MAGIC}.`, UserID: 42 }, User: { "42": { ID: 42, LoginName: OWNER } } }));
+    if (args[0] === "status") {
+      return ok(JSON.stringify({ Self: { DNSName: `${MAGIC}.`, UserID: 42, ...(tagged ? { Tags: ["tag:server"] } : {}) }, User: { "42": { ID: 42, LoginName: tagged ? "tagged-devices" : OWNER } } }));
+    }
     if (args[1] === "status") {
       if (serve.size === 0) return ok("{}");
       return ok(
@@ -65,21 +68,22 @@ function fakeTailscale(): TailscaleRunner {
 
 type Json = Record<string, any>;
 
-async function world(options: { tailnet?: boolean } = {}) {
+/** `tagged`: a tagged machine with no owner, where config.json `inboxTailscaleAllow` (`allow`) says who the owner is. */
+async function world(options: { tailnet?: boolean; tagged?: boolean; allow?: string[] } = {}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-prefs-")));
   roots.push(root);
   const dataDir = join(root, "data");
   mkdirSync(dataDir, { recursive: true });
   setEnv("PLANNOTATOR_DATA_DIR", dataDir);
   for (const name of ["PLANNOTATOR_INBOX_TAILSCALE", "PLANNOTATOR_URL_HOST", "PLANNOTATOR_UPDATE_CHECK", "PLANNOTATOR_INBOX_PREVIEW"]) setEnv(name, undefined);
-  writeFileSync(join(dataDir, "config.json"), JSON.stringify({ updateCheck: false, ...(options.tailnet ? { inboxTailscale: true } : {}) }));
+  writeFileSync(join(dataDir, "config.json"), JSON.stringify({ updateCheck: false, ...(options.tailnet ? { inboxTailscale: true } : {}), ...(options.allow ? { inboxTailscaleAllow: options.allow } : {}) }));
   const home = join(root, "home");
   mkdirSync(home);
   const server = await startInboxServer({
     dataDir,
     binaryPath: null,
     phones: false,
-    ...(options.tailnet ? { tailscale: fakeTailscale() } : {}),
+    ...(options.tailnet ? { tailscale: fakeTailscale(options.tagged === true) } : {}),
     agentEnvironment: createAgentEnvironmentFor({ platform: "linux", homeDir: home, env: {} }),
   });
   servers.push(server);
@@ -194,6 +198,51 @@ describe("from the command line", () => {
       tried.push(pref.key);
     }
     expect(tried.length).toBeGreaterThan(25);
+  });
+});
+
+describe('reset "all"', () => {
+  test("on a default install it puts back what is offered and lists the rest as skipped", async () => {
+    const w = await world();
+    expect((await w.cli({ set: { "appearance.text_size": 12, "sound.volume": 30 } })).status).toBe(200);
+    const response = await w.cli({ reset: "all" });
+    expect(response.status).toBe(200);
+    const answer = (await response.json()) as Json;
+    expect(answer.skipped).toEqual(expect.arrayContaining(["reviews.risk_rules"]));
+    expect(await w.value("appearance.text_size")).toBe(14);
+    expect(await w.value("sound.volume")).toBe(60);
+  });
+});
+
+describe("the tailnet logins", () => {
+  test("a login taken off the list is refused at once, with the window never restarted, and loses its open stream", async () => {
+    const w = await world({ tailnet: true, tagged: true, allow: [OWNER, OTHER] });
+    expect((await w.viaTailnet(OTHER)).status).toBe(200);
+    const listener = w.server.tailscale.listenerPort()!;
+    const controller = new AbortController();
+    const stream = await fetch(`http://127.0.0.1:${listener}/api/inbox/events?cursor=0&window=window-other&permission=granted`, {
+      headers: { Host: `${MAGIC}:${w.server.port}`, "Sec-Fetch-Site": "same-origin", "X-Forwarded-Proto": "https", "Tailscale-User-Login": OTHER },
+      signal: controller.signal,
+    });
+    expect(stream.status).toBe(200);
+    const reader = stream.body!.getReader();
+
+    expect((await w.cli({ set: { "access.tailnet_allow": [OWNER] } })).status).toBe(200);
+    expect((await w.viaTailnet(OTHER)).status).toBe(403);
+    expect((await w.viaTailnet(OWNER)).status).toBe(200);
+    // The stream ends: the listener closed its connections and took the same port again.
+    const ended = await (async () => {
+      const deadline = Date.now() + 3000;
+      while (Date.now() < deadline) {
+        const chunk = await Promise.race([reader.read().catch(() => ({ done: true })), new Promise<null>((resolve) => setTimeout(() => resolve(null), 200))]);
+        if (chunk && chunk.done) return true;
+      }
+      return false;
+    })();
+    controller.abort();
+    expect(ended).toBe(true);
+    expect(w.server.tailscale.listenerPort()).toBe(listener);
+    expect((await w.viaTailnet(OWNER)).status).toBe(200);
   });
 });
 

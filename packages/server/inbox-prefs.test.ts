@@ -117,6 +117,22 @@ describe("a write", () => {
     expect(JSON.stringify(list)).not.toContain("1234\"");
   });
 
+  test('reset "all" puts back what is offered and lists the rest as skipped', async () => {
+    const r = routes();
+    const answer = await inboxPrefsPost({ reset: "all" }, r.deps(sources({ text_size: 12 })));
+    expect(answer.status).toBe(200);
+    expect(answer.body.skipped).toEqual(expect.arrayContaining(["reviews.risk_rules", "access.this_wifi", "access.tailnet_door", "capabilities.code_review"]));
+    expect(r.calls.map((c) => c.path)).toContain("/api/inbox/settings");
+    expect(r.calls.some((c) => c.path === "/api/inbox/pulls/risk" || c.path === "/api/inbox/lan")).toBe(false);
+  });
+
+  test("a cloud agent's wake reset removes it", async () => {
+    const s = { ...sources(), cloud: [{ session: "cloud.0123456789ab", name: "Nightly fixer", preset: "grok-bot", wake: true }] };
+    const r = routes();
+    expect((await inboxPrefsPost({ reset: ["cloud_agents.0123456789ab.wake"] }, r.deps(s))).status).toBe(200);
+    expect(r.calls).toEqual([{ path: "/api/inbox/cloud-agents/cloud.0123456789ab/wake", body: { url: null, key: null } }]);
+  });
+
   test("a held switch is not offered, and its write is refused", async () => {
     const r = routes();
     const answer = await inboxPrefsPost({ set: { "capabilities.code_review": true } }, r.deps(sources()));

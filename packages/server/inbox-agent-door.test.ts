@@ -403,5 +403,13 @@ describe("the agent door", () => {
     expect(readFileSync(cloudAgentsPath(w.dataDir), "utf8")).toContain(hook.url);
     expect(await listed()).not.toContain(KEY);
     expect(JSON.parse(await listed()).prefs[0].value).toBe("set");
+
+    // Reset removes it: the address and key leave the file and the agent polls.
+    const removed = await w.call("/api/inbox/prefs", { reset: [key] });
+    expect(removed.status).toBe(200);
+    expect(removed.json.changes).toEqual([{ key, from: "set", to: "not set" }]);
+    const file = readFileSync(cloudAgentsPath(w.dataDir), "utf8");
+    expect(file).not.toContain(hook.url);
+    expect(file).not.toContain(KEY);
   });
 });

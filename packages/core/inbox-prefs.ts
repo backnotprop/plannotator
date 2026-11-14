@@ -149,7 +149,7 @@ const CLOUD_WAKE = /^cloud_agents\.([0-9a-f]{12})\.wake$/;
 
 /** A cloud agent's wake key, for `cloud.<id>`; `name` is the agent's, for its words. */
 export function inboxCloudWakePref(id: string, name = "This cloud agent"): InboxPref {
-  return { key: `cloud_agents.${id}.wake`, group: "cloud_agents", type: { kind: "wake" }, default: null, scope: "device", stored: "file:inbox/cloud-agents.json", noReset: true, secret: true, ...inboxPrefCloudWakeWords(name) };
+  return { key: `cloud_agents.${id}.wake`, group: "cloud_agents", type: { kind: "wake" }, default: null, scope: "device", stored: "file:inbox/cloud-agents.json", secret: true, ...inboxPrefCloudWakeWords(name) };
 }
 
 export const inboxPref = (key: string): InboxPref | undefined => {
@@ -177,7 +177,7 @@ export function inboxPrefAllowed(type: InboxPrefType): string {
     case "logins":
       return `a list of up to ${type.max} logins, each once`;
     case "wake":
-      return "{ url, key }: the routine's https:// webhook address and its key";
+      return "{ url, key }: the routine's https:// webhook address and its key, or null for none";
   }
 }
 
@@ -216,6 +216,7 @@ export function inboxPrefCheck(pref: InboxPref, value: unknown): InboxPrefCheck 
       return new Set(value.map((item: string) => item.toLowerCase())).size === value.length ? { ok: true, value: value as string[] } : refuse();
     }
     case "wake": {
+      if (value === null) return { ok: true, value: null };
       const wake = value as { url?: unknown; key?: unknown } | null;
       const ok = !!wake && typeof wake === "object" && !Array.isArray(wake) && Object.keys(wake).every((k) => k === "url" || k === "key") && typeof wake.url === "string" && wake.url.length <= 2048 && typeof wake.key === "string" && wake.key.length > 0 && wake.key.length <= 4096;
       return ok ? { ok: true, value: { url: wake.url as string, key: wake.key as string } } : refuse();
@@ -257,6 +258,8 @@ export function inboxPrefsChange(body: { set?: unknown; reset?: unknown }): Inbo
     values.set(pref, checked.value);
   }
   for (const key of resetKeys) {
+    // "all" leaves a key this call also sets.
+    if (resetAll && named.some(([name]) => name === key)) continue;
     const pref = take(key);
     if ("ok" in pref) return pref;
     if (pref.noReset) return refuse(key, `${key}: has no default to put back; set it to true or false.`);

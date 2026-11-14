@@ -271,6 +271,7 @@ packages/inbox/updateStuck.test.tsx
 packages/inbox/palettePicker.test.tsx
 packages/inbox/textSize.test.tsx
 packages/inbox/prefsLive.test.tsx
+packages/inbox/prefsTakeRace.test.tsx
 packages/inbox/agentNoteDialog.test.tsx
 packages/inbox/connectLine.test.tsx
 packages/inbox/agentsSettings.test.tsx

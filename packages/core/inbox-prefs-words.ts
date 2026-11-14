@@ -87,13 +87,13 @@ export const INBOX_PREF_WORDS: Readonly<Record<string, InboxPrefWords>> = {
   "voice.api_key": { label: "OpenAI API key", meaning: "The key voice uses with the API key engine. Never shown: reads say set or not set. Null removes it.", where: "Settings → Voice" },
 
   "access.tailnet_window": { label: "Window over your tailnet", meaning: "Keep the window open to your tailnet at every start.", where: "Settings → Devices" },
-  "access.tailnet_allow": { label: "Your Tailscale logins", meaning: "On a tagged machine, which Tailscale names no owner for: the logins that count as you over your tailnet. Read when the window over your tailnet next turns on.", where: "config.json" },
+  "access.tailnet_allow": { label: "Your Tailscale logins", meaning: "On a tagged machine, which Tailscale names no owner for: the logins that count as you over your tailnet. A login taken off is shut out at once.", where: "config.json" },
   "access.this_wifi": { label: "This Wi-Fi", meaning: "Phones on this computer's network can reach the Inbox.", where: "Settings → Devices" },
   "access.tailnet_door": { label: "Phones over your tailnet", meaning: "Phones on your tailnet can reach the Inbox.", where: "Settings → Devices" },
 };
 
 /** `cloud_agents.<id>.wake`: a cloud agent's wake address and key. */
-export const inboxPrefCloudWakeWords = (name: string): InboxPrefWords => ({ label: `${name}'s wake address and key`, meaning: `Where a reply wakes ${name}: { url, key }. Never shown: reads say set or not set.`, where: "Settings → Cloud agents" });
+export const inboxPrefCloudWakeWords = (name: string): InboxPrefWords => ({ label: `${name}'s wake address and key`, meaning: `Where a reply wakes ${name}: { url, key }. Never shown: reads say set or not set. Null removes it.`, where: "Settings → Cloud agents" });
 
 /** `agents.<id>.reach`. */
 export const inboxPrefReachWords = (agent: string): InboxPrefWords => ({ label: `${agent} reaches the Inbox`, meaning: `${agent} can read and send Inbox messages. Writes ${agent}'s own config on this computer.`, where: "Settings → Agents" });

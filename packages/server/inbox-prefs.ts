@@ -333,7 +333,7 @@ function cloudWakeBinding(key: string): Binding {
       if (!row || !inboxCloudPresetWakes(row.preset as InboxCloudPreset)) return undefined;
       return row.wake === true ? "set" : "not set";
     },
-    write: (wake) => wake as Json,
+    write: (wake) => (wake === null ? { url: null, key: null } : (wake as Json)),
   };
 }
 
@@ -417,8 +417,20 @@ export async function inboxPrefsPost(body: Json, deps: InboxPrefsDeps): Promise<
   const refuse = (status: number, code: string, error: string, extra: Json = {}): InboxPrefsAnswer => ({ status, body: { error, code, ...extra }, saved: [] });
   const change = inboxPrefsChange(body);
   if (!change.ok) return refuse(change.status, change.code, change.error, change.key ? { key: change.key } : {});
+  const before = await deps.read(inboxPrefsNeeds([...change.values.keys()].map((pref) => pref.key)));
+  // `reset: "all"` puts back what this Inbox offers now; the rest (Code review off, no phones) is listed as skipped.
+  const skipped: string[] = [];
+  if (body.reset === "all") {
+    const set = obj(body.set) ?? {};
+    for (const pref of [...change.values.keys()]) {
+      if (pref.key in set) continue;
+      const now = bindingFor(pref).read(before);
+      if (now === undefined) skipped.push(pref.key);
+      // Already the default: nothing to write, so no route runs for it (the tailnet switch, launch, an agent's file).
+      if (now === undefined || JSON.stringify(now) === JSON.stringify(pref.default)) change.values.delete(pref);
+    }
+  }
   const prefs = [...change.values.keys()];
-  const before = await deps.read(inboxPrefsNeeds(prefs.map((pref) => pref.key)));
   for (const pref of prefs) {
     const binding = bindingFor(pref);
     if (binding.read(before) === undefined) return refuse(409, "pref_unavailable", `${pref.key}: not offered on this Inbox now (${pref.where}).`, { key: pref.key });
@@ -449,6 +461,7 @@ export async function inboxPrefsPost(body: Json, deps: InboxPrefsDeps): Promise<
     if (answer.status !== 200 || agentProblem) {
       const status = agentProblem ? 422 : answer.status;
       const refusal = agentProblem ? { error: `${call.keys.join(", ")}: ${agentProblem}`, code: "agent_not_changed" } : (answer.body ?? { error: `The Inbox answered ${answer.status}.`, code: "error" });
+      // Not one write: the routes before this one keep what they saved (`saved`); `keys` are this route's, refused.
       return { status, body: { ...refusal, keys: call.keys, saved }, saved };
     }
     saved.push(...call.keys);
@@ -460,7 +473,7 @@ export async function inboxPrefsPost(body: Json, deps: InboxPrefsDeps): Promise<
   });
   // A secret written is a change even when it was set before: its value is never compared.
   const moved = changes.filter((c) => c.secret || JSON.stringify(c.from) !== JSON.stringify(c.to)).map(({ secret: _secret, ...c }) => c);
-  return { status: 200, body: { changes: moved }, saved };
+  return { status: 200, body: { changes: moved, ...(skipped.length > 0 ? { skipped } : {}) }, saved };
 }
 
 /** The keys a write through one of those routes touched: what `event: prefs` names. */

@@ -26,7 +26,7 @@ describe("the list", () => {
   });
 
   test("a cloud agent's wake key is known by its id, and only a well-formed one", () => {
-    expect(inboxPref("cloud_agents.0123456789ab.wake")).toMatchObject({ group: "cloud_agents", secret: true, noReset: true });
+    expect(inboxPref("cloud_agents.0123456789ab.wake")).toMatchObject({ group: "cloud_agents", secret: true });
     expect(inboxPref("cloud_agents.0123.wake")).toBeUndefined();
     expect(inboxPref("cloud_agents.0123456789ab.key")).toBeUndefined();
   });
@@ -66,6 +66,7 @@ describe("a value against its type", () => {
     ["access.tailnet_allow", ["Friend@example.com", "friend@example.com"], false],
     ["cloud_agents.0123456789ab.wake", { url: "https://example.com/hook", key: "k1" }, true],
     ["cloud_agents.0123456789ab.wake", { url: "https://example.com/hook" }, false],
+    ["cloud_agents.0123456789ab.wake", null, true],
     ["voice.api_key", "sk-a-real-looking-key", true],
     ["voice.api_key", "short", false],
   ];
@@ -124,8 +125,11 @@ describe("a call's set and reset", () => {
     expect(keys.some((key) => key.endsWith(".reach") || key.endsWith(".note"))).toBe(false);
     expect(keys).not.toContain("voice.api_key");
     expect(keys.length).toBe(INBOX_PREFS.filter((pref) => !pref.noReset && !pref.secret).length);
-    const named = inboxPrefsChange({ reset: ["voice.api_key"] });
-    expect(named.ok && [...named.values.values()]).toEqual([null]);
+    const named = inboxPrefsChange({ reset: ["voice.api_key", "cloud_agents.0123456789ab.wake"] });
+    expect(named.ok && [...named.values.values()]).toEqual([null, null]);
+    // A key this call sets is not reset by "all" too.
+    const both = inboxPrefsChange({ set: { "appearance.theme": "light" }, reset: "all" });
+    expect(both.ok && [...both.values].find(([pref]) => pref.key === "appearance.theme")?.[1]).toBe("light");
   });
 
   test("a key both set and reset, an empty call and a bad shape are refused", () => {

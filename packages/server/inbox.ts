@@ -5891,7 +5891,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         return json({ serverSession, post_to: saved });
       }
       // config.json `inboxTailscaleAllow`: on a tagged machine (Tailscale names no owner), the logins that count as the
-      // owner over the tailnet; read when the window over the tailnet next turns on (inbox-tailscale.ts).
+      // owner over the tailnet. The gate takes a saved list at once while published (inbox-tailscale.ts allowListChanged).
       if (path === "/api/inbox/settings/tailscale-allow") {
         if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
           return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
@@ -5903,6 +5903,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const allow = resolveInboxTailscaleAllow({ inboxTailscaleAllow: body.allow as string[] });
         if (!Array.isArray(body.allow) || allow.length !== body.allow.length) throw new InboxError("validation_error", "allow: a list of Tailscale logins, each once, with no spaces.", { field: "allow" });
         saveConfig({ inboxTailscaleAllow: allow });
+        tailscale.allowListChanged();
         notifyPrefs(inboxPrefKeysOf("tailscale_allow", body), null, req);
         return json({ allow: resolveInboxTailscaleAllow(loadConfig()) });
       }
