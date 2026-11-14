@@ -13,6 +13,7 @@
     "./app-html": "./app-html.ts",
     "./diagram-engine-assets": "./diagram-engine-assets.ts",
     "./sem-diff-assets": "./sem-diff-assets.ts",
+    "./sem-diff-opinion": "./sem-diff-opinion.ts",
     "./compress": "./compress.ts",
     "./crypto": "./crypto.ts",
     "./diff-paths": "./diff-paths.ts",
@@ -203,6 +204,7 @@
   "dependencies": {
     "@joplin/turndown-plugin-gfm": "^1.0.68",
     "@plannotator/core": "workspace:*",
+    "@plannotator/sem-diff": "workspace:*",
     "chokidar": "^5.0.0",
     "parse5": "^7.3.0",
     "turndown": "^7.2.4"

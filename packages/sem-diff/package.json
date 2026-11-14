@@ -8,6 +8,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./opinions": "./src/opinions.ts",
+    "./candidate": "./src/candidate.ts",
     "./summary": "./src/summary.ts",
     "./languages": "./src/languages.ts"
   },
