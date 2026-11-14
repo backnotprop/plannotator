@@ -23,15 +23,15 @@ export const HeaderBranch: React.FC<{
     data-header-branch=""
   >
     {branch && (
-      <span className="min-w-0 flex text-xs font-mono text-foreground" data-header-branch-name="">
+      <span className="min-w-0 flex overflow-hidden text-xs font-mono text-foreground" data-header-branch-name="">
         <span className="truncate">{branch.length > BRANCH_TAIL * 2 ? branch.slice(0, -BRANCH_TAIL) : branch}</span>
         {branch.length > BRANCH_TAIL * 2 && <span className="flex-none">{branch.slice(-BRANCH_TAIL)}</span>}
       </span>
     )}
     {!(compact && branch) && (
-      <span className="text-xs text-muted-foreground inline-flex items-center gap-1 truncate max-w-[220px] flex-none" data-header-shed="">
+      <span className="min-w-0 shrink-[2] text-xs text-muted-foreground inline-flex items-center gap-1 max-w-[220px]" data-header-shed="" data-header-repo="">
         <RepoIcon className="w-3 h-3 flex-shrink-0" />
-        {repo}
+        <span className="min-w-0 truncate">{repo}</span>
       </span>
     )}
     {!compact && <span className="flex-none" data-header-shed=""><HeaderTotals files={files} /></span>}
