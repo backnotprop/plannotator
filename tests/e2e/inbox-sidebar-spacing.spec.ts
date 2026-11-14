@@ -35,6 +35,20 @@ interface World {
 }
 let world: World;
 
+/**
+ * A route handler whose request outlives its page: `open()` navigates the one page away while the list's last read
+ * may still be in `route.fetch()`, and the navigation disposes that response. Only that ends quietly; any other
+ * failure (a server error, a bad answer) still fails the test.
+ */
+async function unlessGone(handle: () => Promise<void>): Promise<void> {
+  try {
+    await handle();
+  } catch (error) {
+    if (/has been disposed|has been closed|Target closed/.test(error instanceof Error ? error.message : String(error))) return;
+    throw error;
+  }
+}
+
 /** The sections top to bottom, as one line: `Pin -2- Ag -0- rows -12- Proj`. Agents' rows are its groups, or its empty line. */
 const layout = (page: Page, scope: string) =>
   page.evaluate((selector) => {
@@ -104,27 +118,32 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
     return (await fetch(`/api/inbox/threads/${id}/pin`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ serverSession: list.serverSession, pinned: true }) })).status;
   }, thread);
   expect(status).toBeLessThan(300);
-  await page.route(/\/api\/inbox\/threads(\?|$)/, async (route) => {
-    if (route.request().method() !== 'GET') return route.fallback();
-    const response = await route.fetch();
-    const json = (await response.json()) as Record<string, unknown>;
-    const machine = { state: 'online', since: '2026-11-05T10:00:00.000Z', reason: null, version: '0.0.0', address: null, both_ways: true, waiting: 0 };
-    json.self = SELF;
-    json.machines = [{ ...machine, id: SELF, name: 'Studio', self: true }, { ...machine, id: OTHER, name: 'MacBook', self: false }];
-    await route.fulfill({ response, json });
-  });
+  await page.route(/\/api\/inbox\/threads(\?|$)/, (route) =>
+    unlessGone(async () => {
+      if (route.request().method() !== 'GET') return route.fallback();
+      const response = await route.fetch();
+      const json = (await response.json()) as Record<string, unknown>;
+      const machine = { state: 'online', since: '2026-11-05T10:00:00.000Z', reason: null, version: '0.0.0', address: null, both_ways: true, waiting: 0 };
+      json.self = SELF;
+      json.machines = [{ ...machine, id: SELF, name: 'Studio', self: true }, { ...machine, id: OTHER, name: 'MacBook', self: false }];
+      await route.fulfill({ response, json });
+    }),
+  );
   // The stream's own snapshot would say nothing is linked and take the section away again.
-  await page.route(/\/api\/inbox\/events\?/, async (route) => {
-    const stream = new URL(route.request().url());
-    stream.searchParams.delete('agents');
-    await route.continue({ url: stream.toString() });
-  });
+  await page.route(/\/api\/inbox\/events\?/, (route) =>
+    unlessGone(async () => {
+      const stream = new URL(route.request().url());
+      stream.searchParams.delete('agents');
+      await route.continue({ url: stream.toString() });
+    }),
+  );
   world = { url, thread, agent, context, page };
 });
 
 test.afterAll(async () => {
   try {
     await world?.agent.close().catch(() => {});
+    await world?.page.unrouteAll({ behavior: 'ignoreErrors' });
     await world?.context.close();
   } finally {
     await removeInboxScratch();
@@ -160,4 +179,34 @@ test('the gap above Projects is no hover: the row around its header is exactly t
   const header = (await page.locator(`${scope} [data-sidebar-section="projects"]`).boundingBox())!;
   const row = (await page.locator(`${scope} .ib-secrow`, { has: page.locator('[data-sidebar-section="projects"]') }).boundingBox())!;
   expect([row.y, row.height]).toEqual([header.y, header.height]);
+});
+
+// Last: a tag adds a Tags header, which the layouts above do not list. Tags' New tag and Agents' Add agent sit in
+// one column, and both headings show their buttons the same way: always while open, closed only on the heading's hover.
+test("Tags' New tag sits right above Agents' Add agent, and shows while Tags is open, closed only on the heading's hover", async () => {
+  const { page, thread } = world;
+  const status = await page.evaluate(async (id) => {
+    const list = (await (await fetch('/api/inbox/threads?archived=exclude')).json()) as { serverSession: string };
+    const post = (path: string, body: Record<string, unknown>) =>
+      fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ serverSession: list.serverSession, ...body }) });
+    const made = (await (await post('/api/inbox/initiatives', { name: 'Code Review' })).json()) as { initiative: { id: string } };
+    return (await post(`/api/inbox/threads/${id}/tags`, { tag: made.initiative.id, on: true })).status;
+  }, thread);
+  expect(status).toBeLessThan(300);
+  const scope = await open([]);
+  await page.mouse.move(900, 600);
+  const newTag = page.locator(`${scope} [data-tags-add]`);
+  const addAgent = page.locator(`${scope} [data-agents-add="agent"]`);
+  await expect(newTag).toHaveCSS('opacity', '1');
+  await expect(addAgent).toHaveCSS('opacity', '1');
+  const tagBox = (await newTag.boundingBox())!;
+  const agentBox = (await addAgent.boundingBox())!;
+  expect([tagBox.x, tagBox.width]).toEqual([agentBox.x, agentBox.width]);
+
+  await open(['tags']);
+  await page.mouse.move(900, 600);
+  await expect(newTag).toHaveCSS('opacity', '0');
+  await page.locator(`${scope} [data-tags-head] [data-sidebar-section="tags"]`).hover({ position: { x: 40, y: 10 } });
+  await expect(newTag).toHaveCSS('opacity', '1');
+  await page.mouse.move(900, 600);
 });

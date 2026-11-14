@@ -201,6 +201,7 @@ import { classifyForgeHost, normalizeForgeHost } from "@plannotator/core/forge-r
 import { systemSetupRoute } from "./inbox-system-setup";
 import { SYSTEM_READ_PATHS, systemFilesCache, systemReadRoute, systemSwitch } from "./inbox-system";
 import { bitbucketRefReader, createRefCards, readSignedInHosts, refCliRunner, type BitbucketRefReader, type RefRunner } from "./ref-cards";
+import { closePull, reopenAllowed, reopenPull, PULL_REOPEN_WINDOW_MS } from "@plannotator/shared/inbox-pull-close";
 import { mergePull } from "@plannotator/shared/inbox-pull-merge";
 import { createInboxProjectRoots, folderHoldsOtherWork, guessableProjects, isHomeOrRootFolder, nearestProjectHolding, type InboxGitRunner } from "./inbox-project-root";
 import { handleFavicon } from "./shared-handlers";
@@ -1319,6 +1320,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const pullRepoRead = new Set<string>();
   const pullRepoReading = new Map<string, Promise<InboxProjectRepo | null>>();
   const pulls = createInboxPulls(options.refRunner ? { run: options.refRunner } : {});
+  /** PRs this Inbox closed (the board's Close), by key: when. A reopen is taken only for these (`reopenAllowed`). */
+  const closedByInbox = new Map<string, number>();
   // The PR authors' pictures (inbox-pull-avatars.ts): only for logins the last list showed, served from this origin.
   const pullAvatars = createPullAvatars({ ...options.pullAvatars, dir: options.pullAvatars?.dir ?? join(inboxDir(dataDir), "pull-avatars") });
   // The projects' letter-mark pictures (inbox-project-pictures.ts; Settings → Rows, all off by default).
@@ -5610,6 +5613,40 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // The next list shows it merged at once, even from the read cache or a forge search that still says open.
         pulls.markMerged(key);
         return json({ serverSession, ok: true, key, method: result.method, url: pull.url });
+      }
+      // Close and reopen from the board (approval "inbox-pr-board-bulk": Close with the count and Undo). The person's
+      // action from the window: merge's guards (the owner only, same origin, Code review on, the server session). The
+      // forge is asked first (`closePull` / `reopenPull`); a reopen is taken only for a PR this Inbox closed in the last
+      // `PULL_REOPEN_WINDOW_MS`, so Undo can never reopen anything else.
+      if (path === "/api/inbox/pulls/close" || path === "/api/inbox/pulls/reopen") {
+        if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+        if (!ownerOrLocal(req, via)) return localOnly();
+        if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
+          return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
+        }
+        if (!codeReviewOn()) return json({ error: "Code review is off.", code: "code_review_off" }, 409);
+        const body = await readBody(req);
+        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+        const key = typeof body.key === "string" && body.key.length > 0 && body.key.length <= 600 ? body.key : null;
+        if (!key) throw new InboxError("validation_error", "key: a pull request key from the list.", { field: "key" });
+        const reopen = path === "/api/inbox/pulls/reopen";
+        if (reopen && !reopenAllowed(closedByInbox.get(key), Date.now())) {
+          return json({ error: `Only a pull request closed here in the last ${PULL_REOPEN_WINDOW_MS / 60_000} minutes can be reopened here.`, code: "reopen_not_closed_here" }, 409);
+        }
+        if (!pulls.find(key)) await findPulls([key], (await pullProjects()).wanted);
+        const pull = pulls.find(key);
+        if (!pull) return json({ error: "That pull request is not in the list. Refresh the list and try again.", code: "pull_unknown" }, 404);
+        if (!reopen && !inboxPullIsOpen(pull)) return json({ error: pull.state === "merged" ? "It is already merged." : "It is already closed.", code: pull.state === "merged" ? "pull_merged" : "pull_closed" }, 409);
+        const result = reopen ? await reopenPull(options.refRunner ?? refCliRunner, pull) : await closePull(options.refRunner ?? refCliRunner, pull);
+        if (!result.ok) return json({ error: result.message, code: result.code }, result.code === "pull_close_failed" ? 502 : 409);
+        if (reopen) {
+          closedByInbox.delete(key);
+          pulls.markReopened(key);
+        } else {
+          closedByInbox.set(key, Date.now());
+          pulls.markClosed(key);
+        }
+        return json({ serverSession, ok: true, key, url: pull.url });
       }
       if (path === "/api/inbox/events" && req.method === "GET") {
       // Another site's page must not hold (or time) a stream of everything the Inbox holds:

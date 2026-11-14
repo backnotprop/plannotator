@@ -2114,6 +2114,10 @@ export const inboxApi = {
   },
   /** Merge a PR the person confirmed (the popover's second click), at the head they saw. The server asks the forge first. */
   pullMerge: (key: string, headSha: string) => post<{ ok: true; key: string; method: 'merge' | 'squash' | 'rebase' | null; url: string }>(inboxUrl('/pulls/merge'), { key, head_sha: headSha, confirmed: true }),
+  /** The board's Close (approval "inbox-pr-board-bulk"): the host is asked first; a refusal throws its words. */
+  pullClose: (key: string) => post<{ ok: true; key: string; url: string }>(inboxUrl('/pulls/close'), { key }),
+  /** Close's Undo: taken only for a PR this Inbox closed in the last few minutes. */
+  pullReopen: (key: string) => post<{ ok: true; key: string; url: string }>(inboxUrl('/pulls/reopen'), { key }),
   pullOwnerCheck: (keys: readonly string[], projectId: string) => post<{ ok: true }>(inboxUrl('/pulls/owner'), { keys: [...keys], project_id: projectId, validate_only: true }),
   seeBoard: (throughSeq: number) => post<{ seen_seq: number }>(inboxUrl('/cards/seen'), { through_seq: throughSeq }),
   /** The Board's first-visit dialog: the first page on this computer to ask gets `show: true`, once per machine. */

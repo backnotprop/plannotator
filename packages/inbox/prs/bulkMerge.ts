@@ -66,15 +66,6 @@ export function confirmWords(count: number, phone: boolean): string {
     : `Click again to merge ${count} ${count === 1 ? 'pull request' : 'pull requests'}. A merge can’t be undone.`;
 }
 
-/** One PR's end in the report. */
-export type MergeOutcome = { pull: InboxPull; merged: true } | { pull: InboxPull; merged: false; why: string };
-
-/** "Merged #1198, #391." */
-export function mergedLine(outcomes: readonly MergeOutcome[]): string | null {
-  const merged = outcomes.filter((o) => o.merged).map((o) => inboxPullLabel(o.pull));
-  return merged.length ? `Merged ${merged.join(', ')}.` : null;
-}
-
 /** A refusal in the forge's (or the Inbox's) own words, after the PR's number. */
 export function refusedLine(pull: InboxPull, message: string): string {
   return `${inboxPullLabel(pull)} ${message}`;

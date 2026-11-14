@@ -2,8 +2,9 @@
    Add tag list in the row menu and the thread's ⋯ (components/AddTagMenu.tsx), and a tag's list header. Theme tokens only. */
 
 /* ---------- the sidebar: a section like Projects, straight on the sidebar's ground. ---------- */
-/* New tag: the heading's quiet icon button, always shown (not only on hover), as Agents' Add agent. */
-.pn-inbox .ib-tagsec .ib-tags-add { opacity: 1; }
+/* New tag: the heading's quiet icon button, shown while the section is open; closed, on the heading's hover or focus,
+   as Agents' Add agent. */
+.pn-inbox .ib-tagsec:not([data-closed]) .ib-tags-add { opacity: 1; }
 .pn-inbox .ib-tags { display: flex; flex-direction: column; }
 .pn-inbox .ib-tags .ib-proj:not(.ib-on):hover,
 .pn-inbox .ib-tags .ib-proj[data-menu]:not(.ib-on) { background: var(--ib-side-hover); }
