@@ -177,6 +177,13 @@ describe('the Changes tab lists declarations, not lines', () => {
     expect(changes[0]!.endLine).toBe(4);
   });
 
+  test('a rename inside a function keeps its own row', () => {
+    const before = ['export function addTax(amount) {', '  const rate = 0.2;', '  return amount * rate;', '}'].join('\n');
+    const after = ['export function addTax(amount) {', '  const taxRate = 0.2;', '  return amount * taxRate;', '}'].join('\n');
+    const changes = semDiffChanges('src/tax.ts', [op('renamed', [2, 3], [2, 3])], before, after);
+    expect(changes.map((c) => [c.oldEntityName, c.entityName, c.changeType])).toEqual([['rate', 'taxRate', 'renamed']]);
+  });
+
   test('a method line names the method, not the statement inside it', async () => {
     const { shortName } = await import('./semDiffChanges');
     expect(shortName('  async listEntries(dir: string): Promise<Entry[]> {')).toBe('listEntries');

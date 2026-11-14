@@ -2914,7 +2914,7 @@ test('the expand arrows on the PR page: read from the forge, opening a gap grows
   // The old side's line 45 quotes the old text, not the new file's line 45.
   await box.evaluate((el) => el.scrollIntoView({ block: 'end' }));
   await shell.locator('[data-expand-up]:visible').last().click();
-  const oldSide = shell.locator('[data-column-number="45"]').first();
+  const oldSide = shell.locator('[data-deletions] [data-column-number="45"]').first();
   await expect(oldSide).toBeVisible({ timeout: 10_000 });
   await oldSide.click();
   await page.getByPlaceholder('Leave feedback...').fill('Why is this one kept?');
@@ -2928,7 +2928,7 @@ test('the expand arrows on the PR page: read from the forge, opening a gap grows
   await expect(shell.locator('[data-column-number="20"]').last()).toBeInViewport({ timeout: 10_000 });
   // The old side numbers apart from the new: its comment opens the line it was written on.
   await review.locator('.ib-gpanel').getByText('Why is this one kept?').first().click();
-  await expect(shell.locator('[data-column-number="45"]').first()).toBeInViewport({ timeout: 10_000 });
+  await expect(shell.locator('[data-deletions] [data-column-number="45"]').first()).toBeInViewport({ timeout: 10_000 });
   await expect(shell.getByText(TOKENS[44]!).first()).toBeInViewport();
   await review.locator('[data-review-posts] [data-decision-primary]').click();
   const dialog = page.getByRole('dialog');

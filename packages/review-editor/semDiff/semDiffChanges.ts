@@ -110,7 +110,7 @@ export function semDiffChanges(
         : '';
     const name = helper || firstLine(newText, newRange?.start) || firstLine(oldText, oldRange?.start);
     const oldName = firstLine(oldText, oldRange?.start);
-    const owner = helper ? null : newRange ? enclosingName(newText, newRange.start) : enclosingName(oldText, oldRange?.start);
+    const owner = helper || op.type === 'renamed' ? null : newRange ? enclosingName(newText, newRange.start) : enclosingName(oldText, oldRange?.start);
     return {
       entityId: null,
       changeType: CHANGE_TYPE[op.type] ?? 'modified',
