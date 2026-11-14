@@ -62,3 +62,13 @@ test('a record that came while the thread was stale keeps it stale until a read 
   putThread(client, T, { ...(base as object), cursor: 20 } as never);
   expect(isThreadStale(client, T)).toBe(false);
 });
+
+test('a record for a thread not held yet, which a read on its way left before, makes that read land stale', () => {
+  const client = new QueryClient();
+  const base = { serverSession: 's', cursor: 10, thread: { thread_id: 'msg_NEW', project: { id: 'prj', name: 'billing', root: '/r' } as never, subject: 'New', thread_name: null, resolved_at: null, archive_seq: null, messages: [{ ...msg('msg_NEW'), thread_id: 'msg_NEW' }] } } as never;
+  expect(applyStreamRecord(client, { seq: 11, kind: 'message', id: 'msg_NEW', first: false, message: { ...msg('msg_NEW'), thread_id: 'msg_NEW', person_seen_seq: 11 } } as InboxEvent).kind).toBe('unheld');
+  putThread(client, 'msg_NEW', base);
+  expect(isThreadStale(client, 'msg_NEW')).toBe(true);
+  putThread(client, 'msg_NEW', { ...(base as object), cursor: 11 } as never);
+  expect(isThreadStale(client, 'msg_NEW')).toBe(false);
+});

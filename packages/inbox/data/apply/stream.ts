@@ -32,7 +32,7 @@ export function applyStreamRecord(client: QueryClient, event: InboxEvent | null)
   const held = heldThread(client, threadId);
   if (!held || isThreadStale(client, threadId)) {
     ahead.delete(threadId);
-    if (held && !machineOf(threadId) && 'seq' in event && typeof event.seq === 'number') noteMissed(threadId, event.seq);
+    if (!machineOf(threadId) && 'seq' in event && typeof event.seq === 'number') noteMissed(threadId, event.seq);
     return { threadId, kind: 'unheld' };
   }
   const base = ahead.get(threadId) ?? held;
