@@ -213,7 +213,7 @@ export function SemanticDiffsTab() {
               />
             </Row>
             <Row
-              title={provider === 'jev' ? 'TypeSafe key' : 'Workers AI'}
+              title={provider === 'jev' ? 'Jev key' : 'Workers AI'}
               hint={
                 check.kind === 'ok' ? (
                   `✓ Key works · ${check.ms} ms`
@@ -232,7 +232,7 @@ export function SemanticDiffsTab() {
               }
             >
               <form
-                className="flex w-[250px] items-start gap-1.5"
+                className="flex w-[340px] items-end gap-1.5"
                 data-power-up-key-set={saved ? '' : undefined}
                 onSubmit={(e) => {
                   e.preventDefault();
@@ -283,8 +283,13 @@ export function SemanticDiffsTab() {
                     />
                   </>
                 )}
-                <button type="submit" className="sr-only" tabIndex={-1} disabled={check.kind === 'checking'}>
-                  Check and save
+                <button
+                  type="submit"
+                  className="h-7 shrink-0 whitespace-nowrap rounded-md px-2 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground disabled:hover:bg-transparent disabled:hover:text-muted-foreground"
+                  disabled={check.kind === 'checking' || (saved && check.kind === 'ok')}
+                  data-power-up-key-save=""
+                >
+                  {check.kind === 'checking' ? 'Checking…' : saved && check.kind === 'ok' ? 'Saved' : 'Check and save'}
                 </button>
               </form>
             </Row>
@@ -292,7 +297,7 @@ export function SemanticDiffsTab() {
               <Segmented label="Motion" value={motion} options={[['still', 'Still'], ['stream', 'Stream']]} onChange={(v) => configStore.set('diffPowerUpMotion', v)} />
             </Row>
             <p className="pt-1 text-xs text-muted-foreground">
-              Your key, your account; code is sent to {PROVIDER_NAME[provider]}. Only the functions a link is about, never the rest of the repository.
+              Your key, your account; code is sent to {PROVIDER_NAME[provider]}. Only the functions the engine asks about are sent, never the rest of the repository.
             </p>
           </>
         )}
