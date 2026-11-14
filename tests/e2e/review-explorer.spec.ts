@@ -451,7 +451,7 @@ test('Go to File, Go to Definition and References into tabs, Back / Forward, nex
     await expect(activeTab).toHaveText('long.ts');
     // In a diff taller than the screen it walks the runs of changes, down and back up.
     const scrollTop = () => page.evaluate(() => {
-      const host = document.querySelector('[data-pane-active] [data-pane-panel-visible] diffs-container, [data-pane-panel-visible] diffs-container, .dv-active-group diffs-container');
+      const host = document.querySelector('[data-pane-active] [data-pane-panel] diffs-container, [data-pane-panel] diffs-container, .dv-active-group diffs-container');
       let node: Element | null = host;
       while (node) {
         if (node instanceof HTMLElement && node.scrollHeight > node.clientHeight && /(auto|scroll)/.test(getComputedStyle(node).overflowY)) return node.scrollTop;
