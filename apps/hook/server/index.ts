@@ -2606,7 +2606,7 @@ if (args[0] === "sessions") {
   // in a host that cannot import Bun-only server modules directly.
 
   const inputJson = await Bun.stdin.text();
-  const input = parseOpenCodeBridgeInput<{ arguments?: unknown; supportsApprovalNotes?: unknown }>(
+  const input = parseOpenCodeBridgeInput<{ arguments?: unknown; supportsApprovalNotes?: unknown; inboxSession?: unknown }>(
     "opencode-review",
     inputJson,
   );
@@ -2766,6 +2766,7 @@ if (args[0] === "sessions") {
     gitRef,
     error: diffError,
     origin: "opencode",
+    liveReviewAgent: typeof input.inboxSession === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/.test(input.inboxSession) ? { host: "opencode", session: input.inboxSession } : null,
     project: reviewProject,
     includeReviewDirectory: !!reviewDirectory,
     diffType: isPRMode ? undefined : userDiffType,
