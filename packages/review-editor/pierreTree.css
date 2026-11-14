@@ -50,6 +50,7 @@
 .review-changes-tree::part(row-content) {
   flex: 1 1 auto;
   color: inherit;
+  font-variant-ligatures: no-contextual;
 }
 .review-changes-tree::part(row-content-muted) {
   color: var(--muted-foreground);
