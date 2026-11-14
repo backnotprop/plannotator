@@ -73,7 +73,7 @@
     "chokidar": "^5.0.0",
     "diff": "^8.0.4",
     "parse5": "^7.3.0",
-    "turndown": "^7.2.4"
+    "turndown": "^7.2.5"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": ">=0.79.1"
