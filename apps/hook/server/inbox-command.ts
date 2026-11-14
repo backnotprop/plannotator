@@ -83,6 +83,7 @@ import { runInboxLinkCommand } from "./inbox-link-command";
 import { INBOX_CONNECTION_USAGE, runInboxConnectionCommand, stdinLines } from "./inbox-connection-command";
 import { runInboxProjectsCommand } from "./inbox-projects-command";
 import { writeWholeToStdout } from "./write-whole-stdout";
+import { inboxStartTrace } from "./inbox-start-trace";
 
 export const INBOX_LOG_FILE = "inbox.log";
 /** Set by a starter that holds the start lock for the detached Inbox it spawns. */
@@ -110,8 +111,8 @@ export function selfCommand(): string[] {
   return [process.execPath];
 }
 
-/** Spawn `plannotator inbox --no-open` in its own session, output to inbox/inbox.log. */
-function spawnDetachedInbox(dataDir: string, tailscale: boolean): void {
+/** Spawn `plannotator inbox --no-open` in its own session, output to inbox/inbox.log. Answers its pid. */
+function spawnDetachedInbox(dataDir: string, tailscale: boolean): number | undefined {
   const dir = inboxDir(dataDir);
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   const log = openSync(join(dir, INBOX_LOG_FILE), "a", 0o600);
@@ -128,6 +129,7 @@ function spawnDetachedInbox(dataDir: string, tailscale: boolean): void {
   });
   child.unref();
   closeSync(log);
+  return child.pid;
 }
 
 /**
@@ -191,9 +193,13 @@ async function waitForBusyInbox(dataDir: string, pid: number): Promise<InboxRegi
  * needed. Never opens a browser. Throws when it cannot be started.
  */
 export async function ensureInboxRunning(dataDir: string, options: { tailscale?: boolean } = {}): Promise<InboxRegistryEntry> {
+  const trace = inboxStartTrace(dataDir, "starter");
   const status = await inboxStatus(dataDir);
   if (status.state === "running") return status.entry;
-  if (status.state === "busy") return waitForBusyInbox(dataDir, status.entry.pid);
+  if (status.state === "busy") {
+    trace.step("busy_wait", { inbox: status.entry.pid });
+    return waitForBusyInbox(dataDir, status.entry.pid);
+  }
   return startDetachedInbox(dataDir, acquireInboxStartLock(dataDir), options.tailscale === true);
 }
 
@@ -203,9 +209,11 @@ export async function ensureInboxRunning(dataDir: string, options: { tailscale?:
  * holds it) only wait for what that starter starts.
  */
 async function startDetachedInbox(dataDir: string, release: (() => void) | null, tailscale: boolean): Promise<InboxRegistryEntry> {
+  const trace = inboxStartTrace(dataDir, "starter");
+  trace.step(release ? "lock_taken" : "lock_wait");
   if (release) {
     try {
-      spawnDetachedInbox(dataDir, tailscale);
+      trace.step("spawned", { child: spawnDetachedInbox(dataDir, tailscale) });
     } catch (error) {
       release();
       throw error;
@@ -362,9 +370,11 @@ async function serveInbox(dataDir: string, open: boolean, htmlContent: string | 
   // two people (or a person and an agent) never start two writers on one store.
   const lockHeldByStarter = process.env[LOCK_HELD_ENV] === "1";
   delete process.env[LOCK_HELD_ENV];
+  const trace = inboxStartTrace(dataDir, lockHeldByStarter ? "detached" : "direct");
   // Held for this start now too: a starter that exits early never makes it look abandoned.
   if (lockHeldByStarter) joinInboxStartLock(dataDir);
   const release = lockHeldByStarter ? null : acquireInboxStartLock(dataDir);
+  trace.step(lockHeldByStarter ? "lock_joined" : release ? "lock_taken" : "lock_wait");
   if (!lockHeldByStarter && !release) {
     const running = await waitUntilRunning(dataDir);
     if (!running) {
@@ -381,6 +391,7 @@ async function serveInbox(dataDir: string, open: boolean, htmlContent: string | 
   try {
     const status = await inboxStatus(dataDir);
     if (status.state === "running" || status.state === "busy") {
+      trace.step(status.state === "running" ? "already_running" : "busy_wait", { inbox: status.entry.pid });
       const entry = status.state === "running" ? status.entry : await waitForBusyInbox(dataDir, status.entry.pid);
       process.stderr.write(`Plannotator Inbox: ${entry.url}\n`);
       if (tailscale) await publishRunningInbox(entry);
@@ -409,6 +420,7 @@ async function serveInbox(dataDir: string, open: boolean, htmlContent: string | 
       // start lock, the last port first) and end this process. A run
       // published only by --tailscale passes it on.
       onRestartRequested: () => {
+        trace.step("restart");
         ensureInboxRunning(dataDir, { tailscale: inbox.tailscale.runOnly() })
           .catch((error) => process.stderr.write(`Restart failed: ${error instanceof Error ? error.message : String(error)}\n`))
           .finally(() => process.exit(0));
@@ -422,6 +434,7 @@ async function serveInbox(dataDir: string, open: boolean, htmlContent: string | 
   } finally {
     release?.();
   }
+  trace.step("serving", { port: inbox.port });
   const shutdown = (code: number) => {
     inbox.stop();
     process.exit(code);
