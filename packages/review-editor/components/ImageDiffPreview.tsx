@@ -1,7 +1,7 @@
 import React, { useEffect, useLayoutEffect, useState } from 'react';
 import type { DiffFileStatus } from '../types';
 import type { ReviewImageData, ReviewImageSide } from '../utils/reviewImage';
-import { stageLayout, type Size } from './image-diff/geometry';
+import { SIDE_BY_SIDE_GAP, SIDE_BY_SIDE_MIN_WIDTH, sideBySideColumns, sideBySidePaneWidth, stageLayout, type Size } from './image-diff/geometry';
 import { useImageDiffSettings } from './image-diff/imageDiffSettings';
 import { sidesFor, useImageSides, useNearViewport } from './image-diff/useImageSides';
 import { SinglePane, StackedStage, type StageImage } from './image-diff/ImageStage';
@@ -19,8 +19,6 @@ export interface ImageDiffPreviewProps {
   onHeightChange?: () => void;
 }
 
-const SIDE_GAP = 16;
-const TWO_COLUMN_MIN = 480;
 
 function useWidth(ref: React.RefObject<HTMLDivElement | null>): number {
   const [width, setWidth] = useState(0);
@@ -81,8 +79,11 @@ export const ImageDiffPreview: React.FC<ImageDiffPreviewProps> = ({
   const comparable = sides.length === 2 && !!before && !!after && !unchanged;
   const mode = comparable ? settings.mode : 'side';
   const maxHeight = variant === 'all-files' ? 480 : 640;
-  const twoColumns = comparable && mode === 'side' && !compact && width >= TWO_COLUMN_MIN;
-  const paneWidth = twoColumns ? Math.floor((width - SIDE_GAP) / 2) : width;
+  const narrow = width > 0 && width < SIDE_BY_SIDE_MIN_WIDTH;
+  const canvasNatural = { width: Math.max(beforeSize?.width ?? 0, afterSize?.width ?? 0), height: Math.max(beforeSize?.height ?? 0, afterSize?.height ?? 0) };
+  const columnsFit = comparable && sideBySideColumns(canvasNatural, width);
+  const twoColumns = columnsFit && mode === 'side';
+  const paneWidth = sideBySidePaneWidth(width, columnsFit);
   const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
   const sized = comparable ? !!beforeSize && !!afterSize : loaded.length > 0 && !!(beforeSize ?? afterSize);
   const layout = sized && width > 0
@@ -92,6 +93,7 @@ export const ImageDiffPreview: React.FC<ImageDiffPreviewProps> = ({
         available: { width: paneWidth, height: maxHeight },
         zoom: settings.zoom,
         dpr,
+        vector: /\.svg$/i.test(filePath) || [before, after].some((image) => image?.contentType.includes('svg')),
       })
     : null;
   const dimensionsDiffer = comparable && !!beforeSize && !!afterSize && (beforeSize.width !== afterSize.width || beforeSize.height !== afterSize.height);
@@ -168,6 +170,7 @@ export const ImageDiffPreview: React.FC<ImageDiffPreviewProps> = ({
             mask={side === 'new' ? mask : null}
             maskColor={accent}
             label={label}
+            labelAbove={narrow}
             onScrollPosition={twoColumns ? (left, top) => setScroll({ left, top }) : undefined}
             scrollTo={twoColumns ? scroll : null}
           />
@@ -192,12 +195,12 @@ export const ImageDiffPreview: React.FC<ImageDiffPreviewProps> = ({
           <div className="animate-pulse rounded-sm bg-muted/50 motion-reduce:animate-none" style={reserve ?? { height: Math.min(maxHeight, 160) }} aria-label="Loading image" />
         )}
         <figcaption className="mt-1 text-xs leading-5 text-muted-foreground tabular-nums" data-image-unchanged={unchanged ? '' : undefined}>
-          {image ? imageCaption(null, sizeOf(side, image), image.bytes) : label}
+          <span className="whitespace-nowrap">{image ? imageCaption(null, sizeOf(side, image), image.bytes) : label}</span>
           {image && side === 'new' && comparable && before && (
-            <span data-image-delta="" className="ml-1">{sizeChange(beforeSize, afterSize, before.bytes, image.bytes)}</span>
+            <span data-image-delta="" className="ml-1 whitespace-nowrap">{sizeChange(beforeSize, afterSize, before.bytes, image.bytes)}</span>
           )}
-          {unchanged && <span className="ml-1">· contents unchanged</span>}
-          {image && side === 'new' && differencesText && <span className="ml-1">· {differencesText}</span>}
+          {unchanged && <span className="ml-1 whitespace-nowrap">· contents unchanged</span>}
+          {image && side === 'new' && differencesText && <span className="ml-1 whitespace-nowrap">· {differencesText}</span>}
         </figcaption>
       </figure>
     );
@@ -224,9 +227,10 @@ export const ImageDiffPreview: React.FC<ImageDiffPreviewProps> = ({
               opacity={opacity}
               mask={mask}
               maskColor={accent}
+              labelsAbove={narrow}
             />
             <div className="mt-1 flex flex-wrap items-center gap-x-2 text-xs leading-5 text-muted-foreground tabular-nums" data-image-meta="">
-              <span>Before {imageCaption(null, beforeSize, before!.bytes)}</span>
+              <span className="whitespace-nowrap">Before {imageCaption(null, beforeSize, before!.bytes)}</span>
               {mode === 'onion' ? (
                 <input
                   type="range"
@@ -241,22 +245,20 @@ export const ImageDiffPreview: React.FC<ImageDiffPreviewProps> = ({
               ) : (
                 <span aria-hidden="true">→</span>
               )}
-              <span>
-                After {imageCaption(null, afterSize, after!.bytes)}
-                <span data-image-delta="" className="ml-1">{sizeChange(beforeSize, afterSize, before!.bytes, after!.bytes)}</span>
-              </span>
+              <span className="whitespace-nowrap">After {imageCaption(null, afterSize, after!.bytes)}</span>
+              <span data-image-delta="" className="whitespace-nowrap">{sizeChange(beforeSize, afterSize, before!.bytes, after!.bytes)}</span>
               {dimensionsDiffer && (
                 <span data-image-sizes-differ="" title="Both images are aligned top left at one scale; neither is stretched" className="rounded border border-border px-1 leading-4">
                   sizes differ
                 </span>
               )}
-              {differencesText && <span>· {differencesText}</span>}
+              {differencesText && <span className="whitespace-nowrap">· {differencesText}</span>}
             </div>
           </>
         ) : (
           <div
             className="grid"
-            style={{ gridTemplateColumns: twoColumns ? `${paneWidth}px ${paneWidth}px` : 'minmax(0, 1fr)', columnGap: SIDE_GAP, rowGap: 12 }}
+            style={{ gridTemplateColumns: twoColumns ? `${paneWidth}px ${paneWidth}px` : 'minmax(0, 1fr)', columnGap: SIDE_BY_SIDE_GAP, rowGap: 12 }}
           >
             {(unchanged ? (['new'] as ReviewImageSide[]) : sides).map(pane)}
           </div>

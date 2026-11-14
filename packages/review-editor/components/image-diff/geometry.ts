@@ -5,7 +5,10 @@ export interface Size {
 
 export type ImageZoom = 'fit' | 'actual';
 
-export const MAX_FIT_UPSCALE = 8;
+export const MAX_VECTOR_UPSCALE = 2;
+export const MAX_UPSCALED_HEIGHT = 320;
+export const SIDE_BY_SIDE_GAP = 16;
+export const SIDE_BY_SIDE_MIN_WIDTH = 480;
 
 export interface StageLayout {
   scale: number;
@@ -33,11 +36,20 @@ export function unionCanvas(a: Size | null, b: Size | null): Size {
   };
 }
 
-export function fitScale(canvas: Size, available: Size): number {
+export function fitScale(canvas: Size, available: Size, vector = false): number {
   if (canvas.width <= 0 || canvas.height <= 0 || available.width <= 0 || available.height <= 0) return 1;
   const raw = Math.min(available.width / canvas.width, available.height / canvas.height);
-  if (raw >= 1) return Math.min(MAX_FIT_UPSCALE, Math.max(1, Math.floor(raw)));
-  return raw;
+  if (!vector || raw <= 1) return Math.min(raw, 1);
+  return Math.max(1, Math.min(raw, MAX_VECTOR_UPSCALE, MAX_UPSCALED_HEIGHT / canvas.height));
+}
+
+export function sideBySideColumns(canvas: Size, width: number): boolean {
+  if (width <= 0 || canvas.width <= 0) return false;
+  return width >= SIDE_BY_SIDE_MIN_WIDTH || canvas.width * 2 + SIDE_BY_SIDE_GAP <= width;
+}
+
+export function sideBySidePaneWidth(width: number, columns: boolean): number {
+  return columns ? Math.floor((width - SIDE_BY_SIDE_GAP) / 2) : width;
 }
 
 export function stageLayout(options: {
@@ -46,14 +58,15 @@ export function stageLayout(options: {
   available: Size;
   zoom: ImageZoom;
   dpr: number;
+  vector?: boolean;
 }): StageLayout {
   const canvas = unionCanvas(options.old, options.new);
-  const scale = options.zoom === 'actual' ? 1 : fitScale(canvas, options.available);
+  const scale = options.zoom === 'actual' ? 1 : fitScale(canvas, options.available, options.vector === true);
   const size = (s: Size | null): Size | null =>
     s ? { width: floorToDevice(s.width * scale, options.dpr), height: floorToDevice(s.height * scale, options.dpr) } : null;
   const stage = size(canvas)!;
   const offsetX = stage.width < options.available.width ? floorToDevice((options.available.width - stage.width) / 2, options.dpr) : 0;
-  return { scale, stage, old: size(options.old), new: size(options.new), offsetX, pixelated: scale > 1 };
+  return { scale, stage, old: size(options.old), new: size(options.new), offsetX, pixelated: scale > 1 && options.vector !== true };
 }
 
 export function swipeClipX(position: number, stageWidth: number, dpr: number): number {

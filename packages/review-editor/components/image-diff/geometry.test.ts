@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { fitScale, floorToDevice, stageLayout, stepSwipe, swipeClipX } from './geometry';
+import { fitScale, floorToDevice, sideBySideColumns, sideBySidePaneWidth, stageLayout, stepSwipe, swipeClipX } from './geometry';
 
 const widths = [390, 768, 1280, 1917];
 const dprs = [1, 1.25, 1.5, 2, 3];
@@ -36,10 +36,51 @@ describe('stageLayout keeps both images registered', () => {
     }
   }
 
-  test('small images scale up by whole steps, so pixels stay square', () => {
-    expect(fitScale({ width: 16, height: 16 }, { width: 600, height: 480 })).toBe(8);
-    expect(fitScale({ width: 100, height: 100 }, { width: 350, height: 480 })).toBe(3);
+  test('fit never draws a raster image above its natural size', () => {
+    expect(fitScale({ width: 96, height: 96 }, { width: 600, height: 480 })).toBe(1);
     expect(fitScale({ width: 2000, height: 1000 }, { width: 1000, height: 480 })).toBeCloseTo(0.48);
+    const icon = stageLayout({ old: { width: 96, height: 96 }, new: { width: 96, height: 96 }, available: { width: 900, height: 640 }, zoom: 'fit', dpr: 2 });
+    expect(icon.stage).toEqual({ width: 96, height: 96 });
+    expect(icon.pixelated).toBe(false);
+  });
+
+  test('an SVG may scale up, at most twice and at most 320 px tall', () => {
+    expect(fitScale({ width: 64, height: 64 }, { width: 900, height: 640 }, true)).toBe(2);
+    expect(fitScale({ width: 200, height: 200 }, { width: 900, height: 640 }, true)).toBe(1.6);
+    expect(fitScale({ width: 64, height: 64 }, { width: 100, height: 640 }, true)).toBeCloseTo(100 / 64);
+    expect(fitScale({ width: 600, height: 600 }, { width: 300, height: 640 }, true)).toBe(0.5);
+    const logo = stageLayout({ old: { width: 64, height: 64 }, new: { width: 64, height: 64 }, available: { width: 900, height: 640 }, zoom: 'fit', dpr: 1, vector: true });
+    expect(logo.stage).toEqual({ width: 128, height: 128 });
+    expect(logo.pixelated).toBe(false);
+  });
+
+  test('one scale for every view: the side-by-side pane width decides it', () => {
+    const before = { width: 200, height: 100 };
+    const after = { width: 260, height: 140 };
+    for (const width of [390, 768, 1280]) {
+      const columns = sideBySideColumns({ width: 260, height: 140 }, width);
+      const pane = sideBySidePaneWidth(width, columns);
+      const layout = stageLayout({ old: before, new: after, available: { width: pane, height: 480 }, zoom: 'fit', dpr: 2 });
+      expect(layout.scale).toBe(1);
+      expect(layout.new).toEqual(after);
+    }
+    const big = stageLayout({ old: { width: 2400, height: 400 }, new: { width: 2400, height: 264 }, available: { width: sideBySidePaneWidth(1000, true), height: 480 }, zoom: 'fit', dpr: 1 });
+    expect(big.stage.width).toBeLessThanOrEqual(492);
+  });
+
+  test('before and after stack only when the two do not fit side by side at 100%', () => {
+    expect(sideBySideColumns({ width: 200, height: 100 }, 430)).toBe(true);
+    expect(sideBySideColumns({ width: 200, height: 100 }, 358)).toBe(false);
+    expect(sideBySideColumns({ width: 260, height: 140 }, 358)).toBe(false);
+    expect(sideBySideColumns({ width: 2400, height: 400 }, 358)).toBe(false);
+    expect(sideBySideColumns({ width: 2400, height: 400 }, 900)).toBe(true);
+  });
+
+  test('Actual size is 100% for every kind', () => {
+    for (const vector of [false, true]) {
+      const layout = stageLayout({ old: { width: 64, height: 64 }, new: { width: 64, height: 64 }, available: { width: 900, height: 640 }, zoom: 'actual', dpr: 2, vector });
+      expect(layout.stage).toEqual({ width: 64, height: 64 });
+    }
   });
 });
 
