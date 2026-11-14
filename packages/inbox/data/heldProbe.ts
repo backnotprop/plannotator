@@ -4,11 +4,12 @@ import { inboxUrl, machineOf } from '../inboxUrl';
 import { createInboxQueryClient } from './client';
 import { inboxKeys } from './keys';
 import { heldList } from './queries/list';
-import { heldThread, isThreadStale, showableThread } from './queries/thread';
+import { heldThread, isThreadStale, showableThread, threadReadsOut } from './queries/thread';
 
 export interface HeldProbeRead {
   error?: string;
   busy: number;
+  reading: number;
   threads: { threadId: string; held: ThreadModel; fresh: ThreadModel; note?: string }[];
   list: { held: ListModel; fresh: ListModel } | null;
 }
@@ -29,6 +30,7 @@ async function readHeld(client: QueryClient): Promise<HeldProbeRead> {
     const threads: HeldProbeRead['threads'] = [];
     const open = openThread();
     let stale = 0;
+    const reading = open ? threadReadsOut(open) : 0;
     for (const query of client.getQueryCache().findAll({ queryKey: inboxKeys.threads() })) {
       const threadId = query.queryKey[2];
       if (typeof threadId !== 'string') continue;
@@ -41,14 +43,14 @@ async function readHeld(client: QueryClient): Promise<HeldProbeRead> {
       });
       if (!fresh) continue;
       const state = client.getQueryState(inboxKeys.thread(threadId));
-      const note = `open ${threadId === open}, stale ${isThreadStale(client, threadId)}, held cursor ${held.cursor}, fresh cursor ${fresh.cursor}, applied ${JSON.stringify((held as { applied?: unknown }).applied ?? null)}, updated ${Date.now() - (state?.dataUpdatedAt ?? 0)} ms ago`;
+      const note = `open ${threadId === open}, stale ${isThreadStale(client, threadId)}, reads out ${threadReadsOut(threadId)}, held cursor ${held.cursor}, fresh cursor ${fresh.cursor}, applied ${JSON.stringify((held as { applied?: unknown }).applied ?? null)}, updated ${Date.now() - (state?.dataUpdatedAt ?? 0)} ms ago`;
       threads.push({ threadId, held, fresh, note });
     }
     const list = heldList(client);
     const fresh = list ? ((await (await fetch(WHOLE_LIST, { headers: { Accept: 'application/json' } })).json()) as ListModel) : null;
-    return { busy: client.isFetching() + client.isMutating() + stale, threads, list: list && fresh ? { held: list, fresh } : null };
+    return { busy: client.isFetching() + client.isMutating() + stale, reading, threads, list: list && fresh ? { held: list, fresh } : null };
   } catch (cause) {
-    return { error: cause instanceof Error ? cause.message : String(cause), busy: 1, threads: [], list: null };
+    return { error: cause instanceof Error ? cause.message : String(cause), busy: 1, reading: 0, threads: [], list: null };
   }
 }
 

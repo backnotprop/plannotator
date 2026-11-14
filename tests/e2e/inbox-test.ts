@@ -6,6 +6,7 @@ export * from '@playwright/test';
 
 export const HELD_DRIFT_OFF = 'held-drift-off';
 const SETTLE_MS = 3000;
+const READING_MS = 20_000;
 const RETRY_MS = 100;
 
 const contexts = new Set<BrowserContext>();
@@ -50,7 +51,8 @@ function driftOf(read: HeldProbeRead): string | null {
 }
 
 async function pageDrift(page: Page): Promise<string | null> {
-  const deadline = Date.now() + SETTLE_MS;
+  const started = Date.now();
+  const deadline = started + SETTLE_MS;
   for (;;) {
     const now = await read(page);
     if (!now) return null;
@@ -61,7 +63,7 @@ async function pageDrift(page: Page): Promise<string | null> {
       continue;
     }
     const drift = driftOf(now);
-    if ((!drift && now.busy === 0) || Date.now() > deadline) return drift;
+    if ((!drift && now.busy === 0) || (Date.now() > deadline && !(now.reading > 0 && Date.now() < started + READING_MS))) return drift;
     await page.waitForTimeout(RETRY_MS).catch(() => {});
     if (page.isClosed()) return null;
   }
