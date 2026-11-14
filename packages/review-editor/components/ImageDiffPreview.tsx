@@ -96,7 +96,6 @@ export const ImageDiffPreview: React.FC<ImageDiffPreviewProps> = ({
         available: { width: paneWidth, height: maxHeight },
         zoom: settings.zoom,
         dpr,
-        vector: /\.svg$/i.test(filePath) || [before, after].some((image) => image?.contentType.includes('svg')),
       })
     : null;
   const dimensionsDiffer = comparable && !!beforeSize && !!afterSize && (beforeSize.width !== afterSize.width || beforeSize.height !== afterSize.height);
