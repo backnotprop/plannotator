@@ -2,10 +2,9 @@ import React, { Suspense, useCallback, useEffect, useRef, useState } from 'react
 import { useConfigValue } from '@plannotator/ui/config';
 import type { DiffLayoutSource, LineSide, ScrollElementModel } from './layoutSource';
 import type { RowMetrics } from './rowModel';
-import type { MinimapMark } from './scene';
+import type { MinimapKind } from './scene';
 
 export const MINIMAP_LONG_SCREENS = 3;
-export const MINIMAP_WIDTH = 12;
 
 export interface MinimapFileInput {
   id: string;
@@ -18,6 +17,7 @@ export interface MinimapNote {
   side: LineSide;
   lineStart: number;
   lineEnd: number;
+  kind?: MinimapKind;
 }
 
 export interface DiffMinimapSlotProps {
@@ -26,8 +26,8 @@ export interface DiffMinimapSlotProps {
   files: readonly MinimapFileInput[];
   viewedPaths: ReadonlySet<string> | undefined;
   notes: readonly MinimapNote[];
-  extraMarks?: readonly MinimapMark[];
   metrics: RowMetrics;
+  labelTop: number;
   split: boolean;
   expandUnchanged: boolean;
   pulseRef: React.MutableRefObject<(() => void) | null>;

@@ -8,12 +8,23 @@ export interface MinimapColors {
   other: string;
 }
 
-type Lane = 'del' | 'add' | 'mark';
+type Lane = 'del' | 'add' | 'mark' | 'edge' | 'semantic';
 
 const KIND_STYLE: Record<string, { lane: Lane; color: keyof MinimapColors }> = {
   del: { lane: 'del', color: 'del' },
   add: { lane: 'add', color: 'add' },
   comment: { lane: 'mark', color: 'mark' },
+  thread: { lane: 'edge', color: 'mark' },
+  moved: { lane: 'semantic', color: 'other' },
+  renamed: { lane: 'semantic', color: 'other' },
+  reformatted: { lane: 'semantic', color: 'other' },
+};
+
+const LANES: Record<Exclude<Lane, 'mark'>, [number, number]> = {
+  semantic: [0, 2],
+  del: [3, 3],
+  add: [7, 3],
+  edge: [10, 2],
 };
 
 const TOKENS: Record<keyof MinimapColors, string> = {
@@ -43,24 +54,24 @@ export interface MinimapDrawInput {
   colors: MinimapColors;
 }
 
-const MIN_ALPHA = 0.3;
-const MAX_ALPHA = 0.62;
+export const FLOOR_ALPHA = 0.14;
+export const CEILING_ALPHA = 0.85;
 const DIM = 0.4;
 const STEPS = 24;
 
-function laneBox(lane: Lane, dpr: number, width: number): [number, number] {
-  if (lane === 'mark') return [0, width];
-  const left = Math.round((lane === 'del' ? 2 : 7) * dpr);
-  return [left, Math.round(3 * dpr)];
+function laneBox(lane: Exclude<Lane, 'mark'>, dpr: number): [number, number] {
+  const [left, width] = LANES[lane];
+  return [Math.round(left * dpr), Math.max(1, Math.round(width * dpr))];
+}
+
+export function densityAlpha(value: number): number {
+  if (value <= 0.002) return 0;
+  return FLOOR_ALPHA + (CEILING_ALPHA - FLOOR_ALPHA) * Math.pow(Math.min(1, value), 0.75);
 }
 
 function alphaColumn(column: Float32Array): Float32Array {
   const out = new Float32Array(column.length);
-  for (let i = 0; i < column.length; i++) {
-    const own = column[i] > 0 ? MIN_ALPHA + (MAX_ALPHA - MIN_ALPHA) * Math.min(1, column[i]) : 0;
-    const above = i > 0 && column[i - 1] > 0 ? MIN_ALPHA + (MAX_ALPHA - MIN_ALPHA) * Math.min(1, column[i - 1]) : 0;
-    out[i] = Math.max(own, above);
-  }
+  for (let i = 0; i < column.length; i++) out[i] = densityAlpha(column[i]);
   return out;
 }
 
@@ -127,8 +138,9 @@ export function drawMinimap(ctx: CanvasRenderingContext2D, input: MinimapDrawInp
       if (style.lane === 'mark') {
         fillMarks(ctx, column, width, Math.round(2 * dpr), dim ? DIM : 0.95);
       } else {
-        const [x, w] = laneBox(style.lane, dpr, width);
-        fillColumn(ctx, alphaColumn(column), x, w, scale);
+        const [x, w] = laneBox(style.lane, dpr);
+        if (style.lane === 'add' || style.lane === 'del') fillColumn(ctx, alphaColumn(column), x, w, scale);
+        else fillColumn(ctx, column.map((v) => (v > 0 ? 0.9 : 0)), x, w, scale);
       }
     }
   }

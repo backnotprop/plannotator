@@ -12,6 +12,7 @@ export interface CodeViewMinimapProps {
   itemIdToFile: ReadonlyMap<string, { path: string; patch: string }>;
   viewedFiles: ReadonlySet<string> | undefined;
   annotations: readonly CodeAnnotation[];
+  marks?: readonly MinimapNote[];
   metrics: RowMetrics;
   split: boolean;
   expandUnchanged: boolean;
@@ -19,7 +20,7 @@ export interface CodeViewMinimapProps {
   onShownChange: (shown: boolean) => void;
 }
 
-export const CodeViewMinimap: React.FC<CodeViewMinimapProps> = ({ getViewer, getScrollElement, items, itemIdToFile, viewedFiles, annotations, metrics, split, expandUnchanged, pulseRef, onShownChange }) => {
+export const CodeViewMinimap: React.FC<CodeViewMinimapProps> = ({ getViewer, getScrollElement, items, itemIdToFile, viewedFiles, annotations, marks, metrics, split, expandUnchanged, pulseRef, onShownChange }) => {
   const ids = useMemo(() => items.map((item) => item.id), [items]);
   const fallbackModel = useMemo(() => ({ current: null as ScrollElementModel | null }), []);
   const source = useMemo(
@@ -34,8 +35,11 @@ export const CodeViewMinimap: React.FC<CodeViewMinimapProps> = ({ getViewer, get
     [ids, itemIdToFile],
   );
   const notes = useMemo<MinimapNote[]>(
-    () => annotations.filter((a) => !isFileScopedAnnotation(a)).map((a) => ({ filePath: a.filePath, side: a.side, lineStart: a.lineStart, lineEnd: a.lineEnd })),
-    [annotations],
+    () => {
+      const fromComments = annotations.filter((a) => !isFileScopedAnnotation(a)).map((a) => ({ filePath: a.filePath, side: a.side, lineStart: a.lineStart, lineEnd: a.lineEnd }));
+      return marks && marks.length > 0 ? fromComments.concat(marks) : fromComments;
+    },
+    [annotations, marks],
   );
   return (
     <DiffMinimapSlot
@@ -45,6 +49,7 @@ export const CodeViewMinimap: React.FC<CodeViewMinimapProps> = ({ getViewer, get
       viewedPaths={viewedFiles}
       notes={notes}
       metrics={metrics}
+      labelTop={Math.max(0, (metrics.headerHeight - 22) / 2)}
       split={split}
       expandUnchanged={expandUnchanged}
       pulseRef={pulseRef}

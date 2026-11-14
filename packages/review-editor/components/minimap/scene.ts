@@ -1,7 +1,7 @@
 import type { DiffLayoutItem, LineSide } from './layoutSource';
 import { ROW_ADD, ROW_DEL, bodyHeight, rowAtOffset, rowForLine, rowOffset, type FileRowModel, type RowMetrics } from './rowModel';
 
-export type MinimapKind = 'add' | 'del' | 'comment' | (string & {});
+export type MinimapKind = 'add' | 'del' | 'comment' | 'thread' | 'moved' | 'renamed' | 'reformatted' | (string & {});
 
 export interface MinimapMark {
   itemId: string;
@@ -40,6 +40,14 @@ export interface Band {
   top: number;
   height: number;
   dim: boolean;
+  weight?: number;
+}
+
+export const FILE_SEGMENT_MIN_PX = 3;
+
+export function heaviness(lines: number, ceiling: number): number {
+  if (lines <= 0) return 0;
+  return Math.min(1, Math.log1p(lines) / Math.log1p(Math.max(ceiling, 1)));
 }
 
 export function placeFiles(items: readonly DiffLayoutItem[], files: ReadonlyMap<string, MinimapFile>, metrics: RowMetrics, contentHeight: number): MinimapLayout {
@@ -71,10 +79,19 @@ function rowBand(file: PlacedFile, kind: MinimapKind, start: number, end: number
   return { kind, top, height: Math.max(0, bottom - top), dim: file.viewed };
 }
 
-export function changeBands(layout: MinimapLayout, metrics: RowMetrics): Band[] {
+export function changeBands(layout: MinimapLayout, metrics: RowMetrics, stripPxPerContent = Infinity): Band[] {
   const bands: Band[] = [];
+  let ceiling = 20;
+  for (const file of layout.files) ceiling = Math.max(ceiling, file.model.additions, file.model.deletions);
   for (const file of layout.files) {
     if (file.scale === 0) continue;
+    if (file.height * stripPxPerContent < FILE_SEGMENT_MIN_PX) {
+      for (const [kind, lines] of [['add', file.model.additions], ['del', file.model.deletions]] as const) {
+        const weight = heaviness(lines, ceiling);
+        if (weight > 0) bands.push({ kind, top: file.top, height: file.height, dim: file.viewed, weight });
+      }
+      continue;
+    }
     const { flags, rows } = file.model;
     for (const [flag, kind] of [[ROW_ADD, 'add'], [ROW_DEL, 'del']] as const) {
       let start = -1;
@@ -117,22 +134,56 @@ export function coverageKey(kind: MinimapKind, dim: boolean): string {
   return dim ? `${kind}:dim` : kind;
 }
 
-export function rasterize(bands: readonly Band[], contentHeight: number, bins: number): Coverage {
+const DENSITY_KINDS = new Set(['add', 'del']);
+
+function smooth(column: Float32Array, radius: number): Float32Array {
+  if (radius <= 0) return column;
+  const out = new Float32Array(column.length);
+  const width = radius * 2 + 1;
+  let sum = 0;
+  for (let i = -radius; i < column.length + radius; i++) {
+    if (i + radius < column.length) sum += column[i + radius];
+    if (i - radius - 1 >= 0) sum -= column[i - radius - 1];
+    if (i >= 0 && i < column.length) out[i] = sum / width;
+  }
+  return out;
+}
+
+export function rasterize(bands: readonly Band[], contentHeight: number, bins: number, options: { smoothRadius?: number; minSegmentBins?: number } = {}): Coverage {
   const out: Coverage = new Map();
   if (contentHeight <= 0 || bins <= 0) return out;
   const k = bins / contentHeight;
+  const lines = new Map<string, Float32Array>();
+  const segments = new Map<string, Float32Array>();
+  const column = (map: Map<string, Float32Array>, key: string) => {
+    let found = map.get(key);
+    if (!found) {
+      found = new Float32Array(bins);
+      map.set(key, found);
+    }
+    return found;
+  };
   for (const band of bands) {
     const key = coverageKey(band.kind, band.dim);
-    let column = out.get(key);
-    if (!column) {
-      column = new Float32Array(bins);
-      out.set(key, column);
+    let a = Math.max(0, band.top * k);
+    let b = Math.min(bins, Math.max(a + 1e-6, (band.top + band.height) * k));
+    if (band.weight != null) {
+      const min = options.minSegmentBins ?? 1;
+      if (b - a < min) b = Math.min(bins, a + min);
+      if (b - a < min) a = Math.max(0, b - min);
+      const target = column(segments, key);
+      for (let bin = Math.floor(a); bin < Math.ceil(b) && bin < bins; bin++) target[bin] = Math.max(target[bin], band.weight);
+      continue;
     }
-    const a = Math.max(0, band.top * k);
-    const b = Math.min(bins, Math.max(a + 1e-6, (band.top + band.height) * k));
+    const target = column(lines, key);
     for (let bin = Math.floor(a); bin < Math.ceil(b) && bin < bins; bin++) {
-      column[bin] += Math.min(bin + 1, b) - Math.max(bin, a);
+      target[bin] += Math.min(bin + 1, b) - Math.max(bin, a);
     }
+  }
+  for (const [key, values] of lines) out.set(key, DENSITY_KINDS.has(key.replace(/:dim$/, '')) ? smooth(values, options.smoothRadius ?? 0) : values);
+  for (const [key, values] of segments) {
+    const merged = column(out, key);
+    for (let i = 0; i < bins; i++) merged[i] = Math.max(merged[i], values[i]);
   }
   return out;
 }

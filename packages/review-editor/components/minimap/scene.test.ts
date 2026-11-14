@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { buildFileRowModel, type RowMetrics } from './rowModel';
 import { changeBands, hitTest, markBands, placeFiles, rasterize, type MinimapFile } from './scene';
+import { densityAlpha } from './draw';
 
 const PATCH = [
   'diff --git a/a.ts b/a.ts',
@@ -85,5 +86,46 @@ describe('minimap marker positions', () => {
     const light = coverage.slice(55, 65).reduce((sum, v) => sum + v, 0);
     expect(heavy).toBeGreaterThan(light * 50);
     expect(light).toBeGreaterThan(0);
+  });
+
+  test('a +80/−80 file reads clearly heavier than a +2/−2 file when both are a few pixels tall on the strip', () => {
+    const changed = (n: number) =>
+      buildFileRowModel(['@@ -1,' + n + ' +1,' + n + ' @@', ...Array.from({ length: n }, () => '-old'), ...Array.from({ length: n }, () => '+new')].join('\n'), { split: true, expandUnchanged: false });
+    const light = changed(2);
+    const heavy = changed(80);
+    const layout = placeFiles(
+      [
+        { id: 'light', top: 0, height: 32 + 2 * 20 + 8, collapsed: false },
+        { id: 'heavy', top: 2_000, height: 32 + 80 * 20 + 8, collapsed: false },
+      ],
+      new Map([
+        ['light', { id: 'light', path: 'light.ts', model: light, viewed: false }],
+        ['heavy', { id: 'heavy', path: 'heavy.ts', model: heavy, viewed: false }],
+      ]),
+      METRICS,
+      100_000,
+    );
+    const column = rasterize(changeBands(layout, METRICS, 400 / 100_000), 100_000, 800, { smoothRadius: 3, minSegmentBins: 2 }).get('add')!;
+    const peak = (from: number, to: number) => Math.max(...column.slice(from, to));
+    const lightAlpha = densityAlpha(peak(0, 2));
+    const heavyAlpha = densityAlpha(peak(16, 24));
+    expect(lightAlpha).toBeGreaterThan(0);
+    expect(heavyAlpha).toBeGreaterThan(lightAlpha * 2);
+  });
+
+  test('in one big file a dense hunk outshines an isolated one-line change', () => {
+    const column = rasterize(
+      [
+        { kind: 'add', top: 10_000, height: 8_000, dim: false },
+        { kind: 'add', top: 60_000, height: 20, dim: false },
+      ],
+      100_000,
+      1_000,
+      { smoothRadius: 3 },
+    ).get('add')!;
+    const dense = densityAlpha(Math.max(...column.slice(100, 180)));
+    const single = densityAlpha(Math.max(...column.slice(595, 606)));
+    expect(single).toBeGreaterThan(0);
+    expect(dense).toBeGreaterThan(single * 3);
   });
 });
