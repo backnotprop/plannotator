@@ -1,9 +1,15 @@
 import { describe, expect, test } from 'bun:test';
-import { createKeptWholeFiles } from './wholeFileText';
+import { createKeptWholeFiles, opensWholeFileEagerly, WHOLE_FILE_EAGER_LINE_LIMIT } from './wholeFileText';
 
 const linesOf = (count: number) => Array.from({ length: count }, (_, index) => `line ${index}`).join('\n') + '\n';
 
 describe('whole file text read ahead of an expand', () => {
+  test('a file at the line limit is handed to Pierre at once, one line over waits for the reader', () => {
+    expect(opensWholeFileEagerly({ oldContent: linesOf(WHOLE_FILE_EAGER_LINE_LIMIT), newContent: linesOf(10) })).toBe(true);
+    expect(opensWholeFileEagerly({ oldContent: linesOf(10), newContent: linesOf(WHOLE_FILE_EAGER_LINE_LIMIT + 1) })).toBe(false);
+    expect(opensWholeFileEagerly({ oldContent: linesOf(5500), newContent: linesOf(5500) })).toBe(false);
+  });
+
   test('the kept text serves the first expand without a second read, once', async () => {
     const kept = createKeptWholeFiles();
     const text = { oldContent: linesOf(21000), newContent: linesOf(21002) };

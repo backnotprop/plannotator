@@ -1,6 +1,19 @@
+export const WHOLE_FILE_EAGER_LINE_LIMIT = 1200;
+
 export interface WholeFileText {
   oldContent: string | null;
   newContent: string | null;
+}
+
+function lineCount(text: string | null): number {
+  if (!text) return 0;
+  let lines = 1;
+  for (let at = text.indexOf('\n'); at !== -1; at = text.indexOf('\n', at + 1)) lines += 1;
+  return text.endsWith('\n') ? lines - 1 : lines;
+}
+
+export function opensWholeFileEagerly(text: WholeFileText, limit = WHOLE_FILE_EAGER_LINE_LIMIT): boolean {
+  return Math.max(lineCount(text.oldContent), lineCount(text.newContent)) <= limit;
 }
 
 export interface KeptWholeFiles {
