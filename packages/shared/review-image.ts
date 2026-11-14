@@ -397,7 +397,10 @@ function formatMegabytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+const SVG_PATH = /\.svg$/i;
+
 function isEligibleEntry(entry: PatchFileEntry): boolean {
+  if (SVG_PATH.test(entry.newPath ?? "") || SVG_PATH.test(entry.oldPath ?? "")) return true;
   return !entry.hasHunks && (isReviewImagePath(entry.newPath) || isReviewImagePath(entry.oldPath));
 }
 

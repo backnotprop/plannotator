@@ -276,6 +276,7 @@ export interface AllFilesCodeViewProps {
    * guides.show) that leave it unset never fetch or draw it.
    */
   renderPackageChanges?: (args: { file: DiffFile; onHeightChange: () => void }) => React.ReactNode;
+  renderImageViewControl?: (args: { file: DiffFile; iconOnly: boolean; touch: boolean }) => React.ReactNode;
   /**
    * Rendered Markdown previews. A previewed Markdown file shows its card in
    * the header slot (measured like an image preview) and its item's diff is
@@ -806,6 +807,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   contextExpansionAvailable = true,
   fetchFileContent,
   renderImagePreview,
+  renderImageViewControl,
   renderPackageChanges,
   markdownPreview,
   compactTouchLayout,
@@ -3549,7 +3551,11 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         isViewed={viewedFiles?.has(filePath)}
         isGenerated={generatedFiles?.has(filePath) === true}
         isTest={fileKind(filePath, generatedFiles) === 'test'}
-        renderMarkdownView={previewable ? (fit) => previewControl!.renderViewControl({ file, ...fit }) : undefined}
+        renderMarkdownView={previewable
+          ? (fit) => previewControl!.renderViewControl({ file, ...fit })
+          : imagePreview && renderImageViewControl
+          ? (fit) => renderImageViewControl({ file, ...fit })
+          : undefined}
         onToggleViewed={onToggleViewed ? () => handleToggleViewedAndCollapse(filePath, item.id) : undefined}
         showViewedControl={showViewedControls}
         viewedKeyHint={!readOnly && !commentOnly}
