@@ -3,7 +3,7 @@
 // extracted (or inlined), with the question and cut-off measured in harness/compare/ (see
 // docs/decision-models-2026-11-08.md). Keys are the user's own; call these from a server or the
 // user's machine, never from a page that other people load.
-import type { Candidate } from './runtime.ts';
+import type { Candidate } from './candidate.ts';
 
 type Fetch = typeof fetch;
 
@@ -68,8 +68,8 @@ const FATAL = new Set([401, 402, 403]);
  * counts as "no"; a refused key or an empty account stops the batch and throws, so the diff
  * reports it (`diagnostics`, pass "second-opinion") instead of quietly answering "no" to all.
  */
-async function each<T>(items: T[], limit: number, f: (x: T) => Promise<boolean>): Promise<boolean[]> {
-  const out = new Array<boolean>(items.length).fill(false);
+async function each<T, R>(items: T[], limit: number, f: (x: T) => Promise<R>, fallback: (x: T) => R): Promise<R[]> {
+  const out = items.map(fallback);
   let next = 0;
   let fatal: unknown = null;
   await Promise.all(
@@ -80,7 +80,7 @@ async function each<T>(items: T[], limit: number, f: (x: T) => Promise<boolean>)
           out[i] = await f(items[i]!);
         } catch (e) {
           if (e instanceof OpinionKeyError) fatal = e;
-          else out[i] = false;
+          else out[i] = fallback(items[i]!);
         }
       }
     })
@@ -101,8 +101,8 @@ async function post(doFetch: Fetch, provider: 'jev' | 'clef', url: string, token
  * The same candidate asked twice (the diff opened again, or a file shown in two views) is
  * answered from memory: one entry per candidate's code, the oldest dropped past `size`.
  */
-function remembered(size: number, ask: (c: Candidate) => Promise<boolean>): (c: Candidate) => Promise<boolean> {
-  const memo = new Map<string, Promise<boolean>>();
+function remembered<R>(size: number, ask: (c: Candidate) => Promise<R>): (c: Candidate) => Promise<R> {
+  const memo = new Map<string, Promise<R>>();
   return (c) => {
     const key = [c.kind, c.file ?? '', c.helper, c.caller, c.code.helper, c.code.caller, c.code.callerNew].join('\0');
     const hit = memo.get(key);
@@ -115,6 +115,27 @@ function remembered(size: number, ask: (c: Candidate) => Promise<boolean>): (c: 
     return p;
   };
 }
+
+export type OpinionBand = 'very-likely' | 'likely';
+
+/** One model answer about one candidate, kept so a reader can be told what was asked and why. */
+export interface OpinionAnswer {
+  accept: boolean;
+  score: number;
+  band?: OpinionBand;
+  model: string;
+  question: string;
+  options: string[];
+  answer: string;
+}
+
+/** "Very likely" from 0.90, "Likely" from the accept threshold, nothing below it. */
+export function bandFor(score: number, threshold: number): OpinionBand | undefined {
+  if (score >= 0.9) return 'very-likely';
+  return score >= threshold ? 'likely' : undefined;
+}
+
+const unanswered = (model: string, question: string, options: string[]) => (): OpinionAnswer => ({ accept: false, score: 0, model, question, options, answer: 'unanswered' });
 
 export interface JevOptions {
   /** A TypeSafe API key. */
@@ -135,30 +156,44 @@ export interface JevOptions {
   fetch?: Fetch;
 }
 
-/** TypeSafe's Jev, asked a multiple-choice question (moved / new / rewritten / elsewhere). */
-export function jevOpinion(o: JevOptions): (candidates: Candidate[]) => Promise<boolean[]> {
+/** TypeSafe's Jev, asked a multiple-choice question (moved / new / rewritten / elsewhere), with its answer kept. */
+export function jevAnswers(o: JevOptions): (candidates: Candidate[]) => Promise<OpinionAnswer[]> {
   const doFetch = o.fetch ?? fetch;
   const t = o.threshold ?? 0.74;
-  const ask = async (c: Candidate) => {
+  const model = o.model ?? 'jev-1.14.0';
+  const ask = async (c: Candidate): Promise<OpinionAnswer> => {
     const q = CHOICE[c.kind];
+    const options = Object.keys(q.criteria);
     const out = await post(doFetch, 'jev', JEV_URL, o.apiKey, {
-      model: o.model ?? 'jev-1.14.0',
+      model,
       state: candidateState(c),
       questions: { q: { type: 'choice', instructions: q.instructions, criteria: q.criteria } },
     });
-    const p: number = out.answers.q.probabilities.moved ?? 0;
-    if (p >= t) return true;
+    const probabilities: Record<string, number> = out.answers.q.probabilities ?? {};
+    const answer = Object.entries(probabilities).sort((x, y) => y[1] - x[1])[0]?.[0] ?? 'unanswered';
+    const p = probabilities.moved ?? 0;
+    const base = { model, question: q.instructions, options, answer };
+    if (p >= t) return { ...base, accept: true, score: p, band: bandFor(p, t) };
     const tb = o.tieBreaker;
-    if (!tb || p < (tb.from ?? 0.6)) return false;
+    if (!tb || p < (tb.from ?? 0.6)) return { ...base, accept: false, score: p };
     try {
-      return (await tb.ask(c)) >= (tb.threshold ?? 0.8);
+      const second = await tb.ask(c);
+      const threshold = tb.threshold ?? 0.8;
+      const accept = second >= threshold;
+      return { ...base, model: `${model} + clef`, accept, score: accept ? second : p, band: accept ? bandFor(second, threshold) : undefined };
     } catch (e) {
       if (e instanceof OpinionKeyError) throw e;
-      return false;
+      return { ...base, accept: false, score: p };
     }
   };
   const answer = o.remember === 0 ? ask : remembered(o.remember ?? 2000, ask);
-  return (cs) => each(cs, o.concurrency ?? 8, answer);
+  return (cs) => each(cs, o.concurrency ?? 8, answer, (c) => unanswered(model, CHOICE[c.kind].instructions, Object.keys(CHOICE[c.kind].criteria))());
+}
+
+/** TypeSafe's Jev as a yes/no second opinion (see `jevAnswers` for the answers themselves). */
+export function jevOpinion(o: JevOptions): (candidates: Candidate[]) => Promise<boolean[]> {
+  const answers = jevAnswers(o);
+  return async (cs) => (await answers(cs)).map((a) => a.accept);
 }
 
 const JEV_URL = 'https://api.typesafe.ai/v1/systemone';
@@ -189,13 +224,24 @@ export function clefScore(o: Omit<ClefOptions, 'threshold' | 'concurrency' | 're
   };
 }
 
+/** Cloudflare's Clef on Workers AI, asked a yes/no question, with its answer kept. */
+export function clefAnswers(o: ClefOptions): (candidates: Candidate[]) => Promise<OpinionAnswer[]> {
+  const t = o.threshold ?? 0.9;
+  const model = o.model ?? 'clef';
+  const score = clefScore(o);
+  const ask = async (c: Candidate): Promise<OpinionAnswer> => {
+    const p = await score(c);
+    const accept = p >= t;
+    return { accept, score: p, band: accept ? bandFor(p, t) : undefined, model, question: YES_NO[c.kind], options: ['yes', 'no'], answer: p >= 0.5 ? 'yes' : 'no' };
+  };
+  const answer = o.remember === 0 ? ask : remembered(o.remember ?? 2000, ask);
+  return (cs) => each(cs, o.concurrency ?? 8, answer, (c) => unanswered(model, YES_NO[c.kind], ['yes', 'no'])());
+}
+
 /** Cloudflare's Clef on Workers AI, asked a yes/no question. */
 export function clefOpinion(o: ClefOptions): (candidates: Candidate[]) => Promise<boolean[]> {
-  const t = o.threshold ?? 0.9;
-  const score = clefScore(o);
-  const ask = async (c: Candidate) => (await score(c)) >= t;
-  const answer = o.remember === 0 ? ask : remembered(o.remember ?? 2000, ask);
-  return (cs) => each(cs, o.concurrency ?? 8, answer);
+  const answers = clefAnswers(o);
+  return async (cs) => (await answers(cs)).map((a) => a.accept);
 }
 
 const clefUrl = (accountId: string) => `https://api.cloudflare.com/client/v4/accounts/${accountId}/ai/run/@cf/cloudflare/clef`;

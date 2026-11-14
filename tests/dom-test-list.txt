@@ -738,9 +738,11 @@ packages/inbox/threadTags.test.tsx
 packages/review-editor/components/PRDescriptionVideo.test.tsx
 packages/ui/components/CommentPopover.hostDraft.test.tsx
 packages/ui/components/CodeSnippetPreview.lineClick.test.tsx
+packages/ui/components/settings/SemanticDiffsTab.test.tsx
 packages/review-editor/components/FileTree.redraws.test.tsx
 packages/ui/components/Viewer.blockRedraws.test.tsx
 packages/editor/hooks/useCheckboxOverrides.viewer.test.tsx
 packages/ui/components/TaterSpriteSlots.test.tsx
 packages/inbox/sidebarRedraws.test.tsx
 packages/inbox/agents/faceSources.test.tsx
+packages/ui/components/agentFace/PowerUpGuy.test.tsx

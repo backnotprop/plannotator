@@ -634,6 +634,36 @@ export const SETTINGS = {
     toServer: (v: boolean) => ({ diffOptions: { semantic: v } }),
   },
 
+  diffPowerUp: {
+    defaultValue: true as boolean,
+    fromCookie: () => {
+      const v = storage.getItem('plannotator-diff-power-up');
+      return v === 'true' ? true : v === 'false' ? false : undefined;
+    },
+    toCookie: (v: boolean) => storage.setItem('plannotator-diff-power-up', String(v)),
+    serverKey: 'diffOptions',
+    fromServer: (sc: Record<string, unknown>) => {
+      const v = (sc.diffOptions as Record<string, unknown> | undefined)?.powerUp;
+      return typeof v === 'boolean' ? v : undefined;
+    },
+    toServer: (v: boolean) => ({ diffOptions: { powerUp: v } }),
+  },
+
+  diffPowerUpMotion: {
+    defaultValue: 'still' as 'stream' | 'still',
+    fromCookie: () => {
+      const v = storage.getItem('plannotator-diff-power-up-motion');
+      return v === 'stream' || v === 'still' ? v : undefined;
+    },
+    toCookie: (v: 'stream' | 'still') => storage.setItem('plannotator-diff-power-up-motion', v),
+    serverKey: 'diffOptions',
+    fromServer: (sc: Record<string, unknown>) => {
+      const v = (sc.diffOptions as Record<string, unknown> | undefined)?.powerUpMotion;
+      return v === 'stream' || v === 'still' ? v : undefined;
+    },
+    toServer: (v: 'stream' | 'still') => ({ diffOptions: { powerUpMotion: v } }),
+  },
+
   diffHideWhitespace: {
     defaultValue: false as boolean,
     fromCookie: () => {

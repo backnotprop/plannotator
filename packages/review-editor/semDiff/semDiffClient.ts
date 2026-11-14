@@ -1,10 +1,11 @@
-import type { SemanticDiffFold, SemanticDiffOperation } from '@plannotator/sem-diff';
+import type { SecondOpinionReport, SemanticDiffFold, SemanticDiffOperation } from '@plannotator/sem-diff';
 import { languageForPath } from '@plannotator/sem-diff/languages';
 import { reviewSummary, SKIM_KINDS, type ReviewSummary } from '@plannotator/sem-diff/summary';
 import type { SemDiffAdvert } from '@plannotator/shared/sem-diff-assets';
 import { SEM_DIFF_GRAMMARS, type SemDiffReply, type SemDiffRequest } from './protocol';
 
 export const SEM_DIFF_TIMEOUT_MS = 3_000;
+export const SEM_DIFF_OPINION_TIMEOUT_MS = 30_000;
 const MAX_CACHED = 500;
 
 function hashText(text: string): string {
@@ -18,6 +19,11 @@ export interface SemDiffResult {
   semanticFolds: SemanticDiffFold[];
   patch: string;
   summary: ReviewSummary;
+  secondOpinion?: SecondOpinionReport;
+}
+
+export interface SemDiffOpinionRequest {
+  rejected: readonly string[];
 }
 
 export interface SemDiffAttempt {
@@ -27,8 +33,8 @@ export interface SemDiffAttempt {
 
 export interface SemDiffClient {
   supports(path: string): boolean;
-  diff(path: string, oldText: string, newText: string, signal?: AbortSignal): Promise<SemDiffResult | null>;
-  attempt(path: string, oldText: string, newText: string, signal?: AbortSignal): Promise<SemDiffAttempt>;
+  diff(path: string, oldText: string, newText: string, signal?: AbortSignal, opinion?: SemDiffOpinionRequest): Promise<SemDiffResult | null>;
+  attempt(path: string, oldText: string, newText: string, signal?: AbortSignal, opinion?: SemDiffOpinionRequest): Promise<SemDiffAttempt>;
   dispose(): void;
 }
 
@@ -52,6 +58,7 @@ export function createSemDiffClient(options: SemDiffClientOptions): SemDiffClien
   interface Pending {
     request: SemDiffRequest;
     settle: (reply: SemDiffReply | null) => void;
+    limitMs: number;
   }
   const pending = new Map<number, Pending>();
   let watchdog: ReturnType<typeof setTimeout> | null = null;
@@ -62,7 +69,7 @@ export function createSemDiffClient(options: SemDiffClientOptions): SemDiffClien
     const head = pending.keys().next();
     if (head.done) return;
     const id = head.value;
-    watchdog = setTimeout(() => headTimedOut(id), timeoutMs);
+    watchdog = setTimeout(() => headTimedOut(id), pending.get(id)!.limitMs);
   };
   const settle = (id: number, reply: SemDiffReply | null) => {
     const entry = pending.get(id);
@@ -125,37 +132,39 @@ export function createSemDiffClient(options: SemDiffClientOptions): SemDiffClien
 
   const results = new Map<string, Promise<SemDiffAttempt>>();
 
-  const compute = (path: string, oldText: string, newText: string): Promise<SemDiffAttempt> => {
+  const compute = (path: string, oldText: string, newText: string, opinion?: SemDiffOpinionRequest): Promise<SemDiffAttempt> => {
     const id = nextId++;
-    const request: SemDiffRequest = { id, advert: advert!, origin, path, oldText, newText };
+    const request: SemDiffRequest = { id, advert: advert!, origin, path, oldText, newText, ...(opinion ? { opinion: { rejected: [...opinion.rejected] } } : {}) };
     return new Promise<SemDiffReply | null>((resolve) => {
-      pending.set(id, { request, settle: resolve });
+      pending.set(id, { request, settle: resolve, limitMs: opinion ? Math.max(timeoutMs, SEM_DIFF_OPINION_TIMEOUT_MS) : timeoutMs });
       post(id);
       if (pending.size === 1) watchHead();
     }).then((reply) => {
       if (!reply || !reply.ok) return { result: null, failed: true };
-      if (!hasSomethingToSay(reply.semanticOperations)) return { result: null, failed: false };
+      if (!opinion && !hasSomethingToSay(reply.semanticOperations)) return { result: null, failed: false };
       return {
         result: {
           semanticOperations: reply.semanticOperations,
           semanticFolds: reply.semanticFolds,
           patch: reply.patch,
           summary: reviewSummary(reply.semanticOperations),
+          ...(reply.secondOpinion ? { secondOpinion: reply.secondOpinion } : {}),
         },
         failed: false,
       };
     });
   };
 
-  const attempt = async (path: string, oldText: string, newText: string, signal?: AbortSignal): Promise<SemDiffAttempt> => {
+  const attempt = async (path: string, oldText: string, newText: string, signal?: AbortSignal, opinion?: SemDiffOpinionRequest): Promise<SemDiffAttempt> => {
     if (!advert || !supports(path) || signal?.aborted || oldText === newText) return { result: null, failed: false };
-    const key = `${path}\0${hashText(oldText)}\0${hashText(newText)}`;
+    const key = `${path}\0${hashText(oldText)}\0${hashText(newText)}${opinion ? `\0opinion\0${[...opinion.rejected].sort().join(',')}` : ''}`;
     let found = results.get(key);
     if (!found) {
-      found = compute(path, oldText, newText);
+      found = compute(path, oldText, newText, opinion);
       results.set(key, found);
       void found.then((outcome) => {
-        if (outcome.failed && results.get(key) === found) results.delete(key);
+        const keep = !outcome.failed && (!opinion || outcome.result?.secondOpinion?.state === 'ok');
+        if (!keep && results.get(key) === found) results.delete(key);
       });
       if (results.size > MAX_CACHED) results.delete(results.keys().next().value!);
     }
@@ -173,8 +182,8 @@ export function createSemDiffClient(options: SemDiffClientOptions): SemDiffClien
   return {
     supports,
     attempt,
-    async diff(path, oldText, newText, signal) {
-      return (await attempt(path, oldText, newText, signal)).result;
+    async diff(path, oldText, newText, signal, opinion) {
+      return (await attempt(path, oldText, newText, signal, opinion)).result;
     },
     dispose() {
       results.clear();

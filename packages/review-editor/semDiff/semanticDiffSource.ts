@@ -1,5 +1,5 @@
 import type { SemanticDiffChange, SemanticDiffResponse, SemanticDiffUnreadFile } from '@plannotator/shared/semantic-diff-types';
-import type { SemDiffClient } from './semDiffClient';
+import type { SemDiffClient, SemDiffOpinionRequest } from './semDiffClient';
 import { semDiffChanges } from './semDiffChanges';
 
 export interface SemanticDiffSourceFile {
@@ -41,6 +41,7 @@ export async function computeReviewSemanticDiff(
   read: ReadFileContents,
   signal: AbortSignal,
   generated: ReadonlySet<string> = new Set(),
+  opinion?: SemDiffOpinionRequest,
 ): Promise<SemanticDiffResponse> {
   const supported = files.filter((file) => client.supports(file.path)).slice(0, MAX_FILES);
   const unread: SemanticDiffUnreadFile[] = supported.filter((file) => generated.has(file.path)).map((file) => ({ path: file.path, reason: 'generated' }));
@@ -62,10 +63,13 @@ export async function computeReviewSemanticDiff(
         unread.push({ path: file.path, reason: 'too-large' });
         continue;
       }
-      const outcome = await client.attempt(file.path, contents.oldContent, contents.newContent, signal);
-      if (outcome.failed) unread.push({ path: file.path, reason: 'timed-out' });
-      if (!outcome.result) continue;
-      perFile[index] = semDiffChanges(file.path, outcome.result.semanticOperations, contents.oldContent, contents.newContent, file.oldPath ?? null);
+      const plain = await client.attempt(file.path, contents.oldContent, contents.newContent, signal);
+      if (plain.failed) unread.push({ path: file.path, reason: 'timed-out' });
+      const powered = opinion && !plain.failed ? await client.attempt(file.path, contents.oldContent, contents.newContent, signal, opinion) : null;
+      const links = powered?.result?.secondOpinion?.state === 'ok' ? powered.result.secondOpinion.links : [];
+      const result = links.length > 0 ? powered!.result : plain.result;
+      if (!result) continue;
+      perFile[index] = semDiffChanges(file.path, result.semanticOperations, contents.oldContent, contents.newContent, file.oldPath ?? null, links);
     }
   };
   await Promise.all(Array.from({ length: CONCURRENCY }, work));

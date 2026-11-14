@@ -26,6 +26,10 @@ export interface SemanticDiffChange {
   oldStartLine: number | null;
   oldEndLine: number | null;
   structuralChange: boolean | null;
+  origin?: 'second-opinion';
+  band?: 'very-likely' | 'likely';
+  model?: string;
+  candidateId?: string;
 }
 
 export interface SemanticDiffBinaryChange {

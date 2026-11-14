@@ -17,7 +17,7 @@
       "devDependencies": {
         "@agentclientprotocol/sdk": "1.9.0",
         "@modelcontextprotocol/client": "2.3.1",
-        "@pierre/diffs-sem": "file:vendor/pierre-diffs/pierre-diffs-1.7.0-beta.3-sem.2.tgz",
+        "@pierre/diffs-sem": "file:vendor/pierre-diffs/pierre-diffs-1.7.0-beta.3-sem.3.tgz",
         "@playwright/test": "1.64.1",
         "@types/node": "^26.6.5",
         "@types/turndown": "^5.0.6",
@@ -437,6 +437,7 @@
       "dependencies": {
         "@joplin/turndown-plugin-gfm": "^1.0.68",
         "@plannotator/core": "workspace:*",
+        "@plannotator/sem-diff": "workspace:*",
         "chokidar": "^5.0.0",
         "parse5": "^7.3.0",
         "turndown": "^7.2.4",
@@ -1161,7 +1162,7 @@
 
     "@pierre/diffs": ["@pierre/diffs@1.7.0-beta.3", "", { "dependencies": { "@pierre/highlights": "0.5.0", "@pierre/patches": "0.0.1", "@pierre/theme": "2.0.0", "@pierre/theming": "1.0.2", "diff": "9.0.0", "hast-util-to-html": "9.0.5", "lru_map": "0.4.1", "shiki": "^3.0.0 || ^4.0.0" }, "peerDependencies": { "react": "^18.3.1 || ^19.0.0", "react-dom": "^18.3.1 || ^19.0.0" }, "optionalPeers": ["react", "react-dom"] }, "sha512-eAoAoL9aoO7vR9VV5NCLIuIAEr4yu5LsBnhTbyoy8wDFjT0y7bDrlhX8doO7FUb/MCd0Ldcd15Ga/yTOq2mjBA=="],
 
-    "@pierre/diffs-sem": ["@pierre/diffs@vendor/pierre-diffs/pierre-diffs-1.7.0-beta.3-sem.2.tgz", { "dependencies": { "@pierre/highlights": "0.5.1", "@pierre/patches": "0.0.1", "@pierre/theme": "2.0.0", "@pierre/theming": "1.0.2", "diff": "9.0.0", "hast-util-to-html": "9.0.5", "lru_map": "0.4.1", "shiki": "^3.0.0 || ^4.0.0" }, "peerDependencies": { "react": "^18.3.1 || ^19.0.0", "react-dom": "^18.3.1 || ^19.0.0" }, "optionalPeers": ["react", "react-dom"] }, "sha512-vwEhbwv7tBJpPeDsAJF/Pp9pex2RTz8uz4Gh9xrln91XMW2MMePrm0SMwQRNaM4A468L7lUrNr5/8ibiODTKzw=="],
+    "@pierre/diffs-sem": ["@pierre/diffs@vendor/pierre-diffs/pierre-diffs-1.7.0-beta.3-sem.3.tgz", { "dependencies": { "@pierre/highlights": "0.5.1", "@pierre/patches": "0.0.1", "@pierre/theme": "2.0.0", "@pierre/theming": "1.0.2", "diff": "9.0.0", "hast-util-to-html": "9.0.5", "lru_map": "0.4.1", "shiki": "^3.0.0 || ^4.0.0" }, "peerDependencies": { "react": "^18.3.1 || ^19.0.0", "react-dom": "^18.3.1 || ^19.0.0" }, "optionalPeers": ["react", "react-dom"] }, "sha512-wN6EPLCQRT22UFGtiLsrH+BJsRhgPtwgq06FUCsZzelOC29+UNa6uYBFaXu9HInmIbEQ9qMJ8aMI4m/MCgkxjQ=="],
 
     "@pierre/highlights": ["@pierre/highlights@0.5.1", "", {}, "sha512-c2WF6sgwgKdxXU6FpWDLWUYHRca/cJy+3QJkWAqYqEAFxqlPf8eSH0ehHcFFjKBmT+9KBl9H7q6z7HMRU7+m6g=="],
 
