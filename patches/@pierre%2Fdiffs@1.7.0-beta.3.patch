@@ -1,8 +1,8 @@
 diff --git a/dist/components/FileDiff.js b/dist/components/FileDiff.js
-index 6910f5c..573edbc 100644
+index 734ff98..307b46f 100644
 --- a/dist/components/FileDiff.js
 +++ b/dist/components/FileDiff.js
-@@ -542,7 +542,9 @@ var FileDiff = class {
+@@ -544,7 +544,9 @@ var FileDiff = class {
  		const fileDiff = this.getInputDiff();
  		const { loadDiffFiles } = this.options;
  		if (fileDiff == null || !canHydrateDiff(fileDiff) || this.pendingFiles?.fileDiff === fileDiff) return;
