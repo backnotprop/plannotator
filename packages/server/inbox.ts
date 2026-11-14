@@ -4908,6 +4908,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // Images the messages show with no captured file yet: copied in the background; the read never waits (approval "inbox-image-viewer").
     if (store.thread(threadId)) imageCapture.schedule(threadId);
     const thread = perfPhase("thread", () => store.windowThread(threadId));
+    const cursor = store.cursor();
     if (!thread) return null;
     // `pull_theirs`: the person handed this thread only teammates' PRs, so its reviews take no verdict.
     // `pull_keys` (Code review on): the PRs it owns, which its review may be posted to (Post to GitHub/GitLab).
@@ -4924,7 +4925,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const run = await launch.runOf(thread.thread_id, isOwner(req, via));
     const row = store.listRow(thread.thread_id);
     // `row` (additive): the thread's list row, also for an archived thread, which the window's list leaves out.
-    return { serverSession, cursor: store.cursor(), thread: withRepo, row: row ? withSnooze(launch.rowDecorator()(row)) : row, ...(run === undefined ? {} : { run, attach_command: launch.attachOf(thread.thread_id) }) };
+    return { serverSession, cursor, thread: withRepo, row: row ? withSnooze(launch.rowDecorator()(row)) : row, ...(run === undefined ? {} : { run, attach_command: launch.attachOf(thread.thread_id) }) };
   };
 
   const handle = async (req: Request, via: RequestVia): Promise<Response> => {
