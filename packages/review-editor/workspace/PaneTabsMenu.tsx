@@ -2,28 +2,40 @@ import React from 'react';
 import { Menu } from '@base-ui/react/menu';
 import { ChevronDown, X } from 'lucide-react';
 import type { Pane } from './paneLayout';
-import { useSettledValue } from './useSettledValue';
-import { TITLE_SETTLE_MS } from './PaneTabs';
+import { TITLE_SETTLE_MS, useSettledValue } from './useSettledValue';
+import { tabLabel } from './tabLabel';
 
 export const PaneTabsMenu: React.FC<{
   pane: Pane;
   onActivate: (id: string) => void;
   onClose: (id: string) => void;
-}> = ({ pane, onActivate, onClose }) => {
+  overflow?: boolean;
+}> = ({ pane, onActivate, onClose, overflow = false }) => {
   const active = pane.tabs.find((tab) => tab.id === pane.activeId) ?? pane.tabs[0];
-  const title = useSettledValue(active?.title ?? '', TITLE_SETTLE_MS);
+  const title = useSettledValue(active ? tabLabel(active) : '', TITLE_SETTLE_MS);
   return (
     <Menu.Root>
-      <Menu.Trigger
-        data-pn-touch-target
-        data-pane-tabs-menu=""
-        aria-label={`Open files: ${title}`}
-        className="min-w-0 max-w-full h-11 flex items-center justify-center gap-1 px-2 rounded-md text-[13px] font-medium text-foreground"
-      >
-        <span className="truncate">{title}</span>
-        <span className="flex-none text-[12px] tabular-nums text-muted-foreground">{pane.tabs.length}</span>
-        <ChevronDown className="w-3.5 h-3.5 flex-none text-muted-foreground" aria-hidden="true" />
-      </Menu.Trigger>
+      {overflow ? (
+        <Menu.Trigger
+          data-pane-tabs-overflow=""
+          aria-label={`All ${pane.tabs.length} open files`}
+          className="flex-none self-center h-6 flex items-center gap-0.5 px-1.5 rounded-md text-[12px] tabular-nums text-muted-foreground hover:text-foreground hover:bg-muted"
+        >
+          {pane.tabs.length}
+          <ChevronDown className="w-3.5 h-3.5" aria-hidden="true" />
+        </Menu.Trigger>
+      ) : (
+        <Menu.Trigger
+          data-pn-touch-target
+          data-pane-tabs-menu=""
+          aria-label={`Open files: ${title}`}
+          className="min-w-0 max-w-full h-11 flex items-center justify-center gap-1 px-2 rounded-md text-[13px] font-medium text-foreground"
+        >
+          <span className="truncate">{title}</span>
+          <span className="flex-none text-[12px] tabular-nums text-muted-foreground">{pane.tabs.length}</span>
+          <ChevronDown className="w-3.5 h-3.5 flex-none text-muted-foreground" aria-hidden="true" />
+        </Menu.Trigger>
+      )}
       <Menu.Portal>
         <Menu.Positioner sideOffset={4} className="z-[110] outline-none">
           <Menu.Popup className="w-[min(20rem,calc(100vw-1rem))] rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-lg outline-none">
@@ -34,7 +46,7 @@ export const PaneTabsMenu: React.FC<{
                   data-pane-tabs-menu-item={tab.id}
                   className={`flex-1 min-w-0 h-11 flex items-center px-2 rounded-md text-[13px] outline-none data-[highlighted]:bg-muted ${tab.id === pane.activeId ? 'font-medium text-foreground' : 'text-muted-foreground'}`}
                 >
-                  <span className="truncate">{tab.title}</span>
+                  <span className="truncate">{tabLabel(tab)}</span>
                 </Menu.Item>
                 {pane.tabs.length > 1 && (
                   <button

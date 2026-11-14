@@ -91,6 +91,10 @@ export class WorkspaceStore {
     this.paneElements[index] = element;
   }
 
+  paneElement(index: number): HTMLElement | null {
+    return this.paneElements[index] ?? null;
+  }
+
   restore(saved: { panes: { tabs: PaneTab[]; activeId: string | null }[]; activePane: number }) {
     const present = new Set(this.layout.panes.flatMap((pane) => pane.tabs.map((tab) => tab.id)));
     const panes = saved.panes.slice(0, this.singlePane ? 1 : 2).map((savedPane, index) => {
