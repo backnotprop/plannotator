@@ -1178,8 +1178,9 @@ export function MessageBody({
   );
 
   // Here and not through the Viewer's onSelectAnnotation, so a tap opens a highlight the same way on every screen. (On a
-  // touch screen the highlighter does listen here: no onHostDraft, so it paints a finger's selection itself once the
-  // selection is finished, and keeps it selected; ui's useAnnotationHighlighter.)
+  // touch screen the highlighter does not paint a finger's selection: no onHostDraft, so the selection stays the
+  // system's and the Viewer's selection toolbar waits under it, painting it only when a button is tapped; ui's
+  // useAnnotationHighlighter and TouchSelectionToolbar.)
   const openHighlight = (event: ReactMouseEvent<HTMLDivElement>) => {
     const target = event.target as Element;
     const mark = target.closest?.<HTMLElement>('[data-bind-id], [data-highlight-id]');

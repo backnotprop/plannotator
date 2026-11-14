@@ -22,10 +22,6 @@
  * the screen) it rests at the bottom edge. While the selection is scrolled
  * out of sight it is hidden, not stuck to an edge.
  *
- * A selection whose END the finger was moving (`prefer: 'above'`) puts the
- * toolbar above first, over the menu's band, when both fit there: below, it
- * would cover the end handle's way on and the lines the finger drags it to.
- *
  * Default: off, so a host that does not opt in (Workspaces) keeps the
  * toolbar's desktop placement everywhere, exactly as before. Plannotator's
  * plan review, annotate, code review and Inbox pass true. With it on, nothing
@@ -112,21 +108,26 @@ export function unionToolbarRect(rects: readonly ToolbarRect[]): ToolbarRect | n
 /**
  * Pure: the toolbar's top-left corner for one reading of the anchor (the
  * WHOLE selection), the toolbar's own size and the visible screen.
- * `center-above` (a text selection) goes centered under the anchor;
- * `top-right` (a hovered block) keeps its right-aligned place over the block.
- * Both are kept inside the screen with `margin` plus `insets` on each side; a
- * toolbar wider than that starts at the left edge. An anchor entirely out of
- * the visible screen gives `hidden`.
+ * `center-above` (a text selection) goes centered under the anchor, or over it
+ * with `prefer: 'above'`; `top-right` (a hovered block) keeps its
+ * right-aligned place over the block. Both are kept inside the screen with
+ * `margin` plus `insets` on each side; a toolbar wider than that starts at the
+ * left edge. An anchor entirely out of the visible screen gives `hidden`.
+ *
+ * `prefer: 'above'` is for a selection that is still the system's, whose edit
+ * menu shows wherever iOS puts it: the toolbar goes over the band where iOS
+ * draws its menu above a selection, which also clears the start selection
+ * handle, so iOS's menu is never on top of it, above or below. Without room
+ * for that, it goes below by the default rules.
  */
 export function placeTouchToolbar(input: {
   anchor: ToolbarRect;
   toolbar: { width: number; height: number };
   viewport: ToolbarViewport;
   mode: 'center-above' | 'top-right';
+  prefer?: 'below' | 'above';
   margin?: number;
   insets?: Partial<ViewportEdgeInsets>;
-  /** `above`: try above the selection first (a selection whose end handle the finger was moving). */
-  prefer?: 'above';
 }): TouchToolbarPosition {
   const { anchor, toolbar, viewport, mode } = input;
   const margin = input.margin ?? TOUCH_TOOLBAR_EDGE_MARGIN;
@@ -157,14 +158,18 @@ export function placeTouchToolbar(input: {
     return { ...base, top: clamp(anchor.top - toolbar.height - 4, minTop, maxTop), placement: 'above' };
   }
 
+  const above = (gap: number): TouchToolbarPosition | null => {
+    const top = anchor.top - gap - toolbar.height;
+    return top >= minTop ? { ...base, top: Math.min(top, maxTop), placement: 'above' } : null;
+  };
+
+  if (input.prefer === 'above') {
+    const placed = above(TOUCH_TOOLBAR_GAP_ABOVE + IOS_MENU_CLEARANCE);
+    if (placed) return placed;
+  }
+
   // iOS's menu goes below a selection that starts near the top: sit under it.
   const nearTop = anchor.top - bounds.top < IOS_MENU_ROOM_ABOVE;
-  // Away from the end handle: above the band where iOS draws its menu, when
-  // the menu and the toolbar both fit there.
-  if (input.prefer === 'above' && !nearTop) {
-    const above = anchor.top - TOUCH_TOOLBAR_GAP_ABOVE - IOS_MENU_CLEARANCE - toolbar.height;
-    if (above >= minTop && above <= maxTop) return { ...base, top: above, placement: 'above' };
-  }
   const gaps = nearTop ? [TOUCH_TOOLBAR_GAP_BELOW + IOS_MENU_CLEARANCE, TOUCH_TOOLBAR_GAP_BELOW] : [TOUCH_TOOLBAR_GAP_BELOW];
   for (const gap of gaps) {
     const below = anchor.bottom + gap;
@@ -174,11 +179,9 @@ export function placeTouchToolbar(input: {
   // No room below (a selection near the bottom): above, but over the band
   // where iOS draws its menu (centered above the selection), then right above
   // the selection, then pinned to the bottom edge.
-  for (const gap of [TOUCH_TOOLBAR_GAP_ABOVE + IOS_MENU_CLEARANCE, TOUCH_TOOLBAR_GAP_ABOVE]) {
-    const above = anchor.top - gap - toolbar.height;
-    if (above >= minTop) return { ...base, top: Math.min(above, maxTop), placement: 'above' };
-  }
-  return { ...base, top: maxTop, placement: 'pinned' };
+  return above(TOUCH_TOOLBAR_GAP_ABOVE + IOS_MENU_CLEARANCE)
+    ?? above(TOUCH_TOOLBAR_GAP_ABOVE)
+    ?? { ...base, top: maxTop, placement: 'pinned' };
 }
 
 /**

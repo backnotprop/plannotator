@@ -79,7 +79,9 @@ export const FloatingSelectionActionsPicker: React.FC<{
   actions: SelectionAction[];
   onSelect: (action: SelectionAction) => void;
   onDismiss: () => void;
-}> = ({ anchorEl, actions, onSelect, onDismiss }) => {
+  /** As `FloatingQuickLabelPicker`'s: the toolbar is for an unpainted (touch) selection, and this menu is part of it. */
+  unpainted?: boolean;
+}> = ({ anchorEl, actions, onSelect, onDismiss, unpainted = false }) => {
   const [position, setPosition] = useState<{ top: number; left: number; flipAbove: boolean } | null>(null);
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
   const ref = useRef<HTMLDivElement>(null);
@@ -150,6 +152,7 @@ export const FloatingSelectionActionsPicker: React.FC<{
       aria-label="Actions"
       data-selection-actions-picker
       data-floating-picker="true"
+      data-pn-touch-selection-offer={unpainted ? '' : undefined}
       className="fixed z-[100]"
       style={{
         top: position.top,
@@ -157,6 +160,8 @@ export const FloatingSelectionActionsPicker: React.FC<{
         width: PICKER_WIDTH,
         ...(position.flipAbove ? { transform: 'translateY(-100%)' } : {}),
       }}
+      // Captured: the rows stop the press themselves.
+      onMouseDownCapture={(e) => { if (unpainted) e.preventDefault(); }}
       onMouseDown={(e) => e.stopPropagation()}
     >
       <div className="bg-popover border border-border/60 rounded-lg shadow-xl overflow-hidden">

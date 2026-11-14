@@ -133,17 +133,21 @@ interface AnnotationToolbarProps {
    * The whole selection's rect, in viewport coordinates, when `element` is
    * only its start (the first of several marks; a 1px anchor over an HTML
    * frame). Read only by the touch placement (`touchSelectionToolbar`), which
-   * puts the toolbar below the selection's bottom; desktop placement uses
+   * places the toolbar by the selection's edges; desktop placement uses
    * `element` as before. Absent or null: `element`'s rect.
    */
   touchAnchorRect?: () => ToolbarRect | null;
   /**
-   * Touch placement only: `above` puts the toolbar over the selection first
-   * (above the band where iOS draws its edit menu) when there is room, for a
-   * selection whose end the finger was moving, so it covers neither the end
-   * handle nor the lines the finger may drag on to. Absent: below first.
+   * The selection is not painted: a touch screen's resting selection, still
+   * the system's, handles and edit menu included (`element` is any element
+   * of its start; `touchAnchorRect` its live box). The toolbar is placed by
+   * the touch rules whatever the host opted into, above the selection and
+   * clear of the system's menu (`placeTouchToolbar`'s `prefer: 'above'`), a
+   * press on it leaves the page's selection alone, and it
+   * is marked for `useAnnotationHighlighter`, which keeps it through that
+   * press. Absent: a painted selection, exactly as before.
    */
-  touchSide?: 'above';
+  unpainted?: boolean;
   /** Close toolbar when element scrolls out of viewport */
   closeOnScrollOut?: boolean;
   /** Exit animation state */
@@ -171,14 +175,14 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
   showDelete,
   hideCopyButton = false,
   touchAnchorRect,
-  touchSide,
+  unpainted = false,
   closeOnScrollOut = false,
   isExiting = false,
   onMouseEnter,
   onMouseLeave,
 }) => {
   const [position, setPosition] = useState<{ top: number; left?: number; right?: number; touch?: TouchToolbarPlacement; maxWidth?: number } | null>(null);
-  const touchToolbar = useTouchToolbar();
+  const touchToolbar = useTouchToolbar() || unpainted;
   const [copied, setCopied] = useState(false);
   const [richCopied, setRichCopied] = useState<RichCopyOutcome | false>(false);
   const richCopyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -272,15 +276,15 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
       }
 
       if (touchToolbar) {
-        // Below the selection, where iOS's own edit menu does not go, and
-        // kept inside the visible screen.
+        // Clear of iOS's own edit menu and kept inside the visible screen:
+        // below a painted selection, above one that is still the system's.
         const placed = placeTouchToolbar({
           anchor,
           toolbar: measuredSizeRef.current ?? TOUCH_TOOLBAR_SIZE_ESTIMATE,
           viewport: readVisibleViewport(),
           insets: readSafeAreaInsets(),
           mode: positionMode,
-          ...(touchSide ? { prefer: touchSide } : {}),
+          prefer: unpainted ? 'above' : 'below',
         });
         hiddenRef.current = placed.placement === 'hidden';
         setPosition({ top: placed.top, left: placed.left, touch: placed.placement, maxWidth: placed.maxWidth });
@@ -319,7 +323,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
       vv?.removeEventListener("resize", updatePosition);
       vv?.removeEventListener("scroll", updatePosition);
     };
-  }, [element, positionMode, closeOnScrollOut, onClose, touchToolbar, touchSide]);
+  }, [element, positionMode, closeOnScrollOut, onClose, touchToolbar, unpainted]);
 
   // Touch placement needs the toolbar's real size to keep it inside the
   // screen. Its width does not depend on where it sits (width: max-content in
@@ -441,9 +445,14 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
       // Touch placement (host opt-in, finger pointer): which side of the
       // selection it took. theme.css sizes the buttons for a thumb here.
       data-pn-annotation-toolbar-touch={position.touch}
+      data-pn-touch-selection-offer={unpainted ? '' : undefined}
       className="annotation-toolbar fixed z-[100] bg-popover border border-border rounded-lg shadow-2xl"
       style={style}
-      onMouseDown={(e) => e.stopPropagation()}
+      onMouseDown={(e) => {
+        e.stopPropagation();
+        // The press must not take the selection off the page: it is the words the buttons act on.
+        if (unpainted) e.preventDefault();
+      }}
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
     >
@@ -523,6 +532,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
               onClose();
             }}
             onDismiss={() => setShowSelectionActions(false)}
+            unpainted={unpainted}
           />
         )}
         {onQuickLabel && (
@@ -550,6 +560,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
                   onQuickLabel(label);
                 }}
                 onDismiss={() => setShowQuickLabels(false)}
+                unpainted={unpainted}
               />
             )}
           </>
