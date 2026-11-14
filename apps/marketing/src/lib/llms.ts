@@ -229,7 +229,7 @@ export function buildLlmsInbox(): string {
     '- If it does not, go on with your work and call `read_thread` with the `thread_id` later. `read_thread` with no id lists your threads; a thread the person wrote in for you reads `unread`.',
     '- The reply holds the person\'s words, then "Answers to your questions", then their comments on your text and their annotations on attached files.',
     '- Questions they did not answer stay open, and the reply says how many. Do not ask them again.',
-    '- Codex, Qwen Code and T3 Code get a wake once. If a reply has not arrived when you next work, list your threads with `read_thread`.',
+    '- Codex, Qwen Code and T3 Code are woken once per reply, and a lost wake is not sent again. If a reply has not arrived when you next work, list your threads with `read_thread`.',
     '',
     '### Chat or Inbox',
     '',
