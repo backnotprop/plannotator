@@ -1917,6 +1917,38 @@ describe("a star or Priority on a linked machine's thread lives on that machine 
     }
   }, 120_000);
 
+  test("a tag made in A's Board Tags dialog, with no thread in it, is listed on B by name; renamed, deleted and brought back from B, on A", async () => {
+    const dataA = scratch("plannotator-tags-board-a-");
+    const dataB = scratch("plannotator-tags-board-b-");
+    const a = await start(dataA);
+    const b = await start(dataB);
+    try {
+      const offered = (await (await fetch(`${at(b.port)}/api/inbox/machines/offer`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).json()) as Json;
+      const linked = await fetch(`${at(a.port)}/api/inbox/machines/link`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ link: offered.link, address: at(b.port), back: at(a.port) }) });
+      expect(linked.status).toBe(201);
+      const aId = (await list(a.port)).self as string;
+      const tagsOn = async (port: number) => ((await list(port)).tags as Json[]).map((tag) => [tag.name, tag.machines]);
+      const made = await post(a.port, "/api/inbox/initiatives", { name: "Roadmap" });
+      expect(made.status).toBe(200);
+      const roadmap = ((await made.json()) as Json).initiative as Json;
+      await waitFor("A's Roadmap on B", async () => JSON.stringify(await tagsOn(b.port)) === JSON.stringify([["Roadmap", { [aId]: roadmap.id }]]), 30_000);
+      expect(b.store.initiatives()).toEqual([]);
+
+      expect((await forward(b.port, aId, `initiatives/${roadmap.id}`, { op: "rename", name: "Plan" })).status).toBe(200);
+      expect(a.store.initiative(roadmap.id as string)!.name).toBe("Plan");
+      await waitFor("the rename on B", async () => JSON.stringify(await tagsOn(b.port)) === JSON.stringify([["Plan", { [aId]: roadmap.id }]]), 30_000);
+
+      expect((await forward(b.port, aId, `initiatives/${roadmap.id}`, { op: "delete" })).status).toBe(200);
+      expect(a.store.initiative(roadmap.id as string)!.deleted_at).not.toBeNull();
+      await waitFor("gone on B", async () => (await tagsOn(b.port)).length === 0, 30_000);
+      expect((await forward(b.port, aId, `initiatives/${roadmap.id}`, { op: "restore" })).status).toBe(200);
+      await waitFor("back on B", async () => JSON.stringify(await tagsOn(b.port)) === JSON.stringify([["Plan", { [aId]: roadmap.id }]]), 30_000);
+    } finally {
+      a.stop();
+      b.stop();
+    }
+  }, 120_000);
+
   test("an older machine (its list names no `tags` mark): its rows are in no tag here and its tags are not listed; one that names it joins by name", async () => {
     const thread = "msg_01K0000000000000000000000T";
     const farTag = { id: "ini_01K0000000000000000000000F", name: "release", created_at: "2026-11-12T09:00:00.000Z", created_by: { kind: "person" }, updated_at: "2026-11-12T09:00:00.000Z", deleted_at: null };

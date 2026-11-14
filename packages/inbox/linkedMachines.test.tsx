@@ -8,7 +8,8 @@
  * version, Unlink asks twice, and the link form sends a pasted link or an
  * address and six digits. With no machine linked none of it is drawn. Tags:
  * Add tag on a machine's rows only when it takes tags, sent there by name; one
- * sidebar tag per name across machines; a held tag says it waits.
+ * sidebar tag per name across machines; a held tag says it waits; the Board's
+ * Tags dialog lists and changes them on each machine as the sidebar does.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -662,5 +663,65 @@ test.skipIf(!hasDom)('a tag for an asleep machine’s thread waits there and say
   } finally {
     globalThis.fetch = before;
     resetMachineRoutes();
+  }
+});
+
+/** The Board's Tags dialog on the sidebar's path (tagsAcross.ts), over a fetch that answers each tag write. */
+async function boardTagsDialog(tags: ListTag[], machines: MachineView[]) {
+  const { InitiativesDialog } = await import('./board/InitiativesDialog');
+  const { tagsAcross } = await import('./tagsAcross');
+  const writes: string[] = [];
+  const before = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
+    writes.push(`${url} ${String(body.op ?? body.name)}`);
+    const id = url.split('/').at(-1)!;
+    return Response.json({ initiative: id === 'initiatives' ? tagRecord('ini_s_new', String(body.name)) : { ...tagRecord(id, 'x'), deleted_at: body.op === 'delete' ? SINCE : null } });
+  }) as typeof fetch;
+  mount(<InitiativesDialog initiatives={tags} across={tagsAcross(tags, machinesModel(machines))} start="edit" phone={false} onClose={noop} onChanged={noop} />);
+  await settle();
+  return {
+    writes,
+    restore: () => void (globalThis.fetch = before),
+    dialog: () => document.querySelector<HTMLElement>('[data-dialog="initiatives"]')!,
+  };
+}
+
+test.skipIf(!hasDom)("the Board's Tags dialog: a tag only the other machine holds is listed; delete and its Undo reach each machine that takes tags; an older one is never written; a new tag is this Inbox's", async () => {
+  const machines = [machine(SELF, 'Studio', 'online'), machine(MAC, 'MacBook', 'online', { marks: ['tags'] }), machine(OLD, 'Mini', 'online', { marks: ['star', 'priority'] })];
+  // Mini's id under Release stands for a machine that stopped taking tags since the list was read.
+  const release: ListTag = { ...tagRecord('ini_s_rel', 'Release'), machines: { [SELF]: 'ini_s_rel', [MAC]: 'ini_m_rel', [OLD]: 'ini_o_rel' } };
+  const billing: ListTag = { ...tagRecord('ini_m_bill', 'Billing'), machines: { [MAC]: 'ini_m_bill' } };
+  const drawn = await boardTagsDialog([release, billing], machines);
+  try {
+    const dialog = drawn.dialog();
+    expect([...dialog.querySelectorAll('[data-initiative-row]')].map((r) => r.getAttribute('data-initiative-row'))).toEqual(['ini_s_rel', 'ini_m_bill']);
+
+    await act(async () => dialog.querySelector<HTMLElement>('[data-initiative-row="ini_s_rel"] [data-initiative-delete]')!.click());
+    await settle();
+    expect(drawn.writes).toEqual(['/api/inbox/initiatives/ini_s_rel delete', `/api/inbox/m/${MAC}/initiatives/ini_m_rel delete`]);
+    drawn.writes.length = 0;
+    await act(async () => dialog.querySelector<HTMLElement>('.ib-toast [data-toast-undo]')!.click());
+    await settle();
+    expect(drawn.writes).toEqual(['/api/inbox/initiatives/ini_s_rel restore', `/api/inbox/m/${MAC}/initiatives/ini_m_rel restore`]);
+
+    drawn.writes.length = 0;
+    await act(async () => dialog.querySelector<HTMLElement>('[data-initiative-row="ini_m_bill"] [data-initiative-delete]')!.click());
+    await settle();
+    expect(drawn.writes).toEqual([`/api/inbox/m/${MAC}/initiatives/ini_m_bill delete`]);
+
+    // A new tag is made here; the other machine lists it by name from this Inbox's list.
+    drawn.writes.length = 0;
+    const field = dialog.querySelector<HTMLInputElement>('[data-initiative-new-name]')!;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(field, 'Docs');
+      field.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => dialog.querySelector<HTMLElement>('[data-initiative-add]')!.click());
+    await settle();
+    expect(drawn.writes).toEqual(['/api/inbox/initiatives Docs']);
+  } finally {
+    drawn.restore();
   }
 });

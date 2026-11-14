@@ -246,8 +246,8 @@ import { ThemeChooser } from './components/ThemeChooser';
 import { openThemeSettings, useThemeChooser } from './themeChooser';
 import { CardChip } from './board/CardChip';
 import { boardFilterHash, boardInitiativeOf, boardViewOf, cardsInInitiative, initiativeDeletedToast, liveInitiatives, newCardProject, type BoardView } from './board/model';
-import { restoreInitiatives } from './board/initiativeUndo';
-import { canTagThread, filterTagRows, rowTagsHere, tagById, tagHref, tagIdOn, tagListSummary, tagNamed, tagsSectionShown, tagThreadCounts, tagWaitingCounts, tagWrite, thisInboxTags, ThreadTagsContext, type ListTag, type ThreadTagsHost } from './threadTags';
+import { tagsAcross } from './tagsAcross';
+import { canTagThread, filterTagRows, rowTagsHere, tagById, tagHref, tagListSummary, tagsSectionShown, tagThreadCounts, tagWaitingCounts, tagWrite, thisInboxTags, ThreadTagsContext, type ListTag, type ThreadTagsHost } from './threadTags';
 import { TagIcon } from './components/InitiativePeek';
 import { useComposeSessions } from './compose/useComposeSessions';
 import { useComposerOpener } from './compose/openComposer';
@@ -2160,6 +2160,8 @@ function Inbox() {
   const keepsTags = latest?.tags !== undefined;
   // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the ids and names, on purpose
   const listTags = useMemo(() => latest?.tags ?? null, [listTagsKey, keepsTags]);
+  /** The tags' rename, delete and Undo on every linked machine that holds one of the name: the sidebar's and the Board's. */
+  const across = useMemo(() => (listTags ? tagsAcross(listTags, machines) : null), [listTags, machines]);
   const initiativeTags = useMemo<InitiativeTags>(() => {
     if (boardEnabled === false && listTags) {
       // The Board off: `#` lists the tags, each counted by its threads, and a sent tag opens its list.
@@ -2179,7 +2181,9 @@ function Inbox() {
     const mentions = new Map(Object.entries(cards?.initiative_threads ?? {}));
     return { initiatives: tagInitiatives, counts, cards: live, rows, projects, mentions, refresh: refreshForPeek };
   }, [cards, latest, tagInitiatives, refreshForPeek, boardEnabled, listTags, machines.self]);
-  const boardInitiative = route.page === 'board' ? boardInitiativeOf(route.initiative, cards ? liveInitiatives(cards.initiatives) : null) : null;
+  // A tag only a linked machine held takes this Inbox's id once a card here is put in it: its link still filters.
+  const boardInitiativeAsked = route.page === 'board' && route.initiative && listTags ? (tagById(listTags, route.initiative)?.id ?? route.initiative) : route.page === 'board' ? route.initiative : null;
+  const boardInitiative = route.page === 'board' ? boardInitiativeOf(boardInitiativeAsked, cards ? [...(listTags ?? []), ...liveInitiatives(cards.initiatives)] : null) : null;
   useEffect(() => {
     if (!onBoard) {
       setBoardVisit(null);
@@ -5598,14 +5602,13 @@ function Inbox() {
         },
         onRename: async (tagId: string, name: string) => {
           const tag = tagById(listTags, tagId);
-          if (!tag) return false;
-          // A name another machine's tag already has would join the two there: refused as this Inbox refuses its own.
-          const taken = tagNamed(listTags, name);
-          if (taken && taken.id !== tag.id) {
-            showError(new InboxApiError(409, 'initiative_exists', `There is already a tag named ${taken.name}.`));
+          if (!tag || !across) return false;
+          const taken = across.renameTaken(tag, name);
+          if (taken) {
+            showError(taken);
             return false;
           }
-          const { refused, held } = await changeTagEverywhere(tag, { op: 'rename', name });
+          const { refused, held } = await across.change(tag, { op: 'rename', name });
           await refreshList(false);
           if (refused) showError(refused);
           else if (held) showError(held);
@@ -5613,36 +5616,9 @@ function Inbox() {
         },
         onDelete: (tag: InboxInitiative) => void deleteTag(tag),
       };
-  /**
-   * A tag's rename, delete or Undo on every machine that holds one of its name and takes tags from here: this Inbox
-   * first (its refusal stops the rest), then each linked one. One asleep holds the change and gets it when it is back.
-   * An older one keeps its own tag as it is.
-   */
-  const changeTagEverywhere = async (tag: ListTag, change: { op: 'rename'; name: string } | { op: 'delete' } | { op: 'restore' }) => {
-    let refused: unknown = null;
-    let held: InboxHeldError | null = null;
-    const own = tagIdOn(tag, null, machines.self);
-    if (own) {
-      try {
-        await inboxApi.changeInitiative(own, change);
-      } catch (cause) {
-        return { refused: cause, held };
-      }
-    }
-    for (const [machine, id] of Object.entries(tag.machines ?? {})) {
-      if (machine === machines.self || !machineTakes({ machine }, machines, 'tags')) continue;
-      try {
-        await inboxApi.changeInitiative(id, change, machine);
-      } catch (cause) {
-        if (cause instanceof InboxHeldError) held = cause;
-        // A delete that finds it already gone there has nothing left to do.
-        else if (!(change.op === 'delete' && cause instanceof InboxApiError && cause.code === 'initiative_not_found')) refused ??= cause;
-      }
-    }
-    return { refused, held };
-  };
   const deleteTag = async (tag: ListTag) => {
-    const { refused } = await changeTagEverywhere(tag, { op: 'delete' });
+    if (!across) return;
+    const { refused } = await across.change(tag, { op: 'delete' });
     if (refused) {
       showError(refused);
       await refreshList(false);
@@ -5654,12 +5630,9 @@ function Inbox() {
     showToast({ icon: 'check', ...initiativeDeletedToast([tag]), onUndo: () => void undoDeleteTag(tag) });
   };
   const undoDeleteTag = async (tag: ListTag) => {
+    if (!across) return;
     dismissToast();
-    const own = tagIdOn(tag, null, machines.self);
-    const { left, line } = own ? await restoreInitiatives([{ ...tag, id: own }]) : { left: [], line: null };
-    // The linked machines' copies after this Inbox's own, which restoreInitiatives brought back.
-    const far = { ...tag, machines: Object.fromEntries(Object.entries(tag.machines ?? {}).filter(([machine]) => machine !== machines.self)) };
-    const { refused } = await changeTagEverywhere(far, { op: 'restore' });
+    const { left, line, refused } = await across.restore([tag]);
     if (line) showToast({ icon: 'warn', wrap: true, lead: line, ...(left.length > 0 ? { onUndo: () => void undoDeleteTag(tag) } : {}) });
     else if (refused) showError(refused);
     await refreshList(false);
@@ -7561,8 +7534,11 @@ function Inbox() {
             setCards((model) => (model ? { ...model, cards: [card, ...model.cards.filter((c) => c.id !== card.id)] } : model));
           }
           refreshBoard();
+          // A tag changed in the Tags dialog: the sidebar's merged list too.
+          if (!card) void refreshList(false);
         }}
         onSeeDrops={seeDrops}
+        tagsAcross={across}
         tidy={boardTidy}
         onOpenThread={(card, threadId) =>
           go({ page: 'inbox', project: null, thread: threadId, card: card.id, board: route.board ?? 'lanes', boardProject: boardFilter, boardInitiative })
