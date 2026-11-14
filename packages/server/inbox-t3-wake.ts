@@ -291,6 +291,7 @@ export function createInboxT3Wake(options: {
     if (retry && retry.at > now()) return;
     const text = codexQueueMessage(options.commandOf(item, session));
     const [, { T3Delivery, T3DeliveryRefused }, { T3Thread }] = await loadT3();
+    if (id === item.id && !store.handover.hand(item, session, "t3")) return;
     try {
       // One request per item (the delivery folder is the thread's): a retry re-sends the first words, so a thread
       // renamed between two tries is still one T3 turn.
@@ -304,6 +305,7 @@ export function createInboxT3Wake(options: {
     } catch (error) {
       const said = (error instanceof Error ? error.message : String(error)).split("\n")[0]!.slice(0, 300);
       const code = MODE_DENIED.exec(said)?.[1];
+      if (code || error instanceof T3DeliveryRefused || THREAD_GONE.test(said)) store.handover.giveBack(id, session);
       if (code) {
         retryAt.delete(key);
         refused.add(key);

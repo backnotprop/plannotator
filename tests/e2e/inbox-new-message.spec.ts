@@ -248,7 +248,7 @@ test('one live session (5.1): a message sent through the route is drawn "to Pi",
   const messages = await threadMessages();
   expect(messages.at(-1)).toMatchObject({ id: command.id, author: { kind: 'person' }, to: { host: 'pi', session: world.writer } });
   // The session's connection polls idle: it takes it within seconds.
-  await expect(pane.locator('[data-delivery="sending"]')).toHaveText('Sending to Pi…');
+  await expect(pane.locator('[data-delivery="sending"]').locator('.ib-dl-text')).toHaveText('Sending to Pi…');
 
   await writer.deliver(command.id);
   await expect(pane.locator('[data-delivery="delivered"]')).toHaveText(/^Delivered to Pi, (?:[A-Z][a-z]{2} \d{1,2}, )?\d{1,2}:\d{2} [AP]M$/);
