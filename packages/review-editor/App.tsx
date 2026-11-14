@@ -843,7 +843,7 @@ const ReviewApp: React.FC = () => {
     else root.removeAttribute('data-power-up');
     return () => root.removeAttribute('data-power-up');
   }, [powerUpActive, powerUpStatus]);
-  const semContentRef = useRef<{ files: DiffFile[]; base?: string; snapshot?: string; powerUp?: PowerUpConfig }>({ files: [] });
+  const semContentRef = useRef<{ files: DiffFile[]; base?: string; snapshot?: string; generated: ReadonlySet<string>; powerUp?: PowerUpConfig }>({ files: [], generated: new Set() });
   useEffect(() => {
     if (!semDiffClient) {
       setSemanticDiffSource(null);
@@ -861,11 +861,11 @@ const ReviewApp: React.FC = () => {
     };
     let cached: { key: string; promise: Promise<SemanticDiffResponse> } | null = null;
     setSemanticDiffSource(() => {
-      const { files, base, snapshot, powerUp: current } = semContentRef.current;
+      const { files, base, snapshot, generated, powerUp: current } = semContentRef.current;
       const opinion = current?.active ? { rejected: current.rejected } : undefined;
-      const key = `${base ?? ''}|${snapshot ?? ''}|${opinion ? `power:${opinion.rejected.join(',')}:${current?.retry ?? 0}` : 'plain'}|${files.map((file) => `${file.path}#${file.patch.length}`).join('|')}`;
+      const key = `${base ?? ''}|${snapshot ?? ''}|${[...generated].join(',')}|${opinion ? `power:${opinion.rejected.join(',')}:${current?.retry ?? 0}` : 'plain'}|${files.map((file) => `${file.path}#${file.patch.length}`).join('|')}`;
       if (cached?.key === key) return cached.promise;
-      const promise = computeReviewSemanticDiff(files, semDiffClient, read, new AbortController().signal, opinion);
+      const promise = computeReviewSemanticDiff(files, semDiffClient, read, new AbortController().signal, generated, opinion);
       cached = { key, promise };
       return promise;
     });
@@ -4453,6 +4453,7 @@ const ReviewApp: React.FC = () => {
       : undefined,
     snapshot: feedbackDiffContext?.snapshotId,
     powerUp,
+    generated: generatedFiles,
   };
   const reviewStateValue = useMemo<ReviewState>(() => ({
     files,

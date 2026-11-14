@@ -12,7 +12,7 @@ const advert = {
   },
 };
 
-type Behaviour = 'engine' | 'hang' | 'fail';
+type Behaviour = 'engine' | 'hang' | 'fail' | 'stuck-on-big';
 
 function fakeWorker(behaviour: Behaviour, log: { created: number; terminated: number }) {
   return () => {
@@ -20,8 +20,26 @@ function fakeWorker(behaviour: Behaviour, log: { created: number; terminated: nu
     const worker = {
       onmessage: null as ((e: MessageEvent<SemDiffReply>) => void) | null,
       onerror: null as (() => void) | null,
+      queue: [] as SemDiffRequest[],
+      stuck: false,
       postMessage(request: SemDiffRequest) {
         if (behaviour === 'hang') return;
+        if (behaviour === 'stuck-on-big') {
+          worker.queue.push(request);
+          const drain = async () => {
+            while (!worker.stuck && worker.queue.length > 0) {
+              const next = worker.queue.shift()!;
+              if (next.path.includes('big')) {
+                worker.stuck = true;
+                return;
+              }
+              const r = await semanticDiffFile(languageForPath(next.path)!, next.oldText, next.newText, next.path);
+              worker.onmessage?.({ data: { id: next.id, ok: true, semanticOperations: r.semanticOperations, semanticFolds: r.semanticFolds, patch: r.patch } } as MessageEvent<SemDiffReply>);
+            }
+          };
+          if (worker.queue.length === 1) void drain();
+          return;
+        }
         void (async () => {
           let reply: SemDiffReply;
           if (behaviour === 'fail') reply = { id: request.id, ok: false, error: 'boom' };
@@ -85,10 +103,20 @@ describe('semantic diff client', () => {
     const client = createSemDiffClient({ advert, origin: 'http://127.0.0.1:1', createWorker: fakeWorker('hang', log), timeoutMs: 30 });
     expect(await client.diff('src/users.ts', before, moved)).toBeNull();
     expect(log.terminated).toBe(1);
-    expect(await client.diff('src/users.ts', before, moved)).toBeNull();
-    expect(log.created).toBe(1);
-    await client.diff('src/users.ts', before, `${moved}\n`);
+    expect((await client.attempt('src/users.ts', before, moved)).failed).toBe(true);
     expect(log.created).toBe(2);
+    client.dispose();
+  });
+
+  test('one file that stalls the worker fails alone; the files queued behind it still get their answers', async () => {
+    const log = { created: 0, terminated: 0 };
+    const client = createSemDiffClient({ advert, origin: 'http://127.0.0.1:1', createWorker: fakeWorker('stuck-on-big', log), timeoutMs: 200 });
+    const big = client.attempt('src/big.ts', before, moved);
+    const others = [client.attempt('src/a.ts', before, moved), client.attempt('src/b.ts', before, `${moved}\n`)];
+    expect((await big).failed).toBe(true);
+    const settled = await Promise.all(others);
+    expect(settled.map((outcome) => outcome.failed)).toEqual([false, false]);
+    expect(settled.every((outcome) => outcome.result?.semanticOperations.some((op) => op.type === 'moved'))).toBe(true);
     client.dispose();
   });
 
