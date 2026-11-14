@@ -26,6 +26,7 @@ describe.skipIf(!hasDom)('Open it again from an ended review', () => {
     const originalReplace = window.location.replace;
     Object.defineProperty(window.location, 'replace', { configurable: true, value: (u: string) => replaced.push(u) });
     try {
+      await import('../openReviewMarker');
       const { OpenLiveReview } = await import('./ReviewAnchorLine');
       expect(window.location.search).toBe('');
       host = document.createElement('div');

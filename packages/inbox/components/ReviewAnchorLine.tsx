@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { pageServerSession } from '../api';
 import { inboxUrl } from '../inboxUrl';
+import { takeAskedReview } from '../openReviewMarker';
 import type { InboxReviewAnchor } from '@plannotator/core/review-threads';
 
 export function reviewAnchorWhere(anchor: InboxReviewAnchor): string {
@@ -21,20 +22,6 @@ export function ReviewAnchorLine({ anchor, resolved }: { anchor: InboxReviewAnch
   );
 }
 
-export const OPEN_REVIEW_MARKER = 'open-review';
-
-function takeOpenMarker(): string | null {
-  if (typeof window === 'undefined') return null;
-  const search = new URLSearchParams(window.location.search);
-  const thread = search.get(OPEN_REVIEW_MARKER);
-  if (!thread) return null;
-  search.delete(OPEN_REVIEW_MARKER);
-  const rest = search.toString();
-  window.history.replaceState(window.history.state, '', `${window.location.pathname}${rest ? `?${rest}` : ''}${window.location.hash}`);
-  return thread;
-}
-
-let askedToOpen = takeOpenMarker();
 let autoOpen: Promise<void> | null = null;
 
 export function OpenLiveReview({ threadId, title }: { threadId: string; title: string }) {
@@ -63,8 +50,7 @@ export function OpenLiveReview({ threadId, title }: { threadId: string; title: s
     }
   };
   useEffect(() => {
-    if (askedToOpen !== threadId) return;
-    askedToOpen = null;
+    if (!takeAskedReview(threadId)) return;
     autoOpen ??= open(true);
   }, [threadId]);
   return (
