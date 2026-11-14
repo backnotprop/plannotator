@@ -15,6 +15,7 @@ dist-ssr
 
 # npm pack output
 *.tgz
+!vendor/pierre-diffs/*.tgz
 
 # VS Code extension package
 *.vsix

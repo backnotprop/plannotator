@@ -1,0 +1,30 @@
+diff --git a/packages/diffs/package.json b/packages/diffs/package.json
+index be0fba76..e826d703 100644
+--- a/packages/diffs/package.json
++++ b/packages/diffs/package.json
+@@ -1,6 +1,6 @@
+ {
+   "name": "@pierre/diffs",
+-  "version": "1.7.0-beta.3",
++  "version": "1.7.0-beta.3-sem.1",
+   "license": "apache-2.0",
+   "files": [
+     "dist",
+diff --git a/packages/diffs/src/components/FileDiff.ts b/packages/diffs/src/components/FileDiff.ts
+index 66542ee4..7d626b01 100644
+--- a/packages/diffs/src/components/FileDiff.ts
++++ b/packages/diffs/src/components/FileDiff.ts
+@@ -1428,10 +1428,10 @@ export class FileDiff<LAnnotation = undefined, Caret = undefined> {
+     ) {
+       return;
+     }
++    // Hosts may hydrate partial diffs externally. Without a loader, keep
++    // rendering the patch; prepareForEditing still requires full contents.
+     if (loadDiffFiles == null) {
+-      throw new Error(
+-        'FileDiff: loadDiffFiles is required to load full files for a partial diff'
+-      );
++      return;
+     }
+ 
+     const promise = this.loadFilesForDiff(fileDiff, loadDiffFiles);
