@@ -58,7 +58,7 @@ export const FileMinimap: React.FC<FileMinimapProps> = ({ viewport, content, fil
 
   if (!box) return null;
   return (
-    <div className="pointer-events-none absolute right-0 w-5" style={{ top: box.top, height: box.height }}>
+    <div className="pointer-events-none absolute right-0 w-6" style={{ top: box.top, height: box.height }}>
       <div className="pointer-events-auto absolute inset-0">
         <DiffMinimapSlot
           source={source}

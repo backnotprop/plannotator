@@ -1148,7 +1148,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
         <div className="flex-1 min-h-0 relative flex flex-col" data-diff-body-override>{bodyOverride}</div>
       ) : !collapsed && (
         <OverlayScrollArea
-          className={`flex-1 min-h-0 relative ${minimapOn && minimapShown ? 'mr-5' : ''} ${isDraggingSplit ? 'select-none' : ''}`}
+          className={`flex-1 min-h-0 relative ${minimapOn && minimapShown ? 'mr-6' : ''} ${isDraggingSplit ? 'select-none' : ''}`}
           overflowX="scroll"
           overflowY="auto"
           onViewportReady={onViewportReady}

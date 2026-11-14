@@ -1,10 +1,26 @@
-import React, { Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useConfigValue } from '@plannotator/ui/config';
 import type { DiffLayoutSource, LineSide, ScrollElementModel } from './layoutSource';
 import type { RowMetrics } from './rowModel';
 import type { MinimapKind } from './scene';
 
 export const MINIMAP_LONG_SCREENS = 3;
+export const MINIMAP_BIG_FILE_LINES = 1000;
+
+const HUNK_HEADER = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/gm;
+
+export function lastHunkLine(patch: string): number {
+  let last = 0;
+  for (const match of patch.matchAll(HUNK_HEADER)) {
+    last = Math.max(last, Number(match[1]) + Number(match[2] ?? 1), Number(match[3]) + Number(match[4] ?? 1));
+  }
+  return last;
+}
+
+export function hasBigFile(patches: Iterable<string>): boolean {
+  for (const patch of patches) if (lastHunkLine(patch) > MINIMAP_BIG_FILE_LINES) return true;
+  return false;
+}
 
 export interface MinimapFileInput {
   id: string;
@@ -36,21 +52,23 @@ export interface DiffMinimapSlotProps {
 
 const DiffMinimap = React.lazy(() => import('./DiffMinimap'));
 
-export function isLongContent(contentHeight: number, viewportHeight: number): boolean {
-  return viewportHeight > 0 && contentHeight > viewportHeight * MINIMAP_LONG_SCREENS;
+export function isLongContent(contentHeight: number, viewportHeight: number, bigFile = false): boolean {
+  if (viewportHeight <= 0) return false;
+  return contentHeight > viewportHeight * (bigFile ? 1 : MINIMAP_LONG_SCREENS);
 }
 
 export const DiffMinimapSlot: React.FC<DiffMinimapSlotProps> = ({ pulseRef, onShownChange, ...props }) => {
   const enabled = useConfigValue('diffMinimap');
   const { source } = props;
+  const bigFile = useMemo(() => hasBigFile(props.files.map((file) => file.patch)), [props.files]);
   const [long, setLong] = useState(false);
   const innerPulseRef = useRef<(() => void) | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const check = useCallback(() => {
-    setLong(isLongContent(source.contentHeight(), source.viewportHeight()));
+    setLong(isLongContent(source.contentHeight(), source.viewportHeight(), bigFile));
     innerPulseRef.current?.();
-  }, [source]);
+  }, [source, bigFile]);
 
   const pulse = useCallback(() => {
     if (timerRef.current != null) return;
