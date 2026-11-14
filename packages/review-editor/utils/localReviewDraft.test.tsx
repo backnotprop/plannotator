@@ -24,7 +24,7 @@ test('generation conflicts do not masquerade as target changes, and missing draf
     const error = await transport.save({}, { keepalive: false }).catch(error => error);
     expect(error).toBeInstanceOf(Error);
     expect(error).not.toBeInstanceOf(DraftTargetChangedError);
-    globalThis.fetch = (async () => Response.json({ found: false, draftGeneration: 40 }, { status: 404 })) as typeof fetch;
+    globalThis.fetch = (async () => new Response(null, { status: 204, headers: { "Plannotator-Draft-Generation": "40" } })) as typeof fetch;
     expect(await transport.load()).toEqual({ data: null, generation: 40 });
   } finally { globalThis.fetch = previousFetch; }
 });

@@ -39,6 +39,7 @@ import {
 	handleReferenceSkillsRequest,
 	handleReferenceSkillContentRequest,
 	readDraftGenerationFromBody,
+	sendMissingDraft,
 	handleSaveNotesRequest,
 	handleUploadRequest,
 } from "./handlers.ts";
@@ -519,7 +520,7 @@ export async function startPlanReviewServer(options: {
 				// by path (`documents`) when the index lists any.
 				const loaded = loadSessionDraftWithDocuments({ patchKey: draftKey }, planDocumentDrafts);
 				if (loaded.found) json(res, loaded.draft);
-				else json(res, { found: false, ...(loaded.draftGeneration !== null ? { draftGeneration: loaded.draftGeneration } : {}) }, 404);
+				else sendMissingDraft(res, loaded.draftGeneration);
 			} else {
 				await handleDraftRequest(req, res, draftKey);
 			}

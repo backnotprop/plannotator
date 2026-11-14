@@ -24,7 +24,7 @@ import { useCodeAnnotationDraft } from './hooks/useCodeAnnotationDraft';
 import { localReviewDraftTransport } from '../review-editor/utils/localReviewDraft';
 import { resetDraftTransport, setDraftTransport } from './hooks/useAnnotationDraft';
 import type { CodeAnnotation } from './types';
-import { saveDraft, loadDraft, deleteDraft, getDraftGeneration } from '../shared/draft';
+import { saveDraft, loadDraft, deleteDraft, getDraftGeneration, missingDraftHeaders } from '../shared/draft';
 
 const hasDom = typeof document !== 'undefined';
 
@@ -64,13 +64,7 @@ function installFetchShim() {
         const data = loadDraft(DRAFT_KEY);
         return data
           ? new Response(JSON.stringify(data), { status: 200, headers: { 'Content-Type': 'application/json' } })
-          : new Response(
-              JSON.stringify({
-                found: false,
-                ...(getDraftGeneration(DRAFT_KEY) !== null ? { draftGeneration: getDraftGeneration(DRAFT_KEY) } : {}),
-              }),
-              { status: 404, headers: { 'Content-Type': 'application/json' } },
-            );
+          : new Response(null, { status: 204, headers: missingDraftHeaders(getDraftGeneration(DRAFT_KEY)) });
       }
       if (method === 'POST') {
         saveDraft(DRAFT_KEY, JSON.parse(String(init?.body)));

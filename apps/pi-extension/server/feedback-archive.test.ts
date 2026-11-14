@@ -145,7 +145,7 @@ describe("pi feedback archive: code review", () => {
 			expect(JSON.stringify(records[0])).not.toContain("diff --git");
 			expect(sidecarBody(dataDir, records[0])).toContain("parse() still drops the null case.");
 
-			expect((await fetch(`${server.url}/api/draft`)).status).toBe(404);
+			expect((await fetch(`${server.url}/api/draft`)).status).toBe(204);
 		} finally {
 			server.stop();
 		}
@@ -250,7 +250,7 @@ describe("pi feedback archive: code review", () => {
 			});
 			expect(response.status).toBe(200);
 			expect(existsSync(feedbackDir(dataDir))).toBe(false);
-			expect((await fetch(`${server.url}/api/draft`)).status).toBe(404);
+			expect((await fetch(`${server.url}/api/draft`)).status).toBe(204);
 		} finally {
 			server.stop();
 		}

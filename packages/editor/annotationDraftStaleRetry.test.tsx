@@ -89,7 +89,7 @@ function serve(session: AnnotateDraftSession): number[] {
     const loaded = session.load();
     return loaded.found
       ? Response.json(loaded.draft)
-      : Response.json({ found: false, draftGeneration: loaded.draftGeneration }, { status: 404 });
+      : new Response(null, { status: 204, headers: loaded.draftGeneration === null ? {} : { "Plannotator-Draft-Generation": String(loaded.draftGeneration) } });
   }) as typeof fetch;
   return posted;
 }

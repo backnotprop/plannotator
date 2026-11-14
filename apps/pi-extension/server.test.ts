@@ -1290,7 +1290,7 @@ describe("pi review server", () => {
       expect(draftDelete.status).toBe(200);
 
       const draftMissing = await fetch(`${server.url}/api/draft`);
-      expect(draftMissing.status).toBe(404);
+      expect(draftMissing.status).toBe(204);
 
       const generatedDraft = { codeAnnotations: [{ id: "stale-draft" }], draftGeneration: 5 };
       const generatedDraftSave = await fetch(`${server.url}/api/draft`, {
@@ -1322,8 +1322,8 @@ describe("pi review server", () => {
       expect(lateDraftSave.status).toBe(409);
       expect(await lateDraftSave.json()).toMatchObject({ ok: false, draftGeneration: 5 });
       const lateDraftLoad = await fetch(`${server.url}/api/draft`);
-      expect(lateDraftLoad.status).toBe(404);
-      expect(await lateDraftLoad.json()).toEqual({ found: false, draftGeneration: 5 });
+      expect(lateDraftLoad.status).toBe(204);
+      expect(lateDraftLoad.headers.get("Plannotator-Draft-Generation")).toBe("5");
 
       await expect(server.waitForDecision()).resolves.toEqual({
         approved: false,
