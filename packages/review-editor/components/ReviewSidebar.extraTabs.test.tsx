@@ -9,7 +9,8 @@ let host: HTMLElement | null = null;
 
 const CHANGES: ReviewSidebarExtraTab = {
   id: 'changes',
-  label: 'Changes',
+  label: 'Sem',
+  title: 'Semantic changes',
   count: 4,
   render: () => <div data-test-changes-body="">semantic changes</div>,
 };
@@ -52,7 +53,9 @@ describe.skipIf(!hasDom)('a feature adds its own tab to the right panel', () => 
     const tabs = [...el.querySelectorAll<HTMLButtonElement>('[role="tab"]')].map((tab) => tab.dataset.reviewSidebarTab);
     expect(tabs).toEqual(['annotations', 'changes']);
     const changes = el.querySelector<HTMLButtonElement>('[data-review-sidebar-tab="changes"]')!;
-    expect(changes.textContent).toBe('Changes4');
+    expect(changes.textContent).toBe('Sem4');
+    expect(changes.getAttribute('aria-label')).toBe('Semantic changes, 4');
+    expect(changes.title).toBe('Semantic changes');
     expect(el.querySelector('[data-test-changes-body]')).toBeNull();
     await act(async () => changes.click());
     expect(onSelectTab).toHaveBeenCalledWith('changes');

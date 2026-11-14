@@ -4,6 +4,7 @@ import type { ReviewSidebarTab } from './ReviewSidebar';
 export interface ReviewSidebarTabItem {
   id: ReviewSidebarTab;
   label: string;
+  title?: string;
   count?: number;
   attention?: boolean;
 }
@@ -43,6 +44,8 @@ export const ReviewSidebarTabs: React.FC<{
             aria-controls={REVIEW_SIDEBAR_BODY_ID}
             tabIndex={selected ? 0 : -1}
             data-review-sidebar-tab={tab.id}
+            title={tab.title}
+            aria-label={tab.title ? (tab.count ? `${tab.title}, ${tab.count}` : tab.title) : undefined}
             onClick={() => onSelect(tab.id)}
             className={`relative flex items-center gap-1.5 text-[13px] font-medium whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 rounded-sm ${
               selected ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'
