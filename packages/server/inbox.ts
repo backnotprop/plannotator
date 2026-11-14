@@ -156,7 +156,7 @@ import { InboxError, inboxDir } from "@plannotator/shared/inbox/schema";
 import { inboxPromptsModel, parseInboxPromptsChange, saveInboxPromptsChange } from "./inbox-prompts";
 import { inboxRulesFitError } from "./inbox-rules";
 import { InboxStore } from "@plannotator/shared/inbox/store";
-import { INBOX_DB_FILE, inboxReturnDelayFromEnv, returnFromSqlite } from "@plannotator/shared/inbox/store-log/sqlite-return/return";
+import { INBOX_DB_FILE, inboxReturnHoldFromEnv, returnFromSqlite } from "@plannotator/shared/inbox/store-log/sqlite-return/return";
 import { INBOX_TIDY_WITHDRAWN_HOST, inboxTidyBodyStepsOff, inboxTidyIsStepsOnly, inboxTidyStepsOnlyWakes } from "@plannotator/shared/inbox/tidy";
 import { inboxArchivedRows, inboxListSections, inboxRowArchived } from "@plannotator/shared/inbox/list";
 import { archiveProject, markProjectRead, unarchiveProject, unmarkProjectRead } from "@plannotator/shared/inbox/project-batch";
@@ -1103,7 +1103,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     previousInboxVersion = readUpdateState(dataDir).inboxVersion ?? null;
   } catch {}
   const storeLoadStarted = performance.now();
-  const returned = returnFromSqlite(dataDir, { ...(options.storeNow ? { now: options.storeNow } : {}), step: inboxReturnDelayFromEnv(process.env) });
+  const returned = returnFromSqlite(dataDir, { ...(options.storeNow ? { now: options.storeNow } : {}), step: inboxReturnHoldFromEnv(process.env) });
   if (returned) process.stderr.write(`Inbox: moved back from ${INBOX_DB_FILE} into its files (${returned.lines} lines, ${returned.ms} ms).\n`);
   const store = InboxStore.open(dataDir, options.storeNow ? { now: options.storeNow } : {});
   // Read every project's log and replayed it (store.ts load): the debug log notes how long that took.
