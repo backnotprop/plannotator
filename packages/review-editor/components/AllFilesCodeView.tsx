@@ -783,6 +783,7 @@ const inStepRoots = new WeakSet<ShadowRoot>();
 
 const streamRoots = new Set<ShadowRoot>();
 const POWER_UP_SCROLL_REST_MS = 150;
+const streamState = { scrolling: false };
 
 function restartPowerUpStream(): void {
   for (const root of streamRoots) {
@@ -807,6 +808,7 @@ function keepPowerUpInStep(node: HTMLElement): void {
   streamRoots.add(root);
   stampPowerUpPhase(root.querySelectorAll(POWER_UP_ROW));
   new MutationObserver((records) => {
+    if (streamState.scrolling) return;
     const rows: Element[] = [];
     for (const record of records) {
       if (record.type === 'attributes') {
@@ -2052,6 +2054,14 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
 
   const rejectedKey = powerUp?.rejected.join(',') ?? '';
   const powerUpActive = powerUp?.active === true;
+  const powerUpStream = powerUpActive && powerUpMotion === 'stream';
+  const powerUpStreamRef = useRef(powerUpStream);
+  powerUpStreamRef.current = powerUpStream;
+  useEffect(() => {
+    if (!powerUpStream) return;
+    for (const node of scrollRef.current?.querySelectorAll<HTMLElement>('diffs-container') ?? []) keepPowerUpInStep(node);
+    restartPowerUpStream();
+  }, [powerUpStream]);
   const powerUpRetry = powerUp?.retry ?? 0;
   useEffect(() => {
     if (!powerUpActive) {
@@ -2401,7 +2411,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       // CodeView recycles elements across items.
       nodeToItemIdRef.current.set(node, context.id);
       if (flushesFiles) syncTrailingRow(node, context);
-      keepPowerUpInStep(node);
+      if (powerUpStreamRef.current) keepPowerUpInStep(node);
       augmentItem(context.id);
       const itemId = context.id;
       requestAnimationFrame(() => applyItemHighlights(node, itemId));
@@ -3179,11 +3189,14 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   const handleScroll = useStableCallback((position: number) => {
     lastScrollTsRef.current = Date.now();
     const scroller = scrollRef.current;
-    if (scroller && powerUpActive && powerUpMotion === 'stream') {
-      if (streamRestTimerRef.current == null) scroller.style.setProperty('--pu-content', 'none');
-      else clearTimeout(streamRestTimerRef.current);
+    if (scroller && powerUpStreamRef.current) {
+      if (streamRestTimerRef.current == null) {
+        streamState.scrolling = true;
+        scroller.style.setProperty('--pu-content', 'none');
+      } else clearTimeout(streamRestTimerRef.current);
       streamRestTimerRef.current = setTimeout(() => {
         streamRestTimerRef.current = null;
+        streamState.scrolling = false;
         restartPowerUpStream();
         scroller.style.removeProperty('--pu-content');
       }, POWER_UP_SCROLL_REST_MS);
@@ -3200,6 +3213,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   useEffect(() => () => {
     if (scrollReportRafRef.current != null) cancelAnimationFrame(scrollReportRafRef.current);
     if (streamRestTimerRef.current != null) clearTimeout(streamRestTimerRef.current);
+    streamState.scrolling = false;
   }, []);
 
   // CodeView's onScroll only fires on actual scroll, so seed the initial

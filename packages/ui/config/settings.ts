@@ -650,7 +650,7 @@ export const SETTINGS = {
   },
 
   diffPowerUpMotion: {
-    defaultValue: 'stream' as 'stream' | 'still',
+    defaultValue: 'still' as 'stream' | 'still',
     fromCookie: () => {
       const v = storage.getItem('plannotator-diff-power-up-motion');
       return v === 'stream' || v === 'still' ? v : undefined;
