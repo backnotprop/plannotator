@@ -208,7 +208,7 @@ test('at the default 256 px the scope and the tools share one line in both scope
     const all = await geometry();
     expect(all).toEqual(changes);
     // The label is whole, not cut to fit.
-    expect(await page.locator('[data-tree-scope="all"] .truncate').evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+    expect(await page.locator('[data-tree-scope="all"] [data-tree-scope-label]').evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
   });
 });
 
