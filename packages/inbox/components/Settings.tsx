@@ -35,7 +35,6 @@ import { useVoiceSettings } from '../voice';
 import { RowsSection, rowsSummary, type RowsSectionProps } from './RowsSettings';
 import { useListLook } from '../listLook';
 import { DecisionData } from './DecisionData';
-import { StorageBackups } from './StorageBackups';
 import type { SystemProjectRow } from '@plannotator/core/inbox-system';
 import { openSystemSetup } from '../system/opener';
 import { systemStateWords } from '../system/projects';
@@ -1235,13 +1234,6 @@ export function SettingsPage(props: SettingsPageProps) {
             )}
           </section>
         );
-        if (store)
-          body = (
-            <>
-              {body}
-              <StorageBackups store={store} onChanged={props.onReadStore} />
-            </>
-          );
         break;
       case 'activity':
         // The chart on top, the decision numbers under it (approval "settings-storage-activity"). DecisionData asks
