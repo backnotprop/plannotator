@@ -77,7 +77,7 @@ import { INBOX_AGENT_LABELS, INBOX_AUTO_SEND_AFTER_MS, INBOX_NOTE_AGENT_IDS, typ
 import { writeUrlQr } from "@plannotator/server/qr";
 import { shellLine } from "@plannotator/inbox/harnesses";
 import { getCliVersion, hasHelpFlag } from "./cli";
-import { inboxHostSessionFromEnv, inboxQwenShimContext, inboxSessionProjectFromEnv, inboxT3EntryIdle, runInboxMcpShim } from "./inbox-mcp-shim";
+import { inboxClaudeMcpSessionFromEnv, inboxHostSessionFromEnv, inboxQwenShimContext, inboxSessionProjectFromEnv, inboxT3EntryIdle, runInboxMcpShim } from "./inbox-mcp-shim";
 import { runPermissionHook } from "./inbox-permission-hook";
 import { runInboxLinkCommand } from "./inbox-link-command";
 import { INBOX_CONNECTION_USAGE, runInboxConnectionCommand, stdinLines } from "./inbox-connection-command";
@@ -150,14 +150,21 @@ export function detachedInboxEnv(env: Readonly<Record<string, string | undefined
 
 function waitUntilRunning(dataDir: string): Promise<InboxRegistryEntry | null> {
   const started = Date.now();
+  const timeout = startTimeoutMs();
+  let returnSeenAt = 0;
+  const returning = () => {
+    if (Date.now() - started >= RETURN_WAIT_MAX_MS) return false;
+    if (inboxReturnRunning(dataDir)) returnSeenAt = Date.now();
+    return returnSeenAt > 0 && Date.now() - returnSeenAt < timeout;
+  };
   return waitForInbox(
     async () => {
       const next = await inboxStatus(dataDir, 1000);
       return next.state === "running" ? next.entry : null;
     },
-    startTimeoutMs(),
+    timeout,
     100,
-    () => Date.now() - started < RETURN_WAIT_MAX_MS && inboxReturnRunning(dataDir),
+    returning,
   );
 }
 
@@ -722,6 +729,7 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
       cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
       ensureRunning: () => ensureInboxRunning(dataDir),
       hostSession: inboxHostSessionFromEnv(process.env),
+      claude: inboxClaudeMcpSessionFromEnv(process.env),
       sessionProject: inboxSessionProjectFromEnv(process.env),
       qwen: inboxQwenShimContext(process.env, homedir(), process.cwd(), process.ppid),
       askAiChild: isAskAiChild(process.env),

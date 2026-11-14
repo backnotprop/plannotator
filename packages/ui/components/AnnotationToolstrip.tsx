@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import type { EditorMode, InputMethod } from '../types';
-import { TaterSpritePullup } from './TaterSpritePullup';
+import { TaterPullupSlot } from './TaterSpriteSlots';
 
 /** Props for the shared annotation input and action mode toolstrip. */
 export interface AnnotationToolstripProps {
@@ -207,7 +207,7 @@ export const AnnotationToolstrip: React.FC<AnnotationToolstripProps> = ({
             className="bg-card border border-border rounded-xl w-full max-w-2xl shadow-2xl relative"
             onClick={e => e.stopPropagation()}
           >
-            {taterMode && <TaterSpritePullup />}
+            {taterMode && <TaterPullupSlot />}
             <div className="flex items-center justify-between p-4 border-b border-border">
               <div className="flex items-center gap-1 bg-muted/50 rounded-lg p-0.5">
                 <button
