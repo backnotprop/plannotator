@@ -244,7 +244,7 @@ test.skipIf(!hasDom)('with no machine linked the agents are one flat list; an In
   expect(surface()!.textContent).toContain('Agents show here while they run.');
 });
 
-test.skipIf(!hasDom)('Add agent and Add machine are always-shown buttons with their own routes; an agent row filters the list, or messages a live agent with no thread', () => {
+test.skipIf(!hasDom)('Add machine and Add agent are the heading\'s buttons, each with its own route; an agent row filters the list, or messages a live agent with no thread', () => {
   setInboxAgents([group([agent('ses_s1'), agent('ses_s2')], SELF)]);
   const calls: string[] = [];
   let opener: HTMLElement | null = null;
@@ -341,7 +341,7 @@ test.skipIf(!hasDom)('a click on an agent filters the list to it and opens no th
   expect(calls.some((c) => c.startsWith('open:'))).toBe(false);
 });
 
-test.skipIf(!hasDom)('closed, Agents is its heading alone, whatever is open: no row for the open thread, no machine name, no Add buttons; only a press on the heading opens it', async () => {
+test.skipIf(!hasDom)('closed, Agents is its heading alone, whatever is open: no row for the open thread, no machine name, its Add buttons kept for the heading\'s hover; only a press on the heading opens it', async () => {
   // Which sections are closed is kept through Plannotator's storage (cookies in the app); a map stands in for them.
   const { setStorageBackend, resetStorageBackend } = await import('@plannotator/ui/utils/storage');
   const stored = new Map<string, string>();
@@ -367,8 +367,8 @@ async function closedAgents() {
     captions: surface()!.querySelectorAll('[data-machine]').length,
     under: surface()!.querySelector('[data-agents-section]')!.childElementCount,
   });
-  const shut = { open: 'false', buttons: [], rows: [], captions: 0, under: 0 };
-  expect(state()).toEqual({ open: 'true', buttons: ['agent', 'machine'], rows: ['ses_s1', 'ses_s2', 'ses_m1'], captions: 2, under: 2 });
+  const shut = { open: 'false', buttons: ['machine', 'agent'], rows: [], captions: 0, under: 0 };
+  expect(state()).toEqual({ open: 'true', buttons: ['machine', 'agent'], rows: ['ses_s1', 'ses_s2', 'ses_m1'], captions: 2, under: 2 });
   act(() => header().click());
   expect(state()).toEqual(shut);
   expect(surface()!.querySelector('[data-sidebar-section="agents"] .ib-agents-mk')).not.toBeNull();
@@ -391,7 +391,7 @@ async function closedAgents() {
   expect(state()).toEqual(shut);
   // The person presses the heading: everything is back; an open thread marks no agent, the agent filtered to does.
   act(() => header().click());
-  expect(state()).toEqual({ open: 'true', buttons: ['agent', 'machine'], rows: ['ses_s1', 'ses_s2', 'ses_m1'], captions: 2, under: 2 });
+  expect(state()).toEqual({ open: 'true', buttons: ['machine', 'agent'], rows: ['ses_s1', 'ses_s2', 'ses_m1'], captions: 2, under: 2 });
   expect(surface()!.querySelector('[data-sidebar-agent="ses_s1"] .ib-proj')!.getAttribute('aria-pressed')).toBe('false');
   mount(<Sidebar {...props({ openThreadId: 'thr_1', agentFilter: { id: 'ses_s1', name: 'Invoice retries' } })} />);
   expect(surface()!.querySelector('[data-sidebar-agent="ses_s1"] .ib-proj')!.getAttribute('aria-pressed')).toBe('true');
