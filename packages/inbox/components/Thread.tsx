@@ -6133,7 +6133,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       folderOf={(session) => sessionFolder(session, thread, taggable) ?? thread.project.name}
     />
   ) : (
-    <ReplyRecipient rows={rcptAgents} chosen={rcptChosen} open={rcptOpen} onOpen={setRcptOpen} onOnly={onlyRecipient} onToggle={toggleReplyRecipient} onTagAnother={tagAnother} />
+    <ReplyRecipient rows={rcptAgents} chosen={rcptChosen} open={rcptOpen} onOpen={setRcptOpen} onOnly={onlyRecipient} onToggle={toggleReplyRecipient} onTagAnother={tagAnother} labels={sessionLabels} />
   );
   const routeChoice = asking ? (
     <RouteChoice

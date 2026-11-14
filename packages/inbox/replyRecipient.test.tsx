@@ -18,6 +18,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { parseInboxQuestionBlocks } from '@plannotator/core/inbox-questions';
 import type { InboxMessageWire, InboxProject, InboxQuestion, InboxThread } from '@plannotator/core/inbox-types';
 import type { TaggableSession } from './api';
+import { setSessionLabels } from './sessionLabels';
 
 const hasDom = typeof document !== 'undefined';
 // Viewer pulls in web-highlighter, which reads `window` at module-eval time.
@@ -265,6 +266,28 @@ test.skipIf(!hasDom)('two agents: the pill names the last writer; a name picked,
   expect(replies()[0]!.body).toMatchObject({ words: 'Use the old totals.' });
   expect(replies()[0]!.body.to).toBeUndefined();
   expect(replies()[0]!.body.tags).toBeUndefined();
+});
+
+test.skipIf(!hasDom)('a computer, sessions with titles: the pill and its list name the sessions by title, and the reply still goes to the session it names', async () => {
+  try {
+    setSessionLabels({ ses_claude: 'Fix login redirect', ses_pi: 'Invoice PDF fonts' });
+    const el = await render(threadOf(agentMessage(M1, CLAUDE, 41), agentMessage(M2, PI, 45)));
+    await write(el, 'Use the old totals.');
+    expect(pillName(el)).toBe('Invoice PDF fonts');
+    await openList(el);
+    expect(rows(el)).toEqual([
+      ['Fix login redirect', null],
+      ['Invoice PDF fonts', null],
+    ]);
+    await only(el, 'ses_claude');
+    expect(pillName(el)).toBe('Fix login redirect');
+    await send(el);
+    expect(replies().map((r) => r.path)).toEqual([`/api/inbox/messages/${M1}/reply`]);
+    expect(replies()[0]!.body.to).toBeUndefined();
+  } finally {
+    // The labels are global: clear them inside act, while the pane is still mounted, so no other test reads them.
+    act(() => setSessionLabels({}));
+  }
 });
 
 test.skipIf(!hasDom)('a circle adds a second agent: "2 agents", and the reply to the first carries the second as a tag; an ended agent\'s circle is off', async () => {
