@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useMemo, useSyncExternalStore } from "react";
 import { isCodeFilePath, isCodeFilePathStrict, CODE_PATH_BARE_REGEX, parseCodePath } from "@plannotator/core/code-file";
-import { findCrossRepoRef, forgeRefLinks, matchCrossRepoRef, type CrossRepoRef } from "@plannotator/core/forge-refs";
+import { findCrossRepoRef, forgeRefLinks, gitlabHostsSnapshot, matchCrossRepoRef, subscribeGitlabHosts, type CrossRepoRef } from "@plannotator/core/forge-refs";
 import { CodeSnippetPreview } from "./CodeSnippetPreview";
 import { useHoverPreview } from "../hooks/useHoverPreview";
 import { transformPlainText } from "../utils/inlineTransforms";
@@ -571,6 +571,7 @@ export const InlineMarkdown: React.FC<{
   const softLineBreaks = useContext(SoftLineBreaksContext);
   const resolveImage = useImageResolver();
   const inlineImageTags = useContext(InlineImageTagsContext);
+  useSyncExternalStore(subscribeGitlabHosts, gitlabHostsSnapshot, gitlabHostsSnapshot);
   const refLinks = forgeRefLinks({ display: githubRepo, host: repoHost });
   // Cross-repo `owner/repo#123` refs: for a caller that names its project's
   // repo (it knows the forge); otherwise they stay plain text, unless the

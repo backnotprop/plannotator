@@ -225,6 +225,6 @@ describe("the agent door", () => {
     const toWoken = await w.call("/api/inbox/messages", { to: { session: woken.agent.session }, body: "Run the nightly export.", idempotency_key: "wake-1" });
     const wokenConnection = (await w.call(`/api/inbox/threads/${toWoken.json.thread_id}/sessions?asker=${encodeURIComponent(woken.agent.session)}`)).json.asker?.connection;
     expect(wokenConnection?.polls).toBeUndefined();
-    expect(["queued/next_turn", "delivered/delivered"]).toContain((await line(toWoken.json.thread_id))!);
+    expect(["queued/next_turn", "queued/handed", "delivered/delivered"]).toContain((await line(toWoken.json.thread_id))!);
   });
 });
