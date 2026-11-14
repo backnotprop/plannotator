@@ -712,6 +712,7 @@ packages/inbox/prs/prsInReviews.test.tsx
 packages/inbox/prs/sheetTable.test.tsx
 packages/inbox/prs/sheetSelect.test.tsx
 packages/inbox/prs/sheetMerge.test.tsx
+packages/inbox/prs/sheetClose.test.tsx
 packages/inbox/fileQuestionCards.test.tsx
 packages/inbox/agents/agentsSection.test.tsx
 packages/inbox/agents/faceFan.test.tsx
@@ -739,3 +740,8 @@ packages/inbox/threadTags.test.tsx
 packages/review-editor/components/PRDescriptionVideo.test.tsx
 packages/ui/components/CommentPopover.hostDraft.test.tsx
 packages/inbox/data/queries/heldThreadOpen.test.tsx
+packages/review-editor/components/FileTree.redraws.test.tsx
+packages/ui/components/Viewer.blockRedraws.test.tsx
+packages/editor/hooks/useCheckboxOverrides.viewer.test.tsx
+packages/ui/components/TaterSpriteSlots.test.tsx
+packages/inbox/sidebarRedraws.test.tsx

@@ -29,6 +29,7 @@ import type { InboxLaunchChoices } from "./inbox-launch-choice";
 import type { InboxRowSnooze } from "./inbox-snooze";
 import { INBOX_CODEX_QUEUE_MIN_VERSION } from "./inbox-codex";
 import { INBOX_QWEN_WAKE_MIN_VERSION } from "./inbox-qwen";
+import { INBOX_T3_HOST, isT3ThreadId } from "./inbox-t3";
 
 // The attachment shapes and file rules (step 2) live in their own module and
 // reach the Inbox through this published entry, so core's export map is unchanged.
@@ -3269,6 +3270,16 @@ export const INBOX_REPLY_DRAFT_RECIPIENTS_MAX = INBOX_TAGS_MAX + 1;
 /** A session id as a tag (and a reply draft's recipient) names it. */
 export const INBOX_SESSION_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/;
 
+/** Whether a reply draft's recipient (an id with no host) can name this session: an id of that shape, or a T3 Code thread's own id. */
+export function isInboxRecipientSessionId(value: unknown): value is string {
+  return (typeof value === "string" && INBOX_SESSION_ID_PATTERN.test(value)) || isT3ThreadId(value);
+}
+
+/** Whether a tag of this host can name this session: a T3 Code thread's own id under `t3` only, an id of that shape under any other. */
+export function isInboxTagSessionId(host: unknown, session: unknown): session is string {
+  return host === INBOX_T3_HOST ? isT3ThreadId(session) : typeof session === "string" && INBOX_SESSION_ID_PATTERN.test(session);
+}
+
 /**
  * A long paste that became a file (approval "inbox-paste-attachment"): where Put back returns its text in the
  * draft's words. `at` is an offset into the words as saved, `lead` what goes before it (the thread-name chip's
@@ -3292,7 +3303,7 @@ export const INBOX_DRAFT_PASTED_LEAD_MAX = 2;
  * (approval "inbox-linked-marks"). The list says them (`marks`), so a linked machine offers a mark on this Inbox's
  * rows only once this Inbox takes it; an older Inbox says none.
  */
-export const INBOX_LINKED_MARKS = ["star", "priority", "agent-face", "agent-name", "take-back"] as const;
+export const INBOX_LINKED_MARKS = ["star", "priority", "agent-face", "agent-name", "take-back", "tags"] as const;
 export type InboxLinkedMark = (typeof INBOX_LINKED_MARKS)[number];
 
 /**

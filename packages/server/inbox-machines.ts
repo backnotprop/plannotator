@@ -24,7 +24,7 @@
  *    (`link-back`, `unlink`).
  */
 
-import { INBOX_LINKED_MARKS, inboxRowArchived, isInboxId, type InboxAgentsGroup, type InboxListRow, type InboxMachineAccountsRead } from "@plannotator/core/inbox-types";
+import { INBOX_LINKED_MARKS, inboxRowArchived, isInboxId, type InboxAgentsGroup, type InboxInitiative, type InboxListRow, type InboxMachineAccountsRead } from "@plannotator/core/inbox-types";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { inboxSnoozeRefusal, inboxSnoozeRunning } from "@plannotator/core/inbox-snooze";
@@ -1145,6 +1145,9 @@ export function createInboxMachines(context: InboxMachinesContext) {
   };
   /** Each linked machine's starred threads, in its own order, from a machine that takes stars from this one. */
   const pinnedIds = (): string[] => [...peers.values()].flatMap((peer) => (peer.list?.marks.includes("star") ? peer.list.pins : []));
+  /** Each linked machine's live tags, from a machine that takes tags from this one (an older one's stay its own). */
+  const tagLists = (): { machine: string; tags: InboxInitiative[] }[] =>
+    [...peers.values()].flatMap((peer) => (peer.list?.marks.includes("tags") ? [{ machine: peer.id, tags: peer.list.tags }] : []));
   const projectOwner = (projectId: string): string | null => {
     for (const peer of peers.values()) if (peer.list?.projects.some((p) => p.id === projectId)) return peer.id;
     return null;
@@ -1181,6 +1184,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
     sessionNames,
     projectOwner,
     pinnedIds,
+    tagLists,
     snoozeThread,
     /** The linked machine a device on this Inbox's door belongs to (a launch it starts here records it), or null. */
     machineOfDevice: (deviceId: string): { machine: string; name: string } | null => {

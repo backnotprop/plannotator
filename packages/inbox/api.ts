@@ -331,8 +331,9 @@ export interface ListModel {
   /**
    * The live tags, oldest first (approval "inbox-thread-tags"): the sidebar's Tags and the Add tag list; each row's
    * `tags` names them. Absent from an older Inbox: the window then draws no Tags section and offers no Add tag.
+   * Merged: one per name across the linked machines that take tags, `machines` its id on each (InboxMachineTag).
    */
-  tags?: InboxInitiative[];
+  tags?: (InboxInitiative & { machines?: Record<string, string> })[];
   /** The version of this list, named by the next read so only what changed comes back (listRead.ts). Absent from an older Inbox. */
   list_version?: string;
   /**
@@ -564,16 +565,6 @@ export interface SettingsModel {
   list_intro?: { due: boolean };
   /** The one-time Snooze announcement waits to be claimed by this page (POST /api/inbox/snooze-intro). Absent from an older Inbox. */
   snooze_intro?: { due: boolean };
-  /**
-   * The line of one-time dialogs: the one this page may arm, or null; `ahead`: the offers it may also arm, each going
-   * as soon as its own moment comes (List view); `setup`: the agent note may show on this load (absent from an older
-   * Inbox: it may); `line`: this Inbox keeps the line (a release build), so the update-day dialogs (sound, list
-   * options, voice) show only when `next` names them; `aside`: the star ask, which this page may arm beside `next` (it
-   * stands outside the line's order); `launch_tip`: the Launch tip may show at the first plain New message (outside the
-   * line; absent from an older Inbox: it never shows); `sidebar_tip`: the Sidebar tip may show at a calm moment beside
-   * the open sidebar (outside the line; absent from an older Inbox: it never shows). The whole field is absent from an
-   * older Inbox.
-   */
   reveal?: { next: InboxRevealId | null; ahead?: InboxRevealId[]; setup?: boolean; line?: boolean; aside?: InboxRevealId[]; launch_tip?: boolean; sidebar_tip?: boolean; /** ms until a date can change the line, or null (reveals.ts `revealAgainAt`). */ again_in?: number | null };
   /** Voice dictation (config.json inboxVoice). Absent from an Inbox that predates it. */
   voice?: InboxVoiceSettings;
@@ -2005,9 +1996,9 @@ export const inboxApi = {
     post<{ card: InboxCardWire }>(inboxUrl(`/cards/${encodeURIComponent(id)}`), { op: 'initiative', initiative }),
   /** A new initiative, named. */
   createInitiative: (name: string) => post<{ initiative: InboxInitiative }>(inboxUrl('/initiatives'), { name }),
-  /** An initiative renamed, or deleted (its cards read as in none). */
-  changeInitiative: (id: string, change: { op: 'rename'; name: string } | { op: 'delete' } | { op: 'restore' }) =>
-    post<{ initiative: InboxInitiative }>(inboxUrl(`/initiatives/${encodeURIComponent(id)}`), change),
+  /** An initiative renamed, or deleted (its cards read as in none). `machine`: a linked machine's tag, changed there. */
+  changeInitiative: (id: string, change: { op: 'rename'; name: string } | { op: 'delete' } | { op: 'restore' }, machine?: string | null) =>
+    post<{ initiative: InboxInitiative }>(inboxUrl(`/initiatives/${encodeURIComponent(id)}`, undefined, machine), change),
   /** The person's move: `move` to a column, `drop` (Cancel, reason optional), `restore`. */
   moveCard: (id: string, change: { op: 'move'; column: InboxCardColumn } | { op: 'drop'; reason?: string | null } | { op: 'restore' }) =>
     post<{ card: InboxCardWire }>(inboxUrl(`/cards/${encodeURIComponent(id)}`), change),
@@ -2069,6 +2060,10 @@ export const inboxApi = {
   },
   /** Merge a PR the person confirmed (the popover's second click), at the head they saw. The server asks the forge first. */
   pullMerge: (key: string, headSha: string) => post<{ ok: true; key: string; method: 'merge' | 'squash' | 'rebase' | null; url: string }>(inboxUrl('/pulls/merge'), { key, head_sha: headSha, confirmed: true }),
+  /** The board's Close (approval "inbox-pr-board-bulk"): the host is asked first; a refusal throws its words. */
+  pullClose: (key: string) => post<{ ok: true; key: string; url: string }>(inboxUrl('/pulls/close'), { key }),
+  /** Close's Undo: taken only for a PR this Inbox closed in the last few minutes. */
+  pullReopen: (key: string) => post<{ ok: true; key: string; url: string }>(inboxUrl('/pulls/reopen'), { key }),
   pullOwnerCheck: (keys: readonly string[], projectId: string) => post<{ ok: true }>(inboxUrl('/pulls/owner'), { keys: [...keys], project_id: projectId, validate_only: true }),
   seeBoard: (throughSeq: number) => post<{ seen_seq: number }>(inboxUrl('/cards/seen'), { through_seq: throughSeq }),
   /** The Board's first-visit dialog: the first page on this computer to ask gets `show: true`, once per machine. */
@@ -2179,8 +2174,11 @@ export const inboxApi = {
   /** Add the thread to Priority (`true`) or remove it, or (`restore`) put back a `before` an earlier write answered. On the thread's own machine. */
   priority: (threadId: string, change: boolean | { restore: InboxPriorityBefore }) =>
     post<{ before: InboxPriorityBefore }>(threadUrl(threadId, '/priority'), typeof change === 'boolean' ? { priority: change } : change),
-  /** Put a thread in a tag (`on`) or take it out (approval "inbox-thread-tags"): the thread's tags after. */
-  setThreadTag: (threadId: string, tag: string, on: boolean) => post<{ tags: string[] }>(inboxUrl(`/threads/${encodeURIComponent(threadId)}/tags`), { tag, on }),
+  /**
+   * Put a thread in a tag (`on`) or take it out (approval "inbox-thread-tags"): the thread's tags after. On the thread's
+   * own machine, by the tag's id there or by its name (`{ name }`: that machine makes the tag when it has none).
+   */
+  setThreadTag: (threadId: string, tag: { tag: string } | { name: string }, on: boolean) => post<{ tags: string[] }>(threadUrl(threadId, '/tags'), { ...tag, on }),
   /** Snooze the thread until a time, or end its snooze (`null`). `at`: an earlier snooze's own time, for an Undo. On the thread's own machine. */
   snooze: (threadId: string, until: string | null, at?: string) =>
     post<{ snoozed: { until: string; at: string } | null }>(threadUrl(threadId, '/snooze'), { until, ...(at ? { at } : {}) }),
