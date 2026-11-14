@@ -7,8 +7,8 @@
  */
 import { expect, test } from '@playwright/test';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { accessSync, constants, existsSync, mkdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { delimiter, join, resolve } from 'node:path';
 import { TagConnection } from '../helpers/inbox-tag-world';
 import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
 import { NO_BROWSER } from '../helpers/no-browser';
@@ -31,6 +31,25 @@ const FIRST_RUN: Record<string, string> = {
   'plannotator-review-dest-spotlight-seen': '1',
   'plannotator-token-hover-announcement-seen': '1',
 };
+
+function ownPath(root: string): string {
+  const bin = join(root, 'bin');
+  mkdirSync(bin, { recursive: true });
+  const found = (process.env.PATH ?? '')
+    .split(delimiter)
+    .filter(Boolean)
+    .map((dir) => join(dir, 'git'))
+    .find((file) => {
+      try {
+        accessSync(file, constants.X_OK);
+        return statSync(file).isFile();
+      } catch {
+        return false;
+      }
+    });
+  if (found) symlinkSync(found, join(bin, 'git'));
+  return [bin, '/usr/bin', '/bin'].join(delimiter);
+}
 
 function git(cwd: string, ...args: string[]) {
   const result = spawnSync('git', args, { cwd, encoding: 'utf8' });
@@ -57,8 +76,9 @@ test('a comment reaches the agent that opened the review, its answer lands live 
   const root = inboxScratch('plannotator-review-live-');
   const dataDir = join(root, 'data');
   const env = {
-    PATH: process.env.PATH ?? '',
+    PATH: ownPath(root),
     HOME: root,
+    PLANNOTATOR_AI: 'disabled',
     PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9',
     PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_BROWSER: NO_BROWSER,
@@ -130,7 +150,7 @@ test('a comment reaches the agent that opened the review, its answer lands live 
     await card.locator('[data-live-reply]').click();
     const box = card.locator('[data-live-composer] textarea');
     await box.click();
-    await box.pressSequentially('Pi, can you add a test? @');
+    await box.pressSequentially('Pi, can you add a test? @Pi');
     await box.press('ArrowDown');
     await box.press('Enter');
     await expect(box).toHaveValue(/@Pi /);
