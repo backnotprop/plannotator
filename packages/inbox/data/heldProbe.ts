@@ -9,7 +9,7 @@ import { heldThread, isThreadStale, showableThread } from './queries/thread';
 export interface HeldProbeRead {
   error?: string;
   busy: number;
-  threads: { threadId: string; held: ThreadModel; fresh: ThreadModel }[];
+  threads: { threadId: string; held: ThreadModel; fresh: ThreadModel; note?: string }[];
   list: { held: ListModel; fresh: ListModel } | null;
 }
 
@@ -39,7 +39,10 @@ async function readHeld(client: QueryClient): Promise<HeldProbeRead> {
         if (machineOf(threadId)) return null;
         throw cause;
       });
-      if (fresh) threads.push({ threadId, held, fresh });
+      if (!fresh) continue;
+      const state = client.getQueryState(inboxKeys.thread(threadId));
+      const note = `open ${threadId === open}, stale ${isThreadStale(client, threadId)}, held cursor ${held.cursor}, fresh cursor ${fresh.cursor}, applied ${JSON.stringify((held as { applied?: unknown }).applied ?? null)}, updated ${Date.now() - (state?.dataUpdatedAt ?? 0)} ms ago`;
+      threads.push({ threadId, held, fresh, note });
     }
     const list = heldList(client);
     const fresh = list ? ((await (await fetch(WHOLE_LIST, { headers: { Accept: 'application/json' } })).json()) as ListModel) : null;

@@ -40,9 +40,9 @@ const read = (page: Page): Promise<HeldProbeRead | null> =>
 
 function driftOf(read: HeldProbeRead): string | null {
   const out: string[] = [];
-  for (const { threadId, held, fresh } of read.threads) {
+  for (const { threadId, held, fresh, note } of read.threads) {
     const drift = threadDrift(held, fresh);
-    if (drift) out.push(`thread ${threadId}:\n${drift}`);
+    if (drift) out.push(`thread ${threadId} (${note ?? ''}):\n${drift}`);
   }
   const list = read.list && listDrift(read.list.held, read.list.fresh);
   if (list) out.push(`list:\n${list}`);
