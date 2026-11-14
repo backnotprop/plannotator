@@ -45,6 +45,15 @@ export function StageLabel({ children, side }: { children: React.ReactNode; side
   );
 }
 
+function LabelRow({ left, right, width, offset = 0 }: { left: string; right?: string; width?: number; offset?: number }) {
+  return (
+    <div className="mb-1 flex justify-between text-xs leading-5 text-muted-foreground" style={{ width, marginLeft: offset }} data-stage-labels-above="">
+      <span data-stage-label="left">{left}</span>
+      {right && <span data-stage-label="right">{right}</span>}
+    </div>
+  );
+}
+
 export function DifferenceOverlay({ mask, stage, color }: { mask: DifferenceMask; stage: Size; color: string }) {
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
@@ -110,18 +119,22 @@ export function SinglePane(props: {
   mask?: DifferenceMask | null;
   maskColor: string;
   label?: string;
+  labelAbove?: boolean;
   onScrollPosition?: (left: number, top: number) => void;
   scrollTo?: { left: number; top: number } | null;
 }) {
   const { layout } = props;
   return (
+    <>
+    {props.label && props.labelAbove && <LabelRow left={props.label} />}
     <Viewport layout={layout} maxHeight={props.maxHeight} onScrollPosition={props.onScrollPosition} scrollTo={props.scrollTo}>
       <div data-image-stage="" className="relative" style={{ width: layout.stage.width, height: layout.stage.height }}>
         <ImageLayer image={props.image} box={props.box} pixelated={layout.pixelated} side={props.side} />
         {props.mask && <DifferenceOverlay mask={props.mask} stage={layout.stage} color={props.maskColor} />}
-        {props.label && <StageLabel side="left">{props.label}</StageLabel>}
+        {props.label && !props.labelAbove && <StageLabel side="left">{props.label}</StageLabel>}
       </div>
     </Viewport>
+    </>
   );
 }
 
@@ -136,6 +149,7 @@ export function StackedStage(props: {
   opacity: number;
   mask?: DifferenceMask | null;
   maskColor: string;
+  labelsAbove?: boolean;
 }) {
   const { layout, mode } = props;
   const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
@@ -148,7 +162,10 @@ export function StackedStage(props: {
     props.onPosition(Math.min(1, Math.max(0, (clientX - rect.left) / rect.width)));
   };
   const swipe = mode === 'swipe';
+  const overlayLabels = swipe && !props.labelsAbove;
   return (
+    <>
+    {swipe && props.labelsAbove && <LabelRow left="Before" right="After" width={layout.stage.width} offset={layout.offsetX} />}
     <Viewport layout={layout} maxHeight={props.maxHeight}>
       <div
         ref={stageRef}
@@ -204,8 +221,8 @@ export function StackedStage(props: {
           style={swipe ? { clipPath: `inset(0 0 0 ${clipX}px)` } : { opacity: props.opacity }}
         />
         {props.mask && <DifferenceOverlay mask={props.mask} stage={layout.stage} color={props.maskColor} />}
-        {swipe && <StageLabel side="left">Before</StageLabel>}
-        {swipe && <StageLabel side="right">After</StageLabel>}
+        {overlayLabels && <StageLabel side="left">Before</StageLabel>}
+        {overlayLabels && <StageLabel side="right">After</StageLabel>}
         {swipe && (
           <div aria-hidden="true" data-swipe-divider="" className="pointer-events-none absolute top-0 bottom-0" style={{ left: clipX }}>
             <div className="absolute inset-y-0 -left-px w-0.5 bg-primary" />
@@ -218,5 +235,6 @@ export function StackedStage(props: {
         )}
       </div>
     </Viewport>
+    </>
   );
 }

@@ -36,10 +36,27 @@ describe('stageLayout keeps both images registered', () => {
     }
   }
 
-  test('small images scale up by whole steps, so pixels stay square', () => {
-    expect(fitScale({ width: 16, height: 16 }, { width: 600, height: 480 })).toBe(8);
-    expect(fitScale({ width: 100, height: 100 }, { width: 350, height: 480 })).toBe(3);
+  test('fit never draws a raster image above its natural size', () => {
+    expect(fitScale({ width: 96, height: 96 }, { width: 600, height: 480 })).toBe(1);
     expect(fitScale({ width: 2000, height: 1000 }, { width: 1000, height: 480 })).toBeCloseTo(0.48);
+    const icon = stageLayout({ old: { width: 96, height: 96 }, new: { width: 96, height: 96 }, available: { width: 900, height: 640 }, zoom: 'fit', dpr: 2 });
+    expect(icon.stage).toEqual({ width: 96, height: 96 });
+    expect(icon.pixelated).toBe(false);
+  });
+
+  test('an SVG may scale up, at most four times and never past the pane', () => {
+    expect(fitScale({ width: 64, height: 64 }, { width: 900, height: 640 }, true)).toBe(4);
+    expect(fitScale({ width: 64, height: 64 }, { width: 200, height: 640 }, true)).toBeCloseTo(3.125);
+    const logo = stageLayout({ old: { width: 64, height: 64 }, new: { width: 64, height: 64 }, available: { width: 900, height: 640 }, zoom: 'fit', dpr: 1, vector: true });
+    expect(logo.stage).toEqual({ width: 256, height: 256 });
+    expect(logo.pixelated).toBe(false);
+  });
+
+  test('Actual size is 100% for every kind', () => {
+    for (const vector of [false, true]) {
+      const layout = stageLayout({ old: { width: 64, height: 64 }, new: { width: 64, height: 64 }, available: { width: 900, height: 640 }, zoom: 'actual', dpr: 2, vector });
+      expect(layout.stage).toEqual({ width: 64, height: 64 });
+    }
   });
 });
 

@@ -5,7 +5,7 @@ export interface Size {
 
 export type ImageZoom = 'fit' | 'actual';
 
-export const MAX_FIT_UPSCALE = 8;
+export const MAX_VECTOR_UPSCALE = 4;
 
 export interface StageLayout {
   scale: number;
@@ -33,11 +33,10 @@ export function unionCanvas(a: Size | null, b: Size | null): Size {
   };
 }
 
-export function fitScale(canvas: Size, available: Size): number {
+export function fitScale(canvas: Size, available: Size, vector = false): number {
   if (canvas.width <= 0 || canvas.height <= 0 || available.width <= 0 || available.height <= 0) return 1;
   const raw = Math.min(available.width / canvas.width, available.height / canvas.height);
-  if (raw >= 1) return Math.min(MAX_FIT_UPSCALE, Math.max(1, Math.floor(raw)));
-  return raw;
+  return Math.min(raw, vector ? MAX_VECTOR_UPSCALE : 1);
 }
 
 export function stageLayout(options: {
@@ -46,14 +45,15 @@ export function stageLayout(options: {
   available: Size;
   zoom: ImageZoom;
   dpr: number;
+  vector?: boolean;
 }): StageLayout {
   const canvas = unionCanvas(options.old, options.new);
-  const scale = options.zoom === 'actual' ? 1 : fitScale(canvas, options.available);
+  const scale = options.zoom === 'actual' ? 1 : fitScale(canvas, options.available, options.vector === true);
   const size = (s: Size | null): Size | null =>
     s ? { width: floorToDevice(s.width * scale, options.dpr), height: floorToDevice(s.height * scale, options.dpr) } : null;
   const stage = size(canvas)!;
   const offsetX = stage.width < options.available.width ? floorToDevice((options.available.width - stage.width) / 2, options.dpr) : 0;
-  return { scale, stage, old: size(options.old), new: size(options.new), offsetX, pixelated: scale > 1 };
+  return { scale, stage, old: size(options.old), new: size(options.new), offsetX, pixelated: scale > 1 && options.vector !== true };
 }
 
 export function swipeClipX(position: number, stageWidth: number, dpr: number): number {
