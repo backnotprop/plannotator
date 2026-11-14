@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React, { useLayoutEffect, useRef } from 'react';
 import type { ReviewSidebarTab } from './ReviewSidebar';
 
 export interface ReviewSidebarTabItem {
@@ -18,6 +18,16 @@ export const ReviewSidebarTabs: React.FC<{
 }> = ({ tabs, active, onSelect }) => {
   const listRef = useRef<HTMLDivElement>(null);
 
+  useLayoutEffect(() => {
+    const list = listRef.current;
+    const tab = list?.querySelector<HTMLElement>(`#${TAB_ID(active)}`);
+    if (!list || !tab) return;
+    const left = tab.offsetLeft - list.offsetLeft;
+    const right = left + tab.offsetWidth;
+    if (left < list.scrollLeft) list.scrollLeft = left;
+    else if (right > list.scrollLeft + list.clientWidth) list.scrollLeft = right - list.clientWidth;
+  }, [active, tabs.length]);
+
   const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
     if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
@@ -30,7 +40,7 @@ export const ReviewSidebarTabs: React.FC<{
   };
 
   return (
-    <div ref={listRef} role="tablist" aria-label="Review panel" className="flex h-full items-stretch gap-4" onKeyDown={onKeyDown}>
+    <div ref={listRef} role="tablist" aria-label="Review panel" className="flex h-full min-w-0 flex-1 items-stretch gap-4 overflow-x-auto overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" onKeyDown={onKeyDown} data-review-sidebar-tablist="">
       {tabs.map((tab) => {
         const selected = tab.id === active;
         return (
@@ -44,13 +54,13 @@ export const ReviewSidebarTabs: React.FC<{
             tabIndex={selected ? 0 : -1}
             data-review-sidebar-tab={tab.id}
             onClick={() => onSelect(tab.id)}
-            className={`relative flex items-center gap-1.5 text-[13px] font-medium whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 rounded-sm ${
+            className={`relative flex flex-none items-center gap-1.5 text-[13px] font-medium whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 rounded-sm ${
               selected ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'
             }`}
           >
             {tab.label}
             {tab.count !== undefined && tab.count > 0 && (
-              <span className="text-[12px] font-normal tabular-nums text-muted-foreground">{tab.count > 99 ? '99+' : tab.count}</span>
+              <span className="inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-muted px-1 text-[12px] font-normal leading-none tabular-nums text-muted-foreground" data-tab-count="">{tab.count > 99 ? '99+' : tab.count}</span>
             )}
             {tab.attention && !selected && <span className="w-1.5 h-1.5 rounded-full bg-primary" aria-label="New activity" />}
             {selected && <span aria-hidden="true" className="pointer-events-none absolute inset-x-0 bottom-0 h-0.5 rounded-full bg-foreground" />}

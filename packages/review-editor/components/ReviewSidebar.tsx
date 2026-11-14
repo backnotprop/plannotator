@@ -633,7 +633,7 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
       aria-label={presentation === 'overlay' ? 'Review sidebar' : undefined}
       className={presentation === 'overlay'
         ? 'absolute inset-0 z-40 flex min-w-0 flex-col bg-background'
-        : 'border-l border-border bg-card/30 flex flex-col flex-shrink-0'
+        : 'border-l border-border bg-card/30 flex flex-col flex-shrink-0 min-w-0 overflow-hidden'
       }
       style={presentation === 'overlay' ? undefined : { width: width ?? 288 }}
     >
