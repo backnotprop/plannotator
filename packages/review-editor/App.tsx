@@ -233,7 +233,7 @@ import { annotationMatchesPrScope, proseAnnotationMatchesPr } from './utils/anno
 import { annotationNavigation, reanchorCodeAnnotations, restorableViewedFiles } from '@plannotator/ui/utils/codeAnnotationAnchor';
 import { localReviewDraftTransport, withLocalReviewTarget } from './utils/localReviewDraft';
 import type { DiffOption, GitContext, SinceBaseSections, CommitDiffInfo, ReviewSourceKind } from '@plannotator/shared/types';
-import type { ReviewPanelHeaderModel } from './components/ReviewPanelHeader';
+import { diffWords, type ReviewPanelHeaderModel } from './components/ReviewPanelHeader';
 import { CommitsPanel } from './components/CommitsPanel';
 import { useCommitsView } from './hooks/useCommitsView';
 import { shouldRepairPanelPair } from './utils/panelPairRepair';
@@ -247,6 +247,7 @@ import type { PRDiffScope, PRDiffScopeOption, PRStackInfo, PRStackTree } from '@
 import { altKey, isMac } from '@plannotator/ui/utils/platform';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 import { GuideScreen } from './components/guide/GuideScreen';
+import { useAgentsPanelSlots, reviewScopeText } from './components/AgentsPanelSlots';
 import { DEMO_GUIDE_ID } from './demoGuide';
 import { buildPRArtifacts } from './utils/prArtifacts';
 import { useMarkdownPreview, useMarkdownPreviewKeys } from './hooks/useMarkdownPreview';
@@ -2181,6 +2182,15 @@ const ReviewApp: React.FC = () => {
     (job: AgentJobInfo) => jobMatchesReviewContext(job, prMetadata?.url, activeWorktreePath),
     [prMetadata, activeWorktreePath],
   );
+  const guideHasContent = activeGuideJobId !== null || agentJobs.jobs.some((j) => j.provider === 'guide' && jobMatchesCurrentContext(j));
+  const launchPadReachable = aiUIEnabled && agentJobs.capabilities?.available === true;
+  const toggleGuideOrLaunchPad = useCallback(() => {
+    if (!guideOpen && !guideHasContent && launchPadReachable) {
+      reviewSidebar.open('agents');
+      return;
+    }
+    setGuideOpen((prev) => !prev);
+  }, [guideOpen, guideHasContent, launchPadReachable, reviewSidebar.open]);
 
   // A `saved:{id}` guide has no AgentJobInfo, so GuideScreen's context match
   // passes trivially (unknown ids are tolerated by design, for the demo path).
@@ -2578,11 +2588,11 @@ const ReviewApp: React.FC = () => {
       if ((e.metaKey || e.ctrlKey) && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'g' && !isTypingTarget(e.target)) {
         if (aiUIEnabled && hasSearchableFiles) {
           e.preventDefault();
-          if (isCompactTouchLayout && !guideOpen) {
+          if (isCompactTouchLayout && !guideOpen && guideHasContent) {
             setIsCompactNavigatorOpen(false);
             reviewSidebar.close();
           }
-          setGuideOpen(prev => !prev);
+          toggleGuideOrLaunchPad();
         }
       }
       // Cmd/Ctrl+. to toggle sidebar
@@ -2596,7 +2606,7 @@ const ReviewApp: React.FC = () => {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showExportModal, showDestinationMenu, isSearchOpen, searchQuery, searchMatches, isSearchPending, openSearch, stepSearchMatch, clearSearch, closeSearch, aiUIEnabled, hasSearchableFiles, showCommitsPanel, reviewSidebar.isOpen, reviewSidebar.open, reviewSidebar.close, isFileTreeOpen, guideOpen, isCompactTouchLayout, isCompactNavigatorOpen, toggleNavigator]);
+  }, [showExportModal, showDestinationMenu, isSearchOpen, searchQuery, searchMatches, isSearchPending, openSearch, stepSearchMatch, clearSearch, closeSearch, aiUIEnabled, hasSearchableFiles, showCommitsPanel, reviewSidebar.isOpen, reviewSidebar.open, reviewSidebar.close, isFileTreeOpen, guideOpen, isCompactTouchLayout, isCompactNavigatorOpen, toggleNavigator, guideHasContent, toggleGuideOrLaunchPad]);
 
 
   // Load diff content - try API first, fall back to demo
@@ -4373,6 +4383,16 @@ const ReviewApp: React.FC = () => {
     setScrollTargetAnnotation(prev => ({ id, token: (prev?.token ?? 0) + 1 }));
   }, [files, handleFileSwitch, prMetadata, prDiffScope, guideOpen, openCallFlowPanel, handleFileViewChange, openRepoFile]);
 
+  const agentsPanel = useAgentsPanelSlots({
+    enabled: !!origin && agentJobs.capabilities?.available === true,
+    prMode: !!prMetadata,
+    contextKey: `${prMetadata?.url ?? ''}|${activeWorktreePath ?? ''}|${gitContext?.currentBranch ?? ''}`,
+    jobs: agentJobs.jobs,
+    onOpenGuide: handleOpenGuide,
+    openDiffFile,
+    navigateToAnnotation: handleNavigateToAnnotation,
+  });
+
   // Diff context bundled into local-mode feedback headers so the receiving
   // agent knows which diff the annotations are anchored to. Uses committedBase
   // (what the server actually computed) and activeDiffBase/activeWorktreePath
@@ -5616,6 +5636,12 @@ const ReviewApp: React.FC = () => {
     onGoToFile: dockApi ? () => setGoToFileOpen(true) : undefined,
     searching: hasSearchableFiles && !!searchQuery.trim(),
   };
+  const agentsScope = reviewScopeText({
+    prLabel: prMetadata ? getMRNumberLabel(prMetadata) : null,
+    ...diffWords(panelHeader),
+    base: panelHeader.base?.selectedBase ?? null,
+    files,
+  });
 
   const reviewStatusProps = {
     platformActionError,
@@ -5697,7 +5723,7 @@ const ReviewApp: React.FC = () => {
                       markGuideHintSeen();
                       setGuideHintActive(false);
                     }
-                    setGuideOpen(prev => !prev);
+                    toggleGuideOrLaunchPad();
                   }}
                   className={`relative flex h-7 shrink-0 items-center gap-1 px-2 rounded-md text-xs font-medium transition-colors ${
                     guideOpen ? 'bg-primary/15 text-primary' : 'bg-muted hover:bg-muted/80'
@@ -5989,8 +6015,12 @@ const ReviewApp: React.FC = () => {
                   markGuideHintSeen();
                   setGuideHintActive(false);
                 }
-                reviewSidebar.close();
                 setIsCompactNavigatorOpen(false);
+                if (!guideHasContent && launchPadReachable) {
+                  reviewSidebar.open('agents');
+                  return;
+                }
+                reviewSidebar.close();
                 setGuideOpen(true);
               } : undefined}
               onOpenAnnotations={isCompactTouchLayout ? () => reviewSidebar.open('annotations') : undefined}
@@ -6363,6 +6393,9 @@ const ReviewApp: React.FC = () => {
                 onAgentKillJob={agentJobs.killJob}
                 onAgentKillAll={agentJobs.killAll}
                 externalAnnotations={externalAnnotations}
+                onOpenFinding={agentsPanel.onOpenFinding}
+                agentsScope={agentsScope}
+                agentsGuides={agentsPanel.agentsGuides}
                 onOpenJobDetail={handleOpenJobDetail}
                 onOpenGuide={handleOpenGuide}
                 guideLaunchable={aiUIEnabled && hasSearchableFiles}

@@ -156,7 +156,7 @@ import {
 } from "./claude-review";
 import { createGuideSession, GUIDE_EMPTY_OUTPUT_ERROR } from "./guide/guide-review";
 import { GuideShareError, shareGuide, unshareBeforeDelete, unshareGuide } from "./guide/guide-share";
-import { createGuideStoreSession, SAVED_GUIDE_ID_PREFIX, updateGuideShare } from "@plannotator/shared/guide-store";
+import { createGuideStoreSession, normalizeGuideTitle, SAVED_GUIDE_ID_PREFIX, updateGuideShare } from "@plannotator/shared/guide-store";
 import { resolveGuideShareUrl, resolveSharingEnabled } from "@plannotator/shared/config";
 import {
   buildGuideSnapshot,
@@ -2537,6 +2537,20 @@ export async function startReviewServer(
             const savedId = decodeURIComponent(savedGuideDeleteMatch[1]);
             await unshareBeforeDelete((await guideStore.locateEnvelope(`${SAVED_GUIDE_ID_PREFIX}${savedId}`))?.envelope.share);
             const ok = await guideStore.deleteSaved(savedId);
+            if (!ok) return Response.json({ error: "Guide not found" }, { status: 404 });
+            return Response.json({ ok: true });
+          }
+
+          if (savedGuideDeleteMatch && req.method === "PATCH") {
+            const savedId = decodeURIComponent(savedGuideDeleteMatch[1]);
+            let body: { title?: unknown };
+            try {
+              body = (await req.json()) as { title?: unknown };
+            } catch {
+              return Response.json({ error: "Invalid JSON" }, { status: 400 });
+            }
+            if (!normalizeGuideTitle(body?.title)) return Response.json({ error: "A title is 1 to 200 characters." }, { status: 400 });
+            const ok = await guideStore.renameSaved(savedId, body.title as string);
             if (!ok) return Response.json({ error: "Guide not found" }, { status: 404 });
             return Response.json({ ok: true });
           }

@@ -19,6 +19,7 @@ import type { GuideGlobalComments } from '@plannotator/guide-viewer/host';
 import { GuideExportButton } from './GuideExportButton';
 import { GuideDiffControls, nextGuideCollapseAll, type GuideCollapseAll } from './GuideDiffControls';
 import { filesViewedByTickingSection } from '../../utils/guideReviewedViewed';
+import { resumeFile } from '../../utils/guidesListModel';
 
 interface GuideScreenProps {
   /** Latest completed guide job id (or the demo guide id in standalone mode).
@@ -339,6 +340,16 @@ function ActiveGuide({
     const firstResolvable = allRefs.find((ref) => filePathsInDiff.has(ref.file));
     if (firstResolvable) setFocusedFile(firstResolvable.file);
   }, [guide, focusedFile, state.files]);
+
+  const resumedRef = useRef(false);
+  useEffect(() => {
+    if (resumedRef.current || !guide || reviewed.length === 0) return;
+    resumedRef.current = true;
+    const file = resumeFile(guide.sections, reviewed, filesInDiff);
+    if (!file) return;
+    setFocusedFile(file);
+    state.onGuideRevealFile?.(file);
+  }, [guide, reviewed, filesInDiff, state.onGuideRevealFile]);
 
   const handleFixOutput = async () => {
     if (!failedJob || repairing) return;

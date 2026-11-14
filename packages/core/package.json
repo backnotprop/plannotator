@@ -92,6 +92,7 @@
     "./workspace-status-types": "./workspace-status-types.ts",
     "./ai-context": "./ai-context.ts",
     "./model-catalog": "./model-catalog.ts",
+    "./model-fallbacks": "./model-fallbacks.ts",
     "./types": "./types.ts",
     ".": "./index.ts",
     "./guide-format-fixtures": "./guide-format-fixtures.ts",
