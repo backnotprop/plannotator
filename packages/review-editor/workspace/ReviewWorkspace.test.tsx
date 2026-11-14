@@ -169,19 +169,20 @@ describe.skipIf(!hasDom)('the review panes', () => {
     resetStorageBackend();
   });
 
-  test('every tab opened is remembered, a preview or one opened into the pane that is not focused, and comes back on reload', async () => {
+  test('every tab opened is remembered, the diff tab Go to file uses, a preview, one opened into the pane that is not focused, and comes back on reload', async () => {
     const { setStorageBackend, resetStorageBackend } = await import('@plannotator/ui/utils/storage');
     const memory = new Map<string, string>();
     setStorageBackend({ getItem: (key) => memory.get(key) ?? null, setItem: (key, value) => { memory.set(key, value); }, removeItem: (key) => { memory.delete(key); } });
     await mount(false, { reviewKey: 'repo#reload' });
     await act(async () => { api!.addPanel({ id: 'review-file:balance.ts', component: 'review-file', title: 'balance.ts', params: { filePath: 'balance.ts' }, position: { referencePanel: 'review-all-files', direction: 'right' } }); });
-    await act(async () => { api!.addPanel({ id: 'review-file-preview:1', component: 'review-file', title: 'validate.ts', params: { filePath: 'validate.ts', preview: true }, position: { referencePanel: 'review-all-files', direction: 'within' } }); });
+    await act(async () => { api!.addPanel({ id: 'review-diff', component: 'review-diff', title: 'validate.ts', params: { filePath: 'validate.ts' }, position: { referencePanel: 'review-all-files', direction: 'within' } }); });
+    await act(async () => { api!.addPanel({ id: 'review-file-preview:1', component: 'review-file', title: 'entries.ts', params: { filePath: 'entries.ts', preview: true }, position: { referencePanel: 'review-all-files', direction: 'within' } }); });
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 350)); });
     await act(async () => root?.unmount());
     host?.remove();
     const el = await mount(false, { reviewKey: 'repo#reload' });
     await act(async () => { await Promise.resolve(); });
-    expect([...el.querySelectorAll('[data-pane="0"] [data-pane-tab]')].map((tab) => tab.getAttribute('data-pane-tab'))).toEqual(['review-all-files', 'review-file-preview:1']);
+    expect([...el.querySelectorAll('[data-pane="0"] [data-pane-tab]')].map((tab) => tab.getAttribute('data-pane-tab'))).toEqual(['review-all-files', 'review-diff', 'review-file-preview:1']);
     expect(el.querySelector('[data-pane="1"] [data-pane-tab="review-file:balance.ts"]')).not.toBeNull();
     resetStorageBackend();
   });

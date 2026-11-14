@@ -1,4 +1,7 @@
 import React from 'react';
+import { Menu } from '@base-ui/react/menu';
+import { ChevronDown } from 'lucide-react';
+
 
 export type ChangedFileView = 'changes' | 'whole' | 'original';
 
@@ -34,11 +37,42 @@ export const FileViewSwitch: React.FC<{
       </button>
     );
   };
+  const reasonOf = (key: ChangedFileView) => (key === 'whole' ? wholeUnavailableReason : key === 'original' ? originalUnavailableReason : null);
   return (
-    <div className="flex-none flex items-center bg-muted/50 rounded p-0.5 mr-1" role="group" aria-label="File view" data-file-view-switch>
-      {segment('changes')}
-      {segment('whole')}
-      {segment('original')}
-    </div>
+    <>
+      <div className="flex-none flex items-center bg-muted/50 rounded p-0.5 mr-1 @max-[600px]/file-header:hidden" role="group" aria-label="File view" data-file-view-switch>
+        {segment('changes')}
+        {segment('whole')}
+        {segment('original')}
+      </div>
+      <Menu.Root>
+        <Menu.Trigger
+          data-file-view-menu=""
+          aria-label={`File view: ${LABELS[view].label}`}
+          className="hidden @max-[600px]/file-header:flex flex-none items-center gap-0.5 h-6 px-1.5 mr-1 rounded text-xs font-medium bg-muted/50 text-foreground hover:bg-muted"
+        >
+          {LABELS[view].label}
+          <ChevronDown className="w-3 h-3 text-muted-foreground" aria-hidden="true" />
+        </Menu.Trigger>
+        <Menu.Portal>
+          <Menu.Positioner sideOffset={4} align="end" className="z-[110] outline-none">
+            <Menu.Popup className="min-w-[9rem] rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-lg outline-none">
+              {(['changes', 'whole', 'original'] as const).map((key) => (
+                <Menu.Item
+                  key={key}
+                  disabled={!!reasonOf(key)}
+                  onClick={() => onSelect(key)}
+                  data-file-view-option={key}
+                  title={reasonOf(key) ?? LABELS[key].title}
+                  className={`h-7 flex items-center px-2 rounded-md text-xs outline-none data-[highlighted]:bg-muted data-[disabled]:opacity-40 ${view === key ? 'font-medium text-foreground' : 'text-muted-foreground'}`}
+                >
+                  {LABELS[key].label}
+                </Menu.Item>
+              ))}
+            </Menu.Popup>
+          </Menu.Positioner>
+        </Menu.Portal>
+      </Menu.Root>
+    </>
   );
 };

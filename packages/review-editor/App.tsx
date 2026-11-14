@@ -217,6 +217,7 @@ import { browseView } from './workspace/paneFileView';
 import { referencesPlacement } from './workspace/paneLayout';
 import { REFERENCES_TAB_ID, useReferencesTab } from './workspace/useReferencesTab';
 import { HeaderTotals } from './components/HeaderTotals';
+import { HeaderBranch } from './components/HeaderBranch';
 import { COMPACT_REVIEW_HEADER_HEIGHT, REVIEW_HEADER_HEIGHT } from './utils/diffChromeMetrics';
 import { usePRContext } from './hooks/usePRContext';
 import {
@@ -5752,7 +5753,7 @@ const ReviewApp: React.FC = () => {
         {/* Header */}
         <header style={{ '--review-header-h': `${isCompactTouchLayout ? COMPACT_REVIEW_HEADER_HEIGHT : REVIEW_HEADER_HEIGHT}px` } as React.CSSProperties} className={isCompactTouchLayout
           ? 'relative min-h-[var(--review-header-h)] grid grid-cols-[44px_minmax(0,1fr)_44px] items-center border-b border-border/50 bg-card/50 backdrop-blur-xl z-50'
-          : 'py-1 min-[480px]:py-0 min-[480px]:h-[var(--review-header-h)] flex flex-col min-[480px]:flex-row items-stretch min-[480px]:items-center min-[480px]:justify-between gap-1 min-[480px]:gap-0 px-2 border-b border-border bg-card/50 z-50'
+          : '[&:has([data-pane-tabs-for="1"])_[data-header-shed]]:hidden py-1 min-[480px]:py-0 min-[480px]:h-[var(--review-header-h)] flex flex-col min-[480px]:flex-row items-stretch min-[480px]:items-center min-[480px]:justify-between gap-1 min-[480px]:gap-0 px-2 border-b border-border bg-card/50 z-50'
         }>
           <div className={isCompactTouchLayout
             ? 'contents'
@@ -5811,6 +5812,7 @@ const ReviewApp: React.FC = () => {
                 <span
                   className="min-w-0 max-w-[160px] xl:max-w-[240px] text-xs text-muted-foreground/60 hidden sm:inline-flex items-center gap-1"
                   title={displayRepo}
+                  data-header-shed=""
                 >
                   <RepoIcon className="w-3 h-3 flex-shrink-0" />
                   <span className="truncate">{displayRepo}</span>
@@ -5836,30 +5838,10 @@ const ReviewApp: React.FC = () => {
                     onNavigatePR={handlePRSwitch}
                   />
                 )}
-                {headerTotals}
+                {headerTotals && <span className="flex-none" data-header-shed="">{headerTotals}</span>}
               </div>
             ) : repoInfo ? (
-              <div className={isCompactTouchLayout
-                ? 'min-w-0 flex items-center justify-center gap-2 overflow-hidden px-1'
-                : 'min-w-0 flex shrink items-center gap-2 lg:gap-3 overflow-hidden'
-              }>
-                {repoInfo.branch && (
-                  <span
-                    className="text-xs font-mono text-foreground truncate"
-                    title={repoInfo.branch}
-                  >
-                    {repoInfo.branch}
-                  </span>
-                )}
-                <span
-                  className="text-xs text-muted-foreground inline-flex items-center gap-1 truncate max-w-[220px]"
-                  title={repoInfo.display}
-                >
-                  <RepoIcon className="w-3 h-3 flex-shrink-0" />
-                  {repoName}
-                </span>
-                {headerTotals}
-              </div>
+              <HeaderBranch branch={repoInfo.branch} repo={repoName ?? ''} repoTitle={repoInfo.display} files={files} compact={isCompactTouchLayout} />
             ) : isStaticPatch ? (
               // Honest label for a repo-less session: name the patch that IS
               // the review, never a branch or repo this process happens to

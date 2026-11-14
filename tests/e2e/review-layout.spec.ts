@@ -204,7 +204,14 @@ test('two files side by side, the original next to the current, and the layout b
     await page.locator('[data-tree-open-to-side]').click();
     await expect(page.locator('[data-pane]')).toHaveCount(2);
     await expect(page.locator('[data-pane-divider]')).toBeVisible();
-    await page.locator('[data-pane="1"] [data-file-view="original"]').click();
+    await expect(page.locator('[data-pane="1"] [data-file-header]')).toBeVisible();
+    const viewMenu = page.locator('[data-pane="1"] [data-file-view-menu]');
+    if (await viewMenu.isVisible()) {
+      await viewMenu.click();
+      await page.locator('[data-file-view-option="original"]').click();
+    } else {
+      await page.locator('[data-pane="1"] [data-file-view="original"]').click();
+    }
     await expect(page.locator('[data-pane="1"] [data-original-file-view]')).toBeVisible();
     await expect(page.locator('[data-pane="0"] [data-whole-file-view]')).toBeVisible();
 
@@ -214,7 +221,7 @@ test('two files side by side, the original next to the current, and the layout b
     await page.keyboard.press('ArrowLeft');
     const ratio = await divider.getAttribute('aria-valuenow');
     await page.waitForTimeout(500);
-    await page.reload();
+    await page.reload({ waitUntil: 'domcontentloaded' });
     await expect(page.locator('[data-pane]')).toHaveCount(2);
     await expect(page.locator('[data-pane-divider]')).toHaveAttribute('aria-valuenow', ratio!);
     await expect(page.locator('[data-pane="1"] [data-pane-tab]')).toHaveCount(0);
