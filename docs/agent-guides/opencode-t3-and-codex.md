@@ -175,6 +175,10 @@ entry: see "T3 Code" in `inbox-notifications-and-agents.md`. That is why
 `plannotator t3` is listed (`plannotator --help` points at it, the skill
 documents it); its help leads with that setup.
 
+A Codex thread in T3 needs no grant: the Inbox's Codex wake sends its replies
+with T3's own `t3 thread send` and never `codex queue`s it ("A thread T3 Code
+runs" in `inbox-notifications-and-agents.md`).
+
 Where Claude Code runs hooks modules, the Claude Code mod runs in a T3
 thread's Claude by itself ("A T3 Code thread" in `claude-code-mod.md`): it
 gives the thread `plannotator_inbox` filed as the thread, puts the Inbox's

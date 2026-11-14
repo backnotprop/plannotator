@@ -221,6 +221,7 @@ import { assertInboxUploadsPending, inboxBodyForAgent, inboxDiskFullError, inbox
 import { createInboxLiveSessions, takesOver, thereInThread } from "./inbox-sessions";
 import { inboxAgentsGroup, inboxFolderProject, inboxMergedAgents, inboxStartOfDay, type InboxAgentWait } from "./inbox-agents-list";
 import { createInboxCodexWake, type InboxCodexWake } from "./inbox-codex-wake";
+import { createCodexT3Route } from "./inbox-codex-t3";
 import { createInboxVoice } from "./inbox-voice";
 import { createInboxQwenWake, type InboxQwenWake } from "./inbox-qwen-wake";
 import { createInboxT3Wake, type InboxT3Wake, type T3Connect } from "./inbox-t3-wake";
@@ -4280,6 +4281,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     launched: (session) => launchedCodex(session),
     // A steps-only Tidy wake with steps off is withdrawn, never handed (a switch turned off in config.json by hand).
     skip: (item) => withdrawnTidy(item),
+    // A Codex thread T3 Code runs: its items go into the T3 thread with T3's own `t3` command (inbox-codex-t3.ts).
+    t3: createCodexT3Route({ environment: agentEnvironment }),
     ...(options.codexWake?.extraClis ? { extraClis: options.codexWake.extraClis } : {}),
     ...(options.codexWake?.now ? { now: options.codexWake.now } : {}),
     ...(options.codexWake?.queueTimeoutMs ? { queueTimeoutMs: options.codexWake.queueTimeoutMs } : {}),
