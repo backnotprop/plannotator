@@ -187,7 +187,7 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
       aria-label={viewedKeyHint ? filePath : undefined}
     >
       {paneTabs ? (
-        <div className="min-w-0 flex flex-1 self-stretch items-stretch" data-file-header-tabs="">{paneTabs}</div>
+        <div className="min-w-0 flex flex-1 self-stretch items-stretch" data-file-header-tabs="" data-roving-skip="">{paneTabs}</div>
       ) : (
         <div className="min-w-0 flex flex-1 items-center" onClick={onCollapseToggle} style={onCollapseToggle ? { cursor: 'pointer' } : undefined}>
           {collapseToggle}
