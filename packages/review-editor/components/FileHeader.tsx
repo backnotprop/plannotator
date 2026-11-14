@@ -4,6 +4,7 @@ import { SemanticFileBadge } from './SemanticFileBadge';
 import { CallFlowFileBadge } from './CallFlowFileBadge';
 import { OpenInAppButton } from '@plannotator/ui/components/OpenInAppButton';
 import { useReviewStateOptional } from '../dock/ReviewStateContext';
+import { useRovingToolbar } from '../hooks/useRovingToolbar';
 import type { DiffFileStatus } from '../types';
 import { FileKindIcon } from '@plannotator/guide-viewer/FileKindIcon';
 import { fileStatusLetter } from '@plannotator/ui/utils/fileStatusLetter';
@@ -150,6 +151,7 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
   const isCompactTouchLayout = compactTouchLayout ?? state?.isCompactTouchLayout ?? false;
   const headerRef = useRef<HTMLDivElement>(null);
   const fileCommentRef = useRef<HTMLButtonElement>(null);
+  useRovingToolbar(headerRef, viewedKeyHint);
   const { directory, name } = splitFilePath(filePath);
   const isVeryTight = headerWidth > 0 && headerWidth < 480;
   const narrow = headerWidth > 0 && headerWidth < 560;
@@ -186,6 +188,9 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
       data-file-header=""
       className={`group/file-header flex-shrink-0 border-b border-border flex items-center justify-between gap-2 transition-colors duration-150 hover:bg-muted/30 ${isCompactTouchLayout ? 'pr-3' : 'pl-2 pr-2'}`}
       style={{ height: isCompactTouchLayout ? `${COMPACT_FILE_HEADER_HEIGHT}px` : 'var(--panel-header-h)' }}
+      data-file-header-path={filePath}
+      role={viewedKeyHint ? 'toolbar' : undefined}
+      aria-label={viewedKeyHint ? filePath : undefined}
     >
       <div className="min-w-0 flex flex-1 items-center" onClick={onCollapseToggle} style={onCollapseToggle ? { cursor: 'pointer' } : undefined}>
         {collapseToggle}

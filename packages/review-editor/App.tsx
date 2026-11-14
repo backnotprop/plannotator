@@ -192,6 +192,8 @@ import {
 import { JobLogsProvider } from './dock/JobLogsContext';
 import { ReviewDockRightActions } from './dock/ReviewDockRightActions';
 import { ReviewPanelToggle } from './components/ReviewPanelToggle';
+import { focusFileHeaderWhenLost, focusReviewPanelSoon } from './utils/focusFileHeader';
+import { SkipToReviewPanel } from './components/SkipToReviewPanel';
 import { ReviewHeaderStatus } from './components/ReviewHeaderStatus';
 import { watchLoneTabHeader } from './dock/loneTabHeader';
 import { ReviewCenterArea } from './workspace/ReviewCenterArea';
@@ -443,6 +445,8 @@ const ReviewApp: React.FC = () => {
   const [diffData, setDiffData] = useState<DiffData | null>(null);
   const [files, setFiles] = useState<DiffFile[]>([]);
   const [activeFileIndex, setActiveFileIndex] = useState(0);
+  const activeFileIndexRef = useRef(activeFileIndex);
+  activeFileIndexRef.current = activeFileIndex;
   const [annotations, setAnnotations] = useState<CodeAnnotation[]>([]);
   const annotationsRef = useRef(annotations);
   annotationsRef.current = annotations;
@@ -568,6 +572,10 @@ const ReviewApp: React.FC = () => {
   const reviewSidebar = useSidebar<ReviewSidebarTab>(false, 'annotations');
   const closeReviewSidebar = reviewSidebar.close;
   const openReviewSidebarTab = reviewSidebar.open;
+  const skipToReviewPanel = useCallback(() => {
+    if (!reviewSidebar.isOpen) reviewSidebar.open(reviewSidebar.activeTab);
+    focusReviewPanelSoon(reviewSidebar.activeTab);
+  }, [reviewSidebar]);
   const { tab: referencesTab, show: showReferencesTab } = useReferencesTab(closeReviewSidebar);
   const [isFileTreeOpen, setIsFileTreeOpen] = useState(true);
   const [isCompactNavigatorOpen, setIsCompactNavigatorOpen] = useState(false);
@@ -2510,6 +2518,7 @@ const ReviewApp: React.FC = () => {
       if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'b' && !isTypingTarget(e.target)) {
         e.preventDefault();
         toggleNavigator();
+        focusFileHeaderWhenLost(filesRef.current[activeFileIndexRef.current]?.path);
       }
       // Cmd/Ctrl+Shift+G to toggle the guided review takeover — gated on the
       // same hasSearchableFiles condition as the header badge so the shortcut
@@ -6117,6 +6126,7 @@ const ReviewApp: React.FC = () => {
             inert={isCompactTransientSurfaceOpen || undefined}
             aria-hidden={isCompactTransientSurfaceOpen || undefined}
           >
+            {!isCompactTouchLayout && files.length > 0 && <SkipToReviewPanel onSkip={skipToReviewPanel} />}
             {/* Commit navigation veil: while a commit switch is in flight (or
                 the view was just entered and HEAD auto-select hasn't landed),
                 cover the stale previous diff instead of letting it sit there

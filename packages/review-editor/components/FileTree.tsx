@@ -1,4 +1,5 @@
 import React, { useEffect, useCallback, useState, useMemo, useRef } from 'react';
+import { focusFileHeaderWhenLost } from '../utils/focusFileHeader';
 import { CodeAnnotation } from '@plannotator/ui/types';
 import type {
   JjEvoLogEntry,
@@ -324,25 +325,29 @@ export const FileTree: React.FC<FileTreeProps> = ({
 
       const visualPos = visualOrder.indexOf(activeFileIndex);
 
+      const select = (index: number) => {
+        onSelectFile(index);
+        focusFileHeaderWhenLost(files[index]?.path);
+      };
       if (e.key === 'j' || e.key === 'ArrowDown') {
         e.preventDefault();
         if (visualPos < visualOrder.length - 1) {
-          onSelectFile(visualOrder[visualPos + 1]);
+          select(visualOrder[visualPos + 1]);
         }
       } else if (e.key === 'k' || e.key === 'ArrowUp') {
         e.preventDefault();
         if (visualPos > 0) {
-          onSelectFile(visualOrder[visualPos - 1]);
+          select(visualOrder[visualPos - 1]);
         }
       } else if (e.key === 'Home') {
         e.preventDefault();
-        onSelectFile(visualOrder[0]);
+        select(visualOrder[0]);
       } else if (e.key === 'End') {
         e.preventDefault();
-        onSelectFile(visualOrder[visualOrder.length - 1]);
+        select(visualOrder[visualOrder.length - 1]);
       }
     },
-    [enableKeyboardNav, activeFileIndex, visualOrder, onSelectFile],
+    [enableKeyboardNav, activeFileIndex, visualOrder, onSelectFile, files],
   );
 
   useEffect(() => {
