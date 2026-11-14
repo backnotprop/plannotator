@@ -1,6 +1,7 @@
 import React from 'react';
 import { ContextMenu } from '@base-ui/react/context-menu';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
+import { useReviewStateOptional } from '../dock/ReviewStateContext';
 import type { DiffFile } from '../types';
 import { ViewedControl, StageControl, AnnotationBadge, ChangeTypeLetter, CountColumns } from './FileRowBits';
 
@@ -61,6 +62,7 @@ export const FileTreeFileRow = React.memo(function FileTreeFileRow({
   onToggleViewed,
   onStageFile,
 }: FileTreeFileRowProps) {
+  const openToSide = useReviewStateOptional()?.onOpenToSide;
   return (
     <ContextMenu.Root>
       <ContextMenu.Trigger
@@ -120,6 +122,15 @@ export const FileTreeFileRow = React.memo(function FileTreeFileRow({
       <ContextMenu.Portal>
         <ContextMenu.Positioner className="z-50">
           <ContextMenu.Popup className="min-w-[160px] bg-popover text-popover-foreground border border-border rounded shadow-lg overflow-hidden py-1 transition-opacity data-starting-style:opacity-0 data-ending-style:opacity-0">
+          {openToSide && (
+            <ContextMenu.Item
+              onClick={() => openToSide(path)}
+              data-tree-open-to-side=""
+              className="flex items-center gap-2 mx-1 px-2 py-1.5 text-xs rounded cursor-pointer outline-none text-foreground/80 data-[highlighted]:bg-muted data-[highlighted]:text-foreground"
+            >
+              Open to the side
+            </ContextMenu.Item>
+          )}
           <ContextMenu.Item
             onClick={() => { void copyTextToClipboard(path); }}
             className="flex items-center gap-2 mx-1 px-2 py-1.5 text-xs rounded cursor-pointer outline-none text-foreground/80 data-[highlighted]:bg-muted data-[highlighted]:text-foreground"

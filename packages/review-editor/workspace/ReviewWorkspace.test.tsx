@@ -1,0 +1,238 @@
+import { afterEach, describe, expect, mock, test } from 'bun:test';
+import React, { act } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { usePaneTabsInHeader } from './paneContext';
+
+const hasDom = typeof document !== 'undefined';
+
+function Probe(props: { params: Record<string, unknown>; api: { id: string } }) {
+  const [text, setText] = React.useState('');
+  const tabs = usePaneTabsInHeader();
+  return (
+    <div data-probe={props.api.id}>
+      {tabs && <div data-probe-header="">{tabs}</div>}
+      <input data-probe-input={props.api.id} value={text} onChange={(event) => setText(event.target.value)} />
+      <span data-probe-path="">{String(props.params.filePath ?? '')}</span>
+    </div>
+  );
+}
+
+mock.module('../dock/reviewPanelComponents', () => ({
+  reviewPanelComponents: { 'review-all-files': Probe, 'review-file': Probe, 'review-diff': Probe },
+}));
+
+const { ReviewWorkspace } = (hasDom ? await import('./ReviewWorkspace') : {}) as typeof import('./ReviewWorkspace');
+const { ReviewStateProvider } = (hasDom ? await import('../dock/ReviewStateContext') : {}) as typeof import('../dock/ReviewStateContext');
+type Api = import('./workspaceStore').WorkspaceApi;
+
+let root: Root | null = null;
+let host: HTMLElement | null = null;
+let api: Api | null = null;
+const kept: string[] = [];
+
+afterEach(async () => {
+  if (root) await act(async () => root?.unmount());
+  root = null;
+  host?.remove();
+  host = null;
+  api = null;
+  kept.length = 0;
+});
+
+async function mount(singlePane = false, extra: { reviewKey?: string } = {}) {
+  host = document.createElement('div');
+  document.body.appendChild(host);
+  root = createRoot(host);
+  const state = { onKeepFileTab: (id: string) => kept.push(id) } as never;
+  await act(async () => {
+    root!.render(
+      <ReviewStateProvider value={state}>
+        <ReviewWorkspace singlePane={singlePane} reviewKey={extra.reviewKey} onReady={(event) => { api = event.api; }} />
+      </ReviewStateProvider>,
+    );
+  });
+  await act(async () => {
+    api!.addPanel({ id: 'review-all-files', component: 'review-all-files', title: 'All changes' });
+  });
+  return host;
+}
+
+const tabRow = (el: HTMLElement, pane = 0) => el.querySelector(`[data-pane="${pane}"] [data-pane-tabs]`);
+const tabButton = (el: HTMLElement, id: string) => el.querySelector<HTMLButtonElement>(`[data-pane-tab="${id}"]`)!;
+
+describe.skipIf(!hasDom)('the review panes', () => {
+  test('one tab draws no tab row; a second tab brings it; a click switches; a middle click closes', async () => {
+    const el = await mount();
+    expect(tabRow(el)).toBeNull();
+    await act(async () => { api!.addPanel({ id: 'review-file:a.ts', component: 'review-file', title: 'a.ts', params: { filePath: 'a.ts' } }); });
+    expect(tabRow(el)).not.toBeNull();
+    expect(tabButton(el, 'review-file:a.ts').getAttribute('aria-selected')).toBe('true');
+    await act(async () => tabButton(el, 'review-all-files').click());
+    expect(api!.activePanel?.id).toBe('review-all-files');
+    await act(async () => { tabButton(el, 'review-file:a.ts').dispatchEvent(new MouseEvent('auxclick', { bubbles: true, button: 1 })); });
+    expect(api!.getPanel('review-file:a.ts')).toBeUndefined();
+    expect(tabRow(el)).toBeNull();
+  });
+
+  test('All changes is the fixed home tab: no close button and a middle click leaves it; other tabs close', async () => {
+    const el = await mount();
+    await act(async () => { api!.addPanel({ id: 'review-file:a.ts', component: 'review-file', title: 'a.ts', params: { filePath: 'a.ts' } }); });
+    expect(el.querySelector('[data-pane-tab-close="review-all-files"]')).toBeNull();
+    expect(el.querySelector('[data-pane-tab-close="review-file:a.ts"]')).not.toBeNull();
+    await act(async () => { tabButton(el, 'review-all-files').dispatchEvent(new MouseEvent('auxclick', { bubbles: true, button: 1 })); });
+    expect(api!.getPanel('review-all-files')).toBeDefined();
+  });
+
+  test('a preview tab is italic and a double click keeps it', async () => {
+    const el = await mount();
+    await act(async () => { api!.addPanel({ id: 'review-file-preview:1', component: 'review-file', title: 'b.ts', params: { filePath: 'b.ts', preview: true } }); });
+    const preview = tabButton(el, 'review-file-preview:1');
+    expect(preview.className).toContain('italic');
+    await act(async () => preview.dispatchEvent(new MouseEvent('dblclick', { bubbles: true })));
+    expect(kept).toEqual(['review-file-preview:1']);
+  });
+
+  test('to the side opens a second pane with one divider the keyboard can move; a phone keeps one pane', async () => {
+    const el = await mount();
+    await act(async () => { api!.addPanel({ id: 'review-file:a.ts', component: 'review-file', title: 'a.ts', params: { filePath: 'a.ts' }, position: { referencePanel: 'review-all-files', direction: 'right' } }); });
+    expect(el.querySelectorAll('[data-pane]').length).toBe(2);
+    const divider = el.querySelector<HTMLElement>('[data-pane-divider]')!;
+    expect(divider.getAttribute('aria-valuenow')).toBe('50');
+    await act(async () => divider.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true })));
+    expect(divider.getAttribute('aria-valuenow')).toBe('48');
+    await act(async () => divider.dispatchEvent(new MouseEvent('dblclick', { bubbles: true })));
+    expect(divider.getAttribute('aria-valuenow')).toBe('50');
+    await act(async () => root?.unmount());
+    host?.remove();
+    const phone = await mount(true);
+    await act(async () => { api!.addPanel({ id: 'review-file:a.ts', component: 'review-file', title: 'a.ts', params: { filePath: 'a.ts' }, position: { referencePanel: 'review-all-files', direction: 'right' } }); });
+    expect(phone.querySelectorAll('[data-pane]').length).toBe(1);
+  });
+
+  test('a tab keeps its state while another tab is shown, and its parameters reach it', async () => {
+    const el = await mount();
+    const input = () => el.querySelector<HTMLInputElement>('[data-probe-input="review-all-files"]')!;
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+      setter.call(input(), 'kept');
+      input().dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => { api!.addPanel({ id: 'review-file:a.ts', component: 'review-file', title: 'a.ts', params: { filePath: 'a.ts' } }); });
+    expect(el.querySelector('[data-pane-panel="review-all-files"]')).toBeNull();
+    await act(async () => api!.getPanel('review-file:a.ts')!.api.updateParameters({ filePath: 'c.ts' }));
+    expect(el.querySelector('[data-probe="review-file:a.ts"] [data-probe-path]')?.textContent).toBe('c.ts');
+    await act(async () => tabButton(el, 'review-all-files').click());
+    expect(input().value).toBe('kept');
+  });
+
+  test('only All changes: no tab row; All changes with others: one slim row; a file tab: its own header row carries the tabs', async () => {
+    const el = await mount();
+    expect(el.querySelector('[data-pane-tab-row]')).toBeNull();
+    await act(async () => { api!.addPanel({ id: 'review-file:a.ts', component: 'review-file', title: 'a.ts', params: { filePath: 'src/a.ts' } }); });
+    expect(el.querySelector('[data-pane-tab-row="slim"]')).toBeNull();
+    expect(el.querySelector('[data-probe="review-file:a.ts"] [data-probe-header] [data-pane-tab="review-file:a.ts"]')).not.toBeNull();
+    expect(el.querySelector('[data-pane-tab-directory]')?.textContent).toBe('src/');
+    await act(async () => tabButton(el, 'review-all-files').click());
+    expect(el.querySelector('[data-pane-tab-row="slim"] [data-pane-tab="review-file:a.ts"]')).not.toBeNull();
+    expect(el.querySelectorAll('[data-pane-tab="review-all-files"]').length).toBe(1);
+  });
+
+  test('a preview tab shows a new title only once the file settles, so arrowing does not flicker it', async () => {
+    const slot = await mount();
+    await act(async () => { api!.addPanel({ id: 'review-file-preview:1', component: 'review-file', title: 'one.ts', params: { filePath: 'one.ts', preview: true } }); });
+    const title = () => slot.querySelector('[data-pane-tab="review-file-preview:1"]')?.textContent;
+    await act(async () => {
+      api!.getPanel('review-file-preview:1')!.api.setTitle('two.ts');
+      api!.getPanel('review-file-preview:1')!.api.setTitle('three.ts');
+    });
+    expect(title()).toBe('one.ts');
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 260)); });
+    expect(title()).toBe('three.ts');
+  });
+
+  test('a review reopened comes back with its two panes, kept tabs and divider', async () => {
+    const { writeSavedLayout } = await import('./layoutMemory');
+    const { setStorageBackend, resetStorageBackend } = await import('@plannotator/ui/utils/storage');
+    const memory = new Map<string, string>();
+    setStorageBackend({ getItem: (key) => memory.get(key) ?? null, setItem: (key, value) => { memory.set(key, value); }, removeItem: (key) => { memory.delete(key); } });
+    writeSavedLayout('repo#branch', {
+      panes: [
+        { tabs: [{ id: 'review-all-files', component: 'review-all-files', title: 'All changes', params: {} }], activeId: 'review-all-files' },
+        { tabs: [{ id: 'review-file:a.ts', component: 'review-file', title: 'a.ts', params: { filePath: 'a.ts' } }], activeId: 'review-file:a.ts' },
+      ],
+      activePane: 0,
+      ratio: 0.62,
+    });
+    const el = await mount(false, { reviewKey: 'repo#branch' });
+    await act(async () => { await Promise.resolve(); });
+    expect(el.querySelectorAll('[data-pane]').length).toBe(2);
+    expect(api!.getPanel('review-file:a.ts')).toBeDefined();
+    expect(el.querySelector('[data-pane-divider]')?.getAttribute('aria-valuenow')).toBe('62');
+    resetStorageBackend();
+  });
+
+  test('every tab opened is remembered, the diff tab Go to file uses, a preview, one opened into the pane that is not focused, and comes back on reload', async () => {
+    const { setStorageBackend, resetStorageBackend } = await import('@plannotator/ui/utils/storage');
+    const memory = new Map<string, string>();
+    setStorageBackend({ getItem: (key) => memory.get(key) ?? null, setItem: (key, value) => { memory.set(key, value); }, removeItem: (key) => { memory.delete(key); } });
+    await mount(false, { reviewKey: 'repo#reload' });
+    await act(async () => { api!.addPanel({ id: 'review-file:balance.ts', component: 'review-file', title: 'balance.ts', params: { filePath: 'balance.ts' }, position: { referencePanel: 'review-all-files', direction: 'right' } }); });
+    await act(async () => { api!.addPanel({ id: 'review-diff', component: 'review-diff', title: 'validate.ts', params: { filePath: 'validate.ts' }, position: { referencePanel: 'review-all-files', direction: 'within' } }); });
+    await act(async () => { api!.addPanel({ id: 'review-file-preview:1', component: 'review-file', title: 'entries.ts', params: { filePath: 'entries.ts', preview: true }, position: { referencePanel: 'review-all-files', direction: 'within' } }); });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 350)); });
+    await act(async () => root?.unmount());
+    host?.remove();
+    const el = await mount(false, { reviewKey: 'repo#reload' });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 40)); });
+    expect([...el.querySelectorAll('[data-pane="0"] [data-pane-tab]')].map((tab) => tab.getAttribute('data-pane-tab'))).toEqual(['review-all-files', 'review-diff', 'review-file-preview:1']);
+    expect(el.querySelector('[data-pane="1"] [data-pane-tab="review-file:balance.ts"]')).not.toBeNull();
+    resetStorageBackend();
+  });
+
+  test('tabs that do not fit hide whole into a menu counting them, never the active tab; one tab never gets a menu', async () => {
+    const restore = (name: 'offsetWidth' | 'clientWidth', own: PropertyDescriptor | undefined) => {
+      if (own) Object.defineProperty(HTMLElement.prototype, name, own);
+      else delete (HTMLElement.prototype as unknown as Record<string, unknown>)[name];
+    };
+    const width = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetWidth');
+    const client = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth');
+    Object.defineProperty(HTMLElement.prototype, 'offsetWidth', { configurable: true, get(this: HTMLElement) { return this.hasAttribute('data-pane-tab-item') ? 100 : 0; } });
+    Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get(this: HTMLElement) { return this.hasAttribute('data-pane-tabs') ? 300 : 0; } });
+    try {
+      const slot = await mount();
+      expect(slot.querySelector('[data-pane-tabs-overflow]')).toBeNull();
+      for (const name of ['a', 'b', 'c', 'd']) {
+        await act(async () => { api!.addPanel({ id: `review-file:${name}.ts`, component: 'review-file', title: `${name}.ts`, params: { filePath: `${name}.ts` } }); });
+      }
+      await act(async () => { api!.getPanel('review-file:d.ts')!.api.setActive(); });
+      const hidden = [...slot.querySelectorAll('[data-pane-tab-item][aria-hidden="true"]')].map((item) => item.getAttribute('data-pane-tab-item'));
+      expect(hidden).not.toContain('review-file:d.ts');
+      expect(hidden).not.toContain('review-all-files');
+      expect(hidden.length).toBe(3);
+      expect(slot.querySelector('[data-pane-tabs-overflow]')?.textContent).toBe('3');
+    } finally {
+      restore('offsetWidth', width);
+      restore('clientWidth', client);
+      }
+  });
+
+  test('a diff tab and a file tab of one file read apart: their own icon and tooltip', async () => {
+    const el = await mount();
+    await act(async () => { api!.addPanel({ id: 'review-diff', component: 'review-diff', title: 'a.ts', params: { filePath: 'a.ts' } }); });
+    await act(async () => { api!.addPanel({ id: 'review-file:a.ts', component: 'review-file', title: 'a.ts', params: { filePath: 'a.ts' } }); });
+    expect(el.querySelector('[data-pane-tab-item="review-diff"] [data-tab-kind-icon="diff"]')).not.toBeNull();
+    expect(tabButton(el, 'review-diff').title).toBe('Diff of a.ts');
+    expect(el.querySelector('[data-pane-tab-item="review-file:a.ts"] [data-tab-kind-icon="file"]')).not.toBeNull();
+    expect(tabButton(el, 'review-file:a.ts').title).toBe('File a.ts');
+  });
+
+  test('a References tab reads as the symbol with an icon, and with nothing hidden no title is capped', async () => {
+    const slot = await mount();
+    await act(async () => { api!.addPanel({ id: 'review-code-nav', component: 'review-code-nav', title: 'References: validateEntryBoundaries' }); });
+    const tab = slot.querySelector<HTMLElement>('[data-pane-tab="review-code-nav"]')!;
+    expect(tab.textContent).toBe('validateEntryBoundaries');
+    expect(slot.querySelector('[data-pane-tab-item="review-code-nav"] [data-tab-kind-icon="references"]')).not.toBeNull();
+    expect(tab.className).not.toMatch(/max-w-/);
+  });
+
+});
