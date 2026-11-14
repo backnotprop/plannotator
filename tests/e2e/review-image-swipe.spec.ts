@@ -3,7 +3,9 @@
  * drift, so the divider reveals exactly the pixels that changed, where they
  * are, at device pixel ratio 1 and 2. Two synthetic PNGs differ in one known
  * 40 x 40 block; the test reads the screen's pixels on both sides of the
- * divider.
+ * divider. At DPR 2 the browser smooths a 100% image, so each edge pixel is
+ * read on its device half away from the edge: a drift of one image pixel
+ * still shows as the wrong colour there.
  *
  * Nothing is mocked: `plannotator review` runs in a scratch git repository
  * under a temp PLANNOTATOR_DATA_DIR and HOME, with a PATH of its own, and
@@ -129,19 +131,23 @@ function buildRepo(root: string): string {
 }
 
 async function pixel(page: Page, x: number, y: number): Promise<[number, number, number]> {
-  const shot = await page.screenshot({ clip: { x, y, width: 1, height: 1 }, scale: 'css' });
-  return page.evaluate(async (data) => {
-    const image = new Image();
-    image.src = `data:image/png;base64,${data}`;
-    await image.decode();
-    const canvas = document.createElement('canvas');
-    canvas.width = 1;
-    canvas.height = 1;
-    const ctx = canvas.getContext('2d')!;
-    ctx.drawImage(image, 0, 0);
-    const [r, g, b] = ctx.getImageData(0, 0, 1, 1).data;
-    return [r, g, b] as [number, number, number];
-  }, shot.toString('base64'));
+  const dpr = await page.evaluate(() => window.devicePixelRatio);
+  const shot = await page.screenshot({ scale: 'device' });
+  return page.evaluate(
+    async ({ data, px, py }) => {
+      const image = new Image();
+      image.src = `data:image/png;base64,${data}`;
+      await image.decode();
+      const canvas = document.createElement('canvas');
+      canvas.width = image.width;
+      canvas.height = image.height;
+      const ctx = canvas.getContext('2d')!;
+      ctx.drawImage(image, 0, 0);
+      const [r, g, b] = ctx.getImageData(px, py, 1, 1).data;
+      return [r, g, b] as [number, number, number];
+    },
+    { data: shot.toString('base64'), px: Math.floor(x * dpr), py: Math.floor(y * dpr) },
+  );
 }
 
 function expectColor(actual: [number, number, number], expected: [number, number, number], where: string) {
@@ -200,7 +206,9 @@ for (const dpr of [1, 2]) {
       const box = (await stage.boundingBox())!;
       const scale = box.width / WIDTH;
       expect(scale).toBe(1);
-      const at = (x: number, y: number) => pixel(page, box.x + (x + 0.5) * scale, box.y + (y + 0.5) * scale);
+      const at = (x: number, y: number, leanX = 0.5, leanY = 0.5) => pixel(page, box.x + (x + leanX) * scale, box.y + (y + leanY) * scale);
+      const AWAY = 0.25;
+      const TOWARD = 0.75;
       const inside = { x: BLOCK.x + 20, y: BLOCK.y + 20 };
 
       await stage.focus();
@@ -209,18 +217,22 @@ for (const dpr of [1, 2]) {
 
       await page.keyboard.press('Home');
       expectColor(await at(inside.x, inside.y), MAGENTA, 'at inside.x, inside.y');
-      expectColor(await at(BLOCK.x - 1, inside.y), GREY, 'at BLOCK.x - 1, inside.y');
-      expectColor(await at(BLOCK.x + BLOCK.size, inside.y), GREY, 'at BLOCK.x + BLOCK.size, inside.y');
-      expectColor(await at(BLOCK.x, BLOCK.y), MAGENTA, 'at BLOCK.x, BLOCK.y');
-      expectColor(await at(BLOCK.x + BLOCK.size - 1, BLOCK.y + BLOCK.size - 1), MAGENTA, 'at BLOCK.x + BLOCK.size - 1, BLOCK.y + BLOCK.size - 1');
-      expectColor(await at(inside.x, BLOCK.y - 1), GREY, 'at inside.x, BLOCK.y - 1');
+      expectColor(await at(BLOCK.x - 1, inside.y, AWAY), GREY, 'at BLOCK.x - 1, inside.y');
+      expectColor(await at(BLOCK.x + BLOCK.size, inside.y, TOWARD), GREY, 'at BLOCK.x + BLOCK.size, inside.y');
+      expectColor(await at(BLOCK.x, BLOCK.y, TOWARD, TOWARD), MAGENTA, 'at BLOCK.x, BLOCK.y');
+      expectColor(await at(BLOCK.x + BLOCK.size - 1, BLOCK.y + BLOCK.size - 1, AWAY, AWAY), MAGENTA, 'at BLOCK.x + BLOCK.size - 1, BLOCK.y + BLOCK.size - 1');
+      expectColor(await at(inside.x, BLOCK.y - 1, 0.5, AWAY), GREY, 'at inside.x, BLOCK.y - 1');
 
       for (let i = 0; i < 75; i++) await page.keyboard.press('ArrowRight');
       await expect(stage).toHaveAttribute('aria-valuenow', '75');
       const divider = 0.75 * WIDTH;
       expectColor(await at(divider - 2, inside.y), GREY, 'at divider - 2, inside.y');
       expectColor(await at(divider + 1, inside.y), MAGENTA, 'at divider + 1, inside.y');
-      if (shots) await page.screenshot({ path: join(shots, `swipe-registration-dpr${dpr}.png`) });
+      if (shots) {
+        await page.screenshot({ path: join(shots, `swipe-registration-dpr${dpr}.png`) });
+        await page.keyboard.press('Home');
+        await page.screenshot({ path: join(shots, `swipe-edge-crop-dpr${dpr}.png`), scale: 'device', clip: { x: box.x + BLOCK.x - 6, y: box.y + BLOCK.y - 6, width: 12, height: 12 } });
+      }
     });
   });
 }
