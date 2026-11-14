@@ -225,4 +225,14 @@ describe.skipIf(!hasDom)('FileTree: Changes | All files', () => {
     );
     expect(el.querySelector('[data-repo-files-unavailable="no-checkout"]')?.textContent).toBe('All files needs the local checkout.');
   });
+
+  test('an empty review lists "All changes" once: the nav row waits for files', async () => {
+    const empty = await mount(<Tree files={[]} treeScope="changes" onSelectAllFiles={() => {}} />);
+    expect([...empty.querySelectorAll('[data-nav-row]')].some((row) => row.textContent?.includes('All changes'))).toBe(false);
+    await act(async () => root?.unmount());
+    root = null;
+    const some = await mount(<Tree treeScope="changes" onSelectAllFiles={() => {}} />);
+    expect([...some.querySelectorAll('[data-nav-row]')].some((row) => row.textContent?.includes('All changes'))).toBe(true);
+  });
 });
+
