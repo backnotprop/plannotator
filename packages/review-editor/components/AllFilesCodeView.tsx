@@ -14,7 +14,7 @@ import type {
   SelectedLineRange,
   VirtualFileMetrics,
 } from '@pierre/diffs';
-import { CodeView, EditProvider, type CodeViewAnnotationArgs, type CodeViewHandle, useStableCallback, useWorkerPool } from '@pierre/diffs/react';
+import { CodeView, EditProvider, type CodeViewAnnotationArgs, type CodeViewHandle, useStableCallback } from '@pierre/diffs/react';
 import type { DiffTokenEventBaseProps } from '@pierre/diffs';
 import type {
   CodeAnnotation,
@@ -60,7 +60,7 @@ import { OversizedFileNotice } from './OversizedFileNotice';
 import { ToolbarHost, type ToolbarHostHandle } from './ToolbarHost';
 import type { DiffSelectionActions } from './SelectionChooser';
 import { FileHeader } from './FileHeader';
-import { createKeptWholeFiles, opensWholeFileEagerly, type WholeFileText } from '../utils/wholeFileText';
+import { createKeptWholeFiles, type WholeFileText } from '../utils/wholeFileText';
 import { collectHeaderHeightHints, headerHeightFor, type HeaderHeightHint } from '../utils/headerHeightHints';
 import { ReviewStateProvider, useReviewStateOptional, type ReviewState } from '../dock/ReviewStateContext';
 import { DiffBottomBar } from './DiffBottomBar';
@@ -762,7 +762,6 @@ const FLUSH_FILES_CSS = `
   :host([data-trailing-unread]) [data-separator][data-separator-last] { display: none; }
 `;
 
-const WHOLE_FILE_OPEN_IDLE_MS = 500;
 // How long revealing a comment on a closed line waits for its file's whole text.
 const REVEAL_WAIT_MS = 30_000;
 
@@ -1829,51 +1828,6 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     refreshEditSessionMarkers();
   }, [annotations, refreshEditSessionMarkers]);
 
-  const eagerWholeFilesRef = useRef(new Map<string, string>());
-  const pendingOpensRef = useRef(new Set<string>());
-  const openTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastScrollTsRef = useRef(0);
-  const highlightPool = useWorkerPool();
-  const highlightPoolRef = useRef(highlightPool);
-  highlightPoolRef.current = highlightPool;
-  const flushWholeFileOpens = useCallback(() => {
-    openTimerRef.current = null;
-    const idleFor = Date.now() - lastScrollTsRef.current;
-    const poolStats = highlightPoolRef.current?.getStats();
-    const poolBusy = poolStats != null && poolStats.queuedTasks + poolStats.activeTasks > 0;
-    if (idleFor < WHOLE_FILE_OPEN_IDLE_MS || poolBusy) {
-      openTimerRef.current = setTimeout(flushWholeFileOpens, poolBusy ? WHOLE_FILE_OPEN_IDLE_MS : WHOLE_FILE_OPEN_IDLE_MS - idleFor + 10);
-      return;
-    }
-    const viewer = viewerRef.current?.getInstance();
-    const scroller = scrollRef.current;
-    const pending = pendingOpensRef.current;
-    if (viewer == null || scroller == null) return;
-    const port = scroller.getBoundingClientRect();
-    const viewTop = Math.max(port.top, 0);
-    const viewBottom = Math.min(port.bottom, window.innerHeight);
-    for (const rendered of viewer.getRenderedItems()) {
-      if (!pending.has(rendered.id)) continue;
-      if (eagerWholeFilesRef.current.get(rendered.id) !== fileSetKeyRef.current || rendered.type !== 'diff' || rendered.item.fileDiff.isPartial !== true) {
-        pending.delete(rendered.id);
-        continue;
-      }
-      if (previewAppliedRef.current.has(rendered.id) || rendered.id === editSession.editingItemIdRef.current) continue;
-      const box = rendered.element?.getBoundingClientRect();
-      if (box == null || (box.bottom > viewTop && box.top < viewBottom)) continue;
-      pending.delete(rendered.id);
-      rendered.instance.expandHunk(0, 'up', 0);
-    }
-  }, []);
-  const queueWholeFileOpen = useCallback((itemId: string) => {
-    if (eagerWholeFilesRef.current.get(itemId) !== fileSetKeyRef.current) return;
-    pendingOpensRef.current.add(itemId);
-    if (openTimerRef.current == null) openTimerRef.current = setTimeout(flushWholeFileOpens, WHOLE_FILE_OPEN_IDLE_MS);
-  }, [flushWholeFileOpens]);
-  useEffect(() => () => {
-    if (openTimerRef.current != null) clearTimeout(openTimerRef.current);
-  }, []);
-
   const prefetchWholeFile = useCallback((itemId: string) => {
     if (fetchFileContentRef.current) return;
     const augmentState = augmentRef.current;
@@ -1897,17 +1851,13 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         if (isStale()) return;
         if (data) keptWholeFilesRef.current.keep(itemId, generation, data);
         augmentState.set(itemId, { status: 'done', controller, generation });
-        if (data && opensWholeFileEagerly(data)) {
-          eagerWholeFilesRef.current.set(itemId, generation);
-          queueWholeFileOpen(itemId);
-        }
       },
       () => {
         if (!isStale()) augmentState.set(itemId, { status: 'error', controller, generation });
         else if (augmentState.get(itemId)?.controller === controller) augmentState.delete(itemId);
       },
     );
-  }, [readWholeFileFromReview, queueWholeFileOpen]);
+  }, [readWholeFileFromReview]);
 
   // A host's reader, for the arrows: Pierre shows them on a partial diff once it has a loader, and calls it on the first
   // click. It parks the click's opening, swaps in the whole file and highlights that off the main thread.
@@ -2082,7 +2032,6 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       nodeToItemIdRef.current.set(node, context.id);
       if (flushesFiles) syncTrailingRow(node, context);
       prefetchWholeFile(context.id);
-      queueWholeFileOpen(context.id);
       const itemId = context.id;
       requestAnimationFrame(() => applyItemHighlights(node, itemId));
     },
@@ -2856,8 +2805,6 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   // stamps scroll activity for the augmentation idle-flush.
   const scrollReportRafRef = useRef<number | null>(null);
   const handleScroll = useStableCallback((position: number) => {
-    lastScrollTsRef.current = Date.now();
-    if (pendingOpensRef.current.size > 0 && openTimerRef.current == null) openTimerRef.current = setTimeout(flushWholeFileOpens, WHOLE_FILE_OPEN_IDLE_MS);
     hasScrolledRef.current = true;
     onScrollPositionChange?.(position);
     if (scrollReportRafRef.current != null) return;
