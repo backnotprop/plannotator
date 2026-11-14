@@ -28,6 +28,7 @@
  */
 
 import { createHmac, randomBytes } from "node:crypto";
+import { gunzipSync } from "node:zlib";
 import { SERVED_FRAME_GONE } from "@plannotator/core/html-embed";
 
 export const INBOX_PAGES_PATH = "/api/inbox/pages";
@@ -82,6 +83,17 @@ export function inboxPageHeaders(): Record<string, string> {
   };
 }
 
+async function pageBody(req: Request, readBody: (req: Request) => Promise<Record<string, unknown>>): Promise<Record<string, unknown> | null> {
+  if ((req.headers.get("content-encoding") ?? "").toLowerCase() !== "gzip") return readBody(req);
+  let text: string;
+  try {
+    text = gunzipSync(Buffer.from(await req.arrayBuffer()), { maxOutputLength: INBOX_PAGE_MAX_BYTES * 2 }).toString("utf8");
+  } catch (cause) {
+    return (cause as { code?: unknown }).code === "ERR_BUFFER_TOO_LARGE" ? null : {};
+  }
+  return readBody(new Request(req.url, { method: "POST", headers: { "Content-Type": "application/json" }, body: text }));
+}
+
 export function createInboxPages(options: {
   readBody: (req: Request) => Promise<Record<string, unknown>>;
   json: (body: unknown, status?: number) => Response;
@@ -119,7 +131,10 @@ export function createInboxPages(options: {
   const route = async (req: Request, url: URL): Promise<Response | null> => {
     if (url.pathname === INBOX_PAGES_PATH) {
       if (req.method !== "POST") return json({ error: "Use POST.", code: "method_not_allowed" }, 405);
-      const body = await options.readBody(req);
+      const body = await pageBody(req, options.readBody);
+      if (body === null) {
+        return json({ error: `html: at most ${INBOX_PAGE_MAX_BYTES} bytes.`, code: "page_too_large" }, 413);
+      }
       if (typeof body.html !== "string" || body.html.trim() === "") {
         return json({ error: "html: the page, a non-empty string.", code: "validation_error" }, 400);
       }

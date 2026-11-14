@@ -373,7 +373,7 @@ export function knownAnswerFor(text: string, hidden: readonly string[] = []): Kn
 
 /**
  * The answers this Inbox can't follow, from its settings read: starting agents where it is not offered (Windows),
- * and a switch the Inbox does not report (an older Inbox, or a tailnet guest's read). Nothing until settings load.
+ * and a switch the Inbox does not report (an older Inbox). Nothing until settings load.
  */
 export function hiddenKnownAnswers(
   settings: { launch?: { unsupported?: boolean }; board?: unknown; steps?: unknown; bro?: unknown; float_drafts?: unknown; experimental?: unknown } | null,

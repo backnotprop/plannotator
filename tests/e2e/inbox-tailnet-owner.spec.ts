@@ -1,8 +1,8 @@
 /**
  * The owner's phone over the tailnet, in a real Chromium at phone widths
  * (approval "inbox-tailnet-owner"): every section the approval opened is drawn,
- * fits 390 and 320 px, and writes through the real tailnet listener; a guest's
- * phone is offered none of it.
+ * fits 390 and 320 px, and writes through the real tailnet listener. Another
+ * Tailscale account gets the refusal page and nothing of the Inbox.
  *
  * A release-version Inbox from source (as inbox-updates.spec.ts) under a temp
  * HOME and data dir, `tailscale` a script on PATH that keeps its serve config in
@@ -31,7 +31,7 @@ const shots = resolve(process.env.PLANNOTATOR_TAILNET_OWNER_SHOTS ?? join(repo, 
 
 const MAGIC = 'studio.tail0000.ts.net';
 const OWNER = 'owner@example.com';
-const GUEST = 'guest@example.com';
+const OTHER = 'someone@example.com';
 const KEY = 'sk-phone-e2e-0123456789abcd';
 const NEXT = '0.28.12';
 
@@ -106,7 +106,7 @@ test.beforeAll(async () => {
   // Bun counts as the binary the install script manages, so About and the dialog offer Update now.
   const bun = realpathSync(process.env.BUN_BINARY ?? execSync('command -v bun').toString().trim());
   symlinkSync(bun, join(home, '.local', 'bin', 'plannotator'));
-  writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ inboxTailscale: true, inboxTailscaleAllow: [GUEST], inboxThemeChooser: { notNeededAt: '2026-10-01T10:00:00.000Z' } }));
+  writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ inboxTailscale: true, inboxThemeChooser: { notNeededAt: '2026-10-01T10:00:00.000Z' } }));
   writeFileSync(join(dataDir, 'update-state.json'), JSON.stringify({ latestRelease: { tag: NEXT, fetchedAt: Date.now(), publishedAt: '2026-10-09T15:00:00Z' } }));
   mkdirSync(join(dataDir, 'update-notes'));
   writeFileSync(join(dataDir, 'update-notes', `${NEXT}.json`), JSON.stringify({ version: NEXT, notes: 'A patch release for the Inbox.\n\n### Update notices\n\nOne click.', highlights: [] }));
@@ -211,7 +211,7 @@ for (const width of [390, 320]) {
     const { context, page, errors } = await phone(browser, width);
     await go(page, base, '#settings/agents');
     const seen = await page.evaluate(() => fetch('/api/inbox/settings').then((r) => r.json()));
-    expect([seen.via, seen.guest]).toEqual(['tailnet', false]);
+    expect(seen.via).toBe('tailnet');
 
     await expect(page.locator('[data-agent]').first()).toBeVisible();
     await fits(page, 'Settings → Agents', '[data-settings-section]');
@@ -287,9 +287,9 @@ test('the Board at 390 and 320 px: the off page turns it on from the phone, and 
 
 /**
  * Parity (owner ruling 2026-11-11): the owner's phone over the tailnet links a machine as the computer does, on a poor
- * link (400 ms each way, about 400 kbit/s, as a phone on one bar), and a guest's page has the same section disabled.
+ * link (400 ms each way, about 400 kbit/s, as a phone on one bar).
  */
-test('the owner at 390 px on a poor link: Settings → Machines makes a link code as on the computer; a guest’s is disabled', async ({ browser }) => {
+test('the owner at 390 px on a poor link: Settings → Machines makes a link code as on the computer', async ({ browser }) => {
   const owner = await serveFor(OWNER);
   const { context, page, errors } = await phone(browser, 390);
   const cdp = await context.newCDPSession(page);
@@ -298,7 +298,6 @@ test('the owner at 390 px on a poor link: Settings → Machines makes a link cod
   await go(page, owner, '#settings/machines');
   const machines = page.locator('[data-settings-machines]');
   await expect(machines).toBeVisible({ timeout: 30_000 });
-  await expect(page.locator('[data-machines-remote]')).toHaveCount(0);
   await expect(page.locator('[data-machine-link]')).toBeEnabled();
   await page.locator('[data-machine-offer-start]').tap();
   // The code and this machine's tailnet address to type on the other computer.
@@ -311,14 +310,6 @@ test('the owner at 390 px on a poor link: Settings → Machines makes a link cod
   await expect(page.locator('[data-settings-tailscale] [role="switch"]')).toBeEnabled();
   expect(errors).toEqual([]);
   await context.close();
-
-  const guestBase = await serveFor(GUEST);
-  const guest = await phone(browser, 390);
-  await go(guest.page, guestBase, '#settings/machines');
-  await expect(guest.page.locator('[data-machines-remote]')).toBeVisible({ timeout: 30_000 });
-  await expect(guest.page.locator('[data-machine-offer-start]')).toBeDisabled();
-  expect(guest.errors).toEqual([]);
-  await guest.context.close();
 });
 
 test('the key typed on the phone reached the file and no log', async () => {
@@ -326,25 +317,23 @@ test('the key typed on the phone reached the file and no log', async () => {
   expect(inboxErr).not.toContain(KEY);
 });
 
-test('a guest’s phone: none of it is offered, and its window works', async ({ browser }) => {
-  const base = await serveFor(GUEST);
-  const { context, page, errors } = await phone(browser, 390);
-  await go(page, base, '#settings/about');
-  await expect(page.locator('[data-settings-section="about"]')).toBeVisible();
-  const seen = await page.evaluate(() => fetch('/api/inbox/settings').then((r) => r.json()));
-  expect([seen.via, seen.guest]).toEqual(['tailnet', true]);
-  await expect(page.getByRole('button', { name: 'Update now' })).toHaveCount(0);
-  await go(page, base, '#settings/agents');
-  await expect(page.locator('[data-settings-section="agents"]')).toBeVisible();
-  await expect(page.locator('[data-agent]')).toHaveCount(0);
-  await go(page, base, '#settings/general');
-  await expect(page.locator('[data-settings-section="general"]')).toBeVisible();
-  await expect(page.locator('[data-general-update]')).toHaveCount(0);
-  await expect(page.locator('[data-settings-cookie-host]')).toHaveCount(0);
-  await go(page, base, '#settings/voice');
-  await expect(page.locator('[data-settings-voice="guest"]')).toBeVisible();
-  await expect(page.locator('input[type="password"]')).toHaveCount(0);
-  await picture(page, 'guest-voice', 390);
-  expect(errors).toEqual([]);
-  await context.close();
+test('another Tailscale account’s phone: the refusal page at 390 and 320 px, and the API answers it the same in JSON', async ({ browser }) => {
+  const base = await serveFor(OTHER);
+  for (const width of [390, 320]) {
+    const { context, page } = await phone(browser, width);
+    const answer = await page.goto(`${base}/#settings/about`);
+    expect(answer?.status()).toBe(403);
+    await expect(page.locator('h1')).toHaveText("This Inbox belongs to this computer's owner");
+    await expect(page.locator('main')).toContainText('only for the Tailscale account that owns this computer');
+    await expect(page.locator('main')).toContainText(OTHER);
+    // Nothing of the Inbox: no window, no script.
+    await expect(page.locator('.pn-inbox, [data-settings-section]')).toHaveCount(0);
+    await fits(page, 'the refusal page', 'main');
+    await picture(page, 'other-account-refused', width);
+    await context.close();
+  }
+  // The page's own policy allows it no fetch, so the API is asked from here, through the same stand-in for serve.
+  const api = await fetch(`${base}/api/inbox/settings`);
+  expect(api.status).toBe(403);
+  expect(((await api.json()) as { code?: string }).code).toBe('tailnet_identity_refused');
 });

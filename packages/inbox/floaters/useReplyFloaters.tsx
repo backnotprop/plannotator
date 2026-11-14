@@ -37,7 +37,7 @@ export interface ReplyFloatersOptions {
   rowsRead: boolean;
   threadId: string | null;
   phone: boolean;
-  /** The tour, a guest. */
+  /** The tour. */
   off: boolean;
   /**
    * Settings → Capabilities → Experimental → "Float reply drafts" (config.json `inboxFloatDrafts`), off by default.
@@ -78,7 +78,7 @@ function draftMark(row: InboxReplyDraftRow) {
 
 export function useReplyFloaters(options: ReplyFloatersOptions): { layer: ReactNode } {
   const { rows, rowsRead, threadId, phone, off, floatDrafts, ask, openThread, openDrafts, refreshDrafts, toast, dismissToast } = options;
-  /** Drafts float: not the tour or a guest, and the person turned it on. Off, only Ask's row is in the corner. */
+  /** Drafts float: not the tour, and the person turned it on. Off, only Ask's row is in the corner. */
   const floats = !off && floatDrafts === true;
   const entries = useFloatEntries();
   const [openId, setOpenId] = useState<string | null>(null);
@@ -127,7 +127,7 @@ export function useReplyFloaters(options: ReplyFloatersOptions): { layer: ReactN
     },
     [look],
   );
-  // Off (the tour, a guest, the setting) or gone: no look still waiting floats a draft.
+  // Off (the tour, the setting) or gone: no look still waiting floats a draft.
   useEffect(() => {
     if (!floats) return;
     const timers = settleTimers.current;
