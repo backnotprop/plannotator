@@ -259,7 +259,7 @@ curl -fsSL https://plannotator.ai/install.sh | bash -s -- --minimal
 | **Pi** | 跳过安装程序。只需执行 `pi install npm:@plannotator/pi-extension`。使用 `--plan` 启动 Pi，或通过 `/plannotator-plan-mode` 切换。 | [README](apps/pi-extension/README.md) |
 | **T3 Code** | 对于 T3 中的 Claude 对话：运行 `plannotator t3 --help`，并按照其中的两个步骤操作（登录 T3 一次，添加 `--t3` MCP 条目）。随后，你的 Inbox 回复会作为新一轮消息到达对话。 | [README](packages/t3-code/README.md) |
 
-**更新：**再次运行安装程序以更新二进制文件和斜杠命令。当 PATH 中存在 `claude` 命令时，它也会更新已安装的 Claude Code 插件（可通过 `--skip-claude-plugin` 跳过）；否则，依次运行 `claude plugin marketplace update plannotator` 和 `claude plugin update plannotator@plannotator`，然后重启 Claude Code（仅刷新 marketplace 不会更新插件）。Pi：执行 `pi update --extensions`（单独执行 `pi update` 只会更新 Pi）。
+**更新：** 再次运行安装程序以更新二进制文件和斜杠命令。当 PATH 中存在 `claude` 命令时，它也会更新已安装的 Claude Code 插件（可通过 `--skip-claude-plugin` 跳过）；否则，依次运行 `claude plugin marketplace update plannotator` 和 `claude plugin update plannotator@plannotator`，然后重启 Claude Code（仅刷新 marketplace 不会更新插件）。Pi：执行 `pi update --extensions`（单独执行 `pi update` 只会更新 Pi）。
 
 在 Claude Code 2.1.287 或更新版本中，计划审阅、代码审阅和批注都不会让 Claude 等待：Claude 会结束当前轮次，你的决定稍后作为消息到达。设置 `PLANNOTATOR_CLAUDE_MOD=0` 可恢复经典流程。
 
