@@ -182,6 +182,7 @@ import { projectWrites } from './projectWrites';
 import { priorityWrites } from './priorityWrites';
 import { snoozeWrites } from './snoozeWrites';
 import { agentWrites, type AgentDeleteAsk } from './agentWrites';
+import { joinThreadRead, type ThreadFlight } from './threadFlights';
 import { openTakenBack } from './takenBackCompose';
 import { restartInbox } from './restartInbox';
 import { errorToast } from './toastError';
@@ -1107,6 +1108,8 @@ function Inbox() {
   const threadLoadedAt = useRef(0);
   /** The open thread's reads on their way: given up when the person moves on to another thread before they answer. */
   const openThreadReadsOut = useRef(new Set<{ threadId: string; controller: AbortController }>());
+  const threadFlights = useRef(new Map<string, ThreadFlight>());
+  const threadReadFailures = useRef(new Map<string, number>());
   /**
    * A row action's result, drawn the moment it is pressed while its write is on its way (rowActions.ts): Mark read's
    * and Archive's row state, a Star's pin. Its pending mutation is the drawing (data/actions/rows.ts): taken away when
@@ -1807,27 +1810,19 @@ function Inbox() {
   );
 
   /** `given`: a read that came with another answer (a Send's `thread_read`): drawn as a read of the thread, none sent. */
-  const refreshThread = useCallback(async (threadId: string, given?: ThreadModel) => {
+  const readThreadInto = useCallback(async (threadId: string, given?: ThreadModel): Promise<InboxThread | null> => {
     const mine = ++threadReadSeq.current;
-    // A thread being opened (not a re-read of the one on screen): pn:thread-open runs until its messages are drawn.
     if (threadLoaded.current?.thread_id !== threadId) perfThreadOpenStart(threadId);
-    // The machine this read goes to: null is this Inbox (or an owner not learned yet).
     const askedOwner = machineOf(threadId);
-    // A read of the open thread is given up when the person moves on before it answers (the open effect), so
-    // clicking through threads reads only the one they land on.
     const out = routeRef.current.thread === threadId && !given ? { threadId, controller: new AbortController() } : null;
     if (out) openThreadReadsOut.current.add(out);
     try {
-      const next = given ?? (await readThread(threadId, THREAD_READ_TIMEOUT_MS, out?.controller.signal));
-      // Its code fences' grammars and KaTeX are chunks loaded on first use (#2593): the thread draws once
-      // they are in, so its code paints highlighted and its math typeset, never plain first.
+      const next = given ?? (await readThread(threadId, THREAD_READ_TIMEOUT_MS * 2 ** Math.min(threadReadFailures.current.get(threadId) ?? 0, 3), out?.controller.signal));
+      threadReadFailures.current.delete(threadId);
       await threadDrawReady(next.thread);
       if (unlistedSince.current?.threadId === threadId) unlistedSince.current = null;
       if (routeRef.current.thread === threadId && mine > threadReadApplied.current) {
         threadReadApplied.current = mine;
-        // Into the cache: what did not change keeps its objects (structural sharing), so a window left open on a busy
-        // thread holds no full copy of it per read, and an unchanged message is not drawn again. Lines the stream
-        // applied after this read left stay (data/apply/record.ts `reconcileRead`).
         const before = threadLoaded.current;
         const reread = before?.thread_id === threadId;
         const held = putThread(queryClient, threadId, next);
@@ -1857,6 +1852,7 @@ function Inbox() {
       perfThreadOpenDropped(threadId);
       // Given up: the person moved on to another thread. Nothing to say or retry.
       if (out?.controller.signal.aborted) return null;
+      threadReadFailures.current.set(threadId, (threadReadFailures.current.get(threadId) ?? 0) + 1);
       // Not on this Inbox, asked before the list named each id's machine: once the first list is read (it may have landed
       // while this read was out; else wait a few seconds at most), read the thread on the machine it names.
       let waiting: string | null = null;
@@ -1866,7 +1862,7 @@ function Inbox() {
           await Promise.race([firstList.current!.promise, new Promise((r) => (timer = setTimeout(r, FIRST_LIST_WAIT_MS)))]);
           clearTimeout(timer);
         }
-        if (machineOf(threadId) && routeRef.current.thread === threadId) return refreshThread(threadId);
+        if (machineOf(threadId) && routeRef.current.thread === threadId) return readThreadInto(threadId);
         // Just started (a restart, an update): a linked machine whose list this Inbox has not read yet may hold it.
         // Not "deleted" then: read again on the usual schedule, and the thread opens once that list names it. Only a
         // machine that can still send one counts (one that needs an update or removed the link never will), and only
@@ -1901,6 +1897,10 @@ function Inbox() {
       if (out) openThreadReadsOut.current.delete(out);
     }
   }, [setThreadLoad, stopLiveThreadRetry, queryClient]);
+  const refreshThread = useCallback(
+    (threadId: string, given?: ThreadModel): Promise<InboxThread | null> => joinThreadRead(threadFlights.current, threadId, given, readThreadInto),
+    [readThreadInto],
+  );
 
   /** A settings read arrived: the moment the Inbox named for the line, kept on this page's clock (`useLineLatch`). */
   const noteLineAgain = useCallback((reveal: SettingsModel['reveal']) => {
