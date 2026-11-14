@@ -15,8 +15,8 @@ published packages `@plannotator/core` and `@plannotator/ui` declare
 follows that: `package.json` declares `"license": "Apache-2.0"`, and no file
 carries a license header. On placement in the open-source repo these files
 take Apache-2.0, under the owner's ruling that this code may be opened. Each
-`src` file keeps a two-line provenance comment naming its Workspaces source
-and the main commit.
+`src` file's source is named below (`test/registry.test.ts` fails when a
+file is not).
 
 ## File by file
 

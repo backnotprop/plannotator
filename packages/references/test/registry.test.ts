@@ -174,12 +174,12 @@ describe("the cut stays cut", () => {
 		}
 	});
 
-	it("every source file names its Workspaces source and the main commit in its first two lines", () => {
+	it("PROVENANCE.md names the Workspaces main commit and says where every source file came from", () => {
+		const provenance = readFileSync(fileURLToPath(new URL("../PROVENANCE.md", import.meta.url)), "utf8");
+		expect(provenance).toContain("7379b0195de140adc00b4496eefe553a3eec803e");
 		for (const file of files) {
-			const [first, second] = readFileSync(file, "utf8").split("\n");
-			expect(first?.startsWith("// Source: "), file).toBe(true);
-			expect(first?.includes("7379b0195de140adc00b4496eefe553a3eec803e"), file).toBe(true);
-			expect(second?.startsWith("// "), file).toBe(true);
+			const relativePath = `src/${file.slice(src.length + 1).split("\\").join("/")}`;
+			expect(provenance.includes(`\`${relativePath}\``), relativePath).toBe(true);
 		}
 	});
 });

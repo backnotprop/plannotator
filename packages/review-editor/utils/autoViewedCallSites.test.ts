@@ -38,10 +38,9 @@ describe('Rule 5 call-site scope', () => {
   test('the hide-whitespace toggle does not opt in', () => {
     // Its patches all differ by design; that delta is a presentation choice,
     // not the reviewed content changing.
-    const effect = APP.slice(
-      APP.indexOf('// Re-fetch diff when hideWhitespace toggles'),
-      APP.indexOf('// --- Diff staleness ---'),
-    );
+    const start = APP.indexOf('const hideWhitespaceInitialized');
+    const effect = APP.slice(start, APP.indexOf('}, [diffHideWhitespace', start));
+    expect(start).toBeGreaterThan(-1);
     expect(effect).toContain('fetchDiffSwitch(');
     expect(effect).not.toContain('contentRefresh');
   });
