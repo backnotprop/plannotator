@@ -31,8 +31,35 @@ describe('parseAuthorColor', () => {
     expect(css('rgb(100%, 0%, 0%)')).toBe('rgb(255, 0, 0)');
     expect(css('rgb(999, -4, 0)')).toBe('rgb(255, 0, 0)');
     expect(css('hsl(30, 100%, 45%)')).toBe('hsl(30, 100%, 45%)');
-    expect(css('hsla(390, 100%, 45%, .25)')).toBe('hsla(30, 100%, 45%, 0.25)');
+    expect(css('hsla(390, 100%, 45%, .75)')).toBe('hsla(30, 100%, 45%, 0.75)');
     expect(parseAuthorColor('hsl(120, 100%, 25%)')!.rgba).toEqual([0, 128, 0, 1]);
+  });
+
+  test('a colour fainter than half is refused in every alpha form, so no caller can hide words', () => {
+    for (const faint of [
+      '#0000',
+      '#d007',
+      '#ffffff00',
+      '#d000007f',
+      'rgba(0, 0, 0, 0)',
+      'rgba(255, 255, 255, 0.02)',
+      'rgba(208, 0, 0, 49%)',
+      'rgb(0 0 0 / 0)',
+      'rgb(208 0 0 / 0.49)',
+      'rgb(208 0 0 / 10%)',
+      'hsla(0, 100%, 50%, 0.01)',
+      'hsla(0, 100%, 50%, -1)',
+      'hsl(0 100% 50% / .3)',
+    ]) {
+      expect([faint, css(faint)]).toEqual([faint, null]);
+    }
+    expect(style('color: #0000')).toBeNull();
+    expect(matchAuthorColor('<span style="color:#0000">hidden</span>')).toMatchObject({ color: null, inner: 'hidden' });
+    expect(matchAuthorColor('<font color="#ffffff00">hidden</font>')).toMatchObject({ color: null, inner: 'hidden' });
+    // Half and above stay as written.
+    expect(css('#d008')).toBe('#d008');
+    expect(css('rgb(208 0 0 / 50%)')).toBe('rgba(208, 0, 0, 0.5)');
+    expect(css('hsla(0, 100%, 50%, 0.5)')).toBe('hsla(0, 100%, 50%, 0.5)');
   });
 
   test('named colours from the CSS list only', () => {
@@ -159,6 +186,55 @@ describe('stripAuthorColor', () => {
     expect(stripAuthorColor('a <b>bold</b> <span>plain</span> `<x>`')).toBe('a <b>bold</b> <span>plain</span> `<x>`');
     expect(stripAuthorColor('<span style="color: red">open')).toBe('<span style="color: red">open');
   });
+
+  test('a code span is copied as written, tags and all', () => {
+    expect(stripAuthorColor('| `<span style="color: red">x</span>` | <span style="color: red">y</span> |')).toBe(
+      '| `<span style="color: red">x</span>` | y |',
+    );
+    expect(stripAuthorColor('``a ` <font color=red>b</font>`` <font color=red>c</font>')).toBe('``a ` <font color=red>b</font>`` c');
+    // A run of backticks no run of the same length closes is plain text.
+    expect(stripAuthorColor('` <font color=red>b</font> ``')).toBe('` b ``');
+    expect(stripAuthorColor('<span style="color: red">a `<b>` c</span>')).toBe('a `<b>` c');
+  });
+});
+
+describe('a page of hostile tags costs time in proportion to its size', () => {
+  /** Best of a few runs, so one slow tick does not decide the ratio. */
+  const cost = (run: () => void) => {
+    let best = Infinity;
+    for (let i = 0; i < 5; i++) {
+      const start = performance.now();
+      run();
+      best = Math.min(best, performance.now() - start);
+    }
+    return best;
+  };
+  // Every `<` is a place InlineMarkdown asks for a run, as it does.
+  const matchEvery = (text: string) => () => {
+    for (let at = text.indexOf('<'); at !== -1; at = text.indexOf('<', at + 1)) matchAuthorColor(text.slice(at));
+  };
+  // 8x the input: linear is about 8x the time, quadratic about 64x.
+  const ratio = (make: (n: number) => string, work: (text: string) => () => void) =>
+    cost(work(make(16_000))) / Math.max(cost(work(make(2_000))), 0.05);
+
+  test('unclosed runs, for the matcher and for the copy strip', () => {
+    const unclosed = (n: number) => '<span style="color:red">x '.repeat(n);
+    expect(ratio(unclosed, matchEvery)).toBeLessThan(24);
+    expect(ratio(unclosed, (text) => () => stripAuthorColor(text))).toBeLessThan(24);
+  });
+
+  test('runs nested deep, and unclosed code spans of every width', () => {
+    const nested = (n: number) => '<font color=red>'.repeat(n) + 'x' + '</font>'.repeat(n);
+    expect(ratio(nested, matchEvery)).toBeLessThan(24);
+    expect(ratio(nested, (text) => () => stripAuthorColor(text))).toBeLessThan(24);
+    const ticks = (n: number) => Array.from({ length: Math.sqrt(n * 4) | 0 }, (_, i) => '`'.repeat(i + 1) + ' <b>').join('');
+    expect(ratio(ticks, (text) => () => stripAuthorColor(text))).toBeLessThan(24);
+  });
+
+  test('past the bound the run renders as written', () => {
+    expect(matchAuthorColor('<font color=red>'.repeat(17) + 'x' + '</font>'.repeat(17))).toBeNull();
+    expect(matchAuthorColor('<font color=red>'.repeat(16) + 'x' + '</font>'.repeat(16))!.inner).toStartWith('<font');
+  });
 });
 
 describe('readableAuthorColor', () => {
@@ -188,7 +264,7 @@ describe('readableAuthorColor', () => {
   });
 
   test('a faint colour comes back opaque and readable', () => {
-    const shifted = readableAuthorColor(rgba('#d0000010'), lightCard)!;
+    const shifted = readableAuthorColor(rgba('#ffcccc80'), lightCard)!;
     expect(shifted).toHaveLength(3);
     expect(contrastRatio(shifted, lightCard)).toBeGreaterThanOrEqual(3);
   });

@@ -87,6 +87,18 @@ test('hostile styles are dropped whole and the words kept', async ({ page }) => 
   expect(handlers.styles).toEqual(['span|color: red']);
 });
 
+test('a see-through colour is refused in every alpha form, so a caller that never paints shows the words', async ({ page }) => {
+  for (const faint of ['#0000', '#ffffff00', 'rgba(255,255,255,0.02)', 'rgb(0 0 0 / 0)', 'rgb(0 0 0 / 10%)', 'hsla(0,100%,50%,0.01)', 'hsl(0 0% 0% / .4)']) {
+    const span = await block(page, `<p>a <span style="color:${faint}">hidden</span> b</p>`);
+    expect([faint, span.styles, span.html]).toEqual([faint, [], '<p>a <span>hidden</span> b</p>']);
+    const font = await block(page, `<p>a <font color="${faint}">hidden</font> b</p>`);
+    expect([faint, font.html]).toEqual([faint, '<p>a hidden b</p>']);
+    const inline = await page.evaluate((f) => (window as any).inline(`<span style="color:${f}">hidden</span>`), faint);
+    expect([faint, inline]).toEqual([faint, '<span>hidden</span>']);
+  }
+  expect((await block(page, '<p><span style="color: rgba(208, 0, 0, 0.5)">half</span></p>')).styles).toEqual(['span|color: rgba(208, 0, 0, 0.5)']);
+});
+
 test('style on every other tag stays stripped, even a pure colour', async ({ page }) => {
   for (const tag of ['p', 'div', 'td', 'a', 'strong', 'mark', 'img', 'table', 'details', 'summary', 'li']) {
     const out = await block(page, `<table><tr><td><${tag} style="color: red">w</${tag}></td></tr></table>`);

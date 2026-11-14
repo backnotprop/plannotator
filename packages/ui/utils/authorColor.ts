@@ -127,15 +127,25 @@ function parseFunction(name: string, body: string): AuthorColor | null {
   return { css, rgba: [...hslToRgb(h, s / 100, l / 100), a] };
 }
 
-/** One colour value (a `color:` value or a `<font color>`), or null when it is not one this accepts. */
-export function parseAuthorColor(raw: string): AuthorColor | null {
-  if (raw.length > MAX_VALUE) return null;
-  const value = raw.trim().toLowerCase();
+/**
+ * Below this alpha a colour is refused, so no caller (one that never runs the
+ * contrast pass included) can make words see-through.
+ */
+export const AUTHOR_COLOR_MIN_ALPHA = 0.5;
+
+function readValue(value: string): AuthorColor | null {
   if (HEX_RE.test(value)) return { css: value, rgba: hexToRgba(value) };
   const named = NAMED.get(value);
   if (named) return { css: value, rgba: hexToRgba(`#${named}`) };
   const fn = FN_RE.exec(value);
   return fn ? parseFunction(fn[1], fn[2]) : null;
+}
+
+/** One colour value (a `color:` value or a `<font color>`), or null when it is not one this accepts. */
+export function parseAuthorColor(raw: string): AuthorColor | null {
+  if (raw.length > MAX_VALUE) return null;
+  const color = readValue(raw.trim().toLowerCase());
+  return color && color.rgba[3] >= AUTHOR_COLOR_MIN_ALPHA ? color : null;
 }
 
 /** A style attribute that is exactly one `color` declaration, else null (the whole style is dropped). */
@@ -152,7 +162,16 @@ export function parseColorStyle(style: string): AuthorColor | null {
  * either way; a font's colour may be bare, as in old HTML). Any other
  * attribute, or none, and the tag is not this form.
  */
-const OPEN_RE = /^<(span)\s+style\s*=\s*(?:"([^"<>]*)"|'([^'<>]*)')\s*>|^<(font)\s+color\s*=\s*(?:"([^"<>]*)"|'([^'<>]*)'|([^\s"'<>=`]+))\s*>/i;
+const OPEN_RE = /<(span)\s+style\s*=\s*(?:"([^"<>]*)"|'([^'<>]*)')\s*>|<(font)\s+color\s*=\s*(?:"([^"<>]*)"|'([^'<>]*)'|([^\s"'<>=`]+))\s*>/iy;
+const TAG_RE = { span: /<(\/?)span(?=[\s>])[^<>]*>/gi, font: /<(\/?)font(?=[\s>])[^<>]*>/gi };
+
+/**
+ * How far the closing tag is looked for: past this many tags of the same name,
+ * or this many open at once, the run is not this form and renders as written.
+ * The bound keeps a page of unclosed tags linear to read.
+ */
+const MAX_TAGS = 64;
+const MAX_DEPTH = 16;
 
 export interface AuthorColorMatch {
   /** The colour, or null when the attribute was refused: the words still render, uncoloured. */
@@ -169,40 +188,75 @@ export interface AuthorColorMatch {
  * not this form (it renders as written).
  */
 export function matchAuthorColor(text: string): AuthorColorMatch | null {
-  if (text[0] !== '<') return null;
+  return matchAt(text, 0);
+}
+
+function matchAt(text: string, at: number): AuthorColorMatch | null {
+  if (text[at] !== '<') return null;
+  OPEN_RE.lastIndex = at;
   const open = OPEN_RE.exec(text);
   if (!open) return null;
-  const tag = (open[1] ?? open[4]).toLowerCase();
-  const attr = open[1] ? (open[2] ?? open[3]) : (open[5] ?? open[6] ?? open[7]);
-  const color = open[1] ? parseColorStyle(attr) : parseAuthorColor(attr);
-  const tags = new RegExp(`<(/?)${tag}(?=[\\s>])[^<>]*>`, 'gi');
-  tags.lastIndex = open[0].length;
+  const isSpan = !!open[1];
+  const attr = isSpan ? (open[2] ?? open[3]) : (open[5] ?? open[6] ?? open[7]);
+  const color = isSpan ? parseColorStyle(attr) : parseAuthorColor(attr);
+  const tags = isSpan ? TAG_RE.span : TAG_RE.font;
+  const start = at + open[0].length;
+  tags.lastIndex = start;
   let depth = 1;
-  for (let m = tags.exec(text); m; m = tags.exec(text)) {
+  for (let seen = 0, m = tags.exec(text); m && seen < MAX_TAGS; seen++, m = tags.exec(text)) {
     depth += m[1] ? -1 : 1;
-    if (depth === 0) return { color, inner: text.slice(open[0].length, m.index), length: m.index + m[0].length };
+    if (depth > MAX_DEPTH) return null;
+    if (depth === 0) return { color, inner: text.slice(start, m.index), length: m.index + m[0].length - at };
   }
   return null;
 }
 
-/** `text` with every coloured run reduced to its words: what a table copy and CSV carry. */
+/**
+ * Where each code span closes, CommonMark's way (as InlineMarkdown reads them):
+ * a run of N backticks is closed by the next run of exactly N.
+ */
+function codeSpanEnds(text: string): (at: number) => number {
+  const width = new Map<number, number>();
+  const starts = new Map<number, { at: number[]; next: number }>();
+  for (const run of text.matchAll(/`+/g)) {
+    const n = run[0].length;
+    width.set(run.index, n);
+    const list = starts.get(n) ?? { at: [], next: 0 };
+    list.at.push(run.index);
+    starts.set(n, list);
+  }
+  // Called with rising `at`, so each width's cursor only moves forward.
+  return (at) => {
+    const n = width.get(at)!;
+    const list = starts.get(n)!;
+    while (list.next < list.at.length && list.at[list.next] <= at) list.next++;
+    return list.next < list.at.length ? list.at[list.next] + n : at + n;
+  };
+}
+
+/**
+ * `text` with every coloured run reduced to its words: what a table copy and
+ * CSV carry. A code span is copied as written, tags and all.
+ */
 export function stripAuthorColor(text: string): string {
   if (!text.includes('<')) return text;
+  const codeEnd = text.includes('`') ? codeSpanEnds(text) : null;
+  const next = /[<`]/g;
   let out = '';
-  let i = 0;
-  while (i < text.length) {
-    const at = text.indexOf('<', i);
-    if (at === -1) break;
-    const run = matchAuthorColor(text.slice(at));
+  let copied = 0; // text before this is in `out`
+  for (let hit = next.exec(text); hit; hit = next.exec(text)) {
+    const at = hit.index;
+    if (text[at] === '`') {
+      next.lastIndex = codeEnd!(at);
+      continue;
+    }
+    const run = matchAt(text, at);
     if (run) {
-      out += text.slice(i, at) + stripAuthorColor(run.inner);
-      i = at + run.length;
-    } else {
-      out += text.slice(i, at + 1);
-      i = at + 1;
+      out += text.slice(copied, at) + stripAuthorColor(run.inner);
+      copied = next.lastIndex = at + run.length;
     }
   }
-  return out + text.slice(i);
+  return out + text.slice(copied);
 }
 
 // ── Readability against the background ─────────────────────────────────────

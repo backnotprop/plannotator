@@ -745,3 +745,4 @@ packages/ui/components/TaterSpriteSlots.test.tsx
 packages/inbox/sidebarRedraws.test.tsx
 packages/inbox/agents/faceSources.test.tsx
 packages/ui/components/Viewer.authorColor.test.tsx
+packages/review-editor/components/authorColor.review.test.tsx

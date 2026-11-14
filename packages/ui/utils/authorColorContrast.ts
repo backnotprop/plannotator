@@ -3,8 +3,7 @@
  * colour is painted as written unless it falls below 3:1 against the
  * background actually behind it; then `readableAuthorColor` shifts its
  * lightness, hue kept. Measured on the page (any palette, any host) and again
- * after every change to `<html>`'s classes or style, which is how a theme
- * switch arrives.
+ * after each theme switch on `<html>`.
  */
 import { composite, parseColorStyle, readableAuthorColor, type AuthorColor, type Rgb, type Rgba } from './authorColor';
 
@@ -70,72 +69,125 @@ function backgroundBehind(el: Element): Rgb | null {
   return base;
 }
 
+type Span = readonly [HTMLElement, AuthorColor];
+
 const painted = new WeakMap<HTMLElement, string>();
 
 /**
- * Paints `color` on `el` (which already carries `color.css`): as written, or
- * shifted where it would be unreadable on the background behind it. The
- * change lands at once, not through the page's 150ms colour transition.
+ * Paints each span's colour (which it already carries as `color.css`): as
+ * written, or shifted where it would be unreadable on the background behind
+ * it. Every background is read before anything is written, so a page of
+ * coloured spans costs one style pass, and the change lands at once, not
+ * through the page's 150ms colour transition.
  */
+function paintAll(spans: Iterable<Span>): void {
+  const changed: Array<[HTMLElement, string]> = [];
+  for (const [el, color] of spans) {
+    const bg = backgroundBehind(el);
+    const shift = bg ? readableAuthorColor(color.rgba, bg) : null;
+    const value = shift ? `rgb(${shift.join(', ')})` : color.css;
+    if ((painted.get(el) ?? color.css) !== value) changed.push([el, value]);
+  }
+  for (const [el, value] of changed) {
+    painted.set(el, value);
+    el.style.transition = 'none';
+    el.style.color = value;
+  }
+  for (const [el] of changed) void el.ownerDocument.defaultView?.getComputedStyle(el).color;
+  for (const [el] of changed) el.style.removeProperty('transition');
+}
+
+/** Paints `color` on `el` once (see `watchAuthorColor` to keep it painted). */
 export function paintAuthorColor(el: HTMLElement, color: AuthorColor): void {
-  const bg = backgroundBehind(el);
-  const shift = bg ? readableAuthorColor(color.rgba, bg) : null;
-  const value = shift ? `rgb(${shift.join(', ')})` : color.css;
-  if ((painted.get(el) ?? color.css) === value) return;
-  painted.set(el, value);
-  el.style.transition = 'none';
-  el.style.color = value;
-  void el.ownerDocument.defaultView?.getComputedStyle(el).color;
-  el.style.removeProperty('transition');
+  paintAll([[el, color]]);
+}
+
+const watched = new Set<readonly Span[]>();
+
+function watch(spans: readonly Span[]): () => void {
+  if (spans.length === 0) return () => {};
+  paintAll(spans);
+  watched.add(spans);
+  // Its own listener, so the observer lives while any watch does (`notify` paints `watched`).
+  const stop = onThemeChange(() => {});
+  return () => {
+    watched.delete(spans);
+    stop();
+  };
+}
+
+/** Paints `color` on `el` now and on each theme change; returns the unsubscribe. */
+export function watchAuthorColor(el: HTMLElement, color: AuthorColor): () => void {
+  return watch([[el, color]]);
 }
 
 /**
- * `paintAuthorColor` for every coloured span of sanitized HTML under `root`
- * (the sanitizer leaves a style on nothing else), now and on each theme
- * change; returns the unsubscribe.
+ * `watchAuthorColor` for every coloured span of sanitized HTML under `root`
+ * (the sanitizer leaves a style on nothing else); returns the unsubscribe.
  */
 export function paintAuthorColors(root: HTMLElement): () => void {
-  const spans: Array<[HTMLElement, AuthorColor]> = [];
+  const spans: Span[] = [];
   for (const el of Array.from(root.querySelectorAll<HTMLElement>('span[style]'))) {
     const color = parseColorStyle(el.getAttribute('style') ?? '');
     if (color) spans.push([el, color]);
   }
-  if (spans.length === 0) return () => {};
-  const paint = () => {
-    for (const [el, color] of spans) paintAuthorColor(el, color);
-  };
-  paint();
-  return onThemeChange(paint);
+  return watch(spans);
 }
 
 const listeners = new Set<() => void>();
 let observer: MutationObserver | null = null;
 let frame = 0;
 let settle: ReturnType<typeof setTimeout> | undefined;
+let lastTheme = '';
 
 /** Past the page's 150ms colour transition, for a host that swaps theme classes without ThemeProvider's instant switch. */
 const SETTLED_MS = 200;
 
+/**
+ * What a theme switch changes on `<html>`: its classes, `data-theme`, and the
+ * palette a host may set inline (the VS Code webview does). A panel drag
+ * writes widths to the same inline style and changes none of these.
+ */
+function themeKey(): string {
+  const root = document.documentElement;
+  const style = getComputedStyle(root);
+  return [
+    root.className,
+    root.getAttribute('data-theme'),
+    style.colorScheme,
+    style.backgroundColor,
+    ...['--background', '--foreground', '--card', '--muted', '--popover'].map((v) => style.getPropertyValue(v)),
+    document.body ? getComputedStyle(document.body).backgroundColor : '',
+  ].join('|');
+}
+
 const notify = () => {
+  const spans: Span[] = [];
+  for (const list of watched) spans.push(...list);
+  paintAll(spans);
   for (const fn of Array.from(listeners)) fn();
 };
 
 /**
- * Calls `cb` a frame after `<html>`'s class or style changes (a theme switch),
- * and again once a background still fading in would have landed; returns the
- * unsubscribe.
+ * Calls `cb` a frame after a theme switch on `<html>` (any number of changes
+ * in that frame count once), and again once a background still fading in
+ * would have landed; returns the unsubscribe.
  */
 export function onThemeChange(cb: () => void): () => void {
   if (typeof document === 'undefined' || typeof MutationObserver === 'undefined') return () => {};
   listeners.add(cb);
   if (!observer) {
+    lastTheme = themeKey();
     observer = new MutationObserver(() => {
-      clearTimeout(settle);
-      settle = setTimeout(notify, SETTLED_MS);
       if (frame) return;
       frame = requestAnimationFrame(() => {
         frame = 0;
+        const theme = themeKey();
+        if (theme === lastTheme) return;
+        lastTheme = theme;
         notify();
+        clearTimeout(settle);
+        settle = setTimeout(notify, SETTLED_MS);
       });
     });
     observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style', 'data-theme'] });

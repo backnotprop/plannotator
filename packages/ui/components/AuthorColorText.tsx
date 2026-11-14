@@ -1,6 +1,6 @@
 import React, { useLayoutEffect, useRef } from 'react';
 import type { AuthorColor } from '../utils/authorColor';
-import { onThemeChange, paintAuthorColor } from '../utils/authorColorContrast';
+import { watchAuthorColor } from '../utils/authorColorContrast';
 
 /**
  * Words the author coloured (`<span style="color: …">` / `<font color>` in
@@ -12,9 +12,7 @@ export const AuthorColorText: React.FC<{ color: AuthorColor; children: React.Rea
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const paint = () => paintAuthorColor(el, color);
-    paint();
-    return onThemeChange(paint);
+    return watchAuthorColor(el, color);
     // `color` is a new object every render; its css is what identifies it.
   }, [color.css]);
   return <span ref={ref} style={{ color: color.css }}>{children}</span>;

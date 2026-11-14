@@ -108,6 +108,41 @@ describe.if(hasDom)('a table copies a coloured cell as its words', () => {
     expect(buildMarkdownTable(headers, rows)).not.toMatch(/<\/?(span|font)/);
     expect(rows[0][1]).toBe('<span style="color: #d00000">73.0%</span>');
   });
+
+  test('a code span that documents the syntax copies as written', () => {
+    const docs = ['| Write | Shows |', '| --- | --- |', '| `<span style="color: red">x</span>` | <span style="color: red">x</span> |'].join('\n');
+    expect(buildCsv(docs)).toBe('Write,Shows\n"`<span style=""color: red"">x</span>`",x');
+    const { headers, rows } = parseTableContent(docs);
+    expect(buildMarkdownTable(headers, rows)).toContain('| `<span style="color: red">x</span>` | x |');
+  });
+});
+
+describe.if(hasDom)('a coloured span is checked again on a theme switch, not on every write to <html>', () => {
+  const frames = () => act(async () => new Promise((r) => setTimeout(r, 300)));
+
+  test('a panel width written to <html> leaves it; a theme class repaints it', async () => {
+    const html = document.documentElement;
+    const page = await mountInline('<span style="color: #5a0000">low</span>', 'rgb(255, 255, 255)');
+    const span = page.querySelector<HTMLElement>('span[style]')!;
+    expect(span.style.color).toBe('#5a0000');
+    try {
+      // The card turns dark without a theme switch: a drag frame is not one.
+      host!.style.backgroundColor = 'rgb(30, 30, 36)';
+      html.style.setProperty('--rpanel-w', '320px');
+      await frames();
+      html.style.setProperty('--rpanel-w', '340px');
+      await frames();
+      expect(span.style.color).toBe('#5a0000');
+
+      html.classList.add('author-color-test-theme');
+      await frames();
+      expect(span.style.color).not.toBe('#5a0000');
+      expect(span.style.color).toMatch(/^rgb\(/);
+    } finally {
+      html.style.removeProperty('--rpanel-w');
+      html.classList.remove('author-color-test-theme');
+    }
+  });
 });
 
 interface ViewerHandle {

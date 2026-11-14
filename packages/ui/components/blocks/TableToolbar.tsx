@@ -54,7 +54,8 @@ export const TableToolbar: React.FC<TableToolbarProps> = ({
   }, [element]);
 
   const handleCopyMarkdown = async () => {
-    if (await copyTextToClipboard(stripAuthorColor(markdown))) {
+    // Row by row: a code span never runs from one row into the next.
+    if (await copyTextToClipboard(markdown.split('\n').map(stripAuthorColor).join('\n'))) {
       setCopiedMd(true);
       setTimeout(() => setCopiedMd(false), 1500);
     } else {
