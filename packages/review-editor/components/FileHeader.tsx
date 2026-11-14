@@ -199,7 +199,7 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
       {paneTabs ? (
         <div className="min-w-0 flex flex-1 self-stretch items-stretch gap-2" data-file-header-tabs="" data-roving-skip="">
           {paneTabs}
-          {status === 'renamed' && oldPath && (
+          {status === 'renamed' && oldPath && !narrow && (
             <span className="min-w-0 shrink-[1000] self-center max-w-[40%] truncate text-xs text-muted-foreground [font-variant-ligatures:no-contextual]" title={`Renamed from ${oldPath}`} data-file-header-renamed-from="">
               from {splitFilePath(oldPath).name}
             </span>
