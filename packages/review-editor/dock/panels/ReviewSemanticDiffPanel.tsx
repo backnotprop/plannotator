@@ -23,6 +23,22 @@ type LoadState =
   | { status: 'empty'; data: SemanticDiffOkResponse }
   | { status: 'error'; error: SemanticDiffErrorResponse | Error };
 
+const UNREAD_REASON: Record<string, string> = {
+  generated: 'generated file, skipped',
+  'too-large': 'too large to read',
+  unreadable: 'could not be loaded',
+  'timed-out': 'took too long',
+};
+
+function unreadLine(data: SemanticDiffOkResponse): { text: string; detail: string } | null {
+  const unread = data.unreadFiles ?? [];
+  if (unread.length === 0) return null;
+  return {
+    text: `Couldn't read ${unread.length} ${unread.length === 1 ? 'file' : 'files'}`,
+    detail: unread.map((file) => `${file.path}: ${UNREAD_REASON[file.reason] ?? file.reason}`).join('\n'),
+  };
+}
+
 const SUMMARY_ORDER = ['moved', 'moved & edited', 'renamed', 'reformatted', 'extracted', 'inlined', 'reordered', 'modified', 'added', 'deleted'];
 const SUMMARY_WORD: Record<string, string> = { modified: 'edited' };
 
@@ -160,6 +176,7 @@ export function ReviewSemanticDiffPanel() {
 
   if (loadState.status !== 'ready' && loadState.status !== 'empty') return null;
   const { data } = loadState;
+  const unread = unreadLine(data);
 
   return (
     <div className="semantic-diff-panel">
@@ -194,7 +211,14 @@ export function ReviewSemanticDiffPanel() {
         ))}
 
         {loadState.status === 'empty' && (
-          <div className="semantic-diff-empty">No semantic changes found.</div>
+          <div className="semantic-diff-empty">
+            {data.unreadFiles?.length ? 'No semantic changes found in the files that could be read.' : 'No semantic changes found.'}
+          </div>
+        )}
+        {unread && (
+          <div className="semantic-diff-unread" title={unread.detail} data-semantic-unread={data.unreadFiles!.length}>
+            {unread.text}
+          </div>
         )}
         <div className="semantic-diff-summary">{formatSummary(data)}</div>
       </div>

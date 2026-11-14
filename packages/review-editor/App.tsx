@@ -793,7 +793,7 @@ const ReviewApp: React.FC = () => {
   );
   useEffect(() => () => semDiffClient?.dispose(), [semDiffClient]);
   const semanticDiffUsable = semDiffClient != null || (semanticDiffEnabled && semanticDiffAvailable);
-  const semContentRef = useRef<{ files: DiffFile[]; base?: string; snapshot?: string }>({ files: [] });
+  const semContentRef = useRef<{ files: DiffFile[]; base?: string; snapshot?: string; generated: ReadonlySet<string> }>({ files: [], generated: new Set() });
   useEffect(() => {
     if (!semDiffClient) {
       setSemanticDiffSource(null);
@@ -811,10 +811,10 @@ const ReviewApp: React.FC = () => {
     };
     let cached: { key: string; promise: Promise<SemanticDiffResponse> } | null = null;
     setSemanticDiffSource(() => {
-      const { files, base, snapshot } = semContentRef.current;
-      const key = `${base ?? ''}|${snapshot ?? ''}|${files.map((file) => `${file.path}#${file.patch.length}`).join('|')}`;
+      const { files, base, snapshot, generated } = semContentRef.current;
+      const key = `${base ?? ''}|${snapshot ?? ''}|${[...generated].join(',')}|${files.map((file) => `${file.path}#${file.patch.length}`).join('|')}`;
       if (cached?.key === key) return cached.promise;
-      const promise = computeReviewSemanticDiff(files, semDiffClient, read, new AbortController().signal);
+      const promise = computeReviewSemanticDiff(files, semDiffClient, read, new AbortController().signal, generated);
       cached = { key, promise };
       return promise;
     });
@@ -4401,6 +4401,7 @@ const ReviewApp: React.FC = () => {
       ? committedBase ?? undefined
       : undefined,
     snapshot: feedbackDiffContext?.snapshotId,
+    generated: generatedFiles,
   };
   const reviewStateValue = useMemo<ReviewState>(() => ({
     files,

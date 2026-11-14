@@ -237,6 +237,12 @@ diffs-container {
   color: var(--destructive);
 }
 
+.semantic-diff-unread {
+  margin-top: 0.25rem;
+  color: var(--warning);
+  cursor: help;
+}
+
 /* Entity row — grid-aligned, full-width, rounded hover target */
 .semantic-diff-row {
   display: grid;
