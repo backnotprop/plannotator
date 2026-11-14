@@ -150,14 +150,21 @@ export function detachedInboxEnv(env: Readonly<Record<string, string | undefined
 
 function waitUntilRunning(dataDir: string): Promise<InboxRegistryEntry | null> {
   const started = Date.now();
+  const timeout = startTimeoutMs();
+  let returnSeenAt = 0;
+  const returning = () => {
+    if (Date.now() - started >= RETURN_WAIT_MAX_MS) return false;
+    if (inboxReturnRunning(dataDir)) returnSeenAt = Date.now();
+    return returnSeenAt > 0 && Date.now() - returnSeenAt < timeout;
+  };
   return waitForInbox(
     async () => {
       const next = await inboxStatus(dataDir, 1000);
       return next.state === "running" ? next.entry : null;
     },
-    startTimeoutMs(),
+    timeout,
     100,
-    () => Date.now() - started < RETURN_WAIT_MAX_MS && inboxReturnRunning(dataDir),
+    returning,
   );
 }
 

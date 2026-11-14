@@ -159,11 +159,9 @@ export interface ProjectFolder extends InboxProject {
   combined?: { id: string; name: string; root: string }[];
   /** When its letter mark's picture was set (Set picture…, ms). Absent when none, and from an older Inbox. */
   picture?: number;
-  /**
-   * Its git origin's host (null: a remote that names none, which links as github.com). Absent for a project with no
-   * repo (or none resolved yet), and from an older Inbox. Read for `defaultRefHost.ts`.
-   */
+  /** Its git origin's host (null: none named, links as github.com); absent with no repo and from an older Inbox. */
   repo_host?: string | null;
+  repo_forge?: 'gitlab';
 }
 
 /** The project menu's batches (POST /api/inbox/projects/:id/read and /resolve): the threads each took. */
