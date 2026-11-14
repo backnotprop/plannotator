@@ -43,15 +43,15 @@ export interface MinimapDrawInput {
   colors: MinimapColors;
 }
 
-const MIN_ALPHA = 0.38;
-const MAX_ALPHA = 0.9;
+const MIN_ALPHA = 0.3;
+const MAX_ALPHA = 0.62;
 const DIM = 0.4;
 const STEPS = 24;
 
 function laneBox(lane: Lane, dpr: number, width: number): [number, number] {
   if (lane === 'mark') return [0, width];
-  const left = Math.round((lane === 'del' ? 2 : 6) * dpr);
-  return [left, Math.round(4 * dpr)];
+  const left = Math.round((lane === 'del' ? 2 : 7) * dpr);
+  return [left, Math.round(3 * dpr)];
 }
 
 function alphaColumn(column: Float32Array): Float32Array {
