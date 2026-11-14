@@ -9,19 +9,19 @@ export const PaneTabsMenu: React.FC<{
   pane: Pane;
   onActivate: (id: string) => void;
   onClose: (id: string) => void;
-  overflow?: boolean;
-}> = ({ pane, onActivate, onClose, overflow = false }) => {
+  overflow?: number;
+}> = ({ pane, onActivate, onClose, overflow }) => {
   const active = pane.tabs.find((tab) => tab.id === pane.activeId) ?? pane.tabs[0];
   const title = useSettledValue(active ? tabLabel(active) : '', TITLE_SETTLE_MS);
   return (
     <Menu.Root>
-      {overflow ? (
+      {overflow !== undefined ? (
         <Menu.Trigger
           data-pane-tabs-overflow=""
-          aria-label={`All ${pane.tabs.length} open files`}
+          aria-label={`${overflow} more open ${overflow === 1 ? 'file' : 'files'}`}
           className="flex-none self-center h-6 flex items-center gap-0.5 px-1.5 rounded-md text-[12px] tabular-nums text-muted-foreground hover:text-foreground hover:bg-muted"
         >
-          {pane.tabs.length}
+          {overflow}
           <ChevronDown className="w-3.5 h-3.5" aria-hidden="true" />
         </Menu.Trigger>
       ) : (

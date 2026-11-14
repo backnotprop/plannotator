@@ -13,7 +13,7 @@ import { readSavedLayout, snapshotLayout, writeSavedLayout } from './layoutMemor
 
 export const PANE_RATIO_KEY = 'plannotator-review-pane-ratio';
 const SAVE_DELAY_MS = 300;
-const SECOND_GROUP_MIN_WIDTH = 160;
+const SECOND_GROUP_MIN_WIDTH = 96;
 
 function readRatio(): number {
   return clampRatio(Number.parseFloat(storage.getItem(PANE_RATIO_KEY) ?? '0.5'));

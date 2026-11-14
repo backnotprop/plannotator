@@ -8,22 +8,48 @@ import { isClosableTab, isReferencesTab, tabLabel } from './tabLabel';
 
 export { TITLE_SETTLE_MS };
 
-function useOverflowing(ref: React.RefObject<HTMLElement | null>, deps: unknown[]): boolean {
-  const [overflowing, setOverflowing] = useState(false);
+export const TAB_MIN_WIDTH = 72;
+
+function useHiddenTabs(ref: React.RefObject<HTMLElement | null>, key: string, single: boolean): Set<string> {
+  const [hidden, setHidden] = useState<Set<string>>(() => new Set());
   useLayoutEffect(() => {
     const element = ref.current;
     if (!element) return;
-    const measure = () => setOverflowing(element.scrollWidth > element.clientWidth + 1);
+    const measure = () => {
+      const next = new Set<string>();
+      if (!single) {
+        for (const item of element.querySelectorAll<HTMLElement>('[data-pane-tab-item]')) {
+          if (item.offsetLeft + item.offsetWidth > element.clientWidth + 1) next.add(item.getAttribute('data-pane-tab-item')!);
+        }
+      }
+      setHidden((before) => (before.size === next.size && [...next].every((id) => before.has(id)) ? before : next));
+    };
     measure();
     if (typeof ResizeObserver === 'undefined') return;
     const observer = new ResizeObserver(measure);
     observer.observe(element);
     return () => observer.disconnect();
-  }, deps);
-  return overflowing;
+  }, [ref, key, single]);
+  return hidden;
 }
 
-const TabTitle: React.FC<{ title: string }> = ({ title }) => <>{useSettledValue(title, TITLE_SETTLE_MS)}</>;
+const FILE_EXTENSION = /^(.+?)(\.[A-Za-z0-9]{1,8})$/;
+
+export function splitTabTitle(title: string): { stem: string; extension: string } {
+  const match = FILE_EXTENSION.exec(title);
+  return match ? { stem: match[1]!, extension: match[2]! } : { stem: title, extension: '' };
+}
+
+const TabTitle: React.FC<{ title: string; keepExtension: boolean }> = ({ title, keepExtension }) => {
+  const settled = useSettledValue(title, TITLE_SETTLE_MS);
+  const { stem, extension } = keepExtension ? splitTabTitle(settled) : { stem: settled, extension: '' };
+  return (
+    <>
+      <span className="truncate min-w-0">{stem}</span>
+      {extension && <span className="flex-none">{extension}</span>}
+    </>
+  );
+};
 
 function focusTreeRow() {
   const row = document.querySelector<HTMLElement>('[data-review-sidebar] .file-tree-item.active') ?? document.querySelector<HTMLElement>('[data-review-sidebar] .file-tree-item');
@@ -39,7 +65,7 @@ export const PaneTabs: React.FC<{
   inHeader?: boolean;
 }> = ({ pane, paneIndex, onActivate, onClose, onKeep, inHeader = false }) => {
   const listRef = useRef<HTMLDivElement>(null);
-  const overflowing = useOverflowing(listRef, [pane.tabs.length]);
+  const hidden = useHiddenTabs(listRef, pane.tabs.map((tab) => `${tab.id}\0${tab.title}`).join('\n'), pane.tabs.length < 2 || !inHeader);
 
   const focusTab = (id: string | null) => {
     if (!id) return;
@@ -74,7 +100,7 @@ export const PaneTabs: React.FC<{
       onKeyDown={onKeyDown}
       data-pane-tabs-for={paneIndex}
       className={inHeader
-        ? 'min-w-0 h-full flex items-stretch gap-4 overflow-x-auto [scrollbar-width:none]'
+        ? 'min-w-0 h-full flex items-stretch gap-4 overflow-hidden'
         : 'flex-none h-8 flex items-stretch gap-4 px-3 overflow-x-auto shadow-[inset_0_-1px_0_var(--border)] bg-background [scrollbar-width:none]'}
     >
       {pane.tabs.map((tab) => {
@@ -82,7 +108,13 @@ export const PaneTabs: React.FC<{
         const preview = isReviewFilePreviewParams(tab.params);
         const closable = isClosableTab(tab);
         return (
-          <div key={tab.id} className="group relative flex flex-none items-center gap-1">
+          <div
+            key={tab.id}
+            data-pane-tab-item={tab.id}
+            aria-hidden={hidden.has(tab.id) || undefined}
+            style={inHeader ? { minWidth: TAB_MIN_WIDTH } : undefined}
+            className={`group relative flex items-center gap-1 ${inHeader ? 'min-w-0 shrink' : 'flex-none'} ${hidden.has(tab.id) ? 'invisible' : ''}`}
+          >
             <button
               type="button"
               role="tab"
@@ -98,12 +130,12 @@ export const PaneTabs: React.FC<{
                 event.preventDefault();
                 close(tab.id);
               }}
-              className={`h-full max-w-[180px] flex items-center gap-1 text-[13px] font-medium transition-colors outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary/60 rounded-sm ${
+              className={`h-full min-w-0 max-w-[180px] flex items-center text-[13px] font-medium transition-colors outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary/60 rounded-sm ${
                 active ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'
               } ${preview ? 'italic' : ''}`}
             >
-              {isReferencesTab(tab) && <Crosshair className="w-3.5 h-3.5 flex-none" aria-hidden="true" data-references-tab-icon="" />}
-              <span className="truncate"><TabTitle title={tabLabel(tab)} /></span>
+              {isReferencesTab(tab) && <Crosshair className="w-3.5 h-3.5 flex-none mr-1" aria-hidden="true" data-references-tab-icon="" />}
+              <span className="min-w-0 flex"><TabTitle title={tabLabel(tab)} keepExtension={!isReferencesTab(tab)} /></span>
             </button>
             {closable && <button
               type="button"
@@ -111,7 +143,7 @@ export const PaneTabs: React.FC<{
               data-pane-tab-close={tab.id}
               tabIndex={-1}
               onClick={() => close(tab.id)}
-              className={`h-4 w-4 flex items-center justify-center rounded-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-opacity ${
+              className={`h-4 w-4 flex-none flex items-center justify-center rounded-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-opacity ${
                 active ? 'opacity-70' : 'opacity-0 group-hover:opacity-70 [@media(hover:none)]:opacity-70 focus-visible:opacity-100'
               }`}
             >
@@ -129,7 +161,7 @@ export const PaneTabs: React.FC<{
   return (
     <div className="min-w-0 h-full flex items-stretch gap-1">
       {list}
-      {overflowing && <PaneTabsMenu pane={pane} onActivate={onActivate} onClose={onClose} overflow />}
+      {hidden.size > 0 && <PaneTabsMenu pane={pane} onActivate={onActivate} onClose={onClose} overflow={hidden.size} />}
     </div>
   );
 };
