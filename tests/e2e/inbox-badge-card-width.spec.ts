@@ -17,7 +17,7 @@
  * Plain full-window PNGs land in PLANNOTATOR_BADGE_CARD_SHOTS when it is set.
  */
 
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';

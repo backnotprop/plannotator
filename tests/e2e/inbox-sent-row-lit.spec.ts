@@ -9,7 +9,7 @@
  * PNGs land in .local/proof/sent-row-lit/ (and SENT_ROW_LIT_SHOTS when set).
  */
 
-import { expect, test } from '@playwright/test';
+import { expect, test } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';

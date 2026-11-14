@@ -14,7 +14,7 @@
  * Build the binary first (see inbox.spec.ts). PLANNOTATOR_E2E_BINARY names
  * another binary (an older release, to see the bug).
  */
-import { expect, test, type Browser, type Page } from '@playwright/test';
+import { expect, test, type Browser, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';

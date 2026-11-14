@@ -4,7 +4,7 @@
  * window, or a window back from offline that never catches up; rows flipping back when the second-last session ends.
  * ROW_NAMES_SHOTS writes PNGs. Build the binary first (see inbox.spec.ts).
  */
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';

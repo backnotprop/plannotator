@@ -16,7 +16,7 @@
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-whats-new-behind.spec.ts`.
  */
 
-import { expect, test, type Browser, type Page } from '@playwright/test';
+import { expect, test, type Browser, type Page } from './inbox-test';
 import { execSync, spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';

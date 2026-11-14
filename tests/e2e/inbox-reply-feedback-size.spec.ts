@@ -18,7 +18,7 @@
  * land in .local/proof/reply-feedback-size/ (or PLANNOTATOR_E2E_PROOF_DIR/reply-feedback-size).
  */
 
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';

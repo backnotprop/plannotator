@@ -25,7 +25,7 @@
  * (default .local/proof/fullscreen-keyboard).
  */
 
-import { chromium, expect, test, webkit, type Browser, type BrowserContext, type Locator, type Page } from '@playwright/test';
+import { chromium, expect, test, webkit, type Browser, type BrowserContext, type Locator, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';

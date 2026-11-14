@@ -7,7 +7,7 @@
  * Under a temp HOME and PLANNOTATOR_DATA_DIR; agents write through `plannotator inbox mcp`.
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-row-star.spec.ts`.
  */
-import { devices, expect, test, webkit, type Browser, type Page } from '@playwright/test';
+import { devices, expect, test, webkit, type Browser, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';

@@ -22,7 +22,7 @@
  * .local/proof/new-card-phone/ (PLANNOTATOR_E2E_SHOTS_DIR names another folder).
  */
 
-import { devices, expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { devices, expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';

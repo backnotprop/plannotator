@@ -34,7 +34,7 @@
  * the picker's placement is checked, so an older binary still leaves one.
  */
 
-import { devices, expect, test, webkit, type Browser, type Page } from '@playwright/test';
+import { devices, expect, test, webkit, type Browser, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';

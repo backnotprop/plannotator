@@ -27,7 +27,7 @@
  * PLANNOTATOR_E2E_VIDEO=1.
  */
 
-import { chromium, expect, test, type Browser, type BrowserContext, type Locator, type Page } from '@playwright/test';
+import { chromium, expect, test, type Browser, type BrowserContext, type Locator, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';

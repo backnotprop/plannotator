@@ -27,7 +27,7 @@
  * /Users/ramos/plannotator/.ops/shots/decision-mode-build/ when that folder's parent exists, else .local/proof/decision-mode/.
  */
 
-import { chromium, devices, expect, test, webkit, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { chromium, devices, expect, test, webkit, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';

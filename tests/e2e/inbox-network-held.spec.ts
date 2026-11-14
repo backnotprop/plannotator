@@ -16,7 +16,7 @@
  *    and the reply box where they were, and draws each new message (each one draws only its own body: stage 3).
  */
 
-import { expect, test, type BrowserContext, type Page, type Request } from '@playwright/test';
+import { expect, test, type BrowserContext, type Page, type Request } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';

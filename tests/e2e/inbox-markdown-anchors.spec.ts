@@ -1,5 +1,5 @@
 /** Heading links scroll the attachment, without replacing the Inbox route (#2229). */
-import { expect, test } from '@playwright/test';
+import { expect, test } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';

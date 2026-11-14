@@ -12,7 +12,7 @@
 import { execFileSync } from 'node:child_process';
 import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { type Browser, devices, expect, firefox, type Page, test, webkit } from '@playwright/test';
+import { type Browser, devices, expect, firefox, type Page, test, webkit } from './inbox-test';
 import { removeInboxScratch } from './inbox-scratch';
 import { seedShapeWorld, type ShapeWorld } from './inbox-shape-seed';
 import { SimAgent } from '../../scripts/inbox-sim';

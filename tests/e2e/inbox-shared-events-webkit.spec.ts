@@ -8,7 +8,7 @@
  * Runs in the playwright config's `webkit` project.
  */
 
-import { expect, test, type Browser } from '@playwright/test';
+import { expect, test, type Browser } from './inbox-test';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { removeInboxScratch } from './inbox-scratch';

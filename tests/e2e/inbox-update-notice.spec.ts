@@ -14,7 +14,7 @@
  * Needs the built apps (apps/hook/dist), as the other specs do.
  */
 
-import { expect, test } from '@playwright/test';
+import { expect, test } from './inbox-test';
 import { execSync, spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, realpathSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';

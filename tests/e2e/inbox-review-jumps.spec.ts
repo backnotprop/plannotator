@@ -8,7 +8,7 @@
  * files just off screen are ready; a 30,000-line diff does not freeze the window, whether jumped to or passed.
  */
 
-import { expect, test, type Browser, type BrowserContext, type Locator, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Locator, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';

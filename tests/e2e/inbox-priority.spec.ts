@@ -15,7 +15,7 @@
  * PNGs land in PLANNOTATOR_PRIORITY_SHOTS (default /tmp/priority-shots).
  */
 
-import { devices, expect, test, webkit, type Page } from '@playwright/test';
+import { devices, expect, test, webkit, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';

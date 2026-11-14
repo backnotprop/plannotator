@@ -20,7 +20,7 @@
  * PNGs land in .local/proof/picks-composing/ (or PLANNOTATOR_PICKS_SHOTS).
  */
 
-import { devices, expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { devices, expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';

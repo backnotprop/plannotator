@@ -20,7 +20,7 @@
  * set, the walk-through test also records a video there.
  */
 
-import { devices, expect, test, type Browser, type BrowserContext, type Frame, type Page } from '@playwright/test';
+import { devices, expect, test, type Browser, type BrowserContext, type Frame, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
