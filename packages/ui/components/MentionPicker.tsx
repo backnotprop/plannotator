@@ -156,7 +156,7 @@ export function MentionPicker({
                       active === index ? 'bg-muted text-foreground' : 'text-foreground/85 hover:bg-muted/60'
                     }`}
                   >
-                    {person.avatar && <MentionAvatar avatar={person.avatar} label={person.label} />}
+                    {person.mark ? <span data-mention-mark className="flex h-4 w-4 shrink-0 items-center justify-center">{person.mark}</span> : person.avatar && <MentionAvatar avatar={person.avatar} label={person.label} />}
                     <span className="min-w-0 flex-1 truncate">{person.label}</span>
                     {person.detail && (
                       <span className="min-w-0 max-w-[44%] shrink-0 truncate text-[10px] text-muted-foreground">{person.detail}</span>
@@ -187,7 +187,7 @@ export function MentionPicker({
               active === index ? 'bg-muted text-foreground' : 'text-foreground/85 hover:bg-muted/60'
             }`}
           >
-            {person.avatar && <MentionAvatar avatar={person.avatar} label={person.label} />}
+            {person.mark ? <span data-mention-mark className="flex h-4 w-4 shrink-0 items-center justify-center">{person.mark}</span> : person.avatar && <MentionAvatar avatar={person.avatar} label={person.label} />}
             <span className="min-w-0 flex-1 truncate">{person.label}</span>
             {person.detail && (
               // The NAME is what the person reads; the detail gives way first.
