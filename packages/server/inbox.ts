@@ -3970,7 +3970,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         thread_id: reply.thread_id,
         reply_to: reply.reply_to,
         subject,
-        body: inboxBodyForAgent(reply, store.reviewBatchOf(reply)),
+        body: inboxBodyForAgent(reply, store.reviewBatchOf(reply), store.reviewAnchorAbove(reply)),
         url: threadPageUrl(baseUrl, reply.thread_id),
         tagged: { owner: hostAgentName(store.recipientOf(reply)?.host) },
         // Added to the thread ("Add instead"): it works alongside the owner.
@@ -4003,7 +4003,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       thread_id: reply.thread_id,
       reply_to: reply.reply_to,
       subject,
-      body: inboxBodyForAgent(reply, store.reviewBatchOf(reply)),
+      body: inboxBodyForAgent(reply, store.reviewBatchOf(reply), store.reviewAnchorAbove(reply)),
       url: threadPageUrl(baseUrl, reply.thread_id),
       ...(redirected ? { redirected_from: redirected } : {}),
       // A thread the person started: the wake says so (INBOX_NEW_THREAD_INSTRUCTION).

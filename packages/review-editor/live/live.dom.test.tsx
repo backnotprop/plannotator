@@ -103,3 +103,23 @@ describe.skipIf(!hasDom)('a thread whose code changed', () => {
     expect(el.querySelector('[data-live-resolve]')?.textContent).toBe('Reopen');
   });
 });
+
+describe.skipIf(!hasDom)('a long thread', () => {
+  test('shows its first message and the last two, with how many are folded between', async () => {
+    const agent = { kind: 'agent', host: 'pi', session: 's', name: null } as never;
+    const messages = [
+      message({ id: 'c1', reply_to: 'root', body: 'First.', review_anchor: anchor }),
+      message({ id: 'a1', reply_to: 'c1', body: 'Two.', author: agent, created_at: '2026-11-14T05:01:00.000Z' }),
+      message({ id: 'p1', reply_to: 'a1', body: 'Three.', created_at: '2026-11-14T05:02:00.000Z' }),
+      message({ id: 'a2', reply_to: 'p1', body: 'Four.', author: agent, created_at: '2026-11-14T05:03:00.000Z' }),
+      message({ id: 'p2', reply_to: 'a2', body: 'Five.', created_at: '2026-11-14T05:04:00.000Z' }),
+    ];
+    const [thread] = placeThreads(messages, []);
+    const el = await render(<LiveThreadCard thread={thread!} messages={messages} actions={actionsRef()} />);
+    const bodies = () => [...el.querySelectorAll('[data-live-message]')].map((m) => m.getAttribute('data-live-message'));
+    expect(bodies()).toEqual(['c1', 'a2', 'p2']);
+    expect(el.querySelector('[data-live-earlier]')?.textContent).toBe('2 earlier');
+    await act(async () => el.querySelector<HTMLButtonElement>('[data-live-earlier]')!.click());
+    expect(bodies()).toEqual(['c1', 'a1', 'p1', 'a2', 'p2']);
+  });
+});

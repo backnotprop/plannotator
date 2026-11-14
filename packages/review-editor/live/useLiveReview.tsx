@@ -53,7 +53,7 @@ export function useLiveReview(input: {
   useEffect(() => {
     if (state?.inbox) loadAgents();
   }, [state?.inbox, loadAgents]);
-  const watching = !!state?.inbox && !!state.thread;
+  const watching = !!state?.inbox;
   useEffect(() => (watching ? watchLive(() => threadRef.current, refresh) : undefined), [watching, refresh]);
 
   const placed = useMemo(() => placeThreads(state?.messages ?? [], input.files), [state?.messages, input.files]);

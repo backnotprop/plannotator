@@ -76,8 +76,14 @@ test("a comment sent now to the launching agent wakes it with its lines, and its
   expect(conversation!.anchor.line_start).toBe(4);
   expect(conversation!.messages.map((m) => m.body)).toEqual(["Use RangeError here.", "Done in def5678."]);
 
+  const agentAnswer = again.messages.find((m) => m.body === "Done in def5678.")!;
+  const followUp = await fetch(`http://127.0.0.1:${w.server.port}/api/inbox/messages/${agentAnswer.id}/reply`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ serverSession: w.server.serverSession, words: "And the message?", questions: [], idempotency_key: "f1" }) });
+  const followId = ((await followUp.json()) as { reply: { id: string } }).reply.id;
+  const woken = (await w.poll("ses-cc", "claude-code")).find((c) => c.id === followId)!;
+  expect(woken.body).toBe(`And the message?\n\n(On the review thread about \`src/billing.ts\` line 4 (new side, at abc1234); answer with reply_to ${followId}.)`);
+
   const replay = await w.send({ to: { host: "claude-code", session: "ses-cc" }, comments: [{ anchor: anchor(4, "  if (amount < 0) throw new Error();"), words: "Use RangeError here." }], idempotency_key: "k1" });
-  expect(replay.messages.length).toBe(again.messages.length);
+  expect(replay.messages.length).toBe((await w.read()).messages.length);
 });
 
 test("send all: one wake per agent carries every comment by its own id, and each answer threads on its comment", async () => {
