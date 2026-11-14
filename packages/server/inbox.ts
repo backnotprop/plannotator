@@ -6141,7 +6141,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       const machineDoor = door?.platform === MACHINE_PLATFORM;
       const composed = await compose.route(req, url, !door || machineDoor, door ? { machine: machineDoor, window: door.window, from: machineDoor ? machines.machineOfDevice(door.device_id) : null } : null);
       if (composed) return composed;
-      const reviewed = await liveReview.route(req, url, isOwner(req, via) && !door);
+      const reviewed = await liveReview.route(req, url, !door);
       if (reviewed) return reviewed;
       // Reply drafts: the reply box's words per thread (approval "inbox-reply-drafts").
       const drafted = await replyDrafts.route(req, url);

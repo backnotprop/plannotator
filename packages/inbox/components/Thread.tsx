@@ -6822,7 +6822,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         )}
         {cardChip ? <div className="ib-tmeta" data-thread-card-row="">{cardChip}</div> : null}
         {(() => {
-          const live = !machine && !guest ? thread.messages.find((m) => m.id === m.thread_id && m.review_live) : undefined;
+          const live = !machine ? thread.messages.find((m) => m.id === m.thread_id && m.review_live) : undefined;
           return live?.review_live ? <OpenLiveReview threadId={live.thread_id} title={live.review_live.title} /> : null;
         })()}
         {notice}

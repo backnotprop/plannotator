@@ -167,7 +167,7 @@ describe.if(hasDom)("phone width: one thing on screen at a time", () => {
     expect(sheet()!.getAttribute("aria-label")).toBe("Review navigation");
     expect(document.activeElement).toBe(sheet());
     expect(document.querySelector('[data-header-branch]')?.textContent).not.toContain("payments-service");
-    const row = [...document.querySelectorAll<HTMLElement>(".file-tree-item")].find((el) => el.textContent?.includes("ledger.ts"));
+    const row = [...(document.querySelector("[data-changes-tree]")?.shadowRoot?.querySelectorAll<HTMLElement>('[data-type="item"]') ?? [])].find((el) => el.dataset.itemPath?.endsWith("ledger.ts"));
     expect(row).toBeDefined();
     await act(async () => row!.click());
     await waitFor(() => !sheetOpen(), "the sheet to close after the pick");
