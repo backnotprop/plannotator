@@ -108,8 +108,6 @@ export interface InboxOpenInRouteContext {
   threadPulls: (thread: string) => string[];
   /** A file at a pull request's head commit, or null. */
   pullFile: (pull: string, path: string) => Promise<InboxPullFile | null>;
-  /** This computer's window, or the owner's own login through the tailnet. */
-  ownerOrLocal: (req: Request, via: "local" | "tailnet") => boolean;
   /** The person's home folder, by default this process's. */
   home?: string;
 }
@@ -185,7 +183,7 @@ function holdsCredentials(path: string): boolean {
 }
 
 export function createInboxOpenInRoute(context: InboxOpenInRouteContext) {
-  const { store, serverSession, readBody, json, localOnly, launcher, codeReviewOn, shapeRoot, repoRoots, threadPulls, pullFile, ownerOrLocal } = context;
+  const { store, serverSession, readBody, json, localOnly, launcher, codeReviewOn, shapeRoot, repoRoots, threadPulls, pullFile } = context;
   const givenHome = context.home ?? homedir();
   const home = realpathOrNull(givenHome) ?? givenHome;
 
@@ -309,7 +307,7 @@ export function createInboxOpenInRoute(context: InboxOpenInRouteContext) {
   };
 
   return async function handle(req: Request, path: string, via: "local" | "tailnet"): Promise<Response | null> {
-    if (path === INBOX_OPEN_IN_CODE_PATH) return ownerOrLocal(req, via) ? codeRoute(req) : localOnly();
+    if (path === INBOX_OPEN_IN_CODE_PATH) return codeRoute(req);
     if (path !== INBOX_OPEN_IN_PATH && path !== INBOX_OPEN_IN_APPS_PATH && path !== INBOX_OPEN_IN_FILE_PATH) return null;
     // Launching an app changes this computer: never through the tailnet.
     if (via === "tailnet") return localOnly();

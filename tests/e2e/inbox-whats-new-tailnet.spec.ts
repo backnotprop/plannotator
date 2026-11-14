@@ -184,7 +184,6 @@ test('the sidebar link opens What\'s new on a phone through the tailnet: it scro
   await page.goto(world.url);
   const settings = await page.evaluate(async () => (await fetch('/api/inbox/settings')).json());
   expect(settings.via).toBe('tailnet');
-  expect(settings.guest).toBe(false);
 
   // The phone's sidebar is a drawer behind the toggle.
   await page.locator('[data-sidebar="trigger"]').first().click();

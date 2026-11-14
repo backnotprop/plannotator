@@ -19,8 +19,8 @@
  * slow machine moving when it answers, an open peek keeping its place and focus
  * through a far answer, the sheet inside a phone's window, and where focus
  * lands when Tab leaves the peek. The rules are
- * packages/inbox/accountsSection.test.tsx; the refusals, a tailnet guest's
- * included, are packages/server/inbox-accounts.test.ts.
+ * packages/inbox/accountsSection.test.tsx; the refusals are
+ * packages/server/inbox-accounts.test.ts.
  *
  * PNGs, light and dark, land in .local/proof/inbox-accounts-step3/.
  */

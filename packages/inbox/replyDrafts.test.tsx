@@ -663,7 +663,7 @@ test.skipIf(!hasDom)('a Send whose answer is lost after it went is read back: th
   await until(() => box(el) === null, 'the box closed');
   globalThis.fetch = real;
   expect(el.textContent).not.toContain('Failed to fetch');
-  expect(liveText(el)).toContain('Your reply went.');
+  await until(() => liveText(el).includes('Your reply went.'), 'the went line');
   await settle(200);
   expect(await serverDraft(world.waiting)).toBeNull();
   expect(await personReplies('Went, answer lost.')).toHaveLength(1);

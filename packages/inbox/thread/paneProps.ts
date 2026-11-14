@@ -84,7 +84,6 @@ export interface ThreadPaneProps {
   stacked?: boolean;
   fileStacked?: boolean;
   remote?: boolean | null;
-  guest?: boolean;
   onBackToList?: (fileName: string | null) => void;
   onToast?: (toast: Omit<InboxToastModel, 'id'>) => void;
   onToastGone?: (onUndo: () => void) => void;
