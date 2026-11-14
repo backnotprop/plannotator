@@ -781,6 +781,19 @@ const LINE_TARGET_FLASH_MS = 1_600;
 
 const inStepRoots = new WeakSet<ShadowRoot>();
 
+const streamRoots = new Set<ShadowRoot>();
+const POWER_UP_SCROLL_REST_MS = 150;
+
+function restartPowerUpStream(): void {
+  for (const root of streamRoots) {
+    if (!root.host.isConnected) {
+      streamRoots.delete(root);
+      continue;
+    }
+    stampPowerUpPhase(root.querySelectorAll(POWER_UP_ROW));
+  }
+}
+
 function stampPowerUpPhase(rows: Iterable<Element>): void {
   const now = document.timeline.currentTime;
   const phase = `${-((typeof now === 'number' ? now : performance.now()) % POWER_UP_PERIOD_MS)}ms`;
@@ -791,6 +804,7 @@ function keepPowerUpInStep(node: HTMLElement): void {
   const root = node.shadowRoot;
   if (!root || inStepRoots.has(root)) return;
   inStepRoots.add(root);
+  streamRoots.add(root);
   stampPowerUpPhase(root.querySelectorAll(POWER_UP_ROW));
   new MutationObserver((records) => {
     const rows: Element[] = [];
@@ -3161,8 +3175,19 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   // scroll EVENT, which can outpace frames during momentum scrolling. Also
   // stamps scroll activity for the augmentation idle-flush.
   const scrollReportRafRef = useRef<number | null>(null);
+  const streamRestTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const handleScroll = useStableCallback((position: number) => {
     lastScrollTsRef.current = Date.now();
+    const scroller = scrollRef.current;
+    if (scroller && powerUpActive && powerUpMotion === 'stream') {
+      if (streamRestTimerRef.current == null) scroller.style.setProperty('--pu-content', 'none');
+      else clearTimeout(streamRestTimerRef.current);
+      streamRestTimerRef.current = setTimeout(() => {
+        streamRestTimerRef.current = null;
+        restartPowerUpStream();
+        scroller.style.removeProperty('--pu-content');
+      }, POWER_UP_SCROLL_REST_MS);
+    }
     hasScrolledRef.current = true;
     onScrollPositionChange?.(position);
     if (scrollReportRafRef.current != null) return;
@@ -3174,6 +3199,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
 
   useEffect(() => () => {
     if (scrollReportRafRef.current != null) cancelAnimationFrame(scrollReportRafRef.current);
+    if (streamRestTimerRef.current != null) clearTimeout(streamRestTimerRef.current);
   }, []);
 
   // CodeView's onScroll only fires on actual scroll, so seed the initial

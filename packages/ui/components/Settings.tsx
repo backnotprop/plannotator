@@ -159,6 +159,7 @@ interface SettingsProps {
   onPermissionModeChange?: (mode: PermissionMode) => void;
   /** Externally controlled open state (for mobile menu integration) */
   externalOpen?: boolean;
+  externalTab?: 'semantic';
   onExternalClose?: () => void;
   /** Available AI providers (from /api/ai/capabilities). */
   aiProviders?: Array<{ id: string; name: string; capabilities: Record<string, boolean>; models?: Array<{ id: string; label: string; default?: boolean }> }>;
@@ -1185,7 +1186,7 @@ const CommentsTab: React.FC = () => {
   );
 };
 
-export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange, onIdentityChange, origin, mode = 'plan', annotateParity = false, onUIPreferencesChange, onPermissionModeChange, externalOpen, onExternalClose, aiProviders = [], gitUser, autoUpdateSetting, updateCheckSetting, cookieHostSetting, packageChangesSetting, agentToolSetting, onAgentToolChange, sinceBaseUnavailable, isCompactTouchLayout = false, onDetectObsidianVaults, agentTerminalAvailable = false, webmcpAvailable = false, hideEnterSavesComment = false, hideRepoOwnerSetting = false, showDocumentTextSize = false, showDocumentFont = false }) => {
+export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange, onIdentityChange, origin, mode = 'plan', annotateParity = false, onUIPreferencesChange, onPermissionModeChange, externalOpen, externalTab, onExternalClose, aiProviders = [], gitUser, autoUpdateSetting, updateCheckSetting, cookieHostSetting, packageChangesSetting, agentToolSetting, onAgentToolChange, sinceBaseUnavailable, isCompactTouchLayout = false, onDetectObsidianVaults, agentTerminalAvailable = false, webmcpAvailable = false, hideEnterSavesComment = false, hideRepoOwnerSetting = false, showDocumentTextSize = false, showDocumentFont = false }) => {
   const webmcpTools = useWebMcpToolsEnabled();
   const autoUpdate = useConfigValue('autoUpdate');
   const updateChecksOn = updateCheckSetting ? updateCheckSetting.on : true;
@@ -1308,10 +1309,11 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
   // Sync external open state
   useEffect(() => {
     if (externalOpen) {
+      if (externalTab) setActiveTab(externalTab);
       setShowDialog(true);
       onExternalClose?.();
     }
-  }, [externalOpen, onExternalClose]);
+  }, [externalOpen, externalTab, onExternalClose]);
 
   useEffect(() => {
     if (showDialog) {

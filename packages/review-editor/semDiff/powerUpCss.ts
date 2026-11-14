@@ -26,9 +26,9 @@ path[data-connector-origin][data-connector-kind="reformatted"] { stroke: var(--d
 
 const STREAM = `
 [data-line][data-semantic-origin]::before {
+  content: var(--pu-content, "");
   --pu-s: light-dark(color-mix(in srgb, var(--pu-c) 24%, transparent), color-mix(in srgb, var(--pu-c) 34%, transparent));
   --pu-s2: light-dark(color-mix(in srgb, var(--pu-c) 10%, transparent), color-mix(in srgb, var(--pu-c) 14%, transparent));
-  content: "";
   position: absolute; z-index: -1; top: 0; bottom: 0; left: -480px; right: 0;
   pointer-events: none;
   background-image: linear-gradient(90deg, transparent 0%, var(--pu-s2) 9%, var(--pu-s) 26%, var(--pu-s2) 41%, transparent 52%, var(--pu-s2) 66%, var(--pu-s2) 76%, transparent 92%, transparent 100%);

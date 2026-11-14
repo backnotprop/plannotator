@@ -533,7 +533,7 @@ const ReviewApp: React.FC = () => {
     useState<LineAnnotationComposeRequest | null>(null);
   const nextLineAnnotationComposeRequestId = useRef(0);
   const [showExportModal, setShowExportModal] = useState(false);
-  const [openSettingsMenu, setOpenSettingsMenu] = useState(false);
+  const [openSettingsMenu, setOpenSettingsMenu] = useState<boolean | 'semantic'>(false);
   const [showNoAnnotationsDialog, setShowNoAnnotationsDialog] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const diffStyle = useConfigValue('diffStyle');
@@ -5930,7 +5930,7 @@ const ReviewApp: React.FC = () => {
                     status={powerUpStatus}
                     provider={powerUpConfigured.provider}
                     onRetry={() => setPowerUpRetry((n) => n + 1)}
-                    onSettings={() => setOpenSettingsMenu(true)}
+                    onSettings={() => setOpenSettingsMenu('semantic')}
                   />
                 )}
                 {!isCompactTouchLayout && <ReviewHeaderStatus variant="pill" {...reviewStatusProps} />}
@@ -6476,7 +6476,8 @@ const ReviewApp: React.FC = () => {
             packageChangesSetting={packageChangesSetting}
             agentToolSetting={agentTool.setting}
             onAgentToolChange={agentTool.save}
-            externalOpen={openSettingsMenu}
+            externalOpen={openSettingsMenu !== false}
+            externalTab={openSettingsMenu === 'semantic' ? 'semantic' : undefined}
             onExternalClose={() => setOpenSettingsMenu(false)}
             // Local git session where since-base isn't offered (base ref
             // unresolvable): Settings → Review → Git notes that the Git-status preference
