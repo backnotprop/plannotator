@@ -150,4 +150,17 @@ describe.if(hasDom)('Agents tab launch pad', () => {
     expect(killed).toEqual(['run']);
     expect(launched).toEqual([{ provider: 'claude', label: 'Code Review', model: 'opus', effort: 'high', reviewProfileId: 'skill:security' }]);
   });
+
+  test('runs read apart: the engine whole, each run its own model and effort, and its start time in the tooltip', async () => {
+    await render({ jobs: [job({ id: 'a', effort: 'low', launchLabel: 'Review: money rounding' }), job({ id: 'b', effort: 'high', reviewProfileLabel: 'Security' })] });
+    const rows = [...host.querySelectorAll<HTMLElement>('[data-agent-job-row]')];
+    expect(rows).toHaveLength(2);
+    const engines = rows.map((row) => row.querySelector('[data-agent-job-engine]')!.textContent);
+    expect(engines[0]).not.toBe(engines[1]);
+    expect(engines.every((text) => text!.startsWith('Claude'))).toBe(true);
+    expect(rows.every((row) => !row.querySelector('[data-agent-job-engine]')!.className.includes('truncate'))).toBe(true);
+    expect(rows[0].getAttribute('title')).toContain('started');
+    expect(rows.map((row) => row.querySelector('[data-agent-job-label]')!.textContent)).toEqual(expect.arrayContaining(['Review: money rounding', 'Code Review: Security']));
+  });
 });
+

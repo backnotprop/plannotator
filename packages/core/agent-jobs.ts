@@ -117,6 +117,7 @@ export interface AgentJobInfo {
   reviewProfileId?: string;
   /** Resolved review profile label — rides on findings so the UI can show a profile tag. */
   reviewProfileLabel?: string;
+  launchLabel?: string;
   /**
    * Launch-time review-target snapshot for guide jobs (#1112). Guide jobs run
    * for minutes while the session supports mid-generation PR/diff switching,
@@ -205,3 +206,10 @@ export function markJobReviewFailed(job: AgentJobInfo, error: string): void {
   job.status = "failed";
   job.error = error;
 }
+
+export function launchLabelOf(sent: unknown, stored: string): string | undefined {
+  if (typeof sent !== "string") return undefined;
+  const label = sent.trim().slice(0, 200);
+  return label && label !== stored ? label : undefined;
+}
+
