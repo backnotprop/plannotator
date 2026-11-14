@@ -110,7 +110,10 @@ import { INBOX_COMMENT_PICTURES_MAX, inboxCommentPicture, inboxCommentPictureUpl
 import { inboxHasUnsent, inboxListSections, inboxRowUnread, inboxSectionOf } from "./list";
 import { inboxProjectLabels } from "./project-name";
 import { inboxActivity, type InboxActivitySource } from "./activity";
-import { inboxAckLine, inboxClaimName, inboxStopNoticeId, inboxStopNoticeReply, type InboxWakeContext } from "./connection";
+import { inboxAckLine, inboxStopNoticeId, inboxStopNoticeReply, type InboxWakeContext } from "./connection";
+import { inboxClaimDirs } from "./claims";
+import { createInboxHandover, type InboxHandover } from "./handover";
+import { inboxTakeBackRefusal, type InboxHolder } from "./take-back";
 import { inboxWakeQuote } from "./wake-quote";
 import { inboxReplyQuoteExcerpt, inboxReplyQuoteLead, inboxReplyQuoteTime, type InboxReplyQuote, type InboxReplyQuoteWhose } from "@plannotator/core/inbox-reply-quote";
 import { whenTime } from "@plannotator/core/inbox-format";
@@ -620,6 +623,8 @@ export function normalizeInboxTags(value: unknown, owner: string | null): InboxT
   return out;
 }
 
+const takenBackError = () => new InboxError("taken_back", "This message was taken back.");
+
 /** A hand-off still inside its Undo window: nobody is handed the reply yet. */
 function handoffHeld(message: InboxMessage): boolean {
   return !!message.handoff && !message.handoff.settled_at && !message.handoff.undone_at;
@@ -949,6 +954,7 @@ export class InboxStore {
    */
   private readonly previewLines = new WeakMap<InboxMessage, { asks: string; text: string | null }>();
   private readonly now: () => Date;
+  readonly handover: InboxHandover = createInboxHandover(this, () => this.now().getTime());
   /** Where the records are kept (`store-log/log.ts`). */
   private readonly log: InboxLog;
 
@@ -3653,7 +3659,7 @@ export class InboxStore {
     if (!thread) return null;
     return {
       ...thread,
-      messages: thread.messages.map((message) => {
+      messages: thread.messages.filter((message) => !message.taken_back_at).map((message) => {
         let out: InboxMessageWire = message;
         // The writer's own folder, by name only: an agent never reads another folder's absolute path.
         if (message.from_project) out = { ...out, from_project: { name: message.from_project.name } } as unknown as InboxMessageWire;
@@ -3821,7 +3827,7 @@ export class InboxStore {
    * owns a message or was tagged in the thread.
    */
   private owedToAnother(message: InboxMessage, reader: string | null, isNewcomer = () => this.newcomerTo(message.thread_id, reader)): boolean {
-    if (message.to || hasTags(message) || message.delivery || isAckNote(message)) return false;
+    if (message.to || hasTags(message) || message.delivery || isAckNote(message) || message.taken_back_at) return false;
     if (message.tidy && !message.tidy.wake) return false;
     const asked = message.reply_to ? this.messages.get(message.reply_to) : undefined;
     if (asked?.author.kind !== "agent") return false;
@@ -6514,7 +6520,7 @@ export class InboxStore {
   /** Whether a person's `message` waits for `session` (the rules of `pendingReplies`). */
   private pendingFor(message: InboxMessage, session: string, options: { tags?: boolean }): boolean {
     // A hand-off inside its Undo window goes to nobody yet.
-    if (handoffHeld(message)) return false;
+    if (handoffHeld(message) || message.taken_back_at) return false;
     const owner = this.isOwner(message, session);
     const tag = owner ? null : tagOf(message, session);
     if (tag) return !tag.delivery && options.tags !== false;
@@ -6791,6 +6797,7 @@ export class InboxStore {
   requestDeliverNow(messageId: string, session?: string | null, by: InboxDeliverNowBy = "person"): InboxMessage {
     const message = this.messages.get(messageId);
     if (!message) throw new InboxError("message_not_found", `No message ${messageId}.`);
+    if (message.taken_back_at) throw takenBackError();
     const tag = session && !this.isOwner(message, session) ? tagOf(message, session) : null;
     if (session && !tag && !this.isOwner(message, session)) {
       throw new InboxError("not_addressed", "That session is not one this message goes to.");
@@ -6883,6 +6890,45 @@ export class InboxStore {
     const next: InboxMessage = { ...message, deliver_now_at: null };
     this.appendMessage(next, at);
     return next;
+  }
+
+  takeBack(messageId: string): InboxMessage {
+    const message = this.messages.get(messageId);
+    if (!message) throw new InboxError("message_not_found", `No message ${messageId}.`);
+    if (message.taken_back_at) return message;
+    const refusal = inboxTakeBackRefusal(message, { carries: this.carriesRecords(message.id), loneRoot: this.threadMessages(message.thread_id).every((m) => m.id === message.id || m.taken_back_at) });
+    if (refusal) throw new InboxError("cannot_take_back", refusal);
+    const holder = this.heldBy(message) ?? this.handover.holder(message);
+    if (holder) throw new InboxError("agent_has_it", "The agent already has this message.", { ...holder });
+    const at = this.stamp();
+    const taken: InboxMessage = { ...message, taken_back_at: at, deliver_now_at: null, ...(message.tags ? { tags: message.tags.map((t) => ({ ...t, deliver_now_at: null })) } : {}) };
+    this.appendMessage(taken, at);
+    return taken;
+  }
+
+  recordAgentRead(ids: Iterable<string>, reader: string | null): void {
+    for (const id of ids) {
+      const message = this.messages.get(id);
+      if (message?.author.kind !== "person" || isInboxNote(message) || message.taken_back_at || this.heldBy(message)) continue;
+      const at = this.stamp();
+      this.appendMessage({ ...message, read_by_agent: { session: reader, at } }, at);
+    }
+  }
+
+  heldBy(message: InboxMessage): InboxHolder | null {
+    if (message.delivery) return { by: "delivered", session: message.delivery.session, host: message.delivery.host };
+    if (message.read_by_agent) return { by: "read", session: message.read_by_agent.session, host: null };
+    const tag = message.tags?.find((t) => t.delivery || t.read_at);
+    if (tag) return { by: tag.delivery ? "delivered" : "read", session: tag.session, host: tag.host };
+    const root = this.messages.get(message.thread_id);
+    if ((root?.agent_checked_seq ?? 0) >= (this.messageSeq.get(message.id) ?? 0)) return { by: "read", session: null, host: root?.agent_checked_by ?? null };
+    return null;
+  }
+
+  private carriesRecords(messageId: string): boolean {
+    for (const record of this.questions.values()) if (record.sent_reply_id === messageId) return true;
+    for (const record of this.annotations.values()) if (record.sent_reply_id === messageId) return true;
+    return false;
   }
 
   /** The blobs the store's messages use (attachments and guided reviews): the upload sweep keeps them. */
@@ -7157,6 +7203,7 @@ export class InboxStore {
     if (!message) throw new InboxError("message_not_found", `No message ${messageId}.`);
     const notAddressed = () => new InboxError("not_addressed", "Only a message you addressed to an agent session can be sent to another one.");
     if (message.author.kind !== "person" || isInboxNote(message)) throw notAddressed();
+    if (message.taken_back_at) throw takenBackError();
     if (message.delivery) throw new InboxError("already_delivered", "That session already took this message.", { delivery: message.delivery });
     const taken = () => new InboxError("already_delivered", "That session already took this message.");
     const checkedSeq = this.messages.get(message.thread_id)?.agent_checked_seq ?? 0;
@@ -7177,9 +7224,7 @@ export class InboxStore {
     // old one, so it neither goes in at once nor stays blocked from going in by itself; its wait starts again.
     const moved = (m: InboxMessage): InboxMessage => {
       // No old claim on it stands, the Claude Code mod's included (its claims are per session, under its own folder).
-      const claims = [join(this.dir, "claims", m.id), join(this.dir, "claims", inboxClaimName(m.id, to.session))];
-      if (/^[A-Za-z0-9_-][A-Za-z0-9._-]*$/.test(to.session)) claims.push(join(this.dir, "..", "claude-code-mod", to.session, "inbox", "claims", m.id));
-      for (const claim of claims) {
+      for (const claim of inboxClaimDirs(this.dir, m.id, to.session)) {
         try {
           rmSync(claim, { recursive: true, force: true });
         } catch {
@@ -7231,9 +7276,7 @@ export class InboxStore {
     if (!message || message.author.kind !== "person" || isInboxNote(message) || message.delivery?.session !== session) {
       throw new InboxError("message_not_found", `No message ${messageId} that session took.`);
     }
-    const claims = [join(this.dir, "claims", message.id), join(this.dir, "claims", inboxClaimName(message.id, session))];
-    if (/^[A-Za-z0-9_-][A-Za-z0-9._-]*$/.test(session)) claims.push(join(this.dir, "..", "claude-code-mod", session, "inbox", "claims", message.id));
-    for (const claim of claims) {
+    for (const claim of inboxClaimDirs(this.dir, message.id, session)) {
       try {
         rmSync(claim, { recursive: true, force: true });
       } catch {
