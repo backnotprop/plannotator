@@ -1,6 +1,6 @@
 import type { QueryClient } from '@tanstack/react-query';
 import { inboxApi, type ListModel, type ThreadModel } from '../api';
-import { inboxUrl } from '../inboxUrl';
+import { inboxUrl, machineOf } from '../inboxUrl';
 import { createInboxQueryClient } from './client';
 import { inboxKeys } from './keys';
 import { heldList } from './queries/list';
@@ -34,7 +34,12 @@ async function readHeld(client: QueryClient): Promise<HeldProbeRead> {
       if (typeof threadId !== 'string') continue;
       const held = showableThread(client, threadId) ?? (threadId === open ? (heldThread(client, threadId) ?? null) : null);
       if (threadId === open && isThreadStale(client, threadId)) stale += 1;
-      if (held) threads.push({ threadId, held, fresh: await inboxApi.thread(threadId) });
+      if (!held) continue;
+      const fresh = await inboxApi.thread(threadId).catch((cause: unknown) => {
+        if (machineOf(threadId)) return null;
+        throw cause;
+      });
+      if (fresh) threads.push({ threadId, held, fresh });
     }
     const list = heldList(client);
     const fresh = list ? ((await (await fetch(WHOLE_LIST, { headers: { Accept: 'application/json' } })).json()) as ListModel) : null;
