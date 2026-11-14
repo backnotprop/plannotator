@@ -238,7 +238,6 @@ import { resolvePanelView } from './utils/resolvePanelView';
 import { isCommitDiffType, resolveCommitExitDiff, type CommitViewRestoreTarget } from './utils/commitViewRestore';
 import { needsGuideHint, markGuideHintSeen } from './utils/guideIntro';
 import { ExternalLineAnnotationComposer } from './components/ExternalLineAnnotationComposer';
-import { TextShimmer } from '@plannotator/ui/components/TextShimmer';
 import type { PRMetadata, PRReviewAction } from '@plannotator/shared/pr-types';
 import type { PRDiffScope, PRDiffScopeOption, PRStackInfo, PRStackTree } from '@plannotator/shared/pr-stack';
 import { altKey, isMac } from '@plannotator/ui/utils/platform';
@@ -5608,18 +5607,13 @@ const ReviewApp: React.FC = () => {
                     setGuideOpen(prev => !prev);
                   }}
                   className={`relative flex h-7 shrink-0 items-center gap-1 px-2 rounded-md text-xs font-medium transition-colors ${
-                    guideOpen ? 'bg-primary/15 text-primary' : 'bg-muted hover:bg-muted/80'
+                    guideOpen ? 'bg-primary/15 text-primary' : 'bg-muted text-foreground hover:bg-muted/80'
                   }`}
                   title={guideOpen ? 'Back to the diff workspace' : 'Open guided review'}
+                  data-guide-button=""
                 >
-                  {guideHintActive && !guideOpen ? (
-                    <>
-                      <TextShimmer>Guide</TextShimmer>
-                      <span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
-                    </>
-                  ) : (
-                    guideOpen ? 'Go back' : 'Guide'
-                  )}
+                  {guideOpen ? 'Go back' : 'Guide'}
+                  {guideHintActive && !guideOpen && <span data-guide-hint-dot="" className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-primary" />}
                 </button>
                 <div className="w-px h-5 bg-border mx-1 hidden lg:block" />
               </>
