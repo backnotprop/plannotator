@@ -119,7 +119,7 @@ export const PaneTabs: React.FC<{
             data-pane-tab-item={tab.id}
             aria-hidden={hidden.ids.has(tab.id) || undefined}
             style={inHeader && pane.tabs.length === 1 ? { minWidth: TAB_MIN_WIDTH } : undefined}
-            className={`group relative flex items-center gap-1 ${inHeader && pane.tabs.length === 1 ? 'min-w-0 shrink' : 'flex-none'} ${hidden.ids.has(tab.id) ? 'invisible absolute' : ''}`}
+            className={`group flex items-center gap-1 ${inHeader && pane.tabs.length === 1 ? 'min-w-0 shrink' : 'flex-none'} ${hidden.ids.has(tab.id) ? 'invisible absolute' : 'relative'}`}
           >
             <button
               type="button"
