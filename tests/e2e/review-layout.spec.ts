@@ -206,8 +206,9 @@ test('a phone keeps one pane, its tabs in the pane, and the header never changes
     await expect(page.locator('[data-pane="0"]')).toBeVisible();
     const top = await paneTop(page);
     const header = await headerShape(page);
-    await page.locator('button[aria-label="Open review navigation"]').click();
+    await expect(page.locator('[data-review-navigation-sheet]')).toBeVisible();
     await page.locator('[data-changes-tree] [data-type="item"][data-item-path$="routes.ts"]').first().tap();
+    await expect(page.locator('[data-review-navigation-sheet]')).toHaveCount(0);
     await expect(page.locator('[data-pane="0"] [data-pane-tab][aria-selected="true"]')).toBeVisible();
     expect(await paneTop(page)).toBe(top);
     expect(await headerShape(page)).toBe(header);
