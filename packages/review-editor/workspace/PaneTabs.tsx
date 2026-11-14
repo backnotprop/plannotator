@@ -10,19 +10,30 @@ export { TITLE_SETTLE_MS };
 
 export const TAB_MIN_WIDTH = 72;
 
-function useHiddenTabs(ref: React.RefObject<HTMLElement | null>, key: string, single: boolean): Set<string> {
-  const [hidden, setHidden] = useState<Set<string>>(() => new Set());
+const MENU_RESERVE = 44;
+
+type HiddenTabs = { ids: Set<string>; end: number };
+const NONE_HIDDEN: HiddenTabs = { ids: new Set(), end: 0 };
+
+function useHiddenTabs(ref: React.RefObject<HTMLElement | null>, key: string, single: boolean): HiddenTabs {
+  const [hidden, setHidden] = useState<HiddenTabs>(NONE_HIDDEN);
   useLayoutEffect(() => {
     const element = ref.current;
     if (!element) return;
     const measure = () => {
-      const next = new Set<string>();
+      const ids = new Set<string>();
+      let end = 0;
       if (!single) {
-        for (const item of element.querySelectorAll<HTMLElement>('[data-pane-tab-item]')) {
-          if (item.offsetLeft + item.offsetWidth > element.clientWidth + 1) next.add(item.getAttribute('data-pane-tab-item')!);
+        const items = [...element.querySelectorAll<HTMLElement>('[data-pane-tab-item]')];
+        const overflows = items.some((item) => item.offsetLeft + item.offsetWidth > element.clientWidth + 1);
+        const limit = element.clientWidth - (overflows ? MENU_RESERVE : 0) + 1;
+        for (const item of items) {
+          const right = item.offsetLeft + item.offsetWidth;
+          if (overflows && right > limit) ids.add(item.getAttribute('data-pane-tab-item')!);
+          else end = Math.max(end, right);
         }
       }
-      setHidden((before) => (before.size === next.size && [...next].every((id) => before.has(id)) ? before : next));
+      setHidden((before) => (before.end === end && before.ids.size === ids.size && [...ids].every((id) => before.ids.has(id)) ? before : ids.size ? { ids, end } : NONE_HIDDEN));
     };
     measure();
     if (typeof ResizeObserver === 'undefined') return;
@@ -111,9 +122,9 @@ export const PaneTabs: React.FC<{
           <div
             key={tab.id}
             data-pane-tab-item={tab.id}
-            aria-hidden={hidden.has(tab.id) || undefined}
-            style={inHeader ? { minWidth: TAB_MIN_WIDTH } : undefined}
-            className={`group relative flex items-center gap-1 ${inHeader ? 'min-w-0 shrink' : 'flex-none'} ${hidden.has(tab.id) ? 'invisible' : ''}`}
+            aria-hidden={hidden.ids.has(tab.id) || undefined}
+            style={inHeader && pane.tabs.length === 1 ? { minWidth: TAB_MIN_WIDTH } : undefined}
+            className={`group relative flex items-center gap-1 ${inHeader && pane.tabs.length === 1 ? 'min-w-0 shrink' : 'flex-none'} ${hidden.ids.has(tab.id) ? 'invisible' : ''}`}
           >
             <button
               type="button"
@@ -159,9 +170,13 @@ export const PaneTabs: React.FC<{
   );
   if (!inHeader) return list;
   return (
-    <div className="min-w-0 h-full flex items-stretch gap-1">
+    <div className="relative min-w-0 h-full flex items-stretch">
       {list}
-      {hidden.size > 0 && <PaneTabsMenu pane={pane} onActivate={onActivate} onClose={onClose} overflow={hidden.size} />}
+      {hidden.ids.size > 0 && (
+        <div className="absolute inset-y-0 flex items-center" style={{ left: hidden.end + 8 }}>
+          <PaneTabsMenu pane={pane} onActivate={onActivate} onClose={onClose} overflow={hidden.ids.size} />
+        </div>
+      )}
     </div>
   );
 };
