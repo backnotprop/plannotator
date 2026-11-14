@@ -1,5 +1,6 @@
 import React, { useEffect, useCallback, useState, useMemo, useRef } from 'react';
 import { focusFileHeaderWhenLost } from '../utils/focusFileHeader';
+import { useCompactTouchLayout } from '@plannotator/ui/hooks/useIsMobile';
 import { CodeAnnotation } from '@plannotator/ui/types';
 import type {
   JjEvoLogEntry,
@@ -342,6 +343,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
   }, [annotations]);
 
   const changesTreeRef = useRef<ChangesTreeHandle>(null);
+  const touchRows = useCompactTouchLayout();
   const [foldersExpanded, setFoldersExpanded] = useState(true);
   const allFolderPaths = useMemo(() => getAllFolderPaths(tree), [tree]);
   const handleToggleAllFolders = useCallback(() => {
@@ -577,6 +579,8 @@ export const FileTree: React.FC<FileTreeProps> = ({
           data-changes-tree-wrap=""
         >
           <ChangesTreeView
+            key={touchRows ? 'touch' : 'pointer'}
+            touch={touchRows}
             handleRef={changesTreeRef}
             grouping={blocks ? effectiveGroupBy : 'none'}
             tree={plainTree}
@@ -607,6 +611,8 @@ export const FileTree: React.FC<FileTreeProps> = ({
             data-repo-tree-wrap=""
           >
             <RepoTreeView
+              key={touchRows ? 'touch' : 'pointer'}
+              touch={touchRows}
               handleRef={repoTreeRef}
               repo={repoReady}
               loadDir={repoFiles!.loadDir}
