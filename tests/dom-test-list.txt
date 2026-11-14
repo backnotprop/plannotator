@@ -743,4 +743,3 @@ packages/editor/hooks/useCheckboxOverrides.viewer.test.tsx
 packages/ui/components/TaterSpriteSlots.test.tsx
 packages/inbox/sidebarRedraws.test.tsx
 packages/review-editor/live/toolbarTag.dom.test.tsx
-packages/inbox/components/openLiveReview.dom.test.tsx

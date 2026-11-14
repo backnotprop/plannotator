@@ -1,7 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { pageServerSession } from '../api';
 import { inboxUrl } from '../inboxUrl';
-import { takeAskedReview } from '../openReviewMarker';
 import type { InboxReviewAnchor } from '@plannotator/core/review-threads';
 
 export function reviewAnchorWhere(anchor: InboxReviewAnchor): string {
@@ -22,15 +21,13 @@ export function ReviewAnchorLine({ anchor, resolved }: { anchor: InboxReviewAnch
   );
 }
 
-let autoOpen: Promise<void> | null = null;
-
 export function OpenLiveReview({ threadId, title }: { threadId: string; title: string }) {
   const [state, setState] = useState<'idle' | 'opening' | 'failed'>('idle');
   const [error, setError] = useState<string | null>(null);
-  const open = async (inPlace = false) => {
+  const open = async () => {
     setState('opening');
     setError(null);
-    const tab = inPlace ? null : window.open('about:blank', '_blank');
+    const tab = window.open('about:blank', '_blank');
     try {
       const response = await fetch(inboxUrl(`/review-threads/${encodeURIComponent(threadId)}/open`), {
         method: 'POST',
@@ -39,8 +36,7 @@ export function OpenLiveReview({ threadId, title }: { threadId: string; title: s
       });
       const body = (await response.json().catch(() => ({}))) as { url?: string; error?: string };
       if (!response.ok || !body.url) throw new Error(body.error ?? 'The review did not start.');
-      if (inPlace) window.location.replace(body.url);
-      else if (tab) tab.location.href = body.url;
+      if (tab) tab.location.href = body.url;
       else window.open(body.url, '_blank');
       setState('idle');
     } catch (e) {
@@ -49,10 +45,6 @@ export function OpenLiveReview({ threadId, title }: { threadId: string; title: s
       setState('failed');
     }
   };
-  useEffect(() => {
-    if (!takeAskedReview(threadId)) return;
-    autoOpen ??= open(true);
-  }, [threadId]);
   return (
     <div className="ib-ranchor-open" data-open-live-review="">
       <button type="button" className="ib-ranchor-btn" disabled={state === 'opening'} onClick={() => void open()}>

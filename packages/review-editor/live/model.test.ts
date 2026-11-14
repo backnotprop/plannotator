@@ -122,9 +122,3 @@ describe('a review with many threads', () => {
   });
 });
 
-describe('the ended review', () => {
-  test('Open it again names the thread in the address the Inbox acts on once', async () => {
-    const { reopenUrl } = await import('./LiveEndedBar');
-    expect(reopenUrl('http://localhost:49606/#thread=msg_01ABC')).toBe('http://localhost:49606/?open-review=msg_01ABC#thread=msg_01ABC');
-  });
-});
