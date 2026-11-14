@@ -239,6 +239,7 @@ import { altKey, isMac } from '@plannotator/ui/utils/platform';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 import { GuideScreen } from './components/guide/GuideScreen';
 import { useAgentsPanelSlots, reviewScopeText } from './components/AgentsPanelSlots';
+import { newestGuideForThisDiff } from './utils/guidesListModel';
 import { DEMO_GUIDE_ID } from './demoGuide';
 import { buildPRArtifacts } from './utils/prArtifacts';
 import { useMarkdownPreview, useMarkdownPreviewKeys } from './hooks/useMarkdownPreview';
@@ -2139,13 +2140,18 @@ const ReviewApp: React.FC = () => {
   );
   const guideHasContent = activeGuideJobId !== null || agentJobs.jobs.some((j) => j.provider === 'guide' && jobMatchesCurrentContext(j));
   const launchPadReachable = aiUIEnabled && agentJobs.capabilities?.available === true;
+  const newestDiffGuideRef = useRef<string | null>(null);
   const toggleGuideOrLaunchPad = useCallback(() => {
+    if (!guideOpen && !guideHasContent && newestDiffGuideRef.current) {
+      handleOpenGuide(newestDiffGuideRef.current);
+      return;
+    }
     if (!guideOpen && !guideHasContent && launchPadReachable) {
       reviewSidebar.open('agents');
       return;
     }
     setGuideOpen((prev) => !prev);
-  }, [guideOpen, guideHasContent, launchPadReachable, reviewSidebar.open]);
+  }, [guideOpen, guideHasContent, launchPadReachable, reviewSidebar.open, handleOpenGuide]);
 
   // A `saved:{id}` guide has no AgentJobInfo, so GuideScreen's context match
   // passes trivially (unknown ids are tolerated by design, for the demo path).
@@ -4317,6 +4323,7 @@ const ReviewApp: React.FC = () => {
     openDiffFile,
     navigateToAnnotation: handleNavigateToAnnotation,
   });
+  newestDiffGuideRef.current = newestGuideForThisDiff(agentsPanel.savedGuides);
 
   // Diff context bundled into local-mode feedback headers so the receiving
   // agent knows which diff the annotations are anchored to. Uses committedBase
@@ -5930,11 +5937,15 @@ const ReviewApp: React.FC = () => {
                   setGuideHintActive(false);
                 }
                 setIsCompactNavigatorOpen(false);
-                if (!guideHasContent && launchPadReachable) {
+                if (!guideHasContent && !newestDiffGuideRef.current && launchPadReachable) {
                   reviewSidebar.open('agents');
                   return;
                 }
                 reviewSidebar.close();
+                if (!guideHasContent && newestDiffGuideRef.current) {
+                  handleOpenGuide(newestDiffGuideRef.current);
+                  return;
+                }
                 setGuideOpen(true);
               } : undefined}
               onOpenAnnotations={isCompactTouchLayout ? () => reviewSidebar.open('annotations') : undefined}

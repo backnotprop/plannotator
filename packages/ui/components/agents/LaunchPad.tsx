@@ -62,7 +62,7 @@ function LaunchRow({
           aria-expanded={open}
           aria-controls={detailsId}
           title={open ? 'Hide options' : 'Engine, model and options'}
-          className="group flex min-w-0 flex-1 items-center gap-2 rounded-md px-1 py-1 text-left hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="group -ml-1 flex min-w-0 flex-1 items-center gap-2 rounded-md px-1 py-1 text-left hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           <Icon className="shrink-0 text-muted-foreground" size={16} />
           <span className="min-w-0 flex-1">
@@ -115,14 +115,14 @@ export function LaunchPad({
   const { folds, toggle } = useLaunchFolds();
   const guideInstructions = useGuideInstructions(config.guide.available);
   return (
-    <section aria-label="Start a review" className="px-3 pt-2" data-launch-pad="">
+    <section aria-label="Start a review" className="px-4 pt-2" data-launch-pad="">
       {scope && (
-        <p className="truncate px-1 pb-1 text-[12px] leading-5 text-muted-foreground" data-launch-scope="">
+        <p className="truncate pb-1 text-[12px] leading-5 text-muted-foreground" data-launch-scope="">
           {scope}
         </p>
       )}
       {!config.guide.available && !config.review.available && (
-        <p className="px-1 py-1.5 text-[12px] leading-5 text-muted-foreground" data-launch-none="">
+        <p className="py-1.5 text-[12px] leading-5 text-muted-foreground" data-launch-none="">
           No agent CLI on this machine. Install Claude Code, Codex, Cursor, OpenCode, Pi or Copilot to start reviews here.
         </p>
       )}

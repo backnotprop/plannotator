@@ -120,7 +120,7 @@ export const AgentsTab: React.FC<AgentsTabProps> = ({
           >
             Runs
           </SectionTitle>
-          <div className="px-3">
+          <div className="px-4">
             {sortedJobs.map((job) => {
               const findings = findingsOf(job.source, externalAnnotations);
               return (

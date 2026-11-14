@@ -52,38 +52,38 @@ function GuideRow({
   ].filter(Boolean).join(' · ');
   return (
     <li
-      className="group flex items-start gap-1 rounded-md px-1 py-1.5 hover:bg-muted/50 focus-within:bg-muted/50"
+      className="group relative -mx-1 rounded-md px-1 py-1.5 hover:bg-muted/50 focus-within:bg-muted/50"
       data-saved-guide={entry.id}
       data-guide-where={entry.where ?? 'other'}
     >
-      <div className="min-w-0 flex-1">
-        {renaming ? (
-          <RenameField
-            initial={entry.title}
-            onDone={async (title) => {
-              setRenaming(false);
-              if (title === null || title.trim() === entry.title) return;
-              setError(await onRename(title));
-            }}
-          />
-        ) : (
-          <button
-            type="button"
-            onClick={onOpen}
-            className="block w-full min-w-0 rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            title={entry.title}
-          >
-            <span className="flex items-baseline gap-2">
-              <span className="min-w-0 flex-1 truncate text-[13px] text-foreground">{entry.title}</span>
-              <span className="shrink-0 text-[12px] tabular-nums text-muted-foreground">{savedAgo(entry.savedAt)}</span>
-            </span>
-            {meta && <span className="block truncate text-[12px] text-muted-foreground" data-guide-progress="">{meta}</span>}
-            {mismatch && <span className="block truncate text-[12px] text-muted-foreground" data-guide-mismatch="">{mismatch}</span>}
-          </button>
-        )}
-        {error && <p className="text-[12px] text-muted-foreground" role="alert">{error}</p>}
-      </div>
-      <GuideRowMenu id={entry.id} title={entry.title} onRename={() => setRenaming(true)} onDelete={onDelete} />
+      {renaming ? (
+        <RenameField
+          initial={entry.title}
+          onDone={async (title) => {
+            setRenaming(false);
+            if (title === null || title.trim() === entry.title) return;
+            setError(await onRename(title));
+          }}
+        />
+      ) : (
+        <button
+          type="button"
+          onClick={onOpen}
+          className="block w-full min-w-0 rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          title={entry.title}
+        >
+          <span className="flex items-baseline gap-2">
+            <span className="min-w-0 flex-1 truncate text-[13px] text-foreground">{entry.title}</span>
+            <span className="shrink-0 text-[12px] tabular-nums text-muted-foreground">{savedAgo(entry.savedAt)}</span>
+          </span>
+          {meta && <span className="block truncate pr-7 text-[12px] leading-5 text-muted-foreground" data-guide-progress="">{meta}</span>}
+          {mismatch && <span className="block truncate pr-7 text-[12px] leading-5 text-muted-foreground" data-guide-mismatch="">{mismatch}</span>}
+        </button>
+      )}
+      {error && <p className="text-[12px] text-muted-foreground" role="alert">{error}</p>}
+      <span className="absolute bottom-1 right-1">
+        <GuideRowMenu id={entry.id} title={entry.title} onRename={() => setRenaming(true)} onDelete={onDelete} />
+      </span>
     </li>
   );
 }
@@ -122,7 +122,7 @@ export function GuidesList({
       ) : (
         <>
           {searchable && (
-            <label className="mx-3 mb-1 flex h-7 items-center gap-2 rounded-md border border-border/60 bg-background px-2 focus-within:border-ring">
+            <label className="mx-4 mb-1 flex h-7 items-center gap-2 rounded-md border border-border/60 bg-background px-2 focus-within:border-ring">
               <Search size={12} className="shrink-0 text-muted-foreground" aria-hidden />
               <input
                 type="search"
@@ -137,8 +137,8 @@ export function GuidesList({
           {groups.length === 0 && <p className="px-4 py-2 text-[12px] text-muted-foreground">No guide matches “{query.trim()}”.</p>}
           {groups.map((group) => (
             <div key={group.key} data-guide-group={group.key}>
-              <h4 className="px-4 pb-0.5 pt-2 text-[12px] text-muted-foreground">{group.label}</h4>
-              <ul className="px-3">
+              <h4 className="px-4 pb-0.5 pt-2 text-[12px] font-medium text-muted-foreground">{group.label}</h4>
+              <ul className="px-4">
                 {group.entries.map((entry) => (
                   <GuideRow
                     key={entry.id}

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { SavedGuideListEntry } from '@plannotator/shared/guide';
-import { groupSavedGuides, guideMismatchText, guideProgressText, resumeFile } from './guidesListModel';
+import { groupSavedGuides, guideMismatchText, guideProgressText, newestGuideForThisDiff, resumeFile } from './guidesListModel';
 
 const entry = (id: string, where: SavedGuideListEntry['where'], savedAt: number, extra: Partial<SavedGuideListEntry> = {}): SavedGuideListEntry => ({
   id,
@@ -54,5 +54,13 @@ describe('guide rows', () => {
     expect(resumeFile(sections, [true, false, false], files)).toBe('c.ts');
     expect(resumeFile(sections, [false, false, false], files)).toBeNull();
     expect(resumeFile(sections, [true, true, true], files)).toBeNull();
+  });
+});
+
+describe('the Guide button', () => {
+  test('opens the newest guide written for this diff, never one for another push or target', () => {
+    expect(newestGuideForThisDiff([entry('old', 'diff', 1), entry('new', 'diff', 5), entry('pr', 'target', 9), entry('x', 'other', 10)])).toBe('saved:new');
+    expect(newestGuideForThisDiff([entry('pr', 'target', 9), entry('x', undefined, 10)])).toBeNull();
+    expect(newestGuideForThisDiff(null)).toBeNull();
   });
 });
