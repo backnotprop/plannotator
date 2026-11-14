@@ -160,12 +160,11 @@ const MCP_JSON = '{ "mcpServers": { "plannotator-inbox": { "command": "plannotat
 
 const openInbox = (see: string): Step => ({ do: 'Open the Inbox. It connects the agents it finds on this computer.', code: 'plannotator inbox', see });
 /**
- * The OpenClaw plugin's install line (apps/openclaw-plugin/README.md:20). A bare
- * package name installs from ClawHub only; from npm it is
- * `openclaw plugins install npm:@plannotator/openclaw` (OpenClaw's
- * docs/cli/plugins/install.md, "npm only"; it asks to confirm unless `--force`).
+ * The OpenClaw plugin's install line (apps/openclaw-plugin/README.md). The `npm:`
+ * prefix installs from npm (OpenClaw's docs/cli/plugins/install.md, "npm only"; it
+ * asks to confirm unless `--force`). A bare package name installs from ClawHub only.
  */
-const OPENCLAW_INSTALL = 'openclaw plugins install @plannotator/openclaw';
+const OPENCLAW_INSTALL = 'openclaw plugins install npm:@plannotator/openclaw';
 /** Plugins and cloud agents that first shipped in Plannotator 0.28.63. */
 const installNew: Step = { do: 'Install Plannotator 0.28.63 or newer. The same command updates an older one.', code: INSTALL };
 const onWindows = { title: 'On Windows', steps: [{ do: 'Install Plannotator from PowerShell. The other steps are the same.', code: INSTALL_WIN }] };
