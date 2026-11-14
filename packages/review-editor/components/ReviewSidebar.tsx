@@ -704,7 +704,7 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
                           anchored composer popover is never painted under a
                           later section's header. */}
                       <div className="sticky top-0 z-[25] bg-background/95 backdrop-blur-sm px-2 py-1 flex items-center justify-between gap-2">
-                        <span className="text-xs font-medium text-muted-foreground">Global comments</span>
+                        <span className="flex-none whitespace-nowrap text-xs font-medium text-muted-foreground">Global comments</span>
                         {onAddGeneralComment && (
                           <GeneralCommentComposer
                             onAdd={onAddGeneralComment}
