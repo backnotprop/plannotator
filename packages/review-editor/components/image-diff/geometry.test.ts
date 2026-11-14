@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { deviceNudge } from './ImageStage';
 import { fitScale, floorToDevice, sideBySideColumns, sideBySidePaneWidth, stageLayout, stepSwipe, swipeClipX } from './geometry';
 
 const widths = [390, 768, 1280, 1917];
@@ -97,5 +98,14 @@ describe('swipe', () => {
     expect(stepSwipe(0.995, 'ArrowRight', false)).toBe(1);
     expect(stepSwipe(0.3, 'Home', false)).toBe(0);
     expect(stepSwipe(0.3, 'a', false)).toBeNull();
+  });
+});
+
+describe('the stage starts on a whole device pixel', () => {
+  test('a fractional offset is nudged forward to the next device pixel', () => {
+    expect(deviceNudge(100.5, 1)).toBeCloseTo(0.5);
+    expect(deviceNudge(100.25, 2)).toBeCloseTo(0.25);
+    expect(deviceNudge(100.5, 2)).toBe(0);
+    expect(deviceNudge(100, 1)).toBe(0);
   });
 });

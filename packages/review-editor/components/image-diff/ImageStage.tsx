@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { stepSwipe, swipeClipX, type Size, type StageLayout } from './geometry';
 import type { DifferenceMask } from './differences';
 
@@ -83,6 +83,33 @@ export function DifferenceOverlay({ mask, stage, color }: { mask: DifferenceMask
   );
 }
 
+export function deviceNudge(position: number, dpr: number): number {
+  const device = position * dpr;
+  const frac = device - Math.floor(device);
+  return frac < 1e-3 ? 0 : (1 - frac) / dpr;
+}
+
+function useDevicePixelNudge(ref: React.RefObject<HTMLDivElement | null>): { x: number; y: number } {
+  const [nudge, setNudge] = useState({ x: 0, y: 0 });
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el || typeof window === 'undefined') return;
+    const measure = () => {
+      const dpr = window.devicePixelRatio || 1;
+      const rect = el.getBoundingClientRect();
+      const x = deviceNudge(rect.left, dpr);
+      const y = deviceNudge(rect.top, dpr);
+      setNudge((prev) => (Math.abs(prev.x - x) < 1e-4 && Math.abs(prev.y - y) < 1e-4 ? prev : { x, y }));
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(document.documentElement);
+    return () => observer.disconnect();
+  }, [ref]);
+  return nudge;
+}
+
 function Viewport({ layout, maxHeight, children, onScrollPosition, scrollTo }: {
   layout: StageLayout;
   maxHeight: number;
@@ -96,13 +123,14 @@ function Viewport({ layout, maxHeight, children, onScrollPosition, scrollTo }: {
     if (ref.current.scrollLeft !== scrollTo.left) ref.current.scrollLeft = scrollTo.left;
     if (ref.current.scrollTop !== scrollTo.top) ref.current.scrollTop = scrollTo.top;
   }, [scrollTo]);
+  const nudge = useDevicePixelNudge(ref);
   const scrolls = layout.stage.height > maxHeight;
   return (
     <div
       ref={ref}
       data-image-viewport=""
       className="relative max-w-full overflow-auto overscroll-contain"
-      style={{ maxHeight: scrolls ? maxHeight : undefined, paddingLeft: layout.offsetX }}
+      style={{ maxHeight: scrolls ? maxHeight : undefined, paddingLeft: layout.offsetX + nudge.x, paddingTop: nudge.y }}
       onScroll={onScrollPosition ? (event) => onScrollPosition(event.currentTarget.scrollLeft, event.currentTarget.scrollTop) : undefined}
     >
       {children}
