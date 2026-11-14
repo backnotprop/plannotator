@@ -29,7 +29,7 @@ import { INBOX_UPLOAD_MAX_BYTES, inboxActionInDraft, inboxActionPersonMark, type
 import { withoutInboxActionsSection } from '@plannotator/core/inbox-actions';
 import { withoutInboxReplyQuoteLead } from '@plannotator/core/inbox-reply-quote';
 import { capQuestionPrompt, emptyQuestionAnswer, indexQuestionBlocks, isQuestionAnswerEmpty, type IndexedQuestion, type QuestionAnswer, type QuestionStatus } from '@plannotator/core/question-block';
-import { inboxAskingMessage, inboxLaunchStops, inboxPersonAnsweredSince, isInboxNote, isInboxTextKind, readInboxAttachmentKind, type InboxAnnotationRecord, type InboxAttachment, type InboxAttachmentState, type InboxInlineImage, type InboxQuestionState } from '@plannotator/core/inbox-types';
+import { inboxAskingMessage, inboxLaunchStops, inboxPersonAnsweredSince, isInboxNote, isInboxT3WaitReason, isInboxTextKind, readInboxAttachmentKind, type InboxAnnotationRecord, type InboxAttachment, type InboxAttachmentState, type InboxInlineImage, type InboxQuestionState } from '@plannotator/core/inbox-types';
 import type { LocalLinkResolver } from '@plannotator/ui/components/LocalLinkContext';
 import { NOT_ATTACHED_TITLE, attachmentDeepLink, attachmentDisplayPath, attachmentForLink, openAttachmentTitle, projectFileOfLink, useRefRepo } from '../links';
 import { InboxApiError, InboxHeldError, inboxApi, type OutboxView, type TagMode, type ThreadModel } from '../api';
@@ -99,6 +99,7 @@ import { NewMessageButton, NewMessageComposer, NewMessagePopover, hostName, useL
 import { debugNote } from '../debugLog';
 import { deliveryLine, handedItem, restartNote, uncertainItem, waitInputs, type DeliveryLine } from '../deliveryLine';
 import { RestartLine } from './RestartNote';
+import { T3WaitLine } from './T3WaitLine';
 import { TakeBackButton, UndeliveredBand, UndeliveredText } from './Undelivered';
 import { useThreadTakeBack } from '../thread/useThreadTakeBack';
 import { useSendNow } from '../useSendNow';
@@ -271,19 +272,6 @@ function spanWords(from: string, to: string): string {
 
 const reducedMotion = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-/**
- * What the "↓ N new" pill counts and goes to, in thread order, of the
- * messages whose top is below the view (under the pill's band): the arrivals
- * not yet seen on sight (`data-arrival`, design record
- * "inbox-new-in-open-thread": the pill counts only unseen arrivals below);
- * only when none waits there, the messages that were new when the thread
- * opened (`data-new`). An arrival already seen (`data-sighted`) never counts,
- * and neither does a message the person has had on screen this visit
- * (`passed`): once its top was in the view, or the view went past it, it is
- * read as far as the pill is concerned, so scrolling back up never brings it
- * back. `mark` (the tab visible and nothing over the thread) adds what is on
- * screen now to `passed`; scrolled to the end, everything is on screen.
- */
 function newBelow(body: HTMLElement, passed: Set<string>, mark: boolean): HTMLElement[] {
   const bottom = body.getBoundingClientRect().bottom - PILL_BAND_PX;
   const end = mark && body.scrollHeight > 0 && atEnd(body);
@@ -4821,6 +4809,11 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     : heldHandoff && deliveredNow
       ? { state: 'queued', text: `Goes to ${handoffName(last)} once the Undo window ends.` }
       : deliveredNow;
+  // A reply the T3 wake cannot put in (its thread's machine says why): one line with the fix, until it is delivered.
+  const t3Wait =
+    delivered && !last.delivery && !last.taken_back_at && isInboxT3WaitReason(last.t3_wait) && (delivered.state === 'saved' || delivered.state === 'queued') && !handedItem(recipientConnection, last.id)
+      ? last.t3_wait
+      : null;
   // No Send now because that session runs an older plugin than a restart loads (the "Steps" line,
   // owner approval "restart-warning"): only while the reply waits for a working session.
   const restart = delivered?.state === 'queued' && !last.deliver_now_at ? restartNote(recipientConnection) : null;
@@ -6762,7 +6755,10 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                 )}
                 <DeliveredLine text={earlierDelivered(message)} />
                 {message === last && cloudLast && <CloudWakeLine wake={cloudLast.cloud_wake} fallbackName={addresseeName(lastTo?.host ?? 'cloud')} time={whenTime} />}
-                {message === last && !shownRun && delivered && !delivered.wait && tagLines.length === 0 && (
+                {message === last && !shownRun && t3Wait && !delivered?.wait && tagLines.length === 0 && (
+                  <T3WaitLine reason={t3Wait}>{takeBackLast && <TakeBackButton busy={takingBack} onPress={takeBackLast} />}</T3WaitLine>
+                )}
+                {message === last && !shownRun && delivered && !t3Wait && !delivered.wait && tagLines.length === 0 && (
                   // tabIndex -1: Send to another session puts focus here once it moved the message.
                   <div className="ib-delivered" data-delivery={delivered.state} data-auto={delivered.autoAfterMin !== undefined ? '' : undefined} tabIndex={-1}>
                     <span className="ib-dl-main">
