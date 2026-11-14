@@ -172,18 +172,20 @@ test('the view tabs: arrows move focus, Enter and Space switch, focus stays on t
   });
 });
 
-test('a group heading folds and opens with Enter and Space', async ({ browser }) => {
+test('a group heading folds and opens from the keyboard', async ({ browser }) => {
   await withReview(browser, 900, async (page) => {
-    const heading = page.locator('[data-file-kind-block="test"] [data-panel-section-header]');
+    const heading = page.locator('[data-review-sidebar] [data-type="item"][data-item-path="Tests/"]');
+    const testRows = page.locator('[data-review-sidebar] [data-item-type="file"][data-item-path^="Tests/"]');
     await expect(heading).toHaveAttribute('aria-expanded', 'true');
-    await heading.focus();
-    expect(await heading.evaluate((el) => el.matches(':focus-visible'))).toBe(true);
-    await page.keyboard.press('Enter');
+    await heading.click();
     await expect(heading).toHaveAttribute('aria-expanded', 'false');
-    await expect(page.locator('[data-file-kind-block="test"] .file-tree-item')).toHaveCount(0);
-    await page.keyboard.press(' ');
+    await expect(testRows).toHaveCount(0);
+    await heading.focus();
+    await page.keyboard.press('ArrowRight');
     await expect(heading).toHaveAttribute('aria-expanded', 'true');
-    await expect(page.locator('[data-file-kind-block="test"] .file-tree-item')).toHaveCount(1);
+    await expect(testRows).toHaveCount(1);
+    await page.keyboard.press('ArrowLeft');
+    await expect(heading).toHaveAttribute('aria-expanded', 'false');
   });
 });
 
@@ -210,29 +212,24 @@ test('at the default 256 px the scope and the tools share one line in both scope
   });
 });
 
-test('the tools stay on top while the files scroll under them; the numbers keep two edges', async ({ browser }) => {
+test('the tools stay put while the files scroll; the numbers keep two edges', async ({ browser }) => {
   await withReview(browser, 520, async (page) => {
-    const block = page.locator('[data-review-sticky-tools]');
-    await expect(block).not.toHaveAttribute('data-stuck', '');
-    const before = await block.boundingBox();
-    // Scroll the panel's list.
-    await page.locator('[data-review-sidebar] .file-tree-item').first().hover();
+    const tools = page.getByRole('button', { name: 'List options' });
+    const before = await tools.boundingBox();
+    const first = page.locator('[data-review-sidebar] [data-type="item"]').first();
+    const firstPath = await first.getAttribute('data-item-path');
+    await first.hover();
     await page.mouse.wheel(0, 400);
-    await expect(block).toHaveAttribute('data-stuck', '');
-    const after = await block.boundingBox();
-    expect(after!.y).toBeLessThanOrEqual(before!.y);
-    // Still on screen, at the top of the list, with its tools usable.
+    await expect(page.locator(`[data-review-sidebar] [data-type="item"][data-item-path="${firstPath}"]`)).not.toBeInViewport();
+    expect((await tools.boundingBox())!.y).toBe(before!.y);
     await expect(page.locator('[data-tree-scope="all"]')).toBeInViewport();
-    await expect(page.getByRole('button', { name: 'List options' })).toBeInViewport();
-    // The first files went under the block.
-    const firstRow = await page.locator('[data-review-sidebar] .file-tree-item').first().boundingBox();
-    expect(firstRow!.y).toBeLessThan(after!.y);
 
-    // Every + ends on one edge and every - on the next.
-    const edges = await page.locator('[data-review-sidebar]').evaluate((aside) => {
-      const right = (selector: string) =>
-        [...new Set([...aside.querySelectorAll(selector)].map((el) => Math.round(el.getBoundingClientRect().right)))];
-      return { plus: right('[data-count-columns] .additions'), minus: right('[data-count-columns] .deletions') };
+    const edges = await page.locator('[data-changes-tree]').evaluate((tree) => {
+      const right = (n: number) =>
+        [...new Set([...tree.shadowRoot!.querySelectorAll(`[data-item-section="trail"] > :nth-child(${n})`)]
+          .filter((el) => el.textContent)
+          .map((el) => Math.round(el.getBoundingClientRect().right)))];
+      return { plus: right(3), minus: right(4) };
     });
     expect(edges.plus.length).toBe(1);
     expect(edges.minus.length).toBeLessThanOrEqual(1);

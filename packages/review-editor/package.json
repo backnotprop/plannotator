@@ -5,6 +5,7 @@
   "exports": {
     ".": "./App.tsx",
     "./styles": "./index.css",
+    "./tree-styles": "./pierreTree.css",
     "./shortcuts": "./shortcuts.ts",
     "./worker-pool": "./workerPool.tsx",
     "./components/*": "./components/*.tsx",

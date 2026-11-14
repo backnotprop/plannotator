@@ -399,12 +399,10 @@ packages/review-editor/components/CallFlowTreeView.sourcePreview.test.tsx
 packages/review-editor/dock/panels/semanticDiffShared.sourcePreview.test.tsx
 packages/review-editor/components/PanelChrome.test.tsx
 packages/review-editor/components/FileTree.search-placement.test.tsx
-packages/review-editor/components/FileTree.fileKinds.test.tsx
-packages/review-editor/components/FileTree.statusGroups.test.tsx
+packages/review-editor/components/ChangesTreeView.test.tsx
 packages/review-editor/components/FileHeader.fileKind.test.tsx
 packages/review-editor/components/FileHeader.narrow.test.tsx
 packages/review-editor/components/PackageChangesCard.test.tsx
-packages/review-editor/components/FileTreeNode.controls.test.tsx
 packages/ui/components/Settings.analysis.test.tsx
 packages/ui/components/AnnotationPanel.props.test.tsx
 packages/ui/components/AnnotationPanel.cardHeader.test.tsx

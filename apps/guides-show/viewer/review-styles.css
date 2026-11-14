@@ -10,7 +10,8 @@
 @source not "../../../packages/review-editor/components/PanelChrome.tsx";
 @source not "../../../packages/review-editor/components/PanelNavRows.tsx";
 @source not "../../../packages/review-editor/components/FileTree.tsx";
-@source not "../../../packages/review-editor/components/FileTreeNode.tsx";
-@source not "../../../packages/review-editor/components/RepoFileTree.tsx";
+@source not "../../../packages/review-editor/components/ChangesTreeView.tsx";
+@source not "../../../packages/review-editor/components/RepoTreeView.tsx";
+@source not "../../../packages/review-editor/components/pierreRows.tsx";
 @source not "../../../packages/review-editor/components/SectionsPanel.tsx";
 @source not "../../../packages/review-editor/components/CommitsPanel.tsx";

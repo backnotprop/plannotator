@@ -375,7 +375,7 @@ test('Go to File, Go to Definition and References into tabs, Back / Forward, nex
     await expect(page.locator('[data-code-nav-location]')).toHaveCount(0);
 
     // The changed file on its diff.
-    await page.locator('.file-tree-item', { hasText: 'fileKindTree.ts' }).first().click();
+    await page.locator('[data-review-sidebar] [data-item-type="file"]', { hasText: 'fileKindTree.ts' }).first().click();
     await expect(page.locator('[data-file-view-switch]')).toBeVisible();
 
     // Go to File (Mod+P): fuzzy over the whole repository; the changed file is marked.
@@ -426,9 +426,9 @@ test('Go to File, Go to Definition and References into tabs, Back / Forward, nex
     await expect(longWhole.locator('[data-line="2"][data-selected-line]').first()).toBeAttached();
     await page.keyboard.press(back);
     await expect(activeTab).toHaveText('fileKindTree.ts');
-    await page.locator('.file-tree-item', { hasText: 'long.ts' }).first().click();
+    await page.locator('[data-review-sidebar] [data-item-type="file"]', { hasText: 'long.ts' }).first().click();
     await expect(page.locator('[data-file-view="changes"]')).toHaveAttribute('aria-pressed', 'true');
-    await page.locator('.file-tree-item', { hasText: 'fileKindTree.ts' }).first().click();
+    await page.locator('[data-review-sidebar] [data-item-type="file"]', { hasText: 'fileKindTree.ts' }).first().click();
     await expect(activeTab).toHaveText('fileKindTree.ts');
     await page.locator('[data-char]', { hasText: /^kindLabel$/ }).last().hover();
     await page.keyboard.press('F12');
@@ -445,7 +445,7 @@ test('Go to File, Go to Definition and References into tabs, Back / Forward, nex
     await page.screenshot({ path: join(proofDir, '07-refs.png') });
 
     // Next change: this diff fits the screen, so on to the next changed file.
-    await page.locator('.file-tree-item', { hasText: 'fileKindTree.ts' }).first().click();
+    await page.locator('[data-review-sidebar] [data-item-type="file"]', { hasText: 'fileKindTree.ts' }).first().click();
     await expect(activeTab).toHaveText('fileKindTree.ts');
     await page.keyboard.press('Alt+F5');
     await expect(activeTab).toHaveText('long.ts');

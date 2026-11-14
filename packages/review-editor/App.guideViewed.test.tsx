@@ -235,7 +235,7 @@ async function mount(pr: boolean): Promise<void> {
   await act(async () => {
     root?.render(<App />);
   });
-  await waitFor(() => !!document.body.textContent?.includes("a.ts"), "the diff");
+  await waitFor(() => !!document.querySelector("[data-changes-tree]")?.shadowRoot?.textContent?.includes("a.ts"), "the diff");
   await settle(10);
 }
 

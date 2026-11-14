@@ -93,12 +93,17 @@ async function mount(element: React.ReactElement) {
   return host;
 }
 
+const settle = () =>
+  act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  });
+const repoShadow = (el: HTMLElement) => el.querySelector<HTMLElement>('[data-repo-file-tree]')!.shadowRoot!;
+const repoRow = (el: HTMLElement, path: string) => repoShadow(el).querySelector<HTMLElement>(`[data-item-path="${path}"]`)!;
 const visibleRows = (el: HTMLElement) =>
-  [...el.querySelectorAll<HTMLElement>('[data-repo-file-tree] [role="treeitem"]')].map((row) => {
-    const folder = row.querySelector<HTMLElement>('[data-repo-folder]');
-    if (folder) return `dir:${folder.dataset.repoFolder}`;
-    const fileRow = row.querySelector<HTMLElement>('[data-repo-file]');
-    return `${fileRow?.hasAttribute('data-repo-changed') ? 'changed' : 'file'}:${fileRow?.dataset.repoFile}`;
+  [...repoShadow(el).querySelectorAll<HTMLElement>('[data-type="item"]')].map((row) => {
+    const path = row.dataset.itemPath!;
+    if (row.dataset.itemType === 'folder') return `dir:${path.replace(/\/$/, '')}`;
+    return `${row.querySelector('[data-item-part-id="viewed"]') ? 'changed' : 'file'}:${path}`;
   });
 
 afterEach(async () => {
@@ -137,6 +142,7 @@ describe.skipIf(!hasDom)('FileTree: Changes | All files', () => {
 
   test('All files opens on the paths that lead to changes; changed rows keep their controls', async () => {
     const el = await mount(<Tree />);
+    await settle();
     expect(visibleRows(el)).toEqual([
       'dir:apps',
       'dir:packages',
@@ -146,34 +152,34 @@ describe.skipIf(!hasDom)('FileTree: Changes | All files', () => {
       'changed:packages/review-editor/utils/explorerTree.ts',
       'changed:packages/review-editor/utils/fileKindTree.ts',
       'dir:packages/shared',
-      // Deleted by the diff, so not in the listing, still in the tree.
       'changed:packages/shared/old.ts',
       'file:packages/shared/review-core.ts',
       'dir:packages/ui',
       'file:.gitignore',
       'file:README.md',
     ]);
-    const changedRow = el.querySelector('[data-repo-file="packages/review-editor/utils/fileKindTree.ts"]')!;
-    expect(changedRow.querySelector('[role="checkbox"]')).not.toBeNull();
-    expect(changedRow.textContent).toContain('+2');
+    expect(repoRow(el, 'packages/review-editor/utils/fileKindTree.ts').textContent).toContain('+2');
   });
 
   test('folders open and close; a changed row selects its diff, an unchanged one opens the file', async () => {
     const onSelectFile = mock((_index: number) => {});
     const onOpenRepoFile = mock((_path: string, _options: { pin: boolean }) => {});
     const el = await mount(<Tree onSelectFile={onSelectFile} onOpenRepoFile={onOpenRepoFile} />);
-    await act(async () => el.querySelector<HTMLButtonElement>('[data-repo-folder="apps"]')!.click());
+    await settle();
+    await act(async () => repoRow(el, 'apps/').click());
+    await settle();
     expect(visibleRows(el)).toContain('dir:apps/hook');
-    await act(async () => el.querySelector<HTMLButtonElement>('[data-repo-folder="packages"]')!.click());
+    await act(async () => repoRow(el, 'packages/').click());
+    await settle();
     expect(visibleRows(el).filter((row) => row.includes('packages/'))).toEqual([]);
-    await act(async () => el.querySelector<HTMLButtonElement>('[data-repo-folder="packages"]')!.click());
+    await act(async () => repoRow(el, 'packages/').click());
+    await settle();
 
-    await act(async () => el.querySelector<HTMLButtonElement>('[data-repo-file="packages/review-editor/utils/explorerTree.ts"] button')!.click());
+    await act(async () => repoRow(el, 'packages/review-editor/utils/explorerTree.ts').click());
     expect(onSelectFile).toHaveBeenCalledWith(1);
-    const readme = el.querySelector<HTMLButtonElement>('button[data-repo-file="README.md"]')!;
-    await act(async () => readme.click());
+    await act(async () => repoRow(el, 'README.md').click());
     expect(onOpenRepoFile).toHaveBeenLastCalledWith('README.md', { pin: false });
-    await act(async () => readme.dispatchEvent(new MouseEvent('dblclick', { bubbles: true })));
+    await act(async () => repoRow(el, 'README.md').dispatchEvent(new MouseEvent('dblclick', { bubbles: true })));
     expect(onOpenRepoFile).toHaveBeenLastCalledWith('README.md', { pin: true });
   });
 
@@ -181,19 +187,18 @@ describe.skipIf(!hasDom)('FileTree: Changes | All files', () => {
     const el = await mount(
       <Tree repoFiles={repo(ready({ onDisk: { 'packages/review-editor/utils/fileKindTree.ts': 'M', 'packages/shared/review-core.ts': 'A' } }))} />,
     );
-    expect(el.querySelector('[data-repo-file="packages/review-editor/utils/fileKindTree.ts"] [data-repo-on-disk="M"]')).not.toBeNull();
-    expect(el.querySelector('[data-repo-file="packages/shared/review-core.ts"] [data-repo-on-disk="A"]')).not.toBeNull();
+    await settle();
+    expect(repoRow(el, 'packages/shared/review-core.ts').dataset.itemGitStatus).toBe('untracked');
+    expect(repoRow(el, 'packages/shared/review-core.ts').querySelector('[title^="Added on disk"]')).not.toBeNull();
   });
 
   test('a big repository renders only a window of rows', async () => {
     const many = Array.from({ length: 5000 }, (_, i) => `packages/review-editor/utils/f${String(i).padStart(5, '0')}.ts`);
     const el = await mount(<Tree repoFiles={repo(ready({ paths: [...many, ...LISTING].sort(), total: many.length + LISTING.length }))} />);
-    const list = el.querySelector<HTMLElement>('[data-repo-file-tree]')!;
-    const rendered = list.querySelectorAll('[role="treeitem"]').length;
+    await settle();
+    const rendered = repoShadow(el).querySelectorAll('[data-type="item"]').length;
     expect(rendered).toBeGreaterThan(0);
     expect(rendered).toBeLessThanOrEqual(100);
-    // The list keeps the full height so the scroll bar is right.
-    expect(parseInt(list.style.height, 10)).toBeGreaterThan(5000 * 20);
   });
 
   test('a lazy listing asks for a folder when it opens and shows its children when they come', async () => {
@@ -204,9 +209,8 @@ describe.skipIf(!hasDom)('FileTree: Changes | All files', () => {
     ];
     const state = ready({ paths: null, total: 400_000, dirs: new Map([['', rootEntries]]) });
     const el = await mount(<Tree repoFiles={repo(state, loadDir)} />);
-    // packages leads to changes, so it opens, and its children are asked for.
+    await settle();
     expect(loadDir).toHaveBeenCalledWith('packages');
-    expect(el.textContent).toContain('Loading…');
     const next = ready({
       paths: null,
       total: 400_000,
@@ -216,7 +220,11 @@ describe.skipIf(!hasDom)('FileTree: Changes | All files', () => {
       ]),
     });
     await act(async () => root?.render(<Tree repoFiles={repo(next, loadDir)} />));
+    await settle();
     expect(visibleRows(el)).toContain('dir:packages/ui');
+    await act(async () => repoRow(el, 'packages/ui/').click());
+    await settle();
+    expect(loadDir).toHaveBeenLastCalledWith('packages/ui');
   });
 
   test('says why when the session cannot list the repository', async () => {

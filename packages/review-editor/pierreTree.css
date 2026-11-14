@@ -1,0 +1,133 @@
+.review-changes-tree {
+  display: block;
+  --tree-fill-faint: var(--sidebar-fill-faint, color-mix(in oklab, var(--foreground) 5%, transparent));
+  --tree-fill: var(--sidebar-fill, color-mix(in oklab, var(--foreground) 6%, transparent));
+  --tree-fill-strong: var(--sidebar-fill-strong, color-mix(in oklab, var(--foreground) 9%, transparent));
+  --tree-line: var(--sidebar-line, color-mix(in oklab, var(--foreground) 9%, transparent));
+  --tree-text-tertiary: var(--sidebar-text-tertiary, var(--muted-foreground));
+  --trees-bg-override: transparent;
+  --trees-fg-override: color-mix(in oklab, var(--foreground) 88%, var(--background));
+  --trees-fg-muted-override: var(--muted-foreground);
+  --trees-bg-muted-override: var(--tree-fill);
+  --trees-selected-bg-override: var(--tree-fill-strong);
+  --trees-selected-fg-override: var(--foreground);
+  --trees-selected-focused-border-color-override: transparent;
+  --trees-accent-override: var(--primary);
+  --trees-focus-ring-color-override: color-mix(in oklab, var(--primary) 70%, transparent);
+  --trees-border-color-override: var(--tree-line);
+  --trees-indent-guide-bg-override: transparent;
+  --trees-font-family-override: var(--font-sans);
+  --trees-font-size-override: 13px;
+  --trees-font-weight-regular-override: 400;
+  --trees-border-radius-override: 4px;
+  --trees-padding-inline-override: 0px;
+  --trees-item-padding-x-override: 8px;
+  --trees-item-margin-x-override: 0px;
+  --trees-level-gap-override: 0px;
+  --trees-item-row-gap-override: 6px;
+  --trees-icon-width-override: 12px;
+  --trees-git-lane-width-override: 14px;
+  --trees-git-added-color-override: var(--success);
+  --trees-git-deleted-color-override: var(--destructive);
+  --trees-git-modified-color-override: color-mix(in oklab, var(--muted-foreground) 60%, transparent);
+  --trees-git-renamed-color-override: var(--muted-foreground);
+  --trees-git-untracked-color-override: var(--muted-foreground);
+  --trees-scrollbar-thumb-override: color-mix(in oklab, var(--foreground) 18%, transparent);
+  --trees-row-part-gap: 4px;
+  --trees-row-muted-opacity: 1;
+  --trees-row-trail-columns: max-content max-content minmax(var(--count-add-w, 3ch), max-content) minmax(var(--count-del-w, 3ch), max-content);
+}
+.review-changes-tree::part(row-icon-file),
+.review-changes-tree::part(row-git-directory) {
+  display: none;
+}
+.review-changes-tree::part(row-git) {
+  font-size: 12px;
+  line-height: 1;
+}
+.review-changes-tree::part(row-content) {
+  flex: 1 1 auto;
+  color: inherit;
+}
+.review-changes-tree::part(row-content-muted) {
+  color: var(--muted-foreground);
+}
+.review-changes-tree::part(row-content-heading) {
+  color: var(--foreground);
+  font-weight: 600;
+}
+.review-changes-tree::part(row-trail) {
+  font-size: 12px;
+  color: var(--tree-text-tertiary);
+}
+.review-changes-tree::part(row-part-viewed),
+.review-changes-tree::part(row-part-stage),
+.review-changes-tree::part(row-part-unstage),
+.review-changes-tree::part(row-part-staged),
+.review-changes-tree::part(row-part-staging) {
+  width: 16px;
+  height: 16px;
+  display: grid;
+  place-items: center;
+  line-height: 0;
+  border-radius: 4px;
+}
+.review-changes-tree::part(row-part-viewed) {
+  color: color-mix(in oklab, var(--muted-foreground) 60%, transparent);
+}
+.review-changes-tree::part(row-part-viewed row-part-pressed) {
+  color: var(--success);
+}
+.review-changes-tree::part(row-part-viewed):hover {
+  background: var(--tree-fill);
+}
+.review-changes-tree::part(row-part-stage) {
+  box-sizing: border-box;
+  border: 1px solid var(--border);
+  color: var(--muted-foreground);
+  opacity: var(--trees-row-active, 1);
+  transition: opacity 120ms;
+}
+.review-changes-tree::part(row-part-stage):hover {
+  color: var(--foreground);
+  border-color: color-mix(in oklab, var(--muted-foreground) 60%, transparent);
+  background: var(--tree-fill-faint);
+}
+.review-changes-tree::part(row-part-unstage),
+.review-changes-tree::part(row-part-staged) {
+  color: var(--primary);
+}
+.review-changes-tree::part(row-part-unstage):hover {
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+.review-tree-menu {
+  z-index: 50;
+  min-width: 160px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  background: var(--popover);
+  color: var(--popover-foreground);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: var(--float-shadow);
+}
+.review-tree-menu > button {
+  padding: 6px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  text-align: left;
+  color: color-mix(in oklab, var(--foreground) 80%, transparent);
+}
+.review-tree-menu > button:hover,
+.review-tree-menu > button:focus-visible {
+  background: var(--muted);
+  color: var(--foreground);
+  outline: none;
+}
+[data-compact-rows] .review-changes-tree::part(row-trail) {
+  display: none;
+}
+.review-changes-tree::part(row-content-repo) {
+  color: var(--muted-foreground);
+}

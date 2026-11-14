@@ -5,13 +5,11 @@ import type {
   SinceBaseSections,
   WorktreeInfo,
 } from '@plannotator/shared/types';
-import { buildFileTree, getVisualFileOrder, type FileTreeNode } from '../utils/buildFileTree';
-import { buildFileKindBlocks, kindFolderPath, type FileKindBlock } from '../utils/fileKindTree';
-import { buildFileStatusBlocks, fileStatusGroup, FILE_STATUS_COVERS, FILE_STATUS_LABELS } from '../utils/fileStatusTree';
-import { fileKind } from '@plannotator/core/file-kind';
+import { buildFileTree, getAllFolderPaths, getVisualFileOrder, type FileTreeNode } from '../utils/buildFileTree';
+import { buildFileKindBlocks, type FileKindBlock } from '../utils/fileKindTree';
+import { buildFileStatusBlocks, FILE_STATUS_COVERS, FILE_STATUS_LABELS } from '../utils/fileStatusTree';
 import { FileKindIcon, FILE_KIND_LABELS } from '@plannotator/guide-viewer/FileKindIcon';
-import { useDiffFileTreeExpansion } from '@plannotator/ui/hooks/useDiffFileTreeExpansion';
-import { FileTreeNodeItem, alignedTreeIndent, maxTreeIndent } from './FileTreeNode';
+import { ChangesTreeView, type ChangesTreeHandle } from './ChangesTreeView';
 import { EvoLogPicker } from './EvoLogPicker';
 import { WorktreePicker } from './WorktreePicker';
 import { getReviewSearchSideLabel, type ReviewSearchFileGroup, type ReviewSearchMatch } from '../utils/reviewSearch';
@@ -19,17 +17,16 @@ import type { DiffFile } from '../types';
 import { OverlayScrollArea } from '@plannotator/ui/components/OverlayScrollArea';
 import { PRPlatformIcon } from '@plannotator/ui/components/PRPlatformIcon';
 import { Paperclip } from 'lucide-react';
-import { RepoFileTree } from './RepoFileTree';
+import { RepoTreeView, type RepoTreeHandle } from './RepoTreeView';
 import { ReviewPanelHeader, ScopeSwitch, reviewPanelBodyProps, type ReviewPanelHeaderModel } from './ReviewPanelHeader';
 
 import type { TreeScope } from '../hooks/useTreeScope';
 import type { RepoFiles } from '../hooks/useRepoFiles';
-import { initialRepoExpansion, repoAncestors } from '../utils/repoTree';
 import type { OverlayScrollAreaHandle } from '@plannotator/ui/components/OverlayScrollArea';
 
 import { SidebarActionRow, SemanticDiffRow, CallFlowRow, AllChangesRow } from './PanelNavRows';
 import { PanelControlsRow, PanelSearchField, TOOLS_ONE_ROW_WIDTH } from './PanelChrome';
-import { PanelSectionHeader, CountColumns, countColumnVars, compactRowsProps } from './FileRowBits';
+import { countColumnVars, compactRowsProps } from './FileRowBits';
 import { useHiddenViewedFiles } from '../hooks/useHiddenViewedFiles';
 
 interface FileTreeProps {
@@ -261,27 +258,8 @@ export const FileTree: React.FC<FileTreeProps> = ({
     }
     return null;
   }, [statusBlocks, kindBlocks]);
-  const blockKeyOf = useCallback(
-    (path: string): string => {
-      if (statusBlocks && sinceBaseSections) {
-        const file = files.find((candidate) => candidate.path === path);
-        return file ? fileStatusGroup(file, sinceBaseSections, stagedFiles) : 'committed';
-      }
-      return fileKind(path, generatedFiles);
-    },
-    [statusBlocks, sinceBaseSections, files, stagedFiles, generatedFiles],
-  );
   const tree = useMemo(() => (blocks ? blocks.flatMap((block) => block.tree) : buildFileTree(files)), [files, blocks]);
-  const [foldedKinds, setFoldedKinds] = useState<ReadonlySet<string>>(() => new Set(['generated']));
-  const setKindFolded = useCallback((kind: string, folded: boolean) => {
-    setFoldedKinds((prev) => {
-      if (prev.has(kind) === folded) return prev;
-      const next = new Set(prev);
-      if (folded) next.add(kind);
-      else next.delete(kind);
-      return next;
-    });
-  }, []);
+  const plainTree = useMemo(() => (blocks ? [] : tree), [blocks, tree]);
 
   // Since-base sidecar lookup for per-row lifecycle markers + stage buttons.
   const getSectionEntry = useMemo(() => {
@@ -315,6 +293,8 @@ export const FileTree: React.FC<FileTreeProps> = ({
       if (active instanceof HTMLElement && active.closest('[role="menu"], [role="dialog"], [role="listbox"]')) {
         return;
       }
+
+      if (e.composedPath?.().some((node) => node instanceof HTMLElement && node.hasAttribute('data-changes-tree'))) return;
 
       const visualPos = visualOrder.indexOf(activeFileIndex);
 
@@ -352,88 +332,31 @@ export const FileTree: React.FC<FileTreeProps> = ({
     return map;
   }, [annotations]);
 
-  const getAnnotationCount = useCallback(
-    (filePath: string) => {
-      return annotationCountMap.get(filePath) ?? 0;
-    },
-    [annotationCountMap],
-  );
-
-  // Inside kind blocks a folder path is scoped to its block, so the active
-  // file's path is too (its ancestors are then the block's folders).
-  const activePath = files[activeFileIndex]?.path;
-  const activeExpansionPath =
-    blocks && activePath ? kindFolderPath(blockKeyOf(activePath), activePath) : activePath;
-
-  // A file that becomes active by any route (j/k, a click in all-files, the
-  // scroll highlight, an annotation or search jump) opens its folded kind
-  // block, the way folded folders open for the active file. Only a change
-  // opens a block, and a new file list never does, so Generated stays folded
-  // when a diff loads.
-  const scrollPath = isAllFilesActive && scrollHighlightIndex != null ? files[scrollHighlightIndex]?.path : undefined;
-  const revealedRef = useRef<{ files: DiffFile[]; active?: string; scroll?: string } | null>(null);
-  useEffect(() => {
-    const before = revealedRef.current;
-    revealedRef.current = { files, active: activePath, scroll: scrollPath };
-    if (!before || before.files !== files || !blocks) return;
-    if (activePath && activePath !== before.active) setKindFolded(blockKeyOf(activePath), false);
-    if (scrollPath && scrollPath !== before.scroll) setKindFolded(blockKeyOf(scrollPath), false);
-  }, [files, activePath, scrollPath, blocks, blockKeyOf, setKindFolded]);
-
-  // Folder open/closed state is the shared diff-file-tree hook (expand all on a
-  // new tree, keep the active file's ancestors open), the same one the
-  // embeddable @plannotator/ui DiffFileTree uses.
-  const {
-    expandedFolders,
-    allFolderPaths,
-    areAllFoldersExpanded,
-    toggleFolder: handleToggleFolder,
-    toggleAllFolders: handleToggleAllFolders,
-  } = useDiffFileTreeExpansion(tree, activeExpansionPath);
+  const changesTreeRef = useRef<ChangesTreeHandle>(null);
+  const [foldersExpanded, setFoldersExpanded] = useState(true);
+  const allFolderPaths = useMemo(() => getAllFolderPaths(tree), [tree]);
+  const handleToggleAllFolders = useCallback(() => {
+    const next = !foldersExpanded;
+    setFoldersExpanded(next);
+    changesTreeRef.current?.setAllFoldersExpanded(next);
+  }, [foldersExpanded]);
 
   // --- All files -----------------------------------------------------------
   const showAllFiles = treeScope === 'all' && !!repoFiles;
   const repoState = repoFiles?.state;
   const repoReady = repoState?.status === 'ready' ? repoState : null;
-  const [repoExpanded, setRepoExpanded] = useState<ReadonlySet<string> | null>(null);
-  // Opens on the paths that lead to the changes (and the active file).
-  useEffect(() => {
-    if (!repoReady || repoExpanded) return;
-    setRepoExpanded(initialRepoExpansion(files.map((file) => file.path), activePath));
-  }, [repoReady, repoExpanded, files, activePath]);
-  // The active file's folders open when it changes, as in Changes.
-  const activeRepoTarget = activeRepoPath ?? activePath ?? null;
-  useEffect(() => {
-    if (!activeRepoTarget) return;
-    setRepoExpanded((current) => {
-      if (!current) return current;
-      const missing = repoAncestors(activeRepoTarget).filter((dir) => !current.has(dir));
-      if (missing.length === 0) return current;
-      const next = new Set(current);
-      for (const dir of missing) next.add(dir);
-      return next;
-    });
-  }, [activeRepoTarget]);
-  const toggleRepoFolder = useCallback((path: string) => {
-    setRepoExpanded((current) => {
-      const next = new Set(current ?? []);
-      if (next.has(path)) next.delete(path);
-      else next.add(path);
-      return next;
-    });
-  }, []);
-  const repoAllCollapsed = !repoExpanded || repoExpanded.size === 0;
+  const repoTreeRef = useRef<RepoTreeHandle>(null);
+  const [repoFoldersOpen, setRepoFoldersOpen] = useState(true);
   const toggleAllRepoFolders = useCallback(() => {
-    setRepoExpanded(repoAllCollapsed ? initialRepoExpansion(files.map((file) => file.path), activePath) : new Set());
-  }, [repoAllCollapsed, files, activePath]);
+    const next = !repoFoldersOpen;
+    setRepoFoldersOpen(next);
+    repoTreeRef.current?.setAllFoldersExpanded(next);
+  }, [repoFoldersOpen]);
   const scrollAreaRef = useRef<OverlayScrollAreaHandle>(null);
-  const getScrollElement = useCallback(() => scrollAreaRef.current?.getViewport() ?? null, []);
 
   const panelWidth = width ?? 256;
   const totalAdditions = files.reduce((sum, file) => sum + file.additions, 0);
   const totalDeletions = files.reduce((sum, file) => sum + file.deletions, 0);
-  const treeIndentCap = maxTreeIndent(panelWidth);
-  const treeIndent = useCallback((depth: number) => alignedTreeIndent(depth, treeIndentCap), [treeIndentCap]);
   const { hiddenFiles, panelPointerProps } = useHiddenViewedFiles(viewedFiles, hideViewedFiles);
 
   const panelControls = (
@@ -445,7 +368,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
       onCloseSearch={searchQuery.trim() ? onSearchClear : onSearchClose}
       oneRow={panelWidth >= TOOLS_ONE_ROW_WIDTH}
       onToggleAllFolders={showAllFiles ? toggleAllRepoFolders : handleToggleAllFolders}
-      areAllFoldersExpanded={showAllFiles ? !repoAllCollapsed : areAllFoldersExpanded}
+      areAllFoldersExpanded={showAllFiles ? repoFoldersOpen : foldersExpanded}
       collapseDisabled={showAllFiles ? !repoReady : allFolderPaths.length === 0}
       onToggleHideViewed={onToggleHideViewed}
       hideViewedFiles={hideViewedFiles}
@@ -472,33 +395,11 @@ export const FileTree: React.FC<FileTreeProps> = ({
     isAllFilesActive || isSemanticDiffActive || isCallFlowActive || isPROverviewActive || isPRArtifactsActive
       ? -1
       : activeFileIndex;
-  const renderNodes = (nodes: typeof tree) =>
-    nodes.map((node) => (
-      <FileTreeNodeItem
-        key={node.type === 'file' ? node.path : `folder:${node.path}`}
-        node={node}
-        indent={treeIndent}
-        expandedFolders={expandedFolders}
-        onToggleFolder={handleToggleFolder}
-        activeFileIndex={rowActiveIndex}
-        scrollHighlightIndex={isAllFilesActive ? scrollHighlightIndex : undefined}
-        onSelectFile={onSelectFile}
-        onDoubleClickFile={onDoubleClickFile}
-        viewedFiles={viewedFiles}
-        onToggleViewed={onToggleViewed}
-        showViewedControls={showViewedControls}
-        hideViewedFiles={hideViewedFiles}
-        hiddenFiles={hiddenFiles}
-        getAnnotationCount={getAnnotationCount}
-        stagedFiles={stagedFiles}
-        repoRoot={repoRoot}
-        getSectionEntry={getSectionEntry}
-        onStageFile={onStageFile}
-        stagingFile={stagingFile}
-        showStageControls={showStageControls}
-        markdownPreviewedPaths={markdownPreviewedPaths}
-      />
-    ));
+  const treeActivePath =
+    rowActiveIndex >= 0 ? files[rowActiveIndex]?.path ?? null : isAllFilesActive && scrollHighlightIndex != null ? files[scrollHighlightIndex]?.path ?? null : null;
+  const annotationCounts = annotationCountMap;
+  const showChangesTree = !searchQuery.trim() && !showAllFiles;
+  const showRepoTree = !searchQuery.trim() && showAllFiles && !!repoReady;
 
   const searchField = isSearchVisible ? (
     <PanelSearchField
@@ -579,7 +480,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
 
       {/* The list: the nav rows scroll with it; the tools and progress rows
           stick to its top. Then the file tree, All files or search results. */}
-      <OverlayScrollArea ref={scrollAreaRef} className="flex-1 min-h-0">
+      <OverlayScrollArea ref={scrollAreaRef} className={showChangesTree || showRepoTree ? 'flex-none' : 'flex-1 min-h-0'}>
         <div
           {...reviewPanelBodyProps(header)}
           className="px-2 pb-2"
@@ -650,75 +551,68 @@ export const FileTree: React.FC<FileTreeProps> = ({
             ) : (
               <div className="py-6 text-center text-xs text-muted-foreground/50">No matches found</div>
             )
-          ) : showAllFiles ? (
-            repoReady ? (
-              <RepoFileTree
-                repo={repoReady}
-                loadDir={repoFiles!.loadDir}
-                files={files}
-                activeFileIndex={rowActiveIndex}
-                activeRepoPath={activeRepoPath}
-                expanded={repoExpanded ?? EMPTY_SET}
-                onToggleFolder={toggleRepoFolder}
-                onSelectFile={onSelectFile}
-                onDoubleClickFile={onDoubleClickFile}
-                onOpenRepoFile={onOpenRepoFile}
-                viewedFiles={viewedFiles}
-                onToggleViewed={onToggleViewed}
-                showViewedControls={showViewedControls}
-                annotations={annotations}
-                stagedFiles={stagedFiles}
-                repoRoot={repoRoot}
-                getSectionEntry={getSectionEntry}
-                onStageFile={onStageFile}
-                stagingFile={stagingFile}
-                showStageControls={showStageControls}
-                markdownPreviewedPaths={markdownPreviewedPaths}
-                scrollHighlightIndex={isAllFilesActive ? scrollHighlightIndex : undefined}
-                getScrollElement={getScrollElement}
-              />
-            ) : (
-              <RepoListingPlaceholder state={repoState} onRetry={repoFiles?.reload} />
-            )
-          ) : (
-            <>
-              {blocks
-                ? blocks.map((block) => {
-                    const folded = foldedKinds.has(block.key);
-                    if (hideViewedFiles && block.paths.every((path) => hiddenFiles.has(path) && path !== files[rowActiveIndex]?.path)) {
-                      return null;
-                    }
-                    return (
-                      <div
-                        key={block.key}
-                        className="review-panel-group"
-                        data-file-kind-block={block.group === 'kind' ? block.key : undefined}
-                        data-file-status-block={block.group === 'status' ? block.key : undefined}
-                      >
-                        <PanelSectionHeader
-                          label={block.label}
-                          collapsed={folded}
-                          onToggle={() => setKindFolded(block.key, !folded)}
-                          icon={block.icon}
-                          tooltip={block.tooltip}
-                          ariaLabel={blockHeadingName(block, viewedFiles)}
-                        >
-                          <BlockCounts block={block} viewedFiles={viewedFiles} />
-                        </PanelSectionHeader>
-                        {!folded && renderNodes(block.tree)}
-                      </div>
-                    );
-                  })
-                : renderNodes(tree)}
-            </>
-          )}
+          ) : showAllFiles && !repoReady ? (
+            <RepoListingPlaceholder state={repoState} onRetry={repoFiles?.reload} />
+          ) : null}
         </div>
       </OverlayScrollArea>
+      {showRepoTree && repoReady && (
+        <div className="flex-1 min-h-0 px-2 pb-2" style={countColumnVars(totalAdditions, totalDeletions)}>
+          <RepoTreeView
+            handleRef={repoTreeRef}
+            repo={repoReady}
+            loadDir={repoFiles!.loadDir}
+            files={files}
+            activePath={activeRepoPath ?? treeActivePath}
+            viewedFiles={viewedFiles}
+            showViewedControls={showViewedControls}
+            onToggleViewed={onToggleViewed}
+            stagedFiles={stagedFiles}
+            stagingFile={stagingFile}
+            showStageControls={showStageControls}
+            onStageFile={onStageFile}
+            getSectionEntry={getSectionEntry}
+            annotationCounts={annotationCounts}
+            markdownPreviewedPaths={markdownPreviewedPaths}
+            repoRoot={repoRoot}
+            onSelectFile={onSelectFile}
+            onDoubleClickFile={onDoubleClickFile}
+            onOpenRepoFile={onOpenRepoFile}
+          />
+        </div>
+      )}
+      {showChangesTree && (
+        <div className="flex-1 min-h-0 px-2 pb-2" style={countColumnVars(totalAdditions, totalDeletions)} data-changes-tree-wrap="">
+          <ChangesTreeView
+            handleRef={changesTreeRef}
+            grouping={blocks ? effectiveGroupBy : 'none'}
+            tree={plainTree}
+            groups={blocks}
+            initiallyFoldedGroups={INITIALLY_FOLDED}
+            activePath={treeActivePath}
+            viewedFiles={viewedFiles}
+            hiddenFiles={hiddenFiles}
+            hideViewedFiles={hideViewedFiles}
+            showViewedControls={showViewedControls}
+            onToggleViewed={onToggleViewed}
+            stagedFiles={stagedFiles}
+            stagingFile={stagingFile}
+            showStageControls={showStageControls}
+            onStageFile={onStageFile}
+            getSectionEntry={getSectionEntry}
+            annotationCounts={annotationCounts}
+            markdownPreviewedPaths={markdownPreviewedPaths}
+            repoRoot={repoRoot}
+            onSelectFile={onSelectFile}
+            onDoubleClickFile={onDoubleClickFile}
+          />
+        </div>
+      )}
     </aside>
   );
 };
 
-const EMPTY_SET: ReadonlySet<string> = new Set();
+const INITIALLY_FOLDED: ReadonlySet<string> = new Set(['generated']);
 
 /** The All files list while it loads, or why there is none. */
 export const RepoListingPlaceholder: React.FC<{ state: RepoFiles['state'] | undefined; onRetry?: () => void }> = ({ state, onRetry }) => {
@@ -765,26 +659,6 @@ interface FileGroupBlock {
   additions: number;
   deletions: number;
 }
-
-function blockHeadingName(block: FileGroupBlock, viewedFiles: Set<string>): string {
-  const total = block.paths.length;
-  const viewed = block.paths.filter((path) => viewedFiles.has(path)).length;
-  const files = `${total} file${total === 1 ? '' : 's'}`;
-  return `${block.label}: ${files}, ${viewed} viewed, ${block.additions} lines added, ${block.deletions} removed. ${block.tooltip}.`;
-}
-
-const BlockCounts: React.FC<{ block: FileGroupBlock; viewedFiles: Set<string> }> = ({ block, viewedFiles }) => {
-  const total = block.paths.length;
-  const viewed = block.paths.filter((path) => viewedFiles.has(path)).length;
-  return (
-    <span className="ml-auto flex items-center gap-2 pl-2" data-kind-counts="">
-      <span className="review-kind-viewed" data-kind-viewed="" title={`${viewed} of ${total} viewed`}>
-        {viewed}/{total}
-      </span>
-      <CountColumns additions={block.additions} deletions={block.deletions} tone="quiet" />
-    </span>
-  );
-};
 
 // --- Search result components ---
 

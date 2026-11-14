@@ -10630,6 +10630,8 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
 /* The tree: one column. */
 /* From nothing, not from the tree's height: a big tree otherwise squeezes the layers above it to a row, hiding the one you are on. */
 .ib-prp-files { flex: 1 1 0; min-height: 0; overflow-y: auto; padding: 12px 8px 12px; scrollbar-width: thin; }
+.ib-prp-files.ib-prp-pierre { display: flex; flex-direction: column; overflow: hidden; }
+.ib-prp-pierre > .review-changes-tree { flex: 1 1 0; min-height: 0; }
 .ib-prp-fileshead { display: flex; align-items: center; padding: 0 6px 4px; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
 .ib-prp-list { list-style: none; margin: 0; padding: 0; }
 .pn-inbox .ib-prp-file, .pn-inbox .ib-prp-folder { display: flex; align-items: center; gap: 5px; width: 100%; min-height: 25px; padding-right: 6px; border-radius: 6px; font-size: var(--ib-fs-12-5, 12.5px); text-align: left; color: var(--foreground); }
