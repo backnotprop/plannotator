@@ -1,7 +1,7 @@
 import { unionCanvas, type Size } from './geometry';
 
 export const DIFFERENCE_MAX_SIDE = 1024;
-export const DIFFERENCE_THRESHOLD = 8;
+export const DIFFERENCE_THRESHOLD = 16;
 
 export interface DifferenceMask {
   mask: ImageBitmap;

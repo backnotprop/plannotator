@@ -176,7 +176,13 @@ export function StackedStage(props: {
             }
           : {})}
       >
-        <ImageLayer image={props.before} box={props.before.size} pixelated={layout.pixelated} side="old" />
+        <ImageLayer
+          image={props.before}
+          box={props.before.size}
+          pixelated={layout.pixelated}
+          side="old"
+          style={swipe ? { clipPath: `inset(0 ${Math.max(0, props.before.size.width - clipX)}px 0 0)` } : undefined}
+        />
         <ImageLayer
           image={props.after}
           box={props.after.size}
