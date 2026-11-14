@@ -91,7 +91,7 @@ export const PaneTabs: React.FC<{
               tabIndex={-1}
               onClick={() => close(tab.id)}
               className={`h-4 w-4 flex items-center justify-center rounded-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-opacity ${
-                active ? 'opacity-70' : 'opacity-0 group-hover:opacity-70 focus-visible:opacity-100'
+                active ? 'opacity-70' : 'opacity-0 group-hover:opacity-70 [@media(hover:none)]:opacity-70 focus-visible:opacity-100'
               }`}
             >
               <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.25} aria-hidden="true">

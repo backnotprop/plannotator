@@ -52,7 +52,7 @@ export const PaneDivider: React.FC<{
       className="group relative z-10 w-px flex-none cursor-col-resize bg-border focus-visible:outline-none"
     >
       <span aria-hidden="true" className="absolute inset-y-0 -left-1 -right-1" />
-      <span aria-hidden="true" className="absolute inset-y-0 -left-px w-[3px] bg-primary/50 opacity-0 transition-opacity duration-[120ms] group-hover:opacity-100 group-focus-visible:opacity-100 group-active:opacity-100" />
+      <span aria-hidden="true" className="absolute inset-y-0 -left-px w-[3px] bg-primary/50 opacity-0 transition-opacity duration-[120ms] group-hover:opacity-100 [@media(hover:none)]:opacity-100 group-focus-visible:opacity-100 group-active:opacity-100" />
     </div>
   );
 };
