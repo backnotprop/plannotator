@@ -532,7 +532,7 @@ class GuideViewportManager {
   }
 
   /**
-   * One frame's step toward the window at rest: everything on screen now, plus the nearest other file, and as many
+   * One frame's step toward the window at rest: everything on screen now, plus the nearest other file still in reach, and as many
    * files dropped as that mounted (at least one). Pins and jump targets mounted at once already, on their own paths.
    */
   private settleStep(next: Set<string>): Set<string> {
@@ -551,7 +551,7 @@ class GuideViewportManager {
       if (distance === 0) {
         step.add(id);
         added += 1;
-      } else if (distance < nearestDistance) {
+      } else if (distance <= OUTER_OVERSCAN_PX && distance < nearestDistance) {
         nearest = id;
         nearestDistance = distance;
       }
