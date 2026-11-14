@@ -5,7 +5,7 @@ import DiffMinimap from './DiffMinimap';
 import type { DiffLayoutItem, DiffLayoutSource } from './layoutSource';
 
 const STRIP_HEIGHT = 400;
-const ADD_LANE_X = 7;
+const ADD_LANE_X = 8;
 
 const patch = (name: string) =>
   [`--- a/${name}`, `+++ b/${name}`, '@@ -1,2 +1,6 @@', ' a', '+b', '+c', '+d', '+e', ' f'].join('\n');

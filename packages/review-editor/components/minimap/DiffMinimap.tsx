@@ -322,7 +322,7 @@ const DiffMinimap: React.FC<DiffMinimapProps> = ({ source, fallbackModel, files,
       onKeyDown={onKeyDown}
     >
       <span ref={probeRef} aria-hidden="true" className="hidden" />
-      <div ref={columnRef} data-diff-minimap-strip="" className="absolute inset-y-0 right-1 w-3 border-l border-border/60">
+      <div ref={columnRef} data-diff-minimap-strip="" className="absolute inset-y-0 right-1 w-3.5 border-l border-border/60">
         <canvas ref={canvasRef} aria-hidden="true" className="absolute inset-0 h-full w-full" />
         <div
           ref={outlineRef}

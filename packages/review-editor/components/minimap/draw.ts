@@ -21,10 +21,10 @@ const KIND_STYLE: Record<string, { lane: Lane; color: keyof MinimapColors }> = {
 };
 
 const LANES: Record<Exclude<Lane, 'mark'>, [number, number]> = {
-  semantic: [0, 2],
-  del: [3, 3],
-  add: [7, 3],
-  edge: [10, 2],
+  semantic: [0, 3],
+  del: [4, 3],
+  add: [8, 3],
+  edge: [11, 2],
 };
 
 const TOKENS: Record<keyof MinimapColors, string> = {
@@ -94,6 +94,23 @@ function fillColumn(ctx: CanvasRenderingContext2D, alpha: Float32Array, x: numbe
   }
 }
 
+export const SEMANTIC_MIN_HEIGHT = 3;
+
+function fillRuns(ctx: CanvasRenderingContext2D, column: Float32Array, x: number, w: number, minHeight: number, alpha: number) {
+  ctx.globalAlpha = alpha;
+  let i = 0;
+  while (i < column.length) {
+    if (column[i] <= 0) {
+      i++;
+      continue;
+    }
+    const start = i;
+    while (i < column.length && column[i] > 0) i++;
+    const height = Math.min(column.length, Math.max(minHeight, i - start));
+    ctx.fillRect(x, Math.max(0, Math.min(start, column.length - height)), w, height);
+  }
+}
+
 function fillMarks(ctx: CanvasRenderingContext2D, column: Float32Array, width: number, minHeight: number, scale: number) {
   ctx.globalAlpha = scale;
   let i = 0;
@@ -140,6 +157,7 @@ export function drawMinimap(ctx: CanvasRenderingContext2D, input: MinimapDrawInp
       } else {
         const [x, w] = laneBox(style.lane, dpr);
         if (style.lane === 'add' || style.lane === 'del') fillColumn(ctx, alphaColumn(column), x, w, scale);
+        else if (style.lane === 'semantic') fillRuns(ctx, column, x, w, Math.round(SEMANTIC_MIN_HEIGHT * dpr), scale);
         else fillColumn(ctx, column.map((v) => (v > 0 ? 0.9 : 0)), x, w, scale);
       }
     }

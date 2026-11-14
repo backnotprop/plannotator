@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { buildFileRowModel, type RowMetrics } from './rowModel';
 import { changeBands, hitTest, markBands, placeFiles, rasterize, type MinimapFile } from './scene';
-import { densityAlpha } from './draw';
+import { densityAlpha, drawMinimap, SEMANTIC_MIN_HEIGHT, type MinimapColors } from './draw';
 import { hasBigFile, minimapShows } from './DiffMinimapSlot';
 import { buildWholeFileRowModel } from './wholeFileModel';
 import { ROW_ADD, ROW_DEL } from './rowModel';
@@ -156,4 +156,35 @@ describe('minimap marker positions', () => {
     expect(original.flags[12 - 1] & ROW_ADD).toBe(ROW_ADD);
     expect(original.oldLine[199]).toBe(200);
   });
+
+  test('a one-line moved block paints a readable semantic lane: 3 px wide, at least 3 px tall, clear of the add and delete lanes', () => {
+    const dpr = 2;
+    const width = 13 * dpr;
+    const height = 400 * dpr;
+    const layout = placeFiles([{ id: 'a', top: 0, height: 20_000, collapsed: false }], files(false), METRICS, 20_000);
+    const bands = markBands(layout, [{ itemId: 'a', kind: 'moved', side: 'new', lineStart: 10, lineEnd: 10 }], METRICS);
+    const painted = new Map<number, { color: string; alpha: number }>();
+    const ctx = {
+      fillStyle: '',
+      globalAlpha: 1,
+      setTransform() {},
+      clearRect() {},
+      fillRect(x: number, y: number, w: number, h: number) {
+        for (let py = y; py < y + h; py++) for (let px = x; px < x + w; px++) painted.set(py * width + px, { color: this.fillStyle, alpha: this.globalAlpha });
+      },
+    };
+    const colors: MinimapColors = { add: 'green', del: 'red', mark: 'blue', line: 'grey', other: 'slate' };
+    drawMinimap(ctx as unknown as CanvasRenderingContext2D, { width, height, dpr, coverage: rasterize(bands, layout.contentHeight, height, { minSegmentBins: dpr }), boundaries: [], colors });
+    const rows = new Set<number>();
+    for (const [index, pixel] of painted) {
+      const x = index % width;
+      expect(pixel.color).toBe('slate');
+      expect(pixel.alpha).toBe(1);
+      expect(x).toBeLessThan(3 * dpr);
+      rows.add(Math.floor(index / width));
+    }
+    expect(painted.size).toBe(rows.size * 3 * dpr);
+    expect(rows.size).toBeGreaterThanOrEqual(SEMANTIC_MIN_HEIGHT * dpr);
+  });
 });
+
