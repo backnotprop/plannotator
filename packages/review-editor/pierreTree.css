@@ -86,8 +86,6 @@
   box-sizing: border-box;
   border: 1px solid var(--border);
   color: var(--muted-foreground);
-  opacity: var(--trees-row-active, 1);
-  transition: opacity 120ms;
 }
 .review-changes-tree::part(row-part-stage):hover {
   color: var(--foreground);
