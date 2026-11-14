@@ -15,7 +15,7 @@ import { useDiffFileTreeExpansion } from '@plannotator/ui/hooks/useDiffFileTreeE
 import { FileTreeNodeItem, alignedTreeIndent, maxTreeIndent } from './FileTreeNode';
 import { EvoLogPicker } from './EvoLogPicker';
 import { WorktreePicker } from './WorktreePicker';
-import { getReviewSearchSideLabel, type ReviewSearchFileGroup, type ReviewSearchMatch } from '../utils/reviewSearch';
+import { type ReviewSearchFileGroup, type ReviewSearchMatch } from '../utils/reviewSearch';
 import type { DiffFile } from '../types';
 import { OverlayScrollArea } from '@plannotator/ui/components/OverlayScrollArea';
 import { PRPlatformIcon } from '@plannotator/ui/components/PRPlatformIcon';
@@ -576,7 +576,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
         jjEvologs.length >= 2 &&
         detectedEvoBase && (
           <div className="px-2 py-1.5 border-b border-border/30 flex items-center gap-2">
-            <span className="text-[10px] uppercase tracking-wide text-muted-foreground flex-shrink-0">
+            <span className="text-xs text-muted-foreground flex-shrink-0">
               from evolution
             </span>
             <div className="flex-1 min-w-0">
@@ -891,7 +891,6 @@ const SearchMatchRow: React.FC<{
   isActive: boolean;
   onSelect: () => void;
 }> = ({ match, searchQuery, isActive, onSelect }) => {
-  const sideLabel = getReviewSearchSideLabel(match.side);
   const sideColor =
     match.side === 'addition'
       ? 'text-success'
@@ -907,7 +906,7 @@ const SearchMatchRow: React.FC<{
       onClick={onSelect}
     >
       <span className="flex-shrink-0 text-muted-foreground/40 w-7 text-right tabular-nums">{match.lineNumber}</span>
-      <span className={`flex-shrink-0 w-6 text-[10px] font-semibold uppercase ${sideColor}`}>{sideLabel}</span>
+      <span className={`flex-shrink-0 w-3 text-center ${sideColor}`} title={match.side === 'addition' ? 'Added line' : match.side === 'deletion' ? 'Removed line' : 'Unchanged line'} data-search-side={match.side}>{match.side === 'addition' ? '+' : match.side === 'deletion' ? '−' : ''}</span>
       <span className="truncate leading-relaxed">{highlightQuery(match.snippet, searchQuery)}</span>
     </button>
   );

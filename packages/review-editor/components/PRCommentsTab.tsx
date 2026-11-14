@@ -20,7 +20,7 @@ const HIDE_BOTS_KEY = 'plannotator-pr-hide-bots';
 /** Small muted "bot" tag shown next to automation-account authors. */
 function BotTag() {
   return (
-    <span className="shrink-0 text-[9px] uppercase tracking-wide font-semibold px-1 py-px rounded bg-muted text-muted-foreground/70">
+    <span className="shrink-0 text-xs font-semibold px-1 py-px rounded bg-muted text-muted-foreground/70">
       bot
     </span>
   );
@@ -332,7 +332,7 @@ export const PRCommentsTab: React.FC<PRCommentsTabProps> = React.memo(({ context
           />
           <div className="absolute right-2.5 top-1/2 -translate-y-1/2 flex items-center gap-1.5">
             {searchQuery.trim() && (
-              <span className="text-[10px] text-muted-foreground tabular-nums">
+              <span className="text-xs text-muted-foreground tabular-nums">
                 {filteredTimeline.length} of {baseTimeline.length}
               </span>
             )}
@@ -365,7 +365,7 @@ export const PRCommentsTab: React.FC<PRCommentsTabProps> = React.memo(({ context
                 </svg>
                 Filters
                 {activeFilterCount > 0 && (
-                  <span className="ml-0.5 inline-flex items-center justify-center min-w-3.5 h-3.5 px-1 rounded-full bg-primary/20 text-primary text-[9px] font-semibold tabular-nums">
+                  <span className="ml-0.5 inline-flex items-center justify-center min-w-3.5 h-3.5 px-1 rounded-full bg-primary/20 text-primary text-xs font-semibold tabular-nums">
                     {activeFilterCount}
                   </span>
                 )}
@@ -377,7 +377,7 @@ export const PRCommentsTab: React.FC<PRCommentsTabProps> = React.memo(({ context
               <Popover.Positioner align="start" sideOffset={6} className="z-50">
                 <Popover.Popup className="w-56 bg-popover text-popover-foreground border border-border rounded-lg shadow-lg origin-[var(--transform-origin)] transition-opacity data-starting-style:opacity-0 data-ending-style:opacity-0">
                 <div className="p-2 space-y-1">
-                  <div className="text-[10px] uppercase tracking-wide text-muted-foreground/70 px-1">Show</div>
+                  <div className="text-xs text-muted-foreground/70 px-1">Show</div>
                   {hasBots && (
                     <FilterSwitch label="Bot comments" checked={!hideBots} onChange={toggleHideBots} />
                   )}
@@ -388,8 +388,8 @@ export const PRCommentsTab: React.FC<PRCommentsTabProps> = React.memo(({ context
                     <>
                       <div className="border-t border-border/50 my-1" />
                       <div className="flex items-center justify-between px-1">
-                        <span className="text-[10px] uppercase tracking-wide text-muted-foreground/70">Authors</span>
-                        <div className="flex items-center gap-1.5 text-[10px]">
+                        <span className="text-xs text-muted-foreground/70">Authors</span>
+                        <div className="flex items-center gap-1.5 text-xs">
                           <button
                             type="button"
                             onClick={() => setExcludedAuthors(new Set())}
@@ -457,7 +457,7 @@ export const PRCommentsTab: React.FC<PRCommentsTabProps> = React.memo(({ context
         {displayTimeline.length === 0 ? (
           <div className="text-center py-8">
             <p className="text-xs text-muted-foreground mb-2">No comments match your filters.</p>
-            <button onClick={clearFilters} className="text-[10px] text-primary hover:underline">
+            <button onClick={clearFilters} className="text-xs text-primary hover:underline">
               Clear filters
             </button>
           </div>
@@ -512,13 +512,13 @@ export const PRCommentsTab: React.FC<PRCommentsTabProps> = React.memo(({ context
                       <BotTag />
                     )}
                     {style && (
-                      <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded flex-shrink-0 ${style.bg} ${style.text}`}>
+                      <span className={`text-xs font-medium px-1.5 py-0.5 rounded flex-shrink-0 ${style.bg} ${style.text}`}>
                         {style.label}
                       </span>
                     )}
                   </div>
                   <div className="flex items-center gap-2 flex-shrink-0">
-                    <span className="text-[10px] text-muted-foreground tabular-nums">
+                    <span className="text-xs text-muted-foreground tabular-nums">
                       {formatRelativeTime(getEntryTime(entry))}
                     </span>
                     <svg className={`w-3 h-3 text-muted-foreground/40 transition-transform duration-150 ${isCollapsed ? '' : 'rotate-180'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -618,28 +618,28 @@ function ThreadCard({ thread, isSelected, isCollapsed, onSelect, onToggleCollaps
             <BotTag />
           )}
           {thread.isOutdated && (
-            <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-warning/15 text-warning flex-shrink-0">
+            <span className="text-xs font-medium px-1.5 py-0.5 rounded bg-warning/15 text-warning flex-shrink-0">
               Outdated
             </span>
           )}
           {thread.isResolved && (
-            <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-success/15 text-success flex-shrink-0">
+            <span className="text-xs font-medium px-1.5 py-0.5 rounded bg-success/15 text-success flex-shrink-0">
               Resolved
             </span>
           )}
           {thread.path && (
-            <span className="text-[10px] font-mono text-muted-foreground truncate flex-shrink min-w-0">
+            <span className="text-xs font-mono text-muted-foreground truncate flex-shrink min-w-0">
               {thread.path.split('/').pop()}{lineLabel ? `:${lineLabel}` : ''}
             </span>
           )}
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
           {replies.length > 0 && (
-            <span className="text-[10px] text-muted-foreground">
+            <span className="text-xs text-muted-foreground">
               {replies.length} repl{replies.length === 1 ? 'y' : 'ies'}
             </span>
           )}
-          <span className="text-[10px] text-muted-foreground">
+          <span className="text-xs text-muted-foreground">
             {formatRelativeTime(first.createdAt)}
           </span>
           <svg className={`w-3 h-3 text-muted-foreground/40 transition-transform duration-150 ${isCollapsed ? '' : 'rotate-180'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -682,7 +682,7 @@ function ThreadCard({ thread, isSelected, isCollapsed, onSelect, onToggleCollaps
           {isDimmed && !isExpanded && (
             <button
               onClick={(e) => { e.stopPropagation(); setIsExpanded(true); }}
-              className="mt-1 text-[10px] text-primary/70 hover:text-primary transition-colors"
+              className="mt-1 text-xs text-primary/70 hover:text-primary transition-colors"
             >
               Show full comment{replies.length > 0 ? ` + ${replies.length} repl${replies.length === 1 ? 'y' : 'ies'}` : ''}
             </button>
@@ -695,11 +695,11 @@ function ThreadCard({ thread, isSelected, isCollapsed, onSelect, onToggleCollaps
                 <div key={reply.id}>
                   <div className="flex items-center gap-2 mb-1">
                     <Avatar src={reply.avatarUrl} name={reply.author} size={16} />
-                    <span className="text-[11px] font-semibold text-foreground">{reply.author}</span>
+                    <span className="text-xs font-semibold text-foreground">{reply.author}</span>
                     {reply.isBot && (
                       <BotTag />
                     )}
-                    <span className="text-[10px] text-muted-foreground">{formatRelativeTime(reply.createdAt)}</span>
+                    <span className="text-xs text-muted-foreground">{formatRelativeTime(reply.createdAt)}</span>
                   </div>
                   <div className="pl-6 leading-relaxed review-comment-markdown text-foreground/85">
                     <MarkdownBody prMedia authenticatedImages={authenticatedImages} markdown={reply.body} textClassName="text-[13px]" />
@@ -738,7 +738,7 @@ function PRCommentLinkActions({ url, body, commentId, author, onAnnotate }: {
         <button
           type="button"
           onClick={(e) => { e.stopPropagation(); onAnnotate(commentId, author || 'unknown', body, e.currentTarget); }}
-          className="mr-auto flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground px-1.5 py-0.5 rounded hover:bg-muted/30 transition-colors"
+          className="mr-auto flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground px-1.5 py-0.5 rounded hover:bg-muted/30 transition-colors"
         >
           <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-4l-4 4v-4z" />
@@ -752,7 +752,7 @@ function PRCommentLinkActions({ url, body, commentId, author, onAnnotate }: {
           target="_blank"
           rel="noopener noreferrer"
           onClick={(e) => e.stopPropagation()}
-          className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground px-1.5 py-0.5 rounded hover:bg-muted/30 transition-colors"
+          className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground px-1.5 py-0.5 rounded hover:bg-muted/30 transition-colors"
         >
           <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />

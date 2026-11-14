@@ -433,7 +433,7 @@ export const ReviewPanelHeader: React.FC<{ model: ReviewPanelHeaderModel; width:
               <BaseBranchPicker
                 {...model.base}
                 trigger={{
-                  className: `${token.replace('max-w-full ', '')} font-mono text-[11.5px]`,
+                  className: `${token.replace('max-w-full ', '')} font-mono text-xs`,
                   ariaLabel: `${model.base.copy.triggerTitlePrefix}: ${model.base.selectedBase}`,
                   content: (
                     <>
@@ -532,7 +532,7 @@ export const ScopeSwitch: React.FC<{ model: ReviewPanelHeaderModel; width: numbe
         </button>
       </div>
       {listing && !listing.live && listing.truncated && (
-        <p className="pt-1 px-2 flex items-center gap-1.5 text-[11px] leading-4 text-muted-foreground" data-repo-listing-status="partial">
+        <p className="pt-1 px-2 flex items-center gap-1.5 text-xs leading-4 text-muted-foreground" data-repo-listing-status="partial">
           <span className="w-1.5 h-1.5 flex-shrink-0 rounded-full border border-warning" aria-hidden="true" />
           <span>{PARTIAL_LISTING_TEXT}</span>
         </p>

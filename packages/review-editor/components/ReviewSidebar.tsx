@@ -134,7 +134,7 @@ const SuggestionPreview: React.FC<{ code: string; originalCode?: string; languag
         </svg>
         Suggestion
         {diffStats && (
-          <span className="ml-auto text-[9px] font-mono">
+          <span className="ml-auto text-xs font-mono">
             <span style={{ color: 'var(--success)' }}>+{diffStats.added}</span>
             {' '}
             <span style={{ color: 'var(--destructive)' }}>-{diffStats.removed}</span>
@@ -212,7 +212,7 @@ const GeneralCommentComposer: React.FC<{
         aria-expanded={open}
         aria-haspopup="dialog"
         title="Add global comment"
-        className="inline-flex items-center rounded px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+        className="inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
       >
         + Global comment
       </button>
@@ -423,11 +423,11 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
         <CommentMeta
           leading={
             isGeneralScope && annotation.callFlowTargets?.length ? (
-              <span className="text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-primary/10 text-primary">
+              <span className="text-xs font-semibold px-1.5 py-0.5 rounded bg-primary/10 text-primary">
                 flow · {annotation.callFlowTargets.length} {annotation.callFlowTargets.length === 1 ? 'step' : 'steps'}
               </span>
             ) : isGeneralScope ? (
-              <span className="text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-primary/10 text-primary">
+              <span className="text-xs font-semibold px-1.5 py-0.5 rounded bg-primary/10 text-primary">
                 global
               </span>
             ) : isFileScope ? (
@@ -436,20 +436,20 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
                 {annotation.markdownPreview && (
                   <span
                     data-annotation-markdown-preview=""
-                    className="text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-primary/10 text-primary"
+                    className="text-xs font-semibold px-1.5 py-0.5 rounded bg-primary/10 text-primary"
                     title="Made in the rendered Markdown (Changes or Read)"
                   >
                     rendered
                   </span>
                 )}
                 {annotation.callFlowTargets?.length ? (
-                  <span className="text-[9px] text-primary/80">
+                  <span className="text-xs text-primary/80">
                     flow · {annotation.callFlowTargets.length} {annotation.callFlowTargets.length === 1 ? 'step' : 'steps'}
                   </span>
                 ) : null}
               </span>
             ) : (
-              <span className="text-[10px] font-mono text-muted-foreground">
+              <span className="text-xs font-mono text-muted-foreground">
                 {annotation.callFlowTargets?.length ? (
                   <span className="mr-1 text-primary/80">
                     flow · {annotation.callFlowTargets.length} {annotation.callFlowTargets.length === 1 ? 'step' : 'steps'} ·
@@ -464,7 +464,7 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
                 {annotation.outdated && (
                   <span
                     data-annotation-outdated="true"
-                    className="ml-1.5 font-sans text-[9px] px-1.5 py-0.5 rounded font-medium bg-muted text-muted-foreground"
+                    className="ml-1.5 font-sans text-xs px-1.5 py-0.5 rounded font-medium bg-muted text-muted-foreground"
                     title="The code changed after this comment was written; its line numbers refer to an earlier version"
                   >
                     Outdated
@@ -473,7 +473,7 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
                 {annotation.outsideDiff && (
                   <span
                     data-annotation-outside-diff="true"
-                    className="ml-1.5 font-sans text-[9px] px-1.5 py-0.5 rounded font-medium whitespace-nowrap bg-warning/15 text-warning"
+                    className="ml-1.5 font-sans text-xs px-1.5 py-0.5 rounded font-medium whitespace-nowrap bg-warning/15 text-warning"
                     title="To the agent: sent with the file, lines and code. On a PR: goes in the review's main comment with the code quoted and a link, since the platform cannot post a comment outside the diff."
                   >
                     not in the diff
@@ -490,7 +490,7 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
           createdAt={annotation.createdAt}
         />
         {annotation.markdownPreview && (
-          <div className="mt-1 mb-1 border-l-2 border-border/40 pl-1.5 text-[11px] italic text-muted-foreground/80 line-clamp-2">
+          <div className="mt-1 mb-1 border-l-2 border-border/40 pl-1.5 text-xs italic text-muted-foreground/80 line-clamp-2">
             {annotation.markdownPreview.originalText}
           </div>
         )}
@@ -573,7 +573,7 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
       >
         <CommentMeta
           leading={
-            <span className="text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-primary/10 text-primary">
+            <span className="text-xs font-semibold px-1.5 py-0.5 rounded bg-primary/10 text-primary">
               {label}
             </span>
           }
@@ -582,7 +582,7 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
           createdAt={createdAt}
         />
         {quote && (
-          <div className={`mt-1 mb-1 border-l-2 border-border/40 pl-1.5 text-[11px] italic text-muted-foreground/80 ${quoteClamp}`}>
+          <div className={`mt-1 mb-1 border-l-2 border-border/40 pl-1.5 text-xs italic text-muted-foreground/80 ${quoteClamp}`}>
             {quote}
           </div>
         )}
@@ -732,7 +732,7 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
                         `${sample?.prRepo ? `${sample.prRepo}` : ''}#${sample?.prNumber ?? '?'} ${sample?.prTitle ?? ''}`;
                       return (
                         <div key={prUrl}>
-                          <div className="sticky top-0 z-20 bg-background/95 backdrop-blur-sm px-2 py-1.5 text-[10px] font-medium text-accent/80 border-b border-border/30 mb-1">
+                          <div className="sticky top-0 z-20 bg-background/95 backdrop-blur-sm px-2 py-1.5 text-xs font-medium text-accent/80 border-b border-border/30 mb-1">
                             {prLabel}
                           </div>
                           <div className="space-y-4">
@@ -771,7 +771,7 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
                   {annotations.length > 0 && (
                     <div className="flex items-center gap-2 pt-2 pb-1">
                       <div className="flex-1 border-t border-border/30" />
-                      <span className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground/60">Editor</span>
+                      <span className="text-xs font-semibold text-muted-foreground/60">Editor</span>
                       <div className="flex-1 border-t border-border/30" />
                     </div>
                   )}
@@ -792,7 +792,7 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
                   {(annotations.length > 0 || (editorAnnotations?.length ?? 0) > 0) && (
                     <div className="flex items-center gap-2 pt-2 pb-1">
                       <div className="flex-1 border-t border-border/30" />
-                      <span className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground/60">PR description</span>
+                      <span className="text-xs font-semibold text-muted-foreground/60">PR description</span>
                       <div className="flex-1 border-t border-border/30" />
                     </div>
                   )}
@@ -808,7 +808,7 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
                   {(annotations.length > 0 || (editorAnnotations?.length ?? 0) > 0 || (descriptionAnnotations?.length ?? 0) > 0) && (
                     <div className="flex items-center gap-2 pt-2 pb-1">
                       <div className="flex-1 border-t border-border/30" />
-                      <span className="text-[9px] font-semibold uppercase tracking-wider text-muted-foreground/60">PR comments</span>
+                      <span className="text-xs font-semibold text-muted-foreground/60">PR comments</span>
                       <div className="flex-1 border-t border-border/30" />
                     </div>
                   )}

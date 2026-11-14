@@ -238,7 +238,7 @@ export const GoToFile: React.FC<GoToFileProps> = ({
             return (
               <React.Fragment key={row.path}>
                 {heading && (
-                  <div className="px-3 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70" role="presentation">
+                  <div className="px-3 pt-2 pb-1 text-xs font-semibold text-muted-foreground/70" role="presentation">
                     {heading}
                   </div>
                 )}
@@ -266,20 +266,20 @@ export const GoToFile: React.FC<GoToFileProps> = ({
                   <span className="truncate text-muted-foreground text-xs min-w-0"><Marked text={dir} offset={0} positions={positions} /></span>
                   <span className="flex-1" />
                   {file && (file.additions > 0 || file.deletions > 0) && (
-                    <span className="font-mono text-[11px] flex-shrink-0">
+                    <span className="font-mono text-xs flex-shrink-0">
                       {file.additions > 0 && <span className="text-success">+{file.additions}</span>}
                       {file.deletions > 0 && <span className="text-destructive ml-1">-{file.deletions}</span>}
                     </span>
                   )}
                   {index === active && (
-                    <kbd className="text-[10px] font-mono px-1 rounded border border-border/60 text-muted-foreground flex-shrink-0">↵</kbd>
+                    <kbd className="text-xs font-mono px-1 rounded border border-border/60 text-muted-foreground flex-shrink-0">↵</kbd>
                   )}
                 </div>
               </React.Fragment>
             );
           })}
         </div>
-        <div className="flex items-center gap-3 px-3 h-8 border-t border-border/60 text-[11px] text-muted-foreground">
+        <div className="flex items-center gap-3 px-3 h-8 border-t border-border/60 text-xs text-muted-foreground">
           <span><kbd className="font-mono">↑</kbd> <kbd className="font-mono">↓</kbd> move</span>
           <span><kbd className="font-mono">↵</kbd> open</span>
           <span><kbd className="font-mono">{altKey}</kbd> <kbd className="font-mono">↵</kbd> open to the side</span>
