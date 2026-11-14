@@ -32,6 +32,7 @@ describe.if(hasDom)('FileHeader as one toolbar', () => {
     const name = el.querySelector<HTMLElement>('[data-ellipsis-name]')!;
     expect(name.className).toContain('min-w-0');
     expect(name.className).toContain('overflow-hidden');
+    expect(name.className).toContain('shrink');
     expect(name.className).not.toContain('flex-none');
     expect(name.closest('[title]')!.getAttribute('title')).toBe(`old.ts → ${path}`);
   });

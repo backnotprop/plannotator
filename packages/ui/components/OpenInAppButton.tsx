@@ -42,6 +42,8 @@ interface OpenInAppButtonProps {
   disabled?: boolean;
   extraItems?: readonly { label: string; onSelect: () => void; icon?: React.ReactNode }[];
   quiet?: boolean;
+  menuOnly?: boolean;
+  menuHeader?: React.ReactNode;
 }
 
 // The host app catalog is static for the session, but the all-files view
@@ -58,6 +60,8 @@ export const OpenInAppButton: React.FC<OpenInAppButtonProps> = ({
   disabled = false,
   extraItems,
   quiet = false,
+  menuOnly = false,
+  menuHeader,
 }) => {
   const detected = useOpenInApps(OPEN_IN_APPS_URL);
   const apps = detected?.apps ?? null;
@@ -165,7 +169,7 @@ export const OpenInAppButton: React.FC<OpenInAppButtonProps> = ({
     <div className={`flex items-center gap-1 ${quiet ? 'opacity-0 group-hover/file-header:opacity-100 [@media(hover:none)]:opacity-100 focus-within:opacity-100 has-[[data-popup-open]]:opacity-100 transition-opacity' : ''}`} data-open-in-quiet={quiet ? '' : undefined}>
       <div className="flex items-center">
         {/* Primary: open in the current app (only when launchable). */}
-        {openable && currentApp && (
+        {openable && currentApp && !menuOnly && (
           <button
             type="button"
             onClick={() => open(resolvedId)}
@@ -188,14 +192,16 @@ export const OpenInAppButton: React.FC<OpenInAppButtonProps> = ({
                 type="button"
                 disabled={isDisabled}
                 className={`text-xs flex items-center py-1 transition-colors text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed ${
-                  openable ? 'px-1 rounded-r border-l border-border/50' : 'px-1.5 rounded'
+                  menuOnly ? 'px-1.5 rounded justify-center' : openable ? 'px-1 rounded-r border-l border-border/50' : 'px-1.5 rounded'
                 }`}
-                title={openable ? 'Open in…' : 'File actions'}
-                aria-label={openable ? 'Choose app to open in' : 'File actions'}
+                title={openable && !menuOnly ? 'Open in…' : 'File actions'}
+                aria-label={openable && !menuOnly ? 'Choose app to open in' : 'File actions'}
+                data-pn-touch-target={menuOnly ? '' : undefined}
+                data-pn-touch-target-icon={menuOnly ? '' : undefined}
               />
             }
           >
-            {openable ? (
+            {openable && !menuOnly ? (
               <ChevronDown className="w-3 h-3" />
             ) : (
               <MoreHorizontal className="w-3.5 h-3.5" />
@@ -209,6 +215,8 @@ export const OpenInAppButton: React.FC<OpenInAppButtonProps> = ({
             // the menu closes — that left-edge bar reads as a stray artifact.
             finalFocus={false}
           >
+            {menuHeader}
+            {menuHeader != null && <DropdownMenuSeparator />}
             {extraItems?.map((item) => (
               <DropdownMenuItem key={item.label} onClick={item.onSelect} className="text-[13px]" data-open-in-extra={item.label}>
                 {item.icon}

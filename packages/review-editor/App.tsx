@@ -167,7 +167,8 @@ import { ReviewSidebar } from './components/ReviewSidebar';
 import type { ReviewSidebarExtraTab, ReviewSidebarTab } from './components/ReviewSidebar';
 import { useSidebar } from '@plannotator/ui/hooks/useSidebar';
 import { useViewportEnvironment } from '@plannotator/ui/hooks/useViewportEnvironment';
-import { useCompactTouchLayout } from '@plannotator/ui/hooks/useIsMobile';
+import { opensNavigatorOnLoad, phoneDiffStyle } from './utils/phoneLayout';
+import { CompactLayoutQueryProvider, PHONE_REVIEW_LAYOUT_MEDIA_QUERY, useCompactTouchLayout } from '@plannotator/ui/hooks/useIsMobile';
 import { FileTree } from './components/FileTree';
 import { StackedPRLabel } from './components/StackedPRLabel';
 import { PRSelector } from './components/PRSelector';
@@ -372,37 +373,27 @@ const reviewItemId = (item: { id: string }): string => item.id;
 
 interface CompactReviewOverlayProps {
   title: string;
-  onClose: () => void;
   context?: React.ReactNode;
   children: React.ReactNode;
 }
 
 /** Full-stage transient surface used for review navigation on touch layouts. */
-function CompactReviewOverlay({ title, onClose, context, children }: CompactReviewOverlayProps) {
+function CompactReviewOverlay({ title, context, children }: CompactReviewOverlayProps) {
+  const sheetRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    sheetRef.current?.focus({ preventScroll: true });
+  }, []);
   return (
     <section
+      ref={sheetRef}
+      tabIndex={-1}
       data-pn-review-transient-overlay
+      data-review-navigation-sheet=""
       role="dialog"
       aria-label={title}
-      className="absolute inset-0 z-40 flex min-w-0 flex-col bg-background"
+      className="absolute inset-0 z-40 flex min-w-0 flex-col bg-background outline-none"
     >
-      <div className="flex min-h-[52px] shrink-0 items-center gap-2 border-b border-border/50 px-3">
-        <h2 className="shrink-0 text-sm font-semibold text-foreground">{title}</h2>
-        {context && <div className="min-w-0 flex-1 overflow-hidden">{context}</div>}
-        <button
-          data-pn-touch-target
-          data-pn-touch-target-icon
-          autoFocus
-          type="button"
-          onClick={onClose}
-          className="ml-auto inline-flex shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
-          aria-label={`Close ${title.toLowerCase()}`}
-        >
-          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.25}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
-      </div>
+      {context && <div className="flex min-h-11 shrink-0 items-center border-b border-border/50 px-3 overflow-hidden">{context}</div>}
       <div className="flex min-h-0 flex-1 [&>aside]:!w-full [&>aside]:!border-r-0">
         {children}
       </div>
@@ -420,14 +411,13 @@ interface ReviewNavigatorContainerProps {
 
 function ReviewNavigatorContainer({
   isCompactTouchLayout,
-  onClose,
   context,
   resizeHandle,
   children,
 }: ReviewNavigatorContainerProps) {
   if (isCompactTouchLayout) {
     return (
-      <CompactReviewOverlay title="Review navigation" onClose={onClose} context={context}>
+      <CompactReviewOverlay title="Review navigation" context={context}>
         {children}
       </CompactReviewOverlay>
     );
@@ -460,7 +450,7 @@ const ReviewApp: React.FC = () => {
   // A plain-text paste into our text fields is inserted by the page: Chrome 155-156 on macOS drops
   // dictated (synthetic ⌘V) text otherwise. Remove once Chrome 157 is stable (pasteInsert.ts).
   useEffect(() => installPlainTextPaste(), []);
-  const isCompactTouchLayout = useCompactTouchLayout();
+  const isCompactTouchLayout = useCompactTouchLayout(PHONE_REVIEW_LAYOUT_MEDIA_QUERY);
   const { resolvedMode } = useTheme();
   const [diffData, setDiffData] = useState<DiffData | null>(null);
   const [files, setFiles] = useState<DiffFile[]>([]);
@@ -540,13 +530,9 @@ const ReviewApp: React.FC = () => {
   const [showNoAnnotationsDialog, setShowNoAnnotationsDialog] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const diffStyle = useConfigValue('diffStyle');
-  const [compactDiffStyle, setCompactDiffStyle] = useState<'split' | 'unified'>('unified');
-  const effectiveDiffStyle = isCompactTouchLayout ? compactDiffStyle : diffStyle;
+  const effectiveDiffStyle = phoneDiffStyle(isCompactTouchLayout, diffStyle);
   const handleDiffStyleChange = useCallback((style: 'split' | 'unified') => {
-    if (isCompactTouchLayout) {
-      setCompactDiffStyle(style);
-      return;
-    }
+    if (isCompactTouchLayout) return;
     configStore.set('diffStyle', style);
   }, [isCompactTouchLayout]);
   const diffOverflow = useConfigValue('diffOverflow');
@@ -908,6 +894,12 @@ const ReviewApp: React.FC = () => {
     snapshotId, contextKey: JSON.stringify([prMetadata?.url, committedBase]),
     enabled: !!origin, setViewedFiles, setSuppressedFiles: setAutoViewSuppressed,
   });
+  const navigatorOpenedOnLoad = useRef(false);
+  useEffect(() => {
+    if (navigatorOpenedOnLoad.current || isLoading || files.length === 0 || reviewProgressStatus === 'loading') return;
+    navigatorOpenedOnLoad.current = true;
+    if (opensNavigatorOnLoad(isCompactTouchLayout, viewedFiles.size)) setIsCompactNavigatorOpen(true);
+  }, [isLoading, files.length, reviewProgressStatus, isCompactTouchLayout, viewedFiles.size]);
   const reviewHistoryContext = snapshotId ?? prMetadata?.url ?? diffData?.gitRef ?? 'loading';
   const applyReviewHistory = useCallback((action: ReviewHistoryAction, direction: HistoryDirection) => {
     switch (action.kind) {
@@ -5736,6 +5728,7 @@ const ReviewApp: React.FC = () => {
   }
 
   return (
+    <CompactLayoutQueryProvider value={PHONE_REVIEW_LAYOUT_MEDIA_QUERY}>
     <ThemeProvider defaultTheme="dark" manageFavicon>
       <TooltipProvider>
       <ReviewStateProvider value={reviewStateValue}>
@@ -5766,7 +5759,7 @@ const ReviewApp: React.FC = () => {
                   onClick={toggleNavigator}
                   className={`h-7 w-7 flex shrink-0 items-center justify-center rounded-md transition-all focus-visible:outline-none ${
                     isNavigatorOpen
-                      ? 'text-primary'
+                      ? `text-primary${isCompactTouchLayout ? ' bg-muted' : ''}`
                       : 'text-muted-foreground hover:text-foreground hover:bg-muted'
                   }`}
                   title={isNavigatorOpen ? 'Close review navigation' : 'Open review navigation'}
@@ -5865,6 +5858,15 @@ const ReviewApp: React.FC = () => {
             )}
             </div>
             {isCompactTouchLayout && !guideVisible && <CompactPrimaryAction action={compactPrimaryAction(compactReviewActions)} />}
+            {isCompactTouchLayout && !guideVisible && (
+              <ReviewPanelToggle
+                touch
+                isOpen={reviewSidebar.isOpen}
+                commentCount={totalAnnotationCount}
+                attention={(aiMessages.length > 0 && !(reviewSidebar.isOpen && reviewSidebar.activeTab === 'ai')) || agentJobs.jobs.some(j => j.status === 'running' || j.status === 'starting')}
+                onToggle={() => reviewSidebar.isOpen ? reviewSidebar.close() : reviewSidebar.open()}
+              />
+            )}
             </div>
           </div>
 
@@ -6714,6 +6716,7 @@ const ReviewApp: React.FC = () => {
     </ReviewStateProvider>
     </TooltipProvider>
     </ThemeProvider>
+    </CompactLayoutQueryProvider>
   );
 };
 

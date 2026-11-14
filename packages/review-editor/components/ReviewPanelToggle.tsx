@@ -7,7 +7,8 @@ export const ReviewPanelToggle: React.FC<{
   commentCount: number;
   attention: boolean;
   onToggle: () => void;
-}> = ({ isOpen, commentCount, attention, onToggle }) => {
+  touch?: boolean;
+}> = ({ isOpen, commentCount, attention, onToggle, touch = false }) => {
   const binding = resolveShortcutBindings(reviewEditorShortcuts.shortcuts.toggleSidebar)[0];
   const hint = binding ? ` (${formatShortcutBindingText(binding, getShortcutPlatform())})` : '';
   const label = isOpen ? 'Close comments, AI and agents' : 'Open comments, AI and agents';
@@ -19,7 +20,9 @@ export const ReviewPanelToggle: React.FC<{
       aria-label={label}
       title={`${label}${hint}`}
       data-review-panel-toggle=""
-      className={`relative h-7 w-7 flex items-center justify-center rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 ${
+      data-pn-touch-target={touch || undefined}
+      data-pn-touch-target-icon={touch || undefined}
+      className={`relative h-7 w-7 flex-none flex items-center justify-center rounded-md transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50 ${
         isOpen ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground hover:bg-muted'
       }`}
     >

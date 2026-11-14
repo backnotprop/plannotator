@@ -7,6 +7,7 @@ import { CallFlowFileBadge } from './CallFlowFileBadge';
 import { OpenInAppButton } from '@plannotator/ui/components/OpenInAppButton';
 import { useReviewStateOptional } from '../dock/ReviewStateContext';
 import { useRovingToolbar } from '../hooks/useRovingToolbar';
+import { CompactFileActions } from './CompactFileActions';
 import type { DiffFileStatus } from '../types';
 import { FileKindIcon } from '@plannotator/guide-viewer/FileKindIcon';
 import { fileStatusLetter } from '@plannotator/ui/utils/fileStatusLetter';
@@ -178,7 +179,7 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
     <div
       ref={headerRef}
       data-file-header=""
-      className={`group/file-header @container/file-header flex-shrink-0 border-b border-border flex items-center justify-between gap-2 transition-colors duration-150 ${paneTabs ? '' : 'hover:bg-muted/30'} ${isCompactTouchLayout ? (paneTabs ? 'px-3' : 'pr-3') : paneTabs ? 'pl-3 pr-2' : 'pl-2 pr-2'}`}
+      className={`group/file-header @container/file-header flex-shrink-0 border-b border-border flex items-center justify-between gap-2 transition-colors duration-150 ${paneTabs ? '' : 'hover:bg-muted/30'} ${isCompactTouchLayout ? 'pl-3 pr-1' : paneTabs ? 'pl-3 pr-2' : 'pl-2 pr-2'}`}
       style={{ height: isCompactTouchLayout ? `${COMPACT_FILE_HEADER_HEIGHT}px` : 'var(--panel-header-h)' }}
       data-file-header-path={filePath}
       role={viewedKeyHint ? 'toolbar' : undefined}
@@ -377,7 +378,20 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
           }
         />}
       </div>}
-      {isCompactTouchLayout && renderMarkdownView?.({ iconOnly: false, touch: true })}
+      {isCompactTouchLayout && (readOnly ? renderMarkdownView?.({ iconOnly: false, touch: true }) : (
+        <CompactFileActions
+          filePath={filePath}
+          patch={patch}
+          canOpen={state?.canUseLiveWorkspaceActions !== false && !(state?.prMetadata && !state?.agentCwd) && status !== 'deleted'}
+          base={state?.agentCwd ?? null}
+          markdownView={renderMarkdownView?.({ iconOnly: true, touch: true })}
+          viewSwitch={accessory}
+          viewed={showViewedControl && onToggleViewed ? { isViewed, onToggle: onToggleViewed } : null}
+          onComment={onFileComment ? () => headerRef.current && onFileComment(headerRef.current) : undefined}
+          stage={showStageControl && canStage && onStage ? { isStaged, isStaging, onStage } : null}
+          onEdit={onEditFile && !isEditing && !editDisabledReason ? onEditFile : undefined}
+        />
+      ))}
     </div>
   );
 };
