@@ -737,3 +737,8 @@ packages/inbox/attachmentTileKeys.test.tsx
 packages/inbox/threadTags.test.tsx
 packages/review-editor/components/PRDescriptionVideo.test.tsx
 packages/ui/components/CommentPopover.hostDraft.test.tsx
+packages/review-editor/components/FileTree.redraws.test.tsx
+packages/ui/components/Viewer.blockRedraws.test.tsx
+packages/editor/hooks/useCheckboxOverrides.viewer.test.tsx
+packages/ui/components/TaterSpriteSlots.test.tsx
+packages/inbox/sidebarRedraws.test.tsx
