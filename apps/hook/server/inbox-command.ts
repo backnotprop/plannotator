@@ -28,7 +28,6 @@
  *   plannotator inbox link …        link this Inbox with another machine's,
  *   plannotator inbox unlink …      or remove the link (inbox-link-command.ts)
  *   plannotator inbox projects …    list, combine and undo (inbox-projects-command.ts)
- *   plannotator inbox export …      the Inbox as JSONL files (inbox-export-command.ts)
  *   plannotator inbox icon set …    hand an animated icon back ("Animate it"; inbox-icon-command.ts)
  *
  * The status, stop and restart commands follow rmohta's port
@@ -41,7 +40,6 @@
  */
 
 import { runInboxRowsCommand } from "./inbox-rows-command";
-import { runInboxExportCommand } from "./inbox-export-command";
 import { runInboxIconCommand } from "./inbox-icon-command";
 import { ANNOTATION_HIGHLIGHT_CSS, BRIDGE_SCRIPT, LIVE_BRIDGE_BOOTSTRAP } from "@plannotator/ui/components/html-viewer/bridge-script";
 import { spawn } from "node:child_process";
@@ -55,6 +53,7 @@ import { inboxDir } from "@plannotator/shared/inbox/schema";
 import {
   acquireInboxStartLock,
   inboxStartLockStale,
+  inboxReturnRunning,
   joinInboxStartLock,
   INBOX_START_LOCK,
   INBOX_START_LOCK_STALE_MS,
@@ -67,9 +66,7 @@ import {
   type InboxStopResult,
 } from "@plannotator/shared/inbox/registry";
 import { handleInboxServerReady, startInboxServer } from "@plannotator/server/inbox";
-import { INBOX_IMPORT_SLOW_MS, INBOX_UPGRADE_WAIT_MAX_MS, INBOX_UPGRADING_LINE, inboxUpgradeRunning } from "@plannotator/shared/inbox/store-log/sqlite/move-words";
-import { resolveInboxSqlite } from "@plannotator/shared/inbox/store-log/sqlite/open-store";
-import { loadConfig } from "@plannotator/shared/config";
+import { INBOX_DB_FILE, InboxReturnError, inboxReturnFailedWords } from "@plannotator/shared/inbox/store-log/sqlite-return/return";
 import { exposureWarning, type InboxTailscaleState } from "@plannotator/server/inbox-tailscale";
 import { openBrowser, openBrowserDetached } from "@plannotator/server/browser";
 import { isRemoteSession } from "@plannotator/server/remote";
@@ -100,6 +97,7 @@ const LOCK_HELD_ENV = "PLANNOTATOR_INBOX_LOCK_HELD";
 const DETACHED_ENV = "PLANNOTATOR_INBOX_DETACHED";
 /** How long a starter waits for a detached Inbox to answer its health check. */
 const START_TIMEOUT_MS = 20_000;
+const RETURN_WAIT_MAX_MS = 5 * 60_000;
 
 /**
  * The argv that runs this same CLI: the compiled binary alone, or bun plus the
@@ -150,45 +148,19 @@ export function detachedInboxEnv(env: Readonly<Record<string, string | undefined
   return out;
 }
 
-/**
- * Wait for the Inbox to answer as running; null on timeout. With the SQLite switch on (off by default), an Inbox
- * still moving its records into SQLite is waited for past the usual 20 s, for as long as the move runs (up to
- * `INBOX_UPGRADE_WAIT_MAX_MS`) and the usual wait again after it (the start goes on once the move is done), and
- * past 2 s the move is said once on stderr: the window cannot, the server is not listening yet.
- */
 function waitUntilRunning(dataDir: string): Promise<InboxRegistryEntry | null> {
   const started = Date.now();
-  const timeout = startTimeoutMs();
-  const sqlite = resolveInboxSqlite(loadConfig(), process.env);
-  let movedAt = 0;
-  const upgrading = () => {
-    if (!sqlite || Date.now() - started >= INBOX_UPGRADE_WAIT_MAX_MS) return false;
-    if (!inboxUpgradeRunning(dataDir)) return false;
-    movedAt = Date.now();
-    return true;
-  };
-  const keepWaiting = () => upgrading() || (movedAt > 0 && Date.now() - movedAt < timeout);
-  let told = false;
   return waitForInbox(
     async () => {
       const next = await inboxStatus(dataDir, 1000);
-      if (next.state === "running") return next.entry;
-      if (!told && Date.now() - started > INBOX_IMPORT_SLOW_MS && upgrading()) {
-        told = true;
-        process.stderr.write(`${INBOX_UPGRADING_LINE}\n`);
-      }
-      return null;
+      return next.state === "running" ? next.entry : null;
     },
-    timeout,
+    startTimeoutMs(),
     100,
-    keepWaiting,
+    () => Date.now() - started < RETURN_WAIT_MAX_MS && inboxReturnRunning(dataDir),
   );
 }
 
-/**
- * How long a starter waits for a detached Inbox: `START_TIMEOUT_MS`, or under the test sandbox only,
- * `PLANNOTATOR_INBOX_START_TIMEOUT_MS` (so a test can outlast it without waiting 20 s).
- */
 export function startTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
   const raw = env.PLANNOTATOR_TEST_SANDBOX ? env.PLANNOTATOR_INBOX_START_TIMEOUT_MS?.trim() : undefined;
   const ms = raw && /^\d+$/.test(raw) ? Number(raw) : NaN;
@@ -235,7 +207,8 @@ async function startDetachedInbox(dataDir: string, release: (() => void) | null,
   try {
     const running = await waitUntilRunning(dataDir);
     if (!running) {
-      throw new Error(`The Plannotator Inbox did not start; see ${join(inboxDir(dataDir), INBOX_LOG_FILE)}.`);
+      const words = existsSync(join(inboxDir(dataDir), INBOX_DB_FILE)) ? `${inboxReturnFailedWords(dataDir)} Details: ` : "The Plannotator Inbox did not start; see ";
+      throw new Error(`${words}${join(inboxDir(dataDir), INBOX_LOG_FILE)}.`);
     }
     return running;
   } finally {
@@ -434,6 +407,11 @@ async function serveInbox(dataDir: string, open: boolean, htmlContent: string | 
           .finally(() => process.exit(0));
       },
     });
+  } catch (error) {
+    if (!(error instanceof InboxReturnError)) throw error;
+    release?.();
+    process.stderr.write(`${error.message}\n`);
+    process.exit(1);
   } finally {
     release?.();
   }
@@ -785,10 +763,6 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
 
   if (args[0] === "projects") {
     process.exit(await runInboxProjectsCommand(args.slice(1), { json: assets.json === true, self: shellLine(selfCommand()), ensureRunning: () => ensureInboxRunning(dataDir) }));
-  }
-
-  if (args[0] === "export") {
-    process.exit(await runInboxExportCommand(args.slice(1), { dataDir, cwd: process.env.PLANNOTATOR_CWD || process.cwd(), json: assets.json === true }));
   }
 
   if (args[0] === "rows") {
