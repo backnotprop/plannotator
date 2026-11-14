@@ -28,7 +28,6 @@
  *   plannotator inbox link …        link this Inbox with another machine's,
  *   plannotator inbox unlink …      or remove the link (inbox-link-command.ts)
  *   plannotator inbox projects …    list, combine and undo (inbox-projects-command.ts)
- *   plannotator inbox export …      the Inbox as JSONL files (inbox-export-command.ts)
  *   plannotator inbox icon set …    hand an animated icon back ("Animate it"; inbox-icon-command.ts)
  *
  * The status, stop and restart commands follow rmohta's port
@@ -41,7 +40,6 @@
  */
 
 import { runInboxRowsCommand } from "./inbox-rows-command";
-import { runInboxExportCommand } from "./inbox-export-command";
 import { runInboxIconCommand } from "./inbox-icon-command";
 import { ANNOTATION_HIGHLIGHT_CSS, BRIDGE_SCRIPT, LIVE_BRIDGE_BOOTSTRAP } from "@plannotator/ui/components/html-viewer/bridge-script";
 import { spawn } from "node:child_process";
@@ -55,21 +53,23 @@ import { inboxDir } from "@plannotator/shared/inbox/schema";
 import {
   acquireInboxStartLock,
   inboxStartLockStale,
+  inboxReturnRunning,
   joinInboxStartLock,
   INBOX_START_LOCK,
   INBOX_START_LOCK_STALE_MS,
   inboxRegistryPath,
+  inboxOutOfReach,
   inboxStatus,
+  InboxUnreachableError,
   readInboxRegistry,
   stopInbox,
   waitForInbox,
   type InboxRegistryEntry,
+  type InboxStatus,
   type InboxStopResult,
 } from "@plannotator/shared/inbox/registry";
 import { handleInboxServerReady, startInboxServer } from "@plannotator/server/inbox";
-import { INBOX_IMPORT_SLOW_MS, INBOX_UPGRADE_WAIT_MAX_MS, INBOX_UPGRADING_LINE, inboxUpgradeRunning } from "@plannotator/shared/inbox/store-log/sqlite/move-words";
-import { resolveInboxSqlite } from "@plannotator/shared/inbox/store-log/sqlite/open-store";
-import { loadConfig } from "@plannotator/shared/config";
+import { INBOX_DB_FILE, InboxReturnError, inboxReturnFailedWords } from "@plannotator/shared/inbox/store-log/sqlite-return/return";
 import { exposureWarning, type InboxTailscaleState } from "@plannotator/server/inbox-tailscale";
 import { openBrowser, openBrowserDetached } from "@plannotator/server/browser";
 import { isRemoteSession } from "@plannotator/server/remote";
@@ -80,12 +80,13 @@ import { INBOX_AGENT_LABELS, INBOX_AUTO_SEND_AFTER_MS, INBOX_NOTE_AGENT_IDS, typ
 import { writeUrlQr } from "@plannotator/server/qr";
 import { shellLine } from "@plannotator/inbox/harnesses";
 import { getCliVersion, hasHelpFlag } from "./cli";
-import { inboxHostSessionFromEnv, inboxQwenShimContext, inboxSessionProjectFromEnv, inboxT3EntryIdle, runInboxMcpShim } from "./inbox-mcp-shim";
+import { inboxClaudeMcpSessionFromEnv, inboxHostSessionFromEnv, inboxQwenShimContext, inboxSessionProjectFromEnv, inboxT3EntryIdle, runInboxMcpShim } from "./inbox-mcp-shim";
 import { runPermissionHook } from "./inbox-permission-hook";
 import { runInboxLinkCommand } from "./inbox-link-command";
 import { INBOX_CONNECTION_USAGE, runInboxConnectionCommand, stdinLines } from "./inbox-connection-command";
 import { runInboxProjectsCommand } from "./inbox-projects-command";
 import { writeWholeToStdout } from "./write-whole-stdout";
+import { inboxStartTrace } from "./inbox-start-trace";
 
 export const INBOX_LOG_FILE = "inbox.log";
 /** Set by a starter that holds the start lock for the detached Inbox it spawns. */
@@ -100,6 +101,7 @@ const LOCK_HELD_ENV = "PLANNOTATOR_INBOX_LOCK_HELD";
 const DETACHED_ENV = "PLANNOTATOR_INBOX_DETACHED";
 /** How long a starter waits for a detached Inbox to answer its health check. */
 const START_TIMEOUT_MS = 20_000;
+const RETURN_WAIT_MAX_MS = 5 * 60_000;
 
 /**
  * The argv that runs this same CLI: the compiled binary alone, or bun plus the
@@ -112,8 +114,8 @@ export function selfCommand(): string[] {
   return [process.execPath];
 }
 
-/** Spawn `plannotator inbox --no-open` in its own session, output to inbox/inbox.log. */
-function spawnDetachedInbox(dataDir: string, tailscale: boolean): void {
+/** Spawn `plannotator inbox --no-open` in its own session, output to inbox/inbox.log. Answers its pid. */
+function spawnDetachedInbox(dataDir: string, tailscale: boolean): number | undefined {
   const dir = inboxDir(dataDir);
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   const log = openSync(join(dir, INBOX_LOG_FILE), "a", 0o600);
@@ -130,6 +132,7 @@ function spawnDetachedInbox(dataDir: string, tailscale: boolean): void {
   });
   child.unref();
   closeSync(log);
+  return child.pid;
 }
 
 /**
@@ -150,45 +153,26 @@ export function detachedInboxEnv(env: Readonly<Record<string, string | undefined
   return out;
 }
 
-/**
- * Wait for the Inbox to answer as running; null on timeout. With the SQLite switch on (off by default), an Inbox
- * still moving its records into SQLite is waited for past the usual 20 s, for as long as the move runs (up to
- * `INBOX_UPGRADE_WAIT_MAX_MS`) and the usual wait again after it (the start goes on once the move is done), and
- * past 2 s the move is said once on stderr: the window cannot, the server is not listening yet.
- */
 function waitUntilRunning(dataDir: string): Promise<InboxRegistryEntry | null> {
   const started = Date.now();
   const timeout = startTimeoutMs();
-  const sqlite = resolveInboxSqlite(loadConfig(), process.env);
-  let movedAt = 0;
-  const upgrading = () => {
-    if (!sqlite || Date.now() - started >= INBOX_UPGRADE_WAIT_MAX_MS) return false;
-    if (!inboxUpgradeRunning(dataDir)) return false;
-    movedAt = Date.now();
-    return true;
+  let returnSeenAt = 0;
+  const returning = () => {
+    if (Date.now() - started >= RETURN_WAIT_MAX_MS) return false;
+    if (inboxReturnRunning(dataDir)) returnSeenAt = Date.now();
+    return returnSeenAt > 0 && Date.now() - returnSeenAt < timeout;
   };
-  const keepWaiting = () => upgrading() || (movedAt > 0 && Date.now() - movedAt < timeout);
-  let told = false;
   return waitForInbox(
     async () => {
       const next = await inboxStatus(dataDir, 1000);
-      if (next.state === "running") return next.entry;
-      if (!told && Date.now() - started > INBOX_IMPORT_SLOW_MS && upgrading()) {
-        told = true;
-        process.stderr.write(`${INBOX_UPGRADING_LINE}\n`);
-      }
-      return null;
+      return next.state === "running" ? next.entry : null;
     },
     timeout,
     100,
-    keepWaiting,
+    returning,
   );
 }
 
-/**
- * How long a starter waits for a detached Inbox: `START_TIMEOUT_MS`, or under the test sandbox only,
- * `PLANNOTATOR_INBOX_START_TIMEOUT_MS` (so a test can outlast it without waiting 20 s).
- */
 export function startTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
   const raw = env.PLANNOTATOR_TEST_SANDBOX ? env.PLANNOTATOR_INBOX_START_TIMEOUT_MS?.trim() : undefined;
   const ms = raw && /^\d+$/.test(raw) ? Number(raw) : NaN;
@@ -212,10 +196,26 @@ async function waitForBusyInbox(dataDir: string, pid: number): Promise<InboxRegi
  * needed. Never opens a browser. Throws when it cannot be started.
  */
 export async function ensureInboxRunning(dataDir: string, options: { tailscale?: boolean } = {}): Promise<InboxRegistryEntry> {
+  const trace = inboxStartTrace(dataDir, "starter");
   const status = await inboxStatus(dataDir);
   if (status.state === "running") return status.entry;
-  if (status.state === "busy") return waitForBusyInbox(dataDir, status.entry.pid);
+  if (status.state === "busy") {
+    trace.step("busy_wait", { inbox: status.entry.pid });
+    return waitForBusyInbox(dataDir, status.entry.pid);
+  }
+  const unreachable = await outOfReach(status);
+  if (unreachable) {
+    trace.step("out_of_reach", { inbox: unreachable.pid });
+    throw unreachable.error;
+  }
   return startDetachedInbox(dataDir, acquireInboxStartLock(dataDir), options.tailscale === true);
+}
+
+/** The running Inbox this process cannot reach (`inboxOutOfReach`): its pid and the error a start gives. Null when there is none. */
+async function outOfReach(status: InboxStatus): Promise<{ pid: number; error: InboxUnreachableError } | null> {
+  if (status.state !== "stopped" || status.reason !== "no_answer") return null;
+  const detail = await inboxOutOfReach(status.entry);
+  return detail === null ? null : { pid: status.entry.pid, error: new InboxUnreachableError(detail) };
 }
 
 /**
@@ -224,9 +224,11 @@ export async function ensureInboxRunning(dataDir: string, options: { tailscale?:
  * holds it) only wait for what that starter starts.
  */
 async function startDetachedInbox(dataDir: string, release: (() => void) | null, tailscale: boolean): Promise<InboxRegistryEntry> {
+  const trace = inboxStartTrace(dataDir, "starter");
+  trace.step(release ? "lock_taken" : "lock_wait");
   if (release) {
     try {
-      spawnDetachedInbox(dataDir, tailscale);
+      trace.step("spawned", { child: spawnDetachedInbox(dataDir, tailscale) });
     } catch (error) {
       release();
       throw error;
@@ -235,7 +237,8 @@ async function startDetachedInbox(dataDir: string, release: (() => void) | null,
   try {
     const running = await waitUntilRunning(dataDir);
     if (!running) {
-      throw new Error(`The Plannotator Inbox did not start; see ${join(inboxDir(dataDir), INBOX_LOG_FILE)}.`);
+      const words = existsSync(join(inboxDir(dataDir), INBOX_DB_FILE)) ? `${inboxReturnFailedWords(dataDir)} Details: ` : "The Plannotator Inbox did not start; see ";
+      throw new Error(`${words}${join(inboxDir(dataDir), INBOX_LOG_FILE)}.`);
     }
     return running;
   } finally {
@@ -382,9 +385,11 @@ async function serveInbox(dataDir: string, open: boolean, htmlContent: string | 
   // two people (or a person and an agent) never start two writers on one store.
   const lockHeldByStarter = process.env[LOCK_HELD_ENV] === "1";
   delete process.env[LOCK_HELD_ENV];
+  const trace = inboxStartTrace(dataDir, lockHeldByStarter ? "detached" : "direct");
   // Held for this start now too: a starter that exits early never makes it look abandoned.
   if (lockHeldByStarter) joinInboxStartLock(dataDir);
   const release = lockHeldByStarter ? null : acquireInboxStartLock(dataDir);
+  trace.step(lockHeldByStarter ? "lock_joined" : release ? "lock_taken" : "lock_wait");
   if (!lockHeldByStarter && !release) {
     const running = await waitUntilRunning(dataDir);
     if (!running) {
@@ -401,12 +406,21 @@ async function serveInbox(dataDir: string, open: boolean, htmlContent: string | 
   try {
     const status = await inboxStatus(dataDir);
     if (status.state === "running" || status.state === "busy") {
+      trace.step(status.state === "running" ? "already_running" : "busy_wait", { inbox: status.entry.pid });
       const entry = status.state === "running" ? status.entry : await waitForBusyInbox(dataDir, status.entry.pid);
       process.stderr.write(`Plannotator Inbox: ${entry.url}\n`);
       if (tailscale) await publishRunningInbox(entry);
       if (open) await openBrowser(entry.url);
       if (connect) await connectRunningInbox(entry);
       process.exit(0);
+    }
+    // A detached Inbox's starter has decided already (the window's Restart runs inside the Inbox it replaces).
+    const unreachable = lockHeldByStarter ? null : await outOfReach(status);
+    if (unreachable) {
+      trace.step("out_of_reach", { inbox: unreachable.pid });
+      release?.();
+      process.stderr.write(`${unreachable.error.message}\n`);
+      process.exit(1);
     }
     inbox = await startInboxServer({
       dataDir,
@@ -429,14 +443,21 @@ async function serveInbox(dataDir: string, open: boolean, htmlContent: string | 
       // start lock, the last port first) and end this process. A run
       // published only by --tailscale passes it on.
       onRestartRequested: () => {
+        trace.step("restart");
         ensureInboxRunning(dataDir, { tailscale: inbox.tailscale.runOnly() })
           .catch((error) => process.stderr.write(`Restart failed: ${error instanceof Error ? error.message : String(error)}\n`))
           .finally(() => process.exit(0));
       },
     });
+  } catch (error) {
+    if (!(error instanceof InboxReturnError)) throw error;
+    release?.();
+    process.stderr.write(`${error.message}\n`);
+    process.exit(1);
   } finally {
     release?.();
   }
+  trace.step("serving", { port: inbox.port });
   const shutdown = (code: number) => {
     inbox.stop();
     process.exit(code);
@@ -664,6 +685,11 @@ async function stopCommand(dataDir: string): Promise<number> {
  * in between waits for this start instead of racing it.
  */
 async function restartCommand(dataDir: string, tailscale: boolean): Promise<number> {
+  const unreachable = await outOfReach(await inboxStatus(dataDir));
+  if (unreachable) {
+    process.stderr.write(`${unreachable.error.message}\n`);
+    return 1;
+  }
   const release = await takeStartLock(dataDir);
   if (!release) {
     process.stderr.write("Another Plannotator Inbox start holds the start lock and did not finish; try again.\n");
@@ -744,6 +770,7 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
       cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
       ensureRunning: () => ensureInboxRunning(dataDir),
       hostSession: inboxHostSessionFromEnv(process.env),
+      claude: inboxClaudeMcpSessionFromEnv(process.env),
       sessionProject: inboxSessionProjectFromEnv(process.env),
       qwen: inboxQwenShimContext(process.env, homedir(), process.cwd(), process.ppid),
       askAiChild: isAskAiChild(process.env),
@@ -785,10 +812,6 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
 
   if (args[0] === "projects") {
     process.exit(await runInboxProjectsCommand(args.slice(1), { json: assets.json === true, self: shellLine(selfCommand()), ensureRunning: () => ensureInboxRunning(dataDir) }));
-  }
-
-  if (args[0] === "export") {
-    process.exit(await runInboxExportCommand(args.slice(1), { dataDir, cwd: process.env.PLANNOTATOR_CWD || process.cwd(), json: assets.json === true }));
   }
 
   if (args[0] === "rows") {

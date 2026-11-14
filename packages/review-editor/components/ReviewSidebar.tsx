@@ -8,7 +8,7 @@ import { EditorAnnotationCard } from '@plannotator/ui/components/EditorAnnotatio
 import { CommentActions } from './CommentActions';
 import { commentCopyText } from '../utils/annotationDisplay';
 import { HighlightedCode } from './HighlightedCode';
-import { detectLanguage } from '../utils/detectLanguage';
+import { fileHighlightLanguage } from '../utils/highlightLanguage';
 import { renderInlineMarkdown } from '../utils/renderInlineMarkdown';
 import { FileNameChip } from './FileNameChip';
 import { AITab } from './AITab';
@@ -507,7 +507,7 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
         )}
         {annotation.suggestedCode && !isGeneralScope && (
           <div className="mt-1.5">
-            <SuggestionPreview code={annotation.suggestedCode} originalCode={annotation.originalCode} language={detectLanguage(annotation.filePath)} />
+            <SuggestionPreview code={annotation.suggestedCode} originalCode={annotation.originalCode} language={fileHighlightLanguage(annotation.filePath)} />
           </div>
         )}
         {editingOutdated?.id !== annotation.id && (

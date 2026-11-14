@@ -10,7 +10,7 @@
  * Decisions page (`#decisions=…`) opens the list.
  */
 
-import { threadPullsBus } from './threadPulls/model';
+import { pullReviewLinks, threadPullsBus } from './threadPulls/model';
 import { inboxRefTransport } from './refTransport';
 import { markInboxPage } from './pageMarks';
 import { perfFirstList, perfStart, perfThreadOpenDropped, perfThreadOpenStart, perfThreadReadLanded, perfUntilNextFrame } from './perfMarks';
@@ -80,7 +80,7 @@ import { ListFilterEmpty, clearedFrom } from './components/ListFilter';
 import { addOwnThreads, adoptKeepingOpen, drawnSection, filterSections, heldNews as heldNewsOf, heldNotice, listGroups, lookedRow, markHeldRowArchived, markHeldRowLooked, priorityChangedRows, putReadRowBack, putRowBack, refreshHeldRows, replaceHeldRow, settleOwn, settlesOnBack, settleThread, showBroughtIn, showLandsIn, snoozeChangedRows, waitingCount, type OpenThread } from './held';
 import { inboxSnoozeDelay, inboxSnoozeRunning, inboxSnoozeWhen, type InboxRowSnooze } from '@plannotator/core/inbox-snooze';
 import { deliveriesReadList } from './rowDelivery';
-import { inboxAgentsWatched, setInboxAgents, useAgentListFilter } from './agentsList';
+import { inboxAgentsNow, inboxAgentsWatched, setInboxAgents, useAgentListFilter } from './agentsList';
 import { filterAgentRows } from './agents/model';
 import {
   captureSettle,
@@ -172,10 +172,12 @@ import { leaveOnPurpose, replyBeingWritten, unsentReply } from './unsent';
 import { reloadOntoInbox, STALE_HEALTH_MS, useStalePage } from './stalePage';
 import { StalePageNotice } from './components/StalePageNotice';
 import { InboxToast, type InboxToastModel, toastSpeech } from './components/Toast';
-import { errorToast } from './toastError';
+import { errorText, errorToast } from './toastError';
 import { pictureFromFile } from './projectPictures';
 import { canToggleRead, confirmSetAside, MARK_READ_LOOK_WAIT_MS, MARK_READ_UNDO_MS, MARK_UNREAD_RETRY_WAIT_MS, markReadToast, markUnreadToast, offersRowMarkRead, seenHeldInNew, setAsideCount, type SetAsideAnswer, type SetAsideCount, warnsBeforeRead } from './markRead';
 import { MarkReadWarning } from './components/MarkReadWarning';
+import { AgentDeleteDialog } from './agents/AgentDeleteDialog';
+import { agentDeleteThreads, deleteAgentSession, type AgentDeleted } from './agents/agentDelete';
 import { summarizeInboxQuestions } from '@plannotator/core/inbox-questions';
 import { threadLink, type RowMenuAction } from './rowMenu';
 import { movePin, sameMachinePins, unpinnedWhere } from './pins';
@@ -231,6 +233,9 @@ import { GrillMeTip } from './components/GrillMeTip';
 import { ListViewIntro } from './components/ListViewIntro';
 import { ChecklistIntro } from './steps/ChecklistIntro';
 import { RulesIntro } from './components/RulesIntro';
+import { PersonalAgentsIntro, usePersonalAgentsBanner } from './components/PersonalAgentsIntro';
+import { PriorityIntro } from './components/PriorityIntro';
+import { openPriorityMenu, priorityIntroHolds, priorityIntroMayClaim, priorityIntroPicture, priorityIntroTarget } from './priorityIntro';
 import { rulesSet, wantRulesEditor } from './agentRules';
 import { StarAskCard } from '@plannotator/ui/components/StarAskCard';
 import { CodeReviewOffer } from './components/CodeReviewOffer';
@@ -241,8 +246,8 @@ import { ThemeChooser } from './components/ThemeChooser';
 import { openThemeSettings, useThemeChooser } from './themeChooser';
 import { CardChip } from './board/CardChip';
 import { boardFilterHash, boardInitiativeOf, boardViewOf, cardsInInitiative, initiativeDeletedToast, liveInitiatives, newCardProject, type BoardView } from './board/model';
-import { restoreInitiatives } from './board/initiativeUndo';
-import { canTagThread, filterTagRows, rowTagsHere, tagHref, tagListSummary, tagsSectionShown, tagThreadCounts, tagWaitingCounts, ThreadTagsContext, type ThreadTagsHost } from './threadTags';
+import { tagsAcross } from './tagsAcross';
+import { canTagThread, filterTagRows, rowTagsHere, tagById, tagHref, tagListSummary, tagsSectionShown, tagThreadCounts, tagWaitingCounts, tagWrite, thisInboxTags, ThreadTagsContext, type ListTag, type ThreadTagsHost } from './threadTags';
 import { TagIcon } from './components/InitiativePeek';
 import { useComposeSessions } from './compose/useComposeSessions';
 import { useComposerOpener } from './compose/openComposer';
@@ -2150,18 +2155,20 @@ function Inbox() {
   }, [refreshCards]);
   // With the Board off, the list's tags (approval "inbox-thread-tags"), the same array while their ids and names stay.
   const listTagsKey = (latest?.tags ?? [])
-    .map((i) => `${i.id}\u0000${i.name}`)
+    .map((i) => `${i.id}\u0000${i.name}\u0000${JSON.stringify(i.machines ?? null)}`)
     .join('\u0001');
   const keepsTags = latest?.tags !== undefined;
   // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the ids and names, on purpose
   const listTags = useMemo(() => latest?.tags ?? null, [listTagsKey, keepsTags]);
+  /** The tags' rename, delete and Undo on every linked machine that holds one of the name: the sidebar's and the Board's. */
+  const across = useMemo(() => (listTags ? tagsAcross(listTags, machines) : null), [listTags, machines]);
   const initiativeTags = useMemo<InitiativeTags>(() => {
     if (boardEnabled === false && listTags) {
       // The Board off: `#` lists the tags, each counted by its threads, and a sent tag opens its list.
       const rows = new Map<string, InboxListRow>();
       for (const row of [...(latest?.sections.flatMap((s) => s.threads) ?? []), ...(latest?.snoozed ?? []), ...(latest?.pins ?? [])]) if (!rows.has(row.thread_id)) rows.set(row.thread_id, row);
       const projects = new Map((latest?.projects ?? []).map((p) => [p.id, p.name] as const));
-      return { initiatives: listTags, counts: tagThreadCounts([...rows.values()]), cards: [], rows, projects, mentions: new Map(), href: tagHref };
+      return { initiatives: thisInboxTags(listTags, machines.self), counts: tagThreadCounts([...rows.values()]), cards: [], rows, projects, mentions: new Map(), href: tagHref };
     }
     const counts = new Map<string, number>();
     const live = (cards?.cards ?? []).filter((card) => card.column !== 'dropped');
@@ -2173,8 +2180,10 @@ function Inbox() {
     const projects = new Map((latest?.projects ?? []).map((p) => [p.id, p.name] as const));
     const mentions = new Map(Object.entries(cards?.initiative_threads ?? {}));
     return { initiatives: tagInitiatives, counts, cards: live, rows, projects, mentions, refresh: refreshForPeek };
-  }, [cards, latest, tagInitiatives, refreshForPeek, boardEnabled, listTags]);
-  const boardInitiative = route.page === 'board' ? boardInitiativeOf(route.initiative, cards ? liveInitiatives(cards.initiatives) : null) : null;
+  }, [cards, latest, tagInitiatives, refreshForPeek, boardEnabled, listTags, machines.self]);
+  // A tag only a linked machine held takes this Inbox's id once a card here is put in it: its link still filters.
+  const boardInitiativeAsked = route.page === 'board' && route.initiative && listTags ? (tagById(listTags, route.initiative)?.id ?? route.initiative) : route.page === 'board' ? route.initiative : null;
+  const boardInitiative = route.page === 'board' ? boardInitiativeOf(boardInitiativeAsked, cards ? [...(listTags ?? []), ...liveInitiatives(cards.initiatives)] : null) : null;
   useEffect(() => {
     if (!onBoard) {
       setBoardVisit(null);
@@ -3519,10 +3528,10 @@ function Inbox() {
   const rowOf = (threadId: string): InboxListRow | undefined =>
     (latestRef.current ? listGroups(latestRef.current) : []).flatMap((section) => section.threads).find((row) => row.thread_id === threadId);
 
-  const say = (text: string) => {
+  const say = useCallback((text: string) => {
     setSaid('');
     setTimeout(() => setSaid(text), 30);
-  };
+  }, []);
   // The live region says "Reconnecting…" once when the stream dies, never its return, and not again within
   // RECONNECT_SAY_GAP_MS (a network that comes and goes would say it over and over).
   useEffect(() => {
@@ -4609,6 +4618,75 @@ function Inbox() {
     return true;
   };
 
+  /** The sidebar agent's Delete … session…, asked in place (AgentDeleteDialog): its threads as the list holds them then. */
+  const [agentDelete, setAgentDelete] = useState<{ agent: InboxAgent; machine: string | null; threads: InboxListRow[] } | null>(null);
+  const askAgentDelete = (agent: InboxAgent, machine: string | null) => {
+    if (!agent.launch) return;
+    setAgentDelete({ agent, machine, threads: agentDeleteThreads(agent, inboxAgentsNow(), machines, windowRows) });
+  };
+  /**
+   * Delete the launch, then archive its threads when the box was ticked. The toast is the thread's ("Session
+   * deleted"); with threads archived it says how many, and its Undo unarchives them (snoozes ahead put back, as
+   * Archive's Undo does). The session itself is gone either way.
+   */
+  const deleteAgent = async (archive: boolean) => {
+    const asked = agentDelete;
+    setAgentDelete(null);
+    const launch = asked?.agent.launch;
+    if (!asked || !launch) return;
+    let done: AgentDeleted;
+    try {
+      done = await deleteAgentSession(launch.id, asked.machine, asked.threads.map((row) => row.thread_id), archive);
+    } catch (cause) {
+      showToast(errorToast(cause, 'That did not work; try again.'));
+      return;
+    }
+    const archived = done.archived;
+    if (archived.length > 0) {
+      const at = new Date().toISOString();
+      setShown((current) => (current ? archived.reduce((sections, id) => markHeldRowArchived(sections, id, at), current) : current));
+    }
+    await afterWrite(archived);
+    const kept = done.scratchKept ? 'its scratch folder was kept' : null;
+    const took = archived.length > 0 ? `Archived ${plural(archived.length, 'thread')}` : null;
+    const snoozes = asked.threads.filter((row) => archived.includes(row.thread_id)).map((row) => [row.thread_id, row.snoozed] as const);
+    const failed = done.archiveError ? errorText(done.archiveError, 'That did not work; try again.') : null;
+    showToast({
+      icon: failed ? 'warn' : 'check',
+      lead: 'Session deleted',
+      ...(failed ? { detail: failed, wrap: true } : kept || took ? { detail: [kept, took].filter(Boolean).join(' · ') } : {}),
+      ...(archived.length > 0
+        ? {
+            onUndo: () => {
+              void (async () => {
+                try {
+                  for (const id of archived) await inboxApi.resolve(id, false);
+                } catch (cause) {
+                  showToast(errorToast(cause, 'That did not work; try again.'));
+                  return;
+                }
+                for (const [id, snooze] of snoozes) await restoreSnooze(id, snooze);
+                await afterWrite(archived);
+                dismissToast();
+                say('Moved back.');
+              })();
+            },
+          }
+        : {}),
+    });
+  };
+  /** The sidebar agent's Stop: as the thread's Stop (Thread.tsx `launchAct`), its words on a toast when it fails. */
+  const stopAgent = async (agent: InboxAgent, machine: string | null) => {
+    if (!agent.launch) return;
+    try {
+      await inboxApi.launchStop(agent.launch.id, machine);
+    } catch (cause) {
+      showToast(errorToast(cause, 'That did not work; try again.'));
+      return;
+    }
+    if (thread?.thread_id === agent.launch.thread_id) void refreshThread(agent.launch.thread_id);
+  };
+
   /**
    * The project menu's Set picture… (approval "inbox-letter-marks"): the picture kept by the Inbox, then the list read
    * again, so every project mark shows it. A refused picture (not an image, too big) says why in the toast.
@@ -5435,18 +5513,22 @@ function Inbox() {
    * the sidebar's Tags; and Add tag's host (threadTags.ts), each write said in the toast with Undo.
    */
   const [tagPatches, setTagPatches] = useState<ReadonlyMap<string, readonly string[]>>(() => new Map());
-  const tagsOfRow = useCallback((row: Pick<InboxListRow, 'thread_id' | 'tags' | 'machine'>) => rowTagsHere(row, machines.self, tagPatches), [tagPatches, machines.self]);
-  const filterTag = route.page === 'inbox' && route.tag ? (listTags?.find((tag) => tag.id === route.tag) ?? null) : null;
+  const tagsOfRow = useCallback((row: Pick<InboxListRow, 'thread_id' | 'tags' | 'machine'>) => rowTagsHere(row, machines, tagPatches), [tagPatches, machines]);
+  const filterTag = route.page === 'inbox' && route.tag && listTags ? tagById(listTags, route.tag) : null;
+  /** The list a route's tag shows: the merged id, which a tag made here since takes over from another machine's. */
+  const shownTagId = filterTag?.id ?? (route.page === 'inbox' ? (route.tag ?? null) : null);
   const tagCounts = useMemo(() => tagThreadCounts(windowRows, tagsOfRow), [windowRows, tagsOfRow]);
   const tagWaiting = useMemo(() => tagWaitingCounts(latestSections, tagsOfRow), [latestSections, tagsOfRow]);
   const tagsShown = listTags !== null && tagsSectionShown(listTags, windowRows, tagsOfRow);
-  const setThreadTag = async (threadId: string, tag: InboxInitiative, on: boolean, undo = true) => {
+  /** `tag.id` empty: a name no machine holds yet, made on the thread's own machine by this write (nothing drawn early). */
+  const setThreadTag = async (threadId: string, tag: ListTag, on: boolean, undo = true) => {
     const before = tagPatches.get(threadId) ?? rowOf(threadId)?.tags ?? [];
     const next = on ? (before.includes(tag.id) ? before : [...before, tag.id]) : before.filter((id) => id !== tag.id);
-    setTagPatches((current) => withEntry<readonly string[]>(current, threadId, next));
+    if (tag.id) setTagPatches((current) => withEntry<readonly string[]>(current, threadId, next));
     const unpatch = () => setTagPatches((current) => withEntry<readonly string[]>(current, threadId, undefined));
     try {
-      await inboxApi.setThreadTag(threadId, tag.id, on);
+      // On the thread's own machine (a held write there says so in the clock toast, as Priority's does).
+      await inboxApi.setThreadTag(threadId, tagWrite(tag, machineOf(threadId), machines.self), on);
     } catch (cause) {
       unpatch();
       showError(cause);
@@ -5483,18 +5565,21 @@ function Inbox() {
             tags: listTags,
             tagsOf: (threadId) => {
               const row = windowRows.find((r) => r.thread_id === threadId);
-              return row ? rowTagsHere(row, machines.self, tagPatches) : (tagPatches.get(threadId) ?? []);
+              return row ? rowTagsHere(row, machines, tagPatches) : (tagPatches.get(threadId) ?? []);
             },
             counts: tagCounts,
-            can: (threadId) => canTagThread(threadId, windowRows, machines.self, machineOf(threadId)),
+            can: (threadId) => canTagThread(threadId, windowRows, machines, machineOf(threadId)),
             set: (threadId, tag, on) => void setThreadTagRef.current(threadId, tag, on),
+            // Another machine's thread: its machine makes the tag by name, in the same write that tags the thread.
             createAndSet: (threadId, name) =>
-              void createTagRef.current(name).then((tag) => {
-                if (tag) void setThreadTagRef.current(threadId, tag, true);
-              }),
+              machineOf(threadId)
+                ? void setThreadTagRef.current(threadId, { id: '', name, created_at: '', created_by: { kind: 'person' }, updated_at: '', deleted_at: null }, true)
+                : void createTagRef.current(name).then((tag) => {
+                    if (tag) void setThreadTagRef.current(threadId, tag, true);
+                  }),
             listed: filterTag,
           },
-    [listTags, tagPatches, windowRows, tagCounts, machines.self, filterTag],
+    [listTags, tagPatches, windowRows, tagCounts, machines, filterTag],
   );
   const setThreadTagRef = useRef(setThreadTag);
   setThreadTagRef.current = setThreadTag;
@@ -5507,7 +5592,7 @@ function Inbox() {
         tags: listTags,
         waiting: tagWaiting,
         shown: tagsShown,
-        tagId: route.page === 'inbox' ? (route.tag ?? null) : null,
+        tagId: shownTagId,
         onOpen: (tagId: string) => leave({ page: 'inbox', project: null, machine: null, agent: null, tag: tagId, thread: null }),
         onCreate: async (name: string) => {
           const tag = await createTag(name);
@@ -5516,33 +5601,40 @@ function Inbox() {
           return tag.id;
         },
         onRename: async (tagId: string, name: string) => {
-          try {
-            await inboxApi.changeInitiative(tagId, { op: 'rename', name });
-          } catch (cause) {
-            showError(cause);
+          const tag = tagById(listTags, tagId);
+          if (!tag || !across) return false;
+          const taken = across.renameTaken(tag, name);
+          if (taken) {
+            showError(taken);
             return false;
           }
+          const { refused, held } = await across.change(tag, { op: 'rename', name });
           await refreshList(false);
-          return true;
+          if (refused) showError(refused);
+          else if (held) showError(held);
+          return !refused;
         },
         onDelete: (tag: InboxInitiative) => void deleteTag(tag),
       };
-  const deleteTag = async (tag: InboxInitiative) => {
-    try {
-      await inboxApi.changeInitiative(tag.id, { op: 'delete' });
-    } catch (cause) {
-      showError(cause);
+  const deleteTag = async (tag: ListTag) => {
+    if (!across) return;
+    const { refused } = await across.change(tag, { op: 'delete' });
+    if (refused) {
+      showError(refused);
+      await refreshList(false);
       return;
     }
     // Its list goes with it: the Inbox, in its place.
-    if (routeRef.current.page === 'inbox' && routeRef.current.tag === tag.id) writeRoute({ page: 'inbox', project: null, thread: null }, { replace: true });
+    if (routeRef.current.page === 'inbox' && routeRef.current.tag && tagById([tag], routeRef.current.tag)) writeRoute({ page: 'inbox', project: null, thread: null }, { replace: true });
     await refreshList(false);
     showToast({ icon: 'check', ...initiativeDeletedToast([tag]), onUndo: () => void undoDeleteTag(tag) });
   };
-  const undoDeleteTag = async (tag: InboxInitiative) => {
+  const undoDeleteTag = async (tag: ListTag) => {
+    if (!across) return;
     dismissToast();
-    const { left, line } = await restoreInitiatives([tag]);
+    const { left, line, refused } = await across.restore([tag]);
     if (line) showToast({ icon: 'warn', wrap: true, lead: line, ...(left.length > 0 ? { onUndo: () => void undoDeleteTag(tag) } : {}) });
+    else if (refused) showError(refused);
     await refreshList(false);
   };
   const projectNames = useMemo(
@@ -5554,8 +5646,8 @@ function Inbox() {
   /** One project's rows, then one machine's, then one agent's, then one tag's, then without the machines the person hid while away. */
   const filterList = useCallback(
     (sections: readonly InboxListSection[]) =>
-      filterTagRows(filterAgentRows(filterMachineRows(filterSections(sections, route.project), machines, filterMachine?.id ?? null, hideAway), filterAgent, machines.self), route.tag ?? null, tagsOfRow),
-    [route.project, machines, filterMachine, filterAgent, hideAway, route.tag, tagsOfRow],
+      filterTagRows(filterAgentRows(filterMachineRows(filterSections(sections, route.project), machines, filterMachine?.id ?? null, hideAway), filterAgent, machines.self), shownTagId, tagsOfRow),
+    [route.project, machines, filterMachine, filterAgent, hideAway, shownTagId, tagsOfRow],
   );
   // The list's filter (listFilter.ts): this browser's picks; on a project's page its Project picks step aside. The
   // day is in the keys so Today and the last N days move on at midnight.
@@ -5875,6 +5967,25 @@ function Inbox() {
     mayClaim: (pageAge) => lineLatch !== null && !firstRun && pageAge >= REVEAL_TIMES.pageAgeMs,
     holds: () => !rulesSet(settingsRef.current?.prompts?.rules),
   });
+  // Personal agents (core/inbox-personal-agents.ts): the Inbox names it only while none is connected. Its banner is
+  // loaded before the claim, so the dialog opens with it or, offline, without it, and never changes while open.
+  const personalAgentsDue = lineLatch?.next === 'personal_agents';
+  const personalAgentsBanner = usePersonalAgentsBanner(personalAgentsDue);
+  const personalAgentsReveal = useLineReveal({
+    id: 'personal_agents',
+    due: personalAgentsDue,
+    blocked: revealBlocked,
+    rows: snoozeIntroRows,
+    toast: toast !== null,
+    thread: route.page === 'inbox' ? (route.thread ?? null) : null,
+    clear: listIntroClear,
+    place: `${route.thread}|${route.project}|${route.machine}`,
+    heldBack: revealHeldBack,
+    leaveCounts: (visit, now) => starRevealLeaveCounts(visit, now),
+    idle: pageIdle,
+    mayClaim: (pageAge) => personalAgentsBanner !== null && lineLatch !== null && !firstRun && pageAge >= REVEAL_TIMES.pageAgeMs,
+    holds: () => true,
+  });
   // The List view's choice, registered with the line (approval "inbox-one-time-dialogs", the change; reveal.ts
   // `useLineReveal`): armed while it is `reveal.next`, or in `reveal.ahead` (it goes at its own moment, ahead of the
   // other offers), back on the list with no thread open or the page idle (any layout), once the list is taller than the
@@ -5912,6 +6023,41 @@ function Inbox() {
   // The choice's two pictures: the person's own list as the groups draw it, and as the Simple list draws it.
   const listViewChoiceGroups: ListIntroGroup[] = listViewChoiceOpen && shown ? filterList(shown).flatMap((section) => (section.id !== 'snoozed' && section.threads.length > 0 ? [{ id: section.id, label: section.label, count: section.threads.length, rows: section.threads.slice(0, 8) }] : [])) : [];
   const listViewChoiceFlat = listViewChoiceOpen && shown ? flatRows(filterList(shown), null, { epoch: 0, keep: null }).rows.slice(0, 10) : [];
+  // The Priority dialog (priorityIntro.ts), registered with the line: the Inbox names it for someone who never added a
+  // thread to Priority; its moment is "Set the rules"' (a thread read and left, or the page idle), on the grouped list
+  // with 3 threads or more waiting on the person.
+  const priorityReveal = useLineReveal({
+    id: 'priority',
+    due: lineLatch?.next === 'priority',
+    blocked: revealBlocked,
+    rows: snoozeIntroRows,
+    toast: toast !== null,
+    thread: route.page === 'inbox' ? (route.thread ?? null) : null,
+    clear: listIntroClear,
+    place: `${route.thread}|${route.project}|${route.machine}`,
+    heldBack: revealHeldBack,
+    leaveCounts: (visit, now) => starRevealLeaveCounts(visit, now),
+    idle: pageIdle,
+    mayClaim: (pageAge) => priorityIntroMayClaim({ listLoaded: lineLatch !== null, firstRun, grouped: listView === 'grouped', rows: snoozeIntroRows }, pageAge),
+    holds: () => listView === 'grouped' && priorityIntroHolds(oneTimeRows.current),
+  });
+  const priorityIntroAim = priorityReveal.stage === 'open' ? priorityIntroTarget(snoozeIntroRows, priorityReveal.target) : null;
+  const priorityIntroScene = useMemo(() => (priorityReveal.stage === 'open' ? priorityIntroPicture(snoozeIntroRows, priorityIntroAim) : null), [priorityReveal.stage, priorityIntroAim, snoozeIntroRows]);
+  /** Try it: the dialog closes, then the real menu opens with focus on Add to Priority; it adds nothing itself. */
+  const tryPriorityIntro = () => {
+    const aim = priorityIntroAim;
+    priorityReveal.close();
+    setTimeout(() => {
+      const now = routeRef.current;
+      void openPriorityMenu({
+        root: document.querySelector('.pn-inbox') ?? document,
+        phone,
+        openThread: now.page === 'inbox' ? (now.thread ?? null) : null,
+        target: aim,
+        openTarget: (threadId) => go({ page: 'inbox', project: now.project ?? null, machine: now.machine, agent: now.agent, tag: now.tag, thread: threadId }),
+      });
+    }, 0);
+  };
   // The tab icon dialog ("Which favicon do you prefer?"; tabIconChoice.ts): an update-day dialog of the line, armed
   // while it is `reveal.next`, 15 s into the page (the owner, 2026-11-10; reveal.ts `soonMayClaim`): no leave and no
   // stillness, only Code review's guards (the page clear, nothing typed or open, no toast, settled).
@@ -5951,7 +6097,7 @@ function Inbox() {
   // The "Star the repo" ask (approval "star-ask"): beside the line, never in its order (settings `reveal.aside`), at the
   // same calm moment (a thread read and left, 60 s into the page) while no other reveal is showing or claiming; its
   // claim runs the already-starred check, then the corner card shows.
-  const otherRevealActive = [snoozeIntro.stage, boardReveal.stage, stepsReveal.stage, broReveal.stage, agentRulesReveal.stage, grillMeTipReveal.stage, listViewReveal.stage, tabIconChoice.stage, themeChooser.stage].some((stage) => stage === 'open' || stage === 'claimed');
+  const otherRevealActive = [snoozeIntro.stage, boardReveal.stage, stepsReveal.stage, broReveal.stage, agentRulesReveal.stage, personalAgentsReveal.stage, priorityReveal.stage, grillMeTipReveal.stage, listViewReveal.stage, tabIconChoice.stage, themeChooser.stage].some((stage) => stage === 'open' || stage === 'claimed');
   const starReveal = useStarReveal({
     due: lineLatch?.aside.includes('star') === true,
     listLoaded: lineLatch !== null,
@@ -6035,6 +6181,10 @@ function Inbox() {
     broReveal.stage !== 'claimed' &&
     agentRulesReveal.stage !== 'open' &&
     agentRulesReveal.stage !== 'claimed' &&
+    personalAgentsReveal.stage !== 'open' &&
+    personalAgentsReveal.stage !== 'claimed' &&
+    priorityReveal.stage !== 'open' &&
+    priorityReveal.stage !== 'claimed' &&
     grillMeTipReveal.stage !== 'open' &&
     grillMeTipReveal.stage !== 'claimed' &&
     starReveal.stage !== 'open' &&
@@ -6086,6 +6236,8 @@ function Inbox() {
   // The list a thread from the box opens beside: the one the box opened over.
   const reviewsScope = () => (route.page === 'reviews' ? { project: route.project, view: route.view ?? pullFilterOf(null) } : (route.reviews ?? { project: null, view: pullFilterOf(null) }));
   const reviewPulls = useMemo(() => reviewBoxPulls(pulls.reviews, new Map((projects ?? []).map((p) => [p.id, p.name]))), [pulls.reviews, projects]);
+  // The thread's PR list: where each open PR's "Open review thread" goes, read from Reviews' own list as its launchpad is.
+  const pullReviewOf = useMemo(() => (pullsShown ? pullReviewLinks(pulls.model, pulls.reviews) : null), [pullsShown, pulls.model, pulls.reviews]);
   // A review arrived, a verdict went: the rows and the sidebar's count follow the store, a moment after it changed.
   const pullsReloadRows = pulls.reloadRows;
   const rowsWaitingSince = useRef<number | null>(null);
@@ -6581,7 +6733,7 @@ function Inbox() {
   });
   const offerLinesFree = linesFree && codeReviewOffer.stage !== 'open' && codeReviewOffer.stage !== 'claimed';
   // One of the line's dialogs is claimed or open now: the load arms nothing else meanwhile (`lineLatch`).
-  const stagesBusy = [voiceIntro.stage, snoozeIntro.stage, boardReveal.stage, stepsReveal.stage, broReveal.stage, agentRulesReveal.stage, grillMeTipReveal.stage, listViewReveal.stage, tabIconChoice.stage, themeChooser.stage, starReveal.stage, codeReviewOffer.stage].some(
+  const stagesBusy = [voiceIntro.stage, snoozeIntro.stage, boardReveal.stage, stepsReveal.stage, broReveal.stage, agentRulesReveal.stage, personalAgentsReveal.stage, priorityReveal.stage, grillMeTipReveal.stage, listViewReveal.stage, tabIconChoice.stage, themeChooser.stage, starReveal.stage, codeReviewOffer.stage].some(
     (stage) => stage === 'claimed' || stage === 'open',
   );
   useEffect(() => setLineStagesBusy(stagesBusy), [stagesBusy]);
@@ -7143,6 +7295,7 @@ function Inbox() {
           onOpenPull={(pull, stack) => go(boardPull(pull, stack, { page: 'prs', project: null, thread: null, stack: stack.id, layer: pull.key, scope: 'layer', prsFrom: 'reviews' }))}
           onOpenStack={(stack) => go({ page: 'prs', project: null, thread: null, stack: stack.id, layer: null })}
           onMerged={sheetPulls.refresh}
+          onToast={(next, ms) => showToast(next, ms)}
           layout={paneLayout}
           onLayout={setPaneLayout}
         />
@@ -7382,8 +7535,11 @@ function Inbox() {
             setCards((model) => (model ? { ...model, cards: [card, ...model.cards.filter((c) => c.id !== card.id)] } : model));
           }
           refreshBoard();
+          // A tag changed in the Tags dialog: the sidebar's merged list too.
+          if (!card) void refreshList(false);
         }}
         onSeeDrops={seeDrops}
+        tagsAcross={across}
         tidy={boardTidy}
         onOpenThread={(card, threadId) =>
           go({ page: 'inbox', project: null, thread: threadId, card: card.id, board: route.board ?? 'lanes', boardProject: boardFilter, boardInitiative })
@@ -7439,6 +7595,7 @@ function Inbox() {
         onOpenPull={(pull, stack) => go(boardPull(pull, stack, { ...route, stack: stack.id, layer: pull.key, scope: 'layer', prsFrom: 'sheet' }))}
         onOpenStack={(stack) => go({ ...route, stack: stack.id, layer: null })}
         onMerged={sheetPulls.refresh}
+        onToast={(next, ms) => showToast(next, ms)}
       />
     );
   } else if (route.page === 'prs') {
@@ -7701,6 +7858,15 @@ function Inbox() {
             thread={thread}
             onNewMessageWith={(source) => openCompose({ reuse: [source] })}
             codeReview={settings?.code_review?.on === true}
+            pullReview={
+              pullReviewOf
+                ? {
+                    linkOf: pullReviewOf,
+                    // A thread opened beside Reviews keeps Reviews beside the one it opens.
+                    onOpen: (link) => leave(link.kind === 'thread' ? { page: 'inbox', project: null, thread: link.threadId, reviews: route.reviews } : { page: 'reviews', project: null, thread: null, stack: link.stackId, layer: null }),
+                  }
+                : undefined
+            }
             inReviews={!!route.reviews}
             reviewView={reviewView}
             onInReviews={pullsShown && !route.reviews ? () => go({ page: 'inbox', reviews: { project: null, view: 'all' }, project: null, thread: thread.thread_id }) : undefined}
@@ -7776,6 +7942,10 @@ function Inbox() {
             onQuestions={patchQuestions}
             onPickSaves={onPickSaves}
             onChanged={afterWrite}
+            onTakenBack={(draft) => {
+              void inboxApi.drafts().then((model) => openCompose({ draft: model.drafts.find((d) => d.id === draft.id) ?? { ...draft, status: 'none' } }));
+              void afterWrite();
+            }}
             readPending={rowPatches.get(thread.thread_id)?.read_at !== undefined}
             onSentRead={async (model) => {
               // The Send's answer carried the thread: drawn from it, and only the list is read after (afterWrite reads both).
@@ -8039,6 +8209,8 @@ function Inbox() {
             onProjectAction={(projectId, action) => void projectAction(projectId, action)}
             onProjectRename={renameProject}
             onAgentRename={guestPage ? undefined : renameAgent}
+            onAgentStop={(agent, machine) => void stopAgent(agent, machine)}
+            onAgentDelete={askAgentDelete}
             onProjectPicture={setProjectPicture}
             onProjectCombine={async (pair) => (await combineProjects([pair])) === null}
             // "+" on a project row (F1-F7): while agents can be started from New message, and not on a guest's page.
@@ -8164,6 +8336,15 @@ function Inbox() {
           />
         ) : null;
       })()}
+      {agentDelete?.agent.launch && (
+        <AgentDeleteDialog
+          host={agentDelete.agent.host}
+          scratch={agentDelete.agent.launch.scratch ?? null}
+          threads={agentDelete.threads.length}
+          onCancel={() => setAgentDelete(null)}
+          onDelete={(archive) => void deleteAgent(archive)}
+        />
+      )}
       {readWarning && (
         <MarkReadWarning
           count={readWarning.count}
@@ -8270,6 +8451,23 @@ function Inbox() {
             agentRulesReveal.close();
             wantRulesEditor();
             window.location.hash = '#settings/prompts';
+          }}
+        />
+      )}
+      {personalAgentsReveal.stage === 'open' && (
+        <PersonalAgentsIntro phone={phone} banner={personalAgentsBanner === true} close={personalAgentsReveal.close} />
+      )}
+      {priorityReveal.stage === 'open' && priorityIntroScene && (
+        <PriorityIntro
+          picture={priorityIntroScene}
+          projectNames={projectNames}
+          phone={phone}
+          onGotIt={priorityReveal.close}
+          onTry={tryPriorityIntro}
+          onDismiss={() => {
+            // Escape, a click outside: the line's Not now (the next offer waits three days).
+            void inboxApi.revealNotNow('priority');
+            priorityReveal.close();
           }}
         />
       )}

@@ -100,12 +100,13 @@ import type {
 
 import { browserSharedEventsEnv, sharedInboxEventsSupported, subscribeOwnInboxEvents, subscribeSharedInboxEvents } from './sharedEvents';
 import { newUuid } from './uuid';
+import { trackCommentWrite } from './commentSaves';
 
 /**
  * A dialog of the line of one-time dialogs, as the Inbox names it (the queue: packages/shared/inbox/reveals.ts, server
  * side): the update-day dialogs, then the offers. A registered dialog (Bro mode, List view) adds its id here.
  */
-export type InboxRevealId = 'theme_chooser' | 'code_review' | 'sound' | 'list_intro' | 'voice' | 'tab_icon' | 'snooze' | 'bro' | 'grill_me_tip' | 'board' | 'steps' | 'agent_rules' | 'star' | 'list_view';
+export type InboxRevealId = 'theme_chooser' | 'code_review' | 'sound' | 'list_intro' | 'voice' | 'tab_icon' | 'snooze' | 'bro' | 'grill_me_tip' | 'board' | 'steps' | 'agent_rules' | 'star' | 'list_view' | 'personal_agents' | 'priority';
 /** What the line claims (`POST /api/inbox/reveal`): every offer, and the tab icon, the one update-day dialog claimed through the line. */
 export type InboxRevealOfferId = Exclude<InboxRevealId, 'sound' | 'list_intro' | 'voice'>;
 /** What a page claims through `POST /api/inbox/reveal`: Snooze, an offer, the agent note, the Launch tip or the Sidebar tip (both outside the line). */
@@ -164,6 +165,7 @@ export interface ProjectFolder extends InboxProject {
    * repo (or none resolved yet), and from an older Inbox. Read for `defaultRefHost.ts`.
    */
   repo_host?: string | null;
+  repo_forge?: 'gitlab';
 }
 
 /** The project menu's batches (POST /api/inbox/projects/:id/read and /resolve): the threads each took. */
@@ -333,8 +335,9 @@ export interface ListModel {
   /**
    * The live tags, oldest first (approval "inbox-thread-tags"): the sidebar's Tags and the Add tag list; each row's
    * `tags` names them. Absent from an older Inbox: the window then draws no Tags section and offers no Add tag.
+   * Merged: one per name across the linked machines that take tags, `machines` its id on each (InboxMachineTag).
    */
-  tags?: InboxInitiative[];
+  tags?: (InboxInitiative & { machines?: Record<string, string> })[];
   /** The version of this list, named by the next read so only what changed comes back (listRead.ts). Absent from an older Inbox. */
   list_version?: string;
   /**
@@ -684,10 +687,6 @@ export interface InboxStorageModel {
     /** The projects combined into this one, by name: deleting it leaves them. */
     combined?: string[];
   }[];
-  /** The Inbox on SQLite (its switch, off by default): the database file's bytes, counted in `bytes`. */
-  database?: number;
-  /** The dated backups a move into SQLite left, counted in `bytes`: listed with Remove (StorageBackups.tsx). */
-  backups?: { name: string; kind: 'jsonl' | 'sqlite'; date: string; bytes: number }[];
 }
 
 /** Settings → Agents: starting agents from New message (config.json `inboxLaunch`). Off, only `enabled` and a false `full_permissions`. */
@@ -913,6 +912,7 @@ export class InboxApiError extends Error {
     readonly threadId: string | null = null,
     /** `question_revision_conflict`: the question's revision on the Inbox now, when the answer names it. */
     readonly currentRevision: number | null = null,
+    readonly by: string | null = null,
   ) {
     super(message);
     this.name = 'InboxApiError';
@@ -930,6 +930,7 @@ async function readJson<T>(response: Response): Promise<T> {
       typeof body.retry_at === 'number' ? body.retry_at : null,
       typeof body.thread_id === 'string' ? body.thread_id : null,
       typeof body.current_revision === 'number' ? body.current_revision : null,
+      typeof body.by === 'string' ? body.by : null,
     );
   }
   return body as T;
@@ -1837,10 +1838,10 @@ export const inboxApi = {
     post<{ message_id: string; viewed: string[] }>(messageUrl(messageId, `/guide/viewed`), { viewed }),
   /** A comment on that guide's diff (the review app's line comment), new or edited; removed through `removeAnnotation`. */
   saveGuideAnnotation: (messageId: string, annotation: object) =>
-    post<{ annotation: InboxAnnotationRecord }>(messageUrl(messageId, `/guide/annotations`), { annotation }),
+    trackCommentWrite(post<{ annotation: InboxAnnotationRecord }>(messageUrl(messageId, `/guide/annotations`), { annotation }), { on: messageId, id: (annotation as { id?: unknown }).id }),
   /** A comment on the text of an agent's message (the words selected), new or edited; removed through `removeAnnotation`. */
   saveMessageAnnotation: (messageId: string, annotation: object) =>
-    post<{ annotation: InboxAnnotationRecord }>(messageUrl(messageId, `/annotations`), { annotation }),
+    trackCommentWrite(post<{ annotation: InboxAnnotationRecord }>(messageUrl(messageId, `/annotations`), { annotation }), { on: messageId, id: (annotation as { id?: unknown }).id }),
   // A question choice's running-app prototype, through the live proxy (packages/server/inbox-live.ts). `probe`: the
   // app is asked first, so a stopped one answers 422 live_not_answering instead of the proxy framing its error.
   liveSite: (threadId: string, siteId: string, probe = false) =>
@@ -1848,7 +1849,7 @@ export const inboxApi = {
   pingLiveSite: (threadId: string, siteId: string) =>
     post<{ running: boolean }>(inboxUrl(`/threads/${encodeURIComponent(threadId)}/live/${encodeURIComponent(siteId)}/ping`), {}),
   saveLiveAnnotation: (threadId: string, siteId: string, annotation: object) =>
-    post<{ annotation: InboxAnnotationRecord }>(inboxUrl(`/threads/${encodeURIComponent(threadId)}/live/${encodeURIComponent(siteId)}/annotations`), { annotation }),
+    trackCommentWrite(post<{ annotation: InboxAnnotationRecord }>(inboxUrl(`/threads/${encodeURIComponent(threadId)}/live/${encodeURIComponent(siteId)}/annotations`), { annotation }), { on: threadId, id: (annotation as { id?: unknown }).id }),
   restart: () => post<{ ok: true }>(inboxUrl('/restart'), {}),
   // The update control: the dialogs' facts, Update now, Remind me tomorrow, Check now, What's new.
   updateDetails: () => get<UpdateDetails>(inboxUrl('/update')),
@@ -1922,9 +1923,9 @@ export const inboxApi = {
   linkedPage: (attachmentId: string, path: string) =>
     get<LinkedPageView>(attachmentUrl(attachmentId, `/linked-page?path=${encodeURIComponent(path)}`)),
   saveAnnotation: (attachmentId: string, version: string, annotation: object) =>
-    post<{ annotation: InboxAnnotationRecord }>(inboxUrl('/annotations', undefined, machineOf(attachmentId)), { attachment_id: attachmentId, version, annotation }),
+    trackCommentWrite(post<{ annotation: InboxAnnotationRecord }>(inboxUrl('/annotations', undefined, machineOf(attachmentId)), { attachment_id: attachmentId, version, annotation }), { on: attachmentId, id: (annotation as { id?: unknown }).id }),
   removeAnnotation: (id: string) =>
-    post<{ annotation: InboxAnnotationRecord }>(inboxUrl(`/annotations/${encodeURIComponent(id)}/remove`, undefined, machineOf(id)), {}),
+    trackCommentWrite(post<{ annotation: InboxAnnotationRecord }>(inboxUrl(`/annotations/${encodeURIComponent(id)}/remove`, undefined, machineOf(id)), {}), { on: id, id, remove: true }),
   /** "Open in": the file as it is now, in a catalog app or the default app, by the attachment's id (on this computer only). */
   openIn: (attachmentId: string, appId: string) =>
     post<{ ok: boolean; error?: string }>(inboxUrl('/open-in'), { attachment_id: attachmentId, app_id: appId }),
@@ -2046,9 +2047,9 @@ export const inboxApi = {
     post<{ card: InboxCardWire }>(inboxUrl(`/cards/${encodeURIComponent(id)}`), { op: 'initiative', initiative }),
   /** A new initiative, named. */
   createInitiative: (name: string) => post<{ initiative: InboxInitiative }>(inboxUrl('/initiatives'), { name }),
-  /** An initiative renamed, or deleted (its cards read as in none). */
-  changeInitiative: (id: string, change: { op: 'rename'; name: string } | { op: 'delete' } | { op: 'restore' }) =>
-    post<{ initiative: InboxInitiative }>(inboxUrl(`/initiatives/${encodeURIComponent(id)}`), change),
+  /** An initiative renamed, or deleted (its cards read as in none). `machine`: a linked machine's tag, changed there. */
+  changeInitiative: (id: string, change: { op: 'rename'; name: string } | { op: 'delete' } | { op: 'restore' }, machine?: string | null) =>
+    post<{ initiative: InboxInitiative }>(inboxUrl(`/initiatives/${encodeURIComponent(id)}`, undefined, machine), change),
   /** The person's move: `move` to a column, `drop` (Cancel, reason optional), `restore`. */
   moveCard: (id: string, change: { op: 'move'; column: InboxCardColumn } | { op: 'drop'; reason?: string | null } | { op: 'restore' }) =>
     post<{ card: InboxCardWire }>(inboxUrl(`/cards/${encodeURIComponent(id)}`), change),
@@ -2083,6 +2084,8 @@ export const inboxApi = {
   /** A PR author's profile picture, served by the Inbox from its own origin (only an author the last list returned). */
   pullDetails: (key: string, signal?: AbortSignal) => get<InboxPullDetailsAnswer>(inboxUrl(`/pulls/details?key=${encodeURIComponent(key)}`), signal),
   pullAvatarUrl: (host: string, login: string) => inboxUrl('/pulls/avatar', `host=${encodeURIComponent(host)}&login=${encodeURIComponent(login)}`),
+  pullMediaUrl: (key: string, url: string) => inboxUrl('/pulls/media', `key=${encodeURIComponent(key)}&url=${encodeURIComponent(url)}`),
+  pullMediaSizes: (key: string, signal?: AbortSignal) => get<{ sizes: Record<string, { width: number; height: number }> }>(inboxUrl(`/pulls/media/sizes?key=${encodeURIComponent(key)}`), signal),
   /** One layer's diff, or the stack's from its base up to that layer (a PR the last list named). */
   pullDiff: (key: string, scope: InboxPullDiffScope, signal?: AbortSignal) =>
     get<InboxPullDiffAnswer>(inboxUrl(`/pulls/diff?key=${encodeURIComponent(key)}&scope=${scope}`), signal),
@@ -2091,8 +2094,8 @@ export const inboxApi = {
   /** New review's change summary for a project's local changes. */
   reviewChanges: (project: string, changes: InboxReviewChanges, signal?: AbortSignal) => get<InboxReviewChangesAnswer>(inboxUrl(`/reviews/changes?project=${encodeURIComponent(project)}&changes=${changes}`), signal),
   /** One changed file's whole text at both ends of that diff, for its expand arrows, while it is the blobs (`old`, `new`) the patch on screen names. */
-  pullFile: (key: string, scope: InboxPullDiffScope, path: string, ids: PatchBlobIds, signal?: AbortSignal) =>
-    get<InboxFileContents>(inboxUrl(`/pulls/file?key=${encodeURIComponent(key)}&scope=${scope}&path=${encodeURIComponent(path)}&old=${ids.oldId}&new=${ids.newId}`), signal),
+  pullFile: (key: string, scope: InboxPullDiffScope, path: string, pin: PatchBlobIds | { head: string }, signal?: AbortSignal) =>
+    get<InboxFileContents>(inboxUrl(`/pulls/file?key=${encodeURIComponent(key)}&scope=${scope}&path=${encodeURIComponent(path)}&${'head' in pin ? `head=${pin.head}` : `old=${pin.oldId}&new=${pin.newId}`}`), signal),
   /** The person started a PR's (a stack's open layers') review thread with an agent: `threadId` is the thread the review picker (or compose's New thread) just started for it. */
   pullOwner: (keys: readonly string[], threadId: string, ask?: 'guide' | 'custom') => post<{ ok: true }>(inboxUrl('/pulls/owner'), { keys: [...keys], thread_id: threadId, ...(ask ? { ask } : {}) }),
   /** Before a hand-off is sent: may these PRs go to an agent in `projectId`? (404 `pull_unknown`, 422 another project's.) */
@@ -2111,6 +2114,10 @@ export const inboxApi = {
   },
   /** Merge a PR the person confirmed (the popover's second click), at the head they saw. The server asks the forge first. */
   pullMerge: (key: string, headSha: string) => post<{ ok: true; key: string; method: 'merge' | 'squash' | 'rebase' | null; url: string }>(inboxUrl('/pulls/merge'), { key, head_sha: headSha, confirmed: true }),
+  /** The board's Close (approval "inbox-pr-board-bulk"): the host is asked first; a refusal throws its words. */
+  pullClose: (key: string) => post<{ ok: true; key: string; url: string }>(inboxUrl('/pulls/close'), { key }),
+  /** Close's Undo: taken only for a PR this Inbox closed in the last few minutes. */
+  pullReopen: (key: string) => post<{ ok: true; key: string; url: string }>(inboxUrl('/pulls/reopen'), { key }),
   pullOwnerCheck: (keys: readonly string[], projectId: string) => post<{ ok: true }>(inboxUrl('/pulls/owner'), { keys: [...keys], project_id: projectId, validate_only: true }),
   seeBoard: (throughSeq: number) => post<{ seen_seq: number }>(inboxUrl('/cards/seen'), { through_seq: throughSeq }),
   /** The Board's first-visit dialog: the first page on this computer to ask gets `show: true`, once per machine. */
@@ -2221,8 +2228,11 @@ export const inboxApi = {
   /** Add the thread to Priority (`true`) or remove it, or (`restore`) put back a `before` an earlier write answered. On the thread's own machine. */
   priority: (threadId: string, change: boolean | { restore: InboxPriorityBefore }) =>
     post<{ before: InboxPriorityBefore }>(threadUrl(threadId, '/priority'), typeof change === 'boolean' ? { priority: change } : change),
-  /** Put a thread in a tag (`on`) or take it out (approval "inbox-thread-tags"): the thread's tags after. */
-  setThreadTag: (threadId: string, tag: string, on: boolean) => post<{ tags: string[] }>(inboxUrl(`/threads/${encodeURIComponent(threadId)}/tags`), { tag, on }),
+  /**
+   * Put a thread in a tag (`on`) or take it out (approval "inbox-thread-tags"): the thread's tags after. On the thread's
+   * own machine, by the tag's id there or by its name (`{ name }`: that machine makes the tag when it has none).
+   */
+  setThreadTag: (threadId: string, tag: { tag: string } | { name: string }, on: boolean) => post<{ tags: string[] }>(threadUrl(threadId, '/tags'), { ...tag, on }),
   /** Snooze the thread until a time, or end its snooze (`null`). `at`: an earlier snooze's own time, for an Undo. On the thread's own machine. */
   snooze: (threadId: string, until: string | null, at?: string) =>
     post<{ snoozed: { until: string; at: string } | null }>(threadUrl(threadId, '/snooze'), { until, ...(at ? { at } : {}) }),
@@ -2247,6 +2257,7 @@ export const inboxApi = {
    */
   sendNow: (messageId: string, session?: string | null) =>
     post<{ message: InboxMessage }>(messageUrl(messageId, `/send-now`), session ? { session } : {}),
+  takeBack: (messageId: string) => post<{ message: InboxMessage; draft: InboxReplyDraft | null; compose: InboxDraft | null }>(messageUrl(messageId, '/take-back'), {}),
   newMessage: (threadId: string, input: { session: string; body: string; idempotency_key: string }) =>
     post<{ message: InboxMessage | null; replayed: boolean; held?: OutboxView }>(threadUrl(threadId, `/message`), input).catch((cause) => {
       // To another machine: held in the outbox, as a reply is; the thread shows it waiting.
@@ -2316,8 +2327,6 @@ export const inboxApi = {
   askSeen: (threadId: string, seenAt: string) => post<unknown>(inboxUrl(`/threads/${threadId}/ask/seen`), { seen_at: seenAt }),
   askStop: (threadId: string, turnId: string) => post<{ stopped: boolean }>(inboxUrl(`/threads/${threadId}/ask/stop`), { turn_id: turnId }),
   deleteProject: (projectId: string) => post<{ store: InboxStorageModel }>(inboxUrl(`/projects/${encodeURIComponent(projectId)}/delete`), {}),
-  /** Settings → Storage's Remove on a dated backup (the Inbox on SQLite only). */
-  removeBackup: (name: string) => post<{ store: InboxStorageModel }>(inboxUrl(`/settings/storage/backups/${encodeURIComponent(name)}/remove`), {}),
 };
 
 /** One question and what came of it (`packages/shared/inbox/ask.ts`). */

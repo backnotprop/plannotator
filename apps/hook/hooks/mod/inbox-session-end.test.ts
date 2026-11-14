@@ -58,7 +58,7 @@ async function world() {
       _meta: { [INBOX_WAKES_META_KEY]: true },
     })
   ).structuredContent as { message_id: string; thread_id: string }
-  const session = await ClaudeSession.start({ env: { PATH: process.env.PATH ?? '', HOME: home, PLANNOTATOR_DATA_DIR: dataDir }, cwd: project, store: new Map(), sessionId: SESSION, dataDir })
+  const session = await ClaudeSession.start({ env: { PATH: process.env.PATH ?? '', HOME: home, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: dataDir }, cwd: project, store: new Map(), sessionId: SESSION, dataDir })
   sessions.push(session)
   await until('the session to poll', async () =>
     ((await (await fetch(`${base}/api/inbox/threads/${asked.thread_id}/sessions`)).json()) as { sessions: { session: string }[] }).sessions.some((s) => s.session === SESSION),

@@ -2220,6 +2220,8 @@ describe("PlannotatorConfig schema", () => {
 // skipInstall config scoping.
 // ---------------------------------------------------------------------------
 
+const isRawBinaryCall = (c: string) => c.includes("/releases/download/") && !/\.(sha256|tar\.xz|gz)$/.test(c);
+
 const FAKE_BINARY = "fake plannotator binary\n";
 const FAKE_BINARY_SHA256 = createHash("sha256").update(FAKE_BINARY).digest("hex");
 const ATTESTATION_FIXTURE = join(scriptsDir, "fixtures", "attestations-response.json");
@@ -2356,6 +2358,9 @@ for a in "$@"; do
   esac
   prev="$a"
 done
+case "$url" in
+  */releases/download/*.tar.xz|*/releases/download/*.gz) echo "curl: (22) The requested URL returned error: 404" >&2; exit 22 ;;
+esac
 case "$url" in
   *".sha256") ;;
   */releases/download/*)
@@ -2544,7 +2549,7 @@ describe.skipIf(process.platform === "win32" || !Bun.which("node"))(
       // No pause between attempts: the bounds are counts, not time.
       const result = runInstallSh(sandbox, args, { STUB_CURL_LOG: log, PLANNOTATOR_DOWNLOAD_RETRY_DELAY: "0", ...env });
       const calls = existsSync(log) ? readFileSync(log, "utf8").trim().split("\n") : [];
-      const downloads = calls.filter((c) => c.includes("/releases/download/") && !c.endsWith(".sha256"));
+      const downloads = calls.filter(isRawBinaryCall);
       return { ...result, downloads, installed: readFileSync(installed, "utf8"), tmp: join(sandbox.home, "tmp") };
     }
 
@@ -2576,7 +2581,7 @@ describe.skipIf(process.platform === "win32" || !Bun.which("node"))(
       const result = runInstallSh(sandbox, args, { STUB_CURL_LOG: log, STUB_DOWNLOAD_FAIL: "92", PLANNOTATOR_DOWNLOAD_RETRY_DELAY: "0" });
       expect(result.code).toBe(0);
       const calls = readFileSync(log, "utf8").trim().split("\n");
-      const binaryCalls = calls.filter((c) => c.includes("/releases/download/") && !c.endsWith(".sha256"));
+      const binaryCalls = calls.filter(isRawBinaryCall);
       const checksumCalls = calls.filter((c) => c.includes("/releases/download/") && c.endsWith(".sha256"));
       expect(binaryCalls).toHaveLength(2);
       expect(binaryCalls[0]).toContain("--max-time 21600 ");

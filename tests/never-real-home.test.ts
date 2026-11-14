@@ -118,7 +118,7 @@ describe("refuseRealHome", () => {
   test("SimAgent.connect refuses a real or missing HOME without the sandbox flag", async () => {
     // A program that is not Plannotator: even without the guard, no Inbox could start here.
     const options = { binary: "/usr/bin/false", name: "x", host: "x" };
-    const env = { PATH: "/usr/bin:/bin", PLANNOTATOR_DATA_DIR: process.env.PLANNOTATOR_DATA_DIR! };
+    const env = { PATH: "/usr/bin:/bin", PLANNOTATOR_RELAY_URL: "http://127.0.0.1:9", PLANNOTATOR_DATA_DIR: process.env.PLANNOTATOR_DATA_DIR! };
     await expect(SimAgent.connect({ ...options, env })).rejects.toThrow("HOME must be a scratch folder");
     await expect(SimAgent.connect({ ...options, env: { ...env, HOME: account } })).rejects.toThrow("HOME must be a scratch folder");
     expect(() => refuseRealHome("", "test")).toThrow("HOME must be a scratch folder");

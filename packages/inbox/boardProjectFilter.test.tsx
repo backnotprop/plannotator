@@ -419,6 +419,62 @@ test.if(hasDom)('New initiative… makes one from the filter menu; Edit initiati
 
 });
 
+// One experience across the person's devices (owner, 2026-11-14): the Board's Tags are the sidebar's, one per name
+// across the linked machines. What regresses: a tag only the other machine holds missing from the dialog, the filter or
+// a card's menu; a rename that stays on this Inbox; a card put in such a tag naming the other machine's id.
+test.if(hasDom)("linked machines: the Tags dialog, the filter and a card's menu list the other machine's tags; a rename reaches it; a card in its tag makes the tag here by name", async () => {
+  scriptFetch();
+  const { tagsAcross } = await import('./tagsAcross');
+  const { machinesModel } = await import('./machines');
+  const SELF = `ibx_01K${'0'.repeat(22)}S`;
+  const MAC = `ibx_01K${'0'.repeat(22)}M`;
+  const view = (id: string, marks: string[]) => ({ id, name: id === SELF ? 'Studio' : 'MacBook', self: id === SELF, state: 'online' as const, since: AT, reason: null, version: '0.28.39', address: null, both_ways: true, waiting: 0, marks });
+  const machines = machinesModel([view(SELF, []), view(MAC, ['tags'])] as Parameters<typeof machinesModel>[0]);
+  const FAR_ONLY = 'ini_01JX00000000000000000000M1';
+  const tags = [
+    { ...INITIATIVES[0]!, machines: { [SELF]: SHAPE, [MAC]: 'ini_01JX00000000000000000000M2' } },
+    { ...INITIATIVES[1]!, machines: { [SELF]: MEMORY } },
+    { id: FAR_ONLY, name: 'Roadmap', created_at: AT, created_by: { kind: 'person' as const }, updated_at: AT, deleted_at: null, machines: { [MAC]: FAR_ONLY } },
+  ];
+  draw({ openCard: 'web_look', tagsAcross: tagsAcross(tags, machines) });
+  await settle();
+  await press($('[data-board-filter-button]')!);
+  expect(rows('data-board-initiative-option').map((r) => r.name)).toEqual(['All tags', 'Shape', 'Memory', 'Roadmap', 'No tag']);
+  await act(async () => $('[data-board-initiative-edit]')!.click());
+  await settle();
+  const dialog = $('[data-dialog="initiatives"]')!;
+  expect([...dialog.querySelectorAll('[data-initiative-row]')].map((r) => r.getAttribute('data-initiative-row'))).toEqual([SHAPE, MEMORY, FAR_ONLY]);
+  const rename = async (id: string, to: string) => {
+    posts.length = 0;
+    const name = dialog.querySelector<HTMLInputElement>(`[data-initiative-row="${id}"] [data-initiative-name]`)!;
+    await type(name, to);
+    await act(async () => name.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
+    await settle();
+    return posts.map((p) => [p.path, p.body.op, p.body.name]);
+  };
+  expect(await rename(SHAPE, 'Ship')).toEqual([
+    [`/api/inbox/initiatives/${SHAPE}`, 'rename', 'Ship'],
+    [`/api/inbox/m/${MAC}/initiatives/ini_01JX00000000000000000000M2`, 'rename', 'Ship'],
+  ]);
+  expect(await rename(FAR_ONLY, 'Plan')).toEqual([[`/api/inbox/m/${MAC}/initiatives/${FAR_ONLY}`, 'rename', 'Plan']]);
+  // A name another machine's tag has is refused here, before anything is written.
+  expect(await rename(MEMORY, 'roadmap')).toEqual([]);
+  expect(dialog.querySelector('[data-initiative-error]')?.textContent).toBe('There is already a tag named Roadmap.');
+  await act(async () => dialog.querySelector<HTMLElement>('[data-initiatives-done]')!.click());
+  await settle();
+
+  // The opened card: Roadmap is offered; picked, this Inbox makes its own Roadmap and the card names that.
+  await press($('[data-card-panel="web_look"] [data-card-initiative]')!);
+  expect($$('[data-card-initiative-menu] [data-card-initiative-option]').map((o) => o.textContent?.trim())).toEqual(['Shape', 'Memory', 'Roadmap', 'No tag']);
+  posts.length = 0;
+  await act(async () => $(`[data-card-initiative-menu] [data-card-initiative-option="${FAR_ONLY}"]`)!.click());
+  await settle();
+  expect(posts).toEqual([
+    { path: '/api/inbox/initiatives', body: { name: 'Roadmap' } },
+    { path: '/api/inbox/cards/web_look', body: { op: 'initiative', initiative: 'ini_01JX0000000000000000000009' } },
+  ]);
+});
+
 // The owner, 2026-11-04: "delete initiatives very simply without friction". The failures guarded: a question coming
 // back; an Undo drawn under the modal (the page behind it is inert, so it could not be pressed) or lost on Done; a
 // double click deleting the row that moved up under the pointer.

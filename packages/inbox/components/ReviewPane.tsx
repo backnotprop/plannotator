@@ -116,6 +116,7 @@ import { Tip } from './Tip';
 import { RailTree } from '../pulls/RailTree';
 import { reviewFiles } from '../pulls/reviewFiles';
 import { FileTreeMark } from '../pulls/fileTreeMark';
+import { failedCommentWrite, watchCommentWrites, withCommentWrites } from '../commentSaves';
 
 // `#guide-reader` is packages/inbox/guide/GuideReader.tsx (package.json `imports`).
 const GuideReader = GuideReaderPart.Part;
@@ -866,12 +867,24 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
       const plan = verdictOf(id, records.length > 0);
       setSending(true);
       setSendError(null);
+      const commentWrites = watchCommentWrites();
       try {
+        // As a reply's Send does (Thread.tsx): a verdict that carries the comments carries one still saving too, and
+        // one that failed stops it. The verdict itself stays the one the person pressed.
+        const writes = await commentWrites.settled();
+        const failed = failedCommentWrite(writes, new Set([message.id, ...records.map((r) => r.id)]));
+        if (failed) {
+          if (!mounted.current) return;
+          setSendError(failed.remove ? 'The comment was not removed.' : 'The comment was not saved.');
+          setSending(false);
+          return;
+        }
+        const carried = withCommentWrites(records, writes, thread.thread_id).filter((r) => r.guide && r.message_id === message.id);
         if (plan.discard) {
-          for (const record of records) await inboxApi.removeAnnotation(record.id);
+          for (const record of carried) await inboxApi.removeAnnotation(record.id);
           setRecords([]);
         }
-        const parts = verdictReply(plan, message.guide?.title ?? snapshot.guide.title, plan.discard ? [] : records, note);
+        const parts = verdictReply(plan, message.guide?.title ?? snapshot.guide.title, plan.discard ? [] : carried, note);
         const input = { words: parts.words, questions: [], ...(parts.feedback ? { feedback: parts.feedback, annotation_ids: parts.annotation_ids } : {}), ...(parts.uploads ? { uploads: parts.uploads } : {}), review_verdict: plan.verdict, ...(to ? { to } : {}) };
         await inboxApi.reply(message.id, { idempotency_key: keys.current.keyFor(input), ...input });
         keys.current.done();
@@ -890,9 +903,11 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
           setSendError(cause instanceof InboxApiError || cause instanceof Error ? cause.message : 'Your verdict was not sent.');
         }
         setSending(false);
+      } finally {
+        commentWrites.stop();
       }
     },
-    [sending, snapshot, records, setRecords, message.id, message.guide?.title, onSent, onBack, askerEnded, anyOtherLive, asking, live],
+    [sending, snapshot, records, setRecords, message.id, message.guide?.title, thread.thread_id, onSent, onBack, askerEnded, anyOtherLive, asking, live],
   );
   const spec = useMemo(
     () => buildDecisionSpec({ app: 'review', gate: true, count: comments.length, hasFeedback: comments.length > 0, approvalNotesSupported: true }),

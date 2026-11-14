@@ -361,10 +361,28 @@ button.ib-prs-box:focus-visible { outline: 2px solid var(--ring); outline-offset
 .ib-prtb .ib-prtb-c .ib-prs-box { vertical-align: middle; }
 .ib-prtb-r[data-picked] td,
 .ib-prtb-r[data-picked]:hover td { background: var(--ib-cur-bg); }
-/* A phone: the count and Clear in a sheet at the bottom, 44 px to tap; the filter row keeps Done. */
+/* A phone: the count, Merge and Clear in a sheet at the bottom, 44 px to tap, the list above them; the filter row keeps Done. */
 .ib-prs-picksheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; display: flex; align-items: center; gap: 12px; padding: 10px 12px calc(12px + var(--pn-safe-bottom, 0px)) 18px; border-radius: 14px 14px 0 0; background: var(--popover); color: var(--popover-foreground); box-shadow: var(--ib-float-s, 0 0 0 1px var(--border), 0 -12px 30px -12px oklch(0 0 0 / 0.45)); }
 .ib-prs-picksheet .ib-prs-picked { font-size: var(--ib-fs-15, 15px); }
+/* Bulk Merge (approval "inbox-pr-board-bulk"): Merge N, its second click green as the popover's, the hint beside it,
+   and under the bar the confirm's list (what merges, what stays and why) or the report. */
+.ib-prs-btn[data-merge='confirm'] { background: var(--success, oklch(0.62 0.15 150)); color: var(--success-foreground, #fff); }
+.ib-prs-btn[data-merge='confirm']:hover { background: color-mix(in oklch, var(--success, oklch(0.62 0.15 150)) 88%, var(--foreground)); }
+.ib-prs-mnote { min-width: 0; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
+.ib-prs-merging { font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ib-prs-mlist { flex: 1 0 100%; display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; font-size: var(--ib-fs-13, 13px); }
+.ib-prs-mlist li { display: flex; align-items: baseline; gap: 8px; min-width: 0; overflow-wrap: anywhere; }
+.ib-prs-mlist li > svg { flex: none; align-self: center; color: var(--success, oklch(0.62 0.15 150)); }
+.ib-prs-mn { flex: none; font-family: var(--font-mono); font-size: var(--ib-fs-12-5, 12.5px); font-variant-numeric: tabular-nums; }
+.ib-prs-mt { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted-foreground); }
+.ib-prs-mskip { color: var(--muted-foreground); }
+.ib-prs-mlist .ib-prs-mbad { color: var(--destructive); }
+.ib-prs-picksheet { flex-direction: column; align-items: stretch; gap: 10px; max-height: 70vh; overflow-y: auto; }
+.ib-prs-pickrow { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 12px; }
+.ib-prs-picksheet .ib-prs-mlist { font-size: var(--ib-fs-14, 14px); }
 .ib-prs-picksheet .ib-prs-btn { height: 44px; padding: 0 18px; font-size: var(--ib-fs-15, 15px); }
+/* The window's toast (Close's count with Undo) sits above the phone's pick sheet, never over its buttons (SheetPage's useToastAbove). */
+.pn-inbox[data-prs-sheet] .ib-toast { bottom: calc(var(--ib-prs-sheet-h, 0px) + 8px); }
 .ib-prs[data-phone] .ib-prs-bar .ib-prs-btn { height: 36px; padding: 0 14px; }
 .ib-prs[data-phone][data-picking] .ib-prs-scroll { padding-bottom: 96px; }
 
