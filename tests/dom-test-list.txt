@@ -736,6 +736,7 @@ packages/review-editor/components/PRDescriptionVideo.test.tsx
 packages/ui/components/CommentPopover.hostDraft.test.tsx
 packages/ui/components/CodeSnippetPreview.lineClick.test.tsx
 packages/review-editor/live/live.dom.test.tsx
+packages/review-editor/components/minimap/DiffMinimap.sync.test.tsx
 packages/ui/components/Viewer.blockRedraws.test.tsx
 packages/editor/hooks/useCheckboxOverrides.viewer.test.tsx
 packages/ui/components/TaterSpriteSlots.test.tsx
