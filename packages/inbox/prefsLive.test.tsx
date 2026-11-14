@@ -38,6 +38,10 @@ let savedEventSource: unknown;
 const streams = new Set<ClientRequest>();
 /** Every frame name the window's stream has delivered. */
 const heard: string[] = [];
+/** The window's settings reads: how many began, the latest one answered, and how many had begun as each `prefs` frame arrived. */
+let settingsReads = 0;
+let lastAnsweredRead = 0;
+const readsAtPrefsFrame: number[] = [];
 
 function loopback(path: string, method = 'GET', body?: string): Promise<{ status: number; text: string }> {
   return new Promise((done, fail) => {
@@ -77,6 +81,7 @@ class LoopbackEventSource {
           }
           if (data.length === 0) continue;
           heard.push(name);
+          if (name === 'prefs') readsAtPrefsFrame.push(settingsReads);
           const event = new MessageEvent(name, { data: data.join('\n'), lastEventId: id });
           for (const listener of this.listeners.get(name) ?? []) act(() => listener(event as MessageEvent<string>));
         }
@@ -141,8 +146,13 @@ beforeEach(() => {
   resetInboxThemeForTests();
   resetInboxDiffOptionsForTests();
   savedFetch = globalThis.fetch;
+  settingsReads = 0;
+  lastAnsweredRead = 0;
+  readsAtPrefsFrame.length = 0;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const read = (init?.method ?? 'GET') === 'GET' && String(input).includes('/api/inbox/settings?') ? ++settingsReads : 0;
     const answer = await loopback(String(input), init?.method ?? 'GET', init?.body ? String(init.body) : undefined);
+    if (read) lastAnsweredRead = Math.max(lastAnsweredRead, read);
     return new Response(answer.text, { status: answer.status, headers: { 'Content-Type': 'application/json' } });
   }) as typeof fetch;
   savedEventSource = (globalThis as Record<string, unknown>).EventSource;
@@ -173,9 +183,11 @@ async function until(check: () => boolean, what: string) {
   throw new Error(`timed out waiting for ${what}`);
 }
 
-async function settle(ms: number) {
+/** Until the `frames`th `prefs` frame has arrived and a settings read begun after it has answered, then one turn for the window to take it. */
+async function readAfterFrame(frames: number, what: string) {
+  await until(() => readsAtPrefsFrame.length >= frames && lastAnsweredRead > readsAtPrefsFrame[frames - 1]!, what);
   await act(async () => {
-    await new Promise((r) => setTimeout(r, ms));
+    await new Promise((r) => setTimeout(r, 0));
   });
 }
 
@@ -189,25 +201,32 @@ test.skipIf(!hasDom)('a save from another window or an agent shows at once; a co
     root = createRoot(host!);
     root.render(<InboxApp />);
   });
-  await until(() => host!.querySelector(`[data-thread-id="${thread}"]`) !== null && heard.includes('hello'), 'the list and the event stream');
-  await settle(300);
-  expect(textSize()).toBe('');
-  expect(configStore.get('themePair').mode).toBe('dark');
-  expect(configStore.get('diffStyle')).toBe('split');
+  await until(() => host!.querySelector(`[data-thread-id="${thread}"]`) !== null && heard.includes('hello') && lastAnsweredRead > 0, 'the list, the event stream and the first settings read');
+  // Whatever this page started with (the theme follows the system until one is saved): each step moves away from it.
+  const startSize = textSize();
+  const startMode = configStore.get('themePair').mode;
+  const otherMode = startMode === 'light' ? 'dark' : 'light';
+  const otherStyle = configStore.get('diffStyle') === 'split' ? 'unified' : 'split';
 
-  // config.json changed with no save through the Inbox (what a window saw before `event: prefs`): nothing moves.
-  writeOnDisk({ inboxTextSize: 12, theme: { mode: 'light' } });
-  await settle(600);
-  expect(textSize()).toBe('');
-  expect(configStore.get('themePair').mode).toBe('dark');
+  // config.json changed with no save through the Inbox (what a window saw before `event: prefs`), then a frame that
+  // names another key: the window reads its settings again and still moves neither.
+  writeOnDisk({ inboxTextSize: 12, theme: { mode: otherMode } });
+  expect((await loopback('/api/inbox/prefs', 'POST', JSON.stringify({ set: { 'sound.volume': 40 } }))).status).toBe(200);
+  await readAfterFrame(1, 'the settings read after the sound frame');
+  expect(textSize()).toBe(startSize);
+  expect(configStore.get('themePair').mode).toBe(startMode);
 
   // Another window saves the text size from Settings.
   expect((await loopback('/api/inbox/settings', 'POST', JSON.stringify({ text_size: 13 }))).status).toBe(200);
-  await until(() => textSize() === '13', 'the text size from the other window');
+  await readAfterFrame(2, 'the settings read after the text size frame');
+  expect(textSize()).toBe('13');
 
   // An agent sets the theme and the diff layout through the preference route.
-  const agent = await loopback('/api/inbox/prefs', 'POST', JSON.stringify({ set: { 'appearance.theme': 'light', 'diff.style': 'unified', 'appearance.text_size': 15 } }));
+  const agent = await loopback('/api/inbox/prefs', 'POST', JSON.stringify({ set: { 'appearance.theme': otherMode, 'diff.style': otherStyle, 'appearance.text_size': 15 } }));
   expect(agent.status).toBe(200);
-  await until(() => configStore.get('themePair').mode === 'light' && configStore.get('diffStyle') === 'unified' && textSize() === '15', 'the agent’s theme, diff layout and text size');
-  expect(heard.filter((name) => name === 'prefs').length).toBe(2);
+  await readAfterFrame(3, 'the settings read after the agent’s frame');
+  expect(configStore.get('themePair').mode).toBe(otherMode);
+  expect(configStore.get('diffStyle')).toBe(otherStyle);
+  expect(textSize()).toBe('15');
+  expect(heard.filter((name) => name === 'prefs').length).toBe(3);
 });
