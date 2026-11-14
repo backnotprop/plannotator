@@ -33,6 +33,7 @@ export const sharedConfig = defineConfig({
       // highlights with Shiki. See build/pierre-highlights-stub.ts.
       '@pierre/highlights/themes/loader': path.resolve(__dirname, '../../build/pierre-highlights-stub.ts'),
       '@pierre/highlights': path.resolve(__dirname, '../../build/pierre-highlights-stub.ts'),
+      '@pierre/patches': path.resolve(__dirname, '../../build/pierre-patches-stub.ts'),
       '@plannotator/shared': path.resolve(__dirname, '../../packages/shared'),
       '@plannotator/ui': path.resolve(__dirname, '../../packages/ui'),
       '@plannotator/inbox': path.resolve(__dirname, '../../packages/inbox/index.ts'),
