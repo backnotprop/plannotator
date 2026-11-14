@@ -28,7 +28,7 @@ import {
   handleServerReady,
   handleUpload,
 } from "./shared-handlers";
-import { detectGitUser, getServerConfig, saveConfig } from "./config";
+import { detectGitUser, getServerConfig, parseDisplayOptionsConfig, saveConfig } from "./config";
 import { agentToolHostForServer } from "./ai-runtime";
 import { isFaviconStyle, type FaviconStyle } from "@plannotator/shared/favicon";
 import { isWSL } from "./browser";
@@ -148,6 +148,7 @@ export async function startGoalSetupServer(
               const body = (await req.json()) as {
                 displayName?: string;
                 diffOptions?: Record<string, unknown>;
+                displayOptions?: unknown;
                 theme?: Record<string, unknown>;
                 favicon?: FaviconStyle;
                 conventionalComments?: boolean;
@@ -159,6 +160,13 @@ export async function startGoalSetupServer(
               }
               if (body.diffOptions !== undefined) {
                 toSave.diffOptions = body.diffOptions;
+              }
+              if (body.displayOptions !== undefined) {
+                const displayOptions = parseDisplayOptionsConfig(body.displayOptions);
+                if (!displayOptions) {
+                  return Response.json({ error: "Invalid displayOptions" }, { status: 400 });
+                }
+                toSave.displayOptions = displayOptions;
               }
               if (body.theme !== undefined) {
                 toSave.theme = body.theme;

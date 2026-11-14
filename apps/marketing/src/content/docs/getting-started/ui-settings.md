@@ -73,6 +73,8 @@ Controls how the repository is named beside the document, in the plan diff, in c
 
 On first launch, Plannotator shows a one-time setup dialog for these display options.
 
+The Display settings and the Select / Pinpoint selection mode are also saved to `~/.plannotator/config.json` under `displayOptions`, so they carry over to another host name and survive cleared cookies. A value in config.json wins over the cookie.
+
 ### Table of Contents
 
 Toggle the sidebar navigation panel on desktop. Enabled by default. On mobile, the sidebar is always hidden regardless of this setting.

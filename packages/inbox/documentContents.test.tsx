@@ -294,8 +294,9 @@ test.skipIf(!hasDom)('Hide in the open panel is remembered for the next file; th
   click(railOf()!.querySelector('[data-contents-hide]'));
   expect(railOf()).toBeNull();
   expect(storage.getItem(CONTENTS_COOKIE)).toBe('hidden');
-  // Plan review's own setting is not this one.
-  expect(storage.getItem('plannotator-toc-enabled')).toBeNull();
+  // Plan review's own setting is not this one: Hide never turns it off. (The
+  // config store may seed it with its default, true, when the store loads.)
+  expect(storage.getItem('plannotator-toc-enabled')).not.toBe('false');
   expect(host!.querySelector('[data-contents-show]')).not.toBeNull();
 
   act(() => root?.unmount());

@@ -51,11 +51,21 @@ describe('documentFontFamily setting', () => {
     expect(SETTINGS.documentFontFamily.fromCookie()).toBe('IowanOld Style');
   });
 
-  test('it is cookie-only and does not share the code font cookie', () => {
+  test('it does not share the code font cookie', () => {
     const values = installBackend();
     SETTINGS.documentFontFamily.toCookie('Georgia');
     expect([...values.keys()]).toEqual([KEY]);
-    expect(SETTINGS.documentFontFamily.serverKey).toBeUndefined();
+  });
+
+  test('config.json carries it as displayOptions.fontFamily, and an empty string (the theme font) is a value', () => {
+    const def = SETTINGS.documentFontFamily;
+    expect(def.serverKey).toBe('displayOptions');
+    expect(def.toServer('Georgia')).toEqual({ displayOptions: { fontFamily: 'Georgia' } });
+    expect(def.fromServer({ displayOptions: { fontFamily: 'Georgia' } })).toBe('Georgia');
+    expect(def.fromServer({ displayOptions: { fontFamily: '' } })).toBe('');
+    expect(def.fromServer({ displayOptions: { fontFamily: 'Iowan\nOld Style' } })).toBe('IowanOld Style');
+    expect(def.fromServer({ displayOptions: { fontFamily: 3 } })).toBeUndefined();
+    expect(def.fromServer({})).toBeUndefined();
   });
 });
 
