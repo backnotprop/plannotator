@@ -204,10 +204,17 @@ describe.skipIf(!hasDom)('The Changes tree on Pierre trees', () => {
     expect(row(el, 'Generated/').getAttribute('aria-expanded')).toBe('true');
   });
 
-  test('a long file name is cut in the middle so its extension stays, with the full path in the title', async () => {
-    const el = await mount(<Tree files={[file('src/an-extremely-long-file-name-for-the-tree.ts')]} activeFileIndex={0} />);
-    const target = row(el, 'an-extremely-long-file-name-for-the-tree.ts');
-    expect(target.querySelector('[data-truncate-container]')).not.toBeNull();
+  test('a file name is a stem cut at whole letters and a tail that always shows: the last three letters and the extension', async () => {
+    const el = await mount(<Tree files={[file('src/an-extremely-long-file-name-for-the-tree.ts'), file('legacy/step0.py'), file('legacy/step1.py'), file('src/a.ts')]} activeFileIndex={0} />);
+    const name = (path: string) => row(el, rows(el).find((p) => p?.endsWith(path))!).querySelector<HTMLElement>('[data-item-name]')!;
+    const long = name('an-extremely-long-file-name-for-the-tree.ts');
+    expect(long.querySelector('[data-item-name-stem]')!.textContent).toBe('an-extremely-long-file-name-for-the-t');
+    expect(long.querySelector('[data-item-name-tail]')!.textContent).toBe('ree.ts');
+    expect(long.textContent).toBe('an-extremely-long-file-name-for-the-tree.ts');
+    expect(name('step0.py').querySelector('[data-item-name-tail]')!.textContent).toBe('ep0.py');
+    expect(name('step1.py').querySelector('[data-item-name-tail]')!.textContent).toBe('ep1.py');
+    expect(name('a.ts').querySelector('[data-item-name-stem]')).toBeNull();
+    const target = row(el, rows(el).find((p) => p?.endsWith('tree.ts'))!);
     expect(target.getAttribute('title') ?? target.querySelector('[title]')?.getAttribute('title')).toContain('src/an-extremely-long-file-name-for-the-tree.ts');
   });
 
