@@ -942,7 +942,7 @@ export function checksOffWords(details: UpdateDetails | null): ReactNode {
  * button to also show up in the general part of settings"): the version this
  * Inbox runs and the same action the sidebar's Update button offers, plus
  * Check now; the failing-check line with the install command when checking
- * fails. The page never renders it for a tailnet guest.
+ * fails.
  */
 export function GeneralUpdateRow({
   version,
@@ -1074,9 +1074,8 @@ export function AboutBlock({
   whatsNewRunning = false,
 }: {
   /**
-   * False on a tailnet guest's page, where every /api/inbox/update* route
-   * answers 403 local_only: the block shows the version and What's new in it,
-   * and no Update, Check now or update switch.
+   * False until the settings are read: the block shows the version and
+   * What's new in it, and no Update, Check now or update switch.
    */
   updates?: boolean;
   /**

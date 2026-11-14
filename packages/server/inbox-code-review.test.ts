@@ -121,10 +121,9 @@ describe("the Code review switch", () => {
     expect(await read()).toBeUndefined();
   });
 
-  test("only the owner turns it on: a tailnet guest is refused and the switch stays as it was", async () => {
+  test("the owner turns it on from a phone over the tailnet", async () => {
     const MAGIC = "macbook-pro.tail0000.ts.net";
     const OWNER = "ramos@example.com";
-    const GUEST = "guest@example.com";
     const savedTailscale = process.env.PLANNOTATOR_INBOX_TAILSCALE;
     delete process.env.PLANNOTATOR_INBOX_TAILSCALE;
     try {
@@ -133,7 +132,7 @@ describe("the Code review switch", () => {
       const dataDir = join(root, "data");
       mkdirSync(dataDir, { recursive: true });
       process.env.PLANNOTATOR_DATA_DIR = dataDir;
-      writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxTailscale: true, inboxTailscaleAllow: [GUEST] }));
+      writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxTailscale: true }));
       const server = await startInboxServer({ dataDir, binaryPath: null, phones: false, tailscale: scriptedTailscale(MAGIC, OWNER) });
       servers.push(server);
       const listener = server.tailscale.listenerPort();
@@ -146,11 +145,7 @@ describe("the Code review switch", () => {
         });
       const config = () => JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")) as { inboxCodeReview?: boolean };
 
-      const guest = await through(GUEST);
-      expect(guest.status).toBe(403);
-      expect(((await guest.json()) as { code: string }).code).toBe("local_only");
       expect(config().inboxCodeReview).toBeUndefined();
-
       expect((await through(OWNER)).status).toBe(200);
       expect(config().inboxCodeReview).toBe(true);
     } finally {

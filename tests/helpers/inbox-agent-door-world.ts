@@ -120,6 +120,7 @@ export async function doorWorld(cleanups: ReturnType<typeof doorCleanups>) {
     pair,
     door,
     thread,
+    mcp,
     localSend,
     restart,
     local,

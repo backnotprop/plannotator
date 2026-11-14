@@ -41,7 +41,6 @@ function route(switches: { codeReview: boolean; boards: boolean }) {
     serverSession: SESSION,
     readBody: async (req) => (await req.json()) as Record<string, unknown>,
     json: (body, status = 200) => Response.json(body, { status }),
-    isGuest: () => false,
     onChange: () => {},
     token: "t",
     hostOf: () => null,

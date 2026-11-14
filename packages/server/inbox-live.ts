@@ -27,10 +27,9 @@
  *   refuses a response carrying the Plannotator server header, and the
  *   proxy refuses one on every response (#2190). A proxied Plannotator page
  *   would otherwise get same-origin writes on that server.
- * - Every route here is a window route. Through the tailnet it answers the
- *   machine's owner only (`403 owner_only` to a login the allowlist adds;
- *   the owner, 2026-11-09: "Should serve the prototype so it's viewable on
- *   the phone"), and the window frames the prototype relay
+ * - Every route here is a window route. Through the tailnet (only the
+ *   machine's owner gets that far; the owner, 2026-11-09: "Should serve the
+ *   prototype so it's viewable on the phone") the window frames the prototype relay
  *   (inbox-live-relay.ts) instead of the loopback proxy; the device door does
  *   not list them. The proxy itself binds 127.0.0.1.
  * - Reads and writes alike refuse another site's page
@@ -217,11 +216,9 @@ export interface InboxLiveSitesOptions {
   /** The clock (tests). */
   now?: () => number;
   /**
-   * Over your tailnet (inbox-tailscale.ts): who is the owner, the relay's origin (mapped on first use) and the window's
-   * tailnet origin. Absent: every live route answers the tailnet `403 local_only`.
+   * Over your tailnet (inbox-tailscale.ts): the relay's origin (mapped on first use) and the window's tailnet origin. Absent: every live route answers the tailnet `403 local_only`.
    */
   tailnet?: {
-    isOwner: (req: Request) => boolean;
     openRelay: (handlers: InboxTailnetRelayHandlers) => Promise<string>;
     windowOrigin: () => string | null;
   };
@@ -390,11 +387,7 @@ export function createInboxLiveSites(options: InboxLiveSitesOptions): InboxLiveS
 
   const route = async (req: Request, path: string, via: "local" | "tailnet"): Promise<Response | null> => {
     if (!isInboxLivePath(path)) return null;
-    // Through the tailnet: the machine's owner only (their phone), never a login the allowlist adds.
-    if (via === "tailnet") {
-      if (!options.tailnet) return options.localOnly();
-      if (!options.tailnet.isOwner(req)) return json({ error: "A prototype opens only for this computer's owner.", code: "owner_only" }, 403);
-    }
+    if (via === "tailnet" && !options.tailnet) return options.localOnly();
     // Another site's page (the proxied app is same-site with this window) never reads or writes here.
     if (!isSameOriginOrNoOrigin(req.headers.get("origin"), req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
       return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
