@@ -9,11 +9,19 @@ const SETTLE_MS = 3000;
 const READING_MS = 20_000;
 const RETRY_MS = 100;
 
-const contexts = new Set<BrowserContext>();
+const contexts = new Map<BrowserContext, { file: string | null; checked: boolean }>();
 const tracked = new WeakSet<Browser>();
 
+function specFile(): string | null {
+  try {
+    return base.info().file;
+  } catch {
+    return null;
+  }
+}
+
 async function prepare(context: BrowserContext): Promise<BrowserContext> {
-  contexts.add(context);
+  contexts.set(context, { file: specFile(), checked: true });
   context.on('close', () => contexts.delete(context));
   await context.addInitScript(() => {
     (window as { __plannotatorInboxHeld?: object }).__plannotatorInboxHeld = {};
@@ -69,9 +77,10 @@ async function pageDrift(page: Page): Promise<string | null> {
   }
 }
 
-export async function heldDriftOfPages(): Promise<string | null> {
+export async function heldDriftOfPages(file?: string): Promise<string | null> {
   const out: string[] = [];
-  for (const context of contexts) {
+  for (const [context, opened] of contexts) {
+    if (!opened.checked || (file !== undefined && opened.file !== null && opened.file !== file)) continue;
     for (const page of context.pages()) {
       if (page.isClosed()) continue;
       const drift = await pageDrift(page);
@@ -81,17 +90,26 @@ export async function heldDriftOfPages(): Promise<string | null> {
   return out.length > 0 ? out.join('\n\n') : null;
 }
 
+async function closeEarlierFiles(file: string): Promise<void> {
+  for (const [context, opened] of [...contexts]) {
+    if (opened.file === null || opened.file === file) continue;
+    contexts.delete(context);
+    await context.close().catch(() => {});
+  }
+}
+
 const off = (info: TestInfo) => info.annotations.some((annotation) => annotation.type === HELD_DRIFT_OFF);
 
 export const test = base.extend<{ heldDrift: void }, { browser: Browser }>({
   browser: [async ({ browser }, use) => use(track(browser)), { scope: 'worker' }],
   heldDrift: [
     async ({}, use, info) => {
-      const before = new Set(contexts);
+      await closeEarlierFiles(info.file);
+      const before = new Set(contexts.keys());
       await use();
-      if (off(info)) for (const context of [...contexts]) if (!before.has(context)) contexts.delete(context);
+      if (off(info)) for (const [context, opened] of contexts) if (!before.has(context)) opened.checked = false;
       if (off(info) || info.status !== info.expectedStatus) return;
-      const drift = await heldDriftOfPages();
+      const drift = await heldDriftOfPages(info.file);
       if (drift) throw new Error(`The window's held copy differs from a fresh read of the Inbox (tests/e2e/inbox-test.ts):\n${drift}`);
     },
     { auto: true },
