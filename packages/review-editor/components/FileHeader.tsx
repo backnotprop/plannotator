@@ -360,7 +360,7 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
           </button>
         )}
         <CallFlowFileBadge filePath={filePath} oldPath={oldPath} />
-        {semanticNote}
+        {!isVeryTight && semanticNote}
         <SemanticFileBadge filePath={filePath} />
         {/* Edit entry lives at the far right of the row, next to the file
             actions dropdown, so the experimental affordance stays out of the

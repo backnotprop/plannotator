@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeAll, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, utimesSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { INBOX_START_LOCK, readInboxRegistry } from "@plannotator/shared/inbox/registry";
@@ -48,6 +48,8 @@ test(
     db.run(readFileSync(join(inbox, "inbox.sql"), "utf8"));
     db.close();
     rmSync(join(inbox, "inbox.sql"));
+    const log = join(inbox, "inbox.log");
+    const release = join(root, "release");
     const env = {
       ...agents.env,
       HOME: home,
@@ -61,16 +63,19 @@ test(
       PLANNOTATOR_UPDATE_CHECK: "0",
       PLANNOTATOR_TEST_SANDBOX: "1",
       PLANNOTATOR_INBOX_START_TIMEOUT_MS: "3000",
-      PLANNOTATOR_INBOX_RETURN_DELAY_MS: "8000",
+      PLANNOTATOR_INBOX_RETURN_HOLD: release,
     };
+    const held = () => (existsSync(log) ? readFileSync(log, "utf8").match(/the way back held/g)?.length ?? 0 : 0);
 
     const first = start(root, env);
-    const at = Date.now();
-    while (!existsSync(join(inbox, INBOX_RETURN_PARTIAL))) await Bun.sleep(50);
+    while (held() === 0) await Bun.sleep(50);
+    const heldAt = Date.now();
     const old = new Date(Date.now() - 120_000);
     utimesSync(join(inbox, INBOX_START_LOCK), old, old);
-    await Bun.sleep(Math.max(0, 3_500 - (Date.now() - at)));
     const second = start(root, env);
+    await Bun.sleep(4_000);
+    await Bun.sleep(Math.max(0, heldAt + 3_500 - Date.now()));
+    writeFileSync(release, "");
     const [a, b] = await Promise.all([first, second]);
     let named = inboxEntryOf(dataDir);
     for (let waited = 0; !named && waited < 15_000; waited += 100) {
@@ -80,14 +85,13 @@ test(
     if (named) started.push({ entry: named, root });
 
     expect(a.code).toBe(0);
-    expect(a.ms).toBeGreaterThan(8_000);
     expect(b.code).toBe(0);
     expect(b.stdout).toBe(a.stdout);
     expect(a.stdout.trim()).toBe(readInboxRegistry(dataDir)!.url);
-    const log = readFileSync(join(inbox, "inbox.log"), "utf8");
-    expect(log.match(/moved back from inbox\.db/g)).toHaveLength(1);
-    expect(log).not.toContain("could not start");
-    expect(log.match(/the way back held/g)).toHaveLength(1);
+    const written = readFileSync(log, "utf8");
+    expect(written.match(/moved back from inbox\.db/g)).toHaveLength(1);
+    expect(written).not.toContain("could not start");
+    expect(held()).toBe(1);
     expect(existsSync(join(inbox, INBOX_DB_FILE))).toBe(false);
     expect(existsSync(join(inbox, "seq.json"))).toBe(true);
     expect(existsSync(join(inbox, "initiatives.jsonl"))).toBe(true);
