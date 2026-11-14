@@ -97,8 +97,12 @@ export const RepoTreeView: React.FC<RepoTreeViewProps> = (props) => {
     const { props: p, changedIndex: index, stageColumn: withStage } = live.current;
     if (row.name === LOADING) return { tone: 'loading' };
     const at = index.get(row.path);
-    if (at !== undefined) return fileRowParts(p.files[at], p, withStage);
     const onDisk = p.repo.onDisk[row.path];
+    if (at !== undefined) {
+      const parts = fileRowParts(p.files[at], p, withStage);
+      if (onDisk && parts.trail) parts.trail = [{ text: '\u25cf', color: 'var(--warning)', title: ON_DISK_TITLES[onDisk] }, ...parts.trail.slice(1)];
+      return parts;
+    }
     const notes = p.annotationCounts.get(row.path) ?? 0;
     const lead = [p.showViewedControls ? null : undefined, withStage ? null : undefined].filter((cell) => cell !== undefined) as null[];
     return {
