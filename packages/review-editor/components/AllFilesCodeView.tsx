@@ -1,5 +1,5 @@
 import { COMPACT_FILE_HEADER_HEIGHT, COMPACT_HUNK_SEPARATOR_HEIGHT, FILE_HEADER_HEIGHT, HUNK_SEPARATOR_HEIGHT } from '../utils/diffChromeMetrics';
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { memo, startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ContextNoteAnchor } from '../utils/contextNoteAnchor';
 import { createPortal } from 'react-dom';
 import { DEFAULT_CODE_VIEW_FILE_METRICS, getSingularPatch } from '@pierre/diffs';
@@ -61,6 +61,7 @@ import { ToolbarHost, type ToolbarHostHandle } from './ToolbarHost';
 import type { DiffSelectionActions } from './SelectionChooser';
 import { FileHeader } from './FileHeader';
 import { createKeptWholeFiles, type WholeFileText } from '../utils/wholeFileText';
+import { ReviewStateProvider, useReviewStateOptional, type ReviewState } from '../dock/ReviewStateContext';
 import { DiffBottomBar } from './DiffBottomBar';
 import { BinaryFileNotice } from './BinaryFileNotice';
 import { GeneratedFileNotice } from './GeneratedFileNotice';
@@ -687,6 +688,30 @@ function buildItemIdentity(
  * hunks, so Pierre draws nothing under the header slot that holds the
  * preview. A distinct cacheKey keeps highlight caches apart.
  */
+function reviewStateMatchesIgnoringFocus(previous: ReviewState | null, next: ReviewState | null): boolean {
+  if (previous === next) return true;
+  if (previous == null || next == null) return false;
+  const keys = Object.keys(next) as (keyof ReviewState)[];
+  if (keys.length !== Object.keys(previous).length) return false;
+  return keys.every((key) => key === 'focusedFileIndex' || previous[key] === next[key]);
+}
+
+interface FileHeaderSlotProps {
+  item: CodeViewItem<DiffAnnotationMetadata>;
+  version: number;
+  inputs: object;
+  render: (item: CodeViewItem<DiffAnnotationMetadata>, settled: boolean) => React.ReactNode;
+}
+
+const FileHeaderSlot = memo(
+  function FileHeaderSlot({ item, render }: FileHeaderSlotProps) {
+    const [settled, setSettled] = useState(false);
+    useEffect(() => startTransition(() => setSettled(true)), []);
+    return <>{render(item, settled)}</>;
+  },
+  (previous, next) => previous.item === next.item && previous.version === next.version && previous.inputs === next.inputs,
+);
+
 function markdownPreviewFileDiff(full: FileDiffMetadata): FileDiffMetadata {
   return {
     ...full,
@@ -3156,7 +3181,22 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
 
   // --- Custom header render slot (the full Plannotator FileHeader) -----------
 
-  const renderCustomHeader = useStableCallback((item: CodeViewItem<DiffAnnotationMetadata>) => {
+  const fileHeaderInputs = useMemo(
+    () => ({}),
+    [
+      itemIdToFilePath, itemIdToFile, markdownPreview, previewItemIds, fileCommentsByPath, renderImagePreview, editEnabled,
+      editSession.editingItemId, measuredHeaderItemIds, compactTouchLayout, headerKeepsFolder, readOnly, commentOnly, fileOpenIn,
+      viewedFiles, generatedFiles, onToggleViewed, showViewedControls, stagedFiles, stagingFile, onStage, canStagePath,
+      canStageFiles, showStageControls, stageError, onAddFileCommentForFile, hostFileNotesByPath, renderPackageChanges,
+      selectedAnnotationId, onSelectAnnotation, onEditAnnotation, onDeleteAnnotation, explainHandler, agentFindingSources,
+      isAILoading,
+    ],
+  );
+  const renderCustomHeader = useStableCallback((item: CodeViewItem<DiffAnnotationMetadata>) => (
+    <FileHeaderSlot item={item} version={item.version ?? 0} inputs={fileHeaderInputs} render={renderFileHeaderContent} />
+  ));
+
+  const renderFileHeaderContent = useStableCallback((item: CodeViewItem<DiffAnnotationMetadata>, settled: boolean) => {
     if (item.type !== 'diff') return null;
     const filePath = itemIdToFilePath.get(item.id);
     if (filePath == null) return null;
@@ -3203,7 +3243,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         <FileHeader
         compactTouchLayout={compactTouchLayout}
         keepsFolder={headerKeepsFolder}
-        readOnly={readOnly || commentOnly}
+        readOnly={readOnly || commentOnly || !settled}
         openIn={fileOpenIn?.(filePath)}
         filePath={filePath}
         patch={file.patch}
@@ -3504,6 +3544,11 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     return () => cancelAnimationFrame(frame);
   }, [itemMetrics, syncHeaderMetrics]);
 
+  const reviewState = useReviewStateOptional();
+  const steadyReviewStateRef = useRef(reviewState);
+  if (!reviewStateMatchesIgnoringFocus(steadyReviewStateRef.current, reviewState)) steadyReviewStateRef.current = reviewState;
+  const steadyReviewState = steadyReviewStateRef.current;
+
   // After all hooks: hold the surface until the worker pool can take the
   // first tokenization wave (≈100-300ms once per session; instant after).
   if (!workerPoolReady) {
@@ -3561,11 +3606,10 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       {/* EditProvider only mounts when the experimental flag is on; its
           factory declines attaches until the lazy editor chunk has loaded
           (the chunk loads on first Edit click, never before). */}
-      {editEnabled ? (
-        <EditProvider createEditor={editSession.createEditor}>{codeView}</EditProvider>
-      ) : (
-        codeView
-      )}
+      {(() => {
+        const viewer = editEnabled ? <EditProvider createEditor={editSession.createEditor}>{codeView}</EditProvider> : codeView;
+        return steadyReviewState ? <ReviewStateProvider value={steadyReviewState}>{viewer}</ReviewStateProvider> : viewer;
+      })()}
       {diffOverflow !== 'wrap' && <DiffBottomBar root={scrollEl} />}
 
       {/* Leading content (commit description card) lives INSIDE the scroll

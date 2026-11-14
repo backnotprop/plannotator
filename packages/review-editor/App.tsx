@@ -431,6 +431,22 @@ function evologBaseFor(diffType: string, gitContext: GitContext | null): string 
   return diffType === 'jj-evolog' ? gitContext?.jjEvologs?.[1]?.commitId : undefined;
 }
 
+const reviewToaster = (
+  <Toaster
+    position="bottom-center"
+    toastOptions={{
+      // Sonner aborts a swipe-to-dismiss once any text is selected, so a
+      // mouse drag across selectable toast text never dismisses it.
+      className: 'select-none',
+      style: {
+        '--normal-bg': 'var(--card)',
+        '--normal-border': 'var(--border)',
+        '--normal-text': 'var(--foreground)',
+      } as React.CSSProperties,
+    }}
+  />
+);
+
 const ReviewApp: React.FC = () => {
   useViewportEnvironment();
   // A plain-text paste into our text fields is inserted by the page: Chrome 155-156 on macOS drops
@@ -1584,11 +1600,13 @@ const ReviewApp: React.FC = () => {
   }, [askAI, files, pendingSelection]);
 
   // Single-file surface: the focused file IS files[activeFileIndex].
+  const askAIFileIndexRef = useRef(activeFileIndex);
+  askAIFileIndexRef.current = activeFileIndex;
   const handleAskAI = useCallback((question: string) => {
-    const file = files[activeFileIndex];
+    const file = files[askAIFileIndexRef.current];
     if (!file) return;
     handleAskAIForFile(file.path, question);
-  }, [activeFileIndex, files, handleAskAIForFile]);
+  }, [files, handleAskAIForFile]);
 
   const handleViewAIResponse = useCallback((questionId?: string) => {
     reviewSidebar.open('ai');
@@ -6523,19 +6541,7 @@ const ReviewApp: React.FC = () => {
       />
     )}
 
-    <Toaster
-      position="bottom-center"
-      toastOptions={{
-        // Sonner aborts a swipe-to-dismiss once any text is selected, so a
-        // mouse drag across selectable toast text never dismisses it.
-        className: 'select-none',
-        style: {
-          '--normal-bg': 'var(--card)',
-          '--normal-border': 'var(--border)',
-          '--normal-text': 'var(--foreground)',
-        } as React.CSSProperties,
-      }}
-    />
+    {reviewToaster}
     </JobLogsProvider>
     </ReviewStateProvider>
     </TooltipProvider>
