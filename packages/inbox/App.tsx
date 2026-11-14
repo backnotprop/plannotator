@@ -7320,6 +7320,7 @@ function Inbox() {
           onOpenPull={(pull, stack) => go(boardPull(pull, stack, { page: 'prs', project: null, thread: null, stack: stack.id, layer: pull.key, scope: 'layer', prsFrom: 'reviews' }))}
           onOpenStack={(stack) => go({ page: 'prs', project: null, thread: null, stack: stack.id, layer: null })}
           onMerged={sheetPulls.refresh}
+          onToast={(next, ms) => showToast(next, ms)}
           layout={paneLayout}
           onLayout={setPaneLayout}
         />
@@ -7623,6 +7624,7 @@ function Inbox() {
         onOpenPull={(pull, stack) => go(boardPull(pull, stack, { ...route, stack: stack.id, layer: pull.key, scope: 'layer', prsFrom: 'sheet' }))}
         onOpenStack={(stack) => go({ ...route, stack: stack.id, layer: null })}
         onMerged={sheetPulls.refresh}
+        onToast={(next, ms) => showToast(next, ms)}
       />
     );
   } else if (route.page === 'prs') {
