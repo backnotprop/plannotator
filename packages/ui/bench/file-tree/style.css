@@ -1,0 +1,37 @@
+@import "tailwindcss";
+@source "../../components/**/*.tsx";
+@source "./*.tsx";
+@import "../../theme.css";
+
+html,
+body {
+  margin: 0;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+#panel {
+  width: 320px;
+  height: 800px;
+  overflow: auto;
+  background: var(--card);
+  border-right: 1px solid var(--border);
+}
+
+/* The new tree is its own scroll container. */
+#panel:has(> [role="tree"]),
+#panel.pierre {
+  overflow: hidden;
+}
+
+/* The tokens the first harness mapped onto @pierre/trees. */
+#panel.pierre {
+  --trees-bg-override: var(--card);
+  --trees-fg-override: var(--foreground);
+  --trees-fg-muted-override: var(--muted-foreground);
+  --trees-selected-bg-override: color-mix(in oklab, var(--primary) 12%, transparent);
+  --trees-focus-ring-color-override: var(--ring);
+  --trees-border-color-override: var(--border);
+  --trees-font-size-override: 13px;
+}
