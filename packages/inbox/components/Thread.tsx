@@ -31,7 +31,7 @@ import { INBOX_UPLOAD_MAX_BYTES, inboxActionInDraft, inboxActionPersonMark, type
 import { withoutInboxActionsSection } from '@plannotator/core/inbox-actions';
 import { withoutInboxReplyQuoteLead } from '@plannotator/core/inbox-reply-quote';
 import { capQuestionPrompt, emptyQuestionAnswer, indexQuestionBlocks, isQuestionAnswerEmpty, type IndexedQuestion, type QuestionAnswer, type QuestionStatus } from '@plannotator/core/question-block';
-import { INBOX_AUTO_SEND_ACK_NOTES, inboxAskingMessage, inboxLaunchStops, inboxPersonAnsweredSince, wholeMinutes, isInboxNote, isInboxTextKind, readInboxAttachmentKind, type InboxAnnotationRecord, type InboxAttachment, type InboxAttachmentState, type InboxInlineImage, type InboxQuestionState } from '@plannotator/core/inbox-types';
+import { INBOX_AUTO_SEND_ACK_NOTES, inboxAskingMessage, inboxLaunchStops, inboxPersonAnsweredSince, wholeMinutes, isInboxNote, isInboxT3WaitReason, isInboxTextKind, readInboxAttachmentKind, type InboxAnnotationRecord, type InboxAttachment, type InboxAttachmentState, type InboxInlineImage, type InboxQuestionState } from '@plannotator/core/inbox-types';
 import type { LocalLinkResolver } from '@plannotator/ui/components/LocalLinkContext';
 import { NOT_ATTACHED_TITLE, attachmentDeepLink, attachmentDisplayPath, attachmentForLink, openAttachmentTitle, projectFileOfLink, useRefRepo } from '../links';
 import { InboxApiError, InboxHeldError, inboxApi, type AttachmentsModel, type MachineView, type OutboxView, type TagMode, type ThreadModel } from '../api';
@@ -101,6 +101,7 @@ import { NewMessageButton, NewMessageComposer, NewMessagePopover, hostName, useL
 import { debugNote } from '../debugLog';
 import { autoAfterText, deliveryLine, handedItem, restartNote, TURN_ENDED_TEXT, uncertainItem, waitInputs, type DeliveryLine, type RecipientConnection } from '../deliveryLine';
 import { RestartLine } from './RestartNote';
+import { T3WaitLine } from './T3WaitLine';
 import { TakeBackButton, UndeliveredBand, UndeliveredText, useMinuteClock } from './Undelivered';
 import { takeBackOffered, useTakeBack } from '../takeBack';
 import { SendToAnotherSession } from '../compose/SendToAnotherSession';
@@ -5500,6 +5501,11 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     : heldHandoff && deliveredNow
       ? { state: 'queued', text: `Goes to ${handoffName(last)} once the Undo window ends.` }
       : deliveredNow;
+  // A reply the T3 wake cannot put in (its thread's machine says why): one line with the fix, until it is delivered.
+  const t3Wait =
+    delivered && !last.delivery && !last.taken_back_at && isInboxT3WaitReason(last.t3_wait) && (delivered.state === 'saved' || delivered.state === 'queued') && !handedItem(recipientConnection, last.id)
+      ? last.t3_wait
+      : null;
   // No Send now because that session runs an older plugin than a restart loads (the "Steps" line,
   // owner approval "restart-warning"): only while the reply waits for a working session.
   const restart = delivered?.state === 'queued' && !last.deliver_now_at ? restartNote(recipientConnection) : null;
@@ -7479,7 +7485,10 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                   </div>
                 )}
                 {message === last && cloudLast && <CloudWakeLine wake={cloudLast.cloud_wake} fallbackName={addresseeName(lastTo?.host ?? 'cloud')} time={whenTime} />}
-                {message === last && !shownRun && delivered && !delivered.wait && tagLines.length === 0 && (
+                {message === last && !shownRun && t3Wait && !delivered?.wait && tagLines.length === 0 && (
+                  <T3WaitLine reason={t3Wait}>{takeBackLast && <TakeBackButton busy={takingBack} onPress={takeBackLast} />}</T3WaitLine>
+                )}
+                {message === last && !shownRun && delivered && !t3Wait && !delivered.wait && tagLines.length === 0 && (
                   // tabIndex -1: Send to another session puts focus here once it moved the message.
                   <div className="ib-delivered" data-delivery={delivered.state} data-auto={delivered.autoAfterMin !== undefined ? '' : undefined} tabIndex={-1}>
                     <span className="ib-dl-main">

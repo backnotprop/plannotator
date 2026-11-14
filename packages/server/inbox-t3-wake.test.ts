@@ -12,9 +12,10 @@ import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/cli
 import { T3Credentials } from "@plannotator/t3-code/auth";
 import type { T3Rpc } from "@plannotator/t3-code/t3-client";
 import type { InboxThread } from "@plannotator/core/inbox-types";
+import { INBOX_WAKES_META_KEY } from "@plannotator/shared/inbox/connection";
 import { startInboxServer, type InboxServer } from "./inbox";
 import { INBOX_ASKER_RESTART_GRACE_MS } from "./inbox-sessions";
-import { INBOX_REPLY_ARRIVES_TEXT, INBOX_REPLY_READ_LATER_TEXT } from "./inbox-mcp";
+import { INBOX_REPLY_ARRIVES_TEXT, INBOX_REPLY_READ_LATER_TEXT, INBOX_REPLY_T3_WHILE_RUNNING_TEXT } from "./inbox-mcp";
 import { t3CeilingOfScope, t3GrantModeOf } from "./inbox-t3-wake";
 import { type FakeT3, startFakeT3, type T3Access, type T3RuntimeMode, T3_THREAD_ID_FORMS, t3ScopeOf } from "../../tests/helpers/fake-t3";
 
@@ -251,6 +252,139 @@ describe("a reply to a T3 Code thread", () => {
     clock += 61_000;
     await w.server.t3Wake.sweep();
     expect(w.t3.sends).toEqual([expect.objectContaining({ threadId: THREAD, clientRequestId: `plannotator-inbox-${replyId}` })]);
+  });
+});
+
+/**
+ * A T3 thread whose Claude runs the Claude Code mod: the mod polls the bridge as host t3 and the thread, and puts
+ * the reply in as a turn of the running session itself. The failure these catch: one reply going in twice (the
+ * mod's turn and a T3 send), or a reply left waiting once T3 stopped that Claude.
+ */
+describe("a reply to a T3 thread whose Claude runs the Claude Code mod: one owner", () => {
+  async function modWorld(options: { grant?: boolean } = {}) {
+    const clock = { now: Date.now() };
+    const w = await world({ ...options, sessionsNow: () => clock.now });
+    const poll = async () => {
+      const response = await fetch(`http://127.0.0.1:${w.server.port}/api/inbox/bridge/poll`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${w.server.token}` },
+        body: JSON.stringify({ session: THREAD, host: "t3", waitMs: 0, tags: true }),
+      });
+      expect(response.status).toBe(200);
+      return ((await response.json()) as { commands: { id: string }[] }).commands.map((command) => command.id);
+    };
+    const delivered = (id: string) =>
+      fetch(`http://127.0.0.1:${w.server.port}/api/inbox/bridge/event`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${w.server.token}` },
+        body: JSON.stringify({ session: THREAD, host: "t3", type: "delivered", id }),
+      });
+    return { ...w, clock, poll, delivered };
+  }
+
+  test("while the mod polls, the reply is the mod's: handed out on its poll, never sent through T3, and delivered once", async () => {
+    const w = await modWorld();
+    await w.poll();
+    const sent = await w.send("Ship the worker today?");
+    // The send says the reply arrives: the thread's own connection wakes it, grant or not.
+    expect(sent.text).toContain(INBOX_REPLY_ARRIVES_TEXT);
+    const replyId = await w.reply(sent.message_id, "Yes, ship it.");
+    await w.server.t3Wake.sweep();
+    await w.server.t3Wake.sweep();
+    expect(w.t3.sends).toHaveLength(0);
+    expect(await w.poll()).toEqual([replyId]);
+    await w.delivered(replyId);
+    await w.server.t3Wake.sweep();
+    expect(w.t3.sends).toHaveLength(0);
+    expect((await w.thread(sent.thread_id)).messages.at(-1)!.delivery).toMatchObject({ host: "t3", session: THREAD });
+  });
+
+  test("with no grant at all, a polling thread is told its reply arrives only while T3 keeps it running", async () => {
+    const clock = { now: Date.now() };
+    const w = await world({ grant: false, sessionsNow: () => clock.now });
+    await fetch(`http://127.0.0.1:${w.server.port}/api/inbox/bridge/poll`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${w.server.token}` },
+      body: JSON.stringify({ session: THREAD, host: "t3", waitMs: 0 }),
+    });
+    const text = (await w.send("Anyone there?")).text;
+    expect(text).toContain(INBOX_REPLY_T3_WHILE_RUNNING_TEXT);
+    expect(text).not.toContain(INBOX_REPLY_ARRIVES_TEXT);
+  });
+
+  test("only a T3 thread the mod wakes, with no grant, gets the while-running line: every other sender's line is unchanged", async () => {
+    const ARRIVES = "The person's reply arrives in this session by itself, as a new message once the session is idle: end your turn, or go on with other work.";
+    const LOOK = "If it has not arrived when you next work, call read_thread with this thread_id.";
+    const LATER = "The person's reply won't arrive in this session by itself: go on with your work and call read_thread with this thread_id later.";
+    for (const grant of [false, true]) {
+      const w = await world({ grant });
+      // `wakes`: the sender's own connection says it wakes the session, as the Claude Code mod and the plugins do.
+      const send = async (host: string | undefined, session: string, wakes: boolean) => {
+        const result = await w.client.callTool({
+          name: "send_message",
+          arguments: { body: "Which queue?", project_path: "/tmp", agent_session: session, ...(host ? { agent_host: host } : {}) },
+          ...(wakes ? { _meta: { [INBOX_WAKES_META_KEY]: true } } : {}),
+        });
+        return (result.content as { text: string }[])[0]!.text.split("\n")[0]!;
+      };
+      const ends = (text: string, line: string) => expect(text.endsWith(` ${line}`)).toBe(true);
+      // An interactive Claude Code session, Pi and OpenCode 2, each woken by its own connection.
+      for (const host of ["claude-code", "pi", "opencode"]) ends(await send(host, `ses_${host}`, true), ARRIVES);
+      // `claude -p` or another SDK session not under T3: the mod sends without the wake. An MCP-over-HTTP agent.
+      ends(await send("claude-code", "ses_headless", false), LATER);
+      ends(await send(undefined, "ses_http", false), LATER);
+      // Codex with no `codex queue` here is not woken: its line is unchanged.
+      ends(await send("codex", "019a0000-0000-7000-8000-000000000001", false), LATER);
+      // The T3 thread its mod wakes: unchanged with a grant that reaches it, the while-running line without one.
+      const t3 = await send("t3", THREAD, true);
+      if (grant) ends(t3, `${ARRIVES} ${LOOK}`);
+      else ends(t3, INBOX_REPLY_T3_WHILE_RUNNING_TEXT);
+    }
+  });
+
+  test("with no grant, once T3 released that Claude, the thread's reply says it waits for a sign-in, and clears when it goes in", async () => {
+    const w = await modWorld({ grant: false });
+    await w.poll();
+    const sent = await w.send("Ship the worker today?");
+    const replyId = await w.reply(sent.message_id, "Yes, ship it.");
+    await w.server.t3Wake.sweep();
+    // The mod's while it polls: nothing holds it.
+    expect((await w.thread(sent.thread_id)).messages.at(-1)!.t3_wait ?? null).toBeNull();
+    w.clock.now += 31_000;
+    await w.server.t3Wake.sweep();
+    expect((await w.thread(sent.thread_id)).messages.at(-1)!.t3_wait).toBe("sign_in");
+    w.login("e1");
+    await w.server.t3Wake.sweep();
+    const last = (await w.thread(sent.thread_id)).messages.at(-1)!;
+    expect(last.delivery).toMatchObject({ host: "t3", session: THREAD });
+    expect(last.t3_wait ?? null).toBeNull();
+    expect(w.t3.sends).toEqual([expect.objectContaining({ clientRequestId: `plannotator-inbox-${replyId}` })]);
+  });
+
+  test("once the mod stopped polling (T3 released that Claude), the T3 wake sends what still waits, once", async () => {
+    const w = await modWorld();
+    await w.poll();
+    const sent = await w.send("Ship the worker today?");
+    const replyId = await w.reply(sent.message_id, "Yes, ship it.");
+    await w.server.t3Wake.sweep();
+    expect(w.t3.sends).toHaveLength(0);
+    w.clock.now += 31_000;
+    await w.server.t3Wake.sweep();
+    expect(w.t3.sends).toEqual([expect.objectContaining({ threadId: THREAD, clientRequestId: `plannotator-inbox-${replyId}` })]);
+    await w.server.t3Wake.sweep();
+    expect(w.t3.sends).toHaveLength(1);
+  });
+
+  test("a mod that polls again while the T3 wake's send is in flight is not handed that reply", async () => {
+    // No grant: the T3 wake sends nothing by itself here; the hand stands for its send in flight.
+    const w = await modWorld({ grant: false });
+    const sent = await w.send("Ship the worker today?");
+    const replyId = await w.reply(sent.message_id, "Yes, ship it.");
+    const message = w.server.store.message(replyId)!;
+    expect(w.server.store.handover.hand(message, THREAD, "t3")).toBe(true);
+    expect(await w.poll()).toEqual([]);
+    w.server.store.handover.giveBack(replyId, THREAD);
+    expect(await w.poll()).toEqual([replyId]);
   });
 });
 

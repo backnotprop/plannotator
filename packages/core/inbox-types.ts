@@ -30,7 +30,7 @@ import type { InboxLaunchChoices } from "./inbox-launch-choice";
 import type { InboxRowSnooze } from "./inbox-snooze";
 import { INBOX_CODEX_QUEUE_MIN_VERSION } from "./inbox-codex";
 import { INBOX_QWEN_WAKE_MIN_VERSION } from "./inbox-qwen";
-import { INBOX_T3_HOST, isT3ThreadId } from "./inbox-t3";
+import { INBOX_T3_HOST, isT3ThreadId, type InboxT3WaitReason } from "./inbox-t3";
 
 // The attachment shapes and file rules (step 2) live in their own module and
 // reach the Inbox through this published entry, so core's export map is unchanged.
@@ -625,6 +625,12 @@ export interface InboxMessage {
   taken_back_at?: string | null;
   read_by_agent?: { session: string | null; at: string } | null;
   cloud_wake?: InboxCloudWake | null;
+  /**
+   * On a person's reply or message for a T3 Code thread: why the T3 wake
+   * cannot put it in now (packages/server/inbox-t3-wake.ts). Absent while
+   * nothing known holds it, and dropped when it is delivered.
+   */
+  t3_wait?: InboxT3WaitReason | null;
   /**
    * On a person's reply or message not yet delivered: the person pressed
    * Send now in the Inbox, and when. The session's connection then delivers

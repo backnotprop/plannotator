@@ -120,6 +120,7 @@ import { inboxReplyQuoteExcerpt, inboxReplyQuoteLead, inboxReplyQuoteTime, type 
 import { whenTime } from "@plannotator/core/inbox-format";
 import type { QuestionAnswer } from "@plannotator/core/question-block";
 import { isInboxCloudHost, isInboxCloudSession, type InboxCloudWake } from "@plannotator/core/inbox-cloud";
+import type { InboxT3WaitReason } from "@plannotator/core/inbox-types";
 import { INBOX_T3_HOST, isT3ThreadId } from "@plannotator/core/inbox-types";
 import { INBOX_PERMISSION_FULL, INBOX_PERMISSION_SESSION_PREFIX, isInboxPermissionSession } from "@plannotator/core/inbox-permission";
 import { inboxProjectKey } from "./project-key";
@@ -6593,6 +6594,22 @@ export class InboxStore {
     return next;
   }
 
+  /**
+   * Why the T3 wake cannot put the person's reply or message into its T3
+   * thread now (null: nothing known holds it). One line per change; nothing
+   * once it is delivered.
+   */
+  recordT3Wait(messageId: string, wait: InboxT3WaitReason | null): InboxMessage | null {
+    const message = this.messages.get(messageId);
+    if (!message || message.author.kind !== "person" || message.delivery) return null;
+    if ((message.t3_wait ?? null) === wait) return message;
+    const at = this.stamp();
+    const { t3_wait: _before, ...rest } = message;
+    const next: InboxMessage = wait ? { ...rest, t3_wait: wait } : rest;
+    this.appendMessage(next, at);
+    return next;
+  }
+
   /** What a delivery of this message to `session` goes by: the message's id, or a former owner's stop notice's own. */
   deliveryIdOf(message: InboxMessage, session: string): string {
     return tagOf(message, session)?.handed_away ? inboxStopNoticeId(message.id) : message.id;
@@ -6630,7 +6647,8 @@ export class InboxStore {
     }
     if (reply.delivery) return reply;
     const at = this.stamp();
-    const delivered: InboxMessage = { ...reply, delivery: { state: "delivered", host: by.host, session: by.session, at, ...intoTurnOf(reply.deliver_now_by, by.intoTurn) } };
+    const { t3_wait: _t3Wait, ...kept } = reply;
+    const delivered: InboxMessage = { ...kept, delivery: { state: "delivered", host: by.host, session: by.session, at, ...intoTurnOf(reply.deliver_now_by, by.intoTurn) } };
     this.appendMessage(delivered, at);
     // Up to it, but never past a reply still owed to another session.
     this.markAgentChecked(reply.thread_id, this.messageSeq.get(reply.id) ?? 0, at, by.session);
