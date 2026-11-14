@@ -145,7 +145,7 @@ printf '// @generated — DO NOT EDIT. Source: packages/ui/components/html-viewe
   | cat - "../../packages/ui/components/html-viewer/sandboxShim.ts" > "generated/sandboxShim.ts"
 
 # Vendor the moved AI context types and the model catalog from core into generated/ai/.
-for f in ai-context model-catalog; do
+for f in ai-context model-catalog model-fallbacks; do
   printf '// @generated — DO NOT EDIT. Source: packages/core/%s.ts\n' "$f" \
     | cat - "../../packages/core/$f.ts" > "generated/ai/$f.ts"
 done

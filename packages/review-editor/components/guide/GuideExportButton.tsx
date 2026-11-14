@@ -63,7 +63,7 @@ const HEADER_CONTROL_CLASS =
  * of offering a second upload — an unrecorded link (guide history off) can
  * only ever be removed with that token, so it must never be silently orphaned.
  */
-export const GuideExportButton: React.FC<GuideExportButtonProps> = ({ jobId }) => {
+export function useGuideExportInfo(jobId: string, enabled = true) {
   const [info, setInfo] = useState<ExportInfo | null>(null);
   const [share, setShare] = useState<ShareInfo | null>(null);
   const [shareOpen, setShareOpen] = useState(false);
@@ -71,6 +71,7 @@ export const GuideExportButton: React.FC<GuideExportButtonProps> = ({ jobId }) =
   const encoded = encodeURIComponent(jobId);
 
   useEffect(() => {
+    if (!enabled) return;
     let cancelled = false;
     setInfo(null);
     setShare(null);
@@ -97,7 +98,14 @@ export const GuideExportButton: React.FC<GuideExportButtonProps> = ({ jobId }) =
     return () => {
       cancelled = true;
     };
-  }, [encoded]);
+  }, [encoded, enabled]);
+
+  return { info, share, setShare, shareOpen, setShareOpen, created, setCreated, encoded };
+}
+
+export const GuideExportButton: React.FC<GuideExportButtonProps> = ({ jobId }) => {
+  const exportInfo = useGuideExportInfo(jobId);
+  const { info, share, setShareOpen, created, encoded } = exportInfo;
 
   if (!info) return null;
 
@@ -133,30 +141,32 @@ export const GuideExportButton: React.FC<GuideExportButtonProps> = ({ jobId }) =
           <span>{hasLink ? 'Share link' : 'Create share link'}</span>
         </button>
       )}
-      {shareEnabled && (
-        <GuideShareDialog
-          isOpen={shareOpen}
-          onClose={() => setShareOpen(false)}
-          jobId={jobId}
-          bytes={info.bytes}
-          serviceUrl={share.serviceUrl}
-          existing={share.existing}
-          created={created}
-          onCreated={(next) => {
-            setCreated(next);
-            // Only a link the server recorded can be removed from here; an
-            // `existing` entry otherwise would offer a Remove that 404s.
-            if (!next.recorded) return;
-            setShare((prev) =>
-              prev ? { ...prev, existing: { url: next.url, createdAt: new Date().toISOString() } } : prev,
-            );
-          }}
-          onRemoved={() => {
-            setCreated(null);
-            setShare((prev) => (prev ? { ...prev, existing: null } : prev));
-          }}
-        />
-      )}
+      <GuideShareHost jobId={jobId} exportInfo={exportInfo} />
     </>
   );
 };
+
+export function GuideShareHost({ jobId, exportInfo }: { jobId: string; exportInfo: ReturnType<typeof useGuideExportInfo> }) {
+  const { info, share, setShare, shareOpen, setShareOpen, created, setCreated } = exportInfo;
+  if (!info || !share?.enabled) return null;
+  return (
+    <GuideShareDialog
+      isOpen={shareOpen}
+      onClose={() => setShareOpen(false)}
+      jobId={jobId}
+      bytes={info.bytes}
+      serviceUrl={share.serviceUrl}
+      existing={share.existing}
+      created={created}
+      onCreated={(next) => {
+        setCreated(next);
+        if (!next.recorded) return;
+        setShare((prev) => (prev ? { ...prev, existing: { url: next.url, createdAt: new Date().toISOString() } } : prev));
+      }}
+      onRemoved={() => {
+        setCreated(null);
+        setShare((prev) => (prev ? { ...prev, existing: null } : prev));
+      }}
+    />
+  );
+}

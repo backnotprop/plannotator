@@ -14,6 +14,7 @@ import { renderInlineMarkdown } from '../utils/renderInlineMarkdown';
 import { FileNameChip } from './FileNameChip';
 import { AITab } from './AITab';
 import { AgentsTab, type AgentLaunchParams, type AgentLaunchResult } from '@plannotator/ui/components/AgentsTab';
+import type { FindingLike } from '@plannotator/ui/components/AgentsTab';
 import type { PRMetadata } from '@plannotator/shared/pr-types';
 import { OverlayScrollArea } from '@plannotator/ui/components/OverlayScrollArea';
 import type { AIChatEntry, PendingPermission } from '../hooks/useAIChat';
@@ -107,7 +108,10 @@ interface ReviewSidebarProps {
   onAgentLaunch?: (params: AgentLaunchParams) => AgentLaunchResult | Promise<AgentLaunchResult>;
   onAgentKillJob?: (id: string) => void;
   onAgentKillAll?: () => void;
-  externalAnnotations?: Array<{ source?: string }>;
+  externalAnnotations?: ReadonlyArray<FindingLike>;
+  onOpenFinding?: (finding: FindingLike) => void;
+  agentsScope?: React.ReactNode;
+  agentsGuides?: (ctx: { startGuide: (() => void) | null }) => React.ReactNode;
   onOpenJobDetail?: (jobId: string) => void;
   onOpenGuide?: (jobId: string) => void;
   /** Pass-through to AgentsTab — gates the sidebar's Guided Review mode on
@@ -317,6 +321,9 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
   onAgentKillJob,
   onAgentKillAll,
   externalAnnotations,
+  onOpenFinding,
+  agentsScope,
+  agentsGuides,
   onOpenJobDetail,
   onOpenGuide,
   guideLaunchable,
@@ -859,8 +866,11 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
               externalAnnotations={externalAnnotations ?? []}
               onOpenJobDetail={onOpenJobDetail}
               onOpenGuide={onOpenGuide}
+              onOpenFinding={onOpenFinding}
               guideLaunchable={guideLaunchable}
               canOpenGuideJob={canOpenGuideJob}
+              scope={agentsScope}
+              guides={agentsGuides}
             />
           )}
 

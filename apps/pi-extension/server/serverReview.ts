@@ -200,7 +200,7 @@ import {
 } from "../generated/claude-review.ts";
 import { createGuideSession, GUIDE_EMPTY_OUTPUT_ERROR } from "../generated/guide-review.ts";
 import { GuideShareError, shareGuide, unshareBeforeDelete, unshareGuide } from "../generated/guide-share.ts";
-import { createGuideStoreSession, SAVED_GUIDE_ID_PREFIX, updateGuideShare } from "../generated/guide-store.ts";
+import { createGuideStoreSession, normalizeGuideTitle, SAVED_GUIDE_ID_PREFIX, updateGuideShare } from "../generated/guide-store.ts";
 import {
 	buildGuideSnapshot,
 	createGuideHtml,
@@ -2486,6 +2486,28 @@ export async function startReviewServer(options: {
 			const savedId = decodeURIComponent(savedGuideDeleteMatch[1]);
 			await unshareBeforeDelete((await guideStore.locateEnvelope(`${SAVED_GUIDE_ID_PREFIX}${savedId}`))?.envelope.share);
 			const ok = await guideStore.deleteSaved(savedId);
+			if (!ok) {
+				json(res, { error: "Guide not found" }, 404);
+				return;
+			}
+			json(res, { ok: true });
+			return;
+		}
+
+		if (savedGuideDeleteMatch && req.method === "PATCH") {
+			const savedId = decodeURIComponent(savedGuideDeleteMatch[1]);
+			let body: { title?: unknown };
+			try {
+				body = (await parseBody(req)) as { title?: unknown };
+			} catch {
+				json(res, { error: "Invalid JSON" }, 400);
+				return;
+			}
+			if (!normalizeGuideTitle(body?.title)) {
+				json(res, { error: "A title is 1 to 200 characters." }, 400);
+				return;
+			}
+			const ok = await guideStore.renameSaved(savedId, body.title as string);
 			if (!ok) {
 				json(res, { error: "Guide not found" }, 404);
 				return;

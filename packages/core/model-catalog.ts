@@ -10,6 +10,8 @@
  * dependency-free: imported by the AI providers and by the UI.
  */
 
+import { catalogFromRows, CLAUDE_FALLBACK_ROWS, CODEX_FALLBACK_ROWS, MODEL_FALLBACKS_CHECKED } from "./model-fallbacks";
+
 export interface CatalogModel {
   id: string;
   label: string;
@@ -39,47 +41,11 @@ export function effortList(ids: readonly string[]): Array<{ id: string; label: s
   return ids.map((id) => ({ id, label: EFFORT_LABELS[id] ?? id }));
 }
 
-const CLAUDE_EFFORTS = effortList(['low', 'medium', 'high', 'xhigh', 'max']);
-const claude = (id: string, label: string, extra: Partial<CatalogModel> = {}): CatalogModel => ({
-  id,
-  label,
-  reasoningEfforts: CLAUDE_EFFORTS,
-  defaultReasoningEffort: 'high',
-  ...extra,
-});
+export const CLAUDE_FALLBACK_MODELS: CatalogModel[] = catalogFromRows(CLAUDE_FALLBACK_ROWS);
 
-export const CLAUDE_FALLBACK_MODELS: CatalogModel[] = [
-  claude('opus', 'Opus (latest)'),
-  claude('sonnet', 'Sonnet (latest)', { default: true }),
-  claude('fable', 'Fable (latest)'),
-  { id: 'haiku', label: 'Haiku (latest)' },
-  claude('claude-fable-5-1', 'Fable 5.1'),
-  claude('claude-opus-5-5', 'Opus 5.5'),
-  claude('claude-sonnet-5', 'Sonnet 5'),
-  { id: 'claude-haiku-4-5', label: 'Haiku 4.5' },
-];
+export const CODEX_FALLBACK_MODELS: CatalogModel[] = catalogFromRows(CODEX_FALLBACK_ROWS);
 
-const codex = (id: string, label: string, efforts: readonly string[], defaultReasoningEffort: string, extra: Partial<CatalogModel> = {}): CatalogModel => ({
-  id,
-  label,
-  reasoningEfforts: effortList(efforts),
-  defaultReasoningEffort,
-  fastMode: true,
-  ...extra,
-});
-const CODEX_TO_ULTRA = ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
-const CODEX_TO_MAX = ['low', 'medium', 'high', 'xhigh', 'max'];
-// What codex 0.155.1's `model/list` reports (GPT-6 is listed only to codex
-// >= 0.155); every model offers the fast (`priority`) tier.
-export const CODEX_FALLBACK_MODELS: CatalogModel[] = [
-  codex('gpt-6-sol', 'GPT-6-Sol', CODEX_TO_ULTRA, 'medium', { default: true }),
-  codex('gpt-6-astra', 'GPT-6-Astra', CODEX_TO_ULTRA, 'medium'),
-  codex('gpt-6-luna', 'GPT-6-Luna', CODEX_TO_MAX, 'medium'),
-  codex('gpt-5.6-sol', 'GPT-5.6-Sol', CODEX_TO_ULTRA, 'low'),
-  codex('gpt-5.6-terra', 'GPT-5.6-Terra', CODEX_TO_ULTRA, 'medium'),
-  codex('gpt-5.6-luna', 'GPT-5.6-Luna', CODEX_TO_MAX, 'medium'),
-  codex('gpt-5.5', 'GPT-5.5', ['low', 'medium', 'high', 'xhigh'], 'medium'),
-];
+export { MODEL_FALLBACKS_CHECKED };
 
 /** Where a provider's model list came from: the installed tool, or the static fallback. */
 export type ModelsSource = 'fallback' | 'discovered';
@@ -408,4 +374,17 @@ export function effortSelectOptions(models: readonly CatalogModel[], modelId: st
 /** Label for a model id: the catalog's, else an alias's, else the id itself. */
 export function modelLabel(models: readonly CatalogModel[], id: string): string {
   return models.find((m) => m.id === id)?.label ?? aliasLabel(id) ?? id;
+}
+
+export function modelFallbackNotice(
+  saved: string,
+  offered: ReadonlyArray<{ id: string; label: string; resolvedId?: string }>,
+  used: string,
+  engineName: string,
+): string | null {
+  if (!saved || offered.length === 0 || offered.some((m) => m.id === saved) || saved === used) return null;
+  const usedRow = offered.find((m) => m.id === used);
+  if (usedRow?.resolvedId === saved) return null;
+  const label = usedRow?.label ?? (used || "its default");
+  return `${saved} isn't offered by ${engineName} any more. Using ${label}.`;
 }
