@@ -22,7 +22,7 @@
  * An upload no draft names is swept after INBOX_UPLOAD_KEEP_MS.
  */
 
-import { reviewAnchorBlock, reviewBatchBlock, type InboxReviewAnchor } from "@plannotator/core/review-threads";
+import { reviewAnchorBlock, reviewBatchBlock, reviewFollowUpLine, type InboxReviewAnchor } from "@plannotator/core/review-threads";
 import { INBOX_ROWS_ASK_BLOCK } from "@plannotator/core/inbox-types";
 import { randomBytes } from "node:crypto";
 import {
@@ -126,8 +126,14 @@ export function inboxBodyForAgent(message: {
   viewing?: InboxReplyViewing | null;
   id?: string;
   review_anchor?: InboxReviewAnchor | null;
-}, batch: readonly { id: string; body: string; review_anchor?: InboxReviewAnchor | null }[] = []): string {
-  const review = message.id ? (batch.length > 0 ? reviewBatchBlock({ id: message.id }, batch) : reviewAnchorBlock({ id: message.id, review_anchor: message.review_anchor })) : "";
+}, batch: readonly { id: string; body: string; review_anchor?: InboxReviewAnchor | null }[] = [], within: InboxReviewAnchor | null = null): string {
+  const review = message.id
+    ? batch.length > 0
+      ? reviewBatchBlock({ id: message.id }, batch)
+      : message.review_anchor
+        ? reviewAnchorBlock({ id: message.id, review_anchor: message.review_anchor })
+        : reviewFollowUpLine({ id: message.id }, within)
+    : "";
   const after = [review, inboxViewingLine(message), inboxAttachedLines(message)].filter((part) => part !== "").join("\n\n");
   // A reply of pasted files alone may have no words.
   let words = !after ? message.body : message.body.trim() ? `${message.body}\n\n${after}` : after;

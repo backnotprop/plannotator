@@ -131,6 +131,11 @@ export function reviewAnchorBlock(message: { id: string; review_anchor?: InboxRe
   return `(A review comment on ${reviewAnchorPlace(anchor)}:${codeBlock(anchor)}\nAnswer it with reply_to ${message.id}.)`;
 }
 
+export function reviewFollowUpLine(message: { id: string }, anchor: InboxReviewAnchor | null | undefined): string {
+  if (!anchor || typeof anchor.file !== 'string') return '';
+  return `(On the review thread about ${reviewAnchorPlace(anchor)}; answer with reply_to ${message.id}.)`;
+}
+
 export function reviewBatchBlock(lead: { id: string }, comments: readonly { id: string; body: string; review_anchor?: InboxReviewAnchor | null }[]): string {
   const listed = comments.filter((c) => c.review_anchor && typeof c.review_anchor.file === 'string' && Array.isArray(c.review_anchor.code));
   if (listed.length === 0) return '';

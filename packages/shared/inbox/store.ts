@@ -7207,6 +7207,16 @@ export class InboxStore {
     return found;
   }
 
+  reviewAnchorAbove(message: InboxMessage): InboxReviewAnchor | null {
+    let at = message.reply_to ? this.messages.get(message.reply_to) : undefined;
+    for (let hops = 0; at && hops < 200; hops++) {
+      if (at.review_anchor) return at.review_anchor;
+      if (at.review_batch?.lead) return null;
+      at = at.reply_to ? this.messages.get(at.reply_to) : undefined;
+    }
+    return null;
+  }
+
   reviewBatchOf(message: InboxMessage): InboxMessage[] {
     const batch = message.review_batch;
     if (!batch?.lead) return [];
