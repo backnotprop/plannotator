@@ -207,8 +207,8 @@ function Switch({ on, labelledBy, disabled, onClick, label }: { on: boolean; lab
  * Over your tailnet, in Devices: the browser on your other devices, which
  * the phone app does not need (owner, decision 2: written out). One switch,
  * saved to config.json and applied at once. It shows the person's choice
- * even while publishing fails, so a click turns it off. It cannot be turned
- * on from a page that came through the tailnet, and the env var locks it.
+ * even while publishing fails, so a click turns it off. A tailnet guest's
+ * page cannot change it, and the env var locks it.
  */
 function OverYourTailnet({
   state,
@@ -269,7 +269,7 @@ function OverYourTailnet({
             </span>
           </span>
           <span className="ib-ctl">
-            <Switch on={state.on} labelledBy="ib-ts-label" disabled={busy || locked || (guest && !state.on)} onClick={() => onToggle(!state.on)} />
+            <Switch on={state.on} labelledBy="ib-ts-label" disabled={busy || locked || guest} onClick={() => onToggle(!state.on)} />
           </span>
         </div>
         {exposed && (
@@ -375,7 +375,7 @@ export interface DevicesSectionProps {
   phones: PhonesState | null;
   tailscale: TailscaleSettings | undefined;
   via: 'local' | 'tailnet';
-  /** A tailnet login other than the owner's (`tailnetGuest`): it pairs nothing and turns no way on. */
+  /** A tailnet login other than the owner's (`tailnetGuest`): it pairs and removes nothing and switches no way. */
   guest: boolean;
   tailscaleBusy: boolean;
   onToggleTailscale: (next: boolean, replaceExposed?: boolean) => void;
@@ -444,9 +444,11 @@ export function DevicesSection({ phones, tailscale, via, guest, tailscaleBusy, o
                         {PLATFORM[device.platform] ?? device.platform} · last seen {shortTime(device.last_seen_at)}
                       </span>
                     </span>
-                    <span className="ib-ctl">
-                      <RemoveLink name={device.name} onRemove={() => phones.remove(device.id)} />
-                    </span>
+                    {!remote && (
+                      <span className="ib-ctl">
+                        <RemoveLink name={device.name} onRemove={() => phones.remove(device.id)} />
+                      </span>
+                    )}
                   </div>
                 ))}
                 <div className="ib-prow">
