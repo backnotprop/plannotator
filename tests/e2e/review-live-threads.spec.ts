@@ -150,6 +150,13 @@ test('the Inbox thread shows a review comment on its lines and opens the living 
       const read = (await (await fetch(`${inboxUrl}/api/inbox/threads/${thread}`)).json()) as { thread?: { messages?: { body: string }[] } };
       return (read.thread?.messages ?? []).map((m) => m.body);
     }).toContain('I approved the review.');
+    review.on('response', async (response) => {
+      if (response.url().includes('/review-threads/') && response.url().endsWith('/open')) console.log('open answered', response.status(), await response.text().catch(() => ''));
+    });
+    review.on('console', (message) => console.log('page', message.type(), message.text().slice(0, 200)));
+    review.on('framenavigated', (frame) => {
+      if (frame === review.mainFrame()) console.log('navigated', frame.url());
+    });
     const firstUrl = review.url();
     await review.locator('[data-live-ended] a').click();
     await review.waitForURL((url) => url.href !== firstUrl && !url.href.startsWith(inboxUrl), { timeout: 45_000 });
