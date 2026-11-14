@@ -270,8 +270,8 @@ describe('file-scoped comments on GitHub (#1599)', () => {
   ];
   const paths = new Set(['src/a.ts', 'src/b.ts']);
 
-  test('GitHub posts each file comment as a file-level thread and leaves it out of the body', () => {
-    const [target] = buildReviewSubmission(annotations, [], PR_URL, paths, meta, undefined, 'github').targets;
+  test.each(['github', 'gitlab'] as const)('%s posts each file comment as a file-level thread and leaves it out of the body', (platform) => {
+    const [target] = buildReviewSubmission(annotations, [], PR_URL, paths, meta, undefined, platform).targets;
     expect(target.fileLevelComments).toEqual([
       { path: 'src/a.ts', body: 'Split this file.' },
       { path: 'src/a.ts', body: 'Wrong directory.' },
@@ -284,8 +284,8 @@ describe('file-scoped comments on GitHub (#1599)', () => {
     expect(target.fileComments).toHaveLength(0);
   });
 
-  test('GitLab and an unknown platform keep folding file comments into the body', () => {
-    for (const platform of ['gitlab', undefined] as const) {
+  test('Bitbucket and an unknown platform keep folding file comments into the body', () => {
+    for (const platform of ['bitbucket', undefined] as const) {
       const [target] = buildReviewSubmission(annotations, [], PR_URL, paths, meta, undefined, platform).targets;
       expect(target.fileLevelComments).toEqual([]);
       expect(target.fileScopedBody).toContain('**src/a.ts:** Split this file.');

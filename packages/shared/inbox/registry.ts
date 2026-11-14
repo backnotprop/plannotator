@@ -22,7 +22,7 @@
  */
 
 import { randomBytes } from "node:crypto";
-import { appendFileSync, chmodSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { isInboxHealth, type InboxHealth } from "@plannotator/core/inbox-types";
 import { inboxDir } from "./schema";
@@ -328,24 +328,41 @@ export function acquireInboxStartLock(dataDir: string): (() => void) | null {
   const lock = join(dir, INBOX_START_LOCK);
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      mkdirSync(lock);
-      joinInboxStartLock(dataDir);
-      return () => rmSync(lock, { recursive: true, force: true });
+      if (!existsSync(lock) && createStartLock(lock)) return () => rmSync(lock, { recursive: true, force: true });
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-      try {
-        // Never stale while the Inbox it started moves into SQLite: a second Inbox would start beside it.
-        if (!inboxStartLockStale(dataDir) || inboxUpgradeRunning(dataDir)) return null;
-        rmSync(lock, { recursive: true, force: true });
-      } catch {
-        // Gone in between: try again.
-      }
+    }
+    try {
+      // Never stale while the Inbox it started moves into SQLite: a second Inbox would start beside it.
+      if (!inboxStartLockStale(dataDir) || inboxUpgradeRunning(dataDir)) return null;
+      rmSync(lock, { recursive: true, force: true });
+    } catch {
+      // Gone in between: try again.
     }
   }
   return null;
 }
 
 const START_LOCK_HOLDERS = "holders";
+
+function createStartLock(lock: string): boolean {
+  const named = `${lock}.${process.pid}`;
+  try {
+    mkdirSync(named, { recursive: true });
+    writeFileSync(join(named, START_LOCK_HOLDERS), `${process.pid}\n`, { mode: 0o600 });
+    renameSync(named, lock);
+    return true;
+  } catch {
+    if (existsSync(lock)) return false;
+    mkdirSync(lock);
+    try {
+      appendFileSync(join(lock, START_LOCK_HOLDERS), `${process.pid}\n`, { mode: 0o600 });
+    } catch {}
+    return true;
+  } finally {
+    rmSync(named, { recursive: true, force: true });
+  }
+}
 
 /** Name this process as a holder of the start lock (the detached Inbox its starter started); best effort. */
 export function joinInboxStartLock(dataDir: string): void {
