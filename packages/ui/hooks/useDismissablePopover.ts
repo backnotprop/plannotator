@@ -17,14 +17,11 @@ import { useEffect } from 'react';
 export function useDismissablePopover({
   enabled,
   ref,
-  contentRef,
   onDismiss,
   dismissOnIframeFocus,
 }: {
   enabled: boolean;
   ref: React.RefObject<HTMLElement | null>;
-  /** A portaled panel that belongs to the same trigger. */
-  contentRef?: React.RefObject<HTMLElement | null>;
   onDismiss: () => void;
   dismissOnIframeFocus?: boolean;
 }) {
@@ -34,7 +31,6 @@ export function useDismissablePopover({
     const handlePointerDown = (event: PointerEvent) => {
       const target = event.target as Node | null;
       if (target && ref.current && ref.current.contains(target)) return;
-      if (target && contentRef?.current?.contains(target)) return;
       onDismiss();
     };
 
@@ -65,5 +61,5 @@ export function useDismissablePopover({
       if (dismissOnIframeFocus) window.removeEventListener('blur', handleWindowBlur);
       if (blurTimer !== undefined) clearTimeout(blurTimer);
     };
-  }, [enabled, ref, contentRef, onDismiss, dismissOnIframeFocus]);
+  }, [enabled, ref, onDismiss, dismissOnIframeFocus]);
 }

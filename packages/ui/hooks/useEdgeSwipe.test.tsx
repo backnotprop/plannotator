@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { useEdgeSwipe } from './useEdgeSwipe';
+import { usePanelDrag } from './usePanelDrag';
 
 const hasDom = typeof document !== 'undefined';
 let root: Root | null = null;
@@ -15,10 +16,11 @@ afterEach(async () => {
   if (hasDom) window.getSelection()?.removeAllRanges();
 });
 
-function touch(target: Element, type: string, x: number, y = 100, fingers = 1) {
+function touch(target: Element, type: string, x: number, y = 100, fingers = 1, time = 0) {
   const point = { identifier: 7, clientX: x, clientY: y };
   const event = new Event(type, { bubbles: true, cancelable: true });
   Object.defineProperties(event, {
+    timeStamp: { value: time },
     touches: { value: type === 'touchend' || type === 'touchcancel' ? [] : Array(fingers).fill(point) },
     changedTouches: { value: [point] },
   });
@@ -30,7 +32,7 @@ async function mount() {
   const opened: string[] = [];
   function Harness({ enabled = true, side }: { enabled?: boolean; side?: 'left' | 'right' }) {
     useEdgeSwipe({
-      enabled, onOpenLeft: () => opened.push('left'), onOpenRight: () => opened.push('right'),
+      enabled,
       panel: side ? { side, selector: '#test-panel', onClose: () => opened.push('closed') } : undefined,
     });
     return <main data-pn-compact-touch-layout="true"><p>Review text</p><textarea />
@@ -126,16 +128,38 @@ describe.skipIf(!hasDom)('compact panel edge swipes', () => {
     expect(opened).toEqual([]);
   });
 
-  test('opens the corresponding side only after a completed inward edge swipe', async () => {
+  test('both viewport edges remain browser-owned', async () => {
     const { opened, target } = await mount();
-    for (const [x, end, side] of [[8, 90, 'left'], [window.innerWidth - 8, window.innerWidth - 90, 'right']] as const) {
+    for (const [x, end] of [[8, 90], [window.innerWidth - 8, window.innerWidth - 90]]) {
       touch(target, 'touchstart', x);
-      expect(touch(target, 'touchmove', end).defaultPrevented).toBe(true);
-      expect(opened).not.toContain(side);
+      expect(touch(target, 'touchmove', end).defaultPrevented).toBe(false);
       touch(target, 'touchend', end);
     }
-    expect(opened).toEqual(['left', 'right']);
+    expect(opened).toEqual([]);
   });
+
+  for (const tracked of [false, true]) {
+    test(`short flick closes (tracked=${tracked}), slow drag and paused flick do not`, async () => {
+      const closed: boolean[] = [];
+      function FlickPanel() {
+        const drag = usePanelDrag({ selector: '#flick', onClose: () => closed.push(true), fallbackWidth: () => 300 });
+        useEdgeSwipe({ enabled: true, drag: { left: tracked ? drag.gesture : undefined },
+          panel: { side: 'left', selector: '#flick', trackDrag: tracked, onClose: () => closed.push(true) } });
+        return <section id="flick" data-pn-compact-touch-layout="true"><p>Panel</p></section>;
+      }
+      await mount();
+      await act(async () => root?.render(<FlickPanel />));
+      const panel = host!.querySelector('p')!;
+      for (const [duration, release] of [[200, 200], [50, 300], [50, 60]]) {
+        await act(async () => {
+          touch(panel, 'touchstart', 200, 100, 1, 0);
+          touch(panel, 'touchmove', 160, 100, 1, duration);
+          touch(panel, 'touchend', 160, 100, 1, release);
+        });
+        expect(closed.length).toBe(release === 60 ? 1 : 0);
+      }
+    });
+  }
 
   test('leaves center swipes, vertical scrolling, outward and short drags alone', async () => {
     const { opened, target } = await mount();

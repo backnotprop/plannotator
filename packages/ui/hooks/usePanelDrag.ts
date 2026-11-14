@@ -1,11 +1,12 @@
 import { useCallback, useLayoutEffect, useRef, useState } from 'react';
+import { SWIPE_FLICK_MIN_PX, SWIPE_FLICK_SPEED } from './useSwipeStep';
 import { usePrefersReducedMotion } from './usePrefersReducedMotion';
 
-type DragFrame = { distance: number; closing: boolean };
+type DragFrame = { distance: number };
 
 function paint(panel: HTMLElement, frame: DragFrame | null) {
   if (frame) {
-    panel.setAttribute('data-pn-panel-drag', frame.closing ? 'closing' : 'opening');
+    panel.setAttribute('data-pn-panel-drag', 'closing');
     panel.style.setProperty('--pn-panel-drag-distance', `${frame.distance}px`);
   } else {
     panel.removeAttribute('data-pn-panel-drag');
@@ -15,18 +16,16 @@ function paint(panel: HTMLElement, frame: DragFrame | null) {
 
 interface PanelDragOptions {
   selector: string;
-  onOpen: () => void;
   onClose: () => void;
-  onPreview?: () => void;
   fallbackWidth?: () => number;
 }
 
-/** Mount a preview on the first move, then paint the transform without rerendering. */
-export function usePanelDrag({ selector, onOpen, onClose, onPreview, fallbackWidth }: PanelDragOptions) {
+/** Track a closing drag without rerendering for every move. */
+export function usePanelDrag({ selector, onClose, fallbackWidth }: PanelDragOptions) {
   const reduced = usePrefersReducedMotion();
   const frame = useRef<DragFrame | null>(null);
   const element = useRef<HTMLElement | null>(null);
-  const [phase, setPhase] = useState({ active: false });
+  const [phase, setPhase] = useState(0);
 
   // Paint after mounting and after committing the end state. A fresh phase
   // object also handles a complete gesture batched into a single render.
@@ -38,28 +37,22 @@ export function usePanelDrag({ selector, onOpen, onClose, onPreview, fallbackWid
   const cancel = useCallback(() => {
     if (!frame.current) return;
     frame.current = null;
-    setPhase({ active: false });
+    setPhase(value => value + 1);
   }, []);
 
   return {
-    active: phase.active,
     cancel,
     gesture: reduced ? undefined : {
-      onMove: (distance: number, closing: boolean) => {
-        const first = !frame.current;
-        frame.current = { distance, closing };
+      onMove: (distance: number) => {
+        frame.current = { distance };
         if (!element.current?.isConnected) element.current = document.querySelector<HTMLElement>(selector);
         if (element.current) paint(element.current, frame.current);
-        if (first) {
-          onPreview?.();
-          setPhase({ active: true });
-        }
       },
-      onEnd: (distance: number | null, closing: boolean) => {
+      onEnd: (distance: number | null, velocity = 0) => {
         if (distance !== null) {
           const width = element.current?.getBoundingClientRect().width || fallbackWidth?.()
             || window.visualViewport?.width || window.innerWidth;
-          if (distance >= width / 3) (closing ? onClose : onOpen)();
+          if (distance >= width / 3 || (distance >= SWIPE_FLICK_MIN_PX && velocity >= SWIPE_FLICK_SPEED)) onClose();
         }
         cancel();
       },

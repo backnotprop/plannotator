@@ -155,42 +155,38 @@ afterEach(async () => {
   configStore.loadFromBackend();
 });
 
-describe.if(hasDom)('mobile edge swipes in real app shells', () => {
-  test('a document with no navigation tabs does not claim the left-edge gesture', async () => {
-    await mount('annotate', true, false, false);
-    expect(document.getElementById('pn-compact-plan-navigator-trigger')).toBeNull();
-    expect(await swipe('left')).toBe(false);
-    expect(navigation('annotate')).toBeNull();
-    expect(document.documentElement.hasAttribute('data-pn-panel-scroll-lock')).toBe(false);
-    expect(await swipe('right')).toBe(true);
-    expect(optionsMenu()).not.toBeNull();
-  });
 
+async function openPanel(mode: Mode, side: 'left' | 'right') {
+  const trigger = side === 'right'
+    ? host!.querySelector<HTMLButtonElement>('button[aria-label="Options"]')
+    : mode === 'review'
+      ? host!.querySelector<HTMLButtonElement>('[aria-label="Open review navigation"]')
+      : document.getElementById('pn-compact-plan-navigator-trigger') as HTMLButtonElement;
+  expect(trigger).not.toBeNull();
+  await act(async () => trigger!.click());
+  await settle();
+}
+
+describe.if(hasDom)('mobile panel closing and memory in real app shells', () => {
   for (const mode of ['plan', 'annotate', 'review'] as const) {
-    test(`${mode}: right swipe opens the same Options menu as the header burger`, async () => {
+    test(`${mode}: edge swipes stay native, buttons open panels and inside swipes close them`, async () => {
       await mount(mode);
-      const trigger = host!.querySelector<HTMLButtonElement>('button[aria-label="Options"]')!;
-      await act(async () => trigger.click());
-      const clickedMenu = host!.querySelector('[data-pn-dismissable-popover]')!;
-      expect(clickedMenu).not.toBeNull();
-      expect(clickedMenu.querySelector('[aria-label="Close options"]')).toBeNull();
-      const contents = clickedMenu.querySelector('[data-pn-options-content]')!.textContent;
-      await act(async () => trigger.click());
-      await act(async () => { await new Promise(resolve => setTimeout(resolve, PANEL_TRANSITION_MS + 30)); });
-      expect(await swipe('right')).toBe(true);
-      expect(trigger.getAttribute('aria-expanded')).toBe('true');
-      const swipedMenu = document.querySelector('[data-pn-options-menu]:not([aria-hidden="true"])');
-      expect(swipedMenu).not.toBeNull();
-      expect(swipedMenu!.querySelector('[data-pn-options-content]')!.textContent).toBe(contents);
-      expect(swipedMenu!.querySelector('[aria-label="Close options"]')).not.toBeNull();
-      await act(async () => swipedMenu!.dispatchEvent(new Event('pointerdown', { bubbles: true })));
-      expect(optionsMenu()).toBe(swipedMenu);
-      expect(annotationSurface(mode)).toBeNull();
+      for (const side of ['left', 'right'] as const) {
+        expect(await swipe(side)).toBe(false);
+        expect(navigation(mode)).toBeNull();
+        expect(optionsMenu()).toBeNull();
+        await openPanel(mode, side);
+        const panel = side === 'left' ? navigation(mode)! : optionsMenu()!;
+        expect(panel).not.toBeNull();
+        expect(await swipe(side, panel, true)).toBe(true);
+        expect(side === 'left' ? navigation(mode) : optionsMenu()).toBeNull();
+        await act(async () => { await new Promise(resolve => setTimeout(resolve, PANEL_TRANSITION_MS + 30)); });
+      }
     });
 
-    test(`${mode}: annotations remain available from Options and dismiss by outward swipe`, async () => {
+    test(`${mode}: Options opens annotations, which close by an inside swipe`, async () => {
       await mount(mode);
-      await swipe('right');
+      await openPanel(mode, 'right');
       const item = Array.from(optionsMenu()!.querySelectorAll<HTMLButtonElement>('button'))
         .find(button => button.textContent?.trim() === 'Annotations')!;
       expect(item).toBeDefined();
@@ -202,111 +198,29 @@ describe.if(hasDom)('mobile edge swipes in real app shells', () => {
       expect(annotationSurface(mode)).toBeNull();
     });
 
-    test(`${mode}: navigation restores scroll position after its exit and remount`, async () => {
+    test(`${mode}: navigation restores scroll after closing and remounting`, async () => {
       await mount(mode);
-      await swipe('left');
+      await openPanel(mode, 'left');
       const panel = navigation(mode)!;
-      const viewport = Array.from(panel.querySelectorAll<HTMLElement>('div')).find(el => el.style.overflowY === 'auto');
+      const viewport = Array.from(panel.querySelectorAll<HTMLElement>('div')).find(el => el.style.overflowY === 'auto')!;
       expect(viewport).toBeDefined();
-      viewport!.scrollTop = 320;
-      viewport!.dispatchEvent(new Event('scroll'));
+      viewport.scrollTop = 320;
+      viewport.dispatchEvent(new Event('scroll'));
       await swipe('left', panel, true);
       await act(async () => { await new Promise(resolve => setTimeout(resolve, PANEL_TRANSITION_MS + 30)); });
       expect(panel.isConnected).toBe(false);
-      await swipe('left');
-      const restored = Array.from(navigation(mode)!.querySelectorAll<HTMLElement>('div')).find(el => el.style.overflowY === 'auto');
+      await openPanel(mode, 'left');
+      const restored = Array.from(navigation(mode)!.querySelectorAll<HTMLElement>('div')).find(el => el.style.overflowY === 'auto')!;
       expect(restored).not.toBe(viewport);
-      expect(restored!.scrollTop).toBe(320);
+      expect(restored.scrollTop).toBe(320);
     });
 
-    test(`${mode}: closing by swipe or button retains inert panels until the exit finishes`, async () => {
-      await mount(mode);
-      await swipe('left');
-      const left = navigation(mode)!;
-      expect(left.getAttribute('data-pn-panel-side')).toBe('left');
-      expect(left.getAttribute('data-pn-panel-state')).toBe('open');
-      await swipe('left', left, true);
-      expect(left.isConnected).toBe(true);
-      expect(left.getAttribute('data-pn-panel-state')).toBe('closed');
-      expect(left.hasAttribute('inert')).toBe(true);
-      expect(left.getAttribute('aria-hidden')).toBe('true');
-      await act(async () => { await new Promise(resolve => setTimeout(resolve, PANEL_TRANSITION_MS + 30)); });
-      expect(left.isConnected).toBe(false);
-      await swipe('right');
-      const right = optionsMenu()!;
-      expect(right.getAttribute('data-pn-panel-side')).toBe('right');
-      await act(async () => right.querySelector<HTMLButtonElement>('button[aria-label="Close options"]')!.click());
-      expect(right.isConnected).toBe(true);
-      expect(right.hasAttribute('inert')).toBe(true);
-      await act(async () => { await new Promise(resolve => setTimeout(resolve, PANEL_TRANSITION_MS + 30)); });
-      expect(right.isConnected).toBe(false);
-    });
-
-    test(`${mode}: reopening during exit keeps the same interactive panel mounted`, async () => {
-      await mount(mode);
-      await swipe('right');
-      const panel = optionsMenu()!;
-      await swipe('right', panel, true);
-      expect(panel.isConnected).toBe(true);
-      expect(await swipe('right')).toBe(true);
-      await act(async () => { await new Promise(resolve => setTimeout(resolve, PANEL_TRANSITION_MS + 30)); });
-      expect(optionsMenu()).toBe(panel);
-      expect(panel.hasAttribute('inert')).toBe(false);
-      expect(panel.getAttribute('data-pn-panel-state')).toBe('open');
-    });
-
-    test(`${mode}: reduced motion closes without waiting for an animation`, async () => {
+    test(`${mode}: reduced motion still allows swipe-to-close`, async () => {
       await mount(mode, true, true);
-      await swipe('left');
+      await openPanel(mode, 'left');
       const panel = navigation(mode)!;
       await swipe('left', panel, true);
       expect(panel.isConnected).toBe(false);
-      await swipe('right');
-      const menu = optionsMenu()!;
-      await swipe('right', menu, true);
-      expect(menu.isConnected).toBe(false);
-    });
-
-    test(`${mode}: inward swipes open panels and outward swipes inside them close and allow reopening`, async () => {
-      await mount(mode);
-      expect(navigation(mode)).toBeNull();
-      expect(optionsMenu()).toBeNull();
-      expect(await swipe('left')).toBe(true);
-      expect(navigation(mode)).not.toBeNull();
-      expect(optionsMenu()).toBeNull();
-      expect(navigation(mode)!.textContent).toContain(mode === 'review' ? 'example.ts' : 'Second heading');
-      await swipe('right');
-      expect(navigation(mode)).not.toBeNull();
-      expect(optionsMenu()).toBeNull();
-      expect(await swipe('left', navigation(mode)!, true)).toBe(true);
-      expect(navigation(mode)).toBeNull();
-      expect(await swipe('right')).toBe(true);
-      expect(optionsMenu()).not.toBeNull();
-      expect(navigation(mode)).toBeNull();
-      expect(optionsMenu()!.textContent).toContain('Annotations');
-      expect(await swipe('right', optionsMenu()!, true)).toBe(true);
-      expect(optionsMenu()).toBeNull();
-      expect(await swipe('left')).toBe(true);
-      expect(navigation(mode)).not.toBeNull();
-    });
-
-    test(`${mode}: an open Options menu retains ownership of edge gestures`, async () => {
-      await mount(mode);
-      await swipe('right');
-      const panel = optionsMenu();
-      expect(panel).not.toBeNull();
-      await swipe('left');
-      expect(await swipe('right', panel!)).toBe(false);
-      expect(optionsMenu()).toBe(panel);
-      expect(navigation(mode)).toBeNull();
-    });
-
-    test(`${mode}: desktop edge touches never open compact panels`, async () => {
-      await mount(mode, false);
-      expect(await swipe('left')).toBe(false);
-      expect(await swipe('right')).toBe(false);
-      expect(navigation(mode)).toBeNull();
-      expect(optionsMenu()).toBeNull();
     });
   }
 });

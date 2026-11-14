@@ -9,4 +9,4 @@ This is the **published, reusable document UI** (`@plannotator/ui` + `@plannotat
 - `@plannotator/core` is browser-safe and zero-dep — **no `node:` imports** (CI enforces it). `@plannotator/shared`/`@plannotator/ai` stay private; `shared` re-exports `core` via shims.
 - **Never delete working Plannotator code until a human confirms parity in the browser.**
 
-For compact panels, gestures, scroll containment and navigation scroll memory, read [Mobile edge swipes](../../docs/agent-guides/guides-and-shared-ui.md#mobile-edge-swipes). The plan/annotate and code-review shells share the hooks; check both callers when changing panel behavior. Keep scroll memory optional for hosts using `OverlayScrollArea` without it.
+For compact panels, gestures, scroll containment and navigation scroll memory, read [Mobile panel gestures and scroll memory](../../docs/agent-guides/guides-and-shared-ui.md#mobile-panel-gestures-and-scroll-memory). The plan/annotate and code-review shells share the hooks; check both callers when changing panel behavior. Keep scroll memory optional for hosts using `OverlayScrollArea` without it.

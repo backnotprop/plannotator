@@ -1,15 +1,13 @@
 import { useEffect, useRef } from 'react';
-import { sidewaysOwner } from './useSwipeStep';
+import { SWIPE_FLICK_MIN_PX, SWIPE_FLICK_SPEED, sidewaysOwner } from './useSwipeStep';
 
 interface EdgeDrag {
-  onMove: (distance: number, closing: boolean) => void;
-  onEnd: (distance: number | null, closing: boolean) => void;
+  onMove: (distance: number) => void;
+  onEnd: (distance: number | null, velocity?: number) => void;
 }
 
 interface EdgeSwipeOptions {
   enabled: boolean;
-  onOpenLeft?: () => void;
-  onOpenRight?: () => void;
   drag?: Partial<Record<'left' | 'right', EdgeDrag>>;
   panel?: {
     side: 'left' | 'right';
@@ -19,21 +17,21 @@ interface EdgeSwipeOptions {
   };
 }
 
-/** Open from a viewport edge; dismiss an open panel with an outward swipe inside it. */
+/** Dismiss an open panel with an outward swipe starting inside it. */
 export function useEdgeSwipe(options: EdgeSwipeOptions): void {
   const latest = useRef(options);
   latest.current = options;
 
   useEffect(() => {
-    if (!options.enabled) return;
+    if (!options.enabled || !options.panel) return;
 
     let gesture: {
+      samples: { x: number; time: number }[];
       id: number;
       x: number;
       y: number;
-      side: 'left' | 'right';
       direction: 1 | -1;
-      panel: Element | null;
+      panel: Element;
       path: EventTarget[];
       claimed: boolean;
       drag?: EdgeDrag;
@@ -41,7 +39,7 @@ export function useEdgeSwipe(options: EdgeSwipeOptions): void {
     const reset = () => {
       const current = gesture;
       gesture = null;
-      if (current?.claimed) current.drag?.onEnd(null, !!current.panel);
+      if (current?.claimed) current.drag?.onEnd(null);
     };
     const hasSelection = () => !!window.getSelection()?.toString();
     const hasBlockingModal = (panel: Element | null) => Array.from(
@@ -52,21 +50,19 @@ export function useEdgeSwipe(options: EdgeSwipeOptions): void {
       reset();
       const panelOptions = latest.current.panel;
       const panel = panelOptions ? document.querySelector(panelOptions.selector) : null;
-      if (panelOptions && !panel) return;
+      if (!panelOptions || !panel) return;
       if (event.touches.length !== 1 || hasSelection() || hasBlockingModal(panel)) return;
       const path = event.composedPath();
-      if (panel && !path.includes(panel)) return;
+      if (!path.includes(panel)) return;
       // Ignore portals, lightboxes and other surfaces outside the compact app shell.
       if (!path.some(node => node instanceof Element
         && node.matches('[data-pn-compact-touch-layout="true"]'))) return;
       const touch = event.touches[0];
-      const side = panelOptions?.side ?? (touch.clientX <= 24 ? 'left'
-        : touch.clientX >= window.innerWidth - 24 ? 'right' : null);
-      if (!side || (!panel && !(side === 'left' ? latest.current.onOpenLeft : latest.current.onOpenRight))) return;
-      const direction = panel ? (side === 'left' ? -1 : 1) : (side === 'left' ? 1 : -1);
+      const side = panelOptions.side;
+      const direction = side === 'left' ? -1 : 1;
       if (sidewaysOwner(path, direction === 1 ? -1 : 1)) return;
-      const drag = !panel || panelOptions?.trackDrag ? latest.current.drag?.[side] : undefined;
-      gesture = { id: touch.identifier, x: touch.clientX, y: touch.clientY, side, direction, panel, path, claimed: false, drag };
+      const drag = panelOptions.trackDrag ? latest.current.drag?.[side] : undefined;
+      gesture = { samples: [{ x: touch.clientX, time: event.timeStamp }], id: touch.identifier, x: touch.clientX, y: touch.clientY, direction, panel, path, claimed: false, drag };
     };
 
     const move = (event: TouchEvent) => {
@@ -74,6 +70,8 @@ export function useEdgeSwipe(options: EdgeSwipeOptions): void {
       if (event.touches.length !== 1 || hasSelection() || hasBlockingModal(gesture.panel)) return reset();
       const touch = event.touches[0];
       if (touch.identifier !== gesture.id) return reset();
+      gesture.samples.push({ x: touch.clientX, time: event.timeStamp });
+      while (gesture.samples.length > 1 && gesture.samples[0].time < event.timeStamp - 100) gesture.samples.shift();
       const dx = (touch.clientX - gesture.x) * gesture.direction;
       const dy = Math.abs(touch.clientY - gesture.y);
       if (!gesture.claimed) {
@@ -84,7 +82,7 @@ export function useEdgeSwipe(options: EdgeSwipeOptions): void {
       }
       if (!event.cancelable) return reset(); // The browser already owns this gesture.
       event.preventDefault();
-      gesture.drag?.onMove(Math.max(0, dx), !!gesture.panel);
+      gesture.drag?.onMove(Math.max(0, dx));
     };
 
     const end = (event: TouchEvent) => {
@@ -94,14 +92,19 @@ export function useEdgeSwipe(options: EdgeSwipeOptions): void {
       if (!touch) return reset();
       gesture = null;
       const dx = (touch.clientX - current.x) * current.direction;
-      if (current.drag) {
-        current.drag.onEnd(Math.max(0, dx), !!current.panel);
+      const sample = current.samples.find(s => s.time >= event.timeStamp - 100);
+      const elapsed = sample ? event.timeStamp - sample.time : 0;
+      const velocity = sample && elapsed > 0 ? (touch.clientX - sample.x) * current.direction / elapsed : 0;
+      if (dx <= Math.abs(touch.clientY - current.y) * 1.5) {
+        current.drag?.onEnd(null);
         return;
       }
-      if (dx < 48 || dx <= Math.abs(touch.clientY - current.y) * 1.5) return;
-      const callback = current.panel ? latest.current.panel?.onClose
-        : current.side === 'left' ? latest.current.onOpenLeft : latest.current.onOpenRight;
-      callback?.();
+      if (current.drag) {
+        current.drag.onEnd(Math.max(0, dx), velocity);
+        return;
+      }
+      if (dx < 48 && !(dx >= SWIPE_FLICK_MIN_PX && velocity >= SWIPE_FLICK_SPEED)) return;
+      latest.current.panel?.onClose();
     };
 
     document.addEventListener('touchstart', start, { passive: true });

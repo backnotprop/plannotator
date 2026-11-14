@@ -952,11 +952,9 @@ const App: React.FC = () => {
   const navigatorSelector = '#pn-compact-plan-navigator';
   const navigatorDrag = usePanelDrag({
     selector: navigatorSelector,
-    onOpen: () => openSidebarTab(effectiveCompactNavigatorTab),
     onClose: () => closeCompactNavigator(),
   });
-  const navigatorPreview = isCompactTouchLayout && navigatorDrag.active && !isCompactNavigatorOpen;
-  const navigatorPresence = usePanelPresence(isCompactNavigatorOpen || navigatorPreview, isCompactTouchLayout);
+  const navigatorPresence = usePanelPresence(isCompactNavigatorOpen, isCompactTouchLayout);
   const annotationsPresence = usePanelPresence(isCompactAnnotationsOpen, isCompactTouchLayout);
   const aiPresence = usePanelPresence(isCompactAIOpen, isCompactTouchLayout);
   usePanelScrollLock(isCompactTouchLayout && (
@@ -7272,7 +7270,6 @@ const App: React.FC = () => {
   useEdgeSwipe({
     enabled: isCompactTouchLayout && (compactNavigatorAvailable || isCompactAnnotationsOpen || isCompactAIOpen)
       && compactPlanSurface.type !== 'review' && !goalSetupMode,
-    onOpenLeft: compactNavigatorAvailable ? () => openSidebarTab(effectiveCompactNavigatorTab) : undefined,
     drag: { left: navigatorDrag.gesture },
     panel: isCompactNavigatorOpen ? {
       side: 'left', selector: navigatorSelector, onClose: closeCompactNavigator, trackDrag: true,
@@ -7353,7 +7350,6 @@ const App: React.FC = () => {
       <SidebarContainer
         presentation={presentation}
         closing={compact && navigatorPresence.closing}
-        previewing={compact && navigatorPreview}
         scrollPositions={compact ? navigationScrollPositions.current : undefined}
         activeTab={compact ? effectiveCompactNavigatorTab : sidebar.activeTab}
         onTabChange={handleNavigatorTabChange}

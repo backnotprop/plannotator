@@ -68,57 +68,20 @@ for (const containment of ['native', 'fallback'] as const) {
       }).map(([name, value]) => ({ name, value, url })));
       await page.goto(url);
       await expect(page.locator('article')).toBeVisible();
-      // The right edge owns the header burger's Options, not the annotations surface.
       const options = page.getByRole('dialog', { name: 'Options', exact: true });
       const burger = page.getByRole('button', { name: 'Options', exact: true });
-      if (containment === 'native') {
-        const preview = page.locator('[data-pn-options-menu]');
-        // Cross the open threshold, then pull back below it before lifting.
-        await traceHorizontalDrag(page, [382, 262, 342], async distance => {
-          await expect.poll(async () => Math.round((await preview.boundingBox())?.x ?? -1)).toBe(390 - distance);
-          await expect(burger).toHaveAttribute('aria-expanded', 'false');
-        });
-        await expect(preview).toHaveCount(0);
-      }
+      const panel = page.locator('#pn-compact-plan-navigator');
       await drag(page, 382, 150, 150, 285);
-      await expect(options).toBeVisible();
-      await expect.poll(async () => {
-        const box = (await options.boundingBox())!;
-        return Math.round(box.y) === 0 && Math.round(box.height) === 844;
-      }).toBe(true);
-      await expect.poll(() => options.evaluate(panel => panel.contains(document.elementFromPoint(250, 816)))).toBe(true);
-      await page.setViewportSize({ width: 390, height: 600 });
-      await expect.poll(async () => Math.round((await options.boundingBox())!.height)).toBe(600);
-      await expect(options.getByRole('button', { name: 'Close options', exact: true })).toBeVisible();
-      await page.setViewportSize({ width: 390, height: 844 });
-      await expect(burger).toHaveAttribute('aria-expanded', 'true');
-      await expect(options.getByRole('button', { name: 'Settings', exact: true })).toBeVisible();
-      await expect(page.getByRole('dialog', { name: 'Annotations', exact: true })).toHaveCount(0);
-      if (containment === 'native') {
-        await page.emulateMedia({ media: 'print' });
-        try {
-          await expect(page.locator('.pn-options-drawer')).toBeHidden({ timeout: 2000 });
-        } finally {
-          await page.emulateMedia({ media: 'screen' });
-        }
-        await expect(options).toBeVisible();
-        const restingX = Math.round((await options.boundingBox())!.x);
-        // A closing drag follows the finger too; pulling back keeps it open.
-        await traceHorizontalDrag(page, [200, 320, 250], async distance => {
-          await expect.poll(async () => Math.round((await options.boundingBox())!.x)).toBe(restingX + distance);
-        });
-        await expect.poll(async () => Math.round((await options.boundingBox())!.x)).toBe(restingX);
-      }
-      await drag(page, 200, 150, 150, 310);
+      await drag(page, 8, 150, 150, 168);
       await expect(options).toHaveCount(0);
+      await expect(panel).toHaveCount(0);
+
       await burger.click();
       await expect(options).toBeVisible();
-      const popoverBox = (await options.boundingBox())!;
-      expect(popoverBox.y).toBeGreaterThan(0);
-      expect(popoverBox.height).toBeLessThan(844);
-      expect(popoverBox.y + popoverBox.height).toBeLessThanOrEqual(844);
-      await expect(options.getByRole('button', { name: 'Close options', exact: true })).toHaveCount(0);
-      await burger.click();
+      const box = (await options.boundingBox())!;
+      expect(box.y).toBeGreaterThan(0);
+      expect(box.height).toBeLessThan(844);
+      await drag(page, box.x + 35, box.y + 35, box.y + 35, box.x + 120);
       await expect(options).toHaveCount(0);
       if (containment === 'fallback') {
       // Replay an engine that cannot contain nested scrolling using CSS alone.
@@ -130,24 +93,8 @@ for (const containment of ['native', 'fallback'] as const) {
       }
       await page.evaluate(() => window.scrollTo(0, 1400));
       await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0);
-      await drag(page, 382, 150, 150, 285);
-      await expect(options).toBeVisible();
-      await expect.poll(async () => Math.round((await options.boundingBox())!.y)).toBe(0);
-      await options.getByRole('button', { name: 'Close options', exact: true }).click();
-      await expect(options).toHaveCount(0);
-      const panel = page.locator('#pn-compact-plan-navigator');
-      if (containment === 'native') {
-        // Pull the left panel out past its threshold, then back below it.
-        await traceHorizontalDrag(page, [8, 168, 68], async distance => {
-          await expect.poll(async () => Math.round((await panel.boundingBox())?.x ?? -999)).toBe(-390 + distance);
-          await expect(panel).toHaveAttribute('aria-hidden', 'true');
-        });
-        await expect(panel).toHaveCount(0);
-        await drag(page, 8, 150, 150, 168);
-      } else {
-        // Open without Playwright first scrolling the offscreen header into view.
-        await page.locator('#pn-compact-plan-navigator-trigger').evaluate(el => (el as HTMLButtonElement).click());
-      }
+      // Open without Playwright scrolling the offscreen header into view.
+      await page.locator('#pn-compact-plan-navigator-trigger').evaluate(el => (el as HTMLButtonElement).click());
       await expect(panel).toBeVisible();
       await page.waitForTimeout(250);
       const viewport = panel.locator('nav[aria-label="Table of contents"]').locator('..');
