@@ -229,7 +229,7 @@ test('the tools stay put while the files scroll; the numbers keep two edges', as
         [...new Set([...tree.shadowRoot!.querySelectorAll(`[data-item-section="trail"] > :nth-child(${n})`)]
           .filter((el) => el.textContent)
           .map((el) => Math.round(el.getBoundingClientRect().right)))];
-      return { plus: right(3), minus: right(4) };
+      return { plus: right(2), minus: right(3) };
     });
     expect(edges.plus.length).toBe(1);
     expect(edges.minus.length).toBeLessThanOrEqual(1);

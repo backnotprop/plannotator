@@ -11,15 +11,15 @@ Our review tree puts controls and numbers in its rows. Upstream rows take one no
 | Addition | Why |
 |---|---|
 | `rows.renderParts(context)` returns `{ lead, trail, muted, tone, title }` | `lead` parts sit before the name (the viewed circle, git add), `trail` parts after it (comment count, `+N`, `−M`). A `null` part keeps its column empty so columns line up. `muted` dims the name (viewed files). `tone` names a row style (group headings). `title` is the row's tooltip |
-| A part with an `id` is a button (`role="button"`, `aria-pressed` from `pressed`) and calls `rows.onPartClick({ partId, path, row })` | Clicking the viewed circle or git add must not select or open the file |
+| A part with an `id` is a button (`role="button"`, `aria-pressed` from `pressed`) and calls `rows.onPartClick({ partId, path, row })`; a part may carry an icon and text together | Clicking the viewed circle or git add must not select or open the file; an open-threads count is an icon and a number |
 | `rows.onDoubleClick({ path, row })` | Double-click pins a file |
 | `rows.gitStatusPlacement: 'start'` | The status letter before the name, as in our tree |
 | `onDirectoryExpand(path)` (a tree option) | All files lists folders lazily: an unloaded folder is a path ending in `/`; when it opens we load its children and `batch` them in |
 | `model.refreshRows()` | Re-runs `renderParts` and `renderRowDecoration` after the host's state (viewed, staged, comments) changes |
-| Shadow parts on row sections: `row-icon row-icon-file|directory`, `row-lead`, `row-git row-git-file|directory`, `row-content` (+ `row-content-muted`, `row-content-<tone>`), `row-trail`, `row-part`, `row-part-<id>`, `row-part-pressed` | Stable styling from outside the shadow root with `::part()`, instead of CSS against internal attributes |
-| CSS variables `--trees-row-lead-columns`, `--trees-row-trail-columns`, `--trees-row-part-gap`, `--trees-row-muted-opacity` | The lead and trail are grids; the host sets column widths so `+N` and `−M` line up down the panel |
+| Shadow parts on row sections: `row-spacing`, `row-icon row-icon-file|directory`, `row-lead`, `row-git row-git-file|directory`, `row-content` (+ `row-content-muted`, `row-content-<tone>`), `row-decoration`, `row-trail`, `row-part`, `row-part-<id>`, `row-part-pressed` | Stable styling from outside the shadow root with `::part()`, instead of CSS against internal attributes |
+| CSS variables `--trees-row-lead-columns`, `--trees-row-trail-columns`, `--trees-row-part-gap`, `--trees-row-muted-opacity`, and `--trees-row-active` (1 on a hovered, focused or selected row, else 0; always 1 without hover) | The lead and trail are grids; the host sets column widths so `+N` and `−M` line up down the panel. `--trees-row-active` lets a part (Git add) show on hover only, from outside the shadow root |
 
-Files touched (all under `dist/`): `render/FileTreeView.js` (rendering and clicks), `render/FileTree.js` (passing `rows`, `refreshRows`), `model/FileTreeController.js` (`onDirectoryExpand`), `style.js` (the grid CSS, appended as its own string), `model/publicTypes.d.ts`, `render/FileTree.d.ts`, `index.d.ts` (types). Source maps are not updated.
+The patch is about 125 added lines. Files touched (all under `dist/`): `render/FileTreeView.js` (rendering and clicks), `render/FileTree.js` (passing `rows`, `refreshRows`), `model/FileTreeController.js` (`onDirectoryExpand`), `style.js` (the grid CSS, appended as its own string), `model/publicTypes.d.ts`, `render/FileTree.d.ts`, `index.d.ts` (types). Source maps are not updated.
 
 ## Re-sync with a new upstream version
 

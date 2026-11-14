@@ -5,7 +5,7 @@
   --tree-fill-strong: var(--sidebar-fill-strong, color-mix(in oklab, var(--foreground) 9%, transparent));
   --tree-line: var(--sidebar-line, color-mix(in oklab, var(--foreground) 9%, transparent));
   --tree-text-tertiary: var(--sidebar-text-tertiary, var(--muted-foreground));
-  --trees-bg-override: transparent;
+  --trees-bg-override: var(--tree-bg, var(--background));
   --trees-fg-override: color-mix(in oklab, var(--foreground) 88%, var(--background));
   --trees-fg-muted-override: var(--muted-foreground);
   --trees-bg-muted-override: var(--tree-fill);
@@ -35,10 +35,11 @@
   --trees-scrollbar-thumb-override: color-mix(in oklab, var(--foreground) 18%, transparent);
   --trees-row-part-gap: 4px;
   --trees-row-muted-opacity: 1;
-  --trees-row-trail-columns: max-content max-content minmax(var(--count-add-w, 3ch), max-content) minmax(var(--count-del-w, 3ch), max-content);
+  --trees-row-trail-columns: max-content minmax(var(--count-add-w, 3ch), max-content) minmax(var(--count-del-w, 3ch), max-content);
 }
 .review-changes-tree::part(row-icon-file),
-.review-changes-tree::part(row-git-directory) {
+.review-changes-tree::part(row-git-directory),
+.review-changes-tree::part(row-decoration) {
   display: none;
 }
 .review-changes-tree::part(row-git) {

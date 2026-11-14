@@ -138,11 +138,11 @@ export const ChangesTreeView: React.FC<ChangesTreeViewProps> = (props) => {
         tone: 'heading',
         title: entry.group.tooltip,
         lead: GROUP_ICONS[entry.group.key] ? [GROUP_ICONS[entry.group.key]] : undefined,
-        trail: [null, { text: `${viewed}/${total}`, title: `${viewed} of ${total} viewed` }, ...countParts(entry.group.additions, entry.group.deletions, true)],
+        trail: [{ text: `${viewed}/${total}`, title: `${viewed} of ${total} viewed` }, ...countParts(entry.group.additions, entry.group.deletions, true)],
       };
     }
     if (entry.kind === 'folder') {
-      return { trail: [null, null, ...countParts(entry.node.additions, entry.node.deletions, true)] };
+      return { trail: [null, ...countParts(entry.node.additions, entry.node.deletions, true)] };
     }
     return fileRowParts(entry.file, p, withStage);
   }, []);

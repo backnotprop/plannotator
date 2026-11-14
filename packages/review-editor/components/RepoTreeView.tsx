@@ -78,8 +78,11 @@ export const RepoTreeView: React.FC<RepoTreeViewProps> = (props) => {
       title: row.path,
       lead,
       trail: [
-        onDisk ? { text: '●', color: 'var(--warning)', title: ON_DISK_TITLES[onDisk] } : null,
-        notes > 0 ? { text: String(notes), color: 'var(--primary)', title: `${notes} comment${notes === 1 ? '' : 's'}` } : null,
+        onDisk
+          ? { text: '●', color: 'var(--warning)', title: ON_DISK_TITLES[onDisk] }
+          : notes > 0
+            ? { text: String(notes), color: 'var(--primary)', title: `${notes} comment${notes === 1 ? '' : 's'}` }
+            : null,
         null,
         null,
       ],

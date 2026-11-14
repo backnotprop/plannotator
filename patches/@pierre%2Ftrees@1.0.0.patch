@@ -184,10 +184,10 @@ index 0b41099..a745685 100644
  		searchEnabled: search === true,
  		searchFakeFocus: searchFakeFocus === true,
 diff --git a/dist/render/FileTreeView.js b/dist/render/FileTreeView.js
-index b4c7ee4..e906e3a 100644
+index b4c7ee4..d7e76dc 100644
 --- a/dist/render/FileTreeView.js
 +++ b/dist/render/FileTreeView.js
-@@ -362,8 +362,46 @@ function focusFirstMenuElement(menuElement) {
+@@ -362,11 +362,50 @@ function focusFirstMenuElement(menuElement) {
  	].join(", "));
  	focusElement(focusable ?? menuElement);
  }
@@ -235,7 +235,11 @@ index b4c7ee4..e906e3a 100644
  	return /* @__PURE__ */ jsxs(Fragment, { children: [
  		row.depth > 0 ? /* @__PURE__ */ jsx("div", {
  			"data-item-section": "spacing",
-@@ -374,10 +412,14 @@ function renderFileTreeRowContent(row, resolveIcon, { actionLaneEnabled = false,
++			part: "row-spacing",
+ 			children: Array.from({ length: row.depth }).map((_, index) => /* @__PURE__ */ jsx("div", {
+ 				"data-item-section": "spacing-item",
+ 				"data-ancestor-path": row.ancestorPaths[index]
+@@ -374,10 +413,14 @@ function renderFileTreeRowContent(row, resolveIcon, { actionLaneEnabled = false,
  		}) : null,
  		/* @__PURE__ */ jsx("div", {
  			"data-item-section": "icon",
@@ -250,8 +254,11 @@ index b4c7ee4..e906e3a 100644
  			children: row.isFlattened ? formatFlattenedSegments(row, renameInput, dragTargetFlattenedSegmentPath) : renameInput ?? /* @__PURE__ */ jsx(MiddleTruncate, {
  				minimumLength: 5,
  				split: "extension",
-@@ -388,10 +430,8 @@ function renderFileTreeRowContent(row, resolveIcon, { actionLaneEnabled = false,
+@@ -386,12 +429,11 @@ function renderFileTreeRowContent(row, resolveIcon, { actionLaneEnabled = false,
+ 		}),
+ 		decorationLaneEnabled ? /* @__PURE__ */ jsx("div", {
  			"data-item-section": "decoration",
++			part: "row-decoration",
  			children: customDecoration != null ? renderRowDecoration(customDecoration, resolveIcon) : null
  		}) : null,
 -		gitLaneActive ? /* @__PURE__ */ jsx("div", {
@@ -263,7 +270,7 @@ index b4c7ee4..e906e3a 100644
  		actionLaneEnabled ? /* @__PURE__ */ jsx("div", {
  			"data-item-section": "action",
  			children: showDecorativeActionAffordance ? /* @__PURE__ */ jsx("span", {
-@@ -403,13 +443,14 @@ function renderFileTreeRowContent(row, resolveIcon, { actionLaneEnabled = false,
+@@ -403,13 +445,14 @@ function renderFileTreeRowContent(row, resolveIcon, { actionLaneEnabled = false,
  	] });
  }
  function renderStyledRow(frame, row, key, options = {}) {
@@ -279,7 +286,7 @@ index b4c7ee4..e906e3a 100644
  	const gitDecoration = getBuiltInGitStatusDecoration(effectiveGitStatus, containsGitChange, labels);
  	const actionLaneEnabled = contextMenuEnabled && contextMenuButtonTriggerEnabled;
  	const decorationLaneEnabled = customDecoration != null || gitLaneActive || actionLaneEnabled;
-@@ -435,7 +476,12 @@ function renderStyledRow(frame, row, key, options = {}) {
+@@ -435,7 +478,12 @@ function renderStyledRow(frame, row, key, options = {}) {
  		dragTargetFlattenedSegmentPath: dragTarget?.flattenedSegmentPath ?? null,
  		gitDecoration,
  		gitLaneActive,
@@ -292,7 +299,7 @@ index b4c7ee4..e906e3a 100644
  		showDecorativeActionAffordance
  	});
  	const commonProps = {
-@@ -464,6 +510,9 @@ function renderStyledRow(frame, row, key, options = {}) {
+@@ -464,6 +512,9 @@ function renderStyledRow(frame, row, key, options = {}) {
  			},
  			targetPath
  		}),
@@ -302,7 +309,7 @@ index b4c7ee4..e906e3a 100644
  		key,
  		onContextMenu: contextMenuEnabled || dragAndDropEnabled ? (event) => {
  			if (shouldSuppressContextMenu()) {
-@@ -512,6 +561,9 @@ function renderStyledRow(frame, row, key, options = {}) {
+@@ -512,6 +563,9 @@ function renderStyledRow(frame, row, key, options = {}) {
  		onClick: (event) => {
  			onRowClick(event, row, targetPath, mode);
  		},
@@ -312,7 +319,7 @@ index b4c7ee4..e906e3a 100644
  		children: rowContent
  	});
  }
-@@ -519,7 +571,7 @@ function renderRangeChildren(frame, range, hiddenRowPaths) {
+@@ -519,7 +573,7 @@ function renderRangeChildren(frame, range, hiddenRowPaths) {
  	if (range.end < range.start) return [];
  	return frame.controller.getVisibleRows(range.start, range.end).filter((row) => !hiddenRowPaths.has(getFileTreeRowPath(row))).map((row, slotIndex) => renderStyledRow(frame, row, range.start + slotIndex));
  }
@@ -321,7 +328,7 @@ index b4c7ee4..e906e3a 100644
  	"use no memo";
  	const contextMenuAnchorRef = useRef(null);
  	const contextMenuTriggerRef = useRef(null);
-@@ -695,6 +747,10 @@ function FileTreeView({ composition, controller, gitStatusByPath, ignoredGitDire
+@@ -695,6 +749,10 @@ function FileTreeView({ composition, controller, gitStatusByPath, ignoredGitDire
  		item: createContextMenuItem(row, targetPath),
  		row
  	}) ?? null, [renderRowDecoration]);
@@ -332,7 +339,7 @@ index b4c7ee4..e906e3a 100644
  	const restoreContextMenuFocus = useCallback((restorePath) => {
  		const focusedButton = restorePath == null ? null : rowButtonRefs.current.get(restorePath) ?? null;
  		if (focusElement(focusedButton)) return true;
-@@ -1776,7 +1832,9 @@ function FileTreeView({ composition, controller, gitStatusByPath, ignoredGitDire
+@@ -1776,7 +1834,9 @@ function FileTreeView({ composition, controller, gitStatusByPath, ignoredGitDire
  		registerRenameInput,
  		renameView,
  		renderDecorationForRow,

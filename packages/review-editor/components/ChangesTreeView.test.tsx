@@ -110,8 +110,8 @@ describe.skipIf(!hasDom)('The Changes tree on Pierre trees', () => {
       'Generated/',
     ]);
     expect(row(el, 'Generated/').getAttribute('aria-expanded')).toBe('false');
-    expect(trail(el, 'Code/')).toEqual(['', '0/2', '+20', '-1']);
-    expect(trail(el, 'Code/src∕sync/retry.ts')).toEqual(['', '', '+19', '']);
+    expect(trail(el, 'Code/')).toEqual(['0/2', '+20', '-1']);
+    expect(trail(el, 'Code/src∕sync/retry.ts')).toEqual(['', '+19', '']);
     expect(selected(el)).toEqual(['Code/src∕sync/retry.ts']);
   });
 

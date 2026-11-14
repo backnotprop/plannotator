@@ -108,10 +108,11 @@ export function fileRowParts(file: DiffFile, p: FileRowState, withStage: boolean
     trail: [
       threads > 0
         ? { icon: THREAD_ICON, text: String(threads), title: `${threads} open ${threads === 1 ? 'thread' : 'threads'}` }
-        : previewed
-          ? { icon: EYE_ICON, title: 'Shown rendered' }
-          : null,
-      notes > 0 ? { text: String(notes), title: `${notes} annotation${notes === 1 ? '' : 's'}`, color: 'var(--primary)' } : null,
+        : notes > 0
+          ? { text: String(notes), title: `${notes} annotation${notes === 1 ? '' : 's'}`, color: 'var(--primary)' }
+          : previewed
+            ? { icon: EYE_ICON, title: 'Shown rendered' }
+            : null,
       ...countParts(file.additions, file.deletions, false),
     ],
   };
