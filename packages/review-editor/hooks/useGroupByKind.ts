@@ -14,14 +14,13 @@ export function readGroupByKind(): boolean {
   return storage.getItem(GROUP_BY_KIND_COOKIE) !== 'off';
 }
 
-export function useGroupByKind(): [boolean, () => void] {
+export function useGroupByKind(): [boolean, () => void, (on: boolean) => void] {
   const [on, setOn] = useState(readGroupByKind);
-  const toggle = useCallback(() => {
-    const next = !on;
-    // The default (on) is the absence of the cookie.
+  const set = useCallback((next: boolean) => {
     if (next) storage.removeItem(GROUP_BY_KIND_COOKIE);
     else storage.setItem(GROUP_BY_KIND_COOKIE, 'off');
     setOn(next);
-  }, [on]);
-  return [on, toggle];
+  }, []);
+  const toggle = useCallback(() => set(!on), [on, set]);
+  return [on, toggle, set];
 }

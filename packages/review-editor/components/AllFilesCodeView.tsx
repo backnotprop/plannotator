@@ -1,3 +1,4 @@
+import { COMPACT_FILE_HEADER_HEIGHT, COMPACT_HUNK_SEPARATOR_HEIGHT, FILE_HEADER_HEIGHT, HUNK_SEPARATOR_HEIGHT } from '../utils/diffChromeMetrics';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ContextNoteAnchor } from '../utils/contextNoteAnchor';
 import { createPortal } from 'react-dom';
@@ -734,19 +735,6 @@ type HeaderMetricsTarget = { setMetrics(metrics?: Partial<VirtualFileMetrics>, f
 const isHeaderMetricsTarget = (value: unknown): value is HeaderMetricsTarget =>
   typeof value === 'object' && value !== null && typeof (value as HeaderMetricsTarget).setMetrics === 'function';
 
-// Resolved pixel height of the custom header. Must equal FileHeader's fixed
-// container height (`style={{ height: 'var(--panel-header-h)' }}`) so CodeView's
-// virtualization reserves exactly the right space for the header. FileHeader is
-// internally responsive (ResizeObserver shrinks labels) but its OUTER box height
-// is fixed, so the responsive label changes never alter the row height.
-const PANEL_HEADER_HEIGHT = 33; // --panel-header-h
-const COMPACT_PANEL_HEADER_HEIGHT = 44;
-// Hunk separator height forced by usePierreTheme unsafeCSS:
-//   [data-separator='line-info'] { height: 24px; margin-block: 4px; }
-// => 24 + 4*2 = 32. Pierre's own 'line-info' default metric is also 32, so
-// passing it is redundant today — kept explicit so the metric stays pinned to
-// OUR unsafeCSS rule rather than silently tracking a library default.
-const HUNK_SEPARATOR_HEIGHT = 32;
 // A file in a box as tall as its layout (`scrollsWithPage`). The box holds the padding, so the code draws what the
 // layout counts; under the last row only Pierre's own room for its sideways scrollbar (itemMetrics' paddingBottom).
 // The line under a header shows only while the header is stuck (browsers without scroll-state queries draw none).
@@ -763,7 +751,7 @@ const STUCK_HEADER_LINE_CSS = `
   }
 `;
 // Flush files (`flushFiles`): the header's own hairline is the seam, and an unread file's trailing row is not drawn
-// (the viewer gives its room back, HUNK_SEPARATOR_HEIGHT).
+// (the viewer gives its room back, the separator's height).
 const FLUSH_FILES_CSS = `
   :host([data-trailing-unread]) [data-separator][data-separator-last] { display: none; }
 `;
@@ -880,6 +868,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   // header-custom slot, no [data-title] element), so that rule is moot either
   // way — we keep `true` to be explicit that the built-in title is irrelevant
   // here (our FileHeader owns all header chrome).
+  const separatorHeight = compactTouchLayout ? COMPACT_HUNK_SEPARATOR_HEIGHT : HUNK_SEPARATOR_HEIGHT;
   const pierreTheme = usePierreTheme({
     fontFamily,
     fontSize,
@@ -953,7 +942,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     const report = () => {
       if (!list) return;
       const style = getComputedStyle(list);
-      const height = Math.ceil((list as HTMLElement).offsetHeight + parseFloat(style.marginTop || '0') + parseFloat(style.marginBottom || '0')) - (trailingUnread ? HUNK_SEPARATOR_HEIGHT : 0);
+      const height = Math.ceil((list as HTMLElement).offsetHeight + parseFloat(style.marginTop || '0') + parseFloat(style.marginBottom || '0')) - (trailingUnread ? separatorHeight : 0);
       if (height <= 0 || height === last) return;
       last = height;
       contentHeightRef.current?.(height);
@@ -3572,10 +3561,9 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   }, [hostFileNotes, hostFileNotesByPath, files]);
   const itemMetrics = useMemo<Partial<VirtualFileMetrics>>(
     () => ({
-      diffHeaderHeight: (compactTouchLayout ? COMPACT_PANEL_HEADER_HEIGHT : PANEL_HEADER_HEIGHT) + hostHeaderExtra,
+      diffHeaderHeight: (compactTouchLayout ? COMPACT_FILE_HEADER_HEIGHT : FILE_HEADER_HEIGHT) + hostHeaderExtra,
       // The 32 is the line-info row's; a simple one's height is the library's own.
-      ...(hunkSeparators === 'line-info' && { hunkSeparatorHeight: HUNK_SEPARATOR_HEIGHT }),
-      // HUNK_SEPARATOR_HEIGHT already holds the drawn margins, so Pierre's gaps around each separator are never drawn.
+      ...(hunkSeparators === 'line-info' && { hunkSeparatorHeight: separatorHeight }),
       // Counted, every open file was laid out 8px taller per gap than it is. In a box as tall as the layout the rows
       // float in that room; in the scroller, a list that just outgrows the view is pushed down by it, under the
       // pointer, when a file opens (#2713: Pierre's sticky window sits at the bottom of the room it is given).
@@ -3585,7 +3573,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       paddingBottom: 8,
       ...(customLineHeight != null && { lineHeight: customLineHeight }),
     }),
-    [compactTouchLayout, customLineHeight, hunkSeparators, hostHeaderExtra],
+    [compactTouchLayout, customLineHeight, hunkSeparators, hostHeaderExtra, separatorHeight],
   );
   itemMetricsRef.current = itemMetrics;
 
@@ -3614,7 +3602,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       // leadingHeight reserves space for the leading-content portal (commit
       // description card) so items start below it and it scrolls with them.
       // Scrolling with the page, the box around the viewer holds the padding: rows laid out edge to edge have no slack to float in.
-      layout: scrollsWithPage ? { gap: 0, paddingTop: 0, paddingBottom: 0 } : { gap: 0, paddingTop: 8 + leadingHeight, paddingBottom: 8 },
+      layout: scrollsWithPage ? { gap: 0, paddingTop: 0, paddingBottom: 0 } : { gap: 0, paddingTop: leadingHeight, paddingBottom: 8 },
       itemMetrics,
       // Opt-in safety net for the hand-maintained itemMetrics above: Pierre
       // compares its virtualization estimates against measured DOM heights and
@@ -3757,7 +3745,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     <div
       className="relative h-full"
       // The hidden trailing row's room, given back (flushFiles): the next file's header meets the last code row.
-      style={flushesFiles && trailingUnread ? { marginBottom: -HUNK_SEPARATOR_HEIGHT } : undefined}
+      style={flushesFiles && trailingUnread ? { marginBottom: -separatorHeight } : undefined}
       data-history-owner={editSession.editingItemId ? 'edit-session' : undefined}
       onPointerMove={markdownPreview ? (event) => { pointerRef.current = { x: event.clientX, y: event.clientY }; } : undefined}
       onPointerLeave={markdownPreview ? () => { pointerRef.current = null; } : undefined}

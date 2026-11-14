@@ -59,6 +59,9 @@ export interface PanelControlsProps {
    *  Without the handler the menu item is not rendered. */
   groupByKind?: boolean;
   onToggleGroupByKind?: () => void;
+  groupBy?: "none" | "kind" | "status";
+  onSelectGroupBy?: (groupBy: "none" | "kind" | "status") => void;
+  statusGroupingAvailable?: boolean;
   /** The tools row's lead: the Changes / All files switch (`ScopeSwitch`).
    *  Unset: the row is labelled "Files". */
   scope?: React.ReactNode;
@@ -138,56 +141,12 @@ function StickyTools({ children }: { children: React.ReactNode }) {
       <div ref={sentinelRef} aria-hidden="true" data-review-sticky-sentinel="" />
       <div
         ref={blockRef}
-        className="review-sticky-tools sticky top-0 z-10 -mx-2 px-2 pb-3 flex flex-col bg-background"
+        className="review-sticky-tools sticky top-0 z-10 -mx-2 px-2 pb-1 flex flex-col bg-background"
         data-review-sticky-tools=""
       >
         {children}
       </div>
     </>
-  );
-}
-
-/** Where the review stands, in words, with the Hide viewed eye at the end
- *  (under the "…" button). No bar: at 0 % it read as a divider line. */
-function ProgressRow({
-  viewedCount,
-  totalCount,
-  stagedCount = 0,
-  showViewedControls = true,
-  showStageControls = true,
-  hideViewedFiles = false,
-  onToggleHideViewed,
-}: PanelControlsProps) {
-  const showStaged = showStageControls && stagedCount > 0;
-  if (!showViewedControls && !showStaged) return null;
-  const allViewed = showViewedControls && totalCount > 0 && viewedCount >= totalCount;
-  return (
-    <div
-      className="flex items-center min-h-6 pl-2 pr-1 gap-1.5 text-[12px] text-muted-foreground tabular-nums"
-      data-review-progress-caption=""
-    >
-      {/* Wraps between its parts, never inside one, in a narrow panel. */}
-      <span className="min-w-0 flex flex-wrap items-center gap-x-1.5">
-        {showViewedControls && (
-          <span data-panel-viewed-controls="" className={`whitespace-nowrap${allViewed ? " text-success" : ""}`}>
-            {allViewed ? `All ${totalCount} viewed` : `${viewedCount} of ${totalCount} viewed`}
-          </span>
-        )}
-        {showViewedControls && showStaged && <span aria-hidden="true" data-progress-dot="">·</span>}
-        {showStaged && (
-          <span data-panel-staged-count="" className="whitespace-nowrap" title="Files staged with git add">
-            {stagedCount} staged
-          </span>
-        )}
-      </span>
-      {showViewedControls && onToggleHideViewed && (
-        <span className="ml-auto flex">
-          <ToolButton label="Hide viewed files" onClick={onToggleHideViewed} pressed={hideViewedFiles}>
-            {hideViewedFiles ? <EyeOff className="w-3.5 h-3.5" aria-hidden="true" /> : <Eye className="w-3.5 h-3.5" aria-hidden="true" />}
-          </ToolButton>
-        </span>
-      )}
-    </div>
   );
 }
 
@@ -204,13 +163,19 @@ function ListOptionsMenu({
   onToggleAutoViewed,
   groupByKind = true,
   onToggleGroupByKind,
+  groupBy,
+  onSelectGroupBy,
+  statusGroupingAvailable = false,
   onCopyRawDiff,
   canCopyRawDiff = false,
   copyRawDiffStatus = "idle",
+  onToggleAllFolders,
+  areAllFoldersExpanded = false,
+  collapseDisabled = false,
 }: PanelControlsProps) {
   const perFile = !!onToggleShowViewedControls && !!onToggleShowStageControls;
-  const settings = !!onToggleAutoViewed || !!onToggleGroupByKind;
-  if (!onCopyRawDiff && !settings && !perFile) return null;
+  const settings = !!onToggleAutoViewed || !!onToggleGroupByKind || !!onSelectGroupBy;
+  if (!onCopyRawDiff && !settings && !perFile && !onToggleAllFolders) return null;
   const check = (on: boolean) => (
     <span className="ml-auto w-3.5 flex justify-center text-foreground">
       {on ? <Check className="w-3.5 h-3.5" aria-hidden="true" /> : null}
@@ -229,6 +194,17 @@ function ListOptionsMenu({
             className="w-60 rounded-lg border border-border bg-popover p-1 text-popover-foreground shadow-lg outline-none"
             data-review-tree-settings=""
           >
+            {onToggleAllFolders && (
+              <Menu.Item className={MENU_ITEM} onClick={onToggleAllFolders} disabled={collapseDisabled} data-review-collapse-folders="">
+                {areAllFoldersExpanded ? (
+                  <ChevronsDownUp className="w-3.5 h-3.5 text-muted-foreground" aria-hidden="true" />
+                ) : (
+                  <ChevronsUpDown className="w-3.5 h-3.5 text-muted-foreground" aria-hidden="true" />
+                )}
+                {areAllFoldersExpanded ? "Collapse all folders" : "Expand all folders"}
+              </Menu.Item>
+            )}
+            {onToggleAllFolders && onCopyRawDiff && <Menu.Separator className="my-1 h-px bg-border/70" />}
             {onCopyRawDiff && (
               <Menu.Item className={MENU_ITEM} onClick={onCopyRawDiff} disabled={!canCopyRawDiff} closeOnClick={false} data-review-copy-all-diffs="">
                 {copyRawDiffStatus === "success" ? (
@@ -254,7 +230,25 @@ function ListOptionsMenu({
                 {check(autoViewed)}
               </Menu.CheckboxItem>
             )}
-            {onToggleGroupByKind && (
+            {onSelectGroupBy && groupBy && (
+              <Menu.Group>
+                <Menu.Separator className="my-1 h-px bg-border/70" />
+                <Menu.GroupLabel className="px-2 pt-1 pb-0.5 text-[12px] font-medium text-muted-foreground">Group files</Menu.GroupLabel>
+                <Menu.RadioGroup value={groupBy} onValueChange={(value) => onSelectGroupBy(value as "none" | "kind" | "status")}>
+                  {([
+                    ["none", "No groups"],
+                    ["kind", "By kind: code, tests, generated"],
+                    ...(statusGroupingAvailable ? [["status", "By git status: staged, unstaged, untracked"]] : []),
+                  ] as [string, string][]).map(([value, label]) => (
+                    <Menu.RadioItem key={value} value={value} className={MENU_ITEM} closeOnClick={false} data-review-group-by={value}>
+                      {label}
+                      {check(groupBy === value)}
+                    </Menu.RadioItem>
+                  ))}
+                </Menu.RadioGroup>
+              </Menu.Group>
+            )}
+            {!onSelectGroupBy && onToggleGroupByKind && (
               <Menu.CheckboxItem
                 className={MENU_ITEM}
                 checked={groupByKind}
@@ -310,13 +304,12 @@ export function PanelControlsRow(props: PanelControlsProps) {
     onOpenSearch,
     onCloseSearch,
     oneRow = false,
-    onToggleAllFolders,
-    areAllFoldersExpanded = false,
-    collapseDisabled = false,
     copyRawDiffStatus = "idle",
     scope,
+    showViewedControls = true,
+    hideViewedFiles = false,
+    onToggleHideViewed,
   } = props;
-  const collapseLabel = areAllFoldersExpanded ? "Collapse all folders" : "Expand all folders";
   const searchToggles = !!onCloseSearch;
   return (
     <StickyTools>
@@ -326,6 +319,11 @@ export function PanelControlsRow(props: PanelControlsProps) {
       >
         {scope ?? <span className="px-2 text-[13px] font-medium text-muted-foreground">Files</span>}
         <div className="ml-auto flex flex-shrink-0 items-center pr-1">
+          {showViewedControls && onToggleHideViewed && (
+            <ToolButton label="Hide viewed files" onClick={onToggleHideViewed} pressed={hideViewedFiles}>
+              {hideViewedFiles ? <EyeOff className="w-3.5 h-3.5" aria-hidden="true" /> : <Eye className="w-3.5 h-3.5" aria-hidden="true" />}
+            </ToolButton>
+          )}
           {onOpenSearch && (
             <ToolButton
               label="Search in diff"
@@ -336,22 +334,12 @@ export function PanelControlsRow(props: PanelControlsProps) {
               <TextSearch className="w-3.5 h-3.5" aria-hidden="true" />
             </ToolButton>
           )}
-          {onToggleAllFolders && (
-            <ToolButton label={collapseLabel} onClick={onToggleAllFolders} disabled={collapseDisabled}>
-              {areAllFoldersExpanded ? (
-                <ChevronsDownUp className="w-3.5 h-3.5" aria-hidden="true" />
-              ) : (
-                <ChevronsUpDown className="w-3.5 h-3.5" aria-hidden="true" />
-              )}
-            </ToolButton>
-          )}
           <ListOptionsMenu {...props} />
         </div>
         <span className="sr-only" aria-live="polite">
           {copyRawDiffStatus === "success" ? "All diffs copied" : copyRawDiffStatus === "error" ? "Copy failed" : ""}
         </span>
       </div>
-      <ProgressRow {...props} />
     </StickyTools>
   );
 }

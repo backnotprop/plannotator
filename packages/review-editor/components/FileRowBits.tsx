@@ -64,15 +64,6 @@ export const StageControl: React.FC<{
   );
 };
 
-/** Committed-file marker — green dot in the stage-slot column (committed rows
- * can't be staged, so the slot is otherwise empty). Mirrors StageControl's
- * primary staged dot: green = already committed, primary = staged. */
-export const CommittedDot: React.FC = () => (
-  <span className="w-4 h-4 flex items-center justify-center flex-shrink-0" title="Committed" aria-label="Committed">
-    <span className="w-1.5 h-1.5 rounded-full bg-success" />
-  </span>
-);
-
 /** File path that always keeps the filename visible. The directory part
  * absorbs all truncation (ellipsis lands right before the final slash);
  * only a filename that alone exceeds the row truncates at its own end. */

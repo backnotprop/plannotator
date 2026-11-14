@@ -145,7 +145,7 @@ describe("resolveModelChoice", () => {
   });
 
   test("a stale pinned id keeps its family instead of taking the surface default", () => {
-    // Tour/guide default to sonnet, review to opus: neither may win over the
+    // Guide defaults to sonnet, review to opus: neither may win over the
     // family the user picked.
     expect(resolveModelChoice("claude-opus-5-5", catalog, "sonnet")).toBe("opus");
     expect(resolveModelChoice("claude-opus-5", catalog, "sonnet")).toBe("opus");

@@ -296,16 +296,6 @@ async function settle(): Promise<void> {
   });
 }
 
-/** seedFirstRunSeen minus the terminal-tools announcement, so one test can
- *  watch that dialog take its turn at the end of the chain. */
-function seedFirstRunSeenExceptTerminalTools(): void {
-  seedFirstRunSeen();
-  // Not in seedFirstRunSeen: this harness leaves the token hover announcement
-  // pending, and it sits directly ahead of the terminal-tools one.
-  memory.set("plannotator-token-hover-announcement-seen", "1");
-  memory.delete("plannotator-announce-tui-herdr-seen");
-}
-
 async function mount(
   waitFor: () => unknown,
   seed: () => void = seedFirstRunSeen,
@@ -626,7 +616,7 @@ describe.if(hasDom)("review decision control (agent mode)", () => {
     expect(primaryButton()!.textContent).toContain("Approve");
 
     await act(async () => {
-      document.querySelector<HTMLButtonElement>('button[title="Annotations"]')!.click();
+      document.querySelector<HTMLButtonElement>('button[data-review-panel-toggle]')!.click();
     });
     await settle();
 
@@ -670,127 +660,11 @@ describe.if(hasDom)("review decision control (agent mode)", () => {
     expect((general as Record<string, unknown>).prUrl).toBeUndefined();
   });
 
-  // Guards the exact regression this project exists to fix on the surface
-  // that has no Mod+Enter (E16-review): compact at zero must offer a visible
-  // positive decision row, and it must post the bare approval body.
-  test("the terminal-tools announcement takes its turn once the rest of the chain is done", async () => {
-    const DIALOG = "[data-terminal-tools-announcement-dialog]";
-    await mount(() => document.querySelector(DIALOG), seedFirstRunSeenExceptTerminalTools);
-
-    // Every other test in this file seeds the key and sees no dialog, so this
-    // pair is what proves the review chain hands the last turn over rather
-    // than swallowing it.
-    expect(document.querySelector(DIALOG)).not.toBeNull();
-
-    const gotIt = Array.from(document.querySelectorAll<HTMLButtonElement>(`${DIALOG} button`))
-      .find((button) => button.textContent?.trim() === "Got it");
-    if (!gotIt) throw new Error("Dismiss action did not render");
-    await act(async () => gotIt.click());
-    await settle();
-
-    expect(document.querySelector(DIALOG)).toBeNull();
-    expect(memory.get("plannotator-announce-tui-herdr-seen")).toBe("1");
-    expect(submissions).toHaveLength(0);
-  });
-
-  test("the Inbox announcement shows once, links to the Inbox page, and Mod+Enter cannot post behind it", async () => {
-    const DIALOG = "[data-inbox-announcement-dialog]";
-    const isOpen = () => document.querySelector(DIALOG) !== null;
-    const seed = () => {
-      seedFirstRunSeen();
-      memory.set("plannotator-token-hover-announcement-seen", "1");
-      memory.delete("plannotator-announce-inbox-seen");
-    };
-    await mount(isOpen, seed);
-    expect(isOpen()).toBe(true);
-
-    const link = document.querySelector<HTMLAnchorElement>(`${DIALOG} a[data-inbox-announcement-learn-more]`);
-    expect(link?.getAttribute("href")).toBe("https://plannotator.ai/inbox");
-    expect(link?.getAttribute("target")).toBe("_blank");
-
-    const close = document.querySelector<HTMLButtonElement>(`${DIALOG} [data-inbox-announcement-close]`);
-    if (!close) throw new Error("Close action did not render");
-    await act(async () => {
-      close.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", metaKey: true, bubbles: true }));
-    });
-    await settle();
-    expect(submissions).toHaveLength(0);
-
-    await act(async () => close.click());
-    await settle();
-    expect(isOpen()).toBe(false);
-    expect(memory.get("plannotator-announce-inbox-seen")).toBe("1");
-    expect(submissions).toHaveLength(0);
-
-    // Seen: the next load does not show it again.
-    await act(async () => root?.unmount());
-    root = null;
-    host?.remove();
-    host = null;
+  test("code review opens with no first-run announcement, even on a fresh profile", async () => {
     await mount(() => document.body.textContent?.includes("Approve"), () => {});
-    expect(isOpen()).toBe(false);
-  });
-
-  test("the Inbox announcement never shows in the VS Code webview", async () => {
-    const target = window as { __PLANNOTATOR_VSCODE?: unknown };
-    target.__PLANNOTATOR_VSCODE = true;
-    try {
-      await mount(() => document.body.textContent?.includes("Approve"), () => {
-        seedFirstRunSeen();
-        memory.set("plannotator-token-hover-announcement-seen", "1");
-        memory.delete("plannotator-announce-inbox-seen");
-      });
-      for (let attempt = 0; attempt < 5; attempt += 1) await settle();
-      expect(document.querySelector("[data-inbox-announcement-dialog]") !== null).toBe(false);
-      expect(memory.has("plannotator-announce-inbox-seen")).toBe(false);
-    } finally {
-      delete target.__PLANNOTATOR_VSCODE;
-    }
-  });
-
-  test("the Ask this session announcement takes the last turn, and Mod+Enter cannot post behind it", async () => {
-    const DIALOG = "[data-ask-session-announcement-dialog]";
-    aiCapabilities = {
-      available: true,
-      providers: [{
-        id: "session-bridge",
-        name: "session-bridge",
-        label: "Ask this session · Claude Code",
-        capabilities: {},
-        models: [],
-        sessionBridge: { host: "claude-code", status: "ready", modes: { turn: true, transient: false } },
-      }],
-      defaultProvider: null,
-    };
-    await mount(() => document.querySelector(DIALOG), () => {
-      seedFirstRunSeen();
-      memory.set("plannotator-token-hover-announcement-seen", "1");
-    });
-
-    expect(document.querySelector(DIALOG)?.getAttribute("data-ask-session-agent")).toBe("claude-code");
-    expect(document.querySelector(`${DIALOG} [data-ask-session-status="connected"]`)).not.toBeNull();
-
-    const gotIt = Array.from(document.querySelectorAll<HTMLButtonElement>(`${DIALOG} button`))
-      .find((button) => button.textContent?.trim() === "Got it");
-    if (!gotIt) throw new Error("Dismiss action did not render");
-    await act(async () => {
-      gotIt.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", metaKey: true, bubbles: true }));
-    });
-    await settle();
-    expect(submissions).toHaveLength(0);
-
-    await act(async () => gotIt.click());
-    await settle();
-    expect(document.querySelector(DIALOG)).toBeNull();
-    expect(memory.get("plannotator-announce-ask-session-seen")).toBe("1");
-    expect(submissions).toHaveLength(0);
-  });
-
-  test("the Ask this session announcement never shares a load with the terminal-tools one", async () => {
-    aiCapabilities = { available: true, providers: [], defaultProvider: null };
-    await mount(() => document.querySelector("[data-terminal-tools-announcement-dialog]"), seedFirstRunSeenExceptTerminalTools);
-    expect(document.querySelector("[data-ask-session-announcement-dialog]")).toBeNull();
-    expect(memory.has("plannotator-announce-ask-session-seen")).toBe(false);
+    for (let attempt = 0; attempt < 5; attempt += 1) await settle();
+    expect(document.querySelector("[data-inbox-announcement-dialog], [data-ask-session-announcement-dialog], [data-terminal-tools-announcement-dialog], [data-agent-tool-announcement-dialog]")).toBeNull();
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
   });
 
   test("compact touch offers a positive decision row at zero and it posts", async () => {

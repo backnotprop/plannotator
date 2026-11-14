@@ -3,16 +3,14 @@ import { allowedToolsOf, buildClaudeCommand, claudeRulesAdmit, detectClaudeShell
 import { buildAgentReviewUserMessage, getLocalDiffInstruction } from "./agent-review-message";
 import type { DiffType } from "./vcs";
 import type { PRMetadata } from "./pr";
-import { buildTourClaudeCommand } from "./tour/tour-review";
 import { buildGuideClaudeCommand } from "./guide/guide-review";
 import type { ClaudeJobCommandOptions } from "./claude-review";
 
-// #1627: every Claude Code agent job (review, Code Tour, Guided Review) must
+// #1627: every Claude Code agent job (review, Guided Review) must
 // load no user MCP servers, and must be able to run with Claude Code's sandbox
 // off where it cannot start — without ever widening its read-only posture.
 const builders: Array<[string, (opts?: ClaudeJobCommandOptions) => string[]]> = [
   ["buildClaudeCommand", (opts) => buildClaudeCommand("p", "opus", undefined, opts).command],
-  ["buildTourClaudeCommand", (opts) => buildTourClaudeCommand("p", "sonnet", undefined, opts).command],
   ["buildGuideClaudeCommand", (opts) => buildGuideClaudeCommand("p", "sonnet", undefined, opts).command],
 ];
 
@@ -77,9 +75,9 @@ const DENIED = "Permission to use Bash has been denied because Claude Code is ru
 const result = (denials: Array<{ tool_name: string; tool_use_id: string; tool_input?: unknown }>) =>
   JSON.stringify({ type: "result", is_error: false, permission_denials: denials });
 
-// The real allowlist a Code Tour job launches with, so the rule is tested
+// The real allowlist a Guided Review job launches with, so the rule is tested
 // against what the runner actually passes.
-const TOUR_ALLOWED = allowedToolsOf(buildTourClaudeCommand("p").command);
+const GUIDE_ALLOWED = allowedToolsOf(buildGuideClaudeCommand("p").command);
 const denial = (id: string, command: string) => ({ tool_name: "Bash", tool_use_id: id, tool_input: { command } });
 
 describe("detectClaudeShellBlocked (#1627)", () => {
@@ -90,7 +88,7 @@ describe("detectClaudeShellBlocked (#1627)", () => {
       bashUse("b", "git merge-base origin/master HEAD"), toolResult("b", DENIED, true),
       result([denial("a", compound), denial("b", "git merge-base origin/master HEAD")]),
     ].join("\n");
-    expect(detectClaudeShellBlocked(stdout, TOUR_ALLOWED)).toBe(true);
+    expect(detectClaudeShellBlocked(stdout, GUIDE_ALLOWED)).toBe(true);
   });
 
   test("a sandbox refusal answered only in a tool result counts too", () => {
@@ -98,7 +96,7 @@ describe("detectClaudeShellBlocked (#1627)", () => {
       bashUse("a", "git status"), toolResult("a", "sandbox failed to start: bubblewrap (bwrap) not installed", true),
       result([]),
     ].join("\n");
-    expect(detectClaudeShellBlocked(stdout, TOUR_ALLOWED)).toBe(true);
+    expect(detectClaudeShellBlocked(stdout, GUIDE_ALLOWED)).toBe(true);
   });
 
   test("refusals of compound, variable-bearing, or non-allowlisted commands never count", () => {
@@ -107,7 +105,7 @@ describe("detectClaudeShellBlocked (#1627)", () => {
       ...cmds.flatMap((c, i) => [bashUse(`c${i}`, c), toolResult(`c${i}`, DENIED, true)]),
       result(cmds.map((c, i) => denial(`c${i}`, c))),
     ].join("\n");
-    expect(detectClaudeShellBlocked(stdout, TOUR_ALLOWED)).toBe(false);
+    expect(detectClaudeShellBlocked(stdout, GUIDE_ALLOWED)).toBe(false);
   });
 
   test("does not warn once any Bash call succeeded", () => {
@@ -116,20 +114,20 @@ describe("detectClaudeShellBlocked (#1627)", () => {
       bashUse("b", "git merge-base main HEAD"), toolResult("b", "8ce0d729", false),
       result([denial("a", "git merge-base main HEAD")]),
     ].join("\n");
-    expect(detectClaudeShellBlocked(stdout, TOUR_ALLOWED)).toBe(false);
+    expect(detectClaudeShellBlocked(stdout, GUIDE_ALLOWED)).toBe(false);
   });
 
   test("a command's own failure, no Bash, or no allowlist never warns", () => {
     const ownFailure = [bashUse("a", "git show nope"), toolResult("a", "fatal: bad object nope", true), result([])].join("\n");
-    expect(detectClaudeShellBlocked(ownFailure, TOUR_ALLOWED)).toBe(false);
-    expect(detectClaudeShellBlocked(result([]), TOUR_ALLOWED)).toBe(false);
+    expect(detectClaudeShellBlocked(ownFailure, GUIDE_ALLOWED)).toBe(false);
+    expect(detectClaudeShellBlocked(result([]), GUIDE_ALLOWED)).toBe(false);
     const refusedPlain = [bashUse("a", "git status"), toolResult("a", DENIED, true), result([denial("a", "git status")])].join("\n");
     expect(detectClaudeShellBlocked(refusedPlain, "")).toBe(false);
   });
 
   test("ignores refusals of non-Bash tools", () => {
     const stdout = result([{ tool_name: "mcp__idea__git_status", tool_use_id: "x", tool_input: { command: "git status" } }]);
-    expect(detectClaudeShellBlocked(stdout, TOUR_ALLOWED)).toBe(false);
+    expect(detectClaudeShellBlocked(stdout, GUIDE_ALLOWED)).toBe(false);
   });
 });
 

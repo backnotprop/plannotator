@@ -46,7 +46,6 @@ describe.if(hasDom)('useAgentSettings Codex setters', () => {
       'plannotator.agents',
       JSON.stringify({
         codex: { model: 'gpt-5.3-codex', perModel: {} },
-        tourCodex: { model: 'gpt-5.3-codex', perModel: {} },
       }),
     );
     root = createRoot(document.createElement('div'));
@@ -58,9 +57,6 @@ describe.if(hasDom)('useAgentSettings Codex setters', () => {
     // Before the fix the toggle wrote perModel['gpt-5.3-codex'] and did nothing.
     expect(latest!.codexFast).toBe(true);
     expect(latest!.codexModel).toBe('gpt-6-sol');
-
-    await act(async () => latest!.setTourCodexFast(true));
-    expect(latest!.tourCodexFast).toBe(true);
   });
 });
 
@@ -91,11 +87,15 @@ describe.if(hasDom)('useAgentSettings guide Codex default', () => {
     return current!;
   };
 
-  test('a user with no pick gets gpt-6-luna for guides when Codex offers it; review and tour keep Codex default', async () => {
+  test('a user with no pick gets gpt-6-luna for guides when Codex offers it; review keeps Codex default', async () => {
     const s = await render(codexCatalog(['gpt-6-astra', 'gpt-6-sol', 'gpt-6-luna']));
     expect(s.guideCodexModel).toBe('gpt-6-luna');
     expect(s.codexModel).toBe('gpt-6-astra');
-    expect(s.tourCodexModel).toBe('gpt-6-astra');
+  });
+
+  test('a saved Code Tour mode from an older version opens on Code Review', async () => {
+    const s = await render(codexCatalog(['gpt-6-astra']), { selectedMode: 'tour' });
+    expect(s.selectedMode).toBe('review');
   });
 
   test("falls back to Codex's own default when gpt-6-luna is not offered", async () => {

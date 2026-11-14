@@ -193,7 +193,7 @@ describe.if(hasDom)("opening panel view", () => {
     await mount();
 
     expect(selectedPanelSegment()).toBe("Tree");
-    expect(panelSegment("Git status")).toBeDefined(); // still one click away
+    expect(panelSegment("Git status")).toBeUndefined();
     // No setup chooser interrupts the session. With every UNRELATED one-time
     // announcement retired above, any remaining chain dialog would have to be
     // a review-setup one, so the absence of a modal overlay is the assertion.
@@ -203,14 +203,15 @@ describe.if(hasDom)("opening panel view", () => {
     expect(memory.get("plannotator-review-panel-view")).toBe("tree");
   });
 
-  test("a persisted sections cookie still opens on Git status", async () => {
+  test("a persisted sections cookie opens the tree grouped by git status", async () => {
     // Failure caught: the default flip reaching existing users. Anyone who
     // chose Git status in Settings keeps it.
     await mount(() => {
       memory.set("plannotator-review-panel-view", "sections");
     });
 
-    expect(selectedPanelSegment()).toBe("Git status");
+    expect(selectedPanelSegment()).toBe("Tree");
+    expect(document.querySelector("[data-file-status-block]")).not.toBeNull();
   });
 
   test("the last-used memo still layers over the persisted default", async () => {
@@ -221,6 +222,7 @@ describe.if(hasDom)("opening panel view", () => {
       memory.set("plannotator-review-panel-view-last-used", "sections");
     });
 
-    expect(selectedPanelSegment()).toBe("Git status");
+    expect(selectedPanelSegment()).toBe("Tree");
+    expect(document.querySelector("[data-file-status-block]")).not.toBeNull();
   });
 });

@@ -23,7 +23,7 @@
  * also turns the Inbox server off by config (`codexAskAiConfigArgs`, below).
  * Claude sessions disallow it by name (claude-agent-sdk.ts).
  *
- * The review server's agent jobs (code review, Code Tour, Guided Review,
+ * The review server's agent jobs (code review, Guided Review,
  * `agent-jobs.ts` in both runtimes) get the same env and, for `codex exec`,
  * the same `-c` override: none of them uses Plannotator's integration (each
  * returns its result on stdout or in its `-o` file).
@@ -80,8 +80,8 @@ const CODEX_INBOX_SERVER = "plannotator-inbox";
 
 /**
  * The global `-c` override every `codex app-server` that Ask AI starts gets,
- * and every `codex exec` agent job of the review server (code review, Code
- * Tour, Guided Review). It turns off the Inbox MCP server. The marker in the
+ * and every `codex exec` agent job of the review server (code review,
+ * Guided Review). It turns off the Inbox MCP server. The marker in the
  * agent's env (`askAiChildEnv`) cannot do this, because Codex starts a stdio MCP server with
  * a cleared environment that holds only HOME, PATH and a few others
  * (codex-rs/rmcp-client `create_env_for_mcp_server`). Codex hooks get the

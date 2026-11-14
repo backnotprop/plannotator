@@ -6,7 +6,7 @@ import { formatLineRange } from '../utils/formatLineRange';
 import { formatRelativeTime } from '../utils/formatRelativeTime';
 import { FileNameChip } from './FileNameChip';
 import { SparklesIcon } from '@plannotator/ui/components/SparklesIcon';
-import { CountBadge } from './CountBadge';
+import { CountBadge } from '@plannotator/ui/components/sidebar/CountBadge';
 import { CopyButton } from './CopyButton';
 import { PermissionCard } from './PermissionCard';
 import { AIConfigBar } from './AIConfigBar';

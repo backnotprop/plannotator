@@ -308,7 +308,7 @@ When an AI provider is available, the diff viewer includes inline AI chat. Selec
 
 ### Ask this session
 
-When the review was opened from Claude Code (with the [Plannotator mod](/docs/guides/claude-code/#the-plannotator-mod)), Pi, or OpenCode 2, Ask AI is answered by that agent session. It is the only option: there is no provider picker. Your question shows in the agent's chat. If the agent is busy, choose **Ask when it finishes** or **Interrupt and ask now**. In remote mode, from another Tailscale login than the computer owner's on a `--tailscale` session, from OpenCode 1, or with the Claude Code mod off, you pick a provider as described below. Review agents, Code Tour and Guided Review still run their own Claude or Codex models. See [Ask this session](/docs/guides/ai-features/#ask-this-session).
+When the review was opened from Claude Code (with the [Plannotator mod](/docs/guides/claude-code/#the-plannotator-mod)), Pi, or OpenCode 2, Ask AI is answered by that agent session. It is the only option: there is no provider picker. Your question shows in the agent's chat. If the agent is busy, choose **Ask when it finishes** or **Interrupt and ask now**. In remote mode, from another Tailscale login than the computer owner's on a `--tailscale` session, from OpenCode 1, or with the Claude Code mod off, you pick a provider as described below. Review agents and Guided Review still run their own Claude or Codex models. See [Ask this session](/docs/guides/ai-features/#ask-this-session).
 
 ### Supported providers
 
@@ -343,7 +343,7 @@ The same export is available from the command line — `plannotator guide list` 
 
 ## How review agents prompt the CLI
 
-The review agents (Claude, Codex, Code Tour, Guided Review) shell out to external CLIs — Claude and Codex natively, plus Cursor, OpenCode, Pi, and GitHub Copilot CLI as additional engines for review and guide jobs. Plannotator controls the user message and output schema; the CLI's own harness owns the system prompt. See the [Prompts reference](/docs/reference/prompts/) for the full breakdown of what each provider sends, how the pieces join, and which knobs you can tune per job.
+The review agents (Claude, Codex, Guided Review) shell out to external CLIs — Claude and Codex natively, plus Cursor, OpenCode, Pi, and GitHub Copilot CLI as additional engines for review and guide jobs. Plannotator controls the user message and output schema; the CLI's own harness owns the system prompt. See the [Prompts reference](/docs/reference/prompts/) for the full breakdown of what each provider sends, how the pieces join, and which knobs you can tune per job.
 
 ## Submitting feedback
 
@@ -429,7 +429,7 @@ restore a draft.
 | `/api/ai/abort` | POST | Abort current AI query |
 | `/api/ai/permission` | POST | Respond to tool approval request |
 | `/api/agents/capabilities` | GET | Check available agent providers |
-| `/api/agents/jobs` | GET/POST/DELETE | Manage agent jobs (review, Code Tour, Guided Review) |
+| `/api/agents/jobs` | GET/POST/DELETE | Manage agent jobs (review, Guided Review) |
 | `/api/guide/:jobId` | GET | Fetch a completed Guided Review (sections, summaries, file refs) |
 | `/api/guide/:jobId/export` | GET | Download a guide (live id or `saved:{id}`) as one portable HTML file; `/export-info` returns its size and languages |
 | `/api/guide/:jobId/share` | POST/DELETE | Create a share link for a guide on the guide host (`{ public?, ttlSeconds? }`; encrypted unless `public`) or remove the recorded one; `/share-info` reports whether sharing is enabled, the host, and an existing link |

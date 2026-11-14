@@ -109,7 +109,7 @@ export interface AIEndpointDeps {
   registry: ProviderRegistry;
   /**
    * Providers registered ONLY so their model catalogs can be served to the
-   * agent-job launchers (Review Agents, Code Tour, Guided Review), used when a
+   * agent-job launchers (Review Agents, Guided Review), used when a
    * session bridge makes the bridge the sole Ask AI provider. They never take
    * an Ask AI session and are never listed under `providers`: a
    * `?activate=<id>` probe naming one runs its discovery and reports it under
