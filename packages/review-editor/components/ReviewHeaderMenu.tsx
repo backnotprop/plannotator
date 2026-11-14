@@ -121,7 +121,7 @@ export const ReviewHeaderMenu: React.FC<ReviewHeaderMenuProps> = ({
           {compactTouchLayout && (compactDestination || compactActions.length > 0) && (
             <>
               <div className="px-3 py-2 space-y-2">
-                <ActionMenuSectionLabel>Review</ActionMenuSectionLabel>
+                <ActionMenuSectionLabel plain>Review</ActionMenuSectionLabel>
                 {compactDestination && (
                   <div className="grid grid-cols-2 gap-1 rounded-lg bg-muted/50 p-0.5" aria-label="Review destination">
                     {(['agent', 'platform'] as const).map((destination) => {
@@ -169,7 +169,7 @@ export const ReviewHeaderMenu: React.FC<ReviewHeaderMenuProps> = ({
           )}
 
           <div className="px-3 py-2 space-y-1.5">
-            <ActionMenuSectionLabel>Theme</ActionMenuSectionLabel>
+            <ActionMenuSectionLabel plain>Theme</ActionMenuSectionLabel>
             <div className="flex items-center gap-1 rounded-lg bg-muted/50 p-0.5">
               {THEME_MODES.map(({ id, label, Icon }) => (
                 <button
@@ -242,7 +242,7 @@ export const ReviewHeaderMenu: React.FC<ReviewHeaderMenuProps> = ({
                     onOpenAnnotations();
                   }}
                   icon={<SidebarIcon />}
-                  label="Annotations"
+                  label="Comments"
                 />
               )}
               {onOpenAI && (
@@ -252,7 +252,7 @@ export const ReviewHeaderMenu: React.FC<ReviewHeaderMenuProps> = ({
                     onOpenAI();
                   }}
                   icon={<SparklesIcon className="w-3.5 h-3.5" />}
-                  label="AI Chat"
+                  label="AI"
                 />
               )}
               {onOpenAgents && (
@@ -262,7 +262,7 @@ export const ReviewHeaderMenu: React.FC<ReviewHeaderMenuProps> = ({
                     onOpenAgents();
                   }}
                   icon={<ReviewAgentsIcon className="w-3.5 h-3.5" />}
-                  label="Review Agents"
+                  label="Agents"
                 />
               )}
             </>

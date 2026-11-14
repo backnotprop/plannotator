@@ -101,8 +101,8 @@ export const ActionMenuDivider: React.FC = () => (
   <div className="my-1 border-t border-border" />
 );
 
-export const ActionMenuSectionLabel: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-  <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+export const ActionMenuSectionLabel: React.FC<{ children: React.ReactNode; plain?: boolean }> = ({ children, plain = false }) => (
+  <div className={plain ? 'text-xs font-medium text-muted-foreground' : 'text-[10px] font-semibold uppercase tracking-wider text-muted-foreground'}>
     {children}
   </div>
 );
