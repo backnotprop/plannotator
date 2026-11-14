@@ -24,7 +24,7 @@ import { WarmCodeHighlight } from './components/WarmCodeHighlight';
 import { threadDrawReady } from './threadDrawReady';
 import { QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import { createInboxQueryClient } from './data/client';
-import { dropThread, heldThread, pruneThreads, putThread, readThread, showableThread, staleThreads, useHeldThread } from './data/queries/thread';
+import { dropThread, heldThread, isThreadStale, pruneThreads, putThread, readThread, showableThread, staleThreads, useHeldThread } from './data/queries/thread';
 import { sameThreadFiles } from './data/queries/files';
 import { putList, readListTaking, useListModel } from './data/queries/list';
 import { changeDrafts, heldReplyDrafts, readDrafts, useDrafts } from './data/queries/drafts';
@@ -1353,8 +1353,8 @@ function Inbox() {
     }
   }, [setThreadLoad, stopLiveThreadRetry, queryClient]);
   const refreshThread = useCallback(
-    (threadId: string, given?: ThreadModel): Promise<InboxThread | null> => joinThreadRead(threadFlights.current, threadId, given, readThreadInto),
-    [readThreadInto],
+    (threadId: string, given?: ThreadModel): Promise<InboxThread | null> => joinThreadRead(threadFlights.current, threadId, given, readThreadInto, (id) => routeRef.current.thread === id && isThreadStale(queryClient, id)),
+    [readThreadInto, queryClient],
   );
 
   /** A settings read arrived: the moment the Inbox named for the line, kept on this page's clock (`useLineLatch`). */
