@@ -45,7 +45,7 @@ interface AgentsTabProps {
   guideLaunchable?: boolean;
   canOpenGuideJob?: (job: AgentJobInfo) => boolean;
   scope?: React.ReactNode;
-  guides?: (ctx: { startGuide: (() => void) | null }) => React.ReactNode;
+  guides?: () => React.ReactNode;
 }
 
 function SectionTitle({ children, trailing }: { children: React.ReactNode; trailing?: React.ReactNode }) {
@@ -120,7 +120,7 @@ export const AgentsTab: React.FC<AgentsTabProps> = ({
           >
             Runs
           </SectionTitle>
-          <div className="px-3">
+          <div className="px-4">
             {sortedJobs.map((job) => {
               const findings = findingsOf(job.source, externalAnnotations);
               return (
@@ -140,7 +140,7 @@ export const AgentsTab: React.FC<AgentsTabProps> = ({
         </section>
       )}
 
-      {guides?.({ startGuide: config.guide.ready ? () => void onLaunch(config.guide.buildParams()) : null })}
+      {guides?.()}
 
       {addReviewOpen && (
         <AddReviewDialog

@@ -3144,7 +3144,7 @@ Pinned by `components/CommentPopover.hostDraft.test.tsx`.
 
 ## Agents tab: one launch pad, runs with findings by severity (unreleased; `AgentsTab` props changed, core gains `model-fallbacks`)
 
-- `AgentsTab` draws two launch rows (Guided Review: Start, Review agent: Run) that launch with the saved picks in one click; options fold out in place (`hooks/useLaunchFolds`, key `plannotator.launchpad`). The launch logic is `hooks/useLaunchConfig` (one place for both kinds; the old mode menu is gone).
-- New optional props: `scope` (one line above the rows), `guides` (a render function given `{ startGuide }`, for a host's saved-guides list), `onOpenFinding` (a finished run's click goes to its most severe finding). `externalAnnotations` is typed `FindingLike[]` (id, source, severity, text, filePath, lineStart).
+- `AgentsTab` draws two launch rows (Guided Review and Review agent, each with Start) that launch with the saved picks in one click; options fold out in place (`hooks/useLaunchFolds`, key `plannotator.launchpad`). The launch logic is `hooks/useLaunchConfig` (one place for both kinds; the old mode menu is gone).
+- New optional props: `scope` (one line above the rows), `guides` (a render function for a host's saved-guides list), `onOpenFinding` (a finished run's click goes to its most severe finding). `externalAnnotations` is typed `FindingLike[]` (id, source, severity, text, filePath, lineStart).
 - Runs: `components/agents/JobRow` with Cancel and Run again; counts from `components/agents/jobFindings`.
 - `useAgentSettings` returns `savedModels` (the raw saved picks). `@plannotator/core/model-catalog` gains `modelFallbackNotice` and re-exports `MODEL_FALLBACKS_CHECKED`; the hand lists live in `@plannotator/core/model-fallbacks`.

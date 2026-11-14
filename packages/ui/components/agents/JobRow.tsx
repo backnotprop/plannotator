@@ -97,7 +97,7 @@ export function JobRow({
         }
       }}
       data-agent-job-row={job.status}
-      className="group flex items-start gap-2 rounded-md px-1 py-1.5 hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      className="group -mx-1 flex items-start gap-2 rounded-md px-1 py-1.5 hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
     >
       <span className="pt-0.5"><StatusIcon status={job.status} /></span>
       <span className="min-w-0 flex-1">

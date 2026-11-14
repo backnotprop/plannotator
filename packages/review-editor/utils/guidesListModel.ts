@@ -69,3 +69,11 @@ export function resumeFile(
   }
   return null;
 }
+
+export function newestGuideForThisDiff(entries: readonly SavedGuideListEntry[] | null): string | null {
+  let best: SavedGuideListEntry | null = null;
+  for (const entry of entries ?? []) {
+    if (entry.where === 'diff' && (!best || entry.savedAt > best.savedAt)) best = entry;
+  }
+  return best ? `saved:${best.id}` : null;
+}
