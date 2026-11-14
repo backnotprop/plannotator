@@ -85,7 +85,9 @@ describe('semantic diff client', () => {
     const client = createSemDiffClient({ advert, origin: 'http://127.0.0.1:1', createWorker: fakeWorker('hang', log), timeoutMs: 30 });
     expect(await client.diff('src/users.ts', before, moved)).toBeNull();
     expect(log.terminated).toBe(1);
-    await client.diff('src/users.ts', before, moved);
+    expect(await client.diff('src/users.ts', before, moved)).toBeNull();
+    expect(log.created).toBe(1);
+    await client.diff('src/users.ts', before, `${moved}\n`);
     expect(log.created).toBe(2);
     client.dispose();
   });
@@ -108,6 +110,30 @@ describe('semantic diff client', () => {
   });
 });
 
+test('each file and content pair is worked out once', async () => {
+  let posted = 0;
+  const log = { created: 0, terminated: 0 };
+  const base = fakeWorker('engine', log);
+  const client = createSemDiffClient({
+    advert,
+    origin: 'http://127.0.0.1:1',
+    createWorker: () => {
+      const w = base() as unknown as { postMessage: (r: SemDiffRequest) => void };
+      const post = w.postMessage.bind(w);
+      w.postMessage = (r) => {
+        posted++;
+        post(r);
+      };
+      return w as unknown as Worker;
+    },
+  });
+  const [a, b] = await Promise.all([client.diff('src/users.ts', before, moved), client.diff('src/users.ts', before, moved)]);
+  expect(a).not.toBeNull();
+  expect(b).toBe(a);
+  expect(posted).toBe(1);
+  client.dispose();
+});
+
 describe('semantic changes for the file badge', () => {
   test('a move becomes a non-structural "moved" change named by its first line', async () => {
     const r = await semanticDiffFile('typescript', before, moved, 'src/users.ts');
@@ -115,7 +141,15 @@ describe('semantic changes for the file badge', () => {
     const move = changes.find((c) => c.changeType === 'moved');
     expect(move).toBeDefined();
     expect(move!.structuralChange).toBe(false);
-    expect(move!.entityName).toContain('export function');
+    expect(['load', 'save']).toContain(move!.entityName);
     expect(move!.startLine).not.toBeNull();
   });
+});
+
+test('names are the declared identifier where there is one', async () => {
+  const { shortName } = await import('./semDiffChanges');
+  expect(shortName('export async function sumLineItems(items: Item[]) {')).toBe('sumLineItems');
+  expect(shortName('const taxRate = 0.08;')).toBe('taxRate');
+  expect(shortName('def walk(tree):')).toBe('walk');
+  expect(shortName('return db.save({')).toBe('return db.save({');
 });

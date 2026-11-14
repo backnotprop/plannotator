@@ -64,7 +64,7 @@
     "sonner": "^2.0.8"
   },
   "devDependencies": {
-    "@pierre/diffs-sem": "file:vendor/pierre-diffs/pierre-diffs-1.7.0-beta.3-sem.1.tgz",
+    "@pierre/diffs-sem": "file:vendor/pierre-diffs/pierre-diffs-1.7.0-beta.3-sem.2.tgz",
     "@agentclientprotocol/sdk": "1.9.0",
     "@modelcontextprotocol/client": "2.3.1",
     "@playwright/test": "1.64.1",

@@ -5,6 +5,7 @@ import type {
   SemanticDiffResponse,
 } from '@plannotator/shared/semantic-diff-types';
 import { useReviewState } from '../ReviewStateContext';
+import { loadReviewSemanticDiff } from '../../semDiff/semanticDiffSource';
 import { useReviewFileSource } from '../../hooks/useReviewFileSource';
 import {
   SemanticDiffRows,
@@ -21,19 +22,17 @@ type LoadState =
   | { status: 'empty'; data: SemanticDiffOkResponse }
   | { status: 'error'; error: SemanticDiffErrorResponse | Error };
 
+const SUMMARY_ORDER = ['moved', 'moved & edited', 'renamed', 'reformatted', 'extracted', 'inlined', 'reordered', 'modified', 'added', 'deleted'];
+const SUMMARY_WORD: Record<string, string> = { modified: 'edited' };
+
 function formatSummary(data: SemanticDiffOkResponse): string {
-  const summary = data.summary;
-  const parts = [
-    `${summary.added} added`,
-    `${summary.modified} modified`,
-    `${summary.deleted} deleted`,
-  ];
-  if (summary.renamed > 0) parts.push(`${summary.renamed} renamed`);
-  if (summary.moved > 0) parts.push(`${summary.moved} moved`);
-  if (summary.reordered > 0) parts.push(`${summary.reordered} reordered`);
-  if (summary.binary > 0) parts.push(`${summary.binary} binary`);
-  if (summary.orphan > 0) parts.push(`${summary.orphan} orphans`);
-  return `Summary: ${parts.join(', ')} across ${summary.fileCount} files`;
+  const counts = new Map<string, number>();
+  for (const change of data.changes) counts.set(change.changeType, (counts.get(change.changeType) ?? 0) + 1);
+  const kinds = [...SUMMARY_ORDER.filter((kind) => counts.has(kind)), ...[...counts.keys()].filter((kind) => !SUMMARY_ORDER.includes(kind))];
+  const parts = kinds.map((kind) => `${counts.get(kind)} ${SUMMARY_WORD[kind] ?? kind}`);
+  if (data.summary.binary > 0) parts.push(`${data.summary.binary} binary`);
+  if (data.summary.orphan > 0) parts.push(`${data.summary.orphan} orphans`);
+  return `Summary: ${parts.join(', ') || 'nothing'} across ${data.summary.fileCount} files`;
 }
 
 function formatLoadError(error: SemanticDiffErrorResponse | Error): string {
@@ -67,11 +66,7 @@ export function ReviewSemanticDiffPanel() {
     const controller = new AbortController();
     setLoadState({ status: 'loading' });
 
-    fetch('/api/semantic-diff', { signal: controller.signal })
-      .then((res) => {
-        if (!res.ok) throw new Error('Semantic diff failed');
-        return res.json() as Promise<SemanticDiffResponse>;
-      })
+    loadReviewSemanticDiff(controller.signal)
       .then((data) => {
         if (controller.signal.aborted) return;
         if (data.status === 'unavailable') {

@@ -27,9 +27,8 @@ import type {
 import { CommentPopover } from '@plannotator/ui/components/CommentPopover';
 import { usePierreTheme } from '../hooks/usePierreTheme';
 import { useIsWorkerPoolReadyOrDisabled, useWorkerPoolThemeSync } from '../workerPool';
-import type { SemDiffAdvert } from '@plannotator/shared/sem-diff-assets';
 import { useConfigValue } from '@plannotator/ui/config';
-import { createSemDiffClient, type SemDiffClient } from '../semDiff/semDiffClient';
+import type { SemDiffClient } from '../semDiff/semDiffClient';
 import { SemanticFileNote, type SemanticFileState } from '../semDiff/SemanticFileNote';
 import type { DiffFile, AnnotationScrollTarget } from '../types';
 import type { MarkdownFileView } from '../utils/markdownPreview';
@@ -235,8 +234,7 @@ export interface AllFilesCodeViewProps {
   pendingSelection: SelectedLineRange | null;
   reviewBase?: string;
   reviewSnapshotId?: string;
-  semDiff?: SemDiffAdvert | null;
-  createSemDiffWorker?: () => Promise<Worker>;
+  semDiffClient?: SemDiffClient | null;
   /** False when there is no source behind the diff to expand into (static
    *  patch review): the augmentation stage completes as a no-op instead of
    *  firing a /api/file-content request the server answers 400. */
@@ -793,8 +791,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   pendingSelection,
   reviewBase,
   reviewSnapshotId,
-  semDiff,
-  createSemDiffWorker,
+  semDiffClient,
   contextExpansionAvailable = true,
   fetchFileContent,
   renderImagePreview,
@@ -1178,13 +1175,8 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   const semanticEnabled = useConfigValue('diffSemantic');
   const semanticEnabledRef = useRef(semanticEnabled);
   semanticEnabledRef.current = semanticEnabled;
-  const semClient = useMemo<SemDiffClient | null>(
-    () => (semDiff && createSemDiffWorker ? createSemDiffClient({ advert: semDiff, origin: window.location.origin, createWorker: createSemDiffWorker }) : null),
-    [semDiff, createSemDiffWorker],
-  );
-  useEffect(() => () => semClient?.dispose(), [semClient]);
-  const semClientRef = useRef(semClient);
-  semClientRef.current = semClient;
+  const semClientRef = useRef(semDiffClient ?? null);
+  semClientRef.current = semDiffClient ?? null;
   const semStateRef = useRef(new Map<string, SemanticFileState>());
   const semDiffsRef = useRef(new Map<string, { plain: FileDiffMetadata; semantic: FileDiffMetadata }>());
   // Stable identity of the current diff. Changes whenever the file set or any

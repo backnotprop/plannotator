@@ -15,6 +15,9 @@ const changeSymbols: Record<string, string> = {
   deleted: '⊖',
   modified: '∆',
   reordered: '↕',
+  reformatted: '¶',
+  extracted: '↗',
+  inlined: '↙',
 };
 
 export function getChangeSymbol(changeType: string): string {
@@ -26,8 +29,11 @@ export function getChangeClass(changeType: string): string {
   if (changeType.includes('added')) return 'added';
   if (changeType.includes('deleted')) return 'deleted';
   if (changeType.includes('renamed')) return 'renamed';
+  if (changeType === 'moved & edited') return 'modified';
   if (changeType.includes('moved')) return 'moved';
   if (changeType.includes('reordered')) return 'reordered';
+  if (changeType === 'reformatted') return 'reformatted';
+  if (changeType === 'extracted' || changeType === 'inlined') return 'moved';
   return 'modified';
 }
 
@@ -145,7 +151,7 @@ function SemanticDiffChangeRow({
         </span>
         <span className="semantic-diff-kind">{change.entityType}</span>
         <span className="semantic-diff-name">{getDisplayName(change)}</span>
-        <span className="semantic-diff-status">{change.changeType}</span>
+        <span className="semantic-diff-status">{change.changeType === 'modified' ? 'edited' : change.changeType}</span>
       </button>
       {sourcePreview.preview && range && (
         <CodeSnippetPreview

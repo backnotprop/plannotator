@@ -6,21 +6,25 @@ export type SemanticFileState =
   | { status: 'semantic'; summary: ReviewSummary }
   | { status: 'off'; summary: ReviewSummary };
 
-const KIND_LABEL: Record<string, string> = {
-  moved: 'moved',
-  movedWithEdit: 'moved and edited',
-  renamed: 'renamed',
-  reordered: 'reordered',
-  reformatted: 'reformatted',
-  extractedFunction: 'extracted',
-  inlinedFunction: 'inlined',
-};
+const KINDS: Array<[string, string]> = [
+  ['moved', 'moved'],
+  ['movedWithEdit', 'moved & edited'],
+  ['renamed', 'renamed'],
+  ['reformatted', 'reformatted'],
+  ['extractedFunction', 'extracted'],
+  ['inlinedFunction', 'inlined'],
+  ['reordered', 'reordered'],
+];
 
-export function semanticNoteTitle(summary: ReviewSummary): string {
-  const parts = Object.entries(summary.counts)
-    .filter(([kind]) => kind in KIND_LABEL)
-    .map(([kind, n]) => `${n} ${KIND_LABEL[kind]}`);
-  return parts.join(', ');
+export function semanticNoteParts(summary: ReviewSummary): string[] {
+  return KINDS.filter(([kind]) => (summary.counts[kind as keyof typeof summary.counts] ?? 0) > 0).map(
+    ([kind, word]) => `${summary.counts[kind as keyof typeof summary.counts]} ${word}`,
+  );
+}
+
+export function semanticNoteLabel(summary: ReviewSummary): string {
+  const parts = semanticNoteParts(summary);
+  return parts.length > 2 ? `${parts.slice(0, 2).join(' · ')} · +${parts.length - 2}` : parts.join(' · ');
 }
 
 export const SemanticFileNote: React.FC<{ state: SemanticFileState; onToggle: () => void }> = ({ state, onToggle }) => {
@@ -31,7 +35,7 @@ export const SemanticFileNote: React.FC<{ state: SemanticFileState; onToggle: ()
       </span>
     );
   }
-  const skim = state.summary.skim.length + (state.summary.counts.movedWithEdit ?? 0);
+  const all = semanticNoteParts(state.summary).join(', ');
   const on = state.status === 'semantic';
   return (
     <button
@@ -42,9 +46,9 @@ export const SemanticFileNote: React.FC<{ state: SemanticFileState; onToggle: ()
         onToggle();
       }}
       className={`text-[11px] px-1.5 py-0.5 rounded transition-colors hover:bg-muted ${on ? 'text-muted-foreground' : 'text-muted-foreground/50 line-through'}`}
-      title={on ? `${semanticNoteTitle(state.summary)}. Click to show the plain diff.` : `Plain diff. Click to show ${semanticNoteTitle(state.summary)}.`}
+      title={on ? `${all}. Click to show the plain diff.` : `Plain diff. Click to show ${all}.`}
     >
-      {skim} to skim
+      {semanticNoteLabel(state.summary)}
     </button>
   );
 };

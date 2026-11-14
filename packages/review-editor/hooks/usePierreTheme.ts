@@ -283,6 +283,19 @@ export function usePierreTheme(options?: {
               minmax(0, var(--split-left, 1fr))
               minmax(0, var(--split-right, 1fr)) !important;
           }
+          [data-semantic-start] { position: relative; }
+          [data-semantic-start]::after {
+            position: absolute; right: 10px; top: 0;
+            font: 500 10.5px/inherit ui-sans-serif, system-ui, sans-serif;
+            letter-spacing: 0.02em; color: ${fg}; opacity: 0.55; pointer-events: none;
+          }
+          [data-semantic-start][data-line-type='change-moved']::after { content: 'moved'; }
+          [data-semantic-start][data-line-type='change-moved-with-edit']::after { content: 'moved & edited'; }
+          [data-semantic-start][data-line-type='change-renamed']::after { content: 'renamed'; }
+          [data-semantic-start][data-line-type='change-reordered']::after { content: 'reordered'; }
+          [data-semantic-start][data-line-type='change-reformatted']::after { content: 'reformatted'; }
+          [data-semantic-start][data-line-type='change-extracted-function']::after { content: 'extracted'; }
+          [data-semantic-start][data-line-type='change-inlined-function']::after { content: 'inlined'; }
           [data-diff-type='split'][data-overflow='scroll'][data-semantic] {
             grid-template-columns:
               minmax(0, var(--split-left, 1fr))

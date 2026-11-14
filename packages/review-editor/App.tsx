@@ -77,6 +77,10 @@ import { useHasSavedGuides } from './hooks/guide/useHasSavedGuides';
 import { generateId } from './utils/generateId';
 import { parseDiagramEngineUrls } from './utils/diagramEngine';
 import { parseSemDiffAdvert } from './semDiff/protocol';
+import { createSemDiffClient } from './semDiff/semDiffClient';
+import { computeReviewSemanticDiff, setSemanticDiffSource, type ReadFileContents } from './semDiff/semanticDiffSource';
+import { resetSemanticDiffCache } from './hooks/useFileSemanticChanges';
+import type { SemanticDiffResponse } from '@plannotator/shared/semantic-diff-types';
 
 import type { SemDiffAdvert } from '@plannotator/shared/sem-diff-assets';
 import type { DiagramEngineUrls } from './utils/diagramEngineContract';
@@ -703,7 +707,6 @@ const ReviewApp: React.FC = () => {
   // its decision clear the targets it saved. PR drafts ignore it.
   const feedbackUrl = `/api/feedback?client=${localDraftClientId}`;
   const exitUrl = `/api/exit?client=${localDraftClientId}&`;
-  const semanticDiffUsable = semanticDiffEnabled && semanticDiffAvailable;
   const callFlowAvailable = callFlowEnabled && callFlowAdvert.available;
   const { state: callFlowAnalysis, retry: retryCallFlowAnalysis } = useCallFlowAnalysis(snapshotId, callFlowAvailable);
   const [isFetchingBase, setIsFetchingBase] = useState(false);
@@ -783,6 +786,40 @@ const ReviewApp: React.FC = () => {
   // host that ships no engine, the demo): diagram fences show as code.
   const [diagramEngine, setDiagramEngine] = useState<DiagramEngineUrls | null>(null);
   const [semDiff, setSemDiff] = useState<SemDiffAdvert | null>(null);
+  const semDiffClient = useMemo(
+    () => (semDiff ? createSemDiffClient({ advert: semDiff, origin: window.location.origin, createWorker: loadSemDiffWorker }) : null),
+    [semDiff],
+  );
+  useEffect(() => () => semDiffClient?.dispose(), [semDiffClient]);
+  const semanticDiffUsable = semDiffClient != null || (semanticDiffEnabled && semanticDiffAvailable);
+  const semContentRef = useRef<{ files: DiffFile[]; base?: string; snapshot?: string }>({ files: [] });
+  useEffect(() => {
+    if (!semDiffClient) {
+      setSemanticDiffSource(null);
+      resetSemanticDiffCache();
+      return;
+    }
+    const read: ReadFileContents = async (file, signal) => {
+      const params = new URLSearchParams({ path: file.path });
+      if (file.oldPath) params.set('oldPath', file.oldPath);
+      const { base, snapshot } = semContentRef.current;
+      if (base) params.set('base', base);
+      if (snapshot) params.set('snapshot', snapshot);
+      const res = await fetch(`/api/file-content?${params}`, { signal });
+      return res.ok ? res.json() : null;
+    };
+    let cached: { key: string; promise: Promise<SemanticDiffResponse> } | null = null;
+    setSemanticDiffSource(() => {
+      const { files, base, snapshot } = semContentRef.current;
+      const key = `${base ?? ''}|${snapshot ?? ''}|${files.map((file) => `${file.path}#${file.patch.length}`).join('|')}`;
+      if (cached?.key === key) return cached.promise;
+      const promise = computeReviewSemanticDiff(files, semDiffClient, read, new AbortController().signal);
+      cached = { key, promise };
+      return promise;
+    });
+    resetSemanticDiffCache();
+    return () => setSemanticDiffSource(null);
+  }, [semDiffClient]);
   // Session-constant capability advert from `/api/diff`: 'patch' means the
   // diff is caller-supplied bytes (`plannotator review --patch-file`) with no
   // repository behind it. ABSENT reads as 'vcs', so an old server keeps every
@@ -2269,12 +2306,14 @@ const ReviewApp: React.FC = () => {
     }
     const existing = dockApi.getPanel(REVIEW_SEMANTIC_DIFF_PANEL_ID);
     if (existing) { existing.api.setActive(); return; }
+    const beside = semDiffClient != null ? dockApi.getPanel(REVIEW_ALL_FILES_PANEL_ID) : undefined;
     dockApi.addPanel({
       id: REVIEW_SEMANTIC_DIFF_PANEL_ID,
       component: REVIEW_PANEL_TYPES.SEMANTIC_DIFF,
-      title: 'Semantic diff',
+      title: 'Semantic changes',
+      ...(beside ? { position: { referencePanel: beside.id, direction: 'right' as const }, initialWidth: 400 } : {}),
     });
-  }, [dockApi, openAllFilesPanel, semanticDiffUsable]);
+  }, [dockApi, openAllFilesPanel, semanticDiffUsable, semDiffClient]);
 
   const openCallFlowPanel = useCallback(() => {
     if (!dockApi || !callFlowEnabled) return;
@@ -2292,10 +2331,11 @@ const ReviewApp: React.FC = () => {
 
   const handleSemanticDiffUnavailable = useCallback(() => {
     semanticDiffAutoFallbackPending.current = false;
+    if (semDiffClient) return;
     setSemanticDiffAvailable(false);
     dockApi?.getPanel(REVIEW_SEMANTIC_DIFF_PANEL_ID)?.api.close();
     openAllFilesPanel();
-  }, [dockApi, openAllFilesPanel]);
+  }, [dockApi, openAllFilesPanel, semDiffClient]);
 
   const handleSemanticDiffLoadSuccess = useCallback(() => {
     semanticDiffAutoFallbackPending.current = false;
@@ -2318,12 +2358,12 @@ const ReviewApp: React.FC = () => {
     if (!semanticDiff) return;
     const available = semanticDiff.available === true;
     setSemanticDiffAvailable(available);
-    if (!available) {
+    if (!available && !semDiffClient) {
       semanticDiffAutoFallbackPending.current = false;
       dockApi?.getPanel(REVIEW_SEMANTIC_DIFF_PANEL_ID)?.api.close();
       if (isSemanticDiffActive) openAllFilesPanel();
     }
-  }, [dockApi, isSemanticDiffActive, openAllFilesPanel]);
+  }, [dockApi, isSemanticDiffActive, openAllFilesPanel, semDiffClient]);
 
   const applyCallFlowAdvert = useCallback((callFlow?: CallFlowAdvert) => {
     if (!callFlow) return;
@@ -2368,7 +2408,7 @@ const ReviewApp: React.FC = () => {
   const callFlowNavError = callFlowInstall.status.state === 'error';
 
   useEffect(() => {
-    if (!semanticDiffEnabled) {
+    if (!semanticDiffUsable) {
       dockApi?.getPanel(REVIEW_SEMANTIC_DIFF_PANEL_ID)?.api.close();
       if (isSemanticDiffActive) openAllFilesPanel();
     }
@@ -2376,7 +2416,7 @@ const ReviewApp: React.FC = () => {
       dockApi?.getPanel(REVIEW_CALL_FLOW_PANEL_ID)?.api.close();
       if (isCallFlowActive) openAllFilesPanel();
     }
-  }, [callFlowEnabled, dockApi, isCallFlowActive, isSemanticDiffActive, openAllFilesPanel, semanticDiffEnabled]);
+  }, [callFlowEnabled, dockApi, isCallFlowActive, isSemanticDiffActive, openAllFilesPanel, semanticDiffUsable]);
 
   // Turning Call flow on opens its panel. Without this the only sign anything
   // happened is a new sidebar row, so a user who just opted in (intro dialog
@@ -4338,6 +4378,13 @@ const ReviewApp: React.FC = () => {
   }, [prMetadata, prStackInfo, prDiffScope]);
 
   // Build ReviewState value for dock panel context
+  semContentRef.current = {
+    files,
+    base: (activeDiffBase === 'since-base' || activeDiffBase === 'branch' || activeDiffBase === 'merge-base' || activeDiffBase === 'jj-line' || activeDiffBase === 'jj-evolog')
+      ? committedBase ?? undefined
+      : undefined,
+    snapshot: feedbackDiffContext?.snapshotId,
+  };
   const reviewStateValue = useMemo<ReviewState>(() => ({
     files,
     rawPatch: diffData?.rawPatch ?? '',
@@ -4379,8 +4426,7 @@ const ReviewApp: React.FC = () => {
     snapshotId,
     markdownPreview,
     diagramEngine,
-    semDiff,
-    createSemDiffWorker: loadSemDiffWorker,
+    semDiffClient,
     onAddMarkdownPreviewComment: handleAddMarkdownPreviewComment,
     onAskAIForMarkdownPreview: aiAvailable ? handleAskAIForMarkdownPreview : undefined,
     // Outdated comments (#1590) carry line numbers from an earlier version of
@@ -4514,7 +4560,7 @@ const ReviewApp: React.FC = () => {
   }), [
     files, diffData?.rawPatch, activeFileIndex, guideOpen, isDiffPanelActive, effectiveDiffStyle, handleDiffStyleChange, isCompactTouchLayout, diffOverflow, diffIndicators,
     diffLineDiffType, diffShowLineNumbers, diffShowBackground,
-    diffExpandUnchanged, diffFontFamily, diffFontSize, activeDiffBase, committedBase, feedbackDiffContext, prReviewScopeLabel, prDiffScope, agentCwd, canUseLiveWorkspaceActions, isStaticPatch, imagePreviewSupported, snapshotId, markdownPreview, diagramEngine, semDiff, handleAddMarkdownPreviewComment, handleAskAIForMarkdownPreview,
+    diffExpandUnchanged, diffFontFamily, diffFontSize, activeDiffBase, committedBase, feedbackDiffContext, prReviewScopeLabel, prDiffScope, agentCwd, canUseLiveWorkspaceActions, isStaticPatch, imagePreviewSupported, snapshotId, markdownPreview, diagramEngine, semDiffClient, handleAddMarkdownPreviewComment, handleAskAIForMarkdownPreview,
     diffAnnotations, externalAnnotations,
     visibleDescriptionAnnotations, selectedDescriptionAnnotationId, handleAddDescriptionAnnotation,
     handleSelectDescriptionAnnotation, handleDeleteDescriptionAnnotation, handleAskAIForDescription,

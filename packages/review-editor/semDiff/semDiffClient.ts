@@ -5,6 +5,13 @@ import type { SemDiffAdvert } from '@plannotator/shared/sem-diff-assets';
 import { SEM_DIFF_GRAMMARS, type SemDiffReply, type SemDiffRequest } from './protocol';
 
 export const SEM_DIFF_TIMEOUT_MS = 3_000;
+const MAX_CACHED = 500;
+
+function hashText(text: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 0x01000193);
+  return `${text.length}:${(h >>> 0).toString(36)}`;
+}
 
 export interface SemDiffResult {
   semanticOperations: SemanticDiffOperation[];
@@ -73,47 +80,62 @@ export function createSemDiffClient(options: SemDiffClientOptions): SemDiffClien
     return advert.grammars[SEM_DIFF_GRAMMARS[language as keyof typeof SEM_DIFF_GRAMMARS]] != null;
   };
 
-  return {
-    supports,
-    async diff(path, oldText, newText, signal) {
-      if (!advert || !supports(path) || signal?.aborted || oldText === newText) return null;
-      const id = nextId++;
-      const request: SemDiffRequest = { id, advert, origin, path, oldText, newText };
-      const reply = await new Promise<SemDiffReply | null>((resolve) => {
-        const timer = setTimeout(() => {
-          if (pending.has(id)) restart();
-        }, timeoutMs);
-        const finish = (value: SemDiffReply | null) => {
-          clearTimeout(timer);
-          signal?.removeEventListener('abort', onAbort);
-          resolve(value);
-        };
-        const onAbort = () => {
-          pending.delete(id);
-          finish(null);
-        };
-        signal?.addEventListener('abort', onAbort, { once: true });
-        pending.set(id, finish);
-        ensureWorker().then(
-          (w) => {
-            if (pending.has(id)) w.postMessage(request);
-          },
-          () => {
-            pending.delete(id);
-            finish(null);
-          },
-        );
+  const results = new Map<string, Promise<SemDiffResult | null>>();
+
+  const compute = (path: string, oldText: string, newText: string): Promise<SemDiffResult | null> => {
+    const id = nextId++;
+    const request: SemDiffRequest = { id, advert: advert!, origin, path, oldText, newText };
+    return new Promise<SemDiffReply | null>((resolve) => {
+      const timer = setTimeout(() => {
+        if (pending.has(id)) restart();
+      }, timeoutMs);
+      pending.set(id, (value) => {
+        clearTimeout(timer);
+        resolve(value);
       });
-      if (!reply || !reply.ok || signal?.aborted) return null;
-      if (!hasSomethingToSay(reply.semanticOperations)) return null;
+      ensureWorker().then(
+        (w) => {
+          if (pending.has(id)) w.postMessage(request);
+        },
+        () => {
+          pending.get(id)?.(null);
+          pending.delete(id);
+        },
+      );
+    }).then((reply) => {
+      if (!reply || !reply.ok || !hasSomethingToSay(reply.semanticOperations)) return null;
       return {
         semanticOperations: reply.semanticOperations,
         semanticFolds: reply.semanticFolds,
         patch: reply.patch,
         summary: reviewSummary(reply.semanticOperations),
       };
+    });
+  };
+
+  return {
+    supports,
+    async diff(path, oldText, newText, signal) {
+      if (!advert || !supports(path) || signal?.aborted || oldText === newText) return null;
+      const key = `${path}\0${hashText(oldText)}\0${hashText(newText)}`;
+      let result = results.get(key);
+      if (!result) {
+        result = compute(path, oldText, newText);
+        results.set(key, result);
+        if (results.size > MAX_CACHED) results.delete(results.keys().next().value!);
+      }
+      if (!signal) return result;
+      return new Promise<SemDiffResult | null>((resolve) => {
+        const onAbort = () => resolve(null);
+        signal.addEventListener('abort', onAbort, { once: true });
+        result!.then((value) => {
+          signal.removeEventListener('abort', onAbort);
+          resolve(signal.aborted ? null : value);
+        });
+      });
     },
     dispose() {
+      results.clear();
       restart();
     },
   };

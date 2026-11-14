@@ -6,6 +6,7 @@ import type {
 } from '@plannotator/shared/semantic-diff-types';
 import { useReviewStateOptional } from '../dock/ReviewStateContext';
 import { useFileSemanticChanges } from '../hooks/useFileSemanticChanges';
+import { hasSemanticDiffSource } from '../semDiff/semanticDiffSource';
 import { SemanticDiffRows, lineSelectionForChange } from '../dock/panels/semanticDiffShared';
 
 const CLOSE_DELAY_MS = 140;
@@ -39,7 +40,7 @@ export const SemanticFileBadge: React.FC<{ filePath: string }> = ({ filePath }) 
   };
 
   const count = changes.length + binaryChanges.length;
-  if (!state || !available) return null;
+  if (!state || !available || hasSemanticDiffSource()) return null;
   // Sem is available but this file has no named changes (or is still
   // resolving): show a disabled "sem 0" so every header carries the badge in
   // the same spot — consistent look, aligned buttons, no popover.

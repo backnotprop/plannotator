@@ -4,7 +4,7 @@ import type { SemanticDiffChange } from '@plannotator/shared/semantic-diff-types
 
 const CHANGE_TYPE: Record<SemanticDiffOperation['type'], string> = {
   moved: 'moved',
-  movedWithEdit: 'moved',
+  movedWithEdit: 'moved & edited',
   edited: 'modified',
   added: 'added',
   deleted: 'deleted',
@@ -16,11 +16,30 @@ const CHANGE_TYPE: Record<SemanticDiffOperation['type'], string> = {
 };
 
 const MAX_NAME = 80;
+const NAMED = /\b(?:export\s+)?(?:default\s+)?(?:async\s+)?(?:function\*?|def|fn|func|class|interface|type|enum|const|let|var|struct|trait|impl)\s+([A-Za-z_$][\w$]*)/;
 
-function firstLine(text: string, line: number | undefined): string {
+export function shortName(line: string): string {
+  return NAMED.exec(line)?.[1] ?? line;
+}
+
+function lineText(text: string, line: number | undefined): string {
   if (line == null) return '';
   const value = text.split('\n')[line - 1]?.trim() ?? '';
   return value.length > MAX_NAME ? `${value.slice(0, MAX_NAME - 1)}…` : value;
+}
+
+function firstLine(text: string, line: number | undefined): string {
+  return lineText(text, line);
+}
+
+function declarationLine(text: string, ranges: readonly { start: number; end: number }[]): string {
+  for (const range of ranges) {
+    for (let line = range.start; line <= range.end && line < range.start + 40; line++) {
+      const value = lineText(text, line);
+      if (/\b(function|def|fn|func|class)\b/.test(value)) return value;
+    }
+  }
+  return '';
 }
 
 export function semDiffChanges(
@@ -35,14 +54,19 @@ export function semDiffChanges(
     const newRange = op.lines.new[0];
     const oldEnd = op.lines.old.at(-1)?.end ?? null;
     const newEnd = op.lines.new.at(-1)?.end ?? null;
-    const name = firstLine(newText, newRange?.start) || firstLine(oldText, oldRange?.start);
+    const helper = op.type === 'extractedFunction'
+      ? declarationLine(newText, op.lines.new)
+      : op.type === 'inlinedFunction'
+        ? declarationLine(oldText, op.lines.old)
+        : '';
+    const name = helper || firstLine(newText, newRange?.start) || firstLine(oldText, oldRange?.start);
     const oldName = firstLine(oldText, oldRange?.start);
     return {
       entityId: null,
       changeType: CHANGE_TYPE[op.type] ?? 'modified',
-      entityType: 'code',
-      entityName: name,
-      oldEntityName: oldName && oldName !== name ? oldName : null,
+      entityType: '',
+      entityName: shortName(name),
+      oldEntityName: op.type === 'renamed' && oldName && shortName(oldName) !== shortName(name) ? shortName(oldName) : null,
       filePath,
       oldFilePath,
       startLine: newRange?.start ?? null,

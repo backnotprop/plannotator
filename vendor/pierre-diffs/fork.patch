@@ -1,12 +1,12 @@
 diff --git a/packages/diffs/package.json b/packages/diffs/package.json
-index be0fba76..e826d703 100644
+index be0fba76..2e05424f 100644
 --- a/packages/diffs/package.json
 +++ b/packages/diffs/package.json
 @@ -1,6 +1,6 @@
  {
    "name": "@pierre/diffs",
 -  "version": "1.7.0-beta.3",
-+  "version": "1.7.0-beta.3-sem.1",
++  "version": "1.7.0-beta.3-sem.2",
    "license": "apache-2.0",
    "files": [
      "dist",
@@ -28,3 +28,25 @@ index 66542ee4..7d626b01 100644
      }
  
      const promise = this.loadFilesForDiff(fileDiff, loadDiffFiles);
+diff --git a/packages/diffs/src/layout/DiffLayout.ts b/packages/diffs/src/layout/DiffLayout.ts
+index 79f7703b..10185460 100644
+--- a/packages/diffs/src/layout/DiffLayout.ts
++++ b/packages/diffs/src/layout/DiffLayout.ts
+@@ -1131,10 +1131,16 @@ export class DiffLayout<LAnnotation = undefined> {
+         : row.marked
+           ? lineDiffRangesFor(model, row.side, row.lineIndex, this.#ranges)
+           : NO_RANGES;
++    // The first row of a semantic region (the one with a gutter icon) is
++    // marked so a host can label the region in its own words.
++    const contentProperties =
++      row.gutterIcon != null
++        ? { ...row.contentProperties, 'data-semantic-start': '' }
++        : row.contentProperties;
+     const content = this.#line(
+       base,
+       ranges,
+-      row.contentProperties,
++      contentProperties,
+       row.lineNumber,
+       row.altLineNumber,
+       row.lineIndexText
