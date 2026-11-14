@@ -187,7 +187,7 @@ import { projectWrites } from './projectWrites';
 import { priorityWrites } from './priorityWrites';
 import { snoozeWrites } from './snoozeWrites';
 import { agentWrites, type AgentDeleteAsk } from './agentWrites';
-import { joinThreadRead, type ThreadFlight } from './threadFlights';
+import { joinThreadRead, useStaleOpenRead, type ThreadFlight } from './threadFlights';
 import { openTakenBack } from './takenBackCompose';
 import { restartInbox } from './restartInbox';
 import { errorToast } from './toastError';
@@ -1892,6 +1892,7 @@ function Inbox() {
       if (out) openThreadReadsOut.current.delete(out);
     }
   }, [setThreadLoad, stopLiveThreadRetry, queryClient]);
+  const staleOpenCheck = useStaleOpenRead(queryClient, routeRef, (id) => void refreshThread(id));
   const refreshThread = useCallback(
     (threadId: string, given?: ThreadModel): Promise<InboxThread | null> => joinThreadRead(threadFlights.current, threadId, given, readThreadInto, (id) => routeRef.current.thread === id && isThreadStale(queryClient, id)),
     [readThreadInto, queryClient],
@@ -2474,15 +2475,13 @@ function Inbox() {
             pickSaves.current.held.push(event);
             return;
           }
-          // The record of a save of this window that already landed (it came after the save's answer): it owes what
-          // shows the pick besides the pane, never the open thread or its files; nothing once that read started after
-          // the save's answer (the run's end read it).
           const own = event ? ownEcho(event) : null;
           if (own && event?.kind === 'question' && ownSaves.covered(event.question)) {
             emitFloaterEvent('record', null);
             return;
           }
           readAfterRecord(event, own ? { own } : { applied, files: stream.kind !== 'any' && stream.files === true });
+          staleOpenCheck(routeRef.current.thread);
           // A floating draft's window reads its thread again (a new message, a hand-off).
           emitFloaterEvent('record', null);
         },

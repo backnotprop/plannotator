@@ -1,4 +1,7 @@
+import { useEffect, useRef } from 'react';
+import type { QueryClient } from '@tanstack/react-query';
 import type { InboxThread } from '@plannotator/core/inbox-types';
+import { heldThread, isThreadStale } from './data/queries/thread';
 import type { ThreadModel } from './api';
 
 export interface ThreadFlight {
@@ -45,4 +48,20 @@ export function joinThreadRead(
     });
   flights.set(threadId, flight);
   return flight.promise;
+}
+
+export const STALE_OPEN_MS = 1500;
+
+export function useStaleOpenRead(client: QueryClient, route: { readonly current: { thread: string | null } }, read: (threadId: string) => void) {
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (timer.current) clearTimeout(timer.current);
+  }, []);
+  return (threadId: string | null) => {
+    if (!threadId || timer.current || !heldThread(client, threadId) || !isThreadStale(client, threadId)) return;
+    timer.current = setTimeout(() => {
+      timer.current = null;
+      if (route.current.thread === threadId && heldThread(client, threadId) && isThreadStale(client, threadId)) read(threadId);
+    }, STALE_OPEN_MS);
+  };
 }
