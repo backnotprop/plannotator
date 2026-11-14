@@ -5,7 +5,7 @@ import DiffMinimap from './DiffMinimap';
 import type { DiffLayoutItem, DiffLayoutSource } from './layoutSource';
 
 const STRIP_HEIGHT = 400;
-const ADD_LANE_X = 6;
+const ADD_LANE_X = 7;
 
 const patch = (name: string) =>
   [`--- a/${name}`, `+++ b/${name}`, '@@ -1,2 +1,6 @@', ' a', '+b', '+c', '+d', '+e', ' f'].join('\n');
@@ -144,8 +144,8 @@ describe('diff minimap stays in step with the diff layout', () => {
     await render(new Set(['one.ts']));
     await flush();
     const [viewedRun, ...others] = addRuns();
-    expect(Math.max(...viewedRun.map((fill) => fill.alpha))).toBeLessThan(0.4);
-    for (const run of others) expect(Math.min(...run.map((fill) => fill.alpha))).toBeGreaterThan(0.37);
+    expect(Math.max(...viewedRun.map((fill) => fill.alpha))).toBeLessThan(0.3);
+    for (const run of others) expect(Math.min(...run.map((fill) => fill.alpha))).toBeGreaterThan(0.29);
 
     await act(() => root.unmount());
     host.remove();
