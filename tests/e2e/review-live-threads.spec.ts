@@ -145,11 +145,19 @@ test('the Inbox thread shows a review comment on its lines and opens the living 
     await review.locator('body').click({ position: { x: 5, y: 300 } });
     await review.keyboard.press('ControlOrMeta+Enter');
     await expect(review.locator('[data-live-ended]')).toBeVisible({ timeout: 30_000 });
-    await expect(review.locator('[data-live-ended] a')).toHaveAttribute('href', new RegExp(`#thread=${thread}$`));
+    await expect(review.locator('[data-live-ended] a')).toHaveAttribute('href', new RegExp(`/\\?open-review=${thread}#thread=${thread}$`));
     await expect.poll(async () => {
       const read = (await (await fetch(`${inboxUrl}/api/inbox/threads/${thread}`)).json()) as { thread?: { messages?: { body: string }[] } };
       return (read.thread?.messages ?? []).map((m) => m.body);
     }).toContain('I approved the review.');
+    const firstUrl = review.url();
+    await review.locator('[data-live-ended] a').click();
+    await review.waitForURL((url) => url.href !== firstUrl && !url.href.startsWith(inboxUrl), { timeout: 45_000 });
+    await expect(review.locator('[data-review-panel-toggle]')).toBeVisible({ timeout: 30_000 });
+    const againTab = review.locator('[data-review-sidebar-tab="threads"]');
+    if (!(await againTab.isVisible())) await review.locator('[data-review-panel-toggle]').click();
+    await againTab.click();
+    await expect(review.locator('[data-live-row]')).toContainText('Can this say why?');
     await context.close();
   } finally {
     await owner?.stop();

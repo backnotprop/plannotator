@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { pageServerSession } from '../api';
 import { inboxUrl } from '../inboxUrl';
 import type { InboxReviewAnchor } from '@plannotator/core/review-threads';
@@ -21,13 +21,28 @@ export function ReviewAnchorLine({ anchor, resolved }: { anchor: InboxReviewAnch
   );
 }
 
+export const OPEN_REVIEW_MARKER = 'open-review';
+
+function takeOpenMarker(): string | null {
+  if (typeof window === 'undefined') return null;
+  const search = new URLSearchParams(window.location.search);
+  const thread = search.get(OPEN_REVIEW_MARKER);
+  if (!thread) return null;
+  search.delete(OPEN_REVIEW_MARKER);
+  const rest = search.toString();
+  window.history.replaceState(window.history.state, '', `${window.location.pathname}${rest ? `?${rest}` : ''}${window.location.hash}`);
+  return thread;
+}
+
+let askedToOpen = takeOpenMarker();
+
 export function OpenLiveReview({ threadId, title }: { threadId: string; title: string }) {
   const [state, setState] = useState<'idle' | 'opening' | 'failed'>('idle');
   const [error, setError] = useState<string | null>(null);
-  const open = async () => {
+  const open = async (inPlace = false) => {
     setState('opening');
     setError(null);
-    const tab = window.open('about:blank', '_blank');
+    const tab = inPlace ? null : window.open('about:blank', '_blank');
     try {
       const response = await fetch(inboxUrl(`/review-threads/${encodeURIComponent(threadId)}/open`), {
         method: 'POST',
@@ -36,7 +51,8 @@ export function OpenLiveReview({ threadId, title }: { threadId: string; title: s
       });
       const body = (await response.json().catch(() => ({}))) as { url?: string; error?: string };
       if (!response.ok || !body.url) throw new Error(body.error ?? 'The review did not start.');
-      if (tab) tab.location.href = body.url;
+      if (inPlace) window.location.replace(body.url);
+      else if (tab) tab.location.href = body.url;
       else window.open(body.url, '_blank');
       setState('idle');
     } catch (e) {
@@ -45,6 +61,11 @@ export function OpenLiveReview({ threadId, title }: { threadId: string; title: s
       setState('failed');
     }
   };
+  useEffect(() => {
+    if (askedToOpen !== threadId) return;
+    askedToOpen = null;
+    void open(true);
+  }, [threadId]);
   return (
     <div className="ib-ranchor-open" data-open-live-review="">
       <button type="button" className="ib-ranchor-btn" disabled={state === 'opening'} onClick={() => void open()}>
