@@ -111,7 +111,7 @@ interface ReviewSidebarProps {
   externalAnnotations?: ReadonlyArray<FindingLike>;
   onOpenFinding?: (finding: FindingLike) => void;
   agentsScope?: React.ReactNode;
-  agentsGuides?: (ctx: { startGuide: (() => void) | null }) => React.ReactNode;
+  agentsGuides?: () => React.ReactNode;
   onOpenJobDetail?: (jobId: string) => void;
   onOpenGuide?: (jobId: string) => void;
   /** Pass-through to AgentsTab — gates the sidebar's Guided Review mode on

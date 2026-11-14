@@ -94,14 +94,12 @@ export function GuidesList({
   onOpen,
   onRename,
   onDelete,
-  onStart,
 }: {
   guides: SavedGuideListEntry[] | null;
   prMode: boolean;
   onOpen: (savedJobId: string) => void;
   onRename: (id: string, title: string) => Promise<string | null>;
   onDelete: (id: string) => void;
-  onStart?: () => void;
 }) {
   const [query, setQuery] = useState('');
   const searchable = (guides?.length ?? 0) > GUIDE_SEARCH_THRESHOLD;
@@ -118,20 +116,9 @@ export function GuidesList({
         {guides.length > 0 && <span className="text-[12px] tabular-nums text-muted-foreground">{guides.length}</span>}
       </div>
       {guides.length === 0 ? (
-        <div className="px-4 pb-2" data-guides-empty="">
-          <p className="text-[12px] leading-5 text-muted-foreground">
-            A guided review orders this change into short chapters, the core of it first, with the code beside each one.
-          </p>
-          {onStart && (
-            <button
-              type="button"
-              onClick={onStart}
-              className="mt-2 inline-flex h-7 items-center rounded-md border border-border bg-background px-2.5 text-[12px] font-medium text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              Start a Guided Review
-            </button>
-          )}
-        </div>
+        <p className="px-4 pb-2 text-[12px] leading-5 text-muted-foreground" data-guides-empty="">
+          No guided reviews yet. Start one above: it orders this change into short chapters, the core first, and is kept here.
+        </p>
       ) : (
         <>
           {searchable && (

@@ -51,14 +51,13 @@ export function useAgentsPanelSlots({
     [openDiffFile, navigateToAnnotation],
   );
   const renderGuides = useCallback(
-    ({ startGuide }: { startGuide: (() => void) | null }) => (
+    () => (
       <GuidesList
         guides={saved.guides}
         prMode={prMode}
         onOpen={onOpenGuide}
         onRename={saved.rename}
         onDelete={saved.remove}
-        onStart={startGuide ?? undefined}
       />
     ),
     [saved.guides, saved.rename, saved.remove, prMode, onOpenGuide],

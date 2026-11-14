@@ -9,7 +9,7 @@ import { LaunchDetails } from './LaunchDetails';
 
 const ROW: Record<LaunchKind, { title: string; action: string; Icon: React.FC<{ className?: string; size?: number }> }> = {
   guide: { title: 'Guided Review', action: 'Start', Icon: BookOpenText },
-  review: { title: 'Review agent', action: 'Run', Icon: ScanSearch },
+  review: { title: 'Review agent', action: 'Start', Icon: ScanSearch },
 };
 
 function LaunchRow({
@@ -82,7 +82,7 @@ function LaunchRow({
           disabled={!side.ready || pending}
           aria-busy={pending}
           data-launch-start={side.kind}
-          className="inline-flex h-7 min-w-14 shrink-0 items-center justify-center gap-1.5 rounded-md border border-border bg-background px-2.5 text-[12px] font-medium text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+          className="inline-flex h-7 w-16 shrink-0 items-center justify-center gap-1.5 rounded-md border border-border bg-background px-2.5 text-[12px] font-medium text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
         >
           {pending && <Loader2 className="animate-spin motion-reduce:animate-none" size={12} />}
           {pending ? 'Starting' : action}
