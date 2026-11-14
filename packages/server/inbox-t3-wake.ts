@@ -33,12 +33,17 @@
  *    answer about the grant or the thread (`orchestration_error`) is a failure
  *    to reach T3, kept on the backoff;
  *  - on an agent's send_message, the lookup gets a few seconds
- *    (`lookupTimeoutMs`): a T3 that does not answer by then is not promised.
+ *    (`lookupTimeoutMs`): a T3 that does not answer by then is not promised;
+ *  - what holds a reply the thread owns (no sign-in saved, one T3 refused,
+ *    a mode that does not cover the thread, T3 not answering) is written on
+ *    the reply (`t3_wait`), so every window that shows the thread, a linked
+ *    machine's included, says it. Saved grants whose T3 does not have the
+ *    thread write nothing: no sign-in here fixes that.
  */
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { INBOX_T3_HOST, isT3ThreadId, type InboxMessage } from "@plannotator/core/inbox-types";
+import { INBOX_T3_HOST, isT3ThreadId, type InboxMessage, type InboxT3WaitReason } from "@plannotator/core/inbox-types";
 import type { InboxReplyCommand } from "@plannotator/shared/inbox/connection";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import type { T3Credentials } from "@plannotator/t3-code/auth";
@@ -59,6 +64,8 @@ const GRANT_CHECK_MS = 15_000;
 const THREAD_GONE = /\bthread_not_found\b|thread was not found|calling thread was not found|archived/i;
 /** A lookup T3 answered about the grant or the thread; anything else (a network failure, `orchestration_error`) did not reach it and is tried again. */
 const T3_ANSWERED = /\b(thread_not_found|capability_denied|target_required)\b|thread was not found|different thread|\b401\b|unauthorized/i;
+/** T3 refused the saved grant itself: lapsed (a sign-in lasts 30 days) or revoked. */
+const GRANT_REFUSED = /\b401\b|unauthorized/i;
 /** How long an agent's send_message waits on T3 to learn whether its thread wakes. */
 const LOOKUP_TIMEOUT_MS = 3_000;
 /** What T3 answers when the grant's mode does not cover the thread (its OrchestratorMcpFailure codes). */
@@ -193,8 +200,8 @@ export function createInboxT3Wake(options: {
     return link;
   };
   const homes = new Map<string, Link>();
-  /** When no grant reached the thread, and the grants then: a new login asks again at once. */
-  const misses = new Map<string, { at: number; grants: string }>();
+  /** When no grant reached the thread, and the grants then: a new login asks again at once. `lapsed`: T3 refused a saved grant (401). */
+  const misses = new Map<string, { at: number; grants: string; lapsed: boolean }>();
   /** Each thread's runtime mode, as T3 last said it. */
   const threadModes = new Map<string, T3RuntimeMode>();
   /** The grant's mode T3 named in a denial, per endpoint, with that grant's epoch: a new login clears it. */
@@ -232,6 +239,7 @@ export function createInboxT3Wake(options: {
     const missed = misses.get(thread);
     if (missed && missed.grants === mark && now() - missed.at < MISS_TTL_MS) return null;
     let unreachable = false;
+    let lapsed = false;
     for (const credentials of found) {
       try {
         const link = await linkOf(credentials);
@@ -243,11 +251,13 @@ export function createInboxT3Wake(options: {
         return link;
       } catch (error) {
         // Not this environment's thread or a refused grant is an answer; a network failure is not.
-        if (!T3_ANSWERED.test(error instanceof Error ? error.message : String(error))) unreachable = true;
+        const said = error instanceof Error ? error.message : String(error);
+        if (!T3_ANSWERED.test(said)) unreachable = true;
+        else if (GRANT_REFUSED.test(said)) lapsed = true;
       }
     }
     if (unreachable) return "unreachable";
-    misses.set(thread, { at: now(), grants: mark });
+    misses.set(thread, { at: now(), grants: mark, lapsed });
     return null;
   };
 
@@ -333,14 +343,15 @@ export function createInboxT3Wake(options: {
   const itemOfKey = (key: string) => key.slice(0, key.indexOf("."));
   const sessionOfKey = (key: string) => key.slice(key.indexOf(".") + 1);
 
-  const deliverOne = async (link: Link, item: InboxMessage, session: string): Promise<void> => {
+  /** What the item's wait reads after a try: a reason, null (nothing holds it), undefined (as it was). */
+  const deliverOne = async (link: Link, item: InboxMessage, session: string): Promise<InboxT3WaitReason | null | undefined> => {
     const id = store.deliveryIdOf(item, session);
     const key = `${id}.${session}`;
     const retry = retryAt.get(key);
-    if (retry && retry.at > now()) return;
+    if (retry && retry.at > now()) return undefined;
     const text = codexQueueMessage(options.commandOf(item, session));
     const [, { T3Delivery, T3DeliveryRefused }, { T3Thread }] = await loadT3();
-    if (id === item.id && !store.handover.hand(item, session, "t3")) return;
+    if (id === item.id && !store.handover.hand(item, session, "t3")) return null;
     let delivery: InstanceType<typeof T3Delivery> | null = null;
     try {
       // One request per item (the delivery folder is the thread's): a retry re-sends the first words, so a thread
@@ -353,6 +364,7 @@ export function createInboxT3Wake(options: {
       } catch {
         // Gone, or no longer this session's.
       }
+      return null;
     } catch (error) {
       const said = (error instanceof Error ? error.message : String(error)).split("\n")[0]!.slice(0, 300);
       const code = MODE_DENIED.exec(said)?.[1];
@@ -373,25 +385,26 @@ export function createInboxT3Wake(options: {
           if (threadMode) threadModes.set(session, threadMode);
         }
         sayOnce(t3ModeDeniedLine(item.id, session, code, t3GrantModeOf(said), link.credentials.endpoint.href));
-        return;
+        return "access";
       }
       if (error instanceof T3DeliveryRefused) {
         retryAt.delete(key);
         refused.set(key, null);
         log(`T3 refused ${item.id} for thread ${session} (${said}); it waits in the Inbox for the agent's next read.`);
-        return;
+        return null;
       }
       if (THREAD_GONE.test(said)) {
         retryAt.delete(key);
         dead.add(session);
         homes.delete(session);
         log(`T3 no longer has thread ${session} (${said}); the reply waits in the Inbox for the next agent.`);
-        return;
+        return null;
       }
       backOff(key);
       // A refused grant may be a new login on another URL: ask again which grant reaches the thread.
       homes.delete(session);
       sayOnce(`T3 send failed: ${said}. Trying again later.`);
+      return undefined;
     }
   };
 
@@ -410,10 +423,33 @@ export function createInboxT3Wake(options: {
     const pendingKeys = new Set<string>();
     /** Items this pass could send: a retry is kept only for those, so nothing that cannot go runs a timer. */
     const sendable = new Set<string>();
+    /** Why each reply the thread owns waits, as this pass found it (`t3_wait`); one it did not look at keeps its own. */
+    const waits = new Map<string, InboxT3WaitReason | null>();
+    const waitOf = (item: InboxMessage, session: string, wait: InboxT3WaitReason | null | undefined) => {
+      if (wait !== undefined && store.isOwner(item, session) && store.deliveryIdOf(item, session) === item.id) waits.set(item.id, wait);
+    };
+    const recordWaits = () => {
+      for (const [id, wait] of waits) {
+        try {
+          store.recordT3Wait(id, wait);
+        } catch {
+          // Gone meanwhile.
+        }
+      }
+    };
     for (const [session, items] of pending) {
       const work = items.filter((item) => wakesItem(item, session) && !options.skip?.(item, session));
+      // Not the wake's to send (its connection delivers it, or it is withdrawn): nothing here holds it.
+      for (const item of items) if (!work.includes(item)) waitOf(item, session, null);
       for (const item of work) pendingKeys.add(keyOf(item, session));
-      if (dead.has(session)) continue;
+      if (dead.has(session)) {
+        for (const item of work) waitOf(item, session, null);
+        continue;
+      }
+      for (const item of work) {
+        const key = keyOf(item, session);
+        if (refused.has(key)) waitOf(item, session, refused.get(key) ? "access" : null);
+      }
       const todo = work.filter((item) => !refused.has(keyOf(item, session)));
       if (todo.length === 0) continue;
       // Every item still inside its backoff: kept, and T3 is not asked until one comes due.
@@ -428,12 +464,16 @@ export function createInboxT3Wake(options: {
           const key = keyOf(item, session);
           sendable.add(key);
           if ((retryAt.get(key)?.at ?? 0) <= now()) backOff(key);
+          waitOf(item, session, "closed");
         }
         sayOnce(`T3 could not be reached for thread ${session}. Trying again later.`);
         continue;
       }
       if (!link) {
         noGrant = true;
+        // Saved grants that T3 answered "not this environment's thread" say nothing the person can act on here.
+        const wait = found.length === 0 ? "sign_in" : misses.get(session)?.lapsed ? "sign_in_again" : null;
+        for (const item of todo) waitOf(item, session, wait);
         sayOnce(`No T3 grant reaches thread ${session}; run \`plannotator t3 login --url <T3 MCP URL>\`. Its replies wait in the Inbox.`);
         continue;
       }
@@ -441,16 +481,18 @@ export function createInboxT3Wake(options: {
         sayOnce(t3NotCoveredLine(session, ceilingOf(link) ?? "its mode", threadModes.get(session) ?? null, link.credentials.endpoint.href));
       }
       for (const item of todo) {
-        if (stopped) return;
+        if (stopped) return recordWaits();
         // Denied for the grant's mode, or a mode it does not cover: kept for the agent's next read, never sent under this grant.
         if (!sendsInto(session, link)) {
           refuseUnder(keyOf(item, session), link);
+          waitOf(item, session, "access");
           continue;
         }
         sendable.add(keyOf(item, session));
-        await deliverOne(link, item, session);
+        waitOf(item, session, await deliverOne(link, item, session));
       }
     }
+    recordWaits();
     for (const key of [...retryAt.keys()]) if (!sendable.has(key)) retryAt.delete(key);
     for (const key of [...refused.keys()]) if (!pendingKeys.has(key)) refused.delete(key);
     scheduleRetry();

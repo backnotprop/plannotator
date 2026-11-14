@@ -14,7 +14,7 @@ import type { T3Rpc } from "@plannotator/t3-code/t3-client";
 import type { InboxThread } from "@plannotator/core/inbox-types";
 import { startInboxServer, type InboxServer } from "./inbox";
 import { INBOX_ASKER_RESTART_GRACE_MS } from "./inbox-sessions";
-import { INBOX_REPLY_ARRIVES_TEXT, INBOX_REPLY_READ_LATER_TEXT } from "./inbox-mcp";
+import { INBOX_REPLY_ARRIVES_TEXT, INBOX_REPLY_READ_LATER_TEXT, INBOX_REPLY_T3_WHILE_RUNNING_TEXT } from "./inbox-mcp";
 import { t3CeilingOfScope, t3GrantModeOf } from "./inbox-t3-wake";
 import { type FakeT3, startFakeT3, type T3Access, type T3RuntimeMode, T3_THREAD_ID_FORMS, t3ScopeOf } from "../../tests/helpers/fake-t3";
 
@@ -298,7 +298,7 @@ describe("a reply to a T3 thread whose Claude runs the Claude Code mod: one owne
     expect((await w.thread(sent.thread_id)).messages.at(-1)!.delivery).toMatchObject({ host: "t3", session: THREAD });
   });
 
-  test("with no grant at all, a polling thread is told its reply arrives: no `plannotator t3 login`", async () => {
+  test("with no grant at all, a polling thread is told its reply arrives only while T3 keeps it running", async () => {
     const clock = { now: Date.now() };
     const w = await world({ grant: false, sessionsNow: () => clock.now });
     await fetch(`http://127.0.0.1:${w.server.port}/api/inbox/bridge/poll`, {
@@ -306,7 +306,28 @@ describe("a reply to a T3 thread whose Claude runs the Claude Code mod: one owne
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${w.server.token}` },
       body: JSON.stringify({ session: THREAD, host: "t3", waitMs: 0 }),
     });
-    expect((await w.send("Anyone there?")).text).toContain(INBOX_REPLY_ARRIVES_TEXT);
+    const text = (await w.send("Anyone there?")).text;
+    expect(text).toContain(INBOX_REPLY_T3_WHILE_RUNNING_TEXT);
+    expect(text).not.toContain(INBOX_REPLY_ARRIVES_TEXT);
+  });
+
+  test("with no grant, once T3 released that Claude, the thread's reply says it waits for a sign-in, and clears when it goes in", async () => {
+    const w = await modWorld({ grant: false });
+    await w.poll();
+    const sent = await w.send("Ship the worker today?");
+    const replyId = await w.reply(sent.message_id, "Yes, ship it.");
+    await w.server.t3Wake.sweep();
+    // The mod's while it polls: nothing holds it.
+    expect((await w.thread(sent.thread_id)).messages.at(-1)!.t3_wait ?? null).toBeNull();
+    w.clock.now += 31_000;
+    await w.server.t3Wake.sweep();
+    expect((await w.thread(sent.thread_id)).messages.at(-1)!.t3_wait).toBe("sign_in");
+    w.login("e1");
+    await w.server.t3Wake.sweep();
+    const last = (await w.thread(sent.thread_id)).messages.at(-1)!;
+    expect(last.delivery).toMatchObject({ host: "t3", session: THREAD });
+    expect(last.t3_wait ?? null).toBeNull();
+    expect(w.t3.sends).toEqual([expect.objectContaining({ clientRequestId: `plannotator-inbox-${replyId}` })]);
   });
 
   test("once the mod stopped polling (T3 released that Claude), the T3 wake sends what still waits, once", async () => {

@@ -1532,6 +1532,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           (await qwenWake.wakes(host, session, meta)) ||
           (await t3Wake.wakes(host, session)),
         bridgePolls: (host, session) => pollingWakeHost(host) && live.pollsNow(host, session),
+        t3WakeReaches: (session) => t3Wake.wakes(INBOX_T3_HOST, session),
         sessionName: (session) => live.labelOf(session) ?? live.titleOf(session),
         // The Board: the card tool is listed and served only while the person has it on.
         boardOn,
