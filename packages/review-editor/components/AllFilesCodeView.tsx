@@ -1959,6 +1959,27 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   // on every mount/update and dropped on unmount.
   const nodeToItemIdRef = useRef(new WeakMap<HTMLElement, string>());
 
+  useEffect(() => {
+    if (!scrollEl || !opensWholeFiles) return;
+    const readAheadOfExpand = (event: Event) => {
+      if (event instanceof PointerEvent && event.movementX === 0 && event.movementY === 0) return;
+      const path = event.composedPath();
+      if (!path.some((node) => node instanceof Element && node.hasAttribute('data-expand-button'))) return;
+      const host = path.find((node): node is HTMLElement => node instanceof HTMLElement && node.tagName === 'DIFFS-CONTAINER');
+      const itemId = host ? nodeToItemIdRef.current.get(host) : undefined;
+      if (itemId == null) return;
+      const rendered = viewerRef.current?.getInstance()?.getRenderedItems().find((candidate) => candidate.id === itemId);
+      if (rendered?.type !== 'diff' || rendered.item.fileDiff.isPartial !== true) return;
+      rendered.instance.expandHunk(0, 'up', 0);
+    };
+    scrollEl.addEventListener('pointermove', readAheadOfExpand, { passive: true });
+    scrollEl.addEventListener('focusin', readAheadOfExpand);
+    return () => {
+      scrollEl.removeEventListener('pointermove', readAheadOfExpand);
+      scrollEl.removeEventListener('focusin', readAheadOfExpand);
+    };
+  }, [scrollEl, opensWholeFiles]);
+
   const handlePostRender = useStableCallback(
     (
       node: HTMLElement,
