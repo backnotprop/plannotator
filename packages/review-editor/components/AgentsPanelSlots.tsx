@@ -1,3 +1,4 @@
+import { formatCount, plural } from '@plannotator/ui/utils/countFormat';
 import React, { useCallback, useMemo } from 'react';
 import type { AgentJobInfo } from '@plannotator/ui/types';
 import type { FindingLike } from '@plannotator/ui/components/AgentsTab';
@@ -20,8 +21,7 @@ export function reviewScopeText({
   const what = prLabel ?? [noun, connector && base ? `${connector} ${base}` : null].filter(Boolean).join(' ');
   const additions = files.reduce((sum, f) => sum + f.additions, 0);
   const deletions = files.reduce((sum, f) => sum + f.deletions, 0);
-  const count = `${files.length} file${files.length === 1 ? '' : 's'}`;
-  return [what, count, `+${additions} −${deletions}`].join(' · ');
+  return [what, plural(files.length, 'file'), `+${formatCount(additions)} −${formatCount(deletions)}`].join(' · ');
 }
 
 export function useAgentsPanelSlots({
