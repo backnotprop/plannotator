@@ -24,7 +24,7 @@ export function describeImageError(error: Pick<ReviewImageError, 'reason' | 'byt
   }
 }
 
-export function imageCaption(label: string, size: Size | null, bytes: number): string {
+export function imageCaption(label: string | null, size: Size | null, bytes: number): string {
   return [label, size ? `${size.width} × ${size.height}` : null, formatImageBytes(bytes)].filter(Boolean).join(' · ');
 }
 

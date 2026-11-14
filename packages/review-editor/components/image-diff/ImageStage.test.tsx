@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { StackedStage } from './ImageStage';
+import { ImageViewMenu } from './ImageViewMenu';
 import { stageLayout, type Size } from './geometry';
 
 const hasDom = typeof document !== 'undefined';
@@ -77,5 +78,60 @@ describe.if(hasDom)('the swipe and onion stages stack both images in one box (DO
     expect(layers[1].style.opacity).toBe('0.5');
     expect(stage.style.width).toBe(`${layout.stage.width}px`);
     expect(stage.style.height).toBe('700px');
+  });
+
+  test('the keyboard moves the divider: arrows by 1%, Shift by 10%, Home and End to the ends; labels name each side', () => {
+    const size = { width: 400, height: 200 };
+    const layout = stageLayout({ old: size, new: size, available: { width: 800, height: 480 }, zoom: 'fit', dpr: 1 });
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    root = createRoot(host);
+    function Harness() {
+      const [position, setPosition] = React.useState(0.5);
+      return (
+        <StackedStage
+          mode="swipe"
+          before={{ url: 'blob:old', alt: 'Before', size: layout.old! }}
+          after={{ url: 'blob:new', alt: 'After', size: layout.new! }}
+          layout={layout}
+          maxHeight={480}
+          position={position}
+          onPosition={setPosition}
+          opacity={0.5}
+          maskColor="blue"
+        />
+      );
+    }
+    act(() => root!.render(<Harness />));
+    const stage = host.querySelector<HTMLElement>('[data-image-stage]')!;
+    expect(stage.getAttribute('role')).toBe('slider');
+    expect(stage.tabIndex).toBe(0);
+    const press = (key: string, shiftKey = false) =>
+      act(() => {
+        stage.dispatchEvent(new KeyboardEvent('keydown', { key, shiftKey, bubbles: true }));
+      });
+    press('ArrowRight');
+    expect(stage.getAttribute('aria-valuenow')).toBe('51');
+    press('ArrowLeft', true);
+    expect(stage.getAttribute('aria-valuenow')).toBe('41');
+    press('End');
+    expect(stage.getAttribute('aria-valuenow')).toBe('100');
+    press('Home');
+    expect(stage.getAttribute('aria-valuenow')).toBe('0');
+    expect([...host.querySelectorAll('[data-stage-label]')].map((el) => [el.getAttribute('data-stage-label'), el.textContent])).toEqual([
+      ['left', 'Before'],
+      ['right', 'After'],
+    ]);
+  });
+
+  test('the view menu is a button in the tab order', () => {
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    root = createRoot(host);
+    act(() => root!.render(<ImageViewMenu filePath="a/shot.png" comparable differencesAvailable />));
+    const trigger = host.querySelector<HTMLButtonElement>('[data-image-view-menu]')!;
+    expect(trigger.tagName).toBe('BUTTON');
+    expect(trigger.tabIndex).toBe(0);
+    expect(trigger.getAttribute('aria-label')).toContain('shot.png');
   });
 });
