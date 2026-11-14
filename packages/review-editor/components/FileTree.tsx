@@ -503,7 +503,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
           style={countColumnVars(totalAdditions, totalDeletions)}
         >
           <nav aria-label="Review views" className="pb-1 flex flex-col empty:hidden" data-review-views-nav="">
-          {onSelectAllFiles && (
+          {onSelectAllFiles && files.length > 0 && (
             <AllChangesRow
               active={isAllFilesActive}
               onClick={onSelectAllFiles}

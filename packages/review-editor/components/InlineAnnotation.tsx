@@ -1,4 +1,5 @@
 import React from 'react';
+import { ClampedCommentBody } from './ClampedCommentBody';
 import { SEVERITY_STYLES, DiffAnnotationMetadata } from '@plannotator/ui/types';
 import { SuggestionBlock } from './SuggestionBlock';
 import { CommentMeta } from './CommentMeta';
@@ -53,7 +54,7 @@ export const InlineAnnotation: React.FC<InlineAnnotationProps> = ({
         createdAt={metadata.createdAt}
       />
       {metadata.text && (
-        <div className="review-comment-body">{renderInlineMarkdown(metadata.text)}</div>
+        <ClampedCommentBody className="review-comment-body">{renderInlineMarkdown(metadata.text)}</ClampedCommentBody>
       )}
       {metadata.reasoning && (
         <div className="review-comment-reasoning text-xs text-muted-foreground/60 leading-relaxed mt-1.5">

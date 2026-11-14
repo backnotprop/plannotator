@@ -11,6 +11,7 @@ import { CompactFileActions } from './CompactFileActions';
 import type { DiffFileStatus } from '../types';
 import { FileKindIcon } from '@plannotator/guide-viewer/FileKindIcon';
 import { fileStatusLetter } from '@plannotator/ui/utils/fileStatusLetter';
+import { formatCount } from '@plannotator/ui/utils/countFormat';
 
 interface FileHeaderProps {
   /** Read-only host: no open-in affordance (it probes the review server). */
@@ -115,6 +116,8 @@ function countChanges(patch: string): { additions: number; deletions: number } {
 }
 
 /** Sticky file header with file path, Viewed toggle, Git Add, and Copy Diff button */
+const NARROW_ACTIONS_WIDTH = 360;
+
 export const FileHeader: React.FC<FileHeaderProps> = ({
   filePath,
   patch,
@@ -156,6 +159,7 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
   const { directory, name } = splitFilePath(filePath);
   const paneTabs = usePaneTabsInHeader();
   const isVeryTight = headerWidth > 0 && headerWidth < 480;
+  const menuActions = isCompactTouchLayout || (!readOnly && headerWidth > 0 && headerWidth < NARROW_ACTIONS_WIDTH);
   const narrow = headerWidth > 0 && headerWidth < 560;
 
   useEffect(() => {
@@ -196,10 +200,10 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
           )}
         </div>
       ) : (
-        <div className="min-w-0 flex flex-1 items-center" onClick={onCollapseToggle} style={onCollapseToggle ? { cursor: 'pointer' } : undefined}>
+        <div className="min-w-0 flex flex-1 items-center overflow-hidden" onClick={onCollapseToggle} style={onCollapseToggle ? { cursor: 'pointer' } : undefined}>
           {collapseToggle}
           <span
-            className={`min-w-0 flex items-center text-[13px] font-medium leading-normal whitespace-nowrap ${isCompactTouchLayout ? 'flex-1' : ''}`}
+            className={`min-w-0 flex items-center text-[13px] font-medium leading-normal whitespace-nowrap [font-variant-ligatures:no-contextual] ${isCompactTouchLayout ? 'flex-1' : ''}`}
             title={status === 'renamed' && oldPath ? `${oldPath} → ${filePath}` : filePath}
           >
             {/* Rename: dimmed old path → new path (diffshub treatment). Dropped
@@ -243,9 +247,9 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
           </span>
           {isTest && <FileKindIcon kind="test" size={13} className="ml-1.5 flex-none text-muted-foreground" title="Test file" />}
           {(additions > 0 || deletions > 0 || (status && status !== 'modified') || isGenerated) && (
-            <span className="flex-none ml-3 flex items-center gap-1.5 text-[12px] leading-none tabular-nums">
-              {additions > 0 && <span className="text-success">+{additions}</span>}
-              {deletions > 0 && <span className="text-destructive">−{deletions}</span>}
+            <span className="min-w-0 shrink-[1000] ml-3 flex h-4 flex-wrap items-center gap-x-1.5 overflow-hidden text-[12px] leading-4 tabular-nums" data-file-header-counts="">
+              {additions > 0 && <span className="text-success">+{formatCount(additions)}</span>}
+              {deletions > 0 && <span className="text-destructive">−{formatCount(deletions)}</span>}
               {status && <FileStatusLetter status={status} oldPath={oldPath} />}
               {isGenerated && (
                 <span
@@ -260,7 +264,7 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
           )}
         </div>
       )}
-      {!isCompactTouchLayout && <div className={`flex flex-shrink-0 items-center pl-2 gap-1`}>
+      {!menuActions && <div className={`flex flex-shrink-0 items-center pl-2 gap-1`}>
         {accessory}
         {renderMarkdownView?.({ iconOnly: isVeryTight, touch: false })}
         {showViewedControl && onToggleViewed && (
@@ -390,13 +394,13 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
           }
         />}
       </div>}
-      {isCompactTouchLayout && (readOnly ? renderMarkdownView?.({ iconOnly: false, touch: true }) : (
+      {menuActions && (readOnly ? renderMarkdownView?.({ iconOnly: false, touch: true }) : (
         <CompactFileActions
           filePath={filePath}
           patch={patch}
           canOpen={state?.canUseLiveWorkspaceActions !== false && !(state?.prMetadata && !state?.agentCwd) && status !== 'deleted'}
           base={state?.agentCwd ?? null}
-          markdownView={renderMarkdownView?.({ iconOnly: true, touch: true })}
+          markdownView={renderMarkdownView?.({ iconOnly: true, touch: isCompactTouchLayout })}
           viewSwitch={accessory}
           viewed={showViewedControl && onToggleViewed ? { isViewed, onToggle: onToggleViewed } : null}
           onComment={onFileComment ? () => headerRef.current && onFileComment(headerRef.current) : undefined}

@@ -217,7 +217,7 @@ const GeneralCommentComposer: React.FC<{
         aria-expanded={open}
         aria-haspopup="dialog"
         title="Add global comment"
-        className="inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+        className="inline-flex items-center whitespace-nowrap rounded px-1.5 py-0.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
       >
         + Global comment
       </button>
@@ -641,7 +641,7 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
       aria-label={presentation === 'overlay' ? 'Review sidebar' : undefined}
       className={presentation === 'overlay'
         ? 'absolute inset-0 z-40 flex min-w-0 flex-col bg-background'
-        : 'border-l border-border bg-card/30 flex flex-col flex-shrink-0'
+        : 'border-l border-border bg-card/30 flex flex-col flex-shrink-0 min-w-0 overflow-hidden'
       }
       style={presentation === 'overlay' ? undefined : { width: width ?? 288 }}
     >
@@ -712,7 +712,7 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
                           anchored composer popover is never painted under a
                           later section's header. */}
                       <div className="sticky top-0 z-[25] bg-background/95 backdrop-blur-sm px-2 py-1 flex items-center justify-between gap-2">
-                        <span className="text-xs font-medium text-muted-foreground">Global comments</span>
+                        <span className="flex-none whitespace-nowrap text-xs font-medium text-muted-foreground">Global comments</span>
                         {onAddGeneralComment && (
                           <GeneralCommentComposer
                             onAdd={onAddGeneralComment}

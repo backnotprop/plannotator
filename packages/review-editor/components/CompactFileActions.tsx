@@ -35,7 +35,7 @@ export const CompactFileActions: React.FC<CompactFileActionsProps> = ({ filePath
           data-file-header-viewed=""
           data-pn-touch-target=""
           data-pn-touch-target-icon=""
-          className={`flex items-center justify-center rounded ${viewed.isViewed ? 'text-foreground' : 'text-muted-foreground'}`}
+          className={`flex h-7 w-7 items-center justify-center rounded hover:bg-muted ${viewed.isViewed ? 'text-foreground' : 'text-muted-foreground'}`}
         >
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
             {viewed.isViewed
