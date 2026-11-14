@@ -15,11 +15,9 @@ const slotName = (slot: Slot) => (slot === 'shared' ? 'All agents' : AGENT_NAME[
 
 export function AgentRulesSection({
   rules,
-  editable,
   onPrompts,
 }: {
   rules: Rules;
-  editable: boolean;
   onPrompts?: (next: InboxPromptsSettings) => void;
 }) {
   const id = useId();
@@ -27,8 +25,8 @@ export function AgentRulesSection({
   const textOf = (slot: Slot) => (slot === 'shared' ? rules.shared : rules.runtimes[slot]);
   const set = SLOTS.filter((slot) => textOf(slot) !== null);
   useEffect(() => {
-    if (editable && takeRulesEditorWish()) setEditing('shared');
-  }, [editable]);
+    if (takeRulesEditorWish()) setEditing('shared');
+  }, []);
 
   return (
     <section className="ib-sgroup ib-sgroup-first" aria-labelledby={`${id}-h`} data-rules-section="">
@@ -43,11 +41,9 @@ export function AgentRulesSection({
             <span className="ar-t">
               <span className="ar-l">No rules yet</span>
             </span>
-            {editable && (
-              <button type="button" className="ib-btn ib-sm ib-pri" onClick={() => setEditing('shared')} data-rules-add="">
-                Add rules
-              </button>
-            )}
+            <button type="button" className="ib-btn ib-sm ib-pri" onClick={() => setEditing('shared')} data-rules-add="">
+              Add rules
+            </button>
           </div>
         ) : (
           set.map((slot) => (
@@ -55,11 +51,9 @@ export function AgentRulesSection({
               <div className="pm-head">
                 {slot === 'shared' ? <span className="ib-chip pm-custom">All agents</span> : <span className="ar-who"><HostMark host={slot} />{AGENT_NAME[slot]}</span>}
                 <span className="pm-sp" />
-                {editable && (
-                  <button type="button" className="ib-btn ib-sm" onClick={() => setEditing(slot)} data-rules-edit={slot} aria-label={`Edit the rules for ${slotName(slot).toLowerCase()}`}>
-                    Edit
-                  </button>
-                )}
+                <button type="button" className="ib-btn ib-sm" onClick={() => setEditing(slot)} data-rules-edit={slot} aria-label={`Edit the rules for ${slotName(slot).toLowerCase()}`}>
+                  Edit
+                </button>
               </div>
               <p className="pm-text" data-rules-text={slot}>
                 {textOf(slot)}

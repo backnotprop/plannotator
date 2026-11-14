@@ -1836,6 +1836,161 @@ describe("a star or Priority on a linked machine's thread lives on that machine 
       }
     }
   });
+  test("tagged from A by name, B makes the tag and one tag of that name holds both machines' threads; out, rename and B away the same way", async () => {
+    const dataA = scratch("plannotator-tags-linked-a-");
+    const dataB = scratch("plannotator-tags-linked-b-");
+    const a = await start(dataA);
+    let b = await start(dataB);
+    let client: Client | null = null;
+    try {
+      const offered = (await (await fetch(`${at(b.port)}/api/inbox/machines/offer`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).json()) as Json;
+      const linked = await fetch(`${at(a.port)}/api/inbox/machines/link`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ link: offered.link, address: at(b.port), back: at(a.port) }) });
+      expect(linked.status).toBe(201);
+      const bId = (JSON.parse(readFileSync(join(dataA, "inbox", "machines.json"), "utf8")) as Json).links[0].id as string;
+      client = new Client({ name: "inbox-machines-tags", version: "1.0.0" });
+      await client.connect(new StreamableHTTPClientTransport(new URL(`${at(b.port)}/mcp`)));
+      const project = scratch("plannotator-tags-linked-project-");
+      const send = async (body: string) => ((await client!.callTool({ name: "send_message", arguments: { project_path: project, agent_session: "ses_b", body } })) as { structuredContent: { thread_id: string } }).structuredContent.thread_id;
+      const one = await send("First news");
+      const two = await send("Second news");
+      await waitFor("B's threads on A", async () => JSON.stringify((await list(a.port)).sections).includes(two));
+      const view = async () => (((await (await fetch(`${at(a.port)}/api/inbox/machines`)).json()) as Json).machines as Json[]).find((m) => m.id === bId)!;
+      expect((await view()).marks).toContain("tags");
+      const aId = (await list(a.port)).self as string;
+      const tagsOf = async (port: number, id: string) => ((await list(port)).sections as Json[]).flatMap((s) => s.threads as Json[]).find((row) => row.thread_id === id)?.tags ?? [];
+      const live = (store: typeof a.store) => store.initiatives().filter((tag) => tag.deleted_at === null);
+
+      // A's own Release, with A's own thread in it.
+      const release = a.store.createInitiative({ name: "Release", by: { kind: "person" } });
+      const ownProject = a.store.ensureProject({ name: "app", root: scratch("plannotator-tags-linked-own-") });
+      const mine = a.store.sendMessage({ project_id: ownProject.id, author: { kind: "agent" as const, host: "claude-code", session: "ses_a", name: null }, body: "Own news" }).message.thread_id;
+      expect((await post(a.port, `/api/inbox/threads/${mine}/tags`, { tag: release.id, on: true })).status).toBe(200);
+
+      // Tagged from A by name: B holds no Release, so B makes it (the person's) and the thread is in it there only.
+      expect((await forward(a.port, bId, `threads/${one}/tags`, { name: "Release", on: true })).status).toBe(200);
+      const bRelease = live(b.store).find((tag) => tag.name === "Release")!;
+      expect(bRelease.created_by).toEqual({ kind: "person" });
+      expect(b.store.threadTags(one)).toEqual([bRelease.id]);
+      expect(live(a.store).map((tag) => tag.id)).toEqual([release.id]);
+      // The same name, cased and spaced otherwise, is the same tag there: nothing more is made.
+      expect((await forward(a.port, bId, `threads/${two}/tags`, { name: " RELEASE ", on: true })).status).toBe(200);
+      expect(live(b.store).map((tag) => tag.id)).toEqual([bRelease.id]);
+
+      // A's merged list: one Release, its id on each machine; both machines' threads are in it.
+      expect(((await list(a.port)).tags as Json[]).map((tag) => [tag.id, tag.name, tag.machines])).toEqual([[release.id, "Release", { [aId]: release.id, [bId]: bRelease.id }]]);
+      for (const id of [mine, one, two]) expect(await tagsOf(a.port, id)).toEqual([release.id]);
+      // B's own window: the same tag, B's id standing for it, holding the same threads.
+      await waitFor("A's thread in B's Release", async () => JSON.stringify(await tagsOf(b.port, mine)) === JSON.stringify([bRelease.id]));
+      expect(await tagsOf(b.port, one)).toEqual([bRelease.id]);
+      expect(((await list(b.port)).tags as Json[]).map((tag) => tag.id)).toEqual([bRelease.id]);
+
+      // Out from A, by name, on B.
+      expect((await forward(a.port, bId, `threads/${two}/tags`, { name: "Release", on: false })).status).toBe(200);
+      expect(b.store.threadTags(two)).toEqual([]);
+      expect(await tagsOf(a.port, two)).toEqual([]);
+      // Out in B's own window: A's list follows (`event: tags` on B's stream), with no write of A's.
+      expect((await post(b.port, `/api/inbox/threads/${one}/tags`, { tag: bRelease.id, on: false })).status).toBe(200);
+      await waitFor("the tag gone on A", async () => (await tagsOf(a.port, one)).length === 0);
+
+      // Renamed from A's sidebar: this Inbox's tag, then B's by its id there.
+      expect((await post(a.port, `/api/inbox/initiatives/${release.id}`, { op: "rename", name: "Ship" })).status).toBe(200);
+      expect((await forward(a.port, bId, `initiatives/${bRelease.id}`, { op: "rename", name: "Ship" })).status).toBe(200);
+      expect(b.store.initiative(bRelease.id)!.name).toBe("Ship");
+      expect(((await list(a.port)).tags as Json[]).map((tag) => [tag.name, tag.machines])).toEqual([["Ship", { [aId]: release.id, [bId]: bRelease.id }]]);
+
+      // B away: a tag waits (202, nothing made here) and lands, made there by name.
+      await client.close();
+      client = null;
+      b.stop();
+      await waitFor("B offline on A", async () => (await view()).state === "offline", 30_000);
+      const held = await forward(a.port, bId, `threads/${two}/tags`, { name: "Billing", on: true });
+      expect(held.status).toBe(202);
+      expect(live(a.store).some((tag) => tag.name === "Billing")).toBe(false);
+      b = await start(dataB);
+      await waitFor("the held tag on B", () => live(b.store).some((tag) => tag.name === "Billing" && b.store.threadTags(two).includes(tag.id)), 45_000);
+      await waitFor("Billing on A, B's id standing for it", async () => ((await list(a.port)).tags as Json[]).some((tag) => tag.name === "Billing" && JSON.stringify(tag.machines) === JSON.stringify({ [bId]: tag.id })), 15_000);
+      expect(live(a.store).some((tag) => tag.name === "Billing")).toBe(false);
+    } finally {
+      await client?.close().catch(() => {});
+      a.stop();
+      b.stop();
+    }
+  }, 120_000);
+
+  test("a tag made in A's Board Tags dialog, with no thread in it, is listed on B by name; renamed, deleted and brought back from B, on A", async () => {
+    const dataA = scratch("plannotator-tags-board-a-");
+    const dataB = scratch("plannotator-tags-board-b-");
+    const a = await start(dataA);
+    const b = await start(dataB);
+    try {
+      const offered = (await (await fetch(`${at(b.port)}/api/inbox/machines/offer`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).json()) as Json;
+      const linked = await fetch(`${at(a.port)}/api/inbox/machines/link`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ link: offered.link, address: at(b.port), back: at(a.port) }) });
+      expect(linked.status).toBe(201);
+      const aId = (await list(a.port)).self as string;
+      const tagsOn = async (port: number) => ((await list(port)).tags as Json[]).map((tag) => [tag.name, tag.machines]);
+      const made = await post(a.port, "/api/inbox/initiatives", { name: "Roadmap" });
+      expect(made.status).toBe(200);
+      const roadmap = ((await made.json()) as Json).initiative as Json;
+      await waitFor("A's Roadmap on B", async () => JSON.stringify(await tagsOn(b.port)) === JSON.stringify([["Roadmap", { [aId]: roadmap.id }]]), 30_000);
+      expect(b.store.initiatives()).toEqual([]);
+
+      expect((await forward(b.port, aId, `initiatives/${roadmap.id}`, { op: "rename", name: "Plan" })).status).toBe(200);
+      expect(a.store.initiative(roadmap.id as string)!.name).toBe("Plan");
+      await waitFor("the rename on B", async () => JSON.stringify(await tagsOn(b.port)) === JSON.stringify([["Plan", { [aId]: roadmap.id }]]), 30_000);
+
+      expect((await forward(b.port, aId, `initiatives/${roadmap.id}`, { op: "delete" })).status).toBe(200);
+      expect(a.store.initiative(roadmap.id as string)!.deleted_at).not.toBeNull();
+      await waitFor("gone on B", async () => (await tagsOn(b.port)).length === 0, 30_000);
+      expect((await forward(b.port, aId, `initiatives/${roadmap.id}`, { op: "restore" })).status).toBe(200);
+      await waitFor("back on B", async () => JSON.stringify(await tagsOn(b.port)) === JSON.stringify([["Plan", { [aId]: roadmap.id }]]), 30_000);
+    } finally {
+      a.stop();
+      b.stop();
+    }
+  }, 120_000);
+
+  test("an older machine (its list names no `tags` mark): its rows are in no tag here and its tags are not listed; one that names it joins by name", async () => {
+    const thread = "msg_01K0000000000000000000000T";
+    const farTag = { id: "ini_01K0000000000000000000000F", name: "release", created_at: "2026-11-12T09:00:00.000Z", created_by: { kind: "person" }, updated_at: "2026-11-12T09:00:00.000Z", deleted_at: null };
+    for (const marks of [["star", "priority"], ["star", "priority", "tags"]]) {
+      const id = "ibx_01K0000000000000000000000T";
+      const door = Bun.serve({
+        hostname: "127.0.0.1",
+        port: 0,
+        idleTimeout: 0,
+        fetch(req) {
+          const route = new URL(req.url).pathname.replace("/api/inbox/device/", "");
+          if (route === "health") return Response.json({ ok: true, inbox_id: id, machine_links: 1, version: "0.28.62" });
+          if (route === "events") return new Response(new ReadableStream({ start: (c) => c.enqueue(new TextEncoder().encode(`event: hello\ndata: {"cursor":0}\n\n`)) }), { headers: { "Content-Type": "text/event-stream" } });
+          const row = { thread_id: thread, project: { id: "prj_x" }, resolved_at: null, section: "new", last_at: "2026-11-12T09:00:00.000Z", tags: [farTag.id] };
+          if (route === "threads") return Response.json({ cursor: 0, sections: [{ id: "new", threads: [row] }], projects: [], pins: [], marks, tags: [farTag] });
+          return Response.json({ code: "device_route_not_found", error: "Not a phone route." }, { status: 404 });
+        },
+      });
+      const dataDir = scratch("plannotator-tags-linked-older-");
+      mkdirSync(join(dataDir, "inbox"), { recursive: true });
+      writeFileSync(join(dataDir, "inbox", "machines.json"), JSON.stringify({ v: 1, self: { id: "ibx_01K00000000000000000000009" }, links: [{ id, name: "Mini", token: "tok_0", transport: { kind: "tailnet", url: at(door.port as number) }, device_id: null, linked_at: "2026-10-30T00:00:00Z" }] }), { mode: 0o600 });
+      const inbox = await start(dataDir);
+      try {
+        const own = inbox.store.createInitiative({ name: "Release", by: { kind: "person" } });
+        const view = async () => (((await (await fetch(`${at(inbox.port)}/api/inbox/machines`)).json()) as Json).machines as Json[]).find((m) => m.id === id);
+        await waitFor("that machine's list", async () => typeof (await view())?.list_cursor === "number");
+        const model = await list(inbox.port);
+        const row = (model.sections as Json[]).flatMap((s) => s.threads as Json[]).find((r) => r.thread_id === thread)!;
+        const self = model.self as string;
+        if (marks.includes("tags")) {
+          expect(row.tags).toEqual([own.id]);
+          expect((model.tags as Json[]).map((tag) => [tag.id, tag.machines])).toEqual([[own.id, { [self]: own.id, [id]: farTag.id }]]);
+        } else {
+          expect(row.tags).toBeUndefined();
+          expect((model.tags as Json[]).map((tag) => [tag.id, tag.machines])).toEqual([[own.id, { [self]: own.id }]]);
+        }
+      } finally {
+        inbox.stop();
+        door.stop(true);
+      }
+    }
+  });
 });
 
 describe("an agent's face and given name on a linked machine live on that machine (approval inbox-linked-marks)", () => {
@@ -1987,10 +2142,11 @@ describe("an agent's face and given name on a linked machine live on that machin
   });
 });
 
-describe("a tailnet guest through the forward: it answers, it never starts an agent there", () => {
+describe("linked machines through the forward, over the tailnet", () => {
   const MAGIC = "laptop.tail0000.ts.net";
   const OWNER = "owner@example.com";
-  const GUEST = "guest@example.com";
+  /** The login a tagged machine (no Tailscale owner) names as its owner in `inboxTailscaleAllow`. */
+  const ALLOWED = "allowed@example.com";
   const roots: string[] = [];
   const restore: (() => void)[] = [];
   afterAll(() => {
@@ -2031,16 +2187,17 @@ describe("a tailnet guest through the forward: it answers, it never starts an ag
 
   /**
    * A (the MacBook, `tagged`: a tagged Tailscale device with no owner) linked both ways to B (the Mini) on loopback,
-   * A's window published on the tailnet with GUEST in `inboxTailscaleAllow`, and an agent's question waiting on B.
+   * A's window published on the tailnet (ALLOWED in `inboxTailscaleAllow`, which names the owner only on a tagged
+   * machine), and an agent's question waiting on B.
    */
   async function linkedPair(prefix: string, tagged: boolean, far: Partial<Parameters<typeof startInboxServer>[0]> = {}) {
     const root = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
     roots.push(root);
     const dataA = join(root, "macbook");
     const dataB = join(root, "mini");
-    // config.json (read from PLANNOTATOR_DATA_DIR) lets GUEST onto A's window over the tailnet.
+    // config.json (read from PLANNOTATOR_DATA_DIR): on a tagged A, ALLOWED is its owner; on an owned A it is ignored.
     mkdirSync(dataA, { recursive: true });
-    writeFileSync(join(dataA, "config.json"), JSON.stringify({ inboxTailscaleAllow: [GUEST] }));
+    writeFileSync(join(dataA, "config.json"), JSON.stringify({ inboxTailscaleAllow: [ALLOWED] }));
     const previous = process.env.PLANNOTATOR_DATA_DIR;
     process.env.PLANNOTATOR_DATA_DIR = dataA;
     restore.push(() => {
@@ -2115,16 +2272,13 @@ describe("a tailnet guest through the forward: it answers, it never starts an ag
 
   const delivered = async (answer: Response) => [answer.status, answer.headers.get("x-plannotator-outbox")];
 
-  test("Update on a linked machine: the owner from any path, never a guest, another site, the generic forward or the outbox", async () => {
+  test("Update on a linked machine: the owner from any path, never another site, the generic forward or the outbox", async () => {
     const w = await linkedPair("plannotator-machines-update-gates-", false);
     try {
       const { a, b, mini } = w;
       const route = `/api/inbox/machines/${mini}/update`;
-      // A tailnet guest: refused, read and write.
-      expect((await w.throughServe(GUEST, route)).status).toBe(403);
-      const guest = await w.throughServe(GUEST, route, {});
-      expect(guest.status).toBe(403);
-      expect(((await guest.json()) as Json).code).toBe("owner_only");
+      // Another account over the tailnet (the allowlist names it, ignored on an owned machine): refused at the listener.
+      expect((await w.throughServe(ALLOWED, route, {})).status).toBe(403);
       // The owner over the tailnet: it reaches that machine (a dev build here, so it answers that and runs nothing).
       const owner = await w.throughServe(OWNER, route, {});
       expect(owner.status).toBe(409);
@@ -2357,7 +2511,7 @@ describe("a tailnet guest through the forward: it answers, it never starts an ag
   test("where Tailscale names no owner (a tagged machine), a login let on is treated as you: Update is never refused", async () => {
     const w = await linkedPair("plannotator-machines-update-tagged-", true);
     try {
-      const answer = await w.throughServe(GUEST, `/api/inbox/machines/${w.mini}/update`, {});
+      const answer = await w.throughServe(ALLOWED, `/api/inbox/machines/${w.mini}/update`, {});
       expect(answer.status).toBe(409);
       expect(((await answer.json()) as Json).code).toBe("update_dev_build");
     } finally {
@@ -2391,23 +2545,13 @@ describe("a tailnet guest through the forward: it answers, it never starts an ag
     }
   });
 
-  test("a tailnet guest of this machine answers a linked machine's thread as here, but never starts an agent there; the owner writes from every path: this window, another device, a plain local call", async () => {
+  test("the owner writes to a linked machine's thread from every path: this window, another device, a plain local call", async () => {
     const w = await linkedPair("plannotator-machines-forward-owner-", false);
     try {
       const { a, mini, asked } = w;
-      // Reads through the forward stay as they are, for the guest too.
-      const read = await w.throughServe(GUEST, `/api/inbox/m/${mini}/threads/${asked.thread_id}`);
+      // Reads through the forward stay as they are.
+      const read = await w.throughServe(OWNER, `/api/inbox/m/${mini}/threads/${asked.thread_id}`);
       expect(read.status).toBe(200);
-      const cursor = ((await read.json()) as Json).cursor as number;
-
-      // The guest, from A's own page (owner ruling 2026-11-11): its reply and its file reach B as the owner's do.
-      const guestReply = await w.throughServe(GUEST, `/api/inbox/m/${mini}/messages/${asked.message_id}/reply`, { idempotency_key: "guest-reply", words: "Guest says retry.", seen_through_seq: cursor });
-      expect(await delivered(guestReply)).toEqual([200, "delivered"]);
-      expect((await w.uploadThroughServe(GUEST, "guest-up")).status).toBe(200);
-      // Starting an agent on B stays the owner's, as it is on A: refused, and nothing is held for B.
-      const start = await w.throughServe(GUEST, `/api/inbox/m/${mini}/messages`, { idempotency_key: "guest-start", body: "Fix it.", to: { launch: { agent: "claude-code", project_id: "prj_x" } } });
-      expect([start.status, ((await start.json()) as Json).code]).toEqual([403, "owner_only"]);
-      expect(await w.personOnB()).toHaveLength(1);
 
       // The owner keeps everything through the forward, each answer delivered to B once.
       // The owner's window on this machine.
@@ -2440,23 +2584,19 @@ describe("a tailnet guest through the forward: it answers, it never starts an ag
       });
       expect(bareUpload.status).toBe(200);
       const landed = (await w.personOnB()).map((m) => m.body as string);
-      expect(landed).toHaveLength(4);
-      expect(landed[0]).toStartWith("Guest says retry.");
-      expect(landed[1]).toStartWith("From the MacBook's window.");
-      expect(landed[2]).toStartWith("From the owner's phone browser.");
-      expect(landed[3]).toStartWith("From a script on the MacBook.");
+      expect(landed).toHaveLength(3);
+      expect(landed[0]).toStartWith("From the MacBook's window.");
+      expect(landed[1]).toStartWith("From the owner's phone browser.");
+      expect(landed[2]).toStartWith("From a script on the MacBook.");
     } finally {
       await w.stop();
     }
   }, 60_000);
 
-  test("a tailnet guest cancels what waits for another machine as the owner does, but never lists its folders", async () => {
+  test("the owner's phone cancels what waits for another machine", async () => {
     const w = await linkedPair("plannotator-machines-forward-cancel-", false);
     try {
       const { a, b, mini, asked } = w;
-      // Another machine's folder names are the owner's window's: a guest gets none.
-      const folders = await w.throughServe(GUEST, `/api/inbox/m/${mini}/launch/folders?path=~`);
-      expect([folders.status, ((await folders.json()) as Json).code]).toEqual([403, "owner_only"]);
       b.stop();
       await waitFor("A sees B asleep", async () => {
         const view = (await (await fetch(`http://127.0.0.1:${a.port}/api/inbox/machines`)).json()) as Json;
@@ -2466,10 +2606,10 @@ describe("a tailnet guest through the forward: it answers, it never starts an ag
       expect(held.status).toBe(202);
       const waiting = (await (await fetch(`http://127.0.0.1:${a.port}/api/inbox/outbox`)).json()) as Json;
       expect((waiting.waiting as Json[]).map((e) => e.key)).toEqual(["owner-held-read"]);
-      // A guest's page over the tailnet: Cancel works there too.
-      const guest = await w.throughServe(GUEST, "/api/inbox/outbox/owner-held-read/cancel", {});
-      expect(guest.status).toBe(200);
-      expect(((await guest.json()) as Json).entry.state).toBe("cancelled");
+      // The owner's page over the tailnet: Cancel works there too.
+      const cancelled = await w.throughServe(OWNER, "/api/inbox/outbox/owner-held-read/cancel", {});
+      expect(cancelled.status).toBe(200);
+      expect(((await cancelled.json()) as Json).entry.state).toBe("cancelled");
     } finally {
       await w.stop();
     }
@@ -2479,22 +2619,22 @@ describe("a tailnet guest through the forward: it answers, it never starts an ag
     const w = await linkedPair("plannotator-machines-forward-tagged-", true);
     try {
       const { mini, asked } = w;
-      expect(await delivered(await w.throughServe(GUEST, `/api/inbox/m/${mini}/messages/${asked.message_id}/picks`, await w.pickBody("tagged-pick", "Alert")))).toEqual([
+      expect(await delivered(await w.throughServe(ALLOWED, `/api/inbox/m/${mini}/messages/${asked.message_id}/picks`, await w.pickBody("tagged-pick", "Alert")))).toEqual([
         200,
         "delivered",
       ]);
       expect(((await w.onB()).messages[0].questions as Json[])[0]!.state).toBe("picked");
-      const reply = await w.throughServe(GUEST, `/api/inbox/m/${mini}/messages/${asked.message_id}/reply`, {
+      const reply = await w.throughServe(ALLOWED, `/api/inbox/m/${mini}/messages/${asked.message_id}/reply`, {
         idempotency_key: "tagged-reply",
         words: "From the tagged machine's only user.",
         seen_through_seq: (await w.thread()).cursor,
       });
       expect(await delivered(reply)).toEqual([200, "delivered"]);
-      expect(await delivered(await w.throughServe(GUEST, `/api/inbox/m/${mini}/threads/${asked.thread_id}/snooze`, { idempotency_key: "tagged-snooze", until: tomorrow() }))).toEqual([
+      expect(await delivered(await w.throughServe(ALLOWED, `/api/inbox/m/${mini}/threads/${asked.thread_id}/snooze`, { idempotency_key: "tagged-snooze", until: tomorrow() }))).toEqual([
         200,
         "delivered",
       ]);
-      expect((await w.uploadThroughServe(GUEST, "tagged-up")).status).toBe(200);
+      expect((await w.uploadThroughServe(ALLOWED, "tagged-up")).status).toBe(200);
       const landed = await w.personOnB();
       expect(landed).toHaveLength(1);
       expect(landed[0]!.body).toStartWith("From the tagged machine's only user.");
