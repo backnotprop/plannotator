@@ -115,7 +115,7 @@ During normal plan review, an Archive sidebar tab provides the same browsing via
 | `/api/external-annotations` | DELETE | Remove by `?id=`, `?source=`, or clear all |
 | `/api/host/status` | GET | Host-only (see "Host session control" below): `{ kind, documents, unsentAnnotations, decided }`; counts only, never comment text |
 | `/api/host/close` | POST | Host-only: the reviewer's Close marked `closedBy: "agent"`, KEEPING the draft; tells open tabs over the external-annotation SSE (`session-closed`) and answers `{ unsentAnnotations }`; `409 { code: "already_decided" }` once decided |
-| `/api/agents/capabilities` | GET | Check available agent providers (claude, codex, tour, guide, cursor, opencode, pi, copilot) |
+| `/api/agents/capabilities` | GET | Check available agent providers (claude, codex, guide, cursor, opencode, pi, copilot) |
 | `/api/agents/review-profiles` | GET | List launchable review profiles (enabled skills + builtin default) |
 | `/api/agents/skills` | GET | List all discovered skills for the add-a-review picker (each flagged `enabled`) |
 | `/api/agents/review-skills` | POST | Enable a skill as a review (body: `{ name }`); writes `review-skills.json` |
@@ -128,8 +128,6 @@ During normal plan review, an Archive sidebar tab provides the same browsing via
 | `/api/pr-diff-scope` | POST | Switch between layer and full-stack diff scope. Response includes `semanticDiff?`. |
 | `/api/pr-list` | GET | List PRs for the current repo (cached 30s) |
 | `/api/pr-switch` | POST | Switch to a different PR in-place (body: `{ url }`). Response includes `semanticDiff?`. |
-| `/api/tour/:jobId` | GET | Fetch Code Tour result (greeting, stops, checklist) for a completed tour job |
-| `/api/tour/:jobId/checklist` | PUT | Persist checklist item state for a Code Tour |
 | `/api/guide/:jobId` | GET | Fetch Guided Review result (ordered sections with overviews + file refs) for a completed guide job, or a persisted guide via the `saved:{id}` pseudo job id |
 | `/api/guide/:jobId/reviewed` | PUT | Persist per-section reviewed state for a guide (live job ids write through to the job's autosaved file; `saved:{id}` ids persist directly) |
 | `/api/guide/:jobId/export` | GET | Download a guide as one portable HTML file (`Content-Disposition: attachment`): live job ids resolve from the session's launch-time review (store fallback), `saved:{id}` from the store. 404 when the guide's diff was not retained (pre-portable envelopes). No size gate. `/api/guide/:jobId/export-info` returns `{ bytes, filename, languages }` for the same resolution. |

@@ -32,7 +32,7 @@ for f in config-types storage-types workspace-status-types; do
 done
 
 # Everything else in the original flat list stays sourced from packages/shared.
-for f in child-env annotate-bundle plannotator-tool prompts review-core repo-files repo-files-node fuzzy-path review-image review-markdown-image review-progress generated-files feedback-archive cli-pagination jj-core gitbutler-core vcs-core review-args advertised-url review-open-state draft review-draft annotate-draft annotate-history annotate-live-version pr-types pr-context-live pr-artifact-document pr-marked pr-gitlab-versions pr-provider pr-stack pr-gitlab-stack pr-github pr-github-account pr-gitlab pr-gitlab-file-threads pr-bitbucket checklist integrations-common notion repo reference-common markdown-extensions resolve-file doc-resolve file-browser-watch-core file-browser-files annotate-reference-roots-node worktree worktree-pool html-to-markdown html-diff html-assets html-assets-node app-html packed-app diagram-engine-assets url-to-markdown tour annotate-args annotate-target at-reference review-workspace-node review-workspace pfm-reminder improvement-hooks code-nav repo-file data-dir semantic-diff-types semantic-diff call-flow-types call-flow-languages call-flow-pack-locks call-flow-install-lock call-flow call-flow-install single-flight source-save-node review-profiles guide-store guide-instructions-store commit-avatars commit-history port-range annotate-client-lease annotate-decision archive-mode tailscale live-proxy-port plannotator-server-marker plannotator-ports live-proxy-core live-probe live-proxy-node loopback-host tailnet-audience this-machine-reader reference-reader host-control request-origin request-host local-image update-check daily-ping star-ask browser-intent agent-program package-metadata package-changes-service ref-cards ref-cards-node; do
+for f in child-env annotate-bundle plannotator-tool prompts review-core repo-files repo-files-node fuzzy-path review-image review-markdown-image review-progress generated-files feedback-archive cli-pagination jj-core gitbutler-core vcs-core review-args advertised-url review-open-state draft review-draft annotate-draft annotate-history annotate-live-version pr-types pr-context-live pr-artifact-document pr-marked pr-gitlab-versions pr-provider pr-stack pr-gitlab-stack pr-github pr-github-account pr-gitlab pr-gitlab-file-threads pr-bitbucket checklist integrations-common notion repo reference-common markdown-extensions resolve-file doc-resolve file-browser-watch-core file-browser-files annotate-reference-roots-node worktree worktree-pool html-to-markdown html-diff html-assets html-assets-node app-html packed-app diagram-engine-assets url-to-markdown annotate-args annotate-target at-reference review-workspace-node review-workspace pfm-reminder improvement-hooks code-nav repo-file data-dir semantic-diff-types semantic-diff call-flow-types call-flow-languages call-flow-pack-locks call-flow-install-lock call-flow call-flow-install single-flight source-save-node review-profiles guide-store guide-instructions-store commit-avatars commit-history port-range annotate-client-lease annotate-decision archive-mode tailscale live-proxy-port plannotator-server-marker plannotator-ports live-proxy-core live-probe live-proxy-node loopback-host tailnet-audience this-machine-reader reference-reader host-control request-origin request-host local-image update-check daily-ping star-ask browser-intent agent-program package-metadata package-changes-service ref-cards ref-cards-node; do
   src="../../packages/shared/$f.ts"
   # Shared modules that import browser-safe siblings from @plannotator/core
   # (e.g. guide-store → core/guide-format): generated/ is flat and vendors the
@@ -101,24 +101,8 @@ for f in agent-review-message codex-review claude-review review-findings marker-
     > "generated/$f.ts"
 done
 
-# tour-review lives in packages/server/tour/ — parent-relative imports and the
-# shared tour types package each map to the flat generated/ layout.
-for f in tour-review; do
-  src="../../packages/server/tour/$f.ts"
-  printf '// @generated — DO NOT EDIT. Source: packages/server/tour/%s.ts\n' "$f" | cat - "$src" \
-    | sed 's|from "\.\./vcs"|from "./review-core.ts"|' \
-    | sed 's|from "\.\./pr"|from "./pr-provider.ts"|' \
-    | sed 's|from "\.\./agent-review-message"|from "./agent-review-message.ts"|' \
-    | sed 's|from "\.\./claude-review"|from "./claude-review.ts"|' \
-    | sed 's|from "\.\./config"|from "./config.ts"|' \
-    | sed 's|from "@plannotator/shared/tour"|from "./tour.ts"|' \
-    | sed 's|from "@plannotator/ai/providers/ask-ai-env"|from "./ai/providers/ask-ai-env.ts"|' \
-    | sed 's|from "@plannotator/shared/data-dir"|from "./data-dir.ts"|' \
-    > "generated/$f.ts"
-done
-
-# guide-review lives in packages/server/guide/ — same parent-relative and
-# shared-package import rewrites as tour-review above, plus its own
+# guide-review lives in packages/server/guide/ — parent-relative and
+# shared-package imports map to the flat generated/ layout, plus its own
 # marker-review import (guide's marker-engine support reuses marker-review.ts's
 # nonce/extraction primitives, same as review.ts does).
 for f in guide-review; do

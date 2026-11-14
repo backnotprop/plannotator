@@ -28,11 +28,10 @@ export { annotateSidebarShortcuts, useAnnotateSidebarShortcuts } from './plan-re
 
 // code-review scopes
 export { reviewAnnotationToolbarShortcuts, useReviewAnnotationToolbarShortcuts } from './code-review/annotationToolbar.shortcuts';
-export { reviewFileTreeShortcuts, useReviewFileTreeShortcuts } from './code-review/fileTree.shortcuts';
+export { reviewFileTreeShortcuts } from './code-review/fileTree.shortcuts';
 export { reviewPrCommentsShortcuts, useReviewPrCommentsShortcuts } from './code-review/prComments.shortcuts';
 export { reviewAllFilesDiffShortcuts, useReviewAllFilesDiffShortcuts } from './code-review/allFilesDiff.shortcuts';
 export { reviewAiShortcuts, useReviewAiShortcuts } from './code-review/ai.shortcuts';
 export { reviewSuggestionModalShortcuts, useReviewSuggestionModalShortcuts } from './code-review/suggestionModal.shortcuts';
-export { reviewTourDialogShortcuts, useReviewTourDialogShortcuts } from './code-review/tourDialog.shortcuts';
 export { reviewMarkdownPreviewShortcuts, useReviewMarkdownPreviewShortcuts } from './code-review/markdownPreview.shortcuts';
 export { reviewExplorerShortcuts, useReviewExplorerShortcuts } from './code-review/explorer.shortcuts';

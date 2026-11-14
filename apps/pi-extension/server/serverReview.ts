@@ -198,7 +198,6 @@ import {
 	parseClaudeStreamOutput,
 	transformClaudeFindings,
 } from "../generated/claude-review.ts";
-import { createTourSession, TOUR_EMPTY_OUTPUT_ERROR } from "../generated/tour-review.ts";
 import { createGuideSession, GUIDE_EMPTY_OUTPUT_ERROR } from "../generated/guide-review.ts";
 import { GuideShareError, shareGuide, unshareBeforeDelete, unshareGuide } from "../generated/guide-share.ts";
 import { createGuideStoreSession, SAVED_GUIDE_ID_PREFIX, updateGuideShare } from "../generated/guide-store.ts";
@@ -1153,7 +1152,6 @@ export async function startReviewServer(options: {
 			true,
 		);
 	}
-	const tour = createTourSession();
 	const guide = createGuideSession();
 	// Durable guide persistence (#1112): autosaves validated guides to
 	// ${PLANNOTATOR_DATA_DIR}/guides/{repo-key}/ and serves them back through
@@ -1451,18 +1449,6 @@ export async function startReviewServer(options: {
 							snapshotId: launchSnapshotId,
 						}),
 					};
-
-			if (provider === "tour") {
-				const built = await tour.buildCommand({
-					cwd,
-					patch: launchPatch,
-					diffType: launchDiffType as DiffType,
-					options: userMessageOptions,
-					prMetadata: launchPrMeta,
-					config,
-				});
-				return built ? { ...built, prUrl: launchPrUrl, diffScope: launchDiffScope, diffContext, reviewProfileId: reviewProfile.id, reviewProfileLabel: reviewProfile.label } : built;
-			}
 
 			if (provider === "guide") {
 				// Snapshot ALL launch-relevant mutable closure state into locals
@@ -1803,7 +1789,7 @@ export async function startReviewServer(options: {
 			// FAIL-CLOSED: marker output is prompt-enforced (no schema flag), so any
 			// missing/malformed/schema/transform/insertion failure must MUTATE the job
 			// to failed — NEVER throw (agent-jobs.ts swallows throws, silently leaving
-			// an exit-0 job marked done). Mirrors the Tour fail-closed pattern below.
+			// an exit-0 job marked done). Mirrors the guide fail-closed pattern below.
 			// Findings carry nullable file/line, classified into line/whole-file/
 			// general by transformMarkerFindings — nothing is dropped (same as Claude).
 			const markerEngine = MARKER_ENGINES[job.provider as MarkerEngineId];
@@ -1856,20 +1842,6 @@ export async function startReviewServer(options: {
 				return;
 			}
 
-			if (job.provider === "tour") {
-				const { summary } = await tour.onJobComplete({ job, meta });
-				if (summary) {
-					job.summary = summary;
-				} else {
-					// The process exited 0 but the model returned empty or malformed output
-					// and nothing was stored. Flip status so the client doesn't auto-open
-					// a successful-looking card that 404s on /api/tour/:id.
-					job.status = "failed";
-					job.error = TOUR_EMPTY_OUTPUT_ERROR;
-				}
-				return;
-			}
-
 			if (job.provider === "guide") {
 				// Validate refs against the LAUNCH-time changed-file set (snapshotted
 				// on the job at buildCommand time), not the current patch — the model
@@ -1892,7 +1864,7 @@ export async function startReviewServer(options: {
 					const validated = guide.getGuide(job.id);
 					if (validated) await guideStore.saveForJob(guideSaveJob(job), validated, job.guideContext, meta.launchReview);
 				} else {
-					// Same fail-closed precedent as Tour: an exit-0 job with empty,
+					// Fail closed: an exit-0 job with empty,
 					// malformed, or fully-invalidated output must not look like a
 					// successful card that 404s on /api/guide/:id.
 					job.status = "failed";
@@ -2296,32 +2268,6 @@ export async function startReviewServer(options: {
 
 		if (handleHostControl(req, res, url, { token: hostControlToken, getServerPort: () => boundPort, control: hostControl })) return;
 		if (await handleRefCards(req, res, url, refCards, serverSession)) return;
-
-		// API: Get tour result
-		if (url.pathname.match(/^\/api\/tour\/[^/]+$/) && req.method === "GET") {
-			const jobId = url.pathname.slice("/api/tour/".length);
-			const result = tour.getTour(jobId);
-			if (!result) {
-				json(res, { error: "Tour not found" }, 404);
-				return;
-			}
-			json(res, result);
-			return;
-		}
-
-		// API: Save tour checklist state
-		const checklistMatch = url.pathname.match(/^\/api\/tour\/([^/]+)\/checklist$/);
-		if (checklistMatch && req.method === "PUT") {
-			const jobId = checklistMatch[1];
-			try {
-				const body = await parseBody(req) as { checked: boolean[] };
-				if (Array.isArray(body.checked)) tour.saveChecklist(jobId, body.checked);
-				json(res, { ok: true });
-			} catch {
-				json(res, { error: "Invalid JSON" }, 400);
-			}
-			return;
-		}
 
 		// API: Get guide result — live job ids, or `saved:{id}` for a
 		// persisted guide loaded from the on-disk store (#1112).

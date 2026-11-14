@@ -25,22 +25,17 @@ export const DEFAULT_CLAUDE_EFFORT = 'high';
 export const DEFAULT_CODEX_MODEL = '';
 export const DEFAULT_CODEX_REASONING = 'high';
 export const DEFAULT_CODEX_FAST = false;
-export const DEFAULT_TOUR_CLAUDE_MODEL = 'sonnet';
-export const DEFAULT_TOUR_CLAUDE_EFFORT = 'medium';
-export const DEFAULT_TOUR_CODEX_MODEL = '';
-export const DEFAULT_TOUR_CODEX_REASONING = 'medium';
-export const DEFAULT_TOUR_CODEX_FAST = false;
 export const DEFAULT_GUIDE_CLAUDE_MODEL = 'sonnet';
-// Guide defaults run LOWER effort than tour/review on purpose: a guide is an
+// Guide defaults run LOWER effort than review on purpose: a guide is an
 // orientation doc the reviewer is actively waiting on, and newer models at
-// low effort chapter a diff well. Guide-scoped only — tour/review keep medium.
+// low effort chapter a diff well. Guide-scoped only.
 export const DEFAULT_GUIDE_CLAUDE_EFFORT = 'low';
 export const DEFAULT_GUIDE_CODEX_MODEL = '';
 /**
  * The Codex model a guide uses for a user who has not picked one (saved ''),
  * when the resolved catalog offers it; otherwise Codex's own marked default.
  * A resolution preference only, never written to the cookie, so a saved pick
- * always wins. Guide-scoped: review and tour keep Codex's default.
+ * always wins. Guide-scoped: review keeps Codex's default.
  */
 export const PREFERRED_GUIDE_CODEX_MODEL = 'gpt-6-luna';
 export const DEFAULT_GUIDE_CODEX_REASONING = 'low';
@@ -115,10 +110,8 @@ interface CopilotSection {
   model: string; // '' (default) or a model id from `copilot help config`
 }
 
-export type AgentMode = 'review' | 'tour' | 'guide';
+export type AgentMode = 'review' | 'guide';
 export type AgentEngine = 'claude' | 'codex';
-// Review-only engine union. Tour stays on the narrow AgentEngine so its
-// exhaustive Record<AgentEngine, ...> maps remain valid without change.
 export type ReviewEngine = AgentEngine | 'cursor' | 'opencode' | 'pi' | 'copilot';
 
 interface AgentSettingsState {
@@ -128,7 +121,6 @@ interface AgentSettingsState {
   // its own default (e.g. Claude runs one review, Cursor another) — mirrors how
   // `model` is per-engine. The current value is reviewProfileByEngine[reviewEngine].
   reviewProfileByEngine: Record<ReviewEngine, string>;
-  tourEngine: AgentEngine;
   // Guide runs on the wide union: marker engines (cursor/opencode) generate
   // guides via the marker-block JSON contract, same as marker review jobs.
   guideEngine: ReviewEngine;
@@ -138,8 +130,6 @@ interface AgentSettingsState {
   opencode: OpencodeSection;
   pi: PiSection;
   copilot: CopilotSection;
-  tourClaude: ClaudeSection;
-  tourCodex: CodexSection;
   guideClaude: ClaudeSection;
   guideCodex: CodexSection;
   // Guide-scoped marker-engine settings — kept separate from cursor/opencode/pi
@@ -166,7 +156,6 @@ const initialState: AgentSettingsState = {
     pi: BUILTIN_DEFAULT_PROFILE,
     copilot: BUILTIN_DEFAULT_PROFILE,
   },
-  tourEngine: 'claude',
   guideEngine: 'claude',
   claude: { model: DEFAULT_CLAUDE_MODEL, perModel: {} },
   codex: { model: DEFAULT_CODEX_MODEL, perModel: {} },
@@ -174,8 +163,6 @@ const initialState: AgentSettingsState = {
   opencode: { model: DEFAULT_OPENCODE_MODEL },
   pi: { model: DEFAULT_PI_MODEL, thinking: DEFAULT_PI_THINKING },
   copilot: { model: DEFAULT_COPILOT_MODEL },
-  tourClaude: { model: DEFAULT_TOUR_CLAUDE_MODEL, perModel: {} },
-  tourCodex: { model: DEFAULT_TOUR_CODEX_MODEL, perModel: {} },
   guideClaude: { model: DEFAULT_GUIDE_CLAUDE_MODEL, perModel: {} },
   guideCodex: { model: DEFAULT_GUIDE_CODEX_MODEL, perModel: {} },
   guideCursor: { model: DEFAULT_GUIDE_CURSOR_MODEL },
@@ -209,7 +196,7 @@ function parseReviewEngine(value: unknown): ReviewEngine {
 }
 
 function parseMode(value: unknown): AgentMode | undefined {
-  if (value === 'review' || value === 'tour' || value === 'guide') return value;
+  if (value === 'review' || value === 'guide') return value;
   return undefined;
 }
 
@@ -237,7 +224,6 @@ function readCookie(): AgentSettingsState {
       selectedMode: parseMode(parsed.selectedMode) ?? initialState.selectedMode,
       reviewEngine: parseReviewEngine(parsed.reviewEngine),
       reviewProfileByEngine: parseReviewProfileByEngine(parsed),
-      tourEngine: parseEngine(parsed.tourEngine),
       guideEngine: parseReviewEngine(parsed.guideEngine),
       claude: parseModelSection(parsed.claude, DEFAULT_CLAUDE_MODEL),
       codex: parseModelSection(parsed.codex, DEFAULT_CODEX_MODEL),
@@ -254,8 +240,6 @@ function readCookie(): AgentSettingsState {
       copilot: {
         model: typeof parsed.copilot?.model === 'string' ? parsed.copilot.model : DEFAULT_COPILOT_MODEL,
       },
-      tourClaude: parseModelSection(parsed.tourClaude, DEFAULT_TOUR_CLAUDE_MODEL),
-      tourCodex: parseModelSection(parsed.tourCodex, DEFAULT_TOUR_CODEX_MODEL),
       guideClaude: parseModelSection(parsed.guideClaude, DEFAULT_GUIDE_CLAUDE_MODEL),
       guideCodex: parseModelSection(parsed.guideCodex, DEFAULT_GUIDE_CODEX_MODEL),
       guideCursor: {
@@ -363,10 +347,6 @@ export function useAgentSettings(catalogs?: ModelCatalogs) {
     }));
   }, []);
 
-  const setTourEngine = useCallback((engine: AgentEngine) => {
-    setState((s) => ({ ...s, tourEngine: engine }));
-  }, []);
-
   const setGuideEngine = useCallback((engine: ReviewEngine) => {
     setState((s) => ({ ...s, guideEngine: engine }));
   }, []);
@@ -376,7 +356,7 @@ export function useAgentSettings(catalogs?: ModelCatalogs) {
   }, []);
 
   const patchClaude = useCallback(
-    (section: 'claude' | 'tourClaude' | 'guideClaude', patch: Partial<{ effort: string }>) => {
+    (section: 'claude' | 'guideClaude', patch: Partial<{ effort: string }>) => {
       setState((s) => {
         const cur = s[section];
         const prev = cur.perModel[cur.model] ?? { effort: '' };
@@ -430,7 +410,7 @@ export function useAgentSettings(catalogs?: ModelCatalogs) {
    */
   const patchCodex = useCallback(
     (
-      section: 'codex' | 'tourCodex' | 'guideCodex',
+      section: 'codex' | 'guideCodex',
       patch: Partial<{ reasoning: string; fast: boolean }>,
       defaults: { reasoning: string; fast: boolean },
       shown: { model: string; reasoning: string; fast: boolean },
@@ -463,11 +443,6 @@ export function useAgentSettings(catalogs?: ModelCatalogs) {
   const codexModel = effectiveModel(codexCatalog, state.codex.model, DEFAULT_CODEX_MODEL);
   const codexReasoning = effectiveEffort(codexCatalog, codexModel, state.codex.perModel[state.codex.model]?.reasoning ?? DEFAULT_CODEX_REASONING);
   const codexFast = effectiveFast(codexCatalog, state.codex.model, codexModel, state.codex.perModel[state.codex.model]?.fast ?? DEFAULT_CODEX_FAST);
-  const tourClaudeModel = effectiveModel(claudeCatalog, state.tourClaude.model, DEFAULT_TOUR_CLAUDE_MODEL);
-  const tourClaudeEffort = effectiveEffort(claudeCatalog, tourClaudeModel, state.tourClaude.perModel[state.tourClaude.model]?.effort ?? DEFAULT_TOUR_CLAUDE_EFFORT);
-  const tourCodexModel = effectiveModel(codexCatalog, state.tourCodex.model, DEFAULT_TOUR_CODEX_MODEL);
-  const tourCodexReasoning = effectiveEffort(codexCatalog, tourCodexModel, state.tourCodex.perModel[state.tourCodex.model]?.reasoning ?? DEFAULT_TOUR_CODEX_REASONING);
-  const tourCodexFast = effectiveFast(codexCatalog, state.tourCodex.model, tourCodexModel, state.tourCodex.perModel[state.tourCodex.model]?.fast ?? DEFAULT_TOUR_CODEX_FAST);
   const guideClaudeModel = effectiveModel(claudeCatalog, state.guideClaude.model, DEFAULT_GUIDE_CLAUDE_MODEL);
   const guideClaudeEffort = effectiveEffort(claudeCatalog, guideClaudeModel, state.guideClaude.perModel[state.guideClaude.model]?.effort ?? DEFAULT_GUIDE_CLAUDE_EFFORT);
   const guideCodexModel = effectiveModel(codexCatalog, state.guideCodex.model, PREFERRED_GUIDE_CODEX_MODEL);
@@ -484,30 +459,6 @@ export function useAgentSettings(catalogs?: ModelCatalogs) {
     (fast: boolean) =>
       patchCodex('codex', { fast }, { reasoning: DEFAULT_CODEX_REASONING, fast: DEFAULT_CODEX_FAST }, { model: codexModel, reasoning: codexReasoning, fast: codexFast }),
     [patchCodex, codexModel, codexReasoning, codexFast],
-  );
-
-  const setTourClaudeModel = useCallback((model: string) => {
-    setState((s) => ({ ...s, tourClaude: { ...s.tourClaude, model } }));
-  }, []);
-
-  const setTourClaudeEffort = useCallback(
-    (effort: string) => patchClaude('tourClaude', { effort }),
-    [patchClaude],
-  );
-
-  const setTourCodexModel = useCallback((model: string) => {
-    setState((s) => ({ ...s, tourCodex: { ...s.tourCodex, model } }));
-  }, []);
-
-  const setTourCodexReasoning = useCallback(
-    (reasoning: string) =>
-      patchCodex('tourCodex', { reasoning }, { reasoning: DEFAULT_TOUR_CODEX_REASONING, fast: DEFAULT_TOUR_CODEX_FAST }, { model: tourCodexModel, reasoning: tourCodexReasoning, fast: tourCodexFast }),
-    [patchCodex, tourCodexModel, tourCodexReasoning, tourCodexFast],
-  );
-  const setTourCodexFast = useCallback(
-    (fast: boolean) =>
-      patchCodex('tourCodex', { fast }, { reasoning: DEFAULT_TOUR_CODEX_REASONING, fast: DEFAULT_TOUR_CODEX_FAST }, { model: tourCodexModel, reasoning: tourCodexReasoning, fast: tourCodexFast }),
-    [patchCodex, tourCodexModel, tourCodexReasoning, tourCodexFast],
   );
 
   const setGuideClaudeModel = useCallback((model: string) => {
@@ -553,7 +504,6 @@ export function useAgentSettings(catalogs?: ModelCatalogs) {
     selectedMode: state.selectedMode,
     reviewEngine: state.reviewEngine,
     reviewProfileId: state.reviewProfileByEngine[state.reviewEngine] ?? BUILTIN_DEFAULT_PROFILE,
-    tourEngine: state.tourEngine,
     guideEngine: state.guideEngine,
     claudeModel,
     claudeEffort,
@@ -565,11 +515,6 @@ export function useAgentSettings(catalogs?: ModelCatalogs) {
     piModel: state.pi.model,
     piThinking: state.pi.thinking,
     copilotModel: state.copilot.model,
-    tourClaudeModel,
-    tourClaudeEffort,
-    tourCodexModel,
-    tourCodexReasoning,
-    tourCodexFast,
     guideClaudeModel,
     guideClaudeEffort,
     guideCodexModel,
@@ -582,7 +527,6 @@ export function useAgentSettings(catalogs?: ModelCatalogs) {
     setSelectedMode,
     setReviewEngine,
     setReviewProfileId,
-    setTourEngine,
     setGuideEngine,
     setClaudeModel,
     setClaudeEffort,
@@ -594,11 +538,6 @@ export function useAgentSettings(catalogs?: ModelCatalogs) {
     setPiModel,
     setPiThinking,
     setCopilotModel,
-    setTourClaudeModel,
-    setTourClaudeEffort,
-    setTourCodexModel,
-    setTourCodexReasoning,
-    setTourCodexFast,
     setGuideClaudeModel,
     setGuideClaudeEffort,
     setGuideCodexModel,

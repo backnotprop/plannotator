@@ -31,9 +31,8 @@ export const ReviewAgentJobDetailPanel: React.FC<IDockviewPanelProps> = (props) 
   );
 
   const terminal = job ? isTerminalStatus(job.status) : false;
-  const isTour = job?.provider === 'tour';
   const isGuide = job?.provider === 'guide';
-  const [activeTab, setActiveTab] = useState<DetailTab>(isTour || isGuide ? 'logs' : 'findings');
+  const [activeTab, setActiveTab] = useState<DetailTab>(isGuide ? 'logs' : 'findings');
 
   const { fullCommand, userMessage, systemPrompt } = useMemo(() => {
     const cmd = job?.command ?? [];
@@ -159,7 +158,7 @@ export const ReviewAgentJobDetailPanel: React.FC<IDockviewPanelProps> = (props) 
               <pre className="text-xs font-mono text-foreground/80 whitespace-pre-wrap break-words max-h-48 overflow-y-auto">{userMessage}</pre>
             </Disclosure>
             {systemPrompt && (
-              <Disclosure title={isTour ? "Tour Prompt" : isGuide ? "Guide Prompt" : "Review Prompt"} copyText={systemPrompt} nested>
+              <Disclosure title={isGuide ? "Guide Prompt" : "Review Prompt"} copyText={systemPrompt} nested>
                 <pre className="text-xs font-mono text-foreground/80 whitespace-pre-wrap break-words max-h-48 overflow-y-auto">{systemPrompt}</pre>
               </Disclosure>
             )}
@@ -169,12 +168,12 @@ export const ReviewAgentJobDetailPanel: React.FC<IDockviewPanelProps> = (props) 
 
       {/* ── Tabs ── */}
       <div className="flex-shrink-0 px-8 flex gap-0.5 border-b border-border/40">
-        {!isTour && !isGuide && (
+        {!isGuide && (
           <TabButton active={activeTab === 'findings'} onClick={() => setActiveTab('findings')}>
             Findings{activeAnnotations.length > 0 && ` (${activeAnnotations.length})`}
           </TabButton>
         )}
-        {(isTour || isGuide) && (
+        {isGuide && (
           <TabButton active={activeTab === 'findings'} onClick={() => setActiveTab('findings')}>
             Status
           </TabButton>
@@ -187,14 +186,7 @@ export const ReviewAgentJobDetailPanel: React.FC<IDockviewPanelProps> = (props) 
 
       {/* ── Content ── */}
       {activeTab === 'findings' ? (
-        isTour ? (
-          /* Tour status view — no findings, just status + Open Tour button */
-          <ScrollFade>
-            <div className="px-8 py-3 space-y-4 max-w-2xl">
-              <TourStatusCard summary={job.summary} terminal={terminal} jobId={jobId} />
-            </div>
-          </ScrollFade>
-        ) : isGuide ? (
+        isGuide ? (
           /* Guide status view — no findings, just status + Open guide button */
           <ScrollFade>
             <div className="px-8 py-3 space-y-4 max-w-2xl">
@@ -312,54 +304,6 @@ function VerdictCard({ summary, isCorrect, terminal }: {
   );
 }
 
-function TourStatusCard({ summary, terminal, jobId }: {
-  summary: AgentJobInfo['summary'];
-  terminal: boolean;
-  jobId: string;
-}) {
-  const state = useReviewState();
-
-  if (summary) {
-    return (
-      <div className="space-y-3">
-        <div className="rounded px-3 py-2.5 bg-success/5">
-          <div className="flex items-baseline gap-2">
-            <span className="text-xs font-semibold text-success">Tour Generated</span>
-          </div>
-          <p className="text-xs text-foreground/80 leading-relaxed mt-1.5">{summary.explanation}</p>
-        </div>
-        <button
-          onClick={() => state.openTourPanel(jobId)}
-          className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-colors text-xs font-medium active:scale-[0.98]"
-        >
-          Open Tour
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-            <path d="M3 7h8M8 3.5L11 7l-3 3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </button>
-      </div>
-    );
-  }
-
-  return (
-    <div className="rounded bg-muted/10 px-3 py-2.5">
-      <div className="flex items-center gap-2">
-        <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/50">
-          Tour Status
-        </span>
-        {!terminal && (
-          <span className="text-[10px] text-muted-foreground/40 animate-pulse">Generating...</span>
-        )}
-      </div>
-      {terminal ? (
-        <p className="text-xs text-muted-foreground/50 mt-1">Tour generation failed.</p>
-      ) : (
-        <p className="text-xs text-muted-foreground/50 mt-1">The tour will be ready when the agent finishes.</p>
-      )}
-    </div>
-  );
-}
-
 function GuideStatusCard({ job, terminal, jobId }: {
   job: AgentJobInfo;
   terminal: boolean;
@@ -440,13 +384,9 @@ function StatusDot({ status }: { status: AgentJobInfo['status'] }) {
 
 function ProviderPill({ provider, engine, model }: { provider: string; engine?: string; model?: string }) {
   let label: string;
-  if (provider === 'tour') {
-    const engineLabel = engine === 'codex' ? 'Codex' : 'Claude';
-    label = model && engine !== 'codex' ? `Tour · ${engineLabel} ${model.charAt(0).toUpperCase() + model.slice(1)}` : `Tour · ${engineLabel}`;
-  } else if (provider === 'guide') {
-    // Guide's engine union is wider than Tour's (marker engines included) —
-    // only show the model for Claude, mirroring Tour's own "skip it for
-    // engines with verbose/technical model ids" convention.
+  if (provider === 'guide') {
+    // Only show the model for Claude: other engines have verbose/technical
+    // model ids.
     const engineLabel = engine === 'codex' ? 'Codex' : engine === 'cursor' ? 'Cursor' : engine === 'opencode' ? 'OpenCode' : engine === 'pi' ? 'Pi' : engine === 'copilot' ? 'Copilot' : 'Claude';
     label = model && engine === 'claude' ? `Guide · ${engineLabel} ${model.charAt(0).toUpperCase() + model.slice(1)}` : `Guide · ${engineLabel}`;
   } else {
@@ -454,7 +394,7 @@ function ProviderPill({ provider, engine, model }: { provider: string; engine?: 
   }
   return (
     <span className={`text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded ${
-      provider === 'tour' || provider === 'guide' ? 'bg-accent/10 text-accent' : 'bg-muted text-muted-foreground'
+      provider === 'guide' ? 'bg-accent/10 text-accent' : 'bg-muted text-muted-foreground'
     }`}>
       {label}
     </span>

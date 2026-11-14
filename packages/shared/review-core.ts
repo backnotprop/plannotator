@@ -391,7 +391,7 @@ export const GIT_COLOR_FREE_ARGS: readonly string[] = Object.freeze([
 
 /**
  * The same color-off settings as `GIT_CONFIG_*` environment variables, for
- * processes Plannotator spawns that run git themselves (review, tour and
+ * processes Plannotator spawns that run git themselves (review and
  * guide agent jobs). Inherited `GIT_CONFIG_*` entries are kept. Git 2.31+
  * reads these; an older git ignores them, which only costs color in the
  * agent's own tool output.

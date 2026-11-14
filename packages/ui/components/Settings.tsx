@@ -617,16 +617,16 @@ const ReviewTab: React.FC<{ sinceBaseUnavailable?: boolean }> = ({ sinceBaseUnav
         <div id="settings-review-git" className={REVIEW_SECTION_HEADING}>Git</div>
         <div className="space-y-2">
           <div>
-            <div className="text-sm font-medium">Default review view</div>
-            <div className="text-xs text-muted-foreground">Which panel a code review opens in</div>
+            <div className="text-sm font-medium">Default file grouping</div>
+            <div className="text-xs text-muted-foreground">How the file tree groups a code review's files when it opens</div>
             {/* This is a GLOBAL preference — never hide the options because the
                 CURRENT repo can't serve them; just say so. Without this note,
                 picking Git status on a repo whose base ref doesn't resolve
                 silently falls back to Tree and the setting looks broken. */}
             {sinceBaseUnavailable && (
               <div className="text-xs text-warning mt-1">
-                Git status view isn't available in this repository (its base branch
-                couldn't be resolved) — reviews here open in Tree. The preference
+                Grouping by git status isn't available in this repository (its base branch
+                couldn't be resolved), so reviews here open grouped by kind. The preference
                 still applies in repositories where it works.
               </div>
             )}
@@ -635,8 +635,8 @@ const ReviewTab: React.FC<{ sinceBaseUnavailable?: boolean }> = ({ sinceBaseUnav
               via the panel toggle) and is never the opening view. */}
           <SegmentedControl
             options={[
-              { value: 'sections' as const, label: 'Git status' },
-              { value: 'tree' as const, label: 'Tree' },
+              { value: 'sections' as const, label: 'By git status' },
+              { value: 'tree' as const, label: 'By kind' },
             ]}
             value={reviewPanelView}
             onChange={setReviewPanelView}

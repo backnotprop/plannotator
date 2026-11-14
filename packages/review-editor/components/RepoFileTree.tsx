@@ -8,7 +8,6 @@ import { FileTreeNodeItem } from './FileTreeNode';
 import type { FileTreeNode } from '../utils/buildFileTree';
 import {
   addRepoDirEntries,
-  baseName,
   buildRepoTreeIndex,
   emptyLazyRepoTreeIndex,
   flattenRepoTree,
@@ -336,4 +335,3 @@ export const RepoFileTree: React.FC<RepoFileTreeProps> = ({
 };
 
 /** A path's name, for callers that need it outside the tree. */
-export { baseName as repoBaseName };

@@ -2,7 +2,7 @@ import React from 'react';
 import { ContextMenu } from '@base-ui/react/context-menu';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 import type { DiffFile } from '../types';
-import { ViewedControl, StageControl, AnnotationBadge, CommittedDot, ChangeTypeLetter, CountColumns } from './FileRowBits';
+import { ViewedControl, StageControl, AnnotationBadge, ChangeTypeLetter, CountColumns } from './FileRowBits';
 
 export interface FileTreeFileRowProps {
   path: string;
@@ -81,7 +81,7 @@ export const FileTreeFileRow = React.memo(function FileTreeFileRow({
               sit in the panel's two number columns. */}
           <div className="review-file-row-main">
             {showViewedControls && (
-              <ViewedControl isViewed={isViewed} onToggle={onToggleViewed ? () => onToggleViewed(path) : undefined} forceVisible={isActive} />
+              <ViewedControl isViewed={isViewed} onToggle={onToggleViewed ? () => onToggleViewed(path) : undefined} />
             )}
             {showStageControls && (
               sinceBaseMode && (isStageable || isStaged) ? (
@@ -90,9 +90,7 @@ export const FileTreeFileRow = React.memo(function FileTreeFileRow({
                   isStaging={isStaging}
                   onStage={onStageFile ? () => onStageFile(path) : undefined}
                 />
-              ) : sinceBaseMode && sectionGroup === 'committed' ? (
-                <CommittedDot />
-              ) : sinceBaseMode && onStageFile ? (
+              ) : sinceBaseMode && (onStageFile || sectionGroup === 'committed') ? (
                 <span className="w-4 h-4 flex-shrink-0" aria-hidden="true" />
               ) : isStaged && !sinceBaseMode ? (
                 <span className="text-[10px] text-primary font-medium flex items-center justify-center w-4 flex-shrink-0" title="Staged (git add)">+</span>

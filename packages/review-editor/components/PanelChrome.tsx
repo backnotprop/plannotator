@@ -59,6 +59,9 @@ export interface PanelControlsProps {
    *  Without the handler the menu item is not rendered. */
   groupByKind?: boolean;
   onToggleGroupByKind?: () => void;
+  groupBy?: "none" | "kind" | "status";
+  onSelectGroupBy?: (groupBy: "none" | "kind" | "status") => void;
+  statusGroupingAvailable?: boolean;
   /** The tools row's lead: the Changes / All files switch (`ScopeSwitch`).
    *  Unset: the row is labelled "Files". */
   scope?: React.ReactNode;
@@ -160,6 +163,9 @@ function ListOptionsMenu({
   onToggleAutoViewed,
   groupByKind = true,
   onToggleGroupByKind,
+  groupBy,
+  onSelectGroupBy,
+  statusGroupingAvailable = false,
   onCopyRawDiff,
   canCopyRawDiff = false,
   copyRawDiffStatus = "idle",
@@ -168,7 +174,7 @@ function ListOptionsMenu({
   collapseDisabled = false,
 }: PanelControlsProps) {
   const perFile = !!onToggleShowViewedControls && !!onToggleShowStageControls;
-  const settings = !!onToggleAutoViewed || !!onToggleGroupByKind;
+  const settings = !!onToggleAutoViewed || !!onToggleGroupByKind || !!onSelectGroupBy;
   if (!onCopyRawDiff && !settings && !perFile && !onToggleAllFolders) return null;
   const check = (on: boolean) => (
     <span className="ml-auto w-3.5 flex justify-center text-foreground">
@@ -224,7 +230,25 @@ function ListOptionsMenu({
                 {check(autoViewed)}
               </Menu.CheckboxItem>
             )}
-            {onToggleGroupByKind && (
+            {onSelectGroupBy && groupBy && (
+              <Menu.Group>
+                <Menu.Separator className="my-1 h-px bg-border/70" />
+                <Menu.GroupLabel className="px-2 pt-1 pb-0.5 text-[12px] font-medium text-muted-foreground">Group files</Menu.GroupLabel>
+                <Menu.RadioGroup value={groupBy} onValueChange={(value) => onSelectGroupBy(value as "none" | "kind" | "status")}>
+                  {([
+                    ["none", "No groups"],
+                    ["kind", "By kind"],
+                    ...(statusGroupingAvailable ? [["status", "By git status"]] : []),
+                  ] as [string, string][]).map(([value, label]) => (
+                    <Menu.RadioItem key={value} value={value} className={MENU_ITEM} closeOnClick={false} data-review-group-by={value}>
+                      {label}
+                      {check(groupBy === value)}
+                    </Menu.RadioItem>
+                  ))}
+                </Menu.RadioGroup>
+              </Menu.Group>
+            )}
+            {!onSelectGroupBy && onToggleGroupByKind && (
               <Menu.CheckboxItem
                 className={MENU_ITEM}
                 checked={groupByKind}

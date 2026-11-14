@@ -1,7 +1,7 @@
 /**
  * Pi (Node) mirror of packages/server/agent-jobs-ask-ai-child.test.ts: every
- * agent job the Pi review server starts (code review, Code Tour, Guided
- * Review; Claude, Codex and the marker engines) runs with Plannotator's own
+ * agent job the Pi review server starts (code review, Guided Review;
+ * Claude, Codex and the marker engines) runs with Plannotator's own
  * integration off: PLANNOTATOR_ASK_AI_CHILD=1 with the Inbox tool and agent
  * tool switches at 0 in its env, the Codex `-c` override that turns the Inbox
  * MCP server off, and the Claude disallow of `mcp__plannotator-inbox`.
@@ -20,7 +20,6 @@ import { buildClaudeCommand } from "../generated/claude-review.ts";
 import { buildCodexCommand, generateOutputPath } from "../generated/codex-review.ts";
 import { buildGuideClaudeCommand, buildGuideCodexCommand, generateGuideOutputPath } from "../generated/guide-review.ts";
 import { buildMarkerCommand, MARKER_ENGINES } from "../generated/marker-review.ts";
-import { buildTourClaudeCommand, buildTourCodexCommand, generateTourOutputPath } from "../generated/tour-review.ts";
 import { createAgentJobHandler, type AgentJobHandlerOptions } from "./agent-jobs.ts";
 import { requestUrl } from "./helpers.ts";
 
@@ -113,8 +112,6 @@ const JOBS: Array<{ name: string; provider: string; engine?: string; build: (cwd
 	{ name: "code review, Claude", provider: "claude", build: async (cwd) => { const b = buildClaudeCommand("review"); return claudeJob(b.command, b.stdinPrompt, cwd); } },
 	{ name: "code review, Codex", provider: "codex", build: async (cwd) => { const outputPath = generateOutputPath(); return { command: await buildCodexCommand({ cwd, outputPath, prompt: "review" }), outputPath, cwd }; } },
 	{ name: "code review, OpenCode", provider: "opencode", build: async (cwd) => ({ command: buildMarkerCommand(MARKER_ENGINES.opencode, "review", undefined, cwd).command, cwd, captureStdout: true }) },
-	{ name: "Code Tour, Claude", provider: "tour", engine: "claude", build: async (cwd) => { const b = buildTourClaudeCommand("tour"); return claudeJob(b.command, b.stdinPrompt, cwd); } },
-	{ name: "Code Tour, Codex", provider: "tour", engine: "codex", build: async (cwd) => { const outputPath = generateTourOutputPath(); return { command: await buildTourCodexCommand({ cwd, outputPath, prompt: "tour" }), outputPath, cwd, engine: "codex" }; } },
 	{ name: "Guided Review, Claude", provider: "guide", engine: "claude", build: async (cwd) => { const b = buildGuideClaudeCommand("guide"); return claudeJob(b.command, b.stdinPrompt, cwd); } },
 	{ name: "Guided Review, Codex", provider: "guide", engine: "codex", build: async (cwd) => { const outputPath = generateGuideOutputPath(); return { command: await buildGuideCodexCommand({ cwd, outputPath, prompt: "guide" }), outputPath, cwd, engine: "codex" }; } },
 	{ name: "Guided Review, OpenCode", provider: "guide", engine: "opencode", build: async (cwd) => ({ command: buildMarkerCommand(MARKER_ENGINES.opencode, "guide", undefined, cwd).command, cwd, captureStdout: true, engine: "opencode" }) },

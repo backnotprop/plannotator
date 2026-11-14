@@ -9,14 +9,12 @@ import { Tooltip } from './Tooltip';
 
 /** Viewed checkbox — always visible: green check-circle when viewed, empty
  * circle otherwise. Fixed 16px slot, same as StageControl, so the two align
- * as a column. (`forceVisible` retained as a no-op for call-site stability.) */
+ * as a column. */
 export const ViewedControl: React.FC<{
   isViewed: boolean;
   onToggle?: () => void;
   /** The file, for a screen reader's name; a host's rows pass it. */
   name?: string;
-  /** Deprecated no-op — the control is always visible now. */
-  forceVisible?: boolean;
 }> = ({ isViewed, onToggle, name }) => (
   <Tooltip content={isViewed ? 'Viewed — click to unmark' : 'Mark as viewed'} side="bottom">
     <span

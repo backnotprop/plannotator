@@ -24,7 +24,7 @@ export function ConfigRow({ label, stacked, children }: { label: string; stacked
   );
 }
 
-// Pill selector for small option sets (effort, reasoning, tour engine).
+// Pill selector for small option sets (effort, reasoning, thinking).
 export function SegmentedPicker({ options, value, onChange }: { options: Array<{ value: string; label: string }>; value: string; onChange: (v: string) => void }) {
   return (
     <div className="flex items-center gap-px rounded-lg bg-surface-1/50 p-0.5">

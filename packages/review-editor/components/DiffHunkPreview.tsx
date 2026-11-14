@@ -80,7 +80,7 @@ export const DiffHunkPreview: React.FC<DiffHunkPreviewProps> = ({
   const fileDiff = useMemo(() => {
     if (!shown) return undefined;
     try {
-      // Robustly handle all three hunk formats the tour agent might produce:
+      // Robustly handle all three hunk formats a caller might pass:
       //   1. Full git diff: starts with "diff --git" — use as-is
       //   2. File-level diff: starts with "--- " — prepend "diff --git" line only
       //   3. Bare hunk: starts with "@@ " — prepend full synthetic headers
