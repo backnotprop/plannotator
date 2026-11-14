@@ -1,3 +1,4 @@
+import { withServerSession } from '@plannotator/ui/utils/serverSession';
 import type { InboxReviewAnchor } from '@plannotator/core/review-threads';
 import type { LiveAgent, LiveState, LiveTarget } from './model';
 
@@ -30,6 +31,13 @@ export const liveApi = {
   sendNow: (messageId: string) => post<unknown>(`/api/live/send-now/${messageId}`, {}),
   takeBack: (messageId: string) => post<{ taken: string[] }>(`/api/live/take-back/${messageId}`, {}),
 };
+
+export async function postThreadsToPR(input: { action: 'comment'; body: string; fileComments: unknown[]; fileLevelComments: unknown[] }): Promise<{ prUrl?: string }> {
+  const response = await fetch('/api/pr-action', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(withServerSession(input)) });
+  const answer = (await response.json().catch(() => ({}))) as { error?: string; prUrl?: string; submission?: { status?: string } };
+  if (!response.ok) throw new LiveError(response.status, 'pr_action', answer.error ?? 'The review was not posted.');
+  return answer;
+}
 
 export function liveKey(): string {
   return `rv_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;

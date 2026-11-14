@@ -76,3 +76,23 @@ describe('a pull request thread on the diff', () => {
     expect(prThreadPlace({ ...base, line: null, startLine: null, diffSide: null })).toBeNull();
   });
 });
+
+describe('a thread posted to the forge', () => {
+  test('goes on its current lines with every reply, and a whole-file one as a file comment', async () => {
+    const { forgeCommentsOf } = await import('./model');
+    const anchor = anchorOfComment({ filePath: 'src/billing.ts', lineStart: 4, lineEnd: 5, side: 'new' }, files);
+    const whole = anchorOfComment({ filePath: 'src/billing.ts', lineStart: 0, lineEnd: 0, side: 'new', scope: 'file' }, files);
+    const placed = placeThreads(
+      [
+        msg({ id: 'c', body: 'Two checks here?', review_anchor: anchor }),
+        msg({ id: 'a', reply_to: 'c', body: 'Merged into one.', author: { kind: 'agent', host: 'pi', session: 's', name: null } as never, created_at: at(1) }),
+        msg({ id: 'f', body: 'Split this file.', review_anchor: whole }),
+      ],
+      files,
+    );
+    expect(forgeCommentsOf(placed)).toEqual({
+      fileComments: [{ path: 'src/billing.ts', line: 5, side: 'RIGHT', start_line: 4, start_side: 'RIGHT', body: 'Two checks here?\n\n**Pi:** Merged into one.' }],
+      fileLevelComments: [{ path: 'src/billing.ts', body: 'Split this file.' }],
+    });
+  });
+});

@@ -160,3 +160,32 @@ export function commentOfMessage(message: LiveMessage): { filePath: string; line
   const whole = anchor.line_start === 0;
   return { filePath: anchor.file, lineStart: anchor.line_start, lineEnd: anchor.line_end, side: anchor.side, scope: whole ? 'file' : 'line', text: message.body };
 }
+
+export interface ForgeThreadComments {
+  fileComments: { path: string; line: number; side: 'LEFT' | 'RIGHT'; body: string; start_line?: number; start_side?: 'LEFT' | 'RIGHT' }[];
+  fileLevelComments: { path: string; body: string }[];
+}
+
+export function threadForgeText(thread: PlacedThread): string {
+  const [first, ...rest] = thread.conversation.messages;
+  const lines = [first?.body.trim() ?? ''];
+  for (const message of rest) lines.push(`**${authorName(message)}:** ${message.body.trim()}`);
+  return lines.filter(Boolean).join('\n\n');
+}
+
+export function forgeCommentsOf(threads: readonly PlacedThread[]): ForgeThreadComments {
+  const out: ForgeThreadComments = { fileComments: [], fileLevelComments: [] };
+  for (const thread of threads) {
+    if (!thread.inDiff) continue;
+    const body = threadForgeText(thread);
+    const { anchor } = thread.conversation;
+    if (anchor.line_start === 0) {
+      out.fileLevelComments.push({ path: anchor.file, body });
+      continue;
+    }
+    const side = anchor.side === 'old' ? 'LEFT' : 'RIGHT';
+    const { line_start: start, line_end: end } = thread.now;
+    out.fileComments.push({ path: anchor.file, line: end, side, body, ...(end > start ? { start_line: start, start_side: side } : {}) });
+  }
+  return out;
+}

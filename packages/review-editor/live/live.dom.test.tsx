@@ -53,7 +53,7 @@ const anchor = { file: 'src/billing.ts', side: 'new' as const, line_start: 4, li
 
 function actionsRef(over: Partial<LiveReviewActions> = {}) {
   return {
-    current: { agents: [PI, CC], defaultTo: CC, loadAgents: () => {}, reply: mock(async () => {}), resolve: mock(async () => {}), sendComments: mock(async () => {}), reveal: () => {}, takeBack: mock(async () => {}), revealLines: () => {}, error: null, ...over },
+    current: { agents: [PI, CC], defaultTo: CC, loadAgents: () => {}, reply: mock(async () => {}), resolve: mock(async () => {}), sendComments: mock(async () => {}), reveal: () => {}, takeBack: mock(async () => {}), postToPR: null, posted: new Set<string>(), revealLines: () => {}, error: null, ...over },
   } as React.MutableRefObject<LiveReviewActions>;
 }
 

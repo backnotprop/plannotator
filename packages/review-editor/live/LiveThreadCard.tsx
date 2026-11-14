@@ -68,6 +68,18 @@ export function LiveThreadCard({ thread, messages, actions }: { thread: PlacedTh
       >
         {resolved ? 'Reopen' : 'Resolve'}
       </button>
+      {actions.current.postToPR ? (
+        actions.current.posted.has(conversation.id) ? (
+          <span className="px-1">· On the forge</span>
+        ) : (
+          <>
+            <span aria-hidden="true">·</span>
+            <button type="button" className={QUIET} data-live-post onClick={() => void actions.current.postToPR?.([conversation.id]).catch(() => {})}>
+              Post
+            </button>
+          </>
+        )
+      ) : null}
     </>
   );
   return (

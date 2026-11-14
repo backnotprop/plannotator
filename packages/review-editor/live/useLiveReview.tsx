@@ -2,8 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CodeAnnotation } from '@plannotator/ui/types';
 import type { HostLineNote } from '../components/hostLineNotes';
 import type { ReviewSidebarExtraTab } from '../components/ReviewSidebar';
-import { liveApi, liveKey, LiveError, watchLive, type LiveSendTag } from './api';
-import { anchorOfComment, commentOfMessage, openThreadIds, placeThreads, stepThread, unsentComments, type LiveAgent, type LiveState, type PlacedThread } from './model';
+import { liveApi, liveKey, LiveError, postThreadsToPR, watchLive, type LiveSendTag } from './api';
+import { getPRPlatformCapabilities, type Platform as ReviewPlatform } from '@plannotator/shared/pr-types';
+import { anchorOfComment, commentOfMessage, forgeCommentsOf, openThreadIds, placeThreads, stepThread, unsentComments, type LiveAgent, type LiveState, type PlacedThread } from './model';
 import { LiveThreadCard } from './LiveThreadCard';
 import { LiveThreadsTab } from './LiveThreadsTab';
 import { PRThreadCard, prThreadPlace } from './PRThreadCard';
@@ -22,6 +23,8 @@ export interface LiveReviewActions {
   sendComments: (comments: readonly CodeAnnotation[], words: string, tags: LiveSendTag[]) => Promise<void>;
   reveal: (thread: PlacedThread) => void;
   takeBack: (messageId: string) => Promise<void>;
+  postToPR: ((ids: readonly string[]) => Promise<void>) | null;
+  posted: ReadonlySet<string>;
   revealLines: (filePath: string, line: number, side: 'old' | 'new') => void;
   error: string | null;
 }
@@ -33,7 +36,7 @@ export function useLiveReview(input: {
   restoreAnnotations?: (comments: CodeAnnotation[]) => void;
   revealLines: (filePath: string, start: number, end: number, side: 'old' | 'new') => void;
   openTab: (id: string) => void;
-  pr?: { forge: string; threads: readonly PRReviewThread[] | null; load: () => void } | null;
+  pr?: { forge: string; platform: ReviewPlatform; threads: readonly PRReviewThread[] | null; load: () => void } | null;
 }): { notes: readonly HostLineNote[]; tab: ReviewSidebarExtraTab | null } {
   const [state, setState] = useState<LiveState | null>(null);
   const [agents, setAgents] = useState<readonly LiveAgent[]>([]);
@@ -135,8 +138,24 @@ export function useLiveReview(input: {
     },
     [failed, refresh, state?.messages, input.dropAnnotations, input.restoreAnnotations],
   );
+  const [posted, setPosted] = useState<ReadonlySet<string>>(new Set());
+  const platform = input.pr?.platform ?? null;
+  const postToPR = useCallback(
+    async (ids: readonly string[]) => {
+      if (!platform) return;
+      setError(null);
+      const chosen = placed.filter((p) => ids.includes(p.conversation.id));
+      const comments = forgeCommentsOf(chosen);
+      const count = comments.fileComments.length + comments.fileLevelComments.length;
+      if (count === 0) return;
+      const body = getPRPlatformCapabilities({ platform }).reviewBodyRequired ? 'See inline comments.' : '';
+      await postThreadsToPR({ action: 'comment', body, ...comments }).catch(failed);
+      setPosted((current) => new Set([...current, ...chosen.map((p) => p.conversation.id)]));
+    },
+    [platform, placed, failed],
+  );
   const revealLines = useCallback((filePath: string, line: number, side: 'old' | 'new') => input.revealLines(filePath, line, line, side), [input.revealLines]);
-  const actions: LiveReviewActions = { agents, defaultTo, loadAgents, reply, resolve, sendComments, reveal, takeBack, revealLines, error };
+  const actions: LiveReviewActions = { agents, defaultTo, loadAgents, reply, resolve, sendComments, reveal, takeBack, postToPR: platform ? postToPR : null, posted, revealLines, error };
   const actionsRef = useRef(actions);
   actionsRef.current = actions;
 
@@ -156,10 +175,10 @@ export function useLiveReview(input: {
         filePath: thread.conversation.anchor.file,
         line: thread.now.line_end,
         side: thread.conversation.anchor.side,
-        key: JSON.stringify([agents.length, thread.now, thread.conversation.resolved, thread.conversation.messages.map((m) => [m.id, m.delivery?.at ?? null, (m.tags ?? []).map((t) => t.delivery?.at ?? null)])]),
+        key: JSON.stringify([agents.length, posted.has(thread.conversation.id), thread.now, thread.conversation.resolved, thread.conversation.messages.map((m) => [m.id, m.delivery?.at ?? null, (m.tags ?? []).map((t) => t.delivery?.at ?? null)])]),
         render: () => <LiveThreadCard thread={thread} messages={state.messages} actions={actionsRef} />,
       }))];
-  }, [state, placed, agents.length, prThreads, prForge]);
+  }, [state, placed, agents.length, prThreads, prForge, posted]);
 
   const step = useCallback(
     (direction: 1 | -1) => {
@@ -181,7 +200,7 @@ export function useLiveReview(input: {
             render: () => <LiveThreadsTab placed={placed} unsent={unsent} order={order} focused={focused} onStep={step} threadUrl={state?.thread_url ?? null} pr={input.pr ?? null} actions={actionsRef} />,
           }
         : null,
-    [visible, order, placed, unsent, focused, step, agents, error, defaultTo, state?.thread_url, input.pr],
+    [visible, order, placed, unsent, focused, step, agents, error, defaultTo, state?.thread_url, input.pr, posted],
   );
   useEffect(() => {
     if (error) input.openTab(LIVE_TAB_ID);
