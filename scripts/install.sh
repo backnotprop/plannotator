@@ -845,7 +845,39 @@ if [ "$verify_attestation" -eq 1 ]; then
     fi
 fi
 
-binary_url="https://github.com/${REPO}/releases/download/${latest_tag}/${binary_name}"
+release_download_url_allowed() {
+    local url="$1" authority host
+    case "$url" in
+        https://*) authority="${url#https://}" ;;
+        http://*) authority="${url#http://}" ;;
+        *) return 1 ;;
+    esac
+    authority="${authority%%[/?#]*}"
+    case "$authority" in
+        ""|*@*) return 1 ;;
+    esac
+    case "$url" in
+        https://*) return 0 ;;
+    esac
+    host="$(printf '%s' "$authority" | tr '[:upper:]' '[:lower:]')"
+    case "$host" in
+        "[::1]"|"[::1]:"*) return 0 ;;
+    esac
+    host="${host%%:*}"
+    [ "$host" = "localhost" ] && return 0
+    [[ "$host" =~ ^127\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]
+}
+
+release_download_base="https://github.com/${REPO}/releases/download"
+release_download_override="${PLANNOTATOR_RELEASE_DOWNLOAD_URL:-}"
+while [ "${release_download_override%/}" != "$release_download_override" ]; do
+    release_download_override="${release_download_override%/}"
+done
+if [ -n "$release_download_override" ] && release_download_url_allowed "$release_download_override"; then
+    release_download_base="$release_download_override"
+fi
+
+binary_url="${release_download_base}/${latest_tag}/${binary_name}"
 checksum_url="${binary_url}.sha256"
 
 mkdir -p "$INSTALL_DIR"
