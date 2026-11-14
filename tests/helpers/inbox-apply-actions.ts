@@ -39,6 +39,8 @@ export const ACTIONS = [
   'pulls',
   'delivery',
   'agent-checked',
+  'take-back',
+  'agent-read',
 ] as const;
 
 export type ActionKind = (typeof ACTIONS)[number];
@@ -225,5 +227,20 @@ export async function runAction(w: ApplyWorld, action: Action, step: number): Pr
     case 'agent-checked':
       store.markAgentChecked(t);
       return;
+    case 'take-back': {
+      const mine = messagesOf(w, t).filter((m) => m.author.kind === 'person');
+      const target = at(mine, b);
+      if (target) {
+        try {
+          store.takeBack(target.id);
+        } catch {}
+      }
+      return;
+    }
+    case 'agent-read': {
+      const waiting = messagesOf(w, t).filter((m) => m.author.kind === 'person' && !m.delivery);
+      if (waiting.length > 0) store.recordAgentRead([at(waiting, b)!.id], sessionOf(w, t));
+      return;
+    }
   }
 }
