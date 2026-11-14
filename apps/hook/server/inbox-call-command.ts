@@ -44,7 +44,7 @@ import { decodeInboxAgentPairing, INBOX_AGENT_CALL_ACTIONS } from "@plannotator/
 import { callInboxThroughRelay, inboxAgentSignalUrl, type InboxAgentRelayOutcome } from "@plannotator/shared/inbox/agent-relay-client";
 import { INBOX_HOST_NAMES, INBOX_QWEN_SESSION_ENV, INBOX_T3_HOST, INBOX_T3_THREAD_ENV, inboxTidyMcpLine, parseInboxSessionRef, type InboxTidyMark } from "@plannotator/core/inbox-types";
 import { INBOX_MAX_REQUEST_BYTES, INBOX_PEEK_META_KEY, inboxRequestTooLargeMessage, inboxToolCallParams, mcpAnswerOfResponse } from "@plannotator/shared/inbox/connection";
-import type { InboxRegistryEntry } from "@plannotator/shared/inbox/registry";
+import { inboxEnsureFailedWords, type InboxRegistryEntry } from "@plannotator/shared/inbox/registry";
 import { attachedImagesNotInBodyText } from "@plannotator/shared/inbox/attached-images";
 import { questionsToCheckText } from "@plannotator/shared/inbox/questions-to-check";
 import type { InboxQuestionToCheck } from "@plannotator/core/inbox-questions";
@@ -236,7 +236,7 @@ export async function runInboxCallCommand(argv: readonly string[], deps: CallCom
   try {
     entry = await deps.ensureRunning();
   } catch (error) {
-    return refused("inbox_not_running", `Plannotator Inbox is not running: ${error instanceof Error ? error.message : String(error)}`);
+    return refused("inbox_not_running", inboxEnsureFailedWords(error));
   }
   let answer: ReturnType<typeof mcpAnswerOfResponse>;
   try {

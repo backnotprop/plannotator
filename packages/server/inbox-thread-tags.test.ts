@@ -137,6 +137,23 @@ describe("thread tags", () => {
     expect(await rowTags(server, a.thread_id)).toEqual([]);
   });
 
+  test("by name (a linked machine's write): the live tag of that name, case and space ignored, made when none is; out by name", async () => {
+    const { server, send } = await setup();
+    const a = await send("Tag me by name", "ses_a");
+    const release = await makeTag(server, "Release");
+    const path = `/api/inbox/threads/${a.thread_id}/tags`;
+    expect(((await (await post(server, path, { name: " release", on: true })).json()) as Json).tags).toEqual([release.id]);
+    const made = (await (await post(server, path, { name: "Billing", on: true })).json()) as Json;
+    const billing = (await list(server)).tags!.find((t) => t.name === "Billing")!;
+    expect(made.tags).toEqual([release.id, billing.id]);
+    expect(((await (await post(server, path, { name: "BILLING", on: false })).json()) as Json).tags).toEqual([release.id]);
+    // A name no tag has takes nothing out and makes nothing; a missing thread makes no tag either.
+    expect(((await (await post(server, path, { name: "Nowhere", on: false })).json()) as Json).tags).toEqual([release.id]);
+    expect((await post(server, "/api/inbox/threads/msg_01K70000000000000000000099/tags", { name: "Fresh", on: true })).status).toBe(404);
+    expect((await post(server, path, { name: "", on: true })).status).toBe(422);
+    expect((await list(server)).tags!.map((t) => t.name).sort()).toEqual(["Billing", "Release"]);
+  });
+
   test("every open window hears `event: tags`; the phone's stream (no window id) does not", async () => {
     const { server, send } = await setup();
     const a = await send("Tag me", "ses_a");
