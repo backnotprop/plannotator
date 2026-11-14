@@ -6,6 +6,7 @@ import { OpenInAppButton } from '@plannotator/ui/components/OpenInAppButton';
 import { useReviewStateOptional } from '../dock/ReviewStateContext';
 import type { DiffFileStatus } from '../types';
 import { FileKindIcon } from '@plannotator/guide-viewer/FileKindIcon';
+import { fileStatusLetter } from '@plannotator/ui/utils/fileStatusLetter';
 
 interface FileHeaderProps {
   /** Read-only host: no open-in affordance (it probes the review server). */
@@ -91,30 +92,11 @@ function frontEllipsize(text: string, visibleChars: number): string {
   return `...${text.slice(-visibleChars)}`;
 }
 
-/**
- * Change-type letter shown to the right of the +/- counts (matches the file
- * tree): A added · D deleted · R renamed, colored so the critical changes pop.
- * Modified is bare — the +/- counts already say it changed within the file.
- */
-const STATUS_LETTER: Record<DiffFileStatus, { letter: string; className: string; title: string }> = {
-  added: { letter: 'A', className: 'text-success', title: 'Added file' },
-  modified: { letter: 'M', className: 'text-muted-foreground', title: 'Modified file' },
-  deleted: { letter: 'D', className: 'text-destructive', title: 'Deleted file' },
-  renamed: { letter: 'R', className: 'text-[#007aff]', title: 'Renamed file' },
-};
-
 const FileStatusLetter: React.FC<{ status: DiffFileStatus; oldPath?: string }> = ({ status, oldPath }) => {
-  // Match the file tree: only added/deleted/renamed get a badge; modified is
-  // bare (the +/- counts already convey that it changed within the file).
   if (status === 'modified') return null;
-  const meta = STATUS_LETTER[status];
-  const title = status === 'renamed' && oldPath ? `Renamed from ${oldPath}` : meta.title;
+  const meta = fileStatusLetter(status, { oldPath });
   return (
-    <span
-      className={`flex-none font-semibold leading-none ${meta.className}`}
-      title={title}
-      aria-label={title}
-    >
+    <span className={`flex-none leading-none ${meta.className}`} title={meta.title} aria-label={meta.title} data-file-header-status={meta.letter}>
       {meta.letter}
     </span>
   );

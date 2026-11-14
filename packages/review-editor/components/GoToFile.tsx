@@ -5,6 +5,7 @@ import { REPO_FILES_SEARCH_ENDPOINT } from '@plannotator/shared/repo-files';
 import { altKey } from '@plannotator/ui/utils/platform';
 import type { DiffFile } from '../types';
 import type { RepoFilesState } from '../hooks/useRepoFiles';
+import { fileStatusLetter } from '@plannotator/ui/utils/fileStatusLetter';
 
 const RESULT_LIMIT = 50;
 const SERVER_DEBOUNCE_MS = 80;
@@ -28,13 +29,6 @@ interface Row {
   group?: 'recent' | 'changed';
 }
 
-const STATUS_LETTER: Record<DiffFile['status'], string> = { added: 'A', deleted: 'D', renamed: 'R', modified: 'M' };
-const STATUS_CLASS: Record<DiffFile['status'], string> = {
-  added: 'text-success',
-  deleted: 'text-destructive',
-  renamed: 'text-warning',
-  modified: 'text-primary',
-};
 
 /** The matched characters of a name, marked. */
 function Marked({ text, offset, positions }: { text: string; offset: number; positions: ReadonlySet<number> }) {
@@ -255,8 +249,8 @@ export const GoToFile: React.FC<GoToFileProps> = ({
                   className={`flex items-center gap-2 mx-1 px-2 h-8 rounded-md cursor-pointer text-[13px] ${index === active ? 'bg-primary/15' : ''}`}
                 >
                   {file ? (
-                    <span className={`w-4 text-center text-[10px] font-semibold flex-shrink-0 ${STATUS_CLASS[file.status]}`} data-goto-status={STATUS_LETTER[file.status]}>
-                      {STATUS_LETTER[file.status]}
+                    <span className={`w-4 text-center text-[12px] flex-shrink-0 ${fileStatusLetter(file.status).className}`} title={fileStatusLetter(file.status).title} data-goto-status={fileStatusLetter(file.status).letter}>
+                      {fileStatusLetter(file.status).letter}
                     </span>
                   ) : (
                     <svg className="w-4 h-4 text-muted-foreground/70 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} aria-hidden="true">
