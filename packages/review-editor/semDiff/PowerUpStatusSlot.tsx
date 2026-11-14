@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useState } from 'react';
+import { PowerUpGuy } from '@plannotator/ui/components/agentFace/PowerUpGuy';
 import { PROVIDER_NAME, type PowerUpStatus } from './powerUp';
 
 export const PowerUpStatusSlot: React.FC<{
@@ -29,10 +30,41 @@ export const PowerUpStatusSlot: React.FC<{
         : state === 'nothing'
           ? `${model} found nothing the engine missed.`
           : `Asking ${model} about the calls the engine was too strict to make.`;
+  const [card, setCard] = useState(false);
+  const [poke, setPoke] = useState(0);
+  const wake = () => {
+    setCard(true);
+    setPoke((n) => n + 1);
+  };
   return (
-    <span className="flex items-center gap-1.5 px-1.5 text-xs text-muted-foreground" data-power-up-status={state} title={title}>
-      <span data-power-up-slot="" aria-hidden="true" />
+    <span
+      className="relative flex items-center gap-1.5 px-1.5 text-xs text-muted-foreground"
+      data-power-up-status={state}
+      onMouseEnter={wake}
+      onMouseLeave={() => setCard(false)}
+      onFocus={wake}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setCard(false);
+      }}
+    >
+      <span data-power-up-slot="" tabIndex={0} className="rounded outline-none focus-visible:ring-1 focus-visible:ring-ring">
+        <PowerUpGuy state={state === 'asking' || state === 'unavailable' ? 'grey' : 'alive'} size={16} wakeKey={status.links} poke={poke} />
+      </span>
       <span>{text}</span>
+      {card && (
+        <span
+          role="tooltip"
+          data-power-up-card=""
+          className="absolute right-0 top-full z-50 mt-1 flex w-max flex-col gap-0.5 rounded-md border border-border bg-popover px-2.5 py-2 text-xs text-popover-foreground shadow-md"
+        >
+          <span className="font-medium">{state === 'unavailable' ? 'Power Up is unavailable' : 'Your diffs are powered up'}</span>
+          <span className="text-muted-foreground">Second opinion from {model}</span>
+          <span className="max-w-64 text-muted-foreground">{title}</span>
+          <button type="button" className="mt-1 self-start text-primary hover:underline" onClick={onSettings}>
+            Power Up settings
+          </button>
+        </span>
+      )}
       {state === 'unavailable' && (
         <>
           <button type="button" className="rounded px-1 hover:bg-muted hover:text-foreground" onClick={onRetry}>Retry</button>

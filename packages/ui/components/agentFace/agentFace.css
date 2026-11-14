@@ -5,7 +5,7 @@
 .am-face[hidden] { display: none; }
 /* OpenCode's currentColor mark takes the muted text colour. */
 .am-tile { position: relative; width: 100%; height: 100%; display: grid; place-items: center; color: var(--muted-foreground); }
-.am-tile > .ib-mk, .am-tile > .ib-mk > svg, .am-tile > .ib-mk > img { width: var(--ib-mark-20); height: var(--ib-mark-20); }
+.am-tile > .ib-mk, .am-tile > .ib-mk > svg, .am-tile > .ib-mk > img { width: var(--ib-mark-20, 20px); height: var(--ib-mark-20, 20px); }
 .am-glyph { width: var(--am); height: var(--am); display: block; overflow: visible; }
 /* A rig: every part an HTML layer the size of the glyph, holding its own small svg. */
 .am-rig { position: relative; }
@@ -18,7 +18,7 @@
 .am-fb { display: block; width: 100%; height: 100%; transform-origin: 50% 97%; }
 /* A host with no rig: its plain mark, drawn in the same moving layer. */
 .am-fb.am-plain { display: grid; place-items: center; }
-.am-plain > .ib-mk, .am-plain > .ib-mk > svg, .am-plain > .ib-mk > img { width: var(--ib-mark-20); height: var(--ib-mark-20); }
+.am-plain > .ib-mk, .am-plain > .ib-mk > svg, .am-plain > .ib-mk > img { width: var(--ib-mark-20, 20px); height: var(--ib-mark-20, 20px); }
 .am-art { display: block; width: 100%; height: 100%; }
 /* Transparent: the ink-frame mark on light, the yellow-frame pixel mark on dark. */
 .am-art-l { display: none; }

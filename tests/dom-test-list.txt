@@ -745,3 +745,4 @@ packages/editor/hooks/useCheckboxOverrides.viewer.test.tsx
 packages/ui/components/TaterSpriteSlots.test.tsx
 packages/inbox/sidebarRedraws.test.tsx
 packages/inbox/agents/faceSources.test.tsx
+packages/ui/components/agentFace/PowerUpGuy.test.tsx

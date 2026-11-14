@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     "./components/*": "./components/*.tsx",
+    "./components/agentFace/agentFace.css": "./components/agentFace/agentFace.css",
     "./components/ui/*": "./components/ui/*.tsx",
     "./components/ai/*": "./components/ai/*.tsx",
     "./components/core/*": "./components/core/*.tsx",
