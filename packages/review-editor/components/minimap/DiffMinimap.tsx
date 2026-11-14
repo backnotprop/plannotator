@@ -203,9 +203,24 @@ const DiffMinimap: React.FC<DiffMinimapProps> = ({ source, fallbackModel, files,
 
   const dragRef = useRef<{ grab: number; startY: number; moved: boolean; onOutline: boolean } | null>(null);
 
+  const pendingScrollRef = useRef<{ top: number; frame: number } | null>(null);
+  useEffect(() => () => {
+    if (pendingScrollRef.current) cancelAnimationFrame(pendingScrollRef.current.frame);
+  }, []);
   const scrollToStripY = (y: number, grab: number) => {
     if (!layout || size.height <= 0) return;
-    source.scrollTo(((y - grab) / size.height) * layout.contentHeight);
+    const top = ((y - grab) / size.height) * layout.contentHeight;
+    const pending = pendingScrollRef.current;
+    if (pending) {
+      pending.top = top;
+      return;
+    }
+    const next = { top, frame: 0 };
+    next.frame = requestAnimationFrame(() => {
+      pendingScrollRef.current = null;
+      source.scrollTo(next.top);
+    });
+    pendingScrollRef.current = next;
   };
 
   const onPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -241,6 +256,10 @@ const DiffMinimap: React.FC<DiffMinimapProps> = ({ source, fallbackModel, files,
     dragRef.current = null;
     setDragging(false);
     if (!drag || drag.moved || drag.onOutline || !layout) return;
+    if (pendingScrollRef.current) {
+      cancelAnimationFrame(pendingScrollRef.current.frame);
+      pendingScrollRef.current = null;
+    }
     const rect = event.currentTarget.getBoundingClientRect();
     const contentY = toContent(event.clientY - rect.top);
     const hit = hitTest(layout, contentY, metrics);
@@ -274,7 +293,7 @@ const DiffMinimap: React.FC<DiffMinimapProps> = ({ source, fallbackModel, files,
     <div
       ref={stripRef}
       role="slider"
-      tabIndex={0}
+      tabIndex={-1}
       aria-label="Diff overview"
       aria-orientation="vertical"
       aria-valuemin={0}
@@ -282,7 +301,7 @@ const DiffMinimap: React.FC<DiffMinimapProps> = ({ source, fallbackModel, files,
       aria-valuenow={Math.max(0, Math.min(100, percent))}
       aria-valuetext={valueText || undefined}
       data-diff-minimap=""
-      className="group absolute inset-y-0 right-0 w-5 touch-none select-none cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-primary"
+      className="group absolute inset-y-0 right-0 w-6 touch-none select-none cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-primary"
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
@@ -296,7 +315,7 @@ const DiffMinimap: React.FC<DiffMinimapProps> = ({ source, fallbackModel, files,
       onKeyDown={onKeyDown}
     >
       <span ref={probeRef} aria-hidden="true" className="hidden" />
-      <div ref={columnRef} data-diff-minimap-strip="" className="absolute inset-y-0 right-0 w-3 border-l border-border/60">
+      <div ref={columnRef} data-diff-minimap-strip="" className="absolute inset-y-0 right-1 w-3 border-l border-border/60">
         <canvas ref={canvasRef} aria-hidden="true" className="absolute inset-0 h-full w-full" />
         <div
           ref={outlineRef}

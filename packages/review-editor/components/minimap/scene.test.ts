@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { buildFileRowModel, type RowMetrics } from './rowModel';
 import { changeBands, hitTest, markBands, placeFiles, rasterize, type MinimapFile } from './scene';
 import { densityAlpha } from './draw';
+import { hasBigFile, isLongContent } from './DiffMinimapSlot';
 
 const PATCH = [
   'diff --git a/a.ts b/a.ts',
@@ -127,5 +128,15 @@ describe('minimap marker positions', () => {
     const single = densityAlpha(Math.max(...column.slice(595, 606)));
     expect(single).toBeGreaterThan(0);
     expect(dense).toBeGreaterThan(single * 3);
+  });
+
+  test('a big file shows the strip even when its diff is short; a short diff in a small file does not', () => {
+    const big = '@@ -2398,3 +2398,4 @@\n a\n+b\n c\n d';
+    const small = '@@ -10,3 +10,4 @@\n a\n+b\n c\n d';
+    expect(hasBigFile([small, big])).toBe(true);
+    expect(hasBigFile([small])).toBe(false);
+    expect(isLongContent(1_200, 800, true)).toBe(true);
+    expect(isLongContent(1_200, 800, false)).toBe(false);
+    expect(isLongContent(700, 800, true)).toBe(false);
   });
 });
