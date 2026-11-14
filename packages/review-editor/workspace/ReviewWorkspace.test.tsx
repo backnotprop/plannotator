@@ -187,6 +187,16 @@ describe.skipIf(!hasDom)('the review panes', () => {
     resetStorageBackend();
   });
 
+  test('a diff tab and a file tab of one file read apart: their own icon and tooltip', async () => {
+    const el = await mount();
+    await act(async () => { api!.addPanel({ id: 'review-diff', component: 'review-diff', title: 'a.ts', params: { filePath: 'a.ts' } }); });
+    await act(async () => { api!.addPanel({ id: 'review-file:a.ts', component: 'review-file', title: 'a.ts', params: { filePath: 'a.ts' } }); });
+    expect(tabButton(el, 'review-diff').querySelector('[data-tab-kind-icon="diff"]')).not.toBeNull();
+    expect(tabButton(el, 'review-diff').title).toBe('Diff of a.ts');
+    expect(tabButton(el, 'review-file:a.ts').querySelector('[data-tab-kind-icon="file"]')).not.toBeNull();
+    expect(tabButton(el, 'review-file:a.ts').title).toBe('File a.ts');
+  });
+
   test('a References tab reads as the symbol with an icon, and a long title is capped', async () => {
     const slot = document.createElement('div');
     document.body.appendChild(slot);

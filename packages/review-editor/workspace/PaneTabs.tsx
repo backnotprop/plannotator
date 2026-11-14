@@ -1,10 +1,11 @@
 import React, { useLayoutEffect, useRef, useState } from 'react';
-import { Crosshair } from 'lucide-react';
+import { Crosshair, FileDiff, FileText } from 'lucide-react';
+import { EllipsisName } from '../components/EllipsisName';
 import type { Pane } from './paneLayout';
 import { isReviewFilePreviewParams } from '../dock/reviewPanelTypes';
 import { TITLE_SETTLE_MS, useSettledValue } from './useSettledValue';
 import { PaneTabsMenu } from './PaneTabsMenu';
-import { isClosableTab, isReferencesTab, tabLabel } from './tabLabel';
+import { isClosableTab, isReferencesTab, tabKind, tabLabel, tabTooltip } from './tabLabel';
 
 export { TITLE_SETTLE_MS };
 
@@ -44,23 +45,9 @@ function useHiddenTabs(ref: React.RefObject<HTMLElement | null>, key: string, si
   return hidden;
 }
 
-const FILE_EXTENSION = /^(.+?)(\.[A-Za-z0-9]{1,8})$/;
-
-export function splitTabTitle(title: string): { stem: string; extension: string } {
-  const match = FILE_EXTENSION.exec(title);
-  return match ? { stem: match[1]!, extension: match[2]! } : { stem: title, extension: '' };
-}
-
-const TabTitle: React.FC<{ title: string; keepExtension: boolean }> = ({ title, keepExtension }) => {
-  const settled = useSettledValue(title, TITLE_SETTLE_MS);
-  const { stem, extension } = keepExtension ? splitTabTitle(settled) : { stem: settled, extension: '' };
-  return (
-    <>
-      <span className="truncate min-w-0">{stem}</span>
-      {extension && <span className="flex-none">{extension}</span>}
-    </>
-  );
-};
+const TabTitle: React.FC<{ title: string; keepExtension: boolean }> = ({ title, keepExtension }) => (
+  <EllipsisName text={useSettledValue(title, TITLE_SETTLE_MS)} keepExtension={keepExtension} />
+);
 
 function focusTreeRow() {
   const row = document.querySelector<HTMLElement>('[data-review-sidebar] .file-tree-item.active') ?? document.querySelector<HTMLElement>('[data-review-sidebar] .file-tree-item');
@@ -133,7 +120,7 @@ export const PaneTabs: React.FC<{
               tabIndex={active ? 0 : -1}
               data-pane-tab={tab.id}
               data-preview-tab={preview || undefined}
-              title={preview ? `${tab.title} (preview: double-click to keep it open)` : tab.title}
+              title={preview ? `${tabTooltip(tab)} (preview: double-click to keep it open)` : tabTooltip(tab)}
               onClick={() => onActivate(tab.id)}
               onDoubleClick={preview && onKeep ? () => onKeep(tab.id) : undefined}
               onAuxClick={(event) => {
@@ -146,6 +133,8 @@ export const PaneTabs: React.FC<{
               } ${preview ? 'italic' : ''}`}
             >
               {isReferencesTab(tab) && <Crosshair className="w-3.5 h-3.5 flex-none mr-1" aria-hidden="true" data-references-tab-icon="" />}
+              {tabKind(tab) === 'diff' && <FileDiff className="w-3.5 h-3.5 flex-none mr-1 text-muted-foreground" aria-hidden="true" data-tab-kind-icon="diff" />}
+              {tabKind(tab) === 'file' && <FileText className="w-3.5 h-3.5 flex-none mr-1 text-muted-foreground" aria-hidden="true" data-tab-kind-icon="file" />}
               <span className="min-w-0 flex"><TabTitle title={tabLabel(tab)} keepExtension={!isReferencesTab(tab)} /></span>
             </button>
             {closable && <button
