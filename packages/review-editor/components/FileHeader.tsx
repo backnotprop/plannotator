@@ -114,6 +114,8 @@ function countChanges(patch: string): { additions: number; deletions: number } {
 }
 
 /** Sticky file header with file path, Viewed toggle, Git Add, and Copy Diff button */
+const NARROW_ACTIONS_WIDTH = 360;
+
 export const FileHeader: React.FC<FileHeaderProps> = ({
   filePath,
   patch,
@@ -153,6 +155,7 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
   useRovingToolbar(headerRef, viewedKeyHint);
   const { directory, name } = splitFilePath(filePath);
   const isVeryTight = headerWidth > 0 && headerWidth < 480;
+  const menuActions = isCompactTouchLayout || (!readOnly && headerWidth > 0 && headerWidth < NARROW_ACTIONS_WIDTH);
   const narrow = headerWidth > 0 && headerWidth < 560;
 
   useEffect(() => {
@@ -245,7 +248,7 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
           </span>
         )}
       </div>
-      {!isCompactTouchLayout && <div className={`flex flex-shrink-0 items-center pl-2 gap-1`}>
+      {!menuActions && <div className={`flex flex-shrink-0 items-center pl-2 gap-1`}>
         {accessory}
         {renderMarkdownView?.({ iconOnly: isVeryTight, touch: false })}
         {showViewedControl && onToggleViewed && (
@@ -370,13 +373,13 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
           }
         />}
       </div>}
-      {isCompactTouchLayout && (readOnly ? renderMarkdownView?.({ iconOnly: false, touch: true }) : (
+      {menuActions && (readOnly ? renderMarkdownView?.({ iconOnly: false, touch: true }) : (
         <CompactFileActions
           filePath={filePath}
           patch={patch}
           canOpen={state?.canUseLiveWorkspaceActions !== false && !(state?.prMetadata && !state?.agentCwd) && status !== 'deleted'}
           base={state?.agentCwd ?? null}
-          markdownView={renderMarkdownView?.({ iconOnly: true, touch: true })}
+          markdownView={renderMarkdownView?.({ iconOnly: true, touch: isCompactTouchLayout })}
           viewSwitch={accessory}
           viewed={showViewedControl && onToggleViewed ? { isViewed, onToggle: onToggleViewed } : null}
           onComment={onFileComment ? () => headerRef.current && onFileComment(headerRef.current) : undefined}
