@@ -14,6 +14,7 @@
  * Browser-safe and dependency-free apart from core's own question model.
  */
 
+import type { InboxReviewAddressed, InboxReviewAnchor, InboxReviewBatch, InboxReviewLive, InboxReviewResolved } from "./review-threads";
 import type { QuestionAnswer, QuestionKind } from "./question-block";
 import type { InboxAnnotationRecord, InboxAttachment, InboxAttachmentKind, InboxInlineImage, InboxLiveSiteRef } from "./inbox-attachments";
 import type { InboxDeliverNowBy, InboxRowDelivery } from "./inbox-delivery";
@@ -29,6 +30,7 @@ import type { InboxLaunchChoices } from "./inbox-launch-choice";
 import type { InboxRowSnooze } from "./inbox-snooze";
 import { INBOX_CODEX_QUEUE_MIN_VERSION } from "./inbox-codex";
 import { INBOX_QWEN_WAKE_MIN_VERSION } from "./inbox-qwen";
+import { INBOX_T3_HOST, isT3ThreadId } from "./inbox-t3";
 
 // The attachment shapes and file rules (step 2) live in their own module and
 // reach the Inbox through this published entry, so core's export map is unchanged.
@@ -768,14 +770,6 @@ export interface InboxMessage {
    */
   started_by_person?: true;
   /**
-   * On a person message a tailnet guest wrote (a login `inboxTailscaleAllow`
-   * let in that is not this computer's owner): a reply, a re-ask, a new
-   * message or a thread started in compose. It is kept and delivered as any,
-   * but never starts a stopped launched session again. Set once, when the
-   * message is written; absent on the owner's and on every other message.
-   */
-  by_guest?: true;
-  /**
    * On the root of a thread the person started with compose's Board chip on
    * (approval "inbox-compose-board-chip", 2026-10-27): the person asked the
    * agent to track the work on the Board. The body stays as typed; what the
@@ -861,6 +855,11 @@ export interface InboxMessage {
    * checks the session really ended; a reply aimed elsewhere while the asker is live does not carry it.
    */
   took_over?: boolean;
+  review_live?: InboxReviewLive;
+  review_anchor?: InboxReviewAnchor;
+  review_batch?: InboxReviewBatch;
+  review_resolved?: InboxReviewResolved | null;
+  review_addressed?: InboxReviewAddressed;
 }
 
 /** A hand-off a person's reply carries (`InboxMessage.handoff`). */
@@ -3269,6 +3268,16 @@ export const INBOX_REPLY_DRAFT_RECIPIENTS_MAX = INBOX_TAGS_MAX + 1;
 /** A session id as a tag (and a reply draft's recipient) names it. */
 export const INBOX_SESSION_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/;
 
+/** Whether a reply draft's recipient (an id with no host) can name this session: an id of that shape, or a T3 Code thread's own id. */
+export function isInboxRecipientSessionId(value: unknown): value is string {
+  return (typeof value === "string" && INBOX_SESSION_ID_PATTERN.test(value)) || isT3ThreadId(value);
+}
+
+/** Whether a tag of this host can name this session: a T3 Code thread's own id under `t3` only, an id of that shape under any other. */
+export function isInboxTagSessionId(host: unknown, session: unknown): session is string {
+  return host === INBOX_T3_HOST ? isT3ThreadId(session) : typeof session === "string" && INBOX_SESSION_ID_PATTERN.test(session);
+}
+
 /**
  * A long paste that became a file (approval "inbox-paste-attachment"): where Put back returns its text in the
  * draft's words. `at` is an offset into the words as saved, `lead` what goes before it (the thread-name chip's
@@ -3292,7 +3301,7 @@ export const INBOX_DRAFT_PASTED_LEAD_MAX = 2;
  * (approval "inbox-linked-marks"). The list says them (`marks`), so a linked machine offers a mark on this Inbox's
  * rows only once this Inbox takes it; an older Inbox says none.
  */
-export const INBOX_LINKED_MARKS = ["star", "priority", "agent-face", "agent-name", "take-back"] as const;
+export const INBOX_LINKED_MARKS = ["star", "priority", "agent-face", "agent-name", "take-back", "tags"] as const;
 export type InboxLinkedMark = (typeof INBOX_LINKED_MARKS)[number];
 
 /**
@@ -3620,8 +3629,6 @@ export interface InboxPromptsSettings {
      * next text in line): its length, else null. Absent from an older Inbox.
      */
     over?: { shared: number | null; runtimes: Record<InboxPromptHost, number | null> };
-    /** Whether this page may change it: false for a tailnet guest (it reaches every agent on this computer). */
-    editable: boolean;
   };
   /** The plan, review and annotate prompts, in the order the page lists them. */
   others: InboxPromptItem[];
@@ -3671,8 +3678,6 @@ export interface InboxVoiceSettings {
   computer: string | null;
   /** The one-time announcement may still show here (`POST /api/inbox/voice/intro` claims it). */
   intro_due: boolean;
-  /** A tailnet login other than the owner's: `on` is false and voice's routes answer `owner_only`, as Feedback's does. */
-  guest: boolean;
 }
 
 /**

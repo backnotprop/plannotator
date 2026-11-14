@@ -160,6 +160,8 @@ import {
 	handleUploadRequest,
 } from "./handlers.ts";
 import { handleApiNotFound, serveApp, json, parseBody, parseJsonBody, readBody, requestUrl, send } from "./helpers.ts";
+import { createReviewLiveRoute } from "./review-live-route.ts";
+import type { ReviewLiveTarget } from "../generated/review-live.ts";
 import { captureReviewProgress, handleReviewProgress } from "../generated/review-progress.ts";
 import { createPiAIRuntime, handlePiAIRequest } from "./ai-runtime.ts";
 import type { SessionBridge } from "../generated/ai/session-bridge.ts";
@@ -362,6 +364,8 @@ export async function startReviewServer(options: {
 	origin?: string;
 	diffType?: DiffType | WorkspaceDiffType;
 	gitContext?: GitContext;
+	liveReviewAgent?: ReviewLiveTarget | null;
+	liveReviewDataDir?: string;
 	/**
 	 * Initial base branch the caller used to compute `rawPatch`. When a caller
 	 * overrides the detected default (e.g. `openCodeReview({ defaultBranch })`),
@@ -450,6 +454,17 @@ export async function startReviewServer(options: {
 	const hasLocalAccess = !!options.gitContext;
 	const sessionVcsType = options.gitContext?.vcsType;
 	let clientGitContext = options.gitContext;
+	const liveRoute = createReviewLiveRoute({
+		...(options.liveReviewDataDir ? { dataDir: options.liveReviewDataDir } : {}),
+		launchedBy: options.liveReviewAgent ?? null,
+		projectPath: () => clientGitContext?.root ?? clientGitContext?.cwd ?? options.gitContext?.root ?? options.gitContext?.cwd ?? options.agentCwd ?? process.cwd(),
+		review: () =>
+			prMeta?.url
+				? { key: `pr:${prMeta.url}`, title: prMeta.title || prMeta.url }
+				: clientGitContext?.currentBranch
+					? { key: `branch:${clientGitContext.currentBranch}`, title: clientGitContext.currentBranch }
+					: null,
+	});
 	const isRemote = isRemoteSession();
 	const wslFlag = detectWSL();
 	let prRef = prMeta ? prRefFromMetadata(prMeta) : null;
@@ -2267,6 +2282,7 @@ export async function startReviewServer(options: {
 		const url = requestUrl(req);
 
 		if (handleHostControl(req, res, url, { token: hostControlToken, getServerPort: () => boundPort, control: hostControl })) return;
+		if (await liveRoute(req, res, url)) return;
 		if (await handleRefCards(req, res, url, refCards, serverSession)) return;
 
 		// API: Get guide result — live job ids, or `saved:{id}` for a

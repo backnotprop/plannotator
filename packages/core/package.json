@@ -1,6 +1,6 @@
 {
   "name": "@plannotator/core",
-  "version": "0.25.30",
+  "version": "0.25.31",
   "license": "Apache-2.0",
   "type": "module",
   "exports": {
@@ -95,7 +95,9 @@
     "./types": "./types.ts",
     ".": "./index.ts",
     "./guide-format-fixtures": "./guide-format-fixtures.ts",
-    "./guide-viewer-manifest": "./guide-viewer-manifest.ts"
+    "./guide-viewer-manifest": "./guide-viewer-manifest.ts",
+    "./line-anchor": "./line-anchor.ts",
+    "./review-threads": "./review-threads.ts"
   },
   "files": [
     "**/*.ts",

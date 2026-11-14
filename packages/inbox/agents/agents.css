@@ -1,3 +1,5 @@
+@import "../../ui/components/agentFace/agentFace.css";
+
 /* The sidebar's Agents section (approval "inbox-agents-section", APPROVED STATE 2026-11-09; AgentsSection.tsx) and
    the animated agent marks (approval "inbox-agent-icon-motion"; motion.ts). Theme tokens only. */
 
@@ -6,12 +8,14 @@
 /* The heading's goggles: one filled shape in the heading's grey (currentColor), both themes. */
 .pn-inbox .ib-side-sec > svg.ib-ic.ib-agents-mk,
 .pn-inbox .ib-sheet-now-n > svg.ib-ic.ib-agents-mk { fill: currentColor; stroke: none; overflow: visible; }
-/* Add agent and Add machine: the heading's quiet icon buttons, always shown while the section is open (not only on
-   hover), the chevron's place kept. */
-.pn-inbox .ib-agentsec .ib-agents-add { opacity: 1; }
-.pn-inbox .ib-agentsec .ib-agents-add[data-agents-add="agent"] { right: 50px; }
-.pn-inbox .ib-agentsec .ib-agents-add[data-agents-add="machine"] { right: 24px; }
-.pn-inbox .ib-agentsec [data-one-add] .ib-agents-add[data-agents-add="agent"] { right: 24px; }
+/* Add machine, then Add agent: the heading's quiet icon buttons, the chevron's place kept, so Add agent is right under
+   Tags' New tag. Shown while the section is open; closed, on the heading's hover or focus (always where nothing
+   hovers), as New tag. */
+.pn-inbox .ib-agentsec:not([data-closed]) .ib-agents-add { opacity: 1; }
+.pn-inbox .ib-agentsec .ib-agents-add[data-agents-add="machine"] { right: 50px; }
+/* The phone's sheet lays the heading's buttons out in a row: Add agent first there, and none on a closed heading. */
+.pn-inbox .ib-sb-sheet-in .ib-agentsec .ib-agents-add[data-agents-add="machine"] { order: 1; }
+.pn-inbox .ib-sb-sheet-in .ib-agentsec[data-closed] .ib-agents-add { display: none; }
 .pn-inbox .ib-agents-body { margin-top: 2px; }
 .pn-inbox .ib-agents-body[data-closed] { margin-top: 0; }
 .pn-inbox .ib-agents-group + .ib-agents-group { margin-top: 10px; }
@@ -78,32 +82,6 @@
 
 /* ---------- the animated agent mark (motion.ts): 24 px, no tile, always alive ---------- */
 .pn-inbox .am { --am: var(--ib-mark-24); position: relative; display: inline-grid; place-items: center; flex: none; width: var(--am); height: var(--am); cursor: pointer; -webkit-tap-highlight-color: transparent; }
-/* The layer that leans toward the pointer, around the mark's feet. */
-.am-look { grid-area: 1 / 1; display: grid; place-items: center; width: var(--am); height: var(--am); transform-origin: 50% 90%; will-change: transform; }
-.am-card { grid-area: 1 / 1; position: relative; width: var(--am); height: var(--am); display: grid; place-items: center; transform-style: preserve-3d; }
-.am-face { grid-area: 1 / 1; position: absolute; inset: 0; display: grid; place-items: center; backface-visibility: hidden; }
-.am-face[hidden] { display: none; }
-/* OpenCode's currentColor mark takes the muted text colour. */
-.am-tile { position: relative; width: 100%; height: 100%; display: grid; place-items: center; color: var(--muted-foreground); }
-.am-tile > .ib-mk, .am-tile > .ib-mk > svg, .am-tile > .ib-mk > img { width: var(--ib-mark-20); height: var(--ib-mark-20); }
-.am-glyph { width: var(--am); height: var(--am); display: block; overflow: visible; }
-/* A rig: every part an HTML layer the size of the glyph, holding its own small svg. */
-.am-rig { position: relative; }
-.am-rig .am-p, .am-rig .am-x, .am-rig .am-spin, .am-rig .am-e { position: absolute; inset: 0; display: block; }
-.am-l { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
-/* The gesture layer and the eyes (the layer inside it that looks toward the pointer) are promoted up front, so a
-   gesture or a look never lays out or repaints the row. */
-.am-rig .am-x, .am-fb.am-x, .am-rig .am-e { will-change: transform; }
-/* Our faces (the favicon art) move as a whole. */
-.am-fb { display: block; width: 100%; height: 100%; transform-origin: 50% 97%; }
-/* A host with no rig: its plain mark, drawn in the same moving layer. */
-.am-fb.am-plain { display: grid; place-items: center; }
-.am-plain > .ib-mk, .am-plain > .ib-mk > svg, .am-plain > .ib-mk > img { width: var(--ib-mark-20); height: var(--ib-mark-20); }
-.am-art { display: block; width: 100%; height: 100%; }
-/* Transparent: the ink-frame mark on light, the yellow-frame pixel mark on dark. */
-.am-art-l { display: none; }
-:root.light .am-art-l { display: block; }
-:root.light .am-art-d { display: none; }
 
 /* ---------- the face picker (FaceFan.tsx): a half-circle fan of faces round the mark, an overlay ---------- */
 /* The positioner sits at the mark's centre with no size; each choice is placed from there (fanLayout.ts). */

@@ -41,7 +41,6 @@ function model(over: Partial<InboxPromptsSettings['reminder']> = {}): InboxPromp
       defaults: { wake: WAKE, no_wake: 'no wake' },
       max: 9000,
       on: { 'claude-code': true, pi: true, opencode: false },
-      editable: true,
       ...over,
     },
     others: [
@@ -334,17 +333,6 @@ test.skipIf(!hasDom)('Guided reviews: Default with only Edit; Save writes `guide
   await click(q(row, '[data-prompt-reset="guide"]'));
   expect(sent.at(-1)).toEqual({ guide: null });
   expect(q(row, '.ib-chip')?.textContent).toBe('Default');
-});
-
-test.skipIf(!hasDom)('through the tailnet: read-only, no Edit anywhere', () => {
-  const el = mount(model({ editable: false, shared: 'Mine.', runtimes: { 'claude-code': null, pi: 'Pi.', opencode: null } }));
-  expect(el.querySelectorAll('[data-prompt-edit], [data-prompt-reset], [data-prompt-use-shared]')).toHaveLength(0);
-  expect(el.textContent).toContain('Change it on this computer.');
-  expect(q(el, '[data-prompt-text="pi"]')?.textContent).toBe('Pi.');
-  // Guided reviews too: shown, never editable.
-  act(() => root!.render(<PromptsSection prompts={{ ...model({ editable: false }), guide: { text: 'Mine.', max: 12000 } }} />));
-  expect(q(el, '[data-prompt-text="guide"]')?.textContent).toBe('Mine.');
-  expect(el.querySelectorAll('[data-prompt-edit], [data-prompt-reset]')).toHaveLength(0);
 });
 
 function withRules(rules: Partial<NonNullable<InboxPromptsSettings['rules']>> = {}): InboxPromptsSettings {

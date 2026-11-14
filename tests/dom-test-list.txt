@@ -102,7 +102,7 @@ packages/inbox/threadFolding.test.tsx
 packages/inbox/threadNameMeta.test.tsx
 packages/inbox/threadHeader.test.tsx
 packages/inbox/snoozeBackLine.test.tsx
-packages/inbox/launchMenuGuest.test.tsx
+packages/inbox/launchMenuTailnet.test.tsx
 packages/inbox/remoteLaunchThread.test.tsx
 packages/inbox/composeLaunchPulls.test.tsx
 packages/inbox/choiceLabels.test.tsx
@@ -711,6 +711,7 @@ packages/inbox/prs/prsInReviews.test.tsx
 packages/inbox/prs/sheetTable.test.tsx
 packages/inbox/prs/sheetSelect.test.tsx
 packages/inbox/prs/sheetMerge.test.tsx
+packages/inbox/prs/sheetClose.test.tsx
 packages/inbox/fileQuestionCards.test.tsx
 packages/inbox/agents/agentsSection.test.tsx
 packages/inbox/agents/faceFan.test.tsx
@@ -741,3 +742,4 @@ packages/ui/components/Viewer.blockRedraws.test.tsx
 packages/editor/hooks/useCheckboxOverrides.viewer.test.tsx
 packages/ui/components/TaterSpriteSlots.test.tsx
 packages/inbox/sidebarRedraws.test.tsx
+packages/inbox/agents/faceSources.test.tsx
