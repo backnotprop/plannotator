@@ -204,7 +204,8 @@ describe.skipIf(!hasDom)('the review panes', () => {
     const original = Element.prototype.getBoundingClientRect;
     Element.prototype.getBoundingClientRect = function (this: Element) {
       const left = this.matches('[data-pane="1"]') ? 700 : this.matches('[data-header-pane-tabs]') ? 200 : 0;
-      return { left, right: left, top: 0, bottom: 0, width: 0, height: 0, x: left, y: 0, toJSON: () => ({}) } as DOMRect;
+      const width = this.matches('[data-header-pane-tabs]') ? 900 : 0;
+      return { left, right: left + width, top: 0, bottom: 0, width, height: 0, x: left, y: 0, toJSON: () => ({}) } as DOMRect;
     };
     try {
       await mount(false, { tabsSlot: slot });

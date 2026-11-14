@@ -4,7 +4,7 @@ import type { PaneLayout, PaneTab } from './paneLayout';
 export const LAYOUT_MEMORY_KEY = 'plannotator-review-layouts';
 const MAX_REVIEWS = 6;
 const MAX_TABS_PER_PANE = 8;
-const RESTORABLE = new Set(['review-all-files', 'review-file', 'review-pr-overview', 'review-pr-artifacts', 'review-semantic-diff', 'review-call-flow']);
+const RESTORABLE = new Set(['review-all-files', 'review-diff', 'review-file', 'review-pr-overview', 'review-pr-artifacts', 'review-semantic-diff', 'review-call-flow']);
 
 export interface SavedLayout {
   panes: { tabs: PaneTab[]; activeId: string | null }[];
