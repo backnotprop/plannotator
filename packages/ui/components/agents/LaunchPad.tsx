@@ -3,6 +3,7 @@ import { BookOpenText, ChevronRight, Loader2, ScanSearch } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import type { AgentLaunchParams } from '../../hooks/useAgentJobs';
 import type { LaunchConfig, LaunchKind, LaunchSide } from '../../hooks/useLaunchConfig';
+import { HostMark } from '../inbox-thread/icons';
 import { useLaunchFolds } from '../../hooks/useLaunchFolds';
 import { useGuideInstructions } from '../../hooks/useGuideInstructions';
 import { LaunchDetails } from './LaunchDetails';
@@ -70,7 +71,7 @@ function LaunchRow({
             {side.models === null && !side.experimental ? (
               <span className="block truncate text-[12px] text-muted-foreground" data-launch-summary="">Loading models…</span>
             ) : (
-              <LaunchSummaryLine summary={side.summary} />
+              <LaunchSummaryLine summary={side.summary} engine={side.engine} />
             )}
           </span>
           <ChevronRight
@@ -153,14 +154,18 @@ export function LaunchPad({
   );
 }
 
-export function LaunchSummaryLine({ summary }: { summary: string }) {
-  const [engine, model, ...rest] = summary.split(' · ');
-  if (!model) return <span className="block truncate text-[12px] text-muted-foreground" data-launch-summary="">{summary}</span>;
+export function LaunchSummaryLine({ summary, engine }: { summary: string; engine?: string }) {
+  const [engineName, model, ...rest] = summary.split(' · ');
+  if (!model) return <span className="block text-[12px] text-muted-foreground" data-launch-summary="">{summary}</span>;
   return (
-    <span className="flex min-w-0 text-[12px] text-muted-foreground" data-launch-summary="" title={summary}>
-      <span className="min-w-0 shrink-[2] truncate">{engine} ·&nbsp;</span>
-      <span className="max-w-full flex-none truncate" data-launch-model="">{model}</span>
-      {rest.length > 0 && <span className="min-w-0 shrink truncate">&nbsp;· {rest.join(' · ')}</span>}
+    <span className="flex flex-wrap items-center gap-x-1 text-[12px] leading-5 text-muted-foreground" data-launch-summary="" title={summary}>
+      <span className="inline-flex flex-none items-center [&_.ib-mk]:inline-flex [&_.ib-mk]:size-3.5 [&_svg]:size-3.5" title={engineName} aria-label={engineName} role="img" data-launch-engine={engine ?? engineName}>
+        <HostMark host={engine ?? engineName.toLowerCase()} />
+      </span>
+      <span data-launch-model="">{model}</span>
+      {rest.map((part) => (
+        <span key={part} className="whitespace-nowrap" data-launch-option="">· {part}</span>
+      ))}
     </span>
   );
 }

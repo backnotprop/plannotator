@@ -15,17 +15,20 @@ afterEach(async () => {
 });
 
 describe.if(hasDom)('the launch row keeps the model name whole', () => {
-  test('engine and options give way first; the model never shrinks; the whole line is in the title', async () => {
+  test('the engine is its mark with its name in the tooltip; the model and every option stay whole and wrap instead of being cut', async () => {
     host = document.createElement('div');
     document.body.appendChild(host);
     root = createRoot(host);
-    await act(async () => root!.render(<LaunchSummaryLine summary="Claude · Sonnet 5.5 · High · Fast" />));
+    await act(async () => root!.render(<LaunchSummaryLine summary="Claude · Sonnet 5.5 · High · Fast" engine="claude" />));
     const line = host.querySelector<HTMLElement>('[data-launch-summary]')!;
-    const model = host.querySelector<HTMLElement>('[data-launch-model]')!;
-    expect(model.textContent).toBe('Sonnet 5.5');
-    expect(model.className).toContain('flex-none');
+    const engine = host.querySelector<HTMLElement>('[data-launch-engine]')!;
+    expect(engine.getAttribute('title')).toBe('Claude');
+    expect(engine.textContent).toBe('');
+    expect(engine.querySelector('svg, img')).not.toBeNull();
+    expect(host.querySelector('[data-launch-model]')!.textContent).toBe('Sonnet 5.5');
+    expect([...host.querySelectorAll('[data-launch-option]')].map((o) => o.textContent)).toEqual(['· High', '· Fast']);
+    expect(line.className).toContain('flex-wrap');
+    expect(host.querySelector('.truncate')).toBeNull();
     expect(line.getAttribute('title')).toBe('Claude · Sonnet 5.5 · High · Fast');
-    const others = [...line.children].filter((child) => child !== model);
-    expect(others.every((child) => child.className.includes('shrink') && child.className.includes('truncate'))).toBe(true);
   });
 });
