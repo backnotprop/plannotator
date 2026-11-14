@@ -5,7 +5,7 @@ const PowerUpGuyLive = lazy(() => import('./PowerUpGuyLive'));
 const STILL_SRC = glassDataUrl(GLASS_COLOURS.find((colour) => colour.id === 'glass') ?? GLASS_COLOURS[0]!);
 export const POWER_UP_GUY_REST_MS = 4_000;
 
-export type PowerUpGuyState = 'alive' | 'grey';
+export type PowerUpGuyState = 'alive' | 'still' | 'grey';
 
 export const PowerUpGuy: React.FC<{ state: PowerUpGuyState; size?: number; wakeKey?: unknown; poke?: number }> = ({ state, size = 20, wakeKey, poke = 0 }) => {
   const [awake, setAwake] = useState(false);
@@ -37,7 +37,7 @@ export const PowerUpGuy: React.FC<{ state: PowerUpGuyState; size?: number; wakeK
   );
   return (
     <span
-      data-power-up-guy={state === 'grey' ? 'grey' : awake ? 'alive' : 'resting'}
+      data-power-up-guy={state === 'alive' ? (awake ? 'alive' : 'resting') : state}
       aria-hidden="true"
       style={{ display: 'inline-grid', placeItems: 'center', width: size, height: size, flex: 'none' }}
     >
