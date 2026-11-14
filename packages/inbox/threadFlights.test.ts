@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import type { InboxThread } from '@plannotator/core/inbox-types';
 import { joinThreadRead, type ThreadFlight } from './threadFlights';
 
-test('reads of one thread never overlap: a second ask joins the one out and one more read follows it', async () => {
+test('reads of one thread never overlap; a read asked while one is out gets the next read, which starts after it', async () => {
   const flights = new Map<string, ThreadFlight>();
   let out = 0;
   let most = 0;
@@ -20,14 +20,19 @@ test('reads of one thread never overlap: a second ask joins the one out and one 
   const first = joinThreadRead(flights, 't', undefined, read);
   const second = joinThreadRead(flights, 't', undefined, read);
   const third = joinThreadRead(flights, 't', undefined, read);
-  expect(second).toBe(first);
-  expect(third).toBe(first);
+  expect(second).not.toBe(first);
+  expect(third).toBe(second);
   expect(reads).toBe(1);
   releases.shift()!();
   await first;
   for (let i = 0; i < 5; i++) await Promise.resolve();
   expect(reads).toBe(2);
+  let secondDone = false;
+  void second.then(() => (secondDone = true));
+  for (let i = 0; i < 5; i++) await Promise.resolve();
+  expect(secondDone).toBe(false);
   releases.shift()!();
+  await second;
   for (let i = 0; i < 5; i++) await Promise.resolve();
   expect(most).toBe(1);
   expect(flights.size).toBe(0);
