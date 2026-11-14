@@ -6,6 +6,7 @@ export const INBOX_AGENT_READ_WAIT_MS = 15_000;
 export const INBOX_AGENT_WRITE_WAIT_MS = 30_000;
 const POLL_MS = 300;
 const REQUEST_MS = 10_000;
+const BYTES_PER_EXTRA_SECOND = 256 * 1024;
 
 export const INBOX_AGENT_WRITE_ACTIONS: readonly string[] = ["send_message", "resolve_message", "snooze_thread", "thread_pulls", "submit_guide", "card", "steps"];
 
@@ -58,13 +59,15 @@ export async function callInboxThroughRelay(
     code: "relay_unreachable",
     message: `Could not reach the Inbox's relay at ${pairing.relay.url} (${error instanceof Error ? error.message : String(error)}). Nothing was sent. Check that this machine may reach that address; on a Claude Code routine, add its host under the environment's allowed domains.`,
   });
-  const relay = (method: string, path: string, body?: unknown) =>
-    http(`${base}${path}`, {
+  const relay = (method: string, path: string, body?: unknown) => {
+    const text = body === undefined ? undefined : JSON.stringify(body);
+    return http(`${base}${path}`, {
       method,
-      headers: { Authorization: `Bearer ${keys.relaySecret}`, ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
-      body: body === undefined ? undefined : JSON.stringify(body),
-      signal: AbortSignal.timeout(REQUEST_MS),
+      headers: { Authorization: `Bearer ${keys.relaySecret}`, ...(text === undefined ? {} : { "Content-Type": "application/json" }) },
+      body: text,
+      signal: AbortSignal.timeout(REQUEST_MS + Math.ceil((text?.length ?? 0) / BYTES_PER_EXTRA_SECOND) * 1000),
     });
+  };
   const held = async (): Promise<{ items: HeldItem[]; online: boolean } | InboxAgentRelayOutcome> => {
     const answer = await relay("GET", "/items?after=0");
     if (answer.status === 401 || answer.status === 404) return removed();

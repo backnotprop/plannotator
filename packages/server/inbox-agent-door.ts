@@ -7,6 +7,7 @@ import { bodyShowsLocalImages } from "@plannotator/shared/inbox/inline-images";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { inboxUploadAttachments, receiveInboxUpload, removeInboxUploads } from "@plannotator/shared/inbox/uploads";
+import { bytesOfBase64, createInboxAgentPieces, inboxAgentPieceAction } from "./inbox-agent-pieces";
 import { hasCloudWake, type InboxCloudAgent, type InboxCloudAgents } from "./inbox-cloud-agents";
 import { prototypePlace } from "./inbox-live";
 import { createInboxMcpServer, type InboxMcpContext } from "./inbox-mcp";
@@ -58,6 +59,7 @@ const sameName = (a: string, b: string) => a.trim().toLowerCase() === b.trim().t
 
 export function createInboxAgentDoor(context: InboxAgentDoorContext) {
   const { store, agents } = context;
+  const pieces = createInboxAgentPieces(store.dir);
   const inScope = (threadId: string | null | undefined, session: string): boolean => {
     if (!threadId) return false;
     for (const message of store.thread(threadId)?.messages ?? []) {
@@ -123,27 +125,31 @@ export function createInboxAgentDoor(context: InboxAgentDoorContext) {
   };
 
   const projectNames = () => store.listProjects().map((project) => project.name);
-  const receive = async (value: unknown): Promise<string[]> => {
+  const receive = async (agent: InboxCloudAgent, value: unknown): Promise<string[]> => {
     if (value === undefined) return [];
-    if (!Array.isArray(value)) throw new DoorRefusal("validation_error", "attachments: a list of { name, data } (data: the file's bytes as base64).");
-    const files = value.map((item, i) => {
+    if (!Array.isArray(value)) throw new DoorRefusal("validation_error", "attachments: a list of { name, data } (data: the file's bytes as base64), or { upload } for a file sent in pieces.");
+    const files = value.map((item, i): { piece: ReturnType<typeof pieces.take> } | { name: string; bytes: Buffer } => {
       if (typeof item === "string") {
         throw new DoorRefusal("attachment_path_refused", `attachments[${i}]: ${JSON.stringify(item)} is a path, and the Inbox opens no path for a cloud agent. Send the file's bytes: { "name": "shot.png", "data": "<base64>" } (plannotator inbox call does this for a path on your own disk).`);
       }
-      const file = item as { name?: unknown; data?: unknown } | null;
-      if (!file || typeof file !== "object" || typeof file.name !== "string" || typeof file.data !== "string" || !/^[A-Za-z0-9+/_-]*={0,2}$/.test(file.data)) {
-        throw new DoorRefusal("validation_error", `attachments[${i}]: { name, data } with data as base64.`);
-      }
-      return { name: file.name, bytes: Buffer.from(file.data, file.data.includes("-") || file.data.includes("_") ? "base64url" : "base64") };
+      const file = item as { name?: unknown; data?: unknown; upload?: unknown } | null;
+      if (file && typeof file === "object" && "upload" in file) return { piece: pieces.take(agent.session, file.upload) };
+      const bytes = file && typeof file === "object" && typeof file.name === "string" ? bytesOfBase64(file.data) : null;
+      if (!bytes) throw new DoorRefusal("validation_error", `attachments[${i}]: { name, data } with data as base64, or { upload } for a file sent in pieces.`);
+      return { name: file!.name as string, bytes };
     });
-    const total = files.reduce((sum, file) => sum + file.bytes.length, 0);
+    const total = files.reduce((sum, file) => sum + ("bytes" in file ? file.bytes.length : 0), 0);
     if (total > INBOX_AGENT_ATTACHMENTS_MAX_BYTES) {
-      throw new DoorRefusal("attachments_too_large", `attachments: at most ${INBOX_AGENT_ATTACHMENTS_MAX_BYTES / (1024 * 1024)} MB in one message.`);
+      throw new DoorRefusal("attachments_too_large", `attachments: at most ${INBOX_AGENT_ATTACHMENTS_MAX_BYTES / (1024 * 1024)} MB as data in one message. Send a bigger file in pieces (plannotator inbox call does this for a path on your own disk).`);
     }
     const at = new Date(context.mcp.now?.() ?? Date.now()).toISOString();
     const ids: string[] = [];
     try {
       for (const file of files) {
+        if ("piece" in file) {
+          ids.push((await receiveInboxUpload(store.dir, file.piece.name, Bun.file(file.piece.path).stream(), { at })).upload_id);
+          continue;
+        }
         const bytes = file.bytes;
         const stream = new ReadableStream<Uint8Array>({
           start(controller) {
@@ -157,6 +163,7 @@ export function createInboxAgentDoor(context: InboxAgentDoorContext) {
       removeInboxUploads(store.dir, ids);
       throw error;
     }
+    for (const file of files) if ("piece" in file) file.piece.drop();
     return ids;
   };
 
@@ -203,6 +210,8 @@ export function createInboxAgentDoor(context: InboxAgentDoorContext) {
       if (extra) throw new DoorRefusal("validation_error", `${extra}: whoami takes no fields.`);
       return whoami(agent);
     }
+    const pieceResult = inboxAgentPieceAction(pieces, agent.session, tool, args);
+    if (pieceResult) return pieceResult;
 
     const tools = await servedTools(contextFor(agent, []));
     const fields = tools.get(tool);
@@ -214,7 +223,7 @@ export function createInboxAgentDoor(context: InboxAgentDoorContext) {
     if (typeof args.body === "string" && bodyShowsLocalImages(args.body)) {
       throw new DoorRefusal("image_path_refused", "body: a picture shown by path (![alt](path)) is not taken from a cloud agent: the Inbox opens no path for it. Put the picture in attachments instead (plannotator inbox call reads a path there from your own disk and sends its bytes); it shows below the message.");
     }
-    const uploads = fields.includes("attachments") ? await receive(args.attachments) : [];
+    const uploads = fields.includes("attachments") ? await receive(agent, args.attachments) : [];
     try {
       const sent = argumentsFor(agent, tool, fields, args, uploads, commandId);
       const answer = await mcpRequest(contextFor(agent, uploads), "tools/call", { name: tool, arguments: sent });

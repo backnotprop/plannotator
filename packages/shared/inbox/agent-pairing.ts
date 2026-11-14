@@ -1,6 +1,8 @@
 import { INBOX_TOOL_ACTIONS } from "./connection";
 
 export const INBOX_AGENT_CALL_ACTIONS = ["whoami", ...INBOX_TOOL_ACTIONS] as const;
+export const INBOX_AGENT_UPLOAD_PIECE = "upload_piece";
+export const INBOX_AGENT_UPLOAD_FINISH = "upload_finish";
 
 export const INBOX_AGENT_PAIRING_PREFIX = "plannotator-pairing-1.";
 export const INBOX_AGENT_PAIRING_RELAY_PREFIX = "plannotator-pairing-2.";
