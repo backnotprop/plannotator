@@ -16,7 +16,11 @@ export function joinThreadRead(
   read: (threadId: string, given?: ThreadModel) => Promise<InboxThread | null>,
   stillStale: (threadId: string) => boolean = () => false,
 ): Promise<InboxThread | null> {
-  if (given) return read(threadId, given);
+  if (given)
+    return read(threadId, given).then((thread) => {
+      if (thread !== null && stillStale(threadId)) void joinThreadRead(flights, threadId, undefined, read, stillStale);
+      return thread;
+    });
   const out = flights.get(threadId);
   if (out) {
     out.again = true;
