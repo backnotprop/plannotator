@@ -1,8 +1,10 @@
 /**
- * Compression of the Inbox's JSON answers for the browser, on every listener
- * the browser reaches: the window's own loopback port (and so a plain reverse
- * proxy or ssh tunnel in front of it) and the Inbox's tailnet listener. One
- * path for both, applied where each listener answers, so no listener can drift.
+ * Compression of the Inbox's JSON answers, and of the attached HTML pages it
+ * keeps (inbox-pages.ts, about 300 KB with their annotation bridge), for the
+ * browser, on every listener the browser reaches: the window's own loopback
+ * port (and so a plain reverse proxy or ssh tunnel in front of it) and the
+ * Inbox's tailnet listener. One path for both, applied where each listener
+ * answers, so no listener can drift.
  *
  * Not applied inside the handler the device door and the relay call in
  * process: the door forwards no `Accept-Encoding`, and the relay reads bodies
@@ -14,8 +16,8 @@
  * `packedAppResponse`), not here.
  *
  * Left exactly as they are (the same Response object, never read):
- * - anything that is not `application/json` (the event stream, pictures,
- *   video, attachments, the page, scripts);
+ * - anything else (the event stream, pictures, video, attachments, the page,
+ *   scripts);
  * - a body already encoded, a HEAD, and any status other than 200;
  * - any answer with a byte range or a validator of its own (`Content-Range`,
  *   `Accept-Ranges`, `ETag`, `Content-Disposition`): a file a person attached,
@@ -26,6 +28,7 @@
  */
 import * as zlib from "node:zlib";
 import { negotiateAppHtmlEncoding } from "@plannotator/shared/app-html";
+import { INBOX_PAGES_PATH } from "./inbox-pages";
 
 /** Below this a compressed body saves less than a packet. */
 export const INBOX_JSON_COMPRESS_MIN_BYTES = 1024;
@@ -68,10 +71,17 @@ function addVary(headers: Headers): void {
 }
 
 /** The browser-facing answer for `res`: a JSON body compressed when the client takes it, else `res` untouched. */
+const PAGE_DOCUMENTS = `${INBOX_PAGES_PATH}/`;
+
+function compressible(req: Request, type: string): boolean {
+  const kind = type.toLowerCase();
+  if (kind.startsWith("application/json")) return true;
+  return kind.startsWith("text/html") && new URL(req.url).pathname.startsWith(PAGE_DOCUMENTS);
+}
+
 export async function encodeInboxResponse(req: Request, res: Response): Promise<Response> {
   if (req.method === "HEAD" || res.status !== 200 || !res.body) return res;
-  const type = res.headers.get("content-type") ?? "";
-  if (!type.toLowerCase().startsWith("application/json")) return res;
+  if (!compressible(req, res.headers.get("content-type") ?? "")) return res;
   if (KEEP_AS_IS.some((name) => res.headers.has(name))) return res;
   const encoding = negotiateAppHtmlEncoding(req.headers.get("accept-encoding"));
   const raw = Buffer.from(await res.arrayBuffer());

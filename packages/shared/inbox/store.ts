@@ -335,8 +335,6 @@ export interface InboxAnswerEntry {
 
 export interface InboxReplyInput {
   words?: string;
-  /** Written by a tailnet guest (`InboxMessage.by_guest`): the server's `isGuest`, never the window's word. */
-  by_guest?: boolean;
   questions?: InboxAnswerEntry[];
   idempotency_key: string;
   /** `to` takes the place of a session the server read as ended (`InboxMessage.took_over`). */
@@ -425,8 +423,6 @@ export interface InboxReplyInput {
 /** The person's Re-ask (approval "inbox-reask"): ask the agent for its open questions again, in one message. */
 export interface InboxReaskInput {
   idempotency_key: string;
-  /** Written by a tailnet guest (`InboxMessage.by_guest`). */
-  by_guest?: boolean;
   /**
    * Another live session takes the note, because the one that asked has
    * ended (the window's choice, as for a reply). Null: a session was asked
@@ -5083,7 +5079,6 @@ export class InboxStore {
       created_at: at,
       resolved_at: null,
       idempotency_key: key,
-      ...(input.by_guest ? { by_guest: true as const } : {}),
       ...(to ? { to: { host: to.host, session: to.session } } : {}),
       ...(to && input.took_over ? { took_over: true } : {}),
       ...(attachments.length > 0 ? { attachments: attachments.map((attachment) => ({ ...attachment, sent_at: at })) } : {}),
@@ -5317,7 +5312,6 @@ export class InboxStore {
       resolved_at: null,
       idempotency_key: key,
       reask: open.map((r) => r.id),
-      ...(input.by_guest ? { by_guest: true as const } : {}),
       ...(to ? { to: { host: to.host, session: to.session } } : {}),
     };
     try {
@@ -6997,7 +6991,7 @@ export class InboxStore {
    * message it wrote, and writes nothing. Whether the session is live is the
    * server's check: `to` null means it is not, and only a replay answers.
    */
-  sendNewMessage(threadId: string, input: { body: unknown; to: InboxAddressee | null; idempotency_key: unknown; by_guest?: boolean }): { message: InboxMessage; replayed: boolean } {
+  sendNewMessage(threadId: string, input: { body: unknown; to: InboxAddressee | null; idempotency_key: unknown }): { message: InboxMessage; replayed: boolean } {
     const key = typeof input.idempotency_key === "string" ? input.idempotency_key.trim() : "";
     if (!key) throw new InboxError("validation_error", "idempotency_key: required on a Send.", { field: "idempotency_key" });
     const root = this.messages.get(threadId);
@@ -7024,7 +7018,6 @@ export class InboxStore {
       resolved_at: null,
       idempotency_key: key,
       to: { host: input.to.host, session: input.to.session },
-      ...(input.by_guest ? { by_guest: true as const } : {}),
     };
     this.appendMessage(message, at);
     this.endSnooze(threadId);
@@ -7097,8 +7090,6 @@ export class InboxStore {
     body: unknown;
     to: InboxAddressee | null;
     idempotency_key: unknown;
-    /** Written by a tailnet guest (`InboxMessage.by_guest`). */
-    by_guest?: boolean;
     attachments?: InboxAttachment[];
     /** The thread's name (its chip), when the person gave one: checked by the thread-name rules; an agent never replaces it. */
     thread_name?: unknown;
@@ -7167,7 +7158,6 @@ export class InboxStore {
       idempotency_key: key,
       to: { host: input.to.host, session: input.to.session },
       started_by_person: true,
-      ...(input.by_guest ? { by_guest: true as const } : {}),
       ...(input.board_request === true ? { board_request: true as const } : {}),
       ...(input.decision_ask === true ? { decision_ask: true as const } : {}),
       ...(input.rows_ask === true ? { rows_ask: true as const } : {}),
