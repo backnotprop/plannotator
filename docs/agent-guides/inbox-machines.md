@@ -1,5 +1,10 @@
 ## Inbox: linked machines
 
+**The rule: one experience across a person's devices** (the owner, 2026-11-13: "It's all one unified experience for me … No arbitrary rules, this isn't some made-up enterprise scenario, this is an open source tool that needs to work seamlessly across people's devices"). A feature is done only when it works on another linked machine's thread, agent or project the same way it works on this machine's own: the same menu item, the same result, seen from either machine. A thread lives on one machine, so the action goes to that machine (as snooze and Priority do); that is plumbing, never a reason to hide the feature. The one allowed gap is a linked machine that is older or offline: the item is left out for its threads until it updates, with no error and no explanation dialog. Do not add a per-machine rule, switch or warning for any other reason.
+
+- Building a feature: add the far-machine path and its capability check in the same PR, and prove it with two linked Inboxes, both directions.
+- Known gaps, each a bug against this rule, to close: thread tags on another machine's thread (step 1 offered Add tag on this machine's threads only); a reply draft for another machine's thread is not saved (`inbox-messages.md`); Settings → Accounts switches accounts on this machine only (`inbox-accounts.md`). When you find another, add it here and fix it.
+
 One Inbox across machines, Phase 1: the server engine, then the window (see "The window" below). The design and the formal model live outside the repo (`.ops/multi-machine/PLAN.md`, `model/FINDINGS.md`); this guide is what is built.
 
 **The shape.** Every machine keeps its own Inbox, exactly as before: its agents, files, wakes and offline behavior do not change. There is no home machine and no machine is special. One pairing code links two Inboxes both ways, and each then shows every machine's threads. A thread lives only on the machine whose agent started it; every other Inbox is a view of it and a remote control. No Inbox stores another's threads on disk, and no Inbox passes one machine's data on to a third.
