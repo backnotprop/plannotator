@@ -97,6 +97,7 @@ import { CallTreeHunkEntry } from './components/callTree/CallTreeHunkEntry';
 import { selectionForCallFlowNode } from './components/CallFlowTreeView';
 import { useSemanticDiffChanges } from './hooks/useFileSemanticChanges';
 import type { HostLineNote } from './components/hostLineNotes';
+import { useLiveReview } from './live/useLiveReview';
 import {
   shouldHandleReviewSearchShortcut,
   isTypingTarget,
@@ -3117,6 +3118,9 @@ const ReviewApp: React.FC = () => {
       });
     }
   }, [deleteExternalAnnotation, externalAnnotations, reviewHistory]);
+  const dropSentComments = useCallback((ids: readonly string[]) => ids.forEach((id) => handleDeleteAnnotation(id)), [handleDeleteAnnotation]);
+  const liveReview = useLiveReview({ files, annotations, dropAnnotations: dropSentComments, revealLines: handleScrollToAILines, openTab: reviewSidebar.open });
+  const hostNotes = useMemo(() => (liveReview.notes.length > 0 ? [...callTreeHunkNotes, ...liveReview.notes] : callTreeHunkNotes), [callTreeHunkNotes, liveReview.notes]);
 
   // Handle identity change - update author on existing annotations
   const handleIdentityChange = useCallback((oldIdentity: string, newIdentity: string) => {
@@ -4489,7 +4493,7 @@ const ReviewApp: React.FC = () => {
     isCallFlowActive,
     openCallFlowPanel,
     callFlowInstall,
-    callTreeHunkNotes,
+    callTreeHunkNotes: hostNotes,
     callTreeRequest,
     openCallTreeNode,
     returnFromCallTree,
@@ -6255,6 +6259,7 @@ const ReviewApp: React.FC = () => {
                 isAIStreaming={aiIsStreaming}
                 onAIStop={abortAI}
                 onScrollToAILines={handleScrollToAILines}
+                {...(liveReview.tab ? { extraTabs: [liveReview.tab] } : {})}
                 activeFilePath={files[activeFileIndex]?.path}
                 scrollToQuestionId={scrollToQuestionId}
                 onAskGeneral={handleAskGeneral}

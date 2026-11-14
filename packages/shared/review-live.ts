@@ -27,6 +27,7 @@ export type ReviewLiveAnswer = { status: number; json: unknown } | { status: num
 
 interface InboxAddress {
   base: string;
+  url: string;
   serverSession: string;
 }
 
@@ -39,9 +40,10 @@ export function reviewLiveTargetOf(tag: string | undefined | null): ReviewLiveTa
 
 function inboxAddress(dataDir: string): InboxAddress | null {
   try {
-    const entry = JSON.parse(readFileSync(join(dataDir, "inbox", "inbox.json"), "utf8")) as { port?: unknown; serverSession?: unknown };
+    const entry = JSON.parse(readFileSync(join(dataDir, "inbox", "inbox.json"), "utf8")) as { port?: unknown; serverSession?: unknown; url?: unknown };
     if (typeof entry.port !== "number" || typeof entry.serverSession !== "string") return null;
-    return { base: `http://127.0.0.1:${entry.port}`, serverSession: entry.serverSession };
+    const base = `http://127.0.0.1:${entry.port}`;
+    return { base, url: typeof entry.url === "string" && /^https?:\/\//.test(entry.url) ? entry.url.replace(/\/+$/, "") : base, serverSession: entry.serverSession };
   } catch {
     return null;
   }
@@ -83,7 +85,9 @@ export async function handleReviewLiveRequest(request: ReviewLiveRequest, contex
     const answer = await relay(`/api/inbox/review-threads?${new URLSearchParams({ project_path: projectPath, key: review.key })}`);
     if (answer.status === 503) return { status: 200, json: { ...base, inbox: false, thread: null, messages: [] } };
     if (!("json" in answer) || answer.status !== 200) return answer;
-    return { status: 200, json: { ...base, inbox: true, ...(answer.json as Record<string, unknown>) } };
+    const found = answer.json as { thread?: { id?: string } | null };
+    const threadUrl = found.thread?.id ? `${inbox.url}/#thread=${found.thread.id}` : null;
+    return { status: 200, json: { ...base, inbox: true, ...(answer.json as Record<string, unknown>), thread_url: threadUrl } };
   }
   if (route === "agents") {
     if (request.method !== "GET") return { status: 405, json: { error: "Use GET." } };
