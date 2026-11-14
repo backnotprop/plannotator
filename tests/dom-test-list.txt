@@ -181,6 +181,7 @@ packages/inbox/rowsNotesLook.test.tsx
 packages/inbox/relativeTime.test.tsx
 packages/inbox/composeThread.test.tsx
 packages/inbox/sendNow.test.tsx
+packages/inbox/takeBack.test.tsx
 packages/inbox/sendWaitsForComments.test.tsx
 packages/inbox/undelivered.test.tsx
 packages/inbox/tagAgents.test.tsx
@@ -737,3 +738,8 @@ packages/review-editor/components/PRDescriptionVideo.test.tsx
 packages/ui/components/CommentPopover.hostDraft.test.tsx
 packages/ui/components/AgentsTab.launch.dom.test.tsx
 packages/ui/hooks/useLaunchConfig.dom.test.tsx
+packages/review-editor/components/FileTree.redraws.test.tsx
+packages/ui/components/Viewer.blockRedraws.test.tsx
+packages/editor/hooks/useCheckboxOverrides.viewer.test.tsx
+packages/ui/components/TaterSpriteSlots.test.tsx
+packages/inbox/sidebarRedraws.test.tsx
