@@ -12,6 +12,8 @@
  * by `inbox-types`.
  */
 
+import { INBOX_T3_HOST, isPlainT3ThreadId, isT3ThreadId } from "./inbox-t3";
+
 /** The person wrote last and the session has not written since, for at least this long. */
 export const INBOX_TIDY_PERSON_LAST_MS = 10 * 60_000;
 /** An open question or action item counts once it is this old. */
@@ -51,7 +53,7 @@ export function isInboxSessionId(value: unknown): value is string {
  * text puts it in a command).
  */
 export function inboxSessionRef(host: string | null, session: string): string | null {
-  if (!isInboxSessionId(session)) return null;
+  if (!isInboxSessionId(session) && !(host === INBOX_T3_HOST && isPlainT3ThreadId(session))) return null;
   return host !== null && INBOX_SESSION_HOST.test(host) ? `${host}:${session}` : session;
 }
 
@@ -60,7 +62,9 @@ export function parseInboxSessionRef(value: string): { host: string | null; sess
   const colon = value.indexOf(":");
   const host = colon === -1 ? null : value.slice(0, colon);
   const session = value.slice(colon + 1);
-  if (!isInboxSessionId(session) || (host !== null && !INBOX_SESSION_HOST.test(host))) return null;
+  if (host !== null && !INBOX_SESSION_HOST.test(host)) return null;
+  // A T3 thread's own id has `:` in it (inbox-t3.ts): it counts only under its host. Quoted, a script can pass any.
+  if (!isInboxSessionId(session) && !(host === INBOX_T3_HOST && isT3ThreadId(session))) return null;
   return { host, session };
 }
 
