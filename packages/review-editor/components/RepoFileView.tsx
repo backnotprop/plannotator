@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useRef } from 'react';
 import { CodeFileView, type CodeFileAnnotationInput, type CodeFileTokenTarget } from '@plannotator/ui/components/CodeFilePopout';
 import type { CodeAnnotation } from '@plannotator/ui/types';
 import type { RepoRevisionInfo } from '@plannotator/shared/repo-files';
@@ -105,6 +105,9 @@ export const RepoFileView: React.FC<RepoFileViewProps> = ({
   fetchImpl,
 }) => {
   const text = useRepoFileText(filePath, snapshotId, fetchImpl);
+  const lastReady = useRef<{ path: string; content: string } | null>(null);
+  if (text.status === 'ready') lastReady.current = { path: filePath, content: text.content };
+  else if (text.status !== 'loading') lastReady.current = null;
   const { revealLine, missed } = useRevealedLine(filePath, text.status === 'ready' ? text.content : null, revealTarget);
   const fileAnnotations = useMemo(() => wholeFileAnnotations(annotations, filePath), [annotations, filePath]);
   const slash = filePath.lastIndexOf('/');
@@ -147,7 +150,21 @@ export const RepoFileView: React.FC<RepoFileViewProps> = ({
       )}
       {missed && <RevealMissedNote missed={missed} />}
       <div className="flex-1 min-h-0 overflow-auto" ref={scroll.ref} onScroll={scroll.onScroll}>
-        {text.status === 'loading' ? (
+        {text.status === 'loading' && lastReady.current ? (
+          <div className="opacity-60 transition-opacity duration-150" aria-busy="true" data-stale-file={lastReady.current.path}>
+            <CodeFileView
+              filepath={lastReady.current.path}
+              contents={lastReady.current.content}
+              annotations={[]}
+              selectedAnnotationId={null}
+              onEditAnnotation={() => {}}
+              onDeleteAnnotation={() => {}}
+              onSelectAnnotation={() => {}}
+              className="min-h-full"
+              lang={lastReady.current.content.length > 500_000 ? 'text' : undefined}
+            />
+          </div>
+        ) : text.status === 'loading' ? (
           <FileTextState>Reading the file…</FileTextState>
         ) : text.status === 'error' ? (
           <FileTextState>{text.message}</FileTextState>

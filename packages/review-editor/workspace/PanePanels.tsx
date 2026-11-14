@@ -1,4 +1,4 @@
-import React, { useLayoutEffect, useRef } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { Pane } from './paneLayout';
 import type { WorkspaceStore } from './workspaceStore';
@@ -45,9 +45,26 @@ function restoreScroll(memory: ScrollMemory | undefined) {
   }
 }
 
-export const PanePanels: React.FC<{ pane: Pane; store: WorkspaceStore }> = ({ pane, store }) => {
+function useAfterFirstPaint(defer: boolean): boolean {
+  const [ready, setReady] = useState(!defer);
+  useEffect(() => {
+    if (ready) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const frame = requestAnimationFrame(() => {
+      timer = setTimeout(() => setReady(true));
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+      if (timer) clearTimeout(timer);
+    };
+  }, [ready]);
+  return ready;
+}
+
+export const PanePanels: React.FC<{ pane: Pane; store: WorkspaceStore; deferFirstMount?: boolean }> = ({ pane, store, deferFirstMount = false }) => {
   const frameRef = useRef<HTMLDivElement>(null);
   const scrolls = useRef(new Map<string, ScrollMemory>());
+  const ready = useAfterFirstPaint(deferFirstMount);
 
   useLayoutEffect(() => {
     const frame = frameRef.current;
@@ -76,7 +93,7 @@ export const PanePanels: React.FC<{ pane: Pane; store: WorkspaceStore }> = ({ pa
 
   return (
     <div ref={frameRef} className="relative flex-1 min-h-0" data-pane-frame="">
-      {pane.tabs.map((tab) => {
+      {ready && pane.tabs.map((tab) => {
         const Component = (reviewPanelComponents as unknown as Record<string, PanelComponent>)[tab.component];
         const handle = store.api.getPanel(tab.id);
         if (!Component || !handle) return null;
