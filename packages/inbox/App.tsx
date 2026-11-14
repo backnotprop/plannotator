@@ -3524,10 +3524,10 @@ function Inbox() {
   const rowOf = (threadId: string): InboxListRow | undefined =>
     (latestRef.current ? listGroups(latestRef.current) : []).flatMap((section) => section.threads).find((row) => row.thread_id === threadId);
 
-  const say = (text: string) => {
+  const say = useCallback((text: string) => {
     setSaid('');
     setTimeout(() => setSaid(text), 30);
-  };
+  }, []);
   // The live region says "Reconnecting…" once when the stream dies, never its return, and not again within
   // RECONNECT_SAY_GAP_MS (a network that comes and goes would say it over and over).
   useEffect(() => {
@@ -7919,6 +7919,10 @@ function Inbox() {
             onQuestions={patchQuestions}
             onPickSaves={onPickSaves}
             onChanged={afterWrite}
+            onTakenBack={(draft) => {
+              void inboxApi.drafts().then((model) => openCompose({ draft: model.drafts.find((d) => d.id === draft.id) ?? { ...draft, status: 'none' } }));
+              void afterWrite();
+            }}
             readPending={rowPatches.get(thread.thread_id)?.read_at !== undefined}
             onSentRead={async (model) => {
               // The Send's answer carried the thread: drawn from it, and only the list is read after (afterWrite reads both).
