@@ -226,13 +226,13 @@ describe.skipIf(!hasDom)('the review panes', () => {
     expect(tabButton(el, 'review-file:a.ts').title).toBe('File a.ts');
   });
 
-  test('a References tab reads as the symbol with an icon, and a long title is capped', async () => {
+  test('a References tab reads as the symbol with an icon, and with nothing hidden no title is capped', async () => {
     const slot = await mount();
     await act(async () => { api!.addPanel({ id: 'review-code-nav', component: 'review-code-nav', title: 'References: validateEntryBoundaries' }); });
     const tab = slot.querySelector<HTMLElement>('[data-pane-tab="review-code-nav"]')!;
     expect(tab.textContent).toBe('validateEntryBoundaries');
     expect(slot.querySelector('[data-pane-tab-item="review-code-nav"] [data-tab-kind-icon="references"]')).not.toBeNull();
-    expect(tab.className).toContain('max-w-[240px]');
+    expect(tab.className).not.toMatch(/max-w-/);
   });
 
 });

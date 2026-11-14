@@ -1,7 +1,6 @@
 import React, { useLayoutEffect, useRef, useState } from 'react';
 
 const ELLIPSIS = '…';
-const FILE_EXTENSION = /^(.+?)(\.[A-Za-z0-9]{1,8})$/;
 
 function measurer(probe: HTMLElement | null): ((text: string) => number) | null {
   if (!probe || typeof probe.getBoundingClientRect !== 'function') return null;
@@ -16,22 +15,23 @@ function measurer(probe: HTMLElement | null): ((text: string) => number) | null 
   };
 }
 
-export function splitExtension(name: string): { stem: string; extension: string } {
-  const match = FILE_EXTENSION.exec(name);
-  return match ? { stem: match[1]!, extension: match[2]! } : { stem: name, extension: '' };
+
+function graphemes(text: string): string[] {
+  const Segmenter = (Intl as unknown as { Segmenter?: new (locale?: string, options?: { granularity: 'grapheme' }) => { segment(input: string): Iterable<{ segment: string }> } }).Segmenter;
+  return Segmenter ? [...new Segmenter(undefined, { granularity: 'grapheme' }).segment(text)].map((part) => part.segment) : Array.from(text);
 }
 
-export function fitMiddle(name: string, available: number, width: (text: string) => number, keepExtension = true): string {
+export function fitMiddle(name: string, available: number, width: (text: string) => number): string {
   if (width(name) <= available) return name;
-  const { stem, extension } = keepExtension ? splitExtension(name) : { stem: name, extension: '' };
-  let low = 0;
-  let high = stem.length;
+  const parts = graphemes(name);
+  let low = 1;
+  let high = parts.length - 1;
   while (low < high) {
     const mid = (low + high + 1) >> 1;
-    if (width(`${stem.slice(0, mid)}${ELLIPSIS}${extension.slice(1)}`) <= available) low = mid;
+    if (width(`${ELLIPSIS}${parts.slice(parts.length - mid).join('')}`) <= available) low = mid;
     else high = mid - 1;
   }
-  return `${stem.slice(0, Math.max(1, low))}${ELLIPSIS}${extension.slice(1)}`;
+  return `${ELLIPSIS}${parts.slice(parts.length - Math.max(1, low)).join('')}`;
 }
 
 export function fitDirectory(directory: string, available: number, width: (text: string) => number): string {
@@ -44,9 +44,8 @@ export function fitDirectory(directory: string, available: number, width: (text:
   return '';
 }
 
-export const EllipsisName: React.FC<{ text: string; keepExtension?: boolean; className?: string; title?: string }> = ({
+export const EllipsisName: React.FC<{ text: string; className?: string; title?: string }> = ({
   text,
-  keepExtension = true,
   className,
   title,
 }) => {
@@ -66,7 +65,7 @@ export const EllipsisName: React.FC<{ text: string; keepExtension?: boolean; cla
       }
       const full = Math.ceil(width(text)) + 1;
       const available = element.clientWidth;
-      const next = available > 0 && available < full ? fitMiddle(text, available, width, keepExtension) : text;
+      const next = available > 0 && available < full ? fitMiddle(text, available, width) : text;
       probe.textContent = '';
       setFitted((before) => (before.text === next && before.width === full ? before : { text: next, width: full }));
     };
@@ -75,14 +74,14 @@ export const EllipsisName: React.FC<{ text: string; keepExtension?: boolean; cla
     const observer = new ResizeObserver(fit);
     observer.observe(element);
     return () => observer.disconnect();
-  }, [text, keepExtension]);
+  }, [text]);
 
   return (
     <span
       ref={ref}
       title={title}
       data-ellipsis-name={text}
-      className={`relative block min-w-0 shrink overflow-hidden whitespace-nowrap ${className ?? ''}`}
+      className={`relative block min-w-0 shrink overflow-hidden whitespace-nowrap [font-variant-ligatures:no-contextual] ${className ?? ''}`}
       style={fitted.width ? { width: fitted.width } : undefined}
     >
       {fitted.text}

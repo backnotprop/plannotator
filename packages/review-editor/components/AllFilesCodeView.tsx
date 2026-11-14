@@ -71,6 +71,8 @@ import type { DiffSelectionActions } from './SelectionChooser';
 import { FileHeader } from './FileHeader';
 import { DiffBottomBar } from './DiffBottomBar';
 import { BinaryFileNotice } from './BinaryFileNotice';
+import { ChangeNotice } from './ChangeNotice';
+import { changeNotice } from '../utils/changeNotice';
 import { GeneratedFileNotice } from './GeneratedFileNotice';
 import { EditSessionHud } from './EditSessionHud';
 import { FileCommentBanner } from './FileCommentBanner';
@@ -3711,6 +3713,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     const fileComments = previewed ? allFileComments.filter((comment) => !comment.markdownPreview) : allFileComments;
     const isOversizedStub = isOversizedReviewStubPatch(file.patch);
     const isBinaryNotice = !isOversizedStub && isContentlessBinaryPatch(file.patch);
+    const notice = isOversizedStub || isBinaryNotice ? null : changeNotice(file.patch);
     const remeasure = () => refreshItem(item.id);
     const imagePreview = !collapsed && renderImagePreview && isImagePreviewCandidate(file.patch, file.path, file.oldPath)
       ? renderImagePreview({
@@ -3839,6 +3842,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         {!collapsed && !imagePreview && isBinaryNotice && (
           <BinaryFileNotice onHeightChange={() => refreshItem(item.id)} />
         )}
+        {!collapsed && !imagePreview && notice && <ChangeNotice text={notice} onHeightChange={() => refreshItem(item.id)} />}
         {/* EXPERIMENTAL edit-session HUD: session controls + state in a slim
             strip below the header, above the file content. Appears/disappears
             with session start/end, which both go through a version-bumped

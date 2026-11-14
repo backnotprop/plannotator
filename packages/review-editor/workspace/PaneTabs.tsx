@@ -14,7 +14,7 @@ export const TAB_MIN_WIDTH = 72;
 
 const MENU_RESERVE = 44;
 const TAB_GAP = 16;
-const ACTIVE_NEED_WIDTH = 150;
+const ACTIVE_ROOM = 130;
 
 function naturalWidth(item: HTMLElement): number {
   let width = item.offsetWidth;
@@ -26,8 +26,8 @@ function naturalWidth(item: HTMLElement): number {
   return directory ? width - directory.offsetWidth : width;
 }
 
-type HiddenTabs = { ids: Set<string>; directoryRoom: number };
-const NONE_HIDDEN: HiddenTabs = { ids: new Set(), directoryRoom: 0 };
+type HiddenTabs = { ids: Set<string> };
+const NONE_HIDDEN: HiddenTabs = { ids: new Set() };
 
 function useHiddenTabs(ref: React.RefObject<HTMLElement | null>, key: string, single: boolean, activeId: string | null): HiddenTabs {
   const [hidden, setHidden] = useState<HiddenTabs>(NONE_HIDDEN);
@@ -39,22 +39,21 @@ function useHiddenTabs(ref: React.RefObject<HTMLElement | null>, key: string, si
       const ids = new Set<string>();
       const items = [...element.querySelectorAll<HTMLElement>('[data-pane-tab-item]')].map((item) => ({ id: item.getAttribute('data-pane-tab-item')!, width: naturalWidth(item) }));
       const total = items.reduce((sum, item, index) => sum + item.width + (index ? TAB_GAP : 0), 0);
-      let used = total;
-      let room = element.clientWidth;
-      if (!single && total > element.clientWidth + 1) {
-        room = element.clientWidth - MENU_RESERVE;
-        const kept = items.filter((item) => item.id === activeId || item.id === REVIEW_ALL_FILES_PANEL_ID);
-        used = kept.reduce((sum, item, index) => sum + (item.id === REVIEW_ALL_FILES_PANEL_ID ? item.width : Math.min(item.width, ACTIVE_NEED_WIDTH)) + (index ? TAB_GAP : 0), 0);
+      if (!single && element.clientWidth > 0 && total > element.clientWidth + 1) {
+        const room = element.clientWidth - MENU_RESERVE;
+        const active = items.find((item) => item.id === activeId);
+        const home = items.find((item) => item.id === REVIEW_ALL_FILES_PANEL_ID && item.id !== activeId);
+        const homeFits = !home || !active || home.width + TAB_GAP + Math.min(active.width, ACTIVE_ROOM) <= room;
+        const kept = items.filter((item) => item === active || (item === home && homeFits));
+        if (home && !homeFits) ids.add(home.id);
+        let used = kept.reduce((sum, item, index) => sum + item.width + (index ? TAB_GAP : 0), 0);
         for (const item of items) {
-          if (kept.includes(item)) continue;
+          if (kept.includes(item) || ids.has(item.id)) continue;
           if (used + TAB_GAP + item.width <= room) used += TAB_GAP + item.width;
           else ids.add(item.id);
         }
-        const active = items.find((item) => item.id === activeId);
-        if (active && active.width > ACTIVE_NEED_WIDTH) used += active.width - ACTIVE_NEED_WIDTH;
       }
-      const directoryRoom = Math.max(0, Math.floor(room - used - 4));
-      setHidden((before) => (before.directoryRoom === directoryRoom && before.ids.size === ids.size && [...ids].every((id) => before.ids.has(id)) ? before : { ids, directoryRoom }));
+      setHidden((before) => (before.ids.size === ids.size && [...ids].every((id) => before.ids.has(id)) ? before : ids.size ? { ids } : NONE_HIDDEN));
     };
     measure();
     if (typeof ResizeObserver === 'undefined') return;
@@ -65,23 +64,44 @@ function useHiddenTabs(ref: React.RefObject<HTMLElement | null>, key: string, si
   return hidden;
 }
 
-const DirectoryPrefix: React.FC<{ directory: string; room: number }> = ({ directory, room }) => {
+const DirectoryPrefix: React.FC<{ directory: string }> = ({ directory }) => {
+  const boxRef = useRef<HTMLSpanElement>(null);
   const probeRef = useRef<HTMLSpanElement>(null);
-  const [shown, setShown] = useState('');
+  const [fit, setFit] = useState<{ text: string; width?: number }>({ text: directory });
   useLayoutEffect(() => {
+    const box = boxRef.current;
     const probe = probeRef.current;
-    if (!probe || typeof probe.getBoundingClientRect !== 'function') return;
+    if (!box || !probe || typeof probe.getBoundingClientRect !== 'function') return;
     const width = (text: string) => {
       probe.textContent = text;
       return probe.getBoundingClientRect().width;
     };
-    const next = width('M') === 0 ? directory : room > 0 ? fitDirectory(directory, room, width) : '';
-    probe.textContent = '';
-    setShown(next);
-  }, [directory, room]);
+    const measure = () => {
+      if (width('M') === 0) {
+        probe.textContent = '';
+        setFit((before) => (before.text === directory && !before.width ? before : { text: directory }));
+        return;
+      }
+      const full = Math.ceil(width(directory)) + 1;
+      const next = box.clientWidth > 0 && box.clientWidth < full ? fitDirectory(directory, box.clientWidth, width) : directory;
+      probe.textContent = '';
+      setFit((before) => (before.text === next && before.width === full ? before : { text: next, width: full }));
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(box);
+    return () => observer.disconnect();
+  }, [directory]);
   return (
-    <span aria-hidden="true" className="relative flex-none -mr-1 whitespace-nowrap text-[13px] text-muted-foreground" data-pane-tab-directory="">
-      {shown}
+    <span
+      ref={boxRef}
+      aria-hidden="true"
+      style={fit.width ? { width: fit.width } : undefined}
+      className="relative min-w-0 shrink-[1000] -mr-1 overflow-hidden whitespace-nowrap text-right text-[13px] text-muted-foreground [font-variant-ligatures:no-contextual]"
+      data-pane-tab-directory=""
+    >
+      {fit.text}
       <span ref={probeRef} className="pointer-events-none invisible absolute left-0 top-0 whitespace-nowrap" />
     </span>
   );
@@ -98,9 +118,7 @@ const TabIcon: React.FC<{ tab: PaneTab; onClick: () => void }> = ({ tab, onClick
   );
 };
 
-const TabTitle: React.FC<{ title: string; keepExtension: boolean }> = ({ title, keepExtension }) => (
-  <EllipsisName text={useSettledValue(title, TITLE_SETTLE_MS)} keepExtension={keepExtension} />
-);
+const TabTitle: React.FC<{ title: string }> = ({ title }) => <EllipsisName text={useSettledValue(title, TITLE_SETTLE_MS)} />;
 
 function focusTreeRow() {
   const tree = document.querySelector<HTMLElement>('[data-review-sidebar] [data-changes-tree]');
@@ -175,7 +193,7 @@ export const PaneTabs: React.FC<{
             className={`group flex items-center gap-1 ${shrinks ? 'min-w-0 shrink' : 'flex-none'} ${hidden.ids.has(tab.id) ? 'invisible absolute' : 'relative'}`}
           >
             <TabIcon tab={tab} onClick={() => onActivate(tab.id)} />
-            {directory && <DirectoryPrefix directory={directory} room={hidden.directoryRoom} />}
+            {directory && <DirectoryPrefix directory={directory} />}
             <button
               type="button"
               role="tab"
@@ -191,11 +209,11 @@ export const PaneTabs: React.FC<{
                 event.preventDefault();
                 close(tab.id);
               }}
-              className={`h-full min-w-0 ${active ? 'max-w-[240px]' : 'max-w-[180px]'} flex items-center text-[13px] font-medium transition-colors outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary/60 rounded-sm ${
+              className={`h-full min-w-0 ${hidden.ids.size === 0 ? '' : active ? 'max-w-[240px]' : 'max-w-[180px]'} flex items-center text-[13px] font-medium transition-colors outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary/60 rounded-sm ${
                 active ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'
               } ${preview ? 'italic' : ''}`}
             >
-              <span className="min-w-0 flex"><TabTitle title={tabLabel(tab)} keepExtension={!isReferencesTab(tab)} /></span>
+              <span className="min-w-0 flex"><TabTitle title={tabLabel(tab)} /></span>
             </button>
             {closable && <button
               type="button"
@@ -203,7 +221,9 @@ export const PaneTabs: React.FC<{
               data-pane-tab-close={tab.id}
               tabIndex={-1}
               onClick={() => close(tab.id)}
-              className={`h-4 w-4 flex-none flex items-center justify-center rounded-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-opacity ${
+              data-pn-touch-target=""
+              data-pn-touch-target-icon=""
+              className={`h-6 w-6 -mx-1 flex-none flex items-center justify-center rounded-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-opacity ${
                 active ? 'opacity-70' : 'opacity-0 group-hover:opacity-70 [@media(hover:none)]:opacity-70 focus-visible:opacity-100'
               }`}
             >

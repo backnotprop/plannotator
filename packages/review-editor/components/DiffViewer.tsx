@@ -26,6 +26,8 @@ const MarkdownFilePreview = React.lazy(async () => ({ default: (await import('./
 import { fileViewOfRendered, renderedViewOf, type MarkdownPreviewView } from '../hooks/useMarkdownPreview';
 import { MarkdownViewMenu } from './MarkdownViewMenu';
 import { BinaryFileNotice } from './BinaryFileNotice';
+import { ChangeNotice } from './ChangeNotice';
+import { changeNotice } from '../utils/changeNotice';
 import { FileCommentBanner } from './FileCommentBanner';
 import { DiffBottomBar } from './DiffBottomBar';
 import { OversizedFileNotice } from './OversizedFileNotice';
@@ -1096,6 +1098,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   // chunk (a genuine binary file, or a stub shape the marker does not cover)
   // still renders an empty body and still has to say why. Gated on the marker
   // so a marker-carrying stub is explained exactly once, by the message above.
+  const notice = useMemo(() => changeNotice(patch), [patch]);
   const isContentlessBinary = useMemo(
     () => !isOversizedStub && isContentlessBinaryPatch(patch),
     [patch, isOversizedStub],
@@ -1243,6 +1246,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
                 <>
                   {isOversizedStub && <OversizedFileNotice />}
                   {isContentlessBinary && <BinaryFileNotice />}
+                  {!isOversizedStub && !isContentlessBinary && notice && <ChangeNotice text={notice} />}
                 </>
               )}
               {packageChangesAvailable && isPackageChangePath(filePath) && (
