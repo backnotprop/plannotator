@@ -29,7 +29,7 @@ export const HeaderBranch: React.FC<{
       </span>
     )}
     {!(compact && branch) && (
-      <span className="min-w-0 shrink-[2] text-xs text-muted-foreground inline-flex items-center gap-1 max-w-[220px]" data-header-shed="" data-header-repo="">
+      <span className="min-w-0 shrink-[2] overflow-hidden text-xs text-muted-foreground inline-flex items-center gap-1 max-w-[220px]" data-header-shed="" data-header-repo="">
         <RepoIcon className="w-3 h-3 flex-shrink-0" />
         <span className="min-w-0 truncate">{repo}</span>
       </span>

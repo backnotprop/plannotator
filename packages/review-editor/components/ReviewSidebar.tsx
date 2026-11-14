@@ -212,7 +212,7 @@ const GeneralCommentComposer: React.FC<{
         aria-expanded={open}
         aria-haspopup="dialog"
         title="Add global comment"
-        className="inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+        className="inline-flex items-center whitespace-nowrap rounded px-1.5 py-0.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
       >
         + Global comment
       </button>
