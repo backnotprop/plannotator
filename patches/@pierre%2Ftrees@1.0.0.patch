@@ -184,7 +184,7 @@ index 0b41099..a745685 100644
  		searchEnabled: search === true,
  		searchFakeFocus: searchFakeFocus === true,
 diff --git a/dist/render/FileTreeView.js b/dist/render/FileTreeView.js
-index b4c7ee4..d7e76dc 100644
+index b4c7ee4..36a9ea4 100644
 --- a/dist/render/FileTreeView.js
 +++ b/dist/render/FileTreeView.js
 @@ -362,11 +362,50 @@ function focusFirstMenuElement(menuElement) {
@@ -192,11 +192,11 @@ index b4c7ee4..d7e76dc 100644
  	focusElement(focusable ?? menuElement);
  }
 -function renderFileTreeRowContent(row, resolveIcon, { actionLaneEnabled = false, customDecoration = null, decorationLaneEnabled = false, dragTargetFlattenedSegmentPath = null, gitDecoration = null, gitLaneActive = false, renameInput = null, showDecorativeActionAffordance = false } = {}) {
-+function renderFileTreeRowPartLane(lane, parts, resolveIcon, onPartClick) {
++function renderFileTreeRowPartLane(lane, parts, resolveIcon, onPartClick, tone) {
 +	if (parts == null || parts.length === 0) return null;
 +	return /* @__PURE__ */ jsx("div", {
 +		"data-item-section": lane,
-+		part: `row-${lane}`,
++		part: tone == null ? `row-${lane}` : `row-${lane} row-${lane}-${tone}`,
 +		children: parts.map((part, index) => {
 +			if (part == null) return /* @__PURE__ */ jsx("span", { "data-item-part-empty": "true" }, index);
 +			const interactive = part.id != null && part.disabled !== true;
@@ -246,7 +246,7 @@ index b4c7ee4..d7e76dc 100644
 +			part: `row-icon row-icon-${row.kind}`,
  			children: row.kind === "directory" ? /* @__PURE__ */ jsx(Icon, { ...resolveIcon("file-tree-icon-chevron") }) : /* @__PURE__ */ jsx(Icon, { ...resolveIcon("file-tree-icon-file", targetPath) })
  		}),
-+		renderFileTreeRowPartLane("lead", rowParts?.lead, resolveIcon, onPartClick),
++		renderFileTreeRowPartLane("lead", rowParts?.lead, resolveIcon, onPartClick, rowParts?.tone),
 +		gitStatusPlacement === "start" ? gitLane : null,
  		/* @__PURE__ */ jsx("div", {
  			"data-item-section": "content",
@@ -265,7 +265,7 @@ index b4c7ee4..d7e76dc 100644
 -			"data-item-section": "git",
 -			children: renderRowDecoration(gitDecoration, resolveIcon)
 -		}) : null,
-+		renderFileTreeRowPartLane("trail", rowParts?.trail, resolveIcon, onPartClick),
++		renderFileTreeRowPartLane("trail", rowParts?.trail, resolveIcon, onPartClick, rowParts?.tone),
 +		gitStatusPlacement === "start" ? null : gitLane,
  		actionLaneEnabled ? /* @__PURE__ */ jsx("div", {
  			"data-item-section": "action",

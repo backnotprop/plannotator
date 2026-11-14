@@ -3,7 +3,7 @@ import { preparePresortedFileTreeInput, type FileTreeRowDecorationContext, type 
 import { FileTree as PierreFileTree, useFileTree } from '@pierre/trees/react';
 import type { FileTreeNode } from '../utils/buildFileTree';
 import type { DiffFile } from '../types';
-import { GROUP_ICONS, ROW_ICONS, TreeRowMenu, ancestorsOf, countParts, fileRowParts, gitStatusFor, type SectionEntry } from './pierreRows';
+import { GROUP_ICONS, ROW_ICONS, TreeRowMenu, ancestorsOf, countColumns, countParts, fileRowParts, gitStatusFor, hasBadge, withoutBadge, type SectionEntry } from './pierreRows';
 
 export interface ChangesTreeGroup {
   key: string;
@@ -124,10 +124,26 @@ export const ChangesTreeView: React.FC<ChangesTreeViewProps> = (props) => {
   const sinceBaseMode = props.getSectionEntry != null;
   const stageColumn = showStageControls && (sinceBaseMode ? true : stagedFiles.size > 0);
 
-  const live = useRef({ props, layout, stageColumn });
-  live.current = { props, layout, stageColumn };
+  const columns = useMemo(() => {
+    let add = 0;
+    let del = 0;
+    let badge = groups != null;
+    for (const entry of layout.entries.values()) {
+      const counts = entry.kind === 'file' ? entry.file : entry.kind === 'folder' ? entry.node : entry.group;
+      add = Math.max(add, counts.additions);
+      del = Math.max(del, counts.deletions);
+      if (!badge && entry.kind === 'file' && hasBadge(entry.file, props)) badge = true;
+    }
+    return { add, del, badge };
+  }, [layout, groups, annotationCounts, markdownPreviewedPaths, props.threadCount]);
 
-  const renderParts = useCallback(({ row }: FileTreeRowDecorationContext): FileTreeRowParts | null => {
+  const live = useRef({ props, layout, stageColumn, badge: columns.badge });
+  live.current = { props, layout, stageColumn, badge: columns.badge };
+
+  const renderParts = useCallback((context: FileTreeRowDecorationContext): FileTreeRowParts | null =>
+    withoutBadge(rowParts(context), live.current.badge), []);
+
+  const rowParts = ({ row }: FileTreeRowDecorationContext): FileTreeRowParts | null => {
     const { props: p, layout: l, stageColumn: withStage } = live.current;
     const entry = l.entries.get(row.path);
     if (!entry) return null;
@@ -145,7 +161,7 @@ export const ChangesTreeView: React.FC<ChangesTreeViewProps> = (props) => {
       return { trail: [null, ...countParts(entry.node.additions, entry.node.deletions, true)] };
     }
     return fileRowParts(entry.file, p, withStage);
-  }, []);
+  };
 
   const gitStatus = useMemo(() => {
     const status: GitStatusEntry[] = [];
@@ -236,7 +252,7 @@ export const ChangesTreeView: React.FC<ChangesTreeViewProps> = (props) => {
 
   useEffect(() => {
     model.refreshRows();
-  }, [model, viewedFiles, stagedFiles, stagingFile, annotationCounts, markdownPreviewedPaths, showViewedControls, showStageControls, props.threadCount]);
+  }, [model, viewedFiles, stagedFiles, stagingFile, annotationCounts, markdownPreviewedPaths, showViewedControls, showStageControls, props.threadCount, columns]);
 
   useEffect(() => {
     let lastFocused = model.getFocusedPath();
@@ -262,7 +278,7 @@ export const ChangesTreeView: React.FC<ChangesTreeViewProps> = (props) => {
     },
   }), [model, gitStatus, syncSelection]);
 
-  const leadColumns = [showViewedControls ? '16px' : null, stageColumn ? '16px' : null].filter(Boolean).join(' ') || 'none';
+  const leadColumns = [showViewedControls ? '14px' : null, stageColumn ? '14px' : null].filter(Boolean).join(' ') || 'none';
 
   return (
     <PierreFileTree
@@ -270,7 +286,7 @@ export const ChangesTreeView: React.FC<ChangesTreeViewProps> = (props) => {
       className="review-changes-tree"
       data-changes-tree=""
       data-tree-grouping={props.grouping ?? 'none'}
-      style={{ '--trees-row-lead-columns': leadColumns, height: '100%' } as React.CSSProperties}
+      style={{ '--trees-row-lead-columns': leadColumns, '--trees-row-trail-columns': countColumns(columns.add, columns.del, columns.badge), height: '100%' } as React.CSSProperties}
       renderContextMenu={(item, context) => {
         const entry = live.current.layout.entries.get(item.path);
         return entry?.kind === 'file' ? <TreeRowMenu path={entry.file.path} repoRoot={live.current.props.repoRoot} close={context.close} anchor={context.anchorRect} /> : null;

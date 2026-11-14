@@ -211,6 +211,7 @@ describe.skipIf(!hasDom)('FileTree: Changes | All files', () => {
     const el = await mount(<Tree repoFiles={repo(state, loadDir)} />);
     await settle();
     expect(loadDir).toHaveBeenCalledWith('packages');
+    expect(visibleRows(el)).toContain('file:packages/Loading\u2026');
     const next = ready({
       paths: null,
       total: 400_000,
@@ -222,6 +223,7 @@ describe.skipIf(!hasDom)('FileTree: Changes | All files', () => {
     await act(async () => root?.render(<Tree repoFiles={repo(next, loadDir)} />));
     await settle();
     expect(visibleRows(el)).toContain('dir:packages/ui');
+    expect(visibleRows(el)).not.toContain('file:packages/Loading\u2026');
     await act(async () => repoRow(el, 'packages/ui/').click());
     await settle();
     expect(loadDir).toHaveBeenLastCalledWith('packages/ui');

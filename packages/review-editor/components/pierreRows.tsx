@@ -75,6 +75,20 @@ export function stageColumnShown(state: Pick<FileRowState, 'getSectionEntry' | '
   return showStageControls && (state.getSectionEntry != null || state.stagedFiles.size > 0);
 }
 
+export function countColumns(widestAdd: number, widestDel: number, withBadge: boolean): string {
+  const col = (n: number) => `minmax(calc(${String(n).length + 1}ch + 2px), max-content)`;
+  return `${withBadge ? 'max-content ' : ''}${col(widestAdd)} ${col(widestDel)}`;
+}
+
+export function withoutBadge(parts: FileTreeRowParts | null, withBadge: boolean): FileTreeRowParts | null {
+  if (withBadge || !parts?.trail) return parts;
+  return { ...parts, trail: parts.trail.slice(1) };
+}
+
+export function hasBadge(file: DiffFile, p: FileRowState): boolean {
+  return (p.annotationCounts.get(file.path) ?? 0) > 0 || (p.threadCount?.(file.path) ?? 0) > 0 || !!p.markdownPreviewedPaths?.has(file.path);
+}
+
 export function fileRowParts(file: DiffFile, p: FileRowState, withStage: boolean): FileTreeRowParts {
   const isViewed = p.viewedFiles.has(file.path);
   const isStaged = p.stagedFiles.has(file.path);

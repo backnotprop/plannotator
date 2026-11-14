@@ -23,19 +23,18 @@
   --trees-padding-inline-override: 0px;
   --trees-item-padding-x-override: 8px;
   --trees-item-margin-x-override: 0px;
-  --trees-level-gap-override: 0px;
-  --trees-item-row-gap-override: 6px;
+  --trees-level-gap-override: 2px;
+  --trees-item-row-gap-override: 4px;
   --trees-icon-width-override: 12px;
-  --trees-git-lane-width-override: 14px;
+  --trees-git-lane-width-override: 12px;
   --trees-git-added-color-override: var(--success);
   --trees-git-deleted-color-override: var(--destructive);
   --trees-git-modified-color-override: color-mix(in oklab, var(--muted-foreground) 60%, transparent);
   --trees-git-renamed-color-override: var(--muted-foreground);
   --trees-git-untracked-color-override: var(--muted-foreground);
   --trees-scrollbar-thumb-override: color-mix(in oklab, var(--foreground) 18%, transparent);
-  --trees-row-part-gap: 4px;
+  --trees-row-part-gap: 2px;
   --trees-row-muted-opacity: 1;
-  --trees-row-trail-columns: max-content minmax(var(--count-add-w, 3ch), max-content) minmax(var(--count-del-w, 3ch), max-content);
 }
 .review-changes-tree::part(row-icon-file),
 .review-changes-tree::part(row-git-directory),
@@ -53,11 +52,20 @@
 .review-changes-tree::part(row-content-muted) {
   color: var(--muted-foreground);
 }
+.review-changes-tree::part(row-lead-heading) {
+  grid-template-columns: auto;
+  color: var(--muted-foreground);
+}
+.review-changes-tree::part(row-content-loading) {
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
 .review-changes-tree::part(row-content-heading) {
   color: var(--foreground);
   font-weight: 600;
 }
 .review-changes-tree::part(row-trail) {
+  column-gap: 4px;
   font-size: 12px;
   color: var(--tree-text-tertiary);
 }
@@ -66,8 +74,8 @@
 .review-changes-tree::part(row-part-unstage),
 .review-changes-tree::part(row-part-staged),
 .review-changes-tree::part(row-part-staging) {
-  width: 16px;
-  height: 16px;
+  width: 14px;
+  height: 14px;
   display: grid;
   place-items: center;
   line-height: 0;
