@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import { storage } from '@plannotator/ui/utils/storage';
 import { hidesDockHeader } from '../dock/loneTabHeader';
@@ -98,6 +98,13 @@ export const ReviewWorkspace: React.FC<{
 
   useLayoutMemory(store, reviewKey, ratio, setRatio);
 
+  const paneCount = layout.panes.length;
+  useLayoutEffect(() => {
+    const sideWidth = store.takeSideWidth();
+    const width = rowRef.current?.clientWidth ?? 0;
+    if (paneCount === 2 && sideWidth && width > 0) setRatio(clampRatio(1 - sideWidth / width));
+  }, [store, paneCount]);
+
   const commitRatio = (next: number) => {
     setRatio(next);
     storage.setItem(PANE_RATIO_KEY, String(Math.round(next * 1000) / 1000));
@@ -135,7 +142,7 @@ export const ReviewWorkspace: React.FC<{
                 onKeep={state?.onKeepFileTab}
               />
             )}
-            <PanePanels pane={pane} store={store} />
+            <PanePanels pane={pane} store={store} deferFirstMount={index === 1} />
           </section>
         </React.Fragment>
       ))}

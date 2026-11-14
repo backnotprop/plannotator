@@ -196,6 +196,7 @@ import { ReviewHeaderStatus } from './components/ReviewHeaderStatus';
 import { watchLoneTabHeader } from './dock/loneTabHeader';
 import { ReviewCenterArea } from './workspace/ReviewCenterArea';
 import { usesPaneLayout } from './workspace/layoutEngine';
+import { browseView } from './workspace/paneFileView';
 import { referencesPlacement } from './workspace/paneLayout';
 import { REFERENCES_TAB_ID, useReferencesTab } from './workspace/useReferencesTab';
 import { HeaderTotals } from './components/HeaderTotals';
@@ -990,6 +991,7 @@ const ReviewApp: React.FC = () => {
   const [dockApi, setDockApi] = useState<DockviewApi | null>(null);
   const [dockActivePanelId, setDockActivePanelId] = useState<string | null>(null);
   const [paneTabsSlot, setPaneTabsSlot] = useState<HTMLElement | null>(null);
+  const treeScopeRef = useRef<string>('changes');
   const [allChangesOpen, setAllChangesOpen] = useState(false);
   const filesRef = useRef(files);
   filesRef.current = files;
@@ -1078,7 +1080,7 @@ const ReviewApp: React.FC = () => {
   }, [dockApi]);
   const previewPanelSeq = useRef(0);
 
-  const openRepoFile = useCallback((filePath: string, options: { pin: boolean; side?: boolean }) => {
+  const openRepoFile = useCallback((filePath: string, options: { pin: boolean; side?: boolean; browse?: boolean }) => {
     if (!dockApi) return;
     const changed = files.some((file) => file.path === filePath);
     const kept = findFilePanel((params) => !params.preview && params.filePath === filePath);
@@ -1092,7 +1094,7 @@ const ReviewApp: React.FC = () => {
     const besideCode = dockApi.activePanel?.id === REVIEW_CODE_NAV_PANEL_ID && mainPanelId && dockApi.getPanel(mainPanelId)
       ? { position: { referencePanel: mainPanelId } }
       : {};
-    if (changed && !options.pin) {
+    if (changed && !options.pin && !options.browse) {
       if (besideCode.position) dockApi.getPanel(besideCode.position.referencePanel)?.api.setActive();
       openDiffFile(filePath);
       return;
@@ -1123,7 +1125,7 @@ const ReviewApp: React.FC = () => {
       return;
     }
     if (preview) {
-      preview.api.updateParameters({ filePath, preview: true } satisfies ReviewFilePanelParams);
+      preview.api.updateParameters({ filePath, preview: true, ...browseView(filePath, changed && !!options.browse) });
       preview.api.setTitle(title);
       preview.api.setActive();
       setActiveRepoPath(filePath);
@@ -1134,7 +1136,7 @@ const ReviewApp: React.FC = () => {
       id: `${REVIEW_FILE_PREVIEW_PANEL_ID}:${previewPanelSeq.current}`,
       component: REVIEW_PANEL_TYPES.FILE,
       title,
-      params: { filePath, preview: true } satisfies ReviewFilePanelParams,
+      params: { filePath, preview: true, ...browseView(filePath, changed && !!options.browse) },
       ...besideCode,
     });
     setActiveRepoPath(filePath);
@@ -3134,8 +3136,9 @@ const ReviewApp: React.FC = () => {
   const handleFilePreview = useCallback((index: number) => {
     const file = files[index];
     if (!file) return;
-    openDiffFile(file.path);
-  }, [files, openDiffFile]);
+    if (treeScopeRef.current === 'all' && usesPaneLayout()) openRepoFile(file.path, { pin: false, browse: true });
+    else openDiffFile(file.path);
+  }, [files, openDiffFile, openRepoFile]);
 
   // Double-click keeps the file in a tab of its own (step 2 of the explorer).
   const handleFilePinned = useCallback((index: number) => {
@@ -3311,6 +3314,7 @@ const ReviewApp: React.FC = () => {
   // remembered per browser once chosen, and the repository is only listed
   // while All files is chosen.
   const [treeScope, setTreeScope] = useTreeScope();
+  treeScopeRef.current = treeScope;
   // Listed (and watched) only while All files is on screen (the Tree view of
   // an open file tree, not merely remembered in the cookie), and while Go to
   // File is open.

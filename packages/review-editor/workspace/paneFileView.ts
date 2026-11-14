@@ -8,3 +8,7 @@ export interface PaneFileViewParams {
 export function paneFileView(params: PaneFileViewParams | undefined, filePath: string | null): ChangedFileView {
   return params?.view && params.viewPath === filePath ? params.view : 'changes';
 }
+
+export function browseView(filePath: string, browsingChangedFile: boolean): PaneFileViewParams {
+  return browsingChangedFile ? { view: 'whole', viewPath: filePath } : {};
+}

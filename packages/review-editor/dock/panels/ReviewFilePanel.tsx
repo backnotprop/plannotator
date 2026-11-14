@@ -53,7 +53,6 @@ export const ReviewFilePanel: React.FC<IDockviewPanelProps<ReviewFilePanelParams
   }
   return (
     <RepoFileView
-      key={filePath}
       filePath={filePath}
       snapshotId={state.snapshotId}
       preview={preview}

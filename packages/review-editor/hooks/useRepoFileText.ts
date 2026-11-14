@@ -28,7 +28,8 @@ export function useRepoFileText(
   fetchImpl: typeof fetch = fetch,
 ): RepoFileText {
   const key = path && snapshotId ? `${snapshotId}\0${path}` : null;
-  const [state, setState] = useState<RepoFileText>(() => (key && cache.get(key)) || { status: 'loading' });
+  const [held, setHeld] = useState<{ key: string | null; text: RepoFileText }>(() => ({ key, text: (key && cache.get(key)) || { status: 'loading' } }));
+  const setState = (text: RepoFileText) => setHeld({ key, text });
 
   useEffect(() => {
     if (!key || !path || !snapshotId) return;
@@ -66,7 +67,9 @@ export function useRepoFileText(
     return () => controller.abort();
   }, [key, path, snapshotId, fetchImpl]);
 
-  return key ? state : { status: 'loading' };
+  if (!key) return { status: 'loading' };
+  if (held.key === key) return held.text;
+  return cache.get(key) ?? { status: 'loading' };
 }
 
 /** What a tab says when a file has no text to show. */
