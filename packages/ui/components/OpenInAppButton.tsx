@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { ChevronDown, Check, Copy, MoreHorizontal } from 'lucide-react';
+import { ChevronDown, Check, Copy, ExternalLink, MoreHorizontal } from 'lucide-react';
 import { AppIcon } from './icons/AppIcon';
 import { useOpenInApps, useRememberedOpenInApp } from '../hooks/useOpenInApps';
 import { copyTextToClipboard } from '../utils/clipboard';
@@ -41,6 +41,7 @@ interface OpenInAppButtonProps {
   showLabel?: boolean;
   disabled?: boolean;
   extraItems?: readonly { label: string; onSelect: () => void; icon?: React.ReactNode }[];
+  quiet?: boolean;
 }
 
 // The host app catalog is static for the session, but the all-files view
@@ -56,6 +57,7 @@ export const OpenInAppButton: React.FC<OpenInAppButtonProps> = ({
   showLabel = false,
   disabled = false,
   extraItems,
+  quiet = false,
 }) => {
   const detected = useOpenInApps(OPEN_IN_APPS_URL);
   const apps = detected?.apps ?? null;
@@ -160,21 +162,21 @@ export const OpenInAppButton: React.FC<OpenInAppButtonProps> = ({
   const isDisabled = disabled || busy;
 
   return (
-    <div className="flex items-center gap-1">
-      <div className="flex items-center rounded overflow-hidden">
+    <div className={`flex items-center gap-1 ${quiet ? '[@media(hover:hover)]:opacity-0 group-hover/file-header:opacity-100 focus-within:opacity-100 has-[[data-popup-open]]:opacity-100 transition-opacity' : ''}`} data-open-in-quiet={quiet ? '' : undefined}>
+      <div className="flex items-center">
         {/* Primary: open in the current app (only when launchable). */}
         {openable && currentApp && (
           <button
             type="button"
             onClick={() => open(resolvedId)}
             disabled={isDisabled}
-            className={`text-xs flex items-center gap-1 py-1 transition-colors text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed ${
+            className={`text-xs flex items-center gap-1 py-1 rounded-l transition-colors text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed ${
               showLabel ? 'pl-2 pr-1.5' : 'px-1.5'
             }`}
             title={error ?? currentApp.label}
             aria-label={`Open in ${currentApp.label}`}
           >
-            {busy ? Spinner : <AppIcon id={currentApp.icon} className="w-3.5 h-3.5" />}
+            {busy ? Spinner : quiet ? <ExternalLink className="w-3.5 h-3.5" aria-hidden="true" /> : <AppIcon id={currentApp.icon} className="w-3.5 h-3.5" />}
             {showLabel && <span className="whitespace-nowrap">{currentApp.label}</span>}
           </button>
         )}
@@ -186,7 +188,7 @@ export const OpenInAppButton: React.FC<OpenInAppButtonProps> = ({
                 type="button"
                 disabled={isDisabled}
                 className={`text-xs flex items-center py-1 transition-colors text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed ${
-                  openable ? 'px-1 border-l border-border/50' : 'px-1.5'
+                  openable ? 'px-1 rounded-r border-l border-border/50' : 'px-1.5 rounded'
                 }`}
                 title={openable ? 'Open in…' : 'File actions'}
                 aria-label={openable ? 'Choose app to open in' : 'File actions'}
@@ -208,7 +210,7 @@ export const OpenInAppButton: React.FC<OpenInAppButtonProps> = ({
             finalFocus={false}
           >
             {extraItems?.map((item) => (
-              <DropdownMenuItem key={item.label} onClick={item.onSelect} className="text-xs" data-open-in-extra={item.label}>
+              <DropdownMenuItem key={item.label} onClick={item.onSelect} className="text-[13px]" data-open-in-extra={item.label}>
                 {item.icon}
                 <span className="flex-1">{item.label}</span>
               </DropdownMenuItem>
@@ -223,7 +225,7 @@ export const OpenInAppButton: React.FC<OpenInAppButtonProps> = ({
                       key={app.id}
                       closeOnClick={false}
                       onClick={() => selectApp(app.id)}
-                      className="text-xs"
+                      className="text-[13px]"
                     >
                       <AppIcon id={app.icon} className="w-4 h-4" />
                       <span className="flex-1 truncate">{app.label}</span>
@@ -237,7 +239,7 @@ export const OpenInAppButton: React.FC<OpenInAppButtonProps> = ({
               <DropdownMenuItem
                 closeOnClick={false}
                 onClick={() => void copyText(filePath)}
-                className="text-xs"
+                className="text-[13px]"
               >
                 <Copy className="w-4 h-4" />
                 <span className="flex-1">Copy path</span>
@@ -247,7 +249,7 @@ export const OpenInAppButton: React.FC<OpenInAppButtonProps> = ({
               <DropdownMenuItem
                 closeOnClick={false}
                 onClick={() => void copyText(diffText)}
-                className="text-xs"
+                className="text-[13px]"
               >
                 <Copy className="w-4 h-4" />
                 <span className="flex-1">Copy file diff</span>

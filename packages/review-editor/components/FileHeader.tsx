@@ -184,7 +184,7 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
     <div
       ref={headerRef}
       data-file-header=""
-      className={`flex-shrink-0 border-b border-border flex items-center justify-between gap-2 transition-colors duration-150 hover:bg-muted/30 ${isCompactTouchLayout ? 'pr-3' : 'pl-2 pr-2'}`}
+      className={`group/file-header flex-shrink-0 border-b border-border flex items-center justify-between gap-2 transition-colors duration-150 hover:bg-muted/30 ${isCompactTouchLayout ? 'pr-3' : 'pl-2 pr-2'}`}
       style={{ height: isCompactTouchLayout ? `${COMPACT_FILE_HEADER_HEIGHT}px` : 'var(--panel-header-h)' }}
     >
       <div className="min-w-0 flex flex-1 items-center" onClick={onCollapseToggle} style={onCollapseToggle ? { cursor: 'pointer' } : undefined}>
@@ -375,6 +375,7 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
             matching the plan/annotate side. */}
         {openIn}
         {!readOnly && <OpenInAppButton
+          quiet
           extraItems={state?.onOpenToSide ? [{ label: 'Open to the side', onSelect: () => state.onOpenToSide!(filePath), icon: <OpenToSideIcon /> }] : undefined}
           filePath={filePath}
           base={state?.agentCwd ?? null}
