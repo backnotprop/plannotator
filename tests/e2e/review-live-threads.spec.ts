@@ -78,6 +78,7 @@ test('a comment reaches the agent that opened the review, its answer lands live 
   const env = {
     PATH: ownPath(root),
     HOME: root,
+    PLANNOTATOR_TEST_SANDBOX: root,
     PLANNOTATOR_AI: 'disabled',
     PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9',
     PLANNOTATOR_DATA_DIR: dataDir,
@@ -176,6 +177,7 @@ test('the Inbox thread shows a review comment on its lines and opens the living 
   const env = {
     PATH: ownPath(root),
     HOME: root,
+    PLANNOTATOR_TEST_SANDBOX: root,
     PLANNOTATOR_AI: 'disabled',
     PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9',
     PLANNOTATOR_DATA_DIR: dataDir,
