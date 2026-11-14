@@ -32,6 +32,8 @@ export interface GuideReaderProps {
   /** The reviewed ticks as the person left them (kept with the thread by the pane). */
   reviewed: readonly boolean[];
   onReviewedChange: (reviewed: boolean[]) => void;
+  /** False: the chapters take no "Reviewed" tick (a walkthrough: code as it is, nothing to review). Default true. */
+  chapterTicks?: boolean;
   /** Line comments on the diffs; absent, the diffs are read-only (a resolved thread). */
   comments?: GuideReaderComments;
   /**
@@ -52,12 +54,18 @@ export interface GuideReaderProps {
   selectionActions?: GuideSelectionActions;
   /** Draws the overview's diagram (the guide host's `renderOverviewDiagram`). Absent or null: as before. */
   renderOverviewDiagram?: (diagram: GuideOverviewDiagram) => ReactNode | null;
+  /** Draws a chapter's html diagram (the guide host's `renderChapterDiagram`; Mermaid is drawn by the reader). Absent or null: no diagram. */
+  renderChapterDiagram?: (diagram: GuideOverviewDiagram, index: number) => ReactNode | null;
+  /** Draw each chapter's diagram folded, its Diagram header closed (Chapter diagrams off); one click opens it. Absent: as before. */
+  chapterDiagramsFolded?: boolean;
   /** A picture slot when the overview has no diagram (the guide host's `renderOverviewFigure`). Absent: none. */
   renderOverviewFigure?: () => ReactNode | null;
-  /** Paint these lines (new side) and bring them into view; a new token moves again. */
-  highlight?: { path: string; start: number; end: number; token: number } | null;
+  /** Paint these lines (new side; `side: 'old'`: removed lines' numbers) and bring them into view; a new token moves again. */
+  highlight?: { path: string; start: number; end: number; token: number; side?: 'old' } | null;
   /** Under the host's own title (the PR review): no heading block of the reader's own, the host's page margins. */
   bare?: boolean;
+  /** Bare: Global comment and Split | Unified in this element of the host's (the PR review's strip), not above the files. */
+  controlsHost?: HTMLElement | null;
   /** Reads one changed file's whole text, for the "N unmodified lines" arrows. Absent: the diffs show as they came. */
   fileContents?: (path: string, signal: AbortSignal, patch: string) => Promise<InboxFileContents>;
   /**
@@ -65,6 +73,11 @@ export interface GuideReaderProps {
    * thread's (GuideView `threadHeading`). Absent: as before.
    */
   threadHeading?: boolean;
+  /**
+   * Sign each new comment with the person's name, as the review app does (the full-window review while Code review is
+   * on). The PR page (`bare`) always signs. Absent: unsigned, as on main.
+   */
+  signComments?: boolean;
   /**
    * The host's bar draws the diff controls (Split / Unified, Collapse all, the "Diff display" popover: approval
    * "diff-controls-headers"), so the first card has no Split | Unified tab. Absent: the tab, as before.
@@ -76,6 +89,56 @@ export interface GuideReaderProps {
   renderHeadActions?: () => ReactNode | null;
   /** "Open in" on each file's header (a review while Code review is on). Absent: none, as before. */
   fileOpenIn?: (path: string) => ReactNode;
+  /**
+   * What the host draws itself under lines of the diffs (the PR page: other people's threads from the forge). Never
+   * comments: nothing counts, sends or posts them. Absent: none, as before.
+   */
+  lineNotes?: readonly GuideLineNote[];
+  /**
+   * What the host draws itself about whole files, in each file's header under its path (the PR page: other people's
+   * folded comments on a whole file), so it stays with the header. Never comments, as `lineNotes`; something that
+   * should scroll away with the code is a line note on line 0. Absent: none, as before.
+   */
+  wholeFileNotes?: readonly GuideFileNote[];
+  /**
+   * Context notes (approval "inbox-context-notes"): agents' words on lines, drawn under their last line by
+   * `renderContextNote` through review-editor's `contextNotes` seam, never as comments. Absent: nothing changes.
+   */
+  contextNotes?: readonly GuideContextNote[];
+  renderContextNote?: (id: string) => ReactNode;
+}
+
+/** One thing the host draws under a line (review-editor's `HostLineNote`, as the window's strict typecheck sees it). */
+export interface GuideLineNote {
+  /** Stable for the same note across reads. */
+  id: string;
+  filePath: string;
+  line: number;
+  side: 'old' | 'new';
+  /** Changes whenever what `render` draws changes; the same key leaves the line as it is. */
+  key: string;
+  render: () => ReactNode;
+}
+
+/** One thing the host draws about a whole file (review-editor's `HostFileNote`, as the window's strict typecheck sees it). */
+export interface GuideFileNote {
+  /** Stable for the same note across reads. */
+  id: string;
+  filePath: string;
+  /** Changes whenever what `render` draws changes; the same key leaves the file's header as it is. */
+  key: string;
+  /** The height it draws at, in px, when known: the header is sized for it from the start (review-editor's `height`). */
+  height?: number;
+  render: () => ReactNode;
+}
+
+/** Where a context note sits (review-editor's `ContextNoteAnchor`, as the window's strict typecheck sees it). */
+export interface GuideContextNote {
+  id: string;
+  filePath: string;
+  side: 'old' | 'new';
+  lineStart: number;
+  lineEnd: number;
 }
 
 /** Selected lines, as a selection action receives them (review-editor's `DiffSelection`). */

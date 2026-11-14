@@ -26,10 +26,11 @@ const IMAGE_CSP = "sandbox; default-src 'none'; style-src 'unsafe-inline'";
 /**
  * The mock's policy: its own inline scripts and styles run in a sandbox with
  * no `allow-same-origin`, so it reaches nothing of the Inbox, and it may load
- * nothing (no network, no frames, no forms).
+ * nothing (no network, no frames, no forms): pictures, video and audio from
+ * data: and blob: only.
  */
 export const INBOX_TOUR_MOCK_CSP =
-  "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; form-action 'none'; base-uri 'none'; frame-ancestors 'self'";
+  "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; media-src data: blob:; font-src data:; form-action 'none'; base-uri 'none'; frame-ancestors 'self'";
 
 const etags = new Map<string, string>();
 

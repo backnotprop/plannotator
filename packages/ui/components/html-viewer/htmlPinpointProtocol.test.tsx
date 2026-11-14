@@ -1613,6 +1613,7 @@ describe.if(hasDom)('Interact/Annotate mode on static (srcdoc) surfaces', () => 
     onAnnotateModeExit?: () => void;
     onAnnotateModeToggle?: () => void;
     onStep?: (dir: 1 | -1) => void;
+    stepInInteract?: boolean;
     onPageEscape?: () => void;
   } = {}) {
     if (!htmlViewerModule) throw new Error('DOM test environment is not registered');
@@ -1635,6 +1636,7 @@ describe.if(hasDom)('Interact/Annotate mode on static (srcdoc) surfaces', () => 
           onAnnotateModeExit={options.onAnnotateModeExit}
           onAnnotateModeToggle={options.onAnnotateModeToggle}
           onStep={options.onStep}
+          stepInInteract={options.stepInInteract}
           onPageEscape={options.onPageEscape}
         />,
       );
@@ -1717,7 +1719,7 @@ describe.if(hasDom)('Interact/Annotate mode on static (srcdoc) surfaces', () => 
     expect(toggles).toBe(1);
   });
 
-  test('a bridge step message (a plain ] or [ in the page) reaches the host only while armed, with the frame focused, at most once per 150 ms', async () => {
+  test('a bridge step message (a plain ] or [ in the page) reaches the host while armed (in Interact only with stepInInteract), with the frame focused, at most once per 150 ms', async () => {
     // The Inbox steps through a thread's attachments on it. The page can post
     // the message itself, so a page posting in a loop without the person's
     // focus must not move anything, and a loop with focus is throttled.
@@ -1743,13 +1745,23 @@ describe.if(hasDom)('Interact/Annotate mode on static (srcdoc) surfaces', () => 
     await post({ type: 'plannotator-bridge-step', dir: -1 });
     expect(armed).toEqual([1, -1]);
 
-    // In Interact the page owns its keys: nothing reaches the host.
+    // In Interact the page owns its keys: nothing reaches a host that did not opt in.
     const interact: number[] = [];
     const second = await mountModeViewer({ annotateModeActive: false, onStep: (dir) => interact.push(dir) });
-    const frames = document.querySelectorAll<HTMLIFrameElement>('iframe');
+    let frames = document.querySelectorAll<HTMLIFrameElement>('iframe');
     await act(async () => { frames[frames.length - 1]!.focus(); });
     await second.post({ type: 'plannotator-bridge-step', dir: 1 });
     expect(interact).toEqual([]);
+
+    // A host with stepInInteract takes it in Interact (the bridge offers only a key the page did not use), focused only.
+    const opted: number[] = [];
+    const third = await mountModeViewer({ annotateModeActive: false, stepInInteract: true, onStep: (dir) => opted.push(dir) });
+    await third.post({ type: 'plannotator-bridge-step', dir: 1 });
+    expect(opted).toEqual([]);
+    frames = document.querySelectorAll<HTMLIFrameElement>('iframe');
+    await act(async () => { frames[frames.length - 1]!.focus(); });
+    await third.post({ type: 'plannotator-bridge-step', dir: -1 });
+    expect(opted).toEqual([-1]);
   });
 
   test('a bridge page-escape (an Escape the page did not use, in Interact) reaches the host only in Interact, with the frame focused, at most once per 150 ms', async () => {

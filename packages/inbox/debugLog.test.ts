@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { cleanWindowRecord, INBOX_DEBUG_BATCH_RECORDS, INBOX_DEBUG_ID_HEADER, INBOX_DEBUG_PATH } from '../shared/inbox/debug-log';
-import { createDebugRecorder, DEBUG_BUFFER_RECORDS } from './debugLog';
+import { createAliveMarker, createDebugRecorder, DEBUG_BUFFER_RECORDS, openRoute } from './debugLog';
 
 type Rec = Record<string, unknown>;
 
@@ -341,5 +341,50 @@ describe('the wrapper changes nothing about the request', () => {
     await tick();
     recorder.save();
     expect(storage.records().map((r) => r.ev)).toEqual(['req_start', 'req_head', 'req_fail']);
+  });
+});
+
+describe('the crash breadcrumb', () => {
+  const FILE = 'att_01J9Z3V5K8Q2W4E6R7T8Y9M0NP';
+  const tabStore = () => {
+    const values = new Map<string, string>();
+    return { getItem: (k: string) => values.get(k) ?? null, setItem: (k: string, v: string) => void values.set(k, v), removeItem: (k: string) => void values.delete(k) } as unknown as Storage;
+  };
+
+  test('a page that died without leaving is told to the next page in the tab, with what it had open and how big it was', () => {
+    const storage = tabStore();
+    let now = 1000;
+    const dying = createAliveMarker({ storage, page: 'p1000-1', now: () => now });
+    expect(dying.previous()).toBeNull();
+    dying.mark(openRoute(`#thread=${MSG}`), { heap: 300, imgs: 17 });
+    now = 5000;
+    dying.mark(openRoute(`#thread=${MSG}&file=${FILE}&view=full`), { heap: 912, imgs: 190 });
+    // No pagehide: the renderer died. The tab's next page (its Reload) finds the mark.
+    now = 9000;
+    const next = createAliveMarker({ storage, page: 'p9000-2', now: () => now });
+    expect(next.previous()).toEqual({ last_page: 'p1000-1', ms: 4000, thread: MSG, file: FILE, view: 'full', heap: 912, imgs: 190, discarded: false });
+  });
+
+  test('a page that left cleanly leaves nothing: the next page logs no crash', () => {
+    const storage = tabStore();
+    const page = createAliveMarker({ storage, page: 'p1000-1' });
+    page.mark(openRoute(`#thread=${MSG}`));
+    page.clear();
+    expect(createAliveMarker({ storage, page: 'p2000-2' }).previous()).toBeNull();
+  });
+
+  test('no session storage, or a store that throws, records nothing and throws nothing', () => {
+    const throwing = { getItem: () => { throw new Error('denied'); }, setItem: () => { throw new Error('denied'); }, removeItem: () => { throw new Error('denied'); } } as unknown as Storage;
+    for (const storage of [null, throwing]) {
+      const marker = createAliveMarker({ storage, page: 'p1-1' });
+      expect(() => marker.mark(openRoute(`#thread=${MSG}`))).not.toThrow();
+      expect(marker.previous()).toBeNull();
+      expect(() => marker.clear()).not.toThrow();
+    }
+  });
+
+  test('only ids and the view leave the address: a linked page, a search or a question key does not', () => {
+    expect(openRoute(`#thread=${MSG}&file=${FILE}&view=full&linked=docs/salaries.html&q=layoffs`)).toEqual({ thread: MSG, file: FILE, view: 'full' });
+    expect(openRoute('#thread=the layoffs&file=../../etc/passwd&view=zebra')).toEqual({ thread: undefined, file: undefined, view: undefined });
   });
 });

@@ -20,6 +20,7 @@ if (hasDom) {
   mock.module(resolve(import.meta.dir, './debugLog.ts'), () => ({
     debugLogOn: () => debugOn,
     debugNote: () => {},
+    debugMemory: () => ({}),
     whenDebugLogStops: (listener: () => void) => {
       stops.add(listener);
       return () => void stops.delete(listener);

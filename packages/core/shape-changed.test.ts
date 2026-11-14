@@ -1,12 +1,14 @@
 /**
- * What's changed in the Shape format (approval "shape-whats-changed"). What regresses if these fail:
- * - a board with What's changed is refused, or stored differently from what the agent wrote;
- * - a wrong field is stored instead of named (an agent then never hears what to fix);
- * - an old board without What's changed checks, parts or diffs differently than before;
- * - "since you looked" misses a change to one change, or to a call path.
+ * `views.changed` in the Shape format: once What's changed, now accepted but never shown (approval
+ * "shape-whats-changed-removed"). What regresses if these fail:
+ * - a board that still sends it is refused, or stored differently from what the agent wrote;
+ * - a wrong field is stored instead of named;
+ * - it becomes parts again, so a change in it lights a dot or `shape update` reports it, or a saved version's old
+ *   `changed` parts still count;
+ * - a board without it checks or parts differently than before.
  */
 import { describe, expect, test } from 'bun:test';
-import { checkShapeBoard, diffShapeVersions, shapeCitedRefs, shapeParts, SHAPE_VIEWS, type ShapeBoard } from './shape';
+import { checkShapeBoard, diffShapeVersions, shapeCitedRefs, shapeParts, summarizeShapeDiff, type ShapeBoard } from './shape';
 import { KETTLE_CHANGED, KETTLE_OLD_BOARD, kettleBoard } from '../../tests/fixtures/shape-whats-changed';
 
 const errorsOf = (board: unknown) => {
@@ -14,12 +16,7 @@ const errorsOf = (board: unknown) => {
   return r.ok ? [] : r.errors;
 };
 
-describe('What\'s changed', () => {
-  test('is a view after How it works', () => {
-    const ids = SHAPE_VIEWS.map((v) => v.id);
-    expect(ids.indexOf('changed')).toBe(ids.indexOf('how') + 1);
-  });
-
+describe('views.changed: accepted, never shown', () => {
   test('a board with it is kept as the agent wrote it', () => {
     const r = checkShapeBoard(kettleBoard());
     expect(r.ok).toBe(true);
@@ -87,18 +84,27 @@ describe('What\'s changed', () => {
     expect(errorsOf(board)).toEqual(['refs: the board cites [4] but refs has no entry with that n']);
   });
 
-  test('each change and each call path is a part, and a change to one is found', () => {
+  test('it has no parts, and a change to it is no change: no view, no part, nothing for shape update to report', () => {
     const before = checkShapeBoard(kettleBoard());
     const edited = structuredClone(KETTLE_CHANGED);
     edited.items[0]!.now = 'One whistle, then quiet for 5 minutes';
     edited.flows![0]!.steps![0]!.is = 'changed';
     const after = checkShapeBoard(kettleBoard(edited));
     if (!before.ok || !after.ok) throw new Error('fixture');
-    const ids = shapeParts(before.value).filter((p) => p.view === 'changed').map((p) => p.id);
-    expect(ids).toEqual([...KETTLE_CHANGED.items.map((i) => i.id), ...KETTLE_CHANGED.flows!.map((f) => f.id)]);
+    expect(shapeParts(before.value).filter((p) => p.view === 'changed')).toEqual([]);
     const diff = diffShapeVersions({ n: 1, views: before.value.views, parts: shapeParts(before.value) }, { n: 2, views: after.value.views, parts: shapeParts(after.value) });
-    expect(diff.views).toEqual(['changed']);
-    expect(diff.changes.map((c) => `${c.view}/${c.id}/${c.kind}`)).toEqual([`changed/${KETTLE_CHANGED.items[0]!.id}/changed`, `changed/${KETTLE_CHANGED.flows![0]!.id}/changed`]);
+    expect(diff.views).toEqual([]);
+    expect(diff.changes).toEqual([]);
+    expect(summarizeShapeDiff(diff)).toEqual([]);
+  });
+
+  test('a version saved while What\'s changed was shown still carries changed parts: the diff skips them', () => {
+    const r = checkShapeBoard(kettleBoard());
+    if (!r.ok) throw new Error('fixture');
+    const old = (text: string, n: number) => ({ n, views: r.value.views, parts: [...shapeParts(r.value), { view: 'changed' as const, id: 'whistle', text }] });
+    const diff = diffShapeVersions(old('One whistle', 1), old('Two whistles', 2));
+    expect(diff.changes).toEqual([]);
+    expect(diff.views).toEqual([]);
   });
 });
 
@@ -111,9 +117,9 @@ describe('a board without What\'s changed', () => {
     expect('changed' in r.value.views).toBe(false);
   });
 
-  test('has the parts it had, in their order', () => {
+  test('has the parts it had, in their order, less its views.know words (not shown, so not parts)', () => {
     const r = checkShapeBoard(KETTLE_OLD_BOARD);
     if (!r.ok) throw new Error('fixture');
-    expect(shapeParts(r.value).map((p) => `${p.view}/${p.id}`)).toEqual(['header/title', 'header/claim', 'picture/kettle', 'know/know-1']);
+    expect(shapeParts(r.value).map((p) => `${p.view}/${p.id}`)).toEqual(['header/title', 'header/claim', 'picture/kettle']);
   });
 });

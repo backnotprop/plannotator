@@ -883,3 +883,40 @@ describe.if(hasDom)('the canvas as a citizen of the page', () => {
     expect(host!.querySelector('[data-diagram-composer]')).toBeNull();
   });
 });
+
+describe.if(hasDom)('a comment put back (reopenComment)', () => {
+  test('the composer opens at its part once the diagram is drawn, holding the words, and saves only on Enter', async () => {
+    const created: Array<{ anchor: DiagramAnchor; text: string }> = [];
+    const request = { anchor: NODE_D, text: 'Kept while the file was closed' };
+    await mount(viewer({ onCreateComment: (anchor, text) => { created.push({ anchor, text }); }, reopenComment: request }));
+    await waitFor(() => expect(host!.querySelector('[data-diagram-composer]')).not.toBeNull());
+    expect(q('[data-diagram-composer]').textContent).toContain('node D');
+    const textarea = q<HTMLTextAreaElement>('[data-diagram-composer] textarea');
+    expect(textarea.value).toBe('Kept while the file was closed');
+    expect(created).toHaveLength(0);
+    await act(async () => {
+      textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    });
+    await waitFor(() => expect(created).toHaveLength(1));
+    expect(created[0]!.anchor).toMatchObject({ kind: 'node', id: 'D', sourceLine: [2, 2] });
+    expect(created[0]!.text).toBe('Kept while the file was closed');
+  });
+
+  test('the words stay with their part: a composer opened on another part starts empty', async () => {
+    await mount(viewer({ onCreateComment: noop, reopenComment: { anchor: NODE_D, text: 'Only for D' } }));
+    await waitFor(() => expect(host!.querySelector('[data-diagram-composer] textarea')).not.toBeNull());
+    const edgeDM = q('[id$="-L_D_M_0"]');
+    const edges = Array.from(host!.querySelectorAll('path.flowchart-link'));
+    const hits = Array.from(host!.querySelectorAll('[data-diagram-hit-layer] > [data-diagram-hit]'));
+    await clickPart(hits[edges.indexOf(edgeDM)]!);
+    await waitFor(() => expect(q('[data-diagram-composer]').textContent).toContain('edge D → M'));
+    expect(q<HTMLTextAreaElement>('[data-diagram-composer] textarea').value).toBe('');
+  });
+
+  test('a part gone from the render: onMissing, no composer', async () => {
+    let missing = 0;
+    await mount(viewer({ onCreateComment: noop, reopenComment: { anchor: NODE_GONE, text: 'lost part', onMissing: () => { missing += 1; } } }));
+    await waitFor(() => expect(missing).toBe(1));
+    expect(host!.querySelector('[data-diagram-composer]')).toBeNull();
+  });
+});

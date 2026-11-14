@@ -28,8 +28,8 @@ function changed(): void {
 /**
  * The tab the composer shows for a thread: the person's pick, else Reply when
  * a reply draft waits (they were writing to the agent), else Comment (the file
- * is what is on screen). A view that takes no comment is Reply only (HTML, until a phone's pin or selection
- * gives it one: useHtmlPageComment).
+ * is what is on screen). A view that takes no comment is Reply only (a read-only file, a page linked from an HTML
+ * attachment).
  */
 export function composerModeFor(threadId: string, hasDraft: boolean, takesComments: boolean): ComposerMode {
   if (!takesComments) return 'reply';

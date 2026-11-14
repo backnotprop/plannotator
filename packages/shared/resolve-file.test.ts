@@ -379,15 +379,16 @@ describe("annotatable plain-text files (#1029)", () => {
 		}
 	});
 
-	test("rejects .env but accepts .env.example", () => {
+	test("takes a .env only by its explicit path, never by name search; .env.example as any file", () => {
 		const cwd = mkdtempSync(join(tmpdir(), "plannotator-annotatable-env-"));
 		try {
 			writeFileSync(join(cwd, ".env"), "SECRET=1\n");
 			writeFileSync(join(cwd, ".env.example"), "SECRET=\n");
-			expect(resolveMarkdownFile(".env", cwd, NO_EXTRAS)).toEqual({
-				kind: "not_found",
-				input: ".env",
-			});
+			mkdirSync(join(cwd, "app"));
+			writeFileSync(join(cwd, "app", ".env.local"), "SECRET=2\n");
+			expect(resolveMarkdownFile(".env", cwd, NO_EXTRAS)).toEqual({ kind: "found", path: join(cwd, ".env") });
+			expect(resolveMarkdownFile("app/.env.local", cwd, NO_EXTRAS)).toEqual({ kind: "found", path: join(cwd, "app", ".env.local") });
+			expect(resolveMarkdownFile(".env.local", cwd, NO_EXTRAS)).toEqual({ kind: "not_found", input: ".env.local" });
 			expect(resolveMarkdownFile(".env.example", cwd, NO_EXTRAS)).toEqual({
 				kind: "found",
 				path: join(cwd, ".env.example"),

@@ -12,7 +12,7 @@
  * e2e does. Agents are SimAgent over each machine's own `inbox mcp`.
  *
  * What is proved, in order:
- *  1. Never linked: no machine label, no Machines section, no away line and
+ *  1. Never linked: no machine label, no machine in the sidebar, no away line and
  *     no "Hide offline machines"; Settings → Machines says none is linked.
  *  2. Linked: the merged list labels another machine's rows like the project
  *     label ("billing-svc · MacBook"), this machine's not; Machines in the
@@ -27,7 +27,7 @@
  *     once when MacBook is back, and its agent gets it.
  *  5. The sidebar filter, and Hide offline machines.
  *  6. Unlink in Settings → Machines (Mini asleep: it is told at its next contact).
- *  7. The sidebar's Machines section goes with the last link: unlinked from
+ *  7. The sidebar's machine captions go with the last link: unlinked from
  *     MacBook's side, then (linked again) from Studio's Settings.
  *
  * Screenshots (light and dark at 1440×900, phone at 390) land in
@@ -222,7 +222,7 @@ let macHeldThread = '';
 let macWaiting = '';
 let miniThread = '';
 
-test('1. never linked: no machine label, no Machines section, no away line, no "Hide offline machines"', async () => {
+test('1. never linked: no machine label, no machine in the sidebar, no away line, no "Hide offline machines"', async () => {
   const agent = await agentOn(studio);
   const sent = await agent.send({ project_path: scratchProject(studio.code, 'billing-svc'), subject: 'Refund webhook: retry or alert on a 409?', body: ask('Retry the 409 with the same key, or alert?', ['Retry', 'Alert']) });
   ownThread = sent.thread_id as string;
@@ -231,7 +231,9 @@ test('1. never linked: no machine label, no Machines section, no away line, no "
   await page.goto(studio.url);
   await expect(row(ownThread)).toBeVisible();
   await expect(label(ownThread)).toHaveText('billing-svc');
-  await expect(page.locator('[data-machines-section]')).toHaveCount(0);
+  // The sidebar's Agents is one flat list: no machine caption.
+  await expect(page.locator('[data-agents-section]')).toHaveAttribute('data-flat', '');
+  await expect(page.locator('[data-agents-section] [data-machine]')).toHaveCount(0);
   await expect(page.locator('[data-machine-away]')).toHaveCount(0);
   await expect(page.locator('.ib-lbody [data-away]')).toHaveCount(0);
   expect(await menuHasHideOffline()).toBe(false);
@@ -286,7 +288,7 @@ test('2b. the merged list labels another machine\'s rows like the project label;
   await expect(label(ownThread)).toHaveText('billing-svc');
   await expect(label(macThread)).toHaveText('billing-svc · MacBook');
   await expect(label(miniThread)).toHaveText('infra · Mini');
-  const machinesSection = page.locator('[data-machines-section]');
+  const machinesSection = page.locator('[data-agents-section]');
   await expect(machinesSection.locator('[data-machine] .ib-name')).toHaveText(['Studio', 'MacBook', 'Mini']);
   await shot('01-merged-list');
   await phoneShot('01-merged-list', '');
@@ -436,7 +438,7 @@ test('5. the Machines filter, and Hide offline machines', async () => {
   await page.goto(studio.url);
   await expect(row(macAsk)).toBeVisible();
   await expect(row(miniThread)).toBeVisible();
-  const machines = page.locator('[data-machines-section]');
+  const machines = page.locator('[data-agents-section]');
   await machines.locator(`[data-machine="${macbook.id}"]`).click();
   await expect(page).toHaveURL(new RegExp(`#machine=${macbook.id}`));
   await expect(row(macAsk)).toBeVisible();
@@ -489,12 +491,13 @@ test('6. Settings → Machines: each machine with its state and version; Unlink 
   await page.goto(studio.url);
   await expect(row(ownThread)).toBeVisible();
   await expect(row(miniThread)).toHaveCount(0);
-  await expect(page.locator('[data-machines-section] [data-machine] .ib-name')).toHaveText(['Studio', 'MacBook']);
+  await expect(page.locator('[data-agents-section] [data-machine] .ib-name')).toHaveText(['Studio', 'MacBook']);
   expect(errors).toEqual([]);
 });
 
-test('7. the sidebar Machines section goes with the last link: unlinked from the other side, then from here', async () => {
-  const section = page.locator('[data-machines-section]');
+test("7. the sidebar's machine captions go with the last link: unlinked from the other side, then from here", async () => {
+  // Agents stays; its machine captions are what go, and it is one flat list again.
+  const section = page.locator('[data-agents-section] [data-machine]').first();
   await page.goto(studio.url);
   await expect(label(macWaiting)).toHaveText('stripe-sync · MacBook');
   await expect(section).toBeVisible();

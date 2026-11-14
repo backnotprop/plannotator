@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import type { InboxListRow } from "@plannotator/core/inbox-types";
-import { INBOX_BRIDGE_EVENT_PATH, INBOX_BRIDGE_POLL_PATH, INBOX_SEND_NOW_POLL_FIELD, INBOX_WAKES_META_KEY } from "@plannotator/shared/inbox/connection";
+import { INBOX_BRIDGE_EVENT_PATH, INBOX_BRIDGE_POLL_PATH, INBOX_HELD_POLL_FIELD, INBOX_SEND_NOW_POLL_FIELD, INBOX_WAKES_META_KEY } from "@plannotator/shared/inbox/connection";
 import { startInboxServer, type InboxServer } from "./inbox";
 
 const roots: string[] = [];
@@ -159,6 +159,55 @@ describe("the row's delivery through the server", () => {
     await bridge(server, INBOX_BRIDGE_EVENT_PATH, { session: "ses-b", host: "claude-code", type: "state", busy: false });
     await bridge(server, INBOX_BRIDGE_EVENT_PATH, { session: "ses-b", host: "claude-code", type: "state", busy: true });
     await until(() => window.events.filter((e) => e === "deliveries").length > before, 3_000);
+  }, 20_000);
+
+  // Approval "inbox-stopped-reply": the Claude Code mod says Claude Code refused its reply (the person stopped that
+  // session, #2780). The row and the thread's connection read Stopped until the mod says the hold lifted.
+  test("a session whose connection says Claude Code holds its replies reads stopped on the row and the thread, until the hold lifts", async () => {
+    const { server, client, project } = await setup();
+    const sent = (
+      await client.callTool({
+        name: "send_message",
+        arguments: { body: "Shipped. Anything else?", project_path: project, agent_session: "ses-h", agent_host: "claude-code" },
+        _meta: { [INBOX_WAKES_META_KEY]: true },
+      })
+    ).structuredContent as { message_id: string; thread_id: string };
+    const window = stream(server, "cursor=0&window=win-0a1b2c3d4e5f6789&permission=granted&origin=http%3A%2F%2Flocalhost");
+    await until(() => window.events.includes("hello"));
+    await bridge(server, INBOX_BRIDGE_POLL_PATH, { session: "ses-h", host: "claude-code", project_path: project, waitMs: 0, busy: false, [INBOX_SEND_NOW_POLL_FIELD]: true });
+    const replied = await fetch(`${base(server)}/api/inbox/messages/${sent.message_id}/reply`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ serverSession: server.serverSession, idempotency_key: "k1", words: "Bump the version too." }),
+    });
+    const reply = ((await replied.json()) as { reply: { id: string } }).reply;
+    expect((await row(server, sent.thread_id)).delivery).toMatchObject({ state: "sending", reason: "idle" });
+    const connection = async () =>
+      ((await (await fetch(`${base(server)}/api/inbox/threads/${sent.thread_id}/sessions?asker=ses-h`)).json()) as { asker: { connection: { held?: boolean } } }).asker.connection;
+    expect((await connection()).held).toBeUndefined();
+
+    // The mod's state event: Claude Code refused the reply. The windows are told, and both reads say stopped.
+    let before = window.events.filter((e) => e === "deliveries").length;
+    await bridge(server, INBOX_BRIDGE_EVENT_PATH, { session: "ses-h", host: "claude-code", type: "state", busy: false, [INBOX_SEND_NOW_POLL_FIELD]: true, [INBOX_HELD_POLL_FIELD]: true });
+    await until(() => window.events.filter((e) => e === "deliveries").length > before);
+    expect((await row(server, sent.thread_id)).delivery).toMatchObject({ state: "queued", reason: "stopped", send_now: false, message_id: reply.id });
+    expect((await connection()).held).toBe(true);
+    // Its next poll, still held, keeps it; a poll without the field (the hold lifted, or an older mod) clears it.
+    await bridge(server, INBOX_BRIDGE_POLL_PATH, { session: "ses-h", host: "claude-code", project_path: project, waitMs: 0, busy: false, [INBOX_HELD_POLL_FIELD]: true });
+    expect((await row(server, sent.thread_id)).delivery).toMatchObject({ reason: "stopped" });
+    await bridge(server, INBOX_BRIDGE_POLL_PATH, { session: "ses-h", host: "claude-code", project_path: project, waitMs: 0, busy: false });
+    expect((await row(server, sent.thread_id)).delivery).toMatchObject({ state: "sending", reason: "idle" });
+    expect((await connection()).held).toBeUndefined();
+
+    // Held again, then the person types: the mod's state event lifts it, and the reply is delivered, not stopped.
+    await bridge(server, INBOX_BRIDGE_EVENT_PATH, { session: "ses-h", host: "claude-code", type: "state", busy: false, [INBOX_HELD_POLL_FIELD]: true });
+    expect((await row(server, sent.thread_id)).delivery).toMatchObject({ reason: "stopped" });
+    before = window.events.filter((e) => e === "deliveries").length;
+    await bridge(server, INBOX_BRIDGE_EVENT_PATH, { session: "ses-h", host: "claude-code", type: "state", busy: true, [INBOX_HELD_POLL_FIELD]: false });
+    await until(() => window.events.filter((e) => e === "deliveries").length > before);
+    expect((await row(server, sent.thread_id)).delivery).toMatchObject({ state: "queued", reason: "working" });
+    await bridge(server, INBOX_BRIDGE_EVENT_PATH, { session: "ses-h", host: "claude-code", type: "delivered", id: reply.id });
+    expect((await row(server, sent.thread_id)).delivery).toMatchObject({ state: "delivered", reason: "delivered" });
   }, 20_000);
 
   test("a reply to an MCP agent (no waking connection) reads saved", async () => {

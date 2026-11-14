@@ -294,7 +294,8 @@ export function createInboxVoice(options: InboxVoiceOptions): InboxVoice {
   };
   /** Only the first claim ever gets true. No await between the last read and the write, so two tabs cannot both win. */
   const claimIntro = async (via: "local" | "tailnet", load: string | null = null): Promise<boolean> => {
-    if (via !== "local" || !introDue() || options.otherDialogDue(load)) return false;
+    // The owner's page on any of their devices (a guest never reaches the voice routes).
+    if (!introDue() || options.otherDialogDue(load)) return false;
     if (!(await checkIntroAudience())) return false;
     if (!introDue() || options.otherDialogDue(load)) return false;
     const at = new Date().toISOString();

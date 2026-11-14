@@ -101,6 +101,44 @@ describe.if(posix)("Pi's gh / glab runner", () => {
 		expect(Date.now() - started).toBeLessThan(5_000);
 	});
 
+	test("the deadline is hard: a CLI that catches TERM, a wrapper's grandchild and a helper left holding the pipes all end, and an answer given before is kept", async () => {
+		const { bin } = scratch();
+		const pids = join(root, "pids");
+		const alive = (pid: number) => {
+			try {
+				process.kill(pid, 0);
+			} catch {
+				return false;
+			}
+			const state = Bun.spawnSync(["/bin/ps", "-o", "stat=", "-p", String(pid)]).stdout.toString().trim();
+			return state !== "" && !state.startsWith("Z");
+		};
+		const cases: [string, boolean][] = [
+			[`echo $$ >> '${pids}'\ntrap '' TERM\nexec /bin/sleep 600`, false],
+			[`echo $$ >> '${pids}'\n/bin/sh -c 'echo $$ >> "$0"; exec /bin/sleep 600' '${pids}'`, false],
+			[`/bin/sleep 600 &\necho $! >> '${pids}'\necho '{"data":{}}'\nexit 0`, true],
+		];
+		for (const [body, answers] of cases) {
+			rmSync(pids, { force: true });
+			writeFileSync(join(bin, "glab"), `#!/bin/sh\n${body}\n`);
+			chmodSync(join(bin, "glab"), 0o755);
+			const started = Date.now();
+			const result = await createNodeRefCliRunner(1_000)("glab", ["api", "graphql"]);
+			if (answers) {
+				expect(result).toMatchObject({ exitCode: 0, stdout: '{"data":{}}\n' });
+				expect(Date.now() - started).toBeLessThan(1_000);
+			} else {
+				expect(result).toMatchObject({ exitCode: 1, stderr: "glab: timed out" });
+				expect(Date.now() - started).toBeLessThan(1_500);
+			}
+			const spawned = readFileSync(pids, "utf8").trim().split(/\s+/).map(Number);
+			expect(spawned.length).toBeGreaterThan(0);
+			const until = Date.now() + 3_000;
+			while (spawned.some(alive) && Date.now() < until) await Bun.sleep(50);
+			expect(spawned.filter(alive)).toEqual([]);
+		}
+	});
+
 	test("the card through the Node runner: one query, --hostname github.com, the issue's data", async () => {
 		const log = scratch();
 		const cards = createRefCards({ run: nodeRefCliRunner, avatar: async () => null });

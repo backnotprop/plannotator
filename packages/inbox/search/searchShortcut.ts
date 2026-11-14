@@ -17,6 +17,7 @@ export function buildInboxSearchShortcuts(extras: InboxShortcutExtras = INBOX_SH
   return defineShortcutScope({
     id: 'inbox-search',
     title: 'Inbox',
+    lettersByCode: true,
     shortcuts: {
       openSearch: {
         description: 'Search',
@@ -48,7 +49,8 @@ export function isOpenSearchKey(event: KeyEventLike, mac: boolean = isMac): bool
   const own = mac === isMac ? isModKeyHeld(event) : mac ? event.metaKey : event.ctrlKey;
   const other = mac ? event.ctrlKey : event.metaKey;
   if (!own || other) return false;
-  return matchesShortcutBinding(event, OPEN_SEARCH_BINDING);
+  // ⌘K on the K key on a Cyrillic or Greek layout too (the scope's `lettersByCode`).
+  return matchesShortcutBinding(event, OPEN_SEARCH_BINDING, inboxSearchShortcuts);
 }
 
 /**

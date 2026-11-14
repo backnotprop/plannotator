@@ -27,6 +27,21 @@ export interface ShortcutScopeDefinition<TAction extends string = string> {
   id: string;
   title: string;
   shortcuts: Record<TAction, ShortcutDefinition>;
+  /**
+   * Optional, off by default: a letter binding also matches its physical key
+   * (`event.code`, `KeyE` for `E`) when the character typed is one letter
+   * outside A–Z, so letter keys keep working on Cyrillic, Greek or Hebrew
+   * layouts. Punctuation, dead keys and unidentified keys never fall back.
+   * A Latin layout still matches by character (AZERTY's A is A), and
+   * punctuation (`?`, `/`) is always matched by character.
+   */
+  lettersByCode?: boolean;
+}
+
+/** How a binding is matched. */
+export interface ShortcutMatchOptions {
+  /** See `ShortcutScopeDefinition.lettersByCode`. */
+  lettersByCode?: boolean;
 }
 
 export interface ShortcutEntry extends ShortcutDefinition {
@@ -398,7 +413,7 @@ export function getShortcutDigit(event: ShortcutKeyEvent): number | null {
   return digitCode === null ? null : Number.parseInt(digitCode, 10);
 }
 
-function matchesKeyToken(event: ShortcutKeyEvent, token: string): boolean {
+function matchesKeyToken(event: ShortcutKeyEvent, token: string, options?: ShortcutMatchOptions): boolean {
   const key = event.key.length === 1 ? event.key.toUpperCase() : event.key;
   const shortcutDigit = getShortcutDigit(event);
 
@@ -419,7 +434,12 @@ function matchesKeyToken(event: ShortcutKeyEvent, token: string): boolean {
   }
 
   if (isSingleLetter(token)) {
-    return key === token;
+    if (key === token) return true;
+    // Opt-in: a non-Latin letter on the letter's physical key (Cyrillic У on KeyE). Only a single letter outside
+    // A–Z counts: punctuation (Dvorak's `.` on KeyE, Hebrew's `/` on KeyQ), a dead key or an unidentified one never
+    // turns into a letter.
+    const typed = event.key;
+    return options?.lettersByCode === true && typed.length === 1 && /\p{L}/u.test(typed) && !/^[A-Za-z]$/.test(typed) && event.code === `Key${token}`;
   }
 
   if (isSingleDigit(token)) {
@@ -435,7 +455,7 @@ function matchesKeyToken(event: ShortcutKeyEvent, token: string): boolean {
  * Sequential and hold bindings deliberately return false; their timing
  * semantics are handled by the shortcut runtime's dedicated paths.
  */
-export function matchesShortcutBinding(event: ShortcutKeyEvent, binding: string): boolean {
+export function matchesShortcutBinding(event: ShortcutKeyEvent, binding: string, options?: ShortcutMatchOptions): boolean {
   if (binding.includes(' ') || binding.includes('hold')) {
     return false;
   }
@@ -466,7 +486,7 @@ export function matchesShortcutBinding(event: ShortcutKeyEvent, binding: string)
   if (!shiftMatches) return false;
   if (requiresAlt !== event.altKey) return false;
 
-  return matchesKeyToken(event, keyToken);
+  return matchesKeyToken(event, keyToken, options);
 }
 
 /**
@@ -474,8 +494,8 @@ export function matchesShortcutBinding(event: ShortcutKeyEvent, binding: string)
  *
  * The group uses the same normalized syntax as an ordinary one-press binding.
  */
-export function matchesShortcutBindingGroup(event: ShortcutKeyEvent, group: string): boolean {
-  return matchesShortcutBinding(event, group);
+export function matchesShortcutBindingGroup(event: ShortcutKeyEvent, group: string, options?: ShortcutMatchOptions): boolean {
+  return matchesShortcutBinding(event, group, options);
 }
 
 export function getMatchingShortcutBindingIndex(event: ShortcutKeyEvent, bindings: string[]): number {

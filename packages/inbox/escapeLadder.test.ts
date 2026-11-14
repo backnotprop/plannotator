@@ -38,12 +38,11 @@ describe('the Escape ladder', () => {
     expect(KINDS.filter((kind) => rungsFor(kind).includes('linked'))).toEqual(['html']);
   });
 
-  test('a menu closes before a composer, the drawer before Annotate, Annotate before the question, and the question before leaving', () => {
+  test('a menu closes before a composer, the composer before the drawer, the drawer before Annotate, Annotate before leaving', () => {
     expect(escapeRung({ ...IDLE_LADDER, popoverOpen: true, composerOpen: true })).toBe('popover');
     expect(escapeRung({ ...IDLE_LADDER, composerOpen: true, panelOpen: true })).toBe('composer');
     expect(escapeRung({ ...IDLE_LADDER, inField: true, panelOpen: true })).toBe('field');
     expect(escapeRung({ ...IDLE_LADDER, panelOpen: true, annotating: true })).toBe('drawer');
-    expect(escapeRung({ ...IDLE_LADDER, annotating: true, questionOpen: true })).toBe('annotate');
-    expect(escapeRung({ ...IDLE_LADDER, questionOpen: true })).toBe('question');
+    expect(escapeRung({ ...IDLE_LADDER, annotating: true })).toBe('annotate');
   });
 });

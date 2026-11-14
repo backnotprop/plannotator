@@ -36,9 +36,9 @@ async function setup() {
   const client = new Client({ name: "inbox-snooze-test", version: "1.0.0" });
   await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${server.port}/mcp`)));
   clients.push(client);
-  const send = async (body: string, session: string) =>
+  const send = async (body: string, session: string, replyTo?: string) =>
     (
-      (await client.callTool({ name: "send_message", arguments: { project_path: project, agent_session: session, agent_name: "Claude Code", body } })) as {
+      (await client.callTool({ name: "send_message", arguments: { project_path: project, agent_session: session, agent_name: "Claude Code", body, ...(replyTo ? { reply_to: replyTo } : {}) } })) as {
         structuredContent: { thread_id: string; message_id: string };
       }
     ).structuredContent;
@@ -103,7 +103,7 @@ describe("snooze_thread, the agent's call", () => {
   test("any message of a thread names that thread: a reply's id, not only the root's", async () => {
     const { server, client, send } = await setup();
     const a = await send(ASK, "ses_a");
-    const later1 = await send("Plain news", "ses_a");
+    const later1 = await send("Plain news", "ses_a", a.message_id);
     expect(later1.thread_id).toBe(a.thread_id);
     expect(later1.message_id).not.toBe(a.thread_id);
     const answer = await call(client, { thread_id: later1.message_id, until: later(3_600_000) });
@@ -196,7 +196,7 @@ describe("snooze", () => {
     const { server, client, send } = await setup();
     const a = await send("Plain news", "ses_a");
     await snooze(server, a.thread_id, later(3_600_000));
-    const asked = await send(ASK, "ses_a");
+    const asked = await send(ASK, "ses_a", a.message_id);
     expect(asked.thread_id).toBe(a.thread_id);
     const read = await client.callTool({ name: "read_thread", arguments: { thread_id: a.thread_id, agent_session: "ses_a" } });
     expect(JSON.stringify(read)).not.toMatch(/snooz/i);
@@ -243,6 +243,24 @@ describe("snooze", () => {
     // Read, the clock goes.
     await post(server, `/api/inbox/threads/${a.thread_id}/seen`, {});
     expect(server.store.snoozes()).toEqual([]);
+  });
+
+  test("a thread in the person's Priority keeps it while snoozed and when it comes back", async () => {
+    const { server, send } = await setup();
+    const a = await send(ASK, "ses_a");
+    expect((await post(server, `/api/inbox/threads/${a.thread_id}/priority`, { priority: true })).status).toBe(200);
+    const first = server.store.priorities().threads[0]!.at;
+    await snooze(server, a.thread_id, later(800));
+    // Snoozed: in the band (the window draws it there, not in Priority), its priority kept.
+    const snoozed = (await list(server)).snoozed!.find((r) => r.thread_id === a.thread_id)!;
+    expect(snoozed.priority).toEqual({ person: true, at: first, ask: null });
+    let back = await list(server);
+    for (let i = 0; i < 40 && back.snoozed!.length > 0; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      back = await list(server);
+    }
+    expect(back.snoozed).toEqual([]);
+    expect(back.sections.flatMap((s) => s.threads).find((r) => r.thread_id === a.thread_id)!.priority).toEqual({ person: true, at: first, ask: null });
   });
 
   test("a time gone by is refused; Unsnooze ends it", async () => {

@@ -119,6 +119,26 @@ order, `list` named it `2 files: notes.md, mock.html`, its feedback arrived
 headed `— Feedback · 2 comments.` under `Files: notes.md, mock.html`, and
 `close all` closed a second bundle.
 
+### OpenCode 2: sessions the Inbox starts
+
+In a server the Inbox started (`PLANNOTATOR_INBOX_LAUNCHED=1`), the plugin's wake watches each root session as it is created (`session.created`), not only once it ran, so the Inbox's first message reaches a session that has had no turn; with `PLANNOTATOR_INBOX_LAUNCHED_SESSION` it watches that session from the start (a restart). The rest is "OpenCode" in `inbox-launch.md`. Test: `inbox-v2-wake.test.ts` "OpenCode 2 started by the Inbox".
+
+### OpenCode 2: the installer updates a running service's plugin
+
+The OpenCode 2 service keeps the plugin it loaded. When it is running with an
+unpinned `@plannotator/opencode` spec, `install.sh` runs `opencode2 plugin
+update <spec>` (`update_opencode2_service_plugin`), which loads the new plugin
+without cancelling a turn, a pending permission, a question form or an open
+Plannotator review (measured on OpenCode 2.0.22, 5 of 5; `opencode2 reload`
+cancels the permission and the form, so nothing automatic uses it). The step
+only asks the service, bounds every call, reads the result back from `plugin
+list`, never fails the install, and keeps the OpenCode 2 cache while the
+service has the plugin. There is no "reload when every session is idle"
+action in the Inbox: idleness cannot be held between the check and the
+reload, and `plugin update` needs no idle gate. Details and knobs:
+`PLANNOTATOR_OPENCODE2_TIMEOUT` in [environment.md](environment.md).
+`install.ps1` / `install.cmd` have no OpenCode 2 step yet.
+
 ### OpenCode: in-process servers in `plannotator sessions` (#1567)
 
 The plugin's own servers (submit_plan's plan review, `/plannotator-review`,
@@ -139,7 +159,7 @@ handling); instead each registration deletes entries whose pid is dead, and
 loopback port no longer accepts a connection, or that cannot be read. Commands
 list the project they detected (or `unknown`); only the plan review detects it.
 
-### T3 Code: Ask this session through an optional Claude hook (opt-in, unreleased)
+### T3 Code: Ask this session through an optional Claude hook (opt-in)
 
 `packages/t3-code` (user notes in its README). T3 Code runs Claude through the
 Agent SDK, which loads `~/.claude/settings.json` hooks, so a Claude Bash hook
@@ -168,9 +188,10 @@ documents it); its help leads with that setup.
   `HIDDEN_SUBCOMMANDS`; `t3` is not.
 - **The gate (per Bash call cost):** the hook runs on every Bash call of every
   Claude session that loads the settings file. The command is
-  `case "$CLAUDE_CODE_ENTRYPOINT" in sdk*) PLANNOTATOR_DATA_DIR=… '<binary>' t3-hook;; esac`
+  `case "$CLAUDE_CODE_ENTRYPOINT" in sdk*|t3-code) PLANNOTATOR_DATA_DIR=… '<binary>' t3-hook;; esac`
   (`t3HookCommand`, `packages/shared/t3-hook-command.ts`): only an Agent SDK
-  session (`sdk-ts`, …) starts the binary; an interactive `claude` (`cli`)
+  session (T3 names itself `t3-code`; other SDK apps report `sdk-ts`, …)
+  starts the binary; an interactive `claude` (`cli`)
   is answered by the shell with no output (~3 ms instead of ~290 ms of CLI
   startup). The binary repeats the check as the first statement of
   `apps/hook/server/index.ts` and in `prepareT3Hook`. Inside an SDK session

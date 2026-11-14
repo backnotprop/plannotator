@@ -78,10 +78,10 @@ describe("send_message: the line naming a thread the session has not read", () =
     const root = await send(client, project, "ses-a", { body: "Shipped the retry fix.", subject: "Retry fix" });
     const followUp = await send(client, project, "ses-a", { body: "Also the docs.", reply_to: root.structuredContent.message_id });
     expect(text(followUp)).not.toMatch(WARNING);
-    // A default-routed follow-up (no reply_to) into the session's open thread: no line either.
+    // No reply_to and no thread: a new thread, so no line either.
     expect(text(await send(client, project, "ses-a", { body: "And the changelog." }))).not.toMatch(WARNING);
     later(INBOX_THREAD_STALE_MS + HOURS);
-    // Routed by default (no reply_to, no thread): it goes where the session's own messages went, so no line.
+    // The same hours later: it names no thread, so no line.
     expect(text(await send(client, project, "ses-a", { body: "Back after lunch." }))).not.toMatch(/its subject is/);
     later(INBOX_THREAD_STALE_MS + HOURS);
     // Named by reply_to: the line, worded for the thread's starter, never "you have not read".

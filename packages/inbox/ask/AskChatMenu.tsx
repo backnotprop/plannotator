@@ -6,8 +6,8 @@ import { Icon } from '../icons';
 import { askChatGroups, askChatName, askChatTime, askRowState } from './askModel';
 
 /**
- * The window's header: the current chat (its agent's real icon, the thread's
- * name, a caret) and the dropdown of chats, on the Inbox's own menu (`.ib-pm`;
+ * The window's header: the current chat (Ask's sparkle in the accent colour,
+ * "Ask AI · <thread name>", a caret) and the dropdown of chats, on the Inbox's own menu (`.ib-pm`;
  * Base UI carries the keys: arrows, Home/End, type-ahead, Escape and Tab close,
  * focus back on the chip). The list is read when it opens, so an answer in
  * another chat shows there and nowhere before that (told to the owner).
@@ -65,9 +65,10 @@ export function AskChatMenu({ current, phone, onPick }: { current: InboxAskChat;
   return (
     <Menu.Root modal={false} onOpenChange={(open) => open && read()}>
       <Menu.Trigger ref={chip} className="ib-ask-chip" aria-label={`${askChatName(current.subject)}, chats`} data-ask-chip="">
-        <HostMark host={current.host} />
+        {/* Told apart from a draft's window at a glance (approval "inbox-reply-floaters"): Ask's sparkle and "Ask AI · <thread>". */}
+        <AskSparkle />
         <span className="ib-ask-chipname" dir="auto">
-          {askChatName(current.subject)}
+          Ask AI · {askChatName(current.subject)}
         </span>
         <Icon name="chevD" size={13} className="ib-ask-caret" />
       </Menu.Trigger>
@@ -92,5 +93,15 @@ export function AskChatMenu({ current, phone, onPick }: { current: InboxAskChat;
         </Menu.Positioner>
       </Menu.Portal>
     </Menu.Root>
+  );
+}
+
+/** Lucide's sparkles (the Inbox's own icons have no such mark): Ask's header, and its row in the corner's list. */
+export function AskSparkle({ size = 15, className = 'ib-ic ib-ask-sparkle' }: { size?: number; className?: string }) {
+  return (
+    <svg className={className} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" data-ask-sparkle="">
+      <path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z" />
+      <path d="M20 3v4M22 5h-4M4 17v2M5 18H3" />
+    </svg>
   );
 }

@@ -6,6 +6,10 @@
  * another agent than the one the pill names, a pill that moves when an agent
  * writes, or a one-agent thread that grows new UI.
  *
+ * A phone (approval "inbox-phone-composer-picker"): under the same rule as a
+ * computer's pill (a one-agent thread has none), the control is in the box's
+ * row after Skills, and its list is a bottom sheet; the last cases here.
+ *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
@@ -175,11 +179,11 @@ function button(el: HTMLElement, text: string): HTMLButtonElement {
 }
 
 async function write(el: HTMLElement, words: string) {
-  if (!el.querySelector('textarea')) {
+  if (!el.querySelector('textarea:not([data-question-other])')) {
     act(() => button(el.querySelector('.ib-pfoot') as HTMLElement, 'Reply').click());
     await settle();
   }
-  const text = el.querySelector('textarea') as HTMLTextAreaElement;
+  const text = el.querySelector('textarea:not([data-question-other])') as HTMLTextAreaElement;
   act(() => {
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(text, words);
     text.dispatchEvent(new Event('input', { bubbles: true }));
@@ -207,7 +211,7 @@ async function send(el: HTMLElement) {
   await settle();
 }
 
-test.skipIf(!hasDom)('one agent: nothing new, no pill and no label above the box; Draft and Saved sit under it in Send\'s row', async () => {
+test.skipIf(!hasDom)('one agent: nothing new, no pill and no label above the box; a computer saves silently, and the bin sits in Send\'s row', async () => {
   const el = await render(threadOf(agentMessage(M1, CLAUDE, 41), agentMessage(M2, CLAUDE, 45)));
   const text = await write(el, 'Ship it.');
   await settle(1100);
@@ -215,14 +219,14 @@ test.skipIf(!hasDom)('one agent: nothing new, no pill and no label above the box
   expect(text.getAttribute('aria-label')).toBe('Reply to Claude Code');
   const leaves = [...el.querySelectorAll('.ib-pfoot *')].filter((n) => n.children.length === 0).map((n) => n.textContent ?? '');
   expect(leaves.some((t) => t.startsWith('Reply to'))).toBe(false);
-  const stamp = el.querySelector('[data-draft-stamp]');
-  expect(stamp).not.toBeNull();
-  expect(el.querySelector('[data-reply-row]')?.contains(stamp)).toBe(true);
+  // The draft saved (below), and nothing says so in the box; Discard is the bin in the box's row (approval "inbox-reply-box", T6).
+  expect(el.querySelector('[data-draft-stamp]')).toBeNull();
+  expect(el.querySelector('[data-reply-row] [data-reply-discard]')?.getAttribute('aria-label')).toBe('Discard draft');
   // The one-agent draft names no recipient.
   expect(drafts().at(-1)!.body.recipients).toBeUndefined();
 });
 
-test.skipIf(!hasDom)('on a phone the Draft line is nothing before the first save, then sits above the box, outside Send\'s row', async () => {
+test.skipIf(!hasDom)('on a phone the Draft line is nothing before the first save, then sits above the box, outside the box\'s row', async () => {
   const el = await render(threadOf(agentMessage(M1, CLAUDE, 41), agentMessage(M2, CLAUDE, 45)), true);
   act(() => button(el.querySelector('.ib-pfoot') as HTMLElement, 'Reply').click());
   await settle();
@@ -232,7 +236,7 @@ test.skipIf(!hasDom)('on a phone the Draft line is nothing before the first save
   expect(el.querySelector('[data-draft-stamp]')).toBeNull();
   await write(el, 'Ship it.');
   await settle(1100);
-  // One line, above the box: none in Send's row.
+  // One line, above the box: none in the box's row.
   expect(el.querySelectorAll('[data-draft-stamp]').length).toBe(1);
   expect(el.querySelector('[data-reply-row] [data-draft-stamp]')).toBeNull();
   expect(above!.querySelector('[data-draft-stamp] [data-draft-discard]')).not.toBeNull();
@@ -255,7 +259,7 @@ test.skipIf(!hasDom)('two agents: the pill names the last writer; a name picked,
   // The words are saved with the choice (the server keeps it, approval server item 1).
   await settle(1100);
   expect(drafts().at(-1)!.body).toMatchObject({ body: 'Use the old totals.', recipients: ['ses_claude'] });
-  expect((el.querySelector('textarea') as HTMLTextAreaElement).getAttribute('aria-label')).toBe('Reply to Claude Code');
+  expect((el.querySelector('textarea:not([data-question-other])') as HTMLTextAreaElement).getAttribute('aria-label')).toBe('Reply to Claude Code');
   await send(el);
   expect(replies().map((r) => r.path)).toEqual([`/api/inbox/messages/${M1}/reply`]);
   expect(replies()[0]!.body).toMatchObject({ words: 'Use the old totals.' });
@@ -401,7 +405,7 @@ test.skipIf(!hasDom)('a restored draft led by an agent that can\'t take the repl
   savedDraft = { v: 1, thread_id: M1, body: 'Still on the migration?', created_at: '2026-11-01T10:46:00.000Z', updated_at: '2026-11-01T10:46:00.000Z', recipients: ['ses_unknown', 'ses_gone'] };
   const el = await render(threadOf(agentMessage(M1, CLAUDE, 41), TAGGED_GONE()));
   // The draft's box is open, with its words.
-  expect((el.querySelector('textarea') as HTMLTextAreaElement).value).toBe('Still on the migration?');
+  expect((el.querySelector('textarea:not([data-question-other])') as HTMLTextAreaElement).value).toBe('Still on the migration?');
   expect(pillName(el)).toBe('Claude Code');
   await send(el);
   expect(replies().map((r) => r.path)).toEqual([`/api/inbox/messages/${M1}/reply`]);
@@ -507,7 +511,7 @@ async function tagWith(text: HTMLTextAreaElement, typed: string) {
   await typeBox(text, `${text.value} `);
 }
 
-test.skipIf(!hasDom)('agents tagged with `@` count toward the nine: with two typed, the seventh circle is off and a Send carries eight tags at most', async () => {
+test.skipIf(!hasDom)('any number of agents: with two typed with `@` and every circle ticked, one Send carries all nine tags', async () => {
   const writers = Array.from({ length: 8 }, (_, i) => `ses_c${i + 1}`);
   taggable = [...writers.map((s) => tagged(s, 'claude-code')), tagged('ses_pi', 'pi'), tagged('ses_codex', 'codex')];
   const ids = [M1, M2, M3, M4, 'msg_01M4H7DDDDDDDDDDDDDDDDDDDD', 'msg_01M4H7EEEEEEEEEEEEEEEEEEEE', 'msg_01M4H7FFFFFFFFFFFFFFFFFFFF', 'msg_01M4H7GGGGGGGGGGGGGGGGGGGG'];
@@ -518,12 +522,139 @@ test.skipIf(!hasDom)('agents tagged with `@` count toward the nine: with two typ
   // The last writer and the two typed.
   expect(pillName(el)).toBe('3 agents');
   await openList(el);
-  for (const s of writers.slice(0, 6)) await tap(tick(el, s));
-  expect(pillName(el)).toBe('9 agents');
-  expect(tick(el, 'ses_c7').disabled).toBe(true);
+  for (const s of writers.slice(0, 7)) await tap(tick(el, s));
+  expect(pillName(el)).toBe('10 agents');
   await send(el);
   expect(replies()).toHaveLength(1);
   const tags = (replies()[0]!.body.tags as { session: string }[]).map((t) => t.session);
-  expect(tags.length).toBe(8);
-  expect(new Set(tags)).toEqual(new Set([...writers.slice(0, 6), 'ses_pi', 'ses_codex']));
+  expect(new Set(tags)).toEqual(new Set([...writers.slice(0, 7), 'ses_pi', 'ses_codex']));
+});
+
+// A computer's list is `.ib-rpick`, and holds the page mark `data-ib-rpick` on its .pn-inbox (pageMarks.ts,
+// build/inbox-page-marks.ts) exactly while it is open. The rule the mark stands for, `.pn-inbox:has(.ib-rpick) .ib-rbox`
+// (no ring around the box under the list), is in inbox.css's phone query; a phone's list is now a bottom sheet that is
+// not `.ib-rpick` and holds no mark (below).
+test.skipIf(!hasDom)('a computer: the open list marks its .pn-inbox (data-ib-rpick), and the mark goes with the list', async () => {
+  const el = await render(threadOf(agentMessage(M1, CLAUDE, 41), agentMessage(M2, PI, 45)));
+  await write(el, 'Use the old totals.');
+  const inbox = el.querySelector('.pn-inbox')!;
+  expect(inbox.hasAttribute('data-ib-rpick')).toBe(false);
+  await openList(el);
+  expect(el.querySelector('[data-recipient-list]')).not.toBeNull();
+  expect(inbox.hasAttribute('data-ib-rpick')).toBe(true);
+  await only(el, 'ses_claude');
+  expect(el.querySelector('[data-recipient-list]')).toBeNull();
+  expect(inbox.hasAttribute('data-ib-rpick')).toBe(false);
+});
+
+/** A phone's sheet (approval "inbox-phone-composer-picker"): each row's session, title, quiet line, and whether it gets the reply. */
+const sheetRows = (el: HTMLElement) =>
+  [...el.querySelectorAll('[data-recipient-list] [data-recipient-row]')].map((r) => [r.getAttribute('data-recipient-row'), r.querySelector('.ib-sheet-t')?.textContent, r.querySelector('.ib-sheet-d')?.textContent ?? null, r.getAttribute('aria-selected')]);
+const sheetRow = (el: HTMLElement, session: string) => el.querySelector(`[data-recipient-list] [data-recipient-row="${session}"]`) as HTMLElement;
+/** The sheet is open: after a close it stays in the DOM for its way out, so the control says it. */
+const sheetOpen = (el: HTMLElement) => pill(el)?.getAttribute('aria-expanded') === 'true';
+
+test.skipIf(!hasDom)('a phone, several agents: who gets the reply is a pill in the row after Skills; its sheet is a dialog that takes focus, a circle adds a second agent (an ended one\'s is off), a row picks that agent alone, closes the sheet and gives the reply its focus back', async () => {
+  const el = await render(threadOf(agentMessage(M1, GONE, 39), agentMessage(M2, CLAUDE, 41), agentMessage(M3, PI, 45)), true);
+  const text = await write(el, 'Use the old totals.');
+  act(() => text.focus());
+  const control = pill(el)!;
+  // In the row, after Skills; never on the line over the row, and none of a computer's pill.
+  expect(control.closest('[data-reply-row]') !== null).toBe(true);
+  expect(el.querySelector('[data-reply-line] [data-recipient]')).toBeNull();
+  expect(el.querySelector('.ib-rto')).toBeNull();
+  expect(el.querySelector('[data-reply-skills]')!.compareDocumentPosition(control) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(el.querySelector('[data-voice-mic], [data-reply-send]')!.compareDocumentPosition(control) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+  // It names the last writer.
+  expect(control.hasAttribute('data-agent-pill')).toBe(true);
+  expect(control.getAttribute('data-recipient-chosen')).toBe('ses_pi');
+  expect(control.getAttribute('aria-label')).toBe('Reply goes to Pi. Change');
+  expect(control.getAttribute('aria-haspopup')).toBe('dialog');
+  // No other agent here wears Pi's mark: the mark and the chevron say it, with no name (the label has it).
+  expect(control.querySelector('.ib-apill-n')).toBeNull();
+  expect(control.querySelector('.ib-apill-m') !== null && control.querySelector('.ib-apill-c') !== null).toBe(true);
+  await openList(el);
+  const sheet = el.querySelector('[data-recipient-list]') as HTMLElement;
+  expect(sheet.getAttribute('role')).toBe('dialog');
+  expect(sheet.getAttribute('aria-label')).toBe('Who gets this reply');
+  expect(sheetOpen(el)).toBe(true);
+  // The sheet has focus (the keyboard goes down); it is not a computer's list and holds no page mark.
+  expect(document.activeElement === sheet).toBe(true);
+  expect(sheet.classList.contains('ib-rpick')).toBe(false);
+  expect(el.querySelector('.pn-inbox')!.hasAttribute('data-ib-rpick')).toBe(false);
+  // Live first, the ended agent last; the recipient is the selected row.
+  expect(sheetRows(el)).toEqual([
+    ['ses_claude', 'Claude Code', 'superfans', 'false'],
+    ['ses_pi', 'Pi', 'superfans', 'true'],
+    ['ses_gone', 'Codex', 'ended', 'false'],
+  ]);
+  expect(tick(el, 'ses_gone').disabled).toBe(true);
+  // A circle adds that agent too, and the sheet stays.
+  await tap(tick(el, 'ses_claude'));
+  expect(sheetOpen(el)).toBe(true);
+  expect(tick(el, 'ses_claude').getAttribute('aria-checked')).toBe('true');
+  expect(pill(el)!.getAttribute('data-recipient-chosen')).toBe('ses_pi ses_claude');
+  expect(pill(el)!.querySelector('[data-agent-count]')?.textContent).toBe('2');
+  expect(pill(el)!.getAttribute('aria-label')).toBe('Reply goes to Pi and Claude Code. Change');
+  // A row: that agent only. The sheet closes and the reply has focus again.
+  await act(async () => sheetRow(el, 'ses_claude').click());
+  await settle();
+  expect(sheetOpen(el)).toBe(false);
+  expect(pill(el)!.getAttribute('data-recipient-chosen')).toBe('ses_claude');
+  expect(document.activeElement === text).toBe(true);
+  // Its way out over, the sheet is gone.
+  await settle(400);
+  expect(el.querySelector('[data-recipient-list]')).toBeNull();
+  // The draft keeps the choice, and Send answers that agent's own latest message alone.
+  await settle(1100);
+  expect(drafts().at(-1)!.body).toMatchObject({ body: 'Use the old totals.', recipients: ['ses_claude'] });
+  await send(el);
+  expect(replies().map((r) => r.path)).toEqual([`/api/inbox/messages/${M2}/reply`]);
+  expect(replies()[0]!.body.tags).toBeUndefined();
+});
+
+test.skipIf(!hasDom)('a phone, two agents with the same mark (two Claude Code sessions): still the mark alone, and its accessible name says which gets the reply', async () => {
+  const el = await render(threadOf(agentMessage(M1, CLAUDE, 41), agentMessage(M4, FARCLAUDE, 45, { from_project: { name: FAR.name, root: FAR.root } })), true);
+  await write(el, 'Which folder?');
+  expect(pill(el)!.hasAttribute('data-agent-pill')).toBe(true);
+  expect(pill(el)!.getAttribute('data-recipient-chosen')).toBe('ses_far');
+  expect(pill(el)!.getAttribute('aria-label')).toBe('Reply goes to Claude Code (plannotator). Change');
+  expect(pill(el)!.querySelector('.ib-apill-n')).toBeNull();
+  await openList(el);
+  await act(async () => sheetRow(el, 'ses_claude').click());
+  await settle();
+  expect(pill(el)!.getAttribute('data-recipient-chosen')).toBe('ses_claude');
+  expect(pill(el)!.querySelector('.ib-apill-n')).toBeNull();
+  expect(pill(el)!.getAttribute('aria-label')).toBe('Reply goes to Claude Code (superfans). Change');
+});
+
+test.skipIf(!hasDom)('a phone, a tagged agent that ended and never wrote here: its row can\'t be picked alone, and the reply stays with the agent that wrote', async () => {
+  notLive = new Set(['ses_gone']);
+  const el = await render(threadOf(agentMessage(M1, CLAUDE, 41), TAGGED_GONE()), true);
+  await write(el, 'Codex, are you there?');
+  await openList(el);
+  expect(sheetRow(el, 'ses_gone').getAttribute('aria-disabled')).toBe('true');
+  expect(sheetRow(el, 'ses_claude').hasAttribute('aria-disabled')).toBe(false);
+  expect(tick(el, 'ses_gone').disabled).toBe(true);
+  await act(async () => sheetRow(el, 'ses_gone').click());
+  await settle();
+  // Nothing was picked: the sheet is still open, on the same agent.
+  expect(sheetOpen(el)).toBe(true);
+  expect(pill(el)!.getAttribute('data-recipient-chosen')).toBe('ses_claude');
+});
+
+test.skipIf(!hasDom)('a phone, one agent: nothing new, as on a computer: no control in the row and no sheet; the draft names no recipient', async () => {
+  const el = await render(threadOf(agentMessage(M1, CLAUDE, 41), agentMessage(M2, CLAUDE, 45)), true);
+  const text = await write(el, 'Ship it.');
+  expect(pill(el)).toBeNull();
+  expect(el.querySelector('[data-agent-mark], [data-agent-pill]')).toBeNull();
+  expect(el.querySelector('[data-recipient-list], [data-sheet]')).toBeNull();
+  // The row is the paperclip, Skills and Send.
+  expect(el.querySelector('[data-reply-row][data-phone] [data-reply-skills]')).not.toBeNull();
+  expect(text.getAttribute('aria-label')).toBe('Reply to Claude Code');
+  await settle(1100);
+  expect(drafts().at(-1)!.body.recipients).toBeUndefined();
+  await send(el);
+  expect(el.querySelector('[data-recipient-list]')).toBeNull();
+  expect(replies().map((r) => r.path)).toEqual([`/api/inbox/messages/${M2}/reply`]);
 });

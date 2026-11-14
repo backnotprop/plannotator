@@ -145,10 +145,14 @@ describe('What to know', () => {
     }
   });
 
-  test('two old versions with raw reqs parts compare as What to know: same parts, no changes', () => {
-    const version = (text: string) => ({ n: 1, views: {}, refs: [], parts: [{ view: 'reqs', id: 'r-1', text }] }) as unknown as Parameters<typeof diffShapeVersions>[0];
-    expect(diffShapeVersions(version('Line'), version('Line')).changes).toEqual([]);
-    expect(diffShapeVersions(version('Line'), version('Other')).changes).toEqual([{ view: 'know', id: 'r-1', kind: 'changed', before: 'Line', after: 'Other' }]);
+  test('two saved versions with know or raw reqs parts: a change in those words is no change (they are not shown)', () => {
+    const version = (view: string, text: string) => ({ n: 1, views: { know: text }, refs: [], parts: [{ view, id: 'r-1', text }] }) as unknown as Parameters<typeof diffShapeVersions>[0];
+    for (const view of ['know', 'reqs']) {
+      const diff = diffShapeVersions(version(view, 'Line'), version(view, 'Other'));
+      expect(diff.changes).toEqual([]);
+      expect(diff.views).toEqual([]);
+      expect(summarizeShapeDiff(diff)).toEqual([]);
+    }
   });
 
   test('a note from a tab older than What to know is taken, as What to know', () => {
@@ -169,35 +173,35 @@ describe('What to know', () => {
     expect(r.ok && r.value.views.know).toBe('Just this.');
   });
 
-  test('a new board cannot write Requirements: the refusal names where the words go', () => {
+  test('a new board cannot write Requirements: the refusal sends the words behind a number, never to views.know', () => {
     const b = board() as unknown as { views: Record<string, unknown> };
     b.views.reqs = { groups: [{ id: 'g', label: 'G', items: [{ id: 'r', text: 'a' }] }] };
     const r = checkShapeBoard(b);
     expect(r.ok).toBe(false);
     expect(errors(r)).toContain('views.reqs: Requirements are gone');
-    expect(errors(r)).toContain('views.know');
+    expect(errors(r)).toContain("ref's sub");
+    // Agents are no longer asked for views.know (approval "shape-know-removed").
+    expect(errors(r)).not.toContain('know');
   });
 
-  test('each paragraph is a part: a change to one marks that one, and says What to know', () => {
+  test('its words are not parts: a change to them marks nothing, and shape update does not report it', () => {
     const a = board();
     a.views.know = 'First.\n\nSecond.';
     const b = board();
     b.views.know = 'First.\n\nSecond, changed.';
-    expect(shapeParts(a).filter((p) => p.view === 'know')).toEqual([
-      { view: 'know', id: 'know-1', text: 'First.' },
-      { view: 'know', id: 'know-2', text: 'Second.' },
-    ]);
+    expect(shapeParts(a).filter((p) => p.view === 'know')).toEqual([]);
     const diff = diffShapeVersions(version(a, 1), version(b, 2));
-    expect(diff.changes.map((c) => `${c.kind} ${c.view}/${c.id}`)).toEqual(['changed know/know-2']);
-    expect(summarizeShapeDiff(diff)).toEqual(['What to know: 1 changed']);
+    expect(diff.changes).toEqual([]);
+    expect(diff.views).toEqual([]);
+    expect(summarizeShapeDiff(diff)).toEqual([]);
   });
 
-  test('an old board: its Requirements are what the view holds, with their parts and references', () => {
+  test('an old board: its Requirements are kept, with their references, but are not parts', () => {
     const old = board({ refs: [{ n: 4, kind: 'link', title: 'R', target: 'https://example.com' }] });
     delete old.views.know;
     old.views.reqs = { groups: [{ id: 'g', label: 'When', items: [{ id: 'r-1', text: 'Once [^4]' }] }], foot: [{ label: 'Open', text: 'Nothing' }] };
     expect(shapeViewContent(old.views, 'know')).toBe(old.views.reqs);
-    expect(shapeParts(old)).toContainEqual({ view: 'know', id: 'r-1', text: 'When: Once [^4]' });
+    expect(shapeParts(old).filter((p) => p.view === 'know')).toEqual([]);
     expect(shapeCitedRefs(old).has(4)).toBe(true);
     delete old.views.reqs;
     expect(shapeViewContent(old.views, 'know')).toBeUndefined();
@@ -378,10 +382,10 @@ describe('diffShapeVersions', () => {
     b.views.know = 'It whistles once per boil.\n\nLoud enough to hear upstairs.';
     b.views.how = { ...a.views.how!, css: 'div { color: var(--mark) }' };
     const diff = diffShapeVersions(version(a, 1), version(b, 2));
-    expect(diff.changes.map((c) => `${c.kind} ${c.view}/${c.id}`).sort()).toEqual(['added know/know-2']);
-    expect(diff.views).toEqual(['how', 'know']);
+    expect(diff.changes).toEqual([]);
+    expect(diff.views).toEqual(['how']);
     expect(diff.refs).toEqual({ added: [2], removed: [], changed: [] });
-    expect(summarizeShapeDiff(diff)).toEqual(['How it works: redrawn', 'What to know: 1 added', 'References: 1 added']);
+    expect(summarizeShapeDiff(diff)).toEqual(['How it works: redrawn', 'References: 1 added']);
   });
 });
 

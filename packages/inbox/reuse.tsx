@@ -1,14 +1,14 @@
 /**
  * Add a file already in the Inbox to the message being written (approval
  * "reuse-attachments"): one quiet button on a tile, a big preview, a picture in
- * a message's text, an Artifacts card and the viewer. The composer's files
+ * a message's text, an Artifacts card and the viewer; in an archived thread, which
+ * takes no reply, it opens New message with the file. The composer's files
  * (ComposeFiles.tsx `addExisting`) do the rest: a pending upload naming the same
  * blob (POST /api/inbox/uploads/reuse), so nothing is written and the message
  * carries an ordinary attachment. See docs/agent-guides/inbox-files-and-guides.md.
  *
  * No provider, no button: another machine's thread (its files are not this
- * Inbox's), an archived thread, the tour, and a host of these parts draw what
- * they drew.
+ * Inbox's), the tour, and a host of these parts draw what they drew.
  */
 import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import type { InboxAttachmentState } from '@plannotator/core/inbox-types';
@@ -41,6 +41,8 @@ export function sourceOf(file: InboxAttachmentState, version: ReuseVersion, imag
 }
 
 export interface ReuseApi {
+  /** `reply`: into this thread's reply box. `new`: no reply can be written here (archived): New message with it. */
+  target: 'reply' | 'new';
   isAdded: (file: InboxAttachmentState, version?: ReuseVersion) => boolean;
   toggle: (file: InboxAttachmentState, version?: ReuseVersion) => void;
   /** The thread's files by id: a picture in a message's text is named by its id. */
@@ -60,8 +62,9 @@ export function ReuseIcon({ size = 15 }: { size?: number }) {
   );
 }
 
-function reuseWords(file: Pick<InboxAttachmentState, 'name'>, added: boolean): { tip: string; label: string } {
+function reuseWords(file: Pick<InboxAttachmentState, 'name'>, target: ReuseApi['target'], added: boolean): { tip: string; label: string } {
   if (added) return { tip: 'In your reply. Click to take it out', label: `${file.name} is in your reply. Take it out` };
+  if (target === 'new') return { tip: 'New message with this', label: `New message with ${file.name}` };
   return { tip: 'Add to your reply', label: `Add ${file.name} to your reply` };
 }
 
@@ -71,7 +74,7 @@ export function ReuseButton({ file, surface, version, className = '', big = fals
   if (!reuse) return null;
   const chosen = version ?? readableVersion(file);
   const added = reuse.isAdded(file, chosen);
-  const words = reuseWords(file, added);
+  const words = reuseWords(file, reuse.target, added);
   return (
     <Tip content={words.tip}>
       <button
@@ -80,7 +83,7 @@ export function ReuseButton({ file, surface, version, className = '', big = fals
         // Explicit: Safari's Tab skips a button without one (by default), and the tile's ⋯ beside it has one.
         tabIndex={0}
         aria-label={words.label}
-        aria-pressed={added}
+        aria-pressed={reuse.target === 'reply' ? added : undefined}
         data-reuse={file.id}
         data-reuse-state={added ? 'added' : 'idle'}
         data-reuse-surface={surface}

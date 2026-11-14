@@ -14,7 +14,7 @@
  * The rule: no answer the person typed is lost or sent stale. A newest answer
  * that was not saved stays owed, and the next wait saves it first.
  */
-import type { InboxThread } from '@plannotator/core/inbox-types';
+import type { InboxQuestion, InboxThread } from '@plannotator/core/inbox-types';
 
 /** Saves one answer. False: it was not saved and the person was told (a held or replaced one is true). */
 export type PickSave = () => Promise<boolean>;
@@ -33,6 +33,8 @@ export interface PickQueue {
   put(id: string, save: PickSave): void;
   /** A newer answer of question `id` will be saved next: it decides, not the save running now. */
   hasNewer(id: string): boolean;
+  /** A save of question `id` is running or waiting. */
+  busy(id: string): boolean;
   /** Questions whose newest answer was not saved, each owed a save. */
   unsaved(): number;
   /**
@@ -62,8 +64,23 @@ function jobOf(id: string, save: PickSave): Job {
   return { id, save, done, finish };
 }
 
-/** `onSaving`: the questions with an answer running or waiting, each time they change. */
-export function createPickQueue(onSaving?: (ids: ReadonlySet<string>) => void): PickQueue {
+/**
+ * Answers held before the line: words typed in an answer wait for a pause before they are put (typedAnswers.ts).
+ * `flush` puts them now; `waiting` says whether any are held.
+ */
+export interface PickQueueTyped {
+  flush: () => void;
+  waiting: () => boolean;
+  /** Question `id` has words held for their pause: a newer answer than any in the line. */
+  has: (id: string) => boolean;
+}
+
+/**
+ * `onSaving`: the questions with an answer running or waiting, each time they change. `typed`: every wait (a Send's
+ * rounds, a reload, a key's Send) puts the typed answers held for their pause first, so they go as a change did
+ * before typing waited for a pause.
+ */
+export function createPickQueue(onSaving?: (ids: ReadonlySet<string>) => void, typed?: PickQueueTyped): PickQueue {
   const waiting = new Map<string, Job>();
   /** The newest answers that were not saved. */
   const owed = new Map<string, PickSave>();
@@ -76,6 +93,8 @@ export function createPickQueue(onSaving?: (ids: ReadonlySet<string>) => void): 
   const report = () => onSaving?.(new Set([...(running ? [running.id] : []), ...waiting.keys(), ...late.keys()]));
 
   const next = () => {
+    // One save at a time: held words put while a save ended may have started already.
+    if (running) return;
     const job = waiting.values().next().value;
     if (!job) {
       report();
@@ -90,7 +109,11 @@ export function createPickQueue(onSaving?: (ids: ReadonlySet<string>) => void): 
       .catch(() => false)
       .then((saved) => {
         running = null;
-        const newer = waiting.get(job.id);
+        // Not saved, with newer words held for their pause: they go now, and decide for whoever waits on this one.
+        if (!saved && !waiting.has(job.id) && typed?.has(job.id)) typed.flush();
+        // The flush may have started that newer save already (the line was idle): it is the one running now.
+        const started = running as Job | null;
+        const newer = waiting.get(job.id) ?? (started?.id === job.id ? started : undefined);
         if (saved) job.finish(true);
         // The newer answer decides for whoever waits on this one.
         else if (newer) void newer.done.then(job.finish);
@@ -126,6 +149,7 @@ export function createPickQueue(onSaving?: (ids: ReadonlySet<string>) => void): 
   };
 
   const settled = async () => {
+    typed?.flush();
     // A press is the person asking again: what was refused goes once more, never on its own.
     for (const [id, save] of [...owed]) {
       owed.delete(id);
@@ -141,13 +165,16 @@ export function createPickQueue(onSaving?: (ids: ReadonlySet<string>) => void): 
   return {
     put,
     hasNewer: (id) => waiting.has(id),
+    busy: (id) => waiting.has(id) || running?.id === id,
     unsaved: () => owed.size,
     settled,
     async forSend() {
       for (let round = 1; round < SEND_ROUNDS; round += 1) {
         if (!(await settled())) return null;
-        if (running === null && waiting.size === 0) break;
+        if (running === null && waiting.size === 0 && !typed?.waiting()) break;
       }
+      // Words held for their pause go in this Send, as a change made before the line closes does.
+      typed?.flush();
       closed += 1;
       let open = true;
       const release = () => {
@@ -173,11 +200,41 @@ const sameFields = <T extends object>(a: T, b: T, except?: keyof T): boolean => 
 
 /**
  * `after` is `before` with nothing but messages' `questions` replaced: a saved
- * pick (App's `patchQuestions`). A read of the thread never is, whatever it
- * brought: its objects are all new.
+ * pick (App's `patchQuestions`). A read of the thread keeps what did not change
+ * (shareUnchanged.ts), so it can look like one: App's `refreshThread` reads the
+ * files again itself then (`filesSignal`).
  */
 export function onlyQuestionsChanged(before: InboxThread, after: InboxThread): boolean {
   if (before === after) return true;
   if (!sameFields(before, after, 'messages') || before.messages.length !== after.messages.length) return false;
   return before.messages.every((message, index) => sameFields(message, after.messages[index]!, 'questions'));
+}
+
+/**
+ * `thread` with each question never older than the newest copy this window's
+ * own saves brought back (`saved`, by `<message id>/<key>`). A read of the
+ * thread the server answered before the last saves landed can arrive after
+ * them; taken whole, it put an older answer back in the field being typed in,
+ * and the next key built on it, so letters typed since were lost (the owner,
+ * 2026-11-08: "it felt like it was backspacing on me"). A question's revision
+ * only grows, so a copy with a lower one is older. The same thread object
+ * when nothing is kept, and each message untouched keeps its object.
+ */
+export function keepSavedQuestions(thread: InboxThread, saved: ReadonlyMap<string, InboxQuestion>): InboxThread {
+  if (saved.size === 0) return thread;
+  let changed = false;
+  const messages = thread.messages.map((message) => {
+    if (!message.questions?.length) return message;
+    let kept = false;
+    const questions = message.questions.map((q) => {
+      const mine = saved.get(`${q.message_id}/${q.key}`);
+      if (!mine || mine.revision <= q.revision) return q;
+      kept = true;
+      return mine;
+    });
+    if (!kept) return message;
+    changed = true;
+    return { ...message, questions };
+  });
+  return changed ? { ...thread, messages } : thread;
 }

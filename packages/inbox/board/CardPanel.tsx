@@ -3,8 +3,6 @@ import { Menu } from '@base-ui/react/menu';
 import {
   INBOX_CARD_COLUMN_LABELS,
   INBOX_CARD_LIVE_COLUMNS,
-  INBOX_CARD_NOTES_MAX,
-  INBOX_CARD_REASON_MAX,
   INBOX_SECTIONS,
   inboxAgentName,
   inboxCardLinkLabel,
@@ -31,9 +29,6 @@ import { OnceButton } from './OnceButton';
 import { RefMarkIcon } from './RefMark';
 import { CardInitiativeMenu } from './BoardFilter';
 import { cardAge, cardFoot, cardYou, columnChoices, historyWords, refState, sentTo, youThread } from './model';
-import { StepsLists } from '../steps/StepsList';
-import { stepsAsCardHeadSays } from '../steps/model';
-import type { InboxStepsWire } from '@plannotator/core/inbox-types';
 
 export interface CardPanelProps {
   card: InboxCardWire;
@@ -50,8 +45,6 @@ export interface CardPanelProps {
   /** Said with "Ask for an update" when it goes to another session (the card's own agent ended). */
   askNote?: string | null;
   rowOf: (threadId: string) => InboxListRow | null;
-  /** The card's threads' checklists, the latest first (approval "inbox-thread-steps", part 4); none while the switch is off. Read only. */
-  steps?: readonly InboxStepsWire[];
   phone: boolean;
   now: number;
   onClose: () => void;
@@ -261,14 +254,6 @@ export function CardPanel(props: CardPanelProps) {
             {card.dropped.reason ? `: ${card.dropped.reason}` : ''}
           </p>
         )}
-        {props.steps && props.steps.length > 0 && (
-          // The checklist (approval "inbox-thread-steps", part 4): the thread's steps as its foot shows them, read
-          // only. "Waiting on you ›" opens that list's thread, where the question is (with the way back here).
-          // Each list is its own named section (StepsLists), so the wrapper is not one more.
-          <div className="ib-crdp-sec ib-crdp-steps" data-card-checklist="">
-            <StepsLists lists={stepsAsCardHeadSays(props.steps, agent?.session ?? null, props.state)} heading now={new Date(props.now)} onWaiting={(list) => () => props.onOpenThread(list.thread_id)} />
-          </div>
-        )}
         <Notes card={card} onSave={props.onNotes} text={text} />
         {card.threads.length > 0 && (
           <section className="ib-crdp-sec" aria-label="Threads">
@@ -357,7 +342,6 @@ export function CardPanel(props: CardPanelProps) {
             type="text"
             placeholder="Why (optional)"
             value={reason}
-            maxLength={INBOX_CARD_REASON_MAX}
             onChange={(event) => setReason(event.target.value)}
             ref={reasonField}
             // eslint-disable-next-line jsx-a11y/no-autofocus
@@ -587,7 +571,6 @@ function Notes({ card, onSave, text: render }: { card: InboxCardWire; onSave: (n
           ref={area}
           value={text}
           rows={5}
-          maxLength={INBOX_CARD_NOTES_MAX}
           onChange={(event) => setText(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === 'Escape') {

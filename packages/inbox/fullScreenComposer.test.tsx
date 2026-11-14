@@ -10,7 +10,7 @@
  * is saved and the thread's box holds it; typed in the box the card shows
  * it); the card's minimize gathers it with the toolbar into the corner control,
  * as Hide (») does, kept across files, and one press brings both back with
- * focus where it was; an HTML page is Reply only; Send from
+ * focus where it was; an HTML page offers Comment and Reply too; Send from
  * the card refuses as the thread's Send does (nothing to send, the server
  * refusing) and keeps the words, and a Send that goes clears them and the
  * draft while full screen stays. Files: the Reply tab's paperclip (the reply
@@ -339,6 +339,7 @@ const toolsState = () => host!.querySelector('[data-attachment-pane]')!.getAttri
 
 test.skipIf(!hasDom)('the card’s minimize is the toolbar’s »: card and toolbar gather into the corner control (focus on it), across files; one press brings both back with focus in the card’s field', async () => {
   await renderFull('page.html');
+  await click(radio('reply'));
   expect(card()!.querySelector('[data-fcomp-minimize]')!.getAttribute('aria-label')).toBe('Hide tools');
   await click(card()!.querySelector<HTMLButtonElement>('[data-fcomp-minimize]')!);
   // One gather: the card and the toolbar both go (inert), no pill of its own.
@@ -371,11 +372,13 @@ test.skipIf(!hasDom)('the card’s minimize is the toolbar’s »: card and tool
   expect(card()!.inert).toBe(false);
 });
 
-test.skipIf(!hasDom)('Hide (») takes the card out with the toolbar: inert until one press on the corner control; an HTML page is Reply only', async () => {
+test.skipIf(!hasDom)('Hide (») takes the card out with the toolbar: inert until one press on the corner control; an HTML page offers Comment and Reply, Comment first', async () => {
   await renderFull('page.html');
-  // HTML: no tabs, the reply field.
-  expect(card()!.querySelector('[role="radiogroup"]')).toBeNull();
-  expect(card()!.textContent).toMatch(/Reply to /);
+  // HTML: both tabs, as on an image; Comment picked (no reply draft waits), its field the page's own row.
+  expect(card()!.querySelector('[role="radiogroup"]')).not.toBeNull();
+  expect(radio('comment').getAttribute('aria-checked')).toBe('true');
+  expect(card()!.querySelector('[data-html-page-comment] textarea')).not.toBeNull();
+  await click(radio('reply'));
   expect(replyField()).not.toBeNull();
 
   expect(card()!.inert).toBe(false);
@@ -500,7 +503,10 @@ test.skipIf(!hasDom)('the paperclip: none on the Comment tab, first in the Reply
   const label = input.closest('label')!;
   expect(label.getAttribute('aria-label')).toBe('Attach files');
   expect(label.classList.contains('ib-fvb')).toBe(true);
-  expect(card()!.querySelector('[data-fcomp-foot]')!.firstElementChild!.contains(label)).toBe(true);
+  // Round 3: Send first in the reply's row, the paperclip after it.
+  const foot = card()!.querySelector('[data-fcomp-foot]')!;
+  expect(foot.firstElementChild!.hasAttribute('data-fcomp-send')).toBe(true);
+  expect(foot.contains(label)).toBe(true);
   // Nothing written yet: Send is dimmed.
   expect(card()!.querySelector<HTMLButtonElement>('[data-fcomp-send]')!.disabled).toBe(true);
 
@@ -533,7 +539,8 @@ test.skipIf(!hasDom)('the paperclip: none on the Comment tab, first in the Reply
 
 test.skipIf(!hasDom)('a paste and a drop on the card attach to the reply as on the reply box; a file in the box shows in the card; × takes it from both; files alone make the pill a draft', async () => {
   await renderFull('page.html');
-  // HTML is Reply only: the paperclip shows at once.
+  // The paperclip is the Reply tab's.
+  await click(radio('reply'));
   expect(clip()).not.toBeNull();
   // A screenshot pasted into the card's field attaches (the browser's own paste prevented: no text in it).
   expect(pasteFiles(replyField()!, [image('pasted.png')])).toBe(true);
@@ -560,6 +567,7 @@ test.skipIf(!hasDom)('a paste and a drop on the card attach to the reply as on t
 
 test.skipIf(!hasDom)('a long text paste in the card is a pasted-text tile in both places; Undo in the card puts it back in the card’s words, caret after it', async () => {
   await renderFull('page.html');
+  await click(radio('reply'));
   const before = 'Here is the log.';
   const after = ' It fails on the third retry.';
   const log = 'worker-3 retry 2 status=failed\n'.repeat(1200);
@@ -591,8 +599,9 @@ test.skipIf(!hasDom)('a long text paste in the card is a pasted-text tile in bot
 });
 
 for (const away of ['the Reply tab', 'gathered into the corner'] as const) {
-  test.skipIf(!hasDom)(`an image comment not saved yet is kept on ${away}: → asks first, and Keep writing brings the Comment tab back with focus in its words`, async () => {
+  test.skipIf(!hasDom)(`an image comment not saved yet is kept on ${away}: → steps at once, and back on the image its words are in the Comment row again`, async () => {
     await renderFull('shot.png');
+    const shot = world.openIn.ids['shot.png'];
     type(commentField()!, 'Too much padding.');
     if (away === 'the Reply tab') await click(radio('reply'));
     else await click(card()!.querySelector<HTMLButtonElement>('[data-fcomp-minimize]')!);
@@ -601,24 +610,16 @@ for (const away of ['the Reply tab', 'gathered into the corner'] as const) {
     expect(commentField()!.value).toBe('Too much padding.');
     await act(async () => (document.activeElement as HTMLElement | null)?.blur());
     await stepNext();
-    await until(() => stepGuard() !== null, 'the "not saved yet" question');
-    // The step waited: still on the image.
-    expect(host!.querySelector(`[data-attachment-pane="${world.openIn.ids['shot.png']}"]`)).not.toBeNull();
-    await click(stepGuard()!.querySelector<HTMLButtonElement>('[data-guard-keep]')!);
-    await until(() => document.activeElement === commentField(), 'focus in the comment');
-    expect(card()).not.toBeNull();
-    expect(radio('comment').getAttribute('aria-checked')).toBe('true');
-    expect(commentField()!.closest('[hidden]')).toBeNull();
+    // Nothing asks: the step goes on the first press, and nothing is posted.
+    await until(() => host!.querySelector(`[data-attachment-pane="${shot}"]`) === null, 'the next file');
+    expect(stepGuard()).toBeNull();
+    expect(posted.some((p) => p.path.endsWith('/api/inbox/annotations'))).toBe(false);
+    // Back on the image: the words wait in its row.
+    await act(async () => {
+      (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', code: 'ArrowLeft', bubbles: true, cancelable: true }));
+    });
+    await until(() => host!.querySelector(`[data-attachment-pane="${shot}"]`) !== null && commentField() !== null, 'the image again');
     expect(commentField()!.value).toBe('Too much padding.');
-    if (away === 'gathered into the corner') {
-      // Keep writing brought the tools back, so the ⌄ that gathered them is forgotten: » and the corner control put
-      // focus back on », not in a field (on a phone that would raise the keyboard).
-      expect(toolsState()).toBe('pinned');
-      const hide = host!.querySelector<HTMLButtonElement>('[data-full-view-hide]')!;
-      await click(hide);
-      await click(corner()!);
-      expect(document.activeElement).toBe(hide);
-    }
   });
 }
 

@@ -6,8 +6,8 @@
 
 <p align="center">
   <strong>Everything you need to annotate and stay in the loop with your agents</strong><br/>
-  <strong>Markdown Review • Code Review • HTML Artifacts</strong><br/>
-  <sub>Annotate plans, specs, markdown, and HTML before implementation. Review diffs and PRs. Send feedback to your agent.</sub>
+  <strong>Inbox Surface • Artifacts • Code Review</strong><br/>
+  <sub>Annotate plans, specs, markdown, HTML, and other interactive artifacts. Review diffs and PRs. Send feedback to your agent.</sub>
 </p>
 
 <p align="center">
@@ -32,16 +32,16 @@
 </p>
 
 <p align="center">
-  <a href="https://www.youtube.com/watch?v=a_AT7cEN_9I">Watch the og demo</a> · <a href="https://docs.plannotator.ai/open-source/start/installation">Installation guide</a> · <a href="https://plannotator.ai/">Official site</a> · <a href="https://github.com/plannotator/effective-html">Visual HTML Skills</a> · <a href="#plannotator-inbox">Plannotator Inbox</a> · <a href="#herdr-annotate-plannotator-in-the-terminal">Herdr Annotate</a>
+  <a href="#plannotator-inbox">Plannotator Inbox</a> · <a href="https://plannotator.ai/">Official site</a> · <a href="https://plannotator.ai/code-review">Code Review</a> · <a href="https://github.com/plannotator/effective-html">Visual HTML Skills</a> · <a href="#herdr-annotate-plannotator-in-the-terminal">Herdr Annotate</a> · <a href="https://www.youtube.com/watch?v=a_AT7cEN_9I">(Legacy) Plan Mode</a>
 </p>
 
 # Plannotator
 
-**⭐️ NEW:** [Plannotator Inbox](https://plannotator.ai/inbox/) is the missing layer between you and managing multi-agent work.
+**⭐️ NEW:** [Plannotator Inbox](https://plannotator.ai/inbox/) is the missing review layer between you and multi-agent work. It surfaces decisions, prototypes, variations, plans, and everything you need to stay in the loop. Works with all coding agents and personal assistants.
 
-Plannotator is a local, browser-based review surface for AI coding agents: Claude Code, Codex, Copilot CLI, Gemini CLI, OpenCode, Kiro, Droid, Amp, DeepSeek Harness, and Pi. 
+Plannotator is a local, browser-based review surface for AI coding agents: Claude Code, Codex, Copilot CLI, Gemini CLI, OpenCode, Kiro, Droid, Amp, DeepSeek Harness, and Pi. Plannotator Inbox also works with personal assistants (Grok Bot, Muse, Hermes, OpenClaw).
 
-**It plugs directly into your agent** through its hooks and commands. When the agent proposes a plan, html, or finishes writing code, the work opens in your browser and you mark it up, comment, and send feedback directly to the agent for it to act on it.
+**It plugs directly into your agent** through plugins, hooks and commands. When the agent proposes a decision, plan, html, or finishes working, the app opens in your browser and you mark it up, comment, and send feedback directly to the agent for it to act on it.
 
 <table>
 <tr>

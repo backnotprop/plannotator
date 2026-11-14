@@ -345,7 +345,7 @@ async function setup(start: Folder): Promise<{ model: Model; real: Real; done: (
   mkdirSync(dataDir, { recursive: true })
   const server = await startInboxServer({ dataDir, version: 'test', binaryPath: null, phones: false, board: true, projectRootGit: quietGit })
   const session = { cwd: abs(start), root: abs(start) }
-  const host = realHost({ env: { PATH: `${bin}:/usr/bin:/bin`, HOME: process.env.HOME!, PLANNOTATOR_DATA_DIR: dataDir }, cwd: abs(start), store: new Map() })
+  const host = realHost({ env: { PATH: `${bin}:/usr/bin:/bin`, HOME: process.env.HOME!, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: dataDir }, cwd: abs(start), store: new Map() })
   const tools = await discoverInboxTools(host, dataDir)
   const link = new InboxLink({
     host,
@@ -421,7 +421,7 @@ describe('Inbox project of a Claude Code session that moves (spec/inbox-project.
   }, 120_000)
 
   // Audit D1: a session started above a repository that cd's into it. Main filed its tool's sends under the start
-  // folder and its shell's `inbox call` and `card` under the repository: two default threads in two projects.
+  // folder and its shell's `inbox call` and `card` under the repository: one session's messages in two projects.
   test('every client of one session lands in one project across a shell cd', async () => {
     const { model, real, done } = await setup('top')
     try {

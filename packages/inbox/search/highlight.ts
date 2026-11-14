@@ -9,6 +9,7 @@
  */
 
 import { inboxSearchRanges } from '@plannotator/core/inbox-search';
+import { flushPendingHighlights } from '@plannotator/ui/utils/codeHighlight';
 
 /** The highlight's name in `CSS.highlights` (inbox.css styles `::highlight(ib-search-hit)`). */
 export const SEARCH_HIGHLIGHT = 'ib-search-hit';
@@ -46,6 +47,8 @@ export function searchHitRanges(root: Node, terms: readonly string[], skip = '[d
 
 /** Paint the terms under `root`; returns how many ranges, and the way to clear them. */
 export function highlightSearchHits(root: Node, terms: readonly string[]): { count: number; clear: () => void } {
+  // A fence still waiting to be highlighted (off screen) would swap its text nodes later and drop these ranges.
+  flushPendingHighlights(root);
   const api = registry();
   const ranges = searchHitRanges(root, terms);
   if (!api || ranges.length === 0) return { count: ranges.length, clear: () => {} };

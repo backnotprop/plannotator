@@ -54,8 +54,17 @@ const CODEX: InboxAgentRow = {
   reminder: null,
   note: { agent: 'codex', path: '~/.codex/AGENTS.md', target: null, state: 'absent', create: false, created: false, reason: null },
 } as InboxAgentRow;
+/** Qwen Code still gets the one-time note dialog; Codex's note is written by itself (inbox-agent-note-auto). */
+const QWEN: InboxAgentRow = {
+  id: 'qwen',
+  label: 'Qwen Code',
+  detected: true,
+  reach: { kind: 'mcp', on: true, state: 'connected', path: null, locked: false, reason: null },
+  reminder: null,
+  note: { agent: 'qwen', path: '~/.qwen/QWEN.md', target: null, state: 'absent', create: false, created: false, reason: null },
+} as InboxAgentRow;
 const AGENTS: InboxAgentsModel = {
-  agents: [CODEX],
+  agents: [CODEX, QWEN],
   last_report: null,
   connecting: false,
   connect_env_off: true,
@@ -69,7 +78,7 @@ const ready = { ...UPDATE, state: 'ready' };
 let update: typeof UPDATE | null = null;
 
 /** The routes the real gate refuses a guest and answers the owner (inbox-tailnet-owner.test.ts). */
-const guestRefused = (path: string) => path.startsWith('/api/inbox/agents') || path.startsWith('/api/inbox/update') || path.startsWith('/api/inbox/cards/marks') || path.startsWith('/api/inbox/whats-new');
+const guestRefused = (path: string) => path.startsWith('/api/inbox/agents') || path.startsWith('/api/inbox/update') || path.startsWith('/api/inbox/cards/marks');
 
 function loopback(path: string, method = 'GET', body?: string): Promise<{ status: number; text: string; type: string }> {
   return new Promise((done, fail) => {

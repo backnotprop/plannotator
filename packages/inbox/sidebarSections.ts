@@ -11,12 +11,14 @@ import { storage } from '@plannotator/ui/utils/storage';
 
 export const SIDEBAR_CLOSED_COOKIE = 'plannotator-inbox-sidebar-closed';
 
-export type SidebarSection = 'pinned' | 'machines' | 'projects';
-const SECTIONS: readonly SidebarSection[] = ['pinned', 'machines', 'projects'];
+export type SidebarSection = 'pinned' | 'tags' | 'agents' | 'projects';
+/** Agents took Machines' place (approval "inbox-agents-section"): a cookie that closed Machines closes Agents. */
+const SECTIONS: readonly SidebarSection[] = ['pinned', 'tags', 'agents', 'projects'];
+const FORMER: Readonly<Record<string, SidebarSection>> = { machines: 'agents' };
 
 /** The cookie's value ("pinned", "projects", "pinned,projects") as the closed sections; anything else is ignored. */
 export function parseClosedSections(raw: string | null): ReadonlySet<SidebarSection> {
-  const named = new Set((raw ?? '').split(','));
+  const named = new Set((raw ?? '').split(',').map((name) => FORMER[name] ?? name));
   return new Set(SECTIONS.filter((section) => named.has(section)));
 }
 

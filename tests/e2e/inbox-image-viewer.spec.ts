@@ -173,11 +173,13 @@ test('an agent sends three messages: images in their text are captured at send, 
   });
   const second = await world.claude.send({
     project_path: world.project,
+    reply_to: first.message_id,
     body: ['The empty orders page, and its copy:', '', '![Empty orders](design/empty-orders.png)'].join('\n'),
     attachments: ['docs/empty-states.md'],
   });
   const third = await world.claude.send({
     project_path: world.project,
+    reply_to: second.message_id,
     body: 'The phone checkout and the receipt spec.',
     attachments: ['shots/checkout-mobile.png', 'docs/receipt-spec.pdf'],
   });
@@ -328,16 +330,20 @@ test('an image the agent overwrites says it changed since it was sent, and opens
   await expect(pane()).toHaveAttribute('data-version', 'sent');
 });
 
-test('a typed comment on an image asks before a step', async () => {
+test('a typed comment on an image never stops a step, and waits in its box for that image', async () => {
   const page = world.page;
   await pane().getByRole('textbox', { name: 'Comment on checkout-c-drawer.png' }).fill('The drawer hides the total.');
   await pane().locator('.ib-imgstage').click();
   await page.keyboard.press(']');
-  const guard = page.locator('[data-step-guard]');
-  await expect(guard).toBeVisible();
-  await expect(guard.getByRole('button', { name: 'Discard and go to empty-orders.png' })).toBeVisible();
-  await shot(page, '06-guard');
-  await guard.getByRole('button', { name: 'Discard and go to empty-orders.png' }).click();
+  await expectAt(page, 4, 'empty-orders.png');
+  await expect(page.locator('[data-step-guard]')).toHaveCount(0);
+  await page.keyboard.press('[');
+  await expect(pane().getByRole('textbox', { name: 'Comment on checkout-c-drawer.png' })).toHaveValue('The drawer hides the total.');
+  await shot(page, '06-kept');
+  // Cleared on the comment itself, then on: nothing waits for it.
+  await pane().getByRole('textbox', { name: 'Comment on checkout-c-drawer.png' }).fill('');
+  await pane().locator('.ib-imgstage').click();
+  await page.keyboard.press(']');
   await expectAt(page, 4, 'empty-orders.png');
 });
 
@@ -417,7 +423,7 @@ test('plan review and annotate get the light version: full screen, ← → acros
     ['# Checkout plan', '', '## Options', '', '![A: one page](checkout-a-single-page.png)', '', '![B: three steps](checkout-b-steps.png)', '', '![C: a drawer](checkout-c-drawer.png)', '', '## Mobile', '', '![Phone](checkout-mobile.png)', ''].join('\n'),
   );
   const readyFile = join(root, 'ready.jsonl');
-  const env = { PATH: process.env.PATH ?? '', HOME: join(world.root, 'home'), PLANNOTATOR_DATA_DIR: world.dataDir, PLANNOTATOR_READY_FILE: readyFile, PLANNOTATOR_SKIP_BROWSER_OPEN: '1', PLANNOTATOR_BROWSER: NO_BROWSER, NO_BROWSER, PLANNOTATOR_REMOTE: '0' };
+  const env = { PATH: process.env.PATH ?? '', HOME: join(world.root, 'home'), PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: world.dataDir, PLANNOTATOR_READY_FILE: readyFile, PLANNOTATOR_SKIP_BROWSER_OPEN: '1', PLANNOTATOR_BROWSER: NO_BROWSER, NO_BROWSER, PLANNOTATOR_REMOTE: '0' };
   let child: ChildProcess | undefined;
   let url = '';
   try {
@@ -493,7 +499,7 @@ test('Actual size shows an image at its real size: a tall one scrolls, a small o
   const doc = join(root, 'PLAN.md');
   writeFileSync(doc, ['# Sizes', '', '![Tall](tall.png)', '', '![Small](small.png)', ''].join('\n'));
   const readyFile = join(root, 'ready.jsonl');
-  const env = { PATH: process.env.PATH ?? '', HOME: join(world.root, 'home'), PLANNOTATOR_DATA_DIR: world.dataDir, PLANNOTATOR_READY_FILE: readyFile, PLANNOTATOR_SKIP_BROWSER_OPEN: '1', PLANNOTATOR_BROWSER: NO_BROWSER, NO_BROWSER, PLANNOTATOR_REMOTE: '0' };
+  const env = { PATH: process.env.PATH ?? '', HOME: join(world.root, 'home'), PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: world.dataDir, PLANNOTATOR_READY_FILE: readyFile, PLANNOTATOR_SKIP_BROWSER_OPEN: '1', PLANNOTATOR_BROWSER: NO_BROWSER, NO_BROWSER, PLANNOTATOR_REMOTE: '0' };
   let child: ChildProcess | undefined;
   let url = '';
   try {
@@ -594,7 +600,7 @@ test('the lightbox zooms: Ctrl + wheel about the pointer, drag pans, a double cl
   const doc = join(root, 'PLAN.md');
   writeFileSync(doc, ['# Zoom', '', '![Wide](wide.png)', '', '![Other](other.png)', ''].join('\n'));
   const readyFile = join(root, 'ready.jsonl');
-  const env = { PATH: process.env.PATH ?? '', HOME: join(world.root, 'home'), PLANNOTATOR_DATA_DIR: world.dataDir, PLANNOTATOR_READY_FILE: readyFile, PLANNOTATOR_SKIP_BROWSER_OPEN: '1', PLANNOTATOR_BROWSER: NO_BROWSER, NO_BROWSER, PLANNOTATOR_REMOTE: '0' };
+  const env = { PATH: process.env.PATH ?? '', HOME: join(world.root, 'home'), PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: world.dataDir, PLANNOTATOR_READY_FILE: readyFile, PLANNOTATOR_SKIP_BROWSER_OPEN: '1', PLANNOTATOR_BROWSER: NO_BROWSER, NO_BROWSER, PLANNOTATOR_REMOTE: '0' };
   let child: ChildProcess | undefined;
   let url = '';
   try {
@@ -701,7 +707,7 @@ test('on an iPhone (WebKit) a tap beside the image closes the single overlay, an
   // A link high on the page, where the tap beside the image lands once the overlay is open.
   writeFileSync(doc, ['# Ghost tap', '', '[Go somewhere else](https://example.com/ghost) and [another link](https://example.com/ghost-2)', '', '![Small](small.png)', ''].join('\n'));
   const readyFile = join(root, 'ready.jsonl');
-  const env = { PATH: process.env.PATH ?? '', HOME: join(world.root, 'home'), PLANNOTATOR_DATA_DIR: world.dataDir, PLANNOTATOR_READY_FILE: readyFile, PLANNOTATOR_SKIP_BROWSER_OPEN: '1', PLANNOTATOR_BROWSER: NO_BROWSER, NO_BROWSER, PLANNOTATOR_REMOTE: '0' };
+  const env = { PATH: process.env.PATH ?? '', HOME: join(world.root, 'home'), PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: world.dataDir, PLANNOTATOR_READY_FILE: readyFile, PLANNOTATOR_SKIP_BROWSER_OPEN: '1', PLANNOTATOR_BROWSER: NO_BROWSER, NO_BROWSER, PLANNOTATOR_REMOTE: '0' };
   let child: ChildProcess | undefined;
   let url = '';
   const { defaultBrowserType: _ignored, ...device } = devices['iPhone 15'];
@@ -1080,7 +1086,7 @@ test('#2127: in annotate, a plain wheel zooms in, a pause, then the wheel scroll
   const doc = join(root, 'NOTES.md');
   writeFileSync(doc, ['# Notes', '', '![Big](big.png)', ''].join('\n'));
   const readyFile = join(root, 'ready.jsonl');
-  const env = { PATH: process.env.PATH ?? '', HOME: join(world.root, 'home'), PLANNOTATOR_DATA_DIR: world.dataDir, PLANNOTATOR_READY_FILE: readyFile, PLANNOTATOR_SKIP_BROWSER_OPEN: '1', PLANNOTATOR_BROWSER: NO_BROWSER, NO_BROWSER, PLANNOTATOR_REMOTE: '0' };
+  const env = { PATH: process.env.PATH ?? '', HOME: join(world.root, 'home'), PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: world.dataDir, PLANNOTATOR_READY_FILE: readyFile, PLANNOTATOR_SKIP_BROWSER_OPEN: '1', PLANNOTATOR_BROWSER: NO_BROWSER, NO_BROWSER, PLANNOTATOR_REMOTE: '0' };
   let child: ChildProcess | undefined;
   let url = '';
   try {

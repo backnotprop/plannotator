@@ -7,7 +7,7 @@
 
 import { inboxAttachmentKindLabel, type InboxAttachmentState, type InboxMessageWire } from '@plannotator/core/inbox-types';
 import { threadArtifacts, type Artifact } from './artifacts';
-import { hasCommandModifier, inOverlay, isComposingKey, isEditableTarget, isRepeatKey, singleKeysLive } from './shortcuts/guards';
+import { ANNOTATOR_STAGE, hasCommandModifier, inOverlay, isComposingKey, isEditableTarget, isRepeatKey, singleKeysLive } from './shortcuts/guards';
 
 /** One file in the thread's sequence, with the message it came in. */
 export interface AttachmentStep {
@@ -98,7 +98,7 @@ export interface StepKeyContext {
   full: boolean;
   /** The pane's own element: beside the thread, keys step only from inside it. */
   pane: HTMLElement | null;
-  /** The question row or the list is open: they own the keys. */
+  /** A menu or the list is open: they own the keys. */
   blocked: boolean;
 }
 
@@ -106,7 +106,7 @@ export interface StepKeyContext {
  * Whether a keydown steps, and which way: 1 next, -1 previous, null not a
  * step. `]` `[` always, except while typing, with ⌘ / Ctrl / Alt (⌘[ ⌘] are
  * the browser's Back and Forward), on auto-repeat, during an IME
- * composition, or when the question row or the list is open. `→` `←` the
+ * composition, or when a menu or the list is open. `→` `←` the
  * same, and also not with Shift, not where the focused element uses arrows
  * or sits in a block that scrolls sideways, not while a text selection
  * exists, and not when a handler already used the
@@ -126,7 +126,7 @@ export function stepKeyIntent(event: KeyboardEvent, context: StepKeyContext): 1 
   if (isEditableTarget(target)) return null;
   // A dialog or popover over the window (the image annotator, a composer) keeps its keys.
   if (inOverlay(target)) return null;
-  if (typeof document !== 'undefined' && document.querySelector('[data-pn-image-annotator-stage]')) return null;
+  if (typeof document !== 'undefined' && document.querySelector(ANNOTATOR_STAGE)) return null;
   if (!context.full) {
     const pane = context.pane;
     const inside = !!pane && !!target && (pane === target || pane.contains(target));

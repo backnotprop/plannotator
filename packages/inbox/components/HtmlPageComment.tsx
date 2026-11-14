@@ -8,8 +8,10 @@
  * The card reads: what the comment is on, Parent and Child to move a pin to the
  * element around it or back in (`stepPin`), the field and Comment. The field is
  * the reply's (`InboxComposerField`: `@` tags and `/` skills), inside
- * `data-image-composer`, so the pane's unsaved-comment question and its Escape
- * rungs treat it as they treat an image's comment row.
+ * `data-image-composer`, so the pane's Escape rungs treat it as they treat an
+ * image's comment row. Words typed when the file closes wait as its draft
+ * (`kept`), and come back on the same pin or words when it opens again
+ * (`expectWords`, then the page's own draft).
  *
  * Focus lands in the field for a pin. A selection leaves it in the page, where
  * the person may still be dragging its handles; moving it would end them.
@@ -19,22 +21,24 @@
  * selection lost to focus leaving the frame leaves the card as it is: the bridge
  * does not report that one, and the quote is in the draft.
  */
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { useConfigValue } from '@plannotator/ui/config';
 import type { ViewerHandle } from '@plannotator/ui/components/Viewer';
-import type { Annotation, HostDraft } from '@plannotator/ui/types';
+import { AnnotationType, type Annotation, type HostDraft } from '@plannotator/ui/types';
 import { isCommentSubmitKey } from '@plannotator/ui/utils/commentSubmitKey';
 import { shortLabel } from '../attachments';
 import { composerMinimized, openComposerComment, setComposerMinimized, showComposerComment } from '../fullScreenComposer';
 import { Icon } from '../icons';
 import { isWindowPinched } from '../windowPinch';
+import { useRowDraft } from '../fileCommentDrafts';
 import { InboxComposerField, type InboxComposerTags } from './ComposerField';
+import { FullScreenCommentBin } from './FullScreenComposer';
 import { TagNotes } from './TagPicker';
 
 export interface HtmlPageCommentOptions {
   /** The card can open: a phone's full screen on a page that takes comments. Off, any open draft goes. */
   enabled: boolean;
-  /** What the draft belongs to: another file drops it (the pane asked first about typed words). */
+  /** What the draft belongs to: another file drops it (the pane kept typed words as that file's draft first). */
   fileKey: string;
   threadId: string | null;
   /** The file's name, for the field's label. */
@@ -54,10 +58,14 @@ export interface HtmlPageComment {
   open: boolean;
   /** For `HtmlViewer`. */
   onHostDraft: (draft: HostDraft | null) => void;
-  /** The Comment tab's contents, or null: Reply only. */
+  /** The card for a pin or a selection, or null: the Comment tab shows the page's own row (`HtmlPageCommentRow`). */
   card: ReactNode | null;
   /** For the composer's minimize: a comment with no words yet is dropped. */
   onMinimized: () => void;
+  /** The comment being written, as the file closes (its words as `text`, what it is on), or null: none has words. */
+  kept: () => Annotation | null;
+  /** The next draft the page hands over (a kept comment put back on its pin or words) opens holding these words. */
+  expectWords: (text: string) => void;
 }
 
 export function useHtmlPageComment({ enabled, fileKey, threadId, name, viewer, tags, onSave, covered, onDone }: HtmlPageCommentOptions): HtmlPageComment {
@@ -73,6 +81,8 @@ export function useHtmlPageComment({ enabled, fileKey, threadId, name, viewer, t
   const restore = useRef<(() => void) | null>(null);
   /** Parent or Child was pressed: the next draft is the same comment, focus stays where it is. */
   const stepping = useRef(false);
+  /** Words a kept comment had, for the draft the page hands over next (`expectWords`). */
+  const expected = useRef<string | null>(null);
 
   const drop = useCallback(() => {
     setDraft(null);
@@ -94,9 +104,22 @@ export function useHtmlPageComment({ enabled, fileKey, threadId, name, viewer, t
         else restore.current = openComposerComment(threadId);
       }
       setDraft(next);
+      if (expected.current !== null) {
+        setWords(expected.current);
+        expected.current = null;
+      }
     },
     [threadId, drop],
   );
+  const kept = useCallback((): Annotation | null => {
+    const held = draftRef.current;
+    const text = wordsRef.current;
+    if (!held || text.trim() === '') return null;
+    return { ...held.annotation, text, ...(mentions.current.length > 0 ? { mentions: mentions.current } : {}) };
+  }, []);
+  const expectWords = useCallback((text: string) => {
+    expected.current = text;
+  }, []);
 
   const onMinimized = useCallback(() => {
     if (!draftRef.current || wordsRef.current.trim() !== '') return;
@@ -170,7 +193,7 @@ export function useHtmlPageComment({ enabled, fileKey, threadId, name, viewer, t
     />
   ) : null;
 
-  return { open: draft !== null, onHostDraft, card, onMinimized };
+  return { open: draft !== null, onHostDraft, card, onMinimized, kept, expectWords };
 }
 
 function HtmlCommentCard({
@@ -218,10 +241,10 @@ function HtmlCommentCard({
           <>
             {/* Pressing one keeps focus in the field, so the keyboard stays up. */}
             <button type="button" className="ib-fvb" onMouseDown={(event) => event.preventDefault()} onClick={() => onStep('parent')} aria-label="Comment on the element around it" data-html-comment-step="parent">
-              <Icon name="chevU" size={18} />
+              <Icon name="arrowUp" size={18} />
             </button>
             <button type="button" className="ib-fvb" onMouseDown={(event) => event.preventDefault()} onClick={() => onStep('child')} aria-label="Comment on the element inside it" data-html-comment-step="child">
-              <Icon name="chevD" size={18} />
+              <Icon name="arrowDown" size={18} />
             </button>
           </>
         )}
@@ -244,7 +267,128 @@ function HtmlCommentCard({
             tags={tags}
           />
         </div>
+        <FullScreenCommentBin />
         <button type="button" className="ib-btn ib-pri ib-csave" onClick={onSubmit} disabled={saving || words.trim() === ''} data-html-comment-save="">
+          Comment
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** Where a page row's words wait while the row is off screen and the file still open (a linked page over it). */
+export type PageCommentParking = { current: { key: string; text: string } | null };
+
+/** A fresh id for a comment on the whole page. */
+function pageCommentId(): string {
+  return typeof crypto.randomUUID === 'function' ? `ann-page-${crypto.randomUUID()}` : `ann-page-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+/**
+ * The page's own comment row: the full-screen composer's Comment tab on an HTML page, as an image's row is on an
+ * image. A comment here is on the whole page: a general comment (`GLOBAL_COMMENT`, as the HTML viewer's own "Add
+ * global comment" makes in annotate), kept on the attachment and sent with the reply ("General feedback about the
+ * document"). A comment on an element or on words is the page's pin or selection, as before.
+ *
+ * Its words are a row draft (`useRowDraft`): they wait as the file's draft when it closes, and come back with it.
+ * `parking` keeps them while the row is off screen with the file still open (a linked page over it).
+ */
+export function HtmlPageCommentRow({
+  fileKey,
+  name,
+  tags,
+  parking,
+  hidden = false,
+  onSave,
+}: {
+  /** The file and version the row is for: its parked words are only ever its own. */
+  fileKey: string;
+  /** The file's name, for the field's label. */
+  name: string;
+  /** The agents a comment can tag: the reply's. */
+  tags?: InboxComposerTags;
+  parking: PageCommentParking;
+  /** A pin's or a selection's card is in the tab (a phone's): the row stays drawn, hidden, its words kept. */
+  hidden?: boolean;
+  onSave: (annotation: Annotation) => Promise<boolean>;
+}) {
+  const enterSavesComment = useConfigValue('enterSavesComment');
+  /** The words as a save took them: the file closing before the save answers keeps no draft of them. */
+  const sentWords = useRef<string | null>(null);
+  const wordsRef = useRef('');
+  const waiting = useRowDraft(() => (sentWords.current === wordsRef.current ? null : { kind: 'row', text: wordsRef.current, markup: null }));
+  const [words, setWords] = useState(() => waiting?.text ?? (parking.current?.key === fileKey ? parking.current.text : ''));
+  wordsRef.current = words;
+  const [saving, setSaving] = useState(false);
+  const mentions = useRef<readonly string[]>([]);
+  // Off screen with the file still open: the words wait here, and the row takes them back when it is drawn again.
+  useLayoutEffect(() => {
+    parking.current = null;
+    return () => {
+      const text = wordsRef.current;
+      parking.current = text.trim() !== '' && sentWords.current !== text ? { key: fileKey, text } : null;
+    };
+  }, [fileKey, parking]);
+
+  const fieldTags = useMemo<InboxComposerTags | undefined>(() => {
+    const options = tags?.options;
+    if (!options) return undefined;
+    const owner = options.find((o) => o.owner) ?? null;
+    return {
+      options,
+      onChange: (ids) => {
+        mentions.current = ids;
+      },
+      note: ({ id, tagged }) => <TagNotes id={id} tagged={tagged} owner={owner} where="comment" />,
+    };
+  }, [tags?.options]);
+
+  const submit = async () => {
+    const text = words.trim();
+    if (!text || saving) return;
+    setSaving(true);
+    sentWords.current = words;
+    const ok = await onSave({
+      id: pageCommentId(),
+      blockId: '',
+      startOffset: 0,
+      endOffset: 0,
+      type: AnnotationType.GLOBAL_COMMENT,
+      text,
+      originalText: '',
+      createdA: Date.now(),
+      ...(mentions.current.length > 0 ? { mentions: mentions.current } : {}),
+    });
+    setSaving(false);
+    if (!ok) {
+      sentWords.current = null;
+      return;
+    }
+    setWords('');
+    mentions.current = [];
+  };
+
+  return (
+    <div className="ib-fcomp-comment" data-image-composer="" data-html-page-comment="" hidden={hidden || undefined}>
+      <div className="ib-ccard">
+        <div className="ib-fcomp-field">
+          <InboxComposerField
+            value={words}
+            onChange={setWords}
+            onKeyDown={(event) => {
+              if (!isCommentSubmitKey(event, enterSavesComment)) return;
+              event.preventDefault();
+              event.stopPropagation();
+              void submit();
+            }}
+            placeholder="Comment on this page…"
+            ariaLabel={`Comment on ${name}`}
+            destination="your comment"
+            tags={fieldTags}
+          />
+        </div>
+        <FullScreenCommentBin />
+        <button type="button" className="ib-btn ib-pri ib-csave" onClick={() => void submit()} disabled={saving || words.trim() === ''} data-html-page-comment-save="">
           Comment
         </button>
       </div>

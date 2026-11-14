@@ -19,6 +19,8 @@ import { request } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { InboxListSection } from '@plannotator/core/inbox-types';
+import { FACE_FAVICON_PNG_BYTES, FACE_FAVICON_PNG_DATA_URL, FAVICON_PNG_DATA_URL } from '@plannotator/core/favicon';
+import { resetInboxFaviconForTests } from './faviconChoice';
 
 const hasDom = typeof document !== 'undefined';
 const { InboxApp } = (hasDom ? await import('./App') : {}) as typeof import('./App');
@@ -36,6 +38,24 @@ let host: HTMLElement | null = null;
 let savedFetch: typeof fetch;
 let savedEventSource: unknown;
 let pokeStream: (() => void) | null = null;
+let restoreBadge: (() => void) | null = null;
+/** While true, every list read answers 503: a window that cannot load its list. */
+let listReadsFail = false;
+let failedListReads = 0;
+
+/** Every write to the installed app's badge (one badge for all of the app's windows), in order. */
+function watchBadge(): (number | 'clear')[] {
+  const badges: (number | 'clear')[] = [];
+  const nav = navigator as { setAppBadge?: unknown; clearAppBadge?: unknown };
+  const saved = { set: nav.setAppBadge, clear: nav.clearAppBadge };
+  nav.setAppBadge = async (n: number) => void badges.push(n);
+  nav.clearAppBadge = async () => void badges.push('clear');
+  restoreBadge = () => {
+    nav.setAppBadge = saved.set;
+    nav.clearAppBadge = saved.clear;
+  };
+  return badges;
+}
 
 function loopback(path: string, method = 'GET', body?: string): Promise<{ status: number; bytes: Buffer; type: string }> {
   return new Promise((done, fail) => {
@@ -104,6 +124,10 @@ beforeEach(() => {
   if (!hasDom) return;
   savedFetch = globalThis.fetch;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (listReadsFail && String(input).startsWith('/api/inbox/threads?')) {
+      failedListReads += 1;
+      return new Response('{"error":"down"}', { status: 503, headers: { 'Content-Type': 'application/json' } });
+    }
     const answer = await loopback(String(input), init?.method ?? 'GET', init?.body ? String(init.body) : undefined);
     return new Response(new Uint8Array(answer.bytes), { status: answer.status, headers: { 'Content-Type': answer.type } });
   }) as typeof fetch;
@@ -119,7 +143,8 @@ beforeEach(() => {
   document.head.querySelector('link[rel="icon"]')?.remove();
   const link = document.createElement('link');
   link.rel = 'icon';
-  link.setAttribute('href', '/favicon.png');
+  link.setAttribute('href', '/favicon.ico');
+  link.setAttribute('sizes', '16x16 32x32 48x48');
   document.head.appendChild(link);
   window.location.hash = '';
 });
@@ -128,9 +153,14 @@ afterEach(() => {
   if (!hasDom) return;
   act(() => root?.unmount());
   host?.remove();
+  // After the unmount, so a write made by a window going away is still recorded.
+  restoreBadge?.();
+  restoreBadge = null;
+  listReadsFail = false;
   root = null;
   host = null;
   pokeStream = null;
+  resetInboxFaviconForTests();
   globalThis.fetch = savedFetch;
   (globalThis as Record<string, unknown>).EventSource = savedEventSource;
 });
@@ -169,6 +199,9 @@ test.skipIf(!hasDom)('the tab counts threads with news the person has not looked
   expect(waitingRow.questions.open).toBeGreaterThan(0);
   expect(waitingRow.unseen).toBe(0);
 
+  // An installed app's icon (the Dock) gets the same count through the Badging API.
+  const badges = watchBadge();
+
   host = document.createElement('div');
   document.body.appendChild(host);
   act(() => {
@@ -176,15 +209,17 @@ test.skipIf(!hasDom)('the tab counts threads with news the person has not looked
     root.render(<InboxApp />);
   });
   await until(() => document.title === '(1) Plannotator Inbox', 'one thread counted');
+  expect(badges.at(-1)).toBe(1);
   await until(() => iconLabel() === '1', 'the badged icon');
   expect(iconHref().startsWith('data:image/svg+xml')).toBe(true);
-  // The plain icon rides inside the badged one.
-  expect(decodeURIComponent(iconHref())).toContain('href="data:image/png;base64,');
+  // The badge is drawn over Glass's hand-pixelled 32 (the server's /favicon.png), not the .ico.
+  expect(decodeURIComponent(iconHref())).toContain(`href="${FAVICON_PNG_DATA_URL}"`);
 
   // An agent starts a thread: the count rises.
   const fresh = await agentSends('A fresh finding about the build.');
   act(() => pokeStream?.());
   await until(() => document.title === '(2) Plannotator Inbox' && iconLabel() === '2', 'the agent message counted');
+  expect(badges.at(-1)).toBe(2);
 
   // Opening it is the look: the count falls.
   openThread(fresh);
@@ -192,5 +227,79 @@ test.skipIf(!hasDom)('the tab counts threads with news the person has not looked
 
   // Opening the last one: no prefix, the plain icon again.
   openThread(world.stopped);
-  await until(() => document.title === 'Plannotator Inbox' && iconHref() === '/favicon.png', 'the plain tab');
+  await until(() => document.title === 'Plannotator Inbox' && iconHref() === '/favicon.ico', 'the plain tab');
+  expect(badges.at(-1)).toBe('clear');
+});
+
+test.skipIf(!hasDom)('a favicon picked in Settings is the tab icon at once, the badge drawn over it, and saved for every page', async () => {
+  // One thread with news, so the tab carries a badge over the plain icon.
+  const fresh = await agentSends('A thread for the favicon pick.');
+  host = document.createElement('div');
+  document.body.appendChild(host);
+  act(() => {
+    root = createRoot(host!);
+    root.render(<InboxApp />);
+  });
+  await until(() => iconLabel() !== null, 'the badged icon');
+  expect(decodeURIComponent(iconHref())).not.toContain(FACE_FAVICON_PNG_DATA_URL);
+
+  act(() => {
+    window.location.hash = '#settings/general';
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+  });
+  const choice = () => document.querySelector<HTMLInputElement>('input[name="ib-favicon"][value="totman"]');
+  await until(() => choice() !== null, 'the Favicon row');
+  const labels = [...document.querySelectorAll('input[name="ib-favicon"]')].map((input) => input.closest('label')?.textContent);
+  expect(labels).toEqual(['Glass', 'Yellow', 'Face']);
+  expect(document.querySelector<HTMLInputElement>('input[name="ib-favicon"][value="glass"]')?.checked).toBe(true);
+
+  act(() => choice()!.click());
+  // No reload: the badge is drawn again, over the Face icon.
+  await until(() => decodeURIComponent(iconHref()).includes(FACE_FAVICON_PNG_DATA_URL) && iconLabel() !== null, 'the badge over the Face icon');
+  // Saved to config.json, so /favicon.png (every page's first frame) answers with it too.
+  await until(async () => JSON.parse((await loopback('/api/inbox/settings')).bytes.toString('utf8')).favicon === 'totman', 'the saved choice');
+  const served = await loopback('/favicon.png');
+  expect(new Uint8Array(served.bytes)).toEqual(FACE_FAVICON_PNG_BYTES);
+
+  // The last thread seen: the plain icon is now the Face icon, not the one the page loaded with.
+  await loopback(`/api/inbox/threads/${fresh}/seen`, 'POST', '{}');
+  for (const row of await serverRows()) await loopback(`/api/inbox/threads/${row.thread_id}/seen`, 'POST', '{}');
+  act(() => pokeStream?.());
+  await until(() => iconHref() === FACE_FAVICON_PNG_DATA_URL, 'the plain Face icon');
+});
+
+test.skipIf(!hasDom)("the app's badge is one for every window: a window with no list, and a window going away, leave it as it is", async () => {
+  await agentSends('News for the badge every window shares.');
+  const badges = watchBadge();
+  host = document.createElement('div');
+  document.body.appendChild(host);
+  act(() => {
+    root = createRoot(host!);
+    root.render(<InboxApp />);
+  });
+  await until(() => typeof badges.at(-1) === 'number', 'the first window badging its count');
+  const count = badges.at(-1);
+  const writes = badges.length;
+
+  // A second window whose list never loads knows nothing about what is unread.
+  listReadsFail = true;
+  failedListReads = 0;
+  const secondHost = document.createElement('div');
+  document.body.appendChild(secondHost);
+  let second: Root | null = null;
+  act(() => {
+    second = createRoot(secondHost);
+    second.render(<InboxApp />);
+  });
+  await until(() => failedListReads > 0, "the second window's failed list read");
+  await wait(200);
+  expect(badges.slice(writes)).toEqual([]);
+
+  // Either window going away is not the person reading anything.
+  act(() => second!.unmount());
+  secondHost.remove();
+  act(() => root!.unmount());
+  root = null;
+  expect(badges.slice(writes)).toEqual([]);
+  expect(badges.at(-1)).toBe(count);
 });

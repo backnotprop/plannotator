@@ -1,7 +1,7 @@
 /**
  * Plannotator Inbox registry: `${dataDir}/inbox/inbox.json`.
  *
- * `{ v, pid, port, url, version, token, serverSession, startedAt, tailnet?, lan?, tailscale? }`, mode
+ * `{ v, pid, port, url, version, token, serverSession, startedAt, follows?, home?, tailnet?, lan?, tailscale? }`, mode
  * 0600, written by the Inbox server when it starts and LEFT IN PLACE when it
  * exits, so a person who ran the Inbox once has it found by every agent
  * session, and a caller can start it again on the port it last had.
@@ -22,11 +22,12 @@
  */
 
 import { randomBytes } from "node:crypto";
-import { chmodSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { isInboxHealth, type InboxHealth } from "@plannotator/core/inbox-types";
 import { inboxDir } from "./schema";
 import { proveInboxProcess } from "./process-proof";
+import { INBOX_DB_FILE, INBOX_RETURN_PARTIAL } from "./store-log/sqlite-return/names";
 
 export const INBOX_REGISTRY_FILE = "inbox.json";
 export const INBOX_START_LOCK = "start.lock";
@@ -64,7 +65,45 @@ export interface InboxRegistryEntry {
    * its tailnet-only loopback listener), kept after a stop whose take-down
    * failed so the next start or `uninstall --purge` can take it down.
    */
-  tailscale?: { url: string | null; error: string | null; https_port?: number; proxy_port?: number };
+  /**
+   * `relay_port` (additive): the prototype relay's mapping (inbox-tailscale.ts), `tailscale serve --https=<relay_port>`
+   * pointed at the loopback listener on the same port number; recorded before it is made, taken down like the window's.
+   */
+  tailscale?: { url: string | null; error: string | null; https_port?: number; proxy_port?: number; relay_port?: number };
+  /**
+   * The runs of this data folder before this one (additive): their `serverSession`s, newest first, at most
+   * `INBOX_SESSION_LINEAGE_MAX` (`inboxSessionLineage`). A window left open across a restart proves with it that
+   * the Inbox now answering is the same data it loaded from, and keeps writing without a reload.
+   */
+  follows?: string[];
+  /** The `inbox/` folder this entry was written in, as device and inode (additive; `inboxHome`): a copy has another. */
+  home?: string;
+}
+
+/** How many earlier runs an entry names (`follows`): a window that slept through more restarts than this reloads, as before. */
+export const INBOX_SESSION_LINEAGE_MAX = 8;
+
+/** The `inbox/` folder's identity (device:inode), or null where it cannot be read. A copied or restored folder has another. */
+export function inboxHome(dataDir: string): string | null {
+  try {
+    const stat = statSync(inboxDir(dataDir));
+    // Not the birth time: where the filesystem keeps none it reads as the change time, which every write here moves.
+    return `${stat.dev}:${stat.ino}`;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The earlier runs a starting Inbox follows: the last entry's session, then the runs that one followed. Only when
+ * that entry was written in this very folder (`home`): an entry with no `home` (an older Inbox wrote it), another
+ * folder's (the data dir was copied, or restored from a backup) or an unreadable folder starts the line again, so
+ * a window of the other Inbox is never taken for this one's.
+ */
+export function inboxSessionLineage(previous: Pick<InboxRegistryEntry, "serverSession" | "follows" | "home"> | null, home: string | null): string[] {
+  if (!previous || !home || previous.home !== home) return [];
+  const earlier = Array.isArray(previous.follows) ? previous.follows.filter((s): s is string => typeof s === "string" && s !== "") : [];
+  return [previous.serverSession, ...earlier].slice(0, INBOX_SESSION_LINEAGE_MAX);
 }
 
 export function inboxRegistryPath(dataDir: string): string {
@@ -274,6 +313,14 @@ export async function inboxStatus(dataDir: string, timeoutMs = 2000): Promise<In
  * The start lock: one starter at a time, so two agents that find the Inbox
  * stopped at once do not start two writers on one store. Returns a release
  * function, or null when another starter holds a fresh lock.
+ *
+ * The lock folder names the processes that hold it (`holders`: the starter,
+ * and the detached Inbox it started, which joins with `joinInboxStartLock`).
+ * When every one of them is gone (a start that crashed: a force quit, a power
+ * cut), the lock is stale at once
+ * instead of after `INBOX_START_LOCK_STALE_MS`, so the next start goes ahead
+ * rather than giving up with "try again". A lock with no holders file (an
+ * older Plannotator's) is stale by age alone, as before.
  */
 export function acquireInboxStartLock(dataDir: string): (() => void) | null {
   const dir = inboxDir(dataDir);
@@ -281,28 +328,79 @@ export function acquireInboxStartLock(dataDir: string): (() => void) | null {
   const lock = join(dir, INBOX_START_LOCK);
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      mkdirSync(lock);
-      return () => rmSync(lock, { recursive: true, force: true });
+      if (!existsSync(lock) && createStartLock(lock)) return () => rmSync(lock, { recursive: true, force: true });
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-      try {
-        if (Date.now() - statSync(lock).mtimeMs <= INBOX_START_LOCK_STALE_MS) return null;
-        rmSync(lock, { recursive: true, force: true });
-      } catch {
-        // Gone in between: try again.
-      }
+    }
+    try {
+      if (!inboxStartLockStale(dataDir) || inboxReturnRunning(dataDir)) return null;
+      rmSync(lock, { recursive: true, force: true });
+    } catch {
+      // Gone in between: try again.
     }
   }
   return null;
 }
 
+const START_LOCK_HOLDERS = "holders";
+
+function createStartLock(lock: string): boolean {
+  const named = `${lock}.${process.pid}`;
+  try {
+    mkdirSync(named, { recursive: true });
+    writeFileSync(join(named, START_LOCK_HOLDERS), `${process.pid}\n`, { mode: 0o600 });
+    renameSync(named, lock);
+    return true;
+  } catch {
+    if (existsSync(lock)) return false;
+    mkdirSync(lock);
+    try {
+      appendFileSync(join(lock, START_LOCK_HOLDERS), `${process.pid}\n`, { mode: 0o600 });
+    } catch {}
+    return true;
+  } finally {
+    rmSync(named, { recursive: true, force: true });
+  }
+}
+
+/** Name this process as a holder of the start lock (the detached Inbox its starter started); best effort. */
+export function joinInboxStartLock(dataDir: string): void {
+  try {
+    appendFileSync(join(inboxDir(dataDir), INBOX_START_LOCK, START_LOCK_HOLDERS), `${process.pid}\n`, { mode: 0o600 });
+  } catch {
+    // No lock (released meanwhile) or no room: the lock's age decides, as before.
+  }
+}
+
+/** The start lock's holders are all gone, or it is older than `INBOX_START_LOCK_STALE_MS`. Throws when there is no lock. */
+export function inboxStartLockStale(dataDir: string): boolean {
+  const lock = join(inboxDir(dataDir), INBOX_START_LOCK);
+  if (Date.now() - statSync(lock).mtimeMs > INBOX_START_LOCK_STALE_MS) return true;
+  const pids = startLockHolders(dataDir);
+  return pids !== null && pids.length > 0 && !pids.some(isPidAlive);
+}
+
+function startLockHolders(dataDir: string): number[] | null {
+  try {
+    return readFileSync(join(inboxDir(dataDir), INBOX_START_LOCK, START_LOCK_HOLDERS), "utf8").split("\n").map(Number).filter((pid) => Number.isSafeInteger(pid) && pid > 0);
+  } catch {
+    return null;
+  }
+}
+
+export function inboxReturnRunning(dataDir: string): boolean {
+  const dir = inboxDir(dataDir);
+  if (!existsSync(join(dir, INBOX_DB_FILE)) && !existsSync(join(dir, INBOX_RETURN_PARTIAL))) return false;
+  return (startLockHolders(dataDir) ?? []).some((pid) => pid !== process.pid && isPidAlive(pid));
+}
+
 /** Wait until `check` answers non-null, polling; null on timeout. */
-export async function waitForInbox<T>(check: () => Promise<T | null>, timeoutMs: number, intervalMs = 100): Promise<T | null> {
+export async function waitForInbox<T>(check: () => Promise<T | null>, timeoutMs: number, intervalMs = 100, keepWaiting?: () => boolean): Promise<T | null> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     const value = await check();
     if (value !== null) return value;
-    if (Date.now() >= deadline) return null;
+    if (Date.now() >= deadline && !keepWaiting?.()) return null;
     await new Promise((resolve) => setTimeout(resolve, intervalMs));
   }
 }

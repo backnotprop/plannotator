@@ -145,3 +145,18 @@ export function staleThreadText(stale: StaleThread, time: (iso: string) => strin
       : `You have not read this thread ${stale.last_read_at ? `since ${time(stale.last_read_at)}` : "in this session"}`;
   return `${lead}; its subject is ${subject}${name}.`;
 }
+
+/**
+ * When `session` last saw the thread's state, as ISO (approval
+ * "inbox-pr-binding": the wake says what the person changed in the thread's
+ * PRs since then): a read of it, a delivery of the person's words to it, or
+ * its own message there. Null for never.
+ */
+export function sessionLastSawThread(store: InboxStore, session: string, threadId: string): string | null {
+  const messages = store.thread(threadId)?.messages ?? [];
+  let seen = lastRead(store, session, messages, threadId);
+  for (const message of messages) {
+    if (message.author.kind === "agent" && message.author.session === session) seen = later(seen, msOf(message.created_at));
+  }
+  return seen === null ? null : new Date(seen).toISOString();
+}

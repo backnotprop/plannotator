@@ -278,7 +278,7 @@ test.skipIf(!hasDom)("Escape's last rung goes back where full screen was opened 
   await openTile('page.html');
   await until(inFullScreen, 'the page full screen');
   expect(choice()).toBeNull();
-  // The pen first (Annotate → Interact), then full screen ends: opened from the thread alone, the file closes.
+  // Full screen ends (the page opens in Interact, so no pen rung): opened from the thread alone, the file closes.
   for (let i = 0; i < 4 && view() !== null; i++) await escapeOnPane();
   await until(() => view() === null, 'the thread as it was, no file beside it');
   expect(window.location.hash).toBe(threadOnly);
@@ -349,7 +349,7 @@ test.skipIf(!hasDom)("the owner's path: the image preview under a message opens 
   expect(window.location.hash).toBe(threadOnly);
 });
 
-test.skipIf(!hasDom)("a file opened full screen over another one beside the thread: × and Escape go back to that one, and ask first about a comment not saved yet", async () => {
+test.skipIf(!hasDom)("a file opened full screen over another one beside the thread: × and Escape go back to that one at once, a comment not saved yet kept for its file", async () => {
   document.cookie = `${VIEW_COOKIE}=side; path=/`;
   await renderThread();
   await openTile('plan.md');
@@ -366,21 +366,10 @@ test.skipIf(!hasDom)("a file opened full screen over another one beside the thre
   });
   const question = () => host!.querySelector<HTMLElement>('[data-step-guard]');
 
-  // Escape's last rung would show plan.md: it asks first, and Keep writing stays on the image with the words.
-  for (let i = 0; i < 4 && question() === null && inFullScreen(); i++) await escapeOnPane();
-  await until(() => question() !== null, 'the question about the comment, after Escape');
-  expect(question()!.querySelector('[data-guard-discard]')!.textContent).toBe('Discard and go to plan.md');
-  await act(async () => question()!.querySelector<HTMLButtonElement>('[data-guard-keep]')!.click());
-  expect(inFullScreen()).toBe(true);
-  expect(view()!.getAttribute('data-attachment-pane')).toBe(world.openIn.ids['shot.png']!);
-  expect(box()!.value).toBe('The total sits too low.');
-
-  // × asks the same; Discard goes on to plan.md beside the thread.
-  await act(async () => host!.querySelector<HTMLButtonElement>('[data-full-view-close]')!.click());
-  await until(() => question() !== null, 'the question about the comment, after ×');
-  expect(inFullScreen()).toBe(true);
-  await act(async () => question()!.querySelector<HTMLButtonElement>('[data-guard-discard]')!.click());
-  await until(() => view()?.getAttribute('data-attachment-pane') === world.openIn.ids['plan.md'] && !inFullScreen(), 'plan.md beside the thread');
+  // Escape's last rung shows plan.md on that press (focus first leaves the comment row): nothing asks.
+  for (let i = 0; i < 4 && inFullScreen(); i++) await escapeOnPane();
+  await until(() => view()?.getAttribute('data-attachment-pane') === world.openIn.ids['plan.md'] && !inFullScreen(), 'plan.md beside the thread, after Escape');
+  expect(question()).toBeNull();
 });
 
 test.skipIf(!hasDom)("a comment card in the reply box opens its file in the view it is in: a one-off view from a tile's ⋯ stays", async () => {

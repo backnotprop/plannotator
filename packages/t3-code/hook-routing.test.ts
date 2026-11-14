@@ -99,6 +99,10 @@ describe("T3 routing from Claude's actual tool-call identity", () => {
       expect(requests).toBe(0);
       await expect(prepareT3Hook(event, ["plannotator"], root, sdk)).rejects.toThrow();
       expect(requests).toBeGreaterThan(0);
+      // T3 Code names its own entrypoint: its Claude is looked up too.
+      const sdkRequests = requests;
+      await expect(prepareT3Hook(event, ["plannotator"], root, { CLAUDE_CODE_ENTRYPOINT: "t3-code" })).rejects.toThrow();
+      expect(requests).toBeGreaterThan(sdkRequests);
     } finally {
       server.stop(true);
       rmSync(root, { recursive: true, force: true });

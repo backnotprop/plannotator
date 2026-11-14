@@ -6,7 +6,7 @@
  * window's usual guards.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { InboxPromptsSettings } from "@plannotator/core/inbox-types";
@@ -178,12 +178,33 @@ describe("Settings → Prompts", () => {
     expect((await read(server)).reminder.wakes).toEqual({ "claude-code": true, pi: true, opencode: true });
   });
 
+  test("Guided reviews: the one guide-instructions.md file the review UI edits; set, read back, capped, deleted, config.json untouched", async () => {
+    const { server, dataDir, onDisk } = await world({ displayName: "Ann" });
+    const file = join(dataDir, "guide-instructions.md");
+    expect((await read(server)).guide).toEqual({ text: null, max: 12000 });
+    const saved = await post(server, { serverSession: server.serverSession, prompts: { guide: "Start with the riskiest change." } });
+    expect(saved.status).toBe(200);
+    expect(((await saved.json()) as { prompts: InboxPromptsSettings }).prompts.guide?.text).toBe("Start with the riskiest change.");
+    expect(readFileSync(file, "utf8")).toBe("Start with the riskiest change.\n");
+    // Written by the review UI's route, read here.
+    writeFileSync(file, "Call the tenant a workspace.\n");
+    expect((await read(server)).guide?.text).toBe("Call the tenant a workspace.");
+    const over = await post(server, { serverSession: server.serverSession, prompts: { guide: "x".repeat(12001) } });
+    expect([over.status, ((await over.json()) as { field: string }).field]).toEqual([422, "prompts.guide"]);
+    expect(readFileSync(file, "utf8")).toBe("Call the tenant a workspace.\n");
+    expect((await post(server, { serverSession: server.serverSession, prompts: { guide: null } })).status).toBe(200);
+    expect(existsSync(file)).toBe(false);
+    expect(onDisk()).toEqual({ displayName: "Ann" });
+  });
+
   test("a malformed change is refused before anything is written", async () => {
     const { server, onDisk } = await world({ displayName: "Ann" });
     const bodies: unknown[] = [
       null,
       "text",
       { review: { denied: "no" } },
+      {},
+      { guide: 5 },
       { inbox: {} },
       { inbox: { reminder: 5 } },
       { inbox: { other: "x" } },
@@ -209,5 +230,36 @@ describe("Settings → Prompts", () => {
     const stale = await post(server, { ...change, serverSession: "not-this-one" });
     expect(stale.status).toBe(409);
     expect(onDisk()).toEqual({ displayName: "Ann" });
+  });
+
+  test("rules save beside the reminder, an agent's own beside its reminder; Back to default deletes only the rules", async () => {
+    const { server, onDisk } = await world({ prompts: { inbox: { reminder: "Shared line.", runtimes: { pi: { reminder: "Pi line." } } } } });
+    const save = async (inbox: unknown) => {
+      const response = await post(server, { serverSession: server.serverSession, prompts: { inbox } });
+      expect(response.status).toBe(200);
+      return ((await response.json()) as { prompts: InboxPromptsSettings }).prompts;
+    };
+    let prompts = await save({ rules: "Only message me when you are blocked or done." });
+    prompts = await save({ runtimes: { pi: { rules: "Keep messages under 10 lines." } } });
+    expect(prompts.rules?.shared).toBe("Only message me when you are blocked or done.");
+    expect(prompts.rules?.runtimes).toEqual({ "claude-code": null, pi: "Keep messages under 10 lines.", opencode: null });
+    expect(onDisk().prompts.inbox).toEqual({
+      reminder: "Shared line.",
+      rules: "Only message me when you are blocked or done.",
+      runtimes: { pi: { reminder: "Pi line.", rules: "Keep messages under 10 lines." } },
+    });
+    await save({ rules: null });
+    await save({ runtimes: { pi: { rules: null } } });
+    expect(onDisk().prompts.inbox).toEqual({ reminder: "Shared line.", runtimes: { pi: { reminder: "Pi line." } } });
+  });
+
+  test("rules that would not fit with the reminder they follow are refused with 422 and nothing is written", async () => {
+    const { server, onDisk } = await world({ displayName: "Ann" });
+    const room = (await read(server)).rules!.room.shared;
+    const over = await post(server, { serverSession: server.serverSession, prompts: { inbox: { rules: "r".repeat(room + 1) } } });
+    expect(over.status).toBe(422);
+    expect(onDisk()).toEqual({ displayName: "Ann" });
+    const fits = await post(server, { serverSession: server.serverSession, prompts: { inbox: { rules: "r".repeat(room) } } });
+    expect(fits.status).toBe(200);
   });
 });

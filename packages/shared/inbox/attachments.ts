@@ -45,6 +45,7 @@ import {
 import { isLfsPointer, readImageDimensions, sniffImageContentType } from "../review-image";
 import { InboxError } from "./schema";
 import { readMp4VideoMetadata, sniffInboxVideo, type InboxVideoMetadata } from "./video";
+import { audioDurationMsFromHead, inboxAudioServedType, OGG_TAIL_BYTES, oggDurationMs, sniffInboxAudio } from "./audio";
 
 export const BLOBS_DIR = "blobs";
 
@@ -101,13 +102,16 @@ export interface InboxAttachmentKindDecision {
  * read from the bytes: an image by its magic bytes (the extension is
  * ignored, so an HTML page named `.svg` is not an image), a PDF by `%PDF-`,
  * a film by its container (`sniffInboxVideo`, after the image check so an
- * AVIF stays an image), UTF-8 text with no NUL as `code`, and anything else
- * as `file`. A text kind over INBOX_VIEW_MAX_BYTES is a `file` (a download),
- * since the window reads text whole: this is not a limit on what attaches.
+ * AVIF stays an image), a recording by its container (`sniffInboxAudio`,
+ * audio.ts), UTF-8 text with no NUL as `code`, and anything else as `file`.
+ * A text kind over INBOX_VIEW_MAX_BYTES is a `file` (a download), since the
+ * window reads text whole: this is not a limit on what attaches.
  *
  * `video` is what the header walk read from an MP4/MOV (readMp4VideoMetadata):
  * its length and frame size are recorded, and a file whose tracks hold no
- * video (audio named `.mp4`) stays a `file`.
+ * video (audio named `.mp4`) is a recording (`audio`, `audio/mp4`). A
+ * recording's length is the walk's (M4A), the tail's (Ogg) or its head's
+ * (WAV, FLAC, MP3).
  */
 export function decideInboxAttachmentKind(name: string, head: Uint8Array, isText: boolean, size = 0, video?: InboxVideoMetadata | null): InboxAttachmentKindDecision {
   const byName = inboxAttachmentKind(name);
@@ -120,7 +124,8 @@ export function decideInboxAttachmentKind(name: string, head: Uint8Array, isText
   }
   if (isPdfHead(head)) return { kind: "pdf", media_type: "application/pdf" };
   const film = sniffInboxVideo(head);
-  if (film && (!video || video.hasVideoTrack)) {
+  const sound = sniffInboxAudio(head);
+  if (film && !sound && (!video || video.hasVideoTrack)) {
     return {
       kind: "video",
       media_type: film,
@@ -128,14 +133,36 @@ export function decideInboxAttachmentKind(name: string, head: Uint8Array, isText
       ...(film !== "video/webm" && video?.width && video.height ? { width: video.width, height: video.height } : {}),
     };
   }
+  // A recording; or an MP4/MOV whose tracks hold no video (audio named `.mp4`).
+  const recording = sound ?? (film === "video/mp4" || film === "video/quicktime" ? "audio/mp4" : null);
+  if (recording) {
+    const duration = video?.duration_ms ?? audioDurationMsFromHead(head, size, recording);
+    return { kind: "audio", media_type: recording, ...(duration ? { duration_ms: duration } : {}) };
+  }
   if (isText && fitsView) return { kind: "code" };
   return { kind: "file" };
 }
 
-/** An MP4/MOV's header read through a file handle (a few small reads; the film itself is never read). */
+/**
+ * An MP4/MOV's or M4A's header read through a file handle (a few small reads;
+ * the film itself is never read), and an Ogg recording's length from its last
+ * page (one read of the file's tail).
+ */
 export async function readInboxVideoMetadata(handle: FileHandle, size: number, head: Uint8Array): Promise<InboxVideoMetadata | null> {
   const film = sniffInboxVideo(head);
-  if (film !== "video/mp4" && film !== "video/quicktime") return null;
+  const sound = sniffInboxAudio(head);
+  if (sound === "audio/ogg") {
+    try {
+      const at = Math.max(0, size - OGG_TAIL_BYTES);
+      const tail = Buffer.alloc(size - at);
+      const { bytesRead } = await handle.read(tail, 0, tail.length, at);
+      const duration = oggDurationMs(head, tail.subarray(0, bytesRead));
+      return { hasVideoTrack: false, ...(duration ? { duration_ms: duration } : {}) };
+    } catch {
+      return null;
+    }
+  }
+  if (film !== "video/mp4" && film !== "video/quicktime" && sound !== "audio/mp4") return null;
   try {
     return await readMp4VideoMetadata(async (position, length) => {
       const buffer = Buffer.alloc(Math.max(0, Math.min(length, size - position)));
@@ -466,7 +493,7 @@ export async function checkInboxAttachmentForLaunch(inboxDirPath: string, attach
   const check = await checkCurrentAsync(attachment);
   if (!check.ok) return check;
   const kind = readInboxAttachmentKind(attachment.kind);
-  if (kind !== "image" && kind !== "pdf" && kind !== "video") return check;
+  if (kind !== "image" && kind !== "pdf" && kind !== "video" && kind !== "audio") return check;
   const opened = await openInboxAttachmentVersion(inboxDirPath, attachment, "current");
   if (!opened.ok) return { ok: false, unavailable: { code: opened.code, message: opened.message } };
   await opened.handle.close().catch(() => {});
@@ -546,6 +573,7 @@ function headMatchesKind(attachment: InboxAttachment, head: Uint8Array): string 
   if (kind === "image" && (isLfsPointer(head) || !sniffImageContentType(head))) return `${attachment.name} is no longer an image.`;
   if (kind === "pdf" && !isPdfHead(head)) return `${attachment.name} is no longer a PDF.`;
   if (kind === "video" && !sniffInboxVideo(head)) return `${attachment.name} is no longer a video.`;
+  if (kind === "audio" && !inboxAudioServedType(head)) return `${attachment.name} is no longer a recording.`;
   return null;
 }
 

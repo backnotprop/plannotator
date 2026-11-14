@@ -32,7 +32,7 @@ import { INBOX_BRIDGE_EVENT_PATH, INBOX_BRIDGE_POLL_PATH, inboxWakeText, parseIn
 import { InboxStore } from '../../packages/shared/inbox/store';
 import { INBOX_TIDY_INSTRUCTION } from '../../packages/core/inbox-tidy';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
-import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
+import { E2E_LAUNCH_OFF, inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
 import { NO_BROWSER } from '../helpers/no-browser';
 
 const repo = resolve(__dirname, '../..');
@@ -203,6 +203,8 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   writeFileSync(
     join(dataDir, 'config.json'),
     JSON.stringify({
+      // Written whole: launch stays off, or the Board runs `claude --version` on the runner's PATH (tests/e2e/agent-cli-stubs.ts).
+      ...E2E_LAUNCH_OFF,
       inboxTour: { version: 2, seen_at: new Date(now).toISOString(), skipped_at: new Date(now).toISOString() },
       inboxNotifications: { dismissed: true },
       inboxSound: { dialogShownFor: 'tidy-e2e' },
@@ -210,10 +212,14 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
       inboxBoardIntro: { shownAt: new Date(now).toISOString() },
       // Due on a used Inbox, and its check would run the `codex` on this PATH.
       inboxVoiceIntro: { shownAt: new Date(now).toISOString() },
+      // The tab icon dialog (an update-day dialog): settled by a favicon already chosen.
+      favicon: 'glass',
+      // The "themes" dialog (after the tab icon dialog, ahead of the offers): settled, as for someone on another theme.
+      inboxThemeChooser: { notNeededAt: '2026-10-01T10:00:00.000Z' },
       inboxAgentNotes: { offered: true },
     }),
   );
-  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0', PLANNOTATOR_UPDATE_CHECK: '0' };
+  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0', PLANNOTATOR_UPDATE_CHECK: '0' };
   const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
   expect(started.status, started.stderr).toBe(0);
   rememberInboxOf(dataDir);

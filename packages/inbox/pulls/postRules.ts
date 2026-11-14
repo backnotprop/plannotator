@@ -3,9 +3,11 @@
  * them (`getPRPlatformCapabilities`), and which pull request a review may be posted to.
  */
 import { inboxPullIsOpen, type InboxPull } from '@plannotator/core/inbox-types';
+import type { DiffFile } from '@plannotator/core/diff-files';
 import type { CodeAnnotation } from '@plannotator/ui/types';
+import { anchorStillMatches, captureAnchor } from '@plannotator/ui/utils/codeAnnotationAnchor';
 import { getPRPlatformCapabilities } from '../../shared/pr-types';
-import type { PlatformPostPull, PlatformRules } from '../guide/platform-post-types';
+import type { KeptComment, PlatformPostPull, PlatformRules } from '../guide/platform-post-types';
 
 export { resolvePlatformDecisionAction } from '../../review-editor/reviewDecision';
 
@@ -15,6 +17,14 @@ export { resolvePlatformDecisionAction } from '../../review-editor/reviewDecisio
  */
 export function postedSignature(c: CodeAnnotation): string {
   return JSON.stringify([c.id, c.text ?? '', c.suggestedCode ?? '', c.conventionalLabel ?? '', c.decorations ?? [], c.filePath, c.lineStart, c.lineEnd, c.side, c.scope ?? 'line']);
+}
+
+/**
+ * Comments on an agent's guided review that can go inline: the code itself vouches, their lines and those around them
+ * reading the same on the PR's own diff. Any other stays as it was, and goes in the review body with its code.
+ */
+export function onPullDiff(comments: readonly CodeAnnotation[], guideFiles: readonly DiffFile[], pullFiles: readonly DiffFile[]): KeptComment[] {
+  return comments.map((c) => (anchorStillMatches({ ...c, ...captureAnchor(c, guideFiles) }, pullFiles) ? { ...c, onPullDiff: true } : c));
 }
 
 /** The PR as `#platform-post` posts it, or null when it can't be: closed, merged, or its head commit unknown. */
@@ -27,22 +37,23 @@ export function platformRules(pull: PlatformPostPull): PlatformRules {
   const caps = getPRPlatformCapabilities({ platform: pull.platform });
   // The person's own PR: the forge refuses their approval (and on GitHub their request for changes).
   const selfAuthored = pull.mine && caps.selfReviewBlocked;
+  const noun = caps.changeLabel === 'MR' ? 'merge request' : 'pull request';
   return {
     label: caps.label,
     mrLabel: caps.changeLabel,
     selfAuthored,
     requestChangesSupported: caps.requestChanges,
+    selfRequestChangesBlocked: caps.selfRequestChangesBlocked,
     requestChangesUnavailableReason: !caps.requestChanges
       ? `${caps.label} has no request-changes review; this posts as a comment.`
-      : selfAuthored
-        ? `You can't request changes on your own pull request on ${caps.label}.`
+      : selfAuthored && caps.selfRequestChangesBlocked
+        ? `You can't request changes on your own ${noun} on ${caps.label}.`
         : undefined,
   };
 }
 
-/** The posted confirmation's words (GitLab has no request-changes review: it went as a comment). */
 export function postedWords(posted: { label: string; action: string }): string {
   if (posted.action === 'approve') return `Approved on ${posted.label}`;
-  if (posted.action === 'request_changes' && posted.label !== 'GitLab') return `Changes requested on ${posted.label}`;
+  if (posted.action === 'request_changes') return `Changes requested on ${posted.label}`;
   return `Review posted on ${posted.label}`;
 }

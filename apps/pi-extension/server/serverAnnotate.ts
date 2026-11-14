@@ -1,7 +1,7 @@
 import { piUpdateAdvert } from "./update-advert.ts";
 import { schedulePiDailyPing } from "./daily-ping.ts";
 import { crossOriginRefusalBody, isSameOriginOrNoOrigin } from "../generated/request-origin.ts";
-import { annotateDocumentRenderKind } from "../generated/annotatable.ts";
+import { annotateDocumentRenderKind, isSecretEnvPath } from "../generated/annotatable.ts";
 import { likelyAppHtmlEncoding, prewarmAppHtml } from "../generated/app-html.ts";
 import { openPackedApp } from "../generated/packed-app.ts";
 import { createServer } from "node:http";
@@ -528,7 +528,9 @@ export async function startAnnotateServer(options: {
 	// when headings change. Diff content is the markdown, or the raw HTML source
 	// when rendering HTML. Only single local files (not URLs/folders/messages).
 	const annotateProjectName = options.project ?? "_unknown";
-	const annotateHistoryEnabled = resolveAnnotateHistory(loadConfig());
+	// A `.env` file the person named (isSecretEnvPath) keeps nothing in the data
+	// dir: no version copy, no submit record, no feedback archive entry.
+	const annotateHistoryEnabled = resolveAnnotateHistory(loadConfig()) && !((options.mode ?? "annotate") === "annotate" && isSecretEnvPath(options.filePath));
 	// Single local file sessions are the only ones this eager gate covers.
 	// URL, agent-message, and live-app sessions never write session content to
 	// the data dir. Folder sessions do participate in per-file version history,
@@ -716,6 +718,8 @@ export async function startAnnotateServer(options: {
 		enabled: false,
 		reason: "unsupported-runtime",
 	};
+	// Per request once the bridge exists: an SSH session offers the terminal to its own tunnel only.
+	let agentTerminalCapabilityFor = (_req: IncomingMessage): AgentTerminalCapability => agentTerminalCapability;
 
 	// The fallback is silent to the reviewer, so the reason is logged once per
 	// process: a genuine bug in the read must not hide behind the snapshot.
@@ -987,7 +991,7 @@ export async function startAnnotateServer(options: {
 				projectRoot: process.cwd(),
 				serverConfig: getServerConfig(gitUser, currentPiHost(), { cookieHost: !isRemoteSession() }),
 				...piUpdateAdvert(options.origin),
-				agentTerminal: agentTerminalCapability,
+				agentTerminal: agentTerminalCapabilityFor(req),
 				feedbackTemplates: {
 					fileFeedback: getAnnotateFileFeedbackTemplate(
 						(options.origin ?? "pi") as PromptRuntime,
@@ -1067,7 +1071,7 @@ export async function startAnnotateServer(options: {
 				...(annotateDrafts.documentsEnabled ? { documentDrafts: true } : {}),
 				serverConfig: getServerConfig(gitUser, currentPiHost(), { cookieHost: !isRemoteSession() }),
 				...piUpdateAdvert(options.origin),
-				agentTerminal: agentTerminalCapability,
+				agentTerminal: agentTerminalCapabilityFor(req),
 				...(options.recentMessages ? { recentMessages: options.recentMessages } : {}),
 				// Resolved copy-wrapper templates (config-aware, placeholders
 				// intact) so clipboard Copy matches what Send Feedback produces
@@ -1413,8 +1417,8 @@ export async function startAnnotateServer(options: {
 		} else if (url.pathname === "/api/reference/files/stream" && req.method === "GET") {
 			handleFileBrowserStreamRequest(req, res, url);
 			return;
-		} else if (url.pathname === "/favicon.png") {
-			handleFavicon(res);
+		} else if (url.pathname === "/favicon.png" || url.pathname === "/favicon.ico") {
+			handleFavicon(res, url.pathname);
 		} else if (url.pathname === "/api/exit" && req.method === "POST") {
 			// Exit posts carry no body: the nonce rides the query string.
 			if (checkServerSession({ serverSession: url.searchParams.get("serverSession") ?? undefined }, serverSession) === "mismatch") {
@@ -1580,6 +1584,7 @@ export async function startAnnotateServer(options: {
 		throw error;
 	}
 	agentTerminalCapability = agentTerminal.capability;
+	agentTerminalCapabilityFor = agentTerminal.capabilityFor;
 	// Remote sessions serve the app page compressed (#1617); start gzip (what
 	// browsers ask for over plain http) now so the first load does not wait.
 	if (isRemoteSession()) prewarmAppHtml(app.html, likelyAppHtmlEncoding(false));

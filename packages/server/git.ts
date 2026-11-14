@@ -70,7 +70,7 @@ function reapIsolatedGitGroups(): void {
   isolatedGitGroups.clear();
 }
 
-function trackIsolatedGitGroup(pid: number): () => void {
+export function trackIsolatedGitGroup(pid: number): () => void {
   if (process.platform === "win32") return () => {};
   if (!isolatedGitExitHookInstalled) {
     isolatedGitExitHookInstalled = true;
@@ -83,11 +83,34 @@ function trackIsolatedGitGroup(pid: number): () => void {
   return () => isolatedGitGroups.delete(pid);
 }
 
+/**
+ * Stop a git command and, when it runs in its own group (`isolateProcessGroup`), everything it started: ssh,
+ * git-remote-https, fetch-pack. A SIGKILL to the group on POSIX, `taskkill /t` on Windows, else the command alone.
+ */
+export function killGitTree(proc: { pid: number; kill: (signal?: number | NodeJS.Signals) => void }, isolated: boolean): void {
+  if (isolated && process.platform !== "win32") {
+    try {
+      process.kill(-proc.pid, "SIGKILL");
+      return;
+    } catch {
+      // Fall through when the process exited between the timer and signal.
+    }
+  }
+  if (isolated && process.platform === "win32") {
+    const killed = Bun.spawnSync(
+      ["taskkill.exe", "/pid", String(proc.pid), "/t", "/f"],
+      { env: childEnv(), stdin: "ignore", stdout: "ignore", stderr: "ignore", windowsHide: true },
+    );
+    if (killed.exitCode === 0) return;
+  }
+  proc.kill("SIGKILL");
+}
+
 async function runGit(
   args: string[],
   options?: GitCommandOptions,
 ): Promise<GitCommandResult> {
-  const command = prepareGitCommand(args, options, process.env);
+  const command = prepareGitCommand(args, options, childEnv());
   const proc = Bun.spawn(["git", ...command.args], {
     cwd: options?.cwd,
     detached: command.isolateProcessGroup,
@@ -106,24 +129,7 @@ async function runGit(
 
   let timer: ReturnType<typeof setTimeout> | undefined;
   if (options?.timeoutMs) {
-    timer = setTimeout(() => {
-      if (command.isolateProcessGroup && process.platform !== "win32") {
-        try {
-          process.kill(-proc.pid, "SIGKILL");
-          return;
-        } catch {
-          // Fall through when the process exited between the timer and signal.
-        }
-      }
-      if (command.isolateProcessGroup && process.platform === "win32") {
-        const killed = Bun.spawnSync(
-          ["taskkill.exe", "/pid", String(proc.pid), "/t", "/f"],
-          { env: childEnv(), stdin: "ignore", stdout: "ignore", stderr: "ignore", windowsHide: true },
-        );
-        if (killed.exitCode === 0) return;
-      }
-      proc.kill("SIGKILL");
-    }, options.timeoutMs);
+    timer = setTimeout(() => killGitTree(proc, command.isolateProcessGroup), options.timeoutMs);
   }
 
   // try/finally so a rejected stream read cannot leave the group leader in the
@@ -188,7 +194,7 @@ async function runGitBytes(
   args: string[],
   options?: GitCommandOptions,
 ): Promise<GitBytesCommandResult> {
-  const command = prepareGitCommand(args, options, process.env);
+  const command = prepareGitCommand(args, options, childEnv());
   const proc = Bun.spawn(["git", ...command.args], {
     cwd: options?.cwd,
     env: command.env ?? childEnv(),

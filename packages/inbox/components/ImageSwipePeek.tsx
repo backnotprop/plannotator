@@ -110,7 +110,9 @@ export function ImageSwipePeek({
     <div className="ib-imgpeeks" aria-hidden="true" data-image-peeks="" style={{ left: stage.left, top: stage.top, width: stage.width, height: stage.height }}>
       <div className="ib-imgclear" ref={probe} />
       {shown.map(({ step, place }) => (
-        <PeekImage key={step.attachment.id} src={urlOf(step.attachment)} place={place} stage={stage} clear={clear} />
+        // By its file, so a neighbour that becomes the cover keeps its loaded picture; a picture shown for the choices
+        // on both sides (two choices sharing it) is drawn on each side.
+        <PeekImage key={place === 'next' && prev?.attachment.id === step.attachment.id ? `${step.attachment.id}:next` : step.attachment.id} src={urlOf(step.attachment)} place={place} stage={stage} clear={clear} />
       ))}
     </div>
   );

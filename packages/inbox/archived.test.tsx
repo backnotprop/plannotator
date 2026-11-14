@@ -348,7 +348,7 @@ test.skipIf(!hasDom)("an agent's reply into an archived thread brings it back to
 });
 
 function type(el: HTMLElement, words: string) {
-  const text = el.querySelector('textarea') as HTMLTextAreaElement;
+  const text = el.querySelector('textarea:not([data-question-other])') as HTMLTextAreaElement;
   const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
   act(() => {
     setter.call(text, words);
@@ -371,7 +371,7 @@ test.skipIf(!hasDom)('a came-back thread is answered without unarchiving: its la
     await settle();
     type(el, 'Keep it for a week.');
     act(() => button(el.querySelector('.ib-pfoot')!, 'Send').click());
-    await until(() => el.querySelector('textarea') === null, 'the Send');
+    await until(() => el.querySelector('textarea:not([data-question-other])') === null, 'the Send');
     const model = JSON.parse((await loopback(`/api/inbox/threads/${world.waiting}`)).text) as {
       thread: { resolved_at: string | null; messages: { id: string; author: { kind: string }; reply_to: string | null; body: string }[] };
     };

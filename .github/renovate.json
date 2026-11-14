@@ -37,7 +37,7 @@
       "automerge": false,
       "groupName": "Bun runtime",
       "prBodyNotes": [
-        "Bun patch release. Before merging: release.yml's smoke-binaries (macOS leg: the signed binary must launch) and the Bun runtime trust gate must pass, and bump BUN_VERSION and TARGET_IMAGE (digest from the registry) in dast.yml by hand."
+        "Bun patch release. Before merging: release.yml's smoke-binaries (macOS leg: the signed binary must launch) and the Bun runtime trust gate must pass, and bump BUN_VERSION and TARGET_IMAGE (digest from the registry) in dast.yml by hand. Add the new zips' SHA-256s (the release's SHASUMS256.txt) to scripts/ci-install-bun.sh, and bump the Bun zip and its checksum in inbox-e2e.yml."
       ]
     },
     {

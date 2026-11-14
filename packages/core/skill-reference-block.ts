@@ -49,6 +49,17 @@ const INBOX_HEADING_RE = /^\*\*Skills referenced\*\* \(the person is asking you 
 const LIST_LINE_RE = /^- `([^`\n]+)`(.*)$/;
 const BEGIN_RE = /^--- BEGIN SKILL INSTRUCTIONS: (.+) ---$/;
 const END_RE = /^--- END SKILL INSTRUCTIONS: (.+) ---$/;
+const NOTE_BEGIN_RE = /^--- BEGIN PLANNOTATOR NOTE: (.+) ---$/;
+const NOTE_END_RE = /^--- END PLANNOTATOR NOTE: (.+) ---$/;
+
+/**
+ * The Inbox's own note about a skill the person picked (the grill-me note,
+ * `grill-me.ts`): one section after the skills' sections, delimited like them
+ * and named for the skill it is about, so the window folds it with the block.
+ */
+export function inboxSkillNoteSection(name: string, text: string): string {
+  return `--- BEGIN PLANNOTATOR NOTE: ${name} ---\n${text}\n--- END PLANNOTATOR NOTE: ${name} ---`;
+}
 
 /** One skill the block names. */
 export interface InboxSkillReference {
@@ -97,23 +108,31 @@ function readBlockTail(lines: readonly string[], from: number): InboxSkillRefere
   if (skills.length === 0) return null;
   const byName = new Map(skills.map((s) => [s.name, s]));
   const seen = new Set<string>();
-  let open: { name: string; start: number } | null = null;
+  const noted = new Set<string>();
+  let open: { name: string; start: number; note: boolean } | null = null;
   for (; i < lines.length; i++) {
     const line = lines[i]!;
     if (open) {
-      const end = END_RE.exec(line);
+      const end = (open.note ? NOTE_END_RE : END_RE).exec(line);
       if (end && end[1] === open.name) {
-        byName.get(open.name)!.bytes = utf8Bytes(lines.slice(open.start, i + 1).join('\n'));
+        if (!open.note) byName.get(open.name)!.bytes = utf8Bytes(lines.slice(open.start, i + 1).join('\n'));
         open = null;
       }
       continue;
     }
     if (line.trim() === '') continue;
+    // The Inbox's note about a listed skill (inboxSkillNoteSection), once per skill.
+    const note = NOTE_BEGIN_RE.exec(line);
+    if (note && byName.has(note[1]!) && !noted.has(note[1]!)) {
+      noted.add(note[1]!);
+      open = { name: note[1]!, start: i, note: true };
+      continue;
+    }
     // Anything else after the list (the person's words, more feedback) means this is not the window's block.
     const begin = BEGIN_RE.exec(line);
     if (!begin || !byName.get(begin[1]!)?.included || seen.has(begin[1]!)) return null;
     seen.add(begin[1]!);
-    open = { name: begin[1]!, start: i };
+    open = { name: begin[1]!, start: i, note: false };
   }
   return open ? null : skills;
 }

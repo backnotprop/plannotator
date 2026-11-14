@@ -4,7 +4,7 @@ import { HostMark, Icon } from '../icons';
 import { Modal } from '../components/Updates';
 import { useReducedMotion } from '../tour/Tour';
 import { stepsCount } from './model';
-import { StepsPie } from './StepsMarks';
+import { StepsButtonFace } from './StepsButton';
 import { StepsLists } from './StepsList';
 
 /**
@@ -93,7 +93,7 @@ function ChecklistIntroArt() {
       presence: 'working',
     };
   }, [done]);
-  const { done: d, total, text } = stepsCount(list);
+  const { text } = stepsCount(list);
   return (
     <div className="ib-bi-art ib-ci-art" aria-hidden="true" inert>
       <div className="ib-ci-stage" data-fading={fading ? '' : undefined} data-checklist-intro-count={text}>
@@ -118,11 +118,7 @@ function ChecklistIntroArt() {
             </span>
             <span className="ib-ci-anchor">
               <span className="ib-btn ib-st-btn ib-st-working" data-popup-open={open ? '' : undefined}>
-                <StepsPie done={d} total={total} size={13} />
-                <span className="ib-st-num">{text}</span>
-                <span className="ib-oq-chev">
-                  <Icon name="chevU" size={13} />
-                </span>
+                <StepsButtonFace list={list} />
               </span>
               {/* Over the message, from the button's left edge (a phone's: the stage's, as the popover shifts to fit). */}
               {open && (

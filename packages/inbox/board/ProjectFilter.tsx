@@ -27,9 +27,10 @@ export interface ProjectFilterProps {
 export function ProjectFilter({ projects, names, value, phone, onChange }: ProjectFilterProps) {
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
-  // The menu is drawn inside the window's root, so the window's styles (and theme) reach it.
+  // The menu is drawn inside the window's root, so the window's styles (and theme) reach it; inside a modal, in the
+  // modal (the top layer would cover a menu outside it).
   const [portal, setPortal] = useState<HTMLElement | null>(null);
-  useEffect(() => setPortal(trigger.current?.closest<HTMLElement>('.pn-inbox') ?? null), []);
+  useEffect(() => setPortal(trigger.current?.closest<HTMLElement>('dialog, .pn-inbox') ?? null), []);
   const name = value ? (names.get(value) ?? null) : null;
   // The name is unknown only while the projects load (App drops a filter on a project it does not know).
   const label = value ? (name ?? 'Project') : 'All projects';

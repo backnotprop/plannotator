@@ -243,7 +243,7 @@ export function useInitiativePeek(rootRef: React.RefObject<HTMLElement | null>):
       className="ib-tagpeek fixed z-[120] flex flex-col overflow-hidden rounded-xl border border-border bg-popover text-popover-foreground shadow-2xl"
       id={peekId}
       role="dialog"
-      aria-label={`Initiative ${initiative.name}`}
+      aria-label={`Tag ${initiative.name}`}
       data-tag-peek={initiative.id}
       style={{ width: Math.min(WIDTH, window.innerWidth - EDGE * 2), left: pos?.left ?? -9999, top: pos?.top ?? -9999, maxHeight: 'min(560px, calc(100dvh - 24px))' }}
       onPointerEnter={() => {
@@ -279,9 +279,10 @@ export function useInitiativePeek(rootRef: React.RefObject<HTMLElement | null>):
  */
 
 /** The initiative's mark: a `#` at the PR card's state-icon size and stroke, in the text's own muted colour. */
-function TagIcon({ className = '' }: { className?: string }) {
+/** The tag's `#` mark: the preview's, the sidebar's Tags heading and the Add tag item (approval "inbox-thread-tags": `#` once per set). */
+export function TagIcon({ className = '', size }: { className?: string; size?: number }) {
   return (
-    <svg viewBox="0 0 16 16" className={`h-4 w-4 flex-none ${className}`} aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+    <svg viewBox="0 0 16 16" className={`h-4 w-4 flex-none ${className}`} style={size ? { width: size, height: size } : undefined} aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
       <path d="M6.3 2.5 5 13.5M11 2.5l-1.3 11M2.8 5.8h10.6M2.6 10.2h10.6" />
     </svg>
   );
@@ -304,7 +305,7 @@ function PeekView({ name, board, model, onGo }: { name: string; board: string; m
   const cardHref = (item: PeekItem) => `${board}&card=${encodeURIComponent(item.id)}`;
   const empty = model.cards === 0;
   const updated = model.updated ? cardAge(model.updated).short : null;
-  const meta = ['Initiative', model.projects.length ? model.projects.join(', ') : null, empty ? 'no cards yet' : null, updated ? `updated ${updated}` : null].filter(Boolean);
+  const meta = ['Tag', model.projects.length ? model.projects.join(', ') : null, empty ? 'no cards yet' : null, updated ? `updated ${updated}` : null].filter(Boolean);
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex-none px-4 pb-4 pt-3.5" data-tag-peek-head="">

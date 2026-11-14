@@ -7,7 +7,8 @@
  */
 import { expect, test } from 'bun:test';
 import type { InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
-import { replyDraftsDiffer } from './draftsReads';
+import { draftsReadOwed, replyDraftsDiffer } from './draftsReads';
+import { newRecordBatch, noteOwnRecord } from './openThreadReads';
 
 const row = (thread_id: string, unsent: boolean, machine?: string) =>
   ({ thread_id, unsent: unsent ? { picks: 1, comments: 0, reply_at: null } : null, ...(machine ? { machine } : {}) }) as unknown as InboxListRow;
@@ -31,4 +32,12 @@ test("a linked machine's rows never owe a read; this machine's own (`self`) do",
   const merged = list([row('a', true, 'ibx_self'), row('far', true, 'ibx_far')], [], 'ibx_self');
   expect(replyDraftsDiffer([{ thread_id: 'a' }], merged)).toBe(false);
   expect(replyDraftsDiffer([], merged)).toBe(true);
+});
+
+test("the echo of this window's own pick save owes the drafts read of a thread holding unsent work, as its record did", () => {
+  // A pick is unsent work: the Drafts row counts it. The echo reads no thread, but the drafts still follow it.
+  const batch = newRecordBatch();
+  noteOwnRecord(batch, 'a');
+  expect(draftsReadOwed(batch, ['a'])).toBe(true);
+  expect(draftsReadOwed(batch, ['b'])).toBe(false);
 });

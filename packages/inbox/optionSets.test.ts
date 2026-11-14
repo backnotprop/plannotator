@@ -79,7 +79,7 @@ describe('option sets', () => {
   });
 
   test('the set id survives keys with colons (split at the first)', () => {
-    expect(parseOptionSetId(optionSetId(M2, 'q:with:colons'))).toEqual({ messageId: M2, questionKey: 'q:with:colons' });
+    expect(parseOptionSetId(optionSetId(M2, 'q:with:colons'))).toEqual({ messageId: M2, questionKey: 'q:with:colons', choice: null });
   });
 
   test('a file is found in the set by its id or its twin record', () => {

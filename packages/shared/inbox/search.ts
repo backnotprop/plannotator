@@ -641,7 +641,7 @@ export class InboxSearchIndex {
   /** A thread's own document; with `withMessages`, its messages' too (the build). */
   private indexThread(threadId: string, withMessages: boolean): void {
     const root = this.store.message(threadId);
-    if (!root || root.thread_id !== threadId) {
+    if (!root || root.thread_id !== threadId || root.taken_back_at) {
       this.remove(`t:${threadId}`);
       this.facts.delete(threadId);
       return;
@@ -666,6 +666,7 @@ export class InboxSearchIndex {
     const meta = { ref: message.id, threadId: message.thread_id, projectId: message.project_id, at: message.created_at };
     if (message.author.kind === "person") {
       if (isInboxNote(message)) return;
+      if (message.taken_back_at) return this.remove(`m:${message.id}`);
       // A message's body never changes once stored: its length stands for it.
       this.put(`m:${message.id}`, "message", { ...meta, from: "me" }, { title: [], other: [inboxSearchReplyText(message.body, message)] }, `${message.body.length}`);
       return;

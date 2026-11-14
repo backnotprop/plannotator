@@ -28,7 +28,7 @@ import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { join, resolve } from 'node:path';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
-import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
+import { E2E_LAUNCH_OFF, inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
 import { NO_BROWSER } from '../helpers/no-browser';
 
 const repo = resolve(__dirname, '../..');
@@ -76,10 +76,10 @@ test.beforeAll(async () => {
   const root = inboxScratch('plannotator-links-in-place-');
   const dataDir = join(root, 'data');
   const home = join(root, 'home');
-  mkdirSync(dataDir);
+  mkdirSync(dataDir, { recursive: true });
   mkdirSync(home);
   // The dialog case needs Decision mode, which is off by default.
-  writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ experimental: { decisionMode: true } }));
+  writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ ...E2E_LAUNCH_OFF, experimental: { decisionMode: true } }));
   const env = {
     PATH: process.env.PATH ?? '', HOME: home, PLANNOTATOR_DATA_DIR: dataDir,
     CLAUDE_CONFIG_DIR: join(root, 'claude'), CODEX_HOME: join(root, 'codex'), OPENCODE_CONFIG_DIR: join(root, 'opencode'),
@@ -99,7 +99,7 @@ test.beforeAll(async () => {
   mkdirSync(join(alpha, 'docs'));
   writeFileSync(join(alpha, 'docs', 't2.md'), '# T2 file\n\nA file of the second thread.\n');
 
-  // A named thread each: an agent's next message in a project otherwise joins the thread it is in.
+  // A named thread each; a later message joins its thread by reply_to.
   const t2 = await agent.send({ project_path: alpha, subject: 'Second thread', thread: 'second-thread', body: `T2 first message.\n\n${filler(40, 'T2')}` });
   const T2 = t2.thread_id as string;
   const t2b = await agent.send({ project_path: alpha, reply_to: T2, body: 'T2 second message, the target of the link.', attachments: ['docs/t2.md'] });

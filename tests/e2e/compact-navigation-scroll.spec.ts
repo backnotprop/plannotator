@@ -1,7 +1,7 @@
 /** Mobile navigation owns touch scrolling and restores its position after closing or choosing a heading. */
 import { expect, test, type Page } from '@playwright/test';
 import { spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { inboxScratch, removeInboxScratch, scratchEnv } from './inbox-scratch';
 
@@ -40,7 +40,6 @@ for (const containment of ['native', 'fallback'] as const) {
   test(`a mobile navigator owns scrolling with ${containment} containment`, async ({ page }) => {
     const root = inboxScratch('plannotator-navigation-scroll-');
     const scratch = scratchEnv(root);
-    mkdirSync(scratch.PLANNOTATOR_DATA_DIR);
     const doc = join(root, 'long.md');
     writeFileSync(doc, '# Navigation\n\n' + Array.from({ length: 70 }, (_, i) =>
       `## Section ${i + 1}\n\n${'Text for a long document. '.repeat(50)}\n\n`,

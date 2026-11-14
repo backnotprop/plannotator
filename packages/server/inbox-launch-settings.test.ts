@@ -4,14 +4,19 @@
  * another site's page and a tailnet guest are refused before the person's login shell is
  * started; concurrent reads share one shell read; the person's own bypass consent, read
  * from their Claude files, decides whether Full permissions can apply; and a person
- * whose Claude settings set a default mode is not shown (or started in) auto mode.
+ * whose Claude settings set a default mode is not shown (or started in) auto mode. And
+ * Settings → Agents' "Start agents from New message" switch: absent in config.json is on,
+ * an explicit false is off, and its POST writes config.json and turns launch on or off at
+ * once (no restart), the read and the switch itself still answering while off.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { createInboxLaunch } from "./inbox-launch";
+import { createInboxCompose } from "./inbox-compose";
+import { createInboxLiveSessions } from "./inbox-sessions";
 import { claudeBypassSetup, createAgentEnvironmentFor } from "./inbox-agents";
 
 const restore: (() => void)[] = [];
@@ -30,7 +35,7 @@ function setEnv(name: string, value: string) {
   });
 }
 
-function setup(options: { shellSkips?: boolean; claude?: Record<string, unknown>; claudeLocal?: Record<string, unknown>; claudeJson?: Record<string, unknown>; fullPermissions?: boolean; enabled?: boolean } = {}) {
+function setup(options: { shellSkips?: boolean; claude?: Record<string, unknown>; claudeLocal?: Record<string, unknown>; claudeJson?: Record<string, unknown>; fullPermissions?: boolean; enabled?: boolean | null; platform?: NodeJS.Platform } = {}) {
   const root = mkdtempSync(join(tmpdir(), "plannotator-launch-settings-"));
   restore.push(() => rmSync(root, { recursive: true, force: true }));
   const dataDir = join(root, "data");
@@ -39,7 +44,9 @@ function setup(options: { shellSkips?: boolean; claude?: Record<string, unknown>
   mkdirSync(dataDir, { recursive: true });
   setEnv("PLANNOTATOR_DATA_DIR", dataDir);
   setEnv("PLANNOTATOR_TEST_SANDBOX", "1");
-  writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxLaunch: { enabled: options.enabled ?? true, ...(options.fullPermissions === undefined ? {} : { fullPermissions: options.fullPermissions }) } }));
+  // `enabled: null`: no `enabled` key at all (the 0.29 default).
+  const enabled = options.enabled === null ? {} : { enabled: options.enabled ?? true };
+  writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxLaunch: { ...enabled, ...(options.fullPermissions === undefined ? {} : { fullPermissions: options.fullPermissions }) } }));
   if (options.claude) writeFileSync(join(home, ".claude", "settings.json"), JSON.stringify(options.claude));
   if (options.claudeLocal) writeFileSync(join(home, ".claude", "settings.local.json"), JSON.stringify(options.claudeLocal));
   if (options.claudeJson) writeFileSync(join(home, ".claude.json"), JSON.stringify(options.claudeJson));
@@ -51,7 +58,7 @@ function setup(options: { shellSkips?: boolean; claude?: Record<string, unknown>
     dataDir,
     serverSession: "srv",
     homeDir: home,
-    platform: "darwin",
+    platform: options.platform ?? "darwin",
     loginEnv: async () => {
       reads.count++;
       await new Promise((resolve) => setTimeout(resolve, 100));
@@ -72,8 +79,128 @@ function setup(options: { shellSkips?: boolean; claude?: Record<string, unknown>
     const response = await launch.route(new Request(`http://127.0.0.1:4000/api/inbox/launch/settings${query}`, { headers: { host: "127.0.0.1:4000", ...headers } }), "/api/inbox/launch/settings", via);
     return { status: response!.status, body: (await response!.json()) as { launch?: Record<string, unknown>; code?: string } };
   };
-  return { get, reads, launch, home };
+  const call = async (path: string, init: { method?: string; body?: Record<string, unknown>; headers?: Record<string, string> } = {}, via = "local") => {
+    const request = new Request(`http://127.0.0.1:4000${path}`, {
+      method: init.method ?? (init.body ? "POST" : "GET"),
+      headers: { host: "127.0.0.1:4000", ...(init.body ? { "content-type": "application/json" } : {}), ...init.headers },
+      ...(init.body ? { body: JSON.stringify(init.body) } : {}),
+    });
+    const response = await launch.route(request, new URL(request.url).pathname, via);
+    return { status: response!.status, body: (await response!.json()) as { launch?: Record<string, unknown>; code?: string } };
+  };
+  const post = (body: Record<string, unknown>, headers: Record<string, string> = {}, via = "local") => call("/api/inbox/launch/settings", { body, headers }, via);
+  const saved = () => (JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")) as { inboxLaunch: Record<string, unknown> }).inboxLaunch;
+  return { get, post, call, saved, reads, launch, home, store };
 }
+
+describe("Start agents from New message (config.json `inboxLaunch.enabled`)", () => {
+  test("no `enabled` key is on; an explicit false is off, where only the settings route answers and no shell is read", async () => {
+    const absent = setup({ enabled: null });
+    expect(absent.launch.enabled()).toBe(true);
+    expect((await absent.get()).body.launch).toMatchObject({ enabled: true });
+    expect(await absent.launch.composeBlock()).toBeDefined();
+
+    const off = setup({ enabled: false, fullPermissions: true });
+    expect(off.launch.enabled()).toBe(false);
+    expect(await off.launch.composeBlock()).toBeUndefined();
+    // Settings → Agents still reads the switch: off, and nothing about the hidden rows.
+    expect(await off.get()).toEqual({ status: 200, body: { launch: { enabled: false, full_permissions: false } } });
+    expect(off.reads.count).toBe(0);
+    // Every other launch route, and the hidden rows' own settings, stay off.
+    expect(await off.call("/api/inbox/launch/folders?path=~")).toMatchObject({ status: 404, body: { code: "launch_off" } });
+    expect(await off.post({ full_permissions: false })).toMatchObject({ status: 404, body: { code: "launch_off" } });
+    expect(await off.post({ scratch_dir: null })).toMatchObject({ status: 404, body: { code: "launch_off" } });
+    expect(off.saved()).toEqual({ enabled: false, fullPermissions: true });
+  });
+
+  test("the switch writes config.json, keeps the other launch settings, and launch follows at once both ways", async () => {
+    const world = setup({ enabled: null, fullPermissions: false });
+    const off = await world.post({ enabled: false });
+    expect(off).toEqual({ status: 200, body: { launch: { enabled: false, full_permissions: false } } });
+    expect(world.saved()).toEqual({ fullPermissions: false, enabled: false });
+    expect(world.launch.enabled()).toBe(false);
+    expect(await world.launch.composeBlock()).toBeUndefined();
+
+    const on = await world.post({ enabled: true });
+    expect(on.status).toBe(200);
+    expect(on.body.launch).toMatchObject({ enabled: true, full_permissions: false });
+    expect(world.saved()).toEqual({ fullPermissions: false, enabled: true });
+    expect(world.launch.enabled()).toBe(true);
+    expect(await world.launch.composeBlock()).toBeDefined();
+    expect((await world.post({ full_permissions: true })).status).toBe(200);
+  });
+
+  test("off, it refuses only new starts: an agent already started keeps Stop, Delete, Try again, Trust, Open and its permission hook", async () => {
+    const off = setup({ enabled: false });
+    const id = `lch_${"0".repeat(26)}`;
+    for (const action of ["stop", "delete", "retry", "trust", "open"]) {
+      // Past the switch: the route looks the launch up (none by this id here), never `launch_off`.
+      const answered = await off.call(`/api/inbox/launch/${id}/${action}`, { body: {} }).then(
+        (r) => r.body.code,
+        (e: { code?: string }) => e.code,
+      );
+      expect(answered).not.toBe("launch_off");
+    }
+    const hook = await off.launch
+      .permissionRoute(new Request(`http://127.0.0.1:4000/api/inbox/launch/${id}/permission`, { method: "POST", body: "{}" }), `/api/inbox/launch/${id}/permission`)
+      .then(
+        async (r) => ((await r!.json()) as { code?: string }).code,
+        (e: { code?: string }) => e.code,
+      );
+    expect(hook).not.toBe("launch_off");
+  });
+
+  test("a Send that starts an agent while off is refused in words that say whose switch it is", async () => {
+    const off = setup({ enabled: false });
+    const live = createInboxLiveSessions({ store: off.store, serverSession: "srv", resolveRoot: async (path) => path });
+    const compose = createInboxCompose({
+      store: off.store,
+      serverSession: "srv",
+      live,
+      resolveProject: async () => {
+        throw new Error("never reached");
+      },
+      readBody: async (req) => (await req.json()) as Record<string, unknown>,
+      json: (body, status = 200) => Response.json(body, { status }),
+      launch: off.launch,
+    });
+    const send = (key: string, door: Parameters<typeof compose.route>[4]) => {
+      const url = new URL("http://127.0.0.1:4000/api/inbox/messages");
+      const body = { idempotency_key: key, body: "Fix the retries.", to: { launch: { agent: "claude-code", project_id: "prj_x" } } };
+      const req = new Request(url, { method: "POST", headers: { host: "127.0.0.1:4000", "content-type": "application/json" }, body: JSON.stringify(body) });
+      return compose.route(req, url, true, "local", door).then(
+        () => null,
+        (e: { code?: string; message?: string }) => ({ code: e.code, message: e.message }),
+      );
+    };
+    expect(await send("k-here", null)).toEqual({ code: "launch_off", message: "Starting agents from the Inbox is off. Turn it on in Settings → Agents." });
+    // From a linked machine (remote launch): its window shows these words, about this computer's switch.
+    expect(await send("k-there", { machine: true, window: true, from: { machine: "mch_a", name: "MacBook" } })).toEqual({
+      code: "launch_off",
+      message: "Starting agents is off on that computer. Turn it on in its Settings → Agents.",
+    });
+  });
+
+  test("Windows: off unless config.json says true, and Settings is told to show no switch", async () => {
+    const windows = setup({ enabled: null, platform: "win32" });
+    expect(windows.launch.enabled()).toBe(false);
+    expect((await windows.get()).body.launch).toEqual({ unsupported: true, enabled: false, full_permissions: false });
+    const explicit = setup({ enabled: true, platform: "win32" });
+    expect(explicit.launch.enabled()).toBe(true);
+    expect((await explicit.get()).body.launch).toMatchObject({ unsupported: true, enabled: true });
+  });
+
+  test("the owner's alone, and only a boolean", async () => {
+    const world = setup({ enabled: null });
+    expect(await world.post({ enabled: false }, { "tailscale-user-login": "guest@example.com" }, "tailnet")).toMatchObject({ status: 403, body: { code: "owner_only" } });
+    expect(world.launch.enabled()).toBe(true);
+    await expect(world.post({ enabled: "false" })).rejects.toMatchObject({ code: "validation_error" });
+    expect(world.saved()).toEqual({});
+    // The owner over the tailnet (their phone), as the other launch settings.
+    expect((await world.post({ enabled: false }, { "tailscale-user-login": OWNER }, "tailnet")).status).toBe(200);
+    expect(world.launch.enabled()).toBe(false);
+  });
+});
 
 describe("GET /api/inbox/launch/settings", () => {
   test("another site's page and a tailnet guest are refused, and never start the login shell; the owner reads it on their phone too", async () => {
@@ -153,17 +280,28 @@ describe("GET /api/inbox/launch/settings", () => {
     expect(claudeBypassSetup(e)).toEqual({ consent: true, disabled: false, defaultMode: "acceptEdits" });
   });
 
-  test("the login shell read ahead once at Inbox start (launch on only), and a fresh read is reused", async () => {
+  test("the login shell is read the first time New message asks, never at start, and once; off, or on Windows, never", async () => {
+    const tick = () => new Promise((resolve) => setTimeout(resolve, 150));
     const off = setup({ enabled: false });
-    off.launch.warm();
-    await new Promise((resolve) => setTimeout(resolve, 150));
+    await off.launch.composeBlock();
+    await tick();
     expect(off.reads.count).toBe(0);
+    // Created (the Inbox started): nothing read until New message opens.
     const on = setup();
-    on.launch.warm();
-    await new Promise((resolve) => setTimeout(resolve, 150));
+    await tick();
+    expect(on.reads.count).toBe(0);
+    await Promise.all([on.launch.composeBlock(), on.launch.composeBlock()]);
+    await tick();
     expect(on.reads.count).toBe(1);
+    await on.launch.composeBlock();
     expect((await on.get()).status).toBe(200);
     expect(on.reads.count).toBe(1);
+    // Windows: no login shell to run, ever (an explicit true there included).
+    const windows = setup({ platform: "win32" });
+    await windows.launch.composeBlock();
+    expect((await windows.get({}, "local", "?ahead=1")).status).toBe(200);
+    await tick();
+    expect(windows.reads.count).toBe(0);
   });
 
   test("a person whose Claude settings set a default mode is not put in auto mode, the switch off included; theirs comes before the shell's export", async () => {

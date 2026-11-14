@@ -42,6 +42,7 @@ export type WideModeType = 'wide' | 'focus';
 export interface ImageAttachment {
   path: string;
   name: string;
+  kind?: 'file';
 }
 
 /** DOM-relative text position used to restore a document annotation selection. */
@@ -472,7 +473,9 @@ export interface DiffAnnotationMetadata {
    *  the projected metadata, not the full annotation. */
   copyText?: string;
   // AI marker fields (set when kind === 'ai-marker')
-  kind?: 'annotation' | 'ai-marker';
+  kind?: 'annotation' | 'ai-marker' | 'host-note' | 'context-note';
+  /** A host's context note (kind === 'context-note'; review-editor's `contextNotes`): never a comment. */
+  contextNoteId?: string;
   questionId?: string;
   promptPreview?: string;
   hasResponse?: boolean;

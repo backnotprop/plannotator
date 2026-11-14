@@ -2,6 +2,7 @@ import path from "node:path";
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
+import { diffsWorkerCatalogs } from "../../build/diffs-worker-catalogs";
 
 /**
  * The Guide tab: Plannotator's guide reader (packages/guide-viewer over
@@ -41,6 +42,9 @@ export default defineConfig({
     alias: {
       // Pierre runs Shiki's JavaScript regex engine: the Oniguruma WASM is dead weight.
       "shiki/wasm": path.resolve(__dirname, "../../build/shiki-wasm-stub.ts"),
+      // Highlights, Pierre's second highlighter (WASM), never runs. See build/pierre-highlights-stub.ts.
+      "@pierre/highlights/themes/loader": path.resolve(__dirname, "../../build/pierre-highlights-stub.ts"),
+      "@pierre/highlights": path.resolve(__dirname, "../../build/pierre-highlights-stub.ts"),
       "katex/dist/katex.min.css": path.resolve(__dirname, "../guides-show/viewer/stubs/empty.css"),
       // Overview diagrams are Mermaid only: Graphviz's 1.3 MB engine stays out (as in the webview build).
       "@viz-js/viz": path.resolve(__dirname, "src/guides/webview/stubs/viz.ts"),
@@ -48,6 +52,8 @@ export default defineConfig({
   },
   worker: {
     format: "es",
+    // Pierre's language and theme catalogs, dead code in its worker (see the plugin).
+    plugins: () => [diffsWorkerCatalogs()],
     rollupOptions: { output: { inlineDynamicImports: true, entryFileNames: "worker.[hash].js" } },
   },
   define: { "process.env.NODE_ENV": '"production"' },

@@ -14,6 +14,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
+import { WIDE_ROW_WAIT_WORDS } from './components/RowBadge';
 
 const hasDom = typeof document !== 'undefined';
 const { InboxList, ONE_PROJECT_WIDE_ROWS_MIN_LIST_WIDTH, WIDE_ROWS_MIN_LIST_WIDTH } = (hasDom ? await import('./components/InboxList') : {}) as typeof import('./components/InboxList');
@@ -113,9 +114,12 @@ describe.if(hasDom)('the wide list', () => {
       expect(cells.slice(2).map((c) => c.className.split(' ')[0])).toEqual(['ib-cw', 'ib-bcol', 'ib-cq', 'ib-t']);
       expect(cells.slice(1).some((c) => c.querySelector('.ib-mk'))).toBe(false);
     }
-    expect(rowEl(el, 'msg_stop').children[3]!.querySelector('.ib-badge')!.textContent).toBe('Stopped');
-    // The open count is ?N (from one question on), its words for a screen reader.
-    expect(rowEl(el, 'msg_stop').children[4]!.querySelector('.ib-sr')!.textContent).toBe('1 question');
+    // The badge's column holds the words of a blocked row in full-width mode (`WIDE_ROW_WAIT_WORDS`), or nothing.
+    expect(rowEl(el, 'msg_stop').children[3]!.querySelector('.ib-badge')).toBeNull();
+    expect(rowEl(el, 'msg_stop').children[3]!.textContent).toBe(WIDE_ROW_WAIT_WORDS ? 'Stopped' : '');
+    // The open count is ?N (from one question on), filled when the row is blocked, its words for a screen reader.
+    expect(rowEl(el, 'msg_stop').children[4]!.querySelector('.ib-sr')!.textContent!.trim()).toBe('Stopped on you: 1 question');
+    expect(rowEl(el, 'msg_wait').children[4]!.querySelector('.ib-sr')!.textContent!.trim()).toBe('1 question');
   });
 
   test("one project: no project label; the first cell holds the agents' marks alone", () => {
@@ -130,11 +134,12 @@ describe.if(hasDom)('the wide list', () => {
     // The title cell starts with the title: the thread's name, or the subject of an unnamed thread.
     expect(rowEl(el, 'msg_wait').querySelector('.ib-subj > .ib-title')!.textContent).toBe('refund-webhooks');
     expect(rowEl(el, 'msg_sent').querySelector('.ib-subj')!.firstElementChild!.className).toBe('ib-title');
-    // The badge keeps its own column; its words stay for a screen reader.
-    for (const [id, badge] of [['msg_stop', 'Stopped'], ['msg_hold', 'Holds up 2']] as const) {
+    // The badge's column keeps its place; a blocked row's mark is in the open counts' column, never in the title cell.
+    for (const [id, words, step] of [['msg_stop', 'Stopped', 'stop'], ['msg_hold', 'Holds up 2', 'hold']] as const) {
       const r = rowEl(el, id);
-      expect(r.querySelector('.ib-subj .ib-badge')).toBeNull();
-      expect(r.querySelector('.ib-bcol > .ib-badge')!.textContent).toBe(badge);
+      expect(r.querySelector('.ib-subj :is(.ib-badge, .ib-qn)')).toBeNull();
+      expect(r.querySelector('.ib-bcol')!.textContent).toBe(WIDE_ROW_WAIT_WORDS ? words : '');
+      expect(r.querySelector<HTMLElement>('.ib-cq > .ib-qn')!.dataset.waitStep).toBe(step);
     }
     // The guided review mark stays in the title cell, after the preview.
     const wait = rowEl(el, 'msg_wait').querySelector('.ib-subj')!;

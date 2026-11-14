@@ -213,7 +213,7 @@ describe("what the agent sees", () => {
     expect(listed.structuredContent.threads[0]!).not.toHaveProperty("ack");
     await Bun.sleep(DELAY + 400);
     const read = (await readThread(client, threadId)).structuredContent.thread.messages[0]!;
-    expect(read.ack).toEqual({ label: "Looks good", at: expect.any(String) });
+    expect(read.ack).toEqual({ label: "Looks good", at: expect.any(String), reaction: { emoji: "👍", label: "Looks good" } });
     const seen = (await windowMessage(server, threadId, messageId)).ack!;
     expect(seen.seen_at).toEqual(expect.any(String));
     expect(seen.settled_seq).toEqual(expect.any(Number));
@@ -236,9 +236,9 @@ describe("what the agent sees", () => {
     expect(commands).toHaveLength(1);
     const command = commands[0]!;
     expect(command).toMatchObject({ type: "reply", thread_id: threadId, reply_to: messageId, ack_of: messageId });
-    expect(command.body).toBe(`The person marked your message 👍 Looks good (${messageId}). No reply needed unless you have a question.`);
+    expect(command.body).toBe(`The person reacted 👍 Looks good to your message (${messageId}).`);
     expect(inboxWakeText(command)).toBe(
-      `Plannotator Inbox: ${command.subject} (${command.id})\nThe person marked your message 👍 Looks good (${messageId}). No reply needed unless you have a question.\n\n[thread ${threadId}]`,
+      `Plannotator Inbox: ${command.subject} (${command.id})\nThe person reacted 👍 Looks good to your message (${messageId}).\n\n[thread ${threadId}]`,
     );
     // Another session is never handed it.
     expect(await poll(server, "ses_other")).toEqual([]);

@@ -1,0 +1,49 @@
+import { describe, expect, test } from 'bun:test';
+import { SCENE_FIT, sceneSize, type SceneRoom } from './fit';
+
+// The player under the drawing (caption, key, controls) is about 150 px; the Shape page's view at
+// 1440x900 leaves about 760 px of room, at 1280x720 about 580, and a phone (390x844) about 640.
+const room = (over: Partial<SceneRoom>): SceneRoom => ({ slotW: 1300, room: 760, others: 150, lead: 0, vbW: 900, vbH: 420, label: 13, ...over });
+const fits = (r: SceneRoom, s = sceneSize(r)) => s.height + r.others + r.lead <= Math.max(r.room, SCENE_FIT.floor + r.others + r.lead + 4);
+
+describe('a scene fits the window', () => {
+  // What regresses: a wide window stretches the drawing 1.4-1.8x again (fat lines, big type).
+  test('on a laptop a drawing is never drawn larger than its own size', () => {
+    const s = sceneSize(room({}));
+    expect(s.scale).toBe(1);
+    expect(s.width).toBe(900);
+    expect(s.pan).toBe(false);
+    // A small drawing may grow, but only to 640 px wide.
+    expect(sceneSize(room({ vbW: 320, vbH: 120 })).width).toBe(640);
+  });
+
+  // What regresses: the controls fall below the window and the person scrolls to press Play.
+  test('a tall drawing scales down so drawing and controls fit, at 1440x900 and 1280x720', () => {
+    for (const r of [room({ vbW: 1000, vbH: 900 }), room({ slotW: 1150, room: 580, vbW: 1000, vbH: 900 })]) {
+      const s = sceneSize(r);
+      expect(fits(r, s)).toBe(true);
+      expect(s.width / s.height).toBeCloseTo(1000 / 900);
+    }
+  });
+
+  test('never shorter than the floor: a tiny window scrolls instead', () => {
+    const s = sceneSize(room({ room: 200, vbW: 800, vbH: 800 }));
+    expect(s.height).toBe(SCENE_FIT.floor);
+  });
+
+  // What regresses: a phone shrinks a wide drawing until its labels are 5 px, as in rounds 1-3.
+  test('on a phone a wide drawing keeps 9 px labels and pans sideways, and still fits the height', () => {
+    const r = room({ slotW: 358, room: 640, vbW: 900, vbH: 420, label: 13 });
+    const s = sceneSize(r);
+    expect(s.scale * r.label).toBeGreaterThanOrEqual(SCENE_FIT.label - 1e-9);
+    expect(s.pan).toBe(true);
+    expect(s.width).toBeLessThanOrEqual(r.slotW * SCENE_FIT.pan);
+    expect(fits(r, s)).toBe(true);
+  });
+
+  test('on a phone a drawing that is already readable does not pan', () => {
+    const s = sceneSize(room({ slotW: 358, room: 640, vbW: 400, vbH: 300, label: 13 }));
+    expect(s.pan).toBe(false);
+    expect(s.width).toBeLessThanOrEqual(358);
+  });
+});

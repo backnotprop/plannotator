@@ -78,7 +78,7 @@ test.beforeAll(async () => {
   mkdirSync(shotsDir, { recursive: true });
   const root = inboxScratch('plannotator-inbox-skill-list-');
   const dataDir = join(root, 'data');
-  mkdirSync(dataDir);
+  mkdirSync(dataDir, { recursive: true });
   markTourDecided(dataDir);
   const env = {
     PATH: process.env.PATH ?? '',

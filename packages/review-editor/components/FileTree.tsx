@@ -29,6 +29,8 @@ import type { OverlayScrollAreaHandle } from '@plannotator/ui/components/Overlay
 import { SidebarActionRow, SemanticDiffRow, CallFlowRow, AllChangesRow } from './PanelNavRows';
 import { PanelControlsRow, PanelSearchField, TOOLS_ONE_ROW_WIDTH } from './PanelChrome';
 import { PanelSectionHeader, CountColumns, countColumnVars, compactRowsProps } from './FileRowBits';
+import { useHiddenViewedFiles } from '../hooks/useHiddenViewedFiles';
+import { useLatestCallback } from '../hooks/useLatestCallback';
 
 /** Per-snapshot state needed to restore the same All files rows on remount. */
 export interface RepoFolderMemory {
@@ -247,6 +249,11 @@ export const FileTree: React.FC<FileTreeProps> = ({
     });
   }, []);
 
+  const selectFile = useLatestCallback(onSelectFile);
+  const doubleClickFile = useLatestCallback(onDoubleClickFile);
+  const toggleViewed = useLatestCallback(onToggleViewed);
+  const stageFile = useLatestCallback(onStageFile);
+
   // Since-base sidecar lookup for per-row lifecycle markers + stage buttons.
   const getSectionEntry = useMemo(() => {
     if (!sinceBaseSections) return undefined;
@@ -410,6 +417,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
   const totalDeletions = files.reduce((sum, file) => sum + file.deletions, 0);
   const treeIndentCap = maxTreeIndent(panelWidth);
   const treeIndent = useCallback((depth: number) => alignedTreeIndent(depth, treeIndentCap), [treeIndentCap]);
+  const { hiddenFiles, panelPointerProps } = useHiddenViewedFiles(viewedFiles, hideViewedFiles);
 
   const panelControls = (
     <PanelControlsRow
@@ -454,17 +462,18 @@ export const FileTree: React.FC<FileTreeProps> = ({
         onToggleFolder={handleToggleFolder}
         activeFileIndex={rowActiveIndex}
         scrollHighlightIndex={isAllFilesActive ? scrollHighlightIndex : undefined}
-        onSelectFile={onSelectFile}
-        onDoubleClickFile={onDoubleClickFile}
+        onSelectFile={selectFile}
+        onDoubleClickFile={doubleClickFile}
         viewedFiles={viewedFiles}
-        onToggleViewed={onToggleViewed}
+        onToggleViewed={toggleViewed}
         showViewedControls={showViewedControls}
         hideViewedFiles={hideViewedFiles}
+        hiddenFiles={hiddenFiles}
         getAnnotationCount={getAnnotationCount}
         stagedFiles={stagedFiles}
         repoRoot={repoRoot}
         getSectionEntry={getSectionEntry}
-        onStageFile={onStageFile}
+        onStageFile={stageFile}
         stagingFile={stagingFile}
         showStageControls={showStageControls}
         markdownPreviewedPaths={markdownPreviewedPaths}
@@ -506,6 +515,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
     <aside
       data-review-sidebar=""
       {...compactRowsProps(panelWidth)}
+      {...panelPointerProps}
       className="review-sidebar border-r flex flex-col flex-shrink-0 overflow-hidden"
       style={{ width: panelWidth }}
     >
@@ -636,17 +646,17 @@ export const FileTree: React.FC<FileTreeProps> = ({
                 activeRepoPath={activeRepoPath}
                 expanded={repoExpanded ?? EMPTY_SET}
                 onToggleFolder={toggleRepoFolder}
-                onSelectFile={onSelectFile}
-                onDoubleClickFile={onDoubleClickFile}
+                onSelectFile={selectFile}
+                onDoubleClickFile={doubleClickFile}
                 onOpenRepoFile={onOpenRepoFile}
                 viewedFiles={viewedFiles}
-                onToggleViewed={onToggleViewed}
+                onToggleViewed={toggleViewed}
                 showViewedControls={showViewedControls}
                 annotations={annotations}
                 stagedFiles={stagedFiles}
                 repoRoot={repoRoot}
                 getSectionEntry={getSectionEntry}
-                onStageFile={onStageFile}
+                onStageFile={stageFile}
                 stagingFile={stagingFile}
                 showStageControls={showStageControls}
                 markdownPreviewedPaths={markdownPreviewedPaths}
@@ -663,7 +673,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
                     const folded = foldedKinds.has(block.kind);
                     // Hide-viewed hides a viewed row unless it is the active
                     // one; a block with no row left hides its header too.
-                    if (hideViewedFiles && block.paths.every((path) => viewedFiles.has(path) && path !== files[rowActiveIndex]?.path)) {
+                    if (hideViewedFiles && block.paths.every((path) => hiddenFiles.has(path) && path !== files[rowActiveIndex]?.path)) {
                       return null;
                     }
                     return (
@@ -694,7 +704,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
 const EMPTY_SET: ReadonlySet<string> = new Set();
 
 /** The All files list while it loads, or why there is none. */
-const RepoListingPlaceholder: React.FC<{ state: RepoFiles['state'] | undefined; onRetry?: () => void }> = ({ state, onRetry }) => {
+export const RepoListingPlaceholder: React.FC<{ state: RepoFiles['state'] | undefined; onRetry?: () => void }> = ({ state, onRetry }) => {
   if (!state || state.status === 'idle' || state.status === 'loading') {
     return <div className="py-6 text-center text-xs text-muted-foreground/60" data-repo-files-loading>Listing the repository…</div>;
   }

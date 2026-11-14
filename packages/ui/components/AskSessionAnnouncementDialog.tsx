@@ -33,7 +33,7 @@ export const ASK_SESSION_WATCH_URL = 'https://x.com/plannotator/status/210687521
 const OUTBOUND_ACTION_CLASS =
   'inline-flex min-h-9 items-center gap-2 rounded-lg border border-border bg-surface-0/40 px-3 text-sm font-medium text-foreground outline-none transition-colors motion-reduce:transition-none hover:bg-surface-1/70 focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-card';
 
-/** Where the marketing deploy publishes `apps/marketing/public/assets/`. */
+/** The marketing site's hosted media (videos are uploaded there by hand, not kept in the repo). */
 const MEDIA_BASE_URL = 'https://plannotator.ai/assets';
 
 export const ASK_SESSION_DEMO = {

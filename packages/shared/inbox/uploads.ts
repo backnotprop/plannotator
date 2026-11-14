@@ -22,6 +22,7 @@
  * An upload no draft names is swept after INBOX_UPLOAD_KEEP_MS.
  */
 
+import { INBOX_ROWS_ASK_BLOCK } from "@plannotator/core/inbox-types";
 import { randomBytes } from "node:crypto";
 import {
   chmodSync,
@@ -120,6 +121,7 @@ export function inboxBodyForAgent(message: {
   attachments?: readonly InboxAttachment[] | null;
   board_request?: true;
   decision_ask?: true;
+  rows_ask?: true;
   viewing?: InboxReplyViewing | null;
 }): string {
   const after = [inboxViewingLine(message), inboxAttachedLines(message)].filter((part) => part !== "").join("\n\n");
@@ -127,6 +129,7 @@ export function inboxBodyForAgent(message: {
   let words = !after ? message.body : message.body.trim() ? `${message.body}\n\n${after}` : after;
   if (message.board_request === true && message.thread_id) words = `${words}\n\n${inboxBoardRequestBlock(message.thread_id)}`;
   if (message.decision_ask === true) words = `${words}\n\n${INBOX_DECISION_ASK_BLOCK}`;
+  if (message.rows_ask === true) words = `${words}\n\n${INBOX_ROWS_ASK_BLOCK}`;
   return words;
 }
 const PENDING_DIR = "pending";

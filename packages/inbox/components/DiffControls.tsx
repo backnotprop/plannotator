@@ -42,11 +42,14 @@ export function DiffControls({
   files,
   collapseAll,
   onCollapseAll,
+  layout = true,
 }: {
   /** How many files the diff has: Collapse all shows with more than one. */
   files: number;
   collapseAll: CollapseAllState | null;
   onCollapseAll: () => void;
+  /** False for a walkthrough: nothing is marked as changed, so Split would draw the same code twice. Default true. */
+  layout?: boolean;
 }) {
   const phone = usePhone();
   const style = useConfigValue('diffStyle');
@@ -54,9 +57,11 @@ export function DiffControls({
   const folded = collapseAll?.collapsed === true;
   return (
     <span className="ib-dctl" role="group" aria-label="Diff display" data-diff-controls="">
-      <Tip content={diffLayoutToggleTip(style)} side="bottom">
-        <DiffLayoutToggle className="ib-iconbtn ib-dctl-b ib-dctl-layout" value={style} onChange={(next) => chooseDiffOption('diffStyle', next)} nativeTitle={false} />
-      </Tip>
+      {layout && (
+        <Tip content={diffLayoutToggleTip(style)} side="bottom">
+          <DiffLayoutToggle className="ib-iconbtn ib-dctl-b ib-dctl-layout" value={style} onChange={(next) => chooseDiffOption('diffStyle', next)} nativeTitle={false} />
+        </Tip>
+      )}
       {files > 1 && (
         <Tip content={folded ? 'Expand all files' : 'Collapse all files'} side="bottom">
           <button type="button" className="ib-iconbtn ib-dctl-b" onClick={onCollapseAll} aria-label={folded ? 'Expand all files' : 'Collapse all files'} data-diff-collapse-all={folded ? 'collapsed' : 'open'}>

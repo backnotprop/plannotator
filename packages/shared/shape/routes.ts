@@ -92,7 +92,8 @@ export function shapeAgentName(session: ShapeSession | null): string {
   return AGENT_NAMES[session.host] ?? session.host;
 }
 
-async function unlocked(store: ShapeStore, id: string, waitMs = 5_000): Promise<boolean> {
+/** The store's lock (and this shape's) is free, waited for without blocking; false after `waitMs`. */
+export async function unlocked(store: ShapeStore, id: string, waitMs = 5_000): Promise<boolean> {
   const until = Date.now() + waitMs;
   while (store.locked(id)) {
     if (Date.now() > until) return false;

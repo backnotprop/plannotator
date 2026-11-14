@@ -12,7 +12,8 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import type { InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
 import { idsIn, InboxApiError, inboxApi, type MachineView, type OutboxView } from './api';
 import { inboxUrl, isContested, machineOf, rememberMachine, resetMachineRoutes, setSelfMachine } from './inboxUrl';
-import { filterMachineRows, machineCounts, machineProjectNames, machinesModel, outboxLine, rowSnoozes, threadAwayLine, threadOutbox } from './machines';
+import { pinEnds, sameMachinePins } from './pins';
+import { filterMachineRows, machineCounts, machineProjectNames, machinesModel, machineTakes, outboxLine, rowSnoozes, threadAwayLine, threadOutbox, machineNotice, snoozeBlockedBy, awayLine } from './machines';
 
 const SELF = `ibx_01K${'0'.repeat(22)}S`;
 const MAC = `ibx_01K${'0'.repeat(22)}M`;
@@ -112,6 +113,29 @@ describe('linked', () => {
     expect(rowSnoozes(row('mini', 'waiting', MINI), keeps)).toBe(false);
     expect(rowSnoozes(row('mini', 'waiting', MINI), model)).toBe(false);
     expect(rowSnoozes(row('own', 'waiting'), model)).toBe(true);
+  });
+});
+
+describe('marks on a linked machine (approval "inbox-linked-marks")', () => {
+  test("Star is offered on this machine's rows, and on a linked machine's only when its list says it takes stars", () => {
+    const model = machinesModel([machine(SELF, 'Studio', 'online'), machine(MAC, 'MacBook', 'online', { marks: ['star'] }), machine(MINI, 'Mini', 'online')]);
+    expect(machineTakes(row('own', 'waiting'), model, 'star')).toBe(true);
+    expect(machineTakes(row('own', 'waiting', SELF), model, 'star')).toBe(true);
+    expect(machineTakes(row('mac', 'waiting', MAC), model, 'star')).toBe(true);
+    // Mini runs an Inbox from before marks: its list names none.
+    expect(machineTakes(row('mini', 'waiting', MINI), model, 'star')).toBe(false);
+  });
+
+  test("a move and an Undo stay among one machine's stars, whose ends stop a move", () => {
+    const pins = [row('a', 'waiting', SELF), row('b', 'waiting', SELF), row('c', 'waiting', MAC), row('d', 'waiting', MAC)];
+    expect(sameMachinePins(pins, pins[2]!).map((p) => p.thread_id)).toEqual(['c', 'd']);
+    expect(sameMachinePins(pins, pins[0]!).map((p) => p.thread_id)).toEqual(['a', 'b']);
+    expect([0, 1, 2, 3].map((i) => pinEnds(pins, i))).toEqual([
+      { first: true, last: false },
+      { first: false, last: true },
+      { first: true, last: false },
+      { first: false, last: true },
+    ]);
   });
 });
 
@@ -245,6 +269,35 @@ describe("thread ids: a linked machine never takes over this machine's", () => {
     expect(machineOf(PINNED)).toBeNull();
   });
 
+  test("a star, its order and its Undo go to the machine that owns the thread, keyed; this machine's stay here", async () => {
+    await withFetch(() => json(listOf([ROW(LOCAL), ROW(REMOTE, MAC)])), () => inboxApi.list());
+    const bodies: Record<string, unknown>[] = [];
+    const realFetch = globalThis.fetch;
+    const asked: string[] = [];
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      asked.push(String(input));
+      bodies.push(JSON.parse(String(init?.body ?? '{}')));
+      return json({ pins: [] });
+    }) as unknown as typeof fetch;
+    try {
+      await inboxApi.pin(REMOTE, true);
+      await inboxApi.pinOrder([REMOTE]);
+      await inboxApi.pinRestore({ thread_id: REMOTE, index: 0, pinned_at: '2026-11-12T10:00:00.000Z' });
+      await inboxApi.pin(LOCAL, true);
+      await inboxApi.pinOrder([LOCAL]);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+    expect(asked).toEqual([`/api/inbox/m/${MAC}/threads/${REMOTE}/pin`, `/api/inbox/m/${MAC}/pins`, `/api/inbox/m/${MAC}/pins`, `/api/inbox/threads/${LOCAL}/pin`, '/api/inbox/pins']);
+    expect(bodies.slice(0, 3).every((body) => typeof body.idempotency_key === 'string')).toBe(true);
+    expect(bodies.slice(3).some((body) => 'idempotency_key' in body)).toBe(false);
+  });
+
+  test("another machine's starred row teaches its owner, even when no section lists it (archived there)", async () => {
+    await withFetch(() => json({ ...listOf([ROW(LOCAL)]), pins: [ROW(REMOTE, MAC)] }), () => inboxApi.list());
+    expect(machineOf(REMOTE)).toBe(MAC);
+  });
+
   test('a peer event naming a local message id, then Send now from the row: it goes to this Inbox', async () => {
     const MESSAGE = 'msg_01KLOCALDELIVERY000000001';
     // The list row carries its delivery's message id: local, though its thread was never opened here.
@@ -309,5 +362,60 @@ describe("thread ids: a linked machine never takes over this machine's", () => {
       session_id: 'ses_01KREMOTE0000000000000001',
     });
     expect([...ids].sort()).toEqual(['msg_01KREMOTE00000000000000001', REMOTE]);
+  });
+});
+
+describe('Update on a linked machine', () => {
+  const behind = (extra: Partial<NonNullable<MachineView['update']>> = {}) => ({ phase: 'behind' as const, target: '0.28.49', from: '0.28.46', can_update: true, self_update: true, ...extra });
+  const on = (update: MachineView['update'], extra: Partial<MachineView> = {}) => machine(MAC, 'MacBook', 'online', { update, ...extra });
+
+  test('the word shows whenever a machine is behind, whatever the way to update it, and the press knows the way', () => {
+    expect(machineNotice(on(behind()))?.kind).toBe('update');
+    expect(machineNotice(on(behind({ can_update: false })))?.kind).toBe('too_old');
+    expect(machineNotice(on(behind({ self_update: false })))?.kind).toBe('by_hand');
+    // Asleep too: the word stays, and the dialog says why it can't run now.
+    expect(machineNotice(on(behind(), { state: 'offline' }))?.kind).toBe('update');
+    for (const update of [behind(), behind({ can_update: false }), behind({ self_update: false })]) expect(machineNotice(on(update))?.word).toBe('Update');
+  });
+
+  test('a machine with nothing to say, and this machine, draw nothing', () => {
+    expect(machineNotice(on(null))).toBeNull();
+    expect(machineNotice(machine(MAC, 'MacBook', 'online'))).toBeNull();
+    expect(machineNotice(machine(SELF, 'Studio', 'online', { update: behind() }))).toBeNull();
+  });
+
+  test('only what is moving spins: a state that needs the person never looks like progress', () => {
+    const phases = ['updating', 'ready', 'failed', 'restarting', 'not_back', 'updated'] as const;
+    const busy = phases.filter((phase) => machineNotice(on(behind({ phase })))?.busy);
+    expect(busy).toEqual(['updating', 'restarting']);
+    for (const phase of phases) expect(machineNotice(on(behind({ phase })))?.kind).toBe(phase);
+  });
+
+  test('a target it has not named yet still reads as a sentence, never "null"', () => {
+    for (const phase of ['behind', 'updating', 'ready', 'failed', 'restarting', 'updated'] as const) {
+      const notice = machineNotice(on(behind({ phase, target: null })))!;
+      expect(`${notice.line} ${notice.tip}`).not.toContain('null');
+    }
+  });
+
+  test('restarting is not asleep: a machine this Inbox just updated never reads as gone for the night', () => {
+    const restarting = machine(MAC, 'MacBook', 'offline', { update: behind({ phase: 'restarting' }) });
+    expect(awayLine(restarting)).not.toContain('asleep');
+    expect(awayLine(machine(MAC, 'MacBook', 'offline'))).toContain('asleep');
+    // Not back: "asleep" would say to wait.
+    const notBack = machine(MAC, 'MacBook', 'offline', { update: { phase: 'not_back', target: '0.28.49', from: '0.28.46', can_update: true, self_update: true } });
+    expect(awayLine(notBack)).toBe('MacBook has not come back after restarting');
+    expect(threadAwayLine(notBack)).toBe('MacBook has not come back after restarting. This thread opens when it is back.');
+  });
+
+  test("Snooze says why on a machine whose list keeps none; a machine not read yet, or one that keeps them, isn't named", () => {
+    const old = machine(MAC, 'MacBook', 'online', { snooze_old: true, snoozes: false });
+    const unread = machine(MINI, 'Mini', 'online', { snoozes: false });
+    const model = machinesModel([machine(SELF, 'Studio', 'online'), old, unread]);
+    expect(snoozeBlockedBy(row('mac', 'waiting', MAC), model)?.id).toBe(MAC);
+    expect(snoozeBlockedBy(row('mini', 'waiting', MINI), model)).toBeNull();
+    expect(snoozeBlockedBy(row('own', 'waiting'), model)).toBeNull();
+    const keeps = machinesModel([machine(SELF, 'Studio', 'online'), machine(MAC, 'MacBook', 'online', { snooze_old: true, snoozes: true })]);
+    expect(snoozeBlockedBy(row('mac', 'waiting', MAC), keeps)).toBeNull();
   });
 });

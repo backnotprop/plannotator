@@ -422,11 +422,10 @@ test.skipIf(!hasDom)('compose (a message you start): the field takes a skill, th
   expect(menu()!.closest('.ib-cp-body')).toBeNull();
   expect(menu()!.getAttribute('data-skill-menu-placement')).toBe('below');
   expect(field.getAttribute('aria-controls')).toBe(menu()!.id);
-  // Escape on the bare trigger closes the picker, not the dialog (no "keep a draft?" question either).
+  // Escape on the bare trigger closes the picker, not the dialog (and keeps no draft: the dialog stays open).
   await press(field, 'Escape');
   expect(menu()).toBeNull();
   expect(dialog()).not.toBeNull();
-  expect(dialog()!.querySelector('[data-compose-question]')).toBeNull();
   // The dismissed trigger stays closed until the caret leaves it.
   await type(field, 'Plan the retry budget.');
   await type(field, 'Plan the retry budget. /rea');

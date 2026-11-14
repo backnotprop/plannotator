@@ -236,7 +236,7 @@ test.skipIf(!hasDom)('anything else (a zip): Finder and Copy path only; its tile
   expect(link.parentElement).toBe(tile);
   expect(more.parentElement).toBe(tile);
   expect(link.contains(more)).toBe(false);
-  expect(more.getAttribute('aria-label')).toBe('Open in…, build.zip');
+  expect(more.getAttribute('aria-label')).toBe('More: build.zip');
   expect(itemsOf(await openMenu(tile, `button[data-open-in-more="${id}"]`, id))).toEqual(['reveal', 'copy-path']);
 });
 

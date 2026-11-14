@@ -9,6 +9,12 @@
  * RELEASE_NOTES_v<version>.md in the checkout). Never a draft release, because
  * the logged in owner can see drafts that nobody else can.
  *
+ * A closed issue goes in only when it was fixed and the notes say in which
+ * release: the first release whose notes link the PR that closed it (the
+ * latest of them, when several did), else the first that links the issue. Its
+ * row carries that version, so the form can say "Fixed in 0.28.52". The window
+ * never asks GitHub: it reads only this file.
+ *
  *   bun scripts/feedback-search-index.ts
  */
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
@@ -45,13 +51,17 @@ export interface Titled {
   title: string;
   labels?: { name: string }[];
 }
+export interface ClosedIssue extends Titled {
+  stateReason?: string | null;
+  closedByPullRequestsReferences?: { number: number; repository?: { name: string; owner?: { login: string } } }[];
+}
 
 /** #956: a security report. #925: a question, not a known problem. */
 const SKIPPED_ISSUES = new Set([925, 956]);
 /** Bots and trackers. */
 const NOT_A_REQUEST = /^(chore\(deps\)|bump |dependency dashboard|pre-release manual qa)/i;
 /** Sections of release notes that are people or install steps. */
-const NOT_A_FEATURE = /^(what's changed|what's new|install|new contributors|community|contributors|thanks|full changelog|plannotator( inbox)?$|plannotator\.ai$|smaller |additional |behavior changes|documentation updates|features$|ux( improvements)?$|tidy$|v\d)/i;
+const NOT_A_FEATURE = /^(what's changed|what's new|install|new contributors|community|contributors|thanks|full changelog|plannotator( inbox)?$|plannotator\.ai$|smaller |additional |behavior changes|documentation updates|features$|ux( improvements)?$|tidy$|tl;dr$|not yet on$|v\d)/i;
 const HAS_EMAIL = /[\w.+-]+@[\w-]+\.[a-z]{2,}/i;
 
 const plain = (text: string) => text.replace(/\[([^\]]+)\]\([^)]*\)/g, '$1').replace(/`|\*/g, '').replace(/\s+/g, ' ').trim();
@@ -65,16 +75,51 @@ export function releaseTitles(body: string): string[] {
   return headings.map((heading) => plain(heading.replace(/^#+ +/, ''))).filter((title) => !NOT_A_FEATURE.test(title));
 }
 
-/** Issues, then PRs, then release notes, each newest first; a title twice stays once. */
-export function buildSearchData(input: { issues: Titled[]; pulls: Titled[]; releases: Release[] }): SearchData {
+const version = (tag: string) => tag.replace(/^v/, '').split('.').map(Number);
+/** Below zero when `a` is the older version ("v0.28.9" before "0.28.52"). */
+const compareVersions = (a: string, b: string) => version(a).reduce((order, part, at) => order || part - version(b)[at]!, 0);
+const olderFirst = (a: Release, b: Release) => compareVersions(a.tag, b.tag);
+const published = (release: Release) => !release.draft && !release.prerelease && /^v\d+\.\d+\.\d+$/.test(release.tag);
+
+/** Each issue or PR number this repo's notes link, with the first release (oldest) that links it, without its "v". */
+export function firstReleases(releases: Release[]): Map<number, string> {
+  const first = new Map<number, string>();
+  for (const release of releases.filter(published).sort(olderFirst)) {
+    const body = release.body ?? '';
+    const linked = [...body.matchAll(/github\.com\/backnotprop\/plannotator\/(?:issues|pull)\/(\d+)/g), ...body.matchAll(/(?<![\w/&])#(\d+)\b/g)];
+    for (const [, number] of linked) if (!first.has(Number(number))) first.set(Number(number), release.tag.slice(1));
+  }
+  return first;
+}
+
+/** The release that fixed a closed issue, or null when it was not fixed (not planned, a duplicate) or no notes say. */
+export function fixedIn(issue: ClosedIssue, first: Map<number, string>): string | null {
+  if (issue.stateReason !== 'COMPLETED') return null;
+  // A PR in another repository (a fork) never ships in these notes.
+  const pulls = (issue.closedByPullRequestsReferences ?? []).filter((pull) => !pull.repository || (pull.repository.name === 'plannotator' && (pull.repository.owner?.login ?? 'backnotprop') === 'backnotprop'));
+  const shipped = pulls.map((pull) => first.get(pull.number)).filter((tag): tag is string => tag !== undefined);
+  if (shipped.length) return shipped.sort(compareVersions).at(-1)!;
+  return first.get(issue.number) ?? null;
+}
+
+/** Open issues, then fixed issues, then PRs, then release notes, each newest first; a title twice stays once. */
+export function buildSearchData(input: { issues: Titled[]; closedIssues?: ClosedIssue[]; pulls: Titled[]; releases: Release[] }): SearchData {
   const newest = (a: Titled, b: Titled) => b.number - a.number;
-  const version = (tag: string) => tag.replace(/^v/, '').split('.').map(Number);
-  const links = [
-    ...[...input.issues].sort(newest).filter((issue) => !SKIPPED_ISSUES.has(issue.number) && !issue.labels?.some((label) => label.name === 'security')).map((issue) => ({ title: plain(issue.title), path: `issues/${issue.number}` })),
+  const listed = (issue: Titled) => !SKIPPED_ISSUES.has(issue.number) && !issue.labels?.some((label) => label.name === 'security');
+  const first = firstReleases(input.releases);
+  const links: SearchData['links'] = [
+    ...[...input.issues].sort(newest).filter(listed).map((issue) => ({ title: plain(issue.title), path: `issues/${issue.number}` })),
+    ...[...(input.closedIssues ?? [])]
+      .sort(newest)
+      .filter(listed)
+      .flatMap((issue) => {
+        const fixed = fixedIn(issue, first);
+        return fixed ? [{ title: plain(issue.title), path: `issues/${issue.number}`, fixed }] : [];
+      }),
     ...[...input.pulls].sort(newest).map((pull) => ({ title: pullTitle(pull.title), path: `pull/${pull.number}` })),
     ...input.releases
-      .filter((release) => !release.draft && !release.prerelease && /^v\d+\.\d+\.\d+$/.test(release.tag))
-      .sort((a, b) => version(b.tag).reduce((order, part, at) => order || part - version(a.tag)[at]!, 0))
+      .filter(published)
+      .sort((a, b) => olderFirst(b, a))
       .flatMap((release) => releaseTitles(release.body ?? '').map((title) => ({ title, path: `releases/tag/${release.tag}` }))),
   ];
   const seen = new Set(FEATURES.map((feature) => feature.title.toLowerCase()));
@@ -106,7 +151,12 @@ export function writeSearchIndex(root: string, gh: Gh): SearchData {
   const { version } = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as { version: string };
   const notes = join(root, `RELEASE_NOTES_v${version}.md`);
   if (existsSync(notes) && !releases.some((release) => release.tag === `v${version}`)) releases.unshift({ tag: `v${version}`, body: readFileSync(notes, 'utf8') });
-  const data = buildSearchData({ issues: list('issue', 'open', 'number,title,labels'), pulls: [...list('pr', 'open', 'number,title'), ...list('pr', 'merged', 'number,title')], releases });
+  const data = buildSearchData({
+    issues: list('issue', 'open', 'number,title,labels'),
+    closedIssues: list('issue', 'closed', 'number,title,labels,stateReason,closedByPullRequestsReferences') as ClosedIssue[],
+    pulls: [...list('pr', 'open', 'number,title'), ...list('pr', 'merged', 'number,title')],
+    releases,
+  });
   if (!data.links.length) throw new Error('Nothing from GitHub: the file stays as it is.');
   const out = join(root, OUT_FILE);
   const block = (name: string, rows: unknown[]) => `  ${JSON.stringify(name)}: [\n${rows.map((row) => `    ${JSON.stringify(row)}`).join(',\n')}\n  ]`;

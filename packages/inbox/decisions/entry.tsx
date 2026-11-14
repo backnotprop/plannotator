@@ -10,6 +10,7 @@
 import { useLayoutEffect, useState } from 'react';
 import { formatCount } from '../format';
 import { Tip } from '../components/Tip';
+import { markDecisionPill } from '../pageMarks';
 
 /** The way in shows from two decisions (in the thread) up. */
 export const DECIDE_ENTRY_MIN = 2;
@@ -80,6 +81,7 @@ export function DecisionPill({
   const bottom = usePillBottom();
   return (
     <div
+      ref={markDecisionPill}
       className="ib-dm-pill"
       role="region"
       aria-label="Decision mode"

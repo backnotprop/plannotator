@@ -12,10 +12,11 @@
  * messages, keeping the frame (full screen stays full screen, with its
  * toolbar) and replacing the route; › greys at the end,
  * keeps focus, and says "Last file in this thread"; the list opens
- * upward, grouped by message, and jumps; inside the HTML page a plain `]`
- * steps while armed (Annotate) and does nothing in Interact or in the page's
- * text field; a typed image comment raises the question row, Keep writing
- * returns to it and "Save it and go on" saves it and steps; one Back returns
+ * upward, grouped by message, and jumps; the HTML page opens in Interact,
+ * and inside it a plain `]` steps in Interact (a key the page did not use) and
+ * in Annotate, never from the page's text field; Annotate, once on, is still
+ * on when the page opens again; a typed image comment never stops a step (its words wait for
+ * that image, back in its box when it opens again); one Back returns
  * to the thread; on a phone (always full screen) the toolbar's ⋯ opens every
  * file of the thread as a sheet.
  *
@@ -199,6 +200,7 @@ test('one agent sends five files of five kinds across two messages of one thread
   });
   const second = await world.claude.send({
     project_path: world.project,
+    reply_to: first.message_id as string,
     body: 'The phone checkout at 390 px is below, and the refund policy PDF the "See policy" link opens.',
     attachments: ['shots/checkout-mobile.png', 'docs/refund-policy.pdf'],
   });
@@ -208,7 +210,7 @@ test('one agent sends five files of five kinds across two messages of one thread
   expect(Object.keys(world.ids)).toEqual(['SCOPE.md', 'checkout-flow.html', 'retry-states.mmd', 'checkout-mobile.png', 'refund-policy.pdf']);
 });
 
-test('beside the thread: "1 of 5 · SCOPE.md" in the bar, the name gone from the header, the tile marked Open beside', async () => {
+test('beside the thread: "1 of 5 · SCOPE.md" in the bar, the name gone from the header, the tile marked as the open file', async () => {
   const page = world.page;
   await page.goto(`${world.url}#thread=${world.threadId}`);
   await page.getByRole('button', { name: 'Open SCOPE.md' }).click();
@@ -222,7 +224,9 @@ test('beside the thread: "1 of 5 · SCOPE.md" in the bar, the name gone from the
   await expect(page.getByRole('navigation', { name: 'Files in this thread' })).toBeVisible();
   const tile = page.locator(`.ib-att-t[data-attachment-id="${world.ids['SCOPE.md']}"]`);
   await expect(tile).toHaveAttribute('aria-current', 'true');
-  await expect(tile).toContainText('Open beside');
+  // It keeps its words: the highlight and aria-current alone say which file is open.
+  await expect(tile.locator('.ib-open')).toHaveText('Open');
+  await expect(tile).toHaveAttribute('aria-label', 'Open SCOPE.md');
   // The bar is a row of the pane under the file, never over it.
   const geometry = await page.evaluate(() => {
     const body = document.querySelector('[data-attachment-pane] .ib-vbody')!.getBoundingClientRect();
@@ -233,7 +237,7 @@ test('beside the thread: "1 of 5 · SCOPE.md" in the bar, the name gone from the
   await shot('01-side-markdown');
 });
 
-test('] and › step in thread order, keep the frame, and replace the route; inside the HTML page ] steps only while armed', async () => {
+test('] and › step in thread order, keep the frame, and replace the route; inside the HTML page ] steps in Interact and in Annotate', async () => {
   const page = world.page;
   // Full screen: a step keeps it (and its toolbar), the route is replaced.
   await pane().getByRole('button', { name: 'Full screen' }).click();
@@ -258,8 +262,8 @@ test('] and › step in thread order, keep the frame, and replace the route; ins
   await expect(htmlFrame().locator('#promo')).toHaveValue('a]b[');
   await expectAt(2, 'checkout-flow.html');
 
-  // Armed (Annotate): a plain ] pressed in the page steps.
-  await expect(pane().locator('[data-html-annotate-toggle]')).toHaveAttribute('aria-pressed', 'true');
+  // Interact (how the page opens): a plain ] pressed in the page, which the page does not use, steps.
+  await expect(pane().locator('[data-html-annotate-toggle]')).toHaveAttribute('aria-pressed', 'false');
   await htmlFrame().locator('header').evaluate((el) => {
     el.setAttribute('tabindex', '-1');
     (el as HTMLElement).focus();
@@ -267,19 +271,23 @@ test('] and › step in thread order, keep the frame, and replace the route; ins
   await page.keyboard.press(']');
   await expectAt(3, 'retry-states.mmd');
 
-  // Back to the page, then Interact: ] belongs to the page, nothing steps.
+  // Back to the page, then Annotate: a plain ] pressed in the page steps too.
   await page.keyboard.press('[');
   await expectAt(2, 'checkout-flow.html');
   await expect(htmlFrame().locator('#pay')).toHaveText('Pay now');
   await pane().locator('[data-html-annotate-toggle]').click();
-  await expect(pane().locator('[data-html-annotate-toggle]')).toHaveAttribute('aria-pressed', 'false');
+  await expect(pane().locator('[data-html-annotate-toggle]')).toHaveAttribute('aria-pressed', 'true');
   await htmlFrame().locator('header').evaluate((el) => {
     el.setAttribute('tabindex', '-1');
     (el as HTMLElement).focus();
   });
   await page.keyboard.press(']');
-  await page.waitForTimeout(400);
+  await expectAt(3, 'retry-states.mmd');
+  // Back again: the page is still in Annotate.
+  await page.keyboard.press('[');
   await expectAt(2, 'checkout-flow.html');
+  await expect(htmlFrame().locator('#pay')).toHaveText('Pay now');
+  await expect(pane().locator('[data-html-annotate-toggle]')).toHaveAttribute('aria-pressed', 'true');
 
   // The › button steps on to the end, focus staying on it.
   await nextButton().click();
@@ -339,7 +347,7 @@ test('a file read before opens where it was left: scroll is kept per file until 
   await expect.poll(() => pane().locator('.ib-docscroll').evaluate((el) => el.scrollTop)).toBeGreaterThan(560);
 });
 
-test('a typed image comment asks before stepping: Keep writing returns to it, Save it and go on saves it and steps', async () => {
+test('a typed image comment never stops a step: its words wait for the image and are back in its box', async () => {
   const page = world.page;
   await label().click();
   await page.getByRole('gridcell', { name: /checkout-mobile\.png/ }).click();
@@ -347,33 +355,25 @@ test('a typed image comment asks before stepping: Keep writing returns to it, Sa
   const box = pane().getByRole('textbox', { name: 'Comment on checkout-mobile.png' });
   await box.fill('The Pay button sits under the fold on an iPhone SE. Move it up?');
   await nextButton().click();
-  const guard = page.locator('[data-step-guard]');
-  await expect(guard).toBeVisible();
-  await expect(guard).toContainText('Your comment on checkout-mobile.png is not saved yet.');
-  await expect(guard.getByRole('button', { name: 'Discard and go to refund-policy.pdf' })).toBeVisible();
-  await expect(guard.getByRole('button', { name: 'Save it and go on' })).toBeFocused();
-  await expectAt(4, 'checkout-mobile.png');
-  // ] does nothing while the question row is open.
-  await page.keyboard.press(']');
-  await expectAt(4, 'checkout-mobile.png');
-  await shot('05-guard');
-  await guard.getByRole('button', { name: 'Keep writing' }).click();
-  await expect(guard).toHaveCount(0);
-  await expect(box).toBeFocused();
-  await expect(box).toHaveValue('The Pay button sits under the fold on an iPhone SE. Move it up?');
-
-  await nextButton().click();
-  await page.locator('[data-step-guard]').getByRole('button', { name: 'Save it and go on' }).click();
+  // The first press steps: no question row, nothing saved.
   await expectAt(5, 'refund-policy.pdf');
-  await expect
-    .poll(async () => {
-      const model = (await (await fetch(new URL(`/api/inbox/threads/${world.threadId}/attachments`, world.url))).json()) as {
-        annotations: { attachment_id: string; annotation: { text?: string } }[];
-      };
-      return model.annotations.filter((a) => a.attachment_id === world.ids['checkout-mobile.png']).map((a) => a.annotation.text);
-    })
-    .toEqual(['The Pay button sits under the fold on an iPhone SE. Move it up?']);
-  // Back on the image: its comment box is empty, not the last file's words.
+  await expect(page.locator('[data-step-guard]')).toHaveCount(0);
+  const saved = async () => {
+    const model = (await (await fetch(new URL(`/api/inbox/threads/${world.threadId}/attachments`, world.url))).json()) as {
+      annotations: { attachment_id: string; annotation: { text?: string } }[];
+    };
+    return model.annotations.filter((a) => a.attachment_id === world.ids['checkout-mobile.png']).map((a) => a.annotation.text);
+  };
+  expect(await saved()).toEqual([]);
+  // Back on the image: the words are in its box again.
+  await page.locator('[data-step-prev]').click();
+  await expectAt(4, 'checkout-mobile.png');
+  await expect(pane().getByRole('textbox', { name: 'Comment on checkout-mobile.png' })).toHaveValue('The Pay button sits under the fold on an iPhone SE. Move it up?');
+  await shot('05-kept');
+  // Cleared on the comment itself: nothing waits.
+  await pane().getByRole('textbox', { name: 'Comment on checkout-mobile.png' }).fill('');
+  await nextButton().click();
+  await expectAt(5, 'refund-policy.pdf');
   await page.locator('[data-step-prev]').click();
   await expectAt(4, 'checkout-mobile.png');
   await expect(pane().getByRole('textbox', { name: 'Comment on checkout-mobile.png' })).toHaveValue('');

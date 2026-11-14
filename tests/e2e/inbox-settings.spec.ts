@@ -102,7 +102,7 @@ test('desktop: a focused page with a section nav; addresses, keyboard, focus, Ba
   await expect.poll(() => sidebarState(page)).toBe('collapsed');
   expect(await sidebarCookie(context)).toBe(cookieBefore);
   const nav = page.getByRole('navigation', { name: 'Settings sections' });
-  await expect(nav.getByRole('link')).toHaveText(['General', 'Rows', 'Agents', 'Prompts', 'Devices', 'Machines', 'Accounts', 'Voice', 'Capabilities', 'Archived', 'Storage', 'Decision data', 'About']);
+  await expect(nav.getByRole('link')).toHaveText(['General', 'Rows', 'Agents', 'Prompts', 'Devices', 'Machines', 'Accounts', 'Voice', 'Capabilities', 'Activity', 'Archived', 'Storage', 'About']);
   await expect(nav.getByRole('link', { name: 'General' })).toHaveAttribute('aria-current', 'page');
   await shot(page, 'general');
 
@@ -111,11 +111,11 @@ test('desktop: a focused page with a section nav; addresses, keyboard, focus, Ba
   await page.keyboard.press('Tab');
   await expect(nav.getByRole('link', { name: 'Rows' })).toBeFocused();
   await page.keyboard.press('Tab');
-  await expect(nav.getByRole('link', { name: 'Agents' })).toBeFocused();
+  await expect(nav.getByRole('link', { name: 'Agents', exact: true })).toBeFocused();
   await page.keyboard.press('Enter');
   await expect(page).toHaveURL(/#settings\/agents$/);
   await expect(page.getByRole('heading', { name: 'Agents', level: 1 })).toBeFocused();
-  await expect(nav.getByRole('link', { name: 'Agents' })).toHaveAttribute('aria-current', 'page');
+  await expect(nav.getByRole('link', { name: 'Agents', exact: true })).toHaveAttribute('aria-current', 'page');
   await shot(page, 'agents');
 
   for (const [name, check] of [

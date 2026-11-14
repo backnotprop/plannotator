@@ -5,6 +5,7 @@ import {
   guideAddChapter,
   guideClearOverview,
   guideDraftProgress,
+  guideDraftToOutput,
   guideFinish,
   guideMoveChapter,
   guideMoveFile,
@@ -183,7 +184,7 @@ describe("chapters", () => {
     const a = await guideUpdateChapter(d, { chapter: "c2", title: "Backoff tests", overview: "Covers the backoff." }, hooks);
     expect(a.ok).toBe(true);
     expect(a.draft.chapters[1]).toMatchObject({ id: "c2", title: "Backoff tests", overview: "Covers the backoff." });
-    expect((await guideUpdateChapter(d, { chapter: "c2" })).text).toContain("Give a new `title`, `overview`, or both.");
+    expect((await guideUpdateChapter(d, { chapter: "c2" })).text).toContain("Give a new `title`, `overview` or `diagram`.");
   });
 
   test("move answers the new order", async () => {
@@ -639,7 +640,7 @@ describe("runGuideBuilderTool", () => {
   test("argument problems are plain answers", async () => {
     const d = newDraft();
     expect((await runGuideBuilderTool(d, "guide_nope", {})).text).toContain("There is no tool `guide_nope`.");
-    expect((await runGuideBuilderTool(d, "guide_add_chapter", { title: "A" })).text).toContain("guide_add_chapter needs `overview`. It takes: title, overview, position.");
+    expect((await runGuideBuilderTool(d, "guide_add_chapter", { title: "A" })).text).toContain("guide_add_chapter needs `overview`. It takes: title, overview, diagram, position.");
     expect((await runGuideBuilderTool(d, "guide_read", { verbose: true })).text).toContain("`verbose` is not an argument of guide_read. It takes no arguments.");
     expect((await runGuideBuilderTool(d, "guide_add_chapter", { title: 3, overview: "a" })).text).toContain("`title` is text.");
     expect((await runGuideBuilderTool(d, "guide_add_chapter", { title: "a", overview: "a", position: 1.5 })).text).toContain("`position` is a whole number.");
@@ -649,5 +650,150 @@ describe("runGuideBuilderTool", () => {
     expect((await runGuideBuilderTool(d, "guide_set_header", "nope")).text).toContain("The arguments of guide_set_header are an object.");
     // Every refusal still ends with the progress line.
     expect(lastLine((await runGuideBuilderTool(d, "guide_finish", {})).text)).toBe("0 chapters · 0 of 4 files placed");
+  });
+});
+
+describe("chapter diagrams", () => {
+  const FLOW = 'flowchart LR\n  d[deliver] --> b[backoff]\n  click b "symbol:computeBackoff"';
+
+  test("add with a diagram: checked like the overview's, stored on the chapter", async () => {
+    const d = await twoChapters();
+    const a = await guideAddChapter(d, { title: "Picture", overview: "How it flows.", diagram: { kind: "mermaid", source: `  ${FLOW}\n` } }, hooks);
+    expect(a.ok).toBe(true);
+    expect(a.text).toContain('Added chapter c3 "Picture" at position 3 with a Mermaid diagram.');
+    expect(a.draft.chapters[2].diagram).toEqual({ kind: "mermaid", source: FLOW });
+    // Without a diagram the chapter carries no diagram key at all.
+    expect("diagram" in a.draft.chapters[0]).toBe(false);
+  });
+
+  test("add refuses a bad kind, an empty source, an unrendered diagram and an unresolved link, leaving the draft as it was", async () => {
+    const d = await twoChapters();
+    const add = (diagram: { kind: any; source: string }, h: GuideBuilderHooks = hooks) => guideAddChapter(d, { title: "P", overview: "o", diagram }, h);
+    const kind = await add({ kind: "svg", source: "<svg/>" });
+    expect(kind.ok).toBe(false);
+    expect(kind.text).toContain("The diagram's `kind` is `mermaid` or `html`.");
+    expect((await add({ kind: "mermaid", source: "  " })).text).toContain("The diagram's `source` is empty.");
+    expect((await add({ kind: "mermaid", source: "a --> b" })).text).toContain("A Mermaid diagram starts with its type");
+    const render: GuideBuilderHooks = { ...hooks, checkMermaid: () => ({ ok: false, error: "Parse error on line 2" }) };
+    const unrendered = await add({ kind: "mermaid", source: "flowchart TD\n -->" }, render);
+    expect(unrendered.ok).toBe(false);
+    expect(unrendered.text).toContain("The Mermaid diagram does not render: Parse error on line 2");
+    const link = await add({ kind: "mermaid", source: 'flowchart LR\n  a --> b\n  click a "code:src/webhook/deliver.ts"' });
+    expect(link.ok).toBe(false);
+    expect(link.text).toContain("Did you mean `src/webhooks/deliver.ts`?");
+    expect((await add({ kind: "html", source: "<svg></svg>" })).text).toContain("HTML diagrams cannot be checked here");
+    for (const a of [kind, unrendered, link]) {
+      expect(a.changed).toBe(false);
+      expect(a.draft).toBe(d);
+    }
+  });
+
+  test("update sets, replaces and removes a chapter's diagram, keeping its text", async () => {
+    let d = await twoChapters();
+    const set = await guideUpdateChapter(d, { chapter: "c2", diagram: { kind: "mermaid", source: FLOW } }, hooks);
+    expect(set.text).toContain("Added a Mermaid diagram.");
+    d = ok(set);
+    expect(d.chapters[1]).toMatchObject({ title: "Tests", overview: "One new test for the backoff.", diagram: { kind: "mermaid", source: FLOW } });
+    const sanitize: GuideBuilderHooks = { ...hooks, sanitizeHtml: (source) => ({ html: source.replace(/<script[\s\S]*?<\/script>/g, ""), removed: ["a <script> element"] }) };
+    const replaced = await guideUpdateChapter(d, { chapter: "c2", diagram: { kind: "html", source: "<svg><rect/></svg><script>x()</script>" } }, sanitize);
+    expect(replaced.text).toContain("Replaced its diagram with an HTML diagram.");
+    expect(replaced.text).toContain("Removed from the HTML: a <script> element.");
+    expect(replaced.draft.chapters[1].diagram).toEqual({ kind: "html", source: "<svg><rect/></svg>" });
+    d = ok(await guideUpdateChapter(d, { chapter: "c2", title: "Tests, renamed", diagram: null }, hooks));
+    expect(d.chapters[1].title).toBe("Tests, renamed");
+    expect("diagram" in d.chapters[1]).toBe(false);
+    // Removing a diagram that is not there changes nothing.
+    const none = await guideUpdateChapter(d, { chapter: "c2", diagram: null }, hooks);
+    expect(none.ok).toBe(true);
+    expect(none.changed).toBe(false);
+    expect(none.draft).toBe(d);
+  });
+
+  test("update refuses a diagram that does not render, and keeps the old one", async () => {
+    let d = await twoChapters();
+    d = ok(await guideUpdateChapter(d, { chapter: "c1", diagram: { kind: "mermaid", source: FLOW } }, hooks));
+    const render: GuideBuilderHooks = { ...hooks, checkMermaid: () => ({ ok: false, error: "boom" }) };
+    const a = await guideUpdateChapter(d, { chapter: "c1", diagram: { kind: "mermaid", source: "flowchart TD\n  x" } }, render);
+    expect(a.ok).toBe(false);
+    expect(a.draft.chapters[0].diagram?.source).toBe(FLOW);
+  });
+
+  test("the tool dispatcher passes a chapter diagram, and null on update removes it", async () => {
+    let d = await twoChapters();
+    d = ok(await runGuideBuilderTool(d, "guide_add_chapter", { title: "P", overview: "o", diagram: { kind: "mermaid", source: FLOW } }, hooks));
+    expect(d.chapters[2].diagram?.kind).toBe("mermaid");
+    expect((await runGuideBuilderTool(d, "guide_add_chapter", { title: "P", overview: "o", diagram: { kind: "svg", source: "x" } }, hooks)).text).toContain("`diagram.kind` is `mermaid` or `html`.");
+    expect((await runGuideBuilderTool(d, "guide_update_chapter", { chapter: "c3", diagram: { kind: "mermaid", source: FLOW, alt: "y" } }, hooks)).text).toContain("`diagram` takes only `kind` and `source`");
+    d = ok(await runGuideBuilderTool(d, "guide_update_chapter", { chapter: "c3", diagram: null }, hooks));
+    expect(d.chapters[2].diagram).toBeUndefined();
+    // The overview still takes a diagram from an older session, but no longer offers one.
+    const overview = await runGuideBuilderTool(d, "guide_set_overview", { text: "x", diagram: { kind: "mermaid", source: FLOW } }, hooks);
+    expect(overview.draft.overview?.diagram?.source).toBe(FLOW);
+    expect((await runGuideBuilderTool(d, "guide_set_overview", {})).text).toContain("It takes: text.");
+  });
+
+  test("guide_read shows a chapter's diagram under its overview", async () => {
+    let d = await twoChapters();
+    d = ok(await guideUpdateChapter(d, { chapter: "c1", diagram: { kind: "mermaid", source: "flowchart LR\n  a --> b" } }, hooks));
+    const a = await guideRead(d);
+    expect(a.text).toContain("1. c1 · Retry budget\n   The delivery loop asks for a budget before it sends.\n   Diagram (mermaid):\n     flowchart LR\n       a --> b\n");
+    expect(a.text).not.toContain("2. c2 · Tests\n   One new test for the backoff.\n   Diagram");
+  });
+
+  test("moving or removing chapters names the chapter: links of a chapter diagram it re-points", async () => {
+    let d = await twoChapters();
+    d = ok(await guideAddChapter(d, { title: "Glue", overview: "Wiring.", diagram: { kind: "mermaid", source: 'flowchart LR\n  a --> b\n  click b "chapter:2"' } }, hooks));
+    const moved = await guideMoveChapter(d, { chapter: "c2", position: 1 }, hooks);
+    expect(moved.text).toContain('`chapter:2` in the diagram of c3 now points at c1 "Retry budget" (was c2 "Tests").');
+    const removed = await guideRemoveChapter(d, { chapter: "c2" }, hooks);
+    expect(removed.text).toContain('`chapter:2` in the diagram of c3 now points at c3 "Glue" (was c2 "Tests").');
+  });
+
+  test("finish refuses a chapter diagram linking past the last chapter; save as is drops that link", async () => {
+    let d = await completeDraft();
+    d = ok(await guideUpdateChapter(d, { chapter: "c2", diagram: { kind: "mermaid", source: 'flowchart LR\n  a --> b\n  click a "chapter:1"\n  click b "chapter:3"' } }, hooks));
+    const a = await guideFinish(d, hooks);
+    expect(a.ok).toBe(false);
+    expect(a.text).toContain("The diagram of chapter 2 (c2) links to `chapter:3`, but the guide has 2 chapters.");
+    const saved = await guideSaveAsIs(d, hooks);
+    expect(saved.ok).toBe(true);
+    expect(saved.snapshot!.guide.sections[1].diagram?.source).toBe('flowchart LR\n  a --> b\n  click a "chapter:1"');
+  });
+
+  test("a chapter diagram makes the snapshot version 5, carried on its section", async () => {
+    let d = await completeDraft();
+    d = ok(await guideUpdateChapter(d, { chapter: "c2", diagram: { kind: "mermaid", source: FLOW } }, hooks));
+    const out = guideDraftToOutput(d);
+    expect(out.sections[1].diagram).toEqual({ kind: "mermaid", source: FLOW });
+    expect("diagram" in out.sections[0]).toBe(false);
+    const a = await guideFinish(d, hooks);
+    expect(a.ok).toBe(true);
+    const s = a.snapshot!;
+    expect(s.version).toBe(5);
+    expect(s.guide.sections[1].diagram).toEqual({ kind: "mermaid", source: FLOW });
+    expect("diagram" in s.guide.sections[0]).toBe(false);
+    expect(parseGuideSnapshot(JSON.parse(JSON.stringify(s))).ok).toBe(true);
+  });
+
+  test("drafts keep a chapter diagram through JSON; a malformed one is refused", async () => {
+    let d = await completeDraft();
+    d = ok(await guideUpdateChapter(d, { chapter: "c1", diagram: { kind: "mermaid", source: FLOW } }, hooks));
+    const parsed = parseGuideDraft(serializeGuideDraft(d));
+    expect(parsed.ok && parsed.draft.chapters[0].diagram).toEqual({ kind: "mermaid", source: FLOW });
+    const raw = JSON.parse(serializeGuideDraft(d));
+    raw.chapters[0].diagram = { kind: "svg", source: "x" };
+    expect(parseGuideDraft(raw)).toEqual({ ok: false, error: "The diagram of chapter c1 is malformed." });
+  });
+
+  test("an older draft with an overview diagram still parses and finishes with it", async () => {
+    const raw = JSON.parse(serializeGuideDraft(await completeDraft()));
+    raw.overview = { text: "How it fits.", diagram: { kind: "mermaid", source: "flowchart LR\n  a --> b" } };
+    const parsed = parseGuideDraft(JSON.stringify(raw));
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    const a = await guideFinish(parsed.draft, hooks);
+    expect(a.ok).toBe(true);
+    expect(a.snapshot!.version).toBe(2);
+    expect(a.snapshot!.guide.overview?.diagram).toEqual({ kind: "mermaid", source: "flowchart LR\n  a --> b" });
   });
 });

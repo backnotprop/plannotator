@@ -12,6 +12,7 @@ import {
   deriveAutoUpdateNotice,
   installerCommand,
   installerFlagArgs,
+  installerPathWith,
   parseInstallFlags,
   readInstallFlags,
   isCheckDue,
@@ -710,6 +711,41 @@ describe.skipIf(process.platform === "win32")("interrupted installs release the 
       server.stop(true);
     }
   }, 30_000);
+
+  test("the installer gets the extra PATH folders after this process's own (an Inbox's login-shell PATH)", async () => {
+    const { server, env: releaseEnv } = fakeRelease('echo "INSTALLER_PATH=$PATH"\n');
+    const saved = { url: process.env.PLANNOTATOR_INSTALL_SCRIPT_URL, dl: process.env.PLANNOTATOR_RELEASE_DOWNLOAD_URL, tmp: process.env.TMPDIR };
+    process.env.TMPDIR = dataDir;
+    process.env.PLANNOTATOR_INSTALL_SCRIPT_URL = releaseEnv.PLANNOTATOR_INSTALL_SCRIPT_URL;
+    process.env.PLANNOTATOR_RELEASE_DOWNLOAD_URL = releaseEnv.PLANNOTATOR_RELEASE_DOWNLOAD_URL;
+    const paths = autoUpdatePaths(dataDir);
+    writeFileSync(paths.lock, "1");
+    const own = process.env.PATH ?? "";
+    const firstOwn = own.split(":").filter(Boolean)[0]!;
+    try {
+      let out = "";
+      const launch = { version: "v0.28.0", logPath: paths.log, resultPath: paths.result, lockPath: paths.lock, platform: "linux" as const, flags: [], prepare: PREPARE };
+      expect(await runInstallerForeground({ ...launch, extraPath: ["/opt/login-shell/bin", firstOwn] }, (chunk) => (out += chunk))).toBe(0);
+      // Its own PATH first and unchanged; only the folders it lacks are added.
+      expect(out).toContain(`INSTALLER_PATH=${own}:/opt/login-shell/bin\n`);
+      out = "";
+      writeFileSync(paths.lock, "1");
+      expect(await runInstallerForeground(launch, (chunk) => (out += chunk))).toBe(0);
+      expect(out).toContain(`INSTALLER_PATH=${own}\n`);
+    } finally {
+      if (saved.tmp === undefined) delete process.env.TMPDIR;
+      else process.env.TMPDIR = saved.tmp;
+      if (saved.url === undefined) delete process.env.PLANNOTATOR_INSTALL_SCRIPT_URL;
+      else process.env.PLANNOTATOR_INSTALL_SCRIPT_URL = saved.url;
+      if (saved.dl === undefined) delete process.env.PLANNOTATOR_RELEASE_DOWNLOAD_URL;
+      else process.env.PLANNOTATOR_RELEASE_DOWNLOAD_URL = saved.dl;
+      server.stop(true);
+    }
+  }, 30_000);
+
+  test("Windows keeps its PATH as it is (no login shell to add)", () => {
+    expect(installerPathWith("C:\\bin", ["/opt/x"], "win32")).toBe("C:\\bin");
+  });
 
   test("a wrapper killed outright (no trap runs) still ends with the lock released and a failed result", async () => {
     const { server, env: releaseEnv } = fakeRelease('echo "fake installer started"\nsleep 3\n');

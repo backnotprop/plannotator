@@ -9,6 +9,7 @@ import {
   isInboxAnnotatableKind,
   isInboxTextBytes,
   isInboxTextKind,
+  isInboxTimedKind,
   readInboxAttachmentKind,
 } from './inbox-attachments';
 
@@ -63,6 +64,25 @@ describe('Inbox attachment names and kinds', () => {
     expect(inboxAttachmentKindLabel('video', 'teaser.webm', 'video/webm')).toBe('WebM video');
     expect(inboxAttachmentKindLabel('image', 'shot.png', 'image/png')).toBe('PNG image');
     expect(inboxAttachmentKindLabel('pdf', 'spec.pdf')).toBe('PDF');
+  });
+
+  test('a recording is its own kind: played, commented at moments, never read as text; an older reader downloads it', () => {
+    expect(readInboxAttachmentKind('audio')).toBe('audio');
+    expect(isInboxTextKind('audio')).toBe(false);
+    expect(isInboxAnnotatableKind('audio')).toBe(true);
+    expect(isInboxTimedKind('audio')).toBe(true);
+    expect(isInboxTimedKind('video')).toBe(true);
+    expect(isInboxTimedKind('image')).toBe(false);
+    expect(isInboxTimedKind('hologram')).toBe(false);
+    expect(inboxAttachmentKindLabel('audio', 'take.mp3', 'audio/mpeg')).toBe('MP3 audio');
+    expect(inboxAttachmentKindLabel('audio', 'memo.m4a', 'audio/mp4')).toBe('M4A audio');
+    expect(inboxAttachmentKindLabel('audio', 'note.wav', 'audio/wav')).toBe('WAV audio');
+    expect(inboxAttachmentKindLabel('audio', 'call.opus', 'audio/ogg')).toBe('Opus audio');
+    expect(inboxAttachmentKindLabel('audio', 'take.ogg', 'audio/ogg')).toBe('Ogg audio');
+    expect(inboxAttachmentKindLabel('audio', 'voice.webm', 'audio/webm')).toBe('WebM audio');
+    expect(inboxAttachmentKindLabel('audio', 'clip')).toBe('Audio');
+    // A recording's meta is its length alone.
+    expect(inboxVideoMeta({ duration_ms: 83_000 })).toBe('1:23');
   });
 
   test('a moment in a video reads m:ss, h:mm:ss from one hour; a comment carries it as inboxVideo.time', () => {

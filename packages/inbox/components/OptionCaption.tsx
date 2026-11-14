@@ -114,7 +114,7 @@ export function OptionCaption({ set, index, phone = false, onStep }: { set: Opti
         <div className="ib-optcap-main">{row(choice, false)}</div>
         {/* Every name of the set, unseen, in the same cell: the widest sets the card's width, so it is one width on every step. */}
         {set.choices.map((c) => (
-          <div key={c.attachmentId} className="ib-optcap-size" aria-hidden="true">
+          <div key={c.choice} className="ib-optcap-size" aria-hidden="true">
             {row(c, true)}
           </div>
         ))}

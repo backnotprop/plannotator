@@ -13,8 +13,9 @@
  *     by the window's own clock, and it stays returned when MacBook is back.
  *  5. MacBook away: a Snooze and an Unsnooze wait, say so, and apply when it is back.
  *  6. An older peer, when PLANNOTATOR_E2E_OLDER_BINARY names a real release from
- *     before Snooze: no Snooze on its rows or threads, the rest of the menu and
- *     the viewer unharmed; updated in place, Snooze appears with no reload.
+ *     before Snooze: Snooze on its rows and threads says why, writes nothing and
+ *     opens the Update dialog, the rest of the menu and the viewer unharmed;
+ *     updated in place, the real Snooze is there with no reload.
  *
  * Pictures land in PLANNOTATOR_SNOOZE_MACHINES_SHOTS, else .local/proof/snooze-machines.
  * Build the binary first (see inbox.spec.ts).
@@ -308,7 +309,7 @@ test('5. The home machine away: a Snooze and an Unsnooze wait, say so, and apply
   expect(errors).toEqual([]);
 });
 
-test('6. An older peer: no Snooze on its rows, nothing else harmed; updated in place, Snooze appears with no reload', async () => {
+test('6. An older peer: Snooze says why and writes nothing, nothing else harmed; updated in place, the real Snooze is there with no reload', async () => {
   test.skip(older === null, 'needs PLANNOTATOR_E2E_OLDER_BINARY, a real release from before Snooze');
   const mini = machine('Mini', older!);
   stillOlder = mini;
@@ -319,10 +320,16 @@ test('6. An older peer: no Snooze on its rows, nothing else harmed; updated in p
   expect(view.machines.find((m) => m.id === mini.id)?.snoozes).toBe(false);
 
   let menu = await menuOn(old);
-  await expect(menu.locator('[data-row-action="snooze"]')).toHaveCount(0);
+  await expect(menu.locator('[data-row-action="snooze"][data-snooze-blocked]')).toBeVisible();
   await expect(menu.locator('[data-row-action="archive"]')).toBeVisible();
-  await page.screenshot({ path: join(shots, 'older-peer-no-snooze.png') });
-  await page.keyboard.press('Escape');
+  await page.screenshot({ path: join(shots, 'older-peer-snooze-says-why.png') });
+  // No list of times, and no write: the same dialog as the word beside the machine.
+  await menu.locator('[data-row-action="snooze"]').click();
+  await expect(menu.locator('[data-snooze-choice]')).toHaveCount(0);
+  const dialog = page.locator('[data-dialog="machine-update-too-old"]');
+  await expect(dialog).toContainText('Snooze needs a newer Plannotator on Mini');
+  await dialog.getByRole('button', { name: 'Close' }).click();
+  expect((await read<{ waiting: unknown[] }>(studio, '/api/inbox/outbox')).waiting).toEqual([]);
 
   // Its own `stop`: a release this old cannot prove itself to the scratch teardown.
   expect(cli(mini, 'stop').status).toBe(0);
@@ -332,7 +339,7 @@ test('6. An older peer: no Snooze on its rows, nothing else harmed; updated in p
   await expect
     .poll(async () => {
       const menuNow = await menuOn(old);
-      const found = await menuNow.locator('[data-row-action="snooze"]').count();
+      const found = await menuNow.locator('[data-row-action="snooze"]:not([data-snooze-blocked])').count();
       await page.keyboard.press('Escape');
       return found;
     }, { timeout: 60_000, intervals: [2_000] })

@@ -19,12 +19,18 @@
  * never given one (MCP has no such field, and the window folds a block only
  * under the person's own messages).
  *
+ * A grill-me skill (any author's) also gets the grill-me note
+ * (`@plannotator/core/grill-me`), one PLANNOTATOR NOTE section at the end of
+ * the block: the only place Plannotator adds it (the owner, 2026-11-08: "if
+ * it's a skill ran from our UI, that's it").
+ *
  * Bounds: a body is capped at 20,000 characters by the server (and marked
  * truncated with its path); a message pastes at most 40,000 characters of
  * instructions, and a human-only skill past that is named with its folder
  * instead ("read SKILL.md in …"), the export's fallback wording.
  */
-import { INBOX_MESSAGE_SKILL_AUDIENCE, INBOX_REPLY_SKILL_AUDIENCE, type SkillBlockAudience } from '@plannotator/core/skill-reference-block';
+import { INBOX_MESSAGE_SKILL_AUDIENCE, INBOX_REPLY_SKILL_AUDIENCE, inboxSkillNoteSection, type SkillBlockAudience } from '@plannotator/core/skill-reference-block';
+import { GRILL_ME_NOTE_TEXT, isGrillMeSkill } from '@plannotator/core/grill-me';
 import type { InboxAnnotationRecord } from '@plannotator/core/inbox-types';
 import { fetchSkillCatalog, normalizeSkillContent } from '@plannotator/ui/utils/skillCatalog';
 import {
@@ -77,7 +83,10 @@ export function composeInboxSkillsBlock(
     pasted.set(ref.name, content);
     spent += content.content.length;
   }
-  return renderSkillReferencesBlock(refs, { contentOf: (name) => pasted.get(name), audience }).trimEnd();
+  const block = renderSkillReferencesBlock(refs, { contentOf: (name) => pasted.get(name), audience }).trimEnd();
+  // A grill-me skill (any author's, grill-me.ts): the note that sends the interview's questions back here as cards.
+  const grillMe = refs.find((ref) => isGrillMeSkill(ref.name));
+  return grillMe ? `${block}\n\n${inboxSkillNoteSection(grillMe.name, GRILL_ME_NOTE_TEXT)}` : block;
 }
 
 /** What `inboxSkillsBlock` reads; the window's own routes by default, a test's stand-ins otherwise. */
@@ -87,13 +96,36 @@ export interface InboxSkillSources {
 }
 
 /**
+ * Shape's switch as this window last read it (App.tsx sets it from the settings). The review skills' drawing lines
+ * go only while it is on (approval "code-review-029-shape-off"); off until the settings say otherwise.
+ */
+let reviewSkillsShape = false;
+
+/** The window read Shape's switch: the review skills pasted from now on carry their drawing lines only while on. */
+export function setReviewSkillsShape(on: boolean): void {
+  reviewSkillsShape = on;
+}
+
+/**
+ * Chapter diagrams as this window last read it (App.tsx sets it from the settings, Settings → Capabilities): the review
+ * skills' chapter diagram lines go only while it is on. On until the settings say otherwise.
+ */
+let reviewSkillsDiagrams = true;
+
+/** The window read Chapter diagrams: the review skills pasted from now on carry their diagram lines only while on. */
+export function setReviewSkillsDiagrams(on: boolean): void {
+  reviewSkillsDiagrams = on;
+}
+
+/**
  * A Plannotator skill's instructions (root `plannotator`: the review skills the
  * Inbox lists while Code review is on, and `/shape` while Shape is on), from the window's own text, never read
- * from disk. Undefined for any other skill.
+ * from disk. Undefined for any other skill. A review skill's drawing lines ride `shape` (Shape's switch), and its
+ * chapter diagram lines `diagrams` (Chapter diagrams).
  */
-export function builtinSkillContent(ref: SkillCatalogEntry): SkillExportContent | undefined {
+export function builtinSkillContent(ref: SkillCatalogEntry, shape: boolean = reviewSkillsShape, diagrams: boolean = reviewSkillsDiagrams): SkillExportContent | undefined {
   if (ref.root !== 'plannotator') return undefined;
-  const skill = inboxReviewSkill(ref.name) ?? shapeSkill(ref.name);
+  const skill = inboxReviewSkill(ref.name, { shape, diagrams }) ?? shapeSkill(ref.name);
   return skill ? { content: skill.body, truncated: false, dir: '', path: '' } : undefined;
 }
 

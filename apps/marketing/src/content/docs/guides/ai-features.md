@@ -33,7 +33,7 @@ You pick a provider as before (see below) when:
 
 - the session is in remote mode, or you open a `--tailscale` session with a Tailscale login other than the one that owns the computer
 - Plannotator was opened from OpenCode 1
-- the Claude Code mod is off, or Claude Code runs without it (older versions, `claude -p`, Windows)
+- the Claude Code mod is off, or Claude Code runs without it (older versions, `claude -p`)
 - you run the `plannotator` CLI yourself, outside an agent session
 
 Review Agents, Code Tour and Guided Review are separate from Ask AI. They always run their own Claude or Codex models (or another installed agent CLI), also in a session where Ask AI uses the session.

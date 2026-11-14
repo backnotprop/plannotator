@@ -35,6 +35,8 @@ export interface RawPage {
   waitFor(expression: string, timeoutMs?: number): Promise<boolean>;
   /** Two forced full collections, then the JS heap in use (bytes). */
   heapAfterGc(): Promise<{ jsHeapUsed: number; nodes: number; listeners: number }>;
+  /** A forced collection, then a heap snapshot: the JSON DevTools saves as a .heapsnapshot. */
+  heapSnapshot(): Promise<string>;
   close(): Promise<void>;
 }
 
@@ -201,6 +203,22 @@ export async function launchRawChromium(options: { width?: number; height?: numb
       const { metrics } = await call<{ metrics: { name: string; value: number }[] }>('Performance.getMetrics');
       const m = Object.fromEntries(metrics.map((x) => [x.name, x.value]));
       return { jsHeapUsed: m.JSHeapUsedSize ?? 0, nodes: m.Nodes ?? 0, listeners: m.JSEventListeners ?? 0 };
+    },
+    async heapSnapshot() {
+      const chunks: string[] = [];
+      const fn = (m: Message) => {
+        if (m.method === 'HeapProfiler.addHeapSnapshotChunk' && m.sessionId === sessionId) chunks.push(m.params.chunk);
+      };
+      listeners.add(fn);
+      try {
+        await call('HeapProfiler.enable');
+        await withTimeout(call('HeapProfiler.collectGarbage'), 60_000, 'collectGarbage');
+        // The chunks all arrive before the command's answer.
+        await withTimeout(call('HeapProfiler.takeHeapSnapshot', { reportProgress: false }), 180_000, 'takeHeapSnapshot');
+      } finally {
+        listeners.delete(fn);
+      }
+      return chunks.join('');
     },
     async close() {
       try {

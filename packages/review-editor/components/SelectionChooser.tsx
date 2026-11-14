@@ -1,6 +1,7 @@
 import React from 'react';
 import { createPortal } from 'react-dom';
 import { useVisibleViewportBounds, hasPrimaryCoarsePointer } from '@plannotator/ui/hooks/useViewportEnvironment';
+import { getPageMarks, holdPageMark } from '@plannotator/ui/utils/pageMarks';
 import { linesOffScreen, placeChooser, readSelectedLines, type ReadLines, type SelectionRange } from './selectionChooserPlace';
 
 /** Selected lines, as a host's selection action receives them. */
@@ -85,6 +86,9 @@ export function SelectionChooser({
     return () => cancelAnimationFrame(id);
   }, [start, end, side, endSide, position, toolbarRef]);
   const gone = dropped || (!!lines && linesOffScreen(lines, bounds));
+  // With `pageMarks` on (ui utils/pageMarks): `<html data-pn-selection-chooser>` while the bar carries
+  // `[data-selection-chooser]`, what comments.css's `html:has([data-selection-chooser])` matches.
+  React.useLayoutEffect(() => (gone || !getPageMarks() ? undefined : holdPageMark(document.documentElement, 'data-pn-selection-chooser')), [gone]);
   // No lines to read: above the pointer where they were picked, never off the screen.
   const placed: React.CSSProperties = lines
     ? placeChooser(lines, bar, { ...bounds, top: Math.max(bounds.top, lines.roof) })

@@ -10,9 +10,6 @@ import { stillWanted } from '../format/status.ts';
 import type { LoadIssue, LoadResult, SystemFiles } from '../format/types.ts';
 import { decodeUtf8, git, isGitRepo, lsTree, resolveCommit } from './git.ts';
 
-/** Where a drawing lives inside a repo. */
-export const DRAWING_DIR = '.plannotator/system';
-
 /** A file the loader should see: the drawing's own files, and .yml or stray .yaml files it reports. */
 const isDrawingFile = (rel: string) => /^(?:(?:sheets|revisions)\/)?[^/]+\.ya?ml$/.test(rel);
 const issue = (file: string, message: string): LoadIssue => ({ file, field: '', message });

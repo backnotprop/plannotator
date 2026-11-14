@@ -2,9 +2,11 @@ import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { InboxApiError, inboxApi, type MachineOffer, type MachineView, type OutboxView } from '../api';
 import { shortTime } from '../format';
 import { Icon } from '../icons';
-import { machineStatus } from '../machines';
+import { machineNotice, machineStatus } from '../machines';
+import { MachineUpdateButton } from './MachineUpdate';
 import { CodeBox, CopyButton } from './ConnectPicker';
 import { UnlinkLink } from './Devices';
+import { errorText } from '../toastError';
 
 /**
  * What a refused link means, in the window's words. The server's messages
@@ -12,14 +14,15 @@ import { UnlinkLink } from './Devices';
  * are said here; anything else shows the server's own sentence.
  */
 export function linkErrorText(error: unknown): string {
-  if (!(error instanceof InboxApiError)) return error instanceof Error ? error.message : 'The link did not go through.';
+  // A fetch that never reached the Inbox (a phone on a dropped link) says so in plain words, never the browser's own.
+  if (!(error instanceof InboxApiError)) return errorText(error, 'The link did not go through.');
   if (error.code === 'validation_error') {
     if (error.message.startsWith('address:')) return "Type the other machine's address on your tailnet, like mini.tail1234.ts.net:8443.";
     if (error.message.startsWith('link:')) return 'That is not a link code. A link code starts with plannotator://link.';
     return "Paste the other machine's link code, or type its address and six digits.";
   }
   if (error.code === 'no_way_back') return 'The other machine needs a way back to this one, and Tailscale could not publish this machine. Check Tailscale here, then link again.';
-  if (error.code === 'local_only') return "Linking works only on this computer's own screen.";
+  if (error.code === 'owner_only' || error.code === 'local_only') return "Only this computer's owner can link machines.";
   return error.message;
 }
 
@@ -28,29 +31,34 @@ function waitingText(waiting: number): string {
   return `${waiting} waiting to send`;
 }
 
-/** The line under a linked machine: its state, then the answers waiting for it. */
-function machineLine(machine: MachineView): string {
+/** The line under a linked machine: its state, what its update says when this page offers updates, then the answers waiting for it. */
+function machineLine(machine: MachineView, offersUpdates: boolean): string {
   const status = machineStatus(machine);
-  return machine.waiting > 0 ? `${status} · ${waitingText(machine.waiting)}` : status;
+  const notice = offersUpdates ? machineNotice(machine) : null;
+  const withNotice = notice ? `${status} · ${notice.line}` : status;
+  return machine.waiting > 0 ? `${withNotice} · ${waitingText(machine.waiting)}` : withNotice;
 }
 
 export interface MachinesSectionProps {
   /** Every machine the merged view knows, this one included. */
   machines: MachineView[];
-  via: 'local' | 'tailnet';
+  /** A tailnet login other than the owner's (`tailnetGuest`): it sees the machines, and links or unlinks none. */
+  guest: boolean;
   /** After a link or an Unlink: read the machines again. */
   onChanged: () => void;
+  /** Open a machine's update dialog. Absent on a page that offers no updates (a tailnet guest's). */
+  onMachineUpdate?: (machineId: string) => void;
 }
 
 /**
  * Settings → Machines: the other computers whose threads this Inbox shows.
  * Each one keeps its own Inbox; a link works both ways, over the tailnet.
  * Built like Devices → Phones: one card, a row per machine with Unlink
- * (asked twice), then the row that starts a link. Linking is local only,
- * like Pair a phone, so a code never shows on another device.
+ * (asked twice), then the row that starts a link. The owner links from this
+ * computer or from any of their own devices over the tailnet; a guest does not.
  */
-export function MachinesSection({ machines, via, onChanged }: MachinesSectionProps) {
-  const remote = via !== 'local';
+export function MachinesSection({ machines, guest, onChanged, onMachineUpdate }: MachinesSectionProps) {
+  const remote = guest;
   const linked = machines.filter((machine) => !machine.self);
   // Why this Inbox's own door is not on the tailnet (its port held by another mapping): linked machines cannot reach it until that is fixed.
   const doorError = machines.find((machine) => machine.self)?.reason ?? null;
@@ -88,7 +96,7 @@ export function MachinesSection({ machines, via, onChanged }: MachinesSectionPro
       {remote && (
         <div className="ib-callout" data-machines-remote="">
           <Icon name="lock" />
-          <span>You opened this page over your tailnet. Linking and Unlink work only on this computer&apos;s own screen, so a code is never shown to another device.</span>
+          <span>Linking and Unlink are for this computer&apos;s owner.</span>
         </div>
       )}
       {doorError && (
@@ -105,9 +113,10 @@ export function MachinesSection({ machines, via, onChanged }: MachinesSectionPro
             </span>
             <span className="ib-txt">
               <span className="ib-l">{machine.name}</span>
-              <span className="ib-desc">{machineLine(machine)}</span>
+              <span className="ib-desc">{machineLine(machine, !!onMachineUpdate)}</span>
             </span>
             <span className="ib-ctl">
+              {onMachineUpdate && <MachineUpdateButton machine={machine} onPress={() => onMachineUpdate(machine.id)} />}
               {!remote && (
                 <UnlinkLink
                   name={machine.name}

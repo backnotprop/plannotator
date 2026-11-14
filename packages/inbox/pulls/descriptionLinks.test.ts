@@ -1,0 +1,65 @@
+import { describe, expect, test } from 'bun:test';
+import { forgeBody, forgeFileUrl, isLiveLink } from './descriptionLinks';
+
+const github = { url: 'https://github.com/acme/app/pull/12', platform: 'github' as const, repo: 'acme/app', head: 'kim/retry', head_repo: 'acme/app', head_sha: 'a'.repeat(40) };
+const gitlab = { url: 'https://gitlab.example/group/app/-/merge_requests/9', platform: 'gitlab' as const, repo: 'group/app', head: 'kim/retry', head_repo: 'group/app', head_sha: null };
+
+describe("a path in a PR's description", () => {
+  test('is the file on the forge, at the head commit, its anchor kept', () => {
+    expect(forgeFileUrl(github, null, 'docs/guide.md#setup')).toBe(`https://github.com/acme/app/blob/${'a'.repeat(40)}/docs/guide.md#setup`);
+    expect(forgeFileUrl(github, 'b'.repeat(40), './src/app.ts')).toBe(`https://github.com/acme/app/blob/${'b'.repeat(40)}/src/app.ts`);
+  });
+
+  test("a path from the forge's root is the repository's: it never names this window's address", () => {
+    expect(forgeFileUrl(github, null, '/api/inbox/settings')).toBe(`https://github.com/acme/app/blob/${'a'.repeat(40)}/api/inbox/settings`);
+  });
+
+  test('GitLab has its own address; with no commit known, the branch, its slash kept', () => {
+    expect(forgeFileUrl(gitlab, null, 'docs/guide.md')).toBe('https://gitlab.example/group/app/-/blob/kim/retry/docs/guide.md');
+  });
+
+  test('a fork with no commit known has no address here: the branch is not in this repository', () => {
+    expect(forgeFileUrl({ ...github, head_repo: 'kim/app', head_sha: null }, null, 'docs/guide.md')).toBeNull();
+  });
+
+  test('none past the repository, for a drive path, or for nothing at all', () => {
+    expect(forgeFileUrl(github, null, '../../../../settings')).toBeNull();
+    expect(forgeFileUrl(github, null, 'C:\\Windows\\x')).toBeNull();
+    expect(forgeFileUrl(github, null, '/')).toBeNull();
+  });
+});
+
+describe('which links stay live', () => {
+  test("the web's schemes only, as the browser parses the link", () => {
+    for (const href of ['https://a.example/', 'http://a.example/', 'mailto:kim@a.example']) expect(isLiveLink(new URL(href))).toBe(true);
+    for (const href of ['vscode://file/etc/passwd', 'ssh://a.example', 'tel:123', 'java\tscript:alert(1)', 'file:///etc/passwd']) expect(isLiveLink(new URL(href))).toBe(false);
+  });
+});
+
+describe('forgeBody', () => {
+  test("a line of only <br> goes, as dependabot writes it; one among words or in a code fence stays", () => {
+    expect(forgeBody('Bumps it.\n\n<br />\n\nCommits')).toBe('Bumps it.\n\n\nCommits');
+    expect(forgeBody('one<br>two')).toBe('one<br>two');
+    expect(forgeBody('```html\n<br />\n```')).toBe('```html\n<br />\n```');
+  });
+  test("HTML comments go, on a line, across lines and left open, as the forge hides them; in code they stay", () => {
+    expect(forgeBody('<!-- Please describe -->\n\nReal words')).toBe('\nReal words');
+    expect(forgeBody('before <!-- hidden --> after')).toBe('before  after');
+    expect(forgeBody('a\n<!-- one\ntwo\nthree -->\nb')).toBe('a\nb');
+    expect(forgeBody('a\n<!-- never closed\nb')).toBe('a');
+    expect(forgeBody('use `<!-- x -->` here')).toBe('use `<!-- x -->` here');
+    expect(forgeBody('```\n<!-- x -->\n```')).toBe('```\n<!-- x -->\n```');
+    expect(forgeBody('<!-- only a template -->').trim()).toBe('');
+  });
+  test(":robot: is the emoji the forge draws, outside code; a word GitHub has no emoji for stays", () => {
+    expect(forgeBody('## :robot: Size report for this branch\n\n:white_check_mark: :+1: :-1: :100:')).toBe('## 🤖 Size report for this branch\n\n✅ 👍 👎 💯');
+    expect(forgeBody('Run `:robot:` as is')).toBe('Run `:robot:` as is');
+    expect(forgeBody('```\n:robot:\n```')).toBe('```\n:robot:\n```');
+    expect(forgeBody(':octocat: at 10:30:00 and :not_an_emoji:')).toBe(':octocat: at 10:30:00 and :not_an_emoji:');
+  });
+  test("a shortcode in a link's address stays, so the link still goes where it went; its words still get emoji", () => {
+    expect(forgeBody('[:tada: docs](https://x.test/a:tada:b) :tada:')).toBe('[🎉 docs](https://x.test/a:tada:b) 🎉');
+    expect(forgeBody('[docs](<https://x.test/a b:tada:>) :tada:')).toBe('[docs](<https://x.test/a b:tada:>) 🎉');
+    expect(forgeBody('<https://x.test/a:tada:b> and https://x.test/c:robot:d, :robot:')).toBe('<https://x.test/a:tada:b> and https://x.test/c:robot:d, 🤖');
+  });
+});

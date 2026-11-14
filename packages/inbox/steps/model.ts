@@ -1,7 +1,10 @@
 /**
- * Thread steps in the window (approval "inbox-thread-steps", 2026-11-03, A1
- * "Linear"): what the foot's button, its popover or sheet, and the Board's
- * opened card draw from a thread's lists. Pure: no DOM, no fetch.
+ * Thread steps in the window (approval "inbox-thread-steps", 2026-11-03; the
+ * marks are "inbox-checklist-spinners-2026-11-07", mock 1 "today's layout with
+ * spinners", its 11:25Z addendum): what the foot's button and its popover or
+ * sheet draw from a thread's lists. The checklist lives only in its thread
+ * (owner, 2026-11-09): no list row or Board card shows it. Pure: no DOM, no
+ * fetch.
  *
  * One list per agent session (the server's read, latest first). A cleared
  * list (no steps) shows nothing. Done of total counts every step but dropped
@@ -19,36 +22,9 @@ export function shownStepLists(lists: readonly InboxStepsWire[]): InboxStepsWire
   return lists.filter((list) => list.steps.length > 0);
 }
 
-/**
- * A Board card's lists (approval part 4: "the thread is one Board card; its steps are inside it"): the lists of
- * every thread the card links (the cards read's `steps`), the latest written first. The lane card's mark is the
- * first one's.
- */
-export function cardStepLists(threads: readonly string[], steps: Readonly<Record<string, readonly InboxStepsWire[]>> | undefined): InboxStepsWire[] {
-  if (!steps) return [];
-  const lists = threads.flatMap((id) => shownStepLists(steps[id] ?? []));
-  return lists.sort((a, b) => (Date.parse(b.updated_at) || 0) - (Date.parse(a.updated_at) || 0));
-}
-
-/**
- * The opened Board card's lists, said the way its head says the session: once the head reads "ended" (the Board's
- * rule, not live), the card agent's own lists read ended too (the grey dashed mark, "· as of 2:40 PM"), so one card
- * never shows an ended agent beside a list still turning. Another session's list, or any other head, as served.
- */
-export function stepsAsCardHeadSays<T extends Pick<InboxStepsWire, 'presence' | 'agent'>>(lists: readonly T[], session: string | null, state: string | null): T[] {
-  if (state !== 'ended' || !session) return [...lists];
-  return lists.map((list) => (list.agent.session === session && list.presence !== 'ended' ? { ...list, presence: 'ended' } : list));
-}
-
 /** The Board card the checklist head's Board icon opens: the first card (the Board's order) that links the thread, not a cancelled one. */
 export function threadBoardCard<T extends { threads: readonly string[]; column: string }>(cards: readonly T[], threadId: string): T | null {
   return cards.find((card) => card.column !== 'dropped' && card.threads.includes(threadId)) ?? null;
-}
-
-/** The lane card's mark, read aloud and on hover: "3 of 6 steps done" (no count on the card itself). */
-export function stepsDoneWords(list: Pick<InboxStepsWire, 'steps'>): string {
-  const { done, total } = stepsCount(list);
-  return `${done} of ${total} steps done`;
 }
 
 /**
@@ -124,14 +100,15 @@ export function stepsWaitTarget(
   return null;
 }
 
-/** The class the presence gives the panel and the button: the in-progress mark turns only while `working`. */
+/** The class the presence gives a list and the foot's button: the spinner turns only while `working`. */
 export function presenceClass(presence: InboxStepsPresence): string {
   return `ib-st-${presence}`;
 }
 
 /**
- * The plan's mark (Linear's project progress): a ring, and the done share as a wedge inside it. The same on the
- * button, the head, the Board's lane card and its opened card. `path` is null for none done; `full` for all.
+ * The plan's mark (Linear's project progress): a ring, and the done share as a wedge inside it. On the foot's button
+ * when no step is worked on or waits (fresh, all done), and on each list's head. `path` is null for none done; `full`
+ * for all.
  */
 export function pieGeometry(done: number, total: number, size: number): { c: number; r: number; ri: number; path: string | null; full: boolean } {
   const c = size / 2;
@@ -144,4 +121,52 @@ export function pieGeometry(done: number, total: number, size: number): { c: num
   const x = c + ri * Math.sin(angle);
   const y = c - ri * Math.cos(angle);
   return { c, r, ri, path: `M${c} ${c}V${c - ri}A${ri} ${ri} 0 ${share > 0.5 ? 1 : 0} 1 ${x.toFixed(2)} ${y.toFixed(2)}Z`, full: false };
+}
+
+/**
+ * The person answered in the thread since a time (`inboxPersonAnsweredSince` over the thread's messages: a reply of
+ * theirs or a 👍 Looks good). Where the window has no thread (the intro's picture), nobody answered.
+ */
+export type StepsAnsweredSince = (since: string) => boolean;
+const nobodyAnswered: StepsAnsweredSince = () => false;
+
+/**
+ * A list still waits on the person, by the server's rule for the row's `steps_waiting` (`inboxStepsWaitOnPerson`): a
+ * step is `waiting`, its session has not ended (an ended session never updates its list), and the person has not
+ * answered since the list was last written. The foot's button, its name and its list agree by it.
+ */
+export function stepsListWaits(list: Pick<InboxStepsWire, 'steps' | 'presence' | 'updated_at'>, answeredSince: StepsAnsweredSince = nobodyAnswered): boolean {
+  return list.presence !== 'ended' && list.steps.some((step) => step.status === 'waiting') && !answeredSince(list.updated_at);
+}
+
+/**
+ * The foot button's mark (approval "inbox-checklist-spinners-2026-11-07", mock 1): the current step's mark, the amber
+ * pause while the list waits on the person (`stepsListWaits`), else the spinner while a step is worked on; null
+ * otherwise (fresh, all done), when the button keeps the pie.
+ */
+export function stepsButtonMark(list: Pick<InboxStepsWire, 'steps' | 'presence' | 'updated_at'>, answeredSince: StepsAnsweredSince = nobodyAnswered): 'waiting' | 'doing' | null {
+  if (stepsListWaits(list, answeredSince)) return 'waiting';
+  if (list.steps.some((step) => step.status === 'doing')) return 'doing';
+  return null;
+}
+
+/** The list the foot's button shows: one that waits on the person first (that is what they need to see), else the newest. */
+export function stepsButtonList<T extends Pick<InboxStepsWire, 'steps' | 'presence' | 'updated_at'>>(lists: readonly T[], answeredSince: StepsAnsweredSince = nobodyAnswered): T | null {
+  return lists.find((list) => stepsListWaits(list, answeredSince)) ?? lists[0] ?? null;
+}
+
+/**
+ * What the foot's button shows, as a key: the list it shows, its count, its mark, "as of" and "+1". The thread's foot
+ * row fits itself again whenever it changes (a session ending mid-read adds "as of"; another list can win).
+ */
+export function stepsButtonSig(lists: readonly InboxStepsWire[], answeredSince: StepsAnsweredSince = nobodyAnswered): string {
+  const shown = stepsButtonList(lists, answeredSince);
+  if (!shown) return '';
+  return [shown.id, stepsCount(shown).text, stepsButtonMark(shown, answeredSince) ?? 'pie', shown.presence === 'ended' ? 'asof' : '', lists.length].join(':');
+}
+
+/** The waiting step the button's name adds ("; waiting on you: Pick the window"), while its list waits; else "". */
+export function stepsWaitingNameTail(list: Pick<InboxStepsWire, 'steps' | 'presence' | 'updated_at'>, answeredSince: StepsAnsweredSince = nobodyAnswered): string {
+  const step = stepsListWaits(list, answeredSince) ? list.steps.find((one) => one.status === 'waiting') : undefined;
+  return step ? `; waiting on you: ${step.step}` : '';
 }

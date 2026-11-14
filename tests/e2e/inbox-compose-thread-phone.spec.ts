@@ -11,10 +11,10 @@
  * replays the owner's iOS readings (390 x 660 less 403), Chromium the Android ones; 320 x 568 less 353 is the narrowest
  * phone. Proved against the compiled binary under a temp PLANNOTATOR_DATA_DIR (PLANNOTATOR_INBOX_CONNECT=0, no browser):
  *
- * - A name typed first, then the agent picked: the row is on screen with the keyboard up, under To, over the message,
- *   and holds the typed name; Send stays in reach.
+ * - A name typed first, then the agent picked (To is the pill in the foot's row, its list a bottom sheet): the row is on
+ *   screen with the keyboard up, under the top bar, over the message, and holds the typed name; To and Send stay in reach.
  * - The agent picked first, then the message typed: the row is on screen with its suggestion.
- * - A narrow desktop window (Chromium, 600 x 800): the row and its name survive the pick.
+ * - A narrow desktop window (Chromium, 600 x 800, so the phone's layout): the row and its name survive the pick.
  *
  * Build the binary first (see inbox.spec.ts). PLANNOTATOR_E2E_SHOTS_DIR names a folder for the pictures (default
  * .local/proof/compose-thread-phone), the keyboard's stand-in drawn in grey.
@@ -50,7 +50,7 @@ test.beforeAll(async () => {
   mkdirSync(shotsDir, { recursive: true });
   const root = inboxScratch('plannotator-inbox-compose-thread-phone-');
   const dataDir = join(root, 'data');
-  mkdirSync(dataDir);
+  mkdirSync(dataDir, { recursive: true });
   markTourDecided(dataDir);
   const env = {
     PATH: process.env.PATH ?? '',
@@ -130,14 +130,14 @@ const sheetOf = (page: Page) => page.locator('dialog[data-compose]');
 async function openCompose(page: Page): Promise<void> {
   await page.goto(world.url);
   await page.locator('[data-open-compose]:visible').first().click();
-  await expect(sheetOf(page).locator('.ib-cp-tobtn')).not.toHaveAttribute('data-loading', /.*/);
+  await expect(sheetOf(page).locator('[data-compose-to]')).not.toHaveAttribute('data-loading', /.*/);
 }
 
-/** Opens the picker and picks the live session, as a finger does. Focus then goes to the message. */
+/** Opens To's sheet from the pill in the foot's row and picks the live session, as a finger does. Focus then goes to the message. */
 async function pickAgent(page: Page, tap: boolean): Promise<void> {
   const sheet = sheetOf(page);
-  const to = sheet.locator('.ib-cp-tobtn');
-  const row = page.locator(`[data-compose-session="${SESSION}"]`);
+  const to = sheet.locator('.ib-cp-foot [data-compose-to]');
+  const row = sheet.locator(`[data-compose-to-sheet] [data-compose-session="${SESSION}"]`);
   if (tap) {
     await to.tap();
     await row.tap();
@@ -145,20 +145,22 @@ async function pickAgent(page: Page, tap: boolean): Promise<void> {
     await to.click();
     await row.click();
   }
-  await expect(sheet.locator(`.ib-cp-tobtn[data-compose-to="${SESSION}"]`)).toBeVisible();
+  await expect(sheet.locator(`.ib-cp-foot [data-compose-to="${SESSION}"]`)).toBeVisible();
   await expect(sheet.locator('[data-compose-text] textarea')).toBeFocused();
 }
 
 interface Seen {
   thread: { top: number; bottom: number; height: number } | null;
   chip: { top: number; bottom: number } | null;
-  toBottom: number;
+  barBottom: number;
+  to: { top: number; bottom: number };
   footTop: number;
+  footBottom: number;
   seen: number;
   send: { bottom: number; onTop: boolean };
 }
 
-/** Where the Thread row, its chip, To, the foot and Send are. A part not drawn is null. */
+/** Where the Thread row, its chip, the top bar, To, the foot and Send are. A part not drawn is null. */
 async function read(page: Page): Promise<Seen> {
   return page.evaluate(() => {
     const dialog = document.querySelector('dialog[data-compose]')!;
@@ -174,19 +176,24 @@ async function read(page: Page): Promise<Seen> {
     return {
       thread: thread && { top: thread.top, bottom: thread.bottom, height: thread.height },
       chip: chip && { top: chip.top, bottom: chip.bottom },
-      toBottom: rect('.ib-cp-tobtn')!.bottom,
+      barBottom: rect('.ib-cp-bar')!.bottom,
+      to: { top: rect('[data-compose-to]')!.top, bottom: rect('[data-compose-to]')!.bottom },
       footTop: rect('.ib-cp-foot')!.top,
+      footBottom: rect('.ib-cp-foot')!.bottom,
       seen: vv.offsetTop + vv.height,
       send: { bottom: send.bottom, onTop: !!hit?.closest('[data-compose-send]') },
     };
   });
 }
 
-/** The Thread row and its whole chip are on screen, under To and over the foot. */
+/** The Thread row and its whole chip are on screen, under the top bar and over the foot, where To is. */
 function threadOnScreen(l: Seen, name: string): void {
   expect(l.thread, `${name}: the Thread row is drawn`).toBeTruthy();
   expect(l.chip, `${name}: the Thread chip is drawn`).toBeTruthy();
-  expect(l.chip!.top, `${name}: the chip is under To`).toBeGreaterThanOrEqual(l.toBottom - 0.5);
+  expect(l.chip!.top, `${name}: the chip is under the top bar`).toBeGreaterThanOrEqual(l.barBottom - 0.5);
+  expect(l.to.top, `${name}: To is on the foot's row`).toBeGreaterThanOrEqual(l.footTop - 0.5);
+  expect(l.to.bottom, `${name}: To is on the foot's row`).toBeLessThanOrEqual(l.footBottom + 0.5);
+  expect(l.to.bottom, `${name}: To ends above the keyboard`).toBeLessThanOrEqual(l.seen + 0.5);
   expect(l.chip!.bottom, `${name}: the chip is over the foot`).toBeLessThanOrEqual(l.footTop + 0.5);
   expect(l.chip!.bottom, `${name}: the chip is inside its row (not cut)`).toBeLessThanOrEqual(l.thread!.bottom + 0.5);
   expect(l.chip!.top, `${name}: the chip is inside its row (not cut)`).toBeGreaterThanOrEqual(l.thread!.top - 0.5);

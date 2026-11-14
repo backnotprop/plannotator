@@ -32,7 +32,7 @@ beforeEach(() => {
   sends = [];
   copied = [];
   answer = () => new Response(JSON.stringify({ thread_id: 'msg_answer', message: {}, replayed: false }));
-  window.location.hash = '#settings/decision-data';
+  window.location.hash = '#settings/activity';
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     if (url.includes('/api/inbox/sessions')) return new Response(JSON.stringify({ serverSession: 's', home: '/made/up', projects: live }));
@@ -155,7 +155,7 @@ test.skipIf(!hasDom)('with no agent running it says so and offers Copy of the qu
   expect(copy(el)!.textContent).toContain('Copied');
   await press(el);
   expect(sends).toEqual([]);
-  expect(window.location.hash).toBe('#settings/decision-data');
+  expect(window.location.hash).toBe('#settings/activity');
   // Changing the question takes the Copied mark back.
   type(el, 'And when?');
   expect(copy(el)!.textContent).not.toContain('Copied');
@@ -194,7 +194,7 @@ test.skipIf(!hasDom)('when the only agent went while the box was open, the words
   await until(() => el.querySelector('[data-ask-none]') !== null, 'no agent');
   expect(box(el).value).toBe('Why did we drop DockView?');
   expect(copy(el)).not.toBeNull();
-  expect(window.location.hash).toBe('#settings/decision-data');
+  expect(window.location.hash).toBe('#settings/activity');
   expect(el.querySelector('[data-ask-error]')).toBeNull();
 });
 
@@ -206,7 +206,7 @@ test.skipIf(!hasDom)('a press that fails says so and keeps the words; pressing a
   await press(el);
   await until(() => el.querySelector('[data-ask-error]') !== null, 'the error');
   expect(el.querySelector('[data-ask-error]')!.textContent).toContain('Something is off.');
-  expect(window.location.hash).toBe('#settings/decision-data');
+  expect(window.location.hash).toBe('#settings/activity');
   expect(box(el).value).toBe('Why did we drop DockView?');
   await press(el);
   expect(sends.length).toBe(2);

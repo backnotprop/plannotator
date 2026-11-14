@@ -2,8 +2,8 @@
  * The board, as the Inbox opens it (lazy: `#shape-board`). ShapeSurface
  * without its Code view (approval "shape-whats-changed": the guided review is
  * another part of the review, so the board does not embed it). With a review,
- * What's changed and the board's `file:line` links open the review's own
- * guided review (`review`); without one, a `file:line` opens the file viewer.
+ * a place in code on the board (a drawn part's `data-code`) opens the review's
+ * own guided review (`review`); without one, the file viewer.
  * The shared Code view (`ShapeCode`, `@plannotator/guide-viewer/ShapeCodeGuide`)
  * stays in its packages for other hosts. Checked under tsconfig.guide.json;
  * the window sees its shape in board-module.d.ts.
@@ -11,6 +11,7 @@
 import { useMemo } from 'react';
 import { ShapeSurface, type ShapeBoxOptions } from '@plannotator/ui/components/shape';
 import { OpenInCodeSpans } from '../components/OpenIn';
+import { markShapeDock, markShapePill } from '../pageMarks';
 import type { ShapeBoardProps } from './types';
 import type BoardShape from './board-module';
 
@@ -27,15 +28,10 @@ async function readAsset(url: string): Promise<string | null> {
   });
 }
 
-const BOX_SELECT: ShapeBoxOptions = {
-  readAsset,
-  // STUB (proto/shape-box-comment): the word is drawn; Show me on boards is another branch's (#2669). It logs what it would receive.
-  onShowMe: (selection, text) => {
-    void selection.picture.then((picture) => console.info('[shape-box] Show me stub', JSON.stringify({ ...selection, picture: picture ? `${picture.slice(0, 40)}… (${picture.length} chars)` : null, text })));
-  },
-};
+// The box's Show me is the board's own (`host.showMe`, the Inbox's): no `onShowMe` here.
+const BOX_SELECT: ShapeBoxOptions = { readAsset };
 
-export default function ShapeBoard({ host, id, onClose, onCode, renderThread, initialView, initialPanel, onNavigate, headStart, review, crosshair = false, onAddToReply }: ShapeBoardProps) {
+export default function ShapeBoard({ host, id, onClose, onCode, renderThread, initialView, initialPanel, onNavigate, headStart, headSide, review, crosshair = false, onAddToReply }: ShapeBoardProps) {
   // The crosshair is the Inbox's (its ShapeLayer asks for it): the standalone page keeps Annotate.
   const boxSelect = useMemo<ShapeBoxOptions | undefined>(() => (!crosshair ? undefined : onAddToReply ? { ...BOX_SELECT, onAddToReply } : BOX_SELECT), [crosshair, onAddToReply]);
   return (
@@ -51,11 +47,17 @@ export default function ShapeBoard({ host, id, onClose, onCode, renderThread, in
       renderThread={renderThread}
       readFirst
       darkContrast
+      stackBadges
       boxSelect={boxSelect}
       initialView={initialView}
       initialPanel={initialPanel}
       onNavigate={onNavigate}
       headStart={headStart}
+      headSide={headSide}
+      // Every board here sits in a [data-shape-layer] (ShapeBoardLayer, the Shape page): its dock and its update pill
+      // mark <body> for the toast's room (pageMarks.ts).
+      dockRef={markShapeDock}
+      pillRef={markShapePill}
     />
     </OpenInCodeSpans>
   );

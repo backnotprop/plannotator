@@ -220,15 +220,6 @@ describe("the group", () => {
     expect(say(store, docs.id, "From A.", { thread: "release" }).thread_id).toBe(open_.thread_id);
   });
 
-  test("a session's default thread is one across the folders", () => {
-    const { store, docs, site } = open();
-    const first = say(store, site.id, "From B.", { session: "ses_x" });
-    store.combineProject(site.id, docs.id);
-    expect(say(store, docs.id, "From A.", { session: "ses_x" }).thread_id).toBe(first.thread_id);
-    // Another session keeps its own.
-    expect(say(store, docs.id, "Someone else.", { session: "ses_y" }).thread_id).not.toBe(first.thread_id);
-  });
-
   test("a combine takes over no live conversation: a name open in both folders stays each folder's, through an undo", () => {
     const { store, docs, site } = open();
     const inA = say(store, docs.id, "A's release.", { thread: "release" });
@@ -245,15 +236,16 @@ describe("the group", () => {
     expect(store.thread(inB.thread_id)!.messages.map((m) => m.id)).toEqual([inB.id, fromB.id]);
   });
 
-  test("a session with an open thread in each folder stays in the one it writes from, and joins the other's only when its own is done", () => {
+  test("a send with no name and no reply_to starts a new thread from either folder, though the session has one open in each", () => {
     const { store, docs, site } = open();
     const inA = say(store, docs.id, "From A.", { session: "ses_x" });
     const inB = say(store, site.id, "From B.", { session: "ses_x" });
     store.combineProject(site.id, docs.id);
-    expect(say(store, docs.id, "A again.", { session: "ses_x" }).thread_id).toBe(inA.thread_id);
-    expect(say(store, site.id, "B again.", { session: "ses_x" }).thread_id).toBe(inB.thread_id);
-    store.resolveThread(inA.thread_id, true);
-    expect(say(store, docs.id, "A's is done.", { session: "ses_x" }).thread_id).toBe(inB.thread_id);
+    for (const [project, body] of [[docs.id, "A again."], [site.id, "B again."]] as const) {
+      const next = say(store, project, body, { session: "ses_x" });
+      expect(next.thread_id).toBe(next.id);
+      expect([inA.thread_id, inB.thread_id]).not.toContain(next.thread_id);
+    }
   });
 
   test("a retry from the other folder with the same idempotency key lands once", () => {

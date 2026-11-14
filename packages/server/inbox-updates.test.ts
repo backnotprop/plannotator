@@ -280,6 +280,28 @@ describe("Update now", () => {
     expect(readUpdateState(dataDir).pending).toMatchObject({ version: "0.28.12", by: "person" });
   });
 
+  test("the installer gets the login shell's PATH once the Inbox has read it (claude and nvm's node outside its own PATH)", async () => {
+    // A sandboxed Inbox's login shell is PLANNOTATOR_TEST_LAUNCH_PATH (inbox.ts), never the person's.
+    const saved = { sandbox: process.env.PLANNOTATOR_TEST_SANDBOX, path: process.env.PLANNOTATOR_TEST_LAUNCH_PATH };
+    process.env.PLANNOTATOR_TEST_SANDBOX = "1";
+    process.env.PLANNOTATOR_TEST_LAUNCH_PATH = "/opt/login-shell/bin:/usr/bin";
+    try {
+      const server = await start();
+      await waitFor(() => health(server), (u) => u !== null);
+      // New message's sessions read is what reads the login shell.
+      await fetch(`http://127.0.0.1:${server.port}/api/inbox/sessions`);
+      await Bun.sleep(100);
+      expect((await post(server, "/api/inbox/update")).status).toBe(200);
+      expect(launches).toHaveLength(1);
+      expect(launches[0]!.extraPath).toEqual(["/opt/login-shell/bin", "/usr/bin"]);
+    } finally {
+      if (saved.sandbox === undefined) delete process.env.PLANNOTATOR_TEST_SANDBOX;
+      else process.env.PLANNOTATOR_TEST_SANDBOX = saved.sandbox;
+      if (saved.path === undefined) delete process.env.PLANNOTATOR_TEST_LAUNCH_PATH;
+      else process.env.PLANNOTATOR_TEST_LAUNCH_PATH = saved.path;
+    }
+  });
+
   test("a tab left open on an older Inbox (another serverSession) gets 409 and starts nothing", async () => {
     const server = await start();
     await waitFor(() => health(server), (u) => u !== null);

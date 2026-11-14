@@ -296,6 +296,13 @@ export function ReaderApp({ init }: { init: ReaderInit }) {
             <OverviewDiagram source={diagram.source} onChapter={scrollToChapter} />
           </Suspense>
         ) : null,
+      // A chapter's Mermaid diagram, drawn like the overview's (each render takes its own drawing id).
+      renderChapterDiagram: (diagram) =>
+        diagram.kind === "mermaid" ? (
+          <Suspense fallback={<pre className="overflow-x-auto whitespace-pre rounded-md bg-muted/50 p-3 font-mono text-[11px] text-muted-foreground">{diagram.source}</pre>}>
+            <OverviewDiagram source={diagram.source} onChapter={scrollToChapter} />
+          </Suspense>
+        ) : null,
       renderLink: (href, label, key) => {
         const symbol = href.startsWith("symbol:");
         if (!symbol && !href.startsWith("code:")) return null;

@@ -163,7 +163,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   mkdirSync(proofDir, { recursive: true });
   const root = inboxScratch('plannotator-inbox-ended-e2e-');
   const dataDir = join(root, 'data');
-  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: NO_BROWSER };
+  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: NO_BROWSER };
   const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
   expect(started.status, started.stderr).toBe(0);
   const url = started.stdout.trim();
@@ -294,7 +294,7 @@ test('the asking session stopped and another is live: the thread says so, Send a
   const mine = pane.locator('article.ib-message[data-author="person"]');
   await expect(mine.locator('.ib-to')).toHaveText('to Pi (another session)');
   // The taker's connection polls idle: it takes it within seconds.
-  await expect(pane.locator('[data-delivery="sending"]')).toHaveText('Sending to Pi (another session)…');
+  await expect(pane.locator('[data-delivery="sending"]').locator('.ib-dl-text')).toHaveText('Sending to Pi (another session)…');
 
   await taker.deliver(command.id);
   await expect(pane.locator('[data-delivery="delivered"]')).toHaveText(/^Delivered to Pi \(another session\), \d{1,2}:\d{2} [AP]M$/);
@@ -320,7 +320,7 @@ test('nothing live: the note says the reply will wait, Send sends at once, and t
   await shot('3-none-live');
   await pane.locator('.ib-pfoot').getByRole('button', { name: 'Send', exact: true }).click();
   await expect(pane.locator('[data-route-choice]')).toHaveCount(0);
-  await expect(pane.locator('[data-delivery="saved"]')).toHaveText(
+  await expect(pane.locator('[data-delivery="saved"]').locator('.ib-dl-text')).toHaveText(
     "Saved for Pi. That session has ended; it gets this only if it's resumed.",
   );
   const last = (await threadMessages()).at(-1)!;
@@ -361,7 +361,7 @@ test('a saved reply moves to a session that started later, which then keeps the 
 
   await pane.locator('.ib-pfoot').getByRole('button', { name: 'Reply', exact: true }).click();
   await expect(pane.locator('[data-recipient]')).not.toHaveAttribute('aria-label', /ended/);
-  await pane.locator('textarea').first().fill('And log each retry.');
+  await pane.locator('textarea:not([data-question-other])').first().fill('And log each retry.');
   await pane.locator('.ib-pfoot').getByRole('button', { name: 'Send', exact: true }).click();
   await expect(pane.locator('[data-recipient-list]')).toHaveCount(0);
   const next = await waitFor('the next reply handed to the later session', () => late.commands[1]);
@@ -394,7 +394,7 @@ test('handed on, the new owner took it and ended without writing: a later reply 
   // Words for the new owner, saved once it has ended (60 s with no poll).
   await page.reload();
   await pane.locator('.ib-pfoot').getByRole('button', { name: 'Reply', exact: true }).click();
-  await pane.locator('textarea').first().fill('Also cap the retries at five.');
+  await pane.locator('textarea:not([data-question-other])').first().fill('Also cap the retries at five.');
   await pane.locator('.ib-pfoot').getByRole('button', { name: 'Send', exact: true }).click();
   await expect(pane.locator('[data-readdress-open]')).toBeVisible({ timeout: 100_000 });
   const moving = (await threadMessages()).at(-1)!;
@@ -410,7 +410,7 @@ test('handed on, the new owner took it and ended without writing: a later reply 
   await expect(pane.locator('[data-thread-owner]')).toHaveCount(0);
   await pane.locator('.ib-pfoot').getByRole('button', { name: 'Reply', exact: true }).click();
   await expect(pane.locator('[data-recipient]')).not.toHaveAttribute('aria-label', /Ledger retry follow-up/);
-  await pane.locator('textarea').first().fill('Thanks, ship it.');
+  await pane.locator('textarea:not([data-question-other])').first().fill('Thanks, ship it.');
   await pane.locator('.ib-pfoot').getByRole('button', { name: 'Send', exact: true }).click();
   const next = await waitFor('the next reply handed to the other session', () => late.commands.find((c) => c.body.includes('Thanks, ship it.')));
   expect(gone.commands.some((c) => c.id === next.id)).toBe(false);
@@ -449,7 +449,7 @@ test('handed on, the new owner still there, the asker ended: a reply to the aske
   await page.reload();
   await expect(pane.locator('[data-thread-owner]')).toContainText('Ledger retry owner');
   await pane.locator('.ib-pfoot').getByRole('button', { name: 'Reply', exact: true }).click();
-  await pane.locator('textarea').first().fill('Thanks, carry on.');
+  await pane.locator('textarea:not([data-question-other])').first().fill('Thanks, carry on.');
   await shot('9-owner-keeps-it');
   await pane.locator('.ib-pfoot').getByRole('button', { name: 'Send', exact: true }).click();
   await waitFor('the next reply handed to the new owner', () => owner.commands.find((c) => c.body.includes('Thanks, carry on.')));

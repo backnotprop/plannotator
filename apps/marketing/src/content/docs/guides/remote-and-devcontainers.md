@@ -30,6 +30,8 @@ Every other route stays reachable by anyone who can reach the URL: approving or 
 
 Plannotator also detects `SSH_TTY` and `SSH_CONNECTION` environment variables for automatic remote mode when `PLANNOTATOR_REMOTE` is unset. Use `PLANNOTATOR_REMOTE=1` / `true` to force remote mode or `PLANNOTATOR_REMOTE=0` / `false` to force local mode.
 
+When remote mode is on only because of SSH (`PLANNOTATOR_REMOTE` unset), the server listens and advertises exactly as above, and a request that reaches it over loopback (your own `ssh -L` tunnel or editor port forward, or a browser on that machine) gets what a local session gives: Ask this session, link hover cards, the annotate agent terminal, and documents outside the project. A request from any other address gets what remote mode gives. Open in, opening a browser and live app annotation stay off over SSH. `PLANNOTATOR_REMOTE=1` keeps remote mode whole for every request.
+
 ## WSL2
 
 WSL2 does not need remote mode. Leave `PLANNOTATOR_REMOTE` unset (or set it to `0` if your shell sets `SSH_TTY` or `SSH_CONNECTION`, for example when you SSH into WSL from the same Windows machine; from another computer, local mode would open the browser on the WSL host's Windows desktop). In local mode Plannotator binds `127.0.0.1`, WSL2 forwards that port to Windows (`localhostForwarding`, on by default, or mirrored networking), and, unless `BROWSER` or `PLANNOTATOR_BROWSER` is set, Plannotator opens the URL in your Windows default browser through `cmd.exe` (this needs WSL interop; a set `BROWSER`, such as VS Code Remote-WSL's helper or `wslview`, runs instead). The review opens at `http://localhost:<port>` on Windows, and every local feature, "Ask this session" included, stays on.

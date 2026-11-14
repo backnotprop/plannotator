@@ -357,6 +357,8 @@ test.skipIf(!hasDom)("another window's save brings its tile into a box with no e
   );
   expect(saved.status).toBe(200);
   await act(async () => emit('drafts', { thread_id: world.waiting }));
+  await until(() => el.querySelector('[data-draft-restore]') !== null, 'the offer');
+  act(() => (el.querySelector('[data-draft-restore]') as HTMLButtonElement).click());
   await until(() => pastedTiles(el).length === 1 && replyText(el)?.value === BEFORE + AFTER, 'the other window\'s draft');
   expect(pastedTiles(el)[0]!.querySelector('.ib-pt-nm')?.textContent).toBe('From the other window');
   act(() => (pastedTiles(el)[0]!.querySelector('[data-pasted-put-back]') as HTMLButtonElement).click());
@@ -389,8 +391,8 @@ test.skipIf(!hasDom)('a draft of the paste alone, its box closed, goes with the 
   expect(paste(text, LOG)).toBe(true);
   await until(async () => (await serverDraft())?.files?.length === 1, 'the draft of the paste');
   const name = (await serverDraft())!.files![0]!.name;
-  // Cancel keeps it as the draft; the box closes.
-  act(() => button(el, 'Cancel').click());
+  // Closing the box (its chevron) keeps it as the draft.
+  act(() => (el.querySelector('[data-reply-close]') as HTMLButtonElement).click());
   await until(() => replyBox(el) === null, 'the box closed');
   expect((await serverDraft())?.files?.length).toBe(1);
   // The foot's Send carries the kept paste.
@@ -467,6 +469,8 @@ test.skipIf(!hasDom)("a paste still uploading stays when another window saves th
   const saved = await loopback(`/api/inbox/threads/${world.waiting}/draft`, 'POST', JSON.stringify({ serverSession: await serverSession(), body: theirs, base }));
   expect(saved.status).toBe(200);
   await act(async () => emit('drafts', { thread_id: world.waiting }));
+  await until(() => el.querySelector('[data-draft-restore]') !== null, 'the offer');
+  act(() => (el.querySelector('[data-draft-restore]') as HTMLButtonElement).click());
   await until(() => replyText(el)?.value === theirs, "the other window's words");
   // The paste is still here, still uploading: nothing of it was lost.
   expect(pastedTiles(el).length).toBe(1);

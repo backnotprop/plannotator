@@ -143,9 +143,10 @@ describe('every chat class has a rule in the Inbox', () => {
     ]);
   });
 
+  // One Tailwind build per class: about 4 s on a CI runner already, past bun's 5 s default as the sheet grows.
   test('none is left without a rule', async () => {
     expect(await classesWithNoRule(classes)).toEqual([]);
-  });
+  }, 30_000);
 
   // Compiling a class by hand says nothing about whether an app's build ever
   // sees it: `@source` takes these folders as `**/*.tsx`, so a class written in

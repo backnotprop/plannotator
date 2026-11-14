@@ -58,6 +58,7 @@ function sandbox(feedbackUrl: string) {
     PATH: process.env.PATH ?? "/usr/bin:/bin",
     HOME: home,
     TMPDIR: tmpdir(),
+    PLANNOTATOR_RELAY_URL: "http://127.0.0.1:9",
     PLANNOTATOR_DATA_DIR: join(home, ".plannotator"),
     PLANNOTATOR_BROWSER: NO_BROWSER,
     BROWSER: NO_BROWSER,

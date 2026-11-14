@@ -367,7 +367,7 @@ async function startPlanReview(): Promise<{ url: string; close: () => Promise<vo
   mkdirSync(dataDir, { recursive: true });
   const readyFile = join(root, 'ready.jsonl');
   const env = {
-    PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_READY_FILE: readyFile,
+    PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_READY_FILE: readyFile,
     PLANNOTATOR_BROWSER: NO_BROWSER, NO_BROWSER, PLANNOTATOR_SKIP_BROWSER_OPEN: '1', PLANNOTATOR_REMOTE: '0',
     PLANNOTATOR_INBOX_CONNECT: '0', PLANNOTATOR_UPDATE_CHECK: '0',
   };

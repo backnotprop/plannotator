@@ -161,7 +161,7 @@ export function runGuideList(): GuideCliResult {
 
 function git(args: string[], cwd: string): string | undefined {
   try {
-    return execFileSync("git", args, { cwd, env: childEnv(), encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] }).trim() || undefined;
+    return execFileSync("git", args, { cwd, env: childEnv(), encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"], windowsHide: true }).trim() || undefined;
   } catch {
     return undefined;
   }
@@ -187,6 +187,9 @@ interface AuthoredGuideOptions {
   /** Injected for deterministic tests. */
   readonly now?: string;
   readonly source?: GuideSnapshotSource;
+  /** Keep each section's Mermaid `diagram` (format version 5). The CLI's export does; the Inbox reads and checks
+   * chapter diagrams itself (only while Code review is on), so it leaves this off. */
+  readonly chapterDiagrams?: boolean;
 }
 
 /**
@@ -251,6 +254,21 @@ export function buildAuthoredGuideSnapshot(
       }
     }
   }
+  // A chapter's diagram (format version 5), Mermaid only here: nothing in an exported file sanitizes an HTML picture.
+  const diagrams: Array<{ kind: "mermaid"; source: string } | undefined> = [];
+  if (opts.chapterDiagrams && Array.isArray(g.sections)) {
+    g.sections.forEach((section, i) => {
+      const d = section && typeof section === "object" ? (section as Record<string, unknown>).diagram : undefined;
+      if (d === undefined) return void diagrams.push(undefined);
+      const r = (d && typeof d === "object" && !Array.isArray(d) ? d : {}) as Record<string, unknown>;
+      const extra = Object.keys(r).filter((k) => k !== "kind" && k !== "source");
+      if (r.kind !== "mermaid" || typeof r.source !== "string" || !r.source.trim() || extra.length > 0) {
+        problems.push(`sections[${i}].diagram must be { "kind": "mermaid", "source": "<Mermaid source>" }.`);
+        return void diagrams.push(undefined);
+      }
+      diagrams.push({ kind: "mermaid", source: r.source });
+    });
+  }
   if (problems.length > 0) return { ok: false, error: `Guide is not valid:\n- ${problems.join("\n- ")}` };
 
   const validated = validateGuideOutput(
@@ -268,8 +286,13 @@ export function buildAuthoredGuideSnapshot(
     ...((g.generator as GuideSnapshotGenerator | undefined) ?? {}),
   };
 
+  // validateGuideOutput keeps every section of a guide that passed the checks above, in order.
+  const guideOut =
+    diagrams.some(Boolean) && diagrams.length === validated.guide.sections.length
+      ? { ...validated.guide, sections: validated.guide.sections.map((section, i) => (diagrams[i] ? { ...section, diagram: diagrams[i] } : section)) }
+      : validated.guide;
   const snapshot = buildGuideSnapshot({
-    guide: validated.guide,
+    guide: guideOut,
     reviewed: [],
     review: { rawPatch, gitRef, ...(base && { base }), source },
     generator,
@@ -341,7 +364,7 @@ function loadSnapshotSource(args: SourceArgs, cwd: string, io: GuideCliIo, autho
       if (!existsSync(patchFile)) return { ok: false, result: { code: 1, stderr: `Patch file not found: ${patchFile}\n` } };
       rawPatch = readFileSync(patchFile, "utf-8");
     }
-    const built = buildAuthoredGuideSnapshot(readFileSync(guideFile, "utf-8"), rawPatch, { cwd, now: io.now, ...(authoredSource ? { source: authoredSource } : {}) });
+    const built = buildAuthoredGuideSnapshot(readFileSync(guideFile, "utf-8"), rawPatch, { cwd, now: io.now, chapterDiagrams: true, ...(authoredSource ? { source: authoredSource } : {}) });
     if (!built.ok) return { ok: false, result: { code: 1, stderr: `${built.error}\n` } };
     return { ok: true, snapshot: built.snapshot };
   }

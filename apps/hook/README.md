@@ -87,7 +87,7 @@ In the interactive terminal on Claude Code 2.1.287 or newer, the plugin runs the
 
 While a plan review is open Claude is not blocked, so if you leave plan mode yourself before you approve, it can start editing.
 
-Turn the mod off with `PLANNOTATOR_CLAUDE_MOD=0` or `{ "claudeCodeMod": false }` in `~/.plannotator/config.json` (read when Claude Code starts). Older Claude Code, `claude -p` and SDK runs, and Windows always use the classic hook below.
+Turn the mod off with `PLANNOTATOR_CLAUDE_MOD=0` or `{ "claudeCodeMod": false }` in `~/.plannotator/config.json` (read when Claude Code starts). Older Claude Code and `claude -p` and SDK runs always use the classic hook below.
 
 ### The classic hook
 

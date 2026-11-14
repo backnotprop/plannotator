@@ -49,6 +49,8 @@ export const ANNOTATIONS_FILE = "annotations.jsonl";
 export const CARDS_FILE = "cards.jsonl";
 /** Each agent session's steps per thread (approval "inbox-thread-steps"): never read by routing, the list, unread or notifications. */
 export const STEPS_FILE = "steps.jsonl";
+/** Each thread's PRs (approval "inbox-pr-binding"), kind `thread_pull`: never read by routing, the list's sections, unread or notifications. */
+export const PULLS_FILE = "pulls.jsonl";
 /**
  * The Board's initiatives (approval "board-initiatives"): one file in the
  * inbox folder, not per project (an initiative crosses projects), on the
@@ -61,7 +63,7 @@ export function inboxDir(dataDir: string): string {
   return join(dataDir, INBOX_DIR_NAME);
 }
 
-const KINDS: ReadonlySet<InboxRecordKind> = new Set(["project", "message", "question", "annotation", "card", "steps", "initiative"]);
+const KINDS: ReadonlySet<InboxRecordKind> = new Set(["project", "message", "question", "annotation", "card", "steps", "initiative", "thread_pull"]);
 
 /**
  * One line of a store file, or null when it is not a line this reader can

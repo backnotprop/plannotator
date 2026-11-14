@@ -28,6 +28,8 @@ export interface RowAgentGroup {
   host: string | null;
   name: string;
   sessions: number;
+  /** Its first session: its tile shows that agent's chosen face (agents/agentFaces.ts). */
+  session?: string | null;
   /** The labels of its sessions that have one (issue #2450), first to join first; absent or empty: none named. */
   labels?: string[];
 }
@@ -53,7 +55,7 @@ export function rowAgentGroups(
     if (group) {
       group.sessions++;
       if (label) group.labels = [...(group.labels ?? []), label];
-    } else groups.push({ host: session.host, name, sessions: 1, ...(label ? { labels: [label] } : {}) });
+    } else groups.push({ host: session.host, name, sessions: 1, ...(session.session ? { session: session.session } : {}), ...(label ? { labels: [label] } : {}) });
   }
   return groups;
 }
@@ -97,7 +99,7 @@ export function RowAgents({ participants, agent, tip = true }: { participants: r
       <span className="ib-atiles" aria-hidden="true">
         {shown.map((g) => (
           <span className="ib-atile" key={g.name} data-agent-host={g.host ?? ''}>
-            <HostMark host={g.host} />
+            <HostMark host={g.host} agent={g.session} />
           </span>
         ))}
       </span>
@@ -137,7 +139,7 @@ export function RowAgentTiles({ participants, agent, tip = true }: { participant
     <span className="ib-atiles" role="img" aria-label={words} data-row-agents={groups.reduce((n, g) => n + g.sessions, 0)}>
       {shown.map((g) => (
         <span className="ib-atile" key={g.name} aria-hidden="true" data-agent-host={g.host ?? ''}>
-          <HostMark host={g.host} />
+          <HostMark host={g.host} agent={g.session} />
         </span>
       ))}
       {more > 0 && (

@@ -218,7 +218,7 @@ function button(el: HTMLElement, text: string): HTMLButtonElement {
 test.skipIf(!hasDom)('the item sits in its own group above Archive, and sends one reply of the request to the message a reply answers', async () => {
   await render(worked());
   await openMenu();
-  expect(labels()).toEqual(['Copy thread', 'Copy link', 'Copy thread ID', 'Request guided review', 'Archive thread']);
+  expect(labels()).toEqual(['Copy thread', 'Copy link', 'Copy thread ID', 'Add a pull request…', 'Request guided review', 'Archive thread']);
   // A double click: the second press finds the request in flight and sends nothing more.
   await act(async () => {
     requestItem()!.click();

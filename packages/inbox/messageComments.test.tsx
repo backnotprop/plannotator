@@ -11,7 +11,8 @@
  * quote and the comment under "Feedback on your message from <time>". A
  * reload draws the saved highlight again; removing it from the chip takes the
  * highlight away. The person's own message and a question card's words open
- * no toolbar. A click on a diagram part in the message does the same through
+ * the toolbar too (approval "inbox-annotate-own-and-questions"; on the person's
+ * own words, no Delete). A click on a diagram part in the message does the same through
  * the diagram's own composer, and the agent reads which part.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
@@ -375,17 +376,21 @@ test.skipIf(!hasDom)('👍 on selected words is a comment too; a reload draws th
   await until(() => messageBody(message.id)?.querySelector('mark.annotation-highlight') === null, 'the highlight removed');
 }, 30_000);
 
-test.skipIf(!hasDom)("the person's own message and a question card's words open no toolbar", async () => {
+test.skipIf(!hasDom)("the person's own message and a question card's words open the toolbar (approval inbox-annotate-own-and-questions)", async () => {
   const el = await renderApp(`#thread=${world.waiting}`);
   await until(() => el.querySelector('[data-question-key]') !== null, 'the question card');
-  // A question card's prompt: no toolbar.
+  // A question card's prompt takes comments, as the rest of the message does.
   const prompt = el.querySelector<HTMLElement>('[data-question-key] [data-question-part="prompt"]')!;
+  expect(prompt.closest('.annotation-exclude')).toBeNull();
   await select(prompt, prompt.textContent!.trim().split(' ').slice(0, 2).join(' '));
-  expect(toolbarButtons()).toEqual([]);
+  expect(toolbarButtons()).toContain('Comment');
+  const cancel = [...document.querySelectorAll<HTMLButtonElement>('.annotation-toolbar button')].find((b) => (b.getAttribute('aria-label') ?? b.title) === 'Cancel');
+  if (cancel) await act(async () => cancel.click());
+  await settle();
   // The agent's words around it still take comments.
   expect(messageBody(world.waiting)!.hasAttribute('data-text-comments')).toBe(true);
 
-  // The person's own reply: no toolbar.
+  // The person's own reply: the toolbar, without Delete.
   act(() => button(el, 'Reply').click());
   await settle();
   const area = el.querySelector('.ib-rbox textarea') as HTMLTextAreaElement;
@@ -393,9 +398,10 @@ test.skipIf(!hasDom)("the person's own message and a question card's words open 
   act(() => button(el, 'Send').click());
   await until(() => el.querySelectorAll('[data-author="person"] [data-message-id]').length === 1 || el.querySelectorAll('article[data-author="person"]').length === 1, 'my reply drawn');
   const mine = el.querySelector<HTMLElement>('article[data-author="person"] [data-message-id]')!;
-  expect(mine.hasAttribute('data-text-comments')).toBe(false);
+  expect(mine.hasAttribute('data-text-comments')).toBe(true);
   await select(mine, 'Holding this one');
-  expect(toolbarButtons()).toEqual([]);
+  expect(toolbarButtons()).toContain('Comment');
+  expect(toolbarButtons()).not.toContain('Delete');
 }, 30_000);
 
 /** Press and release on the diagram's node D, the way the canvas hears a click. */
@@ -462,7 +468,7 @@ test.skipIf(!hasDom)('a click on a diagram part in a message: the composer, the 
   expect(body).toContain(['Feedback on: "Approve?"', `Diagram node Approve? (D), line ${DIAGRAM_D_LINE}`, '', '> Who approves on a holiday?'].join('\n'));
 }, 30_000);
 
-test.skipIf(!hasDom)('a diagram in the person\'s own message and in an archived message opens no composer', async () => {
+test.skipIf(!hasDom)('a diagram in the person\'s own message opens the composer (approval inbox-annotate-own-and-questions); one in an archived message opens none', async () => {
   const message = await agentWrites(DIAGRAM_BODY);
   const el = await renderApp(`#thread=${message.id}`);
   await until(() => messageBody(message.id)?.querySelector('[id$="-flowchart-D-1"]') != null, 'the rendered diagram');
@@ -474,7 +480,9 @@ test.skipIf(!hasDom)('a diagram in the person\'s own message and in an archived 
   await until(() => el.querySelector('article[data-author="person"] [id$="-flowchart-D-1"]') !== null, 'my diagram drawn');
   await clickNodeD(el.querySelector('article[data-author="person"]')!);
   await settle();
-  expect(composerBox(el)).toBeNull();
+  expect(composerBox(el)).not.toBeNull();
+  await act(async () => composerBox(el)!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+  await settle();
 
   await loopback(`/api/inbox/messages/${message.id}/resolve`, 'POST', JSON.stringify({ resolved: true }));
   act(() => root?.unmount());

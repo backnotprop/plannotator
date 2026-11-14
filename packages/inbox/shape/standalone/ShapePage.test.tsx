@@ -9,7 +9,7 @@
  *    the open board (it must be inert);
  *  - with Shape off the page shows a grid (or Find) at all;
  *  - with no boards the page is blank instead of saying what a board is;
- *  - the page's board takes the Inbox's crosshair (and its Show me stub) in place of Annotate.
+ *  - the page's board takes the Inbox's crosshair (and a Show me, which only the Inbox's boards have) in place of Annotate.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */

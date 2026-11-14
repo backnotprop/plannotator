@@ -51,7 +51,7 @@ let world: World;
 let news = 0;
 
 /**
- * An agent starts a thread of its own (a session's sends without a thread key go into one thread). The key is the
+ * An agent starts a thread of its own. The key is the
  * subject, so the row reads the subject alone, as a thread the agent did not name.
  */
 function start(agent: SimAgent, project: string, subject: string, body: string): Promise<Record<string, unknown>> {
@@ -161,6 +161,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const env: Record<string, string> = {
     PATH: process.env.PATH ?? '',
     HOME: root,
+    PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9',
     PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_BROWSER: NO_BROWSER,
     NO_BROWSER,

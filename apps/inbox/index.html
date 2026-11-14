@@ -4,10 +4,17 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>Plannotator Inbox</title>
-    <!-- No type/sizes: /favicon.png is served by the Inbox server, which
-         picks the bytes from the persisted favicon style, so the response
-         Content-Type is the only truthful declaration. See handleFavicon(). -->
-    <link rel="icon" href="/favicon.png">
+    <!-- No type: /favicon.ico is served by the Inbox server, which picks the
+         bytes from the persisted favicon style (Glass and Yellow are multi-size .ico
+         files, Face is a PNG), so the response Content-Type is the truthful
+         declaration. The sizes let the tab take Glass's hand-pixelled 16 or
+         32 frame instead of a resample. See handleFavicon(). -->
+    <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48">
+    <!-- Installed as an app (Chrome's Install, Safari's Add to Dock): the Inbox
+         server answers both with the large icons of the same favicon style
+         (packages/server/inbox-app-icons.ts). -->
+    <link rel="manifest" href="/manifest.webmanifest">
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 
   </head>
   <body class="overflow-hidden overscroll-none antialiased">

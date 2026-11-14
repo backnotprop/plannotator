@@ -96,4 +96,19 @@ describe("vendor parity: Pi imports ↔ vendor.sh", () => {
       );
     }
   });
+
+  // A file vendored on its own (`cat - "<source>" > "generated/x.ts"`) lands
+  // in generated/ without its folder: each sibling it imports must be vendored
+  // next to it, or Pi cannot load it (bridge-script.ts → ./sandboxShim).
+  test("every relative import of a single vendored file is vendored too", () => {
+    const sh = readFileSync(VENDOR_SH, "utf-8");
+    const missing: string[] = [];
+    for (const single of sh.matchAll(/cat - "([^"$]+\.ts)" > "generated\/([^"$]+)\.ts"/g)) {
+      const source = readFileSync(join(PI_DIR, single[1]), "utf-8");
+      for (const imported of source.matchAll(/(?:from\s+|import\s*\(\s*)["']\.\/([\w.-]+?)(?:\.ts)?["']/g)) {
+        if (!vendored.has(imported[1])) missing.push(`${single[2]}.ts imports ./${imported[1]}`);
+      }
+    }
+    expect(missing).toEqual([]);
+  });
 });

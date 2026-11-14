@@ -41,12 +41,14 @@ Name your own host first. Your system instructions say which agent you are (Clau
 
 Tell the person when a restart is needed. A connection takes effect when a session starts, never in the session that is running now. Do not wait for it: step 4 works without it.
 
-## 3b. Offer the note in each agent's instructions
+## 3b. The note in each agent's instructions
 
-Plannotator can add a short note about the Inbox to each agent's own instructions file, so agents send decisions and finished work there while the person is away. The guide's "A note in each agent's instructions" section lists every file it would write on this computer and whether it adds a marked section or creates the file.
+Plannotator adds a short note about the Inbox to each agent's own instructions file, so agents send decisions and finished work there while the person is away. The guide's "A note in each agent's instructions" section lists every file it would write on this computer and whether it adds a marked section or creates the file.
 
-1. Show the person that list (agent and exact path) and ask which agents should get the note.
-2. Only with their yes in this chat, run `plannotator inbox --notes <ids>` with only the agents they agreed to, comma-separated (for example `plannotator inbox --notes codex,gemini`). It prints what it wrote.
+The Inbox adds the note by itself for Claude Code, Codex, Gemini CLI, Pi and OpenCode. Do not ask about those; at most, tell the person which files got it.
+
+1. Show the person the Qwen Code and Cursor rows of that list (agent and exact path) and ask which of them should get the note. Cursor's note is pasted by hand.
+2. Only with their yes in this chat, run `plannotator inbox --notes <ids>` with only the agents they agreed to, comma-separated (for example `plannotator inbox --notes qwen,cursor`). It prints what it wrote, or for Cursor the note to paste.
 3. Without a yes, run nothing. The Inbox window asks the person once itself.
 
 ## 4. Send the first message

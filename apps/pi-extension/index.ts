@@ -33,7 +33,8 @@ import {
 	parseChecklist,
 	renderCompletedChecklist,
 } from "./generated/checklist.ts";
-import { loadConfig, resolveAgentTool, resolveUseJina } from "./generated/config.ts";
+import { loadConfig, resolveAgentTool, resolveAutoReload, resolveUseJina } from "./generated/config.ts";
+import { setupAutoReload } from "./auto-reload.ts";
 import { detectPiHost, setPiHost } from "./pi-host.ts";
 import { warnRuntimeTlsOnce } from "./runtime-tls.ts";
 import { importFresh, isPlannotatorUpdatedError, launchFailureText } from "./package-version.ts";
@@ -81,7 +82,7 @@ import {
 	type Phase,
 	stripPlanningOnlyTools,
 } from "./tool-scope.ts";
-import { getServerPorts, isRemoteSession } from "./server/network.ts";
+import { getServerPorts, isRemoteSession, isSshDetectedRemote } from "./server/network.ts";
 import { sessionOpenedMessage } from "./session-opened.ts";
 import {
 	claimSessionEventBus,
@@ -450,9 +451,11 @@ export default function plannotator(pi: ExtensionAPI, deps: PlannotatorExtension
 	// last, plan review). Listeners register once here; each command binds a bridge to its ctx.
 	const sessionBridgeHub = createPiSessionBridgeHub(pi);
 	// Off in remote mode: anyone who can reach the session URL could otherwise
-	// type into this agent session (same reasoning as the agent terminal).
+	// type into this agent session (same reasoning as the agent terminal). A
+	// remote session only SSH turned on keeps it, answered only for its own
+	// tunnel (the AI runtime's peer endpoints serve every other address).
 	const sessionBridgeFor = (ctx: ExtensionContext, origin: PiSessionIdentity) =>
-		isRemoteSession() ? undefined : sessionBridgeHub.createBridge(ctx, origin);
+		isRemoteSession() && !isSshDetectedRemote() ? undefined : sessionBridgeHub.createBridge(ctx, origin);
 	/**
 	 * The open reviews (tool, slash commands, plan review), each with a `pn-`
 	 * session id and the Pi session that opened it: what the `plannotator`
@@ -2728,11 +2731,34 @@ Call ${PLAN_MARK_DONE_TOOL} immediately after each completed step and before the
 		});
 	});
 
+	// Pi reloads itself, when nothing can be lost, to load an updated Plannotator
+	// (auto-reload.ts); off, an older Pi and Oh My Pi get the note once per version.
+	const autoReload = setupAutoReload(pi, {
+		host: piHost,
+		enabled: resolveAutoReload(loadConfig(), process.env),
+		plannotatorBusy: () => {
+			if (pendingPlanReview) return "a plan review";
+			if (openReviews.openAll().length > 0) return "an open review";
+			if (sessionBridgeHub.hasActiveAsk) return "an Ask question";
+			return null;
+		},
+		piVersion: async () => {
+			try {
+				const sdk = (await import("@earendil-works/pi-coding-agent")) as { VERSION?: unknown };
+				return typeof sdk.VERSION === "string" ? sdk.VERSION : null;
+			} catch {
+				return null;
+			}
+		},
+	});
 	// The Plannotator Inbox (inbox.ts): where an Inbox was found, the session
 	// claim (which session this Pi runs, the tool on or off); and the
 	// `plannotator_inbox` tool and the reply wake only where the inbox tool
 	// switch allows it for Pi. Pi awaits the extension factory, so the tool list
 	// is read (bounded) before the session's first request; otherwise this
 	// returns nothing.
-	return setupPiInbox(pi, { isAskActive: () => sessionBridgeHub.hasActiveAsk });
+	return setupPiInbox(pi, {
+		isAskActive: () => sessionBridgeHub.hasActiveAsk,
+		claimUpdateNotice: (version) => autoReload.claimNotice(version),
+	});
 }

@@ -70,6 +70,15 @@ function renderOverviewDiagram(diagram: GuideOverviewDiagram): React.ReactNode |
     </Suspense>
   );
 }
+/** A chapter's diagram (format version 5): Mermaid, one drawing id per chapter; an HTML picture is not drawn (nothing shows). */
+function renderChapterDiagram(diagram: GuideOverviewDiagram, index: number): React.ReactNode | null {
+  if (diagram.kind !== 'mermaid') return null;
+  return (
+    <Suspense fallback={<pre className="overflow-x-auto whitespace-pre rounded-md bg-muted/50 p-3 font-mono text-[11px] text-muted-foreground"><code>{diagram.source}</code></pre>}>
+      <OverviewDiagram source={diagram.source} id={`guide-chapter-${index + 1}-diagram`} />
+    </Suspense>
+  );
+}
 
 function SourceLine({ snapshot }: { snapshot: GuideSnapshot }) {
   const s = snapshot.source;
@@ -143,6 +152,7 @@ function App({ snapshot, workerFactory, hosted }: { snapshot: GuideSnapshot; wor
       sourceLine={<SourceLine snapshot={snapshot} />}
       headerActions={headerActions}
       renderOverviewDiagram={renderOverviewDiagram}
+      renderChapterDiagram={renderChapterDiagram}
       className="min-h-screen bg-background text-foreground"
     />
   );

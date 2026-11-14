@@ -52,16 +52,28 @@ jobs:
       - name: Fetch all branches and tags
         run: git fetch --force --prune --tags origin '+refs/heads/*:refs/remotes/origin/*'
 
+      # The archive is kept between runs by version and checksum, and checked
+      # every time, so most runs download nothing.
+      - name: Restore the Gitleaks archive
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ci-tools/gitleaks
+          key: gitleaks-${{ env.GITLEAKS_VERSION }}-${{ env.GITLEAKS_LINUX_X64_SHA256 }}
+
       - name: Install verified Gitleaks
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          archive="$RUNNER_TEMP/gitleaks.tar.gz"
+          archive="$HOME/.cache/ci-tools/gitleaks/gitleaks.tar.gz"
           install_dir="$RUNNER_TEMP/gitleaks-bin"
-          curl --fail --silent --show-error --location \
-            --proto '=https' --tlsv1.2 \
-            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
-            --output "$archive"
+          if [[ ! -f "$archive" ]]; then
+            mkdir -p "$(dirname "$archive")"
+            bash scripts/ci-fetch-release-asset.sh \
+              "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+              "$archive"
+          fi
           printf '%s  %s\n' "$GITLEAKS_LINUX_X64_SHA256" "$archive" | sha256sum --check --strict
           mkdir -p "$install_dir"
           tar -xzf "$archive" -C "$install_dir" gitleaks
@@ -430,17 +442,29 @@ jobs:
         with:
           persist-credentials: false
 
+      # The archive is kept between runs by version and checksum, and checked
+      # every time, so most runs download nothing.
+      - name: Restore the Trivy archive
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ci-tools/trivy
+          key: trivy-${{ env.TRIVY_VERSION }}-${{ env.TRIVY_LINUX_X64_SHA256 }}
+
       - name: Download verified Trivy archive
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          cached="$HOME/.cache/ci-tools/trivy/trivy.tar.gz"
           archive="$RUNNER_TEMP/trivy.tar.gz"
-          curl --fail --silent --show-error --location \
-            --retry 3 --retry-all-errors --retry-delay 2 \
-            --connect-timeout 15 --max-time 120 \
-            --proto '=https' --tlsv1.2 \
-            "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" \
-            --output "$archive"
+          if [[ ! -f "$cached" ]]; then
+            mkdir -p "$(dirname "$cached")"
+            bash scripts/ci-fetch-release-asset.sh \
+              "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" \
+              "$cached"
+          fi
+          cp "$cached" "$archive"
           printf '%s  %s\n' "$TRIVY_LINUX_X64_SHA256" "$archive" \
             | sha256sum --check --strict
 
@@ -859,16 +883,28 @@ jobs:
         with:
           persist-credentials: false
 
+      # The archive is kept between runs by version and checksum, and checked
+      # every time, so most runs download nothing.
+      - name: Restore the zizmor archive
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ci-tools/zizmor
+          key: zizmor-${{ env.ZIZMOR_VERSION }}-${{ env.ZIZMOR_LINUX_X64_SHA256 }}
+
       - name: Install verified zizmor
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          archive="$RUNNER_TEMP/zizmor.tar.gz"
+          archive="$HOME/.cache/ci-tools/zizmor/zizmor.tar.gz"
           install_dir="$RUNNER_TEMP/zizmor-bin"
-          curl --fail --silent --show-error --location \
-            --proto '=https' --tlsv1.2 \
-            "https://github.com/zizmorcore/zizmor/releases/download/v${ZIZMOR_VERSION}/zizmor-x86_64-unknown-linux-gnu.tar.gz" \
-            --output "$archive"
+          if [[ ! -f "$archive" ]]; then
+            mkdir -p "$(dirname "$archive")"
+            bash scripts/ci-fetch-release-asset.sh \
+              "https://github.com/zizmorcore/zizmor/releases/download/v${ZIZMOR_VERSION}/zizmor-x86_64-unknown-linux-gnu.tar.gz" \
+              "$archive"
+          fi
           printf '%s  %s\n' "$ZIZMOR_LINUX_X64_SHA256" "$archive" | sha256sum --check --strict
           mkdir -p "$install_dir"
           tar -xzf "$archive" -C "$install_dir" zizmor

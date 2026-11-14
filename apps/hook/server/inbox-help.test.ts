@@ -76,6 +76,11 @@ afterAll(() => {
   rmSync(root, { recursive: true, force: true });
 });
 
+// Changing how the list's rows look (approval "inbox-rows-settings-page"): an agent asked in passing finds the command here.
+test("the guide says how to change the person's rows: the command, set, and undo", () => {
+  for (const words of ["plannotator inbox rows`", "plannotator inbox rows set <name>=<value>", "plannotator inbox rows undo"]) expect(help).toContain(words);
+});
+
 describe("the guide against what it describes", () => {
   test("every tool a real Inbox registers has a section, and every argument named is in its schema", async () => {
     const savedPath = process.env.PATH;
@@ -253,7 +258,7 @@ describe("plannotator inbox --help as a process", () => {
     for (const argv of [["inbox", "--help"], ["inbox", "mcp", "--help"]]) {
       const proc = Bun.spawn([process.execPath, entry, ...argv], {
         cwd: root,
-        env: { PATH: `${trapBin}:${process.env.PATH ?? "/usr/bin:/bin"}`, HOME: home, TMPDIR: tmpdir(), PLANNOTATOR_DATA_DIR: dataDir },
+        env: { PATH: `${trapBin}:${process.env.PATH ?? "/usr/bin:/bin"}`, HOME: home, TMPDIR: tmpdir(), PLANNOTATOR_RELAY_URL: "http://127.0.0.1:9", PLANNOTATOR_DATA_DIR: dataDir },
         stdin: "ignore",
         stdout: "pipe",
         stderr: "pipe",
@@ -278,7 +283,7 @@ describe("plannotator inbox --help as a process", () => {
     const run = async (argv: string[]) => {
       const proc = Bun.spawn([process.execPath, entry, ...argv], {
         cwd: root,
-        env: { PATH: `${trapBin}:${process.env.PATH ?? "/usr/bin:/bin"}`, HOME: home, TMPDIR: tmpdir(), PLANNOTATOR_DATA_DIR: dataDir },
+        env: { PATH: `${trapBin}:${process.env.PATH ?? "/usr/bin:/bin"}`, HOME: home, TMPDIR: tmpdir(), PLANNOTATOR_RELAY_URL: "http://127.0.0.1:9", PLANNOTATOR_DATA_DIR: dataDir },
         stdin: "ignore",
         stdout: "pipe",
         stderr: "pipe",

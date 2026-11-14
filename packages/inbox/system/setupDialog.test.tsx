@@ -29,13 +29,14 @@ afterEach(() => {
   }
 });
 
-const APP: SystemSetupProject = { id: 'prj_app', key: 'app-abc123', name: 'app', root: '/Users/ada/code/app', repo: 'github.com/acme/app', setup: null };
+const APP: SystemSetupProject = { id: 'prj_app', key: 'app-abc123', name: 'app', root: '/Users/ada/code/app', repo: 'github.com/acme/app', drawing: '/Users/ada/.plannotator/system/app-abc123/drawing', setup: null };
 const DOCS: SystemSetupProject = {
   id: 'prj_docs',
   key: 'docs-def456',
   name: 'docs',
   root: '/Users/ada/code/docs',
   repo: 'github.com/acme/docs',
+  drawing: '/Users/ada/.plannotator/system/docs-def456/drawing',
   setup: { v: 1, repos: ['github.com/acme/brand'], docs: ['https://help.example.com/'], agent: 'claude', model: null, thread_message: null },
 };
 const ON = { code_review: { on: true }, system: { on: true }, home: '/Users/ada' };
@@ -261,6 +262,7 @@ describe.skipIf(!hasDom)('System setup', () => {
     await press(ui.btn('copy'));
     expect(ui.order).toEqual(['copy', 'save']);
     expect(ui.copies[0]).toContain('/Users/ada/code/app');
+    expect(ui.copies[0]).toContain('/Users/ada/.plannotator/system/app-abc123/drawing');
     expect(ui.toasts).toEqual(['Prompt copied']);
     expect(ui.dialog()).toBeNull();
   });

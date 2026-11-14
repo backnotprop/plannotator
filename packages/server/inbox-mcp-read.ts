@@ -29,9 +29,11 @@
  * text alone; an older one appends this trimmed JSON as well.
  */
 
+import { INBOX_ROWS_ASK_BLOCK } from "@plannotator/core/inbox-types";
 import { INBOX_DECISION_ASK_BLOCK, INBOX_HOST_NAMES, inboxAgentName, inboxBoardRequestBlock, isInboxNote, type InboxMessageWire, type InboxQuestion } from "@plannotator/core/inbox-types";
 import { inboxAnswersSectionEnd } from "@plannotator/core/inbox-questions";
 import { QUESTION_ANSWERS_HEADING, type QuestionAnswer } from "@plannotator/core/question-block";
+import { inboxAckReaction } from "@plannotator/shared/inbox/connection";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { inboxSearchBodyText, inboxSearchReplyText } from "@plannotator/shared/inbox/search";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
@@ -59,8 +61,12 @@ export const INBOX_LINE_WORDS = 120;
 export const INBOX_EXPAND_MAX = 50;
 
 
-/** An author as an agent reads it: the person, or an agent by the name the person sees. */
-export type AgentAuthor = { kind: "person" } | { kind: "agent"; name: string };
+/**
+ * An author as an agent reads it: the person, or an agent by the name the person sees, with `you: true`
+ * on the reader's own messages (the session that reads is the session that wrote), so two sessions of
+ * one agent in a thread read apart. Worked out at read time; nothing stored changes.
+ */
+export type AgentAuthor = { kind: "person" } | { kind: "agent"; name: string; you?: true };
 
 /** A question's answer without the copies of its key, kind and prompt. */
 export interface AgentAnswer {
@@ -87,6 +93,12 @@ export interface AgentQuestionRef {
    * it done` (your own `done`). Absent on a question and while it is open.
    */
   result?: string;
+  /**
+   * A question asked inside a file the message attached (issue #2828): the
+   * file's name. `q` then numbers it among that file's questions, as the
+   * reply's answers section does under "Your file <name>, attached to message <id>".
+   */
+  file?: string;
   /**
    * On a one-line message and in `thread.questions`: the prompt, clipped, so
    * an answer ("Yes") says what it answers (the reply's answers section,
@@ -118,7 +130,8 @@ export interface AgentMessage {
   body_bytes?: number;
   questions?: AgentQuestion[];
   attachments?: { name: string; kind: string; size: number; path: string }[];
-  ack?: { label: string; at: string };
+  /** The person's reaction (approval "inbox-reaction-tray"): always `reaction`, 👍 Looks good included. */
+  ack?: { label: string; at: string; reaction: { emoji: string; label?: string } };
   guide?: { title: string };
   /** A person's message addressed to one agent session (a New message, or a reply sent to another session because the asker ended); on a reply that tags agents, its owner. */
   to?: AgentAddressee;
@@ -133,6 +146,8 @@ export interface AgentMessage {
   board_request?: true;
   /** Asked from Decision data: `messageText` puts `INBOX_DECISION_ASK_BLOCK` after the body; `body` stays the person's words. */
   decision_ask?: true;
+  /** Asked from Settings → Rows: `messageText` puts `INBOX_ROWS_ASK_BLOCK` after the body; `body` stays the person's words. */
+  rows_ask?: true;
   /** With `board_request`: the cards in flight that link this thread already (not done, not dropped), for `messageText`. */
   board_cards?: { id: string; title: string }[];
   /** `inboxViewingLine`, on a reply sent from full screen's floating box. `body` stays the person's words. */
@@ -143,6 +158,8 @@ export interface AgentMessage {
 export interface AgentTagged {
   agent: string;
   session: string;
+  /** The session's name as the person's window shows it (their rename, else its generated title); absent when it has none. */
+  name?: string;
   you: boolean;
 }
 
@@ -150,7 +167,19 @@ export interface AgentTagged {
 export interface AgentAddressee {
   host: string;
   session: string;
+  /** The session's name as the person's window shows it; absent when it has none. */
+  name?: string;
   you: boolean;
+}
+
+export type SessionNameOf = (session: string) => string | null;
+
+/**
+ * Another session as an agent reads it: `Pi (pi-0193)`, and with the name the person's window shows for it,
+ * `"docs sweep" (Pi pi-0193)`. The name is quoted: it is display text, never an id.
+ */
+export function sessionWho(agent: string, session: string, name: string | null | undefined): string {
+  return name ? `${JSON.stringify(name)} (${agent} ${session})` : `${agent} (${session})`;
 }
 
 export interface AgentMessageLine {
@@ -166,6 +195,8 @@ export interface AgentMessageLine {
   attachments?: string[];
   guide?: string;
   ack?: true;
+  /** With `ack`: the emoji the person reacted with, 👍 included (approval "inbox-reaction-tray"); the line shows it, never its name. */
+  reaction?: string;
   to?: AgentAddressee;
   tagged?: AgentTagged[];
   board_request?: true;
@@ -180,6 +211,7 @@ export interface ThreadReadInput {
   message_id?: string;
   /** The reader's session: a message addressed to it says `you`. */
   caller?: string | null;
+  names?: SessionNameOf;
 }
 
 export interface ThreadWindowResult {
@@ -190,7 +222,8 @@ export interface ThreadWindowResult {
     resolved_at: string | null;
     project: { id: string; name: string; root: string };
     message_count: number;
-    participants: { kind: "person" | "agent"; name: string; messages: number }[];
+    /** `you: true` on the reader's own session (its messages counted apart from another session of the same agent). */
+    participants: { kind: "person" | "agent"; name: string; messages: number; you?: true }[];
     /** Every question still waiting on the person (open, or picked and not sent). */
     open_questions: AgentOpenQuestion[];
     /** Shown in full, oldest first: the window, the person's earlier messages, and any expanded or asked-for message. */
@@ -253,37 +286,45 @@ export function clip(text: string, max: number): string {
   return `${(space > max * 0.6 ? head.slice(0, space) : head).trimEnd()}…`;
 }
 
-export function agentAuthor(author: InboxMessageWire["author"]): AgentAuthor {
-  return author.kind === "person" ? { kind: "person" } : { kind: "agent", name: inboxAgentName(author) };
+export function agentAuthor(author: InboxMessageWire["author"], caller: string | null = null): AgentAuthor {
+  if (author.kind === "person") return { kind: "person" };
+  const you = !!caller && author.session === caller;
+  return { kind: "agent", name: inboxAgentName(author), ...(you ? { you: true as const } : {}) };
 }
 
+/** `the person`, `Claude Code`, or the reader's own `Claude Code (you)`. */
 function authorName(author: AgentAuthor): string {
-  return author.kind === "person" ? "the person" : author.name;
+  if (author.kind === "person") return "the person";
+  return author.you ? `${author.name} (you)` : author.name;
 }
 
 /** `to you`, or `to another session (Claude Code ses_…)`: a person's message meant for one session. */
 function addresseeWords(to: AgentAddressee | undefined): string | null {
   if (!to) return null;
-  return to.you ? "to you" : `to another session (${INBOX_HOST_NAMES[to.host] ?? to.host} ${to.session})`;
+  if (to.you) return "to you";
+  const agent = INBOX_HOST_NAMES[to.host] ?? to.host;
+  return to.name ? `to another session ${sessionWho(agent, to.session, to.name)}` : `to another session (${agent} ${to.session})`;
 }
 
 /** `tagged you, Pi (pi-0193)`: the sessions a person's reply tags, the reader first as `you`. */
 function taggedWords(tagged: readonly AgentTagged[] | undefined): string | null {
   if (!tagged?.length) return null;
   const you = tagged.filter((t) => t.you);
-  const others = tagged.filter((t) => !t.you).map((t) => `${t.agent} (${t.session})`);
+  const others = tagged.filter((t) => !t.you).map((t) => sessionWho(t.agent, t.session, t.name));
   return `tagged ${[...(you.length > 0 ? ["you"] : []), ...others].join(", ")}`;
 }
 
 /** The tags a wire message carries as `store.agentThread` writes them (`tagged`), with the reader marked. */
-function taggedOf(message: InboxMessageWire, caller: string | null): AgentTagged[] | undefined {
+function taggedOf(message: InboxMessageWire, caller: string | null, names?: SessionNameOf): AgentTagged[] | undefined {
   const tagged = (message as { tagged?: unknown }).tagged;
   if (!Array.isArray(tagged) || tagged.length === 0) return undefined;
-  return tagged.flatMap((t) =>
-    t && typeof t === "object" && typeof (t as { session?: unknown }).session === "string"
-      ? [{ agent: String((t as { agent?: unknown }).agent ?? "An agent"), session: (t as { session: string }).session, you: !!caller && (t as { session: string }).session === caller }]
-      : [],
-  );
+  return tagged.flatMap((t) => {
+    if (!t || typeof t !== "object" || typeof (t as { session?: unknown }).session !== "string") return [];
+    const session = (t as { session: string }).session;
+    const you = !!caller && session === caller;
+    const name = you ? null : (names?.(session) ?? null);
+    return [{ agent: String((t as { agent?: unknown }).agent ?? "An agent"), session, ...(name ? { name } : {}), you }];
+  });
 }
 
 export function agentAnswer(answer: QuestionAnswer | null | undefined): AgentAnswer | undefined {
@@ -321,7 +362,14 @@ export function answerWords(answer: AgentAnswer | undefined): string {
  */
 function numbering(questions: readonly InboxQuestion[]): Map<string, number> {
   const rank = (list: readonly InboxQuestion[]) => [...list].sort((a, b) => a.position - b.position).map((q, i) => [q.key, i + 1] as const);
-  return new Map([...rank(questions.filter((q) => q.kind !== "action")), ...rank(questions.filter((q) => q.kind === "action"))]);
+  // A question inside an attached file (issue #2828) is numbered among that file's questions.
+  const body = questions.filter((q) => !q.attachment);
+  const files = [...new Set(questions.flatMap((q) => (q.attachment ? [q.attachment.id] : [])))];
+  return new Map([
+    ...rank(body.filter((q) => q.kind !== "action")),
+    ...rank(body.filter((q) => q.kind === "action")),
+    ...files.flatMap((id) => rank(questions.filter((q) => q.attachment?.id === id && q.kind !== "action"))),
+  ]);
 }
 
 /** An action item's result in words, for the agent (`AgentQuestionRef.result`). */
@@ -342,6 +390,7 @@ function questionRef(q: InboxQuestion, n: number): AgentQuestionRef {
     key: q.key,
     q: n,
     state: q.state,
+    ...(q.attachment ? { file: q.attachment.name } : {}),
     ...(answer ? { answer } : {}),
     ...(result ? { result } : {}),
     ...(q.superseded_by ? { superseded_by: q.superseded_by.key ? `${q.superseded_by.message_id}/${q.superseded_by.key}` : q.superseded_by.message_id } : {}),
@@ -359,7 +408,7 @@ export function agentQuestions(questions: readonly InboxQuestion[]): AgentQuesti
  */
 export function questionWords(q: AgentQuestionRef, withPrompt = false): string {
   // An action item (key `a-…`) reads A1, A2…: the reply's "Action items you asked for" numbers it so.
-  const head = `${q.key.startsWith("a-") ? "A" : "Q"}${q.q} ${q.key}${withPrompt && q.prompt ? ` (${JSON.stringify(q.prompt)})` : ""}`;
+  const head = `${q.key.startsWith("a-") ? "A" : "Q"}${q.q}${q.file ? ` in your file ${q.file}` : ""} ${q.key}${withPrompt && q.prompt ? ` (${JSON.stringify(q.prompt)})` : ""}`;
   if (q.result) return `${head} ${q.result}`;
   if (q.state === "superseded") return `${head} ${q.superseded_by?.includes("/") ? `replaced by ${q.superseded_by}` : "no longer applies"}`;
   const answer = answerWords(q.answer);
@@ -399,11 +448,14 @@ export type AgentMessageForm = "window" | "earlier" | "whole";
 
 /** A message in full, as read_thread shows it. */
 /** Who a person's message is addressed to, if anyone. */
-function addressee(message: InboxMessageWire, caller: string | null): AgentAddressee | undefined {
-  return message.to ? { host: message.to.host, session: message.to.session, you: !!caller && message.to.session === caller } : undefined;
+function addressee(message: InboxMessageWire, caller: string | null, names?: SessionNameOf): AgentAddressee | undefined {
+  if (!message.to) return undefined;
+  const you = !!caller && message.to.session === caller;
+  const name = you ? null : (names?.(message.to.session) ?? null);
+  return { host: message.to.host, session: message.to.session, ...(name ? { name } : {}), you };
 }
 
-export function agentMessage(message: InboxMessageWire, form: AgentMessageForm = "window", caller: string | null = null): AgentMessage {
+export function agentMessage(message: InboxMessageWire, form: AgentMessageForm = "window", caller: string | null = null, names?: SessionNameOf): AgentMessage {
   const source = form === "earlier" ? withoutAnswersSection(message) : message.body;
   const total = byteLength(message.body);
   const over = form !== "whole" && byteLength(source) > INBOX_BODY_CUT_BYTES;
@@ -413,19 +465,20 @@ export function agentMessage(message: InboxMessageWire, form: AgentMessageForm =
   const ack = message.ack && typeof message.ack === "object" ? message.ack : null;
   return {
     id: message.id,
-    author: agentAuthor(message.author),
+    author: agentAuthor(message.author, caller),
     created_at: message.created_at,
     reply_to: message.reply_to,
     body,
     ...(body !== message.body ? { body_bytes: total } : {}),
     ...(message.questions?.length ? { questions: agentQuestions(message.questions) } : {}),
     ...(message.attachments?.length ? { attachments: message.attachments.map((a) => ({ name: a.name, kind: a.kind, size: a.size, path: a.path })) } : {}),
-    ...(ack ? { ack: { label: ack.label, at: ack.at } } : {}),
+    ...(ack ? { ack: { label: ack.label, at: ack.at, reaction: agentReaction(ack.reaction) } } : {}),
     ...(message.guide ? { guide: { title: message.guide.title } } : {}),
-    ...(message.to ? { to: addressee(message, caller) } : {}),
-    ...(taggedOf(message, caller) ? { tagged: taggedOf(message, caller) } : {}),
+    ...(message.to ? { to: addressee(message, caller, names) } : {}),
+    ...(taggedOf(message, caller) ? { tagged: taggedOf(message, caller, names) } : {}),
     ...(message.board_request === true ? { board_request: true as const } : {}),
     ...(message.decision_ask === true ? { decision_ask: true as const } : {}),
+    ...(message.rows_ask === true ? { rows_ask: true as const } : {}),
     ...(inboxViewingLine(message) ? { viewing: inboxViewingLine(message) } : {}),
   };
 }
@@ -439,11 +492,11 @@ function firstWords(message: InboxMessageWire): string {
   return clip(text, INBOX_LINE_WORDS);
 }
 
-export function agentMessageLine(message: InboxMessageWire, caller: string | null = null): AgentMessageLine {
+export function agentMessageLine(message: InboxMessageWire, caller: string | null = null, names?: SessionNameOf): AgentMessageLine {
   const n = numbering(message.questions ?? []);
   return {
     id: message.id,
-    author: agentAuthor(message.author),
+    author: agentAuthor(message.author, caller),
     created_at: message.created_at,
     reply_to: message.reply_to,
     words: firstWords(message),
@@ -452,8 +505,9 @@ export function agentMessageLine(message: InboxMessageWire, caller: string | nul
     ...(message.attachments?.length ? { attachments: message.attachments.map((a) => a.name) } : {}),
     ...(message.guide ? { guide: message.guide.title } : {}),
     ...(message.ack ? { ack: true as const } : {}),
-    ...(message.to ? { to: addressee(message, caller) } : {}),
-    ...(taggedOf(message, caller) ? { tagged: taggedOf(message, caller) } : {}),
+    ...(message.ack ? { reaction: inboxAckReaction(message.ack.reaction).emoji } : {}),
+    ...(message.to ? { to: addressee(message, caller, names) } : {}),
+    ...(taggedOf(message, caller) ? { tagged: taggedOf(message, caller, names) } : {}),
     ...(message.board_request === true ? { board_request: true as const } : {}),
     ...(inboxViewingLine(message) ? { viewing: inboxViewingLine(message) } : {}),
   };
@@ -550,9 +604,9 @@ export function windowedThread(
       .map((card) => ({ id: card.id, title: card.title }));
   const messages = all
     .filter((m) => full.has(m.id))
-    .map((m) => agentMessage(m, formOf(m.id), caller))
+    .map((m) => agentMessage(m, formOf(m.id), caller, input.names))
     .map((m) => (m.board_request ? { ...m, board_cards: linkedCards() } : m));
-  const earlier = inRange.filter((m) => !full.has(m.id)).map((m) => agentMessageLine(m, caller));
+  const earlier = inRange.filter((m) => !full.has(m.id)).map((m) => agentMessageLine(m, caller, input.names));
   const leftOut = all.filter((m) => !shown.has(m.id));
   // The questions of messages left out, without repeating what the reader has:
   // open and picked ones are in the header; for a message older than `after`
@@ -586,11 +640,12 @@ export function windowedThread(
     }
   }
 
-  const participants = new Map<string, { kind: "person" | "agent"; name: string; messages: number }>();
+  const participants = new Map<string, { kind: "person" | "agent"; name: string; messages: number; you?: true }>();
   for (const message of all) {
-    const author = agentAuthor(message.author);
+    const author = agentAuthor(message.author, caller);
     const name = authorName(author);
-    const entry = participants.get(`${author.kind}:${name}`) ?? { kind: author.kind, name, messages: 0 };
+    const you = author.kind === "agent" && author.you === true;
+    const entry = participants.get(`${author.kind}:${name}`) ?? { kind: author.kind, name: author.kind === "agent" ? author.name : name, messages: 0, ...(you ? { you: true as const } : {}) };
     entry.messages += 1;
     participants.set(`${author.kind}:${name}`, entry);
   }
@@ -665,10 +720,25 @@ export function messageLineText(line: AgentMessageLine, context: TranscriptConte
   if (line.questions?.length) parts.push(line.questions.map((q) => questionWords(q, true)).join("; "));
   if (line.attachments?.length) parts.push(`files: ${line.attachments.join(", ")}`);
   if (line.guide) parts.push(`guided review: ${line.guide}`);
-  if (line.ack) parts.push("👍");
+  if (line.ack) parts.push(line.reaction ?? "👍");
   // Shown in full only: the line says it is there, so a reader that sees just the line expands it.
   if (line.board_request) parts.push(`Board request (read_thread expand: ["${line.id}"] shows it)`);
   return parts.join(" · ");
+}
+
+/**
+ * The person's reaction as an agent reads it (approval "inbox-reaction-tray"): `{ emoji, label? }`, 👍 Looks good
+ * for an ack with none (an older one, or 👍 itself).
+ */
+function agentReaction(value: unknown): { emoji: string; label?: string } {
+  const { emoji, label } = inboxAckReaction(value);
+  return label ? { emoji, label } : { emoji };
+}
+
+/** The line under a message the person reacted to: the emoji, its name when it has one, and when. */
+function ackLineText(ack: NonNullable<AgentMessage["ack"]>): string {
+  const { emoji, label } = inboxAckReaction(ack.reaction);
+  return `${emoji}${label ? ` ${label}` : ""} (${shortTime(ack.at)}): the person's reaction.`;
 }
 
 /** One message in full as text: a heading line, the body, then its questions, files, guide and 👍. */
@@ -685,7 +755,7 @@ export function messageText(message: AgentMessage, context: TranscriptContext): 
     lines.push(`Files: ${message.attachments.map((a) => `${a.name} (${a.kind}, ${sizeText(a.size)}): ${a.path}`).join("; ")}`);
   }
   if (message.guide) lines.push(`Guided review: ${message.guide.title}`);
-  if (message.ack) lines.push(`👍 ${message.ack.label} (${shortTime(message.ack.at)}): the person read it and needs nothing more.`);
+  if (message.ack) lines.push(ackLineText(message.ack));
   // Compose's Board chip: the request, once, after the words and files (the wake's order), and the cards
   // that link the thread already, so a second reader keeps those current instead of making more.
   if (message.board_request) {
@@ -695,6 +765,7 @@ export function messageText(message: AgentMessage, context: TranscriptContext): 
     }
   }
   if (message.decision_ask) lines.push("", INBOX_DECISION_ASK_BLOCK);
+  if (message.rows_ask) lines.push("", INBOX_ROWS_ASK_BLOCK);
   return lines.join("\n");
 }
 
@@ -709,7 +780,7 @@ export function windowedThreadText(result: ThreadWindowResult, order: readonly s
   const facts = [
     thread.thread_name ? `Name: ${thread.thread_name}` : null,
     `Project: ${thread.project.name} (${thread.project.root})`,
-    `From: ${thread.participants.map((p) => `${p.name} ${p.messages}`).join(", ")}`,
+    `From: ${thread.participants.map((p) => `${p.you ? `${p.name} (you)` : p.name} ${p.messages}`).join(", ")}`,
     thread.resolved_at ? `Resolved ${shortTime(thread.resolved_at)}` : null,
     result.url,
   ].filter((part): part is string => part !== null);
@@ -729,7 +800,7 @@ export function windowedThreadText(result: ThreadWindowResult, order: readonly s
           ? `picked, not sent${q.answer ? `: ${answerWords(q.answer)}` : ""}`
           : "open";
       const choices = q.choices.length > 0 ? ` Choices: ${q.choices.map((c) => clip(c, 200)).join(" | ")}` : "";
-      out.push(`- ${q.message_id}/${q.key} (${todo ? "A" : "Q"}${q.q}) ${state}: ${q.prompt}${choices}`);
+      out.push(`- ${q.message_id}/${q.key} (${todo ? "A" : "Q"}${q.q}${q.file ? ` in your file ${q.file}` : ""}) ${state}: ${q.prompt}${choices}`);
     }
   }
   if (thread.questions?.length) {

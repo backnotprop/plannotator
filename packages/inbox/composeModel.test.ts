@@ -28,7 +28,6 @@ import {
   composeOpening,
   statusLine,
   subjectPreview,
-  startBlock,
   startStatusLine,
 } from './compose/model';
 
@@ -227,7 +226,7 @@ describe('the subject preview and the thread name', () => {
   });
 });
 
-describe('launch: the start block under the live sessions (UX screen 01)', () => {
+describe("launch: a start's status line (UX screen 13)", () => {
   const launch = {
     agents: [{ agent: 'claude-code' as const, name: 'Claude Code' }],
     projects: [
@@ -236,22 +235,6 @@ describe('launch: the start block under the live sessions (UX screen 01)', () =>
       { id: 'prj_c', name: 'billing-svc', root: '/u/work/billing-svc', exists: false },
     ],
   };
-
-  test('the caption names the project the person is looking at, else the most recently active', () => {
-    expect(startBlock(launch, { id: 'prj_b', root: null }, '')?.project.name).toBe('plannotator');
-    expect(startBlock(launch, null, '')?.project.name).toBe('workspaces-cli');
-  });
-
-  test('a filter word naming a project moves the caption there; agent words narrow the rows; no match, no block', () => {
-    expect(startBlock(launch, { id: 'prj_b', root: null }, 'billing')?.project.id).toBe('prj_c');
-    expect(startBlock(launch, null, 'claude billing')).toMatchObject({ project: { id: 'prj_c' }, agents: [{ agent: 'claude-code' }] });
-    expect(startBlock(launch, null, 'zzz')).toBeNull();
-  });
-
-  test('no agent available (or none installed new enough): no block at all, never a grey row', () => {
-    expect(startBlock({ ...launch, agents: [] }, null, '')).toBeNull();
-    expect(startBlock(undefined, null, '')).toBeNull();
-  });
 
   test('a start says nothing beside Send, unless its folder is gone (screen 13)', () => {
     const start = { agent: 'claude-code' as const, name: 'Claude Code', project: launch.projects[1]! };

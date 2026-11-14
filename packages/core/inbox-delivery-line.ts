@@ -33,6 +33,8 @@ export interface RecipientConnection {
   send_now: boolean;
   /** It runs an older Plannotator plugin than a restart loads (packages/server/inbox-restart.ts). Absent from an older Inbox. */
   outdated?: InboxSessionOutdated | null;
+  /** Claude Code holds this session's replies until the person types there (absent: no). The line says "Stopped". */
+  held?: boolean;
   /** Claude Code's version as its poll said (absent or null: unknown). */
   engine?: string | null;
   /** `cd <folder> && claude --resume <id>`, when the Inbox knows the folder. Absent from an older Inbox. */
@@ -51,11 +53,17 @@ export interface RecipientConnection {
    * Absent from an older Inbox and when none.
    */
   uncertain?: string[];
+  handed?: string[];
+  polls?: boolean;
 }
 
 /** Whether an item may not have reached the session it was handed to (`connection.uncertain`). */
 export function uncertainItem(connection: RecipientConnection | null | undefined, itemId: string): boolean {
   return connection?.uncertain?.includes(itemId) === true;
+}
+
+export function handedItem(connection: RecipientConnection | null | undefined, itemId: string): boolean {
+  return connection?.handed?.includes(itemId) === true;
 }
 
 /** The wait inputs of `deliveryLine` for one item: the server's clock while it waits, its own record after the mark. */
@@ -239,6 +247,7 @@ export interface DeliveryLineInput {
   undelivered?: { host: string } | null;
   /** Its session's connection took it and stopped while delivering it (the sessions route's `asker.stuck`). */
   stuck?: boolean;
+  handed?: boolean;
   /** When it began to wait on the busy session (the server's clock): the line says how long. */
   waitingSince?: string | null;
   /** When the clock toward going in by itself started (the server's); null: it does not go in by itself yet. */
@@ -261,6 +270,7 @@ export function deliveryLine(input: DeliveryLineInput): DeliveryLine {
     delivered: !!input.deliveredAt,
     undelivered: !!input.undelivered,
     stuck: !!input.stuck,
+    handed: !!input.handed,
     askerEnded: !!input.askerEnded,
     wakes: input.wakes,
     sendingNow: input.sendingNow,
@@ -348,6 +358,10 @@ export function deliveryText(
       return `Queued for ${name}; it gets this as its next turn.`;
     case 'ack_pending':
       return `Goes to ${name} in a few seconds`;
+    case 'stopped':
+      return INBOX_STOPPED_REPLY_TEXT;
+    case 'handed':
+      return `Handed to ${name}; it takes this at its next step.`;
   }
 }
 
@@ -364,6 +378,13 @@ export function reaskRowLine(name: string, checkedAt: string | null, wakes: bool
   if (checkedAt) return `Asked ${name} to re-ask; waiting for its message.`;
   return wakes === true ? `Re-ask queued for ${name}; it gets this as its next turn.` : `Re-ask saved for ${name}. It sees it when it next reads this thread.`;
 }
+
+/**
+ * A reply Claude Code refused because the person stopped that session: it
+ * goes in once they type there (approval "inbox-stopped-reply", the owner's
+ * exact words).
+ */
+export const INBOX_STOPPED_REPLY_TEXT = 'Stopped: goes in when you type in that session';
 
 /** An item the Inbox marked to go in by itself that waited for the turn to end (its own Ask question held it). */
 export const TURN_ENDED_TEXT = 'went in when its turn ended';

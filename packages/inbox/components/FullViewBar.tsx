@@ -65,6 +65,11 @@ export interface FullViewBarProps {
   changed: boolean;
   /** A reply draft waits in full screen's composer (words or files): the corner control says "Draft". */
   draft?: boolean;
+  /**
+   * A comment not sent waits in the file (its words stayed when the tools hid): a dot sits on the corner control's
+   * arrows, and its name says "comment not sent" (approval "inbox-comment-box", visible drafts).
+   */
+  commentDraft?: boolean;
   /** Where focus goes when the tools come back from the corner; absent or null: » (where Hide was pressed). */
   restoreTarget?: () => HTMLElement | null;
   /**
@@ -84,8 +89,6 @@ export interface FullViewBarProps {
     /** The peek, drawn under the bar while open (desktop); it closes through `close` with its reason. */
     renderPeek?: (close: (reason: 'key' | 'outside') => void) => ReactNode;
   } | null;
-  /** Ask AI's icon, before ⋯. Absent: nothing there. */
-  ask?: ReactNode;
   /** The button that adds this file to the reply (reuse.tsx). Absent: nothing there. */
   reuse?: ReactNode;
   /** ⋯: the trigger and its menu (OpenIn.tsx `FullScreenMore`), with whether its menu is open. */
@@ -152,10 +155,10 @@ const HIDDEN_SAYING = 'Tools hidden. They are in the bottom right corner.';
  * What floats over a file in full screen and gathers into the corner control (inbox.css): this toolbar, the composer
  * or its pill, an image's size bar and its "Your marked-up copy" chip, a text file's toolstrip, its Contents button
  * and ui's Contents rail (the ticks at the page's right edge, with the panel and its Hide), and the floating comments
- * panel when it is open. The changed chip is not here: it is a fact about the file.
+ * panel when it is open, and an HTML page's size icon on a phone. The changed chip is not here: it is a fact about the file.
  */
 export const GATHERED =
-  '.ib-fvbar, .ib-fcomp, .ib-fcomp-pillwrap, .ib-imgbar, .ib-imgshowing, .ib-toolstrip, .ib-contents-open, .pn-contents-rail, .ib-drawer .ib-apanel';
+  '.ib-fvbar, .ib-fcomp, .ib-fcomp-pillwrap, .ib-imgbar, .ib-imgshowing, .ib-toolstrip, .ib-contents-open, .pn-contents-rail, .ib-drawer .ib-apanel, .ib-sizecorner';
 /** Focus sits in something that is about to gather (and go inert or hidden). */
 const focusGathers = () => document.activeElement instanceof Element && document.activeElement.closest(GATHERED) !== null;
 
@@ -240,7 +243,7 @@ export const FullViewBar = forwardRef<FullViewBarHandle, FullViewBarProps>(funct
     if (count > lastCount.current && !drawerOpen) setBump((n) => n + 1);
     lastCount.current = count;
   }, [count, drawerOpen]);
-  const handleLabel = `Show tools${props.draft ? ', reply draft' : ''}${count ? `, ${plural(count, 'comment')}` : ''}${props.changed ? ', file changed since sent' : ''}`;
+  const handleLabel = `Show tools${props.commentDraft ? ', comment not sent' : ''}${props.draft ? ', reply draft' : ''}${count ? `, ${plural(count, 'comment')}` : ''}${props.changed ? ', file changed since sent' : ''}`;
   const iconSize = phone ? 18 : 15;
 
   // The way out of full screen names where it goes, "Side by side" (a pick: remembered); on a phone or a stacked window it is Back to the thread.
@@ -279,7 +282,10 @@ export const FullViewBar = forwardRef<FullViewBarHandle, FullViewBarProps>(funct
           aria-label={handleLabel}
           data-full-view-handle=""
         >
-          <Icon name="chevsU" size={phone ? 18 : 14} />
+          <span className="ib-fvhandle-arrows">
+            <Icon name="chevsU" size={phone ? 18 : 14} />
+            {props.commentDraft && <span className="ib-fvhandle-cdot" aria-hidden="true" data-full-view-comment-dot="" />}
+          </span>
           {props.draft && <span className="ib-fvhandle-w">Draft</span>}
           {count > 0 && (
             <span key={bump} className={`ib-fvhandle-n${bump ? ' ib-bump' : ''}`}>
@@ -378,7 +384,6 @@ export const FullViewBar = forwardRef<FullViewBarHandle, FullViewBarProps>(funct
           </span>
         )}
         <span className="ib-fvdv" aria-hidden="true" />
-        {props.ask}
         {props.more}
         {props.leave.kind === 'exit' && leaveButton}
         {props.onExitFull && props.leave.kind === 'exit' && !phone && (

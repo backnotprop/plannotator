@@ -348,7 +348,7 @@ const humanOnlyExportNote = (audience: SkillBlockAudience): string =>
 
 /**
  * The structural forms the injection block itself uses: the BEGIN/END markers
- * and the truncation notice. A skill body line matching one of these could
+ * (a skill's instructions, and the Inbox's PLANNOTATOR NOTE after them) and the truncation notice. A skill body line matching one of these could
  * close our block early (everything after it then reads to the receiving
  * agent as the reviewer's own words), forge a BEGIN marker for a skill nobody
  * referenced, or forge a truncation notice pointing at an attacker-chosen
@@ -364,7 +364,7 @@ const humanOnlyExportNote = (audience: SkillBlockAudience): string =>
 const MARKER_LOOKALIKE_RE =
   // Dash run: ASCII hyphen, `=`, the unicode hyphen/dash block U+2010–U+2015
   // (incl. en/em dash), and the minus sign U+2212.
-  /^[\s>*_#`]*(?:[-=‐-―−]{2,}\s*(?:BEGIN|END)\s*SKILL\s*INSTRUCTIONS\b|\[\s*Instructions\s*truncated\b)/i;
+  /^[\s>*_#`]*(?:[-=‐-―−]{2,}\s*(?:BEGIN|END)\s*(?:SKILL\s*INSTRUCTIONS|PLANNOTATOR\s*NOTE)\b|\[\s*Instructions\s*truncated\b)/i;
 
 /**
  * Invisible format characters (Unicode category Cf: zero-width space/joiners

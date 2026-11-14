@@ -457,13 +457,14 @@ function snapshotProcessTable(): Map<number, number> {
           "-Command",
           "Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId | ConvertTo-Csv -NoTypeInformation",
         ],
-        { env: childEnv(), encoding: "utf-8", timeout: 2000 }
+        { env: childEnv(), encoding: "utf-8", timeout: 2000, windowsHide: true }
       );
       if (result.status !== 0) return new Map();
       return parseProcessTableCsv(result.stdout);
     }
     const result = spawnSync("ps", ["-eo", "pid=,ppid="], {
       env: childEnv(),
+      windowsHide: true,
       encoding: "utf-8",
       timeout: 2000,
     });

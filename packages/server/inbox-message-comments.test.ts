@@ -141,7 +141,7 @@ test("a comment on an agent's message is kept with the thread's annotations, edi
   expect(((await reopen.json()) as { code: string }).code).toBe("annotation_closed");
 });
 
-test("refused: the person's own message, an unknown message, a general comment or empty quote, an id used on a file, another site and a stale tab", async () => {
+test("the person's own message takes a comment; refused: an unknown message, a general comment or empty quote, an id used on a file, another site and a stale tab", async () => {
   const { project, dataDir } = world();
   const server = await start(dataDir);
   const client = await agent(server);
@@ -177,11 +177,14 @@ test("refused: the person's own message, an unknown message, a general comment o
   // GET is not a door.
   expect((await fetch(`http://127.0.0.1:${server.port}${route}`)).status).toBe(405);
 
-  // The person's own reply takes no comments.
+  // The person's own reply takes comments too (approval "inbox-annotate-own-and-questions"; the Inbox's own
+  // notes take none: store-own-and-question-comments.test.ts).
   const reply = await post(server, `/api/inbox/messages/${sent.message_id}/reply`, { idempotency_key: "r-1", words: "Looks right." });
   expect(reply.status).toBe(200);
   const mine = ((await reply.json()) as { reply: { id: string } }).reply.id;
-  await refused(`/api/inbox/messages/${mine}/annotations`, comment({ id: "ann-mine" }), 422, "annotation_not_allowed");
+  expect((await post(server, `/api/inbox/messages/${mine}/annotations`, { annotation: comment({ id: "ann-mine", originalText: "Looks right." }) })).status).toBe(200);
+  expect((await pending(server, sent.thread_id)).map((r) => r.id)).toEqual(["ann-mine"]);
+  expect((await post(server, "/api/inbox/annotations/ann-mine/remove", {})).status).toBe(200);
   expect(await pending(server, sent.thread_id)).toHaveLength(0);
 
   // A message comment's id is not a file annotation's, nor the other way round.

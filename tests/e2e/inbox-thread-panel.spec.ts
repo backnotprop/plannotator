@@ -352,7 +352,7 @@ test('full screen, the Artifacts view and a file beside the thread all come back
   // Full screen: the list hides, Escape leaves it, the next Escape closes the thread.
   await row(page, threads.release).click();
   await expect(subject(page)).toBeVisible();
-  await page.getByRole('button', { name: /^Hide the sidebar and the list/ }).click();
+  await page.locator('.ib-listcol .ib-handle-hit').click();
   await expect(page.locator('.pn-inbox[data-thread-full]')).toBeVisible();
   await expect(list(page)).toBeHidden();
   await page.keyboard.press('Escape');
@@ -363,7 +363,7 @@ test('full screen, the Artifacts view and a file beside the thread all come back
 
   // The address leaving the thread while in full screen (Back, a link): the sidebar and the list come back with the empty panel.
   await row(page, threads.release).click();
-  await page.getByRole('button', { name: /^Hide the sidebar and the list/ }).click();
+  await page.locator('.ib-listcol .ib-handle-hit').click();
   await expect(page.locator('.pn-inbox[data-thread-full]')).toBeVisible();
   await page.evaluate(() => {
     window.location.hash = '';

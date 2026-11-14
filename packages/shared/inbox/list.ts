@@ -110,13 +110,18 @@ export function inboxSectionOf(row: InboxSectionFacts): InboxSectionId {
 }
 
 /**
- * Bold in the list: something waits on the person, or is new to them. A row in
- * New only for the person's own unsent words or comments (`draftOnly`) is not
- * bold: nothing new arrived, and its "Draft" label says what is there.
+ * Bold in the list: something is new to the person. A row in Stopped, Holding
+ * up work or Waiting on you is bold until the person has seen its latest agent
+ * message (`unseen` 0: they opened the thread), then reads as read where it is:
+ * it keeps its group and its chips, and an agent's next message makes it bold
+ * again (the owner, 2026-11-08: "if they could unbolden after I at least read
+ * the latest message ... Then they just stay where they are"). A row in New is
+ * bold, except one there only for the person's own unsent words or comments
+ * (`draftOnly`): nothing new arrived, and its "Draft" label says what is there.
  */
-export function inboxRowUnread(section: InboxSectionId, draftOnly = false): boolean {
-  if (section === "new" && draftOnly) return false;
-  return section === "stopped" || section === "holding" || section === "waiting" || section === "new";
+export function inboxRowUnread(section: InboxSectionId, unseen: number, draftOnly: boolean): boolean {
+  if (section === "stopped" || section === "holding" || section === "waiting") return unseen > 0;
+  return section === "new" && !draftOnly;
 }
 
 function byId(left: InboxListRow, right: InboxListRow): number {

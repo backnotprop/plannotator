@@ -401,6 +401,8 @@ export interface InboxPermissionOptions {
   fullPermissions?: boolean;
   /** The session already runs in Full permissions (a launch made full): no mode switch is offered. */
   full?: boolean;
+  /** False for a host with no session modes to switch to (Codex): no Auto mode or Full permissions choice; such a pick from an older card reads as Allow once. */
+  modes?: boolean;
   /** False when the host takes only a deny from here (its own dialog keeps the approval): Deny, or hand it to Terminal. */
   allowHere?: boolean;
   /** The host can take the prompt in its own dialog: Approve in Terminal is offered too (an allow from here may not count). */
@@ -490,7 +492,7 @@ export function inboxPermissionChoices(event: InboxPermissionEvent, options: Inb
     INBOX_PERMISSION_ALLOW_ONCE,
     ...(session ? [session.label] : []),
     INBOX_PERMISSION_DENY,
-    ...(options.full ? [] : [INBOX_PERMISSION_AUTO, ...(options.fullPermissions ? [INBOX_PERMISSION_FULL] : [])]),
+    ...(options.full || options.modes === false ? [] : [INBOX_PERMISSION_AUTO, ...(options.fullPermissions ? [INBOX_PERMISSION_FULL] : [])]),
     ...(options.terminal ? [INBOX_PERMISSION_TERMINAL] : []),
   ];
 }
@@ -603,8 +605,8 @@ export function inboxPermissionAnswer(answer: QuestionAnswer | null, event: Inbo
   }
   if (picked === INBOX_PERMISSION_TERMINAL && options.terminal) return { choice: "terminal", reason: null };
   if (picked === INBOX_PERMISSION_ALLOW_ONCE) return { choice: "once", reason: null };
-  if (picked === INBOX_PERMISSION_AUTO) return { choice: options.full ? "once" : "auto", reason: null };
-  if (picked === INBOX_PERMISSION_FULL) return { choice: options.fullPermissions ? "full" : "once", reason: null };
+  if (picked === INBOX_PERMISSION_AUTO) return { choice: options.full || options.modes === false ? "once" : "auto", reason: null };
+  if (picked === INBOX_PERMISSION_FULL) return { choice: options.fullPermissions && options.modes !== false ? "full" : "once", reason: null };
   const session = inboxPermissionSessionChoice(event, options.shownPath);
   if (session && picked === session.label) return { choice: "session", reason: null };
   return { choice: "deny", reason };

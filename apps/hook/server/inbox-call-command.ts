@@ -39,13 +39,18 @@
  * `<code>: <message>`. Exit 0 ok, 1 refused or unreachable, 2 bad usage.
  */
 
-import { resolve } from "node:path";
+import { readFile } from "node:fs/promises";
+import { basename, resolve } from "node:path";
+import { decodeInboxAgentPairing, INBOX_AGENT_CALL_ACTIONS } from "@plannotator/shared/inbox/agent-pairing";
+import { callInboxThroughRelay, inboxAgentSignalUrl } from "@plannotator/shared/inbox/agent-relay-client";
 import { INBOX_HOST_NAMES, INBOX_QWEN_SESSION_ENV, INBOX_T3_HOST, INBOX_T3_THREAD_ENV, inboxTidyMcpLine, parseInboxSessionRef, type InboxTidyMark } from "@plannotator/core/inbox-types";
 import { INBOX_MAX_REQUEST_BYTES, INBOX_PEEK_META_KEY, inboxRequestTooLargeMessage, inboxToolCallParams, mcpAnswerOfResponse } from "@plannotator/shared/inbox/connection";
 import type { InboxRegistryEntry } from "@plannotator/shared/inbox/registry";
 import { attachedImagesNotInBodyText } from "@plannotator/shared/inbox/attached-images";
+import { questionsToCheckText } from "@plannotator/shared/inbox/questions-to-check";
+import type { InboxQuestionToCheck } from "@plannotator/core/inbox-questions";
 import { questionOpenersWithTextText, type QuestionOpenerWithText } from "@plannotator/shared/inbox/question-openers";
-import { hasHelpFlag, INBOX_CALL_ACTIONS, INBOX_CALL_USAGE } from "./cli";
+import { hasHelpFlag, INBOX_CALL_ACTIONS, INBOX_CALL_USAGE, INBOX_PAIRED_CALL_USAGE } from "./cli";
 import { writeWholeToStdout } from "./write-whole-stdout";
 import { fillInboxToolArguments, type InboxHostSession, INBOX_DSH_ROOT_FOR_ENV, INBOX_DSH_ROOT_SESSION_ENV, INBOX_SESSION_HOST_NAMES, inboxHostSessionFromEnv, inboxSessionProjectFromEnv } from "./inbox-mcp-shim";
 
@@ -133,7 +138,7 @@ export type ParsedCallCommand =
   | { ok: true; action: string; json: string | null; stdin: boolean; session: string | null }
   | { ok: false; code: string; error: string };
 
-export function parseCallCommand(argv: readonly string[]): ParsedCallCommand {
+export function parseCallCommand(argv: readonly string[], actions: readonly string[] = INBOX_CALL_ACTIONS): ParsedCallCommand {
   const positional: string[] = [];
   let session: string | null = null;
   for (let i = 0; i < argv.length; i++) {
@@ -150,8 +155,8 @@ export function parseCallCommand(argv: readonly string[]): ParsedCallCommand {
   if (action === undefined) return { ok: false, code: "usage", error: "inbox call needs an action." };
   // `steps` is left out of the list, as in the usage: it is served only while the person has thread steps on (and the
   // switch is the Inbox's, not known here), so an agent with them off reads no word of it.
-  if (!(INBOX_CALL_ACTIONS as readonly string[]).includes(action)) {
-    return { ok: false, code: "unknown_action", error: `${action} is not an Inbox action. Actions: ${INBOX_CALL_ACTIONS.filter((name) => name !== "steps").join(", ")}.` };
+  if (!actions.includes(action)) {
+    return { ok: false, code: "unknown_action", error: `${action} is not an Inbox action. Actions: ${actions.filter((name) => name !== "steps").join(", ")}.` };
   }
   if (more.length > 0) return { ok: false, code: "usage", error: "inbox call takes one JSON argument (quote it), or - to read it from stdin." };
   return { ok: true, action, json: json === "-" ? null : (json ?? null), stdin: json === "-", session };
@@ -197,16 +202,19 @@ export async function runInboxCallCommand(argv: readonly string[], deps: CallCom
     err(`${code}: ${message}\n`);
     return exit;
   };
+  const paired = Boolean(deps.env.PLANNOTATOR_PAIRING);
+  const usage = paired ? INBOX_PAIRED_CALL_USAGE : INBOX_CALL_USAGE;
   if (hasHelpFlag([...argv])) {
-    await out(`${INBOX_CALL_USAGE}\n`);
+    await out(`${usage}\n`);
     return 0;
   }
-  const parsed = parseCallCommand(argv);
+  const parsed = parseCallCommand(argv, paired ? INBOX_AGENT_CALL_ACTIONS : INBOX_CALL_ACTIONS);
   if (!parsed.ok) {
-    err(`${parsed.code}: ${parsed.error}\n${INBOX_CALL_USAGE}\n`);
+    err(`${parsed.code}: ${parsed.error}\n${usage}\n`);
     return 2;
   }
   if (deps.askAiChild) return refused("inbox_off", "The Plannotator Inbox is off in an agent that Plannotator's Ask AI started.");
+  if (deps.env.PLANNOTATOR_PAIRING) return runPairedCall(parsed, deps, out, err, refused);
   const caller = inboxCallerOf(parsed.session, deps.env);
   if (!caller.ok) return refused(caller.code, caller.message, caller.usage ? 2 : 1);
   const text = parsed.stdin ? await (deps.stdin ?? (() => Bun.stdin.text()))() : (parsed.json ?? "{}");
@@ -243,7 +251,104 @@ export async function runInboxCallCommand(argv: readonly string[], deps: CallCom
   }
   if (!answer) return refused("inbox_no_answer", "Plannotator Inbox gave no answer.");
   if (answer.error) return refused("inbox_error", answer.error.message ?? "The Inbox refused the call.");
-  const result = answer.result as { content?: { text?: string }[]; structuredContent?: Record<string, unknown>; isError?: boolean } | undefined;
+  return printResult(answer.result as CallResult | undefined, out, err);
+}
+
+type CallResult = { content?: { text?: string }[]; structuredContent?: Record<string, unknown>; isError?: boolean };
+
+/** A paired cloud agent's call: the agent door, with the pairing's token. Only on this computer until the relay carries it. */
+async function runPairedCall(
+  parsed: Extract<ParsedCallCommand, { ok: true }>,
+  deps: CallCommandDeps,
+  out: (text: string) => void | Promise<void>,
+  err: (text: string) => void,
+  refused: (code: string, message: string, exit?: number) => number,
+): Promise<number> {
+  const pairing = decodeInboxAgentPairing(deps.env.PLANNOTATOR_PAIRING);
+  if (!pairing) return refused("invalid_pairing", "PLANNOTATOR_PAIRING is not a whole pairing string from the Inbox: it is cut off or changed, or has spaces or line breaks in it. Ask the person to copy it again, whole (it starts with plannotator-pairing-).", 2);
+  const door = deps.env.PLANNOTATOR_PAIRING_DOOR ? loopbackDoor(deps.env.PLANNOTATOR_PAIRING_DOOR) : null;
+  if (deps.env.PLANNOTATOR_PAIRING_DOOR && !door) return refused("pairing_door_needed", "PLANNOTATOR_PAIRING_DOOR must be the Inbox's address on this computer (http://127.0.0.1:<port>). Unset it to go through the relay.", 2);
+  if (!door && !pairing.relay) {
+    return refused("pairing_without_relay", "This pairing string was made before the person's Inbox could reach its relay, so it works only on their computer. Ask the person to remove this agent and pair it again.", 1);
+  }
+  if (parsed.session !== null) return refused("invalid_session", "--session is not taken with PLANNOTATOR_PAIRING: the pairing names the agent.", 2);
+  let args: Record<string, unknown>;
+  try {
+    const value = JSON.parse((parsed.stdin ? await (deps.stdin ?? (() => Bun.stdin.text()))() : (parsed.json ?? "{}")).replace(/^\uFEFF/, "")) as unknown;
+    if (!value || typeof value !== "object" || Array.isArray(value)) return refused("invalid_json", "The arguments must be one JSON object.", 2);
+    args = value as Record<string, unknown>;
+  } catch (error) {
+    return refused("invalid_json", `The arguments are not JSON: ${error instanceof Error ? error.message : String(error)}`, 2);
+  }
+  // Files on this computer go up as bytes: the Inbox never opens a path a cloud agent names.
+  if (Array.isArray(args.attachments)) {
+    try {
+      args.attachments = await Promise.all(
+        args.attachments.map(async (item) => (typeof item === "string" ? { name: basename(item), data: (await readFile(resolve(deps.cwd, item))).toString("base64") } : item)),
+      );
+    } catch (error) {
+      return refused("attachment_unreadable", error instanceof Error ? error.message : String(error));
+    }
+  }
+  if (!door && pairing.relay) {
+    const relayed = { ...pairing, relay: pairing.relay };
+    const outcome = await callInboxThroughRelay(relayed, parsed.action, args);
+    if (outcome.kind === "refused") return refused(outcome.code, outcome.message);
+    if (outcome.kind === "queued") {
+      await out(
+        `${JSON.stringify({
+          queued: true,
+          note:
+            outcome.reason === "offline"
+              ? "The person's computer is asleep or offline. This call waits at the relay and is applied once when it is back. Do not send it again."
+              : "The person's computer did not answer in time. This call waits at the relay and is applied once. Do not send it again.",
+        })}\n`,
+      );
+      return 0;
+    }
+    const answer = (() => {
+      try {
+        return JSON.parse(outcome.body) as { result?: CallResult; code?: string; error?: string };
+      } catch {
+        return null;
+      }
+    })();
+    if (outcome.status === 401 && answer?.code === "device_revoked") return refused("pairing_removed", "This cloud agent was removed from the person's Inbox. Nothing was sent. Ask the person for a new pairing string.");
+    if (outcome.status < 200 || outcome.status >= 300 || !answer?.result) return refused(answer?.code ?? "inbox_error", answer?.error ?? `The Inbox answered ${outcome.status}.`);
+    if (parsed.action === "whoami" && !answer.result.isError) {
+      answer.result.structuredContent = { ...answer.result.structuredContent, signal_url: await inboxAgentSignalUrl(relayed) };
+    }
+    return printResult(answer.result, out, err);
+  }
+  let response: Response;
+  try {
+    response = await fetch(`${door}/api/inbox/agent/call`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${pairing.token}` },
+      body: JSON.stringify({ tool: parsed.action, arguments: args }),
+      signal: AbortSignal.timeout(deps.timeoutMs ?? REQUEST_TIMEOUT_MS),
+    });
+  } catch (error) {
+    return refused("inbox_no_answer", `Plannotator Inbox did not answer: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  const answer = (await response.json().catch(() => null)) as { result?: CallResult; code?: string; error?: string } | null;
+  if (!response.ok || !answer?.result) return refused(answer?.code ?? "inbox_error", answer?.error ?? `The Inbox answered ${response.status}.`);
+  return printResult(answer.result, out, err);
+}
+
+/** `http://127.0.0.1:<port>` (or localhost, [::1]) with nothing after the port, else null. */
+function loopbackDoor(value: string | undefined): string | null {
+  if (!value) return null;
+  try {
+    const url = new URL(value.trim());
+    if (url.protocol !== "http:" || !["127.0.0.1", "localhost", "[::1]"].includes(url.hostname) || !url.port || url.pathname !== "/" || url.search || url.username) return null;
+    return url.origin;
+  } catch {
+    return null;
+  }
+}
+
+async function printResult(result: CallResult | undefined, out: (text: string) => void | Promise<void>, err: (text: string) => void): Promise<number> {
   const words = (result?.content ?? []).map((part) => part.text ?? "").join("\n");
   if (result?.isError) {
     // The Inbox's refusals are `<code>: <message>`; the MCP layer's (a field the schema does not take) are plain words.
@@ -266,6 +371,19 @@ export async function runInboxCallCommand(argv: readonly string[], deps: CallCom
   // Pictures sent only as attachments: the result text's advice, on stderr too.
   const attachedOnly = result?.structuredContent?.attached_images_not_in_body;
   if (Array.isArray(attachedOnly) && attachedOnly.length > 0) err(`${attachedImagesNotInBodyText(attachedOnly.length).trim()}\n`);
+  // A pick-one block with no choices: the result text's advice, on stderr too.
+  const toCheck = result?.structuredContent?.questions_to_check;
+  const messageId = result?.structuredContent?.message_id;
+  if (Array.isArray(toCheck) && toCheck.length > 0 && typeof messageId === "string") {
+    try {
+      err(`${questionsToCheckText(messageId, toCheck as InboxQuestionToCheck[]).trim()}\n`);
+    } catch {
+      // A malformed list (never from this Inbox) prints no advice; the result below still does.
+    }
+  }
+  // A quiet hint (send_message's `hint`): the result text's last line, on stderr too.
+  const hint = result?.structuredContent?.hint;
+  if (typeof hint === "string" && hint) err(`${hint}\n`);
   await out(`${JSON.stringify(result?.structuredContent ?? { text: words })}\n`);
   return 0;
 }

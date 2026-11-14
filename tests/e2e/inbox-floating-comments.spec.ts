@@ -429,8 +429,9 @@ test('an image at 1440, and HTML at 1280 with the reply card clear of the panel'
   await expect(panel(page)).toBeVisible();
   const p = await panelAtRest(page);
   const card = (await box(page, '[data-fcomp]'))!;
-  // Centred it would run under the panel: it moves left, keeping its width.
-  expect(centred.x + centred.width).toBeGreaterThan(p.x);
+  // Centred it would come within 12 px of the panel (round 3's card is 600 px, #2846): it moves left, keeping its width.
+  expect(centred.x + centred.width).toBeGreaterThan(p.x - 12);
+  expect(card.x).toBeLessThan(centred.x);
   expect(card.x + card.width).toBeLessThanOrEqual(p.x - 12);
   expect(card.width).toBe(centred.width);
   await page.mouse.move(40, 650);

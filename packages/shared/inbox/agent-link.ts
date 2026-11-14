@@ -49,8 +49,10 @@ import {
   inboxSessionThreadsParams,
   inboxSessionThreadsText,
   inboxToolCall,
+  inboxResultWithNote,
   inboxToolCallParams,
   inboxToolResultText,
+  inboxToolsWithoutBro,
   inboxWakeText,
   mcpAnswerOfResponse,
   parseInboxBridgeCommands,
@@ -191,7 +193,7 @@ export async function discoverInboxTools(
   } catch {
     remembered = null;
   }
-  const tools = parseInboxToolList(remembered);
+  const tools = inboxToolsWithoutBro(parseInboxToolList(remembered));
   return tools.length > 0 ? tools : null;
 }
 
@@ -263,7 +265,9 @@ export class InboxAgentConnection {
       if (/not found|unknown tool/i.test(message)) return { text: `This Plannotator Inbox has no ${call.name}; update Plannotator. (${message})`, isError: true };
       return { text: `The Plannotator Inbox refused the call: ${message}`, isError: true };
     }
-    return inboxToolResultText(answer.result);
+    const result = inboxToolResultText(answer.result);
+    // A call the host could not parse, read again with a bare id quoted: the result says so.
+    return { ...result, text: inboxResultWithNote(result.text, call.note) };
   }
 
   /**

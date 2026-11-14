@@ -11,8 +11,12 @@
  * writes no bytes, and the fake agent reads the same bytes at a read-only path
  * of its own; the version on screen is the one fixed; deleting the original
  * touches nothing; a phone adds from the viewer's toolbar and only a download
- * tile, which opens no viewer, has the button rest on it; full screen's card shows the file under Reply; a linked
- * machine's thread offers none of it.
+ * tile, which opens no viewer, has the button rest on it; full screen's card
+ * shows the file under Reply; a linked machine's thread offers none of it. The
+ * next thread: New message over an open thread offers that thread's files, sends
+ * to an agent in another project with no word of the first; an archived thread's
+ * button opens New message with the file. A picture copied from this Inbox pastes
+ * as that file, and anything else as a plain paste.
  */
 import { expect, test, type Browser, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
@@ -20,6 +24,7 @@ import { createHash } from 'node:crypto';
 import { chmodSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { deflateSync } from 'node:zlib';
+import { INBOX_BRIDGE_EVENT_PATH, INBOX_BRIDGE_POLL_PATH, parseInboxBridgeCommands, type InboxReplyCommand } from '../../packages/shared/inbox/connection';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { NO_BROWSER } from '../helpers/no-browser';
 import { fakeTailscale } from './fake-tailscale';
@@ -98,6 +103,35 @@ function png(width: number, height: number, [r, g, b]: [number, number, number])
 const sha = (bytes: Buffer | string) => createHash('sha256').update(bytes).digest('hex');
 const blobsOf = (m: Machine) => readdirSync(join(m.dataDir, 'inbox', 'blobs')).filter((n) => /^[0-9a-f]{64}$/.test(n)).sort();
 
+/** A live session, as a connection plays one: it polls, and what it is woken with lands in `commands`. */
+class LiveSession {
+  readonly commands: InboxReplyCommand[] = [];
+  private stopped = false;
+  private readonly loop: Promise<void>;
+  constructor(private readonly m: Machine, readonly session: string, readonly host: string, private readonly projectPath: string) {
+    this.loop = this.run();
+  }
+  private bridge(path: string, body: Record<string, unknown>) {
+    const { port, token } = JSON.parse(readFileSync(join(this.m.dataDir, 'inbox', 'inbox.json'), 'utf8')) as { port: number; token: string };
+    return fetch(`http://127.0.0.1:${port}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ session: this.session, host: this.host, ...body }) });
+  }
+  private async run() {
+    while (!this.stopped) {
+      const response = await this.bridge(INBOX_BRIDGE_POLL_PATH, { waitMs: 500, project_path: this.projectPath, started_at: Date.now() - 60_000, busy: false, idle_since: Date.now() - 1000 });
+      for (const command of parseInboxBridgeCommands(await response.text())) {
+        if (this.commands.some((known) => known.id === command.id)) continue;
+        this.commands.push(command);
+        await this.bridge(INBOX_BRIDGE_EVENT_PATH, { type: 'delivered', id: command.id });
+      }
+    }
+  }
+  async stop() {
+    this.stopped = true;
+    await this.loop;
+  }
+}
+
+let billingSession: LiveSession;
 let studio: Machine;
 let macbook: Machine;
 let harbor: string;
@@ -144,7 +178,15 @@ const preview = (p: Page, name: string) => p.locator(`[data-gallery-image][data-
 const tile = (p: Page, name: string) => p.locator(`.ib-attachments:not(.ib-hatts-tiles) .ib-att-t[data-attachment-name="${name}"]`).first();
 const button = (p: Page, surface: string, name: string) => p.locator(`[data-reuse-surface="${surface}"][data-reuse][aria-label*="${name}"]`).first();
 const replyTiles = (p: Page) => p.locator('[data-reply-files] [data-compose-file]');
-const sendReply = (p: Page) => p.locator('section.ib-pane .ib-acts').getByRole('button', { name: 'Send' }).first().click();
+const sendReply = (p: Page) => p.locator('section.ib-pane .ib-rbox [data-reply-send]').click();
+/**
+ * The thread's draft on the Inbox holds the box's file. A computer saves without a word (approval "inbox-reply-box",
+ * T6: no "Saved" under the box), so the draft itself is read.
+ */
+const draftSaved = (threadId: string, url = studio.url) =>
+  expect
+    .poll(async () => ((await (await fetch(`${url}/api/inbox/threads/${threadId}/draft`)).json()) as { draft: { files?: unknown[] } | null }).draft?.files?.length ?? 0, { timeout: 10_000 })
+    .toBeGreaterThan(0);
 
 /** Where every element of the pane's attachments and text is. */
 const boxes = (p: Page) =>
@@ -187,6 +229,7 @@ test.beforeAll(async ({ browser }) => {
   macbookAgent = await SimAgent.connect({ binary, env: macbook.env, name: 'Claude Code', host: 'claude-code', cwd: macbook.root });
   macbookThread = ((await macbookAgent.send({ project_path: macbookProject, thread: 'On the other machine', body: 'From over there.\n\n![Away](art/inline-away.png)', attachments: [join(macbookProject, 'art', 'away.png')] })) as { thread_id: string }).thread_id;
 
+  billingSession = new LiveSession(studio, 'ses-billing', 'pi', scratchProject(join(studio.root, 'src'), 'billing-svc'));
   const context = await (browser as Browser).newContext({ viewport: { width: 1440, height: 900 }, permissions: browser.browserType().name() === 'chromium' ? ['notifications'] : [] });
   page = await context.newPage();
   page.on('pageerror', (error) => errors.push(error.message));
@@ -194,6 +237,7 @@ test.beforeAll(async ({ browser }) => {
 
 test.afterAll(async () => {
   await page?.context().close();
+  await billingSession?.stop();
   await agent?.close();
   await macbookAgent?.close();
   await removeInboxScratch();
@@ -287,7 +331,7 @@ test('a draft keeps it through a reload, with its check', async () => {
   await tile(page, REF_A).hover();
   await button(page, 'tile', REF_A).click();
   await expect(page.locator('[data-reply-files] [data-compose-file="done"]')).toHaveCount(1);
-  await expect(page.locator('section.ib-pane').getByText(/Saved/).first()).toBeVisible({ timeout: 10_000 });
+  await draftSaved(thread_id);
   await page.reload();
   await expect(replyTiles(page)).toHaveCount(1, { timeout: 10_000 });
   await expect(button(page, 'tile', REF_A)).toHaveAttribute('data-reuse-state', 'added');
@@ -700,8 +744,8 @@ test('a reload keeps the check: the restored tile is known by its bytes, and the
   await tile(page, REF_A).hover();
   await button(page, 'tile', REF_A).click();
   await expect(page.locator('[data-reply-files] [data-compose-file="done"]')).toHaveCount(1);
-  // The draft has saved it, once the foot says so.
-  await expect(page.locator('section.ib-pane')).toContainText(/Saved \d/);
+  // The draft has saved it.
+  await draftSaved(thread_id);
   await page.reload();
   await expect(page.locator('[data-reply-files] [data-compose-file="done"]')).toHaveCount(1);
   await tile(page, REF_A).hover();
@@ -741,7 +785,7 @@ test('a big changed file, listed by its stat after a reload: the check stays, an
   await tile(page, name).hover();
   await button(page, 'tile', name).click();
   await expect(page.locator('[data-reply-files] [data-compose-file="done"]')).toHaveCount(1);
-  await expect(page.locator('section.ib-pane')).toContainText(/Saved \d/);
+  await draftSaved(big.thread_id);
   await page.reload();
   await expect(page.locator('[data-reply-files] [data-compose-file="done"]')).toHaveCount(1);
   await tile(page, name).hover();
@@ -766,7 +810,7 @@ test('the draft already holds those bytes under another name: one tile, and the 
   await button(page, 'tile', name).click();
   await expect(page.locator('[data-reply-files] [data-compose-file="done"]')).toHaveCount(1);
   await page.unroute(reuse);
-  await expect(page.locator('section.ib-pane')).toContainText(/Saved \d/);
+  await draftSaved(big.thread_id);
   await big.listedByStat();
   await page.reload();
   await expect(page.locator('[data-reply-files] [data-compose-file="done"]')).toHaveCount(1);
@@ -810,7 +854,7 @@ test('the reply box closed with its draft: adding those bytes again opens the bo
   await tile(page, REF_A).hover();
   await button(page, 'tile', REF_A).click();
   await expect(page.locator('[data-reply-files] [data-compose-file="done"]')).toHaveCount(1);
-  await page.locator('section.ib-pane .ib-acts').getByRole('button', { name: 'Cancel' }).click();
+  await page.locator('section.ib-pane .ib-rbox [data-reply-close]').click();
   await expect(replyTiles(page)).toHaveCount(0);
   await tile(page, REF_A).hover();
   await button(page, 'tile', REF_A).click();
@@ -826,4 +870,170 @@ test("a linked machine's thread offers no button, on any surface", async () => {
   await preview(page, 'away.png').click();
   await expect(page.locator('[data-attachment-pane], [data-full-view-bar]').first()).toBeVisible();
   await expect(page.locator('[data-reuse]')).toHaveCount(0);
+});
+
+const composeDialog = (p: Page) => p.locator('dialog[data-compose]');
+/**
+ * Leaves New message with files in it, keeping nothing: Escape closes it and keeps a draft (approval
+ * "inbox-compose-escape-keeps"), so the toast's Reopen and the draft's Delete draft throw it away.
+ */
+const discardCompose = async (p: Page) => {
+  await p.keyboard.press('Escape');
+  await expect(composeDialog(p)).toHaveCount(0);
+  await p.locator('[data-inbox-toast] [data-toast-action]', { hasText: 'Reopen' }).click();
+  await expect(composeDialog(p)).toBeVisible();
+  await composeDialog(p).locator('[data-compose-delete]').click();
+  await expect(composeDialog(p)).toHaveCount(0);
+};
+const openNewMessage = async (p: Page) => {
+  await p.getByRole('button', { name: /New message/ }).first().click();
+  await expect(composeDialog(p)).toBeVisible();
+};
+const post = (route: string, body: Record<string, unknown>) => {
+  const { serverSession } = JSON.parse(readFileSync(join(studio.dataDir, 'inbox', 'inbox.json'), 'utf8')) as { serverSession: string };
+  return fetch(`${studio.url}${route}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ serverSession, ...body }) });
+};
+
+/** A paste as a browser's Copy image writes it: `html` beside a re-encoded PNG. The native menu cannot be driven headless. */
+const paste = (p: Page, selector: string, html: string | null, name = 'image.png') =>
+  p.evaluate(
+    async ({ selector, html, name }) => {
+      const canvas = document.createElement('canvas');
+      canvas.width = 40;
+      canvas.height = 40;
+      canvas.getContext('2d')!.fillRect(0, 0, 20, 20);
+      const png = await new Promise<Blob>((done) => canvas.toBlob((b) => done(b!), 'image/png'));
+      const data = new DataTransfer();
+      if (html !== null) data.setData('text/html', html.replaceAll('ORIGIN', location.origin));
+      data.items.add(new File([png], name, { type: 'image/png' }));
+      const field = document.querySelector(selector) as HTMLTextAreaElement;
+      field.focus();
+      // Firefox's constructor ignores `clipboardData`, so the data is set on the event itself.
+      const event = new ClipboardEvent('paste', { bubbles: true, cancelable: true });
+      Object.defineProperty(event, 'clipboardData', { value: data });
+      field.dispatchEvent(event);
+    },
+    { selector, html, name },
+  );
+const REPLY_FIELD = 'section.ib-pane textarea';
+const openReply = async (p: Page) => {
+  await p.locator('section.ib-pane .ib-pfoot').getByRole('button', { name: 'Reply' }).click();
+  await p.locator(REPLY_FIELD).first().waitFor();
+};
+const idOf = async (threadId: string, name: string) =>
+  ((await (await fetch(`${studio.url}/api/inbox/threads/${threadId}`)).json()) as { thread: { messages: { attachments?: { id: string; name: string }[] }[] } }).thread.messages.flatMap((m) => m.attachments ?? []).find((a) => a.name === name)!.id;
+
+test("New message with a file: the next thread's agent gets the same bytes and no word of the first", async () => {
+  const { thread_id } = await threadWithFiles();
+  expect((await post(`/api/inbox/messages/${thread_id}/resolve`, { resolved: true })).status).toBe(200);
+  await open(page, thread_id);
+  const before = blobsOf(studio);
+  await tile(page, REF_B).hover();
+  await button(page, 'tile', REF_B).click();
+  await expect(composeDialog(page).locator(`[data-compose-file="done"][data-compose-file-name="${REF_B}"]`)).toBeVisible();
+
+  await composeDialog(page).locator('textarea').first().fill('Use this for the invoice header.');
+  await composeDialog(page).locator('.ib-cp-tobtn').click();
+  await composeDialog(page).locator('[data-compose-session="ses-billing"]').click();
+  await composeDialog(page).locator('[data-compose-send]').click();
+  await expect(composeDialog(page)).toHaveCount(0);
+  await expect.poll(() => billingSession.commands.length, { timeout: 15_000 }).toBeGreaterThan(0);
+  const wake = billingSession.commands.at(-1)!.body!;
+  expect(blobsOf(studio)).toEqual(before);
+  const attached = [...wake.matchAll(/Attached: (\S+) \((.+)\)/g)].map((m) => [m[1]!, m[2]!] as const);
+  expect(attached.map(([name]) => name)).toEqual([REF_B]);
+  for (const [name, path] of attached) {
+    // A fake agent, a process of its own and on a Mac inside a sandbox that can write nothing: it reads the path it was
+    // given and its own copy is read-only.
+    const script = `const fs = require('fs'); const b = fs.readFileSync(process.argv[1]); let wrote = true; try { fs.writeFileSync(process.argv[1], 'x'); } catch { wrote = false; } process.stdout.write(require('crypto').createHash('sha256').update(b).digest('hex') + ' ' + wrote);`;
+    const node = [process.execPath, '-e', script, path];
+    const run = process.platform === 'darwin' ? spawnSync('/usr/bin/sandbox-exec', ['-p', '(version 1)(allow default)(deny file-write*)', ...node], { encoding: 'utf8' }) : spawnSync(node[0]!, node.slice(1), { encoding: 'utf8' });
+    expect(run.stdout.trim()).toBe(`${sha(readFileSync(join(harbor, 'art', name)))} false`);
+    expect(statSync(path).mode & 0o777).toBe(0o400);
+  }
+  expect(wake).not.toContain('harbor-web');
+  expect(wake).not.toContain(thread_id);
+});
+
+test("an archived thread's button opens New message with the file, To empty", async () => {
+  const { thread_id } = await threadWithFiles();
+  expect((await post(`/api/inbox/messages/${thread_id}/resolve`, { resolved: true })).status).toBe(200);
+  await open(page, thread_id);
+  await tile(page, REF_B).hover();
+  const add = button(page, 'tile', REF_B);
+  await expect(add).toHaveAttribute('aria-label', `New message with ${REF_B}`);
+  await add.click();
+  await expect(composeDialog(page)).toBeVisible();
+  await expect(composeDialog(page).locator(`[data-compose-file="done"][data-compose-file-name="${REF_B}"]`)).toBeVisible();
+  await expect(composeDialog(page).locator('.ib-cp-tobtn')).toHaveAttribute('data-compose-to', 'choose');
+  // The archived thread itself did not change.
+  await expect(replyTiles(page)).toHaveCount(0);
+  await discardCompose(page);
+});
+
+test('paste: a picture copied from this Inbox is that file, its name and no new bytes; pasted again, one tile', async () => {
+  const { thread_id } = await threadWithFiles();
+  await open(page, thread_id);
+  await openReply(page);
+  const id = await idOf(thread_id, REF_A);
+  const before = blobsOf(studio);
+  const html = `<meta charset="utf-8"><img src="ORIGIN/api/inbox/attachments/${id}/image" alt="">`;
+  await paste(page, REPLY_FIELD, html);
+  await expect(page.locator(`[data-reply-files] [data-compose-file="done"][data-compose-file-name="${REF_A}"]`)).toBeVisible();
+  expect(blobsOf(studio)).toEqual(before);
+  await expect(button(page, 'tile', REF_A)).toHaveAttribute('data-reuse-state', 'added');
+  await paste(page, REPLY_FIELD, html);
+  await page.waitForTimeout(400);
+  await expect(replyTiles(page)).toHaveCount(1);
+});
+
+test('paste into New message: the same file under its own name, no new bytes', async () => {
+  const { thread_id } = await threadWithFiles();
+  await open(page, thread_id);
+  const id = await idOf(thread_id, REF_B);
+  const before = blobsOf(studio);
+  await openNewMessage(page);
+  await paste(page, 'dialog[data-compose] textarea', `<meta charset="utf-8"><img src="ORIGIN/api/inbox/attachments/${id}/image" alt="">`);
+  await expect(composeDialog(page).locator(`[data-compose-file="done"][data-compose-file-name="${REF_B}"]`)).toBeVisible();
+  expect(blobsOf(studio)).toEqual(before);
+  await discardCompose(page);
+});
+
+test('paste falls back to a plain paste: no <img>, words around it, or a file that is gone', async () => {
+  const { thread_id } = await threadWithFiles();
+  await open(page, thread_id);
+  await openReply(page);
+  const id = await idOf(thread_id, REF_A);
+  await paste(page, REPLY_FIELD, null);
+  await expect(page.locator('[data-reply-files] [data-compose-file="done"]')).toHaveCount(1);
+  await page.locator('[data-reply-files] [data-compose-file]').first().getByRole('button').last().click();
+  await expect(replyTiles(page)).toHaveCount(0);
+  const gone = `<img src="ORIGIN/api/inbox/attachments/att_00000000000000000000000000/image">`;
+  await paste(page, REPLY_FIELD, gone);
+  await expect(page.locator('[data-reply-files] [data-compose-file="done"]')).toHaveCount(1);
+  await expect(page.locator('[data-reply-files] [data-compose-file]')).not.toHaveAttribute('data-compose-file-name', REF_A);
+  await page.locator('[data-reply-files] [data-compose-file]').first().getByRole('button').last().click();
+  await expect(replyTiles(page)).toHaveCount(0);
+  await paste(page, REPLY_FIELD, `<p>See <img src="ORIGIN/api/inbox/attachments/${id}/image"> here</p>`);
+  await expect(page.locator('[data-reply-files] [data-compose-file="done"]')).toHaveCount(1);
+  await expect(page.locator(`[data-reply-files] [data-compose-file-name="${REF_A}"]`)).toHaveCount(0);
+});
+
+test("a linked machine's thread: a paste there is a plain paste", async () => {
+  const seen: string[] = [];
+  const watch = (request: { url: () => string }) => {
+    if (request.url().includes('/uploads/reuse')) seen.push(request.url());
+  };
+  page.on('request', watch);
+  // A local thread's file, so a paste there would have something to point at.
+  const { thread_id } = await threadWithFiles();
+  await open(page, thread_id);
+  await page.goto(`${studio.url}/#thread=${macbookThread}`);
+  await expect(page.locator('[data-attachment-name="away.png"]').first()).toBeVisible();
+  await openReply(page);
+  await paste(page, REPLY_FIELD, `<img src="ORIGIN/api/inbox/attachments/${await idOf(thread_id, REF_A)}/image">`);
+  await expect(page.locator('[data-reply-files] [data-compose-file]')).toHaveCount(1);
+  await expect(page.locator(`[data-reply-files] [data-compose-file-name="${REF_A}"]`)).toHaveCount(0);
+  page.off('request', watch);
+  expect(seen).toEqual([]);
 });

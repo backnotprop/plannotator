@@ -322,12 +322,12 @@
         "archived": [],
         "counts": {
           "waiting": 1,
-          "unread": 1
+          "unread": 0
         },
         "threads": {
           "t1": {
             "section": "stopped",
-            "unread": true,
+            "unread": false,
             "unseen": 0,
             "read": false,
             "archived": false,
@@ -435,12 +435,12 @@
         "archived": [],
         "counts": {
           "waiting": 1,
-          "unread": 1
+          "unread": 0
         },
         "threads": {
           "t1": {
             "section": "stopped",
-            "unread": true,
+            "unread": false,
             "unseen": 0,
             "read": false,
             "archived": false,
@@ -489,12 +489,12 @@
         "archived": [],
         "counts": {
           "waiting": 1,
-          "unread": 1
+          "unread": 0
         },
         "threads": {
           "t1": {
             "section": "stopped",
-            "unread": true,
+            "unread": false,
             "unseen": 0,
             "read": false,
             "archived": false,
@@ -735,12 +735,12 @@
         "archived": [],
         "counts": {
           "waiting": 1,
-          "unread": 1
+          "unread": 0
         },
         "threads": {
           "t1": {
             "section": "stopped",
-            "unread": true,
+            "unread": false,
             "unseen": 0,
             "read": false,
             "archived": false,
@@ -791,12 +791,12 @@
         "archived": [],
         "counts": {
           "waiting": 1,
-          "unread": 1
+          "unread": 0
         },
         "threads": {
           "t1": {
             "section": "stopped",
-            "unread": true,
+            "unread": false,
             "unseen": 0,
             "read": false,
             "archived": false,
@@ -959,12 +959,12 @@
         "archived": [],
         "counts": {
           "waiting": 1,
-          "unread": 1
+          "unread": 0
         },
         "threads": {
           "t1": {
             "section": "stopped",
-            "unread": true,
+            "unread": false,
             "unseen": 0,
             "read": false,
             "archived": false,

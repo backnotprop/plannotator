@@ -31,6 +31,8 @@ const memory = new Map<string, string>();
 configurePlannotatorUI({
   serverSync: () => {},
   webmcp: { enabled: false, namePrefix: 'plannotator.' },
+  // The selection toolbar on a phone: below the selection, inside the screen, thumb-sized.
+  touchSelectionToolbar: true,
   storageBackend: {
     getItem: (key) => memory.get(key) ?? null,
     setItem: (key, value) => void memory.set(key, value),

@@ -59,9 +59,9 @@ async function setup(extra: Partial<Parameters<typeof startInboxServer>[0]> = {}
   mkdirSync(other, { recursive: true });
   const dataDir = join(root, "data");
   const { server, client } = await start(dataDir, extra);
-  const send = async (body: string, session: string, path = project) =>
+  const send = async (body: string, session: string, path = project, replyTo?: string) =>
     (
-      (await client.callTool({ name: "send_message", arguments: { project_path: path, agent_session: session, agent_name: "Claude Code", body } })) as {
+      (await client.callTool({ name: "send_message", arguments: { project_path: path, agent_session: session, agent_name: "Claude Code", body, ...(replyTo ? { reply_to: replyTo } : {}) } })) as {
         structuredContent: { thread_id: string; message_id: string };
       }
     ).structuredContent;
@@ -124,7 +124,7 @@ describe("pinned threads", () => {
   });
 
   test("pins change no row, section, count, cursor or routing; agents never see them", async () => {
-    const { server, client, send } = await setup();
+    const { server, client, project, send } = await setup();
     const a = await send(["Which index?", "", ":::question", "Which search index?", "", "- [ ] Pagefind", "- [ ] Orama", ":::"].join("\n"), "ses_a");
     const before = await list(server);
     const cursor = server.store.cursor();
@@ -134,8 +134,8 @@ describe("pinned threads", () => {
     const after = await list(server);
     const strip = (sections: InboxListSection[]) => sections.map((s) => ({ ...s, threads: s.threads.map(({ pinned_at: _p, ...rest }) => rest) }));
     expect(strip(after.sections)).toEqual(strip(before.sections));
-    // The agent's next message still lands in its own thread.
-    const next = await send("And the totals?", "ses_a");
+    // The agent's reply still lands in its thread.
+    const next = await send("And the totals?", "ses_a", project, a.message_id);
     expect(next.thread_id).toBe(a.thread_id);
     // Nothing an agent reads names a pin.
     const read = await client.callTool({ name: "read_thread", arguments: { thread_id: a.thread_id, agent_session: "ses_a" } });
@@ -207,7 +207,7 @@ describe("pinned threads", () => {
   });
 
   test("guards: another site is refused, a stale tab is refused, an unknown thread is 404, a bad body is 422", async () => {
-    const { server, send } = await setup();
+    const { server, project, send } = await setup();
     const a = await send("Pin me", "ses_a");
     const path = `/api/inbox/threads/${a.thread_id}/pin`;
     expect(((await (await post(server, path, { pinned: true }, { Origin: "https://evil.example" })).json()) as Json).code).toBe("cross_origin");
@@ -218,7 +218,7 @@ describe("pinned threads", () => {
     expect(((await stale.json()) as Json).code).toBe("session_mismatch");
     expect((await pin(server, "msg_01K70000000000000000000099", true)).status).toBe(404);
     // A message that is not a thread's root is not a thread.
-    const reply = await send("A second message", "ses_a");
+    const reply = await send("A second message", "ses_a", project, a.message_id);
     expect(reply.thread_id).toBe(a.thread_id);
     expect((await pin(server, reply.message_id, true)).status).toBe(404);
     expect((await post(server, path, { pinned: "yes" })).status).toBe(422);
@@ -289,9 +289,10 @@ describe("pinned threads", () => {
     expect(await read("&window=window-pins-2&permission=granted", () => post(server, `/api/inbox/threads/${a.thread_id}/delete`, {}))).toContain("event: pins");
   });
 
-  test("a phone reads `pins` with the list through its door; the door has no pin write", async () => {
+  test("a phone reads `pins` with the list through its door, and stars, unstars, orders and restores through it", async () => {
     const { server, send } = await setup({ phones: true });
     const a = await send("Pin me", "ses_a");
+    const b = await send("And me", "ses_b");
     await pin(server, a.thread_id, true);
     const made = (await (await fetch(url(server, "/api/inbox/pairing"), { method: "POST", body: "{}" })).json()) as Json;
     const paired = await fetch(url(server, "/api/inbox/device/pair"), {
@@ -307,13 +308,40 @@ describe("pinned threads", () => {
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: init.body === undefined ? undefined : JSON.stringify(init.body),
       });
-    const model = (await (await door("threads")).json()) as ListModel;
-    expect(model.pins!.map((r) => r.thread_id)).toEqual([a.thread_id]);
-    const refused = await door(`threads/${a.thread_id}/pin`, { method: "POST", body: { pinned: false, idempotency_key: "k1" } });
-    expect(((await refused.json()) as Json).code).toBe("device_route_not_found");
-    const order = await door("pins", { method: "POST", body: { order: [], idempotency_key: "k2" } });
-    expect(((await order.json()) as Json).code).toBe("device_route_not_found");
+    const doorPins = async () => ((await (await door("threads")).json()) as ListModel).pins!.map((r) => r.thread_id);
+    expect(await doorPins()).toEqual([a.thread_id]);
+
+    // Star: the phone's write lands in the computer's pins (the window's own route, so its windows are told).
+    expect((await door(`threads/${b.thread_id}/pin`, { method: "POST", body: { pinned: true, idempotency_key: "k1" } })).status).toBe(200);
+    expect(await pinIds(server)).toEqual([a.thread_id, b.thread_id]);
+    expect(await doorPins()).toEqual([a.thread_id, b.thread_id]);
+
+    // Order (Move left, Move right).
+    const ordered = await door("pins", { method: "POST", body: { order: [b.thread_id, a.thread_id], idempotency_key: "k2" } });
+    expect(ordered.status).toBe(200);
+    expect(((await ordered.json()) as Json).pins.map((p: Json) => p.thread_id)).toEqual([b.thread_id, a.thread_id]);
+
+    // Unstar, then its Undo: back at its old place with the time it was first starred.
+    const pinnedAt = (await list(server)).pins![0]!.pinned_at!;
+    expect((await door(`threads/${b.thread_id}/pin`, { method: "POST", body: { pinned: false, idempotency_key: "k3" } })).status).toBe(200);
     expect(await pinIds(server)).toEqual([a.thread_id]);
+    expect((await door("pins", { method: "POST", body: { restore: { thread_id: b.thread_id, index: 0, pinned_at: pinnedAt }, idempotency_key: "k4" } })).status).toBe(200);
+    expect(await pinIds(server)).toEqual([b.thread_id, a.thread_id]);
+    expect((await list(server)).pins![0]!.pinned_at).toBe(pinnedAt);
+
+    // A command the phone sends twice (a retry) is answered from the door's log and writes nothing again.
+    const replay = await door(`threads/${b.thread_id}/pin`, { method: "POST", body: { pinned: false, idempotency_key: "k3" } });
+    expect(replay.headers.get("Idempotent-Replayed")).toBe("true");
+    expect(await pinIds(server)).toEqual([b.thread_id, a.thread_id]);
+
+    // The door's own rules hold: a key is required, and the window's checks answer as they answer the window.
+    const noKey = await door(`threads/${a.thread_id}/pin`, { method: "POST", body: { pinned: false } });
+    expect([noKey.status, ((await noKey.json()) as Json).code]).toEqual([422, "validation_error"]);
+    const bad = await door(`threads/${a.thread_id}/pin`, { method: "POST", body: { idempotency_key: "k5" } });
+    expect(((await bad.json()) as Json).code).toBe("validation_error");
+    const gone = await door("threads/msg_01K70000000000000000000099/pin", { method: "POST", body: { pinned: true, idempotency_key: "k6" } });
+    expect(((await gone.json()) as Json).code).toBe("thread_not_found");
+    expect(await pinIds(server)).toEqual([b.thread_id, a.thread_id]);
   });
 
   test("the owner over the tailnet pins like the window; another site through the tailnet is refused", async () => {

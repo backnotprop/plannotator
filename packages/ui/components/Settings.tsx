@@ -995,7 +995,7 @@ const ReviewDisplayTab: React.FC<{ isCompactTouchLayout?: boolean }> = ({ isComp
       <div className="space-y-2">
         <div>
           <div className="text-sm font-medium">Diff Style</div>
-          <div className="text-xs text-muted-foreground">Side-by-side or inline diff view</div>
+          <div className="text-xs text-muted-foreground">Split: side by side. Unified: one column.</div>
           {isCompactTouchLayout && (
             <div className="text-xs text-muted-foreground mt-1">
               This layout shows unified diffs for the session; your desktop

@@ -243,6 +243,17 @@ describe.if(hasDom)('Settings → Labels: reorder and editable emoji (#1736)', (
     expect(saved[2]!.tip).toBe(labelsModule!.DEFAULT_QUICK_LABELS[1]!.tip!);
   });
 
+  test('any number of labels: past twelve, + Add label still adds one, and it is saved', async () => {
+    labelsModule!.saveQuickLabels(Array.from({ length: 14 }, (_, i) => ({ id: `l${i}`, emoji: '🧪', text: `Label ${i + 1}`, color: 'blue' as const })));
+    await openLabelsTab();
+    expect(rows()).toHaveLength(14);
+    const add = Array.from(document.querySelectorAll<HTMLButtonElement>('button')).find((b) => b.textContent?.trim() === '+ Add label');
+    expect(add).toBeDefined();
+    await click(add!);
+    expect(rows()).toHaveLength(15);
+    expect(labelsModule!.getQuickLabels()).toHaveLength(15);
+  });
+
   test('labels with the same text render as distinct rows without key collisions', async () => {
     const same = (emoji: string, color: string): QuickLabel => ({ id: 'same', emoji, text: 'Same', color });
     labelsModule!.saveQuickLabels([same('🅰️', 'blue'), same('🅱️', 'red'), { id: 'other', emoji: '🧪', text: 'Other', color: 'green' }]);

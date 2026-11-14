@@ -101,7 +101,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   // PATH: this world's own bin and the system's tools, never the agents installed on the machine running the
   // spec (the first-run screen speaks about the agents it finds: none here). No test sandbox: Settings → Agents
   // reads the Claude Code setup this spec writes under HOME, which the sandbox's agent home would hide.
-  const env = { PATH: `${binDir}:/usr/bin:/bin`, HOME: home, PLANNOTATOR_DATA_DIR: dataDir };
+  const env = { PATH: `${binDir}:/usr/bin:/bin`, HOME: home, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: dataDir };
   // The first-run connect screen, not the tour's entry screen (inbox-tour.spec.ts proves that one).
   markTourDecided(dataDir);
   const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
@@ -309,11 +309,12 @@ test('agents write three threads in two projects; the rows land in the six secti
   if (await notice.count()) await notice.click();
   const stoppedRow = page.locator(`[data-section-id="stopped"] [data-thread-id="${stopped.thread_id}"]`);
   await expect(stoppedRow).toBeVisible();
-  await expect(stoppedRow.locator('.ib-badge')).toHaveText('Stopped');
+  // One question mark, filled in the Stopped tint (approval "inbox-question-mark").
+  await expect(stoppedRow.locator('.ib-qn[data-wait-step="stop"] .ib-sr')).toHaveText('Stopped on you: 2 questions');
   await expect(stoppedRow).toContainText('2 questions');
   await expect(stoppedRow).toContainText('billing-svc');
   const holdingRow = page.locator(`[data-section-id="holding"] [data-thread-id="${holding.thread_id}"]`);
-  await expect(holdingRow.locator('.ib-badge')).toHaveText('Holds up 3');
+  await expect(holdingRow.locator('.ib-qn[data-wait-step="hold"]')).toHaveCount(1);
   const namedRow = page.locator(`[data-section-id="waiting"] [data-thread-id="${named.thread_id}"]`);
   // The thread's name is the row's title (approval "list-rows-mail-icons").
   await expect(namedRow.locator('.ib-title')).toHaveText('refund-webhooks');
@@ -373,7 +374,7 @@ test('a project folder filters the list and the sections still apply', async () 
   await expect(page.locator('.ib-row .ib-subj :is(.ib-mk, .ib-badge)')).toHaveCount(0);
   const rightOf = async (sel: string) => Math.round((await page.locator(sel).boundingBox())!.x + (await page.locator(sel).boundingBox())!.width);
   for (const cell of ['.ib-cw', '.ib-bcol', '.ib-cq']) expect(await rightOf(`${named} ${cell}`)).toBe(await rightOf(`${stoppedRow} ${cell}`));
-  expect(await rightOf(`${stoppedRow} .ib-bcol .ib-badge`)).toBe(await rightOf(`${stoppedRow} .ib-bcol`));
+  expect(await rightOf(`${stoppedRow} .ib-cq .ib-qn`)).toBe(await rightOf(`${stoppedRow} .ib-cq`));
   expect(await rightOf(`${named} .ib-cq`)).toBeLessThanOrEqual(await leftOf(page, `${named} .ib-t`));
   await shot('1.2-project-filter');
   await side(page).getByRole('button', { name: /^Inbox/ }).click();
@@ -583,10 +584,10 @@ test('Settings: in sections; Settings → Agents switches apply to the next sess
   // A focused page (design of record inbox-settings-tabs): General first, the section nav beside it.
   await expect(page.getByRole('heading', { name: 'General', level: 1 })).toBeVisible();
   const nav = page.getByRole('navigation', { name: 'Settings sections' });
-  await expect(nav.getByRole('link')).toHaveText(['General', 'Rows', 'Agents', 'Prompts', 'Devices', 'Machines', 'Accounts', 'Voice', 'Capabilities', 'Archived', 'Storage', 'Decision data', 'About']);
-  await nav.getByRole('link', { name: 'Agents' }).click();
+  await expect(nav.getByRole('link')).toHaveText(['General', 'Rows', 'Agents', 'Prompts', 'Devices', 'Machines', 'Accounts', 'Voice', 'Capabilities', 'Activity', 'Archived', 'Storage', 'About']);
+  await nav.getByRole('link', { name: 'Agents', exact: true }).click();
   await expect(page).toHaveURL(/#settings\/agents$/);
-  await expect(nav.getByRole('link', { name: 'Agents' })).toHaveAttribute('aria-current', 'page');
+  await expect(nav.getByRole('link', { name: 'Agents', exact: true })).toHaveAttribute('aria-current', 'page');
   await expect(page.getByRole('heading', { name: 'Agents', level: 1 })).toBeFocused();
   const claudeSwitch = page.getByRole('switch', { name: 'Reaches the Inbox: Claude Code' });
   const piSwitch = page.getByRole('switch', { name: 'Reaches the Inbox: Pi' });
@@ -611,10 +612,10 @@ test('Settings: in sections; Settings → Agents switches apply to the next sess
   const store = page.locator('.ib-stbl');
   await expect(store.locator('[data-store-project="billing-svc"]')).toContainText('2 threads');
   await expect(store.locator('[data-store-project="docs-site"]')).toContainText('2 threads');
-  // Delete thread and delete project are live since step 2 (proved in inbox-attachments.spec.ts).
-  await expect(store.getByRole('button', { name: /Delete project/ }).first()).toBeEnabled();
+  // Delete from Inbox, on threads and projects, is live since step 2 (proved in inbox-attachments.spec.ts).
+  await expect(store.locator('[data-store-project="billing-svc"]').getByRole('button', { name: 'Delete from Inbox: billing-svc' })).toBeEnabled();
 
-  await nav.getByRole('link', { name: 'Agents' }).click();
+  await nav.getByRole('link', { name: 'Agents', exact: true }).click();
   await piSwitch.click();
   await expect(piSwitch).toHaveAttribute('aria-checked', 'true');
   await expect(page.getByText("Pi's next session").first()).toBeVisible();

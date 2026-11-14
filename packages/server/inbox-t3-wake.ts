@@ -51,10 +51,12 @@ const loadT3 = () => (t3Modules ??= Promise.all([import("@plannotator/t3-code/au
 
 const RETRY_FIRST_MS = 30_000;
 const RETRY_MAX_MS = 10 * 60_000;
-/** How long "no grant reaches this thread" is believed before asking T3 again. */
+/** How long "no grant reaches this thread" is believed before asking T3 again, while the saved grants stay the same. */
 const MISS_TTL_MS = 60_000;
-/** What T3 says for a thread it does not have (apps/server/src/mcp/threadAccess.ts). */
-const THREAD_GONE = /thread was not found|calling thread was not found|archived/i;
+/** While a reply waits on a grant (none reaches its thread, or none covers its mode), how often a new login is looked for. */
+const GRANT_CHECK_MS = 15_000;
+/** What T3 says for a thread it does not have (apps/server/src/mcp/threadAccess.ts: "Thread <id> was not found."). */
+const THREAD_GONE = /\bthread_not_found\b|thread was not found|calling thread was not found|archived/i;
 /** A lookup T3 answered about the grant or the thread; anything else (a network failure, `orchestration_error`) did not reach it and is tried again. */
 const T3_ANSWERED = /\b(thread_not_found|capability_denied|target_required)\b|thread was not found|different thread|\b401\b|unauthorized/i;
 /** How long an agent's send_message waits on T3 to learn whether its thread wakes. */
@@ -103,6 +105,8 @@ export interface InboxT3Wake {
   wakes(host: unknown, session: unknown): Promise<boolean>;
   /** `alive` (a T3 thread the Inbox wakes), `dead` (T3 no longer has it), null (not a T3 thread, or one no saved grant reaches). */
   status(session: string): "alive" | "dead" | null;
+  /** T3 said it no longer has the thread, promised or not, and the thread has not called the Inbox since. */
+  gone(session: string): boolean;
   /** The thread called an Inbox tool: it is there. */
   noteToolCall(session: string): void;
   /** A send T3Delivery refused: the window says it is saved for the agent's next read. */
@@ -136,6 +140,8 @@ export function createInboxT3Wake(options: {
   log?: (line: string) => void;
   /** How long an agent's send_message waits on T3 (default 3 s). */
   lookupTimeoutMs?: number;
+  /** How often a new login is looked for while a reply waits on one (default 15 s). */
+  grantCheckMs?: number;
 }): InboxT3Wake {
   const { store, dataDir } = options;
   const now = options.now ?? Date.now;
@@ -166,6 +172,15 @@ export function createInboxT3Wake(options: {
     }
     return found;
   };
+  const epochOf = (credentials: T3Credentials): string | undefined => {
+    try {
+      return credentials.read()?.epoch;
+    } catch {
+      return undefined;
+    }
+  };
+  /** The saved grants as a value: each login and logout changes it. */
+  const markOf = (found: T3Credentials[]): string => found.map((credentials) => `${credentials.endpoint.href} ${epochOf(credentials) ?? ""}`).sort().join("\n");
   const links = new Map<string, Promise<Link>>();
   const linkOf = (credentials: T3Credentials): Promise<Link> => {
     const key = credentials.endpoint.href;
@@ -178,7 +193,8 @@ export function createInboxT3Wake(options: {
     return link;
   };
   const homes = new Map<string, Link>();
-  const misses = new Map<string, number>();
+  /** When no grant reached the thread, and the grants then: a new login asks again at once. */
+  const misses = new Map<string, { at: number; grants: string }>();
   /** Each thread's runtime mode, as T3 last said it. */
   const threadModes = new Map<string, T3RuntimeMode>();
   /** The grant's mode T3 named in a denial, per endpoint, with that grant's epoch: a new login clears it. */
@@ -211,10 +227,12 @@ export function createInboxT3Wake(options: {
     // Logged out, or the grant lapsed: asked again (and found by no grant).
     if (known && known.credentials.token()) return known;
     homes.delete(thread);
+    const found = await grants();
+    const mark = markOf(found);
     const missed = misses.get(thread);
-    if (missed !== undefined && now() - missed < MISS_TTL_MS) return null;
+    if (missed && missed.grants === mark && now() - missed.at < MISS_TTL_MS) return null;
     let unreachable = false;
-    for (const credentials of await grants()) {
+    for (const credentials of found) {
       try {
         const link = await linkOf(credentials);
         const read = await new (await loadT3())[2].T3Thread(link.rpc, thread).read({ limit: 1 });
@@ -229,15 +247,30 @@ export function createInboxT3Wake(options: {
       }
     }
     if (unreachable) return "unreachable";
-    misses.set(thread, now());
+    misses.set(thread, { at: now(), grants: mark });
     return null;
   };
 
   // ── The sessions it wakes ──
   let known: Set<string> | null = null;
   const knownSessions = (): Set<string> => (known ??= store.wakingSessionsOfHost(INBOX_T3_HOST));
+  /**
+   * The threads a sweep looks at: those, and every T3 thread that wrote though nothing was promised then (no
+   * grant yet, a lapsed one, T3 not answering): a reply to it goes in once a grant reaches it.
+   */
+  let swept: Set<string> | null = null;
+  const sweptSessions = (): Set<string> =>
+    (swept ??= new Set([...knownSessions(), ...[...store.agentSessionsOfHost(INBOX_T3_HOST)].filter(isT3ThreadId)]));
   const dead = new Set<string>();
-  const refused = new Set<string>();
+  /**
+   * Items kept without a send, for the agent's next read: under the grant (endpoint and epoch) whose mode did not
+   * cover the thread, until another login; or for good (null), a send T3Delivery refused.
+   */
+  const refused = new Map<string, { endpoint: string; epoch: string } | null>();
+  const refuseUnder = (key: string, link: Link) => {
+    const epoch = grantOf(link)?.epoch;
+    refused.set(key, epoch ? { endpoint: link.credentials.endpoint.href, epoch } : null);
+  };
   /** Threads T3 denied a send into for the grant's mode, with that grant's epoch: a new login clears it. */
   const denied = new Map<string, string>();
   const deniedNow = (session: string, link: Link): boolean => {
@@ -254,7 +287,7 @@ export function createInboxT3Wake(options: {
     if (!store.isOwner(item, session)) return item.tags?.some((tag) => tag.session === session && tag.host === INBOX_T3_HOST && tag.wakes) ?? false;
     if (item.to) return item.to.host === INBOX_T3_HOST;
     const asked = item.reply_to ? store.message(item.reply_to) : null;
-    return asked?.author.kind === "agent" && asked.author.host === INBOX_T3_HOST && asked.wakes === true;
+    return asked?.author.kind === "agent" && asked.author.host === INBOX_T3_HOST && isT3ThreadId(asked.author.session);
   };
 
   const retryAt = new Map<string, { at: number; wait: number }>();
@@ -271,6 +304,19 @@ export function createInboxT3Wake(options: {
     }, Math.max(0, next - now()) + 10);
     (retryTimer as { unref?: () => void }).unref?.();
   };
+  // `plannotator t3 login` runs in another process and tells the Inbox nothing: while a reply waits on a grant,
+  // the saved grants are read again on this timer, and a change sweeps.
+  let grantTimer: ReturnType<typeof setTimeout> | null = null;
+  const watchGrants = (mark: string | null) => {
+    if (grantTimer) clearTimeout(grantTimer);
+    grantTimer = null;
+    if (mark === null || stopped) return;
+    grantTimer = setTimeout(() => {
+      grantTimer = null;
+      void grants().then((found) => (markOf(found) === mark ? watchGrants(mark) : void sweep()), () => watchGrants(mark));
+    }, options.grantCheckMs ?? GRANT_CHECK_MS);
+    (grantTimer as { unref?: () => void }).unref?.();
+  };
   const sayOnce = (line: string) => {
     if (failuresSaid.has(line)) return;
     failuresSaid.add(line);
@@ -283,6 +329,9 @@ export function createInboxT3Wake(options: {
   };
 
   const keyOf = (item: InboxMessage, session: string) => `${store.deliveryIdOf(item, session)}.${session}`;
+  // An item id has no dot; a T3 thread id may, and may end in another thread's id (a native id that does).
+  const itemOfKey = (key: string) => key.slice(0, key.indexOf("."));
+  const sessionOfKey = (key: string) => key.slice(key.indexOf(".") + 1);
 
   const deliverOne = async (link: Link, item: InboxMessage, session: string): Promise<void> => {
     const id = store.deliveryIdOf(item, session);
@@ -291,10 +340,13 @@ export function createInboxT3Wake(options: {
     if (retry && retry.at > now()) return;
     const text = codexQueueMessage(options.commandOf(item, session));
     const [, { T3Delivery, T3DeliveryRefused }, { T3Thread }] = await loadT3();
+    if (id === item.id && !store.handover.hand(item, session, "t3")) return;
+    let delivery: InstanceType<typeof T3Delivery> | null = null;
     try {
       // One request per item (the delivery folder is the thread's): a retry re-sends the first words, so a thread
       // renamed between two tries is still one T3 turn.
-      await new T3Delivery(new T3Thread(link.rpc, session), link.credentials).sendFirst(text, `plannotator-inbox-${id}`);
+      delivery = new T3Delivery(new T3Thread(link.rpc, session), link.credentials);
+      await delivery.sendFirst(text, `plannotator-inbox-${id}`);
       retryAt.delete(key);
       try {
         store.recordDelivery(id, { host: INBOX_T3_HOST, session });
@@ -304,9 +356,12 @@ export function createInboxT3Wake(options: {
     } catch (error) {
       const said = (error instanceof Error ? error.message : String(error)).split("\n")[0]!.slice(0, 300);
       const code = MODE_DENIED.exec(said)?.[1];
+      if (code || error instanceof T3DeliveryRefused || THREAD_GONE.test(said)) store.handover.giveBack(id, session);
       if (code) {
         retryAt.delete(key);
-        refused.add(key);
+        refuseUnder(key, link);
+        // T3 took nothing: a login whose mode covers the thread sends it then, as a new request.
+        delivery?.denied(`plannotator-inbox-${id}`);
         const epoch = grantOf(link)?.epoch;
         if (epoch) {
           denied.set(session, epoch);
@@ -322,7 +377,7 @@ export function createInboxT3Wake(options: {
       }
       if (error instanceof T3DeliveryRefused) {
         retryAt.delete(key);
-        refused.add(key);
+        refused.set(key, null);
         log(`T3 refused ${item.id} for thread ${session} (${said}); it waits in the Inbox for the agent's next read.`);
         return;
       }
@@ -343,9 +398,15 @@ export function createInboxT3Wake(options: {
   let sweeping: Promise<void> | null = null;
   let again = false;
   const sweepOnce = async (): Promise<void> => {
-    const sessions = knownSessions();
-    if (sessions.size === 0) return;
+    const sessions = sweptSessions();
+    if (sessions.size === 0) return watchGrants(null);
     const pending = store.pendingRepliesFor(sessions, { tags: true });
+    const found = pending.size > 0 ? await grants() : [];
+    const mark = markOf(found);
+    // Kept under a grant that is no longer the endpoint's (a new login, a logout): looked at again.
+    const epochs = new Map(found.map((credentials) => [credentials.endpoint.href, epochOf(credentials)]));
+    for (const [key, under] of [...refused]) if (under && epochs.get(under.endpoint) !== under.epoch) refused.delete(key);
+    let noGrant = false;
     const pendingKeys = new Set<string>();
     /** Items this pass could send: a retry is kept only for those, so nothing that cannot go runs a timer. */
     const sendable = new Set<string>();
@@ -372,6 +433,7 @@ export function createInboxT3Wake(options: {
         continue;
       }
       if (!link) {
+        noGrant = true;
         sayOnce(`No T3 grant reaches thread ${session}; run \`plannotator t3 login --url <T3 MCP URL>\`. Its replies wait in the Inbox.`);
         continue;
       }
@@ -382,7 +444,7 @@ export function createInboxT3Wake(options: {
         if (stopped) return;
         // Denied for the grant's mode, or a mode it does not cover: kept for the agent's next read, never sent under this grant.
         if (!sendsInto(session, link)) {
-          refused.add(keyOf(item, session));
+          refuseUnder(keyOf(item, session), link);
           continue;
         }
         sendable.add(keyOf(item, session));
@@ -390,8 +452,9 @@ export function createInboxT3Wake(options: {
       }
     }
     for (const key of [...retryAt.keys()]) if (!sendable.has(key)) retryAt.delete(key);
-    for (const key of [...refused]) if (!pendingKeys.has(key)) refused.delete(key);
+    for (const key of [...refused.keys()]) if (!pendingKeys.has(key)) refused.delete(key);
     scheduleRetry();
+    watchGrants(noGrant || [...refused.values()].some((under) => under !== null) ? mark : null);
   };
   const sweep = (): Promise<void> => {
     if (stopped) return Promise.resolve();
@@ -419,11 +482,13 @@ export function createInboxT3Wake(options: {
     if (line.kind !== "message") return;
     const message = line.record as InboxMessage;
     if (message.author.kind === "agent") {
-      if (message.wakes !== true || message.author.host !== INBOX_T3_HOST || !message.author.session) return;
-      knownSessions().add(message.author.session);
+      if (message.author.host !== INBOX_T3_HOST || !isT3ThreadId(message.author.session)) return;
+      sweptSessions().add(message.author.session);
+      if (message.wakes === true) knownSessions().add(message.author.session);
     } else {
-      if (message.to?.host === INBOX_T3_HOST) knownSessions().add(message.to.session);
-      for (const tag of message.tags ?? []) if (tag.host === INBOX_T3_HOST && tag.wakes) knownSessions().add(tag.session);
+      const add = (session: string) => (knownSessions().add(session), sweptSessions().add(session));
+      if (message.to?.host === INBOX_T3_HOST) add(message.to.session);
+      for (const tag of message.tags ?? []) if (tag.host === INBOX_T3_HOST && tag.wakes) add(tag.session);
     }
     if (sweepQueued) return;
     sweepQueued = true;
@@ -459,18 +524,20 @@ export function createInboxT3Wake(options: {
       if (home && (!home.credentials.token() || !sendsInto(session, home))) return null;
       return dead.has(session) ? "dead" : "alive";
     },
+    gone: (session) => dead.has(session),
     noteToolCall: (session) => {
       if (!isT3ThreadId(session) || !dead.delete(session)) return;
       // Back: what waited on a retry goes now too.
-      for (const key of [...retryAt.keys()]) if (key.endsWith(`.${session}`)) retryAt.delete(key);
+      for (const key of [...retryAt.keys()]) if (sessionOfKey(key) === session) retryAt.delete(key);
       void sweep();
     },
     uncertain: (session, itemId) => refused.has(`${itemId}.${session}`),
-    uncertainItems: (session) => [...refused].filter((key) => key.endsWith(`.${session}`)).map((key) => key.slice(0, key.indexOf("."))),
+    uncertainItems: (session) => [...refused.keys()].filter((key) => sessionOfKey(key) === session).map(itemOfKey),
     sweep,
     stop: () => {
       stopped = true;
       if (retryTimer) clearTimeout(retryTimer);
+      if (grantTimer) clearTimeout(grantTimer);
       unsubscribe();
       for (const link of links.values()) void link.then((value) => (value.rpc as { close?: () => Promise<void> }).close?.()).catch(() => {});
     },

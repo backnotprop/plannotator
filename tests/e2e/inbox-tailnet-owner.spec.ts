@@ -106,7 +106,7 @@ test.beforeAll(async () => {
   // Bun counts as the binary the install script manages, so About and the dialog offer Update now.
   const bun = realpathSync(process.env.BUN_BINARY ?? execSync('command -v bun').toString().trim());
   symlinkSync(bun, join(home, '.local', 'bin', 'plannotator'));
-  writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ inboxTailscale: true, inboxTailscaleAllow: [GUEST] }));
+  writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ inboxTailscale: true, inboxTailscaleAllow: [GUEST], inboxThemeChooser: { notNeededAt: '2026-10-01T10:00:00.000Z' } }));
   writeFileSync(join(dataDir, 'update-state.json'), JSON.stringify({ latestRelease: { tag: NEXT, fetchedAt: Date.now(), publishedAt: '2026-10-09T15:00:00Z' } }));
   mkdirSync(join(dataDir, 'update-notes'));
   writeFileSync(join(dataDir, 'update-notes', `${NEXT}.json`), JSON.stringify({ version: NEXT, notes: 'A patch release for the Inbox.\n\n### Update notices\n\nOne click.', highlights: [] }));
@@ -283,6 +283,42 @@ test('the Board at 390 and 320 px: the off page turns it on from the phone, and 
     expect(errors).toEqual([]);
     await context.close();
   }
+});
+
+/**
+ * Parity (owner ruling 2026-11-11): the owner's phone over the tailnet links a machine as the computer does, on a poor
+ * link (400 ms each way, about 400 kbit/s, as a phone on one bar), and a guest's page has the same section disabled.
+ */
+test('the owner at 390 px on a poor link: Settings → Machines makes a link code as on the computer; a guest’s is disabled', async ({ browser }) => {
+  const owner = await serveFor(OWNER);
+  const { context, page, errors } = await phone(browser, 390);
+  const cdp = await context.newCDPSession(page);
+  await cdp.send('Network.enable');
+  await cdp.send('Network.emulateNetworkConditions', { offline: false, latency: 400, downloadThroughput: 50_000, uploadThroughput: 25_000 });
+  await go(page, owner, '#settings/machines');
+  const machines = page.locator('[data-settings-machines]');
+  await expect(machines).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator('[data-machines-remote]')).toHaveCount(0);
+  await expect(page.locator('[data-machine-link]')).toBeEnabled();
+  await page.locator('[data-machine-offer-start]').tap();
+  // The code and this machine's tailnet address to type on the other computer.
+  await expect(page.locator('[data-machine-offer]')).toContainText(`${MAGIC}:8443`, { timeout: 30_000 });
+  await fits(page, 'Machines with a link code', '[data-settings-section]');
+  await picture(page, 'machines-link-code-poor-link', 390);
+  // Over your tailnet: the owner's page has the switch on and is told only that turning it off ends this connection.
+  await go(page, owner, '#settings/devices');
+  await expect(page.locator('[data-settings-tailscale="on"]')).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator('[data-settings-tailscale] [role="switch"]')).toBeEnabled();
+  expect(errors).toEqual([]);
+  await context.close();
+
+  const guestBase = await serveFor(GUEST);
+  const guest = await phone(browser, 390);
+  await go(guest.page, guestBase, '#settings/machines');
+  await expect(guest.page.locator('[data-machines-remote]')).toBeVisible({ timeout: 30_000 });
+  await expect(guest.page.locator('[data-machine-offer-start]')).toBeDisabled();
+  expect(guest.errors).toEqual([]);
+  await guest.context.close();
 });
 
 test('the key typed on the phone reached the file and no log', async () => {

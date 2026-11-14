@@ -1,0 +1,149 @@
+/* Floating reply drafts and Ask AI in the corner (approval "inbox-reply-floaters"; floaters/useReplyFloaters.tsx). */
+.ib-rf-layer { position: fixed; top: 0; left: 0; right: 0; height: var(--ib-vvh, 100dvh); z-index: 40; pointer-events: none; isolation: isolate; }
+.ib-rf-layer.ib-rf-over { z-index: 85; }
+.ib-rf-layer button { font: inherit; color: inherit; }
+.ib-rf-stack, .ib-rf-layer > .ib-rf-round { position: absolute; pointer-events: auto; transition: right 180ms cubic-bezier(0.23, 1, 0.32, 1), bottom 180ms cubic-bezier(0.23, 1, 0.32, 1); }
+
+/* The corner owns a column at the foot's right end, level with Send: the foot gives it room (closed row and open T6
+   box alike), so nothing sits on the Draft status or T6's bin. */
+.pn-inbox[data-rf-room] section.ib-pane .ib-pfoot { padding-right: calc(30px + var(--ib-rf-room, 0px)); }
+.pn-inbox[data-rf-room] section.ib-pane.ib-withfile .ib-pfoot { padding-right: calc(20px + var(--ib-rf-room, 0px)); }
+@media (max-width: 640px) {
+  .pn-inbox[data-rf-room] section.ib-pane .ib-pfoot { padding-right: calc(12px + var(--ib-rf-room, 0px)); }
+}
+
+.pn-inbox .ib-rf-ic { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--muted-foreground); cursor: pointer; }
+.pn-inbox .ib-rf-ic:hover { background: var(--muted); color: var(--foreground); }
+.pn-inbox .ib-rf-layer button:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.ib-rf-mark { position: relative; display: inline-flex; flex: none; }
+.ib-rf-markdot { position: absolute; top: -2px; right: -2px; width: 8px; height: 8px; border-radius: 50%; background: var(--primary); box-shadow: 0 0 0 2px var(--popover); }
+.ib-rf-badge { position: absolute; top: -5px; right: -5px; min-width: 18px; height: 18px; padding: 0 5px; box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; border-radius: 9px; background: var(--foreground); color: var(--background); font-size: var(--ib-fs-11, 11px); font-weight: 600; line-height: 1; font-variant-numeric: tabular-nums; pointer-events: none; z-index: 3; }
+
+/* A phone's corner button. */
+.pn-inbox .ib-rf-round { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; padding: 0; border: 0; border-radius: 50%; background: var(--popover); color: var(--foreground); box-shadow: var(--ib-float-s, 0 0 0 1px var(--border), 0 6px 16px -8px rgb(0 0 0 / 0.25)); cursor: pointer; pointer-events: auto; transition: background-color 120ms ease-out, transform 120ms ease-out; }
+.pn-inbox .ib-rf-round:hover { background: color-mix(in oklch, var(--popover) 92%, var(--foreground)); }
+.pn-inbox .ib-rf-round:active { transform: scale(0.96); }
+.pn-inbox .ib-rf-round .ib-ic, .pn-inbox .ib-rf-round svg { width: 20px; height: 20px; }
+
+/* The corner's pile. Rows share one edge. At rest each is a round tile, deep ones hidden behind the front; spread,
+   each is a named row. */
+.ib-rf-stack { width: 44px; height: 44px; }
+.ib-rf-stack::before { content: ""; position: absolute; right: -8px; bottom: -8px; width: 320px; height: 0; }
+.ib-rf-stack[data-spread]::before { height: calc(100% + 330px); }
+.ib-rf-card { position: absolute; right: 0; bottom: 0; display: flex; align-items: center; width: 44px; height: 44px; box-sizing: border-box; border-radius: 22px; background: var(--popover); box-shadow: var(--ib-float-s, 0 0 0 1px var(--border), 0 6px 16px -8px rgb(0 0 0 / 0.25)); transform: translateY(calc(var(--i) * -5px)) scale(calc(1 - var(--i) * 0.07)); transform-origin: top center; transition: transform 180ms cubic-bezier(0.23, 1, 0.32, 1), width 180ms cubic-bezier(0.23, 1, 0.32, 1), border-radius 180ms cubic-bezier(0.23, 1, 0.32, 1), opacity 120ms ease; overflow: hidden; }
+.ib-rf-card[data-deep], .pn-inbox .ib-rf-morecard { opacity: 0; pointer-events: none; }
+.ib-rf-stack[data-spread] .ib-rf-card { width: 288px; opacity: 1; pointer-events: auto; border-radius: 13px; transform: translateY(calc(var(--i) * -50px)); transition-delay: calc(var(--i) * 14ms); }
+.pn-inbox .ib-rf-cardopen { display: flex; flex: 1; align-items: center; gap: 10px; min-width: 0; height: 100%; padding: 0 12px 0 13px; border: 0; background: none; cursor: pointer; text-align: left; }
+.ib-rf-cardname { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: var(--ib-fs-13, 13px); opacity: 0; transition: opacity 120ms ease; }
+.ib-rf-cardkind { display: inline-flex; flex: none; color: var(--muted-foreground); opacity: 0; transition: opacity 120ms ease; }
+.ib-rf-card[data-kind="ask"] .ib-rf-cardkind { color: var(--primary); }
+.ib-rf-stack[data-spread] .ib-rf-cardname, .ib-rf-stack[data-spread] .ib-rf-cardkind { opacity: 1; }
+.ib-rf-card:not([data-front]) .ib-rf-cardopen .ib-rf-mark { opacity: 0; }
+.ib-rf-stack[data-spread] .ib-rf-card .ib-rf-cardopen .ib-rf-mark { opacity: 1; }
+.pn-inbox .ib-rf-cardx { width: 24px; height: 24px; margin-right: 6px; display: none; }
+.ib-rf-stack[data-spread] .ib-rf-card:hover .ib-rf-cardx, .ib-rf-stack[data-spread] .ib-rf-cardx:focus-visible { display: inline-flex; }
+.ib-rf-stack[data-spread] .ib-rf-card:hover:has(.ib-rf-cardx) .ib-rf-cardkind { display: none; }
+.pn-inbox .ib-rf-morecard { border: 0; padding: 0 14px; color: var(--muted-foreground); cursor: pointer; text-align: left; }
+.pn-inbox .ib-rf-morecard:hover { color: var(--foreground); }
+.pn-inbox .ib-rf-cardopen:hover { background: color-mix(in oklch, var(--popover) 94%, var(--foreground)); }
+/* A draft arriving: the pile takes it with one small bump. */
+.ib-rf-card[data-arrive="0"], .ib-rf-card[data-arrive="1"] { animation: ib-rf-arrive-a 260ms cubic-bezier(0.23, 1, 0.32, 1); }
+.ib-rf-card[data-arrive="1"] { animation-name: ib-rf-arrive-b; }
+@keyframes ib-rf-arrive-a { 0% { transform: translateY(10px) scale(0.86); opacity: 0.4; } 100% { transform: none; opacity: 1; } }
+@keyframes ib-rf-arrive-b { 0% { transform: translateY(10px) scale(0.86); opacity: 0.4; } 100% { transform: none; opacity: 1; } }
+
+/* The draft's window: Ask's window (ChatFrame) with T6's box inside it, on the card colour. */
+.ib-rf-layer [data-chat-window] { pointer-events: auto; border-color: var(--ib-float-line-s, var(--border)); }
+.ib-rf-layer [data-rf-box] { background: var(--card); }
+.ib-rf-framebody { position: relative; display: flex; flex: 1; flex-direction: column; min-height: 0; }
+.ib-rf-replyhead { display: inline-flex; align-items: center; gap: 8px; min-width: 0; flex: 1; color: var(--foreground); }
+.ib-rf-replyhead > svg { flex: none; color: var(--muted-foreground); }
+.ib-rf-frame .ib-rf-name { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: var(--ib-fs-13, 13px); font-weight: 600; }
+.pn-inbox .ib-rf-peek { display: flex; align-items: flex-start; gap: 6px; width: 100%; box-sizing: border-box; padding: 8px 14px 0; border: 0; background: none; text-align: left; font-size: var(--ib-fs-12-5, 12.5px); line-height: 18px; color: var(--muted-foreground); cursor: pointer; }
+.pn-inbox .ib-rf-peek:hover { color: var(--foreground); }
+.pn-inbox .ib-rf-peek[data-fresh] { color: var(--foreground); }
+.ib-rf-peekline { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.ib-rf-peekwhole { flex: 1; min-width: 0; max-height: 220px; overflow-y: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+.ib-rf-dot { flex: none; width: 7px; height: 7px; margin-top: 6px; border-radius: 50%; background: var(--primary); }
+.ib-rf-asks { flex: none; color: var(--primary); font-weight: 500; }
+.ib-rf-conflict { padding: 6px 14px 4px; font-size: var(--ib-fs-12-5, 12.5px); }
+/* T6's box: its 16 px corners, hairline, soft shadow and card ground, as the thread's foot draws it. */
+.pn-inbox .ib-rbox.ib-rf-t6 {
+  display: flex; flex: 1; flex-direction: column; min-height: 0; margin: 10px 12px 12px;
+  border: 1px solid color-mix(in oklch, var(--foreground) 10%, transparent); border-radius: 16px;
+  background: var(--card); box-shadow: 0 1px 3px rgb(0 0 0 / 0.06), 0 8px 24px -12px rgb(0 0 0 / 0.18);
+}
+.pn-inbox .ib-rbox.ib-rf-t6:focus-within { border-color: color-mix(in oklch, var(--foreground) 22%, transparent); }
+.ib-rf-t6 .ib-rscroll { flex: 1 1 auto; max-height: none; display: flex; flex-direction: column; }
+.ib-rf-t6 .ib-rscroll > :first-child { flex: 1; display: flex; flex-direction: column; }
+.ib-rf-t6 .ib-rscroll :is(.ib-rtext, .ib-rmirror) { flex: 1; max-height: none; min-height: 96px; padding: 12px 16px 8px; overflow-wrap: anywhere; unicode-bidi: plaintext; text-align: start; }
+.ib-rf-t6 .ib-rfiles { padding: 2px 12px 6px; }
+.ib-rf-t6 .ib-rfiles .ib-cp-files { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 0; }
+.ib-rf-t6 .ib-rrow { flex: none; }
+.pn-inbox .ib-rf-t6 .ib-rmid > .ib-vline { display: flex; align-items: center; gap: 10px; height: 100%; padding: 0 2px 0 8px; overflow: hidden; white-space: nowrap; }
+.ib-rf-rides { margin: 0; padding: 0 16px 4px; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
+.ib-rf-err { margin: 0; padding: 0 16px 4px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--destructive); }
+.ib-rf-drop { position: absolute; inset: 0; z-index: 2; display: flex; align-items: center; justify-content: center; gap: 8px; border-radius: inherit; background: color-mix(in oklch, var(--popover) 88%, var(--primary)); font-size: var(--ib-fs-13, 13px); }
+/* A phone: T6's "Draft · Saved · Discard" line above the box. */
+.ib-rf-draftline { display: flex; align-items: baseline; justify-content: flex-end; gap: 8px; padding: 6px 16px 2px; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
+
+/* A phone: the list and a draft each fill the screen once pressed. */
+.ib-rf-sheetwrap, .ib-rf-box.ib-rf-sheet { position: absolute; inset: 0; width: 100%; max-width: none; height: var(--ib-vvh, 100dvh); max-height: none; border-radius: 0; background: var(--card); box-shadow: none; pointer-events: auto; }
+.ib-rf-sheetwrap { display: flex; flex-direction: column; z-index: 3; animation: ib-rf-up 220ms cubic-bezier(0.32, 0.72, 0, 1); }
+.ib-rf-box { position: relative; display: flex; flex-direction: column; box-sizing: border-box; color: var(--popover-foreground); pointer-events: auto; }
+.ib-rf-box.ib-rf-sheet { animation: ib-rf-up 220ms cubic-bezier(0.32, 0.72, 0, 1); z-index: 4; }
+@keyframes ib-rf-up { from { transform: translateY(100%); } to { transform: none; } }
+.ib-rf-sheethead { display: flex; align-items: center; justify-content: space-between; min-height: 52px; padding: 4px 8px 4px 16px; }
+.ib-rf-sheettitle { font-size: var(--ib-fs-17, 17px); font-weight: 600; }
+.ib-rf-sheethead .ib-rf-ic, .ib-rf-sheet .ib-rf-ic { width: 44px; height: 44px; }
+.ib-rf-head { display: flex; align-items: center; gap: 6px; min-height: 52px; padding: 4px; }
+.ib-rf-name { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: var(--ib-fs-15, 15px); font-weight: 600; }
+.ib-rf-headacts { display: flex; flex: none; align-items: center; }
+.ib-rf-sheet .ib-rf-peek { padding: 0 16px 10px; }
+.ib-rf-box.ib-rf-sheet .ib-rbox.ib-rf-t6 { margin: 6px 10px calc(10px + env(safe-area-inset-bottom)); }
+.ib-rf-sheet .ib-rf-t6 .ib-rscroll :is(.ib-rtext, .ib-rmirror) { font-size: var(--ib-fs-16-in, 16px); }
+.ib-rf-sheet .ib-rf-t6 .ib-rrow { padding-bottom: 10px; }
+.ib-rf-list { display: flex; flex-direction: column; overflow-y: auto; padding: 4px; }
+.ib-rf-listsheet { flex: 1; max-height: none; padding: 0 8px calc(8px + env(safe-area-inset-bottom)); }
+.pn-inbox .ib-rf-row { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 60px; padding: 6px 10px; border: 0; border-radius: 10px; background: none; text-align: left; cursor: pointer; }
+.pn-inbox .ib-rf-row:hover { background: var(--muted); }
+.ib-rf-row .ib-rf-cardkind { opacity: 1; }
+.ib-rf-rowtext { display: flex; flex: 1; flex-direction: column; min-width: 0; }
+.ib-rf-rowname, .ib-rf-rowsub { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.ib-rf-rowname { font-size: var(--ib-fs-15, 15px); line-height: 20px; font-weight: 500; }
+.ib-rf-rowsub { font-size: var(--ib-fs-13, 13px); line-height: 18px; color: var(--muted-foreground); }
+.pn-inbox .ib-rf-all { flex: none; height: 44px; margin-top: 2px; padding: 0 10px; border: 0; border-radius: 8px; background: none; text-align: left; font-size: var(--ib-fs-14, 14px); color: var(--muted-foreground); cursor: pointer; }
+.pn-inbox .ib-rf-all:hover { background: var(--muted); color: var(--foreground); }
+
+@media (prefers-reduced-motion: reduce) {
+  .ib-rf-layer *, .ib-rf-box, .ib-rf-sheetwrap { animation: none !important; transition: none !important; }
+}
+
+/* Ask's window reads as a chat with the agent (AskChat.tsx, AskChatMenu.tsx): the sparkle in the accent colour,
+   "Ask AI · <thread>", and a ground tinted by the theme's accent (the selected row's recipe, lighter) over the
+   popover colour: 7% in light themes, 13% in dark ones, where 10% read too faint. */
+.pn-inbox svg.ib-ic.ib-ask-sparkle { color: var(--primary); }
+.pn-inbox [data-ask-window] { background-color: var(--popover); background-image: linear-gradient(color-mix(in oklch, var(--primary) 7%, transparent), color-mix(in oklch, var(--primary) 7%, transparent)); }
+:root:not(.light) .pn-inbox [data-ask-window] { background-image: linear-gradient(color-mix(in oklch, var(--primary) 13%, transparent), color-mix(in oklch, var(--primary) 13%, transparent)); }
+/* Ask's box as T6's box, on the card colour over the tinted window, as the draft window's box is. */
+.pn-inbox .ib-askfoot { flex: none; display: flex; flex-direction: column; gap: 8px; padding: 6px 12px 12px; }
+.pn-inbox .ib-rbox.ib-askbox { display: flex; flex-direction: column; margin: 0; border: 1px solid color-mix(in oklch, var(--foreground) 10%, transparent); border-radius: 16px; background: var(--card); box-shadow: 0 1px 3px rgb(0 0 0 / 0.06), 0 8px 24px -12px rgb(0 0 0 / 0.18); }
+.pn-inbox .ib-rbox.ib-askbox:focus-within { border-color: color-mix(in oklch, var(--foreground) 22%, transparent); }
+.ib-askbox .ib-rscroll { max-height: 160px; }
+.pn-inbox .ib-askbox .ib-rtext { min-height: 52px; max-height: none; padding: 12px 16px 6px; unicode-bidi: plaintext; text-align: start; }
+.pn-inbox .ib-askbox .ib-rtext:disabled { cursor: default; }
+/* Ask's button: a quiet return arrow at the row's right end, icon only, no fill. Grey while the box is empty
+   (disabled), the accent once there are words; hover lays a light Ask tint under it. Never the thread's Send pill. */
+.pn-inbox .ib-askq { display: inline-flex; align-items: center; justify-content: center; flex: none; position: relative; width: 32px; height: 32px; margin-left: auto; margin-right: 2px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--muted-foreground); font: inherit; cursor: pointer; transition: background-color 120ms ease-out, color 120ms ease-out, opacity 120ms ease-out; }
+.pn-inbox .ib-askq svg.ib-ic { width: 20px; height: 20px; }
+.pn-inbox .ib-askq[data-ask-stop] svg.ib-ic { width: 14px; height: 14px; }
+.pn-inbox .ib-askq:disabled { opacity: 0.6; cursor: default; }
+.pn-inbox .ib-askq[data-ready], .pn-inbox .ib-askq[data-ask-stop] { color: var(--primary); }
+.pn-inbox .ib-askq:hover:not(:disabled) { background: color-mix(in oklch, var(--primary) 14%, transparent); }
+.pn-inbox .ib-askq:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.pn-inbox .ib-askq > .ib-spin { color: var(--primary); }
+:root:not(.light) .pn-inbox .ib-askq:hover:not(:disabled) { background: color-mix(in oklch, var(--primary) 20%, transparent); }
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  .pn-inbox .ib-rrow .ib-askq { width: 44px; height: 44px; margin: 0; border-radius: 10px; }
+  .pn-inbox .ib-askq svg.ib-ic { width: 22px; height: 22px; }
+}

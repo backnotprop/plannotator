@@ -595,7 +595,7 @@ function snapshot(card: HTMLElement) {
  * eased from where it was to where its new fit puts it (a transform on its fit
  * box), so it never snaps, whenever the drawing re-fits.
  */
-function useBoardRoom(onFrame: () => void) {
+function useBoardRoom(onFrame: (landed: boolean) => void) {
   const raf = useRef(0);
   const from = useRef<DOMRect | null>(null);
   const t0 = useRef(0);
@@ -617,7 +617,7 @@ function useBoardRoom(onFrame: () => void) {
       view.style.paddingBottom = padding;
       if (!fit || !was || !fit.style.width || reduce || typeof requestAnimationFrame !== 'function') {
         stop(fit ?? null);
-        frame.current();
+        frame.current(true);
         return;
       }
       cancelAnimationFrame(raf.current);
@@ -638,13 +638,13 @@ function useBoardRoom(onFrame: () => void) {
         el.style.transform = keep;
         if (p >= 1 || !to.width) {
           stop(el);
-          frame.current();
+          frame.current(true);
           return;
         }
         const s = (a.width + (to.width - a.width) * e) / to.width;
         el.style.transformOrigin = '0 0';
         el.style.transform = `translate(${a.left + (to.left - a.left) * e - to.left}px, ${a.top + (to.top - a.top) * e - to.top}px) scale(${s})`;
-        frame.current();
+        frame.current(false);
         raf.current = requestAnimationFrame(tick);
       };
       tick();
@@ -705,7 +705,8 @@ export function useShapeFollow(options: ShapeFollowOptions): { button: React.Rea
   const flipping = useRef<Animation[]>([]);
   const stepping = useRef<{ anims: Animation[]; ghost: HTMLElement | null }>({ anims: [], ghost: null });
   const closing = useRef<Animation | null>(null);
-  const room = useBoardRoom(() => painter.current?.place());
+  // Mid-animation only the tags' counter-scale follows the drawing; where they go is worked out once it lands.
+  const room = useBoardRoom((landed) => painter.current?.place({ quick: !landed }));
   const viewOf = useCallback(() => surface?.querySelector<HTMLElement>('.shp-view.v-how:not(.leaving)') ?? null, [surface]);
 
   // Every change of the card's layout goes through here, so its parts can FLIP from where they are.

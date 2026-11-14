@@ -62,7 +62,7 @@ test.beforeAll(async () => {
   mkdirSync(proofDir, { recursive: true });
   const root = inboxScratch('plannotator-inbox-list-options-e2e-');
   const dataDir = join(root, 'data');
-  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0', PLANNOTATOR_UPDATE_CHECK: '0' };
+  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0', PLANNOTATOR_UPDATE_CHECK: '0' };
   const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
   expect(started.status, started.stderr).toBe(0);
   url = started.stdout.trim();
@@ -578,7 +578,7 @@ test('the ⋮ menu: plain checkboxes on one edge with "Customize rows…", which
       await page.locator('[data-customize-rows]').click();
       await expect(page).toHaveURL(/#settings\/rows$/);
       await expect(page.getByRole('heading', { name: 'Rows', level: 1 })).toBeVisible();
-      await expect(page.locator('[data-rows-control="density"] input[value="compact"]')).toBeChecked();
+      await expect(page.locator('[data-rows-control="spacing"] input[value="compact"]')).toBeChecked();
     } finally {
       await context.close();
     }
@@ -597,17 +597,19 @@ test('Settings → Rows: a choice shows in another window at once, is saved for 
     await expect(list.locator(`.ib-row[data-thread-id="${threads.ledger}"]`)).toBeVisible();
     expect(await lookClasses(list)).toEqual([]);
 
-    await settings.locator('[data-rows-control="density"] label', { hasText: 'Roomy' }).click();
+    await settings.locator('[data-rows-control="spacing"] label', { hasText: 'Roomy' }).click();
     await settings.locator('.ib-rws-presets button', { hasText: 'Detailed' }).click();
     // Another browser (another cookie jar), no reload: the Detailed look.
-    await expect.poll(() => lookClasses(list)).toEqual(['ib-lk-pill', 'ib-lk-roomy', 'ib-lk-pv2']);
+    // Detailed has no subject pill since approval "inbox-rows-dialog" (round 7b).
+    await expect.poll(() => lookClasses(list)).toEqual(['ib-lk-roomy', 'ib-lk-pv2']);
     const saved = (await (await fetch(new URL('/api/inbox/settings', url))).json()) as { rows: string[] };
-    expect(saved.rows).toEqual(['highlight', 'roomy', 'previewTwo']);
+    // Detailed also turns letter marks on, with the repo's logo (approval "inbox-rows-dialog").
+    expect(saved.rows).toEqual(['roomy', 'previewTwo', 'marksThreads', 'marksProjects', 'repoLogo']);
     // A wide row with Roomy is 60 px tall.
     expect(Math.round((await list.locator(`.ib-row[data-thread-id="${threads.ledger}"]`).boundingBox())!.height)).toBe(60);
     await list.reload();
     await expect(list.locator(`.ib-row[data-thread-id="${threads.ledger}"]`)).toBeVisible();
-    expect(await lookClasses(list)).toEqual(['ib-lk-pill', 'ib-lk-roomy', 'ib-lk-pv2']);
+    expect(await lookClasses(list)).toEqual(['ib-lk-roomy', 'ib-lk-pv2']);
     await settings.screenshot({ path: join(proofDir, 'rows-settings-detailed.png') });
   } finally {
     await a.close();

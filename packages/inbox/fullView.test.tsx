@@ -14,7 +14,7 @@
  * leaving the file (full screen ends, a step, a new mount); a new comment only
  * bumping the count; the toolbar always starting out; ⌘⇧X on HTML only; the
  * ⋯ menu; the peek and a step keeping full screen with its chip; Escape's
- * ladder (one thing per press, full screen last; typed words never lost); the changed chip and dot; a phone and a stacked window. The
+ * ladder (one thing per press, full screen last; nothing asks about typed words); the changed chip and dot; a phone and a stacked window. The
  * thread's wiring is fullScreenThread.test.tsx; the browser proof is
  * tests/e2e/inbox-full-view.spec.ts.
  *
@@ -304,9 +304,10 @@ test.skipIf(!hasDom)('an HTML file: the pen leads the toolbar and flips Annotate
   await render(<Pane start={page} harness={harnessOf()} />);
   expect(controls()).toEqual(['pen', 'count', 'position', 'more', 'leave:exit', 'close', 'hide:hide']);
   const pen = host!.querySelector<HTMLButtonElement>('[data-full-view-pen]')!;
-  expect(pen.getAttribute('aria-pressed')).toBe('true');
+  // Opens in Interact: a click does what the page says until the person turns Annotate on.
+  expect(pen.getAttribute('aria-pressed')).toBe('false');
   await click(pen);
-  expect(host!.querySelector('[data-full-view-pen]')!.getAttribute('aria-pressed')).toBe('false');
+  expect(host!.querySelector('[data-full-view-pen]')!.getAttribute('aria-pressed')).toBe('true');
 });
 
 test.skipIf(!hasDom)('Hide gathers the tools into the corner control (inert, focus on it); one press brings them back with focus on »; » is only ever Hide', async () => {
@@ -643,8 +644,6 @@ function strayComposer(text: string) {
   });
   return { box, area, reached };
 }
-const guardRow = () => host!.querySelector<HTMLElement>('[data-step-guard]');
-const guardLabels = () => [...guardRow()!.querySelectorAll('button')].map((b) => b.textContent);
 const escapeOn = async (target: EventTarget) => {
   const event = await key(target, { key: 'Escape' });
   await settle();
@@ -668,8 +667,6 @@ for (const [kind, start] of [['markdown', notes], ['HTML', page], ['image', shot
     await render(<Pane start={start} harness={byEscape} />);
     pane().focus();
     await escapeOn(pane());
-    // HTML starts in Annotate: Escape's first press takes it to Interact.
-    if (byEscape.toggles === 0) await escapeOn(pane());
     const escaped = afterLeaving(byEscape);
     expect(escaped).toEqual({ full: false, toggles: 1, picks: [false], focusOnSwitch: true, said: 'Side by side: the file is beside the thread.' });
 
@@ -754,6 +751,7 @@ test.skipIf(!hasDom)('HTML: Escape takes the drawer, then Annotate to Interact, 
   const harness = harnessOf();
   await render(<Pane start={page} harness={harness} />);
   const pen = () => host!.querySelector<HTMLButtonElement>('[data-full-view-pen]')!;
+  await click(pen());
   expect(pen().getAttribute('aria-pressed')).toBe('true');
   // From the window.
   await click(host!.querySelector('[data-full-view-comments]'));
@@ -790,42 +788,32 @@ test.skipIf(!hasDom)('HTML: Escape takes the drawer, then Annotate to Interact, 
   expect(harness.toggles).toBe(1);
 });
 
-test.skipIf(!hasDom)('a comment with typed words is never lost by Escape: the question asks (Save it, Discard it, Keep writing); an empty one just closes; neither leaves full screen', async () => {
+test.skipIf(!hasDom)('Escape typed in a comment being written is the comment\'s own (nothing asks); from elsewhere the ladder closes it first; neither leaves full screen', async () => {
   stubViews();
   const harness = harnessOf();
   await render(<Pane start={notes} harness={harness} />);
   const { box, area, reached } = strayComposer('Say why the flag stays.');
   area.focus();
-  const asked = await escapeOn(area);
-  // The composer never saw the key (it would have closed and dropped the words).
-  expect(reached.escapes).toBe(0);
-  expect(asked.defaultPrevented).toBe(true);
-  expect(guardLabels()).toEqual(['Save it', 'Discard it', 'Keep writing']);
-  expect(document.activeElement).toBe(guardRow()!.querySelector('[data-guard-save]'));
-  // Keep writing: back in the words.
-  await click(guardRow()!.querySelector('[data-guard-keep]'));
-  expect(guardRow()).toBeNull();
-  expect(document.activeElement).toBe(area);
-  // Asked again, then Discard: the composer gets its own Escape (once), and full screen stays.
-  await escapeOn(area);
-  await click(guardRow()!.querySelector('[data-guard-discard]'));
+  const own = await escapeOn(area);
+  // The composer had the key itself (its own close); no question row, full screen stays.
   expect(reached.escapes).toBe(1);
-  expect(live()).toBe('Comment discarded.');
+  expect(own.defaultPrevented).toBe(false);
+  expect(host!.querySelector('[data-step-guard]')).toBeNull();
   expect(harness.toggles).toBe(0);
-  expect(bar()).not.toBeNull();
-  // Empty, with focus elsewhere: the ladder closes it (one Escape sent to it), nothing more.
-  await typeInto(area, '');
+  // With focus elsewhere: the ladder closes the composer (this stand-in gives its words up to no save, so it gets
+  // its own Escape), nothing more.
   pane().focus();
   await escapeOn(pane());
   expect(reached.escapes).toBe(2);
   expect(live()).toBe('Comment closed.');
   expect(harness.toggles).toBe(0);
+  expect(bar()).not.toBeNull();
   box.remove();
   await escapeOn(pane());
   expect(harness.toggles).toBe(1);
 });
 
-test.skipIf(!hasDom)('an image: Escape leaves its comment row with the words kept, then leaves full screen; where the file can only be full screen, leaving asks about the words first', async () => {
+test.skipIf(!hasDom)('an image: Escape leaves its comment row with the words kept, then leaves full screen; where the file can only be full screen, leaving closes it at once', async () => {
   stubViews();
   const harness = harnessOf();
   await render(<Pane start={shot} harness={harness} />);
@@ -841,16 +829,14 @@ test.skipIf(!hasDom)('an image: Escape leaves its comment row with the words kep
   expect(harness.toggles).toBe(1);
   expect(row().value).toBe('Crop the header.');
 
-  // A stacked window: the last rung goes back to the thread, through the unsaved-comment question.
+  // A stacked window: the last rung goes back to the thread on that press (the words wait as the file's draft).
   const locked = harnessOf();
   await rerender(<Pane start={shot} harness={locked} locked />);
   await typeInto(row(), 'Crop the header.');
   row().focus();
   await escapeOn(row());
   await escapeOn(pane());
-  expect(locked.closed).toBe(0);
-  expect(guardLabels()).toEqual(['Save it and close', 'Discard and close the file', 'Keep writing']);
-  await click(guardRow()!.querySelector('[data-guard-discard]'));
+  expect(host!.querySelector('[data-step-guard]')).toBeNull();
   expect(locked.closed).toBe(1);
 });
 

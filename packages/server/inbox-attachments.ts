@@ -39,15 +39,19 @@ import { INBOX_ANNOTATION_CURRENT, isInboxTextKind, readInboxAttachmentKind, typ
 import {
   checkCurrentAsync,
   inboxAttachmentState,
+  inboxBlobPath,
   isPdfHead,
   openInboxAttachmentVersion,
   readInboxAttachmentText,
 } from "@plannotator/shared/inbox/attachments";
 import { INBOX_MESSAGE_IMAGE_CSP, readInboxMessageImageAsync, readInboxPictureAsync } from "@plannotator/shared/inbox/message-images";
-import { inboxImageResponse } from "./inbox-message-images";
+import { inboxImageScales, inboxImageWidth, scaledEtag, scaleInboxImage } from "./inbox-image-scale";
+import { contentDisposition, inboxImageResponse } from "./inbox-message-images";
 import { readInboxMarkup, readInboxMarkupBody, writeInboxMarkup } from "@plannotator/shared/inbox/markups";
+import { readInboxUpload } from "@plannotator/shared/inbox/uploads";
 import { readImageDimensions, sniffImageContentType } from "@plannotator/shared/review-image";
 import { sniffInboxVideo } from "@plannotator/shared/inbox/video";
+import { inboxAudioServedType } from "@plannotator/shared/inbox/audio";
 import { byteRangeResponse, decideByteRange, handleRangeStream } from "./inbox-byte-range";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
@@ -70,19 +74,24 @@ const BYTE_GUARD_HEADERS = {
   "Cross-Origin-Resource-Policy": "same-origin",
 };
 
-/** `filename` (an ASCII fallback) and `filename*` (the real name, percent-encoded) for Content-Disposition. */
-export function contentDisposition(type: "inline" | "attachment", name: string): string {
-  const ascii = name.replace(/[^\x20-\x7e]/g, "_").replace(/["\\]/g, "_") || "file";
-  const encoded = encodeURIComponent(name).replace(/['()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
-  return `${type}; filename="${ascii}"; filename*=UTF-8''${encoded}`;
-}
-
 /**
  * A file handle as a response body, read in 1 MiB chunks: the Range routes'
  * stream (inbox-byte-range.ts), so the handle is closed at the end, on a
  * cancel (after any read in flight), and by the idle watchdog when a reader
  * vanishes.
  */
+/** A file's bytes from its start, by position (the head read already moved nothing), at most `size`. */
+async function readWhole(handle: FileHandle, size: number): Promise<Uint8Array<ArrayBuffer>> {
+  const buffer = new Uint8Array(size);
+  let total = 0;
+  while (total < size) {
+    const { bytesRead } = await handle.read(buffer, total, size - total, total);
+    if (bytesRead === 0) break;
+    total += bytesRead;
+  }
+  return total === size ? buffer : buffer.subarray(0, total);
+}
+
 function handleStream(handle: FileHandle, idleMs?: number): ReadableStream<Uint8Array> {
   return handleRangeStream(handle, 0, undefined, { idleMs });
 }
@@ -441,23 +450,28 @@ export function createInboxAttachmentRoutes(context: InboxAttachmentRoutesContex
       });
     }
 
-    // A film for `<video src>` and a native player: Range from the descriptor
-    // the one check opened (inbox-byte-range.ts), never the whole file at once.
-    const videoRoute = /^\/api\/inbox\/attachments\/(att_[A-Za-z0-9]+)\/video$/.exec(path);
+    // A film for `<video src>` and a native player, a recording for `<audio src>`: Range from the descriptor
+    // the one check opened (inbox-byte-range.ts), never the whole file at once. One handler, two kinds.
+    const videoRoute = /^\/api\/inbox\/attachments\/(att_[A-Za-z0-9]+)\/(video|audio)$/.exec(path);
     if (videoRoute) {
       if (req.method !== "GET") return json({ error: "Use GET." }, 405);
       if (crossSite(req)) return json(CROSS_SITE_BODY, 403);
       const { attachment } = attachmentOf(videoRoute[1]!);
-      if (readInboxAttachmentKind(attachment.kind) !== "video") {
-        throw new InboxError("attachment_not_video", `${attachment.name} is not a video; download it instead.`);
+      const audio = videoRoute[2] === "audio";
+      if (readInboxAttachmentKind(attachment.kind) !== (audio ? "audio" : "video")) {
+        throw audio
+          ? new InboxError("attachment_not_audio", `${attachment.name} is not a recording; download it instead.`)
+          : new InboxError("attachment_not_video", `${attachment.name} is not a video; download it instead.`);
       }
       const opened = await openInboxAttachmentVersion(store.dir, attachment, versionOf(url), { hash: "none" });
       if (!opened.ok) throw new InboxError(opened.code, opened.message);
       // The type of the bytes served, sniffed now (the sent blob too): never the record's, never the name's.
-      const sniffed = sniffInboxVideo(opened.head);
+      const sniffed = audio ? inboxAudioServedType(opened.head) : sniffInboxVideo(opened.head);
       if (!sniffed) {
         await opened.handle.close().catch(() => {});
-        throw new InboxError("attachment_not_video", `${attachment.name} is no longer a video.`);
+        throw audio
+          ? new InboxError("attachment_not_audio", `${attachment.name} is no longer a recording.`)
+          : new InboxError("attachment_not_video", `${attachment.name} is no longer a video.`);
       }
       const decision = decideByteRange(req.headers.get("range"), opened.size, { ifRange: req.headers.get("if-range"), etag: opened.etag });
       return byteRangeResponse(opened.handle, opened.size, decision, {
@@ -536,6 +550,28 @@ export function createInboxAttachmentRoutes(context: InboxAttachmentRoutesContex
         await opened.handle.close().catch(() => {});
         return new Response(null, { headers: { ...headers, "Content-Length": String(opened.size) } });
       }
+      // Drawn small (a tile's icon, the gallery): a smaller copy of a wide picture (inbox-image-scale.ts).
+      const to = route === "image" ? inboxImageWidth(url) : null;
+      const width = Number(extra["X-Image-Width"]) || undefined;
+      if (etag && inboxImageScales(contentType, width, to, opened.size)) {
+        const scaledTag = scaledEtag(etag, to);
+        if (req.headers.get("if-none-match") === scaledTag) {
+          await opened.handle.close().catch(() => {});
+          return new Response(null, { status: 304, headers: { ...headers, ETag: scaledTag } });
+        }
+        let bytes: Uint8Array<ArrayBuffer>;
+        try {
+          bytes = await readWhole(opened.handle, opened.size);
+        } finally {
+          await opened.handle.close().catch(() => {});
+        }
+        const scaled = await scaleInboxImage(bytes, contentType, to, etag);
+        const sized = scaled
+          ? { ...headers, ETag: scaledTag, "Content-Type": scaled.contentType, "X-Image-Width": String(scaled.width), "X-Image-Height": String(scaled.height) }
+          : headers;
+        const body = scaled ? scaled.bytes : bytes;
+        return new Response(body, { headers: { ...sized, "Content-Length": String(body.byteLength) } });
+      }
       if (route === "image" && etag && req.headers.get("if-none-match") === etag) {
         await opened.handle.close().catch(() => {});
         return new Response(null, { status: 304, headers });
@@ -566,6 +602,25 @@ export function createInboxAttachmentRoutes(context: InboxAttachmentRoutesContex
           "Content-Type": markup.contentType,
           "Content-Security-Policy": INBOX_MESSAGE_IMAGE_CSP,
           "Content-Length": String(markup.bytes.length),
+          "Cache-Control": "private, max-age=31536000, immutable",
+        },
+      });
+    }
+
+    const uploadImage = /^\/api\/inbox\/uploads\/(upl_[0-9A-HJKMNP-TV-Z]{26})\/image$/.exec(path);
+    if (uploadImage) {
+      if (req.method !== "GET" && req.method !== "HEAD") return json({ error: "Use GET." }, 405);
+      if (crossSite(req)) return json(CROSS_SITE_BODY, 403);
+      const upload = readInboxUpload(store.dir, uploadImage[1]!);
+      const file = upload?.kind === "image" ? Bun.file(inboxBlobPath(store.dir, upload.sha256)) : null;
+      const contentType = file && (await file.exists()) ? sniffImageContentType(new Uint8Array(await file.slice(0, 4096).arrayBuffer())) : null;
+      if (!file || !contentType) return json({ error: "That picture is no longer here.", code: "upload_not_found" }, 404);
+      return new Response(req.method === "HEAD" ? null : file, {
+        headers: {
+          ...BYTE_GUARD_HEADERS,
+          "Content-Type": contentType,
+          "Content-Security-Policy": INBOX_MESSAGE_IMAGE_CSP,
+          "Content-Length": String(file.size),
           "Cache-Control": "private, max-age=31536000, immutable",
         },
       });

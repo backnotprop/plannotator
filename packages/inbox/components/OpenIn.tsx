@@ -1,11 +1,13 @@
 import { inboxUrl } from '../inboxUrl';
 import { useCallback, useEffect, useMemo, useRef, useState, type HTMLAttributes, type MouseEvent as ReactMouseEvent, type ReactElement, type ReactNode, type Ref } from 'react';
 import { readInboxAttachmentKind, type InboxAttachmentState } from '@plannotator/core/inbox-types';
+import { ContextMenu } from '@base-ui/react/context-menu';
 import { AppIcon } from '@plannotator/ui/components/icons/AppIcon';
 import { CodeSnippetPreview } from '@plannotator/ui/components/CodeSnippetPreview';
 import { HostTitle, tooltipContainerOf } from '@plannotator/ui/components/HostTitle';
 import { CodeSpanContext } from '@plannotator/ui/components/LocalLinkContext';
 import { Tooltip } from '@plannotator/ui/components/Tooltip';
+import { ArtifactPinMenuItem } from './ArtifactPinButton';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@plannotator/ui/components/ui/dropdown-menu';
 import { useHoverPreview } from '@plannotator/ui/hooks/useHoverPreview';
 import { useOpenInApps, useRememberedOpenInApp } from '@plannotator/ui/hooks/useOpenInApps';
@@ -13,11 +15,14 @@ import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 import { InboxApiError, inboxApi, type OpenInFileCode, type OpenInFileScope } from '../api';
 import { Icon } from '../icons';
 import { newTabUrl, openInMenu, openInMenuFor, remembersOpenInItem, type OpenInItem, type OpenInMenu } from '../openIn';
-import { attachmentDownloadUrl } from '../attachments';
+import { attachmentDownloadUrl, readableVersion } from '../attachments';
 import { projectFileOfLink } from '../links';
 import { useInboxFileSource } from '../fileSource';
 import { usePhone, useTouchScreen } from '../phone';
 import { Tip } from './Tip';
+import { useContextMenuTrigger } from './useContextMenuTrigger';
+import { copyImageToClipboard } from '../copyImage';
+import { useMessageArm } from '../messageArming';
 
 /**
  * "Open in" for an attachment (design record "inbox-open-in", approved
@@ -71,13 +76,13 @@ function useOpenInActions(path: string | null, open: (id: string) => Promise<{ o
     flash(ok ? 'Path copied' : 'Could not copy the path', !ok);
   };
 
-  return { busy, status, launch, copyPath };
+  return { busy, status, launch, copyPath, flash };
 }
 
-/** Everything an attachment's control needs: the menu, and picking from it. */
-function useOpenIn(attachment: InboxAttachmentState, version: 'current' | 'sent') {
+/** Everything an attachment's control needs: the menu, and picking from it. `enabled: false` (off this computer): no list is read, no menu. */
+function useOpenIn(attachment: InboxAttachmentState, version: 'current' | 'sent', enabled = true) {
   // A read that did not answer (a restarting Inbox) is asked again for the next file.
-  const answer = useOpenInApps(INBOX_OPEN_IN_APPS_URL, true, attachment.id);
+  const answer = useOpenInApps(INBOX_OPEN_IN_APPS_URL, enabled, attachment.id);
   const [remembered, remember] = useRememberedOpenInApp();
   const menu: OpenInMenu | null = answer?.available ? openInMenu(attachment, answer.apps, answer.platform ?? 'linux', remembered, version) : null;
   const actions = useOpenInActions(attachment.path, (id) => inboxApi.openIn(attachment.id, id), remember);
@@ -668,42 +673,183 @@ function CodeHoverPreview({ contents, path, line, lineEnd, pull, ...window }: {
   );
 }
 
-/**
- * A tile's ⋯ (a sibling of the tile's own button, never inside it): the
- * same list as the header's. Shown on hover and keyboard focus, and always
- * on a touch screen.
- */
-export function OpenInTileMenu({ attachment, version, onOpenAs }: { attachment: InboxAttachmentState; version: 'current' | 'sent'; onOpenAs?: (view: 'full' | 'side') => void }) {
-  const { menu, status, launch, copyPath } = useOpenIn(attachment, version);
-  if (!menu) return null;
+/** The list a tile's ⋯ and its right-click menu show: Open side by side / full screen, Download, then the apps and Copy path. */
+function TileMenuItems({
+  attachment,
+  version,
+  onOpenAs,
+  download,
+  onCopyImage,
+  menu,
+  onLaunch,
+  onCopyPath,
+}: {
+  attachment: InboxAttachmentState;
+  version: 'current' | 'sent';
+  onOpenAs?: (view: 'full' | 'side') => void;
+  download: string | null;
+  /** An image: Copy image, what the browser's own Copy Image leaves (copyImage.ts). */
+  onCopyImage: (() => void) | null;
+  menu: OpenInMenu | null;
+  onLaunch: (item: OpenInItem) => void;
+  onCopyPath: () => void;
+}) {
   return (
     <>
-      <DropdownMenu>
-        <Tip content="Open in…">
-          <DropdownMenuTrigger render={<button type="button" className="ib-att-more" aria-label={`Open in…, ${attachment.name}`} data-open-in-more={attachment.id} />}>
+      {onOpenAs && (
+        <>
+          {/* This file in that view; the remembered choice is unchanged (fileView.ts). */}
+          <DropdownMenuItem className="text-xs" onClick={() => onOpenAs('side')} data-open-as="side">
+            <Icon name="sideBySide" size={15} className="ib-appi ib-glyph" />
+            <span className="flex-1">Open side by side</span>
+          </DropdownMenuItem>
+          <DropdownMenuItem className="text-xs" onClick={() => onOpenAs('full')} data-open-as="full">
+            <Icon name="frame" size={15} className="ib-appi ib-glyph" />
+            <span className="flex-1">Open full screen</span>
+          </DropdownMenuItem>
+          {(download || onCopyImage || menu) && <DropdownMenuSeparator />}
+        </>
+      )}
+      {download && (
+        <>
+          {/* The version the tile opens, under the file's own name: an HTML page or a Markdown file is saved, never opened. */}
+          <DropdownMenuItem className="text-xs" render={<a href={download} download={attachment.name} />} data-tile-download={attachment.id}>
+            <Icon name="download" size={15} className="ib-appi ib-glyph" />
+            <span className="flex-1">{version === 'sent' ? 'Download the sent version' : 'Download'}</span>
+          </DropdownMenuItem>
+        </>
+      )}
+      {onCopyImage && (
+        <DropdownMenuItem className="text-xs" onClick={onCopyImage} data-tile-copy-image={attachment.id}>
+          <Icon name="copy" size={15} className="ib-appi ib-glyph" />
+          <span className="flex-1">Copy image</span>
+        </DropdownMenuItem>
+      )}
+      {(download || onCopyImage) && menu && <DropdownMenuSeparator />}
+      {menu && <OpenInMenuItems kind={attachment.kind} missingWord={missingLabel(attachment)} menu={menu} onLaunch={onLaunch} onCopyPath={onCopyPath} />}
+    </>
+  );
+}
+
+/** The ⋯ menu's look (ui's DropdownMenuContent), for the right-click one: Base UI's context menu has its own positioner, at the pointer. */
+const TILE_CONTEXT_POPUP =
+  'z-50 min-w-[12rem] overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md origin-[var(--transform-origin)] transition-[opacity,scale] duration-150 data-[starting-style]:opacity-0 data-[starting-style]:scale-95 data-[ending-style]:opacity-0 data-[ending-style]:scale-95';
+/** The tile's own control inside what `render` draws: a tile's button or download link, an Artifacts card, a gallery picture. */
+const TILE_CONTROL = '[data-attachment-id], [data-artifact-tile], [data-gallery-image]';
+const NO_SLOT = { order: [], fallback: () => null };
+
+/**
+ * A file's menu on a tile and on an Artifacts card (the owner, 2026-11-08: "a
+ * simpler, faster way to download attachments ... the context menu should
+ * also have Download"). On this computer a ⋯ sits beside the tile (a sibling
+ * of its button, never inside it; shown on hover, keyboard focus or open,
+ * always on a touch screen). A right-click anywhere on the tile opens the same
+ * list at the pointer, here and through the tailnet alike: Open side by side /
+ * Open full screen, Download (the version the tile opens, as the file's own
+ * name), then the apps and Copy path on this computer. The trigger's rules are
+ * `useContextMenuTrigger`'s (rows, cards): a touch never opens it (no long
+ * press), and with nothing to list (the tour writes nothing) the browser's
+ * own menu shows. No key of its own: the hook's Shift+F10 is left off.
+ *
+ * An image also gets Copy image: what the browser's own Copy Image leaves, so a
+ * paste into a reply is still the same file (reusePaste.ts).
+ *
+ * `render` draws the tile (or its wrapper) with `more`, the ⋯ (null off this
+ * computer), and `status`, the line that says why a launch or a copy failed,
+ * placed inside it where it has a wrapper.
+ */
+export function TileMenu({
+  attachment,
+  surface,
+  onOpenAs,
+  render,
+}: {
+  attachment: InboxAttachmentState;
+  surface?: OpenInSurface;
+  onOpenAs?: (view: 'full' | 'side') => void;
+  render: (more: ReactNode, status: ReactNode) => ReactElement;
+}) {
+  const version = readableVersion(attachment);
+  const source = useInboxFileSource();
+  const apps = surface === 'apps';
+  const { menu, status, launch, copyPath, flash } = useOpenIn(attachment, version, apps);
+  const arm = useMessageArm();
+  const [open, setOpen] = useState(false);
+  // A source that writes nothing (the tour): no Download, as the viewer's.
+  const download = source.writes ? source.downloadUrl(attachment, version) : null;
+  // Nothing leaves the window in the tour: no Copy image either.
+  const copyImage =
+    source.writes && readInboxAttachmentKind(attachment.kind) === 'image'
+      ? () => void copyImageToClipboard(source.imageUrl(attachment, version), attachment.name).then((ok) => flash(ok ? 'Image copied' : 'Could not copy the image', !ok))
+      : null;
+  const empty = !onOpenAs && !download && !menu;
+  // The wrapper `render` draws, or the tile's own button or link when it draws no wrapper (typed as Base UI's div).
+  const trigger = useRef<HTMLDivElement>(null);
+  const control = (): HTMLElement | null => {
+    const el = trigger.current;
+    return el ? (el.matches(TILE_CONTROL) ? el : el.querySelector<HTMLElement>(TILE_CONTROL)) : null;
+  };
+  const context = useContextMenuTrigger({
+    // Anywhere on the tile (its ⋯ and add-to-reply too); never the ⋯'s own popup, which React bubbles here.
+    itemOf: (target) => (target instanceof Node && trigger.current?.contains(target) ? control() : null),
+    idOf: () => attachment.id,
+    has: () => !empty,
+    buttonFor: control,
+    slotOf: () => NO_SLOT,
+    stateOf: () => '',
+    disabled: empty,
+    onTarget: () => {},
+  });
+  // Shift+F10 stays the rows', cards' and messages' (no new shortcut): the platform's own context-menu key still sends `contextmenu`.
+  const { onKeyDown: _key, ...triggerProps } = context.trigger;
+  const items = (
+    <TileMenuItems attachment={attachment} version={version} onOpenAs={onOpenAs} download={download} onCopyImage={copyImage} menu={menu} onLaunch={(item) => void launch(item)} onCopyPath={() => void copyPath()} />
+  );
+  // Far from the view (messageArming.tsx): the same ⋯, with no menu behind it yet; a press arms its message and opens
+  // the menu. Only the ⋯ changes: the tile (and its right-click menu) stays the same element, so arming never remounts
+  // a tile or its picture (a phone's thread would lose its place).
+  const plain =
+    apps && !empty ? (
+      <button
+        type="button"
+        className="ib-att-more"
+        aria-label={`More: ${attachment.name}`}
+        aria-haspopup="menu"
+        aria-expanded={false}
+        data-open-in-more={attachment.id}
+        onClick={() => {
+          setOpen(true);
+          arm.arm();
+        }}
+      >
+        <Icon name="dots" size={16} />
+      </button>
+    ) : null;
+  const more = !arm.armed
+    ? plain
+    : apps && !empty ? (
+      <DropdownMenu open={open} onOpenChange={setOpen}>
+        <Tip content="More">
+          <DropdownMenuTrigger render={<button type="button" className="ib-att-more" aria-label={`More: ${attachment.name}`} data-open-in-more={attachment.id} />}>
             <Icon name="dots" size={16} />
           </DropdownMenuTrigger>
         </Tip>
         <DropdownMenuContent align="end" sideOffset={6} className="min-w-[12rem]" finalFocus={false} data-open-in-menu={attachment.id}>
-          {onOpenAs && (
-            <>
-              {/* This file in that view; the remembered choice is unchanged (fileView.ts). */}
-              <DropdownMenuItem className="text-xs" onClick={() => onOpenAs('side')} data-open-as="side">
-                <Icon name="sideBySide" size={15} className="ib-appi ib-glyph" />
-                <span className="flex-1">Open side by side</span>
-              </DropdownMenuItem>
-              <DropdownMenuItem className="text-xs" onClick={() => onOpenAs('full')} data-open-as="full">
-                <Icon name="frame" size={15} className="ib-appi ib-glyph" />
-                <span className="flex-1">Open full screen</span>
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-            </>
-          )}
-          <OpenInMenuItems kind={attachment.kind} missingWord={missingLabel(attachment)} menu={menu} onLaunch={(item) => void launch(item)} onCopyPath={() => void copyPath()} />
+          {items}
         </DropdownMenuContent>
       </DropdownMenu>
-      <Status status={status} />
-    </>
+    ) : null;
+  return (
+    <ContextMenu.Root {...context.root}>
+      <ContextMenu.Trigger ref={trigger} render={render(more, <Status status={status} />)} {...triggerProps} />
+      <ContextMenu.Portal>
+        <ContextMenu.Positioner className="isolate z-50 outline-none">
+          <ContextMenu.Popup className={TILE_CONTEXT_POPUP} aria-label={attachment.name} data-open-in-menu={attachment.id} data-tile-context="" {...context.popup}>
+            {items}
+          </ContextMenu.Popup>
+        </ContextMenu.Positioner>
+      </ContextMenu.Portal>
+    </ContextMenu.Root>
   );
 }
 
@@ -722,6 +868,11 @@ interface FullScreenMoreProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   versionAction: FullScreenVersionAction | null;
+  /**
+   * Pin / Unpin as the menu's first item (a phone's HTML page: its toolbar has no room for the pin button). Absent
+   * or null: the toolbar draws the pin, or there is none (the tour).
+   */
+  pin?: { threadId: string; key: string; name: string } | null;
 }
 
 /**
@@ -768,6 +919,7 @@ function FullScreenMoreMenu(props: FullScreenMoreProps & { openIn: React.ReactNo
         <Icon name="dots" size={props.phone ? 20 : 17} />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" side={props.phone ? 'top' : 'bottom'} sideOffset={8} className="min-w-[14rem]" data-full-view-menu={attachment.id}>
+        {props.pin && <ArtifactPinMenuItem threadId={props.pin.threadId} artifactKey={props.pin.key} name={props.pin.name} />}
         {props.openIn}
         {tab && (
           <DropdownMenuItem className="text-xs" render={<a href={tab} target="_blank" rel="noopener noreferrer" />} data-open-in-tab="">

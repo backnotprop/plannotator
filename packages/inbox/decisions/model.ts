@@ -9,6 +9,7 @@
 import type { InboxDecision, InboxListRow, InboxMessageWire, InboxQuestion, InboxThread } from '@plannotator/core/inbox-types';
 import { readInboxQuestionKind, inboxAgentName } from '@plannotator/core/inbox-types';
 import { capQuestionPrompt, type QuestionAnswer } from '@plannotator/core/question-block';
+import { INBOX_STOPPED_REPLY_TEXT } from '@plannotator/core/inbox-delivery-line';
 import { sendTargetsOf, type SendTarget } from '../sendTargets';
 import { plainLabel } from '../folding';
 
@@ -325,7 +326,7 @@ export type GroupSend =
   | { kind: 'failed'; error: string };
 
 /** After a Send: Delivered, then working, then Replied (brief §4), from the list row and the connection. */
-export type AfterSend = 'sending' | 'queued' | 'saved' | 'undelivered' | 'delivered' | 'working' | 'replied';
+export type AfterSend = 'sending' | 'stopped' | 'queued' | 'saved' | 'undelivered' | 'delivered' | 'working' | 'replied';
 
 /**
  * Where a sent reply is, from the row's own delivery (the same rule the
@@ -338,14 +339,17 @@ export function afterSendOf(row: InboxListRow | undefined, sentAt: string, busy:
   const state = row?.delivery?.state;
   const delivered = state === 'delivered' || (row?.sent?.checked_at ?? null) !== null;
   if (delivered) return busy ? 'working' : 'delivered';
+  // Claude Code holds it until the person types in that session (approval "inbox-stopped-reply"): Stopped, not Queued.
+  if (row?.delivery?.reason === 'stopped') return 'stopped';
   if (state === 'queued' || state === 'saved' || state === 'undelivered') return state;
   return 'sending';
 }
 
-export const AFTER_SEND_ORDER: readonly AfterSend[] = ['sending', 'undelivered', 'queued', 'saved', 'delivered', 'working', 'replied'];
+export const AFTER_SEND_ORDER: readonly AfterSend[] = ['sending', 'undelivered', 'stopped', 'queued', 'saved', 'delivered', 'working', 'replied'];
 
 export const AFTER_SEND_WORDS: Record<AfterSend, string> = {
   sending: 'Sending',
+  stopped: INBOX_STOPPED_REPLY_TEXT,
   queued: 'Queued',
   saved: 'Saved',
   undelivered: 'Not delivered',

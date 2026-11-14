@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { InboxLaunchRecord } from "@plannotator/core/inbox-types";
 import { resolveInboxLaunch } from "@plannotator/shared/config";
-import { createAgentEnvironmentFor, type AgentEnvironment } from "./inbox-agents";
+import { CLAUDE_PROJECT_SETTINGS_MAX_BYTES, claudePluginStateFromScopes, createAgentEnvironmentFor, type AgentEnvironment } from "./inbox-agents";
 import type { LaunchHostContext } from "./inbox-launch-host";
-import { agentByShort, claudeAttachCommand, createClaudeHost, createClaudeLaunchHost, parseAgentsJson, parseBackgrounded, refusedForMode, startFailureOf, versionAtLeast, type ClaudeLaunchMode } from "./inbox-launch-claude";
+import { agentByShort, CLAUDE_AUTH_SIGNED_OUT_TTL_MS, CLAUDE_OTHER_SIGN_IN_ENV, claudeAttachCommand, claudeAuthState, createClaudeHost, createClaudeLaunchHost, parseAgentsJson, parseBackgrounded, refusedForMode, startFailureOf, versionAtLeast, type ClaudeLaunchMode } from "./inbox-launch-claude";
 
 describe("parseBackgrounded", () => {
   test("reads the short id and name from the line Claude Code 2.1.314 prints (bg-test RESULTS)", () => {
@@ -65,6 +65,21 @@ test("versionAtLeast compares numerically, not as text", () => {
   expect(versionAtLeast("2.1.314", "2.1.314")).toBe(true);
   expect(versionAtLeast("2.10.0", "2.1.314")).toBe(true);
   expect(versionAtLeast("2.1.99", "2.1.314")).toBe(false);
+});
+
+test("the plugin's scopes by Claude Code's precedence: managed, then the project's local and shared files, then the user's", () => {
+  const state = (on: Partial<Record<"managed" | "local" | "project" | "user", boolean>>) =>
+    claudePluginStateFromScopes(
+      (["managed", "local", "project", "user"] as const).map((scope) => ({ scope, on: on[scope] })),
+      false,
+    );
+  expect(state({ managed: false, local: true, project: true, user: true })).toEqual({ state: "disabled", managed: true });
+  expect(state({ local: false, project: true, user: true }).state).toBe("disabled");
+  expect(state({ local: true, project: false, user: false }).state).toBe("enabled");
+  expect(state({ project: true, user: false }).state).toBe("enabled");
+  expect(state({ project: false, user: true }).state).toBe("disabled");
+  expect(state({ user: true }).state).toBe("enabled");
+  expect(state({}).state).toBe("absent");
 });
 
 test("the attach command quotes the folder for the shell", () => {
@@ -202,6 +217,8 @@ describe("Claude Code as a launch host", () => {
         '  --version) echo "2.1.316 (Claude Code)" ;;',
         '  --bg) echo "backgrounded · 844d238d · Inbox" ;;',
         `  agents) echo '[{"id":"844d238d","sessionId":"844d238d-0000-4000-8000-000000000001"}]' ;;`,
+        // `auth status`: what the test wrote in auth.out (nothing: an answer it can't read), its exit in auth.exit.
+        `  auth) cat ${JSON.stringify(join(root, "auth.out"))} 2>/dev/null; exit $(cat ${JSON.stringify(join(root, "auth.exit"))} 2>/dev/null || echo 0) ;;`,
         "esac",
       ].join("\n"),
       { mode: 0o755 },
@@ -214,7 +231,12 @@ describe("Claude Code as a launch host", () => {
       selfCommand: ["plannotator"],
       ownEnv: () => ({ HOME: home, PATH: "" }),
       environment: async () => createAgentEnvironmentFor({ platform: process.platform, homeDir: home, env: { HOME: home, PATH: `/usr/bin:/bin:${bin}` } }),
-      shell: () => (login.CLAUDE_CONFIG_DIR ? { CLAUDE_CONFIG_DIR: login.CLAUDE_CONFIG_DIR } : null),
+      // As the engine keeps a shell read: CLAUDE_CONFIG_DIR's value, and only "1" for a host's flags.
+      shell: () => {
+        const kept: Record<string, string> = login.CLAUDE_CONFIG_DIR ? { CLAUDE_CONFIG_DIR: login.CLAUDE_CONFIG_DIR } : {};
+        for (const name of CLAUDE_OTHER_SIGN_IN_ENV) if ((login as Record<string, string | undefined>)[name]) kept[name] = "1";
+        return Object.keys(kept).length > 0 ? kept : null;
+      },
       loginEnv: async () => login,
       config: () => resolveInboxLaunch({}),
       launchDir: (id) => join(dataDir, "inbox", "launch", id),
@@ -228,8 +250,54 @@ describe("Claude Code as a launch host", () => {
       mkdirSync(configDir, { recursive: true });
       writeFileSync(join(configDir, "settings.json"), JSON.stringify({ enabledPlugins: { "plannotator@plannotator": true } }));
     };
-    return { root, home, bin, dataDir, login, launch, pluginOn, host: createClaudeLaunchHost(context), calls: () => readFileSync(calls, "utf8").trim().split("\n") };
+    const auth = (out: string, exit: number) => {
+      writeFileSync(join(root, "auth.out"), out);
+      writeFileSync(join(root, "auth.exit"), String(exit));
+    };
+    return { root, home, bin, dataDir, login, launch, pluginOn, auth, host: createClaudeLaunchHost(context), calls: () => readFileSync(calls, "utf8").trim().split("\n") };
   }
+
+  test("why it can't start comes with a code a linked machine's window words with this machine's name", async () => {
+    const w = world();
+    expect(await w.host.available()).toMatchObject({ ok: false, code: "plugin_off" });
+    w.pluginOn(join(w.home, ".claude"));
+    w.auth(JSON.stringify({ loggedIn: false, authMethod: "none" }), 1);
+    expect(await w.host.available()).toMatchObject({ ok: false, missing: false, code: "signed_out" });
+    // Signed in since: a signed-out answer is kept only a few seconds, so the next look after that says so.
+    w.auth(JSON.stringify({ loggedIn: true, authMethod: "claude.ai" }), 0);
+    expect(await w.host.available()).toMatchObject({ code: "signed_out" });
+    await Bun.sleep(CLAUDE_AUTH_SIGNED_OUT_TTL_MS + 100);
+    expect(await w.host.available()).toMatchObject({ ok: true });
+    // A signed-in answer is kept for a while: no `auth status` per Send.
+    const asked = w.calls().filter((line) => line.startsWith("auth ")).length;
+    await w.host.available();
+    expect(w.calls().filter((line) => line.startsWith("auth ")).length).toBe(asked);
+  }, 20_000);
+
+  test("signed out to the check, but the login shell signs Claude Code in another way (a token, a key, a cloud provider): never refused", async () => {
+    for (const name of ["CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK"]) {
+      const w = world({ login: { [name]: "set-in-zshrc" } });
+      w.pluginOn(join(w.home, ".claude"));
+      w.auth(JSON.stringify({ loggedIn: false }), 1);
+      expect(await w.host.available()).toMatchObject({ ok: true });
+    }
+  });
+
+  test("checks asked at once share one `claude auth status`", async () => {
+    const w = world();
+    w.pluginOn(join(w.home, ".claude"));
+    w.auth(JSON.stringify({ loggedIn: false }), 1);
+    const answers = await Promise.all([w.host.available(), w.host.available(), w.host.available()]);
+    expect(answers.every((a) => !a.ok && a.code === "signed_out")).toBe(true);
+    expect(w.calls().filter((line) => line.startsWith("auth ")).length).toBe(1);
+  });
+
+  test("a sign-in answer it can't read never takes launch away", async () => {
+    const w = world();
+    w.pluginOn(join(w.home, ".claude"));
+    w.auth("error: unknown command 'auth'\n", 1);
+    expect(await w.host.available()).toMatchObject({ ok: true });
+  });
 
   test("a computer with the binary but no plugin is refused first, with the reason: a session there could never reach the Inbox", async () => {
     const w = world();
@@ -246,6 +314,103 @@ describe("Claude Code as a launch host", () => {
     expect((await onlyInHome.host.available()).ok).toBe(false);
     onlyInHome.pluginOn(other);
     expect((await onlyInHome.host.available()).ok).toBe(true);
+  });
+
+  describe("a launch folder's own Claude Code settings turn the plugin on or off for that folder (#3065)", () => {
+    const PLUGIN = "plannotator@plannotator";
+    const settings = (dir: string, name: "settings.json" | "settings.local.json", on: boolean | string) => {
+      mkdirSync(join(dir, ".claude"), { recursive: true });
+      writeFileSync(join(dir, ".claude", name), typeof on === "string" ? on : JSON.stringify({ enabledPlugins: { [PLUGIN]: on } }));
+    };
+    const userSettings = (w: ReturnType<typeof world>, on: boolean) => writeFileSync(join(w.home, ".claude", "settings.json"), JSON.stringify({ enabledPlugins: { [PLUGIN]: on } }));
+    const project = (w: ReturnType<typeof world>, name: string) => {
+      const dir = join(w.root, "projects", name);
+      mkdirSync(dir, { recursive: true });
+      return dir;
+    };
+    const code = async (w: ReturnType<typeof world>, folders?: string[]) => {
+      const answer = await w.host.available(folders);
+      return answer.ok ? "ok" : answer.code;
+    };
+
+    test("off for the user, on in the project's shared or local settings: on there, still off for the machine and in other folders", async () => {
+      const w = world();
+      userSettings(w, false);
+      const shared = project(w, "shared");
+      const local = project(w, "local");
+      const other = project(w, "other");
+      settings(shared, "settings.json", true);
+      settings(local, "settings.local.json", true);
+      expect(await code(w)).toBe("plugin_off");
+      expect(await code(w, [shared])).toBe("ok");
+      expect(await code(w, [local])).toBe("ok");
+      expect(await code(w, [other])).toBe("plugin_off");
+      // To offers it when at least one of the projects turns it on.
+      expect(await code(w, [other, shared])).toBe("ok");
+    });
+
+    test("on for the user, off in a project: off for that folder only", async () => {
+      const w = world();
+      userSettings(w, true);
+      const optedOut = project(w, "opted-out");
+      settings(optedOut, "settings.json", false);
+      expect(await code(w)).toBe("ok");
+      expect(await code(w, [optedOut])).toBe("plugin_off");
+      expect(await code(w, [project(w, "plain")])).toBe("ok");
+    });
+
+    test("the local file beats the shared one, both ways", async () => {
+      const w = world();
+      userSettings(w, false);
+      const outOfShared = project(w, "out-of-shared");
+      settings(outOfShared, "settings.json", true);
+      settings(outOfShared, "settings.local.json", false);
+      const intoLocal = project(w, "into-local");
+      settings(intoLocal, "settings.json", false);
+      settings(intoLocal, "settings.local.json", true);
+      expect(await code(w, [outOfShared])).toBe("plugin_off");
+      expect(await code(w, [intoLocal])).toBe("ok");
+    });
+
+    test.skipIf(process.platform === "win32")("in a folder inside a repository, the local file is the repository root's (as Claude reads it); the shared one is the folder's", async () => {
+      const w = world();
+      userSettings(w, false);
+      const repo = project(w, "repo");
+      mkdirSync(join(repo, ".git"));
+      const sub = join(repo, "packages", "app");
+      mkdirSync(sub, { recursive: true });
+      settings(sub, "settings.local.json", true);
+      expect(await code(w, [sub])).toBe("plugin_off");
+      settings(repo, "settings.local.json", true);
+      expect(await code(w, [sub])).toBe("ok");
+      // The root's shared file is not the subfolder's.
+      const other = project(w, "repo2");
+      mkdirSync(join(other, ".git"));
+      const inner = join(other, "app");
+      mkdirSync(inner, { recursive: true });
+      settings(other, "settings.json", true);
+      expect(await code(w, [inner])).toBe("plugin_off");
+    });
+
+    test.skipIf(process.platform === "win32")("a settings file that leads out of its folder, is too big, or is not JSON counts as not set", async () => {
+      const w = world();
+      userSettings(w, false);
+      const outside = project(w, "outside");
+      settings(outside, "settings.json", true);
+      const linked = project(w, "linked");
+      symlinkSync(join(outside, ".claude"), join(linked, ".claude"));
+      const fileLinked = project(w, "file-linked");
+      mkdirSync(join(fileLinked, ".claude"));
+      symlinkSync(join(outside, ".claude", "settings.json"), join(fileLinked, ".claude", "settings.json"));
+      const big = project(w, "big");
+      settings(big, "settings.json", JSON.stringify({ enabledPlugins: { [PLUGIN]: true }, padding: "x".repeat(CLAUDE_PROJECT_SETTINGS_MAX_BYTES) }));
+      const broken = project(w, "broken");
+      settings(broken, "settings.json", "{ not json");
+      for (const folder of [linked, fileLinked, big, broken]) expect(await code(w, [folder])).toBe("plugin_off");
+      // A broken project file hides nothing below it: the user's own true still counts there.
+      userSettings(w, true);
+      expect(await code(w, [broken])).toBe("ok");
+    });
   });
 
   test("the settings file gives Read on the Inbox's uploads, by an absolute rule, and the login PATH", async () => {
@@ -331,5 +496,23 @@ describe("the start's permission mode", () => {
     const result = await bypass.host.start({ folder: "/p", shownFolder: "~/p", name: "Smoke", settingsPath: "/s.json", mode: "bypassPermissions", allowBypass: true, environment: bypass.env });
     expect(result).toMatchObject({ ok: false, text: "Error: bypassPermissions mode is disabled by your organization." });
     expect(bypass.starts).toHaveLength(1);
+  });
+});
+
+describe("`claude auth status`: signed out only when it says so plainly", () => {
+  const ran = (stdout: string, exitCode = 0, extra: { timedOut?: boolean; stderr?: string } = {}) => ({ exitCode, stdout, stderr: extra.stderr ?? "", timedOut: extra.timedOut ?? false });
+  test.each([
+    ["JSON, signed in", ran('{"loggedIn":true,"authMethod":"claude.ai"}'), "signed_in"],
+    ["JSON, signed out", ran('{"loggedIn":false,"authMethod":"none"}', 1), "signed_out"],
+    ["text, signed out", ran("Not logged in. Run claude to sign in.", 1), "signed_out"],
+    ["words on stderr only", ran("", 1, { stderr: "You are not signed in." }), "unknown"],
+    ["signed-out words with exit 0", ran("Not logged in."), "unknown"],
+    ["text, signed in", ran("Logged in as someone@example.com"), "signed_in"],
+    ["a CLI without the command", ran("", 1, { stderr: "error: unknown command 'auth'" }), "unknown"],
+    ["not there", ran("", 127), "unknown"],
+    ["timed out", ran("", 1, { timedOut: true }), "unknown"],
+    ["nothing", ran(""), "unknown"],
+  ] as const)("%s", (_, result, state) => {
+    expect(claudeAuthState(result)).toBe(state);
   });
 });

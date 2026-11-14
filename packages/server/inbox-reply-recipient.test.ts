@@ -102,8 +102,12 @@ describe("a reply draft remembers who it goes to", () => {
 
     const twice = await saveDraft(server, asked.thread_id, { body: "x", base: cleared.updated_at, recipients: ["ses-a", "ses-a"] });
     expect(twice.status).toBe(422);
+    // Any number of recipients (through 0.28.61, at most 9): ten are kept.
     const many = await saveDraft(server, asked.thread_id, { body: "x", base: cleared.updated_at, recipients: Array.from({ length: 10 }, (_, i) => `ses-${i}`) });
-    expect(many.status).toBe(422);
+    expect(many.status).toBe(200);
+    const kept = ((await many.json()) as { draft: InboxReplyDraft }).draft;
+    expect(kept.recipients).toHaveLength(10);
+    expect((await saveDraft(server, asked.thread_id, { body: "Ship it today", base: kept.updated_at, recipients: [] })).status).toBe(200);
     // Only session ids as a tag names them: a path, a space or a line break is refused.
     for (const id of ["../ses-a", "ses a", "ses-a\nx", ""]) {
       const odd = await saveDraft(server, asked.thread_id, { body: "x", base: cleared.updated_at, recipients: [id] });

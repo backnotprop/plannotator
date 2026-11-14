@@ -443,7 +443,7 @@ test.skipIf(!hasDom)('an HTML page takes no swipe from the pane; an image takes 
   expect(withSheet).toEqual([]);
 });
 
-test.skipIf(!hasDom)('a typed comment: the swipe springs back and the question row asks first', async () => {
+test.skipIf(!hasDom)('a typed comment never stops a swipe: it follows through to the next file, and nothing asks', async () => {
   stubViews();
   reducedMotion(false);
   const opened = await render(notes);
@@ -456,11 +456,10 @@ test.skipIf(!hasDom)('a typed comment: the swipe springs back and the question r
   popover.appendChild(box);
   document.body.appendChild(popover);
   await drag(area(), -200);
-  await settle(80);
-  expect(opened).toEqual([]);
-  expect(area().style.transform).toBe('');
-  expect(host!.querySelector('[data-step-guard]')).not.toBeNull();
-  expect(host!.querySelector('[data-guard-discard]')!.textContent).toContain('plan.txt');
+  await settle(SWIPE_SLIDE_MS + 60);
+  expect(host!.querySelector('[data-step-guard]')).toBeNull();
+  expect(opened).toEqual([plan.id]);
+  popover.remove();
 });
 
 /** The phone's file sheet, opened from the toolbar's pill. */

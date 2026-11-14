@@ -87,7 +87,7 @@ export function dispatchShortcutEvent<TScope extends ShortcutScopeDefinition<any
   for (const [actionId, shortcut] of getShortcutEntries(scope)) {
     const handler = handlers[actionId];
     if (!handler) continue;
-    if (!resolveShortcutBindings(shortcut).some(binding => matchesShortcutBinding(event, binding))) continue;
+    if (!resolveShortcutBindings(shortcut).some(binding => matchesShortcutBinding(event, binding, scope))) continue;
 
     const { when, handle } = normalizeShortcutHandler(handler);
     if (when && !when(event)) continue;
@@ -159,7 +159,7 @@ export function useShortcutScope<TScope extends ShortcutScopeDefinition<any>>({
 
       for (const candidate of active) {
         const group = candidate.groups[candidate.nextIndex];
-        if (!group || !matchesShortcutBindingGroup(keyboardEvent, group)) continue;
+        if (!group || !matchesShortcutBindingGroup(keyboardEvent, group, scope)) continue;
         if (candidate.nextIndex === candidate.groups.length - 1) {
           const shortcut = scope.shortcuts[candidate.actionId];
           const handler = handlersRef.current[candidate.actionId];
@@ -197,7 +197,7 @@ export function useShortcutScope<TScope extends ShortcutScopeDefinition<any>>({
             groups.length < 2
             || groups.includes('hold')
             || (doubleTapKey !== null && ['Alt', 'Shift', 'Mod'].includes(doubleTapKey))
-            || !matchesShortcutBindingGroup(keyboardEvent, groups[0] ?? '')
+            || !matchesShortcutBindingGroup(keyboardEvent, groups[0] ?? '', scope)
           ) {
             continue;
           }

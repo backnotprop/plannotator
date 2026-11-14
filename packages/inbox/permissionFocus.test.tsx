@@ -6,7 +6,7 @@
  *   visit): a person who just opened the thread and presses Enter must never allow a prompt.
  * - An answer still goes out where `crypto.randomUUID` does not exist (plain http to an address
  *   other than localhost): its reply's key comes from `newUuid`.
- * - Its header's Stop is the owner's: a tailnet guest's page has none, as the server answers it `owner_only`.
+ * - Its header's Stop is on every page, a tailnet guest's included (owner ruling 2026-11-11).
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -226,7 +226,7 @@ test.skipIf(!hasDom)('Allow once is sent where crypto.randomUUID does not exist 
   }
 });
 
-test.skipIf(!hasDom)("the card's header Stop is the owner's: a tailnet guest's page has none", async () => {
+test.skipIf(!hasDom)("the card's header Stop is on a tailnet guest's page too", async () => {
   const thread = threadOf(card(CARD_1, 'bun run --cwd apps/inbox build', 1));
   await render(thread, idsOf(thread));
   // Compared as booleans (see `focused`).
@@ -235,5 +235,5 @@ test.skipIf(!hasDom)("the card's header Stop is the owner's: a tailnet guest's p
   host!.remove();
   await render(thread, idsOf(thread), true);
   expect(!!once(CARD_1)).toBe(true);
-  expect(!!host!.querySelector('[data-run-stop]')).toBe(false);
+  expect(!!host!.querySelector(`[data-message-id="${CARD_1}"] [data-run-stop]`)).toBe(true);
 });

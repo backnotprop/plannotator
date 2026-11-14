@@ -14,6 +14,7 @@ import React from 'react';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BRIDGE_PROTOCOL_VERSION, BRIDGE_SCRIPT } from './bridge-script';
+import { SANDBOX_SHIM_SCRIPT } from './sandboxShim';
 import type { BridgeUnavailableInfo } from './HtmlViewer';
 import type { ViewerHandle } from '../Viewer';
 
@@ -149,6 +150,24 @@ describe.if(hasDom)('HtmlViewer bridgeScriptUrl', () => {
     expect(srcdoc).not.toContain(BRIDGE_SCRIPT);
     // The sandbox is unchanged by the delivery path.
     expect(iframe.getAttribute('sandbox')).toBe('allow-scripts allow-modals');
+  });
+
+  // sandboxShim.ts: a page's head script that writes its hash or reads storage must find them safe.
+  const HEAD_SCRIPT_PAGE = '<!doctype html><html><head><script>window.pageHead = 1;</script></head><body><p>Target</p></body></html>';
+
+  test("inline: the sandbox shim runs before the page's own head scripts", async () => {
+    const { iframe } = await mount({ rawHtml: HEAD_SCRIPT_PAGE });
+    const srcdoc = iframe.getAttribute('srcdoc') ?? '';
+    const shim = srcdoc.indexOf(`<script>${SANDBOX_SHIM_SCRIPT}</script>`);
+    expect(shim).toBeGreaterThan(-1);
+    expect(shim).toBeLessThan(srcdoc.indexOf('window.pageHead = 1'));
+  });
+
+  test('by URL: no inline shim, which a host that forbids inline scripts would block (the bridge carries it)', async () => {
+    const { iframe } = await mount({ bridgeScriptUrl: ASSET_URL, rawHtml: HEAD_SCRIPT_PAGE });
+    const srcdoc = iframe.getAttribute('srcdoc') ?? '';
+    expect(srcdoc).not.toContain(SANDBOX_SHIM_SCRIPT);
+    expect(srcdoc.match(/<script>/g)?.length ?? 0).toBe(1);
   });
 
   test("a relative URL is resolved against the PARENT document, so a page's own <base href> cannot redirect it", async () => {

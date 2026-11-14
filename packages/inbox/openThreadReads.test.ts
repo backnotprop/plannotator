@@ -13,7 +13,7 @@
 import { describe, expect, test } from 'bun:test';
 import { INBOX_REPO_TTL_MS, type InboxListRow } from '@plannotator/core/inbox-types';
 import type { InboxEvent } from './api';
-import { listsThread, newRecordBatch, noteRecord, openThreadRead, type OpenThreadState } from './openThreadReads';
+import { listsThread, newRecordBatch, noteOwnRecord, noteRecord, openThreadRead, type OpenThreadState } from './openThreadReads';
 
 const OPEN = 'msg_OPEN';
 const OTHER = 'msg_OTHER';
@@ -126,5 +126,37 @@ describe('listsThread: whether the list read has the open thread', () => {
   test('gone from the list (deleted elsewhere, archived), or no list read: not listed, so it is read again', () => {
     expect(listsThread(list([row(OTHER)]), OPEN)).toBe(false);
     expect(listsThread(null, OPEN)).toBe(false);
+  });
+});
+
+describe("the echo of this window's own question save", () => {
+  // The failure this guards: each key typed in a question's "Other…" field saves, and the save's record read the
+  // open thread and its files again (with the list, the decisions and the drafts), though the pane had drawn the
+  // save's answer already: several reads and whole-window renders per key.
+  const ownFor = (threadId: string, events: (InboxEvent | null)[] = [], open = settledOpen()) => {
+    const batch = newRecordBatch();
+    noteOwnRecord(batch, threadId);
+    for (const event of events) noteRecord(batch, event);
+    return openThreadRead(batch, open);
+  };
+
+  test('alone, it reads neither the open thread nor its files', () => {
+    expect(ownFor(OPEN)).toBe('none');
+  });
+
+  test('with any other record of the open thread, or one no one placed, the thread is read as before', () => {
+    expect(ownFor(OPEN, [message(OPEN)])).toBe('thread');
+    expect(ownFor(OPEN, [question(OPEN)])).toBe('thread');
+    expect(ownFor(OPEN, [null])).toBe('thread');
+    expect(ownFor(OPEN, [project])).toBe('thread');
+  });
+
+  test("with another thread's record, the open thread's files are read as before", () => {
+    expect(ownFor(OPEN, [message(OTHER)])).toBe('files');
+  });
+
+  test("a thread whose row only its read brings (not in the list), or another machine's, is read as before", () => {
+    expect(ownFor(OPEN, [], settledOpen({ listed: false }))).toBe('thread');
+    expect(ownFor(OPEN, [], settledOpen({ remote: true }))).toBe('thread');
   });
 });

@@ -114,7 +114,7 @@ describe("readMp4VideoMetadata", () => {
 });
 
 describe("decideInboxAttachmentKind for films", () => {
-  test("video with the header's metadata; WebM with none; audio stays a file; an AVIF stays an image", async () => {
+  test("video with the header's metadata; WebM with none; audio-only is a recording (audio.test.ts); an AVIF stays an image", async () => {
     const film = mp4({ duration: 102.4, width: 640, height: 360 });
     const meta = await readMp4VideoMetadata(reader(film).read, film.length);
     expect(decideInboxAttachmentKind("/x/cut.mp4", film.subarray(0, INBOX_ATTACHMENT_HEAD_BYTES), false, film.length, meta)).toEqual({
@@ -129,7 +129,7 @@ describe("decideInboxAttachmentKind for films", () => {
     expect(decideInboxAttachmentKind("/x/demo.webm", ebml("webm"), false, 600, null)).toEqual({ kind: "video", media_type: "video/webm" });
     expect(decideInboxAttachmentKind("/x/demo.mkv", ebml("matroska"), false, 600, null)).toEqual({ kind: "file" });
     const audio = mp4({ tracks: ["soun"] });
-    expect(decideInboxAttachmentKind("/x/voice.mp4", audio, false, audio.length, await readMp4VideoMetadata(reader(audio).read, audio.length))).toEqual({ kind: "file" });
+    expect(decideInboxAttachmentKind("/x/voice.mp4", audio, false, audio.length, await readMp4VideoMetadata(reader(audio).read, audio.length))).toEqual({ kind: "audio", media_type: "audio/mp4", duration_ms: 461300 });
     // Brands alone (no header walked) still say video.
     expect(decideInboxAttachmentKind("/x/cut.mov", mp4({ major: "qt  ", compatible: ["qt  "] }), false, 0, null)).toEqual({ kind: "video", media_type: "video/quicktime" });
     const avif = mp4({ major: "avif", compatible: ["avif", "mif1", "miaf"] });

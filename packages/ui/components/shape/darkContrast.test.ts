@@ -44,7 +44,7 @@ function board(t: { paper: string; ink: string; surface: string; rule: string; g
 const DARK = board({ paper: oklch(0.15, 0.02, 260), ink: oklch(0.9, 0.01, 260), surface: oklch(0.22, 0.02, 260), rule: oklch(0.35, 0.02, 260), grey: oklch(0.72, 0.02, 260), alert: oklch(0.65, 0.2, 25) });
 const LIGHT = board({ paper: oklch(0.97, 0.005, 260), ink: oklch(0.18, 0.02, 260), surface: oklch(1, 0, 0), rule: oklch(0.88, 0.01, 260), grey: oklch(0.4, 0.02, 260), alert: oklch(0.5, 0.25, 25) });
 const TOKYO_DARK = board({ paper: '#24283b', ink: '#c0caf5', surface: '#1d202f', rule: '#414868', grey: '#787c99', alert: '#f7768e' });
-const MODERN_DARK = board({ paper: '#171717', ink: '#fafafa', surface: '#121212', rule: '#404040', grey: '#949494', alert: '#ff6467' });
+const MODERN_DARK = board({ paper: '#000000', ink: '#f2f2f2', surface: '#2a2a2a', rule: '#414141', grey: '#bbbbbb', alert: '#ff0000' });
 
 function holds(c: ShapeDarkColors) {
   const f = shapeDarkFixes(c)!;

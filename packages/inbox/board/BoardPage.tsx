@@ -1,10 +1,12 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type ReactNode } from 'react';
+import { ProjectMark, showsProjects, useRowMarks } from '../letterMarks';
+import { knownProjectName, useKnownProjects } from '../projectPictures';
 import { INBOX_CARD_COLUMN_LABELS, INBOX_CARD_LIVE_COLUMNS, displayInboxSubject, inboxCardMarkRef, type InboxCardColumn, type InboxCardMark, type InboxCardHistoryEntry, type InboxCardRef, type InboxCardWire, type InboxListRow, type InboxProjectRepo, type InboxInitiative } from '@plannotator/core/inbox-types';
 import type { ForgeRefCardResult } from '@plannotator/core/forge-ref-card';
 import { inboxApi, type CardsModel, type ComposeSessionsModel, type ProjectFolder } from '../api';
 import { formatCount, fullTime, whenTime } from '../format';
 import { AuthorMark, Icon } from '../icons';
-import { Tip, isTextCut } from '../components/Tip';
+import { ProjectTipText, Tip, isTextCut } from '../components/Tip';
 import { DeliveryTick } from '../components/DeliveryTick';
 import { SidebarTrigger } from '../shell/sidebar';
 import { pageInFront } from '../sound';
@@ -14,6 +16,10 @@ import { CardPanel } from './CardPanel';
 import { CardMenu } from './CardMenu';
 import type { InboxToastModel } from '../components/Toast';
 import { shortcutAria } from '../shortcuts/hint';
+import { useShortcutScope } from '@plannotator/ui/shortcuts';
+import { isGridKey, laneStep, type GridKey } from '../gridMove';
+import { inboxBoardShortcuts } from '../shortcuts/grid.shortcuts';
+import { isComposingKey, keyTarget, modalOpen } from '../shortcuts/guards';
 import { inboxListShortcuts } from '../shortcuts/list.shortcuts';
 import { OnceButton } from './OnceButton';
 import { RefMark, markLabel } from './RefMark';
@@ -24,6 +30,7 @@ import { TidyMenu, type TidyController } from '../components/Tidy';
 import { BoardFilter, BoardFilterTokens, initiativeLabel } from './BoardFilter';
 import { InitiativesDialog } from './InitiativesDialog';
 import { restoreInitiatives } from './initiativeUndo';
+import type { TagsAcross } from '../tagsAcross';
 import { projectNames } from '../search/model';
 import {
   agentState,
@@ -64,9 +71,6 @@ import {
 } from './model';
 import { newUuid } from '../uuid';
 import { noteOneTimeDialogShown } from '../snoozeIntro';
-import { cardStepLists, presenceClass, stepsCount, stepsDoneWords } from '../steps/model';
-import { StepsPie } from '../steps/StepsMarks';
-import type { InboxStepsWire } from '@plannotator/core/inbox-types';
 
 export type { BoardMove } from './model';
 
@@ -126,6 +130,11 @@ export interface BoardPageProps {
    * the lanes from its right-click menu (`cardMenuToast`). Absent: no toast, the live region alone.
    */
   onToast?: (toast: Omit<InboxToastModel, 'id'> | null) => void;
+  /**
+   * The tags as the sidebar has them, one per name across the linked machines, with its rename, delete and Undo on each
+   * (tagsAcross.ts). Absent: this Inbox's initiatives alone.
+   */
+  tagsAcross?: TagsAcross | null;
 }
 
 /**
@@ -152,13 +161,17 @@ export function BoardPage(props: BoardPageProps) {
   const names = useMemo(() => projectNames(props.projects), [props.projects]);
   const offered = boardProjects(allCards, props.projects, project);
   const projectName = project ? (names.get(project) ?? null) : null;
-  const initiatives = useMemo(() => liveInitiatives(model?.initiatives), [model?.initiatives]);
+  // A card names its project while the Board spans projects and none is picked, the Project button's own rule
+  // (owner, 2026-11-05): on a row of its own above the title, with the marks and the age.
+  const cardsShowProject = project === null && offered.length > 1;
+  const across = props.tagsAcross ?? null;
+  const initiatives = useMemo(() => boardTags(across, liveInitiatives(model?.initiatives)), [across, model?.initiatives]);
   const cards = cardsInInitiative(projectCards, initiative, initiatives);
   const initiativeName = initiativeLabel(initiatives, initiative);
   const counts = boardCounts(cards);
   const drops = unseenDrops(cards);
   const [creating, setCreating] = useState<null | 'backlog' | 'send'>(null);
-  /** The Initiatives dialog (the filter's New initiative… or Edit initiatives…). */
+  /** The Tags dialog (the filter's New tag… or Edit tags…). */
   const [managing, setManaging] = useState<null | 'new' | 'edit'>(null);
   const [intro, setIntro] = useState(false);
   const claimed = useRef(false);
@@ -193,10 +206,10 @@ export function BoardPage(props: BoardPageProps) {
   const setInitiative = async (card: InboxCardWire, next: string | null) => {
     setFailed(null);
     try {
-      const { card: changed } = await inboxApi.setCardInitiative(card.id, next);
+      const { card: changed } = await inboxApi.setCardInitiative(card.id, across ? await across.here(next) : next);
       props.onChanged(changed);
-      const name = next ? (initiatives.find((i) => i.id === next)?.name ?? 'the initiative') : null;
-      setSaid(name ? `“${card.title}” is in ${name} now.` : `“${card.title}” is in no initiative now.`);
+      const name = next ? (initiatives.find((i) => i.id === next)?.name ?? 'the tag') : null;
+      setSaid(name ? `“${card.title}” is in ${name} now.` : `“${card.title}” has no tag now.`);
     } catch {
       setFailed(`“${card.title}” did not change. Try again.`);
     }
@@ -252,7 +265,7 @@ export function BoardPage(props: BoardPageProps) {
   };
   const undoInitiatives = async (deleted: readonly InboxInitiative[]) => {
     props.onToast?.(null);
-    const { left, line } = await restoreInitiatives(deleted);
+    const { left, line } = await (across ? across.restore(deleted) : restoreInitiatives(deleted));
     if (line) props.onToast?.({ icon: 'warn', wrap: true, lead: line, ...(left.length > 0 ? { onUndo: () => void undoInitiatives(left) } : {}) });
     props.onChanged();
   };
@@ -410,7 +423,7 @@ export function BoardPage(props: BoardPageProps) {
     const key = dialogKey.current || newUuid();
     dialogKey.current = key;
     try {
-      const card = await dialogCardFor(input);
+      const card = await dialogCardFor(across ? { ...input, initiative: await across.here(input.initiative) } : input);
       // Made in another project than the Board shows: the card is not on screen, so the words say where it went.
       const elsewhere = project && card.project_id !== project ? ` in ${names.get(card.project_id) ?? 'another project'}` : '';
       if (input.mode === 'send' && input.to) {
@@ -448,6 +461,36 @@ export function BoardPage(props: BoardPageProps) {
 
   // The lane marks: the state of each card's linked PR or issue, for the cards on screen only.
   const pageRef = useRef<HTMLElement | null>(null);
+  // Arrow keys between the cards (approval "inbox-keyboard-keys-2026-11-07", item 6; gridMove.ts), only while a card's
+  // button has focus: ↑ ↓ within its lane, ← → the nearest card in the lane beside, Home End the lane's ends. Enter
+  // opens and Shift+F10 opens its menu, as before.
+  const cardKey = {
+    when: (event: KeyboardEvent) => {
+      if (event.defaultPrevented || isComposingKey(event) || modalOpen() || !isGridKey(event.key)) return false;
+      const target = keyTarget(event);
+      return !!target && !!pageRef.current?.querySelector('.ib-bmain')?.contains(target) && target.matches('.ib-bcard[data-card-id] button[data-card-open]');
+    },
+    handle: (event: KeyboardEvent) => {
+      const main = pageRef.current?.querySelector('.ib-bmain');
+      const target = keyTarget(event);
+      if (!main || !target) return;
+      // The lists on screen that hold cards (the lanes, the Done or Cancelled list, a phone's groups), in order.
+      const shown = (el: Element) => el.getClientRects().length > 0;
+      const lists = [...main.querySelectorAll<HTMLElement>('[data-lane], .ib-blist')].filter(shown);
+      const buttons = lists.map((list) => [...list.querySelectorAll<HTMLElement>('.ib-bcard[data-card-id] button[data-card-open]')].filter(shown));
+      const lane = buttons.findIndex((cards) => cards.includes(target as HTMLElement));
+      if (lane < 0) return;
+      const to = laneStep(
+        buttons.map((cards) => cards.map((card) => card.getBoundingClientRect())),
+        { lane, card: buttons[lane]!.indexOf(target as HTMLElement) },
+        event.key as GridKey,
+      );
+      const next = to ? buttons[to.lane]?.[to.card] : null;
+      next?.focus({ preventScroll: true });
+      next?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+    },
+  };
+  useShortcutScope({ scope: inboxBoardShortcuts, handlers: { move: cardKey, ends: cardKey } });
   // A narrow page (a narrow window, or a wide sidebar): the Project chip takes a row of its own under the
   // header, as on a phone, so it is never cut to a few letters.
   const [narrowHead, setNarrowHead] = useState(false);
@@ -467,8 +510,6 @@ export function BoardPage(props: BoardPageProps) {
     const mark = marks.get(card.id);
     return mark && mark.url === ref.url ? mark : { kind: ref.kind === 'issue' ? 'issue' : 'pr', ref: ref.ref, url: ref.url, state: 'unknown', title: null };
   };
-  // The checklist (approval "inbox-thread-steps", part 4): the lists of the card's threads, while the switch is on.
-  const stepsOf = (card: InboxCardWire) => cardStepLists(card.threads, model?.steps);
 
   const common: CardCommon = {
     visitLook: props.visitLook,
@@ -480,7 +521,11 @@ export function BoardPage(props: BoardPageProps) {
     menuKeys,
     rowOf: props.rowOf,
     markOf,
-    stepsOf,
+    projectOfCard: (card) => {
+      if (!cardsShowProject) return null;
+      const name = names.get(card.project_id);
+      return name ? { name, root: projectOf(card)?.root ?? '' } : null;
+    },
     onOpen: (card) => props.onOpenCard(card.id),
     onOpenThread: props.onOpenThread,
   };
@@ -567,7 +612,6 @@ export function BoardPage(props: BoardPageProps) {
       phone={phone}
       now={now}
       rowOf={props.rowOf}
-      steps={stepsOf(open)}
       onClose={() => props.onOpenCard(null)}
       onMove={async (change, fromMenu) => void (await move(open, change, fromMenu))}
       dropAsk={dropAsk?.id === open.id ? dropAsk.n : 0}
@@ -575,7 +619,7 @@ export function BoardPage(props: BoardPageProps) {
       onChanged={props.onChanged}
       onOpenThread={(threadId) => props.onOpenThread(open, threadId)}
       onCreateThread={(session, opener) => props.onCreateThread(open, session, opener)}
-      initiatives={model?.initiatives ?? []}
+      initiatives={cardInitiatives(model?.initiatives ?? [], initiatives)}
       onInitiative={(next) => void setInitiative(open, next)}
     />
   ) : null;
@@ -700,6 +744,7 @@ export function BoardPage(props: BoardPageProps) {
       {managing && (
         <InitiativesDialog
           initiatives={initiatives}
+          across={across}
           start={managing}
           phone={phone}
           onClose={() => setManaging(null)}
@@ -760,8 +805,8 @@ interface CardCommon {
   rowOf: (threadId: string) => InboxListRow | null;
   /** The card's lane mark (its linked PR or issue), null when it links neither. */
   markOf: (card: InboxCardWire) => InboxCardMark | null;
-  /** The card's checklists, the latest first (none while the switch is off): the first one's pie is on the card. */
-  stepsOf: (card: InboxCardWire) => InboxStepsWire[];
+  /** The card's project for its head row, or null while the Board shows one project's cards. */
+  projectOfCard: (card: InboxCardWire) => { name: string; root: string } | null;
   onOpen: (card: InboxCardWire) => void;
   /** The "You: …" line's way in: the thread where the person makes the call (`youThread`). */
   onOpenThread: (card: InboxCardWire, threadId: string) => void;
@@ -905,7 +950,9 @@ const titleCut = (trigger: Element) => isTextCut(trigger.closest('.ib-bc-main'))
  * is the button that opens the card (a click anywhere else on the card does
  * too); "You: …" is its own button, to the thread where the person makes the
  * call (`youThread`); with no thread linked it is plain words, and a click on
- * it opens the card.
+ * it opens the card. While the Board spans projects (`projectOfCard`), the
+ * project's name gets a row of its own above the title, with the marks and the
+ * age at its right, and the title takes the card's whole width.
  */
 function BoardCard({
   card,
@@ -918,7 +965,7 @@ function BoardCard({
   menuKeys,
   rowOf,
   markOf,
-  stepsOf,
+  projectOfCard,
   onOpen,
   onOpenThread,
   draggable = false,
@@ -932,11 +979,8 @@ function BoardCard({
   const delivery = sent && card.sent ? (rowOf(card.sent.thread_id)?.delivery ?? null) : null;
   const age = cardAge(card.heard_at, now);
   const mark = markOf(card);
-  // The checklist's mark (approval "inbox-thread-steps", part 4): the pie alone, no count; the opened card has the number.
-  const plan = stepsOf(card)[0] ?? null;
-  const planCount = plan ? stepsCount(plan) : null;
-  const planWords = plan ? `Checklist: ${stepsDoneWords(plan)}` : null;
-  const label = cardLabel(card, unread, now) + (sent ? `. Sent to ${sent}` : '') + (mark ? `. ${markLabel(mark)}` : '') + (planWords ? `. ${planWords}` : '');
+  const cardProject = projectOfCard(card);
+  const label = cardLabel(card, unread, now, cardProject?.name ?? null) + (sent ? `. Sent to ${sent}` : '') + (mark ? `. ${markLabel(mark)}` : '');
   const thread = line?.you ? youThread(card, rowOf) : null;
   // "Waiting on you" (columns v2, display only): a card before In review whose linked thread waits on the person.
   const waiting = line?.you ? null : waitingThread(card, rowOf);
@@ -949,13 +993,7 @@ function BoardCard({
   const meta = (
     <span className="ib-bc-meta">
       {mark && <RefMark mark={mark} />}
-      {plan && planCount && planWords && (
-        <Tip content={planWords}>
-          <span className={`ib-bc-plan ${presenceClass(plan.presence)}`} data-card-steps={planCount.text}>
-            <StepsPie done={planCount.done} total={planCount.total} size={13} />
-          </span>
-        </Tip>
-      )}
+      <BoardProjectMark projectId={card.project_id} />
       <Tip content={owner === 'You' ? 'Your card' : owner}>
         <span className="ib-bc-who" data-host={card.agent?.kind === 'agent' ? card.agent.host : 'you'}>
           {card.agent ? <AuthorMark author={card.agent} /> : <span className="ib-lane-dot ib-bc-yourdot" data-col="backlog" aria-hidden="true" />}
@@ -990,9 +1028,19 @@ function BoardCard({
       }}
       onDragEnd={onDragEnd}
     >
+      {cardProject && (
+        <span className="ib-bc-head">
+          <Tip content={cardProject.root ? <ProjectTipText name={cardProject.name} root={cardProject.root} /> : cardProject.name}>
+            <bdi className="ib-bc-proj" data-card-project="">
+              {cardProject.name}
+            </bdi>
+          </Tip>
+          {meta}
+        </span>
+      )}
       <span className="ib-bc-top">
         <button type="button" className="ib-bc-main" aria-label={label} aria-current={openId === card.id || undefined} aria-keyshortcuts={menuKeys} data-card-open="" onClick={() => onOpen(card)}>
-          {meta}
+          {!cardProject && meta}
           {/* The clamp (three lines) is on the button, not on the inline title: measure the button. */}
           <Tip content={card.title} when={titleCut}>
             <span className="ib-bc-t" dir="auto">
@@ -1304,7 +1352,6 @@ function OpenedCard({
   phone,
   now,
   rowOf,
-  steps,
   onClose,
   onMove,
   dropAsk,
@@ -1323,7 +1370,6 @@ function OpenedCard({
   phone: boolean;
   now: number;
   rowOf: (threadId: string) => InboxListRow | null;
-  steps: readonly InboxStepsWire[];
   onClose: () => void;
   /** `fromMenu`: a Drop… the card's right-click menu started (its toast). */
   onMove: (move: BoardMove, fromMenu?: boolean) => Promise<void>;
@@ -1420,7 +1466,6 @@ function OpenedCard({
           : null
       }
       rowOf={rowOf}
-      steps={steps}
       phone={phone}
       now={now}
       onClose={onClose}
@@ -1473,4 +1518,35 @@ function OpenedCard({
       onCreateThread={(opener) => onCreateThread(askTarget?.session ?? null, opener)}
     />
   );
+}
+
+/** Letter marks (letterMarks.tsx): the card's project mark (16 px) in its meta, while project marks show. */
+function BoardProjectMark({ projectId }: { projectId: string }) {
+  const { marks } = useRowMarks();
+  useKnownProjects();
+  const name = knownProjectName(projectId);
+  if (!showsProjects(marks.what) || !name) return null;
+  return (
+    <Tip content={name}>
+      <span className="ib-bc-proj">
+        <ProjectMark projectId={projectId} name={name} size={16} solid={marks.style === 'avatar'} />
+      </span>
+    </Tip>
+  );
+}
+
+/**
+ * The tags the Board offers: one per name across the linked machines, and an initiative of this Inbox's the list has
+ * not read yet. A card's tag is this Inbox's copy, whose id the merged tag carries when this Inbox holds one.
+ */
+function boardTags(across: TagsAcross | null, own: InboxInitiative[]): InboxInitiative[] {
+  if (!across) return own;
+  const known = new Set(across.tags.flatMap((tag) => [tag.id, ...Object.values(tag.machines ?? {})]));
+  return [...across.tags, ...own.filter((i) => !known.has(i.id))];
+}
+
+/** The opened card's: every initiative of this Inbox's, deleted ones too (its history names them), and the linked machines' tags. */
+function cardInitiatives(own: readonly InboxInitiative[], offered: readonly InboxInitiative[]): InboxInitiative[] {
+  const ids = new Set(own.map((i) => i.id));
+  return [...own, ...offered.filter((i) => !ids.has(i.id))];
 }

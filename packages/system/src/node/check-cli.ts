@@ -1,14 +1,13 @@
-// bun run --cwd packages/system check [--dir <drawing>] [--root <repo>] [--at <commit>] [--json]
+// bun run --cwd packages/system check --dir <drawing> --root <repo> [--at <commit>] [--json]
 // Loads a drawing and checks that every path it cites is in the repo at the
 // commit the drawing was drawn from (or at --at). Exit 0 clean, 1 not clean,
 // 2 bad usage.
-import { existsSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { resolve } from 'node:path';
 import { formatIssue } from '../format/load.ts';
-import { check, DRAWING_DIR } from './index.ts';
+import { check } from './index.ts';
 
 function usage(message: string): never {
-  process.stderr.write(`usage: ${message}\n  check [--dir <drawing folder>] [--root <repo root>] [--at <commit>] [--json]\n`);
+  process.stderr.write(`usage: ${message}\n  check --dir <drawing folder> --root <repo root> [--at <commit>] [--json]\n`);
   process.exit(2);
 }
 
@@ -29,17 +28,9 @@ for (let i = 0; i < args.length; i++) {
   } else usage(`unknown argument "${a}"`);
 }
 
-// with no --root, the nearest folder up from here that holds a drawing
-if (!root) {
-  for (let d = resolve(dir ? join(dir, '..', '..') : process.cwd()); ; d = dirname(d)) {
-    if (existsSync(join(d, DRAWING_DIR, 'system.yaml'))) {
-      root = d;
-      break;
-    }
-    if (dirname(d) === d) usage('no .plannotator/system found here or above; pass --root');
-  }
-}
-dir ??= join(root, DRAWING_DIR);
+// The drawing lives in Plannotator's folder (<data dir>/system/<key>/drawing), not in the repo: name both.
+if (!dir) usage('--dir <drawing folder> is required');
+if (!root) usage('--root <repo root> is required');
 
 let result;
 try {

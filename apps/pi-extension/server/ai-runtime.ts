@@ -8,10 +8,18 @@ import type { SessionBridge } from "../generated/ai/session-bridge.ts";
 import type { PullSessionBridgeConfig } from "../generated/ai/session-bridge-pull.ts";
 import { isLoopbackHostHeader } from "../generated/loopback-host.ts";
 import { handleApiNotFound, json, toWebRequest } from "./helpers.ts";
-import { getLocalUrlHostname } from "./network.ts";
+import { getLocalUrlHostname, isSshDetectedRemote } from "./network.ts";
+import { isSshTunnelRequest } from "./this-machine.ts";
 
 export interface PiAIRuntime {
 	endpoints: Record<string, (req: Request) => Promise<Response>>;
+	/**
+	 * In a remote session only SSH turned on, with a bridge: what every request
+	 * that is not the session's own tunnel gets (Ask AI through the agent SDKs,
+	 * no bridge), which is what remote mode gives. Mirrors the Bun runtime's
+	 * peer endpoints (packages/server/ai-runtime.ts).
+	 */
+	peerEndpoints?: Record<string, (req: Request) => Promise<Response>>;
 	dispose: () => void;
 }
 
@@ -51,6 +59,7 @@ function whichCmd(cmd: string): string | null {
 		const bin = process.platform === "win32" ? "where" : "which";
 		const output = execFileSync(bin, [cmd], {
 			env: process.env,
+			windowsHide: true,
 			encoding: "utf-8",
 			stdio: ["pipe", "pipe", "pipe"],
 		});
@@ -183,7 +192,19 @@ export async function createPiAIRuntime(options: CreatePiAIRuntimeOptions = {}):
 		if (bridgeProvider) registry.register(bridgeProvider, ai.SESSION_BRIDGE_PROVIDER_NAME);
 		await registerSdkProviders(catalogRegistry ?? registry);
 
+		const peerSessionManager = bridgeProvider && catalogRegistry && isSshDetectedRemote() ? new ai.SessionManager() : null;
+		const peerEndpoints = peerSessionManager && catalogRegistry
+			? ai.createAIEndpoints({
+				registry: catalogRegistry,
+				sessionManager: peerSessionManager,
+				getCwd: options.getCwd,
+				beforeProviderSession: discovery.beforeProviderSession,
+				authorizeSessionBridgeRequest: () => false,
+			})
+			: undefined;
+
 		return {
+			...(peerEndpoints ? { peerEndpoints } : {}),
 			endpoints: ai.createAIEndpoints({
 				registry,
 				...(catalogRegistry ? { catalogRegistry } : {}),
@@ -199,6 +220,7 @@ export async function createPiAIRuntime(options: CreatePiAIRuntimeOptions = {}):
 				// Pi session is already running for us (the decision goes there next).
 				bridgeProvider?.detach();
 				sessionManager.disposeAll();
+				peerSessionManager?.disposeAll();
 				registry.disposeAll();
 				catalogRegistry?.disposeAll();
 				pullBridge?.dispose();
@@ -216,7 +238,9 @@ export async function handlePiAIRequest(
 	runtime: PiAIRuntime | null,
 ): Promise<boolean> {
 	if (!url.pathname.startsWith("/api/ai/")) return false;
-	const handler = runtime?.endpoints[url.pathname];
+	// A remote session only SSH turned on: its own tunnel gets the bridge, every other address the peer endpoints.
+	const endpoints = runtime?.peerEndpoints && !isSshTunnelRequest(req) ? runtime.peerEndpoints : runtime?.endpoints;
+	const handler = endpoints?.[url.pathname];
 
 	if (handler) {
 		try {

@@ -121,7 +121,7 @@ export function boardFilterHash(filter: { project?: string | null; initiative?: 
   );
 }
 
-/** Where a New card starts on a Board filtered to an initiative: that one (never "No initiative", which is no initiative). */
+/** Where a New card starts on a Board filtered to an initiative: that one (never "No tag", which is no initiative). */
 export function newCardInitiative(filter: string | null): string | null {
   return filter && filter !== INBOX_NO_INITIATIVE ? filter : null;
 }
@@ -324,7 +324,7 @@ export function cardMenuToast(card: InboxCardWire, moved: InboxCardWire): { lead
 
 /** The toast after one click on an initiative's Delete: every one deleted while it is up, undone together. */
 export function initiativeDeletedToast(deleted: readonly Pick<InboxInitiative, 'name'>[]): { lead: string; detail: string } {
-  return { lead: 'Deleted', detail: deleted.length === 1 ? `“${deleted[0]!.name}”` : `${deleted.length} initiatives` };
+  return { lead: 'Deleted', detail: deleted.length === 1 ? `“${deleted[0]!.name}”` : `${deleted.length} tags` };
 }
 
 /**
@@ -472,10 +472,10 @@ export function historyWords(
   const by = authorName(entry.by);
   switch (entry.kind) {
     case 'initiative':
-      // Approval "board-initiatives": "Initiative: Code review by you", or "Initiative cleared by you".
+      // Approval "board-initiatives": "Tag: Code review by you", or "Tag cleared by you" (approval "inbox-thread-tags").
       return entry.initiative
-        ? { before: 'Initiative: ', bold: initiativeNameOf(entry.initiative) ?? 'a deleted initiative', after: ` by ${by}`, quote: null }
-        : { before: `Initiative cleared by ${by}`, bold: null, after: '', quote: null };
+        ? { before: 'Tag: ', bold: initiativeNameOf(entry.initiative) ?? 'a deleted tag', after: ` by ${by}`, quote: null }
+        : { before: `Tag cleared by ${by}`, bold: null, after: '', quote: null };
     case 'created':
       return { before: `Created by ${by}`, bold: null, after: '', quote: null };
     case 'sent':
@@ -540,11 +540,13 @@ export function agentState(session: string | null, live: readonly { session: str
 }
 
 /**
- * A card's whole accessible name: the title, its line, the lane, the age,
- * whether it is new, and where a click goes.
+ * A card's whole accessible name: the title, its project while the card shows
+ * it, its line, the lane, the age, whether it is new, and where a click goes.
+ * The title stays first: it is the button's visible words.
  */
-export function cardLabel(card: InboxCardWire, unread: boolean, now: number = Date.now()): string {
+export function cardLabel(card: InboxCardWire, unread: boolean, now: number = Date.now(), project: string | null = null): string {
   const parts = [card.title];
+  if (project) parts.push(project);
   const line = cardLine(card);
   if (line) parts.push(line.you ? `You: ${line.text}` : line.text);
   parts.push(INBOX_CARD_COLUMN_LABELS[card.column]);

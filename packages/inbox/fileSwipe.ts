@@ -79,11 +79,13 @@ export function fileSwipeMode(kind: InboxAttachmentKind, tooLarge: boolean): Fil
     // An image at Fit follows the finger too (approval "inbox-image-swipe"); zoomed, it pans to its edge first.
     case 'image':
       return 'follow';
-    // HTML pages take every touch inside their frame; the diagram canvas pans; a video has native controls.
+    // HTML pages take every touch inside their frame; the diagram canvas pans; a video has native controls; a
+    // recording's bar scrubs under the finger.
     case 'html':
     case 'mermaid':
     case 'graphviz':
     case 'video':
+    case 'audio':
       return 'none';
   }
 }

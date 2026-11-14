@@ -82,6 +82,8 @@ function resolveHostMedia(
     }
     if (resolved?.kind === 'src') {
       img.setAttribute('src', resolved.src);
+      // A smaller copy of the picture: laid out at the original's width, unless the HTML sized it itself.
+      if (resolved.width && !img.hasAttribute('width') && !img.hasAttribute('height')) img.setAttribute('width', String(resolved.width));
     } else if (!/^(https?:|data:|blob:)/i.test(src)) {
       img.setAttribute('src', getImageSrc(src));
     }

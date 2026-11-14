@@ -1,7 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import { inboxPullStacks, type InboxPull, type InboxReviewRow, type InboxReviewsAnswer } from '@plannotator/core/inbox-types';
 import { composeActions, type ComposeTarget } from './model';
-import { forgetUnsentReview, keepUnsentReview, localReviewMessage, localReviewName, reviewBoxPull, reviewBoxPulls, reviewDefaultTo, reviewToWithChanges, unsentReview, type ReviewBoxPull } from './reviewBox';
+import { pullHandoffMessage, pullHandoffThreadName } from '../pulls/model';
+import { forgetUnsentReview, keepUnsentReview, localReviewMessage, localReviewName, reviewBoxPull, reviewBoxPulls, reviewDefaultTo, reviewLinkListed, reviewLinkStack, reviewLinkWords, reviewToWithChanges, unsentReview, type ReviewBoxPull } from './reviewBox';
 
 const pull = (number: number, over: Partial<InboxPull> = {}): InboxPull =>
   ({
@@ -39,7 +40,7 @@ describe('what is kept when the box closes', () => {
   const b = { id: two!.id } as ReviewBoxPull;
 
   test('words typed for one PR open with that PR and the plain door, never another PR', () => {
-    keepUnsentReview({ body: 'focus on the retries', threadName: 'My own name', kind: 'pr', pick: a });
+    keepUnsentReview({ body: 'focus on the retries', threadName: 'My own name', kind: 'pr', pick: a, link: '' });
     try {
       expect(unsentReview(a).body).toBe('focus on the retries');
       expect(unsentReview(null)).toMatchObject({ body: 'focus on the retries', kind: 'pr', pick: a });
@@ -50,10 +51,10 @@ describe('what is kept when the box closes', () => {
   });
 
   test("words typed on local changes stay away from a PR's door; a box left empty reopens as new", () => {
-    keepUnsentReview({ body: 'focus on the retries', threadName: null, kind: 'local', pick: null });
+    keepUnsentReview({ body: 'focus on the retries', threadName: null, kind: 'local', pick: null, link: '' });
     expect(unsentReview(a).body).toBe('');
     expect(unsentReview(null).body).toBe('focus on the retries');
-    keepUnsentReview({ body: '  ', threadName: null, kind: 'pr', pick: a });
+    keepUnsentReview({ body: '  ', threadName: null, kind: 'pr', pick: a, link: '' });
     expect(unsentReview(null)).toMatchObject({ kind: 'local', pick: null });
     forgetUnsentReview();
   });
@@ -161,6 +162,33 @@ describe('the palette', () => {
     expect(kinds('review', true)).toEqual(['review']);
     expect(kinds('new review', true)).toEqual(['review']);
     expect(kinds('new', true)).toEqual(['new', 'review']);
+  });
+});
+
+describe('a pull request link', () => {
+  const read = (number: number, over: Partial<InboxPull> = {}) => ({ ok: true as const, cli: 'gh' as const, pull: pull(number, over), projects: [], thread_id: null });
+  const listed = (stack: InboxPull[]) => [{ id: 's', stack: inboxPullStacks(stack)[0]!, label: '', title: '', projects: ['p'], thread: null, project: null }];
+
+  test('an open layer goes the way of its stack; a merged one is reviewed on its own', () => {
+    const merged = pull(411, { state: 'merged', head: 'b411' });
+    const stack = [merged, pull(412, { base: 'b411' }), pull(413, { base: 'b412' })];
+    expect(reviewLinkListed(read(412), listed(stack))?.id).toBe('s');
+    expect(reviewLinkListed(read(411, { state: 'merged' }), listed(stack))).toBeNull();
+  });
+
+  test('a merged or closed PR hands off as itself, and stays what it is', () => {
+    for (const state of ['open', 'merged', 'closed'] as const) {
+      const stack = reviewLinkStack(pull(411, { state }));
+      expect(stack.layers.map((layer) => [layer.number, layer.state])).toEqual([[411, state]]);
+      expect(pullHandoffThreadName(stack, null)).toBe('Review #411: PR 411');
+      expect(pullHandoffMessage(stack)).toContain('PR 411');
+    }
+  });
+
+  test('its line names the tool and the host it was read from', () => {
+    const line = reviewLinkWords({ ...read(8, { host: 'gitlab.example.com' }), cli: 'glab' });
+    expect(line).toContain('glab');
+    expect(line).toContain('gitlab.example.com');
   });
 });
 

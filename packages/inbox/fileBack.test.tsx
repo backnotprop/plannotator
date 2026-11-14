@@ -5,7 +5,8 @@
  * process, tests/helpers/inbox-dom-server.ts). What is proved: `‹ Inbox` leads
  * the thread header only while a file hides the list on a desktop, and the
  * thread's own × goes while it shows; a click closes the file (through the
- * pane's unsaved-comment question, as the file's × does), brings the sidebar
+ * pane's `leave`, which keeps a comment being written as the file's draft,
+ * as the file's × does), brings the sidebar
  * and the list back with the thread still open, and puts focus on the
  * thread's row; it names the project when the list is filtered; with no file
  * open the header is as before. The compiled-binary proof is
@@ -171,17 +172,13 @@ const listRow = (el: ParentNode, threadId: string) => el.querySelector<HTMLEleme
 test.skipIf(!hasDom)('with a file open beside the thread, ‹ Inbox leads the header and brings the list back', async () => {
   const el = await renderApp(`#thread=${ids.filed}&file=${ids.attachment}`);
   await until(() => el.querySelector('.ib-view') !== null && back(el) !== null, 'the file beside the thread');
-  // The list and the sidebar are hidden by the file; the way back leads, then Mark read; Archive and ⋯ More end the header, and the thread's × is gone.
+  // The list and the sidebar are hidden by the file; the way back leads; ⋯ More ends the header, and the thread's × is gone.
   expect(el.querySelector('.ib-listcol')).toBeNull();
   expect(sidebarState(el)).toBe('collapsed');
   const head = el.querySelector('section.ib-pane .ib-phead')!;
   expect(head.firstElementChild).toBe(back(el));
-  // Mark read follows the way back (after its divider), and Archive then ⋯ More end the header, where the × was.
   const buttons = [...head.querySelectorAll('button')];
   expect(buttons[0]).toBe(back(el)!);
-  const markRead = head.querySelector<HTMLButtonElement>('[data-mark-read]');
-  expect(markRead).not.toBeNull();
-  expect(buttons[1]).toBe(markRead!);
   // ⋯ More (the copy menu, design record "inbox-copy-message") ends it, right after Archive.
   expect(head.lastElementChild).toBe(head.querySelector('[data-thread-more]'));
   expect(head.querySelector('[data-archive]')).toBeNull();
@@ -218,7 +215,7 @@ test.skipIf(!hasDom)('with the list filtered to a project, the way back names th
   await until(() => document.activeElement === listRow(el, ids.filed), 'focus on the thread row');
 });
 
-test.skipIf(!hasDom)('a typed comment in the open file asks first, as the file close does; Keep writing stays', async () => {
+test.skipIf(!hasDom)('a typed comment in the open file never stops the way back: one click closes the file, as the file close does', async () => {
   const el = await renderApp(`#thread=${ids.filed}&file=${ids.attachment}`);
   await until(() => el.querySelector('.ib-view') !== null && back(el) !== null, 'the file beside the thread');
   // A comment composer with words in it (Plannotator's popover draws in a portal on the page).
@@ -230,16 +227,8 @@ test.skipIf(!hasDom)('a typed comment in the open file asks first, as the file c
   document.body.appendChild(popover);
   try {
     await act(async () => back(el)!.click());
-    await until(() => el.querySelector('[data-step-guard]') !== null, 'the question row');
-    await act(async () => el.querySelector<HTMLButtonElement>('[data-guard-keep]')!.click());
-    await settle();
-    expect(el.querySelector('.ib-view')).not.toBeNull();
-    expect(window.location.hash).toContain('file=');
-    // Discard goes on: the file closes and the list comes back.
-    await act(async () => back(el)!.click());
-    await until(() => el.querySelector('[data-step-guard]') !== null, 'the question row again');
-    await act(async () => el.querySelector<HTMLButtonElement>('[data-guard-discard]')!.click());
     await until(() => el.querySelector('.ib-view') === null && listRow(el, ids.filed) !== null, 'the list back');
+    expect(el.querySelector('[data-step-guard]')).toBeNull();
   } finally {
     popover.remove();
   }

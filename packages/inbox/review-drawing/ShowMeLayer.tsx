@@ -33,7 +33,9 @@ const linesWord = (lines: readonly [number, number]) => `${lines[0] === lines[1]
 function Place({ place }: { place: ShowMePlace }) {
   return (
     <div className="ib-sm-at" data-show-me-place="">
-      {place.file ? (
+      {place.part ? (
+        place.part.name
+      ) : place.file ? (
         <>
           {baseName(place.file)}
           {place.lines && ` · ${linesWord(place.lines)}`}
@@ -55,7 +57,8 @@ export function ShowMeBox({
   onClose,
 }: {
   state: ShowMeState;
-  agent: string;
+  /** Null until the thread's read names the agent: the box waits for the name. */
+  agent: string | null;
   onWords: (words: string) => void;
   onSend: () => void;
   /** The agent was busy: ask when it finishes, or interrupt it. */
@@ -68,9 +71,9 @@ export function ShowMeBox({
   useEffect(() => {
     if (box && !box.turn) field.current?.focus({ preventScroll: true });
   }, [box?.place.file, box?.place.lines?.[0], box?.place.lines?.[1]]); // eslint-disable-line react-hooks/exhaustive-deps
-  if (!box) return null;
+  if (!box || agent === null) return null;
   return (
-    <section className="ib-sm-box" aria-label="Show me" data-show-me-box={box.turn ? (state.drawing ? 'drawing' : state.busy ? 'busy' : 'done') : 'compose'} {...LAYER}>
+    <section className="ib-sm-box" aria-label="Show me" data-over-board={box.place.part ? '' : undefined} data-show-me-box={box.turn ? (state.drawing ? 'drawing' : state.busy ? 'busy' : 'done') : 'compose'} {...LAYER}>
       <div className="ib-sm-h">
         <Pebble alive={false} size={18} className="ib-sm-peb" />
         <b>Show me</b>
@@ -117,7 +120,7 @@ export function ShowMeBox({
                       `Interrupting ${agent}…`
                     ) : (
                       <>
-                        <b>{agent} is drawing it.</b> It opens over the review when it’s ready.
+                        <b>{agent} is drawing it.</b> {box.place.part ? 'It opens here when it’s ready.' : 'It opens over the review when it’s ready.'}
                       </>
                     )}
                   </span>

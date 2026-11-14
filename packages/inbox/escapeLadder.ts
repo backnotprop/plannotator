@@ -9,8 +9,9 @@
  *                 this window itself; the rung is for one from inside the page.
  *  2. `composer`  a comment being written closes: a comment popover (text,
  *                 HTML pinpoint, code lines) or a diagram's composer. Typed
- *                 words are never lost: the pane asks first (the question
- *                 row), and only an empty composer just closes.
+ *                 words are never lost and nothing asks: they wait as the
+ *                 file's draft (fileCommentDrafts.ts), back in the comment
+ *                 box when the file opens again.
  *  3. `field`     the key came from the file's own comment row (an image's or
  *                 a film's): focus leaves the row, its words stay in it.
  *  4. `drawer`    the comments drawer (a phone's sheet) closes.
@@ -19,21 +20,20 @@
  *                 rung there, when the key came from inside the pane.
  *  5. `annotate`  an HTML file in Annotate goes to Interact (the pinpoint
  *                 hover goes with it), as it always has.
- *  6. `question`  the question about an unsaved comment goes away: keep writing.
- *  7. `leave`     full screen ends, back where it was opened from
+ *  6. `leave`     full screen ends, back where it was opened from
  *                 (fullScreenOrigin.ts): beside the thread when the file was
- *                 beside it, else back to the thread (the file closes, through
- *                 the same unsaved-comment question), as always where it can
- *                 only be full screen (a phone, a narrow window).
+ *                 beside it, else back to the thread (the file closes; a
+ *                 comment being written waits as its draft), as always where
+ *                 it can only be full screen (a phone, a narrow window).
  *
  * Beside the thread (not full screen) there is no ladder: each control keeps
  * its own Escape, as before.
  */
 
-export type EscapeRung = 'popover' | 'composer' | 'field' | 'drawer' | 'linked' | 'annotate' | 'question' | 'leave';
+export type EscapeRung = 'popover' | 'composer' | 'field' | 'drawer' | 'linked' | 'annotate' | 'leave';
 
 /** The rungs in the order a press takes them. */
-export const ESCAPE_LADDER: readonly EscapeRung[] = ['popover', 'composer', 'field', 'drawer', 'linked', 'annotate', 'question', 'leave'];
+export const ESCAPE_LADDER: readonly EscapeRung[] = ['popover', 'composer', 'field', 'drawer', 'linked', 'annotate', 'leave'];
 
 export interface EscapeLadderState {
   /** The file is full screen. */
@@ -50,8 +50,6 @@ export interface EscapeLadderState {
   linkedOpen: boolean;
   /** An HTML file that takes comments is in Annotate. */
   annotating: boolean;
-  /** The question about an unsaved comment is showing. */
-  questionOpen: boolean;
 }
 
 export const IDLE_LADDER: EscapeLadderState = {
@@ -62,7 +60,6 @@ export const IDLE_LADDER: EscapeLadderState = {
   panelOpen: false,
   linkedOpen: false,
   annotating: false,
-  questionOpen: false,
 };
 
 /** What this Escape does, or null for nothing (beside the thread, with no linked page shown). */
@@ -74,7 +71,6 @@ export function escapeRung(state: EscapeLadderState): EscapeRung | null {
   if (state.panelOpen) return 'drawer';
   if (state.linkedOpen) return 'linked';
   if (state.annotating) return 'annotate';
-  if (state.questionOpen) return 'question';
   return 'leave';
 }
 
@@ -94,8 +90,6 @@ export function afterRung(state: EscapeLadderState, rung: EscapeRung): EscapeLad
       return { ...state, linkedOpen: false };
     case 'annotate':
       return { ...state, annotating: false };
-    case 'question':
-      return { ...state, questionOpen: false };
     case 'leave':
       return { ...state, full: false };
   }
@@ -125,15 +119,15 @@ export type LadderFileKind = 'html' | 'markdown' | 'text' | 'code' | 'diagram' |
 export function rungsFor(kind: LadderFileKind): readonly EscapeRung[] {
   switch (kind) {
     case 'html':
-      return ['popover', 'composer', 'drawer', 'linked', 'annotate', 'question', 'leave'];
+      return ['popover', 'composer', 'drawer', 'linked', 'annotate', 'leave'];
     case 'markdown':
     case 'text':
     case 'code':
     case 'diagram':
-      return ['popover', 'composer', 'drawer', 'question', 'leave'];
+      return ['popover', 'composer', 'drawer', 'leave'];
     case 'image':
     case 'video':
-      return ['popover', 'field', 'drawer', 'question', 'leave'];
+      return ['popover', 'field', 'drawer', 'leave'];
     case 'download':
       return ['popover', 'drawer', 'leave'];
   }
@@ -150,6 +144,5 @@ export function everythingOpen(kind: LadderFileKind): EscapeLadderState {
     panelOpen: rungs.has('drawer'),
     linkedOpen: rungs.has('linked'),
     annotating: rungs.has('annotate'),
-    questionOpen: rungs.has('question'),
   };
 }

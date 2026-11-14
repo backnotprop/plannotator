@@ -347,7 +347,6 @@ test('Escape closes the details and keeps the words; Cmd+Enter does what the but
   await page.keyboard.press('Escape');
   await expect(d.locator(DETAILS)).toHaveCount(0);
   await expect(d).toBeVisible();
-  await expect(d.locator('[data-compose-question]')).toHaveCount(0);
   await expect(d.getByRole('textbox', { name: 'Message' })).toHaveValue('Plan the spring beds.');
 
   await d.getByRole('textbox', { name: 'Message' }).focus();

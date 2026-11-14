@@ -59,7 +59,7 @@ async function windowThread(server: InboxServer, threadId: string): Promise<Inbo
 test("the window's thread carries each message's seq: the event-log seq it was sent at, in thread order", async () => {
   const { project, server, client } = await world();
   const first = await call(client, "send_message", { project_path: project, body: "I looked at three ways to add search.", agent_session: "ses_A" });
-  const second = await call(client, "send_message", { project_path: project, body: "Pushed the fix.", agent_session: "ses_A" });
+  const second = await call(client, "send_message", { project_path: project, body: "Pushed the fix.", agent_session: "ses_A", reply_to: first.message_id });
   const thread = await windowThread(server, first.thread_id);
   expect(thread.messages.map((m) => m.seq)).toEqual([first.cursor, second.cursor]);
   expect(thread.messages[1]!.seq!).toBeGreaterThan(thread.messages[0]!.seq!);
@@ -75,7 +75,7 @@ test("read before the look, the payload tells which agent messages are new; afte
   expect((await post(server, `/api/inbox/threads/${first.thread_id}/seen`, {})).status).toBe(200);
   const reply = await post(server, `/api/inbox/messages/${first.message_id}/reply`, { idempotency_key: "k1", words: "Pagefind is fine." });
   expect(reply.status).toBe(200);
-  const later = await call(client, "send_message", { project_path: project, body: "CI is green.", agent_session: "ses_A" });
+  const later = await call(client, "send_message", { project_path: project, body: "CI is green.", agent_session: "ses_A", reply_to: first.message_id });
 
   const before = await windowThread(server, first.thread_id);
   const root = before.messages[0]!;

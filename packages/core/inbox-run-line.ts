@@ -15,6 +15,8 @@
  * - A reply's respawn that failed, or never connected within the grace →
  *   failed (missing when the CLI is gone), with Try again; it is never
  *   retried by itself.
+ * - Live and idle after a turn that ended in an error the session wrote down
+ *   (`turnErrorAt`), with nothing waiting for it → failed with `turn_error`.
  * - Live and busy → working; live and idle → no line, except while the turn
  *   the start was for has not visibly begun (not taken yet, or taken but not
  *   polled busy nor answered): still starting, so the line does not blink out.
@@ -25,6 +27,13 @@
  */
 
 import type { InboxLaunchRecord, InboxRun } from "./inbox-types";
+
+/**
+ * A launched session's turn that ended in an error (approval "inbox-failed-turn-note"): after the agent's name, on its
+ * run line ("Claude Code couldn't answer. Your message is kept.") and in the notification for it
+ * ("<project>: Codex couldn't answer").
+ */
+export const INBOX_TURN_FAILED_WORDS = "couldn't answer";
 
 /** A start that has not connected within this long is not "starting" any more. */
 export const INBOX_RUN_START_GRACE_MS = 60_000;
@@ -56,6 +65,8 @@ export interface InboxRunEvidence {
   respawnFailed: string | null;
   /** That respawn was refused because Claude Code does not trust the folder: the line offers Open in Terminal. */
   respawnUntrusted?: boolean;
+  /** The session's last turn ended in an error it wrote down (Claude Code's transcript): when (ms); null otherwise. */
+  turnErrorAt?: number | null;
   /** When the person pressed Stop, while it still holds. */
   stoppedByPersonAt: number | null;
   /** The host's words for a stop that was not the person's (`LaunchHost.stoppedNote`): the stopped line's `cause`. */
@@ -64,6 +75,12 @@ export interface InboxRunEvidence {
   connector?: string;
   /** `cd <folder> && claude attach <ref>`; null before the session exists. */
   attachCommand: string | null;
+  /** The launch's folder as the person knows it (`~/…`), for the failed line of a folder the Send made. */
+  shownFolder?: string;
+  /** A clone under way: its percent, once shown (null before, or in its first seconds). */
+  clonePct?: number | null;
+  /** The clone the record says runs is running in this Inbox now (false after a restart cut it off). */
+  cloneRunning?: boolean;
   /** When the oldest permission question of ours still open was asked (its hook holds it), or null. */
   permissionSince?: number | null;
 }
@@ -82,6 +99,21 @@ export function inboxLaunchedSession(root: { to?: { session: string } | null; la
 }
 
 export function inboxRunOf(e: InboxRunEvidence): InboxRun | null {
+  // Clone from a git URL: the clone comes before the agent (E1-E7, E11).
+  const clone = e.launch.clone;
+  const cloneOf = (extra: Partial<NonNullable<InboxRun["clone"]>> = {}): NonNullable<InboxRun["clone"]> => ({
+    url: clone!.url,
+    host: clone!.host,
+    slug: clone!.slug,
+    branch: clone!.branch ?? null,
+    pct: null,
+    error: null,
+    error_text: null,
+    renamed_from: clone!.renamed_from ?? null,
+    brings: clone!.brings ?? null,
+    folder_shown: e.shownFolder ?? null,
+    ...extra,
+  });
   const line = (state: InboxRun["state"], extra: Partial<InboxRun> = {}): InboxRun => ({
     state,
     launch_id: e.launch.id,
@@ -94,12 +126,21 @@ export function inboxRunOf(e: InboxRunEvidence): InboxRun | null {
     cause: null,
     untrusted: false,
     attach_command: e.attachCommand,
+    // A clone that is done: the line after it still names it (E11's "Cloned into …", E10's trust words).
+    ...(clone && clone.state === "done" ? { clone: cloneOf() } : {}),
     ...extra,
   });
+  if (clone && clone.state === "cloning") {
+    // A clone the Inbox no longer runs (it was restarted meanwhile): failed, with Try again.
+    if (e.cloneRunning === false) return line("clone_failed", { since: e.launch.started_at, clone: cloneOf({ error: "failed", error_text: "The clone stopped when the Inbox closed." }) });
+    return line("cloning", { since: iso(e.startedAt), clone: cloneOf({ pct: e.clonePct ?? null }) });
+  }
+  if (clone && clone.state === "failed") return line("clone_failed", { clone: cloneOf({ error: clone.error ?? "failed", error_text: clone.error_text ?? null }) });
+  if (clone && clone.state === "cancelled") return line("clone_cancelled", { clone: cloneOf() });
   const error = e.launch.error;
   if (error) {
     if (error.code === "missing") return line("missing");
-    return line("failed", { cause: error.text, untrusted: error.code === "untrusted", since: error.at });
+    return line("failed", { cause: error.text, untrusted: error.code === "untrusted", since: error.at, ...(e.launch.made_folder && !clone ? { made_folder: e.shownFolder ?? e.launch.folder } : {}) });
   }
   if (e.permissionSince != null) return line("waiting_answer", { since: iso(e.permissionSince) });
   const host = e.host === "absent" ? null : e.host;
@@ -109,7 +150,12 @@ export function inboxRunOf(e: InboxRunEvidence): InboxRun | null {
   if (!e.live && e.respawnFailed && e.turnWaiting) return e.cliAvailable === false ? line("missing") : line("failed", { cause: e.respawnFailed, again: true, untrusted: e.respawnUntrusted === true });
   const starting = () => line("starting", { since: iso(e.startedAt), again: e.again });
   const inGrace = e.now - e.startedAt < INBOX_RUN_START_GRACE_MS;
-  if (e.live) return e.live.busy === true ? line("working", { since: iso(e.live.busySince) }) : e.turnWaiting && inGrace ? starting() : null;
+  if (e.live) {
+    if (e.live.busy === true) return line("working", { since: iso(e.live.busySince) });
+    // Its last turn ended in an error (its note is in the thread): it couldn't answer, with Try again.
+    if (e.turnErrorAt != null && !e.turnWaiting) return line("failed", { turn_error: true, since: iso(e.turnErrorAt) });
+    return e.turnWaiting && inGrace ? starting() : null;
+  }
   if (e.cliAvailable === false) return e.turnWaiting ? line("missing") : null;
   if (inGrace) return starting();
   const hostStopped = e.host === "absent" || host?.state === "stopped" || host?.state === "done";

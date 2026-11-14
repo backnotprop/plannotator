@@ -537,7 +537,8 @@ export function DecisionCard(props: DecisionCardProps) {
                     : checked && setSelected([label])
                 }
                 // The picture picks (it is in the tile's label); the zoom button opens the viewer and never picks.
-                onZoom={(url) => props.onImage(tilePictures, Math.max(0, tilePictures.findIndex((p) => p.src === url)))}
+                // By the choice's place, not its picture's URL: a picture two choices share opens as the one zoomed.
+                onZoom={(_url, _alt, index) => props.onImage(tilePictures, q.choices.slice(0, index).filter((c, i) => c.image && tileUrls[i]).length)}
                 onPictureError={(url) => setFailedPictures((prev) => (prev.has(url) ? prev : new Set([...prev, url])))}
                 renderText={(text) => <InlineMarkdown {...refProps} text={text} />}
                 inputProps={(label) => ({

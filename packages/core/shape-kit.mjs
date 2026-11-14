@@ -36,23 +36,16 @@ const paint = (tone, dash) => `class="${strokeClass[tone] ?? 'line'}${dash ? ' d
 export const box = (x, y, w, h, { tone = 'ink', dash = false, r = 8 } = {}) =>
   `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${r}" ${paint(tone, dash).replace('fill="none"', 'style="fill:var(--paper)"')}/>`;
 
-/** Straight segments with rounded elbows. Points are [x, y]. */
-export function line(points, { tone = 'ink', dash = false, arrow = false, head = 12, r = 12 } = {}) {
-  let d = `M${points[0][0]} ${points[0][1]}`;
-  for (let i = 1; i < points.length - 1; i++) {
-    const [a, b, c] = [points[i - 1], points[i], points[i + 1]];
-    const k = Math.min(r, Math.hypot(b[0] - a[0], b[1] - a[1]) / 2, Math.hypot(c[0] - b[0], c[1] - b[1]) / 2);
-    const to = (p) => { const L = Math.hypot(p[0] - b[0], p[1] - b[1]); return `${b[0] + ((p[0] - b[0]) / L) * k} ${b[1] + ((p[1] - b[1]) / L) * k}`; };
-    d += `L${to(a)}Q${b[0]} ${b[1]} ${to(c)}`;
-  }
-  const end = points[points.length - 1];
-  d += `L${end[0]} ${end[1]}`;
+/** Straight segments with square elbows. Points are [x, y]. arrow: a small filled head at the end, in the line's colour. */
+export function line(points, { tone = 'ink', dash = false, arrow = false, head = 10 } = {}) {
+  const d = points.map(([x, y], i) => `${i ? 'L' : 'M'}${x} ${y}`).join('');
   let out = `<path d="${d}" ${paint(tone, dash)}/>`;
   if (arrow) {
+    const end = points[points.length - 1];
     const prev = points[points.length - 2];
     const a = Math.atan2(end[1] - prev[1], end[0] - prev[0]);
     const wing = (t) => `${(end[0] + Math.cos(a + t) * head).toFixed(1)} ${(end[1] + Math.sin(a + t) * head).toFixed(1)}`;
-    out += `<path d="M${wing(2.55)}L${end[0]} ${end[1]}L${wing(-2.55)}" ${paint(tone)}/>`;
+    out += `<path d="M${wing(2.76)}L${end[0]} ${end[1]}L${wing(-2.76)}Z" ${paint(tone).replace('class="', 'class="shp-head ')}/>`;
   }
   return out;
 }
@@ -80,12 +73,12 @@ export const svg = (w, h, body, { x = 0, y = 0, label } = {}) => ({
 });
 
 /** Writes the board's JSON. picture: svg(…); tall (a phone), more (Show more): svg(…) too. */
-export function board({ out = 'board.json', title, claim, note, picture, tall, more, css, how, know, refs = [] }) {
+export function board({ out = 'board.json', title, claim, note, picture, tall, more, css, how, refs = [] }) {
   const pic = { ...picture };
   if (css) pic.css = css;
   if (tall) pic.tall = { html: tall.html };
   if (more) pic.more = { html: more.html };
-  writeFileSync(out, JSON.stringify({ title, claim, ...(note ? { note } : {}), views: { picture: pic, ...(how ? { how } : {}), ...(know ? { know } : {}) }, refs }, null, 1));
+  writeFileSync(out, JSON.stringify({ title, claim, ...(note ? { note } : {}), views: { picture: pic, ...(how ? { how } : {}) }, refs }, null, 1));
 }
 
 /** Drawn things that belong to these paths. Drawn with no `on`, a thing never fades. */
@@ -104,7 +97,7 @@ export const followCss = (paths) => `
 .pick:hover { background: var(--mark-soft); }
 .pick:has(input:checked) { background: var(--mark); border-color: var(--mark); color: var(--paper); }
 .pick:has(input:focus-visible) { outline: 3px solid var(--mark); outline-offset: 2px; }
-${paths.map((p) => `.board:has(.f-${p}:checked) .d:not(.on-${p}) { opacity: .12; }\n.board:has(.f-${p}:checked) .pick:not(.on-${p}):not(:has(input:checked)) { color: var(--grey); border-color: var(--rule); }\n.board:has(.f-${p}:checked) .on-${p} path.grey { stroke: var(--mark); }`).join('\n')}
+${paths.map((p) => `.board:has(.f-${p}:checked) .d:not(.on-${p}) { opacity: .12; }\n.board:has(.f-${p}:checked) .pick:not(.on-${p}):not(:has(input:checked)) { color: var(--grey); border-color: var(--rule); }\n.board:has(.f-${p}:checked) .on-${p} path.grey { stroke: var(--mark); }\n.board:has(.f-${p}:checked) .on-${p} path.shp-head.grey { fill: var(--mark); }`).join('\n')}
 .board.reduce .d { transition: none; }
 @media (prefers-reduced-motion: reduce) { .d { transition: none; } }
 `;

@@ -137,7 +137,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   forge.github(14, pull(14, 'Delivery ticks on list rows', {}));
   forge.github(15, pull(15, 'electron-forge 7', {}));
   forge.github(11, githubItem({ __typename: 'Issue', number: 11, title: 'Electron forge drops the icon', url: 'https://github.com/acme/widgets/issues/11', state: 'OPEN', stateReason: null, createdAt: hoursAgo(80), updatedAt: hoursAgo(3), closedAt: null, body: '', author: person('sam'), labels: { nodes: [] }, assignees: { nodes: [] }, comments: { totalCount: 0, nodes: [] }, closedByPullRequestsReferences: { nodes: [] } }));
-  const env = { PATH: `${forge.dir}:${process.env.PATH ?? ''}`, HOME: root, PLANNOTATOR_DATA_DIR: join(root, 'data'), PLANNOTATOR_BROWSER: NO_BROWSER, NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0' };
+  const env = { PATH: `${forge.dir}:${process.env.PATH ?? ''}`, HOME: root, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: join(root, 'data'), PLANNOTATOR_BROWSER: NO_BROWSER, NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0' };
   const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
   expect(started.status, started.stderr).toBe(0);
   const src = join(root, 'src');

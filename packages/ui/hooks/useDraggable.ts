@@ -14,8 +14,11 @@ interface DragPosition {
  * so it works regardless of CSS transforms (flipAbove, translateX, etc.).
  *
  * @param elementRef - Ref to the positioned element (the popover/toolbar container)
+ * @param options.keepInside - Opt-in: the whole element stays inside the window (an element larger than the window
+ *   keeps its top left corner in). Absent: at least 50 px of it stays on screen, as before.
  */
-export function useDraggable(elementRef: React.RefObject<HTMLElement | null>) {
+export function useDraggable(elementRef: React.RefObject<HTMLElement | null>, options: { keepInside?: boolean } = {}) {
+  const keepInside = options.keepInside ?? false;
   const [dragPosition, setDragPosition] = useState<DragPosition | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [wasDragged, setWasDragged] = useState(false);
@@ -41,6 +44,16 @@ export function useDraggable(elementRef: React.RefObject<HTMLElement | null>) {
       if (!thresholdMetRef.current) {
         if (Math.abs(dx) < DRAG_THRESHOLD && Math.abs(dy) < DRAG_THRESHOLD) return;
         thresholdMetRef.current = true;
+      }
+
+      if (keepInside) {
+        const height = elementRef.current?.offsetHeight ?? 0;
+        const width = elementRef.current?.offsetWidth ?? 0;
+        setDragPosition({
+          top: Math.max(0, Math.min(startElRef.current.top + dy, window.innerHeight - height)),
+          left: Math.max(0, Math.min(startElRef.current.left + dx, window.innerWidth - width)),
+        });
+        return;
       }
 
       // Clamp to keep at least VISIBLE_MIN px visible on screen
@@ -69,7 +82,7 @@ export function useDraggable(elementRef: React.RefObject<HTMLElement | null>) {
       document.removeEventListener('pointermove', onMove);
       document.removeEventListener('pointerup', onUp);
     };
-  }, [isDragging, elementRef]);
+  }, [isDragging, elementRef, keepInside]);
 
   const onPointerDown = useCallback(
     (e: React.PointerEvent) => {

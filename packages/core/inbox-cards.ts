@@ -173,8 +173,8 @@ export function inboxBoardRequestBlock(threadId: string): string {
 
 /** The longest one-line `say` or `you`, in characters. */
 export const INBOX_CARD_LINE_MAX = 280;
-/** The longest drop reason, in characters. */
-export const INBOX_CARD_REASON_MAX = 500;
+/** The longest drop reason, in characters: any length (500 through core 0.25.27, for no stated reason). */
+export const INBOX_CARD_REASON_MAX = Number.POSITIVE_INFINITY;
 /** The most threads, and the most PRs, one card links. */
 export const INBOX_CARD_LINKS_MAX = 50;
 /** The longest create `idempotency_key`, in characters (trimmed). */
@@ -307,8 +307,8 @@ export interface InboxCard {
   /** An agent's create is idempotent on it, per project. */
   idempotency_key: string | null;
   /**
-   * The person's notes (step 2): free text, line breaks kept, at most
-   * INBOX_CARD_NOTES_MAX characters. When the card is sent to an agent the
+   * The person's notes (step 2): free text, line breaks kept, any length.
+   * When the card is sent to an agent the
    * notes are the message. Null on a card written before notes existed.
    */
   notes: string | null;
@@ -551,8 +551,8 @@ export interface InboxCardSent {
   thread_id: string;
 }
 
-/** The longest card notes, in characters. */
-export const INBOX_CARD_NOTES_MAX = 4000;
+/** The longest card notes, in characters: any length (4,000 through core 0.25.27, for no stated reason). Kept so an importer still builds. */
+export const INBOX_CARD_NOTES_MAX = Number.POSITIVE_INFINITY;
 
 /**
  * A stored card with the fields added since step 1 filled in (`notes`, `sent`,
@@ -568,7 +568,7 @@ export function readInboxCard(card: InboxCard): InboxCard {
 /**
  * Notes as the store keeps them: line breaks kept (CRLF made LF), trimmed,
  * empty is none. Refused when not a string, holding a control or bidi
- * character other than a line break or tab, or over INBOX_CARD_NOTES_MAX.
+ * character other than a line break or tab.
  */
 export function normalizeInboxCardNotes(value: unknown): { notes: string | null } | { error: string } {
   if (value === null || value === undefined) return { notes: null };
@@ -577,7 +577,6 @@ export function normalizeInboxCardNotes(value: unknown): { notes: string | null 
   if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f؜‎‏‪-‮⁦-⁩]/.test(text)) return { error: "notes: no control or bidi characters." };
   const trimmed = text.trim();
   if (!trimmed) return { notes: null };
-  if ([...trimmed].length > INBOX_CARD_NOTES_MAX) return { error: `notes: at most ${INBOX_CARD_NOTES_MAX} characters.` };
   return { notes: trimmed };
 }
 

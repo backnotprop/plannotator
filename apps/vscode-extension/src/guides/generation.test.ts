@@ -386,6 +386,28 @@ describe("guide generation over ACP", () => {
     expect(gen.state.diagramUnchecked).toBeUndefined();
     expect(loadSavedGuide(w.input.repoKey, gen.state.savedGuideId!)?.sidecar.diagramCheck).toBe("ok");
   });
+
+  it("counts chapter diagrams: one unchecked chapter diagram marks the guide unchecked, and the diagram is saved", async () => {
+    const chapterSource = "flowchart LR\n c-->d";
+    const w = world([
+      header,
+      { mcp: { name: "guide_add_chapter", args: { title: "The retry budget", overview: "A policy decides how often to retry.", diagram: { kind: "mermaid", source: chapterSource } } } },
+      place("src/retryPolicy.ts", "c1"),
+      place("src/deliver.ts", "c1"),
+      place("src/deliver.test.ts", "c1"),
+      { mcp: { name: "guide_set_overview", args: { text: "Start here.", diagram: { kind: "mermaid", source: "flowchart LR\n a-->b" } } } },
+      { mcp: { name: "guide_finish" } },
+    ]);
+    // The overview's diagram is render-checked; the chapter's could not be.
+    w.deps.checkMermaid = async (source) => ({ ok: true, checked: source !== chapterSource });
+    const gen = new GuideGeneration(w.input, w.deps);
+    await gen.run();
+    expect(gen.state.status).toBe("finished");
+    expect(gen.state.diagramUnchecked).toBe(true);
+    const saved = loadSavedGuide(w.input.repoKey, gen.state.savedGuideId!);
+    expect(saved?.sidecar.diagramCheck).toBe("unchecked");
+    expect(saved?.envelope.guide.sections[0].diagram).toEqual({ kind: "mermaid", source: chapterSource });
+  });
 });
 
 describe("your agent, your config: Guides never blocks it", () => {

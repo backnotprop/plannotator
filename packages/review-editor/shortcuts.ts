@@ -16,6 +16,7 @@ import {
   reviewExplorerShortcuts,
   type ShortcutSurface,
 } from '@plannotator/ui/shortcuts';
+import { reviewCallTreeShortcuts } from './components/callTree/callTree.shortcuts';
 
 export const reviewEditorShortcuts = defineShortcutScope({
   id: 'review-editor',
@@ -132,6 +133,7 @@ export const reviewSettingsShortcutRegistry = createShortcutRegistry([
   historyShortcuts,
   reviewFileTreeShortcuts,
   reviewExplorerShortcuts,
+  reviewCallTreeShortcuts,
   reviewAllFilesDiffShortcuts,
   reviewMarkdownPreviewShortcuts,
   reviewAnnotationToolbarShortcuts,
