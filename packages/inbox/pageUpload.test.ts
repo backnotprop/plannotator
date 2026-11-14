@@ -15,7 +15,7 @@ afterEach(() => {
 function recordPosts() {
   const posts: { headers: Headers; body: Buffer }[] = [];
   globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
-    posts.push({ headers: new Headers(init?.headers), body: Buffer.from(typeof init?.body === 'string' ? init.body : (init?.body as ArrayBuffer)) });
+    posts.push({ headers: new Headers(init?.headers), body: typeof init?.body === 'string' ? Buffer.from(init.body) : Buffer.from(new Uint8Array(init?.body as ArrayBuffer)) });
     return Response.json({ id: 'a'.repeat(32), url: `/api/inbox/pages/${'a'.repeat(32)}` });
   }) as typeof fetch;
   return posts;
