@@ -824,8 +824,10 @@ async function createCodeReviewBrowserSession(
 		}
 	}
 
+	const piSession = (ctx as { sessionManager?: { getSessionId?: () => string | undefined } }).sessionManager?.getSessionId?.();
 	const server = await startServerWithSelfPreemption(() => startReviewServer({
 		sessionBridge: options.sessionBridge,
+		liveReviewAgent: piSession ? { host: "pi", session: piSession } : null,
 		rawPatch,
 		gitRef,
 		error: diffError,

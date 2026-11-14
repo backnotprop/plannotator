@@ -10,6 +10,7 @@ import { startReviewServer as startBunReviewServer } from "./review";
 import { startReviewServer as startPiReviewServer } from "../../apps/pi-extension/server";
 import { startInboxServer, type InboxServer } from "./inbox";
 import { getVcsContext } from "./vcs";
+import { postReviewLiveDecision, reviewLiveDecisionWords, reviewLiveSessionOf } from "@plannotator/shared/review-live";
 
 const HTML = "<html><body>Plannotator</body></html>";
 const PATCH = "diff --git a/src/a.ts b/src/a.ts\n@@ -1 +1 @@\n-a\n+b\n";
@@ -128,3 +129,34 @@ for (const [runtime, start] of [["Bun", startBunReviewServer], ["Pi", startPiRev
     }, 30_000);
   });
 }
+
+test("a decision in a review opened from its thread goes into that thread, to its agent", async () => {
+  setEnv("PLANNOTATOR_DATA_DIR", temp("plannotator-live-route-data-"));
+  const dataDir = temp("plannotator-live-route-inbox-");
+  const project = repo();
+  const inbox = await startInboxServer({ dataDir, binaryPath: null });
+  inboxes.push(inbox);
+  const poll = async () =>
+    parseInboxBridgeCommands(
+      await (
+        await fetch(`http://127.0.0.1:${inbox.port}${INBOX_BRIDGE_POLL_PATH}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${inbox.token}` },
+          body: JSON.stringify({ session: "ses-pi", host: "pi", waitMs: 0, project_path: project, started_at: Date.now(), busy: false, tags: true }),
+        })
+      ).text(),
+    );
+  await poll();
+  const started = await fetch(`http://127.0.0.1:${inbox.port}/api/inbox/review-threads/send`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ serverSession: inbox.serverSession, project_path: project, review: { key: "branch:fix/charge", title: "fix/charge" }, to: { host: "pi", session: "ses-pi" }, comments: [{ anchor: { file: "a.ts", side: "new", line_start: 1, line_end: 1, code: ["b"] }, words: "Why b?" }], idempotency_key: "k1" }),
+  });
+  const thread = ((await started.json()) as { thread: { id: string } }).thread.id;
+  const session = reviewLiveSessionOf({ PLANNOTATOR_REVIEW_LIVE_THREAD: thread, PLANNOTATOR_REVIEW_LIVE_KEY: "branch:fix/charge" })!;
+  expect(reviewLiveDecisionWords({ approved: false, feedback: "", exit: true })).toBeNull();
+  const words = reviewLiveDecisionWords({ approved: true, feedback: "" })!;
+  expect(await postReviewLiveDecision(dataDir, session, words)).toBe(true);
+  const commands = await poll();
+  expect(commands.map((c) => c.body)).toContainEqual(expect.stringContaining("I approved the review."));
+});

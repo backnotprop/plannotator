@@ -739,3 +739,4 @@ packages/ui/components/Viewer.blockRedraws.test.tsx
 packages/editor/hooks/useCheckboxOverrides.viewer.test.tsx
 packages/ui/components/TaterSpriteSlots.test.tsx
 packages/inbox/sidebarRedraws.test.tsx
+packages/review-editor/live/live.dom.test.tsx

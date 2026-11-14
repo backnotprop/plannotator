@@ -368,6 +368,7 @@ export interface ReviewServerOptions {
   onCleanup?: () => void | Promise<void>;
   liveReviewAgent?: ReviewLiveTarget | null;
   liveReviewDataDir?: string;
+  liveReviewKey?: { key: string; title: string } | null;
 }
 
 export interface ReviewServerResult {
@@ -467,11 +468,12 @@ export async function startReviewServer(
     launchedBy: options.liveReviewAgent ?? null,
     projectPath: () => clientGitContext?.root ?? clientGitContext?.cwd ?? gitContext?.root ?? gitContext?.cwd ?? options.agentCwd ?? process.cwd(),
     review: () =>
-      prMetadata?.url
+      options.liveReviewKey ??
+      (prMetadata?.url
         ? { key: `pr:${prMetadata.url}`, title: prMetadata.title || prMetadata.url }
         : clientGitContext?.currentBranch
           ? { key: `branch:${clientGitContext.currentBranch}`, title: clientGitContext.currentBranch }
-          : null,
+          : null),
   });
   let draftKey = contentHash(options.rawPatch);
   const editorAnnotations = createEditorAnnotationHandler();
