@@ -132,7 +132,7 @@ class GuideViewportManager {
   private lastMotion: 'rest' | 'moving' | 'passing' = 'rest';
   private fallingBehind = false;
   /** End or Home was pressed: the browser's animated scroll to the far end, if the key moves this view. */
-  private keyScroll: { moved: boolean; frames: number; end: boolean } | null = null;
+  private keyScroll: { moved: boolean; frames: number; still: number; end: boolean } | null = null;
   /** End moved this view: where it comes to rest is held at the end of the scroll (`holdEnd`). */
   private endArriving = false;
   private landing: Landing | null = null;
@@ -430,7 +430,7 @@ class GuideViewportManager {
   private handleKey = (event: KeyboardEvent): void => {
     this.endArriving = false;
     if (event.key !== 'End' && event.key !== 'Home') return;
-    this.keyScroll = { moved: false, frames: 0, end: event.key === 'End' };
+    this.keyScroll = { moved: false, frames: 0, still: 0, end: event.key === 'End' };
     this.scheduleReconcile();
   };
 
@@ -497,8 +497,10 @@ class GuideViewportManager {
       return 'rest';
     }
     if (this.keyScroll) {
-      if (moved >= 1) this.keyScroll.moved = true;
-      else if (this.keyScroll.moved || ++this.keyScroll.frames > KEY_SCROLL_START_FRAMES) {
+      if (moved >= 1) {
+        this.keyScroll.moved = true;
+        this.keyScroll.still = 0;
+      } else if (this.keyScroll.moved ? this.keyScrollDone(top) : ++this.keyScroll.frames > KEY_SCROLL_START_FRAMES) {
         this.endArriving = this.keyScroll.moved && this.keyScroll.end;
         this.keyScroll = null;
       }
@@ -517,6 +519,12 @@ class GuideViewportManager {
     const viewHeight = this.scrollRoot ? this.scrollRoot.clientHeight : window.innerHeight;
     this.passedLastFrame = moved > viewHeight || moved / elapsed > PASSING_SPEED;
     return this.passedLastFrame ? 'passing' : 'moving';
+  }
+
+  private keyScrollDone(top: number): boolean {
+    const keyScroll = this.keyScroll!;
+    const arrived = keyScroll.end ? this.readScrollEnd(this.scrollRoot) - top < 1 : top < 1;
+    return arrived || ++keyScroll.still >= SMOOTH_DONE_FRAMES;
   }
 
   private readScrollTop(): number {
