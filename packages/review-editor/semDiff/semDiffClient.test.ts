@@ -153,3 +153,34 @@ test('names are the declared identifier where there is one', async () => {
   expect(shortName('def walk(tree):')).toBe('walk');
   expect(shortName('return db.save({')).toBe('return db.save({');
 });
+
+describe('the Changes tab lists declarations, not lines', () => {
+  const op = (type: string, oldLines: [number, number] | null, newLines: [number, number] | null) =>
+    ({ type, lines: { old: oldLines ? [{ start: oldLines[0], end: oldLines[1] }] : [], new: newLines ? [{ start: newLines[0], end: newLines[1] }] : [] } }) as never;
+  const oldText = ['export function total(items) {', '  let sum = 0;', '  for (const i of items) sum += i;', '  return sum;', '}', '', 'function titleCase(s) {', "  return s.split(' ');", '}'].join('\n');
+  const newText = ['export function total(items) {', '  let sum = 0;', '  for (const i of items) sum += i * 2;', '  return sum;', '}', '', 'const titleCase = (s) =>', "  s.split(' ');", '}'].join('\n');
+
+  test('statements fold into their function, braces and blank names are dropped, a delete plus add of one name is edited', () => {
+    const changes = semDiffChanges('src/a.ts', [
+      op('edited', [3, 3], [3, 3]),
+      op('edited', [4, 4], [4, 4]),
+      op('deleted', [5, 5], null),
+      op('deleted', [7, 9], null),
+      op('added', null, [7, 9]),
+      op('added', null, [6, 6]),
+    ], oldText, newText);
+    expect(changes.map((c) => [c.entityName, c.changeType])).toEqual([
+      ['total', 'modified'],
+      ['titleCase', 'modified'],
+    ]);
+    expect(changes[0]!.startLine).toBe(3);
+    expect(changes[0]!.endLine).toBe(4);
+  });
+
+  test('a method line names the method, not the statement inside it', async () => {
+    const { shortName } = await import('./semDiffChanges');
+    expect(shortName('  async listEntries(dir: string): Promise<Entry[]> {')).toBe('listEntries');
+    expect(shortName('func (s *Store) Save(u User) error {')).toBe('Save');
+    expect(shortName('if (user.coupon) {')).toBe('if (user.coupon) {');
+  });
+});

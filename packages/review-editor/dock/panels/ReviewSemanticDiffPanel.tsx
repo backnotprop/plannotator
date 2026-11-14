@@ -158,6 +158,9 @@ export function ReviewSemanticDiffPanel() {
     );
   }
 
+  if (loadState.status !== 'ready' && loadState.status !== 'empty') return null;
+  const { data } = loadState;
+
   return (
     <div className="semantic-diff-panel">
       <div className="semantic-diff-terminal" aria-label="Semantic diff">
@@ -193,7 +196,7 @@ export function ReviewSemanticDiffPanel() {
         {loadState.status === 'empty' && (
           <div className="semantic-diff-empty">No semantic changes found.</div>
         )}
-        <div className="semantic-diff-summary">{formatSummary(loadState.data)}</div>
+        <div className="semantic-diff-summary">{formatSummary(data)}</div>
       </div>
     </div>
   );
