@@ -80,7 +80,12 @@ export const GoToFile: React.FC<GoToFileProps> = ({
   const listId = useId();
   const changed = useMemo(() => new Map(files.map((file) => [file.path, file])), [files]);
   const changedSet = useMemo(() => new Set(changed.keys()), [changed]);
-  const localPaths = repo.status === 'ready' ? repo.paths : null;
+  const localPaths = useMemo(() => {
+    if (repo.status !== 'ready') return null;
+    const listed = new Set(repo.paths);
+    const missing = files.filter((file) => !listed.has(file.path)).map((file) => file.path);
+    return missing.length ? [...repo.paths, ...missing] : repo.paths;
+  }, [repo, files]);
   const lowerPaths = useMemo(() => localPaths?.map((path) => path.toLowerCase()), [localPaths]);
   // Searched on the server: a lazy listing, or one still loading.
   const searchOnServer = repoSupported && !localPaths && repo.status !== 'unavailable' && repo.status !== 'error';
