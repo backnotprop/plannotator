@@ -185,10 +185,10 @@ index 0b41099..a745685 100644
  		searchEnabled: search === true,
  		searchFakeFocus: searchFakeFocus === true,
 diff --git a/dist/render/FileTreeView.js b/dist/render/FileTreeView.js
-index b4c7ee4..02badaa 100644
+index b4c7ee4..0ccedf1 100644
 --- a/dist/render/FileTreeView.js
 +++ b/dist/render/FileTreeView.js
-@@ -362,11 +362,129 @@ function focusFirstMenuElement(menuElement) {
+@@ -362,11 +362,134 @@ function focusFirstMenuElement(menuElement) {
  	].join(", "));
  	focusElement(focusable ?? menuElement);
  }
@@ -283,10 +283,15 @@ index b4c7ee4..02badaa 100644
 +			measure.done();
 +		};
 +		fit();
-+		if (typeof ResizeObserver === "undefined") return;
-+		const observer = new ResizeObserver(fit);
-+		observer.observe(element);
-+		return () => observer.disconnect();
++		const fonts = typeof document !== "undefined" ? document.fonts : void 0;
++		fonts?.addEventListener?.("loadingdone", fit);
++		fonts?.ready?.then(fit);
++		const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(fit);
++		observer?.observe(element);
++		return () => {
++			observer?.disconnect();
++			fonts?.removeEventListener?.("loadingdone", fit);
++		};
 +	}, [name]);
 +	return /* @__PURE__ */ jsx("span", {
 +		ref,
@@ -319,7 +324,7 @@ index b4c7ee4..02badaa 100644
  			children: Array.from({ length: row.depth }).map((_, index) => /* @__PURE__ */ jsx("div", {
  				"data-item-section": "spacing-item",
  				"data-ancestor-path": row.ancestorPaths[index]
-@@ -374,24 +492,31 @@ function renderFileTreeRowContent(row, resolveIcon, { actionLaneEnabled = false,
+@@ -374,24 +497,31 @@ function renderFileTreeRowContent(row, resolveIcon, { actionLaneEnabled = false,
  		}) : null,
  		/* @__PURE__ */ jsx("div", {
  			"data-item-section": "icon",
@@ -357,7 +362,7 @@ index b4c7ee4..02badaa 100644
  		actionLaneEnabled ? /* @__PURE__ */ jsx("div", {
  			"data-item-section": "action",
  			children: showDecorativeActionAffordance ? /* @__PURE__ */ jsx("span", {
-@@ -403,13 +528,14 @@ function renderFileTreeRowContent(row, resolveIcon, { actionLaneEnabled = false,
+@@ -403,13 +533,14 @@ function renderFileTreeRowContent(row, resolveIcon, { actionLaneEnabled = false,
  	] });
  }
  function renderStyledRow(frame, row, key, options = {}) {
@@ -373,7 +378,7 @@ index b4c7ee4..02badaa 100644
  	const gitDecoration = getBuiltInGitStatusDecoration(effectiveGitStatus, containsGitChange, labels);
  	const actionLaneEnabled = contextMenuEnabled && contextMenuButtonTriggerEnabled;
  	const decorationLaneEnabled = customDecoration != null || gitLaneActive || actionLaneEnabled;
-@@ -435,7 +561,13 @@ function renderStyledRow(frame, row, key, options = {}) {
+@@ -435,7 +566,13 @@ function renderStyledRow(frame, row, key, options = {}) {
  		dragTargetFlattenedSegmentPath: dragTarget?.flattenedSegmentPath ?? null,
  		gitDecoration,
  		gitLaneActive,
@@ -387,7 +392,7 @@ index b4c7ee4..02badaa 100644
  		showDecorativeActionAffordance
  	});
  	const commonProps = {
-@@ -464,6 +596,9 @@ function renderStyledRow(frame, row, key, options = {}) {
+@@ -464,6 +601,9 @@ function renderStyledRow(frame, row, key, options = {}) {
  			},
  			targetPath
  		}),
@@ -397,7 +402,7 @@ index b4c7ee4..02badaa 100644
  		key,
  		onContextMenu: contextMenuEnabled || dragAndDropEnabled ? (event) => {
  			if (shouldSuppressContextMenu()) {
-@@ -512,6 +647,9 @@ function renderStyledRow(frame, row, key, options = {}) {
+@@ -512,6 +652,9 @@ function renderStyledRow(frame, row, key, options = {}) {
  		onClick: (event) => {
  			onRowClick(event, row, targetPath, mode);
  		},
@@ -407,7 +412,7 @@ index b4c7ee4..02badaa 100644
  		children: rowContent
  	});
  }
-@@ -519,7 +657,7 @@ function renderRangeChildren(frame, range, hiddenRowPaths) {
+@@ -519,7 +662,7 @@ function renderRangeChildren(frame, range, hiddenRowPaths) {
  	if (range.end < range.start) return [];
  	return frame.controller.getVisibleRows(range.start, range.end).filter((row) => !hiddenRowPaths.has(getFileTreeRowPath(row))).map((row, slotIndex) => renderStyledRow(frame, row, range.start + slotIndex));
  }
@@ -416,7 +421,7 @@ index b4c7ee4..02badaa 100644
  	"use no memo";
  	const contextMenuAnchorRef = useRef(null);
  	const contextMenuTriggerRef = useRef(null);
-@@ -695,6 +833,10 @@ function FileTreeView({ composition, controller, gitStatusByPath, ignoredGitDire
+@@ -695,6 +838,10 @@ function FileTreeView({ composition, controller, gitStatusByPath, ignoredGitDire
  		item: createContextMenuItem(row, targetPath),
  		row
  	}) ?? null, [renderRowDecoration]);
@@ -427,7 +432,7 @@ index b4c7ee4..02badaa 100644
  	const restoreContextMenuFocus = useCallback((restorePath) => {
  		const focusedButton = restorePath == null ? null : rowButtonRefs.current.get(restorePath) ?? null;
  		if (focusElement(focusedButton)) return true;
-@@ -1776,7 +1918,9 @@ function FileTreeView({ composition, controller, gitStatusByPath, ignoredGitDire
+@@ -1776,7 +1923,9 @@ function FileTreeView({ composition, controller, gitStatusByPath, ignoredGitDire
  		registerRenameInput,
  		renameView,
  		renderDecorationForRow,
@@ -437,7 +442,7 @@ index b4c7ee4..02badaa 100644
  		shouldSuppressContextMenu,
  		visualFocusPath
  	};
-@@ -1816,6 +1960,7 @@ function FileTreeView({ composition, controller, gitStatusByPath, ignoredGitDire
+@@ -1816,6 +1965,7 @@ function FileTreeView({ composition, controller, gitStatusByPath, ignoredGitDire
  			searchEnabled ? /* @__PURE__ */ jsx("div", {
  				"data-file-tree-search-container": true,
  				"data-open": isSearchOpen ? "true" : "false",
