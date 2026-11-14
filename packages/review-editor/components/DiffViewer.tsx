@@ -28,6 +28,9 @@ import { DiffBottomBar } from './DiffBottomBar';
 import { OversizedFileNotice } from './OversizedFileNotice';
 import { isContentlessBinaryPatch, isImagePreviewCandidate, isOversizedReviewStubPatch } from '@plannotator/shared/diff-paths';
 import { ImageDiffPreview } from './ImageDiffPreview';
+import { ImageViewMenu } from './image-diff/ImageViewMenu';
+import { differencesSupported } from './image-diff/differences';
+import { isSvgPath, setSvgView, useSvgView } from './image-diff/svgView';
 import { PackageChangesCard } from './PackageChangesCard';
 import { isPackageChangePath } from '@plannotator/core/package-changes';
 import { isFileScopedAnnotation, lineRangeForAnnotation } from '../utils/annotationScope';
@@ -1081,6 +1084,9 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
     () => imagePreviewAvailable && isImagePreviewCandidate(patch, filePath, oldPath),
     [imagePreviewAvailable, patch, filePath, oldPath],
   );
+  const svgViewChoice = useSvgView(filePath);
+  const isSvgImage = imagePreviewAvailable && !isImagePreview && (isSvgPath(filePath) || isSvgPath(oldPath));
+  const svgShown = isSvgImage && svgViewChoice === 'image';
 
   // Replay a selected line/range comment's anchor as the controlled highlight so
   // clicking it (inline card or sidebar) lights up its lines. A live compose
@@ -1138,6 +1144,17 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
               disabledReason={markdownViewDisabledReason}
             />
           )
+          : isImagePreview || isSvgImage
+          ? ({ iconOnly, touch }) => (
+            <ImageViewMenu
+              filePath={filePath}
+              comparable={status !== 'added' && status !== 'deleted'}
+              differencesAvailable={differencesSupported()}
+              source={isSvgImage ? { active: !svgShown, onChoose: (source) => setSvgView(filePath, source ? 'source' : 'image') } : undefined}
+              iconOnly={iconOnly}
+              touch={touch}
+            />
+          )
           : undefined}
       />
 
@@ -1187,9 +1204,10 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
             <>
               {/* Specific first, general second, and never both: whichever applies,
                   a card with no hunks to draw says why instead of reading as empty. */}
-              {isImagePreview ? (
+              {isImagePreview || svgShown ? (
                 <ImageDiffPreview
                   filePath={filePath}
+                  patch={patch}
                   status={status ?? 'modified'}
                   snapshotId={imageSnapshotId ?? reviewSnapshotId}
                   variant="single"
@@ -1222,7 +1240,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
                 agentFindingSources={agentFindingSources}
                 explainDisabled={isAILoading}
               />
-              <div ref={diffContentRef} data-diff-content="">
+              <div ref={diffContentRef} data-diff-content="" hidden={svgShown || undefined}>
                 <div ref={splitSurfaceRef} className="relative min-w-0" style={splitGridStyle}>
                   {isSplitLayout && diffOverflow !== 'wrap' && (
                     <div

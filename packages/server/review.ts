@@ -68,8 +68,10 @@ import { resolvePoolCwd } from "@plannotator/shared/worktree-pool";
 import {
   REVIEW_IMAGE_ENDPOINT,
   REVIEW_IMAGE_READ_CONCURRENCY,
+  REVIEW_IMAGE_SIZES_ENDPOINT,
   createConcurrencyLimiter,
   handleReviewImageRequest,
+  handleReviewImageSizesRequest,
   readPRImageSide,
 } from "@plannotator/shared/review-image";
 import {
@@ -3684,6 +3686,19 @@ export async function startReviewServer(
           // API: One side of a changed image, as bytes (#1598). Every decision
           // (eligibility, caps, sniffing, headers) is in the shared handler;
           // readReviewSide only says where the current mode reads a side from.
+          if (url.pathname === REVIEW_IMAGE_SIZES_ENDPOINT && req.method === "GET") {
+            const result = await handleReviewImageSizesRequest({
+              params: url.searchParams,
+              available: imagePreviewSupported,
+              patch: currentPatch,
+              isCurrentSnapshot: (snapshot) => snapshot === currentSnapshotId(),
+              signal: req.signal,
+              readSide: (side, filePath, oldPath, maxBytes, signal) =>
+                runImageRead(() => readReviewSide(side, filePath, oldPath, maxBytes, signal), signal),
+            });
+            return new Response(result.body as BodyInit | null, { status: result.status, headers: result.headers });
+          }
+
           if (url.pathname === REVIEW_IMAGE_ENDPOINT && req.method === "GET") {
             const result = await handleReviewImageRequest({
               params: url.searchParams,

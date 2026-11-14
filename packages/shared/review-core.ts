@@ -14,6 +14,7 @@ import {
   parseDiffGitHeader,
   parseDiffMetadataPathLines,
   OVERSIZED_REVIEW_STUB_MARKER,
+  oversizedReviewStubBytesLine,
 } from "./diff-paths";
 import { parseDiffToFiles } from "@plannotator/core/diff-files";
 
@@ -936,6 +937,8 @@ interface RawDiffEntry {
 interface OversizedTrackedDiffEntry extends RawDiffEntry {
   oldObjectId: string;
   newObjectId: string;
+  oldSize?: number | null;
+  newSize?: number | null;
 }
 
 const NULL_OBJECT_ID = /^0+$/;
@@ -1086,6 +1089,8 @@ function buildOversizedTrackedStub(entry: OversizedTrackedDiffEntry): string {
     `diff --git ${headerOldToken} ${headerNewToken}`,
     OVERSIZED_REVIEW_STUB_MARKER,
   ];
+  const bytesLine = oversizedReviewStubBytesLine({ old: entry.oldPath ? entry.oldSize : null, new: entry.newPath ? entry.newSize : null });
+  if (bytesLine) lines.push(bytesLine);
 
   if (!entry.oldPath) lines.push(`new file mode ${entry.newMode}`);
   if (!entry.newPath) lines.push(`deleted file mode ${entry.oldMode}`);
@@ -1265,6 +1270,8 @@ async function buildBoundedTrackedDiff(
     oversized.push({
       ...entry,
       newObjectId: workingObjectId ?? entry.newObjectId,
+      oldSize,
+      newSize,
     });
   }
 
@@ -1511,6 +1518,7 @@ async function getUntrackedFileDiffs(
           // Same size-cap marker the tracked stub carries (see
           // buildOversizedTrackedStub) so the UI explains both the same way.
           OVERSIZED_REVIEW_STUB_MARKER,
+          oversizedReviewStubBytesLine({ new: fileInfo.size })!,
           `new file mode ${mode}`,
           `Binary files /dev/null and ${newToken} differ`,
           "",

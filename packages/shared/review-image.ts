@@ -23,6 +23,7 @@ import {
   readDiffSideBytes,
   validateFilePath,
 } from "./review-core";
+import { parseDiffToFiles } from "@plannotator/core/diff-files";
 
 export const REVIEW_IMAGE_ENDPOINT = "/api/review-image";
 
@@ -397,7 +398,10 @@ function formatMegabytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+const SVG_PATH = /\.svg$/i;
+
 function isEligibleEntry(entry: PatchFileEntry): boolean {
+  if (SVG_PATH.test(entry.newPath ?? "") || SVG_PATH.test(entry.oldPath ?? "")) return true;
   return !entry.hasHunks && (isReviewImagePath(entry.newPath) || isReviewImagePath(entry.oldPath));
 }
 
@@ -519,4 +523,55 @@ export function reviewImageBytesResponse(
     return { status: 304, headers: rest, body: null };
   }
   return { status: 200, headers, body: bytes };
+}
+
+export const REVIEW_IMAGE_SIZES_ENDPOINT = "/api/review-image-sizes";
+export const MAX_REVIEW_IMAGE_SIZE_FILES = 48;
+
+export interface ReviewImageSideSize {
+  bytes: number;
+  width?: number;
+  height?: number;
+}
+
+export type ReviewImageSizes = Record<string, Partial<Record<DiffSide, ReviewImageSideSize>>>;
+
+async function sideSize(request: Omit<ReviewImageRequest, "ifNoneMatch" | "params">, entry: PatchFileEntry, side: DiffSide): Promise<ReviewImageSideSize | null> {
+  const sidePath = side === "old" ? entry.oldPath : entry.newPath;
+  if (!sidePath) return null;
+  try {
+    validateFilePath(sidePath);
+    const read = await request.readSide(side, entry.newPath ?? sidePath, entry.oldPath, MAX_REVIEW_IMAGE_PREVIEW_BYTES, request.signal);
+    if (read.kind === "too-large") return { bytes: read.size };
+    if (read.kind !== "ok") return null;
+    const contentType = sniffImageContentType(read.bytes);
+    const dims = contentType ? readImageDimensions(read.bytes, contentType) : null;
+    return { bytes: read.bytes.byteLength, ...(dims ? { width: dims.width, height: dims.height } : {}) };
+  } catch {
+    return null;
+  }
+}
+
+export async function handleReviewImageSizesRequest(request: Omit<ReviewImageRequest, "ifNoneMatch">): Promise<ReviewImageResponse> {
+  const json = (status: number, body: unknown): ReviewImageResponse => ({
+    status,
+    headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
+    body: JSON.stringify(body),
+  });
+  if (!request.available) return json(200, { sizes: {} });
+  const snapshot = request.params.get("snapshot");
+  if (!snapshot) return json(400, { reason: "bad-request", error: "Expected snapshot" });
+  if (!request.isCurrentSnapshot(snapshot)) return json(409, { reason: "stale", error: "Diff snapshot is stale; refresh the review" });
+  const entries = parseDiffToFiles(request.patch)
+    .map((file) => findPatchFileEntry(request.patch, file.path))
+    .filter((entry): entry is PatchFileEntry => !!entry && isEligibleEntry(entry))
+    .slice(0, MAX_REVIEW_IMAGE_SIZE_FILES);
+  const sizes: ReviewImageSizes = {};
+  await Promise.all(
+    entries.map(async (entry) => {
+      const [old, next] = await Promise.all([sideSize(request, entry, "old"), sideSize(request, entry, "new")]);
+      if (old || next) sizes[entry.path] = { ...(old ? { old } : {}), ...(next ? { new: next } : {}) };
+    }),
+  );
+  return json(200, { sizes });
 }

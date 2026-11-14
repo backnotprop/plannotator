@@ -93,7 +93,8 @@ function buildRepo(): Fixture {
     "dots-before": png(6, 6, 10),
     "dots-after": png(6, 6, 11),
   };
-  writeFileSync(join(repo, ".gitattributes"), "*.svg binary\n");
+  writeFileSync(join(repo, ".gitattributes"), "*.svg binary\nplain.svg diff\n");
+  writeFileSync(join(repo, "plain.svg"), SVG_OLD);
   writeFileSync(join(repo, "mod.png"), files["mod-before"]);
   writeFileSync(join(repo, "gone.png"), files.gone);
   writeFileSync(join(repo, "ren-old.png"), files.renamed);
@@ -111,6 +112,7 @@ function buildRepo(): Fixture {
   git(repo, ["mv", "ren-old.png", "ren-new.png"]);
   writeFileSync(join(repo, "added.png"), files.added);
   writeFileSync(join(repo, "logo.svg"), SVG_NEW);
+  writeFileSync(join(repo, "plain.svg"), SVG_NEW);
   writeFileSync(join(repo, "fake.png"), new Uint8Array([0x50, 0x4b, 0x03, 0x04, 9, 9, 9]));
   writeFileSync(join(repo, "notes.txt"), "two\n");
   writeFileSync(join(repo, "logo..v2.png"), files["dots-after"]);
@@ -210,6 +212,29 @@ for (const [runtime, startServer] of [
         const svg = await image("logo.svg", "new");
         expect(svg.headers.get("content-type")).toBe("image/svg+xml");
         expect(await svg.text()).toBe(SVG_NEW);
+        const textSvg = await image("plain.svg", "old");
+        expect(textSvg.status).toBe(200);
+        expect(await textSvg.text()).toBe(SVG_OLD);
+      } finally {
+        server.stop();
+      }
+    }, 20_000);
+
+    test("one sizes request gives every image's dimensions and bytes, and an over-cap side its size, before any image loads", async () => {
+      const fixture = buildRepo();
+      const { server, payload } = await start(fixture);
+      try {
+        const response = await fetch(`${server.url}/api/review-image-sizes?snapshot=${encodeURIComponent(payload.snapshotId)}`);
+        expect(response.status).toBe(200);
+        const { sizes } = (await response.json()) as { sizes: Record<string, { old?: { bytes: number; width?: number; height?: number }; new?: { bytes: number; width?: number; height?: number } }> };
+        expect(sizes["mod.png"]).toEqual({
+          old: { bytes: fixture.files["mod-before"].byteLength, width: 4, height: 3 },
+          new: { bytes: fixture.files["mod-after"].byteLength, width: 8, height: 6 },
+        });
+        expect(sizes["added.png"]?.old).toBeUndefined();
+        expect(sizes["big.png"]?.new?.bytes).toBeGreaterThan(10 * 1024 * 1024);
+        const stale = await fetch(`${server.url}/api/review-image-sizes?snapshot=nope`);
+        expect(stale.status).toBe(409);
       } finally {
         server.stop();
       }

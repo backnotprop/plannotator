@@ -1,89 +1,52 @@
-import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { MAX_REVIEW_IMAGE_PREVIEW_LABEL } from '@plannotator/shared/diff-paths';
+import React, { useEffect, useLayoutEffect, useState } from 'react';
 import type { DiffFileStatus } from '../types';
-import {
-  fetchReviewImage,
-  formatImageBytes,
-  peekReviewImage,
-  retainReviewImageUrl,
-  type ReviewImageData,
-  type ReviewImageError,
-  type ReviewImageSide,
-} from '../utils/reviewImage';
+import type { ReviewImageData, ReviewImageSide } from '../utils/reviewImage';
+import { SIDE_BY_SIDE_GAP, SIDE_BY_SIDE_MIN_WIDTH, sideBySideColumns, sideBySidePaneWidth, stageLayout, type Size } from './image-diff/geometry';
+import { useImageDiffSettings } from './image-diff/imageDiffSettings';
+import { sidesFor, useImageSides, useNearViewport } from './image-diff/useImageSides';
+import { SinglePane, StackedStage, StageLabelRow, type StageImage } from './image-diff/ImageStage';
+import { peekImageSizes } from './image-diff/imageSizes';
+import { computeDifferences, differencesSupported, type DifferenceMask } from './image-diff/differences';
+import { describeImageError, imageCaption, sizeChange } from './image-diff/imageWords';
 
-/**
- * Before / After preview for a changed image in code review (#1598).
- *
- * Replaces the "Binary or oversized file" notice for a hunkless chunk whose
- * path is an image, when the server advertises `imagePreviewSupported`. It
- * fetches only the sides that exist (After for an addition, Before for a
- * deletion), only while mounted — the all-files view mounts header slots for
- * the virtual window only — and aborts on unmount. When the server cannot show
- * the file as an image at all, `fallback` (the plain notice) renders instead.
- */
-
-type SideState =
-  | { state: 'loading' }
-  | { state: 'ok'; image: ReviewImageData }
-  | { state: 'error'; error: ReviewImageError };
+const LABELS_OVER_MIN_WIDTH = 320;
+const LABELS_OVER_MIN_HEIGHT = 160;
 
 export interface ImageDiffPreviewProps {
   filePath: string;
   status: DiffFileStatus;
   snapshotId?: string;
-  /** `all-files` reserves a fixed pane height so the virtualized item is
-   *  measured once rather than again when the image decodes. */
   variant: 'single' | 'all-files';
   compact?: boolean;
-  /** The plain notice, shown when neither side is a displayable image. */
   fallback: React.ReactNode;
-  /** Shown instead of `fallback` when every side is over the byte cap. */
   tooLargeFallback?: React.ReactNode;
-  /** Re-measure hook for the virtualized all-files host. */
   onHeightChange?: () => void;
+  patch?: string;
 }
 
-const sidesFor = (status: DiffFileStatus): ReviewImageSide[] =>
-  status === 'added' ? ['new'] : status === 'deleted' ? ['old'] : ['old', 'new'];
 
-function initialState(snapshotId: string | undefined, path: string, side: ReviewImageSide): SideState {
-  const cached = snapshotId ? peekReviewImage(snapshotId, path, side) : undefined;
-  return cached ? { state: 'ok', image: cached } : { state: 'loading' };
+function useWidth(ref: React.RefObject<HTMLDivElement | null>): number {
+  const [width, setWidth] = useState(0);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const read = () => setWidth(el.clientWidth);
+    read();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(read);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [ref]);
+  return width;
 }
 
-function describeError(error: ReviewImageError): string {
-  switch (error.reason) {
-    case 'lfs-pointer':
-      return 'the file is stored in Git LFS';
-    case 'not-image':
-      return 'not a recognized image format';
-    case 'decode':
-      return 'the image could not be decoded';
-    case 'too-large':
-      if (error.width && error.height) return `${error.width} × ${error.height} px is over the preview limit`;
-      return `larger than ${MAX_REVIEW_IMAGE_PREVIEW_LABEL}${error.bytes ? ` (${formatImageBytes(error.bytes)})` : ''}`;
-    case 'missing':
-      return 'the file could not be found at this version';
-    case 'stale':
-      return 'the diff changed; refresh the review';
-    case 'network':
-      return 'the server could not be reached';
-    default:
-      return 'the file could not be loaded';
-  }
-}
-
-const CHECKERBOARD: React.CSSProperties = {
-  backgroundImage: 'repeating-conic-gradient(var(--muted) 0% 25%, var(--background) 0% 50%)',
-  backgroundSize: '16px 16px',
-};
-
-function signed(value: number, unit: string): string {
-  return `${value > 0 ? '+' : value < 0 ? '−' : '±'}${Math.abs(value)}${unit}`;
-}
-
-function signedBytes(delta: number): string {
-  return `${delta > 0 ? '+' : delta < 0 ? '−' : '±'}${formatImageBytes(Math.abs(delta))}`;
+function useAccentColor(): string {
+  const [color, setColor] = useState('rgb(59 130 246)');
+  useEffect(() => {
+    const value = getComputedStyle(document.documentElement).getPropertyValue('--primary').trim();
+    if (value) setColor(value);
+  }, []);
+  return color;
 }
 
 export const ImageDiffPreview: React.FC<ImageDiffPreviewProps> = ({
@@ -95,120 +58,100 @@ export const ImageDiffPreview: React.FC<ImageDiffPreviewProps> = ({
   fallback,
   tooLargeFallback,
   onHeightChange,
+  patch,
 }) => {
   const sides = sidesFor(status);
-  const [states, setStates] = useState<Record<ReviewImageSide, SideState>>(() => ({
-    old: initialState(snapshotId, filePath, 'old'),
-    new: initialState(snapshotId, filePath, 'new'),
-  }));
-  // Natural sizes the <img> reports, for formats without server dimensions (SVG).
-  const [natural, setNatural] = useState<Partial<Record<ReviewImageSide, { width: number; height: number }>>>({});
-
-  // Lazy: fetch only once the card is actually near the viewport. The
-  // all-files view mounts header slots for its virtual window, and before
-  // items are measured that window can briefly span dozens of cards.
-  const rootRef = useRef<HTMLDivElement>(null);
-  const [visible, setVisible] = useState(() => typeof IntersectionObserver === 'undefined');
-  useEffect(() => {
-    const el = rootRef.current;
-    if (visible || !el || typeof IntersectionObserver === 'undefined') return;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries.some((entry) => entry.isIntersecting)) {
-          setVisible(true);
-          observer.disconnect();
-        }
-      },
-      { rootMargin: '200px 0px' },
-    );
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [visible]);
-
-  // Keep every URL this card shows alive until it unmounts, even if the cache
-  // evicts it meanwhile (an <img> may not have loaded it yet).
-  const oldUrl = states.old.state === 'ok' ? states.old.image.url : undefined;
-  const newUrl = states.new.state === 'ok' ? states.new.image.url : undefined;
-  useEffect(() => (oldUrl ? retainReviewImageUrl(oldUrl) : undefined), [oldUrl]);
-  useEffect(() => (newUrl ? retainReviewImageUrl(newUrl) : undefined), [newUrl]);
-
-  const sidesKey = sides.join(',');
-  useEffect(() => {
-    if (!snapshotId || !visible) return;
-    const controller = new AbortController();
-    for (const side of sidesKey.split(',') as ReviewImageSide[]) {
-      const cached = peekReviewImage(snapshotId, filePath, side);
-      if (cached) {
-        setStates((prev) => (prev[side].state === 'ok' ? prev : { ...prev, [side]: { state: 'ok', image: cached } }));
-        continue;
-      }
-      setStates((prev) => ({ ...prev, [side]: { state: 'loading' } }));
-      fetchReviewImage(snapshotId, filePath, side, controller.signal)
-        .then((result) => {
-          if (controller.signal.aborted) return;
-          setStates((prev) => ({
-            ...prev,
-            [side]: result.ok ? { state: 'ok', image: result.image } : { state: 'error', error: result.error },
-          }));
-        })
-        .catch(() => {
-          // Aborted on unmount / snapshot change: nothing to update.
-        });
-    }
-    return () => controller.abort();
-  }, [snapshotId, filePath, sidesKey, visible]);
-
-  const sideStates = sides.map((side) => ({ side, ...states[side] }));
-  const loaded = sideStates.filter((s): s is { side: ReviewImageSide; state: 'ok'; image: ReviewImageData } => s.state === 'ok');
-  const errors = sideStates.filter((s): s is { side: ReviewImageSide; state: 'error'; error: ReviewImageError } => s.state === 'error');
-
-  const unchanged = sides.length === 2 && loaded.length === 2 && loaded[0].image.digest === loaded[1].image.digest;
-  const dimsOf = (side: ReviewImageSide, image?: ReviewImageData) =>
-    image?.width && image?.height ? { width: image.width, height: image.height } : natural[side];
-  // Owner ruling: tall images (and narrow or compact layouts) stack Before
-  // above After; stacked tall panes get more height, which is what makes the
-  // stack worth it.
-  const tall = loaded.some(({ side, image }) => {
-    const d = dimsOf(side, image);
-    return !!d && d.height > d.width * 1.2;
+  const [rootRef, visible] = useNearViewport();
+  const knownEntry = peekImageSizes(snapshotId)?.[filePath];
+  const { states, markDecodeError } = useImageSides({
+    snapshotId,
+    filePath,
+    status,
+    visible,
+    patch,
+    knownBytes: { old: knownEntry?.old?.bytes, new: knownEntry?.new?.bytes },
   });
-  const shownSides = unchanged ? (['new'] as ReviewImageSide[]) : sides;
-  const stacked = compact || (tall && shownSides.length === 2);
-  const maxPaneHeight = variant === 'all-files' ? (stacked && tall ? 480 : 360) : (stacked && tall ? 640 : 480);
-  // All-files: a fixed box (the virtualized item is measured without waiting
-  // on decode), sized to the tallest image once its header dimensions are
-  // known so a 16px icon does not sit in a 360px pane. Until then a modest
-  // reservation; the ResizeObserver below re-measures the one change.
-  const tallestImage = Math.max(0, ...loaded.map(({ side, image }) => dimsOf(side, image)?.height ?? 0));
-  const allFilesPaneHeight = loaded.length === 0
-    ? Math.min(maxPaneHeight, 200)
-    : tallestImage > 0
-      ? Math.max(96, Math.min(maxPaneHeight, tallestImage + 18))
-      : maxPaneHeight;
-  const paneHeight = variant === 'all-files' ? allFilesPaneHeight : maxPaneHeight;
+  const [natural, setNatural] = useState<Partial<Record<ReviewImageSide, Size>>>({});
+  const settings = useImageDiffSettings();
+  const [position, setPosition] = useState(0.5);
+  const [opacity, setOpacity] = useState(0.5);
+  const [scroll, setScroll] = useState<{ left: number; top: number } | null>(null);
+  const [mask, setMask] = useState<DifferenceMask | null>(null);
+  const accent = useAccentColor();
+  const contentRef = React.useRef<HTMLDivElement>(null);
+  const width = useWidth(contentRef);
 
-  // Nothing displayable on any side: the plain notice explains it better than
-  // a row of error lines would (a `.png` that is really a zip, say).
-  let mode: 'preview' | 'fallback' | 'too-large' = snapshotId ? 'preview' : 'fallback';
-  if (mode === 'preview' && errors.length === sides.length) {
-    if (errors.every((e) => e.error.reason === 'not-image')) mode = 'fallback';
-    else if (tooLargeFallback && errors.every((e) => e.error.reason === 'too-large' && !e.error.width)) {
-      mode = 'too-large';
+  const loaded = sides.flatMap((side) => (states[side].state === 'ok' ? [{ side, image: (states[side] as { image: ReviewImageData }).image }] : []));
+  const errors = sides.flatMap((side) => (states[side].state === 'error' ? [{ side, error: (states[side] as { error: { reason: string; status: number } }).error }] : []));
+  const before = loaded.find((s) => s.side === 'old')?.image;
+  const after = loaded.find((s) => s.side === 'new')?.image;
+  const known = peekImageSizes(snapshotId)?.[filePath];
+  const knownSize = (side: ReviewImageSide): Size | null => {
+    const entry = known?.[side];
+    return entry?.width && entry?.height ? { width: entry.width, height: entry.height } : null;
+  };
+  const sizeOf = (side: ReviewImageSide, image?: ReviewImageData): Size | null =>
+    image?.width && image?.height ? { width: image.width, height: image.height } : natural[side] ?? knownSize(side);
+  const bytesOf = (side: ReviewImageSide, image?: ReviewImageData): number | undefined => image?.bytes ?? known?.[side]?.bytes;
+  const beforeSize = sizeOf('old', before);
+  const afterSize = sizeOf('new', after);
+  const beforeBytes = bytesOf('old', before);
+  const afterBytes = bytesOf('new', after);
+  const unchanged = sides.length === 2 && !!before && !!after && before.digest === after.digest;
+  const comparable = sides.length === 2 && !unchanged && !!beforeSize && !!afterSize && states.old.state !== 'error' && states.new.state !== 'error';
+  const mode = comparable ? settings.mode : 'side';
+  const maxHeight = variant === 'all-files' ? 480 : 640;
+  const narrow = width > 0 && width < SIDE_BY_SIDE_MIN_WIDTH;
+  const canvasNatural = { width: Math.max(beforeSize?.width ?? 0, afterSize?.width ?? 0), height: Math.max(beforeSize?.height ?? 0, afterSize?.height ?? 0) };
+  const columnsFit = comparable && sideBySideColumns(canvasNatural, width);
+  const twoColumns = columnsFit && mode === 'side';
+  const paneWidth = sideBySidePaneWidth(width, columnsFit);
+  const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
+  const sized = comparable || !!(beforeSize ?? afterSize);
+  const layout = sized && width > 0
+    ? stageLayout({
+        old: unchanged ? null : beforeSize,
+        new: afterSize ?? (unchanged ? beforeSize : null),
+        available: { width: paneWidth, height: maxHeight },
+        zoom: settings.zoom,
+        dpr,
+      })
+    : null;
+  const dimensionsDiffer = comparable && !!beforeSize && !!afterSize && (beforeSize.width !== afterSize.width || beforeSize.height !== afterSize.height);
+
+  const wantDifferences = comparable && settings.differences && differencesSupported() && !!beforeSize && !!afterSize;
+  const diffKey = `${snapshotId ?? ''}|${filePath}|${before?.digest ?? ''}|${after?.digest ?? ''}`;
+  useEffect(() => {
+    if (!wantDifferences || !before || !after || !beforeSize || !afterSize) {
+      setMask(null);
+      return;
     }
+    let live = true;
+    computeDifferences(diffKey, { url: before.url, size: beforeSize }, { url: after.url, size: afterSize }).then((result) => {
+      if (live) setMask(result);
+    });
+    return () => {
+      live = false;
+    };
+  }, [wantDifferences, diffKey]);
+
+  let shown: 'preview' | 'fallback' | 'too-large' = snapshotId ? 'preview' : 'fallback';
+  if (shown === 'preview' && errors.length === sides.length) {
+    if (errors.every((e) => e.error.reason === 'not-image')) shown = 'fallback';
+    else if (tooLargeFallback && errors.every((e) => e.error.reason === 'too-large' && !(e.error as { width?: number }).width)) shown = 'too-large';
   }
 
-  // Re-measure the virtualized item whenever this block's own height changes
-  // (layout flip, error line). Pane heights are fixed, so image decode alone
-  // never changes it. The fallback notices re-measure themselves.
-  const lastHeight = useRef<number>(-1);
+  const heightChangeRef = React.useRef(onHeightChange);
+  heightChangeRef.current = onHeightChange;
   useLayoutEffect(() => {
     const el = rootRef.current;
-    if (!el || !onHeightChange) return;
+    if (!el || !heightChangeRef.current) return;
+    let last = -1;
     const report = () => {
-      const height = el.getBoundingClientRect().height;
-      if (height !== lastHeight.current) {
-        lastHeight.current = height;
-        onHeightChange();
+      const next = el.getBoundingClientRect().height;
+      if (next !== last) {
+        last = next;
+        heightChangeRef.current?.();
       }
     };
     report();
@@ -216,102 +159,157 @@ export const ImageDiffPreview: React.FC<ImageDiffPreviewProps> = ({
     const observer = new ResizeObserver(report);
     observer.observe(el);
     return () => observer.disconnect();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode]);
+  }, [rootRef, shown]);
 
-  if (mode === 'fallback') return <>{fallback}</>;
-  if (mode === 'too-large') return <>{tooLargeFallback}</>;
+  const stageImage = (side: ReviewImageSide, image: ReviewImageData, label: string): StageImage => ({
+    url: image.url,
+    alt: `${label}: ${filePath}`,
+    size: (side === 'old' ? layout?.old : layout?.new) ?? layout?.stage ?? { width: 0, height: 0 },
+    onNatural: image.width && image.height ? undefined : (size) => setNatural((prev) => (prev[side]?.width === size.width && prev[side]?.height === size.height ? prev : { ...prev, [side]: size })),
+    onError: () => markDecodeError(side),
+  });
 
-  const before = loaded.find((s) => s.side === 'old')?.image;
-  const after = loaded.find((s) => s.side === 'new')?.image;
-  const beforeDims = dimsOf('old', before);
-  const afterDims = dimsOf('new', after);
+  if (shown === 'fallback') return <>{fallback}</>;
+  if (shown === 'too-large') return <>{tooLargeFallback}</>;
 
-  const renderPane = (side: ReviewImageSide) => {
+  const sideLabel = (side: ReviewImageSide) => (unchanged ? 'Image' : status === 'added' ? 'Added' : status === 'deleted' ? 'Deleted' : side === 'old' ? 'Before' : 'After');
+  const reserve = layout ? undefined : { height: Math.min(maxHeight, 160) };
+
+  const pane = (side: ReviewImageSide) => {
     const state = states[side];
     const image = state.state === 'ok' ? state.image : undefined;
-    const dims = dimsOf(side, image);
-    const label = unchanged ? 'Image' : side === 'old' ? 'Before' : 'After';
-    const showDelta = !unchanged && side === 'new' && before && after;
+    const label = sideLabel(side);
     return (
-      <figure key={side} className="m-0 min-w-0 flex flex-col gap-1.5" data-image-side={side}>
-        <figcaption className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{label}</figcaption>
-        <div
-          className="relative flex items-center justify-center overflow-hidden rounded border border-border bg-background/60 p-2"
-          // All-files reserves the height up front (one measurement); the
-          // single-file view sizes to the image, up to the same cap.
-          style={variant === 'all-files' ? { height: paneHeight } : { minHeight: 120 }}
-        >
-          {state.state === 'loading' && (
-            <div className="absolute inset-0 animate-pulse bg-muted/40" aria-label="Loading image" />
+      <figure key={side} className="m-0 min-w-0" data-image-side={side}>
+        {image && layout ? (
+          <SinglePane
+            image={stageImage(side, image, label)}
+            side={side}
+            layout={layout}
+            box={(side === 'old' ? layout.old : layout.new) ?? layout.stage}
+            maxHeight={maxHeight}
+            mask={side === 'new' ? mask : null}
+            maskColor={accent}
+            label={label}
+            labelAbove={labelsAboveImage}
+            onScrollPosition={twoColumns ? (left, top) => setScroll({ left, top }) : undefined}
+            scrollTo={twoColumns ? scroll : null}
+          />
+        ) : image ? (
+          <img
+            src={image.url}
+            alt={`${label}: ${filePath}`}
+            draggable={false}
+            data-image-layer={side}
+            className="block max-h-40 max-w-full"
+            onLoad={(event) => {
+              const el = event.currentTarget;
+              setNatural((prev) => (prev[side] ? prev : { ...prev, [side]: { width: el.naturalWidth || 300, height: el.naturalHeight || 150 } }));
+            }}
+            onError={() => markDecodeError(side)}
+          />
+        ) : layout && state.state === 'loading' ? (
+          <>
+          {labelsAboveImage && <StageLabelRow left={label} />}
+          <div
+            className="animate-pulse rounded-sm bg-muted/50 motion-reduce:animate-none"
+            style={{ width: ((side === 'old' ? layout.old : layout.new) ?? layout.stage).width, height: Math.min(layout.stage.height, maxHeight), marginLeft: layout.offsetX }}
+            aria-label="Loading image"
+            data-image-reserved=""
+          />
+          </>
+        ) : state.state === 'error' ? (
+          <p className="py-6 text-xs text-muted-foreground" data-image-error={state.error.reason}>
+            {label}: {describeImageError(state.error)}
+          </p>
+        ) : (
+          <div className="animate-pulse rounded-sm bg-muted/50 motion-reduce:animate-none" style={reserve ?? { height: Math.min(maxHeight, 160) }} aria-label="Loading image" />
+        )}
+        <figcaption className="mt-1 text-xs leading-5 text-muted-foreground tabular-nums" data-image-unchanged={unchanged ? '' : undefined}>
+          <span className="whitespace-nowrap">{bytesOf(side, image) !== undefined ? imageCaption(null, sizeOf(side, image), bytesOf(side, image)!) : label}</span>
+          {side === 'new' && comparable && beforeBytes !== undefined && afterBytes !== undefined && (
+            <span data-image-delta="" className="ml-1 whitespace-nowrap">{sizeChange(beforeSize, afterSize, beforeBytes, afterBytes)}</span>
           )}
-          {image && (
-            <img
-              src={image.url}
-              alt={`${label}: ${filePath}`}
-              draggable={false}
-              className="max-h-full max-w-full object-contain"
-              style={variant === 'all-files' ? CHECKERBOARD : { ...CHECKERBOARD, maxHeight: paneHeight - 18 }}
-              onLoad={(event) => {
-                const el = event.currentTarget;
-                if (el.naturalWidth && el.naturalHeight) {
-                  setNatural((prev) => ({ ...prev, [side]: { width: el.naturalWidth, height: el.naturalHeight } }));
-                }
-              }}
-              onError={() =>
-                setStates((prev) => ({ ...prev, [side]: { state: 'error', error: { status: 200, reason: 'decode' } } }))
-              }
-            />
-          )}
-          {state.state === 'error' && (
-            <p className="px-4 text-center text-xs text-muted-foreground" data-image-error={state.error.reason}>
-              Preview unavailable: {describeError(state.error)}
-            </p>
-          )}
-        </div>
-        <div className="min-h-[1rem] text-[11px] leading-4 text-muted-foreground tabular-nums">
-          {image && (
-            <>
-              {dims ? `${dims.width} × ${dims.height} · ` : ''}
-              {formatImageBytes(image.bytes)}
-              {showDelta && (
-                <span className="ml-2" data-image-delta="">
-                  {beforeDims && afterDims && (beforeDims.width !== afterDims.width || beforeDims.height !== afterDims.height)
-                    ? `(${signed(afterDims.width - beforeDims.width, '')} × ${signed(afterDims.height - beforeDims.height, ' px')}, `
-                    : '('}
-                  {signedBytes(after.bytes - before.bytes)})
-                </span>
-              )}
-            </>
-          )}
-        </div>
+          {unchanged && <span className="ml-1 whitespace-nowrap">· contents unchanged</span>}
+          {image && side === 'new' && differencesText && <span className="ml-1 whitespace-nowrap">· {differencesText}</span>}
+        </figcaption>
       </figure>
     );
   };
 
+  const labelsAboveImage = narrow || !layout || layout.stage.width < LABELS_OVER_MIN_WIDTH || Math.min(layout.stage.height, maxHeight) < LABELS_OVER_MIN_HEIGHT;
+  const differencesText = mask && comparable
+    ? `${((mask.changed / mask.total) * 100).toFixed(mask.changed / mask.total < 0.01 ? 2 : 1)}% of pixels differ`
+    : null;
+  const stackedMode = comparable && (mode === 'swipe' || mode === 'onion') && !!layout;
+  const stacked = stackedMode && before && after;
+
   return (
-    <div
-      ref={rootRef}
-      data-image-diff-preview=""
-      className="border-b border-border bg-muted/30 px-4 py-3"
-    >
-      <div
-        className="grid gap-4"
-        style={{
-          gridTemplateColumns: stacked || shownSides.length === 1
-            ? 'minmax(0, 1fr)'
-            // Two columns while each gets at least 240px; narrower hosts wrap
-            // to one column (Before above After) with no JS measurement.
-            : 'repeat(auto-fit, minmax(min(100%, 240px), 1fr))',
-        }}
-      >
-        {shownSides.map(renderPane)}
+    <div ref={rootRef} data-image-diff-preview="" data-image-diff-mode={comparable ? mode : 'single'} className="relative border-b border-border px-4 py-3">
+      <div ref={contentRef} className="min-w-0">
+        {stackedMode && !stacked ? (
+          <>
+            {mode === 'swipe' && labelsAboveImage && <StageLabelRow left="Before" right="After" width={layout!.stage.width} />}
+            <div
+              className="animate-pulse rounded-sm bg-muted/50 motion-reduce:animate-none"
+              style={{ width: layout!.stage.width, height: Math.min(layout!.stage.height, maxHeight) }}
+              aria-label="Loading image"
+              data-image-reserved=""
+            />
+            <div className="mt-1 flex flex-wrap items-center gap-x-2 text-xs leading-5 text-muted-foreground tabular-nums">
+              <span className="whitespace-nowrap">Before {beforeBytes !== undefined ? imageCaption(null, beforeSize, beforeBytes) : ''}</span>
+            </div>
+          </>
+        ) : stacked ? (
+          <>
+            <StackedStage
+              mode={mode as 'swipe' | 'onion'}
+              before={stageImage('old', before!, 'Before')}
+              after={stageImage('new', after!, 'After')}
+              layout={layout!}
+              maxHeight={maxHeight}
+              position={position}
+              onPosition={setPosition}
+              opacity={opacity}
+              mask={mask}
+              maskColor={accent}
+              labelsAbove={labelsAboveImage}
+            />
+            <div className="mt-1 flex flex-wrap items-center gap-x-2 text-xs leading-5 text-muted-foreground tabular-nums" data-image-meta="">
+              <span className="whitespace-nowrap">Before {imageCaption(null, beforeSize, before!.bytes)}</span>
+              {mode === 'onion' ? (
+                <input
+                  type="range"
+                  min={0}
+                  max={100}
+                  value={Math.round(opacity * 100)}
+                  onChange={(event) => setOpacity(Number(event.target.value) / 100)}
+                  aria-label="After opacity"
+                  data-onion-opacity=""
+                  className="h-1 w-28 accent-[var(--primary)]"
+                />
+              ) : (
+                <span aria-hidden="true">→</span>
+              )}
+              <span className="whitespace-nowrap">After {imageCaption(null, afterSize, after!.bytes)}</span>
+              <span data-image-delta="" className="whitespace-nowrap">{sizeChange(beforeSize, afterSize, before!.bytes, after!.bytes)}</span>
+              {dimensionsDiffer && (
+                <span data-image-sizes-differ="" title="Both images are aligned top left at one scale; neither is stretched" className="rounded border border-border px-1 leading-4">
+                  sizes differ
+                </span>
+              )}
+              {differencesText && <span className="whitespace-nowrap">· {differencesText}</span>}
+            </div>
+          </>
+        ) : (
+          <div
+            className="grid"
+            style={{ gridTemplateColumns: twoColumns ? `${paneWidth}px ${paneWidth}px` : 'minmax(0, 1fr)', columnGap: SIDE_BY_SIDE_GAP, rowGap: 12 }}
+          >
+            {(unchanged ? (['new'] as ReviewImageSide[]) : sides).map(pane)}
+          </div>
+        )}
       </div>
-      {unchanged && (
-        <p className="mt-2 text-xs text-muted-foreground" data-image-unchanged="">
-          Contents unchanged.
-        </p>
-      )}
     </div>
   );
 };

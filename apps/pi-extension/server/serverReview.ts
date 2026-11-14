@@ -109,8 +109,10 @@ import { createReviewRepoWatch } from "./review-repo-watch.ts";
 import {
 	REVIEW_IMAGE_ENDPOINT,
 	REVIEW_IMAGE_READ_CONCURRENCY,
+	REVIEW_IMAGE_SIZES_ENDPOINT,
 	createConcurrencyLimiter,
 	handleReviewImageRequest,
+	handleReviewImageSizesRequest,
 	readPRImageSide,
 } from "../generated/review-image.ts";
 import {
@@ -3600,6 +3602,23 @@ export async function startReviewServer(options: {
 				available: imagePreviewSupported,
 				patch: currentPatch,
 				markdownExtensions: getExtraMarkdownExtensions(),
+				isCurrentSnapshot: (snapshot) => snapshot === currentSnapshotId(),
+				signal: requestAbort.signal,
+				readSide: (side, filePath, oldPath, maxBytes, signal) =>
+					runImageRead(() => readReviewSide(side, filePath, oldPath, maxBytes, signal), signal),
+			});
+			if (requestAbort.signal.aborted) return;
+			res.writeHead(result.status, result.headers);
+			res.end(result.body ?? undefined);
+		} else if (url.pathname === REVIEW_IMAGE_SIZES_ENDPOINT && req.method === "GET") {
+			const requestAbort = new AbortController();
+			res.on("close", () => {
+				if (!res.writableEnded) requestAbort.abort();
+			});
+			const result = await handleReviewImageSizesRequest({
+				params: url.searchParams,
+				available: imagePreviewSupported,
+				patch: currentPatch,
 				isCurrentSnapshot: (snapshot) => snapshot === currentSnapshotId(),
 				signal: requestAbort.signal,
 				readSide: (side, filePath, oldPath, maxBytes, signal) =>

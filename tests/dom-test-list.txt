@@ -736,6 +736,7 @@ packages/inbox/attachmentTileKeys.test.tsx
 packages/inbox/threadTags.test.tsx
 packages/review-editor/components/PRDescriptionVideo.test.tsx
 packages/ui/components/CommentPopover.hostDraft.test.tsx
+packages/review-editor/components/image-diff/ImageStage.test.tsx
 packages/review-editor/components/FileTree.redraws.test.tsx
 packages/ui/components/Viewer.blockRedraws.test.tsx
 packages/editor/hooks/useCheckboxOverrides.viewer.test.tsx
