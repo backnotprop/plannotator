@@ -37,10 +37,16 @@ interface DoorScript {
   post?: (route: string, body: any) => Response;
   /** Status frames its windows would hear, sent after hello. */
   statuses?: unknown[];
+  /** The kind each replayed record carries (default `message`). */
+  recordKind?: string;
+  /** Frames sent a moment after hello (a write there after the line is up). */
+  later?: string[];
+  /** Its Board (`GET cards`). */
+  cards?: () => Response;
 }
 
 function door(script: DoorScript) {
-  const stats = { events: 0, threads: 0, posts: [] as string[], windowMarks: [] as (string | null)[], lastEventId: [] as (string | null)[], eventAsks: [] as string[] };
+  const stats = { events: 0, threads: 0, cards: 0, posts: [] as string[], windowMarks: [] as (string | null)[], lastEventId: [] as (string | null)[], eventAsks: [] as string[] };
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
@@ -54,6 +60,10 @@ function door(script: DoorScript) {
         stats.threads += 1;
         return script.threads ? script.threads() : Response.json({ cursor: script.cursor ?? 0, sections: [{ threads: [{ thread_id: "msg_a", project: { id: "prj_a" } }] }], projects: [] });
       }
+      if (route === "cards" && req.method === "GET") {
+        stats.cards += 1;
+        return script.cards ? script.cards() : Response.json({ code: "device_route_not_found" }, { status: 404 });
+      }
       if (route === "events") {
         stats.events += 1;
         stats.eventAsks.push(url.search);
@@ -66,10 +76,11 @@ function door(script: DoorScript) {
           start(controller) {
             controller.enqueue(encoder.encode(`event: hello\ndata: ${JSON.stringify({ cursor: script.cursor ?? 0 })}\n\n`));
             for (const seq of script.records?.(since === null ? null : Number(since)) ?? []) {
-              controller.enqueue(encoder.encode(`id: ${seq}\nevent: record\ndata: ${JSON.stringify({ seq, kind: "message" })}\n\n`));
+              controller.enqueue(encoder.encode(`id: ${seq}\nevent: record\ndata: ${JSON.stringify({ seq, kind: script.recordKind ?? "message" })}\n\n`));
             }
             for (const status of script.statuses ?? []) controller.enqueue(encoder.encode(`event: status\ndata: ${JSON.stringify(status)}\n\n`));
             for (const frame of script.frames ?? []) controller.enqueue(encoder.encode(frame));
+            if (script.later) setTimeout(() => script.later!.forEach((frame) => controller.enqueue(encoder.encode(frame))), 300);
             if (!script.silent) timer = setInterval(() => controller.enqueue(encoder.encode(": ping\n\n")), 50);
           },
           cancel() {
@@ -474,6 +485,55 @@ describe("the list (rule 5)", () => {
     const live = { id: "ini_01K0000000000000000000000R", name: "Release", created_at: "2026-11-12T09:00:00.000Z", created_by: { kind: "person" as const }, updated_at: "2026-11-12T09:00:00.000Z", deleted_at: null };
     peer.acceptList({ cursor: 4, sections: [], tags: [live, { ...live, id: "ini_01K0000000000000000000000D", deleted_at: "2026-11-12T10:00:00.000Z" }, { id: "not an id", name: "x" }, "Release"] });
     expect(peer.list!.tags).toEqual([live]);
+  });
+
+  const BOARD_CARD = { id: "crd_01K0000000000000000000000A", project_id: "prj_01K0000000000000000000000A", title: "Ship it", column: "todo" };
+  const board = (cursor: number, extra: Record<string, unknown> = {}) =>
+    Response.json({ cursor, cards: [BOARD_CARD], threads: { msg_01K0000000000000000000000A: { thread_id: "msg_01K0000000000000000000000A" }, junk: {} }, initiatives: [], seen_seq: 2, ...extra });
+
+  test("a machine's Board is read only once asked, and only from one that takes `cards`: an older Inbox's is never asked", async () => {
+    const older = door({ cursor: 3, cards: () => board(3) });
+    const { peer: old } = link(older.url);
+    old.start();
+    await until("its list", () => old.list !== null);
+    await old.wantCards();
+    expect(older.stats.cards).toBe(0);
+    expect(old.cards).toBeNull();
+
+    let told = 0;
+    const d = door({ cursor: 3, threads: () => Response.json({ cursor: 3, sections: [], marks: ["cards"] }), cards: () => board(3) });
+    const { peer } = link(d.url, { onCards: () => void told++ });
+    peer.start();
+    await until("its list", () => peer.list !== null);
+    expect(d.stats.cards).toBe(0);
+    await peer.wantCards();
+    expect(d.stats.cards).toBe(1);
+    expect(told).toBe(1);
+    expect(peer.cards!.cards.map((c) => c.id)).toEqual([BOARD_CARD.id]);
+    expect(peer.cards!.seen_seq).toBe(2);
+    // Its threads are named as its own; an id that is not a thread's is dropped.
+    expect(Object.keys(peer.cards!.threads)).toEqual(["msg_01K0000000000000000000000A"]);
+    expect(peer.cards!.threads.msg_01K0000000000000000000000A!.machine).toBe(B);
+  });
+
+  test("a card record on its stream reads its Board again, and the windows hear it after the read", async () => {
+    const cursors: number[] = [];
+    const d = door({
+      cursor: 3,
+      later: [`id: 4\nevent: record\ndata: ${JSON.stringify({ seq: 4, kind: "card" })}\n\n`],
+      threads: () => Response.json({ cursor: 3, sections: [], marks: ["cards"] }),
+      cards: () => board(3 + d.stats.cards),
+    });
+    const { peer } = link(d.url, { onCards: () => cursors.push(peer.cards!.cursor) });
+    peer.start();
+    await until("its list", () => peer.list !== null);
+    await peer.wantCards();
+    await until("read again", () => cursors.length >= 2);
+    expect(d.stats.cards).toBe(2);
+    expect(cursors).toEqual([4, 5]);
+    // An older answer than the one held is dropped.
+    expect(peer.acceptCards({ cursor: 1, cards: [] })).toBe(false);
+    expect(peer.cards!.cursor).toBe(5);
   });
 
   test("a machine's agent faces come from its agents group, only what parses; an older Inbox's group has none", () => {

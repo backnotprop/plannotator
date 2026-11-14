@@ -24,7 +24,7 @@
  *    (`link-back`, `unlink`).
  */
 
-import { INBOX_LINKED_MARKS, inboxRowArchived, isInboxId, type InboxAgentsGroup, type InboxInitiative, type InboxListRow, type InboxMachineAccountsRead } from "@plannotator/core/inbox-types";
+import { INBOX_LINKED_MARKS, inboxRowArchived, isInboxId, type InboxAgentsGroup, type InboxCardWire, type InboxInitiative, type InboxListRow, type InboxMachineAccountsRead } from "@plannotator/core/inbox-types";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { inboxSnoozeRefusal, inboxSnoozeRunning } from "@plannotator/core/inbox-snooze";
@@ -34,13 +34,15 @@ import { INBOX_MACHINE_WINDOW_ONLY_BODY, isWindowRequest } from "./inbox-cross-s
 import { INBOX_MACHINE_ACCOUNTS_MAX_BYTES, INBOX_MACHINE_ACCOUNTS_WAIT_MS, parsePeerAccounts } from "./inbox-accounts";
 import { buildLinkOffer, InboxLinks, parseLinkOffer, type InboxLinkRecord } from "./inbox-links";
 import { doorWriteKind, InboxOutbox, MACHINE_WINDOW_HEADER, type OutboxEntry } from "./inbox-outbox";
-import { farVersion, MACHINE_LINKS_PROTOCOL, parseFarUpdate, PEER_LINK_TIMINGS, PeerLink, readCapped, type PeerLinkTimings, type PeerRecord, type PeerRereadEvent } from "./inbox-peer-link";
+import { farVersion, MACHINE_LINKS_PROTOCOL, parseFarUpdate, PEER_LINK_TIMINGS, PeerLink, readCapped, type PeerCards, type PeerLinkTimings, type PeerRecord, type PeerRereadEvent } from "./inbox-peer-link";
 import { installCommandFor, isNewerStableVersion, normalizeStableVersion } from "@plannotator/shared/update-check";
 import { openTransport, type InboxTransportSpec } from "./inbox-transport";
 import { checkTailnetAddress } from "./inbox-transport-tailnet";
 
 /** How long a write to a machine that is online waits for its answer before the window is told "Sending…" (rule 12). */
 export const MACHINE_WRITE_WAIT_MS = 4_000;
+/** How long the merged Board waits for a linked machine's Board it has not read yet. */
+const MERGED_CARDS_WAIT_MS = 2_000;
 /** How long Unlink waits for the other machine to hear it before it unlinks here anyway (the other side learns at its next contact). */
 const UNLINK_TELL_MS = 5_000;
 /**
@@ -80,8 +82,8 @@ export interface InboxMachineDoor {
 }
 
 /** The id kinds a forwarded route names in its first segments. */
-export type HeldKind = "threads" | "messages" | "attachments" | "projects" | "annotations";
-const HELD_KINDS = new Set<string>(["threads", "messages", "attachments", "projects", "annotations"]);
+export type HeldKind = "threads" | "messages" | "attachments" | "projects" | "annotations" | "cards";
+const HELD_KINDS = new Set<string>(["threads", "messages", "attachments", "projects", "annotations", "cards"]);
 /** The body fields a forwarded write names an id in, and the kind each is. */
 const BODY_IDS = [
   ["thread_id", "messages"],
@@ -123,7 +125,7 @@ export interface InboxMachinesContext {
 export type MachineLinkTimings = Partial<PeerLinkTimings> & { updatedShownMs?: number; restartBackMs?: number; accountsMs?: number };
 
 /** A frame for the window's event stream: other machines' records and states never share the local seq (design review, change 2). */
-export type MachineFrame = { event: "machine"; data: PeerRecord } | { event: "machines"; data: { machines: MachineView[] } } | { event: "outbox"; data: OutboxView } | { event: PeerRereadEvent; data: Record<string, never> } | { event: "deliveries"; data: { sessions?: boolean; agents?: boolean } };
+export type MachineFrame = { event: "machine"; data: PeerRecord } | { event: "machines"; data: { machines: MachineView[] } } | { event: "outbox"; data: OutboxView } | { event: PeerRereadEvent | "cards"; data: Record<string, never> } | { event: "deliveries"; data: { sessions?: boolean; agents?: boolean } };
 
 /** How the window draws a machine's version (approval "inbox-machine-update"). */
 export interface MachineUpdateView {
@@ -525,6 +527,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
       onChange: machinesChanged,
       // A snooze or a star moves no cursor, so nothing in the machines block changes: the windows are told in a frame of its own.
       onReread: (event) => emit({ event, data: {} }),
+      onCards: () => emit({ event: "cards", data: {} }),
       onDeliveries: ({ sessions, agents, labels }) => emit({ event: "deliveries", data: { ...(sessions ? { sessions: true } : {}), ...(agents ? { agents: true } : {}), ...(labels ? { labels: true } : {}) } }),
       onRevoked: () => forget(link.id),
     });
@@ -870,7 +873,8 @@ export function createInboxMachines(context: InboxMachinesContext) {
     else peer.poke();
     const settled = (await outbox.waitSettled(entry.key, peer.state === "online" ? MACHINE_WRITE_WAIT_MS : 0)) ?? entry;
     // A state that landed is in that machine's list now: read it before answering, so the window's next read shows it.
-    if (settled.state === "delivered" && kind === "set") await peer.refreshList();
+    // A card's write reads its Board and its list both: a tag named there may be new, and the merged tags come from the list.
+    if (settled.state === "delivered" && kind === "set") await (segments[0] === "cards" ? Promise.all([peer.refreshList(), peer.refreshCards()]) : peer.refreshList());
     return outboxAnswer(settled, fresh);
   };
 
@@ -1148,6 +1152,29 @@ export function createInboxMachines(context: InboxMachinesContext) {
   /** Each linked machine's live tags, from a machine that takes tags from this one (an older one's stay its own). */
   const tagLists = (): { machine: string; tags: InboxInitiative[] }[] =>
     [...peers.values()].flatMap((peer) => (peer.list?.marks.includes("tags") ? [{ machine: peer.id, tags: peer.list.tags }] : []));
+  /**
+   * Each linked machine's Board, from a machine that takes `cards` (an older one's are not listed). The first ask makes
+   * each line read its Board and keep it current; it waits for that read only while the machine is online, and at most
+   * MERGED_CARDS_WAIT_MS (a slow one's cards follow with `event: cards`).
+   */
+  const cardLists = async (): Promise<{ machine: string; cards: PeerCards }[]> => {
+    const reads = [...peers.values()].map((peer) => {
+      const read = peer.wantCards();
+      return peer.state === "online" ? read : null;
+    });
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([Promise.all(reads), new Promise((resolve) => (timer = setTimeout(resolve, MERGED_CARDS_WAIT_MS)))]);
+    clearTimeout(timer);
+    return [...peers.values()].flatMap((peer) => (peer.cards && peer.list?.marks.includes("cards") ? [{ machine: peer.id, cards: peer.cards }] : []));
+  };
+  /** A linked machine's card, as its Board last said: the lane marks and a link's site icon are read here for it. */
+  const farCard = (id: string): InboxCardWire | null => {
+    for (const peer of peers.values()) {
+      const card = peer.list?.marks.includes("cards") ? peer.cards?.cards.find((c) => c.id === id) : undefined;
+      if (card) return card;
+    }
+    return null;
+  };
   const projectOwner = (projectId: string): string | null => {
     for (const peer of peers.values()) if (peer.list?.projects.some((p) => p.id === projectId)) return peer.id;
     return null;
@@ -1185,6 +1212,8 @@ export function createInboxMachines(context: InboxMachinesContext) {
     projectOwner,
     pinnedIds,
     tagLists,
+    cardLists,
+    farCard,
     snoozeThread,
     /** The linked machine a device on this Inbox's door belongs to (a launch it starts here records it), or null. */
     machineOfDevice: (deviceId: string): { machine: string; name: string } | null => {

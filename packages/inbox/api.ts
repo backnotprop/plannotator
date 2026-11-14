@@ -197,6 +197,13 @@ export interface CardsModel {
    * Absent from an older Inbox: the preview lists no threads.
    */
   initiative_threads?: Record<string, { threads: string[]; total: number }>;
+  /**
+   * The merged Board (linked machines, mark `cards`): each linked machine's look and the cursor of its cards as read,
+   * by its `ibx_` id. Its cards carry `machine`. Absent from an Inbox before it.
+   */
+  machines?: Record<string, { cursor: number; seen_seq: number | null }>;
+  /** The merged Board: this Inbox's own `ibx_` id. */
+  self?: string;
 }
 
 /** A draft's file as a save names it: an upload id, or the id with where a long paste goes back. */
@@ -991,7 +998,7 @@ export function localIdsIn(value: unknown): Set<string> {
 /** Two linked machines claim the thread, message, file or project a path names: it goes to neither (inboxUrl.ts). */
 export const CONFLICT_TEXT = 'Two linked machines both claim this thread, so it opens on neither. Unlink the one that should not have it.';
 function refuseContested(path: string): void {
-  const named = /^\/api\/inbox\/(?:threads|messages|attachments|projects)\/([^/?]+)/.exec(path)?.[1];
+  const named = /^\/api\/inbox\/(?:threads|messages|attachments|projects|cards)\/([^/?]+)/.exec(path)?.[1];
   if (named && isContested(decodeURIComponent(named))) throw new InboxApiError(409, 'machine_conflict', CONFLICT_TEXT);
 }
 
@@ -1258,6 +1265,20 @@ const messageUrl = (messageId: string, rest = '', query?: string) => inboxUrl(`/
 const attachmentUrl = (attachmentId: string, rest = '', query?: string) => inboxUrl(`/attachments/${encodeURIComponent(attachmentId)}${rest}`, query, machineOf(attachmentId));
 /** `/projects/<id><rest>` on the machine that owns the project. */
 const projectUrl = (projectId: string, rest = '') => inboxUrl(`/projects/${encodeURIComponent(projectId)}${rest}`, undefined, machineOf(projectId));
+/** `/cards/<id><rest>` on the machine whose Board holds the card. */
+const cardUrl = (cardId: string, rest = '') => inboxUrl(`/cards/${encodeURIComponent(cardId)}${rest}`, undefined, machineOf(cardId));
+
+/**
+ * The merged Board names each card's machine: a linked machine's card, its project and its threads' rows route there
+ * (inboxUrl.ts); this Inbox's own are local for good.
+ */
+function learnCards(model: CardsModel): CardsModel {
+  setSelfMachine(model.self);
+  rememberLocal(localIdsIn(model));
+  for (const card of model.cards) rememberMachine([card.id, card.project_id, ...card.threads], card.machine);
+  for (const row of Object.values(model.threads ?? {})) if (row) rememberMachine([row.thread_id], row.machine);
+  return model;
+}
 
 /** The merged list names each row's and project's machine: their routes go there from now on (inboxUrl.ts). */
 function learnMachines(model: ListModel): void {
@@ -2026,7 +2047,7 @@ export const inboxApi = {
   // Pins (approval "inbox-pinned-threads"): the sidebar's pinned threads.
   /** Pin a thread (at the bottom of Pinned) or unpin it. */
   /** The Board's cards (approval "inbox-board", step 2): every card, the agents' unseen drops, the person's last look. */
-  cards: () => get<CardsModel>(inboxUrl('/cards')),
+  cards: () => get<CardsModel>(inboxUrl('/cards', 'machines=1')).then(learnCards),
   /**
    * The person's New card: a title, notes and links, in Backlog (or Todo); or sent: `thread_id` is
    * the thread compose's Send just started for it (the card lands in Todo, in that thread's project).
@@ -2042,9 +2063,9 @@ export const inboxApi = {
     /** The initiative the Board is filtered to: the new card starts in it. */
     initiative?: string | null;
   }) => post<{ card: InboxCardWire; replayed: boolean }>(inboxUrl('/cards'), { ...input }),
-  /** The card's initiative (an `ini_` id), or none (null). */
-  setCardInitiative: (id: string, initiative: string | null) =>
-    post<{ card: InboxCardWire }>(inboxUrl(`/cards/${encodeURIComponent(id)}`), { op: 'initiative', initiative }),
+  /** The card's initiative (an `ini_` id), or none (null); on a linked machine's card, `{ name }` when that machine has no tag of the name yet. */
+  setCardInitiative: (id: string, initiative: string | null | { name: string }) =>
+    post<{ card: InboxCardWire }>(cardUrl(id), initiative !== null && typeof initiative === 'object' ? { op: 'initiative', name: initiative.name } : { op: 'initiative', initiative }),
   /** A new initiative, named. */
   createInitiative: (name: string) => post<{ initiative: InboxInitiative }>(inboxUrl('/initiatives'), { name }),
   /** An initiative renamed, or deleted (its cards read as in none). `machine`: a linked machine's tag, changed there. */
@@ -2052,14 +2073,14 @@ export const inboxApi = {
     post<{ initiative: InboxInitiative }>(inboxUrl(`/initiatives/${encodeURIComponent(id)}`, undefined, machine), change),
   /** The person's move: `move` to a column, `drop` (Cancel, reason optional), `restore`. */
   moveCard: (id: string, change: { op: 'move'; column: InboxCardColumn } | { op: 'drop'; reason?: string | null } | { op: 'restore' }) =>
-    post<{ card: InboxCardWire }>(inboxUrl(`/cards/${encodeURIComponent(id)}`), change),
+    post<{ card: InboxCardWire }>(cardUrl(id), change),
   /** The opened card's edits: title, notes; a link (a thread, an issue or PR); sent to an agent (the thread just started). */
   editCard: (id: string, change: { op: 'edit'; title?: string; notes?: string | null } | { op: 'link'; thread_id?: string; ref?: string } | { op: 'send'; thread_id: string }) =>
-    post<{ card: InboxCardWire }>(inboxUrl(`/cards/${encodeURIComponent(id)}`), change),
+    post<{ card: InboxCardWire }>(cardUrl(id), change),
   /** The opened card: the card and its history, newest first, and its project's repo (absent from an older Inbox). */
-  card: (id: string) => get<{ card: InboxCardWire; history: InboxCardHistoryEntry[]; repo?: InboxProjectRepo | null }>(inboxUrl(`/cards/${encodeURIComponent(id)}`)),
+  card: (id: string) => get<{ card: InboxCardWire; history: InboxCardHistoryEntry[]; repo?: InboxProjectRepo | null }>(cardUrl(id)),
   /** The opened card's links, resolved now (read only). */
-  cardRefs: (id: string) => get<{ refs: { ref: InboxCardRef; result: ForgeRefCardResult }[] }>(inboxUrl(`/cards/${encodeURIComponent(id)}/refs`)),
+  cardRefs: (id: string) => get<{ refs: { ref: InboxCardRef; result: ForgeRefCardResult }[] }>(cardUrl(id, '/refs')),
   /** The person opened the Board: the look runs through the cursor of the read it showed (the server clamps it). */
   /** The lane cards' marks (their one linked PR or issue's state), for the cards on screen; `refresh` when the window got its focus back. */
   cardMarks: (ids: readonly string[], refresh = false) => post<{ marks: Record<string, InboxCardMark> }>(inboxUrl('/cards/marks'), { cards: [...ids], refresh }),
@@ -2119,7 +2140,8 @@ export const inboxApi = {
   /** Close's Undo: taken only for a PR this Inbox closed in the last few minutes. */
   pullReopen: (key: string) => post<{ ok: true; key: string; url: string }>(inboxUrl('/pulls/reopen'), { key }),
   pullOwnerCheck: (keys: readonly string[], projectId: string) => post<{ ok: true }>(inboxUrl('/pulls/owner'), { keys: [...keys], project_id: projectId, validate_only: true }),
-  seeBoard: (throughSeq: number) => post<{ seen_seq: number }>(inboxUrl('/cards/seen'), { through_seq: throughSeq }),
+  /** `machine`: a linked machine's look, through the cursor of its cards as read. */
+  seeBoard: (throughSeq: number, machine?: string | null) => post<{ seen_seq: number }>(inboxUrl('/cards/seen', undefined, machine), { through_seq: throughSeq }),
   /** The Board's first-visit dialog: the first page on this computer to ask gets `show: true`, once per machine. */
   claimBoardIntro: () => post<{ show: boolean }>(inboxUrl('/board/intro'), {}),
   /** The one-time list options dialog: only the first claim ever gets `show: true` (once per machine). */
@@ -2179,7 +2201,7 @@ export const inboxApi = {
     return { code, engine: body.engine, reason: body.reason };
   },
   /** The person looked at Dropped: an agent's drops there are seen. */
-  seeDrops: (ids: readonly string[]) => post<{ cards: InboxCardWire[] }>(inboxUrl('/cards/dropped/seen'), { cards: [...ids] }),
+  seeDrops: (ids: readonly string[], machine?: string | null) => post<{ cards: InboxCardWire[] }>(inboxUrl('/cards/dropped/seen', undefined, machine), { cards: [...ids] }),
   /** Every pinned artifact (approval "inbox-artifact-stars"; not the sidebar's thread pins), in pin order. This machine's threads only. */
   artifactPins: () => get<{ pins: InboxArtifactPin[] }>(inboxUrl('/artifact-pins')),
   /** The face each agent's icon shows (inbox/agent-faces.json, agents/agentFaces.ts). This window's Inbox only. */
@@ -2498,6 +2520,8 @@ export interface InboxEventHandlers {
   onArtifactPins?: () => void;
   /** A thread's tags changed (`event: tags`, approval "inbox-thread-tags"); never called by an older Inbox. */
   onTags?: () => void;
+  /** A linked machine's Board was read again (`event: cards`, the merged stream only): the Board reads its cards. */
+  onCards?: () => void;
   /** Show a thread (`event: show`, `plannotator inbox --open <thread>`): only the window named moves; never called by an older Inbox. */
   onShow?: (threadId: string, windowId: string) => void;
   /** A snooze changed or ran out (`event: snoozes`, approval "inbox-snooze"), here or on a linked machine; never called by an older Inbox. */
@@ -2554,7 +2578,7 @@ export interface InboxEventWindow {
 
 /** The event stream's named frames, as they arrive (and as the tab that holds the shared stream passes them on). */
 // `heartbeat`: a window's stream beats every 10 s (packages/server/inbox.ts); heard by liveStream.ts, handled by nothing.
-export const INBOX_EVENT_FRAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'ask', 'pins', 'priority', 'artifact-pins', 'tags', 'show', 'snoozes', 'thread-pulls', 'rows', 'sidebar', 'agent-faces', 'reactions', 'capabilities', 'tailscale', 'shapes', 'machine', 'machines', 'outbox', 'heartbeat'] as const;
+export const INBOX_EVENT_FRAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'ask', 'pins', 'priority', 'artifact-pins', 'tags', 'show', 'snoozes', 'thread-pulls', 'rows', 'sidebar', 'agent-faces', 'reactions', 'capabilities', 'tailscale', 'shapes', 'machine', 'machines', 'cards', 'outbox', 'heartbeat'] as const;
 export type InboxEventFrameName = (typeof INBOX_EVENT_FRAMES)[number];
 export interface InboxEventFrame {
   name: InboxEventFrameName;
@@ -2649,6 +2673,9 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
       return;
     case 'tags':
       handlers.onTags?.();
+      return;
+    case 'cards':
+      handlers.onCards?.();
       return;
     case 'show':
       try {

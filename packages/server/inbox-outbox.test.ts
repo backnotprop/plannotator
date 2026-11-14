@@ -463,6 +463,12 @@ describe("rule 8: every door write is classified, and only small JSON is held", 
     // A thread's tag lives on the thread's own machine, and a tag's rename, delete and Undo on each machine holding it.
     expect(doorWriteKind("threads/msg_1/tags")).toBe("set");
     expect(doorWriteKind("initiatives/ini_1")).toBe("set");
+    // A Board card lives on its project's machine: its writes are held and sent there. The lane marks run gh, and stay here.
+    expect(doorWriteKind("cards/crd_1")).toBe("set");
+    expect(doorWriteKind("cards/seen")).toBe("set");
+    expect(doorWriteKind("cards/dropped/seen")).toBe("set");
+    expect(doorWriteKind("cards/marks")).toBeNull();
+    expect(doorWriteKind("cards")).toBeNull();
   });
 
   test("an Inbox that never holds a write keeps no outbox folder", () => {

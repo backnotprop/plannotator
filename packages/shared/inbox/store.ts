@@ -8117,6 +8117,19 @@ export class InboxStore {
   }
 
   /**
+   * The same by the tag's name (`inboxInitiativeNameKey`), as a linked machine names a tag: the live tag of that name,
+   * made first (the person's) when none is. The card is checked before anything is made.
+   */
+  setCardInitiativeNamed(id: string, name: unknown, by: InboxAuthor): InboxCard {
+    if (by.kind !== "person") throw new InboxError("initiative_person_only", "Only the person puts a card in an initiative.");
+    if (!this.cards.has(id)) throw new InboxError("card_not_found", `No card ${id}.`);
+    const text = this.cardText(name, "name", INBOX_INITIATIVE_NAME_MAX);
+    const key = inboxInitiativeNameKey(text);
+    const found = [...this.initiativesById.values()].find((tag) => tag.deleted_at === null && inboxInitiativeNameKey(tag.name) === key);
+    return this.setCardInitiative(id, (found ?? this.appendNewInitiative(text, by)).id, by);
+  }
+
+  /**
    * The person looked at Dropped: every agent's drop they had not seen (in
    * `projectIds`, or everywhere) is marked seen, one line per card. Not a
    * write to the card itself: `heard_at` stays. Answers the cards it marked.

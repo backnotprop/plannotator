@@ -3301,9 +3301,10 @@ export const INBOX_DRAFT_PASTED_LEAD_MAX = 2;
 /**
  * The marks a person sets on an agent or a thread that a linked machine may send to this Inbox, the one that owns it
  * (approval "inbox-linked-marks"). The list says them (`marks`), so a linked machine offers a mark on this Inbox's
- * rows only once this Inbox takes it; an older Inbox says none.
+ * rows only once this Inbox takes it; an older Inbox says none. `cards`: its Board's cards are read through its door
+ * and changed there, so a linked machine's Board lists them.
  */
-export const INBOX_LINKED_MARKS = ["star", "priority", "agent-face", "agent-name", "take-back", "tags"] as const;
+export const INBOX_LINKED_MARKS = ["star", "priority", "agent-face", "agent-name", "take-back", "tags", "cards"] as const;
 export type InboxLinkedMark = (typeof INBOX_LINKED_MARKS)[number];
 
 /**

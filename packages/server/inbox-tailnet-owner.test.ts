@@ -800,7 +800,9 @@ describe("the login header counts only on the tailnet listener", () => {
 describe("a linked machine gains none of it", () => {
   test("no opened route is a door route or a forwardable write", () => {
     const names = doorRouteNames().join("\n");
-    for (const word of ["agents", "settings", "cards", "voice"]) expect(names).not.toContain(` ${word}`);
+    for (const word of ["agents", "settings", "voice"]) expect(names).not.toContain(` ${word}`);
+    // The Board's cards are door routes (mark `cards`, its own machine's store); their marks run this computer's gh and are not.
+    expect(names).not.toContain("cards/marks");
     // A linked machine's `update` is the one exception, and it is not on the allowlist: the forward refuses it (below), and only a machine's token reaches it.
     expect(names.split("\n").filter((name) => name.includes("update"))).toEqual(["POST update"]);
     for (const route of ["update/check", "update/snooze", "agents", "agents/notes", "agents/seen", "settings", "cards/marks", "voice/key"]) {
