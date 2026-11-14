@@ -3196,7 +3196,7 @@ const ReviewApp: React.FC = () => {
       });
     }
   }, [deleteExternalAnnotation, externalAnnotations, reviewHistory]);
-  const livePR = useMemo(() => (prMetadata ? { forge: prMetadata.platform === 'gitlab' ? 'GitLab' : prMetadata.platform === 'bitbucket' ? 'Bitbucket' : 'GitHub', threads: prContext?.reviewThreads ?? null, load: () => void fetchPRContext() } : null), [prMetadata, prContext, fetchPRContext]);
+  const livePR = useMemo(() => (prMetadata ? { forge: prMetadata.platform === 'gitlab' ? 'GitLab' : prMetadata.platform === 'bitbucket' ? 'Bitbucket' : 'GitHub', platform: prMetadata.platform, threads: prContext?.reviewThreads ?? null, load: () => void fetchPRContext() } : null), [prMetadata, prContext, fetchPRContext]);
   const revealLiveLines = useCallback((filePath: string, start: number, end: number, side: 'old' | 'new') => {
     handleScrollToAILines(filePath, start, end, side);
     window.setTimeout(() => setPendingSelection((current) => (current && current.start === start && current.end === end ? null : current)), 900);
@@ -6255,6 +6255,7 @@ const ReviewApp: React.FC = () => {
                 </div>
               </div>
             )}
+            {liveReview.overlay}
             <ConfirmDialog
               isOpen={!!draftBanner}
               onClose={dismissDraft}

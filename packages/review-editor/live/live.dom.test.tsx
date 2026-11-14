@@ -53,7 +53,7 @@ const anchor = { file: 'src/billing.ts', side: 'new' as const, line_start: 4, li
 
 function actionsRef(over: Partial<LiveReviewActions> = {}) {
   return {
-    current: { agents: [PI, CC], defaultTo: CC, loadAgents: () => {}, reply: mock(async () => {}), resolve: mock(async () => {}), sendComments: mock(async () => {}), reveal: () => {}, takeBack: mock(async () => {}), revealLines: () => {}, error: null, ...over },
+    current: { agents: [PI, CC], defaultTo: CC, loadAgents: () => {}, reply: mock(async () => {}), resolve: mock(async () => {}), sendComments: mock(async () => {}), reveal: () => {}, takeBack: mock(async () => {}), postToPR: null, posted: new Set<string>(), revealLines: () => {}, error: null, ...over },
   } as React.MutableRefObject<LiveReviewActions>;
 }
 
@@ -121,5 +121,30 @@ describe.skipIf(!hasDom)('a long thread', () => {
     expect(el.querySelector('[data-live-earlier]')?.textContent).toBe('2 earlier');
     await act(async () => el.querySelector<HTMLButtonElement>('[data-live-earlier]')!.click());
     expect(bodies()).toEqual(['c1', 'a1', 'p1', 'a2', 'p2']);
+  });
+});
+
+describe.skipIf(!hasDom)('a thread by keyboard', () => {
+  test('Reply opens the box with focus in it, @ tags, Mod+Enter sends, and focus comes back to Reply; Escape on an empty box closes it too', async () => {
+    const messages = [message({ id: 'c1', reply_to: 'root', body: 'Rename it.', review_anchor: anchor })];
+    const [thread] = placeThreads(messages, []);
+    const actions = actionsRef();
+    const el = await render(<LiveThreadCard thread={thread!} messages={messages} actions={actions} />);
+    const reply = el.querySelector<HTMLButtonElement>('[data-live-reply]')!;
+    reply.focus();
+    await act(async () => reply.click());
+    const box = el.querySelector<HTMLTextAreaElement>('[data-live-composer] textarea')!;
+    expect(document.activeElement).toBe(box);
+    await type(box, 'On it? @');
+    await press(box, 'ArrowDown');
+    await press(box, 'Enter');
+    await press(box, 'Enter', { metaKey: true });
+    await act(async () => {});
+    expect(actions.current.reply).toHaveBeenCalledWith('c1', 'On it? @Pi', [{ host: 'pi', session: 'ses-pi', label: 'Pi' }]);
+    expect(document.activeElement).toBe(el.querySelector('[data-live-reply]'));
+    await act(async () => el.querySelector<HTMLButtonElement>('[data-live-reply]')!.click());
+    await press(el.querySelector<HTMLTextAreaElement>('[data-live-composer] textarea')!, 'Escape');
+    expect(el.querySelector('[data-live-composer]')).toBeNull();
+    expect(document.activeElement).toBe(el.querySelector('[data-live-reply]'));
   });
 });

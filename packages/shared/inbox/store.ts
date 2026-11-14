@@ -39,7 +39,7 @@ import {
   type ParsedInboxQuestion,
 } from "@plannotator/core/inbox-questions";
 import { withoutInboxSkillsBlock } from "@plannotator/core/skill-reference-block";
-import type { InboxReviewAddressed, InboxReviewAnchor, InboxReviewBatch, InboxReviewLive } from "@plannotator/core/review-threads";
+import type { InboxReviewAnchor, InboxReviewBatch, InboxReviewLive } from "@plannotator/core/review-threads";
 import { inboxRowPreview, inboxRowPreviewWords } from "@plannotator/core/inbox-folding";
 import {
   checkInboxActionResult,
@@ -336,7 +336,6 @@ export interface InboxReplyInput {
   words?: string;
   review_anchor?: InboxReviewAnchor;
   review_batch?: InboxReviewBatch;
-  review_addressed?: InboxReviewAddressed;
   /** Written by a tailnet guest (`InboxMessage.by_guest`): the server's `isGuest`, never the window's word. */
   by_guest?: boolean;
   questions?: InboxAnswerEntry[];

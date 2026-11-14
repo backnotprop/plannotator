@@ -466,6 +466,11 @@ export async function openCodeReview(
 	return session.waitForDecision();
 }
 
+export function piLiveReviewAgent(ctx: unknown): { host: "pi"; session: string } | null {
+	const session = (ctx as { sessionManager?: { getSessionId?: () => string | undefined } } | null)?.sessionManager?.getSessionId?.();
+	return typeof session === "string" && session ? { host: "pi", session } : null;
+}
+
 export async function startCodeReviewBrowserSession(
 	ctx: ExtensionContext,
 	options: CodeReviewOptions = {},
@@ -824,10 +829,9 @@ async function createCodeReviewBrowserSession(
 		}
 	}
 
-	const piSession = (ctx as { sessionManager?: { getSessionId?: () => string | undefined } }).sessionManager?.getSessionId?.();
 	const server = await startServerWithSelfPreemption(() => startReviewServer({
 		sessionBridge: options.sessionBridge,
-		liveReviewAgent: piSession ? { host: "pi", session: piSession } : null,
+		liveReviewAgent: piLiveReviewAgent(ctx),
 		rawPatch,
 		gitRef,
 		error: diffError,

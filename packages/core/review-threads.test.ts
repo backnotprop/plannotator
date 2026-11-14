@@ -81,13 +81,12 @@ describe('conversations', () => {
       { id: 'c1', reply_to: 'root', created_at: at, review_anchor: anchor },
       { id: 'a1', reply_to: 'c1', created_at: at },
       { id: 'p1', reply_to: 'a1', created_at: at },
-      { id: 'a2', reply_to: 'p1', created_at: at, review_addressed: { at, session: 's', host: 'pi', commit: 'def5678' } },
+      { id: 'a2', reply_to: 'p1', created_at: at },
       { id: 'other', reply_to: 'root', created_at: at },
     ];
     const [only, ...rest] = reviewConversations(messages);
     expect(rest).toEqual([]);
     expect(only!.id).toBe('c1');
     expect(only!.messages.map((m) => m.id)).toEqual(['c1', 'a1', 'p1', 'a2']);
-    expect(only!.addressed?.commit).toBe('def5678');
   });
 });

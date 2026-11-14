@@ -25,13 +25,6 @@ export interface InboxReviewResolved {
   at: string;
 }
 
-export interface InboxReviewAddressed {
-  at: string;
-  session: string | null;
-  host: string | null;
-  commit?: string | null;
-}
-
 export const REVIEW_ANCHOR_CODE_LINES_MAX = 80;
 export const REVIEW_ANCHOR_CONTEXT_LINES_MAX = 3;
 export const REVIEW_ANCHOR_LINE_CHARS_MAX = 400;
@@ -176,7 +169,6 @@ export interface ReviewThreadMessage {
   review_anchor?: InboxReviewAnchor | null;
   review_batch?: InboxReviewBatch | null;
   review_resolved?: InboxReviewResolved | null;
-  review_addressed?: InboxReviewAddressed | null;
 }
 
 export interface ReviewConversation<M extends ReviewThreadMessage> {
@@ -184,7 +176,6 @@ export interface ReviewConversation<M extends ReviewThreadMessage> {
   anchor: InboxReviewAnchor;
   messages: M[];
   resolved: InboxReviewResolved | null;
-  addressed: InboxReviewAddressed | null;
 }
 
 export function reviewConversations<M extends ReviewThreadMessage>(messages: readonly M[]): ReviewConversation<M>[] {
@@ -210,11 +201,10 @@ export function reviewConversations<M extends ReviewThreadMessage>(messages: rea
     let conversation = out.get(id);
     if (!conversation) {
       const root = byId.get(id)!;
-      conversation = { id, anchor: root.review_anchor!, messages: [], resolved: root.review_resolved ?? null, addressed: null };
+      conversation = { id, anchor: root.review_anchor!, messages: [], resolved: root.review_resolved ?? null };
       out.set(id, conversation);
     }
     conversation.messages.push(message);
-    if (message.review_addressed && (!conversation.addressed || message.review_addressed.at > conversation.addressed.at)) conversation.addressed = message.review_addressed;
   }
   return [...out.values()];
 }

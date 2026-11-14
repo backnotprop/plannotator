@@ -8,3 +8,4 @@
   .live-arrive { animation: none; }
 }
 .live-thread { font-family: var(--font-sans, ui-sans-serif, system-ui, sans-serif); white-space: normal; }
+[data-mention-picker] { z-index: 1001; }

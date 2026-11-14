@@ -1,4 +1,4 @@
-import { useRef, useState, type MutableRefObject, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type MutableRefObject, type ReactNode } from 'react';
 import type { LiveReviewActions } from './useLiveReview';
 import { LiveComposer } from './LiveComposer';
 import { authorName, deliveryWord, type LiveMessage, type PlacedThread } from './model';
@@ -32,6 +32,12 @@ export function LiveThreadCard({ thread, messages, actions }: { thread: PlacedTh
   const [open, setOpen] = useState(false);
   const [replying, setReplying] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const replyButton = useRef<HTMLButtonElement>(null);
+  const wasReplying = useRef(false);
+  useEffect(() => {
+    if (wasReplying.current && !replying) replyButton.current?.focus();
+    wasReplying.current = replying;
+  }, [replying]);
   const shown = useRef<Set<string> | null>(null);
   const firstPaint = shown.current === null;
   if (!shown.current) shown.current = new Set(conversation.messages.map((m) => m.id));
@@ -53,7 +59,7 @@ export function LiveThreadCard({ thread, messages, actions }: { thread: PlacedTh
   const takeBack = (id: string) => void actions.current.takeBack(id).catch(() => {});
   const controls = (
     <>
-      <button type="button" className={QUIET} data-live-reply onClick={() => setReplying(true)}>
+      <button ref={replyButton} type="button" className={QUIET} data-live-reply onClick={() => setReplying(true)}>
         Reply
       </button>
       <span aria-hidden="true">·</span>
@@ -68,13 +74,25 @@ export function LiveThreadCard({ thread, messages, actions }: { thread: PlacedTh
       >
         {resolved ? 'Reopen' : 'Resolve'}
       </button>
+      {actions.current.postToPR ? (
+        actions.current.posted.has(conversation.id) ? (
+          <span className="px-1">· On the forge</span>
+        ) : (
+          <>
+            <span aria-hidden="true">·</span>
+            <button type="button" className={QUIET} data-live-post onClick={() => void actions.current.postToPR?.([conversation.id]).catch(() => {})}>
+              Post
+            </button>
+          </>
+        )
+      ) : null}
     </>
   );
   return (
     <div className="live-thread mx-2 my-1 rounded border border-border bg-card py-1" data-live-thread={conversation.id} data-place={now.place}>
       {now.place === 'changed' ? (
         <div className="px-3 py-1 text-[12px] leading-5 text-muted-foreground" data-live-changed>
-          <div>Outdated: the code here changed after this comment. It read:</div>
+          <div>Code changed since this comment. It was:</div>
           <pre className="mt-0.5 overflow-x-auto rounded bg-muted px-2 py-0.5 font-mono text-[12px] leading-5 text-muted-foreground">{conversation.anchor.code.join('\n')}</pre>
         </div>
       ) : now.place === 'moved' ? (

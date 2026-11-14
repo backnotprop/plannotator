@@ -68,10 +68,17 @@ function linesOf(patch: string, side: 'old' | 'new') {
 
 export function placeThreads(messages: readonly LiveMessage[], files: readonly { path: string; patch: string }[]): PlacedThread[] {
   const byPath = new Map(files.map((file) => [file.path, file]));
+  const sides = new Map<string, Map<number, string>>();
+  const sideOf = (patch: string, path: string, side: 'old' | 'new') => {
+    const key = `${side}:${path}`;
+    let lines = sides.get(key);
+    if (!lines) sides.set(key, (lines = linesOf(patch, side)));
+    return lines;
+  };
   return reviewConversations(messages).map((conversation) => {
     const file = byPath.get(conversation.anchor.file);
     if (!file) return { conversation, now: { place: 'unknown', line_start: conversation.anchor.line_start, line_end: conversation.anchor.line_end }, inDiff: false };
-    const now = reviewAnchorNow(conversation.anchor, linesOf(file.patch, conversation.anchor.side));
+    const now = reviewAnchorNow(conversation.anchor, sideOf(file.patch, file.path, conversation.anchor.side));
     return { conversation, now, inDiff: now.place !== 'unknown' || conversation.anchor.line_start === 0 };
   });
 }
@@ -159,4 +166,47 @@ export function commentOfMessage(message: LiveMessage): { filePath: string; line
   if (!anchor) return null;
   const whole = anchor.line_start === 0;
   return { filePath: anchor.file, lineStart: anchor.line_start, lineEnd: anchor.line_end, side: anchor.side, scope: whole ? 'file' : 'line', text: message.body };
+}
+
+export interface ForgeThreadComments {
+  fileComments: { path: string; line: number; side: 'LEFT' | 'RIGHT'; body: string; start_line?: number; start_side?: 'LEFT' | 'RIGHT' }[];
+  fileLevelComments: { path: string; body: string }[];
+}
+
+export function threadForgeText(thread: PlacedThread): string {
+  const [first, ...rest] = thread.conversation.messages;
+  const lines = [first?.body.trim() ?? ''];
+  for (const message of rest) lines.push(`**${authorName(message)}:** ${message.body.trim()}`);
+  return lines.filter(Boolean).join('\n\n');
+}
+
+export function forgeCommentsOf(threads: readonly PlacedThread[]): ForgeThreadComments {
+  const out: ForgeThreadComments = { fileComments: [], fileLevelComments: [] };
+  for (const thread of threads) {
+    if (!thread.inDiff) continue;
+    const body = threadForgeText(thread);
+    const { anchor } = thread.conversation;
+    if (anchor.line_start === 0) {
+      out.fileLevelComments.push({ path: anchor.file, body });
+      continue;
+    }
+    const side = anchor.side === 'old' ? 'LEFT' : 'RIGHT';
+    const { line_start: start, line_end: end } = thread.now;
+    out.fileComments.push({ path: anchor.file, line: end, side, body, ...(end > start ? { start_line: start, start_side: side } : {}) });
+  }
+  return out;
+}
+
+export interface OpenThreadPosition {
+  id: string;
+  file: string;
+  line: number;
+  side: 'old' | 'new';
+  changed: boolean;
+}
+
+export function openThreadPositions(placed: readonly PlacedThread[]): OpenThreadPosition[] {
+  return placed
+    .filter((p) => !p.conversation.resolved && p.inDiff)
+    .map((p) => ({ id: p.conversation.id, file: p.conversation.anchor.file, line: p.now.line_start, side: p.conversation.anchor.side, changed: p.now.place === 'changed' }));
 }

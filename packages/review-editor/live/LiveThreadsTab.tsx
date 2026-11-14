@@ -24,7 +24,7 @@ function UnsentRow({ comment, onSend }: { comment: CodeAnnotation; onSend: () =>
   );
 }
 
-function ThreadRow({ thread, focused, onOpen }: { thread: PlacedThread; focused: boolean; onOpen: () => void }) {
+function ThreadRow({ thread, focused, posted, onOpen }: { thread: PlacedThread; focused: boolean; posted: boolean; onOpen: () => void }) {
   const { conversation, now } = thread;
   const last = conversation.messages[conversation.messages.length - 1]!;
   const state = conversation.resolved ? 'Resolved' : now.place === 'changed' ? 'Code changed' : now.place === 'unknown' ? 'Not in this diff' : null;
@@ -41,6 +41,7 @@ function ThreadRow({ thread, focused, onOpen }: { thread: PlacedThread; focused:
           <span className="truncate" title={conversation.anchor.file}>{short(conversation.anchor.file)}</span>
           <span>{threadLines(now)}</span>
           {state ? <span>· {state}</span> : null}
+          {posted ? <span>· On the forge</span> : null}
         </span>
         <span className="line-clamp-2 text-[13px] leading-5 text-foreground">{conversation.messages[0]!.body}</span>
         {conversation.messages.length > 1 ? (
@@ -60,7 +61,7 @@ export function LiveThreadsTab(props: {
   focused: string | null;
   onStep: (direction: 1 | -1) => void;
   threadUrl: string | null;
-  pr: { forge: string; threads: readonly PRReviewThread[] | null; load: () => void } | null;
+  pr: { forge: string; platform: string; threads: readonly PRReviewThread[] | null; load: () => void } | null;
   actions: MutableRefObject<LiveReviewActions>;
 }) {
   const actions = props.actions.current;
@@ -110,6 +111,18 @@ export function LiveThreadsTab(props: {
           </div>
         </section>
       ) : null}
+      {props.pr && actions.postToPR && props.order.some((id) => !actions.posted.has(id)) ? (
+        <div className="flex items-center border-b border-border px-3 py-1.5">
+          <button
+            type="button"
+            className="h-7 rounded px-2 text-[12px] text-muted-foreground hover:bg-muted hover:text-foreground"
+            data-live-post-all
+            onClick={() => void actions.postToPR?.(props.order.filter((id) => !actions.posted.has(id))).catch(() => {})}
+          >
+            Post {props.order.filter((id) => !actions.posted.has(id)).length} open threads to the {props.pr.forge === 'GitLab' ? 'merge request' : 'pull request'}
+          </button>
+        </div>
+      ) : null}
       {props.pr ? <PRThreadsSection pr={props.pr} onOpen={(path, line, side) => actions.revealLines(path, line, side)} /> : null}
       {props.placed.length === 0 && props.unsent.length === 0 ? (
         <p className="px-3 py-3 text-[12px] leading-5 text-muted-foreground">
@@ -118,7 +131,7 @@ export function LiveThreadsTab(props: {
       ) : (
         <ul className="py-1">
           {[...props.placed].sort((a, b) => a.conversation.anchor.file.localeCompare(b.conversation.anchor.file) || a.now.line_start - b.now.line_start).map((thread) => (
-            <ThreadRow key={thread.conversation.id} thread={thread} focused={props.focused === thread.conversation.id} onOpen={() => actions.reveal(thread)} />
+            <ThreadRow key={thread.conversation.id} thread={thread} focused={props.focused === thread.conversation.id} posted={actions.posted.has(thread.conversation.id)} onOpen={() => actions.reveal(thread)} />
           ))}
         </ul>
       )}

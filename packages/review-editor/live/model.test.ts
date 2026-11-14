@@ -76,3 +76,48 @@ describe('a pull request thread on the diff', () => {
     expect(prThreadPlace({ ...base, line: null, startLine: null, diffSide: null })).toBeNull();
   });
 });
+
+describe('a thread posted to the forge', () => {
+  test('goes on its current lines with every reply, and a whole-file one as a file comment', async () => {
+    const { forgeCommentsOf } = await import('./model');
+    const anchor = anchorOfComment({ filePath: 'src/billing.ts', lineStart: 4, lineEnd: 5, side: 'new' }, files);
+    const whole = anchorOfComment({ filePath: 'src/billing.ts', lineStart: 0, lineEnd: 0, side: 'new', scope: 'file' }, files);
+    const placed = placeThreads(
+      [
+        msg({ id: 'c', body: 'Two checks here?', review_anchor: anchor }),
+        msg({ id: 'a', reply_to: 'c', body: 'Merged into one.', author: { kind: 'agent', host: 'pi', session: 's', name: null } as never, created_at: at(1) }),
+        msg({ id: 'f', body: 'Split this file.', review_anchor: whole }),
+      ],
+      files,
+    );
+    expect(forgeCommentsOf(placed)).toEqual({
+      fileComments: [{ path: 'src/billing.ts', line: 5, side: 'RIGHT', start_line: 4, start_side: 'RIGHT', body: 'Two checks here?\n\n**Pi:** Merged into one.' }],
+      fileLevelComments: [{ path: 'src/billing.ts', body: 'Split this file.' }],
+    });
+  });
+});
+
+describe('a review with many threads', () => {
+  test('60 threads across 20 files are placed quickly; next and previous cross files in order; the open positions are there for the minimap', async () => {
+    const { openThreadPositions } = await import('./model');
+    const many = Array.from({ length: 20 }, (_, f) => ({
+      path: `src/mod${String(f).padStart(2, '0')}.ts`,
+      patch: ['@@ -1,40 +1,40 @@', ...Array.from({ length: 40 }, (_, n) => ` const v${f}_${n} = ${n};`)].join('\n'),
+    }));
+    const messages = many.flatMap((file, f) =>
+      [5, 15, 25].map((line, k) => msg({ id: `t${f}_${k}`, review_anchor: anchorOfComment({ filePath: file.path, lineStart: line, lineEnd: line, side: 'new' }, many), ...(k === 2 && f % 2 ? { review_resolved: { at: at(1) } } : {}) })),
+    );
+    const started = performance.now();
+    const placed = placeThreads(messages, many);
+    expect(performance.now() - started).toBeLessThan(250);
+    expect(placed.every((p) => p.now.place === 'here')).toBe(true);
+    const order = openThreadIds(placed, many.map((f) => f.path));
+    expect(order.length).toBe(50);
+    expect(stepThread(order, 't0_2', 1)).toBe('t1_0');
+    expect(stepThread(order, 't1_0', -1)).toBe('t0_2');
+    expect(stepThread(order, order.at(-1)!, 1)).toBe('t0_0');
+    const positions = openThreadPositions(placed);
+    expect(positions.length).toBe(50);
+    expect(positions[0]).toEqual({ id: 't0_0', file: 'src/mod00.ts', line: 5, side: 'new', changed: false });
+  });
+});
