@@ -39,6 +39,7 @@ import {
   type ParsedInboxQuestion,
 } from "@plannotator/core/inbox-questions";
 import { withoutInboxSkillsBlock } from "@plannotator/core/skill-reference-block";
+import type { InboxReviewAddressed, InboxReviewAnchor, InboxReviewBatch, InboxReviewLive } from "@plannotator/core/review-threads";
 import { inboxRowPreview, inboxRowPreviewWords } from "@plannotator/core/inbox-folding";
 import {
   checkInboxActionResult,
@@ -330,6 +331,9 @@ export interface InboxAnswerEntry {
 
 export interface InboxReplyInput {
   words?: string;
+  review_anchor?: InboxReviewAnchor;
+  review_batch?: InboxReviewBatch;
+  review_addressed?: InboxReviewAddressed;
   /** Written by a tailnet guest (`InboxMessage.by_guest`): the server's `isGuest`, never the window's word. */
   by_guest?: boolean;
   questions?: InboxAnswerEntry[];
@@ -5061,6 +5065,8 @@ export class InboxStore {
       ...(viewing ? { viewing } : {}),
       ...(reviewCommentsOf.length > 0 ? { review_comments_of: reviewCommentsOf } : {}),
       ...(quoted ? { quote: quoted.quote } : {}),
+      ...(input.review_anchor ? { review_anchor: input.review_anchor } : {}),
+      ...(input.review_batch ? { review_batch: input.review_batch } : {}),
     };
     // A hand-off still inside its Undo window in this thread goes first (approval "inbox-tag-handoff"):
     // a later reply never reaches the new owner before the hand-off does, and Undo can no longer
@@ -6519,6 +6525,7 @@ export class InboxStore {
     const tag = owner ? null : tagOf(message, session);
     if (tag) return !tag.delivery && options.tags !== false;
     if (message.delivery || !owner) return false;
+    if (message.review_batch && !message.review_batch.lead) return false;
     // A Tidy note in a thread other than the one carrying the session's wake is never delivered.
     if (message.tidy && !message.tidy.wake) return false;
     // A 👍 taken back before it went is never delivered.
@@ -7039,6 +7046,9 @@ export class InboxStore {
     rows_ask?: unknown;
     /** Launch: the agent the Inbox starts for this thread (the server's record; `to` is then its placeholder). */
     launch?: InboxLaunchRecord;
+    review_live?: InboxReviewLive;
+    review_anchor?: InboxReviewAnchor;
+    review_batch?: InboxReviewBatch;
   }): { message: InboxMessage; replayed: boolean } {
     const key = typeof input.idempotency_key === "string" ? input.idempotency_key.trim() : "";
     if (!key) throw new InboxError("validation_error", "idempotency_key: required on a Send.", { field: "idempotency_key" });
@@ -7081,6 +7091,9 @@ export class InboxStore {
       ...(input.decision_ask === true ? { decision_ask: true as const } : {}),
       ...(input.rows_ask === true ? { rows_ask: true as const } : {}),
       ...(input.launch ? { launch: input.launch } : {}),
+      ...(input.review_live ? { review_live: input.review_live } : {}),
+      ...(input.review_anchor ? { review_anchor: input.review_anchor } : {}),
+      ...(input.review_batch ? { review_batch: input.review_batch } : {}),
       ...(threadName ? { thread_name: threadName, named_by: { kind: auto ? ("auto" as const) : ("person" as const), at } } : {}),
       ...(input.attachments && input.attachments.length > 0 ? { attachments: input.attachments.map((attachment) => ({ ...attachment, sent_at: at })) } : {}),
     };
@@ -7132,6 +7145,32 @@ export class InboxStore {
   }
 
   /** The thread the person started with this idempotency key, for a replayed Send. */
+  reviewLiveThread(projectId: string, key: string): InboxMessage | null {
+    let found: InboxMessage | null = null;
+    for (const message of this.messages.values()) {
+      if (message.project_id !== projectId || message.thread_id !== message.id || message.review_live?.key !== key) continue;
+      if (message.resolved_at) continue;
+      if (!found || message.created_at > found.created_at) found = message;
+    }
+    return found;
+  }
+
+  reviewBatchOf(message: InboxMessage): InboxMessage[] {
+    const batch = message.review_batch;
+    if (!batch?.lead) return [];
+    return this.threadMessages(message.thread_id).filter((m) => m.review_batch?.id === batch.id && !m.review_batch.lead && m.review_anchor);
+  }
+
+  setReviewResolved(messageId: string, resolved: boolean): InboxMessage {
+    const message = this.messages.get(messageId);
+    if (!message || !message.review_anchor) throw new InboxError("message_not_found", `No review comment ${messageId}.`);
+    if (!!message.review_resolved === resolved) return message;
+    const at = this.stamp();
+    const next: InboxMessage = { ...message, review_resolved: resolved ? { at } : null };
+    this.appendMessage(next, at);
+    return next;
+  }
+
   personThreadByKey(key: string): InboxMessage | null {
     for (const message of this.messages.values()) if (message.started_by_person && message.idempotency_key === key) return message;
     return null;

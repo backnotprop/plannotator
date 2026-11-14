@@ -22,6 +22,7 @@
  * An upload no draft names is swept after INBOX_UPLOAD_KEEP_MS.
  */
 
+import { reviewAnchorBlock, reviewBatchBlock, type InboxReviewAnchor } from "@plannotator/core/review-threads";
 import { INBOX_ROWS_ASK_BLOCK } from "@plannotator/core/inbox-types";
 import { randomBytes } from "node:crypto";
 import {
@@ -123,8 +124,11 @@ export function inboxBodyForAgent(message: {
   decision_ask?: true;
   rows_ask?: true;
   viewing?: InboxReplyViewing | null;
-}): string {
-  const after = [inboxViewingLine(message), inboxAttachedLines(message)].filter((part) => part !== "").join("\n\n");
+  id?: string;
+  review_anchor?: InboxReviewAnchor | null;
+}, batch: readonly { id: string; body: string; review_anchor?: InboxReviewAnchor | null }[] = []): string {
+  const review = message.id ? (batch.length > 0 ? reviewBatchBlock({ id: message.id }, batch) : reviewAnchorBlock({ id: message.id, review_anchor: message.review_anchor })) : "";
+  const after = [review, inboxViewingLine(message), inboxAttachedLines(message)].filter((part) => part !== "").join("\n\n");
   // A reply of pasted files alone may have no words.
   let words = !after ? message.body : message.body.trim() ? `${message.body}\n\n${after}` : after;
   if (message.board_request === true && message.thread_id) words = `${words}\n\n${inboxBoardRequestBlock(message.thread_id)}`;

@@ -194,6 +194,8 @@ import {
 import { agentToolHostForServer, createAIRuntime } from "./ai-runtime";
 import { assertTestHome } from "./test-home-guard";
 import { handleHostControl, resolveHostControlToken, type HostControl } from "./host-control";
+import { createReviewLiveRoute } from "./review-live-route";
+import type { ReviewLiveTarget } from "@plannotator/shared/review-live";
 import { sessionTailnetAudience, sessionTailnetGate } from "./session-tailnet";
 import { countUnsentDraftComments, hostSessionClosedEvent } from "@plannotator/shared/host-control";
 import { checkServerSession, createServerSessionNonce, serverSessionMismatchBody } from "@plannotator/shared/server-session";
@@ -357,6 +359,8 @@ export interface ReviewServerOptions {
   gitRemoteCheck?: boolean;
   /** Cleanup callback invoked when server stops (e.g., remove temp worktree) */
   onCleanup?: () => void | Promise<void>;
+  liveReviewAgent?: ReviewLiveTarget | null;
+  liveReviewDataDir?: string;
 }
 
 export interface ReviewServerResult {
@@ -451,6 +455,17 @@ export async function startReviewServer(
   const hasLocalAccess = !!gitContext;
   const sessionVcsType = gitContext?.vcsType;
   let clientGitContext = gitContext;
+  const liveRoute = createReviewLiveRoute({
+    ...(options.liveReviewDataDir ? { dataDir: options.liveReviewDataDir } : {}),
+    launchedBy: options.liveReviewAgent ?? null,
+    projectPath: () => clientGitContext?.root ?? clientGitContext?.cwd ?? gitContext?.root ?? gitContext?.cwd ?? options.agentCwd ?? process.cwd(),
+    review: () =>
+      prMetadata?.url
+        ? { key: `pr:${prMetadata.url}`, title: prMetadata.title || prMetadata.url }
+        : clientGitContext?.currentBranch
+          ? { key: `branch:${clientGitContext.currentBranch}`, title: clientGitContext.currentBranch }
+          : null,
+  });
   let draftKey = contentHash(options.rawPatch);
   const editorAnnotations = createEditorAnnotationHandler();
   const externalAnnotations = createExternalAnnotationHandler("review");
@@ -2328,6 +2343,8 @@ export async function startReviewServer(
             ...(options.tailnetPublished === true ? { fromThisMachine: (r: Request) => sessionTailnetAudience(r) === "local" } : {}),
           });
           if (hostControlResponse) return hostControlResponse;
+          const live = await liveRoute(req, url);
+          if (live) return live;
 
           // API: Get guide result — live job ids, or `saved:{id}` for a
           // persisted guide loaded from the on-disk store (#1112).

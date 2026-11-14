@@ -83,6 +83,7 @@
  *   PLANNOTATOR_PORT   - Fixed port to use (default: random locally, 19432 for remote)
  */
 
+import { reviewLiveTargetOf } from "@plannotator/shared/review-live";
 import { childEnv, isAskAiChild } from "@plannotator/shared/child-env";
 import {
   startPlannotatorServer as startPlannotatorServerUnguarded,
@@ -1707,6 +1708,7 @@ if (args[0] === "sessions") {
 
   // Start review server (even if empty - user can switch diff types in local mode)
   const server = await startReviewServer({
+    liveReviewAgent: reviewLiveTargetOf(process.env.PLANNOTATOR_SESSION_TAG),
     rawPatch,
     gitRef,
     error: diffError,

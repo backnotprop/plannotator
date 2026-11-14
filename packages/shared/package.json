@@ -197,7 +197,8 @@
     "./inbox/drafts": "./inbox/drafts.ts",
     "./inbox/connection": "./inbox/connection.ts",
     "./inbox/tailnet": "./inbox/tailnet.ts",
-    "./inbox/agent-link": "./inbox/agent-link.ts"
+    "./inbox/agent-link": "./inbox/agent-link.ts",
+    "./review-live": "./review-live.ts"
   },
   "dependencies": {
     "@joplin/turndown-plugin-gfm": "^1.0.68",
