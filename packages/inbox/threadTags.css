@@ -2,11 +2,9 @@
    Add tag list in the row menu and the thread's ⋯ (components/AddTagMenu.tsx), and a tag's list header. Theme tokens only. */
 
 /* ---------- the sidebar: a section like Projects, straight on the sidebar's ground. ---------- */
-/* New tag: the heading's quiet icon button, always shown (not only on hover), as Agents' Add agent. It stands over
-   the rows' counts (where a project row's ⋯ sits); the chevron, shown only on hover or focus, comes in left of it,
-   so nothing moves as the pointer enters. */
-.pn-inbox .ib-tagsec .ib-tags-add { opacity: 1; right: 3px; }
-.ib-tagsec .ib-secrow > .ib-side-sec { padding-right: 30px; }
+/* New tag: the heading's quiet icon button, shown while the section is open; closed, on the heading's hover or focus,
+   as Agents' Add agent. */
+.pn-inbox .ib-tagsec:not([data-closed]) .ib-tags-add { opacity: 1; }
 .pn-inbox .ib-tags { display: flex; flex-direction: column; }
 .pn-inbox .ib-tags .ib-proj:not(.ib-on):hover,
 .pn-inbox .ib-tags .ib-proj[data-menu]:not(.ib-on) { background: var(--ib-side-hover); }
@@ -30,11 +28,8 @@
 .pn-inbox .ib-lhead-mark svg.ib-ic { width: 18px; height: 18px; }
 .ib-lhead-note { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--muted-foreground); font-size: var(--ib-fs-13, 13px); font-variant-numeric: tabular-nums; white-space: nowrap; }
 
-/* Phone: the field at the sheet's item height. The chevron is always shown there, in its own 44 px box at the
-   edge, and New tag keeps the place beside it that every heading's button has. */
+/* Phone: the field at the sheet's item height. */
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
-  .pn-inbox .ib-tagsec .ib-tags-add { right: 44px; }
-  .ib-tagsec .ib-secrow > .ib-side-sec { padding-right: 0; }
   .ib-pm-pos[data-phone] .ib-tagm-find { height: 48px; padding: 0 12px; gap: 12px; }
   .ib-pm-pos[data-phone] .ib-tagm-find input { font-size: var(--ib-fs-16-in, 16px); }
 }

@@ -161,3 +161,33 @@ test('the gap above Projects is no hover: the row around its header is exactly t
   const row = (await page.locator(`${scope} .ib-secrow`, { has: page.locator('[data-sidebar-section="projects"]') }).boundingBox())!;
   expect([row.y, row.height]).toEqual([header.y, header.height]);
 });
+
+// Last: a tag adds a Tags header, which the layouts above do not list. Tags' New tag and Agents' Add agent sit in
+// one column, and both headings show their buttons the same way: always while open, closed only on the heading's hover.
+test("Tags' New tag sits right above Agents' Add agent, and shows while Tags is open, closed only on the heading's hover", async () => {
+  const { page, thread } = world;
+  const status = await page.evaluate(async (id) => {
+    const list = (await (await fetch('/api/inbox/threads?archived=exclude')).json()) as { serverSession: string };
+    const post = (path: string, body: Record<string, unknown>) =>
+      fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ serverSession: list.serverSession, ...body }) });
+    const made = (await (await post('/api/inbox/initiatives', { name: 'Code Review' })).json()) as { initiative: { id: string } };
+    return (await post(`/api/inbox/threads/${id}/tags`, { tag: made.initiative.id, on: true })).status;
+  }, thread);
+  expect(status).toBeLessThan(300);
+  const scope = await open([]);
+  await page.mouse.move(900, 600);
+  const newTag = page.locator(`${scope} [data-tags-add]`);
+  const addAgent = page.locator(`${scope} [data-agents-add="agent"]`);
+  await expect(newTag).toHaveCSS('opacity', '1');
+  await expect(addAgent).toHaveCSS('opacity', '1');
+  const tagBox = (await newTag.boundingBox())!;
+  const agentBox = (await addAgent.boundingBox())!;
+  expect([tagBox.x, tagBox.width]).toEqual([agentBox.x, agentBox.width]);
+
+  await open(['tags']);
+  await page.mouse.move(900, 600);
+  await expect(newTag).toHaveCSS('opacity', '0');
+  await page.locator(`${scope} [data-tags-head] [data-sidebar-section="tags"]`).hover({ position: { x: 40, y: 10 } });
+  await expect(newTag).toHaveCSS('opacity', '1');
+  await page.mouse.move(900, 600);
+});
