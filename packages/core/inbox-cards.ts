@@ -651,9 +651,10 @@ export function inboxCardHistory(snapshots: readonly InboxCard[]): InboxCardHist
  * A card as every reader gets it: the record, its `threads` only those that
  * still exist, and `heard_seq` (additive): the store seq of the line that
  * last wrote to it (a line that only marks a drop seen is not a write), so
- * the Board tells news by seq, never by clock.
+ * the Board tells news by seq, never by clock. `machine` (the merged Board
+ * only): a linked machine's card, the `ibx_` id of that machine; absent on this Inbox's own.
  */
-export type InboxCardWire = InboxCard & { heard_seq?: number };
+export type InboxCardWire = InboxCard & { heard_seq?: number; machine?: string };
 
 /**
  * Whether `next` differs from `prev` only in what the person saw (a drop's

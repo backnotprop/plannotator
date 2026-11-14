@@ -14,7 +14,7 @@
  */
 import { expect, test } from 'bun:test';
 import type { InboxAuthor, InboxCardWire, InboxInitiative } from '@plannotator/core/inbox-types';
-import { boardCounts, boardFilterHash, boardInitiativeOf, cardsInInitiative, initiativeCounts, liveInitiatives, newCardInitiative, boardLanes, boardViewOf, boardProjects, cardAge, cardsInProject, newCardProject, cardFoot, cardLine, cardMenuItems, cardMenuToast, cardMessageBody, cardUndoStillApplies, cardShowsUnread, columnChoices, historyWords, messageKey, refState, sentTo, shortRef, unseenDrops, waitingThread, youLinkLabel, youThread, type CardMenuItem } from './model';
+import { boardCounts, boardFilterHash, boardLookOf, boardProjectNames, boardInitiativeOf, cardsInInitiative, initiativeCounts, liveInitiatives, newCardInitiative, boardLanes, boardViewOf, boardProjects, cardAge, cardsInProject, newCardProject, cardFoot, cardLine, cardMenuItems, cardMenuToast, cardMessageBody, cardUndoStillApplies, cardShowsUnread, columnChoices, historyWords, messageKey, refState, sentTo, shortRef, unseenDrops, waitingThread, youLinkLabel, youThread, type CardMenuItem } from './model';
 
 const CLAUDE: InboxAuthor = { kind: 'agent', host: 'claude-code', session: 's1', name: 'Claude Code' };
 const PERSON: InboxAuthor = { kind: 'person' };
@@ -116,6 +116,33 @@ test('unread: an agent wrote in a line after the look the visit began with, and 
   expect(cardShowsUnread(late, look, new Set(['late']))).toBe(false);
   // Never looked: every card an agent wrote is unread.
   expect(cardShowsUnread(early, null, new Set())).toBe(true);
+});
+
+test("unread on the merged Board: a linked machine's card by that machine's look (its seqs are its own), this Inbox's by its own", () => {
+  const looks = { ibx_far: 100, ibx_never: null };
+  const far = card('far', { heard_seq: 50, machine: 'ibx_far' });
+  const own = card('own', { heard_seq: 50 });
+  expect(cardShowsUnread(far, boardLookOf(far, 10, looks), new Set())).toBe(false);
+  expect(cardShowsUnread(own, boardLookOf(own, 10, looks), new Set())).toBe(true);
+  // That machine never looked: its agents' cards are unread, whatever this Inbox's look.
+  const fresh = card('fresh', { heard_seq: 1, machine: 'ibx_never' });
+  expect(cardShowsUnread(fresh, boardLookOf(fresh, 10, looks), new Set())).toBe(true);
+});
+
+test("the Board's project names: a linked machine's carry its name; one name on two machines is told apart by machine, not by folder", () => {
+  const projects = [
+    { id: 'prj_a', name: 'web', root: '/work/web' },
+    { id: 'prj_b', name: 'web', root: '/srv/web', machine: 'ibx_mini' },
+    { id: 'prj_c', name: 'api', root: '/srv/api', machine: 'ibx_mini' },
+  ];
+  const names = boardProjectNames(projects, new Map([['ibx_mini', 'Mac-mini']]));
+  expect([...names]).toEqual([
+    ['prj_a', 'web'],
+    ['prj_b', 'web · Mac-mini'],
+    ['prj_c', 'api · Mac-mini'],
+  ]);
+  // None linked: the names as before.
+  expect(boardProjectNames(projects.slice(0, 1), new Map())).toEqual(new Map([['prj_a', 'web']]));
 });
 
 test('a card message names the card; a message key replays the same words and not changed ones', () => {

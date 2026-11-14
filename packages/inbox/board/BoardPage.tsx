@@ -1,9 +1,11 @@
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type ReactNode } from 'react';
 import { ProjectMark, showsProjects, useRowMarks } from '../letterMarks';
 import { knownProjectName, useKnownProjects } from '../projectPictures';
 import { INBOX_CARD_COLUMN_LABELS, INBOX_CARD_LIVE_COLUMNS, displayInboxSubject, inboxCardMarkRef, type InboxCardColumn, type InboxCardMark, type InboxCardHistoryEntry, type InboxCardRef, type InboxCardWire, type InboxListRow, type InboxProjectRepo, type InboxInitiative } from '@plannotator/core/inbox-types';
 import type { ForgeRefCardResult } from '@plannotator/core/forge-ref-card';
-import { inboxApi, type CardsModel, type ComposeSessionsModel, type ProjectFolder } from '../api';
+import { InboxHeldError, heldWords, inboxApi, type CardsModel, type ComposeSessionsModel, type MachineView, type ProjectFolder } from '../api';
+import { errorToast } from '../toastError';
+import type { MachinesModel } from '../machines';
 import { formatCount, fullTime, whenTime } from '../format';
 import { AuthorMark, Icon } from '../icons';
 import { ProjectTipText, Tip, isTextCut } from '../components/Tip';
@@ -31,7 +33,7 @@ import { BoardFilter, BoardFilterTokens, initiativeLabel } from './BoardFilter';
 import { InitiativesDialog } from './InitiativesDialog';
 import { restoreInitiatives } from './initiativeUndo';
 import type { TagsAcross } from '../tagsAcross';
-import { projectNames } from '../search/model';
+
 import {
   agentState,
   askWhereBody,
@@ -57,6 +59,8 @@ import {
   lanesThatFit,
   laneWindowStart,
   cardOwnerName,
+  boardLookOf,
+  boardProjectNames,
   cardShowsUnread,
   moveSaid,
   sentTo,
@@ -84,10 +88,16 @@ export interface BoardPageProps {
   error: string | null;
   /** The person's look when this visit began: cards an agent wrote to after it are bold. */
   visitLook: number | null;
+  /** Each linked machine's look, by its id: that machine's cards are bold by it. */
+  machineLooks?: Readonly<Record<string, number | null>>;
   /** Cards the person opened or moved this visit: no longer bold. */
   handled: ReadonlySet<string>;
-  /** Projects a New card can go in (the sidebar's). */
+  /** Every project the cards can be in, linked machines' too (the merged list's): their names, the filter, the opened card. */
   projects: readonly ProjectFolder[];
+  /** Projects a New card can go in (this Inbox's own). Absent: `projects`. */
+  homeProjects?: readonly ProjectFolder[];
+  /** The linked machines (machines.ts): a project of one reads "web · Mac-mini", and a write held for one says so. Absent: none linked. */
+  machines?: MachinesModel;
   /** Where a New card goes unless the person picks another. */
   defaultProject: string | null;
   home: string | null;
@@ -98,7 +108,8 @@ export interface BoardPageProps {
   /** A thread's list row (its subject, state and delivery), or null when the list does not hold it. */
   rowOf: (threadId: string) => InboxListRow | null;
   onView: (view: BoardView) => void;
-  onMove: (card: InboxCardWire, move: BoardMove) => Promise<InboxCardWire | null>;
+  /** `held`: the move waits for an asleep linked machine, and the window's clock toast says so. */
+  onMove: (card: InboxCardWire, move: BoardMove) => Promise<InboxCardWire | 'held' | null>;
   /** A card was made or edited here: read the cards again (the event stream does too). */
   onChanged: (card?: InboxCardWire) => void;
   /** The person looked at these agents' drops ("Got it", or the Cancelled page while it is in front): only those are marked seen. */
@@ -158,12 +169,15 @@ export function BoardPage(props: BoardPageProps) {
   const initiative = props.initiative ?? null;
   // Filtered to a project and/or an initiative: everything below reads only those cards (the opened card is found among all).
   const projectCards = cardsInProject(allCards, project);
-  const names = useMemo(() => projectNames(props.projects), [props.projects]);
+  const machineNames = props.machines?.names ?? NO_MACHINES;
+  const names = useMemo(() => boardProjectNames(props.projects, machineNames), [props.projects, machineNames]);
+  const homeProjects = props.homeProjects ?? props.projects;
   const offered = boardProjects(allCards, props.projects, project);
   const projectName = project ? (names.get(project) ?? null) : null;
   // A card names its project while the Board spans projects and none is picked, the Project button's own rule
   // (owner, 2026-11-05): on a row of its own above the title, with the marks and the age.
-  const cardsShowProject = project === null && offered.length > 1;
+  // A linked machine's card always names its project, with that machine (the quiet " · Mac-mini" of a list row).
+  const cardsShowProject = project === null && (offered.length > 1 || allCards.some((c) => farMachine(c) !== null));
   const across = props.tagsAcross ?? null;
   const initiatives = useMemo(() => boardTags(across, liveInitiatives(model?.initiatives)), [across, model?.initiatives]);
   const cards = cardsInInitiative(projectCards, initiative, initiatives);
@@ -205,18 +219,35 @@ export function BoardPage(props: BoardPageProps) {
   /** Put a card in an initiative (or none): the card menu's Initiative and the opened card's. */
   const setInitiative = async (card: InboxCardWire, next: string | null) => {
     setFailed(null);
+    const machine = farMachine(card);
     try {
-      const { card: changed } = await inboxApi.setCardInitiative(card.id, across ? await across.here(next) : next);
+      const value = !across ? next : machine ? across.there(next, machine) : await across.here(next);
+      const { card: changed } = await inboxApi.setCardInitiative(card.id, value);
       props.onChanged(changed);
       const name = next ? (initiatives.find((i) => i.id === next)?.name ?? 'the tag') : null;
       setSaid(name ? `“${card.title}” is in ${name} now.` : `“${card.title}” has no tag now.`);
-    } catch {
-      setFailed(`“${card.title}” did not change. Try again.`);
+    } catch (cause) {
+      if (!heldSaid(cause)) setFailed(`“${card.title}” did not change. Try again.`);
     }
+  };
+  /** A write held for an asleep linked machine is not a failure: the window's clock toast says it waits. */
+  const heldSaid = (cause: unknown): boolean => {
+    if (!(cause instanceof InboxHeldError)) return false;
+    props.onToast?.(errorToast(cause, ''));
+    return true;
   };
   const { model: sessions } = useComposeSessions(true);
   const live = sessions ? sessions.projects.flatMap((g) => g.sessions) : null;
   const open = props.openCard ? (allCards.find((c) => c.id === props.openCard) ?? null) : null;
+  // A linked machine's card talks to that machine's agents: its live sessions, read through the forward while its
+  // card is open or being sent, as compose reads them.
+  const sessionsMachine = (sendingCard ? farMachine(sendingCard) : null) ?? (open ? farMachine(open) : null);
+  const farSessions = useMachineSessions(sessionsMachine);
+  const sessionsOf = (card: InboxCardWire): ComposeSessionsModel | null => {
+    const machine = farMachine(card);
+    if (!machine) return sessions;
+    return farSessions?.machine === machine ? farSessions.model : null;
+  };
   const projectOf = (card: InboxCardWire) => props.projects.find((p) => p.id === card.project_id) ?? null;
 
   // When the opened card closes, focus that the panel took with it goes back to the card, in whatever
@@ -243,6 +274,7 @@ export function BoardPage(props: BoardPageProps) {
   const move = async (card: InboxCardWire, change: BoardMove, fromMenu = false): Promise<InboxCardWire | null> => {
     setFailed(null);
     const moved = await props.onMove(card, change);
+    if (moved === 'held') return null;
     if (!moved) {
       setFailed(`“${card.title}” did not move. Try again.`);
       return null;
@@ -326,7 +358,8 @@ export function BoardPage(props: BoardPageProps) {
   const sendCardTo = async (card: InboxCardWire, to: NonNullable<NewCardInput["to"]>, key: string): Promise<InboxCardWire> => {
     if (!sendTry.current || sendTry.current.session !== to.session) sendTry.current = { session: to.session, body: cardMessageBody(card.title, card.notes, card.id) };
     const body = sendTry.current.body;
-    const started = await inboxApi.startThread({ to: { host: to.host, session: to.session }, body, idempotency_key: messageKey(key, to.session, body) });
+    // A linked machine's card goes to an agent there, through that machine's Inbox.
+    const started = await inboxApi.startThread({ to: { host: to.host, session: to.session }, body, idempotency_key: messageKey(key, to.session, body) }, farMachine(card));
     return (await inboxApi.editCard(card.id, { op: 'send', thread_id: started.thread_id })).card;
   };
 
@@ -513,6 +546,7 @@ export function BoardPage(props: BoardPageProps) {
 
   const common: CardCommon = {
     visitLook: props.visitLook,
+    machineLooks: props.machineLooks ?? NO_LOOKS,
     handled: props.handled,
     now,
     phone,
@@ -605,10 +639,12 @@ export function BoardPage(props: BoardPageProps) {
     <OpenedCard
       key={open.id}
       card={open}
-      projectName={projectOf(open)?.name ?? ''}
+      projectName={names.get(open.project_id) ?? projectOf(open)?.name ?? ''}
       projectRoot={projectOf(open)?.root ?? null}
-      sessions={sessions}
-      live={live}
+      sessions={sessionsOf(open)}
+      live={sessionsOf(open)?.projects.flatMap((g) => g.sessions) ?? null}
+      machine={props.machines?.linked.find((m) => m.id === farMachine(open)) ?? null}
+      onHeld={(cause) => props.onToast?.(errorToast(cause, ''))}
       phone={phone}
       now={now}
       rowOf={props.rowOf}
@@ -618,7 +654,8 @@ export function BoardPage(props: BoardPageProps) {
       onSend={() => openSend(open)}
       onChanged={props.onChanged}
       onOpenThread={(threadId) => props.onOpenThread(open, threadId)}
-      onCreateThread={(session, opener) => props.onCreateThread(open, session, opener)}
+      // A linked machine's card: compose opens with To empty, its folder menu offering that machine's agents.
+      onCreateThread={(session, opener) => props.onCreateThread(open, farMachine(open) ? null : session, opener)}
       initiatives={cardInitiatives(model?.initiatives ?? [], initiatives)}
       onInitiative={(next) => void setInitiative(open, next)}
     />
@@ -629,7 +666,7 @@ export function BoardPage(props: BoardPageProps) {
     return (
       <section className="ib-bpage ib-bpage-card" aria-label={`Card: ${open!.title}`} data-board-page="" data-board-view="card">
         {panel}
-        {sendingCard && <SendDialog card={sendingCard} sessions={sessions} projects={props.projects} home={props.home} phone={phone} onClose={() => setSendingCard(null)} onSend={sendExisting} />}
+        {sendingCard && <SendDialog card={sendingCard} sessions={sessionsOf(sendingCard)} projects={props.projects} home={props.home} phone={phone} onClose={() => setSendingCard(null)} onSend={sendExisting} />}
       </section>
     );
   }
@@ -677,7 +714,7 @@ export function BoardPage(props: BoardPageProps) {
             </a>
           </nav>
         )}
-        {(view === 'lanes' || phone) && <NewCardButton disabled={props.projects.length === 0 && !(live && live.length > 0)} phone={phone} onOpen={() => openCreate('backlog')} />}
+        {(view === 'lanes' || phone) && <NewCardButton disabled={homeProjects.length === 0 && !(live && live.length > 0)} phone={phone} onOpen={() => openCreate('backlog')} />}
         {props.tidy && (view === 'lanes' || phone) && (
           <TidyMenu tidy={props.tidy} phone={phone} className="ib-bhead-more" onRefresh={() => props.onChanged()} />
         )}
@@ -729,7 +766,7 @@ export function BoardPage(props: BoardPageProps) {
       </div>
       {creating && (
         <NewCardDialog
-          projects={props.projects}
+          projects={homeProjects}
           defaultProject={props.defaultProject}
           sessions={sessions}
           home={props.home}
@@ -754,7 +791,7 @@ export function BoardPage(props: BoardPageProps) {
         />
       )}
       {intro && <BoardIntro mcpCommand={props.mcpCommand} phone={phone} onClose={() => setIntro(false)} />}
-      {sendingCard && <SendDialog card={sendingCard} sessions={sessions} projects={props.projects} home={props.home} phone={phone} onClose={() => setSendingCard(null)} onSend={sendExisting} />}
+      {sendingCard && <SendDialog card={sendingCard} sessions={sessionsOf(sendingCard)} projects={props.projects} home={props.home} phone={phone} onClose={() => setSendingCard(null)} onSend={sendExisting} />}
     </section>
   );
 }
@@ -794,6 +831,8 @@ function SendDialog({
 
 interface CardCommon {
   visitLook: number | null;
+  /** Each linked machine's look (`boardLookOf`). */
+  machineLooks: Readonly<Record<string, number | null>>;
   handled: ReadonlySet<string>;
   now: number;
   phone: boolean;
@@ -957,6 +996,7 @@ const titleCut = (trigger: Element) => isTextCut(trigger.closest('.ib-bc-main'))
 function BoardCard({
   card,
   visitLook,
+  machineLooks,
   handled,
   now,
   phone,
@@ -973,7 +1013,7 @@ function BoardCard({
   onDragStart,
   onDragEnd,
 }: CardCommon & { card: InboxCardWire; draggable?: boolean; dragging?: boolean; onDragStart?: () => void; onDragEnd?: () => void }) {
-  const unread = cardShowsUnread(card, visitLook, handled);
+  const unread = cardShowsUnread(card, boardLookOf(card, visitLook, machineLooks), handled);
   const line = cardLine(card);
   const sent = sentTo(card);
   const delivery = sent && card.sent ? (rowOf(card.sent.thread_id)?.delivery ?? null) : null;
@@ -1361,12 +1401,18 @@ function OpenedCard({
   onCreateThread,
   initiatives,
   onInitiative,
+  machine,
+  onHeld,
 }: {
   card: InboxCardWire;
   projectName: string;
   projectRoot: string | null;
   sessions: ComposeSessionsModel | null;
   live: { session: string; busy: boolean | null }[] | null;
+  /** The linked machine that holds the card (its agents are that machine's), or null for this Inbox's own. */
+  machine: MachineView | null;
+  /** A write held for that machine while it is asleep: the window's clock toast. */
+  onHeld: (cause: InboxHeldError) => void;
   phone: boolean;
   now: number;
   rowOf: (threadId: string) => InboxListRow | null;
@@ -1441,10 +1487,11 @@ function OpenedCard({
     const thread = card.threads.find((id) => rowOf(id)?.project.id === card.project_id) ?? card.threads[0];
     if (thread && askTarget.session === agentSession) {
       const sent = await inboxApi.newMessage(thread, { session: askTarget.session, body, idempotency_key: idempotency });
-      // Board cards are this Inbox's own, so its threads are too: a message is never held for another machine here.
+      // Held for an asleep linked machine: it goes when that machine is back, and the card is not marked sent before.
+      if (sent.held) throw new Error(heldWords(machine));
       return sent.message?.id ?? idempotency;
     }
-    const started = await inboxApi.startThread({ to: { host: askTarget.host, session: askTarget.session }, body, idempotency_key: idempotency });
+    const started = await inboxApi.startThread({ to: { host: askTarget.host, session: askTarget.session }, body, idempotency_key: idempotency }, farMachine(card));
     // A send links the thread itself; an Ask links it here.
     if (link) onChanged((await inboxApi.editCard(card.id, { op: 'link', thread_id: started.thread_id })).card);
     return started.message.id;
@@ -1502,8 +1549,11 @@ function OpenedCard({
         try {
           onChanged((await inboxApi.editCard(card.id, { op: 'edit', notes })).card);
           return true;
-        } catch {
-          return false;
+        } catch (cause) {
+          // Held for an asleep linked machine: kept, and saved there when it is back (the clock toast).
+          if (!(cause instanceof InboxHeldError)) return false;
+          onHeld(cause);
+          return true;
         }
       }}
       onLink={async (ref) => {
@@ -1549,4 +1599,33 @@ function boardTags(across: TagsAcross | null, own: InboxInitiative[]): InboxInit
 function cardInitiatives(own: readonly InboxInitiative[], offered: readonly InboxInitiative[]): InboxInitiative[] {
   const ids = new Set(own.map((i) => i.id));
   return [...own, ...offered.filter((i) => !ids.has(i.id))];
+}
+
+const NO_MACHINES: ReadonlyMap<string, string> = new Map();
+const NO_LOOKS: Readonly<Record<string, number | null>> = {};
+
+/** The linked machine whose store holds the card (the merged Board's `machine`), or null for this Inbox's own. */
+function farMachine(card: Pick<InboxCardWire, 'machine'>): string | null {
+  return card.machine ?? null;
+}
+
+/**
+ * A linked machine's live sessions (`GET /api/inbox/m/<id>/sessions`), read as compose reads this computer's while
+ * `machine` is set. Null until a read of that machine has landed.
+ */
+function useMachineSessions(machine: string | null): { machine: string; model: ComposeSessionsModel | null } | null {
+  const asked = useRef(machine);
+  asked.current = machine;
+  const [readFor, setReadFor] = useState<string | null>(null);
+  const loader = useCallback(async () => {
+    const on = asked.current;
+    const got = await inboxApi.composeSessions(null, null, on);
+    setReadFor(on);
+    return got;
+  }, []);
+  const { model, load } = useComposeSessions(machine !== null, loader);
+  useEffect(() => {
+    if (machine) void load();
+  }, [machine, load]);
+  return machine && readFor === machine ? { machine, model } : null;
 }
