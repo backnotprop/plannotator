@@ -30,6 +30,7 @@ import { useIsWorkerPoolReadyOrDisabled, useWorkerPoolThemeSync } from '../worke
 import { useConfigValue } from '@plannotator/ui/config';
 import type { SemDiffClient, SemDiffResult } from '../semDiff/semDiffClient';
 import type { PowerUpConfig, PowerUpFileState, PowerUpStatus } from '../semDiff/powerUp';
+import { powerUpCss } from '../semDiff/powerUpCss';
 import { SemanticFileNote, type SemanticFileState } from '../semDiff/SemanticFileNote';
 import type { DiffFile, AnnotationScrollTarget } from '../types';
 import type { MarkdownFileView } from '../utils/markdownPreview';
@@ -1187,6 +1188,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   const fullDiffsRef = useRef(new Map<string, FileDiffMetadata>());
   const previewAppliedRef = useRef(new Set<string>());
   const semanticEnabled = useConfigValue('diffSemantic');
+  const powerUpMotion = useConfigValue('diffPowerUpMotion');
   const semanticEnabledRef = useRef(semanticEnabled);
   semanticEnabledRef.current = semanticEnabled;
   const semClientRef = useRef(semDiffClient ?? null);
@@ -1934,8 +1936,9 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         return;
       }
       const links = result.secondOpinion?.links ?? [];
+      const powered = powerUpRef.current?.active === true;
       const operations = result.semanticOperations.map((op, index) =>
-        links.some((link) => link.operationIndex === index) ? { ...op, origin: 'second-opinion' } : op,
+        links.some((link) => link.operationIndex === index) ? { ...op, origin: 'second-opinion' } : powered ? { ...op, origin: 'engine' } : op,
       );
       Object.assign(semantic, { semanticOperations: operations, semanticFolds: result.semanticFolds });
       semantic.cacheKey = `${generation}::${itemId}#semantic${links.length > 0 ? `:${links.map((link) => link.candidateId).join(',')}` : ''}`;
@@ -1972,7 +1975,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       }
       powerUpFilesRef.current.set(itemId, { state: 'ok', links: report.links });
       reportPowerUp();
-      if (report.links.length === 0 && !hadLinks) return;
+      if (report.links.length === 0 && !hadLinks && !semDiffsRef.current.has(itemId)) return;
       applySemanticResult(itemId, file, oldText, newText, generation, stale, result, () => {});
     });
   });
@@ -3824,7 +3827,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   const options = useMemo<CodeViewOptions<DiffAnnotationMetadata>>(
     () => ({
       themeType: pierreTheme.type,
-      unsafeCSS: scrollsWithPage ? `${pierreTheme.css}${SCROLLS_WITH_PAGE_CSS}${flushFiles ? FLUSH_FILES_CSS : STUCK_HEADER_LINE_CSS}` : pierreTheme.css,
+      unsafeCSS: `${scrollsWithPage ? `${pierreTheme.css}${SCROLLS_WITH_PAGE_CSS}${flushFiles ? FLUSH_FILES_CSS : STUCK_HEADER_LINE_CSS}` : pierreTheme.css}${powerUpActive ? powerUpCss(powerUpMotion, diffIndicators ?? 'bars') : ''}`,
       ...(pierreTheme.syntaxTheme && { theme: pierreTheme.syntaxTheme }),
       diffStyle,
       overflow: diffOverflow,
@@ -3896,6 +3899,8 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       pierreTheme.type,
       pierreTheme.css,
       pierreTheme.syntaxTheme,
+      powerUpActive,
+      powerUpMotion,
       diffStyle,
       diffOverflow,
       diffIndicators,

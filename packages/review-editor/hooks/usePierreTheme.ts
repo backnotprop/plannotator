@@ -296,8 +296,6 @@ export function usePierreTheme(options?: {
           [data-semantic-start][data-line-type='change-reformatted']::after { content: 'reformatted'; }
           [data-semantic-start][data-line-type='change-extracted-function']::after { content: 'extracted'; }
           [data-semantic-start][data-line-type='change-inlined-function']::after { content: 'inlined'; }
-          [data-semantic-origin='second-opinion'] { box-shadow: inset 2px 0 0 color-mix(in srgb, ${fg} 35%, transparent); }
-          [data-connector-origin='second-opinion'] { stroke: color-mix(in srgb, ${fg} 30%, transparent); stroke-width: 1; stroke-dasharray: 3 3; }
           [data-diff-type='split'][data-overflow='scroll'][data-semantic] {
             grid-template-columns:
               minmax(0, var(--split-left, 1fr))
