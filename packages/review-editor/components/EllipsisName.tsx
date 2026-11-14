@@ -44,10 +44,9 @@ export function fitDirectory(directory: string, available: number, width: (text:
   return '';
 }
 
-export const EllipsisName: React.FC<{ text: string; keepExtension?: boolean; directory?: boolean; className?: string; title?: string }> = ({
+export const EllipsisName: React.FC<{ text: string; keepExtension?: boolean; className?: string; title?: string }> = ({
   text,
   keepExtension = true,
-  directory = false,
   className,
   title,
 }) => {
@@ -67,7 +66,7 @@ export const EllipsisName: React.FC<{ text: string; keepExtension?: boolean; dir
       }
       const full = Math.ceil(width(text)) + 1;
       const available = element.clientWidth;
-      const next = available > 0 && available < full ? (directory ? fitDirectory(text, available, width) : fitMiddle(text, available, width, keepExtension)) : text;
+      const next = available > 0 && available < full ? fitMiddle(text, available, width, keepExtension) : text;
       probe.textContent = '';
       setFitted((before) => (before.text === next && before.width === full ? before : { text: next, width: full }));
     };
@@ -76,7 +75,7 @@ export const EllipsisName: React.FC<{ text: string; keepExtension?: boolean; dir
     const observer = new ResizeObserver(fit);
     observer.observe(element);
     return () => observer.disconnect();
-  }, [text, keepExtension, directory]);
+  }, [text, keepExtension]);
 
   return (
     <span

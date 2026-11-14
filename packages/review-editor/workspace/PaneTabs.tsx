@@ -1,6 +1,6 @@
 import React, { useLayoutEffect, useRef, useState } from 'react';
 import { Crosshair, Diff, FileText } from 'lucide-react';
-import { EllipsisName } from '../components/EllipsisName';
+import { EllipsisName, fitDirectory } from '../components/EllipsisName';
 import { useReviewStateOptional } from '../dock/ReviewStateContext';
 import type { Pane, PaneTab } from './paneLayout';
 import { REVIEW_ALL_FILES_PANEL_ID, isReviewFilePreviewParams } from '../dock/reviewPanelTypes';
@@ -17,16 +17,17 @@ const TAB_GAP = 16;
 const ACTIVE_NEED_WIDTH = 150;
 
 function naturalWidth(item: HTMLElement): number {
-  let extra = 0;
+  let width = item.offsetWidth;
   for (const name of item.querySelectorAll<HTMLElement>('[data-ellipsis-name]')) {
     const full = Number.parseFloat(name.style.width);
-    if (full > name.clientWidth) extra += full - name.clientWidth;
+    if (full > name.clientWidth) width += full - name.clientWidth;
   }
-  return item.offsetWidth + extra;
+  const directory = item.querySelector<HTMLElement>('[data-pane-tab-directory]');
+  return directory ? width - directory.offsetWidth : width;
 }
 
-type HiddenTabs = { ids: Set<string>; end: number };
-const NONE_HIDDEN: HiddenTabs = { ids: new Set(), end: 0 };
+type HiddenTabs = { ids: Set<string>; directoryRoom: number };
+const NONE_HIDDEN: HiddenTabs = { ids: new Set(), directoryRoom: 0 };
 
 function useHiddenTabs(ref: React.RefObject<HTMLElement | null>, key: string, single: boolean, activeId: string | null): HiddenTabs {
   const [hidden, setHidden] = useState<HiddenTabs>(NONE_HIDDEN);
@@ -36,23 +37,24 @@ function useHiddenTabs(ref: React.RefObject<HTMLElement | null>, key: string, si
     const measure = () => {
       element.scrollLeft = 0;
       const ids = new Set<string>();
-      let end = 0;
-      if (!single) {
-        const items = [...element.querySelectorAll<HTMLElement>('[data-pane-tab-item]')].map((item) => ({ id: item.getAttribute('data-pane-tab-item')!, width: naturalWidth(item) }));
-        const total = items.reduce((sum, item, index) => sum + item.width + (index ? TAB_GAP : 0), 0);
-        if (total > element.clientWidth + 1) {
-          const limit = element.clientWidth - MENU_RESERVE;
-          const kept = items.filter((item) => item.id === activeId || item.id === REVIEW_ALL_FILES_PANEL_ID);
-          let used = kept.reduce((sum, item, index) => sum + (item.id === REVIEW_ALL_FILES_PANEL_ID ? item.width : Math.min(item.width, ACTIVE_NEED_WIDTH)) + (index ? TAB_GAP : 0), 0);
-          for (const item of items) {
-            if (kept.includes(item)) continue;
-            if (used + TAB_GAP + item.width <= limit) used += TAB_GAP + item.width;
-            else ids.add(item.id);
-          }
-          end = used;
+      const items = [...element.querySelectorAll<HTMLElement>('[data-pane-tab-item]')].map((item) => ({ id: item.getAttribute('data-pane-tab-item')!, width: naturalWidth(item) }));
+      const total = items.reduce((sum, item, index) => sum + item.width + (index ? TAB_GAP : 0), 0);
+      let used = total;
+      let room = element.clientWidth;
+      if (!single && total > element.clientWidth + 1) {
+        room = element.clientWidth - MENU_RESERVE;
+        const kept = items.filter((item) => item.id === activeId || item.id === REVIEW_ALL_FILES_PANEL_ID);
+        used = kept.reduce((sum, item, index) => sum + (item.id === REVIEW_ALL_FILES_PANEL_ID ? item.width : Math.min(item.width, ACTIVE_NEED_WIDTH)) + (index ? TAB_GAP : 0), 0);
+        for (const item of items) {
+          if (kept.includes(item)) continue;
+          if (used + TAB_GAP + item.width <= room) used += TAB_GAP + item.width;
+          else ids.add(item.id);
         }
+        const active = items.find((item) => item.id === activeId);
+        if (active && active.width > ACTIVE_NEED_WIDTH) used += active.width - ACTIVE_NEED_WIDTH;
       }
-      setHidden((before) => (before.end === end && before.ids.size === ids.size && [...ids].every((id) => before.ids.has(id)) ? before : ids.size ? { ids, end } : NONE_HIDDEN));
+      const directoryRoom = Math.max(0, Math.floor(room - used - 4));
+      setHidden((before) => (before.directoryRoom === directoryRoom && before.ids.size === ids.size && [...ids].every((id) => before.ids.has(id)) ? before : { ids, directoryRoom }));
     };
     measure();
     if (typeof ResizeObserver === 'undefined') return;
@@ -62,6 +64,28 @@ function useHiddenTabs(ref: React.RefObject<HTMLElement | null>, key: string, si
   }, [ref, key, single, activeId]);
   return hidden;
 }
+
+const DirectoryPrefix: React.FC<{ directory: string; room: number }> = ({ directory, room }) => {
+  const probeRef = useRef<HTMLSpanElement>(null);
+  const [shown, setShown] = useState('');
+  useLayoutEffect(() => {
+    const probe = probeRef.current;
+    if (!probe || typeof probe.getBoundingClientRect !== 'function') return;
+    const width = (text: string) => {
+      probe.textContent = text;
+      return probe.getBoundingClientRect().width;
+    };
+    const next = width('M') === 0 ? directory : room > 0 ? fitDirectory(directory, room, width) : '';
+    probe.textContent = '';
+    setShown(next);
+  }, [directory, room]);
+  return (
+    <span aria-hidden="true" className="relative flex-none -mr-1 whitespace-nowrap text-[13px] text-muted-foreground" data-pane-tab-directory="">
+      {shown}
+      <span ref={probeRef} className="pointer-events-none invisible absolute left-0 top-0 whitespace-nowrap" />
+    </span>
+  );
+};
 
 const TabIcon: React.FC<{ tab: PaneTab; onClick: () => void }> = ({ tab, onClick }) => {
   const kind = isReferencesTab(tab) ? 'references' : tabKind(tab);
@@ -149,11 +173,7 @@ export const PaneTabs: React.FC<{
             className={`group flex items-center gap-1 ${shrinks ? 'min-w-0 shrink' : 'flex-none'} ${hidden.ids.has(tab.id) ? 'invisible absolute' : 'relative'}`}
           >
             <TabIcon tab={tab} onClick={() => onActivate(tab.id)} />
-            {directory && (
-              <span aria-hidden="true" className="min-w-0 shrink-[1000] max-w-[40%] -mr-1 flex text-[13px] text-muted-foreground" data-pane-tab-directory="">
-                <EllipsisName text={directory} directory />
-              </span>
-            )}
+            {directory && <DirectoryPrefix directory={directory} room={hidden.directoryRoom} />}
             <button
               type="button"
               role="tab"
