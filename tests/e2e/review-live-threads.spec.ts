@@ -7,7 +7,7 @@
  */
 import { expect, test } from '@playwright/test';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
-import { accessSync, constants, existsSync, mkdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { accessSync, constants, existsSync, mkdirSync, readdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { delimiter, join, resolve } from 'node:path';
 import { TagConnection } from '../helpers/inbox-tag-world';
 import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
@@ -165,6 +165,78 @@ test('a comment reaches the agent that opened the review, its answer lands live 
   } finally {
     for (const connection of connections) await connection.stop();
     if (review && review.exitCode === null) review.kill('SIGTERM');
+    await removeInboxScratch(root);
+  }
+});
+
+test('the Inbox thread shows a review comment on its lines and opens the living review again, with its thread', async ({ browser }) => {
+  test.skip(!existsSync(binary), `build the binary first: ${binary}`);
+  const root = inboxScratch('plannotator-review-live-inbox-');
+  const dataDir = join(root, 'data');
+  const env = {
+    PATH: ownPath(root),
+    HOME: root,
+    PLANNOTATOR_AI: 'disabled',
+    PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9',
+    PLANNOTATOR_DATA_DIR: dataDir,
+    PLANNOTATOR_BROWSER: NO_BROWSER,
+    NO_BROWSER,
+    PLANNOTATOR_SKIP_BROWSER_OPEN: '1',
+    PLANNOTATOR_INBOX_CONNECT: '0',
+    PLANNOTATOR_INBOX_TAILSCALE: '0',
+    PLANNOTATOR_INBOX_PHONES: '0',
+    PLANNOTATOR_UPDATE_CHECK: '0',
+    PLANNOTATOR_INBOX_NOTES: '0',
+    PLANNOTATOR_REMOTE: '0',
+  };
+  let owner: TagConnection | undefined;
+  try {
+    const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
+    expect(started.status, started.stderr).toBe(0);
+    rememberInboxOf(dataDir);
+    const inboxUrl = started.stdout.trim().replace(/\/$/, '');
+    const { token, serverSession } = JSON.parse(readFileSync(join(dataDir, 'inbox', 'inbox.json'), 'utf8')) as { token: string; serverSession: string };
+    const repo = buildRepo(root);
+    owner = new TagConnection(inboxUrl, token, OWNER, 'claude-code', repo, { busy: false, tags: true, sendNow: true, startedAt: Date.now() - 600_000 });
+    await expect.poll(async () => {
+      const r = await fetch(`${inboxUrl}/api/inbox/review-threads/send`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ serverSession, project_path: repo, review: { key: 'branch:fix/charge', title: 'fix/charge' }, to: { host: 'claude-code', session: OWNER }, comments: [{ anchor: { file: 'src/billing.ts', side: 'new', line_start: 2, line_end: 2, code: ['  if (amount < 0) throw new Error("bad");'] }, words: 'Can this say why?' }], idempotency_key: 'inbox-1' }),
+      });
+      return r.status;
+    }).toBe(200);
+    const thread = ((await (await fetch(`${inboxUrl}/api/inbox/review-threads?project_path=${encodeURIComponent(repo)}&key=${encodeURIComponent('branch:fix/charge')}`)).json()) as { thread: { id: string } }).thread.id;
+
+    const context = await browser.newContext({ viewport: { width: 1280, height: 860 } });
+    await context.addCookies(Object.entries(FIRST_RUN).map(([name, value]) => ({ name, value, url: inboxUrl })));
+    const page = await context.newPage();
+    await page.goto(`${inboxUrl}/#thread=${thread}`);
+    const anchor = page.locator('[data-review-anchor]').first();
+    await expect(anchor).toContainText('src/billing.ts line 2');
+    await expect(anchor.locator('pre')).toHaveText('  if (amount < 0) throw new Error("bad");');
+    const open = page.locator('[data-open-live-review] button');
+    await expect(open).toHaveText('Open the review of fix/charge');
+    if (process.env.PLANNOTATOR_LIVE_SHOTS) await page.screenshot({ path: join(process.env.PLANNOTATOR_LIVE_SHOTS, '7-inbox-thread.png') });
+    const [review] = await Promise.all([context.waitForEvent('page'), open.click()]);
+    await review.waitForURL(/^http:\/\/(localhost|127\.0\.0\.1):\d+\/?$/, { timeout: 45_000 });
+    const threadsTab = review.locator('[data-review-sidebar-tab="threads"]');
+    await expect(review.locator('[data-review-panel-toggle]')).toBeVisible({ timeout: 30_000 });
+    if (!(await threadsTab.isVisible())) await review.locator('[data-review-panel-toggle]').click();
+    await threadsTab.click();
+    await expect(review.locator('[data-live-row]')).toContainText('Can this say why?');
+    await context.close();
+  } finally {
+    await owner?.stop();
+    const sessions = join(dataDir, 'sessions');
+    for (const file of existsSync(sessions) ? readdirSync(sessions).filter((f) => f.endsWith('.json')) : []) {
+      const { pid, mode } = JSON.parse(readFileSync(join(sessions, file), 'utf8')) as { pid: number; mode: string };
+      if (mode === 'review') {
+        try {
+          process.kill(pid, 'SIGTERM');
+        } catch {}
+      }
+    }
     await removeInboxScratch(root);
   }
 });
