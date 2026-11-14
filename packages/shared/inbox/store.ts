@@ -8067,6 +8067,20 @@ export class InboxStore {
     return this.threadTags(threadId);
   }
 
+  /**
+   * The same by the tag's name (`inboxInitiativeNameKey`), as a linked machine names a tag: the live tag of that name,
+   * made first (the person's) when none is and the thread goes in. A name no tag has takes nothing out.
+   */
+  setThreadTagNamed(threadId: string, name: unknown, on: boolean): string[] {
+    if (!this.isThreadRoot(threadId)) throw new InboxError("thread_not_found", `No thread ${threadId}.`);
+    const text = this.cardText(name, "name", INBOX_INITIATIVE_NAME_MAX);
+    const key = inboxInitiativeNameKey(text);
+    const found = [...this.initiativesById.values()].find((tag) => tag.deleted_at === null && inboxInitiativeNameKey(tag.name) === key);
+    if (found) return this.setThreadTag(threadId, found.id, on);
+    if (!on) return this.threadTags(threadId);
+    return this.setThreadTag(threadId, this.appendNewInitiative(text, { kind: "person" }).id, true);
+  }
+
   /** Before a rename that changes a tag's key: each thread in it only through a typed `#Name` gets an `on` mark. */
   private markTypedMembers(tagId: string): void {
     const tags = this.liveTags();

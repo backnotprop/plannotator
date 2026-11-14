@@ -439,6 +439,43 @@ describe("the list (rule 5)", () => {
     expect(facesAtTold).toEqual({ ses_b: { face: "glass-red", sessions: [], name: "Retry worker" } });
   });
 
+  test("a thread's tag moves no record: the stream asks for `tags`, and the frame reads the list, its tags too, before the windows hear it", async () => {
+    const told: string[] = [];
+    let tagsAtTold: unknown = null;
+    const release = { id: "ini_01K0000000000000000000000R", name: "Release", created_at: "2026-11-12T09:00:00.000Z", created_by: { kind: "person" }, updated_at: "2026-11-12T09:00:00.000Z", deleted_at: null };
+    const d = door({
+      cursor: 3,
+      frames: ["event: tags\ndata: {}\n\n"],
+      threads: () =>
+        Response.json({
+          cursor: 3,
+          sections: [{ threads: [{ thread_id: "msg_a", ...(d.stats.threads > 1 ? { tags: [release.id] } : {}) }] }],
+          marks: ["star", "tags"],
+          tags: d.stats.threads > 1 ? [release] : [],
+        }),
+    });
+    const { peer } = link(d.url, {
+      onReread: (event) => {
+        told.push(event);
+        tagsAtTold = { tags: peer.list!.tags.map((t) => t.name), row: peer.list!.rows[0]!.tags };
+      },
+    });
+    peer.start();
+    await until("told", () => told.length === 1);
+    expect(new URLSearchParams(d.stats.eventAsks[0]).get("tags")).toBe("1");
+    expect(told).toEqual(["tags"]);
+    expect(tagsAtTold).toEqual({ tags: ["Release"], row: [release.id] });
+  });
+
+  test("a machine's tags are its list's live ones that parse; an older Inbox's list has none", () => {
+    const { peer } = link("http://127.0.0.1:9");
+    peer.acceptList({ cursor: 3, sections: [] });
+    expect(peer.list!.tags).toEqual([]);
+    const live = { id: "ini_01K0000000000000000000000R", name: "Release", created_at: "2026-11-12T09:00:00.000Z", created_by: { kind: "person" as const }, updated_at: "2026-11-12T09:00:00.000Z", deleted_at: null };
+    peer.acceptList({ cursor: 4, sections: [], tags: [live, { ...live, id: "ini_01K0000000000000000000000D", deleted_at: "2026-11-12T10:00:00.000Z" }, { id: "not an id", name: "x" }, "Release"] });
+    expect(peer.list!.tags).toEqual([live]);
+  });
+
   test("a machine's agent faces come from its agents group, only what parses; an older Inbox's group has none", () => {
     const { peer } = link("http://127.0.0.1:9");
     peer.acceptList({ cursor: 3, sections: [], agents: [{ agents: [], total: 0, ended_today: 0 }] });

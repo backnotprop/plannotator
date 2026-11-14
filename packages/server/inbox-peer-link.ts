@@ -21,7 +21,7 @@
  *   reached the machine (rule 15).
  */
 
-import type { InboxAgentsGroup, InboxListRow } from "@plannotator/core/inbox-types";
+import { isInboxInitiativeRecord, type InboxAgentsGroup, type InboxInitiative, type InboxListRow } from "@plannotator/core/inbox-types";
 import { inboxPeerAgentsGroup } from "./inbox-agents-list";
 import { inboxPeerSessionNames } from "./inbox-session-names";
 import type { InboxLinkRecord } from "./inbox-links";
@@ -58,11 +58,11 @@ export interface PeerRecord {
 }
 
 /**
- * That machine's events for a change that writes no record there (a snooze, a star, an agent's face or name): this
- * Inbox asks for each (`<event>=1` on its stream), reads that machine's list again when one comes, and tells its own
- * windows the same event (approval "inbox-linked-marks"). A new mark adds its event here.
+ * That machine's events for a change that writes no record there (a snooze, a star, an agent's face or name, a
+ * thread's tag): this Inbox asks for each (`<event>=1` on its stream), reads that machine's list again when one comes,
+ * and tells its own windows the same event (approval "inbox-linked-marks"). A new mark adds its event here.
  */
-export const PEER_REREAD_EVENTS = ["snoozes", "pins", "priority", "agent-faces"] as const;
+export const PEER_REREAD_EVENTS = ["snoozes", "pins", "priority", "agent-faces", "tags"] as const;
 export type PeerRereadEvent = (typeof PEER_REREAD_EVENTS)[number];
 const isRereadEvent = (event: string): event is PeerRereadEvent => (PEER_REREAD_EVENTS as readonly string[]).includes(event);
 
@@ -76,6 +76,8 @@ export interface PeerList {
   marks: string[];
   /** Its starred threads, in its own order (its list's `pins`). */
   pins: string[];
+  /** Its live tags (its list's `tags`; none from an Inbox before thread tags). */
+  tags: InboxInitiative[];
   /** Its agents (its list's `agents`, capped, with `machine`; inbox-agents-list.ts); null from an older Inbox. */
   agents: InboxAgentsGroup | null;
   session_labels: Record<string, string>;
@@ -453,6 +455,7 @@ export class PeerLink {
       snoozes: list.snoozes === true,
       marks: Array.isArray(list.marks) ? list.marks.filter((mark: unknown): mark is string => typeof mark === "string") : [],
       pins: Array.isArray(list.pins) ? list.pins.flatMap((row: Json) => (typeof row?.thread_id === "string" ? [row.thread_id] : [])) : [],
+      tags: Array.isArray(list.tags) ? list.tags.filter((tag: unknown): tag is InboxInitiative => isInboxInitiativeRecord(tag) && tag.deleted_at === null) : [],
       agents: inboxPeerAgentsGroup(list.agents, this.id),
       session_labels: inboxPeerSessionNames(list.session_labels),
       session_titles: inboxPeerSessionNames(list.session_titles),
