@@ -873,7 +873,8 @@ export function createInboxMachines(context: InboxMachinesContext) {
     else peer.poke();
     const settled = (await outbox.waitSettled(entry.key, peer.state === "online" ? MACHINE_WRITE_WAIT_MS : 0)) ?? entry;
     // A state that landed is in that machine's list now: read it before answering, so the window's next read shows it.
-    if (settled.state === "delivered" && kind === "set") await (segments[0] === "cards" ? peer.refreshCards() : peer.refreshList());
+    // A card's write reads its Board and its list both: a tag named there may be new, and the merged tags come from the list.
+    if (settled.state === "delivered" && kind === "set") await (segments[0] === "cards" ? Promise.all([peer.refreshList(), peer.refreshCards()]) : peer.refreshList());
     return outboxAnswer(settled, fresh);
   };
 

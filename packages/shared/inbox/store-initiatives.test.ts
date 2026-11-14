@@ -172,8 +172,10 @@ describe("initiatives: the store", () => {
 
   // A linked machine's window puts this store's card in a tag by its name: the one of that name, made once.
   test("a card put in a tag by name takes the live one of that name, cased otherwise too, and makes it (the person's) when none is", () => {
-    const { store, project } = world();
+    const { store, project, advance } = world();
     const shape = store.createInitiative({ name: "Shape", by: PERSON });
+    // Tags made in one millisecond are ordered by their random ids.
+    advance(1000);
     const { card } = store.createCard({ project_id: project.id, by: AGENT, title: "Hover cards" });
     expect(store.setCardInitiativeNamed(card.id, " SHAPE ", PERSON).initiative).toBe(shape.id);
     const made = store.setCardInitiativeNamed(card.id, "Billing", PERSON).initiative!;
