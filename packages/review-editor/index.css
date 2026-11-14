@@ -2475,3 +2475,20 @@ diffs-container {
     transition: none;
   }
 }
+
+html:has([data-pn-compact-touch-layout='true']) :is(.review-sidebar .file-tree-item, .review-sidebar .review-folder-row, .review-sidebar .panel-section-heading) {
+  min-height: var(--pn-touch-target);
+  height: var(--pn-touch-target);
+}
+html:has([data-pn-compact-touch-layout='true']) :is([data-panel-view], [data-tree-scope], [data-panel-sentence] button, [data-menu-version] a) {
+  min-block-size: var(--pn-touch-target);
+  touch-action: manipulation;
+}
+html:has([data-pn-compact-touch-layout='true']) [data-go-to-file-button] {
+  min-block-size: var(--pn-touch-target);
+  min-inline-size: var(--pn-touch-target);
+}
+html:has([data-pn-compact-touch-layout='true']) [data-menu-version] a {
+  display: inline-flex;
+  align-items: center;
+}
