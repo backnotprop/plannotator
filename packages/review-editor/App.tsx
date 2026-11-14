@@ -6139,6 +6139,7 @@ const ReviewApp: React.FC = () => {
                 </div>
               </div>
             )}
+            {liveReview.overlay}
             <ConfirmDialog
               isOpen={!!draftBanner}
               onClose={dismissDraft}

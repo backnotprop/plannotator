@@ -53,7 +53,7 @@ export function liveRecordTouches(data: string, threadId: string | null): boolea
   }
 }
 
-export function watchLive(threadId: () => string | null, onChange: () => void): () => void {
+export function watchLive(threadId: () => string | null, onChange: () => void, onLost: () => void = () => {}): () => void {
   if (typeof EventSource === 'undefined') return () => {};
   const source = new EventSource('/api/live/events');
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -68,6 +68,7 @@ export function watchLive(threadId: () => string | null, onChange: () => void): 
     if (liveRecordTouches((event as MessageEvent<string>).data, threadId())) nudge();
   });
   source.addEventListener('deliveries', nudge);
+  source.onerror = () => onLost();
   return () => {
     if (timer) clearTimeout(timer);
     source.close();

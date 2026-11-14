@@ -7,91 +7,22 @@
  */
 import { expect, test } from '@playwright/test';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
-import { accessSync, constants, existsSync, mkdirSync, readdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
-import { delimiter, join, resolve } from 'node:path';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import { TagConnection } from '../helpers/inbox-tag-world';
 import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
-import { NO_BROWSER } from '../helpers/no-browser';
+import { buildRepo, FIRST_RUN, liveEnv } from './review-live-world';
 
 const repoRoot = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repoRoot, '.local/plannotator'));
 const OWNER = 'cc-live-owner-1';
 const SECOND = 'pi-live-second-2';
 
-const FIRST_RUN: Record<string, string> = {
-  'plannotator-announce-agent-tool-seen': '1',
-  'plannotator-announce-ask-session-seen': '1',
-  'plannotator-announce-inbox-seen': '1',
-  'plannotator-announce-tui-herdr-seen': '1',
-  'plannotator-auto-viewed-notice-seen': '1',
-  'plannotator-edit-mode-announcement-seen': '3',
-  'plannotator-guide-hint-acked': 'true',
-  'plannotator-guide-intro-seen': '2',
-  'plannotator-plan-look-choice-resolved': 'true',
-  'plannotator-review-dest-spotlight-seen': '1',
-  'plannotator-token-hover-announcement-seen': '1',
-};
-
-function ownPath(root: string): string {
-  const bin = join(root, 'bin');
-  mkdirSync(bin, { recursive: true });
-  const found = (process.env.PATH ?? '')
-    .split(delimiter)
-    .filter(Boolean)
-    .map((dir) => join(dir, 'git'))
-    .find((file) => {
-      try {
-        accessSync(file, constants.X_OK);
-        return statSync(file).isFile();
-      } catch {
-        return false;
-      }
-    });
-  if (found) symlinkSync(found, join(bin, 'git'));
-  return [bin, '/usr/bin', '/bin'].join(delimiter);
-}
-
-function git(cwd: string, ...args: string[]) {
-  const result = spawnSync('git', args, { cwd, encoding: 'utf8' });
-  if (result.status !== 0) throw new Error(result.stderr);
-}
-
-function buildRepo(root: string): string {
-  const repo = join(root, 'billing-api');
-  mkdirSync(join(repo, 'src'), { recursive: true });
-  git(repo, 'init', '-q');
-  git(repo, 'checkout', '-qb', 'main');
-  git(repo, 'config', 'user.email', 'dev@example.com');
-  git(repo, 'config', 'user.name', 'Dev');
-  writeFileSync(join(repo, 'src/billing.ts'), 'export function charge(amount: number) {\n  return stripe.charges.create({ amount });\n}\n');
-  git(repo, 'add', '.');
-  git(repo, 'commit', '-qm', 'billing');
-  git(repo, 'checkout', '-qb', 'fix/charge');
-  writeFileSync(join(repo, 'src/billing.ts'), 'export function charge(amount: number) {\n  if (amount < 0) throw new Error("bad");\n  return stripe.charges.create({ amount });\n}\n');
-  return repo;
-}
-
 test('a comment reaches the agent that opened the review, its answer lands live on the lines, a tag wakes another, resolve folds it', async ({ browser }) => {
   test.skip(!existsSync(binary), `build the binary first: ${binary}`);
   const root = inboxScratch('plannotator-review-live-');
   const dataDir = join(root, 'data');
-  const env = {
-    PATH: ownPath(root),
-    HOME: root,
-    PLANNOTATOR_TEST_SANDBOX: root,
-    PLANNOTATOR_AI: 'disabled',
-    PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9',
-    PLANNOTATOR_DATA_DIR: dataDir,
-    PLANNOTATOR_BROWSER: NO_BROWSER,
-    NO_BROWSER,
-    PLANNOTATOR_SKIP_BROWSER_OPEN: '1',
-    PLANNOTATOR_INBOX_CONNECT: '0',
-    PLANNOTATOR_INBOX_TAILSCALE: '0',
-    PLANNOTATOR_INBOX_PHONES: '0',
-    PLANNOTATOR_UPDATE_CHECK: '0',
-    PLANNOTATOR_INBOX_NOTES: '0',
-    PLANNOTATOR_REMOTE: '0',
-  };
+  const env = liveEnv(root, dataDir);
   const connections: TagConnection[] = [];
   let review: ChildProcess | undefined;
   try {
@@ -174,23 +105,7 @@ test('the Inbox thread shows a review comment on its lines and opens the living 
   test.skip(!existsSync(binary), `build the binary first: ${binary}`);
   const root = inboxScratch('plannotator-review-live-inbox-');
   const dataDir = join(root, 'data');
-  const env = {
-    PATH: ownPath(root),
-    HOME: root,
-    PLANNOTATOR_TEST_SANDBOX: root,
-    PLANNOTATOR_AI: 'disabled',
-    PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9',
-    PLANNOTATOR_DATA_DIR: dataDir,
-    PLANNOTATOR_BROWSER: NO_BROWSER,
-    NO_BROWSER,
-    PLANNOTATOR_SKIP_BROWSER_OPEN: '1',
-    PLANNOTATOR_INBOX_CONNECT: '0',
-    PLANNOTATOR_INBOX_TAILSCALE: '0',
-    PLANNOTATOR_INBOX_PHONES: '0',
-    PLANNOTATOR_UPDATE_CHECK: '0',
-    PLANNOTATOR_INBOX_NOTES: '0',
-    PLANNOTATOR_REMOTE: '0',
-  };
+  const env = liveEnv(root, dataDir);
   let owner: TagConnection | undefined;
   try {
     const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
@@ -227,6 +142,14 @@ test('the Inbox thread shows a review comment on its lines and opens the living 
     if (!(await threadsTab.isVisible())) await review.locator('[data-review-panel-toggle]').click();
     await threadsTab.click();
     await expect(review.locator('[data-live-row]')).toContainText('Can this say why?');
+    await review.locator('body').click({ position: { x: 5, y: 300 } });
+    await review.keyboard.press('ControlOrMeta+Enter');
+    await expect(review.locator('[data-live-ended]')).toBeVisible({ timeout: 30_000 });
+    await expect(review.locator('[data-live-ended] a')).toHaveAttribute('href', new RegExp(`#thread=${thread}$`));
+    await expect.poll(async () => {
+      const read = (await (await fetch(`${inboxUrl}/api/inbox/threads/${thread}`)).json()) as { thread?: { messages?: { body: string }[] } };
+      return (read.thread?.messages ?? []).map((m) => m.body);
+    }).toContain('I approved the review.');
     await context.close();
   } finally {
     await owner?.stop();

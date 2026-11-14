@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { LiveEndedBar } from './LiveEndedBar';
 import type { CodeAnnotation } from '@plannotator/ui/types';
 import type { HostLineNote } from '../components/hostLineNotes';
 import type { ReviewSidebarExtraTab } from '../components/ReviewSidebar';
@@ -37,7 +38,7 @@ export function useLiveReview(input: {
   revealLines: (filePath: string, start: number, end: number, side: 'old' | 'new') => void;
   openTab: (id: string) => void;
   pr?: { forge: string; platform: ReviewPlatform; threads: readonly PRReviewThread[] | null; load: () => void } | null;
-}): { notes: readonly HostLineNote[]; tab: ReviewSidebarExtraTab | null } {
+}): { notes: readonly HostLineNote[]; tab: ReviewSidebarExtraTab | null; overlay: ReactNode } {
   const [state, setState] = useState<LiveState | null>(null);
   const [agents, setAgents] = useState<readonly LiveAgent[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -57,7 +58,16 @@ export function useLiveReview(input: {
     if (state?.inbox) loadAgents();
   }, [state?.inbox, loadAgents]);
   const watching = !!state?.inbox;
-  useEffect(() => (watching ? watchLive(() => threadRef.current, refresh) : undefined), [watching, refresh]);
+  const [ended, setEnded] = useState(false);
+  const checkAlive = useCallback(() => {
+    fetch('/api/live/state').then(
+      (response) => {
+        if (response.ok) setEnded(false);
+      },
+      () => setEnded(true),
+    );
+  }, []);
+  useEffect(() => (watching ? watchLive(() => threadRef.current, refresh, checkAlive) : undefined), [watching, refresh, checkAlive]);
 
   const placed = useMemo(() => placeThreads(state?.messages ?? [], input.files), [state?.messages, input.files]);
   const order = useMemo(() => openThreadIds(placed, input.files.map((f) => f.path)), [placed, input.files]);
@@ -222,5 +232,6 @@ export function useLiveReview(input: {
     if (tags) void actionsRef.current.sendComments(added, '', tags).catch(() => {});
   }, [input.annotations]);
 
-  return { notes, tab };
+  const overlay = ended && state?.thread_url ? <LiveEndedBar threadUrl={state.thread_url} /> : null;
+  return { notes, tab, overlay };
 }

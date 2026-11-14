@@ -1,4 +1,4 @@
-import { useRef, useState, type MutableRefObject, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type MutableRefObject, type ReactNode } from 'react';
 import type { LiveReviewActions } from './useLiveReview';
 import { LiveComposer } from './LiveComposer';
 import { authorName, deliveryWord, type LiveMessage, type PlacedThread } from './model';
@@ -32,6 +32,12 @@ export function LiveThreadCard({ thread, messages, actions }: { thread: PlacedTh
   const [open, setOpen] = useState(false);
   const [replying, setReplying] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const replyButton = useRef<HTMLButtonElement>(null);
+  const wasReplying = useRef(false);
+  useEffect(() => {
+    if (wasReplying.current && !replying) replyButton.current?.focus();
+    wasReplying.current = replying;
+  }, [replying]);
   const shown = useRef<Set<string> | null>(null);
   const firstPaint = shown.current === null;
   if (!shown.current) shown.current = new Set(conversation.messages.map((m) => m.id));
@@ -53,7 +59,7 @@ export function LiveThreadCard({ thread, messages, actions }: { thread: PlacedTh
   const takeBack = (id: string) => void actions.current.takeBack(id).catch(() => {});
   const controls = (
     <>
-      <button type="button" className={QUIET} data-live-reply onClick={() => setReplying(true)}>
+      <button ref={replyButton} type="button" className={QUIET} data-live-reply onClick={() => setReplying(true)}>
         Reply
       </button>
       <span aria-hidden="true">·</span>
