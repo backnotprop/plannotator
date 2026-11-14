@@ -204,18 +204,23 @@ describe.skipIf(!hasDom)('The Changes tree on Pierre trees', () => {
     expect(row(el, 'Generated/').getAttribute('aria-expanded')).toBe('true');
   });
 
-  test('a file name is a stem cut at whole letters and a tail that always shows: the last three letters and the extension', async () => {
-    const el = await mount(<Tree files={[file('src/an-extremely-long-file-name-for-the-tree.ts'), file('legacy/step0.py'), file('legacy/step1.py'), file('src/a.ts')]} activeFileIndex={0} />);
-    const name = (path: string) => row(el, rows(el).find((p) => p?.endsWith(path))!).querySelector<HTMLElement>('[data-item-name]')!;
-    const long = name('an-extremely-long-file-name-for-the-tree.ts');
-    expect(long.querySelector('[data-item-name-stem]')!.textContent).toBe('an-extremely-long-file-name-for-the-t');
-    expect(long.querySelector('[data-item-name-tail]')!.textContent).toBe('ree.ts');
-    expect(long.textContent).toBe('an-extremely-long-file-name-for-the-tree.ts');
-    expect(name('step0.py').querySelector('[data-item-name-tail]')!.textContent).toBe('ep0.py');
-    expect(name('step1.py').querySelector('[data-item-name-tail]')!.textContent).toBe('ep1.py');
-    expect(name('a.ts').querySelector('[data-item-name-stem]')).toBeNull();
-    const target = row(el, rows(el).find((p) => p?.endsWith('tree.ts'))!);
-    expect(target.getAttribute('title') ?? target.querySelector('[title]')?.getAttribute('title')).toContain('src/an-extremely-long-file-name-for-the-tree.ts');
+  test('a file name too long for its row keeps its start, one ellipsis and a tail of three letters plus the extension, cut by whole letters', async () => {
+    const realGetContext = HTMLCanvasElement.prototype.getContext;
+    const realWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth');
+    HTMLCanvasElement.prototype.getContext = (() => ({ font: '', measureText: (text: string) => ({ width: [...text].length * 7 }) })) as unknown as typeof realGetContext;
+    Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get() { return 70; } });
+    try {
+      const el = await mount(<Tree files={[file('src/an-extremely-long-file-name.ts'), file('legacy/step0.py'), file('legacy/step1.py'), file('src/a.ts')]} activeFileIndex={0} />);
+      const name = (end: string) => row(el, rows(el).find((p) => p?.endsWith(end))!).querySelector<HTMLElement>('[data-item-name]')!;
+      expect(name('file-name.ts').textContent).toBe('an-…ame.ts');
+      expect(name('file-name.ts').getAttribute('aria-label')).toBe('an-extremely-long-file-name.ts');
+      expect(name('step0.py').textContent).toBe('step0.py');
+      expect(name('a.ts').textContent).toBe('a.ts');
+    } finally {
+      HTMLCanvasElement.prototype.getContext = realGetContext;
+      if (realWidth) Object.defineProperty(HTMLElement.prototype, 'clientWidth', realWidth);
+      else delete (HTMLElement.prototype as { clientWidth?: number }).clientWidth;
+    }
   });
 
   test('each row carries its own tight counts: nothing reserved from other rows, a huge count reads 12.3k with the exact number in its tooltip', async () => {
