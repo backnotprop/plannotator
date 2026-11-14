@@ -290,6 +290,17 @@ describe.skipIf(!hasDom)('FileTree: Changes | All files', () => {
     }
   });
 
+  test('typing in All files finds as you type', async () => {
+    const el = await mount(<Tree />);
+    await settle();
+    const row = repoRow(el, 'README.md');
+    await act(async () => row.dispatchEvent(new KeyboardEvent('keydown', { key: 'r', bubbles: true, composed: true })));
+    await settle();
+    const box = repoShadow(el).querySelector<HTMLElement>('[data-file-tree-search-container]')!;
+    expect(box.dataset.open).toBe('true');
+    expect(repoShadow(el).querySelector<HTMLInputElement>('[data-file-tree-search-input]')!.value).toBe('r');
+  });
+
   test('says why when the session cannot list the repository', async () => {
     const el = await mount(
       <Tree repoFiles={repo({ status: 'unavailable', reason: 'no-checkout', message: 'All files needs the local checkout.' })} />,

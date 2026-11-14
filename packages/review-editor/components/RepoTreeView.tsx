@@ -240,11 +240,11 @@ export const RepoTreeView: React.FC<RepoTreeViewProps> = (props) => {
     const all = model.getVisibleRows(0, model.getVisibleCount() - 1);
     const at = all.findIndex((row) => row.path === activePath);
     if (at < 0) return;
-    const rows = model.getVisibleRows(Math.max(0, at - 2), at + 3);
-    for (const row of rows) {
-      if (row.kind !== 'file' || row.path === activePath || row.name === LOADING || changedIndex.has(row.path)) continue;
-      prefetchRepoFile(row.path, snapshotId);
-    }
+    const readable = (row: (typeof all)[number] | undefined) =>
+      row && row.kind === 'file' && row.name !== LOADING && !changedIndex.has(row.path);
+    const next = all.slice(at + 1).find((row) => row.kind === 'file');
+    const previous = all.slice(0, at).reverse().find((row) => row.kind === 'file');
+    for (const row of [next, previous]) if (readable(row)) prefetchRepoFile(row!.path, snapshotId);
   }, [activePath, model, props.snapshotId, changedIndex]);
 
   React.useImperativeHandle(handleRef, () => ({
