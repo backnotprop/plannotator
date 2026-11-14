@@ -184,8 +184,9 @@ test('a phone keeps one pane, and its open files are a menu in the header title:
     await page.goto(url);
     await expect(page.locator('[data-pane="0"]')).toBeVisible();
     const top = await paneTop(page);
-    await page.locator('button[aria-label="Open review navigation"]').click();
+    await expect(page.locator('[data-review-navigation-sheet]')).toBeVisible();
     await page.locator('.file-tree-item', { hasText: 'routes.ts' }).first().tap();
+    await expect(page.locator('[data-review-navigation-sheet]')).toHaveCount(0);
     await expect(page.locator('[data-pane-tabs-menu]')).toBeVisible();
     expect(await paneTop(page)).toBe(top);
     await expect(page.locator('[data-pane]')).toHaveCount(1);
