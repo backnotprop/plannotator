@@ -151,7 +151,7 @@ export const MarkdownViewMenu: React.FC<MarkdownViewMenuProps> = ({
                   <ViewIcon view={option} className={`flex-none text-muted-foreground ${touch ? 'mt-0.5 h-[18px] w-[18px]' : 'mt-px h-4 w-4'}`} />
                   <span className="min-w-0 flex-1">
                     <span className={`block font-medium text-foreground ${touch ? 'text-base' : 'text-xs'}`}>{LABEL[option]}</span>
-                    <span className={`mt-0.5 block text-muted-foreground ${touch ? 'text-sm' : 'text-[11px] leading-snug'}`}>
+                    <span className={`mt-0.5 block text-muted-foreground ${touch ? 'text-sm' : 'text-xs leading-snug'}`}>
                       {describe(option, status)}
                     </span>
                   </span>
@@ -164,8 +164,8 @@ export const MarkdownViewMenu: React.FC<MarkdownViewMenuProps> = ({
               ))}
             </Menu.RadioGroup>
             {!touch && (
-              <div aria-hidden="true" className="mt-1 border-t border-border/60 px-2.5 pb-1 pt-2 text-[11px] text-muted-foreground">
-                <kbd className="mr-1 rounded border border-border bg-muted px-1 font-mono text-[10px] text-foreground">P</kbd>
+              <div aria-hidden="true" className="mt-1 border-t border-border/60 px-2.5 pb-1 pt-2 text-xs text-muted-foreground">
+                <kbd className="mr-1 rounded border border-border bg-muted px-1 font-mono text-xs text-foreground">P</kbd>
                 next view · files you have not set follow your choice
               </div>
             )}

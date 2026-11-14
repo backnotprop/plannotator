@@ -119,7 +119,7 @@ export const DiffHunkPreview: React.FC<DiffHunkPreviewProps> = ({
 
   if (!fileDiff) {
     return (
-      <div className="px-3 py-2 text-[11px] text-muted-foreground/30 italic">
+      <div className="px-3 py-2 text-xs text-muted-foreground/30 italic">
         Diff not available
       </div>
     );
@@ -150,7 +150,7 @@ export const DiffHunkPreview: React.FC<DiffHunkPreviewProps> = ({
       {!expanded && (
         <button
           onClick={(e) => { e.stopPropagation(); setExpanded(true); }}
-          className="w-full text-[10px] text-muted-foreground hover:text-foreground py-1 bg-muted/20 border-t border-border/20 transition-colors"
+          className="w-full text-xs text-muted-foreground hover:text-foreground py-1 bg-muted/20 border-t border-border/20 transition-colors"
         >
           Show full context
         </button>

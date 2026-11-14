@@ -264,7 +264,7 @@ function ListOptionsMenu({
             {perFile && (
               <Menu.Group>
                 {(onCopyRawDiff || settings) && <Menu.Separator className="my-1 h-px bg-border/70" />}
-                <Menu.GroupLabel className="px-2 pt-1 pb-0.5 text-[11px] font-medium text-muted-foreground">On each file</Menu.GroupLabel>
+                <Menu.GroupLabel className="px-2 pt-1 pb-0.5 text-xs font-medium text-muted-foreground">On each file</Menu.GroupLabel>
                 <Menu.CheckboxItem
                   className={MENU_ITEM}
                   checked={showViewedControls}
@@ -404,7 +404,7 @@ export function PanelSearchField({
         />
         <div className="absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-1">
           {hasQuery && !isPending && (
-            <span className="text-[10px] tabular-nums text-muted-foreground/40">
+            <span className="text-xs tabular-nums text-muted-foreground/40">
               {resultCount}
             </span>
           )}

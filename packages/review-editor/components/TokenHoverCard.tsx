@@ -99,14 +99,14 @@ function TokenHoverCardContent({
       <div className="flex items-center gap-2 px-3.5 pt-3">
         <span className="font-mono text-sm font-bold text-primary">{data.symbol}</span>
         {definition?.symbolKind && (
-          <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
+          <span className="rounded bg-muted px-1.5 py-0.5 text-xs font-bold text-muted-foreground">
             {definition.symbolKind}
           </span>
         )}
       </div>
 
       {definition?.signature && (
-        <div className="mx-3.5 mt-2 overflow-x-auto whitespace-pre rounded-md border border-border bg-muted/40 px-2.5 py-2 font-mono text-[11.5px] text-foreground">
+        <div className="mx-3.5 mt-2 overflow-x-auto whitespace-pre rounded-md border border-border bg-muted/40 px-2.5 py-2 font-mono text-xs text-foreground">
           {definition.signature}
           {definition.signatureApproximate && (
             <span className="text-muted-foreground"> {'// matched line'}</span>
@@ -128,7 +128,7 @@ function TokenHoverCardContent({
             <button
               type="button"
               {...inertProps}
-              className={`font-mono text-[11.5px] text-success hover:underline${locationClass}`}
+              className={`font-mono text-xs text-success hover:underline${locationClass}`}
               onClick={() => onSelectLocation(definition)}
             >
               {locationLabel(definition.filePath, definition.line)}
@@ -141,7 +141,7 @@ function TokenHoverCardContent({
               <button
                 type="button"
                 {...inertProps}
-                className={`font-mono text-[11.5px] text-success hover:underline${locationClass}`}
+                className={`font-mono text-xs text-success hover:underline${locationClass}`}
                 onClick={() => onSelectLocation(alternateDefinition)}
               >
                 {locationLabel(alternateDefinition.filePath, alternateDefinition.line)}
@@ -159,7 +159,7 @@ function TokenHoverCardContent({
           {references.map((reference) => (
             <div
               key={`${reference.filePath}:${reference.line}:${reference.column}`}
-              className="flex gap-1.5 py-0.5 font-mono text-[11px]"
+              className="flex gap-1.5 py-0.5 font-mono text-xs"
             >
               <span className="text-muted-foreground/60" aria-hidden="true">{'❯'}</span>
               <button
@@ -173,7 +173,7 @@ function TokenHoverCardContent({
             </div>
           ))}
           {remaining > 0 && (
-            <div className="py-0.5 text-[11px] text-muted-foreground">
+            <div className="py-0.5 text-xs text-muted-foreground">
               {`… ${remaining} more in the References panel`}
             </div>
           )}
@@ -182,9 +182,9 @@ function TokenHoverCardContent({
 
       {/* Frozen copy: the card teaches exactly one thing, and the Alt-click
           alias is deliberately not advertised here. */}
-      <div className="border-t border-border px-3.5 py-1.5 text-[10.5px] text-muted-foreground">
+      <div className="border-t border-border px-3.5 py-1.5 text-xs text-muted-foreground">
         Click a location to jump.{' '}
-        <kbd className="rounded border border-border bg-muted px-1 font-mono text-[10px]">
+        <kbd className="rounded border border-border bg-muted px-1 font-mono text-xs">
           {modKey}
         </kbd>
         {modKey === '⌘' ? '' : '+'}click a token for the full References panel.

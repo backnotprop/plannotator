@@ -40,17 +40,17 @@ export const CommentMeta: React.FC<CommentMetaProps> = ({
         <ConventionalLabelBadge label={conventionalLabel} decorations={decorations} />
       )}
       {reviewProfileLabel ? (
-        <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-accent/10 text-accent/90 truncate max-w-[140px]">
+        <span className="text-xs px-1.5 py-0.5 rounded bg-accent/10 text-accent/90 truncate max-w-[140px]">
           {reviewProfileLabel}
         </span>
       ) : source ? (
-        <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded bg-muted text-muted-foreground/80 truncate max-w-[140px]">
+        <span className="text-xs px-1.5 py-0.5 rounded bg-muted text-muted-foreground/80 truncate max-w-[140px]">
           {source}
         </span>
       ) : null}
       {author && (
         <span
-          className={`text-[10px] truncate max-w-[120px] ${
+          className={`text-xs truncate max-w-[120px] ${
             isCurrentUser(author) ? 'text-muted-foreground/50' : 'text-muted-foreground/70'
           }`}
         >
@@ -60,7 +60,7 @@ export const CommentMeta: React.FC<CommentMetaProps> = ({
       )}
     </div>
     {createdAt != null && (
-      <span className="ml-auto flex-none text-[10px] text-muted-foreground/50">
+      <span className="ml-auto flex-none text-xs text-muted-foreground/50">
         {formatRelativeTime(createdAt)}
       </span>
     )}
