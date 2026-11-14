@@ -1,6 +1,6 @@
 /**
  * Code review draws semantic diffs: moved, renamed and reformatted code is
- * labelled in the diff and listed in the Changes tab, with the engine's
+ * labelled in the diff and listed in the Sem tab, with the engine's
  * parsers served by the review server and loaded only for the languages the
  * diff holds. Proved in a real Chromium against the compiled binary, on a
  * scratch git repository under a temp PLANNOTATOR_DATA_DIR and HOME.
@@ -208,7 +208,7 @@ test('moved and renamed code is labelled in plain words, and only the TypeScript
   }
 });
 
-test('the Changes tab lists what the diff labels, previews it on hover, and a click lands in the diff', async () => {
+test('the Sem tab lists what the diff labels, previews it on hover, and a click lands in the diff', async () => {
   const session = await review();
   try {
     const { context, page } = await open(browser, session.url);

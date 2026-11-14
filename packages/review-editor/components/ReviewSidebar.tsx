@@ -34,6 +34,7 @@ export type ReviewSidebarTab = 'annotations' | 'ai' | 'agents' | (string & {});
 export interface ReviewSidebarExtraTab {
   id: string;
   label: string;
+  title?: string;
   count?: number;
   attention?: boolean;
   render: () => React.ReactNode;
@@ -657,7 +658,7 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
                 { id: 'annotations', label: 'Comments', count: totalCount },
                 ...(aiAvailable ? [{ id: 'ai' as const, label: 'AI', attention: aiMessages.length > 0 }] : []),
                 ...(agentCapabilities?.available ? [{ id: 'agents' as const, label: 'Agents', count: agentJobs?.length ?? 0, attention: (agentJobs ?? []).some((job) => job.status === 'running' || job.status === 'starting') }] : []),
-                ...extraTabs.map(({ id, label, count, attention }) => ({ id, label, count, attention })),
+                ...extraTabs.map(({ id, label, title, count, attention }) => ({ id, label, title, count, attention })),
               ]}
             />
             {presentation === 'overlay' && (
