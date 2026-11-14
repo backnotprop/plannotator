@@ -163,7 +163,6 @@ test('with no guide yet, Guide opens the launch pad and one click on Start runs 
     expect(readFileSync(log, 'utf8')).toMatch(/--model sonnet/);
 
     await page.getByRole('button', { name: 'Go back' }).click();
-    await page.locator('[data-review-panel-toggle]').click();
     await expect(page.locator('[data-guide-group="diff"] [data-saved-guide]')).toHaveCount(1);
     await expect(page.locator('[data-guide-group="diff"] [data-guide-progress]')).toHaveText('2 chapters, not started');
     await context.close();
