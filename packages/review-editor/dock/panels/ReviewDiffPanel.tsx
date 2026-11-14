@@ -140,6 +140,7 @@ export const ReviewDiffBody: React.FC<{
             base={state.reviewBase}
             snapshotId={state.feedbackDiffContext?.snapshotId}
             tokens={state.fileTokens?.(file.path)}
+            minimap={!state.isCompactTouchLayout}
           />
         ) : wholeView ? (
           <WholeFileView
