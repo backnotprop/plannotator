@@ -230,10 +230,7 @@ export function SemanticDiffsTab() {
                 ) : check.kind === 'checking' ? (
                   'Checking…'
                 ) : saved ? (
-                  <>
-                    Kept on this computer ·{' '}
-                    <button type="button" className="underline-offset-2 hover:text-foreground hover:underline" onClick={() => void remove()}>Remove</button>
-                  </>
+                  'Kept on this computer'
                 ) : (
                   ADD_KEY[provider]
                 )
@@ -303,6 +300,16 @@ export function SemanticDiffsTab() {
                       {check.kind === 'checking' ? 'Checking…' : saved && !complete ? 'Saved' : 'Check and save'}
                     </button>
                   </span>
+                  {saved && !complete && (
+                    <button
+                      type="button"
+                      className="h-7 shrink-0 whitespace-nowrap rounded-md px-2 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+                      onClick={() => void remove()}
+                      data-power-up-key-remove=""
+                    >
+                      Remove
+                    </button>
+                  )}
                 </span>
                 {fieldMessage && (
                   <span id={KEY_MESSAGE_ID} className="text-xs text-warning" data-power-up-key-failure="">
