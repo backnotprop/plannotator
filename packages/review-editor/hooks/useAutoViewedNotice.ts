@@ -3,14 +3,16 @@ import { markAutoViewedNoticeSeen, needsAutoViewedNotice, turnOffAutoViewed } fr
 
 export type AutoViewedNoticeState = 'intro' | 'off' | null;
 
-export function useAutoViewedNotice({ blocked, fileKey }: { blocked: boolean; fileKey: unknown }) {
+export const AUTO_VIEWED_NOTICE_SETTLE_MS = 1500;
+
+export function useAutoViewedNotice({ blocked, fileKey, now = Date.now }: { blocked: boolean; fileKey: unknown; now?: () => number }) {
   const [notice, setNotice] = useState<AutoViewedNoticeState>(null);
-  const shownFor = useRef<{ key: unknown } | null>(null);
+  const shown = useRef<{ key: unknown; at: number } | null>(null);
 
   const show = useCallback(() => {
     if (blocked || !needsAutoViewedNotice()) return;
     markAutoViewedNoticeSeen();
-    shownFor.current = null;
+    shown.current = null;
     setNotice('intro');
   }, [blocked]);
 
@@ -21,9 +23,13 @@ export function useAutoViewedNotice({ blocked, fileKey }: { blocked: boolean; fi
 
   useEffect(() => {
     if (!notice) return;
-    if (!shownFor.current) shownFor.current = { key: fileKey };
-    else if (shownFor.current.key !== fileKey) setNotice(null);
-  }, [fileKey, notice]);
+    const current = shown.current;
+    if (!current || now() - current.at < AUTO_VIEWED_NOTICE_SETTLE_MS) {
+      shown.current = { key: fileKey, at: current?.at ?? now() };
+      return;
+    }
+    if (current.key !== fileKey) setNotice(null);
+  }, [fileKey, notice, now]);
 
   return { notice, show, turnOff };
 }
