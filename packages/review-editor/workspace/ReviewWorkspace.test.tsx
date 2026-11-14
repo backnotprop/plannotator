@@ -187,6 +187,35 @@ describe.skipIf(!hasDom)('the review panes', () => {
     resetStorageBackend();
   });
 
+  test('tabs that do not fit hide whole into a menu counting them, never the active tab; one tab never gets a menu', async () => {
+    const slot = document.createElement('div');
+    document.body.appendChild(slot);
+    const restore = (name: 'offsetWidth' | 'clientWidth', own: PropertyDescriptor | undefined) => {
+      if (own) Object.defineProperty(HTMLElement.prototype, name, own);
+      else delete (HTMLElement.prototype as unknown as Record<string, unknown>)[name];
+    };
+    const width = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetWidth');
+    const client = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth');
+    Object.defineProperty(HTMLElement.prototype, 'offsetWidth', { configurable: true, get(this: HTMLElement) { return this.hasAttribute('data-pane-tab-item') ? 100 : 0; } });
+    Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get(this: HTMLElement) { return this.hasAttribute('data-pane-tabs') ? 300 : 0; } });
+    try {
+      await mount(false, { tabsSlot: slot });
+      expect(slot.querySelector('[data-pane-tabs-overflow]')).toBeNull();
+      for (const name of ['a', 'b', 'c', 'd']) {
+        await act(async () => { api!.addPanel({ id: `review-file:${name}.ts`, component: 'review-file', title: `${name}.ts`, params: { filePath: `${name}.ts` } }); });
+      }
+      await act(async () => { api!.getPanel('review-file:d.ts')!.api.setActive(); });
+      const hidden = [...slot.querySelectorAll('[data-pane-tab-item][aria-hidden="true"]')].map((item) => item.getAttribute('data-pane-tab-item'));
+      expect(hidden).not.toContain('review-file:d.ts');
+      expect(hidden.length).toBe(3);
+      expect(slot.querySelector('[data-pane-tabs-overflow]')?.textContent).toBe('3');
+    } finally {
+      restore('offsetWidth', width);
+      restore('clientWidth', client);
+      slot.remove();
+    }
+  });
+
   test('a diff tab and a file tab of one file read apart: their own icon and tooltip', async () => {
     const el = await mount();
     await act(async () => { api!.addPanel({ id: 'review-diff', component: 'review-diff', title: 'a.ts', params: { filePath: 'a.ts' } }); });

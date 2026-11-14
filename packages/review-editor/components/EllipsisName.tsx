@@ -27,10 +27,10 @@ export function fitMiddle(name: string, available: number, width: (text: string)
   let high = stem.length;
   while (low < high) {
     const mid = (low + high + 1) >> 1;
-    if (width(`${stem.slice(0, mid)}${ELLIPSIS}${extension}`) <= available) low = mid;
+    if (width(`${stem.slice(0, mid)}${ELLIPSIS}${extension.slice(1)}`) <= available) low = mid;
     else high = mid - 1;
   }
-  return `${stem.slice(0, Math.max(1, low))}${ELLIPSIS}${extension}`;
+  return `${stem.slice(0, Math.max(1, low))}${ELLIPSIS}${extension.slice(1)}`;
 }
 
 export const EllipsisName: React.FC<{ text: string; keepExtension?: boolean; className?: string; title?: string }> = ({
