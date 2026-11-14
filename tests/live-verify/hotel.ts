@@ -131,7 +131,7 @@ export async function runHotel(d: HotelDeps): Promise<void> {
     mark('openedHotel');
     await A.waitForTimeout(1500);
     const pane = d.paneSel(T.hotel);
-    const other = `${pane} input[aria-label^="Other answer"]`;
+    const other = `${pane} [aria-label^="Other answer"]`;
     const reply = A.getByRole('textbox', { name: /^Reply to/ });
     const edit = A.locator('.ib-pfoot').getByRole('button', { name: /^(Reply|Edit draft)$/ });
     if (await edit.count()) await edit.first().click();

@@ -21,12 +21,31 @@ export function withQuestion(message: InboxMessageWire, question: InboxQuestion)
   return splitMessageActions({ ...rest, questions: all });
 }
 
+const questionsAndActions = (m: InboxMessageWire) => [...(m.questions ?? []), ...(m.actions ?? [])];
+const hasClosedQuestion = (m: InboxMessageWire) => questionsAndActions(m).some((q) => q.state === 'closed');
+const closeQuestion = (q: InboxQuestion): InboxQuestion => (q.state === 'superseded' || q.state === 'closed' ? q : { ...q, state: 'closed' });
+
+function closedByArchive(message: InboxMessageWire, archiveSeq: number): InboxMessageWire {
+  if ((message.seq ?? archiveSeq) >= archiveSeq || questionsAndActions(message).every((q) => q.state === 'superseded' || q.state === 'closed')) return message;
+  return { ...message, ...(message.questions ? { questions: message.questions.map(closeQuestion) } : {}), ...(message.actions ? { actions: message.actions.map(closeQuestion) } : {}) };
+}
+
 const withApplied = (model: HeldThread, id: string, seq: number): Readonly<Record<string, number>> => ({ ...model.applied, [id]: Math.max(seq, model.applied?.[id] ?? 0) });
 
 export function withSavedQuestions(model: HeldThread, messageId: string, questions: readonly InboxQuestion[]): HeldThread {
   const messages = model.thread.messages.map((m) => (m.id === messageId ? questions.reduce(withQuestion, m) : m));
   const saved = { ...model.saved, ...Object.fromEntries(questions.map((q) => [`${messageId}/${q.key}`, q.revision])) };
   return { ...model, thread: { ...model.thread, messages }, saved };
+}
+
+export function recordMovesFiles(model: HeldThread, event: InboxEvent): boolean {
+  const thread = model.thread;
+  if (event.kind === 'annotation') return event.annotation.thread_id === thread.thread_id;
+  if (event.kind !== 'message' || event.message.thread_id !== thread.thread_id) return false;
+  const record = event.message;
+  if (event.first) return (record.attachments?.length ?? 0) === 0 && (record.inline_images?.length ?? 0) === 0;
+  const root = record.id === thread.thread_id ? thread.messages.find((m) => m.id === record.id) : undefined;
+  return root !== undefined && (record.agent_checked_seq ?? null) !== (root.agent_checked_seq ?? null);
 }
 
 export function applyRecord(model: HeldThread, event: InboxEvent): RecordOutcome {
@@ -58,7 +77,7 @@ export function applyRecord(model: HeldThread, event: InboxEvent): RecordOutcome
       ...(record.author.kind === 'person' ? { sent_annotations: before?.sent_annotations ?? model.sentWith?.[record.id] ?? 0 } : {}),
       ...(before?.ack && record.ack ? { ack: before.ack } : {}),
     };
-    const messages = [...thread.messages];
+    let messages = [...thread.messages];
     if (before) messages[at] = next;
     else {
       const after = seq === undefined ? -1 : messages.findIndex((m) => (m.seq ?? -1) > seq);
@@ -67,6 +86,8 @@ export function applyRecord(model: HeldThread, event: InboxEvent): RecordOutcome
     let head = thread;
     if (record.id === thread.thread_id && before) {
       const archived = record.resolved_at !== null && thread.resolved_at === null;
+      if (record.resolved_at === null && thread.resolved_at !== null && messages.some(hasClosedQuestion)) return REREAD;
+      if (archived) messages = messages.map((m) => closedByArchive(m, event.seq));
       head = {
         ...thread,
         resolved_at: record.resolved_at,
@@ -83,6 +104,9 @@ export function applyRecord(model: HeldThread, event: InboxEvent): RecordOutcome
     const message = thread.messages[at]!;
     const next = withQuestion(message, event.question);
     if (next === message) return NONE;
+    const root = thread.messages.find((m) => m.id === thread.thread_id);
+    const was = [...(message.questions ?? []), ...(message.actions ?? [])].find((x) => x.key === event.question.key);
+    if (root && root.subject_question !== null && JSON.stringify(was?.superseded_by ?? null) !== JSON.stringify(event.question.superseded_by ?? null)) return REREAD;
     const messages = [...thread.messages];
     messages[at] = next;
     return { kind: 'applied', model: { ...model, thread: { ...thread, messages }, applied: withApplied(model, `${message.id}/${event.question.key}`, event.seq) } };
@@ -95,8 +119,22 @@ export function applyRecord(model: HeldThread, event: InboxEvent): RecordOutcome
       const reply = record.sent_reply_id;
       return { kind: 'applied', model: { ...model, sentWith: { ...model.sentWith, [reply]: (model.sentWith?.[reply] ?? 0) + 1 }, applied: withApplied(model, `ann:${event.id}`, event.seq) } };
     }
+    return NONE;
   }
-  return NONE;
+  switch (event.kind) {
+    case 'card':
+    case 'initiative':
+    case 'steps':
+    case 'thread_pull':
+      return NONE;
+    case 'project':
+      return REREAD;
+    default: {
+      const unknown: never = event;
+      void unknown;
+      return REREAD;
+    }
+  }
 }
 
 function keepSaved(held: HeldThread, read: ThreadModel): HeldThread {

@@ -1,6 +1,6 @@
 import { replaceEqualDeep } from '@tanstack/react-query';
 import { useCallback, useEffect, useState } from 'react';
-import type { InboxAnnotationRecord } from '@plannotator/core/inbox-types';
+import type { InboxAnnotationRecord, InboxThread } from '@plannotator/core/inbox-types';
 import { inboxApi, type AttachmentsModel } from '../../api';
 import type { Signal } from '../../signal';
 
@@ -29,4 +29,20 @@ export function useThreadAttachments(threadId: string, revision: unknown, again:
     setModel((current) => (current ? { ...current, annotations: update(current.annotations) } : current));
   }, []);
   return { model, load, patch };
+}
+
+type FileCarrier = InboxThread['messages'][number];
+const carriesFiles = (m: FileCarrier) => (m.attachments?.length ?? 0) > 0 || (m.inline_images?.length ?? 0) > 0;
+const filesOf = (m: FileCarrier) => JSON.stringify([m.attachments ?? null, m.inline_images ?? null]);
+
+export function sameThreadFiles(before: InboxThread, after: InboxThread): boolean {
+  if (before === after) return true;
+  if (before.thread_id !== after.thread_id) return false;
+  const was = new Map(before.messages.filter(carriesFiles).map((m) => [m.id, m] as const));
+  const now = after.messages.filter(carriesFiles);
+  if (now.length !== was.size) return false;
+  return now.every((m) => {
+    const b = was.get(m.id);
+    return b !== undefined && (b === m || filesOf(b) === filesOf(m));
+  });
 }
