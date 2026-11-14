@@ -1337,6 +1337,7 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
   const diagramShadow = useConfigValue('diagramShadow');
   const documentTextSize = useConfigValue('documentTextSize');
   const documentFontFamily = useConfigValue('documentFontFamily');
+  const documentSourceLineNumbers = useConfigValue('documentSourceLineNumbers');
   const vimModeEnabled = useConfigValue('vimModeEnabled');
   const enterSavesComment = useConfigValue('enterSavesComment');
   const hideRepoOwner = useConfigValue('hideRepoOwner');
@@ -2161,6 +2162,35 @@ export const Settings: React.FC<SettingsProps> = ({ taterMode, onTaterModeChange
                         customPlaceholder="Font name as installed, e.g. Iowan Old Style"
                         notFoundText="Not found — the document keeps the theme font"
                       />
+                    </div>
+
+                    <div className="border-t border-border" />
+                    </>)}
+
+                    {showDocumentTextSize && (<>
+                    <div className="flex items-center justify-between" data-document-source-line-numbers-setting>
+                      <div>
+                        <div className="text-sm font-medium">Source line numbers</div>
+                        <div className="text-xs text-muted-foreground">
+                          Each block&apos;s source lines beside the {mode === 'annotate' ? 'document' : 'plan'}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-label="Source line numbers"
+                        aria-checked={documentSourceLineNumbers}
+                        onClick={() => configStore.set('documentSourceLineNumbers', !documentSourceLineNumbers)}
+                        className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                          documentSourceLineNumbers ? 'bg-primary' : 'bg-muted'
+                        }`}
+                      >
+                        <span
+                          className={`inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform ${
+                            documentSourceLineNumbers ? 'translate-x-6' : 'translate-x-1'
+                          }`}
+                        />
+                      </button>
                     </div>
 
                     <div className="border-t border-border" />
