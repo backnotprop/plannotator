@@ -87,7 +87,7 @@ export const INBOX_PREF_WORDS: Readonly<Record<string, InboxPrefWords>> = {
   "voice.api_key": { label: "OpenAI API key", meaning: "The key voice uses with the API key engine. Never shown: reads say set or not set. Null removes it.", where: "Settings → Voice" },
 
   "access.tailnet_window": { label: "Window over your tailnet", meaning: "Keep the window open to your tailnet at every start.", where: "Settings → Devices" },
-  "access.tailnet_allow": { label: "Logins let in over your tailnet", meaning: "Tailscale logins besides yours that may open the window over your tailnet. Read when the window over your tailnet next turns on.", where: "config.json" },
+  "access.tailnet_allow": { label: "Your Tailscale logins", meaning: "On a tagged machine, which Tailscale names no owner for: the logins that count as you over your tailnet. Read when the window over your tailnet next turns on.", where: "config.json" },
   "access.this_wifi": { label: "This Wi-Fi", meaning: "Phones on this computer's network can reach the Inbox.", where: "Settings → Devices" },
   "access.tailnet_door": { label: "Phones over your tailnet", meaning: "Phones on your tailnet can reach the Inbox.", where: "Settings → Devices" },
 };

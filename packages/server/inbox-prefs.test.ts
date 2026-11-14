@@ -1,9 +1,9 @@
 /**
  * POST and GET /api/inbox/prefs over stand-in routes (inbox-prefs.ts alone; the real routes are in
  * inbox-prefs-route.test.ts). What regresses: several keys reaching their route as more than one settings call, or
- * in pieces that undo each other (two theme halves, a sidebar part over another); a bad value, an unknown key or a
- * guest's owner-only key reaching any route; a route's refusal not saying what an earlier route already wrote; Settings
- * → Agents' 200-with-error read as done; a held switch or a guest's owner-only key offered in the list; the group
+ * in pieces that undo each other (two theme halves, a sidebar part over another); a bad value or an unknown key
+ * reaching any route; a route's refusal not saying what an earlier route already wrote; Settings
+ * → Agents' 200-with-error read as done; a held switch offered in the list; the group
  * filter; a route body not mapped back to the keys `event: prefs` names.
  */
 import { describe, expect, test } from "bun:test";
@@ -37,7 +37,7 @@ function routes(answers: Record<string, { status: number; body: Json }> = {}) {
 describe("a write", () => {
   test("several settings keys go in one settings call, the theme's halves together", async () => {
     const r = routes();
-    const answer = await inboxPrefsPost({ set: { "appearance.theme": "light", "appearance.dark_palette": "plannotator-graphite", "appearance.text_size": 15, "sound.volume": 40 } }, true, r.deps(sources()));
+    const answer = await inboxPrefsPost({ set: { "appearance.theme": "light", "appearance.dark_palette": "plannotator-graphite", "appearance.text_size": 15, "sound.volume": 40 } }, r.deps(sources()));
     expect(answer.status).toBe(200);
     expect(r.calls).toEqual([{ path: "/api/inbox/settings", body: { theme: { mode: "light", dark: "plannotator-graphite" }, text_size: 15, sound: { volume: 40 } } }]);
     expect(answer.saved).toEqual(["appearance.theme", "appearance.dark_palette", "appearance.text_size", "sound.volume"]);
@@ -45,7 +45,7 @@ describe("a write", () => {
 
   test("the sidebar's parts are applied over the layout now, and over each other", async () => {
     const r = routes();
-    await inboxPrefsPost({ set: { "sidebar.hidden": ["usage"], "sidebar.bottom": ["board", "settings"] } }, true, r.deps(sources()));
+    await inboxPrefsPost({ set: { "sidebar.hidden": ["usage"], "sidebar.bottom": ["board", "settings"] } }, r.deps(sources()));
     const layout = r.calls[0]!.body.sidebar;
     expect(layout.hidden).toEqual(["usage"]);
     expect(layout.bottom).toEqual(["board", "settings"]);
@@ -55,25 +55,15 @@ describe("a write", () => {
   test("one bad value or an unknown key reaches no route", async () => {
     for (const set of [{ "appearance.theme": "light", "sound.volume": 5 }, { "appearance.theme": "light", "list.font": "serif" }]) {
       const r = routes();
-      const answer = await inboxPrefsPost({ set }, true, r.deps(sources()));
+      const answer = await inboxPrefsPost({ set }, r.deps(sources()));
       expect(answer.status).toBeGreaterThanOrEqual(403);
       expect(r.calls).toEqual([]);
     }
   });
 
-  test("a tailnet guest's owner-only key refuses the call before any route runs", async () => {
-    const r = routes();
-    const answer = await inboxPrefsPost({ set: { "appearance.theme": "light", "capabilities.board": true } }, false, r.deps(sources()));
-    expect(answer).toMatchObject({ status: 403, body: { code: "owner_only", key: "capabilities.board" } });
-    expect(r.calls).toEqual([]);
-    // The keys its routes let a guest change still go.
-    const ok = routes();
-    expect((await inboxPrefsPost({ set: { "appearance.theme": "light" } }, false, ok.deps(sources()))).status).toBe(200);
-  });
-
   test("routes run settings first, launch's switch before its folder, and a refusal says what was saved", async () => {
     const r = routes({ "/api/inbox/settings/decisions-post": { status: 500, body: { error: "config.json could not be saved", code: "config_not_saved" } } });
-    const answer = await inboxPrefsPost({ set: { "launch.scratch_dir": "~/scratch", "decisions.post_to": "both", "launch.on": true, "appearance.text_size": 13 } }, true, r.deps(sources()));
+    const answer = await inboxPrefsPost({ set: { "launch.scratch_dir": "~/scratch", "decisions.post_to": "both", "launch.on": true, "appearance.text_size": 13 } }, r.deps(sources()));
     expect(r.calls.map((c) => c.path)).toEqual(["/api/inbox/settings", "/api/inbox/launch/settings", "/api/inbox/launch/settings", "/api/inbox/settings/decisions-post"]);
     expect(r.calls[1]!.body).toEqual({ enabled: true });
     expect(answer).toMatchObject({ status: 500, body: { code: "config_not_saved", keys: ["decisions.post_to"], saved: ["appearance.text_size", "launch.on", "launch.scratch_dir"] } });
@@ -82,20 +72,20 @@ describe("a write", () => {
   test("Settings → Agents' switch that did not hold is a refusal", async () => {
     const agents = [{ id: "codex", reach: { on: false, kind: "mcp" } }];
     const r = routes({ "/api/inbox/agents": { status: 200, body: { error: "Codex was not found on this computer" } } });
-    const answer = await inboxPrefsPost({ set: { "agents.codex.reach": true } }, true, r.deps(sources({}, {}, agents)));
+    const answer = await inboxPrefsPost({ set: { "agents.codex.reach": true } }, r.deps(sources({}, {}, agents)));
     expect(r.calls).toEqual([{ path: "/api/inbox/agents", body: { agent: "codex", reach: true } }]);
     expect(answer).toMatchObject({ status: 422, body: { code: "agent_not_changed" }, saved: [] });
   });
 
   test("the window's serverSession and an agent's name ride along", async () => {
     const r = routes();
-    await inboxPrefsPost({ set: { "list.rows": ["compact"] }, by: { host: "pi", session: "s1" }, serverSession: "abc" }, true, r.deps(sources()));
+    await inboxPrefsPost({ set: { "list.rows": ["compact"] }, by: { host: "pi", session: "s1" }, serverSession: "abc" }, r.deps(sources()));
     expect(r.calls[0]!.body).toEqual({ rows: ["compact"], rows_by: { host: "pi", session: "s1" }, serverSession: "abc" });
   });
 
   test("the logins go before the window over the tailnet turns on; launch's full permissions and settings file are written", async () => {
     const r = routes();
-    const answer = await inboxPrefsPost({ set: { "access.tailnet_window": true, "access.tailnet_allow": ["friend@example.com"], "launch.full_permissions": true, "launch.settings_file": "~/claude.json" } }, true, r.deps(sources()));
+    const answer = await inboxPrefsPost({ set: { "access.tailnet_window": true, "access.tailnet_allow": ["friend@example.com"], "launch.full_permissions": true, "launch.settings_file": "~/claude.json" } }, r.deps(sources()));
     expect(answer.status).toBe(200);
     expect(r.calls).toEqual([
       { path: "/api/inbox/settings/tailscale-allow", body: { allow: ["friend@example.com"] } },
@@ -105,11 +95,11 @@ describe("a write", () => {
     ]);
   });
 
-  test("the phones' doors and a cloud agent's wake go to their own routes; a guest reaches none of them", async () => {
+  test("the phones' doors and a cloud agent's wake go to their own routes", async () => {
     const s = { ...sources(), devices: { lan: false, tailnet: false }, cloud: [{ session: "cloud.0123456789ab", name: "Nightly fixer", preset: "grok-bot", wake: false }] };
     const r = routes();
     const wake = { url: "https://example.com/hook", key: "secret-1234" };
-    const answer = await inboxPrefsPost({ set: { "access.this_wifi": true, "access.tailnet_door": true, "cloud_agents.0123456789ab.wake": wake } }, true, r.deps(s));
+    const answer = await inboxPrefsPost({ set: { "access.this_wifi": true, "access.tailnet_door": true, "cloud_agents.0123456789ab.wake": wake } }, r.deps(s));
     expect(answer.status).toBe(200);
     expect(r.calls).toEqual([
       { path: "/api/inbox/lan", body: { on: true } },
@@ -117,16 +107,11 @@ describe("a write", () => {
       { path: "/api/inbox/cloud-agents/cloud.0123456789ab/wake", body: wake },
     ]);
     expect(JSON.stringify(answer.body)).not.toContain("secret-1234");
-    for (const key of ["access.this_wifi", "access.tailnet_allow", "voice.api_key", "cloud_agents.0123456789ab.wake"]) {
-      const guest = routes();
-      expect((await inboxPrefsPost({ set: { [key]: key === "access.tailnet_allow" ? [] : key === "voice.api_key" ? "sk-a-real-looking-key" : key.startsWith("cloud") ? wake : true } }, false, guest.deps(s))).status).toBe(403);
-      expect(guest.calls).toEqual([]);
-    }
   });
 
   test("a secret is listed as set or not set, never its value", () => {
     const s = { ...sources({ voice: { on: true, key: { source: "saved", last4: "1234" } } }), cloud: [{ session: "cloud.0123456789ab", name: "Nightly fixer", preset: "grok-bot", wake: true }] };
-    const list = inboxPrefsCatalogue(s, true, null).prefs;
+    const list = inboxPrefsCatalogue(s, null).prefs;
     expect(list.find((p) => p.key === "voice.api_key")).toMatchObject({ value: "set", secret: true });
     expect(list.find((p) => p.key === "cloud_agents.0123456789ab.wake")).toMatchObject({ value: "set", secret: true, label: "Nightly fixer's wake address and key" });
     expect(JSON.stringify(list)).not.toContain("1234\"");
@@ -134,25 +119,21 @@ describe("a write", () => {
 
   test("a held switch is not offered, and its write is refused", async () => {
     const r = routes();
-    const answer = await inboxPrefsPost({ set: { "capabilities.code_review": true } }, true, r.deps(sources()));
+    const answer = await inboxPrefsPost({ set: { "capabilities.code_review": true } }, r.deps(sources()));
     expect(answer).toMatchObject({ status: 409, body: { code: "pref_unavailable" } });
     expect(r.calls).toEqual([]);
   });
 });
 
 describe("the list", () => {
-  test("values now, the group filter, and what a guest is offered", () => {
+  test("values now, and the group filter", () => {
     const s = sources({ text_size: 13, cookie_host: { on: true } });
-    const all = inboxPrefsCatalogue(s, true, null);
+    const all = inboxPrefsCatalogue(s, null);
     expect(all.prefs.find((p) => p.key === "appearance.text_size")).toMatchObject({ value: 13, default: 14, allowed: "12, 13, 14 or 15", scope: "person" });
     expect(all.prefs.find((p) => p.key === "launch.full_permissions")).toMatchObject({ value: false });
     // Held (absent from the settings answer) and the agents (not read): not listed.
     expect(all.prefs.some((p) => p.key === "capabilities.code_review" || p.key.startsWith("agents."))).toBe(false);
-    expect(inboxPrefsCatalogue(s, true, "sound").prefs.map((p) => p.key)).toEqual(["sound.on", "sound.volume"]);
-    const guest = inboxPrefsCatalogue(s, false, null).prefs.map((p) => p.key);
-    expect(guest).toContain("appearance.theme");
-    expect(guest).not.toContain("capabilities.board");
-    expect(guest).not.toContain("general.plannotator_localhost");
+    expect(inboxPrefsCatalogue(s, "sound").prefs.map((p) => p.key)).toEqual(["sound.on", "sound.volume"]);
   });
 });
 

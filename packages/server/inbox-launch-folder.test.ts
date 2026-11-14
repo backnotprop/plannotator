@@ -305,7 +305,7 @@ describe("to.launch.folder on another drive", () => {
       return launch.prepare(target, { name: "x", body: "x", resolveProject: async (path) => store.ensureProject({ name: path.split("/").pop()!, root: path }) });
     };
     const list = (path: string) =>
-      launch.route(new Request(`http://localhost/api/inbox/launch/folders?path=${encodeURIComponent(path)}`, { headers: { "sec-fetch-site": "same-origin" } }), "/api/inbox/launch/folders", "local", true, null);
+      launch.route(new Request(`http://localhost/api/inbox/launch/folders?path=${encodeURIComponent(path)}`, { headers: { "sec-fetch-site": "same-origin" } }), "/api/inbox/launch/folders", "local", null);
     return { volumes, prepare, list, launch, chosen };
   }
 
@@ -336,7 +336,7 @@ describe("to.launch.folder on another drive", () => {
   test("Choose in Finder: this computer's own window only; the folder picked, or cancelled", async () => {
     const { launch, chosen } = drives();
     const ask = (via: string, door: { platform: string; window: boolean } | null = null, site = "same-origin") =>
-      launch.route(new Request("http://localhost/api/inbox/launch/choose-folder", { method: "POST", headers: { "sec-fetch-site": site }, body: "{}" }), "/api/inbox/launch/choose-folder", via, true, door);
+      launch.route(new Request("http://localhost/api/inbox/launch/choose-folder", { method: "POST", headers: { "sec-fetch-site": site }, body: "{}" }), "/api/inbox/launch/choose-folder", via, door);
     expect((await ask("tailnet"))!.status).toBe(403);
     expect((await ask("local", { platform: "darwin", window: true }))!.status).toBe(403);
     expect((await ask("local", null, "none"))!.status).toBe(403);

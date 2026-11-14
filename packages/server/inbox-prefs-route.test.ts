@@ -2,7 +2,7 @@
  * GET and POST /api/inbox/prefs on a real Inbox in a temp data dir.
  *
  * What regresses: the local command line (plain fetch to 127.0.0.1, no Origin, no serverSession, as `plannotator inbox
- * rows` reaches the settings) refused; another site, a stale page's serverSession or a tailnet guest's owner-only key
+ * rows` reaches the settings) refused; another site, a stale page's serverSession or another Tailscale account
  * getting a write through, or any key of a call written when one of its values is refused; reset not putting the
  * default; the group filter; a key that no longer reads back what it wrote, or no longer saves to the config.json
  * field its `stored` names; `event: prefs` not reaching an open window, for a write here and for a save from Settings.
@@ -19,7 +19,7 @@ import type { InboxPrefEntry } from "./inbox-prefs";
 
 const MAGIC = "macbook-pro.tail0000.ts.net";
 const OWNER = "owner@example.com";
-const GUEST = "guest@example.com";
+const OTHER = "other@example.com";
 
 const roots: string[] = [];
 const servers: InboxServer[] = [];
@@ -72,7 +72,7 @@ async function world(options: { tailnet?: boolean } = {}) {
   mkdirSync(dataDir, { recursive: true });
   setEnv("PLANNOTATOR_DATA_DIR", dataDir);
   for (const name of ["PLANNOTATOR_INBOX_TAILSCALE", "PLANNOTATOR_URL_HOST", "PLANNOTATOR_UPDATE_CHECK", "PLANNOTATOR_INBOX_PREVIEW"]) setEnv(name, undefined);
-  writeFileSync(join(dataDir, "config.json"), JSON.stringify({ updateCheck: false, ...(options.tailnet ? { inboxTailscale: true, inboxTailscaleAllow: [GUEST] } : {}) }));
+  writeFileSync(join(dataDir, "config.json"), JSON.stringify({ updateCheck: false, ...(options.tailnet ? { inboxTailscale: true } : {}) }));
   const home = join(root, "home");
   mkdirSync(home);
   const server = await startInboxServer({
@@ -210,23 +210,14 @@ describe("the guards", () => {
     expect((await w.page("/api/inbox/prefs", { set: { "appearance.theme": "light" } })).status).toBe(200);
   });
 
-  test("a tailnet guest sets what its routes allow and nothing of the owner's; the owner over the tailnet sets both", async () => {
+  test("another Tailscale account reads and writes nothing; the owner over the tailnet sets any key", async () => {
     const w = await world({ tailnet: true });
-    const guestList = ((await (await w.viaTailnet(GUEST)).json()) as { prefs: InboxPrefEntry[] }).prefs.map((p) => p.key);
-    expect(guestList).toContain("appearance.theme");
-    expect(guestList).not.toContain("capabilities.board");
-    const refused = await w.viaTailnet(GUEST, { set: { "appearance.theme": "light", "capabilities.board": true } });
-    expect(refused.status).toBe(403);
-    expect(await refused.json()).toMatchObject({ code: "owner_only", key: "capabilities.board" });
-    expect(w.saved().theme).toBeUndefined();
-    expect((await w.viaTailnet(GUEST, { set: { "appearance.theme": "light" } })).status).toBe(200);
-    expect((await w.viaTailnet(OWNER, { set: { "capabilities.board": true } })).status).toBe(200);
-    expect(w.saved().inboxBoard).toBe(true);
-    // The logins let in: a guest adds none; the command line on this computer does.
-    expect((await w.viaTailnet(GUEST, { set: { "access.tailnet_allow": [GUEST, "another@example.com"] } })).status).toBe(403);
-    expect(w.saved().inboxTailscaleAllow).toEqual([GUEST]);
-    expect((await w.cli({ set: { "access.tailnet_allow": [GUEST, "another@example.com"] } })).status).toBe(200);
-    expect(w.saved().inboxTailscaleAllow).toEqual([GUEST, "another@example.com"]);
+    const before = w.savedText();
+    expect((await w.viaTailnet(OTHER)).status).toBe(403);
+    expect((await w.viaTailnet(OTHER, { set: { "appearance.theme": "light" } })).status).toBe(403);
+    expect(w.savedText()).toBe(before);
+    expect((await w.viaTailnet(OWNER, { set: { "capabilities.board": true, "access.tailnet_allow": ["another@example.com"] } })).status).toBe(200);
+    expect(w.saved()).toMatchObject({ inboxBoard: true, inboxTailscaleAllow: ["another@example.com"] });
   });
 });
 

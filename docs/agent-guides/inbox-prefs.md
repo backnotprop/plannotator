@@ -15,14 +15,14 @@ Not in the list: one-time stamps (the tour, intros, the update reminder's snooze
 
 ### How a write runs
 
-`packages/server/inbox-prefs.ts` reads from what the window's own routes answer this caller (the settings answer, config.json, Settings → Agents, the phones' doors, the cloud agents) and writes through those routes, one in-process request each, with the caller's own headers. So a key has one stored value, one check and one guard: its route's. Nothing is looser than the route; the prefs route adds one check before any write: a tailnet guest's owner-only key is refused for the whole call.
+`packages/server/inbox-prefs.ts` reads from what the window's own routes answer this caller (the settings answer, config.json, Settings → Agents, the phones' doors, the cloud agents) and writes through those routes, one in-process request each, with the caller's own headers. So a key has one stored value, one check and one guard: its route's. Nothing is looser than the route.
 
 1. Every key and value is checked against the list (`inboxPrefsChange`): one unknown key or bad value refuses the call, naming the key and what it takes.
-2. A guest's owner-only key: `403 owner_only`. A key not offered now (a held switch, launch while off, risk rules while Code review is off, a door this Inbox does not serve): `409 pref_unavailable`.
+2. A key not offered now (a held switch, launch while off, risk rules while Code review is off, a door this Inbox does not serve): `409 pref_unavailable`.
 3. The routes run in order: the tailnet logins, settings (it checks all its fields before it writes one), launch (its switch before its folder), each agent, Post decisions, risk rules, the voice key, This Wi-Fi, the phones' tailnet door, each cloud agent's wake. A refusal answers the route's status and body with `keys` and `saved` (keys an earlier route already wrote).
 4. The answer lists `{ key, from, to }` for each value that moved.
 
-The guard each call goes through is its route's: the general write guard on every POST (same origin, or no Origin: the command line), `serverSession` when sent, the route's owner check (`ownerOrLocal`: this computer, or the owner over the tailnet). Phones reach none of it: the device door's allowlist does not name these routes.
+The guard each call goes through is its route's: the general write guard on every POST (same origin, or no Origin: the command line), `serverSession` when sent, and over the tailnet the tailnet gate (only the account that owns this computer gets past it). Phones reach none of it: the device door's allowlist does not name these routes.
 
 ### Live
 

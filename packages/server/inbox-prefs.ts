@@ -4,7 +4,7 @@
  * preference has one stored value, one check and one guard: its route's. Inbox-only (Bun).
  *
  * A write is checked in full before anything is written: every key against the list, every value against its type,
- * and every key a tailnet guest may not change (`owner`, the same keys its route refuses a guest). Then the routes run
+ * and every key not offered now (a held switch, a route this Inbox does not serve). Then the routes run
  * in a fixed order, the settings route first (it checks all its keys before it writes any). When a route refuses, the
  * answer is that refusal with `saved`, the keys an earlier route already wrote.
  *
@@ -90,7 +90,7 @@ export const INBOX_SETTINGS_NOT_PREFS: Readonly<Record<string, string>> = {
 export interface InboxPrefsSources {
   settings: Json;
   config: PlannotatorConfig;
-  /** GET /api/inbox/agents' rows; null when not read (not asked for, or a tailnet guest). */
+  /** GET /api/inbox/agents' rows; null when not read. */
   agents: readonly Json[] | null;
   /** The phones' doors (GET /api/inbox/lan, /api/inbox/tailnet): null when not read, or this Inbox serves no phones. */
   devices?: { lan: boolean | null; tailnet: boolean | null } | null;
@@ -112,9 +112,7 @@ interface Binding {
   /** The body field it writes; on the agents route, the switch beside `agent`. */
   field: string;
   agent?: string;
-  /** Its route refuses a tailnet guest. */
-  owner?: true;
-  /** Undefined: not offered to this caller (a held switch, a row this Inbox does not show, a guest). */
+  /** Undefined: not offered now (a held switch, a row this Inbox does not show). */
   read: (s: InboxPrefsSources) => InboxPrefValue | undefined;
   /** Its part of the route's body, over what the call already holds for that route. */
   write: (value: InboxPrefValue, s: InboxPrefsSources, pending: Json) => Json;
@@ -125,16 +123,15 @@ const at = (value: unknown, ...path: string[]): unknown => path.reduce<unknown>(
 const orDefault = (key: string, value: unknown): InboxPrefValue => (value === undefined || value === null ? inboxPref(key)!.default : (value as InboxPrefValue));
 const onOf = (s: InboxPrefsSources, field: string): boolean | undefined => (typeof at(s.settings, field, "on") === "boolean" ? (at(s.settings, field, "on") as boolean) : undefined);
 
-const setting = (field: string, read: Binding["read"], write: (value: InboxPrefValue) => unknown, owner = false): Binding => ({
+const setting = (field: string, read: Binding["read"], write: (value: InboxPrefValue) => unknown): Binding => ({
   route: "settings",
   field,
-  ...(owner ? { owner: true as const } : {}),
   read,
   write: (value) => ({ [field]: write(value) }),
 });
-const switchOf = (key: string, field: string, owner: boolean): Binding => setting(field, (s) => onOf(s, field) ?? orDefault(key, undefined), (on) => ({ on }), owner);
+const switchOf = (key: string, field: string): Binding => setting(field, (s) => onOf(s, field) ?? orDefault(key, undefined), (on) => ({ on }));
 /** A switch the settings answer leaves out while it is held or its row is hidden: not offered then. */
-const heldSwitchOf = (field: string): Binding => setting(field, (s) => onOf(s, field), (on) => ({ on }), true);
+const heldSwitchOf = (field: string): Binding => setting(field, (s) => onOf(s, field), (on) => ({ on }));
 
 const sidebarNow = (s: InboxPrefsSources, pending: Json): InboxSidebarLayout => inboxSidebarRead(pending.sidebar) ?? inboxSidebarRead(s.settings.sidebar) ?? INBOX_SIDEBAR_DEFAULT;
 const sidebar = (part: "hidden" | "top" | "bottom"): Binding => ({
@@ -168,7 +165,6 @@ const agentSwitch = (id: string, field: "reach" | "tool" | "reminder" | "note"):
   route: "agents",
   field,
   agent: id,
-  owner: true,
   read: (s) => {
     const part = obj(agentRow(s, id)?.[field]);
     if (!part) return undefined;
@@ -196,7 +192,7 @@ function bindingOf(pref: InboxPref): Binding {
   if (group === "prompts") {
     const path = promptPath(key);
     const read: Binding["read"] = (s) => (key === "prompts.guide" ? ((at(s.settings, "prompts", "guide", "text") as string | null) ?? null) : ((at(s.config.prompts, ...path) as string | undefined) ?? null));
-    return setting("prompts", read, (value) => nest(path, value), true);
+    return setting("prompts", read, (value) => nest(path, value));
   }
   if (group === "diff") {
     const wire = DIFF_WIRE[key]!;
@@ -207,7 +203,6 @@ function bindingOf(pref: InboxPref): Binding {
     return {
       route: "launch",
       field,
-      owner: true,
       read: (s) => {
         const launch = obj(s.settings.launch);
         if (!launch || launch.unsupported === true) return undefined;
@@ -223,7 +218,6 @@ function bindingOf(pref: InboxPref): Binding {
     return {
       route: "risk",
       field,
-      owner: true,
       read: (s) => (riskShown(s) ? orDefault(key, s.config.inboxPullRisk?.[field]) : undefined),
       write: (value, s, pending) => {
         const saved = s.config.inboxPullRisk ?? {};
@@ -254,7 +248,7 @@ function bindingOf(pref: InboxPref): Binding {
     case "list.rows":
       return setting("rows", (s) => (Array.isArray(s.settings.rows) ? (s.settings.rows as string[]) : [...INBOX_ROWS_DEFAULT]), (v) => v);
     case "list.mark_read_warning":
-      return switchOf(key, "mark_read_warning", false);
+      return switchOf(key, "mark_read_warning");
     case "sidebar.hidden":
       return sidebar("hidden");
     case "sidebar.top":
@@ -264,14 +258,13 @@ function bindingOf(pref: InboxPref): Binding {
     case "reactions.saved":
       return setting("reactions", (s) => (Array.isArray(s.settings.reactions) ? (s.settings.reactions as { emoji: string; label?: string }[]) : []), (v) => v);
     case "decisions.post_to":
-      return { route: "decisions", field: "post_to", owner: true, read: (s) => (["description", "comment", "both"].includes(s.config.inboxDecisionsPostTo as string) ? (s.config.inboxDecisionsPostTo as string) : pref.default), write: (value) => ({ post_to: value }) };
+      return { route: "decisions", field: "post_to", read: (s) => (["description", "comment", "both"].includes(s.config.inboxDecisionsPostTo as string) ? (s.config.inboxDecisionsPostTo as string) : pref.default), write: (value) => ({ post_to: value }) };
     case "general.plannotator_localhost":
-      // Left out of a guest's settings answer, as its route refuses a guest.
-      return setting("cookie_host", (s) => (obj(s.settings.cookie_host) ? at(s.settings, "cookie_host", "on") === true : undefined), (v) => v, true);
+      return setting("cookie_host", (s) => (obj(s.settings.cookie_host) ? at(s.settings, "cookie_host", "on") === true : undefined), (v) => v);
     case "capabilities.board":
-      return switchOf(key, "board", true);
+      return switchOf(key, "board");
     case "capabilities.checklist":
-      return switchOf(key, "steps", true);
+      return switchOf(key, "steps");
     case "capabilities.code_review":
       return heldSwitchOf("code_review");
     case "capabilities.shape":
@@ -283,36 +276,34 @@ function bindingOf(pref: InboxPref): Binding {
     case "experimental.decision_mode":
       return setting("experimental", (s) => orDefault(key, at(s.settings, "experimental", "decision_mode", "on")), (decision_mode) => ({ decision_mode }));
     case "experimental.bro":
-      return switchOf(key, "bro", true);
+      return switchOf(key, "bro");
     case "experimental.float_drafts":
-      return switchOf(key, "float_drafts", false);
+      return switchOf(key, "float_drafts");
     case "updates.check":
-      return setting("update_check", (s) => orDefault(key, at(s.settings, "updates", "update_check", "on")), (v) => v, true);
+      return setting("update_check", (s) => orDefault(key, at(s.settings, "updates", "update_check", "on")), (v) => v);
     case "updates.auto_install":
-      return setting("auto_update", (s) => orDefault(key, at(s.settings, "updates", "auto_update", "on")), (v) => v, true);
+      return setting("auto_update", (s) => orDefault(key, at(s.settings, "updates", "auto_update", "on")), (v) => v);
     case "voice.on":
     case "voice.phones_only":
     case "voice.engine": {
       const field = name === "on" ? "on" : name === "phones_only" ? "phones_only" : "engine";
-      // A guest's settings answer says voice is off: not theirs to read or change.
-      return setting("voice", (s) => (at(s.settings, "voice", "guest") === true ? undefined : orDefault(key, at(s.settings, "voice", field))), (value) => ({ [field]: value }), true);
+      return setting("voice", (s) => orDefault(key, at(s.settings, "voice", field)), (value) => ({ [field]: value }));
     }
     case "voice.api_key":
       return {
         route: "voice_key",
         field: "key",
-        owner: true,
-        read: (s) => (at(s.settings, "voice", "guest") === true ? undefined : at(s.settings, "voice", "key", "source") ? "set" : "not set"),
+        read: (s) => (at(s.settings, "voice", "key", "source") ? "set" : "not set"),
         write: (key) => ({ key }),
       };
     case "access.tailnet_window":
-      return setting("tailscale", (s) => s.config.inboxTailscale === true, (on) => ({ on }), true);
+      return setting("tailscale", (s) => s.config.inboxTailscale === true, (on) => ({ on }));
     case "access.tailnet_allow":
-      return { route: "tailscale_allow", field: "allow", owner: true, read: (s) => resolveInboxTailscaleAllow(s.config), write: (allow) => ({ allow }) };
+      return { route: "tailscale_allow", field: "allow", read: (s) => resolveInboxTailscaleAllow(s.config), write: (allow) => ({ allow }) };
     case "access.this_wifi":
-      return { route: "lan", field: "on", owner: true, read: (s) => s.devices?.lan ?? undefined, write: (on) => ({ on }) };
+      return { route: "lan", field: "on", read: (s) => s.devices?.lan ?? undefined, write: (on) => ({ on }) };
     case "access.tailnet_door":
-      return { route: "tailnet", field: "on", owner: true, read: (s) => s.devices?.tailnet ?? undefined, write: (on) => ({ on }) };
+      return { route: "tailnet", field: "on", read: (s) => s.devices?.tailnet ?? undefined, write: (on) => ({ on }) };
   }
   throw new Error(`inbox-prefs: no route for ${key}`);
 }
@@ -337,7 +328,6 @@ function cloudWakeBinding(key: string): Binding {
     route: "cloud_wake",
     path: `/api/inbox/cloud-agents/${session}/wake`,
     field: "wake",
-    owner: true,
     read: (s) => {
       const row = s.cloud?.find((agent) => agent.session === session);
       if (!row || !inboxCloudPresetWakes(row.preset as InboxCloudPreset)) return undefined;
@@ -350,16 +340,10 @@ function cloudWakeBinding(key: string): Binding {
 const bindingFor = (pref: InboxPref): Binding => BINDINGS.get(pref.key) ?? cloudWakeBinding(pref.key);
 
 /** The binding of every key, for the coverage test. */
-export function inboxPrefBinding(key: string): { route: InboxPrefRoute; field: string; agent?: string; owner: boolean } | null {
+export function inboxPrefBinding(key: string): { route: InboxPrefRoute; field: string; agent?: string } | null {
   const pref = inboxPref(key);
   const binding = pref ? bindingFor(pref) : undefined;
-  return binding ? { route: binding.route, field: binding.field, ...(binding.agent ? { agent: binding.agent } : {}), owner: binding.owner === true } : null;
-}
-
-/** Whether this caller is offered the key: a guest only what its routes let it change, and nothing a read leaves out. */
-function offered(pref: InboxPref, binding: Binding, s: InboxPrefsSources, owner: boolean): InboxPrefValue | undefined {
-  if (!owner && binding.owner) return undefined;
-  return binding.read(s);
+  return binding ? { route: binding.route, field: binding.field, ...(binding.agent ? { agent: binding.agent } : {}) } : null;
 }
 
 export interface InboxPrefEntry {
@@ -382,13 +366,13 @@ export interface InboxPrefEntry {
 }
 
 /** GET /api/inbox/prefs: every key this caller is offered, with its value now; `group` keeps one group. */
-export function inboxPrefsCatalogue(s: InboxPrefsSources, owner: boolean, group: string | null): { groups: string[]; prefs: InboxPrefEntry[] } {
+export function inboxPrefsCatalogue(s: InboxPrefsSources, group: string | null): { groups: string[]; prefs: InboxPrefEntry[] } {
   const prefs: InboxPrefEntry[] = [];
   const cloud = (s.cloud ?? []).map((agent) => inboxCloudWakePref(String(agent.session).slice("cloud.".length), String(agent.name)));
   for (const pref of [...INBOX_PREFS, ...cloud]) {
     const binding = bindingFor(pref);
     if (group !== null && pref.group !== group) continue;
-    const value = offered(pref, binding, s, owner);
+    const value = binding.read(s);
     if (value === undefined) continue;
     const type = pref.type;
     prefs.push({
@@ -429,7 +413,7 @@ export interface InboxPrefsAnswer {
  * POST /api/inbox/prefs `{ set?: { key: value }, reset?: [key] | "all", by?, serverSession? }`. Answers
  * `{ changes: [{ key, from, to }] }`, a change only where the value moved.
  */
-export async function inboxPrefsPost(body: Json, owner: boolean, deps: InboxPrefsDeps): Promise<InboxPrefsAnswer> {
+export async function inboxPrefsPost(body: Json, deps: InboxPrefsDeps): Promise<InboxPrefsAnswer> {
   const refuse = (status: number, code: string, error: string, extra: Json = {}): InboxPrefsAnswer => ({ status, body: { error, code, ...extra }, saved: [] });
   const change = inboxPrefsChange(body);
   if (!change.ok) return refuse(change.status, change.code, change.error, change.key ? { key: change.key } : {});
@@ -437,7 +421,6 @@ export async function inboxPrefsPost(body: Json, owner: boolean, deps: InboxPref
   const before = await deps.read(inboxPrefsNeeds(prefs.map((pref) => pref.key)));
   for (const pref of prefs) {
     const binding = bindingFor(pref);
-    if (!owner && binding.owner) return refuse(403, "owner_only", `${pref.key}: only this computer's owner can change this.`, { key: pref.key });
     if (binding.read(before) === undefined) return refuse(409, "pref_unavailable", `${pref.key}: not offered on this Inbox now (${pref.where}).`, { key: pref.key });
   }
   // One body per route call: the settings route takes them all at once; an agents body names one agent; the
