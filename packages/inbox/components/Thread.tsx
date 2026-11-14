@@ -505,6 +505,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
    */
   const [skipArmed, setSkipArmed] = useState<ReadonlySet<string> | null>(null);
   const [sending, setSending] = useState(false);
+  const [wordsAway, setWordsAway] = useState(false);
   // The debug log's two moments of a Send (debugLog.ts): a press with no clear after it is a Send that never ended.
   useEffect(() => {
     if (!sending) return;
@@ -3211,10 +3212,12 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     sendingFromComposer.current = options.stayFull === true;
     sendStarts.current += 1;
     setSending(true);
-    // The words drawn at once (data/actions/sendDraw.ts), until the reply carrying them lands or the Send stops.
     const drawnWords = (box.open ? boxWords() : (replyDraft.draft?.body ?? '')).trim();
     const drawing = drawSend({ threadId: thread.thread_id, words: drawnWords, repliesBefore: personReplies(thread) });
-    if (drawnWords !== '') requestAnimationFrame(() => bodyRef.current?.scrollTo({ top: bodyRef.current.scrollHeight }));
+    if (drawnWords !== '') {
+      setWordsAway(box.open);
+      requestAnimationFrame(() => bodyRef.current?.scrollTo({ top: bodyRef.current.scrollHeight }));
+    }
     const sendEnds = replySendStarts(thread.thread_id);
     setError(null);
     /** Replies of this Send that went (or were already there, a retry's replays). */
@@ -3482,7 +3485,6 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       if (!(sentRead && onSentRead && (await onSentRead(sentRead)))) await onChanged();
       drawing.landed();
       await reloadFiles();
-      // The reply and where it is now sit at the foot of the thread.
       requestAnimationFrame(() => {
         bodyRef.current?.scrollTo({ top: bodyRef.current.scrollHeight });
         if (!focusSent.current) return;
@@ -3547,16 +3549,12 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       const checks = claimed && !done && wordsKey !== null && !(failure instanceof InboxApiError && failure.status >= 400 && failure.status < 500);
       if (done) drawing.landed();
       else if (!checks) drawing.stopped();
-      // Nothing went (or not all of it): the claim is given back and the box's words are saved again.
-      // Unless the reply carrying them may have gone (its POST went out and no clear refusal came back,
-      // e.g. the answer was lost): the thread is read, and a reply with its key there means it went.
       if (claimed && !done) {
         let wentAnyway: 'yes' | 'unknown' | 'no' | 'gone' = 'no';
         if (checks) {
           wentAnyway = await replyLanded(threadRef.current.thread_id, wordsKey!).finally(drawing.stopped);
         }
         if (wentAnyway === 'yes') {
-          // It went (and its clear_draft with it): the Send is finished as if its answer had come.
           finishSent(sentUploads, sendClears);
           setError(null);
           announce('Your reply went.');
@@ -3581,7 +3579,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           setError('The reply may not have gone. Send again: it looks for this one first, so it is not sent twice.');
         } else {
           replyDraft.release();
-          const text = textRef.current?.value ?? '';
+          const text = textRef.current ? replyText.get() : '';
           const files = replyFiles.draftFiles(text);
           if (text.trim() !== '' || files.length > 0) replyDraft.save(text, files);
         }
@@ -3589,6 +3587,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       commentWrites.stop();
       releasePicks?.();
       setSending(false);
+      setWordsAway(false);
       sendEnds();
       if (sendingFromComposer.current) {
         // Back in the card's field once it is drawn (a Send button that went disabled let focus go).
@@ -5742,6 +5741,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
               <div className="ib-rscroll" data-reply-scroll="" ref={replyScrollRef}>
                 <ReplyTextField
                   replyText={replyText}
+                  sendingWords={wordsAway}
                   textareaRef={textRef}
                   voice={voice}
                   voiceNoteGlide

@@ -140,7 +140,8 @@ export default function PlatformPost({ pull, open, comments, readComments, ancho
     const narrow = (from: SubmissionTarget, target: SubmissionTarget): SubmissionTarget => {
       const partial = from.partial!;
       const { body: owedBody, ...retry } = partial.retry;
-      const body = buildPlatformReviewBody(retry.action, pull.platform, owedBody !== undefined ? general : '', target);
+      const fileScopedBody = [target.fileScopedBody, ...target.fileLevelComments.map((c) => `**${c.path}:** ${c.body}`)].filter((part) => part.trim()).join('\n\n');
+      const body = buildPlatformReviewBody(retry.action, pull.platform, owedBody !== undefined ? general : '', { ...target, fileScopedBody, fileLevelComments: [] });
       return {
         ...target,
         status: 'partial',

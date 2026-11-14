@@ -56,11 +56,7 @@ if (hasDom) {
       return null;
     },
   }));
-  // The real review-app dialog and submit (tsconfig `paths` points the window's typecheck at its .d.ts).
-  // By a path in a variable: the window's strict typecheck must not follow it into review-editor.
-  const seam: string = '../guide/PlatformPost.tsx';
-  const real = (await import(seam)) as Record<string, unknown>;
-  mock.module('#platform-post', () => real);
+  await (await import('./platformPostSeam')).realPlatformPost();
 }
 const { PullReview } = (hasDom ? await import('./PullReview') : {}) as typeof import('./PullReview');
 const { PullsPage } = (hasDom ? await import('./PullsPage') : {}) as typeof import('./PullsPage');

@@ -69,7 +69,7 @@ function loopback(path: string, method = 'GET', body?: string): Promise<{ status
   });
 }
 
-const TESTS = 41;
+const TESTS = 43;
 
 beforeAll(async () => {
   if (!hasDom) return;
@@ -446,8 +446,8 @@ test.skipIf(!hasDom)('typing during a slow Send never brings back a draft holdin
   await until(() => posted.some((p) => p.path.endsWith('/reply')), 'the reply posted');
   expect((el.querySelector('textarea:not([data-question-other])') as HTMLTextAreaElement).readOnly).toBe(true);
   type(el, 'First words. And more.');
-  // The box keeps the words the Send carries.
-  expect((el.querySelector('textarea:not([data-question-other])') as HTMLTextAreaElement).value).toBe('First words.');
+  expect((el.querySelector('textarea:not([data-question-other])') as HTMLTextAreaElement).value).toBe('');
+  expect(el.querySelector('[data-sending]')?.textContent).toContain('First words.');
   await until(() => el.querySelector('textarea:not([data-question-other])') === null, 'the Send');
   await settle(200);
   expect(await serverDraft(world.waiting)).toBeNull();
@@ -899,6 +899,66 @@ test.skipIf(!hasDom)('a Send that goes as two replies keeps its "Sending…" rep
   globalThis.fetch = real;
   expect(el.querySelectorAll('[data-sending]').length).toBe(0);
   expect(await personReplies('Two replies.')).toHaveLength(1);
+}, 30_000);
+
+/** The next reply POST waits for `release`, then answers with `answer` (or as the Inbox does). */
+function holdReply(real: typeof fetch, answer?: () => Response) {
+  let release = () => {};
+  const held = new Promise<void>((done) => (release = done));
+  let posting = false;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if ((init?.method ?? 'GET') === 'POST' && String(input).endsWith('/reply')) {
+      posting = true;
+      await held;
+      if (answer) return answer();
+    }
+    return real(input, init);
+  }) as typeof fetch;
+  return { release, posting: () => posting };
+}
+
+test.skipIf(!hasDom)('while a reply sends its words show once, in the thread; a refused Send puts them back in the box with the reason', async () => {
+  const { el } = await openWithSaved('Shown once.');
+  const real = globalThis.fetch;
+  const hold = holdReply(real, () => Response.json({ error: 'The agent is not taking replies.' }, { status: 409 }));
+  act(() => button(el, 'Send').click());
+  await until(hold.posting, 'the reply on its way');
+  await settle();
+  expect(el.querySelector('[data-sending]')?.textContent).toContain('Shown once.');
+  expect(box(el)!.value).toBe('');
+  expect(box(el)!.readOnly).toBe(true);
+  hold.release();
+  await until(() => el.querySelectorAll('[data-sending]').length === 0, 'the drawing gone');
+  await settle();
+  globalThis.fetch = real;
+  expect(box(el)!.value).toBe('Shown once.');
+  expect(box(el)!.readOnly).toBe(false);
+  expect(el.textContent).toContain('The agent is not taking replies.');
+  expect(await personReplies('Shown once.')).toHaveLength(0);
+  expect((await serverDraft(world.waiting))?.body).toBe('Shown once.');
+}, 30_000);
+
+test.skipIf(!hasDom)('a Send pressed while scrolled up goes to the reply at the press, before the Inbox answers', async () => {
+  const { el } = await openWithSaved('Take me down.');
+  const pane = el.querySelector<HTMLElement>('.ib-pbody')!;
+  const real = globalThis.fetch;
+  const hold = holdReply(real);
+  const scrolled: number[] = [];
+  const scrollTo = pane.scrollTo.bind(pane);
+  pane.scrollTo = ((options: ScrollToOptions) => {
+    scrolled.push(options.top ?? -1);
+    scrollTo(options);
+  }) as typeof pane.scrollTo;
+  Object.defineProperty(pane, 'scrollHeight', { configurable: true, get: () => 5000 });
+  pane.scrollTop = 0;
+  act(() => button(el, 'Send').click());
+  await until(hold.posting, 'the reply on its way');
+  await settle();
+  expect(scrolled).toContain(5000);
+  hold.release();
+  await until(() => box(el) === null, 'the box closed');
+  globalThis.fetch = real;
+  expect(await personReplies('Take me down.')).toHaveLength(1);
 }, 30_000);
 
 test.skipIf(!hasDom)('an unconfirmed Send that a thread read shows landed is finished while the box still holds its words', async () => {
