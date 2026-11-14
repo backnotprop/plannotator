@@ -3,6 +3,7 @@ import type { Block } from '../../types';
 import { copyTextToClipboard } from '../../utils/clipboard';
 import { applyHighlight, codeBlockClassName, codeBlockKeepsLayout } from '../../utils/codeHighlight';
 import { useFenceTheme } from '../../hooks/useFenceTheme';
+import { SourceLineGutter } from '../SourceLineGutter';
 
 interface CodeBlockProps {
   block: Block;
@@ -55,6 +56,7 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({ block, onHover, onLeave })
       onMouseEnter={onHover ? handleMouseEnter : undefined}
       onMouseLeave={onLeave}
     >
+      <SourceLineGutter block={block} />
       <button
         onClick={handleCopy}
         className="absolute top-2 right-2 p-1.5 rounded-md bg-muted/80 hover:bg-muted text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100 transition-opacity z-10"

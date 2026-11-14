@@ -507,6 +507,7 @@ packages/ui/components/Viewer.restoreMovedAnchors.test.tsx
 packages/ui/components/Viewer.questionContract.test.tsx
 packages/ui/components/Viewer.alertDraftRestore.test.tsx
 packages/ui/components/Viewer.belowTitle.test.tsx
+packages/ui/components/Viewer.sourceLineNumbers.test.tsx
 packages/ui/utils/belowTitleSlot.test.ts
 packages/ui/components/AnnotationPanel.allFiles.test.tsx
 packages/ui/components/AnnotationPanel.sectionRefs.test.tsx
@@ -530,6 +531,7 @@ packages/ui/components/Settings.annotateParity.test.tsx
 packages/ui/components/Settings.compactDisplay.test.tsx
 packages/ui/components/Settings.customFont.test.tsx
 packages/ui/components/Settings.documentTextSize.test.tsx
+packages/ui/components/Settings.documentSourceLineNumbers.test.tsx
 packages/ui/components/Settings.repoOwner.test.tsx
 packages/ui/components/Settings.experimental.test.tsx
 packages/ui/components/Settings.reviewDefaults.test.tsx

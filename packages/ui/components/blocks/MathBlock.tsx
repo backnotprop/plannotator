@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import type { Block } from '../../types';
 import { normalizeMathTex, renderMathToHtml } from '../../utils/math';
 import { useMathRenderer } from '../../hooks/useMathRenderer';
+import { SourceLineGutter } from '../SourceLineGutter';
 
 // Kept as re-exports: InlineMarkdown and older consumers import them from here.
 export { normalizeMathTex, renderMathToHtml };
@@ -18,25 +19,22 @@ export const MathBlock: React.FC<MathBlockProps> = ({ block }) => {
   // The wrapper (class names, data-* anchors, aria-label) is identical in both
   // branches: block targeting and math-annotation restore key on these
   // attributes, so a placeholder must be addressable exactly like the typeset
-  // block. The placeholder's child is a React text node, never markup.
-  if (html === null) {
-    return (
-      <div
-        className="math-block math-annotatable my-5 overflow-x-auto py-2 text-foreground"
-        data-block-id={block.id}
-        data-block-type="math"
-        data-math-tex={tex}
-        data-math-display="true"
-        aria-label={tex}
-      >
-        {tex}
-      </div>
-    );
-  }
-
-  return (
+  // block. The placeholder's child is a React text node, never markup. A
+  // sibling gutter sits outside this overflow box so the label is not clipped.
+  const body = html === null ? (
     <div
-      className="math-block math-annotatable my-5 overflow-x-auto py-2 text-foreground"
+      className="math-block math-annotatable overflow-x-auto py-2 text-foreground"
+      data-block-id={block.id}
+      data-block-type="math"
+      data-math-tex={tex}
+      data-math-display="true"
+      aria-label={tex}
+    >
+      {tex}
+    </div>
+  ) : (
+    <div
+      className="math-block math-annotatable overflow-x-auto py-2 text-foreground"
       data-block-id={block.id}
       data-block-type="math"
       data-math-tex={tex}
@@ -44,5 +42,11 @@ export const MathBlock: React.FC<MathBlockProps> = ({ block }) => {
       aria-label={tex}
       dangerouslySetInnerHTML={{ __html: html }}
     />
+  );
+  return (
+    <div className="relative my-5">
+      <SourceLineGutter block={block} />
+      {body}
+    </div>
   );
 };

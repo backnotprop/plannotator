@@ -2,6 +2,7 @@ import React, { useRef } from 'react';
 import type { Block } from '../../types';
 import { InlineMarkdown } from '../InlineMarkdown';
 import { stripAuthorColor } from '../../utils/authorColor';
+import { SourceLineGutter } from '../SourceLineGutter';
 
 interface TableBlockProps {
   block: Block;
@@ -102,11 +103,13 @@ export const TableBlock: React.FC<TableBlockProps> = ({
   return (
     <div
       ref={containerRef}
-      className="my-4 overflow-x-auto"
+      className="relative my-4"
       data-block-id={block.id}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={onLeave}
     >
+      <SourceLineGutter block={block} />
+      <div className="overflow-x-auto">
       <table className="min-w-full border-collapse text-sm">
         <thead>
           <tr className="border-b border-border">
@@ -147,6 +150,7 @@ export const TableBlock: React.FC<TableBlockProps> = ({
           ))}
         </tbody>
       </table>
+      </div>
     </div>
   );
 };

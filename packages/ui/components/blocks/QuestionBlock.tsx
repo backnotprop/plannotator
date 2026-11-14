@@ -16,6 +16,8 @@ import { QuestionContext } from './QuestionContext';
 import { HostTitle } from '../HostTitle';
 import { UNAVAILABLE_IMAGE_CLASS, useImageResolver } from '../ImageResolverContext';
 import { getImageSrc } from '../ImageThumbnail';
+import type { Block } from '../../types';
+import { SourceLineGutter } from '../SourceLineGutter';
 import {
   questionChoiceWords,
   questionPictureShape,
@@ -218,6 +220,7 @@ export type QuestionSaveResult = void | Promise<unknown>;
 
 export interface QuestionBlockProps {
   blockId: string;
+  sourceBlock?: Block;
   indexed: IndexedQuestion;
   /** How many question blocks the document has (for "Question N of M"). */
   total: number;
@@ -392,6 +395,7 @@ function fitOtherField(field: HTMLTextAreaElement): number | null {
 
 export const QuestionBlock: React.FC<QuestionBlockProps> = ({
   blockId,
+  sourceBlock,
   indexed,
   total,
   answer: storedAnswer,
@@ -830,7 +834,7 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
     <fieldset
       ref={cardRef}
       className={cx(
-        'question-block my-5 min-w-0 rounded-[10px] border px-3.5 pb-2.5 pt-3',
+        'question-block relative my-5 min-w-0 rounded-[10px] border px-3.5 pb-2.5 pt-3',
         // A size container: the card's own width lays out its footer (FOOT_BUTTON).
         '@container/qcard',
         // Native radios/checkboxes follow the theme's mode. ThemeProvider marks
@@ -853,6 +857,7 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
       data-question-decision={question.decision ? 'recorded' : question.decisionOnAnswer ? 'on-answer' : undefined}
       data-question-decision-recording={recordingAttr}
     >
+      <SourceLineGutter block={sourceBlock} />
       <div className="annotation-exclude select-none mb-1.5 flex items-center gap-2" data-pinpoint-ignore="">
         <span className="text-[10.5px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">{eyebrow}</span>
         <span className="ml-auto inline-flex items-center gap-1">
