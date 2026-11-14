@@ -96,6 +96,7 @@ function bunCompiled(execPath: string): boolean {
  * `process.versions.node` but brings its own TLS and root store. A Bun below
  * 1.4.4 whose bundled roots already dropped emSign G3 has the fix ported.
  * `roots` defaults to this runtime's bundled roots, read only for such a Bun.
+ * Electron embeds Node, so its warning directs users to update the host app.
  */
 export function runtimeTlsWarning(
 	versions: Partial<Record<string, string>> = process.versions,
@@ -112,6 +113,9 @@ export function runtimeTlsWarning(
 	}
 	const node = parse(versions.node);
 	if (!node || nodeFixed(node)) return null;
+	if (versions.electron) {
+		return `Plannotator: this app runs on Electron v${versions.electron} (Node v${versions.node}), which is missing the October 2026 TLS fixes (a compromised certificate authority); update the host app to a build that includes the fixes.`;
+	}
 	return `Plannotator: your Node v${versions.node} is missing the October 2026 TLS fixes (a compromised certificate authority); update to 22.23.4, 24.22.1 or 26.12.1 or later.`;
 }
 

@@ -43,6 +43,14 @@ describe("runtimeTlsWarning", () => {
 		}
 	});
 
+	test("an affected Electron runtime directs the user to update the host app", () => {
+		const warning = runtimeTlsWarning({ electron: "43.3.0", node: "24.18.1" });
+		expect(warning).toContain("Electron v43.3.0");
+		expect(warning).toContain("update the host app");
+		expect(warning).not.toContain("24.22.1");
+		expect(runtimeTlsWarning({ electron: "43.8.4", node: "24.22.1" })).toBeNull();
+	});
+
 	test("on Bun only Bun's version counts, whatever Node version it reports", () => {
 		expect(runtimeTlsWarning({ bun: "1.4.4", node: "24.3.0" }, "/usr/local/bin/bun")).toBeNull();
 		expect(runtimeTlsWarning({ bun: "1.5.0", node: "20.0.0" }, "/usr/local/bin/bun")).toBeNull();
