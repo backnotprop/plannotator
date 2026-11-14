@@ -75,7 +75,7 @@ describe.if(hasDom)('launch pad defaults', () => {
     expect(latest!.review.ready).toBe(true);
     expect(latest!.guide.buildParams()).toEqual({ provider: 'guide', label: 'Guided Review', engine: 'claude', model: 'sonnet', effort: 'low' });
     expect(latest!.review.buildParams()).toEqual({ provider: 'claude', label: 'Code Review', model: 'opus', effort: 'high' });
-    expect(latest!.guide.summary).toBe('Claude · Sonnet 5.5 (latest) · Low');
+    expect(latest!.guide.summary).toBe('Claude · Sonnet 5.5 · Low');
     expect(latest!.guide.notice).toBeNull();
   });
 

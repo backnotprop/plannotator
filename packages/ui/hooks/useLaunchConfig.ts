@@ -149,7 +149,7 @@ export function useLaunchConfig(
       const efforts = catalog.settled ? effortSelectOptions(catalog.models, model) : [];
       const fastOffered = !guide && engine === 'codex' && catalog.models.find((m) => m.id === model)?.fastMode === true;
       const fastOn = fastOffered && s.codexFast;
-      const label = model ? modelLabel(catalog.models, model) : 'Default';
+      const label = model ? modelLabel(catalog.models, model).replace(/ \(latest\)$/, '') : 'Default';
       const effortField = engine === 'claude' ? 'effort' : 'reasoningEffort';
       return {
         ...base,
