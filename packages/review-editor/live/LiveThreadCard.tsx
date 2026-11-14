@@ -11,7 +11,7 @@ export function LiveMessageRow({ message, messages, onTakeBack, tail }: { messag
   const delivery = deliveryWord(message, messages);
   return (
     <div className="px-3 py-1" data-live-message={message.id} data-author={message.author.kind}>
-      <div className="flex items-baseline gap-1.5 text-[12px] leading-5 text-muted-foreground">
+      <div className="flex flex-wrap items-baseline gap-x-1.5 whitespace-nowrap text-[12px] leading-5 text-muted-foreground">
         <span className="font-medium text-foreground">{authorName(message)}</span>
         <span>{time(message.created_at)}</span>
         {delivery ? <span data-live-delivery={delivery}>· {delivery}</span> : null}

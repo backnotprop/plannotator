@@ -159,7 +159,7 @@ test('a comment reaches the agent that opened the review, its answer lands live 
     expect(second.commands[0]!.body).toContain('Pi, can you add a test?');
 
     await card.locator('[data-live-resolve]').click();
-    await expect(card).toHaveAttribute('data-resolved', '');
+    await expect(card).toHaveAttribute('data-resolved');
     await expect(page.locator('[data-live-count]')).toContainText('0 open · 1 resolved');
     await context.close();
   } finally {

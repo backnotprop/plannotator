@@ -161,6 +161,7 @@ export function createInboxLiveReview(options: {
         cwd: project.root,
         detached: true,
         stdio: "ignore",
+        windowsHide: true,
         env: {
           ...process.env,
           ...(options.dataDir ? { PLANNOTATOR_DATA_DIR: options.dataDir } : {}),
