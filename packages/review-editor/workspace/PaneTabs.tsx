@@ -1,6 +1,7 @@
 import React, { useLayoutEffect, useRef, useState } from 'react';
 import { Crosshair, Diff, FileText } from 'lucide-react';
 import { EllipsisName } from '../components/EllipsisName';
+import { useReviewStateOptional } from '../dock/ReviewStateContext';
 import type { Pane, PaneTab } from './paneLayout';
 import { REVIEW_ALL_FILES_PANEL_ID, isReviewFilePreviewParams } from '../dock/reviewPanelTypes';
 import { TITLE_SETTLE_MS, useSettledValue } from './useSettledValue';
@@ -81,6 +82,7 @@ export const PaneTabs: React.FC<{
   onKeep?: (id: string) => void;
 }> = ({ pane, paneIndex, onActivate, onClose, onKeep }) => {
   const listRef = useRef<HTMLDivElement>(null);
+  const compact = useReviewStateOptional()?.isCompactTouchLayout ?? false;
   const hidden = useHiddenTabs(listRef, pane.tabs.map((tab) => `${tab.id}\0${tab.title}`).join('\n'), pane.tabs.length < 2, pane.activeId);
 
   const focusTab = (id: string | null) => {
@@ -128,7 +130,7 @@ export const PaneTabs: React.FC<{
         const preview = isReviewFilePreviewParams(tab.params);
         const closable = isClosableTab(tab);
         const shrinks = pane.tabs.length === 1 || (active && closable);
-        const directory = active ? tabDirectory(tab) : '';
+        const directory = active && !compact ? tabDirectory(tab) : '';
         return (
           <div
             key={tab.id}
