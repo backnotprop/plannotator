@@ -301,6 +301,25 @@ describe.skipIf(!hasDom)('FileTree: Changes | All files', () => {
     expect(repoShadow(el).querySelector<HTMLInputElement>('[data-file-tree-search-input]')!.value).toBe('r');
   });
 
+  test('a file clicked twice opens once; after another file it opens again', async () => {
+    const onOpenRepoFile = mock((_path: string, _options: { pin: boolean }) => {});
+    const el = await mount(<Tree onOpenRepoFile={onOpenRepoFile} />);
+    await settle();
+    await act(async () => repoRow(el, 'README.md').click());
+    await act(async () => repoRow(el, 'README.md').click());
+    await settle();
+    expect(onOpenRepoFile.mock.calls.filter(([path]) => path === 'README.md')).toHaveLength(1);
+    const elsewhere = document.createElement('input');
+    document.body.appendChild(elsewhere);
+    elsewhere.focus();
+    await act(async () => root?.render(<Tree onOpenRepoFile={onOpenRepoFile} activeRepoPath=".gitignore" />));
+    await settle();
+    elsewhere.remove();
+    await act(async () => repoRow(el, 'README.md').click());
+    await settle();
+    expect(onOpenRepoFile.mock.calls.filter(([path]) => path === 'README.md')).toHaveLength(2);
+  });
+
   test('says why when the session cannot list the repository', async () => {
     const el = await mount(
       <Tree repoFiles={repo({ status: 'unavailable', reason: 'no-checkout', message: 'All files needs the local checkout.' })} />,
