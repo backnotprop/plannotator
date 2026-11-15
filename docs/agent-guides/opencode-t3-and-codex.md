@@ -159,6 +159,45 @@ handling); instead each registration deletes entries whose pid is dead, and
 loopback port no longer accepts a connection, or that cannot be read. Commands
 list the project they detected (or `unknown`); only the plan review detects it.
 
+### OpenCode: which reply `last` opens (#3312)
+
+`/plannotator-last` and the tool's `last`, on OpenCode 1 (embedded runtime and
+CLI bridge) and OpenCode 2, read the session through one function,
+`pickRecentAssistantMessages` (`apps/opencode-plugin/recent-messages.ts`). It
+opens the newest reply to a prompt the person wrote, not a reply to an
+injected prompt (an OpenCode 2 `synthetic` row, or an OpenCode 1 user message
+whose parts are all synthetic) that OpenCode or a plugin added; such a reply
+opens only when there is no other. A reply belongs to its turn's prompt.
+OpenCode 1's `parentID` counts only when it names a prompt the person wrote,
+since OpenCode 1 parents the rest of a turn on the injected rows it adds inside
+it (the "Continue…" row after an auto-compaction, a subtask command's
+"Summarize the task tool output…" row). Otherwise the newest prompt row starts
+the turn, and an assistant step ends it unless it called a tool the host runs
+(not a provider-hosted one, as OpenCode's own `needsContinuation` decides) or
+stopped at the output limit (`finish: "length"`); a failed step always ends
+it. An injected row stored after a step or a compaction of a running turn, or
+OpenCode 2's Plan-mode reminder right after the prompt (entry, or exit after
+a revert across a Plan→Build switch; `isOpenCode2PlanReminder`,
+`isOpenCode2PlanExitReminder`), stays in that turn: Plannotator's session-URL
+notice, OpenCode's continuation rows. Any other injected row right after a
+prompt starts its own turn (that prompt got no reply). Known limit: another
+plugin that stores a row from a context hook, before the first step as the
+Plan plugin does, demotes the person's answer. Compaction rows do not
+change the turn, and a compaction summary (`summary: true`) is listed but
+opens only when nothing else can. One injected row counts as the person's: an
+OpenCode 2 background subagent result (`<subagent sessionID="…">`, from
+`SubagentCompletion.deliver`) whose child session is named by a `subagent`
+tool call in one of the person's turns, so the reply to that result opens. A
+result for a subagent that a wake's turn started, or that no turn here names,
+stays injected. A subagent command (`subtask` in the command config) starts
+its child with no tool call in the parent, so its result stays injected. Not
+handled: the retry row after an incomplete stream follows a failed step, so its reply counts as injected. The
+picker lists the reply that opens first (★), then the rest newest first,
+capped at 25; the one that opens is kept even when 25 newer replies to
+injected prompts exist. `toBridgeMessages` carries a V2 step's `error` and
+`finish`, and a row's `text` as a text part. Pi and Claude Code still open the
+newest reply with text. Tests: `apps/opencode-plugin/recent-messages.test.ts`.
+
 ### T3 Code: Ask this session through an optional Claude hook (opt-in)
 
 `packages/t3-code` (user notes in its README). T3 Code runs Claude through the
@@ -175,10 +214,18 @@ entry: see "T3 Code" in `inbox-notifications-and-agents.md`. That is why
 `plannotator t3` is listed (`plannotator --help` points at it, the skill
 documents it); its help leads with that setup.
 
+On the machine that runs T3 no grant is needed: the Inbox sends a reply into
+a T3 thread, Claude or Codex, with T3's own `t3 thread send`, and a Codex
+thread T3 runs is never `codex queue`d ("A thread T3 Code runs" and "T3 Code"
+in `inbox-notifications-and-agents.md`). The grant is for a T3 on another
+machine. Not on Windows yet: there the local route is off, and a reply goes
+in under a grant or waits for the agent's next read.
+
 Where Claude Code runs hooks modules, the Claude Code mod runs in a T3
-thread's Claude by itself ("A T3 Code thread" in `claude-code-mod.md`): it
-gives the thread `plannotator_inbox` filed as the thread, puts the Inbox's
-reply in as a turn while T3 keeps that Claude (no grant needed), and answers
+thread's Claude by itself (T3 0.1.7 and later; "A T3 Code thread" in
+`claude-code-mod.md`): it gives the thread `plannotator_inbox` filed as the
+thread, puts the Inbox's reply in as a turn while T3 keeps that Claude (only
+the process that shows T3's own `t3-code` tools polls; no grant needed), and answers
 `plannotator review` / `annotate` / `last` itself. The hook then stands aside
 (`claudeModServesThread` in `prepareT3Hook`: the mod's tag `t3:<thread>` in
 `PLANNOTATOR_SESSION_TAG`), so no command is acted on twice; it stays for a

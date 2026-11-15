@@ -39,7 +39,7 @@
  * No CORS headers anywhere, so another site cannot read an answer.
  */
 
-import { INBOX_LINKED_MARKS, INBOX_PROMPT_HOSTS, inboxMachineTags, inboxRowsBy, type InboxRowsBy } from "@plannotator/core/inbox-types";
+import { INBOX_LINKED_MARKS, INBOX_PROMPT_HOSTS, inboxMachineTags, inboxRowsBy, inboxTagColoursOf, type InboxRowsBy } from "@plannotator/core/inbox-types";
 import { inboxDiffOptionsOf, inboxDiffOptionsSaved, parseInboxDiffOptionsChange } from "./inbox-diff-options";
 import { listIntroAtStart, listIntroDue, listIntroLookPicked } from "./inbox-list-intro";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
@@ -148,6 +148,7 @@ import { inboxSkillsRoute } from "./inbox-skills";
 import { assertTestHome } from "./test-home-guard";
 import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
 import { isInboxPermissionSession } from "@plannotator/core/inbox-permission";
+import { inboxLaunchedWakeOf } from "@plannotator/core/inbox-run-line";
 import { foldCheckoutFolderProjects } from "./inbox-checkout-folders";
 import { combineSuggestions, type InboxAgentWork } from "./inbox-combine-suggestions";
 import { createInboxTidy } from "./inbox-tidy";
@@ -211,6 +212,7 @@ import { createInboxProjectRoots, folderHoldsOtherWork, guessableProjects, isHom
 import { handleFavicon } from "./shared-handlers";
 import { createInboxAttachmentRoutes } from "./inbox-attachments";
 import { createInboxLiveSites, type InboxLiveBridgeSources, type InboxLiveSites } from "./inbox-live";
+import type { WebFraming } from "./inbox-web-prototypes";
 import { createInboxImageCapture, inboxMessageImageRoute, type InboxImageCapture } from "./inbox-message-images";
 import { INBOX_DECISION_EXPORT_ROUTE, inboxDecisionExportRoute } from "./inbox-decision-export";
 import { INBOX_DECISION_POST_ROUTE, postThreadDecisions } from "./inbox-decision-post";
@@ -223,9 +225,10 @@ import { assertInboxUploadsPending, inboxBodyForAgent, inboxDiskFullError, inbox
 import { createInboxLiveSessions, takesOver, thereInThread } from "./inbox-sessions";
 import { inboxAgentsGroup, inboxFolderProject, inboxMergedAgents, inboxStartOfDay, type InboxAgentWait } from "./inbox-agents-list";
 import { createInboxCodexWake, type InboxCodexWake } from "./inbox-codex-wake";
+import { createT3Local, INBOX_T3_PROBE_MS, type T3Route } from "./inbox-t3-local";
 import { createInboxVoice } from "./inbox-voice";
 import { createInboxQwenWake, type InboxQwenWake } from "./inbox-qwen-wake";
-import { createInboxT3Wake, type InboxT3Wake, type T3Connect } from "./inbox-t3-wake";
+import { createInboxT3Wake, createT3ModOwner, type InboxT3Wake, type T3Connect } from "./inbox-t3-wake";
 import { CloudAgentError, createInboxCloudAgents, hasCloudWake } from "./inbox-cloud-agents";
 import { PERSONAL_AGENTS_BANNER_BASE } from "@plannotator/core/inbox-personal-agents";
 import { personalAgentConnectedHere } from "./inbox-personal-agents";
@@ -509,6 +512,7 @@ export interface InboxServerOptions {
   liveIdleMs?: number;
   /** Tests: the live probe's fetch. */
   liveProbeFetch?: typeof fetch;
+  webPrototypeFraming?: (url: URL) => Promise<WebFraming>;
   /**
    * Tests: where the Feedback dialog's send goes (inbox-feedback.ts). Default:
    * `PLANNOTATOR_FEEDBACK_URL`, else the feedback Worker's constant URL.
@@ -1755,7 +1759,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // A linked machine's row loses its `steps_waiting`: this window never shows that machine's checklists.
     // Tags across machines (approval "inbox-thread-tags"): one tag per name over this Inbox and every linked machine that
     // takes tags, and a far row's tags read as those; a row of a machine that does not take them carries none here.
-    const ownTags = store.initiatives().filter((tag) => tag.deleted_at === null);
+    // Each tag with its colour (inbox-tag-colours.ts), merged by name with the linked machines' as the tags are.
+    const ownTags = store
+      .initiatives()
+      .filter((tag) => tag.deleted_at === null)
+      .map((tag) => {
+        const look = store.tagLook(tag.id);
+        return look ? { ...tag, look } : tag;
+      });
     const farTagLists = merged ? machines.tagLists() : [];
     const machineTags = merged ? inboxMachineTags(machines.selfId, ownTags, farTagLists) : null;
     const tagsTaken = new Set(farTagLists.map((list) => list.machine));
@@ -1820,6 +1831,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
        * Merged: one per name across the machines, each with `machines`, its id on every machine that holds it.
        */
       tags: machineTags ? machineTags.tags : ownTags,
+      /** "Show tag colors" and the person's own colours (inbox-tag-colours.ts); merged: over every machine that takes them. Additive. */
+      tag_colours: merged ? inboxTagColoursOf([store.tagColours(), ...machines.tagColourLists()]) : store.tagColours(),
       ...(merged ? { self: machines.selfId, machines: machines.machinesView() } : {}),
       /**
        * Each machine's agents (additive; the Agents section, inbox-agents-list.ts): one group, this Inbox's own; on the
@@ -4047,6 +4060,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // More words in a thread the person started, handed to a session that has
     // seen nothing of it (the person moved them there): read the thread first.
     const continues = store.continuesThread(reply);
+    const launchedWake = inboxLaunchedWakeOf(reply);
     return {
       type: reply.to && !reply.reply_to ? "message" : "reply",
       id: reply.id,
@@ -4061,6 +4075,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       ...(continues && !redirected ? { continues_thread: true } : {}),
       // Send now: the connection delivers it at once, into the running turn when one runs.
       ...(reply.deliver_now_at && sendNow ? { now: true } : {}),
+      // A launched thread's root, to the session its launch started: the wake says the person reads the Inbox
+      // (approval "inbox-launched-agent-note"). Only the root, so only that session's first wake.
+      ...(launchedWake ? { launched: launchedWake } : {}),
       // A thread the person started with no name yet, handed to a session that may name it: the wake asks it to.
       ...(!reply.ack_of && store.canNameThread(reply.thread_id, reply.to?.session ?? recipientOf(reply)) ? { name_thread: true } : {}),
       // The person's 👍 Looks good (amended 2026-10-16): the wake is the one ack line,
@@ -4101,7 +4118,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const t3Thread = bridgeHost(body) === INBOX_T3_HOST;
     const handedOut = () => {
       const t3Handed = t3Thread ? new Set(store.handover.handedTo(session)) : null;
-      return live.pendingOf(session, { tags }).filter((item) => !withdrawnTidy(item.message) && !t3Handed?.has(item.message.id));
+      // Nor anything the T3 wake works on now or holds a `t3 thread send` claim for (on disk: across restarts too).
+      return live.pendingOf(session, { tags }).filter((item) => !withdrawnTidy(item.message) && !t3Handed?.has(item.message.id) && !(t3Thread && t3Wake.holds(item.as, item.message)));
     };
     const commands = (items = handedOut()) => {
       const list = items.map((item) => replyCommand(item.message, sendNow, item.as));
@@ -4181,6 +4199,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       : null;
     const intoTurn = markedAt ? live.deliveredIntoTurn(session, markedAt) : undefined;
     const reply = store.recordDelivery(body.id, { host, session: acting, ...(intoTurn !== undefined ? { intoTurn } : {}) });
+    // The Claude Code mod in a T3 thread's Claude put it in.
+    if (host === INBOX_T3_HOST) noteT3Route({ route: "mod", agent: "claude", thread: reply.thread_id, reply: reply.id });
     return json({ ok: true, delivery: reply.delivery });
   };
 
@@ -4328,6 +4348,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   /** A Codex thread a launch of this Inbox started (not deleted): only its host takes the thread's items. */
   const launchedCodex = (session: string) =>
     store.launchedRoots().some((m) => m.launch?.agent === INBOX_CODEX_HOST && !m.launch.deleted_at && m.to?.host === INBOX_CODEX_HOST && m.to.session === session);
+  // T3 Code on this machine: both T3 wakes send through its `t3` command first, with no sign-in (inbox-t3-local.ts).
+  const t3Local = createT3Local({ environment: agentEnvironment });
+  // Which way each reply to a T3 thread went, one debug-log line each (`t3_route`); the log is made below.
+  const t3Routes: { note: ((route: T3Route) => void) | null } = { note: null };
+  const noteT3Route = (route: T3Route) => t3Routes.note?.(route);
   const codexWake = createInboxCodexWake({
     store,
     environment: agentEnvironment,
@@ -4339,6 +4364,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     launched: (session) => launchedCodex(session),
     // A steps-only Tidy wake with steps off is withdrawn, never handed (a switch turned off in config.json by hand).
     skip: (item) => withdrawnTidy(item),
+    // A Codex thread T3 Code runs: its items go into the T3 thread with T3's own `t3` command (inbox-t3-local.ts).
+    t3: t3Local,
+    route: noteT3Route,
     ...(options.codexWake?.extraClis ? { extraClis: options.codexWake.extraClis } : {}),
     ...(options.codexWake?.now ? { now: options.codexWake.now } : {}),
     ...(options.codexWake?.queueTimeoutMs ? { queueTimeoutMs: options.codexWake.queueTimeoutMs } : {}),
@@ -4356,36 +4384,36 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     ...options.qwenWake,
   });
 
-  // The T3 Code wake: the person's items for a T3 thread go in as a T3 turn through T3's MCP API, under the
-  // grant `plannotator t3 login` saved (inbox-t3-wake.ts).
-  /**
-   * One owner per reply to a T3 Code thread. Where the thread's Claude runs the Claude Code mod, the mod polls the
-   * bridge as the thread and puts the reply in as a turn of the running session itself: while it polls, and for an
-   * item its claim folder holds, the T3 wake leaves the item alone (a T3 send then would be a second turn). Once
-   * it stops polling (T3 released the idle Claude), the T3 wake sends what still waits, under a grant. The bridge
-   * poll, for its part, never hands the mod what the T3 wake handed for a send in flight.
-   */
-  let t3Resweep: ReturnType<typeof setTimeout> | null = null;
-  const t3ModDelivers = (item: InboxMessage, session: string): boolean => {
-    if (live.pollsNow(INBOX_T3_HOST, session)) {
-      // Looked at again once the poll would be stale: a Claude T3 stopped leaves its replies to the T3 wake.
-      if (!t3Resweep) {
-        t3Resweep = setTimeout(() => {
-          t3Resweep = null;
-          void t3Wake.sweep();
-        }, INBOX_SESSION_LIVE_MS + 1_000);
-        (t3Resweep as { unref?: () => void }).unref?.();
-      }
-      return true;
-    }
-    return inboxClaimDirs(store.dir, store.deliveryIdOf(item, session), session).some((dir) => existsSync(dir));
-  };
+  // The T3 Code wake: the person's items for a T3 thread go in as a T3 turn, through T3's `t3` command on this
+  // machine, else T3's MCP API under the grant `plannotator t3 login` saved (inbox-t3-wake.ts).
+  // One owner per reply to a T3 Code thread: the mod while it polls as the thread, else the T3 wake
+  // (`createT3ModOwner`). The bridge poll, for its part, never hands the mod what the T3 wake handed for a send in flight.
+  const t3Resweeps = new Map<number, ReturnType<typeof setTimeout>>();
+  const t3ModDelivers = createT3ModOwner({
+    local: t3Local,
+    holdsPoll: (session) => live.holdsPollNow(INBOX_T3_HOST, session),
+    polledLately: (session) => live.pollsNow(INBOX_T3_HOST, session),
+    claimed: (item, session) => inboxClaimDirs(store.dir, store.deliveryIdOf(item, session), session).some((dir) => existsSync(dir)),
+    resweep: (ms) => {
+      if (t3Resweeps.has(ms)) return;
+      const timer = setTimeout(() => {
+        t3Resweeps.delete(ms);
+        void t3Wake.sweep();
+      }, ms);
+      (timer as { unref?: () => void }).unref?.();
+      t3Resweeps.set(ms, timer);
+    },
+    liveMs: INBOX_SESSION_LIVE_MS,
+    probeMs: INBOX_T3_PROBE_MS,
+  });
   const t3Wake = createInboxT3Wake({
     store,
     dataDir,
     commandOf: (item, session) => replyCommand(item, false, session),
     // A steps-only Tidy wake with steps off is withdrawn, never handed (a switch turned off in config.json by hand).
     skip: (item, session) => withdrawnTidy(item) || t3ModDelivers(item, session),
+    local: t3Local,
+    route: noteT3Route,
     ...options.t3Wake,
   });
 
@@ -4780,6 +4808,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     bridge: options.liveBridge ?? null,
     idleMs: options.liveIdleMs,
     fetchImpl: options.liveProbeFetch,
+    webFraming: options.webPrototypeFraming,
     // The owner's phone over the tailnet: the prototype relay (inbox-live-relay.ts), mapped on first use.
     tailnet: {
       openRelay: (handlers) => tailscale.openRelay(handlers),
@@ -4930,6 +4959,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
 
   /** The optional debug log (inbox-debug-log.ts): null, the default, changes nothing and writes nothing. */
   const debugLog = (options.debug ?? resolveInboxDebug(loadConfig(), process.env)) ? createInboxDebugLog(join(dataDir, "inbox")) : null;
+  if (debugLog) t3Routes.note = (route) => debugLog.note("t3_route", { ...route });
 
   /**
    * The window: its page, with its scripts packed behind it (build/pack-inbox.ts, #2593) and answered under
@@ -5214,14 +5244,16 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const titles = { ...(merged ? machines.sessionNames().titles : {}), ...live.titles() };
         // A linked machine's read carries this Inbox's agent faces and given names in its group: they live here
         // (inbox-linked-marks), and that machine's windows show them. This Inbox's own windows read them apart.
-        const faces = fromDeviceDoor.get(req)?.platform === MACHINE_PLATFORM ? agentFacesFile.wire() : null;
+        const door = fromDeviceDoor.get(req);
+        const faces = door?.platform === MACHINE_PLATFORM ? agentFacesFile.wire() : null;
+        const phone = door !== undefined && door.platform !== MACHINE_PLATFORM;
         const agents = faces ? rows.agents.map((group) => ({ ...group, faces: faces.faces, faces_rev: faces.rev })) : rows.agents;
-        const model = { ...rows, agents, session_labels: labels, session_titles: titles };
+        const model = { ...(phone ? phoneList(rows) : rows), agents, session_labels: labels, session_titles: titles };
         // `since` (the window, #2593): only the rows changed since the list it holds (inbox-list-delta.ts); the rest of
         // the model, the labels too, goes as it is now. Without it, as before.
         const since = url.searchParams.get("since");
         if (since === null) return json(model);
-        return json(listVersions.answer(`${projectFilter ?? ""}|${archivedMode}|${merged ? 1 : 0}|${snoozedMode}`, model, since || null));
+        return json(listVersions.answer(`${projectFilter ?? ""}|${archivedMode}|${merged ? 1 : 0}|${snoozedMode}|${phone ? 1 : 0}`, model, since || null));
       }
       // Linked machines (inbox-machines.ts): the forward /api/inbox/m/<machine>/<route>, the machines and the outbox.
       if (path.startsWith("/api/inbox/m/") || path.startsWith("/api/inbox/machines") || path.startsWith("/api/inbox/outbox")) {
@@ -7284,6 +7316,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     codexWake.stop();
     qwenWake.stop();
     t3Wake.stop();
+    t3Local.stop();
     cloudWake.stop();
     voice.stop();
     codexAccount.stop();
@@ -7334,4 +7367,18 @@ function seenFields(body: Record<string, unknown>): { reportAt?: string | null; 
     out.notes = notes.map((note: InboxNoteAutoAdd) => ({ agent: note.agent, path: note.path }));
   }
   return out;
+}
+
+/**
+ * A paired phone's list keeps the keys it has always had (inbox-devices.test.ts pins them): no `tag_colours`. Its rows
+ * take their colours from each tag's `look` on its next list read, and "Show tag colors" off takes the looks away.
+ */
+function phoneList<T extends { tags: readonly object[]; tag_colours: { show: boolean } }>(list: T): Omit<T, "tag_colours"> {
+  const { tag_colours, ...rest } = list;
+  if (tag_colours.show) return rest;
+  const tags = list.tags.map((tag) => {
+    const { look: _look, ...plain } = tag as { look?: unknown };
+    return plain;
+  });
+  return { ...rest, tags } as Omit<T, "tag_colours">;
 }

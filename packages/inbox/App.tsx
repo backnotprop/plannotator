@@ -36,6 +36,7 @@ import { useRowWrites, type RowDrawing } from './data/actions/rows';
 import { keepSavedQuestions } from './data/actions/picks';
 import { useSettingsSaves } from './data/actions/settings';
 import { useListShown } from './app/useListView';
+import { useListTags } from './app/useListTags';
 import { useDecideSitting, type DecideSitting } from './app/useDecideSitting';
 import { useSnoozeBack } from './app/useSnoozeBack';
 import { WarmWindowParts } from './lazyParts';
@@ -1569,13 +1570,7 @@ function Inbox() {
     if (Date.now() - cardsReadAt.current < 5_000) return;
     void refreshCards();
   }, [refreshCards]);
-  // With the Board off, the list's tags (approval "inbox-thread-tags"), the same array while their ids and names stay.
-  const listTagsKey = (latest?.tags ?? [])
-    .map((i) => `${i.id}\u0000${i.name}\u0000${JSON.stringify(i.machines ?? null)}`)
-    .join('\u0001');
-  const keepsTags = latest?.tags !== undefined;
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the ids and names, on purpose
-  const listTags = useMemo(() => latest?.tags ?? null, [listTagsKey, keepsTags]);
+  const listTags = useListTags(latest);
   const liveTags = useMemo(() => (boardEnabled === false && listTags ? { initiatives: listTags, href: tagHref } : { initiatives: tagInitiatives }), [boardEnabled, listTags, tagInitiatives]);
   const across = useMemo(() => (listTags ? tagsAcross(listTags, machines) : null), [listTags, machines]);
   const initiativeTags = useMemo<InitiativeTags>(() => {
@@ -4111,7 +4106,7 @@ function Inbox() {
   useEffect(() => {
     if (combinedHead) writeRoute({ ...route, project: combinedHead }, { replace: true });
   }, [combinedHead]);
-  const { latestSections, latestGroups, latestRows, pinsOn, pinRows, pinnedIds, listedOpenRow, openThreadRow, listShown, snoozeOn, projectsReadable, projectCounts, latestProjectActivity, filterProject, filterMachine, windowRows, threadAgentContext, filterAgent, projectNames, sidebarMachineCounts, filterList, listFilterPicks, setListFilter, listFilterScoped, filterShown, listFilterRows, listSections, listFilterEmpty, listTitle, notice, filterTag, threadTagsHost, sidebarTags } = useListShown({
+  const { latestSections, latestGroups, latestRows, pinsOn, pinRows, pinnedIds, listedOpenRow, openThreadRow, listShown, snoozeOn, projectsReadable, projectCounts, latestProjectActivity, filterProject, filterMachine, windowRows, threadAgentContext, filterAgent, projectNames, sidebarMachineCounts, filterList, listFilterPicks, setListFilter, listFilterScoped, filterShown, listFilterRows, listSections, listFilterEmpty, listTitle, notice, filterTag, threadTagsHost, sidebarTags, listColours } = useListShown({
     latest, projects, route, thread, threadRow, rowPatches, pinPatches, looking, shown, machines, hideAway, openedHere, heldOpen, heldRead,
     tags: {
       listTags,
@@ -6053,6 +6048,8 @@ function Inbox() {
           onUnstar={pinsOn ? unstarRow : undefined}
           // "Keep starred above the list" (starredPills.ts): the starred threads as pills, with the sidebar section's actions.
           starred={pinRows ? { rows: pinRows, onOpen: openPinned, onAction: (row, action) => void pinAction(row, action, true) } : undefined}
+          // Tag row colours (tagColours.ts): each row's tint and "Show tag colors" in the ⋮.
+          tagColours={listColours ?? undefined}
           tidy={{
             ...listTidy,
             combine: async (pairs) => {
@@ -6980,6 +6977,7 @@ function Inbox() {
         mounted={searchMounted}
         open={searchOpen}
         phone={phone}
+        tintOf={listColours?.tintOfThread}
         currentProject={route.page === 'inbox' ? route.project : null}
         projects={projects}
         onClose={closeSearch}
