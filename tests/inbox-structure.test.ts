@@ -1,13 +1,15 @@
 /**
  * The Inbox window's shape (packages/inbox), held by two rules (docs/agent-guides/inbox-window.md, "Where code goes").
  *
- * 1. Size. Every file under the new folders (`data/`, `screens/`, `parts/`) stays at or under NEW_FILE_CAP lines.
+ * 1. Size. Every file under the new folders (`data/`, `screens/`, `parts/`, and `app/` and `thread/`, the hooks and
+ *    helpers moved out of App.tsx and components/Thread.tsx) stays at or under NEW_FILE_CAP lines.
  *    The files that were already big (over BIG_FILE_LINES when this guard came) each have a ceiling in
  *    inbox-size-ceilings.json equal to their size; a ceiling only goes down: a file that shrank fails until its
  *    ceiling is lowered to its new size, and no other file may pass BIG_FILE_LINES.
  * 2. Imports. Screens and parts draw; they never fetch: no `fetch(` and no `inboxApi` (the API client) there, and no
- *    import of a big file but its types (so they cannot lean on its private copies of data). `data/` holds no React components:
- *    nothing it imports is a `.tsx` file, a component folder, or the big files.
+ *    import of a big file but its types (so they cannot lean on its private copies of data). `app/` and `thread/` never
+ *    fetch either: no `fetch(` and no `inboxApi`. `data/` holds no React components: nothing it imports is a `.tsx`
+ *    file, a component folder, or the big files.
  *
  * A source scan, since the repo has no linter to say it (no Oxlint or ESLint config).
  */
@@ -17,7 +19,7 @@ import { dirname, join, relative, resolve } from "node:path";
 
 const root = resolve(import.meta.dir, "..");
 const inbox = join(root, "packages/inbox");
-const NEW_FOLDERS = ["data", "screens", "parts"] as const;
+const NEW_FOLDERS = ["data", "screens", "parts", "app", "thread"] as const;
 export const NEW_FILE_CAP = 300;
 const BIG_FILE_LINES = 1500;
 const ceilingsFile = join(import.meta.dir, "inbox-size-ceilings.json");
@@ -66,9 +68,9 @@ export function importFindings(file: string, text: string, big: ReadonlySet<stri
   const body = code(text);
   const targets = importsOf(body).map(({ spec, typeOnly }) => ({ spec, typeOnly, path: resolveImport(file, spec) }));
   const drawing = /^packages\/inbox\/(screens|parts)\//.test(at);
-  if (drawing) {
-    if (/(^|[^.\w])fetch\s*\(/.test(body)) found.push("calls fetch: screens and parts read data through packages/inbox/data");
-    if (/\binboxApi\b/.test(body)) found.push("uses inboxApi: screens and parts read and write through packages/inbox/data");
+  if (drawing || /^packages\/inbox\/(app|thread)\//.test(at)) {
+    if (/(^|[^.\w])fetch\s*\(/.test(body)) found.push("calls fetch: screens, parts, app/ and thread/ read data through packages/inbox/data");
+    if (/\binboxApi\b/.test(body)) found.push("uses inboxApi: screens, parts, app/ and thread/ read and write through packages/inbox/data");
   }
   for (const { spec, typeOnly, path } of targets) {
     // A type names a shape, never a copy of data: types may still come from a big file (api.ts holds the wire types).
@@ -114,7 +116,7 @@ describe("Inbox window structure", () => {
     expect(grown.map(({ file, n }) => `${file}: ${n} lines`)).toEqual([]);
   });
 
-  test("screens and parts never fetch or import a big file; data/ holds no components", () => {
+  test("screens and parts never fetch or import a big file; app/ and thread/ never fetch; data/ holds no components", () => {
     const files = NEW_FOLDERS.flatMap((folder) => sources(join(inbox, folder)));
     const findings = files.flatMap((file) => importFindings(file, readFileSync(file, "utf8"), big).map((why) => `${rel(file)}: ${why}`));
     expect(findings).toEqual([]);
@@ -127,6 +129,9 @@ describe("Inbox window structure", () => {
     expect(importFindings(part, "import { inboxApi } from '../api';", bigSet)).toHaveLength(1);
     expect(importFindings(part, "import { ThreadPane } from '../components/Thread';", bigSet)).toHaveLength(1);
     expect(importFindings(part, "import type { ThreadModel } from '../api';\n// never fetch( here", bigSet)).toEqual([]);
+    const helper = join(inbox, "thread/example.ts");
+    expect(importFindings(helper, "import { inboxApi } from '../api';", bigSet)).toHaveLength(1);
+    expect(importFindings(helper, "import type { ThreadModel } from '../api';", bigSet)).toEqual([]);
     const data = join(inbox, "data/example.ts");
     expect(importFindings(data, "import { ThreadPane } from '../components/Thread';", bigSet).length).toBeGreaterThan(0);
     expect(importFindings(data, "import { useQuery } from '@tanstack/react-query';", bigSet)).toEqual([]);
