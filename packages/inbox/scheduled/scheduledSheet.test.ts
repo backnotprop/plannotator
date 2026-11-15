@@ -43,4 +43,10 @@ test('at phone width the list gives the name the room: no Runs column, one track
   // Name, Run, Last run, the menu: the short row's five cells less Runs.
   expect(phone.get('.st-scols')?.get('grid-template-columns')?.replace(/minmax\([^)]*\)/g, 'm').trim().split(/\s+/)).toHaveLength(4);
   expect(phone.get('.st-sname .st-open')?.get('white-space')).toBe('normal');
+  // The wide table at its narrowest (a 768 window) wraps a long name too.
+  let narrowWide: string | undefined;
+  sheet().walkAtRules('container', (at) => {
+    if (/max-width:\s*600px/.test(at.params)) at.walkRules('.st-row .st-open', (rule) => rule.walkDecls('white-space', (decl) => void (narrowWide = decl.value)));
+  });
+  expect(narrowWide).toBe('normal');
 });

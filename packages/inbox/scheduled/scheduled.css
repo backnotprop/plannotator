@@ -51,6 +51,7 @@
 @container st-table (max-width: 600px) {
   .st-cols { grid-template-columns: minmax(140px, 2fr) 84px minmax(48px, 0.45fr) minmax(130px, 1.1fr) 40px; }
   .st-cols > :nth-child(5) { display: none; }
+  .st-row .st-open { white-space: normal; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; line-height: 18px; }
 }
 
 /* Run and Stop: a quiet bordered button; dimmed on an Off row, where it still runs once. */
