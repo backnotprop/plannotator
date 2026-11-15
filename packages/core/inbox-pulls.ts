@@ -15,6 +15,7 @@
  */
 
 import { forgeRefKey } from "./forge-ref-card";
+import type { InboxPullRiskJudgment } from "./inbox-pull-risk";
 
 export type InboxPullPlatform = "github" | "gitlab";
 export type InboxPullState = "open" | "draft" | "merged" | "closed";
@@ -68,6 +69,11 @@ export interface InboxPull {
   default_branch?: string;
   updated_at: string;
   merged_at: string | null;
+  /**
+   * The merged board only (`?machines=1`): the `ibx_` id of the linked machine that listed it, whose gh / glab reads
+   * and changes it. Absent on this Inbox's own, and on a PR both list.
+   */
+  machine?: string;
 }
 
 /**
@@ -150,6 +156,13 @@ export interface InboxPullsAnswer {
   clis?: Partial<Record<"gh" | "glab", InboxPullCliState>>;
   /** Hosts of the projects' origins that no CLI here is signed in to (never asked). Absent on an older Inbox. */
   unsigned?: string[];
+  /**
+   * The merged board only (`?machines=1`, a machine linked): each linked machine that takes `pulls`, by `ibx_` id.
+   * `read_at`: when its board was last read (its PRs are that read's); `pending`: a read is under way, so ask again.
+   */
+  machines?: Record<string, { read_at: string | null; pending: boolean }>;
+  /** The merged board only: the linked machines' risk judgments of the PRs they list, by pull key. */
+  far_risk?: Record<string, InboxPullRiskJudgment>;
 }
 
 /** `GET /api/inbox/pulls/diff`: the patch of one layer, or of the stack up to that layer. */
