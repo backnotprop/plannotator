@@ -48,12 +48,11 @@ import { storage } from '@plannotator/ui/utils/storage';
 import { setSidebarSectionOpen } from './sidebarSections';
 import type { SkillCatalogEntry } from '@plannotator/ui/utils/skillReferences';
 import { reloadSkillCatalog } from '@plannotator/ui/utils/skillCatalog';
-import type { InboxCardWire, InboxDecision, InboxHealth, InboxListRow, InboxListSection, InboxQuestion, InboxThread } from '@plannotator/core/inbox-types';
+import type { InboxDecision, InboxHealth, InboxListRow, InboxListSection, InboxQuestion, InboxThread } from '@plannotator/core/inbox-types';
 import { DecisionMode } from './decisions/DecisionMode';
 import { DecisionPill } from './decisions/entry';
 import {
   InboxApiError,
-  InboxHeldError,
   inboxApi,
   onReplySent,
   adoptPageSession,
@@ -225,7 +224,8 @@ import { ArtifactsWall } from './components/ArtifactsWall';
 import { readArtifactPins } from './artifactPins';
 import { hearAgentFacesEvent, onAgentFaceRefused, readAgentFaces } from './agents/agentFaces';
 import { DraftsPage } from './compose/DraftsPage';
-import { BoardPage, type BoardMove } from './board/BoardPage';
+import { BoardPage } from './board/BoardPage';
+import { useBoardWrites } from './board/boardWrites';
 import { PullsPage, ReviewsOff } from './pulls/PullsPage';
 import { PullReview } from './pulls/PullReview';
 import { usePulls } from './pulls/usePulls';
@@ -1636,42 +1636,7 @@ function Inbox() {
   }, [boardVisit, boardShowsAll, cards]);
   const handleCard = (id: string) =>
     setBoardVisit((visit) => (visit && !visit.handled.has(id) ? { ...visit, handled: new Set([...visit.handled, id]) } : visit));
-  /**
-   * A card a write answered, as the merged Board draws it: a linked machine's answer is that machine's own card, so it
-   * gets its machine back and its tag reads as the merged tag of that name (the list's `tags`).
-   */
-  const boardCard = (card: InboxCardWire): InboxCardWire => {
-    const machine = machineOf(card.id);
-    if (!machine) return card;
-    const tag = card.initiative ? (listTags ?? []).find((t) => t.machines?.[machine] === card.initiative) : undefined;
-    return { ...card, machine, initiative: tag ? tag.id : (card.initiative ?? null) };
-  };
-  /** `held`: the move waits for an asleep linked machine (its clock toast says so); null: it did not land. */
-  const moveCard = async (card: InboxCardWire, change: BoardMove): Promise<InboxCardWire | 'held' | null> => {
-    handleCard(card.id);
-    try {
-      const moved = boardCard((await inboxApi.moveCard(card.id, change)).card);
-      setCards((model) => (model ? { ...model, cards: model.cards.map((c) => (c.id === moved.id ? moved : c)) } : model));
-      void refreshCards();
-      return moved;
-    } catch (cause) {
-      void refreshCards();
-      if (cause instanceof InboxHeldError) {
-        showToast(errorToast(cause, ''));
-        return 'held';
-      }
-      return null;
-    }
-  };
-  const seeDrops = useCallback((ids: readonly string[]) => {
-    if (ids.length === 0) return;
-    // Each machine marks its own cards' drops seen.
-    const byMachine = new Map<string | null, string[]>();
-    for (const id of ids) byMachine.set(machineOf(id), [...(byMachine.get(machineOf(id)) ?? []), id]);
-    void Promise.allSettled([...byMachine].map(([machine, own]) => inboxApi.seeDrops(own, machine)))
-      .then(() => refreshCards())
-      .catch(() => {});
-  }, [refreshCards]);
+  const { boardCard, moveCard, seeDrops } = useBoardWrites({ listTags, handleCard, setCards, refreshCards, showToast: (next) => showToast(next) });
 
   // The Drafts page follows each draft's session (live, ended) while it is open.
   useEffect(() => {

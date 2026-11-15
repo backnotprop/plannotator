@@ -72,6 +72,8 @@ export { dispatchInboxFrame, INBOX_EVENT_FRAMES, openInboxEventFrames, subscribe
 import type { PatchBlobIds } from '@plannotator/core/diff-files';
 import type { InboxFileContents, InboxPullDetailsAnswer, InboxPullDiffAnswer, InboxPullDiffScope, InboxPullRiskAnswer, InboxPullRiskModels, InboxPullsAnswer, InboxReviewChanges, InboxReviewChangesAnswer, InboxReviewLinkAnswer, InboxReviewsAnswer, InboxRestartAgents, InboxTidyPlan, InboxTidyRun, InboxActivityModel } from '@plannotator/core/inbox-types';
 import { InboxApiError, readJson } from './apiError';
+import { cardUrl, learnCards, type CardsModel } from './cardsWire';
+export type { CardsModel } from './cardsWire';
 import { gzipped, wholeBody } from './apiBody';
 export { InboxApiError };
 import type { InboxSearchAnswer, InboxSearchFrom, InboxSearchGroupId, InboxSearchSort, InboxSearchStatus } from '@plannotator/core/inbox-search';
@@ -173,34 +175,6 @@ export interface ProjectBatchAnswer<B> {
   replayed: boolean;
   /** The batch stopped partway: `batch` names what it changed (Undo covers those); the rest did not change. */
   error?: { code: string; message: string };
-}
-
-/** `GET /api/inbox/cards`: the Board. `seen_seq` (the person's last look, a store seq) is absent from an Inbox before step 2. */
-export interface CardsModel {
-  serverSession: string;
-  cursor: number;
-  cards: InboxCardWire[];
-  dropped_unseen: number;
-  seen_seq?: number | null;
-  /** Each linked thread's list row (archived ones too), for the opened card. Absent from an older Inbox. */
-  threads?: Record<string, InboxListRow | null>;
-  /** While the person's checklist switch is on: each linked thread's lists with steps (approval "inbox-thread-steps"). Absent: off, or an older Inbox. */
-  steps?: Record<string, InboxStepsWire[]>;
-  /** The Board's initiatives, deleted ones too (approval "board-initiatives"). Absent from an older Inbox: none. */
-  initiatives?: InboxInitiative[];
-  /**
-   * Approval "board-hashtags": per live initiative that a message tags, the latest-tagged threads no card of it
-   * links (at most 4, newest first; their rows are in `threads`) and `total`, how many such threads in all.
-   * Absent from an older Inbox: the preview lists no threads.
-   */
-  initiative_threads?: Record<string, { threads: string[]; total: number }>;
-  /**
-   * The merged Board (linked machines, mark `cards`): each linked machine's look and the cursor of its cards as read,
-   * by its `ibx_` id. Its cards carry `machine`. Absent from an Inbox before it.
-   */
-  machines?: Record<string, { cursor: number; seen_seq: number | null }>;
-  /** The merged Board: this Inbox's own `ibx_` id. */
-  self?: string;
 }
 
 /** A draft's file as a save names it: an upload id, or the id with where a long paste goes back. */
@@ -1213,21 +1187,6 @@ const messageUrl = (messageId: string, rest = '', query?: string) => inboxUrl(`/
 const attachmentUrl = (attachmentId: string, rest = '', query?: string) => inboxUrl(`/attachments/${encodeURIComponent(attachmentId)}${rest}`, query, machineOf(attachmentId));
 /** `/projects/<id><rest>` on the machine that owns the project. */
 const projectUrl = (projectId: string, rest = '') => inboxUrl(`/projects/${encodeURIComponent(projectId)}${rest}`, undefined, machineOf(projectId));
-/** `/cards/<id><rest>` on the machine whose Board holds the card. */
-const cardUrl = (cardId: string, rest = '') => inboxUrl(`/cards/${encodeURIComponent(cardId)}${rest}`, undefined, machineOf(cardId));
-
-/**
- * The merged Board names each card's machine: a linked machine's card, its project and its threads' rows route there
- * (inboxUrl.ts); this Inbox's own are local for good.
- */
-function learnCards(model: CardsModel): CardsModel {
-  setSelfMachine(model.self);
-  rememberLocal(localIdsIn(model));
-  for (const card of model.cards) rememberMachine([card.id, card.project_id, ...card.threads], card.machine);
-  for (const row of Object.values(model.threads ?? {})) if (row) rememberMachine([row.thread_id], row.machine);
-  return model;
-}
-
 /** The merged list names each row's and project's machine: their routes go there from now on (inboxUrl.ts). */
 function learnMachines(model: ListModel): void {
   setSelfMachine(model.self);
@@ -1995,7 +1954,7 @@ export const inboxApi = {
   // Pins (approval "inbox-pinned-threads"): the sidebar's pinned threads.
   /** Pin a thread (at the bottom of Pinned) or unpin it. */
   /** The Board's cards (approval "inbox-board", step 2): every card, the agents' unseen drops, the person's last look. */
-  cards: () => get<CardsModel>(inboxUrl('/cards', 'machines=1')).then(learnCards),
+  cards: () => get<CardsModel>(inboxUrl('/cards', 'machines=1')).then((model) => learnCards(model, localIdsIn(model))),
   /**
    * The person's New card: a title, notes and links, in Backlog (or Todo); or sent: `thread_id` is
    * the thread compose's Send just started for it (the card lands in Todo, in that thread's project).
