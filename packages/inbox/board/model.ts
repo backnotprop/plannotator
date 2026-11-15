@@ -36,6 +36,7 @@ import {
 } from '@plannotator/core/inbox-types';
 
 import type { ForgeRefCardData } from '@plannotator/core/forge-ref-card';
+import { projectNames } from '../search/model';
 
 export type BoardView = 'lanes' | 'done' | 'cancelled';
 
@@ -121,7 +122,7 @@ export function boardFilterHash(filter: { project?: string | null; initiative?: 
   );
 }
 
-/** Where a New card starts on a Board filtered to an initiative: that one (never "No initiative", which is no initiative). */
+/** Where a New card starts on a Board filtered to an initiative: that one (never "No tag", which is no initiative). */
 export function newCardInitiative(filter: string | null): string | null {
   return filter && filter !== INBOX_NO_INITIATIVE ? filter : null;
 }
@@ -278,6 +279,33 @@ export function cardShowsUnread(card: InboxCardWire, visitLook: number | null, h
   return !handled.has(card.id) && isInboxCardUnread(card, visitLook);
 }
 
+/** The look a card's bold is read by: a linked machine's card by that machine's look (its seqs are its own), else this Inbox's. */
+export function boardLookOf(card: Pick<InboxCardWire, 'machine'>, visitLook: number | null, machineLooks: Readonly<Record<string, number | null>>): number | null {
+  return card.machine && Object.hasOwn(machineLooks, card.machine) ? machineLooks[card.machine]! : visitLook;
+}
+
+/**
+ * The Board's one name per project (`projectNames`), told apart within each machine: a linked machine's project
+ * carries that machine's name the way a list row does ("web · Mac-mini"). `machineNames`: the linked machines only.
+ */
+export function boardProjectNames(
+  projects: readonly (Parameters<typeof projectNames>[0][number] & { machine?: string })[],
+  machineNames: ReadonlyMap<string, string>,
+): Map<string, string> {
+  if (machineNames.size === 0) return projectNames(projects);
+  const groups = new Map<string, (typeof projects)[number][]>();
+  for (const project of projects) {
+    const owner = project.machine && machineNames.has(project.machine) ? project.machine : '';
+    groups.set(owner, [...(groups.get(owner) ?? []), project]);
+  }
+  const out = new Map<string, string>();
+  for (const [owner, group] of groups) {
+    const machine = machineNames.get(owner);
+    for (const [id, name] of projectNames(group)) out.set(id, machine ? `${name} · ${machine}` : name);
+  }
+  return out;
+}
+
 /** A move the person makes on a card (the window's route `POST /api/inbox/cards/:id`). */
 export type BoardMove = { op: 'move'; column: InboxCardColumn } | { op: 'drop'; reason?: string | null } | { op: 'restore' };
 
@@ -324,7 +352,7 @@ export function cardMenuToast(card: InboxCardWire, moved: InboxCardWire): { lead
 
 /** The toast after one click on an initiative's Delete: every one deleted while it is up, undone together. */
 export function initiativeDeletedToast(deleted: readonly Pick<InboxInitiative, 'name'>[]): { lead: string; detail: string } {
-  return { lead: 'Deleted', detail: deleted.length === 1 ? `“${deleted[0]!.name}”` : `${deleted.length} initiatives` };
+  return { lead: 'Deleted', detail: deleted.length === 1 ? `“${deleted[0]!.name}”` : `${deleted.length} tags` };
 }
 
 /**
@@ -472,10 +500,10 @@ export function historyWords(
   const by = authorName(entry.by);
   switch (entry.kind) {
     case 'initiative':
-      // Approval "board-initiatives": "Initiative: Code review by you", or "Initiative cleared by you".
+      // Approval "board-initiatives": "Tag: Code review by you", or "Tag cleared by you" (approval "inbox-thread-tags").
       return entry.initiative
-        ? { before: 'Initiative: ', bold: initiativeNameOf(entry.initiative) ?? 'a deleted initiative', after: ` by ${by}`, quote: null }
-        : { before: `Initiative cleared by ${by}`, bold: null, after: '', quote: null };
+        ? { before: 'Tag: ', bold: initiativeNameOf(entry.initiative) ?? 'a deleted tag', after: ` by ${by}`, quote: null }
+        : { before: `Tag cleared by ${by}`, bold: null, after: '', quote: null };
     case 'created':
       return { before: `Created by ${by}`, bold: null, after: '', quote: null };
     case 'sent':

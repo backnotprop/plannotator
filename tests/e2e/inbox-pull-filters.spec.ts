@@ -19,7 +19,7 @@
  * Shots land in PLANNOTATOR_E2E_PROOF_DIR/pull-filters (1440 rest, the menu narrowed light and dark, the 390 sheet,
  * 320 narrowed, and sheet.png, the contact sheet). Fails if a "Tell your agents" dialog appears.
  */
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -243,6 +243,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const env: Record<string, string> = {
     PATH: `${forge}:${process.env.PATH ?? ''}`,
     HOME: root,
+    PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9',
     PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_INBOX_CONNECT: '0',
     PLANNOTATOR_UPDATE_CHECK: '0',

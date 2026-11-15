@@ -10,8 +10,8 @@
  *   same-origin wrapper page (`LiveSiteViewer`, the engine of #2258); on the
  *   owner's phone over the tailnet the wrapper frames the prototype relay
  *   instead (server side; nothing differs here); comments are `live`
- *   records, grouped by page in the export. A page that does not open (a
- *   guest login over the tailnet, say) is the server's words in one line.
+ *   records, grouped by page in the export. A page that does not open is the
+ *   server's words in one line.
  *
  * The window opens on Interact, with Annotate one click away. Its bottom row
  * (‹ option › Pick) is the window's own, under the page: never drawn over it

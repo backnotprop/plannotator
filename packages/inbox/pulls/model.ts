@@ -203,9 +203,6 @@ function pullUrl(pull: Pick<InboxPull, 'url' | 'host'>): string | null {
 /** What a hand-off asks the agent for first: a guided review (the default), or the person's own curation. */
 export type PullHandoffAsk = { kind: 'guide' } | { kind: 'custom'; words: string };
 
-/** The person's own words for a custom curation are kept to this many characters. */
-export const PULL_HANDOFF_CUSTOM_MAX = 1000;
-
 /** A stack's guided review, after step 1's `/review-curate` (approval "stack-show-me", q-55141171). */
 const STACK_WALK = 'Walk it layer by layer, in landing order, with what to watch in each.';
 
@@ -277,7 +274,8 @@ function branchIsMine(pull: Pick<InboxPull, 'mine' | 'author' | 'repo' | 'head_r
  */
 export function pullHandoffAskLine(stack: InboxPullStack, ask: PullHandoffAsk): string {
   const layers = handoffLayers(stack);
-  const custom = ask.kind === 'custom' ? ask.words.trim().slice(0, PULL_HANDOFF_CUSTOM_MAX) : '';
+  // The person's words, whole (through 0.28.61 they were cut at 1,000 characters without a word).
+  const custom = ask.kind === 'custom' ? ask.words.trim() : '';
   if (layers.length > 1) {
     const top = layers[layers.length - 1]!;
     const from = safeBranch(stack.open_base) ?? "the stack's base branch";

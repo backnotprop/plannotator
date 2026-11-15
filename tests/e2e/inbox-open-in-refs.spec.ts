@@ -21,7 +21,7 @@
  */
 import { writeInboxAsk } from '../../packages/shared/inbox/ask';
 import { startScriptedAskAgent, type ScriptedAskAgent } from '../helpers/inbox-ask-agent';
-import { expect, test, type Browser, type BrowserContext, type Locator, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Locator, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -210,6 +210,7 @@ test.beforeAll(async () => {
   const env: Record<string, string> = {
     PATH: `${stubs}:${process.env.PATH ?? ''}`,
     HOME: root,
+    PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9',
     PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_INBOX_CONNECT: '0',
     PLANNOTATOR_UPDATE_CHECK: '0',

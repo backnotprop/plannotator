@@ -45,6 +45,11 @@ export interface FakeClaudeConfig {
   answer?: string;
   /** The whole answer, in words, in place of the line tests read (screenshots). */
   body?: string;
+  /**
+   * The turn ends as one the API refused: no answer, and the session's transcript gets an `isApiErrorMessage` entry
+   * with this `error` kind and text (Claude Code 2.1.322's shape). Null or absent: it answers.
+   */
+  apiError?: { error: string; text: string } | null;
   /** A session's first poll waits this long (ms): the Inbox shows "Starting" meanwhile. */
   startDelayMs?: number;
   /** `--bg` answers (and the session exists) only after this long (ms). */

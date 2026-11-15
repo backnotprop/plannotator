@@ -5,7 +5,8 @@ import {
   type AgentTerminalAgent,
   type AgentTerminalCapability,
 } from "@plannotator/shared/agent-terminal";
-import { isRemoteSession } from "./remote";
+import { isRemoteSession, isSshDetectedRemote } from "./remote";
+import { isSshTunnelRequest } from "./this-machine";
 import {
   isAgentTerminalRemoteEnabled,
   resolveAgentTerminalRuntime,
@@ -29,6 +30,8 @@ type NodeAgentTerminalSidecar = {
 
 export type BunAgentTerminalBridge = {
   capability: AgentTerminalCapability;
+  /** What /api/plan tells this request: in a remote session only SSH turned on, the terminal for its own tunnel only. */
+  capabilityFor(req: Request): AgentTerminalCapability;
   matches(pathname: string): boolean;
   upgrade(req: Request, server: Bun.Server<AgentTerminalSocketData>): boolean;
   websocket: Bun.WebSocketHandler<AgentTerminalSocketData>;
@@ -52,7 +55,11 @@ export async function createBunAgentTerminalBridge(args: {
   // reachable by network peers, and its token is not an auth boundary
   // (wsPath ships in the /api/plan capability payload). Both therefore share
   // the same explicit opt-in.
-  if (isRemoteSession() && !isAgentTerminalRemoteEnabled()) {
+  // A remote session only SSH turned on keeps the terminal for its own tunnel
+  // (a loopback peer, isSshTunnelRequest): /api/plan offers it and the
+  // WebSocket upgrades only there; every other address gets this disabled one.
+  const tunnelOnly = isRemoteSession() && !isAgentTerminalRemoteEnabled() && isSshDetectedRemote();
+  if (isRemoteSession() && !isAgentTerminalRemoteEnabled() && !tunnelOnly) {
     return createDisabledBridge({
       enabled: false,
       reason: "remote-disabled",
@@ -103,11 +110,15 @@ export async function createBunAgentTerminalBridge(args: {
 
   return {
     capability,
+    capabilityFor(req) {
+      return tunnelOnly && !isSshTunnelRequest(req) ? REMOTE_DISABLED_CAPABILITY : capability;
+    },
     matches(pathname) {
       return pathname === wsPath;
     },
     upgrade(req, server) {
       if (!isAllowedOrigin(req)) return false;
+      if (tunnelOnly && !isSshTunnelRequest(req)) return false;
       return server.upgrade(req, {
         data: { upstream: null, pending: [] },
       });
@@ -234,11 +245,21 @@ export async function createBunAgentTerminalBridge(args: {
   }
 }
 
+/** What a request that is not an SSH session's own tunnel is told: the terminal is off, as in remote mode. */
+const REMOTE_DISABLED_CAPABILITY: AgentTerminalCapability = {
+  enabled: false,
+  reason: "remote-disabled",
+  message: "Agent terminal is disabled in remote mode. Set PLANNOTATOR_AGENT_TERMINAL_REMOTE=1 to enable it.",
+};
+
 function createDisabledBridge(
   capability: AgentTerminalCapability,
 ): BunAgentTerminalBridge {
   return {
     capability,
+    capabilityFor() {
+      return capability;
+    },
     matches() {
       return false;
     },
@@ -259,6 +280,7 @@ async function startNodeAgentTerminalSidecar(
 ): Promise<NodeAgentTerminalSidecar> {
   const proc = Bun.spawn([runtime.nodePath, runtime.sidecarPath], {
     cwd: runtime.sidecarCwd,
+    windowsHide: true,
     env: {
       ...process.env,
       PLANNOTATOR_AGENT_CWD: cwd,

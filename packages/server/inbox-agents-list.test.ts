@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { INBOX_AGENTS_LISTED_MAX, type InboxAgentsGroup } from "@plannotator/core/inbox-types";
 import { InboxStore } from "@plannotator/shared/inbox/store";
-import { inboxAgentsGroup, inboxAgentsWithoutLabels, inboxMergedAgents, inboxPeerAgentsGroup, inboxStartOfDay, type InboxAgentsEvidence } from "./inbox-agents-list";
+import { inboxAgentsGroup, inboxMergedAgents, inboxPeerAgentsGroup, inboxStartOfDay, type InboxAgentsEvidence } from "./inbox-agents-list";
 import { createInboxLiveSessions } from "./inbox-sessions";
 
 const roots: string[] = [];
@@ -101,7 +101,7 @@ describe("who is listed, and how", () => {
   });
 
   test("a launched agent is listed by its launch: working while it starts, idle once stopped, ended when its start failed; done with an archived thread", () => {
-    const launch = (id: string, run: InboxAgentsEvidence["launches"][number]["run"], session = `launch:${id}`) => ({ launch_id: id, session, thread_id: `msg_${id}`, host: "claude-code", project_id: "prj_ledger", started_at: "2026-11-09T08:00:00.000Z", run });
+    const launch = (id: string, run: InboxAgentsEvidence["launches"][number]["run"], session = `launch:${id}`) => ({ launch_id: id, session, thread_id: `msg_${id}`, host: "claude-code", project_id: "prj_ledger", started_at: "2026-11-09T08:00:00.000Z", started: session !== `launch:${id}`, run, scratch: id === "lch_starting" ? "palette-helper" : null });
     const group = inboxAgentsGroup(
       evidence({
         sessions: [{ session: "ses-real", host: "claude-code", root: "/work/ledger", startedAt: 1, lastSeen: 2, live: false, busy: null, label: "Stopped one" }],
@@ -115,16 +115,15 @@ describe("who is listed, and how", () => {
       ["lch_failed", "ended", false],
     ]);
     // The session it runs as, its launch and thread, and what its session said of itself.
-    expect(group.agents[1]).toMatchObject({ session: "ses-real", launch: { id: "lch_stopped", thread_id: "msg_lch_stopped" }, label: "Stopped one" });
-    expect(group.agents[0]).toMatchObject({ session: "launch:lch_starting", project: { id: "prj_ledger", name: "ledger" } });
+    expect(group.agents[1]).toMatchObject({ session: "ses-real", launch: { id: "lch_stopped", thread_id: "msg_lch_stopped", started: true, run: "stopped", scratch: null }, label: "Stopped one" });
+    expect(group.agents[0]).toMatchObject({ session: "launch:lch_starting", launch: { started: false, run: "starting", scratch: "palette-helper" }, project: { id: "prj_ledger", name: "ledger" } });
   });
 
-  test("labels only for this computer's owner", () => {
+  test("labels only when asked", () => {
     const sessions = [{ session: "ses-a", host: "pi", root: null, startedAt: 1, lastSeen: 2, live: true, busy: false, label: "Secret plan" }];
     expect(inboxAgentsGroup(evidence({ sessions, labels: false })).agents[0]!.label).toBeUndefined();
     const owned = [inboxAgentsGroup(evidence({ sessions }))];
     expect(owned[0]!.agents[0]!.label).toBe("Secret plan");
-    expect(inboxAgentsWithoutLabels(owned)[0]!.agents[0]!.label).toBeUndefined();
   });
 });
 
@@ -157,7 +156,7 @@ describe("one conversation under two session ids (a poll's `continues`) is one a
 
   test("a launched session that got a new id is still its launch's one agent, running as the new id", async () => {
     const { live, clock } = await handedOver();
-    const launches = [{ launch_id: "lch_1", session: "ses-old", thread_id: "msg_launch", host: "claude-code", project_id: "prj_ledger", started_at: "2026-11-09T08:00:00.000Z", run: "stopped" as const }];
+    const launches = [{ launch_id: "lch_1", session: "ses-old", thread_id: "msg_launch", host: "claude-code", project_id: "prj_ledger", started_at: "2026-11-09T08:00:00.000Z", started: true, run: "stopped" as const, scratch: null }];
     const group = listed(live, clock, { launches, waits: [wait("ses-old", "msg_launch")] });
     expect(group.agents.map((agent) => [agent.id, agent.session, agent.launch?.thread_id, agent.waiting, agent.live])).toEqual([["lch_1", "ses-new", "msg_launch", 1, true]]);
     expect(group.total).toBe(1);

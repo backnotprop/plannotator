@@ -459,6 +459,7 @@ export function createInboxCodexWake(options: {
     // No claims yet.
   }
   const dropClaim = (itemId: string, session: string) => {
+    store.handover.giveBack(itemId, session);
     claimed.delete(`${itemId}.${session}`);
     uncertain.delete(`${itemId}.${session}`);
     queued.get(session)?.delete(itemId);
@@ -503,6 +504,7 @@ export function createInboxCodexWake(options: {
     const key = `${id}.${session}`;
     const retry = retryAt.get(key);
     if (retry && retry.at > now()) return;
+    if (id === item.id && !store.handover.hand(item, session, "codex")) return;
     try {
       mkdirSync(dir, { recursive: true });
       mkdirSync(claimDir(id, session));

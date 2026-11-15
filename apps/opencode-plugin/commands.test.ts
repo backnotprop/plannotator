@@ -155,6 +155,7 @@ describe("handleReviewCommand open state (--base / --diff-type)", () => {
     const caller = initGitRepo("caller");
     const target = initGitRepo("target");
     mkdirSync(path.join(target, "src"));
+    mkdirSync(path.join(caller, "src"));
     const hostCwd = process.cwd();
     writeFileSync(path.join(caller, "caller.ts"), "caller-only\n");
     writeFileSync(path.join(target, "target.ts"), "target-only\n");
@@ -182,9 +183,14 @@ describe("handleReviewCommand open state (--base / --diff-type)", () => {
     deps.startReviewServer.mockClear();
     await handleReviewCommand({ properties: { arguments: "./missing-directory", sessionID: "original-session" } }, deps as any);
     expect(deps.startReviewServer).not.toHaveBeenCalled();
-    expect(deps.client.app.log.mock.calls.map((call: any[]) => call[0].message).join("\n")).toContain("does not exist");
+    expect(deps.client.app.log.mock.calls.map((call: any[]) => call[0].message).join("\n")).toContain('No folder "./missing-directory"');
     // app.log never reaches the TUI, so the refusal must also be toasted.
-    expect(deps.client.tui.showToast.mock.calls.map((call: any[]) => call[0].body.message).join("\n")).toContain("does not exist");
+    expect(deps.client.tui.showToast.mock.calls.map((call: any[]) => call[0].body.message).join("\n")).toContain('No folder "./missing-directory"');
+
+    // A sole bare folder name that is not there stops too, naming the close folder.
+    await handleReviewCommand({ properties: { arguments: "srx", sessionID: "original-session" } }, deps as any);
+    expect(deps.startReviewServer).not.toHaveBeenCalled();
+    expect(deps.client.tui.showToast.mock.calls.map((call: any[]) => call[0].body.message).join("\n")).toContain("Did you mean src? Run: plannotator review src");
 
     // Prose that names no directory keeps the pre-directory behavior (#1483):
     // the invoking repo is reviewed and the ignored words are reported.

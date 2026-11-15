@@ -178,6 +178,7 @@ export async function saveToBear(
 
 		const url = `bear://x-callback-url/create?title=${encodeURIComponent(title)}&text=${encodeURIComponent(content)}&open_note=no`;
 
+		// windows-hide-guard: macOS only (open).
 		await $`open ${url}`.quiet();
 
 		return { success: true };
@@ -210,6 +211,7 @@ export async function saveToOctarine(
 
 		const url = `octarine://create?path=${encodeURIComponent(path)}&content=${encodeURIComponent(content)}&workspace=${encodeURIComponent(workspace)}&fresh=true&openAfter=false`;
 
+		// windows-hide-guard: macOS only (open).
 		await $`open ${url}`.quiet();
 
 		return { success: true, path };

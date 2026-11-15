@@ -13,7 +13,7 @@
  * question keep only the clean quote.
  *
  * Failures to catch: Side missing from a thread that can ask, or showing in
- * one that cannot (no live agent: a guest's or a linked machine's thread
+ * one that cannot (no live agent: a linked machine's thread
  * reads `can_ask: false` too), or in the phone layout (the owner hides it
  * there; the top bar icon stays); Side out of its place; a press that opens the
  * window without the words, or not at all; the Ask icon coming back to the

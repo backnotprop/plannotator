@@ -13,9 +13,6 @@ import {
   saveQuickLabels,
 } from '../../utils/quickLabels';
 
-/** Most labels the tab lets a person keep (only the first ten get a key). */
-const MAX_QUICK_LABELS = 12;
-
 /**
  * One editable row. `key` is a session-only identity, never persisted: the
  * saved shape stays exactly `QuickLabel[]`. A label's `id` cannot serve here —
@@ -349,26 +346,25 @@ export const QuickLabelsTab: React.FC = () => {
       </div>
       <div role="status" aria-live="polite" className="sr-only">{announcement}</div>
 
-      {rows.length < MAX_QUICK_LABELS && (
-        <button
-          onClick={() => {
-            const row: QuickLabelRow = {
-              key: nextRowKey(),
-              label: {
-                id: `custom-${Date.now()}`,
-                emoji: '📌',
-                text: 'New label',
-                color: 'blue',
-              },
-            };
-            commit([...rows, row]);
-            pendingFocus.current = { key: row.key, target: 'text' };
-          }}
-          className="w-full py-1.5 text-xs text-muted-foreground hover:text-foreground border border-dashed border-border rounded-lg hover:border-foreground/30 transition-colors"
-        >
-          + Add label
-        </button>
-      )}
+      {/* Any number of labels (through 0.28.61, at most 12); only the first ten get a key, and the picker scrolls. */}
+      <button
+        onClick={() => {
+          const row: QuickLabelRow = {
+            key: nextRowKey(),
+            label: {
+              id: `custom-${Date.now()}`,
+              emoji: '📌',
+              text: 'New label',
+              color: 'blue',
+            },
+          };
+          commit([...rows, row]);
+          pendingFocus.current = { key: row.key, target: 'text' };
+        }}
+        className="w-full py-1.5 text-xs text-muted-foreground hover:text-foreground border border-dashed border-border rounded-lg hover:border-foreground/30 transition-colors"
+      >
+        + Add label
+      </button>
 
       <div className="text-[10px] text-muted-foreground/70">
         Use {shortcutHint('1')} through {shortcutHint('0')} when the annotation toolbar is visible to apply a label instantly. The order of the list decides the key; use the arrows to move a label, and click its emoji to change it.

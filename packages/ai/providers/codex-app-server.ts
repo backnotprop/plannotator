@@ -398,7 +398,7 @@ export class CodexAppServerProcess {
       // stderr pipe deadlocks the child once its buffer fills. The env turns
       // Plannotator's integration off in this Codex (ask-ai-env.ts): its hooks
       // read the marker; the Inbox MCP server is off by the `-c` overrides.
-      proc = spawn(file, args, { cwd, env: askAiChildEnv(env), stdio: ["pipe", "pipe", "ignore"] });
+      proc = spawn(file, args, { cwd, env: askAiChildEnv(env), stdio: ["pipe", "pipe", "ignore"], windowsHide: true });
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));
       this.handleProcessEnd(error);

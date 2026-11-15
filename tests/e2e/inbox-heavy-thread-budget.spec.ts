@@ -61,7 +61,7 @@
  * .local/proof/heavy-thread/measure.json.
  */
 
-import { expect, test } from '@playwright/test';
+import { expect, test } from './inbox-test';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { join, resolve } from 'node:path';
@@ -103,6 +103,7 @@ test('a thread of 120 open messages and 30 full-size screenshots stays within it
   const env: Record<string, string> = {
     PATH: process.env.PATH ?? '',
     HOME: root,
+    PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9',
     PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_BROWSER: NO_BROWSER,
     NO_BROWSER,

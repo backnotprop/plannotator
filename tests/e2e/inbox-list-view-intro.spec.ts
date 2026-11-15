@@ -13,7 +13,7 @@
  * PLANNOTATOR_LIST_VIEW_SHOTS; with PLANNOTATOR_LIST_VIEW_VIDEO set, the desktop page is recorded (list-view-intro.webm).
  */
 
-import { expect, test, type Browser, type Page } from '@playwright/test';
+import { expect, test, type Browser, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, renameSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -46,6 +46,7 @@ test.beforeAll(async () => {
   const env: Record<string, string> = {
     PATH: process.env.PATH ?? '',
     HOME: root,
+    PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9',
     PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_BROWSER: NO_BROWSER,
     NO_BROWSER,

@@ -5,7 +5,7 @@
  * or missing on one that has them; leaving its place right after Add a pull request…, or hiding when the thread has no linked PR to add from; a download that is not a plain link to
  * the thread's own route (relative, so it works over the tailnet or a tunnel; through the forward for a linked
  * machine's thread); the phone sheet not swapping to its sub-view and back. Post decisions (step 2): the "Post on a
- * pull request" group missing where posting is offered, or shown where it is not (a guest, another machine's thread);
+ * pull request" group missing where posting is offered, or shown where it is not (another machine's thread);
  * a row that posts on another PR than its own; with no PR, Add a pull request… not leading to the add-then-post.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
@@ -146,7 +146,7 @@ describe.skipIf(!hasDom)('Export decisions in ⋯ More', () => {
     expect(links.map((l) => l.getAttribute('data-decision-export'))).toEqual(['md', 'html']);
     expectDownload(links[0]!, 'md');
     expectDownload(links[1]!, 'html');
-    // Posting not offered (no postDecisions: a guest, another machine's thread): the two downloads only.
+    // Posting not offered (no postDecisions: another machine's thread): the two downloads only.
     expect(sub.querySelectorAll('[role="menuitem"]').length).toBe(2);
   });
 
@@ -162,6 +162,14 @@ describe.skipIf(!hasDom)('Export decisions in ⋯ More', () => {
     expect(sub.querySelector('[data-decision-post-add]')).toBeNull();
     await press(rows[1]!);
     expect(posted).toEqual(['group/app!45']);
+  });
+
+  test('Post on a pull request: a Bitbucket PR gets no row (the server refuses posting there); the others keep theirs', async () => {
+    stubPulls(['acme/notes#12', 'https://bitbucket.org/acme/billing/pull-requests/7']);
+    frame(<ThreadMore thread={thread(['single'])} linkOf={() => ''} phone={false} addPull={() => {}} postDecisions={{ post: () => {}, addPullThenPost: () => {} }} />);
+    const sub = await openExportSubmenu(await openMore());
+    await until(() => !!sub.querySelector('[data-decision-post]'), 'the PR rows');
+    expect([...sub.querySelectorAll<HTMLElement>('[data-decision-post]')].map((r) => r.getAttribute('data-decision-post'))).toEqual(['acme/notes#12']);
   });
 
   test('Where to post: the stored choice is checked (the description by default), and a pick saves it without closing the menu', async () => {
