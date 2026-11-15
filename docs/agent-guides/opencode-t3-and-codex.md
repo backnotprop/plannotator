@@ -179,7 +179,8 @@ On the machine that runs T3 no grant is needed: the Inbox sends a reply into
 a T3 thread, Claude or Codex, with T3's own `t3 thread send`, and a Codex
 thread T3 runs is never `codex queue`d ("A thread T3 Code runs" and "T3 Code"
 in `inbox-notifications-and-agents.md`). The grant is for a T3 on another
-machine.
+machine. Not on Windows yet: there the local route is off, and a reply goes
+in under a grant or waits for the agent's next read.
 
 Where Claude Code runs hooks modules, the Claude Code mod runs in a T3
 thread's Claude by itself ("A T3 Code thread" in `claude-code-mod.md`): it

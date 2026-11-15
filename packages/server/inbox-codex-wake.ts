@@ -78,7 +78,7 @@ import { INBOX_BOARD_REQUEST_CLOSE, INBOX_BOARD_REQUEST_OPEN, INBOX_DECISION_ASK
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { agentHomeAllowed, codexHome, type AgentEnvironment } from "./inbox-agents";
 import type { LaunchDelivery } from "./inbox-launch-host";
-import type { T3Local } from "./inbox-t3-local";
+import { createT3Claims, INBOX_T3_READ_BACK_AFTER_MS, type T3Local, tryThroughT3 } from "./inbox-t3-local";
 
 /** The ChatGPT desktop app's own Codex CLI (macOS), used when no `codex` is on PATH. */
 export const INBOX_CODEX_DESKTOP_CLI = "/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex";
@@ -654,12 +654,20 @@ export function createInboxCodexWake(options: {
   };
 
   /**
-   * An item for a thread T3 Code runs goes into the T3 thread (`options.t3`), never `codex queue`. While it
-   * cannot go, the reply says why (`t3_wait`), as a T3 thread's does.
+   * An item for a thread T3 Code runs goes into the T3 thread (`options.t3`, `tryThroughT3`), never `codex queue`.
+   * Only a closed T3 here says so on the reply (`t3_wait: "closed"`); one it cannot reach otherwise (no T3 command
+   * here, no T3 thread found yet) is saved for the agent's next read, and the lookup is tried again. Whether it
+   * went: true when it did (the next item of the thread may follow).
    */
   /** Whether a sweep waits on T3 starting again (`T3Local.onceRunning`). */
   let t3Awaited = false;
-  const sendToT3 = async (item: InboxMessage, session: string): Promise<void> => {
+  // An item id has no dot, nor has a Codex thread id.
+  const itemOfKey = (key: string) => key.slice(0, key.indexOf("."));
+  const sessionOfKey = (key: string) => key.slice(key.indexOf(".") + 1);
+  const t3Claims = createT3Claims(join(store.dir, "t3-send-codex"), now);
+  /** Items saved for the agent's next read while T3 cannot be reached here, or while a send that may have gone is read back. */
+  const t3Saved = new Set<string>();
+  const sendToT3 = async (item: InboxMessage, session: string): Promise<boolean> => {
     const id = store.deliveryIdOf(item, session);
     const key = `${id}.${session}`;
     const waits = (reason: "closed" | null) => {
@@ -670,75 +678,89 @@ export function createInboxCodexWake(options: {
         // Gone meanwhile.
       }
     };
+    const sayOnce = (line: string) => {
+      if (failuresSaid.has(line)) return;
+      failuresSaid.add(line);
+      log(line);
+    };
+    const awaitT3 = () => {
+      if (t3Awaited || !options.t3) return;
+      t3Awaited = true;
+      options.t3.onceRunning(() => {
+        t3Awaited = false;
+        // Back: what waited on a retry goes now too.
+        for (const one of [...retryAt.keys()]) if (t3Saved.has(one) || t3Claims.has(itemOfKey(one), sessionOfKey(one))) retryAt.delete(one);
+        void sweep();
+      });
+    };
     const t3 = options.t3;
-    if (t3?.installed() && !t3.running()) {
-      // T3 is closed: nothing to try until it runs again, looked for every few seconds. The backoff is only
-      // for a T3 that runs and does not answer.
+    if (!t3?.installed()) {
+      // No T3 command here (none installed, Windows): nothing here can put it in. Saved, never "Open T3".
+      waits(null);
+      t3Saved.add(key);
+      sayOnce(`T3 Code runs Codex thread ${session}, and this machine has no t3 command the Inbox can use; its replies are saved for the agent's next read.`);
+      return false;
+    }
+    const held = t3Claims.has(id, session);
+    if (!t3.running()) {
+      // T3 is closed: nothing to try until it runs again, looked for every few seconds.
       retryAt.delete(key);
-      waits("closed");
-      if (!t3Awaited) {
-        t3Awaited = true;
-        t3.onceRunning(() => {
-          t3Awaited = false;
-          void sweep();
-        });
-      }
-      return;
+      if (held) t3Saved.add(key);
+      else waits("closed");
+      awaitT3();
+      return false;
     }
     const retry = retryAt.get(key);
-    if (retry && retry.at > now()) return;
-    const later = (line: string) => {
-      const wait = Math.min((retry?.wait ?? RETRY_FIRST_MS / 2) * 2, RETRY_MAX_MS);
+    if (retry && retry.at > now()) return false;
+    const later = (first: number, line: string | null) => {
+      const wait = Math.min(Math.max((retry?.wait ?? first / 2) * 2, first), RETRY_MAX_MS);
       retryAt.set(key, { at: now() + wait, wait });
-      if (!failuresSaid.has(line)) {
-        failuresSaid.add(line);
-        log(`${line}. Trying again later.`);
-      }
+      if (line) sayOnce(`${line}. Trying again later.`);
     };
-    const thread = t3 ? await t3.threadOfCodexThread(session) : null;
-    if (!t3 || !thread) {
-      waits("closed");
-      return later(`T3 Code runs Codex thread ${session}, and its T3 thread could not be found`);
+    const thread = await t3.threadOfCodexThread(session);
+    if (!thread) {
+      // T3 runs, and its state names no thread for this one yet (it may in a moment): saved, and looked up again soon.
+      waits(null);
+      t3Saved.add(key);
+      later(INBOX_T3_READ_BACK_AFTER_MS, `T3 Code runs Codex thread ${session}, and its T3 thread could not be found`);
+      return false;
     }
-    if (id === item.id && !store.handover.hand(item, session, "t3")) return;
-    try {
-      mkdirSync(dir, { recursive: true });
-      mkdirSync(claimDir(id, session));
-    } catch {
-      claimed.add(key);
-      return;
-    }
-    claimed.add(key);
-    const at = now();
-    inFlight.set(key, { at, session, itemId: id, taken: false });
-    const sent = await t3.send(thread, codexQueueMessage(options.commandOf(item, session)), stopping.signal);
-    inFlight.delete(key);
-    if ("sent" in sent) {
+    if (!held && id === item.id && !store.handover.hand(item, session, "t3")) return false;
+    const command = options.commandOf(item, session);
+    const tried = await tryThroughT3({ local: t3, claims: t3Claims, itemId: id, session, t3Thread: thread, marker: command.id, text: codexQueueMessage(command), now, signal: stopping.signal, log });
+    if (tried === "delivered") {
+      t3Claims.drop(id, session);
+      t3Saved.delete(key);
       retryAt.delete(key);
-      return delivered(id, session);
+      waits(null);
+      delivered(id, session);
+      return true;
     }
-    if ("uncertain" in sent) {
-      // As a timed-out `codex queue`: kept claimed (never sent twice), and saved for the agent's next read.
-      retryAt.delete(key);
-      log(`T3 may have taken ${item.id} for thread ${thread} (${sent.uncertain}); it is not sent again: the agent sees it when it reads the thread.`);
-      uncertain.add(key);
-      writeFileSync(join(claimDir(id, session), "queued.json"), `${JSON.stringify({ at, uncertain: true })}\n`);
-      return;
+    if (tried === "checking") {
+      // It may have gone: kept, saved in the window, and the T3 thread read back on the next try.
+      t3Saved.add(key);
+      waits(null);
+      later(INBOX_T3_READ_BACK_AFTER_MS, null);
+      if (!t3.running()) awaitT3();
+      return false;
     }
-    dropClaim(id, session);
-    if ("gone" in sent) {
+    t3Saved.delete(key);
+    store.handover.giveBack(id, session);
+    if (tried === "gone") {
       retryAt.delete(key);
       waits(null);
       dead.add(session);
-      log(`T3 no longer has thread ${thread} (${sent.gone}); the reply waits in the Inbox for the next agent.`);
-      return;
+      log(`T3 no longer has thread ${thread}; the reply waits in the Inbox for the next agent.`);
+      return false;
     }
-    if ("closed" in sent) {
+    if (tried === "closed") {
       waits("closed");
-      return later(`T3 Code is not answering for thread ${thread} (${sent.closed})`);
+      awaitT3();
+      return false;
     }
     waits(null);
-    later(`t3 thread send failed for thread ${thread}: ${sent.failed}`);
+    later(RETRY_FIRST_MS, `T3 did not take ${item.id} for thread ${thread}`);
+    return false;
   };
   /** What `codex queue` took for a thread T3 runs (before the Inbox knew) no turn T3 shows will take: saved, not handed. */
   const releaseQueued = (session: string) => {
@@ -781,6 +803,8 @@ export function createInboxCodexWake(options: {
       dropClaim(key.slice(0, dot), key.slice(dot + 1));
     }
     for (const key of [...retryAt.keys()]) if (!pendingKeys.has(key)) retryAt.delete(key);
+    for (const key of [...t3Saved]) if (!pendingKeys.has(key)) t3Saved.delete(key);
+    for (const key of t3Claims.keys()) if (!pendingKeys.has(key)) t3Claims.drop(itemOfKey(key), sessionOfKey(key));
     // A thread T3 Code runs goes into its T3 thread: T3 runs a turn it did not start out of sight.
     const t3Owned = new Set<string>();
     for (const session of new Set([...work.map((one) => one.session), ...queued.keys()])) {
@@ -788,9 +812,12 @@ export function createInboxCodexWake(options: {
     }
     for (const session of t3Owned) releaseQueued(session);
     if (t3Owned.size > 0) {
+      // In order: once an item of a thread does not go, the thread's later ones wait for it.
+      const waiting = new Set<string>();
       for (const { item, session } of work) {
         if (stopping.signal.aborted) return;
-        if (t3Owned.has(session)) await sendToT3(item, session);
+        if (!t3Owned.has(session) || waiting.has(session)) continue;
+        if (!(await sendToT3(item, session))) waiting.add(session);
       }
       work = work.filter((one) => !t3Owned.has(one.session));
     }
@@ -888,8 +915,8 @@ export function createInboxCodexWake(options: {
     },
     status: (session) => (!knownSessions().has(session) ? null : dead.has(session) ? "dead" : "alive"),
     ownedByT3,
-    uncertain: (session, itemId) => uncertain.has(`${itemId}.${session}`),
-    uncertainItems: (session) => [...uncertain].filter((key) => key.endsWith(`.${session}`)).map((key) => key.slice(0, key.indexOf("."))),
+    uncertain: (session, itemId) => uncertain.has(`${itemId}.${session}`) || t3Saved.has(`${itemId}.${session}`),
+    uncertainItems: (session) => [...new Set([...uncertain, ...t3Saved])].filter((key) => key.endsWith(`.${session}`)).map((key) => key.slice(0, key.indexOf("."))),
     noteToolCall,
     sweep,
     stop: () => {

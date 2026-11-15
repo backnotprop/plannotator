@@ -55,15 +55,16 @@
  *    thread write nothing: no sign-in here fixes that.
  */
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { INBOX_T3_HOST, isT3ThreadId, type InboxMessage, type InboxT3WaitReason } from "@plannotator/core/inbox-types";
-import { inboxClaimName, type InboxReplyCommand } from "@plannotator/shared/inbox/connection";
+import { inboxClaimDirs } from "@plannotator/shared/inbox/claims";
+import type { InboxReplyCommand } from "@plannotator/shared/inbox/connection";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import type { T3Credentials } from "@plannotator/t3-code/auth";
 import type { T3Rpc } from "@plannotator/t3-code/t3-client";
 import { codexQueueMessage } from "./inbox-codex-wake";
-import type { T3Local } from "./inbox-t3-local";
+import { createT3Claims, INBOX_T3_READ_BACK_AFTER_MS, type T3Local, type T3Try, tryThroughT3 } from "./inbox-t3-local";
 
 /** The T3 client loads only once a grant exists: every other CLI start skips the MCP client. */
 let t3Modules: Promise<[typeof import("@plannotator/t3-code/auth"), typeof import("@plannotator/t3-code/delivery"), typeof import("@plannotator/t3-code/t3-client")]> | null = null;
@@ -131,9 +132,11 @@ export interface InboxT3Wake {
   gone(session: string): boolean;
   /** The thread called an Inbox tool: it is there. */
   noteToolCall(session: string): void;
-  /** A send T3Delivery refused: the window says it is saved for the agent's next read. */
+  /** A send T3Delivery refused, or one `t3 thread send` may have put in: the window says it is saved for the agent's next read. */
   uncertain(session: string, itemId: string): boolean;
   uncertainItems(session: string): string[];
+  /** Whether the wake holds this item for the thread now (a sweep works on it, or a `t3 thread send` claim is on disk): the bridge never hands it to the mod. */
+  holds(session: string, item: InboxMessage): boolean;
   sweep(): Promise<void>;
   stop(): void;
 }
@@ -315,38 +318,14 @@ export function createInboxT3Wake(options: {
   // ── T3 on this machine ──
   /** Threads `t3 thread show` or a send found here. */
   const localHas = new Set<string>();
-  const sendDir = join(store.dir, "t3-send");
-  /** Each `t3 thread send` claim folder, by item key: one that outlives its call (no answer, an Inbox restart) is never sent again. */
-  let localClaims: Map<string, string> | null = null;
-  const localClaimsOf = (): Map<string, string> => {
-    if (localClaims) return localClaims;
-    localClaims = new Map();
-    let names: string[] = [];
-    try {
-      names = readdirSync(sendDir);
-    } catch {
-      return localClaims;
-    }
-    for (const name of names) {
-      try {
-        const claim = JSON.parse(readFileSync(join(sendDir, name, "claim.json"), "utf8")) as { item?: unknown; session?: unknown };
-        if (typeof claim.item === "string" && typeof claim.session === "string") localClaims.set(`${claim.item}.${claim.session}`, join(sendDir, name));
-      } catch {
-        // Made by a call that stopped before it wrote its claim: it names no item.
-      }
-    }
-    return localClaims;
-  };
-  const dropLocalClaim = (key: string) => {
-    const dir = localClaimsOf().get(key);
-    localClaimsOf().delete(key);
-    if (!dir) return;
-    try {
-      rmSync(dir, { recursive: true, force: true });
-    } catch {
-      // Left behind: a later sweep tries again.
-    }
-  };
+  /** Threads T3 here said it does not have: the next ways are tried without asking it again, until the thread calls in. */
+  const localGone = new Set<string>();
+  /** The claim on each `t3 thread send`, on disk (inbox-t3-local.ts): the one record of a send that may have gone, across restarts. */
+  const claims = createT3Claims(join(store.dir, "t3-send"), now);
+  /** Items whose send may have gone, until the thread read back says (`checking`): saved, in the window. */
+  const checking = new Set<string>();
+  /** The messages a sweep works on now, by thread: from the moment it picks them, the bridge hands none to the mod. */
+  const working = new Map<string, Set<string>>();
   /** Whether a closed T3 here is looked for (`T3Local.onceRunning`). */
   let localAwaited = false;
   const awaitLocal = () => {
@@ -410,32 +389,30 @@ export function createInboxT3Wake(options: {
   const itemOfKey = (key: string) => key.slice(0, key.indexOf("."));
   const sessionOfKey = (key: string) => key.slice(key.indexOf(".") + 1);
 
-  /**
-   * One item through `t3 thread send`. "sent" and "unsure" end it; "closed", "gone" and "failed" sent nothing and
-   * leave it to a grant; "held" means another way has it.
-   */
-  const sendLocal = async (item: InboxMessage, session: string): Promise<"sent" | "unsure" | "held" | "closed" | "gone" | "failed"> => {
+  /** Whether another way took the item since this sweep picked it (the mod's claim folder, a delivery). */
+  const takenElsewhere = (item: InboxMessage, session: string): boolean => {
+    const fresh = store.message(item.id);
+    if (!fresh || fresh.taken_back_at) return true;
+    if (store.isOwner(fresh, session) ? !!fresh.delivery : !!fresh.tags?.some((tag) => tag.session === session && tag.delivery)) return true;
+    return inboxClaimDirs(store.dir, store.deliveryIdOf(fresh, session), session).some((dir) => existsSync(dir));
+  };
+  /** A retry soon after a send that may have gone: the thread is read back then. */
+  const checkSoon = (key: string) => {
+    const wait = Math.min(Math.max((retryAt.get(key)?.wait ?? 0) * 2, INBOX_T3_READ_BACK_AFTER_MS), RETRY_MAX_MS);
+    retryAt.set(key, { at: now() + wait, wait });
+  };
+
+  /** One item through `t3 thread send` (`tryThroughT3`): the claim, the send, and the read-back of one that may have gone. */
+  const tryLocal = async (item: InboxMessage, session: string): Promise<T3Try | "held"> => {
     const id = store.deliveryIdOf(item, session);
     const key = `${id}.${session}`;
-    if (id === item.id && !store.handover.hand(item, session, "t3")) return "held";
-    const dir = join(sendDir, inboxClaimName(id, session));
-    try {
-      mkdirSync(sendDir, { recursive: true });
-      mkdirSync(dir);
-    } catch {
-      // Already claimed: a call before this one may have sent it.
-      localClaimsOf().set(key, dir);
-      refused.set(key, null);
-      return "unsure";
-    }
-    localClaimsOf().set(key, dir);
-    try {
-      writeFileSync(join(dir, "claim.json"), `${JSON.stringify({ item: id, session, at: new Date(now()).toISOString() })}\n`);
-    } catch {
-      // The folder alone holds the claim for this run.
-    }
-    const sent = await local!.send(session, codexQueueMessage(options.commandOf(item, session)), stopping.signal);
-    if ("sent" in sent) {
+    // Picked before anything waited; asked again now, just before the claim.
+    if (!claims.has(id, session) && takenElsewhere(item, session)) return "held";
+    const command = options.commandOf(item, session);
+    const tried = await tryThroughT3({ local: local!, claims, itemId: id, session, t3Thread: session, marker: command.id, text: codexQueueMessage(command), now, signal: stopping.signal, log });
+    if (tried === "delivered") {
+      claims.drop(id, session);
+      checking.delete(key);
       retryAt.delete(key);
       localHas.add(session);
       try {
@@ -443,23 +420,18 @@ export function createInboxT3Wake(options: {
       } catch {
         // Gone, or no longer this session's.
       }
-      return "sent";
+    } else if (tried === "checking") {
+      checking.add(key);
+      checkSoon(key);
+      if (!local!.running()) awaitLocal();
+    } else {
+      checking.delete(key);
+      if (tried === "gone") {
+        localHas.delete(session);
+        localGone.add(session);
+      }
     }
-    if ("uncertain" in sent) {
-      // T3 may have taken it: kept claimed (no way sends it again) and saved for the agent's next read.
-      retryAt.delete(key);
-      refused.set(key, null);
-      log(`T3 may have taken ${item.id} for thread ${session} (${sent.uncertain}); it is not sent again: the agent sees it when it reads the thread.`);
-      return "unsure";
-    }
-    // T3 took nothing: the claim goes, and a grant may send it.
-    dropLocalClaim(key);
-    store.handover.giveBack(id, session);
-    if ("closed" in sent) return "closed";
-    localHas.delete(session);
-    if ("gone" in sent) return "gone";
-    sayOnce(`t3 thread send failed for thread ${session}: ${sent.failed}. Trying again later.`);
-    return "failed";
+    return tried;
   };
 
   /** What the item's wait reads after a try: a reason, null (nothing holds it), undefined (as it was). */
@@ -556,21 +528,18 @@ export function createInboxT3Wake(options: {
         }
       }
     };
-    const claims = localClaimsOf();
     for (const [session, items] of pending) {
-      // What `t3 thread send` may have put in stays this wake's, saved for the agent's next read: no other way sends it.
-      const unsure = items.filter((item) => wakesItem(item, session) && claims.has(keyOf(item, session)));
-      for (const item of unsure) {
-        const key = keyOf(item, session);
-        pendingKeys.add(key);
-        refused.set(key, null);
-        if (store.deliveryIdOf(item, session) === item.id) store.handover.hand(item, session, "t3");
+      const held = items.filter((item) => wakesItem(item, session) && claims.has(store.deliveryIdOf(item, session), session));
+      const work = items.filter((item) => !held.includes(item) && wakesItem(item, session) && !options.skip?.(item, session));
+      // Not the wake's to send (its connection delivers it, or it is withdrawn): nothing here holds it.
+      for (const item of items) if (!work.includes(item) && !held.includes(item)) waitOf(item, session, null);
+      for (const item of [...held, ...work]) pendingKeys.add(keyOf(item, session));
+      for (const item of held) {
+        // A send that may have gone: this wake's alone, saved in the window until the thread is read back.
+        checking.add(keyOf(item, session));
+        sendable.add(keyOf(item, session));
         waitOf(item, session, null);
       }
-      const work = items.filter((item) => !unsure.includes(item) && wakesItem(item, session) && !options.skip?.(item, session));
-      // Not the wake's to send (its connection delivers it, or it is withdrawn): nothing here holds it.
-      for (const item of items) if (!work.includes(item) && !unsure.includes(item)) waitOf(item, session, null);
-      for (const item of work) pendingKeys.add(keyOf(item, session));
       if (dead.has(session)) {
         for (const item of work) waitOf(item, session, null);
         continue;
@@ -579,8 +548,17 @@ export function createInboxT3Wake(options: {
         const key = keyOf(item, session);
         if (refused.has(key)) waitOf(item, session, refused.get(key) ? "access" : null);
       }
-      let todo = work.filter((item) => !refused.has(keyOf(item, session)));
+      let todo = [...held, ...work.filter((item) => !refused.has(keyOf(item, session)))];
       if (todo.length === 0) continue;
+      // Picked: from here no poll of the bridge hands these to the mod (a first send may start the thread's
+      // Claude, whose mod then polls), and each is handed over at once, before anything waits.
+      const picked = new Set(todo.map((item) => item.id));
+      working.set(session, picked);
+      const handed = new Set<string>();
+      for (const item of todo) if (store.deliveryIdOf(item, session) === item.id && store.handover.hand(item, session, "t3")) handed.add(item.id);
+      /** Items a way took up this pass (delivered, kept to read back, or given to a grant's send): the rest are handed back. */
+      const taken = new Set<string>(held.map((item) => item.id));
+      try {
       // T3 here, closed: nothing to try on it until it runs again, looked for every few seconds.
       const localClosed = local?.installed() === true && !local.running();
       if (localClosed) awaitLocal();
@@ -591,28 +569,37 @@ export function createInboxT3Wake(options: {
       }
       // What T3 here said of the items it did not take: none of them sent, so a grant may.
       let localSaid: "closed" | "gone" | "failed" | null = localClosed ? "closed" : null;
-      if (local?.installed() && !localClosed) {
+      const isHeld = (item: InboxMessage) => held.includes(item);
+      if (local?.installed() && (!localClosed || held.length > 0) && !localGone.has(session)) {
         const rest: InboxMessage[] = [];
+        let stop = false;
         for (const item of todo) {
           if (stopped) return recordWaits();
           const key = keyOf(item, session);
-          if ((retryAt.get(key)?.at ?? 0) > now()) {
-            sendable.add(key);
-            continue;
-          }
-          const sent = await sendLocal(item, session);
-          if (sent === "sent" || sent === "unsure") {
-            waitOf(item, session, null);
-            continue;
-          }
-          if (sent === "held") continue;
           sendable.add(key);
-          localSaid = sent;
+          // In order: once one does not go, the later ones wait for it (a held one is never anyone else's).
+          if (stop || (retryAt.get(key)?.at ?? 0) > now()) {
+            stop = true;
+            if (!isHeld(item) && localSaid !== null) rest.push(item);
+            continue;
+          }
+          const tried = await tryLocal(item, session);
+          if (tried === "held") continue;
+          if (tried === "delivered" || tried === "checking") {
+            taken.add(item.id);
+            waitOf(item, session, null);
+            if (tried === "checking") stop = true;
+            continue;
+          }
+          // Not sent, and known not to be: a grant may send it.
+          stop = true;
+          localSaid = tried === "retry" ? "failed" : tried;
           rest.push(item);
         }
         todo = rest;
         if (todo.length === 0) continue;
-      }
+      } else todo = todo.filter((item) => !isHeld(item));
+      if (todo.length === 0) continue;
       const link = await homeOf(session);
       if (link === "unreachable" || (!link && localSaid === "closed")) {
         // T3 could not be asked: kept, and tried again on the send's backoff, or as soon as T3 here runs.
@@ -662,6 +649,7 @@ export function createInboxT3Wake(options: {
       }
       for (const item of todo) {
         if (stopped) return recordWaits();
+        if (takenElsewhere(item, session)) continue;
         // Denied for the grant's mode, or a mode it does not cover: kept for the agent's next read, never sent under this grant.
         if (!sendsInto(session, link)) {
           refuseUnder(keyOf(item, session), link);
@@ -669,14 +657,21 @@ export function createInboxT3Wake(options: {
           continue;
         }
         sendable.add(keyOf(item, session));
+        taken.add(item.id);
         waitOf(item, session, await deliverOne(link, item, session));
+      }
+      } finally {
+        working.delete(session);
+        // Not taken up this pass: back to the Inbox, so the line reads as it waits and the mod may take it.
+        for (const id of handed) if (!taken.has(id)) store.handover.giveBack(id, session);
       }
     }
     recordWaits();
     for (const key of [...retryAt.keys()]) if (!sendable.has(key)) retryAt.delete(key);
     for (const key of [...refused.keys()]) if (!pendingKeys.has(key)) refused.delete(key);
     // A claim whose item no longer waits (delivered, read, deleted) is done with.
-    for (const key of [...claims.keys()]) if (!pendingKeys.has(key)) dropLocalClaim(key);
+    for (const key of claims.keys()) if (!pendingKeys.has(key)) claims.drop(itemOfKey(key), sessionOfKey(key));
+    for (const key of [...checking]) if (!pendingKeys.has(key)) checking.delete(key);
     scheduleRetry();
     watchGrants(noGrant || [...refused.values()].some((under) => under !== null) ? mark : null);
   };
@@ -760,13 +755,16 @@ export function createInboxT3Wake(options: {
     },
     gone: (session) => dead.has(session),
     noteToolCall: (session) => {
-      if (!isT3ThreadId(session) || !dead.delete(session)) return;
+      if (!isT3ThreadId(session)) return;
+      localGone.delete(session);
+      if (!dead.delete(session)) return;
       // Back: what waited on a retry goes now too.
       for (const key of [...retryAt.keys()]) if (sessionOfKey(key) === session) retryAt.delete(key);
       void sweep();
     },
-    uncertain: (session, itemId) => refused.has(`${itemId}.${session}`),
-    uncertainItems: (session) => [...refused.keys()].filter((key) => sessionOfKey(key) === session).map(itemOfKey),
+    uncertain: (session, itemId) => refused.has(`${itemId}.${session}`) || checking.has(`${itemId}.${session}`),
+    uncertainItems: (session) => [...new Set([...refused.keys(), ...checking])].filter((key) => sessionOfKey(key) === session).map(itemOfKey),
+    holds: (session, item) => working.get(session)?.has(item.id) === true || claims.has(store.deliveryIdOf(item, session), session),
     sweep,
     stop: () => {
       stopped = true;

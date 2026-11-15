@@ -4051,7 +4051,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const t3Thread = bridgeHost(body) === INBOX_T3_HOST;
     const handedOut = () => {
       const t3Handed = t3Thread ? new Set(store.handover.handedTo(session)) : null;
-      return live.pendingOf(session, { tags }).filter((item) => !withdrawnTidy(item.message) && !t3Handed?.has(item.message.id));
+      // Nor anything the T3 wake works on now or holds a `t3 thread send` claim for (on disk: across restarts too).
+      return live.pendingOf(session, { tags }).filter((item) => !withdrawnTidy(item.message) && !t3Handed?.has(item.message.id) && !(t3Thread && t3Wake.holds(item.as, item.message)));
     };
     const commands = (items = handedOut()) => {
       const list = items.map((item) => replyCommand(item.message, sendNow, item.as));
