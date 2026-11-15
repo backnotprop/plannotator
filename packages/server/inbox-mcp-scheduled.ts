@@ -16,7 +16,7 @@ import { guarded, okComplete, PROJECT_PATH_DESCRIPTION } from "./inbox-mcp-resul
 export const SCHEDULED_THREAD_OPS = ["create", "list", "get", "update", "on", "off", "run", "delete"] as const;
 
 export const SCHEDULED_THREAD_DESCRIPTION =
-  "Routines in the Plannotator Inbox: a saved prompt an agent on this computer runs on a schedule, every run replying in one Inbox thread. Make one only when the person asks for work to run on its own, on a schedule. op: create, list, get, update, on, off, run, delete. One you create arrives off: the person turns it on the first time, in the Inbox; after that you may update, turn it on or off, run and delete it. Changing its folder or its agent turns it off again until the person turns it back on. A schedule's runs are at least 15 minutes apart. Pass thread_id: each change posts one line there for the person.";
+  "Routines in the Plannotator Inbox: a saved prompt an agent on this computer runs on a schedule, every run replying in the routine's own Inbox thread. Make one only when the person asks for work to run on its own, on a schedule. op: create, list, get, update, on, off, run, delete; update changes only the fields you pass. One you create arrives off: the person turns it on the first time, in the Inbox; after that you may update, turn it on or off, run and delete it. Changing its folder or its agent turns it off again until the person turns it back on. A schedule's runs are at least 15 minutes apart. Pass thread_id, the thread you work in: each change posts one line there for the person; runs never reply there.";
 
 export interface InboxScheduledMcpContext {
   /** Whether the person has routines on, read on every request. Absent: off. */
@@ -40,11 +40,11 @@ export function registerInboxScheduledTool(server: McpServer, context: InboxSche
           name: z.string().optional().describe("A few words the person knows it by, e.g. \"Morning triage\"."),
           prompt: z.string().optional().describe("What each run is asked, in the person's words, whole."),
           schedule: z
-            .object({ cron: z.string().optional(), at: z.string().optional(), tz: z.string() })
+            .object({ cron: z.string().optional(), at: z.string().optional(), tz: z.string().optional() })
             .strict()
             .nullable()
             .optional()
-            .describe("{ cron: \"0 9 * * 1-5\", tz: \"America/New_York\" } (5-field cron), { at: \"2026-11-20T17:00\", tz } for once, or null: it runs only when run."),
+            .describe("{ cron: \"0 9 * * 1-5\", tz: \"America/New_York\" } (5-field cron), { at: \"2026-11-20T17:00\" } for once, or null: it runs only when run. tz optional: this computer's zone."),
           if_missed: z.enum(["run_once", "skip"]).optional().describe("A run missed while the computer slept: run it once when it wakes (default), or skip it."),
           folder: z
             .object({ path: z.string().optional(), scratch: z.literal(true).optional() })
@@ -55,7 +55,7 @@ export function registerInboxScheduledTool(server: McpServer, context: InboxSche
           model: z.string().optional(),
           effort: z.string().optional(),
           attachments: z.array(z.string()).optional().describe("Full paths of files each run gets."),
-          thread_id: z.string().optional().describe("The thread you are working in: the change line goes there."),
+          thread_id: z.string().optional().describe("The thread you are working in: your change lines go there, not the runs."),
           project_path: z.string().optional().describe(PROJECT_PATH_DESCRIPTION),
           agent_session: z.string().optional().describe("Your session id; the `plannotator inbox mcp` shim fills it."),
           agent_name: z.string().optional().describe("How the person sees you, e.g. \"Claude Code\"."),

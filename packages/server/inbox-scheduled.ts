@@ -160,9 +160,9 @@ export function createInboxScheduled(deps: {
   const scheduleOf = (value: unknown, saved?: InboxScheduledSchedule): InboxScheduledSchedule => {
     if (value === null || value === undefined) return null;
     const v = value as { cron?: unknown; at?: unknown; tz?: unknown };
-    const tz = typeof v.tz === "string" && v.tz.trim() ? v.tz.trim() : null;
+    const tz = typeof v.tz === "string" && v.tz.trim() ? v.tz.trim() : Intl.DateTimeFormat().resolvedOptions().timeZone;
     const schedule = typeof v.cron === "string" && tz ? { cron: v.cron.trim(), tz } : typeof v.at === "string" && tz ? { at: v.at.trim(), tz } : undefined;
-    if (!schedule || typeof value !== "object") throw new InboxError("validation_error", "schedule: { cron, tz }, { at, tz } or null.", { field: "schedule" });
+    if (!schedule || typeof value !== "object") throw new InboxError("validation_error", "schedule: { cron } or { at }, each with an optional tz, or null.", { field: "schedule" });
     const refused = inboxScheduleRefusal(schedule, JSON.stringify(schedule) === JSON.stringify(saved) ? undefined : new Date(now()));
     if (refused) throw new InboxError(refused.code, refused.error, { field: "schedule", ...(refused.every_minutes ? { every_minutes: refused.every_minutes } : {}) });
     return schedule;

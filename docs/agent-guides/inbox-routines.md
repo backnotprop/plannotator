@@ -43,6 +43,7 @@ The `routine` tool (also `plannotator_inbox` action `routine`; the shim fills it
 - Each change posts one line, as the agent, in the thread the call names (`thread_id`), with `scheduled_change: { scheduled_id, name, op, fields?, turned_off? }` and a link `[Name](#routine=<id>)` that opens the editor. An edit says old and new: the schedule and folder in words, the prompt as a `diff` block.
 - An agent's change of the folder or the agent turns it off and clears the approval; the line says so. Prompt and schedule edits apply at once.
 - Runs start in the person's own permission mode, exactly as New message does.
+- `update` changes only the fields passed. A schedule without `tz` takes this computer's zone. `thread_id` is only where the change lines go: runs reply in the routine's own thread, made at its first run.
 
 ### Routes (Bun only)
 

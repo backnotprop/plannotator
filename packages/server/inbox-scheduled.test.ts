@@ -387,6 +387,14 @@ describe("schedules refused when set", () => {
   });
 });
 
+test("a schedule without tz takes this computer's zone, and an update changes only the fields it names", async () => {
+  const w = world();
+  const { record } = await w.make({ schedule: { cron: "0 9 * * *" } });
+  expect(record.schedule).toEqual({ cron: "0 9 * * *", tz: Intl.DateTimeFormat().resolvedOptions().timeZone });
+  const { record: renamed } = await w.scheduled.update(record.id, { name: "Morning sweep" }, { kind: "person" });
+  expect({ ...renamed, name: record.name, updated_at: record.updated_at }).toEqual(record);
+});
+
 describe("one run at a time", () => {
   test("two Run now presses at once, or Run now as the clock fires, are one run in one thread", async () => {
     const w = world();
