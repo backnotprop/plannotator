@@ -28,3 +28,19 @@ test('the native pickers take the dark color scheme under the dark theme', () =>
   });
   expect(dark.some((selector) => /\.st-pick$/.test(selector))).toBe(true);
 });
+
+test('at phone width the list gives the name the room: no Runs column, one track per shown cell, a name on up to two lines', () => {
+  const phone = new Map<string, Map<string, string>>();
+  sheet().walkAtRules('media', (media) => {
+    if (!/max-width:\s*760px/.test(media.params)) return;
+    media.walkRules((rule) => {
+      const decls = new Map<string, string>();
+      rule.walkDecls((decl) => void decls.set(decl.prop, decl.value));
+      phone.set(rule.selector, decls);
+    });
+  });
+  expect(phone.get('.st-scols > .st-runs')?.get('display')).toBe('none');
+  // Name, Run, Last run, the menu: the short row's five cells less Runs.
+  expect(phone.get('.st-scols')?.get('grid-template-columns')?.replace(/minmax\([^)]*\)/g, 'm').trim().split(/\s+/)).toHaveLength(4);
+  expect(phone.get('.st-sname .st-open')?.get('white-space')).toBe('normal');
+});

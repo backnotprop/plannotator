@@ -175,7 +175,10 @@ button.st-foot-mark:hover { background: var(--muted); }
 
 @media (max-width: 760px) {
   .st-list.st-list-split { width: 100%; }
-  .st-scols { grid-template-columns: minmax(0, 1fr) 28px 3em 9.4em 24px; column-gap: 8px; }
+  /* A phone gives the name the room: Runs is in the editor, and a long name takes two lines. */
+  .st-scols { grid-template-columns: minmax(0, 1fr) 28px 9.4em 24px; column-gap: 8px; }
+  .st-scols > .st-runs { display: none; }
+  .st-sname .st-open { white-space: normal; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
   .st-kv { grid-template-columns: minmax(0, 1fr); gap: 4px; }
   .st-next { margin-left: 0; width: 100%; }
   .st-pfoot .ib-btn { flex: 1; }
