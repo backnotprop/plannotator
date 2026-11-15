@@ -182,8 +182,9 @@ test('the gap above Projects is no hover: the row around its header is exactly t
 });
 
 // Last: a tag adds a Tags header, which the layouts above do not list. Tags' New tag and Agents' Add agent sit in
-// one column, and both headings show their buttons the same way: always while open, closed only on the heading's hover.
-test("Tags' New tag sits right above Agents' Add agent, and shows while Tags is open, closed only on the heading's hover", async () => {
+// one column, and each heading shows its buttons exactly when it shows its chevron, open or closed: on its hover or
+// keyboard focus.
+test("Tags' New tag sits right above Agents' Add agent, and the headings' buttons show with their chevron, open or closed", async () => {
   const { page, thread } = world;
   const status = await page.evaluate(async (id) => {
     const list = (await (await fetch('/api/inbox/threads?archived=exclude')).json()) as { serverSession: string };
@@ -194,19 +195,44 @@ test("Tags' New tag sits right above Agents' Add agent, and shows while Tags is 
   }, thread);
   expect(status).toBeLessThan(300);
   const scope = await open([]);
-  await page.mouse.move(900, 600);
   const newTag = page.locator(`${scope} [data-tags-add]`);
   const addAgent = page.locator(`${scope} [data-agents-add="agent"]`);
-  await expect(newTag).toHaveCSS('opacity', '1');
-  await expect(addAgent).toHaveCSS('opacity', '1');
+  const addMachine = page.locator(`${scope} [data-agents-add="machine"]`);
+  const tagsHeader = page.locator(`${scope} [data-tags-head] [data-sidebar-section="tags"]`);
+  const agentsHeader = page.locator(`${scope} [data-agents-head] [data-sidebar-section="agents"]`);
+  const look = (el: Element) => (el.matches('svg') ? getComputedStyle(el).visibility : getComputedStyle(el).opacity);
+  const shown = async () => ({
+    tags: [await tagsHeader.locator('.ib-side-sec-chev').evaluate(look), await newTag.evaluate(look)],
+    agents: [await agentsHeader.locator('.ib-side-sec-chev').evaluate(look), await addMachine.evaluate(look), await addAgent.evaluate(look)],
+  });
+  const none = { tags: ['hidden', '0'], agents: ['hidden', '0', '0'] };
+  const tagsOn = { tags: ['visible', '1'], agents: ['hidden', '0', '0'] };
+  const agentsOn = { tags: ['hidden', '0'], agents: ['visible', '1', '1'] };
+  const settled = (want: typeof none) => expect.poll(shown).toEqual(want);
+
+  await page.mouse.move(900, 600);
+  await settled(none);
   const tagBox = (await newTag.boundingBox())!;
   const agentBox = (await addAgent.boundingBox())!;
   expect([tagBox.x, tagBox.width]).toEqual([agentBox.x, agentBox.width]);
-
-  await open(['tags']);
+  await tagsHeader.hover({ position: { x: 40, y: 10 } });
+  await settled(tagsOn);
+  await agentsHeader.hover({ position: { x: 40, y: 10 } });
+  await settled(agentsOn);
+  // A keyboard user tabs from the heading onto its button, the pointer away: the button and the chevron show.
   await page.mouse.move(900, 600);
-  await expect(newTag).toHaveCSS('opacity', '0');
-  await page.locator(`${scope} [data-tags-head] [data-sidebar-section="tags"]`).hover({ position: { x: 40, y: 10 } });
-  await expect(newTag).toHaveCSS('opacity', '1');
+  await tagsHeader.focus();
+  await page.keyboard.press('Tab');
+  await expect(newTag).toBeFocused();
+  await settled(tagsOn);
+  await newTag.blur();
+
+  await open(['tags', 'agents']);
+  await page.mouse.move(900, 600);
+  await settled(none);
+  await tagsHeader.hover({ position: { x: 40, y: 10 } });
+  await settled(tagsOn);
+  await agentsHeader.hover({ position: { x: 40, y: 10 } });
+  await settled(agentsOn);
   await page.mouse.move(900, 600);
 });
