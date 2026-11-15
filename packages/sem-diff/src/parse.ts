@@ -16,7 +16,7 @@ export interface LanguageConfig {
   wasm: string;
   /** Node types that declare a named function or method. */
   functionTypes: ReadonlySet<string>;
-  callType: string;
+  callTypes: ReadonlySet<string>;
   /** Node types that hold a list of statements. */
   blockTypes: ReadonlySet<string>;
   /** The statement returns from the function (`last`: it is the body's final statement, for tail expressions). */
@@ -44,6 +44,21 @@ export interface LanguageConfig {
    * comments, and attributes such as Rust's `#[derive(..)]`.
    */
   attachedTypes: ReadonlySet<string>;
+  harmlessMissing?: ReadonlySet<string>;
+  contextAt?(root: Node, line: number): string;
+}
+
+export function brokenTree(n: Node, cfg: LanguageConfig): boolean {
+  if (!n.hasError) return false;
+  if (!cfg.harmlessMissing?.size) return true;
+  const stack: Node[] = [n];
+  while (stack.length) {
+    const x = stack.pop()!;
+    if (x.isError || (x.isMissing && !cfg.harmlessMissing.has(x.type))) return true;
+    if (!x.hasError) continue;
+    for (const c of x.children) if (c) stack.push(c);
+  }
+  return false;
 }
 
 /**
@@ -112,7 +127,7 @@ const tsLike = (id: 'typescript' | 'tsx', file: string): LanguageConfig => ({
   // `const f = () => { ... }`, class fields and object properties holding arrow
   // functions (`perform: (elements) => { ... }`) are functions too.
   functionTypes: new Set(['function_declaration', 'method_definition', 'generator_function_declaration', 'variable_declarator', 'public_field_definition', 'pair']),
-  callType: 'call_expression',
+  callTypes: new Set(['call_expression']),
   blockTypes: new Set(['statement_block']),
   // A one-line arrow (`const f = (x) => x.a + 1`) returns its expression body.
   isReturn: (s, last) => s.type === 'return_statement' || (!!last && isArrowExpressionBody(s)),
@@ -193,7 +208,7 @@ const rust: LanguageConfig = {
   id: 'rust',
   wasm: 'tree-sitter-rust/tree-sitter-rust.wasm',
   functionTypes: new Set(['function_item']),
-  callType: 'call_expression',
+  callTypes: new Set(['call_expression']),
   blockTypes: new Set(['block']),
   isReturn: (s, last) =>
     (s.type === 'expression_statement' && s.namedChild(0)?.type === 'return_expression') ||
@@ -254,6 +269,7 @@ const named = (node: Node, kind = node.type, name = node.childForFieldName('name
 const MEMBER_BODIES = new Set([
   'class_body', 'interface_body', 'enum_body', 'annotation_type_body', // Java
   'declaration_list', // C# and Rust
+  'enum_declaration_list',
 ]);
 /** The first declared variable's name in a field or variable declaration. */
 const firstDeclarator = (n: Node): string | undefined => {
@@ -274,7 +290,7 @@ const python: LanguageConfig = {
   id: 'python',
   wasm: 'tree-sitter-python/tree-sitter-python.wasm',
   functionTypes: new Set(['function_definition']),
-  callType: 'call',
+  callTypes: new Set(['call']),
   blockTypes: new Set(['block']),
   isReturn: (s) => s.type === 'return_statement',
   attachedTypes: new Set(['comment']),
@@ -320,7 +336,7 @@ const java: LanguageConfig = {
   id: 'java',
   wasm: 'tree-sitter-java/tree-sitter-java.wasm',
   functionTypes: new Set(['method_declaration', 'constructor_declaration']),
-  callType: 'method_invocation',
+  callTypes: new Set(['method_invocation']),
   blockTypes: new Set(['block', 'constructor_body']),
   isReturn: (s) => s.type === 'return_statement',
   attachedTypes: new Set(['line_comment', 'block_comment']),
@@ -353,7 +369,7 @@ const csharp: LanguageConfig = {
   id: 'csharp',
   wasm: 'tree-sitter-c-sharp/tree-sitter-c_sharp.wasm',
   functionTypes: new Set(['method_declaration', 'constructor_declaration', 'local_function_statement']),
-  callType: 'invocation_expression',
+  callTypes: new Set(['invocation_expression']),
   blockTypes: new Set(['block']),
   // An expression-bodied member (`int F(int x) => x + 1;`) returns its expression, like a
   // one-line arrow in TypeScript: code pulled out into one is a single value moved.
@@ -390,12 +406,85 @@ const csharp: LanguageConfig = {
   },
 };
 
+const PHP_CALLS = new Set(['function_call_expression', 'member_call_expression', 'scoped_call_expression', 'nullsafe_member_call_expression']);
+const PHP_TYPES = new Set(['function_definition', 'class_declaration', 'interface_declaration', 'trait_declaration', 'enum_declaration', 'method_declaration', 'enum_case']);
+const phpName = (n: Node | null | undefined) => n?.text.replace(/^\$/, '');
+const phpNamespace = (n: Node) => n.childForFieldName('name')?.text ?? '';
+const phpUseKey = (n: Node) => {
+  const kind = n.children.find((c) => c?.type === 'function' || c?.type === 'const')?.type;
+  const prefix = kind ? `${kind} ` : '';
+  const group = n.childForFieldName('body');
+  if (group) return { key: `${n.namedChildren.find((c) => c?.type === 'namespace_name')?.text ?? ''}\\{}`, prefix };
+  return { key: n.namedChildren.filter((c): c is Node => c?.type === 'namespace_use_clause').map((c) => c.text).join(','), prefix };
+};
+
+const php: LanguageConfig = {
+  id: 'php',
+  wasm: 'tree-sitter-php/tree-sitter-php.wasm',
+  functionTypes: new Set(['function_definition', 'method_declaration']),
+  callTypes: PHP_CALLS,
+  blockTypes: new Set(['compound_statement']),
+  isReturn: (s) => s.type === 'return_statement',
+  attachedTypes: new Set(['comment']),
+  nameOf: (fn) => fn.childForFieldName('name')?.text ?? null,
+  bodyOf: (fn) => fn.childForFieldName('body'),
+  statementsOf: (block) => block.namedChildren.filter((n): n is Node => n !== null && !isComment(n)),
+  calleeOf: (call) => {
+    const f = call.type === 'function_call_expression' ? call.childForFieldName('function') : call.childForFieldName('name');
+    if (!f) return null;
+    if (f.type === 'qualified_name') return f.childForFieldName('name')?.text ?? f.text;
+    return f.type === 'name' ? f.text : null;
+  },
+  returnValueOf: (ret) => ret.namedChildren.find((n) => n !== null && !isComment(n)) ?? null,
+  identifierTypes: new Set(['name']),
+  declarationsIn: (container) => {
+    const out: Declaration[] = [];
+    let ns = '';
+    const scoped = (name: string) => (ns && container.type === 'program' ? `${ns}\\${name}` : name);
+    for (const child of container.namedChildren) {
+      if (!child || isComment(child)) continue;
+      if (child.type === 'namespace_definition') {
+        const body = child.childForFieldName('body');
+        if (body) out.push({ node: child, kind: 'namespace', name: phpNamespace(child), members: body });
+        else ns = phpNamespace(child);
+      } else if (child.type === 'namespace_use_declaration') {
+        const { key, prefix } = phpUseKey(child);
+        out.push(importDeclaration(child, key, prefix));
+      } else if (child.type === 'use_declaration') {
+        out.push({ node: child, kind: 'use_declaration', name: `use:${child.namedChildren.filter((c): c is Node => c?.type === 'name' || c?.type === 'qualified_name').map((c) => c.text).join(',')}` });
+      } else if (child.type === 'property_declaration') {
+        const name = phpName(child.namedChildren.find((c) => c?.type === 'property_element')?.childForFieldName('name'));
+        if (name) out.push({ node: child, kind: child.type, name });
+      } else if (child.type === 'const_declaration') {
+        const name = child.namedChildren.find((c) => c?.type === 'const_element')?.namedChildren.find((c) => c?.type === 'name')?.text;
+        if (name) out.push({ node: child, kind: child.type, name: scoped(name) });
+      } else if (PHP_TYPES.has(child.type)) {
+        const d = named(child, child.type, child.childForFieldName('name')?.text);
+        if (d) out.push({ ...d, name: scoped(d.name) });
+      }
+    }
+    return out;
+  },
+  contextAt: (root, line) => {
+    let ns = '';
+    for (const c of root.namedChildren) {
+      if (c?.type !== 'namespace_definition') continue;
+      const start = c.startPosition.row + 1;
+      if (start > line) break;
+      if (c.childForFieldName('body')) {
+        if (line <= c.endPosition.row + 1) return phpNamespace(c);
+      } else ns = phpNamespace(c);
+    }
+    return ns;
+  },
+};
+
 export const LANGUAGES: Record<LanguageId, LanguageConfig> = {
   go: {
     id: 'go',
     wasm: 'tree-sitter-go/tree-sitter-go.wasm',
     functionTypes: new Set(['function_declaration', 'method_declaration']),
-    callType: 'call_expression',
+    callTypes: new Set(['call_expression']),
     blockTypes: new Set(['block']),
     isReturn: (s) => s.type === 'return_statement',
     attachedTypes: new Set(['comment']),
@@ -452,6 +541,7 @@ export const LANGUAGES: Record<LanguageId, LanguageConfig> = {
   python,
   java,
   csharp,
+  php,
 };
 
 

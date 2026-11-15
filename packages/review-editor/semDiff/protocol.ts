@@ -23,6 +23,7 @@ export const SEM_DIFF_GRAMMARS = {
   rust: 'tree-sitter-rust.wasm',
   java: 'tree-sitter-java.wasm',
   csharp: 'tree-sitter-c_sharp.wasm',
+  php: 'tree-sitter-php.wasm',
 } as const;
 
 const ROUTE = '/assets/sem-diff/';

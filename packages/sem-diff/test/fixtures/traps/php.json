@@ -1,0 +1,647 @@
+[
+ {
+  "id": "php-html-reindent",
+  "area": "trap",
+  "language": "php",
+  "file": "view.phtml",
+  "title": "html reindent",
+  "expected": "Whitespace in HTML around <?php is template output: no reformatted claim on any line that holds HTML text.",
+  "status": "ok",
+  "old": "<html>\n<body>\n<div class=\"list\">\n<?php foreach ($rows as $row): ?>\n<p><?= htmlspecialchars($row->name) ?></p>\n<?php endforeach; ?>\n</div>\n</body>\n</html>\n",
+  "new": "<html>\n  <body>\n    <div class=\"list\">\n      <?php foreach ($rows as $row): ?>\n        <p><?= htmlspecialchars($row->name) ?></p>\n      <?php endforeach; ?>\n    </div>\n  </body>\n</html>\n",
+  "ops": [],
+  "never": []
+ },
+ {
+  "id": "php-template-code-reindent",
+  "area": "trap",
+  "language": "php",
+  "file": "page.phtml",
+  "title": "template code reindent",
+  "expected": "Lines wholly inside <?php ... ?> are code: re-indenting them is formatting.",
+  "status": "ok",
+  "old": "<div>\n<?php\nif ($user) {\n$name = $user->name;\necho $name;\n}\n?>\n</div>\n",
+  "new": "<div>\n<?php\nif ($user) {\n    $name = $user->name;\n    echo $name;\n}\n?>\n</div>\n",
+  "ops": [
+   {
+    "type": "reformatted",
+    "old": [
+     [
+      4,
+      5
+     ]
+    ],
+    "new": [
+     [
+      4,
+      5
+     ]
+    ]
+   }
+  ],
+  "never": []
+ },
+ {
+  "id": "php-heredoc-body-reindent",
+  "area": "trap",
+  "language": "php",
+  "file": "x.php",
+  "title": "heredoc body reindent",
+  "expected": "Re-indenting a heredoc body without its closing marker changes the string.",
+  "status": "ok",
+  "old": "<?php\nclass Mailer\n{\n    public function body(string $name): string\n    {\n        $greeting = 'Hi';\n        return <<<EOT\n        $greeting $name,\n        Thanks for your order.\n        EOT;\n    }\n}\n",
+  "new": "<?php\nclass Mailer\n{\n    public function body(string $name): string\n    {\n        $greeting = 'Hi';\n        return <<<EOT\n            $greeting $name,\n            Thanks for your order.\n        EOT;\n    }\n}\n",
+  "ops": [],
+  "never": []
+ },
+ {
+  "id": "php-nowdoc-method-reindent",
+  "area": "trap",
+  "language": "php",
+  "file": "x.php",
+  "title": "nowdoc method reindent",
+  "expected": "The nowdoc body and its closing marker are string interior: never claimed as formatting, even though PHP 7.3 strips the common indentation.",
+  "status": "ok",
+  "old": "<?php\nclass Sql\n{\n    public function query(): string\n    {\n        $limit = 10;\n        $sql = <<<'SQL'\n        SELECT *\n        FROM users\n        SQL;\n        return $sql . \" LIMIT $limit\";\n    }\n}\n",
+  "new": "<?php\nclass Sql\n{\n        public function query(): string\n        {\n            $limit = 10;\n            $sql = <<<'SQL'\n            SELECT *\n            FROM users\n            SQL;\n            return $sql . \" LIMIT $limit\";\n        }\n}\n",
+  "ops": [
+   {
+    "type": "reformatted",
+    "old": [
+     [
+      4,
+      7
+     ]
+    ],
+    "new": [
+     [
+      4,
+      7
+     ]
+    ],
+    "optional": true
+   },
+   {
+    "type": "reformatted",
+    "old": [
+     [
+      11,
+      11
+     ]
+    ],
+    "new": [
+     [
+      11,
+      11
+     ]
+    ],
+    "optional": true
+   },
+   {
+    "type": "reformatted",
+    "old": [
+     [
+      12,
+      12
+     ]
+    ],
+    "new": [
+     [
+      12,
+      12
+     ]
+    ],
+    "optional": true
+   }
+  ],
+  "never": [
+   {
+    "type": "reformatted",
+    "new": [
+     [
+      8,
+      10
+     ]
+    ]
+   }
+  ]
+ },
+ {
+  "id": "php-method-into-trait",
+  "area": "trap",
+  "language": "php",
+  "file": "x.php",
+  "title": "method into trait",
+  "expected": "A method moved between a class and a trait in the same file is moved (spec, Traits).",
+  "status": "ok",
+  "old": "<?php\ntrait Greets\n{\n    public function hello(): string\n    {\n        return 'hello';\n    }\n}\n\nclass Person\n{\n    use Greets;\n\n    public function name(): string\n    {\n        return $this->name;\n    }\n\n    public function greet(string $who): string\n    {\n        $text = $this->hello() . ', ' . $who;\n        return ucfirst($text);\n    }\n}\n",
+  "new": "<?php\ntrait Greets\n{\n    public function hello(): string\n    {\n        return 'hello';\n    }\n\n    public function greet(string $who): string\n    {\n        $text = $this->hello() . ', ' . $who;\n        return ucfirst($text);\n    }\n}\n\nclass Person\n{\n    use Greets;\n\n    public function name(): string\n    {\n        return $this->name;\n    }\n}\n",
+  "ops": [
+   {
+    "type": "moved",
+    "old": [
+     [
+      19,
+      22
+     ]
+    ],
+    "new": [
+     [
+      9,
+      12
+     ]
+    ]
+   }
+  ],
+  "never": []
+ },
+ {
+  "id": "php-method-reorder",
+  "area": "trap",
+  "language": "php",
+  "file": "x.php",
+  "title": "method reorder",
+  "expected": "Reordered methods are moved; which one is called moved is the engine's choice.",
+  "status": "ok",
+  "old": "<?php\nclass Cart\n{\n    public function add(Item $item): void\n    {\n        $this->items[] = $item;\n        $this->dirty = true;\n    }\n\n    public function total(): int\n    {\n        $sum = 0;\n        foreach ($this->items as $item) {\n            $sum += $item->price;\n        }\n        return $sum;\n    }\n\n    public function clear(): void\n    {\n        $this->items = [];\n    }\n}\n",
+  "new": "<?php\nclass Cart\n{\n    public function total(): int\n    {\n        $sum = 0;\n        foreach ($this->items as $item) {\n            $sum += $item->price;\n        }\n        return $sum;\n    }\n\n    public function add(Item $item): void\n    {\n        $this->items[] = $item;\n        $this->dirty = true;\n    }\n\n    public function clear(): void\n    {\n        $this->items = [];\n    }\n}\n",
+  "ops": [
+   {
+    "type": "moved"
+   }
+  ],
+  "never": []
+ },
+ {
+  "id": "php-namespace-cross-move",
+  "area": "trap",
+  "language": "php",
+  "file": "x.php",
+  "title": "namespace cross move",
+  "expected": "`rate()` inside tax() now calls App\\Shipping\\rate: moving across `namespace X;` changes meaning (context rule).",
+  "status": "ok",
+  "old": "<?php\nnamespace App\\Billing;\n\nfunction tax(int $cents): int\n{\n    $rate = rate();\n    return intdiv($cents * $rate, 100);\n}\n\nfunction rate(): int\n{\n    return 20;\n}\n\nnamespace App\\Shipping;\n\nfunction rate(): int\n{\n    return 5;\n}\n",
+  "new": "<?php\nnamespace App\\Billing;\n\nfunction rate(): int\n{\n    return 20;\n}\n\nnamespace App\\Shipping;\n\nfunction tax(int $cents): int\n{\n    $rate = rate();\n    return intdiv($cents * $rate, 100);\n}\n\nfunction rate(): int\n{\n    return 5;\n}\n",
+  "ops": [],
+  "never": [
+   {
+    "type": "moved"
+   },
+   {
+    "type": "movedWithEdit"
+   }
+  ]
+ },
+ {
+  "id": "php-namespace-same-move",
+  "area": "trap",
+  "language": "php",
+  "file": "x.php",
+  "title": "namespace same move",
+  "expected": "A move inside the same namespace is a plain move.",
+  "status": "ok",
+  "old": "<?php\nnamespace App\\Billing;\n\nfunction tax(int $cents): int\n{\n    $rate = rate();\n    return intdiv($cents * $rate, 100);\n}\n\nfunction rate(): int\n{\n    return 20;\n}\n\nnamespace App\\Shipping;\n\nfunction fee(): int\n{\n    return 5;\n}\n",
+  "new": "<?php\nnamespace App\\Billing;\n\nfunction rate(): int\n{\n    return 20;\n}\n\nfunction tax(int $cents): int\n{\n    $rate = rate();\n    return intdiv($cents * $rate, 100);\n}\n\nnamespace App\\Shipping;\n\nfunction fee(): int\n{\n    return 5;\n}\n",
+  "ops": [
+   {
+    "type": "moved"
+   }
+  ],
+  "never": []
+ },
+ {
+  "id": "php-braced-namespaces-same-class",
+  "area": "trap",
+  "language": "php",
+  "file": "x.php",
+  "title": "braced namespaces same class",
+  "expected": "Same-named classes in two namespaces pair with their own namespace: one plain edit, nothing moved or renamed.",
+  "status": "ok",
+  "old": "<?php\nnamespace App\\Http {\n    class Config\n    {\n        public function timeout(): int\n        {\n            return 30;\n        }\n\n        public function retries(): int\n        {\n            return 3;\n        }\n    }\n}\n\nnamespace App\\Queue {\n    class Config\n    {\n        public function timeout(): int\n        {\n            return 60;\n        }\n\n        public function retries(): int\n        {\n            return 3;\n        }\n    }\n}\n",
+  "new": "<?php\nnamespace App\\Http {\n    class Config\n    {\n        public function timeout(): int\n        {\n            return 30;\n        }\n\n        public function retries(): int\n        {\n            return 3;\n        }\n    }\n}\n\nnamespace App\\Queue {\n    class Config\n    {\n        public function timeout(): int\n        {\n            return 90;\n        }\n\n        public function retries(): int\n        {\n            return 3;\n        }\n    }\n}\n",
+  "ops": [],
+  "never": []
+ },
+ {
+  "id": "php-group-use-resort",
+  "area": "trap",
+  "language": "php",
+  "file": "x.php",
+  "title": "group use resort",
+  "expected": "Re-sorting the names inside a group use is one edited import (spec: keyed App\\{}).",
+  "status": "ok",
+  "old": "<?php\nnamespace App;\n\nuse App\\Models\\{User, Post, Comment};\nuse Illuminate\\Support\\Str;\n\nfunction slug(Post $post): string\n{\n    return Str::slug($post->title);\n}\n",
+  "new": "<?php\nnamespace App;\n\nuse App\\Models\\{Comment, Post, User};\nuse Illuminate\\Support\\Str;\n\nfunction slug(Post $post): string\n{\n    return Str::slug($post->title);\n}\n",
+  "ops": [],
+  "never": []
+ },
+ {
+  "id": "php-use-lines-reorder",
+  "area": "trap",
+  "language": "php",
+  "file": "x.php",
+  "title": "use lines reorder",
+  "expected": "Re-ordered import lines are moves.",
+  "status": "ok",
+  "old": "<?php\nnamespace App;\n\nuse App\\Models\\User;\nuse function App\\Support\\format_money;\nuse const App\\Support\\CURRENCY;\nuse Illuminate\\Support\\Str;\n\nfunction label(User $u): string\n{\n    return Str::upper($u->name) . format_money(1, CURRENCY);\n}\n",
+  "new": "<?php\nnamespace App;\n\nuse Illuminate\\Support\\Str;\nuse App\\Models\\User;\nuse const App\\Support\\CURRENCY;\nuse function App\\Support\\format_money;\n\nfunction label(User $u): string\n{\n    return Str::upper($u->name) . format_money(1, CURRENCY);\n}\n",
+  "ops": [
+   {
+    "type": "moved"
+   }
+  ],
+  "never": []
+ },
+ {
+  "id": "php-use-function-prefix",
+  "area": "trap",
+  "language": "php",
+  "file": "x.php",
+  "title": "use function prefix",
+  "expected": "`use function` imports a function, `use` a class: an edit, never formatting or a rename.",
+  "status": "ok",
+  "old": "<?php\nnamespace App;\n\nuse App\\Support\\money;\n\nfunction price(): string\n{\n    return money(100);\n}\n",
+  "new": "<?php\nnamespace App;\n\nuse function App\\Support\\money;\n\nfunction price(): string\n{\n    return money(100);\n}\n",
+  "ops": [],
+  "never": []
+ },
+ {
+  "id": "php-closure-reindent",
+  "area": "trap",
+  "language": "php",
+  "file": "x.php",
+  "title": "closure reindent",
+  "expected": "Re-indenting code inside a closure is formatting.",
+  "status": "ok",
+  "old": "<?php\nclass Report\n{\n    public function totals(array $rows): array\n    {\n        return array_map(function ($row) {\n        $net = $row['amount'] - $row['discount'];\n        return $net * 1.2;\n        }, $rows);\n    }\n}\n",
+  "new": "<?php\nclass Report\n{\n    public function totals(array $rows): array\n    {\n        return array_map(function ($row) {\n            $net = $row['amount'] - $row['discount'];\n            return $net * 1.2;\n        }, $rows);\n    }\n}\n",
+  "ops": [
+   {
+    "type": "reformatted",
+    "old": [
+     [
+      7,
+      8
+     ]
+    ],
+    "new": [
+     [
+      7,
+      8
+     ]
+    ]
+   }
+  ],
+  "never": []
+ },
+ {
+  "id": "php-extract-from-closure",
+  "area": "trap",
+  "language": "php",
+  "file": "x.php",
+  "title": "extract from closure",
+  "expected": "Closures are never helpers; code pulled out of one into a method is an extract from the method around it.",
+  "status": "ok",
+  "old": "<?php\nclass Importer\n{\n    public function run(array $rows): array\n    {\n        return array_map(function (array $row) {\n            $name = trim($row['name']);\n            $email = strtolower(trim($row['email']));\n            $joined = new \\DateTimeImmutable($row['joined']);\n            return ['name' => $name, 'email' => $email, 'joined' => $joined];\n        }, $rows);\n    }\n}\n",
+  "new": "<?php\nclass Importer\n{\n    public function run(array $rows): array\n    {\n        return array_map(function (array $row) {\n            return $this->normalise($row);\n        }, $rows);\n    }\n\n    private function normalise(array $row): array\n    {\n        $name = trim($row['name']);\n        $email = strtolower(trim($row['email']));\n        $joined = new \\DateTimeImmutable($row['joined']);\n        return ['name' => $name, 'email' => $email, 'joined' => $joined];\n    }\n}\n",
+  "ops": [
+   {
+    "type": "extractedFunction",
+    "new": [
+     [
+      11,
+      16
+     ]
+    ]
+   }
+  ],
+  "never": []
+ },
+ {
+  "id": "php-extract-method",
+  "area": "trap",
+  "language": "php",
+  "file": "x.php",
+  "title": "extract method",
+  "expected": "Extract method called with $this->.",
+  "status": "ok",
+  "old": "<?php\nclass Invoice\n{\n    public function total(): float\n    {\n        $sum = 0.0;\n        foreach ($this->lines as $line) {\n            $sum += $line->qty * $line->price;\n        }\n        if ($this->discount > 0) {\n            $sum -= $sum * $this->discount / 100;\n        }\n        return round($sum, 2);\n    }\n}\n",
+  "new": "<?php\nclass Invoice\n{\n    public function total(): float\n    {\n        $sum = $this->subtotal();\n        if ($this->discount > 0) {\n            $sum -= $sum * $this->discount / 100;\n        }\n        return round($sum, 2);\n    }\n\n    private function subtotal(): float\n    {\n        $sum = 0.0;\n        foreach ($this->lines as $line) {\n            $sum += $line->qty * $line->price;\n        }\n        return $sum;\n    }\n}\n",
+  "ops": [
+   {
+    "type": "extractedFunction",
+    "new": [
+     [
+      13,
+      19
+     ]
+    ]
+   }
+  ],
+  "never": []
+ },
+ {
+  "id": "php-extract-static",
+  "area": "trap",
+  "language": "php",
+  "file": "x.php",
+  "title": "extract static",
+  "expected": "Extract into a static method called with self:: (scoped_call_expression).",
+  "status": "ok",
+  "old": "<?php\nfinal class Paths\n{\n    public static function join(string ...$parts): string\n    {\n        $clean = [];\n        foreach ($parts as $p) {\n            $p = trim($p, '/');\n            if ($p !== '') {\n                $clean[] = $p;\n            }\n        }\n        return '/' . implode('/', $clean);\n    }\n}\n",
+  "new": "<?php\nfinal class Paths\n{\n    public static function join(string ...$parts): string\n    {\n        return '/' . implode('/', self::clean($parts));\n    }\n\n    private static function clean(array $parts): array\n    {\n        $clean = [];\n        foreach ($parts as $p) {\n            $p = trim($p, '/');\n            if ($p !== '') {\n                $clean[] = $p;\n            }\n        }\n        return $clean;\n    }\n}\n",
+  "ops": [
+   {
+    "type": "extractedFunction",
+    "new": [
+     [
+      9,
+      18
+     ]
+    ]
+   }
+  ],
+  "never": []
+ },
+ {
+  "id": "php-inline-method",
+  "area": "trap",
+  "language": "php",
+  "file": "x.php",
+  "title": "inline method",
+  "expected": "Inline method.",
+  "status": "ok",
+  "old": "<?php\nclass Order\n{\n    public function ship(): void\n    {\n        $this->assertPaid();\n        $this->status = 'shipped';\n        $this->shippedAt = time();\n    }\n\n    private function assertPaid(): void\n    {\n        if (!$this->paid) {\n            throw new \\LogicException('Order is not paid');\n        }\n    }\n}\n",
+  "new": "<?php\nclass Order\n{\n    public function ship(): void\n    {\n        if (!$this->paid) {\n            throw new \\LogicException('Order is not paid');\n        }\n        $this->status = 'shipped';\n        $this->shippedAt = time();\n    }\n}\n",
+  "ops": [
+   {
+    "type": "inlinedFunction",
+    "old": [
+     [
+      11,
+      14
+     ]
+    ]
+   }
+  ],
+  "never": []
+ },
+ {
+  "id": "php-rename-variable",
+  "area": "trap",
+  "language": "php",
+  "file": "x.php",
+  "title": "rename variable",
+  "expected": "$total renamed to $sum everywhere: renamed (names compared without the $).",
+  "status": "ok",
+  "old": "<?php\nfunction average(array $values): float\n{\n    $total = 0;\n    foreach ($values as $v) {\n        $total += $v;\n    }\n    return count($values) ? $total / count($values) : 0.0;\n}\n",
+  "new": "<?php\nfunction average(array $values): float\n{\n    $sum = 0;\n    foreach ($values as $v) {\n        $sum += $v;\n    }\n    return count($values) ? $sum / count($values) : 0.0;\n}\n",
+  "ops": [
+   {
+    "type": "renamed",
+    "old": [
+     [
+      4,
+      4
+     ]
+    ],
+    "new": [
+     [
+      4,
+      4
+     ]
+    ]
+   }
+  ],
+  "never": []
+ },
+ {
+  "id": "php-rename-case-only",
+  "area": "trap",
+  "language": "php",
+  "file": "x.php",
+  "title": "rename case only",
+  "expected": "PHP function names ignore case, but a case-only change is renamed and shown, never formatting.",
+  "status": "ok",
+  "old": "<?php\nfunction getuser(int $id): array\n{\n    return ['id' => $id];\n}\n\nfunction show(int $id): string\n{\n    $u = getuser($id);\n    return json_encode(getuser($id + 1) + $u);\n}\n",
+  "new": "<?php\nfunction getUser(int $id): array\n{\n    return ['id' => $id];\n}\n\nfunction show(int $id): string\n{\n    $u = getUser($id);\n    return json_encode(getUser($id + 1) + $u);\n}\n",
+  "ops": [
+   {
+    "type": "renamed",
+    "old": [
+     [
+      2,
+      2
+     ]
+    ],
+    "new": [
+     [
+      2,
+      2
+     ]
+    ]
+   }
+  ],
+  "never": [
+   {
+    "type": "reformatted"
+   }
+  ]
+ },
+ {
+  "id": "php-reformat-spacing",
+  "area": "trap",
+  "language": "php",
+  "file": "x.php",
+  "title": "reformat spacing",
+  "expected": "Same tokens and tree, new layout: reformatted.",
+  "status": "ok",
+  "old": "<?php\nclass Gate\n{\n    public function allows($user,$ability){\n        if($user===null){return false;}\n        return in_array($ability,$user->abilities,true);\n    }\n}\n",
+  "new": "<?php\nclass Gate\n{\n    public function allows($user, $ability)\n    {\n        if ($user === null) {\n            return false;\n        }\n        return in_array($ability, $user->abilities, true);\n    }\n}\n",
+  "ops": [
+   {
+    "type": "reformatted",
+    "old": [
+     [
+      4,
+      6
+     ]
+    ],
+    "new": [
+     [
+      4,
+      9
+     ]
+    ]
+   }
+  ],
+  "never": []
+ },
+ {
+  "id": "php-array-syntax",
+  "area": "trap",
+  "language": "php",
+  "file": "x.php",
+  "title": "array syntax",
+  "expected": "array() and [] mean the same, but the tokens differ: edited, never reformatted.",
+  "status": "ok",
+  "old": "<?php\nclass Defaults\n{\n    public function options(): array\n    {\n        return array('timeout' => 30, 'retries' => array(1, 2, 4));\n    }\n}\n",
+  "new": "<?php\nclass Defaults\n{\n    public function options(): array\n    {\n        return ['timeout' => 30, 'retries' => [1, 2, 4]];\n    }\n}\n",
+  "ops": [],
+  "never": []
+ },
+ {
+  "id": "php-attribute-edit",
+  "area": "trap",
+  "language": "php",
+  "file": "x.php",
+  "title": "attribute edit",
+  "expected": "A changed attribute changes routing: an edit.",
+  "status": "ok",
+  "old": "<?php\nclass UserController\n{\n    #[Route('/users', methods: ['GET'])]\n    public function index(): Response\n    {\n        return $this->render('users');\n    }\n}\n",
+  "new": "<?php\nclass UserController\n{\n    #[Route('/people', methods: ['GET'])]\n    public function index(): Response\n    {\n        return $this->render('users');\n    }\n}\n",
+  "ops": [],
+  "never": []
+ },
+ {
+  "id": "php-inline-into-arrow-fn",
+  "area": "trap",
+  "language": "php",
+  "file": "x.php",
+  "title": "inline into arrow fn",
+  "expected": "An arrow fn body is its return value; inlining into it may be claimed, nothing else may.",
+  "status": "ok",
+  "old": "<?php\nclass Prices\n{\n    public function withTax(array $prices): array\n    {\n        return array_map(fn($p) => $this->gross($p), $prices);\n    }\n\n    private function gross(float $p): float\n    {\n        return round($p * 1.2, 2);\n    }\n}\n",
+  "new": "<?php\nclass Prices\n{\n    public function withTax(array $prices): array\n    {\n        return array_map(fn($p) => round($p * 1.2, 2), $prices);\n    }\n}\n",
+  "ops": [
+   {
+    "type": "inlinedFunction",
+    "old": [
+     [
+      9,
+      11
+     ]
+    ],
+    "optional": true
+   }
+  ],
+  "never": []
+ },
+ {
+  "id": "php-trait-use-move",
+  "area": "trap",
+  "language": "php",
+  "file": "x.php",
+  "title": "trait use move",
+  "expected": "A trait use is a member keyed use:A,B; moving it inside the class is a move.",
+  "status": "ok",
+  "old": "<?php\nclass Post extends Model\n{\n    use HasFactory, SoftDeletes {\n        SoftDeletes::restore insteadof HasFactory;\n    }\n\n    protected $table = 'posts';\n\n    public function author()\n    {\n        return $this->belongsTo(User::class);\n    }\n}\n",
+  "new": "<?php\nclass Post extends Model\n{\n    protected $table = 'posts';\n\n    use HasFactory, SoftDeletes {\n        SoftDeletes::restore insteadof HasFactory;\n    }\n\n    public function author()\n    {\n        return $this->belongsTo(User::class);\n    }\n}\n",
+  "ops": [
+   {
+    "type": "moved"
+   }
+  ],
+  "never": []
+ },
+ {
+  "id": "php-rename-property",
+  "area": "trap",
+  "language": "php",
+  "file": "x.php",
+  "title": "rename property",
+  "expected": "A property renamed together with its $this-> uses.",
+  "status": "ok",
+  "old": "<?php\nclass Counter\n{\n    private int $count = 0;\n\n    public function increment(): void\n    {\n        $this->count++;\n    }\n\n    public function value(): int\n    {\n        return $this->count;\n    }\n}\n",
+  "new": "<?php\nclass Counter\n{\n    private int $total = 0;\n\n    public function increment(): void\n    {\n        $this->total++;\n    }\n\n    public function value(): int\n    {\n        return $this->total;\n    }\n}\n",
+  "ops": [
+   {
+    "type": "renamed",
+    "old": [
+     [
+      4,
+      4
+     ]
+    ],
+    "new": [
+     [
+      4,
+      4
+     ]
+    ]
+   }
+  ],
+  "never": []
+ },
+ {
+  "id": "php-rename-interpolated",
+  "area": "trap",
+  "language": "php",
+  "file": "x.php",
+  "title": "rename interpolated",
+  "expected": "A parameter renamed, also inside an interpolated string.",
+  "status": "ok",
+  "old": "<?php\nfunction greet(string $name): string\n{\n    $upper = strtoupper($name);\n    return \"Hello {$name}, or $upper\";\n}\n",
+  "new": "<?php\nfunction greet(string $person): string\n{\n    $upper = strtoupper($person);\n    return \"Hello {$person}, or $upper\";\n}\n",
+  "ops": [
+   {
+    "type": "renamed",
+    "old": [
+     [
+      2,
+      2
+     ]
+    ],
+    "new": [
+     [
+      2,
+      2
+     ]
+    ]
+   }
+  ],
+  "never": []
+ },
+ {
+  "id": "php-one-line-class",
+  "area": "trap",
+  "language": "php",
+  "file": "x.php",
+  "title": "one line class",
+  "expected": "A one-line class body laid out on lines is formatting.",
+  "status": "ok",
+  "old": "<?php\nclass Point { public int $x = 0; public int $y = 0; }\n\nfunction origin(): Point\n{\n    return new Point();\n}\n",
+  "new": "<?php\nclass Point\n{\n    public int $x = 0;\n    public int $y = 0;\n}\n\nfunction origin(): Point\n{\n    return new Point();\n}\n",
+  "ops": [
+   {
+    "type": "reformatted",
+    "old": [
+     [
+      2,
+      2
+     ]
+    ],
+    "new": [
+     [
+      2,
+      5
+     ]
+    ]
+   }
+  ],
+  "never": []
+ },
+ {
+  "id": "php-template-html-swap-text",
+  "area": "trap",
+  "language": "php",
+  "file": "list.phtml",
+  "title": "template html swap text",
+  "expected": "An HTML attribute added: an edit, with no claim about the PHP around it.",
+  "status": "ok",
+  "old": "<ul>\n<?php foreach ($items as $item): ?>\n  <li><?= $item ?></li>\n<?php endforeach; ?>\n</ul>\n<p>Total: <?= count($items) ?></p>\n",
+  "new": "<ul>\n<?php foreach ($items as $item): ?>\n  <li class=\"item\"><?= $item ?></li>\n<?php endforeach; ?>\n</ul>\n<p>Total: <?= count($items) ?></p>\n",
+  "ops": [],
+  "never": []
+ }
+]

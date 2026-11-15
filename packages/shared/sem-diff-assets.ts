@@ -17,6 +17,7 @@ export const SEM_DIFF_GRAMMAR_FILES = [
   "tree-sitter-rust.wasm",
   "tree-sitter-java.wasm",
   "tree-sitter-c_sharp.wasm",
+  "tree-sitter-php.wasm",
 ] as const;
 
 export const SEM_DIFF_FILES = [SEM_DIFF_RUNTIME_FILE, ...SEM_DIFF_GRAMMAR_FILES] as const;

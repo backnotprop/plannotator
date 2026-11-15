@@ -200,7 +200,7 @@ test('moved and renamed code is labelled in plain words, and only the TypeScript
     await expect(page.getByText('1 moved · 1 moved & edited', { exact: true })).toBeVisible();
     await expect(page.getByText('Moved 4 lines').first()).toBeAttached();
     expect(parsers.some((path) => path.includes('tree-sitter-typescript-'))).toBe(true);
-    expect(parsers.filter((path) => /tree-sitter-(python|go|rust|java|c_sharp)-/.test(path))).toEqual([]);
+    expect(parsers.filter((path) => /tree-sitter-(python|go|rust|java|c_sharp|php)-/.test(path))).toEqual([]);
     await shot(page, 'labelled');
     await context.close();
   } finally {

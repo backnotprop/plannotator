@@ -108,6 +108,18 @@ describe('semantic diff client', () => {
     client.dispose();
   });
 
+  test('PHP files are supported when the server ships the PHP grammar; Blade templates never are', () => {
+    const log = { created: 0, terminated: 0 };
+    const shipped = { ...advert, grammars: { ...advert.grammars, 'tree-sitter-php.wasm': '/assets/sem-diff/tree-sitter-php-0.wasm' } };
+    expect(createSemDiffClient({ advert, origin: 'http://127.0.0.1:1', createWorker: fakeWorker('engine', log) }).supports('src/User.php')).toBe(false);
+    const client = createSemDiffClient({ advert: shipped, origin: 'http://127.0.0.1:1', createWorker: fakeWorker('engine', log) });
+    expect(client.supports('src/User.php')).toBe(true);
+    expect(client.supports('views/list.phtml')).toBe(true);
+    expect(client.supports('resources/views/welcome.blade.php')).toBe(false);
+    expect(log.created).toBe(0);
+    client.dispose();
+  });
+
   test('without an advert nothing is supported', async () => {
     const log = { created: 0, terminated: 0 };
     const client = createSemDiffClient({ advert: undefined, origin: 'http://127.0.0.1:1', createWorker: fakeWorker('engine', log) });

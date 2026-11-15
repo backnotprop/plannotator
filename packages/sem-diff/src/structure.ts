@@ -9,7 +9,7 @@
 // 5. Paired declarations with identical tokens and comments but different
 //    text are `reformatted`.
 import type { Node } from 'web-tree-sitter';
-import { isComment, type Declaration, type LanguageConfig } from './parse.ts';
+import { brokenTree, isComment, type Declaration, type LanguageConfig } from './parse.ts';
 import { rule } from './runtime.ts';
 import type {
   SemanticDiffFold,
@@ -69,6 +69,7 @@ function leaves(n: Node, cfg: LanguageConfig) {
       else for (let i = x.childCount - 1; i >= 0; i--) { const c = x.child(i); if (c && c.isNamed) stack.push(c); else if (c) tokens.push(c.text); }
       continue;
     }
+    if (x.isMissing && cfg.harmlessMissing?.has(x.type)) continue;
     if (x.childCount === 0) {
       // A written `;` ending a JS/TS statement equals an inserted one; where the
       // line break would split the statement differently, the tree shape differs.
@@ -526,7 +527,7 @@ export function detectStructure(oldRoot: Node, newRoot: Node, cfg: LanguageConfi
   // Formatting only: same tokens, same comments, different text.
   // A class or interface whose whole shape is unchanged (`interface P { a: string }` wrapped
   // onto lines) is reformatted as a whole; otherwise its changed members are reported.
-  const whole = pairs.filter(([a, b]) => a.decl.members && !moved.has(a) && a.text !== b.text && a.seq === b.seq && !a.decl.node.hasError && !b.decl.node.hasError && invisibles(a.text) === invisibles(b.text)).map(([a]) => a.decl.node);
+  const whole = pairs.filter(([a, b]) => a.decl.members && !moved.has(a) && a.text !== b.text && a.seq === b.seq && !brokenTree(a.decl.node, cfg) && !brokenTree(b.decl.node, cfg) && invisibles(a.text) === invisibles(b.text)).map(([a]) => a.decl.node);
   const insideWhole = (a: Entity) => whole.some((w) => w.id !== a.decl.node.id && w.startIndex <= a.decl.node.startIndex && a.decl.node.endIndex <= w.endIndex);
   for (const [a, b] of pairs) {
     if (moved.has(a) || a.text === b.text || insideWhole(a)) continue;
@@ -536,7 +537,7 @@ export function detectStructure(oldRoot: Node, newRoot: Node, cfg: LanguageConfi
     // parses or reads, so a change involving them is never called formatting.
     if (invisibles(a.text) !== invisibles(b.text)) continue;
     // Code that does not parse has no reliable shape to compare.
-    if (a.decl.node.hasError || b.decl.node.hasError) continue;
+    if (brokenTree(a.decl.node, cfg) || brokenTree(b.decl.node, cfg)) continue;
     // Rust macro arguments are raw tokens: spacing can be the macro's input (`stringify!`).
     if (macroArgs(a.decl.node) !== macroArgs(b.decl.node)) continue;
     if (a.decl.members && !whole.includes(a.decl.node)) continue; // report the changed members, not the whole class
@@ -606,6 +607,7 @@ function kindOf(n: Node): 'binding' | 'member' | 'type' {
   if (n.type === 'type_identifier') return 'type';
   if (SHORTHAND.has(n.type)) return 'binding';
   const p = n.parent;
+  if (p?.type === 'variable_name' && p.parent?.type === 'property_element') return 'member';
   // `user.name`, `self.name`, `x.Name`, `obj->name`: the name after the dot.
   if (p && /^(member_expression|attribute|field_expression|selector_expression|field_access|member_access_expression)$/.test(p.type) && p.namedChildren.length > 1 && p.namedChildren.at(-1)?.id === n.id) return 'member';
   if (/property_identifier|field_identifier/.test(n.type)) return 'member';
@@ -650,6 +652,18 @@ function isDeclarationName(id: Node): boolean {
   if (p.type === 'inferred_parameters' || p.type === 'as_pattern_target') return true;
   // TypeScript enum members without a value: `enum E { A, B }`.
   if (p.type === 'enum_body') return true;
+  if (p.type === 'variable_name') {
+    const q = p.parent;
+    if (!q) return false;
+    if (q.type === 'assignment_expression' || q.type === 'reference_assignment_expression') return q.childForFieldName('left')?.id === p.id;
+    if (/parameter$|^property_element$|^static_variable_declaration$/.test(q.type)) return q.childForFieldName('name')?.id === p.id;
+    if (q.type === 'global_declaration' || q.type === 'anonymous_function_use_clause') return true;
+    if (q.type === 'catch_clause') return q.childForFieldName('name')?.id === p.id;
+    if (q.type === 'list_literal') return true;
+    if (q.type === 'foreach_statement' || (q.type === 'pair' && q.parent?.type === 'foreach_statement')) return q.namedChildren[0]?.id !== p.id || q.type === 'pair';
+    return false;
+  }
+  if (p.type === 'const_element' || p.type === 'enum_case') return p.namedChildren.find((c) => c?.type === 'name')?.id === id.id;
   if (!DECLARING_PARENT.test(p.type)) return false;
   // `import { A }` -> `import { B }` brings in a different thing; only a local
   // alias (`import { A as b }`) is a name this file owns.
