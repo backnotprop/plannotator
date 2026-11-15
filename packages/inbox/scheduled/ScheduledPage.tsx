@@ -90,8 +90,8 @@ export function ScheduledPage(props: ScheduledPageProps) {
           <SidebarTrigger />
           <h1 tabIndex={-1}>Scheduled threads</h1>
           {props.on && (
-            <button type="button" className="ib-btn st-new" onClick={() => props.onOpen('new')} data-scheduled-new="">
-              New scheduled thread
+            <button type="button" className="ib-btn st-new" aria-label="New scheduled thread" onClick={() => props.onOpen('new')} data-scheduled-new="">
+              {props.phone ? 'New' : 'New scheduled thread'}
             </button>
           )}
         </div>

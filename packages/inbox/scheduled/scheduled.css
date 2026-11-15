@@ -39,7 +39,9 @@
 .st-end { justify-self: end; }
 .st-offh { display: flex; align-items: baseline; gap: 8px; margin: 26px 4px 10px; font-size: var(--ib-fs-13, 13px); font-weight: 600; color: var(--foreground); }
 .st-offh .ib-n { font-weight: 500; color: var(--muted-foreground); }
-.st-live { display: inline-flex; align-items: center; gap: 7px; color: var(--foreground); }
+.st-live { display: inline-flex; align-items: center; gap: 7px; color: var(--foreground); vertical-align: top; }
+.st-row > span:has(> .st-live) { display: flex; align-items: center; }
+.st-num .st-live { gap: 6px; height: 20px; }
 /* A narrower window drops Created, then Next run, so Name and Last run keep their room. */
 @container st-table (max-width: 760px) {
   .st-cols { grid-template-columns: minmax(160px, 2fr) 84px minmax(48px, 0.45fr) minmax(140px, 1.1fr) minmax(100px, 1fr) 40px; }
@@ -64,6 +66,7 @@
 /* The narrow list beside an open one (and on a phone): Scheduled thread, Runs, Last run. */
 .st-short { padding: 2px 0 20px; }
 .st-scols { display: grid; grid-template-columns: minmax(0, 1fr) 24px 40px 112px 28px; column-gap: 12px; align-items: start; }
+.st-shead > * { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .st-shead { padding: 0 12px; height: 30px; align-content: center; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 500; color: var(--muted-foreground); }
 .st-srow { padding: 9px 12px; border-radius: 8px; cursor: pointer; }
 .st-srow + .st-srow { margin-top: 2px; }
@@ -90,18 +93,18 @@
 .st-pick svg.ib-ic { width: 12px; height: 12px; color: var(--muted-foreground); flex: none; }
 .st-pick[data-popup-open] { outline: 2px solid var(--ring); outline-offset: -1px; }
 .st-time { padding: 0 6px 0 8px; }
-.st-cron { width: 14ch; font-family: var(--font-mono, ui-monospace, monospace); cursor: text; }
+.st-cron { width: 13ch; cursor: text; }
 .st-w { color: var(--muted-foreground); }
 .st-tz { position: relative; display: inline-flex; align-items: center; height: 28px; padding: 0 4px; border-radius: 6px; }
 .st-tz select { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
 .st-tz:has(select:focus-visible) { outline: 2px solid var(--ring); outline-offset: 1px; }
 .st-next { margin-left: auto; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); white-space: nowrap; }
-.st-err { margin: 6px 0 2px 2px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--ib-badge-stop-fg, var(--destructive)); }
-.st-echo { margin: 6px 0 2px 2px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
+.ib-sgroup > p.st-err { margin: 6px 0 2px 2px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--ib-badge-stop-fg, var(--destructive)); }
+.ib-sgroup > p.st-echo { margin: 6px 0 2px 2px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
 .st-kinds { min-width: 200px; }
 .st-miss { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 10px; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
 .st-box { position: relative; border: 1px solid var(--border); border-radius: 10px; background: var(--background); padding: 12px 14px 8px; }
-.st-prompt { display: block; width: 100%; min-height: 92px; padding: 0; border: 0; background: none; resize: vertical; font: inherit; font-size: var(--ib-fs-14, 14px); line-height: 22px; color: var(--foreground); outline: none; field-sizing: content; }
+.st-prompt { display: block; width: 100%; min-height: 92px; padding: 0; border: 0; background: none; resize: none; font: inherit; font-size: var(--ib-fs-14, 14px); line-height: 22px; color: var(--foreground); outline: none; field-sizing: content; }
 .st-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; margin: 10px -6px 0; padding-top: 8px; border-top: 1px solid var(--border); }
 .st-lbl { font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); margin: 0 4px 0 6px; }
 .st-gh { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 7px; border: 0; border-radius: 6px; background: none; font: inherit; font-size: var(--ib-fs-13, 13px); font-weight: 500; color: var(--foreground); cursor: pointer; }
@@ -150,7 +153,7 @@ button.st-line:hover { color: var(--foreground); }
 .st-line.st-skip::after { background: transparent; }
 .st-prompt-shown { margin: 4px 0 10px 34px; font-size: var(--ib-fs-13-5, 13.5px); line-height: 1.55; color: var(--muted-foreground); white-space: pre-wrap; overflow-wrap: anywhere; }
 .st-note.st-unfinished { margin: 0; padding: 12px 0 18px 34px; }
-.st-run-at + .ib-message, .st-run-at + article { border-top: 0; }
+.ib-pbody .st-run-at + .ib-message, .ib-pbody.ib-folding .st-run-at + .ib-message { border-top: 0; margin-top: 0; }
 
 /* The Reply row's mark: "Scheduled · next Mon 9:00 AM · Edit", or on another machine's thread, where to manage it. */
 .st-foot-mark { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 8px; margin-left: auto; margin-right: -8px; border: 0; border-radius: 7px; background: none; font: inherit; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); font-variant-numeric: tabular-nums; white-space: nowrap; flex: none; }
@@ -168,6 +171,7 @@ button.st-foot-mark:hover { background: var(--muted); }
 
 @media (max-width: 760px) {
   .st-list.st-list-split { width: 100%; }
+  .st-scols { grid-template-columns: minmax(0, 1fr) 28px 3em 9.4em 24px; column-gap: 8px; }
   .st-kv { grid-template-columns: 1fr; gap: 4px; }
   .st-next { margin-left: 0; width: 100%; }
   .st-pfoot .ib-btn { flex: 1; }

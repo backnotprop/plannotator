@@ -99,7 +99,10 @@ function KindMenu({ kind, onKind }: { kind: ScheduleKind; onKind: (kind: Schedul
 const timeValue = (hour: number, minute: number) => `${two(hour)}:${two(minute)}`;
 
 export function ScheduleRow({ schedule, preview, onChange }: { schedule: InboxScheduledSchedule; preview: InboxScheduledPreview | null; onChange: (next: InboxScheduledSchedule) => void }) {
-  const parts = scheduleParts(schedule);
+  const read = scheduleParts(schedule);
+  // Custom stays picked while its cron happens to read as a preset ("0 9 * * *"): the person is typing a cron.
+  const [custom, setCustom] = useState(false);
+  const parts = custom && schedule && 'cron' in schedule ? { ...read, kind: 'custom' as ScheduleKind } : read;
   const tz = schedule?.tz ?? localZone();
   const [cron, setCron] = useState(parts.cron);
   const set = (change: Partial<typeof parts>, kind = parts.kind) => onChange(scheduleOf(kind, { ...parts, ...change }, tz));
@@ -118,6 +121,7 @@ export function ScheduleRow({ schedule, preview, onChange }: { schedule: InboxSc
           kind={parts.kind}
           onKind={(kind) => {
             const typed = cron || scheduleCron(schedule);
+            setCustom(kind === 'custom');
             if (kind === 'custom') setCron(typed);
             set(kind === 'custom' ? { cron: typed } : {}, kind);
           }}
