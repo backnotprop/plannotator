@@ -622,6 +622,8 @@ async function currentMod($: Engine, options: { healed?: boolean } = {}): Promis
     mod?.dispose()
     await $.env.set('PLANNOTATOR_SESSION_TAG', settings.t3Thread ? `t3:${settings.t3Thread}` : `claude-code:${sessionId}`)
     const host = hostOf($, settings.debugPath)
+    // Auto reload off (`autoReload`): a host that cannot run the reload never reloads itself.
+    if (!settings.autoReload) delete host.runReload
     const title = sessionTitleOf($, host, String(sessionId))
     // A branched conversation (a new session id) says which session it continues: the Inbox hands it that one's replies.
     const forkedFrom = new TranscriptForkedFrom(host, String(sessionId), transcriptCandidatesOf($, String(sessionId)))
@@ -643,7 +645,6 @@ async function currentMod($: Engine, options: { healed?: boolean } = {}): Promis
       ...(inboxTools ? { inboxTools } : {}),
       ...(settings.t3Thread ? { inboxAs: inboxT3Agent(settings.t3Thread), inboxOwner: () => t3ThreadOwnHere($) } : {}),
       ...(settings.wake ? {} : { inboxWake: false }),
-      ...(settings.autoReload ? {} : { autoReload: false }),
       launchReminder: () => launchReminderFor($, String(sessionId)),
       ...(options.healed ? { healed: true } : {}),
     })

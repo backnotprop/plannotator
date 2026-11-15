@@ -319,8 +319,6 @@ export interface SessionInfo {
   inboxAs?: InboxAgentIdentity
   /** False: the Inbox tool without the reply wake (`InboxLinkOptions.wake`). */
   inboxWake?: boolean
-  /** False: the person turned auto reload off (`autoReload`); the Inbox link never asks for a reload offer. */
-  autoReload?: boolean
   /** Whether this process is the session's own (a T3 Code thread's Claude; `InboxLinkOptions.owner`). */
   inboxOwner?: () => Promise<InboxOwnerAnswer>
   /** The session's working folder, read when asked (the Inbox link's polls say where the session works). */
@@ -382,8 +380,8 @@ export class PlannotatorMod {
   readonly inbox: InboxLink | null
   /**
    * Plannotator reloads itself after an update (auto-reload.ts), told by the
-   * Inbox link's polls; null without an Inbox link, with auto reload turned
-   * off, or a host that cannot read the prompt box or run a command.
+   * Inbox link's polls; null without an Inbox link, or a host that cannot read
+   * the prompt box or run a command.
    */
   readonly autoReload: AutoReload | null
 
@@ -394,7 +392,7 @@ export class PlannotatorMod {
     this.instanceId = host.randomHex(8)
     const { readPrompt, runReload, loadedPlugin } = host
     this.autoReload =
-      session.inboxTools && session.autoReload !== false && readPrompt && runReload && loadedPlugin
+      session.inboxTools && readPrompt && runReload && loadedPlugin
         ? new AutoReload({
             sessionId: session.sessionId,
             now: () => host.now(),
