@@ -1,17 +1,29 @@
 diff --git a/packages/diffs/package.json b/packages/diffs/package.json
-index be0fba76..d4945af9 100644
+index be0fba76..62b8d633 100644
 --- a/packages/diffs/package.json
 +++ b/packages/diffs/package.json
 @@ -1,6 +1,6 @@
  {
    "name": "@pierre/diffs",
 -  "version": "1.7.0-beta.3",
-+  "version": "1.7.0-beta.3-sem.3",
++  "version": "1.7.0-beta.3-sem.4",
    "license": "apache-2.0",
    "files": [
      "dist",
+diff --git a/packages/diffs/src/components/CodeView.ts b/packages/diffs/src/components/CodeView.ts
+index d56dad27..67052739 100644
+--- a/packages/diffs/src/components/CodeView.ts
++++ b/packages/diffs/src/components/CodeView.ts
+@@ -421,6 +421,7 @@ export const CODE_VIEW_DIFF_OPTION_KEYS = [
+   'lineDiffType',
+   'maxLineDiffLength',
+   'expansionLineCount',
++  'expandColourWaitMs',
+   'lineHoverHighlight',
+   'enableTokenInteractionsOnWhitespace',
+   'enableGutterUtility',
 diff --git a/packages/diffs/src/components/FileDiff.ts b/packages/diffs/src/components/FileDiff.ts
-index 66542ee4..7d626b01 100644
+index 66542ee4..5ab61f03 100644
 --- a/packages/diffs/src/components/FileDiff.ts
 +++ b/packages/diffs/src/components/FileDiff.ts
 @@ -1428,10 +1428,10 @@ export class FileDiff<LAnnotation = undefined, Caret = undefined> {
@@ -28,6 +40,15 @@ index 66542ee4..7d626b01 100644
      }
  
      const promise = this.loadFilesForDiff(fileDiff, loadDiffFiles);
+@@ -1582,7 +1582,7 @@ export class FileDiff<LAnnotation = undefined, Caret = undefined> {
+     );
+     this.setHydratedState(files);
+     if (!this.installHydratedDiff(expectedDiff)) {
+-      await awaitWithTimeout(() => this.primeHighlightCache(expectedDiff));
++      await awaitWithTimeout(() => this.primeHighlightCache(expectedDiff), this.options.expandColourWaitMs);
+       if (!this.enabled || this.getInputDiff() !== expectedDiff) {
+         return;
+       }
 diff --git a/packages/diffs/src/components/SemanticConnector.ts b/packages/diffs/src/components/SemanticConnector.ts
 index 89cf1423..25c5ac2c 100644
 --- a/packages/diffs/src/components/SemanticConnector.ts
@@ -69,6 +90,28 @@ index 89cf1423..25c5ac2c 100644
      a.base.top === b.base.top &&
      a.base.bottom === b.base.bottom &&
      a.target.top === b.target.top &&
+diff --git a/packages/diffs/src/components/VirtualizedFileDiff.ts b/packages/diffs/src/components/VirtualizedFileDiff.ts
+index 0f1512fc..dfa585bd 100644
+--- a/packages/diffs/src/components/VirtualizedFileDiff.ts
++++ b/packages/diffs/src/components/VirtualizedFileDiff.ts
+@@ -1330,7 +1330,7 @@ export class VirtualizedFileDiff<
+         files,
+         this.options.parseDiffOptions
+       );
+-      await awaitWithTimeout(() => this.primeHighlightCache(nextDiff));
++      await awaitWithTimeout(() => this.primeHighlightCache(nextDiff), this.options.expandColourWaitMs);
+       if (this.getInputDiff() !== expectedDiff) {
+         return;
+       }
+@@ -1348,7 +1348,7 @@ export class VirtualizedFileDiff<
+       );
+       this.setHydratedState(files);
+       if (!this.installHydratedDiff(expectedDiff)) {
+-        await awaitWithTimeout(() => this.primeHighlightCache(expectedDiff));
++        await awaitWithTimeout(() => this.primeHighlightCache(expectedDiff), this.options.expandColourWaitMs);
+         if (this.getInputDiff() !== expectedDiff) {
+           return;
+         }
 diff --git a/packages/diffs/src/layout/DiffLayout.ts b/packages/diffs/src/layout/DiffLayout.ts
 index 79f7703b..10185460 100644
 --- a/packages/diffs/src/layout/DiffLayout.ts
@@ -119,6 +162,20 @@ index f4dbfccf..0509c04b 100644
      };
    }
  
+diff --git a/packages/diffs/src/types.ts b/packages/diffs/src/types.ts
+index 48ffde96..d264a5cd 100644
+--- a/packages/diffs/src/types.ts
++++ b/packages/diffs/src/types.ts
+@@ -731,6 +731,9 @@ export interface BaseDiffOptions extends BaseCodeOptions {
+ 
+   // How many lines to expand per click
+   expansionLineCount?: number; // 100 is default
++  // How long newly loaded or expanded lines wait for their highlighting
++  // before they are drawn plain and coloured when it arrives.
++  expandColourWaitMs?: number; // 300 is default
+ 
+   /**
+    * Parser options used when computing diffs from file contents
 diff --git a/packages/diffs/src/utils/measureSemanticDiffConnectors.ts b/packages/diffs/src/utils/measureSemanticDiffConnectors.ts
 index 05948014..60bbc2d3 100644
 --- a/packages/diffs/src/utils/measureSemanticDiffConnectors.ts
