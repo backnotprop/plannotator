@@ -130,9 +130,30 @@ test("no PR line when the PR is on any thread's row, passed in this send's pulls
   const threadId = now.thread;
   w.store.changeThreadPulls({ thread_id: threadId, add: [], remove: parseInboxThreadPullRefs(["acme/api#3405"], "remove").refs!, by: { kind: "person" } });
   const known = knowing("github.com/acme/api#3405");
-  expect(quietHint(w.store, { session: "ses_a", threadId, body: "#3405 again", replayed: false, now: Date.now(), known })).toBeNull();
+  expect(quietHint(w.store, { session: "ses_a", threadId, body: "#3405 again", replayed: false, known })).toBeNull();
   // Off this thread is not off every thread: another thread naming it hears the line.
-  expect(quietHint(w.store, { session: "ses_a", threadId: refused.thread, body: "#3405 again", replayed: false, now: Date.now(), known })?.line).toBe(nudge("#3405", "acme/api#3405"));
+  expect(quietHint(w.store, { session: "ses_a", threadId: refused.thread, body: "#3405 again", replayed: false, known })?.line).toBe(nudge("#3405", "acme/api#3405"));
+});
+
+test("the store shows a PR too: its URL in an earlier message, the agent's or the person's, of this project", async () => {
+  // The Inbox has read no list and no card: only the store can say these numbers are PRs.
+  const w = world({ known: knowing() });
+  const first = await w.send("ses_a", { body: "Opened https://github.com/acme/api/pull/3405; tracking https://github.com/acme/api/issues/3399.", thread: "one" });
+  expect(first.last).toBe(nudge("#3405", "acme/api#3405"));
+  expect((await w.send("ses_b", { body: "Reviewing #3405; it closes #3399.", thread: "two" })).last).toBe(nudge("#3405", "acme/api#3405"));
+  // The person's words count the same way; a PR of another repository does not make this one's number a PR.
+  w.store.sendReply(first.id, { words: "Also see https://github.com/acme/api/pull/3410 and https://github.com/acme/web/pull/3411.", idempotency_key: "p1" });
+  const later = await w.send("ses_a", { body: "Next: #3410 and #3411.", thread: "three" });
+  expect(later.lines.slice(1)).toEqual([nudge("#3410", "acme/api#3410")]);
+});
+
+test("a PR taken off a thread's row is known: quiet in that thread, still named in another", async () => {
+  const w = world({ known: knowing() });
+  const one = await w.send("ses_a", { body: "Working on the retry fix.", pulls: ["acme/api#3405"], thread: "one" });
+  w.store.changeThreadPulls({ thread_id: one.thread, add: [], remove: parseInboxThreadPullRefs(["acme/api#3405"], "remove").refs!, by: { kind: "person" } });
+  // Removed on purpose here: never asked back in this thread.
+  expect((await w.send("ses_a", { body: "#3405 is green.", reply_to: one.id })).result.content[0]!.text).not.toContain("You named");
+  expect((await w.send("ses_a", { body: "Shipping #3405.", thread: "two" })).last).toBe(nudge("#3405", "acme/api#3405"));
 });
 
 test("five PRs in one message: three lines in text order and nothing more; a later message there names the other two", async () => {

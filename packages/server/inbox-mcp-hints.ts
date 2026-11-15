@@ -25,9 +25,9 @@
  * it holds for.
  */
 
-import { forgePullUrl, forgeRefKey, forgeRefLabel, type ForgeRef } from "@plannotator/core/forge-ref-card";
+import { forgePullUrl, forgeRefKey, forgeRefLabel, parseForgeRefUrl, type ForgeRef } from "@plannotator/core/forge-ref-card";
 import { parseInboxQuestionBlocks } from "@plannotator/core/inbox-questions";
-import { INBOX_THREAD_PULLS_REMOVED_MS, inboxPullUrlsIn, inboxThreadPullText, parseInboxThreadPullRef, type InboxThreadPullRef } from "@plannotator/core/inbox-types";
+import { inboxPullUrlsIn, inboxThreadPullText, parseInboxThreadPullRef, type InboxThreadPullRef } from "@plannotator/core/inbox-types";
 import { blankCode } from "@plannotator/shared/inbox/message-images";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 
@@ -80,6 +80,34 @@ export function hintSaid(store: InboxStore, session: string | null | undefined, 
 export function noteHintSaid(store: InboxStore, session: string | null | undefined, kind: InboxHintKind): void {
   const who = session?.trim();
   if (who) noteSaid(store, keyOf(who, kind));
+}
+
+/** Per store and project: the PR keys its messages link to (as the Pull requests page reads them), and the messages read. */
+const linkedByStore = new WeakMap<InboxStore, Map<string, { read: Set<string>; keys: Set<string> }>>();
+
+/**
+ * The PR keys the store itself shows are this project's PRs: one a message in
+ * it (the agent's or the person's) links by URL, read as the Pull requests
+ * page reads them, or one taken off a thread's row (one still on a row is
+ * quiet anyway). Each message is read once per store.
+ */
+export function storePullKeys(store: InboxStore, projectId: string): ReadonlySet<string> {
+  let projects = linkedByStore.get(store);
+  if (!projects) linkedByStore.set(store, (projects = new Map()));
+  let linked = projects.get(projectId);
+  if (!linked) projects.set(projectId, (linked = { read: new Set(), keys: new Set() }));
+  for (const thread of store.threadsOf(projectId)) {
+    for (const pull of store.threadPullsRemoved(thread.thread_id, "")) linked.keys.add(pull.pull);
+    for (const id of store.threadMessageIds(thread.thread_id)) {
+      if (linked.read.has(id)) continue;
+      linked.read.add(id);
+      for (const url of inboxPullUrlsIn(store.message(id)?.body ?? "")) {
+        const ref = parseForgeRefUrl(url);
+        if (ref?.kind === "pull") linked.keys.add(forgeRefKey(ref));
+      }
+    }
+  }
+  return linked.keys;
 }
 
 /** A GitLab merge request written short (`group/sub/project!45`). */
@@ -141,14 +169,13 @@ export function pullsNamedInBody(body: string, projectHost?: string | null, know
  * The PRs the body names that are on no thread's row: on no thread now (the
  * lists the rows show: added earlier, by the person, or with this send's
  * `pulls`), not passed in this send's `pulls` (its add may have been
- * refused), and not taken off this thread in the last 7 days (read_thread's
- * "Removed by" lines: never asked back).
+ * refused), and never one taken off this thread (removed on purpose: never
+ * asked back there).
  */
 export function pullsNotAttached(
   store: InboxStore,
   threadId: string,
   body: string,
-  now: number,
   projectHost?: string | null,
   known?: InboxKnownPulls,
   passed: readonly string[] = [],
@@ -158,7 +185,7 @@ export function pullsNotAttached(
   const quiet = new Set([
     ...passed,
     ...store.allThreadPulls().map((pull) => pull.pull),
-    ...store.threadPullsRemoved(threadId, new Date(now - INBOX_THREAD_PULLS_REMOVED_MS).toISOString()).map((pull) => pull.pull),
+    ...store.threadPullsRemoved(threadId, "").map((pull) => pull.pull),
   ]);
   return named.filter((ref) => !quiet.has(ref.key));
 }
@@ -207,16 +234,22 @@ export function quietHint(
     threadId: string;
     body: string;
     replayed: boolean;
-    now: number;
     projectHost?: string | null;
     known?: InboxKnownPulls;
+    /** The thread's project: what the store shows of its PRs counts as known too (`storePullKeys`). */
+    projectId?: string;
     /** The keys of this send's own `pulls`. */
     passed?: readonly string[];
   },
 ): { kind: "attach_pull" | "question_options"; line: string } | null {
   if (sent.replayed) return null;
   try {
-    const refs = pullsNotAttached(store, sent.threadId, sent.body, sent.now, sent.projectHost, sent.known, sent.passed)
+    const context = sent.known;
+    const projectId = sent.projectId;
+    let fromStore: ReadonlySet<string> | null = null;
+    const known: InboxKnownPulls | undefined =
+      context && projectId ? { repo: context.repo, isPull: (key) => context.isPull(key) || (fromStore ??= storePullKeys(store, projectId)).has(key) } : context;
+    const refs = pullsNotAttached(store, sent.threadId, sent.body, sent.projectHost, known, sent.passed)
       .filter((ref) => !said(store, pullSaidKey(sent.threadId, ref.key)))
       .slice(0, HINT_PULLS_MAX);
     if (refs.length > 0) {

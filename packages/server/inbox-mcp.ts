@@ -1270,9 +1270,9 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
           threadId: String(sent.structured.thread_id),
           body: input.body,
           replayed: sent.replayed,
-          now: clock(),
           projectHost,
           known,
+          projectId: project.id,
           passed: pullRefs.map((ref) => ref.key),
         });
         if (quiet) {
