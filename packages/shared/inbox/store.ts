@@ -813,8 +813,12 @@ export class InboxStore {
   private readonly wakingSessions = new Set<string>();
   /** The ids of the thread roots an agent was launched for (`launch`): the launch sweep reads these, never every message. */
   private readonly launchedRootIds = new Set<string>();
-  /** Scheduled threads' run dividers that carry a launch and are not a thread's root (the root's is in launchedRootIds). */
-  private readonly scheduledRunIds = new Set<string>();
+  /** Each scheduled thread's newest run divider that carries a launch and is not the thread's root (the root's is in launchedRootIds), by thread. */
+  private readonly scheduledRunByThread = new Map<string, string>();
+  /** Each scheduled thread's newest run divider (any) and the newest due time its clock wrote a line for, by scheduled thread. */
+  private readonly scheduledLinesOf = new Map<string, { run?: string; due?: string }>();
+  /** Scheduled lines by their run key. */
+  private readonly scheduledKeys = new Map<string, string>();
   /** Scheduled threads, by id, deleted ones too (packages/server/inbox-scheduled.ts). */
   private readonly scheduledById = new Map<string, InboxScheduledThread>();
   /** The seq of a message's first line: its place in the event log. */
@@ -1110,13 +1114,27 @@ export class InboxStore {
     this.threadLines.set(record.thread_id, (this.threadLines.get(record.thread_id) ?? 0) + 1);
     if (record.wakes === true && record.author.kind === "agent" && record.author.session) this.wakingSessions.add(record.author.session);
     if (record.launch !== undefined && record.thread_id === record.id) this.launchedRootIds.add(record.id);
-    else if (record.launch !== undefined && record.scheduled_run?.run !== undefined) this.scheduledRunIds.add(record.id);
+    if (record.scheduled_run) this.placeScheduledLine(record);
     if (!first) return;
     this.messageSeq.set(record.id, firstSeq);
     this.noteAgentMessage(record, firstSeq);
     const members = this.threadMembers.get(record.thread_id);
     if (members) members.push(record.id);
     else this.threadMembers.set(record.thread_id, [record.id]);
+  }
+
+  /** A scheduled thread's divider or skip line: the indexes the clock and the launcher read, never the whole thread. */
+  private placeScheduledLine(record: InboxMessage): void {
+    const run = record.scheduled_run!;
+    const runOf = (id: string | undefined) => (id ? (this.messages.get(id)?.scheduled_run?.run ?? 0) : -1);
+    if (record.idempotency_key) this.scheduledKeys.set(record.idempotency_key, record.id);
+    const lines = this.scheduledLinesOf.get(run.scheduled_id) ?? {};
+    if (run.run !== undefined && run.run >= runOf(lines.run)) lines.run = record.id;
+    if (run.by === "schedule" && !(lines.due && lines.due >= run.due_at)) lines.due = run.due_at;
+    this.scheduledLinesOf.set(run.scheduled_id, lines);
+    if (record.launch !== undefined && run.run !== undefined && record.thread_id !== record.id && run.run >= runOf(this.scheduledRunByThread.get(record.thread_id))) {
+      this.scheduledRunByThread.set(record.thread_id, record.id);
+    }
   }
 
   /** A record whose latest line is all there is to it: a project, question, annotation, steps or initiative. */
@@ -6440,7 +6458,9 @@ export class InboxStore {
     this.projectGroups = null;
     this.messages.clear();
     this.launchedRootIds.clear();
-    this.scheduledRunIds.clear();
+    this.scheduledRunByThread.clear();
+    this.scheduledLinesOf.clear();
+    this.scheduledKeys.clear();
     this.scheduledById.clear();
     this.messageSeq.clear();
     this.resolvedSeq.clear();
@@ -6557,6 +6577,8 @@ export class InboxStore {
   private pendingFor(message: InboxMessage, session: string, options: { tags?: boolean }): boolean {
     // A hand-off inside its Undo window goes to nobody yet.
     if (handoffHeld(message) || message.taken_back_at) return false;
+    // A scheduled run's divider goes to its own run's session only; a skip line, or a run that didn't start, to none.
+    if (message.scheduled_run && message.to?.session !== session) return false;
     const owner = this.isOwner(message, session);
     const tag = owner ? null : tagOf(message, session);
     if (tag) return !tag.delivery && options.tags !== false;
@@ -7382,12 +7404,24 @@ export class InboxStore {
     });
   }
 
-  /** Scheduled threads' run dividers that carry a launch, other than a thread's root: the launcher's runs beside its roots. */
+  /** Each scheduled thread's newest run that carries a launch, other than its root: the launcher's runs beside its roots. Earlier runs have ended. */
   scheduledRunLaunches(): InboxMessage[] {
-    return [...this.scheduledRunIds].flatMap((id) => {
+    return [...this.scheduledRunByThread.values()].flatMap((id) => {
       const message = this.messages.get(id);
       return message ? [message] : [];
     });
+  }
+
+  /** A thread's newest scheduled run that carries a launch, other than its root, or null. */
+  scheduledRunOf(threadId: string): InboxMessage | null {
+    const id = this.scheduledRunByThread.get(threadId);
+    return (id && this.messages.get(id)) || null;
+  }
+
+  /** A scheduled thread's newest run divider, and the newest due time its clock wrote a run or skip line for. */
+  scheduledLines(scheduledId: string): { run: InboxMessage | null; due: string | null } {
+    const lines = this.scheduledLinesOf.get(scheduledId);
+    return { run: (lines?.run && this.messages.get(lines.run)) || null, due: lines?.due ?? null };
   }
 
   /** The scheduled threads not deleted, oldest first. */
@@ -7423,7 +7457,8 @@ export class InboxStore {
     launch?: InboxLaunchRecord;
     attachments?: InboxAttachment[];
   }): { message: InboxMessage; replayed: boolean } {
-    for (const message of this.messages.values()) if (message.scheduled_run && message.idempotency_key === input.key) return { message, replayed: true };
+    const written = this.scheduledKeys.get(input.key);
+    if (written && this.messages.get(written)) return { message: this.messages.get(written)!, replayed: true };
     const root = input.thread_id ? this.messages.get(input.thread_id) : undefined;
     if (input.thread_id && !root) throw new InboxError("thread_not_found", `No thread ${input.thread_id}.`);
     const project_id = root?.project_id ?? input.project_id;

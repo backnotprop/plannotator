@@ -68,7 +68,7 @@ export function inboxDir(dataDir: string): string {
   return join(dataDir, INBOX_DIR_NAME);
 }
 
-const KINDS: ReadonlySet<InboxRecordKind> = new Set(["project", "message", "question", "annotation", "card", "steps", "initiative", "thread_pull"]);
+const KINDS: ReadonlySet<InboxRecordKind> = new Set(["project", "message", "question", "annotation", "card", "steps", "initiative", "thread_pull", "scheduled"]);
 
 /**
  * One line of a store file, or null when it is not a line this reader can
