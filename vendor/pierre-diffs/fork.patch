@@ -1,12 +1,12 @@
 diff --git a/packages/diffs/package.json b/packages/diffs/package.json
-index be0fba76..62b8d633 100644
+index be0fba76..fe242632 100644
 --- a/packages/diffs/package.json
 +++ b/packages/diffs/package.json
 @@ -1,6 +1,6 @@
  {
    "name": "@pierre/diffs",
 -  "version": "1.7.0-beta.3",
-+  "version": "1.7.0-beta.3-sem.4",
++  "version": "1.7.0-beta.3-sem.6",
    "license": "apache-2.0",
    "files": [
      "dist",
@@ -50,7 +50,7 @@ index 66542ee4..5ab61f03 100644
          return;
        }
 diff --git a/packages/diffs/src/components/SemanticConnector.ts b/packages/diffs/src/components/SemanticConnector.ts
-index 89cf1423..25c5ac2c 100644
+index 89cf1423..149a3fab 100644
 --- a/packages/diffs/src/components/SemanticConnector.ts
 +++ b/packages/diffs/src/components/SemanticConnector.ts
 @@ -30,6 +30,8 @@ export interface Connector {
@@ -62,12 +62,13 @@ index 89cf1423..25c5ac2c 100644
  }
  
  interface SemanticConnectorOptions {
-@@ -345,12 +347,19 @@ export class SemanticConnector {
+@@ -345,12 +347,21 @@ export class SemanticConnector {
          const path = document.createElementNS(SVG_NS, 'path');
          path.setAttribute('data-connector-id', connector.id);
          path.setAttribute('data-connector-kind', connector.kind);
 +        if (connector.origin != null)
 +          path.setAttribute('data-connector-origin', connector.origin);
++        markLevel(path, connector);
          entry = { path, connector };
          added.push(entry);
        } else if (!areConnectorsEqual(entry.connector, connector)) {
@@ -79,10 +80,30 @@ index 89cf1423..25c5ac2c 100644
 +            entry.path.setAttribute('data-connector-origin', connector.origin);
 +          else entry.path.removeAttribute('data-connector-origin');
 +        }
++        markLevel(entry.path, connector);
          entry.connector = connector;
        }
        nextEntries.set(connector.id, entry);
-@@ -461,6 +470,7 @@ function areConnectorsEqual(a: Connector, b: Connector): boolean {
+@@ -441,6 +452,18 @@ export class SemanticConnector {
+   }
+ }
+ 
++/**
++ * A band whose two ends span the same rows (an edit or rename on one row) has
++ * no vertical travel, so it draws as a plain rectangle. Mark it so the theme
++ * can drop the edge that would outline it.
++ */
++function markLevel(path: SVGPathElement, connector: Connector): void {
++  const level =
++    connector.base.top === connector.target.top &&
++    connector.base.bottom === connector.target.bottom;
++  path.toggleAttribute('data-connector-level', level);
++}
++
+ function areBoundsEqual(
+   a: SemanticConnectorBounds | undefined,
+   b: SemanticConnectorBounds | undefined
+@@ -461,6 +484,7 @@ function areConnectorsEqual(a: Connector, b: Connector): boolean {
      a.id === b.id &&
      a.kind === b.kind &&
      a.rank === b.rank &&
@@ -160,6 +181,61 @@ index f4dbfccf..0509c04b 100644
 +          : {}),
 +      },
      };
+   }
+ 
+diff --git a/packages/diffs/src/style.css b/packages/diffs/src/style.css
+index e3a74da8..ffacaf29 100644
+--- a/packages/diffs/src/style.css
++++ b/packages/diffs/src/style.css
+@@ -990,7 +990,20 @@
+     user-select: none;
+ 
+     [data-connector-kind] {
+-      opacity: 0.15;
++      fill: light-dark(
++        color-mix(in srgb, var(--diffs-connector-base) 15%, transparent),
++        color-mix(in srgb, var(--diffs-connector-base) 32%, transparent)
++      );
++      stroke: light-dark(
++        transparent,
++        color-mix(in srgb, var(--diffs-connector-base) 50%, transparent)
++      );
++      stroke-width: 1px;
++      vector-effect: non-scaling-stroke;
++    }
++
++    [data-connector-kind][data-connector-level] {
++      stroke: none;
+     }
+ 
+     [data-connector-separator] {
+@@ -1014,23 +1027,23 @@
+     }
+ 
+     [data-connector-kind='added'] {
+-      fill: var(--diffs-addition-base);
++      --diffs-connector-base: var(--diffs-addition-base);
+     }
+ 
+     [data-connector-kind='deleted'] {
+-      fill: var(--diffs-deletion-base);
++      --diffs-connector-base: var(--diffs-deletion-base);
+     }
+ 
+     [data-connector-kind='moved'] {
+-      fill: var(--diffs-moved-base);
++      --diffs-connector-base: var(--diffs-moved-base);
+     }
+ 
+     [data-connector-kind='modified'] {
+-      fill: var(--diffs-edited-base);
++      --diffs-connector-base: var(--diffs-edited-base);
+     }
+ 
+     [data-connector-kind='reformatted'] {
+-      fill: var(--diffs-reformatted-base);
++      --diffs-connector-base: var(--diffs-reformatted-base);
+     }
    }
  
 diff --git a/packages/diffs/src/types.ts b/packages/diffs/src/types.ts
