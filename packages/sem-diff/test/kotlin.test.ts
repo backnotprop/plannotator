@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 import { test } from 'node:test';
 import { languageForPath, semanticDiffFile } from '../src/index.ts';
 import { brokenTree, getParser, LANGUAGES } from '../src/parse.ts';
@@ -10,6 +13,13 @@ test('Kotlin files and scripts are read', () => {
   assert.equal(languageForPath('src/main/kotlin/App.kt'), 'kotlin');
   assert.equal(languageForPath('build.gradle.kts'), 'kotlin');
   assert.equal(languageForPath('notes.ktx'), null);
+});
+
+test('the grammar is the tree-sitter-kotlin 1.1.0 release file, unchanged', () => {
+  const dir = path.join(import.meta.dirname, '..', '..', '..', 'vendor', 'tree-sitter-kotlin');
+  const sum = createHash('sha256').update(fs.readFileSync(path.join(dir, 'tree-sitter-kotlin.wasm'))).digest('hex');
+  assert.equal(sum, '7009d69453bc8735e438b2818a633efb21c88f99782769abba60dffedfab73f7');
+  assert.match(fs.readFileSync(path.join(dir, 'SHA256SUMS'), 'utf8'), new RegExp(`^${sum}  tree-sitter-kotlin.wasm$`, 'm'));
 });
 
 const helpers = Array.from({ length: 4 }, (_, i) => `fun helper${i}(x: Int): Int {\n    val y = x + ${i}\n    return y * 2\n}\n`).join('\n');

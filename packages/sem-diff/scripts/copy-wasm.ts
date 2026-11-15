@@ -1,4 +1,5 @@
-import { copyFileSync, mkdirSync, rmSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { copyFileSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 
@@ -18,7 +19,18 @@ const files: Array<[string, string]> = [
   ["tree-sitter-ruby/tree-sitter-ruby.wasm", "tree-sitter-ruby.wasm"],
   ["@tree-sitter-grammars/tree-sitter-kotlin/tree-sitter-kotlin.wasm", "tree-sitter-kotlin.wasm"],
 ];
+const pinned: Record<string, string> = {
+  "tree-sitter-kotlin.wasm": "7009d69453bc8735e438b2818a633efb21c88f99782769abba60dffedfab73f7",
+};
 rmSync(out, { recursive: true, force: true });
 mkdirSync(out, { recursive: true });
-for (const [from, to] of files) copyFileSync(require.resolve(from), join(out, to));
+for (const [from, to] of files) {
+  const source = require.resolve(from);
+  const want = pinned[to];
+  if (want) {
+    const got = createHash("sha256").update(readFileSync(source)).digest("hex");
+    if (got !== want) throw new Error(`sem-diff: ${to} has sha256 ${got}, expected ${want}`);
+  }
+  copyFileSync(source, join(out, to));
+}
 console.log(`sem-diff: ${files.length} parser files in ${out}`);
