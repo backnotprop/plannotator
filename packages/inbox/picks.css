@@ -15,9 +15,10 @@ button.ib-pick-box:focus-visible { outline: 2px solid var(--ring); outline-offse
 .ib-mrow > .ib-pick-mark { position: absolute; left: 16px; top: 14px; cursor: default; }
 .ib-listcol[data-picking] :is(.ib-row, .ib-nrow, .ib-mrow) { user-select: none; }
 
-/* A group's box, over its header's left (the header is the group's toggle, so the box is its sibling). */
+/* A group's box, over its header's left (the header is the group's toggle, so the box is its sibling), and above the
+   header, which a phone draws opaque and sticky. */
 .ib-listcol[data-picking] .ib-group { position: relative; }
-.ib-group > .ib-pick-box { position: absolute; left: 14px; top: 9px; z-index: 2; }
+.ib-group > .ib-pick-box { position: absolute; left: 14px; top: 9px; z-index: 3; }
 .ib-listcol[data-picking] .ib-band { padding-left: 42px; }
 
 /* The fills: a picked row is filled; the open row keeps only the hover's. */
