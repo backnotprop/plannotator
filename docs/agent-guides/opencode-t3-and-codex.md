@@ -181,8 +181,14 @@ OpenCode 2's Plan-mode reminder right after the prompt (matched with
 notice, OpenCode's continuation rows. Any other injected row right after a
 prompt starts its own turn (that prompt got no reply). Compaction rows do not
 change the turn, and a compaction summary (`summary: true`) is listed but
-opens only when nothing else can. Not handled: the retry row after an
-incomplete stream follows a failed step, so its reply counts as injected. The
+opens only when nothing else can. One injected row counts as the person's: an
+OpenCode 2 background subagent result (`<subagent sessionID="…">`, from
+`SubagentCompletion.deliver`) whose child session is named by a `subagent`
+tool call in one of the person's turns, so the reply to that result opens. A
+result for a subagent that a wake's turn started, or that no turn here names,
+stays injected. A subagent command (`subtask` in the command config) starts
+its child with no tool call in the parent, so its result stays injected. Not
+handled: the retry row after an incomplete stream follows a failed step, so its reply counts as injected. The
 picker lists the reply that opens first (★), then the rest newest first,
 capped at 25; the one that opens is kept even when 25 newer replies to
 injected prompts exist. `toBridgeMessages` carries a V2 step's `error` and

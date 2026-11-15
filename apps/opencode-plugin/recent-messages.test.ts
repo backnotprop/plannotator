@@ -122,6 +122,46 @@ describe("pickRecentAssistantMessages on OpenCode 2", () => {
     ], 2)).toEqual(["explanation", "s2"]);
   });
 
+  // The `subagent` tool's background answer and its later result, as OpenCode 2
+  // stores them (`tool/plugin/subagent.ts` backgroundResult, `SubagentCompletion.deliver`).
+  const startBackground = (child: string) => ({
+    ...tool("subagent", `The subagent is working in the background (sessionID: ${child}).`),
+    state: {
+      status: "completed",
+      input: { description: "review", prompt: "Review the module", background: true },
+      content: [{ type: "text", text: `The subagent is working in the background (sessionID: ${child}).` }],
+      structured: { sessionID: child, status: "running" },
+    },
+  });
+  const subagentResult = (id: string, child: string, value: string) =>
+    synthetic(id, `<subagent sessionID="${child}" state="completed" description="review">\n${value}\n</subagent>`);
+
+  test("the reply to a background subagent the person's turn started opens", () => {
+    expect(pickV2([
+      user("u0", "Q"),
+      assistant("a0", [text("A")]),
+      user("u1", "Review the module in the background"),
+      assistant("launch", [startBackground("ses_child1")]),
+      assistant("started", [text("A reviewer is working on it in the background.")]),
+      subagentResult("r1", "ses_child1", "Three issues."),
+      assistant("report", [text("The reviewer found three issues.")]),
+    ])).toEqual(["report", "started", "a0"]);
+  });
+
+  test("a subagent result stays behind when a wake's turn started it, or nothing here did", () => {
+    expect(pickV2([
+      user("u1", "Explain the fix"),
+      assistant("explanation", [text("Here is the fix")]),
+      synthetic("wake", "Background task finished"),
+      assistant("launch", [startBackground("ses_child2")]),
+      assistant("ack", [text("Started a follow-up.")]),
+      subagentResult("r2", "ses_child2", "Done."),
+      assistant("followup", [text("Follow-up done.")]),
+      subagentResult("r3", "ses_unknown", "Done."),
+      assistant("other", [text("Other result noted.")]),
+    ])).toEqual(["explanation", "other", "followup", "ack"]);
+  });
+
   test("a final step that used only a provider-hosted tool ends the turn, so a later wake is its own", () => {
     expect(pickV2([
       user("u1", "Search the web for X"),

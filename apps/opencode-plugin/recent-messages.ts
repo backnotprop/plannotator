@@ -22,6 +22,10 @@
  * only OpenCode 2's Plan-mode reminder does (matched by its text): any other
  * injected row there means the prompt got no reply. Compaction rows and their
  * summary do not change the turn; a summary opens only when nothing else can.
+ * One injected row counts as the person's: OpenCode 2's result of a background
+ * subagent that one of the person's turns started (its `subagent` tool call
+ * names the child session), since the reply to it is what the person asked
+ * for. A subagent a wake's turn started stays injected.
  */
 
 import { readMessageAgent } from "./message-agent";
@@ -40,6 +44,7 @@ export interface RecentAssistantMessage {
 
 type HostPart = {
   type?: unknown;
+  name?: unknown;
   text?: unknown;
   synthetic?: unknown;
   provider?: { executed?: unknown };
@@ -72,6 +77,16 @@ function callsHostTool(parts: HostPart[]): boolean {
     && part.metadata?.providerExecuted !== true);
 }
 
+/** OpenCode 2's background subagent result: `<subagent sessionID="…" …>` (`SubagentCompletion.deliver`). */
+function subagentResultChild(parts: HostPart[]): string | undefined {
+  for (const part of parts) {
+    if (typeof part?.text !== "string") continue;
+    const match = /^<subagent sessionID="([^"]+)"/.exec(part.text.trimStart());
+    if (match) return match[1];
+  }
+  return undefined;
+}
+
 function isPlanReminder(parts: HostPart[]): boolean {
   return parts.some((part) => typeof part?.text === "string" && isOpenCode2PlanReminder(part.text));
 }
@@ -88,6 +103,8 @@ export function pickRecentAssistantMessages(
 
   const replies: Array<{ message: RecentAssistantMessage; injected: boolean }> = [];
   const personPrompts = new Set<string>();
+  // The `subagent` tool calls of the person's turns, which name each child session.
+  const personSubagentCalls: string[] = [];
   let turnRunning = false;
   let turnInjected = false;
   // Something ran since the turn's prompt (a step, a compaction).
@@ -103,7 +120,11 @@ export function pickRecentAssistantMessages(
       continue;
     }
     if (info?.role === "user" || info?.role === "synthetic") {
-      const injected = isInjectedPrompt(info.role, parts);
+      // A background subagent the person's turn started reports back as an
+      // injected row; the reply to its result answers the person.
+      const child = info.role === "synthetic" ? subagentResultChild(parts) : undefined;
+      const injected = isInjectedPrompt(info.role, parts)
+        && !(child && personSubagentCalls.some((call) => call.includes(child)));
       if (!injected && typeof info.id === "string") personPrompts.add(info.id);
       const staysInTurn = injected && turnRunning && !turnInjected
         && (turnStarted || isPlanReminder(parts));
@@ -120,6 +141,15 @@ export function pickRecentAssistantMessages(
     if (!summary && (info.error !== undefined || (!callsHostTool(parts) && info.finish !== "length"))) {
       turnRunning = false;
     }
+    const parentIsPerson = typeof info.parentID === "string" && personPrompts.has(info.parentID);
+    const injected = summary || (!parentIsPerson && turnInjected);
+    if (!injected) {
+      for (const part of parts) {
+        if (part?.type === "tool" && part.name === "subagent") {
+          personSubagentCalls.push(JSON.stringify(part));
+        }
+      }
+    }
 
     const textParts = parts
       .filter((part) => part?.type === "text" && typeof part.text === "string" && part.text.trim())
@@ -127,7 +157,6 @@ export function pickRecentAssistantMessages(
     if (textParts.length === 0) continue;
     const agent = readMessageAgent(info);
     const created = typeof info.time?.created === "number" ? info.time.created : undefined;
-    const parentIsPerson = typeof info.parentID === "string" && personPrompts.has(info.parentID);
     replies.push({
       message: {
         messageId: typeof info.id === "string" ? info.id : `opencode-${i}`,
@@ -135,7 +164,7 @@ export function pickRecentAssistantMessages(
         timestamp: created ? new Date(created).toISOString() : undefined,
         ...(agent && { agent }),
       },
-      injected: summary || (!parentIsPerson && turnInjected),
+      injected,
     });
   }
 
