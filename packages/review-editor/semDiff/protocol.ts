@@ -24,6 +24,7 @@ export const SEM_DIFF_GRAMMARS = {
   csharp: 'tree-sitter-c_sharp.wasm',
   php: 'tree-sitter-php.wasm',
   ruby: 'tree-sitter-ruby.wasm',
+  kotlin: 'tree-sitter-kotlin.wasm',
   swift: 'tree-sitter-swift.wasm',
 } as const;
 

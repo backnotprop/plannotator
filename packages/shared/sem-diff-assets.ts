@@ -19,6 +19,7 @@ export const SEM_DIFF_GRAMMAR_FILES = [
   "tree-sitter-c_sharp.wasm",
   "tree-sitter-php.wasm",
   "tree-sitter-ruby.wasm",
+  "tree-sitter-kotlin.wasm",
   "tree-sitter-swift.wasm",
 ] as const;
 

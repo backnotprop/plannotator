@@ -47,6 +47,8 @@ export interface LanguageConfig {
   attachedTypes: ReadonlySet<string>;
   harmlessMissing?: ReadonlySet<string>;
   contextAt?(root: Node, line: number): string;
+  positionAt?(root: Node, line: number): string;
+  contextRuns?: boolean;
   holdBack?: ReadonlySet<string>;
   typeOf?(container: Declaration): string | null;
   moveEditedFirst?: boolean;
@@ -61,7 +63,13 @@ export function brokenTree(n: Node, cfg: LanguageConfig): boolean {
     const x = stack.pop()!;
     if (x.isError || (x.isMissing && !cfg.harmlessMissing.has(x.type))) return true;
     if (!x.hasError) continue;
-    for (const c of x.children) if (c) stack.push(c);
+    const children = x.children.filter((c): c is Node => !!c);
+    if (!children.some((c) => c.hasError || c.isMissing)) {
+      const missing = [...x.toString().matchAll(/\(MISSING ("(?:[^"\\]|\\.)*"|[\w]+)\)/g)].map((m) => m[1]!);
+      if (/\((ERROR|UNEXPECTED)\b/.test(x.toString()) || missing.some((m) => !cfg.harmlessMissing!.has(m))) return true;
+      continue;
+    }
+    stack.push(...children);
   }
   return false;
 }
@@ -485,6 +493,141 @@ const php: LanguageConfig = {
   },
 };
 
+const KT_TYPES = new Set(['user_type', 'nullable_type', 'function_type', 'parenthesized_type', 'not_nullable_type', 'dynamic']);
+const KT_CONTAINERS: Record<string, string> = { class_declaration: 'class', object_declaration: 'object', companion_object: 'companion' };
+const KT_ORDERED = ['class_parameter', 'parameter', 'enum_entry'];
+const ktCompact = (s: string) => s.replace(/\s+/g, '');
+export const kotlinReceiver = (n: Node): Node | null => {
+  const name = n.type === 'property_declaration' ? n.namedChildren.find((c) => c?.type === 'variable_declaration' || c?.type === 'multi_variable_declaration') : n.childForFieldName('name');
+  let found: Node | null = null;
+  for (const c of n.namedChildren) {
+    if (!c || (name && c.startIndex >= name.startIndex)) break;
+    if (KT_TYPES.has(c.type)) found = c;
+  }
+  return found;
+};
+const ktParameterTypes = (n: Node) => {
+  const list = n.namedChildren.find((c) => c?.type === 'function_value_parameters');
+  if (!list) return '';
+  const out: string[] = [];
+  let vararg = false;
+  for (const c of list.namedChildren) {
+    if (c?.type === 'parameter_modifiers') vararg ||= /\bvararg\b/.test(c.text);
+    else if (c?.type === 'parameter') {
+      const type = c.namedChildren.find((t) => !!t && KT_TYPES.has(t.type));
+      out.push((vararg ? 'vararg ' : '') + ktCompact(type?.text ?? '?'));
+      vararg = false;
+    }
+  }
+  return out.join(',');
+};
+const ktMembers = (n: Node) => n.namedChildren.find((c) => c?.type === 'class_body' || c?.type === 'enum_class_body') ?? undefined;
+const ktClassKind = (n: Node) => {
+  if (n.children.some((c) => c?.type === 'interface')) return 'interface';
+  const mods = n.namedChildren.find((c) => c?.type === 'modifiers');
+  return mods?.namedChildren.some((m) => m?.type === 'class_modifier' && m.text === 'enum') ? 'enum class' : 'class';
+};
+const ktImportKey = (n: Node) => {
+  const path = n.namedChildren.find((c) => c?.type === 'qualified_identifier')?.text ?? '';
+  const alias = n.namedChildren.find((c) => c?.type === 'identifier')?.text;
+  const star = n.children.some((c) => c?.type === '*') ? '.*' : '';
+  return `${path}${star}${alias ? `:${alias}` : ''}`;
+};
+type KtContext = { start: number; end: number; label: string; ordered: boolean };
+const ktContexts = new WeakMap<object, KtContext[]>();
+const kotlinContexts = (root: Node): KtContext[] => {
+  const cached = ktContexts.get(root.tree);
+  if (cached) return cached;
+  const out: KtContext[] = [];
+  for (const n of root.descendantsOfType([...Object.keys(KT_CONTAINERS), ...KT_ORDERED])) {
+    if (!n) continue;
+    let label = KT_CONTAINERS[n.type];
+    if (!label) {
+      const siblings = n.parent?.namedChildren.filter((c) => c?.type === n.type) ?? [];
+      label = `${n.type}:${siblings.findIndex((c) => c?.id === n.id)}`;
+    }
+    out.push({ start: n.startPosition.row + 1, end: n.endPosition.row + 1, label, ordered: !KT_CONTAINERS[n.type] });
+  }
+  ktContexts.set(root.tree, out);
+  return out;
+};
+
+const kotlin: LanguageConfig = {
+  id: 'kotlin',
+  wasm: '@tree-sitter-grammars/tree-sitter-kotlin/tree-sitter-kotlin.wasm',
+  functionTypes: new Set(['function_declaration']),
+  callTypes: new Set(['call_expression']),
+  blockTypes: new Set(['block']),
+  isReturn: (s, last) => s.type === 'return_expression' || (!!last && s.type === 'function_body'),
+  attachedTypes: new Set(['line_comment', 'block_comment']),
+  nameOf: (fn) => fn.childForFieldName('name')?.text ?? null,
+  bodyOf: (fn) => {
+    const body = fn.namedChildren.find((c) => c?.type === 'function_body');
+    if (!body) return null;
+    return body.namedChildren.find((c) => c?.type === 'block') ?? body;
+  },
+  statementsOf: (block) => (block.type === 'function_body' ? [block] : block.namedChildren.filter((n): n is Node => n !== null && !isComment(n))),
+  calleeOf: (call) => {
+    const f = call.namedChild(0);
+    if (f?.type === 'identifier') return f.text;
+    if (f?.type === 'navigation_expression') {
+      const last = f.namedChildren.at(-1);
+      return last?.type === 'identifier' ? last.text : null;
+    }
+    return null;
+  },
+  returnValueOf: (ret) => {
+    const label = ret.childForFieldName('label');
+    return ret.namedChildren.find((n) => n !== null && !isComment(n) && n.id !== label?.id) ?? null;
+  },
+  identifierTypes: new Set(['identifier']),
+  harmlessMissing: new Set(['_class_member_semi']),
+  contextRuns: true,
+  holdBack: new Set(['movedWithEdit']),
+  declarationsIn: (container) => {
+    const out: Declaration[] = [];
+    for (const child of container.namedChildren) {
+      if (!child || isComment(child)) continue;
+      const receiver = kotlinReceiver(child);
+      const on = receiver ? `${ktCompact(receiver.text)}.` : '';
+      if (child.type === 'import') out.push(importDeclaration(child, ktImportKey(child)));
+      else if (child.type === 'function_declaration') {
+        const name = child.childForFieldName('name')?.text;
+        if (name) out.push({ node: child, kind: `function(${ktParameterTypes(child)})`, name: on + name });
+      } else if (child.type === 'secondary_constructor') out.push({ node: child, kind: `constructor(${ktParameterTypes(child)})`, name: 'constructor' });
+      else if (child.type === 'anonymous_initializer') out.push({ node: child, kind: 'init', name: 'init' });
+      else if (child.type === 'property_declaration') {
+        const v = child.namedChildren.find((c) => c?.type === 'variable_declaration' || c?.type === 'multi_variable_declaration');
+        const names = v?.type === 'variable_declaration' ? v.namedChild(0)?.text : v && `(${v.namedChildren.map((d) => d?.namedChild(0)?.text ?? '').join(',')})`;
+        if (names) out.push({ node: child, kind: 'property', name: on + names });
+      } else if (child.type === 'class_declaration' || child.type === 'object_declaration') {
+        const name = child.childForFieldName('name')?.text;
+        if (name) out.push({ node: child, kind: child.type === 'object_declaration' ? 'object' : ktClassKind(child), name, members: ktMembers(child) });
+      } else if (child.type === 'companion_object') {
+        const name = child.childForFieldName('name')?.text;
+        out.push({ node: child, kind: 'companion', name: name ? `companion ${name}` : 'companion', members: ktMembers(child) });
+      } else if (child.type === 'type_alias') {
+        const name = child.childForFieldName('type')?.text;
+        if (name) out.push({ node: child, kind: 'type_alias', name });
+      } else if (child.type === 'enum_entry') {
+        const name = child.namedChild(0)?.text;
+        if (name) out.push({ node: child, kind: 'enum_entry', name });
+      }
+    }
+    return out;
+  },
+  contextAt: (root, line) =>
+    kotlinContexts(root)
+      .filter((c) => !c.ordered && c.start <= line && line <= c.end)
+      .map((c) => c.label)
+      .join('/'),
+  positionAt: (root, line) =>
+    kotlinContexts(root)
+      .filter((c) => c.start <= line && line <= c.end)
+      .map((c) => c.label)
+      .join('/'),
+};
+
 const RUBY_BLOCKS = new Set(['body_statement', 'block_body', 'then', 'else', 'do', 'begin', 'ensure']);
 const RUBY_CLAUSES = new Set(['rescue', 'else', 'ensure']);
 const RUBY_NOT_TAIL = new Set([
@@ -797,6 +940,7 @@ const swift: LanguageConfig = {
     return out;
   },
   moveEditedFirst: true,
+  contextRuns: true,
   marksOf: (decl) => decl.namedChildren.find((c) => c?.type === 'modifiers')?.namedChildren.filter((c) => c?.type === 'attribute').map((c) => c!.text.replace(/\s+/g, '')).join(' ') ?? '',
   typeOf: (d) => {
     if (d.node.type !== 'class_declaration') return null;
@@ -888,6 +1032,7 @@ export const LANGUAGES: Record<LanguageId, LanguageConfig> = {
   csharp,
   php,
   ruby,
+  kotlin,
   swift,
 };
 

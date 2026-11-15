@@ -2,7 +2,7 @@
 // finding functions, statements and calls with a language config.
 import { rule } from './runtime.ts';
 import type { Node } from 'web-tree-sitter';
-import { isComment, type Declaration, type LanguageConfig } from './parse.ts';
+import { isComment, kotlinReceiver, type Declaration, type LanguageConfig } from './parse.ts';
 import type { SemanticDiffTextPosition, SemanticDiffTextRange } from './pierre-types.ts';
 
 export const pos = (p: { row: number; column: number }): SemanticDiffTextPosition => ({
@@ -171,8 +171,9 @@ export function nodesWithTokens(n: Node, want: string[]): Node[] {
 function argumentCount(call: Node): number {
   const suffix = call.namedChildren.find((c) => c?.type === 'call_suffix');
   if (suffix) return (suffix.namedChildren.find((c) => c?.type === 'value_arguments')?.namedChildren.filter((c) => c?.type === 'value_argument').length ?? 0) + suffix.namedChildren.filter((c) => c?.type === 'lambda_literal' || c?.type === 'annotated_lambda').length;
-  const args = call.childForFieldName('arguments');
-  return args ? args.namedChildren.filter((c) => c !== null && !isComment(c)).length : 0;
+  const args = call.childForFieldName('arguments') ?? call.namedChildren.find((c) => c?.type === 'value_arguments');
+  const lambda = call.namedChildren.some((c) => c?.type === 'annotated_lambda') ? 1 : 0;
+  return (args ? args.namedChildren.filter((c) => c !== null && !isComment(c)).length : 0) + lambda;
 }
 
 /**
@@ -196,10 +197,11 @@ function maxArguments(fn: Node): number {
   // Arrow functions and function expressions keep their parameters in the value; `x => ...` has one.
   const value = fn.childForFieldName('value');
   if (value?.childForFieldName('parameter')) return 1;
-  const params = fn.childForFieldName('parameters') ?? value?.childForFieldName('parameters');
+  const params = fn.childForFieldName('parameters') ?? value?.childForFieldName('parameters') ?? fn.namedChildren.find((c) => c?.type === 'function_value_parameters');
   const swiftParams = params ? [] : fn.namedChildren.filter((c) => c?.type === 'parameter');
   if (swiftParams.length || (!params && fn.type === 'function_declaration' && fn.childForFieldName('body')?.type === 'function_body')) return swiftParams.some((p) => p?.children.some((c) => c?.type === '...')) ? Infinity : swiftParams.length;
   if (!params) return Infinity;
+  if (params.type === 'function_value_parameters') return /\bvararg\b/.test(params.text) ? Infinity : params.namedChildren.filter((c) => c?.type === 'parameter').length;
   let n = 0;
   for (const p of params.namedChildren) {
     if (!p || isComment(p)) continue;
@@ -318,6 +320,7 @@ export function pairSameNamed<T>(olds: T[], news: T[], base: (t: T) => string, t
 export function isMethod(fn: Node): boolean {
   if (fn.childForFieldName('receiver')) return true;
   if (fn.type === 'method' || fn.type === 'singleton_method') return true;
+  if (fn.type === 'function_declaration' && kotlinReceiver(fn)) return true;
   for (let p = fn.parent; p; p = p.parent) {
     if (/class|interface|impl_item|trait_item|object|struct_declaration|record_declaration|enum_declaration/.test(p.type)) return true;
     if (/function|method/.test(p.type) && p !== fn) return false;
@@ -346,9 +349,8 @@ function thisCall(call: Node): boolean {
 function memberCall(call: Node): boolean {
   if (call.childForFieldName('object')) return true; // Java
   if (call.childForFieldName('receiver')) return true;
-  if (call.namedChild(0)?.type === 'navigation_expression') return true;
-  const f = call.childForFieldName('function');
-  return !!f && /member_expression|selector_expression|field_expression|attribute|member_access_expression/.test(f.type);
+  const f = call.childForFieldName('function') ?? (call.type === 'call_expression' ? call.namedChild(0) : null);
+  return !!f && /member_expression|selector_expression|field_expression|attribute|member_access_expression|navigation_expression/.test(f.type);
 }
 
 /** Text of the comments and attributes directly above a declaration (they belong to it). */
