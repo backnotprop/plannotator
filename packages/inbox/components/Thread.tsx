@@ -47,7 +47,7 @@ import { agentName, formatCount, fullTime, plural, shortAgentName, whenTime } fr
 import { inboxRowSnoozed, inboxSnoozeWhen } from '@plannotator/core/inbox-snooze';
 import { foldSnippet, holdingsOf, isDelivered, isPersonLook, isPersonReply, lastNonNote, lookBoundary, newSinceLook, planFolds, snippetText } from '../folding';
 import { highlightSearchHits } from '../search/highlight';
-import { AuthorMark, Icon } from '../icons';
+import { AuthorMark, HostMark, Icon } from '../icons';
 import { createCountStore, NewPill } from '../parts/NewPill';
 import { HoldingChips, SnippetText } from '../parts/FoldLine';
 import { atEnd, followBy, lookThrough, measureFirstLines, unseenArrivals, useSeenOnSight } from '../seenOnSight';
@@ -67,7 +67,7 @@ import { reportUnsentReply } from '../unsent';
 import { registerReloadFlush } from '../stalePage';
 import { clearLateVoiceMiss, LATE_VOICE_MISSED, noteLateVoiceMiss, useLateVoiceMiss } from '../lateVoice';
 import { replyBoxSetAside } from '../floaters/model';
-import { landInReplyDraft, landWordsInReplyDraft, replySendStarts, useReplyDraft, type ReplyBoxTook, type ReplyDraftFiles } from '../replyDraft';
+import { landInReplyDraft, landWordsInReplyDraft, takeHeldVoiceWords, replySendStarts, useReplyDraft, type ReplyBoxTook, type ReplyDraftFiles } from '../replyDraft';
 import { createTypedSaves, isTypedChange } from '../typedAnswers';
 import { conflictRevision, onPickConflict } from '../pickConflict';
 import { useReplyHasWords, useReplyTextStore, useReplyTextWhile } from '../replyText';
@@ -128,7 +128,7 @@ import { sendFailure } from '../sendFailure';
 import { ReplyRecipient } from './ReplyRecipient';
 import { PhoneReplyRecipient } from './PhoneReplyRecipient';
 import { aimable, canTakeAlone, headFolder, knownRecipients, latestBy, RECIPIENTS_MAX, recipientRows, recipientState, sessionFolder, toggleRecipient, type RecipientPerson, type RecipientRow } from '../replyRecipients';
-import { useVoiceSession } from '../voice';
+import { coverVoice, useThreadVoice } from '../thread/useThreadVoice';
 import { spaced } from '../voiceField';
 import type { VoiceLate } from '../voiceSession';
 import type { FullScreenComposerValue } from './FullScreenComposer';
@@ -154,7 +154,6 @@ import {
 } from '../tags';
 import type { MentionSource } from '@plannotator/ui/utils/mentions';
 import { TAG_TOKEN_CLASS } from './ComposerField';
-import { HostMark } from '../icons';
 import { INBOX_REPLY_SKILL_AUDIENCE, annotationSkillTexts, inboxSkillFilter, inboxSkillsBlock, withSkillsBlock } from '../skills';
 import { fetchSkillCatalog, getCachedSkillCatalog } from '@plannotator/ui/utils/skillCatalog';
 import { type ActionMark } from './ActionChecklist';
@@ -517,7 +516,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const [errorDetails, setErrorDetails] = useState<{ for: string; text: string } | null>(null);
   /** The error line names a machine that needs an update (a Delete it refused): its Update follows the words. */
   const [errorUpdate, setErrorUpdate] = useState<{ for: string; machine: string } | null>(null);
-  const voice = useVoiceSession();
+  const voice = useThreadVoice(thread.thread_id, (outcome, takenIn) => onLateVoice(outcome, takenIn));
   /** Words a take left in full screen's card brought back, waiting for the box (`changeReply` waits for a Send). */
   const lateVoice = useRef<string[]>([]);
   const [lateVoiceTick, setLateVoiceTick] = useState(0);
@@ -1680,9 +1679,9 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   screenRef.current = onScreenChange;
   const paneCovered = covered || fileCovers || artifactsOn;
   showingRef.current = !paneCovered;
-  // The status and Cancel go under the cover with the box, and this pane stays mounted: the mic must not go on unseen.
+  // The status and Cancel go under the cover with the box (the pane stays mounted): no mic goes on unseen, and what was said still lands.
   useEffect(() => {
-    if (paneCovered) voice.session.covered();
+    if (paneCovered) coverVoice(voice.session);
   }, [paneCovered, voice.session]);
   useEffect(() => {
     screenRef.current?.({ threadId: thread.thread_id, covered: paneCovered });
@@ -2894,23 +2893,23 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     replyDraft.save(text, files);
   };
 
-  /** A take that outlived the card's field: its words go to this thread's reply. The pane gone with it, to its draft. */
-  const onLateVoice = useCallback((outcome: VoiceLate) => {
-    const threadId = threadRef.current.thread_id;
+  /** A take that outlived its field (full screen's card, or the closed box): its words go to the reply of the thread it was taken in, else to that draft. */
+  const onLateVoice = useCallback((outcome: VoiceLate, takenIn?: string) => {
+    const threadId = takenIn ?? threadRef.current.thread_id;
     if ('failed' in outcome) {
       noteLateVoiceMiss(threadId, outcome.retry && (() => {
         clearLateVoiceMiss(threadId);
         outcome.retry?.();
       }));
-    } else if (paneMounted.current) {
+    } else if (paneMounted.current && threadId === threadRef.current.thread_id) {
       lateVoice.current.push(outcome.text);
       setLateVoiceTick((tick) => tick + 1);
     } else void landWordsInReplyDraft(threadId, outcome.text);
   }, []);
   useEffect(() => {
     // While a Send is on its way the box takes no words: these wait for it to end.
-    if (lateVoice.current.length === 0 || sending) return;
-    const waiting = lateVoice.current;
+    const waiting = boxRef.current.open && !sending ? [...lateVoice.current, ...takeHeldVoiceWords(thread.thread_id)] : lateVoice.current;
+    if (waiting.length === 0 || sending) return;
     lateVoice.current = [];
     if (!boxRef.current.open) {
       // What this pane knows of the draft can be behind a save still on its way (Cancel's): the Inbox's copy decides.
@@ -2929,7 +2928,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     changeReply(text, true);
     // changeReply reads this render's Send state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lateVoiceTick, sending]);
+  }, [lateVoiceTick, sending, box.open]);
   useEffect(() => {
     paneMounted.current = true;
     return () => {
@@ -3741,7 +3740,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const { sendNowState, sendNow, sendNowError, tagSendNow, sendTagNow } = useSendNow(last.id, onChanged, loadPendingLive, loadTagConnections);
   const { takeBack, takeBackOf } = useThreadTakeBack({
     threadId: thread.thread_id,
-    only: thread.messages.length === 1,
+    messages: thread.messages,
     allowed: !sending && (!machine || (machine.marks ?? []).includes('take-back')),
     lastBlocked: (message) => message === last && (delivered?.state === 'delivered' || delivered?.state === 'undelivered' || handedItem(recipientConnection, last.id)),
     nameOf: (message) => (message.to ? toName(message, message.to) : recipientName(askedBy(message))),
@@ -4128,6 +4127,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     // An empty box with nothing saved has nothing to discard: it only closes, and says nothing that is not so.
     const had = replyText.get().trim() !== '' || replyFiles.files.length > 0 || replyDraft.draft !== null;
     replyDraft.discard();
+    voice.session.covered();
     forgetQuote();
     closeBox(true);
     if (had) announce('Draft discarded.');

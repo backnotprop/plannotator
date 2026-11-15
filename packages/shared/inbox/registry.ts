@@ -73,6 +73,12 @@ export interface InboxRegistryEntry {
    * pointed at the loopback listener on the same port number; recorded before it is made, taken down like the window's.
    */
   tailscale?: { url: string | null; error: string | null; https_port?: number; proxy_port?: number; relay_port?: number };
+  cloudflare_access?: {
+    url: string | null;
+    error: string | null;
+    port?: number;
+    tunnel?: { state: string; pid: number | null; connections: number; restarts: number; error: string | null };
+  };
   /**
    * The runs of this data folder before this one (additive): their `serverSession`s, newest first, at most
    * `INBOX_SESSION_LINEAGE_MAX` (`inboxSessionLineage`). A window left open across a restart proves with it that
