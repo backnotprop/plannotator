@@ -3145,9 +3145,15 @@ export type InboxToolCostHost = "pi" | "opencode" | "dsh" | "cline" | "openclaw"
  * 13,009, the field removed and kept), Board on the same +348. Tokens scaled at the entry's bytes per token (3.7),
  * +94, not counted on Pi.
  */
-const INBOX_TOOL_COST_NOW = { bytes: 13009, tokens: 3517 };
+/*
+ * The owner's lessons for agents (2026-11-15: INBOX_SHOWING_RULE, INBOX_REREAD_RULE, INBOX_ASK_RECOGNISE_RULE, the
+ * prototype, mock and thread sentences on send_message's fields; no line in the description, which stays 1,944
+ * characters): the entry as the tool builds it from the default tool list, with Pi's wrapper, 13,084 → 13,869 bytes
+ * (+785), Board on the same +785. Tokens scaled at the entry's bytes per token (3.7), +212, not counted on Pi.
+ */
+const INBOX_TOOL_COST_NOW = { bytes: 13869, tokens: 3729 };
 /** The entry with the Board on (the `card` action listed): for the switch's words, measured on Pi. */
-export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 14681, tokens: 4014 } as const;
+export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 15466, tokens: 4226 } as const;
 /**
  * What thread steps add to the entry when the person turns them on (the
  * `steps` action and send_message's `steps` field; approval

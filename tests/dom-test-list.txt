@@ -136,6 +136,7 @@ packages/inbox/fullView.test.tsx
 packages/inbox/htmlOpensInInteract.test.tsx
 packages/inbox/earlierComments.test.tsx
 packages/inbox/phoneStepping.test.tsx
+packages/inbox/touchStepping.test.tsx
 packages/inbox/htmlPageSize.test.tsx
 packages/inbox/imageSwipe.test.tsx
 packages/inbox/sharedPictureChoice.test.tsx
@@ -606,6 +607,7 @@ packages/inbox/linkedMachines.test.tsx
 packages/inbox/machineUpdate.test.tsx
 packages/inbox/voiceMirror.test.tsx
 packages/inbox/voiceComposeRenders.test.tsx
+packages/inbox/voiceKeptWords.test.tsx
 packages/inbox/voiceDebugLog.test.ts
 packages/inbox/voiceMiss.test.ts
 packages/ui/components/RenderedMarkdown.softLineBreaks.test.tsx
@@ -759,6 +761,7 @@ packages/inbox/agents/faceSources.test.tsx
 packages/ui/components/CommentPopover.phoneKeyboard.test.tsx
 packages/ui/components/Viewer.authorColor.test.tsx
 packages/review-editor/components/authorColor.review.test.tsx
+packages/inbox/threadTagsStep2.test.tsx
 packages/inbox/listPicks.test.tsx
 packages/inbox/pickWork.test.tsx
 packages/inbox/combines.test.tsx

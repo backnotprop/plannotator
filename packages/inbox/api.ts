@@ -15,6 +15,7 @@ import type { SystemDrawingAnswer, SystemProjectsAnswer, SystemPullsAnswer } fro
 import type { SystemModel } from '@plannotator/system';
 import type { ShapeDrawnView, ShapeNote, ShapeRecord, ShapeRef, ShapeVersion } from '@plannotator/core/shape';
 import type { InboxArtifactPin, InboxArtifactsPage, InboxArtifactType } from '@plannotator/core/inbox-artifact-pins';
+import type { CloudflareAccessSettings, TailscaleSettings } from './data/reach';
 import { isActionRecord, questionsOnly, splitThreadActions } from './actions';
 import { createListReader, type ListReadAnswer } from './listRead';
 import { inboxUrl, isContested, localRoute, machineOf, rememberLocal, rememberMachine, selfMachineId, setSelfMachine } from './inboxUrl';
@@ -482,20 +483,7 @@ export function whatsNewImageUrl(version: string, src: string): string {
   return inboxUrl(`/whats-new/image?version=${encodeURIComponent(version)}&src=${encodeURIComponent(src)}`);
 }
 
-/** "Over your tailnet" (packages/server/inbox-tailscale.ts): the switch, the address or why not, and who may open it. */
-export interface TailscaleSettings {
-  on: boolean;
-  /** What decides it: `flag` (this run's `--tailscale`), `env` (PLANNOTATOR_INBOX_TAILSCALE), `config` (this switch), `default`. */
-  source: 'flag' | 'env' | 'config' | 'default';
-  /** PLANNOTATOR_INBOX_TAILSCALE when set: the switch is locked. */
-  env: boolean | null;
-  url: string | null;
-  error: string | null;
-  owner: string | null;
-  allowed: string[];
-  /** Serve routes pointing at the Inbox's own port (a hand-made mapping): each exposes the whole Inbox. Absent from an older Inbox. */
-  exposed?: { https_port: number | null; target: string | null }[];
-}
+export type { CloudflareAccessSettings, TailscaleSettings };
 
 /** Split (old beside new) or Unified (one column): the diff layout code review and guided reviews share. */
 export type InboxDiffStyle = 'split' | 'unified';
@@ -527,6 +515,7 @@ export interface SettingsModel {
   serverSession: string;
   /** Absent from an Inbox that predates "Over your tailnet". */
   tailscale?: TailscaleSettings;
+  cloudflareAccess?: CloudflareAccessSettings | null;
   /** This page reached the Inbox through the tailnet (the switch cannot be turned on from there). */
   via?: 'local' | 'tailnet';
   version: string;
@@ -1263,6 +1252,7 @@ export interface SearchRequest {
   group?: InboxSearchGroupId | null;
   offset?: number;
   limit?: number;
+  tags?: readonly string[] | null;
   /** The project open in the list: a tie boost, never a filter. */
   current?: string | null;
   /** Newest first instead of best match (sent only for `newest`, so a best-match request is what it was). */
@@ -1419,9 +1409,8 @@ export function uploadFile(
 /** Search (read only). `signal` aborts a request a newer query replaced. */
 export async function searchInbox(request: SearchRequest, signal?: AbortSignal): Promise<SearchModel> {
   const query = new URLSearchParams({ q: request.q });
-  if (request.project) query.set('project', request.project);
-  if (request.status) query.set('status', request.status);
-  if (request.from) query.set('from', request.from);
+  for (const key of ['project', 'status', 'from'] as const) if (request[key]) query.set(key, request[key]!);
+  for (const tag of request.tags ?? []) query.append('tag', tag);
   if (request.group) query.set('group', request.group);
   if (request.offset) query.set('offset', String(request.offset));
   if (request.limit) query.set('limit', String(request.limit));
