@@ -5,8 +5,14 @@ import type { LinkedPageView } from '../api';
 export type PageStart = { id: string; start: string };
 
 /** A link's `?…#…` as the start an HTML page opens with ('' when it named neither). */
-export function pageStartOf(search: string | undefined, hash: string): string {
+function pageStartOf(search: string | undefined, hash: string): string {
   return `${search ?? ''}${hash ? `#${hash}` : ''}`;
+}
+
+/** The start a link gives an attached HTML page, or null when it named no query or fragment. */
+export function pageStartAt(id: string, search: string | undefined, hash: string): PageStart | null {
+  const start = pageStartOf(search, hash);
+  return start ? { id, start } : null;
 }
 
 /**

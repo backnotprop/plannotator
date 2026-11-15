@@ -12,7 +12,8 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem,
 import { useHoverPreview } from '@plannotator/ui/hooks/useHoverPreview';
 import { useOpenInApps, useRememberedOpenInApp } from '@plannotator/ui/hooks/useOpenInApps';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
-import { InboxApiError, inboxApi, type OpenInFileCode, type OpenInFileScope } from '../api';
+import { InboxApiError, inboxApi } from '../api';
+import type { OpenInFileCode, OpenInFileScope } from '../openInWire';
 import { Icon } from '../icons';
 import { newTabUrl, openInMenu, openInMenuFor, remembersOpenInItem, type OpenInItem, type OpenInMenu } from '../openIn';
 import { attachmentDownloadUrl, readableVersion } from '../attachments';

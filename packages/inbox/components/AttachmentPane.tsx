@@ -46,10 +46,11 @@ import {
   codeRangeMatches,
   codeRangeOf,
   compareVideoTimes,
-  relocateCodeRange,
   inboxViewKind,
+  relocateCodeRange,
 } from '../attachments';
 import { whenTime, formatBytes } from '../format';
+export { relocateCodeRange };
 import { useRefRepo } from '../links';
 import { inboxMarkdownImageBase } from '../images';
 import { useCommentPictures } from '../commentPictures';
@@ -101,8 +102,7 @@ import { tapNearSizeIcon, useSizeIconFade } from '../sizeIconFade';
 import { useFileQuestionViewerProps, type FileQuestions } from '../fileQuestions';
 import { whenStill } from '../whenStill';
 import { unsavedComposer, unsavedComposers } from './unsavedComposers';
-export { relocateCodeRange } from '../attachments';
-import { linkedValue, pageStartOf, splitLinked, usePageClear, usePageStart, type LinkedPage, type PageStart } from './htmlPageFrame';
+import { linkedValue, pageStartAt, splitLinked, usePageClear, usePageStart, type LinkedPage, type PageStart } from './htmlPageFrame';
 export { unsavedComposer, unsavedComposers };
 
 /**
@@ -274,10 +274,7 @@ export interface AttachmentPaneProps {
    * frame it is in now. Absent: `onStep`.
    */
   onOpenLinked?: (attachmentId: string) => void;
-  /**
-   * The query and fragment an HTML page opens with, when a link named them (`[the mock](mock.html?variant=2)` in a
-   * message): `start` is `?…`, `#…` or both. Only for the attachment `id`; a new object applies again.
-   */
+  /** The `?…#…` an HTML page opens with, from a message's link (`mock.html?variant=2`): attachment `id` only; a new object applies again. */
   pageStart?: PageStart | null;
   /**
    * How a link to this Inbox opens in this window, or null when it does not (App.tsx's `inboxLink`). Absent (the
@@ -1333,10 +1330,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     props.onLinked?.(before ? linkedValue(before.relative, before.hash) : null, { back: true });
     requestAnimationFrame(() => sectionRef.current?.focus({ preventScroll: true }));
   };
-  /**
-   * A link the page's bridge handed over (a plain click, armed or not; ⌘/Ctrl-click while armed pins it instead). `baseDir`:
-   * the folder of the page it is in; `page`: that page's path and its frame, for a link to the page itself (a query).
-   */
+  /** A link the page's bridge handed over (a plain click, armed or not; ⌘/Ctrl-click while armed pins it instead). `baseDir`: the folder of the page it is in; `page`: its path and frame, for a link to itself (a query). */
   const followLink = (href: string, baseDir: string, page?: { path: string; frame?: HtmlViewerFrame }) => {
     // Ahead of the page's own rules, which read the window's own origin as the page's folder, not as 'external'. Only
     // a full address: `/#thread=…` and `./#thread=…` are the page's folder, as those rules say. And only after a
@@ -1363,8 +1357,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     switch (link.kind) {
       case 'ignored':
         return;
-      case 'self':
-        // The page again with that query, in its own frame (as a tab loads `?variant=2`).
+      case 'self': // The page again with that query, in its own frame (as a tab loads `?variant=2`).
         page?.frame?.reload(link.search, link.hash);
         return;
       case 'external':
@@ -1386,8 +1379,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
         }
         leave(link.name, () => {
           if (link.hash) setLinkFragment({ id: link.id, hash: link.hash });
-          const start = linkables.find((a) => a.id === link.id)?.kind === 'html' ? pageStartOf(link.search, link.hash) : '';
-          setPageStart(start ? { id: link.id, start } : null);
+          setPageStart(linkables.find((a) => a.id === link.id)?.kind === 'html' ? pageStartAt(link.id, link.search, link.hash) : null);
           pendingStep.current = 'key';
           if (props.onOpenLinked) props.onOpenLinked(link.id);
           else props.onStep?.(link.id, 'current');
@@ -2631,7 +2623,6 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
               stepInInteract
               // A link the page's bridge handed over: another file of the thread, a page or image beside it, another site (htmlLinks.ts).
               onOpenLink={(href, frame) => followLinkRef.current(href, pageFolder, { path: attachment.path, frame })}
-              // Forms and in-page links work as in a tab (a GET form loads the page again with its fields; `#` sets the hash).
               pageNavigation
               frameStart={pageStart?.id === attachment.id ? pageStart.start : undefined}
               initialFragment={linkFragment?.id === attachment.id ? linkFragment.hash : undefined}
@@ -2830,6 +2821,9 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
               <CodeFileView
                 key={`${attachment.id}:${view.version}:${view.attachment.current?.sha256 ?? ''}`}
                 filepath={attachment.name}
+                lineScroll="vertical"
+                commentCard="plain"
+                commentMarkers="bubble"
                 contents={view.text}
                 annotations={codeAnnotations}
                 selectedAnnotationId={selectedId}
