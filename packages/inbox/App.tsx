@@ -185,6 +185,7 @@ import { priorityWrites } from './priorityWrites';
 import { snoozeWrites } from './snoozeWrites';
 import { agentWrites, type AgentDeleteAsk } from './agentWrites';
 import { joinThreadRead, useStaleOpenRead, type ThreadFlight } from './threadFlights';
+import { sameSettings, settingsReadAtLoad, takeSettingsAtLoad } from './settingsAtLoad';
 import { openTakenBack } from './takenBackCompose';
 import { restartInbox } from './restartInbox';
 import { errorToast } from './toastError';
@@ -1388,13 +1389,12 @@ function Inbox() {
   }, [noteLineAgain]);
 
   const refreshSettings = useCallback(async () => {
-    // The agent icons' faces ride with every settings read: on load, and after the stream was away.
     void readAgentFaces();
     try {
       const mark = listLookReadMark();
       const reactionsMark = reactionsReadMark();
       const sidebarMark = sidebarLayoutReadMark();
-      const next = await inboxApi.settings();
+      const next = await (takeSettingsAtLoad() ?? inboxApi.settings());
       adoptSavedTheme(next.theme);
       adoptSavedTextSize(next.text_size);
       adoptSavedFavicon(next.favicon);
@@ -1407,7 +1407,7 @@ function Inbox() {
       if (next.display_name && next.code_review?.on) configStore.init({ displayName: next.display_name });
       adoptVoiceSettings(next.voice);
       noteLineAgain(next.reveal);
-      setSettings(next);
+      setSettings((current) => (current && sameSettings(current, next) ? current : next));
       setSettingsReadFailed(false);
     } catch (cause) {
       setSettingsError(cause instanceof Error ? cause.message : String(cause));
@@ -1861,14 +1861,14 @@ function Inbox() {
     };
     // Listen to the tabs' shared stream before the first read, so nothing passed on between the read and the subscription is lost (sharedEvents.ts).
     prepareInboxEvents();
-    let settingsAsked = false;
+    let settingsAsked = settingsReadAtLoad();
+    if (settingsAsked) void refreshSettings();
     let firstListTimer: ReturnType<typeof setTimeout> | null = null;
     void (async () => {
       // A first read that fails is read again until it lands (firstListRead.ts): the page listens only from then on.
       const first = await readFirstList({
         read: async () => {
           const next = await refreshList(true);
-          // As before, right after the first try, landed or not.
           if (!settingsAsked) void refreshSettings();
           settingsAsked = true;
           return next;
