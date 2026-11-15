@@ -47,10 +47,12 @@ export * from "./inbox-cards";
 export * from "./inbox-steps";
 // The Board's initiatives (approval "board-initiatives"), the same way.
 export * from "./inbox-initiatives";
+export * from "./inbox-tag-colours";
 // The surface bridge's messages (the phone, PLAN step S1), the same way.
 export * from "./inbox-surface-bridge";
 // Tidy (the list header's and the Board's ⋮ menu), the same way.
 export * from "./inbox-tidy";
+export * from "./inbox-combine";
 // Pull requests (code review in the Inbox, phase 2), the same way.
 export * from "./inbox-pulls";
 export * from "./inbox-pull-risk";
@@ -71,7 +73,7 @@ export { ulid } from "./ulid";
 import { ulid } from "./ulid";
 
 /** `upl`: a file the person uploaded for a message; `drf`: a draft of one (compose); `crd`: a Board card; `stp`: a session's steps in a thread; `ini`: a Board initiative; `lch`: a launch (an agent started from the Inbox). */
-export type InboxIdPrefix = "msg" | "prj" | "ses" | "dec" | "dev" | "upl" | "drf" | "crd" | "tdy" | "lch" | "ibx" | "stp" | "ini";
+export type InboxIdPrefix = "msg" | "prj" | "ses" | "dec" | "dev" | "upl" | "drf" | "crd" | "tdy" | "lch" | "ibx" | "stp" | "ini" | "cmb";
 
 export function inboxId(prefix: InboxIdPrefix, now?: number): string {
   return `${prefix}_${ulid(now)}`;
@@ -96,6 +98,8 @@ const ID_RE: Record<InboxIdPrefix, RegExp> = {
   ibx: /^ibx_[0-9A-HJKMNP-TV-Z]{26}$/,
   /** One agent session's steps in one thread (packages/core/inbox-steps.ts). */
   stp: /^stp_[0-9A-HJKMNP-TV-Z]{26}$/,
+  /** One Combine of picked threads (packages/server/inbox-combine.ts). */
+  cmb: /^cmb_[0-9A-HJKMNP-TV-Z]{26}$/,
   /** A Board initiative (packages/core/inbox-initiatives.ts). */
   ini: /^ini_[0-9A-HJKMNP-TV-Z]{26}$/,
 };
@@ -1901,6 +1905,11 @@ export interface InboxListRow extends InboxThreadSummary {
    */
   run?: "starting" | "working" | "cloning" | null;
   /**
+   * The window's own drawing (approval "inbox-multi-select"): the thread is in a Combine still waiting for its new
+   * thread, so the row says "Combining…". No server sends it.
+   */
+  combining?: true;
+  /**
    * When the person marked the thread read (Mark read), while it still holds:
    * no message but a set-aside note since. The row is Quiet. Null otherwise.
    * Absent from an older Inbox.
@@ -1980,9 +1989,10 @@ export const INBOX_ROW_WAIT_ENTRY_MAX = 120;
 
 /**
  * A group the list draws: a section, the Priority group above them all (`INBOX_PRIORITY_GROUP`), or the Snoozed band
- * under Quiet (`INBOX_SNOOZED_BAND`). The server places no row in either: the window draws them from the row.
+ * under Quiet (`INBOX_SNOOZED_BAND`). The server places no row in either: the window draws them from the row. The
+ * window's Archived group under them all (approval "inbox-archived-group") reads its own rows, never the list's.
  */
-export type InboxListGroupId = InboxSectionId | "snoozed" | "priority";
+export type InboxListGroupId = InboxSectionId | "snoozed" | "priority" | "archived";
 
 /** Why a row is in Priority (`InboxListRow.priority`). */
 export interface InboxRowPriority {
@@ -3131,9 +3141,15 @@ export type InboxToolCostHost = "pi" | "opencode" | "dsh" | "cline" | "openclaw"
  * 13,009, the field removed and kept), Board on the same +348. Tokens scaled at the entry's bytes per token (3.7),
  * +94, not counted on Pi.
  */
-const INBOX_TOOL_COST_NOW = { bytes: 13009, tokens: 3517 };
+/*
+ * The owner's lessons for agents (2026-11-15: INBOX_SHOWING_RULE, INBOX_REREAD_RULE, INBOX_ASK_RECOGNISE_RULE, the
+ * prototype, mock and thread sentences on send_message's fields; no line in the description, which stays 1,944
+ * characters): the entry as the tool builds it from the default tool list, with Pi's wrapper, 13,084 → 13,869 bytes
+ * (+785), Board on the same +785. Tokens scaled at the entry's bytes per token (3.7), +212, not counted on Pi.
+ */
+const INBOX_TOOL_COST_NOW = { bytes: 13869, tokens: 3729 };
 /** The entry with the Board on (the `card` action listed): for the switch's words, measured on Pi. */
-export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 14681, tokens: 4014 } as const;
+export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 15466, tokens: 4226 } as const;
 /**
  * What thread steps add to the entry when the person turns them on (the
  * `steps` action and send_message's `steps` field; approval
@@ -3311,9 +3327,14 @@ export const INBOX_DRAFT_PASTED_LEAD_MAX = 2;
  * The marks a person sets on an agent or a thread that a linked machine may send to this Inbox, the one that owns it
  * (approval "inbox-linked-marks"). The list says them (`marks`), so a linked machine offers a mark on this Inbox's
  * rows only once this Inbox takes it; an older Inbox says none. `cards`: its Board's cards are read through its door
- * and changed there, so a linked machine's Board lists them.
+ * and changed there, so a linked machine's Board lists them. `pulls`: its PR board is read through its door, and a
+ * PR it lists is closed, reopened or merged there, with its own gh / glab. `file-refs`: a file its agents' messages
+ * name is read through its door, and attached to that message there when the person comments on it. `tidy` and
+ * `combine` (approval "inbox-multi-select"): a linked machine's window asks this Inbox's sessions to tidy or combine
+ * this Inbox's threads, through its door. `pulls-looked` (approval "inbox-pr-dashboard"): the PR page's look at a PR
+ * it lists is kept there ("Changed since you looked").
  */
-export const INBOX_LINKED_MARKS = ["star", "priority", "agent-face", "agent-name", "take-back", "tags", "cards"] as const;
+export const INBOX_LINKED_MARKS = ["star", "priority", "agent-face", "agent-name", "take-back", "tags", "cards", "pulls", "tag-colours", "file-refs", "tidy", "combine", "pulls-looked"] as const;
 export type InboxLinkedMark = (typeof INBOX_LINKED_MARKS)[number];
 
 /**

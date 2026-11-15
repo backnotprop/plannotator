@@ -413,7 +413,12 @@ export const DecisionControl: React.FC<DecisionControlProps> = ({
     handlers[item.id]?.();
   }, [closePopover, handlers]);
 
+  // Starts at the value seen at mount: a control mounted after a request (a
+  // layout switch remounts the header's) must not take it as a new one.
+  const handledNoteRequest = useRef(openNoteRequest);
   useEffect(() => {
+    if (openNoteRequest === handledNoteRequest.current) return;
+    handledNoteRequest.current = openNoteRequest;
     if (!openNoteRequest || busy) return;
     const item = spec.items.find((candidate) => candidate.composer && !candidate.muted);
     if (item) selectItem(item);

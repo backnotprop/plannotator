@@ -11,7 +11,7 @@ import { AutoReload } from './auto-reload'
 import { BRIDGE_HOST, BRIDGE_MODES, bridgeBaseUrl, createBridge, type BridgeEnd, type BridgeHandle } from './bridge'
 import { deliveryFor, legacyResult, parseHostResult, type HostResultRecord, type SessionKind } from './delivery'
 import { PromptDropped, type Host, type HttpResult } from './host'
-import { inboxAgentProjectEnvValue, InboxLink, inboxSessionProjectEnvValue, sessionProjectFolder, type InboxAgentIdentity } from './inbox'
+import { inboxAgentProjectEnvValue, InboxLink, inboxSessionProjectEnvValue, sessionProjectFolder, type InboxAgentIdentity, type InboxLaunchReminder, type InboxOwnerAnswer } from './inbox'
 import { isAbsolutePath } from './paths'
 import { inboxCommandBriefing, type InboxToolInfo } from './inbox-contract'
 import {
@@ -83,6 +83,7 @@ import {
   plannotatorUnknownSessionText,
   PLANNOTATOR_TOOL_BUNDLE_UNAVAILABLE_TEXT,
   PLANNOTATOR_TOOL_TAILSCALE_UNAVAILABLE_TEXT,
+  PLANNOTATOR_TOOL_CLOUDFLARE_ACCESS_UNAVAILABLE_TEXT,
   scriptOnlyAnnotateFlag,
   scriptOnlyAnnotateFlagText,
   type PlannotatorCloseOutcome,
@@ -319,6 +320,8 @@ export interface SessionInfo {
   inboxAs?: InboxAgentIdentity
   /** False: the Inbox tool without the reply wake (`InboxLinkOptions.wake`). */
   inboxWake?: boolean
+  /** Whether this process is the session's own (a T3 Code thread's Claude; `InboxLinkOptions.owner`). */
+  inboxOwner?: () => Promise<InboxOwnerAnswer>
   /** The session's working folder, read when asked (the Inbox link's polls say where the session works). */
   cwd?: () => Promise<string>
   /** The session's root folder (`$.session.root()`), read once at the link's start: where `claude --resume` runs. */
@@ -328,6 +331,8 @@ export interface SessionInfo {
   title?: () => string | Promise<string>
   /** The session ids this conversation continues, read for each Inbox poll (`InboxLinkOptions.continues`). */
   continues?: () => Promise<readonly string[]>
+  /** The Inbox reminder a launched session's first wake carries (`InboxLinkOptions.launchReminder`). */
+  launchReminder?: () => Promise<InboxLaunchReminder | null>
   /**
    * Made by the self-heal (self-heal.ts), not by anything the person did: the
    * Inbox link starts without a touch, so a live lease another process holds stands.
@@ -428,8 +433,10 @@ export class PlannotatorMod {
           instanceId: this.instanceId,
           ...(session.inboxAs ? { agent: session.inboxAs } : {}),
           ...(session.inboxWake === false ? { wake: false } : {}),
+          ...(session.inboxOwner ? { owner: session.inboxOwner } : {}),
           turns: this.turns,
           ...(this.autoReload ? { reload: this.autoReload } : {}),
+          ...(session.launchReminder ? { launchReminder: session.launchReminder } : {}),
         })
       : null
     this.inbox?.start({ touch: !session.healed })
@@ -1016,7 +1023,8 @@ export class PlannotatorMod {
     // A list of files is one review of all of them (a bundle), named as such.
     const bundle = Array.isArray(call.target)
     const subject = bundle ? plannotatorBundleSubject(targets) : subjectFor(action, targets)
-    const tailscale = call.tailscale === true
+    const tailscale = call.tailscale === true || call.cloudflareAccess === true
+    const unavailable = call.cloudflareAccess === true ? PLANNOTATOR_TOOL_CLOUDFLARE_ACCESS_UNAVAILABLE_TEXT : PLANNOTATOR_TOOL_TAILSCALE_UNAVAILABLE_TEXT
     const opened = await this.open(action, plannotatorToolArgs(call), subject, {
       ...(gate ? { deliverApproval: true } : {}),
       ...(tailscale ? { tailscaleAsked: true } : {}),
@@ -1028,7 +1036,7 @@ export class PlannotatorMod {
         // A CLI from before `--tailscale` refuses the word (an unknown flag or
         // file). A current CLI's publish failure (`--tailscale: Tailscale is
         // not running`, signed out, port routed) is shown as it is.
-        if (tailscale && isOlderCliTailscaleRefusal(opened.text)) return { deny: PLANNOTATOR_TOOL_TAILSCALE_UNAVAILABLE_TEXT }
+        if (tailscale && isOlderCliTailscaleRefusal(opened.text)) return { deny: unavailable }
         return { deny: opened.text }
       case 'starting':
         return { text: plannotatorToolOpenedText(opened.subject, undefined, gate, opened.sessionId, opened.target) }
@@ -1038,7 +1046,7 @@ export class PlannotatorMod {
           // predates #2166) or not on the tailnet at all (it ignored the
           // flag): say so and do not leave it open, never a silent downgrade.
           await this.abandonLaunch(opened.sessionId)
-          return { deny: PLANNOTATOR_TOOL_TAILSCALE_UNAVAILABLE_TEXT }
+          return { deny: unavailable }
         }
         return {
           text: plannotatorToolOpenedText(

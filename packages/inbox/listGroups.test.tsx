@@ -84,7 +84,7 @@ function row(id: string, section: InboxSectionId, extra: Partial<InboxListRow> =
   } as InboxListRow;
 }
 
-const LABELS: Record<Exclude<InboxListGroupId, 'priority'>, string> = {
+const LABELS: Record<Exclude<InboxListGroupId, 'priority' | 'archived'>, string> = {
   stopped: 'Stopped on you',
   holding: 'Holding up work',
   waiting: 'Waiting on you',

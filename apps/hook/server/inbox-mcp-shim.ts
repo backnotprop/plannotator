@@ -118,10 +118,17 @@ export interface InboxHostSession {
  * `plannotator inbox call`). Anything
  * malformed or naming another host is ignored, never guessed at (a Codex
  * session is a thread id, a UUID; a T3 one any id T3 gives a thread).
+ *
+ * In a T3 thread's own Claude and its MCP servers (`CLAUDE_CODE_ENTRYPOINT`
+ * `t3-code` beside a thread id, no `CLAUDE_CODE_CHILD_SESSION`), a tag of
+ * another host is the one T3 inherited from the shell it was started in, so
+ * the thread wins over it. Claude's Bash commands carry
+ * `CLAUDE_CODE_CHILD_SESSION`, and there the tag still comes first.
  */
 export function inboxHostSessionFromEnv(env: Record<string, string | undefined>): InboxHostSession | null {
   const tag = env.PLANNOTATOR_SESSION_TAG;
-  if (typeof tag === "string") {
+  const t3Own = env.CLAUDE_CODE_ENTRYPOINT === "t3-code" && isT3ThreadId(env[INBOX_T3_THREAD_ENV]) && !env.CLAUDE_CODE_CHILD_SESSION;
+  if (typeof tag === "string" && !(t3Own && !tag.startsWith(`${INBOX_T3_HOST}:`))) {
     const colon = tag.indexOf(":");
     const host = colon > 0 ? tag.slice(0, colon) : "";
     const session = tag.slice(colon + 1);

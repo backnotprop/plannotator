@@ -919,7 +919,7 @@ const LEDE: Record<SettingsSection, string> = {
   // Rows draws its own lede, with Undo and Reset beside it (RowsSettings.tsx).
   rows: '',
   agents: "How each agent on this computer reaches the Inbox and learns when to use it. A change applies to that agent's next session; sessions already running keep what they started with.",
-  'cloud-agents': 'An agent in the cloud or on a server, such as a Claude Code routine, Grok Bot, Muse, Hermes Agent or OpenClaw, that reads and answers its threads here.',
+  'cloud-agents': 'An agent in the cloud or on a server, such as a Claude Code routine, Grok Bot, Muse, Hermes Agent or OpenClaw, that reads and writes across this Inbox.',
   accounts: '',
   prompts: "What Plannotator tells your agents. A change applies to each agent's next session.",
   devices: 'Your phone, and browsers on your other devices.',
@@ -1296,7 +1296,7 @@ export function SettingsPage(props: SettingsPageProps) {
         in {tildePath(store?.dir ?? settings.store_dir ?? settings.store?.dir ?? '', settings.home)}: messages, attached files as they were sent, and annotations.
       </p>
     ) : section === 'devices' && settings && !phonesOn ? (
-      <p className="ib-lede">Browsers on your other devices.</p>
+      <p className="ib-lede">Open this Inbox from your phone, tablet or another computer.</p>
     ) : section && LEDE[section] ? (
       <p className="ib-lede">{LEDE[section]}</p>
     ) : null;
