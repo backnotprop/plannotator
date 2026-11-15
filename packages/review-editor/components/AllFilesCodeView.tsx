@@ -794,6 +794,7 @@ const WARM_UP_STEP_MS = 120;
 // How long revealing a comment on a closed line waits for its file's whole text.
 const REVEAL_WAIT_MS = 30_000;
 const LINE_TARGET_FLASH_MS = 1_600;
+const REVEAL_ON_ARRIVAL_MS = 2_000;
 
 const inStepRoots = new WeakSet<ShadowRoot>();
 
@@ -2352,6 +2353,31 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   // on every mount/update and dropped on unmount.
   const nodeToItemIdRef = useRef(new WeakMap<HTMLElement, string>());
   const firstChangeShownRef = useRef(new Set<string>());
+  const itemNodeRef = useRef(new Map<string, HTMLElement>());
+  const revealOnArrivalRef = useRef(new Map<string, number>());
+
+  const revealWhenDrawn = useStableCallback((itemId: string) => {
+    const until = revealOnArrivalRef.current.get(itemId);
+    if (until == null) return;
+    if (performance.now() > until) {
+      revealOnArrivalRef.current.delete(itemId);
+      return;
+    }
+    const node = itemNodeRef.current.get(itemId);
+    if (node != null && node.shadowRoot?.querySelector('[data-diff-span]') != null) {
+      revealOnArrivalRef.current.delete(itemId);
+      firstChangeShownRef.current.add(itemId);
+      revealFirstChange(node);
+      return;
+    }
+    requestAnimationFrame(() => revealWhenDrawn(itemId));
+  });
+
+  const revealOnArrival = useStableCallback((itemId: string) => {
+    const waiting = revealOnArrivalRef.current.has(itemId);
+    revealOnArrivalRef.current.set(itemId, performance.now() + REVEAL_ON_ARRIVAL_MS);
+    if (!waiting) requestAnimationFrame(() => revealWhenDrawn(itemId));
+  });
 
   useEffect(() => {
     if (!scrollEl || !opensWholeFiles) return;
@@ -2390,6 +2416,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       if (phase === 'unmount') {
         clearItemSearchHighlights(node);
         nodeToItemIdRef.current.delete(node);
+        if (itemNodeRef.current.get(context.id) === node) itemNodeRef.current.delete(context.id);
         return;
       }
       // Image-preview items take a per-item header height (see
@@ -2405,14 +2432,17 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       // selection's shadow-root host. Registered on every mount/update because
       // CodeView recycles elements across items.
       nodeToItemIdRef.current.set(node, context.id);
+      itemNodeRef.current.set(context.id, node);
       if (flushesFiles) syncTrailingRow(node, context);
       if (powerUpStreamRef.current) keepPowerUpInStep(node);
       prefetchWholeFile(context.id);
       const itemId = context.id;
       requestAnimationFrame(() => applyItemHighlights(node, itemId));
-      if (!firstChangeShownRef.current.has(itemId)) {
+      if (!hasScrolledRef.current && !firstChangeShownRef.current.has(itemId)) {
         firstChangeShownRef.current.add(itemId);
-        requestAnimationFrame(() => revealFirstChange(node));
+        requestAnimationFrame(() => {
+          if (!hasScrolledRef.current) revealFirstChange(node);
+        });
       }
     },
   );
@@ -3245,7 +3275,8 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     const viewer = viewerRef.current;
     if (viewer == null) return;
     viewer.scrollTo({ type: 'item', id: itemId, align: 'start' });
-  }, []);
+    revealOnArrival(itemId);
+  }, [revealOnArrival]);
 
   // File-level navigation for surfaces whose lightweight navigation UI lives
   // outside CodeView (Guided Review's outline). Expand before scrolling so a
@@ -3269,6 +3300,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       }
       // With the page as the scroller the host moves it to the file; this would fight that move.
       if (!scrollsWithPageRef.current) handle.scrollTo({ type: 'item', id: itemId, align: 'start' });
+      revealOnArrival(itemId);
     });
     return () => cancelAnimationFrame(raf);
   }, [fileScrollTarget?.filePath, fileScrollTarget?.token, fileSetKey, filePathToItemId, syncAllCollapsedMirror, reportFileCollapsed]);
@@ -3338,6 +3370,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       raf = requestAnimationFrame(() => {
         handledLineTargetRef.current = lineTarget;
         viewerRef.current?.scrollTo({ type: 'range', id: itemId, range });
+        revealOnArrival(itemId);
         if (pendingSelectionRef.current != null) return;
         const flash: CodeViewLineSelection = { id: itemId, range };
         setSelectedLines(flash);
@@ -3396,6 +3429,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         if (viewer == null) return;
         if (isFile) viewer.scrollTo({ type: 'item', id: itemId, align: 'start' });
         else viewer.scrollTo({ type: 'range', id: itemId, range });
+        revealOnArrival(itemId);
       });
     };
     const stopOpening = revealClosedLines(itemId, ann, range, jump);
