@@ -9,7 +9,7 @@
  * rows name those. A thread's tag lives on the thread's own machine, like its Priority.
  */
 import { createContext, useContext } from 'react';
-import { inboxInitiativeNameKey, type InboxInitiative, type InboxListRow, type InboxListSection } from '@plannotator/core/inbox-types';
+import { inboxInitiativeNameKey, type InboxInitiative, type InboxListRow, type InboxListSection, type InboxTagLook } from '@plannotator/core/inbox-types';
 import { plural } from '@plannotator/core/inbox-format';
 import type { MachinesModel } from './machines';
 
@@ -39,7 +39,7 @@ export type RowTags = (row: Pick<InboxListRow, 'thread_id' | 'tags' | 'machine'>
 const ownTags: RowTags = (row) => row.tags ?? [];
 
 /** A tag of the list: on the merged view, with its id on each machine that holds one of its name. */
-export type ListTag = InboxInitiative & { machines?: Record<string, string> };
+export type ListTag = InboxInitiative & { machines?: Record<string, string>; look?: InboxTagLook };
 
 /** Whether `machine` (a row's, or a thread's owner) is this Inbox, or a linked machine that takes tags from it. */
 function takesTags(machine: string | null | undefined, model: Pick<MachinesModel, 'self' | 'linked'>): boolean {

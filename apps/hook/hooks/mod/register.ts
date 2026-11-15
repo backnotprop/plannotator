@@ -95,7 +95,9 @@ import {
   sessionKindOf,
   SESSION_KIND_FEATURES,
   t3ThreadOf,
+  isT3ThreadOwnTools,
   T3_ENTRYPOINT,
+  T3_THREAD_SERVER,
   type SessionKind,
   resolveAgentToolEnabled,
   resolveClaudeModEnabled,
@@ -115,6 +117,7 @@ import {
   inboxFirstPromptContext,
   inboxRegistryPathOf,
   inboxT3Agent,
+  type InboxOwnerAnswer,
   inboxReminderEnvValue,
   inboxReminderWithThreads,
   INBOX_SESSION_NAME_COMMANDS,
@@ -635,7 +638,7 @@ async function currentMod($: Engine, options: { healed?: boolean } = {}): Promis
       title: () => title.generatedTitle() ?? '',
       continues: async () => [...new Set([...(await forkedFrom.read()), ...(await continuedIn.read())])],
       ...(inboxTools ? { inboxTools } : {}),
-      ...(settings.t3Thread ? { inboxAs: inboxT3Agent(settings.t3Thread) } : {}),
+      ...(settings.t3Thread ? { inboxAs: inboxT3Agent(settings.t3Thread), inboxOwner: () => t3ThreadOwnHere($) } : {}),
       ...(settings.wake ? {} : { inboxWake: false }),
       launchReminder: () => launchReminderFor($, String(sessionId)),
       ...(options.healed ? { healed: true } : {}),
@@ -654,6 +657,35 @@ async function currentMod($: Engine, options: { healed?: boolean } = {}): Promis
   } finally {
     switching = null
   }
+}
+
+/** Once yes, for the process: T3's `t3-code` server stays for the thread's Claude while it runs. */
+let t3ThreadOwn: InboxOwnerAnswer | null = null
+
+/**
+ * Whether this process is its T3 thread's own Claude: its tools include T3's
+ * `t3-code` ones (`isT3ThreadOwnTools`), or, where tool schemas load on demand
+ * and the list may leave them out, its context names a `t3-code` server
+ * (`$.session.usage`'s `mcpTools`, which lists a tool not searched for yet
+ * too). A Claude Code whose `$.tool.list` is missing or throws cannot tell:
+ * null, and the link runs as it did before the check.
+ */
+async function t3ThreadOwnHere($: Engine): Promise<InboxOwnerAnswer> {
+  if (t3ThreadOwn) return t3ThreadOwn
+  let tools: unknown
+  try {
+    tools = await $.tool.list()
+  } catch (error) {
+    return { yes: null, via: `no $.tool.list here (${error instanceof Error ? error.message : String(error)})` }
+  }
+  if (!Array.isArray(tools)) return { yes: null, via: 'no $.tool.list here' }
+  if (isT3ThreadOwnTools(tools.map((tool: { name?: unknown }) => tool?.name))) return (t3ThreadOwn = { yes: true, via: 'tools' })
+  const usage = await Promise.resolve()
+    .then(() => $.session.usage({ breakdown: 'summary' }))
+    .catch(() => null)
+  const servers = usage?.context?.breakdown?.mcpTools
+  if (Array.isArray(servers) && servers.some((tool: { serverName?: unknown }) => tool?.serverName === T3_THREAD_SERVER)) return (t3ThreadOwn = { yes: true, via: 'mcp server' })
+  return { yes: false, via: `no t3-code tools or server among ${tools.length} tools` }
 }
 
 /**

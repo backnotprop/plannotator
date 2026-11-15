@@ -21,7 +21,7 @@
  *   reached the machine (rule 15).
  */
 
-import { isInboxId, isInboxInitiativeRecord, type InboxAgentsGroup, type InboxCardWire, type InboxInitiative, type InboxListRow } from "@plannotator/core/inbox-types";
+import { inboxTagColoursRead, isInboxId, isInboxInitiativeRecord, isInboxTagLook, type InboxAgentsGroup, type InboxCardWire, type InboxInitiative, type InboxListRow, type InboxTagColours } from "@plannotator/core/inbox-types";
 import { inboxPeerAgentsGroup } from "./inbox-agents-list";
 import { inboxPeerSessionNames } from "./inbox-session-names";
 import type { InboxLinkRecord } from "./inbox-links";
@@ -76,8 +76,10 @@ export interface PeerList {
   marks: string[];
   /** Its starred threads, in its own order (its list's `pins`). */
   pins: string[];
-  /** Its live tags (its list's `tags`; none from an Inbox before thread tags). */
+  /** Its live tags (its list's `tags`; none from an Inbox before thread tags), each with its colour from one that keeps them. */
   tags: InboxInitiative[];
+  /** Its "Show tag colors" and own colours (its list's `tag_colours`); null from an Inbox before tag colours. */
+  tag_colours: InboxTagColours | null;
   /** Its agents (its list's `agents`, capped, with `machine`; inbox-agents-list.ts); null from an older Inbox. */
   agents: InboxAgentsGroup | null;
   session_labels: Record<string, string>;
@@ -476,7 +478,13 @@ export class PeerLink {
       snoozes: list.snoozes === true,
       marks: Array.isArray(list.marks) ? list.marks.filter((mark: unknown): mark is string => typeof mark === "string") : [],
       pins: Array.isArray(list.pins) ? list.pins.flatMap((row: Json) => (typeof row?.thread_id === "string" ? [row.thread_id] : [])) : [],
-      tags: Array.isArray(list.tags) ? list.tags.filter((tag: unknown): tag is InboxInitiative => isInboxInitiativeRecord(tag) && tag.deleted_at === null) : [],
+      tags: Array.isArray(list.tags)
+        ? list.tags
+            .filter((tag: unknown): tag is InboxInitiative & { look?: unknown } => isInboxInitiativeRecord(tag) && tag.deleted_at === null)
+            // A colour this Inbox cannot read is no colour.
+            .map(({ look, ...tag }: InboxInitiative & { look?: unknown }) => (isInboxTagLook(look) ? { ...tag, look } : tag))
+        : [],
+      tag_colours: inboxTagColoursRead(list.tag_colours),
       agents: inboxPeerAgentsGroup(list.agents, this.id),
       session_labels: inboxPeerSessionNames(list.session_labels),
       session_titles: inboxPeerSessionNames(list.session_titles),

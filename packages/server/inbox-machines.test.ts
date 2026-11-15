@@ -1949,6 +1949,60 @@ describe("a star or Priority on a linked machine's thread lives on that machine 
     }
   }, 120_000);
 
+  test("tag colours across two linked machines: one colour per tag and one switch on both, the same rule on each, a change on either reaching the other live", async () => {
+    const dataA = scratch("plannotator-tag-colours-a-");
+    const dataB = scratch("plannotator-tag-colours-b-");
+    const a = await start(dataA);
+    const b = await start(dataB);
+    try {
+      const offered = (await (await fetch(`${at(b.port)}/api/inbox/machines/offer`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).json()) as Json;
+      const linked = await fetch(`${at(a.port)}/api/inbox/machines/link`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ link: offered.link, address: at(b.port), back: at(a.port) }) });
+      expect(linked.status).toBe(201);
+      const bId = (JSON.parse(readFileSync(join(dataA, "inbox", "machines.json"), "utf8")) as Json).links[0].id as string;
+      const colourOf = async (port: number, name: string) => ((await list(port)).tags as Json[]).find((tag) => (tag.name as string).toLowerCase() === name)?.look?.colour;
+      const shownOn = async (port: number) => ((await list(port)).tag_colours as Json).show;
+      // A's Release first, so its colour is the one both keep; B's own first tag takes green, so its Release is amber.
+      const release = a.store.createInitiative({ name: "Release", by: { kind: "person" } });
+      b.store.createInitiative({ name: "Windows", by: { kind: "person" } });
+      const bRelease = b.store.createInitiative({ name: "release", by: { kind: "person" } });
+      expect(a.store.tagLook(release.id)?.colour).toBe("green");
+      expect(b.store.tagLook(bRelease.id)?.colour).toBe("amber");
+      await waitFor("B's tags on A", async () => (await colourOf(a.port, "windows")) === "green", 30_000);
+      expect(await colourOf(a.port, "release")).toBe("green");
+      await waitFor("A's Release on B", async () => (await colourOf(b.port, "release")) === "green", 30_000);
+      expect(((((await (await fetch(`${at(a.port)}/api/inbox/machines`)).json()) as Json).machines as Json[]).find((m) => m.id === bId)!.marks as string[])).toContain("tag-colours");
+
+      // Picked on A: A's copy, then B's by its id there (the window's write); both read the pick.
+      const picked = "2026-11-13T10:00:00.000Z";
+      expect((await post(a.port, "/api/inbox/tag-colours", { tag: release.id, colour: "#ff6a00", at: picked })).status).toBe(200);
+      expect((await forward(a.port, bId, "tag-colours", { tag: bRelease.id, colour: "#ff6a00", at: picked })).status).toBe(200);
+      expect(b.store.tagLook(bRelease.id)).toEqual({ colour: "#ff6a00", by: "person", at: picked });
+      await waitFor("the pick on B", async () => (await colourOf(b.port, "release")) === "#ff6a00", 30_000);
+      expect(await colourOf(a.port, "release")).toBe("#ff6a00");
+
+      // Picked later in B's own window only: the later pick wins on both.
+      expect((await post(b.port, "/api/inbox/tag-colours", { tag: bRelease.id, colour: "red", at: "2026-11-13T11:00:00.000Z" })).status).toBe(200);
+      await waitFor("B's later pick on A", async () => (await colourOf(a.port, "release")) === "red", 30_000);
+      expect(a.store.tagLook(release.id)?.colour).toBe("#ff6a00");
+      // A held write from before lands on B late (the outbox after a sleep): B keeps the later pick, so both stay red.
+      expect((await forward(a.port, bId, "tag-colours", { tag: bRelease.id, colour: "amber", at: "2026-11-13T10:30:00.000Z" })).status).toBe(200);
+      expect(b.store.tagLook(bRelease.id)?.colour).toBe("red");
+      expect(await colourOf(a.port, "release")).toBe("red");
+
+      // Show tag colors: on until set; off from A (here and on B); on again in B's window, later, wins on A too.
+      expect(await shownOn(a.port)).toBe(true);
+      expect((await post(a.port, "/api/inbox/tag-colours", { show: false, at: "2026-11-13T12:00:00.000Z" })).status).toBe(200);
+      expect((await forward(a.port, bId, "tag-colours", { show: false, at: "2026-11-13T12:00:00.000Z" })).status).toBe(200);
+      expect(await shownOn(b.port)).toBe(false);
+      expect(await shownOn(a.port)).toBe(false);
+      expect((await post(b.port, "/api/inbox/tag-colours", { show: true, at: "2026-11-13T13:00:00.000Z" })).status).toBe(200);
+      await waitFor("B's switch on A", async () => (await shownOn(a.port)) === true, 30_000);
+    } finally {
+      a.stop();
+      b.stop();
+    }
+  }, 120_000);
+
   test("an older machine (its list names no `tags` mark): its rows are in no tag here and its tags are not listed; one that names it joins by name", async () => {
     const thread = "msg_01K0000000000000000000000T";
     const farTag = { id: "ini_01K0000000000000000000000F", name: "release", created_at: "2026-11-12T09:00:00.000Z", created_by: { kind: "person" }, updated_at: "2026-11-12T09:00:00.000Z", deleted_at: null };

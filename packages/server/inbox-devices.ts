@@ -189,6 +189,9 @@ const ALLOWLIST: readonly DoorRoute[] = [
   // tags this Inbox's threads by a tag's name and changes the tag of that name here. Phones do not take tags.
   { method: "POST", route: /^threads\/([^/]+)\/tags$/, window: (m) => `/api/inbox/threads/${m[1]}/tags`, machineOnly: true },
   { method: "POST", route: /^initiatives\/([^/]+)$/, window: (m) => `/api/inbox/initiatives/${m[1]}`, machineOnly: true },
+  // A tag's row colour and "Show tag colors" (mark `tag-colours`): a linked machine's window sets them here too, so
+  // every machine shows the same colours, and a phone sets them as the window does (its list ⋮ has the switch).
+  { method: "POST", route: /^tag-colours$/, window: () => "/api/inbox/tag-colours" },
   // The Board's cards (mark `cards`): a linked machine's window lists this Inbox's cards, opens one, and moves,
   // edits, links and tags it here; the look and "Got it" are this store's too. Phones have no Board.
   { method: "GET", route: /^cards$/, window: () => "/api/inbox/cards", machineOnly: true },
