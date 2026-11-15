@@ -178,7 +178,6 @@ const SELECTION_BAR_PLUS_CSS = `[data-gutter-utility-slot] { display: var(--revi
 export const ANNOTATED_LINE_TINT_CSS = `
   [data-selected-line] { --mix-selection-light: 92% !important; --mix-selection-dark: 88% !important; }
   :is([data-line-annotation], [data-gutter-buffer='annotation'])[data-selected-line] { --mix-selection-light: 100% !important; --mix-selection-dark: 100% !important; }
-  :is([data-line-annotation], [data-gutter-buffer='annotation']) { background-color: var(--diffs-bg) !important; background-image: none !important; }
 `;
 
 /**
@@ -283,7 +282,7 @@ export function usePierreTheme(options?: {
           pre, code { background-color: ${bg} !important; }
           [data-file-info] { background-color: ${muted} !important; }
           [data-column-number] { background-color: ${bg} !important; }
-          :is([data-line-annotation], [data-gutter-buffer='annotation']) { background-color: ${bg} !important; }
+          :is([data-line-annotation], [data-gutter-buffer='annotation']) { background-color: ${bg} !important; background-image: none !important; }
           [data-gutter-buffer='annotation']::before, [data-gutter-buffer='annotation']::after { content: none !important; }
           ${showFileHeader ? '' : '[data-diffs-header] [data-title] { display: none !important; }'}
           [data-diff-type='split'][data-overflow='scroll'] {
