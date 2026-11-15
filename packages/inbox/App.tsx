@@ -36,6 +36,7 @@ import { useRowWrites, type RowDrawing } from './data/actions/rows';
 import { keepSavedQuestions } from './data/actions/picks';
 import { useSettingsSaves } from './data/actions/settings';
 import { useListShown } from './app/useListView';
+import { useListTags } from './app/useListTags';
 import { useDecideSitting, type DecideSitting } from './app/useDecideSitting';
 import { useSnoozeBack } from './app/useSnoozeBack';
 import { WarmWindowParts } from './lazyParts';
@@ -569,11 +570,12 @@ function Inbox() {
    * another machine's thread (`#thread=` after a reload, in a new tab) first reads it here and gets a 404. That 404
    * waits for this list and, when the list names another machine as the owner, reads the thread there.
    */
-  const firstList = useRef<{ done: boolean; promise: Promise<void>; resolve: () => void } | null>(null);
+  const firstList = useRef<{ done: boolean; promise: Promise<void>; resolve: () => void; tried: Promise<void>; settle: () => void } | null>(null);
   if (!firstList.current) {
     let resolve = () => {};
+    let settle = () => {};
     const promise = new Promise<void>((r) => (resolve = r));
-    firstList.current = { done: false, promise, resolve };
+    firstList.current = { done: false, promise, resolve, tried: new Promise<void>((r) => (settle = r)), settle: () => settle() };
   }
   const threadReadApplied = useRef(0);
   /**
@@ -1568,13 +1570,7 @@ function Inbox() {
     if (Date.now() - cardsReadAt.current < 5_000) return;
     void refreshCards();
   }, [refreshCards]);
-  // With the Board off, the list's tags (approval "inbox-thread-tags"), the same array while their ids and names stay.
-  const listTagsKey = (latest?.tags ?? [])
-    .map((i) => `${i.id}\u0000${i.name}\u0000${JSON.stringify(i.machines ?? null)}`)
-    .join('\u0001');
-  const keepsTags = latest?.tags !== undefined;
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the ids and names, on purpose
-  const listTags = useMemo(() => latest?.tags ?? null, [listTagsKey, keepsTags]);
+  const listTags = useListTags(latest);
   const liveTags = useMemo(() => (boardEnabled === false && listTags ? { initiatives: listTags, href: tagHref } : { initiatives: tagInitiatives }), [boardEnabled, listTags, tagInitiatives]);
   const across = useMemo(() => (listTags ? tagsAcross(listTags, machines) : null), [listTags, machines]);
   const initiativeTags = useMemo<InitiativeTags>(() => {
@@ -1854,7 +1850,7 @@ function Inbox() {
       // A first read that fails is read again until it lands (firstListRead.ts): the page listens only from then on.
       const first = await readFirstList({
         read: async () => {
-          const next = await refreshList(true);
+          const next = await refreshList(true).finally(() => firstList.current!.settle());
           if (!settingsAsked) void refreshSettings();
           settingsAsked = true;
           return next;
@@ -2224,11 +2220,10 @@ function Inbox() {
       // settles nothing when every message is seen, left it there with its
       // questions open.
       if (listCovered() && COVERED_LIST_SETTLES === 'while-covered') settleList('own', false, { threadId });
-      // The look covers what this read showed, not a message that lands before the server takes it.
-      // Until it lands and the list is read again, the row and the header read it as looked at (`looking`).
       setLooking((current) => (current.has(threadId) ? current : new Set(current).add(threadId)));
       const look = (async () => {
         try {
+          await firstList.current!.tried;
           await inboxApi.seen(threadId, latestAgentSeq(opened)).catch(() => {});
           // Read the list even when another thread opened meanwhile: this row leaves `looking` next, and must
           // then show the server's row (read), not the one from before the look (bold).
@@ -4111,7 +4106,7 @@ function Inbox() {
   useEffect(() => {
     if (combinedHead) writeRoute({ ...route, project: combinedHead }, { replace: true });
   }, [combinedHead]);
-  const { latestSections, latestGroups, latestRows, pinsOn, pinRows, pinnedIds, listedOpenRow, openThreadRow, listShown, snoozeOn, projectsReadable, projectCounts, latestProjectActivity, filterProject, filterMachine, windowRows, threadAgentContext, filterAgent, projectNames, sidebarMachineCounts, filterList, listFilterPicks, setListFilter, listFilterScoped, filterShown, listFilterRows, listSections, listFilterEmpty, listTitle, notice, filterTag, threadTagsHost, sidebarTags } = useListShown({
+  const { latestSections, latestGroups, latestRows, pinsOn, pinRows, pinnedIds, listedOpenRow, openThreadRow, listShown, snoozeOn, projectsReadable, projectCounts, latestProjectActivity, filterProject, filterMachine, windowRows, threadAgentContext, filterAgent, projectNames, sidebarMachineCounts, filterList, listFilterPicks, setListFilter, listFilterScoped, filterShown, listFilterRows, listSections, listFilterEmpty, listTitle, notice, filterTag, threadTagsHost, sidebarTags, listColours } = useListShown({
     latest, projects, route, thread, threadRow, rowPatches, pinPatches, looking, shown, machines, hideAway, openedHere, heldOpen, heldRead,
     tags: {
       listTags,
@@ -6053,6 +6048,8 @@ function Inbox() {
           onUnstar={pinsOn ? unstarRow : undefined}
           // "Keep starred above the list" (starredPills.ts): the starred threads as pills, with the sidebar section's actions.
           starred={pinRows ? { rows: pinRows, onOpen: openPinned, onAction: (row, action) => void pinAction(row, action, true) } : undefined}
+          // Tag row colours (tagColours.ts): each row's tint and "Show tag colors" in the ⋮.
+          tagColours={listColours ?? undefined}
           tidy={{
             ...listTidy,
             combine: async (pairs) => {
@@ -6982,6 +6979,7 @@ function Inbox() {
         mounted={searchMounted}
         open={searchOpen}
         phone={phone}
+        tintOf={listColours?.tintOfThread}
         currentProject={route.page === 'inbox' ? route.project : null}
         projects={projects}
         onClose={closeSearch}

@@ -46,6 +46,7 @@ export * from "./inbox-cards";
 export * from "./inbox-steps";
 // The Board's initiatives (approval "board-initiatives"), the same way.
 export * from "./inbox-initiatives";
+export * from "./inbox-tag-colours";
 // The surface bridge's messages (the phone, PLAN step S1), the same way.
 export * from "./inbox-surface-bridge";
 // Tidy (the list header's and the Board's ⋮ menu), the same way.
@@ -3308,7 +3309,7 @@ export const INBOX_DRAFT_PASTED_LEAD_MAX = 2;
  * PR it lists is closed, reopened or merged there, with its own gh / glab. `file-refs`: a file its agents' messages
  * name is read through its door, and attached to that message there when the person comments on it.
  */
-export const INBOX_LINKED_MARKS = ["star", "priority", "agent-face", "agent-name", "take-back", "tags", "cards", "pulls", "file-refs"] as const;
+export const INBOX_LINKED_MARKS = ["star", "priority", "agent-face", "agent-name", "take-back", "tags", "cards", "pulls", "tag-colours", "file-refs"] as const;
 export type InboxLinkedMark = (typeof INBOX_LINKED_MARKS)[number];
 
 /**
