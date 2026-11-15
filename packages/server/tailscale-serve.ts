@@ -268,9 +268,9 @@ function registerServeMapping(hostname: string, httpsPort: number, run: Tailscal
  * it does not print a second ready line, and with `skipBrowserOpen` because
  * the advertised URL is meant for another device.
  */
-export async function announceTailscaleSession(url: string, port: number): Promise<void> {
+export async function announceTailscaleSession(url: string, port: number, line = "Served over your tailnet: open it on your device (the URL above)."): Promise<void> {
   process.stderr.write(`\n  ${SESSION_READY_LINE_PREFIX}${url}\n`);
-  process.stderr.write("  Served over your tailnet: open it on your device (the URL above).\n");
+  process.stderr.write(`  ${line}\n`);
   // The URL makes a device hop; the QR skips the retyping (TTY only).
   writeUrlQr(url);
   process.stderr.write("\n");
