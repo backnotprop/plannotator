@@ -6,6 +6,7 @@
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { createServer } from "node:net";
 import { join } from "node:path";
 import {
   antigravityConversationOfCall,
@@ -24,6 +25,8 @@ import { createFakeAgy, type FakeAgy } from "../../tests/helpers/fake-agy";
 const CONVERSATION = "6640fa39-c263-49df-b314-312ed85b242f";
 const CLI_CONVERSATION = "2cb0b3d5-163d-4a94-a19b-5b564a906739";
 const APP_TOKEN = "app-token-0123456789abcdef";
+/** A pid no process has (above the largest pid macOS and Linux hand out). */
+const GONE_PID = 2 ** 22 + 12345;
 const CLI_TOKEN = "cli-token-0123456789abcdef";
 
 const fakes: FakeAgy[] = [];
@@ -51,19 +54,21 @@ function world(conversation = CONVERSATION) {
   const asked = store.sendMessage({ project_id: project.id, author, body: "Ship the worker today?", wakes: true }).message;
   const environment = createAgentEnvironmentFor({ platform: "linux", homeDir: fake.home, env: { PATH: "/usr/bin:/bin", HOME: fake.home } });
   const logs: string[] = [];
-  const start = (over: { sendTimeoutMs?: number; waitCheckMs?: number } = {}) => {
+  const start = (over: { sendTimeoutMs?: number; waitCheckMs?: number; now?: () => number } = {}) => {
     const wake = createInboxAntigravityWake({ store, environment, commandOf, log: (line) => logs.push(line), appClients: [], waitCheckMs: 50, ...over });
     wakes.push(wake);
     return wake;
   };
   let n = 0;
   const reply = (words: string) => store.sendReply(asked.id, { words, idempotency_key: `k${++n}` }).reply!;
-  const link = (address: string, token: string) => {
-    const dir = join(store.dir, "antigravity", "links");
-    mkdirSync(dir, { recursive: true, mode: 0o700 });
-    writeFileSync(join(dir, `${conversation}.json`), JSON.stringify({ conversation, address, token, at: new Date().toISOString() }), { mode: 0o600 });
+  const linksDir = join(store.dir, "antigravity", "links");
+  // `pid`: the agy it came from (this test process: running); null writes none.
+  const link = (address: string, token: string, pid: number | null = process.pid, id = conversation) => {
+    mkdirSync(linksDir, { recursive: true, mode: 0o700 });
+    writeFileSync(join(linksDir, `${id}.json`), JSON.stringify({ conversation: id, address, token, at: new Date().toISOString(), ...(pid === null ? {} : { pid }) }), { mode: 0o600 });
   };
-  return { fake, store, start, reply, link, logs, asked };
+  const lookups = () => fake.calls().filter((call) => call.args[0] === "get-conversation-metadata").length;
+  return { fake, store, start, reply, link, linksDir, lookups, logs, asked };
 }
 
 const waitFor = async (check: () => boolean, ms = 3000) => {
@@ -231,6 +236,92 @@ describe("a CLI conversation, through its hand-over", () => {
   });
 });
 
+describe("stale hand-overs", () => {
+  test("a hand-over whose agy pid is gone is removed on the wake's pass, the conversation is ended and its reply waits", async () => {
+    const w = world(CLI_CONVERSATION);
+    w.fake.server("localhost:56548", { up: true, token: CLI_TOKEN, product: "cli", conversations: [CLI_CONVERSATION] });
+    w.link("localhost:56548", CLI_TOKEN, GONE_PID);
+    const other = "11111111-2222-4333-8444-555555555555";
+    w.link("localhost:50001", "other-token-0123456789", GONE_PID, other);
+    const running = "66666666-7777-4888-9999-aaaaaaaaaaaa";
+    w.link("localhost:50002", "running-token-0123456", process.pid, running);
+    const wake = w.start();
+    const reply = w.reply("Yes.");
+    await wake.sweep();
+    expect(existsSync(join(w.linksDir, `${CLI_CONVERSATION}.json`))).toBe(false);
+    expect(existsSync(join(w.linksDir, `${other}.json`))).toBe(false);
+    expect(existsSync(join(w.linksDir, `${running}.json`))).toBe(true);
+    expect(w.fake.calls()).toHaveLength(0);
+    expect(wake.status(CLI_CONVERSATION)).toBe("dead");
+    expect(w.logs.filter((line) => line.includes("is no longer running"))).toHaveLength(1);
+    expect(w.store.message(reply.id)!.delivery).toBeFalsy();
+  });
+
+  test("a hand-over with no pid is removed when nothing answers on its port, and kept while something does", async () => {
+    const listening = createServer().listen(0, "127.0.0.1");
+    await new Promise((resolve) => listening.once("listening", resolve));
+    const open = (listening.address() as { port: number }).port;
+    const closed = createServer().listen(0, "127.0.0.1");
+    await new Promise((resolve) => closed.once("listening", resolve));
+    const shut = (closed.address() as { port: number }).port;
+    await new Promise((resolve) => closed.close(resolve));
+    try {
+      const w = world(CLI_CONVERSATION);
+      w.link(`127.0.0.1:${shut}`, CLI_TOKEN, null);
+      const kept = "66666666-7777-4888-9999-aaaaaaaaaaaa";
+      w.link(`127.0.0.1:${open}`, "kept-token-0123456789", null, kept);
+      await w.start().sweep();
+      expect(existsSync(join(w.linksDir, `${CLI_CONVERSATION}.json`))).toBe(false);
+      expect(existsSync(join(w.linksDir, `${kept}.json`))).toBe(true);
+    } finally {
+      listening.close();
+    }
+  });
+});
+
+describe("how often it asks", () => {
+  test("a conversation the App no longer has is asked for again only after a doubling wait, at once when a hub file changes; its reply never drops", async () => {
+    let clock = 1_000_000;
+    const w = world();
+    w.fake.server("localhost:57930", { up: true, token: APP_TOKEN, product: "app", conversations: ["00000000-0000-4000-8000-000000000000"] });
+    w.fake.hub("app", 57930, APP_TOKEN);
+    const wake = w.start({ now: () => clock, waitCheckMs: 60_000 });
+    const reply = w.reply("Yes.");
+    await wake.sweep();
+    expect(w.lookups()).toBe(1);
+    for (let i = 0; i < 5; i++) await wake.sweep();
+    expect(w.lookups()).toBe(1);
+    clock += 15_001;
+    await wake.sweep();
+    expect(w.lookups()).toBe(2);
+    clock += 15_001; // The wait is 30 s now.
+    await wake.sweep();
+    expect(w.lookups()).toBe(2);
+    clock += 15_000;
+    await wake.sweep();
+    expect(w.lookups()).toBe(3);
+    // The App is launched again: its new hub file is asked at once, and the reply goes in.
+    w.fake.server("localhost:58000", { up: true, token: "new-token-0123456789", product: "app", conversations: [CONVERSATION] });
+    w.fake.hub("app", 58000, "new-token-0123456789");
+    await wake.sweep();
+    expect(w.store.message(reply.id)!.delivery).toMatchObject({ host: "antigravity", session: CONVERSATION });
+    expect(w.fake.sends()).toHaveLength(1);
+  });
+
+  test("a conversation's calls in a run ask once; a later call asks again", async () => {
+    let clock = 1_000_000;
+    const w = world();
+    w.fake.server("localhost:57930", { up: true, token: APP_TOKEN, product: "app", conversations: [CONVERSATION] });
+    w.fake.hub("app", 57930, APP_TOKEN);
+    const wake = w.start({ now: () => clock });
+    for (let i = 0; i < 4; i++) expect(await wake.wakes("antigravity", CONVERSATION, meta(CONVERSATION, "antigravity"))).toBe(true);
+    expect(w.lookups()).toBe(1);
+    clock += 15_001;
+    expect(await wake.wakes("antigravity", CONVERSATION, meta(CONVERSATION, "antigravity"))).toBe(true);
+    expect(w.lookups()).toBe(2);
+  });
+});
+
 test("the token is never in a log line, a store file, a claim or an argument", async () => {
   const w = world();
   w.fake.server("localhost:57930", { up: true, token: "rotated-token-000000", product: "app", conversations: [CONVERSATION], hang: "before" });
@@ -267,6 +358,17 @@ describe("what the agent is told", () => {
     expect(antigravityHandsOver(app, false, { agent_host: "antigravity", agent_session: CONVERSATION })).toBe(false);
     expect(antigravityHandsOver(cli, false, { agent_host: "antigravity", agent_session: CONVERSATION })).toBe(false);
     expect(replyNextStepText(false, "antigravity")).toBe(INBOX_REPLY_READ_LATER_TEXT);
+  });
+
+  test("the hand-over goes only to a caller filed as Antigravity, even when its call carries an agy conversation's _meta", () => {
+    const cli = { mcpReq: { _meta: meta(CLI_CONVERSATION, "antigravity-cli") } };
+    for (const host of ["claude-code", "codex", "pi", "opencode", "t3", "qwen", "cursor", "gemini", undefined]) {
+      expect(antigravityHandsOver(cli, false, { agent_host: host, agent_session: CLI_CONVERSATION })).toBe(false);
+      expect(antigravityHandsOver({ mcpReq: {} }, false, { agent_host: host, agent_session: CLI_CONVERSATION })).toBe(false);
+      expect(replyNextStepText(false, host, false, false)).toBe(INBOX_REPLY_READ_LATER_TEXT);
+    }
+    // Filed as Antigravity but with no _meta naming that conversation (a forged host): not told either.
+    expect(antigravityHandsOver({ mcpReq: {} }, false, { agent_host: "antigravity", agent_session: CLI_CONVERSATION })).toBe(false);
   });
 });
 

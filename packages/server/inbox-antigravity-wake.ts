@@ -36,7 +36,13 @@
  *    or calls the Inbox;
  *  - while a reply waits on a server that is not there (the App closed, a CLI
  *    conversation that has not handed over), the hub files and hand-overs are
- *    looked at again every few seconds, files only.
+ *    looked at again every few seconds, files only;
+ *  - a conversation the servers answer they do not have is asked for again
+ *    only after a wait that doubles (15 s up to 5 min), or at once when a hub
+ *    file or a hand-over changes; its reply keeps waiting. A conversation's
+ *    calls ask at most once per 15 s;
+ *  - a hand-over whose agy is gone (its pid, else its port) is removed on each
+ *    pass (packages/shared/inbox/antigravity-links.ts).
  *
  * The token never leaves this module: it is passed in the environment of the
  * one `agentapi` run, never in an argument, a log line, an event or a store
@@ -57,6 +63,7 @@ import {
   type InboxAntigravityProduct,
   type InboxMessage,
 } from "@plannotator/core/inbox-types";
+import { antigravityPidAlive, pruneAntigravityLinks } from "@plannotator/shared/inbox/antigravity-links";
 import type { InboxReplyCommand } from "@plannotator/shared/inbox/connection";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { agentHomeAllowed, type AgentEnvironment } from "./inbox-agents";
@@ -70,6 +77,11 @@ const RETRY_FIRST_MS = 30_000;
 const RETRY_MAX_MS = 10 * 60_000;
 /** While a reply waits on a server that is not there, how often the hub files and hand-overs are looked at. */
 const WAIT_CHECK_MS = 5_000;
+/** How long a lookup's answer stands for a conversation's own calls (each Inbox tool call asks whether it is woken). */
+const LOOKUP_FRESH_MS = 15_000;
+/** A conversation the servers answer they do not have: asked for again after this, doubling up to the max. */
+const MISSING_FIRST_MS = 15_000;
+const MISSING_MAX_MS = 5 * 60_000;
 /** The most of a transcript read back (its end): a received message is a recent step. */
 const TRANSCRIPT_TAIL_BYTES = 16 * 1024 * 1024;
 
@@ -92,16 +104,6 @@ type Asked = "found" | "absent" | "refused" | "unreachable";
 /** A refusal that sent nothing: no server there, or a token it does not take. */
 const NOT_SENT = /connection refused|ANTIGRAVITY_LS_ADDRESS is not set|Unauthenticated|missing CSRF|invalid CSRF|no such host/i;
 const NOT_FOUND = /NotFound|not_found|trajectory not found/i;
-
-function pidAlive(pid: unknown): boolean {
-  if (typeof pid !== "number" || !Number.isInteger(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code === "EPERM";
-  }
-}
 
 /** What `agentapi` printed: its JSON answer, or null. */
 function answerOf(stdout: string): { response?: Record<string, unknown>; error?: unknown } | null {
@@ -218,7 +220,7 @@ export function createInboxAntigravityWake(options: {
         const hub = JSON.parse(readFileSync(path, "utf8")) as { pid?: unknown; httpPort?: unknown; csrfToken?: unknown };
         const address = antigravityLoopbackAddress(`localhost:${hub.httpPort}`);
         // A file left by an earlier launch names a pid that is gone.
-        if (!address || !isAntigravityToken(hub.csrfToken) || !pidAlive(hub.pid)) continue;
+        if (!address || !isAntigravityToken(hub.csrfToken) || !antigravityPidAlive(hub.pid)) continue;
         found.push({ server: { address, token: hub.csrfToken, via: "hub", product }, at: statSync(path).mtimeMs });
       } catch {
         // Not a hub file this build reads.
@@ -277,16 +279,39 @@ export function createInboxAntigravityWake(options: {
     return "unreachable";
   };
   /** The server that holds the conversation now, and whether a hand-over for it was refused (its agy is gone). */
-  const find = async (conversation: string, timeoutMs: number): Promise<{ server: Server | null; linkGone: boolean; unreachable: boolean }> => {
+  const find = async (conversation: string, timeoutMs: number): Promise<{ server: Server | null; linkGone: boolean; unreachable: boolean; asked: number }> => {
     let linkGone = false;
     let unreachable = false;
+    let count = 0;
     for (const server of candidates(conversation)) {
+      count++;
       const asked = await ask(server, conversation, timeoutMs);
-      if (asked === "found") return { server, linkGone: false, unreachable: false };
+      if (asked === "found") return { server, linkGone: false, unreachable: false, asked: count };
       if (server.via === "link" && asked !== "unreachable") linkGone = true;
       if (asked === "unreachable") unreachable = true;
     }
-    return { server: null, linkGone, unreachable };
+    return { server: null, linkGone, unreachable, asked: count };
+  };
+  /** The last lookup's answer per conversation, for its own calls (a short while, while the server files stay the same). */
+  const recent = new Map<string, { at: number; mark: string; found: boolean }>();
+  /** Conversations the servers answered they do not have: not asked again before `until` while the server files stay the same. */
+  const missing = new Map<string, { until: number; wait: number; mark: string }>();
+  const missingNow = (conversation: string): boolean => {
+    const entry = missing.get(conversation);
+    return !!entry && entry.until > now() && entry.mark === serversMark();
+  };
+  const lookup = async (conversation: string, timeoutMs: number) => {
+    const where = await find(conversation, timeoutMs);
+    const mark = serversMark();
+    recent.set(conversation, { at: now(), mark, found: !!where.server });
+    if (where.server) missing.delete(conversation);
+    else if (where.asked > 0 && !where.unreachable && !where.linkGone) {
+      // Every server answered (no such conversation, or a token it does not take): back off until the files change.
+      const before = missing.get(conversation);
+      const wait = before && before.mark === mark ? Math.min(before.wait * 2, MISSING_MAX_MS) : MISSING_FIRST_MS;
+      missing.set(conversation, { until: now() + wait, wait, mark });
+    }
+    return where;
   };
 
   // ── The sessions it wakes ──
@@ -371,8 +396,8 @@ export function createInboxAntigravityWake(options: {
   const scheduleRetry = () => {
     if (retryTimer) clearTimeout(retryTimer);
     retryTimer = null;
-    if (retryAt.size === 0 || stopping.signal.aborted) return;
-    const next = Math.min(...[...retryAt.values()].map((retry) => retry.at));
+    if ((retryAt.size === 0 && missing.size === 0) || stopping.signal.aborted) return;
+    const next = Math.min(...[...retryAt.values()].map((retry) => retry.at), ...[...missing.values()].map((entry) => entry.until));
     retryTimer = setTimeout(() => {
       retryTimer = null;
       void sweep();
@@ -400,7 +425,9 @@ export function createInboxAntigravityWake(options: {
     const key = keyOf(id, session);
     const retry = retryAt.get(key);
     if (retry && retry.at > now()) return false;
-    const where = await find(session, options.sendTimeoutMs ?? INBOX_ANTIGRAVITY_SEND_TIMEOUT_MS);
+    // Not there when last asked, and no server file has changed since: it waits (the files are watched meanwhile).
+    if (missingNow(session)) return true;
+    const where = await lookup(session, options.sendTimeoutMs ?? INBOX_ANTIGRAVITY_SEND_TIMEOUT_MS);
     if (!where.server) {
       if (where.unreachable) {
         backOff(key);
@@ -469,7 +496,18 @@ export function createInboxAntigravityWake(options: {
 
   let sweeping: Promise<void> | null = null;
   let again = false;
+  /** The conversations whose hand-over was found ended on this pass: ended here too. */
+  const endLinks = async (): Promise<string[]> => {
+    const ended = await pruneAntigravityLinks(linksDir);
+    for (const session of ended) {
+      recent.delete(session);
+      if (!sweptSessions().has(session)) continue;
+      found.delete(session);
+    }
+    return ended;
+  };
   const sweepOnce = async (): Promise<void> => {
+    const ended = await endLinks();
     const sessions = sweptSessions();
     if (sessions.size === 0 && claimed.size === 0) return watchServers(null);
     const pending = store.pendingRepliesFor(sessions, { tags: true });
@@ -497,6 +535,13 @@ export function createInboxAntigravityWake(options: {
       if (inTranscript(key.slice(0, dot), key.slice(dot + 1), product)) delivered(key.slice(0, dot), key.slice(dot + 1));
     }
     for (const key of [...retryAt.keys()]) if (!pendingKeys.has(key)) retryAt.delete(key);
+    const waitingSessions = new Set(work.map((one) => one.session));
+    for (const session of [...missing.keys()]) if (!waitingSessions.has(session)) missing.delete(session);
+    for (const session of ended) {
+      if (!sessions.has(session)) continue;
+      if (waitingSessions.has(session) && !dead.has(session)) log(`Antigravity conversation ${session} is no longer running (its agy has exited); the reply waits in the Inbox.`);
+      dead.add(session);
+    }
     let waiting = false;
     for (const { item, session } of work) {
       if (stopping.signal.aborted) return;
@@ -557,11 +602,15 @@ export function createInboxAntigravityWake(options: {
       // A subagent's call, or a call that names another conversation, is not this conversation's own.
       if (meta !== undefined && antigravityConversationOfCall(meta)?.conversation !== session) return false;
       remember(session, meta);
+      // Asked a moment ago (its calls come in runs), or not there and not to be asked yet: that answer.
+      const last = recent.get(session);
+      if (last && now() - last.at < LOOKUP_FRESH_MS && last.mark === serversMark()) return last.found && !dead.has(session);
+      if (missingNow(session)) return false;
       let timer: ReturnType<typeof setTimeout> | undefined;
       const late = new Promise<null>((resolve) => {
         timer = setTimeout(() => resolve(null), options.lookupTimeoutMs ?? LOOKUP_TIMEOUT_MS);
       });
-      const looked = find(session, options.lookupTimeoutMs ?? LOOKUP_TIMEOUT_MS);
+      const looked = lookup(session, options.lookupTimeoutMs ?? LOOKUP_TIMEOUT_MS);
       looked.catch(() => {});
       const where = await Promise.race([looked, late]).finally(() => clearTimeout(timer));
       if (!where?.server) return false;
@@ -575,6 +624,8 @@ export function createInboxAntigravityWake(options: {
       remember(session, meta);
       sweptSessions().add(session);
       dead.delete(session);
+      // It called: a server holds it, so it is asked for again now.
+      missing.delete(session);
       for (const key of [...retryAt.keys()]) if (key.endsWith(`.${session}`)) retryAt.delete(key);
       void sweep();
     },

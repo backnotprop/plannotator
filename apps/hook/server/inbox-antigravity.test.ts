@@ -5,7 +5,7 @@
  * folder; nothing is run.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -15,6 +15,7 @@ import {
   INBOX_ANTIGRAVITY_PRINT_TEXT,
   agyArgsPrint,
   runInboxAntigravityCommand,
+  type AgyAncestor,
 } from "./inbox-antigravity-command";
 import { fillInboxToolArguments } from "./inbox-mcp-shim";
 
@@ -26,8 +27,14 @@ afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-function run(env: Record<string, string>, ancestors: string[][] = [["zsh", "-c", "plannotator inbox antigravity"], ["/home/x/.local/bin/agy", "--dangerously-skip-permissions"]]) {
-  const dataDir = mkdtempSync(join(tmpdir(), "plannotator-agy-link-"));
+/** A pid no process has (above the largest pid macOS and Linux hand out). */
+const GONE_PID = 2 ** 22 + 12345;
+const AGY: AgyAncestor[] = [
+  { pid: GONE_PID + 1, args: ["zsh", "-c", "plannotator inbox antigravity"] },
+  { pid: process.pid, args: ["/home/x/.local/bin/agy", "--dangerously-skip-permissions"] },
+];
+
+function run(env: Record<string, string>, ancestors: AgyAncestor[] = AGY, dataDir = mkdtempSync(join(tmpdir(), "plannotator-agy-link-"))) {
   roots.push(dataDir);
   const out: string[] = [];
   const err: string[] = [];
@@ -52,7 +59,24 @@ describe("plannotator inbox antigravity", () => {
     expect([...r.out, ...r.err].join("\n")).not.toContain(TOKEN);
     expect(statSync(r.linkPath).mode & 0o777).toBe(0o600);
     expect(statSync(join(r.dataDir, "inbox", "antigravity", "links")).mode & 0o777).toBe(0o700);
-    expect(JSON.parse(readFileSync(r.linkPath, "utf8"))).toMatchObject({ conversation: CONVERSATION, address: "localhost:56548", token: TOKEN });
+    expect(JSON.parse(readFileSync(r.linkPath, "utf8"))).toMatchObject({ conversation: CONVERSATION, address: "localhost:56548", token: TOKEN, pid: process.pid });
+  });
+
+  test("writing a hand-over removes the ones whose agy is gone, and keeps a running one's", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "plannotator-agy-link-"));
+    const dir = join(dataDir, "inbox", "antigravity", "links");
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    const ended = "11111111-2222-4333-8444-555555555555";
+    const running = "66666666-7777-4888-9999-aaaaaaaaaaaa";
+    const old = (conversation: string, pid: number) =>
+      writeFileSync(join(dir, `${conversation}.json`), JSON.stringify({ conversation, address: "localhost:50001", token: "old-token-0123456789", at: "2026-01-01T00:00:00.000Z", pid }), { mode: 0o600 });
+    old(ended, GONE_PID);
+    old(running, process.pid);
+    const r = run(cliEnv, AGY, dataDir);
+    expect(await r.code).toBe(0);
+    expect(existsSync(join(dir, `${ended}.json`))).toBe(false);
+    expect(existsSync(join(dir, `${running}.json`))).toBe(true);
+    expect(existsSync(r.linkPath)).toBe(true);
   });
 
   test("the App or the IDE: nothing to write, the Inbox reads their own file", async () => {
@@ -63,7 +87,10 @@ describe("plannotator inbox antigravity", () => {
   });
 
   test("agy -p ends after its turn: refused, nothing written", async () => {
-    const r = run(cliEnv, [["zsh", "-c", "x"], ["agy", "--dangerously-skip-permissions", "-p", "do", "it"]]);
+    const r = run(cliEnv, [
+      { pid: GONE_PID, args: ["zsh", "-c", "x"] },
+      { pid: process.pid, args: ["agy", "--dangerously-skip-permissions", "-p", "do", "it"] },
+    ]);
     expect(await r.code).toBe(1);
     expect(r.out).toEqual([INBOX_ANTIGRAVITY_PRINT_TEXT]);
     expect(existsSync(r.linkPath)).toBe(false);

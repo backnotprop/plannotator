@@ -18,6 +18,7 @@ import { chmodSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { antigravityLoopbackAddress, INBOX_ANTIGRAVITY_DATA_DIRS, INBOX_ANTIGRAVITY_LINKS_FOLDER, isAntigravityConversationId, isAntigravityToken, type InboxAntigravityLink } from "@plannotator/core/inbox-types";
 import { childEnv } from "@plannotator/shared/child-env";
+import { pruneAntigravityLinks } from "@plannotator/shared/inbox/antigravity-links";
 import { inboxDir } from "@plannotator/shared/inbox/schema";
 
 export const INBOX_ANTIGRAVITY_USAGE = [
@@ -49,16 +50,27 @@ export function agyArgsPrint(args: readonly string[]): boolean {
   return false;
 }
 
-/** The process tree above this one, nearest first: each process's argv as `ps` gives it (split on spaces). */
-function ancestorsArgv(startPid: number, maxDepth = 12): string[][] {
-  const out: string[][] = [];
+/** A process above this one: its pid and its argv as `ps` gives it (split on spaces). */
+export interface AgyAncestor {
+  pid: number;
+  args: string[];
+}
+
+/** The agy process this command runs under (the nearest `agy` above it), or null. */
+export function agyPidOf(ancestors: readonly AgyAncestor[]): number | null {
+  return ancestors.find((one) => one.args.length > 0 && basename(one.args[0]!) === "agy")?.pid ?? null;
+}
+
+/** The process tree above this one, nearest first. */
+function ancestorsArgv(startPid: number, maxDepth = 12): AgyAncestor[] {
+  const out: AgyAncestor[] = [];
   let pid = startPid;
   for (let depth = 0; depth < maxDepth && pid > 1; depth++) {
     const run = Bun.spawnSync(["ps", "-o", "ppid=,command=", "-p", String(pid)], { env: childEnv(), stdout: "pipe", stderr: "ignore", windowsHide: true });
     const line = run.stdout.toString().trim();
     const match = /^(\d+)\s+(.*)$/.exec(line);
     if (!match) break;
-    out.push(match[2]!.split(/\s+/));
+    out.push({ pid, args: match[2]!.split(/\s+/) });
     pid = Number(match[1]);
   }
   return out;
@@ -71,8 +83,8 @@ export async function runInboxAntigravityCommand(
     dataDir: string;
     write?: (line: string) => void;
     writeError?: (line: string) => void;
-    /** The agy processes above this one (tests pass them). */
-    ancestors?: () => string[][];
+    /** The processes above this one, nearest first (tests pass them). */
+    ancestors?: () => AgyAncestor[];
   },
 ): Promise<number> {
   const write = options.write ?? ((line: string) => void process.stdout.write(`${line}\n`));
@@ -100,14 +112,18 @@ export async function runInboxAntigravityCommand(
     return 0;
   }
   const ancestors = options.ancestors ?? (() => (process.platform === "win32" ? [] : ancestorsArgv(process.ppid)));
-  if (ancestors().some(agyArgsPrint)) {
+  const above = ancestors();
+  if (above.some((one) => agyArgsPrint(one.args))) {
     write(INBOX_ANTIGRAVITY_PRINT_TEXT);
     return 1;
   }
   const dir = join(inboxDir(options.dataDir), ...INBOX_ANTIGRAVITY_LINKS_FOLDER);
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   chmodSync(dir, 0o700);
-  const link: InboxAntigravityLink = { conversation: conversation.toLowerCase(), address, token, at: new Date().toISOString() };
+  // Hand-overs from agy launches that have ended hold tokens for servers that are gone: removed now.
+  await pruneAntigravityLinks(dir, conversation);
+  const pid = agyPidOf(above);
+  const link: InboxAntigravityLink = { conversation: conversation.toLowerCase(), address, token, at: new Date().toISOString(), ...(pid ? { pid } : {}) };
   const path = join(dir, `${conversation.toLowerCase()}.json`);
   const temp = `${path}.${process.pid}.tmp`;
   writeFileSync(temp, `${JSON.stringify(link)}\n`, { mode: 0o600 });

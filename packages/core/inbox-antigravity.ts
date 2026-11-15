@@ -105,4 +105,6 @@ export interface InboxAntigravityLink {
   address: string;
   token: string;
   at: string;
+  /** The agy process the conversation runs in, when it was found: the hand-over ends with it. */
+  pid?: number;
 }
