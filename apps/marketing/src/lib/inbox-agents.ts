@@ -1148,7 +1148,7 @@ export const AGENTS: Agent[] = [
       inboxLog,
     ],
     limits: [
-      { text: 'Tested with agy 1.5.9 and the App 2.32.1 on macOS. Windows and Linux are untested.', src: 'packages/server/inbox-antigravity-wake.ts (the versions in its header)' },
+      { text: 'Tested with agy 1.5.9 and the App 2.32.1 on macOS. The IDE, Windows and Linux are untested.', src: 'packages/server/inbox-antigravity-wake.ts (the versions in its header)' },
     ],
     examples: ['Ask the agent to send you a question in the Plannotator Inbox, then answer it there.'],
   },
