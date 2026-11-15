@@ -11,7 +11,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import type { SemanticDiffChange } from '@plannotator/shared/semantic-diff-types';
 import { SemanticDiffRows } from './semanticDiffShared';
 import { createReviewFileSourceLoader } from '../../hooks/useReviewFileSource';
-import { semanticDiffFile } from '@plannotator/sem-diff';
+import { semanticDiffFile } from '@plannotator/sem-jiff';
 import { semDiffChanges } from '../../semDiff/semDiffChanges';
 
 const hasDom = typeof document !== 'undefined';

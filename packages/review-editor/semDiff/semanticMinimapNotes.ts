@@ -1,4 +1,4 @@
-import type { SemanticDiffOperation } from '@plannotator/sem-diff';
+import type { SemanticDiffOperation } from '@plannotator/sem-jiff';
 
 export type SemanticMinimapKind = 'moved' | 'renamed' | 'reformatted';
 

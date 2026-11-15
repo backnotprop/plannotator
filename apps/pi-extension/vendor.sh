@@ -43,10 +43,13 @@ for f in child-env annotate-bundle plannotator-tool prompts review-core repo-fil
 done
 
 # Power Up's provider calls (sem-diff-opinion imports the engine's opinions and its Candidate type).
-printf '// @generated — DO NOT EDIT. Source: packages/sem-diff/src/candidate.ts\n' | cat - ../../packages/sem-diff/src/candidate.ts > generated/sem-diff-candidate.ts
-printf '// @generated — DO NOT EDIT. Source: packages/sem-diff/src/opinions.ts\n' | cat - ../../packages/sem-diff/src/opinions.ts \
+sem_jiff=node_modules/@plannotator/sem-jiff/src
+printf '// @generated — DO NOT EDIT. Source: @plannotator/sem-jiff src/candidate.ts\n' | cat - "$sem_jiff/candidate.ts" > generated/sem-diff-candidate.ts
+printf '// @generated — DO NOT EDIT. Source: @plannotator/sem-jiff src/opinions.ts\n' | cat - "$sem_jiff/opinions.ts" \
   | sed "s|from ['\"]\./candidate\.ts['\"]|from './sem-diff-candidate.ts'|g" > generated/sem-diff-opinions.ts
-sed -i.bak -e "s|from ['\"]@plannotator/sem-diff/opinions['\"]|from './sem-diff-opinions.ts'|g" -e "s|from ['\"]@plannotator/sem-diff/candidate['\"]|from './sem-diff-candidate.ts'|g" generated/sem-diff-opinion.ts && rm -f generated/sem-diff-opinion.ts.bak
+printf '// @generated — DO NOT EDIT. Source: @plannotator/sem-jiff src/grammars.ts\n' | cat - "$sem_jiff/grammars.ts" > generated/sem-diff-grammars.ts
+sed -i.bak -e "s|from ['\"]@plannotator/sem-jiff/opinions['\"]|from './sem-diff-opinions.ts'|g" -e "s|from ['\"]@plannotator/sem-jiff/candidate['\"]|from './sem-diff-candidate.ts'|g" generated/sem-diff-opinion.ts && rm -f generated/sem-diff-opinion.ts.bak
+sed -i.bak -e "s|from ['\"]@plannotator/sem-jiff/grammars['\"]|from './sem-diff-grammars.ts'|g" generated/sem-diff-assets.ts && rm -f generated/sem-diff-assets.ts.bak
 
 # Shape (the living board): the format (core/shape), the store and the route
 # core Pi's Shape routes mount (server/serverShape.ts). The store keys a shape's

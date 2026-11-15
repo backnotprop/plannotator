@@ -20,7 +20,7 @@
     "@pierre/trees": "1.0.0",
     "@plannotator/core": "workspace:*",
     "@plannotator/guide-viewer": "workspace:*",
-    "@plannotator/sem-diff": "workspace:*",
+    "@plannotator/sem-jiff": "file:/Users/romulus/plannotator/scratch/sem-diff-pack/public/plannotator-sem-jiff-0.2.0.tgz",
     "@plannotator/shared": "workspace:*",
     "@plannotator/ui": "workspace:*",
     "lucide-react": "^1.59.0",

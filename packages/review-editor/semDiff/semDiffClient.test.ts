@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { semanticDiffFile, languageForPath } from '@plannotator/sem-diff';
+import { semanticDiffFile, languageForPath } from '@plannotator/sem-jiff';
 import { createSemDiffClient } from './semDiffClient';
 import type { SemDiffReply, SemDiffRequest } from './protocol';
 import { semDiffChanges } from './semDiffChanges';

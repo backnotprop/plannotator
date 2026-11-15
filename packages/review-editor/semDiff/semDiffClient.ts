@@ -1,8 +1,9 @@
-import type { SecondOpinionReport, SemanticDiffFold, SemanticDiffOperation } from '@plannotator/sem-diff';
-import { languageForPath } from '@plannotator/sem-diff/languages';
-import { reviewSummary, SKIM_KINDS, type ReviewSummary } from '@plannotator/sem-diff/summary';
+import type { SecondOpinionReport, SemanticDiffFold, SemanticDiffOperation } from '@plannotator/sem-jiff';
+import { languageForPath } from '@plannotator/sem-jiff/languages';
+import { reviewSummary, SKIM_KINDS, type ReviewSummary } from '@plannotator/sem-jiff/summary';
 import type { SemDiffAdvert } from '@plannotator/shared/sem-diff-assets';
-import { SEM_DIFF_GRAMMARS, type SemDiffReply, type SemDiffRequest } from './protocol';
+import { SEM_DIFF_GRAMMARS } from '@plannotator/sem-jiff/grammars';
+import type { SemDiffReply, SemDiffRequest } from './protocol';
 
 export const SEM_DIFF_TIMEOUT_MS = 3_000;
 export const SEM_DIFF_OPINION_TIMEOUT_MS = 30_000;

@@ -100,7 +100,7 @@ import { applyFileLanguageFixes } from '../utils/highlightLanguage';
 import type { AIChatEntry } from '../hooks/useAIChat';
 import type { ReviewSearchMatch } from '../utils/reviewSearch';
 import { semanticMinimapNotes, type SemanticMinimapNote } from '../semDiff/semanticMinimapNotes';
-import type { SemanticDiffOperation } from '@plannotator/sem-diff';
+import type { SemanticDiffOperation } from '@plannotator/sem-jiff';
 import {
   applyItemSearchHighlights,
   clearItemSearchHighlights,

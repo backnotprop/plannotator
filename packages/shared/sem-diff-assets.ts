@@ -4,25 +4,11 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { brotliCompress, constants as zlibConstants, gzip } from "node:zlib";
 import { negotiateAppHtmlEncoding } from "./app-html";
+import { SEM_DIFF_GRAMMAR_FILES, SEM_DIFF_RUNTIME_FILE, SEM_DIFF_WASM_FILES } from "@plannotator/sem-jiff/grammars";
 
 export const SEM_DIFF_ROUTE_PREFIX = "/assets/sem-diff/";
 
-export const SEM_DIFF_RUNTIME_FILE = "web-tree-sitter.wasm";
-
-export const SEM_DIFF_GRAMMAR_FILES = [
-  "tree-sitter-typescript.wasm",
-  "tree-sitter-tsx.wasm",
-  "tree-sitter-python.wasm",
-  "tree-sitter-go.wasm",
-  "tree-sitter-rust.wasm",
-  "tree-sitter-java.wasm",
-  "tree-sitter-c_sharp.wasm",
-  "tree-sitter-php.wasm",
-  "tree-sitter-ruby.wasm",
-  "tree-sitter-kotlin.wasm",
-] as const;
-
-export const SEM_DIFF_FILES = [SEM_DIFF_RUNTIME_FILE, ...SEM_DIFF_GRAMMAR_FILES] as const;
+export const SEM_DIFF_FILES = SEM_DIFF_WASM_FILES;
 export type SemDiffFileName = (typeof SEM_DIFF_FILES)[number];
 
 export type SemDiffSources = Record<SemDiffFileName, Uint8Array>;

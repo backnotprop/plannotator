@@ -1,5 +1,5 @@
 import { storage } from '@plannotator/ui/utils/storage';
-import type { SecondOpinionLink, SecondOpinionState } from '@plannotator/sem-diff';
+import type { SecondOpinionLink, SecondOpinionState } from '@plannotator/sem-jiff';
 
 export interface PowerUpFileState {
   state: 'asking' | SecondOpinionState;

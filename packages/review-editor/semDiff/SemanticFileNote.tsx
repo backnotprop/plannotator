@@ -1,5 +1,5 @@
 import React from 'react';
-import type { ReviewSummary } from '@plannotator/sem-diff/summary';
+import type { ReviewSummary } from '@plannotator/sem-jiff/summary';
 
 export type SemanticFileState =
   | { status: 'working' }

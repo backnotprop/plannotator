@@ -1,4 +1,4 @@
-import type { SecondOpinionReport, SemanticDiffFold, SemanticDiffOperation } from '@plannotator/sem-diff';
+import type { SecondOpinionReport, SemanticDiffFold, SemanticDiffOperation } from '@plannotator/sem-jiff';
 import type { SemDiffAdvert } from '@plannotator/shared/sem-diff-assets';
 
 export interface SemDiffRequest {
@@ -14,19 +14,6 @@ export interface SemDiffRequest {
 export type SemDiffReply =
   | { id: number; ok: true; semanticOperations: SemanticDiffOperation[]; semanticFolds: SemanticDiffFold[]; patch: string; secondOpinion?: SecondOpinionReport }
   | { id: number; ok: false; error: string };
-
-export const SEM_DIFF_GRAMMARS = {
-  typescript: 'tree-sitter-typescript.wasm',
-  tsx: 'tree-sitter-tsx.wasm',
-  python: 'tree-sitter-python.wasm',
-  go: 'tree-sitter-go.wasm',
-  rust: 'tree-sitter-rust.wasm',
-  java: 'tree-sitter-java.wasm',
-  csharp: 'tree-sitter-c_sharp.wasm',
-  php: 'tree-sitter-php.wasm',
-  ruby: 'tree-sitter-ruby.wasm',
-  kotlin: 'tree-sitter-kotlin.wasm',
-} as const;
 
 const ROUTE = '/assets/sem-diff/';
 

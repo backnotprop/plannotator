@@ -1,6 +1,6 @@
-import { configure, languageForPath, semanticDiffFile } from '@plannotator/sem-diff';
-import { OpinionKeyError, type OpinionAnswer } from '@plannotator/sem-diff/opinions';
-import type { Candidate } from '@plannotator/sem-diff/candidate';
+import { configure, languageForPath, semanticDiffFile } from '@plannotator/sem-jiff';
+import { OpinionKeyError, type OpinionAnswer } from '@plannotator/sem-jiff/opinions';
+import type { Candidate } from '@plannotator/sem-jiff/candidate';
 import type { SemDiffReply, SemDiffRequest } from './protocol';
 
 let configuredFor: string | null = null;

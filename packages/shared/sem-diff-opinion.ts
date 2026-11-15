@@ -1,13 +1,13 @@
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { Candidate } from "@plannotator/sem-diff/candidate";
+import type { Candidate } from "@plannotator/sem-jiff/candidate";
 import {
   OpinionKeyError,
   checkKey,
   clefAnswers,
   jevAnswers,
   type OpinionAnswer,
-} from "@plannotator/sem-diff/opinions";
+} from "@plannotator/sem-jiff/opinions";
 
 export const SEM_DIFF_OPINION_ROUTE = "/api/sem-diff/opinion";
 export const SEM_DIFF_OPINION_SETTINGS_ROUTE = "/api/sem-diff/opinion/settings";

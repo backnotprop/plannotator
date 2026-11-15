@@ -14,6 +14,6 @@
 1. In a Pierre checkout, fetch, then `git checkout <new commit of amadeus/semantic-diffs>` and `git apply <this folder>/fork.patch`. Bump the `-sem.N` version.
 2. `pnpm install --frozen-lockfile --filter "@pierre/diffs..."`, then `moon run diffs:build`, then `pnpm pack` in `packages/diffs`.
 3. Replace the tarball here. Update the file name in the root `package.json`, the commit in this file and `fork.patch` (`git diff <upstream commit> -- packages/diffs/src packages/diffs/package.json`). Then `bun install`.
-4. In `packages/sem-diff`, run `PIERRE_DIR=<pierre checkout> bun run pierre-drift`. It fails if Pierre changed the semantic types that the engine fills.
+4. In a sem-jiff checkout (the engine behind the `@plannotator/sem-jiff` package), run `PIERRE_DIR=<pierre checkout> npm run pierre-drift`. It fails if Pierre changed the semantic types that the engine fills.
 
 The branch is rebased about weekly, so pin by commit and tarball, never by branch name. When Pierre releases semantic diffs on npm, drop this folder and the alias.
