@@ -13,6 +13,7 @@ import { filterSections, heldNews as heldNewsOf, heldNotice, listGroups, lookedR
 import { useAgentListFilter } from '../agentsList';
 import { filterAgentRows } from '../agents/model';
 import { filterTagRows } from '../threadTags';
+import { withLiveTagPicks } from '../listFilterTags';
 import { useThreadTagsHost } from '../useThreadTagsHost';
 import { projectsWithReadable, shownProjects } from '../projectMenu';
 import { projectActivity } from '../projectSort';
@@ -38,7 +39,7 @@ export interface ListViewInputs {
   openedHere: { readonly current: Set<string> };
   heldOpen: () => OpenThread | null;
   heldRead: ReadonlySet<string>;
-  tags: Omit<Parameters<typeof useThreadTagsHost>[0], 'routeTag' | 'machines' | 'windowRows' | 'latestSections' | 'tagColours'>;
+  tags: Omit<Parameters<typeof useThreadTagsHost>[0], 'routeTag' | 'machines' | 'windowRows' | 'openRow' | 'latestSections' | 'tagColours'>;
 }
 
 export function useListShown({ latest, projects, route, thread, threadRow, rowPatches, pinPatches, looking, shown, machines, hideAway, openedHere, heldOpen, heldRead, tags, combining }: ListViewInputs) {
@@ -83,7 +84,7 @@ export function useListShown({ latest, projects, route, thread, threadRow, rowPa
   const threadAgentContext = useMemo(() => ({ rows: windowRows, machines }), [windowRows, machines]);
   // The Agents section's filter (`#agent=<id>`): one agent's threads, named by its row's name.
   const filterAgent = useAgentListFilter(route.page === 'inbox' ? (route.agent ?? null) : null, machines, windowRows);
-  const { tagsOfRow, filterTag, shownTagId, threadTagsHost, sidebarTags, listColours } = useThreadTagsHost({ ...tags, routeTag: route.page === 'inbox' ? (route.tag ?? null) : null, machines, windowRows, latestSections, tagColours: latest?.tag_colours ?? null });
+  const { tagsOfRow, filterTag, shownTagId, threadTagsHost, sidebarTags, listColours } = useThreadTagsHost({ ...tags, routeTag: route.page === 'inbox' ? (route.tag ?? null) : null, machines, windowRows, openRow: threadRow, latestSections, tagColours: latest?.tag_colours ?? null });
   const projectNames = useMemo(
     () => machineProjectNames({ projects, sidebar: shownProjects(projects, sidebarKeeps), sections: shown ?? [], pins: pinRows }, machines, !filterMachine),
     [projects, sidebarKeeps, shown, pinRows, machines, filterMachine],
@@ -95,17 +96,19 @@ export function useListShown({ latest, projects, route, thread, threadRow, rowPa
       filterTagRows(filterAgentRows(filterMachineRows(filterSections(sections, route.project), machines, filterMachine?.id ?? null, hideAway), filterAgent, machines.self), shownTagId, tagsOfRow),
     [route.project, machines, filterMachine, filterAgent, hideAway, shownTagId, tagsOfRow],
   );
-  // The list's filter (listFilter.ts): this browser's picks; on a project's page its Project picks step aside. The
-  // day is in the keys so Today and the last N days move on at midnight.
+  // The list's filter (listFilter.ts): this browser's picks; on a project's page its Project picks step aside, on a
+  // tag's list its Tag picks. The day is in the keys so Today and the last N days move on at midnight.
   const [listFilterPicks, setListFilter] = useListFilter();
   const listFilterScoped = route.project !== null;
   const listFilterDay = localDay(Date.now());
-  const listFilterApplied = useMemo(() => appliedFilter(listFilterPicks, listFilterScoped), [listFilterPicks, listFilterScoped]);
+  // Until the list is read its tags are not known: the Tag picks hold (no moment of unfiltered rows).
+  const listTags = latest ? tags.listTags : undefined;
+  const listFilterApplied = useMemo(() => withLiveTagPicks(appliedFilter(listFilterPicks, listFilterScoped, filterTag !== null), listTags), [listFilterPicks, listFilterScoped, filterTag, listTags]);
   /** The list as the person reads it: `filterList`, then the filter. "N new" and the rows read this. */
   const filterShown = useCallback(
-    (sections: readonly InboxListSection[]) => filterListSections(filterList(sections), listFilterApplied, Date.now(), heldRead),
+    (sections: readonly InboxListSection[]) => filterListSections(filterList(sections), listFilterApplied, Date.now(), heldRead, tagsOfRow),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the day: a new one reads the spans again.
-    [filterList, listFilterApplied, listFilterDay, heldRead],
+    [filterList, listFilterApplied, listFilterDay, heldRead, tagsOfRow],
   );
   /** The rows before the filter: its menu's counts and choices. */
   const listFilterRows = useMemo(() => {

@@ -39,6 +39,7 @@ export interface ReplyDraftFileOps<F extends ReplyDraftFileRef = ReplyDraftFileR
   add: F[];
   remove: string[];
   place: { upload_id: string; pasted: InboxDraftPasted }[];
+  order?: string[];
 }
 
 export const NO_FILE_OPS: ReplyDraftFileOps = { add: [], remove: [], place: [] };
@@ -110,7 +111,12 @@ export function applyReplyDraftFileOps<F extends ReplyDraftFileRef>(
       return file;
     });
   const here = new Set(kept.map((file) => file.upload_id));
-  return [...kept, ...ops.add.filter((file) => !removed.has(file.upload_id) && !here.has(file.upload_id))];
+  const out = [...kept, ...ops.add.filter((file) => !removed.has(file.upload_id) && !here.has(file.upload_id))];
+  const rank = new Map((ops.order ?? []).map((id, index) => [id, index]));
+  const slots = out.flatMap((file, at) => (rank.has(file.upload_id) ? [at] : []));
+  const named = slots.map((at) => out[at]!).sort((a, b) => rank.get(a.upload_id)! - rank.get(b.upload_id)!);
+  slots.forEach((at, index) => (out[at] = named[index]!));
+  return out;
 }
 
 /**
@@ -121,6 +127,7 @@ export function rewordReplyDraftFileOps<F extends ReplyDraftFileRef>(ops: ReplyD
   if (from === to) return ops;
   const move = <P extends InboxDraftPasted>(pasted: P): P => ({ ...pasted, at: Math.max(0, Math.min(mapAnchor(from, to, pasted.at), to.length)) });
   return {
+    ...ops,
     add: ops.add.map((file) => (file.pasted ? { ...file, pasted: move(file.pasted) } : file)),
     remove: ops.remove,
     place: ops.place.map((entry) => ({ ...entry, pasted: move(entry.pasted) })),
@@ -131,7 +138,7 @@ export function rewordReplyDraftFileOps<F extends ReplyDraftFileRef>(ops: ReplyD
 export function diffReplyDraftFiles<F extends ReplyDraftFileRef>(before: readonly string[], after: readonly F[]): ReplyDraftFileOps<F> {
   const was = new Set(before);
   const now = new Set(after.map((file) => file.upload_id));
-  return { add: after.filter((file) => !was.has(file.upload_id)), remove: before.filter((id) => !now.has(id)), place: [] };
+  return { add: after.filter((file) => !was.has(file.upload_id)), remove: before.filter((id) => !now.has(id)), place: [], order: [...now] };
 }
 
 /**
@@ -152,6 +159,7 @@ export function composeReplyDraftFileOps<F extends ReplyDraftFileRef>(first: Rep
     ],
     remove: [...first.remove.filter((id) => !touched.has(id)), ...then.remove],
     place: [...first.place.filter((entry) => !placed.has(entry.upload_id)), ...then.place],
+    ...((then.order ?? first.order) ? { order: then.order ?? first.order } : {}),
   };
 }
 

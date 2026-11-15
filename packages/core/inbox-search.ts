@@ -439,6 +439,8 @@ export interface InboxSearchQuery {
   project?: string | null;
   status?: InboxSearchStatus | null;
   from?: InboxSearchFrom | null;
+  /** Tag ids: only threads in any of them, and what is in those threads (no projects). An id this Inbox has no tag for matches nothing. */
+  tags?: readonly string[] | null;
   /** One group only ('Show all'), from `offset`. */
   group?: InboxSearchGroupId | null;
   offset?: number;
