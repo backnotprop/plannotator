@@ -607,6 +607,7 @@ packages/inbox/linkedMachines.test.tsx
 packages/inbox/machineUpdate.test.tsx
 packages/inbox/voiceMirror.test.tsx
 packages/inbox/voiceComposeRenders.test.tsx
+packages/inbox/voiceKeptWords.test.tsx
 packages/inbox/voiceDebugLog.test.ts
 packages/inbox/voiceMiss.test.ts
 packages/ui/components/RenderedMarkdown.softLineBreaks.test.tsx
