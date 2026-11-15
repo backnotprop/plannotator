@@ -1,6 +1,6 @@
 {
   "name": "plannotator",
-  "version": "0.28.64",
+  "version": "0.28.65",
   "private": true,
   "description": "Interactive Plan Review for Claude Code - annotate plans visually, share with team, automatically send feedback",
   "author": "backnotprop",
@@ -51,6 +51,7 @@
     "build:ui-css": "bun run --cwd packages/ui build:css",
     "test:e2e:inbox": "playwright test -c tests/e2e/playwright.config.ts",
     "test:e2e:quarantine": "bun run scripts/e2e-quarantine.ts",
+    "verify:inbox-live": "bun scripts/inbox-live-verify.ts",
     "test:parity:inbox-thread": "bun scripts/inbox-thread-parity.ts"
   },
   "dependencies": {
@@ -83,6 +84,7 @@
   },
   "patchedDependencies": {
     "@opencode-ai/sdk@1.19.3": "patches/@opencode-ai%2Fsdk@1.19.3.patch",
-    "@pierre/diffs@1.7.0-beta.3": "patches/@pierre%2Fdiffs@1.7.0-beta.3.patch"
+    "@pierre/diffs@1.7.0-beta.3": "patches/@pierre%2Fdiffs@1.7.0-beta.3.patch",
+    "@pierre/trees@1.0.0": "patches/@pierre%2Ftrees@1.0.0.patch"
   }
 }
