@@ -82,11 +82,11 @@ describe("the owner's lessons reach every copy agents read", () => {
     for (const [name, body] of fields) expect([name, body.trimEnd().endsWith(REREAD)]).toEqual([name, true]);
   });
 
-  test("ask only what the person would recognise: right after 'Ask only what you cannot decide alone' on the agent tool, and in --help and llms.txt", () => {
+  test("ask only what the person would recognise: right after 'Ask only what you cannot decide alone' on the agent tool, and on the MCP body, --help and llms.txt", () => {
     for (const [name, tool] of Object.entries(agentTools)) {
       expect([name, fieldsOf(tool).body!.description!.includes(`Ask only what you cannot decide alone, about 8 a round at most. ${RECOGNISE}`)]).toEqual([name, true]);
     }
-    expect(missing(RECOGNISE, { "plannotator inbox --help": help, "llms.txt Inbox page": llms })).toEqual([]);
+    expect(missing(RECOGNISE, { ...bodies, "llms.txt Inbox page": llms })).toEqual([]);
   });
 
   test("a new big issue gets its own thread: every `thread` field, --help and llms.txt", () => {

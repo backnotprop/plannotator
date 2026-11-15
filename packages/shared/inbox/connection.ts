@@ -568,9 +568,9 @@ export const INBOX_SHOWING_RULE =
 export const INBOX_REREAD_RULE = 'Reread the body once before you send; check each date and duration.'
 
 /**
- * After "Ask only what you cannot decide alone" on the agent tool's body (approved 2026-11-15). Not in core's
- * QUESTION_AUTHORING_GUIDE: send_message's MCP description carries the guide, and Claude Code's 2,048-character cut
- * would drop its `- [x]` rule; --help and llms.txt carry it after the guide.
+ * After "Ask only what you cannot decide alone" on the agent tool's body, and on the MCP `body` (approved 2026-11-15).
+ * Not in core's QUESTION_AUTHORING_GUIDE: send_message's MCP description carries the guide, and Claude Code's
+ * 2,048-character cut would drop its `- [x]` rule; --help and llms.txt carry it after the guide.
  */
 export const INBOX_ASK_RECOGNISE_RULE = 'Ask only about things the person would recognise from using the product; decide the rest and say so in one line.'
 
