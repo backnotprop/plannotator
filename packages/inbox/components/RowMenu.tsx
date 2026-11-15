@@ -13,6 +13,7 @@ import { BulkTagList } from './BulkTags';
 import type { MenuPicks } from './useListPicks';
 import { bulkTargets } from '../rowPicks';
 import { formatCount } from '@plannotator/core/inbox-format';
+import { layoutSpikeOn, openInPane } from '../spike/gate';
 
 export interface ThreadRowMenuProps {
   className: string;
@@ -306,6 +307,20 @@ export const ThreadRowMenu = forwardRef<HTMLDivElement, ThreadRowMenuProps>(func
                   </Menu.Item>
                 )}
                 {(pinning.length > 0 || (target && tags?.can(target.thread_id))) && <Menu.Separator className="ib-pm-sep" />}
+                {/* SPIKE (never merged): the free layout's way in from a row (spike/gate.ts). */}
+                {layoutSpikeOn && target && (
+                  <>
+                    <Menu.Item className="ib-pmi" label="Open in a pane" data-row-action="spike-pane" onClick={() => openInPane(target.thread_id)}>
+                      <Icon name="sideBySide" size={15} />
+                      Open in a pane
+                    </Menu.Item>
+                    <Menu.Item className="ib-pmi" label="Open as a tab" data-row-action="spike-tab" onClick={() => openInPane(target.thread_id, true)}>
+                      <Icon name="stack" size={15} />
+                      Open as a tab
+                    </Menu.Item>
+                    <Menu.Separator className="ib-pm-sep" />
+                  </>
+                )}
                 {copies.map(item)}
                 {writes.length > 0 && <Menu.Separator className="ib-pm-sep" />}
                 {writes.map(item)}

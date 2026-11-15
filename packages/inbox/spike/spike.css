@@ -1,0 +1,53 @@
+/* SPIKE: the free layout beside the list. The engine's chrome takes the Inbox's own tokens; no new colours. */
+.ib-main > .spk-root { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 8px; }
+/* The list keeps its thread-open width whether or not a thread is open: the layout is the rest. */
+.ib-main:has(> .spk-root) > .ib-listcol:not(.ib-narrow):not(.ib-resizable) { flex: none; width: 380px; }
+/* The "opening…" placeholder would draw beside the layout for a moment. */
+.ib-main:has(> .spk-root) > .ib-pane { display: none; }
+
+.spk-bar { display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 0 4px; flex: none; }
+.spk-bar-t { font-weight: 600; font-size: var(--ib-fs-14, 14px); }
+.spk-bar-n { color: var(--muted-foreground); font-size: var(--ib-fs-13, 13px); }
+.spk-layout { flex: 1; min-height: 0; position: relative; }
+
+.spk-root .pierre-layout {
+  --layout-accent: var(--primary);
+  --layout-border: var(--ib-pane-line, var(--border));
+  --layout-pane-background: var(--card);
+  --layout-tab-color: var(--muted-foreground);
+  --layout-tab-hover-color: var(--foreground);
+  --layout-tab-hover-background: var(--muted);
+  --layout-tab-selected-color: var(--foreground);
+  --layout-tab-accent: var(--primary);
+  --layout-tab-close-hover-background: var(--muted);
+  color: var(--foreground);
+}
+.spk-root .pierre-layout-pane { border-radius: var(--ib-pane-r, 10px); box-shadow: var(--ib-pane-shadow); }
+.spk-root .pierre-layout-header { color: var(--muted-foreground); border-bottom-color: var(--ib-pane-line, var(--border)); }
+/* The focused pane: its title in the text colour, the others quiet (the design's active pane rule). */
+.spk-root .pierre-layout-pane[data-focused='true'] .pierre-layout-title { color: var(--foreground); font-weight: 600; }
+.spk-root .pierre-layout-header button { color: inherit; }
+
+/* Pane content fills its pane; the thread pane's card chrome is the pane's. */
+.spk-main, .spk-file { height: 100%; min-height: 0; display: flex; flex-direction: column; }
+.spk-main > .ib-pane, .spk-root .pierre-layout-content > .ib-pane { flex: 1; min-height: 0; border-radius: 0; box-shadow: none; }
+/* The engine's content box scrolls by default: the thread's own body scrolls instead, under a foot that stays put. */
+.spk-root .pierre-layout-content > .ib-pane { height: 100%; }
+.spk-main:empty::before { content: 'Open a thread from the list, or drag a row onto a pane.'; margin: auto; color: var(--muted-foreground); font-size: var(--ib-fs-14, 14px); }
+.spk-file > * { flex: 1; min-height: 0; }
+.spk-note { margin: auto; padding: 24px; color: var(--muted-foreground); }
+.spk-ro .ib-pbody { padding-top: 12px; }
+/* The pane's own indicator shows where focus is; the body takes focus only so the keys scroll it. */
+.spk-ro .ib-pbody:focus { outline: none; }
+.spk-ro-foot { display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--ib-pane-line, var(--border)); color: var(--muted-foreground); font-size: var(--ib-fs-13, 13px); flex: none; }
+.spk-ro-foot > button { margin-left: auto; }
+
+/* A row dragged over the layout: the half (or the middle, a tab) it lands in, filled. */
+.spk-drop { position: fixed; pointer-events: none; z-index: 60; border-radius: var(--ib-pane-r, 10px); }
+.spk-drop::after { content: ''; position: absolute; background: color-mix(in oklab, var(--primary) 18%, transparent); border-radius: inherit; inset: 0; }
+.spk-drop[data-place='left']::after { right: 50%; }
+.spk-drop[data-place='right']::after { left: 50%; }
+.spk-drop[data-place='top']::after { bottom: 50%; }
+.spk-drop[data-place='bottom']::after { top: 50%; }
+.spk-drop[data-place='center']::after { inset: 25%; }
+.spk-ghost { position: fixed; z-index: 61; pointer-events: none; max-width: 280px; padding: 6px 10px; border-radius: 8px; background: var(--popover, var(--card)); color: var(--foreground); box-shadow: var(--ib-pane-shadow); font-size: var(--ib-fs-13, 13px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
