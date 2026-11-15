@@ -187,14 +187,18 @@ jobs:
           --exclude "assets/*.mp4" --exclude "assets/*.webm"
           --exclude "assets/hosted/*"
 
-      - name: Set the Inbox prompt's content type
+      # The sync names .md text/markdown and .txt text/plain with no charset, so
+      # an agent reads the agent pages' curly quotes and arrows as Latin-1.
+      # Every .md and .txt the build emits goes up again with UTF-8 named
+      # (apps/marketing/llms.test.ts checks the patterns cover them).
+      - name: Set the agent pages' content type
         run: |
-          for page in prompt.md cloud-agent.md muse.md; do
-            if [ -f "apps/marketing/dist/inbox/$page" ]; then
-              aws s3 cp "apps/marketing/dist/inbox/$page" "s3://plannotator-marketing/inbox/$page" \
-                --content-type "text/markdown; charset=utf-8"
-            fi
-          done
+          aws s3 cp apps/marketing/dist/ s3://plannotator-marketing/ --recursive \
+            --exclude "*" --include "*.md" \
+            --content-type "text/markdown; charset=utf-8"
+          aws s3 cp apps/marketing/dist/ s3://plannotator-marketing/ --recursive \
+            --exclude "*" --include "*.txt" \
+            --content-type "text/plain; charset=utf-8"
 
       - name: Invalidate CloudFront
         run: |
