@@ -90,6 +90,9 @@ describe("GET /api/inbox/search", () => {
     expect((await w.get("q=x&from=them")).status).toBe(422);
     expect((await w.get("q=x&limit=500")).status).toBe(422);
     expect((await w.get("q=x&project=bogus")).status).toBe(422);
+    expect((await w.get("q=x&tag=bogus")).status).toBe(422);
+    expect((await w.get(`q=x&${Array.from({ length: 51 }, () => "tag=ini_01ZZZZZZZZZZZZZZZZZZZZZZZZ").join("&")}`)).status).toBe(422);
+    expect((await w.get("q=x&tag=ini_01ZZZZZZZZZZZZZZZZZZZZZZZZ")).status).toBe(200);
     expect((await w.get("q=x&project=prj_01M4V7JERHR0Y3XQERK1MR604E")).status).toBe(404);
     expect((await fetch(`${w.base}/api/inbox/search`, { method: "POST" })).status).toBe(405);
     // Filters: the project, and Status.

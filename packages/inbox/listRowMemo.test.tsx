@@ -170,7 +170,7 @@ test.skipIf(!hasDom)("a list read with tags (a new tags host each read, the filt
       const rows = sections.flatMap((s) => s.threads);
       root!.render(
         // App's host is a new object on every list read (its rows, counts and patches).
-        <ThreadTagsContext.Provider value={{ tags: [RELEASE], tagsOf: () => [], counts: new Map(), can: () => true, set: () => {}, createAndSet: () => {}, listed: null, rows, rowTags: (r) => r.tags ?? [], waiting: new Map() }}>
+        <ThreadTagsContext.Provider value={{ tags: [RELEASE], tagsOf: () => [], counts: new Map(), can: () => true, set: () => {}, createAndSet: () => {}, listed: null, rows, rowTags: (r) => r.tags ?? [] }}>
           <SidebarProvider>
             <div className="pn-inbox">
               <InboxList

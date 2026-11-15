@@ -29,12 +29,10 @@ export interface ThreadTagsHost {
   createAndSet: (threadId: string, name: string) => void;
   /** The tag whose list the window shows: its rows' menu offers Remove from <tag>. */
   listed: InboxInitiative | null;
-  /** Every row the window lists, the snoozed too (step 2: the Filter, Search and the preview read them). */
+  /** Every row the window lists, the snoozed too (step 2: the Filter and the preview read them). */
   rows?: readonly InboxListRow[];
   /** A row's tags by the window's rule (`rowTagsHere`). */
   rowTags?: RowTags;
-  /** Per tag, its threads that wait on the person (the sidebar's count). */
-  waiting?: ReadonlyMap<string, number>;
 }
 
 export const ThreadTagsContext = createContext<ThreadTagsHost | null>(null);

@@ -3,10 +3,11 @@
  * - the thread header's tag line: nothing for a thread in no tag; `#` once and the names as links to their lists;
  *   `+` opens Add tag's tick list (no Back row) and a tick puts the thread in or takes it out; no `+` where Add tag is
  *   not offered; a linked machine's thread shows and writes its tags by the window's rule, an older machine's none;
- * - the list's Filter: a Tag group of plain names once a tag holds a listed thread (none for a person with no tags,
- *   none on a tag's own list), several tags widening, combined with the other groups, the badge counting them;
- * - Search: `#name` leads with Tags and "Threads tagged …" (a linked machine's thread too), plain words find the tag
- *   under the results, a tag row opens its list;
+ * - the list's Filter: a Tag group, each name with the `#` mark, once a tag holds a listed thread (none for a person
+ *   with no tags, none on a tag's own list), several tags widening, combined with the other groups, the badge counting;
+ * - Search: tags are never results (the owner: "It can be a filter but nothing more"): with tags the results for
+ *   `#rel` and `rel` are what they are without; the Tag chip after From picks several (every machine's id of each
+ *   sent as `tag`), reads "Tagged Release or Windows", narrows with the other chips, and is absent with no tags;
  * - the Board-off preview of a sent `#name`: its threads (the one it sits in left out), "Show threads" to its list,
  *   a first tap previews and a second goes, a tag only a linked machine holds previews too.
  *
@@ -90,7 +91,6 @@ function hostOf(rows: InboxListRow[], tags: ListTag[], writes: string[], listed:
     listed,
     rows,
     rowTags,
-    waiting: new Map([['ini_release', 1]]),
   };
 }
 
@@ -254,7 +254,7 @@ const funnel = () => $('.ib-lhead [data-list-filter]')!;
 const rowIds = () => [...document.querySelectorAll('.ib-lbody [data-thread-id]')].map((n) => n.getAttribute('data-thread-id'));
 const groupsOf = () => [...document.querySelectorAll('[data-list-filter-menu] [data-list-filter-group]')].map((g) => g.getAttribute('data-list-filter-group'));
 
-test.skipIf(!hasDom)('filter: a Tag group of plain names with counts; several tags widen, another group narrows, the badge counts each', async () => {
+test.skipIf(!hasDom)('filter: a Tag group, each name with the `#` mark and a count; several tags widen, another group narrows, the badge counts each', async () => {
   draw(<FilterHarness value={hostOf(ROWS, [RELEASE, WINDOWS, DOCS], [])} />);
   await press(funnel());
   expect(groupsOf()).toContain('tags');
@@ -266,8 +266,8 @@ test.skipIf(!hasDom)('filter: a Tag group of plain names with counts; several ta
     ['Windows', '2'],
     ['Docs move', '1'],
   ]);
-  // Plain names: no mark before them (the `#` is the heading's, once).
-  expect(group.querySelector('[data-list-filter-tag] svg:not(.ib-pc-tick svg)')).toBeNull();
+  // Each name has the `#` in the icon column, as Agent and Project rows have their marks.
+  for (const item of group.querySelectorAll('[data-list-filter-tag]')) expect(item.firstElementChild!.matches('svg.ib-ic')).toBe(true);
   await click($('[data-list-filter-tag="ini_release"]')!);
   expect(rowIds()).toEqual(['msg_a', 'msg_b', 'msg_far']);
   await click($('[data-list-filter-tag="ini_windows"]')!);
@@ -297,19 +297,40 @@ test.skipIf(!hasDom)("filter: nothing new for a person with no tags, and no Tag 
 
 // ── Search ──
 
-const NO_ANSWER = { serverSession: 's', q: '', terms: [], took_ms: 1, indexing: false, threads: 6, totals: null, groups: null, recent: [], recent_searches: [] };
+const PROJECT = { id: 'prj_web', name: 'web' };
+/** The server's answer: a thread and a message for any words, so a result list is drawn. */
+function answerFor(q: string) {
+  const at = '2026-11-05T13:00:00Z';
+  return {
+    serverSession: 's',
+    q,
+    terms: q ? q.replace('#', '').split(/\s+/) : [],
+    took_ms: 1,
+    indexing: false,
+    threads: 6,
+    totals: q ? { threads: 1, messages: 1, files: 0, projects: 0 } : null,
+    groups: q
+      ? {
+          threads: [{ type: 'thread', id: 'msg_b', thread_id: 'msg_b', project: PROJECT, section: 'new', archived: false, at, title: 'Release notes', title_marks: [], thread_name: null }],
+          messages: [{ type: 'message', id: 'msg_b2', thread_id: 'msg_b', project: PROJECT, section: 'new', archived: false, at, author: { kind: 'agent', name: 'Claude Code' }, title: 'Release notes', snippet: { text: 'the #release checklist', marks: [[4, 8]] }, question: null }],
+        }
+      : null,
+    recent: q ? null : [],
+    recent_searches: [],
+  };
+}
 
-function palette(value: ThreadTagsHost, opened: string[]) {
-  savedFetch = globalThis.fetch;
+const asked: URLSearchParams[] = [];
+function palette(value: ThreadTagsHost | null) {
+  asked.length = 0;
+  savedFetch ??= globalThis.fetch;
   globalThis.fetch = (async (input: RequestInfo | URL) => {
-    const q = new URL(String(input), 'http://127.0.0.1:1').searchParams.get('q') ?? '';
-    return new Response(JSON.stringify({ ...NO_ANSWER, q, recent: q ? null : [], totals: { threads: 0, messages: 0, files: 0, projects: 0 }, groups: {} }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    const params = new URL(String(input), 'http://127.0.0.1:1').searchParams;
+    asked.push(params);
+    return new Response(JSON.stringify(answerFor(params.get('q') ?? '')), { status: 200, headers: { 'Content-Type': 'application/json' } });
   }) as typeof fetch;
-  draw(
-    <ThreadTagsContext.Provider value={value}>
-      <SearchPalette open phone={false} currentProject={null} projects={[]} onClose={() => {}} onOpenResult={(hash) => opened.push(hash)} />
-    </ThreadTagsContext.Provider>,
-  );
+  const node = <SearchPalette open phone={false} currentProject={null} projects={[{ id: 'prj_web', name: 'web', root: '/code/web' }] as never} onClose={() => {}} onOpenResult={() => {}} />;
+  draw(value ? <ThreadTagsContext.Provider value={value}>{node}</ThreadTagsContext.Provider> : node);
 }
 async function typeIn(value: string) {
   await act(async () => {
@@ -317,37 +338,79 @@ async function typeIn(value: string) {
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(el, value);
     el.dispatchEvent(new Event('input', { bubbles: true }));
   });
-  for (let i = 0; i < 40 && !document.querySelector('[data-search-group]'); i += 1) await act(async () => void (await new Promise((r) => setTimeout(r, 20))));
+  for (let i = 0; i < 40 && !document.querySelector('[data-result]'); i += 1) await act(async () => void (await new Promise((r) => setTimeout(r, 20))));
   await settle();
 }
-const headings = () => [...document.querySelectorAll('[data-search-group]')].map((g) => g.getAttribute('data-search-group'));
+/** What the results draw: every group's heading and rows, as text. */
+const resultsText = () => [...document.querySelectorAll('[data-search-group]')].map((g) => g.textContent);
+const chips = () => [...document.querySelectorAll('[data-chip]')].map((c) => c.getAttribute('data-chip'));
+const lastAsked = () => asked[asked.length - 1]!;
 
-test.skipIf(!hasDom)("search: `#rel` leads with the tag and its threads, a linked machine's too; Enter opens the tag's list", async () => {
-  const opened: string[] = [];
-  palette(hostOf(ROWS, [RELEASE, WINDOWS, DOCS], []), opened);
-  await typeIn('#rel');
-  expect(headings()).toEqual(['tags', 'tagged']);
-  expect(texts('[data-search-group="tagged"] .ib-sp-gh')).toEqual(['Threads tagged Release']);
-  expect(texts('[data-result="tag"] .ib-sp-p')).toEqual(['Release']);
-  expect($('[data-result="tag"] .ib-sp-time')!.textContent).toBe(', 3 threads · 1 waiting on you');
-  // The latest first; the older machine's thread is in no tag here.
-  expect([...document.querySelectorAll('[data-result="tagged"]')].map((n) => n.getAttribute('data-result-id'))).toEqual(['msg_a', 'msg_b', 'msg_far']);
-  await act(async () => {
-    $('[role="combobox"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
-  });
-  expect(opened).toEqual([tagHref('ini_release')]);
+test.skipIf(!hasDom)('search: tags are never results: `#rel` and `rel` draw the same results with tags as without, and ask the same', async () => {
+  const drawn: Record<string, string[]> = {};
+  const sent: Record<string, string> = {};
+  for (const withTags of [false, true]) {
+    for (const words of ['#rel', 'rel', 'move']) {
+      palette(withTags ? hostOf(ROWS, [RELEASE, WINDOWS, DOCS], []) : null);
+      await typeIn(words);
+      drawn[`${withTags}:${words}`] = resultsText();
+      sent[`${withTags}:${words}`] = lastAsked().toString();
+      act(() => root!.unmount());
+      document.body.innerHTML = '';
+    }
+  }
+  for (const words of ['#rel', 'rel', 'move']) {
+    expect(drawn[`true:${words}`]).toEqual(drawn[`false:${words}`]);
+    expect(sent[`true:${words}`]).toEqual(sent[`false:${words}`]);
+  }
+  // Nothing of a tag is drawn as a result: no Tags group, no "Threads tagged".
+  expect(drawn['true:#rel']!.join(' ')).not.toContain('Threads tagged');
+  expect(drawn['true:#rel']).toHaveLength(2);
 });
 
-test.skipIf(!hasDom)('search: plain words find a tag by a word of its name, under the results, with no thread list; no tags, no group', async () => {
-  palette(hostOf(ROWS, [RELEASE, WINDOWS, DOCS], []), []);
-  await typeIn('move');
-  expect(headings()).toEqual(['tags']);
-  expect(texts('[data-result="tag"] .ib-sp-p')).toEqual(['Docs move']);
+test.skipIf(!hasDom)('search: the Tag chip after From picks several (the menu stays open), sends every id of each, narrows with the other chips; none with no tags', async () => {
+  palette(hostOf(ROWS, [RELEASE, WINDOWS, DOCS], []));
+  await typeIn('notes');
+  expect(chips()).toEqual(['type', 'project', 'status', 'from', 'tag']);
+  const chip = () => $('[data-chip="tag"]')!;
+  expect(chip().textContent).toBe('Any tag');
+  await click(chip());
+  const menu = () => $('.ib-sp-menu[aria-label="Tag"]')!;
+  expect([...menu().querySelectorAll('.ib-sp-mi')].map((n) => [n.textContent, n.getAttribute('role'), n.getAttribute('aria-checked')])).toEqual([
+    ['Any tag', 'menuitemradio', 'true'],
+    ['Release', 'menuitemcheckbox', 'false'],
+    ['Windows', 'menuitemcheckbox', 'false'],
+    ['Docs move', 'menuitemcheckbox', 'false'],
+  ]);
+  await click(menu().querySelectorAll('.ib-sp-mi')[1]!);
+  await settle();
+  expect(menu()).not.toBeNull();
+  // Release is held here and on the Mac mini: both ids go, so the server finds its own whichever it holds.
+  expect(lastAsked().getAll('tag')).toEqual(['ini_release', 'ini_mini_release']);
+  await click(menu().querySelectorAll('.ib-sp-mi')[2]!);
+  await settle();
+  expect(lastAsked().getAll('tag')).toEqual(['ini_release', 'ini_mini_release', 'ini_windows']);
+  expect(chip().textContent).toBe('Tagged Release or Windows');
+  expect(menu().querySelectorAll('[aria-checked="true"]')).toHaveLength(2);
+  // Unticking takes every id of it.
+  await click(menu().querySelectorAll('.ib-sp-mi')[1]!);
+  await settle();
+  expect(lastAsked().getAll('tag')).toEqual(['ini_windows']);
+  expect(chip().textContent).toBe('Tagged Windows');
+  // With another chip: both are sent ("and").
+  await click($('[data-chip="from"]')!);
+  await click([...document.querySelectorAll('.ib-sp-menu .ib-sp-mi')].find((n) => n.textContent === 'Me')!);
+  await settle();
+  expect([lastAsked().get('from'), lastAsked().getAll('tag')]).toEqual(['me', ['ini_windows']]);
+  // Its × clears the tags alone.
+  await click($('[data-unset="tag"]')!);
+  await settle();
+  expect([lastAsked().get('from'), lastAsked().getAll('tag')]).toEqual(['me', []]);
+  expect(chip().textContent).toBe('Any tag');
   act(() => root!.unmount());
-  globalThis.fetch = savedFetch!;
-  palette(hostOf(ROWS, [], []), []);
-  await typeIn('#rel');
-  expect(headings()).toEqual([]);
+  document.body.innerHTML = '';
+  palette(hostOf(ROWS, [], []));
+  expect(chips()).toEqual(['type', 'project', 'status', 'from']);
 });
 
 // ── The Board-off preview of a sent tag ──

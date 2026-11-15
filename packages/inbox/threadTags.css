@@ -46,5 +46,3 @@
   .pn-inbox .ib-ttag { height: 32px; padding: 0 8px; }
   .pn-inbox .ib-ttags-add { width: 32px; height: 32px; }
 }
-/* A tag row and a tagged thread row in search are one line: the mark and the words on the right sit on its middle. */
-.ib-sp-row:is([data-result="tag"], [data-result="tagged"]) > :is(.ib-sp-mark, .ib-sp-time) { align-self: center; margin-top: 0; }

@@ -96,9 +96,8 @@ const [tagPatches, setTagPatches] = useState<ReadonlyMap<string, readonly string
             listed: filterTag,
             rows: windowRows,
             rowTags: tagsOfRow,
-            waiting: tagWaiting,
           },
-    [listTags, tagPatches, windowRows, tagCounts, machines, filterTag, tagsOfRow, tagWaiting],
+    [listTags, tagPatches, windowRows, tagCounts, machines, filterTag, tagsOfRow],
   );
   const setThreadTagRef = useRef(setThreadTag);
   setThreadTagRef.current = setThreadTag;

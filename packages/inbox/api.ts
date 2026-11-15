@@ -1267,6 +1267,7 @@ export interface SearchRequest {
   group?: InboxSearchGroupId | null;
   offset?: number;
   limit?: number;
+  tags?: readonly string[] | null;
   /** The project open in the list: a tie boost, never a filter. */
   current?: string | null;
   /** Newest first instead of best match (sent only for `newest`, so a best-match request is what it was). */
@@ -1424,9 +1425,8 @@ export function uploadFile(
 /** Search (read only). `signal` aborts a request a newer query replaced. */
 export async function searchInbox(request: SearchRequest, signal?: AbortSignal): Promise<SearchModel> {
   const query = new URLSearchParams({ q: request.q });
-  if (request.project) query.set('project', request.project);
-  if (request.status) query.set('status', request.status);
-  if (request.from) query.set('from', request.from);
+  for (const key of ['project', 'status', 'from'] as const) if (request[key]) query.set(key, request[key]!);
+  for (const tag of request.tags ?? []) query.append('tag', tag);
   if (request.group) query.set('group', request.group);
   if (request.offset) query.set('offset', String(request.offset));
   if (request.limit) query.set('limit', String(request.limit));

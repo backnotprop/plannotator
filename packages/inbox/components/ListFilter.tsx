@@ -7,8 +7,8 @@
  *   colour and a small count in its corner (`CountBadge`, the PRs button's size): one per ticked row. No tokens, no line over the list: what is picked is read in the menu.
  * - The menu (Base UI's: arrows, Home/End, type-ahead, Escape and Tab close, focus back to the funnel): Not seen (one
  *   row: only the rows drawn bold), Updated (Today, Last 7 days, Last 30 days, Custom range…), Agent (several; only
- *   with two agents or more), Pull request (Open, Draft, Merged, Closed, Has a PR, No PR, several; only once a thread in the list has a PR), Tag (several, plain
- *   names; only once a tag holds a thread in the list, never on a tag's own list), then Project last, since the
+ *   with two agents or more), Pull request (Open, Draft, Merged, Closed, Has a PR, No PR, several; only once a thread in the list has a PR), Tag (several, each
+ *   with the `#` mark; only once a tag holds a thread in the list, never on a tag's own list), then Project last, since the
  *   sidebar already narrows by project (each project, several; only on the Inbox page and with two projects or
  *   more). Each row shows how many threads it would leave and a tick when picked, then "Clear filters". It stays open while picking. A phone draws it as the bottom
  *   sheet titled "Filter".
@@ -25,6 +25,7 @@ import { formatCount } from '../format';
 import { HostMark, Icon } from '../icons';
 import { Tip } from './Tip';
 import { RefMarkIcon } from '../board/RefMark';
+import { TagIcon } from './InitiativePeek';
 import { CountBadge } from './CountBadge';
 import { useThreadTags } from '../threadTags';
 import { toggledTagPick, withLiveTagPicks } from '../listFilterTags';
@@ -153,7 +154,7 @@ export function ListFilterButton({ source, phone }: { source: ListFilterSource; 
           on={filter.tags.includes(tag.id)}
           count={countWhere(rows, filter, now, 'tags', (row) => (tagsOf ? tagsOf(row) : (row.tags ?? [])).includes(tag.id), tagsOf)}
           onToggle={() => set({ tags: toggledTagPick(source.filter.tags, tag, host?.tags ?? []) })}
-          mark={null}
+          mark={<TagIcon className="ib-ic" />}
           data={{ 'data-list-filter-tag': tag.id }}
         />
       ))}
