@@ -11,9 +11,9 @@ import { noteReviews } from '../contextNotes/model';
 import { INBOX_PERMISSION_FULL, isInboxPermissionSession } from '@plannotator/core/inbox-permission';
 import { inboxLaunchedSession } from '@plannotator/core/inbox-run-line';
 import { LaunchChoiceMeta } from './LaunchChoiceMeta';
-import { INBOX_UPLOAD_MAX_BYTES, inboxActionInDraft, inboxActionPersonMark, type InboxDraftFile, type InboxMessageWire, type InboxQuestion, type InboxReplyDraft, type InboxThread, type InboxUpload } from '@plannotator/core/inbox-types';
+import { ThreadTagLine } from './ThreadTagLine';
+import { INBOX_UPLOAD_MAX_BYTES, inboxActionInDraft, inboxActionPersonMark, inboxLaunchStops, inboxPersonAnsweredSince, isInboxNote, isInboxT3WaitReason, type InboxAnnotationRecord, type InboxAttachmentState, type InboxDraftFile, type InboxInlineImage, type InboxMessageWire, type InboxQuestion, type InboxReplyDraft, type InboxThread, type InboxUpload } from '@plannotator/core/inbox-types';
 import { isQuestionAnswerEmpty, type QuestionAnswer } from '@plannotator/core/question-block';
-import { inboxLaunchStops, inboxPersonAnsweredSince, isInboxNote, isInboxT3WaitReason, type InboxAnnotationRecord, type InboxAttachmentState, type InboxInlineImage } from '@plannotator/core/inbox-types';
 import { useRefRepo } from '../links';
 import { InboxApiError, InboxHeldError, inboxApi, type OutboxView, type TagMode, type ThreadModel } from '../api';
 import { awayLine, outboxLine } from '../machines';
@@ -45,7 +45,7 @@ import { agentName, formatCount, fullTime, plural, shortAgentName, whenTime } fr
 import { inboxRowSnoozed, inboxSnoozeWhen } from '@plannotator/core/inbox-snooze';
 import { foldSnippet, holdingsOf, isDelivered, isPersonLook, isPersonReply, lastNonNote, lookBoundary, newSinceLook, planFolds, snippetText } from '../folding';
 import { highlightSearchHits } from '../search/highlight';
-import { AuthorMark, Icon } from '../icons';
+import { AuthorMark, HostMark, Icon } from '../icons';
 import { createCountStore, NewPill } from '../parts/NewPill';
 import { HoldingChips, SnippetText } from '../parts/FoldLine';
 import { atEnd, followBy, lookThrough, measureFirstLines, unseenArrivals, useSeenOnSight } from '../seenOnSight';
@@ -152,7 +152,6 @@ import {
 } from '../tags';
 import type { MentionSource } from '@plannotator/ui/utils/mentions';
 import { TAG_TOKEN_CLASS } from './ComposerField';
-import { HostMark } from '../icons';
 import { INBOX_REPLY_SKILL_AUDIENCE, annotationSkillTexts, inboxSkillFilter, inboxSkillsBlock, withSkillsBlock } from '../skills';
 import { fetchSkillCatalog, getCachedSkillCatalog } from '@plannotator/ui/utils/skillCatalog';
 import { type ActionMark } from './ActionChecklist';
@@ -4984,6 +4983,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         )}
         <HeadMark thread={thread} where="body" />
         <h2 className="ib-subject" dir="auto" tabIndex={-1}>{reviewView?.title ?? (thread.pull_keys?.length || thread.review_started ? thread.thread_name : null) ?? thread.subject ?? '(no subject)'}</h2>
+        <ThreadTagLine threadId={thread.thread_id} phone={phone} />
         {reviewView?.fromThread && (
           <p className="ib-rvfrom" data-review-from="">
             Review from thread{' '}

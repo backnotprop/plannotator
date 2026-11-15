@@ -73,7 +73,7 @@ export function MessageBody({
       if (!link || event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return;
       event.preventDefault();
       event.stopPropagation();
-      if (link.getAttribute('href')!.startsWith('#board&') && tapOpens(link)) return;
+      if (tapOpens(link)) return;
       window.location.hash = link.getAttribute('href')!;
     },
     [tapOpens],

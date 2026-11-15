@@ -94,8 +94,11 @@ const [tagPatches, setTagPatches] = useState<ReadonlyMap<string, readonly string
                     if (tag) void setThreadTagRef.current(threadId, tag, true);
                   }),
             listed: filterTag,
+            rows: windowRows,
+            rowTags: tagsOfRow,
+            waiting: tagWaiting,
           },
-    [listTags, tagPatches, windowRows, tagCounts, machines, filterTag],
+    [listTags, tagPatches, windowRows, tagCounts, machines, filterTag, tagsOfRow, tagWaiting],
   );
   const setThreadTagRef = useRef(setThreadTag);
   setThreadTagRef.current = setThreadTag;

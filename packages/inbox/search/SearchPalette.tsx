@@ -30,6 +30,9 @@ import { ShapeThumb } from '@plannotator/ui/components/shape/ShapeGrid';
 import { KeyCaps } from '../shortcuts/hint';
 import { isTextCut, ProjectTipText, Tip } from '../components/Tip';
 import { actionLabel, busyWord, namesActionWord, startedLine, type ComposeAction } from '../compose/model';
+import { useThreadTags } from '../threadTags';
+import { tagSearch } from './tagSearch';
+import { TagSearchRow } from './TagSearchRow';
 import {
   FROM_OPTIONS,
   GROUP_LABELS,
@@ -469,6 +472,8 @@ export default function SearchPalette(props: SearchPaletteProps) {
   const sort = useSearchSort();
   const [fades, setFades] = useState({ top: false, bottom: false });
 
+  // The window's tags (approval "inbox-thread-tags", step 2): absent on an Inbox that keeps none.
+  const tagHost = useThreadTags();
   const names = useMemo(() => projectNames(projects), [projects]);
   const projectName = useCallback((id: string) => names.get(id) ?? id, [names]);
   const projectNameRef = useRef(projectName);
@@ -610,9 +615,15 @@ export default function SearchPalette(props: SearchPaletteProps) {
     const found = answered.model.indexing ? [] : searchGroups(answered.model, expanded);
     // A picked type lists its group alone, without Actions.
     if (answered.type) return found;
+    // Tags the words find: first for `#name`, with the first tag's threads; under the results for plain words.
+    const tagHits = tagSearch(answered.q, tagHost, projectName);
+    const tagGroups: SearchGroupView[] = [];
+    if (tagHits.tags.length > 0) tagGroups.push({ id: 'tags', heading: 'Tags', total: null, options: tagHits.tags.map((tag) => ({ kind: 'tag' as const, tag })) });
+    if (tagHits.tagged) tagGroups.push({ id: 'tagged', heading: `Threads tagged ${tagHits.tagged.name}`, total: null, options: tagHits.tagged.threads.map((thread) => ({ kind: 'tag-thread' as const, thread })) });
+    const withTags = tagHits.lead ? [...tagGroups, ...found] : [...found, ...tagGroups];
     // Shape's boards the words find: their own group, under the results.
     const shapeList = shapes && answered.q.trim() ? shapes(answered.q) : [];
-    const withShapes = shapeList.length ? [...found, { id: 'shapes' as const, heading: 'Shape', total: null, options: shapeList.map((shape) => ({ kind: 'shape' as const, shape })) }] : found;
+    const withShapes = shapeList.length ? [...withTags, { id: 'shapes' as const, heading: 'Shape', total: null, options: shapeList.map((shape) => ({ kind: 'shape' as const, shape })) }] : withTags;
     const actionList = actions ? actions(answered.q) : [];
     if (actionList.length === 0) return withShapes;
     const group: SearchGroupView = { id: 'actions', heading: 'Actions', total: null, options: actionList.map((action) => ({ kind: 'action' as const, action })) };
@@ -620,7 +631,7 @@ export default function SearchPalette(props: SearchPaletteProps) {
     // matched, or when the words name an action; below real results otherwise.
     const first = !answered.q.trim() || withShapes.length === 0 || namesActionWord(answered.q);
     return first ? [group, ...withShapes] : [...withShapes, group];
-  }, [answered, expanded, actions, shapes]);
+  }, [answered, expanded, actions, shapes, tagHost, projectName]);
   const options = useMemo(() => groups.flatMap((g) => g.options), [groups]);
   const optionsKey = answered?.key ?? '';
   // The highlight snaps to the first row when the rows change (a new answer), never while arrowing.
@@ -696,13 +707,14 @@ export default function SearchPalette(props: SearchPaletteProps) {
       onAction?.(option.action);
       return;
     }
-    if (option.kind === 'shape') {
+    if (option.kind === 'shape' || option.kind === 'tag' || option.kind === 'tag-thread') {
+      const hash = option.kind === 'shape' ? option.shape.hash : option.kind === 'tag' ? option.tag.hash : option.thread.hash;
       if (newTab) {
-        window.open(`${window.location.pathname}${window.location.search}${option.shape.hash}`, '_blank', 'noopener');
+        window.open(`${window.location.pathname}${window.location.search}${hash}`, '_blank', 'noopener');
         return;
       }
       close('opened');
-      onOpenResult(option.shape.hash, null);
+      onOpenResult(hash, null);
       return;
     }
     if (option.kind === 'recent-q') {
@@ -1059,6 +1071,9 @@ export default function SearchPalette(props: SearchPaletteProps) {
                   </span>
                 </div>
               );
+            }
+            if (option.kind === 'tag' || option.kind === 'tag-thread') {
+              return <TagSearchRow key={option.kind === 'tag' ? `tag-${option.tag.id}` : `tagged-${option.thread.id}`} option={option} common={common} />;
             }
             if (option.kind === 'more') {
               return (

@@ -33,7 +33,10 @@ export type SearchOption =
   | { kind: 'more'; group: InboxSearchGroupId; total: number; shown: number }
   | { kind: 'recent-q'; q: string }
   // Shape's boards (approval "shape-inbox-placement": the "Shape" group, a small preview, the title, "project · …").
-  | { kind: 'shape'; shape: SearchShape };
+  | { kind: 'shape'; shape: SearchShape }
+  // Tags and a tag's threads (approval "inbox-thread-tags", step 2; tagSearch.ts).
+  | { kind: 'tag'; tag: import('./tagSearch').SearchTag }
+  | { kind: 'tag-thread'; thread: import('./tagSearch').SearchTaggedThread };
 
 /** A board the search found by its title or project. */
 export interface SearchShape {
@@ -49,7 +52,7 @@ export interface SearchShape {
 }
 
 export interface SearchGroupView {
-  id: InboxSearchGroupId | 'recent' | 'recent-searches' | 'actions' | 'shapes';
+  id: InboxSearchGroupId | 'recent' | 'recent-searches' | 'actions' | 'shapes' | 'tags' | 'tagged';
   heading: string;
   /** The group's total when it holds more than it shows (the heading's quiet count). */
   total: number | null;
