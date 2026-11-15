@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { hasPlannotatorServerHeader } from "@plannotator/shared/plannotator-server-marker";
-import { tunnelEnv } from "@plannotator/server/cf-tunnel";
+import { tunnelEnv } from "./cf-tunnel";
 
 export type EdgeFetch = (url: string, init: RequestInit) => Promise<Response>;
 

@@ -1,5 +1,5 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { writeDoorSession } from "@plannotator/shared/inbox/cf-access-door";
@@ -169,5 +169,22 @@ describe("the Inbox through Cloudflare Access", () => {
     writeDoorSession(dataDir, { key: KEY_A, port: server.port as number, pid: process.pid, secret: SECRET_A });
     const asset = await fetch(`${door}/s/${KEY_A}/assets/app.js`, { headers: await owner({ Host: TEST_SESSION_HOST, "Accept-Encoding": "gzip" }) });
     expect(await asset.text()).toBe("console.log('session asset');");
+  });
+
+  test("a person signed in through Cloudflare cannot change the Cloudflare settings", async () => {
+    const { inbox, door } = await start();
+    const read = await fetch(`${door}/api/inbox/cloudflare-access`, { headers: await owner() });
+    expect([read.status, ((await read.json()) as { code: string }).code]).toEqual([403, "local_only"]);
+    for (const action of ["switch", "remove", "setup", "zones"]) {
+      const write = await fetch(`${door}/api/inbox/cloudflare-access/${action}`, {
+        method: "POST",
+        headers: { ...(await owner()), "Content-Type": "application/json", Origin: `https://${TEST_HOST}` },
+        body: JSON.stringify({ on: false, token: "x", serverSession: inbox.serverSession }),
+      });
+      expect([action, write.status]).toEqual([action, 403]);
+    }
+    const local = await fetch(`http://127.0.0.1:${inbox.port}/api/inbox/cloudflare-access`);
+    expect(local.status).toBe(200);
+    expect(JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")).inboxCloudflareAccess.on).toBe(true);
   });
 });

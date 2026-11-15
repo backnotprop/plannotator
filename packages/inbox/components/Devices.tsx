@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { inboxApi, type CloudflareAccessSettings, type LanState, type PairedDevice, type TailnetState, type TailscaleSettings } from '../api';
+import { inboxApi, type LanState, type PairedDevice, type TailnetState, type TailscaleSettings } from '../api';
 import { shortTime } from '../format';
 import { Icon, TailscaleMark } from '../icons';
 import { PairFlow } from './PairFlow';
 import { Tip } from './Tip';
 import { ThroughCloudflare } from './ThroughCloudflare';
+import { Switch } from './SettingSwitch';
 
 const PLATFORM: Record<string, string> = { ios: 'iPhone', android: 'Android' };
 
@@ -189,21 +190,6 @@ export function devicesNeedAttention(phones: PhonesState | null, tailscale: Tail
 }
 
 /** A switch whose name is its row's visible title (label in name). */
-function Switch({ on, labelledBy, disabled, onClick, label }: { on: boolean; labelledBy?: string; label?: string; disabled?: boolean; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      className="ib-sw"
-      aria-checked={on}
-      aria-labelledby={labelledBy}
-      aria-label={label}
-      disabled={disabled}
-      onClick={onClick}
-    />
-  );
-}
-
 /**
  * Over your tailnet, in Devices: the browser on your other devices, which
  * the phone app does not need (owner, decision 2: written out). One switch,
@@ -373,7 +359,6 @@ export interface DevicesSectionProps {
   /** Null: this Inbox does not serve phones (PLANNOTATOR_INBOX_PHONES off), so Devices shows Over your tailnet only. */
   phones: PhonesState | null;
   tailscale: TailscaleSettings | undefined;
-  cloudflareAccess?: CloudflareAccessSettings | null;
   via: 'local' | 'tailnet';
   tailscaleBusy: boolean;
   onToggleTailscale: (next: boolean, replaceExposed?: boolean) => void;
@@ -388,7 +373,7 @@ export interface DevicesSectionProps {
  * Over your tailnet for browsers on other devices, the difference written
  * out (owner, decision 2).
  */
-export function DevicesSection({ phones, tailscale, cloudflareAccess, via, tailscaleBusy, onToggleTailscale, pairing, onPairing }: DevicesSectionProps) {
+export function DevicesSection({ phones, tailscale, via, tailscaleBusy, onToggleTailscale, pairing, onPairing }: DevicesSectionProps) {
   // The owner pairs and switches from this computer or any of their own devices over the tailnet (owner ruling 2026-11-11).
   const pairButton = useRef<HTMLButtonElement>(null);
   const [justPaired, setJustPaired] = useState(false);
@@ -488,7 +473,7 @@ export function DevicesSection({ phones, tailscale, cloudflareAccess, via, tails
         </>
       )}
       {tailscale && <OverYourTailnet state={tailscale} via={via} busy={tailscaleBusy} onToggle={onToggleTailscale} />}
-      {cloudflareAccess?.configured && <ThroughCloudflare state={cloudflareAccess} />}
+      <ThroughCloudflare />
     </>
   );
 }

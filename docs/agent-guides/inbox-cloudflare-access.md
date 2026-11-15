@@ -50,6 +50,14 @@ After the checks, `Cf-*`, `Tailscale-*`, `X-Forwarded-*`, `Plannotator-Door*` an
 - `cloudflared tunnel --no-autoupdate run` gets `TUNNEL_TOKEN` in its environment, restarts with backoff (1 s doubling to 60 s, reset after a minute up), and counts connections from its log.
 - State: `inbox.json` `cloudflare_access` (`inbox status`, `--json`), Settings.
 
+**Settings → Devices → Cloudflare** (`components/ThroughCloudflare.tsx`, `CloudflareSetup.tsx`, `data/cloudflareAccess.ts`, `cloudflare.css`), under "Over your tailnet", in that section's cards, rows, flow and checks:
+- Not set up: what it needs, whether `cloudflared` was found (the install command if not), and Set up.
+- The form: the e-mail (typed, never filled in), the token (a password field; cleared from the page's state the moment setup is sent), then Find domains, a domain to pick, and the two names it will create before anything exists.
+- Setting up: the five steps tick as the server reports them; a failure names its step, says nothing was left behind (or what was), and offers Try again.
+- On: Inbox and sessions addresses with Copy, a QR code of the Inbox's, the tunnel's health, who may sign in, Turn off / Turn on, and Remove (asks for a token again, and says so).
+- A problem (the tunnel not connected, `cloudflared` missing, the door's error) is one line with the "Not working" chip.
+- Through the Cloudflare door itself the block says to change it on the computer or over the tailnet; the routes refuse door requests.
+
 **Tests.**
 - `packages/shared/inbox/cf-access-verify.test.ts`: every refusal, the key cache, the settings.
 - `cf-access-door.test.ts`: routing with two sessions, registrations, the secret.

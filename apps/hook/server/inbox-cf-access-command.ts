@@ -1,12 +1,12 @@
-import { chmodSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { rmSync } from "node:fs";
 import { loadConfig, saveConfig } from "@plannotator/shared/config";
 import { readInboxRegistry, type InboxRegistryEntry } from "@plannotator/shared/inbox/registry";
-import { storedCfAccess, type CfAccessStored } from "@plannotator/shared/inbox/cf-access";
-import { createCfApi, runCfSetup, runCfTeardown, type CfApi, type CfSetupStep, type CfTeardownStep } from "@plannotator/shared/inbox/cf-access-api";
+import { storedCfAccess } from "@plannotator/shared/inbox/cf-access";
+import { createCfApi, type CfApi, type CfSetupStep, type CfTeardownStep } from "@plannotator/shared/inbox/cf-access-api";
 import { cloudflaredInstallHint, findCloudflared, tunnelTokenPath } from "@plannotator/server/cf-tunnel";
 import { writeUrlQr } from "@plannotator/server/qr";
-import { runOutsideChecks, type EdgeFetch } from "./inbox-cf-access-checks";
+import type { EdgeFetch } from "@plannotator/server/cf-access-checks";
+import { runCfAccessRemoveFlow, runCfAccessSetupFlow } from "@plannotator/server/cf-access-flow";
 
 export const CF_ACCESS_USAGE = [
   "Usage:",
@@ -179,53 +179,25 @@ export async function runCfAccessCommand(args: readonly string[], deps: CfAccess
       err("--port must be from 1024 to 65535.");
       return 2;
     }
-    if (before?.on) {
-      saveConfig({ inboxCloudflareAccess: { ...before, on: false } });
-      await tellInbox(readInboxRegistry(deps.dataDir));
-    }
-    let result;
-    try {
-      result = await runCfSetup(makeApi(token), { email, port, account: flag(args, "--account") || undefined, zone: flag(args, "--zone") || undefined, hostname: flag(args, "--hostname") || before?.host || undefined }, (step, detail) =>
-        err(`  ${SETUP_LINES[step]}${detail ? `: ${detail}` : ""}`),
-      );
-    } catch (error) {
-      err(`Setup stopped: ${error instanceof Error ? error.message : String(error)}`);
+    const flow = await runCfAccessSetupFlow(
+      { dataDir: deps.dataDir, api: makeApi(token), binary, apply: () => tellInbox(readInboxRegistry(deps.dataDir)), edgeFetch: deps.edgeFetch, checkTimeoutMs: deps.checkTimeoutMs },
+      { email, port, account: flag(args, "--account") || undefined, zone: flag(args, "--zone") || undefined, hostname: flag(args, "--hostname") || before?.host || undefined },
+      (step, state) => {
+        if (step === "checks" && state === "running") err("  Checking from outside that nothing gets in without your login…");
+      },
+      (step, detail) => err(`  ${SETUP_LINES[step]}${detail ? `: ${detail}` : ""}`),
+    );
+    if (!flow.ok) {
+      err(`Not turned on (${flow.step}): ${flow.message}`);
+      err(flow.leftover.length > 0 ? `Could not remove what setup made; delete in Cloudflare: ${flow.leftover.join(", ")}.` : "Nothing was left behind in Cloudflare.");
       return 1;
     }
-    const tokenFile = tunnelTokenPath(deps.dataDir);
-    mkdirSync(dirname(tokenFile), { recursive: true, mode: 0o700 });
-    writeFileSync(tokenFile, result.tunnelToken, { mode: 0o600 });
-    chmodSync(tokenFile, 0o600);
-    const stored: CfAccessStored = {
-      on: false,
-      host: result.host,
-      sessionHost: result.sessionHost,
-      team: result.team,
-      aud: result.aud,
-      allow: [email.trim().toLowerCase()],
-      port,
-      account: result.account,
-      zone: result.zone,
-      tunnel: result.tunnel,
-      app: result.app,
-      dnsRecord: result.dnsRecord,
-      sessionDnsRecord: result.sessionDnsRecord,
-    };
-    saveConfig({ inboxCloudflareAccess: stored });
-    err("  Checking from outside that nothing gets in without your login…");
-    const checked = await runOutsideChecks({ hosts: [result.host, result.sessionHost], team: result.team, port, binary, tokenFile, edgeFetch: deps.edgeFetch, timeoutMs: deps.checkTimeoutMs });
-    if (!checked.ok) {
-      err(`Not turned on: ${checked.failure}`);
-      err("To remove what setup made: plannotator inbox cloudflare-access teardown");
-      return 1;
-    }
-    saveConfig({ inboxCloudflareAccess: { ...stored, on: true } });
     const after = (await tellInbox(await deps.ensureRunning().catch(() => null))) ?? null;
-    const url = `https://${result.host}/`;
+    const url = `https://${flow.host}/`;
     out(url);
     writeUrlQr(url);
     if (after?.error) err(`The Inbox could not open it yet: ${after.error}`);
-    err(`On. Open it on your device and sign in with ${email.trim().toLowerCase()}. Sessions: add --cloudflare-access to review, annotate or last; they open at https://${result.sessionHost}/s/…`);
+    err(`On. Open it on your device and sign in with ${email.trim().toLowerCase()}. Sessions: add --cloudflare-access to review, annotate or last; they open at https://${flow.sessionHost}/s/…`);
     return 0;
   }
 
@@ -251,14 +223,11 @@ export async function runCfAccessCommand(args: readonly string[], deps: CfAccess
       err("No API token: set CLOUDFLARE_API_TOKEN, or use --local-only.");
       return 2;
     }
-    try {
-      await runCfTeardown(makeApi(token), stored, (step) => err(`  ${TEARDOWN_LINES[step]}`));
-    } catch (error) {
-      err(`Teardown stopped: ${error instanceof Error ? error.message : String(error)}. It is off here; run teardown again to finish.`);
+    const removed = await runCfAccessRemoveFlow({ dataDir: deps.dataDir, api: makeApi(token), apply: () => tellInbox(readInboxRegistry(deps.dataDir)) }, (step) => err(`  ${TEARDOWN_LINES[step]}`));
+    if (!removed.ok) {
+      err(`Teardown stopped: ${removed.message}`);
       return 1;
     }
-    rmSync(tunnelTokenPath(deps.dataDir), { force: true });
-    saveConfig({ inboxCloudflareAccess: undefined });
     out("Cloudflare Access: removed. Revoke the API token in Cloudflare (My Profile, API Tokens) if you no longer need it.");
     return 0;
   }

@@ -101,9 +101,13 @@ describe("plannotator inbox cloudflare-access setup", () => {
     };
     const passing = async () => new Response("hello", { status: 200 });
     for (const edgeFetch of [leaky, passing]) {
-      const run = deps({ api: standIn().api, binary: fakeCloudflared(), edgeFetch, pickPort: () => port });
+      const stand = standIn();
+      const run = deps({ api: stand.api, binary: fakeCloudflared(), edgeFetch, pickPort: () => port });
       expect(await runCfAccessCommand(["setup", "--email", "me@example.com"], run.deps)).toBe(1);
-      expect(config().on).toBe(false);
+      expect(config()).toBeUndefined();
+      expect(existsSync(tunnelTokenPath(dataDir))).toBe(false);
+      expect(stand.calls.filter((c) => c.startsWith("DELETE")).length).toBe(5);
+      expect(run.err.join("\n")).toContain("Nothing was left behind");
       expect(run.err.join("\n")).toContain(edgeFetch === leaky ? "reached this computer" : "was let through");
     }
   });

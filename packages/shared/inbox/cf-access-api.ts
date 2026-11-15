@@ -90,7 +90,12 @@ function pickHost(input: CfSetupInput, zoneName: string): string {
   return host;
 }
 
-export async function runCfSetup(api: CfApi, input: CfSetupInput, onStep: (step: CfSetupStep, detail?: string) => void = () => {}): Promise<CfSetupResult> {
+export async function runCfSetup(
+  api: CfApi,
+  input: CfSetupInput,
+  onStep: (step: CfSetupStep, detail?: string) => void = () => {},
+  created: CfTeardownIds = {},
+): Promise<CfSetupResult> {
   const email = normalizeCfAccessEmail(input.email);
   if (!isEmailAddress(email)) throw new CfApiError("--email must be the e-mail address you sign in with.");
 
@@ -102,6 +107,7 @@ export async function runCfSetup(api: CfApi, input: CfSetupInput, onStep: (step:
   const account = input.account ? accounts.find((a) => a.id === input.account) : accounts.length === 1 ? accounts[0] : undefined;
   if (!account) throw new CfApiError(accounts.length === 0 ? "The token sees no Cloudflare account." : "The token sees several accounts; pass --account <id>.");
   const A = `/accounts/${account.id}`;
+  created.account = account.id;
   onStep("account");
 
   const zones = await api.call<Named[]>("GET", `/zones?per_page=50&account.id=${enc(account.id)}`);
@@ -112,6 +118,7 @@ export async function runCfSetup(api: CfApi, input: CfSetupInput, onStep: (step:
     (!wanted && fromHost && zones.find((z) => fromHost.endsWith(`.${z.name}`))) ||
     (!wanted && !fromHost && zones.length === 1 ? zones[0] : undefined);
   if (!zone || !zone.name) throw new CfApiError(zones.length === 0 ? "The token sees no zone: a domain on Cloudflare is needed." : "Pass --zone <your domain> (the token sees several).");
+  created.zone = zone.id;
   const host = pickHost(input, zone.name);
   const sessionHost = `${host.split(".")[0]!.slice(0, 61)}-s.${zone.name}`;
   onStep("zone", zone.name);
@@ -127,7 +134,9 @@ export async function runCfSetup(api: CfApi, input: CfSetupInput, onStep: (step:
 
   const tunnelName = `${CF_TUNNEL_PREFIX}${host.split(".")[0]}`;
   const tunnels = await api.call<Named[]>("GET", `${A}/cfd_tunnel?is_deleted=false&name=${enc(tunnelName)}`);
-  const tunnel = tunnels.find((t) => t.name === tunnelName) ?? (await api.call<Named>("POST", `${A}/cfd_tunnel`, { name: tunnelName, config_src: "cloudflare" }));
+  const reusedTunnel = tunnels.find((t) => t.name === tunnelName);
+  const tunnel = reusedTunnel ?? (await api.call<Named>("POST", `${A}/cfd_tunnel`, { name: tunnelName, config_src: "cloudflare" }));
+  if (!reusedTunnel) created.tunnel = tunnel.id;
   const tokenResult = await api.call<string | { token?: string }>("GET", `${A}/cfd_tunnel/${tunnel.id}/token`);
   const tunnelToken = typeof tokenResult === "string" ? tokenResult : (tokenResult?.token ?? "");
   if (!tunnelToken) throw new CfApiError("Cloudflare returned no tunnel token.");
@@ -166,6 +175,7 @@ export async function runCfSetup(api: CfApi, input: CfSetupInput, onStep: (step:
   const app = existing
     ? await api.call<Named & { aud?: string }>("PUT", `${A}/access/apps/${existing.id}`, appBody)
     : await api.call<Named & { aud?: string }>("POST", `${A}/access/apps`, appBody);
+  if (!existing) created.app = app.id;
   if (!app.aud) throw new CfApiError("Cloudflare returned no AUD tag for the Access application.");
   onStep("app");
 
@@ -184,6 +194,10 @@ export async function runCfSetup(api: CfApi, input: CfSetupInput, onStep: (step:
       ? await api.call<Named>("PUT", `/zones/${zone.id}/dns_records/${own.id}`, record)
       : await api.call<Named>("POST", `/zones/${zone.id}/dns_records`, record);
     made.push(dns.id);
+    if (!own) {
+      if (made.length === 1) created.dnsRecord = dns.id;
+      else created.sessionDnsRecord = dns.id;
+    }
   }
   onStep("dns", host);
 
