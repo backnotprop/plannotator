@@ -75,6 +75,8 @@ import {
   isQwenSessionId,
   INBOX_T3_HOST,
   isT3ThreadId,
+  INBOX_ANTIGRAVITY_HOST,
+  antigravityConversationOfCall,
   INBOX_MCP_WAKING_HOSTS,
   INBOX_WAKING_HOSTS,
   INBOX_HOST_NAMES,
@@ -206,6 +208,9 @@ import { createGitlabHosts, unnamedForgeHost, type GitlabHosts } from "./inbox-g
 import { classifyForgeHost, normalizeForgeHost } from "@plannotator/core/forge-refs";
 import { systemSetupRoute } from "./inbox-system-setup";
 import { SYSTEM_READ_PATHS, systemFilesCache, systemReadRoute, systemSwitch } from "./inbox-system";
+import { createInboxScheduled, INBOX_SCHEDULED_ERROR_STATUS, INBOX_SCHEDULED_OFF_TEXT, type InboxScheduled } from "./inbox-scheduled";
+import { scheduledRoute, scheduledSwitch } from "./inbox-scheduled-routes";
+import { execLoginCommand, inboxLoginItem, type InboxLoginItem } from "./inbox-scheduled-login";
 import { bitbucketRefReader, createRefCards, readSignedInHosts, refCliRunner, type BitbucketRefReader, type RefRunner } from "./ref-cards";
 import { closePull, reopenAllowed, reopenPull, PULL_REOPEN_WINDOW_MS } from "@plannotator/shared/inbox-pull-close";
 import { mergePull } from "@plannotator/shared/inbox-pull-merge";
@@ -227,9 +232,11 @@ import { createInboxLiveSessions, takesOver, thereInThread } from "./inbox-sessi
 import { inboxAgentsGroup, inboxFolderProject, inboxMergedAgents, inboxStartOfDay, type InboxAgentWait } from "./inbox-agents-list";
 import { createInboxCodexWake, type InboxCodexWake } from "./inbox-codex-wake";
 import { createT3Local, INBOX_T3_PROBE_MS, type T3Route } from "./inbox-t3-local";
+import { t3SettingsStatus } from "./inbox-t3-settings";
 import { createInboxVoice } from "./inbox-voice";
 import { createInboxQwenWake, type InboxQwenWake } from "./inbox-qwen-wake";
 import { createInboxT3Wake, createT3ModOwner, type InboxT3Wake, type T3Connect } from "./inbox-t3-wake";
+import { createInboxAntigravityWake, type InboxAntigravityWake } from "./inbox-antigravity-wake";
 import { CloudAgentError, createInboxCloudAgents, hasCloudWake } from "./inbox-cloud-agents";
 import { PERSONAL_AGENTS_BANNER_BASE } from "@plannotator/core/inbox-personal-agents";
 import { personalAgentConnectedHere } from "./inbox-personal-agents";
@@ -308,10 +315,13 @@ import { DEFAULT_FAVICON_STYLE, isFaviconStyle, type FaviconStyle } from "@plann
 import { themeChooserLook, themeChooserOpen } from "@plannotator/shared/inbox/theme-chooser";
 import { createCardMarks } from "./inbox-card-marks";
 import { validateFilePath } from "@plannotator/shared/review-core";
+import { createInboxPullLookups, refCardsKindReader } from "./inbox-pull-lookups";
 import { createInboxPulls, InboxPullsError, linkInboxPulls, pullCards, threadAgent, type InboxPullLinkStore, type InboxPullRepo } from "./inbox-pulls";
+import { pullDiffScopeOf } from "./inbox-pull-diff-scope";
 import { parseFileLevelComments, parsePRReviewAction, submitPRReview as submitForgeReview, type PRRef, type PRReviewFileComment, type PRRuntime } from "@plannotator/shared/pr-provider";
 import { prCommandRuntime } from "./pr";
 import { createInboxPullLinks } from "./inbox-pull-links";
+import { createInboxPullLooked, pullLookedSeenOf } from "./inbox-pull-looked";
 import { createPullRisk, type PullRiskOptions } from "./inbox-pull-risk";
 import { createPullAvatars, type PullAvatarOptions } from "./inbox-pull-avatars";
 import { pullMediaResponse, pullMediaSizesResponse } from "./inbox-pull-media";
@@ -553,6 +563,8 @@ export interface InboxServerOptions {
   cloudflareAccessRoutes?: CfAccessRouteHooks;
   /** Tests: more agents beside Claude Code (`createInboxLaunch`'s `hosts`), for a sandbox with no CLI to start. */
   launchHosts?: (context: LaunchHostContext) => LaunchHost[];
+  /** Tests: the routines' login item (inbox-scheduled-login.ts). Default: the real one, under the Inbox's own folder under a test. */
+  scheduledLogin?: InboxLoginItem;
   /** Tests: how step 1 of Pair a phone reads this computer (packages/server/inbox-pairing-checks.ts). Default: its own tools. */
   pairingProbes?: Partial<PairingProbes>;
   /**
@@ -575,6 +587,8 @@ export interface InboxServerOptions {
   board?: boolean;
   /** Thread steps, decided here instead of config.json `inboxSteps` (tests). Absent: config.json decides on every request. */
   steps?: boolean;
+  /** Tests: routines on or off, over config.json `inboxScheduledThreads`. */
+  scheduled?: boolean;
   /** Code review, decided here instead of config.json `inboxCodeReview` (tests). Absent: config.json decides on every request. */
   codeReview?: boolean;
   /** Shape, decided here instead of config.json `inboxShape` (tests). Absent: config.json decides on every request. */
@@ -659,6 +673,8 @@ export interface InboxServerOptions {
   /** The T3 Code wake (inbox-t3-wake.ts): tests pass a scripted T3, a clock and a log. */
   t3Wake?: { connect?: T3Connect; now?: () => number; log?: (line: string) => void; lookupTimeoutMs?: number; grantCheckMs?: number };
   cloudWake?: { now?: () => number; gapMs?: number; timeoutMs?: number; retryMs?: number; log?: (line: string) => void };
+  /** The Antigravity wake (inbox-antigravity-wake.ts): tests shorten its time limits and log. */
+  antigravityWake?: { now?: () => number; log?: (line: string) => void; sendTimeoutMs?: number; lookupTimeoutMs?: number; waitCheckMs?: number; appClients?: readonly string[] };
 }
 
 /**
@@ -729,6 +745,8 @@ export interface InboxServer {
   /** The Qwen Code wake (inbox-qwen-wake.ts): tests run its sweep. */
   qwenWake: InboxQwenWake;
   t3Wake: InboxT3Wake;
+  /** The Antigravity wake (inbox-antigravity-wake.ts): tests run its sweep. */
+  antigravityWake: InboxAntigravityWake;
   cloudWake: InboxCloudWaker;
   /** Shape's watch of the boards: tests read how many windows it reads the store for. */
   shapeWatchers: () => number;
@@ -746,6 +764,7 @@ function json(body: unknown, status = 200): Response {
 }
 
 const ERROR_STATUS: Record<string, number> = {
+  ...INBOX_SCHEDULED_ERROR_STATUS,
   validation_error: 422,
   project_unresolved: 503,
   owner_only: 403,
@@ -1147,7 +1166,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // `toWindow`), with the device that asked: a paired phone answers a permission prompt as a window does; a linked
   // machine does for a press in a window there (`window`), and may start, stop or trust for one (remote launch).
   const fromDeviceDoor = new WeakMap<Request, InboxDoorCaller>();
-  // A PR's close, reopen or merge through the door: only a linked machine's, for a press in its window (mark `pulls`).
+  // A PR's close, reopen or merge through the door: only a linked machine's, sent with its window's mark (mark `pulls`).
+  // The mark stops a bare call there, not a program there that imitates the window (inbox-launch.md "Accepted, not defended").
   const pullWriteFromWindow = (req: Request): boolean => {
     const door = fromDeviceDoor.get(req);
     return !door || (door.platform === MACHINE_PLATFORM && door.window);
@@ -1273,7 +1293,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   /** The reaction tray's saved emoji changed (config.json `inboxReactions`): the windows' streams say `event: reactions`. */
   const reactionsListeners = new Set<(reactions: readonly InboxReaction[], rev: number) => void>();
   /** A capability switch was saved (Settings → Capabilities): the windows' streams say `event: capabilities`. `changed`: held until the next big release (heldSwitch). */
-  const capabilityListeners = new Set<(changed?: "code_review" | "shape" | "float_drafts" | "mark_read_warning") => void>();
+  const capabilityListeners = new Set<(changed?: "code_review" | "shape" | "float_drafts" | "mark_read_warning" | "scheduled_threads") => void>();
   /** "Over your tailnet" published by itself once Tailscale came back: the windows' streams say `event: tailscale` with the new state. */
   const tailscaleListeners = new Set<() => void>();
   // The Inbox windows open now and whether any can show a notification (inbox-windows.ts).
@@ -1327,7 +1347,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // Until the startup read of every project's origin has begun, an empty cache says nothing yet about Tidy's suggestions.
   let repoReadsBegun = false;
 
-  // Hover cards for issue, PR and MR links (ref-cards.ts): nothing runs until a card is asked for.
+  // Hover cards for issue, PR and MR links (ref-cards.ts): nothing runs until a card is asked for (or the attach line looks a number up after a send, `pullLookups` below).
   // github.com, gitlab.com and the hosts this computer's own gh / glab is signed in to; nothing else.
   // Bitbucket Cloud PRs through the review app's credentials; a test that runs its own CLIs passes its own reader.
   const refCards = createRefCards(
@@ -1355,6 +1375,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const pullRepoRead = new Set<string>();
   const pullRepoReading = new Map<string, Promise<InboxProjectRepo | null>>();
   const pulls = createInboxPulls(options.refRunner ? { run: options.refRunner } : {});
+  // The attach line's lookups (inbox-pull-lookups.ts): a number an agent named, after its send, through the hover
+  // cards' read; only while Code review is on and this computer's gh is signed in to the host.
+  const pullLookups = createInboxPullLookups({
+    usable: async (ref) => codeReviewOn() && (await pulls.signedInTo("gh", ref.host)),
+    read: refCardsKindReader(refCards),
+  });
   /**
    * PRs this Inbox closed (the board's Close), by key: when, and the PR as it was. A reopen is taken only for these
    * (`reopenAllowed`), and finds the PR here once a fresh list no longer holds it (an open-only search drops it).
@@ -1368,6 +1394,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const postedReviews = new Set<string>();
   // Which agent thread owns a PR, as the person chose it (Hand to an agent, Launch an agent): inbox/pull-links.json.
   const pullOwners = createInboxPullLinks(dataDir);
+  const pullLooked = createInboxPullLooked(dataDir);
   // PR risk ranking (inbox-pull-risk.ts): judged in the background from the list reads below, while Code review is on and rules exist.
   const pullRisk = createPullRisk({ dataDir, pulls, roots: (key) => pullRoots(key), isOn: () => codeReviewOn(), ...options.pullRisk });
   // Reviews (inbox-reviews.ts): every thread with a review card, derived from the store's messages on read.
@@ -1558,7 +1585,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       (typeof host === "string" && typeof session === "string" && pollingWakeHost(host) && live.pollsNow(host, session)) ||
       (await codexWake.wakes(host, session, meta)) ||
       (await qwenWake.wakes(host, session, meta)) ||
-      (await t3Wake.wakes(host, session)),
+      (await t3Wake.wakes(host, session)) ||
+      (await antigravityWake.wakes(host, session, meta)),
     bridgePolls: (host, session) => pollingWakeHost(host) && live.pollsNow(host, session),
     sessionName: (session) => live.labelOf(session) ?? live.titleOf(session),
     t3WakeReaches: (session) => t3Wake.wakes(INBOX_T3_HOST, session),
@@ -1566,9 +1594,24 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     boardOn: () => boardOn(),
     // Thread steps: the steps tool and field are listed and served only while the person has them on.
     stepsOn: () => stepsOn(),
+    // Routines: the routine tool is listed and served only while the person has them on.
+    scheduledOn: () => scheduledCap.on(),
+    scheduled: () => scheduled,
     // A thread's PRs: the reader's live checks, and a read of the PRs an agent just added.
     pulls: threadPullStates,
     projectHost: projectRepoHost,
+    // The attach hint's `#12`: the project's cached origin, and a PR the Pull requests list, a hover card or a lookup
+    // already read. Never a git or forge call on the send's path: a number not known yet is looked up after it.
+    knownPulls: (projectId) => {
+      const project = store.project(projectId);
+      const origin = project ? repos.peek(project.root) : null;
+      return {
+        repo: origin?.host ? { host: origin.host.toLowerCase(), repo: origin.display } : null,
+        isPull: (key) => !!pulls.find(key) || refCards.cached(key)?.kind === "pull" || pullLookups.answer(key)?.kind === "pull",
+        settled: (key) => !!refCards.cached(key) || !!pullLookups.answer(key),
+        lookUp: (refs, found) => pullLookups.lookUp(refs, found),
+      };
+    },
     // Bro mode: send_message's `body` field carries the line only while the person has it on.
     broOn: () => broOn(),
     // Code review: submit_guide's `review` field is listed and served only while the person has it on.
@@ -2226,7 +2269,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // Probed only for a connected one, so reading the agents runs no CLI otherwise. Qwen Code: whether
         // Plannotator holds its trusted-sender token (inbox-qwen-trust.ts), read from disk, no CLI.
         const wakes =
-          INBOX_MCP_WAKING_HOSTS.includes(id) && reach.kind === "mcp" && reach.on ? { wakes: id === INBOX_QWEN_HOST ? qwenWake.canWake() : (await codexWake.cli()) !== null } : {};
+          INBOX_MCP_WAKING_HOSTS.includes(id) && reach.kind === "mcp" && reach.on
+            ? { wakes: id === INBOX_QWEN_HOST ? qwenWake.canWake() : id === INBOX_ANTIGRAVITY_HOST ? antigravityWake.canWake() : (await codexWake.cli()) !== null }
+            : {};
         return { id, label: INBOX_AGENT_LABELS[id], detected, reach, tool, reminder, note, plugin: inboxPluginStatus(id, agentEnvironment), ...wakes };
       }),
     );
@@ -2251,6 +2296,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           update_command: claudePluginBehindInbox(install, version) ? CLAUDE_PLUGIN_UPDATE_COMMAND : null,
         };
       }),
+      t3: await t3SettingsStatus(agentEnvironment, t3Local, t3Wake),
     };
   };
 
@@ -3648,6 +3694,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     experimental: experimentalState(),
     /** The Board (config.json `inboxBoard`): off unless the person turned it on. */
     board: { on: boardOn() },
+    /** Routines (config.json `inboxScheduledThreads`): off unless the person turned them on; absent on Windows. */
+    ...scheduledCap.wire(),
     /** Launch (config.json `inboxLaunch`, on unless `enabled` is false; off by default on Windows): Settings → Agents' "Start agents from New message" switch, and while on its full-permissions switch and scratch root. */
     launch: launch.settingsState(),
     /** Thread steps (config.json `inboxSteps`): off unless the person turned it on. */
@@ -3741,6 +3789,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // A thread's PRs changed (approval "inbox-pr-binding"): silent, never a notification or unread. `thread_id` so a
         // window reads that thread's PRs again (and its row). A reader that does not know the kind skips it.
         return { seq: line.seq, kind: line.kind, id: line.id, thread_id: line.record.thread_id };
+      case "scheduled":
+        // A routine changed: its id only, never its prompt or folder. A reader that does not know the kind skips it.
+        return { seq: line.seq, kind: line.kind, id: line.id };
     }
   };
 
@@ -3868,10 +3919,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           }
         };
         syncShapes();
-        const onCapabilities = (changed?: "code_review" | "shape" | "float_drafts" | "mark_read_warning") => {
+        const onCapabilities = (changed?: "code_review" | "shape" | "float_drafts" | "mark_read_warning" | "scheduled_threads") => {
           syncShapes();
           const floats = floatDraftsOn();
           const frame = { board: { on: boardOn() }, steps: { on: stepsOn() }, bro: { on: broOn() }, ...(floats || changed === "float_drafts" ? { float_drafts: { on: floats } } : {}), ...(changed === "mark_read_warning" ? { mark_read_warning: { on: markReadWarningOn() } } : {}), ...heldSwitch("code_review", codeReviewOn(), changed === "code_review"), ...heldSwitch("shape", shapeOn(), changed === "shape"), ...systemWire(), ...chapterDiagramsWire() };
+          // Routines: while on, and to the save that turned them off.
+          if (scheduledCap.on() || changed === "scheduled_threads") Object.assign(frame, scheduledCap.wire());
           send(`event: capabilities\ndata: ${JSON.stringify(frame)}\n\n`);
         };
         if (windowId) capabilityListeners.add(onCapabilities);
@@ -4285,7 +4338,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           ? INBOX_BOARD_OFF_TEXT
           : call.params?.name === "steps" && !stepsOn()
             ? INBOX_STEPS_OFF_TEXT
-            : null;
+            : call.params?.name === "routine" && !scheduledCap.on()
+              ? INBOX_SCHEDULED_OFF_TEXT
+              : null;
     return text ? json({ jsonrpc: "2.0", id: call.id, result: { content: [{ type: "text", text }], isError: true } }) : null;
   };
 
@@ -4320,7 +4375,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // it is presence, and marks a queued Tidy wake delivered, but it delivers no reply and is not made live.
         const meta = params?._meta;
         const thread = codexThreadOfCall(meta);
-        if (thread && (!session || session === thread)) {
+        const antigravity = thread ? null : antigravityConversationOfCall(meta);
+        if (antigravity && (!session || session === antigravity.conversation)) {
+          // An Antigravity conversation (inbox-antigravity-wake.ts): it names itself on every call, so a tool without a
+          // session counts too. While a server that holds it answers, it is live for New message, compose and tags.
+          if (!session) live.seenOverMcp(antigravity.conversation, { host: INBOX_ANTIGRAVITY_HOST });
+          antigravityWake.noteToolCall(antigravity.conversation, meta);
+          if (await antigravityWake.wakes(INBOX_ANTIGRAVITY_HOST, antigravity.conversation, meta)) await live.seenWakeOnly(antigravity.conversation, INBOX_ANTIGRAVITY_HOST, args?.project_path);
+        } else if (thread && (!session || session === thread)) {
           if (!session) live.seenOverMcp(thread, { host: INBOX_CODEX_HOST });
           codexWake.noteToolCall(thread, codexTurnStartedAt(meta));
           if (await codexWake.wakes(INBOX_CODEX_HOST, thread, meta)) {
@@ -4377,9 +4439,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     autoSendAfterMs: options.autoSendAfterMs ?? INBOX_AUTO_SEND_AFTER_MS,
     // A Codex thread has no connection that polls: it is there until Codex says its thread is gone.
     // A Qwen Code session too, until its registry record goes (inbox-qwen-wake.ts).
-    wakeOnlyStatus: (session) => codexWake.status(session) ?? qwenWake.status(session) ?? t3Wake.status(session) ?? cloudWake.status(session),
+    wakeOnlyStatus: (session) => codexWake.status(session) ?? qwenWake.status(session) ?? t3Wake.status(session) ?? antigravityWake.status(session) ?? cloudWake.status(session),
     pollsItself: (session) => cloudPollsItself(session),
-    uncertainItemsOf: (session) => [...codexWake.uncertainItems(session), ...qwenWake.uncertainItems(session), ...t3Wake.uncertainItems(session)],
+    uncertainItemsOf: (session) => [...codexWake.uncertainItems(session), ...qwenWake.uncertainItems(session), ...t3Wake.uncertainItems(session), ...antigravityWake.uncertainItems(session)],
     // A session that is an agent with a face (its conversation's earlier id, its launch): its threads show that face too.
     onPoll: (session, continues) =>
       agentFacesFile.link(session, () => [
@@ -4408,7 +4470,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   let launchReady = false;
   /** A Codex thread a launch of this Inbox started (not deleted): only its host takes the thread's items. */
   const launchedCodex = (session: string) =>
-    store.launchedRoots().some((m) => m.launch?.agent === INBOX_CODEX_HOST && !m.launch.deleted_at && m.to?.host === INBOX_CODEX_HOST && m.to.session === session);
+    [...store.launchedRoots(), ...store.scheduledRunLaunches()].some(
+      (m) => m.launch?.agent === INBOX_CODEX_HOST && !m.launch.deleted_at && m.to?.host === INBOX_CODEX_HOST && m.to.session === session,
+    );
   // T3 Code on this machine: both T3 wakes send through its `t3` command first, with no sign-in (inbox-t3-local.ts).
   const t3Local = createT3Local({ environment: agentEnvironment });
   // Which way each reply to a T3 thread went, one debug-log line each (`t3_route`); the log is made below.
@@ -4443,6 +4507,16 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // A steps-only Tidy wake with steps off is withdrawn, never handed (a switch turned off in config.json by hand).
     skip: (item) => withdrawnTidy(item),
     ...options.qwenWake,
+  });
+
+  // The Antigravity wake: the person's items for an Antigravity conversation go in through Antigravity's own
+  // `agentapi send-message`, once each (inbox-antigravity-wake.ts).
+  const antigravityWake = createInboxAntigravityWake({
+    store,
+    environment: agentEnvironment,
+    commandOf: (item, session) => replyCommand(item, false, session),
+    skip: (item) => withdrawnTidy(item),
+    ...options.antigravityWake,
   });
 
   // The T3 Code wake: the person's items for a T3 thread go in as a T3 turn, through T3's `t3` command on this
@@ -4558,7 +4632,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     launchResumes: (threadId, session) => launch.resumes(threadId, session),
     hostOf: live.hostOf,
     // A Codex reply whose `codex queue` ran out of time may not have gone: its row says it is saved, not queued.
-    uncertain: (session, itemId) => codexWake.uncertain(session, itemId) || qwenWake.uncertain(session, itemId) || t3Wake.uncertain(session, itemId),
+    uncertain: (session, itemId) => codexWake.uncertain(session, itemId) || qwenWake.uncertain(session, itemId) || t3Wake.uncertain(session, itemId) || antigravityWake.uncertain(session, itemId),
     // Claimed by its session's connection and never to be delivered there (a wake killed mid-delivery).
     stuck: live.stuck,
     autoSendAfterMs: live.autoSendAfterMs,
@@ -4647,6 +4721,41 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     hosts: options.launchHosts,
   });
   launchReady = true;
+  // Routines (inbox-scheduled.ts): a run is a launch. The clock and the login item follow the switch.
+  const underTest = !!process.env.PLANNOTATOR_TEST_SANDBOX || process.env.NODE_ENV === "test";
+  const scheduledCap = scheduledSwitch({
+    platform: process.platform,
+    saved: () => options.scheduled ?? loadConfig().inboxScheduledThreads,
+    save: (on) => saveConfig({ inboxScheduledThreads: on }),
+    // An Inbox under a test (the sandbox, or bun test's NODE_ENV) writes its login item under its own home and runs nothing.
+    login:
+      options.scheduledLogin ??
+      inboxLoginItem({
+        platform: process.platform,
+        home: underTest ? join(dataDir, "agents-home") : homedir(),
+        argv: selfCommand,
+        dataDir,
+        run: underTest ? async () => ({ code: 0 }) : execLoginCommand,
+      }),
+    changed: (on) => {
+      if (on) scheduled.switchedOn();
+      scheduled.sync();
+      for (const listener of capabilityListeners) listener("scheduled_threads");
+    },
+    log: (line) => process.stderr.write(`${line}\n`),
+  });
+  const scheduled: InboxScheduled = createInboxScheduled({
+    store,
+    launch,
+    on: scheduledCap.on,
+    launchOn: () => launch.settingsState().enabled,
+    resolveProject,
+    recordAttachments: (paths, project, base) => recordInboxAttachments(store.dir, paths, { base, at: new Date().toISOString() }),
+    displayFolder: (path) => displayPath(path, agentEnvironment) ?? path,
+    log: (line) => process.stderr.write(`${line}\n`),
+  });
+  scheduled.sync();
+  if (scheduledCap.on()) void scheduledCap.syncLogin();
   // No login-shell read at start: the launch module reads it the first time New message asks (`warmLogin`).
 
   // Compose: a new thread the person starts with a live agent, drafts and uploads (packages/server/inbox-compose.ts).
@@ -5436,6 +5545,18 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         }
         return json({ serverSession, ...pullRisk.answer() });
       }
+      // "Changed since you looked" (inbox-pull-looked.ts): the PR page's look at PRs this machine lists, from its window,
+      // the owner's over the tailnet, or a linked machine's window through the forward (rule 8's `set`). Same guards as the list.
+      if (path === "/api/inbox/pulls/looked") {
+        if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+        if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
+          return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
+        }
+        if (!codeReviewOn()) return json({ error: "Code review is off.", code: "code_review_off" }, 409);
+        const body = await readBody(req);
+        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+        return json({ serverSession, looked: pullLooked.mark(pullLookedSeenOf(body, Date.now())) });
+      }
       if (path === "/api/inbox/pulls" || path === "/api/inbox/pulls/diff" || path === "/api/inbox/pulls/details" || path === "/api/inbox/pulls/file" || path === "/api/inbox/pulls/avatar" || path === "/api/inbox/pulls/repo-files" || path === "/api/inbox/pulls/repo-file" || path === "/api/inbox/pulls/media" || path === "/api/inbox/pulls/media/sizes") {
         if (req.method !== "GET") return json({ error: "Use GET." }, 405);
         if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
@@ -5494,11 +5615,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         }
         if (path === "/api/inbox/pulls/diff") {
           const key = url.searchParams.get("key") ?? "";
-          const scope = url.searchParams.get("scope") ?? "layer";
-          if (scope !== "layer" && scope !== "stack") throw new InboxError("validation_error", "scope: layer or stack.", { field: "scope" });
+          const scoped = pullDiffScopeOf(url.searchParams);
+          if (!scoped) throw new InboxError("validation_error", "scope: layer, stack, range with from (a layer's key) or since with from (a commit).", { field: "scope" });
           if (key.length === 0 || key.length > 600) throw new InboxError("validation_error", "key: a pull request's key from the list.", { field: "key" });
           try {
-            return json({ serverSession, ...(await pulls.diff(key, scope)) });
+            return json({ serverSession, ...(await pulls.diff(key, scoped.scope, scoped.from)) });
           } catch (cause) {
             if (cause instanceof InboxPullsError) return json({ error: cause.message, code: cause.code }, cause.code === "pull_unknown" ? 404 : cause.code === "pull_diff_fork" ? 409 : 502);
             throw cause;
@@ -5506,8 +5627,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         }
         if (path === "/api/inbox/pulls/file") {
           const key = url.searchParams.get("key") ?? "";
-          const scope = url.searchParams.get("scope") ?? "layer";
-          if (scope !== "layer" && scope !== "stack") throw new InboxError("validation_error", "scope: layer or stack.", { field: "scope" });
+          const scoped = pullDiffScopeOf(url.searchParams);
+          if (!scoped) throw new InboxError("validation_error", "scope: layer, stack, range with from (a layer's key) or since with from (a commit).", { field: "scope" });
+          const { scope, from } = scoped;
           if (key.length === 0 || key.length > 600) throw new InboxError("validation_error", "key: a pull request's key from the list.", { field: "key" });
           const filePath = changedFilePath(url.searchParams.get("path"));
           try {
@@ -5517,13 +5639,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
             // Parsed once per diff (`changedFileOf`): the PR page asks for every changed file as it nears the viewport.
             const head = ids ? null : url.searchParams.get("head");
             const pinned = head && /^[0-9a-f]{40,64}$/.test(head) ? head : null;
-            const answer = ids || pinned ? await pulls.diff(key, scope) : null;
+            const answer = ids || pinned ? await pulls.diff(key, scope, from) : null;
             const changed = answer ? changedFileOf(answer, filePath) : null;
             if (answer && (!changed || (pinned && (answer.head_sha !== pinned || (changed.status !== "modified" && changed.status !== "renamed"))))) {
               return json({ serverSession, oldContent: null, newContent: null });
             }
             const check = ids ?? (pinned && changed ? { patch: changed.patch } : null);
-            return json({ serverSession, ...(await pulls.fileContents(key, scope, filePath, check ? await pullRoots(key) : [], check, changed?.oldPath)) });
+            return json({ serverSession, ...(await pulls.fileContents(key, scope, filePath, check ? await pullRoots(key) : [], check, changed?.oldPath, from)) });
           } catch (cause) {
             if (cause instanceof InboxPullsError) return json({ error: cause.message, code: cause.code }, 404);
             throw cause;
@@ -5532,7 +5654,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const { projectsByRepo, wanted } = await pullProjects();
         // `others=1`: the person has the Others view open, so Others is read as often as the list. `everywhere=1`: the
         // Pull requests page, the person's own PRs in any repository (approval "inbox-pr-dashboard"). `machines=1` with
-        // it: the linked machines' boards too, read beside this one (a machine's door never passes `machines`).
+        // it: the linked machines' boards too, read beside this one and never waited for (a machine's door never passes
+        // `machines`): what each had once this list is done, the rest on the window's next read (`pending`).
         const everywhere = url.searchParams.get("everywhere") === "1";
         const refresh = url.searchParams.get("refresh") === "1";
         const far = everywhere && url.searchParams.get("machines") === "1" ? machines.pullLists(refresh) : null;
@@ -5544,8 +5667,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const links = linkInboxPulls(listed.pulls, pullLinkStore, projectsByRepo, pullOwnersNow());
         // The Board is optional: a card that links a PR is a quiet extra, only while the Board is on.
         const cards = boardOn() ? pullCards(listed.pulls, store.listCards()) : {};
-        const own = { ...listed, links, projects: Object.fromEntries(projectsByRepo), cards };
-        const farBoards = far ? await far : [];
+        const own = { ...listed, pulls: pullLooked.on(listed.pulls), links, projects: Object.fromEntries(projectsByRepo), cards };
+        const farBoards = far ? far() : [];
         return json({ serverSession, ...(farBoards.length > 0 ? mergePullBoards(own, farBoards) : own) });
       }
       // Reviews (approval "inbox-reviews-page"; inbox-reviews.ts and core's inbox-reviews.ts): one row per thread with
@@ -5654,6 +5777,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
         }
         if (!codeReviewOn()) return json({ error: "Code review is off.", code: "code_review_off" }, 409);
+        if (!pullWriteFromWindow(req)) return json(INBOX_MACHINE_PULL_WINDOW_ONLY_BODY, 403);
         const body = await readBody(req);
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
         const keys = Array.isArray(body.keys) ? body.keys : null;
@@ -6112,16 +6236,18 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           body.code_review === undefined &&
           body.shape === undefined &&
           body.system === undefined &&
+          body.scheduled_threads === undefined &&
           body.chapter_diagrams === undefined &&
           body.cookie_host === undefined &&
           body.voice === undefined &&
           body.show_archived === undefined &&
           !updateSwitches
         ) {
-          throw new InboxError("validation_error", "body: inbox_tool, notifications, sound, tailscale, theme, text_size, favicon, reactions, reaction_change, rows, sidebar, diff_style, diff_options, experimental, tour, prompts, board, steps, bro, float_drafts, mark_read_warning, code_review, shape, system, chapter_diagrams, voice, update_check, auto_update, show_archived or cookie_host is required.");
+          throw new InboxError("validation_error", "body: inbox_tool, notifications, sound, tailscale, theme, text_size, favicon, reactions, reaction_change, rows, sidebar, diff_style, diff_options, experimental, tour, prompts, board, steps, bro, float_drafts, mark_read_warning, code_review, shape, system, scheduled_threads, chapter_diagrams, voice, update_check, auto_update, show_archived or cookie_host is required.");
         }
         // System: a malformed value throws here.
         system.check(body);
+        scheduledCap.check(body);
         const promptsChange = body.prompts === undefined ? undefined : parseInboxPromptsChange(body.prompts);
         const rulesMisfit = promptsChange ? inboxRulesFitError(promptsChange, loadConfig(), promptWakes()) : null;
         if (rulesMisfit) throw new InboxError("validation_error", rulesMisfit.message, { field: rulesMisfit.field });
@@ -6199,12 +6325,22 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const codeReview = body.code_review === undefined ? { on: codeReviewOn() } : saveCodeReview(body.code_review);
         const shape = body.shape === undefined ? { on: shapeOn() } : saveShape(body.shape);
         const systemAnswer = system.answer(body);
+        const scheduledAnswer = await scheduledCap.answer(body);
         // Present while Code review is on, and always to the save that set it.
         const chapterDiagrams = body.chapter_diagrams === undefined ? chapterDiagramsWire() : { chapter_diagrams: saveChapterDiagrams(body.chapter_diagrams) };
         if (body.voice !== undefined) voice.save(body.voice);
         if (promptsChange) saveInboxPromptsChange(promptsChange);
         const showArchivedNow = showArchivedOn === undefined ? showArchived.state() : saveShowArchived(showArchivedOn);
-        return json({ show_archived: { on: showArchivedNow.on, rev: showArchivedNow.rev }, inbox_tool: inboxTool, notifications, sound, tailscale: tailnet, updates: updateState, theme, text_size: textSize, favicon, ...reactions, ...rows, ...sidebar, diff_style: diffOptions.diff_style, diff_options: diffOptions, experimental, tour, board, steps, bro, float_drafts: floatDrafts, mark_read_warning: markReadWarning, ...heldSwitch("code_review", codeReview.on, body.code_review !== undefined), ...heldSwitch("shape", shape.on, body.shape !== undefined), ...systemAnswer, ...chapterDiagrams, voice: voice.settings(via), prompts: promptsState(), cookie_host: cookieHost ?? cookieHostWire() });
+        return json({ show_archived: { on: showArchivedNow.on, rev: showArchivedNow.rev }, inbox_tool: inboxTool, notifications, sound, tailscale: tailnet, updates: updateState, theme, text_size: textSize, favicon, ...reactions, ...rows, ...sidebar, diff_style: diffOptions.diff_style, diff_options: diffOptions, experimental, tour, board, steps, bro, float_drafts: floatDrafts, mark_read_warning: markReadWarning, ...heldSwitch("code_review", codeReview.on, body.code_review !== undefined), ...heldSwitch("shape", shape.on, body.shape !== undefined), ...systemAnswer, ...scheduledAnswer, ...chapterDiagrams, voice: voice.settings(via), prompts: promptsState(), cookie_host: cookieHost ?? cookieHostWire() });
+      }
+      // Routines (inbox-scheduled-routes.ts): the window's list, editor, Run now and Stop.
+      if (path === "/api/inbox/scheduled" || path.startsWith("/api/inbox/scheduled/")) {
+        if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
+          return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
+        }
+        const launchOn = () => launch.settingsState().enabled;
+        const answer = await scheduledRoute(req, path, { scheduled, on: scheduledCap.on, launchOn, serverSession, json, readBody });
+        if (answer) return answer;
       }
       // Voice dictation (inbox-voice.ts). A read here can start a `codex`, so another site's is refused too.
       if (path.startsWith("/api/inbox/voice/")) {
@@ -6975,6 +7111,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
             // attachments on the reply, exactly as compose's become a thread's.
             // A replay answers the reply it wrote before anything is copied
             // (its uploads are gone by then); the rest checks the message first.
+            // A reply to an earlier run of a routine says that run ended (inbox-scheduled.ts); a replay answers as before.
+            if (!(tagKey && store.replyByKey(messageId, tagKey))) scheduled.checkReply(messageId, body.to);
             const uploads = body.uploads === undefined || body.uploads === null ? [] : body.uploads;
             if (!Array.isArray(uploads)) throw new InboxError("validation_error", "uploads: a list of upload ids.", { field: "uploads" });
             const replayKey = typeof body.idempotency_key === "string" ? body.idempotency_key.trim() : "";
@@ -7123,7 +7261,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       const steps = stepsRoute.route(req, path);
       if (steps) return steps;
       // A thread's PRs (approval "inbox-pr-binding"): the window's read and the person's add and remove (inbox-thread-pulls.ts).
-      // Never another site; never on the device door.
+      // Never another site. On the device door for a linked machine (mark `pulls`), never a phone.
       if (/^\/api\/inbox\/threads\/[A-Za-z0-9_]+\/pulls$/.test(path)) {
         if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
           return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
@@ -7444,6 +7582,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     clearInterval(deliveryWatch);
     clearInterval(autoSendWatch);
     unsubscribeWaits();
+    scheduled.stop();
     launch.stop();
     unsubscribeLaunchTip();
     unsubscribeAgentWork();
@@ -7452,6 +7591,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     qwenWake.stop();
     t3Wake.stop();
     t3Local.stop();
+    antigravityWake.stop();
     cloudWake.stop();
     voice.stop();
     codexAccount.stop();
@@ -7473,7 +7613,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     cfAccess?.stop();
   };
 
-  return { port, url: baseUrl, token, serverSession, portChanged, store, registry, tailscale, connectAgents, search: search.index, imageCapture, codexWake, liveSites: { running: liveSites.running, sweep: liveSites.sweep }, qwenWake, t3Wake, cloudWake, shapeWatchers: () => shapes.watch.watching(), stop };
+  return { port, url: baseUrl, token, serverSession, portChanged, store, registry, tailscale, connectAgents, search: search.index, imageCapture, codexWake, liveSites: { running: liveSites.running, sweep: liveSites.sweep }, qwenWake, t3Wake, antigravityWake, cloudWake, shapeWatchers: () => shapes.watch.watching(), stop };
 }
 
 /** Print where the Inbox is, and open it when a person asked for it. */

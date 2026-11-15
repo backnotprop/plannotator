@@ -20,13 +20,13 @@ import type { LocalLinkResolver } from '@plannotator/ui/components/LocalLinkCont
 import { AnnotationPanel } from '@plannotator/ui/components/AnnotationPanel';
 import { AnnotationToolstrip } from '@plannotator/ui/components/AnnotationToolstrip';
 import { HtmlSurfaceControls } from '@plannotator/ui/components/HtmlSurfaceControls';
-import { HtmlViewer } from '@plannotator/ui/components/html-viewer';
+import { HtmlViewer, type HtmlViewerFrame } from '@plannotator/ui/components/html-viewer';
 import { Viewer, type ViewerHandle } from '@plannotator/ui/components/Viewer';
 import { ScrollViewportProvider } from '@plannotator/ui/hooks/useScrollViewport';
 import type { Annotation, EditorMode, InputMethod } from '@plannotator/ui/types';
 import { annotationOwnsHighlight } from '@plannotator/ui/utils/annotationOwnsHighlight';
 import { groupAnnotationsByDocument, type AnnotationScope } from '@plannotator/ui/utils/annotationScope';
-import { InboxApiError, type AttachmentView, type LinkedPageView } from '../api';
+import { InboxApiError, type AttachmentView } from '../api';
 import { attachmentDrawReady } from '../threadDrawReady';
 import { selectionOnPhrase, useInboxFileSource } from '../fileSource';
 import { folderOf, resolveInboxHtmlLink } from '../htmlLinks';
@@ -103,6 +103,7 @@ import { tapNearSizeIcon, useSizeIconFade } from '../sizeIconFade';
 import { useFileQuestionViewerProps, type FileQuestions } from '../fileQuestions';
 import { whenStill } from '../whenStill';
 import { unsavedComposer, unsavedComposers } from './unsavedComposers';
+import { linkedValue, pageStartAt, splitLinked, usePageClear, usePageStart, type LinkedPage, type PageStart } from './htmlPageFrame';
 export { unsavedComposer, unsavedComposers };
 
 /**
@@ -116,19 +117,6 @@ export const FOLD_PANEL_BELOW = 780;
 
 /** How long the note says why a link in an attached page opened nothing. */
 export const LINK_NOTE_MS = 5000;
-
-/** A page an attached HTML page links to, shown read-only over it: its path in the page's folder and the fragment its link named. */
-type LinkedPage = LinkedPageView & { relative: string; hash: string; attachmentId: string };
-
-/** The route's `linked=` value: the page's path in the folder, then `#fragment`. */
-export function linkedValue(relative: string, hash: string): string {
-  return hash ? `${relative}#${hash}` : relative;
-}
-
-export function splitLinked(value: string): { relative: string; hash: string } {
-  const at = value.indexOf('#');
-  return at < 0 ? { relative: value, hash: '' } : { relative: value.slice(0, at), hash: value.slice(at + 1) };
-}
 
 /** The space between full screen's changed note and the code's top row, which grows under the note (Copy file stays clear of it). */
 export const CODE_ROW_BELOW_NOTE = 8;
@@ -287,6 +275,8 @@ export interface AttachmentPaneProps {
    * frame it is in now. Absent: `onStep`.
    */
   onOpenLinked?: (attachmentId: string) => void;
+  /** The `?…#…` an HTML page opens with, from a message's link (`mock.html?variant=2`): attachment `id` only; a new object applies again. */
+  pageStart?: PageStart | null;
   /**
    * How a link to this Inbox opens in this window, or null when it does not (App.tsx's `inboxLink`). Absent (the
    * tour): every link is another site's.
@@ -1222,6 +1212,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   const [linkImage, setLinkImage] = useState<{ src: string; alt: string } | null>(null);
   /** The fragment a link named on an attached page it opened (`SHEET.html#pr1`): cleared once used. */
   const [linkFragment, setLinkFragment] = useState<{ id: string; hash: string } | null>(null);
+  const [pageStart, setPageStart] = usePageStart(props.pageStart, attachment.id);
   useEffect(() => {
     setLinkNote(null);
     setLinkImage(null);
@@ -1341,8 +1332,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     props.onLinked?.(before ? linkedValue(before.relative, before.hash) : null, { back: true });
     requestAnimationFrame(() => sectionRef.current?.focus({ preventScroll: true }));
   };
-  /** A link the page's bridge handed over (a plain click, armed or not; ⌘/Ctrl-click while armed pins it instead). `baseDir`: the folder of the page it is in. */
-  const followLink = (href: string, baseDir: string) => {
+  /** A link the page's bridge handed over (a plain click, armed or not; ⌘/Ctrl-click while armed pins it instead). `baseDir`: the folder of the page it is in; `page`: its path and frame, for a link to itself (a query). */
+  const followLink = (href: string, baseDir: string, page?: { path: string; frame?: HtmlViewerFrame }) => {
     // Ahead of the page's own rules, which read the window's own origin as the page's folder, not as 'external'. Only
     // a full address: `/#thread=…` and `./#thread=…` are the page's folder, as those rules say. And only after a
     // person's click: the page's own script can post this message too, and must not move the window
@@ -1363,9 +1354,13 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
       assetRoute: pageAssetRoute,
       serverOrigin: window.location.origin,
       markdown: kind === 'markdown',
+      selfPath: page?.path,
     });
     switch (link.kind) {
       case 'ignored':
+        return;
+      case 'self': // The page again with that query, in its own frame (as a tab loads `?variant=2`).
+        page?.frame?.reload(link.search, link.hash);
         return;
       case 'external':
         window.open(link.url, '_blank', 'noopener,noreferrer');
@@ -1386,6 +1381,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
         }
         leave(link.name, () => {
           if (link.hash) setLinkFragment({ id: link.id, hash: link.hash });
+          setPageStart(linkables.find((a) => a.id === link.id)?.kind === 'html' ? pageStartAt(link.id, link.search, link.hash) : null);
           pendingStep.current = 'key';
           if (props.onOpenLinked) props.onOpenLinked(link.id);
           else props.onStep?.(link.id, 'current');
@@ -1714,6 +1710,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     setCommentWaits(full && shownToolbar === 'tucked' && !props.readOnly && unsavedComposer(sectionRef.current, savedTextRef.current) !== null);
   }, [full, shownToolbar, props.readOnly]);
   shownToolbarRef.current = shownToolbar;
+  usePageClear(sectionRef, full && kind === 'html', phone ? 'bar' : shownToolbar === 'tucked' ? 'handle' : null);
   // Every way back to showing (the corner control, ⌘⇧X, leaving full screen, a pinch let go) forgets
   // what gathered the tools, once the corner control's press has put focus back: the next » brings focus back to ».
   useEffect(() => {
@@ -2627,7 +2624,9 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
               onStep={multi ? (dir) => !blockedRef.current && stepRef.current(dir, 'key') : undefined}
               stepInInteract
               // A link the page's bridge handed over: another file of the thread, a page or image beside it, another site (htmlLinks.ts).
-              onOpenLink={(href) => followLinkRef.current(href, pageFolder)}
+              onOpenLink={(href, frame) => followLinkRef.current(href, pageFolder, { path: attachment.path, frame })}
+              pageNavigation
+              frameStart={pageStart?.id === attachment.id ? pageStart.start : undefined}
               initialFragment={linkFragment?.id === attachment.id ? linkFragment.hash : undefined}
               onUnanchoredChange={(ids) => setUnanchored(new Set(ids))}
               fullViewport
@@ -2696,7 +2695,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
                   annotateModeActive={false}
                   // An Escape the page did not use: one page back (full screen: the ladder, whose next rung is that).
                   onPageEscape={() => void escapeFromPage()}
-                  onOpenLink={(href) => followLinkRef.current(href, folderOf(linkedTop.path))}
+                  onOpenLink={(href, frame) => followLinkRef.current(href, folderOf(linkedTop.path), { path: linkedTop.path, frame })}
+                  pageNavigation
                   initialFragment={linkedTop.hash || undefined}
                   fullViewport
                   hideControls

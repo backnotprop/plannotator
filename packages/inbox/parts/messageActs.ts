@@ -5,13 +5,17 @@ import type { InboxAttachmentState, InboxInlineImage, InboxMessageWire } from '@
 import type { QuestionAnswer } from '@plannotator/core/question-block';
 import type { JumpTarget } from '../components/ReplacedQuestion';
 import type { ActionMark } from '../components/ActionChecklist';
+import type { PageStart } from '../components/htmlPageFrame';
 import type { FileRef } from '../fileRefs';
 
 export interface MessageActs {
   openFromReply: (attachment: InboxAttachmentState, version: 'current' | 'sent') => void;
   jumpTo: (target: JumpTarget) => void;
   noteChips: (messageId: string) => { onOpen?: (note: InboxNoteBlock) => void };
-  openFromMessage: (attachment: Pick<InboxAttachmentState, 'id' | 'kind' | 'ref'> & { name?: string }) => void;
+  /** `opening`: called as the file opens. */
+  openFromMessage: (attachment: Pick<InboxAttachmentState, 'id' | 'kind' | 'ref'> & { name?: string }, view?: null, opening?: () => void) => void;
+  /** The HTML page about to open starts at this query and fragment (a message's link to `mock.html?variant=2`). */
+  setPageStart: (start: PageStart) => void;
   openOptionSet: (messageId: string, key: string, image: InboxInlineImage, choice: number) => void;
   pick: (messageId: string, key: string, answer: QuestionAnswer | null) => void;
   markAction: (messageId: string, key: string, mark: ActionMark | null) => Promise<boolean>;

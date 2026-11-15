@@ -200,6 +200,19 @@ export const TOOL_GUIDE: Record<InboxMcpToolName, InboxToolGuide> = {
       "- The person turns steps on and off (Settings → Capabilities in the Inbox). Off, the Inbox lists no `steps`, and a call answers `steps_off` and writes nothing.",
     ],
   },
+  // Routines: shown only while the person has them on (formatInboxHelp's `scheduled`).
+  routine: {
+    args: ["op", "id", "name", "prompt", "schedule", "if_missed", "folder", "agent", "model", "effort", "attachments", "thread_id", "project_path", "agent_session", "agent_name", "agent_host"],
+    lines: [
+      "A routine in the Plannotator Inbox: a saved prompt that an agent on this computer runs on a schedule; every run replies in the routine's own Inbox thread, made at its first run, and the person replies there to that run. Make one only when the person asks for work to run on its own, on a schedule (\"every weekday at 9, triage new issues\").",
+      "- `op`: `create`, `list`, `get`, `update`, `on`, `off`, `run` or `delete`. Every op but create and list takes `id` (`sch_…`). `update` changes only the fields you pass.",
+      "- create: `name` (a few words), `prompt` (what each run is asked, whole), `schedule`, and optionally `if_missed`, `folder` (`{ \"path\": … }`, run in that folder itself, never home, `/` or a hidden folder; default: your project folder; `{ \"scratch\": true }` for a new one), `agent` (`claude-code`, `codex`, `opencode` or `pi`; default your own), `model`, `effort`, `attachments` (full paths). `schedule`: `{ \"cron\": \"0 9 * * 1-5\", \"tz\": \"America/New_York\" }` (5-field cron), `{ \"at\": \"2026-11-20T17:00\" }` for once, or `null` (it runs only when someone runs it); `tz` is optional: this computer's zone. A schedule's runs are at least 15 minutes apart; a closer schedule is refused with `schedule_too_frequent`. `if_missed`: `run_once` (default: one run when the computer wakes) or `skip`.",
+      "- One you create arrives off. The person turns it on the first time, in the Inbox; before that, `on` and `run` answer `routine_not_approved` and change nothing. After that you may `update`, turn it `on` or `off`, `run` it and `delete` it. Changing its folder or its agent turns it off again until the person turns it back on.",
+      "- Every change posts one line for the person, with a link to the routine and, for an edit, what it was and what it is now: in `thread_id`, the thread you are working in, when you pass it, else in the routine's own thread. Runs never reply in `thread_id`.",
+      "- Each run starts the agent the way New message in the Inbox does, in the person's own permission mode. Starting agents from the Inbox must be on (Settings → Agents).",
+      "- The person turns routines on and off (Settings → Capabilities in the Inbox). Off, the Inbox lists no `routine`, and a call answers `routines_off` and writes nothing.",
+    ],
+  },
 };
 
 const SECTION_LABEL = (id: InboxSectionId): string => INBOX_SECTIONS.find((section) => section.id === id)?.label ?? id;
@@ -273,6 +286,8 @@ export interface InboxHelpOptions {
    * Inbox serves none of it then (approval "inbox-thread-steps").
    */
   steps?: boolean;
+  /** The person turned routines on (config.json `inboxScheduledThreads`). Off (the default), the guide says nothing of them. */
+  scheduled?: boolean;
   /**
    * The person turned code review on (config.json `inboxCodeReview`, read by
    * the caller). Off (the default), the guide says nothing of it: no `review`
@@ -305,6 +320,7 @@ function toolBlock(name: InboxMcpToolName, steps = false, codeReview = false): s
 export function formatInboxHelp(options: InboxHelpOptions): string {
   const board = INBOX_CARD_ACTION_ON && options.board === true;
   const steps = options.steps === true;
+  const scheduled = options.scheduled === true;
   const codeReview = options.codeReview === true;
   const mcpCommand = [...options.command, "inbox", "mcp"];
   const mcp = shellLine(mcpCommand);
@@ -392,7 +408,7 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
     "- **T3 Code** (Claude in a T3 thread: `T3CODE_THREAD_ID` is set in your shell): run `plannotator t3 --help` and follow its setup. The person approves T3's sign-in page.",
     "- **Anything else**: register the stdio server; \"Connecting other agents\" below has the line for your host.",
     "",
-    "When the person runs `plannotator inbox` themselves, it already connects the terminal agents it finds (Codex, Gemini CLI, Qwen Code, Cursor, Windsurf/Devin, Amp, Kiro, Muse Code, Pi 0.99+, OpenCode with its plugin, DeepSeek Harness with its plugin, Cline with its plugin, OpenClaw with its plugin, Hermes Agent with its plugin) and the Claude app, so check before adding a second entry: a `plannotator-inbox` server that runs this binary is already the connection.",
+    "When the person runs `plannotator inbox` themselves, it already connects the terminal agents it finds (Codex, Gemini CLI, Antigravity, Qwen Code, Cursor, Windsurf/Devin, Amp, Kiro, Muse Code, Pi 0.99+, OpenCode with its plugin, DeepSeek Harness with its plugin, Cline with its plugin, OpenClaw with its plugin, Hermes Agent with its plugin) and the Claude app, so check before adding a second entry: a `plannotator-inbox` server that runs this binary is already the connection.",
     "",
     `A connection takes effect in the next session, never in the one already running. Until then, send through the stdio server directly: ${code(mcp)}.`,
     "",
@@ -402,7 +418,7 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
     "",
     // Every tool this Inbox serves (`card` only while the Board is on and INBOX_CARD_ACTION_ON lets it ship).
     // `steps` only while the person has thread steps on.
-    ...inboxServedTools({ board, steps }).flatMap((name) => toolBlock(name, steps, codeReview)),
+    ...inboxServedTools({ board, steps, scheduled }).flatMap((name) => toolBlock(name, steps, codeReview)),
     "## Threads",
     "",
     "Where send_message (and submit_guide) puts a message; the first rule that applies wins:",
@@ -421,7 +437,8 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
     `- In Codex ${INBOX_CODEX_QUEUE_MIN_VERSION.replace(/\.0$/, "")} or later (the TUI, the Codex app, the IDE extension), through the stdio server, the person's reply arrives in your thread by itself too: the Inbox puts it into your thread with \`codex queue\`, and it starts a new turn once the turn you are in ends (at once when the thread is idle; a closed thread gets it when it is resumed). It starts with the same \`Plannotator Inbox: <title> (<reply id>)\` line and names your tools as you see them (send_message, read_thread). When send_message says the reply arrives by itself, end your turn instead of waiting. It never arrives in the middle of a turn (no Send now). A \`codex exec\` run is not woken (it ends after its turn): there, read the thread later with read_thread.`,
     `- In Qwen Code ${INBOX_QWEN_WAKE_MIN_VERSION.replace(/\.0$/, "")} or later in a terminal (macOS and Linux), through the stdio server, the person's reply arrives in your session by itself too: Plannotator is a trusted sender there, and Qwen gives it to you as a message from another program (\`<cross_session_message …>\`), as your next turn. It starts with the same \`Plannotator Inbox: <title> (<reply id>)\` line. When send_message says the reply arrives by itself, end your turn instead of waiting. A \`qwen -p\` run, a session an editor or \`qwen serve\` drives, or one whose settings hold or refuse such messages is not woken: there, read the thread later with read_thread.`,
     "- In a T3 Code thread that runs Claude, through the stdio server, the person's reply arrives in your thread by itself too, as a new T3 turn, once the person connected T3 (`plannotator t3 --help`). It starts with the same `Plannotator Inbox: <title> (<reply id>)` line. When send_message says the reply arrives by itself, end your turn instead of waiting.",
-    "- Codex, Qwen and T3 Code get a wake once. If a reply has not arrived when you next work, list your threads with read_thread: a thread the person wrote in for you reads `unread`, also one you never wrote in, and reading it settles it.",
+    "- In Antigravity (the App, the IDE or `agy`), through the stdio server, the person's reply arrives in your conversation by itself too, as a message from the system: a new turn when you are idle, or at your next step mid-turn. It starts with the same `Plannotator Inbox: <title> (<reply id>)` line. In `agy`, run `plannotator inbox antigravity` once per launch when send_message asks you to (it hands this conversation to the Inbox and exits); `agy -p` is not woken. When send_message says the reply arrives by itself, end your turn instead of waiting.",
+    "- Codex, Qwen, T3 Code and Antigravity get a wake once. If a reply has not arrived when you next work, list your threads with read_thread: a thread the person wrote in for you reads `unread`, also one you never wrote in, and reading it settles it.",
     "- OpenCode 1 has the tool but no wake, and nothing wakes another MCP client (or `codex exec`): the reply stays in the Inbox until you read the thread. Go on with your work and call read_thread later; a thread list marks a thread the person wrote in `unread`. A run that ends before the reply (`codex exec`, `qwen -p`, a script) leaves it in the Inbox, and a later run can read it.",
     `- The person can tag you with \`@\` in a reply to another session's thread, in this project or another. With a connection that wakes you it arrives as a new message: \`Plannotator Inbox: <subject> (<reply id>)\`, then \`${INBOX_TAGGED_INSTRUCTION}\`, then the line saying whose thread it is. Read the thread first with read_thread (\`message_id\` the reply's id), answer only what is addressed to you, with \`reply_to\` that id, so your answer lands in that thread; your own thread is unchanged. The session that owns the thread gets the same reply, with a line naming who else was tagged: leave what is addressed to them to them. Without a wake (MCP), read_thread shows it (\`tagged_you: true\`). Agents do not tag each other.`,
     "- When the person tags you, the wake's second line says what they meant: added to the thread (work alongside its owner; their later replies come to you too), handed the thread (it is yours now), or, when it was yours, handed to another session (stop work on it).",
@@ -541,7 +558,7 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
     `${self} inbox call [--session <id>] <action> [<json> | -]`,
     "```",
     "",
-    `- Actions: ${INBOX_CALL_ACTIONS.filter((action) => steps || action !== "steps").map(code).join(", ")}, with the arguments above as one JSON object. \`-\` reads the JSON from stdin, for PowerShell and for loops, where quoting JSON is painful. A stopped Inbox starts in the background.`,
+    `- Actions: ${INBOX_CALL_ACTIONS.filter((action) => (steps || action !== "steps") && (scheduled || action !== "routine")).map(code).join(", ")}, with the arguments above as one JSON object. \`-\` reads the JSON from stdin, for PowerShell and for loops, where quoting JSON is painful. A stopped Inbox starts in the background.`,
     "- stdout is the result as one JSON value (the tool's structured result), so `jq` and scripts can read it. On failure stdout is empty, stderr says `<code>: <message>`, and the exit code is 1 (refused, or no Inbox) or 2 (bad usage: an unknown action, bad JSON). Test the exit code before you use the output.",
     "- Pass an `idempotency_key` on each `send_message` and `card` create, so a rerun cannot post twice. Only those two take one; moving a card again changes nothing.",
     "- Who you are: a Tidy gives you the exact `--session` value; pass it on every call. Otherwise the call is the session this shell names, and the same as your tool: your threads and cards, your name, the person's reply reaches you. Claude Code, Pi, Codex, Qwen Code and DeepSeek Harness each name theirs. A DeepSeek Harness subagent's shell names the session the subagent works for only while Plannotator's plugin runs its Inbox connection in that DSH (the inbox tool on, and the Inbox run once; the shell then has `DSH_PLANNOTATOR_SESSION_ID`); otherwise it names the subagent's own session. With neither, it is nobody in particular: `read_thread` and `card list` show every thread and card in the project, and a reply cannot find you. In a Claude Code or Pi session, a call with no `project_path` files under your session's project, as your tool does, whatever folder the shell is in; name `project_path` only for another project. The JSON cannot name a session. `session_ambiguous` means this shell was started inside another agent and carries both: pass `--session` with your own. `session_mismatch` means your `--session` is not the session this shell names, and nothing was sent. Never drop `--session` to get past it, that writes as the session the shell names: if the value is from your own Tidy, this shell is older than your session, so use a new shell or unset the variable the error names.",
