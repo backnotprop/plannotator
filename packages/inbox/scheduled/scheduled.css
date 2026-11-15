@@ -26,9 +26,14 @@
 .st-list.st-list-split { flex: none; width: 500px; border-right: 1px solid var(--ib-pane-line); }
 .st-lbody { padding: 0 10px 20px; }
 
-/* The wide table (Name, Run, Runs, Last run, Next run, Created, the menu) and the Off table under it. */
-.st-table { margin: 6px 4px 24px; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; container: st-table / inline-size; }
-.st-cols { display: grid; grid-template-columns: minmax(200px, 2fr) 92px minmax(56px, 0.45fr) minmax(150px, 1.1fr) minmax(110px, 1fr) minmax(56px, 0.5fr) 40px; column-gap: 14px; align-items: center; padding: 0 8px 0 20px; }
+/* The wide table (Name, Run, Runs, Last run, Next run, Created, the menu) and the Off table under it. Both tables and
+   every row are subgrids of one grid, so Name is as wide as the longest name (capped) and Run sits just right of it.
+   The tables' margin and border and a row's padding lie inside the edge tracks: the menu's track is its 40px plus 13px.
+   Grid margins do not collapse, so the Off heading's margins are what is left after the tables' own. */
+.st-wide { container: st-table / inline-size; }
+.st-wgrid { display: grid; grid-template-columns: fit-content(max(200px, 34%)) auto minmax(56px, 0.45fr) minmax(150px, 1.1fr) minmax(110px, 1fr) minmax(56px, 0.5fr) 53px; column-gap: 14px; }
+.st-table { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; margin: 6px 4px 24px; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.st-cols { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: center; padding: 0 8px 0 20px; }
 .st-head { height: 44px; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 500; color: var(--muted-foreground); }
 .st-sort { display: inline-flex; align-items: center; gap: 4px; color: var(--foreground); }
 .st-row { height: 52px; border-top: 1px solid var(--border); font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); font-variant-numeric: tabular-nums; white-space: nowrap; cursor: pointer; }
@@ -38,18 +43,18 @@
 .st-open { display: block; max-width: 100%; padding: 0; border: 0; background: none; font: inherit; font-size: var(--ib-fs-13-5, 13.5px); font-weight: 550; color: var(--foreground); text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; border-radius: 4px; }
 .st-dim { opacity: 0.6; }
 .st-end { justify-self: end; }
-.st-offh { display: flex; align-items: baseline; gap: 8px; margin: 26px 4px 10px; font-size: var(--ib-fs-13, 13px); font-weight: 600; color: var(--foreground); }
+.st-offh { grid-column: 1 / -1; display: flex; align-items: baseline; gap: 8px; margin: 2px 4px 4px; font-size: var(--ib-fs-13, 13px); font-weight: 600; color: var(--foreground); }
 .st-offh .ib-n { font-weight: 500; color: var(--muted-foreground); }
 .st-live { display: inline-flex; align-items: center; gap: 7px; color: var(--foreground); vertical-align: top; }
 .st-row > span:has(> .st-live) { display: flex; align-items: center; }
 .st-num .st-live { gap: 6px; height: 20px; }
 /* A narrower window drops Created, then Next run, so Name and Last run keep their room. */
 @container st-table (max-width: 760px) {
-  .st-cols { grid-template-columns: minmax(160px, 2fr) 84px minmax(48px, 0.45fr) minmax(140px, 1.1fr) minmax(100px, 1fr) 40px; }
+  .st-wgrid { grid-template-columns: fit-content(max(160px, 34%)) auto minmax(48px, 0.45fr) minmax(140px, 1.1fr) minmax(100px, 1fr) 53px; }
   .st-cols > :nth-child(6) { display: none; }
 }
 @container st-table (max-width: 600px) {
-  .st-cols { grid-template-columns: minmax(140px, 2fr) 84px minmax(48px, 0.45fr) minmax(130px, 1.1fr) 40px; }
+  .st-wgrid { grid-template-columns: fit-content(max(140px, 34%)) auto minmax(48px, 0.45fr) minmax(130px, 1.1fr) 53px; }
   .st-cols > :nth-child(5) { display: none; }
   .st-row .st-open { white-space: normal; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; line-height: 18px; }
 }
@@ -67,10 +72,17 @@
 .st-more:hover, .st-more[data-popup-open] { background: var(--muted); color: var(--foreground); }
 .st-more svg.ib-ic { width: 15px; height: 15px; }
 
-/* The narrow list beside an open one (and on a phone): Routine, Runs, Last run. */
-.st-short { padding: 2px 0 20px; }
-.st-short { --st-sgap: 12px; }
-.st-scols { display: grid; grid-template-columns: 24px minmax(0, 1fr) 40px 112px 28px; column-gap: var(--st-sgap); align-items: start; }
+/* The narrow list beside an open one (and on a phone): Routine, Run, Runs, Last run. One grid for the whole list; the
+   heading and every row (On and Off) are subgrids of it, so the name column is as wide as the longest name (capped so
+   the rest fits) and every Run button sits on one line, a gap right of the names. A row's 12px padding lies inside the
+   edge tracks, so the menu's track is its 28px plus that padding. */
+.st-short { display: grid; grid-template-columns: [name] fit-content(calc(100% - 286px)) [btn] 24px [space] minmax(0, 1fr) [runs] 40px [last] 112px [more] 40px [end]; column-gap: 10px; align-items: start; padding: 2px 0 20px; }
+.st-scols { grid-column: 1 / -1; display: grid; grid-template-columns: subgrid; align-items: start; }
+.st-scols > .st-sname { grid-column: name; }
+.st-scols > .st-sbtn { grid-column: btn; }
+.st-scols > .st-count { grid-column: runs; }
+.st-scols > .st-last { grid-column: last; }
+.st-scols > .st-end { grid-column: more; }
 .st-shead > * { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .st-shead { padding: 0 12px; height: 30px; align-content: center; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 500; color: var(--muted-foreground); }
 /* Every heading on one baseline, in one size and colour: Runs centred over its counts, Last run flush with the times. */
@@ -81,16 +93,16 @@
 .st-srow:hover { background: color-mix(in oklch, var(--muted) 45%, transparent); }
 .st-srow[data-selected] { background: var(--ib-sel); }
 .st-sname { min-width: 0; }
-.st-sname .st-open { font-weight: 500; line-height: 20px; }
-/* The name, then Run or Stop a small gap after it, centred on the name's first line; a long name gives way, never the button. */
+/* A name longer than the column takes a second line, then truncates. */
+.st-sname .st-open { font-weight: 500; line-height: 20px; white-space: normal; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
 /* The 24px button centred on the name's 20px first line. */
 .st-sbtn { display: flex; height: 20px; align-items: center; }
 .st-run:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
-.st-when { display: block; font-size: var(--ib-fs-12-5, 12.5px); line-height: 18px; color: var(--muted-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* The schedule line never widens the name column: it truncates to it. */
+.st-when { display: block; contain: inline-size; font-size: var(--ib-fs-12-5, 12.5px); line-height: 18px; color: var(--muted-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .st-num { font-size: var(--ib-fs-13, 13px); line-height: 20px; color: var(--muted-foreground); font-variant-numeric: tabular-nums; white-space: nowrap; text-align: right; }
 .st-srow .st-more { width: 24px; height: 20px; }
-/* "Off" starts where the names do: the row's padding, the button column and the gap. */
-.st-offh.st-offh-short { margin: 18px 12px 6px calc(12px + 24px + var(--st-sgap)); }
+.st-offh.st-offh-short { grid-column: 1 / -1; margin: 18px 12px 6px; }
 
 /* The editor. */
 .st-body .st-title { display: block; width: 100%; padding: 0; border: 0; background: none; font: inherit; font-size: var(--ib-fs-20, 20px); font-weight: 650; letter-spacing: -0.01em; color: var(--foreground); outline: none; margin-bottom: 8px; }
@@ -189,10 +201,8 @@ button.st-foot-mark:hover { background: var(--muted); }
 @media (max-width: 760px) {
   .st-list.st-list-split { width: 100%; }
   /* A phone gives the name the room: Runs is in the editor, and a long name takes two lines. */
-  .st-short { --st-sgap: 10px; }
-  .st-scols { grid-template-columns: 24px minmax(0, 1fr) 9.4em 24px; }
+  .st-short { grid-template-columns: [name] fit-content(50%) [btn] 24px [space] minmax(0, 1fr) [last] auto [more] 36px [end]; column-gap: 8px; }
   .st-scols > .st-count { display: none; }
-  .st-sname .st-open { white-space: normal; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
   .st-kv { grid-template-columns: minmax(0, 1fr); gap: 4px; }
   .st-next { margin-left: 0; width: 100%; }
   .st-pfoot .ib-btn { flex: 1; }

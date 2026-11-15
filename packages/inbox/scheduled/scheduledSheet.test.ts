@@ -40,19 +40,42 @@ test('at phone width the list gives the name the room: no Runs column, one track
     });
   });
   expect(phone.get('.st-scols > .st-count')?.get('display')).toBe('none');
-  // Run, Name, Last run, the menu: the short row's five cells less Runs; Run is one fixed column, as beside the editor.
-  const tracks = (columns: string | undefined) => columns?.replace(/minmax\([^)]*\)/g, 'm').trim().split(/\s+/) ?? [];
-  expect(tracks(phone.get('.st-scols')?.get('grid-template-columns'))).toEqual(['24px', 'm', '9.4em', '24px']);
+  // One grid for the whole narrow list: the name column fits the longest name (capped), then Run in a fixed column, so
+  // every row's button is on one line; the heading and the rows are subgrids of it.
+  const tracks = (columns: string | undefined) => (columns ?? '').replace(/\[[^\]]*\]/g, ' ').replace(/(fit-content|minmax)\((?:[^()]|\([^()]*\))*\)/g, (m) => m.split('(')[0]!).trim().split(/\s+/);
+  expect(tracks(phone.get('.st-short')?.get('grid-template-columns'))).toEqual(['fit-content', '24px', 'minmax', 'auto', '36px']);
   let split: string | undefined;
-  sheet().walkRules('.st-scols', (rule) => void (rule.parent?.type === 'root' && rule.walkDecls('grid-template-columns', (decl) => void (split = decl.value))));
-  expect(tracks(split)).toEqual(['24px', 'm', '40px', '112px', '28px']);
-  expect(phone.get('.st-sname .st-open')?.get('white-space')).toBe('normal');
+  let rows: string | undefined;
+  sheet().walkRules((rule) => {
+    if (rule.parent?.type !== 'root') return;
+    if (rule.selector === '.st-short') rule.walkDecls('grid-template-columns', (decl) => void (split = decl.value));
+    if (rule.selector === '.st-scols') rule.walkDecls('grid-template-columns', (decl) => void (rows = decl.value));
+  });
+  expect(tracks(split)).toEqual(['fit-content', '24px', 'minmax', '40px', '112px', '40px']);
+  expect(rows).toBe('subgrid');
+  // A long name takes two lines at every width of the narrow list.
+  let wraps: string | undefined;
+  sheet().walkRules('.st-sname .st-open', (rule) => rule.walkDecls('-webkit-line-clamp', (decl) => void (wraps = decl.value)));
+  expect(wraps).toBe('2');
   // The wide table at its narrowest (a 768 window) wraps a long name too.
   let narrowWide: string | undefined;
   sheet().walkAtRules('container', (at) => {
     if (/max-width:\s*600px/.test(at.params)) at.walkRules('.st-row .st-open', (rule) => rule.walkDecls('white-space', (decl) => void (narrowWide = decl.value)));
   });
   expect(narrowWide).toBe('normal');
+});
+
+test('the wide table: On and Off share one grid whose Name column fits the longest name, so Run sits just right of it at every width', () => {
+  const columns = new Map<string, string>();
+  sheet().walkDecls('grid-template-columns', (decl) => {
+    const rule = decl.parent as { selector?: string; parent?: { type?: string; params?: string } };
+    columns.set(`${rule.parent?.type === 'atrule' ? rule.parent.params : 'root'} ${rule.selector}`, decl.value);
+  });
+  const wide = [...columns].filter(([key]) => key.endsWith(' .st-wgrid'));
+  expect(wide.length).toBe(3);
+  for (const [, value] of wide) expect(value).toMatch(/^fit-content\((?:[^()]|\([^()]*\))*\) auto /);
+  expect(columns.get('root .st-table')).toBe('subgrid');
+  expect(columns.get('root .st-cols')).toBe('subgrid');
 });
 
 test("on a phone New message's pickers keep their full-screen sheet: the editor's anchoring never reaches a [data-phone] picker", () => {

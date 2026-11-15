@@ -129,20 +129,20 @@ function WideRow({ row, acts, now }: { row: InboxScheduledRow; acts: RowActs; no
 function ShortRow({ row, acts, now, selected }: { row: InboxScheduledRow; acts: RowActs; now: number; selected: boolean }) {
   return (
     <div className="st-srow st-scols" role="row" onClick={() => acts.open(row)} data-scheduled-row={row.id} data-state={row.state} data-selected={selected ? '' : undefined}>
-      {/* Run or Stop leads the row, in one column, so every name starts on one line (the owner's note on the narrow list). */}
-      <span role="cell" className="st-sbtn">
-        <RunButton row={row} acts={acts} short />
-      </span>
       <span role="cell" className="st-sname">
         <button type="button" className="st-open" aria-current={selected ? 'true' : undefined} onClick={stopClick(() => acts.open(row))}>
           {row.name}
         </button>
         <span className="st-when">{shortScheduleWords(row)}</span>
       </span>
+      {/* Run or Stop right of the name, every row's on one line: the name column is the longest name's width. */}
+      <span role="cell" className="st-sbtn">
+        <RunButton row={row} acts={acts} short />
+      </span>
       <span role="cell" className="st-num st-count">
         {formatCount(row.runs)}
       </span>
-      <span role="cell" className="st-num">
+      <span role="cell" className="st-num st-last">
         {row.state === 'running' && row.running_since ? <span className="st-live"><RunningDots />{elapsedWords(row.running_since, now)}</span> : lastCell(row, now)}
       </span>
       <span role="cell" className="st-end">
@@ -166,11 +166,11 @@ export function ScheduledTable({ rows, acts, short, selected }: { rows: readonly
     return (
       <div className="st-short" role="table" aria-label="Routines">
         <div className="st-shead st-scols" role="row">
-          <span role="columnheader" aria-label="Run" />
-          <span role="columnheader">Routine</span>
+          <span role="columnheader" className="st-sname">Routine</span>
+          <span role="columnheader" className="st-sbtn" aria-label="Run" />
           <span role="columnheader" className="st-num st-count">Runs</span>
-          <span role="columnheader" className="st-num" aria-sort="descending">Last run</span>
-          <span />
+          <span role="columnheader" className="st-num st-last" aria-sort="descending">Last run</span>
+          <span className="st-end" />
         </div>
         {on.map((row) => <ShortRow key={row.id} row={row} acts={acts} now={now} selected={row.id === selected} />)}
         {off.length > 0 && (
@@ -183,31 +183,33 @@ export function ScheduledTable({ rows, acts, short, selected }: { rows: readonly
     );
   }
   return (
-    <>
-      {on.length > 0 && (
-        <div className="st-table" role="table" aria-label="Routines">
-          <div className="st-head st-cols" role="row">
-            <span role="columnheader">Name</span>
-            <span role="columnheader" aria-label="Run" />
-            <span role="columnheader">Runs</span>
-            <span role="columnheader" aria-sort="descending">{sortMark}</span>
-            <span role="columnheader">Next run</span>
-            <span role="columnheader">Created</span>
-            <span />
+    <div className="st-wide">
+      <div className="st-wgrid">
+        {on.length > 0 && (
+          <div className="st-table" role="table" aria-label="Routines">
+            <div className="st-head st-cols" role="row">
+              <span role="columnheader">Name</span>
+              <span role="columnheader" aria-label="Run" />
+              <span role="columnheader">Runs</span>
+              <span role="columnheader" aria-sort="descending">{sortMark}</span>
+              <span role="columnheader">Next run</span>
+              <span role="columnheader">Created</span>
+              <span />
+            </div>
+            {on.map((row) => <WideRow key={row.id} row={row} acts={acts} now={now} />)}
           </div>
-          {on.map((row) => <WideRow key={row.id} row={row} acts={acts} now={now} />)}
-        </div>
-      )}
-      {off.length > 0 && (
-        <>
-          <h3 className="st-offh" id="st-offh">
-            Off<span className="ib-n">{formatCount(off.length)}</span>
-          </h3>
-          <div className="st-table st-table-off" role="table" aria-labelledby="st-offh" data-scheduled-off="">
-            {off.map((row) => <WideRow key={row.id} row={row} acts={acts} now={now} />)}
-          </div>
-        </>
-      )}
-    </>
+        )}
+        {off.length > 0 && (
+          <>
+            <h3 className="st-offh" id="st-offh">
+              Off<span className="ib-n">{formatCount(off.length)}</span>
+            </h3>
+            <div className="st-table st-table-off" role="table" aria-labelledby="st-offh" data-scheduled-off="">
+              {off.map((row) => <WideRow key={row.id} row={row} acts={acts} now={now} />)}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
   );
 }

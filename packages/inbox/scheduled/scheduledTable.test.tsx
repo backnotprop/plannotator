@@ -48,13 +48,16 @@ function draw(short: boolean, selected: string | null = null) {
 
 const ids = (scope: Element) => [...scope.querySelectorAll('[data-scheduled-row]')].map((el) => el.getAttribute('data-scheduled-row'));
 
-test.skipIf(!hasDom)('wide: newest last run first, running on top, a never-run one last; the off ones in their own table', () => {
+test.skipIf(!hasDom)('wide: newest last run first, running on top, a never-run one last; the off ones in their own table, in the same grid', () => {
   const host = draw(false);
   const tables = host.querySelectorAll('[role="table"]');
   expect(tables.length).toBe(2);
   expect(ids(tables[0]!)).toEqual(['sch_running', 'sch_weekday', 'sch_daily', 'sch_once', 'sch_none']);
   const off = host.querySelector('[data-scheduled-off]')!;
   expect(ids(off)).toEqual(['sch_off_new', 'sch_off_old']);
+  // Both tables sit in one grid, so the Off table's Run column lines up with the On table's.
+  expect(tables[0]!.parentElement).toBe(off.parentElement);
+  expect(off.parentElement!.classList.contains('st-wgrid')).toBe(true);
   // The sort mark sits on Last run.
   expect(host.querySelector('[aria-sort="descending"]')?.textContent).toBe('Last run');
   // Off rows: Next run reads Off, and Run is dimmed but still there to run once.
@@ -72,15 +75,15 @@ test.skipIf(!hasDom)('wide: newest last run first, running on top, a never-run o
   expect(host.querySelector('[data-scheduled-row="sch_none"] [data-scheduled-next]')?.textContent).toBe('None');
 });
 
-test.skipIf(!hasDom)('split: Run leads every row in its own column, then Routine, Runs and Last run; the same order, the open one marked', () => {
+test.skipIf(!hasDom)('split: Routine, then its Run button in a column of its own right of the names, Runs and Last run; the same order, the open one marked', () => {
   const host = draw(true, 'sch_weekday');
   const heads = [...host.querySelectorAll('[role="columnheader"]')].map((el) => el.textContent || el.getAttribute('aria-label'));
-  expect(heads).toEqual(['Run', 'Routine', 'Runs', 'Last run']);
-  // Every row, On and Off, Run or Stop: the button is the first cell and the name the second.
+  expect(heads).toEqual(['Routine', 'Run', 'Runs', 'Last run']);
+  // Every row, On and Off, Run or Stop: the name is the first cell and the button the second, a column of its own.
   for (const row of host.querySelectorAll('[data-scheduled-row]')) {
-    const [button, name] = [...row.children];
-    expect(button!.querySelector('[data-scheduled-run]')).not.toBeNull();
+    const [name, button] = [...row.children];
     expect(name!.classList.contains('st-sname')).toBe(true);
+    expect(button!.classList.contains('st-sbtn') && !!button!.querySelector('[data-scheduled-run]')).toBe(true);
   }
   expect(ids(host)).toEqual(['sch_running', 'sch_weekday', 'sch_daily', 'sch_once', 'sch_none', 'sch_off_new', 'sch_off_old']);
   expect(host.querySelector('[data-scheduled-row="sch_weekday"]')?.hasAttribute('data-selected')).toBe(true);
