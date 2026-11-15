@@ -6,6 +6,9 @@ import { getIdentity } from '@plannotator/ui/utils/identity';
 import type { InboxAnnotationRecord } from '@plannotator/core/inbox-types';
 import { InboxApiError, inboxApi } from '../api';
 import { LIVE_FRAME_SANDBOX } from '../prototypes';
+import { inboxUrl } from '../inboxUrl';
+
+const liveFrameUrl = (threadId: string, siteId: string) => inboxUrl(`/threads/${encodeURIComponent(threadId)}/live/${encodeURIComponent(siteId)}/frame`);
 
 export function hostOf(url: string): string {
   try {
@@ -57,7 +60,7 @@ export function WebPage(props: {
       ) : props.framed ? (
         <iframe
           className="ib-pw-web"
-          src={inboxApi.liveFrameUrl(threadId, siteId)}
+          src={liveFrameUrl(threadId, siteId)}
           sandbox={LIVE_FRAME_SANDBOX}
           referrerPolicy="no-referrer"
           title={props.title}
