@@ -19,7 +19,7 @@
  * .local/proof/mobile/.
  */
 
-import { chromium, devices, expect, test, webkit, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { chromium, devices, expect, test, webkit, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { join, resolve } from 'node:path';
@@ -396,7 +396,15 @@ for (const phone of [
       expect(await box.evaluate((el) => parseFloat(getComputedStyle(el).fontSize))).toBeGreaterThanOrEqual(16);
       await shot(page, '5-reply');
       expect(await sideways(page)).toEqual([]);
-      expect(await smallTargets(page, '.ib-pfoot .ib-btn')).toEqual([]);
+      // The box's Send is a round 36 px arrow that takes a 44 px tap (approval "inbox-phone-composer-picker"), still
+      // named "Send"; every other action in the foot is 44 px as drawn.
+      expect(await smallTargets(page, '.ib-pfoot .ib-btn:not([data-reply-send])')).toEqual([]);
+      const send = pane.locator('.ib-rbox [data-reply-send]');
+      await expect(send).toHaveAccessibleName('Send');
+      expect(await send.evaluate((el) => [el.getBoundingClientRect().width, el.getBoundingClientRect().height])).toEqual([36, 36]);
+      const sendHit = await shortHitAreas(page, '.ib-rbox [data-reply-send]');
+      expect(sendHit.measured).toBe(1);
+      expect(sendHit.short).toEqual([]);
       await pane.locator('.ib-pfoot [data-reply-close]').click();
 
       // Back: the list, and the address of the list (the history is the stack it looks like).
@@ -641,6 +649,14 @@ for (const phone of [
         await page.locator('[data-thread-menu] [data-thread-read-item]').click();
       };
       const moveBack = () => readLine.locator('[data-move-back]').click();
+      // Undo and Move back are done once the live region says "Moved back." (Undo's toast is gone by then). The read
+      // line alone proves nothing: it is hidden while a Mark read still writes, and an event's list read can take it
+      // away before the Undo ends, whose late close would then take the next Mark read's toast.
+      const live = page.locator('[data-inbox-live]');
+      const movedBack = async () => {
+        await expect(readLine).toHaveCount(0);
+        await expect(live).toHaveText('Moved back.');
+      };
       await markRead();
       const toast = page.locator('[data-inbox-toast]');
       await expect(toast).toBeVisible();
@@ -684,7 +700,7 @@ for (const phone of [
       // The thread's banner says the rest; Undo puts it back.
       await expect(pane.locator('[data-read-line]')).toBeVisible();
       await toast.getByRole('button', { name: 'Undo' }).click();
-      await expect(readLine).toHaveCount(0);
+      await movedBack();
 
       // With the reply box open the foot is much taller: the toast still sits above it.
       await pane.locator('.ib-pfoot').getByRole('button', { name: /^Reply$|Edit draft$/ }).click();
@@ -696,7 +712,7 @@ for (const phone of [
       expect(tallToast!.y + tallToast!.height).toBeLessThanOrEqual(tallFoot!.y);
       await shot(page, '14b-toast-reply-open');
       await toast.getByRole('button', { name: 'Undo' }).click();
-      await expect(readLine).toHaveCount(0);
+      await movedBack();
 
       // Undo and the × are 8 px apart and their 44 px targets meet in the middle: a tap 2 px past the Undo pill
       // is still Undo (the thread moves back); one 6 px past it is the × (the toast goes, the thread stays read).
@@ -704,16 +720,27 @@ for (const phone of [
         await markRead();
         await expect(readLine).toBeVisible();
         await expect(toast).toBeVisible();
+        // A raw tap does not wait for the toast to hold still, as a click does. The toast comes up over the foot as it
+        // was; the foot then loses the reply box's line for the question Mark read closed, and the toast drops to 8 px
+        // above it, which can be after the read line shows. Tap where it rests.
+        const gap = () =>
+          page.evaluate(() => {
+            const foot = document.querySelector('section.ib-pane .ib-pfoot')!.getBoundingClientRect();
+            const box = document.querySelector('[data-inbox-toast]')!.getBoundingClientRect();
+            return Math.round(foot.top - box.bottom);
+          });
+        await expect.poll(gap).toBeGreaterThanOrEqual(0);
+        await expect.poll(gap).toBeLessThanOrEqual(12);
         const undoBox = (await toast.locator('[data-toast-undo]').boundingBox())!;
         await page.touchscreen.tap(undoBox.x + undoBox.width + px, undoBox.y + undoBox.height / 2);
       };
       await tapPast(2);
-      await expect(readLine).toHaveCount(0);
+      await movedBack();
       await tapPast(6);
       await expect(toast).toHaveCount(0);
       await expect(readLine).toBeVisible();
       await moveBack();
-      await expect(readLine).toHaveCount(0);
+      await movedBack();
 
       // Swipe it away with a finger (touch pointer events): a short drag springs back, one past 40% of its
       // width dismisses it, and its Undo goes with it (the thread stays read).
@@ -756,7 +783,7 @@ for (const phone of [
       // Back for the tests after this one.
       await page.emulateMedia({ reducedMotion: 'reduce' });
       await moveBack();
-      await expect(readLine).toHaveCount(0);
+      await movedBack();
     });
 
     test('Settings fits the window', async () => {

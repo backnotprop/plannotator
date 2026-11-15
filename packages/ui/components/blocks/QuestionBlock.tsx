@@ -1,4 +1,4 @@
-import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   canonicalQuestionAnswer,
   emptyQuestionAnswer,
@@ -310,7 +310,34 @@ export interface QuestionBlockProps {
    *  carry it for the host's CSS (see `QuestionPictureTiles`); nothing is drawn
    *  differently without host CSS. */
   pictureSize?: (url: string) => QuestionPictureSize | null;
+  /** Accept recommended, gentler (opt-in; the Plannotator Inbox). Absent: today's button. */
+  acceptBehavior?: QuestionAcceptBehavior;
 }
+
+/** `QuestionBlockProps.acceptBehavior`. Each part is off when absent. */
+export interface QuestionAcceptBehavior {
+  /** The button is not drawn while a text field in the card has focus (the
+   *  note, Other…, a text question's answer); it is back once focus leaves it. */
+  asideWhileTyping?: boolean;
+  /** Pick any: words typed under Other… stay in the answer beside the
+   *  recommended ticks, and the button is offered until the ticks alone are
+   *  the recommended ones. */
+  keepOther?: boolean;
+  /** After a tap. `undo` puts back the answer from before it (picks, ticks,
+   *  Other words, Skip; the note as it is now), and does nothing once the
+   *  answer has changed since the tap. `accepted` names the question and the
+   *  answer the tap set, so a host can tell when it is no longer current. */
+  onAccepted?: (undo: () => void, accepted: { key: string; answer: QuestionAnswer }) => void;
+}
+
+/** A field a person types in: a textarea or a text input (not a choice's radio or checkbox). */
+const isTypingField = (el: EventTarget | null): boolean =>
+  el instanceof HTMLTextAreaElement || (el instanceof HTMLInputElement && ['text', 'search', ''].includes(el.type));
+
+/** The parts of an answer Accept recommended sets (the note is not one). */
+export const sameAnswerParts = (a: QuestionAnswer, b: QuestionAnswer): boolean =>
+  a.selected.length === b.selected.length && a.selected.every((l, i) => l === b.selected[i])
+  && (a.other ?? '') === (b.other ?? '') && (a.text ?? '') === (b.text ?? '') && !!a.skipped === !!b.skipped;
 
 /** The picture tile's label (`pictureBadge`): a small dark chip over the picture's top-left corner. */
 const PICTURE_BADGE_STYLE: React.CSSProperties = {
@@ -346,6 +373,23 @@ const TrayIf: React.FC<{ on: boolean; after: React.ReactNode; children: React.Re
     <>{children}</>
   );
 
+/**
+ * Fits the Other field to its lines: one at least (`rows={1}`: its height, padding, border and any min-height
+ * as a one-line field), its CSS max-height at most, scrolling past that. Returns where the "+" mark goes
+ * beside a field of several lines (centred on the first line, where a one-line field centres it), else null.
+ */
+function fitOtherField(field: HTMLTextAreaElement): number | null {
+  field.style.height = '';
+  field.style.overflowY = '';
+  const one = field.offsetHeight;
+  // Its border (no scrollbar while it is one line or growing: its overflow is hidden).
+  const full = field.scrollHeight + (field.offsetHeight - field.clientHeight);
+  if (full <= one + 1) return null;
+  field.style.height = `${full}px`;
+  if (field.scrollHeight > field.clientHeight + 1) field.style.overflowY = 'auto';
+  return one > 15 ? (one - 15) / 2 : null;
+}
+
 export const QuestionBlock: React.FC<QuestionBlockProps> = ({
   blockId,
   indexed,
@@ -374,6 +418,7 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
   pictureBadge,
   onZoomChoice,
   pictureSize,
+  acceptBehavior,
 }) => {
   const { question, number } = indexed;
   const resolveImage = useImageResolver();
@@ -484,6 +529,10 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
   // the recommendation is "Yes".
   const [otherBy, setOtherBy] = useState<'row' | 'field' | null>(null);
   const [otherFocused, setOtherFocused] = useState(false);
+  // A text field of the card has focus (acceptBehavior.asideWhileTyping).
+  const [typing, setTyping] = useState(false);
+  const answerRef = useRef(answer);
+  answerRef.current = answer;
   // Pick any: the reviewer's own Other text the recommended row replaced when
   // ticked, put back when it is unticked (the answer has one Other field).
   const replacedOtherRef = useRef<string | null>(null);
@@ -523,11 +572,12 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
       && question.choices.some((c) => c.recommended)
       && !question.choices.some((c) => c.settled)
       && !isRecommendedQuestionAnswer(
-        answer!,
+        acceptBehavior?.keepOther ? { ...answer!, other: undefined } : answer!,
         question.choices.filter((c) => c.recommended).map((c) => c.label),
         question.suggestedText,
       ))
   );
+  const showAccept = offerAccept && !(acceptBehavior?.asideWhileTyping && typing);
   const selected = answered || skipped ? answer!.selected : settledLabels;
   const base = answer ?? emptyQuestionAnswer(indexed);
 
@@ -611,12 +661,25 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
   };
 
   const acceptRecommended = () => {
-    const next = recommendedQuestionAnswer(indexed, base);
-    if (!next) return;
+    const recommended = recommendedQuestionAnswer(indexed, base);
+    if (!recommended) return;
+    const keptOther = acceptBehavior?.keepOther && question.kind === 'multi' && recommended.selected.length > 0 && base.other?.trim() ? base.other : undefined;
+    const next = keptOther ? { ...recommended, other: keptOther } : recommended;
+    const before = answer;
     replacedOtherRef.current = null;
-    if (next.other) setOtherBy('row');
+    if (next.other && !keptOther) setOtherBy('row');
     focusAfterAcceptRef.current = true;
     commit(next);
+    const onAccepted = acceptBehavior?.onAccepted;
+    if (!onAccepted) return;
+    onAccepted(() => {
+      const now = answerRef.current;
+      if (!now || !sameAnswerParts(now, next)) return;
+      const { note: _n, ...was } = before ?? emptyQuestionAnswer(indexed);
+      replacedOtherRef.current = null;
+      setOtherBy(was.other ? 'field' : null);
+      commit({ ...was, ...(now.note ? { note: now.note } : {}) });
+    }, { key: question.key, answer: next });
   };
   // Runs after the render that drew the accepted answer (and once more at
   // most, should the host not redraw it): the first checked choice, else the
@@ -688,6 +751,43 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
     && (otherBy === 'row' || (otherBy === null && !otherFocused));
   const other = suggestionPicked ? '' : storedOther;
   const otherOn = other.trim() !== '';
+  // The Other field holds as many lines as its words take (typed or wrapped),
+  // from one (its height when it was a one-line field) up to its cap: fitted
+  // on each change, and again when its width changes (its words re-wrap).
+  const otherRef = useRef<HTMLTextAreaElement>(null);
+  const [otherGlyphTop, setOtherGlyphTop] = useState<number | null>(null);
+  const otherWidthRef = useRef(-1);
+  const fitOther = () => {
+    const field = otherRef.current;
+    setOtherGlyphTop(field ? fitOtherField(field) : null);
+    otherWidthRef.current = field ? field.clientWidth : -1;
+  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useLayoutEffect(() => fitOther(), [other, readOnly, otherOn]);
+  useEffect(() => {
+    const field = otherRef.current;
+    if (!field || typeof ResizeObserver === 'undefined') return;
+    let frame = 0;
+    const refit = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(fitOther);
+    };
+    // Only a new width re-wraps; the heights this fit sets come back here too.
+    const watch = new ResizeObserver(() => {
+      if (field.clientWidth !== otherWidthRef.current) refit();
+    });
+    watch.observe(field);
+    // A web font that arrives late re-wraps the words at the same width.
+    let live = true;
+    document.fonts?.ready.then(() => live && refit(), () => {});
+    return () => {
+      live = false;
+      cancelAnimationFrame(frame);
+      watch.disconnect();
+    };
+    // fitOther reads only refs; the field is new when these change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [readOnly, otherOn]);
   // Picture choices: each choice's picture URL (null: none, or not shown).
   const pictures = question.choices.map((c) => (c.image ? pictureSrc(c.image.src) : null));
   const showTiles = pictureChoices
@@ -745,6 +845,8 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
       data-directive-kind={question.directiveKind}
       data-question-key={question.key}
       data-question-status={status}
+      onFocus={acceptBehavior?.asideWhileTyping ? (event) => setTyping(isTypingField(event.target)) : undefined}
+      onBlur={acceptBehavior?.asideWhileTyping ? (event) => setTyping(isTypingField(event.relatedTarget) && !!cardRef.current?.contains(event.relatedTarget as Node)) : undefined}
       aria-labelledby={promptId}
       aria-describedby={describedBy}
       aria-disabled={readOnly || undefined}
@@ -1032,11 +1134,16 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
                     question.kind === 'multi' ? 'rounded-[3px]' : 'rounded-full',
                     otherOn ? 'border-solid border-primary bg-primary text-primary-foreground' : 'border-dashed border-border text-muted-foreground',
                   )}
+                  // Several lines: the mark stays beside the first, where one line centres it.
+                  style={otherGlyphTop === null ? undefined : { alignSelf: 'flex-start', marginTop: otherGlyphTop }}
                 >
                   {otherOn ? <CheckGlyph /> : '+'}
                 </span>
-                <input
-                  type="text"
+                {/* One line tall, as the one-line field it replaced; it grows with its lines (wrapped or typed:
+                    Enter makes a new line, as in the note) up to a cap, then scrolls. A read-only card shows it whole. */}
+                <textarea
+                  ref={otherRef}
+                  rows={1}
                   value={other}
                   onChange={(e) => setOther(e.target.value)}
                   onFocus={() => {
@@ -1049,7 +1156,11 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
                   disabled={readOnly}
                   placeholder={readOnly ? '' : 'Other…'}
                   aria-label={number > 0 ? `Other answer to question ${number}` : 'Other answer'}
-                  className="annotation-exclude min-w-0 flex-1 border-0 border-b border-transparent bg-transparent py-[3px] text-[13.5px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-ring"
+                  data-question-other=""
+                  className={cx(
+                    'annotation-exclude min-w-0 flex-1 resize-none overflow-hidden break-words border-0 border-b border-transparent bg-transparent py-[3px] text-[13.5px] text-foreground outline-none placeholder:text-muted-foreground/70 focus:border-ring',
+                    !readOnly && 'max-h-48',
+                  )}
                 />
               </div>
             )}
@@ -1177,7 +1288,7 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
           {/* Plannotator's own footer (no host actions, no save bar) keeps the
               Accept button as the one right-aligned item. */}
           {!hasHostFooter && !dirty ? (
-            offerAccept && (
+            showAccept && (
               <button
                 type="button"
                 onClick={acceptRecommended}
@@ -1188,7 +1299,7 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
             )
           ) : (
             <div className={cx(FOOT_OWN_ROW, 'ml-auto rtl:ml-0 rtl:mr-auto flex min-w-0 flex-wrap items-center justify-end gap-1')}>
-              {offerAccept && (
+              {showAccept && (
                 <button
                   type="button"
                   onClick={acceptRecommended}

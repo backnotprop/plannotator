@@ -177,6 +177,9 @@ describe("parseInboxCardRef: any other web link (user feedback #10)", () => {
     expect(sourceOf("https://github.com/acme/widgets/pull/12")).toBe("github");
     expect(sourceOf("https://gitlab.com/g/p/-/merge_requests/3")).toBe("gitlab");
     expect(sourceOf("https://bitbucket.org/acme/widgets/pull-requests/2")).toBe("bitbucket");
+    // Its link stays Bitbucket's own, and a Bitbucket issue is no card reference.
+    expect(parseInboxCardRef("https://bitbucket.org/acme/widgets/pull-requests/2")?.url).toBe("https://bitbucket.org/acme/widgets/pull-requests/2");
+    expect(sourceOf("https://bitbucket.org/acme/widgets/issues/2")).toBe("web");
     expect(sourceOf("https://example.atlassian.net/browse/DEMO-1")).toBe("jira");
     expect(sourceOf("https://acme.youtrack.cloud/issue/PROJ-1")).toBe("youtrack");
     // A web link is never a PR.

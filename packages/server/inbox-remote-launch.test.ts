@@ -396,9 +396,9 @@ describe("remote launch, on two real Inboxes linked both ways", () => {
       expect(listed.folders).not.toContain(".cache");
       expect(((await (await read("~/code/biling-api")).json()) as Json).exists).toBe(false);
       expect(((await (await read("~/.claude")).json()) as Json).code).toBe("folder_hidden");
-      expect(((await (await read("~/..")).json()) as Json).code).toBe("folder_outside_home");
+      expect(((await (await read("~/..")).json()) as Json).code).toBe("folder_bad_path");
       // A backslash is never a way into a hidden folder, and a missing folder offers the nearest one above it.
-      expect(((await (await read("~/x\\..\\.claude")).json()) as Json).code).toBe("folder_outside_home");
+      expect(((await (await read("~/x\\..\\.claude")).json()) as Json).code).toBe("folder_bad_path");
       expect(((await (await read("~/code/biling-api")).json()) as Json).nearest).toMatchObject({ path: "~/code", folders: expect.arrayContaining([`billing-api-${here.name.toLowerCase()}`]) });
       // An agent's bare read through the forward, and a read at the other door with this machine's token but no mark.
       const bare = await read("~/code", {});

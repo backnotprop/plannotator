@@ -36,6 +36,8 @@ export default defineConfig({
     sitemap({
       filter: (page) =>
         !page.startsWith('https://plannotator.ai/docs/') &&
+        // A help page the installer opens, not one to find in search (noindex).
+        page !== 'https://plannotator.ai/plugin-update/' &&
         (!page.startsWith('https://plannotator.ai/blog/') ||
           indexableBlogPages.has(page)),
     }),

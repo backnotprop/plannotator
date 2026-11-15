@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, type MouseEvent, type ReactNode, type RefObject } from 'react';
 import { KeyboardSettings } from './KeyboardSettings';
-import { INBOX_SOUND_MAX_VOLUME, INBOX_SOUND_MIN_VOLUME, INBOX_TEXT_SIZES } from '@plannotator/core/inbox-types';
+import { INBOX_TEXT_SIZES } from '@plannotator/core/inbox-types';
 import type { InboxSound } from '../sound';
-import type { AgentToolHost, InboxCookieHost, InboxExperimentalSettings, InboxStorageModel, MachineView, SettingsModel } from '../api';
+import { SoundRow, Switch } from './SoundRow';
+import { type AgentToolHost, type InboxCookieHost, type InboxExperimentalSettings, type InboxStorageModel, type MachineView, type SettingsModel } from '../api';
 import { cookieHostDescription } from '@plannotator/ui/hooks/useCookieHostSetting';
 import { formatBytes, formatCount, plural, tildePath } from '../format';
 import { HARNESSES, type ConnectContext } from '../harnesses';
@@ -16,6 +17,9 @@ import type { InboxAgentsModel, InboxNotifyReach } from '@plannotator/core/inbox
 import type { TestResult } from '../notify';
 import { blockedSteps, browserName, isMac, notifyStatusKind, notifyStatusText, reachText, testMissHint } from '../notifyStatus';
 import { DevicesSection, devicesNeedAttention, usePhones } from './Devices';
+import { CloudAgentsSection } from '../cloud/CloudAgents';
+import { useCloudAgentsGate } from '../cloud/useCloudAgentsGate';
+import { CloudHowButton } from '../cloud/how/CloudHowButton';
 import { MachinesSection } from './Machines';
 import { SidebarTrigger } from '../shell/sidebar';
 import { useInboxPalettes, useInboxTheme } from '../theme';
@@ -28,7 +32,7 @@ import { FAVICON_STYLE_CHOICES, faviconDataUrl } from '@plannotator/core/favicon
 import { SETTINGS_SECTION_LABEL, SETTINGS_SECTIONS, settingsHash, type SettingsSection } from '../settingsRoute';
 import { VoiceSettings } from './VoiceSettings';
 import { useVoiceSettings } from '../voice';
-import { RowsSection, rowsSummary } from './RowsSettings';
+import { RowsSection, rowsSummary, type RowsSectionProps } from './RowsSettings';
 import { useListLook } from '../listLook';
 import { DecisionData } from './DecisionData';
 import type { SystemProjectRow } from '@plannotator/core/inbox-system';
@@ -41,12 +45,15 @@ const TOOL_HOSTS: { host: AgentToolHost; name: string }[] = [
   { host: 'opencode', name: 'OpenCode' },
   { host: 'dsh', name: 'DeepSeek Harness' },
   { host: 'cline', name: 'Cline' },
+  { host: 'openclaw', name: 'OpenClaw' },
+  { host: 'hermes', name: 'Hermes Agent' },
 ];
 
 const SECTION_ICON: Record<SettingsSection, IconName> = {
   general: 'settings',
   rows: 'contents',
   agents: 'chip',
+  'cloud-agents': 'cloud',
   accounts: 'user',
   prompts: 'prompt',
   devices: 'phone',
@@ -90,12 +97,16 @@ export interface SettingsPageProps {
   onToggleSystem?: (next: boolean) => void;
   /** System's projects with their drawing's state, listed under its switch while it is on; null until read. */
   systemProjects?: SystemProjectRow[] | null;
+  /** Settings → Capabilities → Chapter diagrams, under Code review and shown only while it is on. Absent (or an Inbox without it): no row. */
+  onToggleChapterDiagrams?: (next: boolean) => void;
   /** Settings → Capabilities → Checklist (thread steps, approval "inbox-thread-steps"). Absent (or an Inbox without it): no row. */
   onToggleSteps?: (next: boolean) => void;
   /** Settings → Capabilities → Bro mode (approval "bro-mode"). Absent (or an Inbox without it): no row. */
   onToggleBro?: (next: boolean) => void;
   /** Settings → Capabilities → Experimental → "Float reply drafts" (approval "inbox-reply-floaters", off by default). Absent (or an Inbox without it): no row. */
   onToggleFloatDrafts?: (next: boolean) => void;
+  /** Settings → General → When an agent asks you → the Mark read warning (the owner's ask, 2026-11-10). Absent (or an Inbox without it): no row. */
+  onToggleMarkReadWarning?: (next: boolean) => void;
   /** Over your tailnet: the switch, and whether a change is in flight. */
   onToggleTailscale: (next: boolean, replaceExposed?: boolean) => void;
   tailscaleBusy: boolean;
@@ -123,8 +134,7 @@ export interface SettingsPageProps {
   aboutDot?: boolean | 'check-failing';
   /**
    * Settings → General's first row: the version and the sidebar's update
-   * action, Check now (components/Updates.tsx GeneralUpdateRow). Absent: none
-   * (a tailnet guest's page).
+   * action, Check now (components/Updates.tsx GeneralUpdateRow). Absent: none.
    */
   updateRow?: ReactNode;
   /** The question sound's row, under the notifications switch (sound.ts). */
@@ -138,6 +148,8 @@ export interface SettingsPageProps {
   activity?: ReactNode;
   /** How many threads are archived, for the nav's count; null while unknown. */
   archivedTotal?: number | null;
+  /** Settings → Rows' "Your list": the person's newest rows, with the names and away machines the list draws them by. Absent: examples. */
+  rowsPreview?: Pick<RowsSectionProps, 'rows' | 'projectNames' | 'awayMachines'>;
   /** The section on screen (`#settings/<section>`); null is `#settings` alone: General, or the list of sections on a phone. */
   section?: SettingsSection | null;
   /** `#settings/devices/pair`: Pair a phone is open. */
@@ -163,7 +175,7 @@ export interface SettingsPageProps {
   machines?: MachineView[];
   /** A link or an Unlink happened: read the machines again. */
   onMachinesChanged?: () => void;
-  /** Open a machine's update dialog. Absent on a page that offers no updates (a tailnet guest's). */
+  /** Open a machine's update dialog. Absent on a page that offers no updates. */
   onMachineUpdate?: (machineId: string) => void;
 }
 
@@ -172,7 +184,7 @@ export interface SettingsPageProps {
  * code review and annotate show in their Settings too: config.json
  * `urlHost: "plannotator.localhost"`. Locked (with the reason) while
  * PLANNOTATOR_URL_HOST is set or config.json holds another `urlHost`, which it
- * never replaces. The server leaves it out for a tailnet guest's page. From the owner's
+ * never replaces. From the owner's
  * phone (`remote`) it is still the computer's browser that the switch changes, so the heading says so.
  */
 function CookieHostGroup({ cookieHost, remote, onToggle }: { cookieHost: InboxCookieHost; remote: boolean; onToggle: (next: boolean) => void }) {
@@ -195,82 +207,6 @@ function CookieHostGroup({ cookieHost, remote, onToggle }: { cookieHost: InboxCo
         </div>
       </div>
     </section>
-  );
-}
-
-/** A row's switch, named by its visible title. */
-function Switch({ on, labelledBy, label, disabled, onClick }: { on: boolean; labelledBy?: string; label?: string; disabled?: boolean; onClick: () => void }) {
-  return <button type="button" role="switch" className="ib-sw" aria-checked={on} aria-labelledby={labelledBy} aria-label={label} disabled={disabled} onClick={onClick} />;
-}
-
-/**
- * The question sound (design of record: .product/approved/inbox-sound/): one
- * row, "Play a sound · when an agent asks you", then the volume, Play and
- * the switch. Off, the slider is disabled and Play still plays. Letting go of
- * the slider plays the sound once at the new level. Before the first click in
- * the tab, one line says Chrome needs it.
- */
-function SoundRow({ sound }: { sound: InboxSound }) {
-  const { enabled, volume } = sound.settings;
-  const [live, setLive] = useState(volume);
-  const slider = useRef<HTMLInputElement>(null);
-  const soundRef = useRef(sound);
-  soundRef.current = sound;
-  useEffect(() => setLive(volume), [volume]);
-  // React's onChange is the input event; letting go is the native change event.
-  useEffect(() => {
-    const el = slider.current;
-    if (!el) return;
-    const release = () => {
-      const next = Number(el.value);
-      soundRef.current.preview(next);
-      void soundRef.current.setVolume(next);
-    };
-    el.addEventListener('change', release);
-    return () => el.removeEventListener('change', release);
-  }, []);
-  return (
-    <>
-      <div className="ib-prow" data-settings-sound={enabled ? 'on' : 'off'}>
-        <span className="ib-txt">
-          <span className="ib-l" id="ib-sound-label">
-            Play a sound
-          </span>
-          <span className="ib-desc">When an agent asks you, while no Inbox tab is in front</span>
-        </span>
-        <span className="ib-ctl">
-          <input
-            ref={slider}
-            type="range"
-            className="ib-vslider"
-            min={INBOX_SOUND_MIN_VOLUME}
-            max={INBOX_SOUND_MAX_VOLUME}
-            step={10}
-            value={live}
-            aria-label="Volume"
-            aria-valuetext={`${live} percent`}
-            disabled={!enabled}
-            onChange={(event) => setLive(Number(event.target.value))}
-          />
-          <button
-            type="button"
-            className="ib-btn ib-sm ib-icon"
-            aria-label={sound.playing ? 'Playing…' : 'Play the sound'}
-            data-sound-play=""
-            onClick={() => sound.preview(live)}
-          >
-            <Icon name="play" />
-          </button>
-          <Switch on={enabled} labelledBy="ib-sound-label" onClick={() => void sound.setEnabled(!enabled)} />
-        </span>
-      </div>
-      {enabled && !sound.armed && (
-        <div className="ib-callout ib-in-card" role="status" data-sound-click-hint="">
-          <Icon name="clickHere" />
-          <span>Click once in this tab to allow sound.</span>
-        </div>
-      )}
-    </>
   );
 }
 
@@ -297,8 +233,11 @@ function GeneralSection({
   onToggleCookieHost,
   onTakeTour,
   updateRow,
+  onToggleMarkReadWarning,
 }: {
   onToggleCookieHost?: (next: boolean) => void;
+  /** The Mark read warning's switch (absent from an Inbox without it: no row). */
+  onToggleMarkReadWarning?: (next: boolean) => void;
   onTakeTour?: () => void;
   updateRow?: ReactNode;
   settings: SettingsModel;
@@ -421,7 +360,7 @@ function GeneralSection({
                 <span className="ib-l" id="ib-favicon-label">
                   Favicon
                 </span>
-                <span className="ib-desc">The icon on this tab. Also plan review, code review and annotate.</span>
+                <span className="ib-desc">The icon on this tab and on the installed app. Also plan review, code review and annotate.</span>
               </span>
               <span className="ib-ctl">
                 <span className="ib-seg" role="radiogroup" aria-labelledby="ib-favicon-label">
@@ -515,6 +454,21 @@ function GeneralSection({
             </div>
           )}
           {sound && <SoundRow sound={sound} />}
+          {settings.mark_read_warning && onToggleMarkReadWarning && (
+            // The warning before a Mark read that sets questions aside (components/MarkReadWarning.tsx): its "Don't
+            // show this again" turns this off, and this turns it back on.
+            <div className="ib-prow" data-settings-mark-read-warning="">
+              <span className="ib-txt">
+                <span className="ib-l" id="ib-mark-read-warning-label">
+                  Warn before Mark read sets questions aside
+                </span>
+                <span className="ib-desc">Asks first when marking read would close open questions and tell the agent not to wait on them.</span>
+              </span>
+              <span className="ib-ctl">
+                <Switch on={settings.mark_read_warning.on} labelledBy="ib-mark-read-warning-label" onClick={() => onToggleMarkReadWarning(!settings.mark_read_warning!.on)} />
+              </span>
+            </div>
+          )}
         </div>
         <div className="ib-note">
           <Icon name="info" />
@@ -555,6 +509,8 @@ function CapabilitiesSection({
   system,
   onToggleSystem,
   systemProjects,
+  chapterDiagrams,
+  onToggleChapterDiagrams,
   bro,
   onToggleBro,
   floatDrafts,
@@ -578,6 +534,9 @@ function CapabilitiesSection({
   system: { on: boolean } | null;
   onToggleSystem?: (next: boolean) => void;
   systemProjects?: SystemProjectRow[] | null;
+  /** Chapter diagrams: null unless Code review is on (the server sends it only then). */
+  chapterDiagrams: { on: boolean } | null;
+  onToggleChapterDiagrams?: (next: boolean) => void;
   /** Bro mode (approval "bro-mode"), null on an Inbox without it. */
   bro: { on: boolean } | null;
   onToggleBro?: (next: boolean) => void;
@@ -598,6 +557,8 @@ function CapabilitiesSection({
   const [systemRowSeen, setSystemRowSeen] = useState(false);
   if (system?.on === true && codeReview?.on === true && !systemRowSeen) setSystemRowSeen(true);
   const systemRow = system && onToggleSystem && codeReview?.on === true && (SYSTEM_SETTINGS_ROW_VISIBLE || system.on || systemRowSeen);
+  // Chapter diagrams sits under Code review, as System does, and shows only while Code review is on.
+  const chapterDiagramsRow = chapterDiagrams && onToggleChapterDiagrams && codeReview?.on === true;
   // Bro mode sits in the Experimental group (the owner, 2026-11-08), so the group shows for it alone too.
   const broRow = bro && onToggleBro;
   // Floating reply drafts (the owner, 2026-11-08): off by default, so its switch sits with the features still being tried.
@@ -650,6 +611,19 @@ function CapabilitiesSection({
                 </span>
                 <span className="ib-ctl">
                   <Switch on={codeReview.on} labelledBy="ib-code-review-label" onClick={() => onToggleCodeReview(!codeReview.on)} />
+                </span>
+              </div>
+            )}
+            {chapterDiagramsRow && (
+              <div className="ib-prow" data-settings-chapter-diagrams="">
+                <span className="ib-txt">
+                  <span className="ib-l" id="ib-chapter-diagrams-label">
+                    Chapter diagrams
+                  </span>
+                  <span className="ib-desc">Agents may add a diagram above a chapter's code.</span>
+                </span>
+                <span className="ib-ctl">
+                  <Switch on={chapterDiagrams.on} labelledBy="ib-chapter-diagrams-label" onClick={() => onToggleChapterDiagrams(!chapterDiagrams.on)} />
                 </span>
               </div>
             )}
@@ -788,9 +762,11 @@ function AgentsSection({
 }) {
   if (agents && onAgents) {
     return (
-      <section className="ib-sgroup" aria-label="Agents">
-        <AgentsSettings model={agents} onModel={onAgents} context={context} launch={settings.launch ?? null} />
-      </section>
+      <>
+        <section className="ib-sgroup" aria-label="Agents">
+          <AgentsSettings model={agents} onModel={onAgents} context={context} launch={settings.launch ?? null} />
+        </section>
+      </>
     );
   }
   const env = settings.inbox_tool.env;
@@ -799,8 +775,8 @@ function AgentsSection({
       <section className="ib-sgroup" aria-labelledby="ib-g-tool">
         <h2 id="ib-g-tool">The Inbox in your agent&apos;s tools</h2>
         <p>
-          Lets an agent send, read and wait for replies from its own tool list. Pi, OpenCode, DeepSeek Harness and Cline send every tool&apos;s definition with each request, so they start
-          off.
+          Lets an agent send, read and wait for replies from its own tool list. Pi, OpenCode, DeepSeek Harness and Cline send every tool&apos;s definition with each request, so they start off. OpenClaw and
+          Hermes Agent start off too, until you turn them on here or <code>plannotator inbox</code> does.
         </p>
         {env !== null && (
           <div className="ib-callout" data-tool-locked="">
@@ -827,7 +803,7 @@ function AgentsSection({
         {env === null && (
           <div className="ib-note">
             <Icon name="info" />
-            Applies to the next session; for DeepSeek Harness, it applies when DeepSeek Harness next starts. Sessions already running keep what they started with.
+            Applies to the next session; for DeepSeek Harness, it applies when DeepSeek Harness next starts, and for OpenClaw from its next message. Sessions already running keep what they started with.
           </div>
         )}
       </section>
@@ -940,9 +916,10 @@ function StoreTable({
 
 const LEDE: Record<SettingsSection, string> = {
   general: 'How the Inbox looks, and how it gets your attention.',
-  // Rows draws its own lede, with the presets beside it (RowsSettings.tsx).
+  // Rows draws its own lede, with Undo and Reset beside it (RowsSettings.tsx).
   rows: '',
   agents: "How each agent on this computer reaches the Inbox and learns when to use it. A change applies to that agent's next session; sessions already running keep what they started with.",
+  'cloud-agents': 'An agent in the cloud or on a server, such as a Claude Code routine, Grok Bot, Muse, Hermes Agent or OpenClaw, that reads and answers its threads here.',
   accounts: '',
   prompts: "What Plannotator tells your agents. A change applies to each agent's next session.",
   devices: 'Your phone, and browsers on your other devices.',
@@ -990,7 +967,9 @@ export function SettingsPage(props: SettingsPageProps) {
     onRetry,
     phone = false,
   } = props;
-  const section: SettingsSection | null = props.section ?? (phone ? null : 'general');
+  const asked: SettingsSection | null = props.section ?? (phone ? null : 'general');
+  const cloud = useCloudAgentsGate(settings !== null, asked);
+  const section: SettingsSection | null = asked === 'cloud-agents' && cloud.shown === false ? 'agents' : asked;
   // Settings → Storage's sizes walk every file on the server, so they are read only here, each time Storage is shown.
   // The calm wait: nothing moves, and words show only when the count takes longer than STORE_SLOW_MS. Numbers that
   // come after a wait fade in; numbers kept from an earlier visit are there at once.
@@ -1069,6 +1048,7 @@ export function SettingsPage(props: SettingsPageProps) {
   const codeReview = settings?.code_review && props.onToggleCodeReview ? settings.code_review : null;
   const shape = settings?.shape && props.onToggleShape ? settings.shape : null;
   const system = settings?.system && props.onToggleSystem ? settings.system : null;
+  const chapterDiagrams = settings?.chapter_diagrams && props.onToggleChapterDiagrams ? settings.chapter_diagrams : null;
   const bro = settings?.bro && props.onToggleBro ? settings.bro : null;
   const floatDrafts = settings?.float_drafts && props.onToggleFloatDrafts ? settings.float_drafts : null;
   // Machines shows while this Inbox can link one (its merged view names this machine); an older Inbox has no such page.
@@ -1077,7 +1057,7 @@ export function SettingsPage(props: SettingsPageProps) {
   const voice = useVoiceSettings();
   const [look] = useListLook();
   const sections = SETTINGS_SECTIONS.filter(
-    (id) => (id !== 'capabilities' || board !== null || steps !== null || codeReview !== null || shape !== null || bro !== null || floatDrafts !== null || experimental !== null) && (id !== 'machines' || machines.length > 0) && (id !== 'voice' || voice !== null),
+    (id) => (id !== 'capabilities' || board !== null || steps !== null || codeReview !== null || shape !== null || bro !== null || floatDrafts !== null || experimental !== null) && (id !== 'cloud-agents' || cloud.shown === true) && (id !== 'machines' || machines.length > 0) && (id !== 'voice' || voice !== null),
   );
   /** The phone's list of sections, in its groups: settings (Capabilities last of them), then your data and Plannotator. */
   const phoneGroups: { label: string; ids: SettingsSection[] }[] = [
@@ -1124,6 +1104,8 @@ export function SettingsPage(props: SettingsPageProps) {
         const on = TOOL_HOSTS.filter(({ host }) => settings.inbox_tool.hosts[host]).map(({ name }) => name);
         return on.length === 0 ? 'Off' : on.length === 1 ? on[0]! : `${on.length} agents`;
       }
+      case 'cloud-agents':
+        return cloud.count > 0 ? plural(cloud.count, 'agent') : '';
       case 'rows':
         return rowsSummary(look);
       case 'accounts':
@@ -1169,14 +1151,18 @@ export function SettingsPage(props: SettingsPageProps) {
             onToggleCookieHost={props.onToggleCookieHost}
             onTakeTour={props.onTakeTour}
             updateRow={props.updateRow}
+            onToggleMarkReadWarning={props.onToggleMarkReadWarning}
           />
         );
         break;
       case 'rows':
-        body = <RowsSection phone={phone} onGeneral={() => onSection?.('general')} />;
+        body = <RowsSection phone={phone} onGeneral={() => onSection?.('general')} {...props.rowsPreview} />;
         break;
       case 'agents':
         body = <AgentsSection settings={settings} context={context} onToggleTool={onToggleTool} agents={props.agents} onAgents={props.onAgents} />;
+        break;
+      case 'cloud-agents':
+        body = <CloudAgentsSection />;
         break;
       case 'accounts':
         body = <AccountsSection machine={machines.find((machine) => machine.self)?.name} />;
@@ -1205,7 +1191,7 @@ export function SettingsPage(props: SettingsPageProps) {
         );
         break;
       case 'machines':
-        body = <MachinesSection machines={machines} via={via} onChanged={() => props.onMachinesChanged?.()} onMachineUpdate={props.onMachineUpdate} />;
+        body = <MachinesSection machines={machines} onChanged={() => props.onMachinesChanged?.()} onMachineUpdate={props.onMachineUpdate} />;
         break;
       case 'archived':
         body = archived ?? (
@@ -1277,6 +1263,8 @@ export function SettingsPage(props: SettingsPageProps) {
               system={system}
               onToggleSystem={props.onToggleSystem}
               systemProjects={props.systemProjects}
+              chapterDiagrams={chapterDiagrams}
+              onToggleChapterDiagrams={props.onToggleChapterDiagrams}
               bro={bro}
               onToggleBro={props.onToggleBro}
               floatDrafts={floatDrafts}
@@ -1349,7 +1337,14 @@ export function SettingsPage(props: SettingsPageProps) {
             </a>
           </div>
         )}
-        {section === 'accounts' && settings ? (
+        {section === 'cloud-agents' && settings ? (
+          <div className="ib-spg-h">
+            <h1 ref={heading} tabIndex={-1}>
+              {SETTINGS_SECTION_LABEL[section]}
+            </h1>
+            <CloudHowButton />
+          </div>
+        ) : section === 'accounts' && settings ? (
           // Accounts' Refresh reads every machine, so it sits by the page's title (approval "accounts-page").
           <div className="ib-spg-h">
             <h1 ref={heading} tabIndex={-1}>

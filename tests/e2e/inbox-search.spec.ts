@@ -33,7 +33,7 @@
  * PNGs land in .local/proof/search/ (PLANNOTATOR_E2E_PROOF_DIR).
  */
 
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -89,7 +89,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   rmSync(proofDir, { recursive: true, force: true });
   mkdirSync(proofDir, { recursive: true });
   const root = inboxScratch('plannotator-inbox-search-e2e-');
-  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_DATA_DIR: join(root, 'data'), PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0' };
+  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: join(root, 'data'), PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0' };
   const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
   expect(started.status, started.stderr).toBe(0);
   url = started.stdout.trim();
@@ -663,16 +663,14 @@ test('a phone: the list header opens a full-screen sheet; a result opens the thr
     await icon.tap();
     await palette(p).locator('[data-search-cancel]').tap();
     await expect(palette(p)).toBeHidden();
-    // The sidebar sheet's Search entry: the sheet closes and the search sheet opens.
+    // The sidebar sheet holds no Search entry on a phone (approval "inbox-phone-sidebar-sheet"): the header's icon is the way in.
     await p.locator('.ib-lhead .ib-sb-trigger').tap();
-    const sheetEntry = p.locator('.ib-sp-entry').filter({ visible: true });
-    await expect(sheetEntry).toBeVisible();
-    await shot(p, '24-phone-sidebar-entry', ['light']);
-    await sheetEntry.tap();
-    await expect(palette(p)).toBeVisible();
-    await expect(sheetEntry).toBeHidden();
-    await palette(p).locator('[data-search-cancel]').tap();
-    await expect(palette(p)).toBeHidden();
+    const sheet = p.locator('.ib-sb-sheet');
+    await expect(sheet.locator('[data-inbox-nav]')).toBeVisible();
+    await expect(sheet.locator('.ib-sp-entry, [data-open-search], [data-open-compose]')).toHaveCount(0);
+    await shot(p, '24-phone-sidebar-no-entry', ['light']);
+    await sheet.locator('[data-sheet-close]').tap();
+    await expect(sheet).toHaveCount(0);
   } finally {
     await phone.close();
   }

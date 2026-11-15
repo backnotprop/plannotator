@@ -65,7 +65,7 @@ beforeEach(() => {
   Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: { getUserMedia: async () => ({ getTracks: () => [], getAudioTracks: () => [] }) } });
   Object.defineProperty(navigator, 'permissions', { configurable: true, value: { query: async () => ({ state: 'granted' }) } });
   globalThis.fetch = (async (input: RequestInfo | URL) => (String(input).includes('/voice/transcribe') ? Response.json({ text: WORDS }) : Response.json({ state: 'ready', plan: null }))) as typeof fetch;
-  adoptVoiceSettings({ on: true, phones_only: false, engine: 'codex', key: { source: null, last4: null }, computer: null, intro_due: false, guest: false });
+  adoptVoiceSettings({ on: true, phones_only: false, engine: 'codex', key: { source: null, last4: null }, computer: null, intro_due: false });
 });
 
 afterEach(() => {

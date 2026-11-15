@@ -96,9 +96,11 @@ describe("the launched session's first wake", () => {
     }
   });
 
-  test("an agent this connection does not know, in a project folder: Line A alone", () => {
-    const lines = inboxWakeText(command({ agent: "codex" as "pi", project: true })).split("\n");
-    expect(lines.filter((line) => LAUNCHED_WORDS.includes(line))).toEqual([INBOX_LAUNCHED_LINE]);
+  test("Codex or OpenCode in a project folder, which have no project line: Line A alone", () => {
+    for (const agent of ["codex", "opencode"] as const) {
+      const lines = inboxWakeText(command({ agent, project: true })).split("\n");
+      expect(lines.filter((line) => LAUNCHED_WORDS.includes(line))).toEqual([INBOX_LAUNCHED_LINE]);
+    }
   });
 
   test("a wake without it (a session the person started, a later reply): none of the launched words", () => {

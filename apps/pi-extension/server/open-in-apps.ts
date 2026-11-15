@@ -45,6 +45,7 @@ function whichBin(bin: string): boolean {
 		const finder = process.platform === "win32" ? "where" : "which";
 		execFileSync(finder, [bin], {
 			env: process.env,
+			windowsHide: true,
 			encoding: "utf-8",
 			stdio: ["pipe", "pipe", "pipe"],
 		});
@@ -143,6 +144,7 @@ function run(
 
 		let child: ReturnType<typeof spawn>;
 		try {
+			// windows-hide-guard: starts the app window the person asked for, which windowsHide would start hidden.
 			child = spawn(cmd, args, {
 				detached: true,
 				stdio: ["ignore", "ignore", "pipe"],
@@ -229,6 +231,7 @@ function spawnDetached(
 	args: string[],
 ): Promise<{ ok: true } | { ok: false; error: string }> {
 	try {
+		// windows-hide-guard: starts the app window the person asked for, which windowsHide would start hidden.
 		const child = spawn(cmd, args, { detached: true, stdio: "ignore" });
 		child.on("error", () => {}); // fire-and-forget; ignore async spawn failure
 		child.unref();

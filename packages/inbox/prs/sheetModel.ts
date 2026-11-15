@@ -22,6 +22,18 @@ import {
   type InboxPullsAnswer,
 } from '@plannotator/core/inbox-types';
 import { repoLabels } from '../pulls/labels';
+import { person, wordsText, type Words } from '../pulls/words';
+
+/**
+ * A tile's click (the owner, 2026-11-11: "the launchpad everywhere a single PR is clicked"): a single open PR opens its
+ * launchpad in Reviews (`launchpad`, the stack's id), once Reviews' own list (`reviews`, the scoped read) has it, since
+ * the launchpad is drawn from that list. Else the PR view as before (`pull`): a layer of a stack of several, a merged
+ * PR, or a PR in a repository that is no project (the board reads everywhere; Reviews only the projects' ones).
+ */
+export function tileOpens(pull: Pick<InboxPull, 'key' | 'state'>, stack: Pick<InboxPullStack, 'id' | 'layers'>, reviews: Pick<InboxPullsAnswer, 'pulls'> | null): { launchpad: string } | 'pull' {
+  if (stack.layers.length !== 1 || !inboxPullIsOpen(pull)) return 'pull';
+  return reviews?.pulls.some((p) => p.key === pull.key) ? { launchpad: stack.id } : 'pull';
+}
 
 /** A stack folds to one strip on the Sheet past this many PRs (the owner's answer, q-f1451f8d). */
 export const FOLD_OVER = 8;
@@ -245,6 +257,16 @@ export function stackCounts(stack: Pick<InboxPullStack, 'layers'>): { open: numb
 
 /** A PR's state in a word or two, as the popover and the stack view say it. */
 export function statusWords(pull: InboxPull, now: number): string {
+  return wordsText(statusParts(pull, now));
+}
+
+/** `statusWords` in parts: "Waits on " then the reviewer, drawn with their face (`words.ts`). */
+export function statusParts(pull: InboxPull, now: number): Words {
+  const said = statusLine(pull, now);
+  return typeof said === 'string' ? [said] : said;
+}
+
+function statusLine(pull: InboxPull, now: number): string | Words {
   if (pull.state === 'merged') return pull.merged_at ? `Merged ${agoWords(pull.merged_at, now)}` : 'Merged';
   if (pull.state === 'closed') return 'Closed';
   const you = needsYou(pull);
@@ -257,7 +279,7 @@ export function statusWords(pull: InboxPull, now: number): string {
   if (readyToLand(pull)) return 'Approved · ready to land';
   if (pull.review === 'approved') return pull.checks === 'pending' ? 'Approved · checks running' : 'Approved';
   if (pull.checks === 'pending') return 'Checks running';
-  if (pull.reviewers.length > 0) return `Waits on ${pull.reviewers[0]}${pull.reviewers.length > 1 ? ` and ${pull.reviewers.length - 1} more` : ''}`;
+  if (pull.reviewers.length > 0) return ['Waits on ', person(pull.reviewers[0]!), ...(pull.reviewers.length > 1 ? [` and ${pull.reviewers.length - 1} more`] : [])];
   return 'Waiting on review';
 }
 

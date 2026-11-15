@@ -62,8 +62,14 @@ export function launchOff(dataDir: string): void {
   writeFileSync(file, JSON.stringify({ ...config, ...E2E_LAUNCH_OFF }));
 }
 
-/** The config.json key every e2e world starts with (`launchOff`): spread it into a config a spec writes whole. */
-export const E2E_LAUNCH_OFF = { inboxLaunch: { enabled: false } } as const;
+/**
+ * The config.json keys every e2e world starts with (`launchOff`): spread it into a config a spec writes whole. Besides
+ * launch off, the one-time "themes" dialog is settled (as for someone on another theme): on a release build it is due
+ * from day one for the default theme and opens 15 s into the page, over whatever a spec is doing. The spec about that
+ * dialog takes the key out. The warning before a Mark read that sets questions aside is off too (as for someone who
+ * ticked "Don't show this again"), so a spec about Mark read itself is not stopped by it.
+ */
+export const E2E_LAUNCH_OFF = { inboxLaunch: { enabled: false }, inboxThemeChooser: { notNeededAt: '2026-10-01T10:00:00.000Z' }, inboxMarkReadWarning: false } as const;
 
 /**
  * What every Plannotator process a spec starts under `root` needs: a scratch
@@ -74,12 +80,12 @@ export const E2E_LAUNCH_OFF = { inboxLaunch: { enabled: false } } as const;
  * either way it must be a scratch folder. tests/e2e-spawn-home.test.ts fails on
  * an e2e env that sets a data dir with neither a scratch HOME nor this.
  */
-export function scratchEnv(root: string, options: { home?: string } = {}): { HOME: string; PLANNOTATOR_DATA_DIR: string; PLANNOTATOR_BROWSER: string; NO_ANON_PING: string } {
+export function scratchEnv(root: string, options: { home?: string } = {}): { HOME: string; PLANNOTATOR_RELAY_URL: string; PLANNOTATOR_DATA_DIR: string; PLANNOTATOR_BROWSER: string; NO_ANON_PING: string } {
   const HOME = refuseRealHome(options.home ?? join(root, 'home'), 'tests/e2e/inbox-scratch.ts scratchEnv');
   mkdirSync(HOME, { recursive: true });
   const PLANNOTATOR_DATA_DIR = join(root, 'data');
   refuseRealDataDir(PLANNOTATOR_DATA_DIR, 'tests/e2e/inbox-scratch.ts scratchEnv');
-  return { HOME, PLANNOTATOR_DATA_DIR, PLANNOTATOR_BROWSER: NO_BROWSER, NO_ANON_PING: '1' };
+  return { HOME, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR, PLANNOTATOR_BROWSER: NO_BROWSER, NO_ANON_PING: '1' };
 }
 
 const inside = (path: string, root: string) => path === root || path.startsWith(`${root}${sep}`);

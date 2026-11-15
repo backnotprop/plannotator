@@ -28,7 +28,7 @@ import type { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod";
 import { parseDiffToFiles, patchBlobIds, type DiffFile, type PatchBlobIds } from "@plannotator/core/diff-files";
 import { forgeRefKey, parseForgeRefUrl } from "@plannotator/core/forge-ref-card";
-import { GUIDE_REVIEW_PROMPT, GUIDE_SCHEMA_JSON } from "@plannotator/core/guide-prompt";
+import { GUIDE_SCHEMA_JSON } from "@plannotator/core/guide-prompt";
 import {
   GUIDE_SNAPSHOT_DRAWN_VERSION,
   GUIDE_SNAPSHOT_OVERVIEW_VERSION,
@@ -47,6 +47,7 @@ import {
   checkInboxDrawing,
   INBOX_GUIDE_FIELD_DESCRIPTION,
   INBOX_GUIDE_FIELD_DESCRIPTION_WITH_NOTES,
+  INBOX_GUIDE_FIELD_DESCRIPTION_WITH_NOTES_NO_DIAGRAM,
   INBOX_REVIEW_FIELD_DESCRIPTION,
   INBOX_REVIEW_NOTES_RULE,
   inboxReviewChapterDiagramDoc,
@@ -60,11 +61,13 @@ import { questionOpenersWithTextText } from "@plannotator/shared/inbox/question-
 import { questionsToCheckText } from "@plannotator/shared/inbox/questions-to-check";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
+import { readGuideInstructions } from "@plannotator/shared/guide-instructions-store";
 import { readDiffSideBytes, readGitObjectBytes } from "@plannotator/shared/review-core";
 import { runtime as gitRuntime } from "./git";
 import { gitBlobId, INBOX_PULL_FILE_MAX_BYTES, textOfBytes } from "./inbox-pulls";
 import { buildAuthoredGuideSnapshot } from "./guide/guide-cli";
-import { SEND_ROUTING_FIELDS, replyNextStepText, senderWakes, guarded, imagesNotShownText, noStakesText, recommendedInLabelText,
+import { composeGuideMethodology } from "./guide/guide-review";
+import { SEND_ROUTING_FIELDS, replyNextStepText, senderWakes, t3WokenOnlyWhileRunning, guarded, imagesNotShownText, noStakesText, recommendedInLabelText,
   callerWorkingFolder, namingLine, ok, sendAgentMessage, sendProject, type InboxMcpContext } from "./inbox-mcp";
 
 /** How to read the diff to send as `patch` (Workspaces' local-diff steps, for this machine). */
@@ -572,8 +575,9 @@ export async function inboxGuideRoute(
  * drawing: `kind: "html"` with source, css, width and height, tall; or
  * `kind: "mermaid"` with source; with Shape off, Mermaid only). The overview's
  * diagram is no longer offered (approval "guide-chapter-diagrams"); submit_guide still takes one.
+ * `diagrams` false (Chapter diagrams off): no `diagram` on a chapter either; submit_guide still takes one.
  */
-function guideSchemaWithOverview(shapeOn: boolean): Record<string, unknown> {
+function guideSchemaWithOverview(shapeOn: boolean, diagrams = true): Record<string, unknown> {
   const schema = JSON.parse(GUIDE_SCHEMA_JSON) as { properties: Record<string, unknown> } & Record<string, unknown>;
   // Context notes: a diff reference's optional `notes` (only this brief's copy; the review app's guide job keeps its schema).
   const diffItem = (schema.properties.sections as { items: { properties: { diffs: { items: { properties: Record<string, unknown> } } } } }).items.properties.diffs.items;
@@ -587,7 +591,7 @@ function guideSchemaWithOverview(shapeOn: boolean): Record<string, unknown> {
     },
   };
   const drawnSide = { type: "object", properties: { source: { type: "string" }, css: { type: "string" } }, required: ["source"], additionalProperties: false };
-  (schema.properties.sections as { items: { properties: Record<string, unknown> } }).items.properties.diagram = {
+  if (diagrams) (schema.properties.sections as { items: { properties: Record<string, unknown> } }).items.properties.diagram = {
     type: "object",
     // The html kind (a drawing by Shape's rules) only while Shape is on; Mermaid always (see inboxReviewChapterDiagramDoc).
     properties: shapeOn
@@ -624,17 +628,23 @@ export function registerInboxGuideTools(server: McpServer, context: InboxMcpCont
       inputSchema: z.object({}).strict(),
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
-    async () =>
-      ok("The guided-review method, the guide's shape, how to read the diff, the rules and a worked submit_guide call.", {
-        methodology: GUIDE_REVIEW_PROMPT,
-        output_schema: context.codeReviewOn?.() ? guideSchemaWithOverview(context.shapeOn?.() ?? false) : (JSON.parse(GUIDE_SCHEMA_JSON) as Record<string, unknown>),
+    async () => {
+      // Chapter diagrams off (Settings → Capabilities): the brief names no chapter diagram (rule and schema), nothing in its place.
+      const diagrams = context.chapterDiagramsOn?.() ?? true;
+      return ok("The guided-review method, the guide's shape, how to read the diff, the rules and a worked submit_guide call.", {
+        // The person's standing instructions (Settings, `${dataDir}/guide-instructions.md`) reach a guide
+        // an agent writes exactly as they reach one the review UI launches: appended through
+        // composeGuideMethodology, so the two paths read one prompt. Without them, GUIDE_REVIEW_PROMPT byte for byte.
+        methodology: composeGuideMethodology(readGuideInstructions()),
+        output_schema: context.codeReviewOn?.() ? guideSchemaWithOverview(context.shapeOn?.() ?? false, diagrams) : (JSON.parse(GUIDE_SCHEMA_JSON) as Record<string, unknown>),
         diff_steps: GUIDE_DIFF_STEPS,
         // Code review on: a chapter's diagram (approval "guide-chapter-diagrams"), Mermaid always and Shape's html kind
         // only while Shape is on too (approval "code-review-029-shape-off"). Off: as before, byte for byte.
         // Context notes ride Code review's switch (approval "inbox-context-notes"): a rule, the schema's `notes` and an example note.
-        rules: context.codeReviewOn?.() ? [...GUIDE_RULES, inboxReviewChapterDiagramDoc(context.shapeOn?.() ?? false), INBOX_REVIEW_NOTES_RULE] : GUIDE_RULES,
+        rules: context.codeReviewOn?.() ? [...GUIDE_RULES, ...(diagrams ? [inboxReviewChapterDiagramDoc(context.shapeOn?.() ?? false)] : []), INBOX_REVIEW_NOTES_RULE] : GUIDE_RULES,
         example: context.codeReviewOn?.() ? GUIDE_BRIEF_EXAMPLE_WITH_NOTE : GUIDE_BRIEF_EXAMPLE,
-      }),
+      });
+    },
   );
 
   server.registerTool(
@@ -647,7 +657,13 @@ export function registerInboxGuideTools(server: McpServer, context: InboxMcpCont
           guide: z
             .union([z.record(z.string(), z.unknown()), z.string()])
             .optional()
-            .describe(context.codeReviewOn?.() ? INBOX_GUIDE_FIELD_DESCRIPTION_WITH_NOTES : INBOX_GUIDE_FIELD_DESCRIPTION),
+            .describe(
+              context.codeReviewOn?.()
+                ? context.chapterDiagramsOn?.() === false
+                  ? INBOX_GUIDE_FIELD_DESCRIPTION_WITH_NOTES_NO_DIAGRAM
+                  : INBOX_GUIDE_FIELD_DESCRIPTION_WITH_NOTES
+                : INBOX_GUIDE_FIELD_DESCRIPTION,
+            ),
           patch: z.string().optional().describe("The exact unified diff the guide describes (get_guide_brief's diff_steps)."),
           snapshot: z
             .union([z.record(z.string(), z.unknown()), z.string()])
@@ -697,7 +713,7 @@ export function registerInboxGuideTools(server: McpServer, context: InboxMcpCont
         if (!sent.replayed) writeBlob(context.store.dir, described.ref.sha256, Buffer.from(described.text, "utf8"));
         const guide = context.store.message(String(sent.structured.message_id))?.guide ?? described.ref;
         return ok(
-          `${sent.replayed ? "Already sent" : "Sent"} the ${guide.review ? "review" : "guided review"} "${guide.title}" (${guide.sections} section${guide.sections === 1 ? "" : "s"}, ${guide.files} file${guide.files === 1 ? "" : "s"}) to the Plannotator Inbox (thread ${sent.structured.thread_id}, ${sent.structured.url}).${namingLine(sent.naming)} ${replyNextStepText(wakes, input.agent_host)}${imagesNotShownText(sent.imagesNotShown)}${noStakesText(sent.noStakes)}${recommendedInLabelText(sent.recommendedInLabel)}${questionsToCheckText(String(sent.structured.message_id), sent.questionsToCheck)}${questionOpenersWithTextText(sent.questionOpenersWithText)}`,
+          `${sent.replayed ? "Already sent" : "Sent"} the ${guide.review ? "review" : "guided review"} "${guide.title}" (${guide.sections} section${guide.sections === 1 ? "" : "s"}, ${guide.files} file${guide.files === 1 ? "" : "s"}) to the Plannotator Inbox (thread ${sent.structured.thread_id}, ${sent.structured.url}).${namingLine(sent.naming)} ${replyNextStepText(wakes, input.agent_host, await t3WokenOnlyWhileRunning(context, wakes, input))}${imagesNotShownText(sent.imagesNotShown)}${noStakesText(sent.noStakes)}${recommendedInLabelText(sent.recommendedInLabel)}${questionsToCheckText(String(sent.structured.message_id), sent.questionsToCheck)}${questionOpenersWithTextText(sent.questionOpenersWithText)}`,
           { ...sent.structured, guide },
         );
       }),

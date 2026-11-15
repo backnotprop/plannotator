@@ -264,21 +264,29 @@ export interface QuestionDecisionLink {
   url: string;
 }
 
-/** Caps. Parsing is bounded; answers are truncated to these on validation. */
+/** @deprecated No longer applied: a block of any length is a question, and
+ *  every choice is kept (through core 0.25.27 a block over 20,000 characters
+ *  was not a question and choices past 20 were dropped, with no word to the
+ *  person or the agent). Kept so an importer still builds. */
 export const MAX_QUESTION_BODY_CHARS = 20_000;
+/** @deprecated No longer applied; see MAX_QUESTION_BODY_CHARS. */
 export const MAX_QUESTION_CHOICES = 20;
 export const MAX_QUESTION_PROMPT_CHARS = 400;
 /** The longest label a plain-bullet choice takes before the rest moves to
  *  its description (see capChoiceLabel). Task-list labels are not cut. */
 export const MAX_QUESTION_CHOICE_LABEL_CHARS = 200;
-/** The cap on each `selected` label of an answer. A picked label is a choice
- *  label, and a choice lives in a block body of at most
- *  MAX_QUESTION_BODY_CHARS, so any label a block can hold round-trips whole.
- *  (Through 0.28.17 this was MAX_QUESTION_CHOICE_LABEL_CHARS, which cut a
- *  task-list label over 200 characters, so it could never be picked.) */
+/** @deprecated No longer applied: a picked label is kept whole, as every
+ *  choice label is. (Through 0.28.17 picks were cut at
+ *  MAX_QUESTION_CHOICE_LABEL_CHARS, so a long task-list label could never be
+ *  picked; through core 0.25.27 at this body-sized cap.) */
 export const MAX_QUESTION_SELECTED_CHARS = MAX_QUESTION_BODY_CHARS;
+/** @deprecated No longer applied: the person's answer, Other and note are kept
+ *  whole (through core 0.25.27 they were cut here without a word). Kept so an
+ *  importer still builds. */
 export const MAX_QUESTION_OTHER_CHARS = 2000;
+/** @deprecated No longer applied; see MAX_QUESTION_OTHER_CHARS. */
 export const MAX_QUESTION_TEXT_CHARS = 4000;
+/** @deprecated No longer applied; see MAX_QUESTION_OTHER_CHARS. */
 export const MAX_QUESTION_NOTE_CHARS = 2000;
 
 const CHOICE_RE = /^\s*(?:[-*+]|\d{1,3}[.)])\s+\[([ xX])\]\s+(.*)$/;
@@ -432,8 +440,8 @@ const splitBoldLead = (raw: string): { label: string; description: string } | nu
 /** A plain-bullet label longer than `MAX_QUESTION_CHOICE_LABEL_CHARS` is cut
  *  at its first sentence end (else its last space) within the cap; the rest
  *  leads the description, so the card shows a short name. Nothing is
- *  dropped. Task-list labels keep their full length (an answer quotes up to
- *  `MAX_QUESTION_SELECTED_CHARS`). */
+ *  dropped. Task-list labels keep their full length (an answer quotes them
+ *  whole). */
 const capChoiceLabel = (split: { label: string; description?: string }): { label: string; description?: string } => {
   const { label, description } = split;
   if (label.length <= MAX_QUESTION_CHOICE_LABEL_CHARS) return split;
@@ -940,7 +948,7 @@ export const parseQuestionBlock = (
   const readDecisionLines = options?.decisionLines !== false;
   const readContractLines = options?.contractLines !== false;
   const readOptionLines = options?.optionLines === true;
-  if (typeof body !== 'string' || body.length > MAX_QUESTION_BODY_CHARS) return null;
+  if (typeof body !== 'string') return null;
   const lines = body.replace(/\r\n?/g, '\n').split('\n');
 
   let prompt = '';
@@ -1021,7 +1029,6 @@ export const parseQuestionBlock = (
     }
     const choice = directiveKind === 'question-text' ? null : line.match(CHOICE_RE);
     if (choice) {
-      if (choices.length >= MAX_QUESTION_CHOICES) continue;
       const raw = choice[2].trim();
       const { label, description } = splitLabel(raw);
       if (!label) continue;
@@ -1222,7 +1229,7 @@ export const parseQuestionBlock = (
   // A pick question written with plain bullets: the bullets are the choices.
   const choicesArePlainBullets = choices.length === 0 && directiveKind !== 'question-text' && plainBullets.length > 0;
   if (choicesArePlainBullets) {
-    const bullets = plainBullets.slice(0, MAX_QUESTION_CHOICES);
+    const bullets = plainBullets;
     const { splits, names } = plainBulletSplits(bullets);
     bullets.forEach((bullet, i) => {
       const { label, description } = splits[i];
@@ -1251,6 +1258,15 @@ export const parseQuestionBlock = (
       for (const index of bullet.contextIndices) dropContext.add(index);
     });
   }
+  // Two choices whose text before the dash is the same ("Yes — keep it", "Yes — drop it") would be one answer: each
+  // takes its whole text as its label, so a pick, a stored answer and the reply name one choice.
+  const labelCount = new Map<string, number>();
+  for (const c of choices) labelCount.set(normalizeQuestionText(c.label), (labelCount.get(normalizeQuestionText(c.label)) ?? 0) + 1);
+  choices.forEach((c, i) => {
+    if (!c.description || (labelCount.get(normalizeQuestionText(c.label)) ?? 0) < 2) return;
+    const { description: _d, ...rest } = c;
+    choices[i] = { ...rest, label: raws[i]!.trim() };
+  });
   if (choices.some((c) => c.label.includes('![') || c.description?.includes('!['))) {
     choices.splice(0, choices.length, ...withPictureChoices(choices));
   }
@@ -1608,7 +1624,7 @@ export function capQuestionPrompt(prompt: string): string {
 
 /**
  * Fail-closed validator: returns a normalized copy holding only the known
- * fields (strings truncated to their caps, empty optionals dropped), or null
+ * fields (the prompt copy cut to its cap, empty optionals dropped), or null
  * for anything malformed. Every reader of `questionAnswer` goes through it,
  * so a row from an older or foreign writer can never throw in a renderer.
  */
@@ -1628,12 +1644,12 @@ export const parseQuestionAnswer = (value: unknown): QuestionAnswer | null => {
   if (v.sourceLine !== undefined && !(Number.isInteger(v.sourceLine) && (v.sourceLine as number) > 0)) return null;
 
   const selected = [...new Set((v.selected as string[])
-    .map((s) => cap(s.trim(), MAX_QUESTION_SELECTED_CHARS))
-    .filter(Boolean))]
-    .slice(0, MAX_QUESTION_CHOICES);
-  const other = typeof v.other === 'string' ? cap(v.other, MAX_QUESTION_OTHER_CHARS) : '';
-  const text = typeof v.text === 'string' ? cap(v.text, MAX_QUESTION_TEXT_CHARS) : '';
-  const note = typeof v.note === 'string' ? cap(v.note, MAX_QUESTION_NOTE_CHARS) : '';
+    .map((s) => s.trim())
+    .filter(Boolean))];
+  // The person's own words are kept whole: never cut without a word.
+  const other = typeof v.other === 'string' ? v.other : '';
+  const text = typeof v.text === 'string' ? v.text : '';
+  const note = typeof v.note === 'string' ? v.note : '';
   return {
     v: 1,
     key: v.key,
@@ -1857,11 +1873,19 @@ export const formatQuestionAnswerLines = (
       : `Answer: ${labels[0]} (already settled in the document)\n`;
   }
   const picks = [...answer.selected.map(oneLine)];
-  if (answer.other?.trim()) picks.push(`Other: ${oneLine(answer.other)}`);
+  // A multi-line Other answer keeps its line breaks, quoted under `Other:`
+  // the way a multi-line note is quoted under `Note:` (indented under its
+  // bullet when there are several picks); a one-line one stays on its line.
+  const other = answer.other?.trim() ?? '';
+  const otherLines = /\r?\n/.test(other) ? other.split(/\r?\n/) : null;
+  if (other) picks.push(otherLines ? 'Other:' : `Other: ${oneLine(other)}`);
+  const quoted = (indent: string) => (otherLines ?? []).map((line) => `${indent}> ${line}\n`).join('');
   if (answer.text?.trim()) {
     out += `Answer${rec}:\n> ${answer.text.trim().replace(/\r?\n/g, '\n> ')}\n`;
   } else if (picks.length > 1) {
-    out += `Answer${rec}:\n${picks.map((p) => `- ${p}\n`).join('')}`;
+    out += `Answer${rec}:\n${picks.map((p) => `- ${p}\n`).join('')}${quoted('  ')}`;
+  } else if (picks.length === 1 && otherLines) {
+    out += `Answer${rec}: ${picks[0]}\n${quoted('')}`;
   } else if (picks.length === 1) {
     out += `Answer: ${picks[0]}${rec}\n`;
   } else if (answer.skipped) {

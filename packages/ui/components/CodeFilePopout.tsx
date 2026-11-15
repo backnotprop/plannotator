@@ -11,6 +11,7 @@ import { CommentPopover, type CommentExtraAction } from './CommentPopover';
 import { ImageThumbnail } from './ImageThumbnail';
 import type { CodeAnnotation, ImageAttachment } from '../types';
 import { copyTextToClipboard } from '../utils/clipboard';
+import { useHighlightCopy } from '../utils/highlightCopy';
 import { whenCodeLineRendered } from '../utils/codeLineScroll';
 import { hashDraftScope } from '../utils/draftScopeHash';
 
@@ -315,7 +316,7 @@ const CodeInlineAnnotation: React.FC<{
         <div className="mt-2 flex flex-wrap gap-1.5">
           {annotation.images.map((img) => (
             <div key={img.path} className="text-center">
-              <ImageThumbnail path={img.path} size="sm" showRemove={false} />
+              <ImageThumbnail path={img.path} size="sm" showRemove={false} file={img.kind === 'file'} />
               <div className="max-w-[3rem] truncate text-[9px] text-muted-foreground" title={img.name}>
                 {img.name}
               </div>
@@ -440,6 +441,10 @@ export const CodeFileView: React.FC<CodeFileViewProps> = ({
     css: buildPierreCSS(mode, colors.bg, colors.fg),
   }));
   const [pendingComment, setPendingComment] = useState<PendingComment | null>(null);
+  // The selected lines stay marked while their composer has the focus, but
+  // the browser's copy has no selection then: Ctrl+C copies the lines' code
+  // (`utils/highlightCopy`). Text selected in the composer still wins.
+  useHighlightCopy(onAddAnnotation ? pendingComment?.originalCode : null);
   const onComposerLinesRef = useRef(onComposerLines);
   onComposerLinesRef.current = onComposerLines;
   useEffect(() => {

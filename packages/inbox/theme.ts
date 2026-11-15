@@ -160,3 +160,22 @@ export function useInboxPalettes(): InboxPalettes {
   );
   return { ...halves, choose, shown: resolvedMode };
 }
+
+/**
+ * The one-time "themes" dialog's pick (themeChooser.ts): a theme on both halves and a mode, each written as its
+ * Settings control writes it (the Colors row's `choose` for a half, the Theme row's for the mode), so it applies at
+ * once, with no reload, and goes to config.json `theme` the same way. Only a part that changes is written: picking
+ * what is already in use writes nothing.
+ */
+export function useInboxThemePick(): (pick: { light: string; dark: string; mode: Mode }) => void {
+  const { mode, choose: chooseMode } = useInboxTheme();
+  const { pair, choose: choosePalette } = useInboxPalettes();
+  return useCallback(
+    (pick) => {
+      if (pick.light !== pair.light) choosePalette('light', pick.light);
+      if (pick.dark !== pair.dark) choosePalette('dark', pick.dark);
+      if (pick.mode !== mode) chooseMode(pick.mode);
+    },
+    [mode, pair.light, pair.dark, chooseMode, choosePalette],
+  );
+}

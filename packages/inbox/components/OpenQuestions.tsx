@@ -513,7 +513,8 @@ export function OpenQuestionsButton({ questions, actions = [], reask = null, dec
             <div className="ib-oq-list">
               {questions.map((q, i) => {
                 const state = openQuestionState(q);
-                const place = openQuestionPlaceWords(places.get(q.id) ?? 'below');
+                // A question inside an attached file (issue #2828) is where the file is: "in plan.md".
+                const place = q.question.attachment ? `in ${q.question.attachment.name}` : openQuestionPlaceWords(places.get(q.id) ?? 'below');
                 const when = whenTime(q.at);
                 const skipped = openQuestionSkipped(q);
                 const stateWords = skipped

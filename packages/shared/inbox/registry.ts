@@ -1,7 +1,7 @@
 /**
  * Plannotator Inbox registry: `${dataDir}/inbox/inbox.json`.
  *
- * `{ v, pid, port, url, version, token, serverSession, startedAt, tailnet?, lan?, tailscale? }`, mode
+ * `{ v, pid, port, url, version, token, serverSession, startedAt, follows?, home?, tailnet?, lan?, tailscale? }`, mode
  * 0600, written by the Inbox server when it starts and LEFT IN PLACE when it
  * exits, so a person who ran the Inbox once has it found by every agent
  * session, and a caller can start it again on the port it last had.
@@ -15,18 +15,22 @@
  *    with nothing listening (a reused pid). A stopped Inbox is started with
  *    `plannotator inbox --background`. Busy: a live pid whose port takes the
  *    request but does not answer in time; callers wait, never start a second
- *    writer on the store.
+ *    writer on the store. Out of reach (`inboxOutOfReach`): stopped with a
+ *    live pid, read by a process that cannot reach loopback (an agent's
+ *    sandbox); callers refuse to start one.
  *
  * The Inbox never registers in `sessions/`, so it never holds auto-update back
  * (auto-update skips while another live pid is registered there).
  */
 
 import { randomBytes } from "node:crypto";
-import { chmodSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { connect, createServer } from "node:net";
 import { join, resolve } from "node:path";
 import { isInboxHealth, type InboxHealth } from "@plannotator/core/inbox-types";
 import { inboxDir } from "./schema";
-import { proveInboxProcess } from "./process-proof";
+import { processMatchesEntry, proveInboxProcess, readProcessInfo, type ProcessInfo } from "./process-proof";
+import { INBOX_DB_FILE, INBOX_RETURN_PARTIAL } from "./store-log/sqlite-return/names";
 
 export const INBOX_REGISTRY_FILE = "inbox.json";
 export const INBOX_START_LOCK = "start.lock";
@@ -69,6 +73,40 @@ export interface InboxRegistryEntry {
    * pointed at the loopback listener on the same port number; recorded before it is made, taken down like the window's.
    */
   tailscale?: { url: string | null; error: string | null; https_port?: number; proxy_port?: number; relay_port?: number };
+  /**
+   * The runs of this data folder before this one (additive): their `serverSession`s, newest first, at most
+   * `INBOX_SESSION_LINEAGE_MAX` (`inboxSessionLineage`). A window left open across a restart proves with it that
+   * the Inbox now answering is the same data it loaded from, and keeps writing without a reload.
+   */
+  follows?: string[];
+  /** The `inbox/` folder this entry was written in, as device and inode (additive; `inboxHome`): a copy has another. */
+  home?: string;
+}
+
+/** How many earlier runs an entry names (`follows`): a window that slept through more restarts than this reloads, as before. */
+export const INBOX_SESSION_LINEAGE_MAX = 8;
+
+/** The `inbox/` folder's identity (device:inode), or null where it cannot be read. A copied or restored folder has another. */
+export function inboxHome(dataDir: string): string | null {
+  try {
+    const stat = statSync(inboxDir(dataDir));
+    // Not the birth time: where the filesystem keeps none it reads as the change time, which every write here moves.
+    return `${stat.dev}:${stat.ino}`;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The earlier runs a starting Inbox follows: the last entry's session, then the runs that one followed. Only when
+ * that entry was written in this very folder (`home`): an entry with no `home` (an older Inbox wrote it), another
+ * folder's (the data dir was copied, or restored from a backup) or an unreadable folder starts the line again, so
+ * a window of the other Inbox is never taken for this one's.
+ */
+export function inboxSessionLineage(previous: Pick<InboxRegistryEntry, "serverSession" | "follows" | "home"> | null, home: string | null): string[] {
+  if (!previous || !home || previous.home !== home) return [];
+  const earlier = Array.isArray(previous.follows) ? previous.follows.filter((s): s is string => typeof s === "string" && s !== "") : [];
+  return [previous.serverSession, ...earlier].slice(0, INBOX_SESSION_LINEAGE_MAX);
 }
 
 export function inboxRegistryPath(dataDir: string): string {
@@ -275,9 +313,93 @@ export async function inboxStatus(dataDir: string, timeoutMs = 2000): Promise<In
 }
 
 /**
+ * Whether this process can reach loopback at all: it opens a port on 127.0.0.1 and connects to it. An agent's
+ * sandbox can block that (macOS `sandbox-exec`, a container shell); there every health check fails as if nothing
+ * listened.
+ */
+export function loopbackReachable(timeoutMs = 1000): Promise<boolean> {
+  return new Promise((done) => {
+    let settled = false;
+    const server = createServer((socket) => socket.destroy());
+    const finish = (reachable: boolean) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      server.close();
+      done(reachable);
+    };
+    const timer = setTimeout(() => finish(false), timeoutMs);
+    server.on("error", () => finish(false));
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      if (!address || typeof address === "string") return finish(false);
+      const socket = connect({ host: "127.0.0.1", port: address.port }, () => {
+        socket.destroy();
+        finish(true);
+      });
+      socket.on("error", () => finish(false));
+    });
+  });
+}
+
+/**
+ * A record `inboxStatus` reads as stopped with `no_answer` (a live pid, nothing answering on its port) is a reused
+ * pid only where this process can reach loopback. Where it cannot, that Inbox may be running and out of reach from
+ * here, and starting one would put a second Inbox on its store and end the person's (its data-gone check).
+ *
+ * Out of reach: the pid is alive, is not this process (the window's Restart, which stopped listening itself), is
+ * not shown by `ps` to be another program (a sandbox may not run `ps`; then it counts as the Inbox), and this
+ * process cannot reach a loopback port it opens itself. Answers the health request's error then, null otherwise.
+ */
+export async function inboxOutOfReach(
+  entry: Pick<InboxRegistryEntry, "pid" | "port" | "startedAt">,
+  deps: { loopback?: () => Promise<boolean>; processInfo?: (pid: number) => ProcessInfo | null } = {},
+): Promise<string | null> {
+  if (entry.pid === process.pid || !isPidAlive(entry.pid)) return null;
+  const info = (deps.processInfo ?? readProcessInfo)(entry.pid);
+  if (info && !processMatchesEntry(info, entry)) return null;
+  let detail: string;
+  try {
+    await fetch(`http://127.0.0.1:${entry.port}/api/inbox/health`, { signal: AbortSignal.timeout(2000) });
+    return null;
+  } catch (error) {
+    detail = error instanceof Error ? error.message : String(error);
+  }
+  return (await (deps.loopback ?? defaultLoopback)()) ? null : detail;
+}
+
+/** Under the test sandbox, `PLANNOTATOR_TEST_LOOPBACK_BLOCKED=1` stands for an agent sandbox that blocks loopback. */
+function defaultLoopback(): Promise<boolean> {
+  if (process.env.PLANNOTATOR_TEST_SANDBOX && process.env.PLANNOTATOR_TEST_LOOPBACK_BLOCKED === "1") return Promise.resolve(false);
+  return loopbackReachable();
+}
+
+/** A start or restart refused because the running Inbox is out of this process's reach (`inboxOutOfReach`). */
+export class InboxUnreachableError extends Error {
+  constructor(readonly detail: string) {
+    super(`Could not reach the running Inbox: ${detail}`);
+    this.name = "InboxUnreachableError";
+  }
+}
+
+/** What a command says when the Inbox it needs could not be had (its `ensureRunning` threw). */
+export function inboxEnsureFailedWords(error: unknown): string {
+  if (error instanceof InboxUnreachableError) return error.message;
+  return `Plannotator Inbox is not running: ${error instanceof Error ? error.message : String(error)}`;
+}
+
+/**
  * The start lock: one starter at a time, so two agents that find the Inbox
  * stopped at once do not start two writers on one store. Returns a release
  * function, or null when another starter holds a fresh lock.
+ *
+ * The lock folder names the processes that hold it (`holders`: the starter,
+ * and the detached Inbox it started, which joins with `joinInboxStartLock`).
+ * When every one of them is gone (a start that crashed: a force quit, a power
+ * cut), the lock is stale at once
+ * instead of after `INBOX_START_LOCK_STALE_MS`, so the next start goes ahead
+ * rather than giving up with "try again". A lock with no holders file (an
+ * older Plannotator's) is stale by age alone, as before.
  */
 export function acquireInboxStartLock(dataDir: string): (() => void) | null {
   const dir = inboxDir(dataDir);
@@ -285,28 +407,79 @@ export function acquireInboxStartLock(dataDir: string): (() => void) | null {
   const lock = join(dir, INBOX_START_LOCK);
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      mkdirSync(lock);
-      return () => rmSync(lock, { recursive: true, force: true });
+      if (!existsSync(lock) && createStartLock(lock)) return () => rmSync(lock, { recursive: true, force: true });
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-      try {
-        if (Date.now() - statSync(lock).mtimeMs <= INBOX_START_LOCK_STALE_MS) return null;
-        rmSync(lock, { recursive: true, force: true });
-      } catch {
-        // Gone in between: try again.
-      }
+    }
+    try {
+      if (!inboxStartLockStale(dataDir) || inboxReturnRunning(dataDir)) return null;
+      rmSync(lock, { recursive: true, force: true });
+    } catch {
+      // Gone in between: try again.
     }
   }
   return null;
 }
 
+const START_LOCK_HOLDERS = "holders";
+
+function createStartLock(lock: string): boolean {
+  const named = `${lock}.${process.pid}`;
+  try {
+    mkdirSync(named, { recursive: true });
+    writeFileSync(join(named, START_LOCK_HOLDERS), `${process.pid}\n`, { mode: 0o600 });
+    renameSync(named, lock);
+    return true;
+  } catch {
+    if (existsSync(lock)) return false;
+    mkdirSync(lock);
+    try {
+      appendFileSync(join(lock, START_LOCK_HOLDERS), `${process.pid}\n`, { mode: 0o600 });
+    } catch {}
+    return true;
+  } finally {
+    rmSync(named, { recursive: true, force: true });
+  }
+}
+
+/** Name this process as a holder of the start lock (the detached Inbox its starter started); best effort. */
+export function joinInboxStartLock(dataDir: string): void {
+  try {
+    appendFileSync(join(inboxDir(dataDir), INBOX_START_LOCK, START_LOCK_HOLDERS), `${process.pid}\n`, { mode: 0o600 });
+  } catch {
+    // No lock (released meanwhile) or no room: the lock's age decides, as before.
+  }
+}
+
+/** The start lock's holders are all gone, or it is older than `INBOX_START_LOCK_STALE_MS`. Throws when there is no lock. */
+export function inboxStartLockStale(dataDir: string): boolean {
+  const lock = join(inboxDir(dataDir), INBOX_START_LOCK);
+  if (Date.now() - statSync(lock).mtimeMs > INBOX_START_LOCK_STALE_MS) return true;
+  const pids = startLockHolders(dataDir);
+  return pids !== null && pids.length > 0 && !pids.some(isPidAlive);
+}
+
+function startLockHolders(dataDir: string): number[] | null {
+  try {
+    return readFileSync(join(inboxDir(dataDir), INBOX_START_LOCK, START_LOCK_HOLDERS), "utf8").split("\n").map(Number).filter((pid) => Number.isSafeInteger(pid) && pid > 0);
+  } catch {
+    return null;
+  }
+}
+
+export function inboxReturnRunning(dataDir: string): boolean {
+  const dir = inboxDir(dataDir);
+  if (!existsSync(join(dir, INBOX_DB_FILE)) && !existsSync(join(dir, INBOX_RETURN_PARTIAL))) return false;
+  return (startLockHolders(dataDir) ?? []).some((pid) => pid !== process.pid && isPidAlive(pid));
+}
+
 /** Wait until `check` answers non-null, polling; null on timeout. */
-export async function waitForInbox<T>(check: () => Promise<T | null>, timeoutMs: number, intervalMs = 100): Promise<T | null> {
+export async function waitForInbox<T>(check: () => Promise<T | null>, timeoutMs: number, intervalMs = 100, keepWaiting?: () => boolean): Promise<T | null> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     const value = await check();
     if (value !== null) return value;
-    if (Date.now() >= deadline) return null;
+    if (Date.now() >= deadline && !keepWaiting?.()) return null;
     await new Promise((resolve) => setTimeout(resolve, intervalMs));
   }
 }

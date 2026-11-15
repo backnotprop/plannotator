@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type FocusEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
+import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { HueDot, LetterMark, ProjectMark, showsProjects, showsThreads, useRowMarks } from '../letterMarks';
 import { inboxListShortcuts } from '../shortcuts/list.shortcuts';
 import { shortcutAria, useShortcutAria, withShortcut } from '../shortcuts/hint';
@@ -34,19 +34,36 @@ import { StatusMark, rowStatus } from './RowStatus';
 import { attachPullToRefresh } from '../pullRefresh';
 import { TidyMenu, type TidyController } from './Tidy';
 import { ListFilterButton, type ListFilterSource } from './ListFilter';
-import { awayLine, type MachinesModel } from '../machines';
+import { awayLine, machineTakes, type MachinesModel } from '../machines';
 import { listLookClasses, useListLook } from '../listLook';
 import { flatRows, useListView, type ListPlaces, type ListSort } from '../listView';
+import { useStarredAbove } from '../starredPills';
+import { StarredPills } from './StarredPills';
+import type { PinnedAction } from './PinnedRow';
 import { useListGroups } from '../listGroups';
+import type { HeldNews } from '../held';
+import type { ListEdge, UnseenRow } from '../showLight';
+import { ListNewPill } from './ListNewPill';
 import { useInboxTextSize } from '../textSize';
 import { useTheme } from '@plannotator/ui/components/ThemeProvider';
 import { relativeTime, relativeWords, useRelativeClock } from '../relativeTime';
+import { RowSlot } from './RowSlot';
 import { useShortcutScope } from '@plannotator/ui/shortcuts';
 import { bareKeyAllowed, isComposingKey, keyboardFocused, keyTarget, modalOpen } from '../shortcuts/guards';
 import { listKeyTarget, LIST_STOPS, type ListMove } from '../listKeys';
+import { fitCountsColumn, useDevicePixelRatio } from './listFit';
+import { useKeyboardFocus } from './useKeyboardFocus';
 
 export interface InboxListProps {
+  /** Beside an open thread, a click on the list's edge hides the list (the thread in full screen); drag still resizes. Absent: the edge only resizes. */
+  onHide?: () => void;
   title: string;
+  /**
+   * A tag's list (approval "inbox-thread-tags"): the tag's `#` before the title, and "5 threads · 2 projects" after it,
+   * quiet. Absent: neither.
+   */
+  titleMark?: ReactNode;
+  titleNote?: string | null;
   /** The project's folder, `~/src/billing-svc`, when one project is shown: in the title's tooltip, never drawn in the header. */
   path: string | null;
   sections: readonly InboxListSection[];
@@ -68,9 +85,12 @@ export interface InboxListProps {
    * The held list's "N new" (held.ts `heldNotice`): how many, and the one project they are in when all are in
    * one. Always one line: a long project name is cut with "…", the whole line then in a tooltip. `lands`: the
    * groups its rows land in (held.ts `showLandsIn`); Show opens each one closed, as a click on its header does, so
-   * the rows it brings in are on screen (List has no groups to open).
+   * the rows it brings in are on screen (List has no groups to open). `news`: the threads it counts (held.ts
+   * `heldNews`), for the pill at the list's edge while this line is out of view (ListNewPill.tsx).
    */
-  notice: { count: number; project?: string | null; lands?: readonly InboxListGroupId[] } | null;
+  notice: { count: number; project?: string | null; lands?: readonly InboxListGroupId[]; news?: readonly HeldNews[] } | null;
+  /** The list is drawn but out of sight (a thread covers it: a phone, a stacked window, full screen): its pill waits. */
+  covered?: boolean;
   /**
    * When the list on screen was last sorted whole (listView.ts `ListSort`): List keeps each row's place between
    * sorts, as the groups do. Absent: every render is a sort (a list that never holds, the tour).
@@ -80,7 +100,11 @@ export interface InboxListProps {
   stale?: ReactNode;
   /** The one-time notifications line (record 6.1), above everything else. */
   ask?: ReactNode;
-  onShowNew: () => void;
+  /** Show. It never scrolls the list, except `fromPill`: the pill's press also goes to the rows it brings in past that edge. */
+  onShowNew: (fromPill?: ListEdge) => void;
+  /** The rows Show brought in that are not in view yet (showLight.ts): the pill counts them, and its press is `onGoNew`. */
+  unseenNew?: readonly UnseenRow[];
+  onGoNew?: (edge: ListEdge) => void;
   /**
    * The title, pressed, refreshes the list it names (click Inbox to refresh):
    * ↻ beside it on hover with the tooltip, one turn on a click. Absent: a plain heading.
@@ -168,6 +192,12 @@ export interface InboxListProps {
    */
   rememberLook?: boolean;
   /**
+   * The starred threads, in star order (the list model's `pins`), for "Keep starred above the list"
+   * (starredPills.ts): with the choice on they are pills above the first section. Absent (an Inbox that keeps no
+   * stars, the tour): no pills and no menu item.
+   */
+  starred?: { rows: readonly InboxListRow[]; onOpen: (row: InboxListRow) => void; onAction: (row: InboxListRow, action: PinnedAction) => void };
+  /**
    * The list's filter (listFilter.ts): the funnel in the header, left of Search, New message and ⋮. App filters the
    * sections it hands the list; this is the menu's source. Absent (the tour): no funnel.
    */
@@ -185,6 +215,11 @@ export function rowAgent(row: InboxListRow): InboxListRow['author'] {
   return row.addressee ? { kind: 'agent', host: row.addressee.host, session: row.addressee.session, name: null } : row.author;
 }
 
+function slotSession(row: InboxListRow): string | null {
+  const agent = rowAgent(row);
+  return agent.kind === 'agent' ? (agent.session ?? null) : null;
+}
+
 /**
  * The badge card's footer mark: the agent's, or, when several agents are in the thread, their marks overlapping
  * (Lines). The row itself draws its agents before the project, on tiles: `RowAgents` on a wide row, `RowAgentTiles`
@@ -196,41 +231,6 @@ function RowMark({ row }: { row: InboxListRow }) {
   if (hideAgents) return null;
   if ((row.participants?.length ?? 0) > 1) return <TagStack participants={row.participants!} />;
   return <AuthorMark author={rowAgent(row)} />;
-}
-
-/**
- * The row has keyboard focus (`:focus-visible`): its badge's card shows, as it
- * does on hover (approval "inbox-row-badges"). A click's focus does not count.
- * Escape closes the card and keeps focus on the row; that Escape is used up
- * (default prevented), so the window's Escape does not also close the thread.
- * The card comes back the next time the row takes keyboard focus.
- */
-function useKeyboardFocus(enabled: boolean): [
-  boolean,
-  { onFocus: (e: FocusEvent<HTMLElement>) => void; onBlur: () => void; onKeyDown: (e: ReactKeyboardEvent<HTMLElement>) => void },
-] {
-  const [on, setOn] = useState(false);
-  return [
-    on,
-    {
-      onKeyDown: (e) => {
-        if (!on || e.key !== 'Escape' || e.target !== e.currentTarget || e.defaultPrevented) return;
-        e.preventDefault();
-        setOn(false);
-      },
-      onFocus: (e) => {
-        if (!enabled || e.target !== e.currentTarget) return;
-        let visible = false;
-        try {
-          visible = e.currentTarget.matches(':focus-visible');
-        } catch {
-          visible = false;
-        }
-        setOn(visible);
-      },
-      onBlur: () => setOn(false),
-    },
-  ];
 }
 
 /** A blocked row's hover card (wide and three-line rows), or undefined: its filled marks' tooltip. */
@@ -293,17 +293,26 @@ function BadgeWords({ row, id }: { row: InboxListRow; id: string }) {
  * An older Inbox sends no `delivery`: its Sent row says it in words instead.
  */
 function subjectOf(row: InboxListRow): string {
-  // A thread the person started keeps its own subject in Sent; its count cell says whom it went to.
-  // A reply that tags agents (approval "inbox-tag-agents", Lines): how many have it, and who waits.
-  if (row.section === 'sent' && !row.addressee && row.sent?.recipients?.length) return sentRecipientsWords(row.sent.recipients);
-  // A Re-ask note waits on the agent to ask again (approval "inbox-reask"): its own words, beside the delivery tick.
-  if (row.section === 'sent' && row.reask_pending) return reaskRowLine(agentName(rowAgent(row)), row.sent?.checked_at ?? null, row.sent?.wakes);
-  if (row.section === 'sent' && !row.addressee && !row.delivery) return sentRowLine(agentName(rowAgent(row)), row.sent?.wakes);
-  return row.subject ?? '(no subject)';
+  return sentWordsOf(row) ?? row.subject ?? '(no subject)';
 }
 
-/** The row's title (approval "list-rows-mail-icons", 2026-10-30): the thread's name, or its subject when it has none. */
-function titleOf(row: InboxListRow): string {
+/** A Sent row's own words in place of its subject, or null. */
+function sentWordsOf(row: InboxListRow): string | null {
+  if (row.section !== 'sent') return null;
+  // A thread the person started keeps its own subject in Sent; its count cell says whom it went to.
+  // A reply that tags agents (approval "inbox-tag-agents", Lines): how many have it, and who waits.
+  if (!row.addressee && row.sent?.recipients?.length) return sentRecipientsWords(row.sent.recipients);
+  // A Re-ask note waits on the agent to ask again (approval "inbox-reask"): its own words, beside the delivery tick.
+  if (row.reask_pending) return reaskRowLine(agentName(rowAgent(row)), row.sent?.checked_at ?? null, row.sent?.wakes);
+  if (!row.addressee && !row.delivery) return sentRowLine(agentName(rowAgent(row)), row.sent?.wakes);
+  return null;
+}
+
+/**
+ * The row's title (approval "list-rows-mail-icons", 2026-10-30): the thread's name, or its subject when it has none.
+ * A starred pill is labelled with it too (StarredPills.tsx), so a pill and its row never name a thread differently.
+ */
+export function titleOf(row: InboxListRow): string {
   return row.thread_name?.trim() ? row.thread_name : subjectOf(row);
 }
 
@@ -368,13 +377,18 @@ function useAvatarRow(): boolean {
 }
 
 /**
- * The grey preview under or after the title: the subject of a named thread (`subjectOf`, so a Sent row's words
- * too), nothing under an unnamed one, whose subject is its title, or when the subject only repeats the name.
+ * The grey preview under or after the title (approval "inbox-row-latest-preview"): the thread's latest message as
+ * the server words it (`latest_preview`: the newest unread agent message, else the newest one, "You: …" for the
+ * person's own), under a named and an unnamed thread alike. A named Sent row keeps its own words (who has the reply,
+ * a re-ask that waits), as before. Nothing when it only repeats the title. An older Inbox sends no `latest_preview`:
+ * a named thread's subject then, as before, and nothing under an unnamed one, whose subject is its title.
  */
-function previewOf(row: InboxListRow): string | null {
-  if (!row.thread_name?.trim()) return null;
-  const subject = subjectOf(row);
-  return subject.trim() === row.thread_name.trim() ? null : subject;
+export function previewOf(row: InboxListRow): string | null {
+  const named = !!row.thread_name?.trim();
+  const sentWords = named ? sentWordsOf(row) : null;
+  const text = sentWords ?? (row.latest_preview !== undefined ? row.latest_preview : named ? subjectOf(row) : null);
+  if (!text?.trim()) return null;
+  return text.trim() === titleOf(row).trim() ? null : text;
 }
 
 /**
@@ -391,7 +405,7 @@ function FromLine({ row, project, filtered }: { row: InboxListRow; project: stri
     <span className="ib-from">
       <RowAvatar row={row} size={24} />
       {!filtered && <RowProjectMark row={row} />}
-      {!filtered && <ClipText className="ib-p" text={project} />}
+      {!filtered && <RowSlot row={row} session={slotSession(row)} project={project} />}
       <RowAgents participants={row.participants} agent={rowAgent(row)} />
     </span>
   );
@@ -412,14 +426,7 @@ function LeadLine({ row, project, filtered, tip = true }: { row: InboxListRow; p
   return (
     <span className="ib-from ib-lead">
       {withProject && <RowProjectMark row={row} />}
-      {withProject &&
-        (tip ? (
-          <ClipText className="ib-p" text={project} />
-        ) : (
-          <span className="ib-p" dir="auto">
-            {project}
-          </span>
-        ))}
+      {withProject && <RowSlot row={row} session={slotSession(row)} project={project} tip={tip} />}
       <RowAgentTiles participants={row.participants} agent={rowAgent(row)} tip={tip} />
     </span>
   );
@@ -704,74 +711,11 @@ export const ONE_PROJECT_WIDE_ROWS_MIN_LIST_WIDTH = 496;
  */
 export const FULL_WORDS_MIN_LIST_WIDTH = 1150;
 
-/** The wide rows' open counts column, as inbox.css draws it (`.ib-row`'s grid). */
-const COUNTS_COLUMN_PX = 84;
-
-/**
- * In a list with the pin's column (`.ib-pincol`), widen the open counts' column for the whole list to the widest
- * counts drawn ("[□ 12] ?12", "[□ 99+] ?99+" pass its 84px), so every pin stays in one column 8px before its row's
- * counts and none runs under a pin. The counts sit at their column's right edge, so their width is the column's right
- * edge less their leftmost part, whatever the column's width: a second pass gives the same answer. Without pins, or
- * with counts that fit, the column keeps its 84px (`--ib-cq-w` unset).
- *
- * Cells with the same parts and text draw the same counts at the same width (no row state restyles them), so only
- * one cell of each is read. A read lays out its row (rows are `content-visibility: auto`), and a list has far fewer
- * different counts than rows: reading every row cost about 25 ms at 700 rows, on every open of a thread and every
- * return to the list. False when the list is not drawn (nothing in it has a box), so the caller fits it again later.
- */
-function fitCountsColumn(list: HTMLElement, pinColumn: boolean): boolean {
-  let widest = 0;
-  let drawn = true;
-  if (pinColumn) {
-    const alike = new Map<string, HTMLElement[]>();
-    for (const cell of list.querySelectorAll<HTMLElement>('.ib-row > .ib-cq')) {
-      if (!cell.firstElementChild) continue;
-      // What the cell draws: each part's classes and text (its tooltip's id differs on every row).
-      const key = [...cell.children].map((part) => `${part.getAttribute('class')}\t${part.textContent}`).join('\n');
-      const cells = alike.get(key);
-      if (cells) cells.push(cell);
-      else alike.set(key, [cell]);
-    }
-    groups: for (const cells of alike.values()) {
-      for (const cell of cells) {
-        const lefts = [...cell.children].map((part) => part.getBoundingClientRect()).filter((box) => box.width > 1).map((box) => box.left);
-        if (lefts.length) {
-          widest = Math.max(widest, cell.getBoundingClientRect().right - Math.min(...lefts));
-          break;
-        }
-        // Nothing of this cell drawn: try the next alike cell, unless the whole list is undrawn (then none is).
-        if (list.getClientRects().length === 0) {
-          drawn = false;
-          widest = 0;
-          break groups;
-        }
-      }
-    }
-  }
-  const width = widest > COUNTS_COLUMN_PX ? `${Math.ceil(widest)}px` : '';
-  if (list.style.getPropertyValue('--ib-cq-w') !== width) {
-    if (width) list.style.setProperty('--ib-cq-w', width);
-    else list.style.removeProperty('--ib-cq-w');
-  }
-  return drawn;
-}
-
-/** The page's zoom (device pixels per CSS pixel), read again on each resize: a zoom changes it, and text widths with it. */
-function useDevicePixelRatio(): number {
-  const [ratio, setRatio] = useState(() => (typeof window === 'undefined' ? 1 : window.devicePixelRatio));
-  useEffect(() => {
-    const read = () => setRatio(window.devicePixelRatio);
-    window.addEventListener('resize', read);
-    return () => window.removeEventListener('resize', read);
-  }, []);
-  return ratio;
-}
-
 /**
  * One row of the wide list, on one line (approval "inbox-row-byline", the
  * one-line row; its cells as approval "list-rows-mail-icons", 2026-10-30, lays
  * them out). Six columns: the agents' marks and the project after them, the
- * title cell (the thread's name in bold when unread, then the grey subject),
+ * title cell (the thread's name in bold when unread, then the grey preview),
  * then right-aligned the words, the badge, the open counts (the action pill,
  * `?N`) and the time, each in a column of its own so they line up down the
  * list. In one project's list (`filtered`) the first column holds the marks alone.
@@ -803,9 +747,11 @@ interface RowLook {
   statusMark: boolean;
   /** Show → Agent icons off (listLook.ts `hideAgents`): with no project either, a name-first row's second line is empty. */
   noAgents: boolean;
+  /** Pull requests off (listLook.ts `hidePulls`): no PR mark at the row's end, on every shape. */
+  noPulls: boolean;
 }
 
-function WideRow({ row, project, away, selected, filtered, lit, pinned, pinColumn, keys, full, pill, noPreview, relative, statusMark, onOpen, onUnstar }: { onUnstar?: () => void; row: InboxListRow; project: string; away: boolean; selected: boolean; filtered: boolean; lit: boolean; pinned: boolean; pinColumn: boolean; keys?: string; full: boolean; pill: boolean; onOpen: () => void } & Omit<RowLook, 'titleFirst' | 'timeBelow' | 'noAgents'>) {
+function WideRow({ row, project, away, selected, filtered, lit, pinned, pinColumn, keys, full, pill, noPreview, relative, statusMark, noPulls, onOpen, onUnstar }: { onUnstar?: () => void; row: InboxListRow; project: string; away: boolean; selected: boolean; filtered: boolean; lit: boolean; pinned: boolean; pinColumn: boolean; keys?: string; full: boolean; pill: boolean; onOpen: () => void } & Omit<RowLook, 'titleFirst' | 'timeBelow' | 'noAgents'>) {
   const [kbd, focus] = useKeyboardFocus(rowHasBadge(row));
   const wordsId = useId();
   const card = cardOf(row);
@@ -840,7 +786,7 @@ function WideRow({ row, project, away, selected, filtered, lit, pinned, pinColum
         <EndedMark row={row} />
         {row.snoozed ? <SnoozedUntil row={row} /> : <CountWords row={row} wide={full} tip={!full} status={statusMark} />}
         {/* The thread's PRs (approval "inbox-pr-binding"): the state of the one in play, the count over its corner. */}
-        <RowPullsMark threadId={row.thread_id} summary={row.pulls} />
+        <RowPullsMark threadId={row.thread_id} summary={noPulls ? undefined : row.pulls} />
       </span>
       <span className="ib-bcol">{words}</span>
       {/* The pin's column, in a list with a pinned row only (`pinColumn`), so a list without pins keeps its columns. */}
@@ -980,7 +926,7 @@ function RowWithAction({
   );
 }
 
-function NarrowRow({ row, project, away, selected, filtered, lit, pinned, keys, pill, compact, noPreview, relative, titleFirst, timeBelow, statusMark, noAgents, onOpen, onUnstar }: { onUnstar?: () => void; row: InboxListRow; project: string; away: boolean; selected: boolean; filtered: boolean; lit: boolean; pinned: boolean; keys?: string; pill: boolean; compact: boolean; onOpen: () => void } & RowLook) {
+function NarrowRow({ row, project, away, selected, filtered, lit, pinned, keys, pill, compact, noPreview, relative, titleFirst, timeBelow, statusMark, noAgents, noPulls, onOpen, onUnstar }: { onUnstar?: () => void; row: InboxListRow; project: string; away: boolean; selected: boolean; filtered: boolean; lit: boolean; pinned: boolean; keys?: string; pill: boolean; compact: boolean; onOpen: () => void } & RowLook) {
   const [kbd, focus] = useKeyboardFocus(rowHasBadge(row));
   const wordsId = useId();
   const lead = <LeadLine row={row} project={project} filtered={filtered} />;
@@ -995,12 +941,12 @@ function NarrowRow({ row, project, away, selected, filtered, lit, pinned, keys, 
   const end = (
     <>
       {pinned && <PinMark threadId={row.thread_id} press={!!onUnstar} />}
-      <RowPullsMark threadId={row.thread_id} summary={row.pulls} />
+      <RowPullsMark threadId={row.thread_id} summary={noPulls ? undefined : row.pulls} />
       <SnoozedUntil row={row} />
       <LineCount row={row} tip status={statusMark} card={cardOf(row)} open={kbd} />
     </>
   );
-  // First line "Thread name" with Subject preview off too (approval "inbox-customize-rows"): two lines, the guided
+  // First line "Thread name" with Preview off too (approval "inbox-customize-rows"): two lines, the guided
   // review mark and the row's end at line 2's right end. With the time under the preview the end has its own line.
   const twoLines = titleFirst && noPreview && !compact && !timeBelow;
   return (
@@ -1036,7 +982,7 @@ function NarrowRow({ row, project, away, selected, filtered, lit, pinned, keys, 
           </div>
           {/* Nothing shows on it with Agent icons and Project both off (`leadEmpty`): it stays for a screen reader (the
               agents' names), but takes no room, so the preview sits under the name (the owner, 2026-11-07, q-dbe4dc80).
-              Subject preview off too (`twoLines`): line 3's marks and counts at line 2's right end, and no line 3, so the
+              Preview off too (`twoLines`): line 3's marks and counts at line 2's right end, and no line 3, so the
               line draws them and never folds. */}
           {twoLines ? (
             <div className="ib-l2 ib-l2-lead">
@@ -1101,7 +1047,7 @@ function NarrowRow({ row, project, away, selected, filtered, lit, pinned, keys, 
  * at the right end of line 3. A pin with nothing else for line 3 stays at the
  * right end of line 1, before the time.
  */
-function PhoneRow({ row, project, away, filtered, lit, menu, pinned, keys, pill, compact, noPreview, relative, titleFirst, timeBelow, statusMark, noAgents, onOpen, onUnstar }: { onUnstar?: () => void; row: InboxListRow; project: string; away: boolean; filtered: boolean; lit: boolean; menu: boolean; pinned: boolean; keys?: string; pill: boolean; compact: boolean; onOpen: () => void } & RowLook) {
+function PhoneRow({ row, project, away, filtered, lit, menu, pinned, keys, pill, compact, noPreview, relative, titleFirst, timeBelow, statusMark, noAgents, noPulls, onOpen, onUnstar }: { onUnstar?: () => void; row: InboxListRow; project: string; away: boolean; filtered: boolean; lit: boolean; menu: boolean; pinned: boolean; keys?: string; pill: boolean; compact: boolean; onOpen: () => void } & RowLook) {
   const wordsId = useId();
   // A phone: the marks only, no card (the thread shows the details).
   const guide = row.guide && row.section !== 'sent';
@@ -1110,7 +1056,7 @@ function PhoneRow({ row, project, away, filtered, lit, menu, pinned, keys, pill,
   // row never grows a line for the pin alone.
   const avatarRow = useAvatarRow();
   // With the time under the preview the pin goes with the row's end, on the time's line.
-  // First line "Thread name" with Subject preview off: two lines, line 3's book, pin, badge and count at line 2's end.
+  // First line "Thread name" with Preview off: two lines, line 3's book, pin, badge and count at line 2's end.
   const twoLines = titleFirst && noPreview && !compact && !timeBelow;
   const pinOnLine1 = !timeBelow && !twoLines && pinned && !preview && !guide && !rowHasBadge(row) && !row.snoozed && countWords(row, 0, statusMark) === null && row.questions.open < 1 && !(statusMark && rowStatus(row));
   const time = (
@@ -1121,7 +1067,7 @@ function PhoneRow({ row, project, away, filtered, lit, menu, pinned, keys, pill,
   const end = (
     <>
       {pinned && !pinOnLine1 && <PinMark threadId={row.thread_id} press={!!onUnstar} />}
-      <RowPullsMark threadId={row.thread_id} summary={row.pulls} />
+      <RowPullsMark threadId={row.thread_id} summary={noPulls ? undefined : row.pulls} />
       <SnoozedUntil row={row} />
       <LineCount row={row} status={statusMark} />
     </>
@@ -1276,6 +1222,9 @@ function newSince(rows: readonly InboxListRow[], since: number): boolean {
   return rows.some((row) => row.unread && Date.parse(row.last_agent_at ?? row.last_at) > since);
 }
 
+const NO_NEWS: readonly HeldNews[] = [];
+const NO_UNSEEN: readonly UnseenRow[] = [];
+
 export function InboxList(props: InboxListProps) {
   // Every group closes by a click on its header, this browser's choice (listGroups.ts). Quiet and the Snoozed band
   // under it start closed (approval "inbox-snooze"), every other group open.
@@ -1290,6 +1239,8 @@ export function InboxList(props: InboxListProps) {
   // Grouped (the default) or List (listView.ts), this browser's choice in the same ⋮ menu.
   const [view, setView] = useListView(props.rememberLook !== false);
   const asList = view === 'list';
+  // The starred threads as pills above the list, or (off, the default) the sidebar's Starred section (starredPills.ts).
+  const [starredAbove, setStarredAbove] = useStarredAbove(props.rememberLook !== false);
   // Settings → Rows' "Project" off: every row drawn as one project's list draws it (no project, its columns).
   const noProject = props.filtered || look.hideProject;
   // Another project on a phone: the list starts at its top. The list itself stays mounted (its Quiet fold and,
@@ -1456,6 +1407,14 @@ export function InboxList(props: InboxListProps) {
     return () => fonts.removeEventListener('loadingdone', refit);
   }, [listRef]);
   const lit = (row: InboxListRow) => props.lit?.has(row.thread_id) === true;
+  /** Show, from the "N new" line or from the pill that stands for it while it is out of view. */
+  const showNew = (fromPill?: ListEdge) => {
+    // The groups the rows land in open with the press (the owner, 2026-11-08), in the same render as the
+    // rows: closed, they would come in out of sight and Show would seem to do nothing.
+    const lands = props.notice?.lands;
+    if (lands && !asList) groups.open(lands);
+    props.onShowNew(fromPill);
+  };
   // The row whose right-click menu is open: a muted background, as the project row's.
   const [menuRow, setMenuRow] = useState<string | null>(null);
   const rowOf = (threadId: string) => {
@@ -1523,8 +1482,7 @@ export function InboxList(props: InboxListProps) {
       onMarkRead={props.onMarkRead ? markRead : undefined}
       onMarkUnread={props.onMarkUnread ? markUnread : undefined}
       onSendNow={props.onSendNow ? sendNow : undefined}
-      // Pins are this Inbox's own: another machine's thread has no star to press here.
-      onUnstar={props.onUnstar && !(row.machine && props.machines?.names.has(row.machine)) ? unstar : undefined}
+      onUnstar={props.onUnstar ? unstar : undefined}
       day={day}
       menu={menuRow === row.thread_id}
       pinned={props.pinned?.has(row.thread_id) === true}
@@ -1538,6 +1496,7 @@ export function InboxList(props: InboxListProps) {
       timeBelow={look.timeBelow}
       statusMark={look.statusMark}
       noAgents={look.hideAgents}
+      noPulls={look.hidePulls}
     />
   );
   return (
@@ -1565,6 +1524,7 @@ export function InboxList(props: InboxListProps) {
               data-list-refresh=""
               data-refreshing={props.refreshSpin != null ? '' : undefined}
             >
+              {props.titleMark && <span className="ib-lhead-mark">{props.titleMark}</span>}
               {props.path ? (
                 <Tip content={<ProjectTipText name={props.title} root={props.path} />}>
                   <span className="ib-lhead-tt">{props.title}</span>
@@ -1583,8 +1543,16 @@ export function InboxList(props: InboxListProps) {
           </h1>
         ) : (
           <Tip content={props.path ? <ProjectTipText name={props.title} root={props.path} /> : props.title} cut={!props.path}>
-            <h1 dir="auto">{props.title}</h1>
+            <h1 dir="auto">
+              {props.titleMark && <span className="ib-lhead-mark">{props.titleMark}</span>}
+              {props.title}
+            </h1>
           </Tip>
+        )}
+        {props.titleNote && (
+          <span className="ib-lhead-note" data-list-title-note="">
+            {props.titleNote}
+          </span>
         )}
         {/* The button's description, outside the h1 so the heading reads only the name. */}
         {props.onRefresh && (
@@ -1641,9 +1609,20 @@ export function InboxList(props: InboxListProps) {
             threadPanel={props.threadPanel}
             onCustomize={props.onCustomizeRows}
             view={props.rememberLook !== false ? { value: view, onChange: setView } : undefined}
+            starredAbove={props.rememberLook !== false && props.starred ? { on: starredAbove, onChange: setStarredAbove } : undefined}
           />
         )}
       </div>
+      {starredAbove && props.starred && (
+        <StarredPills
+          rows={props.starred.rows}
+          projectNames={props.projectNames}
+          openThreadId={props.selectedThreadId}
+          phone={props.phone === true}
+          onOpen={props.starred.onOpen}
+          onAction={props.starred.onAction}
+        />
+      )}
       {pulls && (
         // The ↻ a pull reveals under the header, behind the list (pullRefresh.ts moves it). Not for a screen reader:
         // the title is the accessible way, and the live region says the refresh.
@@ -1653,6 +1632,17 @@ export function InboxList(props: InboxListProps) {
           </span>
         </div>
       )}
+      {/* Before the rows, where the "N new" line it stands for is: Tab reaches it from the header, ahead of the list. */}
+      <ListNewPill
+        news={props.notice?.news ?? NO_NEWS}
+        body={bodyRef}
+        order={props.sections.map((section) => section.id)}
+        layout={`${asList}|${visible.map((section) => section.id).join(',')}`}
+        covered={props.covered === true}
+        onShow={showNew}
+        unseen={props.unseenNew ?? NO_UNSEEN}
+        onGo={(edge) => props.onGoNew?.(edge)}
+      />
         <ThreadRowMenu
           ref={bodyRef}
           className="ib-lbody"
@@ -1664,11 +1654,13 @@ export function InboxList(props: InboxListProps) {
           snoozeRequest={snoozeRequest}
           snoozeBlockedOf={props.snoozeBlockedOf}
           onSnoozeBlocked={props.onSnoozeBlocked}
-          pinnedOf={props.pinned ? (threadId) => props.pinned!.has(threadId) : undefined}
+          pinnedOf={props.pinned ? (row) => (!props.machines || machineTakes(row, props.machines, 'star') ? props.pinned!.has(row.thread_id) : null) : undefined}
+          prioritizesOf={props.machines ? (row) => machineTakes(row, props.machines!, 'priority') : undefined}
           onTarget={setMenuRow}
           onAction={(row, action) => onRowAction?.(row, action)}
           disabled={!onRowAction}
           held={props.selectedThreadId !== null}
+          phone={props.phone === true}
         >
           {props.stale}
           {props.ask}
@@ -1683,13 +1675,7 @@ export function InboxList(props: InboxListProps) {
             <HeldNoticeLine
               count={props.notice.count}
               project={props.notice.project ?? null}
-              onShow={() => {
-                // The groups the rows land in open with the press (the owner, 2026-11-08), in the same render as the
-                // rows: closed, they would come in out of sight and Show would seem to do nothing.
-                const lands = props.notice?.lands;
-                if (lands && !asList) groups.open(lands);
-                props.onShowNew();
-              }}
+              onShow={() => showNew()}
             />
           )}
           {/* The band alone is an empty list with a band under it: nothing else says the list is clear. */}
@@ -1738,7 +1724,7 @@ export function InboxList(props: InboxListProps) {
           Reconnecting…
         </p>
       )}
-      {resizable && <ListColumnEdge controls={columnId} />}
+      {resizable && <ListColumnEdge controls={columnId} onCollapse={props.onHide} />}
     </section>
   );
 }
@@ -1776,7 +1762,7 @@ interface ListRowProps {
   pill: boolean;
   /** "Compact rows" (listLook.ts): a three-line or phone row's title on line 1. */
   compact: boolean;
-  /** Settings → Rows' "Subject line" off (listLook.ts `hidePreview`): no grey subject under a named thread. */
+  /** Settings → Rows' "Grey line under the name" None (listLook.ts `hidePreview`): no grey preview on the row. */
   noPreview?: boolean;
   /** Settings → Rows' Time "Relative" (listLook.ts `relativeTime`). */
   relative?: boolean;
@@ -1788,6 +1774,8 @@ interface ListRowProps {
   statusMark?: boolean;
   /** Settings → Rows' Show → Agent icons off (listLook.ts `hideAgents`); the list column's class hides the tiles. */
   noAgents?: boolean;
+  /** Settings → Rows' Pull requests off (listLook.ts `hidePulls`): no PR mark at the row's end. */
+  noPulls?: boolean;
 }
 
 /**
@@ -1796,17 +1784,17 @@ interface ListRowProps {
  * list update renders only the rows that changed.
  */
 export const ListRow = memo(
-  function ListRow({ row, project, away, drawn, shape, full, filtered, selected, lit, onOpen, onMarkRead, onMarkUnread, onSendNow, onUnstar, menu, pinned, pinColumn, keys, pill, compact, noPreview = false, relative = false, titleFirst = false, timeBelow = false, statusMark = false, noAgents = false }: ListRowProps) {
+  function ListRow({ row, project, away, drawn, shape, full, filtered, selected, lit, onOpen, onMarkRead, onMarkUnread, onSendNow, onUnstar, menu, pinned, pinColumn, keys, pill, compact, noPreview = false, relative = false, titleFirst = false, timeBelow = false, statusMark = false, noAgents = false, noPulls = false }: ListRowProps) {
     const open = () => onOpen(row);
     const unstarRow = onUnstar && pinned ? () => onUnstar(row) : undefined;
-    const rowLook: RowLook = { noPreview, relative, titleFirst, timeBelow, statusMark, noAgents };
+    const rowLook: RowLook = { noPreview, relative, titleFirst, timeBelow, statusMark, noAgents, noPulls };
     if (shape === 'phone') return <PhoneRow row={row} project={project} away={away} filtered={filtered} lit={lit} menu={menu} pinned={pinned} keys={keys} pill={pill} compact={compact} {...rowLook} onOpen={open} onUnstar={unstarRow} />;
     return (
       <RowWithAction row={row} drawn={drawn} menu={menu} onMarkRead={onMarkRead} onMarkUnread={onMarkUnread} onSendNow={onSendNow}>
         {shape === 'narrow' ? (
           <NarrowRow row={row} project={project} away={away} filtered={filtered} lit={lit} pinned={pinned} keys={keys} selected={selected} pill={pill} compact={compact} {...rowLook} onOpen={open} onUnstar={unstarRow} />
         ) : (
-          <WideRow row={row} project={project} away={away} filtered={filtered} lit={lit} pinned={pinned} pinColumn={pinColumn} keys={keys} selected={selected} full={full} pill={pill} noPreview={noPreview} relative={relative} statusMark={statusMark} onOpen={open} onUnstar={unstarRow} />
+          <WideRow row={row} project={project} away={away} filtered={filtered} lit={lit} pinned={pinned} pinColumn={pinColumn} keys={keys} selected={selected} full={full} pill={pill} noPreview={noPreview} relative={relative} statusMark={statusMark} noPulls={noPulls} onOpen={open} onUnstar={unstarRow} />
         )}
       </RowWithAction>
     );
@@ -1833,6 +1821,7 @@ export const ListRow = memo(
     a.timeBelow === b.timeBelow &&
     a.statusMark === b.statusMark &&
     a.noAgents === b.noAgents &&
+    a.noPulls === b.noPulls &&
     a.onOpen === b.onOpen &&
     a.onMarkRead === b.onMarkRead &&
     a.onMarkUnread === b.onMarkUnread &&

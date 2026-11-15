@@ -72,7 +72,7 @@ describe("the Inbox and the daily ping", () => {
   test("a start sends the Inbox's ping at once; a plan ping earlier today makes it not the day's first", async () => {
     const { dataDir } = await world({ firstWeek: "2026-01-05", day: today(), sent: ["plan"] });
     await until(() => pingFile(dataDir).sent?.includes("inbox") === true);
-    expect(bodies).toEqual(['{"version":"0.30.0","age_week":4,"tool":"inbox","first":0}']);
+    expect(bodies).toEqual(['{"version":"0.30.0","age_week":4,"tool":"inbox","first":0,"favicon":"none"}']);
     expect(pingFile(dataDir)).toMatchObject({ day: today(), sent: ["inbox", "plan"] });
   });
 

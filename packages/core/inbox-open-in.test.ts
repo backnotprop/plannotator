@@ -35,6 +35,12 @@ describe("inboxOpenInPolicy", () => {
     expect(inboxOpenInPolicy({ kind: "video", path: "/p/clip.bin" }, "mac").systemDefault).toBe(false);
   });
 
+  test("a recording opens in the OS default player only when its own extension says audio", () => {
+    expect(inboxOpenInPolicy({ kind: "audio", path: "/p/take.mp3" }, "mac")).toEqual({ browser: false, editors: false, systemDefault: true });
+    expect(inboxOpenInPolicy({ kind: "audio", path: "/p/memo.m4a" }, "linux").systemDefault).toBe(true);
+    expect(inboxOpenInPolicy({ kind: "audio", path: "/p/take.bin" }, "mac").systemDefault).toBe(false);
+  });
+
   test("a terminal is never allowed, whatever the kind", () => {
     const policy = inboxOpenInPolicy({ kind: "code", path: "/p/run.sh" }, "mac");
     expect(inboxOpenInAllows(policy, { id: "terminal", kind: "terminal" })).toBe(false);

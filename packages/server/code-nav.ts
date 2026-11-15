@@ -30,6 +30,7 @@ const bunCodeNavRuntime: CodeNavRuntime = {
         env: childEnv(),
         stdout: "pipe",
         stderr: "pipe",
+        windowsHide: true,
       });
     } catch {
       return { stdout: "", stderr: "command not found", exitCode: 1 };

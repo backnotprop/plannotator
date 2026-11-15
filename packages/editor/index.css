@@ -68,6 +68,9 @@ pre code.pn-code {
 pre code.pn-code[data-keep-layout] {
   white-space: pre;
   overflow-wrap: normal;
+  /* As wide as its longest line, so the background follows the text when the
+     block scrolls sideways (a block-level code box stops at the scroller's width). */
+  min-width: max-content;
 }
 
 /* The code-file hover preview is not a <pre><code>, so the rule above misses

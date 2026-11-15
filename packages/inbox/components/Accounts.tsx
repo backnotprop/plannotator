@@ -248,7 +248,6 @@ function switchLineText(line: SwitchLine, label: string): string {
     renumbered: 'The accounts changed during the switch. The list shows the one in use.',
     busy: 'Another switch is going.',
     not_installed: 'claude-swap is not installed.',
-    owner_only: 'Owner only.',
     unreachable: 'The Inbox did not answer.',
   };
   return `Couldn't switch to ${label}. ${why[line]}`;
@@ -666,10 +665,9 @@ function AccountRow({
   );
 }
 
-/** The page's Refresh, beside its title: it reads every machine again. Not for a tailnet guest. */
+/** The page's Refresh, beside its title: it reads every machine again. */
 export function AccountsRefresh() {
-  const { view, reading, read } = useAccounts();
-  if (view?.state === 'owner_only') return null;
+  const { reading, read } = useAccounts();
   return (
     <button type="button" className="ib-btn ib-ghost ib-sm ib-acct-refresh" disabled={reading} onClick={() => void read({ fresh: true })} data-accounts-refresh="">
       {reading ? <span className="ib-spin" aria-hidden="true" /> : <Icon name="refresh" size={13} />}
@@ -693,13 +691,6 @@ export function AccountsSection({ machine }: { /** This machine's name, when thi
     void read();
   }, [read]);
 
-  if (view?.state === 'owner_only') {
-    return (
-      <div className="ib-accts" data-settings-accounts="owner_only">
-        <p data-accounts-owner-only="">Owner only.</p>
-      </div>
-    );
-  }
   const machines: PageMachine[] = [{ key: SELF, name: machine ?? THIS_MACHINE, read: view }, ...linked.map(({ id, name, read: answer }) => ({ key: id, name, read: answer }))];
   return (
     <div className="ib-accts" data-settings-accounts={view?.state ?? 'reading'}>

@@ -101,7 +101,7 @@ export function DraftsPage({
           return (
             <div className="ib-draft" role="listitem" key={draft.id} data-draft-id={draft.id} data-draft-status={draft.status}>
               <button type="button" className="ib-draft-open" onClick={(event) => onOpen(draft, event.currentTarget)} aria-label={`Open draft: ${subject}. ${draftChip(draft)}. Saved ${whenTime(draft.updated_at)}`}>
-                <span className="ib-draft-mk">{draft.to ? <HostMark host={draft.to.host} big /> : <Icon name="doc" size={17} />}</span>
+                <span className="ib-draft-mk">{draft.to ? <HostMark host={draft.to.host} big agent={draft.to.session} /> : <Icon name="doc" size={17} />}</span>
                 <span className="ib-draft-t">
                   <span className="ib-draft-to" dir="auto">
                     {draft.to ? (

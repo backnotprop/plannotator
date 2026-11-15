@@ -22,7 +22,7 @@
  * .local/proof/new-card-phone/ (PLANNOTATOR_E2E_SHOTS_DIR names another folder).
  */
 
-import { devices, expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { devices, expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -50,7 +50,7 @@ test.beforeAll(async () => {
   expect(existsSync(binary), `build the binary first: ${binary}`).toBe(true);
   mkdirSync(shotsDir, { recursive: true });
   const root = inboxScratch('plannotator-inbox-new-card-phone-e2e-');
-  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_DATA_DIR: join(root, 'data'), PLANNOTATOR_BROWSER: NO_BROWSER, NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0', PLANNOTATOR_UPDATE_CHECK: '0' };
+  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: join(root, 'data'), PLANNOTATOR_BROWSER: NO_BROWSER, NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0', PLANNOTATOR_UPDATE_CHECK: '0' };
   markTourDecided(env.PLANNOTATOR_DATA_DIR);
   const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
   expect(started.status, started.stderr).toBe(0);
@@ -156,6 +156,9 @@ test('with a keyboard up the window ends at its top, the title and notes above i
     try {
       const page = await context.newPage();
       await openNewCard(page);
+      await expect(page.locator('dialog[data-dialog="new-card"] [data-new-card-title]')).toBeFocused();
+      // phone.ts checks the viewport again 300 ms after a focus change and, with no real keyboard, clears --ib-vvh.
+      await page.waitForTimeout(400);
       // phone.ts sets --ib-vvh to the visual viewport's height while an iPhone's keyboard is up.
       const visible = 420;
       await page.evaluate((h) => document.documentElement.style.setProperty('--ib-vvh', `${h}px`), visible);

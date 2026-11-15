@@ -11,7 +11,9 @@
  * refused; `/download` taking the same Range; comments on a video allowed
  * (and shaped), where a file still refuses them; the phone's door forwarding
  * Range and If-Range and returning the window's 206 unchanged; and a relay
- * command (no headers) answered with the whole file.
+ * command (no headers) answered with the whole file. A recording (`audio`)
+ * takes the same handler at its `audio` route, the same comments at a moment,
+ * and the same door.
  */
 import { afterEach, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
@@ -20,6 +22,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { ebml, mp4 } from "../../tests/helpers/video-fixtures";
+import { wav } from "../../tests/helpers/audio-fixtures";
 import { startInboxServer, type InboxServer } from "./inbox";
 import { createInboxDevices } from "./inbox-devices";
 
@@ -171,14 +174,14 @@ test("a client that goes away mid-answer leaves no file handle open: cancel clos
   expect((await whole.arrayBuffer()).byteLength).toBe(mp4({ mdatBytes: 32 * 1024 * 1024 }).length);
 }, 60_000);
 
-test("a film is kind video from its bytes, with the length and frame size its header gives (MP4); WebM without; audio stays a file", async () => {
+test("a film is kind video from its bytes, with the length and frame size its header gives (MP4); WebM without; audio-only is a recording", async () => {
   const { project, dataDir } = world();
   const server = await start(dataDir);
   const sent = await send(server, { project_path: project, body: "Two cuts.", attachments: ATTACHED });
   expect(sent.attachments.map((a: Json) => [a.name, a.kind])).toEqual([
     ["launch-cut-v3.mp4", "video"],
     ["teaser.webm", "video"],
-    ["voice.mp4", "file"],
+    ["voice.mp4", "audio"],
     ["notes.zip", "file"],
   ]);
   const listed = (await (await fetch(`http://127.0.0.1:${server.port}/api/inbox/threads/${sent.thread_id}/attachments`)).json()) as Json;
@@ -345,6 +348,69 @@ test("comments on a video are kept at a moment; a malformed one is refused, and 
   const onFile = await post({ attachment_id: zip.id, version: "current", annotation: { ...annotation, id: "ann-vid-4" } });
   expect(onFile.status).toBe(422);
   expect(((await onFile.json()) as Json).code).toBe("annotation_not_allowed");
+});
+
+test("a recording: kind audio with its length, served at its audio route by Range, comments at a moment, and the door", async () => {
+  const { project, dataDir } = world();
+  const tone = wav({ seconds: 2 });
+  writeFileSync(join(project, "film", "voice-note.wav"), tone);
+  process.env.PLANNOTATOR_RELAY_URL = "http://127.0.0.1:9";
+  const server = await start(dataDir, true);
+  const origin = `http://127.0.0.1:${server.port}`;
+  const sent = await send(server, { project_path: project, body: "Listen.", attachments: ["film/voice-note.wav", "film/voice.mp4", "film/launch-cut-v3.mp4", "notes.zip"] });
+  const [note, voice, cut, zip] = sent.attachments as Json[];
+  expect([note.kind, voice.kind, cut.kind, zip.kind]).toEqual(["audio", "audio", "video", "file"]);
+  const listed = (await (await fetch(`${origin}/api/inbox/threads/${sent.thread_id}/attachments`)).json()) as Json;
+  expect(listed.attachments[0]).toMatchObject({ media_type: "audio/wav", duration_ms: 2000, size: tone.length, unavailable: null });
+  expect(listed.attachments[1]).toMatchObject({ media_type: "audio/mp4", duration_ms: 461300 });
+
+  const url = `${origin}/api/inbox/attachments/${note.id}/audio`;
+  const whole = await fetch(url);
+  expect(whole.status).toBe(200);
+  expect(whole.headers.get("content-type")).toBe("audio/wav");
+  expect(whole.headers.get("accept-ranges")).toBe("bytes");
+  expect(whole.headers.get("content-disposition")).toStartWith("inline;");
+  expect(whole.headers.get("content-security-policy")).toBe("sandbox; default-src 'none'; style-src 'unsafe-inline'");
+  expect(whole.headers.get("x-content-type-options")).toBe("nosniff");
+  expect(Buffer.from(await whole.arrayBuffer()).equals(tone)).toBe(true);
+  const part = await fetch(url, { headers: { Range: "bytes=0-11" } });
+  expect(part.status).toBe(206);
+  expect(part.headers.get("content-range")).toBe(`bytes 0-11/${tone.length}`);
+  expect(Buffer.from(await part.arrayBuffer()).subarray(8, 12).toString("latin1")).toBe("WAVE");
+  expect((await fetch(`${url}?version=sent`, { headers: { Range: "bytes=0-3" } })).status).toBe(206);
+  expect((await fetch(`${origin}/api/inbox/attachments/${voice.id}/audio`, { headers: { Range: "bytes=0-1" } })).headers.get("content-type")).toBe("audio/mp4");
+
+  // Each route takes its own kind only.
+  const notAudio = await fetch(`${origin}/api/inbox/attachments/${cut.id}/audio`);
+  expect(notAudio.status).toBe(415);
+  expect(((await notAudio.json()) as Json).code).toBe("attachment_not_audio");
+  expect(((await (await fetch(`${origin}/api/inbox/attachments/${zip.id}/audio`)).json()) as Json).code).toBe("attachment_not_audio");
+  const notVideo = await fetch(`${origin}/api/inbox/attachments/${note.id}/video`);
+  expect(notVideo.status).toBe(415);
+  expect(((await notVideo.json()) as Json).code).toBe("attachment_not_video");
+  expect((await fetch(url, { method: "HEAD" })).status).toBe(405);
+  expect((await fetch(url, { headers: { "Sec-Fetch-Site": "cross-site" } })).status).toBe(403);
+
+  // Comments at a moment, the video's contract: blockId "video" and inboxVideo.time; anything else is refused.
+  const post = (body: Json) => fetch(`${origin}/api/inbox/annotations`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const annotation = { id: "ann-aud-1", blockId: "video", startOffset: 0, endOffset: 0, type: "COMMENT", text: "The second sentence clips.", originalText: "voice-note.wav at 0:01", createdA: 1, inboxVideo: { time: 1.25 } };
+  const ok = await post({ attachment_id: note.id, version: "current", annotation });
+  expect(ok.status).toBe(200);
+  expect(((await ok.json()) as Json).annotation.annotation.inboxVideo).toEqual({ time: 1.25 });
+  const wrongBlock = await post({ attachment_id: note.id, version: "current", annotation: { ...annotation, id: "ann-aud-2", blockId: "audio" } });
+  expect(wrongBlock.status).toBe(422);
+  expect(((await wrongBlock.json()) as Json).error).toContain("on a recording");
+  expect((await post({ attachment_id: note.id, version: "current", annotation: { ...annotation, id: "ann-aud-3", inboxVideo: {} } })).status).toBe(422);
+
+  // The phone's door forwards the audio route like the video one, with its Range answer unchanged.
+  const made = (await (await fetch(`${origin}/api/inbox/pairing`, { method: "POST", body: "{}" })).json()) as Json;
+  const paired = (await (
+    await fetch(`${origin}/api/inbox/device/pair`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: made.offer.code, name: "iPhone", platform: "ios" }) })
+  ).json()) as Json;
+  const fromPhone = await fetch(`${origin}/api/inbox/device/attachments/${note.id}/audio`, { headers: { Authorization: `Bearer ${paired.token}`, Range: "bytes=0-3" } });
+  expect(fromPhone.status).toBe(206);
+  expect(fromPhone.headers.get("content-type")).toBe("audio/wav");
+  expect(Buffer.from(await fromPhone.arrayBuffer()).toString("latin1")).toBe("RIFF");
 });
 
 test("the phone's door forwards Range and If-Range and returns the window's 206 unchanged; a relay command (no headers) gets the whole file", async () => {

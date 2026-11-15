@@ -10,7 +10,7 @@
  * Rows keep their objects from read to read (listRead.ts puts a change
  * together with the rows the window holds), so most rows compare by identity;
  * any other row, section or field compares by its JSON. `list_version` names
- * the read, not what it shows. `cursor` (the store's newest record) shows only
+ * the read, not what it shows; `agents` have their own store (agentsList.ts). `cursor` (the store's newest record) shows only
  * on Settings (the Archived count reads again when it moves): elsewhere a
  * read whose only change is the cursor is the same list.
  */
@@ -45,7 +45,8 @@ export function sameListModel(held: object | null | undefined, next: object | nu
   const a = held as Record<string, unknown>;
   const b = next as Record<string, unknown>;
   for (const key of new Set([...Object.keys(a), ...Object.keys(b)])) {
-    if (key === 'list_version' || (key === 'cursor' && !options.cursor)) continue;
+    // `agents` live in their own store (agentsList.ts), which draws what reads them: their last poll moves on every read.
+    if (key === 'list_version' || key === 'agents' || (key === 'cursor' && !options.cursor)) continue;
     const left = a[key];
     const right = b[key];
     if (left === right) continue;

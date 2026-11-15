@@ -16,6 +16,10 @@
  *   it (memory only; a token is never logged).
  * - GitLab: the `issue` or `mergeRequest` of a project (GitLab numbers them
  *   apart, so the link's kind decides). glab holds one login per host.
+ * - Bitbucket Cloud: pull requests only, through the REST API with the
+ *   review app's credentials (`fetchBbPRCard` in pr-bitbucket.ts), when the
+ *   host passes a `bitbucket` reader. Without one, or for an issue, the
+ *   answer is `unsupported` and nothing runs.
  * - Hosts: github.com and gitlab.com, plus the hosts this computer's own gh
  *   or glab is signed in to (`gh auth status`, `glab auth status`, read once
  *   per `REF_AUTH_HOSTS_MS`): GitHub Enterprise and self-managed GitLab. Any
@@ -40,6 +44,7 @@
 import {
   FORGE_REF_BODY_MAX,
   FORGE_REF_COMMENT_MAX,
+  forgeHostTrusted,
   forgeRefKey,
   parseForgeRefUrl,
   type ForgeRef,
@@ -57,8 +62,20 @@ export const REF_FRESH_MS = 60_000;
 export const REF_FAILURE_MS = 30_000;
 export const REF_STALE_MAX_MS = 15 * 60_000;
 export const REF_RATE_LIMIT_MS = 60_000;
+/** A CLI's hard deadline: then it and everything it started are ended, and the runner answers at once. */
 export const REF_TIMEOUT_MS = 8_000;
+/** After TERM at the deadline, KILL to whatever is still there (a CLI that catches TERM, as glab does). */
+export const REF_KILL_GRACE_MS = 1_000;
+/** A CLI that exited while something it started still holds its output: how long that leftover may hold it. */
+export const REF_DRAIN_MS = 500;
 export const REF_MAX_CONCURRENT = 2;
+/**
+ * A slot is given back after this whatever its job does, so one stuck job can never hold it forever (a job may run
+ * several CLIs in turn, each under REF_TIMEOUT_MS).
+ */
+export const REF_SLOT_HOLD_MS = 30_000;
+/** With lookups waiting and no slot given back for this long, the waiting ones are answered (unavailable) and dropped. */
+export const REF_QUEUE_STALL_MS = 20_000;
 export const REF_AUTH_HOSTS_MS = 5 * 60_000;
 /** Refs kept in the cache (an answer, or a failure being held). */
 export const REF_CACHE_MAX = 500;
@@ -100,8 +117,96 @@ export interface RefCommandResult {
   stderr: string;
   exitCode: number;
 }
-/** Run `cli args…` (env added to the live env). Exit 127 when the CLI is not installed. */
+/**
+ * Run `cli args…` (env added to the live env). Exit 127 when the CLI is not installed. Always settles by
+ * REF_TIMEOUT_MS (exit 1, stderr `<cli>: timed out`), whatever the CLI and its children do.
+ */
 export type RefRunner = (cli: RefCli, args: string[], env?: Record<string, string>) => Promise<RefCommandResult>;
+
+/**
+ * End a CLI at its deadline, both runtimes: TERM, then KILL after REF_KILL_GRACE_MS to what is left. `signal` sends
+ * one signal (to the CLI's process group on POSIX); a first TERM that finds nothing (ESRCH) sends nothing more, so a
+ * reused pid is never signalled.
+ */
+export function refRunnerKill(signal: (signal: "SIGTERM" | "SIGKILL") => void, graceMs: number = REF_KILL_GRACE_MS): void {
+  try {
+    signal("SIGTERM");
+  } catch {
+    return;
+  }
+  const timer = setTimeout(() => {
+    try {
+      signal("SIGKILL");
+    } catch {
+      // Already gone.
+    }
+  }, graceMs);
+  (timer as { unref?: () => void }).unref?.();
+}
+
+/** Thrown by a slot that cannot be had: too many waiting, or the queue stalled. Callers answer `unavailable`. */
+export const REF_SLOT_BUSY: unique symbol = Symbol("ref slot busy");
+
+/**
+ * At most `max` jobs at once, the others waiting in turn. Never stuck: a job's slot is given back after `holdMs`
+ * whatever the job does, and when nothing has been given back for `stallMs` the waiting jobs are refused
+ * (REF_SLOT_BUSY), as is one past `maxWaiting`.
+ */
+export function createRefSlots(
+  max: number,
+  options: { maxWaiting?: number; holdMs?: number; stallMs?: number } = {},
+): { run<T>(job: () => Promise<T>): Promise<T>; waiting(): number; running(): number } {
+  const maxWaiting = options.maxWaiting ?? REF_MAX_WAITING;
+  const holdMs = options.holdMs ?? REF_SLOT_HOLD_MS;
+  const stallMs = options.stallMs ?? REF_QUEUE_STALL_MS;
+  let running = 0;
+  const waiting: { go: () => void; refuse: () => void }[] = [];
+  let watchdog: ReturnType<typeof setTimeout> | null = null;
+  const watch = () => {
+    if (watchdog) clearTimeout(watchdog);
+    watchdog = null;
+    if (waiting.length === 0) return;
+    watchdog = setTimeout(() => {
+      watchdog = null;
+      for (const entry of waiting.splice(0)) entry.refuse();
+    }, stallMs);
+    (watchdog as { unref?: () => void }).unref?.();
+  };
+  const release = () => {
+    const next = waiting.shift();
+    if (next) next.go();
+    else running--;
+    // A slot was given back: the queue moves, so the stall clock starts again.
+    watch();
+  };
+  return {
+    async run(job) {
+      if (running >= max) {
+        if (waiting.length >= maxWaiting) throw REF_SLOT_BUSY;
+        await new Promise<void>((resolve, reject) => {
+          waiting.push({ go: resolve, refuse: () => reject(REF_SLOT_BUSY) });
+          if (!watchdog) watch();
+        });
+      } else running++;
+      let held = true;
+      const giveBack = () => {
+        if (!held) return;
+        held = false;
+        clearTimeout(hold);
+        release();
+      };
+      const hold = setTimeout(giveBack, holdMs);
+      (hold as { unref?: () => void }).unref?.();
+      try {
+        return await job();
+      } finally {
+        giveBack();
+      }
+    },
+    waiting: () => waiting.length,
+    running: () => running,
+  };
+}
 
 // --- the queries ---
 
@@ -373,7 +478,7 @@ export function refErrorOf(cli: RefCli, result: RefCommandResult): ForgeRefCardE
 export async function readSignedInHosts(run: RefRunner, cli: RefCli): Promise<Set<string>> {
   const hosts = new Set<string>();
   const fromText = (text: string) => {
-    for (const m of text.replace(/\u001b\[[0-9;]*m/g, "").matchAll(/Logged in to ([A-Za-z0-9.-]+)/g)) hosts.add(m[1].toLowerCase());
+    for (const m of text.replace(/\u001b\[[0-9;]*m/g, "").matchAll(/Logged in to ([A-Za-z0-9.-]+(?::\d+)?)/g)) hosts.add(m[1].toLowerCase());
   };
   if (cli === "gh") {
     const json = await run("gh", ["auth", "status", "--json", "hosts"]);
@@ -431,12 +536,32 @@ export interface RefCardsSizes {
   waiting: number;
 }
 
-/** Thrown by a full queue: answered `unavailable`, never cached. */
-const QUEUE_FULL = Symbol("ref-cards queue full");
+
+/**
+ * Reads one Bitbucket Cloud pull request's card; a thrown error's numeric `status` is the HTTP status. `signal` aborts
+ * when the read is given up on (`bitbucketTimeoutMs`): its requests stop with it.
+ */
+export type BitbucketRefReader = (ref: { workspace: string; repo: string; number: number }, signal?: AbortSignal) => Promise<ForgeRefCardData>;
+
+/** A Bitbucket reader's failure as a card error. */
+export function bitbucketRefErrorOf(error: unknown): ForgeRefCardError {
+  const status = typeof (error as { status?: unknown } | null)?.status === "number" ? (error as { status: number }).status : 0;
+  if (status === 401) return "signed_out";
+  if (status === 403 || status === 404) return "not_found";
+  if (status === 429) return "rate_limited";
+  return "unavailable";
+}
 
 export function createRefCards(options: {
   /** How `gh` / `glab` run (Bun: `refCliRunner` in packages/server; Node: `nodeRefCliRunner`). */
   run: RefRunner;
+  /** Bitbucket Cloud pull requests (absent: they answer `unsupported`). */
+  bitbucket?: BitbucketRefReader;
+  /**
+   * A Bitbucket read is given up on after this (default `REF_TIMEOUT_MS`, a CLI's limit): its requests are aborted, its
+   * slot is given back and the card says it couldn't load. Tests pass a short one.
+   */
+  bitbucketTimeoutMs?: number;
   now?: () => number;
   /** Avatar URL → data URI (default: `fetchAvatarDataUri`). */
   avatar?: (url: string) => Promise<string | null>;
@@ -454,22 +579,9 @@ export function createRefCards(options: {
   const rateLimitedUntil = new Map<string, number>();
   /** A stale answer whose refresh failed: not asked again before this. */
   const retryAt = new Map<string, number>();
-  let running = 0;
-  const waiting: (() => void)[] = [];
-
-  const slot = async <T>(job: () => Promise<T>): Promise<T> => {
-    if (running >= REF_MAX_CONCURRENT) {
-      if (waiting.length >= REF_MAX_WAITING) throw QUEUE_FULL;
-      await new Promise<void>((r) => waiting.push(r));
-    } else running++;
-    try {
-      return await job();
-    } finally {
-      const next = waiting.shift();
-      if (next) next();
-      else running--;
-    }
-  };
+  // At most REF_MAX_CONCURRENT CLIs; never stuck (createRefSlots): a full or stalled queue answers at once.
+  const slots = createRefSlots(REF_MAX_CONCURRENT, { maxWaiting: REF_MAX_WAITING });
+  const slot = <T>(job: () => Promise<T>): Promise<T> => slots.run(job);
 
   const dropAvatar = (_url: string, entry: { bytes: number }) => {
     avatarBytes -= entry.bytes;
@@ -536,16 +648,44 @@ export function createRefCards(options: {
     });
     return hosts;
   };
-  /** github.com and gitlab.com always; any other host only when this computer's own CLI is signed in to it. */
+  /**
+   * github.com and gitlab.com always; any other host only when this computer's own CLI is signed in to it.
+   * Bitbucket Cloud pull requests when the host passed a reader.
+   */
   const fetchesFrom = async (ref: ForgeRef): Promise<boolean> => {
-    if (ref.host === (ref.platform === "github" ? "github.com" : "gitlab.com")) return true;
-    return (await signedInHosts(ref.platform === "github" ? "gh" : "glab")).has(ref.host);
+    if (ref.platform === "bitbucket") return !!options.bitbucket && ref.host === "bitbucket.org" && ref.kind === "pull";
+    if (forgeHostTrusted(ref, new Set())) return true;
+    return forgeHostTrusted(ref, await signedInHosts(ref.platform === "github" ? "gh" : "glab"));
   };
 
   const fail = (error: ForgeRefCardError): ForgeRefCardResult => ({ ok: false, error, fetchedAt: now() });
 
+  const bitbucketTimeoutMs = options.bitbucketTimeoutMs ?? REF_TIMEOUT_MS;
+  const fetchBitbucket = async (ref: ForgeRef, read: BitbucketRefReader): Promise<ForgeRefCardResult> => {
+    // The same limit as a CLI's: past it the requests are aborted and the slot is free again. The race also covers a
+    // wait the signal cannot stop (a token command still running answers its later reads from its own cache).
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        reject(new Error("Bitbucket did not answer in time"));
+        controller.abort();
+      }, bitbucketTimeoutMs);
+    });
+    try {
+      const data = await Promise.race([read({ workspace: ref.owner, repo: ref.repo, number: ref.number }, controller.signal), late]).finally(() => clearTimeout(timer));
+      await inlineAvatars(data);
+      return { ok: true, data, fetchedAt: now() };
+    } catch (error) {
+      const code = bitbucketRefErrorOf(error);
+      if (code === "rate_limited") rateLimitedUntil.set(ref.host, now() + REF_RATE_LIMIT_MS);
+      return fail(code);
+    }
+  };
+
   const fetchOnce = async (ref: ForgeRef): Promise<ForgeRefCardResult> => {
     if (now() < (rateLimitedUntil.get(ref.host) ?? 0)) return fail("rate_limited");
+    if (ref.platform === "bitbucket") return options.bitbucket ? fetchBitbucket(ref, options.bitbucket) : fail("unsupported");
     const { cli, args } = queryArgs(ref);
     const repoKey = `${ref.host}/${ref.owner}/${ref.repo}`.toLowerCase();
     const known = accountFor.get(repoKey);
@@ -601,12 +741,12 @@ export function createRefCards(options: {
     const inFlight = pending.get(key);
     if (inFlight) return inFlight;
     const job = slot(() => fetchOnce(ref))
-      .catch((error): ForgeRefCardResult | typeof QUEUE_FULL => (error === QUEUE_FULL ? QUEUE_FULL : fail("unavailable")))
+      .catch((error): ForgeRefCardResult | typeof REF_SLOT_BUSY => (error === REF_SLOT_BUSY ? REF_SLOT_BUSY : fail("unavailable")))
       .then((result) => {
         const prev = cache.get(key);
         const prevShowable = prev?.ok === true && now() - prev.fetchedAt < REF_STALE_MAX_MS;
         // Too many lookups waiting: answer at once and keep nothing, so the next hover asks again.
-        if (result === QUEUE_FULL) return prevShowable ? prev! : fail("unavailable");
+        if (result === REF_SLOT_BUSY) return prevShowable ? prev! : fail("unavailable");
         prune();
         // A failure never replaces an answer still worth showing; it only holds off the next refresh.
         if (!result.ok && prevShowable) {
@@ -648,7 +788,7 @@ export function createRefCards(options: {
         rateLimitedHosts: rateLimitedUntil.size,
         avatars: avatars.size,
         avatarBytes,
-        waiting: waiting.length,
+        waiting: slots.waiting(),
       };
     },
   };

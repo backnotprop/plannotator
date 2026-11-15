@@ -107,13 +107,25 @@ export function setReviewSkillsShape(on: boolean): void {
 }
 
 /**
+ * Chapter diagrams as this window last read it (App.tsx sets it from the settings, Settings → Capabilities): the review
+ * skills' chapter diagram lines go only while it is on. On until the settings say otherwise.
+ */
+let reviewSkillsDiagrams = true;
+
+/** The window read Chapter diagrams: the review skills pasted from now on carry their diagram lines only while on. */
+export function setReviewSkillsDiagrams(on: boolean): void {
+  reviewSkillsDiagrams = on;
+}
+
+/**
  * A Plannotator skill's instructions (root `plannotator`: the review skills the
  * Inbox lists while Code review is on, and `/shape` while Shape is on), from the window's own text, never read
- * from disk. Undefined for any other skill. A review skill's drawing lines ride `shape` (Shape's switch).
+ * from disk. Undefined for any other skill. A review skill's drawing lines ride `shape` (Shape's switch), and its
+ * chapter diagram lines `diagrams` (Chapter diagrams).
  */
-export function builtinSkillContent(ref: SkillCatalogEntry, shape: boolean = reviewSkillsShape): SkillExportContent | undefined {
+export function builtinSkillContent(ref: SkillCatalogEntry, shape: boolean = reviewSkillsShape, diagrams: boolean = reviewSkillsDiagrams): SkillExportContent | undefined {
   if (ref.root !== 'plannotator') return undefined;
-  const skill = inboxReviewSkill(ref.name, { shape }) ?? shapeSkill(ref.name);
+  const skill = inboxReviewSkill(ref.name, { shape, diagrams }) ?? shapeSkill(ref.name);
   return skill ? { content: skill.body, truncated: false, dir: '', path: '' } : undefined;
 }
 

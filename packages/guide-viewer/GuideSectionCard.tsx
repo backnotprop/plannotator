@@ -209,16 +209,18 @@ function writeFold(store: FoldStore | null, id: string, folded: boolean): void {
  * A chapter's diagram at the top of its code pane: a "Diagram" header whose caret folds it, as a file's does, and
  * the host's drawing under it, its box capped at 320px (the canvas fits the drawing inside it; Expand opens it full
  * size) so a tall diagram does not push the chapter's code away. The fold is
- * kept (the host's store, else localStorage), so the diagram stays folded when the guide opens again.
+ * kept (the host's store, else localStorage), so the diagram stays folded when the guide opens again. A host with
+ * `chapterDiagramsFolded` draws it folded at first and keeps nothing.
  */
 function ChapterDiagram({ kind, foldId, children }: { kind: string; foldId: string; children: React.ReactNode }) {
-  const { diagramFoldStore } = useGuideHost();
+  const { diagramFoldStore, chapterDiagramsFolded } = useGuideHost();
   const store = diagramFoldStore ?? localFoldStore();
-  const [folded, setFolded] = useState(() => readFolds(store).includes(foldId));
+  // The host's `chapterDiagramsFolded`: folded at first, and the person's clicks last only while the page is open.
+  const [folded, setFolded] = useState(() => chapterDiagramsFolded === true || readFolds(store).includes(foldId));
   const toggle = () => {
     const next = !folded;
     setFolded(next);
-    writeFold(store, foldId, next);
+    if (chapterDiagramsFolded !== true) writeFold(store, foldId, next);
   };
   return (
     <div data-guide-chapter-diagram={kind} data-folded={folded ? '' : undefined} className="min-w-0">

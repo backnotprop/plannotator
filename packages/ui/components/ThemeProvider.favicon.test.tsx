@@ -7,7 +7,7 @@ import { ThemeProvider } from './ThemeProvider';
 import {
   FACE_FAVICON_PNG_DATA_URL,
   FAVICON_ICO_DATA_URL,
-  P_FAVICON_PNG_DATA_URL,
+  YELLOW_FAVICON_ICO_DATA_URL,
 } from '@plannotator/core/favicon';
 
 const hasDom = typeof document !== 'undefined';
@@ -99,13 +99,13 @@ describe('ThemeProvider favicon synchronization', () => {
     expect(link?.getAttribute('sizes')).toBe('64x64');
 
     await act(async () => {
-      configStore.set('faviconStyle', 'classic');
+      configStore.set('faviconStyle', 'yellow');
     });
 
     const updatedLink = getFaviconLink();
-    expect(updatedLink?.href).toBe(P_FAVICON_PNG_DATA_URL);
-    expect(updatedLink?.type).toBe('image/png');
-    expect(updatedLink?.getAttribute('sizes')).toBe('192x192');
+    expect(updatedLink?.href).toBe(YELLOW_FAVICON_ICO_DATA_URL);
+    expect(updatedLink?.type).toBe('image/x-icon');
+    expect(updatedLink?.getAttribute('sizes')).toBe('16x16 32x32 48x48');
 
     await act(async () => {
       configStore.set('faviconStyle', 'glass');
@@ -117,7 +117,7 @@ describe('ThemeProvider favicon synchronization', () => {
     expect(glassLink?.getAttribute('sizes')).toBe('16x16 32x32 48x48');
   });
 
-  test.skipIf(!hasDom)('classic, stored by anyone who chose the old navy P, draws the P icon', async () => {
+  test.skipIf(!hasDom)('classic, stored by anyone who chose P before it was removed, reads as unset: Glass', async () => {
     stored.set('plannotator-favicon', 'classic');
     configStore.loadFromBackend();
 
@@ -125,8 +125,8 @@ describe('ThemeProvider favicon synchronization', () => {
 
     const link = getFaviconLink();
     expect(link).not.toBeNull();
-    expect(link?.href).toBe(P_FAVICON_PNG_DATA_URL);
-    expect(link?.type).toBe('image/png');
+    expect(link?.href).toBe(FAVICON_ICO_DATA_URL);
+    expect(link?.type).toBe('image/x-icon');
   });
 });
 
@@ -162,7 +162,7 @@ describe('ThemeProvider favicon ownership is opt-in', () => {
   });
 
   test.skipIf(!hasDom)('a default mount creates no favicon link', async () => {
-    stored.set('plannotator-favicon', 'classic');
+    stored.set('plannotator-favicon', 'yellow');
     configStore.loadFromBackend();
 
     await mount(false);
@@ -177,7 +177,7 @@ describe('ThemeProvider favicon ownership is opt-in', () => {
     hostLink.href = 'https://host.example/brand.png';
     document.head.appendChild(hostLink);
 
-    stored.set('plannotator-favicon', 'classic');
+    stored.set('plannotator-favicon', 'yellow');
     configStore.loadFromBackend();
 
     await mount(false);
@@ -199,11 +199,11 @@ describe('ThemeProvider favicon ownership is opt-in', () => {
     hostLink.href = 'https://host.example/brand.png';
     document.head.appendChild(hostLink);
 
-    stored.set('plannotator-favicon', 'classic');
+    stored.set('plannotator-favicon', 'yellow');
     configStore.loadFromBackend();
 
     await mount(true);
 
-    expect(getFaviconLink()?.href).toBe(P_FAVICON_PNG_DATA_URL);
+    expect(getFaviconLink()?.href).toBe(YELLOW_FAVICON_ICO_DATA_URL);
   });
 });

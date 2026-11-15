@@ -49,6 +49,12 @@ test("a section's own fields, and everything else the window draws (projects, la
   expect(sameListModel(held, model([row('a')], { update: { latest: '0.30.0' } }), { cursor: false })).toBe(false);
 });
 
+test("the agents alone are never new to the list: their own store draws them, and their last poll moves on every read", () => {
+  const a = row('a');
+  const agents = (seen: string) => [{ agents: [{ id: 'ses_1', session: 'ses_1', state: 'idle', last_seen_at: seen }], total: 1, ended_today: 0 }];
+  expect(sameListModel(model([a], { agents: agents('2026-11-09T10:00:00Z') }), model([a], { agents: agents('2026-11-09T10:00:05Z') }), { cursor: false })).toBe(true);
+});
+
 test('the cursor alone is new only where it shows (Settings)', () => {
   const held = model([row('a')]);
   const moved = model([row('a')], { cursor: 11 });

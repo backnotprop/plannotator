@@ -11,7 +11,8 @@ import { AutoReload } from './auto-reload'
 import { BRIDGE_HOST, BRIDGE_MODES, bridgeBaseUrl, createBridge, type BridgeEnd, type BridgeHandle } from './bridge'
 import { deliveryFor, legacyResult, parseHostResult, type HostResultRecord, type SessionKind } from './delivery'
 import { PromptDropped, type Host, type HttpResult } from './host'
-import { InboxLink, inboxSessionProjectEnvValue, sessionProjectFolder, type InboxLaunchReminder } from './inbox'
+import { inboxAgentProjectEnvValue, InboxLink, inboxSessionProjectEnvValue, sessionProjectFolder, type InboxAgentIdentity, type InboxLaunchReminder } from './inbox'
+import { isAbsolutePath } from './paths'
 import { inboxCommandBriefing, type InboxToolInfo } from './inbox-contract'
 import {
   aliveArgv,
@@ -36,7 +37,7 @@ import {
   pickerFile,
   planApprovalPathOf,
   privateDirArgv,
-  pruneArgv,
+  pruneArgvs,
   RECENT_MESSAGES_SUBJECT,
   removeFileArgv,
   recentAssistantTexts,
@@ -314,12 +315,19 @@ export interface SessionInfo {
    * at its first session start (inbox.ts); absent: no Inbox connection.
    */
   inboxTools?: readonly InboxToolInfo[]
+  /** Who the session is in the Inbox (a T3 Code thread); absent: this Claude Code session. */
+  inboxAs?: InboxAgentIdentity
+  /** False: the Inbox tool without the reply wake (`InboxLinkOptions.wake`). */
+  inboxWake?: boolean
   /** The session's working folder, read when asked (the Inbox link's polls say where the session works). */
   cwd?: () => Promise<string>
   /** The session's root folder (`$.session.root()`), read once at the link's start: where `claude --resume` runs. */
   root?: () => Promise<string>
   /** The name the person gave the session, read for each Inbox poll (`InboxLinkOptions.label`). */
   label?: () => string | Promise<string>
+  title?: () => string | Promise<string>
+  /** The session ids this conversation continues, read for each Inbox poll (`InboxLinkOptions.continues`). */
+  continues?: () => Promise<readonly string[]>
   /** The Inbox reminder a launched session's first wake carries (`InboxLinkOptions.launchReminder`). */
   launchReminder?: () => Promise<InboxLaunchReminder | null>
   /**
@@ -417,7 +425,11 @@ export class PlannotatorMod {
           ...(session.cwd ? { cwd: session.cwd } : {}),
           ...(session.root ? { root: session.root } : {}),
           ...(session.label ? { label: session.label } : {}),
+          ...(session.title ? { title: session.title } : {}),
+          ...(session.continues ? { continues: session.continues } : {}),
           instanceId: this.instanceId,
+          ...(session.inboxAs ? { agent: session.inboxAs } : {}),
+          ...(session.inboxWake === false ? { wake: false } : {}),
           turns: this.turns,
           ...(this.autoReload ? { reload: this.autoReload } : {}),
           ...(session.launchReminder ? { launchReminder: session.launchReminder } : {}),
@@ -472,8 +484,9 @@ export class PlannotatorMod {
             this.session.cwd ? await this.session.cwd().catch(() => null) : null,
           )
       if (!folder) return
-      const value = inboxSessionProjectEnvValue(this.session.sessionId, folder)
-      if (value === this.exportedProject) return
+      const agent = this.inbox?.agent ?? this.session.inboxAs
+      const value = agent ? inboxAgentProjectEnvValue(agent, folder) : inboxSessionProjectEnvValue(this.session.sessionId, folder)
+      if (value === null || value === this.exportedProject) return
       this.exportedProject = value
       await this.host.setSessionProject(value)
     } catch {
@@ -714,9 +727,12 @@ export class PlannotatorMod {
       dead: old.filter((record) => !mine(record) && age(record) <= LAUNCH_EXPIRED_MS).map((record) => record.dir),
       expired: old.filter((record) => !mine(record) && age(record) > LAUNCH_EXPIRED_MS).map((record) => record.dir),
     }
-    const probe = await this.host.run(pruneArgv(groups), { timeoutMs: 5_000 }).catch(() => null)
-    if (!probe || probe.exitCode !== 0) return
-    const gone = new Set(probe.stdout.split('\n').map((line) => line.trim()).filter(Boolean))
+    const gone = new Set<string>()
+    for (const argv of pruneArgvs(groups)) {
+      const result = await this.host.run(argv, { timeoutMs: 5_000 }).catch(() => null)
+      if (!result || result.exitCode !== 0) continue
+      for (const line of result.stdout.split('\n')) if (line.trim()) gone.add(line.trim())
+    }
     if (gone.size === 0) return
     const current = await this.host.storeGet(STORE_LAUNCHES)
     const all = Array.isArray(current) ? (current as LaunchRecord[]) : []
@@ -1379,7 +1395,7 @@ export class PlannotatorMod {
   private planHistoryRoot(): Promise<string | null> {
     this.historyRoot ??= (async () => {
       const root = this.session.root ? await this.session.root().catch(() => null) : null
-      return root && root.startsWith('/') ? root : null
+      return root && isAbsolutePath(root) ? root : null
     })()
     return this.historyRoot
   }

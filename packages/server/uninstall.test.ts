@@ -18,7 +18,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, parse } from "node:path";
-import { t3HookCommand } from "@plannotator/shared/t3-hook-command";
+import { quoteHookWord, t3HookCommand } from "@plannotator/shared/t3-hook-command";
 import {
   formatPurgeWarning,
   runPlannotatorUninstall,
@@ -372,6 +372,8 @@ describe("default uninstall", () => {
       theme: "dark",
       hooks: { PreToolUse: [{ matcher: "Bash", hooks: [
         { type: "command", command: t3HookCommand(binary, fixture.dataDir), timeout: 10 },
+        // A hook from an earlier build, with the old SDK-only gate (before `t3-code`): removed too.
+        { type: "command", command: `case "$CLAUDE_CODE_ENTRYPOINT" in sdk*) PLANNOTATOR_DATA_DIR=${quoteHookWord(fixture.dataDir)} ${quoteHookWord(binary)} t3-hook;; esac`, timeout: 10 },
         ...customHooks,
       ] }] },
     });
@@ -2445,6 +2447,19 @@ describe("the Inbox's agent connections (inbox-agents.ts)", () => {
     const result = await runPlannotatorUninstall({ purge: true, dryRun: false }, environment);
     expect(result.removed).toContain(describe);
     expect(fixture.commandCalls.filter((call) => call.command === "/fake/qwen").map((call) => call.args)).toEqual([["sessions", "controllers", "remove", "c_0a1b2c3d"]]);
+  });
+
+  test("a connected Hermes Agent plugin is left to Hermes and uninstall names the one command that removes it and its switch, without running hermes", async () => {
+    const fixture = createFixture();
+    const hermesConfig = join(fixture.homeDir, ".hermes", "config.yaml");
+    writeText(hermesConfig, "plugins:\n  entries:\n    plannotator:\n      allow_gateway_injection: true\n");
+    writeText(join(fixture.homeDir, ".hermes", "plugins", "plannotator", "plugin.yaml"), "name: plannotator\nhomepage: https://github.com/backnotprop/plannotator/tree/main/apps/hermes-plugin\n");
+    const environment = { ...fixture.environment, which: (command: string) => (command === "hermes" ? "/fake/hermes" : null) };
+
+    const result = await runPlannotatorUninstall({ purge: false, dryRun: false }, environment);
+    expect(result.warnings.filter((line) => line.includes("`hermes plugins remove plannotator`"))).toHaveLength(1);
+    expect(fixture.commandCalls.filter((call) => call.command === "/fake/hermes")).toEqual([]);
+    expect(readFileSync(hermesConfig, "utf8")).toContain("allow_gateway_injection: true");
   });
 
   test.skipIf(process.getuid?.() === 0)("a grant Qwen will not revoke while the data folder can't be written: the uninstall still removes the binary, and says so", async () => {

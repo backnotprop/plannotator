@@ -9,6 +9,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { InboxOutbox } from "./inbox-outbox";
+import { INBOX_AGENTS_LISTED_MAX } from "@plannotator/core/inbox-types";
 import { PeerLink, readCapped, type PeerRecord } from "./inbox-peer-link";
 import { openTransport } from "./inbox-transport";
 import { checkTailnetAddress } from "./inbox-transport-tailnet";
@@ -36,10 +37,16 @@ interface DoorScript {
   post?: (route: string, body: any) => Response;
   /** Status frames its windows would hear, sent after hello. */
   statuses?: unknown[];
+  /** The kind each replayed record carries (default `message`). */
+  recordKind?: string;
+  /** Frames sent a moment after hello (a write there after the line is up). */
+  later?: string[];
+  /** Its Board (`GET cards`). */
+  cards?: () => Response;
 }
 
 function door(script: DoorScript) {
-  const stats = { events: 0, threads: 0, posts: [] as string[], windowMarks: [] as (string | null)[], lastEventId: [] as (string | null)[] };
+  const stats = { events: 0, threads: 0, cards: 0, posts: [] as string[], windowMarks: [] as (string | null)[], lastEventId: [] as (string | null)[], eventAsks: [] as string[] };
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
@@ -53,8 +60,13 @@ function door(script: DoorScript) {
         stats.threads += 1;
         return script.threads ? script.threads() : Response.json({ cursor: script.cursor ?? 0, sections: [{ threads: [{ thread_id: "msg_a", project: { id: "prj_a" } }] }], projects: [] });
       }
+      if (route === "cards" && req.method === "GET") {
+        stats.cards += 1;
+        return script.cards ? script.cards() : Response.json({ code: "device_route_not_found" }, { status: 404 });
+      }
       if (route === "events") {
         stats.events += 1;
+        stats.eventAsks.push(url.search);
         const since = req.headers.get("last-event-id");
         stats.lastEventId.push(since);
         if (script.eventsHang) return new Promise<Response>(() => {});
@@ -64,10 +76,11 @@ function door(script: DoorScript) {
           start(controller) {
             controller.enqueue(encoder.encode(`event: hello\ndata: ${JSON.stringify({ cursor: script.cursor ?? 0 })}\n\n`));
             for (const seq of script.records?.(since === null ? null : Number(since)) ?? []) {
-              controller.enqueue(encoder.encode(`id: ${seq}\nevent: record\ndata: ${JSON.stringify({ seq, kind: "message" })}\n\n`));
+              controller.enqueue(encoder.encode(`id: ${seq}\nevent: record\ndata: ${JSON.stringify({ seq, kind: script.recordKind ?? "message" })}\n\n`));
             }
             for (const status of script.statuses ?? []) controller.enqueue(encoder.encode(`event: status\ndata: ${JSON.stringify(status)}\n\n`));
             for (const frame of script.frames ?? []) controller.enqueue(encoder.encode(frame));
+            if (script.later) setTimeout(() => script.later!.forEach((frame) => controller.enqueue(encoder.encode(frame))), 300);
             if (!script.silent) timer = setInterval(() => controller.enqueue(encoder.encode(": ping\n\n")), 50);
           },
           cancel() {
@@ -333,11 +346,43 @@ describe("the list (rule 5)", () => {
     expect(d.stats.threads).toBe(2);
   });
 
+  test("that machine's Agents moved (no record, no cursor): its list is read again with the new agents, and the windows hear `agents`", async () => {
+    const told: { sessions: boolean; agents: boolean }[] = [];
+    const agentsAt = (state: string) => [{ agents: [{ id: "ses_1", session: "ses_1", host: "claude-code", project: null, state, waiting: 0, live: true, started_at: null, last_seen_at: null }], total: 1, ended_today: 0 }];
+    const d = door({
+      cursor: 3,
+      frames: ['event: deliveries\ndata: {"agents":true}\n\n'],
+      threads: () => Response.json({ cursor: 3, sections: [], agents: agentsAt(d.stats.threads > 1 ? "working" : "idle") }),
+    });
+    const { peer } = link(d.url, { onDeliveries: (change) => void told.push(change) });
+    peer.start();
+    await until("told", () => told.length === 1);
+    expect(told).toEqual([{ sessions: false, agents: true, labels: false }]);
+    expect(peer.list!.agents).toMatchObject({ machine: B, total: 1, agents: [{ id: "ses_1", state: "working" }] });
+  });
+
+  test("a machine's agents are kept capped and named by the machine; an older Inbox's list (no `agents`) names none", () => {
+    const { peer } = link("http://127.0.0.1:9");
+    peer.acceptList({ cursor: 1, sections: [] });
+    expect(peer.list!.agents).toBeNull();
+    const many = Array.from({ length: 300 }, (_, i) => ({ id: `ses_${i}`, session: `ses_${i}`, host: "pi", project: null, state: "idle", waiting: 0, live: true, started_at: null, last_seen_at: null }));
+    peer.acceptList({ cursor: 1, sections: [], agents: [{ agents: [...many, { id: 1 }, { id: "x", session: "x", state: "asleep" }], total: 302, ended_today: 0 }] });
+    expect(peer.list!.agents!.machine).toBe(B);
+    expect(peer.list!.agents!.agents.length).toBe(INBOX_AGENTS_LISTED_MAX);
+    expect(peer.list!.agents!.total).toBe(302);
+  });
+
   test("a list older than the one held is dropped", () => {
     const { peer } = link("http://127.0.0.1:9");
     expect(peer.acceptList({ cursor: 10, sections: [{ threads: [{ thread_id: "new" }] }] })).toBe(true);
     expect(peer.acceptList({ cursor: 7, sections: [{ threads: [{ thread_id: "old" }] }] })).toBe(false);
     expect(peer.list!.rows.map((r) => [r.thread_id, r.machine])).toEqual([["new", B]]);
+  });
+
+  test("a linked machine's row keeps its grey line (latest_preview) through the forward", () => {
+    const { peer } = link("http://127.0.0.1:9");
+    peer.acceptList({ cursor: 2, sections: [{ threads: [{ thread_id: "msg_a", latest_preview: "You: Ship it." }, { thread_id: "msg_b", latest_preview: null }] }] });
+    expect(peer.list!.rows.map((r) => [r.thread_id, r.latest_preview])).toEqual([["msg_a", "You: Ship it."], ["msg_b", null]]);
   });
 
   test("a machine keeps snoozes only when its list says so: an older Inbox's list (no `snoozes`) takes no snooze", () => {
@@ -346,6 +391,158 @@ describe("the list (rule 5)", () => {
     expect(peer.list!.snoozes).toBe(false);
     peer.acceptList({ cursor: 4, sections: [], snoozes: true });
     expect(peer.list!.snoozes).toBe(true);
+  });
+
+  test("a star moves no record: the stream asks for `pins`, and a `pins` frame reads the list again before the windows hear it", async () => {
+    const told: string[] = [];
+    let pinsAtTold: string[] = [];
+    const d = door({
+      cursor: 3,
+      frames: ["event: pins\ndata: {}\n\n"],
+      threads: () => Response.json({ cursor: 3, sections: [{ threads: [{ thread_id: "msg_a" }] }], marks: ["star"], pins: d.stats.threads > 1 ? [{ thread_id: "msg_a" }] : [] }),
+    });
+    const { peer } = link(d.url, {
+      onReread: (event) => {
+        told.push(event);
+        pinsAtTold = peer.list!.pins;
+      },
+    });
+    peer.start();
+    await until("told", () => told.length === 1);
+    expect(new URLSearchParams(d.stats.eventAsks[0]).get("pins")).toBe("1");
+    expect(told).toEqual(["pins"]);
+    expect(pinsAtTold).toEqual(["msg_a"]);
+  });
+
+  test("a machine's stars and the marks it takes come from its list; an older Inbox's list says no marks", () => {
+    const { peer } = link("http://127.0.0.1:9");
+    peer.acceptList({ cursor: 3, sections: [], pins: [{ thread_id: "msg_a" }] });
+    expect(peer.list!.marks).toEqual([]);
+    peer.acceptList({ cursor: 4, sections: [], marks: ["star", 7], pins: [{ thread_id: "msg_b" }, { title: "no id" }] });
+    expect(peer.list!.marks).toEqual(["star"]);
+    expect(peer.list!.pins).toEqual(["msg_b"]);
+  });
+
+  test("an agent's face moves no record: the stream asks for `agent-faces`, and the frame reads the list again before the windows hear it", async () => {
+    const told: string[] = [];
+    let facesAtTold: unknown = null;
+    const d = door({
+      cursor: 3,
+      frames: ["event: agent-faces\ndata: {\"faces\":{},\"rev\":2}\n\n"],
+      threads: () =>
+        Response.json({
+          cursor: 3,
+          sections: [],
+          marks: ["star", "agent-face", "agent-name"],
+          agents: [{ agents: [], total: 0, ended_today: 0, faces: d.stats.threads > 1 ? { ses_b: { face: "glass-red", sessions: [], name: "Retry worker" } } : {}, faces_rev: d.stats.threads }],
+        }),
+    });
+    const { peer } = link(d.url, {
+      onReread: (event) => {
+        told.push(event);
+        facesAtTold = peer.list!.agents!.faces;
+      },
+    });
+    peer.start();
+    await until("told", () => told.length === 1);
+    expect(new URLSearchParams(d.stats.eventAsks[0]).get("agent-faces")).toBe("1");
+    expect(told).toEqual(["agent-faces"]);
+    expect(facesAtTold).toEqual({ ses_b: { face: "glass-red", sessions: [], name: "Retry worker" } });
+  });
+
+  test("a thread's tag moves no record: the stream asks for `tags`, and the frame reads the list, its tags too, before the windows hear it", async () => {
+    const told: string[] = [];
+    let tagsAtTold: unknown = null;
+    const release = { id: "ini_01K0000000000000000000000R", name: "Release", created_at: "2026-11-12T09:00:00.000Z", created_by: { kind: "person" }, updated_at: "2026-11-12T09:00:00.000Z", deleted_at: null };
+    const d = door({
+      cursor: 3,
+      frames: ["event: tags\ndata: {}\n\n"],
+      threads: () =>
+        Response.json({
+          cursor: 3,
+          sections: [{ threads: [{ thread_id: "msg_a", ...(d.stats.threads > 1 ? { tags: [release.id] } : {}) }] }],
+          marks: ["star", "tags"],
+          tags: d.stats.threads > 1 ? [release] : [],
+        }),
+    });
+    const { peer } = link(d.url, {
+      onReread: (event) => {
+        told.push(event);
+        tagsAtTold = { tags: peer.list!.tags.map((t) => t.name), row: peer.list!.rows[0]!.tags };
+      },
+    });
+    peer.start();
+    await until("told", () => told.length === 1);
+    expect(new URLSearchParams(d.stats.eventAsks[0]).get("tags")).toBe("1");
+    expect(told).toEqual(["tags"]);
+    expect(tagsAtTold).toEqual({ tags: ["Release"], row: [release.id] });
+  });
+
+  test("a machine's tags are its list's live ones that parse; an older Inbox's list has none", () => {
+    const { peer } = link("http://127.0.0.1:9");
+    peer.acceptList({ cursor: 3, sections: [] });
+    expect(peer.list!.tags).toEqual([]);
+    const live = { id: "ini_01K0000000000000000000000R", name: "Release", created_at: "2026-11-12T09:00:00.000Z", created_by: { kind: "person" as const }, updated_at: "2026-11-12T09:00:00.000Z", deleted_at: null };
+    peer.acceptList({ cursor: 4, sections: [], tags: [live, { ...live, id: "ini_01K0000000000000000000000D", deleted_at: "2026-11-12T10:00:00.000Z" }, { id: "not an id", name: "x" }, "Release"] });
+    expect(peer.list!.tags).toEqual([live]);
+  });
+
+  const BOARD_CARD = { id: "crd_01K0000000000000000000000A", project_id: "prj_01K0000000000000000000000A", title: "Ship it", column: "todo" };
+  const board = (cursor: number, extra: Record<string, unknown> = {}) =>
+    Response.json({ cursor, cards: [BOARD_CARD], threads: { msg_01K0000000000000000000000A: { thread_id: "msg_01K0000000000000000000000A" }, junk: {} }, initiatives: [], seen_seq: 2, ...extra });
+
+  test("a machine's Board is read only once asked, and only from one that takes `cards`: an older Inbox's is never asked", async () => {
+    const older = door({ cursor: 3, cards: () => board(3) });
+    const { peer: old } = link(older.url);
+    old.start();
+    await until("its list", () => old.list !== null);
+    await old.wantCards();
+    expect(older.stats.cards).toBe(0);
+    expect(old.cards).toBeNull();
+
+    let told = 0;
+    const d = door({ cursor: 3, threads: () => Response.json({ cursor: 3, sections: [], marks: ["cards"] }), cards: () => board(3) });
+    const { peer } = link(d.url, { onCards: () => void told++ });
+    peer.start();
+    await until("its list", () => peer.list !== null);
+    expect(d.stats.cards).toBe(0);
+    await peer.wantCards();
+    expect(d.stats.cards).toBe(1);
+    expect(told).toBe(1);
+    expect(peer.cards!.cards.map((c) => c.id)).toEqual([BOARD_CARD.id]);
+    expect(peer.cards!.seen_seq).toBe(2);
+    // Its threads are named as its own; an id that is not a thread's is dropped.
+    expect(Object.keys(peer.cards!.threads)).toEqual(["msg_01K0000000000000000000000A"]);
+    expect(peer.cards!.threads.msg_01K0000000000000000000000A!.machine).toBe(B);
+  });
+
+  test("a card record on its stream reads its Board again, and the windows hear it after the read", async () => {
+    const cursors: number[] = [];
+    const d = door({
+      cursor: 3,
+      later: [`id: 4\nevent: record\ndata: ${JSON.stringify({ seq: 4, kind: "card" })}\n\n`],
+      threads: () => Response.json({ cursor: 3, sections: [], marks: ["cards"] }),
+      cards: () => board(3 + d.stats.cards),
+    });
+    const { peer } = link(d.url, { onCards: () => cursors.push(peer.cards!.cursor) });
+    peer.start();
+    await until("its list", () => peer.list !== null);
+    await peer.wantCards();
+    await until("read again", () => cursors.length >= 2);
+    expect(d.stats.cards).toBe(2);
+    expect(cursors).toEqual([4, 5]);
+    // An older answer than the one held is dropped.
+    expect(peer.acceptCards({ cursor: 1, cards: [] })).toBe(false);
+    expect(peer.cards!.cursor).toBe(5);
+  });
+
+  test("a machine's agent faces come from its agents group, only what parses; an older Inbox's group has none", () => {
+    const { peer } = link("http://127.0.0.1:9");
+    peer.acceptList({ cursor: 3, sections: [], agents: [{ agents: [], total: 0, ended_today: 0 }] });
+    expect(peer.list!.agents!.faces).toBeUndefined();
+    peer.acceptList({ cursor: 4, sections: [], agents: [{ agents: [], total: 0, ended_today: 0, faces: { ses_a: { face: "yellow", sessions: ["ses_0"] }, ses_x: { face: "not-a-face" }, "": { face: "yellow" } }, faces_rev: 5 }] });
+    expect(peer.list!.agents!.faces).toEqual({ ses_a: { face: "yellow", sessions: ["ses_0"] } });
+    expect(peer.list!.agents!.faces_rev).toBe(5);
   });
 
   test("one fetch in flight at a time: refreshes during it make one more, never several at once (F5)", async () => {

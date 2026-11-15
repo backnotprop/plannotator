@@ -248,7 +248,7 @@ test.beforeAll(() => {
 test('Inbox: the attached document never paints over the toolstrip, beside the thread, full screen, narrow and on a phone', async ({ browser }: { browser: Browser }) => {
   const root = inboxScratch('plannotator-toolstrip-inbox-');
   const dataDir = join(root, 'data');
-  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: NO_BROWSER };
+  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: NO_BROWSER };
   const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
   expect(started.status, started.stderr).toBe(0);
   const url = started.stdout.trim();
@@ -310,6 +310,7 @@ test('Annotate (the editor plan review shares): the document never paints over t
   const env = {
     PATH: process.env.PATH ?? '',
     HOME: root,
+    PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9',
     PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_READY_FILE: readyFile,
     PLANNOTATOR_SKIP_BROWSER_OPEN: '1',

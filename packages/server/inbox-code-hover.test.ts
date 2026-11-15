@@ -67,7 +67,7 @@ beforeEach(() => {
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
-function route(options: { codeReview?: boolean; owner?: boolean; threadPulls?: string[]; pullFile?: (pull: string, path: string) => Promise<InboxPullFile | null> } = {}) {
+function route(options: { codeReview?: boolean; threadPulls?: string[]; pullFile?: (pull: string, path: string) => Promise<InboxPullFile | null> } = {}) {
   const message = { id: "msg_1", thread_id: "msg_1", project_id: "prj_1", base_path: project };
   const store = {
     dir,
@@ -88,7 +88,6 @@ function route(options: { codeReview?: boolean; owner?: boolean; threadPulls?: s
     repoRoots: () => [project],
     threadPulls: () => options.threadPulls ?? [],
     pullFile: options.pullFile ?? (async () => null),
-    ownerOrLocal: (_req, via) => via === "local" || options.owner === true,
     home: join(dir, "home"),
   });
   return async (query: Record<string, string>, via: "local" | "tailnet" = "local") => {
@@ -207,11 +206,8 @@ describe("who may read", () => {
     expect(body.code).toBe("code_review_off");
   });
 
-  test("the owner's phone through the tailnet reads; a guest is refused", async () => {
-    expect((await route({ owner: true })({ thread: "msg_1", path: "src/a.ts" }, "tailnet")).body.found).toBe(true);
-    const guest = await route({ owner: false })({ thread: "msg_1", path: "src/a.ts" }, "tailnet");
-    expect(guest.status).toBe(403);
-    expect(guest.body.code).toBe("local_only");
+  test("the owner's phone through the tailnet reads", async () => {
+    expect((await route()({ thread: "msg_1", path: "src/a.ts" }, "tailnet")).body.found).toBe(true);
   });
 
   test("another site's page is refused", async () => {
@@ -228,7 +224,6 @@ describe("who may read", () => {
       repoRoots: () => [],
       threadPulls: () => [],
       pullFile: async () => null,
-      ownerOrLocal: () => true,
     })(new Request(url, { headers: { origin: "https://evil.example", "sec-fetch-site": "cross-site" } }), INBOX_OPEN_IN_CODE_PATH, "local");
     expect(refused!.status).toBe(403);
   });

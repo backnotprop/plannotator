@@ -2,8 +2,8 @@
  * Ask AI's window in the whole Inbox window (InboxApp) over a REAL Inbox in a
  * temp data dir, with a scripted agent on a live connection (its own process,
  * tests/helpers/inbox-ask-dom-server.ts), with no switch and Code review off
- * (Ask is on in every Inbox). What is proved: the icon shows only for a thread that can
- * ask; a question gets its answer under the real agent's name and icon, and the
+ * (Ask is on in every Inbox). What is proved: Side shows only for a thread that can
+ * ask, and no top bar has an Ask icon; a question gets its answer under the real agent's name and icon, and the
  * surface the agent gets comes from the thread; the dropdown's pick moves
  * `#thread=`; the box's words stay across a thread switch; Mod+Enter in the
  * window never sends the reply draft, even after a pressed button goes away;
@@ -201,7 +201,8 @@ async function openInbox(target: World, threadId: string): Promise<HTMLElement> 
   return host;
 }
 
-const askButton = () => document.querySelector<HTMLButtonElement>('[data-ask-open]');
+/** The top bar's Ask icon, gone (the owner, 2026-11-09). */
+const askIcon = () => document.querySelector('[data-ask-open], section.ib-pane .ib-phead [aria-label="Ask AI about this thread"]');
 const askWindow = () => document.querySelector<HTMLElement>('[data-chat-window]');
 const askBox = () => askWindow()?.querySelector('textarea') ?? null;
 
@@ -212,9 +213,49 @@ function type(field: HTMLTextAreaElement, words: string) {
   });
 }
 
+const side = () => document.querySelector<HTMLButtonElement>('.annotation-toolbar [data-annotation-side]');
+/** Selects the words of the thread's first message, as a drag does: the selection bar opens over them. */
+async function selectMessage() {
+  // A thread with a reply folds the agent's earlier message: open it, so its words can be selected.
+  const expand = document.querySelector<HTMLButtonElement>('section.ib-pane [data-expand-all][aria-label="Expand all messages"]');
+  if (expand) {
+    act(() => expand.click());
+    await wait(50);
+  }
+  const block = document.querySelector<HTMLElement>('section.ib-pane [data-block-id]');
+  const walker = block ? document.createTreeWalker(block, NodeFilter.SHOW_TEXT) : null;
+  let node: Text | null = null;
+  for (let n = walker?.nextNode() ?? null; n; n = walker!.nextNode()) if ((n.textContent ?? '').trim().length > 3) {
+    node = n as Text;
+    break;
+  }
+  if (!node) return;
+  const range = document.createRange();
+  range.selectNodeContents(node);
+  window.getSelection()!.removeAllRanges();
+  window.getSelection()!.addRange(range);
+  await act(async () => {
+    node!.parentElement!.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+  });
+  await wait(20);
+}
+
+/** Side shows in a selection only on a thread that can ask (the top bar has no Ask icon, the owner 2026-11-09). */
+async function sideOffered(): Promise<boolean> {
+  await selectMessage();
+  const offered = side() !== null;
+  act(() => document.querySelector<HTMLElement>('.annotation-toolbar [aria-label="Cancel"]')?.click());
+  window.getSelection()!.removeAllRanges();
+  return offered;
+}
+
+/** Opens the thread's chat with Side on the message's words: no Ask icon in the top bar, no row in the corner (the owner, 2026-11-09). */
 async function openChat() {
-  await until(() => askButton() !== null, 'the icon');
-  act(() => askButton()!.click());
+  await until(async () => {
+    await selectMessage();
+    return side() !== null;
+  }, 'Side in the selection bar');
+  act(() => side()!.click());
   await until(() => askBox() !== null, 'the window');
 }
 
@@ -305,26 +346,26 @@ function saveUnanswered(threadId: string, session: string, question: string) {
   writeInboxAsk(world.inboxDir, { v: 1, thread_id: threadId, seen_at: null, turns: [{ id: `saved-${threadId.slice(-12)}`, at: new Date().toISOString(), session, host: 'claude-code', question }] });
 }
 
-test('a resolved thread has no icon; an open one does, and it opens and minimizes the window', async () => {
+test('a resolved thread offers no Side; an open one does, with no Ask icon in its top bar, and Side opens and the × minimizes the window', async () => {
   if (!hasDom) return;
   await openInbox(on, on.resolved);
   await wait(300);
-  expect(askButton()).toBeNull();
+  expect(await sideOffered()).toBe(false);
   act(() => {
     window.location.hash = `#thread=${on.first}`;
     window.dispatchEvent(new Event('hashchange'));
   });
-  await until(() => askButton() !== null, 'the icon on an open thread');
+  await until(() => sideOffered(), 'Side on an open thread');
+  expect(askIcon()).toBeNull();
   expect(askWindow()).toBeNull();
   await openChat();
-  expect(askButton()!.getAttribute('aria-pressed')).toBe('true');
-  expect(document.activeElement).toBe(askBox());
+  await until(() => document.activeElement === askBox(), 'focus in the box');
   // The window is outside the thread's section, which is what keeps its keys off the reply.
   expect(askWindow()!.closest('.ib-pane')).toBeNull();
   expect(askWindow()!.closest('.pn-inbox')).not.toBeNull();
   act(() => askWindow()!.querySelector<HTMLElement>('[aria-label="Close"]')!.click());
   expect(askWindow()).toBeNull();
-  // The × minimizes: the thread's chat stays, and the icon gives it back.
+  // The × minimizes: the thread's chat stays, and Side gives it back.
   await openChat();
 });
 
@@ -386,7 +427,7 @@ test('picking a chat moves to its thread, and its box keeps its own words', asyn
 test('Mod+Enter from the window never sends the reply draft', async () => {
   if (!hasDom) return;
   await openInbox(on, on.mine);
-  await until(() => askButton() !== null, 'the icon');
+  await until(() => sideOffered(), 'Side');
   await laidOut(async () => {
     const replyBox = await writeReplyDraft('A reply that must stay a draft');
     await openChat();
@@ -442,7 +483,7 @@ test('a busy agent gets a note, and its choice asks that session once, with focu
   if (!hasDom) return;
   await openInbox(on, on.busy);
   await driveAgents('/busy', { session: 'session-busy', busy: true });
-  await until(() => askButton() !== null, 'the icon');
+  await until(() => sideOffered(), 'Side');
   await laidOut(async () => {
     const replyBox = await writeReplyDraft('A half-written reply');
     await openChat();
@@ -491,7 +532,7 @@ test('a busy choice goes only to the session it was shown for: after a hand-off 
 test('Ask again asks the same turn, with focus kept in the window', async () => {
   if (!hasDom) return;
   await openInbox(on, on.flaky);
-  await until(() => askButton() !== null, 'the icon');
+  await until(() => sideOffered(), 'Side');
   await laidOut(async () => {
     const replyBox = await writeReplyDraft('Another half-written reply');
     await openChat();
@@ -519,7 +560,7 @@ test('Reply in the thread joins the draft, and a window filling the screen moves
   world = on;
   saveUnanswered(on.note, 'session-note', 'What was the plan?');
   await openInbox(on, on.note);
-  await until(() => askButton() !== null, 'the icon');
+  await until(() => sideOffered(), 'Side');
   const replyBox = await writeReplyDraft('Kept words');
   await openChat();
   await until(() => buttonNamed('Reply in the thread') !== undefined, 'the note');
@@ -533,40 +574,19 @@ test('Reply in the thread joins the draft, and a window filling the screen moves
   press(buttonNamed('Reply in the thread')!);
   await until(() => replyBox.value === 'Kept words\n\nWhat was the plan?\n\nWhat was the plan?', 'the question in the reply again');
   expect(askWindow() === null).toBe(true);
-  expect(askButton()!.getAttribute('aria-pressed')).toBe('false');
 });
 
-test('on a touch phone Enter is a new line, and Reply in the thread leaves the reply in sight', async () => {
+test('no Ask on a phone for now: a thread with a chat has no Side, no corner row and no top bar icon', async () => {
   if (!hasDom) return;
   world = on;
   saveUnanswered(on.note, 'session-note', 'What was the plan?');
   aPhone();
   await openInbox(on, on.note);
-  await openChat();
-  type(askBox()!, 'one');
-  requests = [];
-  pressEnter(askBox()!);
-  await wait(200);
-  expect(asksPosted().length).toBe(0);
-  expect(askBox()!.value).toBe('one');
-  await until(() => buttonNamed('Reply in the thread') !== undefined, 'the note');
-  press(buttonNamed('Reply in the thread')!);
-  await until(() => document.querySelector<HTMLTextAreaElement>('section.ib-pane textarea')?.value.includes('What was the plan?') === true, 'the question in the reply');
-  expect(askWindow() === null).toBe(true);
-});
-
-test('on a touch phone a note button hands focus to the transcript, so the keyboard stays down', async () => {
-  if (!hasDom) return;
-  world = on;
-  saveUnanswered(on.note, 'session-note', 'What was the plan?');
-  aPhone();
-  await openInbox(on, on.note);
-  await openChat();
-  await until(() => buttonNamed('Ask again') !== undefined, 'the note');
-  press(buttonNamed('Ask again')!);
-  const focused = document.activeElement as HTMLElement | null;
-  expect(focused?.tagName ?? 'none').not.toBe('TEXTAREA');
-  expect(`${focused?.tagName} ${focused?.getAttribute('aria-label') ?? focused?.textContent?.slice(0, 30)}`).toBe('DIV Ask AI conversation');
+  await wait(400);
+  expect(await sideOffered()).toBe(false);
+  expect(document.querySelectorAll('[data-rf-card="ask"], [data-rf-corner], [data-rf-row="ask"]').length).toBe(0);
+  expect(askIcon()).toBeNull();
+  expect(askWindow()).toBeNull();
 });
 
 test('a refused question keeps its words, across a thread switch too', async () => {
@@ -586,7 +606,7 @@ test('a refused question keeps its words, across a thread switch too', async () 
   expect(askBox()!.value).toBe('Refused, then kept');
 });
 
-test('a POST that lands after a thread switch leaves the next thread its icon', async () => {
+test('a POST that lands after a thread switch leaves the next thread its Ask', async () => {
   if (!hasDom) return;
   await openInbox(on, on.first);
   await openChat();
@@ -595,11 +615,11 @@ test('a POST that lands after a thread switch leaves the next thread its icon', 
   pressEnter(askBox()!);
   await until(() => asksPosted().length === 1, 'the question to go out');
   switchTo(on.mine);
-  await until(() => askButton() !== null && window.location.hash.includes(on.mine), 'the next thread');
+  await until(async () => window.location.hash.includes(on.mine) && (await sideOffered()), 'the next thread');
   await wait(100);
   land();
   await wait(400);
-  expect(askButton()).not.toBeNull();
+  expect(await sideOffered()).toBe(true);
 });
 
 test('words already sent do not come back when a POST lands after a thread switch', async () => {

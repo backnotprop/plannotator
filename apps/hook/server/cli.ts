@@ -1,3 +1,4 @@
+import { INBOX_ROWS_USAGE_LINE } from "@plannotator/core/inbox-types";
 import { GUIDE_CLI_USAGE } from "@plannotator/server/guide-cli";
 import { T3_CLI_USAGE } from "@plannotator/t3-code/usage";
 import { INBOX_CARD_COLUMNS, INBOX_CARD_INITIATIVE_CLEAR_OUT, INBOX_CARD_INITIATIVE_FIELD, INBOX_CARD_INITIATIVE_RULE } from "@plannotator/core/inbox-types";
@@ -214,11 +215,12 @@ export function formatTopLevelHelp(options: { board?: boolean } = {}): string {
     "  plannotator guide import --guide <guide.json> --patch <diff.patch> | --snapshot <snapshot.json> [--pr <url>]",
     "  plannotator sessions",
     "  plannotator data-dir",
-    "  plannotator inbox [--background | --no-open | --open] [--tailscale]",
+    "  plannotator inbox [--background | --no-open | --open [<thread>]] [--tailscale]",
     "  plannotator inbox mcp [--t3]",
     "  plannotator inbox status [--json] | stop | restart",
     "  plannotator inbox projects [combine <project id> --into <project id> | undo <project id>] [--json]",
     "  plannotator inbox call [--session <id>] <action> [<json> | -]",
+  "  plannotator inbox connection --host <host> [--plugin-version <v>] [--no-wake]",
     "  plannotator t3 login | logout --url <T3 MCP URL>",
     ...(options.board === true ? ["  plannotator card <create|move|say|link|ship|drop|list|initiative_delete> ..."] : []),
     `  plannotator feedback --stdin [--category <bug|idea|other>] [--contact '<text>'] <<'${FEEDBACK_HEREDOC_END}'`,
@@ -518,6 +520,27 @@ export const INBOX_PROJECTS_USAGE = [
 /** What `plannotator inbox call` runs: the Inbox tool's actions. */
 export const INBOX_CALL_ACTIONS: readonly string[] = INBOX_TOOL_ACTIONS;
 
+export const INBOX_PAIRED_CALL_USAGE = [
+  "Usage, as a paired cloud agent (PLANNOTATOR_PAIRING is set):",
+  "  plannotator inbox call <action> [<json> | -]",
+  "",
+  "Talks to the person's Plannotator Inbox as the cloud agent the pairing string names, through",
+  "the Inbox's relay, sealed end to end. You see only the threads you started, were sent or were",
+  "tagged in; you post under your own name. Actions: whoami, read_thread, send_message, search, resolve_message.",
+  "",
+  "  plannotator inbox call whoami        check the setup: who you are, or exactly what is wrong",
+  "  plannotator inbox call read_thread '{\"thread_id\":\"thr_1\"}'",
+  "  plannotator inbox call send_message '{\"reply_to\":\"msg_2\",\"body\":\"Done: the tests pass.\"}'",
+  "  plannotator inbox call send_message '{\"reply_to\":\"msg_2\",\"body\":\"The screenshot is below.\",\"attachments\":[\"shot.png\"]}'",
+  "",
+  "A path in attachments is read from this machine and sent as bytes; the Inbox opens no path for you.",
+  "When the person's computer is asleep, a read fails and says so, and send_message waits at the",
+  "relay and is posted once when it is back (stdout then says queued: true; do not send it again).",
+  "whoami also prints signal_url: an address whose value changes when the person writes in one",
+  "of your threads, for a routine that can only poll.",
+  "stdout: the result as one JSON value. A failure: <code>: <message> on stderr, exit 1.",
+].join("\n");
+
 /** `plannotator inbox call …` (inbox-call-command.ts): the Inbox tool from a script. */
 export const INBOX_CALL_USAGE = [
   "Usage:",
@@ -552,7 +575,7 @@ export const INBOX_CALL_USAGE = [
  */
 export const INBOX_COMMAND_USAGE = [
   "Usage:",
-  "  plannotator inbox [--background | --no-open | --open] [--tailscale]",
+  "  plannotator inbox [--background | --no-open | --open [<thread>]] [--tailscale]",
   "  plannotator inbox mcp [--t3]",
   "  plannotator inbox status [--json]",
   "  plannotator inbox stop",
@@ -560,8 +583,11 @@ export const INBOX_COMMAND_USAGE = [
   "  plannotator inbox projects [--json]",
   "  plannotator inbox projects combine <project id> --into <project id> [--json]",
   "  plannotator inbox projects undo <project id> [--json]",
+  INBOX_ROWS_USAGE_LINE,
+  "  plannotator inbox icon set <file> --request <id> [--json]",
   "  plannotator inbox call [--session <id>] <action> [<json> | -]",
   "  plannotator inbox pulls ls|add|rm [--session <id>] <thread> [<ref>... | --all]",
+  "  plannotator inbox export-decisions --thread <id> [--format md|html] [--out <file>] [--pr <ref>]",
   "  plannotator inbox link --offer [--tailscale] | link <code> | link --list",
   "  plannotator inbox unlink <machine>",
   "  plannotator inbox --notes <ids>",
@@ -576,6 +602,7 @@ export const INBOX_COMMAND_USAGE = [
   "                                  detached first when it is not running. Never blocks:",
   "                                  what the /plannotator-inbox commands run, and how to",
   "                                  find the Inbox's address for the person.",
+  "  plannotator inbox --open <thread>  Show that thread in the open Inbox window, or open one.",
   "  plannotator inbox --tailscale   Also publish it over the person's tailnet for this",
   "                                  run (tailscale serve, HTTPS, never funnel), for the",
   "                                  Tailscale login that owns this machine only. With",
@@ -597,10 +624,18 @@ export const INBOX_COMMAND_USAGE = [
   "                                  --tailscale is published again.",
   "  plannotator inbox projects      List the projects, combine one into another, undo a",
   "                                  combine: when the person asks to clean them up.",
+  "  plannotator inbox icon set      Hand back an animated agent icon, only when an Inbox",
+  "                                  message asked you to (its request id starts ia_).",
   "  plannotator inbox call          Run one Inbox action from a script: JSON in, one JSON",
   "                                  result on stdout. See 'Scripting the Inbox'.",
   "  plannotator inbox pulls         A thread's PRs: list them, add or remove some",
   "                                  (owner/repo#123, group/project!45 or the URL).",
+  "  plannotator inbox export-decisions",
+  "                                  A thread's decisions as a file; --pr puts them on",
+  "                                  one of its PRs, updated in place when run again.",
+  "  plannotator inbox connection    The Inbox connection for an agent plugin written in",
+  "                                  another language (Hermes Agent's): JSON lines on",
+  "                                  stdin and stdout. Started by that plugin, never by you.",
   ...INBOX_LINK_USAGE,
   "  plannotator inbox --notes <ids> Add the Inbox note to these agents' instructions",
   "                                  files (claude-code, codex, gemini, qwen, pi,",
@@ -612,13 +647,14 @@ export const INBOX_COMMAND_USAGE = [
   "",
   "Over the tailnet at every start: the Inbox's Settings, PLANNOTATOR_INBOX_TAILSCALE=1,",
   "or { \"inboxTailscale\": true } in config.json. Agents and MCP stay on this computer;",
-  "another Tailscale login is let in only when config.json inboxTailscaleAllow names it.",
+  "it opens only for the Tailscale account that owns this computer.",
   "",
   "A person's plannotator inbox (not --background) also connects the agents found on",
   "this computer that are not connected yet: a plannotator-inbox MCP server in each",
-  "terminal agent and the Claude app, the inbox tool for Pi and OpenCode with",
-  "Plannotator's extension or plugin. It never adds back one removed or turned off,",
-  "never replaces another plannotator-inbox, and says what it added on stderr.",
+  "terminal agent and the Claude app, the inbox tool for Pi, OpenCode, DeepSeek",
+  "Harness, Cline, OpenClaw and Hermes Agent with Plannotator's plugin. It never adds",
+  "back one removed or turned off, never replaces another plannotator-inbox, and says",
+  "what it added on stderr.",
   "PLANNOTATOR_INBOX_CONNECT=0 skips it. plannotator uninstall removes what it added.",
 ].join("\n");
 
@@ -706,7 +742,9 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
     "                Relative to the invoking directory; quote paths containing spaces.",
     "",
     "  Accepts one DIRECTORY or PR_URL. Neither can be combined with --patch-file.",
-    "  A sole word or a path-like word (./x, ../x, a/b, ~/x) is a directory target;",
+    "  A sole word is a directory target: if no such folder exists (or it is a file),",
+    "  the command stops with an error and opens nothing. Among several words, a",
+    "  path-like word (./x, ../x, a/b, ~/x) that names a folder is the target;",
     "  other words are ignored with a notice.",
     "",
     "JSON output:",
@@ -868,8 +906,8 @@ export function isSubcommandHelpInvocation(args: string[]): string | null {
   if (!sub) return null;
   const canonical = SUBCOMMAND_HELP_ALIASES[sub] ?? sub;
   if (!(canonical in SUBCOMMAND_HELP)) return null;
-  // `inbox projects --help` is that command's own usage, not the whole guide.
-  if (canonical === "inbox" && args[1] === "projects") return null;
+  // `inbox projects --help` (and rows, export, icon) is that command's own usage, not the whole guide.
+  if (canonical === "inbox" && (args[1] === "projects" || args[1] === "rows" || args[1] === "export" || args[1] === "icon" || args[1] === "connection")) return null;
   return hasHelpFlag(args.slice(1)) ? canonical : null;
 }
 

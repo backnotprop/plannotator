@@ -24,6 +24,7 @@ import { useShortcutScope } from '@plannotator/ui/shortcuts';
 import {
   formatInboxVideoTime,
   inboxAttachmentKindLabel,
+  isInboxTimedKind,
   readInboxAttachmentKind,
   type InboxAttachmentKind,
   type InboxAttachmentState,
@@ -173,6 +174,7 @@ export function typeMark(attachment: Pick<InboxAttachmentState, 'name' | 'kind'>
 
 export function typedIcon(kind: InboxAttachmentKind): IconName {
   if (kind === 'video') return 'film';
+  if (kind === 'audio') return 'music';
   if (kind === 'image') return 'photo';
   if (kind === 'file') return 'cube';
   return 'doc';
@@ -278,6 +280,18 @@ function FileFace({ artifact, near }: { artifact: FileArtifact; near: boolean })
       </span>
     );
   }
+  if (kind === 'audio') {
+    // A recording: its note and type, the play mark, and its length when the header gave one.
+    return (
+      <span className="ib-art-prev ib-art-f-audio" data-face="audio">
+        {typed}
+        <span className="ib-art-play" aria-hidden="true">
+          <Icon name="play" size={16} />
+        </span>
+        {attachment.duration_ms ? <span className="ib-art-dur">{formatInboxVideoTime(attachment.duration_ms / 1000)}</span> : null}
+      </span>
+    );
+  }
   if (kind === 'html') {
     return (
       <span className="ib-art-prev ib-art-f-page" data-face="html">
@@ -361,7 +375,7 @@ function Tile({
   const name = artifact.type === 'file' ? artifact.attachment.name : artifact.guide.title;
   const body = (
     <>
-      <span className="ib-art-stage" data-video={artifact.type === 'file' && readInboxAttachmentKind(artifact.attachment.kind) === 'video' ? '' : undefined}>
+      <span className="ib-art-stage" data-video={artifact.type === 'file' && isInboxTimedKind(artifact.attachment.kind) ? '' : undefined}>
         {artifact.type === 'file' ? <FileFace artifact={artifact} near={near} /> : <GuideFace artifact={artifact} />}
         {changed && <span className="ib-art-chg">{changed.short}</span>}
         {comments > 0 && (

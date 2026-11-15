@@ -218,39 +218,59 @@ export function useInitiativePeek(rootRef: React.RefObject<HTMLElement | null>):
     setPos({ left, top: Math.max(EDGE, top) });
   }, [open]);
 
+  // The card reads the Board's tags itself: they change with every list read, and the body this hook sits in must not
+  // draw again for them (parts/MessageView.tsx).
+  const node = open && typeof document !== 'undefined' ? <PeekCard open={open} peekId={peekId} cardRef={cardRef} pos={pos} onGo={() => close()} onLeave={scheduleClose} onEnter={() => closeTimer.current !== null && window.clearTimeout(closeTimer.current)} /> : null;
+  return { node, tapOpens };
+}
+
+/** The open preview: the initiative's card, drawn into the window's root. */
+function PeekCard({
+  open,
+  peekId,
+  cardRef,
+  pos,
+  onGo,
+  onLeave,
+  onEnter,
+}: {
+  open: Open;
+  peekId: string;
+  cardRef: React.RefObject<HTMLDivElement | null>;
+  pos: { left: number; top: number } | null;
+  onGo: () => void;
+  onLeave: () => void;
+  onEnter: () => void;
+}) {
   const tags = useInitiativeTags();
   // An opened preview reads the cards again: a tag written meanwhile in a thread no card links moves no card,
   // so nothing else would bring its thread into the list.
   const refresh = useRef(tags.refresh);
   refresh.current = tags.refresh;
-  const openId = open?.id ?? null;
+  const openId = open.id;
   useEffect(() => {
-    if (openId) refresh.current?.();
+    refresh.current?.();
   }, [openId]);
-  if (!open || typeof document === 'undefined') return { node: null, tapOpens };
   const initiative = tags.initiatives.find((i) => i.id === open.id);
-  if (!initiative) return { node: null, tapOpens };
+  if (!initiative) return null;
   // The thread the tag sits in is not listed under Threads: the person is already in it.
   const here = new URLSearchParams(window.location.hash.slice(1)).get('thread');
   const model = initiativePeekModel(initiative.id, tags.cards, tags.rows, tags.projects, tags.mentions.get(initiative.id), here);
   const container = open.anchor.closest<HTMLElement>('dialog[open], .pn-inbox') ?? document.body;
   const board = initiativeHref(initiative.id);
-  const go = () => close();
-  const node = createPortal(
+  return createPortal(
     <div
       ref={cardRef}
       // RefHoverCard's own surface (packages/ui): one family with the issue and PR cards.
       className="ib-tagpeek fixed z-[120] flex flex-col overflow-hidden rounded-xl border border-border bg-popover text-popover-foreground shadow-2xl"
       id={peekId}
       role="dialog"
-      aria-label={`Initiative ${initiative.name}`}
+      aria-label={`Tag ${initiative.name}`}
       data-tag-peek={initiative.id}
       style={{ width: Math.min(WIDTH, window.innerWidth - EDGE * 2), left: pos?.left ?? -9999, top: pos?.top ?? -9999, maxHeight: 'min(560px, calc(100dvh - 24px))' }}
-      onPointerEnter={() => {
-        if (closeTimer.current !== null) window.clearTimeout(closeTimer.current);
-      }}
+      onPointerEnter={onEnter}
       onPointerLeave={(e) => {
-        if (e.pointerType !== 'touch' && open.via !== 'tap') scheduleClose();
+        if (e.pointerType !== 'touch' && open.via !== 'tap') onLeave();
       }}
       onKeyDown={(e) => {
         const first = cardRef.current?.querySelector<HTMLElement>('a[href]');
@@ -260,11 +280,10 @@ export function useInitiativePeek(rootRef: React.RefObject<HTMLElement | null>):
         }
       }}
     >
-      <PeekView name={initiative.name} board={board} model={model} onGo={go} />
+      <PeekView name={initiative.name} board={board} model={model} onGo={onGo} />
     </div>,
     container,
   );
-  return { node, tapOpens };
 }
 
 /**
@@ -279,9 +298,10 @@ export function useInitiativePeek(rootRef: React.RefObject<HTMLElement | null>):
  */
 
 /** The initiative's mark: a `#` at the PR card's state-icon size and stroke, in the text's own muted colour. */
-function TagIcon({ className = '' }: { className?: string }) {
+/** The tag's `#` mark: the preview's, the sidebar's Tags heading and the Add tag item (approval "inbox-thread-tags": `#` once per set). */
+export function TagIcon({ className = '', size }: { className?: string; size?: number }) {
   return (
-    <svg viewBox="0 0 16 16" className={`h-4 w-4 flex-none ${className}`} aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+    <svg viewBox="0 0 16 16" className={`h-4 w-4 flex-none ${className}`} style={size ? { width: size, height: size } : undefined} aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
       <path d="M6.3 2.5 5 13.5M11 2.5l-1.3 11M2.8 5.8h10.6M2.6 10.2h10.6" />
     </svg>
   );
@@ -304,7 +324,7 @@ function PeekView({ name, board, model, onGo }: { name: string; board: string; m
   const cardHref = (item: PeekItem) => `${board}&card=${encodeURIComponent(item.id)}`;
   const empty = model.cards === 0;
   const updated = model.updated ? cardAge(model.updated).short : null;
-  const meta = ['Initiative', model.projects.length ? model.projects.join(', ') : null, empty ? 'no cards yet' : null, updated ? `updated ${updated}` : null].filter(Boolean);
+  const meta = ['Tag', model.projects.length ? model.projects.join(', ') : null, empty ? 'no cards yet' : null, updated ? `updated ${updated}` : null].filter(Boolean);
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex-none px-4 pb-4 pt-3.5" data-tag-peek-head="">

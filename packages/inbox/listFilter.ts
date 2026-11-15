@@ -11,44 +11,28 @@
  * Remembered per browser, as the list's view is (listView.ts): a cookie through `storage`, removed when nothing is
  * picked, never on the server. "Last 7 days" rolls forward with the days; a range keeps its days.
  *
- * Pull requests (shipping with PR linking, branch feat/inbox-pr-linking): Open, Draft, Merged, Closed, Has a PR, No PR,
- * several, read through `rowPullStates`. The group waits behind `LIST_FILTER_PULLS` until both land: off, it is
- * neither drawn nor read, and a remembered pick of it is ignored.
+ * Pull requests (PR linking's coupled PRs): Open, Draft, Merged, Closed, Has a PR, No PR, several, read through
+ * `rowPullStates`. The menu offers the group once a thread in the list has a PR (or a pick of it is remembered).
+ *
+ * Not seen (one row, on or off): only the rows drawn bold, the row's `unread`. Not a Smart group: a row still waiting
+ * on the person is seen once its news is.
  *
  * This file holds no routes or server calls, so another host can share the rule.
  */
 import { useSyncExternalStore } from 'react';
-import type { InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
+import type { InboxListRow, InboxListSection, InboxThreadPullState } from '@plannotator/core/inbox-types';
 import { storage } from '@plannotator/ui/utils/storage';
 import { agentName } from './tags';
 
-/** The Pull request group: off until PR linking (the list rows' `pulls`) and this filter land together. */
-export const LIST_FILTER_PULLS = false;
-
-let pullsOn: boolean = LIST_FILTER_PULLS;
-/** Whether the Pull request group is drawn and read. */
-export function listFilterPullsOn(): boolean {
-  return pullsOn;
-}
-/** Tests only: the group on (or back to `LIST_FILTER_PULLS`). */
-export function setListFilterPullsForTests(on: boolean | null): void {
-  pullsOn = on ?? LIST_FILTER_PULLS;
-}
-
 /**
- * A coupled PR's state as the list row carries it (PR linking's `InboxThreadPullState`, core/inbox-thread-pulls.ts on
- * feat/inbox-pr-linking). Mirrored here until that branch lands; then import it.
+ * The row's PRs' states, or [] for none. A row carries `pulls?: { count, headline: { key, state } }`
+ * (`InboxThreadPullsSummary`, from the stored state the server's reader last wrote): how many, and the one the row's
+ * mark shows (the PR still in play, else one not read yet, else the last). Only that PR's state is on the row, so a
+ * thread is "Open" when the PR its row shows is open. A PR not read yet (or with no gh or glab) is `unknown`: the
+ * thread has a PR, in none of the four states.
  */
-export type ListPullState = 'open' | 'draft' | 'merged' | 'closed' | 'unknown';
-
-/**
- * The row's PRs' states, or [] for none: the adapter between the list row and this filter. PR linking's row carries
- * `pulls?: { count, headline: { key, state } }` (`InboxThreadPullsSummary`): how many, and the one the row's mark
- * shows (the PR still in play, else the last). Only the headline's state is on the row, so a thread is "Open" when
- * the PR its row shows is open. STUB until feat/inbox-pr-linking is merged: read structurally, typed here.
- */
-export function rowPullStates(row: InboxListRow): ListPullState[] {
-  const pulls = (row as InboxListRow & { pulls?: { count: number; headline: { key: string; state: ListPullState } } | null }).pulls;
+export function rowPullStates(row: Pick<InboxListRow, 'pulls'>): InboxThreadPullState[] {
+  const pulls = row.pulls;
   if (!pulls || pulls.count <= 0) return [];
   return [pulls.headline.state];
 }
@@ -66,12 +50,20 @@ export const PULL_OPTIONS: ReadonlyArray<{ value: PullPick; label: string }> = [
   { value: 'none', label: 'No PR' },
 ];
 
-/** The row keeps a Pull request pick: its PR's state, any PR, or none. */
-export function rowPullMatches(row: InboxListRow, pick: PullPick): boolean {
+/**
+ * The row keeps a Pull request pick: its PR's state, any PR, or none. A PR whose state is not known yet is kept by
+ * "Has a PR" alone: never by a state it may not be in, and never by "No PR".
+ */
+export function rowPullMatches(row: Pick<InboxListRow, 'pulls'>, pick: PullPick): boolean {
   const states = rowPullStates(row);
   if (pick === 'none') return states.length === 0;
   if (pick === 'any') return states.length > 0;
   return states.includes(pick);
+}
+
+/** The row is kept by Not seen: the list draws it bold. */
+export function rowNotSeen(row: Pick<InboxListRow, 'unread'>): boolean {
+  return row.unread === true;
 }
 
 export const LIST_FILTER_COOKIE = 'plannotator-inbox-list-filter';
@@ -86,11 +78,13 @@ export interface ListFilter {
   updated: UpdatedPick | null;
   /** Agents by their names (`agentName`); empty: every agent. */
   agents: readonly string[];
-  /** Pull request picks; empty: every thread. Read only while `listFilterPullsOn()`. */
+  /** Pull request picks; empty: every thread. */
   pulls: readonly PullPick[];
+  /** Only the rows drawn bold. */
+  notSeen: boolean;
 }
 
-export const NO_LIST_FILTER: ListFilter = { projects: [], updated: null, agents: [], pulls: [] };
+export const NO_LIST_FILTER: ListFilter = { projects: [], updated: null, agents: [], pulls: [], notSeen: false };
 
 /** The menu's words for the three set spans, in order; "Custom range…" follows them. */
 export const UPDATED_OPTIONS: ReadonlyArray<{ value: 'today' | '7d' | '30d'; label: string }> = [
@@ -108,7 +102,7 @@ export function appliedFilter(filter: ListFilter, scoped: boolean): ListFilter {
 }
 
 export function pickCount(filter: ListFilter): number {
-  return filter.projects.length + filter.agents.length + (filter.updated ? 1 : 0) + (pullsOn ? filter.pulls.length : 0);
+  return filter.projects.length + filter.agents.length + (filter.updated ? 1 : 0) + filter.pulls.length + (filter.notSeen ? 1 : 0);
 }
 
 /** Midnight of `day` (local), as ms. */
@@ -157,7 +151,7 @@ export function agentHost(row: Pick<InboxListRow, 'participants' | 'author' | 'a
   return hosts.find((host) => !!host && agentName(host) === name) ?? null;
 }
 
-type Group = 'projects' | 'updated' | 'agents' | 'pulls';
+type Group = 'projects' | 'updated' | 'agents' | 'pulls' | 'notSeen';
 
 /** The row is shown under `filter`; `skip` leaves one group out (a menu row's count: the other groups' picks). */
 export function rowMatches(row: InboxListRow, filter: ListFilter, now: number, skip?: Group): boolean {
@@ -168,18 +162,26 @@ export function rowMatches(row: InboxListRow, filter: ListFilter, now: number, s
     if (!(at >= from && at < to)) return false;
   }
   if (skip !== 'agents' && filter.agents.length > 0 && !rowAgentNames(row).some((name) => filter.agents.includes(name))) return false;
-  if (pullsOn && skip !== 'pulls' && filter.pulls.length > 0 && !filter.pulls.some((pick) => rowPullMatches(row, pick))) return false;
+  if (skip !== 'pulls' && filter.pulls.length > 0 && !filter.pulls.some((pick) => rowPullMatches(row, pick))) return false;
+  if (skip !== 'notSeen' && filter.notSeen && !rowNotSeen(row)) return false;
   return true;
 }
 
 /**
  * The sections the list draws under the filter: each group keeps its place and only its matching rows, so Smart
  * groups count the matches and a group left with none is not drawn (InboxList draws only groups with rows).
- * Nothing picked: the same sections, untouched.
+ * Nothing picked: the same sections, untouched. `heldRead`: threads whose rows Not seen leaves where they are
+ * (App.tsx: opened while bold, until the list settles), so opening a row never takes it out of a Not seen list.
  */
-export function filterListSections(sections: readonly InboxListSection[], filter: ListFilter, now: number): InboxListSection[] {
+export function filterListSections(sections: readonly InboxListSection[], filter: ListFilter, now: number, heldRead?: ReadonlySet<string>): InboxListSection[] {
   if (pickCount(filter) === 0) return sections as InboxListSection[];
-  return sections.map((section) => ({ ...section, threads: section.threads.filter((row) => rowMatches(row, filter, now)) }));
+  return sections.map((section) => ({ ...section, threads: section.threads.filter((row) => rowMatches(row, filter, now, heldRead?.has(row.thread_id) ? 'notSeen' : undefined)) }));
+}
+
+/** `heldRead` once the list settles: only the thread open then stays held, and only when it was. */
+export function settledHeldRead(held: ReadonlySet<string>, open: string | null): ReadonlySet<string> {
+  const keep = open && held.has(open) ? [open] : [];
+  return keep.length === held.size ? held : new Set(keep);
 }
 
 /** How many rows a menu row would leave: that row's rule with the other groups' picks. */
@@ -205,7 +207,7 @@ export function parseListFilter(raw: string | null): ListFilter {
     const updated: UpdatedPick | null =
       u === 'today' || u === '7d' || u === '30d' ? u : u && typeof u === 'object' && isDay((u as { from?: unknown }).from) && isDay((u as { to?: unknown }).to) ? { from: (u as { from: string }).from, to: (u as { to: string }).to } : null;
     const pulls = strings(value.pulls).filter((p): p is PullPick => (PULL_PICKS as readonly string[]).includes(p));
-    return { projects: strings(value.projects), updated, agents: strings(value.agents), pulls };
+    return { projects: strings(value.projects), updated, agents: strings(value.agents), pulls, notSeen: value.notSeen === true };
   } catch {
     return NO_LIST_FILTER;
   }
@@ -228,7 +230,7 @@ function safeGet(): string | null {
 export function writeListFilter(next: ListFilter): void {
   try {
     if (pickCount(next) === 0) storage.removeItem(LIST_FILTER_COOKIE);
-    else storage.setItem(LIST_FILTER_COOKIE, JSON.stringify({ projects: next.projects, updated: next.updated, agents: next.agents, pulls: next.pulls }));
+    else storage.setItem(LIST_FILTER_COOKIE, JSON.stringify({ projects: next.projects, updated: next.updated, agents: next.agents, pulls: next.pulls, notSeen: next.notSeen }));
   } catch {
     // A page with no cookies: the filter holds until it reloads.
   }

@@ -7,6 +7,8 @@ import type { InboxLaunchNotReady } from "./inbox-types";
 
 /** Plannotator's Claude Code plugin, as the connect steps install it. */
 export const INBOX_CLAUDE_PLUGIN_INSTALL = "claude plugin marketplace add backnotprop/plannotator\nclaude plugin install plannotator@plannotator";
+export const INBOX_OPENCODE_PLUGIN_INSTALL = "opencode2 plugin add @plannotator/opencode";
+export const INBOX_OPENCODE_PLUGIN_UPDATE = "opencode2 plugin update @plannotator/opencode";
 
 export interface InboxLaunchNotReadyWords {
   /** What is wrong, one line with no full stop (the start row, disabled). */
@@ -24,8 +26,10 @@ export function inboxLaunchNotReadyWords(input: { agent: string; code: InboxLaun
     case "missing":
       return { line: `${agent} isn't installed ${on}`, fix: null, command: null };
     case "too_old":
+      if (agent === "OpenCode") return { line: `${agent} ${on} is too old to start from the Inbox`, fix: `Update OpenCode and its Plannotator plugin (\`${INBOX_OPENCODE_PLUGIN_UPDATE}\`) ${on}, then try again.`, command: INBOX_OPENCODE_PLUGIN_UPDATE };
       return { line: `${agent} ${on} is too old to start from the Inbox`, fix: `Update ${agent} ${on}, then try again.`, command: null };
     case "plugin_off":
+      if (agent === "OpenCode") return { line: `${agent} isn't ready ${on}: Plannotator's ${agent} plugin isn't installed there`, fix: `Run \`${INBOX_OPENCODE_PLUGIN_INSTALL}\` ${on}, then try again.`, command: INBOX_OPENCODE_PLUGIN_INSTALL };
       // The fix stands alone (a refusal shows no copy button): the command is in it, and in `command` to copy.
       return {
         line: `${agent} isn't ready ${on}: Plannotator's ${agent} plugin isn't installed or is turned off there`,
@@ -34,14 +38,21 @@ export function inboxLaunchNotReadyWords(input: { agent: string; code: InboxLaun
       };
     case "tool_off":
       return { line: `${agent} isn't ready ${on}: Plannotator's Inbox tool is off for it there`, fix: null, command: null };
-    case "signed_out":
+    case "signed_out": {
+      // The check can read "signed out" when it is not: an Inbox started where macOS keeps the login locked (an SSH
+      // start not seen as one, a process started from one). A restart from that machine's own Terminal reads it again.
+      const restart = `In Terminal ${on} itself, run \`plannotator inbox restart\``;
       return {
         line: `${agent} isn't signed in ${on}`,
-        fix: input.overSsh
-          ? `Plannotator ${on} was started over SSH, and macOS keeps the login locked for SSH. Start Plannotator again from Terminal ${on} itself, then try again.`
-          : `Run \`claude\` ${on} once to sign in, then try again.`,
+        // Codex keeps its login in its own home (`codex login`), not the macOS keychain an SSH start can't open.
+        fix: agent === "Codex"
+          ? `Run \`codex login\` ${on}, then try again. Already signed in there? ${restart}.`
+          : input.overSsh
+          ? `Plannotator ${on} was started over SSH, and macOS keeps the login locked for SSH. ${restart}, then try again.`
+          : `Run \`claude\` ${on} once to sign in, then try again. Already signed in there? ${restart}.`,
         command: null,
       };
+    }
     case "unknown":
       return { line: `${agent} can't start ${on} right now`, fix: null, command: null };
   }

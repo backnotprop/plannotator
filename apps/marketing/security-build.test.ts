@@ -96,6 +96,12 @@ describe('marketing security build', () => {
     expect(files, buildOutput).toContain('index.html');
     expect(files).toContain('code-review/index.html');
     expect(files).toContain('workspaces/index.html');
+    // The install script opens this page after an update (src/lib/plugin-update.ts).
+    expect(files).toContain('plugin-update/index.html');
+    // The Inbox's posted decisions comment loads its banner from these paths (packages/shared/inbox/decision-post.ts,
+    // DECISION_POST_BANNER): moving them breaks every comment already posted.
+    expect(files).toContain('assets/decisions/v1/banner-dark.png');
+    expect(files).toContain('assets/decisions/v1/banner-light.png');
     expect(files).toContain('rss.xml');
     expect(files).toContain('sitemap-index.xml');
     expect(files.some((file) => file.startsWith('server/'))).toBe(false);
@@ -117,5 +123,13 @@ describe('marketing security build', () => {
     expect(sitemap).not.toContain(
       '<loc>https://plannotator.ai/blog/sharing-plans-with-your-team/</loc>',
     );
+  });
+
+  test('keeps the installer help page out of search', async () => {
+    const sitemap = await readFile(join(outputRoot, 'sitemap-0.xml'), 'utf8');
+    const html = await readFile(join(outputRoot, 'plugin-update/index.html'), 'utf8');
+
+    expect(sitemap).not.toContain('https://plannotator.ai/plugin-update/');
+    expect(html).toContain('<meta name="robots" content="noindex, follow">');
   });
 });

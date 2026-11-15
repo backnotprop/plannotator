@@ -61,6 +61,29 @@ test('no keycap or aria-keyshortcuts is written by hand anywhere in the Inbox', 
   expect(offenders).toEqual([]);
 });
 
+// The owner: "Nobody needs to see command enter for send. That's intuitive" (approval "inbox-send-no-shortcut-hint").
+// No Send in the Inbox draws ⌘↵ (no keycap, no tooltip naming it); the key still acts, the shortcut map still lists it,
+// and each Send names it in `aria-keyshortcuts`.
+test('no Send button shows its ⌘↵: no keycap, no tooltip with the key; aria-keyshortcuts names it', () => {
+  const shown: string[] = [];
+  const unnamed: string[] = [];
+  for (const file of sources(import.meta.dir)) {
+    const name = relative(import.meta.dir, file);
+    if (name === join('shortcuts', 'hint.tsx')) continue;
+    const lines = readFileSync(file, 'utf8').split('\n');
+    lines.forEach((line, i) => {
+      if (/^\s*(\*|\/\/)/.test(line)) return;
+      if (/action="send"/.test(line) || /(withShortcut|TipKeys)\b.*action: 'send'/.test(line) || /<Tip content=.*⌘↵/.test(line)) shown.push(`${name}:${i + 1}: ${line.trim()}`);
+      if (!/data-(reply|compose|pulls-reply|rf)-send=""/.test(line)) return;
+      // The Send button's tag so far: from its `<button` to the end of this line.
+      const upTo = lines.slice(0, i + 1).join('\n');
+      if (!/aria-keyshortcuts=\{/.test(upTo.slice(upTo.lastIndexOf('<button')))) unnamed.push(`${name}:${i + 1}: ${line.trim()}`);
+    });
+  }
+  expect(shown).toEqual([]);
+  expect(unnamed).toEqual([]);
+});
+
 function mount(node: React.ReactNode): HTMLElement {
   const host = document.createElement('div');
   document.body.appendChild(host);

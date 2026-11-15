@@ -4881,15 +4881,21 @@ ${SANDBOX_SHIM_SCRIPT}
     postToParent({ type: PREFIX + message });
   }, true);
 
-  // A plain ] or [ while armed (Annotate): the host may step to its next or
-  // previous file (the Inbox steps through a thread's attachments). Never in
-  // Interact (the page owns its keys), never while the page's focus is in a
-  // text field, with a modifier, on auto-repeat or mid-composition. The page
-  // still receives the key; a host without a step handler ignores the
-  // message. Capture phase, like the chords above.
-  document.addEventListener('keydown', function(e) {
+  // A plain ] or [: the host may step to its next or previous file (the
+  // Inbox steps through a thread's attachments). While armed (Annotate), at
+  // once; in Interact only one the page did not use (no handler cancelled it
+  // or stopped it on its way up), offered after every handler had its turn,
+  // as an unused Escape is. Never while the page's focus is in a text field,
+  // with a modifier, on auto-repeat or mid-composition. The page still
+  // receives the key; a host without a step handler ignores the message.
+  // Capture phase, like the chords above.
+  var stepKeyReachedWindow = null;
+  window.addEventListener('keydown', function(e) {
+    if (e.key === ']' || e.key === '[') stepKeyReachedWindow = e;
+  });
+  function offerStepKey(e) {
     if (e.key !== ']' && e.key !== '[') return;
-    if (!annotateModeActive || vimEnabled) return;
+    if (vimEnabled) return;
     if (e.metaKey || e.ctrlKey || e.altKey || e.repeat || e.isComposing) return;
     var t = e.target;
     if (t && t.nodeType === 1) {
@@ -4897,8 +4903,17 @@ ${SANDBOX_SHIM_SCRIPT}
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || t.isContentEditable) return;
       if (t.closest && t.closest('[contenteditable]:not([contenteditable="false"])')) return;
     }
-    postToParent({ type: PREFIX + 'step', dir: e.key === ']' ? 1 : -1 });
-  }, true);
+    var message = { type: PREFIX + 'step', dir: e.key === ']' ? 1 : -1 };
+    if (annotateModeActive) {
+      postToParent(message);
+      return;
+    }
+    setTimeout(function() {
+      if (stepKeyReachedWindow !== e || e.defaultPrevented) return;
+      postToParent(message);
+    }, 0);
+  }
+  document.addEventListener('keydown', offerStepKey, true);
 
   // Author opt-in: a plain click on any element tagged [data-annotate] pops the
   // toolbar — no pinpoint mode. Lets an HTML doc (e.g. a flow graph) wire its own

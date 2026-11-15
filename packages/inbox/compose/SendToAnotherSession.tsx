@@ -172,7 +172,7 @@ export function SendToAnotherSession({
                     void move();
                   }}
                 />
-                <HostMark host={session.host} />
+                <HostMark host={session.host} agent={session.session} />
                 {session.label ? (
                   // A named session (issue #2450): its label on top, cut with "…" (the whole of it on hover), the agent under it.
                   <span className="ib-opt-txt">

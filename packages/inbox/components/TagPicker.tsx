@@ -152,7 +152,7 @@ export function TagPicker({
                       onSelect(index);
                     }}
                   >
-                    <HostMark host={option?.host ?? null} big />
+                    <HostMark host={option?.host ?? null} big agent={person.id} />
                     <span className="ib-tg-ol">
                       <span className="ib-tg-on">{person.label}</span>
                       <span className="ib-tg-od">{blocked ? TAG_UPDATE_WORDS : person.detail}</span>
@@ -185,7 +185,7 @@ export function TagStack({ participants }: { participants: readonly { host: stri
   return (
     <span className="ib-tg-stack" aria-hidden="true" data-tag-stack={participants.length}>
       {shown.map((p) => (
-        <HostMark key={p.session} host={p.host} />
+        <HostMark key={p.session} host={p.host} agent={p.session} />
       ))}
       {more > 0 && <span className="ib-tg-plus">+{more}</span>}
     </span>
@@ -214,7 +214,7 @@ export function TagNotes({
         <span className="ib-tg-goes-l">Goes to</span>
         {recipients.map((r) => (
           <span key={r.id} className="ib-tg-to" data-tag-recipient={r.id}>
-            <HostMark host={r.host} />
+            <HostMark host={r.host} agent={r.id} />
             <span>
               {r.label}
               {r.owner && <i> owns this thread</i>}

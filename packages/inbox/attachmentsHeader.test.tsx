@@ -263,10 +263,14 @@ test.skipIf(!hasDom)('a file opened from the header opens beside the thread exac
   expect(fromHeader).toContain(`file=${specId}`);
   // Focus goes into the pane, as from a tile.
   await until(() => el.querySelector(`[data-attachment-pane="${specId}"]`)!.contains(document.activeElement), 'focus in the pane');
-  // The band stays open; its tile and the foot's both say "Open beside".
+  // The band stays open; its tile and the foot's are both marked as the open file, and keep their words.
   expect(bandOf(el, ids.files.first)!.hidden).toBe(false);
   const current = [...el.querySelectorAll(`[data-attachment-id="${specId}"][aria-current="true"]`)];
   expect(current).toHaveLength(2);
+  for (const tile of current) {
+    expect(tile.querySelector('.ib-open')!.textContent!.trim()).toBe('Open');
+    expect(tile.getAttribute('aria-label')).toBe('Open spec.md');
+  }
   // Stepping order is the thread's, whichever tile opened it: spec, plan, run, listing.
   expect(words(el.querySelector('[data-attachment-pane]'))).toContain('1 of 4');
 

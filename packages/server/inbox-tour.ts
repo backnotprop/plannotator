@@ -16,6 +16,7 @@
  */
 import { decideByteRange } from "./inbox-byte-range";
 import { INBOX_TOUR_ASSET_PATHS, INBOX_TOUR_FIXTURE_PATH } from "./inbox-tour-content";
+import { NO_FRAME_ANCESTORS, withFrameAncestors } from "./inbox-framing";
 
 export const INBOX_TOUR_PREFIX = "/api/inbox/tour/";
 export const INBOX_TOUR_FIXTURE_ROUTE = "/api/inbox/tour/fixture.json";
@@ -26,10 +27,11 @@ const IMAGE_CSP = "sandbox; default-src 'none'; style-src 'unsafe-inline'";
 /**
  * The mock's policy: its own inline scripts and styles run in a sandbox with
  * no `allow-same-origin`, so it reaches nothing of the Inbox, and it may load
- * nothing (no network, no frames, no forms).
+ * nothing (no network, no frames, no forms): pictures, video and audio from
+ * data: and blob: only.
  */
 export const INBOX_TOUR_MOCK_CSP =
-  "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; form-action 'none'; base-uri 'none'; frame-ancestors 'self'";
+  "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; media-src data: blob:; font-src data:; form-action 'none'; base-uri 'none'; frame-ancestors 'self'";
 
 const etags = new Map<string, string>();
 
@@ -58,8 +60,8 @@ function refusal(status: number, code: string, error: string): Response {
   });
 }
 
-/** Answers a request under /api/inbox/tour/, or null for any other path. */
-export async function handleInboxTourRequest(req: Request, path: string): Promise<Response | null> {
+/** Answers a request under /api/inbox/tour/, or null for any other path. `framers`: the app origins that may frame the window (inbox-framing.ts). */
+export async function handleInboxTourRequest(req: Request, path: string, framers: readonly string[] = NO_FRAME_ANCESTORS): Promise<Response | null> {
   if (!path.startsWith(INBOX_TOUR_PREFIX)) return null;
   if (req.method !== "GET" && req.method !== "HEAD") return refusal(405, "method_not_allowed", "Use GET.");
   // Another site's page has no business reading the tour (as the Inbox's other read routes).
@@ -94,7 +96,7 @@ export async function handleInboxTourRequest(req: Request, path: string): Promis
     ETag: etag,
   };
   if (name.endsWith(".webp")) headers["Content-Security-Policy"] = IMAGE_CSP;
-  if (name.endsWith(".html")) headers["Content-Security-Policy"] = INBOX_TOUR_MOCK_CSP;
+  if (name.endsWith(".html")) headers["Content-Security-Policy"] = withFrameAncestors(INBOX_TOUR_MOCK_CSP, framers);
   if (name.endsWith(".json") || name.endsWith(".md")) headers["Content-Security-Policy"] = "sandbox; default-src 'none'";
   if (name.endsWith(".mp4")) {
     // The film: the pictures' policy, and HTTP Range over the bytes already in memory (a 429 KB clip).

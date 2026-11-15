@@ -27,7 +27,7 @@
  * PLANNOTATOR_E2E_VIDEO=1.
  */
 
-import { chromium, expect, test, type Browser, type BrowserContext, type Locator, type Page } from '@playwright/test';
+import { chromium, expect, test, type Browser, type BrowserContext, type Locator, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -223,6 +223,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const env: Record<string, string> = {
     PATH: process.env.PATH ?? '',
     HOME: root,
+    PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9',
     PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_INBOX_CONNECT: '0',
     PLANNOTATOR_UPDATE_CHECK: '0',

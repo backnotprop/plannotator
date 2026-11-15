@@ -1,7 +1,8 @@
 /**
  * The count on the Inbox's browser tab (approval "inbox-tab-count",
  * 2026-10-20): how many threads hold agent messages the person has not looked
- * at yet, as a badge on the favicon (white, near-black digits, a dark ring) and "(N) " before the title.
+ * at yet, as a badge on the favicon (white, near-black digits, a dark ring) and "(N) " before the title,
+ * and on the app's icon when the Inbox is installed as an app.
  *
  * What counts is the list rows' `unseen` (new since you looked), across every
  * project whatever the sidebar's filter, never the sidebar's waiting-on-you
@@ -42,6 +43,25 @@ const COUNT_PREFIX = /^\(\d+\+?\)\s+/;
 export function tabTitle(base: string, count: number): string {
   const plain = base.replace(COUNT_PREFIX, '');
   return count > 0 ? `(${count}) ${plain}` : plain;
+}
+
+/**
+ * The same count on the installed app's icon (the Dock, the taskbar), through
+ * the Badging API: the number, and no badge at zero. A browser without the API
+ * does nothing, and a refusal is dropped: the tab still carries the count.
+ *
+ * The badge is one for all of the app's windows and the last write wins, so
+ * the window writes it only from a list it has read (App.tsx), never while it
+ * has none (zero then means "not known", not "nothing unread") and never when
+ * it goes away.
+ */
+export function setAppBadge(count: number, nav: Pick<Navigator, 'setAppBadge' | 'clearAppBadge'> = navigator): void {
+  try {
+    const done = count > 0 ? nav.setAppBadge?.(count) : nav.clearAppBadge?.();
+    void done?.catch(() => {});
+  } catch {
+    // Thrown, not rejected, by a browser whose API differs.
+  }
 }
 
 /** The icon is drawn at 64 px; the browser scales it to the tab (16 or 32). */
@@ -160,6 +180,8 @@ type BaseIcon = { dataUrl: string; image: HTMLImageElement | null };
  */
 export function useTabCount(count: number, iconHref: string | null = null, badgeHref: string | null = null): void {
   const original = useRef<{ title: string; href: string; type: string | null; badge: string } | null>(null);
+  /** The icon the page loaded with: what the tab goes back to once `iconHref` is null again (a try put back). */
+  const loaded = useRef<{ href: string; type: string | null; badge: string } | null>(null);
   const base = useRef<Promise<BaseIcon | null> | null>(null);
   const drawn = useRef(new Map<number, string>());
 
@@ -172,10 +194,12 @@ export function useTabCount(count: number, iconHref: string | null = null, badge
         type: link?.getAttribute('type') ?? null,
         badge: '/favicon.png',
       };
+      loaded.current = { href: original.current.href, type: original.current.type, badge: original.current.badge };
     }
-    if (iconHref && iconHref !== original.current.href) {
-      // A new plain icon: forget the old one and every badge drawn over it.
-      original.current = { ...original.current, href: iconHref, type: null, badge: badgeHref ?? iconHref };
+    const plain = iconHref ? { href: iconHref, type: null, badge: badgeHref ?? iconHref } : loaded.current!;
+    if (plain.href !== original.current.href) {
+      // A new plain icon (or the loaded one back): forget the old one and every badge drawn over it.
+      original.current = { ...original.current, ...plain };
       base.current = null;
       drawn.current.clear();
     }

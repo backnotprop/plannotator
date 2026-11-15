@@ -67,6 +67,42 @@ export function inboxInitiativeNameKey(name: string): string {
 }
 
 /**
+ * A tag on the merged view of linked machines: one per name (`inboxInitiativeNameKey`), whichever machines hold
+ * it. `id` is this Inbox's own when it holds one, else the first machine's that does; `machines` is its id on each
+ * machine that holds it.
+ */
+export type InboxMachineTag = InboxInitiative & { machines: Record<string, string> };
+
+/**
+ * The live tags of this Inbox (`self`) and of each linked machine that takes tags, merged by name, oldest first,
+ * and the merged id each machine's own tag id reads as (`idOn`; null for one that is not live there).
+ */
+export function inboxMachineTags(
+  self: string,
+  own: readonly InboxInitiative[],
+  far: readonly { machine: string; tags: readonly InboxInitiative[] }[],
+): { tags: InboxMachineTag[]; idOn: (machine: string, id: string) => string | null } {
+  const byKey = new Map<string, InboxMachineTag>();
+  const ids = new Map<string, string>();
+  const add = (machine: string, tag: InboxInitiative) => {
+    const key = inboxInitiativeNameKey(tag.name);
+    if (tag.deleted_at !== null || !key) return;
+    let entry = byKey.get(key);
+    if (!entry) {
+      entry = { ...tag, machines: {} };
+      byKey.set(key, entry);
+    }
+    if (!(machine in entry.machines)) entry.machines[machine] = tag.id;
+    ids.set(`${machine}\0${tag.id}`, entry.id);
+  };
+  for (const tag of own) add(self, tag);
+  for (const list of far) if (list.machine !== self) for (const tag of list.tags) add(list.machine, tag);
+  // A stable sort: this Inbox's own order stands among tags made in the same instant.
+  const tags = [...byKey.values()].sort((a, b) => (a.created_at < b.created_at ? -1 : a.created_at > b.created_at ? 1 : 0));
+  return { tags, idOn: (machine, id) => ids.get(`${machine}\0${id}`) ?? null };
+}
+
+/**
  * The initiative a card is in, among `initiatives`: its id when that one is
  * live, else null (none set, or deleted since).
  */

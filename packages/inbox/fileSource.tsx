@@ -49,6 +49,7 @@ export function selectionOnPhrase(phrase: string, selected: string): boolean {
 
 export interface InboxFileSource {
   imageUrl(attachment: InboxAttachmentState, version: Version): string;
+  /** A film's bytes for `<video src>`, or a recording's for `<audio src>` (by its kind). */
   videoUrl(attachment: InboxAttachmentState, version: Version): string;
   downloadUrl(attachment: InboxAttachmentState, version: Version): string;
   /** A film's still before it plays (`<video poster>`); absent: the film's first frame. */

@@ -23,6 +23,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { request } from "node:http";
+import { networkInterfaces } from "node:os";
 import { dirname, join } from "node:path";
 import { createTestEnvironment } from "../../tests/helpers/environment";
 import { closeServer, occupyConsecutivePorts } from "../../tests/helpers/ports";
@@ -70,12 +71,14 @@ function send(
   path: string,
   headers: Record<string, string> = {},
   body?: unknown,
+  /** The address the request connects to (its TCP peer as the server sees it, for a local address). */
+  address = "127.0.0.1",
 ): Promise<Answer> {
   const port = new URL(server.url).port;
   const text = body === undefined ? undefined : JSON.stringify(body);
   return new Promise((resolve, reject) => {
     const req = request(
-      `http://127.0.0.1:${port}${path}`,
+      `http://${address}:${port}${path}`,
       {
         method,
         headers: {
@@ -111,6 +114,14 @@ const get = (server: DocScenarioServer, path: string, headers: Record<string, st
 
 const docUrl = (path: string, base?: string, doc = true) =>
   `/api/doc?path=${encodeURIComponent(path)}${base ? `&base=${encodeURIComponent(base)}` : ""}${doc ? "&doc=1" : ""}`;
+
+/** A non-loopback IPv4 address of this machine, or null: a request to it arrives from a non-loopback peer. */
+function lanAddress(): string | null {
+  for (const list of Object.values(networkInterfaces())) {
+    for (const entry of list ?? []) if (entry.family === "IPv4" && !entry.internal) return entry.address;
+  }
+  return null;
+}
 
 /** No secret's bytes in an answer, whatever its status. */
 const leaks = (answer: Answer) => /SECRET-/.test(JSON.stringify(answer.body));
@@ -150,7 +161,7 @@ export function defineDocAnyPathScenarios(
   const servers: DocScenarioServer[] = [];
   const undo: (() => void)[] = [];
 
-  async function isolate(options: { remote?: boolean; allowedHosts?: string; proxyUri?: string; codespace?: boolean } = {}): Promise<void> {
+  async function isolate(options: { remote?: boolean; ssh?: boolean; allowedHosts?: string; proxyUri?: string; codespace?: boolean } = {}): Promise<void> {
     environment.reset();
     const dir = realpathSync(environment.makeTempDir());
     home = join(dir, "home");
@@ -159,11 +170,16 @@ export function defineDocAnyPathScenarios(
     process.env.PLANNOTATOR_AI = "disabled";
     process.env.PLANNOTATOR_INBOX_CONNECT = "0";
     process.env.PLANNOTATOR_REMOTE = options.remote ? "1" : "0";
+    // Remote mode that only SSH turned on: PLANNOTATOR_REMOTE unset.
+    if (options.ssh) {
+      delete process.env.PLANNOTATOR_REMOTE;
+      process.env.SSH_CONNECTION = "10.0.0.2 51000 10.0.0.1 22";
+    }
     if (options.allowedHosts !== undefined) process.env.PLANNOTATOR_ALLOWED_HOSTS = options.allowedHosts;
     if (options.proxyUri !== undefined) process.env.VSCODE_PROXY_URI = options.proxyUri;
     if (options.codespace) process.env.CODESPACES = "true";
     else delete process.env.CODESPACES;
-    if (options.remote) {
+    if (options.remote || options.ssh) {
       // Remote mode would otherwise bind the fixed 19432.
       const { start: port, servers: held } = await occupyConsecutivePorts(1);
       await closeServer(held[0]);
@@ -519,6 +535,20 @@ export function defineDocAnyPathScenarios(
         expect(JSON.stringify(doc.body)).not.toContain("ADDED-FOLDER-BODY");
         // The document inside the session's roots still opens.
         if (kind === "annotate") expect((await get(server, docUrl(docPath, project), { host: "localhost" })).status).toBe(200);
+      });
+
+      test("SSH: the session's own tunnel (a loopback peer) opens documents outside the project; another address keeps the roots, whatever Host it claims", async () => {
+        await isolate({ ssh: true });
+        const server = await open(kind);
+        const doc = await get(server, docUrl(join(added, "intro.md"), added));
+        expect(doc.status).toBe(200);
+        expect(JSON.stringify(doc.body)).toContain("ADDED-FOLDER-BODY");
+        const lan = lanAddress();
+        if (!lan) return;
+        const port = new URL(server.url).port;
+        const far = await send(server, "GET", docUrl(join(added, "intro.md"), added), { host: `127.0.0.1:${port}` }, undefined, lan);
+        expect(far.status).toBe(403);
+        expect(JSON.stringify(far.body)).not.toContain("ADDED-FOLDER-BODY");
       });
 
       test("remote mode keeps the session's roots", async () => {

@@ -39,6 +39,13 @@ export const MERMAID_LABEL_WRAP_WIDTH = 140;
 export const MERMAID_CONFIG: MermaidConfig = {
   startOnLoad: false,
   securityLevel: 'strict',
+  /**
+   * Mermaid's own failure output is a "Syntax error in text" graphic drawn
+   * into a temporary node on `document.body`, left there when it throws. The
+   * block shows a failure itself (the source, with a note), so Mermaid draws
+   * nothing for one; `diagram-render` also removes any leftover node.
+   */
+  suppressErrorRendering: true,
   theme: 'dark',
   themeVariables: {
     primaryColor: '#3b82f6',

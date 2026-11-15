@@ -5,7 +5,12 @@
  * place after the reactions, between its own divider and the one before ×;
  * a press that does not hand the host the selected words and their context,
  * or leaves the toolbar open; Side losing the touch-target marker theme.css sizes to 44px
- * on a phone.
+ * on a phone. With the host's `sideButton` (the Inbox: the thread agent's
+ * mark): the word coming back beside the icon, the button unnamed or named
+ * something else than the host's label, the host's glyph not drawn (or the
+ * two bubbles lost when it gives none), the button out of its place, a press
+ * that stopped working; and, without `sideButton`, another host's "Side"
+ * word changing.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -83,6 +88,47 @@ describe.if(hasDom)('AnnotationToolbar Side', () => {
     // theme.css grows a marked control to 44px on a touch toolbar; its word is no span (sized there as a glyph).
     expect(side.getAttribute('data-pn-touch-target')).toBe('true');
     expect(side.querySelectorAll('span')).toHaveLength(0);
+  });
+
+  test('sideButton: icon-only in the same place, the host\'s glyph on it, named by the host\'s label', async () => {
+    const row = await mount({ onSide: () => {}, sideButton: { icon: <svg data-host-mark="" />, label: 'Side chat with Claude' } });
+    expect(rowOrder(row)).toEqual(['Copy', '|', 'Delete', 'Comment', 'Looks good', '|', 'Side chat with Claude', '|', 'Cancel']);
+    const side = sideButton()!;
+    // Named as its neighbours are (HostTitle: a native title here, an aria-label and ui's tooltip in the Inbox).
+    expect(nameOf(side)).toBe('Side chat with Claude');
+    expect(side.textContent).toBe('');
+    expect(side.querySelectorAll('[data-host-mark]')).toHaveLength(1);
+    expect(side.querySelectorAll('svg')).toHaveLength(1);
+    // Sized as its neighbours are: the same classes as Comment's box, and both touch markers (44 by 44 on a touch bar).
+    const comment = [...row.querySelectorAll('button')].find((b) => nameOf(b) === 'Comment')!;
+    const box = (b: HTMLElement) => b.className.split(/\s+/).filter((c) => /^(p-|h-|w-|rounded|flex|gap-|pl-|pr-)/.test(c)).sort();
+    expect(box(side)).toEqual(box(comment));
+    expect(side.getAttribute('data-pn-touch-target')).toBe('true');
+    expect(side.getAttribute('data-pn-touch-target-icon')).toBe('true');
+  });
+
+  test('sideButton with no icon: the two bubbles, icon-only, named by the label', async () => {
+    const row = await mount({ onSide: () => {}, sideButton: { label: 'Side chat' } });
+    expect(rowOrder(row).slice(-4)).toEqual(['|', 'Side chat', '|', 'Cancel']);
+    const side = sideButton()!;
+    expect(nameOf(side)).toBe('Side chat');
+    expect(side.textContent).toBe('');
+    expect(side.querySelectorAll('svg path')).toHaveLength(2);
+  });
+
+  test('sideButton without onSide: no button', async () => {
+    const row = await mount({ sideButton: { label: 'Side chat' } });
+    expect(document.querySelectorAll('[data-annotation-side]')).toHaveLength(0);
+    expect(rowOrder(row).slice(-3)).toEqual(['Looks good', '|', 'Cancel']);
+  });
+
+  test('a sideButton press hands the host the selected words and closes the toolbar, as the word does', async () => {
+    const sides: string[] = [];
+    let closes = 0;
+    await mount({ onSide: (text, context) => sides.push(`${text}|${context.element === anchor}`), onClose: () => (closes += 1), sideButton: { label: 'Side chat' } });
+    await act(async () => sideButton()!.click());
+    expect(sides).toEqual(['the backoff is two, four and eight seconds|true']);
+    expect(closes).toBe(1);
   });
 
   test('a press hands the host the selected words and closes the toolbar', async () => {

@@ -200,6 +200,7 @@ async function discoverMarkerModels(engine: MarkerEngine, program: string): Prom
       env: childEnv(),
       stdout: "pipe",
       stderr: "ignore",
+      windowsHide: true,
     });
     // Out of time: through cmd.exe the whole tree ends, not cmd.exe alone.
     const timer = setTimeout(() => {
@@ -364,6 +365,7 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions): AgentJob
       proc = Bun.spawn(launch.command, {
         cwd: spawnCwd,
         windowsVerbatimArguments: launch.verbatim,
+        windowsHide: true,
         stdin: hasStdinPrompt ? "pipe" : undefined,
         stdout: captureStdout ? "pipe" : "ignore",
         stderr: "pipe",

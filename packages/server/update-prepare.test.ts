@@ -335,6 +335,7 @@ function wrapperEnv(box: Box, port: number, extra: Record<string, string> = {}) 
       PATH: `${box.stub}:/usr/bin:/bin`,
       HOME: box.home,
       TMPDIR: box.tmp,
+      PLANNOTATOR_RELAY_URL: "http://127.0.0.1:9",
       PLANNOTATOR_DATA_DIR: box.data,
       PLANNOTATOR_UPDATE_CHECK: "0",
       PLANNOTATOR_SKIP_SEM_INSTALL: "1",

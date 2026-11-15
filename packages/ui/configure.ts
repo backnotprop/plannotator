@@ -23,8 +23,9 @@ import { setRichCopyEnabled } from './utils/richCopyPolicy';
 import { setCommentCardEnabled, setVisibleCommentDrafts, type CommentCardLayout } from './utils/commentCardPolicy';
 import { setTouchSelectionToolbar } from './utils/touchToolbarPlacement';
 import { setPageMarks } from './utils/pageMarks';
+import { setClickAWord } from './utils/clickAWordPolicy';
 import { setCrossRepoRefsWithoutRepo, setDigitHexIssueRefs, type CrossRepoRefsWithoutRepo } from './components/InlineMarkdown';
-import { setRefCardTransport, type RefCardTransport } from './utils/refCard';
+import { setRefCardBitbucket, setRefCardTransport, type RefCardTransport } from './utils/refCard';
 
 // One-stop type barrel: every seam contract a host implements is importable
 // from this module, next to configurePlannotatorUI itself.
@@ -204,11 +205,25 @@ export interface PlannotatorUIConfig {
    */
   pageMarks?: boolean;
   /**
+   * Click a word: in the Viewer's Select input method one click on a word
+   * highlights it (after 300 ms, so double and triple click stay the
+   * browser's), through the same path as a drag over that word
+   * (`hooks/useClickWord`, `utils/clickAWordPolicy`). Default: true. False: a
+   * click on text makes nothing, as before. A Viewer's own `clickAWord` prop
+   * wins over this. Read when a Viewer mounts.
+   */
+  clickAWord?: boolean;
+  /**
    * Fetch an issue / PR / MR hover card's data (`components/RefHoverCard`).
    * Default: none, so no card is drawn and nothing is requested. The
    * Plannotator Inbox passes one over its `/api/inbox/ref` route.
    */
   refCardTransport?: RefCardTransport;
+  /**
+   * Bitbucket Cloud pull request links get a hover card too. Default: off, so
+   * they stay plain links. The Inbox turns it on: its server reads them.
+   */
+  refCardBitbucket?: boolean;
   /**
    * Highlight a code fence only when it comes near the screen (a screen
    * above or below it), and the rest in idle time, nearest first
@@ -260,7 +275,9 @@ export function configurePlannotatorUI(config: PlannotatorUIConfig): void {
   if (config.visibleCommentDrafts !== undefined) setVisibleCommentDrafts(config.visibleCommentDrafts);
   if (config.touchSelectionToolbar !== undefined) setTouchSelectionToolbar(config.touchSelectionToolbar);
   if (config.pageMarks !== undefined) setPageMarks(config.pageMarks);
+  if (config.clickAWord !== undefined) setClickAWord(config.clickAWord);
   if (config.refCardTransport) setRefCardTransport(config.refCardTransport);
+  if (config.refCardBitbucket !== undefined) setRefCardBitbucket(config.refCardBitbucket);
   if (config.deferOffscreenCodeHighlight !== undefined) setDeferOffscreenCodeHighlight(config.deferOffscreenCodeHighlight);
   if (config.codeHighlightWorker) setCodeHighlightWorker(config.codeHighlightWorker);
   // Re-hydrate AFTER storageBackend is installed (load-bearing order — gated last).

@@ -20,6 +20,7 @@ import type { Annotation, EditorMode, HostDraft, ImageAttachment, InputMethod } 
 import { AnnotationType } from "../../types";
 import { copyTextPreservingFocus } from "../../utils/clipboard";
 import { getRichCopyEnabled } from "../../utils/richCopyPolicy";
+import { useHighlightCopy } from "../../utils/highlightCopy";
 import { elementIdentityForAskAI } from "../../utils/parser";
 import { getIdentity } from "../../utils/identity";
 import { THUMBS_UP_LABEL } from "../../utils/quickLabels";
@@ -277,10 +278,15 @@ export interface HtmlViewerProps {
   /** A plain `]` (1) or `[` (-1) pressed inside the page while the surface is
    *  armed (Annotate) and the page's focus is not in a text field: the host's
    *  next / previous file (the Inbox steps through a thread's attachments).
-   *  The bridge forwards nothing in Interact, and the page still gets the
-   *  key. Honored only while the frame holds focus, and at most once per
+   *  In Interact it is honored only with `stepInInteract`; the page still
+   *  gets the key. Honored only while the frame holds focus, and at most once per
    *  STEP_MESSAGE_MIN_INTERVAL_MS. Absent: the message is ignored, as before. */
   onStep?: (dir: 1 | -1) => void;
+  /** Also honor `onStep` in Interact, for a `]` or `[` the page did not use
+   *  itself (no handler of the page cancelled it or stopped it on its way up),
+   *  as `onPageEscape` is for Escape. The same focus and interval rules apply.
+   *  Absent: nothing steps in Interact. */
+  stepInInteract?: boolean;
   /** Escape pressed inside the page in Interact that the page did not use
    *  itself (no handler of the page cancelled it or stopped it, and focus was
    *  not in one of its text fields): the host may close something of its own
@@ -340,6 +346,10 @@ export interface HtmlViewerProps {
    *  hands the host the selected text and its context (AnnotationToolbar
    *  `onSide`). Absent → no button: unchanged. */
   onSide?: (text: string, context: SelectionActionContext) => void;
+  /** Opt-in host capability: how that button is drawn (AnnotationToolbar
+   *  `sideButton`: an icon-only button with the host's glyph and tooltip).
+   *  Absent → the two bubbles and the word "Side": unchanged. */
+  sideButton?: { icon?: ReactNode; label: string };
   /** Opt-in host capability, forwarded to BOTH comment composers this viewer
    *  mounts (the pinpoint/selection composer and the global one): the `@`
    *  mention source for the composer's picker. The picked ids ride onto the
@@ -527,6 +537,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       onAnnotateModeToggle,
       onToolsToggle,
       onStep,
+      stepInInteract = false,
       onPageEscape,
       vimModeEnabled = false,
       vimHudEnabled = false,
@@ -548,6 +559,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       selectionActions,
       selectionActionsIcon,
       onSide,
+      sideButton,
       mentionSource,
       scrollBehavior,
       scrollClear,
@@ -604,9 +616,11 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
     onToolsToggleRef.current = onToolsToggle;
     const onStepRef = useRef(onStep);
     onStepRef.current = onStep;
-    // The step message is honored only while the host has the surface armed.
+    // The step message is honored only while the host has the surface armed, or in Interact when it opted in.
     const annotateModeActiveRef = useRef(annotateModeActive);
     annotateModeActiveRef.current = annotateModeActive;
+    const stepInInteractRef = useRef(stepInInteract);
+    stepInInteractRef.current = stepInInteract;
     const lastStepAtRef = useRef(0);
     const onPageEscapeRef = useRef(onPageEscape);
     onPageEscapeRef.current = onPageEscape;
@@ -1023,10 +1037,11 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
         if (isRecord(e.data) && e.data.type === `${PREFIX}step`) {
           // The page itself can post this message, so it is honored only for
           // a key the person pressed: the frame holds focus, the surface is
-          // armed, and at most one step per STEP_MESSAGE_MIN_INTERVAL_MS (a
-          // page cannot push itself out of view by posting in a loop).
+          // armed (or the host takes steps in Interact), and at most one step
+          // per STEP_MESSAGE_MIN_INTERVAL_MS (a page cannot push itself out of
+          // view by posting in a loop).
           const dir = e.data.dir;
-          if (!annotateModeActiveRef.current || (dir !== 1 && dir !== -1)) return;
+          if (!(annotateModeActiveRef.current || stepInInteractRef.current) || (dir !== 1 && dir !== -1)) return;
           if (document.activeElement !== iframeRef.current) return;
           const now = Date.now();
           if (now - lastStepAtRef.current < STEP_MESSAGE_MIN_INTERVAL_MS) return;
@@ -1120,6 +1135,11 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
     // overlay. Escape still closes it, as its own rung (below).
     const composerShown = !!hook.commentPopover && hook.pinVisible;
     const composerHidden = !!hook.commentPopover && !hook.pinVisible;
+
+    // The composer's textarea has the focus, out of the page's frame, so the
+    // browser's copy has no selection: Ctrl+C copies the selected words (or a
+    // pinned element's text). The person's own selection still wins.
+    useHighlightCopy(!readOnly && composerShown ? hook.commentPopover?.selectedText : null);
 
     useVimDocumentFocus({
       enabled: !readOnly && vimModeEnabled,
@@ -1590,6 +1610,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
                 unchanged. */}
             <iframe
               ref={iframeRef}
+              allowFullScreen
               {...(src
                 ? { src, ...(liveSandbox ? { sandbox: liveSandbox } : {}) }
                 : servesFrame
@@ -1663,6 +1684,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
               selectionActions={selectionActions}
               selectionActionsIcon={selectionActionsIcon}
               onSide={onSide}
+              sideButton={sideButton}
               onQuickLabel={(label) => {
                 if (label.id === THUMBS_UP_LABEL.id) hook.handleQuickLabel(label);
               }}

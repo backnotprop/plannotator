@@ -7,7 +7,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import type { InboxComposeLaunch } from '@plannotator/core/inbox-types';
-import { defaultStartProject, launchGroups, launchHistory, type LaunchMachine, type MachineLaunchRead } from './compose/model';
+import { defaultStartProject, launchGroups, launchHistory, projectWithAgent, type LaunchMachine, type MachineLaunchRead } from './compose/model';
 
 const SELF = 'ibx_01ARZ3NDEKTSV4RRFFQ69G5FAV';
 const MINI = 'ibx_01ARZ3NDEKTSV4RRFFQ69G5FAW';
@@ -95,11 +95,34 @@ describe('linked machines: one group per machine', () => {
     const pluginOff: InboxComposeLaunch = { agents: [], projects: mini.projects, not_ready: [{ agent: 'claude-code', name: 'Claude Code', code: 'plugin_off' }] };
     const out = launchGroups({ agent: 'claude-code', self, machines: [SELF_VIEW, machine(MINI, 'Mac mini'), machine(STUDIO, 'Studio')], reads: reads([[MINI, signedOut], [STUDIO, pluginOff]]) });
     expect(out.grouped).toBe(true);
-    expect(out.groups[1]!.notice).toEqual({ line: "Claude Code isn't signed in on Mac mini", command: null });
+    expect(out.groups[1]!.notice?.line).toBe("Claude Code isn't signed in on Mac mini");
+    expect(out.groups[1]!.notice?.command).toBeNull();
     expect(out.groups[1]!.projects).toEqual([]);
     expect(out.groups[1]!.scratch).toBeNull();
     expect(out.groups[2]!.notice?.line).toContain('Studio');
     expect(out.groups[2]!.notice?.command).toContain('claude plugin install');
+  });
+
+  test("a signed-out machine's line comes with what to do there, under it: over SSH, not seen as SSH, and Codex", () => {
+    const signedOut = (agent: 'claude-code' | 'codex', name: string, overSsh: boolean): InboxComposeLaunch => ({
+      agents: [],
+      projects: mini.projects,
+      not_ready: [{ agent, name, code: 'signed_out', ...(overSsh ? { over_ssh: true as const } : {}) }],
+    });
+    const fixOn = (agent: 'claude-code' | 'codex', launch: InboxComposeLaunch) =>
+      launchGroups({ agent, self, machines: [SELF_VIEW, machine(MINI, 'Mac mini')], reads: reads([[MINI, launch]]) }).groups.find((g) => g.machine === MINI)?.notice?.fix;
+    expect(fixOn('claude-code', signedOut('claude-code', 'Claude Code', true))).toBe(
+      'Plannotator on Mac mini was started over SSH, and macOS keeps the login locked for SSH. In Terminal on Mac mini itself, run `plannotator inbox restart`, then try again.',
+    );
+    expect(fixOn('claude-code', signedOut('claude-code', 'Claude Code', false))).toBe(
+      'Run `claude` on Mac mini once to sign in, then try again. Already signed in there? In Terminal on Mac mini itself, run `plannotator inbox restart`.',
+    );
+    expect(fixOn('codex', signedOut('codex', 'Codex', false))).toBe('Run `codex login` on Mac mini, then try again. Already signed in there? In Terminal on Mac mini itself, run `plannotator inbox restart`.');
+    // The other reasons keep their one line: launch off there, and a missing plugin (its command is the Copy button).
+    const off = launchGroups({ agent: 'claude-code', self, machines: [SELF_VIEW, machine(MINI, 'Mac mini', { launch: false })], reads: new Map() });
+    expect(off.groups[1]!.notice?.fix ?? null).toBeNull();
+    const pluginOff: InboxComposeLaunch = { agents: [], projects: mini.projects, not_ready: [{ agent: 'claude-code', name: 'Claude Code', code: 'plugin_off' }] };
+    expect(fixOn('claude-code', pluginOff)).toBeNull();
   });
 
   test('launch off there, or an older Plannotator there, says so without reading it', () => {
@@ -145,4 +168,19 @@ describe('launchHistory: from the merged list', () => {
 test('the default start: the project the person is looking at by its id, before another machine\'s folder at the same path', () => {
   const merged = { agents: AGENTS, projects: [{ ...mini.projects[1]!, machine: MINI }, ...here.projects] };
   expect(defaultStartProject(merged, { id: 'prj_bill_a', root: '/Users/me/code/billing-svc' })?.id).toBe('prj_bill_a');
+});
+
+test("an agent only another machine has, picked for this computer's project: it starts on a machine that has it, the same folder or name first, an awake machine's before an asleep one's", () => {
+  const PI: InboxComposeLaunch['agents'] = [{ agent: 'pi', name: 'Pi' }];
+  const studio: InboxComposeLaunch = { agents: PI, projects: [{ id: 'prj_site', name: 'site', root: '/Users/studio/code/site', exists: true }] };
+  const elsewhere: InboxComposeLaunch = { agents: PI, projects: [{ id: 'prj_bill_s', name: 'billing-svc', root: '/Users/mini/code/billing-svc', exists: true }, { id: 'prj_infra', name: 'infra', root: '/Users/me/code/infra', exists: true }] };
+  const groupsFor = (asleep: boolean) =>
+    launchGroups({ agent: 'pi', self, machines: [SELF_VIEW, machine(STUDIO, 'Studio'), machine(MINI, 'Mac mini', asleep ? { state: 'offline' } : {})], reads: reads([[STUDIO, studio], [MINI, elsewhere]]) }).groups;
+  // This computer has no Pi: its projects are not among them.
+  expect(projectWithAgent(groupsFor(false), { root: '/Users/me/code/web-app', name: 'web-app' })).toMatchObject({ id: 'prj_site', machine: STUDIO });
+  expect(projectWithAgent(groupsFor(false), { root: '/Users/me/code/billing-svc', name: 'billing-svc' })).toMatchObject({ id: 'prj_bill_s', machine: MINI });
+  expect(projectWithAgent(groupsFor(false), { root: '/Users/me/code/infra', name: 'infra-old' })).toMatchObject({ id: 'prj_infra', machine: MINI });
+  // Mac mini asleep: Studio's project.
+  expect(projectWithAgent(groupsFor(true), { root: '/Users/me/code/web-app', name: 'web-app' })).toMatchObject({ id: 'prj_site', machine: STUDIO });
+  expect(projectWithAgent([], { root: '/Users/me/code/web-app', name: 'web-app' })).toBeNull();
 });

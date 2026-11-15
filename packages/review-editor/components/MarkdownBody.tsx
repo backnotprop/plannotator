@@ -3,14 +3,17 @@
  * (PR descriptions, PR comments, commit messages). No annotation
  * infrastructure — the full document surface is Viewer/BlockRenderer.
  */
-import React, { useMemo, useRef, useEffect } from 'react';
+import React, { useMemo, useRef, useLayoutEffect } from 'react';
 import { parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
 import type { Block } from '@plannotator/ui/types';
 import { MAX_QUOTE_DEPTH, isProseQuote, parseQuoteBody } from '@plannotator/ui/components/blocks/BlockquoteBlock';
 import { parseTableContent } from '@plannotator/ui/components/blocks/TableBlock';
 import { sanitizeInlineHtml } from '@plannotator/ui/utils/sanitizeHtml';
+import { paintAuthorColors } from '@plannotator/ui/utils/authorColorContrast';
 import { renderInlineMarkdown as renderInline } from '../utils/renderInlineMarkdown';
 import { prImageSrc, prImageSrcset } from '../utils/prImage';
+import { PRMediaScope, PR_MEDIA_SKIP_ATTR } from './PRMediaScope';
+import { OpenInArtifactsButton } from './OpenInArtifactsButton';
 
 function renderInlineMarkdown(content: string, authenticatedImages: boolean) {
   return renderInline(content, { resolveImageSrc: authenticatedImages ? prImageSrc : undefined });
@@ -45,12 +48,14 @@ const containsHtml = (text: string) => HTML_TAG_RE.test(text);
 /** Renders sanitized HTML and hides broken images via ref (no inline event handlers). */
 function SafeHtml({ html, as: Tag = 'div' }: { html: string; as?: 'div' | 'span' }) {
   const ref = useRef<HTMLElement>(null);
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!ref.current) return;
     const imgs = ref.current.querySelectorAll('img');
     imgs.forEach((img) => {
       img.onerror = () => { img.style.display = 'none'; img.onerror = null; };
     });
+    // An author's colour from GitHub text is held to the theme like a document's.
+    return paintAuthorColors(ref.current);
   }, [html]);
   return <Tag ref={ref as any} dangerouslySetInnerHTML={{ __html: html }} />;
 }
@@ -79,14 +84,20 @@ function parseLoneVideoLink(content: string): { url: string; label: string } | n
 }
 
 /** Render a simplified block-level markdown view (no annotation infrastructure). */
-export function MarkdownBody({ markdown, textClassName = 'text-xs', authenticatedImages = false }: { markdown: string; textClassName?: string; authenticatedImages?: boolean }) {
+export function MarkdownBody({ markdown, textClassName = 'text-xs', authenticatedImages = false, prMedia = false }: {
+  markdown: string;
+  textClassName?: string;
+  authenticatedImages?: boolean;
+  prMedia?: boolean;
+}) {
   const blocks = useMemo(() => parseMarkdownToBlocks(markdown), [markdown]);
 
-  return (
+  const body = (
     <div className={`space-y-2.5 ${textClassName} text-foreground/90 leading-relaxed`}>
       {renderBlocks(blocks, authenticatedImages)}
     </div>
   );
+  return prMedia ? <PRMediaScope>{body}</PRMediaScope> : body;
 }
 
 /** A quote holding more than paragraphs (a code fence, a list, a nested
@@ -182,14 +193,18 @@ function renderBlocks(blocks: Block[], authenticatedImages: boolean, depth = 0):
                 src={video.url}
                 className="max-w-full rounded-md border border-border bg-black"
               />
-              <a
-                href={video.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="mt-1 block text-[11px] text-muted-foreground hover:text-foreground truncate"
-              >
-                {video.label}
-              </a>
+              <div className="mt-1 flex min-w-0 items-center gap-2">
+                <a
+                  href={video.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  {...{ [PR_MEDIA_SKIP_ATTR]: '' }}
+                  className="block min-w-0 truncate text-[11px] text-muted-foreground hover:text-foreground"
+                >
+                  {video.label}
+                </a>
+                <OpenInArtifactsButton url={video.url} />
+              </div>
             </div>
           );
         }

@@ -3,6 +3,7 @@ import Base from '../layouts/Base.astro';
 import Nav from '../components/Nav.astro';
 import Footer from '../components/Footer.astro';
 import GitHubStars from '../components/landing/GitHubStars';
+import { videoUrl } from '../lib/media';
 
 // The page runs as two arcs (research-backed ordering): the fully manual
 // tool first, since control is the credibility floor for reviewers in the
@@ -83,7 +84,7 @@ const aiFeatures = [
     ],
     points: ['Per-section reviewed state for multi-sitting reviews', 'Every changed file validated against the real diff'],
     img: '/assets/code-review/guided-review.png',
-    video: '/assets/guided-review-demo.mp4',
+    video: videoUrl('guided-review-demo.mp4'),
     poster: '/assets/guided-review-poster.jpg',
     alt: 'A guided review section: prose overview on the left, live annotatable diff on the right',
   },
@@ -448,7 +449,7 @@ const description =
           playsinline
           preload="none"
           poster="/assets/code-review-demo-poster.jpg"
-          src="/assets/code-review-demo.mp4"
+          src={videoUrl('code-review-demo.mp4')}
         ></video>
       </div>
     </div>

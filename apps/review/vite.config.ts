@@ -6,6 +6,7 @@ import pkg from '../../package.json';
 import { packedApp } from '../../build/pack-app';
 import { DEMO_FILE_CONTENTS } from '../../packages/review-editor/demoData';
 import { katexWoff2Only } from '../../build/katex-woff2-only';
+import { diffsWorkerCatalogs } from '../../build/diffs-worker-catalogs';
 
 function demoFileContentPlugin(): Plugin {
   return {
@@ -38,6 +39,10 @@ export default defineConfig({
       // thread + worker). See build/shiki-wasm-stub.ts. `resolve.alias` is
       // shared with the worker build below; `plugins` would not be.
       'shiki/wasm': path.resolve(__dirname, '../../build/shiki-wasm-stub.ts'),
+      // Highlights, Pierre's second highlighter (WASM), never runs: Plannotator
+      // highlights with Shiki. See build/pierre-highlights-stub.ts.
+      '@pierre/highlights/themes/loader': path.resolve(__dirname, '../../build/pierre-highlights-stub.ts'),
+      '@pierre/highlights': path.resolve(__dirname, '../../build/pierre-highlights-stub.ts'),
       '@': path.resolve(__dirname, '.'),
       '@plannotator/shared': path.resolve(__dirname, '../../packages/shared'),
       '@plannotator/ui': path.resolve(__dirname, '../../packages/ui'),
@@ -53,6 +58,8 @@ export default defineConfig({
   // inlined bundle.
   worker: {
     format: 'es',
+    // Pierre's language and theme catalogs, dead code in its worker (see the plugin).
+    plugins: () => [diffsWorkerCatalogs()],
     rollupOptions: {
       output: {
         inlineDynamicImports: true,

@@ -27,7 +27,7 @@
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-picture-layout.spec.ts`.
  */
 
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -68,6 +68,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const env = {
     PATH: process.env.PATH ?? '',
     HOME: root,
+    PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9',
     PLANNOTATOR_DATA_DIR: join(root, 'data'),
     PLANNOTATOR_BROWSER: NO_BROWSER,
     NO_BROWSER,
@@ -178,7 +179,7 @@ test('nothing moves when the pictures load: two wide pictures share the width, b
 
 test('phone screenshots: narrow columns, three across in a 726 px card, two in a 390 px window, one in a 320 px one', async () => {
   await open('phones');
-  await page.getByRole('button', { name: 'Hide the sidebar and the list' }).first().click();
+  await page.locator('.ib-listcol .ib-handle-hit').first().click();
   let l = await loaded(6);
   expect(rows(l)).toEqual([3, 3]);
   expect(Math.max(...l.tiles.map((t) => t.tile.w))).toBeLessThanOrEqual(320);
