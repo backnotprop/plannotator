@@ -70,3 +70,17 @@ test("'e' and \"e\" are the same string; not when a double quote would read the 
   assert.deepEqual(await one("'a#b'", '"a#b"'), ['edited']);
   assert.deepEqual(await one("'a\\\\n'", '"a\\\\n"'), ['edited']);
 });
+
+test('a method body re-indented into class << self is not formatting', async () => {
+  const body = (pad: string) => ['@cache ||= {}', '', 'clean = if path.start_with?("~")', '  path.dup', 'else', '  path', 'end', '', 'File.expand_path(clean)'].map((l) => (l ? pad + l : l)).join('\n');
+  const a = `class P\n  def self.clean(path)\n${body('    ')}\n  end\nend\n`;
+  const b = `class P\n  class << self\n    def clean(path)\n${body('      ')}\n    end\n  end\nend\n`;
+  const t = await types(a, b);
+  assert.ok(!t.includes('reformatted') && !t.includes('moved'), t.join());
+});
+
+test('a method re-indented in place, same context, is still formatting', async () => {
+  const a = 'class P\n  def clean(path)\n    x = 1\n    y = 2\n  end\nend\n';
+  const b = 'class P\n  def clean(path)\n      x = 1\n      y = 2\n  end\nend\n';
+  assert.deepEqual(await types(a, b), ['reformatted']);
+});
