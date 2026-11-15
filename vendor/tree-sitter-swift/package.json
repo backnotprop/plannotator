@@ -4,5 +4,10 @@
   "description": "tree-sitter-swift 0.7.3 (alex-pinkus/tree-sitter-swift, tag 0.7.3, b8b22bf): the release asset tree-sitter-swift.wasm, unchanged. npm has only 0.7.1, whose wasm fails on real files.",
   "license": "MIT",
   "repository": "https://github.com/alex-pinkus/tree-sitter-swift",
-  "files": ["tree-sitter-swift.wasm", "LICENSE", "SHA256SUMS"]
+  "files": [
+    "tree-sitter-swift.wasm",
+    "LICENSE",
+    "SHA256SUMS",
+    "README.md"
+  ]
 }
