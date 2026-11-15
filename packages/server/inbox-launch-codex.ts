@@ -635,7 +635,9 @@ export function createCodexLaunchHost(ctx: LaunchHostContext, options: { readyMs
 
   const nameOf = (launch: InboxLaunchRecord) => {
     const root = threads?.rootOf(launch.id);
-    return root?.thread_name ?? root?.subject ?? "Inbox";
+    // A reply's launch takes its thread's name.
+    const head = root ? (threads!.store.message(root.thread_id) ?? root) : null;
+    return head?.thread_name ?? head?.subject ?? "Inbox";
   };
 
   let choiceKey: string | null = null;

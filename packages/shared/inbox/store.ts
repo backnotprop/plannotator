@@ -346,6 +346,8 @@ export interface InboxReplyInput {
   idempotency_key: string;
   /** `to` takes the place of a session the server read as ended (`InboxMessage.took_over`). */
   took_over?: boolean;
+  /** The new session this reply starts (`to` is its placeholder, `{ agent, launch:<id> }`); the server's `prepare` made it. */
+  launch?: InboxLaunchRecord;
   /**
    * The person's annotations on the thread's attachments, as Plannotator's
    * feedback text (the window exports them), appended after the answers.
@@ -818,7 +820,10 @@ export class InboxStore {
   private readonly messages = new Map<string, InboxMessage>();
   /** The agent sessions with a message through a waking connection (`hasWakingMessage`, read every second). */
   private readonly wakingSessions = new Set<string>();
-  /** The ids of the thread roots an agent was launched for (`launch`): the launch sweep reads these, never every message. */
+  /**
+   * The ids of the messages an agent was launched for (`launch`: a thread's root, or a reply that started a new session),
+   * in log order: the launch sweep reads these, never every message.
+   */
   private readonly launchedRootIds = new Set<string>();
   /** The seq of a message's first line: its place in the event log. */
   private readonly messageSeq = new Map<string, number>();
@@ -1114,7 +1119,7 @@ export class InboxStore {
     if (record.author.kind === "person") this.indexPersonTags(record);
     this.threadLines.set(record.thread_id, (this.threadLines.get(record.thread_id) ?? 0) + 1);
     if (record.wakes === true && record.author.kind === "agent" && record.author.session) this.wakingSessions.add(record.author.session);
-    if (record.launch !== undefined && record.thread_id === record.id) this.launchedRootIds.add(record.id);
+    if (record.launch !== undefined) this.launchedRootIds.add(record.id);
     if (!first) return;
     this.messageSeq.set(record.id, firstSeq);
     this.noteAgentMessage(record, firstSeq);
@@ -5106,6 +5111,7 @@ export class InboxStore {
       idempotency_key: key,
       ...(to ? { to: { host: to.host, session: to.session } } : {}),
       ...(to && input.took_over ? { took_over: true } : {}),
+      ...(input.to && input.launch ? { launch: input.launch } : {}),
       ...(attachments.length > 0 ? { attachments: attachments.map((attachment) => ({ ...attachment, sent_at: at })) } : {}),
       ...(tags.length > 0 ? { tags } : {}),
       ...(handoff
@@ -7402,7 +7408,7 @@ export class InboxStore {
     return next;
   }
 
-  /** The launched threads' roots (any project, archived included). */
+  /** The launched messages, in log order (any project, archived included): threads' roots, and replies that started a new session. */
   launchedRoots(): InboxMessage[] {
     return [...this.launchedRootIds].flatMap((id) => {
       const message = this.messages.get(id);

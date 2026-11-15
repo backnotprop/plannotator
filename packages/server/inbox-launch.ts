@@ -611,12 +611,15 @@ export function createInboxLaunch(options: {
     return last?.author.kind === "person" && (!last.to || last.to.session === root.to?.session);
   };
 
-  /** The root of a launched thread whose launch started this session, the launch not deleted (the switch off too: it governs new starts only). */
+  /** A thread's launched messages, oldest first: its root, when New message launched it, then each reply sent to a new session. */
+  const launchesOf = (threadId: string): InboxMessage[] => roots().filter((m) => m.thread_id === threadId);
+  /** The launch a thread's run line, attach command and row word follow: its latest. */
+  const latestLaunchOf = (threadId: string): InboxMessage | null => launchesOf(threadId).at(-1) ?? null;
+
+  /** The launched message of a thread whose launch started this session, the launch not deleted (the switch off too: it governs new starts only). */
   const launchedRootOf = (threadId: string, session: string | null | undefined): InboxMessage | null => {
     if (!session) return null;
-    const root = store.message(threadId);
-    if (!root?.launch || root.launch.deleted_at || inboxLaunchedSession(root) !== session) return null;
-    return root;
+    return launchesOf(threadId).filter((m) => !m.launch!.deleted_at && inboxLaunchedSession(m) === session).at(-1) ?? null;
   };
 
   /** The run line of a launched root; null for an agent with no host here. */
@@ -809,7 +812,9 @@ export function createInboxLaunch(options: {
       // The person's login env, read for this start only (after the Send answered; never kept).
       const login = await readLogin();
       await trustMadeFolder(launch, host);
-      const name = root.thread_name ?? root.subject ?? "Inbox";
+      // A reply's launch takes its thread's name.
+      const head = root.id === root.thread_id ? root : (store.message(root.thread_id) ?? root);
+      const name = head.thread_name ?? head.subject ?? "Inbox";
       const result = await host.start(launch, { name, login });
       // Deleted while it started: the session it made goes too, and the thread stays as the person left it.
       if (store.message(root.id)?.launch?.deleted_at) {
@@ -1084,9 +1089,29 @@ ${result.text}`);
     if (line.kind !== "message") return;
     const message = line.record;
     if (message.author.kind !== "person" || message.id === message.thread_id || message.delivery) return;
-    const root = store.message(message.thread_id);
-    if (root?.launch) queueMicrotask(() => maybeRespawn(store.message(root.id) ?? root));
+    for (const root of launchesOf(message.thread_id)) if (root.id !== message.id) queueMicrotask(() => maybeRespawn(store.message(root.id) ?? root));
   });
+
+  /** A list row with its launch's run word, and a session blocked on a prompt placed in Stopped on you. */
+  const decorate = <T extends InboxListRow>(row: T, root: InboxMessage | null): T => {
+    if (!root?.launch) return row;
+    const runLine = runOfRoot(root);
+    if (runLine?.state === "waiting_terminal" && row.resolved_at === null) return { ...row, section: "stopped", unread: true, run: null };
+    // A permission question waits on the person: the session is blocked on them (screen 09).
+    if (runLine?.state === "waiting_answer" && row.resolved_at === null) return { ...row, section: "stopped", unread: true, run: null };
+    const word = runLine?.state === "starting" || runLine?.state === "working" || runLine?.state === "cloning" ? runLine.state : null;
+    // The person's item waits on the start, not on a session that ended: the row says "Starting", no tick.
+    // A start that failed, or an agent that is gone, uses the existing "not delivered" tick (screens 14, 15).
+    const pending = row.delivery && row.delivery.state !== "delivered" ? row.delivery : null;
+    const delivery = !pending
+      ? row.delivery
+      : word
+        ? null
+        : runLine?.state === "failed" || runLine?.state === "missing"
+          ? { ...pending, state: "undelivered" as const, reason: "undelivered" as const, send_now: false }
+          : row.delivery;
+    return { ...row, run: word, delivery };
+  };
 
   // ── Routes ──
 
@@ -1948,14 +1973,14 @@ ${result.text}`);
      * `owner`: the machine's owner reads it, so a line refused for trust carries the host's offer.
      */
     async runOf(threadId: string, owner: boolean = false): Promise<InboxRun | null | undefined> {
-      const root = store.message(threadId);
-      if (!root?.launch || root.thread_id !== root.id) return undefined;
+      const root = latestLaunchOf(threadId);
+      if (!root?.launch) return undefined;
       const host = hostOf(root.launch);
       if (!host) return null;
       const state = stateOf(host);
       if (state.lastAvailable === null) state.lastAvailable = await available(host);
       if (hostStale(host) && needsHost(host, root)) await refreshHost(host);
-      const runLine = runOfRoot(store.message(threadId)!);
+      const runLine = runOfRoot(store.message(root.id)!);
       // Trust that would cover home, or `/`: the how-to says to start in a project with its own repository.
       // The home folder is never trusted: the how-to says to start in a folder inside it. Home in a repository rooted
       // there carries both: this window reads the first, and a window from before it, which knows only the second, keeps
@@ -2017,22 +2042,24 @@ ${result.text}`);
 
     /** The launch ended before its agent wrote: it failed, its CLI is gone, or it was stopped or went away (the thread's own line says which). */
     didNotStart(threadId: string): boolean {
-      const root = store.message(threadId);
-      if (!root?.launch || root.thread_id !== root.id) return false;
+      const root = latestLaunchOf(threadId);
+      if (!root?.launch) return false;
       const state = runOfRoot(root)?.state;
       return state === "failed" || state === "missing" || state === "stopped";
     },
 
     /** A launched thread's attach command (the ⋯ menu's Copy, also while the agent rests and has no line), or null. */
     attachOf(threadId: string): string | null {
-      const launch = store.message(threadId)?.launch;
+      const launch = latestLaunchOf(threadId)?.launch;
       const host = launch ? hostOf(launch) : null;
       return host && launch!.session_ref && !launch!.deleted_at && !launch!.error ? host.attach(launch!) : null;
     },
 
     /** The list's row decorator (a launched row gets its run word, the switch off too: it governs new starts only). */
     rowDecorator(): <T extends InboxListRow>(row: T) => T {
-      return (row) => this.decorateLaunched(row);
+      // One pass over the launches per list read, not one per row.
+      const latest = new Map(roots().map((m) => [m.thread_id, m]));
+      return (row) => decorate(row, latest.get(row.thread_id) ?? null);
     },
 
     /**
@@ -2054,24 +2081,7 @@ ${result.text}`);
 
     /** A launched row with its run word, and a session blocked on a prompt placed in Stopped on you (through `rowDecorator`). */
     decorateLaunched<T extends InboxListRow>(row: T): T {
-      const root = store.message(row.thread_id);
-      if (!root?.launch) return row;
-      const runLine = runOfRoot(root);
-      if (runLine?.state === "waiting_terminal" && row.resolved_at === null) return { ...row, section: "stopped", unread: true, run: null };
-      // A permission question waits on the person: the session is blocked on them (screen 09).
-      if (runLine?.state === "waiting_answer" && row.resolved_at === null) return { ...row, section: "stopped", unread: true, run: null };
-      const word = runLine?.state === "starting" || runLine?.state === "working" || runLine?.state === "cloning" ? runLine.state : null;
-      // The person's item waits on the start, not on a session that ended: the row says "Starting", no tick.
-      // A start that failed, or an agent that is gone, uses the existing "not delivered" tick (screens 14, 15).
-      const pending = row.delivery && row.delivery.state !== "delivered" ? row.delivery : null;
-      const delivery = !pending
-        ? row.delivery
-        : word
-          ? null
-          : runLine?.state === "failed" || runLine?.state === "missing"
-            ? { ...pending, state: "undelivered" as const, reason: "undelivered" as const, send_now: false }
-            : row.delivery;
-      return { ...row, run: word, delivery };
+      return decorate(row, latestLaunchOf(row.thread_id));
     },
 
     /**
