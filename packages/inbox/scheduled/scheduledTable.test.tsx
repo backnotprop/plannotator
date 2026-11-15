@@ -71,13 +71,16 @@ test.skipIf(!hasDom)('wide: newest last run first, running on top, a never-run o
   expect(host.querySelector('[data-scheduled-row="sch_none"] [data-scheduled-next]')?.textContent).toBe('None');
 });
 
-test.skipIf(!hasDom)('split: three columns, Run beside the name, the same order, the open one marked', () => {
+test.skipIf(!hasDom)('split: Run leads every row in its own column, then Routine, Runs and Last run; the same order, the open one marked', () => {
   const host = draw(true, 'sch_weekday');
   const heads = [...host.querySelectorAll('[role="columnheader"]')].map((el) => el.textContent || el.getAttribute('aria-label'));
-  expect(heads).toEqual(['Routine', 'Runs', 'Last run']);
-  // Run sits right after the name, in the name's cell, not in a column of its own.
-  const name = host.querySelector('[data-scheduled-row="sch_weekday"] .st-sname')!;
-  expect(name.querySelector('.st-nline > .st-open + [data-scheduled-run]')).not.toBeNull();
+  expect(heads).toEqual(['Run', 'Routine', 'Runs', 'Last run']);
+  // Every row, On and Off, Run or Stop: the button is the first cell and the name the second.
+  for (const row of host.querySelectorAll('[data-scheduled-row]')) {
+    const [button, name] = [...row.children];
+    expect(button!.querySelector('[data-scheduled-run]')).not.toBeNull();
+    expect(name!.classList.contains('st-sname')).toBe(true);
+  }
   expect(ids(host)).toEqual(['sch_running', 'sch_weekday', 'sch_daily', 'sch_once', 'sch_none', 'sch_off_new', 'sch_off_old']);
   expect(host.querySelector('[data-scheduled-row="sch_weekday"]')?.hasAttribute('data-selected')).toBe(true);
   expect(host.querySelectorAll('[data-selected]').length).toBe(1);

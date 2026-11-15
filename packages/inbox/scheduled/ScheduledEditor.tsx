@@ -277,6 +277,12 @@ export function ScheduledEditor(props: EditorProps) {
             </span>
           </div>
         </section>
+        <section className="ib-sgroup st-group st-kv" aria-label="What it works with">
+          <span className="st-k">Repo or folder</span>
+          <FolderPick block={block} folder={draft.folder} shown={record && JSON.stringify(record.folder) === JSON.stringify(draft.folder) ? record.folder_shown : null} agentName={agentName} phone={props.phone} onChange={(folder) => void save({ folder })} />
+          <span className="st-k">Files</span>
+          <FilesRow files={draft.attachments} onChange={(attachments) => void save({ attachments })} />
+        </section>
         <section className="ib-sgroup st-group">
           <h2>Prompt</h2>
           <div className="st-box">
@@ -291,12 +297,6 @@ export function ScheduledEditor(props: EditorProps) {
             />
             <RunsAs block={block} agent={draft.agent} model={draft.model} effort={draft.effort} phone={props.phone} onChange={(next) => void save({ agent: next.agent, model: next.model, effort: next.effort })} />
           </div>
-        </section>
-        <section className="ib-sgroup st-group st-kv" aria-label="What it works with">
-          <span className="st-k">Repo or folder</span>
-          <FolderPick block={block} folder={draft.folder} shown={record && JSON.stringify(record.folder) === JSON.stringify(draft.folder) ? record.folder_shown : null} agentName={agentName} phone={props.phone} onChange={(folder) => void save({ folder })} />
-          <span className="st-k">Files</span>
-          <FilesRow files={draft.attachments} onChange={(attachments) => void save({ attachments })} />
         </section>
         {record && record.runs > 0 && (
           <section className="ib-sgroup st-group" aria-labelledby="st-runs-h">

@@ -1,7 +1,7 @@
 /**
  * The list: one table (Name, Run, Runs, Last run, Next run, Created, ⋯), newest last run first, and the turned-off ones
- * in their own small "Off" table under it. Beside an open editor it narrows to Routine (its Run button right
- * after the name), Runs and Last run.
+ * in their own small "Off" table under it. Beside an open editor it narrows to the Run button (leading each row, in
+ * one column), Routine, Runs and Last run.
  */
 import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react';
 import { Menu } from '@base-ui/react/menu';
@@ -125,14 +125,14 @@ function WideRow({ row, acts, now }: { row: InboxScheduledRow; acts: RowActs; no
 function ShortRow({ row, acts, now, selected }: { row: InboxScheduledRow; acts: RowActs; now: number; selected: boolean }) {
   return (
     <div className="st-srow st-scols" role="row" onClick={() => acts.open(row)} data-scheduled-row={row.id} data-state={row.state} data-selected={selected ? '' : undefined}>
+      {/* Run or Stop leads the row, in one column, so every name starts on one line (the owner's note on the narrow list). */}
+      <span role="cell" className="st-sbtn">
+        <RunButton row={row} acts={acts} short />
+      </span>
       <span role="cell" className="st-sname">
-        {/* Run or Stop right after the name, on its first line (the owner's note on the split view). */}
-        <span className="st-nline">
-          <button type="button" className="st-open" aria-current={selected ? 'true' : undefined} onClick={stopClick(() => acts.open(row))}>
-            {row.name}
-          </button>
-          <RunButton row={row} acts={acts} short />
-        </span>
+        <button type="button" className="st-open" aria-current={selected ? 'true' : undefined} onClick={stopClick(() => acts.open(row))}>
+          {row.name}
+        </button>
         <span className="st-when">{shortScheduleWords(row)}</span>
       </span>
       <span role="cell" className="st-num st-runs">
@@ -162,6 +162,7 @@ export function ScheduledTable({ rows, acts, short, selected }: { rows: readonly
     return (
       <div className="st-short" role="table" aria-label="Routines">
         <div className="st-shead st-scols" role="row">
+          <span role="columnheader" aria-label="Run" />
           <span role="columnheader">Routine</span>
           <span role="columnheader" className="st-num st-runs">Runs</span>
           <span role="columnheader" className="st-num" aria-sort="descending">Last run</span>

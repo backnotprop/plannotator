@@ -40,8 +40,12 @@ test('at phone width the list gives the name the room: no Runs column, one track
     });
   });
   expect(phone.get('.st-scols > .st-runs')?.get('display')).toBe('none');
-  // Name (with its Run button), Last run, the menu: the short row's four cells less Runs.
-  expect(phone.get('.st-scols')?.get('grid-template-columns')?.replace(/minmax\([^)]*\)/g, 'm').trim().split(/\s+/)).toHaveLength(3);
+  // Run, Name, Last run, the menu: the short row's five cells less Runs; Run is one fixed column, as beside the editor.
+  const tracks = (columns: string | undefined) => columns?.replace(/minmax\([^)]*\)/g, 'm').trim().split(/\s+/) ?? [];
+  expect(tracks(phone.get('.st-scols')?.get('grid-template-columns'))).toEqual(['24px', 'm', '9.4em', '24px']);
+  let split: string | undefined;
+  sheet().walkRules('.st-scols', (rule) => void (rule.parent?.type === 'root' && rule.walkDecls('grid-template-columns', (decl) => void (split = decl.value))));
+  expect(tracks(split)).toEqual(['24px', 'm', '40px', '112px', '28px']);
   expect(phone.get('.st-sname .st-open')?.get('white-space')).toBe('normal');
   // The wide table at its narrowest (a 768 window) wraps a long name too.
   let narrowWide: string | undefined;

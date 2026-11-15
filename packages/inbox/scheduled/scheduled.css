@@ -69,7 +69,8 @@
 
 /* The narrow list beside an open one (and on a phone): Routine, Runs, Last run. */
 .st-short { padding: 2px 0 20px; }
-.st-scols { display: grid; grid-template-columns: minmax(0, 1fr) 40px 112px 28px; column-gap: 12px; align-items: start; }
+.st-short { --st-sgap: 12px; }
+.st-scols { display: grid; grid-template-columns: 24px minmax(0, 1fr) 40px 112px 28px; column-gap: var(--st-sgap); align-items: start; }
 .st-shead > * { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .st-shead { padding: 0 12px; height: 30px; align-content: center; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 500; color: var(--muted-foreground); }
 .st-srow { padding: 9px 12px; border-radius: 8px; cursor: pointer; }
@@ -79,14 +80,14 @@
 .st-sname { min-width: 0; }
 .st-sname .st-open { font-weight: 500; line-height: 20px; }
 /* The name, then Run or Stop a small gap after it, centred on the name's first line; a long name gives way, never the button. */
-.st-nline { display: flex; align-items: flex-start; gap: 8px; min-width: 0; }
-.st-nline .st-open { flex: 0 1 auto; min-width: 0; }
-.st-nline .st-run { flex: none; margin: -2px 0; }
+/* The 24px button centred on the name's 20px first line. */
+.st-sbtn { display: flex; height: 20px; align-items: center; }
 .st-run:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
 .st-when { display: block; font-size: var(--ib-fs-12-5, 12.5px); line-height: 18px; color: var(--muted-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .st-num { font-size: var(--ib-fs-13, 13px); line-height: 20px; color: var(--muted-foreground); font-variant-numeric: tabular-nums; white-space: nowrap; text-align: right; }
 .st-srow .st-more { width: 24px; height: 20px; }
-.st-offh.st-offh-short { margin: 18px 12px 6px; }
+/* "Off" starts where the names do: the row's padding, the button column and the gap. */
+.st-offh.st-offh-short { margin: 18px 12px 6px calc(12px + 24px + var(--st-sgap)); }
 
 /* The editor. */
 .st-body .st-title { display: block; width: 100%; padding: 0; border: 0; background: none; font: inherit; font-size: var(--ib-fs-20, 20px); font-weight: 650; letter-spacing: -0.01em; color: var(--foreground); outline: none; margin-bottom: 8px; }
@@ -185,7 +186,8 @@ button.st-foot-mark:hover { background: var(--muted); }
 @media (max-width: 760px) {
   .st-list.st-list-split { width: 100%; }
   /* A phone gives the name the room: Runs is in the editor, and a long name takes two lines. */
-  .st-scols { grid-template-columns: minmax(0, 1fr) 9.4em 24px; column-gap: 8px; }
+  .st-short { --st-sgap: 10px; }
+  .st-scols { grid-template-columns: 24px minmax(0, 1fr) 9.4em 24px; }
   .st-scols > .st-runs { display: none; }
   .st-sname .st-open { white-space: normal; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
   .st-kv { grid-template-columns: minmax(0, 1fr); gap: 4px; }

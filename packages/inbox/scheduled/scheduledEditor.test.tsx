@@ -151,3 +151,11 @@ test.skipIf(!hasDom)('a folder picked by its path shows that path on the chip wh
   act(() => root!.render(<FolderPick block={null} folder={{ path: '/Users/maya/code/acme-web' }} shown={null} agentName="Claude Code" phone onChange={() => {}} />));
   expect(host.querySelector('[data-scheduled-folder]')?.textContent).toBe('/Users/maya/code/acme-web');
 });
+
+test.skipIf(!hasDom)('the editor reads Schedule, If a run is missed, Repo or folder, Files, then the Prompt, in the page and in Tab order', async () => {
+  const host = await open(scheduledRow('sch_order'));
+  const order = ['.st-sched', '.st-miss', '[data-scheduled-folder]', '.st-chips', 'textarea.st-prompt'].map((selector) => host.querySelector(selector));
+  expect(order.every(Boolean)).toBe(true);
+  for (let i = 1; i < order.length; i++) expect(order[i - 1]!.compareDocumentPosition(order[i]!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect([...host.querySelectorAll('[tabindex]')].filter((el) => Number(el.getAttribute('tabindex')) > 0)).toEqual([]);
+});
