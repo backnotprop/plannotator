@@ -482,10 +482,10 @@ export const INBOX_REPLY_T3_WHILE_RUNNING_TEXT =
 
 /**
  * An Antigravity CLI conversation the Inbox has no live hand-over for: the agy CLI publishes its agent API only to
- * the commands its agent runs, so the agent hands it over once. Proposed words: the owner approves them word for word.
+ * the commands its agent runs, so the agent hands it over once. The owner approved these words: change them only with the owner.
  */
 export const INBOX_REPLY_ANTIGRAVITY_HANDOVER_TEXT =
-  "The person's reply won't arrive in this session by itself yet. To have it start a turn here, run `plannotator inbox antigravity` in your terminal now (once per agy launch); otherwise call read_thread with this thread_id later.";
+  "Run `plannotator inbox antigravity` in your terminal now (once per agy launch) so the person's reply starts a turn here; otherwise call read_thread with this thread_id later.";
 
 /** Whether a send's result asks an Antigravity CLI conversation that nothing wakes yet to hand its agent API over. */
 export function antigravityHandsOver(ctx: unknown, wakes: boolean, input: { agent_host?: string; agent_session?: string }): boolean {
