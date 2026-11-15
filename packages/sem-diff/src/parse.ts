@@ -46,6 +46,7 @@ export interface LanguageConfig {
   attachedTypes: ReadonlySet<string>;
   harmlessMissing?: ReadonlySet<string>;
   contextAt?(root: Node, line: number): string;
+  holdBack?: ReadonlySet<string>;
 }
 
 export function brokenTree(n: Node, cfg: LanguageConfig): boolean {
@@ -550,6 +551,7 @@ function rubyVisibility(body: Node, before: number): string {
 const ruby: LanguageConfig = {
   id: 'ruby',
   wasm: 'tree-sitter-ruby/tree-sitter-ruby.wasm',
+  holdBack: new Set(['movedWithEdit']),
   functionTypes: new Set(['method', 'singleton_method']),
   callTypes: new Set(['call', 'identifier']),
   blockTypes: RUBY_BLOCKS,

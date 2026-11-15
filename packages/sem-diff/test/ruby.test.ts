@@ -84,3 +84,12 @@ test('a method re-indented in place, same context, is still formatting', async (
   const b = 'class P\n  def clean(path)\n      x = 1\n      y = 2\n  end\nend\n';
   assert.deepEqual(await types(a, b), ['reformatted']);
 });
+
+test('moved-with-edits is held back in Ruby: the lines are plain edits', async () => {
+  const long = (n: string) => `  def ${n}\n${[1, 2, 3, 4, 5].map((i) => `    v${i} = ${n}${i}\n`).join('')}  end\n`;
+  const moving = (y: number) => `  def b\n    x = 2\n    y = ${y}\n    x + y\n  end\n`;
+  const t = await types(`class A\n${moving(3)}\n${long('a')}\n${long('c')}end\n`, `class A\n${long('a')}\n${long('c')}\n${moving(30)}end\n`);
+  assert.ok(!t.includes('movedWithEdit') && !t.includes('moved') && t.some((x) => x === 'edited' || x === 'added' || x === 'deleted'), t.join());
+  const { LANGUAGES } = await import('../src/parse.ts');
+  for (const [id, cfg] of Object.entries(LANGUAGES)) if (id !== 'ruby') assert.equal(cfg.holdBack, undefined, id);
+});
