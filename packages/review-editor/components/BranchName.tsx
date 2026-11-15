@@ -28,7 +28,7 @@ export function fitBranch(branch: string, available: number, width: (text: strin
   return `${ELLIPSIS}${tailParts.slice(tailParts.length - size).join('')}`;
 }
 
-export const BranchName: React.FC<{ branch: string }> = ({ branch }) => {
+export const BranchName: React.FC<{ branch: string; minVisible?: number }> = ({ branch, minVisible = 0 }) => {
   const ref = useRef<HTMLSpanElement>(null);
   const probeRef = useRef<HTMLSpanElement>(null);
   const [text, setText] = useState(branch);
@@ -59,10 +59,15 @@ export const BranchName: React.FC<{ branch: string }> = ({ branch }) => {
     };
   }, [branch]);
 
+  const shown = text === branch || graphemes(text.replace(ELLIPSIS, '')).length >= minVisible;
   return (
     <span ref={ref} className="relative block min-w-0 overflow-hidden whitespace-nowrap" data-branch-name={branch}>
       <span aria-hidden="true" className="invisible">{branch}</span>
-      <span className="absolute inset-y-0 left-0 whitespace-nowrap" data-branch-shown="">{text}</span>
+      {shown ? (
+        <span className="absolute inset-y-0 left-0 whitespace-nowrap" data-branch-shown="">{text}</span>
+      ) : (
+        <span className="sr-only">{branch}</span>
+      )}
       <span ref={probeRef} aria-hidden="true" className="invisible absolute left-0 top-0 whitespace-pre" />
     </span>
   );
