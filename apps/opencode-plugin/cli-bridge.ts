@@ -49,10 +49,10 @@ import {
 } from "./prompt-delivery-error";
 import {
   readLastUserAgent,
-  readMessageAgent,
   resolveAddressableAgent,
   resolveAnnotatedMessageAgent,
 } from "./message-agent";
+import { pickRecentAssistantMessages, type RecentAssistantMessage } from "./recent-messages";
 
 type LogLevel = "info" | "error";
 
@@ -234,16 +234,7 @@ export function cliTargetOf(value: unknown): string | string[] | undefined {
   return undefined;
 }
 
-export interface RecentAssistantMessage {
-  messageId: string;
-  text: string;
-  timestamp?: string;
-  /**
-   * The agent that wrote the message (#1612). Plugin-side only: it decides who
-   * answers the feedback and is never sent to the CLI.
-   */
-  agent?: string;
-}
+export type { RecentAssistantMessage };
 
 function log(client: OpenCodeClient, level: LogLevel, message: string): void {
   try {
@@ -851,41 +842,7 @@ export async function getRecentAssistantMessages(
   const messagesResponse = await client.session?.messages?.({
     path: { id: sessionId },
   });
-  const messages = messagesResponse?.data;
-  if (!messages) return [];
-
-  const recentMessages: RecentAssistantMessage[] = [];
-  const syntheticReplies: RecentAssistantMessage[] = [];
-  const syntheticByPromptId = new Map<string, boolean>();
-  let lastPromptWasSynthetic = false;
-  for (let i = 0; i < messages.length; i++) {
-    const msg = messages[i];
-    const info = msg.info;
-    if (info?.role === "user" || info?.role === "synthetic") {
-      const parts = msg.parts ?? [];
-      lastPromptWasSynthetic = info.role === "synthetic"
-        || (parts.length > 0 && parts.every((part: { synthetic?: boolean; type?: string }) =>
-          part.synthetic === true || part.type === "synthetic"));
-      if (typeof info.id === "string") syntheticByPromptId.set(info.id, lastPromptWasSynthetic);
-      continue;
-    }
-    if (info?.role !== "assistant") continue;
-    const textParts = (msg.parts ?? [])
-      .filter((part: any) => part.type === "text" && part.text?.trim())
-      .map((part: any) => part.text);
-    if (textParts.length === 0) continue;
-    const agent = readMessageAgent(info);
-    const synthetic = syntheticByPromptId.get(info.parentID) ?? lastPromptWasSynthetic;
-    const replies = synthetic ? syntheticReplies : recentMessages;
-    replies.push({
-      messageId: info.id ?? `opencode-${i}`,
-      text: textParts.join("\n"),
-      timestamp: info.time?.created ? new Date(info.time.created).toISOString() : undefined,
-      ...(agent && { agent }),
-    });
-  }
-
-  return recentMessages.reverse().concat(syntheticReplies.reverse()).slice(0, Math.max(0, limit));
+  return pickRecentAssistantMessages(messagesResponse?.data, limit);
 }
 
 /** The agent of the session's latest user message, or undefined on any failure. */

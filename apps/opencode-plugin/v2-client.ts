@@ -252,6 +252,8 @@ export function toBridgeMessages(context: unknown): unknown[] {
       // V2 assistant messages record their writer (`Session.Message.Assistant`
       // carries `agent: Agent.ID`); /plannotator-last routes feedback to it.
       ...(typeof message.agent === "string" && message.agent ? { agent: message.agent } : {}),
+      // A failed step ends its turn (`pickRecentAssistantMessages`).
+      ...(message.error !== undefined ? { error: message.error } : {}),
     },
     parts: Array.isArray(message.content) ? message.content : [],
   }));

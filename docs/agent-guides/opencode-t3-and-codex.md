@@ -159,6 +159,25 @@ handling); instead each registration deletes entries whose pid is dead, and
 loopback port no longer accepts a connection, or that cannot be read. Commands
 list the project they detected (or `unknown`); only the plan review detects it.
 
+### OpenCode: which reply `last` opens (#3312)
+
+`/plannotator-last` and the tool's `last`, on OpenCode 1 (embedded runtime and
+CLI bridge) and OpenCode 2, read the session through one function,
+`pickRecentAssistantMessages` (`apps/opencode-plugin/recent-messages.ts`). It
+opens the newest reply to a prompt the person wrote, not a reply to an
+injected prompt (an OpenCode 2 `synthetic` row, or an OpenCode 1 user message
+whose parts are all synthetic) that a plugin used to wake the session; such a
+reply opens only when there is no other. A reply belongs to its turn's prompt:
+OpenCode 1's `parentID`, and on OpenCode 2 (no `parentID`) the newest prompt
+row, except that an injected row stored while the person's turn still runs
+(every assistant step since their prompt called a tool and none failed) stays
+in that turn: Plannotator's own session-URL notice and OpenCode 2's
+Plan-mode reminder re-added after a compaction. The picker lists the reply
+that opens first (★), then the rest newest first, capped at 25; the one that
+opens is kept even when 25 newer replies to injected prompts exist. Pi and
+Claude Code still open the newest reply with text. Tests:
+`apps/opencode-plugin/recent-messages.test.ts`.
+
 ### T3 Code: Ask this session through an optional Claude hook (opt-in)
 
 `packages/t3-code` (user notes in its README). T3 Code runs Claude through the
