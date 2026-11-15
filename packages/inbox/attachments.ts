@@ -223,6 +223,24 @@ export function codeRangeMatches(range: InboxCodeRange, lines: string): boolean 
   return lines === range.code;
 }
 
+/**
+ * Where a kept line comment's lines are in the file now: where they were when they still read the same, else the
+ * nearest place they do (the file was edited above them), else null (they changed: the words wait, on nothing).
+ */
+export function relocateCodeRange(range: InboxCodeRange, text: string): { lineStart: number; lineEnd: number } | null {
+  const lines = text.split('\n');
+  const count = range.lineEnd - range.lineStart + 1;
+  const matchesAt = (start: number) => start >= 1 && start + count - 1 <= lines.length && codeRangeMatches(range, lines.slice(start - 1, start - 1 + count).join('\n'));
+  // Every start, nearest first: a file cut far shorter still finds lines that moved a long way up.
+  const reach = Math.max(range.lineStart, lines.length);
+  for (let distance = 0; distance <= reach; distance++) {
+    for (const start of distance === 0 ? [range.lineStart] : [range.lineStart - distance, range.lineStart + distance]) {
+      if (matchesAt(start)) return { lineStart: start, lineEnd: start + count - 1 };
+    }
+  }
+  return null;
+}
+
 type CodeCommentAnnotation = Annotation & { inboxCode?: InboxCodeRange };
 
 /** The line range a code comment is on, or null for any other annotation. */

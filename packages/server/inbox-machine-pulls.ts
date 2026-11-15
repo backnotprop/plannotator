@@ -17,6 +17,7 @@ import {
   type InboxPullsAnswer,
 } from "@plannotator/core/inbox-types";
 import { readCapped, type PeerLink } from "./inbox-peer-link";
+import { isPullLooked } from "./inbox-pull-looked";
 
 /** A far board's answer is read no further than this. */
 const FAR_PULLS_MAX_BYTES = 8 * 1024 * 1024;
@@ -47,8 +48,8 @@ function farPull(value: unknown): InboxPull | null {
   if (!pull || !text(pull.key, 600) || !text(pull.host, 255) || !text(pull.repo, 400) || !text(pull.url, 2000)) return null;
   if (!Number.isSafeInteger(pull.number) || pull.number <= 0 || !STATES.has(pull.state) || typeof pull.title !== "string") return null;
   if (!/^https?:\/\//i.test(pull.url)) return null;
-  const { machine: _ignored, ...rest } = pull;
-  return rest as InboxPull;
+  const { machine: _ignored, looked, ...rest } = pull;
+  return (isPullLooked(looked) ? { ...rest, looked: { sha: looked.sha, at: looked.at } } : rest) as InboxPull;
 }
 
 /** A far machine's answers to `GET pulls?everywhere=1` and `GET pulls/risk`, picked by name. Null when the board is not one. */
@@ -88,6 +89,8 @@ export interface FarBoardEntry {
   pending: boolean;
   /** The link's name for it, when known. */
   name?: string;
+  /** It keeps the PR page's look at its PRs (mark `pulls-looked`). */
+  looked?: boolean;
 }
 
 /**
@@ -108,8 +111,8 @@ export function mergePullBoards<T extends Pick<InboxPullsAnswer, "pulls" | "link
   const hosts = [...local.hosts];
   const far_risk: Record<string, InboxPullRiskJudgment> = {};
   const machines: NonNullable<InboxPullsAnswer["machines"]> = {};
-  for (const { machine, board, pending, name } of far) {
-    machines[machine] = { read_at: board?.read_at ?? null, pending, ...(name ? { name } : {}) };
+  for (const { machine, board, pending, name, looked } of far) {
+    machines[machine] = { read_at: board?.read_at ?? null, pending, ...(name ? { name } : {}), ...(looked ? { looked: true as const } : {}) };
     if (!board) continue;
     for (const pull of board.pulls) {
       if (keys.has(pull.key)) continue;
@@ -171,7 +174,7 @@ export function createMachinePulls(options: { peers: () => Iterable<PeerLink>; n
     start(refresh: boolean): () => FarBoardEntry[] {
       const peers = takers();
       for (const peer of peers) if (peer.state === "online") void read(peer, refresh);
-      return () => peers.map((peer) => ({ machine: peer.id, board: boards.get(peer.id) ?? null, pending: reading.has(peer.id) }));
+      return () => peers.map((peer) => ({ machine: peer.id, board: boards.get(peer.id) ?? null, pending: reading.has(peer.id), ...(peer.list?.marks.includes("pulls-looked") ? { looked: true } : {}) }));
     },
     /** The reads under way, done (tests). */
     async settled(): Promise<void> {

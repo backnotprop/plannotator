@@ -9,6 +9,7 @@ import { inboxMessageImageBase, inlineImageRefFromSrc, syncMessageImages, toggle
 import type { RefObject } from 'react';
 import type { MessageBodyProps } from './types';
 import { inboxEmbedUrl } from '../../data/actions/embed';
+import type { OpenFileRefRef } from './useFileRefs';
 
 /** The body's pictures: where they load from, their boxes, and what opens one (the viewer, or the lightbox). */
 export function useBodyImages({
@@ -19,7 +20,8 @@ export function useBodyImages({
   inlineRefOf,
   onImage,
   onOpenOptionSet,
-}: Pick<MessageBodyProps, 'message' | 'imageBase' | 'onOpenInlineImage' | 'inlineRefOf' | 'onImage' | 'onOpenOptionSet'> & { bodyRef: RefObject<HTMLDivElement | null> }) {
+  openFileRefRef,
+}: Pick<MessageBodyProps, 'message' | 'imageBase' | 'onOpenInlineImage' | 'inlineRefOf' | 'onImage' | 'onOpenOptionSet'> & { bodyRef: RefObject<HTMLDivElement | null>; openFileRefRef: OpenFileRefRef }) {
   // The body's images go through a host resolver that names the same URL ui's
   // default would (the window's resolver, `inboxImageSrcResolver`), only so ui
   // draws an image the Inbox refuses (403 image_hidden, 404) as its alt text in
@@ -70,7 +72,12 @@ export function useBodyImages({
     (src: string | null, alt: string): boolean => {
       if (!src || refOf(src) === null) return false;
       // An image that failed to load (outside the project, gone) opens nothing: an empty lightbox helps no one.
-      if ([...(bodyRef.current?.querySelectorAll<HTMLImageElement>('img[data-ib-broken]') ?? [])].some((img) => img.getAttribute('src') === src)) return true;
+      if ([...(bodyRef.current?.querySelectorAll<HTMLImageElement>('img[data-ib-broken]') ?? [])].some((img) => img.getAttribute('src') === src)) {
+        // A file the message names opens beside the thread instead, which says why it is not here.
+        const named = openFileRefRef.current ? refOf(src) : null;
+        if (named) openFileRefRef.current?.({ path: named });
+        return true;
+      }
       const image = imageOf(src);
       if (image && openImageRef.current) openImageRef.current(image);
       else setFallback({ src, alt });

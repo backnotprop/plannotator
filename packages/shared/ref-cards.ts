@@ -7,7 +7,8 @@
  * `query` (the module refuses to load otherwise); it is the endpoint `gh pr
  * view` reads too. Nothing runs until a person rests on a link long enough for
  * the card to open, or opens a thread's Links (the rows on screen read their
- * state), so drawing a message costs nothing.
+ * state), so drawing a message costs nothing. The Inbox also reads one after
+ * an agent's send names a number it does not know (inbox-pull-lookups.ts).
  *
  * - GitHub: `issueOrPullRequest` answers both kinds in one call. When GitHub
  *   refuses the account in use (404/401/403/SAML), every other account signed
@@ -565,7 +566,7 @@ export function createRefCards(options: {
   now?: () => number;
   /** Avatar URL → data URI (default: `fetchAvatarDataUri`). */
   avatar?: (url: string) => Promise<string | null>;
-}): RefCards & { sizes(): RefCardsSizes } {
+}): RefCards & { sizes(): RefCardsSizes; cached(key: string): ForgeRefCardData | null } {
   const run = options.run;
   const now = options.now ?? Date.now;
   const avatarOf = options.avatar ?? fetchAvatarDataUri;
@@ -779,6 +780,11 @@ export function createRefCards(options: {
         }
       }
       return refresh(key, ref);
+    },
+    /** The card a read already holds for a `forgeRefKey`, still showable; never fetches. */
+    cached(key) {
+      const hit = cache.get(key);
+      return hit?.ok && now() - hit.fetchedAt < REF_STALE_MAX_MS ? hit.data : null;
     },
     sizes() {
       return {

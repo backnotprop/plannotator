@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { memo, useCallback, useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { HueDot, LetterMark, ProjectMark, showsProjects, showsThreads, useRowMarks } from '../letterMarks';
 import { inboxListShortcuts } from '../shortcuts/list.shortcuts';
 import { shortcutAria, useShortcutAria, withShortcut } from '../shortcuts/hint';
@@ -10,7 +10,7 @@ import { inboxSnoozeWhen } from '@plannotator/core/inbox-snooze';
 import { agentName, formatCount, fullTime, shortTime, whenTime } from '../format';
 import { reaskRowLine, sentRowLine, undeliveredLabel } from '../deliveryLine';
 import { sentRecipientsWords } from '../tags';
-import { RowTagName, rowTintOf, sameTint, tintProps, type ListTagColours, type RowTintFields, type RowTintProps } from '../parts/RowTint';
+import { RowTagName, rowTintOf, tintProps, type ListTagColours, type RowTintProps } from '../parts/RowTint';
 import { TagStack } from './TagPicker';
 import { RowAgents, RowAgentTiles } from './RowAgents';
 import { RowPullsMark } from '../threadPulls/ThreadPulls';
@@ -33,6 +33,8 @@ import { TimeWithTick } from './DeliveryTick';
 import { ActionBadge, QuestionMark, WIDE_ROW_WAIT_WORDS, WaitCard, WaitWords, badgeDescription, rowHasBadge, rowMarks, type RowMarks } from './RowBadge';
 import { StatusMark, rowStatus } from './RowStatus';
 import { attachPullToRefresh } from '../pullRefresh';
+import { RowSwipeLayer, useRowSwipe } from './RowSwipeLayer';
+import { leadEmpty, leadParts } from './rowLead';
 import { TidyMenu, type TidyController } from './Tidy';
 import { ListFilterButton, type ListFilterSource } from './ListFilter';
 import { awayLine, machineTakes, type MachinesModel } from '../machines';
@@ -54,6 +56,14 @@ import { bareKeyAllowed, isComposingKey, keyboardFocused, keyTarget, modalOpen }
 import { listKeyTarget, LIST_STOPS, type ListMove } from '../listKeys';
 import { fitCountsColumn, useDevicePixelRatio } from './listFit';
 import { useKeyboardFocus } from './useKeyboardFocus';
+import { sameListRow, type ListRowProps } from './listRowProps';
+import { useListPicks } from './useListPicks';
+import { PickBox, PickMark } from './PickBar';
+import type { BulkWrites } from '../bulkWrites';
+import { GroupBand } from './GroupBand';
+import { ArchivedGroup, InArchivedGroup, UnarchiveAction } from './ArchivedGroup';
+import type { ArchivedGroupHost } from '../data/actions/archivedGroup';
+import { useShowArchived } from '../showArchived';
 
 export interface InboxListProps {
   /** Beside an open thread, a click on the list's edge hides the list (the thread in full screen); drag still resizes. Absent: the edge only resizes. */
@@ -154,7 +164,9 @@ export interface InboxListProps {
    * The row's right-click menu (Copy link, Copy thread ID, Mark read or
    * Move back, Archive). Absent: no menu, the browser's own.
    */
-  onRowAction?: (row: InboxListRow, action: RowMenuAction) => void;
+  onRowAction?: (row: InboxListRow, action: RowMenuAction) => unknown;
+  /** The picks' actions (bulkWrites.ts): rows can be picked, from the row menu, the ⋮ or ⌘ / Shift and a click. Absent: no picking. */
+  bulk?: BulkWrites;
   /** A press on a starred row's star. Absent (an older Inbox keeps no pins): the star is only a mark. */
   onUnstar?: (row: InboxListRow) => void;
   /** Snooze a row until a moment, from its menu (approval "inbox-snooze"). Absent (an older Inbox keeps no snoozes): no Snooze. */
@@ -205,6 +217,8 @@ export interface InboxListProps {
   listFilter?: ListFilterSource;
   /** The ⋮ menu's "Customize rows…": Settings → Rows. Absent (the tour): no item. */
   onCustomizeRows?: () => void;
+  /** The Archived group under the list and its ⋮ switch (approval "inbox-archived-group"). Absent (the tour): neither. */
+  archived?: ArchivedGroupHost;
   /** Tag row colours (parts/RowTint.tsx) and "Show tag colors" in the ⋮. Absent (an older Inbox, the tour): neither. */
   tagColours?: ListTagColours;
 }
@@ -460,6 +474,7 @@ function countWords(row: InboxListRow, now: number, tickAlone = false): { short:
   if (row.answered_not_sent) return { short: 'Answered', long: 'Answered, not sent', full: 'Answered, not sent' };
   // An agent the person started from New message (launch): one muted word while it starts or works.
   if (row.run) return same(row.run === 'starting' ? 'Starting' : row.run === 'cloning' ? 'Cloning' : 'Working');
+  if (row.combining) return { short: <span className="ib-combining">Combining…</span>, long: <span className="ib-combining">Combining…</span>, full: 'Combining…' };
   if (row.section === 'sent' && row.addressee) return same(`To ${agentName(rowAgent(row))}`);
   return null;
 }
@@ -505,7 +520,7 @@ function HeldNoticeLine({ count, project, onShow }: { count: number; project: st
  */
 function CountWords({ row, tip = false, wide = false, status = false }: { row: InboxListRow; tip?: boolean; wide?: boolean; status?: boolean }) {
   const now = useMinuteClock(rowWait(row.delivery) !== null);
-  const words = countWords(row, now, status);
+  const words = useContext(InArchivedGroup) && inboxRowArchived(row) ? null : countWords(row, now, status);
   if (!words) return null;
   const quiet = row.section === 'quiet' ? ' ib-qlabel' : '';
   if (wide) {
@@ -705,22 +720,10 @@ export const FULL_WORDS_MIN_LIST_WIDTH = 1150;
  * list. In one project's list (`filtered`) the first column holds the marks alone.
  * A list with a pinned row adds the pin's column just left of the open counts.
  */
-/**
- * What a row's lead (`LeadLine`: the agents and the project) draws: the project and its mark unless the list leaves
- * the project out (Project off, or one project's list), and the agents' tiles unless Agent icons is off (the list
- * column's class hides them, their names stay for a screen reader).
- */
-function leadParts(filtered: boolean, noAgents: boolean): { project: boolean; agents: boolean } {
-  return { project: !filtered, agents: !noAgents };
-}
-
-/** A name-first row's second line draws nothing (`leadParts`): only then is it folded away; otherwise the row is as it always was. */
-function leadEmpty(filtered: boolean, noAgents: boolean): boolean {
-  const parts = leadParts(filtered, noAgents);
-  return !parts.project && !parts.agents;
-}
-
 /** Settings → Rows' choices a row reads beyond the list column's classes (listLook.ts). */
+/** The list is picking rows (rowPicks.ts): the row is a toggle, filled while picked. */
+type PickState = { picking: boolean; picked: boolean };
+
 interface RowLook {
   noPreview: boolean;
   relative: boolean;
@@ -735,7 +738,7 @@ interface RowLook {
   noPulls: boolean;
 }
 
-function WideRow({ row, project, away, selected, filtered, lit, pinned, pinColumn, keys, full, pill, noPreview, relative, statusMark, noPulls, onOpen, onUnstar, tint, tagName }: RowTintProps & { onUnstar?: () => void; row: InboxListRow; project: string; away: boolean; selected: boolean; filtered: boolean; lit: boolean; pinned: boolean; pinColumn: boolean; keys?: string; full: boolean; pill: boolean; onOpen: () => void } & Omit<RowLook, 'titleFirst' | 'timeBelow' | 'noAgents'>) {
+function WideRow({ row, project, away, selected, filtered, lit, pinned, pinColumn, keys, full, pill, noPreview, relative, statusMark, noPulls, picking, picked, onOpen, onUnstar, tint, tagName }: PickState & RowTintProps & { onUnstar?: () => void; row: InboxListRow; project: string; away: boolean; selected: boolean; filtered: boolean; lit: boolean; pinned: boolean; pinColumn: boolean; keys?: string; full: boolean; pill: boolean; onOpen: () => void } & Omit<RowLook, 'titleFirst' | 'timeBelow' | 'noAgents'>) {
   const [kbd, focus] = useKeyboardFocus(rowHasBadge(row));
   const wordsId = useId();
   const card = cardOf(row);
@@ -747,7 +750,8 @@ function WideRow({ row, project, away, selected, filtered, lit, pinned, pinColum
     <>
     <button
       type="button"
-      className={`ib-row${row.unread ? ' ib-u' : ''}${sent ? ' ib-sent' : ''}${selected ? ' ib-sel' : ''}`}
+      className={`ib-row${row.unread ? ' ib-u' : ''}${sent ? ' ib-sent' : ''}${selected ? ' ib-sel' : ''}${picked ? ' ib-picked' : ''}`}
+      aria-pressed={picking ? picked : undefined}
       onPointerDown={notePressPointer}
       onClick={(event) => pressRow(event, row.thread_id, onOpen, onUnstar)}
       aria-current={selected ? 'true' : undefined}
@@ -804,6 +808,7 @@ function RowWithAction({
   onMarkRead,
   onMarkUnread,
   onSendNow,
+  onUnarchive,
   children,
 }: {
   row: InboxListRow;
@@ -813,14 +818,15 @@ function RowWithAction({
   onMarkRead?: (row: InboxListRow) => void;
   onMarkUnread?: (row: InboxListRow) => void;
   onSendNow?: (row: InboxListRow) => void;
+  onUnarchive?: (row: InboxListRow) => void;
   children: ReactNode;
 }) {
   // The action toggles (owner, 2026-10-31): on a read row (the row menu's rule, `canMarkUnread`) it is Mark unread.
   // That includes a row the person read that the list still holds in New (the thread open, or the one just left;
   // markRead.ts `seenHeldInNew`): the owner, 2026-11-02, "I opened it. I still want the ability to mark it unread."
   // Its Mark read (move it to Quiet now) stays in the row menu and the header.
-  const unread = onMarkUnread && canMarkUnread(row);
-  const offer = !unread && onMarkRead && offersRowMarkRead(row, drawn);
+  const unread = !onUnarchive && onMarkUnread && canMarkUnread(row);
+  const offer = !onUnarchive && !unread && onMarkRead && offersRowMarkRead(row, drawn);
   // A reply waiting on a busy agent that can take it now: Send now, on hover and keyboard focus as Mark read.
   const sendNow = onSendNow && !offer && !unread && row.delivery?.send_now === true && rowWait(row.delivery) !== null;
   // The action's tooltip mounts when the pointer or focus first comes into the row (RowTip.tsx), before the action
@@ -831,7 +837,7 @@ function RowWithAction({
       className="ib-rw"
       data-row={row.thread_id}
       // Archived, waiting for the list to settle without it (approval "inbox-list-view", R7): faded in place.
-      data-archived={inboxRowArchived(row) ? '' : undefined}
+      data-archived={inboxRowArchived(row) && !onUnarchive ? '' : undefined}
       data-menu={menu ? '' : undefined}
       onPointerEnter={(event) => {
         if (!actionTip && opensTips(event)) setActionTip(true);
@@ -857,6 +863,7 @@ function RowWithAction({
       }}
     >
       {children}
+      {onUnarchive && <UnarchiveAction row={row} label={`Unarchive: ${titleOf(row)}`} onUnarchive={onUnarchive} />}
       {sendNow && (
         <RowTip armed={actionTip} content={`Send now: put your reply into ${agentName(rowAgent(row))}'s running turn without waiting for it to end`}>
           <button
@@ -912,7 +919,7 @@ function RowWithAction({
   );
 }
 
-function NarrowRow({ row, project, away, selected, filtered, lit, pinned, keys, pill, compact, noPreview, relative, titleFirst, timeBelow, statusMark, noAgents, noPulls, onOpen, onUnstar, tint, tagName }: RowTintProps & { onUnstar?: () => void; row: InboxListRow; project: string; away: boolean; selected: boolean; filtered: boolean; lit: boolean; pinned: boolean; keys?: string; pill: boolean; compact: boolean; onOpen: () => void } & RowLook) {
+function NarrowRow({ row, project, away, selected, filtered, lit, pinned, keys, pill, compact, noPreview, relative, titleFirst, timeBelow, statusMark, noAgents, noPulls, picking, picked, onOpen, onUnstar, tint, tagName }: PickState & RowTintProps & { onUnstar?: () => void; row: InboxListRow; project: string; away: boolean; selected: boolean; filtered: boolean; lit: boolean; pinned: boolean; keys?: string; pill: boolean; compact: boolean; onOpen: () => void } & RowLook) {
   const [kbd, focus] = useKeyboardFocus(rowHasBadge(row));
   const wordsId = useId();
   const lead = <LeadLine row={row} project={project} filtered={filtered} />;
@@ -939,7 +946,8 @@ function NarrowRow({ row, project, away, selected, filtered, lit, pinned, keys, 
     <>
     <button
       type="button"
-      className={`ib-nrow${row.unread ? ' ib-u' : ''}${row.section === 'sent' ? ' ib-sent' : ''}${selected ? ' ib-sel' : ''}`}
+      className={`ib-nrow${row.unread ? ' ib-u' : ''}${row.section === 'sent' ? ' ib-sent' : ''}${selected ? ' ib-sel' : ''}${picked ? ' ib-picked' : ''}`}
+      aria-pressed={picking ? picked : undefined}
       data-lm-av={avatarRow ? '' : undefined}
       onPointerDown={notePressPointer}
       onClick={(event) => pressRow(event, row.thread_id, onOpen, onUnstar)}
@@ -1036,7 +1044,7 @@ function NarrowRow({ row, project, away, selected, filtered, lit, pinned, keys, 
  * at the right end of line 3. A pin with nothing else for line 3 stays at the
  * right end of line 1, before the time.
  */
-function PhoneRow({ row, project, away, filtered, lit, menu, pinned, keys, pill, compact, noPreview, relative, titleFirst, timeBelow, statusMark, noAgents, noPulls, onOpen, onUnstar, tint, tagName }: RowTintProps & { onUnstar?: () => void; row: InboxListRow; project: string; away: boolean; filtered: boolean; lit: boolean; menu: boolean; pinned: boolean; keys?: string; pill: boolean; compact: boolean; onOpen: () => void } & RowLook) {
+function PhoneRow({ row, project, away, filtered, lit, menu, pinned, keys, pill, compact, noPreview, relative, titleFirst, timeBelow, statusMark, noAgents, noPulls, picking, picked, onOpen, onUnstar, tint, tagName }: PickState & RowTintProps & { onUnstar?: () => void; row: InboxListRow; project: string; away: boolean; filtered: boolean; lit: boolean; menu: boolean; pinned: boolean; keys?: string; pill: boolean; compact: boolean; onOpen: () => void } & RowLook) {
   const wordsId = useId();
   // A phone: the marks only, no card (the thread shows the details).
   const guide = row.guide && row.section !== 'sent';
@@ -1065,7 +1073,8 @@ function PhoneRow({ row, project, away, filtered, lit, menu, pinned, keys, pill,
     <>
     <button
       type="button"
-      className={`ib-mrow${row.unread ? ' ib-u' : ''}${row.section === 'sent' ? ' ib-sent' : ''}`}
+      className={`ib-mrow${row.unread ? ' ib-u' : ''}${row.section === 'sent' ? ' ib-sent' : ''}${picked ? ' ib-picked' : ''}`}
+      aria-pressed={picking ? picked : undefined}
       data-lm-av={avatarRow ? '' : undefined}
       onPointerDown={notePressPointer}
       onClick={(event) => pressRow(event, row.thread_id, onOpen, onUnstar)}
@@ -1079,6 +1088,7 @@ function PhoneRow({ row, project, away, filtered, lit, menu, pinned, keys, pill,
       aria-describedby={rowHasBadge(row) ? wordsId : undefined}
       {...tintProps(tint)}
     >
+      {picking && <PickMark on={picked} />}
       <RowAvatar row={row} size={30} />
       {titleFirst ? (
         // Settings → Rows' First line "Thread name", as on a three-line row.
@@ -1171,44 +1181,6 @@ function FoldedBlocker({ rows, group }: { rows: readonly InboxListRow[]; group: 
   );
 }
 
-/**
- * A group's header: the whole header is the toggle (approval "inbox-list-groups-close"). Its chevron shows at once
- * while the pointer is on the header, as the sidebar's sections do (owner, 2026-11-08: no wait), or while keyboard
- * focus is on it. A touch never shows it, as before. `data-chev` shows it; inbox.css fades it in and out. Its own
- * state, so only this header redraws.
- */
-function GroupBand({ open, onToggle, children }: { open: boolean; onToggle: (band: HTMLButtonElement) => void; children: ReactNode }) {
-  const [hovered, setHovered] = useState(false);
-  const [focusShown, setFocusShown] = useState(false);
-  return (
-    <button
-      type="button"
-      className="ib-band"
-      aria-expanded={open}
-      data-chev={hovered || focusShown ? '' : undefined}
-      onClick={(event) => onToggle(event.currentTarget)}
-      onPointerEnter={(event) => {
-        if (event.pointerType !== 'touch') setHovered(true);
-      }}
-      onPointerLeave={() => setHovered(false)}
-      onFocus={(event) => {
-        // Keyboard focus only: a click's focus (or a tap's) shows nothing by itself.
-        let keyboard = true;
-        try {
-          keyboard = event.currentTarget.matches(':focus-visible');
-        } catch {
-          // No :focus-visible in this engine: count it as keyboard focus.
-        }
-        if (keyboard) setFocusShown(true);
-      }}
-      onBlur={() => setFocusShown(false)}
-    >
-      {children}
-      <Icon name="chevR" className="ib-band-chev" />
-    </button>
-  );
-}
-
 /** Something new came into a closed group since it was closed: an unread row whose latest agent message came after. */
 function newSince(rows: readonly InboxListRow[], since: number): boolean {
   return rows.some((row) => row.unread && Date.parse(row.last_agent_at ?? row.last_at) > since);
@@ -1233,11 +1205,13 @@ export function InboxList(props: InboxListProps) {
   const asList = view === 'list';
   // The starred threads as pills above the list, or (off, the default) the sidebar's Starred section (starredPills.ts).
   const [starredAbove, setStarredAbove] = useStarredAbove(props.rememberLook !== false);
+  const showArchived = useShowArchived();
   // Settings → Rows' "Project" off: every row drawn as one project's list draws it (no project, its columns).
   const noProject = props.filtered || look.hideProject;
   // Another project on a phone: the list starts at its top. The list itself stays mounted (its Quiet fold and,
   // across a resize past the phone width, its scroll are kept).
   const bodyRef = useRef<HTMLDivElement>(null);
+  const pick = useListPicks({ sections: props.sections, isOpen: (id) => (asList && id !== 'snoozed') || groups.state(id).open, body: bodyRef, bulk: props.bulk, phone: props.phone === true, narrow: props.narrow === true, scope: props.scope ?? null, machines: props.machines, pinned: props.pinned, snoozes: props.onSnooze !== undefined, snoozesOf: props.snoozesOf, sectionOf: (id) => props.sections.find((section) => section.threads.some((r) => r.thread_id === id))?.id ?? null });
   // ↑ ↓ Home End move focus between the rows (listKeys.ts), only while a row or the Quiet band has it.
   const listKey = (move: ListMove) => ({
     when: (event: KeyboardEvent) => {
@@ -1414,9 +1388,9 @@ export function InboxList(props: InboxListProps) {
       const row = section.threads.find((r) => r.thread_id === threadId);
       if (row) return row;
     }
-    return null;
+    return props.archived?.rowOf(threadId) ?? null;
   };
-  const sectionOf = (threadId: string) => props.sections.find((section) => section.threads.some((r) => r.thread_id === threadId))?.id ?? null;
+  const sectionOf = (threadId: string) => props.sections.find((section) => section.threads.some((r) => r.thread_id === threadId))?.id ?? (props.archived?.rowOf(threadId) ? 'archived' : null);
   const onRowAction = props.onRowAction;
   // H on a row the keyboard is on (approval "inbox-keyboard-keys-2026-11-07", item 3): its menu opens at the Snooze
   // times, as Shift+F10 then Snooze would; nothing is snoozed until a time is picked. The open thread's own H is Thread.tsx's.
@@ -1449,11 +1423,13 @@ export function InboxList(props: InboxListProps) {
   useLayoutEffect(() => {
     latest.current = props;
   });
+  const swipeLayerRef = useRowSwipe(bodyRef, latest, onRowAction !== undefined, titleOf);
   const openRow = useCallback((row: InboxListRow) => latest.current.onOpen(row), []);
   const markRead = useCallback((row: InboxListRow) => latest.current.onMarkRead?.(row), []);
   const markUnread = useCallback((row: InboxListRow) => latest.current.onMarkUnread?.(row), []);
   const sendNow = useCallback((row: InboxListRow) => latest.current.onSendNow?.(row), []);
   const unstar = useCallback((row: InboxListRow) => latest.current.onUnstar?.(row), []);
+  const unarchive = useCallback((row: InboxListRow) => latest.current.archived?.unarchive(row), []);
   // A row's time reads "8:22 PM" today and "Oct 19" after midnight: a new day renders every row again.
   const day = new Date().toDateString();
   /** One row, the same in both views; `drawn` is the group the held list draws it in. */
@@ -1476,6 +1452,7 @@ export function InboxList(props: InboxListProps) {
       onMarkUnread={props.onMarkUnread ? markUnread : undefined}
       onSendNow={props.onSendNow ? sendNow : undefined}
       onUnstar={props.onUnstar ? unstar : undefined}
+      onUnarchive={drawn === 'archived' ? unarchive : undefined}
       day={day}
       menu={menuRow === row.thread_id}
       pinned={props.pinned?.has(row.thread_id) === true}
@@ -1490,6 +1467,10 @@ export function InboxList(props: InboxListProps) {
       statusMark={look.statusMark}
       noAgents={look.hideAgents}
       noPulls={look.hidePulls}
+      // An Archived group's row is not picked (no box), though the list is picking.
+      picking={pick.on && drawn !== 'archived'}
+      picked={pick.on && drawn !== 'archived' && pick.has(row.thread_id)}
+      onPick={pick.onRowBox}
     />
   );
   return (
@@ -1498,8 +1479,11 @@ export function InboxList(props: InboxListProps) {
       id={columnId}
       className={`ib-listcol${props.narrow ? ' ib-narrow' : ''}${resizable ? ' ib-resizable' : ''}${noProject ? ' ib-noproj' : ''}${fullWords ? ' ib-fullw' : ''}${pinColumn ? ' ib-pincol' : ''}${listLookClasses(look)}`}
       aria-label={props.title}
+      data-picking={pick.on ? '' : undefined}
+      onClickCapture={pick.onClickCapture}
     >
-      <div className="ib-lhead">
+      {pick.bar}
+      <div className="ib-lhead" hidden={pick.on}>
         <SidebarTrigger />
         {props.onRefresh ? (
           <h1 dir="auto" className="ib-lhead-h">
@@ -1603,6 +1587,8 @@ export function InboxList(props: InboxListProps) {
             onCustomize={props.onCustomizeRows}
             view={props.rememberLook !== false ? { value: view, onChange: setView } : undefined}
             starredAbove={props.rememberLook !== false && props.starred ? { on: starredAbove, onChange: setStarredAbove } : undefined}
+            onSelect={pick.start}
+            showArchived={props.archived && props.rememberLook !== false ? { on: showArchived, onChange: props.archived.setOn } : undefined}
             tagColours={props.tagColours?.setShow ? { on: props.tagColours.show, onChange: props.tagColours.setShow } : undefined}
           />
         )}
@@ -1655,7 +1641,9 @@ export function InboxList(props: InboxListProps) {
           disabled={!onRowAction}
           held={props.selectedThreadId !== null}
           phone={props.phone === true}
+          picks={pick.menu}
         >
+          {onRowAction && <RowSwipeLayer ref={swipeLayerRef} />}
           {props.stale}
           {props.ask}
           {awayLines.map((line) => (
@@ -1691,6 +1679,7 @@ export function InboxList(props: InboxListProps) {
             const fresh = !state.open && newSince(section.threads, state.since);
             return (
               <div key={section.id} className="ib-group" data-section-id={section.id} role="group" aria-label={section.label}>
+                {pick.groupBox(section, open)}
                 <GroupBand
                   open={open}
                   onToggle={(band) => {
@@ -1711,8 +1700,10 @@ export function InboxList(props: InboxListProps) {
               </div>
             );
           })}
+          {props.archived && showArchived && <ArchivedGroup host={props.archived} renderRow={renderRow} phone={props.phone === true} onSearch={props.onSearch} />}
           </LazyRowTips.Provider>
         </ThreadRowMenu>
+      {pick.sheet}
       {props.reconnecting && (
         <p className="ib-relink" data-inbox-reconnecting="">
           Reconnecting…
@@ -1723,124 +1714,31 @@ export function InboxList(props: InboxListProps) {
   );
 }
 
-interface ListRowProps extends RowTintFields {
-  row: InboxListRow;
-  /** The row's project as the window names it (`windowProjectNames`; another machine's carries that machine's name). */
-  project: string;
-  /** Its machine is away (asleep, or needing an update): the row is greyed, its thread opens when the machine is back. */
-  away: boolean;
-  /** The group the row sits in on screen. */
-  drawn: InboxListGroupId;
-  shape: 'wide' | 'narrow' | 'phone';
-  /** A wide row in a list at least FULL_WORDS_MIN_LIST_WIDTH wide: the full words and the badge's words. */
-  full: boolean;
-  filtered: boolean;
-  selected: boolean;
-  lit: boolean;
-  onOpen: (row: InboxListRow) => void;
-  onMarkRead?: (row: InboxListRow) => void;
-  onMarkUnread?: (row: InboxListRow) => void;
-  onSendNow?: (row: InboxListRow) => void;
-  onUnstar?: (row: InboxListRow) => void;
-  /** Today's date: the row's time is written against it (shortTime). */
-  day: string;
-  /** Its right-click menu is open (RowMenu.tsx): the muted background. */
-  menu: boolean;
-  /** Pinned to the sidebar: a small pin on the row's right (`PinMark`). */
-  pinned: boolean;
-  /** A wide row in a list that has a pinned row: every row draws the pin's column, so the columns line up. */
-  pinColumn: boolean;
-  /** `aria-keyshortcuts` for the row's menu (Shift+F10), when the list has one. */
-  keys?: string;
-  /** "Highlight thread subject" (listLook.ts): the title in its pill. */
-  pill: boolean;
-  /** "Compact rows" (listLook.ts): a three-line or phone row's title on line 1. */
-  compact: boolean;
-  /** Settings → Rows' "Grey line under the name" None (listLook.ts `hidePreview`): no grey preview on the row. */
-  noPreview?: boolean;
-  /** Settings → Rows' Time "Relative" (listLook.ts `relativeTime`). */
-  relative?: boolean;
-  /** Settings → Rows' First line "Thread name" (listLook.ts `titleFirst`): three-line and phone rows. */
-  titleFirst?: boolean;
-  /** Settings → Rows' Time position "Under the preview" (listLook.ts `timeBelow`): three-line and phone rows. */
-  timeBelow?: boolean;
-  /** Settings → Rows' Show → Status mark (listLook.ts `statusMark`): every shape. */
-  statusMark?: boolean;
-  /** Settings → Rows' Show → Agent icons off (listLook.ts `hideAgents`); the list column's class hides the tiles. */
-  noAgents?: boolean;
-  /** Settings → Rows' Pull requests off (listLook.ts `hidePulls`): no PR mark at the row's end. */
-  noPulls?: boolean;
-}
-
 /**
  * One row of the list, in the shape the list draws. Every list read brings new
  * row objects, so it is memoized on the row's content, not its identity: a
  * list update renders only the rows that changed.
  */
 export const ListRow = memo(
-  function ListRow({ row, project, away, drawn, shape, full, filtered, selected, lit, onOpen, onMarkRead, onMarkUnread, onSendNow, onUnstar, menu, pinned, pinColumn, keys, pill, compact, noPreview = false, relative = false, titleFirst = false, timeBelow = false, statusMark = false, noAgents = false, noPulls = false, tint, tintName, tintAlso }: ListRowProps) {
-    const open = () => onOpen(row);
+  function ListRow({ row, project, away, drawn, shape, full, filtered, selected, lit, onOpen, onMarkRead, onMarkUnread, onSendNow, onUnstar, onUnarchive, menu, pinned, pinColumn, keys, pill, compact, noPreview = false, relative = false, titleFirst = false, timeBelow = false, statusMark = false, noAgents = false, noPulls = false, picking = false, picked = false, onPick, tint, tintName, tintAlso }: ListRowProps) {
+    const open = () => onOpen(row), pickState = { picking, picked };
     const unstarRow = onUnstar && pinned ? () => onUnstar(row) : undefined;
     const rowLook: RowLook = { noPreview, relative, titleFirst, timeBelow, statusMark, noAgents, noPulls };
     const tagName = <RowTagName tint={tint} tintName={tintName} tintAlso={tintAlso} />;
-    if (shape === 'phone') return <PhoneRow row={row} project={project} away={away} filtered={filtered} lit={lit} menu={menu} pinned={pinned} keys={keys} pill={pill} compact={compact} {...rowLook} onOpen={open} onUnstar={unstarRow} tint={tint} tagName={tagName} />;
+    if (shape === 'phone') return <PhoneRow row={row} project={project} away={away} filtered={filtered} lit={lit} menu={menu} pinned={pinned} keys={keys} pill={pill} compact={compact} {...rowLook} {...pickState} onOpen={open} onUnstar={unstarRow} tint={tint} tagName={tagName} />;
     return (
-      <RowWithAction row={row} drawn={drawn} menu={menu} onMarkRead={onMarkRead} onMarkUnread={onMarkUnread} onSendNow={onSendNow}>
+      <RowWithAction row={row} drawn={drawn} menu={menu} onMarkRead={picking ? undefined : onMarkRead} onMarkUnread={picking ? undefined : onMarkUnread} onSendNow={picking ? undefined : onSendNow} onUnarchive={picking ? undefined : onUnarchive}>
+        {picking && onPick && <PickBox row state={picked ? 'all' : 'none'} label={`Select ${titleOf(row)}`} onPick={(event) => onPick(row, event)} />}
         {shape === 'narrow' ? (
-          <NarrowRow row={row} project={project} away={away} filtered={filtered} lit={lit} pinned={pinned} keys={keys} selected={selected} pill={pill} compact={compact} {...rowLook} onOpen={open} onUnstar={unstarRow} tint={tint} tagName={tagName} />
+          <NarrowRow row={row} project={project} away={away} filtered={filtered} lit={lit} pinned={pinned} keys={keys} selected={selected} pill={pill} compact={compact} {...rowLook} {...pickState} onOpen={open} onUnstar={unstarRow} tint={tint} tagName={tagName} />
         ) : (
-          <WideRow row={row} project={project} away={away} filtered={filtered} lit={lit} pinned={pinned} pinColumn={pinColumn} keys={keys} selected={selected} full={full} pill={pill} noPreview={noPreview} relative={relative} statusMark={statusMark} noPulls={noPulls} onOpen={open} onUnstar={unstarRow} tint={tint} tagName={tagName} />
+          <WideRow row={row} project={project} away={away} filtered={filtered} lit={lit} pinned={pinned} pinColumn={pinColumn} keys={keys} selected={selected} full={full} pill={pill} noPreview={noPreview} relative={relative} statusMark={statusMark} noPulls={noPulls} {...pickState} onOpen={open} onUnstar={unstarRow} tint={tint} tagName={tagName} />
         )}
       </RowWithAction>
     );
   },
-  (a, b) =>
-    a.shape === b.shape &&
-    a.project === b.project &&
-    a.away === b.away &&
-    a.full === b.full &&
-    a.drawn === b.drawn &&
-    a.filtered === b.filtered &&
-    a.selected === b.selected &&
-    a.lit === b.lit &&
-    a.day === b.day &&
-    a.menu === b.menu &&
-    a.pinned === b.pinned &&
-    a.pinColumn === b.pinColumn &&
-    a.keys === b.keys &&
-    a.pill === b.pill &&
-    a.compact === b.compact &&
-    a.noPreview === b.noPreview &&
-    a.relative === b.relative &&
-    a.titleFirst === b.titleFirst &&
-    a.timeBelow === b.timeBelow &&
-    a.statusMark === b.statusMark &&
-    a.noAgents === b.noAgents &&
-    a.noPulls === b.noPulls &&
-    sameTint(a, b) &&
-    a.onOpen === b.onOpen &&
-    a.onMarkRead === b.onMarkRead &&
-    a.onMarkUnread === b.onMarkUnread &&
-    a.onSendNow === b.onSendNow &&
-    a.onUnstar === b.onUnstar &&
-    sameValue(a.row, b.row),
+  sameListRow,
 );
-
-/** Deep equality over JSON-shaped values (a list row). */
-function sameValue(a: unknown, b: unknown): boolean {
-  if (a === b) return true;
-  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false;
-  if (Array.isArray(a)) {
-    if (!Array.isArray(b) || a.length !== b.length) return false;
-    for (let i = 0; i < a.length; i++) if (!sameValue(a[i], b[i])) return false;
-    return true;
-  }
-  if (Array.isArray(b)) return false;
-  const ka = Object.keys(a);
-  if (ka.length !== Object.keys(b).length) return false;
-  for (const k of ka) if (!sameValue((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k])) return false;
-  return true;
-}
 
 /** The guided review mark drops its label to its icon when the row is short of room: only then does it need a tooltip. */
 function guideLabelHidden(trigger: Element): boolean {

@@ -74,6 +74,14 @@ export interface InboxPull {
    * and changes it. Absent on this Inbox's own, and on a PR both list.
    */
   machine?: string;
+  /** The head the person last opened this PR at, on the machine that lists it (server's inbox-pull-looked.ts); absent when never. */
+  looked?: InboxPullLooked;
+}
+
+/** A look at a PR: the head commit shown and when, in ms since the epoch. */
+export interface InboxPullLooked {
+  sha: string;
+  at: number;
 }
 
 /**
@@ -105,8 +113,11 @@ export interface InboxPullLink {
   handed_to?: string | null;
   /** The agent's last message there: what Reply answers, and its words, cut. */
   last: { message_id: string; preview: string; at: string } | null;
-  /** The thread's latest Guided Review, when the agent sent one; `review`: sent for a verdict (it opens as Start review). */
-  guide: { message_id: string; title: string; steps: number; review: boolean } | null;
+  /**
+   * The thread's latest Guided Review, when the agent sent one; `review`: sent for a verdict (it opens as Start review);
+   * `session`: the session that sent it (absent from an older Inbox).
+   */
+  guide: { message_id: string; title: string; steps: number; review: boolean; session?: string | null } | null;
   /** `owner` only: what the hand-off asked for first (a guided review, or the person's own curation); absent for an older choice. */
   ask?: "guide" | "custom";
 }
@@ -160,8 +171,9 @@ export interface InboxPullsAnswer {
    * The merged board only (`?machines=1`, a machine linked): each linked machine that takes `pulls`, by `ibx_` id.
    * `read_at`: when its board was last read (its PRs are that read's); `pending`: a read is under way, so ask again;
    * `name`: what the person calls it (the bulk Merge confirm says which machine merges).
+   * `looked`: it keeps the PR page's look at its PRs (mark `pulls-looked`); an older one is not sent it.
    */
-  machines?: Record<string, { read_at: string | null; pending: boolean; name?: string }>;
+  machines?: Record<string, { read_at: string | null; pending: boolean; name?: string; looked?: true }>;
   /** The merged board only: the linked machines' risk judgments of the PRs they list, by pull key. */
   far_risk?: Record<string, InboxPullRiskJudgment>;
 }
@@ -256,7 +268,12 @@ export interface InboxPullDiffAnswer {
   description?: string | null;
 }
 
-export type InboxPullDiffScope = "layer" | "stack";
+/**
+ * `layer`: the PR's own diff. `stack`: from the branch the lowest open layer is based on to this layer's head.
+ * `range` (with `from`, the range's lowest layer's key): from the branch that layer is based on to this layer's head,
+ * "Layers i–j" as one diff. `since` (with `from`, the head the person last opened): from that commit to this layer's head.
+ */
+export type InboxPullDiffScope = "layer" | "stack" | "range" | "since";
 
 /**
  * One changed file's whole text at both ends of its diff, so the viewer's gaps can open. Both null when there is

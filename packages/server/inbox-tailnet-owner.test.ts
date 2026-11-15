@@ -796,7 +796,9 @@ describe("a linked machine gains none of it", () => {
     // A linked machine may run PR actions with this computer's GitHub sign-in (mark `pulls`, inbox-machines.md "The PR
     // board"). These are every door route that runs this computer's gh / glab: the board's reads, a thread's PRs (read
     // and stored here; gh only reads their state), and the three writes. A new PR route or `forge` write fails here until it is named.
-    expect(all.filter((name) => name.includes("pulls"))).toEqual([
+    // "Changed since you looked" (`POST pulls/looked`) is a record kept here, a `set`: it runs no gh.
+    expect(doorWriteKind("pulls/looked")).toBe("set");
+    expect(all.filter((name) => name.includes("pulls") && name !== "POST pulls/looked")).toEqual([
       "GET pulls",
       "GET pulls/(risk|details|diff|file|repo-files|repo-file|avatar|media|media/sizes)",
       "POST pulls/(close|reopen|merge)",

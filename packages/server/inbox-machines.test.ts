@@ -1997,6 +1997,14 @@ describe("a star or Priority on a linked machine's thread lives on that machine 
       expect(await shownOn(a.port)).toBe(false);
       expect((await post(b.port, "/api/inbox/tag-colours", { show: true, at: "2026-11-13T13:00:00.000Z" })).status).toBe(200);
       await waitFor("B's switch on A", async () => (await shownOn(a.port)) === true, 30_000);
+
+      // A pick from a machine whose clock runs far ahead is held to B's now plus a few minutes: B's next real pick wins on both.
+      expect((await forward(a.port, bId, "tag-colours", { tag: bRelease.id, colour: "green", at: "2099-01-01T00:00:00.000Z" })).status).toBe(200);
+      expect(Date.parse(b.store.tagLook(bRelease.id)!.at)).toBeLessThan(Date.now() + 10 * 60_000);
+      await waitFor("the fast clock's pick on A", async () => (await colourOf(a.port, "release")) === "green", 30_000);
+      expect((await post(b.port, "/api/inbox/tag-colours", { tag: bRelease.id, colour: "red", at: new Date().toISOString() })).status).toBe(200);
+      expect(b.store.tagLook(bRelease.id)?.colour).toBe("red");
+      await waitFor("B's real pick on A", async () => (await colourOf(a.port, "release")) === "red", 30_000);
     } finally {
       a.stop();
       b.stop();

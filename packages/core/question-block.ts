@@ -588,6 +588,11 @@ const matchRecommendation = (
   plainBullets = false,
 ): number[] => {
   const match = (candidate: string): number => {
+    // The choice written exactly so first: `Recommended: Yes!` names `Yes!`, not a `Yes` before it.
+    const written = candidate.trim();
+    if (!written) return -1;
+    const exact = choices.findIndex((c, i) => c.label === written || raws[i]?.trim() === written || (names[i] ?? []).includes(written));
+    if (exact !== -1) return exact;
     const target = normalizeQuestionText(candidate);
     if (!target) return -1;
     return choices.findIndex(
@@ -1818,6 +1823,10 @@ export const isRecommendedQuestionAnswer = (
   }
   const sameSet = (labels: readonly string[]): boolean => {
     if (answer.other?.trim()) return false;
+    // Picks that are all exact choice labels compare exactly: "ship it." is not "Ship it" when both are choices.
+    const exact = new Set(labels);
+    const known = new Set(context.choiceLabels ?? labels);
+    if (answer.selected.every((l) => known.has(l))) return answer.selected.length === exact.size && answer.selected.every((l) => exact.has(l));
     const want = new Set(labels.map(normalizeQuestionText));
     const got = new Set(answer.selected.map(normalizeQuestionText));
     return want.size === got.size && [...want].every((l) => got.has(l));

@@ -47,9 +47,10 @@ import {
   codeRangeOf,
   compareVideoTimes,
   inboxViewKind,
-  type InboxCodeRange,
+  relocateCodeRange,
 } from '../attachments';
 import { whenTime, formatBytes } from '../format';
+export { relocateCodeRange };
 import { useRefRepo } from '../links';
 import { inboxMarkdownImageBase } from '../images';
 import { useCommentPictures } from '../commentPictures';
@@ -79,6 +80,7 @@ import { CommentCount, EarlierSection, commentsLabel } from './EarlierSection';
 import { earlierCommentsOn } from '../earlierComments';
 import { FullScreenMore } from './OpenIn';
 import { fileSwipeMode, prefersReducedMotion, useFileSwipe } from '../fileSwipe';
+import { useTouchStepBar } from '../touchStepBar';
 import { FileSwipeCard } from './FileSwipeCard';
 import { ImageSwipePeek, isImageStep } from './ImageSwipePeek';
 import { OptionCaption } from './OptionCaption';
@@ -336,24 +338,6 @@ export function openPaneUnsaved(): boolean {
   return openPane?.unsaved() ?? false;
 }
 
-/**
- * Where a kept line comment's lines are in the file now: where they were when they still read the same, else the
- * nearest place they do (the file was edited above them), else null (they changed: the words wait, on nothing).
- */
-export function relocateCodeRange(range: InboxCodeRange, text: string): { lineStart: number; lineEnd: number } | null {
-  const lines = text.split('\n');
-  const count = range.lineEnd - range.lineStart + 1;
-  const matchesAt = (start: number) => start >= 1 && start + count - 1 <= lines.length && codeRangeMatches(range, lines.slice(start - 1, start - 1 + count).join('\n'));
-  // Every start, nearest first: a file cut far shorter still finds lines that moved a long way up.
-  const reach = Math.max(range.lineStart, lines.length);
-  for (let distance = 0; distance <= reach; distance++) {
-    for (const start of distance === 0 ? [range.lineStart] : [range.lineStart - distance, range.lineStart + distance]) {
-      if (matchesAt(start)) return { lineStart: start, lineEnd: start + count - 1 };
-    }
-  }
-  return null;
-}
-
 /** The element that scrolls the open file (a document, code, or an image at its own size). */
 function scrollerOf(pane: HTMLElement | null): HTMLElement | null {
   if (!pane) return null;
@@ -492,6 +476,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   const [menuOpen, setMenuOpen] = useState(false);
   /** Full screen (approval "inbox-one-fullscreen"): the file fills the window under one floating toolbar. */
   const full = props.full;
+  const touch = useTouchStepBar(phone, multi && !(full && optionSet));
   /** Full screen's composer: an image, a film, a recording and an HTML page draw it (the comment row of the first three goes inside it). */
   const hasComposer = full && !!props.composer && (kind === 'image' || kind === 'video' || kind === 'audio' || kind === 'html');
   /**
@@ -933,7 +918,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   // peeks in beside it, and a drag down closes, even with one file.
   const imageEdges = useRef<ImageSwipeEdges | null>(null);
   const isImageFile = kind === 'image';
-  const swipeOn = full && phone && (multi || isImageFile) && swipeMode === 'follow' && !blocked && !sheet;
+  const swipeOn = (full && phone ? multi || isImageFile : touch.tablet && multi) && swipeMode === 'follow' && !blocked && !sheet;
   /** The neighbour that way is an image drawn whole beside this one (ImageSwipePeek), not the "Next · name" card. */
   const peeks = (dir: 1 | -1) => {
     const neighbour = steps[index + dir];
@@ -965,7 +950,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     // One image alone has nowhere to step: a sideways drag is the image's own.
     keeps: isImageFile ? (dir) => !multi || (imageEdges.current?.keeps(dir) ?? false) : undefined,
     peek: peeks,
-    dismiss: isImageFile
+    dismiss: isImageFile && phone
       ? {
           can: () => imageEdges.current?.canDismiss() ?? false,
           onDismiss: () => closeRef.current(),
@@ -2583,7 +2568,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
         <div
           ref={docAreaRef}
           className={`ib-docarea${isHtml ? ' ib-html' : ''}`}
-          data-file-swipe={full && phone && multi ? swipeMode : undefined}
+          data-file-swipe={((full && phone) || touch.tablet) && multi ? swipeMode : undefined}
           data-image-peek={swipeOn && isImage && multi ? '' : undefined}
         >
           {error && (
@@ -2765,8 +2750,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
               onError={setError}
               initialFit={memory.current.get(attachment.id)?.fit}
               onFitChange={(fit) => remember(attachment.id, { fit })}
-              // A phone in full screen: the pane's follow swipe (above); elsewhere a touch screen's swipe at Fit.
-              onSwipe={multi && !(full && phone) ? (dir) => step(dir, 'key') : undefined}
+              // A phone in full screen and a touch tablet: the pane's follow swipe (above); elsewhere a touch screen's swipe at Fit.
+              onSwipe={multi && !(full && phone) && !touch.tablet ? (dir) => step(dir, 'key') : undefined}
               edgesRef={imageEdges}
               onShown={swipe.settle}
               wheelHint={wheelHint}
@@ -2838,6 +2823,9 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
               <CodeFileView
                 key={`${attachment.id}:${view.version}:${view.attachment.current?.sha256 ?? ''}`}
                 filepath={attachment.name}
+                lineScroll="vertical"
+                commentCard="plain"
+                commentMarkers="bubble"
                 contents={view.text}
                 annotations={codeAnnotations}
                 selectedAnnotationId={selectedId}
@@ -3132,9 +3120,9 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
         />
       )}
       {full ? null : <div />}
-      {!full && multi ? (
-        // Beside the thread: the stepper in the bar under the file.
-        <div className="ib-vfoot" data-view-foot="">
+      {multi && (!full || touch.bar) ? (
+        // Beside the thread, and full screen on a touch tablet (touchStepBar.ts): the stepper in the bar under the file.
+        <div className="ib-vfoot" data-view-foot="" data-touch-bar={touch.bar ?? undefined}>
           <AttachmentStepper
             steps={steps}
             index={index}
@@ -3147,9 +3135,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
             annotationCounts={annotationCounts}
           />
         </div>
-      ) : full ? null : (
-        <div />
-      )}
+      ) : full ? null : <div />}
       {full && optionSet && (
         // A question's picture choices: the caption names the choice on screen for as long as the set is open (in place of the chip).
         <OptionCaption set={optionSet} index={index} phone={phone} onStep={(dir) => {
@@ -3158,8 +3144,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
         }}
         />
       )}
-      {full && !optionSet && (
-        // The step chip (full screen only): names the new file for a moment, the end note at the ends (a one-file thread: its name once, as full screen starts). The live region says it.
+      {full && !optionSet && !touch.bar && (
+        // The step chip (full screen without a touch bar): names the new file for a moment, the end note at the ends (a one-file thread: its name once, as full screen starts). The live region says it.
         <div className={`ib-fvchip${chip ? ' ib-on' : ''}`} aria-hidden="true" data-full-view-chip={chip ? 'shown' : 'hidden'}>
           {multi && (
             <span className="ib-stepn">
@@ -3178,7 +3164,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
           )}
         </div>
       )}
-      {full && phone && multi && <FileSwipeCard swipe={swipe} steps={steps} index={index} skip={peeks} />}
+      {((full && phone) || touch.tablet) && multi && <FileSwipeCard swipe={swipe} steps={steps} index={index} skip={peeks} />}
       {full && phone && menuOpen && phonePeekHost
         ? createPortal(
             <div className="pn-inbox-peek">

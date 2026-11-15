@@ -12,6 +12,7 @@ import type { StepsSubscribe } from '../steps/useThreadSteps';
 import type { Signal } from '../signal';
 import type { ShapeReplyPart } from '../shape/addToReply';
 import type { ThreadPullReview } from '../threadPulls/ThreadPulls';
+import type { OpenFileRef } from '../components/ReferencedFilePane';
 
 export interface ThreadPaneProps {
   inReviews?: boolean;
@@ -83,6 +84,10 @@ export interface ThreadPaneProps {
   phone?: boolean;
   stacked?: boolean;
   fileStacked?: boolean;
+  /** A file a message names, open beside the thread, read only (the route's `ref=`; approval "inbox-file-refs-open-viewer"). */
+  namedFile?: OpenFileRef | null;
+  /** Open (or, with null, close) a file a message names beside the thread. Absent: references stay as before. */
+  onOpenNamedFile?: (ref: OpenFileRef | null) => void;
   remote?: boolean | null;
   onBackToList?: (fileName: string | null) => void;
   onToast?: (toast: Omit<InboxToastModel, 'id'>) => void;

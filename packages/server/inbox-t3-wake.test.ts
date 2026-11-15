@@ -36,7 +36,8 @@ afterEach(async () => {
 function fakeT3(threads: string[]) {
   const sends: Record<string, unknown>[] = [];
   const attempts: unknown[] = [];
-  const state = { fail: null as string | null, down: false };
+  /** `gate`: a send waits on it once T3 has it (`attempts`), so a test holds that send in flight. */
+  const state = { fail: null as string | null, down: false, gate: null as Promise<void> | null };
   const rpc: T3Rpc = {
     async call(name, args) {
       const threadId = args.threadId as string;
@@ -49,6 +50,7 @@ function fakeT3(threads: string[]) {
         };
       }
       attempts.push(args.clientRequestId);
+      if (state.gate) await state.gate;
       if (state.fail) throw new Error(`T3 ${name}: ${state.fail}`);
       sends.push(args);
       return { threadId, messageId: `m${sends.length}`, runId: "r", status: "queued", delivery: "queued" };
@@ -376,15 +378,25 @@ describe("a reply to a T3 thread whose Claude runs the Claude Code mod: one owne
   });
 
   test("a mod that polls again while the T3 wake's send is in flight is not handed that reply", async () => {
-    // No grant: the T3 wake sends nothing by itself here; the hand stands for its send in flight.
-    const w = await modWorld({ grant: false });
+    const w = await modWorld();
+    await w.poll();
     const sent = await w.send("Ship the worker today?");
     const replyId = await w.reply(sent.message_id, "Yes, ship it.");
-    const message = w.server.store.message(replyId)!;
-    expect(w.server.store.handover.hand(message, THREAD, "t3")).toBe(true);
+    await w.server.t3Wake.sweep();
+    // The mod's poll is stale (T3 released that Claude): the T3 wake sends, and T3 holds the send open.
+    let release!: () => void;
+    w.t3.state.gate = new Promise<void>((resolve) => (release = resolve));
+    w.clock.now += 31_000;
+    const sweep = w.server.t3Wake.sweep();
+    const end = Date.now() + 5_000;
+    while (w.t3.attempts.length === 0 && Date.now() < end) await Bun.sleep(5);
+    expect(w.t3.attempts).toEqual([`plannotator-inbox-${replyId}`]);
+    // A new Claude's mod polls while the send is in flight: it is handed nothing.
     expect(await w.poll()).toEqual([]);
-    w.server.store.handover.giveBack(replyId, THREAD);
-    expect(await w.poll()).toEqual([replyId]);
+    release();
+    await sweep;
+    expect(w.t3.sends).toHaveLength(1);
+    expect(await w.poll()).toEqual([]);
   });
 });
 

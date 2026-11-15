@@ -38,6 +38,8 @@ import {
   type InboxAnswerRefusal,
   type ParsedInboxQuestion,
 } from "@plannotator/core/inbox-questions";
+import { inboxFileQuestionTwin } from "@plannotator/core/inbox-file-question-twin";
+import { inboxTwinChoicesRefusal } from "@plannotator/core/inbox-choice-twins";
 import { withoutInboxSkillsBlock } from "@plannotator/core/skill-reference-block";
 import { inboxRowPreview, inboxRowPreviewWords } from "@plannotator/core/inbox-folding";
 import {
@@ -120,7 +122,7 @@ import { whenTime } from "@plannotator/core/inbox-format";
 import type { QuestionAnswer } from "@plannotator/core/question-block";
 import { isInboxCloudHost, isInboxCloudSession, type InboxCloudWake } from "@plannotator/core/inbox-cloud";
 import type { InboxT3WaitReason } from "@plannotator/core/inbox-types";
-import { INBOX_T3_HOST, isT3ThreadId } from "@plannotator/core/inbox-types";
+import { INBOX_T3_HOST, isInboxT3WaitReason, isT3ThreadId } from "@plannotator/core/inbox-types";
 import { INBOX_PERMISSION_FULL, INBOX_PERMISSION_SESSION_PREFIX, isInboxPermissionSession } from "@plannotator/core/inbox-permission";
 import { inboxProjectKey } from "./project-key";
 import { parseDiagramAnchor } from "@plannotator/core/diagram-anchor";
@@ -515,6 +517,9 @@ function isLivePagePath(value: unknown): value is string {
 /** An action item named where a question's answer or skip goes: it is marked on its card (Done, Can't do it). */
 /** Why an action item the person marked through the timed path (decision mode, the phone door) is refused: it goes in seconds. */
 const PERSON_MARKED_WORDS = "the person already marked it; their answer reaches you in a few seconds";
+
+/** How far ahead of this machine's clock a tag colour or switch time may be: ordinary skew between NTP-synced devices. */
+const COLOUR_AT_SLACK_MS = 5 * 60_000;
 
 function actionNotQuestion(field: string, key: string): InboxError {
   return new InboxError("validation_error", `${field}: ${key} is an action item, not a question; mark it Done or Can't do it on its card.`, { field, key });
@@ -2601,6 +2606,8 @@ export class InboxStore {
       const replyWaiting = !!replySession && !last.delivery && !(lastTo === null && sent?.checked_at);
       const connection = replyWaiting ? connectionOf(replySession!) : undefined;
       const kind = last.reply_to ? "reply" : "message";
+      // The T3 wake says why it cannot go in now: the row waits on T3, as the thread's line does.
+      const t3Wait = !last.delivery && !last.taken_back_at && isInboxT3WaitReason(last.t3_wait) ? last.t3_wait : null;
       if (lastTo) {
         const to = last.delivery ?? last.to ?? lastTo;
         // "Claude Code (another session)": a reply sent to another session of the asker's own host.
@@ -2615,6 +2622,7 @@ export class InboxStore {
           delivered: !!last.delivery,
           stuck: !last.delivery && stuck(lastTo.session, last.id),
           handed: !last.delivery && handed(lastTo.session, last.id) && !uncertain(lastTo.session, last.id),
+          waitsOnT3: t3Wait !== null,
           undelivered: !last.delivery && !askerLive(lastTo.session),
           askerEnded: false,
           wakes: !uncertain(lastTo.session, last.id),
@@ -2633,6 +2641,7 @@ export class InboxStore {
           name: null,
           ...(another ? { another_session: true } : {}),
           ...waitWire(decision),
+          ...(t3Wait && decision.state === "queued" && decision.reason !== "handed" ? { t3_wait: t3Wait } : {}),
         };
       }
       // A reply that tags agents: the owner's own delivery, never another recipient's.
@@ -2647,6 +2656,7 @@ export class InboxStore {
         delivered: !!deliveredAt,
         stuck: replyWaiting && stuck(replySession, last.id),
         handed: replyWaiting && handed(replySession, last.id) && !uncertain(replySession, last.id),
+        waitsOnT3: t3Wait !== null,
         undelivered: false,
         askerEnded,
         wakes: (wakingSession !== null || (askedSession !== null && connection != null)) && !uncertain(replySession, last.id),
@@ -2669,6 +2679,7 @@ export class InboxStore {
         ...(decision.state === "delivered" && sent?.read_by ? { read_by: sent.read_by } : {}),
         ...(decision.reason === "ended" && askingAuthor ? { asking: { host: askingAuthor.host ?? null, name: askingAuthor.name ?? null } } : {}),
         ...waitWire(decision),
+        ...(t3Wait && decision.state === "queued" && decision.reason !== "handed" ? { t3_wait: t3Wait } : {}),
       };
     }
 
@@ -4217,7 +4228,10 @@ export class InboxStore {
     const actions = parseInboxActionBlocks(body);
     // The questions inside attached Markdown files (issue #2828): after the body's, each with a key no
     // question of this message has (inboxFileQuestionKey), numbered within its file.
-    const fileQuestions = this.fileQuestionsOf(input.attachments ?? [], input.attachment_questions ?? [], [...parsed.map((q) => q.key), ...actions.map((a) => a.key)]);
+    const fileQuestions = this.fileQuestionsOf(input.attachments ?? [], input.attachment_questions ?? [], parsed, actions.map((a) => a.key));
+    // Two choices that read the same would be one answer for both (inbox-choice-twins.ts).
+    const twins = inboxTwinChoicesRefusal([...parsed, ...fileQuestions.map((f) => ({ ...f.question, file: f.attachment.name }))]);
+    if (twins) throw new InboxError("validation_error", twins.message, { field: twins.field });
     // Checked before anything is written: one id that names no open question
     // of this thread refuses the whole send.
     const superseding = this.planSupersede(threadId, id, supersedes, [...parsed, ...fileQuestions.map((f) => ({ key: f.key, replaces: f.question.replaces }))], actions);
@@ -4384,20 +4398,24 @@ export class InboxStore {
    * attachment order and each file's block order, with the record key each
    * takes (`inboxFileQuestionKey`: the file's key unless the body, an action
    * item or an earlier file has it). Only files this send attaches; an
-   * action block in a file is not read (only questions).
+   * action block in a file is not read (only questions), nor one that
+   * repeats a body question (`inboxFileQuestionTwin`).
    */
   private fileQuestionsOf(
     attachments: readonly InboxAttachment[],
     asked: NonNullable<InboxSendInput["attachment_questions"]>,
-    bodyKeys: readonly string[],
+    body: readonly ParsedInboxQuestion[],
+    actionKeys: readonly string[],
   ): { key: string; question: ParsedInboxQuestion; attachment: InboxAttachment }[] {
     if (asked.length === 0) return [];
-    const taken = new Set(bodyKeys);
+    const taken = new Set([...body.map((q) => q.key), ...actionKeys]);
+    const bodyShapes = body.map((q) => ({ key: q.key, choices: q.parsed.choices }));
     const out: { key: string; question: ParsedInboxQuestion; attachment: InboxAttachment }[] = [];
     for (const attachment of attachments) {
       const entry = asked.find((a) => a.attachment_id === attachment.id);
       if (!entry) continue;
       for (const question of entry.questions) {
+        if (inboxFileQuestionTwin({ key: question.key, choices: question.parsed.choices }, bodyShapes)) continue;
         const key = inboxFileQuestionKey(question.key, taken);
         if (key !== null) out.push({ key, question, attachment });
       }
@@ -5588,6 +5606,23 @@ export class InboxStore {
     const next: InboxMessage = { ...message, inline_images: merged };
     this.appendMessage(next, this.stamp());
     return next;
+  }
+
+  /**
+   * A file an agent's message names, made one of its attachments because the person commented on it (approval
+   * "inbox-file-refs-open-viewer"): one more line for the message, its latest snapshot with `attachment` after the ones
+   * it has. A file the message already carries (by its real path) is never added twice: that attachment is returned.
+   * Only an agent's message, and not in a resolved thread (as a comment would be refused there).
+   */
+  attachReferencedFile(messageId: string, attachment: InboxAttachment): InboxAttachment {
+    const message = this.messages.get(messageId);
+    if (!message) throw new InboxError("message_not_found", `No message ${messageId}.`);
+    if (message.author.kind !== "agent") throw new InboxError("validation_error", "message_id: only an agent's message takes a file it names.", { field: "message_id" });
+    if (this.closedByArchive(message)) throw new InboxError("thread_resolved", "This thread is resolved; reopen it to annotate.");
+    const held = (message.attachments ?? []).find((file) => file.path === attachment.path);
+    if (held) return held;
+    this.appendMessage({ ...message, attachments: [...(message.attachments ?? []), attachment] }, this.stamp());
+    return attachment;
   }
 
   /** The person's annotations in a thread still waiting for a Send (not removed, not sent). */
@@ -8071,7 +8106,7 @@ export class InboxStore {
     const when = this.colourStamp(at);
     // A pick held on the way (an outbox, a machine asleep) can land after a newer one: the newer stays.
     const kept = this.tagColourState.looks.get(tag.id);
-    if (kept?.by === "person" && Date.parse(kept.at) > Date.parse(when)) return kept;
+    if (kept?.by === "person" && this.colourKeptAt(kept.at) > Date.parse(when)) return kept;
     const look: InboxTagLook = { colour, by: "person", at: when };
     const looks = new Map(this.tagColourState.looks).set(tag.id, look);
     const recent = typeof colour === "string" && colour.startsWith("#") ? [{ colour, at: when }, ...this.tagColourState.recent.filter((r) => r.colour !== colour)].slice(0, INBOX_TAG_RECENT_MAX) : this.tagColourState.recent;
@@ -8084,17 +8119,30 @@ export class InboxStore {
     if (typeof on !== "boolean") throw new InboxError("validation_error", "show: true or false.", { field: "show" });
     const when = this.colourStamp(at);
     const kept = this.tagColourState.show;
-    if (kept && Date.parse(kept.at) > Date.parse(when)) return this.tagColours();
+    if (kept && this.colourKeptAt(kept.at) > Date.parse(when)) return this.tagColours();
     this.commitTagColours({ ...this.tagColourState, show: { on, at: when } });
     return this.tagColours();
   }
 
-  /** When the person chose, as an ISO time (so times compare as times); none given: now. */
+  /**
+   * When the person chose, as an ISO time (so times compare as times); none given: now. A window or machine whose clock
+   * runs ahead is held to this machine's now plus a few minutes, so its pick cannot outrank every later one.
+   */
   private colourStamp(at: unknown): string {
     if (at === undefined || at === null) return this.stamp();
     const ms = typeof at === "string" ? Date.parse(at) : Number.NaN;
     if (Number.isNaN(ms)) throw new InboxError("validation_error", "at: an ISO time.", { field: "at" });
-    return new Date(ms).toISOString();
+    return new Date(Math.min(ms, this.now().getTime() + COLOUR_AT_SLACK_MS)).toISOString();
+  }
+
+  /**
+   * A kept colour time as it compares with a new pick. One already ahead of this clock (a fast machine, or written
+   * before the cap) counts as the start of the allowance, so a pick from a window up to that far behind still wins.
+   */
+  private colourKeptAt(at: string): number {
+    const ms = Date.parse(at);
+    const now = this.now().getTime();
+    return ms > now ? now - COLOUR_AT_SLACK_MS : ms;
   }
 
   private commitTagColours(state: InboxTagColoursFile): void {

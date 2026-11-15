@@ -27,6 +27,8 @@ import { isServedTailnetHost, normalizeTailnetLogin, TAILSCALE_LOGIN_HEADER } fr
 import { tailnetNotOwnerResponse } from "@plannotator/shared/inbox/tailnet-refusal";
 import { loadConfig, resolveInboxTailscaleAllow } from "@plannotator/shared/config";
 import { tailnetAudience, type TailnetAudience } from "@plannotator/shared/tailnet-audience";
+import { DOOR_SECRET_HEADER, hasCfEdgeHeaders, isCfAccessHost } from "@plannotator/shared/inbox/cf-access";
+import { doorSecretMatches } from "@plannotator/shared/inbox/cf-access-door";
 
 export type { TailnetAudience } from "@plannotator/shared/tailnet-audience";
 
@@ -39,6 +41,11 @@ interface SessionTailnetState {
 }
 
 let state: SessionTailnetState = { owners: [], hostname: null, httpsPort: null };
+let door: { secret: string; host: string } | null = null;
+
+export function setSessionDoor(secret: string, host: string): void {
+  door = { secret, host: host.toLowerCase() };
+}
 
 /** Who counts as this machine's owner over the tailnet, or why nobody does. */
 export type TailnetOwners =
@@ -101,6 +108,11 @@ function isServedHost(hostHeader: string | null, hostname: string, httpsPort: nu
 
 /** Who sent a request to this process's tailnet-published session. */
 export function sessionTailnetAudience(req: Request): TailnetAudience {
+  if (door) {
+    const given = req.headers.get(DOOR_SECRET_HEADER);
+    if (given !== null) return doorSecretMatches(door.secret, given) && isCfAccessHost(req.headers.get("host"), door.host) ? "owner" : "peer";
+    if (hasCfEdgeHeaders(req.headers)) return "peer";
+  }
   return tailnetAudience(req.headers, state.owners);
 }
 
@@ -139,6 +151,7 @@ export function refuseTailnetPeer(req: Request): Response | null {
 /** Test-only: forget the owner and served address. */
 export function resetSessionTailnetForTests(): void {
   state = { owners: [], hostname: null, httpsPort: null };
+  door = null;
 }
 
 /** What `createAIRuntime` takes for a tailnet-published session (`tailnet`). */
