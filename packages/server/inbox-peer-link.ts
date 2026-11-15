@@ -27,6 +27,13 @@ import { inboxPeerSessionNames } from "./inbox-session-names";
 import type { InboxLinkRecord } from "./inbox-links";
 import { MACHINE_WINDOW_HEADER, type InboxOutbox, type OutboxAnswer, type OutboxEntry } from "./inbox-outbox";
 import type { InboxPeerTransport } from "./inbox-transport";
+import { farArchivedPage, type FarArchived } from "./inbox-archived-merged";
+import { readShowArchived, type InboxShowArchived } from "./inbox-show-archived";
+
+/** How long the Archived group waits for a linked machine's page before it shows the one that machine last gave. */
+export const FAR_ARCHIVED_WAIT_MS = 2_000;
+/** The asks whose last page is kept per machine (the group's project and how many rows it shows). */
+const FAR_ARCHIVED_KEPT = 8;
 
 /** The oldest link protocol this Inbox links to: health's `machine_links`. */
 export const MACHINE_LINKS_PROTOCOL = 1;
@@ -62,7 +69,7 @@ export interface PeerRecord {
  * thread's tag): this Inbox asks for each (`<event>=1` on its stream), reads that machine's list again when one comes,
  * and tells its own windows the same event (approval "inbox-linked-marks"). A new mark adds its event here.
  */
-export const PEER_REREAD_EVENTS = ["snoozes", "pins", "priority", "agent-faces", "tags"] as const;
+export const PEER_REREAD_EVENTS = ["snoozes", "pins", "priority", "agent-faces", "tags", "show-archived"] as const;
 export type PeerRereadEvent = (typeof PEER_REREAD_EVENTS)[number];
 const isRereadEvent = (event: string): event is PeerRereadEvent => (PEER_REREAD_EVENTS as readonly string[]).includes(event);
 
@@ -84,6 +91,8 @@ export interface PeerList {
   agents: InboxAgentsGroup | null;
   session_labels: Record<string, string>;
   session_titles: Record<string, string>;
+  /** Its "Show archived" switch (inbox-show-archived.ts); null from an Inbox before it. */
+  show_archived: InboxShowArchived | null;
 }
 
 /**
@@ -211,6 +220,7 @@ export class PeerLink {
   private cardsWanted = false;
   private cardsReading: Promise<void> | null = null;
   private cardsAgain = false;
+  private readonly archived = new Map<string, FarArchived["page"]>();
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
   private deliveriesTimer: ReturnType<typeof setTimeout> | null = null;
   private deliveriesSessions = false;
@@ -488,6 +498,7 @@ export class PeerLink {
       agents: inboxPeerAgentsGroup(list.agents, this.id),
       session_labels: inboxPeerSessionNames(list.session_labels),
       session_titles: inboxPeerSessionNames(list.session_titles),
+      show_archived: list.show_archived === undefined ? null : readShowArchived(list.show_archived),
     };
     this.options.onChange();
     return true;
@@ -543,6 +554,29 @@ export class PeerLink {
       seen_seq: typeof model.seen_seq === "number" ? model.seen_seq : null,
     };
     return true;
+  }
+
+  // ── Its archived threads: read only when a window's Archived group asks, never on a timer. ──
+
+  /**
+   * Its archived page for one ask (`?limit=…&project=…`). Online, read now; asleep, slow or failing, the page it last
+   * gave for the same ask, marked `away`. A door that predates the route (404) shows nothing.
+   */
+  async archivedPage(search: string): Promise<FarArchived> {
+    const held = this.archived.get(search) ?? null;
+    if (this.state !== "online") return { machine: this.id, page: held, away: true };
+    try {
+      const response = await this.request("threads/archived", search, { method: "GET", headers: {}, timeoutMs: FAR_ARCHIVED_WAIT_MS });
+      if (response.status === 404) return { machine: this.id, page: null, away: false };
+      if (!response.ok) return { machine: this.id, page: held, away: true };
+      const page = farArchivedPage(this.id, await response.json());
+      this.archived.delete(search);
+      this.archived.set(search, page);
+      for (const old of this.archived.keys()) if (this.archived.size > FAR_ARCHIVED_KEPT) this.archived.delete(old);
+      return { machine: this.id, page, away: false };
+    } catch {
+      return { machine: this.id, page: held, away: true };
+    }
   }
 
   // ── Requests for the window, and the outbox. ──

@@ -77,6 +77,7 @@ import { InboxApiError, readJson } from './apiError';
 import { cardUrl, learnCards, type CardsModel } from './cardsWire';
 export type { CardsModel } from './cardsWire';
 import { gzipped, wholeBody } from './apiBody';
+import { referencedFileUrl, type OpenInFileCode, type OpenInFileScope, type ReferencedFileScope, type ReferencedFileView } from './openInWire';
 export { InboxApiError };
 import type { InboxSearchAnswer, InboxSearchFrom, InboxSearchGroupId, InboxSearchSort, InboxSearchStatus } from '@plannotator/core/inbox-search';
 import type {
@@ -336,6 +337,8 @@ export interface ArchivedModel {
   projects: { id: string; name: string; archived: number }[];
   /** Archived threads in the filtered scope, beyond this page too. */
   total: number;
+  /** `machines=1`: each linked machine asked, `away` when its rows are the ones it last gave. */
+  machines?: Record<string, { away: boolean }>;
   offset: number;
   limit: number;
   threads: InboxListRow[];
@@ -592,6 +595,8 @@ export interface SettingsModel {
   experimental?: InboxExperimentalSettings;
   /** The Board (config.json `inboxBoard`): off unless the person turned it on. Absent from an Inbox before the switch (the Board is then always there). */
   board?: { on: boolean };
+  /** The list's "Show archived" (config.json `inboxShowArchived`), the same on every linked machine. Absent from an older Inbox. */
+  show_archived?: { on: boolean; rev: number };
   /** Thread steps (config.json `inboxSteps`, approval "inbox-thread-steps"): off unless the person turned them on. Absent from an older Inbox (no steps then). */
   steps?: { on: boolean };
   /** Bro mode (config.json `inboxBro`, approval "bro-mode"): off unless the person turned it on. Absent from an older Inbox (no row then). */
@@ -911,7 +916,6 @@ function refuseContested(path: string): void {
   if (named && isContested(decodeURIComponent(named))) throw new InboxApiError(409, 'machine_conflict', CONFLICT_TEXT);
 }
 
-
 /**
  * The server refused a forward because the id is this Inbox's (`id_is_local`): it is local from now on, and the read
  * or write goes to this Inbox instead.
@@ -1098,13 +1102,6 @@ export function pageServerSession(): string | null {
  */
 export type TagMode = 'ask' | 'add' | 'handoff';
 
-/** Where a referenced file's project-relative path starts: the server finds the folder (packages/server/inbox-open-in.ts). */
-/** `from: 'root'`: a diff's path, which starts at the top of the repository wherever the agent stood. */
-export type OpenInFileScope = { thread: string; message?: string; from?: 'root' } | { shape: string } | { repo: string; pull?: string };
-
-/** A referenced file's text for its hover: this computer's, or a pull request's at its head commit (`pull`). */
-export type OpenInFileCode = { found: false } | { found: true; contents: string; pull?: { label: string; platform: 'github' | 'gitlab'; url: string } };
-
 /** A thread's PRs answer as the window uses it: anything missing reads as none. */
 function threadPullsOf(answer: unknown): InboxThreadPullsAnswer {
   const value = (answer && typeof answer === 'object' ? answer : {}) as Partial<InboxThreadPullsAnswer>;
@@ -1118,6 +1115,8 @@ function threadPullsOf(answer: unknown): InboxThreadPullsAnswer {
 /** A browser takes at most 64 KiB of keepalive bodies in flight: a larger one goes as an ordinary request. */
 const KEEPALIVE_BODY_MAX = 60_000;
 
+/** The window's read and write for routes kept in their own files (combineApi.ts). */
+export { get as apiGet, post as apiPost };
 /**
  * `keepalive`: the request outlives the page (a save made as the page hides or goes). The answer is read as ever when
  * the page stays. The fetch starts before this function first waits, so a caller in a `pagehide` handler gets it out.
@@ -1479,18 +1478,18 @@ export const inboxApi = {
       learnMachines(model);
       return model;
     }),
-  archived: (input: { project?: string | null; offset?: number; limit?: number } = {}) => {
-    const query = new URLSearchParams();
-    if (input.project) query.set('project', input.project);
-    if (input.offset) query.set('offset', String(input.offset));
-    if (input.limit) query.set('limit', String(input.limit));
-    const qs = query.toString();
-    return get<ArchivedModel>(inboxUrl('/threads/archived', qs)).then((model) => {
-      // This Inbox's archived threads: local for good, so no linked machine can claim one.
-      rememberLocal(localIdsIn(model));
+  /** `machines`: the list's Archived group, every linked machine's too (each of its rows with `machine`). */
+  archived: (input: { project?: string | null; offset?: number; limit?: number; machines?: boolean } = {}) => {
+    const query = new URLSearchParams(Object.entries({ project: input.project ?? '', offset: input.offset ? String(input.offset) : '', limit: input.limit ? String(input.limit) : '', machines: input.machines ? '1' : '' }).filter(([, v]) => v));
+    return get<ArchivedModel>(inboxUrl('/threads/archived', query.toString())).then((model) => {
+      // This Inbox's archived threads: local for good, so no linked machine can claim one. Another machine's are its own.
+      if (!input.machines) rememberLocal(localIdsIn(model));
+      else for (const row of model.threads) if (row.machine && row.machine !== selfMachineId()) rememberMachine(idsIn(row), row.machine); else rememberLocal(localIdsIn(row));
       return model;
     });
   },
+  /** The list's "Show archived" (⋮ menu): one switch on every linked machine and window. */
+  saveShowArchived: (on: boolean) => post<{ show_archived: { on: boolean; rev: number } }>(inboxUrl('/settings'), { show_archived: { on } }),
   /** One thread; with `timeoutMs`, a read with no answer by then fails (InboxReadTimeout) instead of waiting for good. */
   // A thread's action items move out of `questions` into `actions` here (actions.ts), so nothing that picks or sends answers meets one.
   /** `signal`: the person moved on to another thread before it answered; the read is given up (an AbortError). */
@@ -1510,16 +1509,12 @@ export const inboxApi = {
   },
   /** Decision mode (experimental): every decision waiting on the person, in queue order. 404 while the feature is off. */
   decisions: () => get<InboxDecisionsModel>(inboxUrl('/decisions')),
-  /** Tidy: who it would ask in the list's (or the Board's) scope, and the last run. */
-  tidy: (project: string | null, surface: 'list' | 'board') => {
-    const query = new URLSearchParams(surface === 'board' ? { surface } : {});
-    if (project) query.set('project', project);
-    const qs = query.toString();
-    return get<InboxTidyPlan>(inboxUrl('/tidy', qs));
-  },
-  /** Tidy: ask these sessions. A replay of the key answers the run it wrote. */
-  startTidy: (input: { sessions: readonly string[]; idempotency_key: string; project: string | null; surface: 'list' | 'board' }) =>
-    post<{ run: InboxTidyRun | null; asked: string[] }>(inboxUrl('/tidy'), { ...input, sessions: [...input.sessions] }),
+  /** Tidy: who it would ask in the list's (or the Board's) scope, or about picked `threads`, and the last run; `machine`: a linked machine's. */
+  tidy: (project: string | null, surface: 'list' | 'board', machine?: string | null, threads?: readonly string[]) =>
+    get<InboxTidyPlan>(inboxUrl('/tidy', new URLSearchParams({ ...(surface === 'board' ? { surface } : {}), ...(project ? { project } : {}), ...(threads ? { threads: threads.join(',') } : {}) }).toString(), machine)),
+  /** Tidy: ask these sessions (about picked `thread_ids`, with the person's `words`). A replay of the key answers the run it wrote. */
+  startTidy: (input: { sessions: readonly string[]; idempotency_key: string; project: string | null; surface: 'list' | 'board'; thread_ids?: readonly string[]; words?: string }, machine?: string | null) =>
+    post<{ run: InboxTidyRun | null; asked: string[] }>(inboxUrl('/tidy', undefined, machine), { ...input, sessions: [...input.sessions], ...(input.thread_ids ? { thread_ids: [...input.thread_ids] } : {}) }),
   saveCookieHost: (on: boolean) => post<{ cookie_host: InboxCookieHost }>(inboxUrl('/settings'), { cookie_host: on }),
   saveExperimental: (change: { decision_mode: boolean }) =>
     post<{ experimental: InboxExperimentalSettings }>(inboxUrl('/settings'), { experimental: change }),
@@ -1854,6 +1849,11 @@ export const inboxApi = {
   /** A referenced file in its scope: whether it is on this computer, its real path and kind. 403 through the tailnet. */
   openInFileCheck: (scope: OpenInFileScope, path: string) =>
     get<{ found: boolean; path?: string; kind?: string }>(inboxUrl(`/open-in/file?${new URLSearchParams({ ...scope, path })}`)),
+  /** A file an agent's message names, for the pane: read only, wherever it is on that computer (never a secret). */
+  referencedFile: (scope: ReferencedFileScope, path: string) => get<ReferencedFileView>(referencedFileUrl('view', scope, path)),
+  /** The person commented on a file a message names: it becomes one of that message's attachments (once), on its thread's machine. */
+  attachReferencedFile: (scope: ReferencedFileScope, path: string) =>
+    post<{ attachment: InboxAttachmentState }>(inboxUrl('/open-in/file/attach', undefined, machineOf(scope.thread)), { thread: scope.thread, message: scope.message, path, idempotency_key: crypto.randomUUID() }),
   openInFileCode: (scope: OpenInFileScope, path: string) => get<OpenInFileCode>(inboxUrl(`/open-in/file/code?${new URLSearchParams({ ...scope, path })}`)),
   openInFile: (scope: OpenInFileScope, path: string, appId: string, line?: number) =>
     post<{ ok: boolean; error?: string }>(inboxUrl('/open-in/file'), { ...scope, path, app_id: appId, ...(line ? { line } : {}) }),
@@ -2375,9 +2375,6 @@ interface LinkedPageBase {
 }
 
 export type LinkedPageView = LinkedPageBase & ({ html: string } | { html: null; text: string });
-
-
-
 
 // ───────────────────────────── Shape ─────────────────────────────
 

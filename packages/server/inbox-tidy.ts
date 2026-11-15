@@ -3,9 +3,12 @@
  *
  * - `GET /api/inbox/tidy?project=&surface=list|board`: who Tidy would ask in
  *   the list's (or the Board's) scope, and the last run's progress.
- * - `POST /api/inbox/tidy { sessions, idempotency_key, project?, surface? }`:
+ *   `threads=<id>,<id>` (approval "inbox-multi-select"): the threads the person
+ *   picked instead, with the picked threads nobody is asked about.
+ * - `POST /api/inbox/tidy { sessions, idempotency_key, project?, surface?, thread_ids?, words? }`:
  *   asks the named sessions (each must still be in the plan), writing each
- *   one's Tidy notes. A replay of the key answers the run it wrote.
+ *   one's Tidy notes. A replay of the key answers the run it wrote. `words`:
+ *   the person's own instructions, kept for Recent (`inbox/tidy-words.json`).
  *
  * Bun only, like the rest of the Inbox. The window's guards are the server's
  * own (a write from another site is refused before routing; the read is
@@ -13,7 +16,9 @@
  */
 
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
-import { inboxId, isInboxId, type InboxSteps, type InboxTidyCombine, type InboxTidyPlan, type InboxTidyReach, type InboxTidyRun } from "@plannotator/core/inbox-types";
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { inboxId, inboxTidyWords, isInboxId, type InboxSteps, type InboxTidyCombine, type InboxTidyPlan, type InboxTidyReach, type InboxTidyRun } from "@plannotator/core/inbox-types";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { inboxTidyBody, inboxTidyPlan, inboxTidyRun, inboxTidyWakeThread, type InboxTidySurface } from "@plannotator/shared/inbox/tidy";
@@ -41,6 +46,61 @@ export interface InboxTidyDeps {
   combineLoading?: () => boolean;
 }
 
+/** The person's Tidy instructions on disk (Recent, and each run's "You added"), outside the event log. */
+const TIDY_WORDS_FILE = "tidy-words.json";
+const TIDY_WORDS_KEPT = 20;
+const TIDY_RECENT_SHOWN = 3;
+/** At most this many picked threads in one Tidy. */
+const TIDY_PICKED_MAX = 500;
+
+interface TidyWordsEntry {
+  run: string;
+  words: string;
+  at: string;
+}
+
+function readTidyWords(dir: string): TidyWordsEntry[] {
+  try {
+    const value = JSON.parse(readFileSync(join(dir, TIDY_WORDS_FILE), "utf8")) as { runs?: unknown };
+    if (!Array.isArray(value.runs)) return [];
+    return value.runs.filter((r): r is TidyWordsEntry => !!r && typeof r.run === "string" && typeof r.words === "string" && r.words !== "" && typeof r.at === "string");
+  } catch {
+    return [];
+  }
+}
+
+function writeTidyWords(dir: string, runs: TidyWordsEntry[]): void {
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const path = join(dir, TIDY_WORDS_FILE);
+  const temp = `${path}.${process.pid}.tmp`;
+  writeFileSync(temp, `${JSON.stringify({ v: 1, runs })}\n`, { mode: 0o600 });
+  renameSync(temp, path);
+}
+
+/** The last instructions, newest first, each once (compared without case). */
+function recentWords(runs: readonly TidyWordsEntry[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const entry of [...runs].reverse()) {
+    const key = entry.words.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(entry.words);
+    if (out.length === TIDY_RECENT_SHOWN) break;
+  }
+  return out;
+}
+
+/** `threads=<id>,<id>` or a body's `thread_ids`: the picked threads, or null for the list's (or the Board's) Tidy. */
+function pickedOf(value: unknown): Set<string> | null {
+  if (value === null || value === undefined || value === "") return null;
+  const ids = typeof value === "string" ? value.split(",") : Array.isArray(value) ? value : null;
+  if (!ids || ids.length === 0 || ids.length > TIDY_PICKED_MAX || ids.some((id) => typeof id !== "string" || !isInboxId("msg", id))) {
+    throw new InboxError("validation_error", `thread_ids: the picked threads' ids, at most ${TIDY_PICKED_MAX}.`, { field: "thread_ids" });
+  }
+  return new Set(ids as string[]);
+}
+
 export function createInboxTidy(deps: InboxTidyDeps) {
   const { store } = deps;
   const now = () => deps.now?.() ?? Date.now();
@@ -65,23 +125,28 @@ export function createInboxTidy(deps: InboxTidyDeps) {
   };
   const surfaceOf = (value: unknown): InboxTidySurface => (value === "board" ? "board" : "list");
 
-  const runNow = (reachOf: (session: string) => InboxTidyReach | null): InboxTidyRun | null =>
-    inboxTidyRun(store, { now: now(), idleSince: deps.idleSince, reachOf });
+  const runNow = (reachOf: (session: string) => InboxTidyReach | null): InboxTidyRun | null => {
+    const run = inboxTidyRun(store, { now: now(), idleSince: deps.idleSince, reachOf });
+    const words = run ? readTidyWords(store.dir).find((entry) => entry.run === run.id)?.words : undefined;
+    return run && words ? { ...run, words } : run;
+  };
 
-  const planFor = (projectId: string | null, surface: InboxTidySurface, reachOf: (session: string) => InboxTidyReach | null) =>
-    inboxTidyPlan(store, { projectId, surface, now: now(), reachOf, boardOn: deps.boardOn(), stepsStale: deps.stepsStale?.() ?? null });
+  const planFor = (projectId: string | null, surface: InboxTidySurface, reachOf: (session: string) => InboxTidyReach | null, threadIds: ReadonlySet<string> | null = null) =>
+    inboxTidyPlan(store, { projectId, surface, now: now(), reachOf, boardOn: deps.boardOn(), stepsStale: deps.stepsStale?.() ?? null, threadIds });
 
-  const plan = (projectId: string | null, surface: InboxTidySurface): InboxTidyPlan => {
+  const plan = (projectId: string | null, surface: InboxTidySurface, threadIds: ReadonlySet<string> | null = null): InboxTidyPlan => {
     const reachOf = reachFor();
-    const found = planFor(projectId, surface, reachOf);
+    const found = planFor(projectId, surface, reachOf, threadIds);
     // A session that never wrote anywhere has no thread to carry its wake: not offered.
     const agents = found.agents.filter((agent) => inboxTidyWakeThread(store, agent) !== null);
-    // The list's Tidy only, and every project: a project filter does not hide a duplicate of it.
-    const combine = surface === "list" ? (deps.combineSuggestions?.() ?? []) : [];
+    // The list's Tidy only, and every project: a project filter does not hide a duplicate of it. Never for picked threads.
+    const combine = surface === "list" && !threadIds ? (deps.combineSuggestions?.() ?? []) : [];
     return {
       serverSession: deps.serverSession,
+      recent: recentWords(readTidyWords(store.dir)),
+      ...(found.unreached ? { unreached: found.unreached } : {}),
       ...(combine.length > 0 ? { combine } : {}),
-      ...(surface === "list" && deps.combineLoading?.() ? { combine_loading: true as const } : {}),
+      ...(surface === "list" && !threadIds && deps.combineLoading?.() ? { combine_loading: true as const } : {}),
       count: agents.reduce((n, a) => n + a.items.length, 0) + combine.length,
       agents: agents.map((agent) => ({
         session: agent.session,
@@ -108,7 +173,9 @@ export function createInboxTidy(deps: InboxTidyDeps) {
       return { run: runNow(reachOf), asked: [...new Set(replayed.map((m) => m.to!.session))] };
     }
     const wanted = new Set(body.sessions as string[]);
-    const found = planFor(scopeOf(body.project), surfaceOf(body.surface), reachOf);
+    const threadIds = pickedOf(body.thread_ids);
+    const words = inboxTidyWords(body.words);
+    const found = planFor(scopeOf(body.project), surfaceOf(body.surface), reachOf, threadIds);
     const run = inboxId("tdy");
     const asked: string[] = [];
     for (const agent of found.agents) {
@@ -116,10 +183,11 @@ export function createInboxTidy(deps: InboxTidyDeps) {
       const wake = inboxTidyWakeThread(store, agent);
       if (!wake) continue;
       const threads = [wake, ...agent.items.flatMap((item) => (item.thread_id ? [item.thread_id] : []))];
-      store.sendTidy({ run, to: { host: agent.host ?? "agent", session: agent.session }, threadIds: threads, body: inboxTidyBody(agent), idempotency_key: key });
+      store.sendTidy({ run, to: { host: agent.host ?? "agent", session: agent.session }, threadIds: threads, body: inboxTidyBody(agent, { picked: threadIds !== null, words }), idempotency_key: key });
       asked.push(agent.session);
     }
     if (asked.length === 0) throw new InboxError("nothing_to_tidy", "None of those sessions has anything to tidy now.");
+    if (words) writeTidyWords(store.dir, [...readTidyWords(store.dir), { run, words, at: new Date(now()).toISOString() }].slice(-TIDY_WORDS_KEPT));
     return { run: runNow(reachOf), asked };
   };
 
@@ -131,7 +199,7 @@ export function createInboxTidy(deps: InboxTidyDeps) {
       if (!isSameOriginOrNoOrigin(req.headers.get("origin"), req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
         return deps.json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
       }
-      return deps.json(plan(scopeOf(url.searchParams.get("project")), surfaceOf(url.searchParams.get("surface"))));
+      return deps.json(plan(scopeOf(url.searchParams.get("project")), surfaceOf(url.searchParams.get("surface")), pickedOf(url.searchParams.get("threads"))));
     }
     if (req.method !== "POST") return deps.json({ error: "Use GET or POST." }, 405);
     const body = await deps.readBody(req);

@@ -28,6 +28,7 @@ import { replyViewingOf } from '../replyViewing';
 import { AttachmentTiles, changedCount } from './AttachmentTiles';
 import { AttachmentPane, type AttachmentPaneHandle } from './AttachmentPane';
 import type { OpenInSurface } from './OpenIn';
+import { ReferencedFilePane } from './ReferencedFilePane';
 import { stepsOf } from '../stepping';
 import { choiceLetters, optionOf, optionSetAddress, optionSetId, optionSetOf, parseOptionSetId, openChoiceSetOf } from '../optionSets';
 import { PrototypeWindow, openingOption, type PrototypeOption } from './PrototypeWindow';
@@ -183,6 +184,8 @@ import { StepsButton } from '../steps/StepsButton';
 import { stepsButtonSig, stepsWaitTarget } from '../steps/model';
 import { useThreadSteps } from '../steps/useThreadSteps';
 import { keepEqualByKey } from '../thread/keepEqual';
+import { sentActionsOf } from '../thread/sentActions';
+import { leftoverWords } from '../thread/leftover';
 import { replyWordsCount, withFreeName, withoutReplyWords } from '../shape/addToReply';
 import { replyKeysToRenew, routeSendAnnotations, sendTargetAnswerIds, sendTargetsOf, tookOverReply, wordsMessage, type SendTarget, type SentContents } from '../sendTargets';
 import { FOLD_STEP, isSuperseded, NO_ANNOTATIONS, NO_QUESTIONS, NO_IDS, NO_OUTBOX, NO_SENT_ANSWERS, NO_UPLOADS, askingSessionOf, commentTags, emptyAnswerFor, isOtherAgent, newBelow, otherSendSessions, reducedMotion, replyKeyOf, spanWords, stillHidden, type FoldState } from '../thread/helpers';
@@ -201,7 +204,7 @@ import { MessageBody } from '../parts/MessageBody/MessageBody';
 export { AckPill, MessageBody };
 export { routeSendAnnotations, sendTargetsOf, type SendTarget };
 
-export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, notice, thread: threadRead, threadSteps = null, codeReview = false, pullReview, machine = null, onMachineUpdate, onNewMessageWith, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onSentRead, readPending = false, onPickSaves, onChanged, onTakenBack, draftChanged = 0, filesChanged = 0, draftSignal = null, filesSignal = null, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, priority, onSnooze, onUnsnooze, snoozeBlocked, replyRequest, onReplyOpened, shapeButton = null, onSide, onSideWords, replyWords = null, onReplyWordsTaken, replyPart = null, onReplyPartTaken, onToastGone, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, links: linksRoute = false, onLinks, decide = null, threadAlone = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null, snoozeBack = null, agentContext = null, agentFilter = null, onAgentFilter }: ThreadPaneProps) {
+export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, notice, thread: threadRead, threadSteps = null, codeReview = false, pullReview, machine = null, onMachineUpdate, onNewMessageWith, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onSentRead, readPending = false, onPickSaves, onChanged, onTakenBack, draftChanged = 0, filesChanged = 0, draftSignal = null, filesSignal = null, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, priority, onSnooze, onUnsnooze, snoozeBlocked, replyRequest, onReplyOpened, shapeButton = null, onSide, onSideWords, replyWords = null, onReplyWordsTaken, replyPart = null, onReplyPartTaken, onToastGone, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, namedFile = null, onOpenNamedFile, remote = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, links: linksRoute = false, onLinks, decide = null, threadAlone = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null, snoozeBack = null, agentContext = null, agentFilter = null, onAgentFilter }: ThreadPaneProps) {
   /**
    * The questions this pane's own saves brought back (by `<message id>/<key>`), and how many saves landed. The thread
    * drawn is the one read, its questions never older than these: a read that left before the last keys were saved
@@ -1470,6 +1473,14 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   };
   /** A file the person's sent reply names (its feedback heading): beside the thread, at the version the comments were on. */
   const openFromReply = (attachment: InboxAttachmentState, version: 'current' | 'sent') => openFromMessage(attachment, null, undefined, null, version);
+  /** A comment made a file a message names one of its attachments (or it already was one): that attachment opens in its place. */
+  const openAttachedRef = async (id: string, focus: string | null) => {
+    await reloadFiles();
+    void onChanged();
+    onOpenFile({ id, version: 'current', focus, view: null }, { replace: true });
+  };
+  /** A file a message names, beside the thread; an open file with a comment not saved yet asks first. */
+  const openFileRef: MessageActs['openFileRef'] = (messageId, ref) => (paneRef.current && file ? paneRef.current.leave(ref.path.split('/').pop() ?? ref.path, () => onOpenNamedFile?.({ ...ref, messageId })) : onOpenNamedFile?.({ ...ref, messageId }));
   const openRecord = (record: InboxAnnotationRecord) => {
     // A comment on a guided review's diff: open that guide.
     if (record.guide) {
@@ -2769,21 +2780,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   // listed under its words as "You did 1 action item" (approval "inbox-action-items-in-reply").
   // Each reply's rows stay the same array while they are equal: a message arriving redraws no reply's body.
   const heldSentActions = useRef<ReadonlyMap<string, ActionRow[]> | null>(null);
-  const sentActionsByReply = useMemo(() => {
-    const out = new Map<string, ActionRow[]>();
-    for (const m of thread.messages) {
-      for (const a of m.actions ?? []) {
-        const result = a.action_result;
-        const mine = inboxActionPersonMark(result);
-        if (!result || !mine || !a.sent_reply_id || a.revision === 0 || a.sent_revision !== a.revision) continue;
-        out.set(a.sent_reply_id, [
-          ...(out.get(a.sent_reply_id) ?? []),
-          { id: `${m.id}/${a.key}`, messageId: m.id, number: a.position + 1, prompt: a.prompt, outcome: mine.outcome, note: mine.note, seen: result.by === 'agent' },
-        ]);
-      }
-    }
-    return (heldSentActions.current = keepEqualByKey(heldSentActions.current, out));
-  }, [thread.messages]);
+  const sentActionsByReply = useMemo(() => (heldSentActions.current = keepEqualByKey(heldSentActions.current, sentActionsOf(thread.messages))), [thread.messages]);
 
   // The person's own sent replies are drawn in their words, with the answers they carried as a
   // short list read from the questions (sentReply.ts): never the agent-facing answers section.
@@ -2975,23 +2972,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     });
   }, []);
 
-  /**
-   * What the person added after a Send that went without its answer (comments, picks, files it did not
-   * carry): said plainly, since they are still to send. Null when nothing was added.
-   */
-  const leftoverText = (earlier: UnconfirmedSend): string | null => {
-    const comments = records.filter((r) => !earlier.comments.includes(r.id)).length;
-    const picks = picked.filter((q) => !earlier.picks.includes(`${q.message_id}/${q.key}`)).length;
-    const files = replyUploads.filter((id) => !earlier.uploads.includes(id)).length;
-    const parts = [
-      comments > 0 ? `${comments} comment${comments === 1 ? '' : 's'}` : null,
-      picks > 0 ? `${picks} pick${picks === 1 ? '' : 's'}` : null,
-      files > 0 ? `${files} file${files === 1 ? '' : 's'}` : null,
-    ].filter((part): part is string => part !== null);
-    if (parts.length === 0) return null;
-    const list = parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(', ')} and ${parts.at(-1)}`;
-    return `Your reply went. Not sent yet: ${list}. Press Send to send ${parts.length === 1 && !list.endsWith('s') ? 'it' : 'them'}.`;
-  };
+  /** What the person added after a Send that went without its answer, in words (thread/leftover.ts). */
+  const leftoverText = (earlier: UnconfirmedSend) => leftoverWords(earlier, { comments: records.map((r) => r.id), picks: picked.map((q) => `${q.message_id}/${q.key}`), uploads: replyUploads });
 
   /** The remembered unconfirmed Send turned out to have landed: finish it, and say what is still to send. */
   const finishLanded = (earlier: UnconfirmedSend) => {
@@ -4542,7 +4524,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const closedByRead = thread.messages.flatMap((m) => (m.questions ?? []).filter((q) => q.state === 'closed' && q.set_aside_at));
 
   const openAttachment = file ? allFiles.find((a) => a.id === file.id) ?? null : null;
-  const fileOpen = openAttachment !== null;
+  const fileOpen = openAttachment !== null || (namedFile !== null && file === null);
   // The questions inside the open Markdown file (issue #2828): its cards answer like the body's, through the same
   // pick, draft and Send. A version changed since it was sent may ask otherwise: only the sent text takes answers then.
   const fileOwner = openAttachment ? thread.messages.find((m) => m.id === openAttachment.message_id) : undefined;
@@ -4573,7 +4555,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   };
   // A file beside the thread hides the list (App.tsx `fileOpen`, from the route, so before the
   // attachments load too): the way back to it leads the header, as on an iPad (approved 2026-10-12).
-  const backBesideFile = file !== null && !phone && !stacked && !fileStacked && onBackToList !== undefined;
+  const backBesideFile = (file !== null || namedFile !== null) && !phone && !stacked && !fileStacked && onBackToList !== undefined;
   // The thread's full screen: the control pressed goes away or hides (the list's edge, ‹ Inbox), so focus follows to
   // ‹ Inbox, or back to the thread, when it was on the one pressed or nowhere. A change only, never on the first draw. Leaving can stack the thread
   // (the window too narrow for the list beside it): the window measures that after this pane's effects, in the same
@@ -4666,6 +4648,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const menuMoveBack = markReadOffered && readAt !== null ? () => onMarkRead!(false) : undefined;
   // A thread's PRs: read and changed on the thread's own machine, one that takes them (mark `pulls`).
   const pullsOffered = !machine || (machine.marks ?? []).includes('pulls');
+  // A linked machine's thread: what its messages name is read, and attached when commented on, through its door.
+  const fileRefsHere = !machine || (machine.marks ?? []).includes('file-refs');
   const [addingPull, setAddingPull] = useState(false);
   // Export decisions › Post on a pull request › Add a pull request…: the PR the person adds next gets the post.
   const [postAfterAdd, setPostAfterAdd] = useState(false);
@@ -4713,7 +4697,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     quoteWordsAtPress.current = { id: messageId, words: selectedWordsIn(article) };
   };
   const tryPrototype = (messageId: string, key: string) => setProto({ messageId, key });
-  const newest: MessageActs = { openFromReply, jumpTo, noteChips, openFromMessage, openOptionSet, pick, markAction, saveMessageComment, noteUnanchored, repaintHits, openListAt, onSide, toggleMessage, replyToMessage, quoteAtPress, setHeaderOpen, closeHeaderOnEscape, tryPrototype, takeBackOf };
+  const newest: MessageActs = { openFromReply, jumpTo, noteChips, openFromMessage, openOptionSet, pick, markAction, saveMessageComment, noteUnanchored, repaintHits, openListAt, onSide, toggleMessage, replyToMessage, quoteAtPress, setHeaderOpen, closeHeaderOnEscape, tryPrototype, takeBackOf, openFileRef };
   const acts = useRef(newest);
   acts.current = newest;
   const copyHost: CopyMenuHost = {
@@ -5416,6 +5400,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                     openComment: commentsList?.at ?? null,
                     revealedComment,
                     side: !!onSide,
+                    fileRefs: !!onOpenNamedFile && fileRefsHere,
                     acts,
                   }}
                   draw={drawMessageBody}
@@ -6128,6 +6113,9 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         }}
         composer={composer}
       />
+    )}
+    {!openAttachment && file === null && namedFile && (
+      <ReferencedFilePane threadId={thread.thread_id} fileRef={namedFile} agent={asker} phone={phone} full={phone || fileStacked} onOpen={(ref) => onOpenNamedFile?.(ref)} onClose={() => onOpenNamedFile?.(null)} onAttached={openAttachedRef} />
     )}
     </>
     </ReuseContext.Provider>

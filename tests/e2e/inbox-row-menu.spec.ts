@@ -98,7 +98,7 @@ test('a right-click opens the menu without opening the thread; Copy link copies 
   await expect(row).toBeVisible();
   await row.click({ button: 'right' });
   await expect(menu(page)).toBeVisible();
-  await expect(menu(page).getByRole('menuitem')).toHaveText(['Star thread', 'Add to Priority', 'Add tag', 'Copy thread', 'Copy link', 'Copy thread ID', 'Snooze', 'Mark read', 'Archive']);
+  await expect(menu(page).getByRole('menuitem')).toHaveText(['Select', 'Star thread', 'Add to Priority', 'Add tag', 'Copy thread', 'Copy link', 'Copy thread ID', 'Snooze', 'Mark read', 'Archive']);
   await expect(page.locator(`[data-row="${threads.search}"]`)).toHaveAttribute('data-menu', '');
   expect(page.url()).not.toContain('thread=');
   await shot(page, '01-menu-light.png');
@@ -130,8 +130,10 @@ test('the keyboard: Shift+F10 on a focused row opens the menu, Escape and Tab gi
   // Focus moves into the menu; the arrows walk its items.
   await expect(menu(page)).toBeFocused();
   await page.keyboard.press('ArrowDown');
-  // Star thread leads (approval "inbox-pinned-threads"), then Add to Priority, Add tag (approval "inbox-thread-tags"), Copy thread and Copy link.
-  await expect(page.locator('[data-row-action="pin"]')).toBeFocused();
+  // Select leads (approval "inbox-multi-select"), then Star thread, Add to Priority, Add tag, Copy thread and Copy link.
+  await expect(menu(page).getByRole('menuitem', { name: 'Select' })).toBeFocused();
+  await page.keyboard.press('ArrowDown');
+  await expect(menu(page).getByRole('menuitem', { name: 'Star thread' })).toBeFocused();
   await page.keyboard.press('ArrowDown');
   await expect(page.locator('[data-row-action="priority-add"]')).toBeFocused();
   await page.keyboard.press('ArrowDown');

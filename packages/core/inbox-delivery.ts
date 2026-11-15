@@ -5,6 +5,8 @@
  * "Ticks"), so a row and its thread never disagree. Pure, browser-safe.
  */
 
+import type { InboxT3WaitReason } from "./inbox-t3";
+
 /**
  * How long a reply (a message, a Re-ask note) waits on a busy session before it
  * goes into the running turn by itself, exactly as if the person pressed Send
@@ -81,6 +83,11 @@ export interface InboxDeliveryInput {
   /** Its session's connection took it and stopped while delivering it: that session never gets it. Absent: no. */
   stuck?: boolean;
   handed?: boolean;
+  /**
+   * The T3 wake found no way in for it now and said why (`t3_wait`): it waits on T3, whatever the session's last
+   * poll says (a T3 that quit took its Claude with it while that poll still reads as live). Absent: no.
+   */
+  waitsOnT3?: boolean;
   /** The session that asked has ended (a reply). */
   askerEnded: boolean;
   /** The session it goes to is woken by its connection. */
@@ -143,6 +150,8 @@ export function inboxDeliveryState(input: InboxDeliveryInput): InboxDeliveryDeci
   if (input.stuck) return { state: "undelivered", reason: "stuck", ...no };
   if (input.undelivered) return { state: "undelivered", reason: "undelivered", ...no };
   if (input.handed) return { state: "queued", reason: "handed", ...no };
+  // Queued, never "Sending": the thread's line and the row then say it waits on T3 (approval "inbox-t3-reply-waiting-line").
+  if (input.waitsOnT3) return { state: "queued", reason: "next_turn", ...no };
   if (input.askerEnded) return { state: "saved", reason: "ended", ...no };
   if (!input.wakes || input.connection?.polls === true) return { state: "saved", reason: "reads", ...no };
   const connection = input.connection;
@@ -286,4 +295,6 @@ export interface InboxRowDelivery {
   auto_after_min?: number;
   /** Delivered after an automatic mark, but when the turn ended (the session's own Ask question held it). */
   turn_ended?: boolean;
+  /** It waits on T3 (`waitsOnT3`): why, as the thread's line words it (`inboxT3WaitLine`). Absent otherwise. Additive. */
+  t3_wait?: InboxT3WaitReason;
 }
