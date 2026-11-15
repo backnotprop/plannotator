@@ -219,6 +219,7 @@ export function TidyMenu({
   onCustomize,
   view,
   starredAbove,
+  showArchived,
   tagColours,
 }: {
   tidy: TidyController;
@@ -240,6 +241,8 @@ export function TidyMenu({
    * pills above the list and not a sidebar section. Absent (the Board, the tour, an Inbox that keeps no stars): no item.
    */
   starredAbove?: { on: boolean; onChange: (on: boolean) => void };
+  /** "Show archived" (approval "inbox-archived-group"), after it: the Archived group under the list. Absent: no item. */
+  showArchived?: { on: boolean; onChange: (on: boolean) => void };
   /**
    * "Show tag colors" (tagColours.ts), in the Rows group after the look's checkboxes: off, no row is tinted and no row
    * names its tag. The same on every linked machine. Absent (an Inbox before tag colours, the Board, the tour): no item.
@@ -314,6 +317,7 @@ export function TidyMenu({
                   <Menu.Separator className="ib-pm-sep" />
                   <MenuViewChoice view={view.value} onChange={view.onChange} />
                   {starredAbove && <MenuCheckbox label={STARRED_ABOVE_LABEL} checked={starredAbove.on} onChange={starredAbove.onChange} data-starred-above-option="" />}
+                  {showArchived && <MenuCheckbox label="Show archived" checked={showArchived.on} onChange={showArchived.onChange} data-show-archived-option="" />}
                 </>
               )}
               {look && onLook && (

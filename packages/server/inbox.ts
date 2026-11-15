@@ -327,6 +327,8 @@ import { createInboxStepsRoute, inboxStepsStale, inboxStepsWaitOnPerson as steps
 import { createInboxDebugLog } from "./inbox-debug-log";
 import { createInboxDevices, DOOR_PREFIX, MACHINE_PLATFORM, type InboxDoorCaller } from "./inbox-devices";
 import { createInboxMachines, type InboxMachines, type MachineFrame, type MachineLinkTimings } from "./inbox-machines";
+import { archivedAskOf, farRowTags, mergeArchived } from "./inbox-archived-merged";
+import { createShowArchived, type InboxShowArchived } from "./inbox-show-archived";
 import { mergePullBoards } from "./inbox-machine-pulls";
 import { replyIsStale } from "./inbox-outbox";
 import type { PairingProbes } from "./inbox-pairing-checks";
@@ -2079,9 +2081,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * Settings' Archived block: the archived threads, newest archived first, a
    * page at a time (`offset`, `limit` up to 200), with every project that has
    * any and how many, for its project filter. `total` is the count in the
-   * filtered scope, so the page says how many lie beyond it.
+   * filtered scope, so the page says how many lie beyond it. `head`: the first `offset + limit` rows, which the
+   * merged read slices with the linked machines' (a project of another machine has none here).
    */
-  const archivedModel = (url: URL) => {
+  const archivedModel = (url: URL, head = false) => {
     const projectFilter = projectFilterOf(url);
     const offset = queryCount(url, "offset", 0, 0, Number.MAX_SAFE_INTEGER);
     const limit = queryCount(url, "limit", INBOX_ARCHIVED_PAGE, 1, INBOX_ARCHIVED_PAGE_MAX);
@@ -2092,8 +2095,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       entry.archived += 1;
       counts.set(row.project.id, entry);
     }
-    const shownProject = projectFilter ? store.canonicalProjectId(projectFilter) : null;
+    const shownProject = projectFilter && store.project(projectFilter) ? store.canonicalProjectId(projectFilter) : projectFilter;
     const scoped = shownProject ? archived.filter((row) => row.project.id === shownProject) : archived;
+    // Each row's live tags, as the list's rows carry them: the Archived group's rows take their tag's colour.
+    const tagsOf = store.allThreadTags();
     return {
       serverSession,
       cursor: store.cursor(),
@@ -2102,8 +2107,25 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       total: scoped.length,
       offset,
       limit,
-      threads: scoped.slice(offset, offset + limit),
+      threads: scoped.slice(head ? 0 : offset, offset + limit).map((row): InboxListRow => {
+        const tags = tagsOf.get(row.thread_id);
+        return tags ? { ...row, tags } : row;
+      }),
     };
+  };
+
+  /** The Archived group's read across linked machines (inbox-archived-merged.ts): only the machine a project lives on. */
+  const mergedArchivedModel = async (url: URL) => {
+    const own = archivedModel(url, true);
+    const ask = archivedAskOf(own.project || null, !!own.project && !!store.project(own.project), machines.projectOwner);
+    const far = ask ? await machines.archivedPages(own.offset + own.limit, own.project, ask.owner) : [];
+    const page = mergeArchived(own, far, (id) => store.message(id) !== null);
+    if (!page.threads.some((row) => row.machine)) return page;
+    // A far row's tags read as the merged list's, as listModel's far rows do.
+    const farTagLists = machines.tagLists();
+    const { idOn } = inboxMachineTags(machines.selfId, store.initiatives().filter((tag) => tag.deleted_at === null), farTagLists);
+    const taken = new Set(farTagLists.map((list) => list.machine));
+    return { ...page, threads: page.threads.map((row) => (row.machine ? farRowTags({ ...row, machine: row.machine }, taken, idOn) : row)) };
   };
 
   const selfCommand = options.selfCommand?.length
@@ -3065,6 +3087,31 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   };
 
   /**
+   * The list's "Show archived" (approval "inbox-archived-group", off by default): one switch on every linked machine
+   * (inbox-show-archived.ts). `event: show-archived` tells every window, and a linked machine that asks
+   * (`show-archived=1`), which then reads this list and takes the newer switch.
+   */
+  const showArchived = createShowArchived({
+    load: () => loadConfig().inboxShowArchived,
+    save: (value) => saveConfig({ inboxShowArchived: value }),
+    self: () => machines?.selfId ?? null,
+    far: () => machines?.showArchivedCopies() ?? [],
+  });
+  const showArchivedSwitch = (input: unknown): boolean => {
+    if (!input || typeof input !== "object" || Array.isArray(input) || typeof (input as { on?: unknown }).on !== "boolean" || Object.keys(input).some((key) => key !== "on")) {
+      throw new InboxError("validation_error", "show_archived: { on: boolean }.", { field: "show_archived" });
+    }
+    return (input as { on: boolean }).on;
+  };
+  const saveShowArchived = (on: boolean): InboxShowArchived => {
+    try {
+      return showArchived.set(on);
+    } catch (cause) {
+      throw new InboxError("config_not_saved", cause instanceof Error ? cause.message : String(cause));
+    }
+  };
+
+  /**
    * Code review in the Inbox (approval "inbox-code-review-direction",
    * 2026-11-03): on only when the person turned it on (config.json
    * `inboxCodeReview`). Off or unset, agents get nothing of it (no
@@ -3604,6 +3651,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     float_drafts: { on: floatDraftsOn() },
     /** The warning before a Mark read that sets questions aside (config.json `inboxMarkReadWarning`): on unless turned off. */
     mark_read_warning: { on: markReadWarningOn() },
+    /** The list's "Show archived" (config.json `inboxShowArchived`), the same on every linked machine: off unless turned on. */
+    show_archived: { on: showArchived.state().on, rev: showArchived.state().rev },
     /** Code review (config.json `inboxCodeReview`) and Shape (`inboxShape`): off unless the person turned them on. Held until the next big release: absent while off. */
     ...heldSwitch("code_review", codeReviewOn()),
     ...heldSwitch("shape", shapeOn()),
@@ -3785,6 +3834,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // How the rows look was saved (any window's, a phone's too): every window takes it at once. Windows only.
         const onRows = (rows: readonly InboxRowsOption[], rev: number, last: { prev: readonly InboxRowsOption[] | null; by: InboxRowsBy | null }) => send(`event: rows\ndata: ${JSON.stringify({ rows, rev, prev: last.prev, by: last.by })}\n\n`);
         if (windowId) rowsListeners.add(onRows);
+        // "Show archived" was saved here or taken from a linked machine: every window, and a linked machine that asks
+        // (`show-archived=1`: a switch writes no record, inbox-peer-link.ts).
+        const stopShowArchived =
+          windowId || url.searchParams.get("show-archived") === "1" ? showArchived.subscribe(({ on, rev }) => send(`event: show-archived\ndata: ${JSON.stringify({ on, rev })}\n\n`)) : () => {};
         // The sidebar's layout was saved (any window's, a phone's too): every window takes it at once. Windows only.
         const onSidebar = (sidebar: InboxSidebarLayout, rev: number) => send(`event: sidebar\ndata: ${JSON.stringify({ sidebar, rev })}\n\n`);
         if (windowId) sidebarListeners.add(onSidebar);
@@ -3855,6 +3908,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           snoozeListeners.delete(onSnoozes);
           threadPullLiveListeners.delete(onThreadPullsLive);
           rowsListeners.delete(onRows);
+          stopShowArchived();
           sidebarListeners.delete(onSidebar);
           agentFaceListeners.delete(onAgentFaces);
           reactionsListeners.delete(onReactions);
@@ -5246,10 +5300,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // A linked machine's read carries this Inbox's agent faces and given names in its group: they live here
         // (inbox-linked-marks), and that machine's windows show them. This Inbox's own windows read them apart.
         const door = fromDeviceDoor.get(req);
-        const faces = door?.platform === MACHINE_PLATFORM ? agentFacesFile.wire() : null;
-        const phone = door !== undefined && door.platform !== MACHINE_PLATFORM;
+        const fromMachine = door?.platform === MACHINE_PLATFORM;
+        const faces = fromMachine ? agentFacesFile.wire() : null;
+        const phone = door !== undefined && !fromMachine;
         const agents = faces ? rows.agents.map((group) => ({ ...group, faces: faces.faces, faces_rev: faces.rev })) : rows.agents;
-        const model = { ...(phone ? phoneList(rows) : rows), agents, session_labels: labels, session_titles: titles };
+        // And the "Show archived" switch, which every linked machine keeps the same (inbox-show-archived.ts).
+        const model = { ...(phone ? phoneList(rows) : rows), agents, session_labels: labels, session_titles: titles, ...(fromMachine ? { show_archived: showArchived.state() } : {}) };
         // `since` (the window, #2593): only the rows changed since the list it holds (inbox-list-delta.ts); the rest of
         // the model, the labels too, goes as it is now. Without it, as before.
         const since = url.searchParams.get("since");
@@ -5261,7 +5317,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const answer = await machines.route(req, url, via);
         if (answer) return answer;
       }
-      if (path === "/api/inbox/threads/archived" && req.method === "GET") return json(archivedModel(url));
+      if (path === "/api/inbox/threads/archived" && req.method === "GET") return json(url.searchParams.get("machines") === "1" ? await mergedArchivedModel(url) : archivedModel(url));
       // Decision mode (experimental, approval "inbox-decision-mode"): a read-only projection of every
       // decision waiting on the person. Off (the default), the route does not exist.
       if (path === "/api/inbox/decisions") {
@@ -6014,9 +6070,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           body.chapter_diagrams === undefined &&
           body.cookie_host === undefined &&
           body.voice === undefined &&
+          body.show_archived === undefined &&
           !updateSwitches
         ) {
-          throw new InboxError("validation_error", "body: inbox_tool, notifications, sound, tailscale, theme, text_size, favicon, reactions, reaction_change, rows, sidebar, diff_style, diff_options, experimental, tour, prompts, board, steps, bro, float_drafts, mark_read_warning, code_review, shape, system, chapter_diagrams, voice, update_check, auto_update or cookie_host is required.");
+          throw new InboxError("validation_error", "body: inbox_tool, notifications, sound, tailscale, theme, text_size, favicon, reactions, reaction_change, rows, sidebar, diff_style, diff_options, experimental, tour, prompts, board, steps, bro, float_drafts, mark_read_warning, code_review, shape, system, chapter_diagrams, voice, update_check, auto_update, show_archived or cookie_host is required.");
         }
         // System: a malformed value throws here.
         system.check(body);
@@ -6066,6 +6123,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (body.chapter_diagrams !== undefined) saveChapterDiagrams(body.chapter_diagrams, true);
         if (body.cookie_host !== undefined) saveCookieHostSwitch(body.cookie_host, true);
         if (body.voice !== undefined) voice.save(body.voice, true);
+        const showArchivedOn = body.show_archived === undefined ? undefined : showArchivedSwitch(body.show_archived);
         const tailnet = tailscaleChange === undefined ? tailscale.state() : await tailscale.set(tailscaleChange.on, { via, replaceExposed: tailscaleChange.replaceExposed });
         // After the tailnet change, so a tailnet refusal saves nothing; the cookie switch can be
         // refused too (the env var, another urlHost), so it comes before the other saves.
@@ -6100,7 +6158,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const chapterDiagrams = body.chapter_diagrams === undefined ? chapterDiagramsWire() : { chapter_diagrams: saveChapterDiagrams(body.chapter_diagrams) };
         if (body.voice !== undefined) voice.save(body.voice);
         if (promptsChange) saveInboxPromptsChange(promptsChange);
-        return json({ inbox_tool: inboxTool, notifications, sound, tailscale: tailnet, updates: updateState, theme, text_size: textSize, favicon, ...reactions, ...rows, ...sidebar, diff_style: diffOptions.diff_style, diff_options: diffOptions, experimental, tour, board, steps, bro, float_drafts: floatDrafts, mark_read_warning: markReadWarning, ...heldSwitch("code_review", codeReview.on, body.code_review !== undefined), ...heldSwitch("shape", shape.on, body.shape !== undefined), ...systemAnswer, ...chapterDiagrams, voice: voice.settings(via), prompts: promptsState(), cookie_host: cookieHost ?? cookieHostWire() });
+        const showArchivedNow = showArchivedOn === undefined ? showArchived.state() : saveShowArchived(showArchivedOn);
+        return json({ show_archived: { on: showArchivedNow.on, rev: showArchivedNow.rev }, inbox_tool: inboxTool, notifications, sound, tailscale: tailnet, updates: updateState, theme, text_size: textSize, favicon, ...reactions, ...rows, ...sidebar, diff_style: diffOptions.diff_style, diff_options: diffOptions, experimental, tour, board, steps, bro, float_drafts: floatDrafts, mark_read_warning: markReadWarning, ...heldSwitch("code_review", codeReview.on, body.code_review !== undefined), ...heldSwitch("shape", shape.on, body.shape !== undefined), ...systemAnswer, ...chapterDiagrams, voice: voice.settings(via), prompts: promptsState(), cookie_host: cookieHost ?? cookieHostWire() });
       }
       // Voice dictation (inbox-voice.ts). A read here can start a `codex`, so another site's is refused too.
       if (path.startsWith("/api/inbox/voice/")) {
@@ -7203,6 +7262,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       holds: (kind, id) =>
         kind === "projects" ? store.project(id) !== null : kind === "attachments" ? store.attachment(id) !== null : kind === "annotations" ? store.annotation(id) !== null : kind === "cards" ? store.card(id) !== null : store.message(id) !== null,
       ownVersions: () => ({ current: version, latest: updates.knownLatest() }),
+      showArchivedSaid: (value) => {
+        try {
+          showArchived.adopt(value);
+        } catch {
+          // config.json could not be written: this machine keeps its own switch until the next read.
+        }
+      },
       timings: options.machineLinkTimings,
     });
     relay = createInboxRelay({
