@@ -49,8 +49,11 @@ const node = (repo: string, number: number, author = "dana") => ({
   commits: { nodes: [{ commit: { statusCheckRollup: { state: "SUCCESS" } } }] },
 });
 
-/** A scripted gh: the person's own PRs (`authored`), each PR's state for the close route's read, and its writes kept. */
-function fakeGh(prs: [string, number][]) {
+/**
+ * A scripted gh: the person's own PRs (`authored`), each PR's state for the close route's read, and its writes kept.
+ * `hang`: its list waits for it (a machine that is online but does not answer).
+ */
+function fakeGh(prs: [string, number][], hang?: Promise<void>) {
   const states = new Map(prs.map(([repo, n]) => [`${repo}#${n}`, "open"]));
   const writes: string[] = [];
   const run: RefRunner = async (cli, args) => {
@@ -59,6 +62,7 @@ function fakeGh(prs: [string, number][]) {
     const query = args.find((a) => a.startsWith("query=")) ?? "";
     if (query.includes("InboxPullsOthers")) return { stdout: JSON.stringify({ data: { viewer: { login: "dana" }, others0: { issueCount: 0, nodes: [] } } }), stderr: "", exitCode: 0 };
     if (args.includes("graphql")) {
+      await hang;
       const open = prs.filter(([repo, n]) => states.get(`${repo}#${n}`) === "open").map(([repo, n]) => node(repo, n));
       const none = { issueCount: 0, nodes: [] };
       const data = { viewer: { login: "dana" }, rateLimit: { cost: 1, remaining: 4000, resetAt: "2026-11-14T11:00:00Z" }, requested: none, assigned: none, authored: { issueCount: open.length, nodes: open }, merged: { nodes: [] }, everyRequested: none, everyAssigned: none, everyAuthored: { issueCount: open.length, nodes: open }, everyMerged: { nodes: [] } };
@@ -262,6 +266,38 @@ describe("the PR board across linked machines (mark `pulls`)", () => {
       b.stop();
     }
   }, 150_000);
+
+  test("a linked machine online but not answering: this machine's board answers at once, the other's pending, then joins", async () => {
+    let answer = () => {};
+    const ghA = fakeGh([["northwind/web", 1]]);
+    const ghB = fakeGh([["northwind/api", 7]], new Promise<void>((done) => (answer = done)));
+    const dataA = scratch("plannotator-pulls-hang-a-");
+    const a = await start(dataA, ghA.run);
+    const b = await start(scratch("plannotator-pulls-hang-b-"), ghB.run);
+    try {
+      const offered = (await (await fetch(`${at(b.port)}/api/inbox/machines/offer`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).json()) as Json;
+      expect((await fetch(`${at(a.port)}/api/inbox/machines/link`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ link: offered.link, address: at(b.port), back: at(a.port) }) })).status).toBe(201);
+      const bId = (JSON.parse(readFileSync(join(dataA, "inbox", "machines.json"), "utf8")) as Json).links[0].id as string;
+      await waitFor("B online with `pulls` on A", async () => {
+        const view = (((await (await fetch(`${at(a.port)}/api/inbox/machines`)).json()) as Json).machines as Json[]).find((m) => m.id === bId);
+        return view?.state === "online" && (view.marks as string[]).includes("pulls");
+      });
+      // Before, the first read waited 8 s for B (3 s after). Now never: a bound far under either, and over any slow runner.
+      for (const round of [1, 2]) {
+        const at0 = performance.now();
+        const first = await board(a.port);
+        expect([round, performance.now() - at0 < 2_500]).toEqual([round, true]);
+        expect((first.pulls as Json[]).map((p) => p.key)).toEqual([WEB1]);
+        expect(first.machines[bId]).toMatchObject({ read_at: null, pending: true });
+      }
+      answer();
+      await waitFor("B's PR joins A's board", async () => (await rows(a.port)).some((r) => r[0] === API7 && r[1] === bId), 20_000);
+    } finally {
+      answer();
+      a.stop();
+      b.stop();
+    }
+  }, 60_000);
 
   test("an Inbox with no machine linked: the board's answer is the same with or without `machines=1`", async () => {
     const gh = fakeGh([["northwind/web", 1]]);

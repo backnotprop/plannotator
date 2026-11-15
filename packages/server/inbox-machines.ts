@@ -1225,7 +1225,10 @@ export function createInboxMachines(context: InboxMachinesContext) {
     tagLists,
     cardLists,
     /** Each linked machine's PR board (mark `pulls`), for the merged board (inbox-machine-pulls.ts). */
-    pullLists: async (refresh: boolean) => (await machinePulls.lists(refresh)).map((entry) => ({ ...entry, name: links.get(entry.machine)?.name })),
+    pullLists: (refresh: boolean) => {
+      const snapshot = machinePulls.start(refresh);
+      return () => snapshot().map((entry) => ({ ...entry, name: links.get(entry.machine)?.name }));
+    },
     farCard,
     snoozeThread,
     /** The linked machine a device on this Inbox's door belongs to (a launch it starts here records it), or null. */

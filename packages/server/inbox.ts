@@ -5402,7 +5402,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const { projectsByRepo, wanted } = await pullProjects();
         // `others=1`: the person has the Others view open, so Others is read as often as the list. `everywhere=1`: the
         // Pull requests page, the person's own PRs in any repository (approval "inbox-pr-dashboard"). `machines=1` with
-        // it: the linked machines' boards too, read beside this one (a machine's door never passes `machines`).
+        // it: the linked machines' boards too, read beside this one and never waited for (a machine's door never passes
+        // `machines`): what each had once this list is done, the rest on the window's next read (`pending`).
         const everywhere = url.searchParams.get("everywhere") === "1";
         const refresh = url.searchParams.get("refresh") === "1";
         const far = everywhere && url.searchParams.get("machines") === "1" ? machines.pullLists(refresh) : null;
@@ -5415,7 +5416,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // The Board is optional: a card that links a PR is a quiet extra, only while the Board is on.
         const cards = boardOn() ? pullCards(listed.pulls, store.listCards()) : {};
         const own = { ...listed, links, projects: Object.fromEntries(projectsByRepo), cards };
-        const farBoards = far ? await far : [];
+        const farBoards = far ? far() : [];
         return json({ serverSession, ...(farBoards.length > 0 ? mergePullBoards(own, farBoards) : own) });
       }
       // Reviews (approval "inbox-reviews-page"; inbox-reviews.ts and core's inbox-reviews.ts): one row per thread with
