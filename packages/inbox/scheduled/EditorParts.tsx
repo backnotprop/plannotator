@@ -4,7 +4,7 @@
  */
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Menu } from '@base-ui/react/menu';
-import type { InboxComposeLaunch } from '@plannotator/core/inbox-types';
+import { INBOX_HOST_NAMES, type InboxComposeLaunch } from '@plannotator/core/inbox-types';
 import type { InboxScheduledFolder } from '@plannotator/core/inbox-scheduled-types';
 import { inboxApi } from '../api';
 import { FolderMenu } from '../compose/FolderMenu';
@@ -46,6 +46,7 @@ export function RunsAs({ block, agent, model, effort, phone, onChange }: { block
   const [choiceOpen, setChoiceOpen] = useState(false);
   const agents = block?.launch?.agents ?? [];
   const current = agents.find((a) => a.agent === agent);
+  const name = current?.name ?? INBOX_HOST_NAMES[agent] ?? agent;
   const choices = current?.choices;
   const offered = !!choices && (choices.models.length > 0 || choices.efforts.length > 0);
   const choice = { ...(model ? { model } : {}), ...(effort ? { effort } : {}) };
@@ -53,9 +54,9 @@ export function RunsAs({ block, agent, model, effort, phone, onChange }: { block
     <div className="st-foot" data-runs-as="">
       <span className="st-lbl">Runs as</span>
       <Menu.Root modal={false}>
-        <Menu.Trigger ref={anchor} className="st-gh" aria-label={`Agent: ${current?.name ?? agent}. Change`} data-runs-as-agent={agent}>
+        <Menu.Trigger ref={anchor} className="st-gh" aria-label={`Agent: ${name}. Change`} data-runs-as-agent={agent}>
           <HostMark host={agent} />
-          {current?.name ?? agent}
+          {name}
           <Icon name="chevD" size={12} />
         </Menu.Trigger>
         <Menu.Portal container={portal ?? undefined}>

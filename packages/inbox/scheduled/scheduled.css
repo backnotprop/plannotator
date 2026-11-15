@@ -22,6 +22,7 @@
 
 /* The page: the list column's head with one New button where the list's menu sits. */
 .st-list .ib-lhead .st-new { margin-left: auto; flex: none; }
+.st-list .ib-lhead h1 { outline: none; }
 .st-list.st-list-split { flex: none; width: 500px; border-right: 1px solid var(--ib-pane-line); }
 .st-lbody { padding: 0 10px 20px; }
 
