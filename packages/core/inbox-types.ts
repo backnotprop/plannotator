@@ -22,6 +22,7 @@ import type { InboxCloudWake } from "./inbox-cloud";
 import type { InboxSteps } from "./inbox-steps";
 import type { InboxThreadPull, InboxThreadPullsSummary } from "./inbox-thread-pulls";
 import type { InboxInitiative } from "./inbox-initiatives";
+import type { InboxScheduledChange, InboxScheduledRun, InboxScheduledThread } from "./inbox-scheduled-types";
 import type { InboxReviewVerdictRecord } from "./inbox-review";
 import type { InboxReviewSource } from "./inbox-reviews";
 import type { InboxTidyMark } from "./inbox-tidy";
@@ -801,6 +802,10 @@ export interface InboxMessage {
    * "New Claude Code session"). Absent on every other message.
    */
   launch?: InboxLaunchRecord;
+  /** A scheduled thread's run divider or skip line (inbox-scheduled-types.ts). A divider also carries its run's `launch`. */
+  scheduled_run?: InboxScheduledRun;
+  /** An agent's `scheduled_thread` change, posted as that agent in the thread it called from. */
+  scheduled_change?: InboxScheduledChange;
   /**
    * On the root of a thread the person started: who gave it its name, the
    * thread chip (approval "inbox-agent-names-own-thread"). The person may name
@@ -2090,10 +2095,11 @@ export interface InboxThread {
  * `card`: a Board card (approval "inbox-board"); `steps`: one agent session's
  * steps in a thread (approval "inbox-thread-steps"); `initiative`: a Board
  * initiative (approval "board-initiatives"); `thread_pull`: one PR on one
- * thread (approval "inbox-pr-binding"). A reader that does not know a kind
+ * thread (approval "inbox-pr-binding"); `scheduled`: a scheduled thread
+ * (inbox-scheduled-types.ts). A reader that does not know a kind
  * skips its lines.
  */
-export type InboxRecordKind = "project" | "message" | "question" | "annotation" | "card" | "steps" | "initiative" | "thread_pull";
+export type InboxRecordKind = "project" | "message" | "question" | "annotation" | "card" | "steps" | "initiative" | "thread_pull" | "scheduled";
 
 /** One line of the store: a full snapshot of one record. */
 export type InboxLine =
@@ -2104,7 +2110,8 @@ export type InboxLine =
   | { v: 1; seq: number; at: string; kind: "card"; id: string; record: InboxCard }
   | { v: 1; seq: number; at: string; kind: "steps"; id: string; record: InboxSteps }
   | { v: 1; seq: number; at: string; kind: "initiative"; id: string; record: InboxInitiative }
-  | { v: 1; seq: number; at: string; kind: "thread_pull"; id: string; record: InboxThreadPull };
+  | { v: 1; seq: number; at: string; kind: "thread_pull"; id: string; record: InboxThreadPull }
+  | { v: 1; seq: number; at: string; kind: "scheduled"; id: string; record: InboxScheduledThread };
 
 // ─────────────────────────────── Health ───────────────────────────────
 
