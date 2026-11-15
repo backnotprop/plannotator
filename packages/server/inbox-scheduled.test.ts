@@ -9,7 +9,7 @@
  * and the clock never runs one the person has not turned on; a folder runs as it is; nothing runs while off.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { InboxStore } from "@plannotator/shared/inbox/store";
@@ -56,6 +56,8 @@ function world(start = "2026-11-16T13:59:00.000Z") {
   const fake = fakeLaunchHost();
   const other = { ...fakeLaunchHost().host, agent: "fake-two" as typeof FAKE };
   const switches = { on: true };
+  /** Runs inside a launch's preparing, the moment a run is starting. */
+  const during: { prepare: (() => Promise<void>) | null } = { prepare: null };
   const engine = () => {
     const made = createInboxLaunch({
       store,
@@ -83,6 +85,7 @@ function world(start = "2026-11-16T13:59:00.000Z") {
       launchOn: () => made.settingsState().enabled,
       // As the real one: a folder that is not there has no project.
       resolveProject: async (path) => {
+        await during.prepare?.();
         if (!existsSync(path)) throw new InboxError("folder_missing", `${path} isn't there. Pick another folder. Nothing was sent.`);
         return store.project(project.id)!;
       },
@@ -125,6 +128,7 @@ function world(start = "2026-11-16T13:59:00.000Z") {
     project,
     fake,
     switches,
+    during,
     make,
     dividers,
     settle,
@@ -237,6 +241,20 @@ describe("delete", () => {
     expect(w.scheduled.rowOf(back).state).not.toBe("running");
     await w.scheduled.check();
     expect(w.dividers(back.thread_id)).toHaveLength(1);
+  });
+
+  test("a delete while a run is starting: that run doesn't start, and the scratch folder made for it goes", async () => {
+    const w = world();
+    const { record } = await w.make({ folder: { scratch: true } });
+    w.during.prepare = async () => {
+      w.during.prepare = null;
+      await w.scheduled.remove(record.id, { kind: "person" });
+    };
+    await expect(w.scheduled.runNow(record.id, { kind: "person" })).rejects.toThrow(`No scheduled thread ${record.id}.`);
+    expect(w.fake.calls.filter((call) => call.startsWith("start "))).toEqual([]);
+    expect(w.store.deletedScheduledThread(record.id)!.thread_id).toBeNull();
+    const scratch = join(w.home, "..", "data", "scratch");
+    expect(existsSync(scratch) ? readdirSync(scratch) : []).toEqual([]);
   });
 });
 
@@ -431,7 +449,7 @@ describe("the folder", () => {
     await expect(w.make({ folder: { path: w.home } })).rejects.toThrow("Pick a folder inside the home folder.");
   });
 
-  test("a person's folder by its path gone before any run: the clock's run files its didn't-start line under that folder's name", async () => {
+  test("a person's folder by its path gone before any run: the clock's run files its didn't-start line under the scratch folders' own folder, making no project for the gone one", async () => {
     const w = world();
     const gone = join(w.home, "code", "acme-web");
     mkdirSync(gone, { recursive: true });
@@ -443,7 +461,8 @@ describe("the folder", () => {
     expect(row.last_run).toMatchObject({ run: 1, outcome: "didnt_start" });
     const [line] = w.dividers(row.thread_id);
     expect(line!.scheduled_run!.failed).toMatch(/acme-web isn't there\. Pick another folder\.$/);
-    expect(w.store.project(line!.project_id)).toMatchObject({ name: "acme-web", root: (record.folder as { path: string }).path });
+    expect(w.store.project(line!.project_id)).toMatchObject({ name: "scratch", root: join(w.home, "..", "data", "scratch") });
+    expect(w.store.allProjects().some((p) => p.root === (record.folder as { path: string }).path)).toBe(false);
   });
 
   test("a new scratch folder that can't be made on the first run: the clock's line goes under the scratch folders' own folder", async () => {

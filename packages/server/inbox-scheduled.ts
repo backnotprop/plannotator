@@ -28,6 +28,7 @@ import {
   SCHEDULED_LATE_MS,
   SCHEDULED_TICK_MS,
 } from "@plannotator/core/inbox-scheduled";
+import { existsSync } from "node:fs";
 import { basename } from "node:path";
 import { inboxLaunchedSession } from "@plannotator/core/inbox-run-line";
 import { InboxError } from "@plannotator/shared/inbox/schema";
@@ -262,19 +263,17 @@ export function createInboxScheduled(deps: {
 
   /**
    * Where a first run that didn't start files its line, so the person sees why, on the clock's run as on Run now: a
-   * folder by its path in that folder's project; with it gone, the project of the thread an agent made it from, else
-   * one made for that folder, as a run there makes. A new scratch folder, or a project that is gone, goes where a
-   * scratch thread goes: the scratch folders' own folder.
+   * folder by its path that is there, in that folder's project; else the project of the thread an agent made it from;
+   * else where a scratch thread goes, the scratch folders' own folder. A folder that isn't there never becomes a project.
    */
   const firstProject = async (record: InboxScheduledThread): Promise<string | null> => {
     const path = "path" in record.folder ? record.folder.path : null;
-    const resolved = path ? await deps.resolveProject(path).catch(() => null) : null;
+    const resolved = path && existsSync(path) ? await deps.resolveProject(path).catch(() => null) : null;
     if (resolved) return resolved.id;
     const madeIn = record.made_by?.thread_id ? store.message(record.made_by.thread_id)?.project_id : null;
     if (madeIn && store.project(madeIn)) return madeIn;
     const scratch = launch.settingsState().scratch_dir;
-    const root = path ?? (typeof scratch === "string" ? scratch : null);
-    return root ? store.ensureProject({ name: basename(root) || root, root }).id : null;
+    return typeof scratch === "string" ? store.ensureProject({ name: basename(scratch) || scratch, root: scratch }).id : null;
   };
 
   /**
@@ -318,14 +317,21 @@ export function createInboxScheduled(deps: {
         if (record.thread_id !== message.thread_id) save(record, { thread_id: message.thread_id });
         return message;
       }
-      const record = found(id);
+      // Deleted while it was starting: the run doesn't start, and what the launch made for it goes.
+      const live = (): InboxScheduledThread => {
+        const record = store.scheduledThread(id);
+        if (record) return record;
+        launch.abandon(prepared.launch, prepared.project);
+        throw new InboxError("scheduled_not_found", `No scheduled thread ${id}.`);
+      };
+      const record = live();
       let attachments: InboxAttachment[] = [];
       try {
         attachments = record.attachments.length > 0 ? await deps.recordAttachments(record.attachments, prepared.project, prepared.project.root) : [];
       } catch (error) {
         log(`Inbox scheduled ${id}: an attachment was left out (${error instanceof InboxError ? error.code : "error"})`);
       }
-      const current = found(id);
+      const current = live();
       const previous = current.thread_id ? (store.scheduledRunOf(current.thread_id) ?? store.message(current.thread_id)) : null;
       const { message, replayed } = store.writeScheduledLine({
         project_id: prepared.project.id,
