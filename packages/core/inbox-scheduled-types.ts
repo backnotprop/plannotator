@@ -9,8 +9,12 @@ export type InboxScheduledSchedule = { cron: string; tz: string } | { at: string
 
 export type InboxScheduledIfMissed = "run_once" | "skip";
 
-/** Where its runs work: a project's folder as it is, or a new scratch folder made at its first run (then that project). */
-export type InboxScheduledFolder = { project_id: string } | { scratch: true };
+/**
+ * Where its runs work: a project's folder, a folder by its real path (a worktree or a subfolder runs there, not at its
+ * project's root; home, `/` and hidden folders are refused as New message refuses them), or a new scratch folder made
+ * at its first run (then that project).
+ */
+export type InboxScheduledFolder = { project_id: string } | { path: string } | { scratch: true };
 
 /** The record, kind `scheduled`, in `<dataDir>/inbox/scheduled.jsonl` (one file for every project, like initiatives). */
 export interface InboxScheduledThread {
@@ -19,7 +23,7 @@ export interface InboxScheduledThread {
   name: string;
   enabled: boolean;
   /**
-   * When the person last turned it on in the window. Null until then, and again after an agent moved its folder.
+   * When the person last turned it on in the window. Null until then, and again after an agent changed its folder or its agent.
    * Agents may turn it on and run it only while this is set.
    */
   approved_at: string | null;
@@ -38,7 +42,10 @@ export interface InboxScheduledThread {
   thread_id: string | null;
   /** The agent session that made it, and the thread it asked from. */
   made_by?: { host: string; session: string; thread_id: string };
-  /** The last due time that was run or skipped (ISO). */
+  /**
+   * Where the clock counts from (ISO): set when it is turned on or its schedule changes. A run or skip line the clock
+   * writes counts too (its `due_at`), so this record is not written again at every due time.
+   */
   handled_through: string | null;
   /** A one-time schedule after its run (or its skip): Done. */
   done_at?: string;
@@ -67,9 +74,9 @@ export interface InboxScheduledRun {
   by: "schedule" | "person" | "agent";
   /** Started more than 2 minutes after `due_at`. */
   late?: true;
-  /** Earlier due times folded into this late run. */
+  /** Earlier due times folded into this late run (counted up to 1,000). */
   missed_before?: number;
-  /** On a skip line: the due times skipped, and why. */
+  /** On a skip line: the due times skipped (counted up to 1,000), and why. */
   skipped?: { count: number; from: string; to: string; reason: InboxScheduledSkipReason };
   /** A run that didn't start (the agent missing, the folder gone): why, in the launch's own words. */
   failed?: string;
@@ -82,10 +89,10 @@ export interface InboxScheduledRun {
 export interface InboxScheduledChange {
   scheduled_id: string;
   name: string;
-  op: "create" | "update" | "on" | "off" | "delete";
+  op: "create" | "update" | "on" | "off" | "run" | "delete";
   /** The fields that changed, for an update. */
   fields?: ("name" | "prompt" | "schedule" | "folder" | "if_missed" | "agent" | "model" | "effort" | "attachments")[];
-  /** A folder change turned it off until the person turns it on again. */
+  /** A folder or agent change turned it off until the person turns it on again. */
   turned_off?: true;
 }
 

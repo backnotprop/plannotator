@@ -49,6 +49,12 @@ describe("the missed-run decision (spec section 4)", () => {
     expect(inboxScheduledDecide({ ...base, now: at("2026-11-16T13:59:00Z") })).toEqual({ kind: "wait" });
     expect(inboxScheduledDecide({ ...base, schedule: null, now: at("2026-11-16T14:00:20Z") })).toEqual({ kind: "wait" });
   });
+
+  test("ten years away is one decision for the newest due time, counted up to 1,000, not a walk over each", () => {
+    const base = { schedule: { cron: "*/15 * * * *", tz: NY }, handled_through: "2016-11-16T14:00:00.000Z", now: at("2026-11-16T14:07:00Z"), why: "not_running" as const, running: false };
+    expect(inboxScheduledDecide({ ...base, if_missed: "skip" })).toEqual({ kind: "skip", count: 1000, from: "2016-11-16T14:15:00.000Z", to: "2026-11-16T14:00:00.000Z", reason: "not_running", handled_through: "2026-11-16T14:00:00.000Z" });
+    expect(inboxScheduledDecide({ ...base, if_missed: "run_once", now: at("2026-11-16T14:01:00Z") })).toMatchObject({ kind: "run", due_at: "2026-11-16T14:00:00.000Z", missed_before: 999 });
+  });
 });
 
 describe("next run across daylight saving", () => {

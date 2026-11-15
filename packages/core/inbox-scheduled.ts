@@ -62,11 +62,32 @@ export function inboxScheduledNext(schedule: InboxScheduledSchedule, after: Date
   }
 }
 
-/** The due times in (`after`, `through`], oldest first. */
-export function inboxScheduledDue(schedule: InboxScheduledSchedule, after: Date, through: Date): Date[] {
-  const out: Date[] = [];
-  for (let next = inboxScheduledNext(schedule, after); next && next.getTime() <= through.getTime(); next = inboxScheduledNext(schedule, next)) out.push(next);
-  return out;
+/** How far a catch-up counts the due times it folds in or skips: past this, the words say "1,000 or more". */
+export const SCHEDULED_COUNT_MAX = 1_000;
+
+/**
+ * The due times in (`after`, `through`]: the first, the newest, and how many (counted up to `SCHEDULED_COUNT_MAX`), or
+ * null for none. The newest is read back from `through`, so a long sleep costs at most that many steps.
+ */
+export function inboxScheduledDue(schedule: InboxScheduledSchedule, after: Date, through: Date): { first: Date; newest: Date; count: number } | null {
+  const first = inboxScheduledNext(schedule, after);
+  if (!schedule || !first || first.getTime() > through.getTime()) return null;
+  let newest = first;
+  try {
+    // Croner reads back strictly before its reference, at whole seconds.
+    const back = cronOf(schedule).previousRuns(2, new Date(through.getTime() + 1000)).find((at) => at.getTime() <= through.getTime());
+    if (back && back.getTime() > first.getTime()) newest = back;
+  } catch {
+    // The first is all there is.
+  }
+  let count = 1;
+  for (let next = first; count < SCHEDULED_COUNT_MAX && next.getTime() < newest.getTime(); count++) next = inboxScheduledNext(schedule, next) ?? newest;
+  return { first, newest, count };
+}
+
+/** "3 times", "1,000 or more times". */
+export function inboxScheduledTimes(count: number): string {
+  return count >= SCHEDULED_COUNT_MAX ? `${SCHEDULED_COUNT_MAX.toLocaleString("en-US")} or more times` : `${count} times`;
 }
 
 // ─── Words ───
@@ -179,10 +200,10 @@ export function inboxScheduledDecide(input: {
 }): InboxScheduledDecision {
   if (input.schedule === null || input.handled_through === null) return { kind: "wait" };
   const due = inboxScheduledDue(input.schedule, new Date(input.handled_through), input.now);
-  const newest = due.at(-1);
-  if (!newest) return { kind: "wait" };
+  if (!due) return { kind: "wait" };
+  const { newest } = due;
   const handled_through = newest.toISOString();
-  const skip = (reason: InboxScheduledSkipReason): InboxScheduledDecision => ({ kind: "skip", count: due.length, from: due[0]!.toISOString(), to: handled_through, reason, handled_through });
+  const skip = (reason: InboxScheduledSkipReason): InboxScheduledDecision => ({ kind: "skip", count: due.count, from: due.first.toISOString(), to: handled_through, reason, handled_through });
   if (input.running) return skip("still_running");
   const late = input.now.getTime() - newest.getTime() > SCHEDULED_LATE_MS;
   if (late) {
@@ -190,5 +211,5 @@ export function inboxScheduledDecide(input: {
     const soon = next !== null && next.getTime() - input.now.getTime() < SCHEDULED_MIN_GAP_MINUTES * MINUTE;
     if (input.if_missed === "skip" || soon) return skip(input.why ?? "missed");
   }
-  return { kind: "run", due_at: handled_through, late, missed_before: due.length - 1, handled_through };
+  return { kind: "run", due_at: handled_through, late, missed_before: due.count - 1, handled_through };
 }
