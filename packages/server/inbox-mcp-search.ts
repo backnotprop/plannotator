@@ -12,6 +12,7 @@ import type { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod";
 import { inboxSearchTerms, INBOX_SEARCH_LIMIT_MAX, INBOX_SEARCH_QUERY_MAX, type InboxSearchMessageRow } from "@plannotator/core/inbox-search";
 import { InboxError } from "@plannotator/shared/inbox/schema";
+import { INBOX_SEARCH_FIRST_RULE } from "@plannotator/shared/inbox/connection";
 import { clip, shortTime } from "./inbox-mcp-read";
 import { guarded, okComplete, PROJECT_PATH_DESCRIPTION } from "./inbox-mcp-result";
 import type { InboxMcpContext } from "./inbox-mcp";
@@ -22,7 +23,7 @@ export const INBOX_AGENT_SEARCH_LIMIT = 10;
 export const INBOX_AGENT_SEARCH_BUILD_WAIT_MS = 10_000;
 
 export const SEARCH_DESCRIPTION =
-  "Search the Inbox's messages (yours, other agents' and the person's) by words, read-only: in this project unless all_projects. Up to `limit` results (default 10, at most 50; a larger limit answers 50). Every word must match (the last may be the start of a word), questions' prompts, choices and answers included. Each result is one line: the thread, the message, who wrote it, when, and the words around the match. read_thread with that thread_id and message_id shows the message in full.";
+  `Search the Inbox's messages (yours, other agents' and the person's) by words, read-only: in this project unless all_projects. Up to \`limit\` results (default 10, at most 50; a larger limit answers 50). Every word must match (the last may be the start of a word), questions' prompts, choices and answers included. Each result is one line: the thread, the message, who wrote it, when, and the words around the match. read_thread with that thread_id and message_id shows the message in full. ${INBOX_SEARCH_FIRST_RULE}`;
 
 export interface InboxAgentSearchRow {
   thread_id: string;
