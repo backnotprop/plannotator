@@ -185,6 +185,7 @@ import { priorityWrites } from './priorityWrites';
 import { snoozeWrites } from './snoozeWrites';
 import { agentWrites, type AgentDeleteAsk } from './agentWrites';
 import { joinThreadRead, useStaleOpenRead, type ThreadFlight } from './threadFlights';
+import { sameSettings, settingsReadAtLoad, takeSettingsAtLoad } from './settingsAtLoad';
 import { openTakenBack } from './takenBackCompose';
 import { restartInbox } from './restartInbox';
 import { errorToast } from './toastError';
@@ -568,11 +569,12 @@ function Inbox() {
    * another machine's thread (`#thread=` after a reload, in a new tab) first reads it here and gets a 404. That 404
    * waits for this list and, when the list names another machine as the owner, reads the thread there.
    */
-  const firstList = useRef<{ done: boolean; promise: Promise<void>; resolve: () => void } | null>(null);
+  const firstList = useRef<{ done: boolean; promise: Promise<void>; resolve: () => void; tried: Promise<void>; settle: () => void } | null>(null);
   if (!firstList.current) {
     let resolve = () => {};
+    let settle = () => {};
     const promise = new Promise<void>((r) => (resolve = r));
-    firstList.current = { done: false, promise, resolve };
+    firstList.current = { done: false, promise, resolve, tried: new Promise<void>((r) => (settle = r)), settle: () => settle() };
   }
   const threadReadApplied = useRef(0);
   /**
@@ -1389,13 +1391,12 @@ function Inbox() {
   }, [noteLineAgain]);
 
   const refreshSettings = useCallback(async () => {
-    // The agent icons' faces ride with every settings read: on load, and after the stream was away.
     void readAgentFaces();
     try {
       const mark = listLookReadMark();
       const reactionsMark = reactionsReadMark();
       const sidebarMark = sidebarLayoutReadMark();
-      const next = await inboxApi.settings();
+      const next = await (takeSettingsAtLoad() ?? inboxApi.settings());
       adoptSavedTheme(next.theme);
       adoptSavedTextSize(next.text_size);
       adoptSavedFavicon(next.favicon);
@@ -1408,7 +1409,7 @@ function Inbox() {
       if (next.display_name && next.code_review?.on) configStore.init({ displayName: next.display_name });
       adoptVoiceSettings(next.voice);
       noteLineAgain(next.reveal);
-      setSettings(next);
+      setSettings((current) => (current && sameSettings(current, next) ? current : next));
       setSettingsReadFailed(false);
     } catch (cause) {
       setSettingsError(cause instanceof Error ? cause.message : String(cause));
@@ -1847,14 +1848,14 @@ function Inbox() {
     };
     // Listen to the tabs' shared stream before the first read, so nothing passed on between the read and the subscription is lost (sharedEvents.ts).
     prepareInboxEvents();
-    let settingsAsked = false;
+    let settingsAsked = settingsReadAtLoad();
+    if (settingsAsked) void refreshSettings();
     let firstListTimer: ReturnType<typeof setTimeout> | null = null;
     void (async () => {
       // A first read that fails is read again until it lands (firstListRead.ts): the page listens only from then on.
       const first = await readFirstList({
         read: async () => {
-          const next = await refreshList(true);
-          // As before, right after the first try, landed or not.
+          const next = await refreshList(true).finally(() => firstList.current!.settle());
           if (!settingsAsked) void refreshSettings();
           settingsAsked = true;
           return next;
@@ -2224,11 +2225,10 @@ function Inbox() {
       // settles nothing when every message is seen, left it there with its
       // questions open.
       if (listCovered() && COVERED_LIST_SETTLES === 'while-covered') settleList('own', false, { threadId });
-      // The look covers what this read showed, not a message that lands before the server takes it.
-      // Until it lands and the list is read again, the row and the header read it as looked at (`looking`).
       setLooking((current) => (current.has(threadId) ? current : new Set(current).add(threadId)));
       const look = (async () => {
         try {
+          await firstList.current!.tried;
           await inboxApi.seen(threadId, latestAgentSeq(opened)).catch(() => {});
           // Read the list even when another thread opened meanwhile: this row leaves `looking` next, and must
           // then show the server's row (read), not the one from before the look (bold).
