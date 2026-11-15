@@ -218,7 +218,7 @@ function stringInteriors(root: Node, language?: LanguageId): Set<number> {
       return;
     }
     if (n.endPosition.row === n.startPosition.row) return;
-    if (/string|template|text_block|heredoc|nowdoc/.test(n.type) && !/content|fragment/.test(n.type)) {
+    if ((/string|template|text_block|heredoc|nowdoc/.test(n.type) || (language === 'ruby' && /^(regex|subshell)$/.test(n.type))) && !/content|fragment/.test(n.type)) {
       // Rust drops the leading whitespace of a line continued with a backslash
       // ("...\\\n    more"), so re-indenting that line leaves the string as it was.
       const lines = n.text.split('\n');
