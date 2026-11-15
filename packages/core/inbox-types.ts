@@ -3499,6 +3499,21 @@ export interface InboxAgent {
 export const INBOX_AGENTS_LISTED_MAX = 40;
 
 /**
+ * An agent as another machine (or an older or newer Inbox) sent it, with its names checked: a `label`, `title` or
+ * `first_thread` that is not text is dropped, the rest of the agent kept.
+ */
+export function inboxAgentNamesChecked(agent: InboxAgent): InboxAgent {
+  const { label, title, first_thread, ...rest } = agent as InboxAgent & Record<string, unknown>;
+  const thread = first_thread as unknown as Record<string, unknown> | null | undefined;
+  return {
+    ...rest,
+    ...(typeof label === "string" ? { label } : {}),
+    ...(typeof title === "string" ? { title } : {}),
+    ...(thread && typeof thread === "object" && typeof thread.id === "string" && typeof thread.name === "string" ? { first_thread: { id: thread.id, name: thread.name } } : {}),
+  } as InboxAgent;
+}
+
+/**
  * One machine's agents on the list model (`agents`, one group per machine), in a fixed order: the newest first seen
  * first, an agent keeping its place whatever it does. At most `INBOX_AGENTS_LISTED_MAX`; past that, the ones waiting
  * on the person stay listed.

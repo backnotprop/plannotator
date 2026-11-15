@@ -381,11 +381,13 @@ function engineOn(configDir: string, folder: string) {
   const timers = new Set<() => void>()
   const polls: unknown[] = []
   const titles: unknown[] = []
+  const starts: { started: unknown; first: unknown }[] = []
   let clock = 1_000_000
   const env: Record<string, string> = { HOME: '/home/me', PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: DATA, CLAUDE_CONFIG_DIR: configDir }
   return {
     polls,
     titles,
+    starts,
     store,
     tick: async (n: number) => {
       for (let i = 0; i < n; i += 1) {
@@ -439,9 +441,10 @@ function engineOn(configDir: string, folder: string) {
       http: {
         fetch: async (url: string, init: { body?: string }) => {
           if (url.endsWith('/api/inbox/bridge/poll')) {
-            const body = JSON.parse(init.body ?? '{}') as { label?: unknown; title?: unknown }
+            const body = JSON.parse(init.body ?? '{}') as { label?: unknown; title?: unknown; started_at?: unknown; first_started_at?: unknown }
             polls.push(body.label)
             titles.push(body.title)
+            starts.push({ started: body.started_at, first: body.first_started_at })
           }
           return { status: 200, ok: true, text: JSON.stringify({ commands: [] }) }
         },
@@ -500,7 +503,7 @@ describe('from the transcript to a poll body', () => {
     await on.only('session.end')(world.$, {}, (e: unknown) => e)
   })
 
-  test('a module reload keeps the name and the generated title of a long session whose transcript end holds neither', async () => {
+  test('a module reload keeps the name, the generated title and the first start of a long session whose transcript end holds no title', async () => {
     const configDir = join(scratch, 'claude-config-reload')
     const folder = '/home/me/src/long-session'
     const projectDir = join(configDir, 'projects', claudeProjectSlug(folder)!)
@@ -514,6 +517,8 @@ describe('from the transcript to a poll body', () => {
     await world.tick(3)
     expect([world.polls.at(-1), world.titles.at(-1)]).toEqual(['Named with --name', 'Invoice retry backoff'])
     expect(world.store.get(STORE_INBOX_SESSION_TITLES)).toMatchObject({ [SESSION]: { title: 'Named with --name', generated: 'Invoice retry backoff' } })
+    const firstStart = world.starts.at(-1)!.started as number
+    expect(world.starts.at(-1)).toEqual({ started: firstStart, first: firstStart })
     await first.only('session.end')(world.$, {}, (e: unknown) => e)
 
     appendFileSync(path, chatter('x'.repeat(1024)).repeat(Math.ceil((TRANSCRIPT_TITLE_FIRST_READ_BYTES + 512 * 1024) / 1024)))
@@ -521,6 +526,9 @@ describe('from the transcript to a poll body', () => {
     await reloaded.only('session.start')(world.$, { isInteractive: true }, async () => ({ cwd: folder }))
     await world.tick(3)
     expect([world.polls.at(-1), world.titles.at(-1)]).toEqual(['Named with --name', 'Invoice retry backoff'])
+    // The new link started later; it still tells the Inbox when the session first started (the Agents list's place).
+    expect(world.starts.at(-1)!.started as number).toBeGreaterThan(firstStart)
+    expect(world.starts.at(-1)!.first).toBe(firstStart)
     await reloaded.only('session.end')(world.$, {}, (e: unknown) => e)
   })
 

@@ -124,17 +124,20 @@ import {
   pluginVersionOf,
   readReminderSessions,
   readSessionNames,
+  readSessionStarts,
   readSessionTitles,
   sessionNamesAfterCommand,
   readSessionThreads,
   STORE_INBOX_REMINDER_SESSIONS,
   STORE_INBOX_SESSION_NAMES,
+  STORE_INBOX_SESSION_STARTS,
   STORE_INBOX_SESSION_TITLES,
   TranscriptContinuedIn,
   TranscriptForkedFrom,
   TranscriptTitle,
   type InboxLaunchReminder,
   withReminderSession,
+  withSessionStart,
   withSessionTitles,
 } from './inbox'
 import { inboxAgentTool, inboxReminderFor, type InboxToolInfo } from './inbox-contract'
@@ -599,6 +602,14 @@ function sessionTitleOf($: Engine, host: Host, sessionId: string): TranscriptTit
   })
 }
 
+/** `sessionId`'s first start: the one kept in `$.store` (STORE_INBOX_SESSION_STARTS), else `startedAt`, which is kept. */
+async function sessionFirstStartOf($: Engine, sessionId: string, startedAt: number): Promise<number> {
+  const stored = readSessionStarts(await $.store.get(STORE_INBOX_SESSION_STARTS))
+  const updated = withSessionStart(stored, sessionId, startedAt)
+  if (updated !== stored) await $.store.set(STORE_INBOX_SESSION_STARTS, updated)
+  return Math.min(stored[sessionId] ?? startedAt, startedAt)
+}
+
 /** Where `sessionId`'s transcript may be, asked when needed: the folder it started in (its first root), its root now, its working folder. */
 function transcriptCandidatesOf($: Engine, sessionId: string): () => Promise<string[]> {
   let firstRoot: string | null = null
@@ -648,6 +659,7 @@ async function currentMod($: Engine, options: { healed?: boolean } = {}): Promis
       root: async () => String(await $.session.root()),
       label: async () => (await title.read().catch(() => null)) ?? sessionNameOf($, String(sessionId)),
       title: () => title.generatedTitle() ?? '',
+      firstStart: (startedAt) => sessionFirstStartOf($, String(sessionId), startedAt),
       continues: async () => [...new Set([...(await forkedFrom.read()), ...(await continuedIn.read())])],
       ...(inboxTools ? { inboxTools } : {}),
       ...(settings.t3Thread ? { inboxAs: inboxT3Agent(settings.t3Thread), inboxOwner: () => t3ThreadOwnHere($) } : {}),

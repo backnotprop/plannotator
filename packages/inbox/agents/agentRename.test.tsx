@@ -278,6 +278,33 @@ test.skipIf(!hasDom)('a given name never changes by itself: a thread waiting, ne
   expect(rowName('ses_m')).toBe('Their name');
 });
 
+test.skipIf(!hasDom)("the @ menu leads with the name the person gave, its token's label beside it; the token itself keeps the label the agent knows", async () => {
+  const { TagPicker } = await import('../components/TagPicker');
+  const { namedTagOptions } = await import('../thread/useThreadSessions');
+  const { tagPeople, tagsToSend } = await import('../tags');
+  const base = { host: 'claude-code', agent: 'Claude Code', group: 'Claude Code', owner: false, wakes: true, taggable: true, project: 'ledger' };
+  const options = namedTagOptions(
+    [
+      { ...base, id: 'ses_a', label: 'Invoice retry backoff', detail: 'ledger · idle' },
+      { ...base, id: 'ses_b', label: 'Ledger sync', detail: 'ledger · working' },
+    ],
+    new Map([['ses_a', 'Billing fix']]),
+  );
+  const people = tagPeople(options);
+  const host = document.createElement('div');
+  document.body.appendChild(host);
+  act(() => {
+    root = createRoot(host);
+    root.render(<TagPicker id="tags" menu={{ items: people, emptyNotice: null, heading: null, activeIndex: null, anchor: null, query: '' }} options={options} onSelect={() => {}} />);
+  });
+  const row = (id: string) => [document.querySelector(`[data-tag-option="${id}"] .ib-tg-on`)!.textContent, document.querySelector(`[data-tag-option="${id}"] .ib-tg-od`)!.textContent];
+  expect(row('ses_a')).toEqual(['Billing fix', 'Invoice retry backoff · ledger · idle']);
+  expect(row('ses_b')).toEqual(['Ledger sync', 'ledger · working']);
+  // What reaches the agent: the `@` token's label and the tag's, never the Inbox name.
+  expect(people.find((p) => p.id === 'ses_a')!.label).toBe('Invoice retry backoff');
+  expect(tagsToSend(['ses_a'], options, null)).toEqual([{ host: 'claude-code', session: 'ses_a', label: 'Invoice retry backoff' }]);
+});
+
 test.skipIf(!hasDom)("an older machine's agent (its list takes no agent marks) offers no Rename…: no ⋯ and no right-click menu; this machine's agent keeps both", async () => {
   setInboxAgents([{ ...group([agent('ses_a')]), machine: SELF }, { ...group([agent('ses_m', { host: 'pi' })]), machine: MAC }]);
   mount([], false, machinesModel([view(SELF, 'Studio'), view(MAC, 'MacBook')]));

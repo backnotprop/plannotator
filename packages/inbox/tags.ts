@@ -30,6 +30,8 @@ export interface TagOption {
   host: string | null;
   /** Its readable label: the `@<label>` token and the chip. */
   label: string;
+  /** The name the person gave it in the Inbox: what the picker row leads with. Never in the token (an agent never sees it). */
+  name?: string;
   /** The agent's own name ("Claude Code", "Pi", an MCP agent's name). */
   agent: string;
   /** The picker row's second line: "billing-api · working · since 9:14 AM". */

@@ -15,6 +15,7 @@ import { join } from "node:path";
 import { INBOX_AGENTS_LISTED_MAX, type InboxAgentsGroup } from "@plannotator/core/inbox-types";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { inboxAgentsGroup, inboxMergedAgents, inboxPeerAgentsGroup, inboxStartOfDay, type InboxAgentsEvidence } from "./inbox-agents-list";
+import { createInboxFirstSeen, type InboxFirstSeen } from "./inbox-first-seen";
 import { createInboxLiveSessions } from "./inbox-sessions";
 
 const roots: string[] = [];
@@ -23,11 +24,11 @@ afterEach(() => {
 });
 
 /** Live sessions over a temp store, on a clock the test moves. Noon, so "today" has room both ways. */
-function liveSessions() {
+function liveSessions(options: { firstSeen?: InboxFirstSeen } = {}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-agents-")));
   roots.push(root);
   const clock = { t: new Date(2026, 10, 9, 12, 0, 0).getTime() };
-  const live = createInboxLiveSessions({ store: InboxStore.open(join(root, "data")), serverSession: "srv", resolveRoot: async (path) => path, now: () => clock.t });
+  const live = createInboxLiveSessions({ store: InboxStore.open(join(root, "data")), serverSession: "srv", resolveRoot: async (path) => path, now: () => clock.t, ...options });
   return { live, clock, root };
 }
 
@@ -236,6 +237,55 @@ describe("a fixed order: each agent stays where it first appeared, the newest fi
     ];
     expect(ids(inboxAgentsGroup(evidence({ sessions, ...fromStore(store) })))).toEqual(["ses-mid", "ses-old"]);
   });
+
+  test("a plugin reload and then an Inbox restart (both on every release) move nothing: the first start is kept on disk, and the connection keeps its own", async () => {
+    const at = (h: number, m = 0) => new Date(2026, 10, 9, h, m).getTime();
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-first-seen-")));
+    roots.push(dir);
+    const withFile = () => {
+      const kept = createInboxFirstSeen(dir);
+      const { live, clock, root } = liveSessions({ firstSeen: kept });
+      return { live, clock, root, kept };
+    };
+    const before = withFile();
+    // A connected at 9:00, B at 9:30; C and D (that never wrote anything) at 9:00 and 9:30.
+    for (const [session, start] of [["ses-a", at(9)], ["ses-b", at(9, 30)], ["ses-c", at(9)], ["ses-d", at(9, 30)]] as const) await poll(before.live, session, { busy: false, started_at: start });
+    const order = ["ses-b", "ses-d", "ses-a", "ses-c"];
+    expect(ids(listedNow(before.live, before.clock, { kept: before.kept }))).toEqual(order);
+    // All four reload at 11:00, D's and C's finishing in the other order.
+    for (const [session, start] of [["ses-a", at(11)], ["ses-b", at(11, 1)], ["ses-d", at(11, 2)], ["ses-c", at(11, 3)]] as const) await poll(before.live, session, { busy: false, started_at: start });
+    expect(ids(listedNow(before.live, before.clock, { kept: before.kept }))).toEqual(order);
+    await Promise.resolve();
+    // The Inbox restarts: a new process reads the same folder; the connections say only their reloaded starts.
+    const after = withFile();
+    for (const [session, start] of [["ses-a", at(11)], ["ses-b", at(11, 1)], ["ses-d", at(11, 2)], ["ses-c", at(11, 3)]] as const) await poll(after.live, session, { busy: false, started_at: start });
+    expect(ids(listedNow(after.live, after.clock, { kept: after.kept }))).toEqual(order);
+    // A fresh data folder: the first start each connection kept (`first_started_at`) places it.
+    const fresh = liveSessions();
+    for (const [session, start, first] of [["ses-a", at(11), at(9)], ["ses-b", at(11, 1), at(9, 30)], ["ses-d", at(11, 2), at(9, 30)], ["ses-c", at(11, 3), at(9)]] as const) await poll(fresh.live, session, { busy: false, started_at: start, first_started_at: first });
+    expect(ids(listedNow(fresh.live, fresh.clock))).toEqual(order);
+  });
+
+  test("a conversation resumed under a new id keeps the place its old id had, across an Inbox restart too", async () => {
+    const at = (h: number) => new Date(2026, 10, 9, h).getTime();
+    const kept = createInboxFirstSeen(null);
+    const { live, clock } = liveSessions({ firstSeen: kept });
+    await poll(live, "ses-old", { busy: false, started_at: at(9) });
+    await poll(live, "ses-b", { busy: false, started_at: at(10) });
+    expect(ids(listedNow(live, clock, { kept }))).toEqual(["ses-b", "ses-old"]);
+    // ses-old stops; its conversation goes on as ses-new, started at 11:00.
+    for (const _ of [1, 2]) {
+      clock.t += 20_000;
+      await poll(live, "ses-b", { busy: false });
+    }
+    await poll(live, "ses-new", { busy: false, started_at: at(11), continues: ["ses-old"] });
+    expect(ids(listedNow(live, clock, { kept }))).toEqual(["ses-b", "ses-new"]);
+    // After a restart the old id is no live session at all: what was kept for it still places the new one.
+    const restarted = liveSessions({ firstSeen: kept });
+    await poll(restarted.live, "ses-b", { busy: false, started_at: at(10) });
+    await poll(restarted.live, "ses-new", { busy: false, started_at: at(11), continues: ["ses-old"] });
+    expect(ids(listedNow(restarted.live, restarted.clock, { kept }))).toEqual(["ses-b", "ses-new"]);
+  });
 });
 
 /** A temp store with one project, on a clock the test moves (the first message at 9 AM). */
@@ -300,6 +350,31 @@ describe("names the list gives the window: the host's title, and the thread each
     expect(byId("ses-pi").first_thread).toEqual({ id: opened.thread_id, name: "Queue timeouts" });
     expect(byId("lch_1").first_thread).toEqual({ id: opened.thread_id, name: "Queue timeouts" });
     expect(byId("ses-new").first_thread?.name).toBe("Ledger sync");
+  });
+
+  test("the first thread's name is kept as it first read: renaming or deleting that thread later neither renames the row nor moves it", () => {
+    const { store, project, clock } = storeWith();
+    const kept = createInboxFirstSeen(null);
+    const first = store.sendMessage({ project_id: project.id, author: agentAuthor("ses-a"), subject: "Invoice retries", body: "Looking" }).message;
+    clock.now += 60_000;
+    store.sendMessage({ project_id: project.id, author: agentAuthor("ses-a"), subject: "Semantic diffs", body: "Next" });
+    store.sendMessage({ project_id: project.id, author: agentAuthor("ses-b"), subject: "Ledger sync", body: "Began" });
+    // Both connections came back at noon (an Inbox restart): their first messages place them.
+    const noon = Date.parse("2026-11-09T12:00:00.000Z");
+    const quiet = (session: string) => liveOne(session, { startedAt: noon, firstSeen: noon, lastSeen: noon });
+    const listed = (over: Partial<InboxAgentsEvidence> = {}) => inboxAgentsGroup(evidence({ sessions: [quiet("ses-a"), quiet("ses-b")], ...fromStore(store), kept, ...over }));
+    const rows = (group: InboxAgentsGroup) => group.agents.map((agent) => [agent.id, agent.first_thread?.name]);
+    const before = [
+      ["ses-b", "Ledger sync"],
+      ["ses-a", "Invoice retries"],
+    ];
+    expect(rows(listed())).toEqual(before);
+    // The thread renamed: the name the list reads for it changes; the row's does not.
+    expect(rows(listed({ threadNameOf: () => "Renamed later", firstThreadOf: (sessions) => (sessions[0] === "ses-a" ? { id: first.thread_id, name: "Renamed later", at: first.created_at } : fromStore(store).firstThreadOf!(sessions)) }))).toEqual(before);
+    // Deleted: the store's first thread for ses-a is now "Semantic diffs", a minute later; ses-a keeps its name and place.
+    store.deleteThread(first.thread_id);
+    expect(fromStore(store).firstThreadOf!(["ses-a"])?.name).toBe("Semantic diffs");
+    expect(rows(listed())).toEqual(before);
   });
 });
 
@@ -421,6 +496,15 @@ describe("linked machines", () => {
     const group = inboxPeerAgentsGroup([{ agents: [{ id: "a", session: "a", state: "idle" }, { id: "b", state: "idle" }, null, { id: "c", session: "c", state: "dancing" }], total: -1 }], "ibx_far") as InboxAgentsGroup;
     expect(group.agents.map((agent) => agent.id)).toEqual(["a"]);
     expect(group).toMatchObject({ machine: "ibx_far", total: 1, ended_today: 0 });
+  });
+
+  test("another machine's agent with a name that is not text keeps its row, without that name", () => {
+    const sent = [{ agents: [{ id: "a", session: "a", state: "idle", label: 7, title: { x: 1 }, first_thread: { id: "thr_1", name: null } }, { id: "b", session: "b", state: "idle", label: "Kept", title: "Also kept", first_thread: { id: "thr_2", name: "Ledger sync" } }] }];
+    const group = inboxPeerAgentsGroup(sent, "ibx_far") as InboxAgentsGroup;
+    expect(group.agents.map((agent) => [agent.id, agent.label, agent.title, agent.first_thread])).toEqual([
+      ["a", undefined, undefined, undefined],
+      ["b", "Kept", "Also kept", { id: "thr_2", name: "Ledger sync" }],
+    ]);
   });
 });
 

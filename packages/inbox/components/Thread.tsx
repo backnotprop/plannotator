@@ -1164,7 +1164,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     const row = rcptAgents.find((r) => r.session === id);
     if (row) return [row];
     const option = tagOpts.find((o) => o.id === id);
-    return option ? [{ session: id, host: option.host, label: option.label, short: option.label, state: 'live' as const }] : [];
+    return option ? [{ session: id, host: option.host, label: option.name ?? option.label, short: option.name ?? option.label, state: 'live' as const }] : [];
   });
   const rcptNames = namesList(rcptChosen.map((r) => r.label));
   /** Whom the box's words go to, named: the pill's names where it shows, else as before (the field's name, full screen's card). */

@@ -231,22 +231,27 @@ test.skipIf(!hasDom)("Agents takes Machines' place above Projects: each machine 
   expect(surface()!.querySelector(`[data-machine="${MAC}"]`)!.getAttribute('aria-current')).toBe('page');
 });
 
-test.skipIf(!hasDom)('an agent waiting on the person carries a dot at its row\'s end and says "waiting on you"; it keeps its place, and the dot goes once it no longer waits', () => {
+test.skipIf(!hasDom)('a list whose agent has a name that is not text (another machine, another version) still draws that row, by the next name', () => {
+  const bad = { ...agent('ses_bad'), label: 7, title: { x: 1 }, first_thread: { id: 'thr_1', name: null } } as unknown as InboxAgent;
+  setInboxAgents([group([bad, agent('ses_ok', { title: 'Ledger sync' })])]);
+  mount(<Sidebar {...sidebarProps({ machines: machinesModel(null) })} />);
+  const names = [...surface()!.querySelectorAll<HTMLElement>('[data-sidebar-agent]')].map((r) => [r.getAttribute('data-sidebar-agent'), r.querySelector('.ib-proj .ib-name')!.textContent]);
+  expect(names).toEqual([
+    ['ses_bad', 'billing-svc'],
+    ['ses_ok', 'Ledger sync'],
+  ]);
+});
+
+test.skipIf(!hasDom)('an agent waiting on the person keeps its place, and its row looks and reads like any other (no mark: the owner, 2026-11-15)', () => {
   const listed = (waits: boolean) => [group([agent('ses_a'), agent('ses_b', waits ? { state: 'waiting', waiting: 2 } : { state: 'working' }), agent('ses_c')])];
   const rows = () => [...surface()!.querySelectorAll<HTMLElement>('[data-sidebar-agent]')];
-  const dots = () => rows().filter((r) => r.querySelector('[data-agent-waits]')).map((r) => r.getAttribute('data-sidebar-agent'));
-  setInboxAgents(listed(true));
+  const drawn = () => rows().map((r) => [r.getAttribute('data-sidebar-agent'), r.querySelector('.ib-proj')!.innerHTML.replace(/ses_[abc]/g, 'ID')]);
+  setInboxAgents(listed(false));
   mount(<Sidebar {...sidebarProps({ machines: machinesModel(null) })} />);
-  expect(rows().map((r) => r.getAttribute('data-sidebar-agent'))).toEqual(['ses_a', 'ses_b', 'ses_c']);
-  expect(dots()).toEqual(['ses_b']);
-  const dot = rows()[1]!.querySelector('[data-agent-waits]')!;
-  expect(dot.classList.contains('ib-pdot')).toBe(true);
-  expect(dot.getAttribute('aria-hidden')).toBe('true');
-  expect(rows()[1]!.querySelector('.ib-proj .ib-sr')!.textContent).toBe(', Claude Code, waiting on you');
-  expect(rows()[0]!.querySelector('.ib-proj .ib-sr')!.textContent).toBe(', Claude Code');
-  act(() => setInboxAgents(listed(false)));
-  expect(rows().map((r) => r.getAttribute('data-sidebar-agent'))).toEqual(['ses_a', 'ses_b', 'ses_c']);
-  expect(dots()).toEqual([]);
+  const before = drawn();
+  act(() => setInboxAgents(listed(true)));
+  expect(drawn()).toEqual(before);
+  expect(rows()[1]!.querySelector('.ib-proj .ib-sr')!.textContent).toBe(', Claude Code');
 });
 
 test.skipIf(!hasDom)('with no machine linked the agents are one flat list; an Inbox with no agents field and no link has no section', () => {

@@ -24,9 +24,8 @@ import { agentFacts, agentHostName, agentRowName, agentsGroups, type AgentEntry 
  * row's (AgentMark.tsx: a click or a rest of the pointer opens its face picker). A machine that has no agent shows nothing.
  * While agents show from more than one machine, each machine's name is a small quiet grey caption above its agents
  * (still the machine's filter, as its Machines row was) and the agents sit a small step in; with one machine there is
- * no caption, only the agents. The agents keep the server's fixed order (inbox-agents-list.ts); one waiting on the
- * person carries the pinned row's dot at its end (owner, 2026-11-15), and its name says "waiting on you". No counts;
- * no lines; roomier gaps between machines. A click on an
+ * no caption, only the agents, in the server's fixed order (inbox-agents-list.ts). No counts and no state marks; no
+ * lines; roomier gaps between machines. A click on an
  * agent filters the list to its threads, as a machine's caption does, and opens none of them; a second click shows
  * everything again. An agent with no thread in the window has nothing to filter: a click messages it (New message).
  * Its hover card says where and when it started, and its project.
@@ -171,8 +170,6 @@ const AgentRow = memo(
     const onDelete = launch ? props.onDelete : undefined;
     const hasMenu = !!(onRename || onStop || onDelete);
     const launchName = agentHostName(entry.agent.host);
-    // Waiting on the person: a mark at the row's end, never a move (the list's order is fixed).
-    const waits = entry.agent.state === 'waiting';
     const row = (children: ReactNode) => (
       <div
         className="ib-sbagent"
@@ -271,11 +268,7 @@ const AgentRow = memo(
             <span className="ib-name" dir="auto">
               {entry.name}
             </span>
-            <span className="ib-sr">
-              , {agentHostName(entry.agent.host)}
-              {waits ? ', waiting on you' : ''}
-            </span>
-            {waits && <span className="ib-pdot" aria-hidden="true" data-agent-waits="" />}
+            <span className="ib-sr">, {agentHostName(entry.agent.host)}</span>
           </button>
         </Tip>
         <AgentMark id={entry.agent.id} host={entry.agent.host} name={entry.name} agent={entry.agent} picks={props.picks} />

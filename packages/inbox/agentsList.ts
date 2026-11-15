@@ -11,7 +11,7 @@
  * the agent as read, and `inboxAgentsNow` is the list as read.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { readInboxAgentFaces, type InboxAgent, type InboxAgentsGroup, type InboxListRow } from '@plannotator/core/inbox-types';
+import { inboxAgentNamesChecked, readInboxAgentFaces, type InboxAgent, type InboxAgentsGroup, type InboxListRow } from '@plannotator/core/inbox-types';
 import { agentListFilter, type AgentListFilter } from './agents/model';
 import { givenName, useAgentNames, type AgentNames } from './agents/agentNames';
 import type { MachinesModel } from './machines';
@@ -34,7 +34,7 @@ export function setInboxAgents(next: unknown): void {
     ? next
         .filter((group): group is InboxAgentsGroup => !!group && typeof group === 'object' && Array.isArray((group as InboxAgentsGroup).agents))
         .map((group) => {
-          const agents = group.agents.filter(isAgent);
+          const agents = group.agents.filter(isAgent).map(inboxAgentNamesChecked);
           return {
             ...(typeof group.machine === 'string' ? { machine: group.machine } : {}),
             agents,

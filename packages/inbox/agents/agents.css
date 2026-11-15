@@ -44,15 +44,10 @@
 .pn-inbox .ib-sbagent[data-menu] .ib-proj:not(.ib-on) { background: var(--ib-side-menu); color: var(--foreground); }
 .pn-inbox .ib-sbagent[data-menu] .ib-pmore { color: var(--foreground); }
 .pn-inbox .ib-sbagent[data-renaming] { padding: 3px 0; }
-/* Waiting on the person: the pinned row's dot (inbox.css .ib-pdot) at the row's end. ⋯ takes its place on hover, as
-   it does a project row's count; the row's name still says it. */
-.pn-inbox .ib-sbagent .ib-proj > .ib-pdot { margin-right: 2px; }
-.pn-inbox .ib-sbagent:is(:hover, :has(:focus-visible), [data-menu]):has(> .ib-pmore) .ib-proj > .ib-pdot { visibility: hidden; position: absolute; }
-/* A screen that cannot hover: ⋯ always shown, as a project row's, after the dot. */
+/* A screen that cannot hover: ⋯ always shown, as a project row's. */
 @media (hover: none) {
   .pn-inbox .ib-sbagent .ib-pmore { opacity: 1; }
   .pn-inbox .ib-sbagent:has(> .ib-pmore) .ib-proj { padding-right: 32px; }
-  .pn-inbox .ib-sbagent:is(:hover, :has(:focus-visible), [data-menu]):has(> .ib-pmore) .ib-proj > .ib-pdot { visibility: visible; position: static; }
 }
 /* The one spacing rule of the sidebar's sections, for a section that is one block: its heading 2 px under a closed
    section with no row left, and the next heading 2 px under it while it is closed (closed, it draws no row at all). */
@@ -82,7 +77,6 @@
   /* ⋯ always shown, a 44 px target at the row's end (a project row's on a phone). */
   .pn-inbox .ib-sbagent .ib-pmore { opacity: 1; right: 0; }
   .pn-inbox .ib-sbagent:has(> .ib-pmore) .ib-proj, .pn-inbox .ib-sbagent:is(:hover, :has(:focus-visible), [data-menu]):has(> .ib-pmore) .ib-proj { padding-right: 46px; }
-  .pn-inbox .ib-sbagent:is(:hover, :has(:focus-visible), [data-menu]):has(> .ib-pmore) .ib-proj > .ib-pdot { visibility: visible; position: static; }
 }
 
 /* ---------- the animated agent mark (motion.ts): 24 px, no tile, always alive ---------- */

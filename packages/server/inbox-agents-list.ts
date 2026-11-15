@@ -25,9 +25,10 @@
  *
  * The order is fixed (owner, 2026-11-15: "each agent stays where it first appeared"): the newest first seen first,
  * ties by session id, never by state or by when it was last heard. First seen is the earliest of what this machine
- * knows of it: the start its connection first said (a plugin reload's later start never moves it), its launch, and
- * the first message it wrote or got. Each machine orders its own agents, so every window, linked machine and phone
- * shows a machine's group in the same order.
+ * knows of it and of the sessions its conversation continues (a resumed session keeps its place): the first start its
+ * connection said or kept (a plugin reload's later start never moves it), its launch, the first message it wrote or
+ * got, and what was kept on disk (inbox-first-seen.ts, so an Inbox restart moves nothing). Each machine orders its own
+ * agents, so every window, linked machine and phone shows a machine's group in the same order.
  *
  * The cap: at most `INBOX_AGENTS_LISTED_MAX` per machine, `total` and `ended_today` counting them all. Past it the
  * agents waiting on the person stay, then the newest live ones, then the newest ended; the kept ones keep their
@@ -35,11 +36,13 @@
  * here, so a merged list is never longer than the cap per machine.
  *
  * Names (the window's ladder, packages/inbox/agents/model.ts `agentRowName`): `label`, `title` (the host's own title
- * for the session) and `first_thread` (the thread it got first, the same however many it writes in later).
+ * for the session) and `first_thread` (the thread it got first, with that thread's name as it read when first kept: a
+ * rename or deletion of the thread later changes neither).
  */
 
 import { basename } from "node:path";
-import { INBOX_AGENT_FACES_KEPT, INBOX_AGENTS_LISTED_MAX, readInboxAgentFaces, type InboxAgent, type InboxAgentsGroup, type InboxRunState } from "@plannotator/core/inbox-types";
+import type { InboxFirstSeen } from "./inbox-first-seen";
+import { INBOX_AGENT_FACES_KEPT, INBOX_AGENTS_LISTED_MAX, inboxAgentNamesChecked, readInboxAgentFaces, type InboxAgent, type InboxAgentsGroup, type InboxRunState } from "@plannotator/core/inbox-types";
 import type { InboxAgentSession } from "./inbox-sessions";
 
 /** A launched session (inbox-launch.ts `agents`). */
@@ -91,6 +94,13 @@ export interface InboxAgentsEvidence {
   firstThreadOf?: (sessions: readonly string[]) => { id: string; name: string | null; at: string } | null;
   /** A thread's name as the list shows it (its short name, else its subject); null when unknown. */
   threadNameOf?: (threadId: string) => string | null;
+  /**
+   * What is kept of each session across restarts (inbox-first-seen.ts): read for each listed agent and the sessions
+   * its conversation continues, and given what this list worked out. Absent: nothing kept.
+   */
+  kept?: Pick<InboxFirstSeen, "get" | "note">;
+  /** Now (epoch ms), for `kept`. Default Date.now. */
+  now?: () => number;
   /** Labels are shown (this computer's owner). */
   labels: boolean;
 }
@@ -219,13 +229,19 @@ export function inboxAgentsGroup(evidence: InboxAgentsEvidence, cap = INBOX_AGEN
 
   const firstSeen = new Map<InboxAgent, number>();
   for (const [key, agent] of bySession) {
+    // Its own session and the ones its conversation continues (a resumed session keeps the place it had).
     const sessions = [agent.session, ...(agent.continues ?? [])];
+    const kept = sessions.flatMap((session) => evidence.kept?.get(session) ?? []).sort((a, b) => a.first - b.first);
     const first = evidence.firstThreadOf?.(sessions) ?? null;
     const launched = agent.launch ? { id: agent.launch.thread_id, name: evidence.threadNameOf?.(agent.launch.thread_id) ?? null } : null;
     const named = launched ?? first;
-    if (named?.name) agent.first_thread = { id: named.id, name: named.name };
+    // The first thread's name as it read when first kept: a rename or deletion of that thread later changes nothing.
+    const thread = kept.find((k) => k.thread)?.thread ?? (named?.name ? { id: named.id, name: named.name } : null);
     // Never heard start (it only owns a waiting thread): its first message, else when it last wrote.
-    firstSeen.set(agent, earliest(seen.get(key), ms(first?.at), ms(agent.started_at)) ?? ms(agent.last_seen_at) ?? 0);
+    let at = earliest(seen.get(key), ...sessions.map((session) => seen.get(session)), kept[0]?.first, ms(first?.at), ms(agent.started_at)) ?? ms(agent.last_seen_at) ?? 0;
+    if (evidence.kept && at > 0) at = evidence.kept.note(agent.session, at, (evidence.now ?? Date.now)(), thread).first;
+    if (thread) agent.first_thread = thread;
+    firstSeen.set(agent, at);
   }
   const order = (a: InboxAgent, b: InboxAgent) => firstSeen.get(b)! - firstSeen.get(a)! || a.session.localeCompare(b.session) || a.id.localeCompare(b.id);
   const all = [...bySession.values()].sort(order);
@@ -249,7 +265,7 @@ export function inboxPeerAgentsGroup(value: unknown, machine: string, cap = INBO
   const group = Array.isArray(value) ? value[0] : null;
   if (!group || typeof group !== "object" || !Array.isArray((group as InboxAgentsGroup).agents)) return null;
   const raw = group as Partial<InboxAgentsGroup>;
-  const agents = raw.agents!.filter((agent): agent is InboxAgent => !!agent && typeof agent === "object" && typeof agent.id === "string" && typeof agent.session === "string" && STATES.has(agent.state)).slice(0, cap);
+  const agents = raw.agents!.filter((agent): agent is InboxAgent => !!agent && typeof agent === "object" && typeof agent.id === "string" && typeof agent.session === "string" && STATES.has(agent.state)).slice(0, cap).map(inboxAgentNamesChecked);
   const count = (n: unknown, floor: number) => (typeof n === "number" && Number.isSafeInteger(n) && n >= floor ? n : floor);
   // Its agents' faces and given names live there (inbox-linked-marks): passed through as that machine sent them.
   const faces = raw.faces !== undefined ? { faces: Object.fromEntries(Object.entries(readInboxAgentFaces(raw.faces)).slice(-INBOX_AGENT_FACES_KEPT)), faces_rev: count(raw.faces_rev, 0) } : {};
