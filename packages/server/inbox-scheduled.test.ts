@@ -267,6 +267,41 @@ describe("the clock", () => {
   });
 });
 
+test("Start agents off and then on again catches up nothing that came due meanwhile, as the capability switch does", async () => {
+  const w = world();
+  const { record } = await w.make();
+  const config = join(process.env.PLANNOTATOR_DATA_DIR!, "config.json");
+  writeFileSync(config, JSON.stringify({ inboxLaunch: { enabled: false } }));
+  w.at("2026-11-16T14:00:10.000Z");
+  await w.scheduled.check();
+  writeFileSync(config, JSON.stringify({ inboxLaunch: { enabled: true } }));
+  w.at("2026-11-16T14:30:00.000Z");
+  await w.scheduled.check();
+  expect(w.store.scheduledThread(record.id)!.thread_id).toBeNull();
+  // The next due time runs as usual.
+  w.at("2026-11-17T14:00:10.000Z");
+  await w.scheduled.check();
+  expect(w.dividers(w.store.scheduledThread(record.id)!.thread_id).map((m) => m.scheduled_run!.run)).toEqual([1]);
+});
+
+describe("schedules refused when set", () => {
+  test("a one-time time already passed, on create and on edit; one saved before its time keeps it", async () => {
+    const w = world();
+    const passed = { at: "2026-11-15T17:00", tz: NY };
+    await expect(w.make({ schedule: passed })).rejects.toMatchObject({ code: "schedule_invalid", message: "That time has already passed." });
+    const { record } = await w.make({ schedule: { at: "2026-11-16T17:00", tz: NY } });
+    await expect(w.scheduled.update(record.id, { schedule: passed }, { kind: "person" })).rejects.toMatchObject({ message: "That time has already passed." });
+    w.at("2026-11-17T12:00:00.000Z");
+    expect((await w.scheduled.update(record.id, { schedule: { at: "2026-11-16T17:00", tz: NY }, name: "Send the report" }, { kind: "person" })).record.name).toBe("Send the report");
+  });
+
+  test("a date that is not real and a cron that never runs: schedule_invalid, nothing written", async () => {
+    const w = world();
+    for (const schedule of [{ at: "2026-02-30T10:00", tz: NY }, { cron: "0 9 31 2 *", tz: NY }]) await expect(w.make({ schedule })).rejects.toMatchObject({ code: "schedule_invalid" });
+    expect(w.store.scheduledThreads()).toEqual([]);
+  });
+});
+
 describe("one run at a time", () => {
   test("two Run now presses at once, or Run now as the clock fires, are one run in one thread", async () => {
     const w = world();
@@ -346,5 +381,18 @@ describe("the folder", () => {
     const { message } = await w.scheduled.runNow(record.id, { kind: "person" });
     expect(message.launch?.folder).toBe(realpathSync(sub));
     await expect(w.make({ folder: { path: w.home } })).rejects.toThrow("Pick a folder inside the home folder.");
+  });
+
+  test("a folder by its path gone before its first run: a thread whose first line says the run didn't start, and why", async () => {
+    const w = world();
+    const gone = join(w.home, "code", "gone");
+    mkdirSync(gone, { recursive: true });
+    const { record } = await w.make({ folder: { path: gone } });
+    rmSync(gone, { recursive: true });
+    const { message } = await w.scheduled.runNow(record.id, { kind: "person" });
+    expect(message.scheduled_run!.run).toBe(1);
+    expect(message.scheduled_run!.failed).toMatch(/gone isn't there\. Pick another folder\.$/);
+    expect(message.thread_id).toBe(message.id);
+    expect(w.scheduled.rowOf(w.store.scheduledThread(record.id)!)).toMatchObject({ thread_id: message.id, last_run: { outcome: "didnt_start" } });
   });
 });

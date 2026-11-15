@@ -129,6 +129,8 @@ export interface InboxScheduledRow extends InboxScheduledThread {
   folder_shown: string;
   /** The project's name, or null for a scratch one before its first run. */
   project_name: string | null;
+  /** The name of the thread its runs land in ("Replies in"), or null before its first run. */
+  thread_name: string | null;
 }
 
 /** `POST /api/inbox/scheduled/preview`: a schedule being edited, before it is saved. */

@@ -27,6 +27,7 @@ export function scheduledRow(id: string, change: Partial<InboxScheduledRow> = {}
     running_since: null,
     folder_shown: '~/code/acme-api',
     project_name: 'acme-api',
+    thread_name: null,
     ...change,
   };
 }
