@@ -12,13 +12,16 @@
  * agent", types a real `@`. The list is the `@` list's box and tiles, not its
  * code (that one follows the caret and only adds).
  *
- * The rules are replyRecipients.ts; ThreadPane owns the choice and Send.
+ * The rules are replyRecipients.ts; ThreadPane owns the choice and Send. The
+ * rows are named as a phone's sheet names them (thread/recipientNames.ts).
  */
 import { useEffect, useRef, type ReactNode } from 'react';
+import { graphemesOf } from '@plannotator/core/inbox-format';
 import { HostMark, Icon } from '../icons';
 import { canAddRecipient, type RecipientRow } from '../replyRecipients';
-import { labelOf, shortLabel, type SessionLabels } from '../sessionLabels';
+import type { SessionLabels } from '../sessionLabels';
 import { namesList } from '../tags';
+import { recipientNames } from '../thread/recipientNames';
 import { TagStack } from './TagPicker';
 import { Tip } from './Tip';
 import { markRecipientList } from '../pageMarks';
@@ -44,7 +47,10 @@ function Face({ tile, full, short, ended }: { tile: ReactNode; full: string; sho
   );
 }
 
-const QUIET: Record<RecipientRow['state'], string | null> = { live: null, ended: 'ended', reader: 'Not woken', old: 'Update' };
+/** The longest title the pill shows; a longer one leaves the pill its fallback name, and the title goes to its hover. */
+const PILL_TITLE_MAX = 26;
+const NO_LABELS: SessionLabels = {};
+const NO_FOLDER = () => '';
 
 export function ReplyRecipient({
   rows,
@@ -54,7 +60,8 @@ export function ReplyRecipient({
   onOnly,
   onToggle,
   onTagAnother,
-  labels,
+  labels = NO_LABELS,
+  folderOf = NO_FOLDER,
 }: {
   /** Every agent the list offers, live first, ended last. */
   rows: readonly RecipientRow[];
@@ -67,16 +74,18 @@ export function ReplyRecipient({
   onTagAnother: () => void;
   /** Each session's title, where it has one: the pill and the list show it over the fallback name. */
   labels?: SessionLabels;
+  /** The folder a session works in, as the thread knows it. */
+  folderOf?: (session: string) => string;
 }) {
   const listId = useRef(`ib-rpick-${Math.random().toString(36).slice(2)}`).current;
   const chosenIds = chosen.map((r) => r.session);
   const one = chosen.length === 1 ? chosen[0]! : null;
-  /** What the pill and the list show for a row: its session's title where it has one, else its fallback name. */
-  const nameOf = (row: RecipientRow) => labelOf(labels ?? {}, row.session) ?? row.label;
-  /** The narrow name: the title cut short where it has one, else the row's short name. */
-  const shortOf = (row: RecipientRow) => {
-    const label = labelOf(labels ?? {}, row.session);
-    return label ? shortLabel(label) : row.short;
+  const named = recipientNames(rows, labels, folderOf);
+  const nameOf = (row: RecipientRow) => named.get(row.session)?.name ?? row.label;
+  /** The pill's wide name: the row's name while it is short enough to fit, else the fallback name. */
+  const pillOf = (row: RecipientRow) => {
+    const name = nameOf(row);
+    return graphemesOf(name).length <= PILL_TITLE_MAX ? name : row.label;
   };
   const names = namesList(chosen.map(nameOf));
   const ended = one?.state === 'ended';
@@ -109,7 +118,7 @@ export function ReplyRecipient({
   ) : (
     <TagStack participants={chosen} />
   );
-  const words = one ? nameOf(one) : `${chosen.length} agents`;
+  const words = one ? pillOf(one) : `${chosen.length} agents`;
   const button = (
     <button
       type="button"
@@ -123,7 +132,7 @@ export function ReplyRecipient({
       onMouseDown={(event) => event.preventDefault()}
       onClick={() => onOpen(!open)}
     >
-      <Face tile={tile} full={words} short={one ? shortOf(one) : words} ended={ended} />
+      <Face tile={tile} full={words} short={one ? one.short : words} ended={ended} />
     </button>
   );
 
@@ -131,17 +140,22 @@ export function ReplyRecipient({
     <div ref={markRecipientList} className="ib-tg-menu ib-rpick" id={listId} data-recipient-list="" role="group" aria-label="Who gets this reply" onMouseDown={(event) => event.preventDefault()}>
       {rows.map((row) => {
         const on = chosenIds.includes(row.session);
-        const quiet = QUIET[row.state];
+        const { name, title, agent, quiet } = named.get(row.session)!;
         return (
           <div key={row.session} className="ib-rpick-row" data-recipient-row={row.session} data-on={on ? '' : undefined}>
             <button type="button" className="ib-rpick-name" disabled={row.alone === false} onClick={() => onOnly(row)}>
               <span className="ib-atile">
                 <HostMark host={row.host} agent={row.session} />
               </span>
-              <span className="ib-rpick-l" dir="auto">
-                {nameOf(row)}
+              <span className="ib-rpick-ol">
+                <span className="ib-rpick-l" dir="auto" title={title ? name : undefined}>
+                  {name}
+                </span>
+                <span className="ib-rpick-d" dir="auto">
+                  {agent && `${agent} · `}
+                  {quiet ? <span className="ib-rpick-q">{quiet}</span> : folderOf(row.session)}
+                </span>
               </span>
-              {quiet && <span className="ib-rpick-q">{quiet}</span>}
             </button>
             <button
               type="button"
@@ -168,7 +182,7 @@ export function ReplyRecipient({
 
   const pill = (
     <span className="ib-rto-wrap">
-      {chosen.length > 1 && !open ? <Tip content={names}>{button}</Tip> : button}
+      {!open && (chosen.length > 1 || (one && words !== nameOf(one))) ? <Tip content={names}>{button}</Tip> : button}
       {list}
     </span>
   );
@@ -177,7 +191,7 @@ export function ReplyRecipient({
     <span className="ib-rto-slot">
       {rows.map((row) => (
         <span key={row.session} className="ib-rto ib-rto-ghost" aria-hidden="true">
-          <Face tile={<span className="ib-atile" />} full={nameOf(row)} short={shortOf(row)} ended={row.state === 'ended'} />
+          <Face tile={<span className="ib-atile" />} full={pillOf(row)} short={row.short} ended={row.state === 'ended'} />
         </span>
       ))}
       {pill}
