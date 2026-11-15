@@ -166,17 +166,28 @@ CLI bridge) and OpenCode 2, read the session through one function,
 `pickRecentAssistantMessages` (`apps/opencode-plugin/recent-messages.ts`). It
 opens the newest reply to a prompt the person wrote, not a reply to an
 injected prompt (an OpenCode 2 `synthetic` row, or an OpenCode 1 user message
-whose parts are all synthetic) that a plugin used to wake the session; such a
-reply opens only when there is no other. A reply belongs to its turn's prompt:
-OpenCode 1's `parentID`, and on OpenCode 2 (no `parentID`) the newest prompt
-row, except that an injected row stored while the person's turn still runs
-(every assistant step since their prompt called a tool and none failed) stays
-in that turn: Plannotator's own session-URL notice and OpenCode 2's
-Plan-mode reminder re-added after a compaction. The picker lists the reply
-that opens first (★), then the rest newest first, capped at 25; the one that
-opens is kept even when 25 newer replies to injected prompts exist. Pi and
-Claude Code still open the newest reply with text. Tests:
-`apps/opencode-plugin/recent-messages.test.ts`.
+whose parts are all synthetic) that OpenCode or a plugin added; such a reply
+opens only when there is no other. A reply belongs to its turn's prompt.
+OpenCode 1's `parentID` counts only when it names a prompt the person wrote,
+since OpenCode 1 parents the rest of a turn on the injected rows it adds inside
+it (the "Continue…" row after an auto-compaction, a subtask command's
+"Summarize the task tool output…" row). Otherwise the newest prompt row starts
+the turn, and an assistant step ends it unless it called a tool the host runs
+(not a provider-hosted one, as OpenCode's own `needsContinuation` decides) or
+stopped at the output limit (`finish: "length"`); a failed step always ends
+it. An injected row stored after a step or a compaction of a running turn, or
+OpenCode 2's Plan-mode reminder right after the prompt (matched with
+`isOpenCode2PlanReminder`), stays in that turn: Plannotator's session-URL
+notice, OpenCode's continuation rows. Any other injected row right after a
+prompt starts its own turn (that prompt got no reply). Compaction rows do not
+change the turn, and a compaction summary (`summary: true`) is listed but
+opens only when nothing else can. Not handled: the retry row after an
+incomplete stream follows a failed step, so its reply counts as injected. The
+picker lists the reply that opens first (★), then the rest newest first,
+capped at 25; the one that opens is kept even when 25 newer replies to
+injected prompts exist. `toBridgeMessages` carries a V2 step's `error` and
+`finish`, and a row's `text` as a text part. Pi and Claude Code still open the
+newest reply with text. Tests: `apps/opencode-plugin/recent-messages.test.ts`.
 
 ### T3 Code: Ask this session through an optional Claude hook (opt-in)
 
