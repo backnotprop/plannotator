@@ -14,6 +14,8 @@ import { CodeFilePicker } from "./CodeFilePicker";
 import { normalizeMathTex, renderMathToHtml } from "../utils/math";
 import { useMathRenderer } from "../hooks/useMathRenderer";
 import { HostTitle } from "./HostTitle";
+import { AuthorColorText } from "./AuthorColorText";
+import { matchAuthorColor } from "../utils/authorColor";
 
 export interface DocPreviewResult {
   contents?: string;
@@ -595,6 +597,30 @@ export const InlineMarkdown: React.FC<{
     let match = remaining.match(/^<!--[\s\S]*?-->/);
     if (match) {
       remaining = remaining.slice(match[0].length);
+      previousChar = ">";
+      continue;
+    }
+
+    // An author's text colour: `<span style="color: …">` / `<font color="…">`
+    // (utils/authorColor). A refused colour still renders the words, uncoloured.
+    const colored = remaining[0] === '<' ? matchAuthorColor(remaining) : null;
+    if (colored) {
+      const inner = (
+        <InlineMarkdown
+          text={colored.inner}
+          onOpenLinkedDoc={onOpenLinkedDoc}
+          resolveLinkedDoc={resolveLinkedDoc}
+          onOpenCodeFile={onOpenCodeFile}
+          onNavigateAnchor={onNavigateAnchor}
+          imageBaseDir={imageBaseDir}
+          onImageClick={onImageClick}
+          githubRepo={githubRepo}
+          repoHost={repoHost}
+          linkLabel={linkLabel}
+        />
+      );
+      parts.push(colored.color ? <AuthorColorText key={key++} color={colored.color}>{inner}</AuthorColorText> : <React.Fragment key={key++}>{inner}</React.Fragment>);
+      remaining = remaining.slice(colored.length);
       previousChar = ">";
       continue;
     }

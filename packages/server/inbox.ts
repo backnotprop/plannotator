@@ -58,8 +58,10 @@ import {
   inboxCardShipPrs,
   inboxCardMarkRef,
   isInboxCardDropUnseen,
+  inboxCardColumnIndex,
   INBOX_CARD_MARKS_MAX,
   type InboxCardColumn,
+  type InboxCardWire,
   type InboxCardMark,
   type InboxCardRef,
   INBOX_SOUND_DEFAULT_VOLUME,
@@ -337,6 +339,7 @@ import { inboxCanonicalBaseUrl, inboxCanonicalRedirect } from "./inbox-canonical
 import { createInboxWindows, parseWindowId, parseWindowOrigin, parseWindowPermission } from "./inbox-windows";
 import { inboxAppIconResponse } from "./inbox-app-icons";
 import { handleInboxTourRequest } from "./inbox-tour";
+import { framedWindowHeaders, NO_FRAME_ANCESTORS, resolveInboxFrameAncestors } from "./inbox-framing";
 import { createBunShapeRoutes } from "./shape-routes";
 import { shapeCodeRoot } from "@plannotator/shared/shape/store";
 import { shapeEventFrame } from "@plannotator/shared/shape/routes";
@@ -547,6 +550,8 @@ export interface InboxServerOptions {
    * nothing listens, connects, spawns or makes a certificate.
    */
   phones?: boolean;
+  /** Tests: the origins that may frame the window, checked as config.json `inboxFrameAncestors` is (inbox-framing.ts). Default: that key. */
+  frameAncestors?: unknown;
   /** Tests: Ask AI's waits (inbox-ask-live.ts). */
   askTimes?: InboxAskTimes;
   /** Tests: linked machines' clocks (packages/server/inbox-peer-link.ts): heartbeat silence, backoff. */
@@ -896,7 +901,8 @@ const ERROR_STATUS: Record<string, number> = {
  * The window is one built file: its styles are inline and its scripts are
  * packed behind the page and served by this server (`/assets/`, #2593), so the
  * policy allows inline code and code from this origin only. Nothing may frame
- * it, and it may only talk to this server.
+ * it (but the apps config.json `inboxFrameAncestors` lists, on this
+ * computer's port: inbox-framing.ts), and it may only talk to this server.
  */
 export const WINDOW_CSP = [
   "default-src 'self'",
@@ -985,16 +991,18 @@ function etagMatches(header: string | null, etag: string): boolean {
  * identity bodies are one page (one tag fits all three under
  * `Vary: Accept-Encoding`). The data routes stay `no-store`.
  * A listener's own checks (on the tailnet: owner login, served Host,
- * Sec-Fetch-Site) ran before this.
+ * Sec-Fetch-Site) ran before this. `framers`: the app origins that may frame
+ * this answer (inbox-framing.ts), always none through the tailnet.
  */
-async function windowPage(req: Request, page: string, compress: boolean): Promise<Response> {
+async function windowPage(req: Request, page: string, compress: boolean, framers: readonly string[]): Promise<Response> {
   const etag = windowPageEtag(page);
   const cacheHeaders = { "Cache-Control": "private, no-cache", ETag: etag, Vary: "Accept-Encoding" };
+  const security = framers.length === 0 ? WINDOW_PAGE_HEADERS : framedWindowHeaders(WINDOW_PAGE_HEADERS, framers);
   if (etagMatches(req.headers.get("if-none-match"), etag)) {
-    return new Response(null, { status: 304, headers: { ...WINDOW_PAGE_HEADERS, ...cacheHeaders } });
+    return new Response(null, { status: 304, headers: { ...security, ...cacheHeaders } });
   }
   const prepared = await prepareAppHtml(page, req.headers.get("accept-encoding"), compress);
-  const headers = { ...prepared.headers, ...WINDOW_PAGE_HEADERS, ...cacheHeaders, "Content-Type": "text/html; charset=utf-8" };
+  const headers = { ...prepared.headers, ...security, ...cacheHeaders, "Content-Type": "text/html; charset=utf-8" };
   // A Buffer is a valid fetch body; the lib types lag.
   return new Response(req.method === "HEAD" ? null : (prepared.body as BodyInit), { headers });
 }
@@ -1197,6 +1205,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const token = createInboxToken();
   // Read once per start: the phone surface stays hidden until the iPhone app ships.
   const phonesOn = options.phones ?? resolveInboxPhones(loadConfig());
+  // Read once per start, as the phones: a change applies at the next Restart.
+  const frameAncestors = resolveInboxFrameAncestors(options.frameAncestors !== undefined ? options.frameAncestors : loadConfig().inboxFrameAncestors, (line) => process.stderr.write(line));
   const hostGuard = createRequestHostGuard({ localOnly: true });
   const previous = readInboxRegistry(dataDir);
   // The store is open, so the folder exists: its identity, and the earlier runs of this same folder (registry.ts).
@@ -1876,18 +1886,20 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * `?column=in_progress,in_review` filter; every card otherwise, in the
    * Board's column order, the latest move first.
    */
+  const cardColumnsOf = (url: URL): Set<InboxCardColumn> | null => {
+    const raw = url.searchParams.get("column");
+    if (raw === null || raw === "") return null;
+    const columns = new Set<InboxCardColumn>();
+    for (const value of raw.split(",")) {
+      const column = inboxCardColumnOf(value);
+      if (column === null) throw new InboxError("validation_error", `column: one or more of ${INBOX_CARD_COLUMNS.join(", ")}, comma-separated.`, { field: "column" });
+      columns.add(column);
+    }
+    return columns;
+  };
   const cardsModel = (url: URL) => {
     const project = projectFilterOf(url);
-    const raw = url.searchParams.get("column");
-    let columns: Set<InboxCardColumn> | null = null;
-    if (raw !== null && raw !== "") {
-      columns = new Set();
-      for (const value of raw.split(",")) {
-        const column = inboxCardColumnOf(value);
-        if (column === null) throw new InboxError("validation_error", `column: one or more of ${INBOX_CARD_COLUMNS.join(", ")}, comma-separated.`, { field: "column" });
-        columns.add(column);
-      }
-    }
+    const columns = cardColumnsOf(url);
     const cards = store.listCards({ projectIds: project ? new Set([project]) : null, columns }).map((card) => store.cardWire(card));
     // An agent's drops the person has not seen, in the project (or everywhere): the Board's "N dropped by an agent".
     const droppedUnseen = store.listCards({ projectIds: project ? new Set([project]) : null, columns: new Set(["dropped"]) }).filter(isInboxCardDropUnseen).length;
@@ -1936,6 +1948,45 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   };
 
   /**
+   * The merged Board (`GET /api/inbox/cards?machines=1`, mark `cards`): this Inbox's cards, and every linked machine's
+   * that takes `cards`, each with `machine`. A far card's tag reads as the merged tag of its name (the list's `tags`), its
+   * threads' rows come with it, and `machines` holds each linked machine's look and cursor, for its cards' bold and the
+   * look the window records there. A linked machine never lists a card, thread or project this store holds.
+   */
+  const mergedCardsModel = async (url: URL) => {
+    const own = cardsModel(url);
+    const self = machines.selfId;
+    const project = projectFilterOf(url);
+    const columns = cardColumnsOf(url);
+    const far = await machines.cardLists();
+    const ownTags = store.initiatives().filter((tag) => tag.deleted_at === null);
+    const merged = inboxMachineTags(self, ownTags, machines.tagLists());
+    const cards: InboxCardWire[] = [...own.cards];
+    const threads: Record<string, unknown> = { ...own.threads };
+    const seen: Record<string, { cursor: number; seen_seq: number | null }> = {};
+    let droppedUnseen = own.dropped_unseen;
+    const initiatives = [...own.initiatives];
+    const listed = new Set(cards.map((card) => card.id));
+    for (const { machine, cards: board } of far) {
+      seen[machine] = { cursor: board.cursor, seen_seq: board.seen_seq };
+      // Its live tags are the list's merged ones; a deleted one (or one no merged tag names) stays for its cards' history.
+      for (const tag of board.initiatives) if (tag.deleted_at !== null || !merged.idOn(machine, tag.id)) initiatives.push(tag);
+      for (const card of board.cards) {
+        if (listed.has(card.id) || store.card(card.id) || store.project(card.project_id)) continue;
+        if (project && card.project_id !== project) continue;
+        if (isInboxCardDropUnseen(card)) droppedUnseen += 1;
+        if (columns && !columns.has(card.column)) continue;
+        listed.add(card.id);
+        const initiative = card.initiative ? (merged.idOn(machine, card.initiative) ?? card.initiative) : null;
+        cards.push({ ...card, initiative, machine });
+        for (const id of card.threads) if (!(id in threads) && !store.message(id)) threads[id] = board.threads[id] ?? null;
+      }
+    }
+    cards.sort((a, b) => inboxCardColumnIndex(a.column) - inboxCardColumnIndex(b.column) || b.moved_at.localeCompare(a.moved_at) || a.id.localeCompare(b.id));
+    return { ...own, cards, threads, initiatives, dropped_unseen: droppedUnseen, self, machines: seen };
+  };
+
+  /**
    * The person's moves on a card (`POST /api/inbox/cards/:id`): `op` move
    * (`column`, any; a move to dropped may carry `reason`), icebox (a window
    * from before v2: Backlog, where the Icebox folded in), drop (`reason`
@@ -1965,7 +2016,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // Sent to an agent: `thread_id` is the thread the window just started for it (compose's Send).
         return store.sendCard(id, { thread_id: body.thread_id });
       case "initiative":
-        // The card's initiative (approval "board-initiatives"): an `ini_` id, or null for none.
+        // The card's initiative (approval "board-initiatives"): an `ini_` id, or null for none. A linked machine's
+        // window names it by `name` instead: the live tag of that name here, made when none is.
+        if (body.initiative === undefined && body.name !== undefined) return store.setCardInitiativeNamed(id, body.name, by);
         if (body.initiative === undefined) throw new InboxError("validation_error", "initiative: an ini_ id, or null for none.", { field: "initiative" });
         return store.setCardInitiative(id, body.initiative, by);
       default:
@@ -4929,13 +4982,15 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // Images the messages show with no captured file yet: copied in the background; the read never waits (approval "inbox-image-viewer").
     if (store.thread(threadId)) imageCapture.schedule(threadId);
     const thread = perfPhase("thread", () => store.windowThread(threadId));
+    const cursor = store.cursor();
     if (!thread) return null;
     // `pull_theirs`: the person handed this thread only teammates' PRs, so its reviews take no verdict.
     // `pull_keys` (Code review on): the PRs it owns, which its review may be posted to (Post to GitHub/GitLab).
     const pullKeys = codeReviewOn() ? pullOwners.keys(thread.thread_id) : [];
     const withRepo = {
       ...thread,
-      project: { ...thread.project, repo: repos.get(thread.project.root) },
+      // `repo_known` (additive): resolved, so a null repo is "no origin" and the window need not read again for it.
+      project: { ...thread.project, repo: repos.get(thread.project.root), ...(repos.known(thread.project.root) ? { repo_known: true as const } : {}) },
       ...(pullOwners.theirs(thread.thread_id) ? { pull_theirs: true as const } : {}),
       ...(pullKeys.length > 0 ? { pull_keys: pullKeys } : {}),
       ...(codeReviewOn() && pullOwners.started().has(thread.thread_id) ? { review_started: true as const } : {}),
@@ -4945,7 +5000,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const run = await launch.runOf(thread.thread_id, true);
     const row = store.listRow(thread.thread_id);
     // `row` (additive): the thread's list row, also for an archived thread, which the window's list leaves out.
-    return { serverSession, cursor: store.cursor(), thread: withRepo, row: row ? withSnooze(launch.rowDecorator()(row)) : row, ...(run === undefined ? {} : { run, attach_command: launch.attachOf(thread.thread_id) }) };
+    return { serverSession, cursor, thread: withRepo, row: row ? withSnooze(launch.rowDecorator()(row)) : row, ...(run === undefined ? {} : { run, attach_command: launch.attachOf(thread.thread_id) }) };
   };
 
   const handle = async (req: Request, via: RequestVia): Promise<Response> => {
@@ -4965,6 +5020,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     }
     const path = url.pathname;
     const origin = req.headers.get("origin");
+    // Only the window's own port may be framed by a listed app (inbox-framing.ts): the tailnet and the door answer as without the list.
+    const framers = via === "local" && !fromDeviceDoor.has(req) ? frameAncestors : NO_FRAME_ANCESTORS;
     /** The Board's reads carry the person's notes: another site's read is refused, as on the other read routes. */
     const crossSiteCardRead = (request: Request): Response | null =>
       isSameOriginOrNoOrigin(origin, request.headers.get("host") ?? "", request.headers.get("sec-fetch-site"))
@@ -5128,7 +5185,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     }
 
     // The onboarding tour's fixture and assets (inbox-tour.ts): read only, served from the binary on demand.
-    const tourAnswer = await handleInboxTourRequest(req, path);
+    const tourAnswer = await handleInboxTourRequest(req, path, framers);
     if (tourAnswer) return tourAnswer;
 
     try {
@@ -6198,10 +6255,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       const snoozed = await snoozes.route(req, url);
       if (snoozed) return snoozed;
       // Live HTML embeds: keep a fence's page, and serve it under its own sandboxing policy.
-      const embedded = await embeds.route(req, url);
+      const embedded = await embeds.route(req, url, framers);
       if (embedded) return embedded;
       // Attached HTML pages: keep a page's frame document, and serve it under its own policy (web pictures, never in the window).
-      const paged = await attachedPages.route(req, url);
+      const paged = await attachedPages.route(req, url, framers);
       if (paged) return paged;
       // Feedback (the sidebar's Feedback dialog): sent on, never stored here.
       const fed = await feedback.route(req, path);
@@ -6210,7 +6267,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // The Board's cards (approval "inbox-board", step 1): the person's read and moves.
       if (path === "/api/inbox/cards") {
         // Cards carry the person's notes: another site's read is refused, as on the other read routes.
-        if (req.method === "GET") return crossSiteCardRead(req) ?? json(cardsModel(url));
+        if (req.method === "GET") return crossSiteCardRead(req) ?? json(url.searchParams.get("machines") === "1" ? await mergedCardsModel(url) : cardsModel(url));
         if (req.method !== "POST") return json({ error: "Use GET or POST." }, 405);
         // The person's New card (step 2): a title, notes and links, in Backlog (sent to no agent; a window
         // from before v2 says icebox, which folded into it); or sent to an agent: `thread_id` is the thread
@@ -6315,7 +6372,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const shipping: { id: string; refs: InboxCardRef[] }[] = [];
         for (const id of new Set(ids as string[])) {
           const card = store.card(id);
-          const ref = card ? inboxCardMarkRef(card) : null;
+          // A linked machine's card (its Board as last read) gets its mark from here; only its own machine ships it.
+          const shown = card ?? machines.farCard(id);
+          const ref = shown ? inboxCardMarkRef(shown) : null;
           if (ref) wanted.push({ id, ref });
           if (card && INBOX_CARD_AUTO_SHIP_COLUMNS.includes(card.column)) {
             const own = new Set(inboxCardShipPrs(card));
@@ -6350,7 +6409,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const refused = crossSiteCardRead(req);
         if (refused) return refused;
         if (!boardOn()) return json({ error: "The Board is off.", code: "board_off" }, 409);
-        const card = store.card(faviconMatch[1]!);
+        const card = store.card(faviconMatch[1]!) ?? machines.farCard(faviconMatch[1]!);
         if (!card) throw new InboxError("card_not_found", `No card ${faviconMatch[1]}.`);
         const href = url.searchParams.get("url") ?? "";
         const ref = inboxCardRefsOf(card).find((r) => r.url === href && r.source === "web");
@@ -6883,7 +6942,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // A page load (or a refresh) asks for a new release when the answer is
         // over a minute old: fire-and-forget, the button follows on the event stream.
         if (req.method === "GET") updates.nudge();
-        return windowPage(req, page, compressWindowAsset(req, via, "/"));
+        return windowPage(req, page, compressWindowAsset(req, via, "/"), framers);
       }
       // The window's scripts, by exact name from the pack (404 for any other), compressed on every listener as the page is.
       if (path.startsWith(PACKED_ASSET_ROUTE_PREFIX)) return packedAppResponse(windowApp, req, path, compressWindowAsset(req, via, path));
@@ -7092,7 +7151,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       readBody,
       json,
       holds: (kind, id) =>
-        kind === "projects" ? store.project(id) !== null : kind === "attachments" ? store.attachment(id) !== null : kind === "annotations" ? store.annotation(id) !== null : store.message(id) !== null,
+        kind === "projects" ? store.project(id) !== null : kind === "attachments" ? store.attachment(id) !== null : kind === "annotations" ? store.annotation(id) !== null : kind === "cards" ? store.card(id) !== null : store.message(id) !== null,
       ownVersions: () => ({ current: version, latest: updates.knownLatest() }),
       timings: options.machineLinkTimings,
     });

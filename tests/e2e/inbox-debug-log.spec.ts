@@ -14,7 +14,7 @@
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-debug-log.spec.ts`.
  */
 
-import { expect, test, devices, type Browser, type Page } from '@playwright/test';
+import { expect, HELD_DRIFT_OFF, test, devices, type Browser, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import net from 'node:net';
@@ -202,6 +202,7 @@ test('a healthy Send on this computer: press, the reply on both sides, clear, wi
 });
 
 test('the reply never arrived: after a refresh the file shows the window started it and the server never saw it', async ({ browser }) => {
+  test.info().annotations.push({ type: HELD_DRIFT_OFF, description: 'the page reads through a link this test closes at its end' });
   const world = await inbox('never-arrived', true);
   const link = new Link(Number(new URL(world.url).port));
   await link.listen();
@@ -237,6 +238,7 @@ test('the reply never arrived: after a refresh the file shows the window started
 });
 
 test('the reply landed and its answer was lost: the server ended it, and the window has no end', async ({ browser }) => {
+  test.info().annotations.push({ type: HELD_DRIFT_OFF, description: 'the page reads through a link this test closes at its end' });
   const world = await inbox('answer-lost', true);
   const link = new Link(Number(new URL(world.url).port));
   await link.listen();
@@ -263,6 +265,7 @@ test('the reply landed and its answer was lost: the server ended it, and the win
 });
 
 test('a pick hung: the open request is the pick, and no reply was ever started', async ({ browser }) => {
+  test.info().annotations.push({ type: HELD_DRIFT_OFF, description: 'the page reads through a link this test closes at its end' });
   const world = await inbox('pick-hung', true);
   const link = new Link(Number(new URL(world.url).port));
   await link.listen();
