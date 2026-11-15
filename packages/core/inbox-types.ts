@@ -3469,6 +3469,17 @@ export interface InboxAgent {
   host: string | null;
   /** Its title as its connection last said it (the To picker's name). Absent when none. */
   label?: string;
+  /**
+   * The title its host generated for the session (Claude Code's own session title; INBOX_TITLE_POLL_FIELD), the
+   * last one its connection read. Its name when it has no `label`. Absent when none. Additive.
+   */
+  title?: string;
+  /**
+   * The thread it got first (the first message it wrote, or a person's to it; a launch's own thread), with that
+   * thread's name: its name when it has neither `label` nor `title`. The same thread however many it writes in
+   * later. Absent when none is known. Additive.
+   */
+  first_thread?: { id: string; name: string };
   /** The project it works in (`id` null for a folder the Inbox has no project for); null when it never said where. */
   project: { id: string | null; name: string } | null;
   /**
@@ -3490,8 +3501,24 @@ export interface InboxAgent {
 export const INBOX_AGENTS_LISTED_MAX = 40;
 
 /**
- * One machine's agents on the list model (`agents`, one group per machine): waiting first (most waiting first),
- * then working, idle and ended, each the most recently heard first, at most `INBOX_AGENTS_LISTED_MAX`.
+ * An agent as another machine (or an older or newer Inbox) sent it, with its names checked: a `label`, `title` or
+ * `first_thread` that is not text is dropped, the rest of the agent kept.
+ */
+export function inboxAgentNamesChecked(agent: InboxAgent): InboxAgent {
+  const { label, title, first_thread, ...rest } = agent as InboxAgent & Record<string, unknown>;
+  const thread = first_thread as unknown as Record<string, unknown> | null | undefined;
+  return {
+    ...rest,
+    ...(typeof label === "string" ? { label } : {}),
+    ...(typeof title === "string" ? { title } : {}),
+    ...(thread && typeof thread === "object" && typeof thread.id === "string" && typeof thread.name === "string" ? { first_thread: { id: thread.id, name: thread.name } } : {}),
+  } as InboxAgent;
+}
+
+/**
+ * One machine's agents on the list model (`agents`, one group per machine), in a fixed order: the newest first seen
+ * first, an agent keeping its place whatever it does. At most `INBOX_AGENTS_LISTED_MAX`; past that, the ones waiting
+ * on the person stay listed.
  */
 export interface InboxAgentsGroup {
   /** The machine (its `ibx_` id), on the merged view (`machines=1`) only. */

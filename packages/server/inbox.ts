@@ -231,6 +231,7 @@ import { recordInboxAttachments, sweepStaleInboxSendTemps } from "@plannotator/s
 import { assertInboxUploadsPending, inboxBodyForAgent, inboxDiskFullError, inboxUploadAttachments, removeInboxAttachmentFiles, removeInboxUploads } from "@plannotator/shared/inbox/uploads";
 import { createInboxLiveSessions, takesOver, thereInThread } from "./inbox-sessions";
 import { inboxAgentsGroup, inboxFolderProject, inboxMergedAgents, inboxStartOfDay, type InboxAgentWait } from "./inbox-agents-list";
+import { createInboxFirstSeen } from "./inbox-first-seen";
 import { createInboxCodexWake, type InboxCodexWake } from "./inbox-codex-wake";
 import { createT3Local, INBOX_T3_PROBE_MS, type T3Route } from "./inbox-t3-local";
 import { t3SettingsStatus } from "./inbox-t3-settings";
@@ -1287,6 +1288,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const agentFaceListeners = new Set<(wire: InboxAgentFacesWire) => void>();
   // The pictures uploaded for agents' icons ("Your own…", inbox-agent-icons.ts): every faces wire carries them.
   const agentIconFiles = createAgentIcons({ dir: join(inboxDir(dataDir), INBOX_AGENT_ICONS_DIR) });
+  // When each agent session was first seen and its first thread (inbox/agents-first-seen.json): the Agents list's order and last-resort name.
+  const agentFirstSeen = createInboxFirstSeen(inboxDir(dataDir));
   const agentFacesFile = createInboxAgentFacesFile(inboxDir(dataDir), (wire) => {
     const withIcons = { ...wire, icons: agentIconFiles.list() };
     for (const listener of agentFaceListeners) listener(withIcons);
@@ -1902,6 +1905,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       return project ? { id: project.id, name: project.name } : null;
     };
     let lastThreads: ReturnType<InboxStore["lastThreadsBySession"]> | null = null;
+    let firstThreads: ReturnType<InboxStore["firstThreadsBySession"]> | null = null;
     const waits: InboxAgentWait[] = [];
     const archived = new Set<string>();
     for (const row of own) {
@@ -1931,6 +1935,17 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       lastHeardOf: live.lastHeardOf,
       continuedBy: live.continuedBy,
       continuesOf: live.continuesOf,
+      firstThreadOf: (sessions) => {
+        firstThreads ??= store.firstThreadsBySession();
+        let first: { id: string; name: string | null; at: string } | null = null;
+        for (const session of sessions) {
+          const got = firstThreads.get(session);
+          if (got && (!first || got.at < first.at)) first = got;
+        }
+        return first;
+      },
+      threadNameOf: (threadId) => store.threadShortName(threadId) ?? store.threadSubject(threadId),
+      kept: agentFirstSeen,
       labels: true,
     });
   };
@@ -4444,6 +4459,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     pollsItself: (session) => cloudPollsItself(session),
     uncertainItemsOf: (session) => [...codexWake.uncertainItems(session), ...qwenWake.uncertainItems(session), ...t3Wake.uncertainItems(session), ...antigravityWake.uncertainItems(session)],
     // A session that is an agent with a face (its conversation's earlier id, its launch): its threads show that face too.
+    firstSeen: agentFirstSeen,
     onPoll: (session, continues) =>
       agentFacesFile.link(session, () => [
         ...continues,
