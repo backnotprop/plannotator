@@ -11,7 +11,7 @@
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-row-time-webkit`.
  */
 
-import { devices, expect, test, type BrowserContext, type Browser, type Page } from '@playwright/test';
+import { devices, expect, test, type BrowserContext, type Browser, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';

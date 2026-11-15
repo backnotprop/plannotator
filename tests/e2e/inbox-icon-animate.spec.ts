@@ -13,7 +13,7 @@
  * draws its own otherwise. PLANNOTATOR_ANIMATE_POOR_LINK=1: the window on a poor link (300 ms, 1 Mbit/s each way) and
  * the step's time printed. Build the binary first (see inbox.spec.ts).
  */
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
