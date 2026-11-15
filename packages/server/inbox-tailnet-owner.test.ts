@@ -809,7 +809,7 @@ describe("a linked machine gains none of it", () => {
       "POST threads/:id/pulls",
     ]);
     // The door routes that write with gh / glab: exactly these, each a `forge` write (never held, a window's press only).
-    expect(Object.entries(DOOR_WRITES).filter(([name, kind]) => kind === "forge" && name !== "POST pulls/owner").map(([name]) => name).sort()).toEqual(["POST pulls/close", "POST pulls/merge", "POST pulls/reopen"]);
+    expect(Object.entries(DOOR_WRITES).filter(([, kind]) => kind === "forge").map(([name]) => name).sort()).toEqual(["POST pulls/close", "POST pulls/merge", "POST pulls/owner", "POST pulls/reopen"]);
     for (const verb of ["close", "merge", "reopen"]) expect(doorWriteKind(`pulls/${verb}`)).toBe("forge");
     expect(doorWriteKind("threads/msg_1/pulls")).toBe("set");
     // A linked machine's `update` is the one exception, and it is not on the allowlist: the forward refuses it (below), and only a machine's token reaches it.
