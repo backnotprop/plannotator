@@ -268,6 +268,21 @@ test.skipIf(!hasDom)('"Show N more" shows every agent and gives the focus to the
   expect(document.activeElement?.closest('[data-combine-agent]')?.getAttribute('data-combine-agent')).toBe('ses_4');
 });
 
+test.skipIf(!hasDom)('two agents that read the same are told apart by when they last wrote; others are not', async () => {
+  const twin = (session: string, at: string) => ({ session, host: 'codex', name: 'Codex', project: 'plannotator', thread: 'Release notes 0.29', wrote_at: at, threads: 1 });
+  const agents = [twin('ses_x', '2026-11-14T23:42:00.000Z'), twin('ses_y', '2026-11-14T22:05:00.000Z'), { session: 'ses_z', host: 'pi', name: 'Pi', project: 'docs-site', wrote_at: '2026-11-14T21:00:00.000Z', threads: 1 }];
+  answers = (url) => (url.includes('/combine') ? { serverSession: 's', agents, combines: [] } : {});
+  host = document.body.appendChild(document.createElement('div'));
+  root = createRoot(host);
+  act(() => root!.render(<div className="pn-inbox"><CombineDialog rows={[row('a'), row('b')]} onClose={() => {}} onStarted={() => {}} /></div>));
+  await settle();
+  const sub = (session: string) => document.querySelector(`[data-combine-agent="${session}"] small`)!.textContent!;
+  expect(document.querySelector('[data-combine-agent="ses_x"] b')!.textContent).toBe('Codex · Release notes 0.29');
+  expect(sub('ses_x')).toMatch(/^1 of these · last wrote \S/);
+  expect(sub('ses_x')).not.toBe(sub('ses_y'));
+  expect(sub('ses_z')).toBe('1 of these');
+});
+
 test.skipIf(!hasDom)('a row in a Combine still waiting says “Combining…”, and draws again when it settles', () => {
   draw(SECTIONS({ b: { combining: true } }));
   const before = rowEl('b');

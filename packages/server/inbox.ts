@@ -4935,7 +4935,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     serverSession,
     reachFor: () => tidy.reachFor(),
     idleSince: (session) => live.lastIdleOf(session),
-    titleOf: (session) => live.titles()[session] ?? null,
+    titleOf: (session) => live.labelOf(session) ?? live.titles()[session] ?? null,
     readBody,
     json,
   });

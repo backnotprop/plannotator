@@ -44,6 +44,8 @@ export interface InboxCombineAgent {
   thread?: string;
   /** The project of the picked thread it wrote in last. */
   project?: string;
+  /** When it last wrote in a picked thread: what tells apart two agents that read the same (`inboxCombineAgentTwin`). */
+  wrote_at?: string;
   /** How many of the picked threads it wrote in. */
   threads: number;
 }
@@ -58,6 +60,12 @@ export function inboxCombineAgentLabel(agent: InboxCombineAgent, all: readonly I
   if (!part) return agent.name;
   const twin = all.some((a) => a.session !== agent.session && a.name === agent.name && of(a) === part);
   return `${agent.name} · ${twin && !agent.title && agent.thread ? agent.thread : part}`;
+}
+
+/** Another of the agents still reads the same as this one. */
+export function inboxCombineAgentTwin(agent: InboxCombineAgent, all: readonly InboxCombineAgent[]): boolean {
+  const label = inboxCombineAgentLabel(agent, all);
+  return all.some((a) => a.session !== agent.session && inboxCombineAgentLabel(a, all) === label);
 }
 
 /** What `GET /api/inbox/combine` answers. With `threads=`: who can be asked; always the Combines worth showing. */

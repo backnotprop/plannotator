@@ -137,6 +137,7 @@ export function createInboxCombine(deps: InboxCombineDeps) {
           last.set(session, newest.created_at);
           agent.thread = store.threadSubject(threadId) ?? undefined;
           agent.project = store.project(store.message(threadId)?.project_id ?? "")?.name ?? undefined;
+          agent.wrote_at = newest.created_at;
         }
         found.set(session, agent);
       }
