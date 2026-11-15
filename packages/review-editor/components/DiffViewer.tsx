@@ -1,5 +1,5 @@
 import { revealFirstChange } from '../utils/revealFirstChange';
-import { MAX_LINE_DIFF_LENGTH } from '../utils/diffChromeMetrics';
+import { EXPAND_COLOUR_WAIT_MS, MAX_LINE_DIFF_LENGTH } from '../utils/diffChromeMetrics';
 import React, { useMemo, useRef, useEffect, useLayoutEffect, useCallback, useState } from 'react';
 import { FileDiff, type DiffLineAnnotation } from '@pierre/diffs/react';
 import { LazyBlockBoundary } from '@plannotator/ui/components/LazyBlockBoundary';
@@ -130,6 +130,7 @@ const PierreDiffContent = React.memo(({
         diffIndicators,
         lineDiffType,
         maxLineDiffLength: MAX_LINE_DIFF_LENGTH,
+      expandColourWaitMs: EXPAND_COLOUR_WAIT_MS,
         disableLineNumbers,
         disableBackground,
         expandUnchanged,

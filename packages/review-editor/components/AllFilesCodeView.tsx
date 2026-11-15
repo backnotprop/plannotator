@@ -28,7 +28,7 @@ import type {
 import { CommentPopover } from '@plannotator/ui/components/CommentPopover';
 import { usePierreTheme } from '../hooks/usePierreTheme';
 import { useIsWorkerPoolReadyOrDisabled, useWorkerPoolThemeSync } from '../workerPool';
-import { MAX_LINE_DIFF_LENGTH } from '../utils/diffChromeMetrics';
+import { EXPAND_COLOUR_WAIT_MS, MAX_LINE_DIFF_LENGTH } from '../utils/diffChromeMetrics';
 import { useConfigValue } from '@plannotator/ui/config';
 import type { SemDiffClient } from '../semDiff/semDiffClient';
 import { SemanticFileNote, type SemanticFileState } from '../semDiff/SemanticFileNote';
@@ -3738,6 +3738,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       diffIndicators,
       lineDiffType,
       maxLineDiffLength: MAX_LINE_DIFF_LENGTH,
+      expandColourWaitMs: EXPAND_COLOUR_WAIT_MS,
       disableLineNumbers,
       disableBackground,
       expandUnchanged,
