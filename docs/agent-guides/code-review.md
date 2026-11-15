@@ -67,10 +67,19 @@ through each server's real spawn path, on Windows only: the Windows workflow's
 and Pi) accepts one local repository/worktree or multi-repo workspace directory.
 The shared `parseReviewArgs` + `resolveReviewTarget` resolve it against the
 invoking terminal/session cwd, validate it before discovery, and reject multiple
-targets or a directory combined with `--patch-file`. Prose stays tolerated
-(#1483, the annotate-target precedent): a sole word or any path-shaped word is a
-directory candidate (path-shaped typos and files error), every other word is
-ignored with a notice and the invoking cwd is reviewed. Hosts pass the resolved cwd
+targets or a directory combined with `--patch-file`. A sole word is the target:
+when it names no folder, or a file, every host refuses it (CLI exit 1, OpenCode
+log and toast, Pi notify) and nothing opens, as `annotate` refuses a target that
+names nothing. The message names the word and the directory it was resolved
+against, then the commands to run: a close existing folder ("Did you mean …?",
+each missing path segment matched against its parent's folders), `--diff-type`
+for a diff mode's name, the PR URL form for a number, and `plannotator review`
+for the current project. Two sole words stay prose: a quoted sentence (a word
+with whitespace that is not path-shaped) and a bare word beside `--patch-file`.
+Prose of several words stays tolerated (#1483): a path-shaped word naming a
+folder is the target, every other word (including a missing or file path-shaped
+word) is ignored with a notice and the invoking cwd is reviewed. A folder that
+exists but holds no repository fails in VCS discovery. Hosts pass the resolved cwd
 through existing VCS/workspace discovery and project detection; never use
 `process.chdir()` in a plugin host. Explicit targets inside a repository normalize
 to its detected VCS root. A named directory also removes `GIT_DIR` and its kin
