@@ -1144,6 +1144,30 @@ html:has([data-pn-compact-touch-layout='true'])
   font-size: 1.02em;
 }
 
+/*
+ * KaTeX text-mode runs inherit the document font instead of KaTeX's own
+ * families. This overrides the KaTeX_* font-family mappings shipped by the
+ * `@import "katex/dist/katex.min.css";` at the top of this file. KaTeX maps
+ * `\text`, `\textrm` and `\textsf` to the `.text` / `.textrm` / `.textsf`
+ * classes (`\textnormal` also uses `.textrm`) and `\texttt` to `.texttt`.
+ * Colour is deliberately left alone so `\color{...}` still applies. A
+ * whole-expression run also matches the surrounding text size: the `.katex`
+ * base above is 1.02em, so ~0.98em cancels it. Nested runs (inside fractions,
+ * superscripts, subscripts) keep KaTeX's relative sizing — only their font
+ * family follows.
+ */
+.katex .text,
+.katex .textrm,
+.katex .textsf {
+  font-family: var(--font-sans);
+}
+.katex .texttt {
+  font-family: var(--font-mono);
+}
+.katex .text:not(.mtight) {
+  font-size: 0.98em; /* ≈ 1 / 1.02: cancels the .katex base enlargement */
+}
+
 .math-inline .katex {
   line-height: inherit;
 }

@@ -277,6 +277,8 @@ The renderer's `MathBlock` (and inline math) uses KaTeX. **KaTeX's stylesheet an
 
 If you skip all three and render math, equations appear as broken-looking raw HTML — that's the symptom to recognize. If you never render math, do nothing.
 
+The font KaTeX uses for its text-mode commands comes from `theme.css` (which ships inside the precompiled `styles.css`), not from the `katex.min.css` you load above. KaTeX maps `\text`, `\textrm`, `\textsf` and `\textnormal` to its own `KaTeX_*` families (`\texttt` to `KaTeX_Typewriter`); `theme.css` overrides those to the document's `--font-sans` / `--font-mono` tokens and sizes a whole-expression text run to match the surrounding text, while leaving `\color{...}` alone. So a coloured value such as `$\color{#d00000}{\textsf{73.0\%}}$` in a table cell keeps the table's font. This needs no host-side setup beyond loading `katex.min.css`; it is already in `styles.css`.
+
 The JS side is separate and lazy by default: KaTeX's runtime is no longer on the static import graph of `MathBlock` / `InlineMarkdown`. A host that renders `Viewer` without importing `@plannotator/ui/utils/math-eager` gets the TeX source in the same wrapper for one frame, then the typeset markup once `import('katex')` resolves. See "Lazy renderers and eager entries" for the opt-back and the loader seam.
 
 ---
