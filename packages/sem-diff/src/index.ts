@@ -218,7 +218,7 @@ function stringInteriors(root: Node, language?: LanguageId): Set<number> {
       return;
     }
     if (n.endPosition.row === n.startPosition.row) return;
-    if (/string|template|text_block|heredoc|nowdoc/.test(n.type) && !/content|fragment/.test(n.type)) {
+    if ((/string|template|text_block|heredoc|nowdoc/.test(n.type) || (language === 'ruby' && /^(regex|subshell)$/.test(n.type))) && !/content|fragment/.test(n.type)) {
       // Rust drops the leading whitespace of a line continued with a backslash
       // ("...\\\n    more"), so re-indenting that line leaves the string as it was.
       const lines = n.text.split('\n');
@@ -387,6 +387,7 @@ export async function semanticDiffFile(language: LanguageId, oldText: string, ne
             : op.lines.old.length + op.lines.new.length > 0
           : ownsText(op, oldLines, newLines, inString);
       if (!keep || (op.type === 'movedWithEdit' && !alike(op, oldLines, newLines))) return;
+      if (cfg.holdBack?.has(op.type)) return;
       if ((op.type === 'moved' || op.type === 'movedWithEdit' || op.type === 'reformatted') && contextChanged(op, cfg, a.rootNode, b.rootNode, oldLines, newLines)) return;
       finalIndex.set(i, operations.length);
       operations.push(op);

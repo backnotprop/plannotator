@@ -2,7 +2,7 @@
 // finding functions, statements and calls with a language config.
 import { rule } from './runtime.ts';
 import type { Node } from 'web-tree-sitter';
-import { isComment, type LanguageConfig } from './parse.ts';
+import { isComment, type Declaration, type LanguageConfig } from './parse.ts';
 import type { SemanticDiffTextPosition, SemanticDiffTextRange } from './pierre-types.ts';
 
 export const pos = (p: { row: number; column: number }): SemanticDiffTextPosition => ({
@@ -137,7 +137,7 @@ export function callsTo(n: Node, name: string, cfg: LanguageConfig, fn?: Node): 
   const out: Node[] = [];
   const walk = (x: Node) => {
     // A free function is never called through an object: `JSON.parse(t)` does not call a local `parse`.
-    if (cfg.callTypes.has(x.type) && cfg.calleeOf(x) === name && argumentCount(x) <= max && argumentCount(x) >= min && !(fn && !isMethod(fn) && memberCall(x)) && !(fn?.type === 'pair' && memberCall(x) && !thisCall(x))) out.push(x);
+    if (cfg.callTypes.has(x.type) && (x.childCount > 0 || x.text === name) && cfg.calleeOf(x) === name && argumentCount(x) <= max && argumentCount(x) >= min && !(fn && !isMethod(fn) && memberCall(x)) && !(fn?.type === 'pair' && memberCall(x) && !thisCall(x))) out.push(x);
     // JSX renders a component by calling it: `<OrderRow order={o} />` calls `OrderRow`.
     // Effect runs a defined effect with `yield* load` or `yield* load.pipe(...)`: no call, but the same use.
     else if (x.type === 'yield_expression' && x.child(1)?.type === '*' && yieldsEffect(x.namedChild(0), name)) out.push(x);
@@ -198,7 +198,7 @@ function maxArguments(fn: Node): number {
   if (value?.childForFieldName('parameter')) return 1;
   const params = fn.childForFieldName('parameters') ?? value?.childForFieldName('parameters');
   const swiftParams = params ? [] : fn.namedChildren.filter((c) => c?.type === 'parameter');
-  if (swiftParams.length || fn.type === 'function_declaration' && fn.childForFieldName('body')?.type === 'function_body') return swiftParams.some((p) => p?.children.some((c) => c?.type === '...')) ? Infinity : swiftParams.length;
+  if (swiftParams.length || (!params && fn.type === 'function_declaration' && fn.childForFieldName('body')?.type === 'function_body')) return swiftParams.some((p) => p?.children.some((c) => c?.type === '...')) ? Infinity : swiftParams.length;
   if (!params) return Infinity;
   let n = 0;
   for (const p of params.namedChildren) {
@@ -243,6 +243,18 @@ export function longestInOrder(seq: number[], weight: number[] = seq.map(() => 1
   const keep = new Set<number>();
   for (let i = end; i >= 0; i = prev[i]!) keep.add(i);
   return keep;
+}
+
+export function codeLines(d: Declaration, cfg: LanguageConfig): number {
+  const lines = endLine(d.tail ?? d.node) - startLine(d.node) + 1;
+  if (cfg.id !== 'ruby') return lines;
+  const text = new Set<number>();
+  for (const n of [d.node, ...(d.tail ? [d.tail] : [])]) {
+    for (const h of n.type === 'heredoc_body' ? [n] : n.descendantsOfType('heredoc_body')) {
+      if (h) for (let l = startLine(h) + 1; l <= endLine(h); l++) text.add(l);
+    }
+  }
+  return Math.max(1, lines - text.size);
 }
 
 /**
@@ -305,6 +317,7 @@ export function pairSameNamed<T>(olds: T[], news: T[], base: (t: T) => string, t
 /** The function is a method (of a class, impl, receiver type), so `x.name()` can call it. */
 export function isMethod(fn: Node): boolean {
   if (fn.childForFieldName('receiver')) return true;
+  if (fn.type === 'method' || fn.type === 'singleton_method') return true;
   for (let p = fn.parent; p; p = p.parent) {
     if (/class|interface|impl_item|trait_item|object|struct_declaration|record_declaration|enum_declaration/.test(p.type)) return true;
     if (/function|method/.test(p.type) && p !== fn) return false;
@@ -332,6 +345,7 @@ function thisCall(call: Node): boolean {
 
 function memberCall(call: Node): boolean {
   if (call.childForFieldName('object')) return true; // Java
+  if (call.childForFieldName('receiver')) return true;
   if (call.namedChild(0)?.type === 'navigation_expression') return true;
   const f = call.childForFieldName('function');
   return !!f && /member_expression|selector_expression|field_expression|attribute|member_access_expression/.test(f.type);

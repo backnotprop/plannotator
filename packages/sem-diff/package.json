@@ -24,6 +24,7 @@
     "tree-sitter-java": "^0.23.5",
     "tree-sitter-php": "0.24.2",
     "tree-sitter-python": "^0.25.0",
+    "tree-sitter-ruby": "0.23.1",
     "tree-sitter-rust": "^0.24.0",
     "tree-sitter-swift": "file:../../vendor/tree-sitter-swift",
     "tree-sitter-typescript": "^0.23.2",

@@ -8,7 +8,7 @@
 import { diffArrays } from 'diff';
 import type { Node } from 'web-tree-sitter';
 import type { Declaration, LanguageConfig } from './parse.ts';
-import { attachedAbove, endLine, keepWeights, longestInOrder, pairSameNamed, startLine, tokens } from './syntax.ts';
+import { attachedAbove, codeLines, endLine, keepWeights, longestInOrder, pairSameNamed, startLine, tokens } from './syntax.ts';
 
 /** A run of changed lines; one side is null for a pure insertion or deletion. */
 export interface ChangeBlock {
@@ -46,7 +46,7 @@ function anchors(oldContainer: Node, newContainer: Node, cfg: LanguageConfig): A
     .sort((x, y) => x.a.node.startIndex - y.a.node.startIndex);
   // Keep the longest run whose order is the same on both sides (the same choice the move detector makes).
   const seq = pairs.map((p) => p.b.node.startIndex);
-  const keep = [...longestInOrder(seq, keepWeights(seq, pairs.map((p) => endLine(p.a.node) - startLine(p.a.node) + 1), cfg.moveEditedFirst ? pairs.map((p) => p.a.node.text === p.b.node.text) : undefined))].sort((x, y) => x - y);
+  const keep = [...longestInOrder(seq, keepWeights(seq, pairs.map((p) => codeLines(p.a, cfg)), cfg.moveEditedFirst ? pairs.map((p) => p.a.node.text === p.b.node.text) : undefined))].sort((x, y) => x - y);
   return keep.map((i) => {
     const { a, b } = pairs[i]!;
     return { a: a.node, b: b.node, ...(a.members && b.members ? { members: [a.members, b.members] as [Node, Node] } : {}) };

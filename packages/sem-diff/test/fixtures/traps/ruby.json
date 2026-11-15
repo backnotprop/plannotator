@@ -1,0 +1,718 @@
+[
+ {
+  "id": "rb-reopen-move-within",
+  "area": "trap",
+  "language": "ruby",
+  "title": "Reopened class: method moved inside the second \"class Foo\"",
+  "expected": "name (second Foo) moved to the top of that block; the first Foo#name is untouched and must not pair with it.",
+  "status": "ok",
+  "old": "class Foo\n  def name\n    \"first\"\n  end\nend\n\nclass Foo\n  def size\n    2\n  end\n\n  def count\n    3\n  end\n\n  def name\n    \"second\"\n  end\nend\n",
+  "new": "class Foo\n  def name\n    \"first\"\n  end\nend\n\nclass Foo\n  def name\n    \"second\"\n  end\n\n  def size\n    2\n  end\n\n  def count\n    3\n  end\nend\n",
+  "ops": [
+   {
+    "type": "moved",
+    "old": [
+     [
+      16,
+      18
+     ]
+    ],
+    "new": [
+     [
+      8,
+      10
+     ]
+    ]
+   }
+  ],
+  "never": [
+   {
+    "type": "moved",
+    "old": [
+     [
+      2,
+      4
+     ]
+    ],
+    "new": [
+     [
+      2,
+      4
+     ]
+    ]
+   },
+   {
+    "type": "renamed"
+   },
+   {
+    "type": "reformatted"
+   }
+  ]
+ },
+ {
+  "id": "rb-reopen-move-between",
+  "area": "trap",
+  "language": "ruby",
+  "title": "Reopened class: method moved from the first \"class Foo\" into the second",
+  "expected": "a moved from the first Foo to the end of the second Foo: same class, same visibility, so moved.",
+  "status": "ok",
+  "old": "class Foo\n  def a\n    1\n  end\nend\n\nclass Foo\n  def b\n    2\n  end\nend\n",
+  "new": "class Foo\nend\n\nclass Foo\n  def b\n    2\n  end\n\n  def a\n    1\n  end\nend\n",
+  "ops": [
+   {
+    "type": "moved",
+    "old": [
+     [
+      2,
+      4
+     ]
+    ],
+    "new": [
+     [
+      9,
+      11
+     ]
+    ]
+   }
+  ],
+  "never": [
+   {
+    "type": "renamed"
+   },
+   {
+    "type": "reformatted"
+   }
+  ]
+ },
+ {
+  "id": "rb-self-style-switch",
+  "area": "trap",
+  "language": "ruby",
+  "title": "\"def self.build\" rewritten as \"class << self; def build\"",
+  "expected": "Both are the singleton method build; the text and tree change, so movedWithEdit or edited, never reformatted or plain moved.",
+  "status": "ok",
+  "old": "class Widget\n  def self.build(opts)\n    new(opts).tap(&:validate!)\n  end\n\n  def render\n    \"<widget>\"\n  end\nend\n",
+  "new": "class Widget\n  class << self\n    def build(opts)\n      new(opts).tap(&:validate!)\n    end\n  end\n\n  def render\n    \"<widget>\"\n  end\nend\n",
+  "ops": [],
+  "never": [
+   {
+    "type": "reformatted"
+   },
+   {
+    "type": "moved"
+   },
+   {
+    "type": "renamed"
+   }
+  ]
+ },
+ {
+  "id": "rb-brace-to-do",
+  "area": "trap",
+  "language": "ruby",
+  "title": "\"{ |i| ... }\" rewritten as \"do |i| ... end\" on the same call",
+  "expected": "The block attaches to each in both versions: reformatted.",
+  "status": "ok",
+  "old": "def print_all(items)\n  items.each { |i| puts i }\nend\n",
+  "new": "def print_all(items)\n  items.each do |i|\n    puts i\n  end\nend\n",
+  "ops": [
+   {
+    "type": "reformatted",
+    "old": [
+     [
+      2,
+      2
+     ]
+    ],
+    "new": [
+     [
+      2,
+      4
+     ]
+    ]
+   }
+  ],
+  "never": [
+   {
+    "type": "renamed"
+   }
+  ]
+ },
+ {
+  "id": "rb-brace-to-do-rebind",
+  "area": "trap",
+  "language": "ruby",
+  "title": "\"puts items.map { }\" rewritten as \"puts items.map do ... end\"",
+  "expected": "do ... end binds to puts, not map, so the block moves to another call: edited, never reformatted.",
+  "status": "ok",
+  "old": "def show(items)\n  puts items.map { |i| i * 2 }\nend\n",
+  "new": "def show(items)\n  puts items.map do |i|\n    i * 2\n  end\nend\n",
+  "ops": [],
+  "never": [
+   {
+    "type": "reformatted"
+   },
+   {
+    "type": "renamed"
+   }
+  ]
+ },
+ {
+  "id": "rb-stabby-to-lambda",
+  "area": "trap",
+  "language": "ruby",
+  "title": "\"->(x) { }\" rewritten as \"lambda { |x| }\"",
+  "expected": "Different calls and syntax: edited, never reformatted.",
+  "status": "ok",
+  "old": "class Rules\n  CHECK = ->(x) { x > 0 }\nend\n",
+  "new": "class Rules\n  CHECK = lambda { |x| x > 0 }\nend\n",
+  "ops": [],
+  "never": [
+   {
+    "type": "reformatted"
+   },
+   {
+    "type": "renamed"
+   }
+  ]
+ },
+ {
+  "id": "rb-lambda-to-proc",
+  "area": "trap",
+  "language": "ruby",
+  "title": "\"lambda { |x| }\" rewritten as \"proc { |x| }\"",
+  "expected": "A proc has loose arity and a different return: edited, never reformatted or renamed.",
+  "status": "ok",
+  "old": "def handler\n  lambda { |x| x.to_s }\nend\n",
+  "new": "def handler\n  proc { |x| x.to_s }\nend\n",
+  "ops": [],
+  "never": [
+   {
+    "type": "reformatted"
+   },
+   {
+    "type": "renamed"
+   }
+  ]
+ },
+ {
+  "id": "rb-attr-reader-add",
+  "area": "trap",
+  "language": "ruby",
+  "title": "\"attr_reader :a, :b\" gains \":c\"",
+  "expected": "An edit of that line: never renamed, reformatted or moved.",
+  "status": "ok",
+  "old": "class Point\n  attr_reader :a, :b\n\n  def initialize(a, b)\n    @a = a\n    @b = b\n  end\nend\n",
+  "new": "class Point\n  attr_reader :a, :b, :c\n\n  def initialize(a, b)\n    @a = a\n    @b = b\n  end\nend\n",
+  "ops": [],
+  "never": [
+   {
+    "type": "renamed"
+   },
+   {
+    "type": "reformatted"
+   },
+   {
+    "type": "moved"
+   }
+  ]
+ },
+ {
+  "id": "rb-private-move-down",
+  "area": "trap",
+  "language": "ruby",
+  "title": "Public method moved below a bare \"private\" line",
+  "expected": "helper becomes private: the move changes meaning, so edited (v1), never plain moved.",
+  "status": "ok",
+  "old": "class Account\n  def balance\n    @balance\n  end\n\n  def helper\n    @balance * 2\n  end\n\n  private\n\n  def secret\n    42\n  end\nend\n",
+  "new": "class Account\n  def balance\n    @balance\n  end\n\n  private\n\n  def secret\n    42\n  end\n\n  def helper\n    @balance * 2\n  end\nend\n",
+  "ops": [],
+  "never": [
+   {
+    "type": "moved"
+   }
+  ]
+ },
+ {
+  "id": "rb-private-move-up",
+  "area": "trap",
+  "language": "ruby",
+  "title": "Private method moved above the bare \"private\" line",
+  "expected": "secret becomes public: edited (v1), never plain moved.",
+  "status": "ok",
+  "old": "class Account\n  def balance\n    @balance\n  end\n\n  private\n\n  def audit\n    log(:audit)\n  end\n\n  def secret\n    42\n  end\nend\n",
+  "new": "class Account\n  def secret\n    42\n  end\n\n  def balance\n    @balance\n  end\n\n  private\n\n  def audit\n    log(:audit)\n  end\nend\n",
+  "ops": [],
+  "never": [
+   {
+    "type": "moved"
+   }
+  ]
+ },
+ {
+  "id": "rb-private-move-within",
+  "area": "trap",
+  "language": "ruby",
+  "title": "Control: method moved within the private section",
+  "expected": "Both positions are below private: moved.",
+  "status": "ok",
+  "old": "class Account\n  def balance\n    @balance\n  end\n\n  private\n\n  def audit\n    log(:audit)\n  end\n\n  def secret\n    42\n  end\n\n  def reset\n    @balance = 0\n  end\nend\n",
+  "new": "class Account\n  def balance\n    @balance\n  end\n\n  private\n\n  def reset\n    @balance = 0\n  end\n\n  def audit\n    log(:audit)\n  end\n\n  def secret\n    42\n  end\nend\n",
+  "ops": [
+   {
+    "type": "moved",
+    "old": [
+     [
+      16,
+      18
+     ]
+    ],
+    "new": [
+     [
+      8,
+      10
+     ]
+    ]
+   }
+  ],
+  "never": [
+   {
+    "type": "renamed"
+   },
+   {
+    "type": "reformatted"
+   }
+  ]
+ },
+ {
+  "id": "rb-public-move-within",
+  "area": "trap",
+  "language": "ruby",
+  "title": "Control: method moved within the public section, above private",
+  "expected": "Both positions are above private: moved.",
+  "status": "ok",
+  "old": "class Account\n  def balance\n    @balance\n  end\n\n  def owner\n    @owner\n  end\n\n  def total\n    balance + 1\n  end\n\n  private\n\n  def secret\n    42\n  end\nend\n",
+  "new": "class Account\n  def total\n    balance + 1\n  end\n\n  def balance\n    @balance\n  end\n\n  def owner\n    @owner\n  end\n\n  private\n\n  def secret\n    42\n  end\nend\n",
+  "ops": [
+   {
+    "type": "moved",
+    "old": [
+     [
+      10,
+      12
+     ]
+    ],
+    "new": [
+     [
+      2,
+      4
+     ]
+    ]
+   }
+  ],
+  "never": [
+   {
+    "type": "renamed"
+   },
+   {
+    "type": "reformatted"
+   }
+  ]
+ },
+ {
+  "id": "rb-private-singleton-move",
+  "area": "trap",
+  "language": "ruby",
+  "title": "\"def self.create\" moved below a bare \"private\" line",
+  "expected": "private does not affect def self. methods, so the meaning is unchanged and moved is true; v1 may still say edited.",
+  "status": "borderline",
+  "old": "class Store\n  def self.create\n    new\n  end\n\n  def open\n    true\n  end\n\n  private\n\n  def lock\n    false\n  end\nend\n",
+  "new": "class Store\n  def open\n    true\n  end\n\n  private\n\n  def lock\n    false\n  end\n\n  def self.create\n    new\n  end\nend\n",
+  "ops": [
+   {
+    "type": "moved",
+    "old": [
+     [
+      2,
+      4
+     ]
+    ],
+    "new": [
+     [
+      12,
+      14
+     ]
+    ]
+   }
+  ],
+  "never": [
+   {
+    "type": "renamed"
+   },
+   {
+    "type": "reformatted"
+   }
+  ]
+ },
+ {
+  "id": "rb-oneline-def",
+  "area": "trap",
+  "language": "ruby",
+  "title": "One-line \"def x; 1; end\" written over three lines",
+  "expected": "Same tree: reformatted.",
+  "status": "ok",
+  "old": "class Config\n  def port; 8080; end\nend\n",
+  "new": "class Config\n  def port\n    8080\n  end\nend\n",
+  "ops": [
+   {
+    "type": "reformatted",
+    "old": [
+     [
+      2,
+      2
+     ]
+    ],
+    "new": [
+     [
+      2,
+      4
+     ]
+    ]
+   }
+  ],
+  "never": [
+   {
+    "type": "renamed"
+   },
+   {
+    "type": "moved"
+   }
+  ]
+ },
+ {
+  "id": "rb-call-parens",
+  "area": "trap",
+  "language": "ruby",
+  "title": "\"log(message)\" written as \"log message\" (no block)",
+  "expected": "Argument-list parentheses are formatting only: reformatted.",
+  "status": "ok",
+  "old": "def warn(message)\n  log(message)\n  true\nend\n",
+  "new": "def warn(message)\n  log message\n  true\nend\n",
+  "ops": [
+   {
+    "type": "reformatted",
+    "old": [
+     [
+      2,
+      2
+     ]
+    ],
+    "new": [
+     [
+      2,
+      2
+     ]
+    ]
+   }
+  ],
+  "never": [
+   {
+    "type": "renamed"
+   }
+  ]
+ },
+ {
+  "id": "rb-if-modifier",
+  "area": "trap",
+  "language": "ruby",
+  "title": "\"x if y\" rewritten as \"if y then x end\"",
+  "expected": "if_modifier vs if: edited in v1, never reformatted.",
+  "status": "ok",
+  "old": "def check(user)\n  deny! if user.banned?\n  allow!\nend\n",
+  "new": "def check(user)\n  if user.banned? then deny! end\n  allow!\nend\n",
+  "ops": [],
+  "never": [
+   {
+    "type": "reformatted"
+   },
+   {
+    "type": "renamed"
+   }
+  ]
+ },
+ {
+  "id": "rb-heredoc-move",
+  "area": "trap",
+  "language": "ruby",
+  "title": "Method whose body holds a heredoc moved to the end of the class",
+  "expected": "query moved, and the move covers the heredoc body and terminator (lines 3-8 old).",
+  "status": "ok",
+  "old": "class Repo\n  def query\n    sql = <<~SQL\n      SELECT *\n      FROM users\n      WHERE active\n    SQL\n    run(sql)\n  end\n\n  def count\n    1\n  end\n\n  def name\n    \"repo\"\n  end\nend\n",
+  "new": "class Repo\n  def count\n    1\n  end\n\n  def name\n    \"repo\"\n  end\n\n  def query\n    sql = <<~SQL\n      SELECT *\n      FROM users\n      WHERE active\n    SQL\n    run(sql)\n  end\nend\n",
+  "ops": [
+   {
+    "type": "moved",
+    "old": [
+     [
+      2,
+      9
+     ]
+    ],
+    "new": [
+     [
+      10,
+      17
+     ]
+    ]
+   }
+  ],
+  "never": [
+   {
+    "type": "reformatted"
+   },
+   {
+    "type": "renamed"
+   }
+  ]
+ },
+ {
+  "id": "rb-heredoc-reindent",
+  "area": "trap",
+  "language": "ruby",
+  "title": "Body of a \"<<-\" heredoc re-indented",
+  "expected": "The <<- heredoc keeps its indentation, so the string changed: edited, never reformatted.",
+  "status": "ok",
+  "old": "def banner\n  text = <<-TXT\n  Welcome\n  Bye\n  TXT\n  puts text\nend\n",
+  "new": "def banner\n  text = <<-TXT\n      Welcome\n      Bye\n  TXT\n  puts text\nend\n",
+  "ops": [],
+  "never": [
+   {
+    "type": "reformatted"
+   },
+   {
+    "type": "moved"
+   },
+   {
+    "type": "renamed"
+   }
+  ]
+ },
+ {
+  "id": "rb-endless-move",
+  "area": "trap",
+  "language": "ruby",
+  "title": "Endless \"def area = w * h\" moved",
+  "expected": "An endless method moved past two others unchanged: moved.",
+  "status": "ok",
+  "old": "class Rect\n  def area = width * height\n\n  def width\n    @w\n  end\n\n  def height\n    @h\n  end\nend\n",
+  "new": "class Rect\n  def width\n    @w\n  end\n\n  def height\n    @h\n  end\n\n  def area = width * height\nend\n",
+  "ops": [
+   {
+    "type": "moved",
+    "old": [
+     [
+      2,
+      2
+     ]
+    ],
+    "new": [
+     [
+      10,
+      10
+     ]
+    ]
+   }
+  ],
+  "never": [
+   {
+    "type": "renamed"
+   },
+   {
+    "type": "reformatted"
+   }
+  ]
+ },
+ {
+  "id": "rb-endless-to-block",
+  "area": "trap",
+  "language": "ruby",
+  "title": "Endless \"def area = w * h\" written as a def ... end",
+  "expected": "Same meaning, different tree (expression body vs body statement): reformatted or edited are both defensible; no other claim.",
+  "status": "borderline",
+  "old": "class Rect\n  def area = width * height\nend\n",
+  "new": "class Rect\n  def area\n    width * height\n  end\nend\n",
+  "ops": [],
+  "never": [
+   {
+    "type": "renamed"
+   },
+   {
+    "type": "moved"
+   }
+  ]
+ },
+ {
+  "id": "rb-extract-implicit-return",
+  "area": "trap",
+  "language": "ruby",
+  "title": "Extract whose helper returns its last expression",
+  "expected": "with_tax extracted from total; its value is the implicit return, the caller uses it as its own last expression.",
+  "status": "ok",
+  "old": "class Invoice\n  def total\n    subtotal = items.sum(&:price)\n    tax = subtotal * rate\n    subtotal + tax\n  end\nend\n",
+  "new": "class Invoice\n  def total\n    subtotal = items.sum(&:price)\n    with_tax(subtotal)\n  end\n\n  def with_tax(subtotal)\n    tax = subtotal * rate\n    subtotal + tax\n  end\nend\n",
+  "ops": [
+   {
+    "type": "extractedFunction",
+    "old": [
+     [
+      4,
+      5
+     ]
+    ],
+    "new": [
+     [
+      4,
+      4
+     ],
+     [
+      7,
+      10
+     ]
+    ]
+   }
+  ],
+  "never": [
+   {
+    "type": "moved"
+   },
+   {
+    "type": "renamed"
+   }
+  ]
+ },
+ {
+  "id": "rb-extract-bare-call",
+  "area": "trap",
+  "language": "ruby",
+  "title": "Extract called as a bare identifier (\"lines = header\")",
+  "expected": "header extracted from render; the call has no receiver and no arguments, so it parses as an identifier.",
+  "status": "ok",
+  "old": "class Report\n  def render\n    lines = []\n    lines << \"Header\"\n    lines << \"=\" * 20\n    lines.concat(rows)\n    lines.join(\"\\n\")\n  end\nend\n",
+  "new": "class Report\n  def render\n    lines = header\n    lines.concat(rows)\n    lines.join(\"\\n\")\n  end\n\n  def header\n    lines = []\n    lines << \"Header\"\n    lines << \"=\" * 20\n    lines\n  end\nend\n",
+  "ops": [
+   {
+    "type": "extractedFunction",
+    "old": [
+     [
+      3,
+      5
+     ]
+    ],
+    "new": [
+     [
+      3,
+      3
+     ],
+     [
+      8,
+      13
+     ]
+    ]
+   }
+  ],
+  "never": [
+   {
+    "type": "moved"
+   },
+   {
+    "type": "renamed"
+   }
+  ]
+ },
+ {
+  "id": "rb-inline-bare-call",
+  "area": "trap",
+  "language": "ruby",
+  "title": "Inline of a helper called as a bare identifier",
+  "expected": "discount inlined into price; it was called bare and returned its last expression.",
+  "status": "ok",
+  "old": "class Item\n  def price\n    base - discount\n  end\n\n  def discount\n    pct = member? ? 0.1 : 0.0\n    base * pct\n  end\nend\n",
+  "new": "class Item\n  def price\n    pct = member? ? 0.1 : 0.0\n    base - base * pct\n  end\nend\n",
+  "ops": [
+   {
+    "type": "inlinedFunction",
+    "old": [
+     [
+      3,
+      3
+     ],
+     [
+      6,
+      9
+     ]
+    ],
+    "new": [
+     [
+      3,
+      4
+     ]
+    ]
+   }
+  ],
+  "never": [
+   {
+    "type": "moved"
+   },
+   {
+    "type": "renamed"
+   }
+  ]
+ },
+ {
+  "id": "rb-const-rename-hides-edit",
+  "area": "trap",
+  "language": "ruby",
+  "title": "LIMIT renamed to MAX, and \"<\" became \"<=\" on a line that uses it",
+  "expected": "renamed LIMIT -> MAX on lines 2 and 9; line 5 also changed its operator, so renamed must not cover line 5.",
+  "status": "ok",
+  "old": "module Limits\n  LIMIT = 10\n\n  def self.ok?(n)\n    n < LIMIT\n  end\n\n  def self.cap(n)\n    [n, LIMIT].min\n  end\nend\n",
+  "new": "module Limits\n  MAX = 10\n\n  def self.ok?(n)\n    n <= MAX\n  end\n\n  def self.cap(n)\n    [n, MAX].min\n  end\nend\n",
+  "ops": [
+   {
+    "type": "renamed",
+    "old": [
+     [
+      2,
+      2
+     ]
+    ],
+    "new": [
+     [
+      2,
+      2
+     ]
+    ]
+   }
+  ],
+  "never": [
+   {
+    "type": "renamed",
+    "old": [
+     [
+      5,
+      5
+     ]
+    ],
+    "new": [
+     [
+      5,
+      5
+     ]
+    ]
+   },
+   {
+    "type": "reformatted"
+   }
+  ]
+ }
+]
