@@ -168,6 +168,8 @@ import { namesCapability, withCapabilities } from './capabilities';
 import { openSnoozeMenu } from './snoozeIntroTry';
 import { adoptSavedRows, hearRowsEvent, listLookReadMark, readListLook, writeListLookOptions } from './listLook';
 import { adoptSavedSidebar, hearSidebarEvent, sidebarLayoutReadMark, useSidebarCustomizerOpen } from './sidebarLayout';
+import { adoptShowArchived } from './showArchived';
+import { useArchivedGroup } from './data/actions/archivedGroup';
 import { sidebarTipDue, useSidebarTip } from './sidebarTip';
 import { SidebarTipCard } from './components/SidebarTipCard';
 import { SidebarCustomizer } from './components/SidebarCustomizer';
@@ -189,8 +191,7 @@ import { sameSettings, settingsReadAtLoad, takeSettingsAtLoad } from './settings
 import { openTakenBack } from './takenBackCompose';
 import { restartInbox } from './restartInbox';
 import { errorToast } from './toastError';
-import { bulkWrites } from './bulkWrites';
-import { useCombines } from './components/useCombines';
+import { useBulkWrites } from './components/useCombines';
 import { canToggleRead, confirmSetAside, MARK_READ_LOOK_WAIT_MS, MARK_READ_UNDO_MS, MARK_UNREAD_RETRY_WAIT_MS, markReadToast, markUnreadToast, offersRowMarkRead, seenHeldInNew, setAsideCount, setAsideOf, type SetAsideAnswer, type SetAsideCount, warnsBeforeRead } from './markRead';
 import { MarkReadWarning } from './components/MarkReadWarning';
 import { AgentDeleteDialog } from './agents/AgentDeleteDialog';
@@ -1405,6 +1406,7 @@ function Inbox() {
       adoptSavedReactions(next.reactions, next.reactions_rev, reactionsMark);
       adoptSavedRows(next.rows, next.rows_rev, mark);
       adoptSavedSidebar(next.sidebar, next.sidebar_rev, sidebarMark);
+      adoptShowArchived(next.show_archived);
       adoptSavedDiffOptions(next.diff_options, next.diff_style);
       // The name on the person's comments on the PR page and the review, as plan and code review read it; nothing posted
       // carries it. Only with Code review on: off, every comment reads as on main.
@@ -1986,6 +1988,7 @@ function Inbox() {
         // One at or below the last event's count (the count gone back, or a late copy): the settings read decides.
         onRows: (rows, rev, last) => hearRowsEvent(rows, rev, () => void refreshSettings(), last),
         onSidebar: (sidebar, rev) => hearSidebarEvent(sidebar, rev, () => void refreshSettings()),
+        onShowArchived: adoptShowArchived,
         // An agent icon's face was saved (here, another window, a phone): every icon of that agent redraws at once.
         // A linked machine's agent's face or name changed there: its list brings it.
         onAgentFaces: (data) => {
@@ -3473,7 +3476,7 @@ function Inbox() {
   const { snooze, unsnooze, restoreSnooze } = snoozeWrites({ rowOf, threadRow: () => threadRow, showError, showToast, dismissToast, afterWrite, say, armSlide, setShown, shownRef, routeRef, latestRef, listCovered, snoozeMoved, snoozedThisLoad });
 
   const { setPriority, restorePriority } = priorityWrites({ rowOf, threadRow: () => threadRow, showError, showToast, dismissToast, afterWrite, say, armSlide, setShown, shownRef, routeRef, latestRef, listCovered });
-  const bulkBase = bulkWrites({ rowOf, rowWrites, setShown, shownRef, latestRef, routeRef, listCovered, armSlide, afterWrite, showToast, dismissToast, say, warnSetAside, restoreSnooze, restorePriority, closeThread: () => (fromCard ? backToCard() : close({ ...routeRef.current, thread: null, file: null })), openThread: (thread) => go({ page: 'inbox', project: null, thread }) }), bulk = { ...bulkBase, combines: useCombines(bulkBase, machines) };
+  const bulk = useBulkWrites({ rowOf, rowWrites, setShown, shownRef, latestRef, routeRef, listCovered, armSlide, afterWrite, showToast, dismissToast, say, warnSetAside, restoreSnooze, restorePriority, closeThread: () => (fromCard ? backToCard() : close({ ...routeRef.current, thread: null, file: null })), openThread: (thread) => go({ page: 'inbox', project: null, thread }) }, machines);
 
   /**
    * Pin a thread to the sidebar, or unpin it (approval "inbox-pinned-threads"),
@@ -3607,6 +3610,7 @@ function Inbox() {
     if (action === 'mark-unread') return void markUnread(row.thread_id);
     if (action === 'unsnooze') return void unsnooze(row);
     if (action === 'archive') return void archive(row.thread_id, row.thread_id, true);
+    if (action === 'unarchive') return archivedHost.unarchive(row);
     if (action === 'copy-thread') return void copyThreadOf(row);
     const text = action === 'copy-link' ? threadLink(row.thread_id, settings, window.location.origin) : row.thread_id;
     void copyTextToClipboard(text).then((ok) =>
@@ -3701,27 +3705,6 @@ function Inbox() {
     return deleteAgentNow(agentDelete, archive);
   };
 
-  /**
-   * Settings' Unarchive: the thread goes back to the list, in whatever
-   * section its state puts it, and opens there (owner ruling 2026-10-12).
-   */
-  const unarchiveFromSettings = async (row: InboxListRow): Promise<boolean> => {
-    try {
-      await inboxApi.resolve(row.thread_id, false);
-    } catch (cause) {
-      showError(cause);
-      return false;
-    }
-    go({ page: 'inbox', project: null, thread: row.thread_id });
-    await refreshList(true);
-    showToast({
-      icon: 'check',
-      lead: 'Back in your Inbox',
-      detail: `“${row.subject ?? '(no subject)'}”`,
-      onUndo: () => void archive(row.thread_id, row.thread_id, true),
-    });
-    return true;
-  };
 
   // E marks the open thread (or the focused row) read, and again moves it
   // back; Z undoes while the toast is up. Never while typing, never with a
@@ -4123,6 +4106,9 @@ function Inbox() {
   });
   const { decisionModeOn, decideInThread, sittingDecisions, closeDecide } = useDecideSitting({ settings, decisions, setDecisions, decide, setDecide, decideOpener, decisionModeOnRef, refreshDecisions, refreshList });
   const snoozeBack = useSnoozeBack({ thread, route, listedOpenRow, looking, openThreadCovered, lookRef, trackLook, refreshList, snoozed: latest?.snoozed, refreshSnoozes, seen: inboxApi.seen });
+  // The list's Archived group (approval "inbox-archived-group") and Settings → Archived's Unarchive.
+  const archivedFilter = useCallback((rows: readonly InboxListRow[]) => filterShown([{ id: 'archived', label: 'Archived', threads: [...rows] }])[0]?.threads ?? rows, [filterShown]);
+  const { host: archivedHost, unarchiveFromSettings } = useArchivedGroup({ project: route.page === 'inbox' ? route.project : null, merged: anyMachineLinked, filter: archivedFilter, showToast, showError, afterWrite, archive, go, refreshList });
 
   const context: ConnectContext | null = settings
     ? { command: settings.mcp_command, mcpUrl: settings.mcp_url, platform: platformOf() }
@@ -5990,6 +5976,7 @@ function Inbox() {
           onHide={route.thread !== null && !stack.thread ? () => setThreadFull(true) : undefined}
           threadPanel={phone ? undefined : { on: threadPanelOn, onChange: setThreadPanelOn }}
           onCustomizeRows={() => go({ page: 'settings', project: null, thread: null, section: 'rows' })}
+          archived={archivedHost}
           selectedThreadId={route.thread}
           lit={lit}
           notice={notice}

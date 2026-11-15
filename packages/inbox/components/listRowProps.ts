@@ -26,6 +26,8 @@ export interface ListRowProps extends RowTintFields {
   onMarkUnread?: (row: InboxListRow) => void;
   onSendNow?: (row: InboxListRow) => void;
   onUnstar?: (row: InboxListRow) => void;
+  /** A row of the Archived group: its hover action is Unarchive, and no other. */
+  onUnarchive?: (row: InboxListRow) => void;
   /** Today's date: the row's time is written against it (shortTime). */
   day: string;
   /** Its right-click menu is open (RowMenu.tsx): the muted background. */
@@ -96,6 +98,7 @@ export function sameListRow(a: ListRowProps, b: ListRowProps): boolean {
     a.onMarkUnread === b.onMarkUnread &&
     a.onSendNow === b.onSendNow &&
     a.onUnstar === b.onUnstar &&
+    a.onUnarchive === b.onUnarchive &&
     sameValue(a.row, b.row)
   );
 }

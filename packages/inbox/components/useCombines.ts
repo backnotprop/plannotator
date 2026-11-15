@@ -9,7 +9,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { InboxCombineRecord, InboxListRow } from '@plannotator/core/inbox-types';
 import { plural } from '@plannotator/core/inbox-format';
-import type { BulkWrites } from '../bulkWrites';
+import { bulkWrites, type BulkHost, type BulkWrites } from '../bulkWrites';
 import { combineApi } from '../combineApi';
 import { rememberMachine } from '../inboxUrl';
 import { isAway, type MachinesModel } from '../machines';
@@ -71,6 +71,12 @@ const FAILED: Record<NonNullable<InboxCombineRecord['reason']>, string> = {
 
 /** A watched Combine's machine can be read now: this one, or a linked one there that takes Combines. */
 const readable = (machine: string | null, machines: MachinesModel | undefined) => machine === null || (machines?.linked ?? []).some((m) => m.id === machine && !isAway(m) && (m.marks ?? []).includes('combine'));
+
+/** The list's bulk writes (bulkWrites.ts) with this window's Combines on them: what the window hands its list. */
+export function useBulkWrites(host: BulkHost, machines: MachinesModel | undefined) {
+  const base = bulkWrites(host);
+  return { ...base, combines: useCombines(base, machines) };
+}
 
 export function useCombines(bulk: BulkWrites | undefined, machines: MachinesModel | undefined) {
   const tracked = useRef(new Map<string, Tracked>());

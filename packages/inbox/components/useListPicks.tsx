@@ -37,6 +37,8 @@ export interface ListPicksInput {
 /** What a picked row's right-click menu needs (RowMenu.tsx). */
 export interface MenuPicks {
   has: (threadId: string) => boolean;
+  /** A row that can be picked: the live list's, never an Archived group's (it has no Select). */
+  takes: (threadId: string) => boolean;
   start: (threadId: string) => void;
   act: PickActions;
   /** Stop the Combine a row waits in (its menu's Stop combining). */
@@ -71,8 +73,8 @@ export function useListPicks(input: ListPicksInput) {
     scope.current = input.scope;
     leave();
   }, [input.scope, leave]);
-  /** The rows as drawn, for a Shift press's range. */
-  const order = () => [...(body.current?.querySelectorAll('[data-thread-id]') ?? [])].map((el) => el.getAttribute('data-thread-id')!);
+  /** The rows as drawn that can be picked, for a Shift press's range (an Archived group's are not). */
+  const order = () => [...(body.current?.querySelectorAll('[data-thread-id]') ?? [])].map((el) => el.getAttribute('data-thread-id')!).filter((id) => listed.has(id));
   const drawnIds = sections.filter((section) => isOpen(section.id)).flatMap((section) => section.threads.map((row) => row.thread_id));
   const rows = sections.flatMap((section) => section.threads).filter((row, i, all) => picks.picked.has(row.thread_id) && all.findIndex((r) => r.thread_id === row.thread_id) === i);
   const rules: PickRules = {
@@ -103,6 +105,8 @@ export function useListPicks(input: ListPicksInput) {
     if (!bulk || !(event.target instanceof Element)) return;
     const row = event.target.closest<HTMLElement>('[data-thread-id]');
     if (!row || !body.current?.contains(row) || event.target.closest('[data-pick-box]')) return;
+    // An Archived group's row is never picked: its click opens it, while picking or with a key held.
+    if (!listed.has(row.getAttribute('data-thread-id')!)) return;
     const toggle = event.metaKey || event.ctrlKey;
     if (!picks.on && !toggle && !event.shiftKey) return;
     event.preventDefault();
@@ -145,6 +149,6 @@ export function useListPicks(input: ListPicksInput) {
     ) : null;
   const sheet = picks.on && act && phone ? <PickSheet act={act} /> : null;
   const stopCombine = combines ? (id: string) => combines.waiting.has(id) && void combines.stop(combines.waiting.get(id)!) : undefined;
-  const menu: MenuPicks | undefined = act ? { has: (id) => picks.on && picks.picked.has(id), start: picks.start, act, stopCombine } : undefined;
+  const menu: MenuPicks | undefined = act ? { has: (id) => picks.on && picks.picked.has(id), takes: (id) => listed.has(id), start: picks.start, act, stopCombine } : undefined;
   return { on: picks.on && !!act, has: (id: string) => picks.picked.has(id), start: act ? () => picks.start() : undefined, onClickCapture, onRowBox, groupBox, bar, sheet, menu };
 }

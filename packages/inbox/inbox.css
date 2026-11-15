@@ -1349,12 +1349,24 @@ button.ib-band:hover { background: var(--ib-band-hover-s, var(--ib-band)); }
 .ib-band .ib-n[data-new] { font-weight: 700; color: var(--foreground); }
 /* A group's chevron (owner, 2026-11-08, after approval "inbox-list-groups-close"): at the header's right end, as the
    chevrons were before (owner's pick). Hidden until the pointer is on the header (at once, as the sidebar's sections)
-   or keyboard focus lands on it (data-chev, GroupBand in InboxList.tsx).
+   or keyboard focus lands on it (data-chev, components/GroupBand.tsx).
    It points right closed and down open, as the sidebar's sections do. It fades in over 200 ms with a 3 px slide, and
    goes in 100 ms; always drawn, so nothing moves when it shows. Reduced motion: the fade only. */
 .pn-inbox .ib-band svg.ib-band-chev { margin-left: auto; width: 12px; height: 12px; stroke-width: 2.2; flex: none; opacity: 0; translate: -3px 0; transition: opacity 100ms ease-out, translate 100ms ease-out, rotate 160ms cubic-bezier(0.2, 0.8, 0.2, 1); }
 .pn-inbox .ib-band[data-chev] svg.ib-band-chev { opacity: 1; translate: 0 0; transition: opacity 200ms ease, translate 200ms cubic-bezier(0.23, 1, 0.32, 1), rotate 160ms cubic-bezier(0.2, 0.8, 0.2, 1); }
 .ib-band[aria-expanded="true"] .ib-band-chev { rotate: 90deg; }
+/* The Archived group's own lines (components/ArchivedGroup.tsx): "Show 20 more" and its quiet lines start where the
+   header's words do. A phone's archived row slides left over "Unarchive" (SwipeToUnarchive.tsx); the list scrolls
+   up and down through it (pan-y). */
+.ib-arcg-line { margin: 0; padding: 10px 12px; font-size: var(--ib-fs-13, 13px); line-height: 1.45; color: var(--muted-foreground); }
+.pn-inbox .ib-arcg-more { display: block; margin: 2px 0 4px; padding: 10px 12px; border-radius: 8px; font-size: var(--ib-fs-13, 13px); font-weight: 600; color: var(--foreground); text-align: left; }
+.pn-inbox .ib-arcg-more:hover { background: var(--ib-band-hover-s, var(--ib-band)); }
+.pn-inbox .ib-arcg-search { font: inherit; color: var(--foreground); text-decoration: underline; text-underline-offset: 2px; }
+.ib-arcswipe { position: relative; overflow: hidden; touch-action: pan-y pinch-zoom; }
+.ib-arcswipe-under { position: absolute; inset: 0; display: flex; align-items: center; justify-content: flex-end; gap: 6px; padding-right: 20px; background: var(--muted); color: var(--muted-foreground); font-size: var(--ib-fs-14, 14px); font-weight: 600; visibility: hidden; }
+.ib-arcswipe[data-swiping] .ib-arcswipe-under { visibility: visible; }
+.ib-arcswipe[data-armed] .ib-arcswipe-under { background: var(--primary); color: var(--primary-foreground); }
+.ib-arcswipe-face { position: relative; background: var(--background); }
 @media (prefers-reduced-motion: reduce) {
   .pn-inbox .ib-band svg.ib-band-chev, .pn-inbox .ib-band[data-chev] svg.ib-band-chev { translate: none; transition-property: opacity; }
 }
