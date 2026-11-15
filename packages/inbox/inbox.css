@@ -9461,6 +9461,9 @@ dialog.ib-pqi .ib-listcol.ib-pqi-list { position: relative; inset: auto; visibil
 .pn-inbox .ib-rpick-name { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; height: 36px; padding: 0 4px 0 8px; border: 0; border-radius: 8px; background: none; color: var(--foreground); font: inherit; text-align: left; cursor: pointer; }
 .ib-rpick-l { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
 .ib-rpick-q { flex: none; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
+.ib-rpick-ol { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; line-height: 1.25; }
+.pn-inbox .ib-rpick-name:has(.ib-rpick-ol) { height: 44px; }
+.ib-rpick-d { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
 .pn-inbox .ib-rpick-tick { flex: none; display: grid; place-items: center; width: 36px; height: 36px; padding: 0; border: 0; border-radius: 8px; background: none; color: transparent; cursor: pointer; }
 .ib-rpick-tick > span { display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--border); }
 .pn-inbox .ib-rpick-tick[aria-checked="true"] > span { background: var(--primary); box-shadow: none; color: var(--primary-foreground); }

@@ -17,11 +17,11 @@ import { HostMark, Icon } from '../icons';
 import { canAddRecipient, type RecipientRow } from '../replyRecipients';
 import { labelOf, type SessionLabels } from '../sessionLabels';
 import { agentName, namesList } from '../tags';
+import { recipientNames } from '../thread/recipientNames';
 import { AgentMark, AgentPill } from './AgentPill';
 import { BottomSheet } from './BottomSheet';
 import { SheetLine, SheetRow } from './SheetRow';
 
-const QUIET: Record<RecipientRow['state'], string | null> = { live: null, ended: 'ended', reader: 'Not woken', old: 'Update' };
 const TITLE = 'Who gets this reply';
 
 const AtSign = () => (
@@ -59,6 +59,7 @@ export function PhoneReplyRecipient({
   folderOf: (session: string) => string;
 }) {
   const titleOf = (row: RecipientRow) => labelOf(labels, row.session);
+  const names = recipientNames(rows, labels, folderOf);
   const chosenIds = chosen.map((r) => r.session);
   const first = chosen[0];
   const ended = chosen.length === 1 && first!.state === 'ended';
@@ -113,13 +114,14 @@ export function PhoneReplyRecipient({
               );
             }
             const title = titleOf(row);
+            const named = names.get(row.session) ?? { name: title ?? row.label, detail: undefined };
             return (
               <SheetRow
                 key={row.session}
                 host={row.host}
                 agent={row.session}
-                title={title ?? row.label}
-                detail={[title ? agentName(row.host) : null, QUIET[row.state] ?? folderOf(row.session)].filter(Boolean).join(' · ')}
+                title={named.name}
+                detail={named.detail}
                 selected={on}
                 disabled={row.alone === false}
                 attrs={{ 'data-recipient-row': row.session }}
@@ -129,7 +131,7 @@ export function PhoneReplyRecipient({
                     type="button"
                     role="checkbox"
                     aria-checked={on}
-                    aria-label={`Also send to ${title ?? row.label}`}
+                    aria-label={`Also send to ${named.name}`}
                     className="ib-sheet-tick"
                     data-recipient-tick={row.session}
                     disabled={!canAddRecipient(row, chosenIds, rows)}
