@@ -5,7 +5,8 @@
  *  - a refusal not reported in the host's words, sent again by itself, or leaving the selection;
  *  - closed PRs staying in Open, or a toast without the count and Undo;
  *  - Undo reopening anything but what that Close closed, or not picking them again and saying how each went;
- *  - on a phone, the toast covering the pick sheet's buttons.
+ *  - on a phone, the toast covering the pick sheet's buttons;
+ *  - a linked machine's PR closed or reopened here, or its Undo going anywhere but the machine that closed it.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt. No gh: the window's fetch is stubbed.
  */
@@ -69,7 +70,7 @@ const key = (n: number, repo = 'northwind/ledger') => `github.com/${repo}#${n}`;
 const WEB20 = key(20, 'northwind/web');
 
 /** Every close and reopen the window asked for, in order, each answered when the test says. */
-let sent: { route: string; key: string; answer: (status: number, body: Record<string, unknown>) => void }[] = [];
+let sent: { route: string; key: string; url: string; answer: (status: number, body: Record<string, unknown>) => void }[] = [];
 let toasts: { toast: Omit<InboxToastModel, 'id'>; ms: number }[] = [];
 let root: Root | null = null;
 let host: HTMLElement | null = null;
@@ -85,7 +86,7 @@ beforeEach(() => {
     if (!route) return Response.json({});
     const body = JSON.parse(String(init?.body ?? '{}'));
     return new Promise<Response>((resolve) => {
-      sent.push({ route, key: body.key, answer: (status, answer) => resolve(Response.json(answer, { status })) });
+      sent.push({ route, key: body.key, url: String(url), answer: (status, answer) => resolve(Response.json(answer, { status })) });
     });
   }) as unknown as typeof fetch;
 });
@@ -209,6 +210,27 @@ test('Undo reopens exactly what that Close closed, picks them again, and reports
   expect(toasts.at(-1)!.toast.onUndo).toBeUndefined();
   await settle();
   expect(sent).toHaveLength(5);
+});
+
+test("a linked machine's PR is closed there and its Undo reopens it there; an asleep machine's refusal is said in its words", async () => {
+  if (!hasDom) return;
+  const MINI = 'ibx_01K0000000000000000000000B';
+  draw({ model: { ...MODEL, pulls: MODEL.pulls.map((p) => (p.number === 7 || p.number === 8 ? { ...p, machine: MINI } : p)) } });
+  closeThree();
+  await answerAll([
+    [200, { ok: true, key: key(7), url: '' }],
+    [503, { error: 'Mini cannot be reached now.', code: 'machine_offline' }],
+    [200, { ok: true, key: WEB20, url: '' }],
+  ]);
+  expect(sent.map((s) => s.url)).toEqual([`/api/inbox/m/${MINI}/pulls/close`, `/api/inbox/m/${MINI}/pulls/close`, '/api/inbox/pulls/close']);
+  expect(rows('refused')).toEqual(['#8 Mini cannot be reached now.']);
+  act(() => toasts[0]!.toast.onUndo!());
+  await answerAll([
+    [200, { ok: true, key: key(7), url: '' }],
+    [200, { ok: true, key: WEB20, url: '' }],
+  ]);
+  expect(sent.slice(3).map((s) => s.url)).toEqual([`/api/inbox/m/${MINI}/pulls/reopen`, '/api/inbox/pulls/reopen']);
+  expect(rows('reopened')).toEqual(['Reopened #7, #20.']);
 });
 
 test("a phone's pick sheet lifts the window's toast above it while it shows, and lets it go after", () => {

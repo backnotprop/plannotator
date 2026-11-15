@@ -30,9 +30,10 @@ import { InboxError } from "@plannotator/shared/inbox/schema";
 import { inboxSnoozeRefusal, inboxSnoozeRunning } from "@plannotator/core/inbox-snooze";
 import { refuseInboxSnoozeUntil } from "@plannotator/shared/inbox/snoozes";
 import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
-import { INBOX_MACHINE_WINDOW_ONLY_BODY, isWindowRequest } from "./inbox-cross-site";
+import { INBOX_MACHINE_PULL_WINDOW_ONLY_BODY, INBOX_MACHINE_WINDOW_ONLY_BODY, isWindowRequest } from "./inbox-cross-site";
 import { INBOX_MACHINE_ACCOUNTS_MAX_BYTES, INBOX_MACHINE_ACCOUNTS_WAIT_MS, parsePeerAccounts } from "./inbox-accounts";
 import { buildLinkOffer, InboxLinks, parseLinkOffer, type InboxLinkRecord } from "./inbox-links";
+import { createMachinePulls } from "./inbox-machine-pulls";
 import { doorWriteKind, InboxOutbox, MACHINE_WINDOW_HEADER, type OutboxEntry } from "./inbox-outbox";
 import { farVersion, MACHINE_LINKS_PROTOCOL, parseFarUpdate, PEER_LINK_TIMINGS, PeerLink, readCapped, type PeerCards, type PeerLinkTimings, type PeerRecord, type PeerRereadEvent } from "./inbox-peer-link";
 import { installCommandFor, isNewerStableVersion, normalizeStableVersion } from "@plannotator/shared/update-check";
@@ -61,6 +62,8 @@ const UNLINKED_DOOR_CLOSE_MS = 1_000;
 const PAIR_MS = 15_000;
 /** A file sent to another machine: the time until its answer's headers (the upload itself). */
 const UPLOAD_MS = 10 * 60_000;
+/** A PR's close, reopen or merge there: the forge is asked, then written to, by that machine's gh / glab. */
+const FORGE_WRITE_MS = 60_000;
 
 /** The pieces of the device door linking needs (inbox-devices.ts). */
 export interface InboxMachineDoor {
@@ -408,6 +411,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
   const links = InboxLinks.open(context.dataDir);
   const outbox = InboxOutbox.open(context.dataDir, context.now);
   const peers = new Map<string, PeerLink>();
+  const machinePulls = createMachinePulls({ peers: () => peers.values() });
   const listeners = new Set<(frame: MachineFrame) => void>();
   /** An offer that published the door: the door comes down when it expires unused. */
   let offerTimer: ReturnType<typeof setTimeout> | null = null;
@@ -541,6 +545,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
   const forget = (id: string, closeDoor: "now" | "after_answer" | "after_refusal" = "now"): InboxLinkRecord | null => {
     peers.get(id)?.stop();
     peers.delete(id);
+    machinePulls.forget(id);
     const link = links.remove(id);
     if (link?.device_id) context.door.revokeDevice(link.device_id, { oweRefusal: closeDoor === "after_refusal" });
     outbox.dropMachine(id, link?.name ?? null);
@@ -843,6 +848,23 @@ export function createInboxMachines(context: InboxMachinesContext) {
     // An agent's or a script's bare call is still the owner's for every other write, as before.
     const window = isWindowRequest(req, body, context.serverSession);
     if (!window && startsAgentThere(route, body)) return json(INBOX_MACHINE_WINDOW_ONLY_BODY, 403);
+    if (kind === "forge") {
+      // A PR's close, reopen or merge as that machine's gh / glab: a press in this window, sent now or not at all. A
+      // close held for days would run when nobody is looking, and Undo's reopen is taken there only minutes after it.
+      if (!window) return json(INBOX_MACHINE_PULL_WINDOW_ONLY_BODY, 403);
+      if (peer.state !== "online") return offline();
+      delete body.serverSession;
+      try {
+        const far = await peer.request(route, "", { method: "POST", headers: { "Content-Type": "application/json", [MACHINE_WINDOW_HEADER]: "1" }, body: JSON.stringify(body), signal: req.signal, timeoutMs: FORGE_WRITE_MS });
+        const answer = passAnswer(far);
+        // A retried press under its key: that machine's door answered it again without running it.
+        if (far.headers.get("idempotent-replayed") === "true") answer.headers.set("Idempotent-Replayed", "true");
+        if (answer.ok) void machinePulls.reread(peer);
+        return answer;
+      } catch {
+        return offline();
+      }
+    }
     // A write that names this Inbox's thread, message, file or project in its body (a comment, a new message) is refused the same way.
     for (const [key, held] of BODY_IDS) {
       const id = body[key];
@@ -1213,6 +1235,8 @@ export function createInboxMachines(context: InboxMachinesContext) {
     cardLists,
     archivedPages,
     showArchivedCopies,
+    /** Each linked machine's PR board (mark `pulls`), for the merged board (inbox-machine-pulls.ts). */
+    pullLists: (refresh: boolean) => machinePulls.lists(refresh),
     farCard,
     snoozeThread,
     /** The linked machine a device on this Inbox's door belongs to (a launch it starts here records it), or null. */
