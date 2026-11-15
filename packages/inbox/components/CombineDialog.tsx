@@ -77,8 +77,9 @@ export function CombineDialog({ rows, machines = NO_MACHINES, onClose, onStarted
       setError(cause instanceof Error ? cause.message : 'The Combine did not start.');
     }
   };
+  // Cancel takes the focus: Combine is greyed until the agents are read, and a focused field would open a phone's keyboard.
   return (
-    <Modal labelledBy={`${id}-title`} describedBy={`${id}-lede`} testId="combine" onClose={onClose} ownKeys className="ib-cmb" initialFocus={blocked ? '.ib-btn' : undefined}>
+    <Modal labelledBy={`${id}-title`} describedBy={`${id}-lede`} testId="combine" onClose={onClose} ownKeys className="ib-cmb" initialFocus=".ib-btn">
       <div className="ib-dlg-in">
         <h2 id={`${id}-title`}>Combine {plural(n, 'thread')}</h2>
         <p className="ib-sub" id={`${id}-lede`}>

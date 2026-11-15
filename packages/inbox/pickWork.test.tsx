@@ -131,6 +131,8 @@ test.skipIf(!hasDom)('the wide bar has Tidy… and Combine…; Combine… is gre
   await settle();
   const dialog = document.querySelector('[data-dialog="combine"]')!;
   expect(dialog.querySelector('h2')?.textContent).toBe('Combine 2 threads');
+  // Not the field: on a phone a focused field opens the keyboard over the dialog.
+  expect(document.activeElement?.textContent).toBe('Cancel');
   expect(requests.some((r) => r.method === 'GET' && r.url.includes('/api/inbox/combine?threads=a,b'))).toBe(true);
   const option = dialog.querySelector('[data-combine-agent="ses_a"]')!;
   expect(option.querySelector('input')!.checked).toBe(true);
