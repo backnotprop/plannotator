@@ -14,7 +14,7 @@ export const BranchName: React.FC<{ branch: string; minVisible?: number }> = ({ 
   const shown = text === branch || graphemes(text.replace(ELLIPSIS, '')).length >= minVisible;
   return (
     <span ref={ref} className="relative block min-w-0 overflow-hidden whitespace-nowrap" data-branch-name={branch}>
-      <span aria-hidden="true" className="invisible">{branch}</span>
+      <span aria-hidden="true" className="invisible pr-0.5">{branch}</span>
       {shown ? (
         <span className="absolute inset-y-0 left-0 whitespace-nowrap" data-branch-shown="">{text}</span>
       ) : (
