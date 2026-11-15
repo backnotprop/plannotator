@@ -3,7 +3,7 @@
  * catches: a new tag left without a colour (its rows would not tint at once, as the owner asked); tags made before
  * colours coloured differently on each load, or not written; a colour lost with a delete's Undo; a person's pick
  * replaced by an automatic one; the marks dropped by a colour write; a bad colour stored; the own colours growing past
- * three or repeating; a held write landing late over a newer pick.
+ * three or repeating; a held write landing late over a newer pick; a clock far ahead pinning its pick.
  */
 import { afterEach, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -24,7 +24,7 @@ const PERSON: InboxAuthor = { kind: "person" };
 function world() {
   const dir = mkdtempSync(join(tmpdir(), "plannotator-inbox-tag-colours-"));
   roots.push(dir);
-  let clock = Date.parse("2026-11-12T09:00:00.000Z");
+  let clock = Date.parse("2026-11-13T12:00:00.000Z");
   const now = () => new Date((clock += 1000));
   const store = InboxStore.open(dir, { now });
   const project = store.ensureProject({ name: "app", root: "/work/app" });
@@ -123,6 +123,26 @@ test("a held write that lands late never undoes a newer pick: the later time sta
   expect(() => store.setTagColour(release.id, "green", "~")).toThrow();
   expect(() => store.setTagColoursShown(true, "~")).toThrow();
   expect(reopen().tagLook(release.id)?.colour).toBe("red");
+});
+
+test("a clock far ahead cannot pin a pick: its time is held to now plus a few minutes, and the next real pick wins", () => {
+  const { store, reopen, file, onDisk } = world();
+  const release = store.createInitiative({ name: "Release", by: PERSON });
+  const far = store.setTagColour(release.id, "red", "2099-01-01T00:00:00.000Z");
+  expect(Date.parse(far.at)).toBeLessThan(Date.parse("2026-11-13T12:10:00.000Z"));
+  store.setTagColoursShown(false, "+275760-09-13T00:00:00.000Z");
+  expect(Date.parse(store.tagColours().show_at!)).toBeLessThan(Date.parse("2026-11-13T12:10:00.000Z"));
+  expect(store.setTagColour(release.id, null, null).colour).toBeNull();
+  expect(store.setTagColoursShown(true, null).show).toBe(true);
+  // A future time already on disk (written before the cap) counts as now: the next real pick still wins.
+  const disk = JSON.parse(readFileSync(file, "utf8"));
+  disk.looks[release.id] = { colour: "red", by: "person", at: "2099-01-01T00:00:00.000Z" };
+  disk.show = { on: false, at: "2099-01-01T00:00:00.000Z" };
+  writeFileSync(file, `${JSON.stringify(disk)}\n`);
+  const later = reopen();
+  expect(later.setTagColour(release.id, "green", null).colour).toBe("green");
+  expect(later.setTagColoursShown(true, null).show).toBe(true);
+  expect(onDisk().looks?.[release.id]?.colour).toBe("green");
 });
 
 test("a colour change tells the windows, as a mark does", () => {

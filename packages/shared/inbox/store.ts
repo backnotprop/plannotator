@@ -516,6 +516,9 @@ function isLivePagePath(value: unknown): value is string {
 /** Why an action item the person marked through the timed path (decision mode, the phone door) is refused: it goes in seconds. */
 const PERSON_MARKED_WORDS = "the person already marked it; their answer reaches you in a few seconds";
 
+/** How far ahead of this machine's clock a tag colour or switch time may be: ordinary skew between NTP-synced devices. */
+const COLOUR_AT_SLACK_MS = 5 * 60_000;
+
 function actionNotQuestion(field: string, key: string): InboxError {
   return new InboxError("validation_error", `${field}: ${key} is an action item, not a question; mark it Done or Can't do it on its card.`, { field, key });
 }
@@ -8094,7 +8097,7 @@ export class InboxStore {
     const when = this.colourStamp(at);
     // A pick held on the way (an outbox, a machine asleep) can land after a newer one: the newer stays.
     const kept = this.tagColourState.looks.get(tag.id);
-    if (kept?.by === "person" && Date.parse(kept.at) > Date.parse(when)) return kept;
+    if (kept?.by === "person" && this.colourKeptAt(kept.at) > Date.parse(when)) return kept;
     const look: InboxTagLook = { colour, by: "person", at: when };
     const looks = new Map(this.tagColourState.looks).set(tag.id, look);
     const recent = typeof colour === "string" && colour.startsWith("#") ? [{ colour, at: when }, ...this.tagColourState.recent.filter((r) => r.colour !== colour)].slice(0, INBOX_TAG_RECENT_MAX) : this.tagColourState.recent;
@@ -8107,17 +8110,30 @@ export class InboxStore {
     if (typeof on !== "boolean") throw new InboxError("validation_error", "show: true or false.", { field: "show" });
     const when = this.colourStamp(at);
     const kept = this.tagColourState.show;
-    if (kept && Date.parse(kept.at) > Date.parse(when)) return this.tagColours();
+    if (kept && this.colourKeptAt(kept.at) > Date.parse(when)) return this.tagColours();
     this.commitTagColours({ ...this.tagColourState, show: { on, at: when } });
     return this.tagColours();
   }
 
-  /** When the person chose, as an ISO time (so times compare as times); none given: now. */
+  /**
+   * When the person chose, as an ISO time (so times compare as times); none given: now. A window or machine whose clock
+   * runs ahead is held to this machine's now plus a few minutes, so its pick cannot outrank every later one.
+   */
   private colourStamp(at: unknown): string {
     if (at === undefined || at === null) return this.stamp();
     const ms = typeof at === "string" ? Date.parse(at) : Number.NaN;
     if (Number.isNaN(ms)) throw new InboxError("validation_error", "at: an ISO time.", { field: "at" });
-    return new Date(ms).toISOString();
+    return new Date(Math.min(ms, this.now().getTime() + COLOUR_AT_SLACK_MS)).toISOString();
+  }
+
+  /**
+   * A kept colour time as it compares with a new pick. One already ahead of this clock (a fast machine, or written
+   * before the cap) counts as the start of the allowance, so a pick from a window up to that far behind still wins.
+   */
+  private colourKeptAt(at: string): number {
+    const ms = Date.parse(at);
+    const now = this.now().getTime();
+    return ms > now ? now - COLOUR_AT_SLACK_MS : ms;
   }
 
   private commitTagColours(state: InboxTagColoursFile): void {

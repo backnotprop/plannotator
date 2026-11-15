@@ -763,3 +763,4 @@ packages/inbox/pickWork.test.tsx
 packages/inbox/combines.test.tsx
 packages/inbox/tagColours.test.tsx
 packages/inbox/settingsAtLoad.test.tsx
+packages/inbox/pressKeys.test.tsx
