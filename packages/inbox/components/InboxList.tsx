@@ -33,6 +33,8 @@ import { TimeWithTick } from './DeliveryTick';
 import { ActionBadge, QuestionMark, WIDE_ROW_WAIT_WORDS, WaitCard, WaitWords, badgeDescription, rowHasBadge, rowMarks, type RowMarks } from './RowBadge';
 import { StatusMark, rowStatus } from './RowStatus';
 import { attachPullToRefresh } from '../pullRefresh';
+import { RowSwipeLayer, useRowSwipe } from './RowSwipeLayer';
+import { leadEmpty, leadParts } from './rowLead';
 import { TidyMenu, type TidyController } from './Tidy';
 import { ListFilterButton, type ListFilterSource } from './ListFilter';
 import { awayLine, machineTakes, type MachinesModel } from '../machines';
@@ -162,7 +164,7 @@ export interface InboxListProps {
    * The row's right-click menu (Copy link, Copy thread ID, Mark read or
    * Move back, Archive). Absent: no menu, the browser's own.
    */
-  onRowAction?: (row: InboxListRow, action: RowMenuAction) => void;
+  onRowAction?: (row: InboxListRow, action: RowMenuAction) => unknown;
   /** The picks' actions (bulkWrites.ts): rows can be picked, from the row menu, the ⋮ or ⌘ / Shift and a click. Absent: no picking. */
   bulk?: BulkWrites;
   /** A press on a starred row's star. Absent (an older Inbox keeps no pins): the star is only a mark. */
@@ -718,21 +720,6 @@ export const FULL_WORDS_MIN_LIST_WIDTH = 1150;
  * list. In one project's list (`filtered`) the first column holds the marks alone.
  * A list with a pinned row adds the pin's column just left of the open counts.
  */
-/**
- * What a row's lead (`LeadLine`: the agents and the project) draws: the project and its mark unless the list leaves
- * the project out (Project off, or one project's list), and the agents' tiles unless Agent icons is off (the list
- * column's class hides them, their names stay for a screen reader).
- */
-function leadParts(filtered: boolean, noAgents: boolean): { project: boolean; agents: boolean } {
-  return { project: !filtered, agents: !noAgents };
-}
-
-/** A name-first row's second line draws nothing (`leadParts`): only then is it folded away; otherwise the row is as it always was. */
-function leadEmpty(filtered: boolean, noAgents: boolean): boolean {
-  const parts = leadParts(filtered, noAgents);
-  return !parts.project && !parts.agents;
-}
-
 /** Settings → Rows' choices a row reads beyond the list column's classes (listLook.ts). */
 /** The list is picking rows (rowPicks.ts): the row is a toggle, filled while picked. */
 type PickState = { picking: boolean; picked: boolean };
@@ -1436,6 +1423,7 @@ export function InboxList(props: InboxListProps) {
   useLayoutEffect(() => {
     latest.current = props;
   });
+  const swipeLayerRef = useRowSwipe(bodyRef, latest, onRowAction !== undefined, titleOf);
   const openRow = useCallback((row: InboxListRow) => latest.current.onOpen(row), []);
   const markRead = useCallback((row: InboxListRow) => latest.current.onMarkRead?.(row), []);
   const markUnread = useCallback((row: InboxListRow) => latest.current.onMarkUnread?.(row), []);
@@ -1655,6 +1643,7 @@ export function InboxList(props: InboxListProps) {
           phone={props.phone === true}
           picks={pick.menu}
         >
+          {onRowAction && <RowSwipeLayer ref={swipeLayerRef} />}
           {props.stale}
           {props.ask}
           {awayLines.map((line) => (

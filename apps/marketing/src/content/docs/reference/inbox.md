@@ -397,6 +397,56 @@ Browsers allow notifications per address. Each device asks once.
 
 The Inbox's MCP address (`/mcp`) now answers only when the request names `127.0.0.1` or `localhost` with the Inbox's own port. An `ssh -L` forward to a different local port is refused. Forward the same port number, or run `plannotator inbox mcp` on the Inbox's computer.
 
+## Through your own Cloudflare account
+
+If you do not use Tailscale but already have a domain on Cloudflare, you can reach the Inbox, and review, annotate and last sessions, at an address on your domain, behind Cloudflare's login. It is off until you set it up.
+
+You need:
+
+- a domain whose DNS is on Cloudflare;
+- Zero Trust turned on for the account (the Free plan is enough; Cloudflare asks you to accept its terms and to add a card);
+- `cloudflared` installed (on a Mac: `brew install cloudflared`);
+- an API token you create in Cloudflare with these permissions: Account, Cloudflare Tunnel, Edit; Account, Access: Apps and Policies, Edit; Account, Access: Organizations, Identity Providers, and Groups, Edit; Zone, DNS, Edit (your domain). A short expiry is fine: it is used only to set up and to tear down, and it is never saved.
+
+Then run:
+
+```bash
+plannotator inbox cloudflare-access setup --email you@example.com
+```
+
+It asks for the token (or reads `CLOUDFLARE_API_TOKEN`). It creates a sign-in by one-time code sent to that e-mail, a tunnel, an Access application that lets in only that e-mail, and, last, two DNS records: one name for the Inbox and a sibling name (the same name with `-s` added) for sessions. It then checks from outside that a visit without your sign-in, a forged token, a forged cookie and a wrong name all stay out. Only then does it turn on and print the address with a QR code. Use `--zone` when the token sees several domains, and `--hostname` to choose the name (one level under your domain, for example `plannotator.example.com`).
+
+- **Only you can open it.** Cloudflare asks for your e-mail and a one-time code, and the Inbox checks Cloudflare's signed token on every request itself: the e-mail must be the one you typed. A mistake in the Access policy alone is not enough to let anyone in.
+- **It is on the internet.** Unlike the tailnet, the address is public, behind that sign-in. Treat a signed-in phone like your computer: what you send becomes a turn in an agent session here. The sign-in lasts 24 hours.
+- **Sessions:** add `--cloudflare-access` to `plannotator review`, `annotate` or `last`, and the session opens under `/s/…` at the sibling name, with the same sign-in (you sign in once). The Inbox and sessions are kept on separate names, so a page in a review cannot act as the Inbox. Open sessions share the sibling name with each other. If the Inbox is not running, it starts in the background.
+- **When this computer sleeps** or the Inbox is stopped, the address shows Cloudflare's own error page. `cloudflared` runs as part of the Inbox and stops with it.
+
+You can do all of this from **Settings → Remote devices → Cloudflare** too: type your e-mail, paste the token, pick the domain, and watch each step tick. The same place shows both addresses with a QR code, whether the tunnel is connected, **Turn off** (keeps the setup) and **Remove**. It cannot be changed from a device signed in through Cloudflare. `plannotator inbox cloudflare-access status` shows the same state in a terminal. `plannotator inbox cloudflare-access teardown` turns it off and deletes the DNS records, the Access application and the tunnel, in that order (it asks for a token again). `PLANNOTATOR_INBOX_CF_ACCESS=0` keeps it off for one run.
+
+### Use a tunnel and Access application you already have
+
+If you already run a Cloudflare Tunnel to the Inbox with an Access application in front of it, you can use them as they are, without setup:
+
+1. Stop the `cloudflared` you run yourself.
+2. Save the tunnel's run token in `~/.plannotator/cloudflare-access/tunnel-token`, readable only by you (`chmod 600`). The Inbox then runs `cloudflared` for you.
+3. Add this to `~/.plannotator/config.json`, with your own values:
+
+   ```json
+   "inboxCloudflareAccess": {
+     "on": true,
+     "host": "inbox.example.com",
+     "team": "yourteam.cloudflareaccess.com",
+     "aud": "the Access application's AUD tag",
+     "allow": ["you@example.com"],
+     "port": 41234
+   }
+   ```
+
+   `port` is the local port your tunnel's ingress points at (`http://127.0.0.1:<port>`), and the ingress must set the Host header to `host`.
+4. Restart the Inbox (`plannotator inbox restart`).
+
+This opens the Inbox only. Sessions need the second address that setup creates; until then `--cloudflare-access` says so.
+
 ## Inside another app on this computer
 
 By default, no page may show the Inbox in a frame. To show it inside an app of your own on this computer, such as an agent's desktop app, list that app's origin in `~/.plannotator/config.json` and restart the Inbox:

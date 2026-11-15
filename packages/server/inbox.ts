@@ -337,6 +337,9 @@ import { createInboxRelay, readRelayFile, relayUrl as defaultRelayUrl } from "./
 import { createInboxCloudGate } from "./inbox-cloud-gate";
 import type { TailscaleRunner } from "@plannotator/shared/tailscale";
 import { createInboxTailscale, isDoorTailnetPort, type InboxTailscale, type InboxTailscaleTimers } from "./inbox-tailscale";
+import { createInboxCfAccess, type InboxCfAccess, type InboxCfAccessContext } from "./inbox-cf-access";
+import { CF_ACCESS_ROUTE, createCfAccessRoutes, type CfAccessRouteHooks } from "./inbox-cf-access-routes";
+import { hasCfEdgeHeaders } from "@plannotator/shared/inbox/cf-access";
 import { createInboxUpdates, type InboxUpdatesOptions } from "./inbox-updates";
 import { INBOX_WHATS_NEW_IMAGE_PATH, whatsNewImageRoute } from "./inbox-whats-new-images";
 
@@ -546,6 +549,8 @@ export interface InboxServerOptions {
   tailscale?: TailscaleRunner;
   /** Tests: the clock of "Over your tailnet"'s publish-again retry (inbox-tailscale.ts). Default: unref'd timers. */
   tailscaleTimers?: InboxTailscaleTimers;
+  cloudflareAccess?: Pick<InboxCfAccessContext, "fetchKeys" | "now" | "tunnel" | "sessionAlive" | "log">;
+  cloudflareAccessRoutes?: CfAccessRouteHooks;
   /** Tests: more agents beside Claude Code (`createInboxLaunch`'s `hosts`), for a sandbox with no CLI to start. */
   launchHosts?: (context: LaunchHostContext) => LaunchHost[];
   /** Tests: how step 1 of Pair a phone reads this computer (packages/server/inbox-pairing-checks.ts). Default: its own tools. */
@@ -3588,6 +3593,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     serverSession,
     /** Over your tailnet: the switch, the address or why not, and who may open it. */
     tailscale: tailscale.state(),
+    cloudflareAccess: cfAccess?.state() ?? null,
     /** Whether this page reached the Inbox through the tailnet (the switch cannot be turned on from there). */
     via,
     version,
@@ -4822,6 +4828,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   let relay: ReturnType<typeof createInboxRelay> | null = null;
   // Over your tailnet (packages/server/inbox-tailscale.ts), made once the port is known.
   let tailscale: InboxTailscale;
+  let cfAccess: InboxCfAccess | null = null;
+  let cfRoutes: ReturnType<typeof createCfAccessRoutes> | null = null;
+  const fromCfDoor = new WeakSet<Request>();
 
   const readBody = async (req: Request): Promise<Record<string, unknown>> => {
     try {
@@ -5241,6 +5250,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (req.method !== "POST") return json({ error: "Use POST." }, 405);
         return json({ tailscale: await tailscale.enableForRun() });
       }
+      if (path === "/api/inbox/control/cloudflare-access") {
+        if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+        cfAccess?.restart();
+        return json({ cloudflare_access: cfAccess?.state() ?? null });
+      }
       // `plannotator inbox` while this Inbox runs (an agent started it with
       // --background): connect the agents on this computer, as a start does.
       if (path === "/api/inbox/control/connect") {
@@ -5301,6 +5315,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // Ask AI's session and query routes. On any other server path, they do not exist here.
       if (path.startsWith("/api/ai/")) {
         const answer = await ask.aiRoute(req, path, via);
+        if (answer) return answer;
+      }
+      if (path === CF_ACCESS_ROUTE || path.startsWith(`${CF_ACCESS_ROUTE}/`)) {
+        if (fromCfDoor.has(req)) return json({ error: "Cloudflare settings change only on this computer or over your tailnet.", code: "local_only" }, 403);
+        const answer = await cfRoutes?.handle(req, path);
         if (answer) return answer;
       }
       if (path === "/api/inbox/health" && req.method === "GET") return json(health());
@@ -7201,6 +7220,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       tailscale.noteServedRequest();
       return Promise.resolve(localOnly());
     }
+    if (hasCfEdgeHeaders(req.headers)) return Promise.resolve(localOnly());
     return served(req, "local");
   };
   // What the window's own port answers the browser: the same answers, JSON compressed (inbox-encoding.ts). The
@@ -7253,6 +7273,27 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     },
   });
   tailscale.start();
+  cfAccess = createInboxCfAccess({
+    dataDir,
+    registry: () => registry,
+    dispatch: async (req) => {
+      fromCfDoor.add(req);
+      return markPlannotatorResponse(await encodeInboxResponse(req, await served(req, "tailnet")));
+    },
+    forbiddenPort: (candidate) => candidate === port || candidate === INBOX_FORBIDDEN_PORT || isDoorTailnetPort(candidate),
+    maxRequestBodySize: INBOX_MAX_REQUEST_BYTES,
+    note: debugLog ? (event, data) => debugLog.note(event, data) : undefined,
+    ...options.cloudflareAccess,
+  });
+  cfAccess.start();
+  cfRoutes = createCfAccessRoutes({
+    dataDir,
+    door: cfAccess,
+    json,
+    readBody,
+    sessionMismatch: (body) => (checkServerSession(body, serverSession) === "mismatch" ? json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409) : null),
+    hooks: options.cloudflareAccessRoutes,
+  });
   {
     const devices = createInboxDevices({
       dataDir,
@@ -7429,6 +7470,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     relay?.stop();
     // Over your tailnet: the mapping and the tailnet-only listener, before a restart starts the new run.
     tailnetStopFailedPort = tailscale.stop().failedPort;
+    cfAccess?.stop();
   };
 
   return { port, url: baseUrl, token, serverSession, portChanged, store, registry, tailscale, connectAgents, search: search.index, imageCapture, codexWake, liveSites: { running: liveSites.running, sweep: liveSites.sweep }, qwenWake, t3Wake, cloudWake, shapeWatchers: () => shapes.watch.watching(), stop };

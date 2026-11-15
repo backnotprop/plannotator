@@ -1296,7 +1296,7 @@ export function SettingsPage(props: SettingsPageProps) {
         in {tildePath(store?.dir ?? settings.store_dir ?? settings.store?.dir ?? '', settings.home)}: messages, attached files as they were sent, and annotations.
       </p>
     ) : section === 'devices' && settings && !phonesOn ? (
-      <p className="ib-lede">Browsers on your other devices.</p>
+      <p className="ib-lede">Open this Inbox from your phone, tablet or another computer.</p>
     ) : section && LEDE[section] ? (
       <p className="ib-lede">{LEDE[section]}</p>
     ) : null;
