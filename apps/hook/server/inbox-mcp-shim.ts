@@ -29,7 +29,11 @@
  * the id the shim was started with. A T3 Code thread is its thread id
  * (`T3CODE_THREAD_ID`, which T3 sets for the Claude it runs through the Agent
  * SDK), sent as `agent_host: "t3"`, so the Inbox can put the person's reply
- * into that thread (packages/server/inbox-t3-wake.ts). Otherwise it is one
+ * into that thread (packages/server/inbox-t3-wake.ts). An Antigravity
+ * conversation names itself on every tool call
+ * (`_meta["antigravity.google/conversation_id"]`), sent as
+ * `agent_host: "antigravity"` (packages/server/inbox-antigravity-wake.ts).
+ * Otherwise it is one
  * `ses_` id per shim process, and an MCP client that wants its threads across
  * restarts passes `agent_session` itself.
  *
@@ -44,6 +48,10 @@
  */
 
 import {
+  INBOX_ANTIGRAVITY_HOST,
+  INBOX_ANTIGRAVITY_NAME,
+  antigravityConversationOfCall,
+  isAntigravityConversationId,
   INBOX_CODEX_HOST,
   INBOX_CODEX_NAME,
   INBOX_HOST_NAMES,
@@ -128,7 +136,8 @@ export function inboxHostSessionFromEnv(env: Record<string, string | undefined>)
       Object.hasOwn(INBOX_SESSION_HOST_NAMES, host) &&
       (host === INBOX_T3_HOST ? isT3ThreadId(session) : isInboxSessionId(session)) &&
       (host !== INBOX_CODEX_HOST || isCodexThreadId(session)) &&
-      (host !== INBOX_QWEN_HOST || isQwenSessionId(session))
+      (host !== INBOX_QWEN_HOST || isQwenSessionId(session)) &&
+      (host !== INBOX_ANTIGRAVITY_HOST || isAntigravityConversationId(session))
     ) {
       return { host, session, name: INBOX_SESSION_HOST_NAMES[host]! };
     }
@@ -369,6 +378,8 @@ function rpcError(id: string | number | null | undefined, message: string, code 
  * A call from Codex (`clientName` is `codex-mcp-client`, or the call carries
  * Codex's turn metadata) that names its thread (`params._meta.threadId`) is
  * that thread's: the host session is the thread, whatever the environment says.
+ * A call whose `_meta` names an Antigravity conversation is that conversation's
+ * (a subagent's call, whose conversation is not its root, is not).
  *
  * `project_path` is `cwd`, unless the call is filed as the session
  * `sessionProject` names (its host's `PLANNOTATOR_SESSION_PROJECT`): then
@@ -386,6 +397,8 @@ export function fillInboxToolArguments(
   if (message.method !== "tools/call" || !message.params) return message;
   const codexThread = codexThreadOfCall(message.params._meta, clientName);
   if (codexThread) hostSession = { host: INBOX_CODEX_HOST, session: codexThread, name: INBOX_CODEX_NAME };
+  const antigravity = codexThread ? null : antigravityConversationOfCall(message.params._meta);
+  if (antigravity) hostSession = { host: INBOX_ANTIGRAVITY_HOST, session: antigravity.conversation, name: INBOX_ANTIGRAVITY_NAME };
   const name = message.params.name;
   if (typeof name !== "string") return message;
   if (PROJECT_ONLY_TOOLS.has(name)) {
