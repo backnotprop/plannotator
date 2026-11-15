@@ -89,26 +89,15 @@ export function onFontsChanged(listener: () => void): () => void {
   return () => fontListeners.delete(listener);
 }
 
-const pending = new Set<Element>();
-let pendingFrame = 0;
-
-function observePending() {
-  pendingFrame = 0;
-  for (const element of pending) observer?.observe(element);
-  pending.clear();
-}
-
 export function observeWidth(element: Element, onWidth: (width: number) => void): () => void {
   if (typeof ResizeObserver === 'undefined') return () => {};
   observer ??= new ResizeObserver((entries) => {
     for (const entry of entries) observed.get(entry.target)?.(entry.contentRect.width);
   });
   observed.set(element, onWidth);
-  pending.add(element);
-  if (!pendingFrame) pendingFrame = typeof requestAnimationFrame === 'undefined' ? (queueMicrotask(observePending), -1) : requestAnimationFrame(observePending);
+  observer.observe(element);
   return () => {
     observed.delete(element);
-    if (pending.delete(element)) return;
     observer?.unobserve(element);
   };
 }
@@ -198,9 +187,4 @@ export function fitText(kind: FitKind, text: string, available: number, font: st
     if (kind === 'branch') return fitHeadTail(text, 8, room, width);
     return fitStart(text, room, width);
   });
-}
-
-export function naturalWidth(text: string, font: string): number | undefined {
-  const width = textWidth(font);
-  return width ? Math.ceil(width(text)) + 1 : undefined;
 }

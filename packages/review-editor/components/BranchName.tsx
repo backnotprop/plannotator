@@ -10,7 +10,7 @@ export function fitBranch(branch: string, available: number, width: (text: strin
 
 export const BranchName: React.FC<{ branch: string; minVisible?: number }> = ({ branch, minVisible = 0 }) => {
   const ref = useRef<HTMLSpanElement>(null);
-  const { text } = useFittedText(ref, branch, 'branch');
+  const text = useFittedText(ref, branch, 'branch');
   const shown = text === branch || graphemes(text.replace(ELLIPSIS, '')).length >= minVisible;
   return (
     <span ref={ref} className="relative block min-w-0 overflow-hidden whitespace-nowrap" data-branch-name={branch}>
