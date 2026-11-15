@@ -59,7 +59,7 @@ export function setScheduledOn(next: boolean): void {
 /** From the event stream (eventFrames.ts): `null` is a `deliveries` frame. */
 export function scheduledFrame(event: InboxEvent | null): void {
   if (!on || listeners.size === 0) return;
-  if (event === null ? pages > 0 : (event.kind as string) === 'scheduled' || (event.kind === 'message' && !!event.message.scheduled_run)) void readScheduled();
+  if (event === null ? pages > 0 : event.kind === 'scheduled' || (event.kind === 'message' && !!event.message.scheduled_run)) void readScheduled();
 }
 
 function subscribe(listener: () => void): () => void {
