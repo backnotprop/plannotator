@@ -5356,7 +5356,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                           onOpenAs={phone || fileStacked ? undefined : openFromMessage}
                           openId={file && !full && !phone && !fileStacked ? file.id : null}
                           placement="header"
-                          openIn={openIn}
+                          openIn={openIn} pinOf={(a) => ({ threadId: thread.thread_id, key: openArtifactKey(artifactList, a.id) })}
                         />
                         <p className="ib-hatts-note">Also at the end of the message.</p>
                       </>
@@ -5415,7 +5415,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                     onOpen={openFromMessage}
                     onOpenAs={phone || fileStacked ? undefined : openFromMessage}
                     openId={file && !full && !phone && !fileStacked ? file.id : null}
-                    openIn={openIn}
+                    openIn={openIn} pinOf={(a) => ({ threadId: thread.thread_id, key: openArtifactKey(artifactList, a.id) })}
                     newestId={newestFileId}
                     newestKeycap={!file}
                   />
