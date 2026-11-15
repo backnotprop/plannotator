@@ -26,8 +26,10 @@ export interface TagsAcross {
   change: (tag: ListTag, change: TagChange) => Promise<TagChanged>;
   /** Deleted tags back: this Inbox's copies through `restoreInitiatives` (its Undo's rules), then the linked machines'. */
   restore: (tags: readonly ListTag[]) => Promise<InitiativesRestored & TagChanged>;
-  /** This Inbox's id for a tag a card goes in (cards are this Inbox's own): its copy, made by name when only a linked machine holds one. */
+  /** This Inbox's id for a tag one of its own cards goes in: its copy, made by name when only a linked machine holds one. */
   here: (id: string | null) => Promise<string | null>;
+  /** What a linked machine's card is put in: that machine's id for the tag, else its name, which that machine makes. */
+  there: (id: string | null, machine: string) => string | null | { name: string };
 }
 
 export function tagsAcross(tags: readonly ListTag[], machines: MachinesModel): TagsAcross {
@@ -104,6 +106,11 @@ export function tagsAcross(tags: readonly ListTag[], machines: MachinesModel): T
       }
       madeHere.set(key, made);
       return made;
+    },
+    there: (id, machine) => {
+      const tag = id ? tagById(tags, id) : null;
+      if (!tag) return id;
+      return tagIdOn(tag, machine, machines.self) ?? { name: tag.name };
     },
   };
 }

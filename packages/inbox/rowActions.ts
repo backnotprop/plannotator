@@ -2,7 +2,8 @@
  * Row actions drawn the moment they are pressed (data-layer brief, 2026-11-10: Mark read, Archive and Star waited
  * for the write and two reads in a row, about a second on a poor link). The window draws the row as the write makes
  * it, sends the write, and the server's row takes the drawn one's place when the list read after it lands. A write
- * that fails takes the drawn row away again, and the action's own error says why (the window's `showError`).
+ * that fails takes the drawn row away again, and the action's own error says why (the window's `showError`). What is
+ * drawn while a write is out lives in its pending mutation (data/actions/rows.ts); these say what it draws.
  *
  * Only what the write certainly does is drawn: Mark read reads the row as read (not bold, `read_at` set, which
  * presses the header's Read); Archive shows it archived in place (as `markHeldRowArchived` always did once the write
@@ -55,12 +56,4 @@ export function withPinPatches(pinned: Set<string>, patches: ReadonlyMap<string,
     else out.delete(threadId);
   }
   return out;
-}
-
-/** A map with one entry set or taken away (state updates). */
-export function withEntry<V>(map: ReadonlyMap<string, V>, key: string, value: V | undefined): ReadonlyMap<string, V> {
-  const next = new Map(map);
-  if (value === undefined) next.delete(key);
-  else next.set(key, value);
-  return next;
 }

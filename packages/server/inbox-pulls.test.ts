@@ -554,6 +554,28 @@ describe("close and reopen (the board's Close and its Undo)", () => {
     expect(writes(w)).toHaveLength(2);
   });
 
+  test("Undo still reopens after a fresh list no longer holds the closed PR (the forge lists open ones only)", async () => {
+    const answer = structuredClone(GH_ANSWER);
+    const w = await world({ codeReview: true, answer });
+    await w.send("Working.", "retries");
+    await w.pulls();
+    await w.pulls("?everywhere=1");
+    hostSays(w, "open");
+    expect((await call(w.base, "close", { key: KEY })).status).toBe(200);
+    answer.data.authored.nodes = answer.data.authored.nodes.filter((n) => n.number !== 412);
+    setSystemTime(new Date(Date.now() + INBOX_PULLS_FRESH_MS + 1_000));
+    try {
+      await w.pulls();
+      await w.pulls("?everywhere=1");
+      expect(await stateOf(w)).toBeUndefined();
+      const reopened = await call(w.base, "reopen", { key: KEY });
+      expect(reopened.status).toBe(200);
+      expect(writes(w).map((c) => c.args.at(-1))).toEqual(["state=closed", "state=open"]);
+    } finally {
+      setSystemTime();
+    }
+  });
+
   test("a reopen of a PR this Inbox did not close is refused before the host is asked; another site and an unknown PR too", async () => {
     const w = await world({ codeReview: true });
     await w.send("Working.", "retries");

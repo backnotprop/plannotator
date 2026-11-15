@@ -19,6 +19,7 @@ import { MentionAutocompleteMenu, mentionActiveOptionId } from './MentionAutocom
 import type { MentionSource } from '../utils/mentions';
 import {
   hasPrimaryCoarsePointer,
+  layoutViewportHeight,
   shouldUseExpandedComposer,
   useVisibleViewportBounds,
   type VisibleViewportBounds,
@@ -271,6 +272,7 @@ export function computeCommentCardGeometry(
     phone: boolean;
     expanded: boolean;
     pane: Pick<DOMRect, 'left' | 'right' | 'bottom' | 'width'> | null;
+    /** The layout viewport's height (`layoutViewportHeight`), which a docked card's `bottom` is measured from. */
     viewportHeight: number;
     footTop?: number | null;
     aimX?: number | null;
@@ -283,7 +285,7 @@ export function computeCommentCardGeometry(
   }
   const dock = (): CommentCardGeometry => {
     if (opts.phone) {
-      return { docked: true, above: false, style: { left: bounds.left + 8, width: bounds.width - 16, bottom: opts.viewportHeight - bounds.bottom + 8, maxHeight: Math.max(160, bounds.height * 0.6) } };
+      return { docked: true, above: false, style: { left: bounds.left + 8, width: bounds.width - 16, bottom: opts.viewportHeight - bounds.bottom + 8, maxHeight: Math.min(bounds.height, Math.max(160, bounds.height * 0.6)) } };
     }
     const pane = opts.pane ?? { left: bounds.left, right: bounds.right, bottom: bounds.bottom, width: bounds.width };
     const width = Math.min(pane.width - 24, opts.expanded ? 760 : 680);
@@ -448,7 +450,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
         : [];
       const footTop = feet.length ? Math.min(...feet.map((r) => r.top)) - 4 : null;
       setCardGeo(computeCommentCardGeometry(rect, visibleBounds, {
-        phone: cardPhone, expanded: cardExpanded, pane, viewportHeight: window.innerHeight, footTop, aimX: cardAim.current, placement,
+        phone: cardPhone, expanded: cardExpanded, pane, viewportHeight: layoutViewportHeight(window), footTop, aimX: cardAim.current, placement,
       }));
     };
     update();

@@ -862,17 +862,19 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
   }, [flush, write]);
 
   /** The Send failed: the thread's words may be saved again (the caller saves the box's words). */
-  const release = useCallback(() => {
-    offeredSends.current.delete(current.current);
-    claimed.current.delete(current.current);
+  const release = useCallback((thread?: string) => {
+    const target = thread ?? current.current;
+    offeredSends.current.delete(target);
+    claimed.current.delete(target);
   }, []);
 
   /** The Send carried the words (the server deleted the draft with `clear_draft`): saves still queued do nothing. */
-  const sent = useCallback(() => {
-    const target = current.current;
-    if (timer.current) clearTimeout(timer.current);
-    timer.current = null;
-    pending.current = null;
+  const sent = useCallback((thread?: string) => {
+    const target = thread ?? current.current;
+    const open = target === current.current;
+    if (open && timer.current) clearTimeout(timer.current);
+    if (open) timer.current = null;
+    if (open || pending.current?.threadId === target) pending.current = null;
     bump(target);
     claimed.current.delete(target);
     takeCarried(target);
@@ -882,6 +884,11 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
     tooLongThreads.delete(target);
     refusedThreads.delete(target);
     unsavedChanged();
+    if (!open) {
+      if (conflicts.current.has(target) || offeredSends.current.delete(target)) setConflict(target, null);
+      else learn(target, null);
+      return;
+    }
     setState((s) => (s.tooLong || s.failed ? { ...s, tooLong: false, failed: false } : s));
     // After a conflict the Send carried this window's words and cleared nothing: the other
     // window's draft is still there, and the thread shows it.
