@@ -17,6 +17,13 @@ export function peekImageSizes(snapshotId: string | undefined): ImageSizes | und
   return snapshotId ? loaded.get(snapshotId) : undefined;
 }
 
+export function primeImageSizes(snapshotId: string | undefined, sizes: ImageSizes | undefined): void {
+  if (!snapshotId || !sizes) return;
+  loaded.clear();
+  loaded.set(snapshotId, sizes);
+  inflight.delete(snapshotId);
+}
+
 export function loadImageSizes(snapshotId: string): Promise<ImageSizes> {
   const done = loaded.get(snapshotId);
   if (done) return Promise.resolve(done);

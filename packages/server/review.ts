@@ -81,6 +81,7 @@ import {
   handleReviewImageRequest,
   handleReviewImageSizesRequest,
   readPRImageSide,
+  reviewImageSizesAdvert,
 } from "@plannotator/shared/review-image";
 import {
   REVIEW_MARKDOWN_IMAGE_ENDPOINT,
@@ -2145,6 +2146,12 @@ export async function startReviewServer(
     }
     return { kind: "unavailable" };
   };
+  const imageSizesAdvert = (patch: string) =>
+    reviewImageSizesAdvert({
+      available: imagePreviewSupported,
+      patch,
+      readSide: (side, filePath, oldPath, maxBytes, signal) => runImageRead(() => readReviewSide(side, filePath, oldPath, maxBytes, signal), signal),
+    });
 
   // Package changes under package.json and lockfile diffs. The server reads
   // the files and works out every name a lookup would send; the lookup itself
@@ -2556,6 +2563,7 @@ export async function startReviewServer(
 
               serverSession,
               imagePreviewSupported,
+              ...(await imageSizesAdvert(servedPatch)),
               markdownPreviewSupported,
               repoFilesSupported,
               // Session-constant, read once by the page at mount.
@@ -2974,6 +2982,7 @@ export async function startReviewServer(
 
                   serverSession,
                   imagePreviewSupported,
+                  ...(await imageSizesAdvert(currentPatch)),
                   markdownPreviewSupported,
                   repoFilesSupported,
                   ...sourceKindAdvert,
@@ -3153,6 +3162,7 @@ export async function startReviewServer(
 
                 serverSession,
                 imagePreviewSupported,
+                ...(await imageSizesAdvert(currentPatch)),
                 markdownPreviewSupported,
                 repoFilesSupported,
                 ...sourceKindAdvert,
@@ -3221,6 +3231,7 @@ export async function startReviewServer(
 
                   serverSession,
                   imagePreviewSupported,
+                  ...(await imageSizesAdvert(currentPatch)),
                   markdownPreviewSupported,
                   repoFilesSupported,
                   ...sourceKindAdvert,
@@ -3285,6 +3296,7 @@ export async function startReviewServer(
 
                   serverSession,
                   imagePreviewSupported,
+                  ...(await imageSizesAdvert(currentPatch)),
                   markdownPreviewSupported,
                   repoFilesSupported,
                   ...sourceKindAdvert,
@@ -3340,6 +3352,7 @@ export async function startReviewServer(
 
                 serverSession,
                 imagePreviewSupported,
+                ...(await imageSizesAdvert(currentPatch)),
                 markdownPreviewSupported,
                 repoFilesSupported,
                 ...sourceKindAdvert,
@@ -3476,6 +3489,7 @@ export async function startReviewServer(
 
                 serverSession,
                 imagePreviewSupported,
+                ...(await imageSizesAdvert(currentPatch)),
                 markdownPreviewSupported,
                 repoFilesSupported,
                 ...sourceKindAdvert,

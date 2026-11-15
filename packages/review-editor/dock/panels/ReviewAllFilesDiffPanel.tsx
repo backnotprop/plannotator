@@ -1,4 +1,4 @@
-import React, { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useContext, useLayoutEffect, useMemo, useState } from 'react';
 import type { IDockviewPanelProps } from 'dockview-react';
 import { LazyBlockBoundary } from '@plannotator/ui/components/LazyBlockBoundary';
 import { MarkdownPreviewFailed } from '../../components/DiffViewer';
@@ -19,7 +19,7 @@ import { PackageChangesCard } from '../../components/PackageChangesCard';
 const MarkdownFilePreview = React.lazy(async () => ({ default: (await import('../../components/MarkdownFilePreview')).MarkdownFilePreview }));
 import type { DiffFile } from '../../types';
 import { useReviewState, useReviewStateOptional } from '../ReviewStateContext';
-import { usePaneDiffStyle } from '../../workspace/paneContext';
+import { PaneSlotContext, usePaneDiffStyle } from '../../workspace/paneContext';
 
 /**
  * A Markdown card's view control. Reads review state itself: Pierre's header
@@ -58,6 +58,22 @@ function ReviewMarkdownViewControl({ file, iconOnly, touch }: { file: DiffFile; 
 }
 
 const IMAGE_PREVIEW_INSET = 32;
+
+function usePaneWidth(enabled: boolean): number {
+  const slot = useContext(PaneSlotContext);
+  const element = slot ? slot.store.paneElement(slot.paneIndex) : null;
+  const [width, setWidth] = useState(() => (enabled ? element?.clientWidth ?? 0 : 0));
+  useLayoutEffect(() => {
+    if (!enabled || !element) return;
+    const read = () => setWidth(element.clientWidth);
+    read();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(read);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [enabled, element]);
+  return enabled && width === 0 && element ? element.clientWidth : width;
+}
 
 export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
   const state = useReviewState();
@@ -229,18 +245,7 @@ export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
     [imagesAvailable, state.files],
   );
   const imageSizesReady = useImageSizesReady(snapshotId, hasImages);
-  const probeRef = useRef<HTMLSpanElement>(null);
-  const [paneWidth, setPaneWidth] = useState(0);
-  useLayoutEffect(() => {
-    const pane = probeRef.current?.parentElement;
-    if (!pane || !hasImages) return;
-    const read = () => setPaneWidth(pane.clientWidth);
-    read();
-    if (typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver(read);
-    observer.observe(pane);
-    return () => observer.disconnect();
-  }, [hasImages, imageSizesReady]);
+  const paneWidth = usePaneWidth(hasImages);
   const filesByPath = useMemo(() => new Map(state.files.map((file) => [file.path, file])), [state.files]);
   const headerHeightHint = useCallback(
     (_itemId: string, path: string) => {
@@ -262,12 +267,10 @@ export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
     },
     [hasImages, paneWidth, filesByPath, snapshotId, compact, svgVersion],
   );
-  const probe = <span ref={probeRef} hidden />;
-  if (!imageSizesReady || (hasImages && paneWidth <= 0)) return probe;
+  if (!imageSizesReady) return null;
 
   return (
     <>
-    {probe}
     <AllFilesCodeView
       files={state.files}
       {...(state.callTreeHunkNotes && state.callTreeHunkNotes.length > 0 ? { hostLineNotes: state.callTreeHunkNotes } : {})}

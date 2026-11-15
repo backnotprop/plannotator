@@ -6,6 +6,7 @@
 // drop or reorder either line.
 import '@plannotator/ui/utils/math-eager';
 import '@plannotator/ui/utils/identity-tater';
+import { primeImageSizes, type ImageSizes } from './components/image-diff/imageSizes';
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { type Origin, getAgentName } from '@plannotator/shared/agents';
 import { ThemeProvider, useTheme } from '@plannotator/ui/components/ThemeProvider';
@@ -2710,6 +2711,7 @@ const ReviewApp: React.FC = () => {
         baseBehindRemote?: boolean;
         openStatePinned?: boolean;
         snapshotId?: string;
+        imageSizes?: ImageSizes;
         localDraftTarget?: string | null;
         serverConfig?: Record<string, unknown> & { displayName?: string; gitUser?: string; autoUpdate?: boolean; autoUpdateEnv?: boolean; updateCheck?: boolean; updateCheckEnv?: boolean };
         autoUpdateNotice?: unknown;
@@ -2733,6 +2735,7 @@ const ReviewApp: React.FC = () => {
         updateCheckSetting.adopt(data.serverConfig as Record<string, unknown> | undefined);
         cookieHostSetting.adopt(data.serverConfig as Record<string, unknown> | undefined);
         adoptPackageChangesConfig(data.serverConfig as Record<string, unknown> | undefined);
+        primeImageSizes(data.snapshotId, data.imageSizes);
         setSnapshotId(data.snapshotId);
         setLocalDraftTarget(data.localDraftTarget ?? null);
         setAiEnabled(data.aiEnabled !== false);
@@ -3536,6 +3539,7 @@ const ReviewApp: React.FC = () => {
     rawPatch: string; gitRef: string;
     aiReviewContext?: string;
     snapshotId?: string;
+    imageSizes?: ImageSizes;
     repoInfo?: { display: string; branch?: string };
     viewedFiles?: string[]; error?: string;
     callFlow?: CallFlowAdvert;
@@ -3547,6 +3551,7 @@ const ReviewApp: React.FC = () => {
     draftState?: CodeDraftTargetState;
   }) {
     const isPRSwitch = !!data.prMetadata;
+    primeImageSizes(data.snapshotId, data.imageSizes);
     setSnapshotId(data.snapshotId);
     // In-place PR / scope switch (#1590): the draft target moved. Adopt the
     // new target's generation floor and offer any draft it holds.
@@ -3658,6 +3663,7 @@ const ReviewApp: React.FC = () => {
         gitRef: string;
         aiReviewContext?: string;
         snapshotId?: string;
+        imageSizes?: ImageSizes;
         diffType: string;
         base?: string;
         gitContext?: GitContext;
@@ -3694,6 +3700,7 @@ const ReviewApp: React.FC = () => {
       // newer commit switch still needs — correct by construction. Failed
       // switches never get here either, keeping the memo for a later retry.
       if (!isCommitDiffType(data.diffType)) preCommitDiffRef.current = null;
+      primeImageSizes(data.snapshotId, data.imageSizes);
       setSnapshotId(data.snapshotId);
       setLocalDraftTarget(data.localDraftTarget ?? null);
       if (localDraftTarget || data.localDraftTarget) {
