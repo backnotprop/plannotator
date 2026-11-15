@@ -79,10 +79,13 @@ test('a body re-indented into an #if branch or a constrained extension is not re
   assert.ok(!(await types(before, ext)).includes('reformatted'));
 });
 
-test('Swift v1 makes only reformatted claims: moves, renames, extracts and inlines are held back as plain edits', async () => {
-  assert.deepEqual([...(LANGUAGES.swift.holdBack ?? [])].sort(), ['extractedFunction', 'inlinedFunction', 'moved', 'movedWithEdit', 'renamed']);
+test('Swift v1 holds back moved-with-edits only: its lines are plain edits; moves and renames are claimed', async () => {
+  assert.deepEqual([...(LANGUAGES.swift.holdBack ?? [])], ['movedWithEdit']);
+  const long = (n: string) => `    func ${n}() -> Int {\n${[1, 2, 3, 4, 5].map((i) => `        let v${i} = ${i} * 2\n`).join('')}        return v1 + v5\n    }\n`;
+  const moving = (y: number) => `    func b() -> Int {\n        let x = 2\n        let y = ${y}\n        return x + y\n    }\n`;
+  const t = await shipped(`struct A {\n${moving(3)}\n${long('a')}\n${long('c')}}\n`, `struct A {\n${long('a')}\n${long('c')}\n${moving(30)}}\n`);
+  assert.ok(!t.includes('movedWithEdit') && !t.includes('moved') && t.some((x) => x === 'edited' || x === 'added' || x === 'deleted'), t.join());
   const before = `struct Box {\n    var size: Int\n\n    func twice() -> Int {\n        self.size * 2\n    }\n\n    func plus(_ n: Int) -> Int {\n        size + n\n    }\n}\n`;
-  const t = await shipped(before, before.replaceAll('size', 'width'));
-  assert.ok(!t.includes('renamed') && t.length > 0 && t.every((x) => x === 'edited' || x === 'added' || x === 'deleted'), t.join());
+  assert.ok((await shipped(before, before.replaceAll('size', 'width'))).includes('renamed'));
   assert.deepEqual(await shipped(before, before.replace('        size + n', '            size + n')), ['reformatted']);
 });

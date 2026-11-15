@@ -939,7 +939,7 @@ const swift: LanguageConfig = {
     }
     return out;
   },
-  holdBack: new Set(['moved', 'movedWithEdit', 'renamed', 'extractedFunction', 'inlinedFunction']),
+  holdBack: new Set(['movedWithEdit']),
   moveEditedFirst: true,
   contextRuns: true,
   marksOf: (decl) => decl.namedChildren.find((c) => c?.type === 'modifiers')?.namedChildren.filter((c) => c?.type === 'attribute').map((c) => c!.text.replace(/\s+/g, '')).join(' ') ?? '',
