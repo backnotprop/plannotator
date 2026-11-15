@@ -120,8 +120,8 @@ const NARROW_HEADER_WIDTH = 560;
 const TIGHT_LABEL = '@max-[479px]/file-header:hidden';
 const NARROW_LABEL = '@max-[559px]/file-header:hidden';
 const TIGHT_PAD = 'gap-1 px-2 py-1 @max-[479px]/file-header:px-1.5';
-const ACTIONS_ROW = '@max-[359px]/file-header:hidden';
-const ACTIONS_MENU = 'hidden @max-[359px]/file-header:contents';
+const ACTIONS_FOLD_WIDTH = 360;
+const ACTIONS_FOLD = '@max-[359px]/file-header:hidden';
 const NARROW_PAD = 'gap-1 px-2 py-1 @max-[559px]/file-header:px-1.5';
 
 const FileHeaderView: React.FC<FileHeaderProps> = ({
@@ -166,7 +166,10 @@ const FileHeaderView: React.FC<FileHeaderProps> = ({
   const stageLabel = '';
   const commentLabel = '';
   const foldsActions = !!paneTabs && !readOnly;
-  const foldedNow = () => foldsActions && (headerRef.current?.clientWidth ?? Infinity) < NARROW_HEADER_WIDTH;
+  const headerWidthNow = () => headerRef.current?.clientWidth ?? Infinity;
+  const tinyNow = () => !readOnly && headerWidthNow() < ACTIONS_FOLD_WIDTH;
+  const foldedNow = () => (foldsActions && headerWidthNow() < NARROW_HEADER_WIDTH) || tinyNow();
+  const actionFold = readOnly ? '' : ACTIONS_FOLD;
   const tightLabel = paneTabs ? NARROW_LABEL : TIGHT_LABEL;
   const { additions, deletions } = React.useMemo(() => countChanges(patch), [patch]);
 
@@ -254,7 +257,7 @@ const FileHeaderView: React.FC<FileHeaderProps> = ({
           )}
         </div>
       )}
-      {!isCompactTouchLayout && <div className={`flex flex-shrink-0 items-center pl-2 gap-1 ${readOnly ? '' : ACTIONS_ROW}`}>
+      {!isCompactTouchLayout && <div className={`flex flex-shrink-0 items-center pl-2 gap-1`}>
         {accessory}
         {renderMarkdownView?.({ iconOnly: false, touch: false })}
         {showViewedControl && onToggleViewed && (
@@ -285,7 +288,7 @@ const FileHeaderView: React.FC<FileHeaderProps> = ({
           <button
             onClick={onStage}
             disabled={isStaging}
-            className={`${foldsActions ? NARROW_LABEL : ''} text-xs rounded transition-colors flex items-center ${stageLabel ? 'gap-1 px-2 py-1' : 'px-1.5 py-1'} ${
+            className={`${foldsActions ? NARROW_LABEL : actionFold} text-xs rounded transition-colors flex items-center ${stageLabel ? 'gap-1 px-2 py-1' : 'px-1.5 py-1'} ${
               isStaging
                 ? 'opacity-50 cursor-not-allowed text-muted-foreground'
                 : isStaged
@@ -324,7 +327,7 @@ const FileHeaderView: React.FC<FileHeaderProps> = ({
               fileCommentButtonRef?.(el);
             }}
             onClick={() => fileCommentRef.current && onFileComment(fileCommentRef.current)}
-            className={`${foldsActions ? NARROW_LABEL : ''} text-xs rounded transition-colors flex items-center text-muted-foreground hover:text-foreground hover:bg-muted ${commentLabel ? 'gap-1 px-2 py-1' : 'px-1.5 py-1'}`}
+            className={`${foldsActions ? NARROW_LABEL : actionFold} text-xs rounded transition-colors flex items-center text-muted-foreground hover:text-foreground hover:bg-muted ${commentLabel ? 'gap-1 px-2 py-1' : 'px-1.5 py-1'}`}
             title="Add file-scoped comment"
             aria-label="Comment on this file"
           >
@@ -347,7 +350,7 @@ const FileHeaderView: React.FC<FileHeaderProps> = ({
               if (!editDisabledReason) onEditFile();
             }}
             disabled={!!editDisabledReason}
-            className={`text-xs rounded transition-colors flex items-center ${TIGHT_PAD} ${
+            className={`${actionFold} text-xs rounded transition-colors flex items-center ${TIGHT_PAD} ${
               editDisabledReason
                 ? 'opacity-50 cursor-not-allowed text-muted-foreground'
                 : 'text-muted-foreground hover:text-foreground hover:bg-muted'
@@ -372,6 +375,7 @@ const FileHeaderView: React.FC<FileHeaderProps> = ({
           extraItems={() => [
             ...(foldedNow() && showStageControl && canStage && onStage ? [{ label: isStaged ? 'Unstage this file' : 'Stage this file', onSelect: onStage }] : []),
             ...(foldedNow() && onFileComment ? [{ label: 'Comment on this file', onSelect: () => headerRef.current && onFileComment(headerRef.current) }] : []),
+            ...(tinyNow() && onEditFile && !isEditing && !editDisabledReason ? [{ label: 'Edit to suggest a change', onSelect: onEditFile }] : []),
             ...(state?.onOpenToSide ? [{ label: 'Open to the side', onSelect: () => state.onOpenToSide!(filePath), icon: <OpenToSideIcon /> }] : []),
           ]}
           filePath={filePath}
@@ -385,8 +389,7 @@ const FileHeaderView: React.FC<FileHeaderProps> = ({
         />}
       </div>}
       {isCompactTouchLayout && readOnly && renderMarkdownView?.({ iconOnly: false, touch: true })}
-      {!readOnly && (
-        <div className={isCompactTouchLayout ? 'contents' : ACTIONS_MENU}>
+      {isCompactTouchLayout && !readOnly && (
         <CompactFileActions
           filePath={filePath}
           patch={patch}
@@ -399,7 +402,6 @@ const FileHeaderView: React.FC<FileHeaderProps> = ({
           stage={showStageControl && canStage && onStage ? { isStaged, isStaging, onStage } : null}
           onEdit={onEditFile && !isEditing && !editDisabledReason ? onEditFile : undefined}
         />
-        </div>
       )}
     </div>
   );
