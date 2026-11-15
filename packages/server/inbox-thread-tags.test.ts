@@ -145,8 +145,8 @@ describe("thread tags", () => {
     expect(((await (await post(server, path, { name: " release", on: true })).json()) as Json).tags).toEqual([release.id]);
     const made = (await (await post(server, path, { name: "Billing", on: true })).json()) as Json;
     const billing = (await list(server)).tags!.find((t) => t.name === "Billing")!;
-    // Two tags made in one millisecond are ordered by their random ids.
-    expect([...(made.tags as string[])].sort()).toEqual([release.id, billing.id].sort());
+    // Oldest tag first, even when both were made in one millisecond.
+    expect(made.tags).toEqual([release.id, billing.id]);
     expect(((await (await post(server, path, { name: "BILLING", on: false })).json()) as Json).tags).toEqual([release.id]);
     // A name no tag has takes nothing out and makes nothing; a missing thread makes no tag either.
     expect(((await (await post(server, path, { name: "Nowhere", on: false })).json()) as Json).tags).toEqual([release.id]);
