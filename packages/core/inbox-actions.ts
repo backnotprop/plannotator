@@ -322,8 +322,8 @@ export function parseInboxActionBlocks(markdown: string): ParsedInboxAction[] {
 
 // ─────────────────────────────── The person's result ───────────────────────────────
 
-/** How long a note or a reason may be. */
-export const INBOX_ACTION_NOTE_MAX = 2000;
+/** How long a note or a reason may be: any length (through core 0.25.27, 2,000, for no stated reason). Kept so an importer still builds. */
+export const INBOX_ACTION_NOTE_MAX = Number.POSITIVE_INFINITY;
 
 /**
  * The person's Done or Can't do it, checked: `outcome` "done" (with an
@@ -337,7 +337,6 @@ export function checkInboxActionResult(
   if (outcome !== "done" && outcome !== "cant") return { ok: false, field: "outcome", message: 'outcome: "done", "cant", or null to undo.' };
   if (raw.note !== undefined && raw.note !== null && typeof raw.note !== "string") return { ok: false, field: "note", message: "note: text." };
   const note = typeof raw.note === "string" ? raw.note.trim() : "";
-  if (note.length > INBOX_ACTION_NOTE_MAX) return { ok: false, field: "note", message: `note: at most ${INBOX_ACTION_NOTE_MAX} characters.` };
   if (outcome === "cant" && note === "") return { ok: false, field: "note", message: "note: say why you can't do it; the agent gets it word for word." };
   return { ok: true, outcome, note: note === "" ? null : note };
 }

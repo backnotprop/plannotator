@@ -6,7 +6,9 @@
  * midnight, at the 7th or 30th day back, or at a range's last day; an agent missed when the thread has several or was
  * started by the person; a project's page that still applies the Project picks; Smart groups reordered or renamed by
  * the filter; a menu count that applies its own group; a cookie that keeps junk or breaks the list; a Pull request
- * pick that reads the wrong state, treats a removed PR as one, or puts a PR not read yet under a state (or under No PR).
+ * pick that reads the wrong state, treats a removed PR as one, or puts a PR not read yet under a state (or under No PR);
+ * a Not seen that reads anything but the row's bold (`unread`), a row the person opened that a Not seen list drops, or
+ * a cookie from before Not seen that no longer loads.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { inboxThreadPullsSummary, type InboxListRow, type InboxListSection, type InboxThreadPull, type InboxThreadPullState } from '@plannotator/core/inbox-types';
@@ -22,6 +24,8 @@ import {
   rowMatches,
   rowPullMatches,
   rowPullStates,
+  rowNotSeen,
+  settledHeldRead,
   writeListFilter,
   type ListFilter,
 } from './listFilter';
@@ -32,7 +36,7 @@ const at = (month: number, day: number, hour: number, minute = 0) => new Date(20
 const NOW = new Date(2026, 10, 8, 12, 0).getTime(); // Nov 8, noon
 
 type PullState = 'open' | 'draft' | 'merged' | 'closed' | 'unknown';
-function row(id: string, extra: { project?: string; last_at?: string; host?: string; hosts?: string[]; addressee?: string; person?: boolean; pull?: PullState; pulls?: number } = {}): InboxListRow {
+function row(id: string, extra: { project?: string; last_at?: string; host?: string; hosts?: string[]; addressee?: string; person?: boolean; pull?: PullState; pulls?: number; unread?: boolean } = {}): InboxListRow {
   const project = extra.project ?? 'billing';
   return {
     thread_id: id,
@@ -43,17 +47,18 @@ function row(id: string, extra: { project?: string; last_at?: string; host?: str
     addressee: extra.addressee ? { host: extra.addressee, session: 's_to', name: null } : null,
     // PR linking's row shape (InboxThreadPullsSummary): how many, and the PR its mark shows.
     pulls: extra.pull ? { count: extra.pulls ?? 1, headline: { key: `github.com/o/r#${id}`, state: extra.pull } } : undefined,
+    unread: extra.unread ?? false,
   } as unknown as InboxListRow;
 }
 
 const ROWS = {
-  billingToday: row('billingToday', { project: 'billing', last_at: at(11, 8, 0, 30), pull: 'open' }),
-  webLateYesterday: row('webLateYesterday', { project: 'web', last_at: at(11, 7, 23, 30), host: 'codex', pull: 'draft' }),
+  billingToday: row('billingToday', { project: 'billing', last_at: at(11, 8, 0, 30), pull: 'open', unread: true }),
+  webLateYesterday: row('webLateYesterday', { project: 'web', last_at: at(11, 7, 23, 30), host: 'codex', pull: 'draft', unread: true }),
   webSixDaysBack: row('webSixDaysBack', { project: 'web', last_at: at(11, 2, 0, 10), host: 'pi' }),
   docsSevenDaysBack: row('docsSevenDaysBack', { project: 'docs', last_at: at(11, 1, 23, 59), pull: 'merged', pulls: 3 }),
   docs29Back: row('docs29Back', { project: 'docs', last_at: at(10, 10, 8) }),
   opsOld: row('opsOld', { project: 'ops', last_at: at(10, 9, 8), host: 'codex', pull: 'closed' }),
-  mixed: row('mixed', { project: 'ops', last_at: at(11, 5, 10), hosts: ['codex', 'pi'], pull: 'unknown' }),
+  mixed: row('mixed', { project: 'ops', last_at: at(11, 5, 10), hosts: ['codex', 'pi'], pull: 'unknown', unread: true }),
   startedByPerson: row('startedByPerson', { project: 'web', last_at: at(11, 6, 10), person: true, addressee: 'pi' }),
 };
 const ALL = Object.values(ROWS);
@@ -104,6 +109,42 @@ describe('the Pull request group', () => {
   });
 });
 
+describe('Not seen', () => {
+  test('keeps the rows drawn bold, and narrows with the other groups', () => {
+    expect(kept({ notSeen: true })).toEqual(['billingToday', 'webLateYesterday', 'mixed']);
+    expect(kept({ notSeen: true, agents: ['Codex'], updated: '7d' })).toEqual(['webLateYesterday', 'mixed']);
+    expect(kept({ notSeen: true, projects: ['prj_docs'] })).toEqual([]);
+  });
+
+  test('reads the bold alone: a row still waiting on the person is seen once its news is', () => {
+    expect(rowNotSeen({ ...row('waitingSeen'), section: 'waiting', unread: false } as InboxListRow)).toBe(false);
+    expect(rowNotSeen({ ...row('newUnseen'), section: 'new', unread: true } as InboxListRow)).toBe(true);
+  });
+
+  test('the badge counts it once, and its menu row counts without itself', () => {
+    const filter: ListFilter = { ...NO_LIST_FILTER, notSeen: true, projects: ['prj_web'] };
+    expect(pickCount(filter)).toBe(2);
+    expect(countWhere(ALL, filter, NOW, 'notSeen', rowNotSeen)).toBe(1);
+  });
+
+  test('a row held for it (opened while bold) stays when it stops matching; the other groups still apply', () => {
+    const sections = [{ id: 'new', label: 'New since you looked', threads: [ROWS.webSixDaysBack, ROWS.docs29Back, ROWS.billingToday] }] as InboxListSection[];
+    const ids = (filter: Partial<ListFilter>, held?: ReadonlySet<string>) => filterListSections(sections, { ...NO_LIST_FILTER, ...filter }, NOW, held)[0]!.threads.map((r) => r.thread_id);
+    expect(ids({ notSeen: true })).toEqual(['billingToday']);
+    expect(ids({ notSeen: true }, new Set(['webSixDaysBack']))).toEqual(['webSixDaysBack', 'billingToday']);
+    expect(ids({ notSeen: true, projects: ['prj_billing'] }, new Set(['webSixDaysBack']))).toEqual(['billingToday']);
+  });
+
+  test('a settle lets go of every held row but the thread still open', () => {
+    const held = new Set(['a', 'b']);
+    expect([...settledHeldRead(held, 'b')]).toEqual(['b']);
+    expect([...settledHeldRead(held, null)]).toEqual([]);
+    expect([...settledHeldRead(held, 'c')]).toEqual([]);
+    const one = new Set(['b']);
+    expect(settledHeldRead(one, 'b')).toBe(one);
+  });
+});
+
 test('a PR not read yet is kept by Has a PR alone: by no state, and never by No PR', () => {
   expect(rowPullStates(ROWS.mixed)).toEqual(['unknown']);
   expect((['open', 'draft', 'merged', 'closed', 'any', 'none'] as const).filter((pick) => rowPullMatches(ROWS.mixed, pick))).toEqual(['any']);
@@ -137,9 +178,9 @@ test('the row summary the server builds is what the picks read: the PR still in 
 });
 
 test('a project\'s page sets its Project picks aside, and the badge counts what applies', () => {
-  const filter: ListFilter = { projects: ['prj_web', 'prj_docs'], updated: '7d', agents: ['Pi'], pulls: [] };
+  const filter: ListFilter = { projects: ['prj_web', 'prj_docs'], updated: '7d', agents: ['Pi'], pulls: [], notSeen: false };
   expect(pickCount(filter)).toBe(4);
-  expect(appliedFilter(filter, true)).toEqual({ projects: [], updated: '7d', agents: ['Pi'], pulls: [] });
+  expect(appliedFilter(filter, true)).toEqual({ projects: [], updated: '7d', agents: ['Pi'], pulls: [], notSeen: false });
   expect(pickCount(appliedFilter(filter, true))).toBe(2);
   expect(appliedFilter(filter, false)).toBe(filter);
 });
@@ -160,7 +201,7 @@ test('Smart groups keep their order and names and count only the matches; nothin
 });
 
 test('a menu row counts with the other groups\' picks, not its own group\'s', () => {
-  const filter: ListFilter = { projects: ['prj_web'], updated: '7d', agents: [], pulls: [] };
+  const filter: ListFilter = { projects: ['prj_web'], updated: '7d', agents: [], pulls: [], notSeen: false };
   // docs is not picked, but its row says what ticking it would add: docs rows in the last 7 days.
   expect(countWhere(ALL, filter, NOW, 'projects', (r) => r.project.id === 'prj_docs')).toBe(0);
   expect(countWhere(ALL, filter, NOW, 'projects', (r) => r.project.id === 'prj_billing')).toBe(1);
@@ -181,7 +222,7 @@ describe('remembered per browser', () => {
   });
 
   test('picks are written, read back, and removed when cleared', () => {
-    const filter: ListFilter = { projects: ['prj_web'], updated: { from: '2026-10-20', to: '2026-11-01' }, agents: ['Codex'], pulls: ['merged', 'none'] };
+    const filter: ListFilter = { projects: ['prj_web'], updated: { from: '2026-10-20', to: '2026-11-01' }, agents: ['Codex'], pulls: ['merged', 'none'], notSeen: true };
     writeListFilter(filter);
     expect(parseListFilter(getItem(LIST_FILTER_COOKIE))).toEqual(filter);
     writeListFilter(NO_LIST_FILTER);
@@ -191,8 +232,10 @@ describe('remembered per browser', () => {
   const junk: Array<[string, string | null, ListFilter]> = [
     ['no cookie', null, NO_LIST_FILTER],
     ['not JSON', '{oops', NO_LIST_FILTER],
-    ['wrong shapes are dropped', JSON.stringify({ projects: 'prj_web', updated: 'yesterday', agents: [1, 'Pi', ''] }), { projects: [], updated: null, agents: ['Pi'], pulls: [] }],
+    ['wrong shapes are dropped', JSON.stringify({ projects: 'prj_web', updated: 'yesterday', agents: [1, 'Pi', ''] }), { projects: [], updated: null, agents: ['Pi'], pulls: [], notSeen: false }],
     ['unknown Pull request picks are dropped', JSON.stringify({ pulls: ['open', 'stale', 3] }), { ...NO_LIST_FILTER, pulls: ['open'] }],
+    ['Not seen is on only for true', JSON.stringify({ notSeen: 'yes' }), NO_LIST_FILTER],
+    ['a cookie from before Not seen loads with it off', JSON.stringify({ projects: ['prj_web'], updated: '7d', agents: [], pulls: ['open'] }), { ...NO_LIST_FILTER, projects: ['prj_web'], updated: '7d', pulls: ['open'] }],
     ['a range with a bad day is dropped', JSON.stringify({ updated: { from: '2026-13', to: '2026-11-01' } }), NO_LIST_FILTER],
   ];
   for (const [name, raw, want] of junk) test(name, () => expect(parseListFilter(raw)).toEqual(want));

@@ -34,7 +34,7 @@
  * the picker's placement is checked, so an older binary still leaves one.
  */
 
-import { devices, expect, test, webkit, type Browser, type Page } from '@playwright/test';
+import { devices, expect, test, webkit, type Browser, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -123,6 +123,7 @@ test.beforeAll(async () => {
     CLAUDE_CONFIG_DIR: join(root, '.claude'),
     CODEX_HOME: join(root, '.codex'),
     XDG_CONFIG_HOME: join(root, '.config'),
+    PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9',
     PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_BROWSER: NO_BROWSER,
     NO_BROWSER,

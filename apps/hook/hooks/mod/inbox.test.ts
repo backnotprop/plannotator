@@ -96,6 +96,7 @@ function world(name: string): World {
       PATH: `${bin}:${agents.env.PATH}`,
       HOME: home,
       TMPDIR: tmpdir(),
+      PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9',
       PLANNOTATOR_DATA_DIR: dataDir,
       PLANNOTATOR_BROWSER: browser,
     },
@@ -274,7 +275,8 @@ describe('Claude Code ↔ Plannotator Inbox (real Inbox, real processes)', () =>
     expect(read.text.split('\n')[0]).toStartWith(`Thread ${first.thread_id} (What should the worker do on a Stripe 409?): 39 messages, 19 from the person.`)
     // The transcript is complete: the connection hands it over without the JSON.
     expect(read.text).not.toContain('{"thread"')
-    expect(read.text).toContain(`- ${first.message_id} · Claude Code · `)
+    // The session reads its own messages marked as its own (core's read_thread "you").
+    expect(read.text).toContain(`- ${first.message_id} · Claude Code (you) · `)
     expect(read.text).toContain(`Q1 `)
     expect(read.text).toMatch(/\nCursor \d+: read_thread after: \d+ returns only what is new since this read\.$/)
     expect(Buffer.byteLength(read.text)).toBeLessThan(12_000)

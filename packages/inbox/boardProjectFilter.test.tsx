@@ -1,14 +1,14 @@
 /**
  * The Board's one filter (approval "board-initiatives", take C; the project
  * part from the owner's pick 2026-10-28): the filter icon in the Board's
- * header, its menu holding Initiative and Project, the picks as tokens, as
+ * header, its menu holding Tag and Project, the picks as tokens, as
  * the window draws it over a scripted fetch. What regresses: a Board of one
  * project offering a Project choice it does not need; another project's (or
  * initiative's) card on the lanes, in the counts, on the Done or Cancelled
  * page or in the drops; the menu offering a project with no card, or wrong
  * counts per initiative and for No initiative; × or Show all not clearing; a
  * card opened from another project closing under the filter; New card not
- * starting in the filtered initiative; the opened card's Initiative not
+ * starting in the filtered initiative; the opened card's Tag not
  * writing; New initiative… not making one; the phone's tokens squeezed into
  * the header instead of their own row, or its menu not a bottom sheet; a card
  * not naming its project while the Board spans projects, or still naming it
@@ -236,7 +236,7 @@ test.if(hasDom)('a Board whose cards are all in one project: the filter offers i
   expect($$('[data-card-project]')).toEqual([]);
   await press($('[data-board-filter-button]')!);
   expect(rows('data-board-project-option')).toEqual([]);
-  expect(rows('data-board-initiative-option').map((r) => r.name)).toEqual(['All initiatives', 'Shape', 'Memory', 'No initiative']);
+  expect(rows('data-board-initiative-option').map((r) => r.name)).toEqual(['All tags', 'Shape', 'Memory', 'No tag']);
 });
 
 test.if(hasDom)('cards name their project while the Board spans projects, on a row above the title, and not once one is picked', async () => {
@@ -323,10 +323,10 @@ test.if(hasDom)('an initiative: its count and No initiative\'s in the menu, the 
   await press($('[data-board-filter-button]')!);
   // Counted on the lanes of the picked project: web has two Shape cards and one in none (its done card is past the week).
   expect(rows('data-board-initiative-option')).toEqual([
-    { name: 'All initiatives', count: null, checked: 'true' },
+    { name: 'All tags', count: null, checked: 'true' },
     { name: 'Shape', count: '2', checked: 'false' },
     { name: 'Memory', count: '0', checked: 'false' },
-    { name: 'No initiative', count: '1', checked: 'false' },
+    { name: 'No tag', count: '1', checked: 'false' },
   ]);
   // A deleted one is never offered.
   expect($('[data-board-initiative-option="ini_01JX0000000000000000000003"]')).toBeNull();
@@ -342,7 +342,7 @@ test.if(hasDom)('an initiative: its count and No initiative\'s in the menu, the 
   drawn.rerender({ project: null, initiative: 'none' });
   await settle();
   expect(shownCards()).toEqual(['api_review', 'web_look']);
-  expect(token('initiative')).toBe('No initiative');
+  expect(token('initiative')).toBe('No tag');
 
   // Its × clears only the initiative.
   drawn.rerender({ project: WEB, initiative: SHAPE });
@@ -384,9 +384,9 @@ test.if(hasDom)('the opened card sets its initiative, and takes it out', async (
   await settle();
   const trigger = $('[data-card-panel="web_look"] [data-card-initiative]')!;
   expect(trigger.getAttribute('data-card-initiative')).toBe('none');
-  expect(trigger.textContent).toContain('No initiative');
+  expect(trigger.textContent).toContain('No tag');
   await press(trigger);
-  expect($$('[data-card-initiative-menu] [data-card-initiative-option]').map((o) => o.textContent?.trim())).toEqual(['Shape', 'Memory', 'No initiative']);
+  expect($$('[data-card-initiative-menu] [data-card-initiative-option]').map((o) => o.textContent?.trim())).toEqual(['Shape', 'Memory', 'No tag']);
   await act(async () => $(`[data-card-initiative-menu] [data-card-initiative-option="${MEMORY}"]`)!.click());
   await settle();
   expect(posts.at(-1)).toEqual({ path: '/api/inbox/cards/web_look', body: { op: 'initiative', initiative: MEMORY } });
@@ -417,6 +417,62 @@ test.if(hasDom)('New initiative… makes one from the filter menu; Edit initiati
   await settle();
   expect(posts.at(-1)).toMatchObject({ path: `/api/inbox/initiatives/${SHAPE}`, body: { op: 'rename', name: 'Shape v2' } });
 
+});
+
+// One experience across the person's devices (owner, 2026-11-14): the Board's Tags are the sidebar's, one per name
+// across the linked machines. What regresses: a tag only the other machine holds missing from the dialog, the filter or
+// a card's menu; a rename that stays on this Inbox; a card put in such a tag naming the other machine's id.
+test.if(hasDom)("linked machines: the Tags dialog, the filter and a card's menu list the other machine's tags; a rename reaches it; a card in its tag makes the tag here by name", async () => {
+  scriptFetch();
+  const { tagsAcross } = await import('./tagsAcross');
+  const { machinesModel } = await import('./machines');
+  const SELF = `ibx_01K${'0'.repeat(22)}S`;
+  const MAC = `ibx_01K${'0'.repeat(22)}M`;
+  const view = (id: string, marks: string[]) => ({ id, name: id === SELF ? 'Studio' : 'MacBook', self: id === SELF, state: 'online' as const, since: AT, reason: null, version: '0.28.39', address: null, both_ways: true, waiting: 0, marks });
+  const machines = machinesModel([view(SELF, []), view(MAC, ['tags'])] as Parameters<typeof machinesModel>[0]);
+  const FAR_ONLY = 'ini_01JX00000000000000000000M1';
+  const tags = [
+    { ...INITIATIVES[0]!, machines: { [SELF]: SHAPE, [MAC]: 'ini_01JX00000000000000000000M2' } },
+    { ...INITIATIVES[1]!, machines: { [SELF]: MEMORY } },
+    { id: FAR_ONLY, name: 'Roadmap', created_at: AT, created_by: { kind: 'person' as const }, updated_at: AT, deleted_at: null, machines: { [MAC]: FAR_ONLY } },
+  ];
+  draw({ openCard: 'web_look', tagsAcross: tagsAcross(tags, machines) });
+  await settle();
+  await press($('[data-board-filter-button]')!);
+  expect(rows('data-board-initiative-option').map((r) => r.name)).toEqual(['All tags', 'Shape', 'Memory', 'Roadmap', 'No tag']);
+  await act(async () => $('[data-board-initiative-edit]')!.click());
+  await settle();
+  const dialog = $('[data-dialog="initiatives"]')!;
+  expect([...dialog.querySelectorAll('[data-initiative-row]')].map((r) => r.getAttribute('data-initiative-row'))).toEqual([SHAPE, MEMORY, FAR_ONLY]);
+  const rename = async (id: string, to: string) => {
+    posts.length = 0;
+    const name = dialog.querySelector<HTMLInputElement>(`[data-initiative-row="${id}"] [data-initiative-name]`)!;
+    await type(name, to);
+    await act(async () => name.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
+    await settle();
+    return posts.map((p) => [p.path, p.body.op, p.body.name]);
+  };
+  expect(await rename(SHAPE, 'Ship')).toEqual([
+    [`/api/inbox/initiatives/${SHAPE}`, 'rename', 'Ship'],
+    [`/api/inbox/m/${MAC}/initiatives/ini_01JX00000000000000000000M2`, 'rename', 'Ship'],
+  ]);
+  expect(await rename(FAR_ONLY, 'Plan')).toEqual([[`/api/inbox/m/${MAC}/initiatives/${FAR_ONLY}`, 'rename', 'Plan']]);
+  // A name another machine's tag has is refused here, before anything is written.
+  expect(await rename(MEMORY, 'roadmap')).toEqual([]);
+  expect(dialog.querySelector('[data-initiative-error]')?.textContent).toBe('There is already a tag named Roadmap.');
+  await act(async () => dialog.querySelector<HTMLElement>('[data-initiatives-done]')!.click());
+  await settle();
+
+  // The opened card: Roadmap is offered; picked, this Inbox makes its own Roadmap and the card names that.
+  await press($('[data-card-panel="web_look"] [data-card-initiative]')!);
+  expect($$('[data-card-initiative-menu] [data-card-initiative-option]').map((o) => o.textContent?.trim())).toEqual(['Shape', 'Memory', 'Roadmap', 'No tag']);
+  posts.length = 0;
+  await act(async () => $(`[data-card-initiative-menu] [data-card-initiative-option="${FAR_ONLY}"]`)!.click());
+  await settle();
+  expect(posts).toEqual([
+    { path: '/api/inbox/initiatives', body: { name: 'Roadmap' } },
+    { path: '/api/inbox/cards/web_look', body: { op: 'initiative', initiative: 'ini_01JX0000000000000000000009' } },
+  ]);
 });
 
 // The owner, 2026-11-04: "delete initiatives very simply without friction". The failures guarded: a question coming
@@ -460,7 +516,7 @@ test.if(hasDom)('Delete is one click with no question; the toast inside the dial
   await settle();
   await act(async () => del(MEMORY).click());
   await settle();
-  expect(dialog.querySelector('.ib-toast')!.textContent).toContain('2 initiatives');
+  expect(dialog.querySelector('.ib-toast')!.textContent).toContain('2 tags');
   await act(async () => dialog.querySelector<HTMLElement>('[data-initiatives-done]')!.click());
   await settle();
   expect($('[data-dialog="initiatives"]')).toBeNull();
@@ -483,7 +539,7 @@ test.if(hasDom)("the Initiatives dialog never shows a browser's raw error: a fai
     if (url.pathname === '/api/inbox/initiatives' && init?.method === 'POST') {
       if (answer === 'offline') throw new TypeError('Failed to fetch');
       if (answer === 'taken') {
-        return new Response(JSON.stringify({ code: 'initiative_exists', error: 'There is already an initiative named Shape.' }), { status: 409, headers: { 'Content-Type': 'application/json' } });
+        return new Response(JSON.stringify({ code: 'initiative_exists', error: 'There is already a tag named Shape.' }), { status: 409, headers: { 'Content-Type': 'application/json' } });
       }
       return new Response(JSON.stringify({ code: 'error', error: 'Internal error: disk full' }), { status: 500, headers: { 'Content-Type': 'application/json' } });
     }
@@ -505,7 +561,7 @@ test.if(hasDom)("the Initiatives dialog never shows a browser's raw error: a fai
   answer = 'broken';
   expect(await tryAdd('Release')).toBe('That did not save. Try again.');
   answer = 'taken';
-  expect(await tryAdd('shape')).toBe('There is already an initiative named Shape.');
+  expect(await tryAdd('shape')).toBe('There is already a tag named Shape.');
 });
 
 // Restores answered per initiative: what the two Undos must survive.
@@ -520,7 +576,7 @@ function scriptRestores(answers: Record<string, 'taken' | 'offline' | undefined>
       const answer = answers[at[1]!];
       if (answer === 'offline') throw new TypeError('Failed to fetch');
       if (answer === 'taken') {
-        return new Response(JSON.stringify({ code: 'initiative_exists', error: `There is already an initiative named ${INITIATIVES.find((i) => i.id === at[1])!.name}.` }), { status: 409, headers: { 'Content-Type': 'application/json' } });
+        return new Response(JSON.stringify({ code: 'initiative_exists', error: `There is already a tag named ${INITIATIVES.find((i) => i.id === at[1])!.name}.` }), { status: 409, headers: { 'Content-Type': 'application/json' } });
       }
       return new Response(JSON.stringify({ initiative: INITIATIVES.find((i) => i.id === at[1]) }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     }
@@ -566,7 +622,7 @@ test.if(hasDom)('the dialog: a refused Undo stops offering it, the others still 
   answers[MEMORY] = 'taken';
   const before = changed;
   await undo();
-  expect(error()).toBe('There is already an initiative named Memory.');
+  expect(error()).toBe('There is already a tag named Memory.');
   expect(dialog.querySelector('.ib-toast')).toBeNull();
   expect(changed).toBeGreaterThan(before);
   expect(document.activeElement).toBe(dialog.querySelector('[data-initiative-new-name]'));
@@ -574,11 +630,11 @@ test.if(hasDom)('the dialog: a refused Undo stops offering it, the others still 
   // Refused first, with another waiting behind it: that one is still restored.
   await del(MEMORY);
   await del(SHAPE);
-  expect(dialog.querySelector('.ib-toast')!.textContent).toContain('2 initiatives');
+  expect(dialog.querySelector('.ib-toast')!.textContent).toContain('2 tags');
   posts.length = 0;
   await undo();
   expect(restores()).toEqual([MEMORY, SHAPE]);
-  expect(error()).toBe('There is already an initiative named Memory.');
+  expect(error()).toBe('There is already a tag named Memory.');
   expect(dialog.querySelector('.ib-toast')).toBeNull();
 });
 
@@ -599,7 +655,7 @@ test.if(hasDom)('the dialog: a double click on Undo restores once and keeps what
   await settle();
   expect(restores()).toEqual([MEMORY, SHAPE]);
   expect(error()).toBe('That did not save. Try again.');
-  expect(dialog.querySelector('.ib-toast')!.textContent).toContain('2 initiatives');
+  expect(dialog.querySelector('.ib-toast')!.textContent).toContain('2 tags');
 });
 
 // Done pressed while the restore is on its way: the window's toast offered Undo for what was already back.
@@ -672,7 +728,7 @@ test.if(hasDom)("the window's Undo after Done: every restore is tried; a failed 
   await act(async () => toasts.at(-1)!.onUndo!());
   await settle();
   expect(restores()).toEqual([MEMORY, SHAPE]);
-  expect(toasts.at(-1)!.lead).toBe('There is already an initiative named Memory.');
+  expect(toasts.at(-1)!.lead).toBe('There is already a tag named Memory.');
   expect(toasts.at(-1)!.onUndo).toBeUndefined();
 });
 

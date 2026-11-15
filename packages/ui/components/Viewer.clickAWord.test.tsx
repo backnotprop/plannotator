@@ -7,7 +7,9 @@
  * it off, a click that only closes the toolbar, a click on an existing
  * highlight); a triple click no longer taking the paragraph; a drag no longer
  * selecting exactly what the browser selected; and the host switches (the
- * `clickAWord` prop over `configurePlannotatorUI({ clickAWord })`).
+ * `clickAWord` prop over `configurePlannotatorUI({ clickAWord })`); and
+ * Ctrl+C / Cmd+C no longer copying the clicked word once its toolbar or
+ * composer is up (`utils/highlightCopy`).
  *
  * happy-dom has no layout: the caret under a point is stubbed to a position
  * the test sets, and every range reports one box at the origin.
@@ -131,6 +133,14 @@ const click = async (target: Element, position: { node: Node; offset: number }, 
     target.dispatchEvent(mouse('mouseup', { detail }));
     target.dispatchEvent(mouse('click', { detail }));
   });
+};
+/** What a Ctrl+C at `target` puts on the clipboard (the browser fires `copy`). */
+const copyAt = (target: EventTarget) => {
+  const data = new Map<string, string>();
+  const event = new Event('copy', { bubbles: true, cancelable: true }) as ClipboardEvent;
+  Object.defineProperty(event, 'clipboardData', { value: { setData: (k: string, v: string) => data.set(k, v), getData: (k: string) => data.get(k) ?? '' } });
+  target.dispatchEvent(event);
+  return { prevented: event.defaultPrevented, plain: data.get('text/plain') };
 };
 const wait = (ms = CLICK_WORD_WAIT_MS + 80) => act(async () => { await new Promise((r) => setTimeout(r, ms)); });
 
@@ -257,6 +267,21 @@ describe.if(hasDom)('Viewer: click a word (Select)', () => {
     await wait();
 
     expect(marks()).toBe('try lo');
+  });
+
+  test('Ctrl+C copies the clicked word, with its toolbar up and with its composer open', async () => {
+    const { paragraph, at, toolbar } = await mount();
+    await click(paragraph('retry'), at('retry'));
+    await wait();
+    expect(toolbar()).not.toBeNull();
+    expect(copyAt(document.body)).toEqual({ prevented: true, plain: 'retry' });
+
+    const comment = document.querySelector<HTMLButtonElement>('.annotation-toolbar button.text-annotation-comment')!;
+    await act(async () => comment.click());
+    await wait(30);
+    const area = document.querySelector<HTMLTextAreaElement>('[data-comment-popover] textarea')!;
+    area.focus();
+    expect(copyAt(area)).toEqual({ prevented: true, plain: 'retry' });
   });
 });
 

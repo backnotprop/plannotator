@@ -1,7 +1,7 @@
 /**
  * The Launch tip's window rules (approval "launch-tip"; launchTip.ts). What regresses: + on a project row, a draft, a
  * Message <host>, a Board card, a pull request's hand-off, the review box or a failed clone counted as a plain New
- * message (each would use the tip up); a guest's page offered it; Beside drawn over the list where the window has no
+ * message (each would use the tip up); Beside drawn over the list where the window has no
  * room for it (it must fall back under To below about 1320 px), or beside the box on a phone.
  */
 import { describe, expect, test } from 'bun:test';
@@ -29,10 +29,8 @@ describe('launchTipPlainOpen', () => {
 });
 
 describe('launchTipDue', () => {
-  test("the owner's page on an Inbox that reports it; never a guest's, never an older Inbox's", () => {
+  test("an Inbox that reports it; never an older Inbox's", () => {
     expect(launchTipDue({ reveal: { next: null, launch_tip: true } })).toBe(true);
-    expect(launchTipDue({ guest: false, reveal: { next: null, launch_tip: true } })).toBe(true);
-    expect(launchTipDue({ guest: true, reveal: { next: null, launch_tip: true } })).toBe(false);
     expect(launchTipDue({ reveal: { next: null, launch_tip: false } })).toBe(false);
     expect(launchTipDue({ reveal: { next: null } })).toBe(false);
     expect(launchTipDue({})).toBe(false);

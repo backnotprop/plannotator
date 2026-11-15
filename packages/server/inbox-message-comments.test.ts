@@ -141,7 +141,7 @@ test("a comment on an agent's message is kept with the thread's annotations, edi
   expect(((await reopen.json()) as { code: string }).code).toBe("annotation_closed");
 });
 
-test("refused: the person's own message, an unknown message, a general comment or empty quote, an id used on a file, another site and a stale tab", async () => {
+test("the person's own message takes a comment; refused: an unknown message, a general comment or empty quote, an id used on a file, another site and a stale tab", async () => {
   const { project, dataDir } = world();
   const server = await start(dataDir);
   const client = await agent(server);
@@ -177,11 +177,14 @@ test("refused: the person's own message, an unknown message, a general comment o
   // GET is not a door.
   expect((await fetch(`http://127.0.0.1:${server.port}${route}`)).status).toBe(405);
 
-  // The person's own reply takes no comments.
+  // The person's own reply takes comments too (approval "inbox-annotate-own-and-questions"; the Inbox's own
+  // notes take none: store-own-and-question-comments.test.ts).
   const reply = await post(server, `/api/inbox/messages/${sent.message_id}/reply`, { idempotency_key: "r-1", words: "Looks right." });
   expect(reply.status).toBe(200);
   const mine = ((await reply.json()) as { reply: { id: string } }).reply.id;
-  await refused(`/api/inbox/messages/${mine}/annotations`, comment({ id: "ann-mine" }), 422, "annotation_not_allowed");
+  expect((await post(server, `/api/inbox/messages/${mine}/annotations`, { annotation: comment({ id: "ann-mine", originalText: "Looks right." }) })).status).toBe(200);
+  expect((await pending(server, sent.thread_id)).map((r) => r.id)).toEqual(["ann-mine"]);
+  expect((await post(server, "/api/inbox/annotations/ann-mine/remove", {})).status).toBe(200);
   expect(await pending(server, sent.thread_id)).toHaveLength(0);
 
   // A message comment's id is not a file annotation's, nor the other way round.
@@ -264,10 +267,9 @@ test("a comment on a diagram part keeps its anchor through the door, an edit and
   expect(await pending(again, sent.thread_id)).toHaveLength(0);
 });
 
-test("over the tailnet a comment on a diagram part goes as a comment on words does, the owner's and an allowed guest's; another site's is refused the same", async () => {
+test("over the tailnet the owner's comment on a diagram part goes as a comment on words does; another site's is refused the same", async () => {
   const MAGIC = "macbook-pro.tail0000.ts.net";
   const OWNER = "ramos@example.com";
-  const GUEST = "guest@example.com";
   const serve = new Map<number, string>();
   const fakeTailscale: TailscaleRunner = (args) => {
     const ok = (stdout = "") => ({ status: 0, stdout, stderr: "" });
@@ -284,8 +286,6 @@ test("over the tailnet a comment on a diagram part goes as a comment on words do
   };
   const { project, dataDir } = world();
   mkdirSync(dataDir, { recursive: true });
-  // The tailnet's allowed logins come from config.json in the data dir (loadConfig reads the env's).
-  writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxTailscaleAllow: [GUEST] }));
   const previous = { data: process.env.PLANNOTATOR_DATA_DIR, ts: process.env.PLANNOTATOR_INBOX_TAILSCALE };
   process.env.PLANNOTATOR_DATA_DIR = dataDir;
   delete process.env.PLANNOTATOR_INBOX_TAILSCALE;
@@ -303,16 +303,10 @@ test("over the tailnet a comment on a diagram part goes as a comment on words do
         headers: { Host: `${MAGIC}:${server.port}`, "Tailscale-User-Login": login, Origin: site, "Sec-Fetch-Site": site === origin ? "same-origin" : "cross-site", "Content-Type": "application/json" },
         body: JSON.stringify({ serverSession: server.serverSession, annotation }),
       });
-    const codes: [string, number][] = [];
-    for (const [login, words, diagram] of [
-      [OWNER, comment({ id: "ann-owner-words" }), diagramComment({ id: "ann-owner-part" })],
-      [GUEST, comment({ id: "ann-guest-words" }), diagramComment({ id: "ann-guest-part" })],
-    ] as const) {
-      codes.push([login, (await through(login, words)).status], [login, (await through(login, diagram)).status]);
-    }
-    expect(codes).toEqual([[OWNER, 200], [OWNER, 200], [GUEST, 200], [GUEST, 200]]);
+    expect((await through(OWNER, comment({ id: "ann-owner-words" }))).status).toBe(200);
+    expect((await through(OWNER, diagramComment({ id: "ann-owner-part" }))).status).toBe(200);
     expect((await through(OWNER, diagramComment({ id: "ann-evil" }), "https://evil.example")).status).toBe((await through(OWNER, comment({ id: "ann-evil-2" }), "https://evil.example")).status);
-    expect((await pending(server, sent.thread_id)).filter((r) => r.annotation.diagramAnchor).map((r) => r.id).sort()).toEqual(["ann-guest-part", "ann-owner-part"]);
+    expect((await pending(server, sent.thread_id)).filter((r) => r.annotation.diagramAnchor).map((r) => r.id).sort()).toEqual(["ann-owner-part"]);
   } finally {
     if (previous.data === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
     else process.env.PLANNOTATOR_DATA_DIR = previous.data;

@@ -46,6 +46,7 @@ import type { SessionBridge } from "@plannotator/ai/session-bridge";
 import { createOpenCodeSessionBridge, markPlanReviewPending } from "./opencode-session-bridge";
 import type { PlanEdit } from "./plan-edits";
 import { getPlanningPrompt } from "./planning-prompt";
+import { openCodeLaunchWatch } from "@plannotator/shared/inbox/opencode-launch";
 import { dropInboxDuplicates, findInboxConnection, inboxReminderAlreadyAdded, registerInboxOpenCode2, type InboxToolDomainLike } from "./inbox";
 
 const DEFAULT_PLAN_TIMEOUT_SECONDS = 345_600;
@@ -223,6 +224,7 @@ const serverPlugin = {
           inboxFound = true;
           await registerInboxOpenCode2(ctx.tool as unknown as InboxToolDomainLike, v2, inbox, (sessionID) => resolveRootSession(v2, sessionID), {
             signal: lifetime.signal,
+            launch: openCodeLaunchWatch(process.env),
           });
         }
       } catch (error) {

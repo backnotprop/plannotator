@@ -511,7 +511,7 @@ async function tagWith(text: HTMLTextAreaElement, typed: string) {
   await typeBox(text, `${text.value} `);
 }
 
-test.skipIf(!hasDom)('agents tagged with `@` count toward the nine: with two typed, the seventh circle is off and a Send carries eight tags at most', async () => {
+test.skipIf(!hasDom)('any number of agents: with two typed with `@` and every circle ticked, one Send carries all nine tags', async () => {
   const writers = Array.from({ length: 8 }, (_, i) => `ses_c${i + 1}`);
   taggable = [...writers.map((s) => tagged(s, 'claude-code')), tagged('ses_pi', 'pi'), tagged('ses_codex', 'codex')];
   const ids = [M1, M2, M3, M4, 'msg_01M4H7DDDDDDDDDDDDDDDDDDDD', 'msg_01M4H7EEEEEEEEEEEEEEEEEEEE', 'msg_01M4H7FFFFFFFFFFFFFFFFFFFF', 'msg_01M4H7GGGGGGGGGGGGGGGGGGGG'];
@@ -522,14 +522,12 @@ test.skipIf(!hasDom)('agents tagged with `@` count toward the nine: with two typ
   // The last writer and the two typed.
   expect(pillName(el)).toBe('3 agents');
   await openList(el);
-  for (const s of writers.slice(0, 6)) await tap(tick(el, s));
-  expect(pillName(el)).toBe('9 agents');
-  expect(tick(el, 'ses_c7').disabled).toBe(true);
+  for (const s of writers.slice(0, 7)) await tap(tick(el, s));
+  expect(pillName(el)).toBe('10 agents');
   await send(el);
   expect(replies()).toHaveLength(1);
   const tags = (replies()[0]!.body.tags as { session: string }[]).map((t) => t.session);
-  expect(tags.length).toBe(8);
-  expect(new Set(tags)).toEqual(new Set([...writers.slice(0, 6), 'ses_pi', 'ses_codex']));
+  expect(new Set(tags)).toEqual(new Set([...writers.slice(0, 7), 'ses_pi', 'ses_codex']));
 });
 
 // A computer's list is `.ib-rpick`, and holds the page mark `data-ib-rpick` on its .pn-inbox (pageMarks.ts,

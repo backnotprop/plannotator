@@ -46,6 +46,18 @@ export function reviewRowProjects(answer: InboxReviewsAnswer): Set<string> {
 }
 
 /** The project a thread's row is in; null for a PR row. */
+/**
+ * The stack whose launchpad a row opens (approval "pr-launchpad"; the owner's routing answer, 2026-11-09): a row about
+ * one open PR on its own opens that PR's launchpad, also once an agent reviewed it (its guided review, the diff and the
+ * thread are its doors). Null: the row keeps its way in (a local review or a thread of several PRs its thread, a stack
+ * of several its stack page).
+ */
+export function reviewRowLaunchpad(row: InboxReviewRow): string | null {
+  if (row.stacks.length !== 1) return null;
+  const stack = row.stacks[0]!;
+  return stack.layers.length === 1 && startLayer(stack) ? stack.id : null;
+}
+
 export function reviewRowProject(row: InboxReviewRow): string | null {
   return row.review?.project_id ?? row.started?.project_id ?? null;
 }

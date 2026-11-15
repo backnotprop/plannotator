@@ -168,30 +168,45 @@ async function renderApp(hash = '') {
 
 const warning = () => document.querySelector<HTMLElement>('[data-dialog="mark-read-warning"]');
 const readPosts = (threadId: string) => posted.filter((p) => p.path === `/api/inbox/threads/${threadId}/read`);
+/** Open the thread header's ⋯ and return its item `selector` (null when the menu has none). */
+async function moreItem(el: HTMLElement, selector: string): Promise<HTMLElement | null> {
+  const more = el.querySelector<HTMLElement>('section.ib-pane [data-thread-more]')!;
+  await act(async () => {
+    more.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerType: 'mouse' }));
+    more.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
+    more.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, button: 0, pointerType: 'mouse' }));
+    more.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0 }));
+    more.click();
+  });
+  await until(() => !!document.querySelector('[data-thread-menu]'), 'the ⋯ menu');
+  return document.querySelector<HTMLElement>(`[data-thread-menu] ${selector}`);
+}
+
 const rowAction = (el: HTMLElement, threadId: string) => el.querySelector<HTMLButtonElement>(`[data-row="${threadId}"] [data-row-mark-read]`);
 
 test.skipIf(!hasDom)('Mark read on a thread with questions asks first: Cancel writes nothing; Enter goes on as Mark read did', async () => {
   await warningOn();
   const el = await renderApp(`#thread=${ids.stopped}`);
-  const head = () => el.querySelector<HTMLButtonElement>('[data-mark-read]')!;
-  await until(() => !!el.querySelector('[data-mark-read]'), 'the header');
+  await until(() => !!el.querySelector('section.ib-pane [data-thread-more]'), 'the header');
 
-  act(() => head().click());
+  const first = (await moreItem(el, '[data-thread-read-item]'))!;
+  act(() => first.click());
   await until(() => warning() !== null, 'the warning');
   expect(warning()!.querySelector('h2')!.textContent).toBe('Set aside 2 open questions?');
+  expect(rowAction(el, ids.stopped)).not.toBeNull();
   act(() => warning()!.querySelector<HTMLButtonElement>('[data-mark-read-warning-cancel]')!.click());
   await settle();
   expect(warning()).toBeNull();
   expect(readPosts(ids.stopped)).toEqual([]);
   expect(await questionStates(ids.stopped)).toEqual(['open', 'open']);
-  expect(head().getAttribute('aria-pressed')).toBe('false');
-
-  act(() => head().click());
+  // Cancelled: still Mark read, not marked read.
+  const again = (await moreItem(el, '[data-thread-read-item]'))!;
+  act(() => again.click());
   await until(() => warning() !== null, 'the warning again');
   act(() => {
     warning()!.querySelector('input[type="checkbox"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
   });
-  await until(() => head().getAttribute('aria-pressed') === 'true', 'the pressed Read');
+  await until(() => readPosts(ids.stopped).length === 1, 'the Mark read');
   expect(warning()).toBeNull();
   expect(readPosts(ids.stopped).length).toBe(1);
   expect((await questionStates(ids.stopped)).every((s) => s === 'closed')).toBe(true);

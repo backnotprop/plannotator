@@ -35,6 +35,17 @@ function configuredEndpoints(dataDir: string): URL[] {
 }
 
 /**
+ * The Claude Code mod runs in this T3 thread's Claude: it tags the session
+ * `t3:<thread>` (`PLANNOTATOR_SESSION_TAG`) and answers the thread's
+ * `plannotator review` / `annotate` / `last` itself, so the hook stands
+ * aside and no command is acted on twice.
+ */
+export function claudeModServesThread(env: NodeJS.ProcessEnv): boolean {
+  const thread = env.T3CODE_THREAD_ID;
+  return !!thread && env.PLANNOTATOR_SESSION_TAG === `t3:${thread}`;
+}
+
+/**
  * The hook's answer for one Bash call: `{}` (run the command as written)
  * unless the call is an ordinary Plannotator command in a T3 conversation this
  * machine is authorized for. Only Agent SDK sessions can be T3's, so every
@@ -43,6 +54,7 @@ function configuredEndpoints(dataDir: string): URL[] {
 export async function prepareT3Hook(value: unknown, selfCommand: readonly string[], dataDir: string,
   env: NodeJS.ProcessEnv = process.env, timeoutMs = 6500): Promise<Record<string, unknown>> {
   if (!isAgentSdkEntrypoint(env.CLAUDE_CODE_ENTRYPOINT)) return {};
+  if (claudeModServesThread(env)) return {};
   const parsed = hookEvent.safeParse(value);
   if (!parsed.success || parsed.data.agent_id) return {};
   const event = parsed.data;

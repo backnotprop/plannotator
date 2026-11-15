@@ -69,6 +69,13 @@ describe('the line under a sent reply', () => {
     expect(deliveryLine({ ...base, connection: null }).text).toBe('Queued for Claude Code; it gets this when its session is back.');
   });
 
+  test('a cloud agent with no wake address (its connection polls): saved, then delivered, never queued for a turn', () => {
+    const polls = { busy: null, idle_since: null, send_now: false, polls: true };
+    expect(deliveryLine({ ...base, name: 'Muse by Meta', connection: polls })).toEqual({ state: 'saved', text: 'Saved for Muse by Meta. It sees it when it next reads this thread.' });
+    expect(deliveryLine({ ...base, name: 'Muse by Meta', sendingNow: true, connection: polls }).state).toBe('saved');
+    expect(deliveryLine({ ...base, name: 'Muse by Meta', deliveredAt: '2026-10-16T17:12:00.000Z', connection: polls }).text).toBe('Delivered to Muse by Meta, 5:12 PM');
+  });
+
   test('an agent that only reads the thread keeps the truthful wording and never offers Send now', () => {
     const line = deliveryLine({ ...base, wakes: false, connection: { busy: true, idle_since: null, send_now: true } });
     expect(line).toEqual({ state: 'saved', text: 'Saved for Claude Code. It sees it when it next reads this thread.' });

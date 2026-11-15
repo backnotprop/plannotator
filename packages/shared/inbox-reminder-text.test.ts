@@ -99,6 +99,11 @@ describe("custom reminder text", () => {
     expect(resolveInboxReminderText({ prompts: { inbox: { reminder: "Shared.", runtimes: { pi: { reminder: "  " } } } } }, "pi")).toBe("Shared.");
     expect(resolveInboxReminderText({ prompts: { inbox: { reminder: "Shared.", runtimes: { pi: { reminder: over } } } } }, "pi")).toBe("Shared.");
     expect(resolveInboxReminderText({ prompts: { inbox: { reminder: atCap } } }, "pi")).toBe(atCap);
+    // The cap is Claude Code's ceiling for hook text (10,000), less the thread list: 6,000 characters
+    // (refused through 0.28.61, at 4,128) are the person's reminder now.
+    expect(INBOX_REMINDER_MAX_CHARS).toBeLessThanOrEqual(9_000);
+    const long = "z".repeat(6_000);
+    expect(resolveInboxReminderText({ prompts: { inbox: { reminder: long } } }, "pi")).toBe(long);
   });
 
   test("the text is kept as written: whitespace, line breaks, quotes", () => {

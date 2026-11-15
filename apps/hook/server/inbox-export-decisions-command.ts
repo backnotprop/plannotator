@@ -12,7 +12,7 @@
 
 import { writeFileSync } from "node:fs";
 import { resolve } from "node:path";
-import type { InboxRegistryEntry } from "@plannotator/shared/inbox/registry";
+import { inboxEnsureFailedWords, type InboxRegistryEntry } from "@plannotator/shared/inbox/registry";
 import { hasHelpFlag } from "./cli";
 import { writeWholeToStdout } from "./write-whole-stdout";
 
@@ -92,7 +92,7 @@ export async function runInboxExportDecisionsCommand(argv: readonly string[], de
   try {
     entry = await deps.ensureRunning();
   } catch (error) {
-    return refused("inbox_not_running", `Plannotator Inbox is not running: ${error instanceof Error ? error.message : String(error)}`);
+    return refused("inbox_not_running", inboxEnsureFailedWords(error));
   }
   const base = `http://127.0.0.1:${entry.port}/api/inbox/threads/${encodeURIComponent(parsed.thread)}/decisions`;
   const signal = AbortSignal.timeout(deps.timeoutMs ?? REQUEST_TIMEOUT_MS);

@@ -11,6 +11,7 @@ import {
 } from '@tanstack/react-table';
 import type { Block } from '../../types';
 import { copyTextToClipboard } from '../../utils/clipboard';
+import { stripAuthorColor } from '../../utils/authorColor';
 import { InlineMarkdown } from '../InlineMarkdown';
 import { PopoutDialog } from '../PopoutDialog';
 import { parseTableContent, buildCsvFromRows, buildMarkdownTable } from './TableBlock';
@@ -73,14 +74,15 @@ const TablePopoutImpl: React.FC<TablePopoutProps> = ({
   const columns = useMemo<ColumnDef<Row, string>[]>(() => {
     const helper = createColumnHelper<Row>();
     return columnIds.map((id, i) =>
-      helper.accessor((row) => row[id], {
+      // Sort, filter and copy read a coloured cell's words; the cell draws it as written.
+      helper.accessor((row) => stripAuthorColor(row[id]), {
         id,
         header: headers[i],
         cell: (info) => (
           <InlineMarkdown
             imageBaseDir={imageBaseDir}
             onImageClick={onImageClick}
-            text={info.getValue()}
+            text={info.row.original[id]}
             onOpenLinkedDoc={onOpenLinkedDoc}
             onOpenCodeFile={onOpenCodeFile}
             onNavigateAnchor={onNavigateAnchor}

@@ -22,9 +22,16 @@ export type { ForgeRef, ForgeRefCardResult } from '@plannotator/core/forge-ref-c
 export type RefCardTransport = (href: string, ref: ForgeRef, signal: AbortSignal) => Promise<ForgeRefCardResult | null>;
 
 let transport: RefCardTransport | null = null;
+/** Bitbucket Cloud links get a card too: only a host whose server reads them (the Inbox) turns it on. */
+let bitbucketCards = false;
 
 export function setRefCardTransport(next: RefCardTransport | null): void {
   transport = next;
+  cache.clear();
+}
+
+export function setRefCardBitbucket(on: boolean): void {
+  bitbucketCards = on;
   cache.clear();
 }
 
@@ -61,7 +68,9 @@ const cache = new Map<string, { at: number; promise: Promise<ForgeRefCardResult 
 /** The ref a link names, when a transport is installed to fetch it; else null (no card). */
 export function refCardTarget(href: string | null | undefined): ForgeRef | null {
   if (!transport || !href) return null;
-  return parseForgeRefUrl(href);
+  const ref = parseForgeRefUrl(href);
+  // Bitbucket issues get no card anywhere: the server reads only its pull requests.
+  return ref && (ref.platform !== 'bitbucket' || (bitbucketCards && ref.kind === 'pull')) ? ref : null;
 }
 
 /** The card for a link, through the installed transport (shared and cached per ref). */

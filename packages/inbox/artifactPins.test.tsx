@@ -201,7 +201,7 @@ test.skipIf(!hasDom)('the Wall: Pinned, a type chip and Show more reach its read
   const read = (async (query: Record<string, unknown>) => {
     reads.push(query);
     const rows = query.pinned ? [] : query.cursor ? [wallRow(3, false)] : [wallRow(1, false), wallRow(2, false)];
-    const page: InboxArtifactsPage & { serverSession: string } = { serverSession: 's', artifacts: rows, next_cursor: query.pinned || query.cursor ? null : '2', total: 3, counts: { all: 3, pinned: 0, types: { images: 0, pages: 0, documents: 3, other: 0 } } };
+    const page: InboxArtifactsPage & { serverSession: string } = { serverSession: 's', artifacts: rows, next_cursor: query.pinned || query.cursor ? null : '2', total: 3, counts: { all: 3, pinned: 0, types: { images: 0, videos: 0, pages: 0, documents: 3, other: 0 } } };
     return page;
   }) as unknown as typeof import('./api').inboxApi.artifacts;
   let pinnedNow = false;
@@ -218,13 +218,13 @@ test.skipIf(!hasDom)('the Wall: Pinned, a type chip and Show more reach its read
   await settle();
   expect(reads.at(-1)).toMatchObject({ cursor: '2' });
   expect(el.querySelectorAll('[data-wall-artifact]').length).toBe(3);
-  act(() => el.querySelector<HTMLButtonElement>('[data-wall-type="documents"]')!.click());
+  act(() => el.querySelector<HTMLButtonElement>('[data-wall-type="videos"]')!.click());
   await settle();
-  expect(reads.at(-1)).toMatchObject({ type: 'documents', pinned: false });
+  expect(reads.at(-1)).toMatchObject({ type: 'videos', pinned: false });
   act(() => el.querySelector<HTMLButtonElement>('[data-wall-show="pinned"]')!.click());
   expect(pinnedNow).toBe(true);
   act(() => root!.render(draw()));
   await settle();
-  expect(reads.at(-1)).toMatchObject({ pinned: true, type: 'documents' });
+  expect(reads.at(-1)).toMatchObject({ pinned: true, type: 'videos' });
   expect(el.querySelector('[data-wall-empty] b')?.textContent).toBe('No pinned artifacts yet');
 });

@@ -67,6 +67,7 @@ function baseEnv(data: string, ready: string, extra: Record<string, string> = {}
   }
   return {
     ...(env as Record<string, string>),
+    PLANNOTATOR_RELAY_URL: "http://127.0.0.1:9",
     PLANNOTATOR_DATA_DIR: data,
     PLANNOTATOR_PORT: "0",
     PLANNOTATOR_REMOTE: "0",

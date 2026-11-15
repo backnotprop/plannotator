@@ -10,8 +10,8 @@
  *   same-origin wrapper page (`LiveSiteViewer`, the engine of #2258); on the
  *   owner's phone over the tailnet the wrapper frames the prototype relay
  *   instead (server side; nothing differs here); comments are `live`
- *   records, grouped by page in the export. A page that does not open (a
- *   guest login over the tailnet, say) is the server's words in one line.
+ *   records, grouped by page in the export. A page that does not open is the
+ *   server's words in one line.
  *
  * A file's page opens with its `Prototype:` line's query and fragment
  * (`proto/a.html?variant=2#step-2`), as a tab opens that address, so several
