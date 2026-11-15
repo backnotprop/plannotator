@@ -69,8 +69,10 @@ export interface InboxScheduledRun {
   late?: true;
   /** Earlier due times folded into this late run. */
   missed_before?: number;
-  /** Due times skipped since the last run, and why. On a run: skipped while the last run was still going. */
+  /** On a skip line: the due times skipped, and why. */
   skipped?: { count: number; from: string; to: string; reason: InboxScheduledSkipReason };
+  /** A run that didn't start (the agent missing, the folder gone): why, in the launch's own words. */
+  failed?: string;
 }
 
 /**

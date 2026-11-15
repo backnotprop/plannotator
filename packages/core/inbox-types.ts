@@ -70,8 +70,8 @@ export const INBOX_RECORD_VERSION = 1 as const;
 export { ulid } from "./ulid";
 import { ulid } from "./ulid";
 
-/** `upl`: a file the person uploaded for a message; `drf`: a draft of one (compose); `crd`: a Board card; `stp`: a session's steps in a thread; `ini`: a Board initiative; `lch`: a launch (an agent started from the Inbox). */
-export type InboxIdPrefix = "msg" | "prj" | "ses" | "dec" | "dev" | "upl" | "drf" | "crd" | "tdy" | "lch" | "ibx" | "stp" | "ini";
+/** `upl`: a file the person uploaded for a message; `drf`: a draft of one (compose); `crd`: a Board card; `stp`: a session's steps in a thread; `ini`: a Board initiative; `lch`: a launch (an agent started from the Inbox); `sch`: a scheduled thread. */
+export type InboxIdPrefix = "msg" | "prj" | "ses" | "dec" | "dev" | "upl" | "drf" | "crd" | "tdy" | "lch" | "ibx" | "stp" | "ini" | "sch";
 
 export function inboxId(prefix: InboxIdPrefix, now?: number): string {
   return `${prefix}_${ulid(now)}`;
@@ -98,6 +98,8 @@ const ID_RE: Record<InboxIdPrefix, RegExp> = {
   stp: /^stp_[0-9A-HJKMNP-TV-Z]{26}$/,
   /** A Board initiative (packages/core/inbox-initiatives.ts). */
   ini: /^ini_[0-9A-HJKMNP-TV-Z]{26}$/,
+  /** A scheduled thread (packages/server/inbox-scheduled.ts). */
+  sch: /^sch_[0-9A-HJKMNP-TV-Z]{26}$/,
 };
 
 export function isInboxId(prefix: InboxIdPrefix, value: unknown): value is string {
@@ -305,7 +307,7 @@ export type InboxAuthor =
  * One of the Inbox's own notes to the asking agent: Mark read's set-aside
  * note (`set_aside`), a late Undo's reopened note (`reopened`), or the note
  * that carries a 👍 Looks good to the agent (`ack_of`), or a Tidy note
- * (`tidy`). They are stored as
+ * (`tidy`), or a scheduled thread's skip line (`scheduled_run` with no `run`). They are stored as
  * the person's messages so they reach the agent like any reply, but they are
  * not the person's reply and not a look: the list's `sent`, `unseen`, the
  * look boundary and "came back" all read past them.
@@ -316,10 +318,12 @@ export function isInboxNote(message: {
   reopened?: readonly string[] | null;
   ack_of?: string | null;
   tidy?: InboxTidyMark | null;
+  scheduled_run?: { run?: number } | null;
 }): boolean {
   return (
     message.author.kind === "person" &&
     ((message.set_aside?.length ?? 0) > 0 ||
+      (!!message.scheduled_run && message.scheduled_run.run === undefined) ||
       (message.reopened?.length ?? 0) > 0 ||
       (typeof message.ack_of === "string" && message.ack_of !== "") ||
       (typeof message.tidy === "object" && message.tidy !== null))

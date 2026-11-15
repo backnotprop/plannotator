@@ -519,6 +519,8 @@ export interface PlannotatorConfig {
    * 2026-11-04).
    */
   inboxBoard?: boolean;
+  /** Scheduled threads (packages/server/inbox-scheduled.ts): off unless the person turned them on. Not offered on Windows. */
+  inboxScheduledThreads?: boolean;
   /**
    * Thread steps (approval "inbox-thread-steps", 2026-11-03): something the
    * person turns on, off by default. On: the thread's steps button, the

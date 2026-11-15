@@ -218,6 +218,7 @@ import {
   type InboxInitiative,
 } from "@plannotator/core/inbox-types";
 import type { InboxReviewVerdictRecord } from "@plannotator/core/inbox-review";
+import type { InboxScheduledChange, InboxScheduledRun, InboxScheduledThread } from "@plannotator/core/inbox-scheduled-types";
 import { INBOX_ATTACHMENT_FEEDBACK_TITLE, INBOX_GUIDE_FEEDBACK_TITLE, INBOX_MESSAGE_FEEDBACK_TITLE, INBOX_OWN_MESSAGE_FEEDBACK_TITLE } from "@plannotator/core/inbox-review";
 import { codeFenceCloseIndex } from "@plannotator/core/markdown-structure";
 import { InboxError, inboxDir } from "./schema";
@@ -244,6 +245,8 @@ export interface InboxSendInput {
    * No agent's own call sets it.
    */
   turn_error?: boolean;
+  /** Server only (packages/server/inbox-scheduled.ts): an agent's scheduled_thread change (`InboxMessage.scheduled_change`). */
+  scheduled_change?: InboxScheduledChange;
   body: string;
   subject?: string | null;
   reply_to?: string | null;
@@ -810,6 +813,10 @@ export class InboxStore {
   private readonly wakingSessions = new Set<string>();
   /** The ids of the thread roots an agent was launched for (`launch`): the launch sweep reads these, never every message. */
   private readonly launchedRootIds = new Set<string>();
+  /** Scheduled threads' run dividers that carry a launch and are not a thread's root (the root's is in launchedRootIds). */
+  private readonly scheduledRunIds = new Set<string>();
+  /** Scheduled threads, by id, deleted ones too (packages/server/inbox-scheduled.ts). */
+  private readonly scheduledById = new Map<string, InboxScheduledThread>();
   /** The seq of a message's first line: its place in the event log. */
   private readonly messageSeq = new Map<string, number>();
   /**
@@ -1103,6 +1110,7 @@ export class InboxStore {
     this.threadLines.set(record.thread_id, (this.threadLines.get(record.thread_id) ?? 0) + 1);
     if (record.wakes === true && record.author.kind === "agent" && record.author.session) this.wakingSessions.add(record.author.session);
     if (record.launch !== undefined && record.thread_id === record.id) this.launchedRootIds.add(record.id);
+    else if (record.launch !== undefined && record.scheduled_run?.run !== undefined) this.scheduledRunIds.add(record.id);
     if (!first) return;
     this.messageSeq.set(record.id, firstSeq);
     this.noteAgentMessage(record, firstSeq);
@@ -1139,6 +1147,9 @@ export class InboxStore {
           if (!ids) this.stepsIdsByThread.set(line.record.thread_id, (ids = new Set()));
           ids.add(line.record.id);
         }
+        break;
+      case "scheduled":
+        this.scheduledById.set(line.record.id, line.record);
         break;
       case "initiative":
         // The Board's initiatives (approval "board-initiatives"): read by the Board only.
@@ -4245,6 +4256,7 @@ export class InboxStore {
         : {}),
       ...(input.wakes === true ? { wakes: true } : {}),
       ...(input.turn_error === true ? { turn_error: true as const } : {}),
+      ...(input.scheduled_change ? { scheduled_change: input.scheduled_change } : {}),
       ...(replyThread !== null ? { reply_thread: replyThread } : {}),
       ...(naming ? { thread_naming: naming } : {}),
     };
@@ -6428,6 +6440,8 @@ export class InboxStore {
     this.projectGroups = null;
     this.messages.clear();
     this.launchedRootIds.clear();
+    this.scheduledRunIds.clear();
+    this.scheduledById.clear();
     this.messageSeq.clear();
     this.resolvedSeq.clear();
     this.readdressed.clear();
@@ -7366,6 +7380,78 @@ export class InboxStore {
       const message = this.messages.get(id);
       return message ? [message] : [];
     });
+  }
+
+  /** Scheduled threads' run dividers that carry a launch, other than a thread's root: the launcher's runs beside its roots. */
+  scheduledRunLaunches(): InboxMessage[] {
+    return [...this.scheduledRunIds].flatMap((id) => {
+      const message = this.messages.get(id);
+      return message ? [message] : [];
+    });
+  }
+
+  /** The scheduled threads not deleted, oldest first. */
+  scheduledThreads(): InboxScheduledThread[] {
+    return [...this.scheduledById.values()].filter((record) => !record.deleted_at).sort((a, b) => a.created_at.localeCompare(b.created_at));
+  }
+
+  scheduledThread(id: string): InboxScheduledThread | null {
+    const record = this.scheduledById.get(id);
+    return record && !record.deleted_at ? record : null;
+  }
+
+  /** One snapshot of a scheduled thread (its own file in the inbox folder, on the one seq). */
+  putScheduledThread(record: InboxScheduledThread): InboxScheduledThread {
+    this.write(null, { v: INBOX_RECORD_VERSION, seq: this.seq + 1, at: record.updated_at, kind: "scheduled", id: record.id, record });
+    return record;
+  }
+
+  /**
+   * A scheduled thread's run divider or skip line, written as the person's (the prompt is theirs), keyed by its run
+   * key: the same key again (a restart in the middle of a check) answers the message written before. The first one
+   * starts the thread, named after the scheduled thread. A divider with a launch is addressed to its run's
+   * placeholder and takes the thread over (`took_over`), so the person's plain reply goes to that run's session.
+   */
+  writeScheduledLine(input: {
+    project_id: string;
+    thread_id: string | null;
+    name: string;
+    body: string;
+    key: string;
+    scheduled_run: InboxScheduledRun;
+    to?: InboxAddressee;
+    launch?: InboxLaunchRecord;
+    attachments?: InboxAttachment[];
+  }): { message: InboxMessage; replayed: boolean } {
+    for (const message of this.messages.values()) if (message.scheduled_run && message.idempotency_key === input.key) return { message, replayed: true };
+    const root = input.thread_id ? this.messages.get(input.thread_id) : undefined;
+    if (input.thread_id && !root) throw new InboxError("thread_not_found", `No thread ${input.thread_id}.`);
+    const project_id = root?.project_id ?? input.project_id;
+    if (!this.projectsById.has(project_id)) throw new InboxError("project_not_found", `No project ${project_id}.`);
+    const at = this.stamp();
+    const id = inboxId("msg");
+    const checked = checkInboxThreadName(input.name);
+    const threadName = !root && checked.ok ? this.freeThreadName(project_id, checked.name, true, true) : null;
+    const message: InboxMessage = {
+      id,
+      project_id,
+      thread_id: root?.id ?? id,
+      reply_to: root ? (this.threadMessageIds(root.id).at(-1) ?? root.id) : null,
+      author: { kind: "person" },
+      subject: root ? root.subject : input.name,
+      subject_question: null,
+      body: input.body,
+      created_at: at,
+      resolved_at: null,
+      idempotency_key: input.key,
+      ...(input.to ? { to: { host: input.to.host, session: input.to.session }, ...(root ? { took_over: true } : { started_by_person: true }) } : {}),
+      ...(input.launch ? { launch: input.launch } : {}),
+      scheduled_run: input.scheduled_run,
+      ...(threadName ? { thread_name: threadName, named_by: { kind: "auto" as const, at } } : {}),
+      ...(input.attachments && input.attachments.length > 0 ? { attachments: input.attachments.map((attachment) => ({ ...attachment, sent_at: at })) } : {}),
+    };
+    this.appendMessage(message, at);
+    return { message, replayed: false };
   }
 
   /**
