@@ -17,7 +17,7 @@ import type {
   SemanticDiffOperation,
   SemanticDiffTextRange,
 } from './pierre-types.ts';
-import { attachedAbove, endLine, keepWeights, longestInOrder, pairSameNamed, range, rangeOf, startLine } from './syntax.ts';
+import { attachedAbove, codeLines, endLine, keepWeights, longestInOrder, pairSameNamed, range, rangeOf, startLine } from './syntax.ts';
 
 interface Entity {
   decl: Declaration;
@@ -31,6 +31,8 @@ interface Entity {
   /** Tokens and comments in source order: equal means only whitespace changed. */
   seq: string;
   text: string;
+  scope: string;
+  holder: Entity | null;
 }
 
 export interface StructureResult {
@@ -70,6 +72,7 @@ function leaves(n: Node, cfg: LanguageConfig) {
       continue;
     }
     if (x.isMissing && cfg.harmlessMissing?.has(x.type)) continue;
+    if (cfg.id === 'ruby' && rubyLayoutOnly(x)) continue;
     if (x.childCount === 0) {
       // A written `;` ending a JS/TS statement equals an inserted one; where the
       // line break would split the statement differently, the tree shape differs.
@@ -77,8 +80,12 @@ function leaves(n: Node, cfg: LanguageConfig) {
       if (terminator) tokens.push(x.text);
       else if (x.text.length) {
         tokens.push(x.text);
+        if (cfg.id === 'ruby' && x.parent?.type === 'block' && (x.type === '{' || x.type === '}')) {
+          seq.push(x.type === '{' ? 'do' : 'end');
+          continue;
+        }
         // 'a' and "a" are the same string where both quote styles mean the same (TS, Python).
-        seq.push(SAME_QUOTES.has(cfg.id) && (x.text === "'" || x.text === '"') && x.parent?.type === 'string' ? '\u0004quote' : x.text);
+        seq.push((SAME_QUOTES.has(cfg.id) || (cfg.id === 'ruby' && rubyPlainString(x.parent))) && (x.text === "'" || x.text === '"') && x.parent?.type === 'string' ? '\u0004quote' : x.text);
       } else seq.push(x.type === ';' ? ';' : `\u0001${x.type}`); // zero-width: an inserted semicolon equals a written one
       if (cfg.identifierTypes.has(x.type)) identifiers.push(x);
       // `return` (or `yield`, `break`, `continue`) and a line break ends the statement in
@@ -87,7 +94,7 @@ function leaves(n: Node, cfg: LanguageConfig) {
       if ((cfg.id === 'typescript' || cfg.id === 'tsx') && /^(return|yield|break|continue)$/.test(x.type) && next && next.type !== ';' && next.startPosition.row > x.endPosition.row) seq.push('\u0005break');
       continue;
     }
-    seq.push(`\u0002${x.type}`);
+    seq.push(`\u0002${cfg.id === 'ruby' ? (RUBY_SAME_NODE[x.type] ?? x.type) : x.type}`);
     stack.push(null);
     for (let i = x.childCount - 1; i >= 0; i--) stack.push(x.child(i));
   }
@@ -119,6 +126,18 @@ function prettierOnly(x: Node): boolean {
   return false;
 }
 
+function rubyLayoutOnly(x: Node): boolean {
+  if (x.childCount !== 0 || x.isNamed) return false;
+  const p = x.parent;
+  if (x.type === ';') return true;
+  if (x.type === 'then' && p?.type === 'then') return true;
+  if (x.type === 'do' && p?.type === 'do') return true;
+  if ((x.type === '(' || x.type === ')') && p?.type === 'argument_list') return !p.parent?.childForFieldName('block');
+  return false;
+}
+const rubyPlainString = (s: Node | null) => !!s && s.type === 'string' && s.namedChildren.every((c) => c?.type === 'string_content') && !/[\\#]/.test(s.text.slice(1, -1));
+const RUBY_SAME_NODE: Record<string, string> = { block: 'do_block', block_body: 'body_statement' };
+
 /**
  * A comma right before a closing bracket changes nothing (formatters add one when
  * they wrap a list vertically). A Python one-element tuple `(a,)` still differs
@@ -135,10 +154,22 @@ function withoutTrailingCommas(seq: string[]): string[] {
   });
 }
 
+const declText = (d: Declaration, source: string) => (d.tail ? source.slice(d.node.startIndex, d.tail.endIndex) : d.node.text);
+const declEnd = (d: Declaration) => endLine(d.tail ?? d.node);
+function declLeaves(d: Declaration, cfg: LanguageConfig) {
+  const a = leaves(d.node, cfg);
+  if (!d.tail) return a;
+  const b = leaves(d.tail, cfg);
+  return { tokens: [...a.tokens, ...b.tokens], identifiers: [...a.identifiers, ...b.identifiers], comments: [...a.comments, ...b.comments], seq: a.seq + '\u0000' + b.seq };
+}
+
+const reopens = (cfg: LanguageConfig, d: Declaration) => cfg.id === 'ruby' && /^(class|module|singleton_class)$/.test(d.kind);
+
 function collect(root: Node, cfg: LanguageConfig): Entity[] {
   const out: Entity[] = [];
-  const visit = (container: Node, parent: string) => {
-    const seen = new Map<string, number>();
+  const source = root.text;
+  const seen = new Map<string, number>();
+  const visit = (container: Node, parent: string, holder: Entity | null) => {
     for (const decl of cfg.declarationsIn(container)) {
       // Getters/setters share a name; so can overloads. Number repeats so keys stay unique.
       const accessor = decl.node.children.find((c) => c?.type === 'get' || c?.type === 'set')?.type ?? '';
@@ -146,11 +177,13 @@ function collect(root: Node, cfg: LanguageConfig): Entity[] {
       const n = seen.get(base) ?? 0;
       seen.set(base, n + 1);
       const key = n ? `${base}#${n}` : base;
-      out.push({ decl, key, base: `${decl.kind}:${accessor}${decl.name}`, parent, text: decl.node.text, ...leaves(decl.node, cfg) });
-      if (decl.members) visit(decl.members, key);
+      const scope = reopens(cfg, decl) ? base : key;
+      const e: Entity = { decl, key, base: `${decl.kind}:${accessor}${decl.name}`, parent, text: declText(decl, source), ...declLeaves(decl, cfg), scope, holder };
+      out.push(e);
+      if (decl.members) visit(decl.members, scope, e);
     }
   };
-  visit(root, '');
+  visit(root, '', null);
   return out;
 }
 
@@ -224,12 +257,16 @@ export function detectStructure(oldRoot: Node, newRoot: Node, cfg: LanguageConfi
   };
   const oldKids = byParentKey(olds);
   const newKids = byParentKey(news);
+  const levels = new Set<string>();
   const pairLevel = (oldParent: string, newParent: string) => {
+    const level = `${oldParent}\u0000${newParent}`;
+    if (levels.has(level)) return;
+    levels.add(level);
     for (const [a, b] of pairSameNamed(oldKids.get(oldParent) ?? [], newKids.get(newParent) ?? [], (e) => e.base, (e) => [...(attachedAbove(e.decl.node, cfg.attachedTypes).match(/\S+/g) ?? []), ...e.tokens])) {
       pairs.push([a, b]);
       usedOld.add(a);
       usedNew.add(b);
-      if (a.decl.members && b.decl.members) pairLevel(a.key, b.key);
+      if (a.decl.members && b.decl.members) pairLevel(a.scope, b.scope);
     }
   };
   pairLevel('', '');
@@ -262,10 +299,14 @@ export function detectStructure(oldRoot: Node, newRoot: Node, cfg: LanguageConfi
   const moved = new Set<Entity>();
   const byParent = new Map<string, Array<[Entity, Entity]>>();
   for (const p of pairs) if (p[0].parent === p[1].parent) byParent.set(p[0].parent, [...(byParent.get(p[0].parent) ?? []), p]);
+  const holders = new Map<Entity, Entity>(pairs);
   for (const group of byParent.values()) {
     const ordered = [...group].sort((p, q) => p[0].decl.node.startIndex - q[0].decl.node.startIndex);
-    const starts = ordered.map((p) => p[1].decl.node.startIndex);
-    const keep = longestInOrder(starts, keepWeights(starts, ordered.map((p) => endLine(p[0].decl.node) - startLine(p[0].decl.node) + 1)));
+    const crossed = (p: [Entity, Entity]) => !!p[0].holder && reopens(cfg, p[0].holder.decl) && holders.get(p[0].holder) !== p[1].holder;
+    const stay = ordered.map((p, i) => i).filter((i) => !crossed(ordered[i]!));
+    const starts = stay.map((i) => ordered[i]![1].decl.node.startIndex);
+    const inOrder = longestInOrder(starts, keepWeights(starts, stay.map((i) => codeLines(ordered[i]![0].decl, cfg))));
+    const keep = new Set([...inOrder].map((k) => stay[k]!));
     ordered.forEach(([a, b], i) => {
       if (keep.has(i)) return;
       moved.add(a);
@@ -275,15 +316,15 @@ export function detectStructure(oldRoot: Node, newRoot: Node, cfg: LanguageConfi
       const da = docStart(na, cfg);
       const db = docStart(nb, cfg);
       const same = a.seq === b.seq && docText(na, da, cfg) === docText(nb, db, cfg);
-      const pair: SemanticDiffLinePair = { old: { start: da, end: endLine(na) }, new: { start: db, end: endLine(nb) } };
+      const pair: SemanticDiffLinePair = { old: { start: da, end: declEnd(a.decl) }, new: { start: db, end: declEnd(b.decl) } };
       const index = operations.push({
         type: same ? 'moved' : 'movedWithEdit',
         spans: [
           {
             role: 'root',
             relation: 'moved',
-            old: [range({ line: da, character: 0 }, lineRange(na).end)],
-            new: [range({ line: db, character: 0 }, lineRange(nb).end)],
+            old: [range({ line: da, character: 0 }, { line: declEnd(a.decl) + 1, character: 0 })],
+            new: [range({ line: db, character: 0 }, { line: declEnd(b.decl) + 1, character: 0 })],
             linePairs: [pair],
           },
         ],
@@ -435,7 +476,7 @@ export function detectStructure(oldRoot: Node, newRoot: Node, cfg: LanguageConfi
       if (t === b[i]) continue;
       if (!accepted.has(t) || renames.get(t) !== b[i]) return false;
       // A name after a dot is another object's member, whatever the grammar calls it.
-      if (i > 0 && /^(\.|->|::|\?\.)$/.test(a[i - 1]!)) return false;
+      if (i > 0 && /^(\.|->|::|\?\.|&\.)$/.test(a[i - 1]!)) return false;
       swapped.set(t, (swapped.get(t) ?? 0) + 1);
     }
     for (const [t, count] of swapped) {
@@ -566,7 +607,7 @@ export function detectStructure(oldRoot: Node, newRoot: Node, cfg: LanguageConfi
     });
   }
 
-  const paired = pairs.map(([a]) => ({ start: docStart(a.decl.node, cfg), end: endLine(a.decl.node) }));
+  const paired = pairs.map(([a]) => ({ start: docStart(a.decl.node, cfg), end: declEnd(a.decl) }));
   return { operations, folds, paired };
 }
 
@@ -608,6 +649,7 @@ function kindOf(n: Node): 'binding' | 'member' | 'type' {
   if (SHORTHAND.has(n.type)) return 'binding';
   const p = n.parent;
   if (p?.type === 'variable_name' && p.parent?.type === 'property_element') return 'member';
+  if (p?.type === 'call' && p.childForFieldName('receiver') && p.childForFieldName('method')?.id === n.id) return 'member';
   // `user.name`, `self.name`, `x.Name`, `obj->name`: the name after the dot.
   if (p && /^(member_expression|attribute|field_expression|selector_expression|field_access|member_access_expression)$/.test(p.type) && p.namedChildren.length > 1 && p.namedChildren.at(-1)?.id === n.id) return 'member';
   if (/property_identifier|field_identifier/.test(n.type)) return 'member';
@@ -664,6 +706,10 @@ function isDeclarationName(id: Node): boolean {
     return false;
   }
   if (p.type === 'const_element' || p.type === 'enum_case') return p.namedChildren.find((c) => c?.type === 'name')?.id === id.id;
+  if (/^(method_parameters|block_parameters|left_assignment_list|destructured_left_assignment|destructured_parameter|exception_variable)$/.test(p.type)) return true;
+  if (p.type === 'operator_assignment') return p.childForFieldName('left')?.id === id.id;
+  if (p.type === 'for') return p.childForFieldName('pattern')?.id === id.id;
+  if (p.type === 'method' || p.type === 'singleton_method' || (id.type === 'constant' && (p.type === 'class' || p.type === 'module'))) return p.childForFieldName('name')?.id === id.id;
   if (!DECLARING_PARENT.test(p.type)) return false;
   // `import { A }` -> `import { B }` brings in a different thing; only a local
   // alias (`import { A as b }`) is a name this file owns.
