@@ -79,9 +79,14 @@ process.exit(1);
       // A sole path-shaped typo is refused before the CLI runs, visibly.
       rmSync(opened);
       client.tui.showToast.mockClear();
-      await handleCliCommand({ command: "plannotator-review", client, sessionId: "caller", cwd: path.join(root, "caller"), rawArgs: "./backnd" });
+      await handleCliCommand({ command: "plannotator-review", client, sessionId: "caller", cwd: path.join(root, "caller"), rawArgs: "../targt" });
       expect(existsSync(opened)).toBe(false);
-      expect(toasts()).toContain("does not exist");
+      expect(toasts()).toContain("Did you mean ../target? Run: plannotator review ../target");
+      // So is a sole bare word that names no folder.
+      client.tui.showToast.mockClear();
+      await handleCliCommand({ command: "plannotator-review", client, sessionId: "caller", cwd: path.join(root, "caller"), rawArgs: "backnd" });
+      expect(existsSync(opened)).toBe(false);
+      expect(toasts()).toContain(`No folder "backnd" in ${path.join(root, "caller")}; nothing was opened.`);
     } finally {
       if (previous === undefined) delete process.env.PLANNOTATOR_BIN;
       else process.env.PLANNOTATOR_BIN = previous;

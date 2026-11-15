@@ -753,3 +753,4 @@ packages/ui/components/CommentPopover.phoneKeyboard.test.tsx
 packages/ui/components/Viewer.authorColor.test.tsx
 packages/review-editor/components/authorColor.review.test.tsx
 packages/inbox/threadTagsStep2.test.tsx
+packages/inbox/settingsAtLoad.test.tsx

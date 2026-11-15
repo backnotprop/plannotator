@@ -12,7 +12,7 @@ export interface SheetPullsState {
 }
 
 /**
- * The Pull requests page's list (`GET /api/inbox/pulls?everywhere=1`): read only while the page (or a PR opened from
+ * The Pull requests page's list (`GET /api/inbox/pulls?everywhere=1&machines=1`, with each linked machine's): read only while the page (or a PR opened from
  * it) is on screen, on the same clock as the Reviews page (on open, on focus after `PULLS_FOCUS_MS`, every
  * `PULLS_TICK_MS` while visible). The server answers from its cache in between: no extra polling of the forges.
  */
@@ -40,8 +40,9 @@ export function useSheetPulls(enabled: boolean): SheetPullsState {
           if (controller.signal.aborted) return;
           setModel(answer);
           setError(null);
-          // Others (the projects' other PRs) is read in the background: its answer is on the server's next one.
-          if (answer.hosts.some((h) => h.others_pending)) pendingTimer.current = setTimeout(() => readRef.current(false), PULLS_PENDING_MS);
+          // Others (the projects' other PRs) and a linked machine's board still being read: on the server's next answer.
+          const pending = answer.hosts.some((h) => h.others_pending) || Object.values(answer.machines ?? {}).some((m) => m.pending);
+          if (pending) pendingTimer.current = setTimeout(() => readRef.current(false), PULLS_PENDING_MS);
         })
         .catch((cause: unknown) => {
           if (controller.signal.aborted) return;
