@@ -5,7 +5,10 @@ import { INBOX_LAUNCHED } from '../lib/inbox-launch';
 const currentPath = Astro.url.pathname;
 const isDocsActive = currentPath.startsWith('/docs/');
 const isBlogActive = currentPath.startsWith('/blog/');
-const isInboxActive = currentPath.startsWith('/inbox/');
+// On the /inbox/ pages the bar also links the supported agents page.
+const isInboxSection = currentPath.startsWith('/inbox/');
+const isAgentsActive = currentPath.startsWith('/inbox/agents/');
+const isInboxActive = isInboxSection && !isAgentsActive;
 const isWorkspacesActive = currentPath.startsWith('/workspaces/');
 ---
 <nav class="fixed top-0 left-0 right-0 h-12 flex items-center justify-between px-4 sm:px-6 bg-background/80 backdrop-blur-sm border-b border-border/30 z-50">
@@ -48,19 +51,35 @@ const isWorkspacesActive = currentPath.startsWith('/workspaces/');
             Inbox
           </a>
           <span class="text-muted-foreground/50">|</span>
+          {isInboxSection && (
+            <Fragment>
+              <a
+                href="/inbox/agents/"
+                class:list={[
+                  'transition-colors',
+                  isAgentsActive ? 'text-foreground font-medium' : 'text-muted-foreground hover:text-foreground',
+                ]}
+              >
+                Supported agents
+              </a>
+              <span class="text-muted-foreground/50">|</span>
+            </Fragment>
+          )}
         </Fragment>
       )}
       <a
         href="/workspaces/"
         class:list={[
-          'transition-colors inline-flex items-center gap-1',
+          'transition-colors items-center gap-1',
+          // On a phone the Inbox pages' bar has no room for both: Supported agents stays.
+          isInboxSection ? 'hidden sm:inline-flex' : 'inline-flex',
           isWorkspacesActive ? 'text-foreground font-medium' : 'text-muted-foreground hover:text-foreground',
         ]}
       >
         Workspaces
         <span class="text-[0.6875rem] px-1 py-px rounded bg-primary/15 text-primary border border-primary/30 leading-none">soon</span>
       </a>
-      <span class="text-muted-foreground/50">|</span>
+      <span class:list={['text-muted-foreground/50', isInboxSection && 'hidden sm:inline']}>|</span>
       <a
         href="https://github.com/backnotprop/plannotator"
         target="_blank"
