@@ -406,6 +406,7 @@ packages/review-editor/components/CallFlowFileBadge.interaction.test.tsx
 packages/review-editor/components/CallFlowTreeView.interaction.test.tsx
 packages/review-editor/components/CallFlowTreeView.sourcePreview.test.tsx
 packages/review-editor/dock/panels/semanticDiffShared.sourcePreview.test.tsx
+packages/review-editor/dock/panels/SemanticDiffPath.dom.test.tsx
 packages/review-editor/components/PanelChrome.test.tsx
 packages/review-editor/components/FileTree.search-placement.test.tsx
 packages/review-editor/components/ChangesTreeView.test.tsx
