@@ -397,7 +397,7 @@
       "name": "@plannotator/sem-diff",
       "version": "0.1.0",
       "dependencies": {
-        "@tree-sitter-grammars/tree-sitter-kotlin": "1.1.0",
+        "@tree-sitter-grammars/tree-sitter-kotlin": "file:../../vendor/tree-sitter-kotlin",
         "@vscode/diff": "^0.0.2-133",
         "diff": "^8.0.4",
         "tree-sitter-c-sharp": "^0.23.5",
@@ -1491,8 +1491,6 @@
 
     "@textlint/types": ["@textlint/types@15.8.0", "", { "dependencies": { "@textlint/ast-node-types": "15.8.0" } }, "sha512-Anhc6y5736YIsvqae0U6k0YmB2M/QVHkEeOv2aydAn/WIkdI69dCOiDbe3/+RagS3qstFTSFWJzNRA2lUjv19w=="],
 
-    "@tree-sitter-grammars/tree-sitter-kotlin": ["@tree-sitter-grammars/tree-sitter-kotlin@1.1.0", "", { "dependencies": { "node-addon-api": "^8.3.0", "node-gyp-build": "^4.8.4", "npm-check-updates": "^17.1.13" }, "peerDependencies": { "tree-sitter": "^0.22.4" }, "optionalPeers": ["tree-sitter"], "hasInstallScript": true }, "sha512-vlVXaxEE8t2kpJgfZpa8XVvxcnKw9AYtRTgy7KWjsDmAsadk06RxAT80IXOgGQnmM9i/orQn1nD84gPNUHu6DQ=="],
-
     "@tufjs/canonical-json": ["@tufjs/canonical-json@2.0.0", "", {}, "sha512-yVtV8zsdo8qFHe+/3kw81dSLyF7D576A5cCFCi4X7B39tWT7SekaEFUnvnWJHz+9qO7qJTah1JbrDjWKqFtdWA=="],
 
     "@tufjs/models": ["@tufjs/models@4.1.0", "", { "dependencies": { "@tufjs/canonical-json": "2.0.0", "minimatch": "^10.1.1" } }, "sha512-Y8cK9aggNRsqJVaKUlEYs4s7CvQ1b1ta2DVPyAimb0I2qhzjNk+A+mxvll/klL0RlfuIUei8BF7YWiua4kQqww=="],
@@ -2487,8 +2485,6 @@
 
     "npm-bundled": ["npm-bundled@5.0.0", "", { "dependencies": { "npm-normalize-package-bin": "^5.0.0" } }, "sha512-JLSpbzh6UUXIEoqPsYBvVNVmyrjVZ1fzEFbqxKkTJQkWBO3xFzFT+KDnSKQWwOQNbuWRwt5LSD6HOTLGIWzfrw=="],
 
-    "npm-check-updates": ["npm-check-updates@17.1.18", "", { "bin": { "ncu": "build/cli.js", "npm-check-updates": "build/cli.js" } }, "sha512-bkUy2g4v1i+3FeUf5fXMLbxmV95eG4/sS7lYE32GrUeVgQRfQEk39gpskksFunyaxQgTIdrvYbnuNbO/pSUSqw=="],
-
     "npm-install-checks": ["npm-install-checks@8.0.0", "", { "dependencies": { "semver": "^7.1.1" } }, "sha512-ScAUdMpyzkbpxoNekQ3tNRdFI8SJ86wgKZSQZdUxT+bj0wVFpsEMWnkXP0twVe1gJyNF5apBWDJhhIbgrIViRA=="],
 
     "npm-normalize-package-bin": ["npm-normalize-package-bin@5.0.0", "", {}, "sha512-CJi3OS4JLsNMmr2u07OJlhcrPxCeOeP/4xq67aWNai6TNWWbTrlNDgl8NcFKVlcBKp18GPj+EzbNIgrBfZhsag=="],
@@ -3136,6 +3132,8 @@
     "@plannotator/relay/typescript": ["typescript@5.8.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-p1diW6TqL9L07nNxvRMM7hMMw4c5XOo/1ibL4aAIGmSAt9slTE1Xgw5KWuof2uTOvCg9BY7ZRi+GaF+7sfgPeQ=="],
 
     "@plannotator/review/typescript": ["typescript@5.8.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-p1diW6TqL9L07nNxvRMM7hMMw4c5XOo/1ibL4aAIGmSAt9slTE1Xgw5KWuof2uTOvCg9BY7ZRi+GaF+7sfgPeQ=="],
+
+    "@plannotator/sem-diff/@tree-sitter-grammars/tree-sitter-kotlin": ["@tree-sitter-grammars/tree-sitter-kotlin@file:vendor/tree-sitter-kotlin", {}],
 
     "@plannotator/sem-diff/tree-sitter-swift": ["tree-sitter-swift@file:vendor/tree-sitter-swift", {}],
 

@@ -21,6 +21,7 @@ const files: Array<[string, string]> = [
   ["tree-sitter-swift/tree-sitter-swift.wasm", "tree-sitter-swift.wasm"],
 ];
 const pinned: Record<string, string> = {
+  "tree-sitter-kotlin.wasm": "7009d69453bc8735e438b2818a633efb21c88f99782769abba60dffedfab73f7",
   "tree-sitter-swift.wasm": "0258a7ef17303a8079ffe0748b3583d59656b5c3e8653fca7b6451b3e6689eb2",
 };
 rmSync(out, { recursive: true, force: true });
