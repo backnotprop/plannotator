@@ -2,6 +2,7 @@ import type { InboxAttachmentState, InboxPull } from '@plannotator/core/inbox-ty
 import { isGitHubAttachmentUrl } from '@plannotator/core/pr-attachment-url';
 import { inboxApi } from '../api';
 import type { InboxFileSource } from '../fileSource';
+import { pullMediaUrl } from './pullUrls';
 
 export type PullMediaKind = 'image' | 'video';
 
@@ -57,7 +58,7 @@ export function probeVideo(key: string, url: string): Promise<boolean> {
   const id = `${key}\u0000${url}`;
   let probe = probes.get(id);
   if (!probe) {
-    probe = fetch(inboxApi.pullMediaUrl(key, url), { headers: { Range: 'bytes=0-0' } })
+    probe = fetch(pullMediaUrl(key, url), { headers: { Range: 'bytes=0-0' } })
       .then(async (res) => {
         const video = res.ok && (res.headers.get('content-type') ?? '').toLowerCase().startsWith('video/');
         await res.body?.cancel().catch(() => {});
@@ -104,7 +105,7 @@ export function pullMediaAttachment(item: PullMediaItem): InboxAttachmentState {
 const readOnly = () => Promise.reject(new Error('A pull request’s pictures are read here, not kept.'));
 
 export function pullMediaSource(key: string): InboxFileSource {
-  const url = (attachment: InboxAttachmentState) => inboxApi.pullMediaUrl(key, attachment.path);
+  const url = (attachment: InboxAttachmentState) => pullMediaUrl(key, attachment.path);
   return {
     writes: false,
     imageUrl: url,

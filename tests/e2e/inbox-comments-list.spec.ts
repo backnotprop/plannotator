@@ -24,7 +24,7 @@
  * first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
  */
 
-import { expect, test, type Browser, type Locator, type Page } from '@playwright/test';
+import { expect, test, type Browser, type Locator, type Page } from './inbox-test';
 import { cardChip, countLink, fileHighlight, fileUrl, highlight, layout, onScreen, openThread, pane, pointerOffTheEdge, quietThread, rowOf, rowShown, seededThread, startWorld, stopWorld, theList, threadUrl, type ListThread, type ListWorld } from './inbox-comments-list-world';
 
 let world: ListWorld;

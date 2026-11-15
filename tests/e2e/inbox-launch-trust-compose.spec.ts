@@ -18,7 +18,7 @@
  * Pictures: LAUNCH_TRUST_COMPOSE_SHOTS_DIR (default .local/proof/launch-trust-compose), the approved pictures' names.
  * Build the binary first, then `bunx playwright test -c tests/e2e/playwright.config.ts inbox-launch-trust-compose.spec.ts`.
  */
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';

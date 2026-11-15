@@ -24,6 +24,14 @@ The installer needs `git` for the slash-command skills. If `git` is missing, add
 
 Note the absolute path of the binary: `command -v plannotator` (PowerShell: `(Get-Command plannotator).Source`).
 
+## 1b. Name your host and do its own steps
+
+Name your own host first. Your system instructions say which agent you are (Claude Code, Codex, Cursor, VS Code's agent, Zed's agent, Goose, Pi, OpenCode and so on). Tell the person which one you found.
+
+Do only your host's line below, and tell the person what you install. "Before step 2" comes now: step 2 turns on a plugin's tool only if the plugin is there. Its page has the full setup and fixes. Anything else: https://plannotator.ai/llms.txt.
+
+{{AGENT_STEPS}}
+
 ## 2. Start the Inbox and open it
 
 1. Run `plannotator inbox --background`. It starts the Inbox without a browser (or finds the running one), prints its URL and exits.
@@ -33,7 +41,7 @@ Note the absolute path of the binary: `command -v plannotator` (PowerShell: `(Ge
 
 Run `plannotator inbox --help` and read all of it. It is the installed release's guide for agents: the tools, threads and questions.
 
-Name your own host first. Your system instructions say which agent you are (Claude Code, Codex, Cursor, VS Code's agent, Zed's agent, Goose, Pi, OpenCode and so on). Tell the person which one you found.
+Use the host you named in step 1b.
 
 - If step 2.2 already connected you, or your host's config already has a `plannotator-inbox` server that runs the `plannotator` binary, you are done here.
 - Otherwise follow the guide's "Connecting yourself" section for your host. Do this even when you are an editor's agent (VS Code, Zed, JetBrains, Goose): `plannotator inbox` never changes editors by itself, so you add the entry for yourself. Use the absolute path from step 1 wherever a command names `plannotator`.
