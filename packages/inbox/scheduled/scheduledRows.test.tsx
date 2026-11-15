@@ -11,6 +11,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
+import type { BulkWrites } from '../bulkWrites';
 import { lastRun, scheduledRow } from './testRows';
 
 const hasDom = typeof document !== 'undefined';
@@ -60,6 +61,9 @@ const SECTIONS: InboxListSection[] = [
   },
 ];
 
+/** Picking on: the writes are never called here, only the boxes are read. */
+const BULK = {} as BulkWrites;
+
 let root: Root | null = null;
 afterEach(() => {
   act(() => root?.unmount());
@@ -76,7 +80,7 @@ function render(shape: 'wide' | 'narrow' | 'phone'): HTMLElement {
     root!.render(
       <SidebarProvider>
         <div className="pn-inbox">
-          <InboxList title="Inbox" path={null} sections={SECTIONS} filtered={false} narrow={shape === 'narrow'} selectedThreadId={null} notice={null} onShowNew={() => {}} onOpen={() => {}} phone={shape === 'phone'} />
+          <InboxList title="Inbox" path={null} sections={SECTIONS} filtered={false} narrow={shape === 'narrow'} selectedThreadId={null} notice={null} onShowNew={() => {}} onOpen={() => {}} phone={shape === 'phone'} onRowAction={() => {}} bulk={BULK} />
         </div>
       </SidebarProvider>,
     ),
@@ -107,4 +111,13 @@ test.skipIf(!hasDom)('the warn mark only on the run that didn\'t finish, Running
     act(() => root?.unmount());
     document.body.innerHTML = '';
   }
+});
+
+test.skipIf(!hasDom)("picking: a scheduled thread's box is named with the scheduled thread, never its run", () => {
+  resetScheduledForTests(SCHEDULED, true);
+  const el = render('wide');
+  act(() => void el.querySelector(`.ib-lbody [data-thread-id="msg_unfinished"]`)!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, metaKey: true })));
+  const box = (id: string) => el.querySelector(`.ib-lbody [data-thread-id="${id}"]`)!.parentElement!.querySelector(':scope > [data-pick-box="row"]')!.getAttribute('aria-label');
+  expect(box('msg_unfinished')).toBe('Select Weekday PR summary');
+  expect(box('msg_plain')).toBe('Select plain');
 });

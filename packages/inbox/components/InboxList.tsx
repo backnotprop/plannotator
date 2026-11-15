@@ -1704,7 +1704,7 @@ export const ListRow = memo(
     if (shape === 'phone') return <PhoneRow row={row} project={project} away={away} filtered={filtered} lit={lit} menu={menu} pinned={pinned} keys={keys} pill={pill} compact={compact} {...rowLook} {...pickState} onOpen={open} onUnstar={unstarRow} tint={tint} tagName={tagName} />;
     return (
       <RowWithAction row={row} drawn={drawn} menu={menu} onMarkRead={picking ? undefined : onMarkRead} onMarkUnread={picking ? undefined : onMarkUnread} onSendNow={picking ? undefined : onSendNow} onUnarchive={picking ? undefined : onUnarchive}>
-        {picking && onPick && <PickBox row state={picked ? 'all' : 'none'} label={`Select ${titleOf(row)}`} onPick={(event) => onPick(row, event)} />}
+        {picking && onPick && <PickBox row state={picked ? 'all' : 'none'} label={`Select ${scheduledOf(row)?.name ?? titleOf(row)}`} onPick={(event) => onPick(row, event)} />}
         {shape === 'narrow' ? (
           <NarrowRow row={row} project={project} away={away} filtered={filtered} lit={lit} pinned={pinned} keys={keys} selected={selected} pill={pill} compact={compact} {...rowLook} {...pickState} onOpen={open} onUnstar={unstarRow} tint={tint} tagName={tagName} />
         ) : (
