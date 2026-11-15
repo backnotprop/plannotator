@@ -24,6 +24,8 @@ import type { ReplyViewing } from './replyViewing';
 import type {
   InboxCardMark,
   InboxInitiative,
+  InboxTagColours,
+  InboxTagLook,
   InboxDecisionsModel,
   InboxGuideRef,
   InboxHealth,
@@ -315,7 +317,9 @@ export interface ListModel {
    * `tags` names them. Absent from an older Inbox: the window then draws no Tags section and offers no Add tag.
    * Merged: one per name across the linked machines that take tags, `machines` its id on each (InboxMachineTag).
    */
-  tags?: (InboxInitiative & { machines?: Record<string, string> })[];
+  tags?: (InboxInitiative & { machines?: Record<string, string>; look?: InboxTagLook })[];
+  /** "Show tag colors" and the person's own colours (inbox-tag-colours.ts). Absent from an Inbox before tag colours. */
+  tag_colours?: InboxTagColours;
   /** The version of this list, named by the next read so only what changed comes back (listRead.ts). Absent from an older Inbox. */
   list_version?: string;
   /**
@@ -2159,6 +2163,11 @@ export const inboxApi = {
    * own machine, by the tag's id there or by its name (`{ name }`: that machine makes the tag when it has none).
    */
   setThreadTag: (threadId: string, tag: { tag: string } | { name: string }, on: boolean) => post<{ tags: string[] }>(threadUrl(threadId, '/tags'), { ...tag, on }),
+  /** A tag's row colour (a preset, `#rrggbb`, or null: None), as of `at`; `machine`: that linked machine's tag of the name. */
+  setTagColour: (tag: string, colour: string | null, at: string, machine?: string | null) =>
+    post<{ look: InboxTagLook; tag_colours: InboxTagColours }>(inboxUrl('/tag-colours', undefined, machine), { tag, colour, at }),
+  /** "Show tag colors" in the list's ⋮, as of `at`, here or on a linked machine. */
+  setTagColoursShown: (show: boolean, at: string, machine?: string | null) => post<{ tag_colours: InboxTagColours }>(inboxUrl('/tag-colours', undefined, machine), { show, at }),
   /** Snooze the thread until a time, or end its snooze (`null`). `at`: an earlier snooze's own time, for an Undo. On the thread's own machine. */
   snooze: (threadId: string, until: string | null, at?: string) =>
     post<{ snoozed: { until: string; at: string } | null }>(threadUrl(threadId, '/snooze'), { until, ...(at ? { at } : {}) }),

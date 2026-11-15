@@ -30,6 +30,30 @@ export interface TagsAcross {
   here: (id: string | null) => Promise<string | null>;
   /** What a linked machine's card is put in: that machine's id for the tag, else its name, which that machine makes. */
   there: (id: string | null, machine: string) => string | null | { name: string };
+  /**
+   * A tag's row colour, as of `at`, on this Inbox's copy and each linked machine's that takes tag colours, so every
+   * machine shows the same one (inbox-tag-colours.ts `inboxTagLookOf`). An older machine keeps its own.
+   */
+  colour: (tag: ListTag, colour: string | null, at: string) => Promise<TagChanged>;
+}
+
+/** "Show tag colors" on this Inbox and every linked machine that takes tag colours, as of `at`. */
+export async function showTagColoursAcross(on: boolean, at: string, machines: MachinesModel): Promise<TagChanged> {
+  let held: InboxHeldError | null = null;
+  try {
+    await inboxApi.setTagColoursShown(on, at);
+  } catch (cause) {
+    return { refused: cause, held };
+  }
+  for (const machine of machines.linked) {
+    if (!(machine.marks ?? []).includes('tag-colours')) continue;
+    try {
+      await inboxApi.setTagColoursShown(on, at, machine.id);
+    } catch (cause) {
+      if (cause instanceof InboxHeldError) held = cause;
+    }
+  }
+  return { refused: null, held };
 }
 
 export function tagsAcross(tags: readonly ListTag[], machines: MachinesModel): TagsAcross {
@@ -111,6 +135,28 @@ export function tagsAcross(tags: readonly ListTag[], machines: MachinesModel): T
       const tag = id ? tagById(tags, id) : null;
       if (!tag) return id;
       return tagIdOn(tag, machine, machines.self) ?? { name: tag.name };
+    },
+    colour: async (tag, colour, at) => {
+      let refused: unknown = null;
+      let held: InboxHeldError | null = null;
+      const own = tagIdOn(tag, null, machines.self);
+      if (own) {
+        try {
+          await inboxApi.setTagColour(own, colour, at);
+        } catch (cause) {
+          return { refused: cause, held };
+        }
+      }
+      for (const [machine, id] of Object.entries(tag.machines ?? {})) {
+        if (machine === machines.self || !machineTakes({ machine }, machines, 'tag-colours')) continue;
+        try {
+          await inboxApi.setTagColour(id, colour, at, machine);
+        } catch (cause) {
+          if (cause instanceof InboxHeldError) held = cause;
+          else refused ??= cause;
+        }
+      }
+      return { refused, held };
     },
   };
 }

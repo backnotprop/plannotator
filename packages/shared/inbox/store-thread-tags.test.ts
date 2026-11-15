@@ -175,17 +175,17 @@ test("a marks file from a newer Inbox reads as none and is never written over", 
   expect(existsSync(file)).toBe(true);
 });
 
-test("what else a version-1 file holds beside the marks (a later version's tag colours) is kept through every write", () => {
+test("what else a version-1 file holds beside the marks and the colours (a later version's) is kept through every write", () => {
   const { dir, release, thread, reopen } = world();
   const t = thread();
   const file = join(dir, "inbox", INBOX_TAGS_FILE);
-  writeFileSync(file, `${JSON.stringify({ v: 1, marks: [], looks: { [release.id]: { colour: "#7a9e7e", rows: true } } })}\n`);
+  writeFileSync(file, `${JSON.stringify({ v: 1, marks: [], later: { [release.id]: { icon: "flag" } } })}\n`);
   const store = reopen();
   store.setThreadTag(t.thread_id, release.id, true);
   store.setThreadTag(t.thread_id, release.id, false);
-  const kept = JSON.parse(readFileSync(file, "utf8")) as { v: number; looks: unknown };
+  const kept = JSON.parse(readFileSync(file, "utf8")) as { v: number; later: unknown };
   expect(kept.v).toBe(1);
-  expect(kept.looks).toEqual({ [release.id]: { colour: "#7a9e7e", rows: true } });
+  expect(kept.later).toEqual({ [release.id]: { icon: "flag" } });
 });
 
 test("by name, as a linked machine tags: the live tag of that name (case and space ignored), made when none is", () => {

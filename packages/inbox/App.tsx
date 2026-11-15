@@ -1570,7 +1570,7 @@ function Inbox() {
   }, [refreshCards]);
   // With the Board off, the list's tags (approval "inbox-thread-tags"), the same array while their ids and names stay.
   const listTagsKey = (latest?.tags ?? [])
-    .map((i) => `${i.id}\u0000${i.name}\u0000${JSON.stringify(i.machines ?? null)}`)
+    .map((i) => `${i.id}\u0000${i.name}\u0000${JSON.stringify(i.machines ?? null)}\u0000${JSON.stringify(i.look ?? null)}`)
     .join('\u0001');
   const keepsTags = latest?.tags !== undefined;
   // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the ids and names, on purpose
@@ -4111,7 +4111,7 @@ function Inbox() {
   useEffect(() => {
     if (combinedHead) writeRoute({ ...route, project: combinedHead }, { replace: true });
   }, [combinedHead]);
-  const { latestSections, latestGroups, latestRows, pinsOn, pinRows, pinnedIds, listedOpenRow, openThreadRow, listShown, snoozeOn, projectsReadable, projectCounts, latestProjectActivity, filterProject, filterMachine, windowRows, threadAgentContext, filterAgent, projectNames, sidebarMachineCounts, filterList, listFilterPicks, setListFilter, listFilterScoped, filterShown, listFilterRows, listSections, listFilterEmpty, listTitle, notice, filterTag, threadTagsHost, sidebarTags } = useListShown({
+  const { latestSections, latestGroups, latestRows, pinsOn, pinRows, pinnedIds, listedOpenRow, openThreadRow, listShown, snoozeOn, projectsReadable, projectCounts, latestProjectActivity, filterProject, filterMachine, windowRows, threadAgentContext, filterAgent, projectNames, sidebarMachineCounts, filterList, listFilterPicks, setListFilter, listFilterScoped, filterShown, listFilterRows, listSections, listFilterEmpty, listTitle, notice, filterTag, threadTagsHost, sidebarTags, listColours } = useListShown({
     latest, projects, route, thread, threadRow, rowPatches, pinPatches, looking, shown, machines, hideAway, openedHere, heldOpen, heldRead,
     tags: {
       listTags,
@@ -4122,6 +4122,7 @@ function Inbox() {
       dismissToast,
       refreshList,
       openTag: (tagId) => leave({ page: 'inbox', project: null, machine: null, agent: null, tag: tagId, thread: null }),
+      tagColours: latest?.tag_colours ?? null,
       tagGone: (tag) => {
         if (routeRef.current.page === 'inbox' && routeRef.current.tag && tagById([tag], routeRef.current.tag)) writeRoute({ page: 'inbox', project: null, thread: null }, { replace: true });
       },
@@ -6053,6 +6054,8 @@ function Inbox() {
           onUnstar={pinsOn ? unstarRow : undefined}
           // "Keep starred above the list" (starredPills.ts): the starred threads as pills, with the sidebar section's actions.
           starred={pinRows ? { rows: pinRows, onOpen: openPinned, onAction: (row, action) => void pinAction(row, action, true) } : undefined}
+          // Tag row colours (tagColours.ts): each row's tint and "Show tag colors" in the ⋮.
+          tagColours={listColours ?? undefined}
           tidy={{
             ...listTidy,
             combine: async (pairs) => {
@@ -6980,6 +6983,10 @@ function Inbox() {
         mounted={searchMounted}
         open={searchOpen}
         phone={phone}
+        tintOf={listColours ? (threadId) => {
+          const row = rowOf(threadId);
+          return row ? listColours.tintOf(row) : null;
+        } : undefined}
         currentProject={route.page === 'inbox' ? route.project : null}
         projects={projects}
         onClose={closeSearch}

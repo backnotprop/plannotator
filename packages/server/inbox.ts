@@ -39,7 +39,7 @@
  * No CORS headers anywhere, so another site cannot read an answer.
  */
 
-import { INBOX_LINKED_MARKS, INBOX_PROMPT_HOSTS, inboxMachineTags, inboxRowsBy, type InboxRowsBy } from "@plannotator/core/inbox-types";
+import { INBOX_LINKED_MARKS, INBOX_PROMPT_HOSTS, inboxMachineTags, inboxRowsBy, inboxTagColoursOf, type InboxRowsBy } from "@plannotator/core/inbox-types";
 import { inboxDiffOptionsOf, inboxDiffOptionsSaved, parseInboxDiffOptionsChange } from "./inbox-diff-options";
 import { listIntroAtStart, listIntroDue, listIntroLookPicked } from "./inbox-list-intro";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
@@ -1749,7 +1749,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // A linked machine's row loses its `steps_waiting`: this window never shows that machine's checklists.
     // Tags across machines (approval "inbox-thread-tags"): one tag per name over this Inbox and every linked machine that
     // takes tags, and a far row's tags read as those; a row of a machine that does not take them carries none here.
-    const ownTags = store.initiatives().filter((tag) => tag.deleted_at === null);
+    // Each tag with its colour (inbox-tag-colours.ts), merged by name with the linked machines' as the tags are.
+    const ownTags = store
+      .initiatives()
+      .filter((tag) => tag.deleted_at === null)
+      .map((tag) => {
+        const look = store.tagLook(tag.id);
+        return look ? { ...tag, look } : tag;
+      });
     const farTagLists = merged ? machines.tagLists() : [];
     const machineTags = merged ? inboxMachineTags(machines.selfId, ownTags, farTagLists) : null;
     const tagsTaken = new Set(farTagLists.map((list) => list.machine));
@@ -1814,6 +1821,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
        * Merged: one per name across the machines, each with `machines`, its id on every machine that holds it.
        */
       tags: machineTags ? machineTags.tags : ownTags,
+      /** "Show tag colors" and the person's own colours (inbox-tag-colours.ts); merged: over every machine that takes them. Additive. */
+      tag_colours: merged ? inboxTagColoursOf([store.tagColours(), ...machines.tagColourLists()]) : store.tagColours(),
       ...(merged ? { self: machines.selfId, machines: machines.machinesView() } : {}),
       /**
        * Each machine's agents (additive; the Agents section, inbox-agents-list.ts): one group, this Inbox's own; on the

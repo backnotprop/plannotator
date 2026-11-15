@@ -46,6 +46,7 @@ export * from "./inbox-cards";
 export * from "./inbox-steps";
 // The Board's initiatives (approval "board-initiatives"), the same way.
 export * from "./inbox-initiatives";
+export * from "./inbox-tag-colours";
 // The surface bridge's messages (the phone, PLAN step S1), the same way.
 export * from "./inbox-surface-bridge";
 // Tidy (the list header's and the Board's ⋮ menu), the same way.
@@ -3306,7 +3307,7 @@ export const INBOX_DRAFT_PASTED_LEAD_MAX = 2;
  * rows only once this Inbox takes it; an older Inbox says none. `cards`: its Board's cards are read through its door
  * and changed there, so a linked machine's Board lists them.
  */
-export const INBOX_LINKED_MARKS = ["star", "priority", "agent-face", "agent-name", "take-back", "tags", "cards"] as const;
+export const INBOX_LINKED_MARKS = ["star", "priority", "agent-face", "agent-name", "take-back", "tags", "cards", "tag-colours"] as const;
 export type InboxLinkedMark = (typeof INBOX_LINKED_MARKS)[number];
 
 /**
