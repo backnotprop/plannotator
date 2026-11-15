@@ -275,7 +275,7 @@ export const ThreadRowMenu = forwardRef<HTMLDivElement, ThreadRowMenuProps>(func
                 {target && props.picks?.takes(target.thread_id) && (
                   <>
                     <Menu.Item className="ib-pmi" label="Select" data-row-action="select" onClick={() => props.picks!.start(target.thread_id)}>
-                      <Icon name="check" size={15} />
+                      <Icon name="todoOpen" size={15} />
                       Select
                     </Menu.Item>
                     <Menu.Separator className="ib-pm-sep" />

@@ -320,7 +320,7 @@ export function TidyMenu({
               </Menu.Item>
               {onSelect && (
                 <Menu.Item className="ib-pmi" label="Select threads" data-select-threads="" onClick={onSelect}>
-                  <Icon name="check" size={15} />
+                  <Icon name="todoOpen" size={15} />
                   Select threads
                 </Menu.Item>
               )}

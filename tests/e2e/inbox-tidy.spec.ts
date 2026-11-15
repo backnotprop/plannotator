@@ -314,6 +314,8 @@ test('a phone: the ⋮ and the popover as a bottom sheet, on the list and the Bo
     await shot(page, 'list-menu-closed-390');
     await trigger.click();
     await expect(page.locator('[data-tidy-item]')).toBeVisible();
+    // The sheet rises from the bottom: however many items it holds, its first (Tidy) stays on a 390×664 screen.
+    await expect(page.locator('[data-tidy-item]')).toBeInViewport({ ratio: 1 });
     await shot(page, 'list-menu-open-390');
     await page.locator('[data-tidy-item]').click();
     const pop = page.locator('[data-tidy-popover]');
@@ -329,6 +331,7 @@ test('a phone: the ⋮ and the popover as a bottom sheet, on the list and the Bo
     await shot(page, 'board-menu-closed-390');
     await boardTrigger.click();
     await expect(page.locator('[data-tidy-item]')).toBeVisible();
+    await expect(page.locator('[data-tidy-item]')).toBeInViewport({ ratio: 1 });
     await shot(page, 'board-menu-open-390');
     await page.locator('[data-tidy-item]').click();
     await expect(page.locator('[data-tidy-popover]')).toBeVisible();
