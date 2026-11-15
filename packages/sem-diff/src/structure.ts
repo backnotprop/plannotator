@@ -31,6 +31,8 @@ interface Entity {
   /** Tokens and comments in source order: equal means only whitespace changed. */
   seq: string;
   text: string;
+  scope: string;
+  holder: Entity | null;
 }
 
 export interface StructureResult {
@@ -80,7 +82,7 @@ function leaves(n: Node, cfg: LanguageConfig) {
         // 'a' and "a" are the same string where both quote styles mean the same (TS, Python).
         seq.push(SAME_QUOTES.has(cfg.id) && (x.text === "'" || x.text === '"') && x.parent?.type === 'string' ? '\u0004quote' : x.text);
       } else seq.push(x.type === ';' ? ';' : `\u0001${x.type}`); // zero-width: an inserted semicolon equals a written one
-      if (cfg.identifierTypes.has(x.type)) identifiers.push(x);
+      if (cfg.identifierTypes.has(x.type) && !cfg.notAName?.(x)) identifiers.push(x);
       // `return` (or `yield`, `break`, `continue`) and a line break ends the statement in
       // JS/TS, whatever follows; the parser does not always show it (`return` + newline + JSX).
       const next = x.nextSibling;
@@ -135,10 +137,12 @@ function withoutTrailingCommas(seq: string[]): string[] {
   });
 }
 
+const reopens = (cfg: LanguageConfig, d: Declaration) => !!cfg.typeOf?.(d);
+
 function collect(root: Node, cfg: LanguageConfig): Entity[] {
   const out: Entity[] = [];
-  const visit = (container: Node, parent: string) => {
-    const seen = new Map<string, number>();
+  const seen = new Map<string, number>();
+  const visit = (container: Node, parent: string, holder: Entity | null) => {
     for (const decl of cfg.declarationsIn(container)) {
       // Getters/setters share a name; so can overloads. Number repeats so keys stay unique.
       const accessor = decl.node.children.find((c) => c?.type === 'get' || c?.type === 'set')?.type ?? '';
@@ -146,11 +150,13 @@ function collect(root: Node, cfg: LanguageConfig): Entity[] {
       const n = seen.get(base) ?? 0;
       seen.set(base, n + 1);
       const key = n ? `${base}#${n}` : base;
-      out.push({ decl, key, base: `${decl.kind}:${accessor}${decl.name}`, parent, text: decl.node.text, ...leaves(decl.node, cfg) });
-      if (decl.members) visit(decl.members, key);
+      const scope = reopens(cfg, decl) ? `${parent}/type:${cfg.typeOf!(decl)}` : key;
+      const e: Entity = { decl, key, base: `${decl.kind}:${accessor}${decl.name}`, parent, text: decl.node.text, ...leaves(decl.node, cfg), scope, holder };
+      out.push(e);
+      if (decl.members) visit(decl.members, scope, e);
     }
   };
-  visit(root, '');
+  visit(root, '', null);
   return out;
 }
 
@@ -177,7 +183,7 @@ function identifierSubstitution(a: Entity, b: Entity): Map<string, string> | nul
 /** The statements inside a declaration that hold no block of their own, in order, plus its first line. */
 function simpleStatements(decl: Node, cfg: LanguageConfig): Entity[] {
   const out: Node[] = [];
-  const isBlock = (n: Node) => /block|body|suite/.test(n.type);
+  const isBlock = (n: Node) => /block|body|suite|^statements$/.test(n.type);
   const walk = (n: Node): boolean => {
     // Returns whether `n` holds a block; statements of a block that hold none are collected.
     let holds = false;
@@ -224,12 +230,19 @@ export function detectStructure(oldRoot: Node, newRoot: Node, cfg: LanguageConfi
   };
   const oldKids = byParentKey(olds);
   const newKids = byParentKey(news);
+  const held = new Map<Entity, string[]>();
+  for (const e of [...olds, ...news]) if (e.holder) held.set(e.holder, [...(held.get(e.holder) ?? []), e.base]);
+  const similarBy = (e: Entity) => (reopens(cfg, e.decl) ? (held.get(e) ?? []) : [...(attachedAbove(e.decl.node, cfg.attachedTypes).match(/\S+/g) ?? []), ...e.tokens]);
+  const levels = new Set<string>();
   const pairLevel = (oldParent: string, newParent: string) => {
-    for (const [a, b] of pairSameNamed(oldKids.get(oldParent) ?? [], newKids.get(newParent) ?? [], (e) => e.base, (e) => [...(attachedAbove(e.decl.node, cfg.attachedTypes).match(/\S+/g) ?? []), ...e.tokens])) {
+    const level = `${oldParent}\u0000${newParent}`;
+    if (levels.has(level)) return;
+    levels.add(level);
+    for (const [a, b] of pairSameNamed(oldKids.get(oldParent) ?? [], newKids.get(newParent) ?? [], (e) => e.base, similarBy)) {
       pairs.push([a, b]);
       usedOld.add(a);
       usedNew.add(b);
-      if (a.decl.members && b.decl.members) pairLevel(a.key, b.key);
+      if (a.decl.members && b.decl.members) pairLevel(a.scope, b.scope);
     }
   };
   pairLevel('', '');
@@ -262,15 +275,20 @@ export function detectStructure(oldRoot: Node, newRoot: Node, cfg: LanguageConfi
   const moved = new Set<Entity>();
   const byParent = new Map<string, Array<[Entity, Entity]>>();
   for (const p of pairs) if (p[0].parent === p[1].parent) byParent.set(p[0].parent, [...(byParent.get(p[0].parent) ?? []), p]);
+  const holders = new Map<Entity, Entity>(pairs);
   for (const group of byParent.values()) {
     const ordered = [...group].sort((p, q) => p[0].decl.node.startIndex - q[0].decl.node.startIndex);
-    const starts = ordered.map((p) => p[1].decl.node.startIndex);
-    const keep = longestInOrder(starts, keepWeights(starts, ordered.map((p) => endLine(p[0].decl.node) - startLine(p[0].decl.node) + 1)));
+    const crossed = (p: [Entity, Entity]) => !!p[0].holder && reopens(cfg, p[0].holder.decl) && holders.get(p[0].holder) !== p[1].holder;
+    const stay = ordered.map((p, i) => i).filter((i) => !crossed(ordered[i]!));
+    const starts = stay.map((i) => ordered[i]![1].decl.node.startIndex);
+    const inOrder = longestInOrder(starts, keepWeights(starts, stay.map((i) => endLine(ordered[i]![0].decl.node) - startLine(ordered[i]![0].decl.node) + 1), cfg.moveEditedFirst ? stay.map((i) => ordered[i]![0].text === ordered[i]![1].text) : undefined));
+    const keep = new Set([...inOrder].map((k) => stay[k]!));
     ordered.forEach(([a, b], i) => {
       if (keep.has(i)) return;
       moved.add(a);
       const na = a.decl.node;
       const nb = b.decl.node;
+      if (cfg.marksOf && cfg.marksOf(na) !== cfg.marksOf(nb)) return;
       // The doc comment directly above a declaration moves with it.
       const da = docStart(na, cfg);
       const db = docStart(nb, cfg);
@@ -608,6 +626,7 @@ function kindOf(n: Node): 'binding' | 'member' | 'type' {
   if (SHORTHAND.has(n.type)) return 'binding';
   const p = n.parent;
   if (p?.type === 'variable_name' && p.parent?.type === 'property_element') return 'member';
+  if (p?.type === 'navigation_suffix') return p.parent?.childForFieldName('target')?.type === 'self_expression' ? 'binding' : 'member';
   // `user.name`, `self.name`, `x.Name`, `obj->name`: the name after the dot.
   if (p && /^(member_expression|attribute|field_expression|selector_expression|field_access|member_access_expression)$/.test(p.type) && p.namedChildren.length > 1 && p.namedChildren.at(-1)?.id === n.id) return 'member';
   if (/property_identifier|field_identifier/.test(n.type)) return 'member';
@@ -622,12 +641,22 @@ const DECLARING_PARENT = /(declaration|declarator|definition|parameter|specifier
 
 /** The declared type next to a name, compared with this rename applied (a type can be the thing renamed). */
 function declaredTypeChanged(o: Node, n: Node, from: string, to: string): boolean {
-  const ta = o.parent?.childForFieldName('type');
-  const tb = n.parent?.childForFieldName('type');
+  const ta = declaredType(o);
+  const tb = declaredType(n);
   if (!ta && !tb) return false;
   if (!ta || !tb) return true;
   const swap = (t: string) => t.replace(/\w+/g, (w) => (w === from ? to : w)).replace(/\s+/g, '');
   return swap(ta.text) !== tb.text.replace(/\s+/g, '');
+}
+
+function declaredType(id: Node): Node | null {
+  const p = id.parent;
+  if (!p) return null;
+  const typed = p.childForFieldName('type');
+  if (typed || id.type !== 'simple_identifier') return typed;
+  if (p.type === 'parameter' || p.type === 'lambda_parameter') return p.childrenForFieldName('name').find((c) => c && c.id !== id.id && c.type !== 'simple_identifier') ?? null;
+  if (p.type === 'pattern' && p.parent?.type === 'property_declaration') return p.parent.namedChildren.find((c) => c?.type === 'type_annotation') ?? null;
+  return null;
 }
 
 function isDeclarationName(id: Node): boolean {
@@ -641,6 +670,11 @@ function isDeclarationName(id: Node): boolean {
   if (p.type === 'assignment') return p.childForFieldName('left')?.startIndex === id.startIndex;
   // Go: `x := ...` and `for k, v := range` declare through their left-hand list.
   if (p.type === 'expression_list' && (p.parent?.type === 'short_var_declaration' || p.parent?.type === 'range_clause')) return p.parent.childForFieldName('left')?.startIndex === p.startIndex;
+  if (id.type === 'simple_identifier') {
+    if (p.childrenForFieldName('bound_identifier').some((c) => c?.id === id.id)) return true;
+    if (p.type === 'pattern') return p.namedChildCount === 1 && p.childCount === 1;
+    if (p.type === 'enum_entry') return p.childrenForFieldName('name').some((c) => c?.id === id.id);
+  }
   // Names bound by patterns (`Some(byte) =>`, `let (a, b)`, `[x, y] = ...`) and
   // closure parameters (`|a, b|`). In `{ key: value }` patterns only the value is bound.
   if (/pattern$/.test(p.type) || p.type === 'closure_parameters') {
@@ -702,7 +736,7 @@ function identifierIndex(root: Node, cfg: LanguageConfig): Map<string, Node[]> {
   while (stack.length) {
     const x = stack.pop()!;
     if (x.childCount === 0) {
-      if (cfg.identifierTypes.has(x.type)) {
+      if (cfg.identifierTypes.has(x.type) && !cfg.notAName?.(x)) {
         const list = out.get(x.text);
         if (list) list.push(x);
         else out.set(x.text, [x]);

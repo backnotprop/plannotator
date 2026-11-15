@@ -7,7 +7,7 @@ import type { LanguageId } from './languages.ts';
 export { languageForPath, type LanguageId } from './languages.ts';
 
 /** Comment node types across grammars (Rust splits line and block comments). */
-export const COMMENT_TYPES: ReadonlySet<string> = new Set(['comment', 'line_comment', 'block_comment']);
+export const COMMENT_TYPES: ReadonlySet<string> = new Set(['comment', 'line_comment', 'block_comment', 'multiline_comment']);
 export const isComment = (n: Node | null | undefined) => !!n && COMMENT_TYPES.has(n.type);
 
 export interface LanguageConfig {
@@ -33,6 +33,7 @@ export interface LanguageConfig {
   returnValueOf(ret: Node): Node | null;
   /** Leaf node types that are names (variables, fields, types). */
   identifierTypes: ReadonlySet<string>;
+  notAName?(id: Node): boolean;
   /**
    * Named declarations directly inside `container` (the file, or a class body),
    * with the node to treat as the whole declaration and, for classes, the body
@@ -46,6 +47,9 @@ export interface LanguageConfig {
   attachedTypes: ReadonlySet<string>;
   harmlessMissing?: ReadonlySet<string>;
   contextAt?(root: Node, line: number): string;
+  typeOf?(container: Declaration): string | null;
+  moveEditedFirst?: boolean;
+  marksOf?(decl: Node): string;
 }
 
 export function brokenTree(n: Node, cfg: LanguageConfig): boolean {
@@ -479,6 +483,179 @@ const php: LanguageConfig = {
   },
 };
 
+const SWIFT_NOT_EXPRESSION = /declaration|statement|assignment|directive|^diagnostic$/;
+const swiftParams = (fn: Node) =>
+  fn.namedChildren
+    .filter((c): c is Node => c?.type === 'parameter')
+    .map((p) => {
+      const label = (p.childForFieldName('external_name') ?? p.childForFieldName('name'))?.text ?? '_';
+      const type = p.text.slice(p.text.indexOf(':') + 1).replace(/\s+/g, '');
+      return `${label}:${type}`;
+    })
+    .join(',');
+const swiftBound = (n: Node | null | undefined): string | undefined => {
+  if (!n) return undefined;
+  const direct = n.childForFieldName('bound_identifier');
+  if (direct) return direct.text;
+  for (const c of n.namedChildren) {
+    const r = c && c.type !== 'value_binding_pattern' ? (c.type === 'simple_identifier' ? c.text : swiftBound(c)) : undefined;
+    if (r) return r;
+  }
+  return undefined;
+};
+const swiftDeclKind = (n: Node) => n.childForFieldName('declaration_kind')?.text ?? n.type;
+const swiftExtended = (n: Node) => {
+  const body = n.childForFieldName('body');
+  const name = n.childForFieldName('name');
+  if (!name) return '';
+  const end = body ? body.startIndex : n.endIndex;
+  return n.text.slice(name.startIndex - n.startIndex, end - n.startIndex).replace(/\/\/[^\n]*|\/\*[\s\S]*?\*\//g, '').replace(/\s+/g, ' ').trim();
+};
+const swiftConstrained = (n: Node) =>
+  n.type === 'class_declaration' && swiftDeclKind(n) === 'extension' && (n.namedChildren.some((c) => c?.type === 'type_constraints') || !!n.childForFieldName('name')?.descendantsOfType('type_arguments').length);
+const SWIFT_TYPES = new Set(['class_declaration', 'protocol_declaration']);
+const SWIFT_FUNCTIONS = new Set(['function_declaration', 'protocol_function_declaration', 'init_declaration', 'subscript_declaration']);
+const SWIFT_NAMED = new Set(['typealias_declaration', 'associatedtype_declaration', 'precedence_group_declaration', 'macro_declaration']);
+
+const swiftBranches = new WeakMap<object, string[]>();
+function swiftBranchAt(root: Node, line: number): string {
+  const key = root.tree as object;
+  let at = swiftBranches.get(key);
+  if (!at) {
+    at = [];
+    const rows = root.endPosition.row + 2;
+    const marks = new Map<number, string>();
+    for (const d of root.descendantsOfType('directive')) {
+      const m = d && /^#\s*(if|elseif|else|endif)\b(.*)$/s.exec(d.text.trim());
+      if (d && m) marks.set(d.startPosition.row + 1, `${m[1]} ${m[2]!.replace(/\s+/g, ' ').trim()}`.trim());
+    }
+    const stack: string[][] = [];
+    const show = () => stack.map((arms) => arms.join(' / ')).join(' > ');
+    for (let l = 1; l <= rows; l++) {
+      const mark = marks.get(l);
+      if (mark?.startsWith('if')) stack.push([`#${mark}`]);
+      else if (mark && mark !== 'endif' && stack.length) stack.at(-1)!.push(`#${mark}`);
+      at[l] = show();
+      if (mark === 'endif') stack.pop();
+    }
+    swiftBranches.set(key, at);
+  }
+  return at[line] ?? '';
+}
+
+const swift: LanguageConfig = {
+  id: 'swift',
+  wasm: 'tree-sitter-swift/tree-sitter-swift.wasm',
+  functionTypes: new Set(['function_declaration', 'init_declaration', 'deinit_declaration', 'subscript_declaration', 'property_declaration']),
+  callTypes: new Set(['call_expression']),
+  blockTypes: new Set(['statements']),
+  isReturn: (s, last) => {
+    if (s.type === 'control_transfer_statement') return s.child(0)?.type === 'return';
+    if (!last || SWIFT_NOT_EXPRESSION.test(s.type) || s.parent?.type !== 'statements') return false;
+    return s.parent.namedChildren.filter((c) => c && !isComment(c)).length === 1 && /^(function_body|computed_getter|computed_property)$/.test(s.parent.parent?.type ?? '');
+  },
+  attachedTypes: new Set(['comment', 'multiline_comment']),
+  nameOf: (fn) => {
+    if (fn.type === 'property_declaration') return swiftBound(fn.childForFieldName('name')) ?? null;
+    if (fn.type === 'init_declaration') return 'init';
+    if (fn.type === 'deinit_declaration') return 'deinit';
+    if (fn.type === 'subscript_declaration') return 'subscript';
+    return fn.childForFieldName('name')?.text ?? null;
+  },
+  bodyOf: (fn) => {
+    if (fn.type === 'property_declaration' || fn.type === 'subscript_declaration') {
+      const computed = fn.type === 'property_declaration' ? fn.childForFieldName('computed_value') : fn.namedChildren.find((c) => c?.type === 'computed_property');
+      if (!computed) return null;
+      return computed.namedChildren.find((c) => c?.type === 'computed_getter') ?? (computed.namedChildren.some((c) => c?.type === 'statements') ? computed : null);
+    }
+    return fn.childForFieldName('body');
+  },
+  statementsOf: (block) => {
+    const holder = block.type === 'statements' ? block : block.namedChildren.find((c) => c?.type === 'statements');
+    return holder ? holder.namedChildren.filter((n): n is Node => n !== null && !isComment(n)) : [];
+  },
+  calleeOf: (call) => {
+    const f = call.namedChild(0);
+    if (f?.type === 'simple_identifier') return f.text;
+    if (f?.type === 'navigation_expression') {
+      const s = f.childForFieldName('suffix')?.childForFieldName('suffix');
+      return s?.type === 'simple_identifier' ? s.text : null;
+    }
+    return null;
+  },
+  returnValueOf: (ret) => (ret.type === 'control_transfer_statement' ? ret.childForFieldName('result') : ret),
+  identifierTypes: new Set(['simple_identifier', 'type_identifier']),
+  notAName: (id) => {
+    for (let p = id.parent, depth = 0; p && depth < 8; p = p.parent, depth++) {
+      if (p.type === 'attribute') return true;
+      if (/declaration|statements|^source_file$|body$/.test(p.type)) return false;
+    }
+    return false;
+  },
+  declarationsIn: (container) => {
+    const out: Declaration[] = [];
+    for (const child of container.namedChildren) {
+      if (!child || isComment(child)) continue;
+      if (child.type === 'import_declaration') {
+        const id = child.namedChildren.find((c) => c?.type === 'identifier');
+        if (!id) continue;
+        const before = child.text.slice(0, id.startIndex - child.startIndex).replace(/\bimport\b/, '').replace(/\s+/g, ' ').trim();
+        out.push(importDeclaration(child, id.text, before ? `${before} ` : ''));
+      } else if (SWIFT_TYPES.has(child.type)) {
+        const kind = swiftDeclKind(child);
+        const name = kind === 'extension' ? swiftExtended(child) : child.childForFieldName('name')?.text;
+        const body = child.childForFieldName('body');
+        if (name) out.push({ node: child, kind, name, members: body ?? undefined });
+      } else if (SWIFT_FUNCTIONS.has(child.type)) {
+        const name = child.type === 'init_declaration' ? 'init' : child.type === 'subscript_declaration' ? 'subscript' : child.childForFieldName('name')?.text;
+        if (name) out.push({ node: child, kind: `${child.type === 'protocol_function_declaration' ? 'requirement ' : ''}func(${swiftParams(child)})`, name });
+      } else if (child.type === 'deinit_declaration') {
+        out.push({ node: child, kind: 'deinit', name: 'deinit' });
+      } else if (child.type === 'property_declaration' || child.type === 'protocol_property_declaration') {
+        const name = swiftBound(child.childForFieldName('name'));
+        if (name) out.push({ node: child, kind: child.type === 'property_declaration' ? 'property' : 'requirement property', name });
+      } else if (child.type === 'enum_entry') {
+        const names = child.childrenForFieldName('name').filter((c): c is Node => c?.type === 'simple_identifier').map((c) => c.text);
+        if (names.length) out.push({ node: child, kind: 'case', name: names.join(',') });
+      } else if (child.type === 'operator_declaration') {
+        const op = child.namedChildren.find((c) => c?.type === 'custom_operator');
+        const fixity = child.child(0)?.text ?? '';
+        if (op) out.push({ node: child, kind: `${fixity} operator`, name: op.text });
+      } else if (SWIFT_NAMED.has(child.type)) {
+        const d = named(child, child.type, child.childForFieldName('name')?.text ?? child.namedChildren.find((c) => c?.type === 'type_identifier' || c?.type === 'simple_identifier')?.text);
+        if (d) out.push(d);
+      }
+    }
+    return out;
+  },
+  moveEditedFirst: true,
+  marksOf: (decl) => decl.namedChildren.find((c) => c?.type === 'modifiers')?.namedChildren.filter((c) => c?.type === 'attribute').map((c) => c!.text.replace(/\s+/g, '')).join(' ') ?? '',
+  typeOf: (d) => {
+    if (d.node.type !== 'class_declaration') return null;
+    const name = d.node.childForFieldName('name');
+    return name ? name.text.replace(/<[\s\S]*$/, '').replace(/\s+/g, '') : null;
+  },
+  contextAt: (root, line) => {
+    const text = swiftLines(root)[line - 1] ?? '';
+    const column = Math.max(0, text.search(/\S/));
+    let ext = '';
+    for (let p: Node | null = root.descendantForPosition({ row: line - 1, column }, { row: line - 1, column: column + 1 }); p; p = p.parent) {
+      if (swiftConstrained(p)) {
+        ext = `extension ${swiftExtended(p)}`;
+        break;
+      }
+    }
+    return `${swiftBranchAt(root, line)} | ${ext}`;
+  },
+};
+const swiftLineCache = new WeakMap<object, string[]>();
+function swiftLines(root: Node): string[] {
+  const key = root.tree as object;
+  let lines = swiftLineCache.get(key);
+  if (!lines) swiftLineCache.set(key, (lines = root.text.split('\n')));
+  return lines;
+}
+
 export const LANGUAGES: Record<LanguageId, LanguageConfig> = {
   go: {
     id: 'go',
@@ -542,6 +719,7 @@ export const LANGUAGES: Record<LanguageId, LanguageConfig> = {
   java,
   csharp,
   php,
+  swift,
 };
 
 

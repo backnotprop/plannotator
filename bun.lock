@@ -405,6 +405,7 @@
         "tree-sitter-php": "0.24.2",
         "tree-sitter-python": "^0.25.0",
         "tree-sitter-rust": "^0.24.0",
+        "tree-sitter-swift": "file:../../vendor/tree-sitter-swift",
         "tree-sitter-typescript": "^0.23.2",
         "web-tree-sitter": "^0.27.1",
       },
@@ -3127,6 +3128,8 @@
     "@plannotator/relay/typescript": ["typescript@5.8.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-p1diW6TqL9L07nNxvRMM7hMMw4c5XOo/1ibL4aAIGmSAt9slTE1Xgw5KWuof2uTOvCg9BY7ZRi+GaF+7sfgPeQ=="],
 
     "@plannotator/review/typescript": ["typescript@5.8.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-p1diW6TqL9L07nNxvRMM7hMMw4c5XOo/1ibL4aAIGmSAt9slTE1Xgw5KWuof2uTOvCg9BY7ZRi+GaF+7sfgPeQ=="],
+
+    "@plannotator/sem-diff/tree-sitter-swift": ["tree-sitter-swift@file:vendor/tree-sitter-swift", {}],
 
     "@plannotator/system/typescript": ["typescript@5.8.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-p1diW6TqL9L07nNxvRMM7hMMw4c5XOo/1ibL4aAIGmSAt9slTE1Xgw5KWuof2uTOvCg9BY7ZRi+GaF+7sfgPeQ=="],
 

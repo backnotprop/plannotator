@@ -1,0 +1,513 @@
+[
+ {
+  "id": "sw-ext-plain-move",
+  "area": "trap",
+  "language": "swift",
+  "title": "Method moved from struct Circle into a plain extension Circle",
+  "expected": "moved: area() leaves the struct body for the unconstrained extension of the same type; same meaning.",
+  "status": "ok",
+  "old": "struct Circle {\n    var radius: Double\n\n    func area() -> Double {\n        let r = radius\n        return Double.pi * r * r\n    }\n\n    func diameter() -> Double {\n        radius * 2\n    }\n}\n\nextension Circle {\n    func circumference() -> Double {\n        Double.pi * diameter()\n    }\n}\n",
+  "new": "struct Circle {\n    var radius: Double\n\n    func diameter() -> Double {\n        radius * 2\n    }\n}\n\nextension Circle {\n    func area() -> Double {\n        let r = radius\n        return Double.pi * r * r\n    }\n\n    func circumference() -> Double {\n        Double.pi * diameter()\n    }\n}\n",
+  "ops": [
+   {
+    "type": "moved",
+    "old": [
+     [
+      4,
+      7
+     ]
+    ],
+    "new": [
+     [
+      10,
+      13
+     ]
+    ]
+   }
+  ]
+ },
+ {
+  "id": "sw-ext-constrained-move",
+  "area": "trap",
+  "language": "swift",
+  "title": "Method moved from the generic type body into extension Circle where Unit == Double",
+  "expected": "Edited, never plain moved: doubled() now only exists when Unit == Double (decided context rule).",
+  "status": "ok",
+  "old": "struct Circle<Unit: Numeric> {\n    var radius: Unit\n\n    func doubled() -> Unit {\n        let r = radius\n        return r + r\n    }\n}\n\nextension Circle where Unit == Double {\n    func area() -> Double {\n        Double.pi * radius * radius\n    }\n}\n",
+  "new": "struct Circle<Unit: Numeric> {\n    var radius: Unit\n}\n\nextension Circle where Unit == Double {\n    func doubled() -> Unit {\n        let r = radius\n        return r + r\n    }\n\n    func area() -> Double {\n        Double.pi * radius * radius\n    }\n}\n",
+  "ops": [],
+  "never": [
+   {
+    "type": "moved"
+   }
+  ]
+ },
+ {
+  "id": "sw-ext-array-where-move",
+  "area": "trap",
+  "language": "swift",
+  "title": "Method moved from extension Circle into extension Array where Element == Circle",
+  "expected": "Edited, never plain moved: totalArea becomes a method on [Circle] instead of Circle (self and callers change).",
+  "status": "ok",
+  "old": "struct Circle {\n    var radius: Double\n}\n\nextension Circle {\n    func totalArea(of circles: [Circle]) -> Double {\n        var total = 0.0\n        for c in circles { total += c.radius * c.radius }\n        return total * Double.pi\n    }\n}\n\nextension Array where Element == Circle {\n    var count2: Int { count * 2 }\n}\n",
+  "new": "struct Circle {\n    var radius: Double\n}\n\nextension Circle {\n}\n\nextension Array where Element == Circle {\n    func totalArea(of circles: [Circle]) -> Double {\n        var total = 0.0\n        for c in circles { total += c.radius * c.radius }\n        return total * Double.pi\n    }\n\n    var count2: Int { count * 2 }\n}\n",
+  "ops": [],
+  "never": [
+   {
+    "type": "moved"
+   }
+  ]
+ },
+ {
+  "id": "sw-ext-between-extensions",
+  "area": "trap",
+  "language": "swift",
+  "title": "Method moved between two plain extensions of the same type",
+  "expected": "moved: area() goes from the first extension Circle to the second; both unconstrained, same meaning.",
+  "status": "ok",
+  "old": "struct Circle {\n    var radius: Double\n}\n\n// MARK: - Geometry\n\nextension Circle {\n    func area() -> Double {\n        let r = radius\n        return Double.pi * r * r\n    }\n\n    func diameter() -> Double {\n        radius * 2\n    }\n}\n\n// MARK: - Formatting\n\nextension Circle {\n    func label() -> String {\n        \"r=\\(radius)\"\n    }\n}\n",
+  "new": "struct Circle {\n    var radius: Double\n}\n\n// MARK: - Geometry\n\nextension Circle {\n    func diameter() -> Double {\n        radius * 2\n    }\n}\n\n// MARK: - Formatting\n\nextension Circle {\n    func area() -> Double {\n        let r = radius\n        return Double.pi * r * r\n    }\n\n    func label() -> String {\n        \"r=\\(radius)\"\n    }\n}\n",
+  "ops": [
+   {
+    "type": "moved",
+    "old": [
+     [
+      8,
+      11
+     ]
+    ],
+    "new": [
+     [
+      16,
+      19
+     ]
+    ]
+   }
+  ]
+ },
+ {
+  "id": "sw-proto-default-impl-edit",
+  "area": "trap",
+  "language": "swift",
+  "title": "Default implementation in extension P edited; requirement in protocol P untouched",
+  "expected": "Edited inside the default implementation only; the requirement is a separate declaration and pairs with nothing else.",
+  "status": "ok",
+  "old": "protocol Greeter {\n    func greet(name: String) -> String\n    func farewell() -> String\n}\n\nextension Greeter {\n    func greet(name: String) -> String {\n        \"Hello, \\(name)\"\n    }\n}\n",
+  "new": "protocol Greeter {\n    func greet(name: String) -> String\n    func farewell() -> String\n}\n\nextension Greeter {\n    func greet(name: String) -> String {\n        \"Hi there, \\(name)!\"\n    }\n}\n",
+  "ops": [],
+  "never": [
+   {
+    "type": "moved"
+   },
+   {
+    "type": "movedWithEdit"
+   },
+   {
+    "type": "renamed"
+   }
+  ]
+ },
+ {
+  "id": "sw-proto-requirement-reorder",
+  "area": "trap",
+  "language": "swift",
+  "title": "Requirements reordered inside protocol P; default implementation unchanged",
+  "expected": "Requirement lines move within the protocol body only (moved or reordered); nothing claimed on the extension.",
+  "status": "borderline",
+  "old": "protocol Greeter {\n    func greet(name: String) -> String\n    func farewell() -> String\n    var title: String { get }\n}\n\nextension Greeter {\n    func greet(name: String) -> String {\n        \"Hello, \\(name)\"\n    }\n}\n",
+  "new": "protocol Greeter {\n    var title: String { get }\n    func farewell() -> String\n    func greet(name: String) -> String\n}\n\nextension Greeter {\n    func greet(name: String) -> String {\n        \"Hello, \\(name)\"\n    }\n}\n",
+  "ops": [],
+  "never": [
+   {
+    "type": "moved",
+    "new": [
+     [
+      7,
+      11
+     ]
+    ]
+   },
+   {
+    "type": "movedWithEdit"
+   },
+   {
+    "type": "renamed"
+   }
+  ]
+ },
+ {
+  "id": "sw-wrapper-state-binding",
+  "area": "trap",
+  "language": "swift",
+  "title": "@State var count -> @Binding var count",
+  "expected": "Edited: the property wrapper changes ownership and behaviour; a name inside an attribute is never a rename.",
+  "status": "ok",
+  "old": "import SwiftUI\n\nstruct Counter: View {\n    @State var count: Int\n\n    var body: some View {\n        Text(\"\\(count)\")\n    }\n}\n",
+  "new": "import SwiftUI\n\nstruct Counter: View {\n    @Binding var count: Int\n\n    var body: some View {\n        Text(\"\\(count)\")\n    }\n}\n",
+  "ops": [],
+  "never": [
+   {
+    "type": "renamed"
+   },
+   {
+    "type": "reformatted"
+   }
+  ]
+ },
+ {
+  "id": "sw-wrapper-add",
+  "area": "trap",
+  "language": "swift",
+  "title": "Adding @Published to a stored property",
+  "expected": "Edited: adding a wrapper changes behaviour; not reformatted, not renamed.",
+  "status": "ok",
+  "old": "import Combine\n\nfinal class Profile: ObservableObject {\n    var name: String = \"\"\n    var age: Int = 0\n}\n",
+  "new": "import Combine\n\nfinal class Profile: ObservableObject {\n    @Published var name: String = \"\"\n    var age: Int = 0\n}\n",
+  "ops": [],
+  "never": [
+   {
+    "type": "renamed"
+   },
+   {
+    "type": "reformatted"
+   }
+  ]
+ },
+ {
+  "id": "sw-wrapper-remove-move",
+  "area": "trap",
+  "language": "swift",
+  "title": "A property moves below its neighbour and loses its @AppStorage wrapper",
+  "expected": "Edited (or movedWithEdit); never plain moved and never renamed, because the wrapper was removed.",
+  "status": "ok",
+  "old": "import SwiftUI\n\nstruct Settings: View {\n    @AppStorage(\"theme\") var theme: String = \"light\"\n    var title: String\n\n    var body: some View {\n        Text(title + theme)\n    }\n}\n",
+  "new": "import SwiftUI\n\nstruct Settings: View {\n    var title: String\n    var theme: String = \"light\"\n\n    var body: some View {\n        Text(title + theme)\n    }\n}\n",
+  "ops": [],
+  "never": [
+   {
+    "type": "moved"
+   },
+   {
+    "type": "renamed"
+   },
+   {
+    "type": "reformatted"
+   }
+  ]
+ },
+ {
+  "id": "sw-overload-reorder",
+  "area": "trap",
+  "language": "swift",
+  "title": "scaled(by: Int) moved above scaled(by: Double)",
+  "expected": "moved: the Int overload moves to the top, paired with itself (key scaled(by:Int)), not with the Double overload.",
+  "status": "ok",
+  "old": "struct Circle {\n    var radius: Double\n\n    func scaled(by factor: Double) -> Circle {\n        Circle(radius: radius * factor)\n    }\n\n    func translated() -> Circle {\n        Circle(radius: radius)\n    }\n\n    func area() -> Double {\n        Double.pi * radius * radius\n    }\n\n    func scaled(by factor: Int) -> Circle {\n        Circle(radius: radius * Double(factor))\n    }\n}\n",
+  "new": "struct Circle {\n    var radius: Double\n\n    func scaled(by factor: Int) -> Circle {\n        Circle(radius: radius * Double(factor))\n    }\n\n    func scaled(by factor: Double) -> Circle {\n        Circle(radius: radius * factor)\n    }\n\n    func translated() -> Circle {\n        Circle(radius: radius)\n    }\n\n    func area() -> Double {\n        Double.pi * radius * radius\n    }\n}\n",
+  "ops": [
+   {
+    "type": "moved",
+    "old": [
+     [
+      16,
+      18
+     ]
+    ],
+    "new": [
+     [
+      4,
+      6
+     ]
+    ]
+   }
+  ],
+  "never": [
+   {
+    "type": "movedWithEdit"
+   },
+   {
+    "type": "renamed"
+   }
+  ]
+ },
+ {
+  "id": "sw-overload-param-type",
+  "area": "trap",
+  "language": "swift",
+  "title": "scaled(by: Int) -> scaled(by: Float)",
+  "expected": "Edited: a parameter type change is a signature change (a different overload), not a rename.",
+  "status": "ok",
+  "old": "struct Circle {\n    var radius: Double\n\n    func scaled(by factor: Int) -> Circle {\n        Circle(radius: radius * Double(factor))\n    }\n}\n",
+  "new": "struct Circle {\n    var radius: Double\n\n    func scaled(by factor: Float) -> Circle {\n        Circle(radius: radius * Double(factor))\n    }\n}\n",
+  "ops": [],
+  "never": [
+   {
+    "type": "renamed"
+   },
+   {
+    "type": "reformatted"
+   }
+  ]
+ },
+ {
+  "id": "sw-computed-get-shorthand",
+  "area": "trap",
+  "language": "swift",
+  "title": "Computed property: explicit get { } removed",
+  "expected": "Edited in v1 (the spec keeps get-block vs shorthand as an edit); not reformatted, not moved.",
+  "status": "ok",
+  "old": "struct Circle {\n    var radius: Double\n\n    var area: Double {\n        get {\n            Double.pi * radius * radius\n        }\n    }\n}\n",
+  "new": "struct Circle {\n    var radius: Double\n\n    var area: Double {\n        Double.pi * radius * radius\n    }\n}\n",
+  "ops": [],
+  "never": [
+   {
+    "type": "reformatted"
+   },
+   {
+    "type": "moved"
+   },
+   {
+    "type": "renamed"
+   }
+  ]
+ },
+ {
+  "id": "sw-computed-extract",
+  "area": "trap",
+  "language": "swift",
+  "title": "Two statements of a computed getter extracted into a private method",
+  "expected": "extractedFunction: the subtotal/total lines of summary's getter now live in discountedTotal(), which the getter calls.",
+  "status": "ok",
+  "old": "struct Order {\n    var items: [Int]\n    var discount: Int\n\n    var summary: String {\n        let subtotal = items.reduce(0, +)\n        let total = max(0, subtotal - discount)\n        let label = total > 100 ? \"large\" : \"small\"\n        return \"\\(label): \\(total)\"\n    }\n}\n",
+  "new": "struct Order {\n    var items: [Int]\n    var discount: Int\n\n    var summary: String {\n        let total = discountedTotal()\n        let label = total > 100 ? \"large\" : \"small\"\n        return \"\\(label): \\(total)\"\n    }\n\n    private func discountedTotal() -> Int {\n        let subtotal = items.reduce(0, +)\n        return max(0, subtotal - discount)\n    }\n}\n",
+  "ops": [
+   {
+    "type": "extractedFunction",
+    "old": [
+     [
+      6,
+      7
+     ]
+    ],
+    "new": [
+     [
+      6,
+      6
+     ],
+     [
+      11,
+      14
+     ]
+    ]
+   }
+  ]
+ },
+ {
+  "id": "sw-inline-implicit-return",
+  "area": "trap",
+  "language": "swift",
+  "title": "Helper inlined into a function whose body was one implicit-return expression",
+  "expected": "inlinedFunction: sum(_:) disappears and its body replaces the implicit-return call in total().",
+  "status": "ok",
+  "old": "struct Cart {\n    var prices: [Int]\n\n    func total() -> Int {\n        sum(prices)\n    }\n\n    private func sum(_ values: [Int]) -> Int {\n        var t = 0\n        for v in values { t += v }\n        return t\n    }\n}\n",
+  "new": "struct Cart {\n    var prices: [Int]\n\n    func total() -> Int {\n        var t = 0\n        for v in prices { t += v }\n        return t\n    }\n}\n",
+  "ops": [
+   {
+    "type": "inlinedFunction",
+    "old": [
+     [
+      5,
+      5
+     ],
+     [
+      8,
+      12
+     ]
+    ],
+    "new": [
+     [
+      5,
+      7
+     ]
+    ]
+   }
+  ]
+ },
+ {
+  "id": "sw-ifos-cross-branch",
+  "area": "trap",
+  "language": "swift",
+  "title": "Function moved from the #if os(Linux) branch to the #else branch",
+  "expected": "Edited, never plain moved: name() now compiles on every platform except Linux (decided context rule).",
+  "status": "ok",
+  "old": "import Foundation\n\nenum Platform {\n#if os(Linux)\n    static func name() -> String {\n        let base = \"linux\"\n        return base.uppercased()\n    }\n#else\n    static func version() -> Int {\n        14\n    }\n#endif\n}\n",
+  "new": "import Foundation\n\nenum Platform {\n#if os(Linux)\n#else\n    static func name() -> String {\n        let base = \"linux\"\n        return base.uppercased()\n    }\n\n    static func version() -> Int {\n        14\n    }\n#endif\n}\n",
+  "ops": [],
+  "never": [
+   {
+    "type": "moved"
+   }
+  ]
+ },
+ {
+  "id": "sw-ifos-within-branch",
+  "area": "trap",
+  "language": "swift",
+  "title": "Function moved within the #if os(Linux) branch",
+  "expected": "moved: name() (Linux version) moves below its siblings in the same branch; the #else name() is a different declaration and is untouched.",
+  "status": "ok",
+  "old": "import Foundation\n\nenum Platform {\n#if os(Linux)\n    static func name() -> String {\n        let base = \"linux\"\n        return base.uppercased()\n    }\n\n    static func version() -> Int {\n        6\n    }\n\n    static func shell() -> String {\n        \"/bin/sh\"\n    }\n#else\n    static func name() -> String {\n        \"darwin\"\n    }\n#endif\n}\n",
+  "new": "import Foundation\n\nenum Platform {\n#if os(Linux)\n    static func version() -> Int {\n        6\n    }\n\n    static func shell() -> String {\n        \"/bin/sh\"\n    }\n\n    static func name() -> String {\n        let base = \"linux\"\n        return base.uppercased()\n    }\n#else\n    static func name() -> String {\n        \"darwin\"\n    }\n#endif\n}\n",
+  "ops": [
+   {
+    "type": "moved",
+    "old": [
+     [
+      5,
+      8
+     ]
+    ],
+    "new": [
+     [
+      13,
+      16
+     ]
+    ]
+   }
+  ],
+  "never": [
+   {
+    "type": "movedWithEdit"
+   }
+  ]
+ },
+ {
+  "id": "sw-doc-comment-move",
+  "area": "trap",
+  "language": "swift",
+  "title": "Function with a /** */ doc comment moved below its siblings",
+  "expected": "moved: split(_:) together with its multi-line doc comment (the comment is attached, not deleted and re-added).",
+  "status": "ok",
+  "old": "struct Parser {\n    /**\n     Splits the input on commas.\n     - Parameter text: the raw line.\n     */\n    func split(_ text: String) -> [String] {\n        text.split(separator: \",\").map(String.init)\n    }\n\n    func trim(_ s: String) -> String {\n        s.trimmingCharacters(in: .whitespaces)\n    }\n\n    func lower(_ s: String) -> String {\n        s.lowercased()\n    }\n}\n",
+  "new": "struct Parser {\n    func trim(_ s: String) -> String {\n        s.trimmingCharacters(in: .whitespaces)\n    }\n\n    func lower(_ s: String) -> String {\n        s.lowercased()\n    }\n\n    /**\n     Splits the input on commas.\n     - Parameter text: the raw line.\n     */\n    func split(_ text: String) -> [String] {\n        text.split(separator: \",\").map(String.init)\n    }\n}\n",
+  "ops": [
+   {
+    "type": "moved",
+    "old": [
+     [
+      2,
+      8
+     ]
+    ],
+    "new": [
+     [
+      10,
+      16
+     ]
+    ]
+   }
+  ],
+  "never": [
+   {
+    "type": "deleted",
+    "old": [
+     [
+      2,
+      5
+     ]
+    ]
+   },
+   {
+    "type": "added",
+    "new": [
+     [
+      10,
+      13
+     ]
+    ]
+   }
+  ]
+ },
+ {
+  "id": "sw-rename-hides-edit",
+  "area": "trap",
+  "language": "swift",
+  "title": "Property rename limit -> maxCount hides < becoming <= on the use line",
+  "expected": "renamed on the declaration line only; the use line also changed < to <=, so a rename covering line 5 is false.",
+  "status": "ok",
+  "old": "struct Limits {\n    let limit = 10\n\n    func ok(_ n: Int) -> Bool {\n        n < limit\n    }\n}\n",
+  "new": "struct Limits {\n    let maxCount = 10\n\n    func ok(_ n: Int) -> Bool {\n        n <= maxCount\n    }\n}\n",
+  "ops": [
+   {
+    "type": "renamed",
+    "old": [
+     [
+      2,
+      2
+     ]
+    ],
+    "new": [
+     [
+      2,
+      2
+     ]
+    ]
+   }
+  ],
+  "never": [
+   {
+    "type": "renamed",
+    "old": [
+     [
+      5,
+      5
+     ]
+    ],
+    "new": [
+     [
+      5,
+      5
+     ]
+    ]
+   },
+   {
+    "type": "reformatted"
+   }
+  ]
+ },
+ {
+  "id": "sw-rename-clean",
+  "area": "trap",
+  "language": "swift",
+  "title": "Method renamed isWithin -> fits with its one call site",
+  "expected": "renamed: one name replaced consistently on the declaration and the call; nothing else changed.",
+  "status": "ok",
+  "old": "struct Limits {\n    let limit = 10\n\n    func isWithin(_ n: Int) -> Bool {\n        n < limit\n    }\n\n    func check(_ values: [Int]) -> Bool {\n        values.allSatisfy { isWithin($0) }\n    }\n}\n",
+  "new": "struct Limits {\n    let limit = 10\n\n    func fits(_ n: Int) -> Bool {\n        n < limit\n    }\n\n    func check(_ values: [Int]) -> Bool {\n        values.allSatisfy { fits($0) }\n    }\n}\n",
+  "ops": [
+   {
+    "type": "renamed",
+    "old": [
+     [
+      4,
+      4
+     ],
+     [
+      9,
+      9
+     ]
+    ],
+    "new": [
+     [
+      4,
+      4
+     ],
+     [
+      9,
+      9
+     ]
+    ]
+   }
+  ]
+ }
+]

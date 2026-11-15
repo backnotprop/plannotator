@@ -120,6 +120,17 @@ describe('semantic diff client', () => {
     client.dispose();
   });
 
+  test('Swift files are supported when the server ships the Swift grammar', () => {
+    const log = { created: 0, terminated: 0 };
+    const shipped = { ...advert, grammars: { ...advert.grammars, 'tree-sitter-swift.wasm': '/assets/sem-diff/tree-sitter-swift-0.wasm' } };
+    expect(createSemDiffClient({ advert, origin: 'http://127.0.0.1:1', createWorker: fakeWorker('engine', log) }).supports('Sources/App/Circle.swift')).toBe(false);
+    const client = createSemDiffClient({ advert: shipped, origin: 'http://127.0.0.1:1', createWorker: fakeWorker('engine', log) });
+    expect(client.supports('Sources/App/Circle.swift')).toBe(true);
+    expect(client.supports('Package.swift')).toBe(true);
+    expect(log.created).toBe(0);
+    client.dispose();
+  });
+
   test('without an advert nothing is supported', async () => {
     const log = { created: 0, terminated: 0 };
     const client = createSemDiffClient({ advert: undefined, origin: 'http://127.0.0.1:1', createWorker: fakeWorker('engine', log) });

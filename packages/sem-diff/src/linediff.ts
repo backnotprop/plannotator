@@ -7,7 +7,7 @@
 // diffed freely.
 import { diffArrays } from 'diff';
 import type { Node } from 'web-tree-sitter';
-import type { LanguageConfig } from './parse.ts';
+import type { Declaration, LanguageConfig } from './parse.ts';
 import { attachedAbove, endLine, keepWeights, longestInOrder, pairSameNamed, startLine, tokens } from './syntax.ts';
 
 /** A run of changed lines; one side is null for a pure insertion or deletion. */
@@ -39,12 +39,14 @@ function anchors(oldContainer: Node, newContainer: Node, cfg: LanguageConfig): A
   };
   // Same pairing as the move detector: repeated names pair by similarity.
   const base = (x: { key: string }) => x.key.replace(/#\d+$/, '');
-  const pairs = pairSameNamed(keyed(oldContainer), keyed(newContainer), base, (x) => [...(attachedAbove(x.d.node, cfg.attachedTypes).match(/\S+/g) ?? []), ...tokens(x.d.node)])
+  const similarBy = (x: { d: Declaration }) =>
+    cfg.typeOf && x.d.members ? cfg.declarationsIn(x.d.members).map((m) => `${m.kind}:${m.name}`) : [...(attachedAbove(x.d.node, cfg.attachedTypes).match(/\S+/g) ?? []), ...tokens(x.d.node)];
+  const pairs = pairSameNamed(keyed(oldContainer), keyed(newContainer), base, similarBy)
     .map(([o, n]) => ({ a: o.d, b: n.d }))
     .sort((x, y) => x.a.node.startIndex - y.a.node.startIndex);
   // Keep the longest run whose order is the same on both sides (the same choice the move detector makes).
   const seq = pairs.map((p) => p.b.node.startIndex);
-  const keep = [...longestInOrder(seq, keepWeights(seq, pairs.map((p) => endLine(p.a.node) - startLine(p.a.node) + 1)))].sort((x, y) => x - y);
+  const keep = [...longestInOrder(seq, keepWeights(seq, pairs.map((p) => endLine(p.a.node) - startLine(p.a.node) + 1), cfg.moveEditedFirst ? pairs.map((p) => p.a.node.text === p.b.node.text) : undefined))].sort((x, y) => x - y);
   return keep.map((i) => {
     const { a, b } = pairs[i]!;
     return { a: a.node, b: b.node, ...(a.members && b.members ? { members: [a.members, b.members] as [Node, Node] } : {}) };
