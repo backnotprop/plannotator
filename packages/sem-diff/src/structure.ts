@@ -9,7 +9,7 @@
 // 5. Paired declarations with identical tokens and comments but different
 //    text are `reformatted`.
 import type { Node } from 'web-tree-sitter';
-import { isComment, type Declaration, type LanguageConfig } from './parse.ts';
+import { brokenTree, isComment, type Declaration, type LanguageConfig } from './parse.ts';
 import { rule } from './runtime.ts';
 import type {
   SemanticDiffFold,
@@ -69,6 +69,7 @@ function leaves(n: Node, cfg: LanguageConfig) {
       else for (let i = x.childCount - 1; i >= 0; i--) { const c = x.child(i); if (c && c.isNamed) stack.push(c); else if (c) tokens.push(c.text); }
       continue;
     }
+    if (x.isMissing && cfg.harmlessMissing?.has(x.type)) continue;
     if (x.childCount === 0) {
       // A written `;` ending a JS/TS statement equals an inserted one; where the
       // line break would split the statement differently, the tree shape differs.
@@ -526,7 +527,7 @@ export function detectStructure(oldRoot: Node, newRoot: Node, cfg: LanguageConfi
   // Formatting only: same tokens, same comments, different text.
   // A class or interface whose whole shape is unchanged (`interface P { a: string }` wrapped
   // onto lines) is reformatted as a whole; otherwise its changed members are reported.
-  const whole = pairs.filter(([a, b]) => a.decl.members && !moved.has(a) && a.text !== b.text && a.seq === b.seq && !a.decl.node.hasError && !b.decl.node.hasError && invisibles(a.text) === invisibles(b.text)).map(([a]) => a.decl.node);
+  const whole = pairs.filter(([a, b]) => a.decl.members && !moved.has(a) && a.text !== b.text && a.seq === b.seq && !brokenTree(a.decl.node, cfg) && !brokenTree(b.decl.node, cfg) && invisibles(a.text) === invisibles(b.text)).map(([a]) => a.decl.node);
   const insideWhole = (a: Entity) => whole.some((w) => w.id !== a.decl.node.id && w.startIndex <= a.decl.node.startIndex && a.decl.node.endIndex <= w.endIndex);
   for (const [a, b] of pairs) {
     if (moved.has(a) || a.text === b.text || insideWhole(a)) continue;
@@ -536,7 +537,7 @@ export function detectStructure(oldRoot: Node, newRoot: Node, cfg: LanguageConfi
     // parses or reads, so a change involving them is never called formatting.
     if (invisibles(a.text) !== invisibles(b.text)) continue;
     // Code that does not parse has no reliable shape to compare.
-    if (a.decl.node.hasError || b.decl.node.hasError) continue;
+    if (brokenTree(a.decl.node, cfg) || brokenTree(b.decl.node, cfg)) continue;
     // Rust macro arguments are raw tokens: spacing can be the macro's input (`stringify!`).
     if (macroArgs(a.decl.node) !== macroArgs(b.decl.node)) continue;
     if (a.decl.members && !whole.includes(a.decl.node)) continue; // report the changed members, not the whole class

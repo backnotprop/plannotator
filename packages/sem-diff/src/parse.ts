@@ -16,7 +16,7 @@ export interface LanguageConfig {
   wasm: string;
   /** Node types that declare a named function or method. */
   functionTypes: ReadonlySet<string>;
-  callType: string;
+  callTypes: ReadonlySet<string>;
   /** Node types that hold a list of statements. */
   blockTypes: ReadonlySet<string>;
   /** The statement returns from the function (`last`: it is the body's final statement, for tail expressions). */
@@ -44,6 +44,21 @@ export interface LanguageConfig {
    * comments, and attributes such as Rust's `#[derive(..)]`.
    */
   attachedTypes: ReadonlySet<string>;
+  harmlessMissing?: ReadonlySet<string>;
+  contextAt?(root: Node, line: number): string;
+}
+
+export function brokenTree(n: Node, cfg: LanguageConfig): boolean {
+  if (!n.hasError) return false;
+  if (!cfg.harmlessMissing?.size) return true;
+  const stack: Node[] = [n];
+  while (stack.length) {
+    const x = stack.pop()!;
+    if (x.isError || (x.isMissing && !cfg.harmlessMissing.has(x.type))) return true;
+    if (!x.hasError) continue;
+    for (const c of x.children) if (c) stack.push(c);
+  }
+  return false;
 }
 
 /**
@@ -112,7 +127,7 @@ const tsLike = (id: 'typescript' | 'tsx', file: string): LanguageConfig => ({
   // `const f = () => { ... }`, class fields and object properties holding arrow
   // functions (`perform: (elements) => { ... }`) are functions too.
   functionTypes: new Set(['function_declaration', 'method_definition', 'generator_function_declaration', 'variable_declarator', 'public_field_definition', 'pair']),
-  callType: 'call_expression',
+  callTypes: new Set(['call_expression']),
   blockTypes: new Set(['statement_block']),
   // A one-line arrow (`const f = (x) => x.a + 1`) returns its expression body.
   isReturn: (s, last) => s.type === 'return_statement' || (!!last && isArrowExpressionBody(s)),
@@ -193,7 +208,7 @@ const rust: LanguageConfig = {
   id: 'rust',
   wasm: 'tree-sitter-rust/tree-sitter-rust.wasm',
   functionTypes: new Set(['function_item']),
-  callType: 'call_expression',
+  callTypes: new Set(['call_expression']),
   blockTypes: new Set(['block']),
   isReturn: (s, last) =>
     (s.type === 'expression_statement' && s.namedChild(0)?.type === 'return_expression') ||
@@ -274,7 +289,7 @@ const python: LanguageConfig = {
   id: 'python',
   wasm: 'tree-sitter-python/tree-sitter-python.wasm',
   functionTypes: new Set(['function_definition']),
-  callType: 'call',
+  callTypes: new Set(['call']),
   blockTypes: new Set(['block']),
   isReturn: (s) => s.type === 'return_statement',
   attachedTypes: new Set(['comment']),
@@ -320,7 +335,7 @@ const java: LanguageConfig = {
   id: 'java',
   wasm: 'tree-sitter-java/tree-sitter-java.wasm',
   functionTypes: new Set(['method_declaration', 'constructor_declaration']),
-  callType: 'method_invocation',
+  callTypes: new Set(['method_invocation']),
   blockTypes: new Set(['block', 'constructor_body']),
   isReturn: (s) => s.type === 'return_statement',
   attachedTypes: new Set(['line_comment', 'block_comment']),
@@ -353,7 +368,7 @@ const csharp: LanguageConfig = {
   id: 'csharp',
   wasm: 'tree-sitter-c-sharp/tree-sitter-c_sharp.wasm',
   functionTypes: new Set(['method_declaration', 'constructor_declaration', 'local_function_statement']),
-  callType: 'invocation_expression',
+  callTypes: new Set(['invocation_expression']),
   blockTypes: new Set(['block']),
   // An expression-bodied member (`int F(int x) => x + 1;`) returns its expression, like a
   // one-line arrow in TypeScript: code pulled out into one is a single value moved.
@@ -395,7 +410,7 @@ export const LANGUAGES: Record<LanguageId, LanguageConfig> = {
     id: 'go',
     wasm: 'tree-sitter-go/tree-sitter-go.wasm',
     functionTypes: new Set(['function_declaration', 'method_declaration']),
-    callType: 'call_expression',
+    callTypes: new Set(['call_expression']),
     blockTypes: new Set(['block']),
     isReturn: (s) => s.type === 'return_statement',
     attachedTypes: new Set(['comment']),

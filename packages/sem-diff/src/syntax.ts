@@ -137,7 +137,7 @@ export function callsTo(n: Node, name: string, cfg: LanguageConfig, fn?: Node): 
   const out: Node[] = [];
   const walk = (x: Node) => {
     // A free function is never called through an object: `JSON.parse(t)` does not call a local `parse`.
-    if (x.type === cfg.callType && cfg.calleeOf(x) === name && argumentCount(x) <= max && argumentCount(x) >= min && !(fn && !isMethod(fn) && memberCall(x)) && !(fn?.type === 'pair' && memberCall(x) && !thisCall(x))) out.push(x);
+    if (cfg.callTypes.has(x.type) && cfg.calleeOf(x) === name && argumentCount(x) <= max && argumentCount(x) >= min && !(fn && !isMethod(fn) && memberCall(x)) && !(fn?.type === 'pair' && memberCall(x) && !thisCall(x))) out.push(x);
     // JSX renders a component by calling it: `<OrderRow order={o} />` calls `OrderRow`.
     // Effect runs a defined effect with `yield* load` or `yield* load.pipe(...)`: no call, but the same use.
     else if (x.type === 'yield_expression' && x.child(1)?.type === '*' && yieldsEffect(x.namedChild(0), name)) out.push(x);
@@ -149,7 +149,7 @@ export function callsTo(n: Node, name: string, cfg: LanguageConfig, fn?: Node): 
     // A function handed over as a value is used all the same: `Effect.catch(failSearch)`,
     // `items.map(toRow)`, `atom(resolveLoad)`. Only bare names in argument lists, and never a
     // function of an object literal (those are reached through `this` only).
-    else if (rule('VALUE_REFS') && x.parent?.type === 'arguments' && cfg.identifierTypes.has(x.type) && x.text === name && fn?.type !== 'pair' && x.parent.parent?.type === cfg.callType && cfg.calleeOf(x.parent.parent) !== name) out.push(x);
+    else if (rule('VALUE_REFS') && x.parent?.type === 'arguments' && cfg.identifierTypes.has(x.type) && x.text === name && fn?.type !== 'pair' && !!x.parent.parent && cfg.callTypes.has(x.parent.parent.type) && cfg.calleeOf(x.parent.parent) !== name) out.push(x);
     for (const c of x.namedChildren) if (c) walk(c);
   };
   walk(n);

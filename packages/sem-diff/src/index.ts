@@ -1,7 +1,7 @@
 // Entry point: two versions of a file in, Pierre semantic data out.
 import { detectExtracted } from './extract.ts';
 import { DEFAULT_INLINE_OPTIONS, detectInlined } from './inline.ts';
-import { LANGUAGES, withTrees, type LanguageId } from './parse.ts';
+import { LANGUAGES, withTrees, type LanguageConfig, type LanguageId } from './parse.ts';
 import type { SemanticDiffFold, SemanticDiffLineRange, SemanticDiffOperation, SemanticDiffTextRange } from './pierre-types.ts';
 import { detectStructure } from './structure.ts';
 import { uncoveredChanges } from './coverage.ts';
@@ -246,6 +246,18 @@ function alike(op: SemanticDiffOperation, oldLines: string[], newLines: string[]
   return (2 * common) / (a.length + b.length || 1) >= MOVED_WITH_EDIT_MIN_SIMILARITY;
 }
 
+function contextChanged(op: SemanticDiffOperation, cfg: LanguageConfig, oldRoot: Node, newRoot: Node, oldLines: string[], newLines: string[]): boolean {
+  if (!cfg.contextAt) return false;
+  const contexts = (root: Node, lines: string[], ranges: SemanticDiffLineRange[]) => {
+    const out = new Set<string>();
+    for (const r of ranges) for (let l = r.start; l <= r.end; l++) if ((lines[l - 1] ?? '').trim()) out.add(cfg.contextAt!(root, l));
+    return out;
+  };
+  const before = contexts(oldRoot, oldLines, op.lines.old);
+  const after = contexts(newRoot, newLines, op.lines.new);
+  return before.size !== 1 || after.size !== 1 || [...before][0] !== [...after][0];
+}
+
 export async function semanticDiffFile(language: LanguageId, oldText: string, newText: string, name = 'file', options: DiffOptions = {}): Promise<SemanticFileDiff> {
   const cfg = LANGUAGES[language];
   const started = performance.now();
@@ -366,6 +378,7 @@ export async function semanticDiffFile(language: LanguageId, oldText: string, ne
             : op.lines.old.length + op.lines.new.length > 0
           : ownsText(op, oldLines, newLines, inString);
       if (!keep || (op.type === 'movedWithEdit' && !alike(op, oldLines, newLines))) return;
+      if ((op.type === 'moved' || op.type === 'movedWithEdit') && contextChanged(op, cfg, a.rootNode, b.rootNode, oldLines, newLines)) return;
       finalIndex.set(i, operations.length);
       operations.push(op);
     });
