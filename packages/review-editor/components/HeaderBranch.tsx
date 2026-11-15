@@ -3,6 +3,8 @@ import { RepoIcon } from '@plannotator/ui/components/RepoIcon';
 import { HeaderTotals } from './HeaderTotals';
 import { BranchName } from './BranchName';
 
+const PHONE_MIN_BRANCH_CHARS = 8;
+
 export function headerBranchTooltip(branch: string | undefined, repo: string, files: ReadonlyArray<{ additions: number; deletions: number }>): string {
   const additions = files.reduce((sum, file) => sum + file.additions, 0);
   const deletions = files.reduce((sum, file) => sum + file.deletions, 0);
@@ -23,7 +25,7 @@ export const HeaderBranch: React.FC<{
   >
     {branch && (
       <span className="min-w-0 flex overflow-hidden text-xs font-mono text-foreground" data-header-branch-name="">
-        <BranchName branch={branch} />
+        <BranchName branch={branch} minVisible={compact ? PHONE_MIN_BRANCH_CHARS : 0} />
       </span>
     )}
     {!(compact && branch) && (
