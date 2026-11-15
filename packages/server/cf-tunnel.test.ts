@@ -45,7 +45,7 @@ describe("cloudflared as the Inbox's child", () => {
     await until(() => last?.connections === 2);
     expect(tunnel.state()).toMatchObject({ state: "connected", connections: 2, restarts: 0 });
     const [run] = fake.runs();
-    expect(run).toContain("fake-run-token tunnel --no-autoupdate run");
+    expect(run).toMatch(/fake-run-token tunnel --no-autoupdate --metrics 127\.0\.0\.1:\d+ run$/);
     expect(run!.split(" ").slice(2).join(" ")).not.toContain("fake-run-token");
     const pid = tunnel.state().pid!;
     tunnel.stop();
@@ -59,6 +59,17 @@ describe("cloudflared as the Inbox's child", () => {
     });
     expect(tunnel.state().state).toBe("stopped");
   });
+
+  test("connected by cloudflared's own /ready even when its log says nothing", async () => {
+    const server = `const port = Number(process.argv[1].split(":")[1]); Bun.serve({ hostname: "127.0.0.1", port, fetch: () => Response.json({ status: 200, readyConnections: 3 }) }); setInterval(() => {}, 1e6);`;
+    const fake = fakeCloudflared(`exec "${process.execPath}" -e '${server}' "$4"`);
+    let last: CfTunnelState | null = null;
+    const tunnel = createCfTunnel({ dataDir: fake.dataDir, binary: fake.path, log: () => {}, onChange: () => (last = tunnel.state()) });
+    stops.push(tunnel.stop);
+    tunnel.start();
+    await until(() => last?.connections === 3, 9_000);
+    expect(tunnel.state().state).toBe("connected");
+  }, 15_000);
 
   test("a child that exits is started again after a growing wait, and stop ends the retries", async () => {
     const fake = fakeCloudflared('echo "ERR failed to dial edge" >&2\nexit 1');

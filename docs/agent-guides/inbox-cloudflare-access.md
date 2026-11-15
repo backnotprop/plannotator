@@ -49,7 +49,7 @@ After the checks, `Cf-*`, `Tailscale-*`, `X-Forwarded-*`, `Plannotator-Door*` an
 - It refuses a hostname that already has a record or another Access app. The ids go to config with `on: false`.
 - The outside checks (a recording listener on the port, its own `cloudflared`) send to each name: no login (it must redirect to the team), a forged token, a forged cookie and a wrong Host. Any 2xx, any Plannotator-marked answer, or anything reaching the recorder keeps it off. Only then is `on: true` set and the running Inbox told.
 - `teardown` turns it off, then deletes both DNS records, the app, the tunnel's connections and the tunnel, in that order; it stops at the first refusal and is safe to re-run. `--local-only` lists what is left.
-- `cloudflared tunnel --no-autoupdate run` gets `TUNNEL_TOKEN` in its environment, restarts with backoff (1 s doubling to 60 s, reset after a minute up), and counts connections from its log.
+- `cloudflared tunnel --no-autoupdate run` gets `TUNNEL_TOKEN` in its environment, restarts with backoff (1 s doubling to 60 s, reset after a minute up), and reads its health from `cloudflared`'s own `/ready` on a `--metrics 127.0.0.1:<free port>` listener, with the "Registered tunnel connection" log line as a fallback (`cf-ready.ts`). A failed outside check names what was seen (the status code and where a no-login visit went, or `cloudflared`'s last log line) and what to check.
 - State: `inbox.json` `cloudflare_access` (`inbox status`, `--json`), Settings.
 
 **Settings → Remote devices → Cloudflare** (`components/ThroughCloudflare.tsx`, `CloudflareSetup.tsx`, `data/cloudflareAccess.ts`, `cloudflare.css`), under "Over your tailnet", in that section's cards, rows, flow and checks:

@@ -40,6 +40,7 @@ export interface CfAccessCommandDeps {
   readToken?: () => Promise<string>;
   edgeFetch?: EdgeFetch;
   checkTimeoutMs?: number;
+  connectTimeoutMs?: number;
   out?: (line: string) => void;
   err?: (line: string) => void;
   pickPort?: () => number;
@@ -180,7 +181,7 @@ export async function runCfAccessCommand(args: readonly string[], deps: CfAccess
       return 2;
     }
     const flow = await runCfAccessSetupFlow(
-      { dataDir: deps.dataDir, api: makeApi(token), binary, apply: () => tellInbox(readInboxRegistry(deps.dataDir)), edgeFetch: deps.edgeFetch, checkTimeoutMs: deps.checkTimeoutMs },
+      { dataDir: deps.dataDir, api: makeApi(token), binary, apply: () => tellInbox(readInboxRegistry(deps.dataDir)), edgeFetch: deps.edgeFetch, checkTimeoutMs: deps.checkTimeoutMs, connectTimeoutMs: deps.connectTimeoutMs },
       { email, port, account: flag(args, "--account") || undefined, zone: flag(args, "--zone") || undefined, hostname: flag(args, "--hostname") || before?.host || undefined },
       (step, state) => {
         if (step === "checks" && state === "running") err("  Checking from outside that nothing gets in without your login…");

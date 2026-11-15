@@ -423,6 +423,30 @@ It asks for the token (or reads `CLOUDFLARE_API_TOKEN`). It creates a sign-in by
 
 You can do all of this from **Settings → Remote devices → Cloudflare** too: type your e-mail, paste the token, pick the domain, and watch each step tick. The same place shows both addresses with a QR code, whether the tunnel is connected, **Turn off** (keeps the setup) and **Remove**. It cannot be changed from a device signed in through Cloudflare. `plannotator inbox cloudflare-access status` shows the same state in a terminal. `plannotator inbox cloudflare-access teardown` turns it off and deletes the DNS records, the Access application and the tunnel, in that order (it asks for a token again). `PLANNOTATOR_INBOX_CF_ACCESS=0` keeps it off for one run.
 
+### Use a tunnel and Access application you already have
+
+If you already run a Cloudflare Tunnel to the Inbox with an Access application in front of it, you can use them as they are, without setup:
+
+1. Stop the `cloudflared` you run yourself.
+2. Save the tunnel's run token in `~/.plannotator/cloudflare-access/tunnel-token`, readable only by you (`chmod 600`). The Inbox then runs `cloudflared` for you.
+3. Add this to `~/.plannotator/config.json`, with your own values:
+
+   ```json
+   "inboxCloudflareAccess": {
+     "on": true,
+     "host": "inbox.example.com",
+     "team": "yourteam.cloudflareaccess.com",
+     "aud": "the Access application's AUD tag",
+     "allow": ["you@example.com"],
+     "port": 41234
+   }
+   ```
+
+   `port` is the local port your tunnel's ingress points at (`http://127.0.0.1:<port>`), and the ingress must set the Host header to `host`.
+4. Restart the Inbox (`plannotator inbox restart`).
+
+This opens the Inbox only. Sessions need the second address that setup creates; until then `--cloudflare-access` says so.
+
 ## Inside another app on this computer
 
 By default, no page may show the Inbox in a frame. To show it inside an app of your own on this computer, such as an agent's desktop app, list that app's origin in `~/.plannotator/config.json` and restart the Inbox:

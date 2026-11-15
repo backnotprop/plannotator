@@ -112,6 +112,24 @@ describe("plannotator inbox cloudflare-access setup", () => {
     }
   });
 
+  test("a failed outside check says what was seen and what to check", async () => {
+    const port = 40000 + Math.floor(Math.random() * 20000);
+    const refused = deps({ api: standIn().api, binary: fakeCloudflared(), edgeFetch: async () => new Response("no", { status: 403 }), pickPort: () => port });
+    expect(await runCfAccessCommand(["setup", "--email", "me@example.com"], refused.deps)).toBe(1);
+    const said = refused.err.join("\n");
+    expect(said).toContain("got HTTP 403 instead of a redirect to your Cloudflare Access login page");
+    expect(said).toContain("Zero Trust, Access, Applications");
+    const silent = join(root, "cloudflared-silent");
+    writeFileSync(silent, '#!/bin/sh\necho "2026-11-15T00:00:00Z ERR Failed to dial a quic connection error=\\"timeout\\"" >&2\nexec sleep 30\n');
+    chmodSync(silent, 0o755);
+    const stuck = deps({ api: standIn().api, binary: silent, edgeFetch: async () => new Response(null, { status: 302 }), pickPort: () => port, connectTimeoutMs: 1_500 });
+    expect(await runCfAccessCommand(["setup", "--email", "me@example.com"], stuck.deps)).toBe(1);
+    const stuckSaid = stuck.err.join("\n");
+    expect(stuckSaid).toContain("did not report a connection to Cloudflare within 2 s");
+    expect(stuckSaid).toContain("Failed to dial a quic connection");
+    expect(stuckSaid).toContain("outbound UDP 7844");
+  }, 20_000);
+
   test("needs a typed e-mail and cloudflared before it touches Cloudflare", async () => {
     const stand = standIn();
     const noEmail = deps({ api: stand.api, binary: fakeCloudflared() });

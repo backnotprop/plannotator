@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { cfAccessDir } from "@plannotator/shared/inbox/cf-access-door";
+import { cleanLogLine, freeLoopbackPort, metricsArgs, readyConnections, REGISTERED_LINE } from "./cf-ready";
 
 export type CfTunnelPhase = "starting" | "connected" | "retrying" | "missing" | "stopped";
 
@@ -56,13 +57,9 @@ const defaultTimers: CfTunnelTimers = {
   clear: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
 };
 
-const REGISTERED = /Registered tunnel connection\b.*?\bconnIndex=(\d+)/;
 const UNREGISTERED = /(?:Unregistered tunnel connection|Connection terminated|Lost connection)\b.*?\bconnIndex=(\d+)/;
 const ERROR_LINE = /\b(?:ERR|error)\b/;
 
-function clean(line: string): string {
-  return line.replace(/[A-Za-z0-9_+/=-]{40,}/g, "[redacted]").slice(0, 300);
-}
 
 export function tunnelEnv(token: string, env: NodeJS.ProcessEnv = process.env): Record<string, string> {
   const keep = ["PATH", "HOME", "USER", "LOGNAME", "TMPDIR", "TEMP", "TMP", "SYSTEMROOT", "LANG", "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY", "https_proxy", "http_proxy", "no_proxy"];
@@ -102,11 +99,11 @@ export function createCfTunnel(partial: Partial<CfTunnelOptions> & { dataDir: st
         const line = buffered.slice(0, at);
         buffered = buffered.slice(at + 1);
         if (child !== own) continue;
-        const up = REGISTERED.exec(line);
+        const up = REGISTERED_LINE.exec(line);
         const down = UNREGISTERED.exec(line);
         if (up) connected.add(up[1]!);
         else if (down) connected.delete(down[1]!);
-        else if (ERROR_LINE.test(line)) state.error = clean(line);
+        else if (ERROR_LINE.test(line)) state.error = cleanLogLine(line);
         if (up || down) set({ connections: connected.size, state: connected.size > 0 ? "connected" : "starting", ...(up ? { error: null } : {}) });
       }
     }
@@ -127,7 +124,8 @@ export function createCfTunnel(partial: Partial<CfTunnelOptions> & { dataDir: st
     }
     connected.clear();
     startedAt = options.now();
-    const own = Bun.spawn([options.binary, "tunnel", "--no-autoupdate", "run"], {
+    const metricsPort = freeLoopbackPort();
+    const own = Bun.spawn([options.binary, "tunnel", "--no-autoupdate", ...metricsArgs(metricsPort), "run"], {
       env: tunnelEnv(token),
       windowsHide: true,
       stdin: "ignore",
@@ -136,6 +134,14 @@ export function createCfTunnel(partial: Partial<CfTunnelOptions> & { dataDir: st
     });
     child = own;
     set({ state: "starting", pid: own.pid, connections: 0 });
+    const poll = setInterval(() => {
+      void readyConnections(metricsPort).then((ready) => {
+        if (child !== own || ready === null || ready === state.connections) return;
+        set({ connections: ready, state: ready > 0 ? "connected" : "starting", ...(ready > 0 ? { error: null } : {}) });
+      });
+    }, 5_000);
+    poll.unref?.();
+    void own.exited.then(() => clearInterval(poll));
     void readLines(own.stdout as ReadableStream<Uint8Array>, own);
     void readLines(own.stderr as ReadableStream<Uint8Array>, own);
     void own.exited.then((code) => {
