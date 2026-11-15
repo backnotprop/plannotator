@@ -408,11 +408,11 @@ By default, no page may show the Inbox in a frame. To show it inside an app of y
 Each entry is one exact origin, which is what the app's page reports as `location.origin`:
 
 - an app scheme with a name, such as `app://myapp` or `tauri://localhost`;
-- `http://` or `https://` on `localhost`, a `.localhost` name, `127.0.0.1` or `[::1]`, with its port, such as `http://localhost:5173`.
+- `http://` or `https://` on `localhost`, a `.localhost` name or `127.0.0.1`, such as `http://localhost:5173`. Without a port, an entry means the usual port only (80 for `http`, 443 for `https`), never any port: Tauri on Windows is `http://tauri.localhost`. `http://localhost` does not let a page on `http://localhost:3000` show the Inbox.
 
 Use an app scheme when you can. A port trusts any program that later runs on that port.
 
-The Inbox ignores any other entry and says so when it starts: `*` or any other wildcard, `file://`, a scheme without a name, a path or a trailing slash, an address without a port, and every website. An app loaded from `file://` cannot be listed. Register a scheme for it instead, or show the Inbox in a view of its own (in Electron, a `WebContentsView`), which needs no setting.
+The Inbox ignores any other entry and says so when it starts: `*` or any other wildcard, `file://`, a scheme without a name, a path or a trailing slash, an IPv6 address such as `[::1]`, and every website. An app loaded from `file://` cannot be listed. Register a scheme for it instead, or show the Inbox in a view of its own (in Electron, a `WebContentsView`), which needs no setting.
 
 The setting changes only the Inbox on this computer. The tailnet address can never be framed. The app's page can show the Inbox, but it cannot read it or use its API. Pages that agents attach, `html` blocks and the tour show inside the app too. A running app that an agent opened for you (a live site) does not show inside the app yet.
 

@@ -15,10 +15,11 @@
  * own origin, and a request from the host page itself still meets the write
  * and read guards (`Origin` and `Sec-Fetch-Site`) as any other site does.
  *
- * Only exact origins of an app on this computer are kept: `http(s)` on a
- * loopback or `.localhost` name with its port, or an app scheme with a host
- * (`app://hermes`, `tauri://localhost`). A wildcard, `'self'`, `file:`, a
- * scheme alone, a path, or any other host is dropped with one stderr line, so
+ * Only exact origins of an app on this computer are kept: `http(s)` on
+ * `localhost`, a `.localhost` name or 127/8, with a port or without one (the
+ * scheme's default port only), or an app scheme with a host (`app://hermes`,
+ * `tauri://localhost`). A wildcard, `'self'`, `file:`, a scheme alone, a path,
+ * an IPv6 literal, or any other host is dropped with one stderr line, so
  * nothing in the list can widen the policy or add a directive to it.
  */
 import { isLocalhostHostname, isLoopbackHostname } from "@plannotator/shared/loopback-host";
@@ -58,9 +59,14 @@ export function inboxFrameAncestor(entry: unknown): string | null {
   if (value.startsWith("http://") || value.startsWith("https://")) {
     if (!URL.canParse(value)) return null;
     const url = new URL(value);
-    // `origin` drops a path, query, credentials and a default port, so equality means the entry was exactly one origin.
-    if (url.origin !== value || url.port === "") return null;
-    return isLoopbackHostname(url.hostname) || isLocalhostHostname(url.hostname) ? value : null;
+    // `origin` drops a path, query and credentials, so equality means the entry was exactly one origin. Written
+    // without a port, or with the scheme's own, it is named without one: in CSP that is the default port only
+    // (`http://tauri.localhost`, Tauri on Windows), never "any port".
+    const defaultPort = url.protocol === "https:" ? "443" : "80";
+    if (value !== url.origin && value !== `${url.origin}:${defaultPort}`) return null;
+    // A bracketed IPv6 literal is no CSP host-source: the browser would drop it from the policy without a word.
+    if (url.hostname.startsWith("[")) return null;
+    return isLoopbackHostname(url.hostname) || isLocalhostHostname(url.hostname) ? url.origin : null;
   }
   const app = APP_ORIGIN.exec(value);
   if (!app || REFUSED_SCHEMES.has(app[1]!)) return null;

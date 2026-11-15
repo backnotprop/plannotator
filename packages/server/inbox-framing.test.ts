@@ -24,14 +24,19 @@ const json = (body: unknown, status = 200) => Response.json(body, { status });
 const directives = (csp: string) => new Map(csp.split(";").map((part) => part.trim().split(/\s+/)).map(([name, ...values]) => [name!, values]));
 
 describe("inboxFrameAncestors: what is kept", () => {
-  test("exact origins of an app on this computer: loopback http(s) with its port, and app schemes with a host", () => {
+  test("exact origins of an app on this computer: loopback http(s) with or without a port, and app schemes with a host", () => {
     for (const origin of [
       "http://localhost:5173",
       "https://localhost:8443",
       "http://127.0.0.1:3000",
       "http://127.4.5.6:3000",
-      "http://[::1]:5173",
       "http://hermes.localhost:61738",
+      // No port: the scheme's default port only (Tauri on Windows serves its UI at http://tauri.localhost).
+      "http://tauri.localhost",
+      "https://tauri.localhost",
+      "http://localhost",
+      "https://localhost",
+      "http://127.0.0.1",
       "app://hermes",
       "app://hermes:3000",
       "tauri://localhost",
@@ -42,9 +47,23 @@ describe("inboxFrameAncestors: what is kept", () => {
     // Written loosely, named as the browser compares it.
     expect(inboxFrameAncestor("  APP://Hermes ")).toBe("app://hermes");
     expect(inboxFrameAncestor("HTTP://LOCALHOST:5173")).toBe("http://localhost:5173");
+    // The scheme's own port written out is the same origin, named without it.
+    expect(inboxFrameAncestor("http://localhost:80")).toBe("http://localhost");
+    expect(inboxFrameAncestor("https://localhost:443")).toBe("https://localhost");
+    expect(inboxFrameAncestor("http://tauri.localhost:80")).toBe("http://tauri.localhost");
   });
 
-  test("everything else is dropped: wildcards, keywords, file: and other browser schemes, a scheme alone, a path, a default or missing port, any host on the network, a second directive", () => {
+  test("an entry without a port names the default port only, never any port: the policy carries it as written, with no port wildcard", () => {
+    const framers = resolveInboxFrameAncestors(["http://localhost", "http://tauri.localhost"]);
+    expect(framers).toEqual(["http://localhost", "http://tauri.localhost"]);
+    const sources = directives(withFrameAncestors(INBOX_WINDOW_CSP, framers)).get("frame-ancestors")!;
+    expect(sources).toEqual(["http://localhost", "http://tauri.localhost"]);
+    // A host page at http://localhost:3000 is a different origin; nothing in the list names its port.
+    for (const source of sources) expect(source).not.toMatch(/:(\d+|\*)$/);
+    expect(framers).not.toContain("http://localhost:3000");
+  });
+
+  test("everything else is dropped: wildcards, keywords, file: and other browser schemes, a scheme alone, a path or trailing slash, an IPv6 literal, any host on the network, a second directive", () => {
     for (const entry of [
       "*",
       "'self'",
@@ -62,9 +81,10 @@ describe("inboxFrameAncestors: what is kept", () => {
       "about://blank",
       "chrome-extension://abcdefghijklmnop",
       "ws://localhost:5173",
-      "http://localhost",
-      "http://localhost:80",
-      "https://localhost:443",
+      "http://localhost:80/",
+      "http://localhost:8080:80",
+      "http://[::1]:5173",
+      "http://[::1]",
       "http://localhost:5173/",
       "http://localhost:5173/app",
       "http://localhost:5173?x=1",

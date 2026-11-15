@@ -130,7 +130,7 @@ test("with a list, the window's port: no X-Frame-Options and frame-ancestors exa
 });
 
 test("a list of refused entries only, or none, changes nothing: DENY and the window's policy as it was, the documents' policies as they were", async () => {
-  for (const frameAncestors of [["*", "'self'", "file://", "https://example.com", "http://localhost"], undefined]) {
+  for (const frameAncestors of [["*", "'self'", "file://", "https://example.com", "http://[::1]:5173"], undefined]) {
     const inbox = await start(world(), frameAncestors ? { frameAncestors } : {});
     const page = await fetch(`${base(inbox)}/`);
     expect(page.headers.get("x-frame-options")).toBe("DENY");
