@@ -13,7 +13,7 @@
  * PLANNOTATOR_LIST_VIEW_SHOTS; with PLANNOTATOR_LIST_VIEW_VIDEO set, the desktop page is recorded (list-view-intro.webm).
  */
 
-import { expect, test, type Browser, type Page } from '@playwright/test';
+import { expect, test, type Browser, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, renameSync } from 'node:fs';
 import { join, resolve } from 'node:path';

@@ -21,7 +21,7 @@
  *   reached the machine (rule 15).
  */
 
-import { isInboxInitiativeRecord, type InboxAgentsGroup, type InboxInitiative, type InboxListRow } from "@plannotator/core/inbox-types";
+import { isInboxId, isInboxInitiativeRecord, type InboxAgentsGroup, type InboxCardWire, type InboxInitiative, type InboxListRow } from "@plannotator/core/inbox-types";
 import { inboxPeerAgentsGroup } from "./inbox-agents-list";
 import { inboxPeerSessionNames } from "./inbox-session-names";
 import type { InboxLinkRecord } from "./inbox-links";
@@ -84,6 +84,18 @@ export interface PeerList {
   session_titles: Record<string, string>;
 }
 
+/**
+ * That machine's Board (its `GET cards`, mark `cards`), kept in memory like its list: its cards, the list rows of
+ * their threads, its tags (deleted ones too: a card's history names them), its look and its cursor.
+ */
+export interface PeerCards {
+  cursor: number;
+  cards: InboxCardWire[];
+  threads: Record<string, (InboxListRow & { machine: string }) | null>;
+  initiatives: InboxInitiative[];
+  seen_seq: number | null;
+}
+
 /** A linked machine's update, picked by name: a version that reads as one, and nothing it could point at (no URL, no command). */
 export interface FarUpdate {
   state: "available" | "updating" | "ready" | "failed";
@@ -113,6 +125,8 @@ export interface PeerLinkOptions {
   onChange: () => void;
   /** A no-record change there (`PEER_REREAD_EVENTS`) and its list was read again: the windows hear the same event. */
   onReread?: (event: PeerRereadEvent) => void;
+  /** Its Board was read again (`cards`): the windows read the merged Board. */
+  onCards?: () => void;
   /**
    * That machine's live sessions moved its rows (a delivery, "Session ended") and its list was read again: the windows
    * read theirs. `sessions`: a session ended or came back there; `agents`: its Agents section moved; `labels`: a
@@ -168,6 +182,8 @@ export class PeerLink {
   /** Its health's `message_deletions`: its store takes a Delete on a message's words. False until it answered, and for an older Inbox. */
   messageDeletions = false;
   list: PeerList | null = null;
+  /** Its Board, once a window asked for the merged Board (`wantCards`), and only from a machine whose list takes `cards`. */
+  cards: PeerCards | null = null;
   /** That machine's own update answer (its health and its status frames), and whether its door takes `update`. */
   farUpdate: FarUpdate | null = null;
   canUpdate = false;
@@ -190,6 +206,9 @@ export class PeerLink {
   private wake: (() => void) | null = null;
   private listing: Promise<void> | null = null;
   private listAgain = false;
+  private cardsWanted = false;
+  private cardsReading: Promise<void> | null = null;
+  private cardsAgain = false;
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
   private deliveriesTimer: ReturnType<typeof setTimeout> | null = null;
   private deliveriesSessions = false;
@@ -380,14 +399,16 @@ export class PeerLink {
             if (this.cursor === null) this.cursor = helloCursor;
             wasOnline = true;
             this.setState("online");
-            this.refreshList();
+            void this.refreshList().then(() => this.refreshCards());
             this.flush();
           } else if (parsed.event === "record" && parsed.id !== null) {
             const seq = Number(parsed.id);
             if (!Number.isSafeInteger(seq)) continue;
             this.cursor = Math.max(this.cursor ?? 0, seq);
-            this.options.onRecord({ machine: this.id, seq, live: helloCursor !== null && seq > helloCursor, record: JSON.parse(parsed.data) });
+            const record = JSON.parse(parsed.data) as Json;
+            this.options.onRecord({ machine: this.id, seq, live: helloCursor !== null && seq > helloCursor, record });
             this.refreshList();
+            if (record?.kind === "card" || record?.kind === "initiative") void this.refreshCards();
           } else if (parsed.event === "status") {
             // Its update's state, as its own windows hear it. An ending that needs no restart ends this press here.
             const status = JSON.parse(parsed.data) as Json;
@@ -461,6 +482,58 @@ export class PeerLink {
       session_titles: inboxPeerSessionNames(list.session_titles),
     };
     this.options.onChange();
+    return true;
+  }
+
+  // ── The Board: read once a window asked for it, then on hello and on each card or tag record; one read at a time. ──
+
+  /** A window asked for the merged Board: this machine's is read now (when its list takes `cards`) and kept current. */
+  wantCards(): Promise<void> {
+    if (this.cardsWanted) return this.cardsReading ?? Promise.resolve();
+    this.cardsWanted = true;
+    return this.refreshCards();
+  }
+
+  refreshCards(): Promise<void> {
+    if (!this.cardsWanted || !this.list?.marks.includes("cards")) return Promise.resolve();
+    if (this.cardsReading) {
+      this.cardsAgain = true;
+      return this.cardsReading;
+    }
+    const run = (async () => {
+      do {
+        this.cardsAgain = false;
+        try {
+          const response = await this.options.transport.request("cards", "", { method: "GET", headers: this.auth(), signal: AbortSignal.timeout(this.t.requestMs) });
+          if (response.ok && this.acceptCards((await response.json()) as Json)) this.options.onCards?.();
+        } catch {
+          // The stream's own failure handling marks the line.
+        }
+      } while (this.cardsAgain && this.running);
+    })();
+    this.cardsReading = run.finally(() => {
+      this.cardsReading = null;
+    });
+    return this.cardsReading;
+  }
+
+  /** Its Board, picked by name. One older (by cursor) than the one held is dropped, as its list is (rule 5). */
+  acceptCards(model: Json): boolean {
+    const cursor = typeof model.cursor === "number" ? model.cursor : -1;
+    if (this.cards && cursor < this.cards.cursor) return false;
+    const threads: PeerCards["threads"] = {};
+    if (model.threads && typeof model.threads === "object") {
+      for (const [id, row] of Object.entries(model.threads as Json)) {
+        if (isInboxId("msg", id)) threads[id] = row && typeof row === "object" ? { ...(row as InboxListRow), machine: this.id } : null;
+      }
+    }
+    this.cards = {
+      cursor,
+      cards: (Array.isArray(model.cards) ? model.cards : []).filter((card: Json) => isInboxId("crd", card?.id) && isInboxId("prj", card?.project_id)),
+      threads,
+      initiatives: Array.isArray(model.initiatives) ? model.initiatives.filter((tag: unknown): tag is InboxInitiative => isInboxInitiativeRecord(tag)) : [],
+      seen_seq: typeof model.seen_seq === "number" ? model.seen_seq : null,
+    };
     return true;
   }
 

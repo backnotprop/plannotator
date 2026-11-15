@@ -369,14 +369,15 @@ To install the extension by hand from a Plannotator checkout: `qwen extensions i
 
 ## T3 Code
 
-For Claude threads in T3 Code, connect Plannotator to T3 once. Then, when you answer an agent in the Plannotator Inbox, your reply arrives in its T3 thread as a new turn.
+Claude threads in T3 Code get the Inbox from the [Claude Code plugin](#claude-code), with nothing to set up in T3 (Plannotator 0.28.65 or newer, Claude Code 2.1.287 or newer). While T3 keeps a thread's Claude running, your reply arrives in that thread as a new turn. T3 stops an idle Claude after about 30 minutes. To deliver replies after that, sign Plannotator in to T3 once:
 
 ```bash
 plannotator t3 login --url <T3 MCP URL>
-claude mcp add -s user plannotator-inbox -- plannotator inbox mcp --t3
 ```
 
-For the MCP URL, open T3 **Settings → Environments**, open the environment's menu and choose **Copy MCP URL**. On T3's sign-in page, choose Supervised or higher, at least the mode your threads run in: Read only cannot send replies. With `--t3`, that server shows its tools only inside T3 threads. If `claude mcp get plannotator-inbox` already finds one, with or without `--t3`, keep it and skip the second line: it works in T3 threads as it is. Only Claude threads in T3 wake; other agents in T3 read the reply when they next check the Inbox. `plannotator t3 --help` has the details.
+For the MCP URL, open T3 **Settings → Environments**, open the environment's menu and choose **Copy MCP URL**. On T3's sign-in page, choose Supervised or higher, at least the mode your threads run in: Read only cannot send replies. A reply that waits for the sign-in says so in the Inbox. Only Claude threads in T3 get replies; Codex and other agents in T3 read the reply when they next check the Inbox.
+
+With the Claude Code mod off, or a Claude Code older than 2.1.287, the plugin adds no tool. Sign in as above and add the server for T3 threads instead: `claude mcp add -s user plannotator-inbox -- plannotator inbox mcp --t3` (it shows its tools only inside T3 threads). `plannotator t3 --help` has the details.
 
 ## Kilo Code
 

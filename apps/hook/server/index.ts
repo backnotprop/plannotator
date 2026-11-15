@@ -83,7 +83,7 @@
  *   PLANNOTATOR_PORT   - Fixed port to use (default: random locally, 19432 for remote)
  */
 
-import { childEnv, isAskAiChild } from "@plannotator/shared/child-env";
+import { childEnv, GIT_REPO_ENV, isAskAiChild } from "@plannotator/shared/child-env";
 import {
   startPlannotatorServer as startPlannotatorServerUnguarded,
   handleServerReady,
@@ -761,6 +761,10 @@ function resolveCliReviewDirectory(reviewArgs: ParsedReviewArgs, cwd: string): s
     const target = resolveReviewTarget(reviewArgs, cwd);
     const notice = formatIgnoredReviewWords(target);
     if (notice) console.error(notice);
+    // The named directory is the repository under review: a GIT_DIR the
+    // calling shell exported (a git hook, a script) would send every git run
+    // of the session, and the processes it starts, to another repository.
+    if (target.directory) for (const name of GIT_REPO_ENV) delete process.env[name];
     return target.directory;
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
