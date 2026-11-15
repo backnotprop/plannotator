@@ -8,12 +8,14 @@ import {
   claudeTranscriptPaths,
   inboxRegistryPathOf,
   STORE_INBOX_SESSION_NAMES,
+  STORE_INBOX_SESSION_TITLES,
   TRANSCRIPT_TITLE_FIRST_READ_BYTES,
   TRANSCRIPT_TITLE_FAILURES_MAX,
   TRANSCRIPT_TITLE_LOCATE_RETRY_MS,
   TRANSCRIPT_TITLE_RETRY_MAX_MS,
   TRANSCRIPT_TITLE_RETRY_MS,
   TranscriptTitle,
+  type KnownTranscriptTitles,
 } from './inbox'
 
 // Session labels from the transcript (#2450, the reporter's second comment): a
@@ -162,6 +164,29 @@ describe('the title in the transcript', () => {
     expect(await new TranscriptTitle(host, SESSION, async () => [path]).read()).toBe('Near the end')
     const size = statSync(path).size
     expect(reads).toEqual([{ start: size - TRANSCRIPT_TITLE_FIRST_READ_BYTES, length: TRANSCRIPT_TITLE_FIRST_READ_BYTES }])
+  })
+
+  test("a reader made after a module reload starts from the titles the last one kept: a transcript not found yet, or whose end holds no title, never clears them", async () => {
+    let kept: KnownTranscriptTitles | null = null
+    const memory = { load: async () => kept, save: async (known: KnownTranscriptTitles) => void (kept = known) }
+    const path = transcript(chatter('hello') + title('Named with --name') + aiTitle('Invoice retry backoff'))
+    const { host } = realHost()
+    const before = new TranscriptTitle(host, SESSION, async () => [path], memory)
+    expect(await before.read()).toBe('Named with --name')
+    expect(kept).toEqual({ title: 'Named with --name', generated: 'Invoice retry backoff' })
+    // A long session: the titles fall out of the first read's region.
+    appendFileSync(path, chatter('x'.repeat(1024)).repeat(Math.ceil((TRANSCRIPT_TITLE_FIRST_READ_BYTES + 512 * 1024) / 1024)))
+    const reloaded = new TranscriptTitle(host, SESSION, async () => [path], memory)
+    expect(await reloaded.read()).toBe('Named with --name')
+    expect(reloaded.generatedTitle()).toBe('Invoice retry backoff')
+    const notFound = new TranscriptTitle(host, SESSION, async () => [], memory)
+    expect(await notFound.read()).toBe('Named with --name')
+    expect(notFound.generatedTitle()).toBe('Invoice retry backoff')
+    // Only the runtime changes them: a new title line in the transcript.
+    appendFileSync(path, aiTitle('Retry backoff, take two') + title('Renamed'))
+    expect(await reloaded.read()).toBe('Renamed')
+    expect(reloaded.generatedTitle()).toBe('Retry backoff, take two')
+    expect(kept).toEqual({ title: 'Renamed', generated: 'Retry backoff, take two' })
   })
 
   test('no transcript: null and no process, looked for again only after the wait', async () => {
@@ -473,6 +498,30 @@ describe('from the transcript to a poll body', () => {
     expect(world.polls.at(-1)).toBe('release 0.28.61')
     expect(world.titles.at(-1)).toBe('Plannotator usage reference')
     await on.only('session.end')(world.$, {}, (e: unknown) => e)
+  })
+
+  test('a module reload keeps the name and the generated title of a long session whose transcript end holds neither', async () => {
+    const configDir = join(scratch, 'claude-config-reload')
+    const folder = '/home/me/src/long-session'
+    const projectDir = join(configDir, 'projects', claudeProjectSlug(folder)!)
+    mkdirSync(projectDir, { recursive: true })
+    const path = join(projectDir, `${SESSION}.jsonl`)
+    writeFileSync(path, chatter('hello') + title('Named with --name') + aiTitle('Invoice retry backoff'))
+
+    const world = engineOn(configDir, folder)
+    const first = await freshHooks('reload-before')
+    await first.only('session.start')(world.$, { isInteractive: true }, async () => ({ cwd: folder }))
+    await world.tick(3)
+    expect([world.polls.at(-1), world.titles.at(-1)]).toEqual(['Named with --name', 'Invoice retry backoff'])
+    expect(world.store.get(STORE_INBOX_SESSION_TITLES)).toMatchObject({ [SESSION]: { title: 'Named with --name', generated: 'Invoice retry backoff' } })
+    await first.only('session.end')(world.$, {}, (e: unknown) => e)
+
+    appendFileSync(path, chatter('x'.repeat(1024)).repeat(Math.ceil((TRANSCRIPT_TITLE_FIRST_READ_BYTES + 512 * 1024) / 1024)))
+    const reloaded = await freshHooks('reload-after')
+    await reloaded.only('session.start')(world.$, { isInteractive: true }, async () => ({ cwd: folder }))
+    await world.tick(3)
+    expect([world.polls.at(-1), world.titles.at(-1)]).toEqual(['Named with --name', 'Invoice retry backoff'])
+    await reloaded.only('session.end')(world.$, {}, (e: unknown) => e)
   })
 
   test('with no transcript the /rename store still names the session', async () => {

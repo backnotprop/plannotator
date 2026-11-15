@@ -109,14 +109,15 @@ describe("who is listed, and how", () => {
         archived: new Set(["msg_lch_archived"]),
       }),
     );
-    expect(group.agents.map((agent) => [agent.id, agent.state, agent.live])).toEqual([
+    expect(group.agents.map((agent) => [agent.id, agent.state, agent.live]).sort()).toEqual([
+      ["lch_failed", "ended", false],
       ["lch_starting", "working", true],
       ["lch_stopped", "idle", true],
-      ["lch_failed", "ended", false],
     ]);
+    const byId = (id: string) => group.agents.find((agent) => agent.id === id);
     // The session it runs as, its launch and thread, and what its session said of itself.
-    expect(group.agents[1]).toMatchObject({ session: "ses-real", launch: { id: "lch_stopped", thread_id: "msg_lch_stopped", started: true, run: "stopped", scratch: null }, label: "Stopped one" });
-    expect(group.agents[0]).toMatchObject({ session: "launch:lch_starting", launch: { started: false, run: "starting", scratch: "palette-helper" }, project: { id: "prj_ledger", name: "ledger" } });
+    expect(byId("lch_stopped")).toMatchObject({ session: "ses-real", launch: { id: "lch_stopped", thread_id: "msg_lch_stopped", started: true, run: "stopped", scratch: null }, label: "Stopped one" });
+    expect(byId("lch_starting")).toMatchObject({ session: "launch:lch_starting", launch: { started: false, run: "starting", scratch: "palette-helper" }, project: { id: "prj_ledger", name: "ledger" } });
   });
 
   test("a routine is one agent, its newest run's; an earlier run's session only while it is live; other launches as before", () => {
@@ -146,6 +147,159 @@ describe("who is listed, and how", () => {
     expect(inboxAgentsGroup(evidence({ sessions, labels: false })).agents[0]!.label).toBeUndefined();
     const owned = [inboxAgentsGroup(evidence({ sessions }))];
     expect(owned[0]!.agents[0]!.label).toBe("Secret plan");
+  });
+});
+
+describe("a fixed order: each agent stays where it first appeared, the newest first", () => {
+  const listedNow = (live: ReturnType<typeof liveSessions>["live"], clock: { t: number }, over: Partial<InboxAgentsEvidence> = {}) =>
+    inboxAgentsGroup(evidence({ sessions: live.agentSessions(inboxStartOfDay(clock.t)), lastHeardOf: live.lastHeardOf, continuedBy: live.continuedBy, continuesOf: live.continuesOf, ...over }));
+  const ids = (group: InboxAgentsGroup) => group.agents.map((agent) => agent.id);
+  const waitOn = (session: string) => ({ thread_id: `msg_${session}`, session, host: "claude-code", project: { id: "prj_ledger", name: "ledger" }, at: "2026-11-09T11:00:00.000Z" });
+
+  test("never re-sorted by a turn starting or ending, a poll, a list read, a label, a thread waiting on the person or a session ending", async () => {
+    const { live, clock } = liveSessions();
+    // Started a minute apart, all polling now.
+    for (const [i, session] of ["ses-a", "ses-b", "ses-c", "ses-d"].entries()) await poll(live, session, { busy: false, started_at: clock.t - (4 - i) * 60_000 });
+    const order = ["ses-d", "ses-c", "ses-b", "ses-a"];
+    expect(ids(listedNow(live, clock))).toEqual(order);
+    live.stateChanged("ses-a", "claude-code", { busy: true });
+    expect(ids(listedNow(live, clock))).toEqual(order);
+    clock.t += 7_000;
+    await poll(live, "ses-b", { busy: false });
+    expect(ids(listedNow(live, clock))).toEqual(order);
+    live.stateChanged("ses-a", "claude-code", { busy: false });
+    await poll(live, "ses-a", { busy: false, label: "Renamed in Claude Code", title: "Its own title" });
+    expect(ids(listedNow(live, clock))).toEqual(order);
+    // Read again and again: the same order every time.
+    expect(ids(listedNow(live, clock))).toEqual(order);
+    const waiting = listedNow(live, clock, { waits: [waitOn("ses-b")] });
+    expect(waiting.agents.map((agent) => [agent.id, agent.state])).toEqual([
+      ["ses-d", "idle"],
+      ["ses-c", "idle"],
+      ["ses-b", "waiting"],
+      ["ses-a", "idle"],
+    ]);
+    // ses-c stops polling and ends: it stays in its place for today; the others keep theirs.
+    clock.t += 20_000;
+    for (const session of ["ses-a", "ses-b", "ses-d"]) await poll(live, session, { busy: false });
+    clock.t += 20_000;
+    for (const session of ["ses-a", "ses-b", "ses-d"]) await poll(live, session, { busy: false });
+    const later = listedNow(live, clock, { waits: [waitOn("ses-b")] });
+    expect(later.agents.map((agent) => [agent.id, agent.state])).toEqual([
+      ["ses-d", "idle"],
+      ["ses-c", "ended"],
+      ["ses-b", "waiting"],
+      ["ses-a", "idle"],
+    ]);
+  });
+
+  test("a new agent appears first; a plugin reload (its connection starting again, later) never moves one; ties go by session id", async () => {
+    const { live, clock } = liveSessions();
+    const t0 = clock.t;
+    await poll(live, "ses-b", { busy: false, started_at: t0 });
+    await poll(live, "ses-a", { busy: false, started_at: t0 });
+    expect(ids(listedNow(live, clock))).toEqual(["ses-a", "ses-b"]);
+    clock.t += 5 * 60_000;
+    await poll(live, "ses-new", { busy: true, started_at: clock.t });
+    expect(ids(listedNow(live, clock))).toEqual(["ses-new", "ses-a", "ses-b"]);
+    clock.t += 60_000;
+    // ses-b's module reloaded: its connection says a later start. It keeps its place.
+    await poll(live, "ses-b", { busy: false, started_at: clock.t });
+    expect(ids(listedNow(live, clock))).toEqual(["ses-new", "ses-a", "ses-b"]);
+  });
+
+  test("a linked machine's group comes in its machine's own fixed order, whatever happens there", async () => {
+    const here = liveSessions();
+    const far = liveSessions();
+    await poll(here.live, "ses-here", { busy: false });
+    for (const session of ["ses-m1", "ses-m2", "ses-m3"]) {
+      await poll(far.live, session, { busy: false });
+      far.clock.t += 60_000;
+    }
+    const merged = () => inboxMergedAgents("ibx_self", listedNow(here.live, here.clock), [inboxPeerAgentsGroup([listedNow(far.live, far.clock)], "ibx_far")!]);
+    const before = merged().map((group) => [group.machine, ids(group)]);
+    expect(before).toEqual([
+      ["ibx_self", ["ses-here"]],
+      ["ibx_far", ["ses-m3", "ses-m2", "ses-m1"]],
+    ]);
+    far.live.stateChanged("ses-m1", "claude-code", { busy: true });
+    await poll(far.live, "ses-m2", { busy: false, label: "Named there" });
+    expect(merged().map((group) => [group.machine, ids(group)])).toEqual(before);
+  });
+
+  test("an Inbox restart places a session by the first message it wrote, not by when its connection came back", () => {
+    const { store, project } = storeWith();
+    store.sendMessage({ project_id: project.id, author: { kind: "agent", host: "claude-code", session: "ses-old", name: null }, thread: "early", subject: "Early work", body: "Started" });
+    const sessions = [
+      { session: "ses-old", host: "claude-code", root: "/work/ledger", startedAt: Date.parse("2026-11-09T12:00:00.000Z"), firstSeen: Date.parse("2026-11-09T12:00:00.000Z"), lastSeen: 1, live: true, busy: false, label: null, title: null },
+      { session: "ses-mid", host: "claude-code", root: "/work/ledger", startedAt: Date.parse("2026-11-09T10:00:00.000Z"), firstSeen: Date.parse("2026-11-09T10:00:00.000Z"), lastSeen: 1, live: true, busy: false, label: null, title: null },
+    ];
+    expect(ids(inboxAgentsGroup(evidence({ sessions, ...fromStore(store) })))).toEqual(["ses-mid", "ses-old"]);
+  });
+});
+
+/** A temp store with one project, on a clock the test moves (the first message at 9 AM). */
+function storeWith() {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-agents-store-")));
+  roots.push(root);
+  const clock = { now: Date.parse("2026-11-09T09:00:00.000Z") };
+  const store = InboxStore.open(join(root, "data"), { now: () => new Date(clock.now) });
+  const project = store.ensureProject({ name: "ledger", root: "/work/ledger" });
+  return { store, project, clock };
+}
+
+/** The store's evidence, as the Inbox gives it (packages/server/inbox.ts `agentsOf`). */
+function fromStore(store: InboxStore): Pick<InboxAgentsEvidence, "firstThreadOf" | "threadNameOf"> {
+  return {
+    firstThreadOf: (sessions) => {
+      const firsts = store.firstThreadsBySession();
+      const found = sessions.flatMap((session) => {
+        const got = firsts.get(session);
+        return got ? [got] : [];
+      });
+      return found.sort((a, b) => a.at.localeCompare(b.at))[0] ?? null;
+    },
+    threadNameOf: (id) => store.threadShortName(id) ?? store.threadSubject(id),
+  };
+}
+
+describe("names the list gives the window: the host's title, and the thread each agent got first", () => {
+  const agentAuthor = (session: string) => ({ kind: "agent" as const, host: "claude-code", session, name: null });
+  const liveOne = (session: string, over: Record<string, unknown> = {}) => ({ session, host: "claude-code", root: "/work/ledger", startedAt: 1, firstSeen: 1, lastSeen: 2, live: true, busy: false, label: null, title: null, ...over });
+
+  test("the host's own title rides along with the label, both only when labels are shown", () => {
+    const sessions = [liveOne("ses-a", { title: "Retry backoff for invoices" })];
+    expect(inboxAgentsGroup(evidence({ sessions })).agents[0]).toMatchObject({ title: "Retry backoff for invoices" });
+    expect(inboxAgentsGroup(evidence({ sessions, labels: false })).agents[0]!.title).toBeUndefined();
+  });
+
+  test("the first thread stays the agent's first thread when it writes in newer threads, waits on the person in another, or that one is archived", () => {
+    const { store, project, clock } = storeWith();
+    const first = store.sendMessage({ project_id: project.id, author: agentAuthor("ses-a"), subject: "Invoice retries", body: "Looking" }).message;
+    const firstOf = () => inboxAgentsGroup(evidence({ sessions: [liveOne("ses-a")], ...fromStore(store) })).agents[0]!.first_thread;
+    expect(firstOf()).toEqual({ id: first.thread_id, name: "Invoice retries" });
+    clock.now += 60_000;
+    const second = store.sendMessage({ project_id: project.id, author: agentAuthor("ses-a"), subject: "Semantic diffs", body: "Which way?" }).message;
+    clock.now += 60_000;
+    store.sendMessage({ project_id: project.id, author: agentAuthor("ses-a"), subject: "Release notes", body: "Drafted" });
+    const waits = [{ thread_id: second.thread_id, session: "ses-a", host: "claude-code", project: { id: project.id, name: "ledger" }, at: new Date(clock.now).toISOString() }];
+    expect(inboxAgentsGroup(evidence({ sessions: [liveOne("ses-a")], waits, ...fromStore(store) })).agents[0]!.first_thread).toEqual({ id: first.thread_id, name: "Invoice retries" });
+    store.resolveThread(first.thread_id, true, "person");
+    expect(firstOf()).toEqual({ id: first.thread_id, name: "Invoice retries" });
+  });
+
+  test("a thread the person started with a session is its first; a launched agent's first is its launch's thread; a continued conversation keeps the old id's", () => {
+    const { store, project, clock } = storeWith();
+    const opened = store.startPersonThread({ project_id: project.id, body: "Can you look?", to: { host: "pi", session: "ses-pi" }, idempotency_key: "k1", thread_name: "Queue timeouts" }).message;
+    clock.now += 60_000;
+    store.sendMessage({ project_id: project.id, author: { kind: "agent", host: "pi", session: "ses-pi", name: null }, subject: "Something else", body: "Also" });
+    store.sendMessage({ project_id: project.id, author: agentAuthor("ses-old"), subject: "Ledger sync", body: "Began" });
+    const launches = [{ launch_id: "lch_1", session: "launch:lch_1", thread_id: opened.thread_id, host: "claude-code", project_id: project.id, started_at: "2026-11-09T09:30:00.000Z", started: false, run: "starting" as const, scratch: null }];
+    const group = inboxAgentsGroup(evidence({ sessions: [liveOne("ses-pi"), liveOne("ses-new")], launches, continuesOf: (s) => (s === "ses-new" ? ["ses-old"] : []), ...fromStore(store) }));
+    const byId = (id: string) => group.agents.find((agent) => agent.id === id)!;
+    expect(byId("ses-pi").first_thread).toEqual({ id: opened.thread_id, name: "Queue timeouts" });
+    expect(byId("lch_1").first_thread).toEqual({ id: opened.thread_id, name: "Queue timeouts" });
+    expect(byId("ses-new").first_thread?.name).toBe("Ledger sync");
   });
 });
 
@@ -222,17 +376,26 @@ describe("one conversation under two session ids (a poll's `continues`) is one a
 });
 
 describe("the cap", () => {
-  test("200 sessions list at most the cap, the waiting ones first, and the counts name them all", () => {
-    const sessions = Array.from({ length: 200 }, (_, i) => ({ session: `ses-${String(i).padStart(3, "0")}`, host: "claude-code", root: "/work/ledger", startedAt: i, lastSeen: 1000 + i, live: i % 4 !== 0, busy: i % 2 === 1, label: null }));
+  test("200 sessions list at most the cap; the oldest waiting one stays, in its fixed place; the newest live ones fill the rest; the counts name them all", () => {
+    const sessions = Array.from({ length: 200 }, (_, i) => ({ session: `ses-${String(i).padStart(3, "0")}`, host: "claude-code", root: "/work/ledger", startedAt: i, firstSeen: i, lastSeen: 1000 + i, live: i % 4 !== 0, busy: i % 2 === 1, label: null, title: null }));
     const waits = [{ thread_id: "msg_w", session: "ses-000", host: "claude-code", project: { id: "prj_ledger", name: "ledger" }, at: "2026-11-09T10:00:00.000Z" }];
     const group = inboxAgentsGroup(evidence({ sessions, waits }));
     expect(group.agents.length).toBe(INBOX_AGENTS_LISTED_MAX);
     expect(group.total).toBe(200);
     expect(group.ended_today).toBe(49);
-    expect(group.agents[0]).toMatchObject({ id: "ses-000", state: "waiting" });
-    expect(group.agents[1]!.state).toBe("working");
-    // Within a state, the most recently heard first.
-    expect(group.agents[1]!.id).toBe("ses-199");
+    // The first seen, it is last; nothing ended is kept while live ones are past the cap.
+    expect(group.agents.at(-1)).toMatchObject({ id: "ses-000", state: "waiting" });
+    expect(group.agents.slice(0, -1).every((agent) => agent.live)).toBe(true);
+    expect(group.agents[0]!.id).toBe("ses-199");
+    const seen = group.agents.map((agent) => Number(agent.id.slice(4)));
+    expect(seen).toEqual([...seen].sort((a, b) => b - a));
+  });
+
+  test("past the cap with more waiting agents than room: the newest waiting ones, in the fixed order", () => {
+    const sessions = Array.from({ length: 6 }, (_, i) => ({ session: `ses-${i}`, host: "pi", root: null, startedAt: i, firstSeen: i, lastSeen: 50, live: true, busy: false, label: null, title: null }));
+    const waits = [1, 2, 4].map((i) => ({ thread_id: `msg_${i}`, session: `ses-${i}`, host: "pi", project: { id: "prj_ledger", name: "ledger" }, at: "2026-11-09T10:00:00.000Z" }));
+    expect(inboxAgentsGroup(evidence({ sessions, waits }), 2).agents.map((agent) => agent.id)).toEqual(["ses-4", "ses-2"]);
+    expect(inboxAgentsGroup(evidence({ sessions, waits }), 4).agents.map((agent) => agent.id)).toEqual(["ses-5", "ses-4", "ses-2", "ses-1"]);
   });
 
   test("none: an empty group, so the window can tell no agents from an Inbox that names none", () => {

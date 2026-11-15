@@ -136,7 +136,7 @@ export function useInboxAgents(): readonly InboxAgentsGroup[] | null {
  * list's agent filter and its title read (agents/model.ts `agentListFilter`).
  */
 const whoKey = (groups: readonly InboxAgentsGroup[] | null): string =>
-  JSON.stringify((groups ?? []).map((g) => [g.machine ?? null, g.agents.map((a) => [a.id, a.session, a.continues ?? null, a.launch?.thread_id ?? null, a.label ?? null, a.project?.name ?? null, a.host, a.state === 'ended'])]));
+  JSON.stringify((groups ?? []).map((g) => [g.machine ?? null, g.agents.map((a) => [a.id, a.session, a.continues ?? null, a.launch?.thread_id ?? null, a.label ?? null, a.title ?? null, a.first_thread?.name ?? null, a.project?.name ?? null, a.host, a.state === 'ended'])]));
 
 /**
  * The agents while `on` (the list is filtered to one agent; null otherwise), drawn again only when who they are

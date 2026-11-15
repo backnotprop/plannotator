@@ -981,6 +981,8 @@ export class InboxStore {
    * message. A re-read builds it again.
    */
   private readonly latestAgentIds = new Map<string, string>();
+  /** Each session's first message id (by its first line's seq): one it wrote, or a person's addressed to it. `firstThreadsBySession`. */
+  private readonly firstSessionIds = new Map<string, string>();
   /** Per thread, how many message lines were applied to it: `threadVersion`. */
   private readonly threadLines = new Map<string, number>();
   /**
@@ -1130,6 +1132,7 @@ export class InboxStore {
     if (!first) return;
     this.messageSeq.set(record.id, firstSeq);
     this.noteAgentMessage(record, firstSeq);
+    this.noteFirstSessionMessage(record, firstSeq);
     const members = this.threadMembers.get(record.thread_id);
     if (members) members.push(record.id);
     else this.threadMembers.set(record.thread_id, [record.id]);
@@ -6509,6 +6512,7 @@ export class InboxStore {
     this.reloads += 1;
     this.changes += 1;
     this.latestAgentIds.clear();
+    this.firstSessionIds.clear();
     this.threadLines.clear();
     this.latest.clear();
     this.projectsById.clear();
@@ -7588,6 +7592,29 @@ export class InboxStore {
     const session = message.author.session;
     const known = this.latestAgentIds.get(session);
     if (known === undefined || (this.messageSeq.get(known) ?? 0) < seq) this.latestAgentIds.set(session, message.id);
+  }
+
+  /** A message first applied at `seq`: the first of its session's (its author's, or the session a person addressed). */
+  private noteFirstSessionMessage(message: InboxMessage, seq: number): void {
+    const session = message.author.kind === "agent" ? message.author.session : message.to?.session;
+    if (!session) return;
+    const known = this.firstSessionIds.get(session);
+    if (known === undefined || (this.messageSeq.get(known) ?? Number.POSITIVE_INFINITY) > seq) this.firstSessionIds.set(session, message.id);
+  }
+
+  /**
+   * The thread each session got first (the first message it wrote, or a person's addressed to it) with that message's
+   * time and the thread's name as the list shows it (its short name, else its subject). The thread is the same for as
+   * long as the message stands, whatever the session writes later: the Agents section's last-resort name.
+   */
+  firstThreadsBySession(): Map<string, { id: string; name: string | null; at: string }> {
+    const out = new Map<string, { id: string; name: string | null; at: string }>();
+    for (const [session, id] of this.firstSessionIds) {
+      const message = this.messages.get(id);
+      if (!message) continue;
+      out.set(session, { id: message.thread_id, name: this.threadShortName(message.thread_id) ?? this.threadSubject(message.thread_id), at: message.created_at });
+    }
+    return out;
   }
 
   /**

@@ -72,12 +72,16 @@ export interface InboxAgentSession {
   /** The project root its `project_path` resolved to; null when it sent none. */
   root: string | null;
   startedAt: number;
+  /** The earliest start this Inbox heard for it (`startedAt` moves when its connection starts again; this never does). */
+  firstSeen: number;
   /** The last poll, state change or Inbox tool call. */
   lastSeen: number;
   live: boolean;
   /** A turn runs now (live only); null when the connection does not say, or it is not live. */
   busy: boolean | null;
   label: string | null;
+  /** The title its host generated (INBOX_TITLE_POLL_FIELD); null when it sent none. */
+  title: string | null;
 }
 
 /**
@@ -143,6 +147,8 @@ interface SeenSession {
   /** The project root its `project_path` resolved to; null when it sent none. */
   root: string | null;
   startedAt: number;
+  /** The earliest `startedAt` it had (a plugin reload starts its connection again, later); absent: `startedAt`. */
+  firstSeen?: number;
   /** The `started_at` its last poll said (when its wake started); absent when the poll said none. */
   wakeStartedAt?: number | null;
   lastSeen: number;
@@ -564,7 +570,9 @@ export function createInboxLiveSessions(options: {
     const folder = parseSessionFolder(body.session_folder);
     if (folder) entry.folder = folder;
     if (root !== null) entry.root = root;
-    entry.startedAt = finiteMs(body.started_at) ?? entry.startedAt;
+    const started = finiteMs(body.started_at) ?? entry.startedAt;
+    entry.firstSeen = Math.min(entry.firstSeen ?? entry.startedAt, started);
+    entry.startedAt = started;
     entry.wakeStartedAt = finiteMs(body.started_at);
     entry.lastSeen = at;
     entry.holding += 1;
@@ -860,7 +868,8 @@ export function createInboxLiveSessions(options: {
         idleSince: entry.busy === false ? entry.idleSince : null,
         tags: entry.tags,
         sendNow: entry.sendNow,
-        label: entry.label ?? null,
+        // Its name where it has one: the name given in its host, else the title its host generated.
+        label: entry.label ?? entry.title ?? null,
       });
     }
     return out;
@@ -882,10 +891,12 @@ export function createInboxLiveSessions(options: {
         host: entry.host,
         root: entry.root,
         startedAt: entry.startedAt,
+        firstSeen: Math.min(entry.firstSeen ?? entry.startedAt, entry.startedAt),
         lastSeen: heard,
         live,
         busy: live ? entry.busy : null,
         label: entry.label ?? null,
+        title: entry.title ?? null,
       });
     }
     return out;
@@ -1277,7 +1288,7 @@ export function createInboxLiveSessions(options: {
       const live = {
         ...found,
         sessions: found.sessions.map((session) => {
-          const label = labelOf(session.session);
+          const label = labelOf(session.session) ?? titleOf(session.session);
           return label ? { ...session, label } : session;
         }),
       };

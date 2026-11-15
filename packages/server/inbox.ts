@@ -1901,6 +1901,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       return project ? { id: project.id, name: project.name } : null;
     };
     let lastThreads: ReturnType<InboxStore["lastThreadsBySession"]> | null = null;
+    let firstThreads: ReturnType<InboxStore["firstThreadsBySession"]> | null = null;
     const waits: InboxAgentWait[] = [];
     const archived = new Set<string>();
     for (const row of own) {
@@ -1930,6 +1931,16 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       lastHeardOf: live.lastHeardOf,
       continuedBy: live.continuedBy,
       continuesOf: live.continuesOf,
+      firstThreadOf: (sessions) => {
+        firstThreads ??= store.firstThreadsBySession();
+        let first: { id: string; name: string | null; at: string } | null = null;
+        for (const session of sessions) {
+          const got = firstThreads.get(session);
+          if (got && (!first || got.at < first.at)) first = got;
+        }
+        return first;
+      },
+      threadNameOf: (threadId) => store.threadShortName(threadId) ?? store.threadSubject(threadId),
       labels: true,
     });
   };

@@ -124,15 +124,18 @@ import {
   pluginVersionOf,
   readReminderSessions,
   readSessionNames,
+  readSessionTitles,
   sessionNamesAfterCommand,
   readSessionThreads,
   STORE_INBOX_REMINDER_SESSIONS,
   STORE_INBOX_SESSION_NAMES,
+  STORE_INBOX_SESSION_TITLES,
   TranscriptContinuedIn,
   TranscriptForkedFrom,
   TranscriptTitle,
   type InboxLaunchReminder,
   withReminderSession,
+  withSessionTitles,
 } from './inbox'
 import { inboxAgentTool, inboxReminderFor, type InboxToolInfo } from './inbox-contract'
 import { INBOX_DEFAULT_TOOLS } from './inbox-default-tools'
@@ -581,10 +584,19 @@ async function sessionNameOf($: Engine, sessionId: string): Promise<string> {
  * `<CLAUDE_CONFIG_DIR or ~/.claude>/projects/<folder>/<session id>.jsonl`,
  * for the folder the session started in (its first root), its root now, or its
  * working folder. Its null (no transcript, no title in it, no `/bin/sh`) leaves
- * the label to the `/rename` store.
+ * the label to the `/rename` store. What it read is kept in `$.store`
+ * (STORE_INBOX_SESSION_TITLES), so the instance a module reload makes starts
+ * from the last titles instead of none.
  */
 function sessionTitleOf($: Engine, host: Host, sessionId: string): TranscriptTitle {
-  return new TranscriptTitle(host, sessionId, transcriptCandidatesOf($, sessionId))
+  return new TranscriptTitle(host, sessionId, transcriptCandidatesOf($, sessionId), {
+    load: async () => readSessionTitles(await $.store.get(STORE_INBOX_SESSION_TITLES))[sessionId] ?? null,
+    save: async (known) => {
+      const stored = readSessionTitles(await $.store.get(STORE_INBOX_SESSION_TITLES))
+      const updated = withSessionTitles(stored, sessionId, known, await $.clock.now())
+      if (updated !== stored) await $.store.set(STORE_INBOX_SESSION_TITLES, updated)
+    },
+  })
 }
 
 /** Where `sessionId`'s transcript may be, asked when needed: the folder it started in (its first root), its root now, its working folder. */

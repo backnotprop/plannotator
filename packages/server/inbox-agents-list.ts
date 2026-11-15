@@ -23,9 +23,19 @@
  * it did not end). The agent says which ids its conversation continues (`continues`), so the window finds its
  * threads under them. An old id that still polls keeps its own row here (both conversations may go on).
  *
- * The cap: at most `INBOX_AGENTS_LISTED_MAX` per machine, waiting first, then working, idle and ended, `total` and
- * `ended_today` counting them all. Another machine's group comes from its own list (the door's `threads`, read by
- * its PeerLink), capped again here, so a merged list is never longer than the cap per machine.
+ * The order is fixed (owner, 2026-11-15: "each agent stays where it first appeared"): the newest first seen first,
+ * ties by session id, never by state or by when it was last heard. First seen is the earliest of what this machine
+ * knows of it: the start its connection first said (a plugin reload's later start never moves it), its launch, and
+ * the first message it wrote or got. Each machine orders its own agents, so every window, linked machine and phone
+ * shows a machine's group in the same order.
+ *
+ * The cap: at most `INBOX_AGENTS_LISTED_MAX` per machine, `total` and `ended_today` counting them all. Past it the
+ * agents waiting on the person stay, then the newest live ones, then the newest ended; the kept ones keep their
+ * order. Another machine's group comes from its own list (the door's `threads`, read by its PeerLink), capped again
+ * here, so a merged list is never longer than the cap per machine.
+ *
+ * Names (the window's ladder, packages/inbox/agents/model.ts `agentRowName`): `label`, `title` (the host's own title
+ * for the session) and `first_thread` (the thread it got first, the same however many it writes in later).
  */
 
 import { basename } from "node:path";
@@ -77,6 +87,10 @@ export interface InboxAgentsEvidence {
   continuedBy: (session: string) => string | null;
   /** Every session id `session`'s conversation continues, nearest first. */
   continuesOf: (session: string) => string[];
+  /** The thread the first of `sessions` to get one got first (`store.firstThreadsBySession`), with that message's time; null when none. */
+  firstThreadOf?: (sessions: readonly string[]) => { id: string; name: string | null; at: string } | null;
+  /** A thread's name as the list shows it (its short name, else its subject); null when unknown. */
+  threadNameOf?: (threadId: string) => string | null;
   /** Labels are shown (this computer's owner). */
   labels: boolean;
 }
@@ -95,18 +109,24 @@ export function inboxFolderProject(root: string): { id: null; name: string } {
   return { id: null, name: basename(root) || root };
 }
 
-const STATE_ORDER: Record<InboxAgent["state"], number> = { waiting: 0, working: 1, idle: 2, ended: 3 };
-const heardMs = (agent: InboxAgent) => (agent.last_seen_at ? Date.parse(agent.last_seen_at) : 0);
-
-/** The listing order: waiting first (most waiting first), then working, idle and ended; the most recently heard first. */
-export function compareInboxAgents(a: InboxAgent, b: InboxAgent): number {
-  return STATE_ORDER[a.state] - STATE_ORDER[b.state] || b.waiting - a.waiting || heardMs(b) - heardMs(a) || a.id.localeCompare(b.id);
-}
+const STATES: ReadonlySet<string> = new Set<InboxAgent["state"]>(["waiting", "working", "idle", "ended"]);
+const ms = (at: string | null | undefined) => {
+  const t = at ? Date.parse(at) : Number.NaN;
+  return Number.isFinite(t) ? t : null;
+};
+const earliest = (...times: (number | null | undefined)[]) => {
+  const known = times.filter((t): t is number => typeof t === "number" && Number.isFinite(t));
+  return known.length > 0 ? Math.min(...known) : null;
+};
+/** Who stays past the cap: waiting on the person, then live, then ended. */
+const keepRank = (agent: InboxAgent) => (agent.state === "waiting" ? 0 : agent.state === "ended" ? 2 : 1);
 
 /** This machine's agents (one group, no `machine`): who is listed, how, and in what order, capped. */
 export function inboxAgentsGroup(evidence: InboxAgentsEvidence, cap = INBOX_AGENTS_LISTED_MAX): InboxAgentsGroup {
   const bySession = new Map<string, InboxAgent>();
   const later = (a: string | null, b: string | null) => (!a ? b : !b ? a : a > b ? a : b);
+  /** First seen (ms) by the agent's key in `bySession`; absent: only its threads say. */
+  const seen = new Map<string, number>();
 
   for (const entry of evidence.sessions) {
     const continues = entry.live ? evidence.continuesOf(entry.session) : [];
@@ -116,6 +136,7 @@ export function inboxAgentsGroup(evidence: InboxAgentsEvidence, cap = INBOX_AGEN
       ...(continues.length > 0 ? { continues } : {}),
       host: entry.host,
       ...(evidence.labels && entry.label ? { label: entry.label } : {}),
+      ...(evidence.labels && entry.title ? { title: entry.title } : {}),
       project: evidence.projectOf(entry.root, entry.session),
       state: !entry.live ? "ended" : entry.busy === true ? "working" : "idle",
       waiting: 0,
@@ -123,6 +144,7 @@ export function inboxAgentsGroup(evidence: InboxAgentsEvidence, cap = INBOX_AGEN
       started_at: iso(entry.startedAt),
       last_seen_at: iso(entry.lastSeen),
     });
+    seen.set(entry.session, entry.firstSeen ?? entry.startedAt);
   }
 
   // The session a listed one's conversation goes on as: a live, listed session standing in for it.
@@ -167,6 +189,8 @@ export function inboxAgentsGroup(evidence: InboxAgentsEvidence, cap = INBOX_AGEN
       // A stopped launch is idle: a reply starts it again.
       live: !ended,
     });
+    const first = earliest(seen.get(session), ms(launch.started_at));
+    if (first !== null) seen.set(session, first);
   }
 
   for (const wait of evidence.waits) {
@@ -193,8 +217,23 @@ export function inboxAgentsGroup(evidence: InboxAgentsEvidence, cap = INBOX_AGEN
     if (!agent.live) agent.last_seen_at = later(agent.last_seen_at, wait.at);
   }
 
-  const all = [...bySession.values()].sort(compareInboxAgents);
-  return { agents: all.slice(0, cap), total: all.length, ended_today: all.filter((agent) => agent.state === "ended").length };
+  const firstSeen = new Map<InboxAgent, number>();
+  for (const [key, agent] of bySession) {
+    const sessions = [agent.session, ...(agent.continues ?? [])];
+    const first = evidence.firstThreadOf?.(sessions) ?? null;
+    const launched = agent.launch ? { id: agent.launch.thread_id, name: evidence.threadNameOf?.(agent.launch.thread_id) ?? null } : null;
+    const named = launched ?? first;
+    if (named?.name) agent.first_thread = { id: named.id, name: named.name };
+    // Never heard start (it only owns a waiting thread): its first message, else when it last wrote.
+    firstSeen.set(agent, earliest(seen.get(key), ms(first?.at), ms(agent.started_at)) ?? ms(agent.last_seen_at) ?? 0);
+  }
+  const order = (a: InboxAgent, b: InboxAgent) => firstSeen.get(b)! - firstSeen.get(a)! || a.session.localeCompare(b.session) || a.id.localeCompare(b.id);
+  const all = [...bySession.values()].sort(order);
+  const kept = all.length <= cap ? all : (() => {
+    const stay = new Set([...all].sort((a, b) => keepRank(a) - keepRank(b) || order(a, b)).slice(0, cap));
+    return all.filter((agent) => stay.has(agent));
+  })();
+  return { agents: kept, total: all.length, ended_today: all.filter((agent) => agent.state === "ended").length };
 }
 
 /** The merged view's agents: this Inbox's group first, named by its id, then each linked machine's (`machines.agents`). */
@@ -210,7 +249,7 @@ export function inboxPeerAgentsGroup(value: unknown, machine: string, cap = INBO
   const group = Array.isArray(value) ? value[0] : null;
   if (!group || typeof group !== "object" || !Array.isArray((group as InboxAgentsGroup).agents)) return null;
   const raw = group as Partial<InboxAgentsGroup>;
-  const agents = raw.agents!.filter((agent): agent is InboxAgent => !!agent && typeof agent === "object" && typeof agent.id === "string" && typeof agent.session === "string" && agent.state in STATE_ORDER).slice(0, cap);
+  const agents = raw.agents!.filter((agent): agent is InboxAgent => !!agent && typeof agent === "object" && typeof agent.id === "string" && typeof agent.session === "string" && STATES.has(agent.state)).slice(0, cap);
   const count = (n: unknown, floor: number) => (typeof n === "number" && Number.isSafeInteger(n) && n >= floor ? n : floor);
   // Its agents' faces and given names live there (inbox-linked-marks): passed through as that machine sent them.
   const faces = raw.faces !== undefined ? { faces: Object.fromEntries(Object.entries(readInboxAgentFaces(raw.faces)).slice(-INBOX_AGENT_FACES_KEPT)), faces_rev: count(raw.faces_rev, 0) } : {};

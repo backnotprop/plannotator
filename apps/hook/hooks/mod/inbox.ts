@@ -767,6 +767,49 @@ export class TranscriptContinuedIn {
   }
 }
 
+/**
+ * `$.store` key: the last titles read from each session's transcript (`TranscriptTitle`), so a module reload, a
+ * transcript not found yet or a first read whose region holds no title line never clears a known name. Only a title
+ * line the transcript holds replaces one. Kept to the newest INBOX_SESSION_NAMES_MAX.
+ */
+export const STORE_INBOX_SESSION_TITLES = 'inboxSessionTitles'
+
+/** What a session's transcript last said: its title (`custom-title`; `''` when it said none) and Claude Code's own (`ai-title`). */
+export interface KnownTranscriptTitles {
+  title: string | null
+  generated: string | null
+}
+
+export type InboxSessionTitles = Record<string, KnownTranscriptTitles & { at: number }>
+
+const titleOrNull = (value: unknown) => (typeof value === 'string' ? value : null)
+
+/** The stored record: session id → its known titles and when they were kept, anything else dropped. */
+export function readSessionTitles(value: unknown): InboxSessionTitles {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  const out: InboxSessionTitles = {}
+  for (const [id, entry] of Object.entries(value as Record<string, unknown>)) {
+    const { title, generated, at } = (entry ?? {}) as Record<string, unknown>
+    if (id && typeof at === 'number' && Number.isFinite(at) && (titleOrNull(title) !== null || titleOrNull(generated) !== null)) out[id] = { title: titleOrNull(title), generated: titleOrNull(generated), at }
+  }
+  return out
+}
+
+/** The record with `sessionId`'s titles as `known` (both null: dropped), the newest INBOX_SESSION_NAMES_MAX kept. */
+export function withSessionTitles(record: InboxSessionTitles, sessionId: string, known: KnownTranscriptTitles, now: number): InboxSessionTitles {
+  const was = record[sessionId]
+  if ((was?.title ?? null) === known.title && (was?.generated ?? null) === known.generated) return record
+  const { [sessionId]: _old, ...rest } = record
+  const entries = Object.entries(known.title === null && known.generated === null ? rest : { ...rest, [sessionId]: { ...known, at: now } }).sort((a, b) => b[1].at - a[1].at)
+  return Object.fromEntries(entries.slice(0, INBOX_SESSION_NAMES_MAX))
+}
+
+/** Where a `TranscriptTitle` keeps what it read across module reloads (`STORE_INBOX_SESSION_TITLES`); a failure is nothing kept. */
+export interface TranscriptTitleMemory {
+  load(): Promise<KnownTranscriptTitles | null>
+  save(known: KnownTranscriptTitles): Promise<void>
+}
+
 export class TranscriptTitle {
   private path: string | null = null
   private lookedAt = Number.NEGATIVE_INFINITY
@@ -785,11 +828,15 @@ export class TranscriptTitle {
   private title: string | null = null
   private generated: string | null = null
 
+  /** What `memory` held, read once before the first read. */
+  private recalled: Promise<void> | null = null
+
   constructor(
     private readonly host: Pick<Host, 'fileSize' | 'run' | 'now'>,
     private readonly sessionId: string,
     /** Where the transcript may be (`claudeTranscriptPaths`), asked only while it is not found. */
     private readonly candidates: () => Promise<readonly string[]>,
+    private readonly memory?: TranscriptTitleMemory,
   ) {}
 
   generatedTitle(): string | null {
@@ -798,6 +845,22 @@ export class TranscriptTitle {
 
   /** The latest title (`''`: the transcript says none), or null when the transcript says nothing or cannot be read. */
   async read(): Promise<string | null> {
+    await (this.recalled ??= this.recall())
+    const before = { title: this.title, generated: this.generated }
+    const title = await this.readNow()
+    if (this.memory && (this.title !== before.title || this.generated !== before.generated)) await this.memory.save({ title: this.title, generated: this.generated }).catch(() => undefined)
+    return title
+  }
+
+  /** The titles a reader before this one kept (a module reload): known until the transcript says otherwise. */
+  private async recall(): Promise<void> {
+    const known = await this.memory?.load().catch(() => null)
+    if (!known) return
+    this.title ??= known.title
+    this.generated ??= known.generated
+  }
+
+  private async readNow(): Promise<string | null> {
     const path = await this.locate()
     if (!path) return this.title
     const size = await this.host.fileSize(path).catch(() => null)

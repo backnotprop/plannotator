@@ -231,6 +231,24 @@ test.skipIf(!hasDom)("Agents takes Machines' place above Projects: each machine 
   expect(surface()!.querySelector(`[data-machine="${MAC}"]`)!.getAttribute('aria-current')).toBe('page');
 });
 
+test.skipIf(!hasDom)('an agent waiting on the person carries a dot at its row\'s end and says "waiting on you"; it keeps its place, and the dot goes once it no longer waits', () => {
+  const listed = (waits: boolean) => [group([agent('ses_a'), agent('ses_b', waits ? { state: 'waiting', waiting: 2 } : { state: 'working' }), agent('ses_c')])];
+  const rows = () => [...surface()!.querySelectorAll<HTMLElement>('[data-sidebar-agent]')];
+  const dots = () => rows().filter((r) => r.querySelector('[data-agent-waits]')).map((r) => r.getAttribute('data-sidebar-agent'));
+  setInboxAgents(listed(true));
+  mount(<Sidebar {...sidebarProps({ machines: machinesModel(null) })} />);
+  expect(rows().map((r) => r.getAttribute('data-sidebar-agent'))).toEqual(['ses_a', 'ses_b', 'ses_c']);
+  expect(dots()).toEqual(['ses_b']);
+  const dot = rows()[1]!.querySelector('[data-agent-waits]')!;
+  expect(dot.classList.contains('ib-pdot')).toBe(true);
+  expect(dot.getAttribute('aria-hidden')).toBe('true');
+  expect(rows()[1]!.querySelector('.ib-proj .ib-sr')!.textContent).toBe(', Claude Code, waiting on you');
+  expect(rows()[0]!.querySelector('.ib-proj .ib-sr')!.textContent).toBe(', Claude Code');
+  act(() => setInboxAgents(listed(false)));
+  expect(rows().map((r) => r.getAttribute('data-sidebar-agent'))).toEqual(['ses_a', 'ses_b', 'ses_c']);
+  expect(dots()).toEqual([]);
+});
+
 test.skipIf(!hasDom)('with no machine linked the agents are one flat list; an Inbox with no agents field and no link has no section', () => {
   const alone = machinesModel([view(SELF, 'Studio')]);
   mount(<Sidebar {...sidebarProps({ machines: alone })} />);
@@ -245,7 +263,7 @@ test.skipIf(!hasDom)('with no machine linked the agents are one flat list; an In
 });
 
 test.skipIf(!hasDom)('Add machine and Add agent are the heading\'s buttons, each with its own route; an agent row filters the list, or messages a live agent with no thread', () => {
-  setInboxAgents([group([agent('ses_s1'), agent('ses_s2')], SELF)]);
+  setInboxAgents([group([agent('ses_s1', { first_thread: { id: 'thr_1', name: 'Invoice retries' } }), agent('ses_s2')], SELF)]);
   const calls: string[] = [];
   let opener: HTMLElement | null = null;
   const rows = [threadRow('thr_1', 'ses_s1', 'Invoice retries')];
@@ -284,7 +302,7 @@ test.skipIf(!hasDom)('Add machine and Add agent are the heading\'s buttons, each
 test.skipIf(!hasDom)("a starred thread that is also an agent's thread shows under Starred and under Agents: the star opens it, the agent filters to it", () => {
   // The phone sheet's mock listed such a thread under Starred only; the owner did not approve that (approval
   // "inbox-phone-sidebar-sheet", NOT approved): Agents stays a list of every agent.
-  setInboxAgents([group([agent('ses_s1'), agent('ses_s2')])]);
+  setInboxAgents([group([agent('ses_s1', { first_thread: { id: 'thr_star', name: 'Starred and running' } }), agent('ses_s2', { first_thread: { id: 'thr_other', name: 'Only running' } })])]);
   const starred = { ...threadRow('thr_star', 'ses_s1', 'Starred and running'), project: { id: 'prj_bill', name: 'billing-svc' }, section: 'waiting', unread: false, unseen: 0, read_at: null, resolved_at: null, questions: { open: 2, holds_up: [] } } as unknown as InboxListRow;
   const opened: string[] = [];
   mount(<Sidebar {...sidebarProps({ pins: [starred], agentRows: [starred, threadRow('thr_other', 'ses_s2', 'Only running')], onOpenPin: (row) => opened.push(`pin:${row.thread_id}`), onAgentFilter: (id) => opened.push(`agent:${id}`) })} />);
