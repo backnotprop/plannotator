@@ -2,9 +2,10 @@
  * The list's picks (rowPicks.ts) wired to the list (InboxList.tsx): ⌘ or Ctrl and a click, Shift and a click, and
  * while picking any click on a row picks it instead of opening its thread (the row's own click never runs); the boxes
  * on the groups' headers; the bar in the header's place and a phone's sheet; Escape. Picking ends when the list shows
- * another scope (a project, a tag, a machine).
+ * another scope (a project, a tag, a machine). Tidy… opens Tidy's popover on the picks (PickTidy.tsx), Combine… its
+ * dialog (CombineDialog.tsx); a started Combine ends picking, its rows saying "Combining…" (useCombines.ts).
  */
-import { useCallback, useEffect, useMemo, useRef, type MouseEvent as ReactMouseEvent, type RefObject } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type RefObject } from 'react';
 import type { InboxListGroupId, InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
 import { useShortcutScope } from '@plannotator/ui/shortcuts';
 import { boxState, useRowPicks, type PickRules } from '../rowPicks';
@@ -13,6 +14,8 @@ import { machineTakes, type MachinesModel } from '../machines';
 import { inboxListPickShortcuts } from '../shortcuts/listPick.shortcuts';
 import { inOverlay, isComposingKey, isEditableTarget, keyTarget, modalOpen } from '../shortcuts/guards';
 import { PickBar, PickBox, PickSheet, type PickActions } from './PickBar';
+import { PickTidy } from './PickTidy';
+import { CombineDialog } from './CombineDialog';
 
 export interface ListPicksInput {
   sections: readonly InboxListSection[];
@@ -21,6 +24,8 @@ export interface ListPicksInput {
   body: RefObject<HTMLElement | null>;
   bulk?: BulkWrites;
   phone: boolean;
+  /** Beside an open thread: Tidy… and Combine… go in the bar's ⋯. */
+  narrow?: boolean;
   scope: string | null;
   machines?: MachinesModel;
   pinned?: ReadonlySet<string>;
@@ -34,6 +39,8 @@ export interface MenuPicks {
   has: (threadId: string) => boolean;
   start: (threadId: string) => void;
   act: PickActions;
+  /** Stop the Combine a row waits in (its menu's Stop combining). */
+  stopCombine?: (threadId: string) => void;
 }
 
 export function useListPicks(input: ListPicksInput) {
@@ -57,7 +64,22 @@ export function useListPicks(input: ListPicksInput) {
     starred: (row) => (pinned && (!machines || machineTakes(row, machines, 'star')) ? pinned.has(row.thread_id) : null),
     prioritizes: (row) => !machines || machineTakes(row, machines, 'priority'),
   };
-  const act: PickActions | null = bulk ? { rows, rules, bulk, onGone: leave, snoozes: input.snoozes } : null;
+  const [tidyAt, setTidyAt] = useState<HTMLElement | null>(null);
+  const [combining, setCombining] = useState(false);
+  const combines = bulk?.combines;
+  const act: PickActions | null = bulk
+    ? {
+        rows,
+        rules,
+        bulk,
+        onGone: leave,
+        snoozes: input.snoozes,
+        narrow: input.narrow,
+        // From a menu, the popover sits on the bar's ⋯ (the menu has closed), else on the bar.
+        tidy: (anchor) => setTidyAt(anchor ?? body.current?.closest('.pn-inbox')?.querySelector<HTMLElement>('[data-pick-bar] [data-pick-menu="more"], [data-pick-sheet] [data-pick-menu="more"], [data-pick-bar]') ?? null),
+        ...(combines ? { combine: () => setCombining(true) } : {}),
+      }
+    : null;
 
   /** A click on a row, before the row hears it: a pick, when picking or with ⌘ / Ctrl or Shift. */
   const onClickCapture = (event: ReactMouseEvent) => {
@@ -102,8 +124,16 @@ export function useListPicks(input: ListPicksInput) {
     const ids = section.threads.map((row) => row.thread_id);
     return <PickBox state={boxState(ids, picks.picked)} label={`Select all in ${section.label}`} onPick={() => picks.all(ids)} />;
   };
-  const bar = picks.on && act ? <PickBar act={act} all={boxState(drawnIds, picks.picked)} onAll={() => picks.all(drawnIds)} onDone={leave} phone={phone} /> : null;
+  const bar =
+    picks.on && act ? (
+      <>
+        <PickBar act={act} all={boxState(drawnIds, picks.picked)} onAll={() => picks.all(drawnIds)} onDone={leave} phone={phone} />
+        <PickTidy rows={rows} machines={machines} anchor={tidyAt} phone={phone} onClose={() => setTidyAt(null)} />
+        {combining && combines && <CombineDialog rows={rows} machines={machines} onClose={() => setCombining(false)} onStarted={(record, machine) => (combines.begin(record, machine, rows), leave())} />}
+      </>
+    ) : null;
   const sheet = picks.on && act && phone ? <PickSheet act={act} /> : null;
-  const menu: MenuPicks | undefined = act ? { has: (id) => picks.on && picks.picked.has(id), start: picks.start, act } : undefined;
+  const stopCombine = combines ? (id: string) => combines.waiting.has(id) && void combines.stop(combines.waiting.get(id)!) : undefined;
+  const menu: MenuPicks | undefined = act ? { has: (id) => picks.on && picks.picked.has(id), start: picks.start, act, stopCombine } : undefined;
   return { on: picks.on && !!act, has: (id: string) => picks.picked.has(id), start: act ? () => picks.start() : undefined, onClickCapture, onRowBox, groupBox, bar, sheet, menu };
 }

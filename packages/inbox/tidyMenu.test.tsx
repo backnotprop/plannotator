@@ -54,7 +54,7 @@ function plan(count: number): InboxTidyPlan {
   } as InboxTidyPlan;
 }
 
-const controller = (p: InboxTidyPlan): TidyController => ({ surface: 'list', scope: null, plan: p, run: p.run, start: async () => null, refresh: () => {} });
+const controller = (p: InboxTidyPlan): TidyController => ({ surface: 'list', scope: null, plan: p as TidyController['plan'], run: p.run, start: async () => null, refresh: () => {} });
 
 async function settle() {
   await act(async () => {

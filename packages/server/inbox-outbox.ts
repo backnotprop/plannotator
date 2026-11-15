@@ -206,6 +206,12 @@ export const DOOR_WRITES: Readonly<Record<string, "append" | "set" | "file" | "l
   "POST uploads/reuse": "local",
   "POST uploads": "file",
   "POST markups": "file",
+  // Tidy and Combine (approval "inbox-multi-select"): a Tidy's notes and a Combine's wake are written under the
+  // body's key, so a second copy answers the first; a Combine's Stop and Undo put a state.
+  "POST tidy": "append",
+  "POST combine": "append",
+  "POST combine/(cmb_[^/]+)/cancel": "set",
+  "POST combine/(cmb_[^/]+)/undo": "set",
   // A launched agent's buttons from another machine (remote launch). Stop, Trust folder and Delete put a state; Try
   // again is refused while a start runs and does nothing for a launch that is not failed or stopped.
   "POST launch/:id/stop": "set",

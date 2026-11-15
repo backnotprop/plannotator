@@ -463,6 +463,7 @@ function countWords(row: InboxListRow, now: number, tickAlone = false): { short:
   if (row.answered_not_sent) return { short: 'Answered', long: 'Answered, not sent', full: 'Answered, not sent' };
   // An agent the person started from New message (launch): one muted word while it starts or works.
   if (row.run) return same(row.run === 'starting' ? 'Starting' : row.run === 'cloning' ? 'Cloning' : 'Working');
+  if (row.combining) return { short: <span className="ib-combining">Combining…</span>, long: <span className="ib-combining">Combining…</span>, full: 'Combining…' };
   if (row.section === 'sent' && row.addressee) return same(`To ${agentName(rowAgent(row))}`);
   return null;
 }
@@ -1259,7 +1260,7 @@ export function InboxList(props: InboxListProps) {
   // Another project on a phone: the list starts at its top. The list itself stays mounted (its Quiet fold and,
   // across a resize past the phone width, its scroll are kept).
   const bodyRef = useRef<HTMLDivElement>(null);
-  const pick = useListPicks({ sections: props.sections, isOpen: (id) => (asList && id !== 'snoozed') || groups.state(id).open, body: bodyRef, bulk: props.bulk, phone: props.phone === true, scope: props.scope ?? null, machines: props.machines, pinned: props.pinned, snoozes: props.onSnooze !== undefined, snoozesOf: props.snoozesOf, sectionOf: (id) => props.sections.find((section) => section.threads.some((r) => r.thread_id === id))?.id ?? null });
+  const pick = useListPicks({ sections: props.sections, isOpen: (id) => (asList && id !== 'snoozed') || groups.state(id).open, body: bodyRef, bulk: props.bulk, phone: props.phone === true, narrow: props.narrow === true, scope: props.scope ?? null, machines: props.machines, pinned: props.pinned, snoozes: props.onSnooze !== undefined, snoozesOf: props.snoozesOf, sectionOf: (id) => props.sections.find((section) => section.threads.some((r) => r.thread_id === id))?.id ?? null });
   // ↑ ↓ Home End move focus between the rows (listKeys.ts), only while a row or the Quiet band has it.
   const listKey = (move: ListMove) => ({
     when: (event: KeyboardEvent) => {
@@ -1760,8 +1761,7 @@ export function InboxList(props: InboxListProps) {
  */
 export const ListRow = memo(
   function ListRow({ row, project, away, drawn, shape, full, filtered, selected, lit, onOpen, onMarkRead, onMarkUnread, onSendNow, onUnstar, menu, pinned, pinColumn, keys, pill, compact, noPreview = false, relative = false, titleFirst = false, timeBelow = false, statusMark = false, noAgents = false, noPulls = false, picking = false, picked = false, onPick }: ListRowProps) {
-    const open = () => onOpen(row);
-    const pickState = { picking, picked };
+    const open = () => onOpen(row), pickState = { picking, picked };
     const unstarRow = onUnstar && pinned ? () => onUnstar(row) : undefined;
     const rowLook: RowLook = { noPreview, relative, titleFirst, timeBelow, statusMark, noAgents, noPulls };
     if (shape === 'phone') return <PhoneRow row={row} project={project} away={away} filtered={filtered} lit={lit} menu={menu} pinned={pinned} keys={keys} pill={pill} compact={compact} {...rowLook} {...pickState} onOpen={open} onUnstar={unstarRow} />;

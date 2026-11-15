@@ -162,7 +162,6 @@ import { oneTimeDialogShownThisLoad, snoozeIntroBlockedBy, useSnoozeIntro } from
 import { useLineLatch, claimRevealOnce, listTallerThanScreen, listViewRevealClear, listViewRevealLeaveCounts, listViewRevealMayClaim, idleClockArmed, noteRevealThread, openThreadAsks, revealArmed, broRevealIdleCounts, broRevealLeaveCounts, grillMeTipIdleCounts, grillMeTipLeaveCounts, REVEAL_TIMES, starRevealLeaveCounts, useBoardReveal, useLineReveal, useStepsReveal, useStarReveal } from './reveal';
 import { useIdleClock } from './idleClock';
 import { launchTipDue } from './compose/launchTip';
-import type { InboxRevealId } from './api';
 import { type RevealFeature, turnOnFromReveal as turnOnRevealFeature } from './revealTurnOn';
 import { namesCapability, withCapabilities } from './capabilities';
 import { openSnoozeMenu } from './snoozeIntroTry';
@@ -189,6 +188,7 @@ import { openTakenBack } from './takenBackCompose';
 import { restartInbox } from './restartInbox';
 import { errorToast } from './toastError';
 import { bulkWrites } from './bulkWrites';
+import { useCombines } from './components/useCombines';
 import { canToggleRead, confirmSetAside, MARK_READ_LOOK_WAIT_MS, MARK_READ_UNDO_MS, MARK_UNREAD_RETRY_WAIT_MS, markReadToast, markUnreadToast, offersRowMarkRead, seenHeldInNew, setAsideCount, setAsideOf, type SetAsideAnswer, type SetAsideCount, warnsBeforeRead } from './markRead';
 import { MarkReadWarning } from './components/MarkReadWarning';
 import { AgentDeleteDialog } from './agents/AgentDeleteDialog';
@@ -266,7 +266,7 @@ import { useComposerOpener } from './compose/openComposer';
 import { COMPOSE_CLONE_EVENT, composeActions, composeTargets, hostLabel, lastLaunchAgent, launchHistory, projectCanStart, projectPlusOn, SCRATCH_PICK, type ComposeAction, type ComposeCloneRequest } from './compose/model';
 import { machineLaunchesKept } from './compose/useMachineLaunches';
 import { reviewBoxPulls } from './compose/reviewBox';
-import type { CardsModel, DraftView, InboxStorageModel, ThreadModel, UpdateCheckFailing } from './api';
+import type { CardsModel, DraftView, InboxRevealId, InboxStorageModel, ThreadModel, UpdateCheckFailing } from './api';
 import { NO_RESTART_AGENTS, restartAgentsOf } from './restartAgents';
 import type { InboxComposeLaunch, InboxReaction, InboxRestartAgents } from '@plannotator/core/inbox-types';
 import { reactionSpeech } from './components/ReactionTray';
@@ -3478,7 +3478,7 @@ function Inbox() {
   const { snooze, unsnooze, restoreSnooze } = snoozeWrites({ rowOf, threadRow: () => threadRow, showError, showToast, dismissToast, afterWrite, say, armSlide, setShown, shownRef, routeRef, latestRef, listCovered, snoozeMoved, snoozedThisLoad });
 
   const { setPriority, restorePriority } = priorityWrites({ rowOf, threadRow: () => threadRow, showError, showToast, dismissToast, afterWrite, say, armSlide, setShown, shownRef, routeRef, latestRef, listCovered });
-  const bulk = bulkWrites({ rowOf, rowWrites, setShown, shownRef, latestRef, routeRef, listCovered, armSlide, afterWrite, showToast, dismissToast, say, warnSetAside, restoreSnooze, restorePriority, closeThread: () => (fromCard ? backToCard() : close({ ...routeRef.current, thread: null, file: null })) });
+  const bulkBase = bulkWrites({ rowOf, rowWrites, setShown, shownRef, latestRef, routeRef, listCovered, armSlide, afterWrite, showToast, dismissToast, say, warnSetAside, restoreSnooze, restorePriority, closeThread: () => (fromCard ? backToCard() : close({ ...routeRef.current, thread: null, file: null })), openThread: (thread) => go({ page: 'inbox', project: null, thread }) }), bulk = { ...bulkBase, combines: useCombines(bulkBase, machines) };
 
   /**
    * Pin a thread to the sidebar, or unpin it (approval "inbox-pinned-threads"),
@@ -4111,7 +4111,7 @@ function Inbox() {
     if (combinedHead) writeRoute({ ...route, project: combinedHead }, { replace: true });
   }, [combinedHead]);
   const { latestSections, latestGroups, latestRows, pinsOn, pinRows, pinnedIds, listedOpenRow, openThreadRow, listShown, snoozeOn, projectsReadable, projectCounts, latestProjectActivity, filterProject, filterMachine, windowRows, threadAgentContext, filterAgent, projectNames, sidebarMachineCounts, filterList, listFilterPicks, setListFilter, listFilterScoped, filterShown, listFilterRows, listSections, listFilterEmpty, listTitle, notice, filterTag, threadTagsHost, sidebarTags } = useListShown({
-    latest, projects, route, thread, threadRow, rowPatches, pinPatches, looking, shown, machines, hideAway, openedHere, heldOpen, heldRead,
+    latest, projects, route, thread, threadRow, rowPatches, pinPatches, looking, shown, machines, hideAway, openedHere, heldOpen, heldRead, combining: bulk.combines.waiting,
     tags: {
       listTags,
       across,
@@ -4572,7 +4572,7 @@ function Inbox() {
   // Its plan goes stale with every list read: one that moved the latest list but kept the list drawn (a row held
   // behind "N new") counts, and one that brought nothing new says so itself (`listRead`, refreshList).
   const listReadToken = useMemo(() => ({ shown, latest }), [shown, latest]);
-  const listTidy = useTidy(route.page === 'inbox' ? (route.project ?? null) : null, 'list', listReadToken, route.page === 'inbox' && !firstRun);
+  const listTidy = useTidy(route.page === 'inbox' ? (route.project ?? null) : null, 'list', listReadToken, route.page === 'inbox' && !firstRun, machines);
   listTidyRead.current = listTidy.listRead ?? null;
   const boardTidy = useTidy(boardFilter, 'board', cards, route.page === 'board');
   // The first-run screen shows who is running now ("Message Claude Code") and moves on by itself

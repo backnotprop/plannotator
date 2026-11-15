@@ -39,7 +39,7 @@
  * No CORS headers anywhere, so another site cannot read an answer.
  */
 
-import { INBOX_LINKED_MARKS, INBOX_PROMPT_HOSTS, inboxMachineTags, inboxRowsBy, type InboxRowsBy } from "@plannotator/core/inbox-types";
+import { INBOX_LINKED_MARKS, INBOX_PROMPT_HOSTS, inboxMachineTags, inboxRowsBy, isInboxCombineRun, type InboxRowsBy } from "@plannotator/core/inbox-types";
 import { inboxDiffOptionsOf, inboxDiffOptionsSaved, parseInboxDiffOptionsChange } from "./inbox-diff-options";
 import { listIntroAtStart, listIntroDue, listIntroLookPicked } from "./inbox-list-intro";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
@@ -144,6 +144,7 @@ import { encodeInboxResponse } from "./inbox-encoding";
 import type { InboxSearchIndex, InboxSearchIndexOptions } from "@plannotator/shared/inbox/search";
 import { DecisionDataAborted, decisionDataCsv, decisionDataSummary, readDecisionLines } from "@plannotator/shared/inbox/decision-data";
 import { createInboxSearchRoutes } from "./inbox-search";
+import { createInboxCombine } from "./inbox-combine";
 import { inboxSkillsRoute } from "./inbox-skills";
 import { assertTestHome } from "./test-home-guard";
 import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
@@ -4030,7 +4031,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const ownerCommand = (reply: InboxMessage, sendNow: boolean, subject: string | null): InboxReplyCommand => {
     // Tidy: the note's body is the whole wake (inboxWakeText words it); never a reply to anything.
     if (reply.tidy) {
-      return { type: "message", id: reply.id, thread_id: reply.thread_id, reply_to: null, subject: "Tidy", body: reply.body, url: threadPageUrl(baseUrl, reply.thread_id), tidy: true };
+      return { type: "message", id: reply.id, thread_id: reply.thread_id, reply_to: null, subject: isInboxCombineRun(reply.tidy.id) ? "Combine" : "Tidy", body: reply.body, url: threadPageUrl(baseUrl, reply.thread_id), tidy: true };
     }
     // A reply the person sent to another session because the one that asked
     // had ended: the wake says so, naming the agent that asked.
@@ -4922,6 +4923,17 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     combineLoading: () => !repoReadsBegun || repos.reading(),
   });
 
+  // Combine (packages/server/inbox-combine.ts): picked threads, one agent writes a new thread, then they are archived.
+  const combine = createInboxCombine({
+    store,
+    serverSession,
+    reachFor: () => tidy.reachFor(),
+    idleSince: (session) => live.lastIdleOf(session),
+    titleOf: (session) => live.titles()[session] ?? null,
+    readBody,
+    json,
+  });
+
   /** The optional debug log (inbox-debug-log.ts): null, the default, changes nothing and writes nothing. */
   const debugLog = (options.debug ?? resolveInboxDebug(loadConfig(), process.env)) ? createInboxDebugLog(join(dataDir, "inbox")) : null;
 
@@ -5258,6 +5270,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // Tidy: who it would ask (GET) and asking them (POST).
       const tidied = await tidy.route(req, url);
       if (tidied) return tidied;
+      const combined = await combine.route(req, url);
+      if (combined) return combined;
       // A hover card's data for an issue, PR or MR link (ref-cards.ts). Read only, the window's own
       // read guard; the owner over the tailnet gets it too. Never on the device door (not in its
       // allowlist), so nothing of it reaches a phone or the relay.
@@ -7267,6 +7281,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     launch.stop();
     unsubscribeLaunchTip();
     unsubscribeAgentWork();
+    combine.close();
     codexWake.stop();
     qwenWake.stop();
     t3Wake.stop();

@@ -8,7 +8,7 @@ import { rowMenuActions, type RowMenuAction } from '../rowMenu';
 import { useThreadTags } from '../threadTags';
 import { AddTagItem, AddTagList } from './AddTagMenu';
 import { useContextMenuTrigger } from './useContextMenuTrigger';
-import { BulkItems, runBulk } from './PickBar';
+import { BulkItems, WorkItems, runBulk } from './PickBar';
 import { BulkTagList } from './BulkTags';
 import type { MenuPicks } from './useListPicks';
 import { bulkTargets } from '../rowPicks';
@@ -225,6 +225,7 @@ export const ThreadRowMenu = forwardRef<HTMLDivElement, ThreadRowMenuProps>(func
                 <BulkTagList threadIds={picked.act.rows.map((row) => row.thread_id)} onBack={() => setTagView(false)} />
               ) : (
                 <>
+                  <WorkItems act={picked.act} anchor={() => (target ? body.current?.querySelector<HTMLElement>(`[data-thread-id="${CSS.escape(target.thread_id)}"]`) ?? null : null)} />
                   {bulkTargets(picked.act.rows, 'archive', picked.act.rules).length > 0 && (
                     <Menu.Item className="ib-pmi" label="Archive" data-bulk-action="archive" onClick={() => runBulk(picked.act, 'archive')}>
                       <Icon name="archive" size={15} />
@@ -275,6 +276,15 @@ export const ThreadRowMenu = forwardRef<HTMLDivElement, ThreadRowMenuProps>(func
                     <Menu.Item className="ib-pmi" label="Select" data-row-action="select" onClick={() => props.picks!.start(target.thread_id)}>
                       <Icon name="check" size={15} />
                       Select
+                    </Menu.Item>
+                    <Menu.Separator className="ib-pm-sep" />
+                  </>
+                )}
+                {target?.combining && props.picks?.stopCombine && (
+                  <>
+                    <Menu.Item className="ib-pmi" label="Stop combining" data-row-action="stop-combine" onClick={() => props.picks!.stopCombine!(target.thread_id)}>
+                      <Icon name="xCircle" size={15} />
+                      Stop combining
                     </Menu.Item>
                     <Menu.Separator className="ib-pm-sep" />
                   </>

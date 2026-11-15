@@ -59,3 +59,43 @@ button.ib-pick-box:focus-visible { outline: 2px solid var(--ring); outline-offse
 .ib-pick-tool { flex: 1 1 0; display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; min-width: 0; height: 52px; padding: 0 4px; border: 0; border-radius: 10px; background: color-mix(in oklch, var(--foreground) 6%, transparent); color: var(--foreground); font: inherit; font-size: var(--ib-fs-12-5, 12.5px); white-space: nowrap; }
 .ib-pick-tool:disabled { opacity: 0.45; }
 .ib-pick-tool:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+
+/* Tidy's own instructions (components/TidyPanel.tsx): a two-line field, one muted line, Recent. */
+.ib-tidy:has(.ib-tidy-words) { width: 320px; }
+.ib-tidy-words { display: block; box-sizing: border-box; width: calc(100% - 4px); min-height: 56px; margin: 8px 2px 0; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--ib-rl-xs-s, 6px); background: var(--background); color: var(--foreground); font: inherit; font-size: var(--ib-fs-13, 13px); line-height: 1.4; resize: vertical; }
+.ib-tidy-words::placeholder { color: var(--muted-foreground); }
+.ib-tidy-words:focus-visible { outline: 2px solid var(--ring); outline-offset: -1px; }
+.ib-tidy-line { margin: 6px 8px 0; color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); line-height: 1.45; }
+.ib-tidy-added { margin-bottom: 4px; color: var(--foreground); }
+.ib-tidy-recent .ib-tidy-sub { padding-top: 10px; }
+.ib-tidy-said { display: flex; align-items: center; gap: 8px; width: 100%; height: 30px; padding: 0 8px; border: 0; border-radius: var(--ib-rl-xs-s, 6px); background: none; color: var(--foreground); font: inherit; font-size: var(--ib-fs-13, 13px); text-align: left; cursor: pointer; }
+.ib-tidy-said > svg { flex: none; color: var(--muted-foreground); }
+.ib-tidy-said > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (hover: hover) { .ib-tidy-said:hover { background: var(--ib-hover-s, color-mix(in oklch, var(--muted) 80%, transparent)); } }
+.ib-tidy-said:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+@media (max-width: 767px) { .ib-tidy-words { font-size: 16px; } }
+
+/* Combine… (components/CombineDialog.tsx): who writes it, as Tidy's agent rows; the picked one is filled, not outlined. */
+dialog.ib-dlg.ib-cmb { width: min(560px, calc(100vw - 32px)); }
+.ib-cmb-who { margin: 16px 0 0; padding: 0; border: 0; }
+.ib-cmb-who legend { padding: 0; margin-bottom: 6px; font-weight: 600; font-size: var(--ib-fs-13, 13px); }
+.ib-cmb-opt { display: grid; grid-template-columns: 16px 18px minmax(0, 1fr); align-items: center; column-gap: 10px; min-height: 52px; padding: 6px 10px; border-radius: 8px; cursor: pointer; }
+.ib-cmb-opt[data-on] { background: var(--ib-sel); }
+@media (hover: hover) { .ib-cmb-opt:not([data-on]):hover { background: var(--ib-hover); } }
+.ib-cmb-opt input { margin: 0; accent-color: var(--primary); }
+.ib-cmb-opt .ib-glyph, .ib-cmb-opt > svg { width: 16px; height: 16px; }
+.ib-cmb-nm { display: flex; flex-direction: column; min-width: 0; }
+.ib-cmb-nm b { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-cmb-nm small { color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); }
+.ib-cmb-lbl { display: block; margin: 16px 0 6px; font-weight: 600; font-size: var(--ib-fs-13, 13px); }
+.ib-cmb-words { display: block; box-sizing: border-box; width: 100%; min-height: 64px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); color: var(--foreground); font: inherit; line-height: 1.45; resize: vertical; }
+.ib-cmb-words::placeholder { color: var(--muted-foreground); }
+.ib-cmb-words:focus-visible { outline: 2px solid var(--ring); outline-offset: -1px; }
+.ib-cmb-what { margin: 14px 0 0; color: var(--muted-foreground); line-height: 1.5; }
+.ib-cmb-what b { color: var(--foreground); font-weight: 500; }
+.ib-cmb-why { margin: 14px 0 0; color: var(--muted-foreground); line-height: 1.5; }
+.ib-cmb-err { margin: 12px 0 0; color: var(--destructive); font-size: var(--ib-fs-12-5, 12.5px); }
+.ib-cmb-btns { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+@media (max-width: 767px) { .ib-cmb-words { font-size: 16px; } }
+/* A row in a Combine still waiting for its new thread (InboxList.tsx `countWords`). */
+.pn-inbox .ib-combining { color: var(--primary); }

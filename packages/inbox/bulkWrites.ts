@@ -18,6 +18,7 @@ import type { RowWrites, RowDrawing } from './data/actions/rows';
 import { errorToast } from './toastError';
 import type { InboxToastModel } from './components/Toast';
 import type { BulkAction } from './rowPicks';
+import type { CombinesTracker } from './components/useCombines';
 
 /** How many threads' writes are on their way at once. */
 const AT_ONCE = 6;
@@ -40,6 +41,8 @@ export interface BulkHost {
   restorePriority: (threadId: string, priority: InboxListRow['priority']) => Promise<void>;
   /** Mark unread on the open thread closes it (App.tsx `markUnread`). */
   closeThread: () => void;
+  /** A Combine's new thread, from its toast (useCombines.ts). */
+  openThread: (threadId: string) => void;
 }
 
 /** One thread's write: made, held for its machine (named), or refused (why). */
@@ -246,7 +249,9 @@ export function bulkWrites(host: BulkHost) {
     );
   };
 
-  return { archive, snooze, markRead, markUnread, star, priority };
+  // The window's toasts, live region and writes for the picks' other actions (Combine's tracker, useCombines.ts).
+  return { archive, snooze, markRead, markUnread, star, priority, host };
 }
 
-export type BulkWrites = ReturnType<typeof bulkWrites>;
+/** With the Combines the window follows (useCombines.ts), which the picks' Combine… starts. */
+export type BulkWrites = ReturnType<typeof bulkWrites> & { combines?: CombinesTracker };

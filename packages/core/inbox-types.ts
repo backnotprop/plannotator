@@ -50,6 +50,7 @@ export * from "./inbox-initiatives";
 export * from "./inbox-surface-bridge";
 // Tidy (the list header's and the Board's ⋮ menu), the same way.
 export * from "./inbox-tidy";
+export * from "./inbox-combine";
 // Pull requests (code review in the Inbox, phase 2), the same way.
 export * from "./inbox-pulls";
 export * from "./inbox-pull-risk";
@@ -70,7 +71,7 @@ export { ulid } from "./ulid";
 import { ulid } from "./ulid";
 
 /** `upl`: a file the person uploaded for a message; `drf`: a draft of one (compose); `crd`: a Board card; `stp`: a session's steps in a thread; `ini`: a Board initiative; `lch`: a launch (an agent started from the Inbox). */
-export type InboxIdPrefix = "msg" | "prj" | "ses" | "dec" | "dev" | "upl" | "drf" | "crd" | "tdy" | "lch" | "ibx" | "stp" | "ini";
+export type InboxIdPrefix = "msg" | "prj" | "ses" | "dec" | "dev" | "upl" | "drf" | "crd" | "tdy" | "lch" | "ibx" | "stp" | "ini" | "cmb";
 
 export function inboxId(prefix: InboxIdPrefix, now?: number): string {
   return `${prefix}_${ulid(now)}`;
@@ -95,6 +96,8 @@ const ID_RE: Record<InboxIdPrefix, RegExp> = {
   ibx: /^ibx_[0-9A-HJKMNP-TV-Z]{26}$/,
   /** One agent session's steps in one thread (packages/core/inbox-steps.ts). */
   stp: /^stp_[0-9A-HJKMNP-TV-Z]{26}$/,
+  /** One Combine of picked threads (packages/server/inbox-combine.ts). */
+  cmb: /^cmb_[0-9A-HJKMNP-TV-Z]{26}$/,
   /** A Board initiative (packages/core/inbox-initiatives.ts). */
   ini: /^ini_[0-9A-HJKMNP-TV-Z]{26}$/,
 };
@@ -1897,6 +1900,11 @@ export interface InboxListRow extends InboxThreadSummary {
    */
   run?: "starting" | "working" | "cloning" | null;
   /**
+   * The window's own drawing (approval "inbox-multi-select"): the thread is in a Combine still waiting for its new
+   * thread, so the row says "Combining…". No server sends it.
+   */
+  combining?: true;
+  /**
    * When the person marked the thread read (Mark read), while it still holds:
    * no message but a set-aside note since. The row is Quiet. Null otherwise.
    * Absent from an older Inbox.
@@ -3304,9 +3312,10 @@ export const INBOX_DRAFT_PASTED_LEAD_MAX = 2;
  * The marks a person sets on an agent or a thread that a linked machine may send to this Inbox, the one that owns it
  * (approval "inbox-linked-marks"). The list says them (`marks`), so a linked machine offers a mark on this Inbox's
  * rows only once this Inbox takes it; an older Inbox says none. `cards`: its Board's cards are read through its door
- * and changed there, so a linked machine's Board lists them.
+ * and changed there, so a linked machine's Board lists them. `tidy` and `combine` (approval "inbox-multi-select"): a
+ * linked machine's window asks this Inbox's sessions to tidy or combine this Inbox's threads, through its door.
  */
-export const INBOX_LINKED_MARKS = ["star", "priority", "agent-face", "agent-name", "take-back", "tags", "cards"] as const;
+export const INBOX_LINKED_MARKS = ["star", "priority", "agent-face", "agent-name", "take-back", "tags", "cards", "tidy", "combine"] as const;
 export type InboxLinkedMark = (typeof INBOX_LINKED_MARKS)[number];
 
 /**

@@ -1,6 +1,7 @@
 /**
  * Picking thread rows (approval "inbox-multi-select", 1B + 2A; rowPicks.ts): the box a row, a group or the whole list
- * is picked with, the bar that stands in for the list's header while picking ("3 selected", Archive, Snooze, ⋯, Done),
+ * is picked with, the bar that stands in for the list's header while picking ("3 selected", Archive, Snooze, Tidy…,
+ * Combine…, ⋯, Done; beside an open thread Tidy… and Combine… are the ⋯'s first items),
  * a phone's sheet of the same actions at the bottom edge, and the items the bar's ⋯ and a picked row's menu share.
  * Every action takes the picked rows it applies to (rowPicks.ts `bulkTargets`), with one toast and one Undo
  * (bulkWrites.ts). In a narrow list (beside an open thread) the bar keeps one line: a count of 100 or more draws
@@ -17,6 +18,10 @@ import type { BulkWrites } from '../bulkWrites';
 import { useToastAbove } from '../toastAbove';
 import { BulkTagList, useBulkTagsShown } from './BulkTags';
 import { TagIcon } from './InitiativePeek';
+import { Tip } from './Tip';
+
+/** Combine… with one thread picked: greyed, and its tooltip says why. */
+export const COMBINE_NEEDS_TWO = 'Pick two or more threads to combine';
 
 /** A box that picks: a row's, a group's, or the whole list's (half filled while only some of it is picked). */
 export function PickBox({ state, label, onPick, row }: { state: BoxState; label: string; onPick: (event: ReactMouseEvent) => void; row?: boolean }) {
@@ -71,6 +76,35 @@ export interface PickActions {
   onGone: () => void;
   /** Snooze is offered (an Inbox that keeps snoozes). */
   snoozes: boolean;
+  /** Tidy… on the picks, its popover at `anchor` (null: the bar's Tidy…, else its ⋯). */
+  tidy?: (anchor: HTMLElement | null) => void;
+  /** Combine… on the picks (two or more). */
+  combine?: () => void;
+  /** Beside an open thread: the bar's Tidy… and Combine… are the ⋯'s first items. */
+  narrow?: boolean;
+}
+
+/** Tidy… and Combine… as menu items (the narrow bar's ⋯, a picked row's menu), then a separator. */
+export function WorkItems({ act, anchor }: { act: PickActions; anchor?: () => HTMLElement | null }) {
+  if (!act.tidy && !act.combine) return null;
+  const two = act.rows.length >= 2;
+  return (
+    <>
+      {act.tidy && (
+        <Menu.Item className="ib-pmi" label="Tidy…" onClick={() => act.tidy!(anchor?.() ?? null)} data-pick-work="tidy">
+          <Icon name="brush" size={15} />
+          Tidy…
+        </Menu.Item>
+      )}
+      {act.combine && (
+        <Menu.Item className="ib-pmi" label="Combine…" disabled={!two} onClick={() => act.combine!()} data-pick-work="combine" title={two ? undefined : COMBINE_NEEDS_TWO}>
+          <Icon name="swap" size={15} />
+          Combine…
+        </Menu.Item>
+      )}
+      <Menu.Separator className="ib-pm-sep" />
+    </>
+  );
 }
 
 const ITEMS: { action: BulkAction; label: string; icon: IconName; iconClass?: string }[] = [
@@ -164,6 +198,7 @@ function BarMenu({ kind, act, phone, trigger, label, className }: { kind: 'snooz
             ) : (
               <>
                 {phone && <div className="ib-pm-title" aria-hidden="true">{n === 1 ? '1 thread' : `${formatCount(n)} threads`}</div>}
+                {act.narrow && !phone && <WorkItems act={act} anchor={() => anchor.current} />}
                 <BulkItems act={act} onTags={() => setTags(true)} />
               </>
             )}
@@ -218,6 +253,18 @@ export function PickBar({ act, all, onAll, onDone, phone }: PickBarProps) {
               }
             />
           )}
+          {!act.narrow && act.tidy && (
+            <button type="button" className="ib-pick-btn" onClick={(event) => act.tidy!(event.currentTarget)} data-pick-tidy="">
+              Tidy…
+            </button>
+          )}
+          {!act.narrow && act.combine && (
+            <Tip content={COMBINE_NEEDS_TWO} when={() => n < 2}>
+              <button type="button" className="ib-pick-btn" aria-disabled={n < 2 || undefined} onClick={() => n >= 2 && act.combine!()} data-pick-combine="">
+                Combine…
+              </button>
+            </Tip>
+          )}
           <BarMenu kind="more" act={act} phone={false} label="More for the selected threads" className="ib-pick-btn ib-pick-ico" trigger={<Icon name="dots" size={16} />} />
         </>
       )}
@@ -254,6 +301,18 @@ export function PickSheet({ act }: { act: PickActions }) {
             </>
           }
         />
+      )}
+      {act.tidy && (
+        <button type="button" className="ib-pick-tool" onClick={(event) => act.tidy!(event.currentTarget)} data-pick-tidy="">
+          <Icon name="brush" size={20} />
+          Tidy
+        </button>
+      )}
+      {act.combine && (
+        <button type="button" className="ib-pick-tool" disabled={act.rows.length < 2} onClick={() => act.combine!()} data-pick-combine="">
+          <Icon name="swap" size={20} />
+          Combine
+        </button>
       )}
       <BarMenu
         kind="more"
