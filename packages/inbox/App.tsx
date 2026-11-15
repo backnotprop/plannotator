@@ -3599,17 +3599,17 @@ function Inbox() {
     );
   };
   /**
-   * A thread row's right-click menu. Copy link and Copy thread ID say so in
-   * the window's one toast; Mark read, Move back and Archive are the row's
-   * hover action and the header's, with their toasts.
+   * A thread row's right-click menu and its swipe. Copy link and Copy thread ID say so in the window's one toast; Mark
+   * read, Move back and Archive are the row's hover action and the header's, with their toasts. Mark read, Mark unread
+   * and Archive hand back their write (a row's swipe brings an archived row back once it lands).
    */
-  const rowAction = (row: InboxListRow, action: RowMenuAction) => {
+  const rowAction = (row: InboxListRow, action: RowMenuAction): Promise<void> | void => {
     if (action === 'pin' || action === 'unpin') return void setPin(row, action === 'pin');
     if (action === 'priority-add' || action === 'priority-remove') return void setPriority(row, action === 'priority-add');
-    if (action === 'read' || action === 'unread') return void markRead(row.thread_id, action === 'read');
-    if (action === 'mark-unread') return void markUnread(row.thread_id);
+    if (action === 'read' || action === 'unread') return markRead(row.thread_id, action === 'read');
+    if (action === 'mark-unread') return markUnread(row.thread_id);
     if (action === 'unsnooze') return void unsnooze(row);
-    if (action === 'archive') return void archive(row.thread_id, row.thread_id, true);
+    if (action === 'archive') return archive(row.thread_id, row.thread_id, true);
     if (action === 'unarchive') return archivedHost.unarchive(row);
     if (action === 'copy-thread') return void copyThreadOf(row);
     const text = action === 'copy-link' ? threadLink(row.thread_id, settings, window.location.origin) : row.thread_id;
