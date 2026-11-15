@@ -48,7 +48,6 @@ import {
 import { PRPlatformIcon } from '@plannotator/ui/components/PRPlatformIcon';
 import { RepoIcon } from '@plannotator/ui/components/RepoIcon';
 import { getPlatformLabel, getMRLabel, getMRNumberLabel, getDisplayRepo, getPRNumber, getPRPlatformCapabilities, prBlobPermalink } from '@plannotator/shared/pr-types';
-import type { SemanticDiffAdvert } from '@plannotator/shared/semantic-diff-types';
 import type { CallFlowAdvert, CallFlowNode } from '@plannotator/shared/call-flow-types';
 import { configStore, useConfigValue, setReviewPanelView } from '@plannotator/ui/config';
 import { repoLabel } from '@plannotator/ui/utils/repoLabel';
@@ -83,7 +82,6 @@ import { PowerUpStatusSlot } from './semDiff/PowerUpStatusSlot';
 import { POWER_UP_CHANGED_EVENT } from '@plannotator/ui/components/settings/SemanticDiffsTab';
 import { computeReviewSemanticDiff, loadReviewSemanticDiff, setSemanticDiffSource, type ReadFileContents } from './semDiff/semanticDiffSource';
 import { ReviewSemanticDiffPanel } from './dock/panels/ReviewSemanticDiffPanel';
-import { resetSemanticDiffCache } from './hooks/useFileSemanticChanges';
 import type { SemanticDiffResponse } from '@plannotator/shared/semantic-diff-types';
 
 import type { SemDiffAdvert } from '@plannotator/shared/sem-diff-assets';
@@ -106,7 +104,6 @@ import { resolveCallFlowAnnotationPlacement } from './utils/callFlowAnnotations'
 import { callTreeHunkTargets as callTreeHunkTargetsFor, type CallTreeHunkTarget } from './utils/callTreeHunks';
 import { CallTreeHunkEntry } from './components/callTree/CallTreeHunkEntry';
 import { selectionForCallFlowNode } from './components/CallFlowTreeView';
-import { useSemanticDiffChanges } from './hooks/useFileSemanticChanges';
 import type { HostLineNote } from './components/hostLineNotes';
 import { useLiveReview } from './live/useLiveReview';
 import {
@@ -310,7 +307,6 @@ interface DiffData {
   prStackInfo?: PRStackInfo | null;
   prDiffScope?: PRDiffScope;
   prDiffScopeOptions?: PRDiffScopeOption[];
-  semanticDiff?: SemanticDiffAdvert;
   callFlow?: CallFlowAdvert;
 }
 
@@ -522,7 +518,6 @@ const ReviewApp: React.FC = () => {
   const [isCallFlowActive, setIsCallFlowActive] = useState(false);
   const [isPROverviewActive, setIsPROverviewActive] = useState(false);
   const [isPRArtifactsActive, setIsPRArtifactsActive] = useState(false);
-  const [semanticDiffAvailable, setSemanticDiffAvailable] = useState(false);
   const [callFlowAdvert, setCallFlowAdvert] = useState<CallFlowAdvert>({
     enabled: false,
     available: false,
@@ -568,9 +563,8 @@ const ReviewApp: React.FC = () => {
   const tokenHoverDelay = useConfigValue('tokenHoverDelay');
   // EXPERIMENTAL: edit code in place to author suggestions (default OFF).
   const editSuggestionsEnabled = useConfigValue('editSuggestions');
-  const semanticDiffEnabled = useConfigValue('semanticDiffEnabled');
   const callFlowEnabled = useConfigValue('callFlowEnabled');
-  const confirmedAnalysisSettings = useRef({ semanticDiff: semanticDiffEnabled, callFlow: callFlowEnabled });
+  const confirmedAnalysisSettings = useRef({ callFlow: callFlowEnabled });
   // Global plan-look preference. Code review can resolve this shared first-use
   // choice even though the visual result applies to plan/document surfaces.
 
@@ -810,7 +804,7 @@ const ReviewApp: React.FC = () => {
     [semDiff],
   );
   useEffect(() => () => semDiffClient?.dispose(), [semDiffClient]);
-  const semanticDiffUsable = semDiffClient != null || (semanticDiffEnabled && semanticDiffAvailable);
+  const semanticDiffUsable = semDiffClient != null;
   const diffSemanticOn = useConfigValue('diffSemantic');
   const diffPowerUpOn = useConfigValue('diffPowerUp');
   const [powerUpConfigured, setPowerUpConfigured] = useState<{ configured: boolean; provider: 'jev' | 'clef' | null }>({ configured: false, provider: null });
@@ -862,7 +856,6 @@ const ReviewApp: React.FC = () => {
   useEffect(() => {
     if (!semDiffClient) {
       setSemanticDiffSource(null);
-      resetSemanticDiffCache();
       return;
     }
     const read: ReadFileContents = async (file, signal) => {
@@ -884,7 +877,6 @@ const ReviewApp: React.FC = () => {
       cached = { key, promise };
       return promise;
     });
-    resetSemanticDiffCache();
     return () => setSemanticDiffSource(null);
   }, [semDiffClient]);
   // Session-constant capability advert from `/api/diff`: 'patch' means the
@@ -2410,7 +2402,7 @@ const ReviewApp: React.FC = () => {
     let cancelled = false;
     loadReviewSemanticDiff()
       .then((data) => {
-        if (!cancelled) setSemanticChangeCount(data.status === 'ok' ? data.changes.length : undefined);
+        if (!cancelled) setSemanticChangeCount(data.changes.length);
       })
       .catch(() => {});
     return () => {
@@ -2442,14 +2434,6 @@ const ReviewApp: React.FC = () => {
     });
   }, [callFlowEnabled, dockApi]);
 
-  const handleSemanticDiffUnavailable = useCallback(() => {
-    semanticDiffAutoFallbackPending.current = false;
-    if (semDiffClient) return;
-    setSemanticDiffAvailable(false);
-    dockApi?.getPanel(REVIEW_SEMANTIC_DIFF_PANEL_ID)?.api.close();
-    openAllFilesPanel();
-  }, [dockApi, openAllFilesPanel, semDiffClient]);
-
   const handleSemanticDiffLoadSuccess = useCallback(() => {
     semanticDiffAutoFallbackPending.current = false;
   }, []);
@@ -2467,17 +2451,6 @@ const ReviewApp: React.FC = () => {
     return true;
   }, [dockApi, openAllFilesPanel]);
 
-  const applySemanticDiffAdvert = useCallback((semanticDiff?: SemanticDiffAdvert) => {
-    if (!semanticDiff) return;
-    const available = semanticDiff.available === true;
-    setSemanticDiffAvailable(available);
-    if (!available && !semDiffClient) {
-      semanticDiffAutoFallbackPending.current = false;
-      dockApi?.getPanel(REVIEW_SEMANTIC_DIFF_PANEL_ID)?.api.close();
-      if (isSemanticDiffActive) openAllFilesPanel();
-    }
-  }, [dockApi, isSemanticDiffActive, openAllFilesPanel, semDiffClient]);
-
   const applyCallFlowAdvert = useCallback((callFlow?: CallFlowAdvert) => {
     if (!callFlow) return;
     setCallFlowAdvert(callFlow);
@@ -2490,7 +2463,6 @@ const ReviewApp: React.FC = () => {
     const response = await fetch('/api/review-analysis', { method: 'GET' });
     if (!response.ok) throw new Error('Analysis capabilities could not be refreshed.');
     const data = await response.json() as {
-      semanticDiff?: SemanticDiffAdvert;
       callFlow?: CallFlowAdvert;
       superseded?: boolean;
     };
@@ -2498,10 +2470,9 @@ const ReviewApp: React.FC = () => {
     if (data.callFlow?.state === 'unavailable' && data.callFlow.installable) {
       throw new Error(data.callFlow.message ?? 'The Call flow install is not visible yet.');
     }
-    applySemanticDiffAdvert(data.semanticDiff);
     applyCallFlowAdvert(data.callFlow);
     retryCallFlowAnalysis();
-  }, [applyCallFlowAdvert, applySemanticDiffAdvert, retryCallFlowAnalysis]);
+  }, [applyCallFlowAdvert, retryCallFlowAnalysis]);
 
   const callFlowInstall = useCallFlowInstall(refreshAnalysisAdverts);
   // Call flow is off by default. Enabling it in Settings is the explicit
@@ -2549,22 +2520,21 @@ const ReviewApp: React.FC = () => {
     if (isLoading || !apiModeRef.current) return;
     if (!analysisSettingsInitialized.current) {
       analysisSettingsInitialized.current = true;
-      confirmedAnalysisSettings.current = { semanticDiff: semanticDiffEnabled, callFlow: callFlowEnabled };
+      confirmedAnalysisSettings.current = { callFlow: callFlowEnabled };
       return;
     }
     const previous = confirmedAnalysisSettings.current;
-    const requested = { semanticDiff: semanticDiffEnabled, callFlow: callFlowEnabled };
+    const requested = { callFlow: callFlowEnabled };
     const controller = new AbortController();
     fetch('/api/review-analysis', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ semanticDiff: semanticDiffEnabled, callFlow: callFlowEnabled }),
+      body: JSON.stringify({ callFlow: callFlowEnabled }),
       signal: controller.signal,
     })
       .then(async (response) => {
         if (!response.ok) throw new Error('Analysis settings could not be applied.');
         return response.json() as Promise<{
-          semanticDiff?: SemanticDiffAdvert;
           callFlow?: CallFlowAdvert;
           superseded?: boolean;
         }>;
@@ -2573,21 +2543,17 @@ const ReviewApp: React.FC = () => {
         if (controller.signal.aborted) return;
         if (data.superseded) return;
         confirmedAnalysisSettings.current = requested;
-        applySemanticDiffAdvert(data.semanticDiff);
         applyCallFlowAdvert(data.callFlow);
       })
       .catch((error) => {
         if (controller.signal.aborted) return;
-        if (configStore.get('semanticDiffEnabled') !== previous.semanticDiff) {
-          configStore.set('semanticDiffEnabled', previous.semanticDiff);
-        }
         if (configStore.get('callFlowEnabled') !== previous.callFlow) {
           configStore.set('callFlowEnabled', previous.callFlow);
         }
         toast.error(error instanceof Error ? error.message : 'Analysis settings could not be applied.');
       });
     return () => controller.abort();
-  }, [applyCallFlowAdvert, applySemanticDiffAdvert, callFlowEnabled, isLoading, semanticDiffEnabled]);
+  }, [applyCallFlowAdvert, callFlowEnabled, isLoading]);
 
   // The dock is mounted only while the diff has files (see the render below).
   // A diff with 0 files unmounts it and disposes its API. Forget that API, or
@@ -2737,7 +2703,6 @@ const ReviewApp: React.FC = () => {
         viewedFiles?: string[];
         error?: string;
         isWSL?: boolean;
-        semanticDiff?: SemanticDiffAdvert;
         callFlow?: CallFlowAdvert;
         sections?: SinceBaseSections;
         commitInfo?: CommitDiffInfo;
@@ -2782,7 +2747,6 @@ const ReviewApp: React.FC = () => {
           gitContext: data.gitContext,
           diffOptions: data.diffOptions,
           sharingEnabled: data.sharingEnabled,
-          semanticDiff: data.semanticDiff,
           callFlow: data.callFlow,
         });
         setFiles(apiFiles);
@@ -2839,7 +2803,6 @@ const ReviewApp: React.FC = () => {
         }
         if (data.error) setDiffError(data.error);
         if (data.isWSL) setIsWSL(true);
-        setSemanticDiffAvailable(data.semanticDiff?.available === true);
         if (data.callFlow) setCallFlowAdvert(data.callFlow);
         setSections(data.sections ?? null);
         setCommitInfo(data.commitInfo ?? null);
@@ -2858,7 +2821,6 @@ const ReviewApp: React.FC = () => {
         });
         setFiles(demoFiles);
         setWorkspaceDiffOptions(null);
-        setSemanticDiffAvailable(false);
         setCallFlowAdvert({
           enabled: configStore.get('callFlowEnabled'),
           available: false,
@@ -2960,17 +2922,12 @@ const ReviewApp: React.FC = () => {
 
   // --- Call tree (phase 1): a "Call tree" entry on each hunk Call flow can draw
   // a tree for, opening that tree in the Call flow tab, rooted at the function
-  // around the hunk (sem's range when known). No server change: the existing
-  // analysis and sem output are re-read here.
-  const callTreeSemChanges = useSemanticDiffChanges(
-    diffData?.rawPatch ?? '',
-    semanticDiffUsable && callFlowAnalysis.status === 'ready',
-  );
+  // around the hunk. No server change: the existing analysis is re-read here.
   const callTreeHunkTargets = useMemo(() => {
     if (callFlowAnalysis.status !== 'ready') return [];
     const { data } = callFlowAnalysis;
-    return callTreeHunkTargetsFor(files, data.trees, callTreeSemChanges, { from: data.from, to: data.to });
-  }, [callFlowAnalysis, files, callTreeSemChanges]);
+    return callTreeHunkTargetsFor(files, data.trees, [], { from: data.from, to: data.to });
+  }, [callFlowAnalysis, files]);
   const [callTreeRequest, setCallTreeRequest] = useState<CallTreeRequest | null>(null);
   const callTreeTokenRef = useRef(0);
   const callTreeFromAllFilesRef = useRef(false);
@@ -3581,7 +3538,6 @@ const ReviewApp: React.FC = () => {
     snapshotId?: string;
     repoInfo?: { display: string; branch?: string };
     viewedFiles?: string[]; error?: string;
-    semanticDiff?: SemanticDiffAdvert;
     callFlow?: CallFlowAdvert;
     agentCwd?: string | null;
     approvalNotesSupported?: boolean;
@@ -3632,7 +3588,6 @@ const ReviewApp: React.FC = () => {
       setViewedFiles(data.viewedFiles ? new Set(data.viewedFiles) : new Set());
     }
     setDiffError(data.error || null);
-    applySemanticDiffAdvert(data.semanticDiff);
     applyCallFlowAdvert(data.callFlow);
     // The PR's local checkout changes on switch (and warms in later). Use the
     // server's value when present; otherwise clear it on a switch so the Open-in
@@ -3708,7 +3663,6 @@ const ReviewApp: React.FC = () => {
         gitContext?: GitContext;
         diffOptions?: DiffOption[];
         error?: string;
-        semanticDiff?: SemanticDiffAdvert;
         callFlow?: CallFlowAdvert;
         sections?: SinceBaseSections;
         commitInfo?: CommitDiffInfo;
@@ -3781,7 +3735,6 @@ const ReviewApp: React.FC = () => {
           return next;
         });
       }
-      applySemanticDiffAdvert(data.semanticDiff);
       applyCallFlowAdvert(data.callFlow);
       setSections(data.sections ?? null);
       setCommitInfo(data.commitInfo ?? null);
@@ -3874,7 +3827,7 @@ const ReviewApp: React.FC = () => {
     } finally {
       if (switchSeq === diffSwitchSeqRef.current) setIsLoadingDiff(false);
     }
-  }, [dockApi, resetStagedFiles, selectedBase, diffHideWhitespace, files, activeFileIndex, openDiffFile, applySemanticDiffAdvert, applyCallFlowAdvert, clearPendingSelection, autoViewedEnabled, diffType, reviewProgressStatus, flushReviewProgress, localDraftTarget, localDraftClientId, flushDraftBeforeSwitch, adoptDraftTarget]);
+  }, [dockApi, resetStagedFiles, selectedBase, diffHideWhitespace, files, activeFileIndex, openDiffFile, applyCallFlowAdvert, clearPendingSelection, autoViewedEnabled, diffType, reviewProgressStatus, flushReviewProgress, localDraftTarget, localDraftClientId, flushDraftBeforeSwitch, adoptDraftTarget]);
 
   // Switch the base branch the current diff compares against.
   // Only triggers a refetch when the active mode actually uses a base.
@@ -4662,7 +4615,6 @@ const ReviewApp: React.FC = () => {
     commitInfo,
     isSemanticDiffActive,
     semanticDiffAvailable: semanticDiffUsable,
-    onSemanticDiffUnavailable: handleSemanticDiffUnavailable,
     onSemanticDiffLoadError: handleSemanticDiffLoadError,
     onSemanticDiffLoadSuccess: handleSemanticDiffLoadSuccess,
     callFlowAvailable,
@@ -4710,7 +4662,7 @@ const ReviewApp: React.FC = () => {
     isPRContextLoading, prContextError, fetchPRContext, platformUser, openDiffFile,
     handleAllFilesVisibleFileChange, handleFileScrolledPast,
     handleOpenGuide, isAllFilesActive, allFilesOrder, allFilesAllCollapsed, onToggleAllFilesCollapsed, registerAllFilesCollapseToggle, commitInfo, isSemanticDiffActive, semanticDiffUsable,
-    handleSemanticDiffUnavailable, handleSemanticDiffLoadError, handleSemanticDiffLoadSuccess, handleAddAnnotationForFile,
+    handleSemanticDiffLoadError, handleSemanticDiffLoadSuccess, handleAddAnnotationForFile,
     callFlowAvailable, callFlowAdvert, callFlowAnalysis, retryCallFlowAnalysis, isCallFlowNodeInPatch, isCallFlowActive, openCallFlowPanel, callFlowInstall,
     callTreeHunkNotes, callTreeRequest, openCallTreeNode, returnFromCallTree, clearCallTreeRequest,
     editSuggestionsEnabled, handleAddSuggestionsForFile, handleAddEditorCommentForFile,

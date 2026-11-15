@@ -233,7 +233,7 @@ curl -fsSL https://plannotator.ai/install.sh | bash
 irm https://plannotator.ai/install.ps1 | iex
 ```
 
-The installer downloads the binary from GitHub Releases. A full install can also contact GitHub for release resolution and agent files, Ataraxy-Labs/sem for the optional `sem` sidecar, and npm for Pi, selected extra skills, or the managed agent-terminal runtime. Pinning `--version` skips only GitHub API release resolution, not the release download. See the [privacy policy](https://plannotator.ai/privacy) for the complete network boundaries.
+The installer downloads the binary from GitHub Releases. A full install can also contact GitHub for release resolution and agent files, and npm for Pi, selected extra skills, or the managed agent-terminal runtime. Pinning `--version` skips only GitHub API release resolution, not the release download. See the [privacy policy](https://plannotator.ai/privacy) for the complete network boundaries.
 
 Want just the binary and nothing else? Pass `--minimal` (or export `PLANNOTATOR_MINIMAL=1`) to install only the `plannotator` binary to `~/.local/bin`, skipping every skill, hook, slash command, and per-agent config:
 
