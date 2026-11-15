@@ -3323,7 +3323,6 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     const itemId = filePathToItemId.get(lineTarget.path);
     const handle = viewerRef.current;
     if (itemId == null || handle == null) return;
-    handledLineTargetRef.current = lineTarget;
     const item = handle.getItem(itemId);
     if (item != null && item.collapsed === true) {
       item.collapsed = false;
@@ -3337,6 +3336,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     let clear: ReturnType<typeof setTimeout> | undefined;
     const jump = () => {
       raf = requestAnimationFrame(() => {
+        handledLineTargetRef.current = lineTarget;
         viewerRef.current?.scrollTo({ type: 'range', id: itemId, range });
         if (pendingSelectionRef.current != null) return;
         const flash: CodeViewLineSelection = { id: itemId, range };
