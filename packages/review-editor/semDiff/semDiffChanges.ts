@@ -16,40 +16,65 @@ const CHANGE_TYPE: Record<SemanticDiffOperation['type'], string> = {
 };
 
 const MAX_NAME = 80;
-const NAMED = /\b(?:export\s+)?(?:default\s+)?(?:async\s+)?(?:function\*?|def|fn|func|class|interface|type|enum|const|let|var|struct|trait|impl)\s+([A-Za-z_$][\w$]*)/;
+const ID = '[A-Za-z_$][\\w$]*';
+const GENERIC = '<[^()]*>';
+const KEYWORDS = 'function|def|fn|func|fun|class|interface|type|enum|const|let|var|val|struct|trait|impl|object|protocol|extension|module|record|namespace|typealias';
+const MODIFIERS = 'export|default|declare|abstract|async|public|private|protected|internal|fileprivate|open|static|final|sealed|data|inner|value|annotation|companion|inline|suspend|operator|infix|tailrec|external|override|readonly|virtual|partial|unsafe|extern|mutating|nonmutating|convenience|required|dynamic|lazy|indirect|nonisolated|synchronized|pub(?:\\([^)]*\\))?';
+const ATTRIBUTE = '@[\\w.]+(?:\\([^)]*\\))?\\s+|\\[[^\\]]*\\]\\s*';
+const LEAD = `^\\s*(?:${ATTRIBUTE}|(?:${MODIFIERS}|${KEYWORDS})\\s+)*`;
+const NAMED = new RegExp(
+  `${LEAD}(?:${KEYWORDS})(?:\\s*\\*\\s*|\\s+)(?:\\([^)]*\\)\\s*)?(?:${GENERIC}\\s*)?(?:${ID}(?:${GENERIC})?\\??\\.)*(?!(?:${KEYWORDS})\\b)(${ID})`,
+);
+const RUST_IMPL = new RegExp(`${LEAD}impl\\s*(?:${GENERIC})?\\s+(?:[\\w:]+(?:${GENERIC})?\\s+for\\s+)?([\\w:]*?)(${ID})\\s*(?:${GENERIC})?\\s*(?:where\\b|\\{|$)`);
+const PARAMS = '\\((?:[^()]|\\([^()]*\\))*\\)';
+const METHOD = new RegExp(`^(?:(?:public|private|protected|static|async|readonly|override|get|set)\\s+)*\\*?(${ID})\\s*(?:${GENERIC})?\\s*${PARAMS}\\s*(?::\\s*[^=;{}]+)?\\{\\s*$`);
+const TYPED_METHOD = new RegExp(
+  `^\\s*((?:${ATTRIBUTE}|(?:${MODIFIERS})\\s+|${GENERIC}\\s+)*)(?:([A-Za-z_][\\w.]*(?:${GENERIC})?(?:\\[\\])*\\??)\\s+)?(${ID})\\s*(?:${GENERIC})?\\s*\\(`,
+);
+const TYPED_FILE = /\.(?:java|cs)$/i;
+const NOT_A_NAME = new Set(['if', 'for', 'foreach', 'while', 'switch', 'catch', 'return', 'function', 'else', 'elif', 'do', 'try', 'with', 'match', 'loop', 'when', 'guard', 'unless', 'until', 'using', 'lock', 'fixed', 'synchronized', 'new', 'throw', 'await', 'yield', 'case', 'goto', 'sizeof', 'typeof', 'nameof', 'default']);
 
-const GO_METHOD = /\bfunc\s+\([^)]*\)\s*([A-Za-z_]\w*)/;
-const METHOD = /^(?:(?:public|private|protected|static|async|readonly|override|get|set)\s+)*\*?([A-Za-z_$][\w$]*)\s*(?:<[^>]*>)?\s*\([^)]*\)?[^;]*\{\s*$/;
-const NOT_A_NAME = new Set(['if', 'for', 'while', 'switch', 'catch', 'return', 'function', 'else', 'do', 'try', 'with', 'match', 'loop']);
+function typedMethodName(line: string): string | null {
+  const match = TYPED_METHOD.exec(line);
+  if (!match) return null;
+  const [, modifiers, type, name] = match;
+  if (!modifiers && !type) return null;
+  if (NOT_A_NAME.has(name!) || (type && NOT_A_NAME.has(type))) return null;
+  return name!;
+}
 
-function declaredName(line: string): string | null {
-  const named = NAMED.exec(line)?.[1] ?? GO_METHOD.exec(line)?.[1];
+function declaredName(line: string, typed = false): string | null {
+  const impl = RUST_IMPL.exec(line);
+  if (impl) return impl[2]!;
+  const named = NAMED.exec(line)?.[1];
   if (named) return named;
   const method = METHOD.exec(line.trim())?.[1];
-  return method && !NOT_A_NAME.has(method) ? method : null;
+  if (method && !NOT_A_NAME.has(method)) return method;
+  return typed ? typedMethodName(line) : null;
 }
 
-export function shortName(line: string): string {
-  return declaredName(line) ?? line;
+export function shortName(line: string, filePath = ''): string {
+  return declaredName(line, TYPED_FILE.test(filePath)) ?? line;
 }
 
+const OPEN_BRACE = /^\s*\{\s*$/;
 const indentOf = (line: string) => /^\s*/.exec(line)![0].length;
 const LOCAL = /^\s+(?:const|let|var)\b|^\s*for\b/;
-const ownerName = (line: string) => (LOCAL.test(line) ? null : declaredName(line));
+const ownerName = (line: string, typed: boolean) => (LOCAL.test(line) ? null : declaredName(line, typed));
 
-function enclosingName(text: string, line: number | undefined): string | null {
+function enclosingName(text: string, line: number | undefined, typed: boolean): string | null {
   if (line == null) return null;
   const lines = text.split('\n');
   const own = lines[line - 1] ?? '';
-  if (ownerName(own)) return null;
+  if (ownerName(own, typed)) return null;
   let indent = own.trim() === '' ? Infinity : indentOf(own);
   for (let at = line - 2; at >= 0; at--) {
     const value = lines[at]!;
-    if (value.trim() === '') continue;
+    if (value.trim() === '' || OPEN_BRACE.test(value)) continue;
     const here = indentOf(value);
     if (here >= indent) continue;
     indent = here;
-    const name = ownerName(value);
+    const name = ownerName(value, typed);
     if (name) return name;
     if (here === 0) return null;
   }
@@ -72,7 +97,7 @@ function declarationLine(text: string, ranges: readonly { start: number; end: nu
   for (const range of ranges) {
     for (let line = range.start; line <= range.end && line < range.start + 40; line++) {
       const value = lineText(text, line);
-      if (/\b(function|def|fn|func|class)\b/.test(value)) return value;
+      if (/\b(function|def|fn|func|fun|class)\b/.test(value)) return value;
     }
   }
   return '';
@@ -99,6 +124,8 @@ export function semDiffChanges(
   oldFilePath: string | null = null,
   links: readonly SecondOpinionLink[] = [],
 ): SemanticDiffChange[] {
+  const typed = TYPED_FILE.test(filePath);
+  const named = (line: string) => declaredName(line, typed) ?? line;
   const rows: Folded[] = operations.map((op, index) => {
     const link = links.find((candidate) => candidate.operationIndex === index);
     const oldRange = op.lines.old[0];
@@ -112,13 +139,13 @@ export function semDiffChanges(
         : '';
     const name = helper || firstLine(newText, newRange?.start) || firstLine(oldText, oldRange?.start);
     const oldName = firstLine(oldText, oldRange?.start);
-    const owner = helper || op.type === 'renamed' ? null : newRange ? enclosingName(newText, newRange.start) : enclosingName(oldText, oldRange?.start);
+    const owner = helper || op.type === 'renamed' ? null : newRange ? enclosingName(newText, newRange.start, typed) : enclosingName(oldText, oldRange?.start, typed);
     return {
       entityId: null,
       changeType: CHANGE_TYPE[op.type] ?? 'modified',
       entityType: '',
-      entityName: owner ?? shortName(name),
-      oldEntityName: !owner && op.type === 'renamed' && oldName && shortName(oldName) !== shortName(name) ? shortName(oldName) : null,
+      entityName: owner ?? named(name),
+      oldEntityName: !owner && op.type === 'renamed' && oldName && named(oldName) !== named(name) ? named(oldName) : null,
       filePath,
       oldFilePath,
       startLine: newRange?.start ?? null,
