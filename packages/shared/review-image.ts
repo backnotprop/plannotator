@@ -565,7 +565,7 @@ export interface ReviewImageSideSize {
 
 export type ReviewImageSizes = Record<string, Partial<Record<DiffSide, ReviewImageSideSize>>>;
 
-async function sideSize(request: Omit<ReviewImageRequest, "ifNoneMatch" | "params">, entry: PatchFileEntry, side: DiffSide): Promise<ReviewImageSideSize | null> {
+async function sideSize(request: Pick<ReviewImageRequest, "signal" | "readSide">, entry: PatchFileEntry, side: DiffSide): Promise<ReviewImageSideSize | null> {
   const sidePath = side === "old" ? entry.oldPath : entry.newPath;
   if (!sidePath) return null;
   try {
@@ -581,6 +581,40 @@ async function sideSize(request: Omit<ReviewImageRequest, "ifNoneMatch" | "param
   }
 }
 
+export const REVIEW_IMAGE_SIZES_BUDGET_MS = 250;
+
+type ReviewImageSizesSource = Pick<ReviewImageRequest, "available" | "patch" | "signal" | "readSide">;
+
+function eligibleImageEntries(patch: string): PatchFileEntry[] {
+  return parseDiffToFiles(patch)
+    .map((file) => findPatchFileEntry(patch, file.path))
+    .filter((entry): entry is PatchFileEntry => !!entry && isEligibleEntry(entry))
+    .slice(0, MAX_REVIEW_IMAGE_SIZE_FILES);
+}
+
+export async function collectReviewImageSizes(source: ReviewImageSizesSource): Promise<ReviewImageSizes> {
+  const sizes: ReviewImageSizes = {};
+  if (!source.available) return sizes;
+  await Promise.all(
+    eligibleImageEntries(source.patch).map(async (entry) => {
+      const [old, next] = await Promise.all([sideSize(source, entry, "old"), sideSize(source, entry, "new")]);
+      if (old || next) sizes[entry.path] = { ...(old ? { old } : {}), ...(next ? { new: next } : {}) };
+    }),
+  );
+  return sizes;
+}
+
+export async function reviewImageSizesAdvert(source: ReviewImageSizesSource, budgetMs = REVIEW_IMAGE_SIZES_BUDGET_MS): Promise<{ imageSizes?: ReviewImageSizes }> {
+  if (!source.available || eligibleImageEntries(source.patch).length === 0) return {};
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), budgetMs);
+  });
+  const sizes = await Promise.race([collectReviewImageSizes(source).catch(() => null), late]);
+  if (timer) clearTimeout(timer);
+  return sizes ? { imageSizes: sizes } : {};
+}
+
 export async function handleReviewImageSizesRequest(request: Omit<ReviewImageRequest, "ifNoneMatch">): Promise<ReviewImageResponse> {
   const json = (status: number, body: unknown): ReviewImageResponse => ({
     status,
@@ -591,16 +625,5 @@ export async function handleReviewImageSizesRequest(request: Omit<ReviewImageReq
   const snapshot = request.params.get("snapshot");
   if (!snapshot) return json(400, { reason: "bad-request", error: "Expected snapshot" });
   if (!request.isCurrentSnapshot(snapshot)) return json(409, { reason: "stale", error: "Diff snapshot is stale; refresh the review" });
-  const entries = parseDiffToFiles(request.patch)
-    .map((file) => findPatchFileEntry(request.patch, file.path))
-    .filter((entry): entry is PatchFileEntry => !!entry && isEligibleEntry(entry))
-    .slice(0, MAX_REVIEW_IMAGE_SIZE_FILES);
-  const sizes: ReviewImageSizes = {};
-  await Promise.all(
-    entries.map(async (entry) => {
-      const [old, next] = await Promise.all([sideSize(request, entry, "old"), sideSize(request, entry, "new")]);
-      if (old || next) sizes[entry.path] = { ...(old ? { old } : {}), ...(next ? { new: next } : {}) };
-    }),
-  );
-  return json(200, { sizes });
+  return json(200, { sizes: await collectReviewImageSizes(request) });
 }

@@ -221,7 +221,7 @@ for (const [runtime, startServer] of [
       }
     }, 20_000);
 
-    test("one sizes request gives every image's dimensions and bytes, and an over-cap side its size, before any image loads", async () => {
+    test("image sizes ride the diff answer itself, and the sizes route gives the same, with an over-cap side's size", async () => {
       const fixture = buildRepo();
       const { server, payload } = await start(fixture);
       try {
@@ -234,6 +234,9 @@ for (const [runtime, startServer] of [
         });
         expect(sizes["added.png"]?.old).toBeUndefined();
         expect(sizes["big.png"]?.new?.bytes).toBeGreaterThan(10 * 1024 * 1024);
+        const diff = (await fetch(`${server.url}/api/diff`).then((r) => r.json())) as { imageSizes?: typeof sizes };
+        expect(diff.imageSizes?.["mod.png"]).toEqual(sizes["mod.png"]);
+        expect(diff.imageSizes?.["plain.svg"]?.new).toEqual({ bytes: SVG_NEW.length, width: 4, height: 4 });
         const stale = await fetch(`${server.url}/api/review-image-sizes?snapshot=nope`);
         expect(stale.status).toBe(409);
       } finally {
