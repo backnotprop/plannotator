@@ -3,6 +3,7 @@ import { plural, shortCount } from '@plannotator/ui/utils/countFormat';
 import type { FileTreeRowPart, FileTreeRowParts, GitStatusEntry } from '@pierre/trees';
 import type { DiffFile } from '../types';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
+import { fitText, fontOf, observeWidth, onFontsChanged } from '@plannotator/ui/utils/textFit';
 import { useReviewStateOptional } from '../dock/ReviewStateContext';
 
 export interface SectionEntry {
@@ -82,6 +83,22 @@ export function stageColumnShown(state: Pick<FileRowState, 'getSectionEntry' | '
 export function tightRow(parts: FileTreeRowParts | null): FileTreeRowParts | null {
   if (!parts?.trail) return parts;
   return { ...parts, trail: parts.trail.filter((part) => part !== null) };
+}
+
+export function observeTreeName(element: HTMLElement, name: string, setText: (text: string) => void): () => void {
+  let available = 0;
+  const fit = () => {
+    if (available > 0) setText(fitText('keep-tail', name, available, fontOf(element, 'tree-row-name')));
+  };
+  const stop = observeWidth(element, (width) => {
+    available = width;
+    fit();
+  });
+  const off = onFontsChanged(fit);
+  return () => {
+    stop();
+    off();
+  };
 }
 
 export function hasBadge(file: DiffFile, p: FileRowState): boolean {

@@ -6,7 +6,7 @@ import type { DiffFile } from '../types';
 import type { RepoFilesState } from '../hooks/useRepoFiles';
 import { initialRepoExpansion } from '../utils/repoTree';
 import { prefetchRepoFile } from '../hooks/useRepoFileText';
-import { ROW_ICONS, TreeRowMenu, ancestorsOf, fileRowParts, gitStatusFor, hasBadge, stageColumnShown, tightRow, type FileRowState } from './pierreRows';
+import { ROW_ICONS, TreeRowMenu, ancestorsOf, fileRowParts, gitStatusFor, hasBadge, observeTreeName, stageColumnShown, tightRow, type FileRowState } from './pierreRows';
 
 type ReadyRepoFiles = Extract<RepoFilesState, { status: 'ready' }>;
 
@@ -165,6 +165,7 @@ export const RepoTreeView: React.FC<RepoTreeViewProps> = (props) => {
     rows: {
       gitStatusPlacement: 'start',
       nameTruncation: 'keep-tail',
+      observeName: observeTreeName,
       renderParts,
       onPartClick: ({ partId, path }) => {
         const { props: p } = live.current;
