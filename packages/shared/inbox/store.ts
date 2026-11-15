@@ -7802,9 +7802,13 @@ export class InboxStore {
   // named (createCard). After that whoever sets it last wins, the person or an
   // agent (no write is refused for the other's earlier pick), as any card field.
 
-  /** Every initiative, deleted ones too (a card's history still names them), oldest first. */
+  /**
+   * Every initiative, deleted ones too (a card's history still names them), oldest first. Two made in one
+   * millisecond keep the order they were made in (the map's: the log's seq order on load), never their ids', whose
+   * random part sorts them either way.
+   */
   initiatives(): InboxInitiative[] {
-    return [...this.initiativesById.values()].sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id));
+    return [...this.initiativesById.values()].sort((a, b) => a.created_at.localeCompare(b.created_at));
   }
 
   initiative(id: string): InboxInitiative | null {

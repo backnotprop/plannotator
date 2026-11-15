@@ -5,7 +5,7 @@
  * `/api/inbox/pulls/repo-files`, drawn by the review app's own tree (`guide/PullRepoParts.tsx`).
  */
 import type { TreeScope } from '@plannotator/ui/hooks/useTreeScope';
-import { inboxUrl } from '../inboxUrl';
+import { pullUrl } from './pullMachines';
 
 const FOCUS =
   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/70 focus-visible:ring-offset-1 focus-visible:ring-offset-background';
@@ -53,6 +53,6 @@ export function pullRepoFetch(key: string): typeof fetch {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
     const asked = /^\/api\/(repo-files|repo-file)\?(.*)$/.exec(url);
     if (!asked) return Promise.reject(new Error('The repository could not be listed.'));
-    return globalThis.fetch(inboxUrl(`/pulls/${asked[1]}`, `key=${encodeURIComponent(key)}&${asked[2]}`), init);
+    return globalThis.fetch(pullUrl(`/pulls/${asked[1]}`, key, asked[2]), init);
   }) as typeof fetch;
 }
