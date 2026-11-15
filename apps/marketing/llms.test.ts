@@ -60,8 +60,25 @@ describe('the agent pages', () => {
     }
   });
 
+  // The install prompt a person pastes names every agent's own steps around
+  // `plannotator inbox`, from the steps marked `prompt` in inbox-agents.ts.
+  test('the install prompt gives every agent with a page its own steps and its page', async () => {
+    const prompt = await read('inbox/prompt.md');
+    expect(prompt).not.toContain('{{');
+    expect(new TextEncoder().encode(prompt).length).toBeLessThan(13 * 1024);
+    for (const slug of files('inbox/agents/*/index.html').map((f) => f.split('/')[2])) {
+      const agent = LISTED_AGENTS.find((a) => a.slug === slug)!;
+      expect(prompt, slug).toContain(`[${agent.name}](https://plannotator.ai/llms/agents/${slug}.md)`);
+      const marked = agent.setup.filter((s) => s.prompt);
+      for (const step of marked) if (step.code) for (const line of step.code.split('\n')) expect(prompt, slug).toContain(line);
+      // `plannotator inbox` turns a plugin's tool on only when the plugin is there, and has no way to connect an agent marked MCP by hand.
+      if (agent.tier === 'plugin') expect(marked.some((s) => s.prompt === 'before' && s.code), slug).toBe(true);
+      if (agent.inbox.tool.label === 'MCP by hand') expect(marked.some((s) => s.prompt === 'after'), slug).toBe(true);
+    }
+  });
+
   test('every plannotator.ai link they give is a file the build emits', async () => {
-    for (const path of llmsPages()) {
+    for (const path of [...llmsPages(), 'inbox/prompt.md']) {
       const text = await read(path);
       const links = [...text.matchAll(/https:\/\/plannotator\.ai(\/[^\s)`"'>\]]*)/g)].map(([, p]) => p.replace(/[.,:;]+$/, ''));
       expect(links.length, path).toBeGreaterThan(0);

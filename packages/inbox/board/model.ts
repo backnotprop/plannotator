@@ -36,6 +36,7 @@ import {
 } from '@plannotator/core/inbox-types';
 
 import type { ForgeRefCardData } from '@plannotator/core/forge-ref-card';
+import { projectNames } from '../search/model';
 
 export type BoardView = 'lanes' | 'done' | 'cancelled';
 
@@ -276,6 +277,33 @@ export function cardAge(iso: string, now: number = Date.now()): { short: string;
 /** Whether a card shows bold: unread at the visit's look, and not opened or moved by the person this visit. */
 export function cardShowsUnread(card: InboxCardWire, visitLook: number | null, handled: ReadonlySet<string>): boolean {
   return !handled.has(card.id) && isInboxCardUnread(card, visitLook);
+}
+
+/** The look a card's bold is read by: a linked machine's card by that machine's look (its seqs are its own), else this Inbox's. */
+export function boardLookOf(card: Pick<InboxCardWire, 'machine'>, visitLook: number | null, machineLooks: Readonly<Record<string, number | null>>): number | null {
+  return card.machine && Object.hasOwn(machineLooks, card.machine) ? machineLooks[card.machine]! : visitLook;
+}
+
+/**
+ * The Board's one name per project (`projectNames`), told apart within each machine: a linked machine's project
+ * carries that machine's name the way a list row does ("web · Mac-mini"). `machineNames`: the linked machines only.
+ */
+export function boardProjectNames(
+  projects: readonly (Parameters<typeof projectNames>[0][number] & { machine?: string })[],
+  machineNames: ReadonlyMap<string, string>,
+): Map<string, string> {
+  if (machineNames.size === 0) return projectNames(projects);
+  const groups = new Map<string, (typeof projects)[number][]>();
+  for (const project of projects) {
+    const owner = project.machine && machineNames.has(project.machine) ? project.machine : '';
+    groups.set(owner, [...(groups.get(owner) ?? []), project]);
+  }
+  const out = new Map<string, string>();
+  for (const [owner, group] of groups) {
+    const machine = machineNames.get(owner);
+    for (const [id, name] of projectNames(group)) out.set(id, machine ? `${name} · ${machine}` : name);
+  }
+  return out;
 }
 
 /** A move the person makes on a card (the window's route `POST /api/inbox/cards/:id`). */

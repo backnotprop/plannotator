@@ -48,7 +48,7 @@ import { storage } from '@plannotator/ui/utils/storage';
 import { setSidebarSectionOpen } from './sidebarSections';
 import type { SkillCatalogEntry } from '@plannotator/ui/utils/skillReferences';
 import { reloadSkillCatalog } from '@plannotator/ui/utils/skillCatalog';
-import type { InboxCardWire, InboxDecision, InboxHealth, InboxListRow, InboxListSection, InboxQuestion, InboxThread } from '@plannotator/core/inbox-types';
+import type { InboxDecision, InboxHealth, InboxListRow, InboxListSection, InboxQuestion, InboxThread } from '@plannotator/core/inbox-types';
 import { DecisionMode } from './decisions/DecisionMode';
 import { DecisionPill } from './decisions/entry';
 import {
@@ -224,7 +224,8 @@ import { ArtifactsWall } from './components/ArtifactsWall';
 import { readArtifactPins } from './artifactPins';
 import { hearAgentFacesEvent, onAgentFaceRefused, readAgentFaces } from './agents/agentFaces';
 import { DraftsPage } from './compose/DraftsPage';
-import { BoardPage, type BoardMove } from './board/BoardPage';
+import { BoardPage } from './board/BoardPage';
+import { useBoardWrites } from './board/boardWrites';
 import { PullsPage, ReviewsOff } from './pulls/PullsPage';
 import { PullReview } from './pulls/PullReview';
 import { usePulls } from './pulls/usePulls';
@@ -1495,7 +1496,7 @@ function Inbox() {
    * since (no longer bold). Opening the Board records a new look through the
    * newest card it read, so the next visit is bold only for what came after.
    */
-  const [boardVisit, setBoardVisit] = useState<{ look: number | null; handled: ReadonlySet<string> } | null>(null);
+  const [boardVisit, setBoardVisit] = useState<{ look: number | null; looks: Readonly<Record<string, number | null>>; handled: ReadonlySet<string> } | null>(null);
   /**
    * The Board is something the person turns on (config.json `inboxBoard`,
    * approval "inbox-board" 2026-10-26): null until the settings are read; an
@@ -1606,7 +1607,9 @@ function Inbox() {
     let live = true;
     void refreshCards().then((model) => {
       if (!live || !model) return;
-      setBoardVisit({ look: model.seen_seq ?? null, handled: new Set() });
+      // A linked machine's cards are bold by that machine's own look (its seqs are its own).
+      const looks = Object.fromEntries(Object.entries(model.machines ?? {}).map(([machine, board]) => [machine, board.seen_seq]));
+      setBoardVisit({ look: model.seen_seq ?? null, looks, handled: new Set() });
     });
     return () => {
       live = false;
@@ -1629,28 +1632,11 @@ function Inbox() {
     if (lookRecorded.current || !boardShowsAll || !cards || cards.seen_seq === undefined) return;
     lookRecorded.current = true;
     void inboxApi.seeBoard(cards.cursor).catch(() => {});
+    for (const [machine, board] of Object.entries(cards.machines ?? {})) void inboxApi.seeBoard(board.cursor, machine).catch(() => {});
   }, [boardVisit, boardShowsAll, cards]);
   const handleCard = (id: string) =>
     setBoardVisit((visit) => (visit && !visit.handled.has(id) ? { ...visit, handled: new Set([...visit.handled, id]) } : visit));
-  const moveCard = async (card: InboxCardWire, change: BoardMove): Promise<InboxCardWire | null> => {
-    handleCard(card.id);
-    try {
-      const { card: moved } = await inboxApi.moveCard(card.id, change);
-      setCards((model) => (model ? { ...model, cards: model.cards.map((c) => (c.id === moved.id ? moved : c)) } : model));
-      void refreshCards();
-      return moved;
-    } catch {
-      void refreshCards();
-      return null;
-    }
-  };
-  const seeDrops = useCallback((ids: readonly string[]) => {
-    if (ids.length === 0) return;
-    void inboxApi
-      .seeDrops(ids)
-      .then(() => refreshCards())
-      .catch(() => {});
-  }, [refreshCards]);
+  const { boardCard, moveCard, seeDrops } = useBoardWrites({ listTags, handleCard, setCards, refreshCards, showToast: (next) => showToast(next) });
 
   // The Drafts page follows each draft's session (live, ended) while it is open.
   useEffect(() => {
@@ -1967,6 +1953,11 @@ function Inbox() {
         onPins: () => listAfterEvents(60),
         // A thread's tags changed (here, in another window): read the list's `tags` again (approval "inbox-thread-tags").
         onTags: () => listAfterEvents(60),
+        // A linked machine's cards changed (its Board was read again here): the merged Board is read, as for a card record.
+        onCards: () => {
+          if (cardsTimer) clearTimeout(cardsTimer);
+          cardsTimer = setTimeout(() => void refreshCards(), 60);
+        },
         // The pinned artifacts changed (another window, a phone): read them again (artifactPins.ts).
         onArtifactPins: () => void readArtifactPins(),
         // `plannotator inbox --open <thread>` (a tool on this computer): the window the person used last shows the
@@ -5764,8 +5755,11 @@ function Inbox() {
         model={cards}
         error={cardsError}
         visitLook={boardVisit ? boardVisit.look : (cards?.seen_seq ?? null)}
+        machineLooks={boardVisit?.looks}
+        machines={machines}
         handled={boardVisit?.handled ?? EMPTY_SET}
-        projects={ownProjects}
+        projects={projects}
+        homeProjects={ownProjects}
         // The filtered project, else the project of the card heard from last, else the first.
         defaultProject={newCardProject(boardFilter, ownProjects, cards?.cards ?? [])}
         home={settings?.home ?? null}
@@ -5806,14 +5800,15 @@ function Inbox() {
         onMove={moveCard}
         // A card that leaves the lanes from its right-click menu: the one toast, with Undo (`Z`).
         onToast={(next) => (next ? showToast(next) : dismissToast())}
-        onChanged={(card) => {
-          if (card) {
+        onChanged={(changed) => {
+          if (changed) {
+            const card = boardCard(changed);
             handleCard(card.id);
             setCards((model) => (model ? { ...model, cards: [card, ...model.cards.filter((c) => c.id !== card.id)] } : model));
           }
           refreshBoard();
           // A tag changed in the Tags dialog: the sidebar's merged list too.
-          if (!card) void refreshList(false);
+          if (!changed) void refreshList(false);
         }}
         onSeeDrops={seeDrops}
         tagsAcross={across}
