@@ -6,7 +6,7 @@ sidebar:
 section: "Reference"
 ---
 
-The Plannotator Inbox is one local window per machine. Agents leave messages for you there: questions you answer with a click, files to read and annotate, and guided reviews of their changes. You answer when you can, and nothing holds an agent session open while you do. When you press **Send**, the reply goes back to the session that asked. With Claude Code, Pi or OpenCode 2 it arrives as a new turn once the session is idle. Any other agent reads it later with `read_thread`.
+The Plannotator Inbox is one local window per machine. Agents leave messages for you there: questions you answer with a click, files to read and annotate, and guided reviews of their changes. You answer when you can, and nothing holds an agent session open while you do. When you press **Send**, the reply goes back to the session that asked. With Claude Code, Pi, OpenCode 2, DeepSeek Harness, Cline, OpenClaw and Hermes Agent (through Plannotator's plugins), Codex 0.149 or later, Qwen Code 0.24 or later on macOS and Linux, and Claude threads in T3 Code, it arrives as a new turn once the session is idle. Any other agent reads it later with `read_thread`.
 
 The Inbox runs on your computer. It binds `127.0.0.1` and keeps everything under your Plannotator data directory. To open it from your other devices, publish it [over your tailnet](#over-your-tailnet).
 
@@ -204,11 +204,11 @@ Before any agent has written, the Inbox window shows one next step for this comp
 
 With the Plannotator plugin and [the Plannotator mod](/docs/guides/claude-code/#the-plannotator-mod) (Claude Code 2.1.287 or newer), Claude Code gets a `plannotator_inbox` tool. The tool is on by default for Claude Code, also before you ever ran the Inbox: the first time Claude uses it, it starts the Inbox in the background. The tool is added when Claude Code starts, not when you start a new conversation in a running one, so restart Claude Code after you change the setting. When you send a reply, it arrives in that session as a new turn after Claude finishes what it is doing; **Send now** puts it into the turn Claude is in instead. The thread then shows "Delivered to Claude Code".
 
-The mod is off in `claude -p` and in SDK runs. There the tool is not added. Use the MCP server instead (see [Other agents](#other-agents)).
+In `claude -p` and other SDK runs the mod adds the tool too (Plannotator 0.28.65 or newer), but nothing wakes the run: the agent reads your reply later with `read_thread`. The chat panel of Claude Code's VS Code extension and Claude threads in T3 Code get the tool and the wake. On an older Plannotator, use the MCP server in `claude -p` (see [Other agents](#other-agents)).
 
 ### Pi
 
-Install the [Pi extension](/docs/getting-started/installation/#pi), then run `plannotator inbox`: it turns the inbox tool on for Pi when it finds the extension. The tool is off by default on Pi, because Pi sends every tool's full definition with each request: the inbox tool adds about 10 KB to every request, roughly 2,750 tokens depending on the model (about 12 KB, roughly 3,150 tokens, with the Board on). To turn it on yourself:
+Install the [Pi extension](/docs/getting-started/installation/#pi), then run `plannotator inbox`: it turns the inbox tool on for Pi when it finds the extension. The tool is off by default on Pi, because Pi sends every tool's full definition with each request: the inbox tool adds about 13 KB to every request, roughly 3,517 tokens depending on the model (about 15 KB, roughly 4,014 tokens, with the Board on). To turn it on yourself:
 
 ```bash
 export PLANNOTATOR_INBOX_TOOL=1
@@ -218,7 +218,7 @@ Start a new Pi session (or `/reload`). A reply arrives as a follow-up message on
 
 ### OpenCode
 
-Add the [OpenCode plugin](/docs/getting-started/installation/#opencode), then run `plannotator inbox`: it turns the inbox tool on for OpenCode when it finds the plugin in your global opencode config. The tool is off by default on OpenCode, for the same reason as Pi (about 10 KB per request, roughly 2,750 tokens). To turn it on yourself:
+Add the [OpenCode plugin](/docs/getting-started/installation/#opencode), then run `plannotator inbox`: it turns the inbox tool on for OpenCode when it finds the plugin in your global opencode config. The tool is off by default on OpenCode, for the same reason as Pi (about 13 KB per request, roughly 3,517 tokens). To turn it on yourself:
 
 ```bash
 export PLANNOTATOR_INBOX_TOOL=1
@@ -351,7 +351,7 @@ The Inbox also answers MCP over Streamable HTTP at `http://127.0.0.1:<port>/mcp`
 
 `plannotator inbox --help` prints a full guide for agents in markdown: when to use the Inbox, each tool and its arguments, how threads and replies work, the question syntax, and the setup line for each client above with your binary's path. An agent with no Plannotator skill can read it once and use the Inbox.
 
-The stdio command fills in the project (its working folder) and a session id for the agent. When a Claude Code or Pi session runs it (a script or command the agent starts), that id is the session's own, so your reply reaches that session as with its tool. In Codex the id is the Codex thread, which Codex names on every tool call, so your reply goes back into that thread (see below). Otherwise the id lasts as long as the command's process; an agent that passes its own `agent_session` keeps its threads across restarts. Without one of the three connections, or Codex, nothing wakes the agent when you reply. Your reply stays in the Inbox until the agent calls `read_thread`, and a thread list marks a thread you wrote in as `unread`.
+The stdio command fills in the project (its working folder) and a session id for the agent. When a Claude Code or Pi session runs it (a script or command the agent starts), that id is the session's own, so your reply reaches that session as with its tool. In Codex the id is the Codex thread, which Codex names on every tool call, so your reply goes back into that thread (see below). Otherwise the id lasts as long as the command's process; an agent that passes its own `agent_session` keeps its threads across restarts. Without a Plannotator plugin's tool, or Codex, Qwen Code or a T3 Code thread, nothing wakes the agent when you reply. Your reply stays in the Inbox until the agent calls `read_thread`, and a thread list marks a thread you wrote in as `unread`.
 
 ### The tools
 
@@ -449,7 +449,8 @@ The Pi or OpenCode connection could not find a `plannotator` binary to start a s
 - A reply waits until the session is idle, and the line under it says "Queued" while the agent works. Press **Send now** to put it into the running turn instead: the agent reads it at its next step. Nothing is ever stopped or interrupted.
 - No **Send now** for a Claude Code session that runs a Plannotator plugin from before Send now, while a newer one is installed: the line says so, and **How to reload** gives the steps. Type `/reload-plugins` in that Claude Code: it loads the new plugin and keeps the session, and nothing is interrupted. If the note is still there after that, type `/exit` in it (this stops the turn it is working on; wait for it to finish to keep it), then run the command it shows (`cd <folder> && claude --resume <session id>`, with **Copy**) to start the same session again. Your reply waits in the Inbox until then. If the installed plugin itself is older than the Inbox, the line says to update the plugin first and shows that command.
 - If the agent already read your reply with `read_thread`, the session is not woken again. A message you addressed to a Claude Code, Pi or OpenCode 2 session, or a reply that tags one, still arrives there.
-- On OpenCode 1, and for agents connected through MCP alone (except Codex 0.149 or later and Qwen Code 0.24 or later), nothing wakes the session. The agent has to read the reply.
+- On OpenCode 1, and for agents connected through MCP alone (except Codex 0.149 or later, Qwen Code 0.24 or later and Claude threads in T3 Code), nothing wakes the session. The agent has to read the reply.
+- In T3 Code, a reply arrives in a Claude thread while T3 keeps that Claude running. T3 stops an idle Claude after about 30 minutes; after that the reply needs a T3 sign-in (`plannotator t3 login --url <T3 MCP URL>`), and the line under it says **Waiting for T3 Code** and what to do.
 - Codex gets your reply as its next turn, after the turn it is in ends, so there is no **Send now** for it. With an older Codex, or no `codex` the Inbox can find (its `PATH`, or the ChatGPT app), the reply is not queued: the agent reads it.
 - The reply stays in the thread. You can always read it there, and the agent can read it with `read_thread`.
 
