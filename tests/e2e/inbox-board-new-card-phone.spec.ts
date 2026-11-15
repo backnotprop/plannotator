@@ -156,6 +156,9 @@ test('with a keyboard up the window ends at its top, the title and notes above i
     try {
       const page = await context.newPage();
       await openNewCard(page);
+      await expect(page.locator('dialog[data-dialog="new-card"] [data-new-card-title]')).toBeFocused();
+      // phone.ts checks the viewport again 300 ms after a focus change and, with no real keyboard, clears --ib-vvh.
+      await page.waitForTimeout(400);
       // phone.ts sets --ib-vvh to the visual viewport's height while an iPhone's keyboard is up.
       const visible = 420;
       await page.evaluate((h) => document.documentElement.style.setProperty('--ib-vvh', `${h}px`), visible);
