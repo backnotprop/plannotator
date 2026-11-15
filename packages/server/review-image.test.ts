@@ -211,6 +211,7 @@ for (const [runtime, startServer] of [
         }
         const svg = await image("logo.svg", "new");
         expect(svg.headers.get("content-type")).toBe("image/svg+xml");
+        expect([svg.headers.get("x-image-width"), svg.headers.get("x-image-height")]).toEqual(["4", "4"]);
         expect(await svg.text()).toBe(SVG_NEW);
         const textSvg = await image("plain.svg", "old");
         expect(textSvg.status).toBe(200);

@@ -188,6 +188,32 @@ function jpegDimensions(b: Uint8Array): ImageDimensions | null {
   return null;
 }
 
+export const SVG_DEFAULT_SIZE: ImageDimensions = { width: 300, height: 150 };
+
+function svgLength(value: string | undefined): number | null {
+  if (!value) return null;
+  const match = /^\s*([0-9]*\.?[0-9]+)\s*(px)?\s*$/i.exec(value);
+  if (!match) return null;
+  const n = Number(match[1]);
+  return Number.isFinite(n) && n > 0 ? Math.round(n) : null;
+}
+
+export function svgDimensions(b: Uint8Array): ImageDimensions {
+  const text = new TextDecoder().decode(b.subarray(0, 8192)).replace(/<!--[\s\S]*?-->/g, "");
+  const tag = /<svg\b([^>]*)>/i.exec(text)?.[1] ?? "";
+  const attr = (name: string) => new RegExp(`(?:^|\\s)${name}\\s*=\\s*(["'])(.*?)\\1`, "i").exec(tag)?.[2];
+  const width = svgLength(attr("width"));
+  const height = svgLength(attr("height"));
+  const box = attr("viewBox")?.trim().split(/[\s,]+/).map(Number);
+  const boxWidth = box && box.length === 4 && box[2]! > 0 ? box[2]! : null;
+  const boxHeight = box && box.length === 4 && box[3]! > 0 ? box[3]! : null;
+  if (width && height) return { width, height };
+  if (width && boxWidth && boxHeight) return { width, height: Math.max(1, Math.round((width * boxHeight) / boxWidth)) };
+  if (height && boxWidth && boxHeight) return { width: Math.max(1, Math.round((height * boxWidth) / boxHeight)), height };
+  if (boxWidth && boxHeight) return { width: Math.max(1, Math.round(boxWidth)), height: Math.max(1, Math.round(boxHeight)) };
+  return { ...SVG_DEFAULT_SIZE };
+}
+
 function avifDimensions(b: Uint8Array): ImageDimensions | null {
   const limit = Math.min(b.byteLength, 64 * 1024) - 16;
   for (let i = 0; i < limit; i++) {
@@ -240,6 +266,9 @@ export function readImageDimensions(bytes: Uint8Array, contentType: string): Ima
       else if (headerSize >= 40 && b.byteLength >= 26) dims = { width: Math.abs(i32le(b, 18)), height: Math.abs(i32le(b, 22)) };
       break;
     }
+    case "image/svg+xml":
+      dims = svgDimensions(b);
+      break;
     case "image/x-icon":
       if (b.byteLength >= 8) dims = { width: b[6] || 256, height: b[7] || 256 };
       break;
