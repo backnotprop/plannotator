@@ -1159,7 +1159,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // `toWindow`), with the device that asked: a paired phone answers a permission prompt as a window does; a linked
   // machine does for a press in a window there (`window`), and may start, stop or trust for one (remote launch).
   const fromDeviceDoor = new WeakMap<Request, InboxDoorCaller>();
-  // A PR's close, reopen or merge through the door: only a linked machine's, for a press in its window (mark `pulls`).
+  // A PR's close, reopen or merge through the door: only a linked machine's, sent with its window's mark (mark `pulls`).
+  // The mark stops a bare call there, not a program there that imitates the window (inbox-launch.md "Accepted, not defended").
   const pullWriteFromWindow = (req: Request): boolean => {
     const door = fromDeviceDoor.get(req);
     return !door || (door.platform === MACHINE_PLATFORM && door.window);
@@ -5626,7 +5627,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const { projectsByRepo, wanted } = await pullProjects();
         // `others=1`: the person has the Others view open, so Others is read as often as the list. `everywhere=1`: the
         // Pull requests page, the person's own PRs in any repository (approval "inbox-pr-dashboard"). `machines=1` with
-        // it: the linked machines' boards too, read beside this one (a machine's door never passes `machines`).
+        // it: the linked machines' boards too, read beside this one and never waited for (a machine's door never passes
+        // `machines`): what each had once this list is done, the rest on the window's next read (`pending`).
         const everywhere = url.searchParams.get("everywhere") === "1";
         const refresh = url.searchParams.get("refresh") === "1";
         const far = everywhere && url.searchParams.get("machines") === "1" ? machines.pullLists(refresh) : null;
@@ -5639,7 +5641,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // The Board is optional: a card that links a PR is a quiet extra, only while the Board is on.
         const cards = boardOn() ? pullCards(listed.pulls, store.listCards()) : {};
         const own = { ...listed, pulls: pullLooked.on(listed.pulls), links, projects: Object.fromEntries(projectsByRepo), cards };
-        const farBoards = far ? await far : [];
+        const farBoards = far ? far() : [];
         return json({ serverSession, ...(farBoards.length > 0 ? mergePullBoards(own, farBoards) : own) });
       }
       // Reviews (approval "inbox-reviews-page"; inbox-reviews.ts and core's inbox-reviews.ts): one row per thread with
@@ -7231,7 +7233,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       const steps = stepsRoute.route(req, path);
       if (steps) return steps;
       // A thread's PRs (approval "inbox-pr-binding"): the window's read and the person's add and remove (inbox-thread-pulls.ts).
-      // Never another site; never on the device door.
+      // Never another site. On the device door for a linked machine (mark `pulls`), never a phone.
       if (/^\/api\/inbox\/threads\/[A-Za-z0-9_]+\/pulls$/.test(path)) {
         if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
           return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);

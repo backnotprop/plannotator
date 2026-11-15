@@ -2,8 +2,10 @@
  * The PR board across linked machines, on two real Inboxes linked both ways (docs/agent-guides/inbox-machines.md,
  * "The PR board"). Each has its own scripted gh (a `refRunner`, signed in as the same person) listing different PRs,
  * one PR on both. What regresses: a machine's PRs missing from the other's board, or the shared one shown twice; a
- * close, reopen or merge of the other machine's PR running this machine's gh (or none); a script, an agent or a phone
- * reaching the other machine's gh; Undo going anywhere but the machine that closed; a forge write held for an asleep
+ * close, reopen or merge of the other machine's PR running this machine's gh (or none); a bare call (an agent's curl,
+ * no Origin) or a machine token without the window's mark reaching the other machine's gh; a merge losing the head the
+ * person saw or the second click on the way; a key the other machine does not list written there; Undo going anywhere
+ * but the machine that closed; a forge write held for an asleep
  * machine; an asleep machine's rows dropped; a thread's PRs on the other machine not read or changed there; a look at
  * the other machine's PR ("Changed since you looked") not kept there or not read back; the board of an Inbox with no
  * machine linked changing at all.
@@ -48,8 +50,11 @@ const node = (repo: string, number: number, author = "dana") => ({
   commits: { nodes: [{ commit: { statusCheckRollup: { state: "SUCCESS" } } }] },
 });
 
-/** A scripted gh: the person's own PRs (`authored`), each PR's state for the close route's read, and its writes kept. */
-function fakeGh(prs: [string, number][]) {
+/**
+ * A scripted gh: the person's own PRs (`authored`), each PR's state for the close route's read, and its writes kept.
+ * `hang`: its list waits for it (a machine that is online but does not answer).
+ */
+function fakeGh(prs: [string, number][], hang?: Promise<void>) {
   const states = new Map(prs.map(([repo, n]) => [`${repo}#${n}`, "open"]));
   const writes: string[] = [];
   const run: RefRunner = async (cli, args) => {
@@ -58,12 +63,23 @@ function fakeGh(prs: [string, number][]) {
     const query = args.find((a) => a.startsWith("query=")) ?? "";
     if (query.includes("InboxPullsOthers")) return { stdout: JSON.stringify({ data: { viewer: { login: "dana" }, others0: { issueCount: 0, nodes: [] } } }), stderr: "", exitCode: 0 };
     if (args.includes("graphql")) {
+      await hang;
       const open = prs.filter(([repo, n]) => states.get(`${repo}#${n}`) === "open").map(([repo, n]) => node(repo, n));
       const none = { issueCount: 0, nodes: [] };
       const data = { viewer: { login: "dana" }, rateLimit: { cost: 1, remaining: 4000, resetAt: "2026-11-14T11:00:00Z" }, requested: none, assigned: none, authored: { issueCount: open.length, nodes: open }, merged: { nodes: [] }, everyRequested: none, everyAssigned: none, everyAuthored: { issueCount: open.length, nodes: open }, everyMerged: { nodes: [] } };
       return { stdout: JSON.stringify({ data }), stderr: "", exitCode: 0 };
     }
-    // The close route: `api --hostname h repos/o/r/pulls/N` reads its state; `-X PATCH … -f state=…` writes it.
+    // Merge: `-X PUT repos/o/r/pulls/N/merge … -f sha=…` writes it, at the head it was read at.
+    const merge = args.find((a) => /^repos\/.+\/pulls\/\d+\/merge$/.test(a));
+    if (args[0] === "api" && merge && args.includes("PUT")) {
+      const [, repo, n] = /^repos\/(.+)\/pulls\/(\d+)\/merge$/.exec(merge)!;
+      writes.push(`${repo}#${n} merged ${args.find((a) => a.startsWith("sha="))!.slice("sha=".length, "sha=".length + 7)}`);
+      states.set(`${repo}#${n}`, "merged");
+      return { stdout: JSON.stringify({ merged: true }), stderr: "", exitCode: 0 };
+    }
+    // The repository's merge methods (the merge reads them before it writes).
+    if (args[0] === "api" && args.some((a) => /^repos\/[^/]+\/[^/]+$/.test(a))) return { stdout: JSON.stringify({ full_name: "x", allow_merge_commit: true }), stderr: "", exitCode: 0 };
+    // Close and merge read `api --hostname h repos/o/r/pulls/N` first; `-X PATCH … -f state=…` writes a close or reopen.
     const path = args.find((a) => /^repos\/.+\/pulls\/\d+$/.test(a));
     if (args[0] === "api" && path) {
       const [, repo, n] = /^repos\/(.+)\/pulls\/(\d+)$/.exec(path)!;
@@ -74,7 +90,9 @@ function fakeGh(prs: [string, number][]) {
         states.set(key, to);
         return { stdout: "{}", stderr: "", exitCode: 0 };
       }
-      return { stdout: JSON.stringify({ state: states.get(key) ?? "open", merged: false }), stderr: "", exitCode: 0 };
+      const state = states.get(key) ?? "open";
+      const head = { sha: n!.padStart(40, "a") };
+      return { stdout: JSON.stringify({ state: state === "merged" ? "closed" : state, merged: state === "merged", merged_at: state === "merged" ? "2026-11-14T10:05:00Z" : null, draft: false, head, mergeable: true, mergeable_state: "clean" }), stderr: "", exitCode: 0 };
     }
     return { stdout: "", stderr: "HTTP 404", exitCode: 1 };
   };
@@ -106,7 +124,10 @@ describe("the PR board across linked machines (mark `pulls`)", () => {
   const rows = async (port: number) => ((await board(port)).pulls as Json[]).map((p) => [p.key, p.machine ?? null, p.state]).sort((x, y) => String(x[0]).localeCompare(String(y[0])));
   const session = async (port: number) => ((await (await fetch(`${at(port)}/api/inbox/health`)).json()) as Json).serverSession as string;
   let keys = 0;
-  /** A press in A's window: its own Origin and page session, the key the window adds. */
+  /**
+   * A press in A's window: its own Origin and page session, the key the window adds. A local program can send the same
+   * and is taken as the window ("Accepted, not defended" in inbox-launch.md); `window = false` is an agent's bare call.
+   */
   const press = async (port: number, path: string, body: Json, window = true) =>
     fetch(`${at(port)}${path}`, {
       method: "POST",
@@ -119,7 +140,7 @@ describe("the PR board across linked machines (mark `pulls`)", () => {
   const WEB1 = "github.com/northwind/web#1";
   const WEB2 = "github.com/northwind/web#2";
 
-  test("one board both ways; B's PR closed, undone and merged-refused by B's gh from A's window only; B asleep, its rows stay and nothing is held", async () => {
+  test("one board both ways; B's PR closed, undone and merged by B's gh for A's window's request only; B asleep, its rows stay and nothing is held", async () => {
     const ghA = fakeGh([["northwind/web", 1], ["northwind/web", 2]]);
     const ghB = fakeGh([["northwind/web", 1], ["northwind/api", 7], ["northwind/api", 8]]);
     const dataA = scratch("plannotator-pulls-linked-a-");
@@ -163,7 +184,7 @@ describe("the PR board across linked machines (mark `pulls`)", () => {
       await waitFor("B's look on A's board", async () => ((await board(a.port)).pulls as Json[]).find((p) => p.key === API7)?.looked?.sha === look.sha);
       expect(((await board(a.port)).pulls as Json[]).find((p) => p.key === WEB2)!.looked).toBeUndefined();
 
-      // A script or an agent on A (no window): refused here, nothing runs on B.
+      // An agent's bare call on A (no Origin, no page session): refused here, nothing runs on B.
       const bare = await press(a.port, `/api/inbox/m/${bId}/pulls/close`, { key: API7 }, false);
       expect(bare.status).toBe(403);
       expect(((await bare.json()) as Json).code).toBe("window_only");
@@ -195,6 +216,25 @@ describe("the PR board across linked machines (mark `pulls`)", () => {
       expect(ghA.writes).toEqual([`northwind/web#1 closed`]);
       expect(ghB.writes).toHaveLength(2);
 
+      // Merge through the forward: the head the person saw and the second click reach B, which asks its forge again.
+      const head7 = "7".padStart(40, "a");
+      const merge = (fields: Json, window = true) => press(a.port, `/api/inbox/m/${bId}/pulls/merge`, { key: API7, ...fields }, window);
+      expect((await merge({ head_sha: head7, confirmed: true }, false)).status).toBe(403);
+      const unconfirmed = await merge({ head_sha: head7 });
+      expect([unconfirmed.status, ((await unconfirmed.json()) as Json).code]).toEqual([409, "merge_unconfirmed"]);
+      const moved = await merge({ head_sha: "b".repeat(40), confirmed: true });
+      expect([moved.status, ((await moved.json()) as Json).code]).toEqual([409, "pull_moved"]);
+      expect(ghB.writes).toHaveLength(2);
+      const merged = await merge({ head_sha: head7, confirmed: true });
+      expect(merged.status).toBe(200);
+      expect(((await merged.json()) as Json).method).toBe("merge");
+      expect(ghB.writes.at(-1)).toBe(`northwind/api#7 merged aaaaaaa`);
+      expect(ghA.writes).toEqual([`northwind/web#1 closed`]);
+      // A key B's list does not hold is never written there: B reads its list again, then refuses it.
+      const unknown = await press(a.port, `/api/inbox/m/${bId}/pulls/close`, { key: "github.com/northwind/api#999" });
+      expect([unknown.status, ((await unknown.json()) as Json).code]).toEqual([404, "pull_unknown"]);
+      expect(ghB.writes).toHaveLength(3);
+
       // B's thread's PRs, read and changed on B from A's window.
       client = new Client({ name: "inbox-pulls-linked", version: "1.0.0" });
       await client.connect(new StreamableHTTPClientTransport(new URL(`${at(b.port)}/mcp`)));
@@ -215,10 +255,13 @@ describe("the PR board across linked machines (mark `pulls`)", () => {
       // B asleep: its rows stay as last read; a close says plainly it cannot run, and nothing waits to run later.
       await client.close();
       client = null;
+      const farKeys = (answer: Json) => (answer.pulls as Json[]).filter((p) => p.machine === bId).map((p) => p.key).sort();
+      const lastRead = farKeys(await board(a.port));
+      expect(lastRead).toContain(API8);
       b.stop();
       await waitFor("B offline on A", async () => (await view()).state === "offline", 30_000);
       const away = await board(a.port);
-      expect((away.pulls as Json[]).filter((p) => p.machine === bId).map((p) => p.key).sort()).toEqual([API7, API8]);
+      expect(farKeys(away)).toEqual(lastRead);
       expect(away.machines[bId].pending).toBe(false);
       const asleep = await press(a.port, `/api/inbox/m/${bId}/pulls/close`, { key: API8 });
       expect(asleep.status).toBe(503);
@@ -226,13 +269,45 @@ describe("the PR board across linked machines (mark `pulls`)", () => {
       expect((((await (await fetch(`${at(a.port)}/api/inbox/outbox`)).json()) as Json).waiting as Json[]).filter((e) => e.route.startsWith("pulls/"))).toEqual([]);
       b = await start(dataB, ghB.run);
       await waitFor("B back on A", async () => (await view()).state === "online", 45_000);
-      expect(ghB.writes).toHaveLength(2);
+      expect(ghB.writes).toHaveLength(3);
     } finally {
       await client?.close().catch(() => {});
       a.stop();
       b.stop();
     }
   }, 150_000);
+
+  test("a linked machine online but not answering: this machine's board answers at once, the other's pending, then joins", async () => {
+    let answer = () => {};
+    const ghA = fakeGh([["northwind/web", 1]]);
+    const ghB = fakeGh([["northwind/api", 7]], new Promise<void>((done) => (answer = done)));
+    const dataA = scratch("plannotator-pulls-hang-a-");
+    const a = await start(dataA, ghA.run);
+    const b = await start(scratch("plannotator-pulls-hang-b-"), ghB.run);
+    try {
+      const offered = (await (await fetch(`${at(b.port)}/api/inbox/machines/offer`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).json()) as Json;
+      expect((await fetch(`${at(a.port)}/api/inbox/machines/link`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ link: offered.link, address: at(b.port), back: at(a.port) }) })).status).toBe(201);
+      const bId = (JSON.parse(readFileSync(join(dataA, "inbox", "machines.json"), "utf8")) as Json).links[0].id as string;
+      await waitFor("B online with `pulls` on A", async () => {
+        const view = (((await (await fetch(`${at(a.port)}/api/inbox/machines`)).json()) as Json).machines as Json[]).find((m) => m.id === bId);
+        return view?.state === "online" && (view.marks as string[]).includes("pulls");
+      });
+      // Before, the first read waited 8 s for B (3 s after). Now never: a bound far under either, and over any slow runner.
+      for (const round of [1, 2]) {
+        const at0 = performance.now();
+        const first = await board(a.port);
+        expect([round, performance.now() - at0 < 2_500]).toEqual([round, true]);
+        expect((first.pulls as Json[]).map((p) => p.key)).toEqual([WEB1]);
+        expect(first.machines[bId]).toMatchObject({ read_at: null, pending: true });
+      }
+      answer();
+      await waitFor("B's PR joins A's board", async () => (await rows(a.port)).some((r) => r[0] === API7 && r[1] === bId), 20_000);
+    } finally {
+      answer();
+      a.stop();
+      b.stop();
+    }
+  }, 60_000);
 
   test("an Inbox with no machine linked: the board's answer is the same with or without `machines=1`", async () => {
     const gh = fakeGh([["northwind/web", 1]]);
