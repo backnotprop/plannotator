@@ -2410,9 +2410,11 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       prefetchWholeFile(context.id);
       const itemId = context.id;
       requestAnimationFrame(() => applyItemHighlights(node, itemId));
-      if (!firstChangeShownRef.current.has(itemId)) {
+      if (!hasScrolledRef.current && !firstChangeShownRef.current.has(itemId)) {
         firstChangeShownRef.current.add(itemId);
-        requestAnimationFrame(() => revealFirstChange(node));
+        requestAnimationFrame(() => {
+          if (!hasScrolledRef.current) revealFirstChange(node);
+        });
       }
     },
   );
