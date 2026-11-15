@@ -310,9 +310,11 @@ import { createCardMarks } from "./inbox-card-marks";
 import { validateFilePath } from "@plannotator/shared/review-core";
 import { createInboxPullLookups, refCardsKindReader } from "./inbox-pull-lookups";
 import { createInboxPulls, InboxPullsError, linkInboxPulls, pullCards, threadAgent, type InboxPullLinkStore, type InboxPullRepo } from "./inbox-pulls";
+import { pullDiffScopeOf } from "./inbox-pull-diff-scope";
 import { parseFileLevelComments, parsePRReviewAction, submitPRReview as submitForgeReview, type PRRef, type PRReviewFileComment, type PRRuntime } from "@plannotator/shared/pr-provider";
 import { prCommandRuntime } from "./pr";
 import { createInboxPullLinks } from "./inbox-pull-links";
+import { createInboxPullLooked, pullLookedSeenOf } from "./inbox-pull-looked";
 import { createPullRisk, type PullRiskOptions } from "./inbox-pull-risk";
 import { createPullAvatars, type PullAvatarOptions } from "./inbox-pull-avatars";
 import { pullMediaResponse, pullMediaSizesResponse } from "./inbox-pull-media";
@@ -1375,6 +1377,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const postedReviews = new Set<string>();
   // Which agent thread owns a PR, as the person chose it (Hand to an agent, Launch an agent): inbox/pull-links.json.
   const pullOwners = createInboxPullLinks(dataDir);
+  const pullLooked = createInboxPullLooked(dataDir);
   // PR risk ranking (inbox-pull-risk.ts): judged in the background from the list reads below, while Code review is on and rules exist.
   const pullRisk = createPullRisk({ dataDir, pulls, roots: (key) => pullRoots(key), isOn: () => codeReviewOn(), ...options.pullRisk });
   // Reviews (inbox-reviews.ts): every thread with a review card, derived from the store's messages on read.
@@ -5455,6 +5458,18 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         }
         return json({ serverSession, ...pullRisk.answer() });
       }
+      // "Changed since you looked" (inbox-pull-looked.ts): the PR page's look at PRs this machine lists, from its window,
+      // the owner's over the tailnet, or a linked machine's window through the forward (rule 8's `set`). Same guards as the list.
+      if (path === "/api/inbox/pulls/looked") {
+        if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+        if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
+          return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
+        }
+        if (!codeReviewOn()) return json({ error: "Code review is off.", code: "code_review_off" }, 409);
+        const body = await readBody(req);
+        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+        return json({ serverSession, looked: pullLooked.mark(pullLookedSeenOf(body, Date.now())) });
+      }
       if (path === "/api/inbox/pulls" || path === "/api/inbox/pulls/diff" || path === "/api/inbox/pulls/details" || path === "/api/inbox/pulls/file" || path === "/api/inbox/pulls/avatar" || path === "/api/inbox/pulls/repo-files" || path === "/api/inbox/pulls/repo-file" || path === "/api/inbox/pulls/media" || path === "/api/inbox/pulls/media/sizes") {
         if (req.method !== "GET") return json({ error: "Use GET." }, 405);
         if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
@@ -5513,11 +5528,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         }
         if (path === "/api/inbox/pulls/diff") {
           const key = url.searchParams.get("key") ?? "";
-          const scope = url.searchParams.get("scope") ?? "layer";
-          if (scope !== "layer" && scope !== "stack") throw new InboxError("validation_error", "scope: layer or stack.", { field: "scope" });
+          const scoped = pullDiffScopeOf(url.searchParams);
+          if (!scoped) throw new InboxError("validation_error", "scope: layer, stack, range with from (a layer's key) or since with from (a commit).", { field: "scope" });
           if (key.length === 0 || key.length > 600) throw new InboxError("validation_error", "key: a pull request's key from the list.", { field: "key" });
           try {
-            return json({ serverSession, ...(await pulls.diff(key, scope)) });
+            return json({ serverSession, ...(await pulls.diff(key, scoped.scope, scoped.from)) });
           } catch (cause) {
             if (cause instanceof InboxPullsError) return json({ error: cause.message, code: cause.code }, cause.code === "pull_unknown" ? 404 : cause.code === "pull_diff_fork" ? 409 : 502);
             throw cause;
@@ -5525,8 +5540,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         }
         if (path === "/api/inbox/pulls/file") {
           const key = url.searchParams.get("key") ?? "";
-          const scope = url.searchParams.get("scope") ?? "layer";
-          if (scope !== "layer" && scope !== "stack") throw new InboxError("validation_error", "scope: layer or stack.", { field: "scope" });
+          const scoped = pullDiffScopeOf(url.searchParams);
+          if (!scoped) throw new InboxError("validation_error", "scope: layer, stack, range with from (a layer's key) or since with from (a commit).", { field: "scope" });
+          const { scope, from } = scoped;
           if (key.length === 0 || key.length > 600) throw new InboxError("validation_error", "key: a pull request's key from the list.", { field: "key" });
           const filePath = changedFilePath(url.searchParams.get("path"));
           try {
@@ -5536,13 +5552,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
             // Parsed once per diff (`changedFileOf`): the PR page asks for every changed file as it nears the viewport.
             const head = ids ? null : url.searchParams.get("head");
             const pinned = head && /^[0-9a-f]{40,64}$/.test(head) ? head : null;
-            const answer = ids || pinned ? await pulls.diff(key, scope) : null;
+            const answer = ids || pinned ? await pulls.diff(key, scope, from) : null;
             const changed = answer ? changedFileOf(answer, filePath) : null;
             if (answer && (!changed || (pinned && (answer.head_sha !== pinned || (changed.status !== "modified" && changed.status !== "renamed"))))) {
               return json({ serverSession, oldContent: null, newContent: null });
             }
             const check = ids ?? (pinned && changed ? { patch: changed.patch } : null);
-            return json({ serverSession, ...(await pulls.fileContents(key, scope, filePath, check ? await pullRoots(key) : [], check, changed?.oldPath)) });
+            return json({ serverSession, ...(await pulls.fileContents(key, scope, filePath, check ? await pullRoots(key) : [], check, changed?.oldPath, from)) });
           } catch (cause) {
             if (cause instanceof InboxPullsError) return json({ error: cause.message, code: cause.code }, 404);
             throw cause;
@@ -5563,7 +5579,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const links = linkInboxPulls(listed.pulls, pullLinkStore, projectsByRepo, pullOwnersNow());
         // The Board is optional: a card that links a PR is a quiet extra, only while the Board is on.
         const cards = boardOn() ? pullCards(listed.pulls, store.listCards()) : {};
-        const own = { ...listed, links, projects: Object.fromEntries(projectsByRepo), cards };
+        const own = { ...listed, pulls: pullLooked.on(listed.pulls), links, projects: Object.fromEntries(projectsByRepo), cards };
         const farBoards = far ? await far : [];
         return json({ serverSession, ...(farBoards.length > 0 ? mergePullBoards(own, farBoards) : own) });
       }

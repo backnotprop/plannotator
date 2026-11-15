@@ -724,6 +724,8 @@ packages/inbox/prs/sheetTable.test.tsx
 packages/inbox/prs/sheetSelect.test.tsx
 packages/inbox/prs/sheetMerge.test.tsx
 packages/inbox/prs/sheetClose.test.tsx
+packages/inbox/prs/stackPage.test.tsx
+packages/inbox/pulls/pullReviewRange.test.tsx
 packages/inbox/fileQuestionCards.test.tsx
 packages/inbox/agents/agentsSection.test.tsx
 packages/inbox/agents/faceFan.test.tsx
