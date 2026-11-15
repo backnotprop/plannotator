@@ -50,3 +50,13 @@ test('at phone width the list gives the name the room: no Runs column, one track
   });
   expect(narrowWide).toBe('normal');
 });
+
+test("on a phone New message's pickers keep their full-screen sheet: the editor's anchoring never reaches a [data-phone] picker", () => {
+  const placing: string[] = [];
+  sheet().walkRules((rule) => {
+    if (!/\.ib-cp-picker/.test(rule.selector)) return;
+    rule.walkDecls(/^(top|left|right|bottom|width|position)$/, () => void placing.push(rule.selector));
+  });
+  expect(placing.length).toBeGreaterThan(0);
+  expect([...new Set(placing)].filter((selector) => !selector.includes(':not([data-phone])'))).toEqual([]);
+});

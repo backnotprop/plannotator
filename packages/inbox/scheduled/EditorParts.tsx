@@ -91,7 +91,7 @@ export function FolderPick({ block, folder, shown, agentName, phone, onChange }:
   const launch = block?.launch ?? null;
   const home = block?.home ?? null;
   const project = 'project_id' in folder ? launch?.projects.find((p) => p.id === folder.project_id) : undefined;
-  const words = 'scratch' in folder ? 'New scratch folder' : (shown ?? (project ? tildePath(project.root, home) : 'Pick a folder'));
+  const words = 'scratch' in folder ? 'New scratch folder' : (shown ?? (project ? tildePath(project.root, home) : 'path' in folder ? tildePath(folder.path, home) : 'Pick a folder'));
   return (
     <div className="st-folder">
       <button type="button" className="st-chip" aria-haspopup="true" aria-expanded={open} onClick={() => setOpen((was) => !was)} disabled={!launch} data-scheduled-folder="">

@@ -15,6 +15,7 @@ import { scheduledRow } from './testRows';
 
 const hasDom = typeof document !== 'undefined';
 const { ScheduledEditor } = (hasDom ? await import('./ScheduledEditor') : {}) as typeof import('./ScheduledEditor');
+const { FolderPick } = (hasDom ? await import('./EditorParts') : {}) as typeof import('./EditorParts');
 
 const realFetch = globalThis.fetch;
 let calls: { method: string; path: string; body: Record<string, unknown> | null }[] = [];
@@ -141,4 +142,12 @@ test.skipIf(!hasDom)('opened by a link before the list is read: the next run is 
   const host = await open(scheduledRow('sch_digest', { schedule: { cron: '16 2 * * *', tz: 'America/New_York' } }), null);
   expect(calls.filter((c) => c.path === '/api/inbox/scheduled/preview').at(-1)?.body?.schedule).toEqual({ cron: '16 2 * * *', tz: 'America/New_York' });
   expect(host.querySelector('[data-schedule-next]')?.textContent).toMatch(/at 2:16\sAM EST$/);
+});
+
+test.skipIf(!hasDom)('a folder picked by its path shows that path on the chip while the saved record still names another', () => {
+  const host = document.createElement('div');
+  document.body.appendChild(host);
+  root = createRoot(host);
+  act(() => root!.render(<FolderPick block={null} folder={{ path: '/Users/maya/code/acme-web' }} shown={null} agentName="Claude Code" phone onChange={() => {}} />));
+  expect(host.querySelector('[data-scheduled-folder]')?.textContent).toBe('/Users/maya/code/acme-web');
 });

@@ -121,10 +121,12 @@
 .st-gh:hover, .st-gh[data-popup-open] { background: var(--muted); }
 .st-gh svg.ib-ic { width: 11px; height: 11px; color: var(--muted-foreground); }
 .st-sep { width: 1px; height: 14px; background: var(--border); margin: 0 4px; }
-/* New message's pickers, anchored under what opened them here. */
-.st-box .ib-cp-picker.ib-cp-lch { top: calc(100% + 4px); left: 0; right: auto; }
+/* New message's pickers, anchored under what opened them here; on a phone they keep New message's full-screen sheet. */
+.st-box .ib-cp-picker.ib-cp-lch:not([data-phone]) { top: calc(100% + 4px); left: 0; right: auto; }
 .st-folder { position: relative; }
-.st-folder .ib-cp-picker.ib-cp-folders { top: calc(100% + 4px); left: 0; width: min(480px, calc(100vw - 48px)); }
+.st-folder .ib-cp-picker.ib-cp-folders:not([data-phone]) { top: calc(100% + 4px); left: 0; width: min(480px, calc(100vw - 48px)); }
+/* The body is its own layer under the Run now bar; a phone sheet open in it has to cover that bar too. */
+.st-body:has(.ib-cp-picker[data-phone]) { z-index: 2; }
 /* The labels' column fits its longest label ("Repo or folder"). */
 .st-kv { display: grid; grid-template-columns: max-content minmax(0, 1fr); align-items: start; gap: 14px 12px; }
 .st-k { font-size: var(--ib-fs-13-5, 13.5px); color: var(--muted-foreground); line-height: 28px; }
