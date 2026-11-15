@@ -269,6 +269,7 @@ const named = (node: Node, kind = node.type, name = node.childForFieldName('name
 const MEMBER_BODIES = new Set([
   'class_body', 'interface_body', 'enum_body', 'annotation_type_body', // Java
   'declaration_list', // C# and Rust
+  'enum_declaration_list',
 ]);
 /** The first declared variable's name in a field or variable declaration. */
 const firstDeclarator = (n: Node): string | undefined => {
@@ -405,6 +406,79 @@ const csharp: LanguageConfig = {
   },
 };
 
+const PHP_CALLS = new Set(['function_call_expression', 'member_call_expression', 'scoped_call_expression', 'nullsafe_member_call_expression']);
+const PHP_TYPES = new Set(['function_definition', 'class_declaration', 'interface_declaration', 'trait_declaration', 'enum_declaration', 'method_declaration', 'enum_case']);
+const phpName = (n: Node | null | undefined) => n?.text.replace(/^\$/, '');
+const phpNamespace = (n: Node) => n.childForFieldName('name')?.text ?? '';
+const phpUseKey = (n: Node) => {
+  const kind = n.children.find((c) => c?.type === 'function' || c?.type === 'const')?.type;
+  const prefix = kind ? `${kind} ` : '';
+  const group = n.childForFieldName('body');
+  if (group) return { key: `${n.namedChildren.find((c) => c?.type === 'namespace_name')?.text ?? ''}\\{}`, prefix };
+  return { key: n.namedChildren.filter((c): c is Node => c?.type === 'namespace_use_clause').map((c) => c.text).join(','), prefix };
+};
+
+const php: LanguageConfig = {
+  id: 'php',
+  wasm: 'tree-sitter-php/tree-sitter-php.wasm',
+  functionTypes: new Set(['function_definition', 'method_declaration']),
+  callTypes: PHP_CALLS,
+  blockTypes: new Set(['compound_statement']),
+  isReturn: (s) => s.type === 'return_statement',
+  attachedTypes: new Set(['comment']),
+  nameOf: (fn) => fn.childForFieldName('name')?.text ?? null,
+  bodyOf: (fn) => fn.childForFieldName('body'),
+  statementsOf: (block) => block.namedChildren.filter((n): n is Node => n !== null && !isComment(n)),
+  calleeOf: (call) => {
+    const f = call.type === 'function_call_expression' ? call.childForFieldName('function') : call.childForFieldName('name');
+    if (!f) return null;
+    if (f.type === 'qualified_name') return f.childForFieldName('name')?.text ?? f.text;
+    return f.type === 'name' ? f.text : null;
+  },
+  returnValueOf: (ret) => ret.namedChildren.find((n) => n !== null && !isComment(n)) ?? null,
+  identifierTypes: new Set(['name']),
+  declarationsIn: (container) => {
+    const out: Declaration[] = [];
+    let ns = '';
+    const scoped = (name: string) => (ns && container.type === 'program' ? `${ns}\\${name}` : name);
+    for (const child of container.namedChildren) {
+      if (!child || isComment(child)) continue;
+      if (child.type === 'namespace_definition') {
+        const body = child.childForFieldName('body');
+        if (body) out.push({ node: child, kind: 'namespace', name: phpNamespace(child), members: body });
+        else ns = phpNamespace(child);
+      } else if (child.type === 'namespace_use_declaration') {
+        const { key, prefix } = phpUseKey(child);
+        out.push(importDeclaration(child, key, prefix));
+      } else if (child.type === 'use_declaration') {
+        out.push({ node: child, kind: 'use_declaration', name: `use:${child.namedChildren.filter((c): c is Node => c?.type === 'name' || c?.type === 'qualified_name').map((c) => c.text).join(',')}` });
+      } else if (child.type === 'property_declaration') {
+        const name = phpName(child.namedChildren.find((c) => c?.type === 'property_element')?.childForFieldName('name'));
+        if (name) out.push({ node: child, kind: child.type, name });
+      } else if (child.type === 'const_declaration') {
+        const name = child.namedChildren.find((c) => c?.type === 'const_element')?.namedChildren.find((c) => c?.type === 'name')?.text;
+        if (name) out.push({ node: child, kind: child.type, name: scoped(name) });
+      } else if (PHP_TYPES.has(child.type)) {
+        const d = named(child, child.type, child.childForFieldName('name')?.text);
+        if (d) out.push({ ...d, name: scoped(d.name) });
+      }
+    }
+    return out;
+  },
+  contextAt: (root, line) => {
+    let ns = '';
+    for (const c of root.namedChildren) {
+      if (c?.type !== 'namespace_definition') continue;
+      const start = c.startPosition.row + 1;
+      if (start > line) break;
+      if (c.childForFieldName('body')) {
+        if (line <= c.endPosition.row + 1) return phpNamespace(c);
+      } else ns = phpNamespace(c);
+    }
+    return ns;
+  },
+};
+
 export const LANGUAGES: Record<LanguageId, LanguageConfig> = {
   go: {
     id: 'go',
@@ -467,6 +541,7 @@ export const LANGUAGES: Record<LanguageId, LanguageConfig> = {
   python,
   java,
   csharp,
+  php,
 };
 
 

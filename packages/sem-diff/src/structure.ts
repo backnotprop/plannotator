@@ -607,6 +607,7 @@ function kindOf(n: Node): 'binding' | 'member' | 'type' {
   if (n.type === 'type_identifier') return 'type';
   if (SHORTHAND.has(n.type)) return 'binding';
   const p = n.parent;
+  if (p?.type === 'variable_name' && p.parent?.type === 'property_element') return 'member';
   // `user.name`, `self.name`, `x.Name`, `obj->name`: the name after the dot.
   if (p && /^(member_expression|attribute|field_expression|selector_expression|field_access|member_access_expression)$/.test(p.type) && p.namedChildren.length > 1 && p.namedChildren.at(-1)?.id === n.id) return 'member';
   if (/property_identifier|field_identifier/.test(n.type)) return 'member';
@@ -651,6 +652,18 @@ function isDeclarationName(id: Node): boolean {
   if (p.type === 'inferred_parameters' || p.type === 'as_pattern_target') return true;
   // TypeScript enum members without a value: `enum E { A, B }`.
   if (p.type === 'enum_body') return true;
+  if (p.type === 'variable_name') {
+    const q = p.parent;
+    if (!q) return false;
+    if (q.type === 'assignment_expression' || q.type === 'reference_assignment_expression') return q.childForFieldName('left')?.id === p.id;
+    if (/parameter$|^property_element$|^static_variable_declaration$/.test(q.type)) return q.childForFieldName('name')?.id === p.id;
+    if (q.type === 'global_declaration' || q.type === 'anonymous_function_use_clause') return true;
+    if (q.type === 'catch_clause') return q.childForFieldName('name')?.id === p.id;
+    if (q.type === 'list_literal') return true;
+    if (q.type === 'foreach_statement' || (q.type === 'pair' && q.parent?.type === 'foreach_statement')) return q.namedChildren[0]?.id !== p.id || q.type === 'pair';
+    return false;
+  }
+  if (p.type === 'const_element' || p.type === 'enum_case') return p.namedChildren.find((c) => c?.type === 'name')?.id === id.id;
   if (!DECLARING_PARENT.test(p.type)) return false;
   // `import { A }` -> `import { B }` brings in a different thing; only a local
   // alias (`import { A as b }`) is a name this file owns.

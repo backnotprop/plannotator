@@ -207,9 +207,18 @@ export type Sides = { old: Set<number>; new: Set<number> };
 /** Lines strictly inside multi-line string literals (template strings, raw strings, text blocks...). */
 function stringInteriors(root: Node, language?: LanguageId): Set<number> {
   const out = new Set<number>();
+  const lines = language === 'php' ? root.text.split('\n') : [];
   const walk = (n: Node) => {
+    if (language === 'php' && n.type === 'text') {
+      for (let row = n.startPosition.row; row <= n.endPosition.row; row++) {
+        const from = row === n.startPosition.row ? n.startPosition.column : 0;
+        const to = Math.min(row === n.endPosition.row ? n.endPosition.column : Infinity, (lines[row] ?? '').length);
+        if (to > from) out.add(row + 1);
+      }
+      return;
+    }
     if (n.endPosition.row === n.startPosition.row) return;
-    if (/string|template|text_block/.test(n.type) && !/content|fragment/.test(n.type)) {
+    if (/string|template|text_block|heredoc|nowdoc/.test(n.type) && !/content|fragment/.test(n.type)) {
       // Rust drops the leading whitespace of a line continued with a backslash
       // ("...\\\n    more"), so re-indenting that line leaves the string as it was.
       const lines = n.text.split('\n');

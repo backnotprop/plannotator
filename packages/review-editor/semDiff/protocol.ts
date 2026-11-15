@@ -20,6 +20,7 @@ export const SEM_DIFF_GRAMMARS = {
   python: 'tree-sitter-python.wasm',
   go: 'tree-sitter-go.wasm',
   rust: 'tree-sitter-rust.wasm',
+  php: 'tree-sitter-php.wasm',
 } as const;
 
 const ROUTE = '/assets/sem-diff/';
