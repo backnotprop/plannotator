@@ -1,7 +1,8 @@
 /**
- * The Combines the window follows (components/useCombines.ts): a Combine still waiting marks its threads; one that
- * arrived is told once with Undo (which asks its machine to bring the threads back) and Open; one that failed says
- * nothing was archived; a second load tells neither again; a linked machine's Combines are read through its door.
+ * The Combines the window follows (components/useCombines.ts): only the ones this browser started, so an Inbox where
+ * nobody combines reads nothing; a Combine still waiting marks its threads; one that arrived is told once with Undo
+ * (which asks its machine to bring the threads back) and Open; one that failed says nothing was archived, and is told
+ * again if it is done after all; a second load tells neither again; a linked machine's Combines are read through its door.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -17,6 +18,9 @@ const hasDom = typeof document !== 'undefined';
 const { useCombines } = (hasDom ? await import('./components/useCombines') : {}) as typeof import('./components/useCombines');
 
 const TOLD_KEY = 'plannotator-inbox-combines-told';
+const WATCH_KEY = 'plannotator-inbox-combines-watch';
+/** This browser started these (what `begin` keeps). */
+const started = (...list: [string, string | null, string][]) => localStorage.setItem(WATCH_KEY, JSON.stringify(list.map(([id, machine, at]) => ({ id, machine, at }))));
 let root: Root | null = null;
 let host: HTMLElement | null = null;
 const realFetch = globalThis.fetch;
@@ -26,6 +30,7 @@ beforeEach(() => {
   if (!hasDom) return;
   requests.length = 0;
   localStorage.removeItem(TOLD_KEY);
+  localStorage.removeItem(WATCH_KEY);
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     const method = init?.method ?? 'GET';
@@ -39,6 +44,7 @@ afterEach(() => {
   if (!hasDom) return;
   globalThis.fetch = realFetch;
   localStorage.removeItem(TOLD_KEY);
+  localStorage.removeItem(WATCH_KEY);
   act(() => root?.unmount());
   root = null;
   host?.remove();
@@ -51,6 +57,7 @@ const base = { threads: [{ id: 'a', subject: 'A' }, { id: 'b', subject: 'B' }], 
 const DONE: InboxCombineRecord = { ...base, id: 'cmb_done', state: 'done', thread: { id: 'n', subject: 'Billing retries and refunds' }, settled_at: AT };
 const FAILED: InboxCombineRecord = { ...base, id: 'cmb_fail', state: 'failed', reason: 'ended', settled_at: AT };
 const OLD: InboxCombineRecord = { ...base, id: 'cmb_old', state: 'done', thread: { id: 'o', subject: 'Old' }, at: DAYS_AGO, settled_at: DAYS_AGO };
+const OTHER: InboxCombineRecord = { ...base, id: 'cmb_other', state: 'done', thread: { id: 'x', subject: 'Elsewhere' }, settled_at: AT };
 const WAITING: InboxCombineRecord = { ...base, id: 'cmb_wait', state: 'asked', threads: [{ id: 'c', subject: 'C' }] };
 
 const toasts: Omit<InboxToastModel, 'id'>[] = [];
@@ -85,12 +92,13 @@ async function load() {
 
 test.skipIf(!hasDom)('a Combine that arrived is told once, with Undo and Open; one that failed says nothing was archived', async () => {
   toasts.length = 0;
-  lists = { here: [DONE, OLD], m_mini: [FAILED, WAITING] };
+  lists = { here: [DONE, OLD, OTHER], m_mini: [FAILED, WAITING] };
+  started(['cmb_done', null, AT], ['cmb_old', null, DAYS_AGO], ['cmb_fail', 'm_mini', AT], ['cmb_wait', 'm_mini', AT]);
   await load();
   // This machine's and the linked one's, through its door.
   expect(requests.filter((r) => r.method === 'GET').map((r) => r.url).sort()).toEqual(['/api/inbox/combine', '/api/inbox/m/m_mini/combine']);
   expect([...seen.entries()]).toEqual([['c', 'cmb_wait']]);
-  // One that settled days ago is not told to a browser seeing it for the first time.
+  // One started days ago is no longer followed; one another browser started is not this one's to tell.
   expect(toasts).toHaveLength(2);
   const done = toasts.find((t) => t.lead === 'Combined 2 threads')!;
   expect(done.detail).toBe('into “Billing retries and refunds”');
@@ -108,4 +116,28 @@ test.skipIf(!hasDom)('a Combine that arrived is told once, with Undo and Open; o
   toasts.length = 0;
   await load();
   expect(toasts).toHaveLength(0);
+});
+
+test.skipIf(!hasDom)('an Inbox where this browser started no Combine reads nothing for them', async () => {
+  toasts.length = 0;
+  lists = { here: [DONE], m_mini: [FAILED] };
+  await load();
+  expect(requests).toHaveLength(0);
+  expect(toasts).toHaveLength(0);
+});
+
+test.skipIf(!hasDom)('one that failed and is then done after all is told again, as done', async () => {
+  toasts.length = 0;
+  lists = { here: [FAILED] };
+  started(['cmb_fail', null, AT]);
+  await load();
+  expect(toasts.map((t) => t.icon)).toEqual(['warn']);
+  lists = { here: [{ ...FAILED, state: 'done', reason: undefined, thread: { id: 'late', subject: 'Late but here' } }] };
+  toasts.length = 0;
+  await load();
+  expect(toasts.map((t) => [t.lead, t.detail])).toEqual([['Combined 2 threads', 'into “Late but here”']]);
+  // Done: no longer followed.
+  requests.length = 0;
+  await load();
+  expect(requests).toHaveLength(0);
 });

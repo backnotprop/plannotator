@@ -10,7 +10,7 @@ import { join } from "node:path";
 import type { InboxMessage } from "@plannotator/core/inbox-types";
 import { doorRouteNames, doorWriteRoutes } from "./inbox-devices";
 import { outboxView, startsAgentThere } from "./inbox-machines";
-import { classifyAnswer, DOOR_WRITES, doorWriteKind, InboxOutbox, OUTBOX_KEEP_SETTLED_MS, OUTBOX_MAX_SERVER_ERRORS, replyIsStale, type OutboxAnswer, type OutboxEntry } from "./inbox-outbox";
+import { classifyAnswer, DOOR_WRITES, doorWriteKind, forwardsNow, InboxOutbox, OUTBOX_KEEP_SETTLED_MS, OUTBOX_MAX_SERVER_ERRORS, replyIsStale, type OutboxAnswer, type OutboxEntry } from "./inbox-outbox";
 
 const B = "ibx_01K00000000000000000000000";
 const C = "ibx_01K00000000000000000000001";
@@ -467,6 +467,16 @@ describe("rule 8: every door write is classified, and only small JSON is held", 
     expect(doorWriteKind("pulls/owner")).toBeNull();
     expect(doorWriteKind("pulls/risk")).toBeNull();
     expect(doorWriteKind("threads/msg_1/pulls")).toBe("set");
+    // A Combine, and a Tidy with the person's words, go now from the window or not at all: one held for days would
+    // archive or change threads nobody is looking at. A Tidy without words, a Combine's Stop and Undo are held.
+    expect(doorWriteKind("combine")).toBe("now");
+    expect(forwardsNow("combine", {})).toBe(true);
+    expect(forwardsNow("tidy", { words: "Close what shipped" })).toBe(true);
+    expect(forwardsNow("tidy", { words: "   " })).toBe(false);
+    expect(forwardsNow("tidy", {})).toBe(false);
+    expect(doorWriteKind("tidy")).toBe("append");
+    expect(forwardsNow("combine/cmb_01M7EQBR93W3RGJF4AA831AJ12/undo", {})).toBe(false);
+    expect(doorWriteKind("combine/cmb_01M7EQBR93W3RGJF4AA831AJ12/cancel")).toBe("set");
   });
 
   test("an Inbox that never holds a write keeps no outbox folder", () => {

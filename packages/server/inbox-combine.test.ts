@@ -31,7 +31,7 @@ function setup() {
   const billing = store.ensureProject({ name: "billing-svc", root: "/work/billing-svc" });
   const live = new Map<string, InboxTidyReach>([["ses_a", "wakes"], ["ses_b", "wakes"]]);
   const idle = new Map<string, number>();
-  const combine = createInboxCombine({
+  const make = () => createInboxCombine({
     store,
     serverSession: "srv",
     reachFor: () => (session) => live.get(session) ?? null,
@@ -41,7 +41,13 @@ function setup() {
     json: (body, status = 200) => Response.json(body, { status }),
     now: () => clock.now,
   });
-  closers.push(combine.close);
+  let combine = make();
+  closers.push(() => combine.close());
+  /** The Inbox started again on the same folder: its Combines read back, no session connected yet. */
+  const restart = () => {
+    combine.close();
+    combine = make();
+  };
   const send = (session: string, subject: string, body: string, extra: Record<string, unknown> = {}) =>
     store.sendMessage({ project_id: billing.id, author: agent(session), subject, body, ...extra }).message;
   const a1 = send("ses_a", "Invoice retries", ask("Retry declined cards after 24 hours?"));
@@ -56,7 +62,7 @@ function setup() {
   const start = async (session = "ses_a", words?: string) =>
     (await route("POST", "/api/inbox/combine", { thread_ids: [a1.id, a2.id, b1.id], session, idempotency_key: `k-${session}`, ...(words ? { words } : {}) })).combine as InboxCombineRecord;
   const archived = () => [a1, a2, b1].map((m) => store.message(m.id)!.resolved_at !== null);
-  return { store, live, idle, clock, combine, route, start, send, a1, a2, b1, archived };
+  return { store, live, idle, clock, get combine() { return combine; }, restart, route, start, send, a1, a2, b1, archived };
 }
 
 test("who can be asked: running sessions that wrote in a picked thread, most threads first, named by host and title or project", async () => {
@@ -122,6 +128,10 @@ test("the session ends, or ends its turn without the thread: the Combine fails, 
   const record = await first.start();
   first.live.delete("ses_a");
   first.combine.check();
+  // Just after the Inbox started no session has polled yet: not yet ended.
+  expect(((await first.route("GET", "/api/inbox/combine")).combines as InboxCombineRecord[])[0]!.state).toBe("asked");
+  first.clock.now += 2 * 60_000;
+  first.combine.check();
   expect((await first.route("GET", "/api/inbox/combine")).combines).toMatchObject([{ id: record.id, state: "failed", reason: "ended" }]);
   expect(first.archived()).toEqual([false, false, false]);
   expect(first.store.pendingReplies("ses_a").some((m) => m.tidy?.wake)).toBe(false);
@@ -139,10 +149,59 @@ test("the session ends, or ends its turn without the thread: the Combine fails, 
   second.clock.now = delivered + 30_000;
   second.combine.check();
   expect((await second.route("GET", "/api/inbox/combine")).combines).toMatchObject([{ id: asked.id, state: "failed", reason: "nothing" }]);
-  // A thread it writes after failing archives nothing.
-  second.send("ses_a", "Late", "Late.", { idempotency_key: asked.id });
+  // A slow agent that writes it after all, under the key: the Combine is done then, and the threads go.
+  const late = second.send("ses_a", "Late", "Late.", { idempotency_key: asked.id });
   await Promise.resolve();
-  expect(second.archived()).toEqual([false, false, false]);
+  expect(second.archived()).toEqual([true, true, true]);
+  const settled = ((await second.route("GET", "/api/inbox/combine")).combines as InboxCombineRecord[])[0]!;
+  expect(settled).toMatchObject({ id: asked.id, state: "done", thread: { id: late.id } });
+  expect(settled.reason).toBeUndefined();
+});
+
+test("a restart while a Combine waits: it stays asked while sessions connect again, and fails only if its session does not", async () => {
+  const { start, restart, route, live, clock, archived } = setup();
+  const record = await start();
+  live.delete("ses_a");
+  restart();
+  const after = async () => ((await route("GET", "/api/inbox/combine")).combines as InboxCombineRecord[])[0]!;
+  expect(await after()).toMatchObject({ id: record.id, state: "asked" });
+  live.set("ses_a", "wakes");
+  clock.now += 3 * 60_000;
+  expect((await after()).state).toBe("asked");
+  live.delete("ses_a");
+  expect(await after()).toMatchObject({ state: "failed", reason: "ended" });
+  expect(archived()).toEqual([false, false, false]);
+});
+
+test("only the Combine's key settles it: another new thread of that session in the same project archives nothing, before or after the wake", async () => {
+  const { store, start, send, archived, route } = setup();
+  const record = await start();
+  const wake = store.pendingReplies("ses_a").find((m) => m.tidy?.wake)!;
+  send("ses_a", "PR #812 is ready", "Ready for review.");
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(archived()).toEqual([false, false, false]);
+  store.recordDelivery(wake.id, { host: "claude-code", session: "ses_a" });
+  send("ses_a", "Another thing", "Unrelated.");
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(archived()).toEqual([false, false, false]);
+  expect(((await route("GET", "/api/inbox/combine")).combines as InboxCombineRecord[])[0]).toMatchObject({ id: record.id, state: "asked" });
+});
+
+test("two Combines by one session in one project: each settles only on its own key", async () => {
+  const { store, send, route } = setup();
+  const [x1, x2, y1, y2] = ["X1", "X2", "Y1", "Y2"].map((subject) => send("ses_a", subject, "x"));
+  const begin = async (ids: string[], key: string) => ((await route("POST", "/api/inbox/combine", { thread_ids: ids, session: "ses_a", idempotency_key: key })).combine as InboxCombineRecord);
+  const X = await begin([x1!.id, x2!.id], "kX");
+  const Y = await begin([y1!.id, y2!.id], "kY");
+  const made = send("ses_a", "Y combined", "y", { idempotency_key: Y.id });
+  await Promise.resolve();
+  await Promise.resolve();
+  const states = ((await route("GET", "/api/inbox/combine")).combines as InboxCombineRecord[]).map((c) => [c.id, c.state, c.thread?.id ?? null]);
+  expect(states).toEqual(expect.arrayContaining([[X.id, "asked", null], [Y.id, "done", made.id]]));
+  const gone = (m: { id: string }) => store.message(m.id)!.resolved_at !== null;
+  expect([x1, x2, y1, y2].map((m) => gone(m!))).toEqual([false, false, true, true]);
 });
 
 test("Stop: a Combine still waiting ends, its wake withdrawn; a replayed key answers the first Combine; a thread waiting in one is not combined again", async () => {

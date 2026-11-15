@@ -9,8 +9,9 @@
  * - `POST /api/inbox/combine/:id/undo`: the picked threads come back from the archive.
  *
  * The picked threads are archived (the person's archive) only once the new thread arrives: a root message from the
- * asked session whose `idempotency_key` is the Combine's id, else the first new thread it starts in one of their
- * projects. A session that ends, ends its turn without one, or never gets to it fails the Combine; nothing is archived.
+ * asked session whose `idempotency_key` is the Combine's id, and nothing else (another new thread of that session is
+ * its own work). A session that ends, ends its turn without one, or never gets to it fails the Combine; nothing is
+ * archived, and a thread with the key that still comes settles it then.
  * Bun only, like the rest of the Inbox; the records live in `inbox/combines.json`, outside the event log.
  */
 
@@ -52,6 +53,8 @@ const DELIVERED_MS = 2 * 60 * 60_000;
 /** Idle after delivery for this long without the thread: the turn ended without it. */
 const IDLE_GRACE_MS = 20_000;
 const CHECK_MS = 10_000;
+/** After a start, sessions this long to connect again before a missing one counts as ended (connections live in memory). */
+const RECONNECT_GRACE_MS = 2 * 60_000;
 const PICKED_MAX = 50;
 
 export interface InboxCombineDeps {
@@ -72,7 +75,8 @@ interface Stored extends InboxCombineRecord {
   key: string;
   /** The wake note (the first of the Tidy notes it wrote). */
   wake: string;
-  projects: string[];
+  /** Kept by an older run; never read. */
+  projects?: string[];
 }
 
 const hostName = (host: string | null) => (host ? (INBOX_HOST_NAMES[host] ?? host) : "An agent");
@@ -80,6 +84,7 @@ const hostName = (host: string | null) => (host ? (INBOX_HOST_NAMES[host] ?? hos
 export function createInboxCombine(deps: InboxCombineDeps) {
   const { store } = deps;
   const now = () => deps.now?.() ?? Date.now();
+  const startedAt = now();
   const path = () => join(store.dir, COMBINES_FILE);
 
   const read = (): Stored[] => {
@@ -184,7 +189,6 @@ export function createInboxCombine(deps: InboxCombineDeps) {
       key,
       wake: notes[0]!.id,
       threads: threadIds.map((t) => ({ id: t, subject: store.threadSubject(t) ?? "(no subject)" })),
-      projects: threadIds.map((t) => store.message(t)!.project_id),
       session: agent.session,
       host: agent.host,
       name: inboxCombineAgentLabel(agent, agents),
@@ -222,18 +226,18 @@ export function createInboxCombine(deps: InboxCombineDeps) {
     }
   };
 
-  /** The new thread: the Combine's key on a root message of the asked session, else its first new thread in their projects. */
+  /** The new thread: the Combine's key on a root message of the asked session. One that failed meanwhile still settles. */
   const arrived = (record: Stored, message: { id: string; thread_id: string; project_id: string; created_at: string; idempotency_key?: string | null; author: { kind: string; session?: string | null } }) => {
-    if (record.state !== "asked" || message.author.kind !== "agent" || message.author.session !== record.session || message.id !== message.thread_id) return false;
+    if ((record.state !== "asked" && record.state !== "failed") || message.author.kind !== "agent" || message.author.session !== record.session || message.id !== message.thread_id) return false;
     if (message.created_at < record.at || record.threads.some((t) => t.id === message.id)) return false;
-    return message.idempotency_key === record.id || record.projects.some((p) => store.sameProject(p, message.project_id));
+    return message.idempotency_key === record.id;
   };
   const unsubscribe = store.subscribe((line) => {
     if (line.kind !== "message") return;
     const message = line.record;
     const record = combines.find((c) => arrived(c, message));
     if (!record) return;
-    settle(record, { state: "done", thread: { id: message.id, subject: store.threadSubject(message.id) ?? message.subject ?? "(no subject)" } });
+    settle(record, { state: "done", reason: undefined, thread: { id: message.id, subject: store.threadSubject(message.id) ?? message.subject ?? "(no subject)" } });
     // After the line that told us: the archive is its own writes.
     queueMicrotask(() => archive(record, true));
   });
@@ -248,8 +252,9 @@ export function createInboxCombine(deps: InboxCombineDeps) {
       const note = store.message(record.wake);
       const at = note?.delivery?.at ? Date.parse(note.delivery.at) : null;
       const idle = deps.idleSince(record.session);
+      // Just after a start (an Update, a restart) no session has polled yet: not having one says nothing so soon.
       const reason =
-        !note || reachOf(record.session) === null
+        !note || (reachOf(record.session) === null && t - startedAt >= RECONNECT_GRACE_MS)
           ? "ended"
           : at !== null && idle !== null && idle > at && t - idle >= IDLE_GRACE_MS
             ? "nothing"

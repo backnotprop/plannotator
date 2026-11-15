@@ -1,8 +1,10 @@
 /**
- * Combines the window follows (approval "inbox-multi-select", 4A; combineApi.ts): while one waits for its new thread,
- * its rows say "Combining…" and every machine holding one is read every few seconds. When the thread arrives the toast
- * says so, with Undo (the picked threads come back) and Open; when the agent ends or stops without it, the toast says
- * nothing was archived. A Combine that settled while no window watched is told once, on the next load (`TOLD_KEY`).
+ * Combines the window follows (approval "inbox-multi-select", 4A; combineApi.ts): the ones this browser started
+ * (`WATCH_KEY`), and nothing else, so an Inbox where nobody combines reads nothing for them. While one waits for its
+ * new thread its rows say "Combining…" and its machine is read every few seconds. When the thread arrives the toast says
+ * so, with Undo (the picked threads come back) and Open; when the agent ends or stops without it, the toast says nothing
+ * was archived, and the machine is read each minute for a day in case the thread still comes (then it is done after
+ * all, and told so). Each ending is told once (`TOLD_KEY`), on the next load when no window was open.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { InboxCombineRecord, InboxListRow } from '@plannotator/core/inbox-types';
@@ -14,8 +16,13 @@ import { isAway, type MachinesModel } from '../machines';
 import { errorToast } from '../toastError';
 
 const POLL_MS = 4000;
+/** A failed one, read this often while it may still be done after all. */
+const LATE_POLL_MS = 60_000;
+/** Watched this long after its start: as long as the server waits for an undelivered wake. */
+const WATCH_MS = 24 * 60 * 60 * 1000;
+const WATCH_KEY = 'plannotator-inbox-combines-watch';
 const TOLD_KEY = 'plannotator-inbox-combines-told';
-const TOLD_KEPT = 20;
+const TOLD_KEPT = 40;
 
 interface Tracked {
   record: InboxCombineRecord;
@@ -24,24 +31,37 @@ interface Tracked {
   rows?: readonly InboxListRow[];
 }
 
-// This browser's own list (never a cookie: it would ride every request).
-const TOLD_WITHIN_MS = 24 * 60 * 60 * 1000;
-const fresh = (record: InboxCombineRecord) => Date.now() - Date.parse(record.settled_at ?? record.at) < TOLD_WITHIN_MS;
-const told = (): string[] => {
+interface Watched {
+  id: string;
+  machine: string | null;
+  at: string;
+}
+
+// This browser's own lists (never a cookie: it would ride every request). Private mode or a full store: a toast may
+// show again, or a Combine is not followed after a reload.
+const readList = <T>(key: string, ok: (v: unknown) => v is T): T[] => {
   try {
-    const value = JSON.parse(localStorage.getItem(TOLD_KEY) ?? '[]') as unknown;
-    return Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : [];
+    const value = JSON.parse(localStorage.getItem(key) ?? '[]') as unknown;
+    return Array.isArray(value) ? value.filter(ok) : [];
   } catch {
     return [];
   }
 };
-const tell = (id: string) => {
+const writeList = (key: string, list: unknown[]) => {
   try {
-    localStorage.setItem(TOLD_KEY, JSON.stringify([...told().filter((t) => t !== id), id].slice(-TOLD_KEPT)));
+    localStorage.setItem(key, JSON.stringify(list));
   } catch {
-    // Private mode or a full store: the toast may show again on the next load.
+    // As above.
   }
 };
+const isWatched = (v: unknown): v is Watched => !!v && typeof (v as Watched).id === 'string' && typeof (v as Watched).at === 'string' && ((v as Watched).machine === null || typeof (v as Watched).machine === 'string');
+const watched = () => readList(WATCH_KEY, isWatched).filter((w) => Date.now() - Date.parse(w.at) < WATCH_MS);
+const watch = (w: Watched) => writeList(WATCH_KEY, [...watched().filter((x) => x.id !== w.id), w]);
+const unwatch = (id: string) => writeList(WATCH_KEY, watched().filter((w) => w.id !== id));
+/** Each ending is told once: a failure, and a done that comes after it, are two. */
+const told = () => readList(TOLD_KEY, (v): v is string => typeof v === 'string');
+const tellKey = (record: InboxCombineRecord) => `${record.id}:${record.state}`;
+const tell = (record: InboxCombineRecord) => writeList(TOLD_KEY, [...told().filter((t) => t !== tellKey(record)), tellKey(record)].slice(-TOLD_KEPT));
 
 const FAILED: Record<NonNullable<InboxCombineRecord['reason']>, string> = {
   ended: 'Its session ended. Nothing was archived.',
@@ -49,8 +69,8 @@ const FAILED: Record<NonNullable<InboxCombineRecord['reason']>, string> = {
   timeout: 'It never wrote the new thread. Nothing was archived.',
 };
 
-/** The machines that may hold Combines: this one, and each linked one there now that takes them. */
-const combineMachines = (machines: MachinesModel | undefined): (string | null)[] => [null, ...(machines?.linked ?? []).filter((m) => !isAway(m) && (m.marks ?? []).includes('combine')).map((m) => m.id)];
+/** A watched Combine's machine can be read now: this one, or a linked one there that takes Combines. */
+const readable = (machine: string | null, machines: MachinesModel | undefined) => machine === null || (machines?.linked ?? []).some((m) => m.id === machine && !isAway(m) && (m.marks ?? []).includes('combine'));
 
 export function useCombines(bulk: BulkWrites | undefined, machines: MachinesModel | undefined) {
   const tracked = useRef(new Map<string, Tracked>());
@@ -85,8 +105,10 @@ export function useCombines(bulk: BulkWrites | undefined, machines: MachinesMode
       const was = t.record.state;
       t.record = next;
       if (next.state === 'asked') return;
-      if (!host || told().includes(next.id) || (was !== 'asked' && next.state !== 'done' && next.state !== 'failed')) return;
-      tell(next.id);
+      // Done, stopped or undone: nothing more to follow. Failed: followed until its day is out.
+      if (next.state !== 'failed') unwatch(next.id);
+      if (!host || told().includes(tellKey(next)) || (next.state !== 'done' && next.state !== 'failed') || was === next.state) return;
+      tell(next);
       const n = plural(next.threads.length, 'thread');
       if (next.state === 'done' && next.thread) {
         const opened = next.thread.id;
@@ -100,53 +122,60 @@ export function useCombines(bulk: BulkWrites | undefined, machines: MachinesMode
     [undo],
   );
 
-  /** Reads each machine's Combines and settles what changed. */
+  /** Reads the machines of the watched Combines that pass `which`, and settles what changed. */
   const read = useCallback(
-    async (only?: ReadonlySet<string | null>) => {
-      const list = combineMachines(machinesRef.current).filter((m) => !only || only.has(m));
+    async (which: (w: Watched) => boolean) => {
+      const list = watched().filter((w) => readable(w.machine, machinesRef.current) && which(w));
+      const ids = new Set(list.map((w) => w.id));
       await Promise.all(
-        list.map(async (machine) => {
+        [...new Set(list.map((w) => w.machine))].map(async (machine) => {
           const answer = await combineApi.list(machine).catch(() => null);
           for (const record of answer?.combines ?? []) {
+            if (!ids.has(record.id)) continue;
             const known = tracked.current.get(record.id);
             if (known) settle(known, record);
             else {
-              const t: Tracked = { record, machine };
+              // After a reload: told now when no window told this ending yet.
+              const t: Tracked = { record: { ...record, state: 'asked' }, machine };
               tracked.current.set(record.id, t);
-              // First seen settled: told on this load only when no window told it yet, and within a day (a browser
-              // opening this Inbox for the first time is not told of old ones).
-              if ((record.state === 'done' || record.state === 'failed') && !told().includes(record.id) && fresh(record)) settle({ ...t, record: { ...record, state: 'asked' } }, record);
+              settle(t, record);
             }
           }
         }),
       );
       sync();
+      setFollowing(watched().length > 0);
     },
     [settle],
   );
   const machinesRef = useRef(machines);
   machinesRef.current = machines;
-  const linkedKey = combineMachines(machines).join(',');
+  const [following, setFollowing] = useState(() => watched().length > 0);
+  // Each machine is read once at load (and once when it can be read again); after that the poll follows. Nothing this
+  // browser started still to follow: no read at all.
+  const readOnce = useRef(new Set<string>());
+  const machineKey = (m: string | null) => m ?? 'here';
+  const unread = [...new Set(watched().filter((w) => readable(w.machine, machines)).map((w) => machineKey(w.machine)))].filter((m) => !readOnce.current.has(m)).join(',');
   useEffect(() => {
-    if (bulk) void read();
-    // Read once per set of machines; the poll below follows those waiting.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [linkedKey, !!bulk]);
+    if (!bulk || !unread) return;
+    const now = new Set(unread.split(','));
+    for (const m of now) readOnce.current.add(m);
+    void read((w) => now.has(machineKey(w.machine)));
+  }, [unread, !!bulk, read]);
   const anyWaiting = waiting.size > 0;
   useEffect(() => {
-    if (!anyWaiting) return;
-    const timer = setInterval(() => {
-      const machinesWaiting = new Set([...tracked.current.values()].filter((t) => t.record.state === 'asked').map((t) => t.machine));
-      void read(machinesWaiting);
-    }, POLL_MS);
+    if (!anyWaiting && !following) return;
+    const timer = setInterval(() => void read((w) => !anyWaiting || tracked.current.get(w.id)?.record.state !== 'failed'), anyWaiting ? POLL_MS : LATE_POLL_MS);
     return () => clearInterval(timer);
-  }, [anyWaiting, read]);
+  }, [anyWaiting, following, read]);
 
   /** A Combine this window just started: drawn at once, and its toast's Undo stops it. */
   const begin = (record: InboxCombineRecord, machine: string | null, rows: readonly InboxListRow[]) => {
     const host = bulkRef.current?.host;
     const t: Tracked = { record, machine, rows };
     tracked.current.set(record.id, t);
+    watch({ id: record.id, machine, at: record.at });
+    setFollowing(true);
     sync();
     host?.showToast({ icon: 'clock', lead: `Asked ${record.name} to combine ${plural(record.threads.length, 'thread')}`, phoneLead: 'Combining', onUndo: () => void stop(record.id) });
   };

@@ -34,7 +34,7 @@ import { INBOX_MACHINE_PULL_WINDOW_ONLY_BODY, INBOX_MACHINE_WINDOW_ONLY_BODY, is
 import { INBOX_MACHINE_ACCOUNTS_MAX_BYTES, INBOX_MACHINE_ACCOUNTS_WAIT_MS, parsePeerAccounts } from "./inbox-accounts";
 import { buildLinkOffer, InboxLinks, parseLinkOffer, type InboxLinkRecord } from "./inbox-links";
 import { createMachinePulls } from "./inbox-machine-pulls";
-import { doorWriteKind, InboxOutbox, MACHINE_WINDOW_HEADER, type OutboxEntry } from "./inbox-outbox";
+import { doorWriteKind, forwardsNow, InboxOutbox, MACHINE_WINDOW_HEADER, type OutboxEntry } from "./inbox-outbox";
 import { farVersion, MACHINE_LINKS_PROTOCOL, parseFarUpdate, PEER_LINK_TIMINGS, PeerLink, readCapped, type PeerCards, type PeerLinkTimings, type PeerRecord, type PeerRereadEvent } from "./inbox-peer-link";
 import { installCommandFor, isNewerStableVersion, normalizeStableVersion } from "@plannotator/shared/update-check";
 import { openTransport, type InboxTransportSpec } from "./inbox-transport";
@@ -838,6 +838,18 @@ export function createInboxMachines(context: InboxMachinesContext) {
     // An agent's or a script's bare call is still the owner's for every other write, as before.
     const window = isWindowRequest(req, body, context.serverSession);
     if (!window && startsAgentThere(route, body)) return json(INBOX_MACHINE_WINDOW_ONLY_BODY, 403);
+    // A Combine, or a Tidy with the person's words: a press in this window, sent now or not at all (rule 8, `now`). A
+    // Tidy without words stays held like any append.
+    if (forwardsNow(route, body)) {
+      if (!window) return json(INBOX_MACHINE_WINDOW_ONLY_BODY, 403);
+      if (peer.state !== "online") return offline();
+      delete body.serverSession;
+      try {
+        return passAnswer(await peer.request(route, "", { method: "POST", headers: { "Content-Type": "application/json", [MACHINE_WINDOW_HEADER]: "1" }, body: JSON.stringify(body), signal: req.signal }));
+      } catch {
+        return offline();
+      }
+    }
     if (kind === "forge") {
       // A PR's close, reopen or merge as that machine's gh / glab: a press in this window, sent now or not at all. A
       // close held for days would run when nobody is looking, and Undo's reopen is taken there only minutes after it.

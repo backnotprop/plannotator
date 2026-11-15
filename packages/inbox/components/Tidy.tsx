@@ -76,11 +76,13 @@ export function useTidy(scope: string | null, surface: TidySurface, version: unk
   const open = useRef(false);
   /** A stale plan is being read again (`warm`): until it lands the menu shows no count (a touch opens ⋮ at once). */
   const [pending, setPending] = useState(false);
+  /** The linked machines are read once the person reaches for Tidy; until then a load reads this machine's alone. */
+  const far = useRef(false);
   const refresh = useCallback(() => {
     const mine = ++seq.current;
     stale.current = false;
     // A project's list is that project's machine's alone.
-    const targets = scope ? [{ machine: machineOf(scope), name: null }] : machinesRef.current ? listTargets(machinesRef.current) : [{ machine: null, name: null }];
+    const targets = scope ? [{ machine: machineOf(scope), name: null }] : machinesRef.current && far.current ? listTargets(machinesRef.current) : [{ machine: null, name: null }];
     readAcross(targets, (target) => inboxApi.tidy(scope, surface, target.machine))
       .then((next) => {
         if (mine === seq.current) setPlan(next);
@@ -110,10 +112,12 @@ export function useTidy(scope: string | null, surface: TidySurface, version: unk
     return () => clearTimeout(timer);
   }, [refresh, version, enabled]);
   const warm = useCallback(() => {
-    if (!enabled || !stale.current) return;
+    const first = !scope && !far.current && (machinesRef.current?.linked.length ?? 0) > 0;
+    far.current = true;
+    if (!enabled || (!stale.current && !first)) return;
     setPending(true);
     refresh();
-  }, [enabled, refresh]);
+  }, [enabled, refresh, scope]);
   const shown = useCallback(
     (now: boolean) => {
       open.current = now;

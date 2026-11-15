@@ -42,6 +42,7 @@ import { join } from "node:path";
 import { JsonLines } from "@plannotator/shared/inbox/devices";
 import { InboxError, inboxDir } from "@plannotator/shared/inbox/schema";
 import type { InboxMessage } from "@plannotator/core/inbox-types";
+import { inboxTidyWords } from "@plannotator/core/inbox-types";
 
 export const INBOX_OUTBOX_DIR = "outbox";
 /** The header a linked machine's Inbox sends with a write the person made in its window (`OutboxEntry.window`). */
@@ -155,6 +156,10 @@ export function replyIsStale(messages: readonly InboxMessage[], seenThroughSeq: 
  *   close, reopen or merge): never held, sent only while online, and only from
  *   a press in this Inbox's window. The forge is asked first there, so a second
  *   copy is refused in the forge's words ("It is already closed.").
+ * - `now` asks an agent there to act on the person's threads (a Combine): never
+ *   held, sent only while online, and only from a press in this Inbox's
+ *   window. One held for days would archive threads nobody is looking at. A
+ *   Tidy with the person's words is sent the same way (inbox-machines.ts).
  * - `local` is never forwarded: `doorWriteKind` has no kind for it, so the
  *   forward answers 404. A phone reaches it at this Inbox's own door. Reuse
  *   (`uploads/reuse`) is useful only as its answer, the new upload's id: a held
@@ -165,7 +170,7 @@ export function replyIsStale(messages: readonly InboxMessage[], seenThroughSeq: 
  *
  * inbox-outbox.test.ts fails when a door write has no entry here.
  */
-export const DOOR_WRITES: Readonly<Record<string, "append" | "set" | "file" | "forge" | "local">> = {
+export const DOOR_WRITES: Readonly<Record<string, "append" | "set" | "file" | "forge" | "now" | "local">> = {
   "POST threads/:id/seen": "set",
   "POST threads/:id/read": "set",
   "POST threads/:id/unread": "set",
@@ -219,7 +224,7 @@ export const DOOR_WRITES: Readonly<Record<string, "append" | "set" | "file" | "f
   // Tidy and Combine (approval "inbox-multi-select"): a Tidy's notes and a Combine's wake are written under the
   // body's key, so a second copy answers the first; a Combine's Stop and Undo put a state.
   "POST tidy": "append",
-  "POST combine": "append",
+  "POST combine": "now",
   "POST combine/(cmb_[^/]+)/cancel": "set",
   "POST combine/(cmb_[^/]+)/undo": "set",
   // A launched agent's buttons from another machine (remote launch). Stop, Trust folder and Delete put a state; Try
@@ -245,8 +250,17 @@ const DOOR_WRITE_ROUTES = Object.entries(DOOR_WRITES).flatMap(([name, kind]) =>
  * never forwarded (a write rule 8 has not classified, or calls `local`, cannot
  * reach another machine).
  */
-export function doorWriteKind(route: string): "append" | "set" | "file" | "forge" | null {
+export function doorWriteKind(route: string): "append" | "set" | "file" | "forge" | "now" | null {
   return DOOR_WRITE_ROUTES.find((entry) => entry.route.test(route))?.kind ?? null;
+}
+
+/**
+ * A write the forward sends now, from a press in the window, or not at all: rule 8's `now` (a Combine), and a Tidy
+ * with the person's words, which a later run would apply to threads nobody looked at since. A Tidy without words is
+ * held like any append.
+ */
+export function forwardsNow(route: string, body: Record<string, unknown>): boolean {
+  return doorWriteKind(route) === "now" || (route === "tidy" && inboxTidyWords(body.words) !== "");
 }
 
 /** Statuses a proxy in front of the owner answers when the owner itself never got the request (`tailscale serve` with the Inbox down). */
