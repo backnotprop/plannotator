@@ -16,7 +16,7 @@ import { guarded, okComplete, PROJECT_PATH_DESCRIPTION } from "./inbox-mcp-resul
 export const SCHEDULED_THREAD_OPS = ["create", "list", "get", "update", "on", "off", "run", "delete"] as const;
 
 export const SCHEDULED_THREAD_DESCRIPTION =
-  "Scheduled threads: a saved prompt an agent on this computer runs on a schedule, every run replying in one Inbox thread. Make one when the person asks for something to happen regularly or at a set time. op: create, list, get, update, on, off, run, delete. One you create arrives off: the person turns it on the first time, in the Inbox; after that you may update, turn it on or off, run and delete it. Changing its folder or its agent turns it off again until the person turns it back on. A schedule's runs are at least 15 minutes apart. Pass thread_id: each change posts one line there for the person.";
+  "Scheduled threads: a saved prompt an agent on this computer runs on a schedule, every run replying in one Inbox thread. Make one only when the person asks for work to run on its own, on a schedule. op: create, list, get, update, on, off, run, delete. One you create arrives off: the person turns it on the first time, in the Inbox; after that you may update, turn it on or off, run and delete it. Changing its folder or its agent turns it off again until the person turns it back on. A schedule's runs are at least 15 minutes apart. Pass thread_id: each change posts one line there for the person.";
 
 export interface InboxScheduledMcpContext {
   /** Whether the person has scheduled threads on, read on every request. Absent: off. */
@@ -25,7 +25,7 @@ export interface InboxScheduledMcpContext {
 }
 
 const rowLine = (row: InboxScheduledRow) =>
-  `${row.id} "${row.name}": ${row.state}, ${row.schedule_words}${row.tz_short ? ` (${row.tz_short})` : ""}, ${row.agent} in ${row.folder_shown}${row.next_run ? `, next ${row.next_run}` : ""}${row.approved_at ? "" : ", not yet turned on by the person"}${row.thread_id ? `, thread ${row.thread_id}` : ""}.`;
+  `${row.id} "${row.name}": ${row.state}, ${row.schedule ? row.schedule_words : "runs only when run"}${row.tz_short ? ` (${row.tz_short})` : ""}, ${row.agent} in ${row.folder_shown}${row.next_run ? `, next ${row.next_run}` : ""}${row.approved_at ? "" : ", not yet turned on by the person"}${row.thread_id ? `, thread ${row.thread_id}` : ""}.`;
 
 export function registerInboxScheduledTool(server: McpServer, context: InboxScheduledMcpContext): void {
   server.registerTool(
@@ -81,7 +81,9 @@ export function registerInboxScheduledTool(server: McpServer, context: InboxSche
         }
         const told = (id: string | null) => (id ? ` The person sees it in thread ${input.thread_id}.` : "");
         if (input.op === "create") {
-          const folder = input.folder?.scratch ? { scratch: true } : { path: input.folder?.path ?? input.project_path };
+          const path = input.folder?.path ?? input.project_path;
+          if (!input.folder?.scratch && !path) throw new InboxError("validation_error", "folder: { path } or { scratch: true }, or pass project_path.", { field: "folder" });
+          const folder = input.folder?.scratch ? { scratch: true } : { path };
           const { record, told: line } = await scheduled.create({ ...input, folder, agent: input.agent ?? input.agent_host }, by);
           const row = scheduled.rowOf(record);
           return okComplete(`Made ${rowLine(row)} It is off until the person turns it on in the Inbox.${told(line)}`, { scheduled: row });
@@ -113,7 +115,7 @@ export function registerInboxScheduledTool(server: McpServer, context: InboxSche
             return okComplete(`${said}${told(line)}`, { scheduled: row, message_id: message.id });
           }
           case "delete": {
-            const { told: line } = scheduled.remove(input.id, by);
+            const { told: line } = await scheduled.remove(input.id, by);
             return okComplete(`Deleted ${input.id}. Its thread and past runs stay.${told(line)}`, { deleted: true });
           }
         }

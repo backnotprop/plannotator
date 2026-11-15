@@ -55,7 +55,7 @@ export interface InboxScheduledThread {
   updated_at: string;
 }
 
-export type InboxScheduledSkipReason = "asleep" | "not_running" | "still_running" | "missed";
+export type InboxScheduledSkipReason = "asleep" | "not_running" | "still_running" | "missed" | "late";
 
 /**
  * On a message: the run divider ("Run 4"), which carries the prompt to the run's session as its first turn, or a

@@ -25,7 +25,7 @@ export function runEnded(message: InboxMessageWire, messages: readonly InboxMess
   return { replied, didntFinish: !replied && !going };
 }
 
-/** The thread header's start of "You started Claude Code in acme-api": a scheduled thread's runs were started by its schedule. */
+/** The thread header's start: "You started Claude Code in acme-api", or "Scheduled thread · Claude Code in acme-api". */
 export const startedWords = (root: InboxMessageWire | undefined) => (root?.scheduled_run ? 'Scheduled thread · ' : 'You started ');
 
 /** The fold over earlier runs: "6 earlier runs, Nov 2 to Nov 9", or null when it hides no run. */

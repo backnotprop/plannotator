@@ -42,6 +42,15 @@ describe("the missed-run decision (spec section 4)", () => {
     expect(inboxScheduledDecide({ ...base, if_missed: "run_once", handled_through: "2026-11-20T22:00:00.000Z" })).toEqual({ kind: "wait" });
   });
 
+  test("late with the Inbox up and awake: skip says it couldn't start on time, not that the next run was close", () => {
+    const base = { schedule: daily, handled_through: "2026-11-15T14:00:00.000Z", now: at("2026-11-16T14:05:00Z"), why: null, running: false };
+    expect(inboxScheduledDecide({ ...base, if_missed: "skip" })).toMatchObject({ kind: "skip", reason: "late" });
+    expect(inboxScheduledDecide({ ...base, if_missed: "run_once" })).toMatchObject({ kind: "run", late: true });
+    // The next run under 15 minutes away is that reason, either setting.
+    const close = { ...base, schedule: { cron: "0,20 9 * * *", tz: NY }, now: at("2026-11-16T14:06:00Z") };
+    for (const if_missed of ["run_once", "skip"] as const) expect(inboxScheduledDecide({ ...close, if_missed })).toMatchObject({ kind: "skip", reason: "missed" });
+  });
+
   test("on time, a run still going, nothing due", () => {
     const base = { schedule: daily, if_missed: "run_once" as const, handled_through: "2026-11-15T14:00:00.000Z", why: null, running: false };
     expect(inboxScheduledDecide({ ...base, now: at("2026-11-16T14:00:20Z") })).toMatchObject({ kind: "run", late: false, missed_before: 0 });
@@ -79,21 +88,25 @@ describe("the 15-minute rule", () => {
     expect(inboxScheduleRefusal({ cron: "*/5 * * * *", tz: NY })).toEqual({
       code: "schedule_too_frequent",
       every_minutes: 5,
-      error: "Scheduled threads run at least 15 minutes apart. This one runs every 5 minutes.",
+      error: "Scheduled times are at least 15 minutes apart. This one runs every 5 minutes.",
     });
     // Two runs close together once a day are refused too.
     expect(inboxScheduleRefusal({ cron: "0,10 9 * * *", tz: NY })?.every_minutes).toBe(10);
   });
 
-  test("what does not parse is refused as a schedule, and the preview says so without a next run", () => {
-    expect(inboxScheduleRefusal({ cron: "61 * * * *", tz: NY })?.code).toBe("schedule_invalid");
-    expect(inboxScheduleRefusal({ cron: "0 9 * * *", tz: "Mars/Olympus" })?.code).toBe("schedule_invalid");
-    expect(inboxScheduleRefusal({ cron: "*/5 * * * * *", tz: NY })?.code).toBe("schedule_invalid");
+  test("what does not parse is refused in our own words, never the cron library's, and the preview has no next run", () => {
+    const cron = { code: "schedule_invalid", error: "That isn't a schedule Plannotator can read. A schedule is a 5-field cron, such as 0 9 * * 1-5." };
+    expect(inboxScheduleRefusal({ cron: "61 * * * *", tz: NY })).toEqual(cron);
+    expect(inboxScheduleRefusal({ cron: "*/5 * * * * *", tz: NY })).toEqual(cron);
+    expect(inboxScheduleRefusal({ cron: "0 9 * * *", tz: "Mars/Olympus" })).toEqual({
+      code: "schedule_invalid",
+      error: "That isn't a schedule Plannotator can read. Mars/Olympus isn't a time zone it knows; use one such as America/New_York.",
+    });
     expect(inboxScheduledPreview({ cron: "*/5 * * * *", tz: NY }, at("2026-11-16T00:00:00Z"))).toMatchObject({ ok: false, next_run: null, refused: { code: "schedule_too_frequent" } });
   });
 
   test("*/14 runs 14 minutes apart but 4 at the hour's end: the refusal says it can run 4 apart, not every 4", () => {
-    expect(inboxScheduleRefusal({ cron: "*/14 * * * *", tz: NY })).toMatchObject({ every_minutes: 4, error: "Scheduled threads run at least 15 minutes apart. This one can run 4 minutes apart." });
+    expect(inboxScheduleRefusal({ cron: "*/14 * * * *", tz: NY })).toMatchObject({ every_minutes: 4, error: "Scheduled times are at least 15 minutes apart. This one can run 4 minutes apart." });
   });
 
   test("a date the calendar does not have, and a cron that never comes round, are refused", () => {
@@ -116,4 +129,10 @@ test("the presets in words", () => {
   expect(inboxScheduleWords({ cron: "0 */2 * * *", tz: NY })).toBe("Every 2 hours, at minute 0");
   expect(inboxScheduleWords({ at: "2026-11-20T17:00", tz: NY })).toBe("Once on Fri, Nov 20 at 5:00 PM");
   expect(inboxScheduleWords(null)).toBe("Runs when you run it.");
+});
+
+test("a step that does not divide the hour or the day says what it does, never an untrue every", () => {
+  expect(inboxScheduleWords({ cron: "*/45 * * * *", tz: NY })).toBe("Every hour at :00 and :45");
+  expect(inboxScheduleWords({ cron: "*/20 * * * *", tz: NY })).toBe("Every 20 minutes");
+  expect(inboxScheduleWords({ cron: "0 */5 * * *", tz: NY })).toBe("On the schedule 0 */5 * * *");
 });

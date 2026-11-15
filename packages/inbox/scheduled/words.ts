@@ -106,6 +106,7 @@ const REASON_WORDS: Record<Exclude<InboxScheduledSkipReason, 'still_running'>, s
   asleep: 'this computer was asleep',
   not_running: "the Inbox wasn't running",
   missed: 'the next run was less than 15 minutes away',
+  late: "it couldn't start on time",
 };
 
 /** A run divider: "Run 8 · due 9:00 AM, ran 11:14 AM · 1 earlier time missed"; `alone` (nothing came after it) adds the time. */
@@ -114,7 +115,6 @@ export function dividerWords(run: InboxScheduledRun, createdAt: string, alone: b
   if (run.late) parts.push(`due ${timeFrom(run.due_at, new Date(createdAt))}, ran ${time(new Date(createdAt))}`);
   else if (alone) parts.push(time(new Date(createdAt)));
   if (run.missed_before) parts.push(`${plural(run.missed_before, 'earlier time')} missed`);
-  if (run.skipped?.reason === 'still_running' && run.run) parts.push(`${plural(run.skipped.count, 'time')} skipped while Run ${run.run - 1} was still going`);
   return parts.join(' · ');
 }
 
@@ -122,9 +122,10 @@ export function dividerWords(run: InboxScheduledRun, createdAt: string, alone: b
 export function skipWords(run: InboxScheduledRun, now: Date = new Date()): string {
   const skipped = run.skipped;
   if (!skipped) return 'Skipped';
+  // A newer Inbox's reason this window does not know: the time alone.
   const reason = skipped.reason === 'still_running' ? 'the last run was still going' : REASON_WORDS[skipped.reason];
   const when = skipped.count > 1 ? `${skipped.count} times, ${timeFrom(skipped.from, now)} to ${timeFrom(skipped.to, now)}` : timeFrom(skipped.to, now);
-  return `Skipped ${when} · ${reason}`;
+  return reason ? `Skipped ${when} · ${reason}` : `Skipped ${when}`;
 }
 
 /** The thread's fold over earlier runs: "6 earlier runs, Nov 2 to Nov 9". */

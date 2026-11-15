@@ -34,19 +34,32 @@ const atText = (at: string): string => {
 
 const minutesWords = (n: number) => (n === 1 ? "1 minute" : `${n} minutes`);
 
+const UNREAD = "That isn't a schedule Plannotator can read.";
+
+const zoneKnown = (tz: string): boolean => {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 /**
  * Why a schedule is refused, or null. The words are the editor's and an agent's alike. `now`: a one-time time before
  * it is refused (a new or changed schedule; one already saved keeps its time).
  */
 export function inboxScheduleRefusal(schedule: InboxScheduledSchedule, now?: Date): InboxScheduledRefusal | null {
   if (schedule === null) return null;
+  if (!zoneKnown(schedule.tz)) return { code: "schedule_invalid", error: `${UNREAD} ${schedule.tz} isn't a time zone it knows; use one such as America/New_York.` };
   let cron: Cron;
   try {
     cron = cronOf(schedule);
     cron.nextRun(new Date(0));
   } catch (error) {
-    const reason = (error instanceof Error ? error.message : String(error)).replace(/^Cron\w*: /, "").split(". Original error")[0]!;
-    return { code: "schedule_invalid", error: `That isn't a schedule: ${reason}.` };
+    // A one-time time's reasons are our own words (atText); croner's own text never reaches a person or an agent.
+    if ("at" in schedule) return { code: "schedule_invalid", error: `That isn't a schedule: ${error instanceof Error ? error.message : String(error)}.` };
+    return { code: "schedule_invalid", error: `${UNREAD} A schedule is a 5-field cron, such as 0 9 * * 1-5.` };
   }
   if (!("cron" in schedule)) return now && cron.nextRun(now) === null ? { code: "schedule_invalid", error: "That time has already passed." } : null;
   const runs = cron.nextRuns(GAP_SAMPLE, new Date(Date.UTC(2026, 0, 1)));
@@ -62,7 +75,7 @@ export function inboxScheduleRefusal(schedule: InboxScheduledSchedule, now?: Dat
   const every = Math.max(1, Math.round(gap / MINUTE));
   // `*/14` runs at :56 and then :00: say what is true of it, not "every 4 minutes".
   const how = widest === gap ? `runs every ${every === 1 ? "minute" : minutesWords(every)}` : `can run ${minutesWords(every)} apart`;
-  return { code: "schedule_too_frequent", every_minutes: every, error: `Scheduled threads run at least ${SCHEDULED_MIN_GAP_MINUTES} minutes apart. This one ${how}.` };
+  return { code: "schedule_too_frequent", every_minutes: every, error: `Scheduled times are at least ${SCHEDULED_MIN_GAP_MINUTES} minutes apart. This one ${how}.` };
 }
 
 /** The first due time after `after`, or null (no schedule, a one-time one that passed, or a schedule that is refused). */
@@ -122,10 +135,12 @@ function cronWords(cron: string): string {
   const everyDay = dom === "*" && month === "*";
   if (everyDay && dow === "*") {
     const stepMin = /^\*\/(\d+)$/.exec(min);
-    if (stepMin && hour === "*") return `Every ${stepMin[1]} minutes`;
+    // `*/45` runs at :00 and :45, not every 45 minutes: a step that does not divide the hour says its minutes.
+    const step = stepMin ? Number(stepMin[1]) : 0;
+    if (step > 0 && hour === "*") return 60 % step === 0 ? `Every ${step} minutes` : `Every hour at ${listed(Array.from({ length: Math.ceil(60 / step) }, (_, i) => `:${String(i * step).padStart(2, "0")}`))}`;
     if (m !== null && hour === "*") return `Every hour at :${String(m).padStart(2, "0")}`;
     const stepHour = /^\*\/(\d+)$/.exec(hour);
-    if (m !== null && stepHour) return `Every ${stepHour[1]} hours, at minute ${m}`;
+    if (m !== null && stepHour && 24 % Number(stepHour[1]) === 0) return `Every ${stepHour[1]} hours, at minute ${m}`;
     if (m !== null && h !== null) return `Every day at ${clock(h, m)}`;
   }
   if (everyDay && m !== null && h !== null) {
@@ -222,7 +237,8 @@ export function inboxScheduledDecide(input: {
   if (late) {
     const next = inboxScheduledNext(input.schedule, input.now);
     const soon = next !== null && next.getTime() - input.now.getTime() < SCHEDULED_MIN_GAP_MINUTES * MINUTE;
-    if (input.if_missed === "skip" || soon) return skip(input.why ?? "missed");
+    if (soon) return skip(input.why ?? "missed");
+    if (input.if_missed === "skip") return skip(input.why ?? "late");
   }
   return { kind: "run", due_at: handled_through, late, missed_before: due.count - 1, handled_through };
 }
