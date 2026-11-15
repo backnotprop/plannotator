@@ -46,6 +46,7 @@ export interface LanguageConfig {
   attachedTypes: ReadonlySet<string>;
   harmlessMissing?: ReadonlySet<string>;
   contextAt?(root: Node, line: number): string;
+  positionAt?(root: Node, line: number): string;
 }
 
 export function brokenTree(n: Node, cfg: LanguageConfig): boolean {
@@ -525,7 +526,7 @@ const ktImportKey = (n: Node) => {
   const star = n.children.some((c) => c?.type === '*') ? '.*' : '';
   return `${path}${star}${alias ? `:${alias}` : ''}`;
 };
-type KtContext = { start: number; end: number; label: string };
+type KtContext = { start: number; end: number; label: string; ordered: boolean };
 const ktContexts = new WeakMap<object, KtContext[]>();
 const kotlinContexts = (root: Node): KtContext[] => {
   const cached = ktContexts.get(root.tree);
@@ -538,7 +539,7 @@ const kotlinContexts = (root: Node): KtContext[] => {
       const siblings = n.parent?.namedChildren.filter((c) => c?.type === n.type) ?? [];
       label = `${n.type}:${siblings.findIndex((c) => c?.id === n.id)}`;
     }
-    out.push({ start: n.startPosition.row + 1, end: n.endPosition.row + 1, label });
+    out.push({ start: n.startPosition.row + 1, end: n.endPosition.row + 1, label, ordered: !KT_CONTAINERS[n.type] });
   }
   ktContexts.set(root.tree, out);
   return out;
@@ -607,6 +608,11 @@ const kotlin: LanguageConfig = {
     return out;
   },
   contextAt: (root, line) =>
+    kotlinContexts(root)
+      .filter((c) => !c.ordered && c.start <= line && line <= c.end)
+      .map((c) => c.label)
+      .join('/'),
+  positionAt: (root, line) =>
     kotlinContexts(root)
       .filter((c) => c.start <= line && line <= c.end)
       .map((c) => c.label)

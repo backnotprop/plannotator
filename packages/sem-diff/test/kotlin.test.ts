@@ -59,3 +59,8 @@ test('the missing token on a one-line class body is harmless; other missing toke
   bad.delete();
   parser.delete();
 });
+
+test('a parameter or enum list wrapped onto lines is reformatted: positions constrain moves only', async () => {
+  assert.deepEqual(await ops(`data class P(val x: Int, val y: Int) {\n    fun f() = x\n}\n`, `data class P(\n    val x: Int,\n    val y: Int,\n) {\n    fun f() = x\n}\n`), ['reformatted']);
+  assert.deepEqual(await ops(`enum class E { A, B, C }\n`, `enum class E {\n    A,\n    B,\n    C,\n}\n`), ['reformatted']);
+});
