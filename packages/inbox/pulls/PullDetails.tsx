@@ -12,6 +12,7 @@ import { Tip } from '../components/Tip';
 import { relativeTime, relativeWords } from '../relativeTime';
 import { forgeBody } from './descriptionLinks';
 import { ForgeMarkdown, PullDescription } from './PullDescription';
+import { Face } from './Face';
 
 /**
  * The details of one PR, read again when `stamp` moves or `retry` asks (the server keeps them a minute); a failure says
@@ -58,7 +59,6 @@ function useReached(at: number | null): boolean {
 const REVIEW_WORDS: Record<InboxPullReviewState, string> = { approved: 'Approved', changes: 'Changes requested', commented: 'Commented', waiting: 'Waiting' };
 const REVIEW_ORDER: InboxPullReviewState[] = ['changes', 'approved', 'commented', 'waiting'];
 export const DELETED = 'A deleted account';
-const initial = (login: string) => (login.includes('/') ? login.split('/')[1]! : login).replace(/\[bot\]$/, '').slice(0, 1).toUpperCase();
 export const shortName = (login: string) => login.replace(/\[bot\]$/, '');
 const checkName = (check: InboxPullCheck) => (check.workflow ? `${check.workflow} / ${check.name}` : check.name);
 /** A bot that only commented says nothing about where the review stands: it follows the people who were asked. */
@@ -78,42 +78,6 @@ export function reviewWords(all: readonly InboxPullReviewer[]) {
   if (reviewers.some((r) => r.state === 'changes')) return 'Changes requested';
   const approved = reviewers.filter((r) => r.state === 'approved').length;
   return approved ? `${approved} approved` : reviewers.some((r) => r.state === 'commented') ? 'Commented' : 'Waiting';
-}
-
-/**
- * A person's picture, round: the initial while it loads and when it cannot, a grey person for a deleted account. An app
- * or a team is a soft square, as on the forge; a team has no picture to ask for.
- */
-export function Face({ login, host, size, bot, team, state }: { login: string; host: string; size: number; bot?: boolean; team?: boolean; state?: InboxPullReviewState }) {
-  const [shown, setShown] = useState(false);
-  const [failed, setFailed] = useState(false);
-  const isTeam = team || login.includes('/');
-  const square = bot || isTeam || login.endsWith('[bot]');
-  return (
-    <span className="ib-prd-face" data-square={square ? '' : undefined} data-gone={login ? undefined : ''} style={{ width: size, height: size, fontSize: Math.round(size * 0.42) }} aria-hidden="true">
-      <span className="ib-prd-pic">
-        {!login ? <Icon name="user" size={Math.round(size * 0.6)} /> : !shown && initial(login)}
-        {login && !isTeam && !failed && (
-          <img
-            src={inboxApi.pullAvatarUrl(host, login)}
-            alt=""
-            loading="lazy"
-            decoding="async"
-            referrerPolicy="no-referrer"
-            draggable={false}
-            data-shown={shown ? '' : undefined}
-            onLoad={(event) => (event.currentTarget.naturalWidth > 1 ? setShown(true) : setFailed(true))}
-            onError={() => setFailed(true)}
-          />
-        )}
-      </span>
-      {state && state !== 'waiting' && (
-        <span className="ib-prd-pip" data-state={state}>
-          <Icon name={state === 'approved' ? 'check' : state === 'changes' ? 'x' : 'comment'} size={8} />
-        </span>
-      )}
-    </span>
-  );
 }
 
 const CheckMark = ({ state, quiet }: { state: InboxPullCheckState; quiet?: boolean }) =>
@@ -381,7 +345,7 @@ function CommentCard({ comment, layer, onFile }: { comment: InboxPullDetailComme
   );
 }
 
-export function PullDetails({ layer, description, headSha, data, failed, heldUntil = null, onRetry, forge, panel, phone, inDiff, onClose, onFile, top, keys, descriptionUnread = false }: {
+export function PullDetails({ layer, description, headSha, data, failed, heldUntil = null, onRetry, forge, panel, phone, inDiff, onClose, onFile, top, keys, descriptionUnread = false, headless = false }: {
   layer: InboxPull;
   description: string | null | undefined;
   headSha?: string | null;
@@ -402,6 +366,8 @@ export function PullDetails({ layer, description, headSha, data, failed, heldUnt
   keys?: Record<string, unknown>;
   /** The description has no other source than the details' read (the full review), and it failed: whether there is one is not known. */
   descriptionUnread?: boolean;
+  /** Laid in a page that already names the author, the branches and the forge (the launchpad): no head of its own, no Close. */
+  headless?: boolean;
 }) {
   const labelsId = useId();
   const [opened, setOpened] = useState<'people' | 'checks' | null>(null);
@@ -466,8 +432,8 @@ export function PullDetails({ layer, description, headSha, data, failed, heldUnt
     );
   };
   return (
-    <aside ref={panel as RefObject<HTMLElement>} className="ib-prd" aria-label="Details" tabIndex={-1} data-pull-details="" data-layout={phone ? 'column' : 'columns'} {...keys}>
-      <header className="ib-prd-head">
+    <aside ref={panel as RefObject<HTMLElement>} className="ib-prd" aria-label="Details" tabIndex={-1} data-pull-details="" data-layout={phone ? 'column' : 'columns'} data-headless={headless ? '' : undefined} {...keys}>
+      {!headless && <header className="ib-prd-head">
         <Face login={layer.author ?? ''} host={layer.host} size={32} />
         <div className="ib-prd-who">
           <Tip cut content={layer.author ?? DELETED}><b>{layer.author ?? DELETED}</b></Tip>
@@ -483,7 +449,7 @@ export function PullDetails({ layer, description, headSha, data, failed, heldUnt
         <Tip content="Close">
           <button type="button" className="ib-prd-iconbtn" aria-label="Close the details" onClick={onClose} data-pull-details-close=""><Icon name="x" size={15} /></button>
         </Tip>
-      </header>
+      </header>}
       <div className="ib-prd-body">
         {top && <div className="ib-prd-top">{top}</div>}
         {phone ? (

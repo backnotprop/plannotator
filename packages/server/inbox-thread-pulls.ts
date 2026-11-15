@@ -14,8 +14,9 @@
  *   review decision and the head commit's checks. `--hostname` is always
  *   named, and a host other than github.com is asked only when this
  *   computer's own gh is signed in to it (#2187's rule).
- * - GitLab: the hover cards' lookup (`RefCards`), with its own cap, cache and
- *   rate-limit hold.
+ * - GitLab and Bitbucket Cloud: the hover cards' lookup (`RefCards`), with its
+ *   own cap, cache and rate-limit hold. Bitbucket reads through the review
+ *   app's API token (`fetchBbPRCard`), since Bitbucket has no CLI.
  * - Only PRs still in play (open, a draft, or not read yet) are read: merged
  *   and closed are final. Only on view: when the window lists threads (the
  *   threads not archived) and when it reads one thread's PRs.
@@ -25,12 +26,18 @@
  *   a time, and a rate-limit answer holds that host.
  * - A changed state, title or branch is written on the coupling (the store's
  *   `setThreadPullState`), so rows paint without a forge call and phones and
- *   the device door see it. Checks and the review verdict are kept here only.
- * - No gh or glab, signed out, or a failure: nothing is written, the PR keeps
- *   its last state (`unknown` until a first answer), and nothing nags.
+ *   the device door see it. Checks and the review verdict are kept here only;
+ *   a change to them tells the windows (`onLiveChange`, `event: thread-pulls`).
+ * - No gh or glab, no Bitbucket token, signed out, a failure or a timeout: nothing is written, the
+ *   PR keeps its last state (`unknown` until a first answer), the failure is
+ *   kept for 1 min, and nothing nags.
+ * - The window's read never waits on a forge: it answers what is known at
+ *   once and reads behind it (a hover once said "Loading" for as long as a
+ *   stuck glab ran). Every CLI has a hard deadline (the runner) and no slot is
+ *   held forever (`createRefSlots`).
  */
 
-import { forgeRefKey, parseForgeRefUrl, type ForgeRefCardData } from "@plannotator/core/forge-ref-card";
+import { forgeRefKey, forgeRefLabel, parseForgeRefUrl, type ForgeRefCardData } from "@plannotator/core/forge-ref-card";
 import {
   inboxThreadPullGroups,
   inboxThreadPullText,
@@ -47,7 +54,7 @@ import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { CARD_MARK_FAILURE_MS, CARD_MARK_FRESH_MS, CARD_MARK_REFRESH_MS, CARD_MARKS_BATCH, CARD_MARKS_MAX_CONCURRENT } from "./inbox-card-marks";
 import { sessionLastSawThread } from "./inbox-session-reads";
-import { REF_AUTH_HOSTS_MS, REF_FAILURE_MS, REF_RATE_LIMIT_MS, readSignedInHosts, refCliRunner, refErrorOf, type RefCards, type RefRunner } from "./ref-cards";
+import { createRefSlots, REF_AUTH_HOSTS_MS, REF_FAILURE_MS, REF_RATE_LIMIT_MS, readSignedInHosts, refCliRunner, refErrorOf, type RefCards, type RefRunner } from "./ref-cards";
 
 /** What the reader learns about one PR. */
 export interface ThreadPullRead {
@@ -88,7 +95,7 @@ export function githubThreadPullRead(node: unknown): ThreadPullRead | null {
   return { state, title: str(n.title), base: str(n.baseRefName), head: str(n.headRefName), checks, review };
 }
 
-/** The hover card's data as a read (GitLab). */
+/** The hover card's data as a read (GitLab, Bitbucket). */
 export function cardDataThreadPullRead(data: ForgeRefCardData): ThreadPullRead | null {
   if (data.kind !== "pull") return null;
   const state: InboxThreadPullState | null = data.state === "open" || data.state === "draft" || data.state === "merged" || data.state === "closed" ? data.state : null;
@@ -127,7 +134,19 @@ interface Cached {
   at: number;
 }
 
-export function createThreadPullStates(options: { store: InboxStore; run?: RefRunner; refCards?: RefCards; now?: () => number; fixture?: (() => ThreadPullFixture | null) | null }): ThreadPullStates {
+export function createThreadPullStates(options: {
+  store: InboxStore;
+  run?: RefRunner;
+  refCards?: RefCards;
+  now?: () => number;
+  fixture?: (() => ThreadPullFixture | null) | null;
+  /**
+   * A read changed what only this reader keeps (checks, the review verdict) for these threads' PRs: the windows'
+   * streams say so (`event: thread-pulls`), since no record is written for it. A changed state, title or branch is
+   * a `thread_pull` record already.
+   */
+  onLiveChange?: (threadIds: readonly string[]) => void;
+}): ThreadPullStates {
   const { store } = options;
   const run = options.run ?? refCliRunner;
   const now = options.now ?? Date.now;
@@ -135,20 +154,9 @@ export function createThreadPullStates(options: { store: InboxStore; run?: RefRu
   const pending = new Map<string, Promise<void>>();
   const holdUntil = new Map<string, number>();
   let hosts: { at: number; ttl: number; set: Promise<Set<string>> } | null = null;
-  let running = 0;
-  const waiting: (() => void)[] = [];
-
-  const slot = async <T>(job: () => Promise<T>): Promise<T> => {
-    if (running >= CARD_MARKS_MAX_CONCURRENT) await new Promise<void>((resolve) => waiting.push(resolve));
-    else running++;
-    try {
-      return await job();
-    } finally {
-      const next = waiting.shift();
-      if (next) next();
-      else running--;
-    }
-  };
+  // At most CARD_MARKS_MAX_CONCURRENT reads; never stuck (createRefSlots): a stalled queue fails its reads, kept as failures.
+  const slots = createRefSlots(CARD_MARKS_MAX_CONCURRENT);
+  const slot = <T>(job: () => Promise<T>): Promise<T> => slots.run(job);
 
   const signedIn = (): Promise<Set<string>> => {
     if (hosts && now() - hosts.at < hosts.ttl) return hosts.set;
@@ -170,8 +178,13 @@ export function createThreadPullStates(options: { store: InboxStore; run?: RefRu
 
   /** One answer kept, and written on every live coupling of that PR. */
   const land = (key: string, read: ThreadPullRead | null) => {
+    const before = cache.get(key)?.read;
     cache.set(key, { read, at: now() });
     if (!read) return;
+    if (options.onLiveChange && ((before?.checks ?? null) !== read.checks || (before?.review ?? null) !== read.review)) {
+      const threads = [...new Set(store.allThreadPulls().filter((pull) => pull.pull === key).map((pull) => pull.thread_id))];
+      if (threads.length > 0) options.onLiveChange(threads);
+    }
     for (const pull of store.allThreadPulls()) {
       if (pull.pull !== key) continue;
       try {
@@ -214,14 +227,14 @@ export function createThreadPullStates(options: { store: InboxStore; run?: RefRu
     return job;
   };
 
-  const readGitlab = async (key: string, url: string): Promise<void> => {
+  const readCard = async (key: string, url: string): Promise<void> => {
     const result = options.refCards ? await options.refCards.get(url).catch(() => null) : null;
     land(key, result?.ok ? cardDataThreadPullRead(result.data) : null);
   };
 
   const readFixture = (fixture: ThreadPullFixture, pull: InboxThreadPull): void => {
     const ref = parseForgeRefUrl(pull.url);
-    const named = fixture[pull.pull] ?? (ref ? fixture[`${ref.owner}/${ref.repo}${ref.platform === "gitlab" ? "!" : "#"}${ref.number}`] : undefined) ?? fixture[pull.url];
+    const named = fixture[pull.pull] ?? (ref ? fixture[`${ref.owner}/${ref.repo}${forgeRefLabel(ref)}`] : undefined) ?? fixture[pull.url];
     land(
       pull.pull,
       named?.state
@@ -258,7 +271,7 @@ export function createThreadPullStates(options: { store: InboxStore; run?: RefRu
           batch.items.push({ key: pull.pull, number: ref.number });
           githubBatches.set(repoKey, batch);
         } else {
-          jobs.push(readGitlab(pull.pull, pull.url));
+          jobs.push(readCard(pull.pull, pull.url));
         }
       }
       for (const batch of githubBatches.values()) {
@@ -267,6 +280,43 @@ export function createThreadPullStates(options: { store: InboxStore; run?: RefRu
       await Promise.all(jobs.map((job) => job.catch(() => undefined)));
     },
   };
+}
+
+/** How long the person's Add waits for the new PR's first read before answering with what is known. */
+export const THREAD_PULLS_ADD_WAIT_MS = 1_500;
+
+/** Wait for `work`, but no longer than `ms`; never throws (the work goes on behind). */
+function settledWithin(work: Promise<unknown>, ms: number): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  return Promise.race([
+    work.then(
+      () => undefined,
+      () => undefined,
+    ),
+    new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, ms);
+    }),
+  ]).finally(() => clearTimeout(timer));
+}
+
+/** The host of a project's git remote (inbox-repos.ts), or null. */
+export type ProjectHostOf = (projectId: string) => Promise<string | null>;
+
+/**
+ * `parseInboxThreadPullRefs` in a project: a short `group/project!45` is on
+ * the project's own GitLab host (`parseForgePullRef`). The host is looked up
+ * only when a ref landed on gitlab.com, so a list without one never waits on git.
+ */
+export async function parseProjectPullRefs(
+  values: unknown,
+  field: string,
+  projectId: string,
+  hostOf: ProjectHostOf | undefined,
+): Promise<ReturnType<typeof parseInboxThreadPullRefs>> {
+  const parsed = parseInboxThreadPullRefs(values, field);
+  if ("error" in parsed || !hostOf || !parsed.refs.some(({ ref }) => ref.platform === "gitlab" && ref.host === "gitlab.com")) return parsed;
+  const host = await hostOf(projectId).catch(() => null);
+  return host ? parseInboxThreadPullRefs(values, field, host) : parsed;
 }
 
 /** A thread's PRs as the window reads them: the live list with stack groups, and what was removed in the last 7 days. */
@@ -282,8 +332,7 @@ export function threadPullsAnswer(store: InboxStore, states: Pick<ThreadPullStat
 
 /**
  * The window's route (packages/server/inbox.ts runs its guards first: the
- * same origin, and for a change the owner's window only, so a tailnet guest
- * gets 403 and never reaches this). The person's add and remove are written
+ * same origin). The person's add and remove are written
  * `by: person`; an edit alone wakes no one and notifies no one: the thread's
  * owner hears of it on its next wake (inboxPullsWakeLine).
  */
@@ -295,14 +344,14 @@ export function createThreadPullsRoute(options: {
   readBody: (req: Request) => Promise<Record<string, unknown>>;
   /** The serverSession check of a write (`mismatch`: a window from before a restart). */
   sessionMismatch: (body: Record<string, unknown>) => Response | null;
-  localOnly: () => Response;
+  /** For a short `group/project!45` (`parseProjectPullRefs`). Absent: gitlab.com. */
+  projectHost?: ProjectHostOf;
   now?: () => number;
 }) {
   const { store, states, json } = options;
   const now = options.now ?? Date.now;
   return {
-    /** `owner`: this request may change the PRs and run gh / glab (the owner's window). */
-    async route(req: Request, path: string, owner: boolean): Promise<Response | null> {
+    async route(req: Request, path: string): Promise<Response | null> {
       const match = /^\/api\/inbox\/threads\/([A-Za-z0-9_]+)\/pulls$/.exec(path);
       if (!match) return null;
       if (req.method !== "GET" && req.method !== "POST") return json({ error: "Use GET or POST." }, 405);
@@ -310,21 +359,23 @@ export function createThreadPullsRoute(options: {
       if (!message) return json({ error: `No thread ${match[1]}.`, code: "thread_not_found" }, 404);
       const threadId = message.thread_id;
       if (req.method === "POST") {
-        if (!owner) return options.localOnly();
         const body = await options.readBody(req);
         const mismatch = options.sessionMismatch(body);
         if (mismatch) return mismatch;
-        const add = body.add === undefined ? { refs: [] } : parseInboxThreadPullRefs(body.add, "add");
+        const add = body.add === undefined ? { refs: [] } : await parseProjectPullRefs(body.add, "add", message.project_id, options.projectHost);
         if ("error" in add) throw new InboxError("validation_error", add.error, { field: add.field });
         const all = Array.isArray(body.remove) && body.remove.length === 1 && body.remove[0] === "all";
-        const remove = all || body.remove === undefined ? { refs: [] } : parseInboxThreadPullRefs(body.remove, "remove");
+        const remove = all || body.remove === undefined ? { refs: [] } : await parseProjectPullRefs(body.remove, "remove", message.project_id, options.projectHost);
         if ("error" in remove) throw new InboxError("validation_error", remove.error, { field: remove.field });
         const change = store.changeThreadPulls({ thread_id: threadId, add: add.refs, remove: all ? "all" : remove.refs, by: { kind: "person" } });
-        // A PR just added is read at once, so the popover shows its state.
-        if (change.added.length > 0) await states.refresh(change.added);
-      } else if (owner) {
-        // The thread was opened (or the window got its focus back): its PRs still in play are read if older than 30 s.
-        await states.refresh(store.threadPulls(threadId), { refresh: true });
+        // A PR just added is read at once, so the popover shows its state; a forge slower than
+        // THREAD_PULLS_ADD_WAIT_MS answers later, over the stream (a `thread_pull` record, `event: thread-pulls`).
+        if (change.added.length > 0) await settledWithin(states.refresh(change.added), THREAD_PULLS_ADD_WAIT_MS);
+      } else {
+        // The thread was opened, a row's mark hovered, or the window got its focus back: the answer is what is known
+        // now, at once, and its PRs still in play are read behind it if older than 30 s. Never waits on gh or glab:
+        // what the read changes reaches the window over the stream (a `thread_pull` record, `event: thread-pulls`).
+        void states.refresh(store.threadPulls(threadId), { refresh: true });
       }
       return json({ serverSession: options.serverSession, ...threadPullsAnswer(store, states, threadId, now()) });
     },

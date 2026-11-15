@@ -26,6 +26,8 @@ export interface DiagramRenderState {
     readonly line: number | null;
     /** The engine could not be loaded: a Retry can change this one. */
     readonly runtimeUnavailable: boolean;
+    /** A diagram-type chunk did not load: the block offers Reload. */
+    readonly chunkFailed?: boolean;
   } | null;
   readonly pending: boolean;
 }
@@ -69,7 +71,12 @@ export function useDiagramRender(
     void renderDiagram(kind, renderId, source, theme).then((result: DiagramRenderResult) => {
       if (cancelled) return;
       if (isRenderError(result)) {
-        const error = { message: result.message, line: result.line, runtimeUnavailable: result.runtimeUnavailable };
+        const error = {
+          message: result.message,
+          line: result.line,
+          runtimeUnavailable: result.runtimeUnavailable,
+          ...(result.chunkFailed ? { chunkFailed: true } : {}),
+        };
         setState((current) => ({ ...current, error, pending: false }));
         return;
       }

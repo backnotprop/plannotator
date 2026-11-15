@@ -16,7 +16,7 @@
  * PNGs land in PLANNOTATOR_E2E_SHOTS_DIR (default .local/proof/thread-links).
  */
 
-import { devices, expect, test, webkit, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { devices, expect, test, webkit, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -654,7 +654,7 @@ test('the row in a full-screen thread and beside a file', async ({ browser }: { 
 
   // The mouse rests in the pane: at the window's left edge a full-screen thread peeks the sidebar.
   await open(page, world.mixed, '&artifacts');
-  await pane.locator('[data-full-in]').click();
+  await page.locator('.ib-listcol .ib-handle-hit').click();
   await expect(pane).toHaveAttribute('data-full', /.*/);
   await expect(page.locator('[data-artifact-tile]').first()).toBeVisible();
   await page.mouse.move(900, 700);

@@ -1,12 +1,14 @@
 /**
  * The window's route for a thread's PRs and the state reader behind it
  * (approval "inbox-pr-binding", 2026-11-08). The forge is a stand-in runner:
- * no gh runs. The failures these guard: a tailnet guest (or any request the
- * Inbox does not count as the owner's) that changes a thread's PRs; a bad ref
+ * no gh runs. The failures these guard: a stale window that changes a
+ * thread's PRs; a bad ref
  * that half-writes; the person's change recorded as an agent's; one gh call
  * per PR instead of one per repository; a merged PR read again on every view;
  * a state that lands on one thread but not on another holding the same PR;
- * and a fixture that is not read in the sandbox.
+ * a fixture that is not read in the sandbox; and a window's read that waits
+ * on the forge (a stuck glab once kept a hover on "Loading" and, with the
+ * browser's few connections held, stopped threads from opening).
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -15,7 +17,13 @@ import { join } from "node:path";
 import { parseInboxThreadPullRefs, type InboxAuthor, type InboxThreadPullsAnswer } from "@plannotator/core/inbox-types";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { InboxStore } from "@plannotator/shared/inbox/store";
-import { createThreadPullStates, createThreadPullsRoute, threadPullsChangedForWake, type ThreadPullFixture } from "./inbox-thread-pulls";
+import { createThreadPullStates, createThreadPullsRoute, THREAD_PULLS_ADD_WAIT_MS, threadPullsChangedForWake, type ThreadPullFixture } from "./inbox-thread-pulls";
+import { createRefCards, type BitbucketRefReader } from "./ref-cards";
+
+/** Let the reads behind an answer land (the stand-in forges answer at once). */
+const settle = async () => {
+  for (let i = 0; i < 20; i++) await new Promise((resolve) => setTimeout(resolve, 0));
+};
 
 const roots: string[] = [];
 afterEach(() => {
@@ -42,7 +50,16 @@ function fakeGh(states: Record<number, { state: string; isDraft?: boolean; base?
   return { run, calls };
 }
 
-function world(options: { fixture?: () => ThreadPullFixture | null; gh?: ReturnType<typeof fakeGh> } = {}) {
+function world(
+  options: {
+    fixture?: () => ThreadPullFixture | null;
+    gh?: { run: unknown; calls: string[][] };
+    onLiveChange?: (threadIds: readonly string[]) => void;
+    bitbucket?: BitbucketRefReader;
+    cards?: boolean;
+    projectHost?: (projectId: string) => Promise<string | null>;
+  } = {},
+) {
   const dir = mkdtempSync(join(tmpdir(), "plannotator-inbox-pulls-route-"));
   roots.push(dir);
   let now = Date.parse("2026-11-08T10:00:00.000Z");
@@ -50,7 +67,8 @@ function world(options: { fixture?: () => ThreadPullFixture | null; gh?: ReturnT
   const project = store.ensureProject({ name: "billing", root: "/work/billing" });
   const thread = store.sendMessage({ project_id: project.id, author: AGENT, body: "Opened the retry PR.", subject: "Invoice retries" }).message.id;
   const gh = options.gh ?? fakeGh({});
-  const states = createThreadPullStates({ store, run: gh.run as never, now: () => now, fixture: options.fixture ?? null });
+  const refCards = options.bitbucket || options.cards ? createRefCards({ run: gh.run as never, now: () => now, avatar: async () => null, bitbucket: options.bitbucket }) : undefined;
+  const states = createThreadPullStates({ store, run: gh.run as never, ...(refCards ? { refCards } : {}), now: () => now, fixture: options.fixture ?? null, onLiveChange: options.onLiveChange });
   const route = createThreadPullsRoute({
     store,
     states,
@@ -58,13 +76,13 @@ function world(options: { fixture?: () => ThreadPullFixture | null; gh?: ReturnT
     json: (data, status = 200) => Response.json(data, { status }),
     readBody: async (req) => (await req.json()) as Record<string, unknown>,
     sessionMismatch: (body) => (typeof body.serverSession === "string" && body.serverSession !== "srv_1" ? Response.json({ error: "stale" }, { status: 409 }) : null),
-    localOnly: () => Response.json({ error: "owner only" }, { status: 403 }),
+    projectHost: options.projectHost,
     now: () => now,
   });
   const path = (id: string) => `/api/inbox/threads/${id}/pulls`;
-  const get = (id: string, owner = true) => route.route(new Request(`http://x${path(id)}`), path(id), owner);
-  const post = (id: string, body: Record<string, unknown>, owner = true) =>
-    route.route(new Request(`http://x${path(id)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }), path(id), owner);
+  const get = (id: string) => route.route(new Request(`http://x${path(id)}`), path(id));
+  const post = (id: string, body: Record<string, unknown>) =>
+    route.route(new Request(`http://x${path(id)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }), path(id));
   const agentAdd = (id: string, ...values: string[]) => {
     const parsed = parseInboxThreadPullRefs(values, "add");
     if ("error" in parsed) throw new Error(parsed.error);
@@ -74,12 +92,8 @@ function world(options: { fixture?: () => ThreadPullFixture | null; gh?: ReturnT
 }
 
 describe("the window's route", () => {
-  test("only the owner's window may change a thread's PRs; anyone else gets 403 and nothing is written", async () => {
+  test("a window from before a restart is told so, and writes nothing", async () => {
     const w = world();
-    const refused = await w.post(w.thread, { add: ["o/r#1"] }, false);
-    expect(refused!.status).toBe(403);
-    expect(w.store.threadPulls(w.thread)).toEqual([]);
-    // A window from before a restart is told so, and writes nothing either.
     expect((await w.post(w.thread, { serverSession: "srv_old", add: ["o/r#1"] }))!.status).toBe(409);
     expect(w.store.threadPulls(w.thread)).toEqual([]);
   });
@@ -97,6 +111,23 @@ describe("the window's route", () => {
     expect(error).toBeInstanceOf(InboxError);
     expect((error as InboxError).code).toBe("validation_error");
     expect(w.store.threadPulls(w.thread)).toHaveLength(2);
+  });
+
+  test("the person's short group/project!n is on the thread's project's own GitLab host, and is looked up only for one", async () => {
+    const asked: string[] = [];
+    const w = world({ projectHost: async (projectId) => (asked.push(projectId), "gitlab.acme.dev") });
+    await w.post(w.thread, { add: ["o/r#1", "https://gitlab.acme.dev/acme/api/-/merge_requests/2"] });
+    expect(asked).toEqual([]);
+    const answer = (await (await w.post(w.thread, { add: ["acme/api!3"] }))!.json()) as InboxThreadPullsAnswer;
+    expect(asked).toEqual([w.project.id]);
+    expect(answer.pulls.map((p) => [p.pull, p.url])).toEqual([
+      ["github.com/o/r#1", "https://github.com/o/r/pull/1"],
+      ["gitlab.acme.dev/acme/api#2:pull", "https://gitlab.acme.dev/acme/api/-/merge_requests/2"],
+      ["gitlab.acme.dev/acme/api#3:pull", "https://gitlab.acme.dev/acme/api/-/merge_requests/3"],
+    ]);
+    // Its short form takes it off again.
+    await w.post(w.thread, { remove: ["acme/api!3"] });
+    expect(w.store.threadPulls(w.thread).map((p) => p.pull)).toEqual(["github.com/o/r#1", "gitlab.acme.dev/acme/api#2:pull"]);
   });
 
   test("remove [\"all\"] takes every PR off, and the answer lists them as removed", async () => {
@@ -122,6 +153,10 @@ describe("the state reader", () => {
     expect(other).not.toBe(w.thread);
     w.agentAdd(w.thread, "o/r#1", "o/r#2", "o/r#3");
     w.agentAdd(other, "o/r#2");
+    // The read answers what is known at once (nothing read yet), and reads behind it.
+    const first = (await (await w.get(w.thread))!.json()) as InboxThreadPullsAnswer;
+    expect(first.pulls.map((p) => p.state)).toEqual(["unknown", "unknown", "unknown"]);
+    await settle();
     const answer = (await (await w.get(w.thread))!.json()) as InboxThreadPullsAnswer;
     expect(gh.calls).toHaveLength(1);
     expect(gh.calls[0]!.slice(0, 3)).toEqual(["gh", "api", "graphql"]);
@@ -142,22 +177,68 @@ describe("the state reader", () => {
     const w = world({ gh });
     w.agentAdd(w.thread, "o/r#1", "o/r#2");
     await w.get(w.thread);
+    await settle();
     await w.get(w.thread);
+    await settle();
     expect(gh.calls).toHaveLength(1);
     w.advance(31_000);
     await w.get(w.thread);
+    await settle();
     expect(gh.calls).toHaveLength(2);
     expect(gh.calls[1]!.join(" ")).toContain("n2: pullRequest");
     expect(gh.calls[1]!.join(" ")).not.toContain("n1: pullRequest");
   });
 
-  test("a tailnet guest's read runs no gh: it gets the stored state", async () => {
-    const gh = fakeGh({ 1: { state: "OPEN" } });
-    const w = world({ gh });
-    w.agentAdd(w.thread, "o/r#1");
-    const answer = (await (await w.get(w.thread, false))!.json()) as InboxThreadPullsAnswer;
+  test("a Bitbucket Cloud PR's state, checks and review come through its API reader; no CLI runs", async () => {
+    const gh = fakeGh({});
+    const reads: unknown[] = [];
+    const w = world({
+      gh,
+      bitbucket: async (ref) => {
+        reads.push(ref);
+        return {
+          platform: "bitbucket", kind: "pull", repo: "acme/billing", number: 7, url: "https://bitbucket.org/acme/billing/pull-requests/7",
+          title: "Retry invoices", state: "open", author: null, createdAt: "", updatedAt: "", closedAt: null, labels: [], assignees: [],
+          comments: 0, body: "", bodyCut: false, lastComment: null, linked: [],
+          pull: { base: "main", head: "retries", additions: 0, deletions: 0, files: 0, review: "approved", checks: { state: "failure", passed: 1, failed: 1, pending: 0, total: 2 } },
+        };
+      },
+    });
+    w.agentAdd(w.thread, "https://bitbucket.org/acme/billing/pull-requests/7");
+    // The window's read answers at once and reads Bitbucket behind it; the next read has the answer.
+    await w.get(w.thread);
+    await settle();
+    const answer = (await (await w.get(w.thread))!.json()) as InboxThreadPullsAnswer;
     expect(gh.calls).toEqual([]);
-    expect(answer.pulls[0]!.state).toBe("unknown");
+    expect(reads).toEqual([{ workspace: "acme", repo: "billing", number: 7 }]);
+    expect(answer.pulls.map((p) => [p.platform, p.label, p.state, p.title, p.checks, p.review])).toEqual([["bitbucket", "#7", "open", "Retry invoices", "failing", "approved"]]);
+    expect(w.store.threadPulls(w.thread)[0]).toMatchObject({ state: "open", base: "main", head: "retries" });
+  });
+
+  test("a self-managed GitLab's MR reads its state through the glab signed in there; a host glab is not signed in to is never asked", async () => {
+    const calls: string[][] = [];
+    const run = async (cli: string, args: string[]) => {
+      calls.push([cli, ...args]);
+      if (args[0] === "auth") return { stdout: "", stderr: "git.acme.com\n  ✓ Logged in to git.acme.com as dev (keyring)\n", exitCode: 0 };
+      if (cli === "glab" && args.includes("git.acme.com")) {
+        const mergeRequest = { iid: "61", title: "Retry invoices", webUrl: "https://git.acme.com/acme/api/-/merge_requests/61", state: "opened", draft: false, createdAt: "", updatedAt: "", closedAt: null, mergedAt: null, description: "", author: null, labels: { nodes: [] }, assignees: { nodes: [] }, userNotesCount: 0, notes: { nodes: [] }, sourceBranch: "retries", targetBranch: "main", diffStatsSummary: {}, approved: true, detailedMergeStatus: "MERGEABLE", headPipeline: null };
+        return { stdout: JSON.stringify({ data: { project: { fullPath: "acme/api", mergeRequest } } }), stderr: "", exitCode: 0 };
+      }
+      return { stdout: "", stderr: "unexpected", exitCode: 1 };
+    };
+    const w = world({ gh: { run, calls }, cards: true });
+    w.agentAdd(w.thread, "https://git.acme.com/acme/api/-/merge_requests/61", "https://gitlab.evil.example/acme/api/-/merge_requests/1", "https://evil.example/acme/api/-/merge_requests/2");
+    await w.get(w.thread);
+    await settle();
+    const answer = (await (await w.get(w.thread))!.json()) as InboxThreadPullsAnswer;
+    expect(answer.pulls.map((p) => [p.host, p.platform, p.label, p.state])).toEqual([
+      ["git.acme.com", "gitlab", "!61", "open"],
+      ["gitlab.evil.example", "gitlab", "!1", "unknown"],
+      ["evil.example", "gitlab", "!2", "unknown"],
+    ]);
+    expect(w.store.threadPulls(w.thread)[0]).toMatchObject({ state: "open", base: "main", head: "retries" });
+    expect(calls.filter((call) => call.includes("--hostname")).map((call) => call[call.indexOf("--hostname") + 1])).toEqual(["git.acme.com"]);
+    expect(calls.some((call) => call.some((arg) => arg.includes("evil.example")))).toBe(false);
   });
 
   test("the sandbox's stand-in states are read instead of the forge, by ref, key or URL", async () => {
@@ -170,6 +251,64 @@ describe("the state reader", () => {
       ["o/r#1", "open", "failing"],
       ["acme/api!3", "merged", null],
     ]);
+  });
+});
+
+describe("a forge that never answers", () => {
+  /** A gh that never exits (a stuck CLI the runner has not ended yet): every call stays pending. */
+  const stuckGh = () => {
+    const calls: string[][] = [];
+    return { calls, run: (cli: string, args: string[]) => (calls.push([cli, ...args]), new Promise(() => {})) };
+  };
+  const within = async <T>(work: Promise<T>, ms: number): Promise<T | "late"> =>
+    Promise.race([work, new Promise<"late">((resolve) => setTimeout(() => resolve("late"), ms))]);
+
+  test("the window's read answers at once with what is known, for this thread and every later one", async () => {
+    const gh = stuckGh();
+    const w = world({ gh });
+    w.agentAdd(w.thread, "o/r#1");
+    const others = [1, 2, 3, 4, 5].map((i) => {
+      const id = w.store.sendMessage({ project_id: w.project.id, author: { ...AGENT, session: `ses_${i}` }, body: `Thread ${i}.`, subject: `T${i}` }).message.id;
+      w.agentAdd(id, `o/r${i}#${i}`);
+      return id;
+    });
+    // Hovered again and again, then every other thread opened: each read answers, none waits on the stuck gh.
+    for (const id of [w.thread, w.thread, w.thread, ...others]) {
+      const res = await within(w.get(id)!, 200);
+      expect(res).not.toBe("late");
+      const answer = (await (res as Response).json()) as InboxThreadPullsAnswer;
+      expect(answer.pulls).toHaveLength(1);
+      expect(answer.pulls[0]!.state).toBe("unknown");
+    }
+    // The reads behind them did start (two at once at most, the others queued), so a forge that comes back is read.
+    expect(gh.calls.length).toBeGreaterThan(0);
+  });
+
+  test("the person's Add waits for the new PR's read only briefly", async () => {
+    const w = world({ gh: stuckGh() });
+    const started = Date.now();
+    const res = await within(w.post(w.thread, { add: ["o/r#7"] })!, THREAD_PULLS_ADD_WAIT_MS + 1_000);
+    expect(res).not.toBe("late");
+    expect(Date.now() - started).toBeGreaterThanOrEqual(THREAD_PULLS_ADD_WAIT_MS - 50);
+    const answer = (await (res as Response).json()) as InboxThreadPullsAnswer;
+    expect(answer.pulls.map((p) => [p.ref, p.state])).toEqual([["o/r#7", "unknown"]]);
+  });
+
+  test("checks and the review read behind the answer reach the windows (they write no record)", async () => {
+    const heard: string[][] = [];
+    const gh = fakeGh({ 2: { state: "OPEN", checks: "FAILURE" } });
+    const w = world({ gh, onLiveChange: (ids) => heard.push([...ids]) });
+    w.agentAdd(w.thread, "o/r#2");
+    await w.get(w.thread);
+    await settle();
+    expect(heard).toEqual([[w.thread]]);
+    const answer = (await (await w.get(w.thread))!.json()) as InboxThreadPullsAnswer;
+    expect(answer.pulls.map((p) => [p.state, p.checks])).toEqual([["open", "failing"]]);
+    // The same answer again (a later read): nothing new to say.
+    w.advance(31_000);
+    await w.get(w.thread);
+    await settle();
+    expect(heard).toHaveLength(1);
   });
 });
 

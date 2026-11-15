@@ -39,9 +39,10 @@ import {
 } from "@plannotator/shared/inbox/connection";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore, InboxThreadPullsChange } from "@plannotator/shared/inbox/store";
-import { shortTime } from "./inbox-mcp-read";
+import { sessionWho, shortTime, type SessionNameOf } from "./inbox-mcp-read";
 import { guarded, okComplete } from "./inbox-mcp-result";
 import { noteSessionRead } from "./inbox-session-reads";
+import { parseProjectPullRefs, type ProjectHostOf } from "./inbox-thread-pulls";
 
 /** What a change by an agent outside the thread answers: nothing is written. */
 export const INBOX_NOT_IN_THREAD_TEXT = "Only the person or an agent in this thread can change its PRs. Send in the thread first, or ask the person.";
@@ -60,6 +61,9 @@ export interface InboxPullsMcpContext {
   /** The state reader (packages/server/inbox-thread-pulls.ts). Absent: states as stored, no read. */
   pulls?: InboxPullsMcpLive;
   now?: () => number;
+  sessionName?: SessionNameOf;
+  /** For a short `group/project!45` (`parseProjectPullRefs`). Absent: gitlab.com. */
+  projectHost?: ProjectHostOf;
 }
 
 /** The agent a call's filled fields name. */
@@ -71,7 +75,15 @@ export function pullsActor(input: { agent_session?: string; agent_host?: string;
 
 /** A list of refs read, or a validation_error naming the field (nothing is changed). */
 export function checkPullRefs(values: unknown, field: string): InboxThreadPullRef[] {
-  const parsed = parseInboxThreadPullRefs(values, field);
+  return checkedRefs(parseInboxThreadPullRefs(values, field), field);
+}
+
+/** `checkPullRefs` in a thread's project, where a short `group/project!45` is on the project's own GitLab host. */
+export async function checkProjectPullRefs(context: Pick<InboxPullsMcpContext, "projectHost">, values: unknown, field: string, projectId: string): Promise<InboxThreadPullRef[]> {
+  return checkedRefs(await parseProjectPullRefs(values, field, projectId, context.projectHost), field);
+}
+
+function checkedRefs(parsed: ReturnType<typeof parseInboxThreadPullRefs>, field: string): InboxThreadPullRef[] {
   if ("error" in parsed) throw new InboxError("validation_error", parsed.error, { field: parsed.field });
   if (parsed.refs.length > INBOX_THREAD_PULLS_MAX) {
     throw new InboxError("validation_error", `${field}: at most ${INBOX_THREAD_PULLS_MAX} PRs (this list has ${parsed.refs.length}); nothing was changed.`, { field });
@@ -79,10 +91,10 @@ export function checkPullRefs(values: unknown, field: string): InboxThreadPullRe
   return parsed.refs;
 }
 
-function who(actor: InboxThreadPullActor, reader: string | null, at: string, withTime: boolean): string {
+function who(actor: InboxThreadPullActor, reader: string | null, at: string, withTime: boolean, names?: SessionNameOf): string {
   if (actor.kind === "person") return `the person ${shortTime(at)}`;
   if (actor.session === reader) return "you";
-  return `${inboxAgentName({ kind: "agent", host: actor.host, name: actor.name })} (${actor.session})${withTime ? ` ${shortTime(at)}` : ""}`;
+  return `${sessionWho(inboxAgentName({ kind: "agent", host: actor.host, name: actor.name }), actor.session, names?.(actor.session))}${withTime ? ` ${shortTime(at)}` : ""}`;
 }
 
 function stateWords(pull: InboxThreadPull, live: InboxPullsMcpContext["pulls"]): string {
@@ -104,8 +116,8 @@ export function threadPullsText(context: InboxPullsMcpContext, threadId: string,
   const removed = store.threadPullsRemoved(threadId, new Date(now - INBOX_THREAD_PULLS_REMOVED_MS).toISOString());
   if (live.length === 0 && removed.length === 0) return [];
   const out = [live.length > 0 ? `PRs (${live.length}):` : "PRs: none on this thread now."];
-  for (const pull of live) out.push(`- ${inboxThreadPullText(pull)} ${stateWords(pull, context.pulls)} · added by ${who(pull.added_by, reader, pull.added_at, false)}`);
-  for (const pull of removed) out.push(`Removed by ${who(pull.removed_by!, reader, pull.removed_at!, false)}: ${inboxThreadPullText(pull)}`);
+  for (const pull of live) out.push(`- ${inboxThreadPullText(pull)} ${stateWords(pull, context.pulls)} · added by ${who(pull.added_by, reader, pull.added_at, false, context.sessionName)}`);
+  for (const pull of removed) out.push(`Removed by ${who(pull.removed_by!, reader, pull.removed_at!, false, context.sessionName)}: ${inboxThreadPullText(pull)}`);
   return out;
 }
 
@@ -180,12 +192,13 @@ export function registerInboxThreadPullsTool(server: McpServer, context: InboxPu
     },
     async (input) =>
       guarded(async () => {
-        const root = store.message(input.thread_id?.trim() ?? "")?.thread_id;
-        if (!root) throw new InboxError("thread_not_found", `No thread or message ${input.thread_id}.`, { field: "thread_id" });
+        const named = store.message(input.thread_id?.trim() ?? "");
+        const root = named?.thread_id;
+        if (!named || !root) throw new InboxError("thread_not_found", `No thread or message ${input.thread_id}.`, { field: "thread_id" });
         // Every ref is read before anything is written: one bad ref changes nothing.
-        const add = input.add ? checkPullRefs(input.add, "add") : [];
+        const add = input.add ? await checkProjectPullRefs(context, input.add, "add", named.project_id) : [];
         const all = input.remove?.length === 1 && input.remove[0]!.trim().toLowerCase() === "all";
-        const remove = all ? "all" : input.remove ? checkPullRefs(input.remove, "remove") : [];
+        const remove = all ? "all" : input.remove ? await checkProjectPullRefs(context, input.remove, "remove", named.project_id) : [];
         const reader = input.agent_session?.trim() || null;
         let changed = "";
         let change: InboxThreadPullsChange | null = null;

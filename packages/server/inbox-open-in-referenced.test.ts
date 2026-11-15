@@ -94,7 +94,6 @@ function world(pulls: { threadPulls?: () => string[]; pullFile?: (pull: string, 
     repoRoots: () => [],
     threadPulls: pulls.threadPulls ?? (() => []),
     pullFile: pulls.pullFile ?? (async () => null),
-    ownerOrLocal: (_req, via) => via === "local",
     home: givenHome,
   });
   if (pulls.linkedHome) renameSync(join(root, "plannotator-later"), join(home, ".plannotator"));
@@ -187,9 +186,9 @@ describe("a file a message names: the view", () => {
     for (const path of ["//fileserver/share/plan.md", "//10.255.255.1/c$/x.md"]) expect((await w.view(path)).body).toMatchObject({ found: false, reason: "refused" });
   });
 
-  test("through the tailnet only the owner reads it", async () => {
+  test("through the tailnet it reads as here: only the owner's account reaches the Inbox there", async () => {
     const w = world();
-    expect((await w.view("docs/plan.md", "tailnet")).status).toBe(403);
+    expect((await w.view("docs/plan.md", "tailnet")).body).toMatchObject({ found: true, name: "plan.md" });
   });
 });
 

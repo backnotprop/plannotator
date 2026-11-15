@@ -18,6 +18,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { describeFsError, placeKey, readAgentFile, withBom, writeAgentFileAtomic } from "./agent-files";
 import { CLAUDE_JSON_MAX_BYTES } from "./inbox-agents";
 import type { LaunchTrustReading } from "./inbox-launch-host";
+import { claudeWindowsTrustKey } from "./inbox-launch-windows";
 import { setJsonMember } from "./json-edit";
 
 /** A file's words, or a throw: `readAgentFile` opens regular files only, and a FIFO would block the Inbox here. */
@@ -130,7 +131,8 @@ export async function acceptClaudeTrust(config: string, key: string, waitMs: num
       if (read.kind === "refused") throw new Error(read.reason);
       const file = read.kind === "file" ? read : null;
       if (file && !file.text.trim()) throw new Error("it is empty");
-      const edit = setJsonMember(file?.text ?? "", ["projects", key], "hasTrustDialogAccepted", true);
+      // Windows: Claude keys trust with forward slashes (`C:/Users/me/repo`).
+      const edit = setJsonMember(file?.text ?? "", ["projects", process.platform === "win32" ? claudeWindowsTrustKey(key) : key], "hasTrustDialogAccepted", true);
       if (!edit.ok) throw new Error(edit.reason);
       if (edit.changed) writeAgentFileAtomic(read.target, withBom(edit.text, file?.bom === true), file?.mode ?? 0o600, true, true);
     });

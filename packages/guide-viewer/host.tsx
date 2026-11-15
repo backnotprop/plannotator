@@ -130,6 +130,12 @@ export interface GuideHostValue<P extends object = Record<string, unknown>> {
    */
   diagramFoldStore?: { getItem: (key: string) => string | null; setItem: (key: string, value: string) => void };
   /**
+   * Draw every chapter diagram folded, its "Diagram" header closed, whatever the fold store says (the Inbox's
+   * Chapter diagrams switch off). One click opens it for this view; the store is not written, so the person's own
+   * folds are as they were when the switch is on again. Absent: the store decides.
+   */
+  chapterDiagramsFolded?: boolean;
+  /**
    * A picture slot under the title when the guide's overview has no diagram
    * (the Inbox's code review: "Show me" asks the agent for one). Answering
    * null (or absent) leaves the guide exactly as it is.

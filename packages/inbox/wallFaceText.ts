@@ -35,6 +35,8 @@ export function wallTypeLabel(row: Pick<InboxArtifactRow, 'attachment'>, pages: 
       return upper ? `${upper} image` : 'Image';
     case 'video':
       return upper ? `${upper} video` : 'Video';
+    case 'audio':
+      return upper ? `${upper} audio` : 'Audio';
     case 'html':
       return 'HTML page';
     case 'markdown':

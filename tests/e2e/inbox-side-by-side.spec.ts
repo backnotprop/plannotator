@@ -24,7 +24,7 @@
  * light and dark: desktop-01 to desktop-06 at 1440 px, phone-01 and phone-02.
  */
 
-import { devices, expect, test, webkit, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { devices, expect, test, webkit, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -81,7 +81,7 @@ const addressView = (p = world.page) => p.evaluate(() => new URLSearchParams(loc
 const openTile = (name: string, p = world.page) => p.getByRole('button', { name: `Open ${name}` }).first().click();
 
 /**
- * Escape until full screen ends (an HTML page goes to Interact first): opened from the thread alone, the file
+ * Escape until full screen ends (an HTML page in Annotate goes to Interact first): opened from the thread alone, the file
  * closes and the thread is as it was (fullScreenOrigin.ts). Escape's way out saves nothing.
  */
 async function escapeOut(p = world.page) {

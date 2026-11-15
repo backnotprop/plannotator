@@ -439,11 +439,11 @@ describe("ids", () => {
     expect(parseInboxSupersedeRef("msg_01M5F3B7KD2WQ9XN4C8VJTR6YE/a-4f2c19e0")).toEqual({ message_id: "msg_01M5F3B7KD2WQ9XN4C8VJTR6YE", key: "a-4f2c19e0" });
   });
 
-  test("the person's result: Can't do it needs a reason, a note is capped, null is the Undo", () => {
+  test("the person's result: Can't do it needs a reason, a note is kept whole, null is the Undo", () => {
     expect(checkInboxActionResult({ outcome: "done" })).toEqual({ ok: true, outcome: "done", note: null });
     expect(checkInboxActionResult({ outcome: "cant", note: "  " })).toMatchObject({ ok: false, field: "note" });
     expect(checkInboxActionResult({ outcome: "maybe" })).toMatchObject({ ok: false, field: "outcome" });
     expect(checkInboxActionResult({ outcome: null })).toEqual({ ok: true, outcome: null, note: null });
-    expect(checkInboxActionResult({ outcome: "done", note: "x".repeat(2001) })).toMatchObject({ ok: false });
+    expect(checkInboxActionResult({ outcome: "done", note: "x".repeat(2001) })).toEqual({ ok: true, outcome: "done", note: "x".repeat(2001) });
   });
 });

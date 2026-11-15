@@ -19,6 +19,11 @@ export interface DraftAnswer {
   answer: string;
   /** The asking message as a group heading shows it ("Claude Code's message, 2:58 PM"): used when answers span several messages. */
   messageName: string;
+  /**
+   * The attached file the question was asked in (issue #2828), absent for the message's body: its answers are a
+   * group of their own ("plan.md in Claude Code's message, 2:58 PM", `messageName`), as the file numbers its own cards.
+   */
+  fileId?: string;
 }
 
 /** The answer's words as the reply box lists them: the card's "Your pick" words, then a note. */
@@ -42,14 +47,17 @@ export function ReplyAnswers({ answers, onJump }: { answers: readonly DraftAnswe
   const headingId = useId();
   // Answers to several messages go as one reply each, and each message numbers its own
   // questions (Q1 twice): the rows are grouped under the message they answer.
-  const groups: { messageId: string; name: string; rows: DraftAnswer[] }[] = [];
+  // A file's questions (issue #2828) are a group of their own in their message's reply.
+  const groups: { id: string; messageId: string; name: string; rows: DraftAnswer[] }[] = [];
   for (const a of answers) {
     const last = groups.at(-1);
-    if (last && last.messageId === a.messageId) last.rows.push(a);
-    else groups.push({ messageId: a.messageId, name: a.messageName, rows: [a] });
+    const id = `${a.messageId}/${a.fileId ?? ''}`;
+    if (last && last.id === id) last.rows.push(a);
+    else groups.push({ id, messageId: a.messageId, name: a.messageName, rows: [a] });
   }
   const several = groups.length > 1;
-  const where = several ? 'your replies' : 'this reply';
+  // One reply per asking message: a message's file is in the same reply.
+  const where = new Set(groups.map((g) => g.messageId)).size > 1 ? 'your replies' : 'this reply';
   const heading = answers.length === 1 ? `Your answer goes with ${where}` : `Your ${plural(answers.length, 'answer')} go with ${where}`;
   const row = (a: DraftAnswer) => (
     <li key={a.id}>
@@ -79,7 +87,7 @@ export function ReplyAnswers({ answers, onJump }: { answers: readonly DraftAnswe
       <ul className="ib-ranswers-l">
         {several
           ? groups.map((g) => (
-              <Fragment key={g.messageId}>
+              <Fragment key={g.id}>
                 <li className="ib-ranswers-g" data-reply-answers-group={g.messageId} aria-hidden="true">
                   {g.name}
                 </li>
@@ -148,7 +156,7 @@ export function SentAnswers({ groups, onJump }: { groups: readonly SentAnswerGro
       <ul className="ib-ranswers-l">
         {several
           ? groups.map((g) => (
-              <Fragment key={g.messageId}>
+              <Fragment key={`${g.messageId}/${g.file?.id ?? ''}`}>
                 <li className="ib-ranswers-g" data-sent-answers-group={g.messageId} aria-hidden="true">
                   {g.name}
                 </li>

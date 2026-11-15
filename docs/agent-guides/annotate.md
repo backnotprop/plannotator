@@ -10,9 +10,12 @@ Input type detected:
   .md/.mdx/.txt → file read from disk
   plain-text config/data formats (.yaml .yml .json .jsonc .json5 .toml .ini .cfg .conf .properties .csv .tsv .log .xml .env.example)
              → read from disk, shown as ONE code block in the file's language (see
-               "Config and data files" below) — not as markdown (.env itself is
-               deliberately excluded — it commonly holds secrets and annotate history
-               copies file contents; source-code extensions stay with code review)
+               "Config and data files" below) — not as markdown. A .env file
+               (.env, .env.local, …; isSecretEnvPath) opens the same way, but only by
+               its explicit path, never by name search, the folder browser or a link,
+               and its session writes nothing to the data dir (no history copy, no
+               submit record, no feedback archive); source-code extensions stay with
+               code review
              All single-file annotate reads and /api/doc document serves are capped at
              2MB (`MAX_ANNOTATABLE_FILE_BYTES` in `packages/core/annotatable.ts`) —
              larger files get a clear "File too large to annotate (max 2MB)" error.

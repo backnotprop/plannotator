@@ -23,6 +23,7 @@ import {
   type DiagramEngineSource,
 } from "@plannotator/shared/diagram-engine-assets";
 import { isRemoteSession, getServerHostname, startBunServerOnAvailablePort, buildAdvertisedUrl, getLocalUrlHostname } from "./remote";
+import { isSshTunnelRequest, notePeer } from "./this-machine";
 import { createRequestHostGuard } from "./request-host-guard";
 import { withPlannotatorServerHeader } from "./plannotator-server-marker";
 import { refuseCrossOriginWrite } from "./request-origin-guard";
@@ -194,7 +195,7 @@ import {
 import { agentToolHostForServer, createAIRuntime } from "./ai-runtime";
 import { assertTestHome } from "./test-home-guard";
 import { handleHostControl, resolveHostControlToken, type HostControl } from "./host-control";
-import { sessionTailnetAudience, sessionTailnetGate } from "./session-tailnet";
+import { refuseTailnetPeer, sessionTailnetAudience, sessionTailnetGate } from "./session-tailnet";
 import { countUnsentDraftComments, hostSessionClosedEvent } from "@plannotator/shared/host-control";
 import { checkServerSession, createServerSessionNonce, serverSessionMismatchBody } from "@plannotator/shared/server-session";
 import { isAIEndpointPath, isLongLivedAIEndpointPath, type AIEndpoints, type SessionBridge } from "@plannotator/ai";
@@ -2338,9 +2339,16 @@ export async function startReviewServer(
         idleTimeout: 0,
 
         async fetch(req, server) {
+          // Who sent it (an SSH session answers its own tunnel as local: this-machine.ts).
+          notePeer(req, server);
           // Host allowlist first, before any route (request-host-guard.ts).
           const hostRefusal = requestHostGuard.check(req);
           if (hostRefusal) return hostRefusal;
+          // Published over the tailnet: only this computer's owner gets past here (single player; session-tailnet.ts).
+          if (options.tailnetPublished === true) {
+            const notOwner = refuseTailnetPeer(req);
+            if (notOwner) return notOwner;
+          }
           // Then no write from another site, before any route (request-origin-guard.ts).
           const originRefusal = refuseCrossOriginWrite(req);
           if (originRefusal) return originRefusal;
@@ -4112,7 +4120,8 @@ export async function startReviewServer(
 
           // API: a hover card's data for an issue, PR or MR link (GET /api/ref, ref-cards.ts).
           const refRoute = await refCardRouteResponse(req, url, refCards, {
-            enabled: isRemote ? false : options.tailnetPublished === true ? refCardsTailnetAllowed : true,
+            // Remote mode: only an SSH session's own tunnel (isSshTunnelRequest) may drive gh / glab here.
+            enabled: isRemote ? isSshTunnelRequest : options.tailnetPublished === true ? refCardsTailnetAllowed : true,
             serverSession,
           });
           if (refRoute) return refRoute;
@@ -4615,7 +4624,7 @@ export async function startReviewServer(
           }
 
           // Favicon
-          if (url.pathname === "/favicon.png") return handleFavicon();
+          if (url.pathname === "/favicon.png" || url.pathname === "/favicon.ico") return handleFavicon(url.pathname);
 
           // Code review's diagram engine, fetched by the page only for a
           // preview or guide overview that holds a diagram fence.

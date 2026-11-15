@@ -292,6 +292,24 @@ test.skipIf(!hasDom)("Claude Code not ready on that machine: its group is one li
   expect(all(`[data-compose-folder-option][data-compose-folder-machine="${MINI}"]`)).toHaveLength(0);
 });
 
+test.skipIf(!hasDom)("Claude Code signed out on that machine: what to do there is under the line, its commands as code, and read as the row's description", async () => {
+  machines = [SELF_VIEW, view(MINI, 'Mac mini')];
+  miniBlock = { agents: [], projects: MINI_BLOCK.projects, not_ready: [{ agent: AGENT, name: 'Claude Code', code: 'signed_out', over_ssh: true }] };
+  await open();
+  await until(machinesRead, "Mac mini's sessions read");
+  await startAndOpenMenu();
+  await until(() => inDialog(`[data-compose-folder-notice="${MINI}"]`) !== null, 'the notice');
+  const notice = inDialog(`[data-compose-folder-notice="${MINI}"]`)!;
+  const fix = notice.querySelector('[data-compose-folder-fix]');
+  expect(fix?.textContent).toBe('Plannotator on Mac mini was started over SSH, and macOS keeps the login locked for SSH. In Terminal on Mac mini itself, run plannotator inbox restart, then try again.');
+  expect([...fix!.querySelectorAll('code')].map((c) => c.textContent)).toEqual(['plannotator inbox restart']);
+  // Named by its line, described by the fix: a screen reader says both, once each.
+  expect(document.getElementById(notice.getAttribute('aria-labelledby')!)?.textContent).toBe("Claude Code isn't signed in on Mac mini");
+  expect(notice.getAttribute('aria-describedby')).toBe(fix!.id);
+  expect(notice.getAttribute('aria-disabled')).toBe('true');
+  expect(all(`[data-compose-folder-option][data-compose-folder-machine="${MINI}"]`)).toHaveLength(0);
+});
+
 test.skipIf(!hasDom)('launch off on that machine: one line says so, and none of its projects', async () => {
   machines = [SELF_VIEW, view(MINI, 'Mac mini', { launch: false })];
   miniBlock = undefined;
@@ -310,6 +328,30 @@ test.skipIf(!hasDom)("its switch turned on there since the link connected: its s
   await startAndOpenMenu();
   await until(() => all(`[data-compose-folder-option][data-compose-folder-machine="${MINI}"]`).length > 0, "Mac mini's projects");
   expect(inDialog(`[data-compose-folder-notice="${MINI}"]`)).toBeNull();
+});
+
+test.skipIf(!hasDom)("an agent only Mac mini has: this computer says it is not there, Mac mini's row names its project, and Send starts it there", async () => {
+  miniBlock = { ...MINI_BLOCK, agents: [...MINI_BLOCK.agents, { agent: 'pi', name: 'Pi' }] };
+  machines = [SELF_VIEW, view(MINI, 'Mac mini')];
+  await open();
+  await until(machinesRead, "Mac mini's sessions read");
+  act(() => inDialog('button[data-compose-to]')!.click());
+  await until(() => inDialog('[data-compose-start-missing="pi"]') !== null, "this computer's Pi row");
+  expect(inDialog('[data-compose-start-missing="pi"]')!.textContent).toContain('Not on MacBook');
+  expect(inDialog('[data-compose-start="pi"]')).toBeNull();
+  act(() => inDialog(`[data-compose-switch="${MINI}"]`)!.click());
+  await until(() => inDialog('[data-compose-start="pi"]') !== null, 'the Pi start row');
+  act(() => inDialog('[data-compose-start="pi"]')!.click());
+  await until(() => inDialog('[data-compose-folder]') !== null, 'the project in To');
+  expect(inDialog('[data-compose-folder]')!.getAttribute('data-compose-folder')).toBe('prj_infra');
+  expect(inDialog('[data-compose-folder]')!.getAttribute('data-compose-folder-machine')).toBe(MINI);
+  expect(inDialog('[data-compose-to]')!.textContent).toContain('Pi');
+  write('Rotate the staging password.');
+  act(() => inDialog('[data-compose-send]')!.click());
+  await until(() => sent.length === 1, 'the send');
+  const posts = requests.filter((r) => r.method === 'POST');
+  expect(posts.map((r) => r.path)).toEqual([`/api/inbox/m/${MINI}/messages`]);
+  expect(posts[0]!.body!.to).toEqual({ launch: { agent: 'pi', project_id: 'prj_infra' } });
 });
 
 test.skipIf(!hasDom)('the default start is never an asleep machine\'s project while this computer has one, though the menu still leads with the machine used last', async () => {

@@ -25,7 +25,7 @@ import { Pause, Play } from 'lucide-react';
 const TUI_REPO = 'https://github.com/plannotator/plannotator-tui';
 const HERDR_REPO = 'https://github.com/plannotator/herdr-annotate';
 
-/** Where the marketing deploy publishes `apps/marketing/public/assets/`. */
+/** The marketing site's hosted media (videos are uploaded there by hand, not kept in the repo). */
 const MEDIA_BASE_URL = 'https://plannotator.ai/assets';
 
 export interface TerminalToolsDemo {

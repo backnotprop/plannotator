@@ -4,15 +4,16 @@
  * `broReveal.test.tsx` drives the gate alone.
  *
  * What regresses: App not drawing the card, or not arming it when the line says `bro`, at its moment (back on the list
- * from a long agent message); a click outside writing the switch, or not telling the Inbox (the line's Not now gap); a
- * tailnet guest changing what every agent here reads.
+ * from a long agent message); a tab loaded while the line was held (the gap after another dialog) never arming it
+ * however long it stays loaded, so only a reload ever shows it; a click outside writing the switch, or not telling the Inbox (the line's Not now gap); another
+ * Tailscale account changing what every agent here reads.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { request } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -181,6 +182,38 @@ test.skipIf(!hasDom)('the card opens in the window when the queue says bro, at t
   await until(() => card() === null, 'the card to close');
 }, 30_000);
 
+test.skipIf(!hasDom)('a tab loaded inside the gap after another dialog and left loaded shows the card once the gap is over, with no reload and no polling', async () => {
+  // The line's last dialog showed 40 minutes ago less two seconds (config.json, read live): this load may arm nothing
+  // yet, and the Inbox names the moment the gap ends (`reveal.again_in`).
+  const stamp = new Date(Date.now() - 40 * 60_000 + 2_000).toISOString();
+  writeFileSync(join(server!.dataDir, 'config.json'), JSON.stringify({ ...config(), inboxReveals: { ...config().inboxReveals, lastShownAt: stamp, dayShownAt: stamp } }));
+  reveal.REVEAL_TIMES.lineReadSlackMs = 100;
+  let settingsReads = 0;
+  const counted = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if ((init?.method ?? 'GET') === 'GET' && String(input).split('?')[0] === '/api/inbox/settings') settingsReads += 1;
+    return counted(input, init);
+  }) as typeof fetch;
+  await readAndLeave();
+  expect(openDialogs()).toEqual([]);
+  expect(config().inboxReveals.bro).toBeUndefined();
+  const readsAtLoad = settingsReads;
+  // The gap ends on the same tab: one read of the line at that moment, and Bro mode is armed.
+  await wait(2_600);
+  expect(settingsReads - readsAtLoad).toBe(1);
+  act(() => {
+    window.location.hash = `#thread=${server!.thread}`;
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+  });
+  await wait(TIMES.broReadMs + 150);
+  act(() => {
+    window.location.hash = '';
+    window.dispatchEvent(new HashChangeEvent('hashchange'));
+  });
+  await until(() => card() !== null, 'the card on the tab left loaded');
+  expect(typeof config().inboxReveals.bro.shownAt).toBe('string');
+}, 30_000);
+
 test.skipIf(!hasDom)("a click outside is Not now: no switch, the line's gap stamped, and it does not come back", async () => {
   await readAndLeave();
   await until(() => card() !== null, 'the card');
@@ -195,7 +228,7 @@ test.skipIf(!hasDom)("a click outside is Not now: no switch, the line's gap stam
   expect(settings.reveal.next).not.toBe('bro');
 }, 30_000);
 
-test.skipIf(!hasDom)("a tailnet guest's bro save is refused and writes nothing; the owner's over the tailnet saves", async () => {
+test.skipIf(!hasDom)("another Tailscale account's bro save is refused and writes nothing; the owner's over the tailnet saves", async () => {
   const { listener, host: tailnetHost, login } = server!.tailnet;
   const over = (who: string) =>
     call(listener, '/api/inbox/settings', 'POST', JSON.stringify({ bro: { on: true } }), {
@@ -205,9 +238,9 @@ test.skipIf(!hasDom)("a tailnet guest's bro save is refused and writes nothing; 
       'X-Forwarded-Proto': 'https',
       'Tailscale-User-Login': who,
     });
-  const guest = await over('guest@example.com');
-  expect(guest.status).toBe(403);
-  expect((JSON.parse(guest.text) as { code?: string }).code).toBe('local_only');
+  const other = await over('someone@example.com');
+  expect(other.status).toBe(403);
+  expect((JSON.parse(other.text) as { code?: string }).code).toBe('tailnet_identity_refused');
   expect(config().inboxBro).toBeUndefined();
   expect((await over(login)).status).toBe(200);
   expect(config().inboxBro).toBe(true);

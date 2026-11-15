@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join, resolve as resolvePath } from "node:path";
 import { saveDraft, loadDraft, deleteDraft, getDraftGeneration } from "../generated/draft.ts";
 import { type createReviewDraftSession, type ReviewDraftKeys } from "../generated/review-draft.ts";
-import { faviconBody } from "../generated/favicon.ts";
+import { faviconBody, faviconIcoBody } from "../generated/favicon.ts";
 import { getServerConfig } from "../generated/config.ts";
 import { listReferenceSkills, readReferenceSkillContent } from "../generated/review-skill-loader.ts";
 
@@ -275,10 +275,12 @@ export { readDraftGenerationFromUrl };
  * Serve the app favicon. Mirrors packages/server/shared-handlers.ts
  * handleFavicon() exactly: the persisted style decides the payload, the response
  * declares its real type, and it is not cached because one URL has three
- * possible bodies. See that file for the full reasoning.
+ * possible bodies, for `/favicon.ico` and `/favicon.png`. See that file for
+ * the full reasoning.
  */
-export function handleFavicon(res: Res): void {
-	const { body, contentType } = faviconBody(getServerConfig(null).favicon);
+export function handleFavicon(res: Res, pathname = "/favicon.png"): void {
+	const style = getServerConfig(null).favicon;
+	const { body, contentType } = pathname === "/favicon.ico" ? faviconIcoBody(style) : faviconBody(style);
 	send(res, Buffer.from(body), 200, {
 		"Content-Type": contentType,
 		"Cache-Control": "no-cache",

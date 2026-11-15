@@ -1,0 +1,31 @@
+Icon sets in this folder
+
+These are the built-in sets the Inbox offers for agents' icons ("Sets" in the face picker). Each folder holds one
+set: manifest.json (names, numbers, search words) and icons.bin (the icons' bytes, one after the other; built by
+scripts/build-icon-sets.ts). The server embeds both in the binary and serves one icon at a time when a window asks.
+They are not covered by this repository's MIT or Apache license; each set's own terms follow.
+
+game-icons/ (game-icons.net creatures, 334 icons)
+  Icons made by Delapouite, Lorc, Caro Asercion, Skoll, Cathelineau, Carl Olsen, DarkZaitzev, Faithtoken, Sparker.
+  Available on https://game-icons.net. Licensed under CC BY 3.0 (https://creativecommons.org/licenses/by/3.0/).
+  The "Various artists" icon (Salmon) is CC0. Changes: the black background square removed and the fill set to
+  the theme's text colour. Per-author list: game-icons/CREDITS.md (the Inbox serves it from the picker's credits
+  line). Upstream terms: game-icons/UPSTREAM-LICENSE.txt.
+
+tiny-creatures/ (Tiny Creatures, 170 icons)
+  Tiny Creatures by Clint Bellanger (clintbellanger.net), CC0 1.0
+  (https://creativecommons.org/publicdomain/zero/1.0/). No credit required; given as a courtesy.
+  Upstream terms: tiny-creatures/UPSTREAM-LICENSE.txt.
+
+dcss/ (Dungeon Crawl, 419 icons)
+  Dungeon Crawl Stone Soup tiles, https://github.com/crawl/tiles (releases/Nov-2015/mon), CC0
+  (https://creativecommons.org/publicdomain/zero/1.0/). No credit required; given as a courtesy.
+
+noto-3d/ (Noto Emoji 3D, 149 icons)
+  From https://github.com/googlefonts/noto-emoji, folder 3D/png/128 (Google). The folder carries no licence file of
+  its own; the repository's fonts are under the SIL Open Font License 1.1 and its README puts "most image
+  resources" under Apache 2.0. Which licence covers the 3D PNGs is asked upstream in googlefonts/noto-emoji#592.
+  Details, and how to remove or swap this set: noto-3d/LICENSE.md.
+
+Names: the sets' display names and search words were written for Plannotator (Tiny Creatures ships none; the
+others' come from their file names). Each folder's LICENSE.md says how its licence was established.

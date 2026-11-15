@@ -6,11 +6,16 @@
  *   plain `http:`, local servers included);
  * - the window's own policy lets a picture in from the web again (a message's
  *   text, a diagram in it, would make the browser call the agent's site);
+ * - a page's own video or audio (`<video src="data:video/mp4;base64,…">`, a
+ *   blob:) is blocked again: neither the window's policy (a srcdoc page
+ *   inherits it) nor the page document's names a media source, so media falls
+ *   back to `default-src 'self'`;
  * - a page the Inbox no longer keeps (a restart) leaves the frame blank
  *   instead of telling the window to post it again;
  * - the store grows without bound.
  */
 import { describe, expect, test } from "bun:test";
+import { gzipSync } from "node:zlib";
 import { WINDOW_CSP } from "./inbox";
 import { createInboxPages, INBOX_PAGE_CSP, INBOX_PAGE_GONE_MESSAGE, INBOX_PAGE_MAX_BYTES } from "./inbox-pages";
 
@@ -30,8 +35,12 @@ function pagesWith(options: { maxEntries?: number; maxBytes?: number } = {}) {
 }
 
 describe("the window's policy", () => {
-  test("loads pictures from this server, data: and blob: only, never the web", () => {
-    expect(directives(WINDOW_CSP).get("img-src")).toEqual(["'self'", "data:", "blob:"]);
+  test("loads pictures from this server, data: and blob:, and the project's hosted folder only, never the rest of the web", () => {
+    expect(directives(WINDOW_CSP).get("img-src")).toEqual(["'self'", "data:", "blob:", "https://plannotator.ai/assets/hosted/"]);
+  });
+
+  test("plays a srcdoc page's own video and audio (data: and blob:), never the web's", () => {
+    expect(directives(WINDOW_CSP).get("media-src")).toEqual(["'self'", "data:", "blob:"]);
   });
 });
 
@@ -55,6 +64,8 @@ describe("an attached page's document", () => {
     // An opaque origin even opened as a tab: never allow-same-origin.
     expect(policy.get("sandbox")).toEqual(["allow-scripts", "allow-modals"]);
     expect(policy.get("img-src")).toEqual(["'self'", "data:", "blob:", "https:", "http:"]);
+    // Its own video and audio play (data: and blob:), as in the window's srcdoc.
+    expect(policy.get("media-src")).toEqual(["'self'", "data:", "blob:"]);
     // Pictures only: nothing else reaches the web.
     for (const [name, values] of policy) {
       if (name === "img-src") continue;
@@ -106,5 +117,32 @@ describe("an attached page's document", () => {
     await byBytes.post("c".repeat(1_000));
     expect(byBytes.pages.bytes()).toBeLessThanOrEqual(2_500);
     expect((await byBytes.get(big.answer.url)).status).toBe(404);
+  });
+});
+
+describe("a page the window sends gzipped (about 300 KB with its bridge, a quarter of that on the wire)", () => {
+  const pages = createInboxPages({ readBody: async (req) => (await req.json()) as Record<string, unknown>, json });
+  const send = async (body: BodyInit, gzip: boolean) => {
+    const req = new Request("http://127.0.0.1/api/inbox/pages", { method: "POST", headers: { "Content-Type": "application/json", ...(gzip ? { "Content-Encoding": "gzip" } : {}) }, body });
+    const res = (await pages.route(req, new URL(req.url)))!;
+    return { status: res.status, answer: (await res.json()) as Record<string, any> };
+  };
+
+  test("is kept as the same page as sent plain", async () => {
+    const html = `<!doctype html><script>${"bridge();".repeat(20_000)}</script>`;
+    const plain = await send(JSON.stringify({ html }), false);
+    const zipped = await send(gzipSync(JSON.stringify({ html })), true);
+    expect(zipped.status).toBe(200);
+    expect(zipped.answer.id).toBe(plain.answer.id);
+    const res = (await pages.route(new Request(`http://127.0.0.1${zipped.answer.url}`), new URL(`http://127.0.0.1${zipped.answer.url}`)))!;
+    expect(await res.text()).toBe(html);
+  });
+
+  test("that grows past the limit is refused as too large; one that is not gzip as a bad page", async () => {
+    const big = await send(gzipSync(JSON.stringify({ html: "a".repeat(INBOX_PAGE_MAX_BYTES * 2 + 10) })), true);
+    expect(big.status).toBe(413);
+    expect(big.answer.code).toBe("page_too_large");
+    const broken = await send("not gzip", true);
+    expect(broken.status).toBe(400);
   });
 });

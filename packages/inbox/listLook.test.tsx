@@ -699,6 +699,16 @@ describe.if(hasDom)('the rows in each mode', () => {
     expect(document.querySelector('.ib-lend')).toBeNull();
   });
 
+  // Pull requests (approval "inbox-rows-settings-page"): shown unless the look says `hidePulls`, on every shape.
+  test("a row's PR mark shows for every look saved before `hidePulls`, and goes from every shape once it is on", () => {
+    const sections: InboxListSection[] = [{ id: 'waiting', label: 'Waiting on you', threads: [row('msg_pr', { pulls: { count: 3, headline: { key: 'github.com/acme/app#7', state: 'open' } } }), row('msg_plain')] }];
+    for (const [rows, marks] of [[['smallNames'], 1], [[], 1], [['compact', 'hideAgents', 'statusMark'], 1], [['smallNames', 'hidePulls'], 0]] as const) {
+      resetListLookForTests();
+      adoptSavedRows([...rows], 1, -1);
+      for (const shape of ['narrow', 'phone', 'wide'] as const) expect([rows, shape, remount(shape, { sections }).querySelectorAll('.ib-prmark').length]).toEqual([rows, shape, marks]);
+    }
+  });
+
   // The time, the questions and the warnings always show: no option hides them, on any shape.
   test('every option on: the time and the question count still on every row and shape', () => {
     adoptSavedRows(['highlight', 'compact', 'hideAgents', 'smallNames', 'hideProject', 'hidePreview', 'unreadDot', 'relativeTime', 'titleFirst']);

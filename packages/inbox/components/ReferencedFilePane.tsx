@@ -18,7 +18,8 @@ import { ImageResolverContext, type ImageResolver } from '@plannotator/ui/compon
 import type { LocalLinkResolver } from '@plannotator/ui/components/LocalLinkContext';
 import { ScrollViewportProvider } from '@plannotator/ui/hooks/useScrollViewport';
 import type { Annotation } from '@plannotator/ui/types';
-import { inboxApi, InboxApiError, referencedFileRawUrl, type ReferencedFileScope, type ReferencedFileView } from '../api';
+import { inboxApi, InboxApiError } from '../api';
+import { referencedFileRawUrl, type ReferencedFileScope, type ReferencedFileView } from '../openInWire';
 import { attachmentBlocks, codeCommentAnnotation, inboxViewKind } from '../attachments';
 import { referencedCommentQueue } from '../referencedComments';
 import { InboxFileSourceProvider, useInboxFileSource, type InboxFileSource } from '../fileSource';
@@ -78,7 +79,6 @@ export function ReferencedFilePane({
   fileRef,
   phone,
   full,
-  commentable = true,
   onOpen,
   onClose,
   onAttached,
@@ -89,8 +89,6 @@ export function ReferencedFilePane({
   phone: boolean;
   /** The window has room for the file only (a phone, a narrow window): it covers the thread. */
   full: boolean;
-  /** False: read only (another machine's thread; a comment never attaches through the forward). */
-  commentable?: boolean;
   /** A link in a referenced document: open that file in this pane. */
   onOpen: (ref: OpenFileRef) => void;
   onClose: () => void;
@@ -172,7 +170,7 @@ export function ReferencedFilePane({
   const name = view?.name ?? fileRef.path.split('/').pop() ?? fileRef.path;
   const found = view?.found ? view : null;
   // A PR's version is shown: a comment attaches this computer's file, so it is taken only where that is the same text.
-  const writes = commentable && source.writes && !(found?.pull && !found.local_matches);
+  const writes = source.writes && !(found?.pull && !found.local_matches);
   // Drawn as an attachment of that kind is (inboxViewKind): a log or data file as code, with its lines and their
   // numbers, so a comment made here anchors the same way once it is attached.
   const kind = found ? inboxViewKind(found.kind, found.name) : null;

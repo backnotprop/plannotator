@@ -16,6 +16,7 @@ import {
   reviewExplorerShortcuts,
   type ShortcutSurface,
 } from '@plannotator/ui/shortcuts';
+import { reviewCallTreeShortcuts } from './components/callTree/callTree.shortcuts';
 
 export const reviewEditorShortcuts = defineShortcutScope({
   id: 'review-editor',
@@ -27,6 +28,13 @@ export const reviewEditorShortcuts = defineShortcutScope({
       section: 'Actions',
       hint: 'Fires the adaptive header primary: Approve with no annotations, Send Feedback otherwise.',
       displayOrder: 10,
+    },
+    openDecisionNote: {
+      description: 'Send with a note',
+      bindings: ['Mod+Shift+Enter'],
+      section: 'Actions',
+      hint: 'Opens the note composer of the send menu; Mod+Enter then sends the review and note together.',
+      displayOrder: 15,
     },
     copyFeedback: {
       description: 'Copy feedback to clipboard',
@@ -132,6 +140,7 @@ export const reviewSettingsShortcutRegistry = createShortcutRegistry([
   historyShortcuts,
   reviewFileTreeShortcuts,
   reviewExplorerShortcuts,
+  reviewCallTreeShortcuts,
   reviewAllFilesDiffShortcuts,
   reviewMarkdownPreviewShortcuts,
   reviewAnnotationToolbarShortcuts,

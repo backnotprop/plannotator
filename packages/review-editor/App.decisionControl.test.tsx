@@ -145,6 +145,8 @@ let advertiseApprovalNotes = false;
 /** Extra fields merged into the /api/diff payload — a PR session is entered by
  *  shipping `prMetadata` (+ `platformUser`) exactly the way the server does. */
 let prDiffExtras: Record<string, unknown> | null = null;
+/** Set: /api/pr-action answers with this error, as the server does when the forge refuses. */
+let prActionRefusal: string | null = null;
 /** What /api/ai/capabilities answers; Ask AI is off unless a test says so. */
 let aiCapabilities: Record<string, unknown> = { available: false, providers: [] };
 
@@ -164,10 +166,25 @@ const PR_METADATA = {
   url: "https://github.com/acme/widgets/pull/7",
 };
 
-function seedPlatformSession(options?: { selfAuthored?: boolean }): void {
+const MR_METADATA = {
+  platform: "gitlab",
+  host: "gitlab.com",
+  projectPath: "acme/widgets",
+  iid: 7,
+  title: "Add widget parser",
+  author: "leoreisdias",
+  baseBranch: "main",
+  headBranch: "feature/parser",
+  baseSha: "aaa1111",
+  headSha: "bbb2222",
+  url: "https://gitlab.com/acme/widgets/-/merge_requests/7",
+};
+
+function seedPlatformSession(options?: { selfAuthored?: boolean; gitlab?: boolean }): void {
+  const metadata = options?.gitlab ? MR_METADATA : PR_METADATA;
   prDiffExtras = {
-    prMetadata: PR_METADATA,
-    platformUser: options?.selfAuthored ? PR_METADATA.author : "reviewer",
+    prMetadata: metadata,
+    platformUser: options?.selfAuthored ? metadata.author : "reviewer",
   };
   // The submission's success path opens the PR in a new tab by default;
   // window.open is not a browser here, so keep the toggle off.
@@ -223,6 +240,7 @@ function makeFetch(): typeof fetch {
     if (url.pathname === "/api/pr-action") {
       const posted = JSON.parse(String(init?.body ?? "{}")) as { action?: string; body?: string };
       submissions.push({ endpoint: "pr-action", action: posted.action, body: posted.body });
+      if (prActionRefusal) return Response.json({ error: prActionRefusal }, { status: 500 });
       return Response.json({ ok: true, submission: { status: "complete" } });
     }
     if (url.pathname === "/api/diff/fresh") return Response.json({ fresh: true });
@@ -356,6 +374,7 @@ afterEach(async () => {
   feedbackNetworkFailures = 0;
   advertiseApprovalNotes = false;
   prDiffExtras = null;
+  prActionRefusal = null;
   aiCapabilities = { available: false, providers: [] };
   seededExternalAnnotations = [];
   memory.clear();
@@ -529,6 +548,34 @@ describe.if(hasDom)("review decision control (agent mode)", () => {
     });
     await settle();
     expect(submissions).toHaveLength(2);
+  });
+
+  // #2913 gave plan review and annotate Mod+Shift+Enter for the note
+  // composer; code review answered the chord by POSTING the review instead,
+  // so a reviewer reaching for a note sent the decision with no note and no
+  // way back. Guards the open (nothing posted) and the send through it.
+  test("Mod+Shift+Enter opens the note composer instead of posting", async () => {
+    seededExternalAnnotations = [EXTERNAL_FINDING];
+    await mountReview();
+    await settle();
+    await settle();
+
+    expect(primaryButton()!.title).toContain("Send");
+    expect(noteInput()).toBeNull();
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", metaKey: true, shiftKey: true, bubbles: true, cancelable: true }));
+    });
+    await settle();
+
+    expect(noteInput()).not.toBeNull();
+    expect(submissions).toHaveLength(0);
+
+    await typeNote("one more pass on the retry path");
+    await pressNoteKey("Enter", { metaKey: true });
+
+    expect(submissions).toHaveLength(1);
+    expect(submissions[0]!.approved).toBe(false);
+    expect(submissions[0]!.feedback).toContain("one more pass on the retry path");
   });
 
   test("Mod+Enter fires the visible primary", async () => {
@@ -1010,6 +1057,36 @@ describe.if(hasDom)("review decision control (platform mode)", () => {
     expect(statuses).toHaveLength(1);
     expect(statuses[0]!.approved).toBe(false);
     expect(statuses[0]!.feedback).toContain("approved on GitHub");
+  });
+
+  // GitLab lets an author approve their own MR unless the project forbids it:
+  // Approve stays live, and a refusal shows GitLab's answer in the open
+  // dialog, with nothing sent to the agent, so the review goes on.
+  test("own GitLab MR: Approve is live; GitLab's refusal shows in the dialog and the review stays open", async () => {
+    seedPlatformSession({ selfAuthored: true, gitlab: true });
+    const refusal = "GitLab refused the approval (401 Unauthorized). The project may not let you approve this merge request.";
+    prActionRefusal = refusal;
+    await mountReview();
+
+    const primary = primaryButton()!;
+    expect(primary.textContent).toContain("Approve");
+    expect(primary.getAttribute("aria-disabled")).toBeNull();
+    await act(async () => primary.click());
+    await settle();
+    expect(submissionDialogOpen("Approve MR")).toBe(true);
+
+    await pressModEnter();
+
+    expect(submissions.filter((s) => s.endpoint === "pr-action").map((s) => s.action)).toEqual(["approve"]);
+    expect(submissionDialogOpen("Approve MR")).toBe(true);
+    expect(document.body.textContent).toContain(refusal);
+    expect(submissions.filter((s) => s.endpoint === "feedback")).toHaveLength(0);
+
+    // Request changes is still there to choose.
+    await act(async () => Array.from(document.querySelectorAll("button")).find((b) => b.textContent === "Cancel")?.click());
+    await settle();
+    await openMenu();
+    expect(menuItem("Request changes")?.disabled).toBe(false);
   });
 
   test("self-authored empty state: muted primary is a no-op (click and Mod+Enter); Request changes… mutes, Comment… stays live", async () => {

@@ -21,7 +21,9 @@
  *   reached the machine (rule 15).
  */
 
-import type { InboxListRow } from "@plannotator/core/inbox-types";
+import { isInboxId, isInboxInitiativeRecord, type InboxAgentsGroup, type InboxCardWire, type InboxInitiative, type InboxListRow } from "@plannotator/core/inbox-types";
+import { inboxPeerAgentsGroup } from "./inbox-agents-list";
+import { inboxPeerSessionNames } from "./inbox-session-names";
 import type { InboxLinkRecord } from "./inbox-links";
 import { MACHINE_WINDOW_HEADER, type InboxOutbox, type OutboxAnswer, type OutboxEntry } from "./inbox-outbox";
 import type { InboxPeerTransport } from "./inbox-transport";
@@ -55,12 +57,43 @@ export interface PeerRecord {
   record: unknown;
 }
 
+/**
+ * That machine's events for a change that writes no record there (a snooze, a star, an agent's face or name, a
+ * thread's tag): this Inbox asks for each (`<event>=1` on its stream), reads that machine's list again when one comes,
+ * and tells its own windows the same event (approval "inbox-linked-marks"). A new mark adds its event here.
+ */
+export const PEER_REREAD_EVENTS = ["snoozes", "pins", "priority", "agent-faces", "tags"] as const;
+export type PeerRereadEvent = (typeof PEER_REREAD_EVENTS)[number];
+const isRereadEvent = (event: string): event is PeerRereadEvent => (PEER_REREAD_EVENTS as readonly string[]).includes(event);
+
 export interface PeerList {
   cursor: number;
   rows: (InboxListRow & { machine: string })[];
   projects: Record<string, unknown>[];
   /** Its Inbox keeps snoozes (its list says `snoozes: true`; an older one says nothing): only then is Snooze offered on its rows. */
   snoozes: boolean;
+  /** The marks it takes from a linked machine (its list's `marks`; none from an older Inbox). */
+  marks: string[];
+  /** Its starred threads, in its own order (its list's `pins`). */
+  pins: string[];
+  /** Its live tags (its list's `tags`; none from an Inbox before thread tags). */
+  tags: InboxInitiative[];
+  /** Its agents (its list's `agents`, capped, with `machine`; inbox-agents-list.ts); null from an older Inbox. */
+  agents: InboxAgentsGroup | null;
+  session_labels: Record<string, string>;
+  session_titles: Record<string, string>;
+}
+
+/**
+ * That machine's Board (its `GET cards`, mark `cards`), kept in memory like its list: its cards, the list rows of
+ * their threads, its tags (deleted ones too: a card's history names them), its look and its cursor.
+ */
+export interface PeerCards {
+  cursor: number;
+  cards: InboxCardWire[];
+  threads: Record<string, (InboxListRow & { machine: string }) | null>;
+  initiatives: InboxInitiative[];
+  seen_seq: number | null;
 }
 
 /** A linked machine's update, picked by name: a version that reads as one, and nothing it could point at (no URL, no command). */
@@ -90,10 +123,16 @@ export interface PeerLinkOptions {
   onRecord: (record: PeerRecord) => void;
   /** State, list or anything else the window draws changed. */
   onChange: () => void;
-  /** That machine's snoozes changed and its list was read again: the windows read theirs. */
-  onSnoozes?: () => void;
-  /** That machine's live sessions moved its rows (a delivery, "Session ended") and its list was read again: the windows read theirs. `sessions`: a session ended or came back there. */
-  onDeliveries?: (change: { sessions: boolean }) => void;
+  /** A no-record change there (`PEER_REREAD_EVENTS`) and its list was read again: the windows hear the same event. */
+  onReread?: (event: PeerRereadEvent) => void;
+  /** Its Board was read again (`cards`): the windows read the merged Board. */
+  onCards?: () => void;
+  /**
+   * That machine's live sessions moved its rows (a delivery, "Session ended") and its list was read again: the windows
+   * read theirs. `sessions`: a session ended or came back there; `agents`: its Agents section moved; `labels`: a
+   * session's name changed there.
+   */
+  onDeliveries?: (change: { sessions: boolean; agents: boolean; labels: boolean }) => void;
   /** That machine removed this one (401 device_revoked): the owner of the link cleans up. */
   onRevoked: () => void;
   timings?: Partial<PeerLinkTimings>;
@@ -143,6 +182,8 @@ export class PeerLink {
   /** Its health's `message_deletions`: its store takes a Delete on a message's words. False until it answered, and for an older Inbox. */
   messageDeletions = false;
   list: PeerList | null = null;
+  /** Its Board, once a window asked for the merged Board (`wantCards`), and only from a machine whose list takes `cards`. */
+  cards: PeerCards | null = null;
   /** That machine's own update answer (its health and its status frames), and whether its door takes `update`. */
   farUpdate: FarUpdate | null = null;
   canUpdate = false;
@@ -165,9 +206,14 @@ export class PeerLink {
   private wake: (() => void) | null = null;
   private listing: Promise<void> | null = null;
   private listAgain = false;
+  private cardsWanted = false;
+  private cardsReading: Promise<void> | null = null;
+  private cardsAgain = false;
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
   private deliveriesTimer: ReturnType<typeof setTimeout> | null = null;
   private deliveriesSessions = false;
+  private deliveriesAgents = false;
+  private deliveriesLabels = false;
   private flushDelay = 0;
   private readonly t: PeerLinkTimings;
 
@@ -209,14 +255,18 @@ export class PeerLink {
   }
 
   /** That machine's live sessions moved: one read of its list for all that moved in `deliveriesMs`, at its end. */
-  private deliveriesMoved(sessions: boolean): void {
+  private deliveriesMoved(sessions: boolean, agents: boolean, labels: boolean): void {
     this.deliveriesSessions ||= sessions;
+    this.deliveriesAgents ||= agents;
+    this.deliveriesLabels ||= labels;
     if (this.deliveriesTimer) return;
     this.deliveriesTimer = setTimeout(() => {
       this.deliveriesTimer = null;
-      const moved = this.deliveriesSessions;
+      const moved = { sessions: this.deliveriesSessions, agents: this.deliveriesAgents, labels: this.deliveriesLabels };
       this.deliveriesSessions = false;
-      void this.refreshList().then(() => this.options.onDeliveries?.({ sessions: moved }));
+      this.deliveriesAgents = false;
+      this.deliveriesLabels = false;
+      void this.refreshList().then(() => this.options.onDeliveries?.(moved));
     }, this.t.deliveriesMs);
     (this.deliveriesTimer as { unref?: () => void }).unref?.();
   }
@@ -306,8 +356,9 @@ export class PeerLink {
     }, this.t.silenceMs);
     let response: Response;
     try {
-      // `snoozes=1`, `deliveries=1`: neither writes a record, so the stream tells this machine when to read the list again.
-      response = await this.options.transport.events(headers, this.cursor === null ? "?snoozes=1&deliveries=1" : `?cursor=${this.cursor}&snoozes=1&deliveries=1`, abort.signal);
+      // The reread events and `deliveries=1`: none writes a record, so the stream tells this machine when to read the list again.
+      const asks = [...PEER_REREAD_EVENTS, "deliveries"].map((event) => `${event}=1`).join("&");
+      response = await this.options.transport.events(headers, this.cursor === null ? `?${asks}` : `?cursor=${this.cursor}&${asks}`, abort.signal);
     } catch (error) {
       if (this.stream === abort) this.stream = null;
       if (headersLate) return `the event stream did not answer for ${Math.round(this.t.silenceMs / 1000)} s`;
@@ -348,14 +399,16 @@ export class PeerLink {
             if (this.cursor === null) this.cursor = helloCursor;
             wasOnline = true;
             this.setState("online");
-            this.refreshList();
+            void this.refreshList().then(() => this.refreshCards());
             this.flush();
           } else if (parsed.event === "record" && parsed.id !== null) {
             const seq = Number(parsed.id);
             if (!Number.isSafeInteger(seq)) continue;
             this.cursor = Math.max(this.cursor ?? 0, seq);
-            this.options.onRecord({ machine: this.id, seq, live: helloCursor !== null && seq > helloCursor, record: JSON.parse(parsed.data) });
+            const record = JSON.parse(parsed.data) as Json;
+            this.options.onRecord({ machine: this.id, seq, live: helloCursor !== null && seq > helloCursor, record });
             this.refreshList();
+            if (record?.kind === "card" || record?.kind === "initiative") void this.refreshCards();
           } else if (parsed.event === "status") {
             // Its update's state, as its own windows hear it. An ending that needs no restart ends this press here.
             const status = JSON.parse(parsed.data) as Json;
@@ -365,11 +418,13 @@ export class PeerLink {
               if (this.asked && (this.farUpdate?.state === "failed" || this.noChange)) this.asked = null;
               this.options.onChange();
             }
-          } else if (parsed.event === "snoozes") {
+          } else if (isRereadEvent(parsed.event)) {
             // The list's cursor does not move, so the windows are told apart from a list that changes it.
-            void this.refreshList().then(() => this.options.onSnoozes?.());
+            const event = parsed.event;
+            void this.refreshList().then(() => this.options.onReread?.(event));
           } else if (parsed.event === "deliveries") {
-            this.deliveriesMoved((JSON.parse(parsed.data) as Json).sessions === true);
+            const change = JSON.parse(parsed.data) as Json;
+            this.deliveriesMoved(change.sessions === true, change.agents === true, change.labels === true);
           }
         }
       }
@@ -419,8 +474,66 @@ export class PeerLink {
       rows: rows.map((row: InboxListRow) => ({ ...row, machine: this.id })),
       projects: projects.map((project: Json) => ({ ...project, machine: this.id })),
       snoozes: list.snoozes === true,
+      marks: Array.isArray(list.marks) ? list.marks.filter((mark: unknown): mark is string => typeof mark === "string") : [],
+      pins: Array.isArray(list.pins) ? list.pins.flatMap((row: Json) => (typeof row?.thread_id === "string" ? [row.thread_id] : [])) : [],
+      tags: Array.isArray(list.tags) ? list.tags.filter((tag: unknown): tag is InboxInitiative => isInboxInitiativeRecord(tag) && tag.deleted_at === null) : [],
+      agents: inboxPeerAgentsGroup(list.agents, this.id),
+      session_labels: inboxPeerSessionNames(list.session_labels),
+      session_titles: inboxPeerSessionNames(list.session_titles),
     };
     this.options.onChange();
+    return true;
+  }
+
+  // ── The Board: read once a window asked for it, then on hello and on each card or tag record; one read at a time. ──
+
+  /** A window asked for the merged Board: this machine's is read now (when its list takes `cards`) and kept current. */
+  wantCards(): Promise<void> {
+    if (this.cardsWanted) return this.cardsReading ?? Promise.resolve();
+    this.cardsWanted = true;
+    return this.refreshCards();
+  }
+
+  refreshCards(): Promise<void> {
+    if (!this.cardsWanted || !this.list?.marks.includes("cards")) return Promise.resolve();
+    if (this.cardsReading) {
+      this.cardsAgain = true;
+      return this.cardsReading;
+    }
+    const run = (async () => {
+      do {
+        this.cardsAgain = false;
+        try {
+          const response = await this.options.transport.request("cards", "", { method: "GET", headers: this.auth(), signal: AbortSignal.timeout(this.t.requestMs) });
+          if (response.ok && this.acceptCards((await response.json()) as Json)) this.options.onCards?.();
+        } catch {
+          // The stream's own failure handling marks the line.
+        }
+      } while (this.cardsAgain && this.running);
+    })();
+    this.cardsReading = run.finally(() => {
+      this.cardsReading = null;
+    });
+    return this.cardsReading;
+  }
+
+  /** Its Board, picked by name. One older (by cursor) than the one held is dropped, as its list is (rule 5). */
+  acceptCards(model: Json): boolean {
+    const cursor = typeof model.cursor === "number" ? model.cursor : -1;
+    if (this.cards && cursor < this.cards.cursor) return false;
+    const threads: PeerCards["threads"] = {};
+    if (model.threads && typeof model.threads === "object") {
+      for (const [id, row] of Object.entries(model.threads as Json)) {
+        if (isInboxId("msg", id)) threads[id] = row && typeof row === "object" ? { ...(row as InboxListRow), machine: this.id } : null;
+      }
+    }
+    this.cards = {
+      cursor,
+      cards: (Array.isArray(model.cards) ? model.cards : []).filter((card: Json) => isInboxId("crd", card?.id) && isInboxId("prj", card?.project_id)),
+      threads,
+      initiatives: Array.isArray(model.initiatives) ? model.initiatives.filter((tag: unknown): tag is InboxInitiative => isInboxInitiativeRecord(tag)) : [],
+      seen_seq: typeof model.seen_seq === "number" ? model.seen_seq : null,
+    };
     return true;
   }
 

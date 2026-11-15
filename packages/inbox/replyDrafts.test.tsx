@@ -69,7 +69,7 @@ function loopback(path: string, method = 'GET', body?: string): Promise<{ status
   });
 }
 
-const TESTS = 39;
+const TESTS = 45;
 
 beforeAll(async () => {
   if (!hasDom) return;
@@ -223,7 +223,7 @@ function button(el: ParentNode, text: string): HTMLButtonElement {
 }
 
 function type(el: HTMLElement, words: string) {
-  const text = el.querySelector('textarea') as HTMLTextAreaElement;
+  const text = el.querySelector('textarea:not([data-question-other])') as HTMLTextAreaElement;
   const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
   act(() => {
     setter.call(text, words);
@@ -255,8 +255,8 @@ test.skipIf(!hasDom)('typed words are saved while typing, and come back in the b
   leave();
 
   const again = await renderApp(`#thread=${world.waiting}`);
-  await until(() => (again.querySelector('textarea') as HTMLTextAreaElement | null)?.value === 'Pagefind, but index the changelog too', 'the words back');
-  expect(document.activeElement).not.toBe(again.querySelector('textarea'));
+  await until(() => (again.querySelector('textarea:not([data-question-other])') as HTMLTextAreaElement | null)?.value === 'Pagefind, but index the changelog too', 'the words back');
+  expect(document.activeElement).not.toBe(again.querySelector('textarea:not([data-question-other])'));
 });
 
 test.skipIf(!hasDom)('the reply box is a message, not a comment: "Enter saves a comment" leaves its Enter a new line (#1934)', async () => {
@@ -267,7 +267,7 @@ test.skipIf(!hasDom)('the reply box is a message, not a comment: "Enter saves a 
     act(() => button(el, 'Reply').click());
     await settle();
     type(el, 'Pagefind');
-    const box = el.querySelector('textarea') as HTMLTextAreaElement;
+    const box = el.querySelector('textarea:not([data-question-other])') as HTMLTextAreaElement;
     const enter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
     act(() => {
       box.dispatchEvent(enter);
@@ -275,7 +275,7 @@ test.skipIf(!hasDom)('the reply box is a message, not a comment: "Enter saves a 
     await settle();
     expect(enter.defaultPrevented).toBe(false);
     expect(posted.some((p) => p.path.endsWith('/reply'))).toBe(false);
-    expect(el.querySelector('textarea')).not.toBeNull();
+    expect(el.querySelector('textarea:not([data-question-other])')).not.toBeNull();
   } finally {
     configStore.set('enterSavesComment', false);
   }
@@ -305,7 +305,7 @@ test.skipIf(!hasDom)('closing the box keeps the words: the foot says "Draft · Y
   button(el, 'Send');
   act(() => button(el, 'Edit draft').click());
   await settle();
-  expect((el.querySelector('textarea') as HTMLTextAreaElement).value).toBe('Pagefind.');
+  expect((el.querySelector('textarea:not([data-question-other])') as HTMLTextAreaElement).value).toBe('Pagefind.');
 });
 
 test.skipIf(!hasDom)('Discard drops the draft, here and on the server', async () => {
@@ -316,7 +316,7 @@ test.skipIf(!hasDom)('Discard drops the draft, here and on the server', async ()
   type(el, 'Never mind this.');
   await until(() => el.querySelector('[data-reply-discard]') !== null, 'the bin');
   act(() => (el.querySelector('[data-reply-discard]') as HTMLButtonElement).click());
-  await until(() => el.querySelector('textarea') === null, 'the box closed');
+  await until(() => el.querySelector('textarea:not([data-question-other])') === null, 'the box closed');
   await until(async () => (await serverDraft(world.waiting)) === null, 'the draft gone');
   button(el, 'Reply');
   expect(el.querySelector('[data-draft-foot]')).toBeNull();
@@ -330,7 +330,7 @@ test.skipIf(!hasDom)('the Send that carries the words clears the draft (clear_dr
   type(el, 'Pagefind, thanks.');
   await until(async () => (await serverDraft(world.waiting)) !== null, 'the draft saved');
   act(() => button(el, 'Send').click());
-  await until(() => el.querySelector('textarea') === null, 'the Send');
+  await until(() => el.querySelector('textarea:not([data-question-other])') === null, 'the Send');
   const reply = posted.filter((p) => p.path.endsWith('/reply')).at(-1)!;
   // The draft the words were saved as, by its updated_at: the server clears that draft only.
   expect(reply.body).toMatchObject({ words: 'Pagefind, thanks.' });
@@ -347,7 +347,7 @@ test.skipIf(!hasDom)('a Send pressed before the pause in typing, whose answer is
   replyDelay = 800;
   type(el, 'Sent quickly.');
   act(() => button(el, 'Send').click());
-  await until(() => el.querySelector('textarea') === null, 'the Send');
+  await until(() => el.querySelector('textarea:not([data-question-other])') === null, 'the Send');
   const reply = posted.filter((p) => p.path.endsWith('/reply')).at(-1)!;
   expect(reply.body.words).toBe('Sent quickly.');
   // Past any save the typing scheduled: the server holds no draft, and the window shows none.
@@ -394,7 +394,7 @@ test.skipIf(!hasDom)('an `event: drafts` for the open thread reads its draft aga
   await settle();
   act(() => button(el, 'Edit draft').click());
   await settle();
-  expect((el.querySelector('textarea') as HTMLTextAreaElement).value).toBe('Newer words.');
+  expect((el.querySelector('textarea:not([data-question-other])') as HTMLTextAreaElement).value).toBe('Newer words.');
 });
 
 test.skipIf(!hasDom)('the list says "Draft" ("Draft · Your reply", "Draft · 1 pick" in full); the Drafts row counts them and its page lists them above the messages', async () => {
@@ -444,11 +444,11 @@ test.skipIf(!hasDom)('typing during a slow Send never brings back a draft holdin
   replyDelay = 1500;
   act(() => button(el, 'Send').click());
   await until(() => posted.some((p) => p.path.endsWith('/reply')), 'the reply posted');
-  expect((el.querySelector('textarea') as HTMLTextAreaElement).readOnly).toBe(true);
+  expect((el.querySelector('textarea:not([data-question-other])') as HTMLTextAreaElement).readOnly).toBe(true);
   type(el, 'First words. And more.');
-  // The box keeps the words the Send carries.
-  expect((el.querySelector('textarea') as HTMLTextAreaElement).value).toBe('First words.');
-  await until(() => el.querySelector('textarea') === null, 'the Send');
+  expect((el.querySelector('textarea:not([data-question-other])') as HTMLTextAreaElement).value).toBe('');
+  expect(el.querySelector('[data-sending]')?.textContent).toContain('First words.');
+  await until(() => el.querySelector('textarea:not([data-question-other])') === null, 'the Send');
   await settle(200);
   expect(await serverDraft(world.waiting)).toBeNull();
   // No save went after the reply.
@@ -459,7 +459,7 @@ test.skipIf(!hasDom)('typing during a slow Send never brings back a draft holdin
   const again = await renderApp(`#thread=${world.waiting}`);
   await until(() => [...again.querySelectorAll('button')].some((b) => b.textContent?.trim() === 'Reply'), 'the foot');
   await settle();
-  expect(again.querySelector('textarea')).toBeNull();
+  expect(again.querySelector('textarea:not([data-question-other])')).toBeNull();
   expect(again.querySelector('[data-draft-foot]')).toBeNull();
 });
 
@@ -476,7 +476,7 @@ test.skipIf(!hasDom)('a Send that fails gives the thread back: the words are sav
     return real(input, init);
   }) as typeof fetch;
   act(() => button(el, 'Send').click());
-  await until(() => !(el.querySelector('textarea') as HTMLTextAreaElement).readOnly && el.textContent!.includes('down'), 'the failure');
+  await until(() => !(el.querySelector('textarea:not([data-question-other])') as HTMLTextAreaElement).readOnly && el.textContent!.includes('down'), 'the failure');
   globalThis.fetch = real;
   type(el, 'Kept after a failure, edited.');
   await until(async () => (await serverDraft(world.waiting))?.body === 'Kept after a failure, edited.', 'saved again after the failure');
@@ -504,7 +504,7 @@ test.skipIf(!hasDom)('another window sent the words: this window\'s next save is
   type(el, 'First words. And more, still.');
   await settle(200);
   expect(await serverDraft(world.waiting)).toBeNull();
-  expect((el.querySelector('textarea') as HTMLTextAreaElement).value).toBe('First words. And more, still.');
+  expect((el.querySelector('textarea:not([data-question-other])') as HTMLTextAreaElement).value).toBe('First words. And more, still.');
   // Keep mine: the person's choice saves them.
   act(() => (el.querySelector('[data-draft-keep-mine]') as HTMLButtonElement).click());
   await until(async () => (await serverDraft(world.waiting))?.body === 'First words. And more, still.', 'kept on purpose');
@@ -523,7 +523,7 @@ async function openWithSaved(words: string) {
   await settle();
   return { el, saved: (await serverDraft(world.waiting))! };
 }
-const box = (el: HTMLElement) => el.querySelector('textarea') as HTMLTextAreaElement | null;
+const box = (el: HTMLElement) => el.querySelector('textarea:not([data-question-other])') as HTMLTextAreaElement | null;
 const liveText = (el: HTMLElement) => [...el.querySelectorAll('[aria-live]')].map((n) => n.textContent).join(' ');
 
 test.skipIf(!hasDom)('event: drafts, sent elsewhere: a box with no edits closes, and the sent words never come back', async () => {
@@ -568,10 +568,13 @@ test.skipIf(!hasDom)('event: drafts, sent elsewhere while this box has edits: th
   expect(unloadAsks()).toBe(true);
 });
 
-test.skipIf(!hasDom)('event: drafts, the other window typed: a box with no edits takes its words', async () => {
+test.skipIf(!hasDom)('event: drafts, the other window typed: a box this person opened keeps its words, and Restore draft takes theirs', async () => {
   const { el, saved } = await openWithSaved('Mine.');
   await loopback(`/api/inbox/threads/${world.waiting}/draft`, 'POST', JSON.stringify({ body: 'Theirs.', base: saved.updated_at }));
   await act(async () => emit('drafts', { thread_id: world.waiting }));
+  await until(() => el.querySelector('[data-draft-restore]') !== null, 'the offer');
+  expect(box(el)!.value).toBe('Mine.');
+  act(() => (el.querySelector('[data-draft-restore]') as HTMLButtonElement).click());
   await until(() => box(el)?.value === 'Theirs.', 'their words in the box');
   expect(el.querySelector('[data-draft-conflict]')).toBeNull();
   // Typing on from there saves over it, as an edit of the newest words.
@@ -660,10 +663,37 @@ test.skipIf(!hasDom)('a Send whose answer is lost after it went is read back: th
   await until(() => box(el) === null, 'the box closed');
   globalThis.fetch = real;
   expect(el.textContent).not.toContain('Failed to fetch');
-  expect(liveText(el)).toContain('Your reply went.');
+  await until(() => liveText(el).includes('Your reply went.'), 'the went line');
   await settle(200);
   expect(await serverDraft(world.waiting)).toBeNull();
   expect(await personReplies('Went, answer lost.')).toHaveLength(1);
+}, 30_000);
+
+test.skipIf(!hasDom)('a Send whose answer is lost keeps its "Sending…" reply while the thread is read for it', async () => {
+  const { el } = await openWithSaved('Lost, still drawn.');
+  const real = globalThis.fetch;
+  let release = () => {};
+  const held = new Promise<void>((done) => (release = done));
+  let lost = false;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const path = String(input);
+    if (lost && /\/api\/inbox\/threads\/[^/?]+(\?|$)/.test(path)) await held;
+    const answer = await real(input, init);
+    if ((init?.method ?? 'GET') === 'POST' && path.endsWith('/reply')) {
+      lost = true;
+      throw new TypeError('Failed to fetch');
+    }
+    return answer;
+  }) as typeof fetch;
+  act(() => button(el, 'Send').click());
+  await until(() => lost, 'the answer lost');
+  await settle();
+  expect(el.querySelectorAll('[data-sending]').length).toBe(1);
+  release();
+  await until(() => box(el) === null, 'the box closed');
+  globalThis.fetch = real;
+  expect(el.querySelectorAll('[data-sending]').length).toBe(0);
+  expect(await personReplies('Lost, still drawn.')).toHaveLength(1);
 }, 30_000);
 
 test.skipIf(!hasDom)('a Send carrying a comment whose answer is lost after it went: the box closes; the reply and its comment went once', async () => {
@@ -840,6 +870,162 @@ test.skipIf(!hasDom)('an unconfirmed Send is forgotten when the person leaves: t
   expect(second).not.toBe(first);
   expect(second.path).toContain(asked);
   expect(await personReplies('Yes.')).toHaveLength(2);
+}, 30_000);
+
+test.skipIf(!hasDom)('a Send that goes as two replies keeps its "Sending…" reply until the one with the words lands', async () => {
+  const made = await loopback(
+    `/api/inbox/messages/${world.waiting}/annotations`,
+    'POST',
+    JSON.stringify({ annotation: { id: 'ann-two-replies', blockId: 'block-1', startOffset: 0, endOffset: 13, type: 'COMMENT', text: 'On the first.', originalText: 'The docs site', createdA: 1 } }),
+  );
+  expect(made.status).toBe(200);
+  await agentSend('A word from another agent.', world.waiting);
+  const { el } = await openWithSaved('Two replies.');
+  const real = globalThis.fetch;
+  let release = () => {};
+  const held = new Promise<void>((done) => (release = done));
+  let replies = 0;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if ((init?.method ?? 'GET') === 'POST' && String(input).endsWith('/reply') && ++replies === 2) await held;
+    return real(input, init);
+  }) as typeof fetch;
+  act(() => button(el, 'Send').click());
+  await until(() => replies === 2, 'the second reply on its way');
+  await act(async () => emit('record', { seq: 1_000_000 + ++emitted }));
+  await until(() => el.querySelectorAll('article[data-author="person"]:not([data-sending])').length === 1, 'the first reply drawn');
+  expect(el.querySelectorAll('[data-sending]').length).toBe(1);
+  release();
+  await until(() => box(el) === null, 'the box closed');
+  globalThis.fetch = real;
+  expect(el.querySelectorAll('[data-sending]').length).toBe(0);
+  expect(await personReplies('Two replies.')).toHaveLength(1);
+}, 30_000);
+
+/** The next reply POST waits for `release`, then answers with `answer` (or as the Inbox does). */
+function holdReply(real: typeof fetch, answer?: () => Response) {
+  let release = () => {};
+  const held = new Promise<void>((done) => (release = done));
+  let posting = false;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if ((init?.method ?? 'GET') === 'POST' && String(input).endsWith('/reply')) {
+      posting = true;
+      await held;
+      if (answer) return answer();
+    }
+    return real(input, init);
+  }) as typeof fetch;
+  return { release, posting: () => posting };
+}
+
+test.skipIf(!hasDom)('while a reply sends its words show once, in the thread; a refused Send puts them back in the box with the reason', async () => {
+  const { el } = await openWithSaved('Shown once.');
+  const real = globalThis.fetch;
+  const hold = holdReply(real, () => Response.json({ error: 'The agent is not taking replies.' }, { status: 409 }));
+  act(() => button(el, 'Send').click());
+  await until(hold.posting, 'the reply on its way');
+  await settle();
+  expect(el.querySelector('[data-sending]')?.textContent).toContain('Shown once.');
+  expect(box(el)!.value).toBe('');
+  expect(box(el)!.readOnly).toBe(true);
+  expect(liveText(el)).toContain('Sending your reply to');
+  hold.release();
+  await until(() => el.querySelectorAll('[data-sending]').length === 0, 'the drawing gone');
+  await settle();
+  globalThis.fetch = real;
+  expect(box(el)!.value).toBe('Shown once.');
+  expect(box(el)!.readOnly).toBe(false);
+  expect(el.textContent).toContain('The agent is not taking replies.');
+  expect(await personReplies('Shown once.')).toHaveLength(0);
+  expect((await serverDraft(world.waiting))?.body).toBe('Shown once.');
+}, 30_000);
+
+test.skipIf(!hasDom)('a reply from another device while a Send is on its way never hides its "Sending…" words', async () => {
+  const { el } = await openWithSaved('Mine, still going.');
+  const real = globalThis.fetch;
+  const hold = holdReply(real);
+  act(() => button(el, 'Send').click());
+  await until(hold.posting, 'the reply on its way');
+  await loopback(`/api/inbox/messages/${world.waiting}/reply`, 'POST', JSON.stringify({ idempotency_key: 'phone-1', words: 'From the phone.' }));
+  await act(async () => emit('record', { seq: 1_000_000 + ++emitted }));
+  await until(() => el.textContent!.includes('From the phone.'), 'the other reply drawn');
+  expect(el.querySelector('[data-sending]')?.textContent).toContain('Mine, still going.');
+  hold.release();
+  await until(() => el.querySelectorAll('[data-sending]').length === 0, 'the drawing gone once its own reply landed');
+  globalThis.fetch = real;
+  expect(await personReplies('Mine, still going.')).toHaveLength(1);
+}, 30_000);
+
+test.skipIf(!hasDom)('a Send pressed while scrolled up goes to the reply at the press, before the Inbox answers', async () => {
+  const { el } = await openWithSaved('Take me down.');
+  const pane = el.querySelector<HTMLElement>('.ib-pbody')!;
+  const real = globalThis.fetch;
+  const hold = holdReply(real);
+  const scrolled: number[] = [];
+  const scrollTo = pane.scrollTo.bind(pane);
+  pane.scrollTo = ((options: ScrollToOptions) => {
+    scrolled.push(options.top ?? -1);
+    scrollTo(options);
+  }) as typeof pane.scrollTo;
+  Object.defineProperty(pane, 'scrollHeight', { configurable: true, get: () => 5000 });
+  pane.scrollTop = 0;
+  act(() => button(el, 'Send').click());
+  await until(hold.posting, 'the reply on its way');
+  await settle();
+  expect(scrolled).toContain(5000);
+  hold.release();
+  await until(() => box(el) === null, 'the box closed');
+  globalThis.fetch = real;
+  expect(await personReplies('Take me down.')).toHaveLength(1);
+}, 30_000);
+
+test.skipIf(!hasDom)('a Send that lands after the person moved to another thread finishes on its own thread: the other draft is untouched, and words typed later in the first are saved', async () => {
+  await loopback(`/api/inbox/threads/${world.picked}/draft`, 'POST', JSON.stringify({ body: 'B words kept.', base: null }));
+  const el = await renderApp(`#thread=${world.picked}`);
+  await until(() => el.querySelector(`section.ib-pane[data-thread-id="${world.picked}"]`) !== null, 'thread B read first');
+  await settle(200);
+  await act(async () => {
+    window.location.hash = `#thread=${world.waiting}`;
+  });
+  const footA = () => [...el.querySelectorAll('.ib-pfoot button')].find((b) => ['Reply', 'Edit draft'].includes(b.textContent?.replace(/\s+/g, ' ').trim() ?? '')) as HTMLButtonElement | undefined;
+  await until(() => el.querySelector(`section.ib-pane[data-thread-id="${world.waiting}"]`) !== null && footA() !== undefined, 'thread A');
+  act(() => footA()!.click());
+  await until(() => box(el) !== null, 'the box in A');
+  type(el, 'A goes.');
+  await until(async () => (await serverDraft(world.waiting))?.body === 'A goes.', 'the words saved');
+  await settle();
+  const real = globalThis.fetch;
+  const hold = holdReply(real);
+  act(() => button(el, 'Send').click());
+  await until(hold.posting, 'the reply on its way');
+  await act(async () => {
+    window.location.hash = `#thread=${world.picked}`;
+  });
+  await until(() => el.querySelector(`section.ib-pane[data-thread-id="${world.picked}"]`) !== null, 'thread B open');
+  await settle(200);
+  const editB = () => [...el.querySelectorAll('.ib-pfoot button')].find((b) => ['Reply', 'Edit draft'].includes(b.textContent?.replace(/\s+/g, ' ').trim() ?? '')) as HTMLButtonElement | undefined;
+  if (!box(el)) {
+    await until(() => editB() !== undefined, 'thread B foot');
+    act(() => editB()!.click());
+  }
+  await until(() => box(el) !== null, 'thread B box');
+  await settle(100);
+  expect(box(el)!.value).toBe('B words kept.');
+  expect(box(el)!.readOnly).toBe(false);
+  hold.release();
+  await until(async () => (await personReplies('A goes.')).length === 1, 'the reply landed');
+  await settle(200);
+  globalThis.fetch = real;
+  expect((await serverDraft(world.picked))?.body).toBe('B words kept.');
+  await act(async () => {
+    window.location.hash = `#thread=${world.waiting}`;
+  });
+  const opener = () => [...el.querySelectorAll('.ib-pfoot button')].find((b) => ['Reply', 'Edit draft'].includes(b.textContent?.replace(/\s+/g, ' ').trim() ?? '')) as HTMLButtonElement | undefined;
+  await until(() => el.querySelector(`section.ib-pane[data-thread-id="${world.waiting}"]`) !== null && (opener() !== undefined || box(el) !== null), 'thread A again');
+  if (!box(el)) act(() => opener()!.click());
+  await until(() => box(el) !== null, 'the box in thread A');
+  type(el, 'Typed after.');
+  await until(async () => (await serverDraft(world.waiting))?.body === 'Typed after.', 'the later words saved');
+  expect(await personReplies('A goes.')).toHaveLength(1);
 }, 30_000);
 
 test.skipIf(!hasDom)('an unconfirmed Send that a thread read shows landed is finished while the box still holds its words', async () => {

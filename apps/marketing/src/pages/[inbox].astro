@@ -5,7 +5,9 @@ import Footer from '../components/Footer.astro';
 import InboxShot from '../components/inbox/InboxShot.astro';
 import InboxPhone from '../components/inbox/InboxPhone.astro';
 import { INBOX_LAUNCHED, INBOX_POST_ID } from '../lib/inbox-launch';
-import installPrompt from '../lib/inbox-prompt.md?raw';
+import { videoUrl } from '../lib/media';
+import installPromptSource from '../lib/inbox-prompt.md?raw';
+import { buildInboxPrompt } from '../lib/llms';
 
 // /inbox/ is generated only once the Inbox launches: until then the deployed
 // site has no such page (src/lib/inbox-launch.ts).
@@ -28,7 +30,7 @@ const btn =
 // The hero's "Copy install prompt": the same file /inbox/prompt.md serves
 // ([inbox]/prompt.md.ts), inlined so the copy needs no fetch. Escaped for a
 // <script type="application/json"> body.
-const promptJson = JSON.stringify(installPrompt).replace(/</g, '\\u003c');
+const promptJson = JSON.stringify(buildInboxPrompt(installPromptSource)).replace(/</g, '\\u003c');
 const systems = [
   { id: 'unix', label: 'macOS / Linux / WSL', prompt: '$', command: install },
   { id: 'win', label: 'Windows', prompt: '>', command: 'irm https://plannotator.ai/install.ps1 | iex' },
@@ -170,8 +172,7 @@ const steps = [
                       when Claude Code starts, once the Inbox has run, and your replies arrive as Claude's next turn.
                     </p>
                     <p class="ib-step-note">
-                      Claude Code 2.1.287 or newer on macOS or Linux. On Windows, use the MCP command under Other MCP
-                      agent.
+                      Claude Code 2.1.287 or newer.
                     </p>
                   </div>
                   <div class="ib-panel" role="tabpanel" id="ib-p-pi" aria-labelledby="ib-t-pi" hidden>
@@ -267,7 +268,7 @@ const steps = [
             height="1080"
             aria-label="The Plannotator Inbox film"
           >
-            <source src="/assets/inbox-film.mp4" type="video/mp4" />
+            <source src={videoUrl('inbox-film.mp4')} type="video/mp4" />
           </video>
           <button type="button" class="ib-film-play" aria-label="Play the Inbox film" data-film-play hidden>
             <span class="ib-film-play-dot" aria-hidden="true">
@@ -425,6 +426,7 @@ const steps = [
               set:html={copyIcon}
             />
           </div>
+          <p class="ib-links"><a href="/inbox/agents/">What works with each agent</a></p>
         </div>
         <InboxShot
           name="first-run"

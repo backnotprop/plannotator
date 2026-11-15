@@ -7,7 +7,9 @@
  *    as its widest word, and the confirm hint where it can't push the buttons (under them on a desktop, above them on a
  *    phone's bottom sheet);
  *  - "Merged" closing before it can be read (about 1.5 s), or the pointer leaving closing it early;
- *  - the merged PR still listed as open after the popover closes, while the list on screen still says open.
+ *  - the merged PR still listed as open after the popover closes, while the list on screen still says open;
+ *  - a person's name without their face in the popover, or a Reviews row showing the same face twice (the owner,
+ *    q-331c0466: "Everywhere, but not twice in a row").
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -293,4 +295,28 @@ test('Reviews on a phone: no pane, a "Pull requests" row with its counts at the 
   expect(row.compareDocumentPosition($('[data-pulls-row]')!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   await press(row);
   expect(opened).toEqual(['prs']);
+});
+
+test('a face by every name: the popover pictures the author and who it waits on; a row never shows the same face twice', async () => {
+  if (!hasDom) return;
+  const waits = pull(4, { mine: false, author: 'tomas', review: null, approved_by: null, reviewers: ['nina-k'] });
+  drawSheet({ model: { ...MODEL, pulls: [...MODEL.pulls, waits] } });
+  await hoverOpen(waits.key);
+  const pop = $(`[data-pr-pop="${waits.key}"]`)!;
+  expect(pop.querySelector('.ib-prpop-meta [data-person="tomas"] [data-face="tomas"]')).not.toBeNull();
+  const status = pop.querySelector<HTMLElement>('.ib-prpop-status')!;
+  expect(status.textContent).toBe('Waits on nina-k');
+  expect(status.querySelector('[data-person="nina-k"] [data-face="nina-k"]')).not.toBeNull();
+
+  act(() => root?.unmount());
+  host?.remove();
+  drawReviews();
+  await settle();
+  // #2 asks for the person's review: tomas is pictured at the row's left, so his name in the words has no second face.
+  const row = $(`[data-pulls-row="github.com/${REPO}#2"]`)!;
+  expect(row.querySelector('.ib-lead [data-pulls-author="tomas"]')).not.toBeNull();
+  const words = row.querySelector<HTMLElement>('[data-reviews-status]')!;
+  expect(words.textContent).toBe("Review requested · tomas's PR");
+  expect(words.querySelector('[data-person="tomas"]')).not.toBeNull();
+  expect(words.querySelector('[data-face]')).toBeNull();
 });

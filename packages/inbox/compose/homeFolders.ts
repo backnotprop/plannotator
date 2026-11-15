@@ -7,6 +7,9 @@
 /** The path as the field starts: the home folder, ready for a name. */
 export const HOME_FOLDER_START = '~/';
 
+/** A Windows full path as the window keeps it once read (`homeRelative`): a drive letter, a colon, then `/` or nothing. */
+const WINDOWS_DRIVE_PATH = /^[A-Za-z]:(\/|$)/;
+
 /**
  * A typed path as the server reads it (`~`, `~/…`, or a full path): a bare name ("code/x") is under home. Spaces at
  * either end are dropped; slashes inside are kept as typed (the server skips doubled ones).
@@ -14,8 +17,13 @@ export const HOME_FOLDER_START = '~/';
 export function normalizeFolderPath(typed: string): string {
   const text = typed.trim();
   if (text === '' || text === '~') return HOME_FOLDER_START;
-  if (text.startsWith('~/') || text.startsWith('/')) return text;
+  if (text.startsWith('~/') || text.startsWith('/') || WINDOWS_DRIVE_PATH.test(text)) return text;
   return `~/${text}`;
+}
+
+/** A Windows home (`C:\Users\me`): the machine's paths take `\` or `/`, either drive-letter case. */
+export function isWindowsHome(home: string | null): boolean {
+  return !!home && /^[A-Za-z]:[\\/]/.test(home);
 }
 
 /**
@@ -26,6 +34,8 @@ export function splitFolderPath(typed: string): { parent: string; tail: string }
   const path = normalizeFolderPath(typed);
   const at = path.lastIndexOf('/');
   const parent = path.slice(0, at).replace(/\/+$/, '');
+  // A Windows drive's root keeps its slash (`D:/`): `D:` alone is no full path.
+  if (/^[A-Za-z]:$/.test(parent)) return { parent: `${parent}/`, tail: path.slice(at + 1) };
   return { parent: parent === '' ? (path.startsWith('~') ? '~' : '/') : parent, tail: path.slice(at + 1) };
 }
 
@@ -103,14 +113,30 @@ export function cleanPastedPath(text: string, home: string | null = null, { unes
     } catch {
       path = path.slice('file://'.length);
     }
+    // `file:///C:/Users/me`: a Windows path, no slash before its drive.
+    if (/^\/[A-Za-z]:\//.test(path)) path = path.slice(1);
   }
-  if (unescape) path = path.replace(/\\(.)/g, '$1');
+  // Terminal's escapes are a Mac's and Linux's: in a Windows path (its home, `C:\…`, `~\…`) a backslash is the path's own.
+  if (unescape && !isWindowsHome(home) && !/^([A-Za-z]:\\|~\\)/.test(path)) path = path.replace(/\\(.)/g, '$1');
   return homeRelative(path, home);
 }
 
-/** A full path in `home` as `~/…` (home itself as `~/`); anything else as it is. */
+/**
+ * A full path in `home` as `~/…` (home itself as `~/`); anything else as it is. On Windows (a `C:\…` home) a path is
+ * read as Windows reads it: `\` or `/`, either case, so `C:\Users\me\code`, `c:/users/me/code` and `~\code` are all
+ * `~/code`; another drive's path keeps its letter with `/` (`D:/x`), for that machine to answer.
+ */
 export function homeRelative(path: string, home: string | null): string {
   if (!home) return path;
+  if (isWindowsHome(home)) {
+    // A Windows name can't hold a backslash: every one is a separator.
+    const typed = path.replace(/\\/g, '/');
+    if (!WINDOWS_DRIVE_PATH.test(typed)) return typed;
+    const base = home.replace(/\\/g, '/').replace(/\/+$/, '');
+    const lower = typed.toLowerCase();
+    if (lower === base.toLowerCase() || lower === `${base.toLowerCase()}/`) return HOME_FOLDER_START;
+    return lower.startsWith(`${base.toLowerCase()}/`) ? `~${typed.slice(base.length)}` : typed;
+  }
   const base = home.replace(/\/+$/, '');
   if (path === base || path === `${base}/`) return HOME_FOLDER_START;
   return path.startsWith(`${base}/`) ? `~${path.slice(base.length)}` : path;
@@ -118,7 +144,8 @@ export function homeRelative(path: string, home: string | null): string {
 
 /** Text that reads as a path, not words to find a project by (B4): `~/…`, `/…`, a quoted path, or a `file://` URL. */
 export function looksLikePath(text: string): boolean {
-  return /^(~\/|~$|\/|'\/|"\/|'~\/|"~\/|file:\/\/)/.test(text.trim());
+  // Windows's too: `C:\…`, `c:/…`, `~\…`, quoted or not.
+  return /^(~\/|~$|\/|'\/|"\/|'~\/|"~\/|file:\/\/)/.test(text.trim()) || /^['"]?([A-Za-z]:[\\/]|~\\)/.test(text.trim());
 }
 
 /** What the folder listing answered for one path (`GET /api/inbox/launch/folders`), as the browser keeps it. */
@@ -131,6 +158,10 @@ export interface FolderRead {
   writable?: boolean;
   nearest?: { path: string; folders: readonly string[] } | null;
   blocked?: { path: string; state: 'file' | 'locked' } | null;
+  /** The folder itself is never started in (home, a folder above it, `/`, the folder drives are in). */
+  start?: false;
+  /** Of `folders`, the ones listed but never started in. */
+  nostart?: readonly string[];
 }
 
 /** One row of the folder browser (approval "launch-create-clone", A1-A12). */
@@ -182,8 +213,52 @@ const BAD_NAME = /[\\:]/;
 /** The browser's words for a refused read: the server's code, in the prototype's words. */
 export function folderRefusalWords(code: string | null, message: string): string {
   if (code === 'folder_hidden') return "Hidden folders aren't offered.";
+  if (code === 'folder_system') return "System folders aren't offered.";
+  // An older Inbox on a linked machine offers home only.
   if (code === 'folder_outside_home') return 'Only folders inside your home folder.';
   return message;
+}
+
+/** A drive the machine has mounted (its launch block's `drives`): `/Volumes/Studio SSD`, its name, a network one. */
+export interface FolderDrive {
+  path: string;
+  name: string;
+  network?: true;
+}
+
+/** Where a typed path is: one of the drives (the longest that holds it), else home (`null`). */
+export function placeOf(path: string, drives: readonly FolderDrive[]): FolderDrive | null {
+  const clean = path.replace(/\/+$/, '');
+  return drives.filter((d) => clean === d.path || clean.startsWith(`${d.path}/`)).sort((a, b) => b.path.length - a.path.length)[0] ?? null;
+}
+
+/**
+ * A project whose folder is gone because its drive isn't plugged in: that drive's name (`/Volumes/Archive/old-site`
+ * with no Archive mounted → "Archive"), else null. Only for a folder in a drives folder (`/Volumes`, `/mnt`, `/media`,
+ * `/run/media/<user>`), and only when the machine said which drives it has.
+ */
+export function unpluggedDrive(root: string, drives: readonly FolderDrive[] | null | undefined): string | null {
+  if (!drives) return null;
+  const parts = root.split('/').filter(Boolean);
+  const at = parts[0] === 'Volumes' || parts[0] === 'mnt' ? 1 : parts[0] === 'run' && parts[1] === 'media' ? 3 : parts[0] === 'media' ? (parts.length > 3 ? 2 : 1) : -1;
+  const name = at > 0 ? parts[at] : undefined;
+  if (!name || placeOf(root, drives)) return null;
+  return name;
+}
+
+/**
+ * A folder on a drive as the folder menu says it: the drive's name, then the folders under it
+ * (`/Volumes/Studio SSD/clients/acme` → "Studio SSD", ["clients", "acme"]). A drive that isn't plugged in is named by
+ * its folder in the drives folder. Null for a folder on no drive.
+ */
+export function drivePathOf(root: string, drives: readonly FolderDrive[] | null | undefined): { name: string; folders: string[] } | null {
+  if (!drives) return null;
+  const parts = root.split('/').filter(Boolean);
+  const mounted = placeOf(root, drives);
+  if (mounted) return { name: mounted.name, folders: parts.slice(mounted.path.split('/').filter(Boolean).length) };
+  const name = unpluggedDrive(root, drives);
+  if (!name) return null;
+  return { name, folders: parts.slice(parts.indexOf(name) + 1) };
 }
 
 /**
@@ -196,6 +271,8 @@ export function folderBrowserView(input: {
   typed: string;
   read: FolderRead | null;
   nameRead: FolderRead | null;
+  /** The full path's read was refused as hidden or system (`folderRefusalWords`): said in the note line. */
+  nameRefused?: string | null;
   error?: string | null;
   /**
    * Clone into another folder (C14-C15c): the repo's name, and where a clone into the folder that is there (`cloneAt`)
@@ -215,7 +292,8 @@ export function folderBrowserView(input: {
   };
   const path = normalizeFolderPath(input.typed);
   const { parent, tail } = splitFolderPath(path);
-  if (!parent.startsWith('~')) return { ...view, note: 'Only folders inside your home folder.' };
+  // Any folder but a hidden or system one (approval "inbox-launch-any-folder"): a hidden one is said without a read;
+  // a system one is the server's to say.
   if ([...parent.split('/').slice(1), tail].some((segment) => segment.startsWith('.'))) return { ...view, note: "Hidden folders aren't offered." };
   if (input.error) return { ...view, note: input.error };
   const read = input.read;
@@ -229,9 +307,10 @@ export function folderBrowserView(input: {
     const names = folderSuggestions(read.folders, tail);
     const near = (n: number) => closestFirst(open, tail).slice(0, n).map(row);
     if (tail === '') {
-      // Home itself is never started in (A1): its first folder leads instead. A clone may go in home.
+      // Home itself is never started in (A1), nor a folder above it, `/` or the folder drives are in (`start: false`):
+      // its first folder leads instead. A clone may go in home.
       if (clone) cloneLead(parent);
-      else if (parent !== '~') view.rows.push({ kind: 'start', path: parent, name: folderName(parent) });
+      else if (parent !== '~' && read.start !== false) view.rows.push({ kind: 'start', path: parent, name: folderName(parent) });
       view.rows.push(...names.map(row));
       if (view.rows.length === 0) view.note = `${parent} has no folders.`;
       return view;
@@ -241,7 +320,7 @@ export function folderBrowserView(input: {
     if (exact) {
       if (locked.has(exact)) view.note = `Can't open ${typedPath}: no permission.`;
       else if (clone) cloneLead(typedPath);
-      else view.rows.push({ kind: 'start', path: typedPath, name: tail });
+      else if (!(read.nostart ?? []).includes(exact)) view.rows.push({ kind: 'start', path: typedPath, name: tail });
       view.rows.push(...names.map(row));
       return view;
     }
@@ -249,7 +328,7 @@ export function folderBrowserView(input: {
     if (named === 'folder') {
       // A folder the listing spells another way (a case-blind disk): it is there, so it leads.
       if (clone) cloneLead(typedPath);
-      else view.rows.push({ kind: 'start', path: typedPath, name: tail });
+      else if (input.nameRead!.start !== false) view.rows.push({ kind: 'start', path: typedPath, name: tail });
       view.rows.push(...names.map(row));
       return view;
     }
@@ -257,9 +336,15 @@ export function folderBrowserView(input: {
       view.note = `Can't open ${typedPath}: no permission.`;
       return view;
     }
+    if (named === null && input.nameRefused) {
+      // A folder there but not offered (Windows marks AppData hidden; no dot to see): said, and nothing to create.
+      view.note = input.nameRefused;
+      view.rows.push(...names.map(row));
+      return view;
+    }
     if (named === 'file') {
       // A path to a file (A7): its folder leads. A name a file has (A8): pick another.
-      if (/\.\w+$/.test(tail) && parent !== '~' && !clone) {
+      if (/\.\w+$/.test(tail) && parent !== '~' && read.start !== false && !clone) {
         view.note = `${tail} is a file.`;
         view.rows.push({ kind: 'start', path: parent, name: folderName(parent) });
       } else view.note = `There's already a file named ${tail}. Pick another name.`;

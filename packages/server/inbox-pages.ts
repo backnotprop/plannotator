@@ -28,7 +28,9 @@
  */
 
 import { createHmac, randomBytes } from "node:crypto";
+import { gunzipSync } from "node:zlib";
 import { SERVED_FRAME_GONE } from "@plannotator/core/html-embed";
+import { NO_FRAME_ANCESTORS, withFrameAncestors } from "./inbox-framing";
 
 export const INBOX_PAGES_PATH = "/api/inbox/pages";
 const PAGE_PATH = /^\/api\/inbox\/pages\/([^/]+)$/;
@@ -42,7 +44,8 @@ export const INBOX_PAGE_MAX_BYTES = 8 * 1024 * 1024;
  * (`WINDOW_CSP` in inbox.ts), plus web pictures (`https:` and plain `http:`,
  * local servers included: every picture a page names should show), and
  * sandboxed by the header too, so the page is an opaque origin even opened as
- * a tab of its own.
+ * a tab of its own. Video and audio as the window's (`'self'`, data: and
+ * blob:, never the web): the web is for pictures only.
  * `'self'` keeps the page's folder (its `<base href>`), its nested pages and
  * its own pictures from anywhere on this computer (their tokens, html-assets).
  */
@@ -52,6 +55,7 @@ export const INBOX_PAGE_CSP = [
   "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'",
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob: https: http:",
+  "media-src 'self' data: blob:",
   "font-src 'self' data:",
   "connect-src 'self'",
   "worker-src 'self' blob:",
@@ -66,11 +70,11 @@ export const INBOX_PAGE_GONE_MESSAGE = SERVED_FRAME_GONE;
 const GONE_PAGE = `<!doctype html><meta charset="utf-8"><script>parent.postMessage({ type: ${JSON.stringify(INBOX_PAGE_GONE_MESSAGE)} }, "*");</script>`;
 const GONE_CSP = "sandbox allow-scripts; default-src 'none'; script-src 'unsafe-inline'; frame-ancestors 'self'";
 
-/** A page document's headers. */
-export function inboxPageHeaders(): Record<string, string> {
+/** A page document's headers; `framers`: the app origins that may frame the window (inbox-framing.ts). */
+export function inboxPageHeaders(framers: readonly string[] = NO_FRAME_ANCESTORS): Record<string, string> {
   return {
     "Content-Type": "text/html; charset=utf-8",
-    "Content-Security-Policy": INBOX_PAGE_CSP,
+    "Content-Security-Policy": withFrameAncestors(INBOX_PAGE_CSP, framers),
     "X-Content-Type-Options": "nosniff",
     // No Referer on the page's requests: a web picture's site never learns the Inbox's URL.
     "Referrer-Policy": "no-referrer",
@@ -78,6 +82,17 @@ export function inboxPageHeaders(): Record<string, string> {
     // Kept by id while this Inbox runs; a restart forgets it, so never cached.
     "Cache-Control": "no-store",
   };
+}
+
+async function pageBody(req: Request, readBody: (req: Request) => Promise<Record<string, unknown>>): Promise<Record<string, unknown> | null> {
+  if ((req.headers.get("content-encoding") ?? "").toLowerCase() !== "gzip") return readBody(req);
+  let text: string;
+  try {
+    text = gunzipSync(Buffer.from(await req.arrayBuffer()), { maxOutputLength: INBOX_PAGE_MAX_BYTES * 2 }).toString("utf8");
+  } catch (cause) {
+    return (cause as { code?: unknown }).code === "ERR_BUFFER_TOO_LARGE" ? null : {};
+  }
+  return readBody(new Request(req.url, { method: "POST", headers: { "Content-Type": "application/json" }, body: text }));
 }
 
 export function createInboxPages(options: {
@@ -114,10 +129,13 @@ export function createInboxPages(options: {
     return id;
   };
 
-  const route = async (req: Request, url: URL): Promise<Response | null> => {
+  const route = async (req: Request, url: URL, framers: readonly string[] = NO_FRAME_ANCESTORS): Promise<Response | null> => {
     if (url.pathname === INBOX_PAGES_PATH) {
       if (req.method !== "POST") return json({ error: "Use POST.", code: "method_not_allowed" }, 405);
-      const body = await options.readBody(req);
+      const body = await pageBody(req, options.readBody);
+      if (body === null) {
+        return json({ error: `html: at most ${INBOX_PAGE_MAX_BYTES} bytes.`, code: "page_too_large" }, 413);
+      }
       if (typeof body.html !== "string" || body.html.trim() === "") {
         return json({ error: "html: the page, a non-empty string.", code: "validation_error" }, 400);
       }
@@ -135,10 +153,10 @@ export function createInboxPages(options: {
     if (page === undefined) {
       return new Response(req.method === "HEAD" ? null : GONE_PAGE, {
         status: 404,
-        headers: { ...inboxPageHeaders(), "Content-Security-Policy": GONE_CSP },
+        headers: { ...inboxPageHeaders(framers), "Content-Security-Policy": withFrameAncestors(GONE_CSP, framers) },
       });
     }
-    return new Response(req.method === "HEAD" ? null : page, { headers: inboxPageHeaders() });
+    return new Response(req.method === "HEAD" ? null : page, { headers: inboxPageHeaders(framers) });
   };
 
   return { route, size: () => pages.size, bytes: () => bytes };

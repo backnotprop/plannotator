@@ -1,0 +1,23 @@
+	
+
+	Tiny Creatures (1.0)
+
+	Created by Clint Bellanger (clintbellanger.net)
+	Creation date: 03-18-2024
+
+			------------------------------
+
+	License: (Creative Commons Zero, CC0)
+	http://creativecommons.org/publicdomain/zero/1.0/
+
+	This content is free to use in personal, educational and commercial projects.
+	Support my work by crediting Clint Bellanger (this is not mandatory)
+
+			------------------------------
+
+ 	This set is an expansion of Kenney's Tiny Dungeon and Tiny Town:
+	https://kenney.nl/assets/tiny-dungeon
+	https://kenney.nl/assets/tiny-town
+	The included sample Tiled map and example images contain works by Kenney from these sets.
+
+	Made with Kenney's permission

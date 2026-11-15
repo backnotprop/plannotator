@@ -33,7 +33,7 @@
  * PNGs land in PLANNOTATOR_E2E_PROOF_DIR/list-options, or .local/proof/list-options/.
  */
 
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -62,7 +62,7 @@ test.beforeAll(async () => {
   mkdirSync(proofDir, { recursive: true });
   const root = inboxScratch('plannotator-inbox-list-options-e2e-');
   const dataDir = join(root, 'data');
-  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0', PLANNOTATOR_UPDATE_CHECK: '0' };
+  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0', PLANNOTATOR_UPDATE_CHECK: '0' };
   const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
   expect(started.status, started.stderr).toBe(0);
   url = started.stdout.trim();
@@ -578,7 +578,7 @@ test('the ⋮ menu: plain checkboxes on one edge with "Customize rows…", which
       await page.locator('[data-customize-rows]').click();
       await expect(page).toHaveURL(/#settings\/rows$/);
       await expect(page.getByRole('heading', { name: 'Rows', level: 1 })).toBeVisible();
-      await expect(page.locator('[data-rows-control="density"] input[value="compact"]')).toBeChecked();
+      await expect(page.locator('[data-rows-control="spacing"] input[value="compact"]')).toBeChecked();
     } finally {
       await context.close();
     }
@@ -597,7 +597,7 @@ test('Settings → Rows: a choice shows in another window at once, is saved for 
     await expect(list.locator(`.ib-row[data-thread-id="${threads.ledger}"]`)).toBeVisible();
     expect(await lookClasses(list)).toEqual([]);
 
-    await settings.locator('[data-rows-control="density"] label', { hasText: 'Roomy' }).click();
+    await settings.locator('[data-rows-control="spacing"] label', { hasText: 'Roomy' }).click();
     await settings.locator('.ib-rws-presets button', { hasText: 'Detailed' }).click();
     // Another browser (another cookie jar), no reload: the Detailed look.
     // Detailed has no subject pill since approval "inbox-rows-dialog" (round 7b).

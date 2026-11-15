@@ -76,6 +76,8 @@ import { RiskMark } from './RiskMark';
 import { ContextNotesProvider, useContextNotes } from '../contextNotes/ContextNotes';
 import { placesWord, riskNotes, takeRiskPlaces } from '../contextNotes/model';
 import { usePullRisk } from './usePullRisk';
+import { Named } from './Face';
+import { person, wordsText, type Words } from './words';
 
 // `#guide-reader` is packages/inbox/guide/GuideReader.tsx (package.json `imports`).
 /** The file rail's width: dragged and kept. */
@@ -436,15 +438,16 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
   const postHead = diff?.head_sha ?? (scope === 'layer' ? null : (layer?.head_sha ?? null));
   const canPost = !!postablePull(layer) && !diffError && (!diff || !!postHead);
   // The expand arrows' whole files, at the commits this diff runs between.
-  // Asked only with the blobs the patch names, so the server can refuse a text that is not this patch's file; a patch
-  // without them (GitLab's whole stack), or a diff whose head moved during its read, opens nothing.
   const headMoved = !!diff && !diff.head_sha;
+  const patchHead = diff?.head_sha ?? null;
   const fileContents = useCallback(
     async (path: string, signal: AbortSignal, patch: string) => {
-      const ids = headMoved ? null : patchBlobIds(patch);
-      return ids ? inboxApi.pullFile(layerKey, scope, path, ids, signal) : { oldContent: null, newContent: null };
+      if (headMoved) return { oldContent: null, newContent: null };
+      const ids = patchBlobIds(patch);
+      if (ids) return inboxApi.pullFile(layerKey, scope, path, ids, signal);
+      return patchHead && !/^index /m.test(patch) ? inboxApi.pullFile(layerKey, scope, path, { head: patchHead }, signal) : { oldContent: null, newContent: null };
     },
-    [layerKey, scope, headMoved],
+    [layerKey, scope, headMoved, patchHead],
   );
   const [picked, pick] = useReviewDestination();
   const [posted, setPosted] = useState<{ label: string; url: string; action: string } | null>(null);
@@ -835,11 +838,12 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
   const noun = pullNounWord(layer.platform);
   const wholeTip = `Whole stack: ${diff && scope === 'stack' ? `${diff.base}…${diff.head}` : `${stack.base} up to ${label}`}`;
 
-  const readOnlyWords = layer.mine ? 'No review thread yet' : layer.author ? `by ${layer.author}` : 'by a deleted account';
+  const readOnlyParts: Words = layer.mine ? ['No review thread yet'] : layer.author ? ['by ', person(layer.author)] : ['by a deleted account'];
+  const readOnlyWords = wordsText(readOnlyParts);
   const readOnlyNote = !canDecide && !posted && !diffError && (
     <Tip cut content={readOnlyWords}>
       <p className="ib-prr-note" data-pull-review-readonly={layer.mine ? 'unlinked' : 'teammate'}>
-        {readOnlyWords}
+        <Named words={readOnlyParts} host={layer.host} />
       </p>
     </Tip>
   );

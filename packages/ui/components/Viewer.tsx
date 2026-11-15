@@ -13,9 +13,9 @@ import { copyTextToClipboard } from '../utils/clipboard';
 import { getRichCopyEnabled } from '../utils/richCopyPolicy';
 import { BlockRenderer } from './BlockRenderer';
 import { BELOW_TITLE_SLOT_MARKER } from '../utils/belowTitleSlot';
-import { indexQuestionBlocks, type IndexedQuestion, type ParsedQuestion, type QuestionAnswer } from '@plannotator/core/question-block';
+import { indexQuestionBlocks, isQuestionDirectiveKind, type IndexedQuestion, type ParsedQuestion, type QuestionAnswer } from '@plannotator/core/question-block';
 import { diagramTargetText, type DiagramAnchor } from '@plannotator/core/diagram-anchor';
-import type { QuestionBlockProps } from './blocks/QuestionBlock';
+import type { QuestionAcceptBehavior, QuestionBlockProps } from './blocks/QuestionBlock';
 import { resolveQuestionAnswers } from '../utils/questionAnswers';
 import { CodeBlock } from './blocks/CodeBlock';
 import { TableBlock } from './blocks/TableBlock';
@@ -73,7 +73,7 @@ class ToolbarErrorBoundary extends React.Component<
 }
 
 import { CommentPopover, hasCommentDraft, type CommentAskAIHandler } from './CommentPopover';
-import { TaterSpriteSitting } from './TaterSpriteSitting';
+import { TaterSittingSlot } from './TaterSpriteSlots';
 import { AttachmentsButton } from './AttachmentsButton';
 import { MessagesIcon } from './icons/MessagesIcon';
 import { DiagramAnchorClaims, DiagramAnchorClaimsContext } from './diagram/anchorClaims';
@@ -91,7 +91,9 @@ import { DocBadges, type DocBadgesProps, type LinkedDocBadgeInfo } from './DocBa
 import { legacyBadgesMaxWidth } from './docBadgesWidth';
 import { PinpointOverlay } from './PinpointOverlay';
 import { usePinpoint } from '../hooks/usePinpoint';
-import { rangeInsideExcluded, useAnnotationHighlighter, type AnnotationRestoreReport, type CommentDraftShelf } from '../hooks/useAnnotationHighlighter';
+import { useClickWord } from '../hooks/useClickWord';
+import { getClickAWord } from '../utils/clickAWordPolicy';
+import { useAnnotationHighlighter, type AnnotationRestoreReport, type CommentDraftShelf } from '../hooks/useAnnotationHighlighter';
 import { getVisibleCommentDrafts } from '../utils/commentCardPolicy';
 import { shelveCommentDraft, shelvedCommentDrafts } from '../utils/commentDraftShelf';
 import { CommentDraftBadges } from './CommentDraftBadges';
@@ -111,6 +113,8 @@ import {
   resolveCompactHeaderGeometry,
   snapCompactHeaderWidth,
 } from './compactHeaderLayout';
+
+const asksQuestion = (block: Block): boolean => block.type === 'directive' && isQuestionDirectiveKind(block.directiveKind || 'note');
 
 /** Typed controls required for Viewer's opt-in, in-flow annotation header. */
 export interface ViewerAnnotationHeaderConfig {
@@ -140,6 +144,12 @@ export interface ViewerProps {
    */
   onSide?: (text: string, context: SelectionActionContext) => void;
   /**
+   * Opt-in host capability: how that button is drawn (AnnotationToolbar
+   * `sideButton`: an icon-only button with the host's glyph and tooltip).
+   * Absent → the two bubbles and the word "Side": unchanged.
+   */
+  sideButton?: { icon?: React.ReactNode; label: string };
+  /**
    * Whether the package's quick labels are offered on the selection toolbars
    * (default true). `false` hides the Zap picker and the Alt+digit label
    * shortcuts; the 👍 button is unaffected.
@@ -161,6 +171,12 @@ export interface ViewerProps {
   selectedAnnotationId: string | null;
   mode: EditorMode;
   inputMethod?: InputMethod;
+  /**
+   * Click a word (Select input method): one click on a word highlights it.
+   * Absent: `configurePlannotatorUI({ clickAWord })`, default on. This prop
+   * wins over that.
+   */
+  clickAWord?: boolean;
   taterMode: boolean;
   globalAttachments?: ImageAttachment[];
   onAddGlobalAttachment?: (image: ImageAttachment) => void;
@@ -353,6 +369,10 @@ export interface ViewerProps {
    *  when the host knows it before the picture loads (see `QuestionBlock`
    *  `pictureSize`). Absent: unknown, and nothing changes. */
   questionPictureSize?: (url: string) => { width: number; height: number } | null;
+  /** Accept recommended, gentler: steps aside while a card field has focus, keeps
+   *  Other… words, tells the host so it can offer Undo (see `QuestionBlock`
+   *  `acceptBehavior`). Absent: today's button. */
+  questionAcceptBehavior?: QuestionAcceptBehavior;
   /** Makes a question's "Records a decision" tag a toggle button
    *  (`aria-pressed`); a click calls this with the question's key and the
    *  next state, which the host stores and returns from
@@ -448,6 +468,19 @@ export interface ViewerProps {
    * The label picker stays off. Absent → unchanged.
    */
   textDeletions?: boolean;
+  /**
+   * Opt-in, with `textComments`: question cards take comments too, as they do
+   * in plan review: the prompt, its context, and each choice's label and
+   * description are ordinary text for the selection toolbar and the
+   * highlights; the card's own controls (the radios and checkboxes,
+   * "Other…", the footer, a picture choice's picture) stay out. A click on a
+   * choice still picks it at once; a drag across its words, or a double-click
+   * on one, selects them and never picks (the card's own guard). For a host
+   * whose reader comments on a whole message, questions included (the
+   * Plannotator Inbox). A host's own card (`renderQuestionCard`) stays out.
+   * Absent → unchanged (cards are left out of selection).
+   */
+  questionTextComments?: boolean;
   /**
    * Opt-in: words a text-selection comment box opens with, for the selected
    * text (a host's suggested comment, kept with one press or written over).
@@ -852,10 +885,12 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   selectedAnnotationId,
   mode,
   inputMethod = 'drag',
+  clickAWord: clickAWordProp,
   taterMode,
   selectionActions,
   selectionActionsIcon,
   onSide,
+  sideButton,
   quickLabels,
   mentionSource,
   globalAttachments = [],
@@ -911,6 +946,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   questionPictureBadge,
   onQuestionPictureZoom,
   questionPictureSize,
+  questionAcceptBehavior,
   onToggleQuestionDecisionRecording,
   onOpenQuestionDecision,
   questionDecisionLocked,
@@ -927,6 +963,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
   htmlEmbeds,
   textComments = false,
   textDeletions = false,
+  questionTextComments = false,
   suggestComment,
   vimModeEnabled = false,
   vimHudEnabled = false,
@@ -967,6 +1004,9 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     }
     setLightboxState(imageLightboxStepping || imageRegionComments ? { ...image, images: documentImages() } : image);
   };
+  const setLightboxRef = useRef(setLightbox);
+  setLightboxRef.current = setLightbox;
+  const onBlockImageClick = useCallback((src: string, alt: string) => setLightboxRef.current({ src, alt }), []);
   // Region comments made in the lightbox are selected by the host as they are
   // added; that selection must not reopen or refocus the lightbox.
   const regionCreatedHere = useRef(new Set<string>());
@@ -1365,6 +1405,19 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     onCodeBlockClick: hostComposes ? noHostCodeBlockClick : handlePinpointCodeBlockClick,
   });
   clearPinpointHoverRef.current = clearPinpointHover;
+  // Click a word, part of Select: one click on a word highlights it; a drag is the browser's own
+  // selection, as always. Off with the `clickAWord` prop, else `configurePlannotatorUI({ clickAWord })`.
+  // Redline makes nothing of a click: a stray click must not delete a word. Pinpoint owns its
+  // clicks; off under read-only, a plan diff and vim focus.
+  const [clickAWordDefault] = useState(getClickAWord);
+  useClickWord({
+    containerRef,
+    enabled: (clickAWordProp ?? clickAWordDefault) && inputMethod !== 'pinpoint' && selectionCommentsOn && !(isPlanDiffActive ?? false) && !(vimModeActive && vim.focused),
+    clicksEnabled: mode !== 'redline',
+    snapDrags: false,
+    annotationUiOpen: !!(toolbarState || hookCommentPopover || viewerCommentPopover || hookQuickLabelPicker || codeBlockQuickLabelPicker),
+    onSelectRange: hostComposes ? hostPinpointRange : highlightRange,
+  });
   const vimOwnsHudTarget = vimHudEnabled
     && vim.state.phase !== 'inactive'
     && (vim.focused || vim.state.phase === 'action');
@@ -1489,28 +1542,9 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     return () => window.clearTimeout(timer);
   }, [blocks, locationHash, scrollToAnchor, scrollViewport]);
 
-  // Use the native copy event so clipboard writes are synchronous (Safari
-  // rejects the async navigator.clipboard API outside the user-gesture window).
-  // web-highlighter clears the DOM selection on mouseup, so the browser has
-  // nothing to copy by the time Cmd+C fires — we inject the captured text here.
-  useEffect(() => {
-    const handleCopy = (e: ClipboardEvent) => {
-      const tag = (e.target as HTMLElement)?.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-      // A live selection where nothing is annotated (an Inbox action item's text) is
-      // the person's own: the browser copies it, never an older toolbar's text.
-      const live = window.getSelection();
-      if (live && !live.isCollapsed && live.rangeCount > 0 && containerRef.current && rangeInsideExcluded(containerRef.current, live.getRangeAt(0))) return;
-
-      if (toolbarState?.selectionText) {
-        e.preventDefault();
-        e.clipboardData?.setData('text/plain', toolbarState.selectionText);
-      }
-    };
-
-    document.addEventListener('copy', handleCopy);
-    return () => document.removeEventListener('copy', handleCopy);
-  }, [toolbarState]);
+  // Ctrl+C / Cmd+C with the toolbar up or the selection's composer open is
+  // `useAnnotationHighlighter`'s (`utils/highlightCopy`): the native copy
+  // event, so the clipboard write stays synchronous inside the key press.
 
   // `ViewerHandle.reopenComment`: a comment being written that the host kept
   // when its file closed, back in its composer. A global comment opens the
@@ -1908,7 +1942,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
       data-viewer-fill-height={fillHeight ? '' : undefined}
       style={maxWidth === null ? undefined : { maxWidth: maxWidth ?? 832 }}
     >
-      {taterMode && <TaterSpriteSitting />}
+      {taterMode && <TaterSittingSlot />}
       <article
         ref={containerRef}
         data-print-region="article"
@@ -2004,7 +2038,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
                   {group.blocks.map((block, i) => (
                     <BlockRenderer
                       imageBaseDir={imageBaseDir}
-                      onImageClick={(src, alt) => setLightbox({ src, alt })}
+                      onImageClick={onBlockImageClick}
                       key={block.id}
                       block={block}
                       orderedIndex={indices[i]}
@@ -2074,7 +2108,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
               key={group.block.id}
               block={group.block}
               imageBaseDir={imageBaseDir}
-              onImageClick={(src, alt) => setLightbox({ src, alt })}
+              onImageClick={onBlockImageClick}
               onOpenLinkedDoc={onOpenLinkedDoc}
               onOpenCodeFile={onOpenCodeFile}
               githubRepo={linkRepo?.display}
@@ -2162,7 +2196,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
               const rendered = (
                 <BlockRenderer
                   imageBaseDir={imageBaseDir}
-                  onImageClick={(src, alt) => setLightbox({ src, alt })}
+                  onImageClick={onBlockImageClick}
                   key={group.block.id}
                   block={group.block}
                   onOpenLinkedDoc={onOpenLinkedDoc}
@@ -2179,7 +2213,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
                   onAnswerQuestion={readOnly || (question && questionReadOnly?.(question)) ? undefined : onAnswerQuestion}
                   onSaveQuestionAnswer={readOnly || (question && questionReadOnly?.(question)) ? undefined : onSaveQuestionAnswer}
                   saveQuestionAnswerLabel={saveQuestionAnswerLabel}
-                  renderQuestionFooter={renderQuestionFooter}
+                  renderQuestionFooter={asksQuestion(group.block) ? renderQuestionFooter : undefined}
                   questionDecisionRecording={question ? questionDecisionRecording?.(question) : undefined}
                   questionDecisionScope={questionDecisionScope}
                   onToggleQuestionDecisionRecording={readOnly || (question && (questionDecisionLocked?.(question) || questionReadOnly?.(question))) ? undefined : onToggleQuestionDecisionRecording}
@@ -2193,12 +2227,14 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
                   questionPictureBadge={questionPictureBadge}
                   onQuestionPictureZoom={onQuestionPictureZoom}
                   questionPictureSize={questionPictureSize}
+                  questionAcceptBehavior={questionAcceptBehavior}
                 />
               );
               // `textComments`: a question card's words are not commented on
-              // (its own controls already are excluded); a box-less wrapper
-              // keeps its layout.
-              if (question && textCommentsOnly) {
+              // (its own controls already are excluded) unless the host asks
+              // for them (`questionTextComments`); a box-less wrapper keeps
+              // its layout.
+              if (question && textCommentsOnly && !questionTextComments) {
                 return (
                   <div key={group.block.id} className="annotation-exclude" style={{ display: 'contents' }}>
                     {rendered}
@@ -2225,10 +2261,12 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
               selectionActions={selectionActions}
               selectionActionsIcon={selectionActionsIcon}
               onSide={onSide}
+              sideButton={sideButton}
               quickLabels={quickLabels}
               copyText={toolbarState.selectionText}
               getRichCopy={getRichCopyEnabled() ? toolbarState.getRichCopy : undefined}
               touchAnchorRect={toolbarState.getAnchorRect}
+              touchSide={toolbarState.touchSide}
               hideCopyButton={!isTouchDevice}
               closeOnScrollOut
             />
@@ -2317,7 +2355,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
             onClose={() => setPopoutTable(null)}
             container={containerRef.current}
             imageBaseDir={imageBaseDir}
-            onImageClick={(src, alt) => setLightbox({ src, alt })}
+            onImageClick={onBlockImageClick}
             onOpenLinkedDoc={onOpenLinkedDoc}
             onOpenCodeFile={onOpenCodeFile}
             githubRepo={linkRepo?.display}

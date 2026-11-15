@@ -4152,8 +4152,8 @@ export async function startReviewServer(options: {
 				return;
 			}
 			await handleReviewDraftRequest(req, res, keys, reviewDrafts);
-		} else if (url.pathname === "/favicon.png") {
-			handleFavicon(res);
+		} else if (url.pathname === "/favicon.png" || url.pathname === "/favicon.ico") {
+			handleFavicon(res, url.pathname);
 		} else if (isDiagramEngineRequest(url.pathname)) {
 			// Code review's diagram engine, fetched by the page only for a
 			// preview or guide overview that holds a diagram fence.

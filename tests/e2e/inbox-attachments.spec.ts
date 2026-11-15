@@ -25,7 +25,7 @@
  * .local/proof/attachments/ with a contact sheet.
  */
 
-import { expect, test, type Browser, type BrowserContext, type FrameLocator, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type FrameLocator, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, rmSync, symlinkSync, writeFileSync, appendFileSync, unlinkSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -202,7 +202,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const dataDir = join(root, 'data');
   const home = join(root, 'home');
   mkdirSync(home);
-  const env = { PATH: process.env.PATH ?? '', HOME: home, PLANNOTATOR_DATA_DIR: dataDir };
+  const env = { PATH: process.env.PATH ?? '', HOME: home, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: dataDir };
   const started = spawnSync(builtBinary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
   expect(started.status, started.stderr).toBe(0);
   const url = started.stdout.trim();
@@ -453,7 +453,7 @@ test('the HTML prototype opens full screen: its image and frame load from its fo
   await page.getByRole('button', { name: 'Open admin-view.html' }).click();
   const pane = page.locator(`[data-attachment-pane="${world.attachments.html}"]`);
   await expect(pane).toBeVisible();
-  // HTML opens in the annotation mode by default: full screen, Side by side offered.
+  // HTML opens full screen by default, Side by side offered.
   await expect(pane).toHaveClass(/ib-full/);
   await expect(pane.getByRole('button', { name: 'Side by side' })).toBeVisible();
   const frame = pageFrame(page);
@@ -467,7 +467,10 @@ test('the HTML prototype opens full screen: its image and frame load from its fo
   // The page's script could not read the Inbox API from its sandboxed frame.
   await expect(frame.locator('#probe')).toHaveText('inbox api refused');
 
-  // Pinpoint is armed: a click on the button pins a comment to it.
+  // It opens in Interact; with Annotate on, a click on the button pins a comment to it.
+  await expect(page.locator('[data-full-view-pen]')).toHaveAttribute('aria-pressed', 'false');
+  await page.locator('[data-full-view-pen]').click();
+  await expect(page.locator('[data-full-view-pen]')).toHaveAttribute('aria-pressed', 'true');
   await frame.locator('#retry-all').click();
   await composer(page).fill('Retry all should ask first. Forty charges at once is a lot to undo.');
   await page.locator('[data-comment-popover]').getByRole('button', { name: 'Comment', exact: true }).click();
@@ -566,8 +569,8 @@ async function replyChipProblems(page: Page, sentenceMayWrap = false): Promise<s
 
 /**
  * A phone's open reply box (approval "inbox-reply-box", T6): no chip; the line naming the questions and comments on its
- * own line over the row, its words on one line; the row (paperclip, Skills, mic, Send) one row inside the box. Problems
- * as text. `narrow`: a box far narrower than its row, where Send and the mic must still be inside it.
+ * own line over the row, its words on one line; the row (paperclip, Skills, who gets the reply in a thread with several
+ * agents, mic, Send) one row inside the box. Problems as text. `narrow`: a box far narrower than its row, where Send and the mic must still be inside it.
  */
 async function phoneFootProblems(page: Page, narrow = false): Promise<string[]> {
   return page.evaluate((narrow) => {

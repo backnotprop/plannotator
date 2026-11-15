@@ -21,7 +21,7 @@
  * PNGs land in .local/proof/compose/ (and COMPOSE_SHOTS_DIR when set).
  */
 
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -156,7 +156,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   if (extraShots) mkdirSync(extraShots, { recursive: true });
   const root = inboxScratch('plannotator-inbox-compose-e2e-');
   const dataDir = join(root, 'data');
-  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0' };
+  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0' };
   const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
   expect(started.status, started.stderr).toBe(0);
   const url = started.stdout.trim();
@@ -319,7 +319,7 @@ test('an agent connects: the draft (saved with nobody in To) reopens with To emp
   await expect(pane.locator('[data-started-by]')).toHaveText(/You started this thread\s*to Claude Code in ledger/);
   await expect(pane.locator('[data-attachment-name="notes.md"]').first()).toBeVisible();
   // The session's connection polls idle: it takes it within seconds.
-  await expect(pane.locator('[data-delivery="sending"]')).toHaveText('Sending to Claude Code…');
+  await expect(pane.locator('[data-delivery="sending"]').locator('.ib-dl-text')).toHaveText('Sending to Claude Code…');
   const listRow = page.locator(`.ib-listcol [data-thread-id="${command.thread_id}"]`).first();
   await expect(listRow).toContainText('To Claude Code');
   // The thread's name as compose showed it, the row's title (approval "list-rows-mail-icons").
@@ -405,15 +405,16 @@ test('⌘K: the Actions group opens compose for "Message <agent> in <project>"; 
     const sheet = mobile.locator('dialog[data-compose]');
     await expect(sheet.locator('.ib-cp-bar h2')).toHaveText('New message');
     // Empty: no Save draft, and Send at the foot is disabled.
-    await expect(sheet.locator('.ib-cp-tobtn')).not.toHaveAttribute('data-loading', /.*/);
+    await expect(sheet.locator('.ib-cp-foot [data-compose-to]')).not.toHaveAttribute('data-loading', /.*/);
     await expect(sheet.locator('.ib-cp-bar [data-compose-save]')).toHaveCount(0);
     await expect(sheet.locator('.ib-cp-foot [data-compose-send]')).toHaveAttribute('aria-disabled', 'true');
     await sheet.getByRole('textbox', { name: 'Message' }).fill('Rename the Quiet section to “Done”? Quiet reads like “muted” to me.');
-    // To starts empty: the top bar offers Save draft until a session is picked.
-    await expect(sheet.locator('.ib-cp-tobtn')).toHaveAttribute('data-compose-to', 'choose');
+    // To (the pill in the foot's row) starts empty: the top bar offers Save draft until a session is picked.
+    await expect(sheet.locator('.ib-cp-foot [data-compose-to]')).toHaveAttribute('data-compose-to', 'choose');
     await expect(sheet.locator('.ib-cp-bar [data-compose-save]')).toHaveText('Save draft');
-    await sheet.locator('.ib-cp-tobtn').click();
-    await sheet.locator('[data-compose-session="ses-claude"]').click();
+    await sheet.locator('.ib-cp-foot [data-compose-to]').click();
+    await sheet.locator('[data-compose-to-sheet] [data-compose-session="ses-claude"]').click();
+    await expect(sheet.locator('.ib-cp-foot [data-compose-to]')).toHaveAttribute('data-compose-to', 'ses-claude');
     await shot(mobile, '10-phone-compose', ['dark', 'light']);
     await sheet.locator('.ib-cp-foot [data-compose-send]').click();
     await expect(sheet).toHaveCount(0);
@@ -424,7 +425,7 @@ test('⌘K: the Actions group opens compose for "Message <agent> in <project>"; 
     await mobile.locator('.ib-drafts [data-open-compose], .ib-drafts .ib-lhead-compose').first().click();
     await mobile.locator('dialog[data-compose] [data-compose-text] textarea').fill('A draft kept from a phone.');
     // Kept for a live session (the Drafts page's "is live" chip, later): To is picked, never filled by itself.
-    await mobile.locator('dialog[data-compose] .ib-cp-tobtn').click();
+    await mobile.locator('dialog[data-compose] .ib-cp-foot [data-compose-to]').click();
     await mobile.locator('dialog[data-compose] [data-compose-session="ses-claude"]').click();
     // Cancel keeps it as a draft, with no question.
     await mobile.locator('dialog[data-compose] [data-compose-cancel]').click();

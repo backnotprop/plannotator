@@ -7,6 +7,8 @@ import {
   applyHighlight,
   ensureHighlight,
   highlightToHtml,
+  highlightToRuns,
+  fenceGrammar,
   __resetCodeHighlightCacheForTests,
 } from './codeHighlight';
 import { resolveFenceTheme, resolveSyntaxTheme, DEFAULT_SYNTAX_THEME, SHIKI_THEME_MAP } from './syntaxTheme';
@@ -81,6 +83,41 @@ describe('highlightToHtml', () => {
     // CONTRACT rather than whichever files happened to run first.
     __resetCodeHighlightCacheForTests();
     expect(highlightToHtml('const x = 1', 'typescript', 'pierre-dark')).toBeNull();
+  });
+});
+
+// Fence labels people write that Shiki has no grammar for under that name.
+describe('fence labels Shiki does not know by that name', () => {
+  const FENCES: Array<[label: string, grammar: string, code: string]> = [
+    ['patch', 'diff', '--- a/x\n+++ b/x\n@@ -1 +1 @@\n-old\n+new'],
+    ['env', 'dotenv', '# local\nAPI_URL=https://example.test\nDEBUG=true'],
+    ['postgresql', 'sql', 'SELECT id FROM users WHERE id = 1;'],
+    ['mysql', 'sql', 'SELECT id FROM users WHERE id = 1;'],
+    ['gradle', 'groovy', "plugins {\n    id 'java'\n}"],
+    ['hpp', 'cpp', '#pragma once\nnamespace a { class B { int c() const; }; }'],
+  ];
+
+  for (const [label, grammar, code] of FENCES) {
+    test(`\`${label}\` is coloured as ${grammar}, over the exact source text`, async () => {
+      expect(fenceGrammar(label)).toBe(grammar);
+      expect(await ensureHighlight(label, 'pierre-dark')).toBe(true);
+      // Runs are only returned when the tokens spell the source exactly.
+      const runs = highlightToRuns(code, label, 'pierre-dark');
+      expect(runs).not.toBeNull();
+      expect(new Set(runs!.map((run) => run.style)).size).toBeGreaterThan(1);
+      expect(highlightToHtml(code, label, 'pierre-dark')).toBe(highlightToHtml(code, grammar, 'pierre-dark'));
+    });
+  }
+
+  test('labels that already name a grammar keep it', () => {
+    for (const label of ['ts', 'typescript', 'diff', 'sql', 'cpp', 'c++', 'dotenv', 'groovy', 'bash', 'objc', 'perl']) {
+      expect(fenceGrammar(label)).toBe(label);
+    }
+  });
+
+  test('a made-up label still stays plain', async () => {
+    expect(fenceGrammar('not-a-language')).toBe('not-a-language');
+    expect(await ensureHighlight('not-a-language', 'pierre-dark')).toBe(false);
   });
 });
 

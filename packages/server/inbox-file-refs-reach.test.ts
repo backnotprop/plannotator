@@ -1,6 +1,6 @@
 /**
  * Who reaches a file an agent's message names on another machine, and which paths are never touched (approval
- * "inbox-file-refs-open-viewer"): the forward's refusal, the door's machine-only route, network paths and devices.
+ * "inbox-file-refs-open-viewer"): the forward's refusal, the door's machine-only routes, network paths and devices.
  * Pure: no Inbox, no server, no network; files are fixtures in a temp folder.
  */
 import { afterEach, describe, expect, test } from "bun:test";
@@ -11,6 +11,7 @@ import { checkInboxReadableFile } from "@plannotator/shared/inbox/attachments";
 import { isNetworkPath } from "@plannotator/shared/inbox/network-paths";
 import { doorRouteOf } from "./inbox-devices";
 import { forwardedFileReadRefusal } from "./inbox-machines";
+import { doorWriteKind } from "./inbox-outbox";
 import { isPlannotatorState } from "./inbox-open-in";
 
 const roots: string[] = [];
@@ -21,21 +22,16 @@ afterEach(() => {
 const windowGet = (headers: Record<string, string> = {}) => new Request("http://127.0.0.1:4000/api/inbox/m/x/open-in/file/view", { headers: { host: "127.0.0.1:4000", ...headers } });
 
 describe("a file read forwarded to a linked machine", () => {
-  test("a tailnet guest is refused, even from a window: that machine would read it as its owner's", () => {
-    expect(forwardedFileReadRefusal("open-in/file/view", windowGet({ "sec-fetch-site": "same-origin" }), true)).toMatchObject({ status: 403, body: { code: "owner_only" } });
-    expect(forwardedFileReadRefusal("open-in/file/raw", windowGet({ "sec-fetch-site": "same-origin" }), true)).toMatchObject({ status: 403 });
-  });
-
   test("only the owner's window reads it: a bare call (an agent, a script) and another page are refused", () => {
-    expect(forwardedFileReadRefusal("open-in/file/view", windowGet({ "sec-fetch-site": "same-origin" }), false)).toBeNull();
-    expect(forwardedFileReadRefusal("open-in/file/raw", windowGet({ "sec-fetch-site": "same-origin", origin: "http://127.0.0.1:4000" }), false)).toBeNull();
-    expect(forwardedFileReadRefusal("open-in/file/view", windowGet(), false)).toMatchObject({ status: 403, body: { code: "window_only" } });
-    expect(forwardedFileReadRefusal("open-in/file/view", windowGet({ "sec-fetch-site": "same-site" }), false)).toMatchObject({ status: 403 });
-    expect(forwardedFileReadRefusal("open-in/file/view", windowGet({ "sec-fetch-site": "same-origin", origin: "http://evil.test" }), false)).toMatchObject({ status: 403 });
+    expect(forwardedFileReadRefusal("open-in/file/view", windowGet({ "sec-fetch-site": "same-origin" }))).toBeNull();
+    expect(forwardedFileReadRefusal("open-in/file/raw", windowGet({ "sec-fetch-site": "same-origin", origin: "http://127.0.0.1:4000" }))).toBeNull();
+    expect(forwardedFileReadRefusal("open-in/file/view", windowGet())).toMatchObject({ status: 403, body: { code: "window_only" } });
+    expect(forwardedFileReadRefusal("open-in/file/view", windowGet({ "sec-fetch-site": "same-site" }))).toMatchObject({ status: 403 });
+    expect(forwardedFileReadRefusal("open-in/file/view", windowGet({ "sec-fetch-site": "same-origin", origin: "http://evil.test" }))).toMatchObject({ status: 403 });
   });
 
   test("other forwarded reads are not this rule's", () => {
-    expect(forwardedFileReadRefusal("threads", windowGet(), true)).toBeNull();
+    expect(forwardedFileReadRefusal("threads", windowGet())).toBeNull();
   });
 
   test("the door takes the file routes from a linked machine only; a phone gets none", () => {
@@ -43,7 +39,10 @@ describe("a file read forwarded to a linked machine", () => {
     expect(doorRouteOf("GET", "open-in/file/raw", true)?.windowPath).toBe("/api/inbox/open-in/file/raw");
     expect(doorRouteOf("GET", "open-in/file/view", false)).toBeNull();
     expect(doorRouteOf("GET", "open-in/file/raw", false)).toBeNull();
-    expect(doorRouteOf("POST", "open-in/file/attach", true)).toBeNull();
+    // The attach too, from a linked machine's window (a `now` write: sent at once, never held), and never a phone's.
+    expect(doorRouteOf("POST", "open-in/file/attach", true)?.windowPath).toBe("/api/inbox/open-in/file/attach");
+    expect(doorRouteOf("POST", "open-in/file/attach", false)).toBeNull();
+    expect(doorWriteKind("open-in/file/attach")).toBe("now");
   });
 });
 

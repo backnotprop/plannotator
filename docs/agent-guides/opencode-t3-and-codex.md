@@ -119,6 +119,10 @@ order, `list` named it `2 files: notes.md, mock.html`, its feedback arrived
 headed `— Feedback · 2 comments.` under `Files: notes.md, mock.html`, and
 `close all` closed a second bundle.
 
+### OpenCode 2: sessions the Inbox starts
+
+In a server the Inbox started (`PLANNOTATOR_INBOX_LAUNCHED=1`), the plugin's wake watches each root session as it is created (`session.created`), not only once it ran, so the Inbox's first message reaches a session that has had no turn; with `PLANNOTATOR_INBOX_LAUNCHED_SESSION` it watches that session from the start (a restart). The rest is "OpenCode" in `inbox-launch.md`. Test: `inbox-v2-wake.test.ts` "OpenCode 2 started by the Inbox".
+
 ### OpenCode 2: the installer updates a running service's plugin
 
 The OpenCode 2 service keeps the plugin it loaded. When it is running with an
@@ -155,7 +159,7 @@ handling); instead each registration deletes entries whose pid is dead, and
 loopback port no longer accepts a connection, or that cannot be read. Commands
 list the project they detected (or `unknown`); only the plan review detects it.
 
-### T3 Code: Ask this session through an optional Claude hook (opt-in, unreleased)
+### T3 Code: Ask this session through an optional Claude hook (opt-in)
 
 `packages/t3-code` (user notes in its README). T3 Code runs Claude through the
 Agent SDK, which loads `~/.claude/settings.json` hooks, so a Claude Bash hook
@@ -171,6 +175,16 @@ entry: see "T3 Code" in `inbox-notifications-and-agents.md`. That is why
 `plannotator t3` is listed (`plannotator --help` points at it, the skill
 documents it); its help leads with that setup.
 
+Where Claude Code runs hooks modules, the Claude Code mod runs in a T3
+thread's Claude by itself ("A T3 Code thread" in `claude-code-mod.md`): it
+gives the thread `plannotator_inbox` filed as the thread, puts the Inbox's
+reply in as a turn while T3 keeps that Claude (no grant needed), and answers
+`plannotator review` / `annotate` / `last` itself. The hook then stands aside
+(`claudeModServesThread` in `prepareT3Hook`: the mod's tag `t3:<thread>` in
+`PLANNOTATOR_SESSION_TAG`), so no command is acted on twice; it stays for a
+Claude Code without hooks modules or with the mod off. The grant remains the
+Inbox's way into a thread once T3 released its Claude.
+
 - **Opt in / out:** `install.sh --with-t3` writes one `PreToolUse` `Bash` hook
   into `${CLAUDE_CONFIG_DIR:-~/.claude}/settings.json` (`t3-hook install`,
   `packages/t3-code/install-hook.ts`: other hooks and settings kept, a
@@ -184,9 +198,10 @@ documents it); its help leads with that setup.
   `HIDDEN_SUBCOMMANDS`; `t3` is not.
 - **The gate (per Bash call cost):** the hook runs on every Bash call of every
   Claude session that loads the settings file. The command is
-  `case "$CLAUDE_CODE_ENTRYPOINT" in sdk*) PLANNOTATOR_DATA_DIR=… '<binary>' t3-hook;; esac`
+  `case "$CLAUDE_CODE_ENTRYPOINT" in sdk*|t3-code) PLANNOTATOR_DATA_DIR=… '<binary>' t3-hook;; esac`
   (`t3HookCommand`, `packages/shared/t3-hook-command.ts`): only an Agent SDK
-  session (`sdk-ts`, …) starts the binary; an interactive `claude` (`cli`)
+  session (T3 names itself `t3-code`; other SDK apps report `sdk-ts`, …)
+  starts the binary; an interactive `claude` (`cli`)
   is answered by the shell with no output (~3 ms instead of ~290 ms of CLI
   startup). The binary repeats the check as the first statement of
   `apps/hook/server/index.ts` and in `prepareT3Hook`. Inside an SDK session

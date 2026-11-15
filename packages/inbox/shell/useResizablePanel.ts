@@ -137,6 +137,8 @@ export function useResizablePanel({
 	const widthRef = useRef(width);
 	const startXRef = useRef(0);
 	const startWidthRef = useRef(0);
+	// The width before the gesture (the stored one, maybe wider than the room): a click or a drag that changed nothing keeps it.
+	const preDragWidthRef = useRef(0);
 	const draggingRef = useRef(false);
 	// True while THIS gesture has snap-closed the panel and not yet reversed.
 	const closedRef = useRef(false);
@@ -216,6 +218,7 @@ export function useResizablePanel({
 			// A width restored or kept from a wider window is drawn clamped to
 			// the room there is now: the drag starts from the drawn width, so
 			// the first pixels of travel move the edge.
+			preDragWidthRef.current = widthRef.current;
 			startWidthRef.current = Math.min(effectiveMax(), widthRef.current);
 			latestXRef.current = e.clientX;
 			closedRef.current = false;
@@ -256,7 +259,17 @@ export function useResizablePanel({
 						// A pointerdown+up that never crossed the threshold is a
 						// click, not a resize — fire onClick (collapse) and leave
 						// the width untouched. Mirrors the package hook (0.26.0).
+						// Inbox addition: the few pixels it moved are undone too.
+						widthRef.current = preDragWidthRef.current;
+						applyRef.current?.(startWidthRef.current);
+						setWidth(widthRef.current);
 						onClickRef.current();
+					} else if (widthRef.current === startWidthRef.current) {
+						// Inbox addition: a drag that ends where it began (an edge with no room to
+						// widen into) changes nothing, so the stored width stays.
+						widthRef.current = preDragWidthRef.current;
+						applyRef.current?.(startWidthRef.current);
+						setWidth(widthRef.current);
 					} else {
 						// widthRef is always clamped ≥ minWidth here, so only
 						// accepted widths ever reach storage.
