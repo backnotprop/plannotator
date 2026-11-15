@@ -4539,7 +4539,7 @@ const ReviewApp: React.FC = () => {
     handleOpenGuide, isAllFilesActive, allFilesOrder, allFilesAllCollapsed, onToggleAllFilesCollapsed, registerAllFilesCollapseToggle, commitInfo, isSemanticDiffActive, semanticDiffUsable,
     handleSemanticDiffUnavailable, handleSemanticDiffLoadError, handleSemanticDiffLoadSuccess, handleAddAnnotationForFile,
     callFlowAvailable, callFlowAdvert, callFlowAnalysis, retryCallFlowAnalysis, isCallFlowNodeInPatch, isCallFlowActive, openCallFlowPanel, callFlowInstall,
-    callTreeHunkNotes, callTreeRequest, openCallTreeNode, returnFromCallTree, clearCallTreeRequest,
+    hostNotes, callTreeRequest, openCallTreeNode, returnFromCallTree, clearCallTreeRequest,
     editSuggestionsEnabled, handleAddSuggestionsForFile, handleAddEditorCommentForFile,
     handleCodeNavRequest, codeNav.result, codeNav.isLoading, codeNav.activeSymbol,
     tokenHoverEnabled, handleTokenHoverEnter, tokenHover.onTokenHoverLeave,
