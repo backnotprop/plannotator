@@ -46,7 +46,6 @@ let savedMatchMedia: typeof window.matchMedia;
 let pushRecord: ((data: unknown) => void) | null = null;
 /** The stand-in stream's last record id: past any cursor the list reads in these tests. */
 let fakeEventId = 1000;
-let tailnetPage = false;
 let savedNotification: unknown;
 let savedHasFocus: typeof document.hasFocus;
 /** The browser's answer for this origin, and every notification raised (its title). */
@@ -101,7 +100,6 @@ beforeEach(async () => {
     __forgetTourAssetsForTests();
   }
   setStorageBackend({ getItem: (k) => jar.get(k) ?? null, setItem: (k, v) => void jar.set(k, v), removeItem: (k) => void jar.delete(k) });
-  tailnetPage = false;
   savedFetch = globalThis.fetch;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
@@ -115,11 +113,7 @@ beforeEach(async () => {
     const forced = intercept?.(path, method, body);
     if (forced === 'network') throw new TypeError('Failed to fetch');
     if (forced) return forced;
-    if (path.startsWith('/api/inbox/agents') && tailnetPage) return Response.json({ error: 'local only', code: 'local_only' }, { status: 403 });
     const answer = await loopback(path, method, body);
-    if (method === 'GET' && path.startsWith('/api/inbox/settings') && answer.status === 200 && tailnetPage) {
-      return Response.json({ ...(JSON.parse(answer.text) as Record<string, unknown>), via: 'tailnet', guest: true });
-    }
     return new Response(answer.text, { status: answer.status, headers: { 'Content-Type': answer.type } });
   }) as typeof fetch;
   savedEventSource = (globalThis as Record<string, unknown>).EventSource;
@@ -681,24 +675,6 @@ test.skipIf(!hasDom)('a real message mid-tour is a chip in the bar; the tour goe
   expect(window.location.hash).toContain('thread=msg_01REALMESSAGE000000000000');
 }, 90_000);
 
-test.skipIf(!hasDom)('returning users: Settings → General → Take the tour; over the tailnet step 6 says where to connect', async () => {
-  tailnetPage = true;
-  const el = await openOnEntry();
-  await act(async () => {
-    window.location.hash = '#settings/general';
-  });
-  await until(() => $(el, '[data-settings-take-tour]') !== null, 'Getting started');
-  expect($(el, '[data-settings-tour]')!.textContent).toContain('See how the Inbox works through real threads from building Plannotator');
-  await click($(el, '[data-settings-take-tour]'));
-  await pastIntro(el);
-  // Steps 1 to 5 play in full over the tailnet; step 6 cannot read the agents there.
-  await act(async () => {
-    window.location.hash = '#tour=11';
-  });
-  await until(() => $(el, '.ib-empty h2')?.textContent === 'Now, let’s connect your agents', 'step 11');
-  await until(() => (el.textContent ?? '').includes('Open the Inbox on the computer to connect agents with one click.'), 'the tailnet line');
-}, 90_000);
-
 test.skipIf(!hasDom)('notifications: quiet over the replay in front (the chip says it), as always on step 6 and in the background', async () => {
   permission = 'granted';
   const el = await openOnEntry();
@@ -1061,7 +1037,7 @@ test.skipIf(!hasDom)('"Make it yours": a pick applies at once and is saved; Skip
     // Skip: back to what the step opened with, on the window and in config.json, and on to step 11.
     await click($(el, '[data-tour-skip]'));
     await until(() => window.location.hash === '#tour=11', 'step 11 after Skip');
-    expect(htmlClass()).toContain('theme-plannotator');
+    await until(() => htmlClass().includes('theme-plannotator'), 'the look put back after one settings read');
     expect(htmlClass()).not.toContain('theme-catppuccin');
     expect(document.documentElement.style.getPropertyValue('--inbox-text-size')).toBe('');
     await until(() => config().theme?.mode === 'system' && config().theme?.light === 'plannotator' && config().theme?.dark === 'plannotator' && config().inboxTextSize === 14, 'Skip saved');

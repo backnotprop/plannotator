@@ -1903,7 +1903,8 @@ describe("the thread-state model", () => {
     );
     // The sections' tie-break on the thread id was exercised, not only defined.
     expect(ties.sections).toBeGreaterThan(0);
-  });
+    // 300 runs of up to 45 steps: about 3 s alone, past the default 5 s on a loaded runner (it timed out three times on 2026-11-15).
+  }, 30_000);
 
   test("a message's images captured on first read (one more line for it) change nothing the model sees, and replay the same", () => {
     fc.assert(

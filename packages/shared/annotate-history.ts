@@ -23,6 +23,7 @@
 
 import { saveToHistory, getPlanVersion, getVersionCount, saveAnnotateSubmission } from "./storage";
 import { contentHash } from "./draft";
+import { isSecretEnvPath } from "./annotatable";
 
 export interface AnnotateVersionInfo {
   version: number;
@@ -74,6 +75,8 @@ export function computeAnnotateHistory(
   resolvedFilePath: string,
   content: string,
 ): AnnotateHistoryResult | null {
+  // A `.env` file is never copied into the data dir (core annotatable).
+  if (isSecretEnvPath(resolvedFilePath)) return null;
   const slug = deriveAnnotateHistorySlug(resolvedFilePath);
   try {
     const saved = saveToHistory(project, slug, content);

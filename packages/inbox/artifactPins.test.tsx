@@ -14,7 +14,8 @@ const hasDom = typeof document !== 'undefined';
 const { ArtifactsView } = (hasDom ? await import('./components/ArtifactsView') : {}) as typeof import('./components/ArtifactsView');
 const { ArtifactPinButton } = (hasDom ? await import('./components/ArtifactPinButton') : {}) as typeof import('./components/ArtifactPinButton');
 const { FullScreenMore } = (hasDom ? await import('./components/OpenIn') : {}) as typeof import('./components/OpenIn');
-const { ArtifactsWall } = (hasDom ? await import('./components/ArtifactsWall') : {}) as typeof import('./components/ArtifactsWall');
+const { AttachmentTiles } = (hasDom ? await import('./components/AttachmentTiles') : {}) as typeof import('./components/AttachmentTiles');
+const { ArtifactsWall } =(hasDom ? await import('./components/ArtifactsWall') : {}) as typeof import('./components/ArtifactsWall');
 const { SidebarProvider } = (hasDom ? await import('./shell/sidebar') : {}) as typeof import('./shell/sidebar');
 const { resetArtifactPinsForTest } = (hasDom ? await import('./artifactPins') : {}) as typeof import('./artifactPins');
 
@@ -177,6 +178,36 @@ test.skipIf(!hasDom)('full screen’s ⋯ holds Pin / Unpin when the pane hands 
   expect(document.querySelector('[data-attachment-download]')).not.toBeNull();
 });
 
+// The tile's menu (right-click, and the ⋯ on this computer) holds the viewer's Pin / Unpin beside Download.
+test.skipIf(!hasDom)('a tile’s menu holds Pin beside Download, saves it, and says Unpin once pinned', async () => {
+  resetArtifactPinsForTest([]);
+  const attachment = { id: 'att_plan', name: 'plan.md', path: '/work/plan.md', kind: 'markdown', sent_sha256: 'a'.repeat(64), size: 10, message_id: 'msg_1', current: { sha256: 'a'.repeat(64), size: 10, mtime: '2026-11-08T10:00:00.000Z' } } as unknown as import('@plannotator/core/inbox-types').InboxAttachmentState;
+  const el = mount(<AttachmentTiles attachments={[attachment]} annotationCounts={new Map()} onOpen={() => {}} pinOf={(a) => ({ threadId: THREAD, key: a.id })} />);
+  const menu = () => document.querySelector<HTMLElement>('[data-tile-context]');
+  const open = async () => {
+    await act(async () => el.querySelector(`[data-attachment-id="${attachment.id}"]`)!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: 200, clientY: 120 })));
+    await settle();
+  };
+  await open();
+  expect([...menu()!.querySelectorAll('[role="menuitem"]')].map((item) => item.textContent)).toEqual(['Download', 'Pin']);
+  const item = () => menu()!.querySelector<HTMLElement>('[data-artifact-pin-item="att_plan"]')!;
+  expect(item().getAttribute('aria-label')).toBe('Pin plan.md');
+  act(() => item().click());
+  await settle();
+  expect(posts).toEqual([{ thread_id: THREAD, key: 'att_plan', pinned: true }]);
+  if (!menu()) await open();
+  expect(item().textContent).toBe('Unpin');
+  expect(item().hasAttribute('data-pinned')).toBe(true);
+  act(() => item().click());
+  await settle();
+  expect(posts.at(-1)).toEqual({ thread_id: THREAD, key: 'att_plan', pinned: false });
+  // The tour's tiles (no pin handed down): no item.
+  act(() => root!.render(<AttachmentTiles attachments={[attachment]} annotationCounts={new Map()} onOpen={() => {}} />));
+  await settle();
+  if (!menu()) await open();
+  expect(menu()!.querySelector('[data-artifact-pin-item]')).toBeNull();
+});
+
 function wallRow(i: number, pinned: boolean): InboxArtifactRow {
   return {
     key: `guide:msg_${i}`,
@@ -201,7 +232,7 @@ test.skipIf(!hasDom)('the Wall: Pinned, a type chip and Show more reach its read
   const read = (async (query: Record<string, unknown>) => {
     reads.push(query);
     const rows = query.pinned ? [] : query.cursor ? [wallRow(3, false)] : [wallRow(1, false), wallRow(2, false)];
-    const page: InboxArtifactsPage & { serverSession: string } = { serverSession: 's', artifacts: rows, next_cursor: query.pinned || query.cursor ? null : '2', total: 3, counts: { all: 3, pinned: 0, types: { images: 0, pages: 0, documents: 3, other: 0 } } };
+    const page: InboxArtifactsPage & { serverSession: string } = { serverSession: 's', artifacts: rows, next_cursor: query.pinned || query.cursor ? null : '2', total: 3, counts: { all: 3, pinned: 0, types: { images: 0, videos: 0, pages: 0, documents: 3, other: 0 } } };
     return page;
   }) as unknown as typeof import('./api').inboxApi.artifacts;
   let pinnedNow = false;
@@ -218,13 +249,13 @@ test.skipIf(!hasDom)('the Wall: Pinned, a type chip and Show more reach its read
   await settle();
   expect(reads.at(-1)).toMatchObject({ cursor: '2' });
   expect(el.querySelectorAll('[data-wall-artifact]').length).toBe(3);
-  act(() => el.querySelector<HTMLButtonElement>('[data-wall-type="documents"]')!.click());
+  act(() => el.querySelector<HTMLButtonElement>('[data-wall-type="videos"]')!.click());
   await settle();
-  expect(reads.at(-1)).toMatchObject({ type: 'documents', pinned: false });
+  expect(reads.at(-1)).toMatchObject({ type: 'videos', pinned: false });
   act(() => el.querySelector<HTMLButtonElement>('[data-wall-show="pinned"]')!.click());
   expect(pinnedNow).toBe(true);
   act(() => root!.render(draw()));
   await settle();
-  expect(reads.at(-1)).toMatchObject({ pinned: true, type: 'documents' });
+  expect(reads.at(-1)).toMatchObject({ pinned: true, type: 'videos' });
   expect(el.querySelector('[data-wall-empty] b')?.textContent).toBe('No pinned artifacts yet');
 });

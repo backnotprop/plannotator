@@ -41,9 +41,8 @@ const piShapeCode: NonNullable<ShapeRouteDeps["code"]> = {
 /**
  * NOT MOUNTED, and must not be until it has what the Bun Inbox has around it: Pi has no Shape switch (the Inbox's
  * Settings → Capabilities → Shape and `plannotator shape on|off`, config `inboxShape`, read and written only through
- * @plannotator/shared/shape/switch: off answers 404), no owner check (a tailnet guest is
- * refused there) and no `serverSession` check on writes (409 for a page of a restarted server). Whoever mounts
- * this adds all three first.
+ * @plannotator/shared/shape/switch: off answers 404), and no `serverSession` check on writes (409 for a page of a restarted server). Whoever mounts
+ * this adds both first.
  */
 export function createPiShapeRoutes(options: { dataDir: string; heartbeatMs?: number; watchMs?: number; sessionOf?: ShapeRouteDeps["sessionOf"] }) {
 	const store: ShapeStore = createShapeStore({ dataDir: options.dataDir });

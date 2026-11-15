@@ -10,7 +10,8 @@
  *    or not: the thread's owner as a plain reply would reach it (`store.threadOwner`);
  *  - every session that ended today (it was heard from since this machine's midnight; kept in memory, so an Inbox
  *    restart forgets those);
- *  - every session the Inbox launched whose launch is not deleted and whose thread is not archived. One that is
+ *  - every session the Inbox launched whose launch is not deleted and whose thread is not archived (of a scheduled
+ *    thread, only its newest run's: an earlier run's session is listed only while live). One that is
  *    stopped is idle (a reply starts it again); one whose start failed or whose CLI is gone has ended.
  *
  * A launched agent's id is its launch's id, so it keeps its place while its session moves from the placeholder
@@ -28,7 +29,7 @@
  */
 
 import { basename } from "node:path";
-import { INBOX_AGENTS_LISTED_MAX, type InboxAgent, type InboxAgentsGroup, type InboxRunState } from "@plannotator/core/inbox-types";
+import { INBOX_AGENT_FACES_KEPT, INBOX_AGENTS_LISTED_MAX, readInboxAgentFaces, type InboxAgent, type InboxAgentsGroup, type InboxRunState } from "@plannotator/core/inbox-types";
 import type { InboxAgentSession } from "./inbox-sessions";
 
 /** A launched session (inbox-launch.ts `agents`). */
@@ -39,7 +40,13 @@ export interface InboxAgentLaunch {
   host: string;
   project_id: string;
   started_at: string;
+  /** The host started it (`session_ref`). */
+  started: boolean;
   run: InboxRunState | null;
+  /** Its scratch folder's name; null in a project. */
+  scratch: string | null;
+  /** A routine's run (its root is a run divider). */
+  scheduled?: boolean;
 }
 
 /** One thread waiting on the person, by the session that owns it. */
@@ -126,9 +133,21 @@ export function inboxAgentsGroup(evidence: InboxAgentsEvidence, cap = INBOX_AGEN
   // An old id whose conversation goes on is no agent of its own.
   for (const entry of evidence.sessions) if (!entry.live && nowAs(entry.session) !== entry.session) bySession.delete(entry.session);
 
+  // A routine is one agent however many runs it has: its newest run's. An earlier run's session is listed
+  // only while it is live.
+  const newestRun = new Map<string, InboxAgentLaunch>();
+  for (const launch of evidence.launches) {
+    const was = launch.scheduled ? newestRun.get(launch.thread_id) : undefined;
+    if (launch.scheduled && (!was || launch.started_at > was.started_at)) newestRun.set(launch.thread_id, launch);
+  }
+
   for (const launch of evidence.launches) {
     const session = nowAs(launch.session);
     const known = bySession.get(session);
+    if (launch.scheduled && newestRun.get(launch.thread_id) !== launch) {
+      if (!known?.live) bySession.delete(session);
+      continue;
+    }
     // A launch that is done (its thread archived) is listed only while its session is still live.
     if (evidence.archived.has(launch.thread_id) && !known?.live) {
       bySession.delete(session);
@@ -141,7 +160,7 @@ export function inboxAgentsGroup(evidence: InboxAgentsEvidence, cap = INBOX_AGEN
       ...(known ?? { host: launch.host, project: evidence.projectById(launch.project_id), started_at: launch.started_at, last_seen_at: null }),
       id: launch.launch_id,
       session,
-      launch: { id: launch.launch_id, thread_id: launch.thread_id },
+      launch: { id: launch.launch_id, thread_id: launch.thread_id, started: launch.started, run, scratch: launch.scratch },
       host: known?.host ?? launch.host,
       state: working ? "working" : ended ? "ended" : "idle",
       waiting: 0,
@@ -183,11 +202,6 @@ export function inboxMergedAgents(self: string, own: InboxAgentsGroup, machines:
   return [{ machine: self, ...own }, ...machines.filter((group) => group.machine !== self)];
 }
 
-/** A label-free copy for a reader who is not this computer's owner. */
-export function inboxAgentsWithoutLabels(groups: InboxAgentsGroup[]): InboxAgentsGroup[] {
-  return groups.map((group) => ({ ...group, agents: group.agents.map(({ label: _label, ...agent }) => agent) }));
-}
-
 /**
  * Another machine's group as its list sent it (`agents`, one group): only what parses, capped, named by `machine`.
  * Null when its list has none (an older Inbox): the window then knows nothing of its agents.
@@ -198,5 +212,7 @@ export function inboxPeerAgentsGroup(value: unknown, machine: string, cap = INBO
   const raw = group as Partial<InboxAgentsGroup>;
   const agents = raw.agents!.filter((agent): agent is InboxAgent => !!agent && typeof agent === "object" && typeof agent.id === "string" && typeof agent.session === "string" && agent.state in STATE_ORDER).slice(0, cap);
   const count = (n: unknown, floor: number) => (typeof n === "number" && Number.isSafeInteger(n) && n >= floor ? n : floor);
-  return { machine, agents, total: count(raw.total, agents.length), ended_today: count(raw.ended_today, 0) };
+  // Its agents' faces and given names live there (inbox-linked-marks): passed through as that machine sent them.
+  const faces = raw.faces !== undefined ? { faces: Object.fromEntries(Object.entries(readInboxAgentFaces(raw.faces)).slice(-INBOX_AGENT_FACES_KEPT)), faces_rev: count(raw.faces_rev, 0) } : {};
+  return { machine, agents, total: count(raw.total, agents.length), ended_today: count(raw.ended_today, 0), ...faces };
 }

@@ -13,10 +13,10 @@
  * part of the reply and not as page headings. Display only: an agent's
  * message, and every other surface, draws its headings as before.
  */
-import { ATTACHMENT_FEEDBACK_HEADING, GUIDE_FEEDBACK_TITLE, MESSAGE_FEEDBACK_HEADING } from './attachments';
+import { ATTACHMENT_FEEDBACK_HEADING, GUIDE_FEEDBACK_TITLE, MESSAGE_FEEDBACK_HEADING, OWN_MESSAGE_FEEDBACK } from './attachments';
 
 /** The headings the export opens each feedback section with. */
-const FEEDBACK_HEADINGS = new Set([MESSAGE_FEEDBACK_HEADING.title, ATTACHMENT_FEEDBACK_HEADING.title, GUIDE_FEEDBACK_TITLE].map((title) => `# ${title}`));
+const FEEDBACK_HEADINGS = new Set([MESSAGE_FEEDBACK_HEADING.title, OWN_MESSAGE_FEEDBACK.title, ATTACHMENT_FEEDBACK_HEADING.title, GUIDE_FEEDBACK_TITLE].map((title) => `# ${title}`));
 const FENCE = /^\s{0,3}(`{3,}|~{3,})/;
 
 /**

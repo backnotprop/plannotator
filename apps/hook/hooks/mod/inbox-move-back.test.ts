@@ -154,7 +154,7 @@ async function claudeWorld() {
   const w = await world('claude-code')
   const store = new Map<string, unknown>()
   const open = async () => {
-    const session = await ClaudeSession.start({ env: { PATH: process.env.PATH ?? '', PLANNOTATOR_DATA_DIR: w.dataDir }, cwd: w.project, store, sessionId: FORMER, dataDir: w.dataDir })
+    const session = await ClaudeSession.start({ env: { PATH: process.env.PATH ?? '', PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: w.dataDir }, cwd: w.project, store, sessionId: FORMER, dataDir: w.dataDir })
     stops.push(() => session.quit())
     return session
   }
@@ -501,7 +501,7 @@ describe('moved back to a session that lost it once', () => {
 
 test('the Claude Code mod says its tick goes on polling while a steer waits', async () => {
   const w = await world('claude-code')
-  const session = await ClaudeSession.start({ env: { PATH: process.env.PATH ?? '', PLANNOTATOR_DATA_DIR: w.dataDir }, cwd: w.project, store: new Map(), sessionId: FORMER, dataDir: w.dataDir })
+  const session = await ClaudeSession.start({ env: { PATH: process.env.PATH ?? '', PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: w.dataDir }, cwd: w.project, store: new Map(), sessionId: FORMER, dataDir: w.dataDir })
   stops.push(() => session.quit())
   const bodies: Record<string, unknown>[] = []
   const send = session.host.fetch

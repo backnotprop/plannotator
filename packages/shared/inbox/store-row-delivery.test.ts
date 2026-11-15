@@ -232,3 +232,20 @@ describe("the row's Session ended", () => {
     expect(store.threadOwner(asked.id)).toEqual({ host: "claude-code", session: "ses_c" });
   });
 });
+
+describe("the row's delivery while the reply waits on T3 (approval \"inbox-t3-reply-waiting-line\")", () => {
+  test("it waits on T3, never Sending or plain Queued, though the session's last poll still reads as idle; then delivered as usual", () => {
+    const { store, project, connections, row } = world();
+    const session = "mcp:9843db4f-69c2-4891-9a2b-de6f0afaed58";
+    const asked = store.sendMessage({ project_id: project.id, author: agent(session, "t3"), body: "Ship the worker today?", wakes: true }).message;
+    const reply = store.sendReply(asked.id, { words: "Yes, ship it.", idempotency_key: "k1" }).reply!;
+    // T3 quit: its Claude's last poll is still inside the live window, idle.
+    connections.set(session, { busy: false, send_now: false });
+    expect(row(asked.id).delivery).toMatchObject({ state: "sending", reason: "idle" });
+    store.recordT3Wait(reply.id, "closed");
+    expect(row(asked.id).delivery).toMatchObject({ state: "queued", t3_wait: "closed" });
+    store.recordDelivery(reply.id, { host: "t3", session });
+    expect(row(asked.id).delivery).toMatchObject({ state: "delivered" });
+    expect(row(asked.id).delivery).not.toHaveProperty("t3_wait");
+  });
+});

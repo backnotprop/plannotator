@@ -7,6 +7,7 @@ import { AuthorMark, Icon } from '../icons';
 import { fitPills, moreName, pillName, pillWaits, starredPills, type StarredPill } from '../starredPills';
 import { rowAgent, titleOf } from './InboxList';
 import type { PinnedAction } from './PinnedRow';
+import { pinEnds } from '../pins';
 import { Tip } from './Tip';
 import { useContextMenuTrigger } from './useContextMenuTrigger';
 
@@ -206,11 +207,11 @@ export function StarredPills(props: StarredPillsProps) {
           <Icon name="star" size={15} className="ib-star-on" />
           Unstar
         </Menu.Item>
-        <Menu.Item className="ib-pmi" label="Move left" disabled={at === 0} onClick={run('up')} data-pill-action="left">
+        <Menu.Item className="ib-pmi" label="Move left" disabled={pinEnds(pills.map((p) => p.row), at).first} onClick={run('up')} data-pill-action="left">
           <Icon name="back" size={15} />
           Move left
         </Menu.Item>
-        <Menu.Item className="ib-pmi" label="Move right" disabled={at === pills.length - 1} onClick={run('down')} data-pill-action="right">
+        <Menu.Item className="ib-pmi" label="Move right" disabled={pinEnds(pills.map((p) => p.row), at).last} onClick={run('down')} data-pill-action="right">
           <Icon name="arrowRight" size={15} />
           Move right
         </Menu.Item>

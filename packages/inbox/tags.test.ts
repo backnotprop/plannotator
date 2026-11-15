@@ -212,6 +212,12 @@ describe('the reply box line (approval "inbox-tag-handoff", A2)', () => {
     expect(tagModeLine([pi, codex], 'ask')!.after).toBe(" · Codex isn't woken: it sees your reply the next time it reads this thread");
   });
 
+  test('twelve tags: the line names two and counts the rest, so it stays one line on a phone', () => {
+    const twelve = Array.from({ length: 12 }, (_, i) => opt(`ses_${i}`, `Claude Code (session ${i + 1})`));
+    expect(tagModeLine(twelve, 'ask')!.names).toBe('Claude Code (session 1), Claude Code (session 2) and 10 more');
+    expect(tagModeLine([herdr, pi, codex], 'ask')!.names).toBe('Claude Code (herdr), Pi and Codex');
+  });
+
   test('a mode no longer offered (a second tag, an agent not woken) sends as an Ask', () => {
     expect(effectiveTagMode([herdr], 'handoff')).toBe('handoff');
     expect(effectiveTagMode([herdr, pi], 'handoff')).toBe('ask');

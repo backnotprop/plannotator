@@ -27,14 +27,14 @@ export interface InboxArtifactPin {
 }
 
 /** The Wall's type chips. */
-export const INBOX_ARTIFACT_TYPES = ["images", "pages", "documents", "other"] as const;
+export const INBOX_ARTIFACT_TYPES = ["images", "videos", "pages", "documents", "other"] as const;
 export type InboxArtifactType = (typeof INBOX_ARTIFACT_TYPES)[number];
 
-/** Which chip an artifact falls under: pictures and videos, HTML pages, documents (text, code, diagrams, PDFs, guided reviews), other files (recordings among them). */
 export function inboxArtifactTypeOf(kind: InboxAttachmentKind | "guide"): InboxArtifactType {
   if (kind === "guide") return "documents";
   const k = readInboxAttachmentKind(kind);
-  if (k === "image" || k === "video") return "images";
+  if (k === "image") return "images";
+  if (k === "video") return "videos";
   if (k === "html") return "pages";
   if (k === "file" || k === "audio") return "other";
   return "documents";

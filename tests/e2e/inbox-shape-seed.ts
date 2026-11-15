@@ -23,6 +23,7 @@ export function shapeWorldEnv(root: string): Record<string, string> {
   return {
     PATH: process.env.PATH ?? '',
     HOME: scratchConfig,
+    PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9',
     PLANNOTATOR_DATA_DIR: join(root, 'data'),
     PLANNOTATOR_BROWSER: NO_BROWSER,
     NO_BROWSER: '1',

@@ -27,6 +27,7 @@ function canonical(path: string): string {
 }
 
 function accountHomeFromShell(): string | null {
+  // windows-hide-guard: POSIX only (/bin/sh).
   const out = spawnSync("/bin/sh", ["-c", 'eval echo "~$(id -un)"'], { encoding: "utf8", env: { PATH: "/usr/bin:/bin" } }).stdout?.trim();
   return out || null;
 }

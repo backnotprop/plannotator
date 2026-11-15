@@ -22,7 +22,7 @@
 
 import { resolve } from "node:path";
 import { mcpAnswerOf } from "@plannotator/shared/inbox/connection";
-import type { InboxRegistryEntry } from "@plannotator/shared/inbox/registry";
+import { inboxEnsureFailedWords, type InboxRegistryEntry } from "@plannotator/shared/inbox/registry";
 import { CARD_COMMAND_USAGE } from "./cli";
 import { writeWholeToStdout } from "./write-whole-stdout";
 import { inboxHostSessionFromEnv, inboxProjectFolderFor, inboxSessionProjectFromEnv } from "./inbox-mcp-shim";
@@ -136,7 +136,7 @@ export async function runCardCommand(argv: readonly string[], deps: CardCommandD
   try {
     entry = await deps.ensureRunning();
   } catch (error) {
-    err(`Plannotator Inbox is not running: ${error instanceof Error ? error.message : String(error)}\n`);
+    err(`${inboxEnsureFailedWords(error)}\n`);
     return 1;
   }
   let text: string;

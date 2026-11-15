@@ -620,6 +620,8 @@ ${SANDBOX_SHIM_SCRIPT}
   var annotateModeActive = true;
   // A native host decides link navigations itself (HtmlViewer hostNavigates).
   var hostNavigates = false;
+  // Forms and in-page links work as in a tab (the host's opt-in, \`pageNavigation\`).
+  var pageNavigation = false;
   // WebKit's touch model (iOS, and Playwright's WebKit on Linux) turns a tap
   // into mouse events and a click only when the tapped element or an ancestor
   // up to <body> listens for a click; listeners on document and window (all
@@ -1075,6 +1077,10 @@ ${SANDBOX_SHIM_SCRIPT}
 
     else if (type === PREFIX + 'set-host-navigates') {
       hostNavigates = e.data.active === true;
+    }
+
+    else if (type === PREFIX + 'set-page-navigation') {
+      pageNavigation = e.data.active === true;
     }
 
     else if (type === PREFIX + 'set-page-reports') {
@@ -4691,6 +4697,26 @@ ${SANDBOX_SHIM_SCRIPT}
     return true;
   }
 
+  // The host's opt-in (pageNavigation): an in-page link also sets the page's
+  // own hash, replacing the entry (a new one would land in the host window's
+  // history), and fires hashchange, so a page that routes on its hash follows
+  // it. Only where the browser lets the page change it (the shim's
+  // replaceState: a served page's own address; a srcdoc keeps its own rules):
+  // when it did not change, nothing fires.
+  function setOwnFragment(hash) {
+    try {
+      var before = location.href;
+      if (location.hash === hash || (hash === '#' && !location.hash)) return;
+      history.replaceState(history.state, '', before.split('#')[0] + (hash === '#' ? '' : hash));
+      var after = location.href;
+      if (after === before) return;
+      var changed;
+      try { changed = new HashChangeEvent('hashchange', { oldURL: before, newURL: after }); }
+      catch (ex) { changed = new Event('hashchange'); }
+      window.dispatchEvent(changed);
+    } catch (ex) {}
+  }
+
   // While armed, whether a click on a link pins it instead of following it:
   // the platform modifier (Cmd or Ctrl), a shift-click adding to an open
   // multi-select draft, or the trailing click of a drag that selected text.
@@ -4739,6 +4765,7 @@ ${SANDBOX_SHIM_SCRIPT}
       if (raw.charAt(0) === '#') {
         e.preventDefault();
         scrollToLocalFragment(raw.slice(1));
+        if (pageNavigation && e.isTrusted) setOwnFragment(raw);
         return;
       }
       e.preventDefault();
@@ -4756,6 +4783,53 @@ ${SANDBOX_SHIM_SCRIPT}
       postToParent({ type: PREFIX + 'link-click', href: raw.slice(0, 2048) });
     }, true);
   }
+
+  // --- Forms (the host's opt-in, pageNavigation; srcdoc and served frames only) ---
+  // The frame's sandbox has no allow-forms, so a press on a submit button
+  // neither fires \`submit\` nor submits. With the host's opt-in, a person's
+  // press fires \`submit\` here (the page's own handlers run and may cancel
+  // it), and a GET form nobody cancelled is handed to the host as its address
+  // with the fields as the query, the same message a link sends: the host
+  // decides (the Inbox loads the page again with that query). Nothing is ever
+  // posted. On the window in the bubble phase, after the page's own click
+  // handlers, so one that cancelled the click wins. Never while Annotate is
+  // armed: there the press pins the button.
+  function submitterOf(node) {
+    var el = node && node.closest ? node.closest('button, input') : null;
+    if (!el || !el.form || el.disabled) return null;
+    var type = (el.getAttribute('type') || '').toLowerCase();
+    if (el.tagName === 'BUTTON') return type === '' || type === 'submit' ? el : null;
+    return type === 'submit' || type === 'image' ? el : null;
+  }
+  function submitPageForm(e) {
+    if (!pageNavigation || annotateModeActive || e.defaultPrevented || e.button !== 0 || !e.isTrusted) return;
+    var submitter = submitterOf(e.target);
+    if (!submitter) return;
+    var form = submitter.form;
+    // The browser's own submission is refused by the sandbox: this is the only one.
+    e.preventDefault();
+    if (!form.noValidate && !submitter.formNoValidate && form.checkValidity && !form.checkValidity()) {
+      try { form.reportValidity(); } catch (ex) {}
+      return;
+    }
+    var event;
+    try { event = new SubmitEvent('submit', { bubbles: true, cancelable: true, submitter: submitter }); }
+    catch (ex) { event = new Event('submit', { bubbles: true, cancelable: true }); }
+    if (!form.dispatchEvent(event)) return;
+    var method = (submitter.getAttribute('formmethod') || form.getAttribute('method') || 'get').toLowerCase();
+    if (method !== 'get') return;
+    var action = submitter.getAttribute('formaction');
+    if (action === null) action = form.getAttribute('action');
+    action = (action || '').trim();
+    if (/^javascript:/i.test(action)) return;
+    var data;
+    try { data = new FormData(form, submitter); } catch (ex) { data = new FormData(form); }
+    var query = new URLSearchParams();
+    data.forEach(function(value, key) { if (typeof value === 'string') query.append(key, value); });
+    var path = action.split('#')[0].split('?')[0];
+    postToParent({ type: PREFIX + 'link-click', href: (path + '?' + query.toString()).slice(0, 2048) });
+  }
+  if (!LIVE) window.addEventListener('click', submitPageForm, false);
 
   document.addEventListener('click', function(e) {
     if (!annotateModeActive || currentInputMethod !== 'pinpoint') return;
@@ -4881,15 +4955,21 @@ ${SANDBOX_SHIM_SCRIPT}
     postToParent({ type: PREFIX + message });
   }, true);
 
-  // A plain ] or [ while armed (Annotate): the host may step to its next or
-  // previous file (the Inbox steps through a thread's attachments). Never in
-  // Interact (the page owns its keys), never while the page's focus is in a
-  // text field, with a modifier, on auto-repeat or mid-composition. The page
-  // still receives the key; a host without a step handler ignores the
-  // message. Capture phase, like the chords above.
-  document.addEventListener('keydown', function(e) {
+  // A plain ] or [: the host may step to its next or previous file (the
+  // Inbox steps through a thread's attachments). While armed (Annotate), at
+  // once; in Interact only one the page did not use (no handler cancelled it
+  // or stopped it on its way up), offered after every handler had its turn,
+  // as an unused Escape is. Never while the page's focus is in a text field,
+  // with a modifier, on auto-repeat or mid-composition. The page still
+  // receives the key; a host without a step handler ignores the message.
+  // Capture phase, like the chords above.
+  var stepKeyReachedWindow = null;
+  window.addEventListener('keydown', function(e) {
+    if (e.key === ']' || e.key === '[') stepKeyReachedWindow = e;
+  });
+  function offerStepKey(e) {
     if (e.key !== ']' && e.key !== '[') return;
-    if (!annotateModeActive || vimEnabled) return;
+    if (vimEnabled) return;
     if (e.metaKey || e.ctrlKey || e.altKey || e.repeat || e.isComposing) return;
     var t = e.target;
     if (t && t.nodeType === 1) {
@@ -4897,8 +4977,17 @@ ${SANDBOX_SHIM_SCRIPT}
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || t.isContentEditable) return;
       if (t.closest && t.closest('[contenteditable]:not([contenteditable="false"])')) return;
     }
-    postToParent({ type: PREFIX + 'step', dir: e.key === ']' ? 1 : -1 });
-  }, true);
+    var message = { type: PREFIX + 'step', dir: e.key === ']' ? 1 : -1 };
+    if (annotateModeActive) {
+      postToParent(message);
+      return;
+    }
+    setTimeout(function() {
+      if (stepKeyReachedWindow !== e || e.defaultPrevented) return;
+      postToParent(message);
+    }, 0);
+  }
+  document.addEventListener('keydown', offerStepKey, true);
 
   // Author opt-in: a plain click on any element tagged [data-annotate] pops the
   // toolbar — no pinpoint mode. Lets an HTML doc (e.g. a flow graph) wire its own
