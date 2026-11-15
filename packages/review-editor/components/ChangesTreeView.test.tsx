@@ -235,5 +235,22 @@ describe.skipIf(!hasDom)('The Changes tree on Pierre trees', () => {
     const added = row(el, path('huge.ts')).querySelector<HTMLElement>('[data-item-section="trail"] > span')!;
     expect(added.getAttribute('title') ?? added.querySelector('[title]')?.getAttribute('title')).toBe('12,345 lines added');
   });
+
+  test('clicking the file that is already selected opens it, as any other row would', async () => {
+    const opened: number[] = [];
+    const files = [file('src/a.ts'), file('src/b.ts')];
+    function Live() {
+      const [active, setActive] = React.useState(0);
+      return <Tree files={files} activeFileIndex={active} onSelectFile={(index: number) => { opened.push(index); setActive(index); }} />;
+    }
+    const el = await mount(<Live />);
+    const path = rows(el).find((p) => p?.endsWith('a.ts'))!;
+    expect(row(el, path).dataset.itemSelected).toBe('true');
+    await act(async () => row(el, path).click());
+    expect(opened).toEqual([0]);
+    const other = rows(el).find((p) => p?.endsWith('b.ts'))!;
+    await act(async () => row(el, other).click());
+    expect(opened.at(-1)).toBe(1);
+  });
 });
 
