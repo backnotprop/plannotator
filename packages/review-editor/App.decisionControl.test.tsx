@@ -568,6 +568,60 @@ describe.if(hasDom)("review decision control (agent mode)", () => {
     expect(submissions[0]!.feedback).toContain("one more pass on the retry path");
   });
 
+  // The chord's request is a counter the header control reads. A control
+  // mounted after one press (the compact layout toggled away and back) must
+  // not take that old press as a new one and open the composer by itself.
+  test("a remounted header control does not reopen the composer for an old Mod+Shift+Enter", async () => {
+    let coarse = false;
+    const listeners = new Set<(event: MediaQueryListEvent) => void>();
+    // SAFETY: implements the MediaQueryList surface the shell hooks consume;
+    // `coarse` flips the compact touch layout, which drops the header control.
+    window.matchMedia = ((query: string) => ({
+      get matches() { return coarse && query.includes("pointer: coarse"); },
+      media: query,
+      onchange: null,
+      addListener: () => {},
+      removeListener: () => {},
+      addEventListener: (_type: string, listener: (event: MediaQueryListEvent) => void) => listeners.add(listener),
+      removeEventListener: (_type: string, listener: (event: MediaQueryListEvent) => void) => listeners.delete(listener),
+      dispatchEvent: () => true,
+    })) as unknown as typeof window.matchMedia;
+    const setCoarse = async (value: boolean) => {
+      coarse = value;
+      await act(async () => {
+        for (const listener of [...listeners]) listener({ matches: value } as MediaQueryListEvent);
+      });
+      await settle();
+    };
+
+    seededExternalAnnotations = [EXTERNAL_FINDING];
+    await mountReview();
+    await settle();
+    await settle();
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", metaKey: true, shiftKey: true, bubbles: true, cancelable: true }));
+    });
+    await settle();
+    expect(noteInput() !== null).toBe(true);
+    await pressNoteKey("Escape");
+    expect(noteInput() === null).toBe(true);
+
+    await setCoarse(true);
+    expect(caretButton() === null).toBe(true);
+    await setCoarse(false);
+    expect(caretButton() !== null).toBe(true);
+    expect(noteInput() === null).toBe(true);
+
+    // A new press still opens it.
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", metaKey: true, shiftKey: true, bubbles: true, cancelable: true }));
+    });
+    await settle();
+    expect(noteInput() !== null).toBe(true);
+    expect(submissions).toHaveLength(0);
+  });
+
   test("Mod+Enter fires the visible primary", async () => {
     await mountReview();
 
