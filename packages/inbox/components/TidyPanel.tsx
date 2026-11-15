@@ -64,11 +64,14 @@ function TidyPicker({ tidy, onDone, below }: { tidy: TidyController; onDone: () 
   const lines = whyNotAsked(plan);
   if (plan.agents.length === 0 && combine.length === 0)
     return picking ? (
+      // Under a run, its agents are why nobody is left, so only the lines that say so.
       <>
-        <div className="ib-tidy-top" data-tidy-empty="">
-          <b>Tidy</b>
-        </div>
-        <p className="ib-tidy-line">Nothing to ask: no agent of these threads can be reached.</p>
+        {!below && (
+          <div className="ib-tidy-top" data-tidy-empty="">
+            <b>Tidy</b>
+          </div>
+        )}
+        {lines.length === 0 && <p className="ib-tidy-line">Nothing to ask: no agent of these threads can be reached.</p>}
         {lines.map((line) => (
           <p key={line} className="ib-tidy-line">
             {line}

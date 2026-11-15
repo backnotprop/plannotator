@@ -189,6 +189,13 @@ test.skipIf(!hasDom)('Tidy… reads and asks about the picked threads only, with
   await settle();
   const sent = requests.find((r) => r.method === 'POST' && r.url.endsWith('/api/inbox/tidy'))!;
   expect(sent.body).toMatchObject({ sessions: ['ses_a'], thread_ids: ['a', 'c', 'd'], words: 'Ask me only what blocks you', surface: 'list' });
+  // Asked a moment ago is why nobody is left: the popover does not say they cannot be reached.
+  answers = () => ({ ...plan, agents: [], unreached: { ended: 0, asked: 3 } });
+  click(host!.querySelector('[data-pick-bar] [data-pick-tidy]'));
+  await settle();
+  const again = document.querySelector('[data-pick-tidy-popover]')!;
+  expect(again.textContent).toContain('3 threads’ agents were asked a moment ago.');
+  expect(again.textContent).not.toContain('can be reached');
 });
 
 test.skipIf(!hasDom)('threads on two machines: the dialog says so, offers nobody and reads nothing', async () => {
