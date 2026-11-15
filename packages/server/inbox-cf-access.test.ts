@@ -187,4 +187,20 @@ describe("the Inbox through Cloudflare Access", () => {
     expect(local.status).toBe(200);
     expect(JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")).inboxCloudflareAccess.on).toBe(true);
   });
+
+  test("an owner's write reaches the Inbox through the door with its body intact", async () => {
+    const { inbox, door } = await start();
+    const post = async (serverSession: string) => {
+      const body = JSON.stringify({ serverSession, text_size: 14 });
+      return fetch(`${door}/api/inbox/settings`, {
+        method: "POST",
+        headers: { ...(await owner()), "Content-Type": "application/json", "Content-Length": String(body.length), Origin: `https://${TEST_HOST}` },
+        body,
+      });
+    };
+    expect((await post("not-this-inbox")).status).toBe(409);
+    const written = await post(inbox.serverSession);
+    expect(written.status).toBe(200);
+    expect(JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")).inboxTextSize).toBe(14);
+  });
 });
