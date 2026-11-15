@@ -1977,9 +1977,10 @@ export const INBOX_ROW_WAIT_ENTRY_MAX = 120;
 
 /**
  * A group the list draws: a section, the Priority group above them all (`INBOX_PRIORITY_GROUP`), or the Snoozed band
- * under Quiet (`INBOX_SNOOZED_BAND`). The server places no row in either: the window draws them from the row.
+ * under Quiet (`INBOX_SNOOZED_BAND`). The server places no row in either: the window draws them from the row. The
+ * window's Archived group under them all (approval "inbox-archived-group") reads its own rows, never the list's.
  */
-export type InboxListGroupId = InboxSectionId | "snoozed" | "priority";
+export type InboxListGroupId = InboxSectionId | "snoozed" | "priority" | "archived";
 
 /** Why a row is in Priority (`InboxListRow.priority`). */
 export interface InboxRowPriority {

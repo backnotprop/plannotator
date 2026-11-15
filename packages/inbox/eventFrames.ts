@@ -19,7 +19,7 @@ export interface InboxEventWindow {
   origin: string;
 }
 
-export const INBOX_EVENT_FRAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'ask', 'pins', 'priority', 'artifact-pins', 'tags', 'show', 'snoozes', 'thread-pulls', 'rows', 'sidebar', 'agent-faces', 'reactions', 'capabilities', 'tailscale', 'shapes', 'machine', 'machines', 'cards', 'outbox', 'heartbeat'] as const;
+export const INBOX_EVENT_FRAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'ask', 'pins', 'priority', 'artifact-pins', 'tags', 'show', 'snoozes', 'thread-pulls', 'rows', 'sidebar', 'show-archived', 'agent-faces', 'reactions', 'capabilities', 'tailscale', 'shapes', 'machine', 'machines', 'cards', 'outbox', 'heartbeat'] as const;
 export type InboxEventFrameName = (typeof INBOX_EVENT_FRAMES)[number];
 export interface InboxEventFrame {
   name: InboxEventFrameName;
@@ -45,6 +45,8 @@ export interface InboxEventHandlers {
   onThreadPulls?: (threadIds: string[]) => void;
   onRows?: (rows: unknown, rev: unknown, last: { prev: unknown; by: unknown }) => void;
   onSidebar?: (sidebar: unknown, rev: unknown) => void;
+  /** The list's "Show archived" was saved here, in another window or on a linked machine: `{ on, rev }`. */
+  onShowArchived?: (value: unknown) => void;
   onAgentFaces?: (data: unknown) => void;
   onReactions?: (reactions: unknown, rev: unknown) => void;
   onCapabilities?: (capabilities: { board?: { on: boolean }; steps?: { on: boolean }; bro?: { on: boolean }; float_drafts?: { on: boolean }; mark_read_warning?: { on: boolean }; code_review?: { on: boolean }; shape?: { on: boolean }; system?: { on: boolean }; chapter_diagrams?: { on: boolean } }) => void;
@@ -143,6 +145,12 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
       try {
         const data = JSON.parse(frame.data) as { sidebar?: unknown; rev?: unknown };
         handlers.onSidebar?.(data.sidebar, data.rev);
+      } catch {
+      }
+      return;
+    case 'show-archived':
+      try {
+        handlers.onShowArchived?.(JSON.parse(frame.data));
       } catch {
       }
       return;

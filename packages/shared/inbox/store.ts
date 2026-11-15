@@ -120,7 +120,7 @@ import { whenTime } from "@plannotator/core/inbox-format";
 import type { QuestionAnswer } from "@plannotator/core/question-block";
 import { isInboxCloudHost, isInboxCloudSession, type InboxCloudWake } from "@plannotator/core/inbox-cloud";
 import type { InboxT3WaitReason } from "@plannotator/core/inbox-types";
-import { INBOX_T3_HOST, isT3ThreadId } from "@plannotator/core/inbox-types";
+import { INBOX_T3_HOST, isInboxT3WaitReason, isT3ThreadId } from "@plannotator/core/inbox-types";
 import { INBOX_PERMISSION_FULL, INBOX_PERMISSION_SESSION_PREFIX, isInboxPermissionSession } from "@plannotator/core/inbox-permission";
 import { inboxProjectKey } from "./project-key";
 import { parseDiagramAnchor } from "@plannotator/core/diagram-anchor";
@@ -2601,6 +2601,8 @@ export class InboxStore {
       const replyWaiting = !!replySession && !last.delivery && !(lastTo === null && sent?.checked_at);
       const connection = replyWaiting ? connectionOf(replySession!) : undefined;
       const kind = last.reply_to ? "reply" : "message";
+      // The T3 wake says why it cannot go in now: the row waits on T3, as the thread's line does.
+      const t3Wait = !last.delivery && !last.taken_back_at && isInboxT3WaitReason(last.t3_wait) ? last.t3_wait : null;
       if (lastTo) {
         const to = last.delivery ?? last.to ?? lastTo;
         // "Claude Code (another session)": a reply sent to another session of the asker's own host.
@@ -2615,6 +2617,7 @@ export class InboxStore {
           delivered: !!last.delivery,
           stuck: !last.delivery && stuck(lastTo.session, last.id),
           handed: !last.delivery && handed(lastTo.session, last.id) && !uncertain(lastTo.session, last.id),
+          waitsOnT3: t3Wait !== null,
           undelivered: !last.delivery && !askerLive(lastTo.session),
           askerEnded: false,
           wakes: !uncertain(lastTo.session, last.id),
@@ -2633,6 +2636,7 @@ export class InboxStore {
           name: null,
           ...(another ? { another_session: true } : {}),
           ...waitWire(decision),
+          ...(t3Wait && decision.state === "queued" && decision.reason !== "handed" ? { t3_wait: t3Wait } : {}),
         };
       }
       // A reply that tags agents: the owner's own delivery, never another recipient's.
@@ -2647,6 +2651,7 @@ export class InboxStore {
         delivered: !!deliveredAt,
         stuck: replyWaiting && stuck(replySession, last.id),
         handed: replyWaiting && handed(replySession, last.id) && !uncertain(replySession, last.id),
+        waitsOnT3: t3Wait !== null,
         undelivered: false,
         askerEnded,
         wakes: (wakingSession !== null || (askedSession !== null && connection != null)) && !uncertain(replySession, last.id),
@@ -2669,6 +2674,7 @@ export class InboxStore {
         ...(decision.state === "delivered" && sent?.read_by ? { read_by: sent.read_by } : {}),
         ...(decision.reason === "ended" && askingAuthor ? { asking: { host: askingAuthor.host ?? null, name: askingAuthor.name ?? null } } : {}),
         ...waitWire(decision),
+        ...(t3Wait && decision.state === "queued" && decision.reason !== "handed" ? { t3_wait: t3Wait } : {}),
       };
     }
 

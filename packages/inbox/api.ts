@@ -337,6 +337,8 @@ export interface ArchivedModel {
   projects: { id: string; name: string; archived: number }[];
   /** Archived threads in the filtered scope, beyond this page too. */
   total: number;
+  /** `machines=1`: each linked machine asked, `away` when its rows are the ones it last gave. */
+  machines?: Record<string, { away: boolean }>;
   offset: number;
   limit: number;
   threads: InboxListRow[];
@@ -593,6 +595,8 @@ export interface SettingsModel {
   experimental?: InboxExperimentalSettings;
   /** The Board (config.json `inboxBoard`): off unless the person turned it on. Absent from an Inbox before the switch (the Board is then always there). */
   board?: { on: boolean };
+  /** The list's "Show archived" (config.json `inboxShowArchived`), the same on every linked machine. Absent from an older Inbox. */
+  show_archived?: { on: boolean; rev: number };
   /** Thread steps (config.json `inboxSteps`, approval "inbox-thread-steps"): off unless the person turned them on. Absent from an older Inbox (no steps then). */
   steps?: { on: boolean };
   /** Bro mode (config.json `inboxBro`, approval "bro-mode"): off unless the person turned it on. Absent from an older Inbox (no row then). */
@@ -911,7 +915,6 @@ function refuseContested(path: string): void {
   const named = /^\/api\/inbox\/(?:threads|messages|attachments|projects|cards)\/([^/?]+)/.exec(path)?.[1];
   if (named && isContested(decodeURIComponent(named))) throw new InboxApiError(409, 'machine_conflict', CONFLICT_TEXT);
 }
-
 
 /**
  * The server refused a forward because the id is this Inbox's (`id_is_local`): it is local from now on, and the read
@@ -1473,18 +1476,18 @@ export const inboxApi = {
       learnMachines(model);
       return model;
     }),
-  archived: (input: { project?: string | null; offset?: number; limit?: number } = {}) => {
-    const query = new URLSearchParams();
-    if (input.project) query.set('project', input.project);
-    if (input.offset) query.set('offset', String(input.offset));
-    if (input.limit) query.set('limit', String(input.limit));
-    const qs = query.toString();
-    return get<ArchivedModel>(inboxUrl('/threads/archived', qs)).then((model) => {
-      // This Inbox's archived threads: local for good, so no linked machine can claim one.
-      rememberLocal(localIdsIn(model));
+  /** `machines`: the list's Archived group, every linked machine's too (each of its rows with `machine`). */
+  archived: (input: { project?: string | null; offset?: number; limit?: number; machines?: boolean } = {}) => {
+    const query = new URLSearchParams(Object.entries({ project: input.project ?? '', offset: input.offset ? String(input.offset) : '', limit: input.limit ? String(input.limit) : '', machines: input.machines ? '1' : '' }).filter(([, v]) => v));
+    return get<ArchivedModel>(inboxUrl('/threads/archived', query.toString())).then((model) => {
+      // This Inbox's archived threads: local for good, so no linked machine can claim one. Another machine's are its own.
+      if (!input.machines) rememberLocal(localIdsIn(model));
+      else for (const row of model.threads) if (row.machine && row.machine !== selfMachineId()) rememberMachine(idsIn(row), row.machine); else rememberLocal(localIdsIn(row));
       return model;
     });
   },
+  /** The list's "Show archived" (⋮ menu): one switch on every linked machine and window. */
+  saveShowArchived: (on: boolean) => post<{ show_archived: { on: boolean; rev: number } }>(inboxUrl('/settings'), { show_archived: { on } }),
   /** One thread; with `timeoutMs`, a read with no answer by then fails (InboxReadTimeout) instead of waiting for good. */
   // A thread's action items move out of `questions` into `actions` here (actions.ts), so nothing that picks or sends answers meets one.
   /** `signal`: the person moved on to another thread before it answered; the read is given up (an AbortError). */
@@ -2374,9 +2377,6 @@ interface LinkedPageBase {
 }
 
 export type LinkedPageView = LinkedPageBase & ({ html: string } | { html: null; text: string });
-
-
-
 
 // ───────────────────────────── Shape ─────────────────────────────
 
