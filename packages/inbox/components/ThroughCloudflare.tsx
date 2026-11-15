@@ -4,6 +4,9 @@ import { Icon } from '../icons';
 import { qrModules } from '../qr';
 import { CloudflareForm, CloudflareProgress } from './CloudflareSetup';
 import { Switch } from './SettingSwitch';
+import { CloudflareMark } from './CloudflareMark';
+
+const CloudflareTileMark = CloudflareMark;
 
 function AddressQr({ url }: { url: string }) {
   const path = useMemo(() => qrModules(url), [url]);
@@ -152,7 +155,13 @@ export function ThroughCloudflare() {
   return (
     <section className="ib-sgroup" data-settings-cloudflare={state} aria-labelledby="ib-g-cloudflare">
       <h2 id="ib-g-cloudflare">Cloudflare</h2>
-      <p>Open the Inbox and sessions from your other devices through your own Cloudflare account, behind a sign-in for your e-mail only. For when Tailscale is not an option.</p>
+      <p>
+        Open the Inbox and sessions from your other devices with{' '}
+        <a href="https://www.cloudflare.com/products/access/" target="_blank" rel="noreferrer">
+          Cloudflare Access
+        </a>{' '}
+        and Cloudflare Tunnel, on your own Cloudflare account. Only your e-mail can sign in.
+      </p>
       {showJob ? (
         <CloudflareProgress
           job={job!}
@@ -174,7 +183,7 @@ export function ThroughCloudflare() {
         <div className="ib-card">
           <div className="ib-prow">
             <span className="ib-tile">
-              <Icon name="cloud" />
+              <CloudflareTileMark />
             </span>
             <span className="ib-txt">
               <span className="ib-l">Reach the Inbox through Cloudflare</span>
@@ -200,7 +209,7 @@ export function ThroughCloudflare() {
         <div className="ib-card">
           <div className="ib-prow">
             <span className="ib-tile">
-              <Icon name="cloud" />
+              <CloudflareTileMark />
             </span>
             <span className="ib-txt">
               <span className="ib-l">

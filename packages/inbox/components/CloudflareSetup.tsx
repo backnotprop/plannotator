@@ -112,7 +112,13 @@ export function CloudflareForm({ onStarted, onCancel }: { onStarted: (view: Clou
         <h3>Set up Cloudflare</h3>
       </div>
       <div className="ib-flow-body">
-        <p className="ib-lead">The token is used once for this setup and is never saved. Create it in Cloudflare with Tunnel, Access (apps, policies, identity providers) and DNS edit rights.</p>
+        <p className="ib-lead">
+          The token is used once and never saved.{' '}
+          <a href="https://developers.cloudflare.com/fundamentals/api/get-started/create-token/" target="_blank" rel="noreferrer">
+            Create one in Cloudflare
+          </a>{' '}
+          with edit rights for Tunnel, Access (apps, policies, identity providers) and DNS.
+        </p>
         <div className="ib-card">
           <div className="ib-prow">
             <span className="ib-txt">

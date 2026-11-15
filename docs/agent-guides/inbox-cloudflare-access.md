@@ -12,7 +12,7 @@ Opt-in reach for the Inbox and for `--cloudflare-access` sessions through the pe
 - `packages/server/cf-tunnel.ts`: `cloudflared` as the Inbox's child.
 - `packages/server/session-cf-access.ts`: the session side.
 - `apps/hook/server/inbox-cf-access-command.ts` and `inbox-cf-access-checks.ts`: the command and the outside checks.
-- `packages/inbox/components/ThroughCloudflare.tsx`: Settings → Devices, read only, rendered only once set up.
+- `packages/inbox/components/ThroughCloudflare.tsx`: Settings → Remote devices, read only, rendered only once set up.
 
 **Two names, one app.** Setup makes `host` (the Inbox) and `sessionHost` (`<label>-s.<zone>`, one level, so the free certificate covers it): one ingress rule each, both covered by the one Access app (`self_hosted_domains`, one AUD, one policy, one sign-in), two DNS records. Host decides the world before any path or Referer logic: the Inbox's name never reaches a session (`/s/…` there is `403 wrong_origin`), and the sessions' name never reaches the Inbox (an unattributed Inbox route is `403 wrong_origin`; anything else `410`). The two are same-site to each other, so the Inbox's `Sec-Fetch-Site` rule refuses a session page's requests; the Access cookie and the apps' storage are per name. Sessions share `sessionHost` among themselves: one session page's rendering bug could reach another open session (not the Inbox). A per-session name under a wildcard (`*.<label>-s.<zone>`) would close that, but needs Advanced Certificate Manager for a second-level certificate and a wildcard Access app and DNS record; it would be one more setup step on top of this one, with no change to the Inbox's name.
 
@@ -50,7 +50,7 @@ After the checks, `Cf-*`, `Tailscale-*`, `X-Forwarded-*`, `Plannotator-Door*` an
 - `cloudflared tunnel --no-autoupdate run` gets `TUNNEL_TOKEN` in its environment, restarts with backoff (1 s doubling to 60 s, reset after a minute up), and counts connections from its log.
 - State: `inbox.json` `cloudflare_access` (`inbox status`, `--json`), Settings.
 
-**Settings → Devices → Cloudflare** (`components/ThroughCloudflare.tsx`, `CloudflareSetup.tsx`, `data/cloudflareAccess.ts`, `cloudflare.css`), under "Over your tailnet", in that section's cards, rows, flow and checks:
+**Settings → Remote devices → Cloudflare** (`components/ThroughCloudflare.tsx`, `CloudflareSetup.tsx`, `data/cloudflareAccess.ts`, `cloudflare.css`), under "Over your tailnet", in that section's cards, rows, flow and checks:
 - Not set up: what it needs, whether `cloudflared` was found (the install command if not), and Set up.
 - The form: the e-mail (typed, never filled in), the token (a password field; cleared from the page's state the moment setup is sent), then Find domains, a domain to pick, and the two names it will create before anything exists.
 - Setting up: the five steps tick as the server reports them; a failure names its step, says nothing was left behind (or what was), and offers Try again.

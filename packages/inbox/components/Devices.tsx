@@ -217,11 +217,17 @@ function OverYourTailnet({
   return (
     <section className="ib-sgroup" data-settings-tailscale={state.on ? 'on' : 'off'} aria-labelledby="ib-g-tailscale">
       <h2 id="ib-g-tailscale">Over your tailnet</h2>
-      <p>Open the Inbox window in a browser on your laptop or tablet, through Tailscale, over HTTPS. Your phone&apos;s app does not need this.</p>
+      <p>
+        Open the Inbox window in a browser on your laptop or tablet, through{' '}
+        <a href="https://tailscale.com/" target="_blank" rel="noreferrer">
+          Tailscale
+        </a>
+        , over HTTPS. Your phone&apos;s app does not need this.
+      </p>
       <div className="ib-card">
         <div className="ib-prow">
           <span className="ib-tile">
-            <Icon name="globe" />
+            <TailscaleMark />
           </span>
           <span className="ib-txt">
             <span className="ib-l">
