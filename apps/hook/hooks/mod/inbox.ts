@@ -365,8 +365,25 @@ const LEASE_EVERY_MS = 5_000
 export const INBOX_LEASE_STALE_MS = 20_000
 /** How often a link that waits to know whether it is its session's own process asks again (`InboxLinkOptions.owner`). */
 export const INBOX_OWNER_PROBE_EVERY_MS = 2_000
-/** How long such a link asks before it settles on "not the session's own" for good. */
+/** How long such a link asks that often before it settles on "not the session's own" (each touch starts this again). */
 export const INBOX_OWNER_WAIT_MS = 180_000
+/** How often it still asks once settled on no, for as long as it lives. */
+export const INBOX_OWNER_REASK_EVERY_MS = 30_000
+/** One ask's bound: a hang reads as no answer yet, never holding a tick or a tool call. */
+export const INBOX_OWNER_ASK_TIMEOUT_MS = 2_000
+/** How long a send from a process not yet known as its session's own keeps asking before it goes (`callTool`). */
+export const INBOX_OWNER_SEND_WAIT_MS = 8_000
+const INBOX_OWNER_SEND_WAIT_STEP_MS = 500
+
+/**
+ * What `InboxLinkOptions.owner` answers: `yes` true with the signal that said
+ * so, false with why not, or null when this engine cannot tell (the link is
+ * then the session's own, as without the option).
+ */
+export interface InboxOwnerAnswer {
+  yes: boolean | null
+  via: string
+}
 /** A claimed reply whose claimant stopped saying it is alive for this long is reported as undelivered (shared with the Inbox). */
 export { INBOX_UNDELIVERED_AFTER_MS }
 /**
@@ -1036,15 +1053,16 @@ export interface InboxLinkOptions {
   /** Who the session is in the Inbox (a T3 Code thread); absent: the Claude Code session `sessionId`. */
   agent?: InboxAgentIdentity
   /**
-   * Whether this process is the session's own, asked every
-   * INBOX_OWNER_PROBE_EVERY_MS until it says yes or INBOX_OWNER_WAIT_MS pass
-   * (a T3 Code thread: its `t3-code` tools, which appear a few seconds after
-   * the start). Until it says yes the link takes no lease, polls nothing and
-   * delivers nothing, and its sends carry no wake mark; then a live lease
-   * another process holds stands until the person acts here. Absent: the
-   * process is the session's own from the start.
+   * Whether this process is the session's own (a T3 Code thread: its
+   * `t3-code` tools or server, which reach it a few seconds after the start),
+   * asked every INBOX_OWNER_PROBE_EVERY_MS for INBOX_OWNER_WAIT_MS from the
+   * first ask or the last touch, then every INBOX_OWNER_REASK_EVERY_MS. Until
+   * it says yes the link takes no lease, polls nothing and delivers nothing;
+   * then a live lease another process holds stands until the person acts
+   * here. A null answer (the engine cannot tell) makes it the session's own
+   * at once. Absent: the session's own from the start.
    */
-  owner?: () => Promise<boolean>
+  owner?: () => Promise<InboxOwnerAnswer>
   /**
    * False: the tool sends and reads, and nothing polls (no reply wake, no
    * Inbox Ask): a session that may end with its turn (`SESSION_KIND_FEATURES`).
@@ -1150,6 +1168,8 @@ export class InboxLink {
   private owns: boolean | null
   private ownerAskedSince: number | null = null
   private ownerAskedAt = Number.NEGATIVE_INFINITY
+  /** `start` asked for the touch that being made is, held while the owner is not known. */
+  private startTouch = false
 
   constructor(private readonly options: InboxLinkOptions) {
     this.host = options.host
@@ -1189,7 +1209,10 @@ export class InboxLink {
     })
     // Being made is no touch where the session's own process is still to be found: that one takes a live lease
     // only when the person acts in it.
-    if (options.touch !== false && !this.options.owner) void this.touch()
+    this.startTouch = options.touch !== false
+    if (this.startTouch && !this.options.owner) void this.touch()
+    // Asked at once: an engine that cannot tell makes this the touch it is everywhere else.
+    else if (this.options.owner) void this.ownsSession(true)
     this.arm()
   }
 
@@ -1241,6 +1264,11 @@ export class InboxLink {
   /** The person acted in this process: replies should land here, from now on. */
   async touch(): Promise<void> {
     this.touchedAt = await this.host.now()
+    // The person typed or the agent sent: a "no" is asked again, with a whole wait of its own.
+    if (this.owns === false) {
+      this.owns = null
+      this.ownerAskedSince = this.touchedAt
+    }
     if (this.disposed || !(await this.ownsSession(true))) return
     // No Inbox has ever run here: nothing to deliver, so nothing is written;
     // the lease is taken on the first tick after a call starts the Inbox.
@@ -1277,6 +1305,14 @@ export class InboxLink {
    */
   async callTool(input: unknown, cwd: string): Promise<{ text: string } | { deny: string }> {
     await this.touch()
+    // A thread's first send can come before its own signal does: asked a little longer, so the poll starts
+    // before the message lands. The send says the reply arrives either way, as a confirmed one does.
+    // Waited in `$.process.run`, which a hook's budget does not count.
+    for (let waited = 0; this.owns !== true && waited < INBOX_OWNER_SEND_WAIT_MS; waited += INBOX_OWNER_SEND_WAIT_STEP_MS) {
+      await this.host.waitForAny([], INBOX_OWNER_SEND_WAIT_STEP_MS)
+      // Confirmed while it waited: the send is the touch that takes the lease.
+      if (await this.ownsSession(true)) await this.touch()
+    }
     const project = (await this.projectFolder()) ?? cwd
     const call = inboxToolCall(input, this.tools, {
       project_path: project,
@@ -1307,9 +1343,9 @@ export class InboxLink {
     if ('error' in running) return { deny: running.error }
     let answer: Awaited<ReturnType<typeof mcpCall>>
     try {
-      // This session's wake delivers the reply as a turn: the send tools say to end the turn. Without the wake, or
-      // from a process not yet known as the session's own, they say to read the thread later, as for any agent nothing wakes.
-      const wakes = this.options.wake !== false && this.owns === true
+      // This session's wake delivers the reply as a turn: the send tools say to end the turn. Without the wake
+      // they say to read the thread later, as for any agent nothing wakes.
+      const wakes = this.options.wake !== false
       answer = await mcpCall(this.host, running.port, 'tools/call', inboxToolCallParams(call, { wakes, ...(workingFolder ? { workingFolder } : {}) }))
     } catch (error) {
       return { deny: `The Plannotator Inbox did not answer (${error instanceof Error ? error.message : String(error)}).` }
@@ -1377,24 +1413,32 @@ export class InboxLink {
 
   /**
    * Whether this process is the session's own (`InboxLinkOptions.owner`),
-   * asked at most every INBOX_OWNER_PROBE_EVERY_MS (`force` asks at once)
-   * and settled on no once INBOX_OWNER_WAIT_MS pass without a yes.
+   * asked at most every INBOX_OWNER_PROBE_EVERY_MS, or INBOX_OWNER_REASK_EVERY_MS
+   * once settled on no (`force` asks at once), each ask bounded by
+   * INBOX_OWNER_ASK_TIMEOUT_MS. A yes stays. The debug lines carry no id.
    */
   private async ownsSession(force = false): Promise<boolean> {
-    if (this.owns !== null) return this.owns
+    if (this.owns === true) return true
     const now = await this.host.now()
     this.ownerAskedSince ??= now
-    if (!force && now - this.ownerAskedAt < INBOX_OWNER_PROBE_EVERY_MS) return false
+    const every = this.owns === false ? INBOX_OWNER_REASK_EVERY_MS : INBOX_OWNER_PROBE_EVERY_MS
+    if (!force && now - this.ownerAskedAt < every) return false
     this.ownerAskedAt = now
-    const yes = await this.options.owner!().catch(() => false)
-    if (this.owns !== null) return this.owns
-    if (yes) {
+    const asked = this.options.owner!().catch((error: unknown): InboxOwnerAnswer => ({ yes: false, via: error instanceof Error ? error.message : String(error) }))
+    const answer = (await within(this.host, INBOX_OWNER_ASK_TIMEOUT_MS, asked)) ?? { yes: false, via: `no answer in ${INBOX_OWNER_ASK_TIMEOUT_MS} ms` }
+    // Another ask may have settled it meanwhile (the tick and a send ask side by side).
+    const meanwhile = this.owns as boolean | null
+    if (meanwhile === true || this.disposed) return meanwhile === true
+    const after = (await this.host.now()) - this.ownerAskedSince
+    if (answer.yes !== false) {
       this.owns = true
       this.leaseCheckedAt = Number.NEGATIVE_INFINITY
-      this.host.debug(`inbox: this process is ${this.agent.session}'s own; it may poll and deliver`)
-    } else if (now - this.ownerAskedSince >= INBOX_OWNER_WAIT_MS) {
+      this.host.debug(`inbox: ${this.agent.host} thread confirmed after ${after} ms via ${answer.via}`)
+      // The engine cannot tell: the link is what it is without the option, made with a touch.
+      if (answer.yes === null && this.startTouch) void this.touch()
+    } else if (this.owns === null && now - this.ownerAskedSince >= INBOX_OWNER_WAIT_MS) {
       this.owns = false
-      this.host.debug(`inbox: this process is not ${this.agent.session}'s own; it never polls or delivers`)
+      this.host.debug(`inbox: ${this.agent.host} thread not confirmed: ${answer.via}`)
     }
     return this.owns === true
   }

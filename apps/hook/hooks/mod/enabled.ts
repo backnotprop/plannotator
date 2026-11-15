@@ -312,7 +312,8 @@ export function t3ThreadOf(env: T3SessionEnv): string | null {
  * thread's run only, so a title run, a capability probe or a `claude -p` with
  * the thread's environment never has it, and no environment variable carries it.
  */
-export const T3_THREAD_TOOL_PREFIX = 'mcp__t3-code__'
+export const T3_THREAD_SERVER = 't3-code'
+export const T3_THREAD_TOOL_PREFIX = `mcp__${T3_THREAD_SERVER}__`
 
 /** Whether the session's tools (`$.tool.list()`'s names) show it is a T3 thread's own Claude. */
 export function isT3ThreadOwnTools(names: readonly unknown[]): boolean {
