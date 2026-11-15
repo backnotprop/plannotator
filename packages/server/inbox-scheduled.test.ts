@@ -189,6 +189,27 @@ describe("a run is a launch of its own in the one thread", () => {
     expect(w.store.threadOwner(thread)?.session).toBe(session);
   });
 
+  test("a thread the person deleted: the next run starts one new thread, its number counts on, and nothing already run runs again", async () => {
+    const w = world();
+    const { record } = await w.make();
+    w.at("2026-11-16T14:00:10.000Z");
+    await w.scheduled.check();
+    const first = w.store.scheduledThread(record.id)!.thread_id!;
+    await w.settle(w.dividers(first)[0]!, "Three new issues, labelled.");
+    w.store.deleteThread(first);
+    w.at("2026-11-16T14:05:00.000Z");
+    await w.scheduled.check();
+    expect(w.store.scheduledThread(record.id)!.thread_id).toBeNull();
+    w.restart();
+    w.at("2026-11-17T14:00:10.000Z");
+    await w.scheduled.check();
+    const thread = w.store.scheduledThread(record.id)!.thread_id!;
+    expect(thread).not.toBe(first);
+    expect(w.dividers(thread).map((m) => m.scheduled_run)).toMatchObject([{ run: 2, due_at: "2026-11-17T14:00:00.000Z" }]);
+    await w.settle(w.dividers(thread)[0]!, "Two more, labelled.");
+    expect(w.scheduled.rowOf(w.store.scheduledThread(record.id)!)).toMatchObject({ thread_id: thread, runs: 2, last_run: { run: 2, outcome: "replied" } });
+  });
+
   test("replied, then didn't finish; the newest run takes the reply, an earlier one says it ended", async () => {
     const w = world();
     const { record } = await w.make();
@@ -483,6 +504,21 @@ describe("an agent's change with no thread_id is said in the routine's own threa
     expect(w.store.threadOwner(thread)?.session).toBe(session);
     expect(w.store.listRow(thread)).toMatchObject({ unread: true });
     expect(w.scheduled.rowOf(w.store.scheduledThread(record.id)!).last_change).toEqual({ op: "update", by: "Codex", at: line.created_at });
+  });
+
+  test("after the person deletes its thread, two edits with no thread_id are two lines in one new thread", async () => {
+    const w = world();
+    const { record } = await w.make();
+    const { message } = await w.scheduled.runNow(record.id, { kind: "person" });
+    await w.settle(message, "Three new issues, labelled.");
+    w.store.deleteThread(message.thread_id);
+    expect(w.scheduled.rowOf(w.store.scheduledThread(record.id)!)).toMatchObject({ thread_id: null, thread_name: null, runs: 1 });
+    const before = w.store.threadIds().length;
+    await w.scheduled.update(record.id, { prompt: "Triage, then label." }, agent);
+    await w.scheduled.update(record.id, { prompt: "Triage, label, then assign." }, agent);
+    const thread = w.store.scheduledThread(record.id)!.thread_id!;
+    expect(w.store.threadIds().length).toBe(before + 1);
+    expect(w.store.threadMessageIds(thread).map((id) => w.store.message(id)!.scheduled_change?.op)).toEqual(["update", "update"]);
   });
 
   test("one that never ran: the line makes its thread, and its first run goes on in it", async () => {

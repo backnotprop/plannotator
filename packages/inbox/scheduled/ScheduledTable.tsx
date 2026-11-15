@@ -106,7 +106,7 @@ function WideRow({ row, acts, now }: { row: InboxScheduledRow; acts: RowActs; no
   return (
     <div className="st-row st-cols" role="row" onClick={() => acts.open(row)} data-scheduled-row={row.id} data-state={row.state}>
       <span role="cell" className="st-name">
-        <button type="button" className="st-open" onClick={stopClick(() => acts.open(row))}>
+        <button type="button" className="st-open" title={row.name} onClick={stopClick(() => acts.open(row))}>
           {row.name}
         </button>
       </span>
@@ -130,7 +130,7 @@ function ShortRow({ row, acts, now, selected }: { row: InboxScheduledRow; acts: 
   return (
     <div className="st-srow st-scols" role="row" onClick={() => acts.open(row)} data-scheduled-row={row.id} data-state={row.state} data-selected={selected ? '' : undefined}>
       <span role="cell" className="st-sname">
-        <button type="button" className="st-open" aria-current={selected ? 'true' : undefined} onClick={stopClick(() => acts.open(row))}>
+        <button type="button" className="st-open" title={row.name} aria-current={selected ? 'true' : undefined} onClick={stopClick(() => acts.open(row))}>
           {row.name}
         </button>
         <span className="st-when">{shortScheduleWords(row)}</span>

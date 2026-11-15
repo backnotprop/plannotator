@@ -38,8 +38,10 @@ export interface InboxScheduledThread {
   effort?: string;
   /** Files on this computer the prompt names (absolute paths): each run's divider carries them, as send_message's do. */
   attachments: string[];
-  /** The thread its runs land in: made at the first run or skip line. */
+  /** The thread its runs land in: made at the first run or skip line. Null again after the person deletes it. */
   thread_id: string | null;
+  /** The runs counted in threads the person deleted: the next run's number counts on from it. */
+  runs_before?: number;
   /** The agent session that made it, and the thread it asked from. */
   made_by?: { host: string; session: string; thread_id: string };
   /**

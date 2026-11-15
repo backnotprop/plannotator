@@ -83,6 +83,8 @@ export function createInboxScheduled(deps: {
     return record;
   };
   const save = (record: InboxScheduledThread, patch: Partial<InboxScheduledThread>): InboxScheduledThread => store.putScheduledThread({ ...record, ...patch, updated_at: iso() });
+  /** Its thread, while it is there: one that is gone counts as none, and the next line starts a new one. */
+  const threadOf = (record: InboxScheduledThread): string | null => (record.thread_id && store.message(record.thread_id) ? record.thread_id : null);
 
   // ── Runs, read from the thread ──
 
@@ -151,11 +153,12 @@ export function createInboxScheduled(deps: {
       schedule_words: inboxScheduleWords(record.schedule),
       tz_short: record.schedule ? inboxScheduledTzShort(record.schedule.tz, next ?? at) : null,
       next_run: next ? next.toISOString() : null,
-      runs: last?.scheduled_run?.run ?? 0,
+      runs: last?.scheduled_run?.run ?? record.runs_before ?? 0,
       last_run: lastRun,
       running_since: running ? lastRun!.started_at : null,
       ...folderShown(record),
-      thread_name: record.thread_id ? (store.threadShortName(record.thread_id) ?? store.message(record.thread_id)?.subject ?? null) : null,
+      thread_id: threadOf(record),
+      thread_name: threadOf(record) ? (store.threadShortName(record.thread_id!) ?? store.message(record.thread_id!)?.subject ?? null) : null,
       last_change: lastChangeOf(record),
     };
   };
@@ -243,14 +246,15 @@ export function createInboxScheduled(deps: {
    */
   const tell = async (by: InboxScheduledBy, record: InboxScheduledThread, body: string, change: Omit<InboxScheduledChange, "scheduled_id" | "name">): Promise<string | null> => {
     if (by.kind !== "agent") return null;
-    const thread = (by.thread_id ? store.message(by.thread_id) : null) ?? (record.thread_id ? store.message(record.thread_id) : null);
+    const own = threadOf(record);
+    const thread = (by.thread_id ? store.message(by.thread_id) : null) ?? (own ? store.message(own) : null);
     const line = { author: { kind: "agent" as const, host: by.host, session: by.session, name: by.name }, body, scheduled_change: { scheduled_id: record.id, name: record.name, ...change } };
     if (thread) return store.sendMessage({ ...line, project_id: thread.project_id, reply_to: store.threadMessageIds(thread.thread_id).at(-1) ?? thread.thread_id }).message.id;
     const project = projectOf(record) ?? (await firstProject(record));
     if (!project) return null;
     const sent = store.sendMessage({ ...line, project_id: project, subject: record.name }).message;
     const now = store.scheduledThread(record.id) ?? store.deletedScheduledThread(record.id);
-    if (now && !now.thread_id) save(now, { thread_id: sent.thread_id });
+    if (now && !threadOf(now)) save(now, { thread_id: sent.thread_id });
     return sent.id;
   };
 
@@ -270,7 +274,7 @@ export function createInboxScheduled(deps: {
   // ── Starting a run ──
 
   const projectOf = (record: InboxScheduledThread): string | null => {
-    const project = record.thread_id ? store.message(record.thread_id)?.project_id : "project_id" in record.folder ? record.folder.project_id : null;
+    const project = threadOf(record) ? store.message(record.thread_id!)?.project_id : "project_id" in record.folder ? record.folder.project_id : null;
     return project && store.project(project) ? project : null;
   };
 
@@ -304,7 +308,7 @@ export function createInboxScheduled(deps: {
       const runOf = (record: InboxScheduledThread): InboxScheduledRun => ({
         scheduled_id: record.id,
         name: record.name,
-        run: (lastDividerOf(record)?.scheduled_run?.run ?? 0) + 1,
+        run: (lastDividerOf(record)?.scheduled_run?.run ?? record.runs_before ?? 0) + 1,
         due_at: due.due_at,
         by: due.by,
         ...(due.late ? { late: true as const } : {}),
@@ -326,7 +330,7 @@ export function createInboxScheduled(deps: {
         if (!project) throw error;
         // New message's "Nothing was sent." is not a run's: the thread says "The run didn't start." before it.
         const why = (error instanceof Error ? error.message : String(error)).replace(/\s*Nothing was sent\.$/, "");
-        const { message } = store.writeScheduledLine({ project_id: project, thread_id: record.thread_id, name: record.name, body: bodyOf(record), key, scheduled_run: { ...run, failed: why } });
+        const { message } = store.writeScheduledLine({ project_id: project, thread_id: threadOf(record), name: record.name, body: bodyOf(record), key, scheduled_run: { ...run, failed: why } });
         if (record.thread_id !== message.thread_id) save(record, { thread_id: message.thread_id });
         return message;
       }
@@ -345,10 +349,10 @@ export function createInboxScheduled(deps: {
         log(`Inbox scheduled ${id}: an attachment was left out (${error instanceof InboxError ? error.code : "error"})`);
       }
       const current = live();
-      const previous = current.thread_id ? (store.scheduledRunOf(current.thread_id) ?? store.message(current.thread_id)) : null;
+      const previous = threadOf(current) ? (store.scheduledRunOf(current.thread_id!) ?? store.message(current.thread_id!)) : null;
       const { message, replayed } = store.writeScheduledLine({
         project_id: prepared.project.id,
-        thread_id: current.thread_id,
+        thread_id: threadOf(current),
         name: current.name,
         body: bodyOf(current),
         key,
@@ -379,7 +383,7 @@ export function createInboxScheduled(deps: {
     const when = skipped.count === 1 ? inboxScheduledWhen(new Date(skipped.to), tz) : `${inboxScheduledTimes(skipped.count)}, ${inboxScheduledWhen(new Date(skipped.from), tz)} to ${inboxScheduledWhen(new Date(skipped.to), tz)}`;
     const { message } = store.writeScheduledLine({
       project_id: project,
-      thread_id: record.thread_id,
+      thread_id: threadOf(record),
       name: record.name,
       body: `Skipped ${when} · ${reason}`,
       key: `sch:${record.id}:skip:${skipped.to}`,

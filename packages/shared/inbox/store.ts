@@ -6403,8 +6403,23 @@ export class InboxStore {
     const messageIds = new Set(this.threadMembers.get(threadId) ?? []);
     const markups = this.markupsOf((record) => record.thread_id === threadId);
     this.keepDecisionLines((question) => messageIds.has(question.message_id));
+    this.releaseScheduledThreads((id) => id === threadId);
     this.log.deleteThread(project, threadId, messageIds, this.seq);
     this.reload(markups);
+  }
+
+  /**
+   * A routine whose thread is deleted lets go of it: its next run or change line starts one new thread. Its runs count
+   * on from the deleted thread's last, and its clock keeps its place, so nothing it already ran is run again.
+   */
+  private releaseScheduledThreads(gone: (threadId: string) => boolean): void {
+    for (const record of [...this.scheduledById.values()]) {
+      if (!record.thread_id || !gone(record.thread_id)) continue;
+      const { run, due } = this.scheduledLines(record.id);
+      const handled = record.handled_through !== null && due && due > record.handled_through ? due : record.handled_through;
+      const runs = Math.max(run?.scheduled_run?.run ?? 0, record.runs_before ?? 0);
+      this.putScheduledThread({ ...record, thread_id: null, handled_through: handled, ...(runs > 0 ? { runs_before: runs } : {}), updated_at: this.now().toISOString() });
+    }
   }
 
   /** Delete a project: its whole folder, then every blob no other record uses. */
@@ -6413,6 +6428,7 @@ export class InboxStore {
     if (!project) throw new InboxError("project_not_found", `No project ${projectId}.`);
     const markups = this.markupsOf((record) => record.project_id === projectId);
     this.keepDecisionLines((question) => question.project_id === projectId);
+    this.releaseScheduledThreads((id) => this.messages.get(id)?.project_id === projectId);
     this.log.deleteProject(project, this.seq);
     this.reload(markups);
   }
