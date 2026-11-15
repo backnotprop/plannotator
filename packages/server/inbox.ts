@@ -75,6 +75,8 @@ import {
   isQwenSessionId,
   INBOX_T3_HOST,
   isT3ThreadId,
+  INBOX_ANTIGRAVITY_HOST,
+  antigravityConversationOfCall,
   INBOX_MCP_WAKING_HOSTS,
   INBOX_WAKING_HOSTS,
   INBOX_HOST_NAMES,
@@ -234,6 +236,7 @@ import { t3SettingsStatus } from "./inbox-t3-settings";
 import { createInboxVoice } from "./inbox-voice";
 import { createInboxQwenWake, type InboxQwenWake } from "./inbox-qwen-wake";
 import { createInboxT3Wake, createT3ModOwner, type InboxT3Wake, type T3Connect } from "./inbox-t3-wake";
+import { createInboxAntigravityWake, type InboxAntigravityWake } from "./inbox-antigravity-wake";
 import { CloudAgentError, createInboxCloudAgents, hasCloudWake } from "./inbox-cloud-agents";
 import { PERSONAL_AGENTS_BANNER_BASE } from "@plannotator/core/inbox-personal-agents";
 import { personalAgentConnectedHere } from "./inbox-personal-agents";
@@ -670,6 +673,8 @@ export interface InboxServerOptions {
   /** The T3 Code wake (inbox-t3-wake.ts): tests pass a scripted T3, a clock and a log. */
   t3Wake?: { connect?: T3Connect; now?: () => number; log?: (line: string) => void; lookupTimeoutMs?: number; grantCheckMs?: number };
   cloudWake?: { now?: () => number; gapMs?: number; timeoutMs?: number; retryMs?: number; log?: (line: string) => void };
+  /** The Antigravity wake (inbox-antigravity-wake.ts): tests shorten its time limits and log. */
+  antigravityWake?: { now?: () => number; log?: (line: string) => void; sendTimeoutMs?: number; lookupTimeoutMs?: number; waitCheckMs?: number; appClients?: readonly string[] };
 }
 
 /**
@@ -740,6 +745,8 @@ export interface InboxServer {
   /** The Qwen Code wake (inbox-qwen-wake.ts): tests run its sweep. */
   qwenWake: InboxQwenWake;
   t3Wake: InboxT3Wake;
+  /** The Antigravity wake (inbox-antigravity-wake.ts): tests run its sweep. */
+  antigravityWake: InboxAntigravityWake;
   cloudWake: InboxCloudWaker;
   /** Shape's watch of the boards: tests read how many windows it reads the store for. */
   shapeWatchers: () => number;
@@ -1578,7 +1585,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       (typeof host === "string" && typeof session === "string" && pollingWakeHost(host) && live.pollsNow(host, session)) ||
       (await codexWake.wakes(host, session, meta)) ||
       (await qwenWake.wakes(host, session, meta)) ||
-      (await t3Wake.wakes(host, session)),
+      (await t3Wake.wakes(host, session)) ||
+      (await antigravityWake.wakes(host, session, meta)),
     bridgePolls: (host, session) => pollingWakeHost(host) && live.pollsNow(host, session),
     sessionName: (session) => live.labelOf(session) ?? live.titleOf(session),
     t3WakeReaches: (session) => t3Wake.wakes(INBOX_T3_HOST, session),
@@ -2261,7 +2269,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // Probed only for a connected one, so reading the agents runs no CLI otherwise. Qwen Code: whether
         // Plannotator holds its trusted-sender token (inbox-qwen-trust.ts), read from disk, no CLI.
         const wakes =
-          INBOX_MCP_WAKING_HOSTS.includes(id) && reach.kind === "mcp" && reach.on ? { wakes: id === INBOX_QWEN_HOST ? qwenWake.canWake() : (await codexWake.cli()) !== null } : {};
+          INBOX_MCP_WAKING_HOSTS.includes(id) && reach.kind === "mcp" && reach.on
+            ? { wakes: id === INBOX_QWEN_HOST ? qwenWake.canWake() : id === INBOX_ANTIGRAVITY_HOST ? antigravityWake.canWake() : (await codexWake.cli()) !== null }
+            : {};
         return { id, label: INBOX_AGENT_LABELS[id], detected, reach, tool, reminder, note, plugin: inboxPluginStatus(id, agentEnvironment), ...wakes };
       }),
     );
@@ -4365,7 +4375,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // it is presence, and marks a queued Tidy wake delivered, but it delivers no reply and is not made live.
         const meta = params?._meta;
         const thread = codexThreadOfCall(meta);
-        if (thread && (!session || session === thread)) {
+        const antigravity = thread ? null : antigravityConversationOfCall(meta);
+        if (antigravity && (!session || session === antigravity.conversation)) {
+          // An Antigravity conversation (inbox-antigravity-wake.ts): it names itself on every call, so a tool without a
+          // session counts too. While a server that holds it answers, it is live for New message, compose and tags.
+          if (!session) live.seenOverMcp(antigravity.conversation, { host: INBOX_ANTIGRAVITY_HOST });
+          antigravityWake.noteToolCall(antigravity.conversation, meta);
+          if (await antigravityWake.wakes(INBOX_ANTIGRAVITY_HOST, antigravity.conversation, meta)) await live.seenWakeOnly(antigravity.conversation, INBOX_ANTIGRAVITY_HOST, args?.project_path);
+        } else if (thread && (!session || session === thread)) {
           if (!session) live.seenOverMcp(thread, { host: INBOX_CODEX_HOST });
           codexWake.noteToolCall(thread, codexTurnStartedAt(meta));
           if (await codexWake.wakes(INBOX_CODEX_HOST, thread, meta)) {
@@ -4422,9 +4439,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     autoSendAfterMs: options.autoSendAfterMs ?? INBOX_AUTO_SEND_AFTER_MS,
     // A Codex thread has no connection that polls: it is there until Codex says its thread is gone.
     // A Qwen Code session too, until its registry record goes (inbox-qwen-wake.ts).
-    wakeOnlyStatus: (session) => codexWake.status(session) ?? qwenWake.status(session) ?? t3Wake.status(session) ?? cloudWake.status(session),
+    wakeOnlyStatus: (session) => codexWake.status(session) ?? qwenWake.status(session) ?? t3Wake.status(session) ?? antigravityWake.status(session) ?? cloudWake.status(session),
     pollsItself: (session) => cloudPollsItself(session),
-    uncertainItemsOf: (session) => [...codexWake.uncertainItems(session), ...qwenWake.uncertainItems(session), ...t3Wake.uncertainItems(session)],
+    uncertainItemsOf: (session) => [...codexWake.uncertainItems(session), ...qwenWake.uncertainItems(session), ...t3Wake.uncertainItems(session), ...antigravityWake.uncertainItems(session)],
     // A session that is an agent with a face (its conversation's earlier id, its launch): its threads show that face too.
     onPoll: (session, continues) =>
       agentFacesFile.link(session, () => [
@@ -4490,6 +4507,16 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // A steps-only Tidy wake with steps off is withdrawn, never handed (a switch turned off in config.json by hand).
     skip: (item) => withdrawnTidy(item),
     ...options.qwenWake,
+  });
+
+  // The Antigravity wake: the person's items for an Antigravity conversation go in through Antigravity's own
+  // `agentapi send-message`, once each (inbox-antigravity-wake.ts).
+  const antigravityWake = createInboxAntigravityWake({
+    store,
+    environment: agentEnvironment,
+    commandOf: (item, session) => replyCommand(item, false, session),
+    skip: (item) => withdrawnTidy(item),
+    ...options.antigravityWake,
   });
 
   // The T3 Code wake: the person's items for a T3 thread go in as a T3 turn, through T3's `t3` command on this
@@ -4605,7 +4632,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     launchResumes: (threadId, session) => launch.resumes(threadId, session),
     hostOf: live.hostOf,
     // A Codex reply whose `codex queue` ran out of time may not have gone: its row says it is saved, not queued.
-    uncertain: (session, itemId) => codexWake.uncertain(session, itemId) || qwenWake.uncertain(session, itemId) || t3Wake.uncertain(session, itemId),
+    uncertain: (session, itemId) => codexWake.uncertain(session, itemId) || qwenWake.uncertain(session, itemId) || t3Wake.uncertain(session, itemId) || antigravityWake.uncertain(session, itemId),
     // Claimed by its session's connection and never to be delivered there (a wake killed mid-delivery).
     stuck: live.stuck,
     autoSendAfterMs: live.autoSendAfterMs,
@@ -7563,6 +7590,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     qwenWake.stop();
     t3Wake.stop();
     t3Local.stop();
+    antigravityWake.stop();
     cloudWake.stop();
     voice.stop();
     codexAccount.stop();
@@ -7584,7 +7612,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     cfAccess?.stop();
   };
 
-  return { port, url: baseUrl, token, serverSession, portChanged, store, registry, tailscale, connectAgents, search: search.index, imageCapture, codexWake, liveSites: { running: liveSites.running, sweep: liveSites.sweep }, qwenWake, t3Wake, cloudWake, shapeWatchers: () => shapes.watch.watching(), stop };
+  return { port, url: baseUrl, token, serverSession, portChanged, store, registry, tailscale, connectAgents, search: search.index, imageCapture, codexWake, liveSites: { running: liveSites.running, sweep: liveSites.sweep }, qwenWake, t3Wake, antigravityWake, cloudWake, shapeWatchers: () => shapes.watch.watching(), stop };
 }
 
 /** Print where the Inbox is, and open it when a person asked for it. */
