@@ -126,7 +126,7 @@ function applyThemeClasses(themeId: string, resolvedMode: 'dark' | 'light'): voi
   const schemeStale = !!el.style.colorScheme && el.style.colorScheme !== resolvedMode;
   if (unchanged && !schemeStale) return;
 
-  holdThemeSwitch();
+  if (el.classList.contains('transitions-ready')) holdThemeSwitch();
 
   if (schemeStale) el.style.colorScheme = resolvedMode;
 
