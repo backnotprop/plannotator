@@ -1,7 +1,7 @@
 /**
  * The list's filter (the owner, 2026-11-08: "the classic filter icon and nothing else in the header under any state.
  * A number badge can show and the filter icon can change color"; `components/ListFilter.tsx` draws it): which threads
- * the list shows, by project (several), by when the thread last changed (Today, the last 7 or 30 days, a range of
+ * the list shows, by project (several), by when the thread last changed (Today, the last 3, 7 or 30 days, a range of
  * days) and by agent (several). Each group narrows the list; picks inside one group widen it (billing-svc or web-app).
  *
  * A filter on the list the person reads, never a place: the sidebar's project stays a page of its own (its title, its
@@ -70,7 +70,8 @@ export const LIST_FILTER_COOKIE = 'plannotator-inbox-list-filter';
 
 /** A day as `YYYY-MM-DD`, in the window's own time zone. */
 export type LocalDay = string;
-export type UpdatedPick = 'today' | '7d' | '30d' | { from: LocalDay; to: LocalDay };
+type UpdatedPreset = 'today' | '3d' | '7d' | '30d';
+export type UpdatedPick = UpdatedPreset | { from: LocalDay; to: LocalDay };
 
 export interface ListFilter {
   /** Project ids; empty: every project. */
@@ -86,9 +87,10 @@ export interface ListFilter {
 
 export const NO_LIST_FILTER: ListFilter = { projects: [], updated: null, agents: [], pulls: [], notSeen: false };
 
-/** The menu's words for the three set spans, in order; "Custom range…" follows them. */
-export const UPDATED_OPTIONS: ReadonlyArray<{ value: 'today' | '7d' | '30d'; label: string }> = [
+/** The menu's words for the preset spans, in order; "Custom range…" follows them. */
+export const UPDATED_OPTIONS: ReadonlyArray<{ value: UpdatedPreset; label: string }> = [
   { value: 'today', label: 'Today' },
+  { value: '3d', label: 'Last 3 days' },
   { value: '7d', label: 'Last 7 days' },
   { value: '30d', label: 'Last 30 days' },
 ];
@@ -119,7 +121,7 @@ export function localDay(ms: number): LocalDay {
 
 /**
  * The span a pick keeps, as [from, to) in ms: Today from this midnight; the last 7 days from the midnight six days
- * before (today and the six before it), 30 the same; a range from its first day's midnight to the end of its last.
+ * before (today and the six before it), 3 and 30 the same; a range from its first day's midnight to the end of its last.
  * Calendar days, so a clock change is still one day.
  */
 export function updatedSpan(pick: UpdatedPick, now: number): [number, number] {
@@ -131,7 +133,7 @@ export function updatedSpan(pick: UpdatedPick, now: number): [number, number] {
   }
   const start = new Date(now);
   start.setHours(0, 0, 0, 0);
-  if (pick !== 'today') start.setDate(start.getDate() - (pick === '7d' ? 6 : 29));
+  if (pick !== 'today') start.setDate(start.getDate() - ({ '3d': 2, '7d': 6, '30d': 29 }[pick]));
   return [start.getTime(), Infinity];
 }
 
@@ -205,7 +207,7 @@ export function parseListFilter(raw: string | null): ListFilter {
     const value = JSON.parse(raw) as Record<string, unknown>;
     const u = value.updated as unknown;
     const updated: UpdatedPick | null =
-      u === 'today' || u === '7d' || u === '30d' ? u : u && typeof u === 'object' && isDay((u as { from?: unknown }).from) && isDay((u as { to?: unknown }).to) ? { from: (u as { from: string }).from, to: (u as { to: string }).to } : null;
+      u === 'today' || u === '3d' || u === '7d' || u === '30d' ? u : u && typeof u === 'object' && isDay((u as { from?: unknown }).from) && isDay((u as { to?: unknown }).to) ? { from: (u as { from: string }).from, to: (u as { to: string }).to } : null;
     const pulls = strings(value.pulls).filter((p): p is PullPick => (PULL_PICKS as readonly string[]).includes(p));
     return { projects: strings(value.projects), updated, agents: strings(value.agents), pulls, notSeen: value.notSeen === true };
   } catch {

@@ -70,6 +70,7 @@ describe('which rows a set of picks keeps', () => {
     ['one project', { projects: ['prj_web'] }, ['webLateYesterday', 'webSixDaysBack', 'startedByPerson']],
     ['two projects widen (either one)', { projects: ['prj_billing', 'prj_docs'] }, ['billingToday', 'docsSevenDaysBack', 'docs29Back']],
     ['Today starts at this midnight, not 24 hours back', { updated: 'today' }, ['billingToday']],
+    ['Last 3 days includes the second day back and excludes the third', { updated: '3d' }, ['billingToday', 'webLateYesterday', 'startedByPerson']],
     ['Last 7 days is today and the six days before it', { updated: '7d' }, ['billingToday', 'webLateYesterday', 'webSixDaysBack', 'mixed', 'startedByPerson']],
     ['Last 30 days keeps the 29th day back, not the 30th', { updated: '30d' }, ['billingToday', 'webLateYesterday', 'webSixDaysBack', 'docsSevenDaysBack', 'docs29Back', 'mixed', 'startedByPerson']],
     ['a range keeps its whole last day', { updated: { from: '2026-11-01', to: '2026-11-02' } }, ['webSixDaysBack', 'docsSevenDaysBack']],
@@ -227,6 +228,12 @@ describe('remembered per browser', () => {
     expect(parseListFilter(getItem(LIST_FILTER_COOKIE))).toEqual(filter);
     writeListFilter(NO_LIST_FILTER);
     expect(stored.has(LIST_FILTER_COOKIE)).toBe(false);
+  });
+
+  test('the saved three-day preset advances with the window clock', () => {
+    const filter = parseListFilter(JSON.stringify({ updated: '3d' }));
+    expect(rowMatches(ROWS.startedByPerson, filter, NOW)).toBe(true);
+    expect(rowMatches(ROWS.startedByPerson, filter, new Date(2026, 10, 9).getTime())).toBe(false);
   });
 
   const junk: Array<[string, string | null, ListFilter]> = [
