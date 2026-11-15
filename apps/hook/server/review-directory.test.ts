@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync,
 import { tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
 import { removeStubbedHtml, stubHookDistHtml } from "../../../tests/helpers/hook-dist-stub";
+import { NO_BROWSER } from "../../../tests/helpers/no-browser";
 
 const entry = resolve(import.meta.dir, "index.ts");
 const roots: string[] = [];
@@ -272,10 +273,64 @@ test("invalid targets exit before opening the invoking repository", async () => 
       ]);
       expect(code).toBe(1);
       expect(stdout).toBe("");
-      expect(stderr).toMatch(/does not exist|not a directory|only one directory/);
+      expect(stderr).toMatch(/No folder|is a file, not a folder|only one directory/);
       expect(existsSync(ready)).toBe(false);
     } finally {
       proc.kill();
     }
   }
 }, 15_000);
+
+/** Runs `review <args>` (or the OpenCode bridge with those arguments) to its exit. */
+async function runToExit(cwd: string, args: string[], dataDir: string, bridge: boolean) {
+  const ready = join(dataDir, `unexpected-ready-${crypto.randomUUID()}.json`);
+  const proc = Bun.spawn([process.execPath, "run", entry, ...(bridge ? ["opencode-review"] : ["review", ...args])], {
+    cwd,
+    env: {
+      ...process.env, PLANNOTATOR_CWD: cwd, PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_READY_FILE: ready,
+      PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_SKIP_BROWSER_OPEN: "1", PLANNOTATOR_AI: "disabled",
+    },
+    stdin: bridge ? new TextEncoder().encode(JSON.stringify({ arguments: args.join(" ") })) : "ignore",
+    stdout: "pipe", stderr: "pipe",
+  });
+  try {
+    const [stdout, stderr, code] = await Promise.all([
+      new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited,
+    ]);
+    return { stdout, stderr, code, opened: existsSync(ready) };
+  } finally {
+    proc.kill();
+  }
+}
+
+for (const bridge of [false, true]) {
+  test(`${bridge ? "OpenCode bridge" : "CLI"}: a sole folder name that is not there stops and says what to run`, async () => {
+    const { caller, dataDir } = fixture();
+    mkdirSync(join(caller, "backend"));
+    const typo = await runToExit(caller, ["backnd"], dataDir, bridge);
+    expect(typo).toMatchObject({ code: 1, stdout: "", opened: false });
+    expect(typo.stderr).toContain(
+      `No folder "backnd" in ${caller}; nothing was opened.\n` +
+        "Did you mean backend? Run: plannotator review backend\n" +
+        "To review the current project instead, run: plannotator review\n",
+    );
+    const unknown = await runToExit(caller, ["--diff-type", "uncommitted", "otherproj"], dataDir, bridge);
+    expect(unknown).toMatchObject({ code: 1, stdout: "", opened: false });
+    expect(unknown.stderr).toContain(`No folder "otherproj" in ${caller}; nothing was opened.\n`);
+    expect(unknown.stderr).toContain("plannotator review <path to an existing folder>");
+  }, 20_000);
+}
+
+test("prose of several words still reviews the invoking repository", async () => {
+  const { caller, dataDir } = fixture();
+  for (const args of [["please", "review", "my", "changes"], ["look", "at", "the", "api/users", "code"]]) {
+    const session = await launch(caller, args, dataDir);
+    try {
+      expect((await session.api("/api/diff")).rawPatch).toContain("+export const caller = 2;");
+      await session.api("/api/exit", {});
+      await session.finish();
+    } finally {
+      session.stop();
+    }
+  }
+}, 30_000);

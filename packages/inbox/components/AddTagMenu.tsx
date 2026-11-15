@@ -6,7 +6,7 @@
  * makes it and tags the thread; Enter in the field ticks the tag it names, or makes it.
  * Draw inside a Base UI `Menu.Popup` or `ContextMenu.Popup`; the tags come from `ThreadTagsContext`.
  */
-import { useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useLayoutEffect, useRef, useState, type FocusEvent, type KeyboardEvent } from 'react';
 import { Menu } from '@base-ui/react/menu';
 import { focusAfterSwap } from '@plannotator/ui/components/inbox-thread/SnoozeMenu';
 import { Icon } from '../icons';
@@ -62,6 +62,16 @@ export function AddTagList({ threadId, onBack }: { threadId: string; onBack: () 
       else if (typed) create();
     }
   };
+  // A row moved out from under a resting mouse by the typing (a line added above it, a tag filtered out) makes the
+  // menu focus its popup, and the next letters and Enter would go to the menu: the field takes focus back. An item
+  // the mouse or Down moves to keeps it.
+  const onBlur = (event: FocusEvent<HTMLInputElement>) => {
+    const popup = event.relatedTarget;
+    if (!(popup instanceof HTMLElement) || !popup.contains(event.currentTarget)) return;
+    queueMicrotask(() => {
+      if (popup.ownerDocument.activeElement === popup) field.current?.focus({ preventScroll: true });
+    });
+  };
   return (
     <div ref={body} data-add-tag-list="">
       <Menu.Item className="ib-pmi ib-zb" label="Add tag" closeOnClick={false} onClick={onBack} data-add-tag-back="">
@@ -71,7 +81,7 @@ export function AddTagList({ threadId, onBack }: { threadId: string; onBack: () 
       <Menu.Separator className="ib-pm-sep" />
       <label className="ib-tagm-find">
         <Icon name="search" size={15} />
-        <input ref={field} value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={onKeyDown} placeholder="Find or make a tag" aria-label="Find or make a tag" autoComplete="off" spellCheck={false} data-tag-find="" />
+        <input ref={field} value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={onKeyDown} onBlur={onBlur} placeholder="Find or make a tag" aria-label="Find or make a tag" autoComplete="off" spellCheck={false} data-tag-find="" />
       </label>
       {shown.map((tag) => {
         const ticked = on.has(tag.id);
