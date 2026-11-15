@@ -47,6 +47,8 @@ export interface LanguageConfig {
   harmlessMissing?: ReadonlySet<string>;
   contextAt?(root: Node, line: number): string;
   positionAt?(root: Node, line: number): string;
+  contextRuns?: boolean;
+  holdBack?: ReadonlySet<string>;
 }
 
 export function brokenTree(n: Node, cfg: LanguageConfig): boolean {
@@ -85,6 +87,7 @@ export interface Declaration {
   kind: string;
   name: string;
   members?: Node;
+  tail?: Node;
 }
 
 /** The expression body of a one-line arrow function (`(x) => x + 1`). */
@@ -575,6 +578,7 @@ const kotlin: LanguageConfig = {
   },
   identifierTypes: new Set(['identifier']),
   harmlessMissing: new Set(['_class_member_semi']),
+  contextRuns: true,
   declarationsIn: (container) => {
     const out: Declaration[] = [];
     for (const child of container.namedChildren) {
@@ -617,6 +621,172 @@ const kotlin: LanguageConfig = {
       .filter((c) => c.start <= line && line <= c.end)
       .map((c) => c.label)
       .join('/'),
+};
+
+const RUBY_BLOCKS = new Set(['body_statement', 'block_body', 'then', 'else', 'do', 'begin', 'ensure']);
+const RUBY_CLAUSES = new Set(['rescue', 'else', 'ensure']);
+const RUBY_NOT_TAIL = new Set([
+  'method', 'singleton_method', 'class', 'module', 'singleton_class', 'heredoc_body', 'alias', 'undef',
+  'while', 'until', 'for', 'while_modifier', 'until_modifier', 'if_modifier', 'unless_modifier', 'return',
+]);
+const RUBY_VISIBILITY = /^(private|protected|public|module_function)$/;
+const RUBY_SCOPES = new Set(['method', 'singleton_method', 'class', 'module', 'singleton_class', 'program']);
+const RUBY_CONTAINERS = new Set(['class', 'module', 'singleton_class', 'program']);
+const RUBY_PARAMETER_LISTS = new Set(['method_parameters', 'block_parameters', 'lambda_parameters', 'left_assignment_list', 'destructured_left_assignment', 'destructured_parameter', 'exception_variable']);
+
+function rubyBinds(id: Node): boolean {
+  const p = id.parent;
+  if (!p) return false;
+  if (RUBY_PARAMETER_LISTS.has(p.type)) return true;
+  if (/parameter$/.test(p.type)) return p.childForFieldName('name')?.id === id.id;
+  if (p.type === 'assignment' || p.type === 'operator_assignment') return p.childForFieldName('left')?.id === id.id;
+  if (p.type === 'for') return p.childForFieldName('pattern')?.id === id.id;
+  return false;
+}
+
+function rubyLocal(id: Node): boolean {
+  let scope = id.parent;
+  while (scope && !RUBY_SCOPES.has(scope.type)) scope = scope.parent;
+  if (!scope) return false;
+  const stack: Node[] = [scope];
+  while (stack.length) {
+    const x = stack.pop()!;
+    if (x.startIndex >= id.startIndex) continue;
+    if (x.id !== scope.id && RUBY_SCOPES.has(x.type) && x.type !== 'program') continue;
+    if (x.type === 'identifier' && x.text === id.text && rubyBinds(x)) return true;
+    for (const c of x.namedChildren) if (c) stack.push(c);
+  }
+  return false;
+}
+
+function rubyBareCall(id: Node): string | null {
+  const p = id.parent;
+  if (!p || rubyBinds(id)) return null;
+  if (p.type === 'call' && p.childForFieldName('method')?.id === id.id) return null;
+  if ((p.type === 'method' || p.type === 'singleton_method') && p.childForFieldName('name')?.id === id.id) return null;
+  if (/^(alias|undef|keyword_parameter|pair)$/.test(p.type)) return null;
+  if (RUBY_VISIBILITY.test(id.text)) return null;
+  return rubyLocal(id) ? null : id.text;
+}
+
+function rubyTail(n: Node): Node | undefined {
+  let tail: Node | undefined;
+  for (let s = n.nextSibling; s; s = s.nextSibling) {
+    if (s.type === 'heredoc_body') tail = s;
+    else if (!(isComment(s) && s.startPosition.row === (tail ?? n).endPosition.row)) break;
+  }
+  return tail;
+}
+
+const rubySymbols = (args: Node | null) =>
+  (args?.namedChildren ?? []).filter((c): c is Node => !!c && !isComment(c)).map((c) => c.text.replace(/^:/, ''));
+
+function rubyVisibility(body: Node, before: number): string {
+  let out = 'public';
+  for (const c of body.namedChildren) {
+    if (!c || c.startIndex >= before) break;
+    if (c.type === 'identifier' && RUBY_VISIBILITY.test(c.text)) out = c.text;
+  }
+  return out;
+}
+
+const ruby: LanguageConfig = {
+  id: 'ruby',
+  wasm: 'tree-sitter-ruby/tree-sitter-ruby.wasm',
+  holdBack: new Set(['movedWithEdit']),
+  functionTypes: new Set(['method', 'singleton_method']),
+  callTypes: new Set(['call', 'identifier']),
+  blockTypes: RUBY_BLOCKS,
+  isReturn: (s, last) => s.type === 'return' || (last && !RUBY_NOT_TAIL.has(s.type) && !isComment(s)),
+  attachedTypes: new Set(['comment']),
+  nameOf: (fn) => fn.childForFieldName('name')?.text ?? null,
+  bodyOf: (fn) => fn.childForFieldName('body'),
+  statementsOf: (block) =>
+    RUBY_BLOCKS.has(block.type)
+      ? block.namedChildren.filter((n): n is Node => n !== null && !isComment(n) && !(RUBY_CLAUSES.has(n.type) && (block.type === 'body_statement' || block.type === 'begin')))
+      : [block],
+  calleeOf: (call) => (call.type === 'identifier' ? rubyBareCall(call) : (call.childForFieldName('method')?.text ?? null)),
+  returnValueOf: (ret) => {
+    if (ret.type !== 'return') return ret;
+    const args = ret.namedChildren.find((n) => n?.type === 'argument_list');
+    const values = args?.namedChildren.filter((n): n is Node => !!n && !isComment(n)) ?? [];
+    return values.length === 1 ? values[0]! : (args ?? null);
+  },
+  identifierTypes: new Set(['identifier', 'constant', 'instance_variable', 'class_variable', 'global_variable']),
+  declarationsIn: (container) => {
+    const out: Declaration[] = [];
+    const add = (d: Declaration) => {
+      const tail = rubyTail(d.node);
+      out.push(tail ? { ...d, tail } : d);
+    };
+    for (const child of container.namedChildren) {
+      if (!child || isComment(child)) continue;
+      const t = child.type;
+      if (t === 'method') {
+        const name = child.childForFieldName('name')?.text;
+        if (name) add({ node: child, kind: 'method', name });
+      } else if (t === 'singleton_method') {
+        const name = child.childForFieldName('name')?.text;
+        if (name) add({ node: child, kind: 'method', name: `${child.childForFieldName('object')?.text ?? 'self'}.${name}` });
+      } else if (t === 'class' || t === 'module') {
+        const name = child.childForFieldName('name')?.text;
+        const body = child.childForFieldName('body');
+        if (name) out.push({ node: child, kind: t, name, members: body ?? undefined });
+      } else if (t === 'singleton_class') {
+        const body = child.childForFieldName('body');
+        out.push({ node: child, kind: t, name: child.childForFieldName('value')?.text ?? 'self', members: body ?? undefined });
+      } else if (t === 'identifier' && RUBY_VISIBILITY.test(child.text)) {
+        out.push({ node: child, kind: child.text, name: child.text });
+      } else if ((t === 'assignment' || t === 'operator_assignment') && child.childForFieldName('left')?.type === 'constant') {
+        add({ node: child, kind: 'constant', name: child.childForFieldName('left')!.text });
+      } else if (t === 'call' && !child.childForFieldName('receiver')) {
+        const method = child.childForFieldName('method')?.text ?? '';
+        const args = child.childForFieldName('arguments');
+        const first = args?.namedChildren.find((c) => c && !isComment(c));
+        if (/^attr_(reader|writer|accessor)$/.test(method) || method === 'attr') {
+          add({ node: child, kind: method, name: rubySymbols(args).sort().join(',') });
+        } else if (/^(include|extend|prepend)$/.test(method)) {
+          add(importDeclaration(child, rubySymbols(args).join(','), `${method} `));
+        } else if ((method === 'require' || method === 'require_relative') && first) {
+          add(importDeclaration(child, first.text, `${method} `));
+        } else if (method === 'define_method' && first && /^(simple_symbol|string)$/.test(first.type)) {
+          add({ node: child, kind: 'define_method', name: first.text.replace(/^:/, '').replace(/^(['"])(.*)\1$/, '$2') });
+        } else if (RUBY_VISIBILITY.test(method) && (first?.type === 'method' || first?.type === 'singleton_method')) {
+          const name = first.childForFieldName('name')?.text;
+          if (name) add({ node: child, kind: 'method', name: first.type === 'singleton_method' ? `self.${name}` : name });
+        }
+      }
+    }
+    return out;
+  },
+  contextAt: (root, line) => {
+    const row = line - 1;
+    let container: Node = root;
+    let body: Node | null = root;
+    let statement: Node | null = null;
+    let n: Node | null = root;
+    const path: string[] = [];
+    while (n) {
+      let next: Node | null = null;
+      for (const c of n.namedChildren) if (c && c.startPosition.row <= row && row <= c.endPosition.row) next = c;
+      if (!next) break;
+      if (body && n.id === body.id) statement = next;
+      if (RUBY_CONTAINERS.has(next.type)) {
+        container = next;
+        body = next.childForFieldName('body');
+        statement = null;
+        path.push(next.type === 'singleton_class' ? 'singleton' : 'class');
+      }
+      n = next;
+    }
+    if (!body || !statement) return path.join('/');
+    if (statement.type === 'identifier' && RUBY_VISIBILITY.test(statement.text)) {
+      const governed: string[] = [];
+      for (let s = statement.nextNamedSibling; s && !(s.type === 'identifier' && RUBY_VISIBILITY.test(s.text)); s = s.nextNamedSibling) if (!isComment(s)) governed.push(s.text.split('\n')[0]!.trim());
+      return `${path.join('/')}:${rubyVisibility(body, statement.startIndex)}>${statement.text}:${governed.join('\u0000')}`;
+    }
+    return `${path.join('/')}:${container.type === 'singleton_class' ? 'singleton-' : ''}${rubyVisibility(body, statement.startIndex)}`;
+  },
 };
 
 export const LANGUAGES: Record<LanguageId, LanguageConfig> = {
@@ -682,6 +852,7 @@ export const LANGUAGES: Record<LanguageId, LanguageConfig> = {
   java,
   csharp,
   php,
+  ruby,
   kotlin,
 };
 

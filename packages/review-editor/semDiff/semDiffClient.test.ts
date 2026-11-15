@@ -132,6 +132,21 @@ describe('semantic diff client', () => {
     client.dispose();
   });
 
+  test('Ruby files are supported when the server ships the Ruby grammar; ERB templates never are', () => {
+    const log = { created: 0, terminated: 0 };
+    const shipped = { ...advert, grammars: { ...advert.grammars, 'tree-sitter-ruby.wasm': '/assets/sem-diff/tree-sitter-ruby-0.wasm' } };
+    expect(createSemDiffClient({ advert, origin: 'http://127.0.0.1:1', createWorker: fakeWorker('engine', log) }).supports('lib/cart.rb')).toBe(false);
+    const client = createSemDiffClient({ advert: shipped, origin: 'http://127.0.0.1:1', createWorker: fakeWorker('engine', log) });
+    expect(client.supports('lib/cart.rb')).toBe(true);
+    expect(client.supports('lib/tasks/db.rake')).toBe(true);
+    expect(client.supports('shop.gemspec')).toBe(true);
+    expect(client.supports('Rakefile')).toBe(true);
+    expect(client.supports('Gemfile')).toBe(true);
+    expect(client.supports('app/views/index.html.erb')).toBe(false);
+    expect(log.created).toBe(0);
+    client.dispose();
+  });
+
   test('without an advert nothing is supported', async () => {
     const log = { created: 0, terminated: 0 };
     const client = createSemDiffClient({ advert: undefined, origin: 'http://127.0.0.1:1', createWorker: fakeWorker('engine', log) });

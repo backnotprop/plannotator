@@ -218,7 +218,7 @@ function stringInteriors(root: Node, language?: LanguageId): Set<number> {
       return;
     }
     if (n.endPosition.row === n.startPosition.row) return;
-    if (/string|template|text_block|heredoc|nowdoc/.test(n.type) && !/content|fragment/.test(n.type)) {
+    if ((/string|template|text_block|heredoc|nowdoc/.test(n.type) || (language === 'ruby' && /^(regex|subshell)$/.test(n.type))) && !/content|fragment/.test(n.type)) {
       // Rust drops the leading whitespace of a line continued with a backslash
       // ("...\\\n    more"), so re-indenting that line leaves the string as it was.
       const lines = n.text.split('\n');
@@ -257,6 +257,16 @@ function alike(op: SemanticDiffOperation, oldLines: string[], newLines: string[]
 
 function contextChanged(op: SemanticDiffOperation, cfg: LanguageConfig, oldRoot: Node, newRoot: Node, oldLines: string[], newLines: string[], at = cfg.contextAt): boolean {
   if (!at) return false;
+  if (!cfg.contextRuns) {
+    const set = (root: Node, lines: string[], ranges: SemanticDiffLineRange[]) => {
+      const out = new Set<string>();
+      for (const r of ranges) for (let l = r.start; l <= r.end; l++) if ((lines[l - 1] ?? '').trim()) out.add(at(root, l));
+      return out;
+    };
+    const b = set(oldRoot, oldLines, op.lines.old);
+    const a = set(newRoot, newLines, op.lines.new);
+    return b.size !== 1 || a.size !== 1 || [...b][0] !== [...a][0];
+  }
   const contexts = (root: Node, lines: string[], ranges: SemanticDiffLineRange[]) =>
     ranges.map((r) => {
       const out: string[] = [];
@@ -392,8 +402,9 @@ export async function semanticDiffFile(language: LanguageId, oldText: string, ne
             : op.lines.old.length + op.lines.new.length > 0
           : ownsText(op, oldLines, newLines, inString);
       if (!keep || (op.type === 'movedWithEdit' && !alike(op, oldLines, newLines))) return;
+      if (cfg.holdBack?.has(op.type)) return;
       if ((op.type === 'moved' || op.type === 'movedWithEdit') && contextChanged(op, cfg, a.rootNode, b.rootNode, oldLines, newLines, cfg.positionAt)) return;
-      if ((op.type === 'moved' || op.type === 'movedWithEdit') && contextChanged(op, cfg, a.rootNode, b.rootNode, oldLines, newLines)) return;
+      if ((op.type === 'moved' || op.type === 'movedWithEdit' || op.type === 'reformatted') && contextChanged(op, cfg, a.rootNode, b.rootNode, oldLines, newLines)) return;
       finalIndex.set(i, operations.length);
       operations.push(op);
     });
