@@ -172,6 +172,7 @@ packages/inbox/tidyMenu.test.tsx
 packages/inbox/listLook.test.tsx
 packages/inbox/threadPanel.test.tsx
 packages/inbox/listViewMenu.test.tsx
+packages/inbox/archivedGroup.test.tsx
 packages/inbox/lineLatch.test.tsx
 packages/inbox/listViewReveal.test.tsx
 packages/inbox/idleClock.test.tsx
