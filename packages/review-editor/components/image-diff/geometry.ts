@@ -10,6 +10,9 @@ export const MIN_TINY_SIDE = 64;
 export const MAX_DRAWN_SIDE = 16384;
 export const SIDE_BY_SIDE_GAP = 16;
 export const SIDE_BY_SIDE_MIN_WIDTH = 480;
+export const LABELS_OVER_MIN_WIDTH = 320;
+export const LABELS_OVER_MIN_HEIGHT = 160;
+export const ALL_FILES_IMAGE_MAX_HEIGHT = 480;
 
 export interface StageLayout {
   scale: number;

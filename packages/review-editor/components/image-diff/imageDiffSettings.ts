@@ -44,6 +44,10 @@ function snapshot(): ImageDiffSettings {
   return current;
 }
 
+export function imageDiffSettings(): ImageDiffSettings {
+  return snapshot();
+}
+
 export function setImageDiffSettings(patch: Partial<ImageDiffSettings>): void {
   const next = { ...snapshot(), ...patch };
   if (patch.mode && patch.mode !== snapshot().mode) storage.setItem(IMAGE_DIFF_MODE_COOKIE, patch.mode);

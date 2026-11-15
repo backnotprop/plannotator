@@ -1,7 +1,7 @@
 import React, { useEffect, useLayoutEffect, useState } from 'react';
 import type { DiffFileStatus } from '../types';
 import type { ReviewImageData, ReviewImageSide } from '../utils/reviewImage';
-import { SIDE_BY_SIDE_GAP, SIDE_BY_SIDE_MIN_WIDTH, sideBySideColumns, sideBySidePaneWidth, stageLayout, type Size } from './image-diff/geometry';
+import { ALL_FILES_IMAGE_MAX_HEIGHT, LABELS_OVER_MIN_HEIGHT, LABELS_OVER_MIN_WIDTH, SIDE_BY_SIDE_GAP, SIDE_BY_SIDE_MIN_WIDTH, sideBySideColumns, sideBySidePaneWidth, stageLayout, type Size } from './image-diff/geometry';
 import { useImageDiffSettings } from './image-diff/imageDiffSettings';
 import { sidesFor, useImageSides, useNearViewport } from './image-diff/useImageSides';
 import { SinglePane, StackedStage, StageLabelRow, type StageImage } from './image-diff/ImageStage';
@@ -9,8 +9,6 @@ import { peekImageSizes } from './image-diff/imageSizes';
 import { computeDifferences, differencesSupported, type DifferenceMask } from './image-diff/differences';
 import { describeImageError, imageCaption, sizeChange } from './image-diff/imageWords';
 
-const LABELS_OVER_MIN_WIDTH = 320;
-const LABELS_OVER_MIN_HEIGHT = 160;
 
 export interface ImageDiffPreviewProps {
   filePath: string;
@@ -100,7 +98,7 @@ export const ImageDiffPreview: React.FC<ImageDiffPreviewProps> = ({
   const unchanged = sides.length === 2 && !!before && !!after && before.digest === after.digest;
   const comparable = sides.length === 2 && !unchanged && !!beforeSize && !!afterSize && states.old.state !== 'error' && states.new.state !== 'error';
   const mode = comparable ? settings.mode : 'side';
-  const maxHeight = variant === 'all-files' ? 480 : 640;
+  const maxHeight = variant === 'all-files' ? ALL_FILES_IMAGE_MAX_HEIGHT : 640;
   const narrow = width > 0 && width < SIDE_BY_SIDE_MIN_WIDTH;
   const canvasNatural = { width: Math.max(beforeSize?.width ?? 0, afterSize?.width ?? 0), height: Math.max(beforeSize?.height ?? 0, afterSize?.height ?? 0) };
   const columnsFit = comparable && sideBySideColumns(canvasNatural, width);

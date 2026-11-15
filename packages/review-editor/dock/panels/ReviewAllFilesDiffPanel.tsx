@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { IDockviewPanelProps } from 'dockview-react';
 import { LazyBlockBoundary } from '@plannotator/ui/components/LazyBlockBoundary';
 import { MarkdownPreviewFailed } from '../../components/DiffViewer';
@@ -8,7 +8,10 @@ import { ImageDiffPreview } from '../../components/ImageDiffPreview';
 import { ImageViewMenu } from '../../components/image-diff/ImageViewMenu';
 import { differencesSupported } from '../../components/image-diff/differences';
 import { isSvgPath, setSvgView, svgViewOf, useSvgView, useSvgViewVersion } from '../../components/image-diff/svgView';
-import { useImageSizesReady } from '../../components/image-diff/imageSizes';
+import { peekImageSizes, useImageSizesReady } from '../../components/image-diff/imageSizes';
+import { imagePreviewHeight } from '../../components/image-diff/previewHeight';
+import { imageDiffSettings } from '../../components/image-diff/imageDiffSettings';
+import { COMPACT_FILE_HEADER_HEIGHT, FILE_HEADER_HEIGHT } from '../../utils/diffChromeMetrics';
 import { isImagePreviewCandidate } from '@plannotator/core/diff-paths';
 import { MarkdownViewMenu } from '../../components/MarkdownViewMenu';
 import { PackageChangesCard } from '../../components/PackageChangesCard';
@@ -53,6 +56,8 @@ function ReviewMarkdownViewControl({ file, iconOnly, touch }: { file: DiffFile; 
     />
   );
 }
+
+const IMAGE_PREVIEW_INSET = 32;
 
 export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
   const state = useReviewState();
@@ -224,9 +229,45 @@ export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
     [imagesAvailable, state.files],
   );
   const imageSizesReady = useImageSizesReady(snapshotId, hasImages);
-  if (!imageSizesReady) return null;
+  const probeRef = useRef<HTMLSpanElement>(null);
+  const [paneWidth, setPaneWidth] = useState(0);
+  useLayoutEffect(() => {
+    const pane = probeRef.current?.parentElement;
+    if (!pane || !hasImages) return;
+    const read = () => setPaneWidth(pane.clientWidth);
+    read();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(read);
+    observer.observe(pane);
+    return () => observer.disconnect();
+  }, [hasImages, imageSizesReady]);
+  const filesByPath = useMemo(() => new Map(state.files.map((file) => [file.path, file])), [state.files]);
+  const headerHeightHint = useCallback(
+    (_itemId: string, path: string) => {
+      if (!hasImages || paneWidth <= 0) return undefined;
+      const file = filesByPath.get(path);
+      if (!file) return undefined;
+      const svg = isSvgPath(file.path) || isSvgPath(file.oldPath);
+      if (svg ? svgViewOf(file.path) !== 'image' : !isImagePreviewCandidate(file.patch, file.path, file.oldPath)) return undefined;
+      const settings = imageDiffSettings();
+      const preview = imagePreviewHeight({
+        sizes: peekImageSizes(snapshotId)?.[path],
+        status: file.status,
+        width: paneWidth - IMAGE_PREVIEW_INSET,
+        mode: settings.mode,
+        zoom: settings.zoom,
+        dpr: typeof window === 'undefined' ? 1 : window.devicePixelRatio || 1,
+      });
+      return preview == null ? undefined : (compact ? COMPACT_FILE_HEADER_HEIGHT : FILE_HEADER_HEIGHT) + preview;
+    },
+    [hasImages, paneWidth, filesByPath, snapshotId, compact, svgVersion],
+  );
+  const probe = <span ref={probeRef} hidden />;
+  if (!imageSizesReady || (hasImages && paneWidth <= 0)) return probe;
 
   return (
+    <>
+    {probe}
     <AllFilesCodeView
       files={state.files}
       {...(state.callTreeHunkNotes && state.callTreeHunkNotes.length > 0 ? { hostLineNotes: state.callTreeHunkNotes } : {})}
@@ -309,6 +350,8 @@ export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
       enableEditSuggestions={state.editSuggestionsEnabled}
       onAddSuggestionsForFile={state.onAddSuggestionsForFile}
       onAddEditorCommentForFile={state.onAddEditorCommentForFile}
+      headerHeightHint={headerHeightHint}
     />
+    </>
   );
 };
