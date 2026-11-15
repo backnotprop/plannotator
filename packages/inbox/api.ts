@@ -1117,6 +1117,8 @@ function threadPullsOf(answer: unknown): InboxThreadPullsAnswer {
 /** A browser takes at most 64 KiB of keepalive bodies in flight: a larger one goes as an ordinary request. */
 const KEEPALIVE_BODY_MAX = 60_000;
 
+/** The window's read and write for routes kept in their own files (combineApi.ts). */
+export { get as apiGet, post as apiPost };
 /**
  * `keepalive`: the request outlives the page (a save made as the page hides or goes). The answer is read as ever when
  * the page stays. The fetch starts before this function first waits, so a caller in a `pagehide` handler gets it out.
@@ -1509,16 +1511,12 @@ export const inboxApi = {
   },
   /** Decision mode (experimental): every decision waiting on the person, in queue order. 404 while the feature is off. */
   decisions: () => get<InboxDecisionsModel>(inboxUrl('/decisions')),
-  /** Tidy: who it would ask in the list's (or the Board's) scope, and the last run. */
-  tidy: (project: string | null, surface: 'list' | 'board') => {
-    const query = new URLSearchParams(surface === 'board' ? { surface } : {});
-    if (project) query.set('project', project);
-    const qs = query.toString();
-    return get<InboxTidyPlan>(inboxUrl('/tidy', qs));
-  },
-  /** Tidy: ask these sessions. A replay of the key answers the run it wrote. */
-  startTidy: (input: { sessions: readonly string[]; idempotency_key: string; project: string | null; surface: 'list' | 'board' }) =>
-    post<{ run: InboxTidyRun | null; asked: string[] }>(inboxUrl('/tidy'), { ...input, sessions: [...input.sessions] }),
+  /** Tidy: who it would ask in the list's (or the Board's) scope, or about picked `threads`, and the last run; `machine`: a linked machine's. */
+  tidy: (project: string | null, surface: 'list' | 'board', machine?: string | null, threads?: readonly string[]) =>
+    get<InboxTidyPlan>(inboxUrl('/tidy', new URLSearchParams({ ...(surface === 'board' ? { surface } : {}), ...(project ? { project } : {}), ...(threads ? { threads: threads.join(',') } : {}) }).toString(), machine)),
+  /** Tidy: ask these sessions (about picked `thread_ids`, with the person's `words`). A replay of the key answers the run it wrote. */
+  startTidy: (input: { sessions: readonly string[]; idempotency_key: string; project: string | null; surface: 'list' | 'board'; thread_ids?: readonly string[]; words?: string }, machine?: string | null) =>
+    post<{ run: InboxTidyRun | null; asked: string[] }>(inboxUrl('/tidy', undefined, machine), { ...input, sessions: [...input.sessions], ...(input.thread_ids ? { thread_ids: [...input.thread_ids] } : {}) }),
   saveCookieHost: (on: boolean) => post<{ cookie_host: InboxCookieHost }>(inboxUrl('/settings'), { cookie_host: on }),
   saveExperimental: (change: { decision_mode: boolean }) =>
     post<{ experimental: InboxExperimentalSettings }>(inboxUrl('/settings'), { experimental: change }),

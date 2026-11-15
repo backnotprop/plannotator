@@ -10,6 +10,7 @@ import { showTagColoursAcross, type TagsAcross } from './tagsAcross';
 import { rowTint } from './tagColours';
 import type { ListTagColours } from './parts/RowTint';
 import type { InboxToastModel } from './components/Toast';
+import { eachRow, tagsToast } from './bulkWrites';
 
 function withEntry<V>(map: ReadonlyMap<string, V>, key: string, value: V | undefined): ReadonlyMap<string, V> {
   const next = new Map(map);
@@ -85,6 +86,27 @@ const [tagPatches, setTagPatches] = useState<ReadonlyMap<string, readonly string
       onUndo: () => void setThreadTag(threadId, tag, !on, false),
     });
   };
+  /** The picks' Add tag: each thread through its own machine (`tagWrite`), one toast and one Undo for them all. */
+  const setThreadsTag = async (threadIds: readonly string[], tag: ListTag, on: boolean, undo = true) => {
+    const rows = threadIds.map((id) => rowOf(id)).filter((row): row is InboxListRow => !!row);
+    const outcomes = await eachRow(rows, (row) => inboxApi.setThreadTag(row.thread_id, tagWrite(tag, machineOf(row.thread_id), machines.self), on));
+    const made = outcomes.filter((o) => o.ok).map((o) => o.row.thread_id);
+    if (on && made.length > 0) setSidebarSectionOpen('tags', true);
+    await refreshList(false);
+    if (!undo) {
+      const refused = outcomes.find((o) => !o.ok);
+      if (refused && !refused.ok) showError(refused.cause);
+      else dismissToast();
+      return;
+    }
+    const copy = tagsToast(outcomes, tag.name, on);
+    if (!copy) {
+      const refused = outcomes.find((o) => !o.ok);
+      if (refused && !refused.ok) showError(refused.cause);
+      return;
+    }
+    showToast({ ...copy, onUndo: () => void setThreadsTag(made, tag, !on, false) });
+  };
   const createTag = async (name: string): Promise<InboxInitiative | null> => {
     try {
       return (await inboxApi.createInitiative(name)).initiative;
@@ -106,6 +128,7 @@ const [tagPatches, setTagPatches] = useState<ReadonlyMap<string, readonly string
             counts: tagCounts,
             can: (threadId) => canTagThread(threadId, windowRows, machines, machineOf(threadId)),
             set: (threadId, tag, on) => void setThreadTagRef.current(threadId, tag, on),
+            setMany: (threadIds, tag, on) => void setThreadsTagRef.current(threadIds, tag, on),
             createAndSet: (threadId, name) =>
               machineOf(threadId)
                 ? void setThreadTagRef.current(threadId, { id: '', name, created_at: '', created_by: { kind: 'person' }, updated_at: '', deleted_at: null }, true)
@@ -118,6 +141,8 @@ const [tagPatches, setTagPatches] = useState<ReadonlyMap<string, readonly string
   );
   const setThreadTagRef = useRef(setThreadTag);
   setThreadTagRef.current = setThreadTag;
+  const setThreadsTagRef = useRef(setThreadsTag);
+  setThreadsTagRef.current = setThreadsTag;
   const createTagRef = useRef(createTag);
   createTagRef.current = createTag;
   const sidebarTags = listTags === null

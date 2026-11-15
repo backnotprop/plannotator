@@ -42,6 +42,7 @@ import { join } from "node:path";
 import { JsonLines } from "@plannotator/shared/inbox/devices";
 import { InboxError, inboxDir } from "@plannotator/shared/inbox/schema";
 import type { InboxMessage } from "@plannotator/core/inbox-types";
+import { inboxTidyWords } from "@plannotator/core/inbox-types";
 
 export const INBOX_OUTBOX_DIR = "outbox";
 /** The header a linked machine's Inbox sends with a write the person made in its window (`OutboxEntry.window`). */
@@ -155,11 +156,14 @@ export function replyIsStale(messages: readonly InboxMessage[], seenThroughSeq: 
  *   close, reopen or merge): never held, sent only while online, and only from
  *   a press in this Inbox's window. The forge is asked first there, so a second
  *   copy is refused in the forge's words ("It is already closed.").
- * - `now` is a write whose answer the window needs at once (a file a message
- *   names, attached to that message when the person comments on it: the
- *   comment is saved on the attachment it answers with). Never held, sent only
- *   while online, and only from a press in this Inbox's window. The owner adds
- *   a file to its message once, so a second copy answers the same attachment.
+ * - `now` is a write sent only while online, never held, and only from a press
+ *   in this Inbox's window (`forwardsNow`; the other machine refuses it at its
+ *   door without the window's mark). Two uses: a file a message names,
+ *   attached to that message when the person comments on it (the window needs
+ *   the attachment at once; the owner adds a file to its message once, so a
+ *   second copy answers the same attachment); and a Combine, or a Tidy with the
+ *   person's words, which asks an agent there to act on the person's threads
+ *   (one held for days would archive threads nobody is looking at).
  * - `local` is never forwarded: `doorWriteKind` has no kind for it, so the
  *   forward answers 404. A phone reaches it at this Inbox's own door. Reuse
  *   (`uploads/reuse`) is useful only as its answer, the new upload's id: a held
@@ -225,6 +229,12 @@ export const DOOR_WRITES: Readonly<Record<string, "append" | "set" | "file" | "f
   "POST uploads/reuse": "local",
   "POST uploads": "file",
   "POST markups": "file",
+  // Tidy and Combine (approval "inbox-multi-select"): a Tidy's notes and a Combine's wake are written under the
+  // body's key, so a second copy answers the first; a Combine's Stop and Undo put a state.
+  "POST tidy": "append",
+  "POST combine": "now",
+  "POST combine/(cmb_[^/]+)/cancel": "set",
+  "POST combine/(cmb_[^/]+)/undo": "set",
   // A launched agent's buttons from another machine (remote launch). Stop, Trust folder and Delete put a state; Try
   // again is refused while a start runs and does nothing for a launch that is not failed or stopped.
   "POST launch/:id/stop": "set",
@@ -250,6 +260,23 @@ const DOOR_WRITE_ROUTES = Object.entries(DOOR_WRITES).flatMap(([name, kind]) =>
  */
 export function doorWriteKind(route: string): "append" | "set" | "file" | "forge" | "now" | null {
   return DOOR_WRITE_ROUTES.find((entry) => entry.route.test(route))?.kind ?? null;
+}
+
+/**
+ * A write the forward sends now, from a press in the window, or not at all: rule 8's `now` (a Combine), and a Tidy
+ * with the person's words, which a later run would apply to threads nobody looked at since. A Tidy without words is
+ * held like any append.
+ */
+export function forwardsNow(route: string, body: Record<string, unknown>): boolean {
+  return doorWriteKind(route) === "now" || (route === "tidy" && inboxTidyWords(body.words) !== "");
+}
+
+/**
+ * The receiving side of `forwardsNow`: a Combine or a Tidy with words that came through this Inbox's door from
+ * another machine without the mark of a press in its window. `door` null: not through the door.
+ */
+export function doorRefusesBare(door: { window: boolean } | null | undefined, route: string, body: Record<string, unknown>): boolean {
+  return !!door && !door.window && (route === "combine" || route === "tidy") && forwardsNow(route, body);
 }
 
 /** Statuses a proxy in front of the owner answers when the owner itself never got the request (`tailscale serve` with the Inbox down). */

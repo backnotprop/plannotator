@@ -57,7 +57,7 @@ describe("the Archived group across linked machines", () => {
     dirs.push(dir);
     return dir;
   };
-  const start = (dataDir: string) => startInboxServer({ dataDir, binaryPath: null, phones: false, tailscale: scriptedTailscale() });
+  const start = (dataDir: string, storeNow?: () => Date) => startInboxServer({ dataDir, binaryPath: null, phones: false, tailscale: scriptedTailscale(), ...(storeNow ? { storeNow } : {}) });
   const at = (port: number) => `http://127.0.0.1:${port}`;
   const get = async (port: number, path: string) => (await (await fetch(`${at(port)}${path}`)).json()) as Json;
   const post = async (port: number, path: string, body: Json) => {
@@ -76,7 +76,10 @@ describe("the Archived group across linked machines", () => {
     const dataA = scratch("plannotator-archived-linked-a-");
     const dataB = scratch("plannotator-archived-linked-b-");
     const a = await start(dataA);
-    let b = await start(dataB);
+    // B's store clock: the wall clock, moved a second on between the two archives so they never tie (a fast runner
+    // archives both in one millisecond, and a tie reads by thread id; inbox-archived-order.test.ts).
+    let skew = 0;
+    let b = await start(dataB, () => new Date(Date.now() + skew));
     let client: Client | null = null;
     try {
       const offered = (await (await fetch(`${at(b.port)}/api/inbox/machines/offer`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).json()) as Json;
@@ -89,7 +92,9 @@ describe("the Archived group across linked machines", () => {
       const send = async (body: string) => ((await client!.callTool({ name: "send_message", arguments: { project_path: project, agent_session: "ses_b", body } })) as { structuredContent: { thread_id: string } }).structuredContent.thread_id;
       const older = await send("Older news");
       const newer = await send("Newer news");
-      for (const id of [older, newer]) expect((await post(b.port, `/api/inbox/messages/${id}/resolve`, { resolved: true })).status).toBe(200);
+      expect((await post(b.port, `/api/inbox/messages/${older}/resolve`, { resolved: true })).status).toBe(200);
+      skew += 1_000;
+      expect((await post(b.port, `/api/inbox/messages/${newer}/resolve`, { resolved: true })).status).toBe(200);
 
       // Newest archived first, each with B as its machine; the plain read (Settings → Archived) stays this Inbox's own.
       await waitFor("B's archived on A", async () => (await group(a.port)).rows.length === 2);

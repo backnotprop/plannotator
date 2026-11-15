@@ -243,6 +243,7 @@ packages/inbox/floaters/floaters.test.tsx
 packages/inbox/ask/side.test.tsx
 packages/inbox/ask/sideCommand.test.tsx
 packages/inbox/pullToRefresh.test.tsx
+packages/inbox/rowSwipeList.test.tsx
 packages/inbox/threadReadRetry.test.tsx
 packages/inbox/openThreadReadsWiring.test.tsx
 packages/inbox/tabCountWindow.test.tsx
@@ -758,8 +759,12 @@ packages/inbox/agents/faceSources.test.tsx
 packages/ui/components/CommentPopover.phoneKeyboard.test.tsx
 packages/ui/components/Viewer.authorColor.test.tsx
 packages/review-editor/components/authorColor.review.test.tsx
+packages/inbox/listPicks.test.tsx
+packages/inbox/pickWork.test.tsx
+packages/inbox/combines.test.tsx
 packages/inbox/tagColours.test.tsx
 packages/inbox/settingsAtLoad.test.tsx
+packages/inbox/pressKeys.test.tsx
 packages/inbox/scheduled/scheduledSidebar.test.tsx
 packages/inbox/scheduled/scheduledTable.test.tsx
 packages/inbox/scheduled/scheduledEditor.test.tsx
