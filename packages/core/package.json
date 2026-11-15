@@ -55,6 +55,7 @@
     "./inbox-project-labels": "./inbox-project-labels.ts",
     "./inbox-questions": "./inbox-questions.ts",
     "./inbox-file-question-twin": "./inbox-file-question-twin.ts",
+    "./inbox-choice-twins": "./inbox-choice-twins.ts",
     "./inbox-actions": "./inbox-actions.ts",
     "./inbox-search": "./inbox-search.ts",
     "./inbox-folding": "./inbox-folding.ts",

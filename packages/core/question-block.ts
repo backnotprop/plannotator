@@ -1818,6 +1818,10 @@ export const isRecommendedQuestionAnswer = (
   }
   const sameSet = (labels: readonly string[]): boolean => {
     if (answer.other?.trim()) return false;
+    // Picks that are all exact choice labels compare exactly: "ship it." is not "Ship it" when both are choices.
+    const exact = new Set(labels);
+    const known = new Set(context.choiceLabels ?? labels);
+    if (answer.selected.every((l) => known.has(l))) return answer.selected.length === exact.size && answer.selected.every((l) => exact.has(l));
     const want = new Set(labels.map(normalizeQuestionText));
     const got = new Set(answer.selected.map(normalizeQuestionText));
     return want.size === got.size && [...want].every((l) => got.has(l));
