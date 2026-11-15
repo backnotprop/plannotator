@@ -7,7 +7,8 @@
  * `query` (the module refuses to load otherwise); it is the endpoint `gh pr
  * view` reads too. Nothing runs until a person rests on a link long enough for
  * the card to open, or opens a thread's Links (the rows on screen read their
- * state), so drawing a message costs nothing.
+ * state), so drawing a message costs nothing. The Inbox also reads one after
+ * an agent's send names a number it does not know (inbox-pull-lookups.ts).
  *
  * - GitHub: `issueOrPullRequest` answers both kinds in one call. When GitHub
  *   refuses the account in use (404/401/403/SAML), every other account signed

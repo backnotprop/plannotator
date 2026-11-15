@@ -10,7 +10,7 @@
  * The picture-choices advice is not a quiet hint: it is said every time.
  *
  * A real store in a temp dir and send_message's own handler; no Inbox
- * server, no network.
+ * server, no network: the lookup after a send reads a stand-in forge.
  */
 import { afterEach, expect, test } from "bun:test";
 import { mkdtempSync, realpathSync, rmSync } from "node:fs";
@@ -19,6 +19,7 @@ import { join } from "node:path";
 import { INBOX_THREAD_PULLS_MAX, parseInboxThreadPullRefs } from "@plannotator/core/inbox-types";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { createInboxMcpServer, type InboxMcpContext } from "./inbox-mcp";
+import { createInboxPullLookups } from "./inbox-pull-lookups";
 import { attachPullText, pullsNamedInBody, QUESTION_OPTIONS_HINT, questionWithBareOptions, quietHint, type InboxKnownPulls } from "./inbox-mcp-hints";
 
 const roots: string[] = [];
@@ -208,4 +209,85 @@ test("the picture-choices advice is said on every send it holds for, in any sess
   expect((await w.send("ses_a", { body: pictured("Which icon set?"), thread: "icons" })).result.content[0]!.text).toContain("choices have no pictures");
   expect((await w.send("ses_b", { body: pictured("Which font?"), thread: "fonts" })).result.content[0]!.text).toContain("choices have no pictures");
   expect((await w.send("", { body: pictured("Which grid?"), thread: "grids" })).result.content[0]!.text).toContain("choices have no pictures");
+});
+
+/**
+ * The lookup after a send (inbox-pull-lookups.ts) on a stand-in forge: `kinds` answers each number; `usable` is Code
+ * review on and gh signed in; `reads` is every number the forge was asked.
+ */
+function lookingUp(kinds: Record<number, "pull" | "issue" | "missing" | null>, usable: () => boolean = () => true) {
+  const reads: number[] = [];
+  const lookups = createInboxPullLookups({
+    usable: async () => usable(),
+    read: async (ref) => {
+      reads.push(ref.number);
+      return kinds[ref.number] === undefined ? "missing" : kinds[ref.number]!;
+    },
+  });
+  const known: InboxKnownPulls = {
+    repo: { host: "github.com", repo: "acme/api" },
+    isPull: (key) => lookups.answer(key)?.kind === "pull",
+    settled: (key) => !!lookups.answer(key),
+    lookUp: (refs, found) => lookups.lookUp(refs, found),
+  };
+  // The lookup starts after the send's answer (a timer), then runs on its own.
+  const settled = async () => {
+    await Bun.sleep(1);
+    await lookups.idle();
+  };
+  return { known, reads, settled };
+}
+
+test("an unknown number: no line on this send, looked up after it, the line on that agent's next send in the thread", async () => {
+  const forge = lookingUp({ 3405: "pull", 3399: "issue" });
+  const w = world({ known: forge.known });
+  const first = await w.send("ses_a", { body: "Opened #3405 for the retry fix; it closes #3399.", thread: "one" });
+  expect(first.result.content[0]!.text).not.toContain("You named");
+  expect(forge.reads).toEqual([]);
+  await forge.settled();
+  expect(forge.reads).toEqual([3405, 3399]);
+  // Another agent in the thread is not the one who named it.
+  expect((await w.send("ses_b", { body: "Watching.", reply_to: first.id })).result.content[0]!.text).not.toContain("You named");
+  const next = await w.send("ses_a", { body: "Tests are green.", reply_to: first.id });
+  expect(next.last).toBe(nudge("#3405", "acme/api#3405"));
+  // Said once in this thread; the issue never; and neither is asked of the forge again.
+  expect((await w.send("ses_a", { body: "#3405 and #3399 again.", reply_to: first.id })).result.content[0]!.text).not.toContain("You named");
+  await forge.settled();
+  expect(forge.reads).toEqual([3405, 3399]);
+  // Another thread naming it hears it at once now: the answer is kept.
+  expect((await w.send("ses_c", { body: "Reviewing #3405.", thread: "two" })).last).toBe(nudge("#3405", "acme/api#3405"));
+});
+
+test("a PR found later that is on a row by the next send says nothing; Code review off or a failing forge, nothing at all", async () => {
+  const forge = lookingUp({ 3405: "pull" });
+  const w = world({ known: forge.known });
+  const first = await w.send("ses_a", { body: "Opened #3405.", thread: "one" });
+  await forge.settled();
+  const attached = await w.send("ses_a", { body: "Attached it.", reply_to: first.id, pulls: ["acme/api#3405"] });
+  expect(attached.result.content[0]!.text).not.toContain("You named");
+
+  let on = false;
+  const off = lookingUp({ 3405: "pull" }, () => on);
+  const w2 = world({ known: off.known });
+  const sent = await w2.send("ses_a", { body: "Opened #3405.", thread: "one" });
+  await off.settled();
+  expect(off.reads).toEqual([]);
+  expect((await w2.send("ses_a", { body: "Done.", reply_to: sent.id })).result.content[0]!.text).not.toContain("You named");
+
+  const failing = lookingUp({ 3405: null });
+  const w3 = world({ known: failing.known });
+  const tried = await w3.send("ses_a", { body: "Opened #3405.", thread: "one" });
+  await failing.settled();
+  expect(failing.reads).toEqual([3405]);
+  const after = await w3.send("ses_a", { body: "Done.", reply_to: tried.id });
+  expect(after.result.isError).toBeFalsy();
+  expect(after.result.content[0]!.text).not.toContain("You named");
+});
+
+test("a message listing forty numbers asks the forge about three", async () => {
+  const forge = lookingUp({});
+  const w = world({ known: forge.known });
+  await w.send("ses_a", { body: Array.from({ length: 40 }, (_, i) => `#${i + 1}`).join(" "), thread: "one" });
+  await forge.settled();
+  expect(forge.reads).toEqual([1, 2, 3]);
 });

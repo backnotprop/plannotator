@@ -8,7 +8,9 @@
  *     a GitHub `owner/repo#12` or bare `#12` (the thread's project's
  *     repository) that this Inbox already knows is a PR. One line per PR, at
  *     most three, each said once per (thread, PR) (the owner's words,
- *     2026-11-15).
+ *     2026-11-15). A number it does not know yet is looked up after the send
+ *     (inbox-pull-lookups.ts); a PR found so is named on that agent's next
+ *     send in the thread.
  *  2. `question_options`: the body asks a question with two or more choices,
  *     and no question in it has a `Pros:`, `Cons:` or `Prototype:` line. Said
  *     once per session (`agent_session`, which every connection fills with
@@ -36,12 +38,16 @@ export type InboxHintKind = "attach_pull" | "question_options";
 /**
  * What this Inbox already knows of a project's PRs, with no forge call: its
  * repository (the cached `origin`) and whether a key is a PR that a list or
- * a card read named. A number it does not know counts as no PR.
+ * a card read named. A number it does not know counts as no PR on this send.
  */
 export interface InboxKnownPulls {
   /** `repo` is `owner/repo`. */
   repo: { host: string; repo: string } | null;
   isPull(key: string): boolean;
+  /** Whether the Inbox already knows what the number is, a PR or not (a card of either kind, a lookup's answer). */
+  settled?(key: string): boolean;
+  /** Looks the numbers up in the background (inbox-pull-lookups.ts); `found` hears each that is a PR. Never waits. */
+  lookUp?(refs: readonly ForgeRef[], found: (ref: ForgeRef) => void): void;
 }
 
 /** At most this many (session, hint) and (thread, PR) marks kept per store; the oldest go first. */
@@ -122,12 +128,38 @@ const SHORT_GITHUB_REF = /(?<![\w/.#-])([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)#([1-
 /** A bare `#12` (or `PR#12`): not an HTML entity (`&#12;`), a link's fragment, or the end of `owner/repo#12`. */
 const BARE_NUMBER = /(?<![\w/&#.-])(?:[Pp][Rr])?#([1-9]\d{0,9})(?![\w-])/g;
 
-/** A GitHub PR's ref, or null when `known` does not know the number as a PR. */
-function knownGithubPull(known: InboxKnownPulls, host: string, owner: string, repo: string, number: number): InboxThreadPullRef | null {
-  if ([owner, repo].some((part) => part === "." || part === "..")) return null;
-  const ref: ForgeRef = { platform: "github", host, owner, repo, number, kind: "pull" };
-  const key = forgeRefKey(ref);
-  return known.isPull(key) ? { key, url: forgePullUrl(ref), ref } : null;
+/** The body with what is not the agent's own prose blanked: code (fenced or inline) and quoted `>` lines. */
+function ownWords(body: string): string {
+  return blankCode(body)
+    .split("\n")
+    .map((line) => (/^\s{0,3}>/.test(line) ? "" : line))
+    .join("\n");
+}
+
+/**
+ * The GitHub numbers the text names, as PR refs in text order: `owner/repo#12`
+ * (github.com, or the project's host when it is the project's repository) and
+ * a bare `#12` (the project's repository). `own` marks the project's.
+ */
+function githubNumbersIn(text: string, repo: InboxKnownPulls["repo"]): { index: number; ref: ForgeRef; own: boolean }[] {
+  const out: { index: number; ref: ForgeRef; own: boolean }[] = [];
+  const at = repo ? repo.repo.lastIndexOf("/") : -1;
+  const project = repo && at > 0 ? { host: repo.host, owner: repo.repo.slice(0, at), name: repo.repo.slice(at + 1) } : null;
+  const add = (index: number, host: string, owner: string, name: string, number: number, own: boolean) => {
+    if ([owner, name].some((part) => part === "." || part === "..")) return;
+    out.push({ index, ref: { platform: "github", host, owner, repo: name, number, kind: "pull" }, own });
+  };
+  for (const match of text.matchAll(SHORT_GITHUB_REF)) {
+    const own = !!project && `${match[1]}/${match[2]}`.toLowerCase() === `${project.owner}/${project.name}`.toLowerCase();
+    add(match.index ?? 0, own ? project!.host : "github.com", match[1]!, match[2]!, Number(match[3]), own);
+  }
+  if (project) for (const match of text.matchAll(BARE_NUMBER)) add(match.index ?? 0, project.host, project.owner, project.name, Number(match[1]), true);
+  return out;
+}
+
+/** A GitHub number as a thread-PR ref. */
+function pullRefOf(ref: ForgeRef): InboxThreadPullRef {
+  return { key: forgeRefKey(ref), url: forgePullUrl(ref), ref };
 }
 
 /**
@@ -140,10 +172,7 @@ function knownGithubPull(known: InboxKnownPulls, host: string, owner: string, re
  */
 export function pullsNamedInBody(body: string, projectHost?: string | null, known?: InboxKnownPulls): InboxThreadPullRef[] {
   if (typeof body !== "string" || (!body.includes("https://") && !body.includes("!") && !body.includes("#"))) return [];
-  const text = blankCode(body)
-    .split("\n")
-    .map((line) => (/^\s{0,3}>/.test(line) ? "" : line))
-    .join("\n");
+  const text = ownWords(body);
   const found: { index: number; ref: InboxThreadPullRef }[] = [];
   const add = (index: number, ref: InboxThreadPullRef | { error: string } | null) => {
     if (ref && !("error" in ref) && !found.some((other) => other.ref.key === ref.key)) found.push({ index, ref });
@@ -153,13 +182,9 @@ export function pullsNamedInBody(body: string, projectHost?: string | null, know
   for (const match of text.matchAll(SHORT_MERGE_REQUEST)) take(match.index ?? 0, match[0]);
   for (const match of text.matchAll(BITBUCKET_PULL_URL)) take(match.index ?? 0, match[0]);
   if (known && text.includes("#")) {
-    for (const match of text.matchAll(SHORT_GITHUB_REF)) add(match.index ?? 0, knownGithubPull(known, "github.com", match[1]!, match[2]!, Number(match[3])));
-    const repo = known.repo;
-    const at = repo ? repo.repo.lastIndexOf("/") : -1;
-    if (repo && at > 0) {
-      const owner = repo.repo.slice(0, at);
-      const name = repo.repo.slice(at + 1);
-      for (const match of text.matchAll(BARE_NUMBER)) add(match.index ?? 0, knownGithubPull(known, repo.host, owner, name, Number(match[1])));
+    for (const { index, ref } of githubNumbersIn(text, known.repo)) {
+      const pull = pullRefOf(ref);
+      if (known.isPull(pull.key)) add(index, pull);
     }
   }
   return found.sort((a, b) => a.index - b.index).map((entry) => entry.ref);
@@ -182,12 +207,58 @@ export function pullsNotAttached(
 ): InboxThreadPullRef[] {
   const named = pullsNamedInBody(body, projectHost, known);
   if (named.length === 0) return [];
-  const quiet = new Set([
-    ...passed,
-    ...store.allThreadPulls().map((pull) => pull.pull),
-    ...store.threadPullsRemoved(threadId, "").map((pull) => pull.pull),
-  ]);
+  const quiet = quietPulls(store, threadId, passed);
   return named.filter((ref) => !quiet.has(ref.key));
+}
+
+/** The PRs never named in this thread: on any thread's row, passed in this send's `pulls`, or taken off this thread. */
+function quietPulls(store: InboxStore, threadId: string, passed: readonly string[]): Set<string> {
+  return new Set([...passed, ...store.allThreadPulls().map((pull) => pull.pull), ...store.threadPullsRemoved(threadId, "").map((pull) => pull.pull)]);
+}
+
+/** At most this many PRs a lookup found wait for their agent's next send in a thread, per store; the oldest go first. */
+const MAX_FOUND_LATER = 2_000;
+/** Per store: (thread, session) → the PRs a lookup found after a send there, waiting for that agent's next send. */
+const foundLaterByStore = new WeakMap<InboxStore, Map<string, Map<string, InboxThreadPullRef>>>();
+const foundLaterKey = (threadId: string, session: string | null | undefined) => `${threadId}\u0000${session?.trim() ?? ""}`;
+
+/** A lookup found that a number this agent named in the thread is a PR: its line waits for the agent's next send there. */
+export function notePullFoundLater(store: InboxStore, threadId: string, session: string | null | undefined, ref: ForgeRef): void {
+  let waiting = foundLaterByStore.get(store);
+  if (!waiting) foundLaterByStore.set(store, (waiting = new Map()));
+  const key = foundLaterKey(threadId, session);
+  const refs = waiting.get(key) ?? new Map<string, InboxThreadPullRef>();
+  const pull = pullRefOf(ref);
+  refs.set(pull.key, pull);
+  waiting.delete(key);
+  waiting.set(key, refs);
+  while (waiting.size > MAX_FOUND_LATER) waiting.delete(waiting.keys().next().value!);
+}
+
+/**
+ * The numbers this send names in the project's GitHub repository (a bare
+ * `#12`, or its own `owner/repo#12`) that the Inbox does not know yet, to look
+ * up after the send: not a PR it knows, not one whose kind it already holds,
+ * and not one that would be quiet anyway. Pure but for the store reads.
+ */
+export function pullsToLookUp(
+  store: InboxStore,
+  sent: { threadId: string; body: string; known?: InboxKnownPulls; projectId?: string; passed?: readonly string[] },
+): ForgeRef[] {
+  const known = sent.known;
+  if (!known?.lookUp || !known.repo || typeof sent.body !== "string" || !sent.body.includes("#")) return [];
+  const candidates = githubNumbersIn(ownWords(sent.body), known.repo).filter((entry) => entry.own);
+  if (candidates.length === 0) return [];
+  const quiet = quietPulls(store, sent.threadId, sent.passed ?? []);
+  const fromStore = sent.projectId ? storePullKeys(store, sent.projectId) : new Set<string>();
+  const out: ForgeRef[] = [];
+  for (const { ref } of candidates.sort((a, b) => a.index - b.index)) {
+    const key = forgeRefKey(ref);
+    if (out.some((other) => forgeRefKey(other) === key)) continue;
+    if (quiet.has(key) || fromStore.has(key) || known.isPull(key) || known.settled?.(key) || said(store, pullSaidKey(sent.threadId, key))) continue;
+    out.push(ref);
+  }
+  return out;
 }
 
 /** The attach lines (the approved words): one per PR, at most three. */
@@ -249,9 +320,22 @@ export function quietHint(
     let fromStore: ReadonlySet<string> | null = null;
     const known: InboxKnownPulls | undefined =
       context && projectId ? { repo: context.repo, isPull: (key) => context.isPull(key) || (fromStore ??= storePullKeys(store, projectId)).has(key) } : context;
-    const refs = pullsNotAttached(store, sent.threadId, sent.body, sent.projectHost, known, sent.passed)
-      .filter((ref) => !said(store, pullSaidKey(sent.threadId, ref.key)))
-      .slice(0, HINT_PULLS_MAX);
+    // The body's PRs first, then the ones a lookup found after this agent's earlier sends here.
+    const named = pullsNotAttached(store, sent.threadId, sent.body, sent.projectHost, known, sent.passed);
+    const waiting = foundLaterByStore.get(store);
+    const laterKey = foundLaterKey(sent.threadId, sent.session);
+    const later = waiting?.get(laterKey);
+    if (later) {
+      const quiet = quietPulls(store, sent.threadId, sent.passed ?? []);
+      for (const [key, ref] of later) {
+        if (quiet.has(key)) later.delete(key);
+        else if (!named.some((other) => other.key === key)) named.push(ref);
+      }
+    }
+    const refs = named.filter((ref) => !said(store, pullSaidKey(sent.threadId, ref.key))).slice(0, HINT_PULLS_MAX);
+    for (const ref of refs) later?.delete(ref.key);
+    if (later) for (const key of later.keys()) if (said(store, pullSaidKey(sent.threadId, key))) later.delete(key);
+    if (later?.size === 0) waiting!.delete(laterKey);
     if (refs.length > 0) {
       for (const ref of refs) noteSaid(store, pullSaidKey(sent.threadId, ref.key));
       return { kind: "attach_pull", line: attachPullText(refs) };

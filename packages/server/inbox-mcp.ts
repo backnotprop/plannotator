@@ -52,7 +52,7 @@ export { fail, guarded, ok, okComplete, PROJECT_PATH_DESCRIPTION, type ToolResul
 import type { InboxSearchIndex } from "@plannotator/shared/inbox/search";
 import { isInsideFolder, type InboxProjectRoot } from "./inbox-project-root";
 import { registerInboxSnoozeTool, type InboxSnoozeMcpContext } from "./inbox-mcp-snooze";
-import { quietHint, type InboxKnownPulls } from "./inbox-mcp-hints";
+import { notePullFoundLater, pullsToLookUp, quietHint, type InboxKnownPulls } from "./inbox-mcp-hints";
 import type { ProjectHostOf } from "./inbox-thread-pulls";
 import { applyAgentPriority, priorityLine, PRIORITY_FIELD } from "./inbox-mcp-priority";
 import { changePullsAsAgent, checkProjectPullRefs, checkPullRefs, pullsActor, pullsChangeText, PULLS_FIELD, registerInboxThreadPullsTool, threadPullsText, type InboxPullsMcpLive } from "./inbox-mcp-pulls";
@@ -339,7 +339,8 @@ export interface InboxMcpContext extends InboxSnoozeMcpContext {
   projectHost?: ProjectHostOf;
   /**
    * What this Inbox already knows of a project's PRs, read with no forge call (inbox-mcp-hints.ts): for the attach
-   * hint's `owner/repo#12` and bare `#12`. Absent: only a PR's URL and a short `group/project!45` count.
+   * hint's `owner/repo#12` and bare `#12`. Absent: only a PR's URL and a short `group/project!45` count. Its `lookUp`
+   * runs only after the send has answered.
    */
   knownPulls?: (projectId: string) => InboxKnownPulls | null;
   /**
@@ -1278,6 +1279,23 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
         if (quiet) {
           hints.push(`\n${quiet.line}`);
           sent.structured.hint = quiet.line;
+        }
+        // A number the Inbox does not know yet is looked up after this answer has gone (inbox-pull-lookups.ts); a PR
+        // found so is named on this agent's next send here. Nothing of it can reach this send.
+        if (known?.lookUp && !sent.replayed) {
+          const lookUp = known.lookUp;
+          const threadId = String(sent.structured.thread_id);
+          const session = input.agent_session;
+          const body = input.body;
+          const passed = pullRefs.map((ref) => ref.key);
+          setTimeout(() => {
+            try {
+              const refs = pullsToLookUp(store, { threadId, body, known, projectId: project.id, passed });
+              if (refs.length > 0) lookUp(refs, (ref) => notePullFoundLater(store, threadId, session, ref));
+            } catch {
+              // Advice only: the message was sent.
+            }
+          }, 0);
         }
         return ok(
           `${sent.replayed ? "Already sent" : "Sent"} to the Plannotator Inbox${asked} (thread ${sent.structured.thread_id}, ${sent.structured.url}).${stepsLine}${pullsLine}${priorityLine(sent.priority)}${namingLine(sent.naming)} ${replyNextStepText(wakes, input.agent_host, await t3WokenOnlyWhileRunning(context, wakes, input))}${hints.join("")}`,
