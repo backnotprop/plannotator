@@ -5,7 +5,10 @@ import { FileTree } from './FileTree';
 import { EllipsisName } from './EllipsisName';
 import { BranchName } from './BranchName';
 import type { DiffFile } from '../types';
+import { markFirstCodePainted } from '../utils/firstCodePaint';
 import { installFakeTextLayout, type FakeTextLayout } from '../../../tests/helpers/fake-text-layout';
+
+markFirstCodePainted();
 
 const hasDom = typeof document !== 'undefined';
 let host: HTMLDivElement | null = null;

@@ -85,6 +85,9 @@ export function JobRow({
         : isGuide
           ? 'Ready to read'
           : findingCountsLine(findings);
+  const colon = detail.indexOf(':');
+  const statusWord = job.status === 'failed' && colon > 0 ? detail.slice(0, colon + 1) : detail;
+  const statusRest = statusWord === detail ? '' : detail.slice(colon + 1);
   return (
     <div
       role="button"
@@ -111,10 +114,20 @@ export function JobRow({
             {terminal && job.endedAt ? formatDuration(job.endedAt - job.startedAt) : <ElapsedTime startedAt={job.startedAt} />}
           </span>
         </span>
-        <span className="flex min-w-0 items-baseline text-[12px] text-muted-foreground">
-          <span className="flex-none whitespace-nowrap" data-agent-job-engine="">{[engine, modelName ?? job.model, job.effort ?? job.reasoningEffort ?? job.thinking].filter(Boolean).join(' · ')}</span>
-          <span className="flex-none whitespace-pre" aria-hidden="true"> · </span>
-          <span className="min-w-0 truncate" data-agent-job-detail="" title={detail}>{detail}</span>
+        <span className="block overflow-hidden text-[12px] text-muted-foreground" data-agent-job-meta="">
+          <span className="-ml-3.5 flex flex-wrap items-baseline">
+            <span className="flex min-w-0 max-w-full">
+              <span className="w-3.5 flex-none text-center" aria-hidden="true">·</span>
+              <span className="min-w-0 [overflow-wrap:anywhere]" data-agent-job-engine="">{[engine, modelName ?? job.model, job.effort ?? job.reasoningEffort ?? job.thinking].filter(Boolean).join(' · ')}</span>
+            </span>
+            <span className="flex max-w-full flex-[1_1_0px]">
+              <span className="w-3.5 flex-none text-center" aria-hidden="true">·</span>
+              <span className="flex min-w-0 flex-1" data-agent-job-detail="" title={detail}>
+                <span className="flex-none whitespace-nowrap">{statusWord}</span>
+                {statusRest && <span className="w-0 min-w-0 flex-1 truncate whitespace-pre">{statusRest}</span>}
+              </span>
+            </span>
+          </span>
         </span>
         {job.warning && <span className="block text-[12px] leading-5 text-muted-foreground" role="status" data-agent-job-warning="">{job.warning}</span>}
       </span>

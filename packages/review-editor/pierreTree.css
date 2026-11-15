@@ -48,7 +48,7 @@
   line-height: 1;
 }
 .review-changes-tree::part(row-content) {
-  flex: 1 1 auto;
+  flex: 1 1 0;
   color: inherit;
   font-variant-ligatures: no-contextual;
 }
