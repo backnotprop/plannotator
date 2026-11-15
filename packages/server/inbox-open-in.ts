@@ -397,7 +397,8 @@ export function createInboxOpenInRoute(context: InboxOpenInRouteContext) {
    */
   const namedBy = (scope: FileScope, named: string): boolean => {
     const message = typeof scope.message === "string" ? store.message(scope.message) : null;
-    if (!message || message.thread_id !== scope.thread || typeof named !== "string" || named === "") return false;
+    // Only an agent's message draws file links; the person's words (a reply a linked machine may post) name nothing.
+    if (!message || message.thread_id !== scope.thread || message.author.kind !== "agent" || typeof named !== "string" || named === "") return false;
     const body = message.body ?? "";
     for (const form of new Set([named, encodeURI(named), named.replace(/\//g, "\\")])) {
       for (let at = body.indexOf(form); at !== -1; at = body.indexOf(form, at + 1)) {

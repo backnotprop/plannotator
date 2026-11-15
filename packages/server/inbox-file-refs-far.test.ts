@@ -72,7 +72,7 @@ function world() {
       throw error;
     }
   };
-  const query = (path: string) => new URLSearchParams({ thread: message.thread_id, message: message.id, path });
+  const query = (path: string, in_ = message.id) => new URLSearchParams({ thread: message.thread_id, message: in_, path });
   return {
     project,
     elsewhere,
@@ -83,14 +83,14 @@ function world() {
       door = from;
       return this;
     },
-    view: (path: string) => call(new Request(`http://127.0.0.1/api/inbox/open-in/file/view?${query(path)}`)),
-    raw: (path: string) => call(new Request(`http://127.0.0.1/api/inbox/open-in/file/raw?${query(path)}`)),
-    attach: (path: string) =>
+    view: (path: string, in_?: string) => call(new Request(`http://127.0.0.1/api/inbox/open-in/file/view?${query(path, in_)}`)),
+    raw: (path: string, in_?: string) => call(new Request(`http://127.0.0.1/api/inbox/open-in/file/raw?${query(path, in_)}`)),
+    attach: (path: string, in_ = message.id) =>
       call(
         new Request("http://127.0.0.1/api/inbox/open-in/file/attach", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ thread: message.thread_id, message: message.id, path, serverSession: SESSION }),
+          body: JSON.stringify({ thread: message.thread_id, message: in_, path, serverSession: SESSION }),
         }),
       ),
     attachments: () => store.message(message.id)?.attachments ?? [],
@@ -132,6 +132,16 @@ describe("a file a message names, asked for by a linked machine", () => {
     const w = world().as({ window: true });
     expect((await w.view(join(w.elsewhere, "named.lo"))).body).toMatchObject({ found: false, reason: "missing" });
     expect((await w.as(null).view(join(w.elsewhere, "named.lo"))).body).toMatchObject({ found: true, contents: "a prefix\n" });
+  });
+
+  test("a path named only in the person's own reply (one a linked machine may post) is not on this computer", async () => {
+    const w = world().as({ window: true });
+    const outside = join(w.elsewhere, "other.md");
+    const { reply } = w.store.sendReply(w.message.id, { words: `look at ${outside} and ${join(w.elsewhere, "shot.png")}`, idempotency_key: "k1" });
+    expect((await w.view(outside, reply.id)).body).toMatchObject({ found: false, reason: "missing" });
+    expect((await w.raw(join(w.elsewhere, "shot.png"), reply.id)).status).toBe(404);
+    expect((await w.attach(outside, reply.id)).status).toBe(400);
+    expect(w.attachments()).toEqual([]);
   });
 
   test("this computer's own window still opens a file anywhere but a secret", async () => {
