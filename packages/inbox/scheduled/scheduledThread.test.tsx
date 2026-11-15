@@ -127,3 +127,24 @@ test('an agent\'s change message in another machine\'s thread: the editor link b
   expect(far.body).toContain('Scheduled on Studio Mac. Manage it there.');
   expect(farChangeMessage(change, 'Studio Mac')).toBe(far);
 });
+
+test.skipIf(!hasDom)('a fold over earlier runs hides whole runs: it starts at a run line and the next line shown is a run line', async () => {
+  const { planFolds } = await import('@plannotator/core/inbox-folding');
+  const { runFolds, earlierRunsLabel } = await import('./thread');
+  const you = (id: string, at: string) => message(id, at, { body: 'Merge #47 if checks pass.' });
+  const messages = [
+    divider('msg_r1', '2026-11-15T07:16:00.000Z', { run: 1 }),
+    reply('msg_a1', '2026-11-15T07:16:15.000Z'),
+    divider('msg_r2', '2026-11-15T07:19:00.000Z', { run: 2 }),
+    reply('msg_a2', '2026-11-15T07:19:10.000Z'),
+    you('msg_you', '2026-11-15T07:19:40.000Z'),
+    reply('msg_done', '2026-11-15T07:20:00.000Z'),
+    divider('msg_r3', '2026-11-15T07:20:30.000Z', { run: 3 }),
+  ];
+  const plan = runFolds(planFolds(messages, new Set(), 99), messages);
+  expect(plan.hidden).toEqual([['msg_r1', 'msg_a1', 'msg_r2', 'msg_a2', 'msg_you', 'msg_done']]);
+  expect(earlierRunsLabel(plan.hidden[0]!, messages)).toMatch(/^2 earlier runs/);
+  // Run 2's last reply is new (open): the fold cannot reach Run 3's line, so it stops above Run 2's.
+  expect(planFolds(messages, new Set(['msg_done']), 99).hidden).toEqual([['msg_a1', 'msg_r2']]);
+  expect(runFolds(planFolds(messages, new Set(['msg_done']), 99), messages).hidden).toEqual([['msg_r1', 'msg_a1']]);
+});

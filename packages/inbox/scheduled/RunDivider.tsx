@@ -32,6 +32,33 @@ export function earlierRunsLabel(ids: readonly string[], messages: readonly Inbo
   return due.length > 0 ? earlierRunsWords(due) : null;
 }
 
+/**
+ * The thread's middle folds (planFolds) lined up with its runs: a fold that hides a run line starts at a run line and
+ * ends just above one, so no reply shows under the wrong run. Only folded messages join a fold; an open one stays open.
+ */
+export function runFolds<P extends { folded: ReadonlySet<string>; hidden: string[][] }>(plan: P, messages: readonly InboxMessageWire[]): P {
+  const line = (i: number) => messages[i]?.scheduled_run !== undefined;
+  if (!messages.some((m) => m.scheduled_run !== undefined)) return plan;
+  const folded = (i: number) => i >= 0 && i < messages.length && plan.folded.has(messages[i]!.id);
+  const hidden = plan.hidden.map((ids) => {
+    let s = messages.findIndex((m) => m.id === ids[0]);
+    let e = messages.findIndex((m) => m.id === ids[ids.length - 1]);
+    const lines = s < 0 || e < s ? [] : messages.map((_, i) => i).filter((i) => i >= s && i <= e && line(i));
+    if (lines.length === 0) return ids;
+    let b = s;
+    while (!line(b) && folded(b - 1)) b--;
+    s = line(b) ? b : lines[0]!;
+    let a = e + 1;
+    while (a < messages.length && !line(a) && folded(a)) a++;
+    const lastLine = lines.at(-1)!;
+    if (a === messages.length || line(a)) e = a - 1;
+    else if (lastLine > s) e = lastLine - 1;
+    else return ids;
+    return messages.slice(s, e + 1).map((m) => m.id);
+  });
+  return { ...plan, hidden };
+}
+
 export function RunDivider({ message, messages, run, tail }: { message: InboxMessageWire; messages: readonly InboxMessageWire[]; run: InboxRun | null | undefined; tail?: ReactNode }) {
   const [open, setOpen] = useState(false);
   const scheduled = message.scheduled_run!;

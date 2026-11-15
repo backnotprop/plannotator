@@ -13,7 +13,7 @@ import { inboxLaunchedSession } from '@plannotator/core/inbox-run-line';
 import { LaunchChoiceMeta } from './LaunchChoiceMeta';
 import { INBOX_UPLOAD_MAX_BYTES, inboxActionInDraft, inboxActionPersonMark, type InboxDraftFile, type InboxMessageWire, type InboxQuestion, type InboxReplyDraft, type InboxThread, type InboxUpload, inboxLaunchStops, inboxPersonAnsweredSince, isInboxNote, isInboxT3WaitReason, type InboxAnnotationRecord, type InboxAttachmentState, type InboxInlineImage } from '@plannotator/core/inbox-types';
 import { isQuestionAnswerEmpty, type QuestionAnswer } from '@plannotator/core/question-block';
-import { earlierRunsLabel, RunDivider, ScheduledFoot } from '../scheduled/thread';
+import { earlierRunsLabel, RunDivider, runFolds, ScheduledFoot } from '../scheduled/thread';
 import { useRefRepo } from '../links';
 import { InboxApiError, InboxHeldError, inboxApi, type OutboxView, type TagMode, type ThreadModel } from '../api';
 import { awayLine, outboxLine } from '../machines';
@@ -609,7 +609,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const [foldState, setFoldState] = useState<FoldState | null>(null);
   let fold = foldState;
   if (!fold || fold.threadId !== thread.thread_id) {
-    const plan = planFolds(thread.messages, fresh, boundary);
+    const plan = runFolds(planFolds(thread.messages, fresh, boundary), thread.messages);
     fold = { threadId: thread.thread_id, folded: plan.folded, hidden: plan.hidden, shown: plan.hidden.map(() => 0), stepped: NO_IDS };
     setFoldState(fold);
   }
@@ -620,7 +620,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const reviewPlanKey = `${thread.thread_id}:${inReviews ? 'reviews' : 'inbox'}`;
   if (reviewPlan.current?.key !== reviewPlanKey) {
     const wasReviews = reviewPlan.current?.key === `${thread.thread_id}:reviews`;
-    const folds = wasReviews ? planFolds(thread.messages, fresh, boundary) : fold;
+    const folds = wasReviews ? runFolds(planFolds(thread.messages, fresh, boundary), thread.messages) : fold;
     const plan = inReviews && reviewView ? reviewOpenPlan({ messages: thread.messages, firstReviewId: boundary === null ? null : reviewView.firstReviewId, latestReviewId: reviewView.latestReviewId, fresh, folds }) : null;
     reviewPlan.current = { key: reviewPlanKey, left: new Set(plan?.left ?? []) };
     if (plan || wasReviews) {
