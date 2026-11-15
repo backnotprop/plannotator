@@ -798,15 +798,18 @@ describe("a linked machine gains none of it", () => {
     // and stored here; gh only reads their state), and the three writes. A new PR route or `forge` write fails here until it is named.
     // "Changed since you looked" (`POST pulls/looked`) is a record kept here, a `set`: it runs no gh.
     expect(doorWriteKind("pulls/looked")).toBe("set");
+    // Start review thread's tie (`POST pulls/owner`) is a record kept here; gh only reads the list to find its PRs. Its
+    // kind is `forge` for the sending: never held, the window's mark only.
+    expect(doorWriteKind("pulls/owner")).toBe("forge");
     expect(all.filter((name) => name.includes("pulls") && name !== "POST pulls/looked")).toEqual([
       "GET pulls",
       "GET pulls/(risk|details|diff|file|repo-files|repo-file|avatar|media|media/sizes)",
-      "POST pulls/(close|reopen|merge)",
+      "POST pulls/(close|reopen|merge|owner)",
       "GET threads/:id/pulls",
       "POST threads/:id/pulls",
     ]);
     // The door routes that write with gh / glab: exactly these, each a `forge` write (never held, a window's press only).
-    expect(Object.entries(DOOR_WRITES).filter(([, kind]) => kind === "forge").map(([name]) => name).sort()).toEqual(["POST pulls/close", "POST pulls/merge", "POST pulls/reopen"]);
+    expect(Object.entries(DOOR_WRITES).filter(([, kind]) => kind === "forge").map(([name]) => name).sort()).toEqual(["POST pulls/close", "POST pulls/merge", "POST pulls/owner", "POST pulls/reopen"]);
     for (const verb of ["close", "merge", "reopen"]) expect(doorWriteKind(`pulls/${verb}`)).toBe("forge");
     expect(doorWriteKind("threads/msg_1/pulls")).toBe("set");
     // A linked machine's `update` is the one exception, and it is not on the allowlist: the forward refuses it (below), and only a machine's token reaches it.

@@ -377,6 +377,16 @@ button.ib-prs-box:focus-visible { outline: 2px solid var(--ring); outline-offset
 .ib-prs-mt { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted-foreground); }
 .ib-prs-mskip { color: var(--muted-foreground); }
 .ib-prs-mlist .ib-prs-mbad { color: var(--destructive); }
+/* Start review thread's report: a sentence with links in it, each thread one click away, in the link colour. */
+.ib-prs-mlist li[data-pr-review-row] { display: block; }
+.ib-prs-tlink { padding: 0; border: 0; background: none; font: inherit; font-weight: 550; color: var(--primary); cursor: pointer; }
+.ib-prs-tlink:hover { text-decoration: underline; }
+.ib-prs-tlink:focus-visible { outline: 2px solid var(--ring, var(--primary)); outline-offset: 1px; border-radius: 3px; }
+@media (pointer: coarse) { .ib-prs-tlink { min-height: 44px; } }
+/* A phone's report: every row 44 px, a thread's row all link, so the rows read evenly. */
+.ib-prs-mlist[data-pr-review-report="rows"] { gap: 0; }
+.ib-prs-mlist[data-pr-review-report="rows"] li { display: flex; align-items: center; min-height: 44px; }
+.ib-prs-mlist li[data-pr-review-row$="-thread"] .ib-prs-tlink { display: flex; align-items: center; width: 100%; min-height: 44px; text-align: start; }
 .ib-prs-picksheet { flex-direction: column; align-items: stretch; gap: 10px; max-height: 70vh; overflow-y: auto; }
 .ib-prs-pickrow { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 12px; }
 .ib-prs-picksheet .ib-prs-mlist { font-size: var(--ib-fs-14, 14px); }
