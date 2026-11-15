@@ -5,6 +5,11 @@
 import { useState } from 'react';
 import type { InboxListRow } from '@plannotator/core/inbox-types';
 import type { InboxScheduledRow } from '@plannotator/core/inbox-scheduled-types';
+import type { SettingsModel } from '../api';
+import type { Route } from '../app/route';
+import { writeRoute } from '../app/writeRoute';
+import type { InboxToastModel } from '../components/Toast';
+import { errorText } from '../toastError';
 import { selfMachineId } from '../inboxUrl';
 import { lastLaunchAgent } from '../compose/model';
 import { SidebarTrigger } from '../shell/sidebar';
@@ -17,11 +22,15 @@ import { putScheduled, readScheduled, useScheduledPage } from './store';
 
 export { useScheduledOn } from './store';
 
+/** The capability switch: `loading` until the settings are read; `unsupported` where launch is not (Windows). */
+export type ScheduledSwitch = 'on' | 'off' | 'loading' | 'unsupported';
+
+type Toast = (toast: Omit<InboxToastModel, 'id'>) => void;
+
 export interface ScheduledPageProps {
   /** The open one's id, `new` for a new one, or null for the table alone. */
   openId: string | null;
-  /** The capability switch. */
-  on: boolean;
+  switch: ScheduledSwitch;
   rows: readonly InboxListRow[];
   phone: boolean;
   /** The window shows one column at a time. */
@@ -30,6 +39,27 @@ export interface ScheduledPageProps {
   onOpen: (id: string | null, replace?: boolean) => void;
   onOpenThread: (threadId: string, messageId?: string) => void;
   onSettings: (section: 'capabilities' | 'agents') => void;
+  /** The window's one toast: a delete's Undo. */
+  onToast?: Toast;
+}
+
+/** The page at its address, from the window's settings and route. */
+export function ScheduledRoute(props: { route: Route; settings: Pick<SettingsModel, 'scheduled_threads'> | null; rows: readonly InboxListRow[]; phone: boolean; stacked: boolean; onToast: Toast }) {
+  const { settings } = props;
+  const state = settings === null ? 'loading' : !settings.scheduled_threads ? 'unsupported' : settings.scheduled_threads.on ? 'on' : 'off';
+  return (
+    <ScheduledPage
+      openId={props.route.scheduled ?? null}
+      switch={state}
+      rows={props.rows}
+      phone={props.phone}
+      stacked={props.stacked}
+      onOpen={(id, replace) => writeRoute({ page: 'scheduled', project: null, thread: null, scheduled: id }, { replace })}
+      onOpenThread={(thread, msg) => writeRoute({ page: 'inbox', project: null, thread, msg: msg ?? null })}
+      onSettings={(section) => writeRoute({ page: 'settings', project: null, thread: null, section })}
+      onToast={props.onToast}
+    />
+  );
 }
 
 const local = (row: InboxListRow) => !row.machine || row.machine === selfMachineId();
@@ -58,17 +88,34 @@ export function ScheduledPage(props: ScheduledPageProps) {
       },
     );
   };
+  /** Delete, then the window's toast with Undo, which brings it back as it was. A failure throws, for its caller to say. */
+  const remove = async (row: InboxScheduledRow): Promise<void> => {
+    try {
+      await scheduledApi.remove(row.id);
+    } catch (cause) {
+      void readScheduled();
+      throw new Error(`${row.name} was not deleted. ${errorText(cause, 'Try again.')}`);
+    }
+    putScheduled(null, row.id);
+    if (openId === row.id) props.onOpen(null);
+    const undo = () =>
+      scheduledApi.restore(row.id).then(
+        (answer) => putScheduled(answer.scheduled),
+        (cause: unknown) => props.onToast?.({ icon: 'warn', wrap: true, lead: `${row.name} could not be brought back. ${errorText(cause, 'Try again.')}` }),
+      );
+    props.onToast?.({ icon: 'check', lead: 'Scheduled thread deleted', phoneLead: 'Deleted', detail: row.name, onUndo: () => void undo() });
+  };
   const acts: RowActs = {
     open: (row) => props.onOpen(row.id),
     run: (row) => void settle(scheduledApi.run(row.id)),
     stop: (row) => void settle(scheduledApi.stop(row.id)),
     turn: (row, on) => void settle(scheduledApi.turn(row.id, on)),
-    remove: (row) =>
-      void scheduledApi.remove(row.id).then(() => {
-        putScheduled(null, row.id);
-        if (openId === row.id) props.onOpen(null);
-      }, () => void readScheduled()),
+    remove: (row) => {
+      setActError(null);
+      remove(row).catch((cause: Error) => setActError(cause.message));
+    },
   };
+  const on = props.switch === 'on';
   const alone = props.phone || props.stacked;
   const editor = openId && (
     <ScheduledEditor
@@ -82,10 +129,11 @@ export function ScheduledPage(props: ScheduledPageProps) {
       narrow={alone}
       onClose={() => props.onOpen(null)}
       onCreated={(id) => props.onOpen(id, true)}
+      onDelete={remove}
       onOpenThread={props.onOpenThread}
     />
   );
-  if (openId && alone && props.on) return editor;
+  if (openId && alone && on) return editor;
   const short = !!openId || props.phone;
   return (
     <>
@@ -93,14 +141,18 @@ export function ScheduledPage(props: ScheduledPageProps) {
         <div className="ib-lhead">
           <SidebarTrigger />
           <h1 tabIndex={-1}>Scheduled threads</h1>
-          {props.on && (
+          {on && (
             <button type="button" className="ib-btn st-new" aria-label="New scheduled thread" onClick={() => props.onOpen('new')} data-scheduled-new="">
               {props.phone ? 'New' : 'New scheduled thread'}
             </button>
           )}
         </div>
-        <div className="ib-lbody st-lbody">
-          {!props.on ? (
+        <div className="ib-lbody st-lbody" aria-busy={props.switch === 'loading' || undefined}>
+          {props.switch === 'loading' ? null : props.switch === 'unsupported' ? (
+            <p className="st-note" data-scheduled-off-note="">
+              Scheduled threads aren't available on Windows.
+            </p>
+          ) : !on ? (
             <p className="st-note" data-scheduled-off-note="">
               Scheduled threads are off on this computer.{' '}
               <button type="button" className="st-link" onClick={() => props.onSettings('capabilities')}>
@@ -128,7 +180,7 @@ export function ScheduledPage(props: ScheduledPageProps) {
           )}
         </div>
       </section>
-      {props.on && editor}
+      {on && editor}
     </>
   );
 }

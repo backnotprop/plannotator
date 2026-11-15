@@ -16,7 +16,7 @@ import { RunningDots } from './marks';
 export interface RowScheduled {
   name: string;
   run: number | null;
-  state: 'running' | 'failed' | 'other';
+  state: 'running' | 'failed' | 'didnt_start' | 'other';
 }
 
 const marks = new WeakMap<InboxListRow, RowScheduled>();
@@ -36,7 +36,7 @@ export function scheduledLook(row: InboxListRow, scheduled: readonly InboxSchedu
   const run = last?.run ?? null;
   const preview = running && from.running_since ? `Started at ${TIME.format(new Date(from.running_since))}.` : last?.outcome === 'didnt_start' ? "Didn't start." : failed ? 'The session ended without a reply.' : row.latest_preview;
   const look: InboxListRow = { ...row, thread_name: run ? `Run ${run}` : row.thread_name, latest_preview: preview, run: undefined, session_ended: undefined };
-  marks.set(look, { name: from.name, run, state: running ? 'running' : failed ? 'failed' : 'other' });
+  marks.set(look, { name: from.name, run, state: running ? 'running' : last?.outcome === 'didnt_start' ? 'didnt_start' : failed ? 'failed' : 'other' });
   looks.set(row, { from, look });
   return look;
 }
@@ -52,7 +52,7 @@ export function ScheduledTile() {
   );
 }
 
-/** Running, with the dots; the warn mark for a run that didn't finish; nothing else. */
+/** Running, with the dots; the warn mark for a run that didn't finish or didn't start; nothing else. */
 export function ScheduledBadge({ row }: { row: InboxListRow }) {
   const s = marks.get(row);
   if (!s || s.state === 'other') return null;
@@ -64,8 +64,9 @@ export function ScheduledBadge({ row }: { row: InboxListRow }) {
         <span>Running</span>
       </span>
     );
+  const words = `${run} ${s.state === 'didnt_start' ? "didn't start" : "didn't finish"}`;
   return (
-    <span className="ib-badge ib-bicon ib-b-stop st-warn" aria-label={`${run} didn't finish`} title={`${run} didn't finish`} data-scheduled-badge="failed">
+    <span className="ib-badge ib-bicon ib-b-stop st-warn" aria-label={words} title={words} data-scheduled-badge="failed">
       <Icon name="warn" size={14} />
     </span>
   );

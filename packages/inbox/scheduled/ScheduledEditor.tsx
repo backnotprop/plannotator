@@ -16,7 +16,7 @@ import { InboxApiError } from '../apiError';
 import { putScheduled, readScheduled } from './store';
 import { FilesRow, FolderPick, RunsAs, type LaunchBlock } from './EditorParts';
 import { localZone, ScheduleRow } from './ScheduleRow';
-import { lastRunWords, OUTCOME_WORDS, runWhenWords } from './words';
+import { OUTCOME_WORDS, runWhenWords } from './words';
 
 export interface EditorProps {
   id: string;
@@ -28,10 +28,19 @@ export interface EditorProps {
   narrow: boolean;
   onClose: () => void;
   onCreated: (id: string) => void;
+  /** Delete with the window's Undo; a failure rejects with what to say. */
+  onDelete: (row: InboxScheduledRow) => Promise<void>;
   onOpenThread: (threadId: string, messageId?: string) => void;
 }
 
 const RUNS_SHOWN = 5;
+
+/** A one-time one after its time: "Done · ran Fri 5:02 PM", or that it didn't start or didn't run (skipped). */
+const doneWords = (record: InboxScheduledRow): string => {
+  if (!record.last_run) return "Done · didn't run";
+  if (record.last_run.outcome === 'didnt_start') return "Done · didn't start";
+  return `Done · ran ${runWhenWords(record.last_run.started_at).replace(/^Today /, '')}`;
+};
 
 const fieldsOf = (row: InboxScheduledRow): ScheduledFields => ({
   name: row.name,
@@ -129,24 +138,44 @@ export function ScheduledEditor(props: EditorProps) {
     if (JSON.stringify(draft.schedule) !== previewed.current) void checkSchedule(draft.schedule);
   }, [draft.schedule]);
 
+  // A new one is made once. A pick while it is being made is saved to it next, before it opens at its own address.
   const creating = useRef(false);
-  const save = async (change: Partial<ScheduledFields>, enabled?: boolean) => {
+  const made = useRef<string | null>(null);
+  const later = useRef<{ change: Partial<ScheduledFields>; enabled: boolean } | null>(null);
+  const save = async (change: Partial<ScheduledFields>, enabled = false) => {
     const next = { ...draft, ...change };
     setDraft(next);
     setError(null);
+    if (isNew && creating.current) {
+      later.current = { change: { ...later.current?.change, ...change }, enabled: enabled || !!later.current?.enabled };
+      return;
+    }
     try {
-      if (isNew) {
-        if (!next.name.trim() || !next.prompt.trim() || creating.current) return;
-        creating.current = true;
-        const made = await scheduledApi.create({ ...next, ...(enabled ? { enabled } : {}) } as ScheduledFields);
-        putScheduled(made.scheduled);
-        props.onCreated(made.scheduled.id);
-      } else if (Object.keys(change).length > 0) {
-        const saved = await scheduledApi.update(id, change);
-        putScheduled(saved.scheduled);
+      if (!isNew) {
+        if (Object.keys(change).length > 0) putScheduled((await scheduledApi.update(id, change)).scheduled);
+        return;
       }
+      let target = made.current;
+      let pending = { change, enabled };
+      if (!target) {
+        if (!next.name.trim() || !next.prompt.trim()) return;
+        creating.current = true;
+        try {
+          const answer = await scheduledApi.create({ ...next, ...(enabled ? { enabled } : {}) } as ScheduledFields);
+          target = made.current = answer.scheduled.id;
+          putScheduled(answer.scheduled);
+        } finally {
+          creating.current = false;
+        }
+        pending = { change: {}, enabled: false };
+      }
+      const rest = later.current;
+      later.current = null;
+      const fields = { ...pending.change, ...rest?.change };
+      if (Object.keys(fields).length > 0) putScheduled((await scheduledApi.update(target, fields)).scheduled);
+      if (pending.enabled || rest?.enabled) putScheduled((await scheduledApi.turn(target, true)).scheduled);
+      props.onCreated(target);
     } catch (cause) {
-      creating.current = false;
       setError(cause instanceof Error ? cause.message : String(cause));
     }
   };
@@ -161,10 +190,8 @@ export function ScheduledEditor(props: EditorProps) {
   const turn = () => (record ? act(() => scheduledApi.turn(record.id, !on)) : void save({}, true));
   const remove = () => {
     if (!record) return props.onClose();
-    void scheduledApi.remove(record.id).then(() => {
-      putScheduled(null, record.id);
-      props.onClose();
-    }, (cause: Error) => setError(cause.message));
+    setError(null);
+    props.onDelete(record).catch((cause: Error) => setError(cause.message));
   };
   const runs = detail?.runs ?? [];
   const threadName = record?.thread_id ? (record.thread_name ?? record.name) : null;
@@ -207,7 +234,7 @@ export function ScheduledEditor(props: EditorProps) {
         />
         <div className="ib-tmeta st-meta">
           {record?.state === 'done' ? (
-            <span>Done · ran {record.last_run ? lastRunWords(record.last_run.started_at).replace(/^(Today|Yesterday) /, '') : ''}</span>
+            <span>{doneWords(record)}</span>
           ) : (
             <>
               <Switch on={on} label={on ? 'On' : 'Off'} disabled={isNew && (!draft.name.trim() || !draft.prompt.trim())} onClick={() => void turn()} />

@@ -65,7 +65,8 @@ function RowMenu({ row, acts }: { row: InboxScheduledRow; acts: RowActs }) {
       </Menu.Trigger>
       <Menu.Portal container={portal ?? undefined}>
         <Menu.Positioner className="ib-pm-pos" side="bottom" align="end" sideOffset={4}>
-          <Menu.Popup className="ib-pm" aria-label={row.name}>
+          {/* A portal's clicks bubble to the row in React's tree: a menu item never also opens the row. */}
+          <Menu.Popup className="ib-pm" aria-label={row.name} onClick={(event) => event.stopPropagation()}>
             {row.state !== 'done' && (
               <Menu.Item className="ib-pmi" onClick={() => acts.turn(row, !on)} data-scheduled-turn={on ? 'off' : 'on'}>
                 <span className="ib-pmi-l">{on ? 'Turn off' : 'Turn on'}</span>
@@ -89,7 +90,10 @@ function lastCell(row: InboxScheduledRow, now: number): ReactNode {
         <span>Running · {elapsedWords(row.running_since, now)}</span>
       </span>
     );
-  return row.last_run ? lastRunWords(row.last_run.started_at, new Date(now)) : '';
+  if (!row.last_run) return '';
+  const when = lastRunWords(row.last_run.started_at, new Date(now));
+  // A run that didn't start says so here too; its time is in the tooltip and the editor's Runs.
+  return row.last_run.outcome === 'didnt_start' ? <span className="st-bad" title={when} data-scheduled-last="didnt_start">Didn't start</span> : when;
 }
 
 function WideRow({ row, acts, now }: { row: InboxScheduledRow; acts: RowActs; now: number }) {
@@ -133,7 +137,7 @@ function ShortRow({ row, acts, now, selected }: { row: InboxScheduledRow; acts: 
         {formatCount(row.runs)}
       </span>
       <span role="cell" className="st-num">
-        {row.state === 'running' && row.running_since ? <span className="st-live"><RunningDots />{elapsedWords(row.running_since, now)}</span> : row.last_run ? lastRunWords(row.last_run.started_at, new Date(now)) : ''}
+        {row.state === 'running' && row.running_since ? <span className="st-live"><RunningDots />{elapsedWords(row.running_since, now)}</span> : lastCell(row, now)}
       </span>
       <span role="cell" className="st-end">
         <RowMenu row={row} acts={acts} />

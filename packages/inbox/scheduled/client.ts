@@ -5,6 +5,7 @@
 import type { InboxScheduledFolder, InboxScheduledIfMissed, InboxScheduledPreview, InboxScheduledRow, InboxScheduledRunSummary, InboxScheduledSchedule } from '@plannotator/core/inbox-scheduled-types';
 import { pageServerSession } from '../api';
 import { readJson } from '../apiError';
+import { inboxUrl } from '../inboxUrl';
 import { newUuid } from '../uuid';
 
 declare module '../api' {
@@ -26,7 +27,8 @@ export interface ScheduledFields {
   attachments: string[];
 }
 
-const BASE = '/api/inbox/scheduled';
+/** This machine's own: a scheduled thread is managed on the computer that made it. */
+const BASE = inboxUrl('/scheduled');
 
 async function get<T>(path: string): Promise<T> {
   return readJson<T>(await fetch(path, { headers: { Accept: 'application/json' }, cache: 'no-store' }));
@@ -55,7 +57,9 @@ export const scheduledApi = {
   run: (id: string) => post<Saved & { message_id: string; failed?: string }>(one(id, '/run')),
   stop: (id: string) => post<Saved>(one(id, '/stop')),
   remove: (id: string) => post<{ deleted: true }>(one(id, '/delete')),
+  /** A delete's Undo: back as it was. */
+  restore: (id: string) => post<Saved>(one(id, '/restore')),
   preview: (schedule: InboxScheduledSchedule) => post<InboxScheduledPreview>(`${BASE}/preview`, { schedule }),
   /** The capability switch (`POST /api/inbox/settings`). */
-  saveSwitch: (on: boolean) => post<{ scheduled_threads: { on: boolean; login?: 'added' | 'unavailable' } }>('/api/inbox/settings', { scheduled_threads: { on } }),
+  saveSwitch: (on: boolean) => post<{ scheduled_threads: { on: boolean; login?: 'added' | 'unavailable' } }>(inboxUrl('/settings'), { scheduled_threads: { on } }),
 };

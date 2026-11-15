@@ -27,7 +27,7 @@ const REFUSED: InboxScheduledPreview = {
   schedule_words: 'Every 5 minutes',
   tz_short: 'EST',
   next_run: null,
-  refused: { code: 'schedule_too_frequent', error: 'Scheduled threads run at least 15 minutes apart. This one runs every 5 minutes.', every_minutes: 5 },
+  refused: { code: 'schedule_too_frequent', error: 'Scheduled times are at least 15 minutes apart. This one runs every 5 minutes.', every_minutes: 5 },
 };
 
 function serve(row: InboxScheduledRow) {
@@ -68,7 +68,7 @@ async function open(row: InboxScheduledRow, known: InboxScheduledRow | null = ro
   const noop = () => {};
   act(() =>
     root!.render(
-      <ScheduledEditor id={row.id} row={known} version={0} block={null} defaults={{ agent: null, projectId: null }} phone={false} narrow={false} onClose={noop} onCreated={noop} onOpenThread={noop} />,
+      <ScheduledEditor id={row.id} row={known} version={0} block={null} defaults={{ agent: null, projectId: null }} phone={false} narrow={false} onClose={noop} onCreated={noop} onDelete={async () => {}} onOpenThread={noop} />,
     ),
   );
   await settle();
