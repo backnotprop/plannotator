@@ -6,7 +6,7 @@
  * Nothing here runs, writes or sets a timer while the capability switch is off (`on()`).
  */
 import type { InboxMessage, InboxProject, InboxRun } from "@plannotator/core/inbox-types";
-import { inboxId } from "@plannotator/core/inbox-types";
+import { inboxId, INBOX_HOST_NAMES } from "@plannotator/core/inbox-types";
 import type {
   InboxScheduledChange,
   InboxScheduledFolder,
@@ -20,6 +20,7 @@ import {
   inboxScheduledDecide,
   inboxScheduledLateLine,
   inboxScheduledNext,
+  inboxScheduledTimes,
   inboxScheduledTzShort,
   inboxScheduledWhen,
   inboxScheduleRefusal,
@@ -27,6 +28,7 @@ import {
   SCHEDULED_LATE_MS,
   SCHEDULED_TICK_MS,
 } from "@plannotator/core/inbox-scheduled";
+import { inboxLaunchedSession } from "@plannotator/core/inbox-run-line";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import type { InboxAttachment } from "@plannotator/core/inbox-types";
@@ -82,6 +84,7 @@ export function createInboxScheduled(deps: {
 
   // ── Runs, read from the thread ──
 
+  /** Every run's divider, oldest first (the detail's run list reads it; the clock and the list read only the newest). */
   const dividersOf = (record: InboxScheduledThread): InboxMessage[] =>
     record.thread_id
       ? store.threadMessageIds(record.thread_id).flatMap((id) => {
@@ -89,31 +92,43 @@ export function createInboxScheduled(deps: {
           return message?.scheduled_run?.scheduled_id === record.id && message.scheduled_run.run !== undefined ? [message] : [];
         })
       : [];
+  const lastDividerOf = (record: InboxScheduledThread): InboxMessage | null => store.scheduledLines(record.id).run;
+  /** Where the clock counts from: the record's, or the newest due time it wrote a line for. */
+  const handledThrough = (record: InboxScheduledThread): string | null => {
+    const due = store.scheduledLines(record.id).due;
+    return record.handled_through === null ? null : due && due > record.handled_through ? due : record.handled_through;
+  };
   const summaryOf = (divider: InboxMessage): InboxScheduledRunSummary => {
     const run = divider.scheduled_run!;
     const line = divider.launch ? launch.runOfMessage(divider.id) : null;
-    const session = divider.launch?.session ?? null;
+    const session = inboxLaunchedSession(divider);
+    // That run's own messages: the thread read back from its end to the divider.
     const ids = store.threadMessageIds(divider.thread_id);
-    const after = ids.slice(ids.indexOf(divider.id) + 1).map((id) => store.message(id));
-    const replied = !!session && after.some((m) => m?.author.kind === "agent" && m.author.session === session && !m.turn_error);
+    let replied = false;
+    for (let i = ids.length - 1; !replied && session && i >= 0 && ids[i] !== divider.id; i--) {
+      const m = store.message(ids[i]!);
+      replied = m?.author.kind === "agent" && m.author.session === session && !m.turn_error;
+    }
     const outcome = !divider.launch || divider.launch.error || run.failed ? "didnt_start" : line && RUNNING.has(line.state) ? "running" : replied ? "replied" : "didnt_finish";
     return { message_id: divider.id, run: run.run!, due_at: run.due_at, started_at: divider.created_at, late: run.late === true, outcome };
   };
+  /** Run starts under way here (the clock's and Run now's alike): one at a time per scheduled thread. */
+  const starting = new Set<string>();
   const runningOf = (record: InboxScheduledThread): InboxScheduledRunSummary | null => {
-    const last = dividersOf(record).at(-1);
+    const last = lastDividerOf(record);
     const summary = last ? summaryOf(last) : null;
     return summary?.outcome === "running" ? summary : null;
   };
 
   const folderShown = (record: InboxScheduledThread): { folder_shown: string; project_name: string | null } => {
     if ("scratch" in record.folder) return { folder_shown: "New scratch folder", project_name: null };
+    if ("path" in record.folder) return { folder_shown: deps.displayFolder(record.folder.path), project_name: store.listProjects().find((p) => p.root === (record.folder as { path: string }).path)?.name ?? null };
     const project = store.project(record.folder.project_id);
     return project ? { folder_shown: deps.displayFolder(project.root), project_name: project.name } : { folder_shown: "A folder that is gone", project_name: null };
   };
 
   const rowOf = (record: InboxScheduledThread): InboxScheduledRow => {
-    const dividers = dividersOf(record);
-    const last = dividers.at(-1);
+    const last = lastDividerOf(record);
     const lastRun = last ? summaryOf(last) : null;
     const running = lastRun?.outcome === "running";
     const at = new Date(now());
@@ -124,7 +139,7 @@ export function createInboxScheduled(deps: {
       schedule_words: inboxScheduleWords(record.schedule),
       tz_short: record.schedule ? inboxScheduledTzShort(record.schedule.tz, next ?? at) : null,
       next_run: next ? next.toISOString() : null,
-      runs: dividers.length,
+      runs: last?.scheduled_run?.run ?? 0,
       last_run: lastRun,
       running_since: running ? lastRun!.started_at : null,
       ...folderShown(record),
@@ -155,7 +170,7 @@ export function createInboxScheduled(deps: {
       if (!store.project(v.project_id)) throw new InboxError("folder_missing", `No project ${v.project_id}.`, { field: "folder" });
       return { project_id: v.project_id };
     }
-    if (v && typeof v === "object" && typeof v.path === "string" && v.path.trim()) return { project_id: (await deps.resolveProject(v.path.trim())).id };
+    if (v && typeof v === "object" && typeof v.path === "string" && v.path.trim()) return { path: await launch.startFolder(v.path.trim()) };
     throw new InboxError("validation_error", "folder: { project_id }, { path } or { scratch: true }.", { field: "folder" });
   };
   const optionalToken = (value: unknown, field: string): string | undefined => {
@@ -195,7 +210,9 @@ export function createInboxScheduled(deps: {
   // ── What an agent's change says in its thread ──
 
   const linkOf = (record: InboxScheduledThread) => `[${record.name.replace(/[[\]]/g, "")}](#scheduled=${record.id})`;
-  const folderWords = (folder: InboxScheduledFolder) => ("scratch" in folder ? "a new scratch folder" : (store.project(folder.project_id) && deps.displayFolder(store.project(folder.project_id)!.root)) || "a folder that is gone");
+  const folderWords = (folder: InboxScheduledFolder) =>
+    "scratch" in folder ? "a new scratch folder" : "path" in folder ? deps.displayFolder(folder.path) : (store.project(folder.project_id) && deps.displayFolder(store.project(folder.project_id)!.root)) || "a folder that is gone";
+  const agentWords = (agent: string) => INBOX_HOST_NAMES[agent] ?? agent;
   const scheduleSentence = (schedule: InboxScheduledSchedule) => (schedule ? inboxScheduleWords(schedule).replace(/^Every /, "every ").replace(/^Once /, "once ").replace(/^On the /, "on the ") : "only when someone runs it");
   const fence = (lines: string[]) => {
     const body = lines.join("\n");
@@ -219,98 +236,126 @@ export function createInboxScheduled(deps: {
     return sent.message.id;
   };
 
-  const changeLines = (before: InboxScheduledThread, after: InboxScheduledThread, fields: (keyof InboxScheduledThread)[]): string => {
+  const changeLines = (before: InboxScheduledThread, after: InboxScheduledThread, fields: (keyof InboxScheduledThread)[], turnedOff: boolean): string => {
     const out: string[] = [];
     if (fields.includes("schedule")) out.push(`It now runs ${scheduleSentence(after.schedule)} (was ${scheduleSentence(before.schedule)}).`);
-    if (fields.includes("folder")) out.push(`It now works in ${folderWords(after.folder)} (was ${folderWords(before.folder)}). It is off until you turn it on again.`);
+    if (fields.includes("folder")) out.push(`It now works in ${folderWords(after.folder)} (was ${folderWords(before.folder)}).`);
+    if (fields.includes("agent")) out.push(`It now uses ${agentWords(after.agent)} (was ${agentWords(before.agent)}).`);
     if (fields.includes("name")) out.push(`Its name was ${before.name}.`);
-    const rest = fields.filter((f) => !["schedule", "folder", "name", "prompt"].includes(f));
+    const rest = fields.filter((f) => !["schedule", "folder", "agent", "name", "prompt"].includes(f));
     if (rest.length > 0) out.push(`Also changed: ${rest.join(", ").replace(/_/g, " ")}.`);
     if (fields.includes("prompt")) out.push(`The prompt:\n\n${fence([...before.prompt.split("\n").map((l) => `- ${l}`), ...after.prompt.split("\n").map((l) => `+ ${l}`)])}`);
+    if (turnedOff) out.push("It is off until you turn it on again.");
     return out.join("\n\n");
   };
 
   // ── Starting a run ──
 
-  /** One run: its divider in the thread, then the launch. A run key answers the same divider again after a restart. */
-  const startRun = async (record: InboxScheduledThread, due: { due_at: string; late: boolean; missed_before: number; by: InboxScheduledRun["by"] }): Promise<InboxScheduledThread> => {
-    const key = `sch:${record.id}:${due.due_at}`;
-    const number = dividersOf(record).length + 1;
-    const late = due.late && record.schedule ? `\n\n${inboxScheduledLateLine(new Date(due.due_at), new Date(now()), record.schedule.tz)}` : "";
-    const body = `${record.prompt}${late}`;
-    const run: InboxScheduledRun = {
-      scheduled_id: record.id,
-      name: record.name,
-      run: number,
-      due_at: due.due_at,
-      by: due.by,
-      ...(due.late ? { late: true as const } : {}),
-      ...(due.missed_before > 0 ? { missed_before: due.missed_before } : {}),
-    };
-    const previous = dividersOf(record).at(-1);
-    const target = ("project_id" in record.folder ? { agent: record.agent, project_id: record.folder.project_id } : { agent: record.agent, scratch: true }) as InboxLaunchTarget;
-    if (record.model || record.effort) target.choice = { ...(record.model ? { model: record.model } : {}), ...(record.effort ? { effort: record.effort } : {}) };
-    let prepared: Awaited<ReturnType<InboxLaunch["prepare"]>>;
-    try {
-      if (!deps.launchOn()) throw new InboxError("launch_off", "Starting agents from the Inbox is off. Turn it on in Settings → Agents.");
-      prepared = await launch.prepare(target, { name: record.name, body, resolveProject: deps.resolveProject });
-    } catch (error) {
-      // Didn't start: the divider says why, where there is a thread or a project to put it in.
-      const project = record.thread_id ? store.message(record.thread_id)?.project_id : "project_id" in record.folder ? record.folder.project_id : null;
-      const why = error instanceof Error ? error.message : String(error);
-      log(`Inbox scheduled ${record.id}: run ${number} did not start (${error instanceof InboxError ? error.code : "error"})`);
-      if (!project || !store.project(project)) return record;
-      const { message } = store.writeScheduledLine({ project_id: project, thread_id: record.thread_id, name: record.name, body, key, scheduled_run: { ...run, failed: why } });
-      return save(store.scheduledThread(record.id) ?? record, { thread_id: message.thread_id });
-    }
-    let attachments: InboxAttachment[] = [];
-    try {
-      attachments = record.attachments.length > 0 ? await deps.recordAttachments(record.attachments, prepared.project, prepared.project.root) : [];
-    } catch (error) {
-      log(`Inbox scheduled ${record.id}: an attachment was left out (${error instanceof InboxError ? error.code : "error"})`);
-    }
-    const { message, replayed } = store.writeScheduledLine({
-      project_id: prepared.project.id,
-      thread_id: record.thread_id,
-      name: record.name,
-      body,
-      key,
-      scheduled_run: run,
-      to: prepared.to,
-      launch: prepared.launch,
-      attachments,
-    });
-    if (replayed) launch.abandon(prepared.launch, prepared.project);
-    else launch.begin(message);
-    // The previous run's session, idle, is let go of (a reply to it still says that run ended).
-    if (previous?.launch && !replayed && launch.runOfMessage(previous.id) === null) void launch.stopMessage(previous.id).catch(() => {});
-    const current = store.scheduledThread(record.id) ?? record;
-    return save(current, { thread_id: message.thread_id, ...("scratch" in current.folder ? { folder: { project_id: prepared.project.id } } : {}) });
+  const projectOf = (record: InboxScheduledThread): string | null => {
+    const project = record.thread_id ? store.message(record.thread_id)?.project_id : "project_id" in record.folder ? record.folder.project_id : null;
+    return project && store.project(project) ? project : null;
   };
 
-  const writeSkip = (record: InboxScheduledThread, skipped: NonNullable<InboxScheduledRun["skipped"]>): InboxScheduledThread => {
-    const project = record.thread_id ? store.message(record.thread_id)?.project_id : "project_id" in record.folder ? record.folder.project_id : null;
-    // A scratch one with no run yet has no thread to say it in: the skip is only counted.
-    if (!project || !store.project(project) || !record.schedule) return record;
+  /**
+   * One run: its divider in the thread, then the launch. A run key answers the same divider again after a restart.
+   * One start at a time per scheduled thread (`starting`); its number, thread and prompt are read after the launch is
+   * ready. A run that didn't start is a divider that says why, or, with no thread or project to put it in, the error.
+   */
+  const startRun = async (id: string, due: { due_at: string; late: boolean; missed_before: number; by: InboxScheduledRun["by"] }): Promise<InboxMessage> => {
+    if (starting.has(id)) throw new InboxError("scheduled_running", `${found(id).name} is running now.`);
+    starting.add(id);
+    try {
+      const first = found(id);
+      const bodyOf = (record: InboxScheduledThread) =>
+        `${record.prompt}${due.late && record.schedule ? `\n\n${inboxScheduledLateLine(new Date(due.due_at), new Date(now()), record.schedule.tz)}` : ""}`;
+      const runOf = (record: InboxScheduledThread): InboxScheduledRun => ({
+        scheduled_id: record.id,
+        name: record.name,
+        run: (lastDividerOf(record)?.scheduled_run?.run ?? 0) + 1,
+        due_at: due.due_at,
+        by: due.by,
+        ...(due.late ? { late: true as const } : {}),
+        ...(due.missed_before > 0 ? { missed_before: due.missed_before } : {}),
+      });
+      const key = `sch:${id}:${due.due_at}`;
+      const where = first.folder;
+      const target = ("project_id" in where ? { agent: first.agent, project_id: where.project_id } : "path" in where ? { agent: first.agent, folder: where.path } : { agent: first.agent, scratch: true }) as InboxLaunchTarget;
+      if (first.model || first.effort) target.choice = { ...(first.model ? { model: first.model } : {}), ...(first.effort ? { effort: first.effort } : {}) };
+      let prepared: Awaited<ReturnType<InboxLaunch["prepare"]>>;
+      try {
+        if (!deps.launchOn()) throw new InboxError("launch_off", "Starting agents from the Inbox is off. Turn it on in Settings → Agents.");
+        prepared = await launch.prepare(target, { name: first.name, body: bodyOf(first), resolveProject: deps.resolveProject });
+      } catch (error) {
+        const record = found(id);
+        const project = projectOf(record);
+        const run = runOf(record);
+        log(`Inbox scheduled ${id}: run ${run.run} did not start (${error instanceof InboxError ? error.code : "error"})`);
+        if (!project) throw error;
+        const why = error instanceof Error ? error.message : String(error);
+        const { message } = store.writeScheduledLine({ project_id: project, thread_id: record.thread_id, name: record.name, body: bodyOf(record), key, scheduled_run: { ...run, failed: why } });
+        if (record.thread_id !== message.thread_id) save(record, { thread_id: message.thread_id });
+        return message;
+      }
+      const record = found(id);
+      let attachments: InboxAttachment[] = [];
+      try {
+        attachments = record.attachments.length > 0 ? await deps.recordAttachments(record.attachments, prepared.project, prepared.project.root) : [];
+      } catch (error) {
+        log(`Inbox scheduled ${id}: an attachment was left out (${error instanceof InboxError ? error.code : "error"})`);
+      }
+      const current = found(id);
+      const previous = current.thread_id ? (store.scheduledRunOf(current.thread_id) ?? store.message(current.thread_id)) : null;
+      const { message, replayed } = store.writeScheduledLine({
+        project_id: prepared.project.id,
+        thread_id: current.thread_id,
+        name: current.name,
+        body: bodyOf(current),
+        key,
+        scheduled_run: runOf(current),
+        to: prepared.to,
+        launch: prepared.launch,
+        attachments,
+      });
+      if (replayed) launch.abandon(prepared.launch, prepared.project);
+      else launch.begin(message);
+      // The previous run's session, idle, is let go of (a reply to it still says that run ended).
+      if (previous?.launch && !replayed && launch.runOfMessage(previous.id) === null) void launch.stopMessage(previous.id).catch(() => {});
+      if (current.thread_id !== message.thread_id || "scratch" in current.folder) {
+        save(current, { thread_id: message.thread_id, ...("scratch" in current.folder ? { folder: { project_id: prepared.project.id } } : {}) });
+      }
+      return message;
+    } finally {
+      starting.delete(id);
+    }
+  };
+
+  /** A skip line: a note in the thread, delivered to no session. A scratch one with no run yet has no thread: false. */
+  const writeSkip = (record: InboxScheduledThread, skipped: NonNullable<InboxScheduledRun["skipped"]>): boolean => {
+    const project = projectOf(record);
+    if (!project || !record.schedule) return false;
     const tz = record.schedule.tz;
     const reason = { asleep: "this computer was asleep", not_running: "the Inbox wasn't running", still_running: "the last run was still going", missed: "the next run was less than 15 minutes away" }[skipped.reason];
-    const when = skipped.count === 1 ? inboxScheduledWhen(new Date(skipped.to), tz) : `${skipped.count} times, ${inboxScheduledWhen(new Date(skipped.from), tz)} to ${inboxScheduledWhen(new Date(skipped.to), tz)}`;
-    const body = `Skipped ${when} · ${reason}`;
+    const when = skipped.count === 1 ? inboxScheduledWhen(new Date(skipped.to), tz) : `${inboxScheduledTimes(skipped.count)}, ${inboxScheduledWhen(new Date(skipped.from), tz)} to ${inboxScheduledWhen(new Date(skipped.to), tz)}`;
     const { message } = store.writeScheduledLine({
       project_id: project,
       thread_id: record.thread_id,
       name: record.name,
-      body,
+      body: `Skipped ${when} · ${reason}`,
       key: `sch:${record.id}:skip:${skipped.to}`,
       scheduled_run: { scheduled_id: record.id, name: record.name, due_at: skipped.to, by: "schedule", skipped },
     });
-    return save(record, { thread_id: message.thread_id });
+    if (record.thread_id !== message.thread_id) save(record, { thread_id: message.thread_id });
+    return true;
   };
 
   // ── The clock ──
 
   let lastCheck: number | null = null;
   let checking = false;
+  /**
+   * One check: for each scheduled thread that is on and approved, at most one run or one skip line. The record is
+   * written only when no line says where the clock got to (a one-time one done, a run with nowhere to say it failed).
+   */
   const check = async (): Promise<void> => {
     if (checking) return;
     const at = now();
@@ -325,17 +370,21 @@ export function createInboxScheduled(deps: {
     try {
       for (const record of store.scheduledThreads()) {
         if (!record.enabled || record.done_at || !record.approved_at || !record.schedule) continue;
-        const decision = inboxScheduledDecide({ schedule: record.schedule, if_missed: record.if_missed, handled_through: record.handled_through, now: new Date(at), why, running: runningOf(record) !== null });
+        const running = starting.has(record.id) || runningOf(record) !== null;
+        const decision = inboxScheduledDecide({ schedule: record.schedule, if_missed: record.if_missed, handled_through: handledThrough(record), now: new Date(at), why, running });
         if (decision.kind === "wait") continue;
         try {
-          let after = decision.kind === "run" ? await startRun(record, { ...decision, by: "schedule" }) : writeSkip(record, decision);
-          after = store.scheduledThread(record.id) ?? after;
-          const once = "at" in record.schedule;
-          save(after, { handled_through: decision.handled_through, ...(once ? { done_at: iso(), enabled: false } : {}) });
+          if (decision.kind === "run") await startRun(record.id, { ...decision, by: "schedule" });
+          else writeSkip(record, decision);
         } catch (error) {
           // The code only: a message can name a folder.
           log(`Inbox scheduled ${record.id}: ${error instanceof InboxError ? error.code : error instanceof Error ? error.name : "error"}`);
         }
+        const after = store.scheduledThread(record.id);
+        if (!after) continue;
+        const once = "at" in record.schedule;
+        const behind = (handledThrough(after) ?? "") < decision.handled_through;
+        if (once || behind) save(after, { ...(behind ? { handled_through: decision.handled_through } : {}), ...(once ? { done_at: iso(), enabled: false } : {}) });
       }
     } finally {
       checking = false;
@@ -392,17 +441,18 @@ export function createInboxScheduled(deps: {
       const fields = await fieldsOf(input, false);
       const changed = (Object.keys(fields) as (keyof InboxScheduledThread)[]).filter((key) => JSON.stringify(fields[key] ?? null) !== JSON.stringify(before[key] ?? null));
       if (changed.length === 0) return { record: before, told: null };
-      // An agent that moves the folder hands the switch back to the person.
-      const moved = by.kind === "agent" && changed.includes("folder");
+      // An agent that changes where it works or which agent runs it hands the switch back to the person.
+      const moved = by.kind === "agent" && (changed.includes("folder") || changed.includes("agent"));
       const patch: Partial<InboxScheduledThread> = { ...fields, ...(moved ? { enabled: false, approved_at: null } : {}) };
       // A new schedule counts from now: nothing it would have run before is caught up.
       if (changed.includes("schedule") && before.enabled) patch.handled_through = iso();
       if (changed.includes("schedule")) patch.done_at = undefined;
       const record = save(before, patch);
-      const told = tell(by, record, `Changed the scheduled thread ${linkOf(record)}.\n\n${changeLines(before, record, changed)}`, {
+      const turnedOff = moved && (before.enabled || before.approved_at !== null);
+      const told = tell(by, record, `Changed the scheduled thread ${linkOf(record)}.\n\n${changeLines(before, record, changed, turnedOff)}`, {
         op: "update",
         fields: changed as InboxScheduledChange["fields"],
-        ...(moved ? { turned_off: true as const } : {}),
+        ...(turnedOff ? { turned_off: true as const } : {}),
       });
       return { record, told };
     },
@@ -419,12 +469,19 @@ export function createInboxScheduled(deps: {
       return { record, told };
     },
 
-    async runNow(id: string, by: InboxScheduledBy): Promise<InboxScheduledThread> {
+    /** Run now: the run's divider (its `scheduled_run.failed` says why when it didn't start). */
+    async runNow(id: string, by: InboxScheduledBy): Promise<{ message: InboxMessage; told: string | null }> {
       const record = found(id);
       if (by.kind === "agent" && !record.approved_at) throw new InboxError("scheduled_not_approved", `The person turns ${record.name} on the first time, in the Inbox. Nothing was run.`);
       if (runningOf(record)) throw new InboxError("scheduled_running", `${record.name} is running now.`);
       if (!deps.launchOn()) throw new InboxError("launch_off", "Starting agents from the Inbox is off. Turn it on in Settings → Agents.");
-      return startRun(record, { due_at: iso(), late: false, missed_before: 0, by: by.kind });
+      const message = await startRun(id, { due_at: iso(), late: false, missed_before: 0, by: by.kind });
+      const n = message.scheduled_run!.run;
+      const after = found(id);
+      const told = message.scheduled_run!.failed
+        ? tell(by, after, `Run ${n} of the scheduled thread ${linkOf(after)} didn't start. Its thread says why.`, { op: "run" })
+        : tell(by, after, `Started run ${n} of the scheduled thread ${linkOf(after)}.`, { op: "run" });
+      return { message, told };
     },
 
     async stopRun(id: string): Promise<InboxScheduledThread> {
@@ -454,18 +511,19 @@ export function createInboxScheduled(deps: {
      */
     checkReply(messageId: string, picked: unknown): void {
       const message = store.message(messageId);
-      if (!message || picked !== undefined) return;
+      const root = message ? store.message(message.thread_id) : null;
+      if (!message || !root?.scheduled_run || picked !== undefined) return;
       const session = message.author.kind === "agent" ? message.author.session : message.author.kind === "person" ? message.to?.session : null;
-      if (!session) return;
-      const runs = store.threadMessageIds(message.thread_id).flatMap((id) => {
+      const newest = store.scheduledRunOf(root.id) ?? (root.launch ? root : null);
+      if (!session || !newest || newest.to?.session === session) return;
+      const mine = store.threadMessageIds(root.id).find((id) => {
         const m = store.message(id);
-        return m?.scheduled_run?.run !== undefined && m.launch ? [m] : [];
+        return m?.scheduled_run?.run !== undefined && m.launch && m.to?.session === session;
       });
-      const mine = runs.find((m) => m.to?.session === session);
-      if (!mine || mine === runs.at(-1)) return;
+      if (!mine) return;
       throw new InboxError(
         "scheduled_run_ended",
-        `Run ${mine.scheduled_run!.run} has ended, so your reply was not sent. Reply to the latest run (Run ${runs.at(-1)!.scheduled_run!.run}) instead.`,
+        `Run ${store.message(mine)!.scheduled_run!.run} has ended, so your reply was not sent. Reply to the latest run (Run ${newest.scheduled_run!.run}) instead.`,
       );
     },
 

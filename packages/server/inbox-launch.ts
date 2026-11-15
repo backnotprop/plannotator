@@ -89,7 +89,7 @@ import { readLastLaunchChoice, withinLaunchWait, writeLastLaunchChoice } from ".
 import { claudeSettingsFilePath, readClaudeSettingsFile } from "./inbox-launch-claude-settings-file";
 import { accessSync, appendFileSync, constants as fsConstants, existsSync, lstatSync, mkdirSync, readdirSync, realpathSync, rmdirSync, rmSync, statSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
-import { inboxId, isInboxNote, type InboxComposeLaunch, type InboxLaunchAgent, type InboxLaunchFrom, type InboxLaunchRecord, type InboxLaunchTrust, type InboxLaunchUntrusted, type InboxListRow, type InboxMessage, type InboxProject, type InboxRun } from "@plannotator/core/inbox-types";
+import { inboxId, type InboxComposeLaunch, type InboxLaunchAgent, type InboxLaunchFrom, type InboxLaunchRecord, type InboxLaunchTrust, type InboxLaunchUntrusted, type InboxListRow, type InboxMessage, type InboxProject, type InboxRun } from "@plannotator/core/inbox-types";
 import { inboxLaunchedSession, inboxRunOf, INBOX_RUN_START_GRACE_MS, type InboxRunHostState } from "@plannotator/core/inbox-run-line";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { derivePersonThreadSubject } from "@plannotator/core/inbox-questions";
@@ -496,10 +496,7 @@ export function createInboxLaunch(options: {
   /** Every launch: each launched root, and each scheduled run's divider (one launch per run, many in that one thread). */
   const roots = () => [...store.launchedRoots(), ...store.scheduledRunLaunches()];
   /** The launch a thread's run line, row and reply follow: a scheduled thread's newest run, else the thread's root. */
-  const threadLaunch = (threadId: string): InboxMessage | undefined => {
-    const runs = store.scheduledRunLaunches().filter((m) => m.thread_id === threadId);
-    return runs.length > 0 ? runs.reduce((a, b) => ((store.messageCursor(b.id) ?? 0) > (store.messageCursor(a.id) ?? 0) ? b : a)) : store.message(threadId) ?? undefined;
-  };
+  const threadLaunch = (threadId: string): InboxMessage | undefined => store.scheduledRunOf(threadId) ?? store.message(threadId) ?? undefined;
   const states = new Map<LaunchHost, HostState>();
   const stateOf = (host: LaunchHost): HostState => states.get(host)!;
   /** The host's last word on a session (its cached `sessions`), or null when not read. */
@@ -613,8 +610,8 @@ export function createInboxLaunch(options: {
     if (memo.busySeen) return false;
     const lastId = store.threadMessageIds(root.thread_id).at(-1);
     const last = lastId ? store.message(lastId) : null;
-    // The person's latest, unless it went to another session (re-addressed) or is the Inbox's own note.
-    return last?.author.kind === "person" && !isInboxNote(last) && (!last.to || last.to.session === root.to?.session);
+    // The person's latest, unless it went to another session (re-addressed), or is a scheduled thread's skip line or a run that didn't start.
+    return last?.author.kind === "person" && (!last.to || last.to.session === root.to?.session) && !(last.scheduled_run && !last.to);
   };
 
   /** The root of a launched thread whose launch started this session, the launch not deleted (the switch off too: it governs new starts only). */
@@ -2020,6 +2017,17 @@ ${result.text}`);
     /** Whether `agent` can start here now (its host's own check, the 30 s answer New message uses); null for no such host. */
     availableFor(agent: string): Promise<LaunchAvailability> | null {
       return Object.hasOwn(hosts, agent) ? available(hosts[agent]!) : null;
+    },
+
+    /** A folder a scheduled thread runs in, by a typed folder's rules (home, `/` and hidden folders refused): its real path. */
+    async startFolder(typed: string): Promise<string> {
+      const read = await resolveFolderAnywhere(typed);
+      if (!read.ok) throw new InboxError("folder_unavailable", `${read.slow} isn't responding.`, { field: "folder" });
+      const folder = read.value;
+      if (!folder.ok) throw new InboxError("validation_error", folderRefusalMessage(folder.refused).replace(" Nothing was sent.", ""), { field: "folder" });
+      if (folder.state === "folder" && !folder.start) throw new InboxError("validation_error", noStartMessage(folder.real && isHomeItself(options.homeDir, folder.real) ? "~" : folder.shown).replace(" Nothing was sent.", ""), { field: "folder" });
+      if (folder.state !== "folder" || !folder.real) throw new InboxError("folder_missing", `${folder.shown} isn't there.`, { field: "folder" });
+      return folder.real;
     },
 
     /** A scheduled run's line, from its divider's own launch (null: no line, or no host for its agent). */

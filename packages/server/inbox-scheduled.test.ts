@@ -3,18 +3,20 @@
  * clock. What each test guards: a run is a launch of its own inside the one thread, its divider carrying the prompt
  * (replied, then didn't finish); the previous idle run is let go of, the person's reply reaches the newest run, and a
  * reply to an earlier run is refused saying it ended; an ordinary launched thread keeps its one launch on its root;
- * a restart mid-run never runs twice and says the right skip line; a sleep is one late run or one skip line, never a
- * pile of runs; nothing runs while the switch is off.
+ * the store read back from disk after a restart keeps every scheduled thread and never runs one twice; a skip line is
+ * delivered to no session, so it never wakes or restarts a run; a sleep is one late run or one skip line, never a pile
+ * of runs; two starts at once are one run; an agent can neither turn one on first nor run it before the person did,
+ * and the clock never runs one the person has not turned on; a folder runs as it is; nothing runs while off.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import type { InboxMessage } from "@plannotator/core/inbox-types";
 import { FAKE, fakeLaunchHost } from "../../tests/helpers/fake-launch-host";
 import { createInboxLaunch } from "./inbox-launch";
-import { createInboxScheduled } from "./inbox-scheduled";
+import { createInboxScheduled, type InboxScheduledBy } from "./inbox-scheduled";
 
 const NY = "America/New_York";
 const restore: (() => void)[] = [];
@@ -47,9 +49,11 @@ function world(start = "2026-11-16T13:59:00.000Z") {
   setEnv("PLANNOTATOR_TEST_SANDBOX", "1");
   writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxLaunch: { enabled: true } }));
   const clock = { now: Date.parse(start) };
-  const store = InboxStore.open(dataDir, { now: () => new Date(clock.now) });
+  const open = () => InboxStore.open(dataDir, { now: () => new Date(clock.now) });
+  let store = open();
   const project = store.ensureProject({ name: "project", root: folder });
   const fake = fakeLaunchHost();
+  const other = { ...fakeLaunchHost().host, agent: "fake-two" as typeof FAKE };
   const switches = { on: true };
   const engine = () => {
     const made = createInboxLaunch({
@@ -67,7 +71,7 @@ function world(start = "2026-11-16T13:59:00.000Z") {
       json: (body, status = 200) => Response.json(body, { status }),
       onChange: () => {},
       selfCommand: ["plannotator"],
-      hosts: () => [fake.host],
+      hosts: () => [fake.host, other],
       now: () => clock.now,
     });
     restore.push(() => made.stop());
@@ -76,7 +80,7 @@ function world(start = "2026-11-16T13:59:00.000Z") {
       launch: made,
       on: () => switches.on,
       launchOn: () => made.settingsState().enabled,
-      resolveProject: async () => project,
+      resolveProject: async () => store.project(project.id)!,
       recordAttachments: async () => [],
       displayFolder: (path) => path,
       now: () => clock.now,
@@ -108,7 +112,10 @@ function world(start = "2026-11-16T13:59:00.000Z") {
     return session;
   };
   return {
-    store,
+    get store() {
+      return store;
+    },
+    home,
     clock,
     project,
     fake,
@@ -123,9 +130,11 @@ function world(start = "2026-11-16T13:59:00.000Z") {
     get launch() {
       return current.launch;
     },
+    /** The Inbox again: the store read back from disk, a new engine and clock. */
     restart: () => {
       current.scheduled.stop();
       current.launch.stop();
+      store = open();
       current = engine();
     },
   };
@@ -184,17 +193,20 @@ describe("a run is a launch of its own in the one thread", () => {
 });
 
 describe("the clock", () => {
-  test("a restart mid-run never runs it twice, and a due time it was down for is the right skip line", async () => {
+  test("a restart reads every scheduled thread back from disk and never runs one twice; a skip line wakes no run", async () => {
     const w = world();
     const { record } = await w.make();
     const { record: skipper } = await w.make({ name: "Standup notes", if_missed: "skip" });
     w.at("2026-11-16T14:00:10.000Z");
     await w.scheduled.check();
     const thread = w.store.scheduledThread(record.id)!.thread_id;
-    for (const id of [record.id, skipper.id]) await w.settle(w.dividers(w.store.scheduledThread(id)!.thread_id)[0]!, "Done.");
-    // Down after the divider was written and before the record moved on: the restart answers the same run.
-    w.store.putScheduledThread({ ...w.store.scheduledThread(record.id)!, handled_through: "2026-11-15T14:00:00.000Z" });
+    const sessions: string[] = [];
+    for (const id of [record.id, skipper.id]) sessions.push(await w.settle(w.dividers(w.store.scheduledThread(id)!.thread_id)[0]!, "Done."));
     w.restart();
+    expect(w.store.scheduledThreads().map((r) => [r.id, r.enabled, !!r.approved_at])).toEqual([
+      [record.id, true, true],
+      [skipper.id, true, true],
+    ]);
     w.at("2026-11-16T14:00:40.000Z");
     await w.scheduled.check();
     expect(w.dividers(thread)).toHaveLength(1);
@@ -208,6 +220,10 @@ describe("the clock", () => {
     expect(line.body).toBe("Skipped Tue 9:00 AM · the Inbox wasn't running");
     expect(line.scheduled_run).toMatchObject({ skipped: { count: 1, reason: "not_running" } });
     expect(line.launch).toBeUndefined();
+    // Run 1's session, idle, is not handed the skip line, and is not started again for it.
+    await Bun.sleep(20);
+    expect(w.store.pendingReplies(sessions[1]!).map((m) => m.id)).not.toContain(line.id);
+    expect(w.fake.calls.filter((c) => c.startsWith("resume"))).toEqual([]);
   });
 
   test("a sleep over five hourly runs is one late run, or one skip line", async () => {
@@ -248,5 +264,87 @@ describe("the clock", () => {
     w.scheduled.switchedOn();
     await w.scheduled.check();
     expect(w.store.scheduledThread(record.id)!.thread_id).toBeNull();
+  });
+});
+
+describe("one run at a time", () => {
+  test("two Run now presses at once, or Run now as the clock fires, are one run in one thread", async () => {
+    const w = world();
+    const { record } = await w.make({ schedule: null });
+    const presses = await Promise.allSettled([w.scheduled.runNow(record.id, { kind: "person" }), w.scheduled.runNow(record.id, { kind: "person" })]);
+    expect(presses.map((p) => p.status).sort()).toEqual(["fulfilled", "rejected"]);
+    expect((presses.find((p) => p.status === "rejected") as PromiseRejectedResult).reason.code).toBe("scheduled_running");
+
+    const { record: daily } = await w.make({ name: "Standup notes" });
+    w.at("2026-11-16T14:00:10.000Z");
+    const both = await Promise.allSettled([w.scheduled.check(), w.scheduled.runNow(daily.id, { kind: "person" })]);
+    expect(both.map((p) => p.status)).toEqual(["fulfilled", "rejected"]);
+    for (const id of [record.id, daily.id]) expect(w.dividers(w.store.scheduledThread(id)!.thread_id).map((m) => m.scheduled_run!.run)).toEqual([1]);
+    expect(w.fake.calls.filter((c) => c.startsWith("start"))).toHaveLength(2);
+  });
+
+  test("a due time while a run works is a skip line that run never gets", async () => {
+    const w = world();
+    const { record } = await w.make({ if_missed: "skip" });
+    w.at("2026-11-16T13:59:30.000Z");
+    const { message: divider } = await w.scheduled.runNow(record.id, { kind: "person" });
+    await until(() => !!w.store.message(divider.id)!.launch!.session_ref);
+    const session = w.store.message(divider.id)!.to!.session;
+    w.fake.poll(session, true, w.clock.now);
+    w.store.recordDelivery(divider.id, { host: FAKE, session });
+    w.at("2026-11-16T14:00:10.000Z");
+    await w.scheduled.check();
+    const skip = w.dividers(divider.thread_id).at(-1)!;
+    expect(skip.body).toBe("Skipped Mon 9:00 AM · the last run was still going");
+    expect(w.store.pendingReplies(session).map((m) => m.id)).not.toContain(skip.id);
+  });
+});
+
+describe("the person turns it on first", () => {
+  const agent = (thread_id: string | null = null): InboxScheduledBy => ({ kind: "agent", host: FAKE, session: "s-maya", name: "Fake Agent", thread_id });
+
+  test("an agent's on or run before that is refused with nothing written; the clock never runs one not turned on", async () => {
+    const w = world();
+    const { record } = await w.scheduled.create({ name: "Morning triage", prompt: "Triage.", schedule: { cron: "0 9 * * *", tz: NY }, folder: { project_id: w.project.id }, agent: FAKE }, agent());
+    expect(record).toMatchObject({ enabled: false, approved_at: null });
+    expect(() => w.scheduled.setOn(record.id, true, agent())).toThrow("The person turns Morning triage on the first time");
+    await expect(w.scheduled.runNow(record.id, agent())).rejects.toMatchObject({ code: "scheduled_not_approved" });
+    expect(w.store.scheduledThread(record.id)).toEqual(record);
+    // On, but never by the person (a record written by hand): the clock passes it by.
+    w.store.putScheduledThread({ ...record, enabled: true, handled_through: "2026-11-16T13:00:00.000Z" });
+    w.at("2026-11-16T14:00:10.000Z");
+    await w.scheduled.check();
+    expect(w.store.scheduledThread(record.id)!.thread_id).toBeNull();
+    expect(w.fake.calls).toEqual([]);
+  });
+
+  test("after it, an agent may run it; changing its folder or its agent turns it off and asks the person again", async () => {
+    const w = world();
+    const { record } = await w.make();
+    const { message } = await w.scheduled.runNow(record.id, agent());
+    expect(message.scheduled_run).toMatchObject({ run: 1, by: "agent" });
+    for (const change of [{ agent: "fake-two" }, { folder: { path: w.home + "/code" } }]) {
+      mkdirSync(join(w.home, "code"), { recursive: true });
+      w.scheduled.setOn(record.id, true, { kind: "person" });
+      const { record: after } = await w.scheduled.update(record.id, change, agent());
+      expect(after).toMatchObject({ enabled: false, approved_at: null });
+      await expect(w.scheduled.runNow(record.id, agent())).rejects.toMatchObject({ code: "scheduled_not_approved" });
+    }
+    // A prompt edit applies at once and leaves it on.
+    w.scheduled.setOn(record.id, true, { kind: "person" });
+    expect((await w.scheduled.update(record.id, { prompt: "Triage, then label." }, agent())).record).toMatchObject({ enabled: true, prompt: "Triage, then label." });
+  });
+});
+
+describe("the folder", () => {
+  test("a folder by its path runs there, not at its project's root; home is refused", async () => {
+    const w = world();
+    const sub = join(w.home, "code", "api", "packages", "web");
+    mkdirSync(sub, { recursive: true });
+    const { record } = await w.make({ folder: { path: sub } });
+    expect(record.folder).toEqual({ path: realpathSync(sub) });
+    const { message } = await w.scheduled.runNow(record.id, { kind: "person" });
+    expect(message.launch?.folder).toBe(realpathSync(sub));
+    await expect(w.make({ folder: { path: w.home } })).rejects.toThrow("Pick a folder inside the home folder.");
   });
 });

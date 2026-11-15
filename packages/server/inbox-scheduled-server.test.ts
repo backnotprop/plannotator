@@ -33,13 +33,15 @@ async function world() {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-scheduled-server-")));
   restore.push(() => rmSync(root, { recursive: true, force: true }));
   const dataDir = join(root, "data");
-  const folder = join(root, "acme-api");
-  const other = join(root, "acme-web");
+  // The sandboxed Inbox's launcher reads this as home.
+  const home = join(dataDir, "agents-home");
+  const folder = join(home, "acme-api");
+  const other = join(home, "acme-web");
   for (const dir of [dataDir, folder, other]) mkdirSync(dir, { recursive: true });
   writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxLaunch: { enabled: true } }));
   setEnv("PLANNOTATOR_DATA_DIR", dataDir);
   setEnv("PLANNOTATOR_TEST_SANDBOX", dataDir);
-  setEnv("HOME", join(root, "home"));
+  setEnv("HOME", home);
   setEnv("PLANNOTATOR_INBOX_TAILSCALE", undefined);
   setEnv("PLANNOTATOR_RELAY_URL", "http://127.0.0.1:9");
   const fake = fakeLaunchHost();
@@ -165,7 +167,7 @@ describe("agents", () => {
 
     await w.call({ op: "update", id, folder: { path: w.other }, thread_id: w.thread });
     const moved = w.lines().at(-1)!;
-    expect(moved.body).toContain(`It now works in ${w.other} (was ${w.folder}). It is off until you turn it on again.`);
+    expect(moved.body).toEndWith("It now works in ~/acme-web (was ~/acme-api).\n\nIt is off until you turn it on again.");
     expect(moved.scheduled_change).toMatchObject({ fields: ["folder"], turned_off: true });
     expect(w.server.store.scheduledThread(id)).toMatchObject({ enabled: false, approved_at: null });
     expect((await w.call({ op: "on", id })).content[0]!.text).toStartWith("scheduled_not_approved:");

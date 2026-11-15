@@ -16,7 +16,7 @@ import { guarded, okComplete, PROJECT_PATH_DESCRIPTION } from "./inbox-mcp-resul
 export const SCHEDULED_THREAD_OPS = ["create", "list", "get", "update", "on", "off", "run", "delete"] as const;
 
 export const SCHEDULED_THREAD_DESCRIPTION =
-  "Scheduled threads: a saved prompt an agent on this computer runs on a schedule, every run replying in one Inbox thread. Make one when the person asks for something to happen regularly or at a set time. op: create, list, get, update, on, off, run, delete. One you create arrives off: the person turns it on the first time, in the Inbox; after that you may update, turn it on or off, run and delete it. Runs are at least 15 minutes apart. Pass thread_id: each change posts one line there for the person.";
+  "Scheduled threads: a saved prompt an agent on this computer runs on a schedule, every run replying in one Inbox thread. Make one when the person asks for something to happen regularly or at a set time. op: create, list, get, update, on, off, run, delete. One you create arrives off: the person turns it on the first time, in the Inbox; after that you may update, turn it on or off, run and delete it. Changing its folder or its agent turns it off again until the person turns it back on. A schedule's runs are at least 15 minutes apart. Pass thread_id: each change posts one line there for the person.";
 
 export interface InboxScheduledMcpContext {
   /** Whether the person has scheduled threads on, read on every request. Absent: off. */
@@ -50,7 +50,7 @@ export function registerInboxScheduledTool(server: McpServer, context: InboxSche
             .object({ path: z.string().optional(), scratch: z.literal(true).optional() })
             .strict()
             .optional()
-            .describe("Where runs work: { path } (default: your project_path), or { scratch: true } for a new folder."),
+            .describe("Where runs work: { path }, that folder itself (default: your project_path; never home, / or a hidden folder), or { scratch: true } for a new folder."),
           agent: z.string().optional().describe("claude-code, codex, opencode or pi. Default: your own host."),
           model: z.string().optional(),
           effort: z.string().optional(),
@@ -90,7 +90,8 @@ export function registerInboxScheduledTool(server: McpServer, context: InboxSche
         switch (input.op) {
           case "get": {
             const { scheduled: row, runs } = scheduled.get(input.id);
-            const lines = runs.map((run) => `Run ${run.run}: ${run.started_at}, ${run.outcome.replace("_", " ")}${run.late ? ", late" : ""} (${run.message_id}).`);
+            const words = { running: "running", replied: "replied", didnt_finish: "didn't finish", didnt_start: "didn't start" };
+            const lines = runs.map((run) => `Run ${run.run}: ${run.started_at}, ${words[run.outcome]}${run.late ? ", late" : ""} (${run.message_id}).`);
             return okComplete([rowLine(row), `Prompt: ${JSON.stringify(row.prompt)}`, ...lines].join("\n"), { scheduled: row, runs });
           }
           case "update": {
@@ -105,10 +106,11 @@ export function registerInboxScheduledTool(server: McpServer, context: InboxSche
             return okComplete(`${rowLine(scheduled.rowOf(record))}${told(line)}`, { scheduled: scheduled.rowOf(record) });
           }
           case "run": {
-            const record = await scheduled.runNow(input.id, by);
-            const row = scheduled.rowOf(record);
-            const started = row.last_run?.outcome !== "didnt_start";
-            return okComplete(`${started ? "Started" : "Could not start"} run ${row.runs} of ${rowLine(row)}${started ? "" : " The thread says why."}`, { scheduled: row });
+            const { message, told: line } = await scheduled.runNow(input.id, by);
+            const row = scheduled.get(input.id).scheduled;
+            const run = message.scheduled_run!;
+            const said = run.failed ? `Run ${run.run} did not start: ${run.failed} ${rowLine(row)}` : `Started run ${run.run} of ${rowLine(row)}`;
+            return okComplete(`${said}${told(line)}`, { scheduled: row, message_id: message.id });
           }
           case "delete": {
             const { told: line } = scheduled.remove(input.id, by);
