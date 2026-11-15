@@ -290,8 +290,11 @@ export function createInboxScheduled(deps: {
         prepared = await launch.prepare(target, { name: first.name, body: bodyOf(first), resolveProject: deps.resolveProject });
       } catch (error) {
         const record = found(id);
-        // A folder by its path that never ran yet: its thread goes in that folder's project, so the person sees why.
-        const project = projectOf(record) ?? ("path" in record.folder ? ((await deps.resolveProject(record.folder.path).catch(() => null))?.id ?? null) : null);
+        // A folder by its path that never ran yet: its thread goes in that folder's project, or, with the folder gone, the
+        // project of the thread an agent made it from, so the person sees why.
+        const madeIn = record.made_by?.thread_id ? (store.message(record.made_by.thread_id)?.project_id ?? null) : null;
+        const project =
+          projectOf(record) ?? ("path" in record.folder ? ((await deps.resolveProject(record.folder.path).catch(() => null))?.id ?? null) : null) ?? (madeIn && store.project(madeIn) ? madeIn : null);
         const run = runOf(record);
         log(`Inbox scheduled ${id}: run ${run.run} did not start (${error instanceof InboxError ? error.code : "error"})`);
         if (!project) throw error;

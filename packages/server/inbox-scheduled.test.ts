@@ -9,7 +9,7 @@
  * and the clock never runs one the person has not turned on; a folder runs as it is; nothing runs while off.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { InboxStore } from "@plannotator/shared/inbox/store";
@@ -17,6 +17,7 @@ import type { InboxMessage } from "@plannotator/core/inbox-types";
 import { FAKE, fakeLaunchHost } from "../../tests/helpers/fake-launch-host";
 import { createInboxLaunch } from "./inbox-launch";
 import { createInboxScheduled, type InboxScheduledBy } from "./inbox-scheduled";
+import { InboxError } from "@plannotator/shared/inbox/schema";
 
 const NY = "America/New_York";
 const restore: (() => void)[] = [];
@@ -80,7 +81,11 @@ function world(start = "2026-11-16T13:59:00.000Z") {
       launch: made,
       on: () => switches.on,
       launchOn: () => made.settingsState().enabled,
-      resolveProject: async () => store.project(project.id)!,
+      // As the real one: a folder that is not there has no project.
+      resolveProject: async (path) => {
+        if (!existsSync(path)) throw new InboxError("folder_missing", `${path} isn't there. Pick another folder. Nothing was sent.`);
+        return store.project(project.id)!;
+      },
       recordAttachments: async () => [],
       displayFolder: (path) => path,
       now: () => clock.now,
@@ -387,9 +392,13 @@ describe("the folder", () => {
     const w = world();
     const gone = join(w.home, "code", "gone");
     mkdirSync(gone, { recursive: true });
-    const { record } = await w.make({ folder: { path: gone } });
+    const calling = w.store.sendMessage({ project_id: w.project.id, author: { kind: "agent", host: FAKE, session: "s-maya", name: "Fake Agent" }, body: "Setting up a nightly check." }).message;
+    const by: InboxScheduledBy = { kind: "agent", host: FAKE, session: "s-maya", name: "Fake Agent", thread_id: calling.thread_id };
+    const { record } = await w.scheduled.create({ name: "Nightly check", prompt: "Check.", schedule: { cron: "0 3 * * *", tz: NY }, folder: { path: gone }, agent: FAKE }, by);
     rmSync(gone, { recursive: true });
+    // Its folder is gone, so no project comes from it: the line goes in the project of the thread the agent made it from.
     const { message } = await w.scheduled.runNow(record.id, { kind: "person" });
+    expect(message.project_id).toBe(w.project.id);
     expect(message.scheduled_run!.run).toBe(1);
     expect(message.scheduled_run!.failed).toMatch(/gone isn't there\. Pick another folder\.$/);
     expect(message.thread_id).toBe(message.id);
