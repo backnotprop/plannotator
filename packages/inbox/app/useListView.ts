@@ -6,7 +6,7 @@
 
 import { useCallback, useMemo } from 'react';
 import type { InboxListRow, InboxListSection, InboxThread } from '@plannotator/core/inbox-types';
-import { patchedRow, withPinPatches } from '../rowActions';
+import { patchedRow, withCombining, withPinPatches } from '../rowActions';
 import { filterMachineRows, machineCounts, machineProjectNames } from '../machines';
 import { appliedFilter, filterListSections, localDay, pickCount, useListFilter } from '../listFilter';
 import { filterSections, heldNews as heldNewsOf, heldNotice, listGroups, lookedRow, markHeldRowLooked, showLandsIn, waitingCount, type OpenThread } from '../held';
@@ -28,6 +28,8 @@ export interface ListViewInputs {
   thread: InboxThread | null;
   threadRow: InboxListRow | null;
   rowPatches: RowWrites['patches'];
+  /** Threads in a Combine still waiting for its new thread (useCombines.ts): their rows say "Combining…". */
+  combining?: ReadonlyMap<string, string>;
   pinPatches: RowWrites['pins'];
   looking: ReadonlySet<string>;
   shown: InboxListSection[] | null;
@@ -39,7 +41,7 @@ export interface ListViewInputs {
   tags: Omit<Parameters<typeof useThreadTagsHost>[0], 'routeTag' | 'machines' | 'windowRows' | 'latestSections' | 'tagColours'>;
 }
 
-export function useListShown({ latest, projects, route, thread, threadRow, rowPatches, pinPatches, looking, shown, machines, hideAway, openedHere, heldOpen, heldRead, tags }: ListViewInputs) {
+export function useListShown({ latest, projects, route, thread, threadRow, rowPatches, pinPatches, looking, shown, machines, hideAway, openedHere, heldOpen, heldRead, tags, combining }: ListViewInputs) {
   const latestSections = latest?.sections ?? [];
   // Every row the list knows, the Snoozed band's too: only counts read `latestSections`, which has none of those.
   const latestGroups = useMemo(() => (latest ? listGroups(latest) : []), [latest]);
@@ -55,7 +57,7 @@ export function useListShown({ latest, projects, route, thread, threadRow, rowPa
   // Its opening look on its way: read as looked at, as its row on the list is (`listShown`).
   const openThreadRow = listedOpenRow && looking.has(listedOpenRow.thread_id) ? lookedRow(listedOpenRow) : listedOpenRow;
   /** The list on screen as drawn: the held list, the row whose look is on its way read as looked at. */
-  const listShown = useMemo(() => (shown && looking.size > 0 ? markHeldRowLooked(shown, looking) : shown), [shown, looking]);
+  const listShown = useMemo(() => withCombining(shown && looking.size > 0 ? markHeldRowLooked(shown, looking) : shown, combining), [shown, looking, combining]);
   // Snoozes: an older Inbox sends no `snoozed`, so no Snooze anywhere. Pins' rule for another machine does not apply:
   // a snooze lives on the thread's home machine and goes there through the forward and the outbox, so a linked
   // machine's row offers it only when that machine keeps snoozes too (`rowSnoozes`).

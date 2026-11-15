@@ -80,7 +80,7 @@ for (const scheme of ['light', 'dark'] as const)
     await expect(group(page, 'priority')).toHaveCount(0);
 
     await row(page, world.ask).click({ button: 'right' });
-    await expect(menu(page).getByRole('menuitem').nth(1)).toHaveText('Add to Priority');
+    await expect(menu(page).getByRole('menuitem', { name: 'Add to Priority' })).toBeVisible();
     await page.screenshot({ path: join(shots, `desktop-${scheme}-menu.png`) });
     await menu(page).locator('[data-row-action="priority-add"]').click();
     await expect(group(page, 'priority').locator(`[data-thread-id="${world.ask}"]`)).toBeVisible();
@@ -100,7 +100,7 @@ for (const scheme of ['light', 'dark'] as const)
     await expect(group(page, 'priority').locator(`[data-thread-id="${world.ask}"]`)).toBeVisible();
     const first = (await priorityOnServer(page, world.ask))!.at;
     await row(page, world.ask).click({ button: 'right' });
-    await expect(menu(page).getByRole('menuitem').nth(1)).toHaveText('Remove from Priority');
+    await expect(menu(page).getByRole('menuitem', { name: 'Remove from Priority' })).toBeVisible();
     await menu(page).locator('[data-row-action="priority-remove"]').click();
     await expect(toast(page)).toContainText('Removed from Priority');
     await expect(toast(page)).toContainText('Back in Waiting on you');
