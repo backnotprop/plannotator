@@ -51,6 +51,7 @@ import {
   INBOX_ANTIGRAVITY_HOST,
   INBOX_ANTIGRAVITY_NAME,
   antigravityConversationOfCall,
+  isAntigravityConversationId,
   INBOX_CODEX_HOST,
   INBOX_CODEX_NAME,
   INBOX_HOST_NAMES,
@@ -128,7 +129,8 @@ export function inboxHostSessionFromEnv(env: Record<string, string | undefined>)
       Object.hasOwn(INBOX_SESSION_HOST_NAMES, host) &&
       (host === INBOX_T3_HOST ? isT3ThreadId(session) : isInboxSessionId(session)) &&
       (host !== INBOX_CODEX_HOST || isCodexThreadId(session)) &&
-      (host !== INBOX_QWEN_HOST || isQwenSessionId(session))
+      (host !== INBOX_QWEN_HOST || isQwenSessionId(session)) &&
+      (host !== INBOX_ANTIGRAVITY_HOST || isAntigravityConversationId(session))
     ) {
       return { host, session, name: INBOX_SESSION_HOST_NAMES[host]! };
     }

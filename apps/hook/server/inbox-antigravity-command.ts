@@ -17,8 +17,8 @@
 import { chmodSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { antigravityLoopbackAddress, INBOX_ANTIGRAVITY_DATA_DIRS, INBOX_ANTIGRAVITY_LINKS_FOLDER, isAntigravityConversationId, isAntigravityToken, type InboxAntigravityLink } from "@plannotator/core/inbox-types";
+import { childEnv } from "@plannotator/shared/child-env";
 import { inboxDir } from "@plannotator/shared/inbox/schema";
-
 
 export const INBOX_ANTIGRAVITY_USAGE = [
   "Usage: plannotator inbox antigravity",
@@ -54,7 +54,7 @@ function ancestorsArgv(startPid: number, maxDepth = 12): string[][] {
   const out: string[][] = [];
   let pid = startPid;
   for (let depth = 0; depth < maxDepth && pid > 1; depth++) {
-    const run = Bun.spawnSync(["ps", "-o", "ppid=,command=", "-p", String(pid)], { stdout: "pipe", stderr: "ignore" });
+    const run = Bun.spawnSync(["ps", "-o", "ppid=,command=", "-p", String(pid)], { env: childEnv(), stdout: "pipe", stderr: "ignore", windowsHide: true });
     const line = run.stdout.toString().trim();
     const match = /^(\d+)\s+(.*)$/.exec(line);
     if (!match) break;
