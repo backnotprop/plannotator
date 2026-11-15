@@ -24,7 +24,7 @@ import { SidebarTrigger, useSidebar } from '../shell/sidebar';
 import { canMarkUnread, offersRowMarkRead } from '../markRead';
 import { useNarrowerThan } from '../narrower';
 import { inboxHasUnsent, inboxRowArchived } from '@plannotator/core/inbox-types';
-import { ScheduledBadge, scheduledLook, scheduledOf, ScheduledTile, useScheduled } from '../scheduled/rowLook';
+import { rowLabel, ScheduledBadge, scheduledLook, scheduledOf, ScheduledTile, useScheduled } from '../scheduled/rowLook';
 import { HeldNoticeLine } from './HeldNoticeLine';
 import { DraftLabel, rowUnsent, unsentWords } from './DraftLabel';
 import { ThreadRowMenu } from './RowMenu';
@@ -838,14 +838,14 @@ function RowWithAction({
       }}
     >
       {children}
-      {onUnarchive && <UnarchiveAction row={row} label={`Unarchive: ${titleOf(row)}`} onUnarchive={onUnarchive} />}
+      {onUnarchive && <UnarchiveAction row={row} label={`Unarchive: ${rowLabel(row, titleOf(row))}`} onUnarchive={onUnarchive} />}
       {sendNow && (
         <RowTip armed={actionTip} content={`Send now: put your reply into ${agentName(rowAgent(row))}'s running turn without waiting for it to end`}>
           <button
             type="button"
             className="ib-ract"
             data-row-send-now=""
-            aria-label={`Send now: ${titleOf(row)}`}
+            aria-label={`Send now: ${rowLabel(row, titleOf(row))}`}
             onClick={(event) => {
               event.stopPropagation();
               onSendNow(row);
@@ -862,7 +862,7 @@ function RowWithAction({
             type="button"
             className="ib-ract"
             data-row-mark-read=""
-            aria-label={`Mark read: ${titleOf(row)}`}
+            aria-label={`Mark read: ${rowLabel(row, titleOf(row))}`}
             onClick={(event) => {
               event.stopPropagation();
               onMarkRead(row);
@@ -879,7 +879,7 @@ function RowWithAction({
             type="button"
             className="ib-ract"
             data-row-mark-unread=""
-            aria-label={`Mark unread: ${titleOf(row)}`}
+            aria-label={`Mark unread: ${rowLabel(row, titleOf(row))}`}
             onClick={(event) => {
               event.stopPropagation();
               onMarkUnread(row);
@@ -1704,7 +1704,7 @@ export const ListRow = memo(
     if (shape === 'phone') return <PhoneRow row={row} project={project} away={away} filtered={filtered} lit={lit} menu={menu} pinned={pinned} keys={keys} pill={pill} compact={compact} {...rowLook} {...pickState} onOpen={open} onUnstar={unstarRow} tint={tint} tagName={tagName} />;
     return (
       <RowWithAction row={row} drawn={drawn} menu={menu} onMarkRead={picking ? undefined : onMarkRead} onMarkUnread={picking ? undefined : onMarkUnread} onSendNow={picking ? undefined : onSendNow} onUnarchive={picking ? undefined : onUnarchive}>
-        {picking && onPick && <PickBox row state={picked ? 'all' : 'none'} label={`Select ${scheduledOf(row)?.name ?? titleOf(row)}`} onPick={(event) => onPick(row, event)} />}
+        {picking && onPick && <PickBox row state={picked ? 'all' : 'none'} label={`Select ${rowLabel(row, titleOf(row))}`} onPick={(event) => onPick(row, event)} />}
         {shape === 'narrow' ? (
           <NarrowRow row={row} project={project} away={away} filtered={filtered} lit={lit} pinned={pinned} keys={keys} selected={selected} pill={pill} compact={compact} {...rowLook} {...pickState} onOpen={open} onUnstar={unstarRow} tint={tint} tagName={tagName} />
         ) : (

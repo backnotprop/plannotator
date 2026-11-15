@@ -42,6 +42,8 @@ export function scheduledLook(row: InboxListRow, scheduled: readonly InboxSchedu
 }
 
 export const scheduledOf = (row: InboxListRow): RowScheduled | undefined => marks.get(row);
+/** The name a row's labels give it (Select, Mark read, Unarchive…): a scheduled thread's own name, never its run. */
+export const rowLabel = (row: InboxListRow, title: string): string => marks.get(row)?.name ?? title;
 
 /** The sender's tile: the play mark in place of the agents' marks. */
 export function ScheduledTile() {

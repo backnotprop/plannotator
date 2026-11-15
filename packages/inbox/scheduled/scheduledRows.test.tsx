@@ -80,7 +80,7 @@ function render(shape: 'wide' | 'narrow' | 'phone'): HTMLElement {
     root!.render(
       <SidebarProvider>
         <div className="pn-inbox">
-          <InboxList title="Inbox" path={null} sections={SECTIONS} filtered={false} narrow={shape === 'narrow'} selectedThreadId={null} notice={null} onShowNew={() => {}} onOpen={() => {}} phone={shape === 'phone'} onRowAction={() => {}} bulk={BULK} />
+          <InboxList title="Inbox" path={null} sections={SECTIONS} filtered={false} narrow={shape === 'narrow'} selectedThreadId={null} notice={null} onShowNew={() => {}} onOpen={() => {}} phone={shape === 'phone'} onRowAction={() => {}} bulk={BULK} onMarkRead={() => {}} />
         </div>
       </SidebarProvider>,
     ),
@@ -113,9 +113,11 @@ test.skipIf(!hasDom)('the warn mark only on the run that didn\'t finish, Running
   }
 });
 
-test.skipIf(!hasDom)("picking: a scheduled thread's box is named with the scheduled thread, never its run", () => {
+test.skipIf(!hasDom)("a scheduled thread's row labels (its pick box, Mark read) name the scheduled thread, never its run", () => {
   resetScheduledForTests(SCHEDULED, true);
   const el = render('wide');
+  // A row's other labels name it the same way.
+  expect(el.querySelector('.ib-lbody [data-thread-id="msg_unfinished"]')!.parentElement!.querySelector('[aria-label^="Mark read:"]')?.getAttribute('aria-label')).toBe('Mark read: Weekday PR summary');
   act(() => void el.querySelector(`.ib-lbody [data-thread-id="msg_unfinished"]`)!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, metaKey: true })));
   const box = (id: string) => el.querySelector(`.ib-lbody [data-thread-id="${id}"]`)!.parentElement!.querySelector(':scope > [data-pick-box="row"]')!.getAttribute('aria-label');
   expect(box('msg_unfinished')).toBe('Select Weekday PR summary');
