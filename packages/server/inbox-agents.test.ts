@@ -254,6 +254,17 @@ describe("agents connected by one key in a plain-JSON file", () => {
     });
   });
 
+  test("Antigravity: its one MCP file, there and empty as the products leave it, gets the key", async () => {
+    mkdirSync(join(fake.home, ".gemini", "antigravity-cli"), { recursive: true });
+    const file = join(fake.home, ".gemini", "config", "mcp_config.json");
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, "");
+    const report = await connect();
+    expect(report.added).toEqual(["antigravity"]);
+    expect(JSON.parse(readFileSync(file, "utf8"))).toEqual({ mcpServers: { "plannotator-inbox": { command: SELF[0], args: ["inbox", "mcp"] } } });
+    expect((await connect()).already).toContain("antigravity");
+  });
+
   test("a write that changes nothing is skipped (the file is not touched)", () => {
     const file = join(fake.home, "mcp.json");
     expect(writeJsonEntry(file, ["mcpServers"], { command: "/p/plannotator", args: ["inbox", "mcp"] })).toEqual({ ok: true, changed: true });
