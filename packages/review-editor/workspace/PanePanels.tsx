@@ -88,6 +88,12 @@ export const PanePanels: React.FC<{ pane: Pane; paneIndex: number; store: Worksp
   const frameRef = useRef<HTMLDivElement>(null);
   const scrolls = useRef(new Map<string, ScrollMemory>());
   const ready = useAfterFirstPaint(deferFirstMount);
+  const [attachedId, setAttachedId] = useState<string | null>(null);
+  const mounted = useRef(new Set<string>());
+  const shown = (id: string) => {
+    if (id !== pane.activeId || attachedId === id) mounted.current.add(id);
+    return mounted.current.has(id);
+  };
 
   useLayoutEffect(() => {
     const frame = frameRef.current;
@@ -107,18 +113,20 @@ export const PanePanels: React.FC<{ pane: Pane; paneIndex: number; store: Worksp
       restoreScroll(scrolls.current.get(activeId));
       requestAnimationFrame(() => restoreScroll(scrolls.current.get(activeId)));
     }
+    setAttachedId(activeId);
   }, [pane.activeId, store]);
 
   useLayoutEffect(() => {
     const ids = new Set(pane.tabs.map((tab) => tab.id));
     for (const id of [...scrolls.current.keys()]) if (!ids.has(id)) scrolls.current.delete(id);
+    for (const id of [...mounted.current]) if (!ids.has(id)) mounted.current.delete(id);
   }, [pane.tabs]);
 
   return (
     <>
       {slim && <PaneTabRow store={store} paneIndex={paneIndex} variant="slim" />}
       <div ref={frameRef} className="relative flex-1 min-h-0" data-pane-frame="">
-        {ready && pane.tabs.map((tab) => <PanelSlot key={tab.id} tab={tab} store={store} paneIndex={paneIndex} />)}
+        {ready && pane.tabs.map((tab) => shown(tab.id) && <PanelSlot key={tab.id} tab={tab} store={store} paneIndex={paneIndex} />)}
       </div>
     </>
   );
