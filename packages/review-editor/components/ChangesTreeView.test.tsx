@@ -2,6 +2,9 @@ import { afterAll, afterEach, beforeAll, describe, expect, mock, test } from 'bu
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { FileTree } from './FileTree';
+import { markFirstCodePainted } from '../utils/firstCodePaint';
+
+markFirstCodePainted();
 import type { DiffFile } from '../types';
 import type { SinceBaseSections } from '@plannotator/shared/types';
 import { installFakeTextLayout, type FakeTextLayout } from '../../../tests/helpers/fake-text-layout';
