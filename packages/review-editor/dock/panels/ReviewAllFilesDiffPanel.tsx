@@ -11,6 +11,7 @@ import { PackageChangesCard } from '../../components/PackageChangesCard';
 const MarkdownFilePreview = React.lazy(async () => ({ default: (await import('../../components/MarkdownFilePreview')).MarkdownFilePreview }));
 import type { DiffFile } from '../../types';
 import { useReviewState, useReviewStateOptional } from '../ReviewStateContext';
+import { usePaneDiffStyle } from '../../workspace/paneContext';
 
 /**
  * A Markdown card's view control. Reads review state itself: Pierre's header
@@ -36,6 +37,7 @@ function ReviewMarkdownViewControl({ file, iconOnly, touch }: { file: DiffFile; 
 
 export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
   const state = useReviewState();
+  const paneDiffStyle = usePaneDiffStyle(state.diffStyle);
   // Comments outside the diff live in whole-file views, not on the diff.
   const diffOnlyAnnotations = useMemo(
     () => (state.allAnnotations.some((a) => a.outsideDiff) ? state.allAnnotations.filter((a) => !a.outsideDiff) : state.allAnnotations),
@@ -146,7 +148,7 @@ export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
     <AllFilesCodeView
       files={state.files}
       {...(state.callTreeHunkNotes && state.callTreeHunkNotes.length > 0 ? { hostLineNotes: state.callTreeHunkNotes } : {})}
-      diffStyle={state.diffStyle}
+      diffStyle={paneDiffStyle}
       diffOverflow={state.diffOverflow}
       diffIndicators={state.diffIndicators}
       lineDiffType={state.lineDiffType}

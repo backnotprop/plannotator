@@ -1,77 +1,91 @@
 import React, { useLayoutEffect, useRef, useState } from 'react';
 
 const ELLIPSIS = '…';
-const FILE_EXTENSION = /^(.+?)(\.[A-Za-z0-9]{1,8})$/;
 
-let canvas: HTMLCanvasElement | null = null;
-
-function measurer(element: HTMLElement): ((text: string) => number) | null {
-  if (typeof document === 'undefined') return null;
-  canvas ??= document.createElement('canvas');
-  const context = canvas.getContext?.('2d');
-  if (!context) return null;
-  const style = getComputedStyle(element);
-  context.font = style.font || `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
-  return (text) => context.measureText(text).width;
+function measurer(probe: HTMLElement | null): ((text: string) => number) | null {
+  if (!probe || typeof probe.getBoundingClientRect !== 'function') return null;
+  probe.textContent = 'M';
+  if (probe.getBoundingClientRect().width === 0) {
+    probe.textContent = '';
+    return null;
+  }
+  return (text) => {
+    probe.textContent = text;
+    return probe.getBoundingClientRect().width;
+  };
 }
 
-export function splitExtension(name: string): { stem: string; extension: string } {
-  const match = FILE_EXTENSION.exec(name);
-  return match ? { stem: match[1]!, extension: match[2]! } : { stem: name, extension: '' };
+
+function graphemes(text: string): string[] {
+  const Segmenter = (Intl as unknown as { Segmenter?: new (locale?: string, options?: { granularity: 'grapheme' }) => { segment(input: string): Iterable<{ segment: string }> } }).Segmenter;
+  return Segmenter ? [...new Segmenter(undefined, { granularity: 'grapheme' }).segment(text)].map((part) => part.segment) : Array.from(text);
 }
 
-export function fitMiddle(name: string, available: number, width: (text: string) => number, keepExtension = true): string {
+export function fitMiddle(name: string, available: number, width: (text: string) => number): string {
   if (width(name) <= available) return name;
-  const { stem, extension } = keepExtension ? splitExtension(name) : { stem: name, extension: '' };
-  let low = 0;
-  let high = stem.length;
+  const parts = graphemes(name);
+  let low = 1;
+  let high = parts.length - 1;
   while (low < high) {
     const mid = (low + high + 1) >> 1;
-    if (width(`${stem.slice(0, mid)}${ELLIPSIS}${extension.slice(1)}`) <= available) low = mid;
+    if (width(`${ELLIPSIS}${parts.slice(parts.length - mid).join('')}`) <= available) low = mid;
     else high = mid - 1;
   }
-  return `${stem.slice(0, Math.max(1, low))}${ELLIPSIS}${extension.slice(1)}`;
+  return `${ELLIPSIS}${parts.slice(parts.length - Math.max(1, low)).join('')}`;
 }
 
-export const EllipsisName: React.FC<{ text: string; keepExtension?: boolean; className?: string; title?: string }> = ({
+export function fitDirectory(directory: string, available: number, width: (text: string) => number): string {
+  if (width(directory) <= available) return directory;
+  const parts = directory.split('/').filter(Boolean);
+  for (let drop = 1; drop < parts.length; drop++) {
+    const candidate = `${ELLIPSIS}/${parts.slice(drop).join('/')}/`;
+    if (width(candidate) <= available) return candidate;
+  }
+  return '';
+}
+
+export const EllipsisName: React.FC<{ text: string; className?: string; title?: string }> = ({
   text,
-  keepExtension = true,
   className,
   title,
 }) => {
   const ref = useRef<HTMLSpanElement>(null);
+  const probeRef = useRef<HTMLSpanElement>(null);
   const [fitted, setFitted] = useState<{ text: string; width?: number }>({ text });
 
   useLayoutEffect(() => {
     const element = ref.current;
     if (!element) return;
-    const width = measurer(element);
-    if (!width) {
-      setFitted({ text });
-      return;
-    }
-    const full = Math.ceil(width(text)) + 1;
     const fit = () => {
+      const probe = probeRef.current;
+      const width = measurer(probe);
+      if (!width || !probe) {
+        setFitted((before) => (before.text === text && !before.width ? before : { text }));
+        return;
+      }
+      const full = Math.ceil(width(text)) + 1;
       const available = element.clientWidth;
-      setFitted({ text: available > 0 ? fitMiddle(text, available, width, keepExtension) : text, width: full });
+      const next = available > 0 && available < full ? fitMiddle(text, available, width) : text;
+      probe.textContent = '';
+      setFitted((before) => (before.text === next && before.width === full ? before : { text: next, width: full }));
     };
-    setFitted({ text, width: full });
     fit();
     if (typeof ResizeObserver === 'undefined') return;
     const observer = new ResizeObserver(fit);
     observer.observe(element);
     return () => observer.disconnect();
-  }, [text, keepExtension]);
+  }, [text]);
 
   return (
     <span
       ref={ref}
       title={title}
       data-ellipsis-name={text}
-      className={`block min-w-0 shrink overflow-hidden whitespace-nowrap ${className ?? ''}`}
+      className={`relative block min-w-0 shrink overflow-hidden whitespace-nowrap [font-variant-ligatures:no-contextual] ${className ?? ''}`}
       style={fitted.width ? { width: fitted.width } : undefined}
     >
       {fitted.text}
+      <span ref={probeRef} aria-hidden="true" className="pointer-events-none invisible absolute left-0 top-0 whitespace-nowrap" />
     </span>
   );
 };

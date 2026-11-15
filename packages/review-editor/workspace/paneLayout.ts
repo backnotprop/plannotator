@@ -21,6 +21,7 @@ export type PanePlacement =
   | { kind: 'beside'; referenceId?: string };
 
 export const MAX_PANES = 2;
+export const PANE_MIN_WIDTH = 360;
 export const REFERENCES_PANE_MIN_WIDTH = 1100;
 
 export const EMPTY_LAYOUT: PaneLayout = { panes: [{ tabs: [], activeId: null }], activePane: 0 };
@@ -117,7 +118,8 @@ export function referencesPlacement(windowWidth: number, singlePane: boolean): '
   return singlePane || windowWidth < REFERENCES_PANE_MIN_WIDTH ? 'panel' : 'pane';
 }
 
-export function clampRatio(ratio: number): number {
+export function clampRatio(ratio: number, rowWidth = 0, minPane = 0): number {
   if (!Number.isFinite(ratio)) return 0.5;
-  return Math.min(0.8, Math.max(0.2, ratio));
+  const edge = rowWidth > 0 && minPane > 0 ? Math.min(0.5, Math.max(0.2, minPane / rowWidth)) : 0.2;
+  return Math.min(1 - edge, Math.max(edge, ratio));
 }

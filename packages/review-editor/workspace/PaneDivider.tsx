@@ -1,5 +1,5 @@
 import React, { useRef } from 'react';
-import { clampRatio } from './paneLayout';
+import { clampRatio, PANE_MIN_WIDTH } from './paneLayout';
 
 export const PaneDivider: React.FC<{
   ratio: number;
@@ -12,7 +12,7 @@ export const PaneDivider: React.FC<{
   const ratioAt = (clientX: number) => {
     const box = container()?.getBoundingClientRect();
     if (!box || box.width === 0) return ratio;
-    return clampRatio((clientX - box.left) / box.width);
+    return clampRatio((clientX - box.left) / box.width, box.width, PANE_MIN_WIDTH);
   };
 
   return (
@@ -42,10 +42,11 @@ export const PaneDivider: React.FC<{
       onDoubleClick={() => onCommit(0.5)}
       onKeyDown={(event) => {
         const step = event.shiftKey ? 0.1 : 0.02;
-        if (event.key === 'ArrowLeft') onCommit(clampRatio(ratio - step));
-        else if (event.key === 'ArrowRight') onCommit(clampRatio(ratio + step));
-        else if (event.key === 'Home') onCommit(0.2);
-        else if (event.key === 'End') onCommit(0.8);
+        const width = container()?.getBoundingClientRect().width ?? 0;
+        if (event.key === 'ArrowLeft') onCommit(clampRatio(ratio - step, width, PANE_MIN_WIDTH));
+        else if (event.key === 'ArrowRight') onCommit(clampRatio(ratio + step, width, PANE_MIN_WIDTH));
+        else if (event.key === 'Home') onCommit(clampRatio(0, width, PANE_MIN_WIDTH));
+        else if (event.key === 'End') onCommit(clampRatio(1, width, PANE_MIN_WIDTH));
         else return;
         event.preventDefault();
       }}

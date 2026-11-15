@@ -60,3 +60,16 @@ describe('browsing All files', () => {
     expect(paneFileView(browseView('b.ts', false), 'b.ts')).toBe('changes');
   });
 });
+
+describe('narrow windows and narrow panes', () => {
+  test('a pane never gets under 360 px from the divider, and under 900 px of window only one side panel stays open', async () => {
+    const { clampRatio, PANE_MIN_WIDTH } = await import('./paneLayout');
+    const { sidePanelToClose } = await import('../hooks/useOneSidePanelWhenNarrow');
+    expect(Math.round(clampRatio(0.05, 1000, PANE_MIN_WIDTH) * 1000)).toBe(360);
+    expect(Math.round(clampRatio(0.99, 1000, PANE_MIN_WIDTH) * 1000)).toBe(640);
+    expect(clampRatio(0.3, 600, PANE_MIN_WIDTH)).toBe(0.5);
+    expect(sidePanelToClose(true, true, true, 'panel')).toBe('tree');
+    expect(sidePanelToClose(true, true, true, 'tree')).toBe('panel');
+    expect(sidePanelToClose(false, true, true, 'panel')).toBeNull();
+  });
+});
