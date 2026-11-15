@@ -2191,7 +2191,9 @@ export function linkInboxPulls(
       project_id: projectId,
       agent: threadAgent(store, threadId),
       last: last ? { message_id: last.id, preview: previewOf(last.body), at: last.created_at } : null,
-      guide: guide?.guide ? { message_id: guide.id, title: guide.guide.title, steps: guide.guide.sections, review: guide.guide.review === true } : null,
+      guide: guide?.guide
+        ? { message_id: guide.id, title: guide.guide.title, steps: guide.guide.sections, review: guide.guide.review === true, session: guide.author.kind === "agent" ? guide.author.session : null }
+        : null,
     };
   };
 
