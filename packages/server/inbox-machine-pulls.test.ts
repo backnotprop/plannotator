@@ -140,14 +140,21 @@ describe("createMachinePulls", () => {
     return { link: link as unknown as PeerLink, asked, set: (state: PeerLink["state"]) => ((link as { state: string }).state = state) };
   }
 
+  /** What the merged board gets once the reads it started are done. */
+  const readAll = async (pulls: ReturnType<typeof createMachinePulls>, refresh: boolean) => {
+    const snapshot = pulls.start(refresh);
+    await pulls.settled();
+    return snapshot();
+  };
+
   test("an online machine's board is read through its door, a refresh asked there too; an older machine (no `pulls`) is never asked", async () => {
     const b = peer(B);
     const old = peer(C, { marks: ["star", "cards"] });
     const pulls = createMachinePulls({ peers: () => [b.link, old.link] });
-    const first = await pulls.lists(false);
+    const first = await readAll(pulls, false);
     expect(first.map((e) => [e.machine, e.board?.pulls.length ?? null, e.pending])).toEqual([[B, 1, false]]);
     expect(b.asked).toEqual(["pulls?everywhere=1", "pulls/risk"]);
-    await pulls.lists(true);
+    await readAll(pulls, true);
     expect(b.asked.at(-2)).toBe("pulls?everywhere=1&refresh=1");
     expect(old.asked).toEqual([]);
   });
@@ -155,39 +162,62 @@ describe("createMachinePulls", () => {
   test("asleep: nothing is asked and its rows stay as last read; back, it is read again", async () => {
     const b = peer(B);
     const pulls = createMachinePulls({ peers: () => [b.link] });
-    await pulls.lists(false);
+    await readAll(pulls, false);
     b.set("offline");
     const asked = b.asked.length;
-    const away = await pulls.lists(false);
+    const away = await readAll(pulls, false);
     expect(b.asked.length).toBe(asked);
     expect(away[0]!.board!.pulls.map((p) => p.number)).toEqual([7]);
     expect(away[0]!.pending).toBe(false);
     b.set("online");
-    await pulls.lists(false);
+    await readAll(pulls, false);
     expect(b.asked.length).toBe(asked + 2);
   });
 
-  test("a slow machine: the board answers without it, says it is pending, and joins the one read under way", async () => {
+  test("a machine online but not answering never holds this board up: it is pending, asked once, and joins when it answers", async () => {
     let release = () => {};
     const b = peer(B, { hold: new Promise<void>((done) => (release = done)) });
-    const pulls = createMachinePulls({ peers: () => [b.link], waitMs: 10, firstWaitMs: 10 });
-    const first = await pulls.lists(false);
+    const pulls = createMachinePulls({ peers: () => [b.link] });
+    const at = performance.now();
+    const first = pulls.start(false)();
+    expect(performance.now() - at).toBeLessThan(1_000);
     expect(first).toEqual([{ machine: B, board: null, pending: true }]);
-    await pulls.lists(false);
+    expect(pulls.start(false)()).toEqual([{ machine: B, board: null, pending: true }]);
     expect(b.asked).toEqual(["pulls?everywhere=1"]);
     release();
-    await Bun.sleep(5);
-    const after = await pulls.lists(false);
+    const after = await readAll(pulls, false);
     expect(after[0]!.board!.pulls).toHaveLength(1);
+  });
+
+  test("after a write whose answer never came: the PR's state as that machine's board says now; unreadable now, none", async () => {
+    let state: InboxPull["state"] = "open";
+    let down = false;
+    const link = {
+      id: B,
+      state: "online",
+      list: { marks: ["pulls"] },
+      async request(route: string) {
+        if (down) throw new Error("connection refused");
+        if (route === "pulls") return Response.json({ pulls: [pull("northwind/api", 7, { state })], links: {}, projects: {}, cards: {}, hosts: [] });
+        return Response.json({ judgments: {} });
+      },
+    } as unknown as PeerLink;
+    let clock = 0;
+    const pulls = createMachinePulls({ peers: () => [link], now: () => new Date(Date.UTC(2026, 10, 14, 10, 0, clock++)) });
+    await readAll(pulls, false);
+    state = "merged";
+    expect(await pulls.stateThere(link, "github.com/northwind/api#7")).toBe("merged");
+    down = true;
+    expect(await pulls.stateThere(link, "github.com/northwind/api#7")).toBeNull();
   });
 
   test("unlinked: nothing of its board stays", async () => {
     const b = peer(B);
     let linked = [b.link];
     const pulls = createMachinePulls({ peers: () => linked });
-    await pulls.lists(false);
+    await readAll(pulls, false);
     pulls.forget(B);
     linked = [];
-    expect(await pulls.lists(false)).toEqual([]);
+    expect(await readAll(pulls, false)).toEqual([]);
   });
 });

@@ -77,6 +77,8 @@ import type { InboxFileContents, InboxPullDetailsAnswer, InboxPullDiffAnswer, In
 import { InboxApiError, readJson } from './apiError';
 import { cardUrl, learnCards, type CardsModel } from './cardsWire';
 export type { CardsModel } from './cardsWire';
+import type { InboxAskChat } from './askChatWire';
+export type { InboxAskChat } from './askChatWire';
 import { gzipped, wholeBody } from './apiBody';
 import { referencedFileUrl, type OpenInFileCode, type OpenInFileScope, type ReferencedFileScope, type ReferencedFileView } from './openInWire';
 export { InboxApiError };
@@ -474,11 +476,6 @@ export interface WhatsNewReleasesModel {
   /** The last request for the list failed. */
   offline: boolean;
   fetched_at: string | null;
-}
-
-/** Where the What's new page loads one of the notes' saved images. */
-export function whatsNewImageUrl(version: string, src: string): string {
-  return inboxUrl(`/whats-new/image?version=${encodeURIComponent(version)}&src=${encodeURIComponent(src)}`);
 }
 
 export type { CloudflareAccessSettings, TailscaleSettings };
@@ -1051,6 +1048,7 @@ export function replyDraftSaveBody(
     files_add: files.add,
     files_remove: files.remove,
     files_place: files.place,
+    ...(files.order ? { files_order: files.order } : {}),
     ...(recipients !== undefined ? { recipients } : {}),
     // The message the reply quotes (approval "inbox-reply-quote"): null takes it away; absent, the draft keeps its own.
     ...(quote !== undefined ? { quote } : {}),
@@ -1250,6 +1248,7 @@ export interface SearchRequest {
   group?: InboxSearchGroupId | null;
   offset?: number;
   limit?: number;
+  tags?: readonly string[] | null;
   /** The project open in the list: a tie boost, never a filter. */
   current?: string | null;
   /** Newest first instead of best match (sent only for `newest`, so a best-match request is what it was). */
@@ -1406,9 +1405,8 @@ export function uploadFile(
 /** Search (read only). `signal` aborts a request a newer query replaced. */
 export async function searchInbox(request: SearchRequest, signal?: AbortSignal): Promise<SearchModel> {
   const query = new URLSearchParams({ q: request.q });
-  if (request.project) query.set('project', request.project);
-  if (request.status) query.set('status', request.status);
-  if (request.from) query.set('from', request.from);
+  for (const key of ['project', 'status', 'from'] as const) if (request[key]) query.set(key, request[key]!);
+  for (const tag of request.tags ?? []) query.append('tag', tag);
   if (request.group) query.set('group', request.group);
   if (request.offset) query.set('offset', String(request.offset));
   if (request.limit) query.set('limit', String(request.limit));
@@ -1994,18 +1992,18 @@ export const inboxApi = {
   pullRiskModels: (provider: string, signal?: AbortSignal) => get<InboxPullRiskModels>(inboxUrl(`/pulls/risk/models?provider=${encodeURIComponent(provider)}`), signal),
   pullDetails: (key: string, signal?: AbortSignal) => get<InboxPullDetailsAnswer>(pullUrl('/pulls/details', key), signal),
   pullMediaSizes: (key: string, signal?: AbortSignal) => get<{ sizes: Record<string, { width: number; height: number }> }>(pullUrl('/pulls/media/sizes', key), signal),
-  /** One layer's diff, or the stack's from its base up to that layer (a PR the last list named). */
-  pullDiff: (key: string, scope: InboxPullDiffScope, signal?: AbortSignal) =>
-    get<InboxPullDiffAnswer>(pullUrl('/pulls/diff', key, `scope=${scope}`), signal),
+  /** One layer's diff, or a compare up to that layer (a PR the last list named): `from` is a range's lowest layer, or a commit. */
+  pullDiff: (key: string, scope: InboxPullDiffScope, signal?: AbortSignal, from?: string) =>
+    get<InboxPullDiffAnswer>(pullUrl('/pulls/diff', key, `scope=${scope}${from ? `&from=${encodeURIComponent(from)}` : ''}`), signal),
   /** New review's Pull request link: what the pasted link is. */
   reviewLink: (ref: string, signal?: AbortSignal) => get<InboxReviewLinkAnswer>(inboxUrl(`/reviews/link?ref=${encodeURIComponent(ref)}`), signal),
   /** New review's change summary for a project's local changes. */
   reviewChanges: (project: string, changes: InboxReviewChanges, signal?: AbortSignal) => get<InboxReviewChangesAnswer>(inboxUrl(`/reviews/changes?project=${encodeURIComponent(project)}&changes=${changes}`), signal),
   /** One changed file's whole text at both ends of that diff, for its expand arrows, while it is the blobs (`old`, `new`) the patch on screen names. */
-  pullFile: (key: string, scope: InboxPullDiffScope, path: string, pin: PatchBlobIds | { head: string }, signal?: AbortSignal) =>
-    get<InboxFileContents>(pullUrl('/pulls/file', key, `scope=${scope}&path=${encodeURIComponent(path)}&${'head' in pin ? `head=${pin.head}` : `old=${pin.oldId}&new=${pin.newId}`}`), signal),
-  /** The person started a PR's (a stack's open layers') review thread with an agent: `threadId` is the thread the review picker (or compose's New thread) just started for it. */
-  pullOwner: (keys: readonly string[], threadId: string, ask?: 'guide' | 'custom') => post<{ ok: true }>(inboxUrl('/pulls/owner'), { keys: [...keys], thread_id: threadId, ...(ask ? { ask } : {}) }),
+  pullFile: (key: string, scope: InboxPullDiffScope, path: string, pin: PatchBlobIds | { head: string }, signal?: AbortSignal, from?: string) =>
+    get<InboxFileContents>(pullUrl('/pulls/file', key, `scope=${scope}${from ? `&from=${encodeURIComponent(from)}` : ''}&path=${encodeURIComponent(path)}&${'head' in pin ? `head=${pin.head}` : `old=${pin.oldId}&new=${pin.newId}`}`), signal),
+  /** The person started a review thread for PRs (a stack's open layers, or the board's picks of one repository); `machine`: the thread's, whose list has them. */
+  pullOwner: (keys: readonly string[], threadId: string, ask?: 'guide' | 'custom', machine: string | null = null) => post<{ ok: true }>(inboxUrl('/pulls/owner', undefined, machine), { keys: [...keys], thread_id: threadId, ...(ask ? { ask } : {}) }),
   /** Before a hand-off is sent: may these PRs go to an agent in `projectId`? (404 `pull_unknown`, 422 another project's.) */
   /**
    * Post a review to the PR on GitHub/GitLab (`POST /api/inbox/pulls/review`): the raw answer, which the review app's
@@ -2026,7 +2024,7 @@ export const inboxApi = {
   pullClose: (key: string, machine = pullMachine(key)) => post<{ ok: true; key: string; url: string }>(inboxUrl('/pulls/close', undefined, machine), { key }),
   /** Close's Undo: taken only on the machine that closed it, in the last few minutes, so it goes to the same `machine`. */
   pullReopen: (key: string, machine = pullMachine(key)) => post<{ ok: true; key: string; url: string }>(inboxUrl('/pulls/reopen', undefined, machine), { key }),
-  pullOwnerCheck: (keys: readonly string[], projectId: string) => post<{ ok: true }>(inboxUrl('/pulls/owner'), { keys: [...keys], project_id: projectId, validate_only: true }),
+  pullOwnerCheck: (keys: readonly string[], projectId: string, machine: string | null = null) => post<{ ok: true }>(inboxUrl('/pulls/owner', undefined, machine), { keys: [...keys], project_id: projectId, validate_only: true }),
   /** `machine`: a linked machine's look, through the cursor of its cards as read. */
   seeBoard: (throughSeq: number, machine?: string | null) => post<{ seen_seq: number }>(inboxUrl('/cards/seen', undefined, machine), { through_seq: throughSeq }),
   /** The Board's first-visit dialog: the first page on this computer to ask gets `show: true`, once per machine. */
@@ -2300,18 +2298,6 @@ export interface InboxAskPosted {
   running?: boolean;
 }
 
-/** One row of the chat list (`GET /api/inbox/ask`). */
-export interface InboxAskChat {
-  thread_id: string;
-  subject: string | null;
-  project: string;
-  host: string | null;
-  /** When anything last happened in the chat. */
-  at: string;
-  unread: boolean;
-  answering: boolean;
-}
-
 /** One note the dialog asked to add: written, or why not. */
 export type InboxNoteResult = { ok: true; agent: InboxNoteAgentId; action: string; path: string | null } | { ok: false; agent: InboxNoteAgentId; reason: string; path: string | null };
 
@@ -2330,7 +2316,9 @@ export type InboxEvent =
   /** A Board initiative made, renamed or deleted (approval "board-initiatives"): silent; the Board reads its cards again. Absent from an older Inbox. */
   | { seq: number; kind: 'initiative'; id: string; initiative: InboxInitiative }
   /** A thread's PRs changed (approval "inbox-pr-binding"): silent; the window reads that thread's PRs and the list again. Absent from an older Inbox. */
-  | { seq: number; kind: 'thread_pull'; id: string; thread_id: string };
+  | { seq: number; kind: 'thread_pull'; id: string; thread_id: string }
+  /** A routine changed (scheduled/store.ts reads the list again): its id only. Absent from an older Inbox. */
+  | { seq: number; kind: 'scheduled'; id: string };
 
 /** A thread's attachments as they are now, and the person's annotations waiting for a Send. */
 export interface AttachmentsModel {

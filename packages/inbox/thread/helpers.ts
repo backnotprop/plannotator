@@ -8,6 +8,7 @@ import { annotationOf } from '../attachments';
 import { agentName, clockTime, dayWords } from '../format';
 import { PILL_BAND_PX, atEnd } from '../seenOnSight';
 import type { AskingSession } from '../components/ReplyRoute';
+import type { ReviewOutcome } from '../components/ReviewCard';
 import type { SentAnswerGroup } from '../sentReply';
 import { routeSendAnnotations, sendTargetsOf } from '../sendTargets';
 
@@ -178,3 +179,10 @@ export function commentTags(record: InboxAnnotationRecord): string[] {
 export const NO_SENT_ANSWERS: readonly SentAnswerGroup[] = [];
 export const NO_QUESTIONS: InboxQuestion[] = [];
 export const isSuperseded = (cause: unknown): boolean => cause instanceof InboxApiError && cause.code === 'question_superseded';
+
+/** Each review's outcome: the person's latest verdict reply on it. */
+export function reviewOutcomesOf(messages: readonly InboxMessageWire[]): Map<string, ReviewOutcome> {
+  const out = new Map<string, ReviewOutcome>();
+  for (const m of messages) if (m.author.kind === 'person' && m.review_verdict) out.set(m.review_verdict.of, { verdict: m.review_verdict, at: m.created_at });
+  return out;
+}

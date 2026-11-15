@@ -1,12 +1,12 @@
 diff --git a/packages/diffs/package.json b/packages/diffs/package.json
-index be0fba76..62b8d633 100644
+index be0fba76..82231fda 100644
 --- a/packages/diffs/package.json
 +++ b/packages/diffs/package.json
 @@ -1,6 +1,6 @@
  {
    "name": "@pierre/diffs",
 -  "version": "1.7.0-beta.3",
-+  "version": "1.7.0-beta.3-sem.4",
++  "version": "1.7.0-beta.3-sem.5",
    "license": "apache-2.0",
    "files": [
      "dist",
@@ -160,6 +160,57 @@ index f4dbfccf..0509c04b 100644
 +          : {}),
 +      },
      };
+   }
+ 
+diff --git a/packages/diffs/src/style.css b/packages/diffs/src/style.css
+index e3a74da8..235958a2 100644
+--- a/packages/diffs/src/style.css
++++ b/packages/diffs/src/style.css
+@@ -990,7 +990,16 @@
+     user-select: none;
+ 
+     [data-connector-kind] {
+-      opacity: 0.15;
++      fill: light-dark(
++        color-mix(in srgb, var(--diffs-connector-base) 15%, transparent),
++        color-mix(in srgb, var(--diffs-connector-base) 32%, transparent)
++      );
++      stroke: light-dark(
++        transparent,
++        color-mix(in srgb, var(--diffs-connector-base) 50%, transparent)
++      );
++      stroke-width: 1px;
++      vector-effect: non-scaling-stroke;
+     }
+ 
+     [data-connector-separator] {
+@@ -1014,23 +1023,23 @@
+     }
+ 
+     [data-connector-kind='added'] {
+-      fill: var(--diffs-addition-base);
++      --diffs-connector-base: var(--diffs-addition-base);
+     }
+ 
+     [data-connector-kind='deleted'] {
+-      fill: var(--diffs-deletion-base);
++      --diffs-connector-base: var(--diffs-deletion-base);
+     }
+ 
+     [data-connector-kind='moved'] {
+-      fill: var(--diffs-moved-base);
++      --diffs-connector-base: var(--diffs-moved-base);
+     }
+ 
+     [data-connector-kind='modified'] {
+-      fill: var(--diffs-edited-base);
++      --diffs-connector-base: var(--diffs-edited-base);
+     }
+ 
+     [data-connector-kind='reformatted'] {
+-      fill: var(--diffs-reformatted-base);
++      --diffs-connector-base: var(--diffs-reformatted-base);
+     }
    }
  
 diff --git a/packages/diffs/src/types.ts b/packages/diffs/src/types.ts

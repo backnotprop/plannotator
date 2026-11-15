@@ -26,10 +26,23 @@
 .pn-inbox .ib-lhead-mark svg.ib-ic { width: 18px; height: 18px; }
 .ib-lhead-note { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--muted-foreground); font-size: var(--ib-fs-13, 13px); font-variant-numeric: tabular-nums; white-space: nowrap; }
 
+/* ---------- the thread header's tag line (step 2, components/ThreadTagLine.tsx): `#` once, plain names, `+`. ---------- */
+.ib-ttags { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; margin: -8px 0 12px -6px; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
+.ib-ttags-mark { display: inline-flex; padding: 0 2px 0 6px; }
+.ib-ttags-list { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; min-width: 0; margin: 0; padding: 0; list-style: none; }
+.ib-ttags-list > li { min-width: 0; max-width: 100%; }
+.pn-inbox .ib-ttag { display: inline-flex; align-items: center; max-width: 100%; height: 24px; padding: 0 6px; border-radius: 6px; overflow: hidden; color: var(--muted-foreground); text-decoration: none; text-overflow: ellipsis; white-space: nowrap; }
+.pn-inbox .ib-ttag:hover { background: var(--muted); color: var(--foreground); }
+.pn-inbox .ib-ttags-add { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--muted-foreground); cursor: pointer; }
+.pn-inbox .ib-ttags-add:hover, .pn-inbox .ib-ttags-add[data-popup-open] { background: var(--muted); color: var(--foreground); }
+
 /* Phone: the field at the sheet's item height. */
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
   .ib-pm-pos[data-phone] .ib-tagm-find { height: 48px; padding: 0 12px; gap: 12px; }
   .ib-pm-pos[data-phone] .ib-tagm-find input { font-size: var(--ib-fs-16-in, 16px); }
+  /* A thread's tags 32 px tall to tap. */
+  .pn-inbox .ib-ttag { height: 32px; padding: 0 8px; }
+  .pn-inbox .ib-ttags-add { width: 32px; height: 32px; }
 }
 
 /* ---------- tag colours (tagColours.ts; approval step 3, look C): the whole row tinted, the tag's name on it. ---------- */

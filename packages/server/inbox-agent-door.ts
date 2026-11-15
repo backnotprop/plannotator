@@ -95,6 +95,8 @@ export function createInboxAgentDoor(context: InboxAgentDoorContext) {
       );
     },
     walkthroughThread: () => false,
+    // A routine runs an agent on the person's computer: kept to the agents on it.
+    scheduledOn: () => false,
     sessionWakes: async (_host, session) => session === agent.session && hasCloudWake(agent),
   });
 

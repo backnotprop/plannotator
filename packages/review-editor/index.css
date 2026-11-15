@@ -210,13 +210,18 @@ diffs-container {
 }
 
 .semantic-diff-path {
+  display: flex;
   min-width: 0;
   white-space: nowrap;
   overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .semantic-diff-path-dir {
+  min-width: 0;
+  flex-shrink: 1000;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: rtl;
   color: var(--muted-foreground);
 }
 

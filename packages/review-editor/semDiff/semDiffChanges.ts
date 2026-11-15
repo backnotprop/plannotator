@@ -105,6 +105,36 @@ function declarationLine(text: string, ranges: readonly { start: number; end: nu
 
 type Folded = SemanticDiffChange & { folded: boolean };
 
+type Rename = { oldName: string; newName: string; oldStart: number; oldEnd: number; newStart: number; newEnd: number };
+type TextRange = { start: { line: number; character: number }; end: { line: number; character: number } };
+
+function sigilFor(path: string): RegExp | null {
+  if (/\.(php|phtml)$/i.test(path)) return /\$$/;
+  if (/\.(rb|rake|gemspec)$/i.test(path) || /(^|\/)(Rakefile|Gemfile)$/.test(path)) return /(?:@@?|(?<![:\w]):)$/;
+  return null;
+}
+
+function rangeText(lines: string[], range: TextRange | undefined, sigil: RegExp | null): string {
+  if (!range || range.start.line !== range.end.line) return '';
+  const line = lines[range.start.line - 1] ?? '';
+  const word = line.slice(range.start.character, range.end.character);
+  const lead = sigil?.exec(line.slice(0, range.start.character))?.[0] ?? '';
+  return word.startsWith(lead) ? word : lead + word;
+}
+
+function renamesOf(op: SemanticDiffOperation, oldLines: string[], newLines: string[], oldSigil: RegExp | null, newSigil: RegExp | null): Rename[] {
+  if (op.type !== 'renamed') return [];
+  return (op.spans ?? []).flatMap((span) => {
+    if (span.relation !== 'replaced') return [];
+    const oldName = rangeText(oldLines, span.old[0], oldSigil);
+    const newName = rangeText(newLines, span.new[0], newSigil);
+    if (!oldName || !newName || oldName === newName) return [];
+    const oldRows = span.old.map((range) => range.start.line);
+    const newRows = span.new.map((range) => range.start.line);
+    return [{ oldName, newName, oldStart: Math.min(...oldRows), oldEnd: Math.max(...oldRows), newStart: Math.min(...newRows), newEnd: Math.max(...newRows) }];
+  });
+}
+
 function mergeInto(target: Folded, change: Folded): void {
   if (target.changeType !== change.changeType) target.changeType = 'modified';
   const low = (x: number | null, y: number | null) => (x == null ? y : y == null ? x : Math.min(x, y));
@@ -126,8 +156,32 @@ export function semDiffChanges(
 ): SemanticDiffChange[] {
   const typed = TYPED_FILE.test(filePath);
   const named = (line: string) => declaredName(line, typed) ?? line;
-  const rows: Folded[] = operations.map((op, index) => {
+  const oldLines = oldText.split('\n');
+  const newLines = newText.split('\n');
+  const oldSigil = sigilFor(oldFilePath ?? filePath);
+  const newSigil = sigilFor(filePath);
+  const rows: Folded[] = operations.flatMap((op, index): Folded[] => {
     const link = links.find((candidate) => candidate.operationIndex === index);
+    const linked = link ? { origin: 'second-opinion' as const, band: link.band, model: link.model, candidateId: link.candidateId } : {};
+    const renames = renamesOf(op, oldLines, newLines, oldSigil, newSigil);
+    if (renames.length > 0) {
+      return renames.map((rename) => ({
+        entityId: null,
+        changeType: CHANGE_TYPE.renamed,
+        entityType: '',
+        entityName: rename.newName,
+        oldEntityName: rename.oldName,
+        filePath,
+        oldFilePath,
+        startLine: rename.newStart,
+        endLine: rename.newEnd,
+        oldStartLine: rename.oldStart,
+        oldEndLine: rename.oldEnd,
+        structuralChange: !SKIM_KINDS.includes(op.type),
+        ...linked,
+        folded: false,
+      }));
+    }
     const oldRange = op.lines.old[0];
     const newRange = op.lines.new[0];
     const oldEnd = op.lines.old.at(-1)?.end ?? null;
@@ -140,7 +194,7 @@ export function semDiffChanges(
     const name = helper || firstLine(newText, newRange?.start) || firstLine(oldText, oldRange?.start);
     const oldName = firstLine(oldText, oldRange?.start);
     const owner = helper || op.type === 'renamed' ? null : newRange ? enclosingName(newText, newRange.start, typed) : enclosingName(oldText, oldRange?.start, typed);
-    return {
+    return [{
       entityId: null,
       changeType: CHANGE_TYPE[op.type] ?? 'modified',
       entityType: '',
@@ -153,9 +207,9 @@ export function semDiffChanges(
       oldStartLine: oldRange?.start ?? null,
       oldEndLine: oldEnd,
       structuralChange: !SKIM_KINDS.includes(op.type),
-      ...(link ? { origin: 'second-opinion' as const, band: link.band, model: link.model, candidateId: link.candidateId } : {}),
+      ...linked,
       folded: owner !== null && !link,
-    };
+    }];
   });
   const out: Folded[] = [];
   const byName = new Map<string, Folded>();
