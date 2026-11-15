@@ -3,6 +3,7 @@
  * - full screen's Hide tools (the card gathered into the corner) stops a running recording, so no microphone stays
  *   open unseen, and what was said so far is transcribed into the reply;
  * - closing the thread's reply box while it says Transcribing keeps the take going: its words land in the draft;
+ * - a take belongs to the thread it was said in: another thread's box never gets its words, its line or its failure;
  * - Discard is the person dropping the reply, the take with it: nothing lands afterwards.
  *
  * No microphone and no transcription service: the window's own seam (voice.ts `browserDeps`) gets a scripted
@@ -15,13 +16,15 @@ import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxMessageWire, InboxProject, InboxThread } from '@plannotator/core/inbox-types';
 import type { FullScreenComposerValue } from './components/FullScreenComposer';
-import type { VoiceAnswer, VoiceDeps } from './voiceSession';
+import type { VoiceAnswer, VoiceDeps, VoiceLate } from './voiceSession';
 
 const hasDom = typeof document !== 'undefined';
 const { FullScreenComposer } = (hasDom ? await import('./components/FullScreenComposer') : {}) as typeof import('./components/FullScreenComposer');
 const { resetComposerState } = (hasDom ? await import('./fullScreenComposer') : {}) as typeof import('./fullScreenComposer');
 const { ThreadPane } = (hasDom ? await import('./components/Thread') : {}) as typeof import('./components/Thread');
 const { adoptVoiceSettings, browserDeps } = (hasDom ? await import('./voice') : {}) as typeof import('./voice');
+const { rememberMachine, resetMachineRoutes } = (hasDom ? await import('./inboxUrl') : {}) as typeof import('./inboxUrl');
+const { LATE_VOICE_MISSED, clearLateVoiceMiss } = (hasDom ? await import('./lateVoice') : {}) as typeof import('./lateVoice');
 
 const noop = () => {};
 let root: Root | null = null;
@@ -99,6 +102,9 @@ afterEach(() => {
   root = null;
   host = null;
   resetComposerState?.();
+  resetMachineRoutes?.();
+  clearLateVoiceMiss?.(THREAD);
+  clearLateVoiceMiss?.(OTHER);
   while (restore.length > 0) restore.pop()!();
 });
 
@@ -137,8 +143,9 @@ const PROJECT: InboxProject = { id: 'prj_1', key: 'ledger-abcdef', name: 'ledger
 describe.skipIf(!hasDom)("full screen's Hide tools", () => {
   let gather: (tucked: boolean) => void = noop;
   let words = '';
+  let late: VoiceLate[] = [];
 
-  function Harness() {
+  function Harness({ corner = true }: { corner?: boolean }) {
     const [tucked, setTucked] = useState(false);
     const [text, setText] = useState('');
     gather = setTucked;
@@ -147,13 +154,13 @@ describe.skipIf(!hasDom)("full screen's Hide tools", () => {
       threadId: 'thr_voice',
       phone: false,
       tucked,
-      onGather: () => setTucked(true),
+      onGather: corner ? () => setTucked(true) : undefined,
       fileKey: 'att_a:current',
       reply: {
         to: 'Claude Code',
         value: text,
         onChange: setText,
-        onLateVoice: noop,
+        onLateVoice: (outcome) => late.push(outcome),
         onSend: noop,
         sending: false,
         canSend: false,
@@ -196,6 +203,25 @@ describe.skipIf(!hasDom)("full screen's Hide tools", () => {
     await hear('said before hiding');
     expect(words).toContain('said before hiding');
   });
+
+  test('with no corner control, minimizing the card stops the recording before the card goes, and its words reach the reply', async () => {
+    late = [];
+    host = document.createElement('div');
+    host.className = 'pn-inbox';
+    document.body.appendChild(host);
+    act(() => {
+      root = createRoot(host!);
+      root.render(<Harness corner={false} />);
+    });
+    await settle();
+    await speak(host.querySelector('[data-fcomp] [data-voice-mic]')!);
+    await act(async () => (host!.querySelector('[data-fcomp-minimize]') as HTMLButtonElement).click());
+    await settle();
+    expect(host.querySelector('[data-fcomp]')).toBeNull();
+    expect(mic).toEqual(['stopped', 'transcribing']);
+    await hear('said before minimizing');
+    expect(late).toEqual([{ text: 'said before minimizing' }]);
+  });
 });
 
 describe.skipIf(!hasDom)("the thread's reply box while it says Transcribing", () => {
@@ -215,6 +241,22 @@ describe.skipIf(!hasDom)("the thread's reply box while it says Transcribing", ()
     };
     return { thread_id: THREAD, project: PROJECT, subject: asked.subject, thread_name: null, resolved_at: null, messages: [asked] };
   }
+
+  const other = (): InboxThread => ({ ...thread(), thread_id: OTHER, messages: thread().messages.map((m) => ({ ...m, id: OTHER, thread_id: OTHER })) });
+  const show = (value: InboxThread) =>
+    act(() => {
+      root!.render(
+        <div className="pn-inbox">
+          <ThreadPane thread={value} sent={null} onQuestions={noop} onChanged={async () => {}} onClose={noop} file={null} onOpenFile={noop} onOpenGuide={noop} />
+        </div>,
+      );
+    });
+  const openBox = async (el: HTMLElement) => {
+    const reply = [...el.querySelectorAll('.ib-pfoot button')].find((b) => /^(Reply|Edit draft)$/.test(b.textContent?.trim() ?? '')) as HTMLButtonElement;
+    await act(async () => reply.click());
+    await settle();
+  };
+  const boxText = (el: HTMLElement) => (el.querySelector('textarea:not([data-question-other])') as HTMLTextAreaElement | null)?.value ?? '';
 
   /** The thread with its reply box open, a take transcribing in it. */
   async function transcribing(): Promise<HTMLElement> {
@@ -254,19 +296,49 @@ describe.skipIf(!hasDom)("the thread's reply box while it says Transcribing", ()
 
   test('another thread opened meanwhile: the words go to the draft of the thread they were said in', async () => {
     const el = await transcribing();
-    const other = { ...thread(), thread_id: OTHER, messages: thread().messages.map((m) => ({ ...m, id: OTHER, thread_id: OTHER })) };
-    act(() => {
-      root!.render(
-        <div className="pn-inbox">
-          <ThreadPane thread={other} sent={null} onQuestions={noop} onChanged={async () => {}} onClose={noop} file={null} onOpenFile={noop} onOpenGuide={noop} />
-        </div>,
-      );
-    });
+    show(other());
     await settle();
     await hear('dictated words');
     expect(draftSaves().some((body) => body.includes('dictated words'))).toBe(true);
     expect(posted.some((p) => p.path.includes(OTHER) && String(p.body.body ?? '').includes('dictated words'))).toBe(false);
-    expect((el.querySelector('textarea:not([data-question-other])') as HTMLTextAreaElement | null)?.value ?? '').not.toContain('dictated words');
+    expect(boxText(el)).not.toContain('dictated words');
+  });
+
+  test("another thread's box opened before the words come: it starts clean, and the words still go to their own thread's draft", async () => {
+    const el = await transcribing();
+    show(other());
+    await settle();
+    await openBox(el);
+    expect(el.querySelectorAll('[data-voice-line]').length).toBe(0);
+    await hear('dictated words');
+    expect(boxText(el)).not.toContain('dictated words');
+    expect(posted.some((p) => p.path.includes(OTHER) && String(p.body.body ?? '').includes('dictated words'))).toBe(false);
+    expect(draftSaves().some((body) => body.includes('dictated words'))).toBe(true);
+  });
+
+  test('a take that fails after the person moved to another thread says so in its own thread, not in the one open', async () => {
+    const el = await transcribing();
+    show(other());
+    await settle();
+    await openBox(el);
+    expect(answer).not.toBeNull();
+    await act(async () => answer!({ code: 'voice_refused' }));
+    await settle();
+    expect(el.textContent).not.toContain(LATE_VOICE_MISSED);
+    show(thread());
+    await settle();
+    expect(el.textContent).toContain(LATE_VOICE_MISSED);
+  });
+
+  test("another machine's thread (no draft here): the words wait in the page and come back when its box opens", async () => {
+    rememberMachine([THREAD], 'ibx_01M4XXVG0ZCPSD10B1KPG7DPMB');
+    const el = await transcribing();
+    await act(async () => (el.querySelector('[data-reply-close]') as HTMLButtonElement).click());
+    await settle();
+    await hear('dictated words');
+    expect(el.textContent).not.toContain(LATE_VOICE_MISSED);
+    await openBox(el);
+    expect(boxText(el)).toContain('dictated words');
   });
 
   test('Discard drops the take with the reply: nothing lands afterwards', async () => {

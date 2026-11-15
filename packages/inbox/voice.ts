@@ -133,12 +133,18 @@ export interface VoiceHandle {
 /**
  * `ownsEscape` false: Esc stays with what covers the box (its status is out of sight, so it cannot be what Esc means).
  * `late`: a take being transcribed outlives its field, and this takes its words (voiceSession.ts `attach`). It can run
- * after this host is gone, with the last one it was given.
+ * after this host is gone, with the last one it was given, and is told the `key` the take's session was made for.
+ * `key`: another key is another session, so a take never moves to the next one's field (a thread's box, thread by
+ * thread); one still being transcribed goes on by itself into `late`.
  */
-export function useVoiceSession(ownsEscape = true, late?: (outcome: VoiceLate) => void): VoiceHandle {
+export function useVoiceSession(ownsEscape = true, late?: (outcome: VoiceLate, key?: string) => void, key?: string): VoiceHandle {
   const lateRef = useRef(late);
   lateRef.current = late;
-  const [session] = useState(() => createVoiceSession(browserDeps, late && ((outcome) => lateRef.current?.(outcome))));
+  const make = () => ({ key, session: createVoiceSession(browserDeps, late && ((outcome) => lateRef.current?.(outcome, key))) });
+  const [made, remake] = useState(make);
+  const current = made.key === key ? made : make();
+  if (current !== made) remake(current);
+  const session = current.session;
   const view = useSyncExternalStore(session.subscribe, session.view, session.view);
   const busy = view.phase !== 'idle';
   // Esc belongs to the voice control only while it is running, and this press only cancels: it does not also close

@@ -66,7 +66,7 @@ import { reportUnsentReply } from '../unsent';
 import { registerReloadFlush } from '../stalePage';
 import { clearLateVoiceMiss, LATE_VOICE_MISSED, noteLateVoiceMiss, useLateVoiceMiss } from '../lateVoice';
 import { replyBoxSetAside } from '../floaters/model';
-import { landInReplyDraft, landWordsInReplyDraft, replySendStarts, useReplyDraft, type ReplyBoxTook, type ReplyDraftFiles } from '../replyDraft';
+import { landInReplyDraft, landWordsInReplyDraft, takeHeldVoiceWords, replySendStarts, useReplyDraft, type ReplyBoxTook, type ReplyDraftFiles } from '../replyDraft';
 import { createTypedSaves, isTypedChange } from '../typedAnswers';
 import { conflictRevision, onPickConflict } from '../pickConflict';
 import { useReplyHasWords, useReplyTextStore, useReplyTextWhile } from '../replyText';
@@ -2907,8 +2907,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   }, []);
   useEffect(() => {
     // While a Send is on its way the box takes no words: these wait for it to end.
-    if (lateVoice.current.length === 0 || sending) return;
-    const waiting = lateVoice.current;
+    const waiting = boxRef.current.open && !sending ? [...lateVoice.current, ...takeHeldVoiceWords(thread.thread_id)] : lateVoice.current;
+    if (waiting.length === 0 || sending) return;
     lateVoice.current = [];
     if (!boxRef.current.open) {
       // What this pane knows of the draft can be behind a save still on its way (Cancel's): the Inbox's copy decides.
@@ -2927,7 +2927,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     changeReply(text, true);
     // changeReply reads this render's Send state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lateVoiceTick, sending]);
+  }, [lateVoiceTick, sending, box.open]);
   useEffect(() => {
     paneMounted.current = true;
     return () => {
