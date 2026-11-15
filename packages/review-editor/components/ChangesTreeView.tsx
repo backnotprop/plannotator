@@ -216,6 +216,11 @@ export const ChangesTreeView: React.FC<ChangesTreeViewProps> = (props) => {
         const entry = l.entries.get(path);
         if (entry?.kind === 'file') p.onDoubleClickFile?.(entry.index);
       },
+      onActivate: ({ path }) => {
+        const { props: p, layout: l } = live.current;
+        const entry = l.entries.get(path);
+        if (entry?.kind === 'file' && entry.file.path === p.activePath) p.onSelectFile(entry.index);
+      },
     },
   });
 

@@ -177,6 +177,13 @@ export const RepoTreeView: React.FC<RepoTreeViewProps> = (props) => {
         if (at !== undefined) p.onDoubleClickFile?.(at);
         else if (!path.endsWith(`/${LOADING}`)) p.onOpenRepoFile?.(path, { pin: true });
       },
+      onActivate: ({ path }) => {
+        const { props: p, changedIndex: index } = live.current;
+        if (path !== p.activePath || path.endsWith('/')) return;
+        const at = index.get(path);
+        if (at !== undefined) p.onSelectFile(at);
+        else p.onOpenRepoFile?.(path, { pin: false });
+      },
     },
   });
 

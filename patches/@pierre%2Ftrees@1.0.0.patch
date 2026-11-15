@@ -42,7 +42,7 @@ index 28da458..6689188 100644
  				this.#itemHandles.clear();
  				this.#invalidateKnownPathCaches();
 diff --git a/dist/model/publicTypes.d.ts b/dist/model/publicTypes.d.ts
-index 06d89e9..dace0e7 100644
+index 06d89e9..9f4b4db 100644
 --- a/dist/model/publicTypes.d.ts
 +++ b/dist/model/publicTypes.d.ts
 @@ -58,6 +58,7 @@ type FileTreeControllerBehaviorOptions = FileTreeStoreOptions & {
@@ -61,7 +61,7 @@ index 06d89e9..dace0e7 100644
    search?: boolean;
    searchFakeFocus?: boolean;
    searchBlurBehavior?: FileTreeSearchBlurBehavior;
-@@ -333,6 +335,39 @@ interface FileTreeRowDecorationContext {
+@@ -333,6 +335,40 @@ interface FileTreeRowDecorationContext {
    row: FileTreeVisibleRow;
  }
  type FileTreeRowDecorationRenderer = (context: FileTreeRowDecorationContext) => FileTreeRowDecoration | null;
@@ -95,6 +95,7 @@ index 06d89e9..dace0e7 100644
 +  renderParts?: (context: FileTreeRowDecorationContext) => FileTreeRowParts | null;
 +  onPartClick?: (event: FileTreeRowPartClickEvent) => void;
 +  onDoubleClick?: (event: FileTreeRowDoubleClickEvent) => void;
++  onActivate?: (event: FileTreeRowDoubleClickEvent) => void;
 +  gitStatusPlacement?: 'start' | 'end';
 +  nameTruncation?: 'middle' | 'end' | 'keep-tail';
 +}
@@ -185,7 +186,7 @@ index 0b41099..a745685 100644
  		searchEnabled: search === true,
  		searchFakeFocus: searchFakeFocus === true,
 diff --git a/dist/render/FileTreeView.js b/dist/render/FileTreeView.js
-index b4c7ee4..0ccedf1 100644
+index b4c7ee4..f63d39b 100644
 --- a/dist/render/FileTreeView.js
 +++ b/dist/render/FileTreeView.js
 @@ -362,11 +362,134 @@ function focusFirstMenuElement(menuElement) {
@@ -402,17 +403,18 @@ index b4c7ee4..0ccedf1 100644
  		key,
  		onContextMenu: contextMenuEnabled || dragAndDropEnabled ? (event) => {
  			if (shouldSuppressContextMenu()) {
-@@ -512,6 +652,9 @@ function renderStyledRow(frame, row, key, options = {}) {
+@@ -511,6 +651,10 @@ function renderStyledRow(frame, row, key, options = {}) {
+ 		} : void 0,
  		onClick: (event) => {
  			onRowClick(event, row, targetPath, mode);
- 		},
++			if (!event.shiftKey && !event.ctrlKey && !event.metaKey) rowsOptions?.onActivate?.({ path: targetPath, row });
++		},
 +		onDblClick: rowsOptions?.onDoubleClick == null ? void 0 : () => {
 +			rowsOptions.onDoubleClick({ path: targetPath, row });
-+		},
+ 		},
  		children: rowContent
  	});
- }
-@@ -519,7 +662,7 @@ function renderRangeChildren(frame, range, hiddenRowPaths) {
+@@ -519,7 +663,7 @@ function renderRangeChildren(frame, range, hiddenRowPaths) {
  	if (range.end < range.start) return [];
  	return frame.controller.getVisibleRows(range.start, range.end).filter((row) => !hiddenRowPaths.has(getFileTreeRowPath(row))).map((row, slotIndex) => renderStyledRow(frame, row, range.start + slotIndex));
  }
@@ -421,7 +423,7 @@ index b4c7ee4..0ccedf1 100644
  	"use no memo";
  	const contextMenuAnchorRef = useRef(null);
  	const contextMenuTriggerRef = useRef(null);
-@@ -695,6 +838,10 @@ function FileTreeView({ composition, controller, gitStatusByPath, ignoredGitDire
+@@ -695,6 +839,10 @@ function FileTreeView({ composition, controller, gitStatusByPath, ignoredGitDire
  		item: createContextMenuItem(row, targetPath),
  		row
  	}) ?? null, [renderRowDecoration]);
@@ -432,7 +434,7 @@ index b4c7ee4..0ccedf1 100644
  	const restoreContextMenuFocus = useCallback((restorePath) => {
  		const focusedButton = restorePath == null ? null : rowButtonRefs.current.get(restorePath) ?? null;
  		if (focusElement(focusedButton)) return true;
-@@ -1776,7 +1923,9 @@ function FileTreeView({ composition, controller, gitStatusByPath, ignoredGitDire
+@@ -1776,7 +1924,9 @@ function FileTreeView({ composition, controller, gitStatusByPath, ignoredGitDire
  		registerRenameInput,
  		renameView,
  		renderDecorationForRow,
@@ -442,7 +444,7 @@ index b4c7ee4..0ccedf1 100644
  		shouldSuppressContextMenu,
  		visualFocusPath
  	};
-@@ -1816,6 +1965,7 @@ function FileTreeView({ composition, controller, gitStatusByPath, ignoredGitDire
+@@ -1816,6 +1966,7 @@ function FileTreeView({ composition, controller, gitStatusByPath, ignoredGitDire
  			searchEnabled ? /* @__PURE__ */ jsx("div", {
  				"data-file-tree-search-container": true,
  				"data-open": isSearchOpen ? "true" : "false",
