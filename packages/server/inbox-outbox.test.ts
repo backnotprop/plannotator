@@ -465,9 +465,9 @@ describe("rule 8: every door write is classified, and only small JSON is held", 
     expect(doorWriteKind("cards/marks")).toBeNull();
     expect(doorWriteKind("cards")).toBeNull();
     // A linked machine's PR: closed, reopened or merged by that machine's gh / glab, never held. A thread's PRs are held.
-    for (const verb of ["close", "reopen", "merge"]) expect(doorWriteKind(`pulls/${verb}`)).toBe("forge");
+    // A review thread started there keeps its PRs there, never held either.
+    for (const verb of ["close", "reopen", "merge", "owner"]) expect(doorWriteKind(`pulls/${verb}`)).toBe("forge");
     expect(doorWriteKind("pulls/review")).toBeNull();
-    expect(doorWriteKind("pulls/owner")).toBeNull();
     expect(doorWriteKind("pulls/risk")).toBeNull();
     expect(doorWriteKind("threads/msg_1/pulls")).toBe("set");
     // A Combine, and a Tidy with the person's words, go now from the window or not at all: one held for days would

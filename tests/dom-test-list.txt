@@ -523,6 +523,7 @@ packages/ui/hooks/useLinkedDoc.revealSidebar.test.tsx
 packages/ui/hooks/useLinkedDoc.reapplyFilter.test.tsx
 packages/ui/hooks/useLinkedDoc.scrollRestore.test.tsx
 packages/ui/components/html-viewer/htmlLinkProtocol.test.tsx
+packages/ui/components/html-viewer/bridgePageNavigation.test.ts
 packages/editor/hooks/useAnnotationJump.test.tsx
 packages/ui/components/TableOfContents.linkedDoc.test.tsx
 packages/ui/components/MarkdownContentsRail.test.tsx
@@ -725,6 +726,7 @@ packages/inbox/prs/sheetTable.test.tsx
 packages/inbox/prs/sheetSelect.test.tsx
 packages/inbox/prs/sheetMerge.test.tsx
 packages/inbox/prs/sheetClose.test.tsx
+packages/inbox/prs/sheetReview.test.tsx
 packages/inbox/prs/stackPage.test.tsx
 packages/inbox/pulls/pullReviewRange.test.tsx
 packages/inbox/fileQuestionCards.test.tsx

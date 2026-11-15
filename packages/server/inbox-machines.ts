@@ -24,7 +24,7 @@
  *    (`link-back`, `unlink`).
  */
 
-import { INBOX_LINKED_MARKS, inboxRowArchived, isInboxId, type InboxAgentsGroup, type InboxCardWire, type InboxInitiative, type InboxListRow, type InboxMachineAccountsRead, type InboxTagColours } from "@plannotator/core/inbox-types";
+import { INBOX_LINKED_MARKS, inboxPullUrlOfKey, inboxRowArchived, isInboxId, type InboxAgentsGroup, type InboxCardWire, type InboxInitiative, type InboxListRow, type InboxMachineAccountsRead, type InboxTagColours } from "@plannotator/core/inbox-types";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { inboxSnoozeRefusal, inboxSnoozeRunning } from "@plannotator/core/inbox-snooze";
@@ -892,8 +892,10 @@ export function createInboxMachines(context: InboxMachinesContext) {
       }
     }
     if (kind === "forge") {
-      // A PR's close, reopen or merge as that machine's gh / glab: a press in this window, sent now or not at all. A
-      // close held for days would run when nobody is looking, and Undo's reopen is taken there only minutes after it.
+      // A PR's close, reopen or merge as that machine's gh / glab: a request that looks like this window's, sent now or
+      // not at all. That stops an agent's bare call, not a local program that imitates the window ("Accepted, not
+      // defended" in inbox-launch.md). A close held for days would run when nobody is looking, and Undo's reopen is
+      // taken there only minutes after it.
       if (!window) return json(INBOX_MACHINE_PULL_WINDOW_ONLY_BODY, 403);
       if (peer.state !== "online") return offline();
       delete body.serverSession;
@@ -904,8 +906,17 @@ export function createInboxMachines(context: InboxMachinesContext) {
         if (far.headers.get("idempotent-replayed") === "true") answer.headers.set("Idempotent-Replayed", "true");
         if (answer.ok) void machinePulls.reread(peer);
         return answer;
-      } catch {
-        return offline();
+      } catch (error) {
+        // Refused before it got there: nothing ran. Past its time (or the window left): it may have run there, as the
+        // gh call is not stopped with the request, so its board is read before anything is said.
+        const aborted = error instanceof Error && (error.name === "AbortError" || error.name === "TimeoutError");
+        if (!aborted) return offline();
+        const key = typeof body.key === "string" ? body.key : "";
+        const done = { "pulls/close": "closed", "pulls/reopen": "open", "pulls/merge": "merged" }[route];
+        const state = key ? await machinePulls.stateThere(peer, key) : null;
+        if (state !== null && state === done) return json({ ok: true, key, url: inboxPullUrlOfKey(key) ?? "", method: null });
+        const name = links.get(machine)?.name ?? "That machine";
+        return json({ error: `${name} did not answer in time. It may have run there: check the pull request.`, code: "pull_unconfirmed" }, 504);
       }
     }
     // A write that names this Inbox's thread, message, file or project in its body (a comment, a new message) is refused the same way.
@@ -1283,7 +1294,10 @@ export function createInboxMachines(context: InboxMachinesContext) {
     archivedPages,
     showArchivedCopies,
     /** Each linked machine's PR board (mark `pulls`), for the merged board (inbox-machine-pulls.ts). */
-    pullLists: (refresh: boolean) => machinePulls.lists(refresh),
+    pullLists: (refresh: boolean) => {
+      const snapshot = machinePulls.start(refresh);
+      return () => snapshot().map((entry) => ({ ...entry, name: links.get(entry.machine)?.name }));
+    },
     farCard,
     snoozeThread,
     /** The linked machine a device on this Inbox's door belongs to (a launch it starts here records it), or null. */

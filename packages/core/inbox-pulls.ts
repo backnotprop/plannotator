@@ -169,10 +169,11 @@ export interface InboxPullsAnswer {
   unsigned?: string[];
   /**
    * The merged board only (`?machines=1`, a machine linked): each linked machine that takes `pulls`, by `ibx_` id.
-   * `read_at`: when its board was last read (its PRs are that read's); `pending`: a read is under way, so ask again.
+   * `read_at`: when its board was last read (its PRs are that read's); `pending`: a read is under way, so ask again;
+   * `name`: what the person calls it (the bulk Merge confirm says which machine merges).
    * `looked`: it keeps the PR page's look at its PRs (mark `pulls-looked`); an older one is not sent it.
    */
-  machines?: Record<string, { read_at: string | null; pending: boolean; looked?: true }>;
+  machines?: Record<string, { read_at: string | null; pending: boolean; name?: string; looked?: true }>;
   /** The merged board only: the linked machines' risk judgments of the PRs they list, by pull key. */
   far_risk?: Record<string, InboxPullRiskJudgment>;
 }

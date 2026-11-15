@@ -478,11 +478,6 @@ export interface WhatsNewReleasesModel {
   fetched_at: string | null;
 }
 
-/** Where the What's new page loads one of the notes' saved images. */
-export function whatsNewImageUrl(version: string, src: string): string {
-  return inboxUrl(`/whats-new/image?version=${encodeURIComponent(version)}&src=${encodeURIComponent(src)}`);
-}
-
 export type { CloudflareAccessSettings, TailscaleSettings };
 
 /** Split (old beside new) or Unified (one column): the diff layout code review and guided reviews share. */
@@ -1053,6 +1048,7 @@ export function replyDraftSaveBody(
     files_add: files.add,
     files_remove: files.remove,
     files_place: files.place,
+    ...(files.order ? { files_order: files.order } : {}),
     ...(recipients !== undefined ? { recipients } : {}),
     // The message the reply quotes (approval "inbox-reply-quote"): null takes it away; absent, the draft keeps its own.
     ...(quote !== undefined ? { quote } : {}),
@@ -2006,8 +2002,8 @@ export const inboxApi = {
   /** One changed file's whole text at both ends of that diff, for its expand arrows, while it is the blobs (`old`, `new`) the patch on screen names. */
   pullFile: (key: string, scope: InboxPullDiffScope, path: string, pin: PatchBlobIds | { head: string }, signal?: AbortSignal, from?: string) =>
     get<InboxFileContents>(pullUrl('/pulls/file', key, `scope=${scope}${from ? `&from=${encodeURIComponent(from)}` : ''}&path=${encodeURIComponent(path)}&${'head' in pin ? `head=${pin.head}` : `old=${pin.oldId}&new=${pin.newId}`}`), signal),
-  /** The person started a PR's (a stack's open layers') review thread with an agent: `threadId` is the thread the review picker (or compose's New thread) just started for it. */
-  pullOwner: (keys: readonly string[], threadId: string, ask?: 'guide' | 'custom') => post<{ ok: true }>(inboxUrl('/pulls/owner'), { keys: [...keys], thread_id: threadId, ...(ask ? { ask } : {}) }),
+  /** The person started a review thread for PRs (a stack's open layers, or the board's picks of one repository); `machine`: the thread's, whose list has them. */
+  pullOwner: (keys: readonly string[], threadId: string, ask?: 'guide' | 'custom', machine: string | null = null) => post<{ ok: true }>(inboxUrl('/pulls/owner', undefined, machine), { keys: [...keys], thread_id: threadId, ...(ask ? { ask } : {}) }),
   /** Before a hand-off is sent: may these PRs go to an agent in `projectId`? (404 `pull_unknown`, 422 another project's.) */
   /**
    * Post a review to the PR on GitHub/GitLab (`POST /api/inbox/pulls/review`): the raw answer, which the review app's
@@ -2028,7 +2024,7 @@ export const inboxApi = {
   pullClose: (key: string, machine = pullMachine(key)) => post<{ ok: true; key: string; url: string }>(inboxUrl('/pulls/close', undefined, machine), { key }),
   /** Close's Undo: taken only on the machine that closed it, in the last few minutes, so it goes to the same `machine`. */
   pullReopen: (key: string, machine = pullMachine(key)) => post<{ ok: true; key: string; url: string }>(inboxUrl('/pulls/reopen', undefined, machine), { key }),
-  pullOwnerCheck: (keys: readonly string[], projectId: string) => post<{ ok: true }>(inboxUrl('/pulls/owner'), { keys: [...keys], project_id: projectId, validate_only: true }),
+  pullOwnerCheck: (keys: readonly string[], projectId: string, machine: string | null = null) => post<{ ok: true }>(inboxUrl('/pulls/owner', undefined, machine), { keys: [...keys], project_id: projectId, validate_only: true }),
   /** `machine`: a linked machine's look, through the cursor of its cards as read. */
   seeBoard: (throughSeq: number, machine?: string | null) => post<{ seen_seq: number }>(inboxUrl('/cards/seen', undefined, machine), { through_seq: throughSeq }),
   /** The Board's first-visit dialog: the first page on this computer to ask gets `show: true`, once per machine. */

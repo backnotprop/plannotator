@@ -56,7 +56,7 @@ export function drawMessageBody(d: MessageBodyData) {
       openInFiles={d.codeReview}
       {...(d.notes === null ? {} : { contextNotes: d.notes ? { onOpen: (note) => acts.current.noteChips(id).onOpen?.(note) } : {} })}
       repo={d.repo}
-      onOpenAttachment={(attachment) => acts.current.openFromMessage(attachment)}
+      onOpenAttachment={(attachment, start) => acts.current.openFromMessage(attachment, null, start ? () => acts.current.setPageStart({ id: attachment.id, start }) : undefined)}
       onOpenFileRef={d.fileRefs ? (ref) => acts.current.openFileRef(id, ref) : undefined}
       onOpenInlineImage={(image) => acts.current.openFromMessage(image)}
       onOpenOptionSet={(key, image, choice) => acts.current.openOptionSet(id, key, image, choice)}

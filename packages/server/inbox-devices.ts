@@ -201,11 +201,13 @@ const ALLOWLIST: readonly DoorRoute[] = [
   { method: "POST", route: /^cards\/seen$/, window: () => "/api/inbox/cards/seen", machineOnly: true },
   { method: "POST", route: /^cards\/dropped\/seen$/, window: () => "/api/inbox/cards/dropped/seen", machineOnly: true },
   // The PR board (mark `pulls`): a linked machine's window lists the PRs this Inbox's gh / glab lists, opens one (its
-  // diff, files, details, pictures), and closes, reopens or merges one of them here, as this computer's signed-in
-  // account. Those three run only for a press in that window (`window`); phones have no PR board.
+  // diff, files, details, pictures), closes, reopens or merges one of them here, as this computer's signed-in
+  // account, and ties PRs to a review thread it started here (`owner`, after the thread's start through
+  // `messages`). Those four run only with the window's mark (`window`), which stops a bare call, the relay and a phone
+  // (no PR board), not a program on that machine that imitates its window (inbox-launch.md "Accepted, not defended").
   { method: "GET", route: /^pulls$/, window: () => "/api/inbox/pulls", machineOnly: true },
   { method: "GET", route: /^pulls\/(risk|details|diff|file|repo-files|repo-file|avatar|media|media\/sizes)$/, window: (m) => `/api/inbox/pulls/${m[1]}`, machineOnly: true },
-  { method: "POST", route: /^pulls\/(close|reopen|merge)$/, window: (m) => `/api/inbox/pulls/${m[1]}`, machineOnly: true },
+  { method: "POST", route: /^pulls\/(close|reopen|merge|owner)$/, window: (m) => `/api/inbox/pulls/${m[1]}`, machineOnly: true },
   // "Changed since you looked" (approval "inbox-pr-dashboard"): the look at a PR lives on the machine that lists it.
   { method: "POST", route: /^pulls\/looked$/, window: () => "/api/inbox/pulls/looked", machineOnly: true },
   // A thread's PRs (approval "inbox-pr-binding"): read, added and removed on the thread's own machine.
