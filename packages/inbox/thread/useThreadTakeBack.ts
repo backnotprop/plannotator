@@ -4,7 +4,8 @@ import { takeBackOffered, useTakeBack } from '../takeBack';
 
 export interface ThreadTakeBackHost {
   threadId: string;
-  only: boolean;
+  /** The thread's messages: a reply whose answers ride on their questions is not offered. */
+  messages: readonly InboxMessageWire[];
   allowed: boolean;
   lastBlocked: (message: InboxMessageWire) => boolean;
   nameOf: (message: InboxMessageWire) => string;
@@ -19,6 +20,6 @@ export function useThreadTakeBack(host: ThreadTakeBackHost) {
   const takeBack = useTakeBack({ settle: host.settle, reload: host.reload, fill: (draft) => host.fill(draft.body, draft.files ?? []), compose: host.compose, changed: host.changed });
   useEffect(() => takeBack.clear(), [host.threadId]);
   const takeBackOf = (message: InboxMessageWire) =>
-    host.allowed && message.author.kind === 'person' && takeBackOffered(message, host.only) && !host.lastBlocked(message) ? () => void takeBack.take(message.id, host.nameOf(message)) : null;
+    host.allowed && message.author.kind === 'person' && takeBackOffered(message, host.messages.length === 1, host.messages) && !host.lastBlocked(message) ? () => void takeBack.take(message.id, host.nameOf(message)) : null;
   return { takeBack, takeBackOf };
 }

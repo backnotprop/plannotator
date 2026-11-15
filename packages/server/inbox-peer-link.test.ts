@@ -43,6 +43,8 @@ interface DoorScript {
   later?: string[];
   /** Its Board (`GET cards`). */
   cards?: () => Response;
+  /** Its archived threads (`GET threads/archived`). */
+  archived?: () => Response;
 }
 
 function door(script: DoorScript) {
@@ -60,6 +62,7 @@ function door(script: DoorScript) {
         stats.threads += 1;
         return script.threads ? script.threads() : Response.json({ cursor: script.cursor ?? 0, sections: [{ threads: [{ thread_id: "msg_a", project: { id: "prj_a" } }] }], projects: [] });
       }
+      if (route === "threads/archived" && script.archived) return script.archived();
       if (route === "cards" && req.method === "GET") {
         stats.cards += 1;
         return script.cards ? script.cards() : Response.json({ code: "device_route_not_found" }, { status: 404 });
@@ -412,6 +415,43 @@ describe("the list (rule 5)", () => {
     expect(new URLSearchParams(d.stats.eventAsks[0]).get("pins")).toBe("1");
     expect(told).toEqual(["pins"]);
     expect(pinsAtTold).toEqual(["msg_a"]);
+  });
+
+  test("its archived threads are read only when asked; asleep, it answers with the last page for that ask, away; an older door, nothing", async () => {
+    let awake = true;
+    const d = door({ cursor: 3, archived: () => (awake ? Response.json({ total: 1, threads: [{ thread_id: "msg_old", resolved_at: "2026-11-14T10:00:00Z" }], projects: [] }) : new Response("", { status: 503 })) });
+    const { peer } = link(d.url);
+    expect((await peer.archivedPage("?limit=21")).away).toBe(true);
+    peer.start();
+    await until("its list", () => peer.list !== null);
+    const first = await peer.archivedPage("?limit=21");
+    expect(first).toEqual({ machine: B, away: false, page: { total: 1, projects: [], threads: [expect.objectContaining({ thread_id: "msg_old", machine: B })] } });
+    awake = false;
+    expect(await peer.archivedPage("?limit=21")).toEqual({ ...first, away: true });
+    expect((await peer.archivedPage("?limit=41")).page).toBeNull();
+
+    const older = door({ cursor: 3 });
+    const { peer: old } = link(older.url);
+    old.start();
+    await until("its list", () => old.list !== null);
+    expect(await old.archivedPage("?limit=21")).toEqual({ machine: B, page: null, away: false });
+  });
+
+  test("its Show archived comes from its list, and a `show-archived` frame reads the list again before the windows hear it", async () => {
+    const told: string[] = [];
+    const d = door({
+      cursor: 3,
+      frames: ["event: show-archived\ndata: {}\n\n"],
+      threads: () => Response.json({ cursor: 3, sections: [], show_archived: d.stats.threads > 1 ? { on: true, rev: 4, by: B } : { on: false, rev: 3, by: B } }),
+    });
+    const { peer } = link(d.url, { onReread: (event) => void told.push(`${event}:${peer.list!.show_archived?.rev}`) });
+    peer.start();
+    await until("told", () => told.length === 1);
+    expect(new URLSearchParams(d.stats.eventAsks[0]).get("show-archived")).toBe("1");
+    expect(told).toEqual(["show-archived:4"]);
+    // An older Inbox's list says nothing about it.
+    peer.acceptList({ cursor: 4, sections: [] });
+    expect(peer.list!.show_archived).toBeNull();
   });
 
   test("a machine's stars and the marks it takes come from its list; an older Inbox's list says no marks", () => {

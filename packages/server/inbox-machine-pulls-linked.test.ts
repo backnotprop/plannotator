@@ -4,8 +4,9 @@
  * one PR on both. What regresses: a machine's PRs missing from the other's board, or the shared one shown twice; a
  * close, reopen or merge of the other machine's PR running this machine's gh (or none); a script, an agent or a phone
  * reaching the other machine's gh; Undo going anywhere but the machine that closed; a forge write held for an asleep
- * machine; an asleep machine's rows dropped; a thread's PRs on the other machine not read or changed there; the board
- * of an Inbox with no machine linked changing at all.
+ * machine; an asleep machine's rows dropped; a thread's PRs on the other machine not read or changed there; a look at
+ * the other machine's PR ("Changed since you looked") not kept there or not read back; the board of an Inbox with no
+ * machine linked changing at all.
  *
  * Starts Inboxes: CI runs it.
  */
@@ -152,6 +153,15 @@ describe("the PR board across linked machines (mark `pulls`)", () => {
         [WEB1, null],
         [WEB2, aId],
       ]);
+
+      // "Changed since you looked": A's window looks at B's PR. The look is kept on B (mark `pulls-looked`), so B's own
+      // board carries it, and A's merged board reads it back from B.
+      expect((await board(a.port)).machines[bId].looked).toBe(true);
+      const look = { key: API7, sha: "c".repeat(40), at: Date.now() };
+      expect((await press(a.port, `/api/inbox/m/${bId}/pulls/looked`, { seen: [look] })).status).toBe(200);
+      expect(((await board(b.port)).pulls as Json[]).find((p) => p.key === API7)!.looked).toEqual({ sha: look.sha, at: look.at });
+      await waitFor("B's look on A's board", async () => ((await board(a.port)).pulls as Json[]).find((p) => p.key === API7)?.looked?.sha === look.sha);
+      expect(((await board(a.port)).pulls as Json[]).find((p) => p.key === WEB2)!.looked).toBeUndefined();
 
       // A script or an agent on A (no window): refused here, nothing runs on B.
       const bare = await press(a.port, `/api/inbox/m/${bId}/pulls/close`, { key: API7 }, false);

@@ -588,7 +588,7 @@ export function cliArgvFor(kind: Exclude<SessionKind, 'plan'>, args: string | re
     case 'last':
       // `last` takes no words but `--tailscale` (the tool's `tailscale`, or a
       // person who typed it after /plannotator-last).
-      return ['plannotator', 'annotate-last', '--stdin', ...(words.includes('--tailscale') ? ['--tailscale'] : [])]
+      return ['plannotator', 'annotate-last', '--stdin', ...(words.includes('--tailscale') ? ['--tailscale'] : words.includes('--cloudflare-access') ? ['--cloudflare-access'] : [])]
   }
 }
 

@@ -1349,12 +1349,24 @@ button.ib-band:hover { background: var(--ib-band-hover-s, var(--ib-band)); }
 .ib-band .ib-n[data-new] { font-weight: 700; color: var(--foreground); }
 /* A group's chevron (owner, 2026-11-08, after approval "inbox-list-groups-close"): at the header's right end, as the
    chevrons were before (owner's pick). Hidden until the pointer is on the header (at once, as the sidebar's sections)
-   or keyboard focus lands on it (data-chev, GroupBand in InboxList.tsx).
+   or keyboard focus lands on it (data-chev, components/GroupBand.tsx).
    It points right closed and down open, as the sidebar's sections do. It fades in over 200 ms with a 3 px slide, and
    goes in 100 ms; always drawn, so nothing moves when it shows. Reduced motion: the fade only. */
 .pn-inbox .ib-band svg.ib-band-chev { margin-left: auto; width: 12px; height: 12px; stroke-width: 2.2; flex: none; opacity: 0; translate: -3px 0; transition: opacity 100ms ease-out, translate 100ms ease-out, rotate 160ms cubic-bezier(0.2, 0.8, 0.2, 1); }
 .pn-inbox .ib-band[data-chev] svg.ib-band-chev { opacity: 1; translate: 0 0; transition: opacity 200ms ease, translate 200ms cubic-bezier(0.23, 1, 0.32, 1), rotate 160ms cubic-bezier(0.2, 0.8, 0.2, 1); }
 .ib-band[aria-expanded="true"] .ib-band-chev { rotate: 90deg; }
+/* The Archived group's own lines (components/ArchivedGroup.tsx): "Show 20 more" and its quiet lines start where the
+   header's words do. A phone's archived row slides left over "Unarchive" (SwipeToUnarchive.tsx); the list scrolls
+   up and down through it (pan-y). */
+.ib-arcg-line { margin: 0; padding: 10px 12px; font-size: var(--ib-fs-13, 13px); line-height: 1.45; color: var(--muted-foreground); }
+.pn-inbox .ib-arcg-more { display: block; margin: 2px 0 4px; padding: 10px 12px; border-radius: 8px; font-size: var(--ib-fs-13, 13px); font-weight: 600; color: var(--foreground); text-align: left; }
+.pn-inbox .ib-arcg-more:hover { background: var(--ib-band-hover-s, var(--ib-band)); }
+.pn-inbox .ib-arcg-search { font: inherit; color: var(--foreground); text-decoration: underline; text-underline-offset: 2px; }
+.ib-arcswipe { position: relative; overflow: hidden; touch-action: pan-y pinch-zoom; }
+.ib-arcswipe-under { position: absolute; inset: 0; display: flex; align-items: center; justify-content: flex-end; gap: 6px; padding-right: 20px; background: var(--muted); color: var(--muted-foreground); font-size: var(--ib-fs-14, 14px); font-weight: 600; visibility: hidden; }
+.ib-arcswipe[data-swiping] .ib-arcswipe-under { visibility: visible; }
+.ib-arcswipe[data-armed] .ib-arcswipe-under { background: var(--primary); color: var(--primary-foreground); }
+.ib-arcswipe-face { position: relative; background: var(--background); }
 @media (prefers-reduced-motion: reduce) {
   .pn-inbox .ib-band svg.ib-band-chev, .pn-inbox .ib-band[data-chev] svg.ib-band-chev { translate: none; transition-property: opacity; }
 }
@@ -3589,6 +3601,29 @@ body:has([data-shape-layer] .shp-pill) .ib-toast:not(.ib-toast-phone) { bottom: 
   .ib-pull-dot svg, .ib-pull[data-state="refreshing"] .ib-pull-dot svg { transform: none; animation: none; }
 }
 
+/* Swipe a thread row on a touch screen (rowSwipe.ts): the row follows the finger (its transform, written by the
+   script) over one action layer the script puts under it: Quiet (or Mark unread) on the left, Archive on the right.
+   A vertical drag stays the browser's (pan-y; a pinch still zooms). The layer is hidden until a swipe shows a side
+   (`data-side`), so its buttons are out of reach and out of the accessibility tree until then. */
+.ib-lbody > .ib-group > :is(.ib-mrow, .ib-rw) { touch-action: pan-y pinch-zoom; }
+/* Opaque at once (a button's colour transition would let the layer show through the row as it starts to move). */
+.ib-lbody > .ib-group > .ib-mrow[data-swipe] { background: var(--card); transition: none; }
+.ib-swl { position: absolute; top: 0; left: 0; width: 0; height: 0; overflow: hidden; visibility: hidden; pointer-events: none; }
+.ib-swl[data-side] { visibility: visible; }
+.ib-swa { position: absolute; inset: 0; display: flex; align-items: stretch; padding: 0; border: 0; font: inherit; visibility: hidden; pointer-events: auto; -webkit-tap-highlight-color: transparent; }
+.ib-swl[data-side="lead"] > .ib-swa-lead, .ib-swl[data-side="trail"] > .ib-swa-trail { visibility: visible; }
+.ib-swa-trail { justify-content: flex-end; }
+.ib-swa-in { display: flex; align-items: center; justify-content: center; width: 96px; flex: none; }
+.ib-swa-v { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 550; line-height: 1.2; white-space: nowrap; }
+.ib-swa-lead .ib-swa-v { display: none; }
+.ib-swl[data-lead="read"] .ib-swa-lead .ib-swa-v[data-v="read"], .ib-swl[data-lead="mark-unread"] .ib-swa-lead .ib-swa-v[data-v="mark-unread"] { display: flex; }
+.ib-swa-v svg { transition: scale 150ms ease-out; }
+.ib-swl[data-armed] .ib-swa-v svg { scale: 1.15; }
+/* The right swipe's look (Quiet): a calm neutral tint, quieter than Archive's. */
+.ib-swa-lead { background: color-mix(in oklch, var(--muted) 85%, var(--card)); color: var(--foreground); }
+.ib-swa-trail { background: var(--primary); color: var(--primary-foreground); }
+@media (prefers-reduced-motion: reduce) { .ib-swa-v svg { transition: none; } }
+
 /* ───────────── The Inbox on a phone ─────────────
    One screen at a time, like a mail app: the list, then a thread (Back to
    the list), then a file (Back to the thread). The query is PHONE_QUERY in
@@ -4007,6 +4042,9 @@ body:has([data-shape-layer] .shp-pill) .ib-toast:not(.ib-toast-phone) { bottom: 
   .ib-pm-scrim { display: block; position: fixed; inset: 0; z-index: 79; background: rgb(0 0 0 / 0.3); }
   .ib-pm-pos[data-phone] { position: fixed !important; left: var(--ib-sheet-inset) !important; right: var(--ib-sheet-inset) !important; top: auto !important; bottom: calc(var(--ib-sheet-inset) + env(safe-area-inset-bottom)) !important; transform: none !important; width: auto !important; }
   .ib-pm-pos[data-phone] .ib-pm { min-width: 0; padding: 6px; border-radius: var(--ib-sheet-corner, 12px); animation: var(--ib-sheet-rise); }
+  /* Every bottom sheet (a ⋮ or ⋯ menu, a Tidy-style popover) rises from the bottom, so one taller than a short phone's
+     screen would put its first items above the top edge. It stops below the top and scrolls inside; the page stays. */
+  .ib-pm-pos[data-phone] .ib-pm, .ib-tidy-pos[data-phone] .ib-tidy { max-height: calc(100vh - 2 * var(--ib-sheet-inset) - env(safe-area-inset-top) - env(safe-area-inset-bottom)); max-height: calc(100dvh - 2 * var(--ib-sheet-inset) - env(safe-area-inset-top) - env(safe-area-inset-bottom)); overflow-y: auto; overscroll-behavior: contain; }
   @keyframes ib-pm-up { from { transform: translateY(16px); opacity: 0; } to { transform: none; opacity: 1; } }
   @media (prefers-reduced-motion: reduce) { .ib-pm-pos[data-phone] .ib-pm { animation: none; } }
   .ib-pm-pos[data-phone] .ib-pm-title { display: block; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); padding: 6px 10px 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

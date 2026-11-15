@@ -4,6 +4,8 @@ import { shortTime } from '../format';
 import { Icon, TailscaleMark } from '../icons';
 import { PairFlow } from './PairFlow';
 import { Tip } from './Tip';
+import { ThroughCloudflare } from './ThroughCloudflare';
+import { Switch } from './SettingSwitch';
 
 const PLATFORM: Record<string, string> = { ios: 'iPhone', android: 'Android' };
 
@@ -188,21 +190,6 @@ export function devicesNeedAttention(phones: PhonesState | null, tailscale: Tail
 }
 
 /** A switch whose name is its row's visible title (label in name). */
-function Switch({ on, labelledBy, disabled, onClick, label }: { on: boolean; labelledBy?: string; label?: string; disabled?: boolean; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      className="ib-sw"
-      aria-checked={on}
-      aria-labelledby={labelledBy}
-      aria-label={label}
-      disabled={disabled}
-      onClick={onClick}
-    />
-  );
-}
-
 /**
  * Over your tailnet, in Devices: the browser on your other devices, which
  * the phone app does not need (owner, decision 2: written out). One switch,
@@ -230,11 +217,17 @@ function OverYourTailnet({
   return (
     <section className="ib-sgroup" data-settings-tailscale={state.on ? 'on' : 'off'} aria-labelledby="ib-g-tailscale">
       <h2 id="ib-g-tailscale">Over your tailnet</h2>
-      <p>Open the Inbox window in a browser on your laptop or tablet, through Tailscale, over HTTPS. Your phone&apos;s app does not need this.</p>
+      <p>
+        Open the Inbox window in a browser on your laptop or tablet, through{' '}
+        <a href="https://tailscale.com/" target="_blank" rel="noreferrer">
+          Tailscale
+        </a>
+        , over HTTPS. Your phone&apos;s app does not need this.
+      </p>
       <div className="ib-card">
         <div className="ib-prow">
           <span className="ib-tile">
-            <Icon name="globe" />
+            <TailscaleMark />
           </span>
           <span className="ib-txt">
             <span className="ib-l">
@@ -486,6 +479,7 @@ export function DevicesSection({ phones, tailscale, via, tailscaleBusy, onToggle
         </>
       )}
       {tailscale && <OverYourTailnet state={tailscale} via={via} busy={tailscaleBusy} onToggle={onToggleTailscale} />}
+      <ThroughCloudflare />
     </>
   );
 }

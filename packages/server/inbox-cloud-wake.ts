@@ -160,7 +160,7 @@ export function createInboxCloudWake(options: {
         lastWake.set(threadId, 0);
         settle({ state: "key_rejected", status: answer.status });
         agents.markKeyRejected(agent.session);
-        log(`The cloud agent "${agent.name}" refused its key. Paste the new key in Settings → Devices.`);
+        log(`The cloud agent "${agent.name}" refused its key. Paste the new key in Settings → Remote devices.`);
         return null;
       case "failed":
         giveBack();

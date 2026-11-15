@@ -80,6 +80,7 @@ import { CommentCount, EarlierSection, commentsLabel } from './EarlierSection';
 import { earlierCommentsOn } from '../earlierComments';
 import { FullScreenMore } from './OpenIn';
 import { fileSwipeMode, prefersReducedMotion, useFileSwipe } from '../fileSwipe';
+import { useTouchStepBar } from '../touchStepBar';
 import { FileSwipeCard } from './FileSwipeCard';
 import { ImageSwipePeek, isImageStep } from './ImageSwipePeek';
 import { OptionCaption } from './OptionCaption';
@@ -465,6 +466,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   const [menuOpen, setMenuOpen] = useState(false);
   /** Full screen (approval "inbox-one-fullscreen"): the file fills the window under one floating toolbar. */
   const full = props.full;
+  const touch = useTouchStepBar(phone, multi && !(full && optionSet));
   /** Full screen's composer: an image, a film, a recording and an HTML page draw it (the comment row of the first three goes inside it). */
   const hasComposer = full && !!props.composer && (kind === 'image' || kind === 'video' || kind === 'audio' || kind === 'html');
   /**
@@ -906,7 +908,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   // peeks in beside it, and a drag down closes, even with one file.
   const imageEdges = useRef<ImageSwipeEdges | null>(null);
   const isImageFile = kind === 'image';
-  const swipeOn = full && phone && (multi || isImageFile) && swipeMode === 'follow' && !blocked && !sheet;
+  const swipeOn = (full && phone ? multi || isImageFile : touch.tablet && multi) && swipeMode === 'follow' && !blocked && !sheet;
   /** The neighbour that way is an image drawn whole beside this one (ImageSwipePeek), not the "Next · name" card. */
   const peeks = (dir: 1 | -1) => {
     const neighbour = steps[index + dir];
@@ -938,7 +940,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     // One image alone has nowhere to step: a sideways drag is the image's own.
     keeps: isImageFile ? (dir) => !multi || (imageEdges.current?.keeps(dir) ?? false) : undefined,
     peek: peeks,
-    dismiss: isImageFile
+    dismiss: isImageFile && phone
       ? {
           can: () => imageEdges.current?.canDismiss() ?? false,
           onDismiss: () => closeRef.current(),
@@ -2563,7 +2565,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
         <div
           ref={docAreaRef}
           className={`ib-docarea${isHtml ? ' ib-html' : ''}`}
-          data-file-swipe={full && phone && multi ? swipeMode : undefined}
+          data-file-swipe={((full && phone) || touch.tablet) && multi ? swipeMode : undefined}
           data-image-peek={swipeOn && isImage && multi ? '' : undefined}
         >
           {error && (
@@ -2748,8 +2750,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
               onError={setError}
               initialFit={memory.current.get(attachment.id)?.fit}
               onFitChange={(fit) => remember(attachment.id, { fit })}
-              // A phone in full screen: the pane's follow swipe (above); elsewhere a touch screen's swipe at Fit.
-              onSwipe={multi && !(full && phone) ? (dir) => step(dir, 'key') : undefined}
+              // A phone in full screen and a touch tablet: the pane's follow swipe (above); elsewhere a touch screen's swipe at Fit.
+              onSwipe={multi && !(full && phone) && !touch.tablet ? (dir) => step(dir, 'key') : undefined}
               edgesRef={imageEdges}
               onShown={swipe.settle}
               wheelHint={wheelHint}
@@ -3118,9 +3120,9 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
         />
       )}
       {full ? null : <div />}
-      {!full && multi ? (
-        // Beside the thread: the stepper in the bar under the file.
-        <div className="ib-vfoot" data-view-foot="">
+      {multi && (!full || touch.bar) ? (
+        // Beside the thread, and full screen on a touch tablet (touchStepBar.ts): the stepper in the bar under the file.
+        <div className="ib-vfoot" data-view-foot="" data-touch-bar={touch.bar ?? undefined}>
           <AttachmentStepper
             steps={steps}
             index={index}
@@ -3133,9 +3135,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
             annotationCounts={annotationCounts}
           />
         </div>
-      ) : full ? null : (
-        <div />
-      )}
+      ) : full ? null : <div />}
       {full && optionSet && (
         // A question's picture choices: the caption names the choice on screen for as long as the set is open (in place of the chip).
         <OptionCaption set={optionSet} index={index} phone={phone} onStep={(dir) => {
@@ -3144,8 +3144,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
         }}
         />
       )}
-      {full && !optionSet && (
-        // The step chip (full screen only): names the new file for a moment, the end note at the ends (a one-file thread: its name once, as full screen starts). The live region says it.
+      {full && !optionSet && !touch.bar && (
+        // The step chip (full screen without a touch bar): names the new file for a moment, the end note at the ends (a one-file thread: its name once, as full screen starts). The live region says it.
         <div className={`ib-fvchip${chip ? ' ib-on' : ''}`} aria-hidden="true" data-full-view-chip={chip ? 'shown' : 'hidden'}>
           {multi && (
             <span className="ib-stepn">
@@ -3164,7 +3164,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
           )}
         </div>
       )}
-      {full && phone && multi && <FileSwipeCard swipe={swipe} steps={steps} index={index} skip={peeks} />}
+      {((full && phone) || touch.tablet) && multi && <FileSwipeCard swipe={swipe} steps={steps} index={index} skip={peeks} />}
       {full && phone && menuOpen && phonePeekHost
         ? createPortal(
             <div className="pn-inbox-peek">

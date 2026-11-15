@@ -71,6 +71,7 @@ import {
 import { handleInboxServerReady, startInboxServer } from "@plannotator/server/inbox";
 import { INBOX_DB_FILE, InboxReturnError, inboxReturnFailedWords } from "@plannotator/shared/inbox/store-log/sqlite-return/return";
 import { exposureWarning, type InboxTailscaleState } from "@plannotator/server/inbox-tailscale";
+import { describeCfAccessRecord, runCfAccessCommand } from "./inbox-cf-access-command";
 import { openBrowser, openBrowserDetached } from "@plannotator/server/browser";
 import { isRemoteSession } from "@plannotator/server/remote";
 import { assertTestHome } from "@plannotator/server/test-home-guard";
@@ -560,6 +561,7 @@ async function statusCommand(dataDir: string, asJson: boolean): Promise<number> 
       version: status.state === "running" ? status.health.version : (entry?.version ?? null),
       started_at: entry?.startedAt ?? null,
       tailnet_url: status.state === "running" ? (entry?.tailscale?.url ?? null) : null,
+      ...(status.state === "running" && entry?.cloudflare_access ? { cloudflare_access: entry.cloudflare_access } : {}),
       data_dir: dataDir,
       record: inboxRegistryPath(dataDir),
       cli_version: cliVersion,
@@ -580,6 +582,7 @@ async function statusCommand(dataDir: string, asJson: boolean): Promise<number> 
     out(status.state === "running" ? "Plannotator Inbox: running" : `Plannotator Inbox: not answering (pid ${live.pid} holds port ${live.port} but did not answer)`);
     out(`  URL:      ${live.url}`);
     if (status.state === "running" && live.tailscale?.url) out(`  tailnet:  ${live.tailscale.url}`);
+    if (status.state === "running" && live.cloudflare_access) out(`  cloudflare: ${describeCfAccessRecord(live.cloudflare_access)}`);
     out(`  pid:      ${live.pid}`);
     out(`  version:  ${status.state === "running" ? status.health.version : live.version}`);
     out(`  started:  ${live.startedAt}`);
@@ -821,6 +824,10 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
 
   if (args[0] === "icon") {
     process.exit(await runInboxIconCommand(args.slice(1), { json: assets.json === true, ensureRunning: () => ensureInboxRunning(dataDir) }));
+  }
+
+  if (args[0] === "cloudflare-access") {
+    process.exit(await runCfAccessCommand(args.slice(1), { dataDir, json: assets.json === true, ensureRunning: () => ensureInboxRunning(dataDir) }));
   }
 
   if (args[0] === "link" || args[0] === "unlink") {
