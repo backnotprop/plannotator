@@ -71,10 +71,10 @@ import { adoptRestartedInbox, type RestartHello } from './sessionAdopt';
 import { listsThread, newRecordBatch, noteOwnRecord, noteRecord, openThreadRead } from './openThreadReads';
 import { archivedRowPatch, patchShownRow, readRowPatch, shownRowOf } from './rowActions';
 import { createOwnSaves } from './ownSaves';
-import { createSignal } from './signal';
+import { createKeyedSignal } from './signal';
 import { keepSame } from './listSame';
 import { draftsReadOwed, replyDraftsDiffer, unsentThreads } from './draftsReads';
-import { machinesModel, machineTakes, rowSnoozes, snoozeBlockedBy, threadAwayLine, threadOutbox } from './machines';
+import { machinesModel, rowSnoozes, snoozeBlockedBy, threadAwayLine } from './machines';
 import { ASK_AGENT_TO_UPDATE, ASK_AGENT_TO_UPDATE_THREAD, MachineUpdateDialog } from './components/MachineUpdate';
 import { discardPreparedInboxEvents, prepareInboxEvents } from './sharedEvents';
 import { flatRows, readListView, useListView, type ListSort } from './listView';
@@ -108,7 +108,7 @@ import { InitiativeTagsContext, LiveInitiativesContext, type InitiativeTags } fr
 import { SidebarShell } from './shell/SidebarShell';
 import { InboxList } from './components/InboxList';
 import { useTidy } from './components/Tidy';
-import { ThreadPane } from './components/Thread';
+import { ThreadSlot } from './thread/ThreadSlot';
 import { openPaneUnsaved } from './components/AttachmentPane';
 import { isNewTabClick } from '@plannotator/ui/components/LocalLinkContext';
 import { inboxLinkHash } from './links';
@@ -126,7 +126,9 @@ import { TourBar, TourCoach, TourLoading, TourMain, TourNavigation, loadTour, to
 import { TourEntry, tourEntryModel } from './tour/TourEntry';
 import { TOUR_FIT_LINES, TOUR_FIT_TITLE, TourIntro } from './tour/Fit';
 import { TOUR_COMPOSE_STEP, TOUR_FIRST_QUESTION_PROMPT, TOUR_PROJECT_ID, TOUR_SETTINGS_STEP, TOUR_START, TOUR_STEPS, TOUR_THREAD, tourCanBack, tourCanForward, tourCoach, tourCoachSpeech, tourReducer, type TourAction, type TourDegraded, type TourUi } from './tour/model';
-import { ThreadWait } from './components/ThreadWait';
+import { MAIN_PANE, paneThread } from './panes/model';
+import { createPanesOnScreen } from './panes/onScreen';
+import { useRoutePanes } from './panes/useRoutePanes';
 import { EmptyThreadPanel } from './components/EmptyThreadPanel';
 import { AgentNoteDialog } from './components/AgentNoteDialog';
 import { ConnectLine } from './components/ConnectLine';
@@ -141,7 +143,6 @@ import type { InboxAgentRow, InboxAgentsModel, InboxPull, InboxPullStack, InboxT
 import { ScheduledRoute, useScheduledOn } from './scheduled/ScheduledPage';
 import { SettingsPage } from './components/Settings';
 import { createStepsBus } from './steps/useThreadSteps';
-import { threadBoardCard } from './steps/model';
 import { ArchivedBlock } from './components/Archived';
 import { NotificationAsk, TabSleptLine } from './components/NotificationAsk';
 import { useInboxNotifications } from './notify';
@@ -182,7 +183,6 @@ import { snoozeWrites } from './snoozeWrites';
 import { agentWrites, type AgentDeleteAsk } from './agentWrites';
 import { joinThreadRead, useStaleOpenRead, type ThreadFlight } from './threadFlights';
 import { sameSettings, settingsReadAtLoad, takeSettingsAtLoad } from './settingsAtLoad';
-import { openTakenBack } from './takenBackCompose';
 import { restartInbox } from './restartInbox';
 import { errorToast } from './toastError';
 import { useBulkWrites } from './components/useCombines';
@@ -192,7 +192,6 @@ import { AgentDeleteDialog } from './agents/AgentDeleteDialog';
 import { agentDeleteThreads } from './agents/agentDelete';
 import { threadLink, type RowMenuAction } from './rowMenu';
 import { movePin, sameMachinePins, unpinnedWhere } from './pins';
-import { priorityAction } from './priority';
 import { noteStarred } from './starPop';
 import type { PinnedAction } from './components/PinnedRow';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
@@ -206,9 +205,7 @@ import { LIST_MIN_WIDTH, THREAD_BESIDE_FILE_WIDTH, paneGutters, useStack } from 
 import { usePrPaneFocus } from './pulls/prPaneFocus';
 import { threadPanelShows, useThreadPanel } from './threadPanel';
 import { ListColumnEdge } from './shell/ListColumnEdge';
-import { backBy, backTo, settleLanding } from './history';
-import { sameScreenAnyView } from './fileView';
-import { fileEntryOp, fullExitFile, fullFromSide, pageBackPastSwitch, type FrameMove } from './fullScreenOrigin';
+import { backTo, settleLanding } from './history';
 import { adoptSavedTheme, useInboxThemePick } from './theme';
 import { adoptSavedDiffOptions } from './diffOptions';
 import { adoptSavedTextSize } from './textSize';
@@ -253,7 +250,6 @@ import { TabIconChoice } from './components/TabIconChoice';
 import { useTabIconChoice } from './tabIconChoice';
 import { ThemeChooser } from './components/ThemeChooser';
 import { openThemeSettings, useThemeChooser } from './themeChooser';
-import { CardChip } from './board/CardChip';
 import { boardInitiativeOf, cardsInInitiative, liveInitiatives, newCardProject } from './board/model';
 import { tagsAcross } from './tagsAcross';
 import { tagById, tagHref, tagListSummary, tagThreadCounts, thisInboxTags, ThreadTagsContext } from './threadTags';
@@ -281,7 +277,7 @@ import { emitFloaterEvent } from './floaters/model';
 import { setSessionLabels } from './sessionLabels';
 import { setSessionTitles } from './sessionTitles';
 import { createInboxShapeHost } from './shape/inboxShapeHost';
-import { ShapeGridPage, ShapePebbleButton } from './shape/ShapeParts';
+import { ShapeGridPage } from './shape/ShapeParts';
 import { ThreadShapeLayer, ThreadShowMeBox, useThreadShowMe } from './shape/ThreadShapeLayer';
 import { setReviewSkillsDiagrams, setReviewSkillsShape } from './skills';
 import { showMeBoardOpensIn } from './shape/showMeOpensIn';
@@ -295,7 +291,7 @@ import { connectCommand } from './connectPrompt';
 import { SIDEBAR_OPEN_COOKIE, HIDE_AWAY_MACHINES_COOKIE, COMPOSE_LAST_COOKIE, DRAFTS_REFRESH_MS, EMPTY_SET, REFRESH_SPIN_MS, RECONNECT_SAY_GAP_MS, STALE_NOT_SAVED_MS, AGENTS_SESSIONS_REFRESH_MS, SEEN_RETRIES, SEEN_RETRY_MS, LOOK_RECORD_WAIT_MS, RECORD_PAUSE_MS, WHATS_NEW_RETRIES, WHATS_NEW_RETRY_MS, WHATS_NEW_RELEASES_RETRIES, WHATS_NEW_RELEASES_RETRY_MS, THREAD_READ_RETRY_MS, THREAD_READ_TIMEOUT_MS, FIRST_LIST_WAIT_MS, UNSENT_TOAST_MS, UNLISTED_WAIT_MS, type ThreadLoad } from './app/constants';
 import { shapeFrameListeners, subscribeShapeFrames } from './app/shapeFrames';
 import { readRoute, routeOf, type Route } from './app/route';
-import { hashOf, currentHash, writeRoute } from './app/writeRoute';
+import { hashOf, writeRoute } from './app/writeRoute';
 import { TOUR_ENDED_STATE, settleTourEntry, settleOldExperimental, settleMovedSettings, stripStrayMsg, stripClickSignal, REVIEWS_AFTER_STORE_MS, REVIEWS_AFTER_STORE_MAX_MS, settleReviewsAlias } from './app/boot';
 import { closeTo, covering, listCovered, rowElement, tourPageInFront, focusAfterOpen, SETTINGS_LATE_MS, FIRST_RUN_AGENTS_REFRESH_MS, FIRST_RUN_AGENTS_MIN_GAP_MS, platformOf, replyInProgress, listIntroHeldBack } from './app/focus';
 export { THREAD_READ_RETRY_MS, THREAD_READ_TIMEOUT_MS } from './app/constants';
@@ -472,12 +468,14 @@ function Inbox() {
       return next;
     });
   }, []);
+  /** The thread panes (panes/model.ts): the main pane shows the address's thread. */
+  const panes = useRoutePanes(route.thread ?? null);
   /**
    * The open thread as the cache holds it (data/queries/thread.ts): its read, with the stream's records applied in
    * place since. Its own list row (an archived thread has none in the list) and a launched thread's run line (null
    * while the agent rests) come with it.
    */
-  const openHeld = useHeldThread(route.thread ?? null);
+  const openHeld = useHeldThread(paneThread(panes, MAIN_PANE));
   const thread = openHeld?.thread ?? null;
   const threadRow = openHeld?.row ?? null;
   const threadRun = useMemo(
@@ -545,8 +543,6 @@ function Inbox() {
     if (liveThreadRetry.current) clearTimeout(liveThreadRetry.current.timer);
     liveThreadRetry.current = null;
   }, []);
-  /** Focus was in the thread's place when it gave way to the thread: it goes to the thread's subject. */
-  const focusThreadSubject = useRef(false);
   /** Try again on the placeholder: the open effect reads the thread at once. */
   const [threadRetry, setThreadRetry] = useState(0);
   /** When the open thread's first 404 waited for linked machines' lists (UNLISTED_WAIT_MS); cleared as it opens or closes. */
@@ -744,8 +740,8 @@ function Inbox() {
    * records that need only the files, a re-read of the thread. Signals draw nothing: a read that brings nothing new
    * leaves the window as it is.
    */
-  const [draftSignal] = useState(createSignal);
-  const [filesSignal] = useState(createSignal);
+  const [draftSignals] = useState(createKeyedSignal);
+  const [filesSignals] = useState(createKeyedSignal);
   const [draftsError, setDraftsError] = useState<string | null>(null);
   const [lastSent, setLastSent] = useState<string | null>(() => storage.getItem(COMPOSE_LAST_COOKIE));
   /** The one toast (Mark read, Archive) with its Undo, and what the live region last said. */
@@ -779,8 +775,8 @@ function Inbox() {
   const [staleReloading, setStaleReloading] = useState(false);
   /** The thread whose reply box opens once it is on screen (the warning toast's Reply). */
   const [replyFor, setReplyFor] = useState<string | null>(null);
-  /** The thread pane on screen and whether anything covers it (ThreadPane's `onScreenChange`). */
-  const threadOnScreenRef = useRef<{ threadId: string; covered: boolean } | null>(null);
+  /** Each pane's thread on screen and whether anything covers it (panes/onScreen.ts). */
+  const [panesOnScreen] = useState(createPanesOnScreen);
   const [openThreadCovered, setOpenThreadCovered] = useState(false);
   const notifications = useInboxNotifications({
     settings: settings?.notifications ?? null,
@@ -791,10 +787,7 @@ function Inbox() {
     // Another Inbox tab in front raises what arrives; this one stays quiet.
     otherTabInFront: () => sound.otherTabInFront(),
     // A question in the thread the person has open and visible raises nothing (the tab in front is notify.ts's check).
-    threadOnScreen: (threadId) => {
-      const pane = threadOnScreenRef.current;
-      return pane !== null && pane.threadId === threadId && !pane.covered && routeRef.current.thread === threadId;
-    },
+    threadOnScreen: (threadId) => panesOnScreen.shows(threadId) && routeRef.current.thread === threadId,
     onSettings: (next) => setSettings((current) => (current ? { ...current, notifications: next } : current)),
     // A click on a notification: the thread opens, and the list on screen catches up, even with a
     // thread open. The one exception to "the list holds still while a thread is open" (settle.ts):
@@ -1220,7 +1213,7 @@ function Inbox() {
         // Every real read reads the thread's files again too (a file edited on disk, an image captured since): the
         // pane reads them by itself when the read changed a message's files (data/queries/files.ts), so a read that
         // did not says so here.
-        if (reread && sameThreadFiles(before, read)) filesSignal.emit();
+        if (reread && sameThreadFiles(before, read)) filesSignals.emit(threadId);
         threadLoaded.current = read;
         threadLoadedAt.current = Date.now();
         wakeThreadRetry.current?.();
@@ -1693,7 +1686,7 @@ function Inbox() {
           });
           if (read === 'thread') threadRead = refreshThread(open);
           else {
-            if (read === 'files') filesSignal.emit();
+            if (read === 'files') filesSignals.emit(open);
             // Gone from the list this read brought (deleted elsewhere, which no record says): read it, as before.
             void listRead.then((next) => {
               if (routeRef.current.thread === open && !listsThread(next, open)) void refreshThread(open);
@@ -1867,8 +1860,8 @@ function Inbox() {
         // A compose draft (null) was saved, deleted or sent: only the drafts read; it changes no list row (a Send's
         // new thread comes with its own record).
         onDrafts: (threadId) => {
-          // The open thread's own copy of its draft follows at once (the foot's Send carries those words).
-          if (threadId !== null && threadId === routeRef.current.thread) draftSignal.emit();
+          // The pane showing the thread: its copy of the draft follows at once (the foot's Send carries those words).
+          if (threadId !== null) draftSignals.emit(threadId);
           // A floating draft's window follows, and a draft set aside floats once its save landed.
           emitFloaterEvent('draft', threadId);
           if (draftsTimer) clearTimeout(draftsTimer);
@@ -2122,8 +2115,6 @@ function Inbox() {
       if (cached) setThreadLoad(null);
       else if (heldThread(queryClient, threadId)) dropThread(queryClient, threadId);
     }
-    // The thread's place, if it held focus, gives it to this thread's subject (ThreadWait's onFocusLeaving).
-    focusThreadSubject.current = false;
     /** Another read (the event stream's) already put this thread on screen. */
     const landed = () => (threadLoaded.current?.thread_id === threadId ? threadLoaded.current : null);
     void (async () => {
@@ -2176,12 +2167,6 @@ function Inbox() {
       stopLiveThreadRetry();
     };
   }, [route.thread, threadRetry, refreshThread, refreshList, settleList, trackLook, stopLiveThreadRetry, stopLooking, queryClient]);
-  // The thread landed while focus was in its place: focus goes to its subject, never to the page.
-  useLayoutEffect(() => {
-    if (!focusThreadSubject.current || !thread || thread.thread_id !== route.thread) return;
-    focusThreadSubject.current = false;
-    rootRef.current?.querySelector<HTMLElement>(`section.ib-pane[data-thread-id="${CSS.escape(thread.thread_id)}"] .ib-subject`)?.focus();
-  }, [thread, route.thread]);
 
   // When the list on screen catches up as the route changes (settle.ts).
   // Another page or folder: the list there is drawn as it is now. A thread
@@ -5997,248 +5982,24 @@ function Inbox() {
             <EmptyThreadPanel />
           </div>
         )}
-        {/* Beside the list, the thread's place says it is opening (or why not) until its read lands; a phone
-            and a stacked window keep the list until there is a thread to show, or the thread's machine is away. */}
-        {route.thread && !threadReady && ((!phone && !stack.thread) || awayWait) && (
-          <ThreadWait
-            key={route.thread}
-            load={threadLoad?.threadId === route.thread ? threadLoad : null}
-            away={threadAway}
-            held={{ entries: threadOutbox(outbox, { thread_id: route.thread!, messages: [] }), machine: openOwner ?? null, onDismiss: dismissOutbox }}
-            onFocusLeaving={() => {
-              focusThreadSubject.current = true;
-            }}
-            onRetry={() => setThreadRetry((n) => n + 1)}
-            onClose={fromCard ? backToCard : () => close({ ...route, thread: null, file: null })}
-          />
-        )}
-        {route.thread && thread && threadReady && (
-          <ThreadPane
-            notice={
-              <>
-                {/* No list beside the thread (a phone, a stacked window, full screen, a card's thread, beside a file):
-                    the stale page notice is here instead. */}
-                {(phone || stack.thread || full || fromCard || fileOpen) && staleNotice}
-                {notifyAgain && notifyAgainThread === thread.thread_id ? (
-                <div className="ib-tour-notify-again" data-tour-notify-again="">
-                  <NotificationAsk
-                    kind={notifications.ask!}
-                    soundOn={sound.settings.enabled}
-                    movedFrom={settings?.notifications.allowed_origin ?? null}
-                    onTurnOn={() => {
-                      saveTour({ notify_again: false });
-                      void notifications.turnOn();
-                    }}
-                    onNotNow={() => saveTour({ notify_again: false })}
-                    onSettings={() => go({ page: 'settings', project: null, thread: null, section: 'general' })}
-                  />
-                </div>
-                ) : null}
-              </>
-            }
-            thread={thread}
-            onNewMessageWith={(source) => openCompose({ reuse: [source] })}
-            codeReview={settings?.code_review?.on === true}
-            pullReview={
-              pullReviewOf
-                ? {
-                    linkOf: pullReviewOf,
-                    // A thread opened beside Reviews keeps Reviews beside the one it opens.
-                    onOpen: (link) => leave(link.kind === 'thread' ? { page: 'inbox', project: null, thread: link.threadId, reviews: route.reviews } : { page: 'reviews', project: null, thread: null, stack: link.stackId, layer: null }),
-                  }
-                : undefined
-            }
-            inReviews={!!route.reviews}
-            reviewView={reviewView}
-            onInReviews={pullsShown && !route.reviews ? () => go({ page: 'inbox', reviews: { project: null, view: 'all' }, project: null, thread: thread.thread_id }) : undefined}
-            threadSteps={
-              settings?.steps
-                ? {
-                    on: settings.steps.on,
-                    subscribe: stepsBus.subscribe,
-                    // The checklist head's Board icon (part 4): the card that links this thread, while the Board is on.
-                    boardCard: (() => {
-                      const card = boardEnabled === true && cards ? threadBoardCard(cards.cards, thread.thread_id) : null;
-                      if (!card) return null;
-                      return {
-                        title: card.title,
-                        onOpen: () =>
-                          fromCard === card.id ? backToCard() : go({ page: 'board', project: null, thread: null, board: 'lanes', card: card.id }),
-                      };
-                    })(),
-                  }
-                : null
-            }
-            sent={openThreadRow?.sent ?? null}
-            row={openThreadRow}
-            snoozeBack={snoozeBack?.until ?? null}
-            run={threadRun?.threadId === thread.thread_id ? threadRun.run : undefined}
-            attachCommand={threadRun?.threadId === thread.thread_id ? threadRun.attach : null}
-            onRunChanged={() => void refreshThread(thread.thread_id)}
-            openedWith={openedWith?.threadId === thread.thread_id ? openedWith.ids : null}
-            drawn={drawnSection(shown, thread.thread_id)}
-            onMarkRead={(read) => void markRead(thread.thread_id, read)}
-            onMarkUnread={() => void markUnread(thread.thread_id)}
-            onAck={(messageId, on, agent, reaction, was) => void acknowledge(thread.thread_id, messageId, on, agent, reaction, was)}
-            onAction={(messageId, key, mark) => markAction(messageId, key, mark)}
-            onArchive={(next) => void archive(thread.thread_id, thread.messages[0]!.id, next)}
-            pinned={pinnedIds.has(thread.thread_id)}
-            onPin={pinsOn && machineTakes({ machine: machineOf(thread.thread_id) ?? undefined }, machines, 'star') ? (next) => setPin(thread, next) : undefined}
-            priority={(() => {
-              const action = openThreadRow && machineTakes(openThreadRow, machines, 'priority') ? priorityAction(openThreadRow) : null;
-              return action ? { on: action === 'priority-remove', onToggle: () => void setPriority(thread, action === 'priority-add') } : undefined;
-            })()}
-            onSnooze={snoozeOn && rowSnoozes({ machine: machineOf(thread.thread_id) ?? undefined }, machines) ? (until) => void snooze(thread, until) : undefined}
-            onUnsnooze={snoozeOn && rowSnoozes({ machine: machineOf(thread.thread_id) ?? undefined }, machines) ? () => void unsnooze(thread) : undefined}
-            snoozeBlocked={(() => {
-              const blocked = snoozeOn && pageOffersUpdates(settings) ? snoozeBlockedBy({ machine: machineOf(thread.thread_id) ?? undefined }, machines) : null;
-              return blocked ? { name: blocked.name, onPress: () => setMachineUpdateOpen({ id: blocked.id, snooze: true }) } : undefined;
-            })()}
-            machine={machines.linked.find((m) => m.id === machineOf(thread.thread_id)) ?? null}
-            agentContext={threadAgentContext}
-            // A session's name in the thread's header filters the list to that agent, as the sidebar's agent does,
-            // and keeps this thread on screen (the person is reading it); a second click shows everything again.
-            agentFilter={route.page === 'inbox' ? (route.agent ?? null) : null}
-            onAgentFilter={(agentId) => leave({ page: 'inbox', project: null, machine: null, agent: agentId, thread: route.page === 'inbox' ? route.thread : null })}
-            onMachineUpdate={pageOffersUpdates(settings) ? (id) => setMachineUpdateOpen({ id, snooze: false }) : undefined}
-            outbox={threadOutbox(outbox, thread)}
-            onDismissOutbox={dismissOutbox}
-            replyRequest={replyFor}
-            draftSignal={draftSignal}
-            filesSignal={filesSignal}
-            onReplyOpened={() => setReplyFor(null)}
-            shapeButton={(() => {
-              const board = boardsOn && thread ? shapes.byThread.get(thread.thread_id) : undefined;
-              if (!board) return null;
-              const open = !!route.shape;
-              return <ShapePebbleButton shape={board} open={open} onToggle={() => (open ? close({ ...route, shape: null }) : go({ ...route, shape: board.id }))} />;
-            })()}
-            onSide={ask.side}
-            onSideWords={ask.sideWords}
-            replyWords={askReply?.threadId === thread.thread_id ? askReply.words : null}
-            onReplyWordsTaken={() => setAskReply(null)}
-            replyPart={shapeReply?.threadId === thread.thread_id ? shapeReply : null}
-            onReplyPartTaken={() => setShapeReply(null)}
-            onQuestions={patchQuestions}
-            onPickSaves={onPickSaves}
-            onChanged={afterWrite}
-            onTakenBack={(draft) => openTakenBack(draft, openCompose, afterWrite)}
-            readPending={rowPatches.get(thread.thread_id)?.read_at !== undefined}
-            onSentRead={async (model) => {
-              if (routeRef.current.thread !== model.thread.thread_id) return false;
-              const drawn = await refreshThread(model.thread.thread_id, model);
-              if (!drawn) return false;
-              void refreshList(false);
-              return true;
-            }}
-            onClose={fromCard ? backToCard : () => close({ ...route, thread: null, file: null })}
-            file={route.file ?? null}
-            namedFile={route.ref ?? null}
-            onOpenNamedFile={(ref) => (ref ? go({ ...routeRef.current, file: null, ref }) : close({ ...routeRef.current, ref: null }))}
-            onOpenFile={(file, options) => {
-              if (!file) return closeTo({ ...routeRef.current, file });
-              // A call that names no view keeps the one in the address (the pane names it for a step, a version, a linked page).
-              const keepView = file.view === undefined ? (routeRef.current.file?.view ?? null) : file.view;
-              const next = { ...routeRef.current, ref: null, file: { ...file, view: keepView } };
-              /** Show `next` the way fullScreenOrigin.ts names (the history is the stack of frames). */
-              const show = (request: { move?: FrameMove; replace?: boolean }) => {
-                const op = fileEntryOp({ hash: currentHash(), state: window.history.state }, hashOf(next), request);
-                if (op.kind === 'back') {
-                  // Back onto the entry beside the thread; where asked, it then shows the file on screen now (a step inside full screen kept).
-                  const land = op.land;
-                  const landThere =
-                    land === null
-                      ? undefined
-                      : () => {
-                          if (currentHash() !== land && readRoute().thread === next.thread) writeRoute(next, { replace: true });
-                        };
-                  if (backBy(op.steps, window.history, landThere)) return;
-                  return writeRoute(next, { replace: true, fullMark: null });
-                }
-                if (op.kind === 'replace') writeRoute(next, op.keep ? { replace: true } : { replace: true, fullMark: op.mark });
-                else writeRoute(next, { fullMark: op.mark });
-              };
-              if (options?.back) {
-                // A linked page's Back in a full screen the switch entered on that page: back past the switch's entry and the
-                // page beside the thread, then full screen again with the switch, so × and Back still come back beside the thread.
-                if (
-                  pageBackPastSwitch({ hash: currentHash(), state: window.history.state }, hashOf(next), sameScreenAnyView) &&
-                  backBy(2, window.history, () => {
-                    if (readRoute().thread === next.thread) show({ move: 'switch-full' });
-                  })
-                ) {
-                  return;
-                }
-                // Back through a linked page's stack: the browser's Back when this entry was opened from there,
-                // whatever view that entry names (a pick swapped only the entry on screen); once it lands,
-                // the view the person is in now replaces the one it named.
-                const view = next.file.view;
-                const viewThere = view
-                  ? () => {
-                      const now = readRoute();
-                      if (now.file && now.file.view !== view) writeRoute({ ...now, file: { ...now.file, view } }, { replace: true });
-                    }
-                  : undefined;
-                if (backTo(hashOf(next), window.history, sameScreenAnyView, viewThere)) return;
-              }
-              show({ move: options?.move, replace: options?.replace });
-            }}
-            fullFromSide={fullFromSide(window.history.state)}
-            fullExitFile={fullExitFile(window.history.state)}
-            onOpenGuide={(messageId, at) => go({ ...route, guide: messageId, ...(at ? { guideAt: at } : {}) })}
-            artifacts={route.artifacts === true}
-            onArtifacts={(open) => (open ? go({ ...routeRef.current, artifacts: true, links: false, msg: null }) : close({ ...routeRef.current, artifacts: false, links: false }))}
-            links={route.artifacts === true && route.links === true}
-            // Between the view's two sides: the same screen, so Back still returns to the thread.
-            onLinks={(on) => writeRoute({ ...routeRef.current, links: on }, { replace: true })}
-            // Decision mode's one way in (thread only): from two of this thread's decisions up, and not while a
-            // sitting is tucked into its pill (the pill's Resume is the way back to it).
-            decide={decideInThread(thread.thread_id)}
-            landing={
-              route.msg && decideLanding.current?.messageId === route.msg
-                ? { messageId: route.msg, terms: [], questionKey: decideLanding.current.questionKey, focus: 'prompt' }
-                : route.msg
-                ? {
-                    messageId: route.msg,
-                    terms: searchLanding.current?.messageId === route.msg ? searchLanding.current.terms : [],
-                    questionKey: searchLanding.current?.messageId === route.msg ? searchLanding.current.questionKey : null,
-                  }
-                : null
-            }
-            onLanded={landed}
-            lookSeq={look?.threadId === thread.thread_id ? look.seq : undefined}
-            seenThrough={look?.threadId === thread.thread_id ? look.through : null}
-            onSeen={(through) => seenOnSight(thread.thread_id, through)}
-            covered={!!route.guide || updateDialog !== null || soundDialog === 'open' || agentNoteOpen || feedbackOpen || compose !== null}
-            onScreenChange={(state) => {
-              threadOnScreenRef.current = state;
-              setOpenThreadCovered(state?.covered ?? false);
-            }}
-            backLabel={fromCard ? 'Board' : route.reviews ? 'Reviews' : listTitle}
-            cardChip={fromCard ? <CardChip card={cards?.cards.find((c) => c.id === fromCard) ?? null} onOpen={backToCard} /> : undefined}
-            phone={phone}
-            stacked={stack.thread || !!fromCard}
-            threadAlone={full}
-            fullSidebar={sidebarOpen && !sidebarHeld}
-            onFull={fromCard ? undefined : (on) => (on ? setThreadFull(true) : leaveFull())}
-            fileStacked={stack.file}
-            remote={settings ? (settings.via ?? 'local') === 'tailnet' : null}
-            onToast={(t) => showToast(t)}
-            onToastGone={(onUndo) => {
-              if (toastNow.current?.onUndo === onUndo) dismissToast();
-            }}
-            linkOf={(messageId) => threadLink(thread.thread_id, settings, window.location.origin, messageId)}
-            onInboxLink={inboxLink}
-            onBackToList={(fileName) => {
-              // The file's own close (its ×), then focus on this thread's row and one line for a screen reader.
-              holdSidebarIfTight();
-              // ‹ Inbox beside a file opened from full screen ends full screen too: the list comes back.
-              setThreadFull(false);
-              backFromFile.current = { thread: thread.thread_id, name: fileName, label: listTitle };
-              closeTo({ ...routeRef.current, file: null });
-            }}
-          />
-        )}
+        <ThreadSlot
+          paneId={MAIN_PANE}
+          threadId={paneThread(panes, MAIN_PANE)}
+          active={panes.active === MAIN_PANE}
+          host={{
+            route, routeRef, thread, rowsPending: reviewRowsPending, awayWait, threadLoad, threadAway, openOwner, outbox, dismissOutbox,
+            onRetry: () => setThreadRetry((n) => n + 1),
+            phone, stack, full, fromCard, fileOpen, staleNotice, notifyAgainIn: notifyAgain ? notifyAgainThread : null, notifications,
+            soundOn: sound.settings.enabled, settings, saveTour, go, leave, close, openCompose, pullReviewOf, reviewView, pullsShown, stepsBus,
+            boardEnabled, boardsOn, cards, backToCard, openThreadRow, snoozeBack, threadRun, refreshThread, refreshList, openedWith, shown,
+            markRead, markUnread, acknowledge, markAction, archive, pinnedIds, pinsOn, machines, setPin, setPriority, snoozeOn, snooze, unsnooze,
+            setMachineUpdateOpen, threadAgentContext, replyFor, setReplyFor, draftSignals, filesSignals, shapes, ask, askReply, setAskReply,
+            shapeReply, setShapeReply, patchQuestions, onPickSaves, afterWrite, rowPatches, decideInThread, searchLanding, decideLanding, landed,
+            look, seenOnSight, panesOnScreen, setOpenThreadCovered, listTitle, setThreadFull, leaveFull, showToast, toastNow, dismissToast,
+            covered: !!route.guide || updateDialog !== null || soundDialog === 'open' || agentNoteOpen || feedbackOpen || compose !== null,
+            fullSidebar: sidebarOpen && !sidebarHeld, inboxLink, holdSidebarIfTight, backFromFile,
+          }}
+        />
       </>
     );
   }
