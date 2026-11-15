@@ -21,7 +21,7 @@
  * another binary (an older release, to see the bug). What each step saw lands
  * in PLANNOTATOR_E2E_PROOF_DIR/pull-marker-hang (default .local/proof).
  */
-import { expect, test, type Browser, type Page } from '@playwright/test';
+import { expect, test, type Browser, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';

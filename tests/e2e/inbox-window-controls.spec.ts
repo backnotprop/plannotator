@@ -18,7 +18,7 @@
  * Pictures land in PLANNOTATOR_WINDOW_CONTROLS_SHOTS (default
  * .local/proof/window-controls). Build the binary first (see inbox.spec.ts).
  */
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { existsSync, mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { removeInboxScratch } from './inbox-scratch';

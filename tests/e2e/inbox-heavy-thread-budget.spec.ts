@@ -61,7 +61,7 @@
  * .local/proof/heavy-thread/measure.json.
  */
 
-import { expect, test } from '@playwright/test';
+import { expect, test } from './inbox-test';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { join, resolve } from 'node:path';
