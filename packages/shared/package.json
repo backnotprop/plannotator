@@ -213,7 +213,7 @@
   "dependencies": {
     "@joplin/turndown-plugin-gfm": "^1.0.68",
     "@plannotator/core": "workspace:*",
-    "@plannotator/sem-jiff": "file:/Users/romulus/plannotator/scratch/sem-diff-pack/public/plannotator-sem-jiff-0.2.0.tgz",
+    "@plannotator/sem-jiff": "0.2.0",
     "chokidar": "^5.0.0",
     "parse5": "^7.3.0",
     "turndown": "^7.2.4"

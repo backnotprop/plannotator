@@ -172,7 +172,7 @@
         "@earendil-works/pi-ai": ">=0.79.1",
         "@earendil-works/pi-coding-agent": ">=0.79.1",
         "@earendil-works/pi-tui": ">=0.79.1",
-        "@plannotator/sem-jiff": "file:/Users/romulus/plannotator/scratch/sem-diff-pack/public/plannotator-sem-jiff-0.2.0.tgz",
+        "@plannotator/sem-jiff": "0.2.0",
         "glimpseui": "^0.8.0",
       },
       "peerDependencies": {
@@ -213,7 +213,7 @@
       "dependencies": {
         "@pierre/diffs": "1.7.0-beta.3",
         "@plannotator/review-editor": "workspace:*",
-        "@plannotator/sem-jiff": "file:/Users/romulus/plannotator/scratch/sem-diff-pack/public/plannotator-sem-jiff-0.2.0.tgz",
+        "@plannotator/sem-jiff": "0.2.0",
         "@plannotator/server": "workspace:*",
         "@plannotator/shared": "workspace:*",
         "@plannotator/ui": "workspace:*",
@@ -382,7 +382,7 @@
         "@pierre/trees": "1.0.0",
         "@plannotator/core": "workspace:*",
         "@plannotator/guide-viewer": "workspace:*",
-        "@plannotator/sem-jiff": "file:/Users/romulus/plannotator/scratch/sem-diff-pack/public/plannotator-sem-jiff-0.2.0.tgz",
+        "@plannotator/sem-jiff": "0.2.0",
         "@plannotator/shared": "workspace:*",
         "@plannotator/ui": "workspace:*",
         "lucide-react": "^1.59.0",
@@ -427,7 +427,7 @@
       "dependencies": {
         "@joplin/turndown-plugin-gfm": "^1.0.68",
         "@plannotator/core": "workspace:*",
-        "@plannotator/sem-jiff": "file:/Users/romulus/plannotator/scratch/sem-diff-pack/public/plannotator-sem-jiff-0.2.0.tgz",
+        "@plannotator/sem-jiff": "0.2.0",
         "chokidar": "^5.0.0",
         "parse5": "^7.3.0",
         "turndown": "^7.2.4",
@@ -1215,7 +1215,7 @@
 
     "@plannotator/review-editor": ["@plannotator/review-editor@workspace:packages/review-editor"],
 
-    "@plannotator/sem-jiff": ["@plannotator/sem-jiff@/Users/romulus/plannotator/scratch/sem-diff-pack/public/plannotator-sem-jiff-0.2.0.tgz", { "dependencies": { "@vscode/diff": "^0.0.2-133", "diff": "^8.0.4", "web-tree-sitter": "^0.27.1" }, "bin": { "sem-jiff-copy-wasm": "./dist/copy-wasm-bin.js" } }, "sha512-V81ziMYTH/S/pZQAwBkDz5VCeqBSQDxbOgnmG+zZRmzCCl9a4j9dZYIhSm/AwyGa3vBzupdwp2p6LHZnLtRoFw=="],
+    "@plannotator/sem-jiff": ["@plannotator/sem-jiff@0.2.0", "", { "dependencies": { "@vscode/diff": "^0.0.2-133", "diff": "^8.0.4", "web-tree-sitter": "^0.27.1" }, "bin": { "sem-jiff-copy-wasm": "dist/copy-wasm-bin.js" } }, "sha512-nyYab7XU25LqQMTqJL29eYDvoa9092ivWsJRoSLAQJz9dniKuovXYPA5qbgAHjvaoHn2a/6NGu5Q24uEetdn/g=="],
 
     "@plannotator/server": ["@plannotator/server@workspace:packages/server"],
 

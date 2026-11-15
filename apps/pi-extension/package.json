@@ -81,7 +81,7 @@
   },
   "//engines": "No engines field on purpose (#902): for a bare or range install npm passes over a release whose engines the running Node misses, so Pi on an older Node silently stayed on an old Plannotator. runtime-tls.ts warns once per start instead. package-engines.test.ts fails if a node engines field comes back.",
   "devDependencies": {
-    "@plannotator/sem-jiff": "file:/Users/romulus/plannotator/scratch/sem-diff-pack/public/plannotator-sem-jiff-0.2.0.tgz",
+    "@plannotator/sem-jiff": "0.2.0",
     "glimpseui": "^0.8.0",
     "@earendil-works/pi-coding-agent": ">=0.79.1",
     "@earendil-works/pi-agent-core": ">=0.79.1",

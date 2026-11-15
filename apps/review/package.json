@@ -10,7 +10,7 @@
   },
   "dependencies": {
     "@plannotator/review-editor": "workspace:*",
-    "@plannotator/sem-jiff": "file:/Users/romulus/plannotator/scratch/sem-diff-pack/public/plannotator-sem-jiff-0.2.0.tgz",
+    "@plannotator/sem-jiff": "0.2.0",
     "@plannotator/server": "workspace:*",
     "@plannotator/shared": "workspace:*",
     "@plannotator/ui": "workspace:*",
