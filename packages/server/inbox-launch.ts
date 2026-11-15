@@ -89,7 +89,7 @@ import { readLastLaunchChoice, withinLaunchWait, writeLastLaunchChoice } from ".
 import { claudeSettingsFilePath, readClaudeSettingsFile } from "./inbox-launch-claude-settings-file";
 import { accessSync, appendFileSync, constants as fsConstants, existsSync, lstatSync, mkdirSync, readdirSync, realpathSync, rmdirSync, rmSync, statSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
-import { inboxId, type InboxComposeLaunch, type InboxLaunchAgent, type InboxLaunchFrom, type InboxLaunchRecord, type InboxLaunchTrust, type InboxLaunchUntrusted, type InboxListRow, type InboxMessage, type InboxProject, type InboxRun } from "@plannotator/core/inbox-types";
+import { inboxId, isInboxNote, type InboxComposeLaunch, type InboxLaunchAgent, type InboxLaunchFrom, type InboxLaunchRecord, type InboxLaunchTrust, type InboxLaunchUntrusted, type InboxListRow, type InboxMessage, type InboxProject, type InboxRun } from "@plannotator/core/inbox-types";
 import { inboxLaunchedSession, inboxRunOf, INBOX_RUN_START_GRACE_MS, type InboxRunHostState } from "@plannotator/core/inbox-run-line";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { derivePersonThreadSubject } from "@plannotator/core/inbox-questions";
@@ -493,7 +493,13 @@ export function createInboxLaunch(options: {
   const hostList = Object.values(hosts);
   /** The host of a launch's agent; null for an agent with no host here. */
   const hostOf = (launch: InboxLaunchRecord): LaunchHost | null => (Object.hasOwn(hosts, launch.agent) ? hosts[launch.agent]! : null);
-  const roots = () => store.launchedRoots();
+  /** Every launch: each launched root, and each scheduled run's divider (one launch per run, many in that one thread). */
+  const roots = () => [...store.launchedRoots(), ...store.scheduledRunLaunches()];
+  /** The launch a thread's run line, row and reply follow: a scheduled thread's newest run, else the thread's root. */
+  const threadLaunch = (threadId: string): InboxMessage | undefined => {
+    const runs = store.scheduledRunLaunches().filter((m) => m.thread_id === threadId);
+    return runs.length > 0 ? runs.reduce((a, b) => ((store.messageCursor(b.id) ?? 0) > (store.messageCursor(a.id) ?? 0) ? b : a)) : store.message(threadId) ?? undefined;
+  };
   const states = new Map<LaunchHost, HostState>();
   const stateOf = (host: LaunchHost): HostState => states.get(host)!;
   /** The host's last word on a session (its cached `sessions`), or null when not read. */
@@ -607,14 +613,14 @@ export function createInboxLaunch(options: {
     if (memo.busySeen) return false;
     const lastId = store.threadMessageIds(root.thread_id).at(-1);
     const last = lastId ? store.message(lastId) : null;
-    // The person's latest, unless it went to another session (re-addressed).
-    return last?.author.kind === "person" && (!last.to || last.to.session === root.to?.session);
+    // The person's latest, unless it went to another session (re-addressed) or is the Inbox's own note.
+    return last?.author.kind === "person" && !isInboxNote(last) && (!last.to || last.to.session === root.to?.session);
   };
 
   /** The root of a launched thread whose launch started this session, the launch not deleted (the switch off too: it governs new starts only). */
   const launchedRootOf = (threadId: string, session: string | null | undefined): InboxMessage | null => {
     if (!session) return null;
-    const root = store.message(threadId);
+    const root = threadLaunch(threadId);
     if (!root?.launch || root.launch.deleted_at || inboxLaunchedSession(root) !== session) return null;
     return root;
   };
@@ -1084,9 +1090,53 @@ ${result.text}`);
     if (line.kind !== "message") return;
     const message = line.record;
     if (message.author.kind !== "person" || message.id === message.thread_id || message.delivery) return;
-    const root = store.message(message.thread_id);
+    const root = threadLaunch(message.thread_id);
     if (root?.launch) queueMicrotask(() => maybeRespawn(store.message(root.id) ?? root));
   });
+
+  /** Stop: the host's stop (or Cancel during a clone). The line it leaves. */
+  const stopLaunch = async (root: InboxMessage, host: LaunchHost): Promise<InboxRun | null> => {
+    const launch = root.launch!;
+    const state = stateOf(host);
+    // Cancel during a clone (E1, E7): git is stopped, and the partly cloned folder goes.
+    const cloning = clones.get(launch.id);
+    if (cloning) {
+      cloning.cancel();
+      await cloning.done;
+      // Its own end settles the record; wait for that, so the answer is the cancelled line.
+      for (let i = 0; i < 50 && store.message(root.id)?.launch?.clone?.state === "cloning"; i++) await new Promise((r) => setTimeout(r, 20));
+      return runOfRoot(store.message(root.id)!);
+    }
+    // A clone a restart cut off (no git runs for it now): Cancel still ends it, and its partly cloned folder goes.
+    if (launch.clone?.state === "cloning") {
+      const removed = removeClonedFolder(launch);
+      store.settleLaunch(root.id, { clone: { ...launch.clone, state: "cancelled", ended_at: new Date(now()).toISOString() }, ...(removed ? { made_inode: null } : {}) });
+      options.onChange();
+      return runOfRoot(store.message(root.id)!);
+    }
+    if (!launch.session_ref) throw new InboxError("launch_not_found", "That session never started.");
+    const memo = memoOf(launch);
+    // What waits now was written before the Stop: it stays for the person's next reply.
+    memo.heldReply = root.to ? (store.pendingReplies(root.to.session, { tags: true }).at(-1)?.id ?? null) : null;
+    stopping.add(launch.id);
+    let result: LaunchHostResult;
+    try {
+      await settleDeliveries(launch.id);
+      result = await host.stop(launch.session_ref);
+    } finally {
+      stopping.delete(launch.id);
+    }
+    startLog(launch.id, `stop ${launch.session_ref}: exit ${result.exitCode}\n${result.text}`);
+    memo.stoppedAt = now();
+    memo.startedAt = Math.min(memo.startedAt, now() - INBOX_RUN_START_GRACE_MS);
+    // Nothing waits on a stopped session's prompt: its questions are withdrawn at once.
+    state.permissions.withdrawAll(root);
+    // Its last polls still read as live for a while: from now it counts as live only once it polls anew.
+    if (root.to) memo.quietPolls = host.live(root.to.session)?.polls ?? memo.quietPolls;
+    state.view = null;
+    options.onChange();
+    return runOfRoot(store.message(root.id)!);
+  };
 
   // ── Routes ──
 
@@ -1328,46 +1378,8 @@ ${result.text}`);
     // From another machine: only what a person pressed in a window there (its Inbox checked; this door trusts its token).
     if (door && !door.window) return json(INBOX_MACHINE_WINDOW_ONLY_BODY, 403);
     switch (match[2]) {
-      case "stop": {
-        // Cancel during a clone (E1, E7): git is stopped, and the partly cloned folder goes.
-        const cloning = clones.get(launch.id);
-        if (cloning) {
-          cloning.cancel();
-          await cloning.done;
-          // Its own end settles the record; wait for that, so the answer is the cancelled line.
-          for (let i = 0; i < 50 && store.message(root.id)?.launch?.clone?.state === "cloning"; i++) await new Promise((r) => setTimeout(r, 20));
-          return json({ run: runOfRoot(store.message(root.id)!) });
-        }
-        // A clone a restart cut off (no git runs for it now): Cancel still ends it, and its partly cloned folder goes.
-        if (launch.clone?.state === "cloning") {
-          const removed = removeClonedFolder(launch);
-          store.settleLaunch(root.id, { clone: { ...launch.clone, state: "cancelled", ended_at: new Date(now()).toISOString() }, ...(removed ? { made_inode: null } : {}) });
-          options.onChange();
-          return json({ run: runOfRoot(store.message(root.id)!) });
-        }
-        if (!launch.session_ref) throw new InboxError("launch_not_found", "That session never started.");
-        const memo = memoOf(launch);
-        // What waits now was written before the Stop: it stays for the person's next reply.
-        memo.heldReply = root.to ? (store.pendingReplies(root.to.session, { tags: true }).at(-1)?.id ?? null) : null;
-        stopping.add(launch.id);
-        let result: LaunchHostResult;
-        try {
-          await settleDeliveries(launch.id);
-          result = await host.stop(launch.session_ref);
-        } finally {
-          stopping.delete(launch.id);
-        }
-        startLog(launch.id, `stop ${launch.session_ref}: exit ${result.exitCode}\n${result.text}`);
-        memo.stoppedAt = now();
-        memo.startedAt = Math.min(memo.startedAt, now() - INBOX_RUN_START_GRACE_MS);
-        // Nothing waits on a stopped session's prompt: its questions are withdrawn at once.
-        state.permissions.withdrawAll(root);
-        // Its last polls still read as live for a while: from now it counts as live only once it polls anew.
-        if (root.to) memo.quietPolls = host.live(root.to.session)?.polls ?? memo.quietPolls;
-        state.view = null;
-        options.onChange();
-        return json({ run: runOfRoot(store.message(root.id)!) });
-      }
+      case "stop":
+        return json({ run: await stopLaunch(root, host) });
       case "open": {
         if (via === "tailnet") return localOnly();
         const e = await environment();
@@ -1948,14 +1960,14 @@ ${result.text}`);
      * `owner`: the machine's owner reads it, so a line refused for trust carries the host's offer.
      */
     async runOf(threadId: string, owner: boolean = false): Promise<InboxRun | null | undefined> {
-      const root = store.message(threadId);
-      if (!root?.launch || root.thread_id !== root.id) return undefined;
+      const root = store.message(threadId)?.thread_id === threadId ? threadLaunch(threadId) : undefined;
+      if (!root?.launch) return undefined;
       const host = hostOf(root.launch);
       if (!host) return null;
       const state = stateOf(host);
       if (state.lastAvailable === null) state.lastAvailable = await available(host);
       if (hostStale(host) && needsHost(host, root)) await refreshHost(host);
-      const runLine = runOfRoot(store.message(threadId)!);
+      const runLine = runOfRoot(store.message(root.id)!);
       // Trust that would cover home, or `/`: the how-to says to start in a project with its own repository.
       // The home folder is never trusted: the how-to says to start in a folder inside it. Home in a repository rooted
       // there carries both: this window reads the first, and a window from before it, which knows only the second, keeps
@@ -2010,6 +2022,20 @@ ${result.text}`);
       return Object.hasOwn(hosts, agent) ? available(hosts[agent]!) : null;
     },
 
+    /** A scheduled run's line, from its divider's own launch (null: no line, or no host for its agent). */
+    runOfMessage(messageId: string): InboxRun | null {
+      const message = store.message(messageId);
+      return message?.launch && !message.launch.deleted_at && hostOf(message.launch) ? runOfRoot(message) : null;
+    },
+
+    /** Stop a scheduled run's session (or the previous run's, idle, when the next one starts): the run line's own Stop. */
+    async stopMessage(messageId: string): Promise<void> {
+      const message = store.message(messageId);
+      const host = message?.launch ? hostOf(message.launch) : null;
+      if (!message?.launch || !host || message.launch.deleted_at || (!message.launch.session_ref && !message.launch.clone)) return;
+      await stopLaunch(message, host);
+    },
+
     /** Whether a launch of this Inbox (not deleted) owns `session` of `agent`, so its host can take an item. */
     launched(agent: string, session: string): boolean {
       return roots().some((m) => m.launch!.agent === agent && !m.launch!.deleted_at && m.to?.host === agent && m.to.session === session);
@@ -2017,15 +2043,15 @@ ${result.text}`);
 
     /** The launch ended before its agent wrote: it failed, its CLI is gone, or it was stopped or went away (the thread's own line says which). */
     didNotStart(threadId: string): boolean {
-      const root = store.message(threadId);
-      if (!root?.launch || root.thread_id !== root.id) return false;
+      const root = store.message(threadId)?.thread_id === threadId ? threadLaunch(threadId) : undefined;
+      if (!root?.launch) return false;
       const state = runOfRoot(root)?.state;
       return state === "failed" || state === "missing" || state === "stopped";
     },
 
     /** A launched thread's attach command (the ⋯ menu's Copy, also while the agent rests and has no line), or null. */
     attachOf(threadId: string): string | null {
-      const launch = store.message(threadId)?.launch;
+      const launch = threadLaunch(threadId)?.launch;
       const host = launch ? hostOf(launch) : null;
       return host && launch!.session_ref && !launch!.deleted_at && !launch!.error ? host.attach(launch!) : null;
     },
@@ -2054,7 +2080,7 @@ ${result.text}`);
 
     /** A launched row with its run word, and a session blocked on a prompt placed in Stopped on you (through `rowDecorator`). */
     decorateLaunched<T extends InboxListRow>(row: T): T {
-      const root = store.message(row.thread_id);
+      const root = threadLaunch(row.thread_id);
       if (!root?.launch) return row;
       const runLine = runOfRoot(root);
       if (runLine?.state === "waiting_terminal" && row.resolved_at === null) return { ...row, section: "stopped", unread: true, run: null };
