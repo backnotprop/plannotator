@@ -527,6 +527,17 @@ describe("the list (rule 5)", () => {
     expect(peer.list!.tags).toEqual([live]);
   });
 
+  test("a machine's tag colours: a colour that parses is kept on its tag, one that does not is dropped; the switch, or null from an older Inbox", () => {
+    const { peer } = link("http://127.0.0.1:9");
+    const live = { id: "ini_01K0000000000000000000000R", name: "Release", created_at: "2026-11-12T09:00:00.000Z", created_by: { kind: "person" as const }, updated_at: "2026-11-12T09:00:00.000Z", deleted_at: null };
+    const look = { colour: "#ff6a00", by: "person", at: "2026-11-13T10:00:00.000Z" };
+    peer.acceptList({ cursor: 3, sections: [], tags: [{ ...live, look }, { ...live, id: "ini_01K0000000000000000000000W", look: { colour: "purple", by: "person", at: "x" } }] });
+    expect(peer.list!.tags).toEqual([{ ...live, look } as typeof live, { ...live, id: "ini_01K0000000000000000000000W" }]);
+    expect(peer.list!.tag_colours).toBeNull();
+    peer.acceptList({ cursor: 4, sections: [], tag_colours: { show: false, show_at: "2026-11-13T10:00:00.000Z", recent: [] } });
+    expect(peer.list!.tag_colours).toEqual({ show: false, show_at: "2026-11-13T10:00:00.000Z", recent: [] });
+  });
+
   const BOARD_CARD = { id: "crd_01K0000000000000000000000A", project_id: "prj_01K0000000000000000000000A", title: "Ship it", column: "todo" };
   const board = (cursor: number, extra: Record<string, unknown> = {}) =>
     Response.json({ cursor, cards: [BOARD_CARD], threads: { msg_01K0000000000000000000000A: { thread_id: "msg_01K0000000000000000000000A" }, junk: {} }, initiatives: [], seen_seq: 2, ...extra });

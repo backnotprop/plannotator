@@ -24,7 +24,7 @@
  *    (`link-back`, `unlink`).
  */
 
-import { INBOX_LINKED_MARKS, inboxRowArchived, isInboxId, type InboxAgentsGroup, type InboxCardWire, type InboxInitiative, type InboxListRow, type InboxMachineAccountsRead } from "@plannotator/core/inbox-types";
+import { INBOX_LINKED_MARKS, inboxRowArchived, isInboxId, type InboxAgentsGroup, type InboxCardWire, type InboxInitiative, type InboxListRow, type InboxMachineAccountsRead, type InboxTagColours } from "@plannotator/core/inbox-types";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { inboxSnoozeRefusal, inboxSnoozeRunning } from "@plannotator/core/inbox-snooze";
@@ -1162,6 +1162,9 @@ export function createInboxMachines(context: InboxMachinesContext) {
   /** Each linked machine's live tags, from a machine that takes tags from this one (an older one's stay its own). */
   const tagLists = (): { machine: string; tags: InboxInitiative[] }[] =>
     [...peers.values()].flatMap((peer) => (peer.list?.marks.includes("tags") ? [{ machine: peer.id, tags: peer.list.tags }] : []));
+  /** Each linked machine's "Show tag colors" and own colours, from a machine that takes `tag-colours`. */
+  const tagColourLists = (): InboxTagColours[] =>
+    [...peers.values()].flatMap((peer) => (peer.list?.marks.includes("tag-colours") && peer.list.tag_colours ? [peer.list.tag_colours] : []));
   /**
    * Each linked machine's Board, from a machine that takes `cards` (an older one's are not listed). The first ask makes
    * each line read its Board and keep it current; it waits for that read only while the machine is online, and at most
@@ -1232,6 +1235,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
     projectOwner,
     pinnedIds,
     tagLists,
+    tagColourLists,
     cardLists,
     archivedPages,
     showArchivedCopies,
