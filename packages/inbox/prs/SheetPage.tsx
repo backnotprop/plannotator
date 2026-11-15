@@ -10,6 +10,8 @@
  * (a phone's sheet at the bottom). Done or Clear leaves it; outside it, clicks are as above. The bar's Merge N merges
  * the green picks one at a time after a second click and reports the rest (bulkMerge.ts); Close N closes every pick
  * without a confirm, one at a time, with the window's toast offering Undo, which reopens exactly those (bulkClose.ts).
+ * Start review thread starts one review thread per repository of the picks, on the machine whose list has them, and
+ * links a pick that has one already (bulkReview.ts, startReviews.ts); the report under the bar opens each thread.
  *
  * Keyboard: Tab and Enter only (arrow keys are deferred, q-38094e68). A tile's popover actions join the Tab order only
  * once Enter pins it; Escape closes it back to the tile.
@@ -31,6 +33,8 @@ import { ChecksMark, checksLabel } from './ChecksMark';
 import { BoxMark, boxState, SelectBox } from './SelectBox';
 import { cantMergeLine, confirmWords, mergeHint, mergePlan, notMergedLine, refusedLine, type MergePlan } from './bulkMerge';
 import { CLOSE_UNDO_MS, doneLine, runningWords, toastLead, type BulkVerb, type RunOutcome } from './bulkClose';
+import { ALREADY_LEAD, alreadyPart, groupPart, notStartedLine, reviewPlan, startButtonWords, startedLead, startedToast, startingWords, stoppedToast, untiedLine, type ReviewReport } from './bulkReview';
+import { startReview } from './startReviews';
 import type { InboxToastModel } from '../components/Toast';
 import { SheetTable, type TableSection } from './SheetTable';
 import { nextSort, pullWords, sortUnits, type SheetLayout, type TableSort } from './tableModel';
@@ -81,6 +85,8 @@ export interface SheetPageProps {
   layout?: SheetLayout;
   /** Without it there is no Grid | Table switch. */
   onLayout?: (layout: SheetLayout) => void;
+  /** Open a review thread (Start review thread's report, a tile's Open review thread). Without it neither is offered. */
+  onOpenThread?: (threadId: string) => void;
 }
 
 /** The popover: the PR it is of, the tile it hangs from, and whether Enter or a tap pinned it (its actions take focus). */
@@ -124,6 +130,8 @@ export function SheetPage(props: SheetPageProps) {
   // Closed here (and the state each had), and reopened by Close's Undo.
   const [closedHere, setClosedHere] = useState<ReadonlyMap<string, InboxPull['state']>>(() => new Map());
   const [reopenedHere, setReopenedHere] = useState<ReadonlyMap<string, InboxPull['state']>>(() => new Map());
+  // The review threads started here, by PR key, until the list links them: a second press never starts another.
+  const [threadsHere, setThreadsHere] = useState<ReadonlyMap<string, string>>(() => new Map());
   const model = useMemo(() => withDoneHere(props.model, { merged: mergedHere, closed: closedHere, reopened: reopenedHere }), [props.model, mergedHere, closedHere, reopenedHere]);
   // A merge under way or just done holds its popover open: the pointer leaving or another tile doesn't close it.
   const held = useRef(false);
@@ -181,7 +189,7 @@ export function SheetPage(props: SheetPageProps) {
   // Bulk Merge: the confirm and the report hold the picks they were for; another pick drops them.
   const [bulk, setBulk] = useState<BulkPhase>({ at: 'idle' });
   const chosenKey = [...chosen].sort().join('\n');
-  const live: BulkPhase = (bulk.at === 'confirm' || bulk.at === 'report') && bulk.keys !== chosenKey ? { at: 'idle' } : bulk;
+  const live: BulkPhase = (bulk.at === 'confirm' || bulk.at === 'report' || bulk.at === 'reviewed') && bulk.keys !== chosenKey ? { at: 'idle' } : bulk;
   const busy = live.at === 'running';
   const pickSheet = useToastAbove();
 
@@ -394,6 +402,8 @@ export function SheetPage(props: SheetPageProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [model, chosenKey, order.join('\n')]);
   const plan = useMemo(() => mergePlan(pickedPulls, (key) => stackOf.get(key) ?? null), [pickedPulls, stackOf]);
+  const labelOf = (repo: string) => sheet?.sections.find((section) => section.key === repo)?.label ?? repo;
+  const reviews = reviewPlan(pickedPulls, model?.links ?? {}, threadsHere, model?.projects ?? {}, labelOf);
   // One run at a time: Close's Undo, pressed from the toast while another runs, waits for it.
   const runs = useRef<Promise<void>>(Promise.resolve());
   const waiting = useRef(0);
@@ -457,6 +467,39 @@ export function SheetPage(props: SheetPageProps) {
       const reopened = outcomes.filter((o) => o.ok).map((o) => o.pull.key);
       report('reopen', outcomes, [], new Set(reopened));
       if (reopened.length > 0) props.onToast?.({ icon: 'check', lead: toastLead('reopen', reopened.length) }, CLOSE_UNDO_MS);
+    });
+  /**
+   * Start review thread: one thread per repository, one after another, each on its PRs' machine; a pick with a thread
+   * already is linked to it. What started or was linked leaves the picks; what could not stays, with why. A run that
+   * started only new agents toasts with Stop, which stops those agents (their threads stay, as a run line's Stop does).
+   */
+  const runReviews = () =>
+    queue(async () => {
+      const { groups, already, failed } = reviews;
+      const report: ReviewReport = { started: [], already, failed: [] };
+      for (let i = 0; i < groups.length; i++) {
+        setBulk({ at: 'running', verb: 'review', done: i + 1, total: groups.length });
+        const outcome = await startReview(groups[i]!);
+        if ('why' in outcome) report.failed.push({ pulls: outcome.group.pulls, why: outcome.why });
+        else report.started.push(outcome);
+      }
+      report.failed.push(...failed);
+      const went = new Map(report.started.flatMap(({ group, threadId }) => group.pulls.map((pull) => [pull.key, threadId] as const)));
+      setThreadsHere((was) => new Map([...was, ...went]));
+      const stays = new Set([...chosen].filter((key) => !went.has(key) && !already.some((a) => a.pull.key === key)));
+      setPicked(stays);
+      anchor.current = null;
+      setBulk({ at: 'reviewed', keys: [...stays].sort().join('\n'), report });
+      if (report.started.length > 0) props.onMerged();
+      const launched = report.started.flatMap(({ group, launch }) => (launch ? [{ id: launch, machine: group.machine }] : []));
+      if (launched.length > 0 && launched.length === report.started.length) {
+        const stop = () =>
+          void Promise.allSettled(launched.map(({ id, machine }) => inboxApi.launchStop(id, machine))).then((ends) => {
+            const stopped = ends.filter((end) => end.status === 'fulfilled').length;
+            if (stopped > 0) props.onToast?.({ icon: 'check', lead: stoppedToast(stopped) }, CLOSE_UNDO_MS);
+          });
+        props.onToast?.({ icon: 'check', lead: startedToast(launched.length), action: { label: 'Stop', onPress: stop }, noKey: true }, CLOSE_UNDO_MS);
+      }
     });
   const pressMerge = () => {
     if (live.at === 'confirm') runMerge(plan.merge, plan.skip);
@@ -609,6 +652,10 @@ export function SheetPage(props: SheetPageProps) {
   }
 
   const mode = props.mode ?? 'page';
+  const threadOf = (key: string) => {
+    const link = model?.links[key];
+    return (link && link.agent?.ended !== true ? link.thread_id : null) ?? threadsHere.get(key) ?? null;
+  };
   const popover = pop && (
     <TilePopover
       key={pop.pull.key}
@@ -629,6 +676,10 @@ export function SheetPage(props: SheetPageProps) {
         hide(false);
         props.onOpenStack(pop.stack);
       }}
+      onOpenThread={threadOf(pop.pull.key) && props.onOpenThread ? () => {
+        hide(false);
+        props.onOpenThread!(threadOf(pop.pull.key)!);
+      } : undefined}
       onHold={(hold) => {
         held.current = hold;
       }}
@@ -650,7 +701,7 @@ export function SheetPage(props: SheetPageProps) {
   const mergeControl =
     live.at === 'running' ? (
       <span className="ib-prs-merging" role="status" data-pr-merging="" data-pr-running={live.verb}>
-        {runningWords(live.verb, live.done, live.total)}
+        {live.verb === 'review' ? startingWords(live.done, live.total) : runningWords(live.verb, live.done, live.total)}
       </span>
     ) : plan.merge.length > 0 ? (
       <button
@@ -670,6 +721,20 @@ export function SheetPage(props: SheetPageProps) {
       Close {pickedPulls.length}
     </button>
   );
+  const reviewControl = live.at !== 'running' && pickedPulls.length > 0 && (
+    <button type="button" className="ib-prs-btn" onClick={runReviews} data-pr-review="">
+      {startButtonWords(reviews.groups.length)}
+    </button>
+  );
+  const threadLink = (threadId: string, words: string, key: string) =>
+    props.onOpenThread ? (
+      <button key={key} type="button" className="ib-prs-tlink" onClick={() => props.onOpenThread!(threadId)} data-pr-thread-link={threadId}>
+        {words}
+      </button>
+    ) : (
+      <span key={key}>{words}</span>
+    );
+  const commas = (parts: ReactNode[]) => parts.flatMap((part, i) => (i > 0 ? [', ', part] : [part]));
   const hint = live.at === 'confirm' ? confirmWords(plan.merge.length, phone) : live.at === 'idle' ? mergeHint(plan) : null;
   const mergeNote = hint && (
     <span className="ib-prs-mnote" id={live.at === 'confirm' ? confirmId : undefined} data-pr-merge-hint="">
@@ -691,6 +756,33 @@ export function SheetPage(props: SheetPageProps) {
         {plan.skip.map(({ pull, why }) => (
           <li key={pull.key} data-pr-merge-row="skip">
             <span className="ib-prs-mskip">{cantMergeLine(pull, why)}</span>
+          </li>
+        ))}
+      </ul>
+    ) : live.at === 'reviewed' ? (
+      <ul className="ib-prs-mlist" role="status" data-pr-review-report="">
+        {live.report.started.length > 0 && (
+          <li data-pr-review-row="started">
+            {startedLead(live.report.started.length)}
+            {commas(live.report.started.map(({ group, threadId }) => threadLink(threadId, groupPart(group), group.key)))}
+          </li>
+        )}
+        {live.report.already.length > 0 && (
+          <li data-pr-review-row="already">
+            {ALREADY_LEAD}
+            {commas(live.report.already.map((a) => threadLink(a.threadId, alreadyPart(a), a.pull.key)))}.
+          </li>
+        )}
+        {live.report.started.map(({ group, untied }) =>
+          untied ? (
+            <li key={group.key} className="ib-prs-mbad" data-pr-review-row="untied">
+              {untiedLine(group.pulls, untied)}
+            </li>
+          ) : null,
+        )}
+        {live.report.failed.map((failed) => (
+          <li key={failed.pulls[0]!.key} className="ib-prs-mbad" data-pr-review-row="failed">
+            {notStartedLine(failed)}
           </li>
         ))}
       </ul>
@@ -756,6 +848,7 @@ export function SheetPage(props: SheetPageProps) {
               {pickedWords}
               {mergeControl}
               {closeControl}
+              {reviewControl}
               {mergeNote}
               {!busy && (
                 <button type="button" className="ib-prs-btn ib-prs-end" onClick={leaveSelect} data-pr-clear="">
@@ -849,6 +942,7 @@ export function SheetPage(props: SheetPageProps) {
             {pickedWords}
             {mergeControl}
             {closeControl}
+            {reviewControl}
             {!busy && (
               <button type="button" className="ib-prs-btn ib-prs-end" onClick={leaveSelect} data-pr-clear="">
                 Clear
@@ -902,8 +996,9 @@ function useToastAbove(): (sheet: HTMLDivElement | null) => void {
 type BulkPhase =
   | { at: 'idle' }
   | { at: 'confirm'; keys: string }
-  | { at: 'running'; verb: BulkVerb; done: number; total: number }
-  | { at: 'report'; verb: BulkVerb; keys: string; outcomes: RunOutcome[]; skipped: MergePlan['skip'] };
+  | { at: 'running'; verb: BulkVerb | 'review'; done: number; total: number }
+  | { at: 'report'; verb: BulkVerb; keys: string; outcomes: RunOutcome[]; skipped: MergePlan['skip'] }
+  | { at: 'reviewed'; keys: string; report: ReviewReport };
 
 const okPulls = (outcomes: readonly RunOutcome[]) => outcomes.filter((o) => o.ok).map((o) => o.pull);
 
@@ -925,6 +1020,8 @@ function TilePopover(props: {
   onClose: (returnFocus: boolean) => void;
   onOpen: () => void;
   onOpenStack: () => void;
+  /** The PR's review thread, when it has one. */
+  onOpenThread?: () => void;
   /** A merge under way or done: keep the popover open (true), or let it go again (false). */
   onHold: (hold: boolean) => void;
   /** The merge went and "Merged" was shown for `MERGED_SHOWN_MS`: close, and the PR leaves Open. */
@@ -1093,6 +1190,11 @@ function TilePopover(props: {
           <button type="button" className="ib-prpop-btn" data-primary="" onClick={props.onOpen} tabIndex={tabIndex} data-pr-pop-first="" data-pr-pop-open="">
             Open
           </button>
+          {props.onOpenThread && (
+            <button type="button" className="ib-prpop-btn" onClick={props.onOpenThread} tabIndex={tabIndex} data-pr-pop-thread="">
+              Open review thread
+            </button>
+          )}
           <a className="ib-prpop-btn" href={pull.url} target="_blank" rel="noreferrer" tabIndex={tabIndex} data-pr-pop-forge="">
             Open on {forgeName(pull)}
             <Icon name="external" size={12} />

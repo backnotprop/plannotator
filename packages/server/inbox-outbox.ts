@@ -154,7 +154,9 @@ export function replyIsStale(messages: readonly InboxMessage[], seenThroughSeq: 
  * - `forge` writes to GitHub or GitLab as that machine's own gh / glab (a PR's
  *   close, reopen or merge): never held, sent only while online, and only from
  *   a press in this Inbox's window. The forge is asked first there, so a second
- *   copy is refused in the forge's words ("It is already closed.").
+ *   copy is refused in the forge's words ("It is already closed."). A review
+ *   thread's PRs kept there (`pulls/owner`) go the same way: right after the
+ *   thread's start, or not at all.
  * - `local` is never forwarded: `doorWriteKind` has no kind for it, so the
  *   forward answers 404. A phone reaches it at this Inbox's own door. Reuse
  *   (`uploads/reuse`) is useful only as its answer, the new upload's id: a held
@@ -190,6 +192,7 @@ export const DOOR_WRITES: Readonly<Record<string, "append" | "set" | "file" | "f
   "POST pulls/close": "forge",
   "POST pulls/reopen": "forge",
   "POST pulls/merge": "forge",
+  "POST pulls/owner": "forge",
   // A thread's PRs live on the thread's machine: an add of one it holds, or a remove of one it does not, changes nothing.
   "POST threads/:id/pulls": "set",
   "POST messages/:id/picks": "set",

@@ -4,8 +4,9 @@
  * one PR on both. What regresses: a machine's PRs missing from the other's board, or the shared one shown twice; a
  * close, reopen or merge of the other machine's PR running this machine's gh (or none); a script, an agent or a phone
  * reaching the other machine's gh; Undo going anywhere but the machine that closed; a forge write held for an asleep
- * machine; an asleep machine's rows dropped; a thread's PRs on the other machine not read or changed there; the board
- * of an Inbox with no machine linked changing at all.
+ * machine; an asleep machine's rows dropped; a thread's PRs on the other machine not read or changed there; a review
+ * thread's PRs (`pulls/owner`) kept anywhere but the thread's machine, or by a call that is no press in a window; the
+ * board of an Inbox with no machine linked changing at all.
  *
  * Starts Inboxes: CI runs it.
  */
@@ -201,6 +202,13 @@ describe("the PR board across linked machines (mark `pulls`)", () => {
       const read = (await (await fetch(`${at(a.port)}/api/inbox/m/${bId}/threads/${thread}/pulls`)).json()) as Json;
       expect((read.pulls as Json[]).length).toBe(1);
       expect(a.store.message(thread)).toBeNull();
+      // Start review thread ties B's PRs to B's thread on B: only for a press in A's window, answered by B's
+      // route (B knows the thread; its project has no repository here, so B refuses the PR in its own words).
+      expect((await press(a.port, `/api/inbox/m/${bId}/pulls/owner`, { keys: [API7], thread_id: thread }, false)).status).toBe(403);
+      const ownerAtDoor = await fetch(`${at(b.port)}/api/inbox/device/pulls/owner`, { method: "POST", headers: { Authorization: `Bearer ${linkOnA.token}`, "Content-Type": "application/json" }, body: JSON.stringify({ keys: [API7], thread_id: thread, idempotency_key: "door-owner" }) });
+      expect(ownerAtDoor.status).toBe(403);
+      const owned = (await (await press(a.port, `/api/inbox/m/${bId}/pulls/owner`, { keys: [API7], thread_id: thread })).json()) as Json;
+      expect(owned.error).toBe("thread_id: a thread in a project of that pull request's repository.");
 
       // B asleep: its rows stay as last read; a close says plainly it cannot run, and nothing waits to run later.
       await client.close();

@@ -4593,6 +4593,8 @@ function Inbox() {
   const [paneView, setPaneView] = useState<SheetView>('open');
   const [paneLayout, setPaneLayout] = useState<SheetLayout>('grid');
   const sheetHead = useMemo(() => (sheetPulls.model ? sheetModel(sheetPulls.model, Date.now(), {}).head : null), [sheetPulls.model]);
+  // What the board shares in Reviews' pane and on its own page; a review thread opens beside Reviews.
+  const sheetShared = { model: sheetPulls.model, error: sheetPulls.error, loading: sheetPulls.loading, phone, onMerged: sheetPulls.refresh, onToast: showToast, onOpenThread: (id: string) => go({ page: 'inbox', reviews: reviewsScope(), project: null, thread: id }) };
   // The list a thread from the box opens beside: the one the box opened over.
   const reviewsScope = () => (route.page === 'reviews' ? { project: route.project, view: route.view ?? pullFilterOf(null) } : (route.reviews ?? { project: null, view: pullFilterOf(null) }));
   const reviewPulls = useMemo(() => reviewBoxPulls(pulls.reviews, new Map((projects ?? []).map((p) => [p.id, p.name]))), [pulls.reviews, projects]);
@@ -5554,16 +5556,11 @@ function Inbox() {
       prBoard={
         <SheetPage
           mode="pane"
-          model={sheetPulls.model}
-          error={sheetPulls.error}
-          loading={sheetPulls.loading}
-          phone={phone}
+          {...sheetShared}
           view={paneView}
           onView={setPaneView}
           onOpenPull={(pull, stack) => go(boardPull(pull, stack, { page: 'prs', project: null, thread: null, stack: stack.id, layer: pull.key, scope: 'layer', prsFrom: 'reviews' }))}
           onOpenStack={(stack) => go({ page: 'prs', project: null, thread: null, stack: stack.id, layer: null })}
-          onMerged={sheetPulls.refresh}
-          onToast={(next, ms) => showToast(next, ms)}
           layout={paneLayout}
           onLayout={setPaneLayout}
         />
@@ -5855,10 +5852,7 @@ function Inbox() {
   } else if (route.page === 'prs' && pullsShown) {
     main = (
       <SheetPage
-        model={sheetPulls.model}
-        error={sheetPulls.error}
-        loading={sheetPulls.loading}
-        phone={phone}
+        {...sheetShared}
         view={route.prsView ?? 'open'}
         onView={(prsView) => writeRoute({ ...route, prsView }, { replace: true })}
         layout={route.prsLayout}
@@ -5866,8 +5860,6 @@ function Inbox() {
         onBack={() => close({ page: 'reviews', project: null, thread: null })}
         onOpenPull={(pull, stack) => go(boardPull(pull, stack, { ...route, stack: stack.id, layer: pull.key, scope: 'layer', prsFrom: 'sheet' }))}
         onOpenStack={(stack) => go({ ...route, stack: stack.id, layer: null })}
-        onMerged={sheetPulls.refresh}
-        onToast={(next, ms) => showToast(next, ms)}
       />
     );
   } else if (route.page === 'prs') {

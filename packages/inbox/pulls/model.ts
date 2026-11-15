@@ -160,7 +160,7 @@ let graphemes: Intl.Segmenter | null = null;
  * `text` within `max` characters (code points, the unit the server and the name chip count), cut with "…" between two
  * graphemes: never inside an emoji sequence (a ZWJ family, a flag's two letters) or between a letter and its marks.
  */
-function cutText(text: string, max: number): string {
+export function cutText(text: string, max: number): string {
   if ([...text].length <= max) return text;
   graphemes ??= new Intl.Segmenter(undefined, { granularity: 'grapheme' });
   let kept = '';
@@ -186,17 +186,17 @@ export function pullTitleLine(title: string): string {
 }
 
 /** A branch name when `inboxPullSafeBranch` passes it, else null (then it is left out). */
-function safeBranch(name: string): string | null {
+export function safeBranch(name: string): string | null {
   return inboxPullSafeBranch(name) ? name : null;
 }
 
 const LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,62})$/;
 /** The author's login when it is one (GitHub's or GitLab's letters), else "a teammate". */
-const authorOf = (pull: Pick<InboxPull, 'author'>) => (pull.author && LOGIN.test(pull.author) ? pull.author : 'a teammate');
-const REPO = /^[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)+$/;
+export const authorOf = (pull: Pick<InboxPull, 'author'>) => (pull.author && LOGIN.test(pull.author) ? pull.author : 'a teammate');
+export const REPO = /^[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)+$/;
 
 /** The PR's web page when it is one on the PR's own host (`https://<host>/…`, no spaces or markdown), else null. */
-function pullUrl(pull: Pick<InboxPull, 'url' | 'host'>): string | null {
+export function pullUrl(pull: Pick<InboxPull, 'url' | 'host'>): string | null {
   return pull.url.startsWith(`https://${pull.host}/`) && /^https:\/\/[^\s<>()[\]`"']+$/.test(pull.url) ? pull.url : null;
 }
 
@@ -245,10 +245,10 @@ export function handoffStack(stack: InboxPullStack, links: Readonly<Record<strin
  * Step 2's line on using the thread, every PR's (the owner on a teammate's PR: "You should also be encouraged to use the
  * review thread with the user"; approved in `pull-handoff-pushes`).
  */
-const PULL_HANDOFF_TALK = 'Bring up what you notice or want to ask without waiting for me.';
+export const PULL_HANDOFF_TALK = 'Bring up what you notice or want to ask without waiting for me.';
 
 /** " on dana/web-app (a fork)" after a branch whose head is on a fork, so the agent knows where it lives; else nothing. */
-function forkWords(pull: Pick<InboxPull, 'repo' | 'head_repo'>): string {
+export function forkWords(pull: Pick<InboxPull, 'repo' | 'head_repo'>): string {
   const fork = pull.head_repo;
   return fork && REPO.test(fork) && fork.toLowerCase() !== pull.repo.toLowerCase() ? ` on ${fork} (a fork)` : '';
 }
@@ -258,7 +258,7 @@ function forkWords(pull: Pick<InboxPull, 'repo' | 'head_repo'>): string {
  * compared as `mine` compares logins, exactly. A fork in an organization they own reads as someone else's. Not
  * `inboxReviewIsOf`'s rule, which counts every fork out: a PR from the person's own fork is still theirs to update.
  */
-function branchIsMine(pull: Pick<InboxPull, 'mine' | 'author' | 'repo' | 'head_repo'>): boolean {
+export function branchIsMine(pull: Pick<InboxPull, 'mine' | 'author' | 'repo' | 'head_repo'>): boolean {
   if (!pull.mine) return false;
   const fork = pull.head_repo;
   if (!fork || fork.toLowerCase() === pull.repo.toLowerCase()) return true;
@@ -288,7 +288,7 @@ export function pullHandoffAskLine(stack: InboxPullStack, ask: PullHandoffAsk): 
 }
 
 /** "pull request" / "merge request". */
-const pullNounOf = (stack: Pick<InboxPullStack, 'platform'>) => (stack.platform === 'gitlab' ? 'merge request' : 'pull request');
+export const pullNounOf = (stack: Pick<InboxPullStack, 'platform'>) => (stack.platform === 'gitlab' ? 'merge request' : 'pull request');
 
 /**
  * The opening message of the review thread a PR goes to (Review with an agent, a running one or a new one), the owner's approved
