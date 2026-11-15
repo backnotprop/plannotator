@@ -99,6 +99,7 @@ async function world() {
     binaryPath: null,
     board: true,
     steps: true,
+    scheduled: true,
     storeNow: () => new Date(Date.now() - clock.behind),
     agentEnvironment: createAgentEnvironmentFor({ platform: process.platform, homeDir: agentsHome, env: { HOME: agentsHome, PATH: "" } }),
     codexWake: { extraClis: [] },

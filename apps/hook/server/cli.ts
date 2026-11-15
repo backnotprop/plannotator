@@ -521,7 +521,7 @@ export const INBOX_PROJECTS_USAGE = [
 /** What `plannotator inbox call` runs: the Inbox tool's actions. */
 export const INBOX_CALL_ACTIONS: readonly string[] = INBOX_TOOL_ACTIONS;
 
-const INBOX_PAIRED_CALL_ACTIONS = INBOX_AGENT_CALL_ACTIONS.filter((action) => action !== "steps");
+const INBOX_PAIRED_CALL_ACTIONS = INBOX_AGENT_CALL_ACTIONS.filter((action) => action !== "steps" && action !== "scheduled_thread");
 
 export const INBOX_PAIRED_CALL_USAGE = [
   "Usage, as a paired cloud agent (PLANNOTATOR_PAIRING is set):",
@@ -557,8 +557,8 @@ export const INBOX_CALL_USAGE = [
   "  plannotator inbox call [--session <id>] <action> [<json> | -]",
   "",
   "Runs one Inbox action from a shell, so a script can make many fixes in one go.",
-  // `steps` is left out: it is served only while the person has thread steps on, and the guide names it then.
-  `Actions: ${INBOX_CALL_ACTIONS.filter((action) => action !== "steps").join(", ")}. The JSON holds the action's fields, as in`,
+  // `steps` and `scheduled_thread` are left out: each is served only while the person has it on, and the guide names it then.
+  `Actions: ${INBOX_CALL_ACTIONS.filter((action) => action !== "steps" && action !== "scheduled_thread").join(", ")}. The JSON holds the action's fields, as in`,
   "'plannotator inbox --help'; - reads it from stdin (for PowerShell and for loops, where",
   "quoting JSON is painful). A stopped Inbox starts in the background.",
   "",

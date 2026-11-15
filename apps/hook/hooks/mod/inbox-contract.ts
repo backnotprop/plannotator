@@ -26,6 +26,7 @@ export const INBOX_TOOL_ACTIONS = [
   'get_guide_brief',
   'card',
   'steps',
+  'scheduled_thread',
 ] as const
 
 export type InboxToolAction = (typeof INBOX_TOOL_ACTIONS)[number]
