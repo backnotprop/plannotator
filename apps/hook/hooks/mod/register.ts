@@ -128,6 +128,7 @@ import {
   TranscriptContinuedIn,
   TranscriptForkedFrom,
   TranscriptTitle,
+  type InboxLaunchReminder,
   withReminderSession,
 } from './inbox'
 import { inboxAgentTool, inboxReminderFor, type InboxToolInfo } from './inbox-contract'
@@ -502,6 +503,33 @@ async function recordReminder($: Engine, sessionId: string): Promise<void> {
   await $.store.set(STORE_INBOX_REMINDER_SESSIONS, withReminderSession(readReminderSessions(stored), sessionId, now))
 }
 
+/** The longest a launched session's first wake waits to learn whether it carries the reminder. */
+const LAUNCH_REMINDER_MS = 1_500
+
+/**
+ * The reminder a launched session's first wake carries (approval "inbox-launched-agent-note"): that turn is the
+ * plugin's own prompt, which Claude Code never raises this module's `prompt.submit` for, so it carries the same
+ * text a typed first prompt would, under the same gate (`reminderOn`, decided at the first session.start), once
+ * per conversation: none when this conversation's first prompt had it (here or, by the store's record, in
+ * another process). Taken, it counts as that first prompt's, so a prompt the person types later carries none.
+ */
+async function launchReminderFor($: Engine, sessionId: string): Promise<InboxLaunchReminder | null> {
+  const settings = allowed
+  const toolName = inboxToolName
+  if (!settings || !toolName || reminderGateValue !== true) return null
+  const state = reminderConversation(sessionId)
+  if (state.delivered) return null
+  const recorded = await withinMs($, LAUNCH_REMINDER_MS, () => reminderRecorded($, sessionId))
+  if (recorded !== false) return null
+  return {
+    text: inboxReminderFor(settings.inboxReminderCustom, toolName),
+    entered: async () => {
+      state.delivered = true
+      await recordReminder($, sessionId).catch(() => undefined)
+    },
+  }
+}
+
 /**
  * The folder this session files under in the Inbox, for its thread lists
  * after a compaction or a resume: the session's own link's project folder
@@ -609,6 +637,7 @@ async function currentMod($: Engine, options: { healed?: boolean } = {}): Promis
       ...(inboxTools ? { inboxTools } : {}),
       ...(settings.t3Thread ? { inboxAs: inboxT3Agent(settings.t3Thread) } : {}),
       ...(settings.wake ? {} : { inboxWake: false }),
+      launchReminder: () => launchReminderFor($, String(sessionId)),
       ...(options.healed ? { healed: true } : {}),
     })
     // A question queued behind the old session's turn still enters as a turn of the new one: the new instance drops it.

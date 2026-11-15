@@ -198,6 +198,9 @@ describe("remote launch, on two real Inboxes linked both ways", () => {
       const root = (own.thread.messages as Json[])[0]!;
       expect(root.launch.from).toEqual({ machine: here.id, name: here.name });
       expect(root.launch.folder).toBe(there.project.root);
+      // The session there takes the root as a launched wake (approval "inbox-launched-agent-note"), as a local launch does.
+      await waitFor(`the first wake on ${there.name}`, async () => there.fake.wakes().some((w) => w.id === root.id));
+      expect(there.fake.wakes().find((w) => w.id === root.id)!.launched).toEqual({ agent: "claude-code", project: true });
       // And this machine reads its run line through the forward.
       await waitFor(`${here.name} reads the run line`, async () => ["starting", "working"].includes((await getJson(here, `/api/inbox/m/${there.id}/threads/${answer.thread_id}`)).run?.state));
     }

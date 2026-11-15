@@ -175,17 +175,17 @@ test("a marks file from a newer Inbox reads as none and is never written over", 
   expect(existsSync(file)).toBe(true);
 });
 
-test("what else a version-1 file holds beside the marks (a later version's tag colours) is kept through every write", () => {
+test("what else a version-1 file holds beside the marks and the colours (a later version's) is kept through every write", () => {
   const { dir, release, thread, reopen } = world();
   const t = thread();
   const file = join(dir, "inbox", INBOX_TAGS_FILE);
-  writeFileSync(file, `${JSON.stringify({ v: 1, marks: [], looks: { [release.id]: { colour: "#7a9e7e", rows: true } } })}\n`);
+  writeFileSync(file, `${JSON.stringify({ v: 1, marks: [], later: { [release.id]: { icon: "flag" } } })}\n`);
   const store = reopen();
   store.setThreadTag(t.thread_id, release.id, true);
   store.setThreadTag(t.thread_id, release.id, false);
-  const kept = JSON.parse(readFileSync(file, "utf8")) as { v: number; looks: unknown };
+  const kept = JSON.parse(readFileSync(file, "utf8")) as { v: number; later: unknown };
   expect(kept.v).toBe(1);
-  expect(kept.looks).toEqual({ [release.id]: { colour: "#7a9e7e", rows: true } });
+  expect(kept.later).toEqual({ [release.id]: { icon: "flag" } });
 });
 
 test("by name, as a linked machine tags: the live tag of that name (case and space ignored), made when none is", () => {
@@ -220,4 +220,23 @@ test("by name: a deleted tag's name makes a new one; a missing thread makes no t
   expect(() => store.setThreadTagNamed("msg_missing", "Fresh", true)).toThrow();
   expect(() => store.setThreadTagNamed(t.thread_id, "", true)).toThrow();
   expect(store.initiatives()).toHaveLength(count);
+});
+
+test("tags made in one millisecond (by name, as a linked machine tags) keep the order they were made in, open and after a restart", () => {
+  const dir = mkdtempSync(join(tmpdir(), "plannotator-inbox-thread-tags-"));
+  roots.push(dir);
+  // A clock that stands still: every tag has the same created_at, so only the order they were made in tells them apart.
+  const now = () => new Date("2026-11-12T09:00:00.000Z");
+  const store = InboxStore.open(dir, { now });
+  const project = store.ensureProject({ name: "app", root: "/work/app" });
+  const t = store.sendMessage({ project_id: project.id, author: AGENT, body: "Ready for a look.", thread: "t" }).message;
+  // Twelve, so an order left to the ids' random part passes by chance one time in 12!.
+  const names = Array.from({ length: 12 }, (_, i) => `Tag ${i}`);
+  for (const name of names) store.setThreadTagNamed(t.thread_id, name, true);
+  const made = names.map((name) => store.initiatives().find((i) => i.name === name)!.id);
+  expect(store.initiatives().map((i) => i.id)).toEqual(made);
+  expect(store.threadTags(t.thread_id)).toEqual(made);
+  const reopened = InboxStore.open(dir, { now });
+  expect(reopened.initiatives().map((i) => i.id)).toEqual(made);
+  expect(reopened.threadTags(t.thread_id)).toEqual(made);
 });
