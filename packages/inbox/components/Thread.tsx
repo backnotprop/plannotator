@@ -13,7 +13,7 @@ import { inboxLaunchedSession } from '@plannotator/core/inbox-run-line';
 import { LaunchChoiceMeta } from './LaunchChoiceMeta';
 import { INBOX_UPLOAD_MAX_BYTES, inboxActionInDraft, inboxActionPersonMark, type InboxDraftFile, type InboxMessageWire, type InboxQuestion, type InboxReplyDraft, type InboxThread, type InboxUpload, inboxLaunchStops, inboxPersonAnsweredSince, isInboxNote, isInboxT3WaitReason, type InboxAnnotationRecord, type InboxAttachmentState, type InboxInlineImage } from '@plannotator/core/inbox-types';
 import { isQuestionAnswerEmpty, type QuestionAnswer } from '@plannotator/core/question-block';
-import { earlierRunsLabel, RunDivider, runFolds, ScheduledFoot } from '../scheduled/thread';
+import { earlierRunsLabel, RunDivider, runFolds, ScheduledFoot, startedWords } from '../scheduled/thread';
 import { useRefRepo } from '../links';
 import { InboxApiError, InboxHeldError, inboxApi, type OutboxView, type TagMode, type ThreadModel } from '../api';
 import { awayLine, outboxLine } from '../machines';
@@ -4987,7 +4987,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         {launched && (
           <div className="ib-tmeta" data-started-by="" data-launched={launched.id}>
             <span>
-              You started {hostName(launched.agent)} in <bdi>{thread.project.name}</bdi>
+              {startedWords(thread.messages[0])}{hostName(launched.agent)} in <bdi>{thread.project.name}</bdi>
               {/* Started from another linked machine's window (remote launch): which one. */}
               {launched.from && launched.from.machine !== selfMachineId() && <> from {launched.from.name}</>}
             </span>

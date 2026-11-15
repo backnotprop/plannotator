@@ -178,6 +178,13 @@ test.skipIf(!hasDom)('the header names the machine that started it, unless it wa
   host!.remove();
   await draw(threadOf({ machine: SELF, name: 'MacBook' }), MINI_VIEW);
   expect(started()).toBe('You started Claude Code in billing-svc');
+  act(() => root!.unmount());
+  host!.remove();
+  // A scheduled thread's run was started by its schedule, not by the person.
+  const scheduled = threadOf(null);
+  scheduled.messages[0] = { ...scheduled.messages[0]!, scheduled_run: { scheduled_id: 'sch_a', name: 'CSV export', run: 1, due_at: '2026-11-06T09:12:00.000Z', by: 'schedule' } };
+  await draw(scheduled, null);
+  expect(started()).toBe('Scheduled thread · Claude Code in billing-svc');
 });
 
 test.skipIf(!hasDom)("a prompt only Claude Code's own dialog can approve: on another machine it says where, offers Copy attach command, never Approve in Terminal", async () => {
