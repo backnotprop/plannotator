@@ -40,10 +40,10 @@ The `routine` tool (also `plannotator_inbox` action `routine`; the shim fills it
 | Link | `#routine=<id>` opens that routine's editor; `#routines` the list (`#routine=new` a new one) |
 
 - A routine an agent creates arrives off. The person turns it on the first time, in the Inbox (`approved_at` on the record); before that the agent's `on` and `run` answer `routine_not_approved` and change nothing. After that the agent may update, turn it on or off, run it and delete it.
-- Each change posts one line, as the agent, in the thread the call names (`thread_id`), with `scheduled_change: { scheduled_id, name, op, fields?, turned_off? }` and a link `[Name](#routine=<id>)` that opens the editor. An edit says old and new: the schedule and folder in words, the prompt as a `diff` block.
+- Each change posts one line, as the agent, in the thread the call names (`thread_id`), else in the routine's own thread, with `scheduled_change: { scheduled_id, name, op, fields?, turned_off? }` and a link `[Name](#routine=<id>)` that opens the editor. An edit says old and new: the schedule and folder in words, the prompt as a `diff` block.
 - An agent's change of the folder or the agent turns it off and clears the approval; the line says so. Prompt and schedule edits apply at once.
 - Runs start in the person's own permission mode, exactly as New message does.
-- `update` changes only the fields passed. A schedule without `tz` takes this computer's zone. `thread_id` is only where the change lines go: runs reply in the routine's own thread, made at its first run.
+- `update` changes only the fields passed. A schedule without `tz` takes this computer's zone. `thread_id` is only where the change lines go: runs reply in the routine's own thread, made at its first run. With no `thread_id` the line goes in the routine's own thread (made for it when the routine has none yet); there it is a note, not anyone's words: it wakes no run and takes no reply (`threadOwner`, `wordsMessage`, the run outcome), and the list row says the change (`last_change`, "Changed by Codex") while it is the thread's latest.
 
 ### Routes (Bun only)
 

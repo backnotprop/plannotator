@@ -109,7 +109,7 @@ export function createInboxScheduled(deps: {
     let replied = false;
     for (let i = ids.length - 1; !replied && session && i >= 0 && ids[i] !== divider.id; i--) {
       const m = store.message(ids[i]!);
-      replied = m?.author.kind === "agent" && m.author.session === session && !m.turn_error;
+      replied = m?.author.kind === "agent" && m.author.session === session && !m.turn_error && !m.scheduled_change;
     }
     const outcome = !divider.launch || divider.launch.error || run.failed ? "didnt_start" : line && RUNNING.has(line.state) ? "running" : replied ? "replied" : "didnt_finish";
     return { message_id: divider.id, run: run.run!, due_at: run.due_at, started_at: divider.created_at, late: run.late === true, outcome };
@@ -129,6 +129,16 @@ export function createInboxScheduled(deps: {
     return project ? { folder_shown: deps.displayFolder(project.root), project_name: project.name } : { folder_shown: "A folder that is gone", project_name: null };
   };
 
+  const lastChangeOf = (record: InboxScheduledThread): InboxScheduledRow["last_change"] => {
+    const ids = record.thread_id ? store.threadMessageIds(record.thread_id) : [];
+    for (let i = ids.length - 1; i >= 0; i--) {
+      const m = store.message(ids[i]!);
+      if (m?.scheduled_change?.scheduled_id !== record.id || m.author.kind !== "agent") continue;
+      return { op: m.scheduled_change.op, by: m.author.name || INBOX_HOST_NAMES[m.author.host ?? ""] || "An agent", at: m.created_at };
+    }
+    return null;
+  };
+
   const rowOf = (record: InboxScheduledThread): InboxScheduledRow => {
     const last = lastDividerOf(record);
     const lastRun = last ? summaryOf(last) : null;
@@ -146,6 +156,7 @@ export function createInboxScheduled(deps: {
       running_since: running ? lastRun!.started_at : null,
       ...folderShown(record),
       thread_name: record.thread_id ? (store.threadShortName(record.thread_id) ?? store.message(record.thread_id)?.subject ?? null) : null,
+      last_change: lastChangeOf(record),
     };
   };
 
@@ -225,20 +236,22 @@ export function createInboxScheduled(deps: {
     return `${ticks}diff\n${body}\n${ticks}`;
   };
 
-  /** One message, as the calling agent, in the thread it asked from. A call with no thread posts nothing. */
-  const tell = (by: InboxScheduledBy, record: InboxScheduledThread, body: string, change: Omit<InboxScheduledChange, "scheduled_id" | "name">): string | null => {
-    if (by.kind !== "agent" || !by.thread_id) return null;
-    const thread = store.message(by.thread_id);
-    if (!thread) return null;
-    const latest = store.threadMessageIds(thread.thread_id).at(-1) ?? thread.thread_id;
-    const sent = store.sendMessage({
-      project_id: thread.project_id,
-      author: { kind: "agent", host: by.host, session: by.session, name: by.name },
-      body,
-      reply_to: latest,
-      scheduled_change: { scheduled_id: record.id, name: record.name, ...change },
-    });
-    return sent.message.id;
+  /**
+   * Every change an agent makes says so, as that agent: in the thread it named, else in the routine's own thread (made
+   * for the line when the routine has none yet, where its first run would go). The line is no one's words: it takes
+   * no reply and wakes no run (the store's `threadOwner`, the window's `wordsMessage`).
+   */
+  const tell = async (by: InboxScheduledBy, record: InboxScheduledThread, body: string, change: Omit<InboxScheduledChange, "scheduled_id" | "name">): Promise<string | null> => {
+    if (by.kind !== "agent") return null;
+    const thread = (by.thread_id ? store.message(by.thread_id) : null) ?? (record.thread_id ? store.message(record.thread_id) : null);
+    const line = { author: { kind: "agent" as const, host: by.host, session: by.session, name: by.name }, body, scheduled_change: { scheduled_id: record.id, name: record.name, ...change } };
+    if (thread) return store.sendMessage({ ...line, project_id: thread.project_id, reply_to: store.threadMessageIds(thread.thread_id).at(-1) ?? thread.thread_id }).message.id;
+    const project = projectOf(record) ?? (await firstProject(record));
+    if (!project) return null;
+    const sent = store.sendMessage({ ...line, project_id: project, subject: record.name }).message;
+    const now = store.scheduledThread(record.id) ?? store.deletedScheduledThread(record.id);
+    if (now && !now.thread_id) save(now, { thread_id: sent.thread_id });
+    return sent.id;
   };
 
   const changeLines = (before: InboxScheduledThread, after: InboxScheduledThread, fields: (keyof InboxScheduledThread)[], turnedOff: boolean): string => {
@@ -435,6 +448,8 @@ export function createInboxScheduled(deps: {
 
   return {
     rowOf,
+    /** The thread an agent's change line went to. */
+    threadOfLine: (id: string): string => store.message(id)?.thread_id ?? id,
     list: (): InboxScheduledRow[] =>
       store
         .scheduledThreads()
@@ -472,8 +487,8 @@ export function createInboxScheduled(deps: {
         created_at: at,
         updated_at: at,
       });
-      const told = tell(by, record, `Made the routine ${linkOf(record)}. It is off until you turn it on.`, { op: "create" });
-      return { record, told };
+      const told = await tell(by, record, `Made the routine ${linkOf(record)}. It is off until you turn it on.`, { op: "create" });
+      return { record: found(record.id), told };
     },
 
     async update(id: string, input: InboxScheduledInput, by: InboxScheduledBy): Promise<{ record: InboxScheduledThread; told: string | null }> {
@@ -489,7 +504,7 @@ export function createInboxScheduled(deps: {
       if (changed.includes("schedule")) patch.done_at = undefined;
       const record = save(before, patch);
       const turnedOff = moved && (before.enabled || before.approved_at !== null);
-      const told = tell(by, record, `Changed the routine ${linkOf(record)}.\n\n${changeLines(before, record, changed, turnedOff)}`, {
+      const told = await tell(by, record, `Changed the routine ${linkOf(record)}.\n\n${changeLines(before, record, changed, turnedOff)}`, {
         op: "update",
         fields: changed as InboxScheduledChange["fields"],
         ...(turnedOff ? { turned_off: true as const } : {}),
@@ -497,7 +512,7 @@ export function createInboxScheduled(deps: {
       return { record, told };
     },
 
-    setOn(id: string, on: boolean, by: InboxScheduledBy): { record: InboxScheduledThread; told: string | null } {
+    async setOn(id: string, on: boolean, by: InboxScheduledBy): Promise<{ record: InboxScheduledThread; told: string | null }> {
       const before = found(id);
       if (on && by.kind === "agent" && !before.approved_at) {
         throw new InboxError("routine_not_approved", `The person turns ${before.name} on the first time, in the Inbox. Nothing was changed.`);
@@ -505,7 +520,7 @@ export function createInboxScheduled(deps: {
       if (before.enabled === on) return { record: before, told: null };
       const at = iso();
       const record = save(before, on ? { enabled: true, handled_through: at, ...(by.kind === "person" ? { approved_at: at } : {}) } : { enabled: false });
-      const told = tell(by, record, `Turned the routine ${linkOf(record)} ${on ? "on" : "off"}.`, { op: on ? "on" : "off" });
+      const told = await tell(by, record, `Turned the routine ${linkOf(record)} ${on ? "on" : "off"}.`, { op: on ? "on" : "off" });
       return { record, told };
     },
 
@@ -519,8 +534,8 @@ export function createInboxScheduled(deps: {
       const n = message.scheduled_run!.run;
       const after = found(id);
       const told = message.scheduled_run!.failed
-        ? tell(by, after, `Run ${n} of the routine ${linkOf(after)} didn't start. Its thread says why.`, { op: "run" })
-        : tell(by, after, `Started run ${n} of the routine ${linkOf(after)}.`, { op: "run" });
+        ? await tell(by, after, `Run ${n} of the routine ${linkOf(after)} didn't start. Its thread says why.`, { op: "run" })
+        : await tell(by, after, `Started run ${n} of the routine ${linkOf(after)}.`, { op: "run" });
       return { message, told };
     },
 
@@ -537,7 +552,7 @@ export function createInboxScheduled(deps: {
       const running = runningOf(record);
       if (running) await launch.stopMessage(running.message_id);
       save(found(id), { deleted_at: iso() });
-      return { told: tell(by, record, `Deleted the routine ${record.name}. Its thread and past runs stay.`, { op: "delete" }) };
+      return { told: await tell(by, record, `Deleted the routine ${record.name}. Its thread and past runs stay.`, { op: "delete" }) };
     },
 
     /** The window's Undo of a delete: back as it was, counting from now (nothing due meanwhile is caught up). */

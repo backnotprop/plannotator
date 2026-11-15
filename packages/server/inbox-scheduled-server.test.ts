@@ -154,7 +154,7 @@ describe("agents", () => {
     const refused = await w.call({ op: "create", name: "Release notes", prompt: "Draft them.", schedule: null, agent: FAKE, project_path: undefined });
     expect(refused.content[0]!.text).toBe("validation_error: folder: { path } or { scratch: true }, or pass project_path.");
     const made = await w.call({ op: "create", name: "Release notes", prompt: "Draft them.", schedule: null, agent: FAKE });
-    expect(made.content[0]!.text).toMatch(/^Made sch_\w+ "Release notes": off, runs only when run, fake-agent in ~\/acme-api, not yet turned on by the person\. It is off/);
+    expect(made.content[0]!.text).toMatch(/^Made sch_\w+ "Release notes": off, runs only when run, fake-agent in ~\/acme-api, not yet turned on by the person, thread msg_\w+\. It is off/);
   });
 
   test("an agent's edit says old and new; a folder move turns it off and the person turns it on again", async () => {

@@ -342,7 +342,7 @@ describe("the clock", () => {
     w.scheduled.sync();
     w.at("2026-11-16T14:00:10.000Z");
     await w.scheduled.check();
-    expect(w.store.scheduledThread(record.id)!.thread_id).toBeNull();
+    expect(w.dividers(record.thread_id)).toEqual([]);
     expect(w.fake.calls).toEqual([]);
     w.at("2026-11-16T15:00:00.000Z");
     w.switches.on = true;
@@ -435,14 +435,14 @@ describe("the person turns it on first", () => {
     const w = world();
     const { record } = await w.scheduled.create({ name: "Morning triage", prompt: "Triage.", schedule: { cron: "0 9 * * *", tz: NY }, folder: { project_id: w.project.id }, agent: FAKE }, agent());
     expect(record).toMatchObject({ enabled: false, approved_at: null });
-    expect(() => w.scheduled.setOn(record.id, true, agent())).toThrow("The person turns Morning triage on the first time");
+    await expect(w.scheduled.setOn(record.id, true, agent())).rejects.toThrow("The person turns Morning triage on the first time");
     await expect(w.scheduled.runNow(record.id, agent())).rejects.toMatchObject({ code: "routine_not_approved" });
     expect(w.store.scheduledThread(record.id)).toEqual(record);
     // On, but never by the person (a record written by hand): the clock passes it by.
     w.store.putScheduledThread({ ...record, enabled: true, handled_through: "2026-11-16T13:00:00.000Z" });
     w.at("2026-11-16T14:00:10.000Z");
     await w.scheduled.check();
-    expect(w.store.scheduledThread(record.id)!.thread_id).toBeNull();
+    expect(w.dividers(record.thread_id)).toEqual([]);
     expect(w.fake.calls).toEqual([]);
   });
 
@@ -453,14 +453,48 @@ describe("the person turns it on first", () => {
     expect(message.scheduled_run).toMatchObject({ run: 1, by: "agent" });
     for (const change of [{ agent: "fake-two" }, { folder: { path: w.home + "/code" } }]) {
       mkdirSync(join(w.home, "code"), { recursive: true });
-      w.scheduled.setOn(record.id, true, { kind: "person" });
+      await w.scheduled.setOn(record.id, true, { kind: "person" });
       const { record: after } = await w.scheduled.update(record.id, change, agent());
       expect(after).toMatchObject({ enabled: false, approved_at: null });
       await expect(w.scheduled.runNow(record.id, agent())).rejects.toMatchObject({ code: "routine_not_approved" });
     }
     // A prompt edit applies at once and leaves it on.
-    w.scheduled.setOn(record.id, true, { kind: "person" });
+    await w.scheduled.setOn(record.id, true, { kind: "person" });
     expect((await w.scheduled.update(record.id, { prompt: "Triage, then label." }, agent())).record).toMatchObject({ enabled: true, prompt: "Triage, then label." });
+  });
+});
+
+describe("an agent's change with no thread_id is said in the routine's own thread", () => {
+  const agent: InboxScheduledBy = { kind: "agent", host: "codex", session: "s-alex", name: "Codex", thread_id: null };
+
+  test("a prompt edit on a routine that ran: one line there, old and new; it wakes no run, takes no reply, and is news", async () => {
+    const w = world();
+    const { record } = await w.make();
+    const { message } = await w.scheduled.runNow(record.id, { kind: "person" });
+    const session = await w.settle(message, "Three new issues, labelled.");
+    const thread = message.thread_id;
+    w.store.markSeen(thread);
+    await w.scheduled.update(record.id, { prompt: "Triage, then label." }, agent);
+    const line = w.store.message(w.store.threadMessageIds(thread).at(-1)!)!;
+    expect(line).toMatchObject({ author: { kind: "agent", name: "Codex" }, scheduled_change: { scheduled_id: record.id, op: "update", fields: ["prompt"] } });
+    expect(line.body).toContain("- Triage the new issues.\n+ Triage, then label.");
+    expect(w.store.pendingReplies(session).map((m) => m.id)).not.toContain(line.id);
+    expect(w.store.pendingReplies("s-alex")).toEqual([]);
+    expect(w.store.threadOwner(thread)?.session).toBe(session);
+    expect(w.store.listRow(thread)).toMatchObject({ unread: true });
+    expect(w.scheduled.rowOf(w.store.scheduledThread(record.id)!).last_change).toEqual({ op: "update", by: "Codex", at: line.created_at });
+  });
+
+  test("one that never ran: the line makes its thread, and its first run goes on in it", async () => {
+    const w = world();
+    const { record } = await w.scheduled.create({ name: "Morning triage", prompt: "Triage.", schedule: null, folder: { project_id: w.project.id }, agent: FAKE }, agent);
+    expect(record.thread_id).not.toBeNull();
+    const made = w.store.message(record.thread_id!)!;
+    expect(made).toMatchObject({ subject: "Morning triage", scheduled_change: { op: "create" } });
+    await w.scheduled.setOn(record.id, true, { kind: "person" });
+    const { message } = await w.scheduled.runNow(record.id, agent);
+    expect(message.thread_id).toBe(record.thread_id!);
+    expect(w.store.threadOwner(record.thread_id!)?.session).toBe(message.to!.session);
   });
 });
 

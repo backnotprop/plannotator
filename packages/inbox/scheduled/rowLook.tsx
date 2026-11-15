@@ -22,6 +22,7 @@ export interface RowScheduled {
 const marks = new WeakMap<InboxListRow, RowScheduled>();
 const looks = new WeakMap<InboxListRow, { from: InboxScheduledRow; look: InboxListRow }>();
 const TIME = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' });
+const CHANGED = { create: 'Made', update: 'Changed', on: 'Turned on', off: 'Turned off', run: 'Run', delete: 'Deleted' } as const;
 
 /** The row as the list draws it: unchanged unless it is one of this computer's routines. */
 export function scheduledLook(row: InboxListRow, scheduled: readonly InboxScheduledRow[] | null): InboxListRow {
@@ -34,8 +35,11 @@ export function scheduledLook(row: InboxListRow, scheduled: readonly InboxSchedu
   const running = from.state === 'running';
   const failed = !running && (last?.outcome === 'didnt_finish' || last?.outcome === 'didnt_start');
   const run = last?.run ?? null;
-  const preview = running && from.running_since ? `Started at ${TIME.format(new Date(from.running_since))}.` : last?.outcome === 'didnt_start' ? "Didn't start." : failed ? 'The session ended without a reply.' : row.latest_preview;
-  const look: InboxListRow = { ...row, thread_name: run ? `Run ${run}` : row.thread_name, latest_preview: preview, run: undefined, session_ended: undefined };
+  // An agent's change line is the thread's latest: the row says that change, not the run.
+  const change = from.last_change && from.last_change.at >= row.last_at ? from.last_change : null;
+  const preview = change ? row.latest_preview : running && from.running_since ? `Started at ${TIME.format(new Date(from.running_since))}.` : last?.outcome === 'didnt_start' ? "Didn't start." : failed ? 'The session ended without a reply.' : row.latest_preview;
+  const title = change ? `${CHANGED[change.op]} by ${change.by}` : run ? `Run ${run}` : row.thread_name;
+  const look: InboxListRow = { ...row, thread_name: title, latest_preview: preview, run: undefined, session_ended: undefined };
   marks.set(look, { name: from.name, run, state: running ? 'running' : last?.outcome === 'didnt_start' ? 'didnt_start' : failed ? 'failed' : 'other' });
   looks.set(row, { from, look });
   return look;

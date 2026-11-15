@@ -79,6 +79,12 @@ test.skipIf(!hasDom)('run dividers, a late run with its missed time, a quiet ski
   expect(r7.querySelector('.st-prompt-shown')?.textContent).toBe('Summarize my open pull requests.');
 });
 
+test.skipIf(!hasDom)("an agent's change line after a run is a note, not that run's reply: the run still says Didn't finish", () => {
+  const change = message('msg_c9', '2026-11-13T15:00:00.000Z', { author: { ...AGENT, session: 'ses_b', name: 'Codex' }, body: 'Changed the routine.', scheduled_change: { scheduled_id: 'sch_pr', name: 'Weekday PR summary', op: 'update', fields: ['prompt'] } });
+  const host = draw(null, [...MESSAGES, change]);
+  expect(host.querySelector('[data-scheduled-divider="9"] [data-scheduled-unfinished]')).not.toBeNull();
+});
+
 test.skipIf(!hasDom)('the latest run still going: no Didn\'t finish', () => {
   const host = draw({ state: 'working' } as InboxRun);
   expect(host.querySelector('[data-scheduled-unfinished]')).toBeNull();

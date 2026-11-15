@@ -3607,7 +3607,8 @@ export class InboxStore {
     for (let index = messages.length - 1; index >= 0; index--) {
       const message = messages[index]!;
       // A permission prompt (launch, `perm:…`) is not its session's words, as in the window's `wordsMessage`.
-      if (message.author.kind === "agent" && message.author.session && !isInboxPermissionSession(message.author.session)) return { host: message.author.host ?? null, session: message.author.session };
+      // An agent's routine change line (`scheduled_change`) is a note, not its words: it takes no thread.
+      if (message.author.kind === "agent" && message.author.session && !isInboxPermissionSession(message.author.session) && !message.scheduled_change) return { host: message.author.host ?? null, session: message.author.session };
       if (message.took_over && message.to) return { host: message.to.host, session: message.to.session };
     }
     const root = messages[0];

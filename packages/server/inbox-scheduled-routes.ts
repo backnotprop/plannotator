@@ -100,7 +100,7 @@ export async function scheduledRoute(
       return json({ scheduled: scheduled.rowOf((await scheduled.update(id, { ...body, enabled: undefined }, person)).record) });
     case "on":
     case "off":
-      return json({ scheduled: scheduled.rowOf(scheduled.setOn(id, action === "on", person).record) });
+      return json({ scheduled: scheduled.rowOf((await scheduled.setOn(id, action === "on", person)).record) });
     case "run": {
       const { message } = await scheduled.runNow(id, person);
       return json({ scheduled: scheduled.get(id).scheduled, message_id: message.id, ...(message.scheduled_run?.failed ? { failed: message.scheduled_run.failed } : {}) }, 202);

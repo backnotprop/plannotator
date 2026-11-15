@@ -19,14 +19,15 @@ export function runEnded(message: InboxMessageWire, messages: readonly InboxMess
   const at = messages.indexOf(message);
   const next = messages.findIndex((m, i) => i > at && isRun(m));
   const after = messages.slice(at + 1, next < 0 ? undefined : next);
-  const replied = after.some((m) => m.author.kind === 'agent');
+  // An agent's change line (`scheduled_change`) is a note between runs, not the run's reply.
+  const replied = after.some((m) => m.author.kind === 'agent' && !m.scheduled_change);
   const latest = next < 0;
   const going = latest && !!run && (LIVE.has(run.state) || run.state === 'failed');
   return { replied, didntFinish: !replied && !going };
 }
 
 /** The thread header's start: "You started Claude Code in acme-api", or "Routine · Claude Code in acme-api". */
-export const startedWords = (root: InboxMessageWire | undefined) => (root?.scheduled_run ? 'Routine · ' : 'You started ');
+export const startedWords = (root: InboxMessageWire | undefined) => (root?.scheduled_run || root?.scheduled_change ? 'Routine · ' : 'You started ');
 
 /** The fold over earlier runs: "6 earlier runs, Nov 2 to Nov 9", or null when it hides no run. */
 export function earlierRunsLabel(ids: readonly string[], messages: readonly InboxMessageWire[]): string | null {

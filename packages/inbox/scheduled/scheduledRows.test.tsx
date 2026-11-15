@@ -123,3 +123,12 @@ test.skipIf(!hasDom)("a routine's row labels (its pick box, Mark read) name the 
   expect(box('msg_unfinished')).toBe('Select Weekday PR summary');
   expect(box('msg_plain')).toBe('Select plain');
 });
+
+test.skipIf(!hasDom)("an agent's change line as the thread's latest: the row says that change, not the run", () => {
+  const changed = scheduledRow('sch_changed', { name: 'Docs link sweep', thread_id: 'msg_replied', runs: 4, last_run: lastRun(4, now, 'replied'), last_change: { op: 'update', by: 'Codex', at: '2026-11-13T14:00:00.000Z' } });
+  resetScheduledForTests([changed], true);
+  const el = render('narrow');
+  const of = el.querySelector('[data-thread-id="msg_replied"]')!;
+  expect(of.textContent).toContain('Changed by Codex');
+  expect(of.textContent).not.toContain('Run 4');
+});

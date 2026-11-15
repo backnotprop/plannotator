@@ -16,7 +16,7 @@ import { guarded, okComplete, PROJECT_PATH_DESCRIPTION } from "./inbox-mcp-resul
 export const SCHEDULED_THREAD_OPS = ["create", "list", "get", "update", "on", "off", "run", "delete"] as const;
 
 export const SCHEDULED_THREAD_DESCRIPTION =
-  "Routines in the Plannotator Inbox: a saved prompt an agent on this computer runs on a schedule, every run replying in the routine's own Inbox thread. Make one only when the person asks for work to run on its own, on a schedule. op: create, list, get, update, on, off, run, delete; update changes only the fields you pass. One you create arrives off: the person turns it on the first time, in the Inbox; after that you may update, turn it on or off, run and delete it. Changing its folder or its agent turns it off again until the person turns it back on. A schedule's runs are at least 15 minutes apart. Pass thread_id, the thread you work in: each change posts one line there for the person; runs never reply there.";
+  "Routines in the Plannotator Inbox: a saved prompt an agent on this computer runs on a schedule, every run replying in the routine's own Inbox thread. Make one only when the person asks for work to run on its own, on a schedule. op: create, list, get, update, on, off, run, delete; update changes only the fields you pass. One you create arrives off: the person turns it on the first time, in the Inbox; after that you may update, turn it on or off, run and delete it. Changing its folder or its agent turns it off again until the person turns it back on. A schedule's runs are at least 15 minutes apart. Each change posts one line for the person: in thread_id, the thread you work in, if you pass it, else in the routine's own thread; runs reply only in their own thread.";
 
 export interface InboxScheduledMcpContext {
   /** Whether the person has routines on, read on every request. Absent: off. */
@@ -55,7 +55,7 @@ export function registerInboxScheduledTool(server: McpServer, context: InboxSche
           model: z.string().optional(),
           effort: z.string().optional(),
           attachments: z.array(z.string()).optional().describe("Full paths of files each run gets."),
-          thread_id: z.string().optional().describe("The thread you are working in: your change lines go there, not the runs."),
+          thread_id: z.string().optional().describe("The thread you are working in: your change lines go there, not the runs. Without it they go in the routine's own thread."),
           project_path: z.string().optional().describe(PROJECT_PATH_DESCRIPTION),
           agent_session: z.string().optional().describe("Your session id; the `plannotator inbox mcp` shim fills it."),
           agent_name: z.string().optional().describe("How the person sees you, e.g. \"Claude Code\"."),
@@ -79,7 +79,7 @@ export function registerInboxScheduledTool(server: McpServer, context: InboxSche
           const rows = scheduled.list();
           return okComplete(rows.length === 0 ? "No routines." : rows.map(rowLine).join("\n"), { scheduled: rows });
         }
-        const told = (id: string | null) => (id ? ` The person sees it in thread ${input.thread_id}.` : "");
+        const told = (id: string | null) => (id ? ` The person sees it in thread ${scheduled.threadOfLine(id)}.` : "");
         if (input.op === "create") {
           const path = input.folder?.path ?? input.project_path;
           if (!input.folder?.scratch && !path) throw new InboxError("validation_error", "folder: { path } or { scratch: true }, or pass project_path.", { field: "folder" });
@@ -104,7 +104,7 @@ export function registerInboxScheduledTool(server: McpServer, context: InboxSche
           }
           case "on":
           case "off": {
-            const { record, told: line } = scheduled.setOn(input.id, input.op === "on", by);
+            const { record, told: line } = await scheduled.setOn(input.id, input.op === "on", by);
             return okComplete(`${rowLine(scheduled.rowOf(record))}${told(line)}`, { scheduled: scheduled.rowOf(record) });
           }
           case "run": {
