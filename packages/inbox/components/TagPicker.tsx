@@ -13,7 +13,7 @@
  * woken). Plain text, linked to the field by `aria-describedby`; they never
  * block Send.
  */
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type RefObject } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useState, type CSSProperties, type RefObject } from 'react';
 import type { MentionMenuState } from '@plannotator/ui/hooks/useMentionAutocomplete';
 import { inboxApi, type TaggableModel } from '../api';
 import type { RecipientConnection } from '../deliveryLine';
@@ -73,38 +73,82 @@ import { TAG_READERS_GROUP, TAG_UPDATE_WORDS, tagHeadsUp, tagModeLine, type TagO
 import type { TagMode } from '../api';
 
 /**
+ * Where the menu sits: fixed to the viewport from the textarea's measured
+ * rect (`menu.anchor`, which `useMentionAutocomplete` follows on scroll and
+ * resize), never inside the field's own boxes. A menu drawn inside the reply
+ * box's scroll region (`.ib-rscroll`, `overflow: auto`) is clipped at the
+ * region's edge and nothing shows (#3427); the skills menu portals out the
+ * same way, and this one follows it. Above the field by default; below it
+ * when the field sits too close to the top of the window for one whole row
+ * above it.
+ *
  * An iPhone with the keyboard up (`data-ib-keyboard-pin`): the thread's foot is a short box that scrolls, and the
  * picker drawn above the field opened behind the header, cut off (approval "inbox-reply-recipient", "fix with it").
  * There it is placed on the screen instead: as wide as the field, above it up to the header, never past it; with no
- * room above the field, over the box from its row (Send's) up. Elsewhere it keeps its place in the page.
+ * room above the field, over the box from its row (Send's) up.
  */
-function useKeyboardSpot(): { ref: RefObject<HTMLDivElement | null>; style: CSSProperties | undefined } {
-  const ref = useRef<HTMLDivElement | null>(null);
+function useMenuSpot(menu: MentionMenuState, field: HTMLTextAreaElement | null): CSSProperties | undefined {
   const [style, setStyle] = useState<CSSProperties | undefined>(undefined);
   // Every commit (the field grows as the person types); the equality guard converges.
   useLayoutEffect(() => {
-    const menu = ref.current;
-    const foot = menu?.closest('.ib-pfoot');
-    const field = menu?.parentElement?.getBoundingClientRect();
-    if (!menu || !foot || !field || !document.documentElement.hasAttribute('data-ib-keyboard-pin')) {
+    const anchor = menu.anchor;
+    if (!anchor) {
       setStyle((current) => (current === undefined ? current : undefined));
       return;
     }
-    const headBottom = foot.closest('.ib-pane')?.querySelector('.ib-phead')?.getBoundingClientRect().bottom ?? 0;
-    // Room above the field: there. With the keyboard leaving ~257 px the field starts under the header, so the list
-    // covers the box instead, from just above the box's row (Send's) up to the header (as the recipient list does).
-    const above = Math.round(field.top - 10);
-    const row = foot.querySelector('[data-reply-row]')?.getBoundingClientRect();
-    const top = above - headBottom - 8 >= 120 || !row ? above : Math.round(row.top - 6);
-    const left = Math.round(field.left);
-    const room = Math.max(88, top - headBottom - 8);
+    const view = field?.ownerDocument.defaultView ?? window;
+    const gap = 8;
+    // One whole row and the list's padding: the least list ever shown (a sliver of a row is never shown).
+    const least = 56;
+    let next: CSSProperties;
+    if (view.document.documentElement.hasAttribute('data-ib-keyboard-pin') && field) {
+      const foot = field.closest('.ib-pfoot');
+      const headBottom = foot?.closest('.ib-pane')?.querySelector('.ib-phead')?.getBoundingClientRect().bottom ?? 0;
+      // Room above the field: there. With the keyboard leaving ~257 px the field starts under the header, so the list
+      // covers the box instead, from just above the box's row (Send's) up to the header (as the recipient list does).
+      const above = Math.round(anchor.top - 10);
+      const row = foot?.querySelector('[data-reply-row]')?.getBoundingClientRect();
+      const top = above - headBottom - 8 >= 120 || !row ? above : Math.round(row.top - 6);
+      const left = Math.round(anchor.left);
+      const room = Math.max(88, top - headBottom - 8);
+      next = { position: 'fixed', top, left, width: Math.round(anchor.width), right: 'auto', bottom: 'auto', margin: 0, transform: 'translateY(-100%)', maxHeight: room };
+    } else if (anchor.top - gap >= least) {
+      next = {
+        position: 'fixed',
+        left: Math.round(anchor.left),
+        width: Math.round(anchor.width),
+        right: 'auto',
+        bottom: view.innerHeight - Math.round(anchor.top) + gap,
+        top: 'auto',
+        margin: 0,
+        maxHeight: Math.max(least, Math.round(anchor.top) - gap - 8),
+      };
+    } else {
+      next = {
+        position: 'fixed',
+        left: Math.round(anchor.left),
+        width: Math.round(anchor.width),
+        right: 'auto',
+        top: Math.round(anchor.bottom) + gap,
+        bottom: 'auto',
+        margin: 0,
+        maxHeight: Math.max(least, view.innerHeight - Math.round(anchor.bottom) - gap - 8),
+      };
+    }
     setStyle((current) =>
-      current && current.top === top && current.left === left && current.maxHeight === room
+      current &&
+      current.position === next.position &&
+      current.top === next.top &&
+      current.bottom === next.bottom &&
+      current.left === next.left &&
+      current.width === next.width &&
+      current.maxHeight === next.maxHeight &&
+      current.transform === next.transform
         ? current
-        : { position: 'fixed', top, left, width: Math.round(field.width), right: 'auto', bottom: 'auto', margin: 0, transform: 'translateY(-100%)', maxHeight: room },
+        : next,
     );
   });
-  return { ref, style };
+  return style;
 }
 
 export function TagPicker({
@@ -112,16 +156,21 @@ export function TagPicker({
   menu,
   options,
   onSelect,
+  fieldRef,
 }: {
   id: string;
   menu: MentionMenuState;
   options: readonly TagOption[];
   onSelect: (index: number) => void;
+  /** The field the menu hangs off (the keyboard-up placement reads its foot); absent, it hangs off the anchor alone. */
+  fieldRef?: RefObject<HTMLTextAreaElement | null>;
 }) {
   const byId = new Map(options.map((o) => [o.id, o]));
-  const spot = useKeyboardSpot();
+  const spot = useMenuSpot(menu, fieldRef?.current ?? null);
+  // Nothing until the anchor is measured (the hook measures on open): a frame later the menu is placed from it.
+  if (!menu.anchor || !spot) return null;
   return (
-    <div ref={spot.ref} className="ib-tg-menu" data-tag-picker="" id={id} role="listbox" aria-label="Tag an agent" style={spot.style}>
+    <div className="ib-tg-menu" data-tag-picker="" id={id} role="listbox" aria-label="Tag an agent" style={spot}>
       {menu.items.length === 0 ? (
         <p className="ib-tg-empty">{menu.emptyNotice ?? 'No agent matches.'}</p>
       ) : (

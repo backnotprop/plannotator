@@ -20,15 +20,13 @@
  * keep their meaning and the host's own `onKeyDown` gets everything else.
  * With no skills installed (or the route missing) `/` and `$` are plain text.
  *
- * Where the picker opens: never inside the field's own boxes (FloatingSkillMenu
- * portals it out, so no scrolling foot or stacking context can cut or cover
- * it). By default it hangs off the field's own box (the reply box, two lines
- * tall, so that is at the caret), inside the room the person really sees (the
- * visual viewport, under the thread's header). A tall field in a modal dialog
- * (compose) passes `caretMenu`: the picker then opens at the caret's line,
- * kept inside the box `caretMenu.bounds` names (compose: the viewport on a
- * desktop, so it floats over the footer; the sheet above its footer on a
- * phone).
+ * Where the picker opens: never inside the field's own boxes (FloatingSkillMenu portals the skill and `#` lists out,
+ * and TagPicker portals the `@` list out from the hook's measured anchor, so no scrolling foot or stacking context
+ * can cut or cover it). By default it hangs off the field's own box (the reply box, two lines tall, so that is at
+ * the caret), inside the room the person really sees (the visual viewport, under the thread's header). A tall field
+ * in a modal dialog (compose) passes `caretMenu`: the picker then opens at the caret's line, kept inside the box
+ * `caretMenu.bounds` names (compose: the viewport on a desktop, so it floats over the footer; the sheet above its
+ * footer on a phone).
  */
 import React, { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -281,7 +279,9 @@ export function InboxComposerField({
           )}
         </FloatingSkillMenu>
       ) : null}
-      {tagMenu && options && <TagPicker id={tagListboxId} menu={tagMenu} options={options} onSelect={select} />}
+      {tagMenu && options && host
+        ? createPortal(<TagPicker id={tagListboxId} menu={tagMenu} options={options} onSelect={select} fieldRef={innerRef} />, host)
+        : null}
       <ComposerTokenTextarea
         textareaRef={attach}
         value={value}
@@ -342,7 +342,7 @@ export function InboxComposerField({
  * under the thread's header, so a list drawn there was cut at the foot's top
  * edge (only the last row's bottom showed) and hidden behind the header.
  */
-function skillMenuHost(field: HTMLElement): HTMLElement {
+export function skillMenuHost(field: HTMLElement): HTMLElement {
   return field.closest<HTMLElement>('dialog[open]') ?? field.closest<HTMLElement>('.pn-inbox') ?? field.ownerDocument.body;
 }
 
