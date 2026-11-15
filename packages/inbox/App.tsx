@@ -2224,11 +2224,11 @@ function Inbox() {
       // settles nothing when every message is seen, left it there with its
       // questions open.
       if (listCovered() && COVERED_LIST_SETTLES === 'while-covered') settleList('own', false, { threadId });
-      // The look covers what this read showed, not a message that lands before the server takes it.
       // Until it lands and the list is read again, the row and the header read it as looked at (`looking`).
       setLooking((current) => (current.has(threadId) ? current : new Set(current).add(threadId)));
       const look = (async () => {
         try {
+          if (!firstList.current!.done) await firstList.current!.promise;
           await inboxApi.seen(threadId, latestAgentSeq(opened)).catch(() => {});
           // Read the list even when another thread opened meanwhile: this row leaves `looking` next, and must
           // then show the server's row (read), not the one from before the look (bold).
