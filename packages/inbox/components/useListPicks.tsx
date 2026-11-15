@@ -47,7 +47,24 @@ export function useListPicks(input: ListPicksInput) {
   const { sections, isOpen, body, bulk, phone, machines, pinned, snoozesOf, sectionOf } = input;
   const listed = useMemo(() => new Set(sections.flatMap((section) => section.threads.map((row) => row.thread_id))), [sections]);
   const picks = useRowPicks(useCallback((id: string) => listed.has(id), [listed]));
-  const { leave } = picks;
+  const { leave: leavePicks } = picks;
+  /**
+   * Leaves picking (Done, Escape, an action that ends it). The bar goes with it, so focus that was on the bar, a
+   * menu or nowhere moves to the list: the row after the last pick, else the first pick still drawn, else the first row.
+   */
+  const leave = useCallback(() => {
+    const drawn = [...(body.current?.querySelectorAll('[data-thread-id]') ?? [])].map((el) => el.getAttribute('data-thread-id')!);
+    const picked = picksRef.current.picked;
+    const last = drawn.reduce((at, id, i) => (picked.has(id) ? i : at), -1);
+    const order = [...drawn.slice(last + 1).filter((id) => !picked.has(id)), ...drawn.filter((id) => picked.has(id))];
+    leavePicks();
+    setTimeout(() => {
+      const now = document.activeElement;
+      if (now && now !== document.body && !now.closest('[data-pick-bar], [data-pick-sheet], [role="menu"]')) return;
+      const target = order.map((id) => body.current?.querySelector<HTMLElement>(`[data-thread-id="${CSS.escape(id)}"]`)).find(Boolean);
+      (target ?? body.current?.querySelector<HTMLElement>('[data-thread-id]'))?.focus();
+    });
+  }, [body, leavePicks]);
   const scope = useRef(input.scope);
   useEffect(() => {
     if (input.scope === scope.current) return;
@@ -108,13 +125,7 @@ export function useListPicks(input: ListPicksInput) {
           const from = keyTarget(event);
           return !(from && (isEditableTarget(from) || inOverlay(from) || from.closest('[role="menu"], [role="listbox"], [aria-expanded="true"]')));
         },
-        handle: () => {
-          // Focus on the bar, which goes with picking: to the first picked row, else the list's first row.
-          const lost = !!document.activeElement?.closest('[data-pick-bar], [data-pick-sheet]');
-          const first = [...picks.picked][0];
-          leave();
-          if (lost) setTimeout(() => (body.current?.querySelector<HTMLElement>(first ? `[data-thread-id="${CSS.escape(first)}"]` : '[data-thread-id]') ?? null)?.focus());
-        },
+        handle: () => leave(),
       },
     },
   });

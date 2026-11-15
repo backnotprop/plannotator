@@ -161,6 +161,25 @@ test.skipIf(!hasDom)('Archive takes every picked row at once and ends picking; E
   expect(opened).toEqual(['a']);
 });
 
+test.skipIf(!hasDom)('when picking ends from the bar, focus goes to the list: the row after the last pick, not the page', async () => {
+  if (!hasDom) return;
+  draw();
+  press('a', { metaKey: true });
+  press('b', { metaKey: true });
+  const archive = bar()!.querySelector<HTMLElement>('[data-bulk-action="archive"]')!;
+  archive.focus();
+  act(() => archive.click());
+  await act(async () => void (await new Promise((resolve) => setTimeout(resolve, 10))));
+  expect(document.activeElement?.closest('[data-thread-id]')?.getAttribute('data-thread-id')).toBe('c');
+  press('d', { metaKey: true });
+  const done = bar()!.querySelector<HTMLElement>('[data-pick-done]')!;
+  done.focus();
+  act(() => done.click());
+  await act(async () => void (await new Promise((resolve) => setTimeout(resolve, 10))));
+  // Nothing after the last pick: the pick itself.
+  expect(document.activeElement?.closest('[data-thread-id]')?.getAttribute('data-thread-id')).toBe('d');
+});
+
 test.skipIf(!hasDom)('the box over every row picks them all, then lets them all go; nothing picked, the bar says how to pick', () => {
   if (!hasDom) return;
   draw();
