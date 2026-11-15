@@ -4,7 +4,8 @@
  * line whose change sits far to the right must arrive with both sides at the
  * left edge, whichever side the pointer is over. The steps are a page tall so
  * the file's rows are drawn in the same render that first draws the file,
- * which is when the first-change reveal used to run. Proved in a real Chromium
+ * which is when the first-change reveal used to run. A file the reader goes to
+ * on purpose (a tree click, next file) still opens with its change in view. Proved in a real Chromium
  * against the compiled binary, on a scratch git repository under a temp
  * PLANNOTATOR_DATA_DIR and HOME.
  *
@@ -150,6 +151,32 @@ function scrollers(page: Page): Promise<Scrollers> {
   });
 }
 
+type Column = { side: 'old' | 'new'; left: number; long: boolean };
+
+function shownColumns(page: Page): Promise<Column[]> {
+  return page.evaluate(() => {
+    const out: Column[] = [];
+    document.querySelectorAll('diffs-container').forEach((host) => {
+      const box = host.getBoundingClientRect();
+      if (box.width === 0 || box.bottom <= 0 || box.top >= innerHeight) return;
+      host.shadowRoot?.querySelectorAll<HTMLElement>('code[data-deletions], code[data-additions]').forEach((code) => {
+        out.push({ side: code.hasAttribute('data-deletions') ? 'old' : 'new', left: code.scrollLeft, long: code.scrollWidth > code.clientWidth + 400 });
+      });
+    });
+    return out;
+  });
+}
+
+async function scrollOnce(page: Page) {
+  await expect.poll(async () => (await scrollers(page)).old, { timeout: 30_000 }).not.toBeNull();
+  await page.waitForTimeout(3_000);
+  const atLoad = await scrollers(page);
+  await page.mouse.move(atLoad.old!.x, atLoad.old!.y);
+  await page.mouse.wheel(0, 300);
+  await page.waitForTimeout(500);
+  expect((await scrollers(page)).shifted).toEqual([]);
+}
+
 let browser: Browser;
 test.beforeAll(async () => {
   browser = await chromium.launch({ headless: true });
@@ -188,3 +215,41 @@ for (const side of ['old', 'new'] as const) {
     }
   });
 }
+
+test('after scrolling, a tree click opens the far-right file with its change in view, and All changes stays at the left edge', async () => {
+  const session = await review();
+  try {
+    const { context, page } = await open(browser, session.url);
+    await scrollOnce(page);
+    await page.getByText('z-routes.ts', { exact: true }).first().click();
+    await expect.poll(async () => (await shownColumns(page)).filter((c) => c.long && c.left > 0).map((c) => c.side).sort(), { timeout: 15_000 }).toEqual(['new', 'old']);
+    await page.getByRole('tab', { name: 'All changes' }).click();
+    await page.waitForTimeout(1_000);
+    const columns = await shownColumns(page);
+    expect(columns.length).toBeGreaterThan(0);
+    expect(columns.filter((c) => c.left !== 0)).toEqual([]);
+    await context.close();
+  } finally {
+    await session.close();
+  }
+});
+
+test('after scrolling, next file (]) to the far-right file shows its change in All changes, and the other files stay at the left edge', async () => {
+  const session = await review();
+  try {
+    const { context, page } = await open(browser, session.url);
+    await scrollOnce(page);
+    let arrived: Column[] = [];
+    for (let press = 0; press < FILLERS + 2 && arrived.length === 0; press++) {
+      await page.keyboard.press(']');
+      await page.waitForTimeout(600);
+      arrived = (await shownColumns(page)).filter((c) => c.long);
+    }
+    expect(arrived.length, 'next file reached the far-right file').toBeGreaterThan(0);
+    await expect.poll(async () => (await shownColumns(page)).filter((c) => c.long && c.left > 0).map((c) => c.side).sort(), { timeout: 5_000 }).toEqual(['new', 'old']);
+    expect((await shownColumns(page)).filter((c) => !c.long && c.left !== 0)).toEqual([]);
+    await context.close();
+  } finally {
+    await session.close();
+  }
+});
