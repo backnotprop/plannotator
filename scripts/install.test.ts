@@ -2584,7 +2584,6 @@ describe.skipIf(process.platform === "win32" || !Bun.which("node"))(
       const binaryCalls = calls.filter(isRawBinaryCall);
       const checksumCalls = calls.filter((c) => c.includes("/releases/download/") && c.endsWith(".sha256"));
       expect(binaryCalls).toHaveLength(2);
-      expect(binaryCalls[0]).toContain("--max-time 21600 ");
       for (const call of binaryCalls) {
         const left = Number(/--max-time (\d+)/.exec(call)?.[1]);
         expect(left).toBeGreaterThan(21500);

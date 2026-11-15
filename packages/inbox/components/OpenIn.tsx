@@ -8,11 +8,13 @@ import { HostTitle, tooltipContainerOf } from '@plannotator/ui/components/HostTi
 import { CodeSpanContext } from '@plannotator/ui/components/LocalLinkContext';
 import { Tooltip } from '@plannotator/ui/components/Tooltip';
 import { ArtifactPinMenuItem } from './ArtifactPinButton';
+import { artifactPinnable } from '../artifactPins';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@plannotator/ui/components/ui/dropdown-menu';
 import { useHoverPreview } from '@plannotator/ui/hooks/useHoverPreview';
 import { useOpenInApps, useRememberedOpenInApp } from '@plannotator/ui/hooks/useOpenInApps';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
-import { InboxApiError, inboxApi, type OpenInFileCode, type OpenInFileScope } from '../api';
+import { InboxApiError, inboxApi } from '../api';
+import type { OpenInFileCode, OpenInFileScope } from '../openInWire';
 import { Icon } from '../icons';
 import { newTabUrl, openInMenu, openInMenuFor, remembersOpenInItem, type OpenInItem, type OpenInMenu } from '../openIn';
 import { attachmentDownloadUrl, readableVersion } from '../attachments';
@@ -673,12 +675,13 @@ function CodeHoverPreview({ contents, path, line, lineEnd, pull, ...window }: {
   );
 }
 
-/** The list a tile's ⋯ and its right-click menu show: Open side by side / full screen, Download, then the apps and Copy path. */
+/** The list a tile's ⋯ and its right-click menu show: Open side by side / full screen, Download, Pin, then the apps and Copy path. */
 function TileMenuItems({
   attachment,
   version,
   onOpenAs,
   download,
+  pin,
   onCopyImage,
   menu,
   onLaunch,
@@ -688,6 +691,8 @@ function TileMenuItems({
   version: 'current' | 'sent';
   onOpenAs?: (view: 'full' | 'side') => void;
   download: string | null;
+  /** Pin / Unpin beside Download (the viewer's, ArtifactPinMenuItem); null: no pin. */
+  pin: { threadId: string; key: string } | null;
   /** An image: Copy image, what the browser's own Copy Image leaves (copyImage.ts). */
   onCopyImage: (() => void) | null;
   menu: OpenInMenu | null;
@@ -707,7 +712,7 @@ function TileMenuItems({
             <Icon name="frame" size={15} className="ib-appi ib-glyph" />
             <span className="flex-1">Open full screen</span>
           </DropdownMenuItem>
-          {(download || onCopyImage || menu) && <DropdownMenuSeparator />}
+          {(download || pin || onCopyImage || menu) && <DropdownMenuSeparator />}
         </>
       )}
       {download && (
@@ -719,13 +724,14 @@ function TileMenuItems({
           </DropdownMenuItem>
         </>
       )}
+      {pin && <ArtifactPinMenuItem threadId={pin.threadId} artifactKey={pin.key} name={attachment.name} separator={false} />}
       {onCopyImage && (
         <DropdownMenuItem className="text-xs" onClick={onCopyImage} data-tile-copy-image={attachment.id}>
           <Icon name="copy" size={15} className="ib-appi ib-glyph" />
           <span className="flex-1">Copy image</span>
         </DropdownMenuItem>
       )}
-      {(download || onCopyImage) && menu && <DropdownMenuSeparator />}
+      {(download || pin || onCopyImage) && menu && <DropdownMenuSeparator />}
       {menu && <OpenInMenuItems kind={attachment.kind} missingWord={missingLabel(attachment)} menu={menu} onLaunch={onLaunch} onCopyPath={onCopyPath} />}
     </>
   );
@@ -746,7 +752,8 @@ const NO_SLOT = { order: [], fallback: () => null };
  * always on a touch screen). A right-click anywhere on the tile opens the same
  * list at the pointer, here and through the tailnet alike: Open side by side /
  * Open full screen, Download (the version the tile opens, as the file's own
- * name), then the apps and Copy path on this computer. The trigger's rules are
+ * name), Pin / Unpin (a thread of this machine, as the viewer's pin), then the
+ * apps and Copy path on this computer. The trigger's rules are
  * `useContextMenuTrigger`'s (rows, cards): a touch never opens it (no long
  * press), and with nothing to list (the tour writes nothing) the browser's
  * own menu shows. No key of its own: the hook's Shift+F10 is left off.
@@ -762,11 +769,14 @@ export function TileMenu({
   attachment,
   surface,
   onOpenAs,
+  pin: pinOf,
   render,
 }: {
   attachment: InboxAttachmentState;
   surface?: OpenInSurface;
   onOpenAs?: (view: 'full' | 'side') => void;
+  /** The file's pin (its thread and artifact key); absent (the tour): none. */
+  pin?: { threadId: string; key: string };
   render: (more: ReactNode, status: ReactNode) => ReactElement;
 }) {
   const version = readableVersion(attachment);
@@ -782,7 +792,8 @@ export function TileMenu({
     source.writes && readInboxAttachmentKind(attachment.kind) === 'image'
       ? () => void copyImageToClipboard(source.imageUrl(attachment, version), attachment.name).then((ok) => flash(ok ? 'Image copied' : 'Could not copy the image', !ok))
       : null;
-  const empty = !onOpenAs && !download && !menu;
+  const pin = pinOf && artifactPinnable(pinOf.threadId) ? pinOf : null;
+  const empty = !onOpenAs && !download && !pin && !menu;
   // The wrapper `render` draws, or the tile's own button or link when it draws no wrapper (typed as Base UI's div).
   const trigger = useRef<HTMLDivElement>(null);
   const control = (): HTMLElement | null => {
@@ -803,7 +814,7 @@ export function TileMenu({
   // Shift+F10 stays the rows', cards' and messages' (no new shortcut): the platform's own context-menu key still sends `contextmenu`.
   const { onKeyDown: _key, ...triggerProps } = context.trigger;
   const items = (
-    <TileMenuItems attachment={attachment} version={version} onOpenAs={onOpenAs} download={download} onCopyImage={copyImage} menu={menu} onLaunch={(item) => void launch(item)} onCopyPath={() => void copyPath()} />
+    <TileMenuItems attachment={attachment} version={version} onOpenAs={onOpenAs} download={download} pin={pin} onCopyImage={copyImage} menu={menu} onLaunch={(item) => void launch(item)} onCopyPath={() => void copyPath()} />
   );
   // Far from the view (messageArming.tsx): the same ⋯, with no menu behind it yet; a press arms its message and opens
   // the menu. Only the ⋯ changes: the tile (and its right-click menu) stays the same element, so arming never remounts

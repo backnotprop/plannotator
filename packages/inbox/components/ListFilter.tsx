@@ -7,7 +7,8 @@
  *   colour and a small count in its corner (`CountBadge`, the PRs button's size): one per ticked row. No tokens, no line over the list: what is picked is read in the menu.
  * - The menu (Base UI's: arrows, Home/End, type-ahead, Escape and Tab close, focus back to the funnel): Not seen (one
  *   row: only the rows drawn bold), Updated (Today, Last 7 days, Last 30 days, Custom range…), Agent (several; only
- *   with two agents or more), Pull request (Open, Draft, Merged, Closed, Has a PR, No PR, several; only once a thread in the list has a PR), then Project last, since the
+ *   with two agents or more), Pull request (Open, Draft, Merged, Closed, Has a PR, No PR, several; only once a thread in the list has a PR), Tag (several, each
+ *   with the `#` mark; only once a tag holds a thread in the list, never on a tag's own list), then Project last, since the
  *   sidebar already narrows by project (each project, several; only on the Inbox page and with two projects or
  *   more). Each row shows how many threads it would leave and a tick when picked, then "Clear filters". It stays open while picking. A phone draws it as the bottom
  *   sheet titled "Filter".
@@ -24,7 +25,10 @@ import { formatCount } from '../format';
 import { HostMark, Icon } from '../icons';
 import { Tip } from './Tip';
 import { RefMarkIcon } from '../board/RefMark';
+import { TagIcon } from './InitiativePeek';
 import { CountBadge } from './CountBadge';
+import { useThreadTags } from '../threadTags';
+import { toggledTagPick, withLiveTagPicks } from '../listFilterTags';
 import {
   NO_LIST_FILTER,
   PULL_OPTIONS,
@@ -99,7 +103,11 @@ export function rangeWords(range: { from: string; to: string }): string {
 
 export function ListFilterButton({ source, phone }: { source: ListFilterSource; phone: boolean }) {
   const { rows, scoped, names, onChange } = source;
-  const filter = appliedFilter(source.filter, scoped);
+  // Tags (approval "inbox-thread-tags", step 2): the window's, read with the rows' own rule (`rowTags`).
+  const host = useThreadTags();
+  const tagScoped = !!host?.listed;
+  const filter = withLiveTagPicks(appliedFilter(source.filter, scoped, tagScoped), host?.tags ?? null);
+  const tagsOf = host?.rowTags;
   const [open, setOpen] = useState(false);
   const [rangeOpen, setRangeOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
@@ -121,6 +129,13 @@ export function ListFilterButton({ source, phone }: { source: ListFilterSource; 
     return [...seen].map(([name, host]) => ({ name, host })).sort((a, b) => a.name.localeCompare(b.name));
   }, [rows, source.filter.agents]);
 
+  // The tags offered: those holding a thread in the list, and any picked one (so it can be unticked); oldest first.
+  const tags = useMemo(() => {
+    if (!host || tagScoped) return [];
+    const held = new Set(rows.flatMap((row) => (tagsOf ?? ((r: InboxListRow) => r.tags ?? []))(row)));
+    return host.tags.filter((tag) => held.has(tag.id) || filter.tags.includes(tag.id));
+  }, [host, tagScoped, rows, tagsOf, filter.tags]);
+
   const showProjects = !scoped && projects.length > 1;
   const showAgents = agents.length > 1;
   const set = (next: Partial<ListFilter>) => onChange({ ...source.filter, ...next });
@@ -129,6 +144,22 @@ export function ListFilterButton({ source, phone }: { source: ListFilterSource; 
 
   // Offered once a thread here has a PR, and while a pick of it is remembered (so it can be unticked).
   const pulls = source.filter.pulls.length > 0 || rows.some((row) => rowPullStates(row).length > 0);
+  const tagGroup = tags.length > 0 && (
+    <Menu.Group data-list-filter-group="tags">
+      <Menu.GroupLabel className="ib-pm-glabel">Tag</Menu.GroupLabel>
+      {tags.map((tag) => (
+        <CheckRow
+          key={tag.id}
+          label={tag.name}
+          on={filter.tags.includes(tag.id)}
+          count={countWhere(rows, filter, now, 'tags', (row) => (tagsOf ? tagsOf(row) : (row.tags ?? [])).includes(tag.id), tagsOf)}
+          onToggle={() => set({ tags: toggledTagPick(source.filter.tags, tag, host?.tags ?? []) })}
+          mark={<TagIcon className="ib-ic" />}
+          data={{ 'data-list-filter-tag': tag.id }}
+        />
+      ))}
+    </Menu.Group>
+  );
   const projectGroup = showProjects && (
     <Menu.Group>
       <Menu.GroupLabel className="ib-pm-glabel">Project</Menu.GroupLabel>
@@ -137,7 +168,7 @@ export function ListFilterButton({ source, phone }: { source: ListFilterSource; 
           key={p.id}
           label={p.name}
           on={filter.projects.includes(p.id)}
-          count={countWhere(rows, filter, now, 'projects', (row) => row.project.id === p.id)}
+          count={countWhere(rows, filter, now, 'projects', (row) => row.project.id === p.id, tagsOf)}
           onToggle={() => set({ projects: toggled(source.filter.projects, p.id) })}
           mark={<Icon name="folder" />}
           data={{ 'data-list-filter-project': p.id }}
@@ -168,7 +199,7 @@ export function ListFilterButton({ source, phone }: { source: ListFilterSource; 
               <CheckRow
                 label="Not seen"
                 on={filter.notSeen}
-                count={countWhere(rows, filter, now, 'notSeen', rowNotSeen)}
+                count={countWhere(rows, filter, now, 'notSeen', rowNotSeen, tagsOf)}
                 onToggle={() => set({ notSeen: !source.filter.notSeen })}
                 mark={<Icon name="envelope" />}
                 data={{ 'data-list-filter-not-seen': '' }}
@@ -181,7 +212,7 @@ export function ListFilterButton({ source, phone }: { source: ListFilterSource; 
                     key={o.value}
                     label={o.label}
                     on={filter.updated === o.value}
-                    count={countWhere(rows, filter, now, 'updated', inSpan(o.value, now))}
+                    count={countWhere(rows, filter, now, 'updated', inSpan(o.value, now), tagsOf)}
                     onToggle={() => set({ updated: filter.updated === o.value ? null : o.value })}
                     mark={<Icon name="clock" />}
                     data={{ 'data-list-filter-updated': o.value }}
@@ -199,7 +230,7 @@ export function ListFilterButton({ source, phone }: { source: ListFilterSource; 
                 >
                   <Icon name="clock" />
                   <span className="ib-pmi-l">{custom ? rangeWords(custom) : 'Custom range…'}</span>
-                  {custom && <span className="ib-pmi-n">{formatCount(countWhere(rows, filter, now, 'updated', inSpan(custom, now)))}</span>}
+                  {custom && <span className="ib-pmi-n">{formatCount(countWhere(rows, filter, now, 'updated', inSpan(custom, now), tagsOf))}</span>}
                   {tick(custom !== null)}
                 </Menu.Item>
               </Menu.Group>
@@ -213,7 +244,7 @@ export function ListFilterButton({ source, phone }: { source: ListFilterSource; 
                         key={a.name}
                         label={a.name}
                         on={filter.agents.includes(a.name)}
-                        count={countWhere(rows, filter, now, 'agents', (row) => rowAgentNames(row).includes(a.name))}
+                        count={countWhere(rows, filter, now, 'agents', (row) => rowAgentNames(row).includes(a.name), tagsOf)}
                         onToggle={() => set({ agents: toggled(source.filter.agents, a.name) })}
                         mark={
                           <span className="ib-lflt-host" aria-hidden="true">
@@ -236,13 +267,19 @@ export function ListFilterButton({ source, phone }: { source: ListFilterSource; 
                         key={o.value}
                         label={o.label}
                         on={filter.pulls.includes(o.value)}
-                        count={countWhere(rows, filter, now, 'pulls', (row) => rowPullMatches(row, o.value))}
+                        count={countWhere(rows, filter, now, 'pulls', (row) => rowPullMatches(row, o.value), tagsOf)}
                         onToggle={() => set({ pulls: toggled(source.filter.pulls, o.value) as PullPick[] })}
                         mark={o.value === 'none' ? <Icon name="minus" /> : <RefMarkIcon kind="pr" state={o.value === 'any' ? 'unknown' : o.value} size={16} />}
                         data={{ 'data-list-filter-pull': o.value }}
                       />
                     ))}
                   </Menu.Group>
+                </>
+              )}
+              {tagGroup && (
+                <>
+                  <Menu.Separator className="ib-pm-sep" />
+                  {tagGroup}
                 </>
               )}
               {projectGroup && (
@@ -254,7 +291,7 @@ export function ListFilterButton({ source, phone }: { source: ListFilterSource; 
               {count > 0 && (
                 <>
                   <Menu.Separator className="ib-pm-sep" />
-                  <Menu.Item className="ib-pmi" onClick={() => onChange(clearedFrom(source.filter, scoped))} data-list-filter-clear="">
+                  <Menu.Item className="ib-pmi" onClick={() => onChange(clearedFrom(source.filter, scoped, tagScoped))} data-list-filter-clear="">
                     <Icon name="x" />
                     <span className="ib-pmi-l">Clear filters</span>
                   </Menu.Item>
@@ -278,11 +315,12 @@ const inSpan = (pick: UpdatedPick, now: number) => {
 };
 
 /**
- * Clear filters: every pick that applies here. On a project's page that is all but the Project picks, which
- * stepped aside there and come back on Inbox.
+ * Clear filters: every pick that applies here. On a project's page that is all but the Project picks, on a tag's
+ * list all but the Tag picks: they stepped aside there and come back on Inbox.
  */
-export function clearedFrom(filter: ListFilter, scoped: boolean): ListFilter {
-  return scoped ? { ...NO_LIST_FILTER, projects: filter.projects } : NO_LIST_FILTER;
+export function clearedFrom(filter: ListFilter, scoped: boolean, tagScoped = false): ListFilter {
+  if (!scoped && !tagScoped) return NO_LIST_FILTER;
+  return { ...NO_LIST_FILTER, ...(scoped ? { projects: filter.projects } : {}), ...(tagScoped ? { tags: filter.tags } : {}) };
 }
 
 function RangePanel({

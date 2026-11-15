@@ -76,3 +76,26 @@ describe("Bitbucket card reads have a CLI's time limit", () => {
     expect(signals[0]!.aborted).toBe(false);
   });
 });
+
+// The Inbox's send path asks `cached` whether a number is a PR (the attach hint, inbox-mcp-hints.ts): it must answer
+// only what a read already holds, and never start one, or a send would wait on the forge.
+describe("cached answers from the cache alone", () => {
+  test("nothing before a read and no read started; the card after one", async () => {
+    let reads = 0;
+    const read: BitbucketRefReader = async (ref) => {
+      reads++;
+      return {
+        platform: "bitbucket", kind: "pull", repo: `${ref.workspace}/${ref.repo}`, number: ref.number, url: BB(ref.number),
+        title: "Retry invoices", state: "open", author: null, createdAt: "", updatedAt: "", closedAt: null, labels: [], assignees: [],
+        comments: 0, body: "", bodyCut: false, lastComment: null, linked: [],
+      };
+    };
+    const run: RefRunner = async () => ({ stdout: "", stderr: "", exitCode: 1 });
+    const cards = createRefCards({ run, bitbucket: read, avatar: async () => null });
+    expect(cards.cached("bitbucket.org/acme/billing#9:pull")).toBeNull();
+    expect(reads).toBe(0);
+    await cards.get(BB(9));
+    expect(cards.cached("bitbucket.org/acme/billing#9:pull")).toMatchObject({ kind: "pull", number: 9 });
+    expect(reads).toBe(1);
+  });
+});

@@ -117,7 +117,7 @@ beforeEach(() => {
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input), 'http://127.0.0.1');
     if (init?.method === 'POST') {
-      posted.push({ path: url.pathname, body: JSON.parse(String(init.body)) });
+      if (!url.pathname.endsWith('/pulls/looked')) posted.push({ path: url.pathname, body: JSON.parse(String(init.body)) });
       if (url.pathname.endsWith('/pulls/review')) return Response.json({ ok: true, prUrl: '', submission: { status: 'complete' } });
       return Response.json({ reply: {}, questions: [], replayed: false });
     }

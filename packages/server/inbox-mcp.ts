@@ -19,11 +19,12 @@ import { QUESTION_AUTHORING_GUIDE } from "@plannotator/core/question-block";
 import { inboxStoredAgentName } from "@plannotator/core/inbox-format";
 import { inboxQuestionKeysWithRecommendedMarker, inboxQuestionsToCheck, parseInboxQuestionBlocks, type InboxQuestionToCheck, type PrototypeAppTarget } from "@plannotator/core/inbox-questions";
 import { checkSendPrototypes } from "./inbox-prototypes";
+import { prototypesNotFramedText } from "./inbox-web-prototypes";
 import { questionsToCheckText } from "@plannotator/shared/inbox/questions-to-check";
 import { INBOX_ACTION_EXAMPLE, INBOX_ACTION_GUIDE, INBOX_DONE_DESCRIPTION } from "@plannotator/core/inbox-actions";
 import { INBOX_NOTE_BLOCK_LINE } from "@plannotator/core/inbox-review";
-import { checkInboxSubject, INBOX_CARD_ACTION_ON, INBOX_MCP_WAKING_HOSTS, INBOX_T3_HOST, inboxTidyMcpLine, INBOX_NAME_THIS_THREAD_HINT, INBOX_SECTIONS, isInboxNote, INBOX_THREAD_NAME_MAX, type InboxGuideRef, type InboxSectionId, type InboxMessage, type InboxProject } from "@plannotator/core/inbox-types";
-import { inboxBodyWithBro, inboxStopNoticeReply, INBOX_AGENT_RULES, INBOX_OPTION_LINES_RULE, INBOX_ATTACHMENTS_PICTURES_LINE, INBOX_ATTACHMENTS_PROTOTYPE_CLAUSE, INBOX_DELEGATED_OPTIONS_RULE, INBOX_PEEK_META_KEY, INBOX_PICTURES_RULE, INBOX_REF_LINK_RULE, INBOX_REPLY_TO_CHECK, INBOX_WAKES_META_KEY, INBOX_WORKING_FOLDER_META_KEY } from "@plannotator/shared/inbox/connection";
+import { checkInboxSubject, INBOX_CARD_ACTION_ON, INBOX_MCP_WAKING_HOSTS, INBOX_T3_HOST, inboxTidyMcpLine, isInboxCombineRun, INBOX_NAME_THIS_THREAD_HINT, INBOX_SECTIONS, isInboxNote, INBOX_THREAD_NAME_MAX, type InboxGuideRef, type InboxSectionId, type InboxMessage, type InboxProject } from "@plannotator/core/inbox-types";
+import { inboxBodyWithBro, inboxStopNoticeReply, INBOX_AGENT_RULES, INBOX_OPTION_LINES_RULE, INBOX_ATTACHMENTS_PICTURES_LINE, INBOX_ASK_RECOGNISE_RULE, INBOX_ATTACHMENTS_PROTOTYPE_CLAUSE, INBOX_DELEGATED_OPTIONS_RULE, INBOX_PEEK_META_KEY, INBOX_PICTURES_RULE, INBOX_REF_LINK_RULE, INBOX_REPLY_TO_CHECK, INBOX_REREAD_RULE, INBOX_SHOWING_RULE, INBOX_THREAD_NEW_ISSUE_RULE, INBOX_WAKES_META_KEY, INBOX_WORKING_FOLDER_META_KEY } from "@plannotator/shared/inbox/connection";
 import { inboxSectionOf } from "@plannotator/shared/inbox/list";
 import { bodyShowsLocalImages, captureInboxInlineImages, type InlineImageFailure } from "@plannotator/shared/inbox/inline-images";
 import { inboxMessageRemoteImageRefsInOrder } from "@plannotator/shared/inbox/message-images";
@@ -51,7 +52,7 @@ export { fail, guarded, ok, okComplete, PROJECT_PATH_DESCRIPTION, type ToolResul
 import type { InboxSearchIndex } from "@plannotator/shared/inbox/search";
 import { isInsideFolder, type InboxProjectRoot } from "./inbox-project-root";
 import { registerInboxSnoozeTool, type InboxSnoozeMcpContext } from "./inbox-mcp-snooze";
-import { quietHint } from "./inbox-mcp-hints";
+import { notePullFoundLater, pullsToLookUp, quietHint, type InboxKnownPulls } from "./inbox-mcp-hints";
 import type { ProjectHostOf } from "./inbox-thread-pulls";
 import { applyAgentPriority, priorityLine, PRIORITY_FIELD } from "./inbox-mcp-priority";
 import { changePullsAsAgent, checkProjectPullRefs, checkPullRefs, pullsActor, pullsChangeText, PULLS_FIELD, registerInboxThreadPullsTool, threadPullsText, type InboxPullsMcpLive } from "./inbox-mcp-pulls";
@@ -207,6 +208,10 @@ export const SEND_BODY_DESCRIPTION = [
   "",
   INBOX_STOP_EXAMPLE,
   "",
+  // The guide's "Ask only what you cannot decide alone" is in send_message's description, whose 2,048 cut has no room.
+  INBOX_ASK_RECOGNISE_RULE,
+  "",
+  INBOX_SHOWING_RULE,
   INBOX_PICTURES_RULE,
   "",
   "Optional lines after the question, for a decision that needs them. Most questions need none of these:",
@@ -223,6 +228,8 @@ export const SEND_BODY_DESCRIPTION = [
   INBOX_ACTION_GUIDE,
   "",
   INBOX_ACTION_EXAMPLE,
+  "",
+  INBOX_REREAD_RULE,
 ].join("\n");
 
 const AGENT_SESSION_DESCRIPTION =
@@ -239,7 +246,7 @@ export const SEND_ROUTING_FIELDS = {
     .string()
     .optional()
     .describe(
-      `A short thread name (1-${INBOX_THREAD_NAME_MAX} characters, one line). The same name in this project is the same open thread, across sessions (compared without case, spacing or invisible characters). With no thread and no reply_to, the message starts a new thread; to add to a thread, reply_to its latest message or use the same thread name. Ignored with reply_to, with one exception: in a thread the person started (read_thread says name_this_thread: true, or the Inbox's message asks you to name it), your reply's \`thread\` names that thread, once: a few words saying what it is about, not the name of another open thread in the project.`,
+      `A short thread name (1-${INBOX_THREAD_NAME_MAX} characters, one line). The same name in this project is the same open thread, across sessions (compared without case, spacing or invisible characters). With no thread and no reply_to, the message starts a new thread; to add to a thread, reply_to its latest message or use the same thread name. Ignored with reply_to, with one exception: in a thread the person started (read_thread says name_this_thread: true, or the Inbox's message asks you to name it), your reply's \`thread\` names that thread, once: a few words saying what it is about, not the name of another open thread in the project. ${INBOX_THREAD_NEW_ISSUE_RULE}`,
     ),
   reply_to: z.string().optional().describe(`A message id: post this as a reply in that message's thread. ${INBOX_REPLY_TO_CHECK}`),
   supersedes: z
@@ -289,7 +296,7 @@ export interface InboxMcpContext extends InboxSnoozeMcpContext {
    * existing repository project holds the folder. Absent: search finds no
    * project for a path.
    */
-  findProjects?: (path: string) => Promise<{ projects: InboxProject[]; unresolved: boolean }>;
+  findProjects?: (path: string) => Promise<{ projects: InboxProject[]; unresolved: boolean; every?: boolean }>;
   /**
    * Whether the Inbox itself knows the sender's session is woken by the
    * person's reply, whatever its own connection said: a Claude Code, Pi or
@@ -336,6 +343,12 @@ export interface InboxMcpContext extends InboxSnoozeMcpContext {
   pulls?: InboxPullsMcpLive;
   /** The host of a project's git remote, for a short `group/project!45` (inbox-thread-pulls.ts `parseProjectPullRefs`). Absent: gitlab.com. */
   projectHost?: ProjectHostOf;
+  /**
+   * What this Inbox already knows of a project's PRs, read with no forge call (inbox-mcp-hints.ts): for the attach
+   * hint's `owner/repo#12` and bare `#12`. Absent: only a PR's URL and a short `group/project!45` count. Its `lookUp`
+   * runs only after the send has answered.
+   */
+  knownPulls?: (projectId: string) => InboxKnownPulls | null;
   /**
    * Whether Bro mode is on (config.json `inboxBro`, read on every request; approval "bro-mode"). On: send_message's
    * `body` field carries the line (`INBOX_BRO_LINE`). Off or absent: the field is `SEND_BODY_DESCRIPTION`, unchanged.
@@ -441,7 +454,7 @@ async function withTidy(context: InboxMcpContext, result: ToolResult, input: Rec
   }
   if (withdrawn) return result;
   const body = stepsOff ? inboxTidyBodyStepsOff(note.body) : note.body;
-  const tidy = `\n\n${inboxTidyMcpLine(note.id)}\n\n${body}`;
+  const tidy = `\n\n${inboxTidyMcpLine(note.id, isInboxCombineRun(note.tidy?.id) ? "Combine" : "Tidy")}\n\n${body}`;
   const content = [...result.content];
   const last = content.length - 1;
   if (last >= 0) content[last] = { ...content[last]!, text: `${content[last]!.text}${tidy}` };
@@ -824,7 +837,7 @@ export async function sendAgentMessage(
   input: AgentSendInput,
   guide?: InboxGuideRef,
   wakes = false,
-): Promise<{ structured: Record<string, unknown>; replayed: boolean; questions: number; attachments: number; superseded: number; actions: number; done: number; imagesNotShown: ImageNotShown[]; attachedImagesNotInBody: string[]; questionOpenersWithText: QuestionOpenerWithText[]; noStakes: number; recommendedInLabel: number; questionsToCheck: InboxQuestionToCheck[]; choicesWithoutPictures: { keys: string[]; pictures: number }; naming: InboxSendResult["naming"] | null; priority: boolean | null }> {
+): Promise<{ structured: Record<string, unknown>; replayed: boolean; notFramed: string[]; questions: number; attachments: number; superseded: number; actions: number; done: number; imagesNotShown: ImageNotShown[]; attachedImagesNotInBody: string[]; questionOpenersWithText: QuestionOpenerWithText[]; noStakes: number; recommendedInLabel: number; questionsToCheck: InboxQuestionToCheck[]; choicesWithoutPictures: { keys: string[]; pictures: number }; naming: InboxSendResult["naming"] | null; priority: boolean | null }> {
   const { store } = context;
   refuseIdShapedThread(input.thread, input.reply_to);
   refuseBadSubject(input.subject);
@@ -942,7 +955,9 @@ export async function sendAgentMessage(
   }
   // A question with bare text choices, two or more of them each shown by a picture outside it: send_message advises sending it again as picture choices.
   const choicesWithoutPictures = questionsWithoutPictureChoices(message.body);
+  const notFramed = result.replayed ? [] : prototypes.liveSites.filter((site) => site.framed === false).map((site) => site.url);
   return {
+    notFramed,
     imagesNotShown: notShown,
     attachedImagesNotInBody: attachedOnly,
     questionOpenersWithText: openers,
@@ -996,6 +1011,7 @@ export async function sendAgentMessage(
       ...(recommendedInLabel.length > 0 ? { recommended_in_label: recommendedInLabel } : {}),
       /** Questions to look at again: a pick-one block with no choices (`no_choices`, the directive as written) (advice; the message was sent). */
       ...(toCheck.length > 0 ? { questions_to_check: toCheck } : {}),
+      ...(notFramed.length > 0 ? { prototypes_not_framed: notFramed } : {}),
     },
   };
 }
@@ -1105,8 +1121,9 @@ function personFacts(store: InboxStore, threadId: string, caller: string | null)
 }
 
 /** One row of read_thread's list as a line of text: every field the structured row holds. */
-export function threadRowText(row: InboxAgentThreadRow & { tagged_you?: true }): string {
+export function threadRowText(row: InboxAgentThreadRow & { tagged_you?: true; project?: string }): string {
   const parts = [`- ${row.thread_id}`];
+  if (row.project) parts.push(`in ${row.project}`);
   if (row.subject) parts.push(JSON.stringify(row.subject));
   if (row.thread_name) parts.push(`name ${JSON.stringify(row.thread_name)}`);
   parts.push(row.section, `${row.message_count} message${row.message_count === 1 ? "" : "s"}`);
@@ -1241,16 +1258,50 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
           recommendedInLabelText(sent.recommendedInLabel),
           questionsToCheckText(String(sent.structured.message_id), sent.questionsToCheck),
           pictureChoices,
+          prototypesNotFramedText(sent.notFramed),
           questionOpenersWithTextText(sent.questionOpenersWithText),
         ];
         if (stale) hints.push(`\n${staleThreadText(stale, shortTime)}`);
-        // The quiet hints (inbox-mcp-hints.ts): at most one, once per session, last and on a line of its own.
-        // The project's host only for a body that may name a short `group/project!45`.
+        // The quiet hints (inbox-mcp-hints.ts): one kind at most, last and on lines of their own.
+        // The project's host only for a body that may name a short `group/project!45`; what the Inbox knows of
+        // the project's PRs (cached, no forge call) only for one that may name `#12`.
         const projectHost = /![1-9]/.test(input.body) ? await context.projectHost?.(project.id).catch(() => null) : null;
-        const quiet = quietHint(store, { session: input.agent_session, threadId: String(sent.structured.thread_id), body: input.body, replayed: sent.replayed, now: clock(), projectHost });
+        let known: InboxKnownPulls | undefined;
+        try {
+          known = /#[1-9]/.test(input.body) ? (context.knownPulls?.(project.id) ?? undefined) : undefined;
+        } catch {
+          known = undefined;
+        }
+        const quiet = quietHint(store, {
+          session: input.agent_session,
+          threadId: String(sent.structured.thread_id),
+          body: input.body,
+          replayed: sent.replayed,
+          projectHost,
+          known,
+          projectId: project.id,
+          passed: pullRefs.map((ref) => ref.key),
+        });
         if (quiet) {
           hints.push(`\n${quiet.line}`);
           sent.structured.hint = quiet.line;
+        }
+        // A number the Inbox does not know yet is looked up after this answer has gone (inbox-pull-lookups.ts); a PR
+        // found so is named on this agent's next send here. Nothing of it can reach this send.
+        if (known?.lookUp && !sent.replayed) {
+          const lookUp = known.lookUp;
+          const threadId = String(sent.structured.thread_id);
+          const session = input.agent_session;
+          const body = input.body;
+          const passed = pullRefs.map((ref) => ref.key);
+          setTimeout(() => {
+            try {
+              const refs = pullsToLookUp(store, { threadId, body, known, projectId: project.id, passed });
+              if (refs.length > 0) lookUp(refs, (ref) => notePullFoundLater(store, threadId, session, ref));
+            } catch {
+              // Advice only: the message was sent.
+            }
+          }, 0);
         }
         return ok(
           `${sent.replayed ? "Already sent" : "Sent"} to the Plannotator Inbox${asked} (thread ${sent.structured.thread_id}, ${sent.structured.url}).${stepsLine}${pullsLine}${priorityLine(sent.priority)}${namingLine(sent.naming)} ${replyNextStepText(wakes, input.agent_host, await t3WokenOnlyWhileRunning(context, wakes, input))}${hints.join("")}`,
@@ -1356,9 +1407,11 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
         if (found?.unresolved) {
           throw new InboxError("project_unresolved", "git did not answer in time, so this folder's project is not known yet. Nothing was listed; try the same call again.");
         }
-        const { project, projectIds } = found
-          ? { project: found.projects[0] ?? null, projectIds: new Set(found.projects.flatMap((p) => store.projectGroup(p.id))) }
-          : await threadReadScope(context, input.project_path);
+        const { project, projectIds } = found?.every
+          ? { project: null, projectIds: null }
+          : found
+            ? { project: found.projects[0] ?? null, projectIds: new Set(found.projects.flatMap((p) => store.projectGroup(p.id))) }
+            : await threadReadScope(context, input.project_path);
         const session = input.agent_session?.trim() || null;
         const askedBy = input.asked_by ?? (session ? "me" : "anyone");
         if (askedBy === "me" && !session) throw new InboxError("validation_error", "asked_by: \"me\" needs agent_session.");
@@ -1376,7 +1429,7 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
         // One short row per thread: the window's row is the person's view (and its `ack` shows a 👍 before it settles).
         const rows = threads.slice(0, limit).map((row) => {
           const steps = rowSteps(context, row.thread_id, session);
-          return { ...agentThreadRow(store, row, session), ...(tagged.has(row.thread_id) ? { tagged_you: true as const } : {}), ...(steps ? { steps } : {}) };
+          return { ...agentThreadRow(store, row, session), ...(found?.every ? { project: row.project.name } : {}), ...(tagged.has(row.thread_id) ? { tagged_you: true as const } : {}), ...(steps ? { steps } : {}) };
         });
         // The session saw these subjects (the check INBOX_REPLY_TO_CHECK asks for), unless a connection read them for it.
         if (!peek) for (const row of rows) noteSessionRead(store, session, row.thread_id, clock());

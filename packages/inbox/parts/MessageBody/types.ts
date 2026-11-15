@@ -7,6 +7,7 @@ import type { InboxAttachment, InboxAttachmentState, InboxInlineImage } from '@p
 import type { JumpTarget } from '../../components/ReplacedQuestion';
 import type { ActionRow } from '../../components/ReplyAnswers';
 import type { SentAnswerGroup } from '../../sentReply';
+import type { FileRef } from '../../fileRefs';
 
 export interface MessageBodyProps {
   /** A question with a prototype (an option's, or one for all) was asked to open it (its key). Absent: no "Try prototype" tab. */
@@ -32,6 +33,11 @@ export interface MessageBodyProps {
   repo?: InboxProjectRepo | null;
   /** A link in the body to one of this message's attachments was followed. */
   onOpenAttachment: (attachment: InboxAttachment) => void;
+  /**
+   * A file this agent message names (approval "inbox-file-refs-open-viewer": a link that is not attached, a code span
+   * that is a path, a bare path, a picture that did not load) opens beside the thread. Absent: as before.
+   */
+  onOpenFileRef?: (ref: FileRef) => void;
   /** An image the body shows was clicked (or pressed): its captured file (`inline_images`) opens in the viewer. */
   onOpenInlineImage?: (image: InboxInlineImage) => void;
   /**

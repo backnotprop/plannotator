@@ -417,3 +417,30 @@ button.ib-prs-box:focus-visible { outline: 2px solid var(--ring); outline-offset
 .ib-prs-entry-t { font-weight: 600; }
 .ib-prs-entry-n { margin-left: auto; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
 .ib-prs-entry > svg:last-child { color: var(--muted-foreground); }
+
+/* A stack's page: changed since you looked (a dot after the number, and before the header's count), and choosing a
+   range of layers (prs/StackRangeBar.tsx: the bar sticks while the layers scroll; picked rows are filled). */
+.ib-prst-dot { display: inline-block; width: 6px; height: 6px; margin: 0 0 1px 6px; border-radius: 50%; background: var(--foreground); vertical-align: middle; }
+.ib-prs-sum .ib-prst-dot { margin: 0 5px 1px 0; }
+.ib-prst-range { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px; min-height: 50px; padding: 8px 0; border-bottom: 1px solid var(--ib-line); background: var(--ib-main-bg, var(--card)); font-size: var(--ib-fs-13, 13px); }
+.ib-prst-range-n { color: var(--muted-foreground); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ib-prst-range-name { font-weight: 600; font-variant-numeric: tabular-nums; }
+.ib-prst-range-end { display: inline-flex; gap: 8px; margin-left: auto; }
+.ib-prs-btn[data-primary] { background: var(--primary); color: var(--primary-foreground); }
+.ib-prs-btn[data-primary]:hover { background: color-mix(in oklch, var(--primary) 88%, var(--foreground)); }
+.ib-prst-row[data-picked],
+.ib-prst-row[data-picked]:hover { background: var(--ib-cur-bg); }
+.ib-prst-list[data-picking] .ib-prst-row[data-lands]:not([data-picked]) { background: none; }
+.ib-prst-list[data-picking] .ib-prst-row[aria-disabled] { cursor: default; }
+.ib-prst-list[data-picking] .ib-prst-row[aria-disabled]:hover { background: none; }
+.ib-prst-foot { margin: 14px 0 0; padding-left: 8px; }
+.ib-prst-choose { padding: 0; border: 0; background: none; color: var(--primary); font: inherit; font-size: var(--ib-fs-13, 13px); cursor: pointer; }
+.ib-prst-choose:hover { text-decoration: underline; }
+.ib-prst-choose:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; border-radius: 2px; }
+.ib-prs[data-phone] .ib-prst-range .ib-prs-btn { height: 40px; padding: 0 16px; }
+.ib-prs[data-phone] .ib-prst-choose { min-height: 44px; }
+
+/* The PR page's rail: a range on screen and Since you looked (pulls/RailScopeRows.tsx), under the stack's rows. */
+.ib-prp-stack.ib-prp-views { flex: none; max-height: none; }
+.ib-prp-sincedot { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 15px; height: 15px; }
+.ib-prp-sincedot::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--foreground); }
