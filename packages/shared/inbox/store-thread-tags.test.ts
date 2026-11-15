@@ -221,3 +221,22 @@ test("by name: a deleted tag's name makes a new one; a missing thread makes no t
   expect(() => store.setThreadTagNamed(t.thread_id, "", true)).toThrow();
   expect(store.initiatives()).toHaveLength(count);
 });
+
+test("tags made in one millisecond (by name, as a linked machine tags) keep the order they were made in, open and after a restart", () => {
+  const dir = mkdtempSync(join(tmpdir(), "plannotator-inbox-thread-tags-"));
+  roots.push(dir);
+  // A clock that stands still: every tag has the same created_at, so only the order they were made in tells them apart.
+  const now = () => new Date("2026-11-12T09:00:00.000Z");
+  const store = InboxStore.open(dir, { now });
+  const project = store.ensureProject({ name: "app", root: "/work/app" });
+  const t = store.sendMessage({ project_id: project.id, author: AGENT, body: "Ready for a look.", thread: "t" }).message;
+  // Twelve, so an order left to the ids' random part passes by chance one time in 12!.
+  const names = Array.from({ length: 12 }, (_, i) => `Tag ${i}`);
+  for (const name of names) store.setThreadTagNamed(t.thread_id, name, true);
+  const made = names.map((name) => store.initiatives().find((i) => i.name === name)!.id);
+  expect(store.initiatives().map((i) => i.id)).toEqual(made);
+  expect(store.threadTags(t.thread_id)).toEqual(made);
+  const reopened = InboxStore.open(dir, { now });
+  expect(reopened.initiatives().map((i) => i.id)).toEqual(made);
+  expect(reopened.threadTags(t.thread_id)).toEqual(made);
+});

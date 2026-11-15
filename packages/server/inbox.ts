@@ -243,7 +243,7 @@ import {
   piSessionOutdated,
 } from "./inbox-restart";
 import { createInboxCompose, INBOX_UPLOAD_SWEEP_MS } from "./inbox-compose";
-import { INBOX_CROSS_SITE_BODY, isCrossSiteRequest, isWindowRequest } from "./inbox-cross-site";
+import { INBOX_CROSS_SITE_BODY, INBOX_MACHINE_PULL_WINDOW_ONLY_BODY, isCrossSiteRequest, isWindowRequest } from "./inbox-cross-site";
 import { createInboxLaunch } from "./inbox-launch";
 import { createInboxCodexAccount } from "./inbox-codex-account";
 import type { LaunchHost, LaunchHostContext } from "./inbox-launch-host";
@@ -324,6 +324,7 @@ import { createInboxStepsRoute, inboxStepsStale, inboxStepsWaitOnPerson as steps
 import { createInboxDebugLog } from "./inbox-debug-log";
 import { createInboxDevices, DOOR_PREFIX, MACHINE_PLATFORM, type InboxDoorCaller } from "./inbox-devices";
 import { createInboxMachines, type InboxMachines, type MachineFrame, type MachineLinkTimings } from "./inbox-machines";
+import { mergePullBoards } from "./inbox-machine-pulls";
 import { replyIsStale } from "./inbox-outbox";
 import type { PairingProbes } from "./inbox-pairing-checks";
 import { createInboxRelay, readRelayFile, relayUrl as defaultRelayUrl } from "./inbox-relay";
@@ -1134,6 +1135,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // `toWindow`), with the device that asked: a paired phone answers a permission prompt as a window does; a linked
   // machine does for a press in a window there (`window`), and may start, stop or trust for one (remote launch).
   const fromDeviceDoor = new WeakMap<Request, InboxDoorCaller>();
+  // A PR's close, reopen or merge through the door: only a linked machine's, for a press in its window (mark `pulls`).
+  const pullWriteFromWindow = (req: Request): boolean => {
+    const door = fromDeviceDoor.get(req);
+    return !door || (door.platform === MACHINE_PLATFORM && door.window);
+  };
   // Search (packages/server/inbox-search.ts): the index is built on the first search, not here.
   const search = createInboxSearchRoutes({ store, serverSession, index: options.searchIndex });
   // Mark read: the note to the asking agents goes once the Undo window has passed.
@@ -1337,8 +1343,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const pullRepoRead = new Set<string>();
   const pullRepoReading = new Map<string, Promise<InboxProjectRepo | null>>();
   const pulls = createInboxPulls(options.refRunner ? { run: options.refRunner } : {});
-  /** PRs this Inbox closed (the board's Close), by key: when. A reopen is taken only for these (`reopenAllowed`). */
-  const closedByInbox = new Map<string, number>();
+  /**
+   * PRs this Inbox closed (the board's Close), by key: when, and the PR as it was. A reopen is taken only for these
+   * (`reopenAllowed`), and finds the PR here once a fresh list no longer holds it (an open-only search drops it).
+   */
+  const closedByInbox = new Map<string, { at: number; pull: InboxPull }>();
   // The PR authors' pictures (inbox-pull-avatars.ts): only for logins the last list showed, served from this origin.
   const pullAvatars = createPullAvatars({ ...options.pullAvatars, dir: options.pullAvatars?.dir ?? join(inboxDir(dataDir), "pull-avatars") });
   // The projects' letter-mark pictures (inbox-project-pictures.ts; Settings → Rows, all off by default).
@@ -5400,9 +5409,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         }
         const { projectsByRepo, wanted } = await pullProjects();
         // `others=1`: the person has the Others view open, so Others is read as often as the list. `everywhere=1`: the
-        // Pull requests page, the person's own PRs in any repository (approval "inbox-pr-dashboard").
+        // Pull requests page, the person's own PRs in any repository (approval "inbox-pr-dashboard"). `machines=1` with
+        // it: the linked machines' boards too, read beside this one (a machine's door never passes `machines`).
         const everywhere = url.searchParams.get("everywhere") === "1";
-        const listed = await pulls.list(wanted, { refresh: url.searchParams.get("refresh") === "1", others: url.searchParams.get("others") === "1", everywhere });
+        const refresh = url.searchParams.get("refresh") === "1";
+        const far = everywhere && url.searchParams.get("machines") === "1" ? machines.pullLists(refresh) : null;
+        const listed = await pulls.list(wanted, { refresh, others: url.searchParams.get("others") === "1", everywhere });
         // Risk is judged for the projects' PRs only, as before: the page never starts an agent on a repository it doesn't work in.
         pullRisk.assess(everywhere ? listed.pulls.filter((pull) => projectsByRepo.has(`${pull.host}/${pull.repo}`.toLowerCase())) : listed.pulls);
         // Only this list's authors: a host it did not list (project removed, CLI signed out) keeps no login.
@@ -5410,7 +5422,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const links = linkInboxPulls(listed.pulls, pullLinkStore, projectsByRepo, pullOwnersNow());
         // The Board is optional: a card that links a PR is a quiet extra, only while the Board is on.
         const cards = boardOn() ? pullCards(listed.pulls, store.listCards()) : {};
-        return json({ serverSession, ...listed, links, projects: Object.fromEntries(projectsByRepo), cards });
+        const own = { ...listed, links, projects: Object.fromEntries(projectsByRepo), cards };
+        const farBoards = far ? await far : [];
+        return json({ serverSession, ...(farBoards.length > 0 ? mergePullBoards(own, farBoards) : own) });
       }
       // Reviews (approval "inbox-reviews-page"; inbox-reviews.ts and core's inbox-reviews.ts): one row per thread with
       // a review card (the same thread the Inbox lists, never a copy), with the PRs it owns, plus the listed PRs no
@@ -5648,6 +5662,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
         }
         if (!codeReviewOn()) return json({ error: "Code review is off.", code: "code_review_off" }, 409);
+        if (!pullWriteFromWindow(req)) return json(INBOX_MACHINE_PULL_WINDOW_ONLY_BODY, 403);
         const body = await readBody(req);
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
         const key = typeof body.key === "string" && body.key.length > 0 && body.key.length <= 600 ? body.key : null;
@@ -5677,16 +5692,18 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
         }
         if (!codeReviewOn()) return json({ error: "Code review is off.", code: "code_review_off" }, 409);
+        if (!pullWriteFromWindow(req)) return json(INBOX_MACHINE_PULL_WINDOW_ONLY_BODY, 403);
         const body = await readBody(req);
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
         const key = typeof body.key === "string" && body.key.length > 0 && body.key.length <= 600 ? body.key : null;
         if (!key) throw new InboxError("validation_error", "key: a pull request key from the list.", { field: "key" });
         const reopen = path === "/api/inbox/pulls/reopen";
-        if (reopen && !reopenAllowed(closedByInbox.get(key), Date.now())) {
+        const closedHere = closedByInbox.get(key);
+        if (reopen && !reopenAllowed(closedHere?.at, Date.now())) {
           return json({ error: `Only a pull request closed here in the last ${PULL_REOPEN_WINDOW_MS / 60_000} minutes can be reopened here.`, code: "reopen_not_closed_here" }, 409);
         }
-        if (!pulls.find(key)) await findPulls([key], (await pullProjects()).wanted);
-        const pull = pulls.find(key);
+        if (!reopen && !pulls.find(key)) await findPulls([key], (await pullProjects()).wanted);
+        const pull = reopen ? (pulls.find(key) ?? closedHere?.pull) : pulls.find(key);
         if (!pull) return json({ error: "That pull request is not in the list. Refresh the list and try again.", code: "pull_unknown" }, 404);
         if (!reopen && !inboxPullIsOpen(pull)) return json({ error: pull.state === "merged" ? "It is already merged." : "It is already closed.", code: pull.state === "merged" ? "pull_merged" : "pull_closed" }, 409);
         const result = reopen ? await reopenPull(options.refRunner ?? refCliRunner, pull) : await closePull(options.refRunner ?? refCliRunner, pull);
@@ -5695,7 +5712,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           closedByInbox.delete(key);
           pulls.markReopened(key);
         } else {
-          closedByInbox.set(key, Date.now());
+          closedByInbox.set(key, { at: Date.now(), pull });
           pulls.markClosed(key);
         }
         return json({ serverSession, ok: true, key, url: pull.url });
