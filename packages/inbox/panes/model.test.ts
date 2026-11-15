@@ -5,7 +5,7 @@
  * slot drawn again for nothing).
  */
 import { describe, expect, test } from 'bun:test';
-import { MAIN_PANE, close, focusPane, move, open, paneOf, paneThread, singlePane, split, type PaneSet } from './model';
+import { MAIN_PANE, addressThread, close, focusPane, followAddress, move, open, paneOf, paneThread, singlePane, split, type PaneSet } from './model';
 
 const ids = (set: PaneSet) => set.panes.map((pane) => `${pane.id}:${pane.thread ?? '-'}`);
 const two = () => split(singlePane('t1'), MAIN_PANE, { id: 'p2', thread: 't2' }, 'right');
@@ -85,6 +85,32 @@ describe('close', () => {
     expect(ids(set)).toEqual(['main:-', 'p2:t2']);
     expect(close(singlePane(), MAIN_PANE)).toEqual(singlePane());
     expect(close(two(), 'gone').panes).toHaveLength(2);
+  });
+});
+
+describe('the address names the active pane\'s thread', () => {
+  test('a link to a thread another pane shows focuses that pane; the address and the panes then agree', () => {
+    const set = focusPane(two(), MAIN_PANE);
+    const next = followAddress(set, 't2');
+    expect(ids(next)).toEqual(['main:t1', 'p2:t2']);
+    expect(next.active).toBe('p2');
+    expect(addressThread(next)).toBe('t2');
+  });
+
+  test('any other thread shows in the active pane, whichever it is; the others keep theirs', () => {
+    const fromSecond = followAddress(two(), 't3');
+    expect(ids(fromSecond)).toEqual(['main:t1', 'p2:t3']);
+    expect(addressThread(fromSecond)).toBe('t3');
+    const fromMain = followAddress(focusPane(two(), MAIN_PANE), null);
+    expect(ids(fromMain)).toEqual(['main:-', 'p2:t2']);
+    expect(addressThread(fromMain)).toBeNull();
+  });
+
+  test('focusing a pane changes the thread the address names; the address already named changes nothing', () => {
+    const set = two();
+    expect(addressThread(set)).toBe('t2');
+    expect(addressThread(focusPane(set, MAIN_PANE))).toBe('t1');
+    expect(followAddress(set, 't2')).toBe(set);
   });
 });
 

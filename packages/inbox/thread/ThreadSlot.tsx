@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { closeTo } from '../app/focus';
 import { writeRoute } from '../app/writeRoute';
 import { CardChip } from '../board/CardChip';
@@ -36,6 +36,7 @@ export interface ThreadSlotProps {
 export function ThreadSlot({ paneId, threadId, active, host }: ThreadSlotProps) {
   const { route, routeRef, thread, phone, stack, full, fromCard, fileOpen, settings, machines, go, leave, close, listTitle } = host;
   const ready = !!threadId && !!thread && thread.thread_id === threadId && !host.rowsPending;
+  const scope = useMemo(() => ({ paneId, active }), [paneId, active]);
   const activeRef = useRef(active);
   activeRef.current = active;
   /** Focus was in the thread's place when it gave way to the thread: it goes to the thread's subject. */
@@ -51,7 +52,7 @@ export function ThreadSlot({ paneId, threadId, active, host }: ThreadSlotProps) 
   }, [thread, threadId]);
   const onClose = fromCard ? host.backToCard : () => close({ ...route, thread: null, file: null });
   return (
-    <PaneScopeContext.Provider value={{ paneId, active }}>
+    <PaneScopeContext.Provider value={scope}>
       {/* Beside the list, the thread's place says it is opening (or why not) until its read lands; a phone
           and a stacked window keep the list until there is a thread to show, or the thread's machine is away. */}
       {threadId && !ready && ((!phone && !stack.thread) || host.awayWait) && (

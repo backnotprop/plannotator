@@ -9,6 +9,10 @@
  *
  * One thread shows in one pane at most: opening a thread another pane shows makes that pane the active one. Per-thread
  * state (the reply draft, dictation, a send on its way) can then be keyed by thread and still belong to one pane.
+ *
+ * The address (`#thread=`) always names the active pane's thread (`addressThread`). An address that changes is
+ * followed (`followAddress`): a thread another pane shows focuses that pane, any other thread shows in the active pane.
+ * Focusing a pane changes the address the other way: the window writes the newly active pane's thread to it.
  */
 
 export type PaneId = string;
@@ -85,3 +89,9 @@ export function close(set: PaneSet, id: PaneId): PaneSet {
 export function focusPane(set: PaneSet, id: PaneId): PaneSet {
   return set.active === id || !hasPane(set, id) ? set : { ...set, active: id };
 }
+
+/** The thread the address names: the active pane's. */
+export const addressThread = (set: PaneSet): string | null => paneThread(set, set.active);
+
+/** The set after the address changed to `thread`; afterwards `addressThread` is `thread`. */
+export const followAddress = (set: PaneSet, thread: string | null): PaneSet => (addressThread(set) === thread ? set : open(set, thread));

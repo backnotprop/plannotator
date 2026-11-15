@@ -126,7 +126,7 @@ import { TourBar, TourCoach, TourLoading, TourMain, TourNavigation, loadTour, to
 import { TourEntry, tourEntryModel } from './tour/TourEntry';
 import { TOUR_FIT_LINES, TOUR_FIT_TITLE, TourIntro } from './tour/Fit';
 import { TOUR_COMPOSE_STEP, TOUR_FIRST_QUESTION_PROMPT, TOUR_PROJECT_ID, TOUR_SETTINGS_STEP, TOUR_START, TOUR_STEPS, TOUR_THREAD, tourCanBack, tourCanForward, tourCoach, tourCoachSpeech, tourReducer, type TourAction, type TourDegraded, type TourUi } from './tour/model';
-import { MAIN_PANE, paneThread } from './panes/model';
+import { addressThread, MAIN_PANE, paneThread } from './panes/model';
 import { createPanesOnScreen } from './panes/onScreen';
 import { useRoutePanes } from './panes/useRoutePanes';
 import { EmptyThreadPanel } from './components/EmptyThreadPanel';
@@ -468,14 +468,14 @@ function Inbox() {
       return next;
     });
   }, []);
-  /** The thread panes (panes/model.ts): the main pane shows the address's thread. */
+  /** The thread panes (panes/model.ts): the address names the active pane's thread. */
   const panes = useRoutePanes(route.thread ?? null);
   /**
    * The open thread as the cache holds it (data/queries/thread.ts): its read, with the stream's records applied in
    * place since. Its own list row (an archived thread has none in the list) and a launched thread's run line (null
    * while the agent rests) come with it.
    */
-  const openHeld = useHeldThread(paneThread(panes, MAIN_PANE));
+  const openHeld = useHeldThread(addressThread(panes));
   const thread = openHeld?.thread ?? null;
   const threadRow = openHeld?.row ?? null;
   const threadRun = useMemo(

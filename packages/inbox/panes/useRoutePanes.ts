@@ -1,10 +1,9 @@
 import { useRef } from 'react';
-import { MAIN_PANE, open, paneThread, singlePane, type PaneSet } from './model';
+import { followAddress, singlePane, type PaneSet } from './model';
 
-/** The window's panes, the main one showing the address's thread (`#thread=`): the address stays the one source of it. */
+/** The window's panes, following the address's thread (`#thread=`, the active pane's thread: model.ts). */
 export function useRoutePanes(thread: string | null): PaneSet {
   const held = useRef<PaneSet | null>(null);
-  if (held.current === null) held.current = singlePane(thread);
-  else if (paneThread(held.current, MAIN_PANE) !== thread) held.current = open(held.current, thread, MAIN_PANE);
+  held.current = held.current === null ? singlePane(thread) : followAddress(held.current, thread);
   return held.current;
 }
