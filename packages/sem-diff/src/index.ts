@@ -387,7 +387,7 @@ export async function semanticDiffFile(language: LanguageId, oldText: string, ne
             : op.lines.old.length + op.lines.new.length > 0
           : ownsText(op, oldLines, newLines, inString);
       if (!keep || (op.type === 'movedWithEdit' && !alike(op, oldLines, newLines))) return;
-      if ((op.type === 'moved' || op.type === 'movedWithEdit') && contextChanged(op, cfg, a.rootNode, b.rootNode, oldLines, newLines)) return;
+      if ((op.type === 'moved' || op.type === 'movedWithEdit' || op.type === 'reformatted') && contextChanged(op, cfg, a.rootNode, b.rootNode, oldLines, newLines)) return;
       finalIndex.set(i, operations.length);
       operations.push(op);
     });

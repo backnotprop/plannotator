@@ -56,3 +56,13 @@ test('self.name and a bare name are one property for a rename', async () => {
   const after = before.replaceAll('size', 'width');
   assert.ok((await types(before, after)).includes('renamed'));
 });
+
+test('a body re-indented into an #if branch or a constrained extension is not reformatted', async () => {
+  const body = `    func area() -> Double {\n        let r = radius\n        let d = r * 2\n        return Double.pi * d * d / 4\n    }\n`;
+  const plain = `struct Circle<Unit> {\n    var radius: Double\n\n${body}}\n`;
+  const wrapped = `struct Circle<Unit> {\n    var radius: Double\n\n#if DEBUG\n${body.replace(/^/gm, '    ').replace(/^    $/gm, '')}#endif\n}\n`;
+  assert.ok(!(await types(plain, wrapped)).includes('reformatted'));
+  const ext = `struct Circle<Unit> {\n    var radius: Double\n}\n\nextension Circle where Unit == Double {\n${body}}\n`;
+  const before = `struct Circle<Unit> {\n    var radius: Double\n}\n\n${body.replace(/^    /gm, '')}`;
+  assert.ok(!(await types(before, ext)).includes('reformatted'));
+});
