@@ -766,3 +766,4 @@ packages/ui/components/Viewer.authorColor.test.tsx
 packages/review-editor/components/authorColor.review.test.tsx
 packages/review-editor/components/BranchName.dom.test.tsx
 packages/inbox/settingsAtLoad.test.tsx
+packages/review-editor/components/nameFitting.dom.test.tsx

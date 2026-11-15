@@ -3,7 +3,7 @@ import type { FileTreeRowDecorationContext, FileTreeRowParts, FileTreeSortEntry,
 import { FileTree as PierreFileTree, useFileTree } from '@pierre/trees/react';
 import type { FileTreeNode } from '../utils/buildFileTree';
 import type { DiffFile } from '../types';
-import { GROUP_ICONS, ROW_ICONS, TreeRowMenu, ancestorsOf, countParts, fileRowParts, gitStatusFor, tightRow, type SectionEntry } from './pierreRows';
+import { GROUP_ICONS, ROW_ICONS, TreeRowMenu, ancestorsOf, countParts, fileRowParts, gitStatusFor, observeTreeName, tightRow, type SectionEntry } from './pierreRows';
 
 export interface ChangesTreeGroup {
   key: string;
@@ -128,9 +128,10 @@ export const ChangesTreeView: React.FC<ChangesTreeViewProps> = (props) => {
     handleRef,
   } = props;
 
+  const pinnedPath = hideViewedFiles && activePath && hiddenFiles.has(activePath) ? activePath : null;
   const layout = useMemo(
-    () => layoutTree(tree, groups, hideViewedFiles ? hiddenFiles : NO_PATHS, activePath),
-    [tree, groups, hideViewedFiles, hiddenFiles, activePath],
+    () => layoutTree(tree, groups, hideViewedFiles ? hiddenFiles : NO_PATHS, pinnedPath),
+    [tree, groups, hideViewedFiles, hiddenFiles, pinnedPath],
   );
 
   const sinceBaseMode = props.getSectionEntry != null;
@@ -203,6 +204,7 @@ export const ChangesTreeView: React.FC<ChangesTreeViewProps> = (props) => {
     rows: {
       gitStatusPlacement: 'start',
       nameTruncation: 'keep-tail',
+      observeName: observeTreeName,
       renderParts,
       onPartClick: ({ partId, path }) => {
         const { props: p, layout: l } = live.current;
@@ -269,11 +271,29 @@ export const ChangesTreeView: React.FC<ChangesTreeViewProps> = (props) => {
     syncSelection();
   }, [layout, gitStatus, model, syncSelection, initiallyFoldedGroups]);
 
+  const pendingSync = useRef<{ frame: number; reveal: boolean } | null>(null);
   useEffect(() => {
     const previous = lastActive.current;
     lastActive.current = activePath;
-    syncSelection(previous !== undefined && previous !== activePath);
+    const reveal = previous !== undefined && previous !== activePath;
+    if (previous === undefined || typeof requestAnimationFrame === 'undefined') {
+      syncSelection(reveal);
+      return;
+    }
+    if (pendingSync.current) {
+      pendingSync.current.reveal ||= reveal;
+      return;
+    }
+    const pending = { frame: 0, reveal };
+    pending.frame = requestAnimationFrame(() => {
+      pendingSync.current = null;
+      syncSelection(pending.reveal);
+    });
+    pendingSync.current = pending;
   }, [activePath, syncSelection]);
+  useEffect(() => () => {
+    if (pendingSync.current) cancelAnimationFrame(pendingSync.current.frame);
+  }, []);
 
   useEffect(() => {
     model.refreshRows();

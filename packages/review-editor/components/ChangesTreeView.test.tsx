@@ -1,9 +1,10 @@
-import { afterEach, describe, expect, mock, test } from 'bun:test';
+import { afterAll, afterEach, beforeAll, describe, expect, mock, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { FileTree } from './FileTree';
 import type { DiffFile } from '../types';
 import type { SinceBaseSections } from '@plannotator/shared/types';
+import { installFakeTextLayout, type FakeTextLayout } from '../../../tests/helpers/fake-text-layout';
 
 const hasDom = typeof document !== 'undefined';
 let host: HTMLDivElement | null = null;
@@ -86,6 +87,17 @@ const part = (el: HTMLElement, path: string, id: string) => row(el, path).queryS
 const trail = (el: HTMLElement, path: string) =>
   [...row(el, path).querySelectorAll('[data-item-section="trail"] > span')].map((cell) => cell.textContent);
 const selected = (el: HTMLElement) => rowEls(el).filter((r) => r.dataset.itemSelected === 'true').map((r) => r.dataset.itemPath);
+
+let layout: FakeTextLayout | null = null;
+beforeAll(() => {
+  if (hasDom) layout = installFakeTextLayout();
+});
+afterAll(() => layout?.restore());
+
+async function resizeNames(width: number) {
+  await act(async () => layout!.resize((element) => (element.hasAttribute('data-item-name') ? width : undefined)));
+  await settle();
+}
 
 afterEach(async () => {
   if (root) await act(async () => root?.unmount());
@@ -205,24 +217,15 @@ describe.skipIf(!hasDom)('The Changes tree on Pierre trees', () => {
   });
 
   test('a file name too long for its row keeps its start, one ellipsis and a tail of three letters plus the extension, cut by whole letters', async () => {
-    const realRect = HTMLElement.prototype.getBoundingClientRect;
-    const realWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth');
-    HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement) {
-      return { width: [...(this.textContent ?? '')].length * 7, height: 16, x: 0, y: 0, top: 0, left: 0, right: 0, bottom: 0, toJSON() {} } as DOMRect;
-    };
-    Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get() { return 70; } });
-    try {
-      const el = await mount(<Tree files={[file('src/an-extremely-long-file-name.ts'), file('legacy/step0.py'), file('legacy/step1.py'), file('src/a.ts')]} activeFileIndex={0} />);
-      const name = (end: string) => row(el, rows(el).find((p) => p?.endsWith(end))!).querySelector<HTMLElement>('[data-item-name]')!;
-      expect(name('file-name.ts').textContent).toBe('an…ame.ts');
-      expect(name('file-name.ts').getAttribute('aria-label')).toBe('an-extremely-long-file-name.ts');
-      expect(name('step0.py').textContent).toBe('step0.py');
-      expect(name('a.ts').textContent).toBe('a.ts');
-    } finally {
-      HTMLElement.prototype.getBoundingClientRect = realRect;
-      if (realWidth) Object.defineProperty(HTMLElement.prototype, 'clientWidth', realWidth);
-      else delete (HTMLElement.prototype as { clientWidth?: number }).clientWidth;
-    }
+    const el = await mount(<Tree files={[file('src/an-extremely-long-file-name.ts'), file('legacy/step0.py'), file('legacy/step1.py'), file('src/a.ts')]} activeFileIndex={0} />);
+    await resizeNames(70);
+    const name = (end: string) => row(el, rows(el).find((p) => p?.endsWith(end))!).querySelector<HTMLElement>('[data-item-name]')!;
+    expect(name('file-name.ts').textContent).toBe('an…ame.ts');
+    expect(name('file-name.ts').getAttribute('aria-label')).toBe('an-extremely-long-file-name.ts');
+    expect(name('step0.py').textContent).toBe('step0.py');
+    expect(name('a.ts').textContent).toBe('a.ts');
+    await resizeNames(400);
+    expect(name('file-name.ts').textContent).toBe('an-extremely-long-file-name.ts');
   });
 
   test('each row carries its own tight counts: nothing reserved from other rows, a huge count reads 12.3k with the exact number in its tooltip', async () => {

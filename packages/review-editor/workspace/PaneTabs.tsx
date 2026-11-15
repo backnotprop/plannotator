@@ -1,6 +1,7 @@
 import React, { useLayoutEffect, useRef, useState } from 'react';
 import { Crosshair, Diff, FileText } from 'lucide-react';
-import { EllipsisName, fitDirectory } from '../components/EllipsisName';
+import { EllipsisName } from '../components/EllipsisName';
+import { useFittedText } from '@plannotator/ui/hooks/useFittedText';
 import { useReviewStateOptional } from '../dock/ReviewStateContext';
 import type { Pane, PaneTab } from './paneLayout';
 import { REVIEW_ALL_FILES_PANEL_ID, isReviewFilePreviewParams } from '../dock/reviewPanelTypes';
@@ -66,43 +67,16 @@ function useHiddenTabs(ref: React.RefObject<HTMLElement | null>, key: string, si
 
 const DirectoryPrefix: React.FC<{ directory: string }> = ({ directory }) => {
   const boxRef = useRef<HTMLSpanElement>(null);
-  const probeRef = useRef<HTMLSpanElement>(null);
-  const [fit, setFit] = useState<{ text: string; width?: number }>({ text: directory });
-  useLayoutEffect(() => {
-    const box = boxRef.current;
-    const probe = probeRef.current;
-    if (!box || !probe || typeof probe.getBoundingClientRect !== 'function') return;
-    const width = (text: string) => {
-      probe.textContent = text;
-      return probe.getBoundingClientRect().width;
-    };
-    const measure = () => {
-      if (width('M') === 0) {
-        probe.textContent = '';
-        setFit((before) => (before.text === directory && !before.width ? before : { text: directory }));
-        return;
-      }
-      const full = Math.ceil(width(directory)) + 1;
-      const next = box.clientWidth > 0 && box.clientWidth < full ? fitDirectory(directory, box.clientWidth, width) : directory;
-      probe.textContent = '';
-      setFit((before) => (before.text === next && before.width === full ? before : { text: next, width: full }));
-    };
-    measure();
-    if (typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver(measure);
-    observer.observe(box);
-    return () => observer.disconnect();
-  }, [directory]);
+  const fit = useFittedText(boxRef, directory, 'directory');
   return (
     <span
       ref={boxRef}
       aria-hidden="true"
-      style={fit.width ? { width: fit.width } : undefined}
+      style={fit.natural ? { width: fit.natural } : undefined}
       className="relative min-w-0 shrink-[1000] -mr-1 overflow-hidden whitespace-nowrap text-right text-[13px] text-muted-foreground [font-variant-ligatures:no-contextual]"
       data-pane-tab-directory=""
     >
       {fit.text}
-      <span ref={probeRef} className="pointer-events-none invisible absolute left-0 top-0 whitespace-nowrap" />
     </span>
   );
 };
