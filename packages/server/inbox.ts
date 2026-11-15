@@ -1135,7 +1135,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // `toWindow`), with the device that asked: a paired phone answers a permission prompt as a window does; a linked
   // machine does for a press in a window there (`window`), and may start, stop or trust for one (remote launch).
   const fromDeviceDoor = new WeakMap<Request, InboxDoorCaller>();
-  // A PR's close, reopen or merge through the door: only a linked machine's, for a press in its window (mark `pulls`).
+  // A PR's close, reopen or merge through the door: only a linked machine's, sent with its window's mark (mark `pulls`).
+  // The mark stops a bare call there, not a program there that imitates the window (inbox-launch.md "Accepted, not defended").
   const pullWriteFromWindow = (req: Request): boolean => {
     const door = fromDeviceDoor.get(req);
     return !door || (door.platform === MACHINE_PLATFORM && door.window);
@@ -6989,7 +6990,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       const steps = stepsRoute.route(req, path);
       if (steps) return steps;
       // A thread's PRs (approval "inbox-pr-binding"): the window's read and the person's add and remove (inbox-thread-pulls.ts).
-      // Never another site; never on the device door.
+      // Never another site. On the device door for a linked machine (mark `pulls`), never a phone.
       if (/^\/api\/inbox\/threads\/[A-Za-z0-9_]+\/pulls$/.test(path)) {
         if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
           return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);

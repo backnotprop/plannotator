@@ -90,6 +90,8 @@ export interface FarBoardEntry {
   machine: string;
   board: FarBoard | null;
   pending: boolean;
+  /** The link's name for it, when known. */
+  name?: string;
 }
 
 /**
@@ -110,8 +112,8 @@ export function mergePullBoards<T extends Pick<InboxPullsAnswer, "pulls" | "link
   const hosts = [...local.hosts];
   const far_risk: Record<string, InboxPullRiskJudgment> = {};
   const machines: NonNullable<InboxPullsAnswer["machines"]> = {};
-  for (const { machine, board, pending } of far) {
-    machines[machine] = { read_at: board?.read_at ?? null, pending };
+  for (const { machine, board, pending, name } of far) {
+    machines[machine] = { read_at: board?.read_at ?? null, pending, ...(name ? { name } : {}) };
     if (!board) continue;
     for (const pull of board.pulls) {
       if (keys.has(pull.key)) continue;
@@ -181,6 +183,17 @@ export function createMachinePulls(options: { peers: () => Iterable<PeerLink>; w
     /** After a close, reopen or merge there: its board again, so the next merged read shows it. */
     reread(peer: PeerLink): Promise<void> {
       return peer.list?.marks.includes("pulls") ? read(peer, false) : Promise.resolve();
+    },
+    /**
+     * A PR's state on that machine's board, read now (after a write whose answer never came): null when the board
+     * could not be read now or does not list it.
+     */
+    async stateThere(peer: PeerLink, key: string): Promise<InboxPull["state"] | null> {
+      const before = boards.get(peer.id)?.read_at ?? null;
+      await read(peer, false);
+      const board = boards.get(peer.id);
+      if (!board || board.read_at === before) return null;
+      return board.pulls.find((pull) => pull.key === key)?.state ?? null;
     },
     /** The link went: nothing of that machine's board stays. */
     forget(machine: string): void {

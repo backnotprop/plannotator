@@ -27,7 +27,7 @@ import { createFakeAgents, type FakeAgents } from "../../tests/helpers/fake-agen
 import { startInboxServer, type InboxServer } from "./inbox";
 import { createAgentEnvironmentFor } from "./inbox-agents";
 import { doorRouteNames } from "./inbox-devices";
-import { doorWriteKind } from "./inbox-outbox";
+import { DOOR_WRITES, doorWriteKind } from "./inbox-outbox";
 
 type Json = Record<string, any>;
 
@@ -787,11 +787,26 @@ describe("the login header counts only on the tailnet listener", () => {
 });
 
 describe("a linked machine gains none of it", () => {
-  test("no opened route is a door route or a forwardable write", () => {
-    const names = doorRouteNames().join("\n");
+  test("no opened route is a door route or a forwardable write; this computer's gh runs for a linked machine on the PR board's routes only", () => {
+    const all = doorRouteNames();
+    const names = all.join("\n");
     for (const word of ["agents", "settings", "voice"]) expect(names).not.toContain(` ${word}`);
     // The Board's cards are door routes (mark `cards`, its own machine's store); their marks run this computer's gh and are not.
     expect(names).not.toContain("cards/marks");
+    // A linked machine may run PR actions with this computer's GitHub sign-in (mark `pulls`, inbox-machines.md "The PR
+    // board"). These are every door route that runs this computer's gh / glab: the board's reads, a thread's PRs (read
+    // and stored here; gh only reads their state), and the three writes. A new PR route or `forge` write fails here until it is named.
+    expect(all.filter((name) => name.includes("pulls"))).toEqual([
+      "GET pulls",
+      "GET pulls/(risk|details|diff|file|repo-files|repo-file|avatar|media|media/sizes)",
+      "POST pulls/(close|reopen|merge)",
+      "GET threads/:id/pulls",
+      "POST threads/:id/pulls",
+    ]);
+    // The door routes that write with gh / glab: exactly these, each a `forge` write (never held, a window's press only).
+    expect(Object.entries(DOOR_WRITES).filter(([, kind]) => kind === "forge").map(([name]) => name).sort()).toEqual(["POST pulls/close", "POST pulls/merge", "POST pulls/reopen"]);
+    for (const verb of ["close", "merge", "reopen"]) expect(doorWriteKind(`pulls/${verb}`)).toBe("forge");
+    expect(doorWriteKind("threads/msg_1/pulls")).toBe("set");
     // A linked machine's `update` is the one exception, and it is not on the allowlist: the forward refuses it (below), and only a machine's token reaches it.
     expect(names.split("\n").filter((name) => name.includes("update"))).toEqual(["POST update"]);
     for (const route of ["update/check", "update/snooze", "agents", "agents/notes", "agents/seen", "settings", "cards/marks", "voice/key"]) {

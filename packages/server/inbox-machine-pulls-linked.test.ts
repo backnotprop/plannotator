@@ -2,8 +2,10 @@
  * The PR board across linked machines, on two real Inboxes linked both ways (docs/agent-guides/inbox-machines.md,
  * "The PR board"). Each has its own scripted gh (a `refRunner`, signed in as the same person) listing different PRs,
  * one PR on both. What regresses: a machine's PRs missing from the other's board, or the shared one shown twice; a
- * close, reopen or merge of the other machine's PR running this machine's gh (or none); a script, an agent or a phone
- * reaching the other machine's gh; Undo going anywhere but the machine that closed; a forge write held for an asleep
+ * close, reopen or merge of the other machine's PR running this machine's gh (or none); a bare call (an agent's curl,
+ * no Origin) or a machine token without the window's mark reaching the other machine's gh; a merge losing the head the
+ * person saw or the second click on the way; a key the other machine does not list written there; Undo going anywhere
+ * but the machine that closed; a forge write held for an asleep
  * machine; an asleep machine's rows dropped; a thread's PRs on the other machine not read or changed there; the board
  * of an Inbox with no machine linked changing at all.
  *
@@ -62,7 +64,17 @@ function fakeGh(prs: [string, number][]) {
       const data = { viewer: { login: "dana" }, rateLimit: { cost: 1, remaining: 4000, resetAt: "2026-11-14T11:00:00Z" }, requested: none, assigned: none, authored: { issueCount: open.length, nodes: open }, merged: { nodes: [] }, everyRequested: none, everyAssigned: none, everyAuthored: { issueCount: open.length, nodes: open }, everyMerged: { nodes: [] } };
       return { stdout: JSON.stringify({ data }), stderr: "", exitCode: 0 };
     }
-    // The close route: `api --hostname h repos/o/r/pulls/N` reads its state; `-X PATCH … -f state=…` writes it.
+    // Merge: `-X PUT repos/o/r/pulls/N/merge … -f sha=…` writes it, at the head it was read at.
+    const merge = args.find((a) => /^repos\/.+\/pulls\/\d+\/merge$/.test(a));
+    if (args[0] === "api" && merge && args.includes("PUT")) {
+      const [, repo, n] = /^repos\/(.+)\/pulls\/(\d+)\/merge$/.exec(merge)!;
+      writes.push(`${repo}#${n} merged ${args.find((a) => a.startsWith("sha="))!.slice("sha=".length, "sha=".length + 7)}`);
+      states.set(`${repo}#${n}`, "merged");
+      return { stdout: JSON.stringify({ merged: true }), stderr: "", exitCode: 0 };
+    }
+    // The repository's merge methods (the merge reads them before it writes).
+    if (args[0] === "api" && args.some((a) => /^repos\/[^/]+\/[^/]+$/.test(a))) return { stdout: JSON.stringify({ full_name: "x", allow_merge_commit: true }), stderr: "", exitCode: 0 };
+    // Close and merge read `api --hostname h repos/o/r/pulls/N` first; `-X PATCH … -f state=…` writes a close or reopen.
     const path = args.find((a) => /^repos\/.+\/pulls\/\d+$/.test(a));
     if (args[0] === "api" && path) {
       const [, repo, n] = /^repos\/(.+)\/pulls\/(\d+)$/.exec(path)!;
@@ -73,7 +85,9 @@ function fakeGh(prs: [string, number][]) {
         states.set(key, to);
         return { stdout: "{}", stderr: "", exitCode: 0 };
       }
-      return { stdout: JSON.stringify({ state: states.get(key) ?? "open", merged: false }), stderr: "", exitCode: 0 };
+      const state = states.get(key) ?? "open";
+      const head = { sha: n!.padStart(40, "a") };
+      return { stdout: JSON.stringify({ state: state === "merged" ? "closed" : state, merged: state === "merged", merged_at: state === "merged" ? "2026-11-14T10:05:00Z" : null, draft: false, head, mergeable: true, mergeable_state: "clean" }), stderr: "", exitCode: 0 };
     }
     return { stdout: "", stderr: "HTTP 404", exitCode: 1 };
   };
@@ -105,7 +119,10 @@ describe("the PR board across linked machines (mark `pulls`)", () => {
   const rows = async (port: number) => ((await board(port)).pulls as Json[]).map((p) => [p.key, p.machine ?? null, p.state]).sort((x, y) => String(x[0]).localeCompare(String(y[0])));
   const session = async (port: number) => ((await (await fetch(`${at(port)}/api/inbox/health`)).json()) as Json).serverSession as string;
   let keys = 0;
-  /** A press in A's window: its own Origin and page session, the key the window adds. */
+  /**
+   * A press in A's window: its own Origin and page session, the key the window adds. A local program can send the same
+   * and is taken as the window ("Accepted, not defended" in inbox-launch.md); `window = false` is an agent's bare call.
+   */
   const press = async (port: number, path: string, body: Json, window = true) =>
     fetch(`${at(port)}${path}`, {
       method: "POST",
@@ -118,7 +135,7 @@ describe("the PR board across linked machines (mark `pulls`)", () => {
   const WEB1 = "github.com/northwind/web#1";
   const WEB2 = "github.com/northwind/web#2";
 
-  test("one board both ways; B's PR closed, undone and merged-refused by B's gh from A's window only; B asleep, its rows stay and nothing is held", async () => {
+  test("one board both ways; B's PR closed, undone and merged by B's gh for A's window's request only; B asleep, its rows stay and nothing is held", async () => {
     const ghA = fakeGh([["northwind/web", 1], ["northwind/web", 2]]);
     const ghB = fakeGh([["northwind/web", 1], ["northwind/api", 7], ["northwind/api", 8]]);
     const dataA = scratch("plannotator-pulls-linked-a-");
@@ -153,7 +170,7 @@ describe("the PR board across linked machines (mark `pulls`)", () => {
         [WEB2, aId],
       ]);
 
-      // A script or an agent on A (no window): refused here, nothing runs on B.
+      // An agent's bare call on A (no Origin, no page session): refused here, nothing runs on B.
       const bare = await press(a.port, `/api/inbox/m/${bId}/pulls/close`, { key: API7 }, false);
       expect(bare.status).toBe(403);
       expect(((await bare.json()) as Json).code).toBe("window_only");
@@ -185,6 +202,25 @@ describe("the PR board across linked machines (mark `pulls`)", () => {
       expect(ghA.writes).toEqual([`northwind/web#1 closed`]);
       expect(ghB.writes).toHaveLength(2);
 
+      // Merge through the forward: the head the person saw and the second click reach B, which asks its forge again.
+      const head7 = "7".padStart(40, "a");
+      const merge = (fields: Json, window = true) => press(a.port, `/api/inbox/m/${bId}/pulls/merge`, { key: API7, ...fields }, window);
+      expect((await merge({ head_sha: head7, confirmed: true }, false)).status).toBe(403);
+      const unconfirmed = await merge({ head_sha: head7 });
+      expect([unconfirmed.status, ((await unconfirmed.json()) as Json).code]).toEqual([409, "merge_unconfirmed"]);
+      const moved = await merge({ head_sha: "b".repeat(40), confirmed: true });
+      expect([moved.status, ((await moved.json()) as Json).code]).toEqual([409, "pull_moved"]);
+      expect(ghB.writes).toHaveLength(2);
+      const merged = await merge({ head_sha: head7, confirmed: true });
+      expect(merged.status).toBe(200);
+      expect(((await merged.json()) as Json).method).toBe("merge");
+      expect(ghB.writes.at(-1)).toBe(`northwind/api#7 merged aaaaaaa`);
+      expect(ghA.writes).toEqual([`northwind/web#1 closed`]);
+      // A key B's list does not hold is never written there: B reads its list again, then refuses it.
+      const unknown = await press(a.port, `/api/inbox/m/${bId}/pulls/close`, { key: "github.com/northwind/api#999" });
+      expect([unknown.status, ((await unknown.json()) as Json).code]).toEqual([404, "pull_unknown"]);
+      expect(ghB.writes).toHaveLength(3);
+
       // B's thread's PRs, read and changed on B from A's window.
       client = new Client({ name: "inbox-pulls-linked", version: "1.0.0" });
       await client.connect(new StreamableHTTPClientTransport(new URL(`${at(b.port)}/mcp`)));
@@ -205,10 +241,13 @@ describe("the PR board across linked machines (mark `pulls`)", () => {
       // B asleep: its rows stay as last read; a close says plainly it cannot run, and nothing waits to run later.
       await client.close();
       client = null;
+      const farKeys = (answer: Json) => (answer.pulls as Json[]).filter((p) => p.machine === bId).map((p) => p.key).sort();
+      const lastRead = farKeys(await board(a.port));
+      expect(lastRead).toContain(API8);
       b.stop();
       await waitFor("B offline on A", async () => (await view()).state === "offline", 30_000);
       const away = await board(a.port);
-      expect((away.pulls as Json[]).filter((p) => p.machine === bId).map((p) => p.key).sort()).toEqual([API7, API8]);
+      expect(farKeys(away)).toEqual(lastRead);
       expect(away.machines[bId].pending).toBe(false);
       const asleep = await press(a.port, `/api/inbox/m/${bId}/pulls/close`, { key: API8 });
       expect(asleep.status).toBe(503);
@@ -216,7 +255,7 @@ describe("the PR board across linked machines (mark `pulls`)", () => {
       expect((((await (await fetch(`${at(a.port)}/api/inbox/outbox`)).json()) as Json).waiting as Json[]).filter((e) => e.route.startsWith("pulls/"))).toEqual([]);
       b = await start(dataB, ghB.run);
       await waitFor("B back on A", async () => (await view()).state === "online", 45_000);
-      expect(ghB.writes).toHaveLength(2);
+      expect(ghB.writes).toHaveLength(3);
     } finally {
       await client?.close().catch(() => {});
       a.stop();

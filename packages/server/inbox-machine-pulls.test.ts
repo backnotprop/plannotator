@@ -181,6 +181,28 @@ describe("createMachinePulls", () => {
     expect(after[0]!.board!.pulls).toHaveLength(1);
   });
 
+  test("after a write whose answer never came: the PR's state as that machine's board says now; unreadable now, none", async () => {
+    let state: InboxPull["state"] = "open";
+    let down = false;
+    const link = {
+      id: B,
+      state: "online",
+      list: { marks: ["pulls"] },
+      async request(route: string) {
+        if (down) throw new Error("connection refused");
+        if (route === "pulls") return Response.json({ pulls: [pull("northwind/api", 7, { state })], links: {}, projects: {}, cards: {}, hosts: [] });
+        return Response.json({ judgments: {} });
+      },
+    } as unknown as PeerLink;
+    let clock = 0;
+    const pulls = createMachinePulls({ peers: () => [link], now: () => new Date(Date.UTC(2026, 10, 14, 10, 0, clock++)) });
+    await pulls.lists(false);
+    state = "merged";
+    expect(await pulls.stateThere(link, "github.com/northwind/api#7")).toBe("merged");
+    down = true;
+    expect(await pulls.stateThere(link, "github.com/northwind/api#7")).toBeNull();
+  });
+
   test("unlinked: nothing of its board stays", async () => {
     const b = peer(B);
     let linked = [b.link];

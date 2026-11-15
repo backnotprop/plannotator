@@ -29,7 +29,7 @@ import { inOverlay, isComposingKey, isEditableTarget, keyTarget, modalOpen } fro
 import { inboxPrBoardShortcuts } from '../shortcuts/prBoard.shortcuts';
 import { ChecksMark, checksLabel } from './ChecksMark';
 import { BoxMark, boxState, SelectBox } from './SelectBox';
-import { cantMergeLine, confirmWords, mergeHint, mergePlan, notMergedLine, refusedLine, type MergePlan } from './bulkMerge';
+import { cantMergeLine, confirmWords, farMergeLine, mergeHint, mergePlan, notMergedLine, refusedLine, type MergePlan } from './bulkMerge';
 import { CLOSE_UNDO_MS, doneLine, runningWords, toastLead, type BulkVerb, type RunOutcome } from './bulkClose';
 import type { InboxToastModel } from '../components/Toast';
 import { SheetTable, type TableSection } from './SheetTable';
@@ -670,7 +670,8 @@ export function SheetPage(props: SheetPageProps) {
       Close {pickedPulls.length}
     </button>
   );
-  const hint = live.at === 'confirm' ? confirmWords(plan.merge.length, phone) : live.at === 'idle' ? mergeHint(plan) : null;
+  const far = live.at === 'confirm' ? farMergeLine(plan.merge, props.model?.machines) : null;
+  const hint = live.at === 'confirm' ? `${confirmWords(plan.merge.length, phone)}${far ? ` ${far}` : ''}` : live.at === 'idle' ? mergeHint(plan) : null;
   const mergeNote = hint && (
     <span className="ib-prs-mnote" id={live.at === 'confirm' ? confirmId : undefined} data-pr-merge-hint="">
       {hint}
