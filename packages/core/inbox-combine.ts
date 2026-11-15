@@ -46,7 +46,7 @@ export interface InboxCombineAgent {
   thread?: string;
   /** The project of the picked thread it wrote in last. */
   project?: string;
-  /** When it last wrote in a picked thread: what tells apart two agents that read the same (`inboxCombineAgentTwin`). */
+  /** When it last wrote in a picked thread: what first tells apart two agents that read the same (`inboxCombineAgentApart`). */
   wrote_at?: string;
   /** How many of the picked threads it wrote in. */
   threads: number;
@@ -64,10 +64,39 @@ export function inboxCombineAgentLabel(agent: InboxCombineAgent, all: readonly I
   return `${agent.name} · ${twin && !agent.title && agent.thread ? agent.thread : part}`;
 }
 
-/** Another of the agents still reads the same as this one. */
-export function inboxCombineAgentTwin(agent: InboxCombineAgent, all: readonly InboxCombineAgent[]): boolean {
+/**
+ * What the line under an agent's name adds to tell it from the others whose name reads the same: when it last wrote
+ * (`when` formats it), then its project, then the end of its session id ("session 3f9a"), each only while another of
+ * them still matches everything before it. None for an agent whose name no other has. Two such agents never get the
+ * same parts: at the first of these where they differ, both say it. There is no machine step: the agents of one
+ * Combine are all on the machine holding its threads.
+ */
+export function inboxCombineAgentApart(agent: InboxCombineAgent, all: readonly InboxCombineAgent[], when: (iso: string) => string): string[] {
   const label = inboxCombineAgentLabel(agent, all);
-  return all.some((a) => a.session !== agent.session && inboxCombineAgentLabel(a, all) === label);
+  const same = all.filter((a) => inboxCombineAgentLabel(a, all) === label);
+  const steps: ((a: InboxCombineAgent) => string | undefined)[] = [
+    (a) => (a.wrote_at ? `last wrote ${when(a.wrote_at)}` : undefined),
+    (a) => a.project,
+    (a) => `session ${sessionMark(a.session, same)}`,
+  ];
+  const parts: string[] = [];
+  let rest = same.filter((a) => a.session !== agent.session);
+  for (const step of steps) {
+    if (rest.length === 0) break;
+    const mine = step(agent);
+    if (mine && rest.some((a) => step(a) !== mine)) parts.push(mine);
+    rest = rest.filter((a) => step(a) === mine);
+  }
+  return parts;
+}
+
+/** The fewest last characters of `session` (four or more) that no other of `among` ends with. */
+function sessionMark(session: string, among: readonly InboxCombineAgent[]): string {
+  for (let n = 4; n < session.length; n++) {
+    const end = session.slice(-n);
+    if (!among.some((a) => a.session !== session && a.session.endsWith(end))) return end;
+  }
+  return session;
 }
 
 /** What `GET /api/inbox/combine` answers. With `threads=`: who can be asked; always the Combines worth showing. */

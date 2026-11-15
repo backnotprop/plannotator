@@ -9,7 +9,7 @@
  */
 import { useEffect, useId, useState, type KeyboardEvent } from 'react';
 import type { InboxCombineAgent, InboxCombineRecord, InboxListRow } from '@plannotator/core/inbox-types';
-import { INBOX_COMBINE_WORDS_MAX, inboxCombineAgentLabel, inboxCombineAgentTwin, inboxTidyWords } from '@plannotator/core/inbox-types';
+import { INBOX_COMBINE_WORDS_MAX, inboxCombineAgentApart, inboxCombineAgentLabel, inboxTidyWords } from '@plannotator/core/inbox-types';
 import { formatCount, plural, whenTime } from '@plannotator/core/inbox-format';
 import { combineApi } from '../combineApi';
 import { HostMark } from '../icons';
@@ -118,7 +118,7 @@ export function CombineDialog({ rows, machines = NO_MACHINES, onClose, onStarted
                     <b dir="auto">{nameOf(agent)}</b>
                     <small>
                       {agent.threads} of these
-                      {agent.wrote_at && inboxCombineAgentTwin(agent, agents) ? ` · last wrote ${whenTime(agent.wrote_at)}` : ''}
+                      {inboxCombineAgentApart(agent, agents, (iso) => whenTime(iso)).map((part) => ` · ${part}`).join('')}
                       {machineName ? ` · ${machineName}` : ''}
                     </small>
                   </span>

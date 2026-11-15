@@ -283,6 +283,25 @@ test.skipIf(!hasDom)('two agents that read the same are told apart by when they 
   expect(sub('ses_z')).toBe('1 of these');
 });
 
+test.skipIf(!hasDom)('two agents that read the same and last wrote the same minute are told apart by project, then by their session', async () => {
+  const at = '2026-11-14T23:42:00.000Z';
+  const codex = (session: string, project: string) => ({ session, host: 'codex', name: 'Codex', title: 'Release notes 0.29', project, wrote_at: at, threads: 1 });
+  const agents = [codex('019a-0000-1111-aaaa', 'plannotator'), codex('019a-0000-2222-aaaa', 'plannotator'), codex('019a-0000-3333-bbbb', 'docs-site')];
+  answers = (url) => (url.includes('/combine') ? { serverSession: 's', agents, combines: [] } : {});
+  host = document.body.appendChild(document.createElement('div'));
+  root = createRoot(host);
+  act(() => root!.render(<div className="pn-inbox"><CombineDialog rows={[row('a'), row('b')]} onClose={() => {}} onStarted={() => {}} /></div>));
+  await settle();
+  const line = (session: string) => {
+    const el = document.querySelector(`[data-combine-agent="${session}"]`)!;
+    return `${el.querySelector('b')!.textContent} / ${el.querySelector('small')!.textContent}`;
+  };
+  expect(line('019a-0000-1111-aaaa')).toBe('Codex · Release notes 0.29 / 1 of these · plannotator · session 1-aaaa');
+  expect(line('019a-0000-2222-aaaa')).toBe('Codex · Release notes 0.29 / 1 of these · plannotator · session 2-aaaa');
+  expect(line('019a-0000-3333-bbbb')).toBe('Codex · Release notes 0.29 / 1 of these · docs-site');
+  expect(new Set(agents.map((a) => line(a.session))).size).toBe(3);
+});
+
 test.skipIf(!hasDom)('a row in a Combine still waiting says “Combining…”, and draws again when it settles', () => {
   draw(SECTIONS({ b: { combining: true } }));
   const before = rowEl('b');

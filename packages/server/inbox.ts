@@ -244,7 +244,7 @@ import {
   piSessionOutdated,
 } from "./inbox-restart";
 import { createInboxCompose, INBOX_UPLOAD_SWEEP_MS } from "./inbox-compose";
-import { INBOX_CROSS_SITE_BODY, INBOX_MACHINE_PULL_WINDOW_ONLY_BODY, isCrossSiteRequest, isWindowRequest } from "./inbox-cross-site";
+import { INBOX_CROSS_SITE_BODY, INBOX_MACHINE_PULL_WINDOW_ONLY_BODY, INBOX_MACHINE_WINDOW_ONLY_BODY, isCrossSiteRequest, isWindowRequest } from "./inbox-cross-site";
 import { createInboxLaunch } from "./inbox-launch";
 import { createInboxCodexAccount } from "./inbox-codex-account";
 import type { LaunchHost, LaunchHostContext } from "./inbox-launch-host";
@@ -326,7 +326,7 @@ import { createInboxDebugLog } from "./inbox-debug-log";
 import { createInboxDevices, DOOR_PREFIX, MACHINE_PLATFORM, type InboxDoorCaller } from "./inbox-devices";
 import { createInboxMachines, type InboxMachines, type MachineFrame, type MachineLinkTimings } from "./inbox-machines";
 import { mergePullBoards } from "./inbox-machine-pulls";
-import { replyIsStale } from "./inbox-outbox";
+import { forwardsNow, replyIsStale } from "./inbox-outbox";
 import type { PairingProbes } from "./inbox-pairing-checks";
 import { createInboxRelay, readRelayFile, relayUrl as defaultRelayUrl } from "./inbox-relay";
 import { createInboxCloudGate } from "./inbox-cloud-gate";
@@ -5272,6 +5272,15 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         }
         const span = activitySpanOf(url);
         return json(perfPhase("activity", () => store.activity({ ...span, projectId: projectFilterOf(url) })));
+      }
+      // From another machine a Combine, and a Tidy with the person's words, start only from a press in a window there
+      // (`forwardsNow`): its Inbox checked that and marked it; this door trusts its token, never a bare call.
+      if (req.method === "POST" && (path === "/api/inbox/combine" || path === "/api/inbox/tidy")) {
+        const door = fromDeviceDoor.get(req);
+        if (door && !door.window) {
+          const body = path === "/api/inbox/tidy" ? ((await req.clone().json().catch(() => null)) as Record<string, unknown> | null) : null;
+          if (forwardsNow(path.slice("/api/inbox/".length), body ?? {})) return json(INBOX_MACHINE_WINDOW_ONLY_BODY, 403);
+        }
       }
       // Tidy: who it would ask (GET) and asking them (POST).
       const tidied = await tidy.route(req, url);
