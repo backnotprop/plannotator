@@ -1250,6 +1250,7 @@ export interface SearchRequest {
   group?: InboxSearchGroupId | null;
   offset?: number;
   limit?: number;
+  tags?: readonly string[] | null;
   /** The project open in the list: a tie boost, never a filter. */
   current?: string | null;
   /** Newest first instead of best match (sent only for `newest`, so a best-match request is what it was). */
@@ -1406,9 +1407,8 @@ export function uploadFile(
 /** Search (read only). `signal` aborts a request a newer query replaced. */
 export async function searchInbox(request: SearchRequest, signal?: AbortSignal): Promise<SearchModel> {
   const query = new URLSearchParams({ q: request.q });
-  if (request.project) query.set('project', request.project);
-  if (request.status) query.set('status', request.status);
-  if (request.from) query.set('from', request.from);
+  for (const key of ['project', 'status', 'from'] as const) if (request[key]) query.set(key, request[key]!);
+  for (const tag of request.tags ?? []) query.append('tag', tag);
   if (request.group) query.set('group', request.group);
   if (request.offset) query.set('offset', String(request.offset));
   if (request.limit) query.set('limit', String(request.limit));
@@ -1994,16 +1994,16 @@ export const inboxApi = {
   pullRiskModels: (provider: string, signal?: AbortSignal) => get<InboxPullRiskModels>(inboxUrl(`/pulls/risk/models?provider=${encodeURIComponent(provider)}`), signal),
   pullDetails: (key: string, signal?: AbortSignal) => get<InboxPullDetailsAnswer>(pullUrl('/pulls/details', key), signal),
   pullMediaSizes: (key: string, signal?: AbortSignal) => get<{ sizes: Record<string, { width: number; height: number }> }>(pullUrl('/pulls/media/sizes', key), signal),
-  /** One layer's diff, or the stack's from its base up to that layer (a PR the last list named). */
-  pullDiff: (key: string, scope: InboxPullDiffScope, signal?: AbortSignal) =>
-    get<InboxPullDiffAnswer>(pullUrl('/pulls/diff', key, `scope=${scope}`), signal),
+  /** One layer's diff, or a compare up to that layer (a PR the last list named): `from` is a range's lowest layer, or a commit. */
+  pullDiff: (key: string, scope: InboxPullDiffScope, signal?: AbortSignal, from?: string) =>
+    get<InboxPullDiffAnswer>(pullUrl('/pulls/diff', key, `scope=${scope}${from ? `&from=${encodeURIComponent(from)}` : ''}`), signal),
   /** New review's Pull request link: what the pasted link is. */
   reviewLink: (ref: string, signal?: AbortSignal) => get<InboxReviewLinkAnswer>(inboxUrl(`/reviews/link?ref=${encodeURIComponent(ref)}`), signal),
   /** New review's change summary for a project's local changes. */
   reviewChanges: (project: string, changes: InboxReviewChanges, signal?: AbortSignal) => get<InboxReviewChangesAnswer>(inboxUrl(`/reviews/changes?project=${encodeURIComponent(project)}&changes=${changes}`), signal),
   /** One changed file's whole text at both ends of that diff, for its expand arrows, while it is the blobs (`old`, `new`) the patch on screen names. */
-  pullFile: (key: string, scope: InboxPullDiffScope, path: string, pin: PatchBlobIds | { head: string }, signal?: AbortSignal) =>
-    get<InboxFileContents>(pullUrl('/pulls/file', key, `scope=${scope}&path=${encodeURIComponent(path)}&${'head' in pin ? `head=${pin.head}` : `old=${pin.oldId}&new=${pin.newId}`}`), signal),
+  pullFile: (key: string, scope: InboxPullDiffScope, path: string, pin: PatchBlobIds | { head: string }, signal?: AbortSignal, from?: string) =>
+    get<InboxFileContents>(pullUrl('/pulls/file', key, `scope=${scope}${from ? `&from=${encodeURIComponent(from)}` : ''}&path=${encodeURIComponent(path)}&${'head' in pin ? `head=${pin.head}` : `old=${pin.oldId}&new=${pin.newId}`}`), signal),
   /** The person started a PR's (a stack's open layers') review thread with an agent: `threadId` is the thread the review picker (or compose's New thread) just started for it. */
   pullOwner: (keys: readonly string[], threadId: string, ask?: 'guide' | 'custom') => post<{ ok: true }>(inboxUrl('/pulls/owner'), { keys: [...keys], thread_id: threadId, ...(ask ? { ask } : {}) }),
   /** Before a hand-off is sent: may these PRs go to an agent in `projectId`? (404 `pull_unknown`, 422 another project's.) */

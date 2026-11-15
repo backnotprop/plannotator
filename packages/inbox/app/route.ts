@@ -10,12 +10,13 @@ import { sheetLayoutOf, type SheetLayout } from '../prs/tableModel';
 import { pullFilterOf, type PullFilter } from '../pulls/model';
 import { boardInitiativeOf, boardViewOf, type BoardView } from '../board/model';
 import { shapeReviewAtOf, type ReviewAt } from '../shape/review';
+import { viewScopeOf, type PullViewScope } from '../pulls/viewScope';
 
 export interface Route {
   page: 'inbox' | 'settings' | 'whats-new' | 'drafts' | 'tour' | 'board' | 'reviews' | 'shapes' | 'prs' | 'artifacts';
   /**
    * Pull requests (`#prs`, Code review on; approval "inbox-pr-dashboard"): Open or Merged (`&state=merged`), a stack's
-   * page (`&stack=`, a layer's key), a PR opened from it (`&layer=`, `&scope=stack`), and `&from=sheet` when the PR was
+   * page (`&stack=`, a layer's key), a PR opened from it (`&layer=`; `&scope=stack`, `&range=` or `&since=`, `PullViewScope`), and `&from=sheet` when the PR was
    * opened from a tile (its Back is the Sheet, not the stack's page), `&from=reviews` when it was opened from the board in
    * Reviews' right pane (its Back is Reviews). On a desktop the board lives in Reviews' pane: a Back that would go to
    * the Sheet goes to Reviews there; `#prs` itself is a phone's way in (Reviews' "Pull requests" row).
@@ -31,7 +32,7 @@ export interface Route {
    */
   stack?: string | null;
   layer?: string | null;
-  scope?: 'layer' | 'stack';
+  scope?: PullViewScope;
   /**
    * A thread opened from Reviews (`#reviews&thread=…`): the same thread and pane as the Inbox's (`page: 'inbox'`), with
    * Reviews' list beside it and its filter kept. It doesn't move threads: a different list on the same thread.
@@ -155,7 +156,7 @@ export function routeOf(fullHash: string): Route {
       prsLayout: sheetLayoutOf(params.get('layout')),
       stack,
       layer,
-      scope: layer && params.get('scope') === 'stack' ? 'stack' : 'layer',
+      scope: layer ? viewScopeOf(params) : 'layer',
       prsFrom: layer && params.get('from') === 'sheet' ? 'sheet' : layer && params.get('from') === 'reviews' ? 'reviews' : 'stack',
     };
   }
@@ -172,7 +173,7 @@ export function routeOf(fullHash: string): Route {
       thread: null,
       stack,
       layer,
-      scope: layer && params.get('scope') === 'stack' ? 'stack' : 'layer',
+      scope: layer ? viewScopeOf(params) : 'layer',
       new: params.has('new'),
       ...systemRouteOf(params),
     };
