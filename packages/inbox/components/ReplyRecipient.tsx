@@ -26,6 +26,11 @@ import { TagStack } from './TagPicker';
 import { Tip } from './Tip';
 import { markRecipientList } from '../pageMarks';
 
+/** The longest title the pill shows; a longer one leaves the pill its fallback name, and the title goes to its hover. */
+const PILL_TITLE_MAX = 26;
+const NO_LABELS: SessionLabels = {};
+const NO_FOLDER = () => '';
+
 function Face({ tile, full, short, ended }: { tile: ReactNode; full: string; short: string; ended: boolean }) {
   return (
     <>
@@ -47,10 +52,7 @@ function Face({ tile, full, short, ended }: { tile: ReactNode; full: string; sho
   );
 }
 
-/** The longest title the pill shows; a longer one leaves the pill its fallback name, and the title goes to its hover. */
-const PILL_TITLE_MAX = 26;
-const NO_LABELS: SessionLabels = {};
-const NO_FOLDER = () => '';
+const QUIET: Record<RecipientRow['state'], string | null> = { live: null, ended: 'ended', reader: 'Not woken', old: 'Update' };
 
 export function ReplyRecipient({
   rows,
@@ -140,7 +142,8 @@ export function ReplyRecipient({
     <div ref={markRecipientList} className="ib-tg-menu ib-rpick" id={listId} data-recipient-list="" role="group" aria-label="Who gets this reply" onMouseDown={(event) => event.preventDefault()}>
       {rows.map((row) => {
         const on = chosenIds.includes(row.session);
-        const { name, title, agent, quiet } = named.get(row.session)!;
+        const { title, agent } = named.get(row.session)!;
+        const quiet = QUIET[row.state];
         return (
           <div key={row.session} className="ib-rpick-row" data-recipient-row={row.session} data-on={on ? '' : undefined}>
             <button type="button" className="ib-rpick-name" disabled={row.alone === false} onClick={() => onOnly(row)}>
@@ -148,8 +151,8 @@ export function ReplyRecipient({
                 <HostMark host={row.host} agent={row.session} />
               </span>
               <span className="ib-rpick-ol">
-                <span className="ib-rpick-l" dir="auto" title={title ? name : undefined}>
-                  {name}
+                <span className="ib-rpick-l" dir="auto" title={title ? nameOf(row) : undefined}>
+                  {nameOf(row)}
                 </span>
                 <span className="ib-rpick-d" dir="auto">
                   {agent && `${agent} · `}

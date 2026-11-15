@@ -84,7 +84,8 @@ export function PhoneReplyRecipient({
         <div className="ib-sheet-list" role="listbox" aria-label={TITLE} aria-multiselectable>
           {rows.map((row) => {
             const on = chosenIds.includes(row.session);
-            const named = names.get(row.session)!;
+            const title = titleOf(row);
+            const named = names.get(row.session) ?? { name: title ?? row.label, detail: undefined };
             return (
               <SheetRow
                 key={row.session}
