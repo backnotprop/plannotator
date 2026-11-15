@@ -130,8 +130,10 @@ test('the keyboard: Shift+F10 on a focused row opens the menu, Escape and Tab gi
   // Focus moves into the menu; the arrows walk its items.
   await expect(menu(page)).toBeFocused();
   await page.keyboard.press('ArrowDown');
-  // Star thread leads (approval "inbox-pinned-threads"), then Add to Priority, Add tag (approval "inbox-thread-tags"), Copy thread and Copy link.
-  await expect(page.locator('[data-row-action="pin"]')).toBeFocused();
+  // Select leads (approval "inbox-multi-select"), then Star thread, Add to Priority, Add tag, Copy thread and Copy link.
+  await expect(menu(page).getByRole('menuitem', { name: 'Select' })).toBeFocused();
+  await page.keyboard.press('ArrowDown');
+  await expect(menu(page).getByRole('menuitem', { name: 'Star thread' })).toBeFocused();
   await page.keyboard.press('ArrowDown');
   await expect(page.locator('[data-row-action="priority-add"]')).toBeFocused();
   await page.keyboard.press('ArrowDown');
