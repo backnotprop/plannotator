@@ -155,7 +155,9 @@ export function replyIsStale(messages: readonly InboxMessage[], seenThroughSeq: 
  * - `forge` writes to GitHub or GitLab as that machine's own gh / glab (a PR's
  *   close, reopen or merge): never held, sent only while online, and only from
  *   a press in this Inbox's window. The forge is asked first there, so a second
- *   copy is refused in the forge's words ("It is already closed.").
+ *   copy is refused in the forge's words ("It is already closed."). A review
+ *   thread's PRs tied there (`pulls/owner`) go the same way; the window sends
+ *   it right after the thread's start.
  * - `now` is a write sent only while online, never held, and only from a press
  *   in this Inbox's window (`forwardsNow`; the other machine refuses it at its
  *   door without the window's mark). Two uses: a file a message names,
@@ -201,6 +203,7 @@ export const DOOR_WRITES: Readonly<Record<string, "append" | "set" | "file" | "f
   "POST pulls/close": "forge",
   "POST pulls/reopen": "forge",
   "POST pulls/merge": "forge",
+  "POST pulls/owner": "forge",
   // The PR page's look at a linked machine's PR (approval "inbox-pr-dashboard"): kept there; the newer look wins.
   "POST pulls/looked": "set",
   // A file a linked machine's agent message names, attached there when the person comments on it (approval "inbox-file-refs-open-viewer").

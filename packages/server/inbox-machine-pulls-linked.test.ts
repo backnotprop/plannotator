@@ -6,7 +6,8 @@
  * no Origin) or a machine token without the window's mark reaching the other machine's gh; a merge losing the head the
  * person saw or the second click on the way; a key the other machine does not list written there; Undo going anywhere
  * but the machine that closed; a forge write held for an asleep
- * machine; an asleep machine's rows dropped; a thread's PRs on the other machine not read or changed there; a look at
+ * machine; an asleep machine's rows dropped; a thread's PRs on the other machine not read or changed there; a review
+ * thread's PRs (`pulls/owner`) kept anywhere but the thread's machine, or by a call without the window's mark; a look at
  * the other machine's PR ("Changed since you looked") not kept there or not read back; the board of an Inbox with no
  * machine linked changing at all.
  *
@@ -251,6 +252,13 @@ describe("the PR board across linked machines (mark `pulls`)", () => {
       const read = (await (await fetch(`${at(a.port)}/api/inbox/m/${bId}/threads/${thread}/pulls`)).json()) as Json;
       expect((read.pulls as Json[]).length).toBe(1);
       expect(a.store.message(thread)).toBeNull();
+      // Start review thread ties B's PRs to B's thread on B: only with A's window's mark, answered by B's
+      // route (B knows the thread; its project has no repository here, so B refuses the PR in its own words).
+      expect((await press(a.port, `/api/inbox/m/${bId}/pulls/owner`, { keys: [API7], thread_id: thread }, false)).status).toBe(403);
+      const ownerAtDoor = await fetch(`${at(b.port)}/api/inbox/device/pulls/owner`, { method: "POST", headers: { Authorization: `Bearer ${linkOnA.token}`, "Content-Type": "application/json" }, body: JSON.stringify({ keys: [API7], thread_id: thread, idempotency_key: "door-owner" }) });
+      expect(ownerAtDoor.status).toBe(403);
+      const owned = (await (await press(a.port, `/api/inbox/m/${bId}/pulls/owner`, { keys: [API7], thread_id: thread })).json()) as Json;
+      expect(owned.error).toBe("thread_id: a thread in a project of that pull request's repository.");
 
       // B asleep: its rows stay as last read; a close says plainly it cannot run, and nothing waits to run later.
       await client.close();
