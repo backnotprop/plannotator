@@ -59,7 +59,7 @@ async function settle() {
   for (let i = 0; i < 5; i++) await act(async () => await new Promise((resolve) => setTimeout(resolve, 0)));
 }
 
-async function open(row: InboxScheduledRow): Promise<HTMLElement> {
+async function open(row: InboxScheduledRow, known: InboxScheduledRow | null = row): Promise<HTMLElement> {
   serve(row);
   const host = document.createElement('div');
   host.className = 'pn-inbox';
@@ -68,7 +68,7 @@ async function open(row: InboxScheduledRow): Promise<HTMLElement> {
   const noop = () => {};
   act(() =>
     root!.render(
-      <ScheduledEditor id={row.id} row={row} version={0} block={null} defaults={{ agent: null, projectId: null }} phone={false} narrow={false} onClose={noop} onCreated={noop} onOpenThread={noop} />,
+      <ScheduledEditor id={row.id} row={known} version={0} block={null} defaults={{ agent: null, projectId: null }} phone={false} narrow={false} onClose={noop} onCreated={noop} onOpenThread={noop} />,
     ),
   );
   await settle();
@@ -116,4 +116,29 @@ test.skipIf(!hasDom)('a cron under 15 minutes apart: the refusal under the row, 
   expect(host.querySelector('[data-schedule-refused]')).toBeNull();
   const saved = calls.find((c) => c.method === 'POST' && c.path === '/api/inbox/scheduled/sch_custom');
   expect(saved?.body?.schedule).toEqual({ cron: '0 */2 * * *', tz: 'America/New_York' });
+});
+
+test.skipIf(!hasDom)('Custom picked after an edit starts from the schedule as it is now, so nothing older is saved', async () => {
+  const host = await open(scheduledRow('sch_weekday'));
+  const time = host.querySelector<HTMLInputElement>('input[aria-label="Time"]')!;
+  const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+  await act(async () => {
+    setValue.call(time, '07:30');
+    time.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await settle();
+  await act(async () => host.querySelector<HTMLButtonElement>('[data-schedule-kind]')!.click());
+  await settle();
+  await act(async () => document.querySelector<HTMLElement>('[data-schedule-option="custom"]')!.click());
+  await settle();
+  expect(host.querySelector<HTMLInputElement>('input[aria-label="Cron"]')?.value).toBe('30 7 * * 1-5');
+  const saves = calls.filter((c) => c.method === 'POST' && c.path === '/api/inbox/scheduled/sch_weekday').map((c) => c.body?.schedule);
+  expect(saves.at(-1)).toEqual({ cron: '30 7 * * 1-5', tz: 'America/New_York' });
+});
+
+test.skipIf(!hasDom)('opened by a link before the list is read: the next run is the saved schedule\'s, not a new one\'s default', async () => {
+  preview = (schedule) => ({ ...OK, next_run: (schedule as { cron?: string }).cron === '16 2 * * *' ? '2026-11-16T07:16:00.000Z' : OK.next_run });
+  const host = await open(scheduledRow('sch_digest', { schedule: { cron: '16 2 * * *', tz: 'America/New_York' } }), null);
+  expect(calls.filter((c) => c.path === '/api/inbox/scheduled/preview').at(-1)?.body?.schedule).toEqual({ cron: '16 2 * * *', tz: 'America/New_York' });
+  expect(host.querySelector('[data-schedule-next]')?.textContent).toMatch(/at 2:16\sAM EST$/);
 });

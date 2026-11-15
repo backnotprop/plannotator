@@ -5,6 +5,7 @@
  */
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Menu } from '@base-ui/react/menu';
+import { INBOX_HOST_NAMES } from '@plannotator/core/inbox-types';
 import type { InboxScheduledPreview, InboxScheduledRow, InboxScheduledRunSummary, InboxScheduledSchedule } from '@plannotator/core/inbox-scheduled-types';
 import { formatCount } from '../format';
 import { Icon } from '../icons';
@@ -114,16 +115,19 @@ export function ScheduledEditor(props: EditorProps) {
 
   const [preview, setPreview] = useState<InboxScheduledPreview | null>(null);
   const asked = useRef(0);
+  const previewed = useRef<string | null>(null);
   const checkSchedule = async (schedule: InboxScheduledSchedule): Promise<boolean> => {
     const n = ++asked.current;
+    previewed.current = JSON.stringify(schedule);
     const answer = await scheduledApi.preview(schedule).catch(() => null);
     if (n !== asked.current) return false;
     setPreview(answer);
     return answer?.ok === true;
   };
+  // The schedule shown, however it came (opened, read in after a link, changed elsewhere): its next run.
   useEffect(() => {
-    void checkSchedule(draft.schedule);
-  }, []);
+    if (JSON.stringify(draft.schedule) !== previewed.current) void checkSchedule(draft.schedule);
+  }, [draft.schedule]);
 
   const creating = useRef(false);
   const save = async (change: Partial<ScheduledFields>, enabled?: boolean) => {
@@ -164,7 +168,7 @@ export function ScheduledEditor(props: EditorProps) {
   };
   const runs = detail?.runs ?? [];
   const threadName = record?.thread_id ? (record.thread_name ?? record.name) : null;
-  const agentName = block?.launch?.agents.find((a) => a.agent === draft.agent)?.name ?? draft.agent;
+  const agentName = block?.launch?.agents.find((a) => a.agent === draft.agent)?.name ?? INBOX_HOST_NAMES[draft.agent] ?? draft.agent;
   const running = record?.state === 'running';
   const name = draft.name || (isNew ? 'New scheduled thread' : '');
 

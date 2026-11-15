@@ -120,7 +120,8 @@ export function ScheduleRow({ schedule, preview, onChange }: { schedule: InboxSc
         <KindMenu
           kind={parts.kind}
           onKind={(kind) => {
-            const typed = cron || scheduleCron(schedule);
+            // Custom starts from the schedule as it is now, not the cron the row opened with.
+            const typed = schedule && 'cron' in schedule ? schedule.cron : cron || scheduleCron(schedule);
             setCustom(kind === 'custom');
             if (kind === 'custom') setCron(typed);
             set(kind === 'custom' ? { cron: typed } : {}, kind);
