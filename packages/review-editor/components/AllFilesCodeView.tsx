@@ -762,7 +762,7 @@ const FLUSH_FILES_CSS = `
   :host([data-trailing-unread]) [data-separator][data-separator-last] { display: none; }
 `;
 
-const WARM_UP_REST_MS = 1000;
+const WARM_UP_REST_MS = 400;
 const WARM_UP_STEP_MS = 120;
 // How long revealing a comment on a closed line waits for its file's whole text.
 const REVEAL_WAIT_MS = 30_000;
