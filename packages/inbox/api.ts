@@ -76,6 +76,8 @@ import type { InboxFileContents, InboxPullDetailsAnswer, InboxPullDiffAnswer, In
 import { InboxApiError, readJson } from './apiError';
 import { cardUrl, learnCards, type CardsModel } from './cardsWire';
 export type { CardsModel } from './cardsWire';
+import type { InboxAskChat } from './askChatWire';
+export type { InboxAskChat } from './askChatWire';
 import { gzipped, wholeBody } from './apiBody';
 import { referencedFileUrl, type OpenInFileCode, type OpenInFileScope, type ReferencedFileScope, type ReferencedFileView } from './openInWire';
 export { InboxApiError };
@@ -2310,18 +2312,6 @@ export interface InboxAskPosted {
   running?: boolean;
 }
 
-/** One row of the chat list (`GET /api/inbox/ask`). */
-export interface InboxAskChat {
-  thread_id: string;
-  subject: string | null;
-  project: string;
-  host: string | null;
-  /** When anything last happened in the chat. */
-  at: string;
-  unread: boolean;
-  answering: boolean;
-}
-
 /** One note the dialog asked to add: written, or why not. */
 export type InboxNoteResult = { ok: true; agent: InboxNoteAgentId; action: string; path: string | null } | { ok: false; agent: InboxNoteAgentId; reason: string; path: string | null };
 
@@ -2339,8 +2329,10 @@ export type InboxEvent =
   | { seq: number; kind: 'steps'; id: string; thread_id: string }
   /** A Board initiative made, renamed or deleted (approval "board-initiatives"): silent; the Board reads its cards again. Absent from an older Inbox. */
   | { seq: number; kind: 'initiative'; id: string; initiative: InboxInitiative }
-  /** A thread's PRs changed (approval "inbox-pr-binding"): silent; the window reads that thread's PRs and the list again. A scheduled thread changed: its id only. Absent from an older Inbox. */
-  | { seq: number; kind: 'thread_pull'; id: string; thread_id: string } | { seq: number; kind: 'scheduled'; id: string };
+  /** A thread's PRs changed (approval "inbox-pr-binding"): silent; the window reads that thread's PRs and the list again. Absent from an older Inbox. */
+  | { seq: number; kind: 'thread_pull'; id: string; thread_id: string }
+  /** A scheduled thread changed (scheduled/store.ts reads the list again): its id only. Absent from an older Inbox. */
+  | { seq: number; kind: 'scheduled'; id: string };
 
 /** A thread's attachments as they are now, and the person's annotations waiting for a Send. */
 export interface AttachmentsModel {

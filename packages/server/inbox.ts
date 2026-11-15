@@ -3827,7 +3827,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const onCapabilities = (changed?: "code_review" | "shape" | "float_drafts" | "mark_read_warning" | "scheduled_threads") => {
           syncShapes();
           const floats = floatDraftsOn();
-          const frame = { board: { on: boardOn() }, steps: { on: stepsOn() }, bro: { on: broOn() }, ...(floats || changed === "float_drafts" ? { float_drafts: { on: floats } } : {}), ...(changed === "mark_read_warning" ? { mark_read_warning: { on: markReadWarningOn() } } : {}), ...heldSwitch("code_review", codeReviewOn(), changed === "code_review"), ...heldSwitch("shape", shapeOn(), changed === "shape"), ...systemWire(), ...chapterDiagramsWire(), ...(scheduledCap.on() || changed === "scheduled_threads" ? scheduledCap.wire() : {}) };
+          const frame = { board: { on: boardOn() }, steps: { on: stepsOn() }, bro: { on: broOn() }, ...(floats || changed === "float_drafts" ? { float_drafts: { on: floats } } : {}), ...(changed === "mark_read_warning" ? { mark_read_warning: { on: markReadWarningOn() } } : {}), ...heldSwitch("code_review", codeReviewOn(), changed === "code_review"), ...heldSwitch("shape", shapeOn(), changed === "shape"), ...systemWire(), ...chapterDiagramsWire() };
+          // Scheduled threads: while on, and to the save that turned them off.
+          if (scheduledCap.on() || changed === "scheduled_threads") Object.assign(frame, scheduledCap.wire());
           send(`event: capabilities\ndata: ${JSON.stringify(frame)}\n\n`);
         };
         if (windowId) capabilityListeners.add(onCapabilities);
@@ -4365,7 +4367,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   let launchReady = false;
   /** A Codex thread a launch of this Inbox started (not deleted): only its host takes the thread's items. */
   const launchedCodex = (session: string) =>
-    [...store.launchedRoots(), ...store.scheduledRunLaunches()].some((m) => m.launch?.agent === INBOX_CODEX_HOST && !m.launch.deleted_at && m.to?.host === INBOX_CODEX_HOST && m.to.session === session);
+    [...store.launchedRoots(), ...store.scheduledRunLaunches()].some(
+      (m) => m.launch?.agent === INBOX_CODEX_HOST && !m.launch.deleted_at && m.to?.host === INBOX_CODEX_HOST && m.to.session === session,
+    );
   // T3 Code on this machine: both T3 wakes send through its `t3` command first, with no sign-in (inbox-t3-local.ts).
   const t3Local = createT3Local({ environment: agentEnvironment });
   // Which way each reply to a T3 thread went, one debug-log line each (`t3_route`); the log is made below.
@@ -4611,7 +4615,15 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     saved: () => options.scheduled ?? loadConfig().inboxScheduledThreads,
     save: (on) => saveConfig({ inboxScheduledThreads: on }),
     // An Inbox under a test (the sandbox, or bun test's NODE_ENV) writes its login item under its own home and runs nothing.
-    login: options.scheduledLogin ?? inboxLoginItem({ platform: process.platform, home: underTest ? join(dataDir, "agents-home") : homedir(), argv: selfCommand, dataDir, run: underTest ? async () => ({ code: 0 }) : execLoginCommand }),
+    login:
+      options.scheduledLogin ??
+      inboxLoginItem({
+        platform: process.platform,
+        home: underTest ? join(dataDir, "agents-home") : homedir(),
+        argv: selfCommand,
+        dataDir,
+        run: underTest ? async () => ({ code: 0 }) : execLoginCommand,
+      }),
     changed: (on) => {
       if (on) scheduled.switchedOn();
       scheduled.sync();
@@ -6152,8 +6164,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       }
       // Scheduled threads (inbox-scheduled-routes.ts): the window's list, editor, Run now and Stop.
       if (path === "/api/inbox/scheduled" || path.startsWith("/api/inbox/scheduled/")) {
-        if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
-        const answer = await scheduledRoute(req, path, { scheduled, on: scheduledCap.on, launchOn: () => launch.settingsState().enabled, serverSession, json, readBody });
+        if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
+          return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
+        }
+        const launchOn = () => launch.settingsState().enabled;
+        const answer = await scheduledRoute(req, path, { scheduled, on: scheduledCap.on, launchOn, serverSession, json, readBody });
         if (answer) return answer;
       }
       // Voice dictation (inbox-voice.ts). A read here can start a `codex`, so another site's is refused too.

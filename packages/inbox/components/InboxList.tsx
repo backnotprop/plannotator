@@ -5,7 +5,7 @@ import { shortcutAria, useShortcutAria, withShortcut } from '../shortcuts/hint';
 import { inboxSearchShortcuts } from '../search/searchShortcut';
 import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
 import { inboxAppShortcuts } from '../shortcuts/app.shortcuts';
-import { inboxHasUnsent, inboxRowArchived, type InboxListGroupId, type InboxListRow, type InboxListSection } from '@plannotator/core/inbox-types';
+import type { InboxListGroupId, InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
 import { inboxSnoozeWhen } from '@plannotator/core/inbox-snooze';
 import { agentName, formatCount, fullTime, shortTime, whenTime } from '../format';
 import { reaskRowLine, sentRowLine, undeliveredLabel } from '../deliveryLine';
@@ -23,7 +23,9 @@ import { ListColumnEdge } from '../shell/ListColumnEdge';
 import { SidebarTrigger, useSidebar } from '../shell/sidebar';
 import { canMarkUnread, offersRowMarkRead } from '../markRead';
 import { useNarrowerThan } from '../narrower';
+import { inboxHasUnsent, inboxRowArchived } from '@plannotator/core/inbox-types';
 import { ScheduledBadge, scheduledLook, scheduledOf, ScheduledTile, useScheduled } from '../scheduled/rowLook';
+import { HeldNoticeLine } from './HeldNoticeLine';
 import { DraftLabel, rowUnsent, unsentWords } from './DraftLabel';
 import { ThreadRowMenu } from './RowMenu';
 import type { RowMenuAction } from '../rowMenu';
@@ -469,33 +471,6 @@ function liveCount(rows: readonly InboxListRow[]): number {
   let n = 0;
   for (const row of rows) if (!inboxRowArchived(row)) n += 1;
   return n;
-}
-
-/**
- * The held list's "N new" line: one line at every width (the owner, 2026-11-02: "1 new in appnotes · Users/ramos/…"
- * wrapped onto two). "N new in" and Show never shrink; the project's name takes the rest and is cut with "…", and
- * while it is cut the whole line is the tooltip.
- */
-function HeldNoticeLine({ count, project, onShow }: { count: number; project: string | null; onShow: () => void }) {
-  const full = project ? `${count} new in ${project}` : `${count} new`;
-  return (
-    <Tip content={full} when={(button) => isTextCut(button.querySelector('.ib-notice-proj'))}>
-      <button type="button" className="ib-notice" onClick={onShow} data-inbox-notice="">
-        <Icon name="inbox" size={15} />
-        <span className="ib-notice-text">
-          <span className="ib-notice-n">{project ? `${count} new in` : `${count} new`}</span>
-          {/* A space for the line's text and accessible name; the flex gap draws it. */}
-          {project && ' '}
-          {project && (
-            <bdi className="ib-notice-proj" data-notice-project={project}>
-              {project}
-            </bdi>
-          )}
-        </span>
-        <b>Show</b>
-      </button>
-    </Tip>
-  );
 }
 
 /**
@@ -1455,7 +1430,8 @@ export function InboxList(props: InboxListProps) {
   const sendNow = useCallback((row: InboxListRow) => latest.current.onSendNow?.(row), []);
   const unstar = useCallback((row: InboxListRow) => latest.current.onUnstar?.(row), []);
   // A row's time reads "8:22 PM" today and "Oct 19" after midnight: a new day renders every row again.
-  const day = new Date().toDateString(); const scheduledRows = useScheduled().rows;
+  const day = new Date().toDateString();
+  const scheduledRows = useScheduled().rows;
   /** One row, the same in both views; `drawn` is the group the held list draws it in. */
   const renderRow = (row: InboxListRow, drawn: InboxListGroupId) => (
     <ListRow

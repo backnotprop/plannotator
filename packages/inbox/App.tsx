@@ -11,11 +11,9 @@
  */
 
 import { pullReviewLinks, threadPullsBus } from './threadPulls/model';
-import { inboxRefTransport } from './refTransport';
 import { markInboxPage } from './pageMarks';
 import { perfFirstList, perfStart, perfThreadOpenDropped, perfThreadOpenStart, perfThreadReadLanded, perfUntilNextFrame } from './perfMarks';
-import { createInboxCodeHighlightWorker } from './codeHighlightWorker';
-import { inboxUrl, machineOf, selfMachineId } from './inboxUrl';
+import { machineOf, selfMachineId } from './inboxUrl';
 import type { ActionMark } from './components/ActionChecklist';
 import { isMootNoteRefusal } from './actionSaves';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type ReactNode } from 'react';
@@ -43,13 +41,11 @@ import { WarmWindowParts } from './lazyParts';
 import { TooltipProvider, TOOLTIP_SKIP_DELAY_MS } from '@plannotator/ui/components/Tooltip';
 import { TIP_DELAY_MS } from './components/Tip';
 import { configStore } from '@plannotator/ui/config';
-import { configurePlannotatorUI } from '@plannotator/ui/configure';
 import { selectionToolbarShowing } from './selectionToolbar';
 import { storage } from '@plannotator/ui/utils/storage';
 import { setSidebarSectionOpen } from './sidebarSections';
-import type { SkillCatalogEntry } from '@plannotator/ui/utils/skillReferences';
 import { reloadSkillCatalog } from '@plannotator/ui/utils/skillCatalog';
-import type { InboxDecision, InboxHealth, InboxListRow, InboxListSection, InboxQuestion, InboxThread, InboxAgentRow, InboxAgentsModel, InboxPull, InboxPullStack, InboxTourChange, InboxComposeLaunch, InboxReaction, InboxRestartAgents } from '@plannotator/core/inbox-types';
+import type { InboxDecision, InboxHealth, InboxListRow, InboxListSection, InboxQuestion, InboxThread } from '@plannotator/core/inbox-types';
 import { DecisionMode } from './decisions/DecisionMode';
 import { DecisionPill } from './decisions/entry';
 import {
@@ -61,8 +57,6 @@ import {
   setPageSession,
   subscribeInboxEvents,
   inboxAskOn,
-  REF_CARD_READ_MS,
-  signalWithin,
   type InboxEvent,
   type ListModel,
   type MachineView,
@@ -105,7 +99,6 @@ import {
 } from './settle';
 import { plural, shortAgentName, tildePath } from './format';
 import { copyMarkdown, threadMarkdown } from './copyMarkdown';
-import { inboxImageSrcResolver } from './images';
 import { shellLine, type ConnectContext } from './harnesses';
 import { Sidebar } from './components/Sidebar';
 import { UsagePeek } from './components/Usage';
@@ -144,7 +137,8 @@ import { useSystemProjects } from './system/projects';
 import { systemDropped, systemEscapeTo, systemKept } from './system/route';
 import { feedbackCopiedToast, feedbackPrompt } from './feedbackPrompt';
 import { connectLineNews, noteQuestionRows } from './agents';
-import { ScheduledPage, useScheduledOn } from './scheduled/ScheduledPage';
+import type { InboxAgentRow, InboxAgentsModel, InboxPull, InboxPullStack, InboxTourChange } from '@plannotator/core/inbox-types';
+import { ScheduledRoute, useScheduledOn } from './scheduled/ScheduledPage';
 import { SettingsPage } from './components/Settings';
 import { createStepsBus } from './steps/useThreadSteps';
 import { threadBoardCard } from './steps/model';
@@ -163,7 +157,7 @@ import { oneTimeDialogShownThisLoad, snoozeIntroBlockedBy, useSnoozeIntro } from
 import { useLineLatch, claimRevealOnce, listTallerThanScreen, listViewRevealClear, listViewRevealLeaveCounts, listViewRevealMayClaim, idleClockArmed, noteRevealThread, openThreadAsks, revealArmed, broRevealIdleCounts, broRevealLeaveCounts, grillMeTipIdleCounts, grillMeTipLeaveCounts, REVEAL_TIMES, starRevealLeaveCounts, useBoardReveal, useLineReveal, useStepsReveal, useStarReveal } from './reveal';
 import { useIdleClock } from './idleClock';
 import { launchTipDue } from './compose/launchTip';
-import type { InboxRevealId, CardsModel, DraftView, InboxStorageModel, ThreadModel, UpdateCheckFailing } from './api';
+import type { InboxRevealId } from './api';
 import { type RevealFeature, turnOnFromReveal as turnOnRevealFeature } from './revealTurnOn';
 import { namesCapability, withCapabilities } from './capabilities';
 import { openSnoozeMenu } from './snoozeIntroTry';
@@ -213,9 +207,9 @@ import { ListColumnEdge } from './shell/ListColumnEdge';
 import { backBy, backTo, settleLanding } from './history';
 import { sameScreenAnyView } from './fileView';
 import { fileEntryOp, fullExitFile, fullFromSide, pageBackPastSwitch, type FrameMove } from './fullScreenOrigin';
-import { adoptSavedTheme, inboxServerSync, useInboxThemePick } from './theme';
+import { adoptSavedTheme, useInboxThemePick } from './theme';
 import { adoptSavedDiffOptions } from './diffOptions';
-import { adoptSavedTextSize, applyRememberedTextSize } from './textSize';
+import { adoptSavedTextSize } from './textSize';
 import { adoptSavedFavicon, chooseFavicon, useInboxFavicon, useInboxFaviconBadgeHref, useInboxFaviconHref } from './faviconChoice';
 import { adoptSavedReactions, hearReactionsEvent, onSavedReactionsFailed, reactionsReadMark } from './reactions';
 import type { SettingsSection } from './settingsRoute';
@@ -267,7 +261,9 @@ import { useComposerOpener } from './compose/openComposer';
 import { COMPOSE_CLONE_EVENT, composeActions, composeTargets, hostLabel, lastLaunchAgent, launchHistory, projectCanStart, projectPlusOn, SCRATCH_PICK, type ComposeAction, type ComposeCloneRequest } from './compose/model';
 import { machineLaunchesKept } from './compose/useMachineLaunches';
 import { reviewBoxPulls } from './compose/reviewBox';
+import type { CardsModel, DraftView, InboxStorageModel, ThreadModel, UpdateCheckFailing } from './api';
 import { NO_RESTART_AGENTS, restartAgentsOf } from './restartAgents';
+import type { InboxComposeLaunch, InboxReaction, InboxRestartAgents } from '@plannotator/core/inbox-types';
 import { reactionSpeech } from './components/ReactionTray';
 import { inboxTabCount, setAppBadge, useTabCount } from './tabCount';
 import { pageOffersUpdates, pageOffersWhatsNew, sidebarUpdateNotice, updateForPage } from './updateNotice';
@@ -301,73 +297,8 @@ import { hashOf, currentHash, writeRoute } from './app/writeRoute';
 import { TOUR_ENDED_STATE, settleTourEntry, settleOldExperimental, settleMovedSettings, stripStrayMsg, stripClickSignal, REVIEWS_AFTER_STORE_MS, REVIEWS_AFTER_STORE_MAX_MS, settleReviewsAlias } from './app/boot';
 import { closeTo, covering, listCovered, rowElement, tourPageInFront, focusAfterOpen, SETTINGS_LATE_MS, FIRST_RUN_AGENTS_REFRESH_MS, FIRST_RUN_AGENTS_MIN_GAP_MS, platformOf, replyInProgress, listIntroHeldBack } from './app/focus';
 export { THREAD_READ_RETRY_MS, THREAD_READ_TIMEOUT_MS } from './app/constants';
-
-// The Inbox has no /api/config and no browser-agent tools: settings stay in
-// the page's own cookies, except the theme, which goes to config.json `theme`
-// through the Inbox's settings route so plan review follows it (theme.ts).
-// WebMCP is off.
-// No image uploads either: a comment's image would need an upload route the
-// Inbox does not have, so the composer says so instead of posting nowhere.
-// The text size this browser last showed, on the document before the first render (textSize.ts).
-applyRememberedTextSize();
-
-configurePlannotatorUI({
-  serverSync: inboxServerSync,
-  // ui's own hover text (annotation panel and toolbar, question cards, links to attachments) as ui's Tooltip,
-  // never a native title (the owner, 2026-10-17).
-  componentTooltips: true,
-  // A digit-only #186379 in a message is a PR or issue of the project's repo, not a colour (#1932).
-  digitHexIssueRefs: true,
-  // An owner/repo#123 links even in a project with no git origin (no repo of its own to link bare #123 into):
-  // agents are told to write that form for another repo's PR or issue. github.com until the first list read, then
-  // the host most projects use (defaultRefHost.ts, from api.ts).
-  crossRepoRefsWithoutRepo: true,
-  // ui marks <body data-pn-popout> while a popout is open and <html data-pn-selection-chooser> while the diff's
-  // selection chooser shows; the window's build keys theme.css's and comments.css's body:has() / html:has() on them
-  // (build/inbox-page-marks.ts: each such :has() cost a style pass over the whole page on every DOM change).
-  pageMarks: true,
-  // The selection toolbar's Copy copies rich text, in messages and attached files (#1972).
-  richCopy: true,
-  // The comment box is the small card by the words (approval "inbox-comment-box", round 3; apps/inbox/index.css
-  // imports its sheet). Docked, it spans the pane the words are in and never covers the pane's reply bar or box.
-  commentCard: { pane: '.ib-fullview, [data-attachment-pane], section.ib-pane', foot: '.ib-pfoot, .ib-fcomp, [data-file-foot]' },
-  // A comment closed with words keeps them highlighted, with a "Draft" badge that opens it again.
-  visibleCommentDrafts: true,
-  // On a phone the selection toolbar sits below the selection, clear of iOS's own edit menu, inside the screen,
-  // with thumb-sized buttons (utils/touchToolbarPlacement).
-  touchSelectionToolbar: true,
-  // Hover cards for issue, PR and MR links: the server fetches with this computer's gh or glab, and Bitbucket Cloud
-  // pull requests with the review app's Bitbucket token (ref-cards.ts). Given up after REF_CARD_READ_MS (the card then shows what the Inbox knows), so no read holds a connection for good.
-  refCardBitbucket: true,
-  refCardTransport: inboxRefTransport((href, signal) => {
-    const within = signalWithin(REF_CARD_READ_MS, signal);
-    return fetch(inboxUrl(`/ref?url=${encodeURIComponent(href)}`), { signal: within.signal, headers: { accept: 'application/json' } }).finally(within.done);
-  }),
-  // Images in a message load from the Inbox's per-message route (#1813).
-  imageSrcResolver: inboxImageSrcResolver,
-  // A long thread can hold hundreds of code fences: each is highlighted when it comes near the screen (before it
-  // shows) and the rest in idle time, not all at once when the thread opens (utils/codeHighlight).
-  deferOffscreenCodeHighlight: true,
-  // Their tokens are made in a Web Worker; the page only writes the markup (codeHighlightWorker.ts).
-  codeHighlightWorker: createInboxCodeHighlightWorker(() => import('./codeHighlight.worker?worker&inline').then((module) => new module.default())),
-  webmcp: { enabled: false, namePrefix: 'plannotator.' },
-  // The `/` and `$` skill picker (composers and comments on attached files)
-  // lists this computer's global skills (approval "inbox-skill-references").
-  skillCatalogTransport: async () => {
-    const { skills } = await inboxApi.skills();
-    return Array.isArray(skills) ? (skills as SkillCatalogEntry[]) : [];
-  },
-  // A Send composes ONE skills block for the whole message (skills.ts), so a
-  // comment's `$name` stays plain text in the attachments' feedback.
-  skillReferenceExport: false,
-  // A comment on an attached file rides the person's next reply.
-  skillInstructionsDestination: 'your reply',
-  uploadTransport: {
-    upload: async () => {
-      throw new Error('Images cannot be added to a comment in the Inbox.');
-    },
-  },
-});
+// The document UI's settings for the window, before the first render.
+import './configureUI';
 
 function Inbox() {
   const [route, setRoute] = useState<Route>(() => {
@@ -5613,7 +5544,8 @@ function Inbox() {
         onToggleCookieHost={(next) => void toggleCookieHost(next)}
         landOnExperimental={route.experimental === true}
         onToggleBoard={(next) => void toggleBoard(next)}
-        onToggleSteps={(next) => void toggleSteps(next)} onToggleScheduled={(next) => void toggleScheduled(next)}
+        onToggleSteps={(next) => void toggleSteps(next)}
+        onToggleScheduled={(next) => void toggleScheduled(next)}
         onToggleBro={(next) => void toggleBro(next)}
         onToggleFloatDrafts={(next) => void toggleFloatDrafts(next)}
         onToggleMarkReadWarning={(next) => void toggleMarkReadWarning(next)}
@@ -5897,7 +5829,8 @@ function Inbox() {
         onOpen={(s) => go(s.thread ? { page: 'inbox', project: null, thread: s.thread, shape: s.id } : { page: 'shapes', project: null, thread: null, shape: s.id })}
       />
     );
-  } else if (route.page === 'scheduled') { main = <ScheduledPage openId={route.scheduled ?? null} on={scheduledOn} rows={windowRows} phone={phone} stacked={stack.thread} onOpen={(id, replace) => writeRoute({ page: 'scheduled', project: null, thread: null, scheduled: id }, { replace })} onOpenThread={(thread, msg) => go({ page: 'inbox', project: null, thread, msg: msg ?? null })} onSettings={(section) => go({ page: 'settings', project: null, thread: null, section })} />;
+  } else if (route.page === 'scheduled') {
+    main = <ScheduledRoute route={route} settings={settings} rows={windowRows} phone={phone} stacked={stack.thread} onToast={showToast} />;
   } else if (route.page === 'artifacts') {
     // The Artifacts wall (approval "inbox-artifact-stars"): a tile opens its file or guided review in its thread; Back comes here.
     main = (
@@ -6501,7 +6434,8 @@ function Inbox() {
             onDrafts={() => leave({ page: 'drafts', project: null, thread: null })}
             onArtifacts={() => leave({ page: 'artifacts', project: null, thread: null })}
             // The Board (approval "inbox-board"): a row only while the person has it on; no count (the header has it).
-            onBoard={boardEnabled ? () => leave({ page: 'board', project: null, thread: null }) : undefined} onScheduled={scheduledOn ? () => leave({ page: 'scheduled', project: null, thread: null }) : undefined}
+            onBoard={boardEnabled ? () => leave({ page: 'board', project: null, thread: null }) : undefined}
+            onScheduled={scheduledOn ? () => leave({ page: 'scheduled', project: null, thread: null }) : undefined}
             // Reviews: a row only while Code review is on; its count is the last read's "On you" (read at start and on focus).
             onPulls={pullsShown ? () => leave({ page: 'reviews', project: null, thread: null }) : undefined}
             pullsCount={pullsShown && pulls.reviews ? reviewsOnYou(pulls.reviews) : 0}
