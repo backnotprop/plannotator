@@ -7,11 +7,12 @@
  * reads only its own machine's threads. Threads on two machines, or on a machine that cannot be asked now, are said so
  * and nobody is offered.
  */
-import { useEffect, useId, useState, type KeyboardEvent } from 'react';
+import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
 import type { InboxCombineAgent, InboxCombineRecord, InboxListRow } from '@plannotator/core/inbox-types';
 import { INBOX_COMBINE_WORDS_MAX, inboxCombineAgentApart, inboxCombineAgentLabel, inboxTidyWords } from '@plannotator/core/inbox-types';
 import { formatCount, plural, whenTime } from '@plannotator/core/inbox-format';
 import { combineApi } from '../combineApi';
+import { PressKeys } from '../pressKeys';
 import { HostMark } from '../icons';
 import { isAway, rowMachine, type MachinesModel } from '../machines';
 import { Modal } from './Updates';
@@ -46,7 +47,10 @@ export function CombineDialog({ rows, machines = NO_MACHINES, onClose, onStarted
   const [words, setWords] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
-  const [key] = useState(() => (typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `combine-${Date.now()}-${Math.random()}`));
+  // A double press or a retry after a lost answer starts one Combine; a refusal frees the key for a changed pick.
+  const [keys] = useState(() => new PressKeys('combine'));
+  // Two presses before the button greys out read the same `sending`: this one is set at once.
+  const pressed = useRef(false);
   const ids = rows.map((row) => row.thread_id).join(',');
   useEffect(() => {
     if (blocked) return;
@@ -78,15 +82,18 @@ export function CombineDialog({ rows, machines = NO_MACHINES, onClose, onStarted
   };
   const nameOf = (agent: InboxCombineAgent) => inboxCombineAgentLabel(agent, agents ?? []);
   const combine = async () => {
-    if (!chosen || sending) return;
+    if (!chosen || pressed.current) return;
+    pressed.current = true;
     setSending(true);
     setError(null);
     try {
       const words1 = inboxTidyWords(words);
-      const { combine: record } = await combineApi.start({ thread_ids: rows.map((row) => row.thread_id), session: chosen.session, idempotency_key: key, ...(words1 ? { words: words1 } : {}) }, machine);
+      const { combine: record } = await combineApi.start({ thread_ids: rows.map((row) => row.thread_id), session: chosen.session, idempotency_key: keys.for(), ...(words1 ? { words: words1 } : {}) }, machine);
       onStarted(record, machine);
       onClose();
     } catch (cause) {
+      keys.failed(null, cause);
+      pressed.current = false;
       setSending(false);
       setError(cause instanceof Error ? cause.message : 'The Combine did not start.');
     }

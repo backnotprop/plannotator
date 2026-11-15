@@ -5,6 +5,7 @@ import type { InboxTidyCombine, InboxTidyRun } from '@plannotator/core/inbox-typ
 import { inboxApi } from '../api';
 import { formatCount } from '../format';
 import { Icon } from '../icons';
+import type { PressKeys } from '../pressKeys';
 import { listTargets, readAcross, startAcross, type TidyAcrossAgent, type TidyAcrossPlan } from '../tidyAcross';
 import type { MachinesModel } from '../machines';
 import { machineOf } from '../inboxUrl';
@@ -36,7 +37,7 @@ export interface TidyController {
   /** The last run (within a day), or null. */
   run: InboxTidyRun | null;
   /** Asks the ticked agents, each on its own machine, with the person's own words (approval "inbox-multi-select"). */
-  start: (agents: readonly TidyAcrossAgent[], key: string, words?: string) => Promise<string | null>;
+  start: (agents: readonly TidyAcrossAgent[], key: PressKeys, words?: string) => Promise<string | null>;
   /** A Tidy of picked threads: how many the person picked (the popover's "3 selected"). Absent: the list's or the Board's. */
   picked?: number;
   refresh: () => void;
@@ -150,7 +151,7 @@ export function useTidy(scope: string | null, surface: TidySurface, version: unk
     };
   }, [underway, runAt, refresh, enabled]);
   const start = useCallback(
-    async (agents: readonly TidyAcrossAgent[], key: string, words?: string): Promise<string | null> => {
+    async (agents: readonly TidyAcrossAgent[], key: PressKeys, words?: string): Promise<string | null> => {
       const failed = await startAcross(agents, key, (machine, sessions, partKey) =>
         inboxApi.startTidy({ sessions, idempotency_key: partKey, project: scope, surface, ...(words ? { words } : {}) }, machine),
       );
