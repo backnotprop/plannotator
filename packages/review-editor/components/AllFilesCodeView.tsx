@@ -762,7 +762,7 @@ const FLUSH_FILES_CSS = `
   :host([data-trailing-unread]) [data-separator][data-separator-last] { display: none; }
 `;
 
-const WARM_UP_REST_MS = 400;
+const WARM_UP_REST_MS = 150;
 const WARM_UP_STEP_MS = 120;
 // How long revealing a comment on a closed line waits for its file's whole text.
 const REVEAL_WAIT_MS = 30_000;
@@ -3547,9 +3547,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       disableBackground,
       expandUnchanged,
       ...(opensWholeFiles && { loadDiffFiles: loadWholeFile }),
-      // Pierre turns its rows' pointer events off for 120 ms after each scroll of its root. With the page as the
-      // scroller every page scroll is one, and a stuck header's Viewed or fold button would miss the click that follows.
-      ...(scrollsWithPage && { pointerEventsOnScroll: true }),
+      pointerEventsOnScroll: true,
       enableLineSelection: !readOnly,
       enableGutterUtility: !readOnly,
       hunkSeparators,
