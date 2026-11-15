@@ -338,6 +338,58 @@ describe('GuideViewportProvider window', () => {
     expect(mountedIds()).not.toContain(ids[5]);
   });
 
+  // Guards End on a slow machine: the browser's scroll can stall a frame or two half way. Ending the key's scroll at
+  // the first still frame mounted the files on screen there (inbox-review-jumps.spec.ts, End, in CI).
+  test.skipIf(!hasDom)('End that stalls for two frames half way mounts nothing there, and draws where it ends', async () => {
+    const scroller = await renderInScroller();
+    Object.defineProperty(scroller, 'scrollHeight', { configurable: true, value: 20_000 });
+    const frame = manualFrames();
+    DrivenIntersectionObserver.current!.deliver((id) => ids.slice(0, 5).includes(id));
+    await frame();
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'End' }));
+    await scrollTo(scroller, 9_000);
+    DrivenIntersectionObserver.current!.deliver((id) => ids.slice(18, 22).includes(id));
+    await frame();
+    await frame();
+    await frame();
+    expect(mountedIds()).toEqual(ids.slice(0, 5));
+
+    await scrollTo(scroller, 19_000);
+    DrivenIntersectionObserver.current!.deliver((id) => ids.slice(36).includes(id));
+    await frame();
+    await frame();
+    await frame();
+    expect(mountedIds()).toEqual(expect.arrayContaining(ids.slice(36)));
+    expect(mountedIds()).not.toContain(ids[20]);
+  });
+
+  // Guards End on a busy machine: the observer's news of the files passed half way can arrive after the scroll is over.
+  test.skipIf(!hasDom)('End whose observer still names files it passed mounts none of them at the end', async () => {
+    const scroller = await renderInScroller();
+    Object.defineProperty(scroller, 'scrollHeight', { configurable: true, value: 16_000 });
+    scroller.getBoundingClientRect = () => new DOMRectReadOnly(0, 0, 1_000, 1_000);
+    for (const [index, id] of ids.entries()) {
+      scroller.querySelector<HTMLElement>(`[data-shell="${id}"]`)!.getBoundingClientRect = () => new DOMRectReadOnly(0, index * 400 - scroller.scrollTop, 1_000, 300);
+    }
+    const frame = manualFrames();
+    DrivenIntersectionObserver.current!.deliver((id) => ids.slice(0, 5).includes(id));
+    await frame();
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'End' }));
+    await scrollTo(scroller, 8_000);
+    DrivenIntersectionObserver.current!.deliver((id) => ids.slice(18, 22).includes(id));
+    await frame();
+    await scrollTo(scroller, 15_000);
+    for (let i = 0; i < 4; i++) await frame();
+    expect(mountedIds().filter((id) => ids.slice(18, 22).includes(id))).toEqual([]);
+
+    DrivenIntersectionObserver.current!.deliver((id) => ids.slice(35).includes(id));
+    for (let i = 0; i < 4; i++) await frame();
+    expect(mountedIds()).toEqual(expect.arrayContaining(ids.slice(37)));
+    expect(mountedIds()).not.toContain(ids[20]);
+  });
+
   /** End pressed and its scroll come to rest at the end of a scroll `height()` px tall. */
   async function endPressed(height: () => number) {
     const scroller = await renderInScroller();
