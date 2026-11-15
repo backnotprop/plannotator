@@ -1,0 +1,120 @@
+/**
+ * The `scheduled_thread` tool (docs/agent-guides/inbox-scheduled.md): an agent makes and keeps a scheduled thread
+ * for the person. Served only while the person has scheduled threads on (the MCP context's `scheduledOn`): off, it
+ * is not in tools/list, and a call from a session that listed it before answers `scheduled_threads_off` with
+ * nothing written. What an agent may do is in inbox-scheduled.ts: one it makes arrives off, and the person turns it
+ * on the first time.
+ */
+
+import type { McpServer } from "@modelcontextprotocol/server";
+import * as z from "zod";
+import type { InboxScheduledRow } from "@plannotator/core/inbox-scheduled-types";
+import { InboxError } from "@plannotator/shared/inbox/schema";
+import { INBOX_SCHEDULED_OFF_TEXT, type InboxScheduled, type InboxScheduledBy } from "./inbox-scheduled";
+import { guarded, okComplete, PROJECT_PATH_DESCRIPTION } from "./inbox-mcp-result";
+
+export const SCHEDULED_THREAD_OPS = ["create", "list", "get", "update", "on", "off", "run", "delete"] as const;
+
+export const SCHEDULED_THREAD_DESCRIPTION =
+  "Scheduled threads: a saved prompt an agent on this computer runs on a schedule, every run replying in one Inbox thread. Make one when the person asks for something to happen regularly or at a set time. op: create, list, get, update, on, off, run, delete. One you create arrives off: the person turns it on the first time, in the Inbox; after that you may update, turn it on or off, run and delete it. Runs are at least 15 minutes apart. Pass thread_id: each change posts one line there for the person.";
+
+export interface InboxScheduledMcpContext {
+  /** Whether the person has scheduled threads on, read on every request. Absent: off. */
+  scheduledOn?: () => boolean;
+  scheduled?: () => InboxScheduled | null;
+}
+
+const rowLine = (row: InboxScheduledRow) =>
+  `${row.id} "${row.name}": ${row.state}, ${row.schedule_words}${row.tz_short ? ` (${row.tz_short})` : ""}, ${row.agent} in ${row.folder_shown}${row.next_run ? `, next ${row.next_run}` : ""}${row.approved_at ? "" : ", not yet turned on by the person"}${row.thread_id ? `, thread ${row.thread_id}` : ""}.`;
+
+export function registerInboxScheduledTool(server: McpServer, context: InboxScheduledMcpContext): void {
+  server.registerTool(
+    "scheduled_thread",
+    {
+      title: "Make or change a scheduled thread",
+      description: SCHEDULED_THREAD_DESCRIPTION,
+      inputSchema: z
+        .object({
+          op: z.enum(SCHEDULED_THREAD_OPS),
+          id: z.string().optional().describe("The scheduled thread (sch_…); not for create or list."),
+          name: z.string().optional().describe("A few words the person knows it by, e.g. \"Morning triage\"."),
+          prompt: z.string().optional().describe("What each run is asked, in the person's words, whole."),
+          schedule: z
+            .object({ cron: z.string().optional(), at: z.string().optional(), tz: z.string() })
+            .strict()
+            .nullable()
+            .optional()
+            .describe("{ cron: \"0 9 * * 1-5\", tz: \"America/New_York\" } (5-field cron), { at: \"2026-11-20T17:00\", tz } for once, or null: it runs only when run."),
+          if_missed: z.enum(["run_once", "skip"]).optional().describe("A run missed while the computer slept: run it once when it wakes (default), or skip it."),
+          folder: z
+            .object({ path: z.string().optional(), scratch: z.literal(true).optional() })
+            .strict()
+            .optional()
+            .describe("Where runs work: { path } (default: your project_path), or { scratch: true } for a new folder."),
+          agent: z.string().optional().describe("claude-code, codex, opencode or pi. Default: your own host."),
+          model: z.string().optional(),
+          effort: z.string().optional(),
+          attachments: z.array(z.string()).optional().describe("Full paths of files each run gets."),
+          thread_id: z.string().optional().describe("The thread you are working in: the change line goes there."),
+          project_path: z.string().optional().describe(PROJECT_PATH_DESCRIPTION),
+          agent_session: z.string().optional().describe("Your session id; the `plannotator inbox mcp` shim fills it."),
+          agent_name: z.string().optional().describe("How the person sees you, e.g. \"Claude Code\"."),
+          agent_host: z.string().optional().describe("Your agent host, e.g. claude-code, codex, cursor."),
+        })
+        .strict(),
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+    },
+    async (input) =>
+      guarded(async () => {
+        const scheduled = context.scheduledOn?.() ? context.scheduled?.() : null;
+        if (!scheduled) throw new InboxError("scheduled_threads_off", INBOX_SCHEDULED_OFF_TEXT.replace(/^scheduled_threads_off: /, ""));
+        const by: InboxScheduledBy = {
+          kind: "agent",
+          host: input.agent_host?.trim() || "agent",
+          session: input.agent_session?.trim() || "",
+          name: input.agent_name?.trim() || input.agent_host?.trim() || "Agent",
+          thread_id: input.thread_id?.trim() || null,
+        };
+        if (input.op === "list") {
+          const rows = scheduled.list();
+          return okComplete(rows.length === 0 ? "No scheduled threads." : rows.map(rowLine).join("\n"), { scheduled: rows });
+        }
+        const told = (id: string | null) => (id ? ` The person sees it in thread ${input.thread_id}.` : "");
+        if (input.op === "create") {
+          const folder = input.folder?.scratch ? { scratch: true } : { path: input.folder?.path ?? input.project_path };
+          const { record, told: line } = await scheduled.create({ ...input, folder, agent: input.agent ?? input.agent_host }, by);
+          const row = scheduled.rowOf(record);
+          return okComplete(`Made ${rowLine(row)} It is off until the person turns it on in the Inbox.${told(line)}`, { scheduled: row });
+        }
+        if (!input.id) throw new InboxError("validation_error", `id: required for ${input.op}.`, { field: "id" });
+        switch (input.op) {
+          case "get": {
+            const { scheduled: row, runs } = scheduled.get(input.id);
+            const lines = runs.map((run) => `Run ${run.run}: ${run.started_at}, ${run.outcome.replace("_", " ")}${run.late ? ", late" : ""} (${run.message_id}).`);
+            return okComplete([rowLine(row), `Prompt: ${JSON.stringify(row.prompt)}`, ...lines].join("\n"), { scheduled: row, runs });
+          }
+          case "update": {
+            const folder = input.folder ? (input.folder.scratch ? { scratch: true } : { path: input.folder.path }) : undefined;
+            const { record, told: line } = await scheduled.update(input.id, { ...input, folder }, by);
+            const row = scheduled.rowOf(record);
+            return okComplete(`${line ? "Changed" : "Nothing changed in"} ${rowLine(row)}${told(line)}`, { scheduled: row });
+          }
+          case "on":
+          case "off": {
+            const { record, told: line } = scheduled.setOn(input.id, input.op === "on", by);
+            return okComplete(`${rowLine(scheduled.rowOf(record))}${told(line)}`, { scheduled: scheduled.rowOf(record) });
+          }
+          case "run": {
+            const record = await scheduled.runNow(input.id, by);
+            const row = scheduled.rowOf(record);
+            const started = row.last_run?.outcome !== "didnt_start";
+            return okComplete(`${started ? "Started" : "Could not start"} run ${row.runs} of ${rowLine(row)}${started ? "" : " The thread says why."}`, { scheduled: row });
+          }
+          case "delete": {
+            const { told: line } = scheduled.remove(input.id, by);
+            return okComplete(`Deleted ${input.id}. Its thread and past runs stay.${told(line)}`, { deleted: true });
+          }
+        }
+      }),
+  );
+}

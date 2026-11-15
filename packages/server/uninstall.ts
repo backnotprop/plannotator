@@ -41,6 +41,7 @@ import { inboxStatus, readInboxRegistry, stopInbox } from "@plannotator/shared/i
 import { takeDownInboxTailnet } from "./inbox-devices";
 import { hasTailnetDoorRecord, readTailnetDoorRecord } from "./inbox-tailnet-door";
 import { takeDownInboxTailscale } from "./inbox-tailscale";
+import { inboxLoginItem } from "./inbox-scheduled-login";
 import { agentHomeAllowed, forgetInboxAgents, planInboxAgentRemoval, type AgentEnvironment } from "./inbox-agents";
 import { qwenTrustRemoval, type QwenRevokeResult } from "./inbox-qwen-trust";
 import { hermesPluginInstalled } from "./inbox-hermes";
@@ -488,6 +489,16 @@ export async function runPlannotatorUninstall(
     for (const worker of await stopT3Workers(state.dataDir)) {
       if (worker.state === "stopped") state.removed.push(`Stopped the T3 Code companion for thread ${worker.entry.thread} (pid ${worker.entry.pid})`);
       if (worker.state === "still_running") state.warnings.push(`The T3 Code companion for thread ${worker.entry.thread} (pid ${worker.entry.pid}) did not stop; quit it before deleting ${join(state.dataDir, "t3-code")}.`);
+    }
+  }
+
+  // Scheduled threads' start at login (inbox-scheduled-login.ts): with the binary gone it would fail at every login.
+  const login = inboxLoginItem({ platform: environment.platform, home: environment.homeDir, argv: [], dataDir: state.dataDir, run: async ([command, ...args]) => ({ code: (await environment.runCommand(command!, args)).exitCode }) });
+  if (login.path && existsSync(login.path)) {
+    if (request.dryRun) state.planned.push(`Remove the Inbox's start at login (${login.path})`);
+    else {
+      await login.remove();
+      state.removed.push(`Removed the Inbox's start at login (${login.path})`);
     }
   }
 

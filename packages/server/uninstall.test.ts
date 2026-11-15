@@ -358,6 +358,30 @@ describe("the optional T3 Code connection", () => {
   });
 });
 
+describe("scheduled threads' start at login", () => {
+  test("a plain uninstall removes the macOS login item (unloading it) and the Linux unit (disabling it)", async () => {
+    for (const platform of ["darwin", "linux"] as const) {
+      const fixture = createFixture({ platform });
+      const path = platform === "darwin" ? join(fixture.homeDir, "Library", "LaunchAgents", "ai.plannotator.inbox.plist") : join(fixture.homeDir, ".config", "systemd", "user", "plannotator-inbox.service");
+      writeText(path);
+      const planned = await runPlannotatorUninstall({ purge: false, dryRun: true }, fixture.environment);
+      expect(planned.planned).toContain(`Remove the Inbox's start at login (${path})`);
+      expect(existsSync(path)).toBe(true);
+      const result = await runPlannotatorUninstall({ purge: false, dryRun: false }, fixture.environment);
+      expect(result.removed).toContain(`Removed the Inbox's start at login (${path})`);
+      expect(existsSync(path)).toBe(false);
+      const unload = fixture.commandCalls.find((call) => call.command === (platform === "darwin" ? "launchctl" : "systemctl"));
+      expect(unload?.args.at(-1)).toMatch(platform === "darwin" ? /\/ai\.plannotator\.inbox$/ : /^plannotator-inbox\.service$/);
+    }
+  });
+
+  test("with none, uninstall says nothing of it", async () => {
+    const fixture = createFixture({ platform: "darwin" });
+    const result = await runPlannotatorUninstall({ purge: false, dryRun: false }, fixture.environment);
+    expect([...result.removed, ...result.planned].some((line) => line.includes("start at login"))).toBe(false);
+  });
+});
+
 describe("default uninstall", () => {
   test("removes the optional T3 hook only for the installed binary, preserving other Bash hooks", async () => {
     const fixture = createFixture();

@@ -53,17 +53,18 @@ import type { InboxSearchIndex } from "@plannotator/shared/inbox/search";
 import { isInsideFolder, type InboxProjectRoot } from "./inbox-project-root";
 import { registerInboxSnoozeTool, type InboxSnoozeMcpContext } from "./inbox-mcp-snooze";
 import { quietHint } from "./inbox-mcp-hints";
+import { registerInboxScheduledTool, type InboxScheduledMcpContext } from "./inbox-mcp-scheduled";
 import type { ProjectHostOf } from "./inbox-thread-pulls";
 import { applyAgentPriority, priorityLine, PRIORITY_FIELD } from "./inbox-mcp-priority";
 import { changePullsAsAgent, checkProjectPullRefs, checkPullRefs, pullsActor, pullsChangeText, PULLS_FIELD, registerInboxThreadPullsTool, threadPullsText, type InboxPullsMcpLive } from "./inbox-mcp-pulls";
 
-export const INBOX_MCP_TOOLS = ["send_message", "read_thread", "search", "resolve_message", "snooze_thread", "thread_pulls", "get_guide_brief", "submit_guide", "card", "steps"] as const;
+export const INBOX_MCP_TOOLS = ["send_message", "read_thread", "search", "resolve_message", "snooze_thread", "thread_pulls", "get_guide_brief", "submit_guide", "card", "steps", "scheduled_thread"] as const;
 
 /**
  * The tools this Inbox serves with the Board on (and steps off): every one,
  * except `card` while INBOX_CARD_ACTION_ON holds it back in the code.
  */
-export const INBOX_SERVED_TOOLS: readonly (typeof INBOX_MCP_TOOLS)[number][] = INBOX_MCP_TOOLS.filter((name) => name !== "steps" && (name !== "card" || INBOX_CARD_ACTION_ON));
+export const INBOX_SERVED_TOOLS: readonly (typeof INBOX_MCP_TOOLS)[number][] = INBOX_MCP_TOOLS.filter((name) => name !== "steps" && name !== "scheduled_thread" && (name !== "card" || INBOX_CARD_ACTION_ON));
 
 /**
  * The tools an Inbox serves by default: the Board is off until the person
@@ -74,8 +75,8 @@ export const INBOX_SERVED_TOOLS: readonly (typeof INBOX_MCP_TOOLS)[number][] = I
 export const INBOX_DEFAULT_SERVED_TOOLS: readonly (typeof INBOX_MCP_TOOLS)[number][] = INBOX_SERVED_TOOLS.filter((name) => name !== "card");
 
 /** The tools an Inbox serves for the person's switches, in tools/list order. */
-export function inboxServedTools(switches: { board: boolean; steps: boolean }): (typeof INBOX_MCP_TOOLS)[number][] {
-  return [...(switches.board ? INBOX_SERVED_TOOLS : INBOX_DEFAULT_SERVED_TOOLS), ...(switches.steps ? (["steps"] as const) : [])];
+export function inboxServedTools(switches: { board: boolean; steps: boolean; scheduled?: boolean }): (typeof INBOX_MCP_TOOLS)[number][] {
+  return [...(switches.board ? INBOX_SERVED_TOOLS : INBOX_DEFAULT_SERVED_TOOLS), ...(switches.steps ? (["steps"] as const) : []), ...(switches.scheduled ? (["scheduled_thread"] as const) : [])];
 }
 
 
@@ -254,7 +255,7 @@ export const SEND_ROUTING_FIELDS = {
   agent_host: z.string().optional().describe("Your agent host, e.g. claude-code, codex, cursor."),
 };
 
-export interface InboxMcpContext extends InboxSnoozeMcpContext {
+export interface InboxMcpContext extends InboxSnoozeMcpContext, InboxScheduledMcpContext {
   store: InboxStore;
   /** The Inbox's base URL, `http://localhost:<port>/`. */
   baseUrl: () => string;
@@ -1442,6 +1443,8 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
   if (INBOX_CARD_ACTION_ON && (context.boardOn?.() ?? true)) registerInboxCardTool(server, context);
   // Thread steps (approval "inbox-thread-steps"): packages/server/inbox-mcp-steps.ts. Served only while the person has them on.
   if (context.stepsOn?.()) registerInboxStepsTool(server, context);
+  // Scheduled threads: packages/server/inbox-mcp-scheduled.ts. Served only while the person has them on.
+  if (context.scheduledOn?.()) registerInboxScheduledTool(server, context);
 
   return server;
 }
