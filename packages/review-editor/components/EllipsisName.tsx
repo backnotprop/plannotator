@@ -25,7 +25,7 @@ export const EllipsisName: React.FC<{ text: string; className?: string; title?: 
       data-ellipsis-name={text}
       className={`relative block min-w-0 shrink overflow-hidden whitespace-nowrap [font-variant-ligatures:no-contextual] ${className ?? ''}`}
     >
-      <span aria-hidden="true" className="invisible before:content-[attr(data-full)]" data-full={text} />
+      <span aria-hidden="true" className="invisible pr-0.5 before:content-[attr(data-full)]" data-full={text} />
       <span className="absolute inset-y-0 left-0 whitespace-nowrap" data-ellipsis-shown="">{fitted}</span>
     </span>
   );

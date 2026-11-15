@@ -75,4 +75,19 @@ describe.skipIf(!hasDom)('fitting names to their room', () => {
     expect(tabs[0]!.textContent).toBe('…umber-0.tsx');
     expect(host.querySelector('[data-branch-shown]')!.textContent).toBe('fea…v2-final');
   });
+
+  test('a name cut while its row was narrow is shown whole once the row has room for it', async () => {
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    root = createRoot(host);
+    await act(async () => root!.render(<EllipsisName text="buildFileTree.ts" />));
+    const name = () => host!.querySelector<HTMLElement>('[data-ellipsis-shown]')!.textContent;
+    const resize = (width: number) => act(async () => layout!.resize((element) => (element.matches('[data-ellipsis-name]') ? width : undefined)));
+    await resize(0);
+    expect(name()).toBe('buildFileTree.ts');
+    await resize(60);
+    expect(name()).toBe('…Tree.ts');
+    await resize('buildFileTree.ts'.length * 7 + 2);
+    expect(name()).toBe('buildFileTree.ts');
+  });
 });

@@ -74,7 +74,7 @@ const DirectoryPrefix: React.FC<{ directory: string }> = ({ directory }) => {
       className="relative min-w-0 shrink-[1000] -mr-1 overflow-hidden whitespace-nowrap text-right text-[13px] text-muted-foreground [font-variant-ligatures:no-contextual]"
       data-pane-tab-directory=""
     >
-      <span className="invisible before:content-[attr(data-full)]" data-full={directory} />
+      <span className="invisible pl-0.5 before:content-[attr(data-full)]" data-full={directory} />
       <span className="absolute inset-y-0 right-0 whitespace-nowrap" data-pane-tab-directory-shown="">{fitted}</span>
     </span>
   );
