@@ -1,0 +1,174 @@
+/* Scheduled threads (packages/inbox/scheduled/): the page's table and narrow list, the editor, a thread's run lines and
+   foot mark, and a list row's tile and marks. Everything here is the Inbox's own tokens; no new colours. */
+
+/* The running mark: six dots in two columns that light in turn (the Inbox's ib-dots keyframes). Reduced motion holds
+   them still, three lit. */
+.st-dots { display: inline-grid; grid-template-columns: 3px 3px; grid-template-rows: repeat(3, 3px); grid-auto-flow: column; gap: 2px; width: 8px; height: 13px; flex: none; color: var(--primary); }
+.st-dots i { width: 3px; height: 3px; border-radius: 50%; background: currentColor; opacity: 0.3; animation: ib-dots 1.2s ease-in-out infinite; }
+.st-dots i:nth-child(2) { animation-delay: 0.2s; }
+.st-dots i:nth-child(3) { animation-delay: 0.4s; }
+.st-dots i:nth-child(6) { animation-delay: 0.6s; }
+.st-dots i:nth-child(5) { animation-delay: 0.8s; }
+.st-dots i:nth-child(4) { animation-delay: 1s; }
+@media (prefers-reduced-motion: reduce) {
+  .st-dots i { animation: none; }
+  .st-dots i:nth-child(1), .st-dots i:nth-child(2), .st-dots i:nth-child(6) { opacity: 1; }
+}
+
+.st-link { padding: 0; border: 0; background: none; font: inherit; color: var(--foreground); text-decoration: underline; text-decoration-color: color-mix(in oklch, var(--foreground) 30%, transparent); text-underline-offset: 3px; cursor: pointer; border-radius: 3px; }
+.st-bad { color: var(--ib-badge-stop-fg, var(--destructive)); }
+.st-mut { color: var(--muted-foreground); }
+.st-note { margin: 4px 14px 14px; font-size: var(--ib-fs-13-5, 13.5px); color: var(--muted-foreground); }
+
+/* The page: the list column's head with one New button where the list's menu sits. */
+.st-list .ib-lhead .st-new { margin-left: auto; flex: none; }
+.st-list.st-list-split { flex: none; width: 500px; border-right: 1px solid var(--ib-pane-line); }
+.st-lbody { padding: 0 10px 20px; }
+
+/* The wide table (Name, Run, Runs, Last run, Next run, Created, the menu) and the Off table under it. */
+.st-table { margin: 6px 4px 24px; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; container: st-table / inline-size; }
+.st-cols { display: grid; grid-template-columns: minmax(200px, 2fr) 92px minmax(56px, 0.45fr) minmax(150px, 1.1fr) minmax(110px, 1fr) minmax(56px, 0.5fr) 40px; column-gap: 14px; align-items: center; padding: 0 8px 0 20px; }
+.st-head { height: 44px; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 500; color: var(--muted-foreground); }
+.st-sort { display: inline-flex; align-items: center; gap: 4px; color: var(--foreground); }
+.st-row { height: 52px; border-top: 1px solid var(--border); font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); font-variant-numeric: tabular-nums; white-space: nowrap; cursor: pointer; }
+.st-table-off .st-row:first-child { border-top: 0; }
+.st-row > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.st-row:hover { background: color-mix(in oklch, var(--muted) 45%, transparent); }
+.st-open { display: block; max-width: 100%; padding: 0; border: 0; background: none; font: inherit; font-size: var(--ib-fs-13-5, 13.5px); font-weight: 550; color: var(--foreground); text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; border-radius: 4px; }
+.st-dim { opacity: 0.6; }
+.st-end { justify-self: end; }
+.st-offh { display: flex; align-items: baseline; gap: 8px; margin: 26px 4px 10px; font-size: var(--ib-fs-13, 13px); font-weight: 600; color: var(--foreground); }
+.st-offh .ib-n { font-weight: 500; color: var(--muted-foreground); }
+.st-live { display: inline-flex; align-items: center; gap: 7px; color: var(--foreground); }
+/* A narrower window drops Created, then Next run, so Name and Last run keep their room. */
+@container st-table (max-width: 760px) {
+  .st-cols { grid-template-columns: minmax(160px, 2fr) 84px minmax(48px, 0.45fr) minmax(140px, 1.1fr) minmax(100px, 1fr) 40px; }
+  .st-cols > :nth-child(6) { display: none; }
+}
+@container st-table (max-width: 600px) {
+  .st-cols { grid-template-columns: minmax(140px, 2fr) 84px minmax(48px, 0.45fr) minmax(130px, 1.1fr) 40px; }
+  .st-cols > :nth-child(5) { display: none; }
+}
+
+/* Run and Stop: a quiet bordered button; dimmed on an Off row, where it still runs once. */
+.st-run { display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 11px 0 9px; border: 1px solid var(--border); border-radius: 7px; background: transparent; font: inherit; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 550; color: var(--foreground); cursor: pointer; }
+.st-run svg.ib-ic { width: 12px; height: 12px; stroke-width: 1.9px; }
+.st-run[data-off] { opacity: 0.45; }
+.st-run:hover { background: var(--muted); }
+.st-run.st-run-ic { width: 24px; height: 24px; padding: 0; justify-content: center; }
+.st-stop { width: 9px; height: 9px; border-radius: 2px; background: currentColor; }
+.st-more { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border: 0; background: none; border-radius: 7px; color: var(--muted-foreground); cursor: pointer; }
+.st-more:hover, .st-more[data-popup-open] { background: var(--muted); color: var(--foreground); }
+.st-more svg.ib-ic { width: 15px; height: 15px; }
+
+/* The narrow list beside an open one (and on a phone): Scheduled thread, Runs, Last run. */
+.st-short { padding: 2px 0 20px; }
+.st-scols { display: grid; grid-template-columns: minmax(0, 1fr) 24px 40px 112px 28px; column-gap: 12px; align-items: start; }
+.st-shead { padding: 0 12px; height: 30px; align-content: center; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 500; color: var(--muted-foreground); }
+.st-srow { padding: 9px 12px; border-radius: 8px; cursor: pointer; }
+.st-srow + .st-srow { margin-top: 2px; }
+.st-srow:hover { background: color-mix(in oklch, var(--muted) 45%, transparent); }
+.st-srow[data-selected] { background: var(--ib-sel); }
+.st-sname { min-width: 0; }
+.st-sname .st-open { font-weight: 500; line-height: 20px; }
+.st-when { display: block; font-size: var(--ib-fs-12-5, 12.5px); line-height: 18px; color: var(--muted-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.st-num { font-size: var(--ib-fs-13, 13px); line-height: 20px; color: var(--muted-foreground); font-variant-numeric: tabular-nums; white-space: nowrap; text-align: right; }
+.st-srow .st-more { width: 24px; height: 20px; }
+.st-offh.st-offh-short { margin: 18px 12px 6px; }
+
+/* The editor. */
+.st-body .st-title { display: block; width: 100%; padding: 0; border: 0; background: none; font: inherit; font-size: var(--ib-fs-20, 20px); font-weight: 650; letter-spacing: -0.01em; color: var(--foreground); outline: none; margin-bottom: 8px; }
+.st-body .st-title::placeholder { color: var(--muted-foreground); }
+.st-meta { align-items: center; margin: 0 0 4px; }
+.st-meta .ib-sw { margin-right: 2px; }
+.st-meta > .st-wrap { white-space: normal; }
+.st-group { margin-top: 22px; }
+.st-group > h2 { margin-bottom: 8px; }
+.st-sched { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 10px 8px 12px; min-height: 46px; border: 1px solid var(--border); border-radius: 8px; font-size: var(--ib-fs-13-5, 13.5px); }
+.st-sched > svg.ib-ic { width: 16px; height: 16px; flex: none; color: var(--muted-foreground); }
+.st-pick { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px 0 10px; border: 1px solid var(--border); border-radius: 7px; background: var(--background); color: var(--foreground); font: inherit; font-size: var(--ib-fs-13-5, 13.5px); line-height: 1; white-space: nowrap; cursor: pointer; }
+.st-pick svg.ib-ic { width: 12px; height: 12px; color: var(--muted-foreground); flex: none; }
+.st-pick[data-popup-open] { outline: 2px solid var(--ring); outline-offset: -1px; }
+.st-time { padding: 0 6px 0 8px; }
+.st-cron { width: 14ch; font-family: var(--font-mono, ui-monospace, monospace); cursor: text; }
+.st-w { color: var(--muted-foreground); }
+.st-tz { position: relative; display: inline-flex; align-items: center; height: 28px; padding: 0 4px; border-radius: 6px; }
+.st-tz select { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.st-tz:has(select:focus-visible) { outline: 2px solid var(--ring); outline-offset: 1px; }
+.st-next { margin-left: auto; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); white-space: nowrap; }
+.st-err { margin: 6px 0 2px 2px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--ib-badge-stop-fg, var(--destructive)); }
+.st-echo { margin: 6px 0 2px 2px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
+.st-kinds { min-width: 200px; }
+.st-miss { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 10px; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
+.st-box { position: relative; border: 1px solid var(--border); border-radius: 10px; background: var(--background); padding: 12px 14px 8px; }
+.st-prompt { display: block; width: 100%; min-height: 92px; padding: 0; border: 0; background: none; resize: vertical; font: inherit; font-size: var(--ib-fs-14, 14px); line-height: 22px; color: var(--foreground); outline: none; field-sizing: content; }
+.st-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; margin: 10px -6px 0; padding-top: 8px; border-top: 1px solid var(--border); }
+.st-lbl { font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); margin: 0 4px 0 6px; }
+.st-gh { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 7px; border: 0; border-radius: 6px; background: none; font: inherit; font-size: var(--ib-fs-13, 13px); font-weight: 500; color: var(--foreground); cursor: pointer; }
+.st-gh:hover, .st-gh[data-popup-open] { background: var(--muted); }
+.st-gh svg.ib-ic { width: 11px; height: 11px; color: var(--muted-foreground); }
+.st-sep { width: 1px; height: 14px; background: var(--border); margin: 0 4px; }
+/* New message's pickers, anchored under what opened them here. */
+.st-box .ib-cp-picker.ib-cp-lch { top: calc(100% + 4px); left: 0; right: auto; }
+.st-folder { position: relative; }
+.st-folder .ib-cp-picker.ib-cp-folders { top: calc(100% + 4px); left: 0; width: min(480px, calc(100vw - 48px)); }
+.st-kv { display: grid; grid-template-columns: 72px minmax(0, 1fr); align-items: start; gap: 14px 12px; }
+.st-k { font-size: var(--ib-fs-13-5, 13.5px); color: var(--muted-foreground); line-height: 28px; }
+.st-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.st-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; height: 28px; padding: 0 10px; border: 1px solid var(--border); border-radius: 7px; background: transparent; font: inherit; font-size: var(--ib-fs-13, 13px); color: var(--foreground); }
+button.st-chip { cursor: pointer; }
+.st-chip > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.st-chip svg.ib-ic { width: 14px; height: 14px; color: var(--muted-foreground); flex: none; }
+.st-chip-x { display: inline-flex; padding: 2px; margin-right: -6px; border: 0; background: none; color: var(--muted-foreground); border-radius: 4px; cursor: pointer; }
+.st-path { width: 28ch; outline: none; }
+.st-add { display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 8px; border: 0; background: none; font: inherit; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); cursor: pointer; border-radius: 6px; }
+.st-add:hover { color: var(--foreground); }
+.st-runs-h { display: flex; align-items: baseline; gap: 10px; }
+.st-runs-h .ib-n { font-weight: 500; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
+.st-runs { margin-top: 6px; }
+.st-runrow { display: grid; width: calc(100% + 20px); grid-template-columns: 64px minmax(0, 1fr) auto 14px; align-items: baseline; gap: 10px; height: 36px; align-content: center; padding: 0 10px; margin: 0 -10px; border: 0; border-radius: 7px; background: none; font: inherit; font-size: var(--ib-fs-13-5, 13.5px); color: var(--foreground); text-align: left; cursor: pointer; }
+.st-runrow:hover { background: color-mix(in oklch, var(--muted) 45%, transparent); }
+.st-runrow b { font-weight: 550; }
+.st-runrow > .st-mut:nth-child(3) { font-size: var(--ib-fs-12-5, 12.5px); font-variant-numeric: tabular-nums; }
+.st-runrow svg.ib-ic { color: var(--muted-foreground); }
+.st-all { margin: 6px 0 0 -8px; height: 30px; padding: 0 8px; border: 0; border-radius: 6px; background: none; font: inherit; font-size: var(--ib-fs-13, 13px); font-weight: 500; color: var(--foreground); cursor: pointer; }
+.st-all:hover { background: var(--muted); }
+.st-error { margin-top: 16px; }
+.st-pfoot { display: flex; align-items: center; }
+
+/* A thread's run line: the play mark, the run and a hairline; a click shows its prompt. The skip line is quieter: no
+   mark, regular weight, a fainter colour, no trailing hairline, because nothing ran. */
+.st-line { display: flex; width: 100%; align-items: center; gap: 10px; height: 30px; margin-top: 6px; padding: 0; border: 0; background: none; font: inherit; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 550; color: var(--muted-foreground); font-variant-numeric: tabular-nums; text-align: left; }
+button.st-line { cursor: pointer; border-radius: 4px; }
+button.st-line:hover { color: var(--foreground); }
+.st-line::before, .st-line::after { content: ""; height: 1px; background: var(--ib-hair); }
+.st-line::before { width: 14px; flex: none; }
+.st-line::after { flex: 1; }
+.st-line > svg.ib-ic { width: 14px; height: 14px; stroke-width: 1.7px; margin-right: -3px; flex: none; }
+.st-line > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.st-line.st-skip { font-weight: 400; color: color-mix(in oklch, var(--muted-foreground) 80%, transparent); }
+.st-line.st-skip::after { background: transparent; }
+.st-prompt-shown { margin: 4px 0 10px 34px; font-size: var(--ib-fs-13-5, 13.5px); line-height: 1.55; color: var(--muted-foreground); white-space: pre-wrap; overflow-wrap: anywhere; }
+.st-note.st-unfinished { margin: 0; padding: 12px 0 18px 34px; }
+.st-run-at + .ib-message, .st-run-at + article { border-top: 0; }
+
+/* The Reply row's mark: "Scheduled · next Mon 9:00 AM · Edit", or on another machine's thread, where to manage it. */
+.st-foot-mark { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 8px; margin-left: auto; margin-right: -8px; border: 0; border-radius: 7px; background: none; font: inherit; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); font-variant-numeric: tabular-nums; white-space: nowrap; flex: none; }
+button.st-foot-mark { cursor: pointer; }
+button.st-foot-mark:hover { background: var(--muted); }
+.st-foot-mark svg.ib-ic { width: 14px; height: 14px; stroke-width: 1.7px; }
+.st-foot-mark .st-edit { color: var(--foreground); font-weight: 500; }
+.st-foot-mark.st-far { white-space: normal; }
+
+/* A list row: the play mark in the agent tile, the Running pill and the warn mark. */
+.st-tile { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 6px; flex: none; background: color-mix(in oklch, var(--muted) 85%, var(--foreground) 6%); color: var(--foreground); order: -1; }
+.st-tile svg.ib-ic { width: 12px; height: 12px; stroke-width: 2px; }
+.ib-badge.st-pill { gap: 6px; }
+.ib-badge.st-warn svg.ib-ic { width: 14px; height: 14px; }
+
+@media (max-width: 760px) {
+  .st-list.st-list-split { width: 100%; }
+  .st-kv { grid-template-columns: 1fr; gap: 4px; }
+  .st-next { margin-left: 0; width: 100%; }
+  .st-pfoot .ib-btn { flex: 1; }
+}

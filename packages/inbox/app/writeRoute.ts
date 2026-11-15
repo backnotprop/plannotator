@@ -16,6 +16,7 @@ export function hashOf(route: Route): string {
   else if (route.page === 'whats-new') hash = new URLSearchParams({ 'whats-new': route.version ?? '' }).toString();
   else if (route.page === 'drafts') hash = 'drafts';
   else if (route.page === 'artifacts') hash = route.pinned ? 'artifacts=pinned' : 'artifacts';
+  else if (route.page === 'scheduled') hash = route.scheduled ? `scheduled=${encodeURIComponent(route.scheduled)}` : 'scheduled';
   else if (route.page === 'shapes') hash = route.shape ? `shapes&shape=${encodeURIComponent(route.shape)}` : 'shapes';
   else if (route.page === 'board')
     hash =

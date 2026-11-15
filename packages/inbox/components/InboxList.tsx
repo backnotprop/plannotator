@@ -5,7 +5,7 @@ import { shortcutAria, useShortcutAria, withShortcut } from '../shortcuts/hint';
 import { inboxSearchShortcuts } from '../search/searchShortcut';
 import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
 import { inboxAppShortcuts } from '../shortcuts/app.shortcuts';
-import type { InboxListGroupId, InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
+import { inboxHasUnsent, inboxRowArchived, type InboxListGroupId, type InboxListRow, type InboxListSection } from '@plannotator/core/inbox-types';
 import { inboxSnoozeWhen } from '@plannotator/core/inbox-snooze';
 import { agentName, formatCount, fullTime, shortTime, whenTime } from '../format';
 import { reaskRowLine, sentRowLine, undeliveredLabel } from '../deliveryLine';
@@ -22,7 +22,7 @@ import { ListColumnEdge } from '../shell/ListColumnEdge';
 import { SidebarTrigger, useSidebar } from '../shell/sidebar';
 import { canMarkUnread, offersRowMarkRead } from '../markRead';
 import { useNarrowerThan } from '../narrower';
-import { inboxHasUnsent, inboxRowArchived } from '@plannotator/core/inbox-types';
+import { ScheduledBadge, scheduledLook, scheduledOf, ScheduledTile, useScheduled } from '../scheduled/rowLook';
 import { DraftLabel, rowUnsent, unsentWords } from './DraftLabel';
 import { ThreadRowMenu } from './RowMenu';
 import type { RowMenuAction } from '../rowMenu';
@@ -405,8 +405,8 @@ function FromLine({ row, project, filtered }: { row: InboxListRow; project: stri
     <span className="ib-from">
       <RowAvatar row={row} size={24} />
       {!filtered && <RowProjectMark row={row} />}
-      {!filtered && <RowSlot row={row} session={slotSession(row)} project={project} />}
-      <RowAgents participants={row.participants} agent={rowAgent(row)} />
+      {(!filtered || !!scheduledOf(row)) && <RowSlot row={row} session={slotSession(row)} project={project} />}
+      {scheduledOf(row) ? <ScheduledTile /> : <RowAgents participants={row.participants} agent={rowAgent(row)} />}
     </span>
   );
 }
@@ -426,8 +426,8 @@ function LeadLine({ row, project, filtered, tip = true }: { row: InboxListRow; p
   return (
     <span className="ib-from ib-lead">
       {withProject && <RowProjectMark row={row} />}
-      {withProject && <RowSlot row={row} session={slotSession(row)} project={project} tip={tip} />}
-      <RowAgentTiles participants={row.participants} agent={rowAgent(row)} tip={tip} />
+      {(withProject || !!scheduledOf(row)) && <RowSlot row={row} session={slotSession(row)} project={project} tip={tip} />}
+      {scheduledOf(row) ? <ScheduledTile /> : <RowAgentTiles participants={row.participants} agent={rowAgent(row)} tip={tip} />}
     </span>
   );
 }
@@ -527,7 +527,7 @@ function CountWords({ row, tip = false, wide = false, status = false }: { row: I
 
 /** "Session ended": the session this row's thread would reach has ended (the server's `session_ended`; only a host that can tell). */
 function EndedMark({ row }: { row: InboxListRow }) {
-  if (!row.session_ended) return null;
+  if (!row.session_ended) return <ScheduledBadge row={row} />;
   return (
     <span className="ib-gone ib-rended" data-row-ended="">
       Session ended
@@ -1463,12 +1463,12 @@ export function InboxList(props: InboxListProps) {
   const sendNow = useCallback((row: InboxListRow) => latest.current.onSendNow?.(row), []);
   const unstar = useCallback((row: InboxListRow) => latest.current.onUnstar?.(row), []);
   // A row's time reads "8:22 PM" today and "Oct 19" after midnight: a new day renders every row again.
-  const day = new Date().toDateString();
+  const day = new Date().toDateString(); const scheduledRows = useScheduled().rows;
   /** One row, the same in both views; `drawn` is the group the held list draws it in. */
   const renderRow = (row: InboxListRow, drawn: InboxListGroupId) => (
     <ListRow
       key={row.thread_id}
-      row={row}
+      row={scheduledLook(row, scheduledRows)}
       project={props.projectNames?.get(row.project.id) ?? row.project.name}
       away={!!row.machine && (props.machines?.away.has(row.machine) ?? false)}
       drawn={drawn}

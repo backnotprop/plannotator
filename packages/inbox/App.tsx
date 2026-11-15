@@ -48,7 +48,7 @@ import { storage } from '@plannotator/ui/utils/storage';
 import { setSidebarSectionOpen } from './sidebarSections';
 import type { SkillCatalogEntry } from '@plannotator/ui/utils/skillReferences';
 import { reloadSkillCatalog } from '@plannotator/ui/utils/skillCatalog';
-import type { InboxDecision, InboxHealth, InboxListRow, InboxListSection, InboxQuestion, InboxThread } from '@plannotator/core/inbox-types';
+import type { InboxDecision, InboxHealth, InboxListRow, InboxListSection, InboxQuestion, InboxThread, InboxAgentRow, InboxAgentsModel, InboxPull, InboxPullStack, InboxTourChange, InboxComposeLaunch, InboxReaction, InboxRestartAgents } from '@plannotator/core/inbox-types';
 import { DecisionMode } from './decisions/DecisionMode';
 import { DecisionPill } from './decisions/entry';
 import {
@@ -143,7 +143,7 @@ import { useSystemProjects } from './system/projects';
 import { systemDropped, systemEscapeTo, systemKept } from './system/route';
 import { feedbackCopiedToast, feedbackPrompt } from './feedbackPrompt';
 import { connectLineNews, noteQuestionRows } from './agents';
-import type { InboxAgentRow, InboxAgentsModel, InboxPull, InboxPullStack, InboxTourChange } from '@plannotator/core/inbox-types';
+import { ScheduledPage, useScheduledOn } from './scheduled/ScheduledPage';
 import { SettingsPage } from './components/Settings';
 import { createStepsBus } from './steps/useThreadSteps';
 import { threadBoardCard } from './steps/model';
@@ -162,7 +162,7 @@ import { oneTimeDialogShownThisLoad, snoozeIntroBlockedBy, useSnoozeIntro } from
 import { useLineLatch, claimRevealOnce, listTallerThanScreen, listViewRevealClear, listViewRevealLeaveCounts, listViewRevealMayClaim, idleClockArmed, noteRevealThread, openThreadAsks, revealArmed, broRevealIdleCounts, broRevealLeaveCounts, grillMeTipIdleCounts, grillMeTipLeaveCounts, REVEAL_TIMES, starRevealLeaveCounts, useBoardReveal, useLineReveal, useStepsReveal, useStarReveal } from './reveal';
 import { useIdleClock } from './idleClock';
 import { launchTipDue } from './compose/launchTip';
-import type { InboxRevealId } from './api';
+import type { InboxRevealId, CardsModel, DraftView, InboxStorageModel, ThreadModel, UpdateCheckFailing } from './api';
 import { type RevealFeature, turnOnFromReveal as turnOnRevealFeature } from './revealTurnOn';
 import { namesCapability, withCapabilities } from './capabilities';
 import { openSnoozeMenu } from './snoozeIntroTry';
@@ -266,9 +266,7 @@ import { useComposerOpener } from './compose/openComposer';
 import { COMPOSE_CLONE_EVENT, composeActions, composeTargets, hostLabel, lastLaunchAgent, launchHistory, projectCanStart, projectPlusOn, SCRATCH_PICK, type ComposeAction, type ComposeCloneRequest } from './compose/model';
 import { machineLaunchesKept } from './compose/useMachineLaunches';
 import { reviewBoxPulls } from './compose/reviewBox';
-import type { CardsModel, DraftView, InboxStorageModel, ThreadModel, UpdateCheckFailing } from './api';
 import { NO_RESTART_AGENTS, restartAgentsOf } from './restartAgents';
-import type { InboxComposeLaunch, InboxReaction, InboxRestartAgents } from '@plannotator/core/inbox-types';
 import { reactionSpeech } from './components/ReactionTray';
 import { inboxTabCount, setAppBadge, useTabCount } from './tabCount';
 import { pageOffersUpdates, pageOffersWhatsNew, sidebarUpdateNotice, updateForPage } from './updateNotice';
@@ -4097,8 +4095,9 @@ function Inbox() {
     };
   }, [whatsNewVersion, whatsNewRetry]);
 
-  const { toggleTool, toggleCookieHost, toggleBoard, toggleBro, toggleFloatDrafts, toggleMarkReadWarning, toggleSteps, toggleCodeReview, toggleSystem, toggleChapterDiagrams, toggleShape, toggleExperimental, tailscaleBusy, toggleTailscale, deleteThread, deleteProject } =
+  const { toggleTool, toggleCookieHost, toggleBoard, toggleBro, toggleFloatDrafts, toggleMarkReadWarning, toggleSteps, toggleCodeReview, toggleSystem, toggleChapterDiagrams, toggleShape, toggleScheduled, toggleExperimental, tailscaleBusy, toggleTailscale, deleteThread, deleteProject } =
     useSettingsSaves({ setSettings, setError: setSettingsError, refresh: refreshSettings, adoptStore, readStore, refreshList });
+  const scheduledOn = useScheduledOn(settings);
 
   const projects = latest?.projects ?? [];
   /**
@@ -5619,7 +5618,7 @@ function Inbox() {
         onToggleCookieHost={(next) => void toggleCookieHost(next)}
         landOnExperimental={route.experimental === true}
         onToggleBoard={(next) => void toggleBoard(next)}
-        onToggleSteps={(next) => void toggleSteps(next)}
+        onToggleSteps={(next) => void toggleSteps(next)} onToggleScheduled={(next) => void toggleScheduled(next)}
         onToggleBro={(next) => void toggleBro(next)}
         onToggleFloatDrafts={(next) => void toggleFloatDrafts(next)}
         onToggleMarkReadWarning={(next) => void toggleMarkReadWarning(next)}
@@ -5903,6 +5902,7 @@ function Inbox() {
         onOpen={(s) => go(s.thread ? { page: 'inbox', project: null, thread: s.thread, shape: s.id } : { page: 'shapes', project: null, thread: null, shape: s.id })}
       />
     );
+  } else if (route.page === 'scheduled') { main = <ScheduledPage openId={route.scheduled ?? null} on={scheduledOn} rows={windowRows} phone={phone} stacked={stack.thread} onOpen={(id, replace) => writeRoute({ page: 'scheduled', project: null, thread: null, scheduled: id }, { replace })} onOpenThread={(thread, msg) => go({ page: 'inbox', project: null, thread, msg: msg ?? null })} onSettings={(section) => go({ page: 'settings', project: null, thread: null, section })} />;
   } else if (route.page === 'artifacts') {
     // The Artifacts wall (approval "inbox-artifact-stars"): a tile opens its file or guided review in its thread; Back comes here.
     main = (
@@ -6502,7 +6502,7 @@ function Inbox() {
             onDrafts={() => leave({ page: 'drafts', project: null, thread: null })}
             onArtifacts={() => leave({ page: 'artifacts', project: null, thread: null })}
             // The Board (approval "inbox-board"): a row only while the person has it on; no count (the header has it).
-            onBoard={boardEnabled ? () => leave({ page: 'board', project: null, thread: null }) : undefined}
+            onBoard={boardEnabled ? () => leave({ page: 'board', project: null, thread: null }) : undefined} onScheduled={scheduledOn ? () => leave({ page: 'scheduled', project: null, thread: null }) : undefined}
             // Reviews: a row only while Code review is on; its count is the last read's "On you" (read at start and on focus).
             onPulls={pullsShown ? () => leave({ page: 'reviews', project: null, thread: null }) : undefined}
             pullsCount={pullsShown && pulls.reviews ? reviewsOnYou(pulls.reviews) : 0}
