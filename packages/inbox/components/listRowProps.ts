@@ -5,8 +5,9 @@
  */
 import type { MouseEvent as ReactMouseEvent } from 'react';
 import type { InboxListGroupId, InboxListRow } from '@plannotator/core/inbox-types';
+import { sameTint, type RowTintFields } from '../parts/RowTint';
 
-export interface ListRowProps {
+export interface ListRowProps extends RowTintFields {
   row: InboxListRow;
   /** The row's project as the window names it (`windowProjectNames`; another machine's carries that machine's name). */
   project: string;
@@ -86,6 +87,7 @@ export function sameListRow(a: ListRowProps, b: ListRowProps): boolean {
     a.statusMark === b.statusMark &&
     a.noAgents === b.noAgents &&
     a.noPulls === b.noPulls &&
+    sameTint(a, b) &&
     a.picking === b.picking &&
     a.picked === b.picked &&
     a.onPick === b.onPick &&

@@ -42,13 +42,14 @@ const EMSIGN_ECC_G3_BODY =
 	"jHvrZQnD+JbNR6iC8hZVdyR+EhCVBCyj";
 
 /**
- * Whether a Bun older than 1.4.4 carries the fix anyway: builds such as Pi-Bolt
- * port oven-sh/bun#46300 onto 1.4.3 and keep reporting 1.4.3 (#2914). Their
- * bundled roots no longer hold emSign ECC Root CA - G3. Synchronous and local
- * (string compares over the bundled roots, well under a millisecond); an empty
- * or unreadable store proves nothing.
+ * Whether the runtime carries the fix whatever version it reports: builds such
+ * as Pi-Bolt port oven-sh/bun#46300 onto Bun 1.4.3 and keep reporting 1.4.3
+ * (#2914), and Electron cherry-picks fixes without bumping its Node version.
+ * Their bundled roots no longer hold emSign ECC Root CA - G3. Synchronous and
+ * local (string compares over the bundled roots, well under a millisecond); an
+ * empty or unreadable store proves nothing.
  */
-function bunRootsFixed(roots: readonly string[]): boolean {
+function rootsFixed(roots: readonly string[]): boolean {
 	if (roots.length === 0) return false;
 	return !roots.some((pem) => pem.replace(/-----[^-]+-----|\s/g, "") === EMSIGN_ECC_G3_BODY);
 }
@@ -95,7 +96,10 @@ function bunCompiled(execPath: string): boolean {
  * can't be read). Bun is checked first: it reports a Node-compatible
  * `process.versions.node` but brings its own TLS and root store. A Bun below
  * 1.4.4 whose bundled roots already dropped emSign G3 has the fix ported.
- * `roots` defaults to this runtime's bundled roots, read only for such a Bun.
+ * Electron is judged by its bundled roots, and by its Node version only when
+ * the store is empty or unreadable; its warning directs users to update the
+ * host app. `roots` defaults to this runtime's bundled roots, read only for
+ * such a Bun and for Electron.
  */
 export function runtimeTlsWarning(
 	versions: Partial<Record<string, string>> = process.versions,
@@ -105,13 +109,20 @@ export function runtimeTlsWarning(
 	if (versions.bun) {
 		const bun = parse(versions.bun);
 		if (!bun || atLeast(bun, BUN_FIXED)) return null;
-		if (bunRootsFixed(roots ?? bundledRoots())) return null;
+		if (rootsFixed(roots ?? bundledRoots())) return null;
 		return bunCompiled(execPath)
 			? `Plannotator: this Pi build runs on Bun v${versions.bun}, which is missing the October 2026 TLS fixes (a compromised certificate authority); update Pi to a build with Bun 1.4.4 or later.`
 			: `Plannotator: your Bun v${versions.bun} is missing the October 2026 TLS fixes (a compromised certificate authority); update Bun to 1.4.4 or later.`;
 	}
 	const node = parse(versions.node);
-	if (!node || nodeFixed(node)) return null;
+	if (!node) return null;
+	if (versions.electron) {
+		const store = roots ?? bundledRoots();
+		if (rootsFixed(store)) return null;
+		if (store.length === 0 && nodeFixed(node)) return null;
+		return `Plannotator: this app runs on Electron v${versions.electron} (Node v${versions.node}), which is missing the October 2026 TLS fixes (a compromised certificate authority); update the host app to a build that includes the fixes.`;
+	}
+	if (nodeFixed(node)) return null;
 	return `Plannotator: your Node v${versions.node} is missing the October 2026 TLS fixes (a compromised certificate authority); update to 22.23.4, 24.22.1 or 26.12.1 or later.`;
 }
 

@@ -39,7 +39,7 @@
  * No CORS headers anywhere, so another site cannot read an answer.
  */
 
-import { INBOX_LINKED_MARKS, INBOX_PROMPT_HOSTS, inboxMachineTags, inboxRowsBy, isInboxCombineRun, type InboxRowsBy } from "@plannotator/core/inbox-types";
+import { INBOX_LINKED_MARKS, INBOX_PROMPT_HOSTS, inboxMachineTags, inboxRowsBy, inboxTagColoursOf, isInboxCombineRun, type InboxRowsBy } from "@plannotator/core/inbox-types";
 import { inboxDiffOptionsOf, inboxDiffOptionsSaved, parseInboxDiffOptionsChange } from "./inbox-diff-options";
 import { listIntroAtStart, listIntroDue, listIntroLookPicked } from "./inbox-list-intro";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
@@ -149,6 +149,7 @@ import { inboxSkillsRoute } from "./inbox-skills";
 import { assertTestHome } from "./test-home-guard";
 import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
 import { isInboxPermissionSession } from "@plannotator/core/inbox-permission";
+import { inboxLaunchedWakeOf } from "@plannotator/core/inbox-run-line";
 import { foldCheckoutFolderProjects } from "./inbox-checkout-folders";
 import { combineSuggestions, type InboxAgentWork } from "./inbox-combine-suggestions";
 import { createInboxTidy } from "./inbox-tidy";
@@ -212,6 +213,7 @@ import { createInboxProjectRoots, folderHoldsOtherWork, guessableProjects, isHom
 import { handleFavicon } from "./shared-handlers";
 import { createInboxAttachmentRoutes } from "./inbox-attachments";
 import { createInboxLiveSites, type InboxLiveBridgeSources, type InboxLiveSites } from "./inbox-live";
+import type { WebFraming } from "./inbox-web-prototypes";
 import { createInboxImageCapture, inboxMessageImageRoute, type InboxImageCapture } from "./inbox-message-images";
 import { INBOX_DECISION_EXPORT_ROUTE, inboxDecisionExportRoute } from "./inbox-decision-export";
 import { INBOX_DECISION_POST_ROUTE, postThreadDecisions } from "./inbox-decision-post";
@@ -510,6 +512,7 @@ export interface InboxServerOptions {
   liveIdleMs?: number;
   /** Tests: the live probe's fetch. */
   liveProbeFetch?: typeof fetch;
+  webPrototypeFraming?: (url: URL) => Promise<WebFraming>;
   /**
    * Tests: where the Feedback dialog's send goes (inbox-feedback.ts). Default:
    * `PLANNOTATOR_FEEDBACK_URL`, else the feedback Worker's constant URL.
@@ -1756,7 +1759,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // A linked machine's row loses its `steps_waiting`: this window never shows that machine's checklists.
     // Tags across machines (approval "inbox-thread-tags"): one tag per name over this Inbox and every linked machine that
     // takes tags, and a far row's tags read as those; a row of a machine that does not take them carries none here.
-    const ownTags = store.initiatives().filter((tag) => tag.deleted_at === null);
+    // Each tag with its colour (inbox-tag-colours.ts), merged by name with the linked machines' as the tags are.
+    const ownTags = store
+      .initiatives()
+      .filter((tag) => tag.deleted_at === null)
+      .map((tag) => {
+        const look = store.tagLook(tag.id);
+        return look ? { ...tag, look } : tag;
+      });
     const farTagLists = merged ? machines.tagLists() : [];
     const machineTags = merged ? inboxMachineTags(machines.selfId, ownTags, farTagLists) : null;
     const tagsTaken = new Set(farTagLists.map((list) => list.machine));
@@ -1821,6 +1831,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
        * Merged: one per name across the machines, each with `machines`, its id on every machine that holds it.
        */
       tags: machineTags ? machineTags.tags : ownTags,
+      /** "Show tag colors" and the person's own colours (inbox-tag-colours.ts); merged: over every machine that takes them. Additive. */
+      tag_colours: merged ? inboxTagColoursOf([store.tagColours(), ...machines.tagColourLists()]) : store.tagColours(),
       ...(merged ? { self: machines.selfId, machines: machines.machinesView() } : {}),
       /**
        * Each machine's agents (additive; the Agents section, inbox-agents-list.ts): one group, this Inbox's own; on the
@@ -4048,6 +4060,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // More words in a thread the person started, handed to a session that has
     // seen nothing of it (the person moved them there): read the thread first.
     const continues = store.continuesThread(reply);
+    const launchedWake = inboxLaunchedWakeOf(reply);
     return {
       type: reply.to && !reply.reply_to ? "message" : "reply",
       id: reply.id,
@@ -4062,6 +4075,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       ...(continues && !redirected ? { continues_thread: true } : {}),
       // Send now: the connection delivers it at once, into the running turn when one runs.
       ...(reply.deliver_now_at && sendNow ? { now: true } : {}),
+      // A launched thread's root, to the session its launch started: the wake says the person reads the Inbox
+      // (approval "inbox-launched-agent-note"). Only the root, so only that session's first wake.
+      ...(launchedWake ? { launched: launchedWake } : {}),
       // A thread the person started with no name yet, handed to a session that may name it: the wake asks it to.
       ...(!reply.ack_of && store.canNameThread(reply.thread_id, reply.to?.session ?? recipientOf(reply)) ? { name_thread: true } : {}),
       // The person's 👍 Looks good (amended 2026-10-16): the wake is the one ack line,
@@ -4781,6 +4797,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     bridge: options.liveBridge ?? null,
     idleMs: options.liveIdleMs,
     fetchImpl: options.liveProbeFetch,
+    webFraming: options.webPrototypeFraming,
     // The owner's phone over the tailnet: the prototype relay (inbox-live-relay.ts), mapped on first use.
     tailnet: {
       openRelay: (handlers) => tailscale.openRelay(handlers),
@@ -5226,14 +5243,16 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const titles = { ...(merged ? machines.sessionNames().titles : {}), ...live.titles() };
         // A linked machine's read carries this Inbox's agent faces and given names in its group: they live here
         // (inbox-linked-marks), and that machine's windows show them. This Inbox's own windows read them apart.
-        const faces = fromDeviceDoor.get(req)?.platform === MACHINE_PLATFORM ? agentFacesFile.wire() : null;
+        const door = fromDeviceDoor.get(req);
+        const faces = door?.platform === MACHINE_PLATFORM ? agentFacesFile.wire() : null;
+        const phone = door !== undefined && door.platform !== MACHINE_PLATFORM;
         const agents = faces ? rows.agents.map((group) => ({ ...group, faces: faces.faces, faces_rev: faces.rev })) : rows.agents;
-        const model = { ...rows, agents, session_labels: labels, session_titles: titles };
+        const model = { ...(phone ? phoneList(rows) : rows), agents, session_labels: labels, session_titles: titles };
         // `since` (the window, #2593): only the rows changed since the list it holds (inbox-list-delta.ts); the rest of
         // the model, the labels too, goes as it is now. Without it, as before.
         const since = url.searchParams.get("since");
         if (since === null) return json(model);
-        return json(listVersions.answer(`${projectFilter ?? ""}|${archivedMode}|${merged ? 1 : 0}|${snoozedMode}`, model, since || null));
+        return json(listVersions.answer(`${projectFilter ?? ""}|${archivedMode}|${merged ? 1 : 0}|${snoozedMode}|${phone ? 1 : 0}`, model, since || null));
       }
       // Linked machines (inbox-machines.ts): the forward /api/inbox/m/<machine>/<route>, the machines and the outbox.
       if (path.startsWith("/api/inbox/m/") || path.startsWith("/api/inbox/machines") || path.startsWith("/api/inbox/outbox")) {
@@ -7358,4 +7377,18 @@ function seenFields(body: Record<string, unknown>): { reportAt?: string | null; 
     out.notes = notes.map((note: InboxNoteAutoAdd) => ({ agent: note.agent, path: note.path }));
   }
   return out;
+}
+
+/**
+ * A paired phone's list keeps the keys it has always had (inbox-devices.test.ts pins them): no `tag_colours`. Its rows
+ * take their colours from each tag's `look` on its next list read, and "Show tag colors" off takes the looks away.
+ */
+function phoneList<T extends { tags: readonly object[]; tag_colours: { show: boolean } }>(list: T): Omit<T, "tag_colours"> {
+  const { tag_colours, ...rest } = list;
+  if (tag_colours.show) return rest;
+  const tags = list.tags.map((tag) => {
+    const { look: _look, ...plain } = tag as { look?: unknown };
+    return plain;
+  });
+  return { ...rest, tags } as Omit<T, "tag_colours">;
 }

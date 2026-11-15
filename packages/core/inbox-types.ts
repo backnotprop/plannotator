@@ -46,6 +46,7 @@ export * from "./inbox-cards";
 export * from "./inbox-steps";
 // The Board's initiatives (approval "board-initiatives"), the same way.
 export * from "./inbox-initiatives";
+export * from "./inbox-tag-colours";
 // The surface bridge's messages (the phone, PLAN step S1), the same way.
 export * from "./inbox-surface-bridge";
 // Tidy (the list header's and the Board's ⋮ menu), the same way.
@@ -3317,7 +3318,7 @@ export const INBOX_DRAFT_PASTED_LEAD_MAX = 2;
  * "inbox-multi-select"): a linked machine's window asks this Inbox's sessions to tidy or combine this Inbox's threads,
  * through its door.
  */
-export const INBOX_LINKED_MARKS = ["star", "priority", "agent-face", "agent-name", "take-back", "tags", "cards", "pulls", "tidy", "combine"] as const;
+export const INBOX_LINKED_MARKS = ["star", "priority", "agent-face", "agent-name", "take-back", "tags", "cards", "pulls", "tag-colours", "tidy", "combine"] as const;
 export type InboxLinkedMark = (typeof INBOX_LINKED_MARKS)[number];
 
 /**

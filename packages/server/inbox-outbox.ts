@@ -186,6 +186,8 @@ export const DOOR_WRITES: Readonly<Record<string, "append" | "set" | "file" | "f
   // Undo go to each machine that holds it (approval "inbox-thread-tags").
   "POST threads/:id/tags": "set",
   "POST initiatives/:id": "set",
+  // A tag's colour and "Show tag colors" carry the time the person chose, so a held one lands as of then.
+  "POST tag-colours": "set",
   // A Board card lives on its project's machine (mark `cards`): a move, an edit, a link or a tag puts a state there,
   // and a link already on the card is kept once. The look never moves back; a drop seen stays seen.
   "POST cards/(crd_[^/]+)": "set",

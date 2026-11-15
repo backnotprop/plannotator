@@ -16,6 +16,7 @@ import { LIST_LOOK_OPTIONS, type ListLook, type MenuLookKey } from '../listLook'
 import { THREAD_PANEL_LABEL } from '../threadPanel';
 import { LIST_VIEW_LABEL, LIST_VIEW_OPTIONS, type ListView } from '../listView';
 import { STARRED_ABOVE_LABEL } from '../starredPills';
+import { SHOW_TAG_COLOURS_LABEL } from '../tagColours';
 
 /**
  * Tidy (owner-approved design, 2026-10-28, simplified the same day: "quiet,
@@ -227,6 +228,7 @@ export function TidyMenu({
   view,
   starredAbove,
   onSelect,
+  tagColours,
 }: {
   tidy: TidyController;
   phone: boolean;
@@ -249,6 +251,11 @@ export function TidyMenu({
   starredAbove?: { on: boolean; onChange: (on: boolean) => void };
   /** "Select threads", after Tidy: the list starts picking rows (rowPicks.ts). Absent (the Board, the tour): no item. */
   onSelect?: () => void;
+  /**
+   * "Show tag colors" (tagColours.ts), in the Rows group after the look's checkboxes: off, no row is tinted and no row
+   * names its tag. The same on every linked machine. Absent (an Inbox before tag colours, the Board, the tour): no item.
+   */
+  tagColours?: { on: boolean; onChange: (on: boolean) => void };
 }) {
   const trigger = useRef<HTMLButtonElement>(null);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -335,6 +342,7 @@ export function TidyMenu({
                     {LIST_LOOK_OPTIONS.map((option) => (
                       <MenuCheckbox key={option.key} label={option.label} checked={look[option.key]} onChange={(on) => onLook(option.key, on)} data-list-look={option.key} />
                     ))}
+                    {tagColours && <MenuCheckbox label={SHOW_TAG_COLOURS_LABEL} checked={tagColours.on} onChange={tagColours.onChange} data-tag-colours-option="" />}
                     {onCustomize && (
                       // No icon (the owner, 2026-11-02): its words line up with the checkboxes' labels above it.
                       <Menu.Item className="ib-pmi ib-pmi-noicon" label="Customize rows…" onClick={onCustomize} data-customize-rows="">
