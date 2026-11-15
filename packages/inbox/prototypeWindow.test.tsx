@@ -195,3 +195,59 @@ test.skipIf(!hasDom)('the window opens on the recommended page; ‹ › skip an 
     globalThis.fetch = realFetch;
   }
 });
+
+test.skipIf(!hasDom)("a public page: framed through the Inbox's wrapper with open in a new tab, a whole-page Comment saved on the site, and one line when it refuses frames", async () => {
+  const { prototypePageOf } = await import('./prototypes');
+  const live_sites = [
+    { id: 'liv_00000000000000aa', url: 'https://preview.example.com/a', web: true as const },
+    { id: 'liv_00000000000000bb', url: 'https://preview.example.com/b', web: true as const, framed: false as const },
+  ];
+  const options = ['A', 'B'].map((letter) => ({
+    label: letter,
+    letter,
+    lettered: false,
+    recommended: false,
+    page: prototypePageOf(`https://preview.example.com/${letter.toLowerCase()}`, { live_sites }, '/work'),
+  }));
+  const posted: { url: string; body: { annotation: { type: string; text: string } } }[] = [];
+  const settings = (window as unknown as { happyDOM: { settings: { disableIframePageLoading: boolean } } }).happyDOM.settings;
+  const loadedFrames = settings.disableIframePageLoading;
+  settings.disableIframePageLoading = true;
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (url: string, init?: RequestInit) => {
+    posted.push({ url: String(url), body: JSON.parse(String(init?.body ?? '{}')) });
+    return new Response(JSON.stringify({ annotation: { id: 'x' } }), { headers: { 'Content-Type': 'application/json' } });
+  }) as unknown as typeof fetch;
+  try {
+    await mount(
+      <PrototypeWindow threadId={ID} options={options} start={0} shared={false} picked={[]} readOnly={false} records={[]} attachments={[]} onSaved={() => {}} onPick={() => {}} onClose={() => {}} />,
+    );
+    const frame = host!.querySelector<HTMLIFrameElement>('[data-prototype-web]')!;
+    expect(frame.getAttribute('src')).toBe(`/api/inbox/threads/${ID}/live/liv_00000000000000aa/frame`);
+    expect(host!.querySelector('[data-prototype-open]')!.getAttribute('href')).toBe('https://preview.example.com/a');
+    expect(host!.querySelector('[data-prototype-annotate]')).toBeNull();
+
+    await act(async () => host!.querySelector<HTMLButtonElement>('[data-prototype-comment]')!.click());
+    const box = document.querySelector<HTMLTextAreaElement>('[data-comment-popover] textarea')!;
+    const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(box), 'value')!.set!;
+    await act(async () => {
+      setter.call(box, 'Pay should be bigger');
+      box.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => {
+      box.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', metaKey: true, bubbles: true, cancelable: true }));
+    });
+    expect(posted.map((p) => [p.url, p.body.annotation.type, p.body.annotation.text])).toEqual([
+      [`/api/inbox/threads/${ID}/live/liv_00000000000000aa/annotations`, 'GLOBAL_COMMENT', 'Pay should be bigger'],
+    ]);
+
+    await act(async () => host!.querySelector<HTMLButtonElement>('[data-prototype-step="next"]')!.click());
+    expect(host!.querySelector('[data-prototype-web]')).toBeNull();
+    const line = host!.querySelector('[data-prototype-not-framed]')!;
+    expect(line.textContent).toContain('preview.example.com');
+    expect(line.querySelector('a')!.getAttribute('href')).toBe('https://preview.example.com/b');
+  } finally {
+    settings.disableIframePageLoading = loadedFrames;
+    globalThis.fetch = realFetch;
+  }
+});
