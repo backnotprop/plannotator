@@ -4039,6 +4039,9 @@ body:has([data-shape-layer] .shp-pill) .ib-toast:not(.ib-toast-phone) { bottom: 
   .ib-pm-scrim { display: block; position: fixed; inset: 0; z-index: 79; background: rgb(0 0 0 / 0.3); }
   .ib-pm-pos[data-phone] { position: fixed !important; left: var(--ib-sheet-inset) !important; right: var(--ib-sheet-inset) !important; top: auto !important; bottom: calc(var(--ib-sheet-inset) + env(safe-area-inset-bottom)) !important; transform: none !important; width: auto !important; }
   .ib-pm-pos[data-phone] .ib-pm { min-width: 0; padding: 6px; border-radius: var(--ib-sheet-corner, 12px); animation: var(--ib-sheet-rise); }
+  /* The list's and the Board's ⋮ (Tidy.tsx) is taller than a short phone's screen: it rises from the bottom, so its
+     first items (Tidy) would sit above the top edge. It stops below the top and scrolls. */
+  .ib-pm-pos[data-phone] .ib-pm[data-tidy-menu-popup] { max-height: calc(100vh - 2 * var(--ib-sheet-inset) - env(safe-area-inset-top) - env(safe-area-inset-bottom)); max-height: calc(100dvh - 2 * var(--ib-sheet-inset) - env(safe-area-inset-top) - env(safe-area-inset-bottom)); overflow-y: auto; overscroll-behavior: contain; }
   @keyframes ib-pm-up { from { transform: translateY(16px); opacity: 0; } to { transform: none; opacity: 1; } }
   @media (prefers-reduced-motion: reduce) { .ib-pm-pos[data-phone] .ib-pm { animation: none; } }
   .ib-pm-pos[data-phone] .ib-pm-title { display: block; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); padding: 6px 10px 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

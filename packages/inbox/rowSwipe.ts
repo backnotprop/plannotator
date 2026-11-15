@@ -359,6 +359,21 @@ export function attachRowSwipe(body: HTMLElement, layer: HTMLElement, options: R
     if (trailIn) trailIn.style.transform = x < -SWIPE_ROW_REVEAL_PX ? `translate3d(${x + SWIPE_ROW_REVEAL_PX}px, 0, 0)` : '';
   };
 
+  /** Stops watching the list; set while a row holds the layer. */
+  let unwatch: (() => void) | null = null;
+  /**
+   * The list moved under the row holding the layer (a card came, a row arrived): the layer follows the row. A row
+   * the list took away lets go of the layer (one sliding off after Archive finishes its slide).
+   */
+  const shifted = () => {
+    const c = current;
+    if (!c) return;
+    if (c.face.isConnected) return putTop(c);
+    if (touch?.face === c.face) letGo();
+    if (c.leaving) c.leaving();
+    else if (current === c) rest(c);
+  };
+
   /** The row is at rest: the layer goes, and the row is as it was. */
   const rest = (c: Current) => {
     c.spring.stop();
@@ -366,6 +381,8 @@ export function attachRowSwipe(body: HTMLElement, layer: HTMLElement, options: R
     delete c.face.dataset.swipe;
     if (current === c) {
       current = null;
+      unwatch?.();
+      unwatch = null;
       setOpen(false);
       delete layer.dataset.lead;
       layer.style.height = '0px';
@@ -414,6 +431,7 @@ export function attachRowSwipe(body: HTMLElement, layer: HTMLElement, options: R
     const c: Current = { face, id: idOf(face), actions, width, open: false, spring: null as unknown as Spring };
     c.spring = new Spring((x) => paint(c, x), reduced);
     current = c;
+    unwatch ??= watchListShift(body, layer, shifted);
     place(c, actions.title);
     face.dataset.swipe = '';
     return c;
@@ -548,6 +566,8 @@ export function attachRowSwipe(body: HTMLElement, layer: HTMLElement, options: R
     if (event.touches.length !== 1) return;
     // A pull to refresh owns the list while it shows; a list still moving is stopped by this touch, not swiped.
     if (body.dataset.pull !== undefined || performance.now() - lastScroll < SCROLL_REST_MS) return;
+    // Picking rows (rowPicks.ts): a touch on a row picks it, never swipes it.
+    if (body.closest('[data-picking]')) return;
     const face = faceOf(event.target, body);
     if (!face) return;
     const finger = event.touches[0]!;
@@ -639,10 +659,6 @@ export function attachRowSwipe(body: HTMLElement, layer: HTMLElement, options: R
     if (current) runTrail(current, 0, true);
   };
 
-  // The list moved under a row holding the layer (a card came, a row arrived): the layer follows the row.
-  const unwatch = watchListShift(body, layer, () => {
-    if (current?.face.isConnected) putTop(current);
-  });
   body.addEventListener('touchstart', onStart, { passive: true });
   body.addEventListener('scroll', onScroll, { passive: true });
   body.addEventListener('click', onClick, true);
@@ -650,7 +666,6 @@ export function attachRowSwipe(body: HTMLElement, layer: HTMLElement, options: R
   trail?.addEventListener('click', onTrailClick);
   return () => {
     disposed = true;
-    unwatch();
     body.removeEventListener('touchstart', onStart);
     body.removeEventListener('scroll', onScroll);
     body.removeEventListener('click', onClick, true);

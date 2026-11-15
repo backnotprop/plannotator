@@ -18,6 +18,7 @@ import { QueryClientProvider, type QueryClient } from '@tanstack/react-query';
 import type { InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
 import type { TidyController } from './components/Tidy';
 import type { ArchivedModel } from './api';
+import type { BulkWrites } from './bulkWrites';
 import * as format from './format';
 
 const hasDom = typeof document !== 'undefined';
@@ -109,6 +110,8 @@ interface Opts {
   filter?: (rows: readonly InboxListRow[]) => readonly InboxListRow[];
   live?: InboxListSection[];
   onSearch?: () => void;
+  /** The list's bulk writes: picking rows (rowPicks.ts) is on. */
+  bulk?: BulkWrites;
 }
 const ALL = (rows: readonly InboxListRow[]) => rows;
 
@@ -141,6 +144,7 @@ function Harness(opts: Opts) {
       onSearch={opts.onSearch}
       tidy={TIDY}
       archived={archived}
+      bulk={opts.bulk}
     />
   );
 }
@@ -457,4 +461,33 @@ test.skipIf(!hasDom)("opening the group and its reads draw no live row again", a
   } finally {
     shortTime.mockRestore();
   }
+});
+
+test.skipIf(!hasDom)('picking: an archived row is never picked, and opening the group while picking keeps the bar and its count', async () => {
+  const bulk = { archive: async () => {}, snooze: async () => {}, markRead: async () => {}, markUnread: async () => {}, star: async () => {}, priority: async () => {} } as unknown as BulkWrites;
+  render({ bulk, live: [{ id: 'waiting', label: 'Waiting on you', threads: [row('live_1', { section: 'waiting' }), row('live_2', { section: 'waiting' })] }] });
+  await switchOn();
+  const click = (el: Element, init: MouseEventInit = {}) => act(() => void el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, ...init })));
+  const liveRow = (id: string) => [...document.querySelectorAll<HTMLElement>(`.ib-lbody [data-thread-id="${id}"]`)].find((el) => !el.closest('[data-archived-group]'))!;
+  const count = () => document.querySelector('[data-pick-bar] [role="status"]')?.textContent ?? null;
+  click(liveRow('live_1'), { metaKey: true });
+  expect(count()).toBe('1 selected');
+
+  await openGroup();
+  expect(groupIds().length).toBeGreaterThan(0);
+  expect(count()).toBe('1 selected');
+  // No box on the group's header or its rows; the live rows keep theirs.
+  expect(group()!.querySelector('[data-pick-box]')).toBeNull();
+  expect(liveRow('live_2').closest('.ib-rw')!.querySelector('[data-pick-box]')).not.toBeNull();
+  // Select all takes the live list's rows only.
+  click(document.querySelector('[data-pick-bar] [data-pick-box]')!);
+  expect(count()).toBe('2 selected');
+  // A click on an archived row, with ⌘ or Shift too, opens it and picks nothing.
+  const archivedEl = group()!.querySelector<HTMLElement>('[data-thread-id]')!;
+  const id = archivedEl.getAttribute('data-thread-id');
+  click(archivedEl, { metaKey: true });
+  click(archivedEl, { shiftKey: true });
+  expect(count()).toBe('2 selected');
+  expect(events.filter((e) => e === `open:${id}`)).toHaveLength(2);
+  expect(archivedEl.getAttribute('aria-pressed')).not.toBe('true');
 });

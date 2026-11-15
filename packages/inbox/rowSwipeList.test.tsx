@@ -19,6 +19,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
 import type { RowMenuAction } from './rowMenu';
+import type { BulkWrites } from './bulkWrites';
 
 const hasDom = typeof document !== 'undefined';
 const { InboxList } = (hasDom ? await import('./components/InboxList') : {}) as typeof import('./components/InboxList');
@@ -78,7 +79,7 @@ afterEach(() => {
   answer = () => undefined;
 });
 
-function draw(): void {
+function draw(bulk?: BulkWrites): void {
   host = document.createElement('div');
   document.body.append(host);
   root = createRoot(host);
@@ -103,6 +104,8 @@ function draw(): void {
               actions.push([r.thread_id, action]);
               return answer();
             }}
+            bulk={bulk}
+            pinned={bulk ? new Set() : undefined}
           />
         </div>
       </SidebarProvider>,
@@ -195,6 +198,41 @@ test.skipIf(!hasDom)('a row open on Archive keeps its button under it when the l
   });
   expect(Number.parseFloat(layer().style.top)).toBe(top + 130);
   expect(layer().dataset.side).toBe('trail');
+});
+
+// Picking rows (#3405): a touch on a row picks it, so no swipe starts, from a row, its box or the bar.
+test.skipIf(!hasDom)('while rows are being picked, nothing swipes', async () => {
+  const noop = async () => {};
+  draw({ archive: noop, snooze: noop, markRead: noop, markUnread: noop, star: noop, priority: noop } as unknown as BulkWrites);
+  act(() => void rowEl('msg_2').dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, metaKey: true })));
+  expect(host!.querySelector('[data-picking]')).not.toBeNull();
+  const box = rowEl('msg_3').parentElement!.querySelector('[data-pick-box]') ?? rowEl('msg_3');
+  for (const from of [rowEl('msg_3'), box, host!.querySelector('[data-pick-bar]')!]) {
+    await swipe(from, -90);
+    await swipe(from, 260);
+    expect(layer().dataset.side).toBeUndefined();
+    expect(rowEl('msg_3').style.transform).toBe('');
+  }
+  expect(actions).toEqual([]);
+});
+
+// The list took the open row away (archived elsewhere, a read moved it): its button goes with it.
+test.skipIf(!hasDom)('a row open on Archive that leaves the list lets go of the layer', async () => {
+  draw();
+  const el = rowEl('msg_2');
+  await swipe(el, -90);
+  await settled(el);
+  expect(layer().dataset.side).toBe('trail');
+  await act(async () => {
+    el.remove();
+    await sleep(0);
+  });
+  expect(layer().dataset.side).toBeUndefined();
+  expect(layer().style.height).toBe('0px');
+  await swipe(rowEl('msg_4'), -90);
+  await settled(rowEl('msg_4'));
+  expect(layer().dataset.side).toBe('trail');
+  expect(layer().querySelector('[data-row-swipe="trail"]')!.getAttribute('aria-label')).toBe('Archive: Thread 4');
 });
 
 test.skipIf(!hasDom)('a short slow swipe right rests open on Quiet (Mark read); its tap marks the row read', async () => {
