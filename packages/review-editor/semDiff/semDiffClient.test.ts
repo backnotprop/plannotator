@@ -276,3 +276,57 @@ describe('the Sem tab lists declarations, not lines', () => {
     expect(shortName('if (user.coupon) {')).toBe('if (user.coupon) {');
   });
 });
+
+describe('a moved method is named by itself, not its class, in every language', () => {
+  const op = (start: number, end: number) => ({ type: 'moved', lines: { old: [{ start, end }], new: [{ start, end }] } }) as never;
+  const cases: [string, string, string[], number, string][] = [
+    ['TypeScript method', 'src/greeter.ts', ['export class Greeter {', '  private async greet(name: string): Promise<string> {', '    return name;', '  }', '}'], 2, 'greet'],
+    ['TypeScript arrow const', 'src/greeter.ts', ['export class Greeter {}', 'export const shout = async (s: string) => {', '  return s;', '};'], 2, 'shout'],
+    ['JavaScript function', 'src/greeter.js', ['class Greeter {', '  static build() {', '    function* steps() {', '      yield 1;', '    }', '  }', '}'], 3, 'steps'],
+    ['Python', 'greeter.py', ['class Greeter:', '    async def greet(self, name):', '        return name'], 2, 'greet'],
+    ['Go', 'greeter.go', ['type Greeter struct{}', '', 'func (g *Greeter) Greet(name string) string {', '\treturn name', '}'], 3, 'Greet'],
+    ['Rust', 'src/greeter.rs', ['impl Greeter {', '    pub(crate) async fn greet(&self) -> String {', '        String::new()', '    }', '}'], 2, 'greet'],
+    ['Java', 'Greeter.java', ['public class Greeter {', '    @Override', '    public static <T> List<T> greet(String name) {', '        return null;', '    }', '}'], 3, 'greet'],
+    ['C# brace on next line', 'Greeter.cs', ['public class Greeter', '{', '    public async Task<string> GreetAsync(string name)', '    {', '        return name;', '    }', '}'], 3, 'GreetAsync'],
+    ['PHP', 'Greeter.php', ['class Greeter {', '    public static function greet($name) {', '        return $name;', '    }', '}'], 2, 'greet'],
+    ['Ruby', 'greeter.rb', ['class Greeter', '  def self.greet(name)', '    name', '  end', 'end'], 2, 'greet'],
+    ['Kotlin', 'Greeter.kt', ['class Greeter {', '    fun greet(name: String): String {', '        return name', '    }', '}'], 2, 'greet'],
+    ['Kotlin extension', 'Greeter.kt', ['object Registry {', '    suspend fun <T> List<T>.firstGreeting(): T {', '        return first()', '    }', '}'], 2, 'firstGreeting'],
+    ['Swift', 'Greeter.swift', ['extension Greeter {', '    @MainActor public mutating func greet(_ name: String) -> String {', '        return name', '    }', '}'], 2, 'greet'],
+  ];
+  test.each(cases)('%s', (_label, path, lines, start, expected) => {
+    const text = lines.join('\n');
+    const [change] = semDiffChanges(path, [op(start, start + 1)], text, text);
+    expect(change!.entityName).toBe(expected);
+  });
+
+  const lookalikes: [string, string, string[], number, string][] = [
+    ['a call line', 'src/greeter.ts', ['class Greeter {', '  run(x) {', '    greet(x)', '  }', '}'], 3, 'run'],
+    ['an if line', 'Greeter.kt', ['class Greeter {', '    fun run(x: Int) {', '        if (x > 0) {', '            log(x)', '        }', '    }', '}'], 3, 'run'],
+    ['a return of a call', 'Greeter.java', ['public class Greeter {', '    public int run(int x) {', '        return foo(x);', '    }', '}'], 3, 'run'],
+    ['a constructor call', 'Greeter.cs', ['public class Greeter', '{', '    public void Run()', '    {', '        throw new ArgumentException(name);', '    }', '}'], 5, 'Run'],
+    ['a Kotlin when', 'Greeter.kt', ['class Greeter {', '    fun run(x: Int) {', '        when (x) {', '            else -> log(x)', '        }', '    }', '}'], 3, 'run'],
+    ['a call ending in a lambda', 'src/greeter.test.ts', ['describe("greeter", () => {', '  test("greets", () => {', '    expect(1).toBe(1);', '  });', '});'], 2, 'test("greets", () => {'],
+  ];
+  test.each(lookalikes)('%s is not taken as a name', (_label, path, lines, start, expected) => {
+    const text = lines.join('\n');
+    const [change] = semDiffChanges(path, [op(start, start)], text, text);
+    expect(change!.entityName).toBe(expected);
+  });
+
+  test('type declarations name the type', async () => {
+    const { shortName } = await import('./semDiffChanges');
+    expect(shortName('sealed interface Shape {')).toBe('Shape');
+    expect(shortName('enum class Color {')).toBe('Color');
+    expect(shortName('data object Empty')).toBe('Empty');
+    expect(shortName('public protocol Drawable {')).toBe('Drawable');
+    expect(shortName('extension Greeter: CustomStringConvertible {')).toBe('Greeter');
+    expect(shortName('indirect enum Tree {')).toBe('Tree');
+    expect(shortName('pub trait Shape {')).toBe('Shape');
+    expect(shortName('impl<T: Display> fmt::Display for Point<T> {')).toBe('Point');
+    expect(shortName('pub struct Point {')).toBe('Point');
+    expect(shortName('module Billing')).toBe('Billing');
+    expect(shortName('greet(x)')).toBe('greet(x)');
+    expect(shortName('return foo(x);', 'A.java')).toBe('return foo(x);');
+  });
+});
