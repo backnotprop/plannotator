@@ -145,6 +145,26 @@ function world(start = "2026-11-16T13:59:00.000Z") {
   };
 }
 
+describe("what is news in the list", () => {
+  test("a skip line is not: after a look the row stays read; a run's reply is", async () => {
+    const w = world();
+    const { record } = await w.make({ if_missed: "skip" });
+    w.at("2026-11-16T14:00:10.000Z");
+    await w.scheduled.check();
+    const thread = w.store.scheduledThread(record.id)!.thread_id!;
+    await w.settle(w.dividers(thread)[0]!, "Three new issues, labelled.");
+    expect(w.store.listRow(thread)).toMatchObject({ section: "new", unread: true });
+    w.store.markSeen(thread);
+    for (const reason of ["asleep", "missed"] as const) {
+      const at = reason === "asleep" ? "2026-11-17T14:00:00.000Z" : "2026-11-18T14:00:00.000Z";
+      w.store.writeScheduledLine({ project_id: w.project.id, thread_id: thread, name: record.name, body: `Skipped · ${reason}`, key: `sch:${record.id}:${at}`, scheduled_run: { scheduled_id: record.id, name: record.name, due_at: at, by: "schedule", skipped: { count: 1, from: at, to: at, reason } } });
+      const row = w.store.listRow(thread)!;
+      expect(row.section).not.toBe("new");
+      expect([row.unread, row.unseen]).toEqual([false, 0]);
+    }
+  });
+});
+
 describe("a run is a launch of its own in the one thread", () => {
   test("replied, then didn't finish; the newest run takes the reply, an earlier one says it ended", async () => {
     const w = world();
@@ -386,6 +406,21 @@ describe("the folder", () => {
     const { message } = await w.scheduled.runNow(record.id, { kind: "person" });
     expect(message.launch?.folder).toBe(realpathSync(sub));
     await expect(w.make({ folder: { path: w.home } })).rejects.toThrow("Pick a folder inside the home folder.");
+  });
+
+  test("a person's folder by its path gone before any run: the clock's run files its didn't-start line under that folder's name", async () => {
+    const w = world();
+    const gone = join(w.home, "code", "acme-web");
+    mkdirSync(gone, { recursive: true });
+    const { record } = await w.make({ folder: { path: gone } });
+    rmSync(gone, { recursive: true });
+    w.at("2026-11-16T14:00:10.000Z");
+    await w.scheduled.check();
+    const row = w.scheduled.rowOf(w.store.scheduledThread(record.id)!);
+    expect(row.last_run).toMatchObject({ run: 1, outcome: "didnt_start" });
+    const [line] = w.dividers(row.thread_id);
+    expect(line!.scheduled_run!.failed).toMatch(/acme-web isn't there\. Pick another folder\.$/);
+    expect(w.store.project(line!.project_id)).toMatchObject({ name: "acme-web", root: (record.folder as { path: string }).path });
   });
 
   test("a folder by its path gone before its first run: a thread whose first line says the run didn't start, and why", async () => {

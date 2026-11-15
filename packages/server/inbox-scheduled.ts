@@ -28,6 +28,7 @@ import {
   SCHEDULED_LATE_MS,
   SCHEDULED_TICK_MS,
 } from "@plannotator/core/inbox-scheduled";
+import { basename } from "node:path";
 import { inboxLaunchedSession } from "@plannotator/core/inbox-run-line";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
@@ -290,11 +291,12 @@ export function createInboxScheduled(deps: {
         prepared = await launch.prepare(target, { name: first.name, body: bodyOf(first), resolveProject: deps.resolveProject });
       } catch (error) {
         const record = found(id);
-        // A folder by its path that never ran yet: its thread goes in that folder's project, or, with the folder gone, the
-        // project of the thread an agent made it from, so the person sees why.
+        // A folder by its path that never ran yet: its thread goes in that folder's project, so the person sees why. With
+        // the folder gone: the project of the thread an agent made it from, else one for that folder, as a run there makes.
         const madeIn = record.made_by?.thread_id ? (store.message(record.made_by.thread_id)?.project_id ?? null) : null;
-        const ofPath = async (): Promise<string | null> => ("path" in record.folder ? ((await deps.resolveProject(record.folder.path).catch(() => null))?.id ?? null) : null);
-        const project = projectOf(record) ?? (await ofPath()) ?? (madeIn && store.project(madeIn) ? madeIn : null);
+        const ofPath = async (path: string): Promise<string> =>
+          (await deps.resolveProject(path).catch(() => null))?.id ?? (madeIn && store.project(madeIn) ? madeIn : store.ensureProject({ name: basename(path) || path, root: path }).id);
+        const project = projectOf(record) ?? ("path" in record.folder ? await ofPath(record.folder.path) : null);
         const run = runOf(record);
         log(`Inbox scheduled ${id}: run ${run.run} did not start (${error instanceof InboxError ? error.code : "error"})`);
         if (!project) throw error;
