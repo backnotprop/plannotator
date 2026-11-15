@@ -171,8 +171,6 @@ export interface PlannotatorConfig {
   reviewDefaults?: ReviewDefaults;
   /** Optional analysis layers used by code review. */
   reviewAnalysis?: {
-    /** Named-entity semantic diff. Enabled by default for backwards compatibility. */
-    semanticDiff?: boolean;
     /** Call-stack impact analysis powered by the optional CallDiff runtime. */
     callFlow?: boolean;
   };
@@ -902,10 +900,6 @@ export function parseReviewAnalysisConfig(value: unknown): PlannotatorConfig["re
   if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
   const input = value as Record<string, unknown>;
   const result: NonNullable<PlannotatorConfig["reviewAnalysis"]> = {};
-  if (input.semanticDiff !== undefined) {
-    if (typeof input.semanticDiff !== "boolean") return undefined;
-    result.semanticDiff = input.semanticDiff;
-  }
   if (input.callFlow !== undefined) {
     if (typeof input.callFlow !== "boolean") return undefined;
     result.callFlow = input.callFlow;
@@ -1286,7 +1280,6 @@ export function getServerConfig(
     // explicit. The client must not revive a stale cookie that disagrees with
     // the server when the config leaves either optional leaf unset.
     reviewAnalysis: {
-      semanticDiff: cfg.reviewAnalysis?.semanticDiff !== false,
       callFlow: cfg.reviewAnalysis?.callFlow === true,
     },
     gitUser: gitUser ?? undefined,

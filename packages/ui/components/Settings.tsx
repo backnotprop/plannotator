@@ -473,7 +473,6 @@ function VimSettingsTab({
 }
 
 function ReviewAnalysisTab({ packageChangesSetting }: { packageChangesSetting?: PackageChangesSetting }) {
-  const semanticDiffEnabled = useConfigValue('semanticDiffEnabled');
   const callFlowEnabled = useConfigValue('callFlowEnabled');
   return (
     <div className="space-y-5">
@@ -485,13 +484,6 @@ function ReviewAnalysisTab({ packageChangesSetting }: { packageChangesSetting?: 
       </div>
 
       <div className="space-y-4 rounded-xl border border-border bg-muted/20 p-4">
-        <AnalysisLayerToggle
-          checked={semanticDiffEnabled}
-          onChange={(enabled) => configStore.set('semanticDiffEnabled', enabled)}
-          label="Semantic changes"
-          description="Organize added, changed, moved, and removed functions, classes, and other named code. Enabled by default."
-        />
-        <div className="border-t border-border" />
         <AnalysisLayerToggle
           checked={callFlowEnabled}
           onChange={(enabled) => configStore.set('callFlowEnabled', enabled)}

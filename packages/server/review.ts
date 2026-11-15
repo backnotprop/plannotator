@@ -102,16 +102,6 @@ import {
   type RepoFilesUnavailable,
 } from "@plannotator/shared/repo-files";
 import { createReviewRepoWatch } from "./review-repo-watch";
-import {
-  createDefaultSemanticDiffRuntime,
-  getSemanticDiffAvailability,
-  getSemanticDiffScratchCwd,
-  runSemanticDiff,
-  semanticDiffCacheKey,
-  semanticDiffFileExtsFromSearchParams,
-  SemanticDiffResponseCache,
-} from "@plannotator/shared/semantic-diff";
-import type { SemanticDiffAvailability, SemanticDiffResponse } from "@plannotator/shared/semantic-diff-types";
 import { CallFlowService } from "@plannotator/shared/call-flow";
 import { CallFlowInstallCoordinator, callFlowInstallOriginAllowed } from "@plannotator/shared/call-flow-install";
 import type { CallFlowInstallCoordinatorOptions } from "@plannotator/shared/call-flow-install";
@@ -1247,94 +1237,7 @@ export async function startReviewServer(
       true,
     );
   };
-  const semanticDiffScratchCwd = getSemanticDiffScratchCwd();
-  const resolveSemanticDiffCwd = (diffType: DiffType = currentDiffType as DiffType): string => {
-    if (workspace) return workspace.root;
-    if (options.worktreePool && prMetadata) {
-      const poolPath = resolvePRLocalCwd();
-      if (poolPath) return poolPath;
-      // Checkout warming up — probe sem availability in the scratch dir; the
-      // real run below awaits the checkout before resolving its cwd.
-      if (options.worktreePool.has(prMetadata.url)) return semanticDiffScratchCwd;
-    }
-    if (options.agentCwd) return options.agentCwd;
-    if (gitContext) {
-      const vcsCwd = resolveVcsCwd(diffType, gitContext.cwd);
-      if (vcsCwd) return vcsCwd;
-      if (gitContext.cwd) return gitContext.cwd;
-    }
-    return semanticDiffScratchCwd;
-  };
-  const semanticDiffCache = new SemanticDiffResponseCache();
-  const semanticDiffAvailabilityCache = new Map<string, Promise<SemanticDiffAvailability>>();
-
-  const semanticDiffEnabled = (): boolean => loadConfig().reviewAnalysis?.semanticDiff !== false;
   const callFlowEnabled = (): boolean => loadConfig().reviewAnalysis?.callFlow === true;
-
-  const createSemanticDiffRuntime = (cwd: string) => ({
-    ...createDefaultSemanticDiffRuntime(),
-    cwd,
-  });
-
-  const getSemanticDiffAvailabilityForCwd = (cwd: string): Promise<SemanticDiffAvailability> => {
-    const cached = semanticDiffAvailabilityCache.get(cwd);
-    if (cached) return cached;
-
-    const next: Promise<SemanticDiffAvailability> = getSemanticDiffAvailability(createSemanticDiffRuntime(cwd)).catch((error) => ({
-      available: false,
-      reason: "sem-probe-failed",
-      message: error instanceof Error ? error.message : String(error),
-    }));
-    semanticDiffAvailabilityCache.set(cwd, next);
-    return next;
-  };
-
-  const getSemanticDiffAdvert = async (
-    diffType: DiffType = currentDiffType as DiffType,
-    enabled = semanticDiffEnabled(),
-  ) => {
-    if (!enabled) return { available: false, enabled: false };
-    if (isGitButlerCommittedView(diffType)) return { available: false };
-    const availability = await getSemanticDiffAvailabilityForCwd(resolveSemanticDiffCwd(diffType));
-    return {
-      available: availability.available,
-      ...(availability.semVersion && { semVersion: availability.semVersion }),
-      ...(availability.semSource && { semSource: availability.semSource }),
-    };
-  };
-
-  const getSemanticDiff = async (url: URL): Promise<SemanticDiffResponse> => {
-    if (!semanticDiffEnabled()) {
-      return { status: "unavailable", reason: "disabled", message: "Semantic diff is disabled in Settings → Analysis." };
-    }
-    if (isGitButlerCommittedView()) {
-      return {
-        status: "unavailable",
-        reason: "gitbutler-committed-view",
-        message: "Semantic diff is unavailable for committed GitButler views because the live workspace may contain other layers.",
-      };
-    }
-    // Semantic diff reads real files — wait out the checkout warmup in PR mode.
-    if (isPRMode && options.worktreePool) await ensurePRLocalCwd();
-    const cwd = resolveSemanticDiffCwd();
-    const fileExts = semanticDiffFileExtsFromSearchParams(url.searchParams);
-    const cacheKey = semanticDiffCacheKey({ rawPatch: currentPatch, cwd, fileExts });
-    const cached = semanticDiffCache.get(cacheKey, currentPatch);
-    if (cached) return cached;
-
-    const result = await runSemanticDiff(
-      { rawPatch: currentPatch, cwd, fileExts },
-      createSemanticDiffRuntime(cwd),
-    );
-    if (result.status === "ok") {
-      semanticDiffCache.set(cacheKey, currentPatch, result);
-    } else if (result.status === "error") {
-      // Cooldown-memoized: request rate (file badges remount on scroll) must
-      // not drive sem execution rate when it's failing.
-      semanticDiffCache.setFailure(cacheKey, currentPatch, result);
-    }
-    return result;
-  };
 
   const getCallFlowAdvert = (
     diffType: DiffType = currentDiffType as DiffType,
@@ -2653,7 +2556,6 @@ export async function startReviewServer(
               ...(generatedFiles && { generatedFiles }),
               ...(baseBehindRemote && { baseBehindRemote: true }),
               ...(servedError && { error: servedError }),
-              semanticDiff: await getSemanticDiffAdvert(servedDiffType as DiffType),
               callFlow: await getCallFlowAdvert(servedDiffType as DiffType),
               serverConfig: getServerConfig(gitUser, agentToolHostForServer(options.sessionBridge), { cookieHost: !isRemote && options.tailnetPublished !== true }),
               ...getAutoUpdateAdvert(),
@@ -2789,10 +2691,6 @@ export async function startReviewServer(
             return Response.json({ ok: true, baseBehindRemote });
           }
 
-          // API: Get semantic diff content
-          if (url.pathname === "/api/semantic-diff" && req.method === "GET") {
-            return Response.json(await getSemanticDiff(url));
-          }
 
           // API: Snapshot-bound call-stack impact analysis.
           if (url.pathname === "/api/call-flow" && req.method === "GET") {
@@ -2860,10 +2758,7 @@ export async function startReviewServer(
             const analysisEpoch = reviewAnalysisEpoch;
             const viewEpoch = diffSwitchEpoch;
             const scopeEpoch = prScopeEpoch;
-            const [semanticDiff, callFlow] = await Promise.all([
-              getSemanticDiffAdvert(),
-              getCallFlowAdvert(),
-            ]);
+            const callFlow = await getCallFlowAdvert();
             if (
               analysisEpoch !== reviewAnalysisEpoch
               || reviewAnalysisMutationEpoch !== null
@@ -2872,7 +2767,7 @@ export async function startReviewServer(
             ) {
               return Response.json({ superseded: true });
             }
-            return Response.json({ semanticDiff, callFlow }, { headers: { "Cache-Control": "no-store" } });
+            return Response.json({ callFlow }, { headers: { "Cache-Control": "no-store" } });
           }
 
           // API: Persist analysis toggles and immediately re-advertise both
@@ -2891,12 +2786,8 @@ export async function startReviewServer(
               if (analysisEpoch !== reviewAnalysisEpoch) {
                 return Response.json({ superseded: true });
               }
-              const nextSemanticDiffEnabled = reviewAnalysis.semanticDiff ?? semanticDiffEnabled();
               const nextCallFlowEnabled = reviewAnalysis.callFlow ?? callFlowEnabled();
-              const [semanticDiff, callFlow] = await Promise.all([
-                getSemanticDiffAdvert(currentDiffType as DiffType, nextSemanticDiffEnabled),
-                getCallFlowAdvert(currentDiffType as DiffType, nextCallFlowEnabled),
-              ]);
+              const callFlow = await getCallFlowAdvert(currentDiffType as DiffType, nextCallFlowEnabled);
               if (
                 analysisEpoch !== reviewAnalysisEpoch
                 || viewEpoch !== diffSwitchEpoch
@@ -2906,7 +2797,7 @@ export async function startReviewServer(
               }
               if (!saveConfig({ reviewAnalysis })) return Response.json({ error: "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it." }, { status: 500 });
               if (!nextCallFlowEnabled) callFlowService.cancelAll();
-              return Response.json({ semanticDiff, callFlow });
+              return Response.json({ callFlow });
             } catch {
               return Response.json({ error: "Invalid request" }, { status: 400 });
             } finally {
@@ -3048,7 +2939,6 @@ export async function startReviewServer(
                   diffOptions: workspace.diffOptions,
                   hideWhitespace: currentHideWhitespace,
                   ...(currentError && { error: currentError }),
-                  semanticDiff: await getSemanticDiffAdvert(),
                   callFlow: await getCallFlowAdvert(),
                 });
               }
@@ -3152,8 +3042,7 @@ export async function startReviewServer(
               const sections = await buildSectionsSidecar(nextBase, newDiffType as string);
               const commitInfo = await buildCommitInfoSidecar(newDiffType as string);
               const generatedFiles = await buildGeneratedFilesSidecar(result.patch, newDiffType as string);
-              const [switchSemanticDiff, switchCallFlow, nextDraftTarget] = await Promise.all([
-                getSemanticDiffAdvert(newDiffType as DiffType),
+              const [switchCallFlow, nextDraftTarget] = await Promise.all([
                 getCallFlowAdvert(newDiffType as DiffType),
                 isPRMode ? null : localGitDraftTargetKey({
                   diffType: newDiffType, base: nextBase, cwd: gitContext?.cwd ?? process.cwd(),
@@ -3253,7 +3142,6 @@ export async function startReviewServer(
                     }
                   : {}),
                 ...(currentError && { error: currentError }),
-                semanticDiff: switchSemanticDiff,
                 callFlow: switchCallFlow,
               });
             } catch (err) {
@@ -3280,10 +3168,7 @@ export async function startReviewServer(
               // was parked on an await: drop this request's writes and return
               // the newest state so the client converges on it.
               const supersededResponse = async () => {
-                const [semanticDiff, callFlow] = await Promise.all([
-                  getSemanticDiffAdvert(),
-                  getCallFlowAdvert(),
-                ]);
+                const callFlow = await getCallFlowAdvert();
                 return Response.json({
                   rawPatch: currentPatch,
                   aiReviewContext: buildCurrentAiReviewContext(),
@@ -3300,7 +3185,6 @@ export async function startReviewServer(
                   prDiffScope: currentPRDiffScope,
                   ...(layerPatchIncomplete && { prPatchIncomplete: true, prPatchUpgradeAvailable: layerUpgradeAvailable }),
                   ...(currentError && { error: currentError }),
-                  semanticDiff,
                   callFlow,
                 });
               };
@@ -3365,7 +3249,6 @@ export async function startReviewServer(
                   prDiffScope: currentPRDiffScope,
                   ...(layerPatchIncomplete && { prPatchIncomplete: true, prPatchUpgradeAvailable: layerUpgradeAvailable }),
                   ...((currentError ?? upgradeError) && { error: currentError ?? upgradeError }),
-                  semanticDiff: await getSemanticDiffAdvert(),
                   callFlow: await getCallFlowAdvert(),
                 });
               }
@@ -3419,7 +3302,6 @@ export async function startReviewServer(
                 repoFilesSupported,
                 ...sourceKindAdvert,
                 prDiffScope: currentPRDiffScope,
-                semanticDiff: await getSemanticDiffAdvert(),
                 callFlow: await getCallFlowAdvert(),
               });
             } catch (err) {
@@ -3567,7 +3449,6 @@ export async function startReviewServer(
                 repoInfo,
                 ...(switchedViewedFiles.length > 0 && { viewedFiles: switchedViewedFiles }),
                 ...(currentError ? { error: currentError } : {}),
-                semanticDiff: await getSemanticDiffAdvert(),
                 callFlow: await getCallFlowAdvert(),
               });
             } catch (err) {

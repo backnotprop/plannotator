@@ -1,6 +1,5 @@
 import { COMPACT_FILE_HEADER_HEIGHT } from '../utils/diffChromeMetrics';
 import React, { useEffect, useRef, useState } from 'react';
-import { SemanticFileBadge } from './SemanticFileBadge';
 import { CallFlowFileBadge } from './CallFlowFileBadge';
 import { OpenInAppButton } from '@plannotator/ui/components/OpenInAppButton';
 import { useReviewStateOptional } from '../dock/ReviewStateContext';
@@ -361,7 +360,6 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
         )}
         <CallFlowFileBadge filePath={filePath} oldPath={oldPath} />
         {!isVeryTight && semanticNote}
-        <SemanticFileBadge filePath={filePath} />
         {/* Edit entry lives at the far right of the row, next to the file
             actions dropdown, so the experimental affordance stays out of the
             everyday Viewed/Add/Comment cluster. */}

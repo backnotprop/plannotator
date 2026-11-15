@@ -307,7 +307,6 @@ export interface ReviewState {
   commitInfo: import('@plannotator/shared/types').CommitDiffInfo | null;
   semanticDiffAvailable: boolean;
   isSemanticDiffActive: boolean;
-  onSemanticDiffUnavailable: () => void;
   onSemanticDiffLoadError: () => boolean;
   onSemanticDiffLoadSuccess: () => void;
   callFlowAvailable: boolean;

@@ -16,7 +16,7 @@ afterEach(async () => {
 });
 
 describe('Settings Analysis tab', () => {
-  test.skipIf(!hasDom)('shows both independent analysis layer toggles', async () => {
+  test.skipIf(!hasDom)('shows the Call flow analysis layer toggle', async () => {
     host = document.createElement('div');
     document.body.appendChild(host);
     root = createRoot(host);
@@ -36,9 +36,8 @@ describe('Settings Analysis tab', () => {
     await act(async () => analysisTab?.click());
 
     const switches = Array.from(document.querySelectorAll('[role="switch"]'));
-    expect(switches.length).toBeGreaterThanOrEqual(2);
-    // Deliberate label locks: these two layer names are maintainer-frozen.
-    expect(document.body.textContent).toContain('Semantic changes');
+    expect(switches.length).toBeGreaterThanOrEqual(1);
+    // Deliberate label lock: this layer name is maintainer-frozen.
     expect(document.body.textContent).toContain('Call flow');
   });
 });

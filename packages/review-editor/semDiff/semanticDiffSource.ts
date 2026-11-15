@@ -24,15 +24,9 @@ export function setSemanticDiffSource(next: Source | null): void {
   source = next;
 }
 
-export function hasSemanticDiffSource(): boolean {
-  return source !== null;
-}
-
 export async function loadReviewSemanticDiff(signal?: AbortSignal): Promise<SemanticDiffResponse> {
-  if (source) return source(signal);
-  const res = await fetch('/api/semantic-diff', { signal });
-  if (!res.ok) throw new Error('Semantic diff failed');
-  return res.json() as Promise<SemanticDiffResponse>;
+  if (!source) throw new Error('Semantic diff is not available');
+  return source(signal);
 }
 
 export async function computeReviewSemanticDiff(
@@ -87,8 +81,6 @@ export async function computeReviewSemanticDiff(
     },
     changes,
     binaryChanges: [],
-    semVersion: 'built-in',
-    semSource: 'sem-diff',
     ...(unread.length > 0 && { unreadFiles: unread }),
   };
 }

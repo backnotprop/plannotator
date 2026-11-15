@@ -102,7 +102,6 @@
     "./goal-setup": "./goal-setup.ts",
     "./question-block": "./question-block.ts",
     "./server-session": "./server-session.ts",
-    "./semantic-diff": "./semantic-diff.ts",
     "./semantic-diff-types": "./semantic-diff-types.ts",
     "./call-flow-types": "./call-flow-types.ts",
     "./call-tree": "./call-tree.ts",

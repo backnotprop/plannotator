@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import type {
   SemanticDiffBinaryChange,
   SemanticDiffChange,
-  SemanticDiffResponse,
+  SemanticDiffOkResponse,
 } from '@plannotator/shared/semantic-diff-types';
 import { useReviewState } from '../ReviewStateContext';
 import { loadReviewSemanticDiff } from '../../semDiff/semanticDiffSource';
@@ -14,14 +14,12 @@ import {
   type SemanticOpenLine,
 } from './semanticDiffShared';
 
-type SemanticDiffOkResponse = Extract<SemanticDiffResponse, { status: 'ok' }>;
-type SemanticDiffErrorResponse = Extract<SemanticDiffResponse, { status: 'error' }>;
 
 type LoadState =
   | { status: 'idle' | 'loading' }
   | { status: 'ready'; data: SemanticDiffOkResponse }
   | { status: 'empty'; data: SemanticDiffOkResponse }
-  | { status: 'error'; error: SemanticDiffErrorResponse | Error };
+  | { status: 'error'; error: Error };
 
 const UNREAD_REASON: Record<string, string> = {
   generated: 'generated file, skipped',
@@ -52,7 +50,7 @@ function formatSummary(data: SemanticDiffOkResponse): string {
   return `Summary: ${parts.join(', ') || 'nothing'} across ${data.summary.fileCount} files`;
 }
 
-function formatLoadError(error: SemanticDiffErrorResponse | Error): string {
+function formatLoadError(error: Error): string {
   return error.message || 'Semantic diff failed.';
 }
 
@@ -68,7 +66,6 @@ export function ReviewSemanticDiffPanel() {
   const {
     rawPatch,
     semanticDiffAvailable,
-    onSemanticDiffUnavailable,
     onSemanticDiffLoadError,
     onSemanticDiffLoadSuccess,
     openDiffFile,
@@ -88,15 +85,6 @@ export function ReviewSemanticDiffPanel() {
     loadReviewSemanticDiff(controller.signal)
       .then((data) => {
         if (controller.signal.aborted) return;
-        if (data.status === 'unavailable') {
-          onSemanticDiffUnavailable();
-          return;
-        }
-        if (data.status === 'error') {
-          if (onSemanticDiffLoadError()) return;
-          setLoadState({ status: 'error', error: data });
-          return;
-        }
         onSemanticDiffLoadSuccess();
         setLoadState(data.changes.length === 0 && data.binaryChanges.length === 0
           ? { status: 'empty', data }
@@ -114,7 +102,6 @@ export function ReviewSemanticDiffPanel() {
     rawPatch,
     retryCount,
     semanticDiffAvailable,
-    onSemanticDiffUnavailable,
     onSemanticDiffLoadError,
     onSemanticDiffLoadSuccess,
   ]);

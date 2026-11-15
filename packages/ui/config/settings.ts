@@ -724,21 +724,6 @@ export const SETTINGS = {
     fromServer: undefined,
     toServer: undefined,
   },
-  semanticDiffEnabled: {
-    defaultValue: true as boolean,
-    fromCookie: () => {
-      const value = storage.getItem('plannotator-semantic-diff-enabled');
-      return value === 'true' ? true : value === 'false' ? false : undefined;
-    },
-    toCookie: (value: boolean) =>
-      storage.setItem('plannotator-semantic-diff-enabled', String(value)),
-    serverKey: 'reviewAnalysis',
-    fromServer: (serverConfig: Record<string, unknown>) => {
-      const value = (serverConfig.reviewAnalysis as Record<string, unknown> | undefined)?.semanticDiff;
-      return typeof value === 'boolean' ? value : undefined;
-    },
-    toServer: (value: boolean) => ({ reviewAnalysis: { semanticDiff: value } }),
-  },
   callFlowEnabled: {
     defaultValue: false as boolean,
     fromCookie: () => {
