@@ -258,6 +258,22 @@ describe.skipIf(!hasDom)("the thread's reply box while it says Transcribing", ()
   };
   const boxText = (el: HTMLElement) => (el.querySelector('textarea:not([data-question-other])') as HTMLTextAreaElement | null)?.value ?? '';
 
+  /** The thread with its reply box open, the mic held and listening. */
+  async function recording(): Promise<HTMLElement> {
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    act(() => {
+      root = createRoot(host!);
+    });
+    show(thread());
+    await settle();
+    await openBox(host);
+    await speak(host.querySelector('[data-voice-mic]')!);
+    expect(host.querySelector('[data-voice-line="hold"]')).not.toBeNull();
+    expect(mic).toEqual([]);
+    return host;
+  }
+
   /** The thread with its reply box open, a take transcribing in it. */
   async function transcribing(): Promise<HTMLElement> {
     host = document.createElement('div');
@@ -339,6 +355,52 @@ describe.skipIf(!hasDom)("the thread's reply box while it says Transcribing", ()
     expect(el.textContent).not.toContain(LATE_VOICE_MISSED);
     await openBox(el);
     expect(boxText(el)).toContain('dictated words');
+  });
+
+  test('another thread opened mid-recording: the mic stops, the other box starts clean, and what was said goes to its own draft', async () => {
+    const el = await recording();
+    show(other());
+    await settle();
+    expect(mic).toEqual(['stopped', 'transcribing']);
+    expect(tick).toBeNull();
+    await openBox(el);
+    expect(el.querySelectorAll('[data-voice-line]').length).toBe(0);
+    await hear('said while recording');
+    expect(boxText(el)).not.toContain('said while recording');
+    expect(posted.some((p) => p.path.includes(OTHER) && String(p.body.body ?? '').includes('said while recording'))).toBe(false);
+    expect(draftSaves().some((body) => body.includes('said while recording'))).toBe(true);
+  });
+
+  test('the thread left mid-recording (the pane goes): the mic stops and what was said goes to its draft', async () => {
+    await recording();
+    act(() => root!.render(<div className="pn-inbox" />));
+    await settle();
+    expect(mic).toEqual(['stopped', 'transcribing']);
+    await hear('said while recording');
+    expect(draftSaves().some((body) => body.includes('said while recording'))).toBe(true);
+  });
+
+  test('a cover mid-recording: the mic stops and what was said lands in the box under it', async () => {
+    const el = await recording();
+    act(() => {
+      root!.render(
+        <div className="pn-inbox">
+          <ThreadPane thread={thread()} covered sent={null} onQuestions={noop} onChanged={async () => {}} onClose={noop} file={null} onOpenFile={noop} onOpenGuide={noop} />
+        </div>,
+      );
+    });
+    await settle();
+    expect(mic).toEqual(['stopped', 'transcribing']);
+    await hear('said while recording');
+    expect(boxText(el)).toContain('said while recording');
+  });
+
+  test("closing the box mid-recording lets the take go, as New message's close does", async () => {
+    const el = await recording();
+    await act(async () => (el.querySelector('[data-reply-close]') as HTMLButtonElement).click());
+    await settle();
+    expect(mic).toEqual(['aborted']);
+    expect(answer).toBeNull();
   });
 
   test('Discard drops the take with the reply: nothing lands afterwards', async () => {

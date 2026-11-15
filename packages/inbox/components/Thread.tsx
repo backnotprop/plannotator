@@ -127,7 +127,7 @@ import { sendFailure } from '../sendFailure';
 import { ReplyRecipient } from './ReplyRecipient';
 import { PhoneReplyRecipient } from './PhoneReplyRecipient';
 import { aimable, canTakeAlone, headFolder, knownRecipients, latestBy, RECIPIENTS_MAX, recipientRows, recipientState, sessionFolder, toggleRecipient, type RecipientPerson, type RecipientRow } from '../replyRecipients';
-import { useThreadVoice } from '../thread/useThreadVoice';
+import { coverVoice, useThreadVoice } from '../thread/useThreadVoice';
 import { spaced } from '../voiceField';
 import type { VoiceLate } from '../voiceSession';
 import type { FullScreenComposerValue } from './FullScreenComposer';
@@ -1678,9 +1678,9 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   screenRef.current = onScreenChange;
   const paneCovered = covered || fileCovers || artifactsOn;
   showingRef.current = !paneCovered;
-  // The status and Cancel go under the cover with the box (the pane stays mounted): no mic goes on unseen, and a take being transcribed still lands.
+  // The status and Cancel go under the cover with the box (the pane stays mounted): no mic goes on unseen, and what was said still lands.
   useEffect(() => {
-    if (paneCovered && voice.session.view().phase !== 'sending') voice.session.covered();
+    if (paneCovered) coverVoice(voice.session);
   }, [paneCovered, voice.session]);
   useEffect(() => {
     screenRef.current?.({ threadId: thread.thread_id, covered: paneCovered });
