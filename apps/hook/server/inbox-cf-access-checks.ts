@@ -72,6 +72,7 @@ export async function runOutsideChecks(input: OutsideCheckInput): Promise<Outsid
   }
   const child = Bun.spawn([input.binary, "tunnel", "--no-autoupdate", "run"], {
     env: tunnelEnv(readFileSync(input.tokenFile, "utf8").trim()),
+    windowsHide: true,
     stdin: "ignore",
     stdout: "ignore",
     stderr: "pipe",

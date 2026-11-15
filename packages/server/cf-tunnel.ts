@@ -129,6 +129,7 @@ export function createCfTunnel(partial: Partial<CfTunnelOptions> & { dataDir: st
     startedAt = options.now();
     const own = Bun.spawn([options.binary, "tunnel", "--no-autoupdate", "run"], {
       env: tunnelEnv(token),
+      windowsHide: true,
       stdin: "ignore",
       stdout: "pipe",
       stderr: "pipe",
