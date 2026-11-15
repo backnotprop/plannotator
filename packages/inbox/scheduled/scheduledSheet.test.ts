@@ -39,7 +39,7 @@ test('at phone width the list gives the name the room: no Runs column, one track
       phone.set(rule.selector, decls);
     });
   });
-  expect(phone.get('.st-scols > .st-runs')?.get('display')).toBe('none');
+  expect(phone.get('.st-scols > .st-count')?.get('display')).toBe('none');
   // Run, Name, Last run, the menu: the short row's five cells less Runs; Run is one fixed column, as beside the editor.
   const tracks = (columns: string | undefined) => columns?.replace(/minmax\([^)]*\)/g, 'm').trim().split(/\s+/) ?? [];
   expect(tracks(phone.get('.st-scols')?.get('grid-template-columns'))).toEqual(['24px', 'm', '9.4em', '24px']);

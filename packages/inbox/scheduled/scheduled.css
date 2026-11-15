@@ -73,6 +73,9 @@
 .st-scols { display: grid; grid-template-columns: 24px minmax(0, 1fr) 40px 112px 28px; column-gap: var(--st-sgap); align-items: start; }
 .st-shead > * { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .st-shead { padding: 0 12px; height: 30px; align-content: center; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 500; color: var(--muted-foreground); }
+/* Every heading on one baseline, in one size and colour: Runs centred over its counts, Last run flush with the times. */
+.st-shead > [role="columnheader"] { font-size: inherit; line-height: 18px; color: inherit; }
+.st-num.st-count { text-align: center; }
 .st-srow { padding: 9px 12px; border-radius: 8px; cursor: pointer; }
 .st-srow + .st-srow { margin-top: 2px; }
 .st-srow:hover { background: color-mix(in oklch, var(--muted) 45%, transparent); }
@@ -188,7 +191,7 @@ button.st-foot-mark:hover { background: var(--muted); }
   /* A phone gives the name the room: Runs is in the editor, and a long name takes two lines. */
   .st-short { --st-sgap: 10px; }
   .st-scols { grid-template-columns: 24px minmax(0, 1fr) 9.4em 24px; }
-  .st-scols > .st-runs { display: none; }
+  .st-scols > .st-count { display: none; }
   .st-sname .st-open { white-space: normal; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
   .st-kv { grid-template-columns: minmax(0, 1fr); gap: 4px; }
   .st-next { margin-left: 0; width: 100%; }

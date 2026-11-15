@@ -135,7 +135,7 @@ function ShortRow({ row, acts, now, selected }: { row: InboxScheduledRow; acts: 
         </button>
         <span className="st-when">{shortScheduleWords(row)}</span>
       </span>
-      <span role="cell" className="st-num st-runs">
+      <span role="cell" className="st-num st-count">
         {formatCount(row.runs)}
       </span>
       <span role="cell" className="st-num">
@@ -164,7 +164,7 @@ export function ScheduledTable({ rows, acts, short, selected }: { rows: readonly
         <div className="st-shead st-scols" role="row">
           <span role="columnheader" aria-label="Run" />
           <span role="columnheader">Routine</span>
-          <span role="columnheader" className="st-num st-runs">Runs</span>
+          <span role="columnheader" className="st-num st-count">Runs</span>
           <span role="columnheader" className="st-num" aria-sort="descending">Last run</span>
           <span />
         </div>
