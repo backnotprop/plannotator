@@ -651,7 +651,8 @@ function kindOf(n: Node): 'binding' | 'member' | 'type' {
   if (p?.type === 'variable_name' && p.parent?.type === 'property_element') return 'member';
   if (p?.type === 'call' && p.childForFieldName('receiver') && p.childForFieldName('method')?.id === n.id) return 'member';
   // `user.name`, `self.name`, `x.Name`, `obj->name`: the name after the dot.
-  if (p && /^(member_expression|attribute|field_expression|selector_expression|field_access|member_access_expression)$/.test(p.type) && p.namedChildren.length > 1 && p.namedChildren.at(-1)?.id === n.id) return 'member';
+  if (p?.type === 'navigation_expression' && p.namedChild(0)?.type === 'this_expression' && p.namedChildren.length === 2 && p.namedChildren.at(-1)?.id === n.id) return 'binding';
+  if (p && /^(member_expression|attribute|field_expression|selector_expression|field_access|member_access_expression|navigation_expression)$/.test(p.type) && p.namedChildren.length > 1 && p.namedChildren.at(-1)?.id === n.id) return 'member';
   if (/property_identifier|field_identifier/.test(n.type)) return 'member';
   return 'binding';
 }
@@ -664,8 +665,9 @@ const DECLARING_PARENT = /(declaration|declarator|definition|parameter|specifier
 
 /** The declared type next to a name, compared with this rename applied (a type can be the thing renamed). */
 function declaredTypeChanged(o: Node, n: Node, from: string, to: string): boolean {
-  const ta = o.parent?.childForFieldName('type');
-  const tb = n.parent?.childForFieldName('type');
+  const typeOf = (d: Node | null) => d?.childForFieldName('type') ?? (d && /^(variable_declaration|parameter|class_parameter)$/.test(d.type) ? d.namedChildren.find((c) => !!c && /^(user_type|nullable_type|function_type|parenthesized_type|not_nullable_type)$/.test(c.type)) : null) ?? null;
+  const ta = typeOf(o.parent);
+  const tb = typeOf(n.parent);
   if (!ta && !tb) return false;
   if (!ta || !tb) return true;
   const swap = (t: string) => t.replace(/\w+/g, (w) => (w === from ? to : w)).replace(/\s+/g, '');
@@ -710,6 +712,9 @@ function isDeclarationName(id: Node): boolean {
   if (p.type === 'operator_assignment') return p.childForFieldName('left')?.id === id.id;
   if (p.type === 'for') return p.childForFieldName('pattern')?.id === id.id;
   if (p.type === 'method' || p.type === 'singleton_method' || (id.type === 'constant' && (p.type === 'class' || p.type === 'module'))) return p.childForFieldName('name')?.id === id.id;
+  if (/^(variable_declaration|parameter|class_parameter|enum_entry|catch_block|type_parameter)$/.test(p.type) && !p.childForFieldName('name')) return p.namedChildren.find((c) => c?.type === 'identifier')?.id === id.id;
+  if (p.type === 'import') return p.namedChildren.some((c) => c?.type === 'qualified_identifier') && p.namedChildren.find((c) => c?.type === 'identifier')?.id === id.id;
+  if (p.type === 'type_alias') return p.childForFieldName('type')?.id === id.id;
   if (!DECLARING_PARENT.test(p.type)) return false;
   // `import { A }` -> `import { B }` brings in a different thing; only a local
   // alias (`import { A as b }`) is a name this file owns.

@@ -1,0 +1,667 @@
+[
+  {
+    "id": "kt-ext-same-name",
+    "area": "trap",
+    "language": "kotlin",
+    "title": "Extension functions String.shout and Int.shout: one moved, the other edited",
+    "expected": "String.shout moved to the end unchanged (moved); Int.shout edited in place (\"!\" -> \"!!\"). The two share a name but not a receiver, so Int.shout must not pair with String.shout.",
+    "status": "ok",
+    "old": "package demo\n\nfun String.shout(): String {\n    val loud = uppercase()\n    return loud + \"!\"\n}\n\nfun Int.shout(): String {\n    val loud = toString()\n    return loud + \"!\"\n}\n\nfun whisper(s: String): String {\n    val quiet = s.lowercase()\n    return quiet + \"...\"\n}\n",
+    "new": "package demo\n\nfun Int.shout(): String {\n    val loud = toString()\n    return loud + \"!!\"\n}\n\nfun whisper(s: String): String {\n    val quiet = s.lowercase()\n    return quiet + \"...\"\n}\n\nfun String.shout(): String {\n    val loud = uppercase()\n    return loud + \"!\"\n}\n",
+    "ops": [
+      {
+        "type": "moved",
+        "old": [
+          [
+            3,
+            6
+          ]
+        ],
+        "new": [
+          [
+            13,
+            16
+          ]
+        ]
+      }
+    ],
+    "never": [
+      {
+        "type": "movedWithEdit"
+      },
+      {
+        "type": "renamed"
+      },
+      {
+        "type": "moved",
+        "old": [
+          [
+            8,
+            11
+          ]
+        ],
+        "new": [
+          [
+            3,
+            6
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "kt-ext-receiver-change",
+    "area": "trap",
+    "language": "kotlin",
+    "title": "Extension receiver changed from String to CharSequence",
+    "expected": "Edited: a different receiver type is a different function (and the body changed to toString().uppercase()). Not renamed, even though String -> CharSequence is one identifier swapped on the header line.",
+    "status": "ok",
+    "old": "package demo\n\nfun String.shout(): String {\n    val loud = uppercase()\n    return loud + \"!\"\n}\n\nfun Int.double(): Int = this * 2\n",
+    "new": "package demo\n\nfun CharSequence.shout(): String {\n    val loud = toString().uppercase()\n    return loud + \"!\"\n}\n\nfun Int.double(): Int = this * 2\n",
+    "ops": [],
+    "never": [
+      {
+        "type": "renamed"
+      },
+      {
+        "type": "reformatted"
+      },
+      {
+        "type": "moved"
+      }
+    ]
+  },
+  {
+    "id": "kt-ext-receiver-only",
+    "area": "trap",
+    "language": "kotlin",
+    "title": "Extension receiver Int -> Long with matching literal change",
+    "expected": "Edited: changing the receiver type changes which values the function applies to; never renamed.",
+    "status": "ok",
+    "old": "package demo\n\nfun String.isBlankish(): Boolean = trim().isEmpty()\n\nfun Int.isEven(): Boolean = this % 2 == 0\n",
+    "new": "package demo\n\nfun String.isBlankish(): Boolean = trim().isEmpty()\n\nfun Long.isEven(): Boolean = this % 2 == 0L\n",
+    "ops": [],
+    "never": [
+      {
+        "type": "renamed"
+      },
+      {
+        "type": "reformatted"
+      }
+    ]
+  },
+  {
+    "id": "kt-ext-property-move",
+    "area": "trap",
+    "language": "kotlin",
+    "title": "Extension property val Int.isEven moved past a same-named Long.isEven",
+    "expected": "Int.isEven moved to the end unchanged (moved). Long.isEven is a different declaration and is untouched.",
+    "status": "ok",
+    "old": "package demo\n\nval Int.isEven: Boolean\n    get() = this % 2 == 0\n\nval Long.isEven: Boolean\n    get() = this % 2L == 0L\n\nfun describe(n: Int): String {\n    val kind = if (n.isEven) \"even\" else \"odd\"\n    return \"$n is $kind\"\n}\n",
+    "new": "package demo\n\nval Long.isEven: Boolean\n    get() = this % 2L == 0L\n\nfun describe(n: Int): String {\n    val kind = if (n.isEven) \"even\" else \"odd\"\n    return \"$n is $kind\"\n}\n\nval Int.isEven: Boolean\n    get() = this % 2 == 0\n",
+    "ops": [
+      {
+        "type": "moved",
+        "old": [
+          [
+            3,
+            4
+          ]
+        ],
+        "new": [
+          [
+            11,
+            12
+          ]
+        ]
+      }
+    ],
+    "never": [
+      {
+        "type": "movedWithEdit"
+      },
+      {
+        "type": "renamed"
+      }
+    ]
+  },
+  {
+    "id": "kt-companion-into",
+    "area": "trap",
+    "language": "kotlin",
+    "title": "Member function moved from the class body into its companion object",
+    "expected": "Edited, never plain moved: fromFahrenheit is now called on the class (Temperature.fromFahrenheit) instead of on an instance, and it loses access to the instance (decided context rule).",
+    "status": "ok",
+    "old": "package demo\n\nclass Temperature(val celsius: Double) {\n    fun fahrenheit(): Double = celsius * 9 / 5 + 32\n\n    fun fromFahrenheit(f: Double): Temperature {\n        val c = (f - 32) * 5 / 9\n        return Temperature(c)\n    }\n\n    companion object {\n        val ZERO = Temperature(0.0)\n    }\n}\n",
+    "new": "package demo\n\nclass Temperature(val celsius: Double) {\n    fun fahrenheit(): Double = celsius * 9 / 5 + 32\n\n    companion object {\n        val ZERO = Temperature(0.0)\n\n        fun fromFahrenheit(f: Double): Temperature {\n            val c = (f - 32) * 5 / 9\n            return Temperature(c)\n        }\n    }\n}\n",
+    "ops": [],
+    "never": [
+      {
+        "type": "moved"
+      },
+      {
+        "type": "movedWithEdit"
+      }
+    ]
+  },
+  {
+    "id": "kt-companion-out",
+    "area": "trap",
+    "language": "kotlin",
+    "title": "Function moved out of the companion object into the class body",
+    "expected": "Edited, never plain moved: startingAt goes from Counter.startingAt(n) to an instance method (decided context rule).",
+    "status": "ok",
+    "old": "package demo\n\nclass Counter(private var count: Int) {\n    fun increment() {\n        count += 1\n    }\n\n    companion object {\n        fun startingAt(n: Int): Counter {\n            val start = maxOf(0, n)\n            return Counter(start)\n        }\n\n        const val MAX = 100\n    }\n}\n",
+    "new": "package demo\n\nclass Counter(private var count: Int) {\n    fun increment() {\n        count += 1\n    }\n\n    fun startingAt(n: Int): Counter {\n        val start = maxOf(0, n)\n        return Counter(start)\n    }\n\n    companion object {\n        const val MAX = 100\n    }\n}\n",
+    "ops": [],
+    "never": [
+      {
+        "type": "moved"
+      },
+      {
+        "type": "movedWithEdit"
+      }
+    ]
+  },
+  {
+    "id": "kt-companion-within",
+    "area": "trap",
+    "language": "kotlin",
+    "title": "Control: a function moved within the companion object",
+    "expected": "Moved: ofDollars stays in the same companion, so nothing about how it is called changes.",
+    "status": "ok",
+    "old": "package demo\n\nclass Money(val cents: Long) {\n    fun plus(other: Money): Money = Money(cents + other.cents)\n\n    companion object {\n        fun ofDollars(d: Long): Money {\n            val cents = d * 100\n            return Money(cents)\n        }\n\n        fun parse(s: String): Money {\n            val parts = s.split(\".\")\n            val dollars = parts[0].toLong()\n            val cents = parts.getOrNull(1)?.toLong() ?: 0L\n            return Money(dollars * 100 + cents)\n        }\n\n        val ZERO = Money(0)\n    }\n}\n",
+    "new": "package demo\n\nclass Money(val cents: Long) {\n    fun plus(other: Money): Money = Money(cents + other.cents)\n\n    companion object {\n        fun parse(s: String): Money {\n            val parts = s.split(\".\")\n            val dollars = parts[0].toLong()\n            val cents = parts.getOrNull(1)?.toLong() ?: 0L\n            return Money(dollars * 100 + cents)\n        }\n\n        val ZERO = Money(0)\n\n        fun ofDollars(d: Long): Money {\n            val cents = d * 100\n            return Money(cents)\n        }\n    }\n}\n",
+    "ops": [
+      {
+        "type": "moved",
+        "old": [
+          [
+            7,
+            10
+          ]
+        ],
+        "new": [
+          [
+            16,
+            19
+          ]
+        ]
+      }
+    ],
+    "never": [
+      {
+        "type": "movedWithEdit"
+      }
+    ]
+  },
+  {
+    "id": "kt-companion-named-into",
+    "area": "trap",
+    "language": "kotlin",
+    "title": "Function moved into a named companion object (companion object Factory)",
+    "expected": "Edited, never plain moved: guest() becomes User.guest() / User.Factory.guest() instead of an instance method.",
+    "status": "ok",
+    "old": "package demo\n\nclass User(val name: String, val age: Int) {\n    fun isAdult(): Boolean = age >= 18\n\n    fun guest(): User {\n        val label = \"guest\"\n        return User(label, 0)\n    }\n\n    companion object Factory {\n        fun named(name: String): User = User(name, 0)\n    }\n}\n",
+    "new": "package demo\n\nclass User(val name: String, val age: Int) {\n    fun isAdult(): Boolean = age >= 18\n\n    companion object Factory {\n        fun named(name: String): User = User(name, 0)\n\n        fun guest(): User {\n            val label = \"guest\"\n            return User(label, 0)\n        }\n    }\n}\n",
+    "ops": [],
+    "never": [
+      {
+        "type": "moved"
+      },
+      {
+        "type": "movedWithEdit"
+      }
+    ]
+  },
+  {
+    "id": "kt-companion-named-within",
+    "area": "trap",
+    "language": "kotlin",
+    "title": "Control: a function moved within a named companion object",
+    "expected": "Moved: guest() moves to the end of the same companion Factory.",
+    "status": "ok",
+    "old": "package demo\n\nclass User(val name: String, val age: Int) {\n    companion object Factory {\n        fun guest(): User {\n            val label = \"guest\"\n            return User(label, 0)\n        }\n\n        fun named(name: String): User = User(name, 0)\n\n        fun adult(name: String): User {\n            val age = 18\n            return User(name, age)\n        }\n    }\n}\n",
+    "new": "package demo\n\nclass User(val name: String, val age: Int) {\n    companion object Factory {\n        fun named(name: String): User = User(name, 0)\n\n        fun adult(name: String): User {\n            val age = 18\n            return User(name, age)\n        }\n\n        fun guest(): User {\n            val label = \"guest\"\n            return User(label, 0)\n        }\n    }\n}\n",
+    "ops": [
+      {
+        "type": "moved",
+        "old": [
+          [
+            5,
+            8
+          ]
+        ],
+        "new": [
+          [
+            12,
+            15
+          ]
+        ]
+      }
+    ],
+    "never": [
+      {
+        "type": "movedWithEdit"
+      }
+    ]
+  },
+  {
+    "id": "kt-data-reorder",
+    "area": "trap",
+    "language": "kotlin",
+    "title": "Data class primary-constructor parameters reordered",
+    "expected": "Edited: component1()/component2(), destructuring and positional calls Point(1, 2) now mean the other field. Never moved or reordered.",
+    "status": "ok",
+    "old": "package demo\n\ndata class Point(\n    val x: Int,\n    val y: Int,\n    val label: String,\n) {\n    fun norm(): Int = x * x + y * y\n}\n",
+    "new": "package demo\n\ndata class Point(\n    val y: Int,\n    val x: Int,\n    val label: String,\n) {\n    fun norm(): Int = x * x + y * y\n}\n",
+    "ops": [],
+    "never": [
+      {
+        "type": "moved"
+      },
+      {
+        "type": "movedWithEdit"
+      },
+      {
+        "type": "reordered"
+      },
+      {
+        "type": "reformatted"
+      }
+    ]
+  },
+  {
+    "id": "kt-data-reorder-oneline",
+    "area": "trap",
+    "language": "kotlin",
+    "title": "Data class parameters reordered on one line",
+    "expected": "Edited: Range(0, 10) now sets end=0, start=10. Never reordered, moved or reformatted.",
+    "status": "ok",
+    "old": "package demo\n\ndata class Range(val start: Int, val end: Int)\n\nfun width(r: Range): Int = r.end - r.start\n",
+    "new": "package demo\n\ndata class Range(val end: Int, val start: Int)\n\nfun width(r: Range): Int = r.end - r.start\n",
+    "ops": [],
+    "never": [
+      {
+        "type": "moved"
+      },
+      {
+        "type": "reordered"
+      },
+      {
+        "type": "reformatted"
+      },
+      {
+        "type": "renamed"
+      }
+    ]
+  },
+  {
+    "id": "kt-expr-to-block",
+    "area": "trap",
+    "language": "kotlin",
+    "title": "Expression body rewritten as a block body with return",
+    "expected": "Edited, not reformatted: the tokens differ (\": Int\", braces, return) and the tree shape differs.",
+    "status": "ok",
+    "old": "package demo\n\nclass Rect(val w: Int, val h: Int) {\n    fun area() = w * h\n\n    fun perimeter(): Int = 2 * (w + h)\n}\n",
+    "new": "package demo\n\nclass Rect(val w: Int, val h: Int) {\n    fun area(): Int {\n        return w * h\n    }\n\n    fun perimeter(): Int = 2 * (w + h)\n}\n",
+    "ops": [],
+    "never": [
+      {
+        "type": "reformatted"
+      },
+      {
+        "type": "renamed"
+      }
+    ]
+  },
+  {
+    "id": "kt-extract-expr-helper",
+    "area": "trap",
+    "language": "kotlin",
+    "title": "Extract whose new helper has an expression body",
+    "expected": "extractedFunction: the items.filter.sumOf chain moved from total() into subtotal() = ..., which returns it; total() now calls subtotal().",
+    "status": "ok",
+    "old": "package demo\n\nclass Cart(val items: List<Item>) {\n    fun total(): Double {\n        val sum = items\n            .filter { it.qty > 0 }\n            .sumOf { it.price * it.qty }\n        val discount = if (sum > 100.0) sum * 0.1 else 0.0\n        return sum - discount\n    }\n}\n\ndata class Item(val price: Double, val qty: Int)\n",
+    "new": "package demo\n\nclass Cart(val items: List<Item>) {\n    fun total(): Double {\n        val sum = subtotal()\n        val discount = if (sum > 100.0) sum * 0.1 else 0.0\n        return sum - discount\n    }\n\n    private fun subtotal() = items\n        .filter { it.qty > 0 }\n        .sumOf { it.price * it.qty }\n}\n\ndata class Item(val price: Double, val qty: Int)\n",
+    "ops": [
+      {
+        "type": "extractedFunction",
+        "old": [
+          [
+            5,
+            7
+          ]
+        ],
+        "new": [
+          [
+            5,
+            5
+          ],
+          [
+            10,
+            12
+          ]
+        ]
+      }
+    ],
+    "never": [
+      {
+        "type": "moved"
+      },
+      {
+        "type": "reformatted"
+      }
+    ]
+  },
+  {
+    "id": "kt-inline-expr-helper",
+    "area": "trap",
+    "language": "kotlin",
+    "title": "Inline of a helper with an expression body",
+    "expected": "inlinedFunction: netAmount() = ... removed and its expression now sits in due() in place of the call.",
+    "status": "ok",
+    "old": "package demo\n\nclass Invoice(val lines: List<Line>, val rate: Double) {\n    fun due(): Double {\n        val net = netAmount()\n        val tax = net * rate\n        return net + tax\n    }\n\n    private fun netAmount() = lines\n        .filterNot { it.void }\n        .sumOf { it.amount }\n}\n\ndata class Line(val amount: Double, val void: Boolean)\n",
+    "new": "package demo\n\nclass Invoice(val lines: List<Line>, val rate: Double) {\n    fun due(): Double {\n        val net = lines\n            .filterNot { it.void }\n            .sumOf { it.amount }\n        val tax = net * rate\n        return net + tax\n    }\n}\n\ndata class Line(val amount: Double, val void: Boolean)\n",
+    "ops": [
+      {
+        "type": "inlinedFunction",
+        "old": [
+          [
+            5,
+            5
+          ],
+          [
+            10,
+            12
+          ]
+        ],
+        "new": [
+          [
+            5,
+            7
+          ]
+        ]
+      }
+    ],
+    "never": [
+      {
+        "type": "moved"
+      },
+      {
+        "type": "reformatted"
+      }
+    ]
+  },
+  {
+    "id": "kt-oneline-reflow",
+    "area": "trap",
+    "language": "kotlin",
+    "title": "One-line class body class A { val x = 1 } reflowed to three lines",
+    "expected": "Reformatted: same tokens and same tree, only line breaks and indentation differ.",
+    "status": "ok",
+    "old": "package demo\n\nclass A { val x = 1 }\n\nfun use(a: A): Int = a.x + 1\n",
+    "new": "package demo\n\nclass A {\n    val x = 1\n}\n\nfun use(a: A): Int = a.x + 1\n",
+    "ops": [
+      {
+        "type": "reformatted",
+        "old": [
+          [
+            3,
+            3
+          ]
+        ],
+        "new": [
+          [
+            3,
+            5
+          ]
+        ]
+      }
+    ],
+    "never": [
+      {
+        "type": "moved"
+      }
+    ]
+  },
+  {
+    "id": "kt-oneline-collapse",
+    "area": "trap",
+    "language": "kotlin",
+    "title": "Object body collapsed onto one line",
+    "expected": "Reformatted: object Defaults { const val PORT = 8080 } has the same tokens as the three-line form.",
+    "status": "ok",
+    "old": "package demo\n\nobject Defaults {\n    const val PORT = 8080\n}\n\nfun port(): Int = Defaults.PORT\n",
+    "new": "package demo\n\nobject Defaults { const val PORT = 8080 }\n\nfun port(): Int = Defaults.PORT\n",
+    "ops": [
+      {
+        "type": "reformatted",
+        "old": [
+          [
+            3,
+            5
+          ]
+        ],
+        "new": [
+          [
+            3,
+            3
+          ]
+        ]
+      }
+    ],
+    "never": [
+      {
+        "type": "moved"
+      }
+    ]
+  },
+  {
+    "id": "kt-overload-pairing",
+    "area": "trap",
+    "language": "kotlin",
+    "title": "Overloads scale(by: Double) / scale(by: Int): one moved, the other edited",
+    "expected": "scale(Double) moved to the end unchanged (moved); scale(Int) edited in place (by -> by.toDouble()). Each overload pairs with its own partner, keyed by parameter types.",
+    "status": "ok",
+    "old": "package demo\n\nclass Vec(var x: Double, var y: Double) {\n    fun scale(by: Double) {\n        x *= by\n        y *= by\n    }\n\n    fun length(): Double {\n        val sq = x * x + y * y\n        return Math.sqrt(sq)\n    }\n\n    fun flip() {\n        x = -x\n        y = -y\n    }\n\n    fun scale(by: Int) {\n        x *= by\n        y *= by\n    }\n}\n",
+    "new": "package demo\n\nclass Vec(var x: Double, var y: Double) {\n    fun length(): Double {\n        val sq = x * x + y * y\n        return Math.sqrt(sq)\n    }\n\n    fun flip() {\n        x = -x\n        y = -y\n    }\n\n    fun scale(by: Int) {\n        x *= by.toDouble()\n        y *= by.toDouble()\n    }\n\n    fun scale(by: Double) {\n        x *= by\n        y *= by\n    }\n}\n",
+    "ops": [
+      {
+        "type": "moved",
+        "old": [
+          [
+            4,
+            7
+          ]
+        ],
+        "new": [
+          [
+            19,
+            22
+          ]
+        ]
+      }
+    ],
+    "never": [
+      {
+        "type": "renamed"
+      },
+      {
+        "type": "movedWithEdit"
+      },
+      {
+        "type": "moved",
+        "old": [
+          [
+            19,
+            22
+          ]
+        ],
+        "new": [
+          [
+            14,
+            17
+          ]
+        ]
+      }
+    ]
+  },
+  {
+    "id": "kt-overload-param-type",
+    "area": "trap",
+    "language": "kotlin",
+    "title": "Overload parameter type Int -> Long",
+    "expected": "Edited: a different parameter type is a different overload (and different callers resolve to it). Never renamed, though Int -> Long is a single identifier swap.",
+    "status": "ok",
+    "old": "package demo\n\nclass Vec(var x: Double, var y: Double) {\n    fun scale(by: Double) {\n        x *= by\n        y *= by\n    }\n\n    fun scale(by: Int) {\n        x *= by\n        y *= by\n    }\n}\n",
+    "new": "package demo\n\nclass Vec(var x: Double, var y: Double) {\n    fun scale(by: Double) {\n        x *= by\n        y *= by\n    }\n\n    fun scale(by: Long) {\n        x *= by\n        y *= by\n    }\n}\n",
+    "ops": [],
+    "never": [
+      {
+        "type": "renamed"
+      },
+      {
+        "type": "reformatted"
+      },
+      {
+        "type": "moved"
+      }
+    ]
+  },
+  {
+    "id": "kt-toplevel-move",
+    "area": "trap",
+    "language": "kotlin",
+    "title": "Control: top-level function moved to the end of the file",
+    "expected": "Moved: parseLine is unchanged and still top-level.",
+    "status": "ok",
+    "old": "package demo\n\nfun parseLine(line: String): Pair<String, String> {\n    val idx = line.indexOf('=')\n    val key = line.substring(0, idx).trim()\n    val value = line.substring(idx + 1).trim()\n    return key to value\n}\n\nfun parseAll(text: String): Map<String, String> {\n    return text.lines()\n        .filter { it.isNotBlank() }\n        .associate { parseLine(it) }\n}\n\nfun main() {\n    println(parseAll(\"a=1\\nb=2\"))\n}\n",
+    "new": "package demo\n\nfun parseAll(text: String): Map<String, String> {\n    return text.lines()\n        .filter { it.isNotBlank() }\n        .associate { parseLine(it) }\n}\n\nfun main() {\n    println(parseAll(\"a=1\\nb=2\"))\n}\n\nfun parseLine(line: String): Pair<String, String> {\n    val idx = line.indexOf('=')\n    val key = line.substring(0, idx).trim()\n    val value = line.substring(idx + 1).trim()\n    return key to value\n}\n",
+    "ops": [
+      {
+        "type": "moved",
+        "old": [
+          [
+            3,
+            8
+          ]
+        ],
+        "new": [
+          [
+            13,
+            18
+          ]
+        ]
+      }
+    ],
+    "never": [
+      {
+        "type": "movedWithEdit"
+      }
+    ]
+  },
+  {
+    "id": "kt-rename-callsites",
+    "area": "trap",
+    "language": "kotlin",
+    "title": "Function renamed with its call sites (fmt -> formatCents)",
+    "expected": "Renamed fmt -> formatCents on the declaration and both calls; nothing else changed.",
+    "status": "ok",
+    "old": "package demo\n\nfun fmt(amount: Long): String {\n    val whole = amount / 100\n    val frac = amount % 100\n    return \"$whole.${frac.toString().padStart(2, '0')}\"\n}\n\nfun receipt(total: Long, tax: Long): String {\n    val a = fmt(total)\n    val b = fmt(tax)\n    return \"total $a (tax $b)\"\n}\n",
+    "new": "package demo\n\nfun formatCents(amount: Long): String {\n    val whole = amount / 100\n    val frac = amount % 100\n    return \"$whole.${frac.toString().padStart(2, '0')}\"\n}\n\nfun receipt(total: Long, tax: Long): String {\n    val a = formatCents(total)\n    val b = formatCents(tax)\n    return \"total $a (tax $b)\"\n}\n",
+    "ops": [
+      {
+        "type": "renamed",
+        "old": [
+          [
+            3,
+            3
+          ],
+          [
+            10,
+            10
+          ],
+          [
+            11,
+            11
+          ]
+        ],
+        "new": [
+          [
+            3,
+            3
+          ],
+          [
+            10,
+            10
+          ],
+          [
+            11,
+            11
+          ]
+        ]
+      }
+    ],
+    "never": [
+      {
+        "type": "moved"
+      },
+      {
+        "type": "reformatted"
+      }
+    ]
+  },
+  {
+    "id": "kt-rename-hides-edit",
+    "area": "trap",
+    "language": "kotlin",
+    "title": "Rename fmt -> formatCents that hides a changed argument on one call line",
+    "expected": "Renamed on lines 3 and 10; line 11 also changed its argument (tax -> tax + total), so it must not be covered by renamed: it stays an edit.",
+    "status": "ok",
+    "old": "package demo\n\nfun fmt(amount: Long): String {\n    val whole = amount / 100\n    val frac = amount % 100\n    return \"$whole.${frac.toString().padStart(2, '0')}\"\n}\n\nfun receipt(total: Long, tax: Long): String {\n    val a = fmt(total)\n    val b = fmt(tax)\n    return \"total $a (tax $b)\"\n}\n",
+    "new": "package demo\n\nfun formatCents(amount: Long): String {\n    val whole = amount / 100\n    val frac = amount % 100\n    return \"$whole.${frac.toString().padStart(2, '0')}\"\n}\n\nfun receipt(total: Long, tax: Long): String {\n    val a = formatCents(total)\n    val b = formatCents(tax + total)\n    return \"total $a (tax $b)\"\n}\n",
+    "ops": [
+      {
+        "type": "renamed",
+        "old": [
+          [
+            3,
+            3
+          ],
+          [
+            10,
+            10
+          ]
+        ],
+        "new": [
+          [
+            3,
+            3
+          ],
+          [
+            10,
+            10
+          ]
+        ]
+      }
+    ],
+    "never": [
+      {
+        "type": "renamed",
+        "old": [
+          [
+            11,
+            11
+          ]
+        ],
+        "new": [
+          [
+            11,
+            11
+          ]
+        ]
+      }
+    ]
+  }
+]

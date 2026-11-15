@@ -1,6 +1,6 @@
 // Which parser reads a file, by its name. Kept apart from the parsers so a page can ask
 // without loading them.
-export type LanguageId = 'go' | 'typescript' | 'tsx' | 'rust' | 'python' | 'java' | 'csharp' | 'php' | 'ruby';
+export type LanguageId = 'go' | 'typescript' | 'tsx' | 'rust' | 'python' | 'java' | 'csharp' | 'php' | 'ruby' | 'kotlin';
 
 export function languageForPath(path: string): LanguageId | null {
   if (path.endsWith('.go')) return 'go';
@@ -10,6 +10,7 @@ export function languageForPath(path: string): LanguageId | null {
   if (path.endsWith('.cs')) return 'csharp';
   if (/\.(php|phtml)$/.test(path) && !path.endsWith('.blade.php')) return 'php';
   if (/\.(rb|rake|gemspec)$/.test(path) || /(^|\/)(Rakefile|Gemfile)$/.test(path)) return 'ruby';
+  if (/\.kts?$/.test(path)) return 'kotlin';
   // Plain JavaScript may hold JSX (React `.js` files); the TSX grammar reads both.
   if (path.endsWith('.tsx') || /\.(m|c)?jsx?$/.test(path)) return 'tsx';
   if (/\.(m|c)?(ts|js)$/.test(path)) return 'typescript';

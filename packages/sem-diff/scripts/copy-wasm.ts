@@ -16,6 +16,7 @@ const files: Array<[string, string]> = [
   ["tree-sitter-c-sharp/tree-sitter-c_sharp.wasm", "tree-sitter-c_sharp.wasm"],
   ["tree-sitter-php/tree-sitter-php.wasm", "tree-sitter-php.wasm"],
   ["tree-sitter-ruby/tree-sitter-ruby.wasm", "tree-sitter-ruby.wasm"],
+  ["@tree-sitter-grammars/tree-sitter-kotlin/tree-sitter-kotlin.wasm", "tree-sitter-kotlin.wasm"],
 ];
 rmSync(out, { recursive: true, force: true });
 mkdirSync(out, { recursive: true });
