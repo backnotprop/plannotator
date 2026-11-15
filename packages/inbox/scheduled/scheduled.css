@@ -175,7 +175,7 @@ button.st-foot-mark:hover { background: var(--muted); }
 @media (max-width: 760px) {
   .st-list.st-list-split { width: 100%; }
   .st-scols { grid-template-columns: minmax(0, 1fr) 28px 3em 9.4em 24px; column-gap: 8px; }
-  .st-kv { grid-template-columns: 1fr; gap: 4px; }
+  .st-kv { grid-template-columns: minmax(0, 1fr); gap: 4px; }
   .st-next { margin-left: 0; width: 100%; }
   .st-pfoot .ib-btn { flex: 1; }
 }
