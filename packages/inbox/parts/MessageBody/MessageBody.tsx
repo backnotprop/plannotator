@@ -14,6 +14,7 @@ import { ImageResolverContext } from '@plannotator/ui/components/ImageResolverCo
 import { SoftLineBreaksContext } from '@plannotator/ui/components/InlineMarkdown';
 import { useRefRepo } from '../../links';
 import { OpenInCodeSpans } from '../../components/OpenIn';
+import { FileRefCodeSpans } from '../../components/FileRefSpan';
 import { InlineReuseLayer } from '../../reuse';
 import { SentAnswers, ReplyActions } from '../../components/ReplyAnswers';
 import { SkillsLine } from '../../components/SkillsLine';
@@ -23,6 +24,7 @@ import { NO_ANNOTATIONS, noop } from '../../thread/helpers';
 import { useBodyText } from './useBodyText';
 import { useBodyImages } from './useBodyImages';
 import { useBodyLinks } from './useBodyLinks';
+import { useFileRefs } from './useFileRefs';
 import { useQuestionCards } from './useQuestionCards';
 import { useBodyComments } from './useBodyComments';
 import { useCommentPictures } from '../../commentPictures';
@@ -34,6 +36,7 @@ export function MessageBody({
   openInFiles = false,
   repo,
   onOpenAttachment,
+  onOpenFileRef,
   onOpenInlineImage,
   onOpenOptionSet,
   readOnly,
@@ -80,8 +83,9 @@ export function MessageBody({
   );
   // Hover cards for issue, PR and MR links in the body (ui RefHoverCard).
   const refCard = useRefHoverCards(bodyRef);
-  const { imageBaseDir, htmlEmbeds, resolveImage, fallback, setFallback, onImageClick, onZoomChoice, pictureSizeOf } = useBodyImages({ message, imageBase, bodyRef, onOpenInlineImage, inlineRefOf, onImage, onOpenOptionSet });
-  const { tagLabels, tagHosts, tagLayerRef, tagMarks, resolveLocalLink } = useBodyLinks({ message, bodyRef, skills, replyFiles, replyFileList, projectRoot, openInFiles, onOpenAttachment, setFallback });
+  const { refsOn, openFileRefRef } = useFileRefs({ message, projectRoot, onOpenFileRef, onOpenAttachment });
+  const { imageBaseDir, htmlEmbeds, resolveImage, fallback, setFallback, onImageClick, onZoomChoice, pictureSizeOf } = useBodyImages({ message, imageBase, bodyRef, onOpenInlineImage, inlineRefOf, onImage, onOpenOptionSet, openFileRefRef });
+  const { tagLabels, tagHosts, tagLayerRef, tagMarks, resolveLocalLink } = useBodyLinks({ message, bodyRef, skills, replyFiles, replyFileList, projectRoot, openInFiles, onOpenAttachment, setFallback, refsOn, openFileRefRef });
   const { renderFooter, acceptBehavior, questionCard, belowPrompt, directiveBlock, afterChoices, answerLocked, statusLabel } = useQuestionCards({ message, projectRoot, readOnly, footerFor, answers, renderReplacedCard, renderReplacesLine, renderActions, onTryPrototype, blocks, noteAtLine, notesRef, refRepo });
   const pictures = useCommentPictures();
   const { viewerRef, commentList, selectedBadge, selectBadge, commentsRef, addComment, restoreReport, sideButton, side, answerQuestion } = useBodyComments({ comments, message, blocks, onPick });
@@ -133,6 +137,7 @@ export function MessageBody({
     <ImageResolverContext.Provider value={resolveImage}>
     <SoftLineBreaksContext.Provider value={ownReply}>
     <OpenInCodeSpans scope={{ thread: message.thread_id, message: message.id }} on={openInFiles}>
+    <FileRefCodeSpans on={refsOn} hover={openInFiles} scope={{ thread: message.thread_id, message: message.id }} openRef={openFileRefRef}>
     <div className="ib-body" data-message-id={message.id} data-text-comments={comments ? '' : undefined} data-sent-reply={replyParts ? '' : undefined} ref={bodyRef} onMouseUpCapture={comments?.onOpen ? readPress : undefined} onClickCapture={openHashtag} onClick={comments?.onOpen ? openHighlight : undefined}>
       {refCard}
       {tagPeek.node}
@@ -208,6 +213,7 @@ export function MessageBody({
       <InlineReuseLayer bodyRef={bodyRef} />
       {fallback && createPortal(<ImageLightbox src={fallback.src} alt={fallback.alt} onClose={() => setFallback(null)} />, document.body)}
     </div>
+    </FileRefCodeSpans>
     </OpenInCodeSpans>
     </SoftLineBreaksContext.Provider>
     </ImageResolverContext.Provider>

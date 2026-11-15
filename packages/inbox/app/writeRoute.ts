@@ -63,6 +63,12 @@ export function hashOf(route: Route): string {
       // A question's picture choices (optionSets.ts): a reload and Back keep stepping through them.
       if (route.file.set) params.set('set', route.file.set);
     }
+    if (route.thread && route.ref && !route.file) {
+      params.set('ref', route.ref.path);
+      params.set('in', route.ref.messageId);
+      if (route.ref.line) params.set('line', String(route.ref.line));
+      if (route.ref.lineEnd) params.set('to', String(route.ref.lineEnd));
+    }
     if (route.thread && route.guide) params.set('guide', route.guide);
     if (route.thread && route.guide) writeShapeReviewAt(params, route.guideAt);
     if (route.thread && route.shape) params.set('shape', route.shape);

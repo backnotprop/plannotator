@@ -9,7 +9,7 @@ import { describe, expect, test } from 'bun:test'
 import { INBOX_T3_HOST, INBOX_T3_NAME, isT3ThreadId as coreIsT3ThreadId } from '@plannotator/core/inbox-types'
 import { inboxModClaimDir } from '@plannotator/shared/inbox/claims'
 import { inboxHostSessionFromEnv, inboxSessionProjectFromEnv } from '../../server/inbox-mcp-shim'
-import { isT3ThreadId, sessionKindOf, SESSION_KIND_FEATURES, t3ThreadOf, type T3SessionEnv } from './enabled'
+import { isT3ThreadId, isT3ThreadOwnTools, sessionKindOf, SESSION_KIND_FEATURES, t3ThreadOf, type T3SessionEnv } from './enabled'
 import { inboxAgentProjectEnvValue, inboxSessionDirName, inboxSessionDirOf, inboxT3Agent } from './inbox'
 
 /** Every id form T3 gives a thread (packages/core/inbox-t3.ts), and look-alikes it never gives. */
@@ -52,9 +52,30 @@ describe('a T3 Code thread', () => {
     expect(t3ThreadOf(t3({ claudecode: '1', childSession: '1' }))).toBeNull()
     expect(t3ThreadOf(t3({ claudecode: '1' }))).toBeNull()
     expect(t3ThreadOf(t3({ childSession: '1' }))).toBeNull()
-    expect(t3ThreadOf(t3({ sessionTag: 'claude-code:another-session' }))).toBeNull()
     expect(t3ThreadOf(t3({ sessionTag: `t3:${THREADS[1]}` }))).toBeNull()
     expect(t3ThreadOf(t3({ sessionTag: `t3:${thread}` }))).toBe(thread)
+  })
+
+  test('T3 started from the shell of another Claude Code session (its tag inherited): still the thread', () => {
+    expect(t3ThreadOf(t3({ sessionTag: 'claude-code:0f8fad5b-d9cb-469f-a165-000000000000' }))).toBe(thread)
+    expect(t3ThreadOf(t3({ sessionTag: 'opencode:ses_01ABC' }))).toBe(thread)
+    // The shim and `plannotator inbox call` in the thread's own Claude (no CLAUDE_CODE_CHILD_SESSION) file as the thread.
+    const own = { CLAUDE_CODE_ENTRYPOINT: 't3-code', T3CODE_THREAD_ID: thread, CLAUDECODE: '1', CLAUDE_CODE_SESSION_ID: '0f8fad5b-d9cb-469f-a165-000000000001' }
+    for (const tag of ['claude-code:0f8fad5b-d9cb-469f-a165-000000000000', 'opencode:ses_01ABC', 'pi:019a2b3c-4d5e-7f00-8a9b-0c1d2e3f4a5b']) {
+      expect([tag, inboxHostSessionFromEnv({ ...own, PLANNOTATOR_SESSION_TAG: tag })]).toEqual([tag, inboxT3Agent(thread)])
+    }
+    // A Claude Code session's own commands (CLAUDE_CODE_CHILD_SESSION) keep its tag; so does any other entrypoint.
+    expect(inboxHostSessionFromEnv({ ...own, CLAUDE_CODE_CHILD_SESSION: '1', PLANNOTATOR_SESSION_TAG: 'claude-code:0f8fad5b-d9cb-469f-a165-000000000000' })?.host).toBe('claude-code')
+    expect(inboxHostSessionFromEnv({ ...own, CLAUDE_CODE_ENTRYPOINT: 'cli', PLANNOTATOR_SESSION_TAG: 'claude-code:0f8fad5b-d9cb-469f-a165-000000000000' })?.host).toBe('claude-code')
+    // A thread's tag names that thread.
+    expect(inboxHostSessionFromEnv({ ...own, PLANNOTATOR_SESSION_TAG: `t3:${THREADS[1]}` })).toEqual(inboxT3Agent(THREADS[1]!))
+  })
+
+  test("the thread's own Claude is told by T3's t3-code tools, which a title run or a claude -p never has", () => {
+    expect(isT3ThreadOwnTools(['Bash', 'mcp__t3-code__get_thread', 'mcp__plugin_plannotator__plannotator_inbox'])).toBe(true)
+    for (const names of [[], ['Bash'], ['mcp__t3-codex__x', 'mcp__t3__x', 'mcp__plugin_t3-code__x', 't3-code'], [null, 1]]) {
+      expect([names, isT3ThreadOwnTools(names)]).toEqual([names, false])
+    }
   })
 
   test('files as host t3 and the thread id, under the name T3 Code, as the shim and the T3 wake file it', () => {

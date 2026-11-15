@@ -156,10 +156,14 @@ export function replyIsStale(messages: readonly InboxMessage[], seenThroughSeq: 
  *   close, reopen or merge): never held, sent only while online, and only from
  *   a press in this Inbox's window. The forge is asked first there, so a second
  *   copy is refused in the forge's words ("It is already closed.").
- * - `now` asks an agent there to act on the person's threads (a Combine): never
- *   held, sent only while online, and only from a press in this Inbox's
- *   window. One held for days would archive threads nobody is looking at. A
- *   Tidy with the person's words is sent the same way (inbox-machines.ts).
+ * - `now` is a write sent only while online, never held, and only from a press
+ *   in this Inbox's window (`forwardsNow`; the other machine refuses it at its
+ *   door without the window's mark). Two uses: a file a message names,
+ *   attached to that message when the person comments on it (the window needs
+ *   the attachment at once; the owner adds a file to its message once, so a
+ *   second copy answers the same attachment); and a Combine, or a Tidy with the
+ *   person's words, which asks an agent there to act on the person's threads
+ *   (one held for days would archive threads nobody is looking at).
  * - `local` is never forwarded: `doorWriteKind` has no kind for it, so the
  *   forward answers 404. A phone reaches it at this Inbox's own door. Reuse
  *   (`uploads/reuse`) is useful only as its answer, the new upload's id: a held
@@ -197,6 +201,8 @@ export const DOOR_WRITES: Readonly<Record<string, "append" | "set" | "file" | "f
   "POST pulls/close": "forge",
   "POST pulls/reopen": "forge",
   "POST pulls/merge": "forge",
+  // A file a linked machine's agent message names, attached there when the person comments on it (approval "inbox-file-refs-open-viewer").
+  "POST open-in/file/attach": "now",
   // A thread's PRs live on the thread's machine: an add of one it holds, or a remove of one it does not, changes nothing.
   "POST threads/:id/pulls": "set",
   "POST messages/:id/picks": "set",
@@ -246,8 +252,8 @@ const DOOR_WRITE_ROUTES = Object.entries(DOOR_WRITES).flatMap(([name, kind]) =>
 );
 
 /**
- * The forward's one decision, by route and never by Content-Type: a `file`
- * or a `forge` write goes straight through while the machine is online; every other write is
+ * The forward's one decision, by route and never by Content-Type: a `file`,
+ * a `forge` or a `now` write goes straight through while the machine is online; every other write is
  * held in the outbox. Null: no forwarded door write has that route, so it is
  * never forwarded (a write rule 8 has not classified, or calls `local`, cannot
  * reach another machine).
