@@ -90,7 +90,7 @@ export async function checkSendPrototypes(
     if (!attachment) {
       throw new InboxError(
         "validation_error",
-        `body: ${prototypePlace(file)}: Prototype: ${file.target}: not in attachments. Attach the HTML file in the same send, or give the address of an app running on this computer (http://localhost:…).`,
+        `body: ${prototypePlace(file)}: Prototype: ${file.target}: not in attachments. Attach the HTML file in the same send, or give its https:// address, or the address of an app running on this computer (http://localhost:…).`,
         { field: "body" },
       );
     }
