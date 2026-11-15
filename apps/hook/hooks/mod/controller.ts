@@ -11,7 +11,7 @@ import { AutoReload } from './auto-reload'
 import { BRIDGE_HOST, BRIDGE_MODES, bridgeBaseUrl, createBridge, type BridgeEnd, type BridgeHandle } from './bridge'
 import { deliveryFor, legacyResult, parseHostResult, type HostResultRecord, type SessionKind } from './delivery'
 import { PromptDropped, type Host, type HttpResult } from './host'
-import { inboxAgentProjectEnvValue, InboxLink, inboxSessionProjectEnvValue, sessionProjectFolder, type InboxAgentIdentity, type InboxLaunchReminder } from './inbox'
+import { inboxAgentProjectEnvValue, InboxLink, inboxSessionProjectEnvValue, sessionProjectFolder, type InboxAgentIdentity, type InboxLaunchReminder, type InboxOwnerAnswer } from './inbox'
 import { isAbsolutePath } from './paths'
 import { inboxCommandBriefing, type InboxToolInfo } from './inbox-contract'
 import {
@@ -319,6 +319,8 @@ export interface SessionInfo {
   inboxAs?: InboxAgentIdentity
   /** False: the Inbox tool without the reply wake (`InboxLinkOptions.wake`). */
   inboxWake?: boolean
+  /** Whether this process is the session's own (a T3 Code thread's Claude; `InboxLinkOptions.owner`). */
+  inboxOwner?: () => Promise<InboxOwnerAnswer>
   /** The session's working folder, read when asked (the Inbox link's polls say where the session works). */
   cwd?: () => Promise<string>
   /** The session's root folder (`$.session.root()`), read once at the link's start: where `claude --resume` runs. */
@@ -430,6 +432,7 @@ export class PlannotatorMod {
           instanceId: this.instanceId,
           ...(session.inboxAs ? { agent: session.inboxAs } : {}),
           ...(session.inboxWake === false ? { wake: false } : {}),
+          ...(session.inboxOwner ? { owner: session.inboxOwner } : {}),
           turns: this.turns,
           ...(this.autoReload ? { reload: this.autoReload } : {}),
           ...(session.launchReminder ? { launchReminder: session.launchReminder } : {}),

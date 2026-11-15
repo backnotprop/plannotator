@@ -36,6 +36,7 @@ import { useRowWrites, type RowDrawing } from './data/actions/rows';
 import { keepSavedQuestions } from './data/actions/picks';
 import { useSettingsSaves } from './data/actions/settings';
 import { useListShown } from './app/useListView';
+import { useListTags } from './app/useListTags';
 import { useDecideSitting, type DecideSitting } from './app/useDecideSitting';
 import { useSnoozeBack } from './app/useSnoozeBack';
 import { WarmWindowParts } from './lazyParts';
@@ -238,7 +239,7 @@ import { type SheetLayout } from './prs/tableModel';
 import { inboxPullIsOpen, inboxPullStacks } from '@plannotator/core/inbox-types';
 import { repoLabels } from './pulls/labels';
 import { pullFilterOf, type PullFilter } from './pulls/model';
-import { reviewRowProject, reviewViewOf } from './pulls/reviewsModel';
+import { reviewRowProject, reviewsOnYou, reviewViewOf } from './pulls/reviewsModel';
 import { BoardOff } from './board/BoardOff';
 import { BoardIntro } from './board/BoardIntro';
 import { BroIntro } from './components/BroIntro';
@@ -1567,13 +1568,7 @@ function Inbox() {
     if (Date.now() - cardsReadAt.current < 5_000) return;
     void refreshCards();
   }, [refreshCards]);
-  // With the Board off, the list's tags (approval "inbox-thread-tags"), the same array while their ids and names stay.
-  const listTagsKey = (latest?.tags ?? [])
-    .map((i) => `${i.id}\u0000${i.name}\u0000${JSON.stringify(i.machines ?? null)}`)
-    .join('\u0001');
-  const keepsTags = latest?.tags !== undefined;
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the ids and names, on purpose
-  const listTags = useMemo(() => latest?.tags ?? null, [listTagsKey, keepsTags]);
+  const listTags = useListTags(latest);
   const liveTags = useMemo(() => (boardEnabled === false && listTags ? { initiatives: listTags, href: tagHref } : { initiatives: tagInitiatives }), [boardEnabled, listTags, tagInitiatives]);
   const across = useMemo(() => (listTags ? tagsAcross(listTags, machines) : null), [listTags, machines]);
   const initiativeTags = useMemo<InitiativeTags>(() => {
@@ -4110,7 +4105,7 @@ function Inbox() {
   useEffect(() => {
     if (combinedHead) writeRoute({ ...route, project: combinedHead }, { replace: true });
   }, [combinedHead]);
-  const { latestSections, latestGroups, latestRows, pinsOn, pinRows, pinnedIds, listedOpenRow, openThreadRow, listShown, snoozeOn, projectsReadable, projectCounts, latestProjectActivity, filterProject, filterMachine, windowRows, threadAgentContext, filterAgent, projectNames, sidebarMachineCounts, filterList, listFilterPicks, setListFilter, listFilterScoped, filterShown, listFilterRows, listSections, listFilterEmpty, listTitle, notice, filterTag, threadTagsHost, sidebarTags } = useListShown({
+  const { latestSections, latestGroups, latestRows, pinsOn, pinRows, pinnedIds, listedOpenRow, openThreadRow, listShown, snoozeOn, projectsReadable, projectCounts, latestProjectActivity, filterProject, filterMachine, windowRows, threadAgentContext, filterAgent, projectNames, sidebarMachineCounts, filterList, listFilterPicks, setListFilter, listFilterScoped, filterShown, listFilterRows, listSections, listFilterEmpty, listTitle, notice, filterTag, threadTagsHost, sidebarTags, listColours } = useListShown({
     latest, projects, route, thread, threadRow, rowPatches, pinPatches, looking, shown, machines, hideAway, openedHere, heldOpen, heldRead,
     tags: {
       listTags,
@@ -5120,7 +5115,7 @@ function Inbox() {
   }, [settingsMissing, refreshSettings]);
 
   // A file beside the thread takes the list's and the sidebar's room (record 2.2).
-  const fileOpen = route.page === 'inbox' && !!route.thread && !!route.file;
+  const fileOpen = route.page === 'inbox' && !!route.thread && (!!route.file || !!route.ref);
   // A thread opened from a Board card (`#thread=…&card=crd_…`): it takes the list's place, led by
   // "‹ Board" and a chip naming the card; both go back to the opened card.
   const fromCard = route.page === 'inbox' && route.thread && route.card ? route.card : null;
@@ -6053,6 +6048,8 @@ function Inbox() {
           onUnstar={pinsOn ? unstarRow : undefined}
           // "Keep starred above the list" (starredPills.ts): the starred threads as pills, with the sidebar section's actions.
           starred={pinRows ? { rows: pinRows, onOpen: openPinned, onAction: (row, action) => void pinAction(row, action, true) } : undefined}
+          // Tag row colours (tagColours.ts): each row's tint and "Show tag colors" in the ⋮.
+          tagColours={listColours ?? undefined}
           tidy={{
             ...listTidy,
             combine: async (pairs) => {
@@ -6224,11 +6221,13 @@ function Inbox() {
             }}
             onClose={fromCard ? backToCard : () => close({ ...route, thread: null, file: null })}
             file={route.file ?? null}
+            namedFile={route.ref ?? null}
+            onOpenNamedFile={(ref) => (ref ? go({ ...routeRef.current, file: null, ref }) : close({ ...routeRef.current, ref: null }))}
             onOpenFile={(file, options) => {
               if (!file) return closeTo({ ...routeRef.current, file });
               // A call that names no view keeps the one in the address (the pane names it for a step, a version, a linked page).
               const keepView = file.view === undefined ? (routeRef.current.file?.view ?? null) : file.view;
-              const next = { ...routeRef.current, file: { ...file, view: keepView } };
+              const next = { ...routeRef.current, ref: null, file: { ...file, view: keepView } };
               /** Show `next` the way fullScreenOrigin.ts names (the history is the stack of frames). */
               const show = (request: { move?: FrameMove; replace?: boolean }) => {
                 const op = fileEntryOp({ hash: currentHash(), state: window.history.state }, hashOf(next), request);
@@ -6980,6 +6979,7 @@ function Inbox() {
         mounted={searchMounted}
         open={searchOpen}
         phone={phone}
+        tintOf={listColours?.tintOfThread}
         currentProject={route.page === 'inbox' ? route.project : null}
         projects={projects}
         onClose={closeSearch}
@@ -7149,9 +7149,4 @@ export function InboxApp() {
       </ThemeProvider>
     </QueryClientProvider>
   );
-}
-
-/** The sidebar's Reviews count: the rows on the person in the last read. */
-function reviewsOnYou(answer: import('@plannotator/core/inbox-types').InboxReviewsAnswer): number {
-  return answer.rows.filter((row) => row.move === 'on_you').length;
 }

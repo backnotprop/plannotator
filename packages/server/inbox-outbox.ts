@@ -155,6 +155,11 @@ export function replyIsStale(messages: readonly InboxMessage[], seenThroughSeq: 
  *   close, reopen or merge): never held, sent only while online, and only from
  *   a press in this Inbox's window. The forge is asked first there, so a second
  *   copy is refused in the forge's words ("It is already closed.").
+ * - `now` is a write whose answer the window needs at once (a file a message
+ *   names, attached to that message when the person comments on it: the
+ *   comment is saved on the attachment it answers with). Never held, sent only
+ *   while online, and only from a press in this Inbox's window. The owner adds
+ *   a file to its message once, so a second copy answers the same attachment.
  * - `local` is never forwarded: `doorWriteKind` has no kind for it, so the
  *   forward answers 404. A phone reaches it at this Inbox's own door. Reuse
  *   (`uploads/reuse`) is useful only as its answer, the new upload's id: a held
@@ -165,7 +170,7 @@ export function replyIsStale(messages: readonly InboxMessage[], seenThroughSeq: 
  *
  * inbox-outbox.test.ts fails when a door write has no entry here.
  */
-export const DOOR_WRITES: Readonly<Record<string, "append" | "set" | "file" | "forge" | "local">> = {
+export const DOOR_WRITES: Readonly<Record<string, "append" | "set" | "file" | "forge" | "now" | "local">> = {
   "POST threads/:id/seen": "set",
   "POST threads/:id/read": "set",
   "POST threads/:id/unread": "set",
@@ -181,6 +186,8 @@ export const DOOR_WRITES: Readonly<Record<string, "append" | "set" | "file" | "f
   // Undo go to each machine that holds it (approval "inbox-thread-tags").
   "POST threads/:id/tags": "set",
   "POST initiatives/:id": "set",
+  // A tag's colour and "Show tag colors" carry the time the person chose, so a held one lands as of then.
+  "POST tag-colours": "set",
   // A Board card lives on its project's machine (mark `cards`): a move, an edit, a link or a tag puts a state there,
   // and a link already on the card is kept once. The look never moves back; a drop seen stays seen.
   "POST cards/(crd_[^/]+)": "set",
@@ -190,6 +197,8 @@ export const DOOR_WRITES: Readonly<Record<string, "append" | "set" | "file" | "f
   "POST pulls/close": "forge",
   "POST pulls/reopen": "forge",
   "POST pulls/merge": "forge",
+  // A file a linked machine's agent message names, attached there when the person comments on it (approval "inbox-file-refs-open-viewer").
+  "POST open-in/file/attach": "now",
   // A thread's PRs live on the thread's machine: an add of one it holds, or a remove of one it does not, changes nothing.
   "POST threads/:id/pulls": "set",
   "POST messages/:id/picks": "set",
@@ -233,13 +242,13 @@ const DOOR_WRITE_ROUTES = Object.entries(DOOR_WRITES).flatMap(([name, kind]) =>
 );
 
 /**
- * The forward's one decision, by route and never by Content-Type: a `file`
- * or a `forge` write goes straight through while the machine is online; every other write is
+ * The forward's one decision, by route and never by Content-Type: a `file`,
+ * a `forge` or a `now` write goes straight through while the machine is online; every other write is
  * held in the outbox. Null: no forwarded door write has that route, so it is
  * never forwarded (a write rule 8 has not classified, or calls `local`, cannot
  * reach another machine).
  */
-export function doorWriteKind(route: string): "append" | "set" | "file" | "forge" | null {
+export function doorWriteKind(route: string): "append" | "set" | "file" | "forge" | "now" | null {
   return DOOR_WRITE_ROUTES.find((entry) => entry.route.test(route))?.kind ?? null;
 }
 

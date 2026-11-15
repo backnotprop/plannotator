@@ -161,7 +161,7 @@ import { isInboxArtifactKey, readInboxArtifactPins, writeInboxArtifactPins } fro
 import { inboxThreadArtifactRefs, type InboxArtifactPin, type InboxArtifactRef } from "@plannotator/core/inbox-artifact-pins";
 import { readInboxSnoozes, refuseInboxSnoozeUntil, writeInboxSnoozes } from "./snoozes";
 import { checkInboxPriorityRestore, readInboxPriority, writeInboxPriority, type InboxPriorityState } from "./priority";
-import { readInboxThreadTags, writeInboxThreadTags, type InboxThreadTagMark } from "./thread-tags";
+import { readInboxTagColours, readInboxThreadTags, writeInboxTagColours, writeInboxThreadTags, type InboxTagColoursFile, type InboxThreadTagMark } from "./thread-tags";
 import { inboxSnoozeRefusal, inboxSnoozeRunning, type InboxSnooze } from "@plannotator/core/inbox-snooze";
 import { INBOX_CARD_PR_HINT } from "./cards";
 import { INBOX_CARD_REF_HINT, parseInboxCardRef } from "./card-refs";
@@ -216,6 +216,11 @@ import {
   isInboxInitiativeId,
   isInboxInitiativeRecord,
   type InboxInitiative,
+  inboxNextTagColour,
+  isInboxTagColour,
+  INBOX_TAG_RECENT_MAX,
+  type InboxTagColours,
+  type InboxTagLook,
 } from "@plannotator/core/inbox-types";
 import type { InboxReviewVerdictRecord } from "@plannotator/core/inbox-review";
 import type { InboxScheduledChange, InboxScheduledRun, InboxScheduledThread } from "@plannotator/core/inbox-scheduled-types";
@@ -944,6 +949,8 @@ export class InboxStore {
   private threadTagMarks = new Map<string, Map<string, InboxThreadTagMark>>();
   /** Told when the marks change (no store line is written for them). */
   private readonly threadTagListeners = new Set<() => void>();
+  /** The tags' colours, the "Show tag colors" switch and the person's own colours (tags.json, thread-tags.ts). */
+  private tagColourState: InboxTagColoursFile = { looks: new Map(), show: null, recent: [] };
   /** A guided review's files by its snapshot's sha256 (a blob never changes). */
   private readonly guideFileSets = new Map<string, ReadonlyMap<string, DiffFile>>();
   private readonly listeners = new Set<InboxListener>();
@@ -5613,6 +5620,23 @@ export class InboxStore {
     return next;
   }
 
+  /**
+   * A file an agent's message names, made one of its attachments because the person commented on it (approval
+   * "inbox-file-refs-open-viewer"): one more line for the message, its latest snapshot with `attachment` after the ones
+   * it has. A file the message already carries (by its real path) is never added twice: that attachment is returned.
+   * Only an agent's message, and not in a resolved thread (as a comment would be refused there).
+   */
+  attachReferencedFile(messageId: string, attachment: InboxAttachment): InboxAttachment {
+    const message = this.messages.get(messageId);
+    if (!message) throw new InboxError("message_not_found", `No message ${messageId}.`);
+    if (message.author.kind !== "agent") throw new InboxError("validation_error", "message_id: only an agent's message takes a file it names.", { field: "message_id" });
+    if (this.closedByArchive(message)) throw new InboxError("thread_resolved", "This thread is resolved; reopen it to annotate.");
+    const held = (message.attachments ?? []).find((file) => file.path === attachment.path);
+    if (held) return held;
+    this.appendMessage({ ...message, attachments: [...(message.attachments ?? []), attachment] }, this.stamp());
+    return attachment;
+  }
+
   /** The person's annotations in a thread still waiting for a Send (not removed, not sent). */
   pendingAnnotations(threadId: string): InboxAnnotationRecord[] {
     const out: InboxAnnotationRecord[] = [];
@@ -7969,6 +7993,7 @@ export class InboxStore {
     const at = this.stamp();
     const record: InboxInitiative = { id: inboxId("ini"), name, created_at: at, created_by: by, updated_at: at, deleted_at: null };
     this.appendInitiative(record, at);
+    this.giveTagColours();
     return record;
   }
 
@@ -8131,7 +8156,89 @@ export class InboxStore {
         // Best effort: the next load prunes it again.
       }
     }
-    if (had || kept.length > 0) this.threadTagsChanged();
+    this.tagColourState = readInboxTagColours(this.dir);
+    const gave = this.giveTagColours(false);
+    if (had || kept.length > 0 || gave) this.threadTagsChanged();
+  }
+
+  /**
+   * Each live tag without a colour gets one, oldest first (inbox-tag-colours.ts `inboxNextTagColour`): a new tag, and
+   * at load every tag made before colours. Written once; a file that cannot be written leaves them to the next load.
+   * Answers whether any was given.
+   */
+  private giveTagColours(tell = true): boolean {
+    const live = this.initiatives().filter((tag) => tag.deleted_at === null);
+    const looks = this.tagColourState.looks;
+    const missing = live.filter((tag) => !looks.has(tag.id));
+    if (missing.length === 0) return false;
+    const next = new Map(looks);
+    for (const tag of missing) {
+      const used = live.flatMap((t) => (next.has(t.id) ? [next.get(t.id)!.colour] : []));
+      next.set(tag.id, { colour: inboxNextTagColour(used), by: "auto", at: tag.created_at });
+    }
+    const state = { ...this.tagColourState, looks: next };
+    try {
+      writeInboxTagColours(this.dir, state);
+    } catch {
+      return false;
+    }
+    this.tagColourState = state;
+    if (tell) this.threadTagsChanged();
+    return true;
+  }
+
+  /** A tag's colour (deleted tags keep theirs for an Undo), or undefined before it has one. */
+  tagLook(id: string): InboxTagLook | undefined {
+    return this.tagColourState.looks.get(id);
+  }
+
+  /** The "Show tag colors" switch and the person's own colours, as the list model carries them. */
+  tagColours(): InboxTagColours {
+    const { show, recent } = this.tagColourState;
+    return { show: show?.on ?? true, show_at: show?.at ?? null, recent: recent.map((r) => ({ ...r })) };
+  }
+
+  /**
+   * The person picked a tag's colour (a preset, their own `#rrggbb`, or null for None). `at` is when they picked it,
+   * the same on every machine the window writes it to, so the merged tag's colour agrees everywhere. An own colour
+   * goes first in the recent ones. Writes no store line.
+   */
+  setTagColour(tagId: unknown, colour: unknown, at: unknown): InboxTagLook {
+    const tag = this.liveInitiative(tagId);
+    if (colour !== null && !isInboxTagColour(colour)) throw new InboxError("validation_error", "colour: accent, green, amber, red, grey, a #rrggbb, or null.", { field: "colour" });
+    const when = this.colourStamp(at);
+    // A pick held on the way (an outbox, a machine asleep) can land after a newer one: the newer stays.
+    const kept = this.tagColourState.looks.get(tag.id);
+    if (kept?.by === "person" && Date.parse(kept.at) > Date.parse(when)) return kept;
+    const look: InboxTagLook = { colour, by: "person", at: when };
+    const looks = new Map(this.tagColourState.looks).set(tag.id, look);
+    const recent = typeof colour === "string" && colour.startsWith("#") ? [{ colour, at: when }, ...this.tagColourState.recent.filter((r) => r.colour !== colour)].slice(0, INBOX_TAG_RECENT_MAX) : this.tagColourState.recent;
+    this.commitTagColours({ ...this.tagColourState, looks, recent });
+    return look;
+  }
+
+  /** "Show tag colors" in the list's ⋮, on or off, as of `at`. Writes no store line. */
+  setTagColoursShown(on: unknown, at: unknown): InboxTagColours {
+    if (typeof on !== "boolean") throw new InboxError("validation_error", "show: true or false.", { field: "show" });
+    const when = this.colourStamp(at);
+    const kept = this.tagColourState.show;
+    if (kept && Date.parse(kept.at) > Date.parse(when)) return this.tagColours();
+    this.commitTagColours({ ...this.tagColourState, show: { on, at: when } });
+    return this.tagColours();
+  }
+
+  /** When the person chose, as an ISO time (so times compare as times); none given: now. */
+  private colourStamp(at: unknown): string {
+    if (at === undefined || at === null) return this.stamp();
+    const ms = typeof at === "string" ? Date.parse(at) : Number.NaN;
+    if (Number.isNaN(ms)) throw new InboxError("validation_error", "at: an ISO time.", { field: "at" });
+    return new Date(ms).toISOString();
+  }
+
+  private commitTagColours(state: InboxTagColoursFile): void {
+    writeInboxTagColours(this.dir, state);
+    this.tagColourState = state;
+    this.threadTagsChanged();
   }
 
   private placeThreadTagMark(mark: InboxThreadTagMark): void {

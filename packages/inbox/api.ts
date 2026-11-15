@@ -22,6 +22,7 @@ import { learnPullMachines, pullMachine, pullUrl } from './pulls/pullMachines';
 import { learnProjects } from './projectPictures';
 import { learnDefaultRefHost } from './defaultRefHost';
 import type { ReplyViewing } from './replyViewing';
+import type { ListTagsFields } from './data/actions/tagColours';
 import type {
   InboxCardMark,
   InboxInitiative,
@@ -76,6 +77,7 @@ import { InboxApiError, readJson } from './apiError';
 import { cardUrl, learnCards, type CardsModel } from './cardsWire';
 export type { CardsModel } from './cardsWire';
 import { gzipped, wholeBody } from './apiBody';
+import { referencedFileUrl, type OpenInFileCode, type OpenInFileScope, type ReferencedFileScope, type ReferencedFileView } from './openInWire';
 export { InboxApiError };
 import type { InboxSearchAnswer, InboxSearchFrom, InboxSearchGroupId, InboxSearchSort, InboxSearchStatus } from '@plannotator/core/inbox-search';
 import type {
@@ -275,7 +277,7 @@ export interface MachineOffer {
   tailnet_error: string | null;
 }
 
-export interface ListModel {
+export interface ListModel extends ListTagsFields {
   /**
    * The merged view (`machines=1`): this Inbox's id and every machine, linked ones with their state. Absent from
    * an Inbox that cannot link; with no machine linked, `machines` holds this Inbox alone.
@@ -311,12 +313,6 @@ export interface ListModel {
    * offers no pin.
    */
   pins?: InboxListRow[];
-  /**
-   * The live tags, oldest first (approval "inbox-thread-tags"): the sidebar's Tags and the Add tag list; each row's
-   * `tags` names them. Absent from an older Inbox: the window then draws no Tags section and offers no Add tag.
-   * Merged: one per name across the linked machines that take tags, `machines` its id on each (InboxMachineTag).
-   */
-  tags?: (InboxInitiative & { machines?: Record<string, string> })[];
   /** The version of this list, named by the next read so only what changed comes back (listRead.ts). Absent from an older Inbox. */
   list_version?: string;
   /**
@@ -1103,13 +1099,6 @@ export function pageServerSession(): string | null {
  */
 export type TagMode = 'ask' | 'add' | 'handoff';
 
-/** Where a referenced file's project-relative path starts: the server finds the folder (packages/server/inbox-open-in.ts). */
-/** `from: 'root'`: a diff's path, which starts at the top of the repository wherever the agent stood. */
-export type OpenInFileScope = { thread: string; message?: string; from?: 'root' } | { shape: string } | { repo: string; pull?: string };
-
-/** A referenced file's text for its hover: this computer's, or a pull request's at its head commit (`pull`). */
-export type OpenInFileCode = { found: false } | { found: true; contents: string; pull?: { label: string; platform: 'github' | 'gitlab'; url: string } };
-
 /** A thread's PRs answer as the window uses it: anything missing reads as none. */
 function threadPullsOf(answer: unknown): InboxThreadPullsAnswer {
   const value = (answer && typeof answer === 'object' ? answer : {}) as Partial<InboxThreadPullsAnswer>;
@@ -1127,7 +1116,7 @@ const KEEPALIVE_BODY_MAX = 60_000;
  * `keepalive`: the request outlives the page (a save made as the page hides or goes). The answer is read as ever when
  * the page stays. The fetch starts before this function first waits, so a caller in a `pagehide` handler gets it out.
  */
-async function post<T>(path: string, body: Record<string, unknown>, init: { keepalive?: boolean; gzip?: boolean } = {}): Promise<T> {
+export async function post<T>(path: string, body: Record<string, unknown>, init: { keepalive?: boolean; gzip?: boolean } = {}): Promise<T> {
   refuseContested(path);
   const machine = forwardedTo(path);
   // A write to another machine is keyed end to end (rule 1): the window's own key, or one made for it here.
@@ -1859,6 +1848,11 @@ export const inboxApi = {
   /** A referenced file in its scope: whether it is on this computer, its real path and kind. 403 through the tailnet. */
   openInFileCheck: (scope: OpenInFileScope, path: string) =>
     get<{ found: boolean; path?: string; kind?: string }>(inboxUrl(`/open-in/file?${new URLSearchParams({ ...scope, path })}`)),
+  /** A file an agent's message names, for the pane: read only, wherever it is on that computer (never a secret). */
+  referencedFile: (scope: ReferencedFileScope, path: string) => get<ReferencedFileView>(referencedFileUrl('view', scope, path)),
+  /** The person commented on a file a message names: it becomes one of that message's attachments (once), on its thread's machine. */
+  attachReferencedFile: (scope: ReferencedFileScope, path: string) =>
+    post<{ attachment: InboxAttachmentState }>(inboxUrl('/open-in/file/attach', undefined, machineOf(scope.thread)), { thread: scope.thread, message: scope.message, path, idempotency_key: crypto.randomUUID() }),
   openInFileCode: (scope: OpenInFileScope, path: string) => get<OpenInFileCode>(inboxUrl(`/open-in/file/code?${new URLSearchParams({ ...scope, path })}`)),
   openInFile: (scope: OpenInFileScope, path: string, appId: string, line?: number) =>
     post<{ ok: boolean; error?: string }>(inboxUrl('/open-in/file'), { ...scope, path, app_id: appId, ...(line ? { line } : {}) }),

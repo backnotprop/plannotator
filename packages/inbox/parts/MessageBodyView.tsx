@@ -33,6 +33,8 @@ export type MessageBodyData = {
   side: boolean;
   /** A thread from another linked machine: its name, so a scheduled thread's editor link reads as plain words. */
   farMachine?: string | null;
+  /** A file the message names opens beside the thread (approval "inbox-file-refs-open-viewer"). */
+  fileRefs: boolean;
   acts: MessageActsRef;
 };
 
@@ -55,6 +57,7 @@ export function drawMessageBody(d: MessageBodyData) {
       {...(d.notes === null ? {} : { contextNotes: d.notes ? { onOpen: (note) => acts.current.noteChips(id).onOpen?.(note) } : {} })}
       repo={d.repo}
       onOpenAttachment={(attachment) => acts.current.openFromMessage(attachment)}
+      onOpenFileRef={d.fileRefs ? (ref) => acts.current.openFileRef(id, ref) : undefined}
       onOpenInlineImage={(image) => acts.current.openFromMessage(image)}
       onOpenOptionSet={(key, image, choice) => acts.current.openOptionSet(id, key, image, choice)}
       onTryPrototype={isAgent ? (key) => acts.current.tryPrototype(id, key) : undefined}

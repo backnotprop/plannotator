@@ -98,7 +98,7 @@ export interface SidebarProps {
    * The Tags section (approval "inbox-thread-tags", TagsSection.tsx), under Starred: drawn while `shown` (a tag holds
    * a thread, or the person made one). Absent (an Inbox that keeps no tags, the tour): no section.
    */
-  tags?: Pick<TagsSectionProps, 'tags' | 'waiting' | 'tagId' | 'onOpen' | 'onCreate' | 'onRename' | 'onDelete'> & { shown: boolean };
+  tags?: Pick<TagsSectionProps, 'tags' | 'waiting' | 'tagId' | 'onOpen' | 'onCreate' | 'onRename' | 'onDelete' | 'colours'> & { shown: boolean };
   onAgentFilter?: (agentId: string | null) => void;
   onMessageAgent?: (session: string, opener: HTMLElement) => void;
   onAddAgent?: (opener: HTMLElement) => void;
@@ -784,6 +784,7 @@ export function Sidebar(props: SidebarProps) {
             onCreate={props.tags.onCreate}
             onRename={props.tags.onRename}
             onDelete={props.tags.onDelete}
+            colours={props.tags.colours}
           />,
         )}
         {agentsShown && (
