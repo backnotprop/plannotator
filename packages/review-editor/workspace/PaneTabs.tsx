@@ -20,8 +20,7 @@ const ACTIVE_ROOM = 130;
 function naturalWidth(item: HTMLElement): number {
   let width = item.offsetWidth;
   for (const name of item.querySelectorAll<HTMLElement>('[data-ellipsis-name]')) {
-    const full = Number.parseFloat(name.style.width);
-    if (full > name.clientWidth) width += full - name.clientWidth;
+    if (name.scrollWidth > name.clientWidth) width += name.scrollWidth - name.clientWidth;
   }
   const directory = item.querySelector<HTMLElement>('[data-pane-tab-directory]');
   return directory ? width - directory.offsetWidth : width;
@@ -67,16 +66,16 @@ function useHiddenTabs(ref: React.RefObject<HTMLElement | null>, key: string, si
 
 const DirectoryPrefix: React.FC<{ directory: string }> = ({ directory }) => {
   const boxRef = useRef<HTMLSpanElement>(null);
-  const fit = useFittedText(boxRef, directory, 'directory');
+  const fitted = useFittedText(boxRef, directory, 'directory');
   return (
     <span
       ref={boxRef}
       aria-hidden="true"
-      style={fit.natural ? { width: fit.natural } : undefined}
       className="relative min-w-0 shrink-[1000] -mr-1 overflow-hidden whitespace-nowrap text-right text-[13px] text-muted-foreground [font-variant-ligatures:no-contextual]"
       data-pane-tab-directory=""
     >
-      {fit.text}
+      <span className="invisible before:content-[attr(data-full)]" data-full={directory} />
+      <span className="absolute inset-y-0 right-0 whitespace-nowrap" data-pane-tab-directory-shown="">{fitted}</span>
     </span>
   );
 };
