@@ -295,6 +295,7 @@ packages/inbox/skillReferences.test.tsx
 packages/inbox/skillListRoom.test.tsx
 packages/inbox/messageComments.test.tsx
 packages/inbox/messageDelete.test.tsx
+packages/inbox/messageRedraws.test.tsx
 packages/inbox/linkedMessageDelete.test.tsx
 packages/inbox/messageArming.test.tsx
 packages/inbox/feedbackDialog.test.tsx
@@ -730,6 +731,7 @@ packages/inbox/agents/linkedAgentFaces.test.tsx
 packages/review-editor/dock/panels/ReviewCallFlowPanel.states.test.tsx
 packages/review-editor/components/callTree/CallTree.test.tsx
 packages/review-editor/dock/panels/ReviewCallFlowPanel.callTree.test.tsx
+packages/inbox/paneRetention.test.tsx
 packages/review-editor/components/guide/GuideEmptyState.aiOff.test.tsx
 packages/review-editor/components/PRMediaScope.test.tsx
 packages/inbox/pulls/forgeMedia.test.tsx
@@ -739,11 +741,14 @@ packages/inbox/attachmentTileKeys.test.tsx
 packages/inbox/threadTags.test.tsx
 packages/review-editor/components/PRDescriptionVideo.test.tsx
 packages/ui/components/CommentPopover.hostDraft.test.tsx
+packages/inbox/data/queries/heldThreadOpen.test.tsx
+packages/inbox/inlineReuseMark.test.tsx
 packages/review-editor/components/FileTree.redraws.test.tsx
 packages/ui/components/Viewer.blockRedraws.test.tsx
 packages/editor/hooks/useCheckboxOverrides.viewer.test.tsx
 packages/ui/components/TaterSpriteSlots.test.tsx
 packages/inbox/sidebarRedraws.test.tsx
 packages/inbox/agents/faceSources.test.tsx
+packages/ui/components/CommentPopover.phoneKeyboard.test.tsx
 packages/ui/components/Viewer.authorColor.test.tsx
 packages/review-editor/components/authorColor.review.test.tsx

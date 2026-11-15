@@ -339,6 +339,7 @@ import { inboxCanonicalBaseUrl, inboxCanonicalRedirect } from "./inbox-canonical
 import { createInboxWindows, parseWindowId, parseWindowOrigin, parseWindowPermission } from "./inbox-windows";
 import { inboxAppIconResponse } from "./inbox-app-icons";
 import { handleInboxTourRequest } from "./inbox-tour";
+import { framedWindowHeaders, NO_FRAME_ANCESTORS, resolveInboxFrameAncestors } from "./inbox-framing";
 import { createBunShapeRoutes } from "./shape-routes";
 import { shapeCodeRoot } from "@plannotator/shared/shape/store";
 import { shapeEventFrame } from "@plannotator/shared/shape/routes";
@@ -549,6 +550,8 @@ export interface InboxServerOptions {
    * nothing listens, connects, spawns or makes a certificate.
    */
   phones?: boolean;
+  /** Tests: the origins that may frame the window, checked as config.json `inboxFrameAncestors` is (inbox-framing.ts). Default: that key. */
+  frameAncestors?: unknown;
   /** Tests: Ask AI's waits (inbox-ask-live.ts). */
   askTimes?: InboxAskTimes;
   /** Tests: linked machines' clocks (packages/server/inbox-peer-link.ts): heartbeat silence, backoff. */
@@ -898,7 +901,8 @@ const ERROR_STATUS: Record<string, number> = {
  * The window is one built file: its styles are inline and its scripts are
  * packed behind the page and served by this server (`/assets/`, #2593), so the
  * policy allows inline code and code from this origin only. Nothing may frame
- * it, and it may only talk to this server.
+ * it (but the apps config.json `inboxFrameAncestors` lists, on this
+ * computer's port: inbox-framing.ts), and it may only talk to this server.
  */
 export const WINDOW_CSP = [
   "default-src 'self'",
@@ -987,16 +991,18 @@ function etagMatches(header: string | null, etag: string): boolean {
  * identity bodies are one page (one tag fits all three under
  * `Vary: Accept-Encoding`). The data routes stay `no-store`.
  * A listener's own checks (on the tailnet: owner login, served Host,
- * Sec-Fetch-Site) ran before this.
+ * Sec-Fetch-Site) ran before this. `framers`: the app origins that may frame
+ * this answer (inbox-framing.ts), always none through the tailnet.
  */
-async function windowPage(req: Request, page: string, compress: boolean): Promise<Response> {
+async function windowPage(req: Request, page: string, compress: boolean, framers: readonly string[]): Promise<Response> {
   const etag = windowPageEtag(page);
   const cacheHeaders = { "Cache-Control": "private, no-cache", ETag: etag, Vary: "Accept-Encoding" };
+  const security = framers.length === 0 ? WINDOW_PAGE_HEADERS : framedWindowHeaders(WINDOW_PAGE_HEADERS, framers);
   if (etagMatches(req.headers.get("if-none-match"), etag)) {
-    return new Response(null, { status: 304, headers: { ...WINDOW_PAGE_HEADERS, ...cacheHeaders } });
+    return new Response(null, { status: 304, headers: { ...security, ...cacheHeaders } });
   }
   const prepared = await prepareAppHtml(page, req.headers.get("accept-encoding"), compress);
-  const headers = { ...prepared.headers, ...WINDOW_PAGE_HEADERS, ...cacheHeaders, "Content-Type": "text/html; charset=utf-8" };
+  const headers = { ...prepared.headers, ...security, ...cacheHeaders, "Content-Type": "text/html; charset=utf-8" };
   // A Buffer is a valid fetch body; the lib types lag.
   return new Response(req.method === "HEAD" ? null : (prepared.body as BodyInit), { headers });
 }
@@ -1199,6 +1205,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const token = createInboxToken();
   // Read once per start: the phone surface stays hidden until the iPhone app ships.
   const phonesOn = options.phones ?? resolveInboxPhones(loadConfig());
+  // Read once per start, as the phones: a change applies at the next Restart.
+  const frameAncestors = resolveInboxFrameAncestors(options.frameAncestors !== undefined ? options.frameAncestors : loadConfig().inboxFrameAncestors, (line) => process.stderr.write(line));
   const hostGuard = createRequestHostGuard({ localOnly: true });
   const previous = readInboxRegistry(dataDir);
   // The store is open, so the folder exists: its identity, and the earlier runs of this same folder (registry.ts).
@@ -4977,13 +4985,15 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // Images the messages show with no captured file yet: copied in the background; the read never waits (approval "inbox-image-viewer").
     if (store.thread(threadId)) imageCapture.schedule(threadId);
     const thread = perfPhase("thread", () => store.windowThread(threadId));
+    const cursor = store.cursor();
     if (!thread) return null;
     // `pull_theirs`: the person handed this thread only teammates' PRs, so its reviews take no verdict.
     // `pull_keys` (Code review on): the PRs it owns, which its review may be posted to (Post to GitHub/GitLab).
     const pullKeys = codeReviewOn() ? pullOwners.keys(thread.thread_id) : [];
     const withRepo = {
       ...thread,
-      project: { ...thread.project, repo: repos.get(thread.project.root) },
+      // `repo_known` (additive): resolved, so a null repo is "no origin" and the window need not read again for it.
+      project: { ...thread.project, repo: repos.get(thread.project.root), ...(repos.known(thread.project.root) ? { repo_known: true as const } : {}) },
       ...(pullOwners.theirs(thread.thread_id) ? { pull_theirs: true as const } : {}),
       ...(pullKeys.length > 0 ? { pull_keys: pullKeys } : {}),
       ...(codeReviewOn() && pullOwners.started().has(thread.thread_id) ? { review_started: true as const } : {}),
@@ -4993,7 +5003,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const run = await launch.runOf(thread.thread_id, true);
     const row = store.listRow(thread.thread_id);
     // `row` (additive): the thread's list row, also for an archived thread, which the window's list leaves out.
-    return { serverSession, cursor: store.cursor(), thread: withRepo, row: row ? withSnooze(launch.rowDecorator()(row)) : row, ...(run === undefined ? {} : { run, attach_command: launch.attachOf(thread.thread_id) }) };
+    return { serverSession, cursor, thread: withRepo, row: row ? withSnooze(launch.rowDecorator()(row)) : row, ...(run === undefined ? {} : { run, attach_command: launch.attachOf(thread.thread_id) }) };
   };
 
   const handle = async (req: Request, via: RequestVia): Promise<Response> => {
@@ -5013,6 +5023,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     }
     const path = url.pathname;
     const origin = req.headers.get("origin");
+    // Only the window's own port may be framed by a listed app (inbox-framing.ts): the tailnet and the door answer as without the list.
+    const framers = via === "local" && !fromDeviceDoor.has(req) ? frameAncestors : NO_FRAME_ANCESTORS;
     /** The Board's reads carry the person's notes: another site's read is refused, as on the other read routes. */
     const crossSiteCardRead = (request: Request): Response | null =>
       isSameOriginOrNoOrigin(origin, request.headers.get("host") ?? "", request.headers.get("sec-fetch-site"))
@@ -5176,7 +5188,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     }
 
     // The onboarding tour's fixture and assets (inbox-tour.ts): read only, served from the binary on demand.
-    const tourAnswer = await handleInboxTourRequest(req, path);
+    const tourAnswer = await handleInboxTourRequest(req, path, framers);
     if (tourAnswer) return tourAnswer;
 
     try {
@@ -6246,10 +6258,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       const snoozed = await snoozes.route(req, url);
       if (snoozed) return snoozed;
       // Live HTML embeds: keep a fence's page, and serve it under its own sandboxing policy.
-      const embedded = await embeds.route(req, url);
+      const embedded = await embeds.route(req, url, framers);
       if (embedded) return embedded;
       // Attached HTML pages: keep a page's frame document, and serve it under its own policy (web pictures, never in the window).
-      const paged = await attachedPages.route(req, url);
+      const paged = await attachedPages.route(req, url, framers);
       if (paged) return paged;
       // Feedback (the sidebar's Feedback dialog): sent on, never stored here.
       const fed = await feedback.route(req, path);
@@ -6933,7 +6945,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // A page load (or a refresh) asks for a new release when the answer is
         // over a minute old: fire-and-forget, the button follows on the event stream.
         if (req.method === "GET") updates.nudge();
-        return windowPage(req, page, compressWindowAsset(req, via, "/"));
+        return windowPage(req, page, compressWindowAsset(req, via, "/"), framers);
       }
       // The window's scripts, by exact name from the pack (404 for any other), compressed on every listener as the page is.
       if (path.startsWith(PACKED_ASSET_ROUTE_PREFIX)) return packedAppResponse(windowApp, req, path, compressWindowAsset(req, via, path));

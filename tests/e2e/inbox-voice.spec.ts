@@ -31,7 +31,7 @@
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-voice.spec.ts`. PNGs land in
  * PLANNOTATOR_E2E_SHOTS_DIR, or .local/proof/inbox-voice.
  */
-import { chromium, devices, expect, test, webkit, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from '@playwright/test';
+import { chromium, devices, expect, test, webkit, type Browser, type BrowserContext, type CDPSession, type Locator, type Page } from './inbox-test';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
