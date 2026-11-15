@@ -8,6 +8,7 @@ import type { ActionRow } from '../components/ReplyAnswers';
 import type { SentAnswerGroup } from '../sentReply';
 import { MessageBody } from './MessageBody/MessageBody';
 import type { MessageActsRef } from './messageActs';
+import { farChangeMessage } from '../scheduled/farLinks';
 
 export type MessageBodyData = {
   message: InboxMessageWire;
@@ -30,11 +31,14 @@ export type MessageBodyData = {
   openComment: string | null;
   revealedComment: string | null;
   side: boolean;
+  /** A thread from another linked machine: its name, so a scheduled thread's editor link reads as plain words. */
+  farMachine?: string | null;
   acts: MessageActsRef;
 };
 
 export function drawMessageBody(d: MessageBodyData) {
-  const { message, acts } = d;
+  const { acts } = d;
+  const message = farChangeMessage(d.message, d.farMachine);
   const id = message.id;
   const isAgent = message.author.kind === 'agent';
   const questions = message.questions ?? [];

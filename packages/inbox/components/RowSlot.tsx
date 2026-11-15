@@ -5,6 +5,7 @@ import { labelOf, useSessionLabels } from '../sessionLabels';
 import { useSessionTitles } from '../sessionTitles';
 import { projectKey, useRowSessions } from '../severalSessions';
 import { RowTip } from './RowTip';
+import { scheduledOf } from '../scheduled/rowLook';
 
 export function RowSlot({ row, session, project, tip = true }: { row: InboxListRow; session: string | null; project: string; tip?: boolean }) {
   const labels = useSessionLabels();
@@ -20,6 +21,22 @@ export function RowSlot({ row, session, project, tip = true }: { row: InboxListR
   });
   const own = now ? namesOf(now) : {};
   const names = now && now !== session && !own.label && !own.title ? namesOf(session!) : own;
+  // A scheduled thread's row (scheduled/rowLook.tsx): its name is the sender, where the project sits.
+  const scheduled = scheduledOf(row);
+  if (scheduled) {
+    const name = (
+      <span className="ib-p" dir="auto" data-scheduled-sender="">
+        {scheduled.name}
+      </span>
+    );
+    return tip ? (
+      <RowTip content={scheduled.name} cut>
+        {name}
+      </RowTip>
+    ) : (
+      name
+    );
+  }
   const slot = rowSlot({ project, session: now, names, several: sessions.several.has(key), peers: agents.map((agent) => ({ session: agent.session, ...namesOf(agent.session) })) });
   const text = (
     <span className="ib-p" dir="auto" {...(slot.kind === 'name' ? { 'data-session-slot': '' } : {})}>

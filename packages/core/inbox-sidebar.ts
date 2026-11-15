@@ -40,6 +40,7 @@ export const INBOX_SIDEBAR_ITEMS = [
   { id: 'new-message', label: 'New message', place: 'stack', stack: 'top', hideable: true },
   { id: 'inbox', label: 'Inbox', place: 'stack', stack: 'top', hideable: false },
   { id: 'board', label: 'Board', place: 'stack', stack: 'top', hideable: true },
+  { id: 'scheduled', label: 'Scheduled threads', place: 'stack', stack: 'top', hideable: true },
   { id: 'shape', label: 'Shape', place: 'stack', stack: 'top', hideable: true },
   { id: 'artifacts', label: 'Artifacts', place: 'stack', stack: 'top', hideable: true },
   { id: 'reviews', label: 'Reviews', place: 'stack', stack: 'top', hideable: true },
