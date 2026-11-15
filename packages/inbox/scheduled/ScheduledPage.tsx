@@ -2,11 +2,13 @@
  * The sidebar's Scheduled threads page (CONTRACT.md section 2): the table, and with one open, the narrow list beside
  * its editor. On a phone, or where the window stacks a list and a thread, the editor stands alone with a Back.
  */
+import { useState } from 'react';
 import type { InboxListRow } from '@plannotator/core/inbox-types';
 import type { InboxScheduledRow } from '@plannotator/core/inbox-scheduled-types';
 import { selfMachineId } from '../inboxUrl';
 import { lastLaunchAgent } from '../compose/model';
 import { SidebarTrigger } from '../shell/sidebar';
+import { InboxApiError } from '../apiError';
 import { scheduledApi } from './client';
 import { useLaunchBlock } from './EditorParts';
 import { ScheduledEditor } from './ScheduledEditor';
@@ -44,11 +46,18 @@ export function ScheduledPage(props: ScheduledPageProps) {
   const block = useLaunchBlock();
   const { openId } = props;
   const rows = snap.rows ?? [];
-  const settle = (call: Promise<{ scheduled: InboxScheduledRow }>) =>
-    call.then(
+  const [actError, setActError] = useState<string | null>(null);
+  const settle = (call: Promise<{ scheduled: InboxScheduledRow }>) => {
+    setActError(null);
+    return call.then(
       (answer) => putScheduled(answer.scheduled),
-      () => void readScheduled(),
+      (cause: Error) => {
+        // A second Run press while the first starts is that run.
+        if (!(cause instanceof InboxApiError && cause.code === 'scheduled_running')) setActError(cause.message);
+        void readScheduled();
+      },
     );
+  };
   const acts: RowActs = {
     open: (row) => props.onOpen(row.id),
     run: (row) => void settle(scheduledApi.run(row.id)),
@@ -61,10 +70,6 @@ export function ScheduledPage(props: ScheduledPageProps) {
       }, () => void readScheduled()),
   };
   const alone = props.phone || props.stacked;
-  const titleOf = (threadId: string) => {
-    const row = props.rows.find((r) => r.thread_id === threadId);
-    return row ? (row.thread_name ?? row.subject) : null;
-  };
   const editor = openId && (
     <ScheduledEditor
       key={openId}
@@ -75,7 +80,6 @@ export function ScheduledPage(props: ScheduledPageProps) {
       defaults={{ agent: lastLaunchAgent(props.rows), projectId: lastProject(props.rows) }}
       phone={props.phone}
       narrow={alone}
-      threadTitle={titleOf}
       onClose={() => props.onOpen(null)}
       onCreated={(id) => props.onOpen(id, true)}
       onOpenThread={props.onOpenThread}
@@ -113,9 +117,9 @@ export function ScheduledPage(props: ScheduledPageProps) {
                   </button>
                 </p>
               )}
-              {snap.error && (
+              {(actError ?? snap.error) && (
                 <p className="ib-error" role="alert">
-                  {snap.error}
+                  {actError ?? snap.error}
                 </p>
               )}
               {snap.rows && rows.length === 0 && <p className="st-note">No scheduled threads yet.</p>}

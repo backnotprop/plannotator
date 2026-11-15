@@ -55,7 +55,9 @@
 /* Run and Stop: a quiet bordered button; dimmed on an Off row, where it still runs once. */
 .st-run { display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 11px 0 9px; border: 1px solid var(--border); border-radius: 7px; background: transparent; font: inherit; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 550; color: var(--foreground); cursor: pointer; }
 .st-run svg.ib-ic { width: 12px; height: 12px; stroke-width: 1.9px; }
-.st-run[data-off] { opacity: 0.45; }
+/* Off: quieter, still a button (Run now works while off). */
+.st-run[data-off] { color: var(--muted-foreground); }
+.st-run[data-off]:hover { color: var(--foreground); }
 .st-run:hover { background: var(--muted); }
 .st-run.st-run-ic { width: 24px; height: 24px; padding: 0; justify-content: center; }
 .st-stop { width: 9px; height: 9px; border-radius: 2px; background: currentColor; }

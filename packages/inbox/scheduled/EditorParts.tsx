@@ -101,13 +101,18 @@ export function FolderPick({ block, folder, shown, agentName, phone, onChange }:
       {open && launch && (
         <FolderMenu
           projects={launch.projects}
-          selected={'scratch' in folder ? SCRATCH_PICK : folder.project_id}
+          selected={'scratch' in folder ? SCRATCH_PICK : 'project_id' in folder ? folder.project_id : null}
           home={home}
           phone={phone}
           onPick={(picked) => {
             setOpen(false);
             onChange({ project_id: picked.id });
           }}
+          onFolder={(path) => {
+            setOpen(false);
+            onChange({ path });
+          }}
+          folderPicked={'path' in folder ? { folder: tildePath(folder.path, home), machine: null } : null}
           scratch={launch.scratch ? { folder: tildePath(launch.scratch.root, home), root: tildePath(launch.scratch.root, home), trusted: true, agentName } : null}
           onScratch={() => {
             setOpen(false);

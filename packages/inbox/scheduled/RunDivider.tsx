@@ -1,8 +1,8 @@
 /**
  * A scheduled thread's lines in its thread (CONTRACT.md section 1), drawn from the messages alone so a thread that
  * lives on another linked machine reads the same: the run divider ("Run 8 · due 9:00 AM, ran 11:14 AM · 1 earlier
- * time missed", a click shows its prompt), the quieter skip line, and "Didn't finish" under a run that ended with no
- * reply.
+ * time missed", a click shows its prompt), the quieter skip line, "The run didn't start" under a run that never started (its
+ * `failed`, no launch), and "Didn't finish" under a run that ended with no reply.
  */
 import { useState, type ReactNode } from 'react';
 import type { InboxMessageWire, InboxRun } from '@plannotator/core/inbox-types';
@@ -43,7 +43,8 @@ export function RunDivider({ message, messages, run, tail }: { message: InboxMes
       </div>
     );
   }
-  const ended = runEnded(message, messages, run);
+  const failed = scheduled.failed !== undefined;
+  const ended = failed ? { replied: false, didntFinish: false } : runEnded(message, messages, run);
   const words = dividerWords(scheduled, message.created_at, !ended.replied);
   const promptId = `st-prompt-${message.id}`;
   return (
@@ -57,12 +58,17 @@ export function RunDivider({ message, messages, run, tail }: { message: InboxMes
           {message.body}
         </div>
       )}
+      {failed && (
+        <p className="st-note st-unfinished" data-scheduled-didnt-start="">
+          <span className="st-bad">The run didn't start.</span> {scheduled.failed}
+        </p>
+      )}
       {ended.didntFinish && (
         <p className="st-note st-unfinished" data-scheduled-unfinished="">
           <span className="st-bad">Didn't finish.</span> The session ended without a reply.
         </p>
       )}
-      {tail}
+      {!failed && tail}
     </div>
   );
 }

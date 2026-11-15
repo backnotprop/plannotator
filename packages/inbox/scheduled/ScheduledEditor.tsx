@@ -11,7 +11,8 @@ import { Icon } from '../icons';
 import { Switch } from '../components/SoundRow';
 import { Tip } from '../components/Tip';
 import { scheduledApi, type ScheduledFields } from './client';
-import { putScheduled } from './store';
+import { InboxApiError } from '../apiError';
+import { putScheduled, readScheduled } from './store';
 import { FilesRow, FolderPick, RunsAs, type LaunchBlock } from './EditorParts';
 import { localZone, ScheduleRow } from './ScheduleRow';
 import { lastRunWords, OUTCOME_WORDS, runWhenWords } from './words';
@@ -24,7 +25,6 @@ export interface EditorProps {
   defaults: { agent: string | null; projectId: string | null };
   phone: boolean;
   narrow: boolean;
-  threadTitle: (threadId: string) => string | null;
   onClose: () => void;
   onCreated: (id: string) => void;
   onOpenThread: (threadId: string, messageId?: string) => void;
@@ -146,10 +146,11 @@ export function ScheduledEditor(props: EditorProps) {
       setError(cause instanceof Error ? cause.message : String(cause));
     }
   };
+  // A second press while the first run starts is that run: nothing to say.
   const act = (run: () => Promise<{ scheduled: InboxScheduledRow }>) =>
     run().then(
       (answer) => putScheduled(answer.scheduled),
-      (cause: Error) => setError(cause.message),
+      (cause: Error) => (cause instanceof InboxApiError && cause.code === 'scheduled_running' ? void readScheduled() : setError(cause.message)),
     );
 
   const on = record ? record.state !== 'off' && record.state !== 'done' : false;
@@ -162,7 +163,7 @@ export function ScheduledEditor(props: EditorProps) {
     }, (cause: Error) => setError(cause.message));
   };
   const runs = detail?.runs ?? [];
-  const threadName = record?.thread_id ? (props.threadTitle(record.thread_id) ?? record.name) : null;
+  const threadName = record?.thread_id ? (record.thread_name ?? record.name) : null;
   const agentName = block?.launch?.agents.find((a) => a.agent === draft.agent)?.name ?? draft.agent;
   const running = record?.state === 'running';
   const name = draft.name || (isNew ? 'New scheduled thread' : '');

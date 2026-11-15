@@ -68,7 +68,7 @@ async function open(row: InboxScheduledRow): Promise<HTMLElement> {
   const noop = () => {};
   act(() =>
     root!.render(
-      <ScheduledEditor id={row.id} row={row} version={0} block={null} defaults={{ agent: null, projectId: null }} phone={false} narrow={false} threadTitle={() => null} onClose={noop} onCreated={noop} onOpenThread={noop} />,
+      <ScheduledEditor id={row.id} row={row} version={0} block={null} defaults={{ agent: null, projectId: null }} phone={false} narrow={false} onClose={noop} onCreated={noop} onOpenThread={noop} />,
     ),
   );
   await settle();

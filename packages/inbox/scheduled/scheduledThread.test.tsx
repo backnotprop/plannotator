@@ -83,6 +83,17 @@ test.skipIf(!hasDom)('the latest run still going: no Didn\'t finish', () => {
   expect(host.querySelector('[data-scheduled-unfinished]')).toBeNull();
 });
 
+test.skipIf(!hasDom)("a run that didn't start (`failed`, no launch): Didn't start with why, never Didn't finish, and no run line under it", () => {
+  const failed = divider('msg_r10', '2026-11-14T14:00:00.000Z', { run: 10, failed: 'Claude Code is not installed on this computer.' });
+  const host = document.createElement('div');
+  document.body.appendChild(host);
+  root = createRoot(host);
+  act(() => root!.render(<RunDivider message={failed} messages={[...MESSAGES, failed]} run={{ state: 'stopped' } as InboxRun} tail={<i data-run-line="" />} />));
+  expect(host.querySelector('[data-scheduled-didnt-start]')?.textContent).toContain('Claude Code is not installed on this computer.');
+  expect(host.querySelector('[data-scheduled-unfinished]')).toBeNull();
+  expect(host.querySelector('[data-run-line]')).toBeNull();
+});
+
 function foot(machine: { name: string } | null): HTMLElement {
   const host = document.createElement('div');
   host.className = 'pn-inbox';

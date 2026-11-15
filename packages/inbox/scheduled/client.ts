@@ -51,7 +51,8 @@ export const scheduledApi = {
   create: (fields: ScheduledFields) => post<Saved>(BASE, { ...fields, idempotency_key: newUuid() }),
   update: (id: string, fields: Partial<ScheduledFields>) => post<Saved>(one(id), fields),
   turn: (id: string, on: boolean) => post<Saved>(one(id, on ? '/on' : '/off')),
-  run: (id: string) => post<Saved>(one(id, '/run')),
+  /** `202`: the run's divider; `failed`: why it didn't start (its thread says it too). */
+  run: (id: string) => post<Saved & { message_id: string; failed?: string }>(one(id, '/run')),
   stop: (id: string) => post<Saved>(one(id, '/stop')),
   remove: (id: string) => post<{ deleted: true }>(one(id, '/delete')),
   preview: (schedule: InboxScheduledSchedule) => post<InboxScheduledPreview>(`${BASE}/preview`, { schedule }),
