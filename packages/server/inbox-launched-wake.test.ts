@@ -17,6 +17,7 @@ import {
   INBOX_NAME_THREAD_LINE,
   INBOX_NEW_THREAD_INSTRUCTION,
   INBOX_WAKE_INSTRUCTION,
+  inboxRedirectedLine,
   inboxWakeText,
   type InboxReplyCommand,
 } from "@plannotator/shared/inbox/connection";
@@ -66,11 +67,15 @@ describe("which wake is a launched session's first", () => {
   });
 
   test("nothing else is: a later message, a root moved to another session, a deleted launch, a thread no launch made", () => {
-    expect(inboxLaunchedWakeOf({ ...root(), id: "msg_01JZLATER000000000000000" })).toBeNull();
+    expect(inboxLaunchedWakeOf({ to: { session: SESSION } })).toBeNull();
     expect(inboxLaunchedWakeOf(root({}, "ses-the-person-moved-it-to"))).toBeNull();
     expect(inboxLaunchedWakeOf(root({ deleted_at: "2026-11-09T16:00:00.000Z" }))).toBeNull();
-    expect(inboxLaunchedWakeOf({ id: ROOT, thread_id: ROOT, to: { session: SESSION } })).toBeNull();
     expect(inboxLaunchedWakeOf({ ...root(), to: null })).toBeNull();
+  });
+
+  test("a reply sent to a new session in place of one that ended carries its own launch: that session's first wake", () => {
+    expect(inboxLaunchedWakeOf({ to: { session: SESSION }, launch: launch() })).toEqual({ agent: "claude-code", project: true });
+    expect(inboxLaunchedWakeOf({ to: { session: "ses-moved-on" }, launch: launch() })).toBeNull();
   });
 });
 
@@ -101,6 +106,21 @@ describe("the launched session's first wake", () => {
       const lines = inboxWakeText(command({ agent, project: true })).split("\n");
       expect(lines.filter((line) => LAUNCHED_WORDS.includes(line))).toEqual([INBOX_LAUNCHED_LINE]);
     }
+  });
+
+  test("a reply sent to a new session in place of an ended one: the redirected line, then the launched lines, and no other words", () => {
+    const REPLY = "msg_01JZREPLY00000000000000";
+    const wake = command({ agent: "claude-code", project: true }, { type: "reply", id: REPLY, reply_to: "msg_01JZASK00000000000000000", new_thread: false, redirected_from: "Claude Code" });
+    const lines = inboxWakeText(wake).split("\n");
+    expect(lines.slice(0, 5)).toEqual([
+      `Plannotator Inbox: Fix the flaky upload test (${REPLY})`,
+      INBOX_WAKE_INSTRUCTION,
+      inboxRedirectedLine("Claude Code", REPLY),
+      INBOX_LAUNCHED_LINE,
+      INBOX_LAUNCHED_PROJECT_LINE_CLAUDE,
+    ]);
+    const piLines = inboxWakeText({ ...wake, launched: { agent: "pi", project: true } }).split("\n");
+    expect(piLines.slice(2, 5)).toEqual([inboxRedirectedLine("Claude Code", REPLY), INBOX_LAUNCHED_LINE, INBOX_LAUNCHED_PROJECT_LINE_PI]);
   });
 
   test("a wake without it (a session the person started, a later reply): none of the launched words", () => {

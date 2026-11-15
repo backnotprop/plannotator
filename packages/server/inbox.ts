@@ -152,6 +152,7 @@ import { assertTestHome } from "./test-home-guard";
 import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
 import { isInboxPermissionSession } from "@plannotator/core/inbox-permission";
 import { inboxLaunchedWakeOf } from "@plannotator/core/inbox-run-line";
+import { createInboxReplyLaunch, replyStartsSession } from "./inbox-reply-launch";
 import { foldCheckoutFolderProjects } from "./inbox-checkout-folders";
 import { combineSuggestions, type InboxAgentWork } from "./inbox-combine-suggestions";
 import { createInboxTidy } from "./inbox-tidy";
@@ -4792,6 +4793,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // The hand-off stands without the coupling.
     }
   };
+  // A reply sent to a new session in place of the one that ended (packages/server/inbox-reply-launch.ts).
+  const replyLaunch = createInboxReplyLaunch({ store, launch, live, resolveProject });
   const compose = createInboxCompose({
     store,
     serverSession,
@@ -7113,8 +7116,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
             // live session to take the reply: checked here as New message
             // checks its session (null: not live, 409 and nothing written).
             // An unknown message is the store's 404, never "not live".
-            const asked = body.to === undefined ? undefined : store.message(messageId);
-            const to = body.to === undefined || !asked ? undefined : live.replyTarget(asked.thread_id, body.to);
+            // Or a new session (`to.launch`): prepared here as New message's, started once the reply is written.
+            const startsSession = replyStartsSession(body.to);
+            const door = fromDeviceDoor.get(req);
+            const fromMachine = door?.platform === MACHINE_PLATFORM;
+            // Another machine starts an agent here only for what the person pressed in a window there: never an agent's call.
+            const launching = startsSession ? await replyLaunch.prepare(messageId, body, fromMachine ? { from: machines.machineOfDevice(door.device_id), window: door.window } : null) : null;
+            const asked = body.to === undefined || startsSession ? undefined : store.message(messageId);
+            const to = launching ? launching.to : body.to === undefined || !asked ? undefined : live.replyTarget(asked.thread_id, body.to);
             // The sessions the person tagged with `@` (approval "inbox-tag-agents"): each one live
             // with a connection that understands tags, or an MCP agent the Inbox knows; any other
             // is refused before anything is written. A replay answers what it wrote, as it was.
@@ -7143,6 +7152,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
                 ...(attachments.length > 0 ? { attachments } : {}),
                 ...(to === undefined ? {} : { to }),
                 ...(to && asked && takesOver(store, asked.thread_id, asked, asked.to?.session, thereInThread(live, launch, asked.thread_id)) ? { took_over: true } : {}),
+                // The new session owns the thread from this reply on.
+                ...(launching ? { launch: launching.launch, took_over: true } : {}),
                 ...(tags && tags.length > 0 ? { tags } : {}),
                 ...(handoff ? { handoff } : {}),
                 words: typeof body.words === "string" ? body.words : undefined,
@@ -7168,6 +7179,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
               });
             } catch (error) {
               removeInboxAttachmentFiles(store.dir, attachments);
+              replyLaunch.settle(launching, null);
               // A skip-only Send whose questions closed meanwhile: a no-op, so
               // the rest of a Send to several sessions still goes.
               if (error instanceof InboxError && error.code === "nothing_to_send") {
@@ -7175,6 +7187,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
               }
               throw error;
             }
+            // Written: the new session starts before anything else this Send tidies, so nothing after can leave it unstarted.
+            replyLaunch.settle(launching, { message: result.reply, replayed: result.replayed });
             // The Send that carried the reply box's draft: its words go (a replay too, since the first one sent them)
             // while it is the draft those words were saved as (`updated_at`), with the files this Send carried (a file
             // it did not carry stays, as a draft of files only); or it goes whole while it holds exactly those words

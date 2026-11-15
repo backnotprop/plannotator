@@ -493,10 +493,12 @@ export function createInboxLaunch(options: {
   const hostList = Object.values(hosts);
   /** The host of a launch's agent; null for an agent with no host here. */
   const hostOf = (launch: InboxLaunchRecord): LaunchHost | null => (Object.hasOwn(hosts, launch.agent) ? hosts[launch.agent]! : null);
-  /** Every launch: each launched root, and each scheduled run's divider (one launch per run, many in that one thread). */
+  /** Every launch: each launched root and reply that started a new session, and each scheduled run's divider (one launch per run, many in that one thread). */
   const roots = () => [...store.launchedRoots(), ...store.scheduledRunLaunches()];
-  /** The launch a thread's run line, row and reply follow: a routine's newest run, else the thread's root. */
-  const threadLaunch = (threadId: string): InboxMessage | undefined => store.scheduledRunOf(threadId) ?? store.message(threadId) ?? undefined;
+  /** A thread's launched messages, oldest first: its root, when New message launched it, then each reply sent to a new session. */
+  const launchesOf = (threadId: string): InboxMessage[] => store.launchedRoots().filter((m) => m.thread_id === threadId);
+  /** The launch a thread's run line, row and reply follow: a routine's newest run, else its latest launched message, else the thread's root. */
+  const threadLaunch = (threadId: string): InboxMessage | undefined => store.scheduledRunOf(threadId) ?? launchesOf(threadId).at(-1) ?? store.message(threadId) ?? undefined;
   const states = new Map<LaunchHost, HostState>();
   const stateOf = (host: LaunchHost): HostState => states.get(host)!;
   /** The host's last word on a session (its cached `sessions`), or null when not read. */
@@ -614,12 +616,11 @@ export function createInboxLaunch(options: {
     return last?.author.kind === "person" && (!last.to || last.to.session === root.to?.session) && !(last.scheduled_run && !last.to);
   };
 
-  /** The root of a launched thread whose launch started this session, the launch not deleted (the switch off too: it governs new starts only). */
+  /** The launched message of a thread whose launch started this session, the launch not deleted (the switch off too: it governs new starts only). */
   const launchedRootOf = (threadId: string, session: string | null | undefined): InboxMessage | null => {
     if (!session) return null;
-    const root = threadLaunch(threadId);
-    if (!root?.launch || root.launch.deleted_at || inboxLaunchedSession(root) !== session) return null;
-    return root;
+    const run = store.scheduledRunOf(threadId);
+    return [...launchesOf(threadId), ...(run ? [run] : [])].filter((m) => !m.launch!.deleted_at && inboxLaunchedSession(m) === session).at(-1) ?? null;
   };
 
   /** The run line of a launched root; null for an agent with no host here. */
@@ -812,7 +813,9 @@ export function createInboxLaunch(options: {
       // The person's login env, read for this start only (after the Send answered; never kept).
       const login = await readLogin();
       await trustMadeFolder(launch, host);
-      const name = root.thread_name ?? root.subject ?? "Inbox";
+      // A reply's launch takes its thread's name.
+      const head = root.id === root.thread_id ? root : (store.message(root.thread_id) ?? root);
+      const name = head.thread_name ?? head.subject ?? "Inbox";
       const result = await host.start(launch, { name, login });
       // Deleted while it started: the session it made goes too, and the thread stays as the person left it.
       if (store.message(root.id)?.launch?.deleted_at) {
@@ -1087,9 +1090,30 @@ ${result.text}`);
     if (line.kind !== "message") return;
     const message = line.record;
     if (message.author.kind !== "person" || message.id === message.thread_id || message.delivery) return;
-    const root = threadLaunch(message.thread_id);
-    if (root?.launch) queueMicrotask(() => maybeRespawn(store.message(root.id) ?? root));
+    const run = store.scheduledRunOf(message.thread_id);
+    for (const root of [...launchesOf(message.thread_id), ...(run ? [run] : [])]) if (root.id !== message.id) queueMicrotask(() => maybeRespawn(store.message(root.id) ?? root));
   });
+
+  /** A list row with its launch's run word, and a session blocked on a prompt placed in Stopped on you. */
+  const decorate = <T extends InboxListRow>(row: T, root: InboxMessage | null): T => {
+    if (!root?.launch) return row;
+    const runLine = runOfRoot(root);
+    if (runLine?.state === "waiting_terminal" && row.resolved_at === null) return { ...row, section: "stopped", unread: true, run: null };
+    // A permission question waits on the person: the session is blocked on them (screen 09).
+    if (runLine?.state === "waiting_answer" && row.resolved_at === null) return { ...row, section: "stopped", unread: true, run: null };
+    const word = runLine?.state === "starting" || runLine?.state === "working" || runLine?.state === "cloning" ? runLine.state : null;
+    // The person's item waits on the start, not on a session that ended: the row says "Starting", no tick.
+    // A start that failed, or an agent that is gone, uses the existing "not delivered" tick (screens 14, 15).
+    const pending = row.delivery && row.delivery.state !== "delivered" ? row.delivery : null;
+    const delivery = !pending
+      ? row.delivery
+      : word
+        ? null
+        : runLine?.state === "failed" || runLine?.state === "missing"
+          ? { ...pending, state: "undelivered" as const, reason: "undelivered" as const, send_now: false }
+          : row.delivery;
+    return { ...row, run: word, delivery };
+  };
 
   /** Stop: the host's stop (or Cancel during a clone). The line it leaves. */
   const stopLaunch = async (root: InboxMessage, host: LaunchHost): Promise<InboxRun | null> => {
@@ -2066,7 +2090,9 @@ ${result.text}`);
 
     /** The list's row decorator (a launched row gets its run word, the switch off too: it governs new starts only). */
     rowDecorator(): <T extends InboxListRow>(row: T) => T {
-      return (row) => this.decorateLaunched(row);
+      // One pass over the launches per list read, not one per row.
+      const latest = new Map(roots().map((m) => [m.thread_id, m]));
+      return (row) => decorate(row, latest.get(row.thread_id) ?? null);
     },
 
     /**
@@ -2088,24 +2114,7 @@ ${result.text}`);
 
     /** A launched row with its run word, and a session blocked on a prompt placed in Stopped on you (through `rowDecorator`). */
     decorateLaunched<T extends InboxListRow>(row: T): T {
-      const root = threadLaunch(row.thread_id);
-      if (!root?.launch) return row;
-      const runLine = runOfRoot(root);
-      if (runLine?.state === "waiting_terminal" && row.resolved_at === null) return { ...row, section: "stopped", unread: true, run: null };
-      // A permission question waits on the person: the session is blocked on them (screen 09).
-      if (runLine?.state === "waiting_answer" && row.resolved_at === null) return { ...row, section: "stopped", unread: true, run: null };
-      const word = runLine?.state === "starting" || runLine?.state === "working" || runLine?.state === "cloning" ? runLine.state : null;
-      // The person's item waits on the start, not on a session that ended: the row says "Starting", no tick.
-      // A start that failed, or an agent that is gone, uses the existing "not delivered" tick (screens 14, 15).
-      const pending = row.delivery && row.delivery.state !== "delivered" ? row.delivery : null;
-      const delivery = !pending
-        ? row.delivery
-        : word
-          ? null
-          : runLine?.state === "failed" || runLine?.state === "missing"
-            ? { ...pending, state: "undelivered" as const, reason: "undelivered" as const, send_now: false }
-            : row.delivery;
-      return { ...row, run: word, delivery };
+      return decorate(row, threadLaunch(row.thread_id) ?? null);
     },
 
     /**

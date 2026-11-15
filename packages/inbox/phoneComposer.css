@@ -234,3 +234,5 @@
   .ib-tour-coach.ib-ctip[data-side="above"] { top: auto; }
 }
 .ib-cp-picker[data-phone] .ib-cp-lchopt .ib-cp-op { color: var(--foreground); font-size: inherit; }
+/* The reply's start row: New message's "+" before the agent's mark. */
+.ib-sheet-lead:has(> .ib-cp-plus) { display: flex; align-items: center; gap: 8px; width: auto; }

@@ -811,7 +811,9 @@ export interface InboxMessage {
   viewing?: InboxReplyViewing;
   /**
    * On the root of a thread the person started by launching an agent (To:
-   * "New Claude Code session"). Absent on every other message.
+   * "New Claude Code session"), or on a person's reply sent to a new session in
+   * place of one that ended (the reply box's "New Claude Code session" row).
+   * Absent on every other message.
    */
   launch?: InboxLaunchRecord;
   /** A routine's run divider or skip line (inbox-scheduled-types.ts). A divider also carries its run's `launch`. */
