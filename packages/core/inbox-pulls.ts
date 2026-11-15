@@ -113,8 +113,11 @@ export interface InboxPullLink {
   handed_to?: string | null;
   /** The agent's last message there: what Reply answers, and its words, cut. */
   last: { message_id: string; preview: string; at: string } | null;
-  /** The thread's latest Guided Review, when the agent sent one; `review`: sent for a verdict (it opens as Start review). */
-  guide: { message_id: string; title: string; steps: number; review: boolean } | null;
+  /**
+   * The thread's latest Guided Review, when the agent sent one; `review`: sent for a verdict (it opens as Start review);
+   * `session`: the session that sent it (absent from an older Inbox).
+   */
+  guide: { message_id: string; title: string; steps: number; review: boolean; session?: string | null } | null;
   /** `owner` only: what the hand-off asked for first (a guided review, or the person's own curation); absent for an older choice. */
   ask?: "guide" | "custom";
 }

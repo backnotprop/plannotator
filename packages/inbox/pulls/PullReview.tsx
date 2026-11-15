@@ -55,11 +55,12 @@ import { useNarrowerThan } from '../narrower';
 import { usePhone } from '../phone';
 import { holdBarAfterClose, usePhoneCommentsSheet } from '../components/phoneCommentsSheet';
 import { VerdictKeys, verdictOf } from '../reviewVerdict';
+import { verdictRecheckBlock } from '../skills';
 import { OpenInCodeSpans, OpenInFile } from '../components/OpenIn';
 import { REVIEW_FOLD_PANEL_BELOW } from '../components/ReviewPane';
 import { PostEnding, useReviewDestination } from './PostEnding';
 import { postablePull, postedSignature, postedWords } from './postRules';
-import { findStack, inboxPullLabel, linkAgentName, pullGroups, pullNounWord, pullVerdictReply } from './model';
+import { findStack, inboxPullLabel, linkAgentName, pullGroups, pullNounWord, pullVerdictReply, pullVerdictToReviewer } from './model';
 import { forgeName } from './labels';
 import { FileTreeMark } from './fileTreeMark';
 import { TooltipEscapePassesThrough } from '@plannotator/ui/components/Tooltip';
@@ -797,7 +798,8 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
       const plan = verdictOf(id, comments.length > 0);
       // What the agent reads names lines of the diff on screen: one not on it says so.
       const carried = plan.withComments && !plan.discard ? comments.map((c) => (onLine(c) && !c.outdated && !isHere(c, { stamp, files }) ? { ...c, outdated: true } : c)) : [];
-      const parts = pullVerdictReply(plan.verdict, { pull: layer, scope: on?.whole ? 'stack' : 'layer', base: on?.scope === 'range' && on.base ? on.base : stack.base }, carried.length, carried.length > 0 ? guideCommentSections(carried) : '', note);
+      const skills = verdictRecheckBlock(plan.verdict, pullVerdictToReviewer(link));
+      const parts = pullVerdictReply(plan.verdict, { pull: layer, scope: on?.whole ? 'stack' : 'layer', base: on?.scope === 'range' && on.base ? on.base : stack.base }, carried.length, carried.length > 0 ? guideCommentSections(carried) : '', note, skills);
       const input = { words: parts.words, questions: [], ...(parts.feedback ? { feedback: parts.feedback } : {}) };
       setSending(true);
       setSendError(null);

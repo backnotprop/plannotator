@@ -118,10 +118,10 @@ export const KNOWN_ANSWERS: readonly KnownAnswer[] = [
   {
     id: 'phone',
     answer: 'Use the Inbox on your phone, over your tailnet',
-    action: { kind: 'settings-devices', label: 'Open Settings → Devices' },
+    action: { kind: 'settings-devices', label: 'Open Settings → Remote devices' },
     faq: {
       question: 'Can I use the Inbox on my phone?',
-      answer: 'Yes, over your tailnet: open the address from Settings → Devices on your phone.',
+      answer: 'Yes, over your tailnet: open the address from Settings → Remote devices on your phone.',
     },
     feature: 'Over your tailnet',
     match: {

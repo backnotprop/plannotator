@@ -54,6 +54,7 @@
 @import "../../packages/inbox/agents/iconDialog.css";
 /* Thread tags: the sidebar's Tags, Add tag, a tag's list header (packages/inbox/threadTags.css). */
 @import "../../packages/inbox/threadTags.css";
+@import "../../packages/inbox/cloudflare.css";
 /* Picking thread rows: the boxes, the picks' bar and a phone's sheet (packages/inbox/picks.css). */
 @import "../../packages/inbox/picks.css";
 @import "../../packages/inbox/cloud/cloud.css";

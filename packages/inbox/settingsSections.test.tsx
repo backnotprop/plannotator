@@ -203,7 +203,7 @@ test.skipIf(!hasDom)('#settings opens General; the nav moves between sections by
   await until(() => navLink(el, 'machines') !== null, 'the Machines row');
   const links = [...el.querySelectorAll<HTMLAnchorElement>('.ib-snav a')];
   // Machines right after Devices, then Capabilities (the owner, 2026-10-27), with Voice between them (inbox-voice); Experimental is a group inside it, not a row of its own.
-  expect(links.map((a) => a.textContent?.trim())).toEqual(['General', 'Rows', 'Agents', 'Prompts', 'Devices', 'Machines', 'Accounts', 'Voice', 'Capabilities', 'Activity', 'Archived', 'Storage', 'About']);
+  expect(links.map((a) => a.textContent?.trim())).toEqual(['General', 'Rows', 'Agents', 'Prompts', 'Remote devices', 'Machines', 'Accounts', 'Voice', 'Capabilities', 'Activity', 'Archived', 'Storage', 'About']);
   expect(links.map((a) => a.getAttribute('href'))).toEqual([
     '#settings/general',
     '#settings/rows',
@@ -814,7 +814,7 @@ test.skipIf(!hasDom)('phones off (the released default): Devices is Over your ta
   expect(el.querySelector('[data-settings-phones]')).toBeNull();
   expect(el.querySelector('[data-pair-flow]')).toBeNull();
   expect(buttonText(el, 'Pair a phone')).toBeNull();
-  expect([...el.querySelectorAll('.ib-spg .ib-sgroup')].map((g) => (g.hasAttribute('data-settings-tailscale') ? 'tailnet' : g.hasAttribute('data-settings-cloud') ? 'cloud' : 'other'))).toEqual(['tailnet']);
+  expect([...el.querySelectorAll('.ib-spg .ib-sgroup')].map((g) => (g.hasAttribute('data-settings-tailscale') ? 'tailnet' : g.hasAttribute('data-settings-cloudflare') ? 'cloudflare' : g.hasAttribute('data-settings-cloud') ? 'cloud' : 'other'))).toEqual(['tailnet', 'cloudflare']);
 });
 
 test.skipIf(!hasDom)('on a phone: #settings is the list of sections; a section opens with ‹ Settings, which goes back to the list', async () => {
@@ -842,7 +842,7 @@ test.skipIf(!hasDom)('on a phone: #settings is the list of sections; a section o
   act(() => (el.querySelector('.ib-sphead .ib-pback') as HTMLAnchorElement).click());
   await until(() => document.activeElement === el.querySelector('[data-settings-list] [data-settings-link="capabilities"]'), 'focus on the Capabilities row');
   act(() => el.querySelector<HTMLAnchorElement>('[data-settings-list] [data-settings-link="devices"]')!.click());
-  await until(() => heading(el) === 'Devices', 'Devices');
+  await until(() => heading(el) === 'Remote devices', 'Remote devices');
   expect(window.location.hash).toBe('#settings/devices');
   const back = el.querySelector('.ib-sphead .ib-pback') as HTMLAnchorElement;
   expect(back.textContent).toContain('Settings');
