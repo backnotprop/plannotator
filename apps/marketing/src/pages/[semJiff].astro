@@ -119,9 +119,9 @@ const dividerTorrent = makeTorrent(2, 4419, 26, 0);
 
 const pctOf = (n: number, total: number) => `${((n / total) * 100).toFixed(2)}%`;
 
-const title = `${SEM_JIFF_NAME} · Plannotator`;
+const title = `${SEM_JIFF_NAME}: semantic and structural diffs · Plannotator`;
 const description =
-  'A tree-sitter engine that reads a code diff and labels what really happened: moved, renamed, reformatted, extracted and inlined functions. Power Up with Jev and Clef to find more. Powers the Sem tab in Plannotator code review.';
+  'Semantic and structural diffs. A tree-sitter engine that reads a code diff and labels what really happened: moved, renamed, reformatted, extracted and inlined functions. Power Up with Jev and Clef to find more. Powers the Sem tab in Plannotator code review.';
 ---
 
 <Base title={title} description={description}>
@@ -134,12 +134,15 @@ const description =
       <div class="sd-hero-wrap">
       <header class="sd-hero">
         <div class="sd-cmd-row">
-          <button type="button" class="sd-cmd" data-copy={installCmd} aria-label="Copy the install command">
+          <div class="sd-cmd">
             <span class="sd-cmd-prompt" aria-hidden="true">$</span>
-            <span>{installCmd}</span>
-            <span class="sd-lamp" aria-hidden="true"></span>
-            <span class="sd-cmd-copied" data-copied hidden>copied</span>
-          </button>
+            <code class="sd-cmd-text">{installCmd}</code>
+            <button type="button" class="sd-copy" data-copy={installCmd} aria-label="Copy the install command">
+              <svg class="sd-copy-icon" data-copy-icon viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" /><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" /></svg>
+              <svg class="sd-copy-icon" data-copied-icon hidden viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M20 6L9 17l-5-5" /></svg>
+            </button>
+            <span class="sd-copy-status" data-copy-status role="status" aria-live="polite"></span>
+          </div>
           <a
             href="https://github.com/backnotprop/plannotator"
             target="_blank"
@@ -152,15 +155,16 @@ const description =
           </a>
         </div>
 
-        <h1 class="sd-heading">see what a diff<br />really changed</h1>
+        <h1 class="sd-heading">semantic and<br />structural diffs</h1>
         <p class="sd-line">
-          <span class="sd-line-engine">the engine labels the noise.</span>
-          <span class="sd-line-you">you read the real edits.</span>
+          <span class="sd-line-engine">label structural noise.</span>
+          <span class="sd-line-you">understand real changes.</span>
         </p>
         <p class="sd-overview">
           {SEM_JIFF_NAME} reads both sides of a code diff with tree-sitter and labels what actually
           happened, so reviewers skip the noise and read the real edits. It powers the Sem
           tab in Plannotator's code review.
+          <a href="#power-up" class="sd-powered">Powered up by decision models, <span class="sd-rainbow">like Jev by Typesafe</span>, for deeper structural diff understanding.</a>
         </p>
 
 
@@ -204,8 +208,8 @@ const description =
               hidden={i !== 0}
             >
               <picture>
-                <source media="(max-width: 640px)" srcset={`/assets/semantic-labels/diff-${l.key}-light-phone.webp`} />
-                <img src={`/assets/semantic-labels/diff-${l.key}-light.webp`} alt={l.alt} width="2400" loading={i === 0 ? 'eager' : 'lazy'} />
+                <source media="(max-width: 640px)" srcset={`/assets/semantic-labels/diff-${l.key}-dark-phone.webp`} />
+                <img src={`/assets/semantic-labels/diff-${l.key}-dark.webp`} alt={l.alt} width="2400" loading={i === 0 ? 'eager' : 'lazy'} />
               </picture>
             </div>
           ))}
@@ -431,7 +435,15 @@ const description =
         <p class="sd-body">
           It's already in <a href="/code-review/">Plannotator code review</a>. Or use the engine on its own:
         </p>
-        <pre class="sd-code"><code>{installCmd}</code></pre>
+        <div class="sd-cmd sd-cmd-block">
+          <span class="sd-cmd-prompt" aria-hidden="true">$</span>
+          <code class="sd-cmd-text">{installCmd}</code>
+          <button type="button" class="sd-copy" data-copy={installCmd} aria-label="Copy the install command">
+            <svg class="sd-copy-icon" data-copy-icon viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2" /><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" /></svg>
+            <svg class="sd-copy-icon" data-copied-icon hidden viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M20 6L9 17l-5-5" /></svg>
+          </button>
+          <span class="sd-copy-status" data-copy-status role="status" aria-live="polite"></span>
+        </div>
         <div class="sd-cta-actions">
           <a href="/code-review/" class="sd-btn">
             Plannotator code review
@@ -448,14 +460,26 @@ const description =
 
     <script is:inline>
       (() => {
-        const copyBtn = document.querySelector('[data-copy]');
-        const copied = copyBtn?.querySelector('[data-copied]');
-        copyBtn?.addEventListener('click', () => {
-          navigator.clipboard?.writeText(copyBtn.getAttribute('data-copy') || '').then(() => {
-            if (!copied) return;
-            copied.hidden = false;
-            setTimeout(() => { copied.hidden = true; }, 1400);
-          }).catch(() => {});
+        document.querySelectorAll('[data-copy]').forEach((btn) => {
+          const wrap = btn.closest('.sd-cmd');
+          const status = wrap?.querySelector('[data-copy-status]');
+          const icon = btn.querySelector('[data-copy-icon]');
+          const done = btn.querySelector('[data-copied-icon]');
+          let timer;
+          btn.addEventListener('click', () => {
+            const text = btn.getAttribute('data-copy') || '';
+            navigator.clipboard?.writeText(text).then(() => {
+              if (icon) icon.hidden = true;
+              if (done) done.hidden = false;
+              if (status) status.textContent = 'copied';
+              clearTimeout(timer);
+              timer = setTimeout(() => {
+                if (icon) icon.hidden = false;
+                if (done) done.hidden = true;
+                if (status) status.textContent = '';
+              }, 1500);
+            }).catch(() => {});
+          });
         });
 
         const tip = document.querySelector('[data-tip-el]');
@@ -565,6 +589,44 @@ const description =
     line-height: 1.35;
   }
 
+  .sd-powered {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  .sd-powered:hover,
+  .sd-powered:focus-visible {
+    text-decoration: underline;
+    text-decoration-color: #a79aec;
+    text-underline-offset: 3px;
+  }
+
+  .sd-rainbow {
+    color: #a79aec;
+    font-weight: 600;
+  }
+
+  @supports ((-webkit-background-clip: text) or (background-clip: text)) {
+    .sd-rainbow {
+      color: transparent;
+      background-image: linear-gradient(90deg, #f01ef0, #a79aec, #69b1ff, #86f51f, #f6e600, #f2443b, #f01ef0);
+      background-size: 200% 100%;
+      background-position: 0% 50%;
+      -webkit-background-clip: text;
+      background-clip: text;
+      animation: sd-stream 5s linear infinite;
+    }
+  }
+
+  @keyframes sd-stream {
+    from { background-position: 0% 50%; }
+    to { background-position: -200% 50%; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .sd-rainbow { animation: none; }
+  }
+
   .sd-line-engine { color: #a79aec; }
   .sd-line-you { color: var(--sd-you); }
 
@@ -642,26 +704,60 @@ const description =
     font-weight: 600;
     color: var(--primary);
     letter-spacing: 0.01em;
-    background: none;
-    border: none;
+  }
+
+  .sd-cmd-prompt {
+    color: var(--sd-subtle);
+    font-weight: 400;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  .sd-cmd-text {
+    font: inherit;
+    color: inherit;
+    overflow-wrap: anywhere;
+  }
+
+  .sd-copy {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    flex: none;
     padding: 0;
-    cursor: copy;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: transparent;
+    color: var(--sd-subtle);
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s;
   }
 
-  .sd-cmd-prompt { color: var(--sd-subtle); font-weight: 400; }
+  .sd-copy:hover { color: var(--foreground); border-color: var(--sd-subtle); }
 
-  .sd-lamp {
-    width: 0.5em;
-    height: 0.5em;
-    margin-left: 0.125rem;
-    background: var(--sd-you);
-    align-self: center;
+  .sd-copy:focus-visible {
+    outline: 2px solid var(--sd-you);
+    outline-offset: 2px;
   }
 
-  .sd-cmd-copied {
+  .sd-copy-icon { width: 14px; height: 14px; }
+  .sd-copy-icon[hidden] { display: none; }
+
+  .sd-copy-status {
+    user-select: none;
+    -webkit-user-select: none;
     font-size: 0.6875rem;
     font-weight: 500;
     color: var(--sd-dim);
+  }
+
+  .sd-cmd-block {
+    padding: 0.75rem 0.75rem 0.75rem 1rem;
+    border-radius: 4px;
+    background: var(--muted);
+    max-width: 100%;
   }
 
   .sd-gh {
@@ -754,7 +850,7 @@ const description =
     border-radius: 6px;
     overflow: hidden;
     border: 1px solid var(--border);
-    background: #fff;
+    background: #000;
   }
 
 
@@ -1116,15 +1212,6 @@ const description =
     border-top: 1px solid color-mix(in oklab, var(--border) 55%, transparent);
   }
 
-  .sd-code {
-    font-family: var(--font-mono);
-    font-size: 0.8125rem;
-    padding: 0.75rem 1rem;
-    border-radius: 4px;
-    background: var(--muted);
-    max-width: 100%;
-    overflow-x: auto;
-  }
 
   .sd-cta-actions {
     display: flex;
