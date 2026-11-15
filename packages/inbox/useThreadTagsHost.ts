@@ -228,11 +228,12 @@ const [tagPatches, setTagPatches] = useState<ReadonlyMap<string, readonly string
   const rowOfRef = useRef(rowOf);
   rowOfRef.current = rowOf;
   const listColours = useMemo<ListTagColours | null>(() => {
-    if (!coloursKept) return null;
+    // A phone's list has no `tag_colours` (its keys are fixed): its rows still tint by each tag's `look`, with no switch.
+    if (listTags === null) return null;
     const tintOf: ListTagColours['tintOf'] = (row) => (showColours && listTags ? rowTint(tagsOfRow(row), listTags, colourOf, shownTagId) : null);
     return {
       show: showColours,
-      setShow: (on) => void setShow(on),
+      setShow: coloursKept ? (on) => void setShow(on) : undefined,
       tintOf,
       tintOfThread: (threadId) => {
         const row = rowOfRef.current(threadId);

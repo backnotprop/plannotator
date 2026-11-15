@@ -1603,7 +1603,7 @@ export function InboxList(props: InboxListProps) {
             onCustomize={props.onCustomizeRows}
             view={props.rememberLook !== false ? { value: view, onChange: setView } : undefined}
             starredAbove={props.rememberLook !== false && props.starred ? { on: starredAbove, onChange: setStarredAbove } : undefined}
-            tagColours={props.tagColours ? { on: props.tagColours.show, onChange: props.tagColours.setShow } : undefined}
+            tagColours={props.tagColours?.setShow ? { on: props.tagColours.show, onChange: props.tagColours.setShow } : undefined}
           />
         )}
       </div>

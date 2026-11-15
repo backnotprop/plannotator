@@ -391,7 +391,7 @@ test.skipIf(!hasDom)('"Show tag colors" off hides the sidebar tags’ colours to
 
 const MACHINES = { self: SELF, linked: [{ id: MAC, name: 'Mac', marks: ['tags', 'tag-colours'] }], names: new Map([[MAC, 'Mac']]), away: new Set<string>() } as unknown as MachinesModel;
 let hosted: ReturnType<typeof useThreadTagsHost> | null = null;
-function HostHarness({ tags, colours }: { tags: readonly ListTag[]; colours: InboxTagColours }) {
+function HostHarness({ tags, colours }: { tags: readonly ListTag[]; colours: InboxTagColours | null }) {
   const across = useMemo(() => tagsAcross(tags, MACHINES), [tags]);
   hosted = useThreadTagsHost({
     listTags: tags,
@@ -421,7 +421,7 @@ test.skipIf(!hasDom)('the switch and a pick show at once and are written here an
   draw(<HostHarness tags={TAGS} colours={{ show: true, show_at: null, recent: [] }} />);
   const tagged = row('a', [RELEASE.id]);
   expect(hosted!.listColours!.tintOf(tagged)?.colour).toBe('green');
-  await act(async () => hosted!.listColours!.setShow(false));
+  await act(async () => hosted!.listColours!.setShow!(false));
   await until(() => sent.length === 2, 'the switch written');
   expect(sent.map((s) => [s.url, s.body.show])).toEqual([
     ['/api/inbox/tag-colours', false],
@@ -443,4 +443,11 @@ test.skipIf(!hasDom)('with the switch off from the list read, no row is tinted a
   expect(hosted!.listColours!.show).toBe(false);
   expect(hosted!.listColours!.tintOf(row('a', [RELEASE.id]))).toBeNull();
   expect(hosted!.sidebarTags!.colours!.show).toBe(false);
+});
+
+test.skipIf(!hasDom)("a paired phone's list (no tag_colours, its keys fixed): rows tint by each tag's look, with no switch and no colour menu", () => {
+  draw(<HostHarness tags={TAGS} colours={null} />);
+  expect(hosted!.listColours!.tintOf(row('a', [RELEASE.id]))?.colour).toBe('green');
+  expect(hosted!.listColours!.setShow).toBeUndefined();
+  expect(hosted!.sidebarTags!.colours).toBeNull();
 });

@@ -5226,14 +5226,16 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const titles = { ...(merged ? machines.sessionNames().titles : {}), ...live.titles() };
         // A linked machine's read carries this Inbox's agent faces and given names in its group: they live here
         // (inbox-linked-marks), and that machine's windows show them. This Inbox's own windows read them apart.
-        const faces = fromDeviceDoor.get(req)?.platform === MACHINE_PLATFORM ? agentFacesFile.wire() : null;
+        const door = fromDeviceDoor.get(req);
+        const faces = door?.platform === MACHINE_PLATFORM ? agentFacesFile.wire() : null;
+        const phone = door !== undefined && door.platform !== MACHINE_PLATFORM;
         const agents = faces ? rows.agents.map((group) => ({ ...group, faces: faces.faces, faces_rev: faces.rev })) : rows.agents;
-        const model = { ...rows, agents, session_labels: labels, session_titles: titles };
+        const model = { ...(phone ? phoneList(rows) : rows), agents, session_labels: labels, session_titles: titles };
         // `since` (the window, #2593): only the rows changed since the list it holds (inbox-list-delta.ts); the rest of
         // the model, the labels too, goes as it is now. Without it, as before.
         const since = url.searchParams.get("since");
         if (since === null) return json(model);
-        return json(listVersions.answer(`${projectFilter ?? ""}|${archivedMode}|${merged ? 1 : 0}|${snoozedMode}`, model, since || null));
+        return json(listVersions.answer(`${projectFilter ?? ""}|${archivedMode}|${merged ? 1 : 0}|${snoozedMode}|${phone ? 1 : 0}`, model, since || null));
       }
       // Linked machines (inbox-machines.ts): the forward /api/inbox/m/<machine>/<route>, the machines and the outbox.
       if (path.startsWith("/api/inbox/m/") || path.startsWith("/api/inbox/machines") || path.startsWith("/api/inbox/outbox")) {
@@ -7346,4 +7348,18 @@ function seenFields(body: Record<string, unknown>): { reportAt?: string | null; 
     out.notes = notes.map((note: InboxNoteAutoAdd) => ({ agent: note.agent, path: note.path }));
   }
   return out;
+}
+
+/**
+ * A paired phone's list keeps the keys it has always had (inbox-devices.test.ts pins them): no `tag_colours`. Its rows
+ * take their colours from each tag's `look` on its next list read, and "Show tag colors" off takes the looks away.
+ */
+function phoneList<T extends { tags: readonly object[]; tag_colours: { show: boolean } }>(list: T): Omit<T, "tag_colours"> {
+  const { tag_colours, ...rest } = list;
+  if (tag_colours.show) return rest;
+  const tags = list.tags.map((tag) => {
+    const { look: _look, ...plain } = tag as { look?: unknown };
+    return plain;
+  });
+  return { ...rest, tags } as Omit<T, "tag_colours">;
 }

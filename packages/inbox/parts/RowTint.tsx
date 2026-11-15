@@ -6,7 +6,8 @@ import { rowTintTitle, tintAttrs, type RowTint } from '../tagColours';
 /** What the list needs for tag colours: the ⋮'s switch and each row's tint. */
 export interface ListTagColours {
   show: boolean;
-  setShow: (on: boolean) => void;
+  /** Absent where the list carries no switch (a phone): the ⋮ has no item. */
+  setShow?: (on: boolean) => void;
   tintOf: (row: Pick<InboxListRow, 'thread_id' | 'tags' | 'machine'>) => RowTint | null;
   /** The same by thread id, for search's results: null for a thread the list does not hold. */
   tintOfThread?: (threadId: string) => RowTint | null;
