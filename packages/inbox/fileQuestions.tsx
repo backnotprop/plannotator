@@ -46,7 +46,7 @@ export function fileQuestionRecords(message: Pick<InboxMessageWire, 'questions'>
 
 /**
  * The record a card computes `fileKey` for, by the file's key: the file's own
- * record first (a message sent before twins were left out recorded one), else
+ * record first (an older message has one for a repeated question too), else
  * the body's record of the same key.
  */
 export function recordsByFileKey(records: readonly InboxQuestion[]): Map<string, InboxQuestion> {
