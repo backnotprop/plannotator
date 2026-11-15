@@ -14,11 +14,12 @@ const installCmd = `npm install ${SEM_JIFF_PACKAGE}`;
 const languages = ['TypeScript', 'TSX', 'JavaScript', 'Python', 'Go', 'Rust', 'Java', 'C#', 'PHP', 'Ruby', 'Kotlin', 'Swift'];
 
 const labels = [
-  { key: 'extracted', name: 'Extracted function', alt: 'A loop pulled out of checkout into a new sumLineItems function, drawn as one block moving across the diff' },
-  { key: 'inlined', name: 'Inlined function', alt: 'A helper removed and its body pasted where it was called, drawn as one block moving across the diff' },
-  { key: 'moved', name: 'Moved', alt: 'A function moved further down the file, drawn as one block instead of a deletion and an addition' },
-  { key: 'renamed', name: 'Renamed', alt: 'MAX_RETRIES renamed to MAX_ATTEMPTS everywhere, each use marked as a rename' },
-  { key: 'reformatted', name: 'Reformatted', alt: 'An object literal split across lines, marked as reformatted, next to a real edit' },
+  { key: 'hero', name: 'All in one file', alt: 'One TypeScript file in split view: roundCents moved, sumItems extracted, auditSubtotal inlined, amt renamed to lineTotal, with bands joining each block to its new place and two real edits left plain' },
+  { key: 'extracted', name: 'Extracted function', alt: 'Kotlin: two lines pulled out of the receipt printer into appendTotal, which the original now calls' },
+  { key: 'inlined', name: 'Inlined function', alt: 'TypeScript: the helper auditSubtotal removed and its body placed at the call site' },
+  { key: 'moved', name: 'Moved', alt: 'Python: format_amount moved to the end of the file, folded on the old side, next to one real edit' },
+  { key: 'renamed', name: 'Renamed', alt: 'PHP: $amt renamed to $requested in all five places, each marked renamed' },
+  { key: 'reformatted', name: 'Reformatted', alt: 'TypeScript: quoteShipping re-wrapped from two lines to eight, marked reformatted' },
 ];
 
 const finalSet = {
@@ -33,9 +34,9 @@ const finalSet = {
 const heldOut = {
   total: 454,
   rows: [
-    { key: 'engine', name: 'Engine alone', found: 263, wrong: 8 },
-    { key: 'jev', name: '+ Jev', found: 371, wrong: 12 },
-    { key: 'clef', name: '+ Jev, Clef as tie-breaker', found: 388, wrong: 13 },
+    { key: 'n1', name: 'Engine alone', found: 263, wrong: 8 },
+    { key: 'n2', name: '+ Jev', found: 371, wrong: 12 },
+    { key: 'lead', name: '+ Jev, Clef as tie-breaker', found: 388, wrong: 13 },
   ],
 };
 
@@ -44,18 +45,18 @@ const compare = [
     name: 'TypeScript',
     total: 187,
     rows: [
-      { key: 'rm', name: 'RefactoringMiner', found: 73, wrong: 14 },
-      { key: 'engine', name: SEM_JIFF_NAME, found: 105, wrong: 1 },
-      { key: 'jev', name: `${SEM_JIFF_NAME} + Jev`, found: 148, wrong: 1 },
+      { key: 'n1', name: 'RefactoringMiner', found: 73, wrong: 14 },
+      { key: 'n2', name: SEM_JIFF_NAME, found: 105, wrong: 1 },
+      { key: 'lead', name: `${SEM_JIFF_NAME} + Jev`, found: 148, wrong: 1 },
     ],
   },
   {
     name: 'Java',
     total: 91,
     rows: [
-      { key: 'rm', name: 'RefactoringMiner', found: 70, wrong: 16 },
-      { key: 'engine', name: SEM_JIFF_NAME, found: 52, wrong: 1 },
-      { key: 'jev', name: `${SEM_JIFF_NAME} + Jev`, found: 62, wrong: 1 },
+      { key: 'n1', name: 'RefactoringMiner', found: 70, wrong: 16 },
+      { key: 'n2', name: SEM_JIFF_NAME, found: 52, wrong: 1 },
+      { key: 'lead', name: `${SEM_JIFF_NAME} + Jev`, found: 62, wrong: 1 },
     ],
   },
 ];
@@ -96,7 +97,8 @@ const description =
 ---
 
 <Base title={title} description={description}>
-  <div class="min-h-screen bg-background text-foreground">
+  <link slot="head" rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500;600&display=swap" />
+  <div class="sd-static min-h-screen bg-background text-foreground">
     <Nav />
 
     <main class="max-w-6xl mx-auto px-6 md:px-8">
@@ -105,6 +107,7 @@ const description =
           <button type="button" class="sd-cmd" data-copy={installCmd} aria-label="Copy the install command">
             <span class="sd-cmd-prompt" aria-hidden="true">$</span>
             <span>{installCmd}</span>
+            <span class="sd-lamp" aria-hidden="true"></span>
             <span class="sd-cmd-copied" data-copied hidden>copied</span>
           </button>
           <a
@@ -119,8 +122,7 @@ const description =
           </a>
         </div>
 
-        <p class="sd-pkg">{SEM_JIFF_PACKAGE}</p>
-        <h1 class="font-display sd-heading">See what a diff<br />really changed.</h1>
+        <h1 class="font-display sd-heading">see what a diff<br />really changed</h1>
         <p class="sd-overview">
           {SEM_JIFF_NAME} reads both sides of a code diff with tree-sitter and labels what actually
           happened, so reviewers skip the noise and read the real edits. It powers the Sem
@@ -159,22 +161,17 @@ const description =
               data-shot-pane={l.key}
               hidden={i !== 0}
             >
-              {['light', 'dark'].map((t) => (
-                <picture class={`sd-shot-${t}`}>
-                  <source media="(max-width: 640px)" srcset={`/assets/semantic-labels/diff-${l.key}-${t}-phone.webp`} />
-                  <img src={`/assets/semantic-labels/diff-${l.key}-${t}.webp`} alt={l.alt} width="2000" loading={i === 0 ? 'eager' : 'lazy'} />
-                </picture>
-              ))}
+              <picture>
+                <source media="(max-width: 640px)" srcset={`/assets/semantic-labels/diff-${l.key}-light-phone.webp`} />
+                <img src={`/assets/semantic-labels/diff-${l.key}-light.webp`} alt={l.alt} width="2400" loading={i === 0 ? 'eager' : 'lazy'} />
+              </picture>
             </div>
           ))}
         </figure>
       </section>
 
       <section id="power-up" class="sd-section">
-        <p class="sd-eyebrow"><span class="sd-bolt" aria-hidden="true">
-          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M13 2 4 14h7l-1 8 9-12h-7l1-8z" /></svg>
-        </span>power up</p>
-        <h2 class="font-display sd-title">Power Up with Jev and Clef</h2>
+        <h2 class="font-display sd-title">power up with Jev and Clef</h2>
         <p class="sd-body">
           Add your own Jev key and the engine asks a model about the candidates its strict rules
           aren't sure of. Add Clef and it breaks the ties.
@@ -188,7 +185,7 @@ const description =
 
           <div class="sd-bars sd-bars-hero" role="list">
             <div class="sd-bars-colhead" aria-hidden="true">
-              <span></span><span></span><span class="sd-colhead-wrong">wrong claims</span>
+              <span></span><span></span><span class="sd-colhead-wrong">Wrong claims</span>
             </div>
             {finalSet.rows.map((r) => (
               <div
@@ -262,8 +259,7 @@ const description =
       </section>
 
       <section id="compare" class="sd-section">
-        <p class="sd-eyebrow">against other tools</p>
-        <h2 class="font-display sd-title">More found, far fewer wrong</h2>
+        <h2 class="font-display sd-title">more found, far fewer wrong</h2>
         <p class="sd-body">
           Extracted and inlined functions on the same commits, next to RefactoringMiner.
         </p>
@@ -318,8 +314,7 @@ const description =
       </section>
 
       <section id="tools" class="sd-section">
-        <p class="sd-eyebrow">structural diff tools</p>
-        <h2 class="font-display sd-title">{hasLinesLeft ? 'Less to read. Fewer wrong claims.' : 'Fewer wrong claims'}</h2>
+        <h2 class="font-display sd-title">{hasLinesLeft ? 'less to read, fewer wrong claims' : 'fewer wrong claims'}</h2>
         <p class="sd-body">{hasLinesLeft ? 'Next to plain git, git --color-moved, difftastic, GumTree and sem.' : 'Next to difftastic and sem, on projects it was never tuned on.'}</p>
 
         {hasLinesLeft && (
@@ -339,7 +334,7 @@ const description =
                 >
                   <span class="sd-row-name">{r.tool}</span>
                   <span class="sd-track">
-                    <span class:list={['sd-bar', r.key === 'engine' ? 'sd-c-jev' : 'sd-c-rm']} style={`--p: ${pctOf(r.linesLeft, linesLeftMax)}`}></span>
+                    <span class:list={['sd-bar', r.key === 'engine' ? 'sd-c-lead' : 'sd-c-n1']} style={`--p: ${pctOf(r.linesLeft, linesLeftMax)}`}></span>
                     <span class="sd-bar-val"><strong>{r.linesLeft.toLocaleString('en-US')}</strong></span>
                   </span>
                   <span class="sd-row-wrong"></span>
@@ -369,7 +364,7 @@ const description =
                     >
                       <span class="sd-row-name">{r.name}</span>
                       <span class="sd-track">
-                        {r.wrong > 0 && <span class:list={['sd-bar', r.key === 'engine' ? 'sd-c-engine' : 'sd-c-rm']} style={`--p: ${pctOf(r.wrong, r.of)}`}></span>}
+                        {r.wrong > 0 && <span class:list={['sd-bar', r.key === 'engine' ? 'sd-c-lead' : 'sd-c-n1']} style={`--p: ${pctOf(r.wrong, r.of)}`}></span>}
                         <span class="sd-bar-val"><strong>{r.wrong}</strong> wrong</span>
                       </span>
                       <span class="sd-row-wrong">of {r.of} {r.unit}</span>
@@ -383,7 +378,7 @@ const description =
       </section>
 
       <section class="sd-cta">
-        <h2 class="font-display sd-title">Try it in your next review</h2>
+        <h2 class="font-display sd-title">try it in your next review</h2>
         <p class="sd-body">
           It's already in <a href="/code-review/">Plannotator code review</a>. Or use the engine on its own:
         </p>
@@ -456,22 +451,58 @@ const description =
 </Base>
 
 <style>
-  main {
-    --sd-dim: color-mix(in oklab, var(--foreground) 62%, transparent);
-    --sd-subtle: color-mix(in oklab, var(--foreground) 42%, transparent);
-    --sd-grid: color-mix(in oklab, var(--foreground) 8%, transparent);
-    --sd-c-rm: #535861;
-    --sd-c-engine: #6265b3;
-    --sd-c-jev: #7a7cf0;
-    --sd-c-clef: #9fa5ff;
+  .sd-static {
+    --background: #0b0a11;
+    --foreground: #ece7dc;
+    --card: #000000;
+    --popover: #050507;
+    --muted: #14121c;
+    --muted-foreground: #9893ad;
+    --border: #1f1c2a;
+    --primary: #a79aec;
+    --destructive: #f2443b;
+    --sd-you: #f01ef0;
+    --font-mono: 'Geist Mono', 'JetBrains Mono', ui-monospace, monospace;
+    --sd-dim: #b9b4c4;
+    --sd-subtle: #8f8aa3;
+    --sd-grid: color-mix(in oklab, var(--foreground) 9%, transparent);
+    --sd-c-engine: #4c4766;
+    --sd-c-jev: #7a6ed0;
+    --sd-c-clef: #a79aec;
+    --sd-c-n1: #45424f;
+    --sd-c-n2: #7a7590;
+    --sd-c-lead: #a79aec;
+    --sd-diff-bg: #1e1e1e;
   }
 
-  :global(.light) main {
-    --sd-c-rm: #b0b6bf;
-    --sd-c-engine: #8889e0;
-    --sd-c-jev: #6861f1;
-    --sd-c-clef: #4a1fd9;
+  :global(.light) .sd-static {
+    --background: #efebe3;
+    --foreground: #0b0a11;
+    --card: #faf8f3;
+    --popover: #faf8f3;
+    --muted: #e4dfd4;
+    --muted-foreground: #58546a;
+    --border: #d8d2c6;
+    --primary: #4a37c4;
+    --destructive: #c4271f;
+    --sd-you: #b0129f;
+    --sd-dim: #46424f;
+    --sd-subtle: #625e70;
+    --sd-c-engine: #aaa4be;
+    --sd-c-jev: #7466cf;
+    --sd-c-clef: #4a37c4;
+    --sd-c-n1: #b3aec0;
+    --sd-c-n2: #7d7890;
+    --sd-c-lead: #4a37c4;
+    --sd-diff-bg: #ffffff;
   }
+
+  .sd-static :global(::selection) {
+    background: color-mix(in oklab, var(--sd-you) 40%, transparent);
+    color: var(--foreground);
+  }
+
+  .sd-static :global(:focus-visible) { outline-color: var(--sd-you); }
 
   .sd-hero {
     display: flex;
@@ -508,6 +539,14 @@ const description =
 
   .sd-cmd-prompt { color: var(--sd-subtle); font-weight: 400; }
 
+  .sd-lamp {
+    width: 0.5em;
+    height: 0.5em;
+    margin-left: 0.125rem;
+    background: var(--sd-you);
+    align-self: center;
+  }
+
   .sd-cmd-copied {
     font-size: 0.6875rem;
     font-weight: 500;
@@ -520,9 +559,9 @@ const description =
     gap: 0.5rem;
     font-size: 0.75rem;
     line-height: 1;
-    padding: 0.5rem 0.875rem;
+    padding: 0.5rem 0.75rem;
     border: 1px solid var(--border);
-    border-radius: 999px;
+    border-radius: 4px;
     color: var(--sd-dim);
     text-decoration: none;
     transition: color 0.15s, border-color 0.15s;
@@ -534,12 +573,6 @@ const description =
     border-color: var(--sd-subtle);
   }
 
-  .sd-pkg {
-    font-family: var(--font-mono);
-    font-size: 0.75rem;
-    color: var(--sd-subtle);
-    margin-bottom: -0.5rem;
-  }
 
   .sd-heading {
     font-size: clamp(2rem, 5vw, 3rem);
@@ -559,7 +592,7 @@ const description =
   .sd-gallery {
     display: flex;
     flex-direction: column;
-    gap: 0.875rem;
+    gap: 1rem;
     margin-bottom: 1rem;
   }
 
@@ -575,7 +608,7 @@ const description =
     font-weight: 700;
     line-height: 1;
     padding: 0.5rem 0.75rem;
-    border-radius: 999px;
+    border-radius: 4px;
     cursor: pointer;
     color: var(--sd-dim);
     border: 1px solid var(--border);
@@ -596,7 +629,7 @@ const description =
   .sd-langs {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.25rem 0.875rem;
+    gap: 0.25rem 1rem;
     font-family: var(--font-mono);
     font-size: 0.75rem;
     color: var(--sd-subtle);
@@ -604,14 +637,12 @@ const description =
 
   .sd-shot {
     margin: 0;
-    border-radius: 12px;
+    border-radius: 6px;
     overflow: hidden;
     border: 1px solid var(--border);
-    background: #1e1e1e;
-    box-shadow: 0 24px 60px color-mix(in oklab, var(--foreground) 10%, transparent);
+    background: #fff;
   }
 
-  :global(.light) .sd-shot { background: #fff; }
 
   .sd-shot-pane[hidden] { display: none; }
 
@@ -622,14 +653,11 @@ const description =
     height: auto;
   }
 
-  .sd-shot-light { display: none !important; }
-  :global(.light) .sd-shot-light { display: block !important; }
-  :global(.light) .sd-shot-dark { display: none !important; }
 
   .sd-section {
     display: flex;
     flex-direction: column;
-    gap: 0.875rem;
+    gap: 1rem;
     padding: 4.5rem 0 1rem;
     scroll-margin-top: 4rem;
   }
@@ -639,24 +667,12 @@ const description =
     margin-top: 3.5rem;
   }
 
-  .sd-eyebrow {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.4rem;
-    font-family: var(--font-mono);
-    font-size: 0.6875rem;
-    font-weight: 600;
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
-    color: var(--primary);
-  }
 
-  .sd-bolt svg { width: 0.95rem; height: 0.95rem; display: block; }
 
   .sd-title {
     font-size: clamp(1.625rem, 3.2vw, 2.25rem);
     line-height: 1.12;
-    font-weight: 700;
+    font-weight: 600;
     letter-spacing: -0.02em;
     text-wrap: balance;
   }
@@ -677,7 +693,7 @@ const description =
   .sd-card {
     min-width: 0;
     border: 1px solid var(--border);
-    border-radius: 14px;
+    border-radius: 6px;
     background: var(--card);
     padding: 1.5rem 1.5rem 1.25rem;
   }
@@ -696,13 +712,13 @@ const description =
     font-size: 0.8125rem;
     line-height: 1.5;
     color: var(--sd-dim);
-    margin-top: 0.2rem;
+    margin-top: 0.25rem;
   }
 
   .sd-legend {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.5rem 1.125rem;
+    gap: 0.5rem 1rem;
     margin-bottom: 1.25rem;
     font-size: 0.75rem;
     color: var(--sd-dim);
@@ -711,7 +727,7 @@ const description =
   .sd-legend-item {
     display: inline-flex;
     align-items: center;
-    gap: 0.4rem;
+    gap: 0.5rem;
   }
 
   .sd-swatch {
@@ -721,7 +737,9 @@ const description =
     display: inline-block;
   }
 
-  .sd-c-rm { background: var(--sd-c-rm); }
+  .sd-c-n1 { background: var(--sd-c-n1); }
+  .sd-c-n2 { background: var(--sd-c-n2); }
+  .sd-c-lead { background: var(--sd-c-lead); }
   .sd-c-engine { background: var(--sd-c-engine); }
   .sd-c-jev { background: var(--sd-c-jev); }
   .sd-c-clef { background: var(--sd-c-clef); }
@@ -742,9 +760,7 @@ const description =
 
   .sd-colhead-wrong {
     font-family: var(--font-mono);
-    font-size: 0.625rem;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
+    font-size: 0.75rem;
     color: var(--sd-subtle);
     text-align: right;
     padding-bottom: 0.25rem;
@@ -768,7 +784,7 @@ const description =
     position: relative;
     display: flex;
     align-items: center;
-    gap: 0.625rem;
+    gap: 0.75rem;
     min-height: 24px;
     border-left: 1px solid var(--sd-grid);
   }
@@ -791,7 +807,7 @@ const description =
   .sd-bar-val {
     display: inline-flex;
     align-items: baseline;
-    gap: 0.4rem;
+    gap: 0.5rem;
     white-space: nowrap;
     font-size: 0.8125rem;
     color: var(--sd-dim);
@@ -799,7 +815,7 @@ const description =
 
   .sd-bar-val strong {
     color: var(--foreground);
-    font-weight: 650;
+    font-weight: 600;
   }
 
   .sd-bars-hero .sd-bar-val strong { font-size: 1.25rem; letter-spacing: -0.01em; }
@@ -850,7 +866,7 @@ const description =
   .sd-table th,
   .sd-table td {
     text-align: left;
-    padding: 0.35rem 1.25rem 0.35rem 0;
+    padding: 0.25rem 1.25rem 0.25rem 0;
     border-bottom: 1px solid var(--sd-grid);
     font-weight: 400;
   }
@@ -885,7 +901,7 @@ const description =
     justify-content: flex-end;
     gap: 0.25rem;
     border: 1px solid var(--border);
-    border-radius: 14px;
+    border-radius: 6px;
     background: var(--card);
     padding: 1.25rem 1.5rem;
   }
@@ -897,7 +913,7 @@ const description =
 
   .sd-stat-val {
     font-size: 2.25rem;
-    font-weight: 650;
+    font-weight: 600;
     letter-spacing: -0.02em;
     line-height: 1.1;
     margin: 0;
@@ -913,7 +929,7 @@ const description =
   .sd-compare {
     display: grid;
     grid-template-columns: minmax(0, 1fr);
-    gap: 1.75rem;
+    gap: 2rem;
   }
 
   @media (min-width: 860px) {
@@ -931,7 +947,7 @@ const description =
   .sd-group-name span {
     font-weight: 400;
     color: var(--sd-subtle);
-    margin-left: 0.35rem;
+    margin-left: 0.5rem;
     font-size: 0.8125rem;
   }
 
@@ -944,7 +960,7 @@ const description =
     .sd-bars-colhead > span:first-child { display: none; }
     .sd-row-name {
       grid-column: 1 / -1;
-      margin-bottom: 0.35rem;
+      margin-bottom: 0.25rem;
     }
     .sd-bars-hero .sd-bar-val strong { font-size: 1.0625rem; }
   }
@@ -961,8 +977,8 @@ const description =
     position: fixed;
     z-index: 60;
     max-width: 18rem;
-    padding: 0.45rem 0.65rem;
-    border-radius: 8px;
+    padding: 0.5rem 0.75rem;
+    border-radius: 4px;
     font-size: 0.75rem;
     line-height: 1.4;
     color: var(--foreground);
@@ -978,7 +994,7 @@ const description =
     display: flex;
     flex-direction: column;
     align-items: flex-start;
-    gap: 0.875rem;
+    gap: 1rem;
     padding: 3.5rem 0 5.5rem;
     margin-top: 3.5rem;
     border-top: 1px solid color-mix(in oklab, var(--border) 55%, transparent);
@@ -988,7 +1004,7 @@ const description =
     font-family: var(--font-mono);
     font-size: 0.8125rem;
     padding: 0.75rem 1rem;
-    border-radius: 8px;
+    border-radius: 4px;
     background: var(--muted);
     max-width: 100%;
     overflow-x: auto;
@@ -997,8 +1013,8 @@ const description =
   .sd-cta-actions {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.625rem;
-    margin-top: 0.375rem;
+    gap: 0.75rem;
+    margin-top: 0.5rem;
   }
 
   .sd-btn {
@@ -1007,8 +1023,8 @@ const description =
     gap: 0.5rem;
     font-size: 0.8125rem;
     font-weight: 600;
-    padding: 0.625rem 1.125rem;
-    border-radius: 8px;
+    padding: 0.75rem 1.25rem;
+    border-radius: 4px;
     background: var(--foreground);
     color: var(--background);
     text-decoration: none;
