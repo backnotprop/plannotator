@@ -99,6 +99,9 @@ import { LinkedMarkdown } from './LinkedMarkdown';
 import { PAGE_DESKTOP_WIDTH, desktopFitScale, pageIsWide, readPageSize, shownPageSize, writePageSize, type PageSize } from '../pageSize';
 import { tapNearSizeIcon, useSizeIconFade } from '../sizeIconFade';
 import { useFileQuestionViewerProps, type FileQuestions } from '../fileQuestions';
+import { whenStill } from '../whenStill';
+import { unsavedComposer, unsavedComposers } from './unsavedComposers';
+export { unsavedComposer, unsavedComposers };
 
 /**
  * The pane width below which the 300 px comments panel beside the thread
@@ -331,69 +334,6 @@ let openPane: { unsaved: () => boolean } | null = null;
 /** Whether the file open now holds a comment not saved yet (saved words compared: an edit not changed is not unsaved). */
 export function openPaneUnsaved(): boolean {
   return openPane?.unsaved() ?? false;
-}
-
-/** The first of `unsavedComposers`, or null. `savedText` answers an annotation's saved words by id. */
-export function unsavedComposer(pane: HTMLElement | null, savedText: (id: string) => string | undefined = () => undefined): HTMLTextAreaElement | null {
-  return unsavedComposers(pane, savedText)[0] ?? null;
-}
-
-/**
- * Every composer of the open file with words (or a drawing) not yet saved, or
- * an existing comment being edited whose words differ from the saved ones,
- * in this order: comment popovers, a diagram's composer, the file's own row
- * (`data-image-composer`), edit boxes. Their textareas.
- */
-export function unsavedComposers(
-  pane: HTMLElement | null,
-  savedText: (id: string) => string | undefined = () => undefined,
-  owns: (area: HTMLTextAreaElement) => boolean = () => true,
-): HTMLTextAreaElement[] {
-  const found: HTMLTextAreaElement[] = [];
-  const typed = (area: HTMLTextAreaElement) => area.value.trim() !== '';
-  // Plannotator's comment popover (text, HTML pinpoint, code lines) draws in a portal on the page: only the pane's own.
-  for (const area of document.querySelectorAll<HTMLTextAreaElement>('[data-comment-popover] textarea')) {
-    if (typed(area) && owns(area)) found.push(area);
-  }
-  if (!pane) return found;
-  for (const area of pane.querySelectorAll<HTMLTextAreaElement>('[data-diagram-composer] textarea, [data-image-composer] textarea')) {
-    if (typed(area)) found.push(area);
-  }
-  // An image drawn on but not yet commented.
-  const drawn = pane.querySelector<HTMLElement>('[data-image-composer] .ib-markup');
-  const row = drawn ? pane.querySelector<HTMLTextAreaElement>('[data-image-composer] textarea') : null;
-  if (row && !found.includes(row)) found.push(row);
-  // A comment being edited (the annotation panel's card, a code line's inline comment, which Pierre may draw in its shadow root).
-  const roots: ParentNode[] = [pane];
-  for (const container of pane.querySelectorAll('diffs-container')) if (container.shadowRoot) roots.push(container.shadowRoot);
-  for (const scope of roots) {
-    for (const area of scope.querySelectorAll<HTMLTextAreaElement>('[data-annotation-id] textarea, [data-code-annotation-id] textarea')) {
-      const owner = area.closest('[data-annotation-id], [data-code-annotation-id]');
-      const id = owner?.getAttribute('data-annotation-id') ?? owner?.getAttribute('data-code-annotation-id') ?? '';
-      if (area.value.trim() !== (savedText(id) ?? '').trim()) found.push(area);
-    }
-  }
-  return found;
-}
-
-/**
- * Run `then` once `el` stops moving: the same box three frames running (or after about a second). A file opening
- * beside the thread slides in as the list and sidebar fold away; a comment box placed before that would stay where
- * its words were mid-slide, so one put back waits, as a person's click always does.
- */
-function whenStill(el: () => HTMLElement | null, then: () => void): () => void {
-  let last = '';
-  let still = 0;
-  let frames = 0;
-  let id = requestAnimationFrame(function tick() {
-    const box = el()?.getBoundingClientRect();
-    const now = box ? `${box.left},${box.top},${box.width},${box.height}` : '';
-    still = now === last ? still + 1 : 0;
-    last = now;
-    if (still >= 3 || ++frames >= 60) then();
-    else id = requestAnimationFrame(tick);
-  });
-  return () => cancelAnimationFrame(id);
 }
 
 /**

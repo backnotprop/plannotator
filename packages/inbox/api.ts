@@ -6,9 +6,8 @@
  */
 
 import type { InboxCloudAgentView, InboxCloudPreset, InboxCloudSetup } from '@plannotator/core/inbox-cloud';
-import { readHello, type RestartHello } from './sessionAdopt';
 import type { InboxSidebarLayout } from '@plannotator/core/inbox-sidebar';
-import type { DecisionDataSummary, InboxAgentsGroup } from '@plannotator/core/inbox-types';
+import type { DecisionDataSummary, InboxAgentsGroup, InboxAgentFaceChange, InboxPriorityBefore } from '@plannotator/core/inbox-types';
 import type { FaviconStyle } from '@plannotator/core/favicon';
 import type { InboxShowMeTarget } from '@plannotator/core/inbox-review';
 import type { SystemSetup, SystemSetupAnswer, SystemSetupInput } from '@plannotator/core/inbox-system-setup';
@@ -16,7 +15,6 @@ import type { SystemDrawingAnswer, SystemProjectsAnswer, SystemPullsAnswer } fro
 import type { SystemModel } from '@plannotator/system';
 import type { ShapeDrawnView, ShapeNote, ShapeRecord, ShapeRef, ShapeVersion } from '@plannotator/core/shape';
 import type { InboxArtifactPin, InboxArtifactsPage, InboxArtifactType } from '@plannotator/core/inbox-artifact-pins';
-import type { InboxAgentFaceChange, InboxPriorityBefore } from '@plannotator/core/inbox-types';
 import { isActionRecord, questionsOnly, splitThreadActions } from './actions';
 import { createListReader, type ListReadAnswer } from './listRead';
 import { inboxUrl, isContested, localRoute, machineOf, rememberLocal, rememberMachine, selfMachineId, setSelfMachine } from './inboxUrl';
@@ -70,9 +68,12 @@ import { FEEDBACK_UNAVAILABLE } from '@plannotator/core/product-feedback';
 import type { ForgeRefCardResult } from '@plannotator/core/forge-ref-card';
 import { learnDebugLog, resumeDebugLog } from './debugLog';
 import type { RecipientConnection } from './deliveryLine';
-import { parseRestartAgents } from './restartAgents';
+export { dispatchInboxFrame, INBOX_EVENT_FRAMES, openInboxEventFrames, subscribeInboxEvents, type InboxEventFrame, type InboxEventFrameName, type InboxEventHandlers, type InboxEventWindow, type MachineRecordFrame } from './eventFrames';
 import type { PatchBlobIds } from '@plannotator/core/diff-files';
 import type { InboxFileContents, InboxPullDetailsAnswer, InboxPullDiffAnswer, InboxPullDiffScope, InboxPullRiskAnswer, InboxPullRiskModels, InboxPullsAnswer, InboxReviewChanges, InboxReviewChangesAnswer, InboxReviewLinkAnswer, InboxReviewsAnswer, InboxRestartAgents, InboxTidyPlan, InboxTidyRun, InboxActivityModel } from '@plannotator/core/inbox-types';
+import { InboxApiError, readJson } from './apiError';
+import { gzipped, wholeBody } from './apiBody';
+export { InboxApiError };
 import type { InboxSearchAnswer, InboxSearchFrom, InboxSearchGroupId, InboxSearchSort, InboxSearchStatus } from '@plannotator/core/inbox-search';
 import type {
   InboxAgentId,
@@ -98,7 +99,6 @@ import type {
   InboxWindowPermission,
 } from '@plannotator/core/inbox-types';
 
-import { browserSharedEventsEnv, sharedInboxEventsSupported, subscribeOwnInboxEvents, subscribeSharedInboxEvents } from './sharedEvents';
 import { newUuid } from './uuid';
 import { trackCommentWrite } from './commentSaves';
 
@@ -160,10 +160,7 @@ export interface ProjectFolder extends InboxProject {
   combined?: { id: string; name: string; root: string }[];
   /** When its letter mark's picture was set (Set picture…, ms). Absent when none, and from an older Inbox. */
   picture?: number;
-  /**
-   * Its git origin's host (null: a remote that names none, which links as github.com). Absent for a project with no
-   * repo (or none resolved yet), and from an older Inbox. Read for `defaultRefHost.ts`.
-   */
+  /** Its git origin's host (null: none named, links as github.com); absent with no repo and from an older Inbox. */
   repo_host?: string | null;
   repo_forge?: 'gitlab';
 }
@@ -567,16 +564,6 @@ export interface SettingsModel {
   list_intro?: { due: boolean };
   /** The one-time Snooze announcement waits to be claimed by this page (POST /api/inbox/snooze-intro). Absent from an older Inbox. */
   snooze_intro?: { due: boolean };
-  /**
-   * The line of one-time dialogs: the one this page may arm, or null; `ahead`: the offers it may also arm, each going
-   * as soon as its own moment comes (List view); `setup`: the agent note may show on this load (absent from an older
-   * Inbox: it may); `line`: this Inbox keeps the line (a release build), so the update-day dialogs (sound, list
-   * options, voice) show only when `next` names them; `aside`: the star ask, which this page may arm beside `next` (it
-   * stands outside the line's order); `launch_tip`: the Launch tip may show at the first plain New message (outside the
-   * line; absent from an older Inbox: it never shows); `sidebar_tip`: the Sidebar tip may show at a calm moment beside
-   * the open sidebar (outside the line; absent from an older Inbox: it never shows). The whole field is absent from an
-   * older Inbox.
-   */
   reveal?: { next: InboxRevealId | null; ahead?: InboxRevealId[]; setup?: boolean; line?: boolean; aside?: InboxRevealId[]; launch_tip?: boolean; sidebar_tip?: boolean; /** ms until a date can change the line, or null (reveals.ts `revealAgainAt`). */ again_in?: number | null };
   /** Voice dictation (config.json inboxVoice). Absent from an Inbox that predates it. */
   voice?: InboxVoiceSettings;
@@ -888,43 +875,6 @@ export interface InboxCommentDraftView {
   updated_at: string;
 }
 
-export class InboxApiError extends Error {
-  constructor(
-    readonly status: number,
-    readonly code: string,
-    message: string,
-    /** The request's field the refusal names (`files[1]`), when it names one. */
-    readonly field: string | null = null,
-    /** When a held read may be asked again (ms since the epoch), when the answer says. */
-    readonly retryAt: number | null = null,
-    /** `thread_name_taken`: the one open thread that has the name, when the answer names it. */
-    readonly threadId: string | null = null,
-    /** `question_revision_conflict`: the question's revision on the Inbox now, when the answer names it. */
-    readonly currentRevision: number | null = null,
-    readonly by: string | null = null,
-  ) {
-    super(message);
-    this.name = 'InboxApiError';
-  }
-}
-
-async function readJson<T>(response: Response): Promise<T> {
-  const body = (await response.json().catch(() => ({}))) as Record<string, unknown>;
-  if (!response.ok) {
-    throw new InboxApiError(
-      response.status,
-      typeof body.code === 'string' ? body.code : 'error',
-      typeof body.error === 'string' ? body.error : `The Inbox answered ${response.status}.`,
-      typeof body.field === 'string' ? body.field : null,
-      typeof body.retry_at === 'number' ? body.retry_at : null,
-      typeof body.thread_id === 'string' ? body.thread_id : null,
-      typeof body.current_revision === 'number' ? body.current_revision : null,
-      typeof body.by === 'string' ? body.by : null,
-    );
-  }
-  return body as T;
-}
-
 /** A thread read as the window holds it (`thread`, and a Send's `thread_read`). */
 function threadModelOf(threadId: string, model: ThreadModel): ThreadModel {
   if (machineOf(threadId)) {
@@ -1086,25 +1036,7 @@ async function getWithin<T>(path: string, timeoutMs: number, outer?: AbortSignal
     clearTimeout(timer);
     timer = setTimeout(expire, timeoutMs);
   };
-  const arriving = async (response: Response): Promise<Response> => {
-    progress();
-    const reader = response.body?.getReader();
-    if (!reader) return response;
-    const parts: Uint8Array[] = [];
-    let size = 0;
-    for (let part = await reader.read(); !part.done; part = await reader.read()) {
-      progress();
-      parts.push(part.value);
-      size += part.value.length;
-    }
-    const bytes = new Uint8Array(size);
-    let at = 0;
-    for (const part of parts) {
-      bytes.set(part, at);
-      at += part.length;
-    }
-    return new Response(bytes, { status: response.status, statusText: response.statusText, headers: response.headers });
-  };
+  const arriving = (response: Response) => wholeBody(response, progress);
   const onAbort = () => controller.abort(outer?.reason);
   if (outer?.aborted) onAbort();
   else outer?.addEventListener('abort', onAbort, { once: true });
@@ -1213,15 +1145,6 @@ const KEEPALIVE_BODY_MAX = 60_000;
  * `keepalive`: the request outlives the page (a save made as the page hides or goes). The answer is read as ever when
  * the page stays. The fetch starts before this function first waits, so a caller in a `pagehide` handler gets it out.
  */
-async function gzipped(text: string): Promise<ArrayBuffer | null> {
-  if (typeof CompressionStream === 'undefined') return null;
-  try {
-    return await new Response(new Blob([text]).stream().pipeThrough(new CompressionStream('gzip'))).arrayBuffer();
-  } catch {
-    return null;
-  }
-}
-
 async function post<T>(path: string, body: Record<string, unknown>, init: { keepalive?: boolean; gzip?: boolean } = {}): Promise<T> {
   refuseContested(path);
   const machine = forwardedTo(path);
@@ -2106,10 +2029,7 @@ export const inboxApi = {
   pullRisk: (signal?: AbortSignal) => get<InboxPullRiskAnswer>(inboxUrl('/pulls/risk'), signal),
   savePullRisk: (input: { rules: string; provider: string | null; model: string | null }) => post<InboxPullRiskAnswer>(inboxUrl('/pulls/risk'), input),
   pullRiskModels: (provider: string, signal?: AbortSignal) => get<InboxPullRiskModels>(inboxUrl(`/pulls/risk/models?provider=${encodeURIComponent(provider)}`), signal),
-  /** A PR author's profile picture, served by the Inbox from its own origin (only an author the last list returned). */
   pullDetails: (key: string, signal?: AbortSignal) => get<InboxPullDetailsAnswer>(inboxUrl(`/pulls/details?key=${encodeURIComponent(key)}`), signal),
-  pullAvatarUrl: (host: string, login: string) => inboxUrl('/pulls/avatar', `host=${encodeURIComponent(host)}&login=${encodeURIComponent(login)}`),
-  pullMediaUrl: (key: string, url: string) => inboxUrl('/pulls/media', `key=${encodeURIComponent(key)}&url=${encodeURIComponent(url)}`),
   pullMediaSizes: (key: string, signal?: AbortSignal) => get<{ sizes: Record<string, { width: number; height: number }> }>(inboxUrl(`/pulls/media/sizes?key=${encodeURIComponent(key)}`), signal),
   /** One layer's diff, or the stack's from its base up to that layer (a PR the last list named). */
   pullDiff: (key: string, scope: InboxPullDiffScope, signal?: AbortSignal) =>
@@ -2481,384 +2401,8 @@ interface LinkedPageBase {
 
 export type LinkedPageView = LinkedPageBase & ({ html: string } | { html: null; text: string });
 
-/** What `subscribeInboxEvents` calls (the server's frames, read). */
-export interface InboxEventHandlers {
-  onRecord: (event: InboxEvent | null) => void;
-  /**
-   * `updated` is undefined from an Inbox older than the field (the "What's new in X" link stays as the list said);
-   * `restartClaudeCode` too (the sidebar's "Reload Claude Code N" stays as the list said), and
-   * `restartAgents` (every runtime's count, "Reload agents N").
-   */
-  onStatus: (update: InboxHealth['update'], updated?: string | null, restartClaudeCode?: number, restartAgents?: InboxRestartAgents, checkFailing?: UpdateCheckFailing | null) => void;
-  /** Whether a notification can reach the person now (inbox-windows.ts); never called by an older Inbox. */
-  onReach?: (reach: InboxNotifyReach) => void;
-  /**
-   * A row's delivery may have moved with the live sessions (a turn started or
-   * ended, a session went away): no store line, so the list is read again.
-   * Never called by an older Inbox. `sessions`: a session ended or came back, so a row's "Session ended" may have
-   * moved. `labels`: a session's label changed too (issue #2450), so the rows' agents
-   * and the authors read the list again.
-   */
-  onDeliveries?: (change?: { labels: boolean; sessions: boolean; agents?: boolean }) => void;
-  /**
-   * The stream (re)connected: the server's `hello`. A reconnect carries the
-   * URL it was first opened with, so its `permission=` may be stale (a grant
-   * since, a restarted Inbox that forgot the window): report again here.
-   * With a shared stream (sharedEvents.ts) also called when the tab whose
-   * stream serves this one changes, so the report names it (`served_by`).
-   */
-  onConnect?: (hello?: RestartHello) => void;
-  /**
-   * A reply draft was saved or discarded (`event: drafts`, approval "inbox-reply-drafts"), or a compose draft saved,
-   * deleted or sent (`{ compose: true }`: null); never called by an older Inbox.
-   */
-  onDrafts?: (threadId: string | null) => void;
-  /** An Ask AI chat changed (`event: ask`), only ever on the owner's own window. */
-  onAsk?: (threadId: string) => void;
-  /** The sidebar's pins changed (`event: pins`, approval "inbox-pinned-threads"); never called by an older Inbox. */
-  onPins?: () => void;
-  /** The person's Priority changed (`event: priority`); never called by an older Inbox. */
-  onPriority?: () => void;
-  /** The pinned artifacts changed (`event: artifact-pins`, approval "inbox-artifact-stars"); never called by an older Inbox. */
-  onArtifactPins?: () => void;
-  /** A thread's tags changed (`event: tags`, approval "inbox-thread-tags"); never called by an older Inbox. */
-  onTags?: () => void;
-  /** Show a thread (`event: show`, `plannotator inbox --open <thread>`): only the window named moves; never called by an older Inbox. */
-  onShow?: (threadId: string, windowId: string) => void;
-  /** A snooze changed or ran out (`event: snoozes`, approval "inbox-snooze"), here or on a linked machine; never called by an older Inbox. */
-  onSnoozes?: () => void;
-  /** A read of these threads' PRs changed their checks or review (`event: thread-pulls`, no record); never called by an older Inbox. */
-  onThreadPulls?: (threadIds: string[]) => void;
-  /** How the list's rows look was saved, here or in another window (`event: rows`, approval "inbox-customize-rows"). */
-  /** `last`: the look before this save and, for an agent's command, who made it (`prev`, `by`; absent from an older Inbox). */
-  onRows?: (rows: unknown, rev: unknown, last: { prev: unknown; by: unknown }) => void;
-  /** The sidebar's layout was saved, here or in another window (`event: sidebar`, approval "inbox-sidebar-customize"). */
-  onSidebar?: (sidebar: unknown, rev: unknown) => void;
-  /** An agent icon's face was saved (`{ faces, rev }`, unparsed). */
-  onAgentFaces?: (data: unknown) => void;
-  /** The tray's saved emoji changed, here or in another window (`event: reactions`, approval "inbox-reaction-tray"). */
-  onReactions?: (reactions: unknown, rev: unknown) => void;
-  /** A capability switch was saved, here or in another window (`event: capabilities`: the Board, thread steps, ...); never called by an older Inbox. */
-  onCapabilities?: (capabilities: { board?: { on: boolean }; steps?: { on: boolean }; bro?: { on: boolean }; float_drafts?: { on: boolean }; mark_read_warning?: { on: boolean }; code_review?: { on: boolean }; shape?: { on: boolean }; system?: { on: boolean }; chapter_diagrams?: { on: boolean } }) => void;
-  /** "Over your tailnet" published by itself once Tailscale came back (`event: tailscale`): its new state. Never called by an older Inbox. */
-  onTailscale?: (tailscale: TailscaleSettings) => void;
-  /** Shape's boards changed (`event: shapes`, only while Shape is on): their ids. */
-  onShapes?: (ids: string[]) => void;
-  /**
-   * Linked machines (`machines=1`): a record from another machine's own stream, with that machine's own seq
-   * (never this Inbox's). `live: false` is a resync after a reconnect: never a notification.
-   */
-  onMachine?: (frame: MachineRecordFrame) => void;
-  /** Every machine and its state: a snapshot when the stream opens, and on every change (a state, a far list read again). */
-  onMachines?: (machines: MachineView[]) => void;
-  /** A write held for another machine changed state (queued, sending, delivered, refused…). */
-  onOutbox?: (entry: OutboxView) => void;
-  /**
-   * The live stream went silent past its window (liveStream.ts), or the tab came back after it: read the list and
-   * the open thread again, so nothing it missed stays missed. Never called while the stream is heard.
-   */
-  onCatchUp?: () => void;
-  /** The live stream is dead (`false`: a reconnect brought nothing) or heard again (`true`). Called on a change only. */
-  onLive?: (live: boolean) => void;
-}
 
-/** The `machine` frame: one record of another machine's event stream. */
-export interface MachineRecordFrame {
-  machine: string;
-  seq: number;
-  live: boolean;
-  record: InboxEvent | null;
-}
 
-/** This window, as its event stream (or its report) names it to the server (inbox-windows.ts). */
-export interface InboxEventWindow {
-  id: string;
-  permission: InboxWindowPermission;
-  origin: string;
-}
-
-/** The event stream's named frames, as they arrive (and as the tab that holds the shared stream passes them on). */
-// `heartbeat`: a window's stream beats every 10 s (packages/server/inbox.ts); heard by liveStream.ts, handled by nothing.
-export const INBOX_EVENT_FRAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'ask', 'pins', 'priority', 'artifact-pins', 'tags', 'show', 'snoozes', 'thread-pulls', 'rows', 'sidebar', 'agent-faces', 'reactions', 'capabilities', 'tailscale', 'shapes', 'machine', 'machines', 'outbox', 'heartbeat'] as const;
-export type InboxEventFrameName = (typeof INBOX_EVENT_FRAMES)[number];
-export interface InboxEventFrame {
-  name: InboxEventFrameName;
-  /** The frame's `data`, unparsed. */
-  data: string;
-  /** The frame's `id` (a record's seq), or null. */
-  id: string | null;
-}
-
-/**
- * Open the server's event stream for this tab: every named frame, unparsed,
- * after `cursor`. EventSource reconnects on its own and resumes from the last
- * event id. Answers the close.
- */
-export function openInboxEventFrames(cursor: number, onFrame: (frame: InboxEventFrame) => void, win?: InboxEventWindow): () => void {
-  // `machines=1`: other machines' records and states ride this one stream in frames of their own (never this
-  // Inbox's seq). An older Inbox ignores it; with nothing linked only the `machines` snapshot comes.
-  const query = new URLSearchParams({ cursor: String(cursor), machines: '1' });
-  if (win) {
-    query.set('window', win.id);
-    query.set('permission', win.permission);
-    query.set('origin', win.origin);
-  }
-  const source = new EventSource(inboxUrl(`/events?${query}`));
-  for (const name of INBOX_EVENT_FRAMES) {
-    source.addEventListener(name, (event) => {
-      const message = event as MessageEvent<string>;
-      onFrame({ name, data: typeof message.data === 'string' ? message.data : '', id: message.lastEventId || null });
-    });
-  }
-  return () => source.close();
-}
-
-/** One frame to the handlers: what each named event means. */
-export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventHandlers): void {
-  switch (frame.name) {
-    case 'heartbeat':
-      // Only proof the stream is alive: no read, nothing to show.
-      return;
-    case 'hello':
-      // The run that answers and its cursor: a page that lived through a restart reads them (sessionAdopt.ts).
-      handlers.onConnect?.(readHello(frame.data) ?? undefined);
-      return;
-    case 'reach':
-      try {
-        handlers.onReach?.(JSON.parse(frame.data) as InboxNotifyReach);
-      } catch {
-        // A malformed frame changes nothing.
-      }
-      return;
-    case 'drafts':
-      try {
-        const data = JSON.parse(frame.data) as { thread_id?: unknown; compose?: unknown };
-        if (typeof data.thread_id === 'string') handlers.onDrafts?.(data.thread_id);
-        else if (data.compose === true) handlers.onDrafts?.(null);
-      } catch {
-        // A malformed frame changes nothing.
-      }
-      return;
-    case 'ask':
-      try {
-        const data = JSON.parse(frame.data) as { thread_id?: unknown };
-        if (typeof data.thread_id === 'string') handlers.onAsk?.(data.thread_id);
-      } catch {
-        // A malformed frame changes nothing.
-      }
-      return;
-    case 'deliveries': {
-      let labels = false;
-      let sessions = false;
-      let agents = false;
-      try {
-        const change = JSON.parse(frame.data) as { labels?: unknown; sessions?: unknown; agents?: unknown } | null;
-        labels = change?.labels === true;
-        sessions = change?.sessions === true;
-        // The sidebar's Agents moved (agentsList.ts).
-        agents = change?.agents === true;
-      } catch {
-        // An empty or malformed frame is a delivery change alone.
-      }
-      handlers.onDeliveries?.({ labels, sessions, agents });
-      return;
-    }
-    case 'pins':
-      handlers.onPins?.();
-      return;
-    case 'priority':
-      handlers.onPriority?.();
-      return;
-    case 'artifact-pins':
-      handlers.onArtifactPins?.();
-      return;
-    case 'tags':
-      handlers.onTags?.();
-      return;
-    case 'show':
-      try {
-        const data = JSON.parse(frame.data) as { thread_id?: unknown; window?: unknown };
-        if (typeof data.thread_id === 'string' && typeof data.window === 'string') handlers.onShow?.(data.thread_id, data.window);
-      } catch {
-        // A malformed frame changes nothing.
-      }
-      return;
-    case 'snoozes':
-      handlers.onSnoozes?.();
-      return;
-    case 'thread-pulls':
-      try {
-        const data = JSON.parse(frame.data) as { thread_ids?: unknown };
-        const ids = Array.isArray(data.thread_ids) ? data.thread_ids.filter((id): id is string => typeof id === 'string') : [];
-        if (ids.length > 0) handlers.onThreadPulls?.(ids);
-      } catch {
-        // A malformed frame changes nothing.
-      }
-      return;
-    case 'rows':
-      try {
-        const data = JSON.parse(frame.data) as { rows?: unknown; rev?: unknown; prev?: unknown; by?: unknown };
-        handlers.onRows?.(data.rows, data.rev, { prev: data.prev, by: data.by });
-      } catch {
-        // A malformed frame changes nothing.
-      }
-      return;
-    case 'sidebar':
-      try {
-        const data = JSON.parse(frame.data) as { sidebar?: unknown; rev?: unknown };
-        handlers.onSidebar?.(data.sidebar, data.rev);
-      } catch {
-        // A malformed frame changes nothing.
-      }
-      return;
-    case 'agent-faces':
-      try {
-        handlers.onAgentFaces?.(JSON.parse(frame.data));
-      } catch {
-        // A malformed frame changes nothing.
-      }
-      return;
-    case 'reactions':
-      try {
-        const data = JSON.parse(frame.data) as { reactions?: unknown; rev?: unknown };
-        handlers.onReactions?.(data.reactions, data.rev);
-      } catch {
-        // A malformed frame changes nothing.
-      }
-      return;
-    case 'capabilities':
-      try {
-        const data = JSON.parse(frame.data) as { board?: { on?: unknown }; steps?: { on?: unknown }; bro?: { on?: unknown }; float_drafts?: { on?: unknown }; mark_read_warning?: { on?: unknown }; code_review?: { on?: unknown }; shape?: { on?: unknown }; system?: { on?: unknown }; chapter_diagrams?: { on?: unknown } };
-        handlers.onCapabilities?.({
-          ...(typeof data.board?.on === 'boolean' ? { board: { on: data.board.on } } : {}),
-          ...(typeof data.steps?.on === 'boolean' ? { steps: { on: data.steps.on } } : {}),
-          ...(typeof data.bro?.on === 'boolean' ? { bro: { on: data.bro.on } } : {}),
-          ...(typeof data.float_drafts?.on === 'boolean' ? { float_drafts: { on: data.float_drafts.on } } : {}),
-          ...(typeof data.mark_read_warning?.on === 'boolean' ? { mark_read_warning: { on: data.mark_read_warning.on } } : {}),
-          ...(typeof data.code_review?.on === 'boolean' ? { code_review: { on: data.code_review.on } } : {}),
-          ...(typeof data.shape?.on === 'boolean' ? { shape: { on: data.shape.on } } : {}),
-          ...(typeof data.system?.on === 'boolean' ? { system: { on: data.system.on } } : {}),
-          ...(typeof data.chapter_diagrams?.on === 'boolean' ? { chapter_diagrams: { on: data.chapter_diagrams.on } } : {}),
-        });
-      } catch {
-        // A malformed frame changes nothing.
-      }
-      return;
-    case 'tailscale':
-      try {
-        const data = JSON.parse(frame.data) as { tailscale?: unknown };
-        const tailscale = data.tailscale as TailscaleSettings | null | undefined;
-        if (tailscale && typeof tailscale === 'object' && typeof tailscale.on === 'boolean') handlers.onTailscale?.(tailscale);
-      } catch {
-        // A malformed frame changes nothing.
-      }
-      return;
-    case 'shapes':
-      try {
-        const data = JSON.parse(frame.data) as { ids?: unknown };
-        if (Array.isArray(data.ids)) handlers.onShapes?.(data.ids.filter((id): id is string => typeof id === 'string'));
-      } catch {
-        // A malformed frame changes nothing.
-      }
-      return;
-    case 'machine':
-      try {
-        const data = JSON.parse(frame.data) as Partial<MachineRecordFrame>;
-        if (typeof data.machine === 'string' && typeof data.seq === 'number') {
-          // A linked machine's steps line (approval "inbox-thread-steps"): its threads show no steps here, so it
-          // neither rings nor makes the open thread read again.
-          // A linked machine's thread PRs line (approval "inbox-pr-binding"): the same, its threads show none here.
-          const machineKind = (data.record as { kind?: unknown } | undefined)?.kind;
-          if (machineKind === 'steps' || machineKind === 'thread_pull') return;
-          rememberMachine(idsIn(data.record), data.machine);
-          handlers.onMachine?.({ machine: data.machine, seq: data.seq, live: data.live === true, record: (data.record as InboxEvent | undefined) ?? null });
-        }
-      } catch {
-        // A malformed frame changes nothing.
-      }
-      return;
-    case 'machines':
-      try {
-        const data = JSON.parse(frame.data) as { machines?: unknown };
-        if (Array.isArray(data.machines)) handlers.onMachines?.(data.machines as MachineView[]);
-      } catch {
-        // A malformed frame changes nothing.
-      }
-      return;
-    case 'outbox':
-      try {
-        const data = JSON.parse(frame.data) as OutboxView;
-        if (typeof data.key === 'string' && typeof data.machine === 'string') handlers.onOutbox?.(data);
-      } catch {
-        // A malformed frame changes nothing.
-      }
-      return;
-    case 'record': {
-      let parsed: InboxEvent | null = null;
-      try {
-        parsed = JSON.parse(frame.data) as InboxEvent;
-      } catch {
-        // A malformed frame still refreshes the list.
-      }
-      // This Inbox's own record: every id in it is local for good (another machine's arrive as `machine` frames).
-      if (parsed) rememberLocal(localIdsIn(parsed));
-      handlers.onRecord(parsed);
-      return;
-    }
-    case 'status':
-      try {
-        const data = JSON.parse(frame.data) as {
-          update: InboxHealth['update'];
-          updated?: string | null;
-          restart_claude_code?: unknown;
-          restart_agents?: unknown;
-          update_check_failing?: UpdateCheckFailing | null;
-        };
-        handlers.onStatus(
-          data.update,
-          'updated' in data ? (data.updated ?? null) : undefined,
-          typeof data.restart_claude_code === 'number' ? data.restart_claude_code : undefined,
-          parseRestartAgents(data.restart_agents) ?? undefined,
-          'update_check_failing' in data ? (data.update_check_failing ?? null) : undefined,
-        );
-      } catch {
-        // A malformed frame changes nothing.
-      }
-      return;
-  }
-}
-
-/**
- * The server's event stream: `onRecord` for every store line after the
- * cursor (the line, for the notifications), `onStatus` for restart-to-update.
- *
- * The Inbox tabs of one origin share ONE stream (sharedEvents.ts): the tab
- * holding a Web Lock opens it and passes every frame on over a
- * BroadcastChannel, so a browser never holds one HTTP/1.1 connection per tab
- * (Chrome allows six per host; a seventh tab would stall). Where Web Locks or
- * BroadcastChannel is missing, or there is no window to name, this tab opens
- * its own stream exactly as before.
- */
-export function subscribeInboxEvents(
-  cursor: number,
-  handlers: InboxEventHandlers,
-  /** This window, so the server counts it (and what its browser allows) while the stream is open. */
-  win?: InboxEventWindow,
-): () => void {
-  if (win && sharedInboxEventsSupported()) {
-    return subscribeSharedInboxEvents(cursor, handlers, win, browserSharedEventsEnv({ open: openInboxEventFrames, dispatch: dispatchInboxFrame }));
-  }
-  // A window's own stream beats too: the same silence watch, reopening this tab's stream.
-  if (win && typeof document !== 'undefined') {
-    return subscribeOwnInboxEvents(cursor, handlers, win, {
-      open: openInboxEventFrames,
-      dispatch: dispatchInboxFrame,
-      lifecycle: { document, window },
-      isVisible: () => document.visibilityState === 'visible',
-    });
-  }
-  return openInboxEventFrames(cursor, (frame) => dispatchInboxFrame(frame, handlers), win);
-}
 
 // ───────────────────────────── Shape ─────────────────────────────
 

@@ -17,7 +17,7 @@
  * PNGs land in PLANNOTATOR_IMAGE_SWIPE_SHOTS (default .local/proof/image-swipe).
  */
 
-import { chromium, devices, expect, test, webkit, type Browser, type Page } from '@playwright/test';
+import { chromium, devices, expect, test, webkit, type Browser, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
