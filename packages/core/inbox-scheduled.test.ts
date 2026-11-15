@@ -91,6 +91,23 @@ describe("the 15-minute rule", () => {
     expect(inboxScheduleRefusal({ cron: "*/5 * * * * *", tz: NY })?.code).toBe("schedule_invalid");
     expect(inboxScheduledPreview({ cron: "*/5 * * * *", tz: NY }, at("2026-11-16T00:00:00Z"))).toMatchObject({ ok: false, next_run: null, refused: { code: "schedule_too_frequent" } });
   });
+
+  test("*/14 runs 14 minutes apart but 4 at the hour's end: the refusal says it can run 4 apart, not every 4", () => {
+    expect(inboxScheduleRefusal({ cron: "*/14 * * * *", tz: NY })).toMatchObject({ every_minutes: 4, error: "Scheduled threads run at least 15 minutes apart. This one can run 4 minutes apart." });
+  });
+
+  test("a date the calendar does not have, and a cron that never comes round, are refused", () => {
+    expect(inboxScheduleRefusal({ at: "2026-02-30T10:00", tz: NY })).toMatchObject({ code: "schedule_invalid", error: expect.stringContaining("2026-02-30") });
+    expect(inboxScheduleRefusal({ at: "2026-11-20T24:00", tz: NY })?.code).toBe("schedule_invalid");
+    expect(inboxScheduleRefusal({ cron: "0 9 31 2 *", tz: NY })).toEqual({ code: "schedule_invalid", error: "That schedule never runs: no day matches it." });
+  });
+
+  test("a one-time time already passed is refused when it is set, and its preview says so", () => {
+    const now = at("2026-11-21T12:00:00Z");
+    expect(inboxScheduleRefusal({ at: "2026-11-20T17:00", tz: NY }, now)).toEqual({ code: "schedule_invalid", error: "That time has already passed." });
+    expect(inboxScheduleRefusal({ at: "2026-11-22T17:00", tz: NY }, now)).toBeNull();
+    expect(inboxScheduledPreview({ at: "2026-11-20T17:00", tz: NY }, now)).toMatchObject({ ok: false, refused: { error: "That time has already passed." } });
+  });
 });
 
 test("the presets in words", () => {

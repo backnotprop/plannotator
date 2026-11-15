@@ -22,14 +22,23 @@ export type InboxScheduledRefusal = { code: "schedule_too_frequent" | "schedule_
 const cronOf = (schedule: NonNullable<InboxScheduledSchedule>): Cron =>
   "cron" in schedule ? new Cron(schedule.cron, { timezone: schedule.tz, mode: "5-part" }) : new Cron(atText(schedule.at), { timezone: schedule.tz });
 
-/** A one-time `at` as croner reads a wall time in its zone: `YYYY-MM-DDTHH:MM[:SS]`, no offset. */
+/** A one-time `at` as croner reads a wall time in its zone: `YYYY-MM-DDTHH:MM[:SS]`, no offset, a day the calendar has. */
 const atText = (at: string): string => {
-  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/.test(at)) throw new Error("a one-time schedule is a date and time, 2026-11-20T17:00");
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(:\d{2})?$/.exec(at);
+  if (!match) throw new Error("a one-time schedule is a date and time, 2026-11-20T17:00");
+  const [y, mo, d, h, mi] = match.slice(1, 6).map(Number) as [number, number, number, number, number];
+  const day = new Date(Date.UTC(y, mo - 1, d));
+  if (day.getUTCMonth() !== mo - 1 || day.getUTCDate() !== d || h > 23 || mi > 59) throw new Error(`${at.slice(0, 10)} at ${at.slice(11, 16)} is not a real date and time`);
   return at.length === 16 ? `${at}:00` : at;
 };
 
-/** Why a schedule is refused, or null. The words are the editor's and an agent's alike. */
-export function inboxScheduleRefusal(schedule: InboxScheduledSchedule): InboxScheduledRefusal | null {
+const minutesWords = (n: number) => (n === 1 ? "1 minute" : `${n} minutes`);
+
+/**
+ * Why a schedule is refused, or null. The words are the editor's and an agent's alike. `now`: a one-time time before
+ * it is refused (a new or changed schedule; one already saved keeps its time).
+ */
+export function inboxScheduleRefusal(schedule: InboxScheduledSchedule, now?: Date): InboxScheduledRefusal | null {
   if (schedule === null) return null;
   let cron: Cron;
   try {
@@ -39,17 +48,21 @@ export function inboxScheduleRefusal(schedule: InboxScheduledSchedule): InboxSch
     const reason = (error instanceof Error ? error.message : String(error)).replace(/^Cron\w*: /, "").split(". Original error")[0]!;
     return { code: "schedule_invalid", error: `That isn't a schedule: ${reason}.` };
   }
-  if (!("cron" in schedule)) return null;
+  if (!("cron" in schedule)) return now && cron.nextRun(now) === null ? { code: "schedule_invalid", error: "That time has already passed." } : null;
   const runs = cron.nextRuns(GAP_SAMPLE, new Date(Date.UTC(2026, 0, 1)));
+  if (runs.length === 0) return { code: "schedule_invalid", error: "That schedule never runs: no day matches it." };
   let gap = Infinity;
-  for (let i = 1; i < runs.length; i++) gap = Math.min(gap, runs[i]!.getTime() - runs[i - 1]!.getTime());
+  let widest = 0;
+  for (let i = 1; i < runs.length; i++) {
+    const apart = runs[i]!.getTime() - runs[i - 1]!.getTime();
+    gap = Math.min(gap, apart);
+    widest = Math.max(widest, apart);
+  }
   if (gap >= SCHEDULED_MIN_GAP_MINUTES * MINUTE) return null;
   const every = Math.max(1, Math.round(gap / MINUTE));
-  return {
-    code: "schedule_too_frequent",
-    every_minutes: every,
-    error: `Scheduled threads run at least ${SCHEDULED_MIN_GAP_MINUTES} minutes apart. This one runs every ${every === 1 ? "minute" : `${every} minutes`}.`,
-  };
+  // `*/14` runs at :56 and then :00: say what is true of it, not "every 4 minutes".
+  const how = widest === gap ? `runs every ${every === 1 ? "minute" : minutesWords(every)}` : `can run ${minutesWords(every)} apart`;
+  return { code: "schedule_too_frequent", every_minutes: every, error: `Scheduled threads run at least ${SCHEDULED_MIN_GAP_MINUTES} minutes apart. This one ${how}.` };
 }
 
 /** The first due time after `after`, or null (no schedule, a one-time one that passed, or a schedule that is refused). */
@@ -165,7 +178,7 @@ export function inboxScheduledLateLine(due: Date, started: Date, tz: string): st
 
 /** The preview the editor shows as the person edits (`POST /api/inbox/scheduled/preview`). */
 export function inboxScheduledPreview(schedule: InboxScheduledSchedule, now: Date): InboxScheduledPreview {
-  const refused = inboxScheduleRefusal(schedule);
+  const refused = inboxScheduleRefusal(schedule, now);
   const next = refused ? null : inboxScheduledNext(schedule, now);
   return {
     ok: refused === null,
