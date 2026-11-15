@@ -3318,9 +3318,10 @@ export const INBOX_DRAFT_PASTED_LEAD_MAX = 2;
  * PR it lists is closed, reopened or merged there, with its own gh / glab. `file-refs`: a file its agents' messages
  * name is read through its door, and attached to that message there when the person comments on it. `tidy` and
  * `combine` (approval "inbox-multi-select"): a linked machine's window asks this Inbox's sessions to tidy or combine
- * this Inbox's threads, through its door.
+ * this Inbox's threads, through its door. `pulls-looked` (approval "inbox-pr-dashboard"): the PR page's look at a PR
+ * it lists is kept there ("Changed since you looked").
  */
-export const INBOX_LINKED_MARKS = ["star", "priority", "agent-face", "agent-name", "take-back", "tags", "cards", "pulls", "tag-colours", "file-refs", "tidy", "combine"] as const;
+export const INBOX_LINKED_MARKS = ["star", "priority", "agent-face", "agent-name", "take-back", "tags", "cards", "pulls", "tag-colours", "file-refs", "tidy", "combine", "pulls-looked"] as const;
 export type InboxLinkedMark = (typeof INBOX_LINKED_MARKS)[number];
 
 /**

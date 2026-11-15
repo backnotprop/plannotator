@@ -5,7 +5,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import type { InboxPull } from '@plannotator/core/inbox-types';
-import { LOOKED_KEPT, changedLayers, changedSince, parseLooked, withLooked } from './looked';
+import { LOOKED_KEPT, changedLayers, changedSince, mergeLooked, parseLooked, withLooked } from './looked';
 
 const A = 'a'.repeat(40);
 const B = 'b'.repeat(40);
@@ -57,5 +57,12 @@ describe('the kept map', () => {
     expect(parseLooked('not json')).toEqual({});
     expect(parseLooked('[1,2]')).toEqual({});
     expect(parseLooked(JSON.stringify({ k: { sha: A, at: 1 }, j: { sha: 3 }, h: null }))).toEqual({ k: { sha: A, at: 1 } });
+  });
+
+  test("the machine's look and this browser's: the newer of the two wins", () => {
+    const B = 'b'.repeat(40);
+    const local = { k: { sha: A, at: 5 }, j: { sha: A, at: 5 } };
+    const merged = mergeLooked(local, [{ key: 'k', looked: { sha: B, at: 9 } }, { key: 'j', looked: { sha: B, at: 1 } }, { key: 'n', looked: { sha: B, at: 1 } }]);
+    expect(merged).toEqual({ k: { sha: B, at: 9 }, j: { sha: A, at: 5 }, n: { sha: B, at: 1 } });
   });
 });

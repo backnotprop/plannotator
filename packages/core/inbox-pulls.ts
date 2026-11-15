@@ -74,6 +74,14 @@ export interface InboxPull {
    * and changes it. Absent on this Inbox's own, and on a PR both list.
    */
   machine?: string;
+  /** The head the person last opened this PR at, on the machine that lists it (server's inbox-pull-looked.ts); absent when never. */
+  looked?: InboxPullLooked;
+}
+
+/** A look at a PR: the head commit shown and when, in ms since the epoch. */
+export interface InboxPullLooked {
+  sha: string;
+  at: number;
 }
 
 /**
@@ -159,8 +167,9 @@ export interface InboxPullsAnswer {
   /**
    * The merged board only (`?machines=1`, a machine linked): each linked machine that takes `pulls`, by `ibx_` id.
    * `read_at`: when its board was last read (its PRs are that read's); `pending`: a read is under way, so ask again.
+   * `looked`: it keeps the PR page's look at its PRs (mark `pulls-looked`); an older one is not sent it.
    */
-  machines?: Record<string, { read_at: string | null; pending: boolean }>;
+  machines?: Record<string, { read_at: string | null; pending: boolean; looked?: true }>;
   /** The merged board only: the linked machines' risk judgments of the PRs they list, by pull key. */
   far_risk?: Record<string, InboxPullRiskJudgment>;
 }

@@ -206,6 +206,8 @@ const ALLOWLIST: readonly DoorRoute[] = [
   { method: "GET", route: /^pulls$/, window: () => "/api/inbox/pulls", machineOnly: true },
   { method: "GET", route: /^pulls\/(risk|details|diff|file|repo-files|repo-file|avatar|media|media\/sizes)$/, window: (m) => `/api/inbox/pulls/${m[1]}`, machineOnly: true },
   { method: "POST", route: /^pulls\/(close|reopen|merge)$/, window: (m) => `/api/inbox/pulls/${m[1]}`, machineOnly: true },
+  // "Changed since you looked" (approval "inbox-pr-dashboard"): the look at a PR lives on the machine that lists it.
+  { method: "POST", route: /^pulls\/looked$/, window: () => "/api/inbox/pulls/looked", machineOnly: true },
   // A thread's PRs (approval "inbox-pr-binding"): read, added and removed on the thread's own machine.
   { method: "GET", route: /^threads\/([^/]+)\/pulls$/, window: (m) => `/api/inbox/threads/${m[1]}/pulls`, machineOnly: true },
   { method: "POST", route: /^threads\/([^/]+)\/pulls$/, window: (m) => `/api/inbox/threads/${m[1]}/pulls`, machineOnly: true },

@@ -10,7 +10,7 @@
  * Left for later (not in this first version): the docked inspector and the merged fold.
  */
 import { useId, useState } from 'react';
-import { inboxPullIsOpen, inboxPullLabel, inboxPullLandsNext, type InboxPull, type InboxPullStack } from '@plannotator/core/inbox-types';
+import { inboxPullIsOpen, inboxPullLabel, inboxPullLandsNext, type InboxPull, type InboxPullStack, type InboxPullsAnswer } from '@plannotator/core/inbox-types';
 import { Icon } from '../icons';
 import { SidebarTrigger } from '../shell/sidebar';
 import { ChecksMark, checksLabel } from './ChecksMark';
@@ -26,6 +26,8 @@ export interface StackPageProps {
   stack: InboxPullStack | null;
   /** The list is still being read: nothing to say yet. */
   loading: boolean;
+  /** The board the stack is read from: where each layer's look is kept. */
+  board?: Pick<InboxPullsAnswer, 'pulls' | 'machines'> | null;
   repoLabel: string | null;
   phone: boolean;
   onBack: () => void;
@@ -38,7 +40,7 @@ export function StackPage(props: StackPageProps) {
   const { stack, phone } = props;
   const now = props.now ?? Date.now();
   const titleId = useId();
-  const looked = useLooked();
+  const looked = useLooked(props.board ?? null);
   // Choosing a range: `null` while not; else the ends picked so far.
   const [picked, setPicked] = useState<string[] | null>(null);
   const crumb = (

@@ -21,9 +21,9 @@ import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
 import { act, useState, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { INBOX_THREAD_NAME_MAX, inboxPullStacks, type InboxPull, type InboxPullLink, type InboxPullsAnswer } from '@plannotator/core/inbox-types';
-import { forgetUnsentReview, keepUnsentReview } from '../compose/reviewBox';
+import { forgetUnsentReview, keepUnsentReview, type ReviewBoxPull } from '../compose/reviewBox';
 import type { ComposeSent } from '../compose/ComposeDialog';
-import type { ReviewBoxPull } from '../compose/reviewBox';
+import type { PullViewScope } from './viewScope';
 import type { StartThreadInput } from '../api';
 import { handoffKeys, handoffStack, PULL_HANDOFF_TITLE_MAX, pullHandoffAskLine, pullHandoffMessage, pullHandoffThreadName, pullLaunchAsk, pullTitleLine } from './model';
 import { layerVerdictLink } from './topology';
@@ -124,7 +124,7 @@ beforeEach(() => {
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input), 'http://127.0.0.1');
     if (init?.method === 'POST') {
-      posted.push({ path: url.pathname, body: JSON.parse(String(init.body)) });
+      if (!url.pathname.endsWith('/pulls/looked')) posted.push({ path: url.pathname, body: JSON.parse(String(init.body)) });
       if (url.pathname.endsWith('/api/inbox/messages')) {
         const no = refuse[String((JSON.parse(String(init.body)) as { to?: { session?: string } }).to?.session)];
         if (no) return Response.json(no.body, { status: no.status });
@@ -195,7 +195,7 @@ function mount(node: React.ReactNode) {
 
 /** The review, with its layer and scope in state as the route keeps them. */
 function Review({ stackId, from, answer }: { stackId: string; from: string; answer: InboxPullsAnswer }) {
-  const [at, setAt] = useState<{ key: string; scope: import('./PullReview').PullReviewProps['scope'] }>({ key: from, scope: 'layer' });
+  const [at, setAt] = useState<{ key: string; scope: PullViewScope }>({ key: from, scope: 'layer' });
   return <PullReview model={answer} modelError={null} stackId={stackId} layerKey={at.key} scope={at.scope} onLayer={(key, scope) => setAt({ key, scope })} onBack={() => {}} onSent={() => {}} />;
 }
 

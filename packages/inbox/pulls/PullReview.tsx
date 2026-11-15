@@ -84,7 +84,7 @@ import { person, wordsText, type Words } from './words';
 import { isCompare, type PullViewScope } from './viewScope';
 import { scopeOnPage } from './reviewScope';
 import { liveView } from '../prs/stackRange';
-import { lookedBefore, markLooked } from '../prs/looked';
+import { lookedBefore, markLooked, useLooked } from '../prs/looked';
 import { RailScopeRows } from './RailScopeRows';
 
 // `#guide-reader` is packages/inbox/guide/GuideReader.tsx (package.json `imports`).
@@ -304,7 +304,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
   const scope = stack ? liveView(stack, layerKey, asked) : asked;
   const on = stack && layer ? scopeOnPage(stack, layer, scope, pullNounWord(layer.platform)) : null;
   // What the person had opened of this layer before, while its head has moved since: the rail offers what changed.
-  const before = lookedBefore(layerKey, layer?.head_sha);
+  const before = lookedBefore(layerKey, layer?.head_sha, useLooked(model));
   // The verdict goes to this layer's own review thread (its stack's only as a fallback), and only on the person's
   // own PR: a teammate's layer, even in a stack with theirs, reads without a verdict. A Whole stack verdict goes to the
   // stack's one review thread (its lowest linked layer's), as the stack view names it.
@@ -372,7 +372,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
   }, [seenId, attempt]);
   // Looked at: the layers this diff shows, at the heads it shows them (this layer's as the patch names it).
   useEffect(() => {
-    if (diff && on) markLooked(on.covers.map((l) => ({ key: l.key, sha: l.key === layerKey ? (diff.head_sha ?? l.head_sha) : l.head_sha })));
+    if (diff && on) markLooked(on.covers.map((l) => ({ key: l.key, sha: l.key === layerKey ? (diff.head_sha ?? l.head_sha) : l.head_sha })), model);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [diff]);
 
