@@ -25,6 +25,8 @@ packages/ui/components/inbox-thread/SnoozeMenu.test.tsx
 packages/ui/components/Viewer.vimMode.integration.test.tsx
 packages/ui/components/CodeFilePopout.lineScroll.test.tsx
 packages/ui/components/CodeFilePopout.windowsPath.test.tsx
+packages/ui/components/CodeFilePopout.commentCard.test.tsx
+packages/ui/components/CodeFilePopout.commentFolds.test.tsx
 packages/ui/hooks/useVimSelection.test.tsx
 packages/ui/hooks/useVimSelection.selectionScope.test.tsx
 packages/ui/hooks/useModelCatalogs.dom.test.tsx
@@ -102,7 +104,7 @@ packages/inbox/threadFolding.test.tsx
 packages/inbox/threadNameMeta.test.tsx
 packages/inbox/threadHeader.test.tsx
 packages/inbox/snoozeBackLine.test.tsx
-packages/inbox/launchMenuGuest.test.tsx
+packages/inbox/launchMenuTailnet.test.tsx
 packages/inbox/remoteLaunchThread.test.tsx
 packages/inbox/composeLaunchPulls.test.tsx
 packages/inbox/choiceLabels.test.tsx
@@ -134,6 +136,7 @@ packages/inbox/fullView.test.tsx
 packages/inbox/htmlOpensInInteract.test.tsx
 packages/inbox/earlierComments.test.tsx
 packages/inbox/phoneStepping.test.tsx
+packages/inbox/touchStepping.test.tsx
 packages/inbox/htmlPageSize.test.tsx
 packages/inbox/imageSwipe.test.tsx
 packages/inbox/sharedPictureChoice.test.tsx
@@ -170,6 +173,7 @@ packages/inbox/tidyMenu.test.tsx
 packages/inbox/listLook.test.tsx
 packages/inbox/threadPanel.test.tsx
 packages/inbox/listViewMenu.test.tsx
+packages/inbox/archivedGroup.test.tsx
 packages/inbox/lineLatch.test.tsx
 packages/inbox/listViewReveal.test.tsx
 packages/inbox/idleClock.test.tsx
@@ -181,6 +185,8 @@ packages/inbox/rowsNotesLook.test.tsx
 packages/inbox/relativeTime.test.tsx
 packages/inbox/composeThread.test.tsx
 packages/inbox/sendNow.test.tsx
+packages/inbox/t3WaitLine.test.tsx
+packages/inbox/t3AgentGroup.test.tsx
 packages/inbox/takeBack.test.tsx
 packages/inbox/sendWaitsForComments.test.tsx
 packages/inbox/undelivered.test.tsx
@@ -239,6 +245,7 @@ packages/inbox/floaters/floaters.test.tsx
 packages/inbox/ask/side.test.tsx
 packages/inbox/ask/sideCommand.test.tsx
 packages/inbox/pullToRefresh.test.tsx
+packages/inbox/rowSwipeList.test.tsx
 packages/inbox/threadReadRetry.test.tsx
 packages/inbox/openThreadReadsWiring.test.tsx
 packages/inbox/tabCountWindow.test.tsx
@@ -294,6 +301,7 @@ packages/inbox/skillReferences.test.tsx
 packages/inbox/skillListRoom.test.tsx
 packages/inbox/messageComments.test.tsx
 packages/inbox/messageDelete.test.tsx
+packages/inbox/messageRedraws.test.tsx
 packages/inbox/linkedMessageDelete.test.tsx
 packages/inbox/messageArming.test.tsx
 packages/inbox/feedbackDialog.test.tsx
@@ -420,6 +428,7 @@ packages/ui/components/ImageAnnotator/ImageAnnotator.shortcuts.test.tsx
 packages/ui/utils/undoHistory.dom.test.ts
 packages/ui/utils/codeBlockMark.test.ts
 packages/ui/components/InlineMarkdown.seam.test.tsx
+packages/ui/components/InlineMarkdown.barePaths.test.tsx
 packages/ui/components/ImageThumbnail.seam.test.tsx
 packages/ui/hooks/useAnnotationHighlighter.test.tsx
 packages/ui/hooks/annotationRestoreVerify.test.tsx
@@ -514,6 +523,7 @@ packages/ui/hooks/useLinkedDoc.revealSidebar.test.tsx
 packages/ui/hooks/useLinkedDoc.reapplyFilter.test.tsx
 packages/ui/hooks/useLinkedDoc.scrollRestore.test.tsx
 packages/ui/components/html-viewer/htmlLinkProtocol.test.tsx
+packages/ui/components/html-viewer/bridgePageNavigation.test.ts
 packages/editor/hooks/useAnnotationJump.test.tsx
 packages/ui/components/TableOfContents.linkedDoc.test.tsx
 packages/ui/components/MarkdownContentsRail.test.tsx
@@ -599,6 +609,7 @@ packages/inbox/linkedMachines.test.tsx
 packages/inbox/machineUpdate.test.tsx
 packages/inbox/voiceMirror.test.tsx
 packages/inbox/voiceComposeRenders.test.tsx
+packages/inbox/voiceKeptWords.test.tsx
 packages/inbox/voiceDebugLog.test.ts
 packages/inbox/voiceMiss.test.ts
 packages/ui/components/RenderedMarkdown.softLineBreaks.test.tsx
@@ -686,6 +697,8 @@ packages/ui/components/html-viewer/HtmlViewer.reopenComment.test.tsx
 packages/ui/components/StarAskCard.test.tsx
 packages/system/test/change.test.tsx
 packages/system/test/render.test.tsx
+packages/inbox/fileRefs.dom.test.tsx
+packages/inbox/referencedFilePane.dom.test.tsx
 packages/ui/components/CommentPopover.card.test.tsx
 packages/ui/components/Viewer.commentDrafts.test.tsx
 packages/inbox/fullViewCommentDot.test.tsx
@@ -713,6 +726,8 @@ packages/inbox/prs/sheetTable.test.tsx
 packages/inbox/prs/sheetSelect.test.tsx
 packages/inbox/prs/sheetMerge.test.tsx
 packages/inbox/prs/sheetClose.test.tsx
+packages/inbox/prs/stackPage.test.tsx
+packages/inbox/pulls/pullReviewRange.test.tsx
 packages/inbox/fileQuestionCards.test.tsx
 packages/inbox/agents/agentsSection.test.tsx
 packages/inbox/agents/faceFan.test.tsx
@@ -729,6 +744,7 @@ packages/inbox/agents/linkedAgentFaces.test.tsx
 packages/review-editor/dock/panels/ReviewCallFlowPanel.states.test.tsx
 packages/review-editor/components/callTree/CallTree.test.tsx
 packages/review-editor/dock/panels/ReviewCallFlowPanel.callTree.test.tsx
+packages/inbox/paneRetention.test.tsx
 packages/review-editor/components/guide/GuideEmptyState.aiOff.test.tsx
 packages/review-editor/components/PRMediaScope.test.tsx
 packages/inbox/pulls/forgeMedia.test.tsx
@@ -738,8 +754,27 @@ packages/inbox/attachmentTileKeys.test.tsx
 packages/inbox/threadTags.test.tsx
 packages/review-editor/components/PRDescriptionVideo.test.tsx
 packages/ui/components/CommentPopover.hostDraft.test.tsx
+packages/inbox/data/queries/heldThreadOpen.test.tsx
+packages/inbox/inlineReuseMark.test.tsx
 packages/review-editor/components/FileTree.redraws.test.tsx
 packages/ui/components/Viewer.blockRedraws.test.tsx
 packages/editor/hooks/useCheckboxOverrides.viewer.test.tsx
 packages/ui/components/TaterSpriteSlots.test.tsx
 packages/inbox/sidebarRedraws.test.tsx
+packages/inbox/agents/faceSources.test.tsx
+packages/ui/components/CommentPopover.phoneKeyboard.test.tsx
+packages/ui/components/Viewer.authorColor.test.tsx
+packages/review-editor/components/authorColor.review.test.tsx
+packages/inbox/threadTagsStep2.test.tsx
+packages/inbox/listPicks.test.tsx
+packages/inbox/pickWork.test.tsx
+packages/inbox/combines.test.tsx
+packages/inbox/tagColours.test.tsx
+packages/inbox/settingsAtLoad.test.tsx
+packages/inbox/pressKeys.test.tsx
+packages/inbox/scheduled/scheduledSidebar.test.tsx
+packages/inbox/scheduled/scheduledTable.test.tsx
+packages/inbox/scheduled/scheduledEditor.test.tsx
+packages/inbox/scheduled/scheduledThread.test.tsx
+packages/inbox/scheduled/scheduledRows.test.tsx
+packages/inbox/scheduled/scheduledActions.test.tsx

@@ -449,14 +449,17 @@ describe("plannotator inbox mcp inside an agent session", () => {
     expect(piHost).toBe("pi");
     expect(piName).toBeDefined();
     expect(INBOX_SESSION_HOST_NAMES[piHost!]).toBe(piName!);
-    // Codex, Qwen Code and T3 Code have no plannotator_inbox tool: the Inbox wakes them itself (`codex queue`, Qwen's
-    // cross-session messaging, T3's MCP API), and the shim sends as their session.
-    expect(Object.keys(INBOX_SESSION_HOST_NAMES).sort()).toEqual(["claude-code", "cline", "codex", "dsh", "hermes", "openclaw", "opencode", "pi", "qwen", "t3"]);
+    // Codex, Qwen Code, T3 Code and Antigravity have no plannotator_inbox tool: the Inbox wakes them itself (`codex queue`,
+    // Qwen's cross-session messaging, T3's MCP API, Antigravity's agentapi), and the shim sends as their session.
+    expect(Object.keys(INBOX_SESSION_HOST_NAMES).sort()).toEqual(["antigravity", "claude-code", "cline", "codex", "dsh", "hermes", "openclaw", "opencode", "pi", "qwen", "t3"]);
     expect(INBOX_SESSION_HOST_NAMES.codex).toBe("Codex");
     expect(INBOX_SESSION_HOST_NAMES.qwen).toBe("Qwen Code");
     // A Qwen session in the tag is a Qwen session id, never anything else.
     expect(inboxHostSessionFromEnv({ PLANNOTATOR_SESSION_TAG: "qwen:8e016be8-5b48-4c13-ad22-1f5326ae64ac" })).toEqual({ host: "qwen", session: "8e016be8-5b48-4c13-ad22-1f5326ae64ac", name: "Qwen Code" });
     expect(inboxHostSessionFromEnv({ PLANNOTATOR_SESSION_TAG: "qwen:ses_01ABC" })).toBeNull();
+    // An Antigravity conversation in the tag is a conversation id (a UUID).
+    expect(inboxHostSessionFromEnv({ PLANNOTATOR_SESSION_TAG: "antigravity:5067117f-74f6-4709-91b3-bb4283355316" })).toEqual({ host: "antigravity", session: "5067117f-74f6-4709-91b3-bb4283355316", name: "Antigravity" });
+    expect(inboxHostSessionFromEnv({ PLANNOTATOR_SESSION_TAG: "antigravity:ses_01ABC" })).toBeNull();
   });
 
   test("the session tag is read strictly; anything malformed is ignored", () => {

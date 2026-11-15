@@ -100,6 +100,15 @@ describe('the row words', () => {
     expect(rowDeliverySpoken({ ...base, kind: 'ack', state: 'queued' })).toBe('Looks good, queued for Claude Code');
   });
 
+  // Approval "inbox-t3-reply-waiting-line": the row says what the thread's line says, never "Queued for …".
+  test('waiting on T3: the accessible name and the tooltip are the thread line, for a Claude and a Codex thread alike', () => {
+    for (const host of ['t3', 'codex']) {
+      const waiting: InboxRowDelivery = { ...base, host, reason: 'next_turn', send_now: false, t3_wait: 'closed' };
+      expect(rowDeliverySpoken(waiting)).toBe('Waiting for T3 Code');
+      expect(rowDeliveryLine(waiting)).toBe('Waiting for T3 Code. T3 isn\'t answering. Open T3 and this goes in by itself.');
+    }
+  });
+
   // Approval "inbox-stopped-reply": the accessible name says what the tooltip and the thread say, never "Queued".
   test('held by a stopped Claude Code session: the accessible name says Stopped, as the tooltip does', () => {
     const stopped: InboxRowDelivery = { ...base, reason: 'stopped', send_now: false };

@@ -13,6 +13,7 @@ import { chunkSegments, codeSegmentsToHtml, wordDiffSegments } from "../../utils
 import { useFenceTheme } from "../../hooks/useFenceTheme";
 import { ListItemBody } from "../ListItemBody";
 import { BlockquoteBlock, BLOCKQUOTE_CLASS_NAME } from "../blocks/BlockquoteBlock";
+import { parseTableContent } from "../blocks/TableBlock";
 import type { Block, Annotation, EditorMode, ImageAttachment } from "../../types";
 import { AnnotationType } from "../../types";
 import {
@@ -1009,17 +1010,8 @@ const SimpleBlockRenderer: React.FC<{ block: Block; orderedIndex?: number | null
       return <hr className="border-border/30 my-8" />;
 
     case "table": {
-      const lines = block.content.split('\n').filter(line => line.trim());
-      if (lines.length === 0) return null;
-      const parseRow = (line: string): string[] =>
-        line.replace(/^\|/, '').replace(/\|$/, '').split(/(?<!\\)\|/).map(cell => cell.trim().replace(/\\\|/g, '|'));
-      const headers = parseRow(lines[0]);
-      const rows: string[][] = [];
-      for (let i = 1; i < lines.length; i++) {
-        const line = lines[i].trim();
-        if (/^[\|\-:\s]+$/.test(line)) continue;
-        rows.push(parseRow(line));
-      }
+      const { headers, rows } = parseTableContent(block.content);
+      if (headers.length === 0) return null;
       return (
         <div className="my-4 overflow-x-auto">
           <table className="min-w-full border-collapse text-sm">

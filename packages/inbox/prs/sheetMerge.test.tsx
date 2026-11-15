@@ -5,7 +5,8 @@
  *  - the confirm not listing what merges and what stays, with why;
  *  - PRs merged at once instead of one after another, or a refusal sent again by itself;
  *  - the report not naming what merged and each refusal in the forge's words, or a refused pick leaving the selection;
- *  - a phone without its "Tap again" words.
+ *  - a phone without its "Tap again" words;
+ *  - the confirm not saying which linked machine merges a pick (with its own sign-in there).
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt. No gh: the window's fetch is stubbed.
  */
@@ -222,4 +223,13 @@ test('a phone: the sheet says Tap again, and nothing merges before the second ta
   expect(sent).toEqual([]);
   click(sheet.querySelector<HTMLElement>('[data-pr-merge]')!);
   expect(sent.map((s) => s.key)).toEqual([key(7)]);
+});
+
+test('picks a linked machine merges: the confirm says which machine merges them; with none, no line', () => {
+  if (!hasDom) return;
+  const MINI = 'ibx_01K0000000000000000000000B';
+  draw({ model: { ...MODEL, pulls: MODEL.pulls.map((p) => (p.number === 5 || p.number === 7 ? { ...p, machine: MINI } : p)), machines: { [MINI]: { read_at: null, pending: false, name: 'Mini' } } } });
+  pickFive();
+  click($('[data-pr-merge]')!);
+  expect($('[data-pr-merge-hint]')!.textContent).toBe('Click again to merge 3 pull requests. A merge can’t be undone. Mini merges #5, #7 with its own sign-in.');
 });

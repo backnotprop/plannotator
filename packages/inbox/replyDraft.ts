@@ -149,8 +149,17 @@ let landing = 0;
 /** Per thread: raised by each Discard here. A file still landing from before one joins no draft (it was thrown away). */
 const discards = new Map<string, number>();
 const discardsOf = (threadId: string) => discards.get(threadId) ?? 0;
+/** Another machine's thread keeps no draft here: dictated words for its closed box wait in this page for the box. */
+const heldVoice = new Map<string, string[]>();
+/** The dictated words waiting for this thread's box (`landWordsInReplyDraft` on another machine's thread), taken once. */
+export function takeHeldVoiceWords(threadId: string): string[] {
+  const words = heldVoice.get(threadId) ?? [];
+  heldVoice.delete(threadId);
+  if (words.length > 0) unsavedChanged();
+  return words;
+}
 export function replyDraftUnsaved(): boolean {
-  return unsaved > 0 || landing > 0 || conflictWords.size > 0 || offerWords.size > 0 || tooLongThreads.size > 0 || refusedThreads.size > 0 || carriesFiles();
+  return unsaved > 0 || landing > 0 || heldVoice.size > 0 || conflictWords.size > 0 || offerWords.size > 0 || tooLongThreads.size > 0 || refusedThreads.size > 0 || carriesFiles();
 }
 
 /**
@@ -214,6 +223,7 @@ export function replySendStarts(threadId: string): () => void {
 /** This window discarded the thread's draft: a file or words already landing there stop. */
 export function replyDraftDiscarded(threadId: string): void {
   discards.set(threadId, discardsOf(threadId) + 1);
+  heldVoice.delete(threadId);
 }
 
 /**
@@ -224,6 +234,11 @@ export function replyDraftDiscarded(threadId: string): void {
  * stay for the thread to offer again (lateVoice.ts).
  */
 export function landWordsInReplyDraft(threadId: string, words: string, store: ReplyDraftStore = httpReplyDraftStore): Promise<void> {
+  if (machineOf(threadId)) {
+    heldVoice.set(threadId, [...(heldVoice.get(threadId) ?? []), words]);
+    unsavedChanged();
+    return Promise.resolve();
+  }
   landing += 1;
   unsavedChanged();
   const discarded = discardsOf(threadId);
@@ -862,17 +877,19 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
   }, [flush, write]);
 
   /** The Send failed: the thread's words may be saved again (the caller saves the box's words). */
-  const release = useCallback(() => {
-    offeredSends.current.delete(current.current);
-    claimed.current.delete(current.current);
+  const release = useCallback((thread?: string) => {
+    const target = thread ?? current.current;
+    offeredSends.current.delete(target);
+    claimed.current.delete(target);
   }, []);
 
   /** The Send carried the words (the server deleted the draft with `clear_draft`): saves still queued do nothing. */
-  const sent = useCallback(() => {
-    const target = current.current;
-    if (timer.current) clearTimeout(timer.current);
-    timer.current = null;
-    pending.current = null;
+  const sent = useCallback((thread?: string) => {
+    const target = thread ?? current.current;
+    const open = target === current.current;
+    if (open && timer.current) clearTimeout(timer.current);
+    if (open) timer.current = null;
+    if (open || pending.current?.threadId === target) pending.current = null;
     bump(target);
     claimed.current.delete(target);
     takeCarried(target);
@@ -882,6 +899,11 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
     tooLongThreads.delete(target);
     refusedThreads.delete(target);
     unsavedChanged();
+    if (!open) {
+      if (conflicts.current.has(target) || offeredSends.current.delete(target)) setConflict(target, null);
+      else learn(target, null);
+      return;
+    }
     setState((s) => (s.tooLong || s.failed ? { ...s, tooLong: false, failed: false } : s));
     // After a conflict the Send carried this window's words and cleared nothing: the other
     // window's draft is still there, and the thread shows it.

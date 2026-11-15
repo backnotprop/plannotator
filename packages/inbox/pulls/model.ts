@@ -545,6 +545,7 @@ export function pullLaunchAsk(body: string, askLine: string): 'guide' | 'custom'
  * agent's thread: the verdict words, the note, then the comments in the
  * review app's export (`guideCommentSections`), under "Feedback on <noun>".
  * DRAFT agent text (REPORT.md): the words reach the agent as the person's reply.
+ * `skills` (`verdictRecheckBlock`) goes last in the feedback.
  */
 export function pullVerdictReply(
   verdict: 'approved' | 'changes_requested',
@@ -552,6 +553,7 @@ export function pullVerdictReply(
   comments: number,
   sections: string,
   note?: string,
+  skills = '',
 ): { words: string; feedback?: string } {
   const subject = pullSubject(target);
   const count = comments === 1 ? 'a comment' : `${comments} comments`;
@@ -564,10 +566,17 @@ export function pullVerdictReply(
         ? `I reviewed ${subject} and I am asking for changes: ${comments === 1 ? 'my comment is' : `my ${comments} comments are`} below.`
         : `I reviewed ${subject} and I am asking for changes.`;
   const words = [lead, note?.trim() ?? ''].filter((part) => part !== '').join('\n\n');
-  if (comments === 0) return { words };
+  if (comments === 0) return skills ? { words, feedback: skills } : { words };
   const noun = pullNoun(target.pull);
-  return {
-    words,
-    feedback: `# Feedback on ${noun}\n\nThe following comments are on the diff of ${subject}, one section per file. Line numbers are the file's own: (new) the changed file, (old) the original.\n\n${sections}`.trim(),
-  };
+  const feedback = `# Feedback on ${noun}\n\nThe following comments are on the diff of ${subject}, one section per file. Line numbers are the file's own: (new) the changed file, (old) the original.\n\n${sections}`.trim();
+  return { words, feedback: skills ? `${feedback}\n\n${skills}` : feedback };
+}
+
+/**
+ * Whether a PR verdict, which goes to the agent that last wrote in the thread (`link.last`), reaches the live session
+ * that sent the thread's latest review: only that one is asked for just what changed since.
+ */
+export function pullVerdictToReviewer(link: Pick<InboxPullLink, 'agent' | 'guide'> | null): boolean {
+  const reviewer = link?.guide?.review ? link.guide.session : null;
+  return !!reviewer && !!link?.agent && !link.agent.ended && link.agent.session === reviewer;
 }

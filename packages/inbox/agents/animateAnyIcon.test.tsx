@@ -58,16 +58,16 @@ function inbox() {
   const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
   const readBody = async (req: Request) => (await req.json()) as Record<string, unknown>;
   const facesRoute = createInboxAgentFaces({ file, serverSession: 'srv', readBody, json, icons: () => store.list() }).route;
-  const iconsRoute = createInboxAgentIcons({ icons: store, faces: file, serverSession: 'srv', localOnly: () => json({}, 403), readBody, json }).route;
+  const iconsRoute = createInboxAgentIcons({ icons: store, faces: file, serverSession: 'srv', readBody, json }).route;
   const builtIn = createBuiltInIconSets();
   const fetcher = createIconSetFetcher({ dir: join(dir, 'icon-sets'), pointer: null, builtIn: builtIn.ids });
-  const setsRoute = createInboxIconSets({ builtIn, fetcher, serverSession: 'srv', localOnly: () => json({}, 403), readBody, json }).route;
+  const setsRoute = createInboxIconSets({ builtIn, fetcher, serverSession: 'srv', readBody, json }).route;
   const animate = createInboxIconAnimate({
     inboxDir: dir,
     icons: store,
     faces: file,
     serverSession: 'srv',
-    localOnly: () => json({}, 403),
+   
     readBody,
     json,
     touch: () => {},
@@ -80,7 +80,7 @@ function inbox() {
     asked.push(`${init?.method ?? 'GET'} ${url.pathname}`);
     const req = new Request(url, { method: init?.method ?? 'GET', ...(init?.body ? { body: init.body } : {}) });
     try {
-      return (await facesRoute(req, url)) ?? (await iconsRoute(req, url, true)) ?? (await setsRoute(req, url, true)) ?? (await animate.route(req, url, true)) ?? json({ error: 'not here' }, 404);
+      return (await facesRoute(req, url)) ?? (await iconsRoute(req, url)) ?? (await setsRoute(req, url)) ?? (await animate.route(req, url)) ?? json({ error: 'not here' }, 404);
     } catch (cause) {
       const error = cause as { message: string; code: string };
       return json({ error: error.message, code: error.code }, 422);

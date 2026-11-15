@@ -3,8 +3,8 @@
  * data dir. What regresses: a dev build deciding it; a new user (first use under two days) getting it; the backfill
  * not reading first use from the event log on upgrade, or missing a snooze running at upgrade; a snooze by some route
  * (the window, the owner's phone over the tailnet, a phone app through the door, a linked machine's forward) not
- * marking it, or a tailnet guest's marking it; the dialog showing twice (two tabs at once, or after the stamp); a
- * tailnet guest claiming it; a claim with another server session going through. And the pure rules (inbox-snooze-intro.ts):
+ * marking it; the dialog showing twice (two tabs at once, or after the stamp); a claim with another server session
+ * going through. And the pure rules (inbox-snooze-intro.ts):
  * the two-day line moving (the owner changed it from seven), an active-days rule coming back, a used or shown mark not
  * ending it, a dev build deciding it, first use read from the wrong end of the log.
  */
@@ -21,7 +21,6 @@ import { SNOOZE_INTRO_TENURE_MS, snoozeIntroDue, snoozeIntroFirstUse } from "./i
 const DAY = 24 * 60 * 60 * 1000;
 const MAGIC = "macbook-pro.tail0000.ts.net";
 const OWNER = "owner@example.com";
-const GUEST = "guest@example.com";
 const RELEASE = "0.30.0";
 
 const roots: string[] = [];
@@ -74,7 +73,7 @@ interface Options {
   logDaysAgo?: number;
   /** A snooze running at the start (snoozes.json). */
   snoozeRunning?: boolean;
-  /** Published over the tailnet (the owner's phone and a guest can reach it). */
+  /** Published over the tailnet (the owner's phone can reach it). */
   tailnet?: boolean;
   /** Phones on (the door a phone app pairs with). */
   phones?: boolean;
@@ -108,7 +107,7 @@ async function world(options: Options = {}) {
     inboxThemeChooser: { notNeededAt: "2026-10-01T10:00:00.000Z" },
   };
   if (options.saved) config.inboxSnoozeIntro = options.saved;
-  if (options.tailnet) Object.assign(config, { inboxTailscale: true, inboxTailscaleAllow: [GUEST] });
+  if (options.tailnet) Object.assign(config, { inboxTailscale: true });
   writeFileSync(join(dataDir, "config.json"), JSON.stringify(config));
   let thread = "";
   if (options.logDaysAgo !== undefined) {
@@ -140,8 +139,8 @@ async function world(options: Options = {}) {
   const base = `http://127.0.0.1:${server.port}`;
   const post = (path: string, body: Record<string, unknown> = {}) =>
     fetch(`${base}${path}`, { method: "POST", headers: { "Content-Type": "application/json", Origin: base }, body: JSON.stringify({ serverSession: server.serverSession, ...body }) });
-  /** A page through the tailnet listener, as `tailscale serve` hands it over: the owner's phone, or a guest's. */
-  const viaTailnet = (who: "owner" | "guest", path: string, body?: Record<string, unknown>) => {
+  /** A page through the tailnet listener, as `tailscale serve` hands it over: the owner's phone. */
+  const viaTailnet = (path: string, body?: Record<string, unknown>) => {
     const listener = server.tailscale.listenerPort();
     if (listener === null) throw new Error("not published");
     return fetch(`http://127.0.0.1:${listener}${path}`, {
@@ -151,7 +150,7 @@ async function world(options: Options = {}) {
         Origin: `https://${MAGIC}:${server.port}`,
         "Sec-Fetch-Site": "same-origin",
         "X-Forwarded-Proto": "https",
-        "Tailscale-User-Login": who === "owner" ? OWNER : GUEST,
+        "Tailscale-User-Login": OWNER,
         ...(body ? { "Content-Type": "application/json" } : {}),
       },
       ...(body ? { body: JSON.stringify({ serverSession: server.serverSession, ...body }) } : {}),
@@ -238,16 +237,10 @@ describe("the claim", () => {
     expect(await (await w.post("/api/inbox/snooze-intro")).json()).toEqual({ show: false, snooze_intro: { due: false } });
   });
 
-  test("over the tailnet: a guest never sees it due nor claims it; the owner's phone does", async () => {
+  test("over the tailnet: the owner's phone sees it due and claims it", async () => {
     const w = await world({ logDaysAgo: 3, tailnet: true });
-    const due = async (who: "owner" | "guest") => ((await (await w.viaTailnet(who, "/api/inbox/settings")).json()) as { snooze_intro: { due: boolean } }).snooze_intro.due;
-    const claim = async (who: "owner" | "guest") => ((await (await w.viaTailnet(who, "/api/inbox/snooze-intro", {})).json()) as { show: boolean }).show;
-    expect(await due("guest")).toBe(false);
-    expect(await claim("guest")).toBe(false);
-    // The guest's ask spent nothing.
-    expect(w.saved()!.shownAt).toBeUndefined();
-    expect(await due("owner")).toBe(true);
-    expect(await claim("owner")).toBe(true);
+    expect(((await (await w.viaTailnet("/api/inbox/settings")).json()) as { snooze_intro: { due: boolean } }).snooze_intro.due).toBe(true);
+    expect(((await (await w.viaTailnet("/api/inbox/snooze-intro", {})).json()) as { show: boolean }).show).toBe(true);
     expect(w.saved()!.shownAt).toMatch(/^\d{4}-/);
   });
 });
@@ -269,11 +262,10 @@ describe("every snooze route marks it used", () => {
     expect(await w.claim()).toBe(false);
   });
 
-  test("the owner's phone over the tailnet marks it; a tailnet guest's snooze does not", async () => {
+  test("the owner's phone over the tailnet marks it", async () => {
     const w = await world({ logDaysAgo: 3, tailnet: true });
-    await w.viaTailnet("guest", `/api/inbox/threads/${w.thread}/snooze`, { until: tomorrow() });
     expect(w.saved()!.snoozedAt).toBeUndefined();
-    expect((await w.viaTailnet("owner", `/api/inbox/threads/${w.thread}/snooze`, { until: tomorrow() })).status).toBe(200);
+    expect((await w.viaTailnet(`/api/inbox/threads/${w.thread}/snooze`, { until: tomorrow() })).status).toBe(200);
     expect(w.saved()!.snoozedAt).toMatch(/^\d{4}-/);
     expect(await w.due()).toBe(false);
   });

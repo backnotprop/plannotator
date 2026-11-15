@@ -22,6 +22,7 @@ import type { InboxCloudWake } from "./inbox-cloud";
 import type { InboxSteps } from "./inbox-steps";
 import type { InboxThreadPull, InboxThreadPullsSummary } from "./inbox-thread-pulls";
 import type { InboxInitiative } from "./inbox-initiatives";
+import type { InboxScheduledChange, InboxScheduledRun, InboxScheduledThread } from "./inbox-scheduled-types";
 import type { InboxReviewVerdictRecord } from "./inbox-review";
 import type { InboxReviewSource } from "./inbox-reviews";
 import type { InboxTidyMark } from "./inbox-tidy";
@@ -29,7 +30,7 @@ import type { InboxLaunchChoices } from "./inbox-launch-choice";
 import type { InboxRowSnooze } from "./inbox-snooze";
 import { INBOX_CODEX_QUEUE_MIN_VERSION } from "./inbox-codex";
 import { INBOX_QWEN_WAKE_MIN_VERSION } from "./inbox-qwen";
-import { INBOX_T3_HOST, isT3ThreadId } from "./inbox-t3";
+import { INBOX_T3_HOST, isT3ThreadId, type InboxT3Status, type InboxT3WaitReason } from "./inbox-t3";
 
 // The attachment shapes and file rules (step 2) live in their own module and
 // reach the Inbox through this published entry, so core's export map is unchanged.
@@ -40,16 +41,19 @@ export * from "./inbox-codex";
 export * from "./inbox-qwen";
 export * from "./inbox-muse";
 export * from "./inbox-t3";
+export * from "./inbox-antigravity";
 // The Board's cards (approval "inbox-board"), the same way.
 export * from "./inbox-cards";
 // Thread steps (approval "inbox-thread-steps"), the same way.
 export * from "./inbox-steps";
 // The Board's initiatives (approval "board-initiatives"), the same way.
 export * from "./inbox-initiatives";
+export * from "./inbox-tag-colours";
 // The surface bridge's messages (the phone, PLAN step S1), the same way.
 export * from "./inbox-surface-bridge";
 // Tidy (the list header's and the Board's ⋮ menu), the same way.
 export * from "./inbox-tidy";
+export * from "./inbox-combine";
 // Pull requests (code review in the Inbox, phase 2), the same way.
 export * from "./inbox-pulls";
 export * from "./inbox-pull-risk";
@@ -69,8 +73,8 @@ export const INBOX_RECORD_VERSION = 1 as const;
 export { ulid } from "./ulid";
 import { ulid } from "./ulid";
 
-/** `upl`: a file the person uploaded for a message; `drf`: a draft of one (compose); `crd`: a Board card; `stp`: a session's steps in a thread; `ini`: a Board initiative; `lch`: a launch (an agent started from the Inbox). */
-export type InboxIdPrefix = "msg" | "prj" | "ses" | "dec" | "dev" | "upl" | "drf" | "crd" | "tdy" | "lch" | "ibx" | "stp" | "ini";
+/** `upl`: a file the person uploaded for a message; `drf`: a draft of one (compose); `crd`: a Board card; `stp`: a session's steps in a thread; `ini`: a Board initiative; `lch`: a launch (an agent started from the Inbox); `sch`: a routine. */
+export type InboxIdPrefix = "msg" | "prj" | "ses" | "dec" | "dev" | "upl" | "drf" | "crd" | "tdy" | "lch" | "ibx" | "stp" | "ini" | "cmb" | "sch";
 
 export function inboxId(prefix: InboxIdPrefix, now?: number): string {
   return `${prefix}_${ulid(now)}`;
@@ -95,8 +99,12 @@ const ID_RE: Record<InboxIdPrefix, RegExp> = {
   ibx: /^ibx_[0-9A-HJKMNP-TV-Z]{26}$/,
   /** One agent session's steps in one thread (packages/core/inbox-steps.ts). */
   stp: /^stp_[0-9A-HJKMNP-TV-Z]{26}$/,
+  /** One Combine of picked threads (packages/server/inbox-combine.ts). */
+  cmb: /^cmb_[0-9A-HJKMNP-TV-Z]{26}$/,
   /** A Board initiative (packages/core/inbox-initiatives.ts). */
   ini: /^ini_[0-9A-HJKMNP-TV-Z]{26}$/,
+  /** A routine (packages/server/inbox-scheduled.ts). */
+  sch: /^sch_[0-9A-HJKMNP-TV-Z]{26}$/,
 };
 
 export function isInboxId(prefix: InboxIdPrefix, value: unknown): value is string {
@@ -304,7 +312,7 @@ export type InboxAuthor =
  * One of the Inbox's own notes to the asking agent: Mark read's set-aside
  * note (`set_aside`), a late Undo's reopened note (`reopened`), or the note
  * that carries a 👍 Looks good to the agent (`ack_of`), or a Tidy note
- * (`tidy`). They are stored as
+ * (`tidy`), or a routine's skip line (`scheduled_run` with no `run`). They are stored as
  * the person's messages so they reach the agent like any reply, but they are
  * not the person's reply and not a look: the list's `sent`, `unseen`, the
  * look boundary and "came back" all read past them.
@@ -315,10 +323,12 @@ export function isInboxNote(message: {
   reopened?: readonly string[] | null;
   ack_of?: string | null;
   tidy?: InboxTidyMark | null;
+  scheduled_run?: { run?: number } | null;
 }): boolean {
   return (
     message.author.kind === "person" &&
     ((message.set_aside?.length ?? 0) > 0 ||
+      (!!message.scheduled_run && message.scheduled_run.run === undefined) ||
       (message.reopened?.length ?? 0) > 0 ||
       (typeof message.ack_of === "string" && message.ack_of !== "") ||
       (typeof message.tidy === "object" && message.tidy !== null))
@@ -434,6 +444,7 @@ export const INBOX_HOST_NAMES: Readonly<Record<string, string>> = {
   qwen: "Qwen Code",
   dsh: "DeepSeek Harness",
   t3: "T3 Code",
+  antigravity: "Antigravity",
   cline: "Cline",
   muse: "Muse Code",
   openclaw: "OpenClaw",
@@ -458,13 +469,15 @@ export const INBOX_HOST_NAMES: Readonly<Record<string, string>> = {
  * INBOX_QWEN_WAKE_MIN_VERSION or later, macOS and Linux;
  * packages/server/inbox-qwen-wake.ts), and a T3 Code thread through MCP
  * alone, where the Inbox sends the reply into the thread through T3's MCP API
- * (packages/server/inbox-t3-wake.ts).
+ * (packages/server/inbox-t3-wake.ts), and an Antigravity conversation through
+ * MCP alone, where the Inbox sends the reply in with Antigravity's own
+ * `agentapi send-message` (packages/server/inbox-antigravity-wake.ts).
  * The one list: wording that names which agents a reply wakes reads it.
  */
-export const INBOX_WAKING_HOSTS = ["claude-code", "pi", "opencode", "dsh", "cline", "openclaw", "hermes", "codex", "qwen", "t3"] as const;
+export const INBOX_WAKING_HOSTS = ["claude-code", "pi", "opencode", "dsh", "cline", "openclaw", "hermes", "codex", "qwen", "t3", "antigravity"] as const;
 
-/** Of INBOX_WAKING_HOSTS, the ones an MCP connection alone wakes (no Plannotator plugin): Codex, Qwen Code and T3 Code. */
-export const INBOX_MCP_WAKING_HOSTS: readonly string[] = ["codex", "qwen", "t3"];
+/** Of INBOX_WAKING_HOSTS, the ones an MCP connection alone wakes (no Plannotator plugin): Codex, Qwen Code, T3 Code and Antigravity. */
+export const INBOX_MCP_WAKING_HOSTS: readonly string[] = ["codex", "qwen", "t3", "antigravity"];
 
 /** The first version of each agent MCP alone wakes that can be woken. */
 export const INBOX_MCP_WAKE_MIN_VERSIONS: Readonly<Record<string, string>> = { codex: INBOX_CODEX_QUEUE_MIN_VERSION, qwen: INBOX_QWEN_WAKE_MIN_VERSION };
@@ -625,6 +638,12 @@ export interface InboxMessage {
   read_by_agent?: { session: string | null; at: string } | null;
   cloud_wake?: InboxCloudWake | null;
   /**
+   * On a person's reply or message for a T3 Code thread: why the T3 wake
+   * cannot put it in now (packages/server/inbox-t3-wake.ts). Absent while
+   * nothing known holds it, and dropped when it is delivered.
+   */
+  t3_wait?: InboxT3WaitReason | null;
+  /**
    * On a person's reply or message not yet delivered: the person pressed
    * Send now in the Inbox, and when. The session's connection then delivers
    * it at once, into the running turn when one runs, instead of waiting for
@@ -769,14 +788,6 @@ export interface InboxMessage {
    */
   started_by_person?: true;
   /**
-   * On a person message a tailnet guest wrote (a login `inboxTailscaleAllow`
-   * let in that is not this computer's owner): a reply, a re-ask, a new
-   * message or a thread started in compose. It is kept and delivered as any,
-   * but never starts a stopped launched session again. Set once, when the
-   * message is written; absent on the owner's and on every other message.
-   */
-  by_guest?: true;
-  /**
    * On the root of a thread the person started with compose's Board chip on
    * (approval "inbox-compose-board-chip", 2026-10-27): the person asked the
    * agent to track the work on the Board. The body stays as typed; what the
@@ -803,6 +814,10 @@ export interface InboxMessage {
    * "New Claude Code session"). Absent on every other message.
    */
   launch?: InboxLaunchRecord;
+  /** A routine's run divider or skip line (inbox-scheduled-types.ts). A divider also carries its run's `launch`. */
+  scheduled_run?: InboxScheduledRun;
+  /** An agent's `routine` change, posted as that agent in the thread it called from. */
+  scheduled_change?: InboxScheduledChange;
   /**
    * On the root of a thread the person started: who gave it its name, the
    * thread chip (approval "inbox-agent-names-own-thread"). The person may name
@@ -1899,6 +1914,11 @@ export interface InboxListRow extends InboxThreadSummary {
    */
   run?: "starting" | "working" | "cloning" | null;
   /**
+   * The window's own drawing (approval "inbox-multi-select"): the thread is in a Combine still waiting for its new
+   * thread, so the row says "Combining…". No server sends it.
+   */
+  combining?: true;
+  /**
    * When the person marked the thread read (Mark read), while it still holds:
    * no message but a set-aside note since. The row is Quiet. Null otherwise.
    * Absent from an older Inbox.
@@ -1978,9 +1998,10 @@ export const INBOX_ROW_WAIT_ENTRY_MAX = 120;
 
 /**
  * A group the list draws: a section, the Priority group above them all (`INBOX_PRIORITY_GROUP`), or the Snoozed band
- * under Quiet (`INBOX_SNOOZED_BAND`). The server places no row in either: the window draws them from the row.
+ * under Quiet (`INBOX_SNOOZED_BAND`). The server places no row in either: the window draws them from the row. The
+ * window's Archived group under them all (approval "inbox-archived-group") reads its own rows, never the list's.
  */
-export type InboxListGroupId = InboxSectionId | "snoozed" | "priority";
+export type InboxListGroupId = InboxSectionId | "snoozed" | "priority" | "archived";
 
 /** Why a row is in Priority (`InboxListRow.priority`). */
 export interface InboxRowPriority {
@@ -2053,8 +2074,12 @@ export interface InboxThread {
    * `repo` rides only on `GET /api/inbox/threads/:id` and is never stored:
    * the project's `origin`, or null for a folder without one or until the
    * Inbox has resolved it. Absent from an older Inbox.
+   * `repo_known` (additive, same read): the Inbox has resolved it, so a null
+   * `repo` means the folder has no `origin`, not "not known yet". Absent
+   * until then, and from an older Inbox (the window then reads the thread
+   * again on each of its records, as before).
    */
-  project: InboxProject & { repo?: InboxProjectRepo | null };
+  project: InboxProject & { repo?: InboxProjectRepo | null; repo_known?: true };
   subject: string | null;
   /** The thread's name, or null for an unnamed thread. */
   thread_name: string | null;
@@ -2088,10 +2113,11 @@ export interface InboxThread {
  * `card`: a Board card (approval "inbox-board"); `steps`: one agent session's
  * steps in a thread (approval "inbox-thread-steps"); `initiative`: a Board
  * initiative (approval "board-initiatives"); `thread_pull`: one PR on one
- * thread (approval "inbox-pr-binding"). A reader that does not know a kind
+ * thread (approval "inbox-pr-binding"); `scheduled`: a routine
+ * (inbox-scheduled-types.ts). A reader that does not know a kind
  * skips its lines.
  */
-export type InboxRecordKind = "project" | "message" | "question" | "annotation" | "card" | "steps" | "initiative" | "thread_pull";
+export type InboxRecordKind = "project" | "message" | "question" | "annotation" | "card" | "steps" | "initiative" | "thread_pull" | "scheduled";
 
 /** One line of the store: a full snapshot of one record. */
 export type InboxLine =
@@ -2102,7 +2128,8 @@ export type InboxLine =
   | { v: 1; seq: number; at: string; kind: "card"; id: string; record: InboxCard }
   | { v: 1; seq: number; at: string; kind: "steps"; id: string; record: InboxSteps }
   | { v: 1; seq: number; at: string; kind: "initiative"; id: string; record: InboxInitiative }
-  | { v: 1; seq: number; at: string; kind: "thread_pull"; id: string; record: InboxThreadPull };
+  | { v: 1; seq: number; at: string; kind: "thread_pull"; id: string; record: InboxThreadPull }
+  | { v: 1; seq: number; at: string; kind: "scheduled"; id: string; record: InboxScheduledThread };
 
 // ─────────────────────────────── Health ───────────────────────────────
 
@@ -2534,6 +2561,7 @@ export type InboxAgentId =
   | "muse"
   | "openclaw"
   | "hermes"
+  | "antigravity"
   | "claude-app";
 
 export const INBOX_AGENT_IDS: readonly InboxAgentId[] = [
@@ -2552,6 +2580,7 @@ export const INBOX_AGENT_IDS: readonly InboxAgentId[] = [
   "muse",
   "openclaw",
   "hermes",
+  "antigravity",
   "claude-app",
 ];
 
@@ -2571,6 +2600,7 @@ export const INBOX_AGENT_LABELS: Readonly<Record<InboxAgentId, string>> = {
   muse: "Muse Code",
   openclaw: "OpenClaw",
   hermes: "Hermes Agent",
+  antigravity: "Antigravity",
   "claude-app": "Claude app",
 };
 
@@ -2838,6 +2868,8 @@ export interface InboxAgentsModel {
    * row. Absent from an Inbox older than the field.
    */
   sessions?: Partial<Record<InboxToolHostId, InboxHostSessions>>;
+  /** T3 Code when it is on this computer, else null. Absent from an Inbox older than the field: no T3 Code group. */
+  t3?: InboxT3Status | null;
 }
 
 /** The hosts that connect through Plannotator's own plugin or extension. */
@@ -3122,9 +3154,15 @@ export type InboxToolCostHost = "pi" | "opencode" | "dsh" | "cline" | "openclaw"
  * 13,009, the field removed and kept), Board on the same +348. Tokens scaled at the entry's bytes per token (3.7),
  * +94, not counted on Pi.
  */
-const INBOX_TOOL_COST_NOW = { bytes: 13009, tokens: 3517 };
+/*
+ * The owner's lessons for agents (2026-11-15: INBOX_SHOWING_RULE, INBOX_REREAD_RULE, INBOX_ASK_RECOGNISE_RULE, the
+ * prototype, mock and thread sentences on send_message's fields; no line in the description, which stays 1,944
+ * characters): the entry as the tool builds it from the default tool list, with Pi's wrapper, 13,084 → 13,869 bytes
+ * (+785), Board on the same +785. Tokens scaled at the entry's bytes per token (3.7), +212, not counted on Pi.
+ */
+const INBOX_TOOL_COST_NOW = { bytes: 13869, tokens: 3729 };
 /** The entry with the Board on (the `card` action listed): for the switch's words, measured on Pi. */
-export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 14681, tokens: 4014 } as const;
+export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 15466, tokens: 4226 } as const;
 /**
  * What thread steps add to the entry when the person turns them on (the
  * `steps` action and send_message's `steps` field; approval
@@ -3301,9 +3339,15 @@ export const INBOX_DRAFT_PASTED_LEAD_MAX = 2;
 /**
  * The marks a person sets on an agent or a thread that a linked machine may send to this Inbox, the one that owns it
  * (approval "inbox-linked-marks"). The list says them (`marks`), so a linked machine offers a mark on this Inbox's
- * rows only once this Inbox takes it; an older Inbox says none.
+ * rows only once this Inbox takes it; an older Inbox says none. `cards`: its Board's cards are read through its door
+ * and changed there, so a linked machine's Board lists them. `pulls`: its PR board is read through its door, and a
+ * PR it lists is closed, reopened or merged there, with its own gh / glab. `file-refs`: a file its agents' messages
+ * name is read through its door, and attached to that message there when the person comments on it. `tidy` and
+ * `combine` (approval "inbox-multi-select"): a linked machine's window asks this Inbox's sessions to tidy or combine
+ * this Inbox's threads, through its door. `pulls-looked` (approval "inbox-pr-dashboard"): the PR page's look at a PR
+ * it lists is kept there ("Changed since you looked").
  */
-export const INBOX_LINKED_MARKS = ["star", "priority", "agent-face", "agent-name", "take-back", "tags"] as const;
+export const INBOX_LINKED_MARKS = ["star", "priority", "agent-face", "agent-name", "take-back", "tags", "cards", "pulls", "tag-colours", "file-refs", "tidy", "combine", "pulls-looked"] as const;
 export type InboxLinkedMark = (typeof INBOX_LINKED_MARKS)[number];
 
 /**
@@ -3631,8 +3675,6 @@ export interface InboxPromptsSettings {
      * next text in line): its length, else null. Absent from an older Inbox.
      */
     over?: { shared: number | null; runtimes: Record<InboxPromptHost, number | null> };
-    /** Whether this page may change it: false for a tailnet guest (it reaches every agent on this computer). */
-    editable: boolean;
   };
   /** The plan, review and annotate prompts, in the order the page lists them. */
   others: InboxPromptItem[];
@@ -3682,8 +3724,6 @@ export interface InboxVoiceSettings {
   computer: string | null;
   /** The one-time announcement may still show here (`POST /api/inbox/voice/intro` claims it). */
   intro_due: boolean;
-  /** A tailnet login other than the owner's: `on` is false and voice's routes answer `owner_only`, as Feedback's does. */
-  guest: boolean;
 }
 
 /**

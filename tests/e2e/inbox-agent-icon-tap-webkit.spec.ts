@@ -8,7 +8,7 @@
  * Build the binary first (see inbox.spec.ts), then
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-agent-icon-tap-webkit.spec.ts`.
  */
-import { expect, test, type Locator } from '@playwright/test';
+import { expect, test, type Locator } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';

@@ -49,9 +49,9 @@ export function launchTipPlainOpen(request: object): boolean {
   return Object.values(request).every((value) => value === undefined || value === null || value === '');
 }
 
-/** The Inbox has the tip for this page: the owner's page (never a guest's) on an Inbox that reports it due. */
-export function launchTipDue(settings: Pick<SettingsModel, 'guest' | 'reveal'> | null | undefined): boolean {
-  return !!settings && settings.guest !== true && settings.reveal?.launch_tip === true;
+/** The Inbox has the tip for this page: an Inbox that reports it due. */
+export function launchTipDue(settings: Pick<SettingsModel, 'reveal'> | null | undefined): boolean {
+  return !!settings && settings.reveal?.launch_tip === true;
 }
 
 export interface LaunchTipPlace {

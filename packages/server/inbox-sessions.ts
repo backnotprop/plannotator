@@ -540,6 +540,8 @@ export function createInboxLiveSessions(options: {
       tags: false,
     };
     entry.host = host;
+    // A session the Inbox woke itself (a T3 thread its MCP sends named) that now polls is that connection from here.
+    delete entry.wakeOnly;
     setDeliveryFlags(entry, entry.busy, body[INBOX_SEND_NOW_POLL_FIELD] === true);
     setHeld(entry, body[INBOX_HELD_POLL_FIELD] === true);
     entry.tags = body[INBOX_TAGS_POLL_FIELD] === true;
@@ -1233,11 +1235,17 @@ export function createInboxLiveSessions(options: {
   /**
    * Whether `session` of `host` holds or made a bridge poll within the live
    * window now: its connection (the Claude Code mod, Pi, OpenCode 2) will
-   * hand it the person's reply as a turn. MCP activity never counts.
+   * hand it the person's reply as a turn. MCP activity never counts, nor a
+   * session only the Inbox wakes (`seenWakeOnly`).
    */
   const pollsNow = (host: string, session: string): boolean => {
     const entry = sessions.get(session);
-    return !!entry && entry.host === host && isLive(entry);
+    return !!entry && entry.host === host && entry.wakeOnly === undefined && isLive(entry);
+  };
+  /** Whether `session` of `host` holds a bridge poll open right now (`pollsNow` also counts one that just ended). */
+  const holdsPollNow = (host: string, session: string): boolean => {
+    const entry = sessions.get(session);
+    return !!entry && entry.host === host && entry.wakeOnly === undefined && entry.holding > 0;
   };
 
   /** `{ host?, session }` naming a live session in any project, or null when it is not live (compose's Send). */
@@ -1259,11 +1267,8 @@ export function createInboxLiveSessions(options: {
       headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" },
     });
 
-  /**
-   * The window's routes; null when the path is not one of them.
-   * `byGuest`: the request is a tailnet guest's (`isGuest`), so a new message it writes is marked `by_guest`.
-   */
-  const route = async (req: Request, path: string, byGuest = false): Promise<Response | null> => {
+  /** The window's routes; null when the path is not one of them. A session carries its `label` here. */
+  const route = async (req: Request, path: string): Promise<Response | null> => {
     const sessionsMatch = /^\/api\/inbox\/threads\/([A-Za-z0-9_]+)\/sessions$/.exec(path);
     if (sessionsMatch) {
       if (req.method !== "GET") return answer({ error: "Use GET." }, 405);
@@ -1326,7 +1331,6 @@ export function createInboxLiveSessions(options: {
       body: body.body,
       idempotency_key: body.idempotency_key,
       to: target ? { host: target.host, session: target.session } : null,
-      ...(byGuest ? { by_guest: true } : {}),
     });
     return answer({ message: result.message, replayed: result.replayed });
   };
@@ -1408,6 +1412,7 @@ export function createInboxLiveSessions(options: {
     isSessionLive,
     runStateOf,
     pollsNow,
+    holdsPollNow,
     composeTarget,
     connectionOf,
     askHostOf,

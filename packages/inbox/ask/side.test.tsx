@@ -13,7 +13,7 @@
  * question keep only the clean quote.
  *
  * Failures to catch: Side missing from a thread that can ask, or showing in
- * one that cannot (no live agent: a guest's or a linked machine's thread
+ * one that cannot (no live agent: a linked machine's thread
  * reads `can_ask: false` too), or in the phone layout (the owner hides it
  * there; the top bar icon stays); Side out of its place; a press that opens the
  * window without the words, or not at all; the Ask icon coming back to the
@@ -296,8 +296,21 @@ test.skipIf(!hasDom)("a Codex thread: Side is Codex's mark, named for Codex", as
   expect(askBox()!.value).toBe(`> ${WORDS}\n\n`);
 });
 
+test.skipIf(!hasDom)("a T3 Code thread: Side is T3 Code's mark, named for T3 Code", async () => {
+  serve(true, { host: 't3', name: 'T3 Code' });
+  await mount(<MessageWithAsk />);
+  await until(async () => {
+    await select(host!, WORDS);
+    return side() !== null;
+  }, 'Side in the selection bar');
+  expect(barOrder()).toEqual(['Delete', 'Comment', 'Looks good', '|', 'Side chat with T3 Code', '|', 'Cancel']);
+  expect(side()!.textContent).toBe('');
+  expect(side()!.querySelector('.ib-mk')!.isEqualNode(markOf('t3'))).toBe(true);
+  expect(side()!.querySelector('[data-mark="t3"]')).not.toBeNull();
+});
+
 for (const agent of [
-  { host: 't3', name: 'T3 Code' },
+  { host: 'kiro', name: 'Kiro' },
   { host: 'some-new-agent', name: 'some-new-agent' },
   { host: null, name: 'An agent' },
 ]) {
