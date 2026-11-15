@@ -5,6 +5,7 @@
  */
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Menu } from '@base-ui/react/menu';
+import { usePhone } from '../phone';
 import { INBOX_HOST_NAMES } from '@plannotator/core/inbox-types';
 import type { InboxScheduledPreview, InboxScheduledRow, InboxScheduledRunSummary, InboxScheduledSchedule } from '@plannotator/core/inbox-scheduled-types';
 import { formatCount } from '../format';
@@ -56,6 +57,8 @@ const fieldsOf = (row: InboxScheduledRow): ScheduledFields => ({
 
 function MoreMenu({ on, onTurn, onDelete }: { on: boolean | null; onTurn: () => void; onDelete: () => void }) {
   const anchor = useRef<HTMLButtonElement>(null);
+  // On a phone, main's bottom sheet (inbox.css `.ib-pm-pos[data-phone]`): it fits the screen and scrolls.
+  const sheet = usePhone();
   const [portal, setPortal] = useState<HTMLElement | null>(null);
   useLayoutEffect(() => setPortal(anchor.current?.closest<HTMLElement>('.pn-inbox') ?? null), []);
   return (
@@ -64,7 +67,8 @@ function MoreMenu({ on, onTurn, onDelete }: { on: boolean | null; onTurn: () => 
         <Icon name="dots" />
       </Menu.Trigger>
       <Menu.Portal container={portal ?? undefined}>
-        <Menu.Positioner className="ib-pm-pos" side="bottom" align="end" sideOffset={4}>
+        {sheet && <Menu.Backdrop className="ib-pm-scrim" />}
+        <Menu.Positioner className="ib-pm-pos" side="bottom" align="end" sideOffset={4} data-phone={sheet ? '' : undefined}>
           <Menu.Popup className="ib-pm" aria-label="Routine">
             {on !== null && (
               <Menu.Item className="ib-pmi" onClick={onTurn}>

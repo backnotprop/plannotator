@@ -4,6 +4,7 @@
  */
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Menu } from '@base-ui/react/menu';
+import { usePhone } from '../phone';
 import { INBOX_HOST_NAMES, type InboxComposeLaunch } from '@plannotator/core/inbox-types';
 import type { InboxScheduledFolder } from '@plannotator/core/inbox-scheduled-types';
 import { inboxApi } from '../api';
@@ -36,13 +37,15 @@ export function useLaunchBlock(): LaunchBlock | null {
 
 function usePortal() {
   const anchor = useRef<HTMLButtonElement>(null);
+  // On a phone, main's bottom sheet (inbox.css `.ib-pm-pos[data-phone]`): it fits the screen and scrolls.
+  const sheet = usePhone();
   const [portal, setPortal] = useState<HTMLElement | null>(null);
   useLayoutEffect(() => setPortal(anchor.current?.closest<HTMLElement>('.pn-inbox') ?? null), []);
-  return { anchor, portal };
+  return { anchor, portal, sheet };
 }
 
 export function RunsAs({ block, agent, model, effort, phone, onChange }: { block: LaunchBlock | null; agent: string; model?: string; effort?: string; phone: boolean; onChange: (next: { agent: string; model?: string; effort?: string }) => void }) {
-  const { anchor, portal } = usePortal();
+  const { anchor, portal, sheet } = usePortal();
   const [choiceOpen, setChoiceOpen] = useState(false);
   const agents = block?.launch?.agents ?? [];
   const current = agents.find((a) => a.agent === agent);
@@ -60,7 +63,8 @@ export function RunsAs({ block, agent, model, effort, phone, onChange }: { block
           <Icon name="chevD" size={12} />
         </Menu.Trigger>
         <Menu.Portal container={portal ?? undefined}>
-          <Menu.Positioner className="ib-pm-pos" side="bottom" align="start" sideOffset={4}>
+          {sheet && <Menu.Backdrop className="ib-pm-scrim" />}
+          <Menu.Positioner className="ib-pm-pos" side="bottom" align="start" sideOffset={4} data-phone={sheet ? '' : undefined}>
             <Menu.Popup className="ib-pm" aria-label="Agent">
               <Menu.RadioGroup value={agent} onValueChange={(next: string) => next !== agent && onChange({ agent: next })}>
                 {agents.map((a) => (

@@ -4,6 +4,7 @@
  */
 import { useLayoutEffect, useRef, useState } from 'react';
 import { Menu } from '@base-ui/react/menu';
+import { usePhone } from '../phone';
 import type { InboxScheduledPreview, InboxScheduledSchedule } from '@plannotator/core/inbox-scheduled-types';
 import { Icon } from '../icons';
 import { nextRunLine } from './words';
@@ -66,6 +67,8 @@ export function scheduleOf(kind: ScheduleKind, p: { hour: number; minute: number
 
 function KindMenu({ kind, onKind }: { kind: ScheduleKind; onKind: (kind: ScheduleKind) => void }) {
   const anchor = useRef<HTMLButtonElement>(null);
+  // On a phone, main's bottom sheet (inbox.css `.ib-pm-pos[data-phone]`): it fits the screen and scrolls.
+  const sheet = usePhone();
   const [portal, setPortal] = useState<HTMLElement | null>(null);
   useLayoutEffect(() => setPortal(anchor.current?.closest<HTMLElement>('.pn-inbox') ?? null), []);
   const shown = KINDS.find((k) => k.id === kind)!;
@@ -76,7 +79,8 @@ function KindMenu({ kind, onKind }: { kind: ScheduleKind; onKind: (kind: Schedul
         <Icon name="chevD" size={12} />
       </Menu.Trigger>
       <Menu.Portal container={portal ?? undefined}>
-        <Menu.Positioner className="ib-pm-pos" side="bottom" align="start" sideOffset={4}>
+        {sheet && <Menu.Backdrop className="ib-pm-scrim" />}
+        <Menu.Positioner className="ib-pm-pos" side="bottom" align="start" sideOffset={4} data-phone={sheet ? '' : undefined}>
           <Menu.Popup className="ib-pm st-kinds" aria-label="Schedule">
             <Menu.RadioGroup value={kind} onValueChange={(next: ScheduleKind) => next !== kind && onKind(next)}>
               {KINDS.map((k) => (

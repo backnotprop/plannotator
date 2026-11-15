@@ -11,6 +11,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxScheduledRow } from '@plannotator/core/inbox-scheduled-types';
 import { lastRun, scheduledRow } from './testRows';
+import { PHONE_QUERY } from '../phone';
 
 const hasDom = typeof document !== 'undefined';
 const { ScheduledTable } = (hasDom ? await import('./ScheduledTable') : {}) as typeof import('./ScheduledTable');
@@ -84,4 +85,17 @@ test.skipIf(!hasDom)('split: Run leads every row in its own column, then Routine
   expect(ids(host)).toEqual(['sch_running', 'sch_weekday', 'sch_daily', 'sch_once', 'sch_none', 'sch_off_new', 'sch_off_old']);
   expect(host.querySelector('[data-scheduled-row="sch_weekday"]')?.hasAttribute('data-selected')).toBe(true);
   expect(host.querySelectorAll('[data-selected]').length).toBe(1);
+});
+
+test.skipIf(!hasDom)("on a phone a row's ⋯ opens main's bottom sheet (it fits a short screen and scrolls), with its scrim", async () => {
+  const before = window.matchMedia;
+  window.matchMedia = ((media: string) => ({ media, matches: media === PHONE_QUERY, addEventListener: () => {}, removeEventListener: () => {} })) as unknown as typeof window.matchMedia;
+  try {
+    const host = draw(true);
+    await act(async () => host.querySelector<HTMLButtonElement>('[data-scheduled-menu]')!.click());
+    expect(document.querySelector('.ib-pm-pos[data-phone] .ib-pm')).not.toBeNull();
+    expect(document.querySelector('.ib-pm-scrim')).not.toBeNull();
+  } finally {
+    window.matchMedia = before;
+  }
 });

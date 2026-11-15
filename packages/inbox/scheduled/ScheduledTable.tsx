@@ -5,6 +5,7 @@
  */
 import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react';
 import { Menu } from '@base-ui/react/menu';
+import { usePhone } from '../phone';
 import type { InboxScheduledRow } from '@plannotator/core/inbox-scheduled-types';
 import { formatCount } from '../format';
 import { Icon } from '../icons';
@@ -56,6 +57,8 @@ function RunButton({ row, acts, short }: { row: InboxScheduledRow; acts: RowActs
 
 function RowMenu({ row, acts }: { row: InboxScheduledRow; acts: RowActs }) {
   const anchor = useRef<HTMLButtonElement>(null);
+  // On a phone, main's bottom sheet (inbox.css `.ib-pm-pos[data-phone]`): it fits the screen and scrolls.
+  const sheet = usePhone();
   const [portal, setPortal] = useState<HTMLElement | null>(null);
   useLayoutEffect(() => setPortal(anchor.current?.closest<HTMLElement>('.pn-inbox') ?? null), []);
   const on = row.state !== 'off';
@@ -65,7 +68,8 @@ function RowMenu({ row, acts }: { row: InboxScheduledRow; acts: RowActs }) {
         <Icon name="dots" />
       </Menu.Trigger>
       <Menu.Portal container={portal ?? undefined}>
-        <Menu.Positioner className="ib-pm-pos" side="bottom" align="end" sideOffset={4}>
+        {sheet && <Menu.Backdrop className="ib-pm-scrim" />}
+        <Menu.Positioner className="ib-pm-pos" side="bottom" align="end" sideOffset={4} data-phone={sheet ? '' : undefined}>
           {/* A portal's clicks bubble to the row in React's tree: a menu item never also opens the row. */}
           <Menu.Popup className="ib-pm" aria-label={row.name} onClick={(event) => event.stopPropagation()}>
             {row.state !== 'done' && (
