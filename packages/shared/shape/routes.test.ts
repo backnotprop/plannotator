@@ -49,6 +49,15 @@ function world() {
 }
 
 describe("shape routes", () => {
+  test("malformed URL escapes return a client error instead of rejecting the route", async () => {
+    const w = world();
+    for (const path of ["/api/shapes/%", `/api/shapes/${w.id}/files/%E0%A4%A`]) {
+      expect((await w.call("GET", path)).status).toBe(400);
+    }
+    expect((await w.call("GET", `/api/shapes/${w.id}`)).status).toBe(200);
+    expect(w.changed).toEqual([]);
+  });
+
   test("a page opens a board, its history and an older version", async () => {
     const w = world();
     w.store.update({ id: w.id, base: 1, board: board("whistles twice"), project });
