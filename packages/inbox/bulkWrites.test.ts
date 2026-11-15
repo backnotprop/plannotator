@@ -6,8 +6,8 @@
  */
 import { describe, expect, test } from 'bun:test';
 import type { InboxListRow } from '@plannotator/core/inbox-types';
-import { InboxApiError, InboxHeldError } from './api';
-import { bulkToast, eachRow, tagsToast } from './bulkWrites';
+import { InboxApiError, InboxHeldError, inboxApi } from './api';
+import { bulkToast, bulkWrites, eachRow, tagsToast, type BulkHost } from './bulkWrites';
 
 const row = (id: string) => ({ thread_id: id, subject: id }) as InboxListRow;
 const held = (name: string) => new InboxHeldError({ id: 'out_1', state: 'queued' } as never, { name, state: 'asleep' } as never);
@@ -62,5 +62,88 @@ describe('bulkToast', () => {
   test('Add tag: the tag after the count', () => {
     expect(tagsToast([made('a'), made('b')], 'Billing', true)).toMatchObject({ icon: 'check', lead: 'Tagged 2 threads', detail: 'Billing' });
     expect(tagsToast([made('a'), made('b')], 'Billing', false)).toMatchObject({ lead: 'Removed 2 threads', detail: 'from Billing' });
+  });
+});
+
+describe('one Undo', () => {
+  /** A host that keeps what it was asked; the list draws nothing (no rows shown). */
+  function harness() {
+    const toasts: { onUndo?: () => void; lead: string }[] = [];
+    const restored: string[] = [];
+    const host = {
+      rowOf: () => undefined,
+      rowWrites: { draw: () => ({ failed: () => {}, done: () => {} }) },
+      setShown: () => {},
+      shownRef: { current: null },
+      latestRef: { current: null },
+      routeRef: { current: {} },
+      listCovered: () => false,
+      armSlide: () => {},
+      afterWrite: async () => {},
+      showToast: (toast: { onUndo?: () => void; lead: string }) => void toasts.push(toast),
+      dismissToast: () => {},
+      say: () => {},
+      warnSetAside: async () => true,
+      restoreSnooze: async (id: string, snoozed: unknown) => {
+        restored.push(`snooze ${id} ${snoozed ? 'on' : 'off'}`);
+        if (id === 'b') throw held('Mac mini');
+      },
+      restorePriority: async (id: string, priority: unknown) => {
+        restored.push(`priority ${id} ${priority ? 'on' : 'off'}`);
+        if (id === 'b') throw held('Mac mini');
+      },
+      closeThread: () => {},
+      openThread: () => {},
+    } as unknown as BulkHost;
+    return { toasts, restored, bulk: bulkWrites(host) };
+  }
+  const flush = () => new Promise((done) => setTimeout(done, 10));
+
+  test('an Archive’s Undo unarchives only what was archived, held ones too, and brings back their snooze and Priority', async () => {
+    const { toasts, restored, bulk } = harness();
+    const calls: string[] = [];
+    const real = inboxApi.resolve;
+    inboxApi.resolve = (async (id: string, resolved: boolean) => {
+      calls.push(`${resolved ? 'archive' : 'unarchive'} ${id}`);
+      // b's machine is away: held both ways. c is refused.
+      if (id === 'b') throw held('Mac mini');
+      if (id === 'c' && resolved) throw new InboxApiError(409, 'gone', 'That thread is gone.');
+      return {};
+    }) as typeof inboxApi.resolve;
+    try {
+      const rows = [
+        { ...row('a'), snoozed: { until: '2099-01-01T00:00:00.000Z', at: '2026-11-01T00:00:00.000Z' }, priority: { at: '2026-11-01T00:00:00.000Z' } },
+        { ...row('b'), snoozed: { until: '2099-01-01T00:00:00.000Z', at: '2026-11-01T00:00:00.000Z' }, priority: { at: '2026-11-01T00:00:00.000Z' } },
+        { ...row('c'), priority: { at: '2026-11-01T00:00:00.000Z' } },
+      ] as unknown as InboxListRow[];
+      await bulk.archive(rows);
+      expect(toasts).toHaveLength(1);
+      toasts[0]!.onUndo!();
+      await flush();
+      expect(calls.filter((c) => c.startsWith('unarchive')).sort()).toEqual(['unarchive a', 'unarchive b']);
+      // b's unarchive was held: its snooze and Priority are still asked for, in order, after it.
+      expect(restored.sort()).toEqual(['priority a on', 'priority b on', 'snooze a on', 'snooze b on']);
+    } finally {
+      inboxApi.resolve = real;
+    }
+  });
+
+  test('a Snooze’s Undo puts back only the snoozes that were made', async () => {
+    const { toasts, bulk } = harness();
+    const calls: string[] = [];
+    const real = inboxApi.snooze;
+    inboxApi.snooze = (async (id: string, until: string | null) => {
+      calls.push(`${id} ${until ?? 'none'}`);
+      if (id === 'c') throw new InboxApiError(409, 'gone', 'That thread is gone.');
+      return {};
+    }) as typeof inboxApi.snooze;
+    try {
+      await bulk.snooze([row('a'), row('c')], '2099-01-01T00:00:00.000Z');
+      toasts[0]!.onUndo!();
+      await flush();
+      expect(calls).toEqual(['a 2099-01-01T00:00:00.000Z', 'c 2099-01-01T00:00:00.000Z', 'a none']);
+    } finally {
+      inboxApi.snooze = real;
+    }
   });
 });

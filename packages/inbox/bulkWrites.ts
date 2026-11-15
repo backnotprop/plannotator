@@ -181,10 +181,18 @@ export function bulkWrites(host: BulkHost) {
     }
     void afterWrite(ids(outcomes)).finally(() => drawings.forEach(({ drawing }) => drawing.done()));
     // Archive ends a snooze and the person's Priority: Undo unarchives first, since an archived thread takes neither.
+    // For a machine that is away each is held, in that order, so all three go when it is back.
     finish('archive', outcomes, undoWith(outcomes, async ({ row }) => {
-      await inboxApi.resolve(row.thread_id, false);
-      await host.restoreSnooze(row.thread_id, row.snoozed);
-      await host.restorePriority(row.thread_id, row.priority);
+      let held: InboxHeldError | null = null;
+      for (const write of [() => inboxApi.resolve(row.thread_id, false), () => host.restoreSnooze(row.thread_id, row.snoozed), () => host.restorePriority(row.thread_id, row.priority)]) {
+        try {
+          await write();
+        } catch (cause) {
+          if (!(cause instanceof InboxHeldError)) throw cause;
+          held ??= cause;
+        }
+      }
+      if (held) throw held;
     }));
   };
 
