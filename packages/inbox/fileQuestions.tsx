@@ -9,16 +9,19 @@
  * rules the body's cards follow (Thread.tsx `MessageBody`): only an open or
  * picked question takes an answer; a pick not sent tags its card "Draft"; a
  * card the file shows that no record names (the file changed since it was
- * sent, or a message sent before this) stays read-only.
+ * sent, or a message sent before this) stays read-only. A card that repeats
+ * a body question (`inboxFileQuestionTwin`: the store recorded none for it)
+ * is the body's record's card.
  */
 
 import { useMemo } from 'react';
+import { inboxFileQuestionTwin } from '@plannotator/core/inbox-file-question-twin';
 import type { InboxMessageWire, InboxQuestion } from '@plannotator/core/inbox-types';
 import type { IndexedQuestion, QuestionAnswer, QuestionStatus } from '@plannotator/core/question-block';
 
 /** The open file's questions, as the thread hands them to the pane. */
 export interface FileQuestions {
-  /** The file's question records (each with `attachment`), as the thread reads them now. */
+  /** The file's question records (each with `attachment`) and the body's questions its cards may repeat, as the thread reads them now. */
   records: readonly InboxQuestion[];
   /** The answers on screen, a pick being saved included, by record key. */
   answers: ReadonlyMap<string, QuestionAnswer>;
@@ -35,16 +38,29 @@ export interface FileQuestions {
 /** The status tag a pick not sent shows, as on the body's cards. */
 const DRAFT_STATUS = { label: 'Draft', tone: 'open' } as const;
 
-/** The records of `message` asked inside the attachment `attachmentId`. */
+/** The records of `message` asked inside the attachment `attachmentId`, then the questions of its body. */
 export function fileQuestionRecords(message: Pick<InboxMessageWire, 'questions'> | undefined, attachmentId: string): InboxQuestion[] {
-  return (message?.questions ?? []).filter((q) => q.attachment?.id === attachmentId);
+  const all = message?.questions ?? [];
+  return [...all.filter((q) => q.attachment?.id === attachmentId), ...all.filter((q) => !q.attachment && q.kind !== 'action')];
 }
 
-/** The record a card computes `fileKey` for, by the file's key. */
+/**
+ * The record a card computes `fileKey` for, by the file's key: the file's own
+ * record first (a message sent before twins were left out recorded one), else
+ * the body's record of the same key.
+ */
 export function recordsByFileKey(records: readonly InboxQuestion[]): Map<string, InboxQuestion> {
   const out = new Map<string, InboxQuestion>();
+  for (const r of records) if (!r.attachment) out.set(r.key, r);
   for (const r of records) if (r.attachment) out.set(r.attachment.key, r);
   return out;
+}
+
+/** The record a card answers through: a body record only when the card repeats it (its choices too). */
+function cardRecord(byFileKey: ReadonlyMap<string, InboxQuestion>, indexed: IndexedQuestion): InboxQuestion | undefined {
+  const record = byFileKey.get(indexed.question.key);
+  if (!record || record.attachment) return record;
+  return inboxFileQuestionTwin(indexed.question, [record]) ?? undefined;
 }
 
 /** Whether a card takes no answer: locked, no record names it, or its record is not open or picked (sent, closed, replaced). */
@@ -83,14 +99,14 @@ export function useFileQuestionViewerProps(questions: FileQuestions | null | und
         const record = byFileKey.get(fileKey);
         if (!fileQuestionLocked(record, locked)) onPick(record!.key, answer);
       },
-      questionReadOnly: (indexed: IndexedQuestion) => fileQuestionLocked(byFileKey.get(indexed.question.key), locked),
+      questionReadOnly: (indexed: IndexedQuestion) => fileQuestionLocked(cardRecord(byFileKey, indexed), locked),
       questionStatusLabel: (indexed: IndexedQuestion, status: QuestionStatus) => {
         if (status !== 'answered' && status !== 'skipped') return undefined;
-        const record = byFileKey.get(indexed.question.key);
+        const record = cardRecord(byFileKey, indexed);
         return record && (record.state === 'open' || record.state === 'picked') ? DRAFT_STATUS : undefined;
       },
       renderQuestionFooter: (indexed: IndexedQuestion) => {
-        const record = byFileKey.get(indexed.question.key);
+        const record = cardRecord(byFileKey, indexed);
         const text = record ? footerFor(record.key) : null;
         return text ? <span className="ib-qfoot-st">{text}</span> : null;
       },

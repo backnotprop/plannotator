@@ -38,6 +38,7 @@ import {
   type InboxAnswerRefusal,
   type ParsedInboxQuestion,
 } from "@plannotator/core/inbox-questions";
+import { inboxFileQuestionTwin } from "@plannotator/core/inbox-file-question-twin";
 import { withoutInboxSkillsBlock } from "@plannotator/core/skill-reference-block";
 import { inboxRowPreview, inboxRowPreviewWords } from "@plannotator/core/inbox-folding";
 import {
@@ -4226,7 +4227,7 @@ export class InboxStore {
     const actions = parseInboxActionBlocks(body);
     // The questions inside attached Markdown files (issue #2828): after the body's, each with a key no
     // question of this message has (inboxFileQuestionKey), numbered within its file.
-    const fileQuestions = this.fileQuestionsOf(input.attachments ?? [], input.attachment_questions ?? [], [...parsed.map((q) => q.key), ...actions.map((a) => a.key)]);
+    const fileQuestions = this.fileQuestionsOf(input.attachments ?? [], input.attachment_questions ?? [], parsed, actions.map((a) => a.key));
     // Checked before anything is written: one id that names no open question
     // of this thread refuses the whole send.
     const superseding = this.planSupersede(threadId, id, supersedes, [...parsed, ...fileQuestions.map((f) => ({ key: f.key, replaces: f.question.replaces }))], actions);
@@ -4393,20 +4394,24 @@ export class InboxStore {
    * attachment order and each file's block order, with the record key each
    * takes (`inboxFileQuestionKey`: the file's key unless the body, an action
    * item or an earlier file has it). Only files this send attaches; an
-   * action block in a file is not read (only questions).
+   * action block in a file is not read (only questions), nor one that
+   * repeats a body question (`inboxFileQuestionTwin`).
    */
   private fileQuestionsOf(
     attachments: readonly InboxAttachment[],
     asked: NonNullable<InboxSendInput["attachment_questions"]>,
-    bodyKeys: readonly string[],
+    body: readonly ParsedInboxQuestion[],
+    actionKeys: readonly string[],
   ): { key: string; question: ParsedInboxQuestion; attachment: InboxAttachment }[] {
     if (asked.length === 0) return [];
-    const taken = new Set(bodyKeys);
+    const taken = new Set([...body.map((q) => q.key), ...actionKeys]);
+    const bodyShapes = body.map((q) => ({ key: q.key, choices: q.parsed.choices }));
     const out: { key: string; question: ParsedInboxQuestion; attachment: InboxAttachment }[] = [];
     for (const attachment of attachments) {
       const entry = asked.find((a) => a.attachment_id === attachment.id);
       if (!entry) continue;
       for (const question of entry.questions) {
+        if (inboxFileQuestionTwin({ key: question.key, choices: question.parsed.choices }, bodyShapes)) continue;
         const key = inboxFileQuestionKey(question.key, taken);
         if (key !== null) out.push({ key, question, attachment });
       }
