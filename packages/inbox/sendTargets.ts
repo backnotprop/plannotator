@@ -125,7 +125,7 @@ export function tookOverReply(thread: InboxThread): InboxMessageWire | null {
   if (activeHandoff(thread)) return null;
   for (let index = thread.messages.length - 1; index >= 0; index--) {
     const m = thread.messages[index]!;
-    if (m.author.kind === 'agent' && !isInboxPermissionSession(m.author.session)) return null;
+    if (m.author.kind === 'agent' && !isInboxPermissionSession(m.author.session) && !m.scheduled_change) return null;
     if (!m.took_over || !m.to) continue;
     // That session's latest since (the server's owner too): a stale tab's reply to another session does not take it.
     const owner = m.to.session;
@@ -153,7 +153,8 @@ export function wordsMessage(thread: InboxThread): InboxMessageWire {
     return after.at(-1) ?? handoff;
   }
   // A permission prompt's question (launch, `perm:…`) takes only its own answer: the words go to the agent itself.
-  return thread.messages.filter((m) => m.author.kind === 'agent' && !isInboxPermissionSession(m.author.session)).at(-1) ?? thread.messages[0]!;
+  // An agent's routine change line is a note, not its words: the person's words go past it.
+  return thread.messages.filter((m) => m.author.kind === 'agent' && !isInboxPermissionSession(m.author.session) && !m.scheduled_change).at(-1) ?? thread.messages[0]!;
 }
 
 /** The reply a message's questions ride: its session's, or its own when it has none. */

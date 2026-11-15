@@ -2,7 +2,7 @@ import { perfInteraction, perfKeystroke } from '../perfMarks';
 import { useThreadArmed } from '../threadArmed';
 import { postDecisions, threadHasQuestionCards } from '../decisionExport';
 import { ThreadPullsButton } from '../threadPulls/ThreadPulls';
-import { machineOf, selfMachineId } from '../inboxUrl';
+import { machineOf } from '../inboxUrl';
 import { startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { capturePlace, holdPlace, openerOf, opensFile, parsePlaceLayout, placeInView, placeLayoutKey, placeSelector, placeShown, restorePlace, type ThreadPlace } from '../threadPlace';
 import { AnnotationType, type Annotation } from '@plannotator/ui/types';
@@ -10,10 +10,11 @@ import type { InboxNoteBlock } from '@plannotator/core/inbox-context-notes';
 import { noteReviews } from '../contextNotes/model';
 import { INBOX_PERMISSION_FULL, isInboxPermissionSession } from '@plannotator/core/inbox-permission';
 import { inboxLaunchedSession } from '@plannotator/core/inbox-run-line';
-import { LaunchChoiceMeta } from './LaunchChoiceMeta';
 import { ThreadTagLine } from './ThreadTagLine';
 import { INBOX_UPLOAD_MAX_BYTES, inboxActionInDraft, inboxActionPersonMark, inboxLaunchStops, inboxPersonAnsweredSince, isInboxNote, isInboxT3WaitReason, type InboxAnnotationRecord, type InboxAttachmentState, type InboxDraftFile, type InboxInlineImage, type InboxMessageWire, type InboxQuestion, type InboxReplyDraft, type InboxThread, type InboxUpload } from '@plannotator/core/inbox-types';
 import { isQuestionAnswerEmpty, type QuestionAnswer } from '@plannotator/core/question-block';
+import { StartedBy } from './StartedBy';
+import { earlierRunsLabel, RunDivider, runFolds, ScheduledFoot } from '../scheduled/thread';
 import { useRefRepo } from '../links';
 import { InboxApiError, InboxHeldError, inboxApi, type OutboxView, type TagMode, type ThreadModel } from '../api';
 import { awayLine, outboxLine } from '../machines';
@@ -612,7 +613,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const [foldState, setFoldState] = useState<FoldState | null>(null);
   let fold = foldState;
   if (!fold || fold.threadId !== thread.thread_id) {
-    const plan = planFolds(thread.messages, fresh, boundary);
+    const plan = runFolds(planFolds(thread.messages, fresh, boundary), thread.messages);
     fold = { threadId: thread.thread_id, folded: plan.folded, hidden: plan.hidden, shown: plan.hidden.map(() => 0), stepped: NO_IDS };
     setFoldState(fold);
   }
@@ -623,7 +624,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const reviewPlanKey = `${thread.thread_id}:${inReviews ? 'reviews' : 'inbox'}`;
   if (reviewPlan.current?.key !== reviewPlanKey) {
     const wasReviews = reviewPlan.current?.key === `${thread.thread_id}:reviews`;
-    const folds = wasReviews ? planFolds(thread.messages, fresh, boundary) : fold;
+    const folds = wasReviews ? runFolds(planFolds(thread.messages, fresh, boundary), thread.messages) : fold;
     const plan = inReviews && reviewView ? reviewOpenPlan({ messages: thread.messages, firstReviewId: boundary === null ? null : reviewView.firstReviewId, latestReviewId: reviewView.latestReviewId, fresh, folds }) : null;
     reviewPlan.current = { key: reviewPlanKey, left: new Set(plan?.left ?? []) };
     if (plan || wasReviews) {
@@ -787,7 +788,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           <button type="button" className="ib-mfold-b ib-mfold-step" data-fold-head="" data-fold-step="" onClick={() => stepRun(run, false)} aria-label={`Show ${plural(n, 'earlier message')}`}>
             <span>
               <Icon name="arrowUp" size={14} />
-              {`Show ${formatCount(n)} earlier`}
+              {earlierRunsLabel(rest, thread.messages) ?? `Show ${formatCount(n)} earlier`}
               {n < total && <span className="ib-mfold-when"> · {formatCount(total)} hidden</span>}
             </span>
           </button>
@@ -4986,22 +4987,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         )}
         {cardChip ? <div className="ib-tmeta" data-thread-card-row="">{cardChip}</div> : null}
         {notice}
-        {launched && (
-          <div className="ib-tmeta" data-started-by="" data-launched={launched.id}>
-            <span>
-              You started {hostName(launched.agent)} in <bdi>{thread.project.name}</bdi>
-              {/* Started from another linked machine's window (remote launch): which one. */}
-              {launched.from && launched.from.machine !== selfMachineId() && <> from {launched.from.name}</>}
-            </span>
-            {launched.full_permissions && (
-              <>
-                <span className="ib-tdot" aria-hidden="true" />
-                <span data-launch-full="">Full permissions</span>
-              </>
-            )}
-            <LaunchChoiceMeta launch={launched} />
-          </div>
-        )}
+        {launched && <StartedBy launched={launched} root={thread.messages[0]} project={thread.project.name} />}
         {confirmDelete && launched && (
           <div className="ib-cp-note ib-warn ib-run-confirm" role="alertdialog" aria-label={`Delete the ${hostName(launched.agent)} session`} data-launch-confirm="">
             <Icon name="warn" size={16} />
@@ -5227,6 +5213,13 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
             before.push(<TidyNote key={message.id} agent={message.to ? toName(message, message.to) : 'the agent'} time={time} fullWhen={fullWhen} />);
             return before;
           }
+          if (message.scheduled_run) {
+            const tail = message === last && shownRun && !runInCard && (
+              <RunLine run={shownRun} canOpen={!!openTerminal} canReaddress={waitingCanMove && anotherCanTake} machine={machine?.id ?? null} machineName={machine?.name ?? null} onChanged={() => onRunChanged?.()} onChangeUrl={changeCloneUrl} />
+            );
+            before.push(<RunDivider key={message.id} message={message} messages={thread.messages} run={runLine} tail={tail} />);
+            return before;
+          }
           const open = one || !fold.folded.has(message.id);
           if (!open) {
             const holdings = holdingsOf(message, {
@@ -5400,6 +5393,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                     openComment: commentsList?.at ?? null,
                     revealedComment,
                     side: !!onSide,
+                    farMachine: machine?.name ?? null,
                     fileRefs: !!onOpenNamedFile && fileRefsHere,
                     acts,
                   }}
@@ -5999,6 +5993,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                 />
               </div>
             )}
+            <ScheduledFoot messages={thread.messages} machine={machine} />
             {/* What Send and Edit draft are described by, now that the skip lives in the open questions list and a
                 phone draws no status: the draft's words (a phone) and what this Send does with the unanswered questions. */}
             {(waiting || draftKept) && phone && (
