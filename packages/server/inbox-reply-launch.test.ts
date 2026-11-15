@@ -15,7 +15,7 @@ import { inboxLaunchedWakeOf } from "@plannotator/core/inbox-run-line";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { FAKE, fakeLaunchHost } from "../../tests/helpers/fake-launch-host";
 import { createInboxLaunch } from "./inbox-launch";
-import { createInboxReplyLaunch } from "./inbox-reply-launch";
+import { createInboxReplyLaunch, replyLaunchRefusal } from "./inbox-reply-launch";
 
 const restore: (() => void)[] = [];
 afterEach(() => {
@@ -175,5 +175,26 @@ describe("a reply sent to a new session when the asking one ended", () => {
     expect(store.threadMessageIds(asked.thread_id)).toHaveLength(1);
     await Bun.sleep(20);
     expect(fake.calls).toEqual([]);
+  });
+});
+
+describe("the order a reply's new session is refused in", () => {
+  const codeOf = (input: Parameters<typeof replyLaunchRefusal>[0]) => replyLaunchRefusal(input)?.code ?? null;
+  const there = { from: null, window: true };
+  const bare = { from: null, window: false };
+
+  test("a linked machine's call no press in its window made: window_only, before the switch and the asker", () => {
+    expect(codeOf({ door: bare, switchOn: false, askerEnded: () => false })).toBe("window_only");
+  });
+
+  test("the switch off: launch_off, whether or not the asker ended, in the words for the machine that has it", () => {
+    expect(codeOf({ door: null, switchOn: false, askerEnded: () => false })).toBe("launch_off");
+    expect(replyLaunchRefusal({ door: null, switchOn: false, askerEnded: () => true })?.message).toBe("Starting agents from the Inbox is off. Turn it on in Settings → Agents.");
+    expect(replyLaunchRefusal({ door: there, switchOn: false, askerEnded: () => true })?.message).toBe("Starting agents is off on that computer. Turn it on in its Settings → Agents.");
+  });
+
+  test("the asker still there: session_still_live; ended, nothing refuses", () => {
+    expect(codeOf({ door: there, switchOn: true, askerEnded: () => false })).toBe("session_still_live");
+    expect(codeOf({ door: null, switchOn: true, askerEnded: () => true })).toBeNull();
   });
 });

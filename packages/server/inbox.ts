@@ -7075,8 +7075,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
             const door = fromDeviceDoor.get(req);
             const fromMachine = door?.platform === MACHINE_PLATFORM;
             // Another machine starts an agent here only for what the person pressed in a window there: never an agent's call.
-            if (startsSession && fromMachine && !door.window) return json(INBOX_MACHINE_WINDOW_ONLY_BODY, 403);
-            const launching = startsSession ? await replyLaunch.prepare(messageId, body, fromMachine ? machines.machineOfDevice(door.device_id) : null) : null;
+            const launching = startsSession ? await replyLaunch.prepare(messageId, body, fromMachine ? { from: machines.machineOfDevice(door.device_id), window: door.window } : null) : null;
             const asked = body.to === undefined || startsSession ? undefined : store.message(messageId);
             const to = launching ? launching.to : body.to === undefined || !asked ? undefined : live.replyTarget(asked.thread_id, body.to);
             // The sessions the person tagged with `@` (approval "inbox-tag-agents"): each one live

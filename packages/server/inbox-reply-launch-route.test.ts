@@ -33,8 +33,12 @@ function setEnv(name: string, value: string | undefined) {
 
 /** No real tailscale ever runs: the loopback transport is the test sandbox's, and serve holds nothing. */
 const tailscale: TailscaleRunner = (args) => ({ status: 0, stdout: args[1] === "status" ? "{}" : "", stderr: "" });
-/** The sessions clock past the start's grace: a session the Inbox never heard from has ended. */
-const later = () => Date.now() + 10 * 60_000;
+/**
+ * The Inbox's sessions clock. A fresh Inbox counts every session as there for its first minute, so the test moves it on
+ * ten minutes after the start: the asker, never heard from, has ended as a real one does.
+ */
+const clock = { ahead: 0 };
+const sessionsNow = () => Date.now() + clock.ahead;
 
 async function setup(enabled = true) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-reply-launch-route-")));
@@ -49,8 +53,10 @@ async function setup(enabled = true) {
   setEnv("HOME", join(root, "home"));
   setEnv("PLANNOTATOR_RELAY_URL", "http://127.0.0.1:9");
   const fake = fakeLaunchHost();
-  const server: InboxServer = await startInboxServer({ dataDir, binaryPath: null, phones: false, tailscale, readProjectRepo: async () => null, sessionsNow: later, launchHosts: () => [fake.host] });
+  clock.ahead = 0;
+  const server: InboxServer = await startInboxServer({ dataDir, binaryPath: null, phones: false, tailscale, readProjectRepo: async () => null, sessionsNow, launchHosts: () => [fake.host] });
   restore.push(() => server.stop());
+  clock.ahead = 10 * 60_000;
   const store = server.store;
   const project = store.ensureProject({ name: "ledger", root: folder });
   const asked = store.sendMessage({
