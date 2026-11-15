@@ -38,7 +38,7 @@ const realSleep = (ms: number, options?: { signal?: AbortSignal }) =>
   })
 
 /** The `$` the module runs on, in memory, with an Inbox whose poll answers offer `installed`. */
-function engineOver(sessionId: string, installed: string) {
+function engineOver(sessionId: string, installed: string, env: Record<string, string> = {}) {
   const files = new Map<string, string>([
     ['/bin/sh', ''],
     [inboxRegistryPathOf(DATA), REGISTRY],
@@ -66,7 +66,7 @@ function engineOver(sessionId: string, installed: string) {
     },
     $: {
       plugin: { root: ROOT },
-      env: { get: async (name: string) => (name === 'HOME' ? '/home/me' : name === 'PLANNOTATOR_DATA_DIR' ? DATA : undefined), set: async () => undefined },
+      env: { get: async (name: string) => (name in env ? env[name] : name === 'HOME' ? '/home/me' : name === 'PLANNOTATOR_DATA_DIR' ? DATA : undefined), set: async () => undefined },
       fs: {
         exists: async (path: string) => files.has(path),
         read: async (path: string) => {
@@ -135,6 +135,18 @@ describe('auto reload through the registered hooks', () => {
     expect(world.polls.length).toBeGreaterThan(0)
     expect(world.polls.every((poll) => poll[INBOX_AUTO_RELOAD_POLL_FIELD] === true)).toBe(true)
     expect(world.commands).toEqual([RELOAD])
+    await hook('session.end')($, {}, pass)
+  })
+
+  test('PLANNOTATOR_AUTO_RELOAD=0: the polls never ask for a reload and nothing runs, while the Inbox link stays', async () => {
+    const hook = await freshHooks('auto-reload-off')
+    const world = engineOver('sess-off', '0.28.51', { PLANNOTATOR_AUTO_RELOAD: '0' })
+    const { $ } = world
+    await hook('session.start')($, { isInteractive: true }, async () => ({ cwd: '/home/me/src/app' }))
+    await world.tick(5)
+    expect(world.polls.length).toBeGreaterThan(0)
+    expect(world.polls.some((poll) => INBOX_AUTO_RELOAD_POLL_FIELD in poll)).toBe(false)
+    expect(world.commands).toEqual([])
     await hook('session.end')($, {}, pass)
   })
 

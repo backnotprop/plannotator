@@ -100,6 +100,7 @@ import {
   T3_THREAD_SERVER,
   type SessionKind,
   resolveAgentToolEnabled,
+  resolveAutoReloadEnabled,
   resolveClaudeModEnabled,
   resolveInboxReminderCustom,
   resolveInboxReminderEnabled,
@@ -313,6 +314,8 @@ interface Allowed {
   planReview: boolean
   /** Connect to the Plannotator Inbox (the inbox tool switch, on by default). */
   inboxTool: boolean
+  /** Reload Plannotator by itself after an update (`autoReload`, on by default). Off: the manual notice. */
+  autoReload: boolean
   /** With the Inbox tool: the one-line reminder at the start of each conversation (`inboxReminder`, on by default). */
   inboxReminder: boolean
   /** The person's own reminder text (config.json `prompts.inbox`), or null: the built-in line. */
@@ -640,6 +643,7 @@ async function currentMod($: Engine, options: { healed?: boolean } = {}): Promis
       ...(inboxTools ? { inboxTools } : {}),
       ...(settings.t3Thread ? { inboxAs: inboxT3Agent(settings.t3Thread), inboxOwner: () => t3ThreadOwnHere($) } : {}),
       ...(settings.wake ? {} : { inboxWake: false }),
+      ...(settings.autoReload ? {} : { autoReload: false }),
       launchReminder: () => launchReminderFor($, String(sessionId)),
       ...(options.healed ? { healed: true } : {}),
     })
@@ -842,6 +846,7 @@ async function resolveAllowed($: Engine, e: { isInteractive?: unknown }): Promis
     agentTool: features.reviews && resolveAgentToolEnabled(await $.env.get('PLANNOTATOR_AGENT_TOOL'), configText),
     planReview: features.planReview && resolvePlanReviewEnabled(await $.env.get('PLANNOTATOR_PLAN_REVIEW'), configText),
     inboxTool: features.inboxTool && resolveInboxToolEnabled(await $.env.get('PLANNOTATOR_INBOX_TOOL'), configText),
+    autoReload: resolveAutoReloadEnabled(await $.env.get('PLANNOTATOR_AUTO_RELOAD'), configText),
     inboxReminder: features.wake && features.inboxTool && resolveInboxReminderEnabled(await $.env.get('PLANNOTATOR_INBOX_TOOL'), configText),
     inboxReminderCustom: resolveInboxReminderCustom(configText),
     inboxReminderRules: resolveInboxReminderRules(configText),

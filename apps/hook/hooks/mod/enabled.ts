@@ -115,6 +115,32 @@ export function resolvePlanReviewEnabled(envValue: string | undefined, configTex
 }
 
 /**
+ * Whether the mod runs `/reload-plugins plannotator` by itself after an
+ * update (auto-reload.ts). Off with `PLANNOTATOR_AUTO_RELOAD=0` or
+ * `{ "autoReload": false }`: the Inbox tool stays, and the session keeps the
+ * Inbox's manual `/reload-plugins` notice. Mirrors `resolveAutoReload(config, env)`
+ * in packages/shared/config.ts. Read once, at the first session.start.
+ */
+export function resolveAutoReloadEnabled(envValue: string | undefined, configText: string | null | undefined): boolean {
+  const fromEnv = parseClaudeModEnv(envValue)
+  if (fromEnv !== undefined) return fromEnv
+  if (!configText) return true
+  let value: unknown
+  try {
+    value = (JSON.parse(configText) as Record<string, unknown> | null)?.autoReload
+  } catch {
+    return true
+  }
+  if (typeof value === 'boolean') return value
+  if (typeof value === 'string') {
+    const v = value.trim().toLowerCase()
+    if (v === 'true' || v === '1') return true
+    if (v === 'false' || v === '0') return false
+  }
+  return true
+}
+
+/**
  * Whether the mod registers the `plannotator_inbox` tool and runs the reply
  * wake when nothing is set. Mirrors the claude-code
  * entry of `INBOX_TOOL_DEFAULTS` in packages/shared/config.ts.
