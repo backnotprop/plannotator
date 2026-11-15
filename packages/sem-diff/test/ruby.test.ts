@@ -63,3 +63,10 @@ test('a bare name that is a local variable is not a call', async () => {
   const t = await types(a, b);
   assert.ok(!t.includes('inlinedFunction') && !t.includes('extractedFunction'), t.join());
 });
+
+test("'e' and \"e\" are the same string; not when a double quote would read the text differently", async () => {
+  const one = async (a: string, b: string) => types(`def f\n  x(${a})\nend\n`, `def f\n  x(${b})\nend\n`);
+  assert.deepEqual(await one("'e'", '"e"'), ['reformatted']);
+  assert.deepEqual(await one("'a#b'", '"a#b"'), ['edited']);
+  assert.deepEqual(await one("'a\\\\n'", '"a\\\\n"'), ['edited']);
+});

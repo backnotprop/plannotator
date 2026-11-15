@@ -85,7 +85,7 @@ function leaves(n: Node, cfg: LanguageConfig) {
           continue;
         }
         // 'a' and "a" are the same string where both quote styles mean the same (TS, Python).
-        seq.push(SAME_QUOTES.has(cfg.id) && (x.text === "'" || x.text === '"') && x.parent?.type === 'string' ? '\u0004quote' : x.text);
+        seq.push((SAME_QUOTES.has(cfg.id) || (cfg.id === 'ruby' && rubyPlainString(x.parent))) && (x.text === "'" || x.text === '"') && x.parent?.type === 'string' ? '\u0004quote' : x.text);
       } else seq.push(x.type === ';' ? ';' : `\u0001${x.type}`); // zero-width: an inserted semicolon equals a written one
       if (cfg.identifierTypes.has(x.type)) identifiers.push(x);
       // `return` (or `yield`, `break`, `continue`) and a line break ends the statement in
@@ -135,6 +135,7 @@ function rubyLayoutOnly(x: Node): boolean {
   if ((x.type === '(' || x.type === ')') && p?.type === 'argument_list') return !p.parent?.childForFieldName('block');
   return false;
 }
+const rubyPlainString = (s: Node | null) => !!s && s.type === 'string' && s.namedChildren.every((c) => c?.type === 'string_content') && !/[\\#]/.test(s.text.slice(1, -1));
 const RUBY_SAME_NODE: Record<string, string> = { block: 'do_block', block_body: 'body_statement' };
 
 /**
