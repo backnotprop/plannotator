@@ -170,6 +170,25 @@ describe("what is news in the list", () => {
 });
 
 describe("a run is a launch of its own in the one thread", () => {
+  test("an archived thread (bulk Archive, a swipe, a Combine that took it): the next run goes on in it, and its reply brings it back", async () => {
+    const w = world();
+    const { record } = await w.make();
+    w.at("2026-11-16T14:00:10.000Z");
+    await w.scheduled.check();
+    const thread = w.store.scheduledThread(record.id)!.thread_id!;
+    await w.settle(w.dividers(thread)[0]!, "Three new issues, labelled.");
+    w.store.resolveThread(thread, true, "person");
+    w.at("2026-11-17T14:00:10.000Z");
+    await w.scheduled.check();
+    expect(w.store.scheduledThread(record.id)!.thread_id).toBe(thread);
+    const [, second] = w.dividers(thread);
+    expect(second!.scheduled_run).toMatchObject({ run: 2 });
+    const session = await w.settle(second!, "Two more, labelled.");
+    expect(w.scheduled.rowOf(w.store.scheduledThread(record.id)!)).toMatchObject({ runs: 2, last_run: { run: 2, outcome: "replied" } });
+    expect(w.store.agentAfterArchive(thread)).toBe(true);
+    expect(w.store.threadOwner(thread)?.session).toBe(session);
+  });
+
   test("replied, then didn't finish; the newest run takes the reply, an earlier one says it ended", async () => {
     const w = world();
     const { record } = await w.make();
