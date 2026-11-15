@@ -1991,6 +1991,147 @@ describe("a star or Priority on a linked machine's thread lives on that machine 
       }
     }
   });
+
+  const startBoard = (dataDir: string) => startInboxServer({ dataDir, binaryPath: null, phones: false, tailscale: scriptedTailscale().run, board: true });
+  /** A window's merged Board: every card, each a linked machine's with its `machine`. */
+  const board = async (port: number) => (await (await fetch(`${at(port)}/api/inbox/cards?machines=1`)).json()) as Json;
+  const cardOn = async (port: number, id: string) => ((await board(port)).cards as Json[]).find((card) => card.id === id) ?? null;
+
+  test("one Board on both: an agent's card on B is on A's, A's on B's; moved, tagged and edited from A on B; B's own move reaches A live; B away, it waits and lands", async () => {
+    const dataA = scratch("plannotator-board-linked-a-");
+    const dataB = scratch("plannotator-board-linked-b-");
+    const a = await startBoard(dataA);
+    let b = await startBoard(dataB);
+    let client: Client | null = null;
+    const stream = new AbortController();
+    try {
+      const offered = (await (await fetch(`${at(b.port)}/api/inbox/machines/offer`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).json()) as Json;
+      const linked = await fetch(`${at(a.port)}/api/inbox/machines/link`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ link: offered.link, address: at(b.port), back: at(a.port) }) });
+      expect(linked.status).toBe(201);
+      const bId = (JSON.parse(readFileSync(join(dataA, "inbox", "machines.json"), "utf8")) as Json).links[0].id as string;
+      const view = async () => (((await (await fetch(`${at(a.port)}/api/inbox/machines`)).json()) as Json).machines as Json[]).find((m) => m.id === bId)!;
+      await waitFor("B's list on A", async () => typeof (await view()).list_cursor === "number");
+      expect((await view()).marks).toContain("cards");
+      const aId = (await list(a.port)).self as string;
+
+      // A card an agent on B makes, through B's own card tool (its words unchanged): B's store holds it.
+      client = new Client({ name: "inbox-machines-board", version: "1.0.0" });
+      await client.connect(new StreamableHTTPClientTransport(new URL(`${at(b.port)}/mcp`)));
+      const project = scratch("plannotator-board-linked-project-");
+      // Its project, the way it always gets one: a message.
+      await client.callTool({ name: "send_message", arguments: { project_path: project, agent_session: "ses_b", body: "Starting the refund webhook" } });
+      const made = (await client.callTool({ name: "card", arguments: { op: "create", title: "Refund webhook", column: "in_progress", project_path: project, agent_session: "ses_b", agent_host: "claude-code" } })) as { structuredContent: { card: { id: string } } };
+      const far = made.structuredContent.card.id;
+      // A's own card, from A's window.
+      const ownProject = a.store.ensureProject({ name: "app", root: scratch("plannotator-board-linked-own-") });
+      const mine = ((await (await post(a.port, "/api/inbox/cards", { project: ownProject.id, title: "Release notes", column: "todo", idempotency_key: "own-1" })).json()) as Json).card.id as string;
+      expect(a.store.card(far)).toBeNull();
+      expect(b.store.card(mine)).toBeNull();
+
+      // Both on A's Board, B's named as B's, each once; and both on B's, A's named as A's.
+      await waitFor("B's card on A's Board", async () => (await cardOn(a.port, far))?.machine === bId, 15_000);
+      const onA = (await board(a.port)).cards as Json[];
+      expect(onA.map((card) => card.id).sort()).toEqual([far, mine].sort());
+      expect(onA.find((card) => card.id === mine)!.machine).toBeUndefined();
+      expect(onA.find((card) => card.id === far)!.column).toBe("in_progress");
+      await waitFor("A's card on B's Board", async () => (await cardOn(b.port, mine))?.machine === aId, 15_000);
+      expect(((await board(b.port)).cards as Json[]).map((card) => card.id).sort()).toEqual([far, mine].sort());
+
+      // A's window opens B's card through the forward: B's history.
+      const opened = (await (await fetch(`${at(a.port)}/api/inbox/m/${bId}/cards/${far}`)).json()) as Json;
+      expect(opened.card.id).toBe(far);
+      expect((opened.history as Json[]).length).toBeGreaterThan(0);
+
+      // Moved, edited and tagged from A: each lands on B, and A's Board reads it back.
+      expect((await forward(a.port, bId, `cards/${far}`, { op: "move", column: "in_review" })).status).toBe(200);
+      expect(b.store.card(far)!.column).toBe("in_review");
+      expect((await cardOn(a.port, far))!.column).toBe("in_review");
+      expect((await forward(a.port, bId, `cards/${far}`, { op: "edit", notes: "Retry the 409." })).status).toBe(200);
+      expect(b.store.card(far)!.notes).toBe("Retry the 409.");
+      const release = a.store.createInitiative({ name: "Release", by: { kind: "person" } });
+      expect((await forward(a.port, bId, `cards/${far}`, { op: "initiative", name: "Release" })).status).toBe(200);
+      const bRelease = b.store.initiatives().find((tag) => tag.name === "Release" && tag.deleted_at === null)!;
+      expect(b.store.card(far)!.initiative).toBe(bRelease.id);
+      expect(a.store.initiatives().map((tag) => tag.id)).toEqual([release.id]);
+      // On A's Board the card is in A's Release: the one tag of that name, so the tag filter holds both machines' cards.
+      expect((await cardOn(a.port, far))!.initiative).toBe(release.id);
+
+      // B's own window moves it: A's window hears `event: cards`, and its Board follows with no write of A's.
+      const frames = await fetch(`${at(a.port)}/api/inbox/events?machines=1`, { signal: stream.signal });
+      const reader = frames.body!.getReader();
+      expect((await post(b.port, `/api/inbox/cards/${far}`, { op: "move", column: "done" })).status).toBe(200);
+      let heard = "";
+      const deadline = Date.now() + 15_000;
+      while (!heard.includes("event: cards") && Date.now() < deadline) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        heard += new TextDecoder().decode(value);
+      }
+      expect(heard).toContain("event: cards");
+      expect((await cardOn(a.port, far))!.column).toBe("done");
+      stream.abort();
+
+      // B away: a move waits (202, nothing on A) and lands on B when it is back.
+      await client.close();
+      client = null;
+      b.stop();
+      await waitFor("B offline on A", async () => (await view()).state === "offline", 30_000);
+      const held = await forward(a.port, bId, `cards/${far}`, { op: "move", column: "todo" });
+      expect(held.status).toBe(202);
+      expect(a.store.card(far)).toBeNull();
+      b = await startBoard(dataB);
+      await waitFor("the held move on B", () => b.store.card(far)?.column === "todo", 45_000);
+      await waitFor("the move on A's Board", async () => (await cardOn(a.port, far))?.column === "todo", 15_000);
+    } finally {
+      stream.abort();
+      await client?.close().catch(() => {});
+      a.stop();
+      b.stop();
+    }
+  }, 150_000);
+
+  test("an older machine (its list names no `cards` mark): its Board is never asked and none of its cards are listed; one that names it is", async () => {
+    const card = { id: "crd_01K0000000000000000000000C", project_id: "prj_01K0000000000000000000000C", title: "Far work", column: "todo", moved_at: "2026-11-12T09:00:00.000Z", heard_seq: 1, threads: [], prs: [], refs: [] };
+    for (const marks of [["star", "priority", "tags"], ["star", "priority", "tags", "cards"]]) {
+      const id = "ibx_01K0000000000000000000000C";
+      let asked = 0;
+      const door = Bun.serve({
+        hostname: "127.0.0.1",
+        port: 0,
+        idleTimeout: 0,
+        fetch(req) {
+          const route = new URL(req.url).pathname.replace("/api/inbox/device/", "");
+          if (route === "health") return Response.json({ ok: true, inbox_id: id, machine_links: 1, version: "0.28.62" });
+          if (route === "events") return new Response(new ReadableStream({ start: (c) => c.enqueue(new TextEncoder().encode(`event: hello\ndata: {"cursor":0}\n\n`)) }), { headers: { "Content-Type": "text/event-stream" } });
+          if (route === "threads") return Response.json({ cursor: 0, sections: [], projects: [], pins: [], marks, tags: [] });
+          if (route === "cards") {
+            asked += 1;
+            return Response.json({ cursor: 0, cards: [card], threads: {}, initiatives: [], seen_seq: 0 });
+          }
+          return Response.json({ code: "device_route_not_found", error: "Not a phone route." }, { status: 404 });
+        },
+      });
+      const dataDir = scratch("plannotator-board-linked-older-");
+      mkdirSync(join(dataDir, "inbox"), { recursive: true });
+      writeFileSync(join(dataDir, "inbox", "machines.json"), JSON.stringify({ v: 1, self: { id: "ibx_01K00000000000000000000009" }, links: [{ id, name: "Mini", token: "tok_0", transport: { kind: "tailnet", url: at(door.port as number) }, device_id: null, linked_at: "2026-10-30T00:00:00Z" }] }), { mode: 0o600 });
+      const inbox = await startBoard(dataDir);
+      try {
+        const view = async () => (((await (await fetch(`${at(inbox.port)}/api/inbox/machines`)).json()) as Json).machines as Json[]).find((m) => m.id === id);
+        await waitFor("that machine's list", async () => typeof (await view())?.list_cursor === "number");
+        const cards = ((await board(inbox.port)).cards as Json[]).map((c) => [c.id, c.machine]);
+        if (marks.includes("cards")) {
+          expect(cards).toEqual([[card.id, id]]);
+          expect(asked).toBe(1);
+        } else {
+          expect(cards).toEqual([]);
+          expect(asked).toBe(0);
+        }
+      } finally {
+        inbox.stop();
+        door.stop(true);
+      }
+    }
+  });
 });
 
 describe("an agent's face and given name on a linked machine live on that machine (approval inbox-linked-marks)", () => {

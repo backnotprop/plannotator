@@ -19,7 +19,7 @@ export interface InboxEventWindow {
   origin: string;
 }
 
-export const INBOX_EVENT_FRAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'ask', 'pins', 'priority', 'artifact-pins', 'tags', 'show', 'snoozes', 'thread-pulls', 'rows', 'sidebar', 'agent-faces', 'reactions', 'capabilities', 'tailscale', 'shapes', 'machine', 'machines', 'outbox', 'heartbeat'] as const;
+export const INBOX_EVENT_FRAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'ask', 'pins', 'priority', 'artifact-pins', 'tags', 'show', 'snoozes', 'thread-pulls', 'rows', 'sidebar', 'agent-faces', 'reactions', 'capabilities', 'tailscale', 'shapes', 'machine', 'machines', 'cards', 'outbox', 'heartbeat'] as const;
 export type InboxEventFrameName = (typeof INBOX_EVENT_FRAMES)[number];
 export interface InboxEventFrame {
   name: InboxEventFrameName;
@@ -39,6 +39,7 @@ export interface InboxEventHandlers {
   onPriority?: () => void;
   onArtifactPins?: () => void;
   onTags?: () => void;
+  onCards?: () => void;
   onShow?: (threadId: string, windowId: string) => void;
   onSnoozes?: () => void;
   onThreadPulls?: (threadIds: string[]) => void;
@@ -109,6 +110,9 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
       return;
     case 'tags':
       handlers.onTags?.();
+      return;
+    case 'cards':
+      handlers.onCards?.();
       return;
     case 'show':
       try {
