@@ -359,7 +359,7 @@ describe("the optional T3 Code connection", () => {
 });
 
 describe("scheduled threads' start at login", () => {
-  test("a plain uninstall removes the macOS login item (unloading it) and the Linux unit (disabling it)", async () => {
+  test("a plain uninstall removes the macOS login item (the file only) and the Linux unit (disabling it)", async () => {
     for (const platform of ["darwin", "linux"] as const) {
       const fixture = createFixture({ platform });
       const path = platform === "darwin" ? join(fixture.homeDir, "Library", "LaunchAgents", "ai.plannotator.inbox.plist") : join(fixture.homeDir, ".config", "systemd", "user", "plannotator-inbox.service");
@@ -370,8 +370,8 @@ describe("scheduled threads' start at login", () => {
       const result = await runPlannotatorUninstall({ purge: false, dryRun: false }, fixture.environment);
       expect(result.removed).toContain(`Removed the Inbox's start at login (${path})`);
       expect(existsSync(path)).toBe(false);
-      const unload = fixture.commandCalls.find((call) => call.command === (platform === "darwin" ? "launchctl" : "systemctl"));
-      expect(unload?.args.at(-1)).toMatch(platform === "darwin" ? /\/ai\.plannotator\.inbox$/ : /^plannotator-inbox\.service$/);
+      expect(fixture.commandCalls.some((call) => call.command === "launchctl")).toBe(false);
+      if (platform === "linux") expect(fixture.commandCalls.find((call) => call.command === "systemctl")?.args.at(-1)).toBe("plannotator-inbox.service");
     }
   });
 

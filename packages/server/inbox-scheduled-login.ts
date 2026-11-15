@@ -18,7 +18,7 @@ export type LoginRunner = (argv: string[]) => Promise<{ code: number }>;
 
 /** The real runner: `launchctl` or `systemctl`, its exit code only, bounded so a hung one never holds Settings. */
 export const execLoginCommand: LoginRunner = ([file, ...args]) =>
-  new Promise((resolve) => execFile(file!, args, { timeout: 10_000 }, (error) => resolve({ code: error ? (typeof error.code === "number" ? error.code : 1) : 0 })));
+  new Promise((resolve) => execFile(file!, args, { timeout: 10_000, windowsHide: true }, (error) => resolve({ code: error ? (typeof error.code === "number" ? error.code : 1) : 0 })));
 
 export type InboxLoginItem = {
   /** Where it would be written, or null where there is none (Windows). */
@@ -79,7 +79,7 @@ const writeAtomic = (path: string, text: string) => {
   renameSync(temp, path);
 };
 
-export function inboxLoginItem(o: { platform: NodeJS.Platform; home: string; argv: readonly string[]; dataDir: string; run: LoginRunner; uid?: number }): InboxLoginItem {
+export function inboxLoginItem(o: { platform: NodeJS.Platform; home: string; argv: readonly string[]; dataDir: string; run: LoginRunner }): InboxLoginItem {
   if (o.platform === "darwin") {
     const dir = join(o.home, "Library", "LaunchAgents");
     const path = join(dir, `${INBOX_LOGIN_LABEL}.plist`);
@@ -90,11 +90,8 @@ export function inboxLoginItem(o: { platform: NodeJS.Platform; home: string; arg
         writeAtomic(path, inboxLoginPlist({ argv: o.argv, dataDir: o.dataDir, log: join(o.dataDir, "inbox", "inbox.log") }));
         return "added";
       },
+      // Only the file: launchd reads it at login, and an unload would end this Inbox if the login started it.
       async remove() {
-        if (!existsSync(path)) return;
-        // Loaded since the last login: unloaded too (it is not running now, or this Inbox is what it started).
-        const uid = o.uid ?? process.getuid?.();
-        if (uid != null) await o.run(["launchctl", "bootout", `gui/${uid}/${INBOX_LOGIN_LABEL}`]).catch(() => undefined);
         rmSync(path, { force: true });
       },
     };
@@ -114,6 +111,7 @@ export function inboxLoginItem(o: { platform: NodeJS.Platform; home: string; arg
         rmSync(path, { force: true });
         return "unavailable";
       },
+      // Disabled, not stopped: this Inbox may be the unit the login started.
       async remove() {
         if (!existsSync(path)) return;
         await o.run(["systemctl", "--user", "disable", INBOX_LOGIN_UNIT]).catch(() => undefined);

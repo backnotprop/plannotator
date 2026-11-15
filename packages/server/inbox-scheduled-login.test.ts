@@ -23,9 +23,9 @@ function world(answers: Record<string, number> = {}) {
   return { home, ran, run, dataDir: join(home, "Plannotator Data") };
 }
 
-test("macOS: a launchd item that starts the Inbox with no window; removing it unloads it", async () => {
+test("macOS: a launchd item that starts the Inbox with no window; removing it deletes the file and never unloads this Inbox", async () => {
   const w = world();
-  const item = inboxLoginItem({ platform: "darwin", home: w.home, argv: ["/opt/plannotator & co/plannotator"], dataDir: w.dataDir, run: w.run, uid: 501 });
+  const item = inboxLoginItem({ platform: "darwin", home: w.home, argv: ["/opt/plannotator & co/plannotator"], dataDir: w.dataDir, run: w.run });
   expect(await item.add()).toBe("added");
   expect(item.path).toBe(join(w.home, "Library", "LaunchAgents", "ai.plannotator.inbox.plist"));
   const plist = readFileSync(item.path!, "utf8");
@@ -35,7 +35,7 @@ test("macOS: a launchd item that starts the Inbox with no window; removing it un
   // Writing it starts nothing now: launchd reads it at the next login.
   expect(w.ran).toEqual([]);
   await item.remove();
-  expect(w.ran).toEqual(["launchctl bootout gui/501/ai.plannotator.inbox"]);
+  expect(w.ran).toEqual([]);
   expect(existsSync(item.path!)).toBe(false);
 });
 
