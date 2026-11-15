@@ -1,9 +1,10 @@
 /**
  * Settings → Agents' T3 Code group (the owner's "A · One row", 2026-11-15):
  * absent when T3 Code is not on this computer; after Codex when it is, with
- * one row, Your replies, in each state the design names (its command wakes a
- * thread; T3 closed now; nothing here can wake one, with the sign-in fix and
- * its Copy). Settings' Agents item gets no dot from it: the row says it.
+ * T3 Code's own mark and one row, Your replies, in each state the design
+ * names (its command wakes a thread; T3 closed now; nothing here can wake
+ * one, with the sign-in fix and its Copy). Settings' Agents item gets no dot
+ * from it: the row says it.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -87,6 +88,8 @@ test.skipIf(!hasDom)('no T3 Code group when T3 Code is not on this computer, or 
 test.skipIf(!hasDom)("its command here and T3 open: replies arrive as a new turn, Connected, no fix; the group follows Codex's", () => {
   const el = agents(model({ local: true, open: true, sign_in: 'none' }));
   expect([...el.querySelectorAll('[data-agent]')].map((g) => g.getAttribute('data-agent'))).toEqual(['claude-code', 'codex', 't3', 'pi']);
+  // T3 Code's own logo, not the neutral code glyph.
+  expect(t3Group(el)!.querySelector('.ib-aghead .ib-mk [data-mark="t3"]')).not.toBeNull();
   expect(read(t3Group(el)!)).toEqual({
     name: 'T3 Code',
     via: 'Claude and Codex threads',

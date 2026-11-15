@@ -15,9 +15,6 @@ import { CopyCommand } from './RestartNote';
 import { T3_SIGN_IN_COPY } from './T3WaitLine';
 import { Tip } from './Tip';
 
-/** The host whose mark the group draws. The icon set has no T3 Code logo yet, so HostMark draws its neutral code glyph. */
-export const T3_CODE_MARK_HOST = INBOX_T3_HOST;
-
 /** Whether a reply wakes a T3 thread from here: the local `t3` command, or a saved sign-in that can send. */
 export function t3RepliesWake(t3: InboxT3Status): boolean {
   return t3.local || t3.sign_in === 'ok';
@@ -29,7 +26,7 @@ export function T3AgentGroup({ t3 }: { t3: InboxT3Status }) {
   return (
     <div className="ib-agent" data-agent={INBOX_T3_HOST} data-t3-state={wakes ? (closed ? 'closed' : 'wakes') : 'sign_in'}>
       <div className="ib-aghead">
-        <HostMark host={T3_CODE_MARK_HOST} big />
+        <HostMark host={INBOX_T3_HOST} big />
         <b>{INBOX_T3_NAME}</b>
         <span className="ib-agvia">Claude and Codex threads</span>
         <span className={`ib-agstate${wakes ? '' : ' ib-agoff'}`}>

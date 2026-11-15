@@ -5,7 +5,7 @@
  */
 
 import type React from 'react';
-import { ClaudeIcon, CodexIcon, CursorIcon, GrokBotIcon, HermesAgentIcon, MuseIcon, OpenCodeIcon, PiIcon } from '../icons/AgentIcons';
+import { ClaudeIcon, CodexIcon, CursorIcon, GrokBotIcon, HermesAgentIcon, MuseIcon, OpenCodeIcon, PiIcon, T3Icon } from '../icons/AgentIcons';
 import type { InboxAuthor } from '@plannotator/core/inbox-types';
 
 const PATHS = {
@@ -300,6 +300,8 @@ function ownMark(host: string | null | undefined): React.ReactNode | null {
       return <CodexIcon />;
     case 'cursor':
       return <CursorIcon />;
+    case 't3':
+      return <T3Icon />;
     case 'cloud':
       return (
         <svg className="ib-glyph" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
