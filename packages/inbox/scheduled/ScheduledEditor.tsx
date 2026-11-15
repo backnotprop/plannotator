@@ -293,7 +293,7 @@ export function ScheduledEditor(props: EditorProps) {
           </div>
         </section>
         <section className="ib-sgroup st-group st-kv" aria-label="What it works with">
-          <span className="st-k">Folder</span>
+          <span className="st-k">Repo or folder</span>
           <FolderPick block={block} folder={draft.folder} shown={record && JSON.stringify(record.folder) === JSON.stringify(draft.folder) ? record.folder_shown : null} agentName={agentName} phone={props.phone} onChange={(folder) => void save({ folder })} />
           <span className="st-k">Files</span>
           <FilesRow files={draft.attachments} onChange={(attachments) => void save({ attachments })} />

@@ -1,6 +1,7 @@
 /**
  * The list: one table (Name, Run, Runs, Last run, Next run, Created, ⋯), newest last run first, and the turned-off ones
- * in their own small "Off" table under it. Beside an open editor it narrows to Scheduled thread, Runs and Last run.
+ * in their own small "Off" table under it. Beside an open editor it narrows to Scheduled thread (its Run button right
+ * after the name), Runs and Last run.
  */
 import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react';
 import { Menu } from '@base-ui/react/menu';
@@ -125,13 +126,14 @@ function ShortRow({ row, acts, now, selected }: { row: InboxScheduledRow; acts: 
   return (
     <div className="st-srow st-scols" role="row" onClick={() => acts.open(row)} data-scheduled-row={row.id} data-state={row.state} data-selected={selected ? '' : undefined}>
       <span role="cell" className="st-sname">
-        <button type="button" className="st-open" aria-current={selected ? 'true' : undefined} onClick={stopClick(() => acts.open(row))}>
-          {row.name}
-        </button>
+        {/* Run or Stop right after the name, on its first line (the owner's note on the split view). */}
+        <span className="st-nline">
+          <button type="button" className="st-open" aria-current={selected ? 'true' : undefined} onClick={stopClick(() => acts.open(row))}>
+            {row.name}
+          </button>
+          <RunButton row={row} acts={acts} short />
+        </span>
         <span className="st-when">{shortScheduleWords(row)}</span>
-      </span>
-      <span role="cell">
-        <RunButton row={row} acts={acts} short />
       </span>
       <span role="cell" className="st-num st-runs">
         {formatCount(row.runs)}
@@ -161,7 +163,6 @@ export function ScheduledTable({ rows, acts, short, selected }: { rows: readonly
       <div className="st-short" role="table" aria-label="Scheduled threads">
         <div className="st-shead st-scols" role="row">
           <span role="columnheader">Scheduled thread</span>
-          <span role="columnheader" aria-label="Run" />
           <span role="columnheader" className="st-num st-runs">Runs</span>
           <span role="columnheader" className="st-num" aria-sort="descending">Last run</span>
           <span />

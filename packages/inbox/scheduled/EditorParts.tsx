@@ -1,5 +1,5 @@
 /**
- * The editor's prompt foot and its folder and files: "Runs as" (New message's agent, model and effort), Folder (New
+ * The editor's prompt foot and its folder and files: "Runs as" (New message's agent, model and effort), Repo or folder (New
  * message's folder menu) and Files (paths on this computer that each run's divider carries).
  */
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';

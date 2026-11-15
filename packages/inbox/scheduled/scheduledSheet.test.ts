@@ -40,8 +40,8 @@ test('at phone width the list gives the name the room: no Runs column, one track
     });
   });
   expect(phone.get('.st-scols > .st-runs')?.get('display')).toBe('none');
-  // Name, Run, Last run, the menu: the short row's five cells less Runs.
-  expect(phone.get('.st-scols')?.get('grid-template-columns')?.replace(/minmax\([^)]*\)/g, 'm').trim().split(/\s+/)).toHaveLength(4);
+  // Name (with its Run button), Last run, the menu: the short row's four cells less Runs.
+  expect(phone.get('.st-scols')?.get('grid-template-columns')?.replace(/minmax\([^)]*\)/g, 'm').trim().split(/\s+/)).toHaveLength(3);
   expect(phone.get('.st-sname .st-open')?.get('white-space')).toBe('normal');
   // The wide table at its narrowest (a 768 window) wraps a long name too.
   let narrowWide: string | undefined;
