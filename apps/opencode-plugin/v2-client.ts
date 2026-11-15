@@ -252,8 +252,14 @@ export function toBridgeMessages(context: unknown): unknown[] {
       // V2 assistant messages record their writer (`Session.Message.Assistant`
       // carries `agent: Agent.ID`); /plannotator-last routes feedback to it.
       ...(typeof message.agent === "string" && message.agent ? { agent: message.agent } : {}),
+      // `pickRecentAssistantMessages` reads where a turn ends from these.
+      ...(message.error !== undefined ? { error: message.error } : {}),
+      ...(typeof message.finish === "string" ? { finish: message.finish } : {}),
     },
-    parts: Array.isArray(message.content) ? message.content : [],
+    // User and synthetic rows carry `text`, not `content`.
+    parts: Array.isArray(message.content) ? message.content
+      : typeof message.text === "string" ? [{ type: "text", text: message.text }]
+      : [],
   }));
 }
 
