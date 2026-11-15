@@ -3740,7 +3740,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const { sendNowState, sendNow, sendNowError, tagSendNow, sendTagNow } = useSendNow(last.id, onChanged, loadPendingLive, loadTagConnections);
   const { takeBack, takeBackOf } = useThreadTakeBack({
     threadId: thread.thread_id,
-    only: thread.messages.length === 1,
+    messages: thread.messages,
     allowed: !sending && (!machine || (machine.marks ?? []).includes('take-back')),
     lastBlocked: (message) => message === last && (delivered?.state === 'delivered' || delivered?.state === 'undelivered' || handedItem(recipientConnection, last.id)),
     nameOf: (message) => (message.to ? toName(message, message.to) : recipientName(askedBy(message))),
