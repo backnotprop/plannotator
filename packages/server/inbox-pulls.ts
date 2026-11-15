@@ -42,6 +42,7 @@
 import { createHash } from "node:crypto";
 import type { PatchBlobIds } from "@plannotator/core/diff-files";
 import { gitlabCompareEndpoint, gitlabForkProjects, textsFitPatch, type GitlabForkProjects } from "./inbox-gitlab-stack";
+import { pullDiffBases } from "./inbox-pull-diff-scope";
 import { forgeRefKey } from "@plannotator/core/forge-ref-card";
 import {
   INBOX_PULLS_MERGED_DAYS,
@@ -742,8 +743,8 @@ export interface InboxPulls {
   othersSettled(): Promise<void>;
   /** The profile pictures' URLs of the authors of the PRs the last list showed on this host, by login. */
   avatarUrls(host: string): Record<string, string>;
-  /** One layer's patch, or the stack's from its base up to that layer. Throws InboxPullsError. */
-  diff(key: string, scope: InboxPullDiffScope): Promise<InboxPullDiffAnswer>;
+  /** One layer's patch, or a compare up to that layer (`InboxPullDiffScope`; `from` for a range or a commit). Throws InboxPullsError. */
+  diff(key: string, scope: InboxPullDiffScope, from?: string): Promise<InboxPullDiffAnswer>;
   /** What the forge has beside the diff: reviewers, checks, labels, comments. Only for a PR the last list named. */
   details(key: string): Promise<InboxPullDetailsAnswer>;
   /** The PR's own text as the details read answered it, for the PR media route. Throws InboxPullsError. */
@@ -786,7 +787,7 @@ export interface InboxPulls {
    * the last list did not name.
    */
   /** `ids` are the blobs the patch on screen names: a text that does not hash to them is not that patch's file, and no arrows open. */
-  fileContents(key: string, scope: InboxPullDiffScope, path: string, roots: readonly string[], ids: PullFileCheck | null, oldPath?: string): Promise<InboxFileContents>;
+  fileContents(key: string, scope: InboxPullDiffScope, path: string, roots: readonly string[], ids: PullFileCheck | null, oldPath?: string, from?: string): Promise<InboxFileContents>;
 }
 
 export type PullFileCheck = PatchBlobIds | { patch: string };
@@ -1134,6 +1135,11 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
   let knownWide = new Map<string, InboxPull>();
   let lastWideRepos = new Set<string>();
   const findKnown = (key: string): InboxPull | undefined => known.get(key) ?? knownWide.get(key);
+  /** The stack a listed PR is a layer of, from the list that names it (Reviews' first, as `findKnown`). */
+  const stackOf = (pull: InboxPull) => {
+    const from = known.has(pull.key) ? known : knownWide;
+    return inboxPullStacks([...from.values()].filter((p) => p.host === pull.host && p.repo === pull.repo)).find((s) => s.layers.some((l) => l.key === pull.key));
+  };
   /** PRs merged from this Inbox, by key: when (`markMerged`). */
   const mergedHere = new Map<string, number>();
   const asMerged = (pull: InboxPull, at: number): InboxPull => ({ ...pull, state: "merged", merged_at: pull.merged_at ?? new Date(at).toISOString() });
@@ -1781,22 +1787,21 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
         readWorkingTree: readRepoWorkingTreeFile,
       });
     },
-    async diff(key, scope) {
+    async diff(key, scope, from) {
       const pull = findKnown(key);
       if (!pull || !listedRepo(pull)) throw new InboxPullsError("pull_unknown", "That pull request is not in the list. Refresh the list and try again.");
       // Whole stack: from the branch the lowest open layer is based on (merged layers are not read again), and from
-      // the stack's own base when that branch is gone (a merged layer's branch, deleted).
-      let bases = [pull.base];
-      if (scope === "stack") {
-        const stack = inboxPullStacks([...known.values()].filter((p) => p.host === pull.host && p.repo === pull.repo)).find((s) => s.layers.some((l) => l.key === key));
-        bases = [...new Set([stack?.open_base ?? pull.base, stack?.base ?? pull.base])];
-      }
+      // the stack's own base when that branch is gone (a merged layer's branch, deleted). A range likewise.
+      const found = pullDiffBases(stackOf(pull), pull, scope, from);
+      if ("error" in found) throw new InboxPullsError("pull_diff_failed", found.error);
+      const bases = found.bases;
+      const compare = scope !== "layer";
       // A layer from a fork: its branch lives in the fork, never under the same name upstream.
       const fork = !!pull.head_repo && pull.head_repo.toLowerCase() !== pull.repo.toLowerCase();
       let head = pull.head;
       // The compare's head as its URL takes it: the branch percent-encoded, a fork's owner before it.
       let headRef = compareRef(pull.head);
-      if (scope === "stack" && fork) {
+      if (compare && fork) {
         const owner = splitPath(pull.head_repo!)?.owner ?? "";
         if (pull.platform === "github" ? !FORK_OWNER.test(owner) : !owner) {
           throw new InboxPullsError("pull_diff_fork", "This layer comes from a fork, which the forge can't compare with the stack here. Review it layer by layer, or open it on the forge.");
@@ -1810,7 +1815,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
       // Only an answer naming the head last read here: a list gone back to an older head reads the forge, and so does a
       // head the forge did not pin down.
       if (hit && now() - hit.at < INBOX_PULL_DIFF_FRESH_MS && readHeads.get(key) === hit.answer.head_sha) return hit.answer;
-      if (scope === "stack" && (!bases.every(compareBranch) || !compareBranch(pull.head))) throw new InboxPullsError("pull_diff_failed", "This stack's branch names can't be compared here. Open it on the forge.");
+      if (compare && (!bases.every(compareBranch) || !compareBranch(pull.head))) throw new InboxPullsError("pull_diff_failed", "This stack's branch names can't be compared here. Open it on the forge.");
       const state = hosts.get(pull.host);
       const cli: RefCli = state?.cli ?? (pull.platform === "github" ? "gh" : "glab");
       if (now() < (holdUntil.get(pull.host) ?? 0)) throw new InboxPullsError("pull_diff_failed", `${pull.host} asked to slow down. Try again in a minute.`);
@@ -1840,7 +1845,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
         }
       };
       const before = await pullNow();
-      if (scope === "stack" && fork && pull.platform === "gitlab") {
+      if (compare && fork && pull.platform === "gitlab") {
         forkProjects = before?.fork ?? null;
         if (!forkProjects) throw new InboxPullsError("pull_diff_failed", `${cli} could not read where this layer's fork is. Try again, or open it on the forge.`);
       }
@@ -1860,7 +1865,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
         throw new InboxPullsError("pull_diff_failed", error === "signed_out" ? `${cli} is not signed in to ${pull.host}.` : `${cli} could not read this diff. Try again, or open it on the forge.`);
       }
       let patch = result.stdout;
-      if (pull.platform === "gitlab" && scope === "stack") {
+      if (pull.platform === "gitlab" && compare) {
         try {
           const diffsOf = obj(JSON.parse(result.stdout)).diffs;
           patch = reconstructGitlabPatch((Array.isArray(diffsOf) ? diffsOf : []) as GitLabDiffEntry[]);
@@ -1934,7 +1939,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
       const headAfter = headBefore ? await readHeadNow(pull, cli) : null;
       return { patch, partial, head_sha: headBefore && headBefore === headAfter ? headBefore : null, ...(heldBack ? { held_back: heldBack } : {}), ...(perFile ? { per_file: true as const } : {}) };
     },
-    async fileContents(key, scope, path, roots, ids, oldPath) {
+    async fileContents(key, scope, path, roots, ids, oldPath, from) {
       const none: InboxFileContents = { oldContent: null, newContent: null };
       if (!ids) return none;
       // A rename's old path comes from the patch, which a guide's author wrote: it must not walk out of the forge's route.
@@ -1967,13 +1972,9 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
       };
       /** The commit the diff runs from: where the head left its base branch, not the branch's tip. */
       const mergeBase = (): Promise<string | null> => {
-        const bases =
-          scope === "layer"
-            ? [pull.base]
-            : (() => {
-                const stack = inboxPullStacks([...known.values()].filter((p) => p.host === pull.host && p.repo === pull.repo)).find((s) => s.layers.some((l) => l.key === key));
-                return [...new Set([stack?.open_base ?? pull.base, stack?.base ?? pull.base])];
-              })();
+        const found = pullDiffBases(stackOf(pull), pull, scope, from);
+        if ("error" in found) return Promise.resolve(null);
+        const bases = found.bases;
         // With the bases: a retarget keeps the head and moves where the diff runs from.
         const baseKey = `${key}\u0000${scope}\u0000${head}\u0000${bases.join("\u0000")}`;
         const hit = mergeBases.get(baseKey);

@@ -201,6 +201,8 @@ export const DOOR_WRITES: Readonly<Record<string, "append" | "set" | "file" | "f
   "POST pulls/close": "forge",
   "POST pulls/reopen": "forge",
   "POST pulls/merge": "forge",
+  // The PR page's look at a linked machine's PR (approval "inbox-pr-dashboard"): kept there; the newer look wins.
+  "POST pulls/looked": "set",
   // A file a linked machine's agent message names, attached there when the person comments on it (approval "inbox-file-refs-open-viewer").
   "POST open-in/file/attach": "now",
   // A thread's PRs live on the thread's machine: an add of one it holds, or a remove of one it does not, changes nothing.
