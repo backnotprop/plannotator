@@ -10,7 +10,7 @@
  * host refuses being lost or tried again in a loop.
  */
 import { describe, expect, test } from 'bun:test'
-import { inboxRegistryPathOf, inboxSessionDirOf, INBOX_TICK_MS } from './inbox'
+import { inboxRegistryPathOf, inboxSessionDirOf, INBOX_OWNER_WAIT_MS, INBOX_TICK_MS } from './inbox'
 import { INBOX_BRIDGE_EVENT_PATH, INBOX_BRIDGE_POLL_PATH } from './inbox-contract'
 
 type Hook = ($: unknown, e: unknown, next: (e: unknown) => unknown) => unknown
@@ -40,12 +40,31 @@ const T3 = { CLAUDE_CODE_ENTRYPOINT: 't3-code', T3CODE_THREAD_ID: 'a1b2c3d4-0000
 const SDK_START = { isInteractive: false, surface: null, cwd: '/w' }
 const REPLY = { type: 'reply', id: 'msg_reply', thread_id: 'msg_1', reply_to: 'msg_1', subject: 'Ship it?', body: 'Yes, after the freeze.', url: `http://localhost:${PORT}/#thread=msg_1` }
 
+/** The tools T3's own MCP server gives a thread's Claude, a few seconds after it starts. */
+const T3_OWN_TOOLS = ['mcp__t3-code__get_thread', 'mcp__t3-code__send_message']
+
+/** What two processes on one machine share: the data dir and the Inbox. */
+function machine() {
+  return {
+    files: new Map<string, string>([
+      ['/bin/sh', ''],
+      [inboxRegistryPathOf(DATA), REGISTRY],
+    ]),
+    /** Ids the Inbox heard `delivered` for. */
+    delivered: [] as string[],
+    /** The person's reply waits in the Inbox: every poll hands it out until it is delivered. */
+    replyWaiting: true,
+  }
+}
+
 /** The engine beneath the mod: env, files, a clock the test moves, the timers it arms, and an Inbox on PORT. */
-function engine(extraEnv: Record<string, string> = {}) {
-  const files = new Map<string, string>([
-    ['/bin/sh', ''],
-    [inboxRegistryPathOf(DATA), REGISTRY],
-  ])
+function engine(
+  extraEnv: Record<string, string> = {},
+  options: { shared?: ReturnType<typeof machine>; sessionId?: string; listed?: string[]; toolList?: 'missing' | 'hangs' } = {},
+) {
+  const shared = options.shared ?? machine()
+  const files = shared.files
+  const sessionId = options.sessionId ?? SESSION
   const env = new Map<string, string>(Object.entries({ HOME: '/home/me', PLANNOTATOR_DATA_DIR: DATA, ...extraEnv }))
   const store = new Map<string, unknown>()
   const timers: { ms: number; fn: () => void; live: boolean }[] = []
@@ -54,11 +73,20 @@ function engine(extraEnv: Record<string, string> = {}) {
     env,
     now: 1_000_000,
     tools: [] as string[],
+    /** What `$.tool.list()` answers with (the session's tools, MCP ones included), and how often it was asked. */
+    listed: [...(options.listed ?? [])],
+    toolLists: 0,
+    /** The MCP servers the context names (`$.session.usage`'s `mcpTools`), tools behind ToolSearch included. */
+    servers: [] as string[],
     envSet: [] as string[],
     fetches: [] as { path: string; body: any }[],
     submits: [] as string[],
     /** Ids the Inbox heard `delivered` for. */
-    delivered: [] as string[],
+    delivered: shared.delivered,
+    /** The process exits: none of its timers fires again. */
+    kill() {
+      for (const timer of timers) timer.live = false
+    },
     /** What `$.prompt.submit` resolves with; a `{ drop }` is the engine's refusal. */
     answer: undefined as unknown,
     /** Fire the Inbox tick `n` times, a second apart. */
@@ -88,15 +116,21 @@ function engine(extraEnv: Record<string, string> = {}) {
         stat: async (path: string) => (files.has(path) ? { kind: 'file', size: files.get(path)!.length } : null),
       },
       session: {
-        id: async () => SESSION,
+        id: async () => sessionId,
         cwd: async () => '/w',
         root: async () => '/w',
         messages: async () => [],
         version: async () => ({ version: '2.1.322', base: '2.1.322' }),
+        usage: async () => ({ context: { window: 200_000, breakdown: { mcpTools: world.servers.map((serverName) => ({ name: `mcp__${serverName}__x`, serverName, tokens: 1, isLoaded: false })) } } }),
       },
       clock: {
         now: async () => world.now,
-        sleep: async () => undefined,
+        // A few real milliseconds: a bound raced against a `$` call (`within`) loses to one that answers.
+        sleep: (_ms: number, opts?: { signal?: AbortSignal }) =>
+          new Promise<void>((resolve, reject) => {
+            const timer = setTimeout(resolve, 5)
+            opts?.signal?.addEventListener('abort', () => (clearTimeout(timer), reject(new Error('aborted'))), { once: true })
+          }),
         every: (ms: number, fn: () => void) => {
           const timer = { ms, fn, live: true }
           timers.push(timer)
@@ -111,7 +145,7 @@ function engine(extraEnv: Record<string, string> = {}) {
           const body = init?.body ? JSON.parse(init.body) : undefined
           world.fetches.push({ path, body })
           const answer = (value: unknown) => ({ status: 200, ok: true, headers: {}, text: JSON.stringify(value) })
-          if (path === INBOX_BRIDGE_POLL_PATH) return answer({ commands: world.delivered.includes(REPLY.id) ? [] : [REPLY] })
+          if (path === INBOX_BRIDGE_POLL_PATH) return answer({ commands: shared.replyWaiting && !world.delivered.includes(REPLY.id) ? [REPLY] : [] })
           if (path === '/api/inbox/health') return answer({ serverSession: 'srv' })
           if (path === '/mcp' && body?.method === 'tools/call') return answer({ jsonrpc: '2.0', id: body.id, result: { content: [{ type: 'text', text: 'Sent.' }] } })
           if (path === INBOX_BRIDGE_EVENT_PATH) {
@@ -122,6 +156,15 @@ function engine(extraEnv: Record<string, string> = {}) {
         },
       },
       tool: {
+        ...(options.toolList === 'missing'
+          ? {}
+          : {
+              list: async () => {
+                world.toolLists += 1
+                if (options.toolList === 'hangs') return new Promise(() => undefined)
+                return world.listed.map((name) => ({ name, description: '', mcp: name.startsWith('mcp__') }))
+              },
+            }),
         register: async (spec: { name: string }) => {
           world.tools.push(spec.name)
           return { tool: `mcp__plugin_plannotator__${spec.name}` }
@@ -145,9 +188,9 @@ function engine(extraEnv: Record<string, string> = {}) {
 
 const pass = (e: unknown) => e
 
-async function started(name: string, env: Record<string, string>) {
+async function started(name: string, env: Record<string, string>, options: Parameters<typeof engine>[1] = {}) {
   const hook = await freshHooks(name)
-  const world = engine(env)
+  const world = engine(env, options)
   await hook('session.start')(world.$, SDK_START, async () => ({ cwd: '/w' }))
   await settle()
   return { hook, world }
@@ -180,6 +223,8 @@ describe("the VS Code extension's chat panel (CLAUDE_CODE_ENTRYPOINT=claude-vsco
 
     await world.ticks(10)
     expect(world.submits).toHaveLength(1)
+    // Its own session from the start: the tool list is never asked.
+    expect(world.toolLists).toBe(0)
   })
 
   // The refusals the docs list for `$.prompt.submit` in an Agent SDK session, each resolved as `{ drop }`.
@@ -259,6 +304,9 @@ const HEADLESS: [string, Record<string, string>][] = [
   ['an agent job of a Plannotator CLI the panel\'s mod started (its session tag names that session)', { ...PANEL, PLANNOTATOR_SESSION_TAG: 'claude-code:the-panel-session' }],
   ['claude -p from Claude\'s Bash in a T3 thread', { CLAUDE_CODE_ENTRYPOINT: 't3-code', T3CODE_THREAD_ID: 'a1b2c3d4-0000-4000-8000-000000000001', CLAUDECODE: '1', CLAUDE_CODE_CHILD_SESSION: '1' }],
   ['an agent job of a CLI a T3 thread\'s mod started', { CLAUDE_CODE_ENTRYPOINT: 't3-code', T3CODE_THREAD_ID: 'a1b2c3d4-0000-4000-8000-000000000001', PLANNOTATOR_SESSION_TAG: 't3:another-thread' }],
+  // T3 before 0.1.7 sets no entrypoint and leaves CLAUDECODE from the shell it was started in.
+  ['a thread of T3 before 0.1.7 (no entrypoint)', { T3CODE_THREAD_ID: 'a1b2c3d4-0000-4000-8000-000000000001' }],
+  ['a thread of T3 before 0.1.7 started from a Claude Code shell', { T3CODE_THREAD_ID: 'a1b2c3d4-0000-4000-8000-000000000001', CLAUDECODE: '1', PLANNOTATOR_SESSION_TAG: 'claude-code:0f8fad5b-d9cb-469f-a165-000000000000' }],
 ]
 
 describe('every other session that is not interactive (headless): the Inbox tool, no wake, the classic reviews', () => {
@@ -270,6 +318,7 @@ describe('every other session that is not interactive (headless): the Inbox tool
       expect(world.env.get('PLANNOTATOR_SESSION_TAG')).toBe(`claude-code:${SESSION}`)
       expect(polls(world)).toEqual([])
       expect(world.submits).toEqual([])
+      expect(world.toolLists).toBe(0)
     })
   }
 
@@ -335,7 +384,7 @@ const T3_THREADS = [
 describe('a T3 Code thread (CLAUDE_CODE_ENTRYPOINT=t3-code beside T3CODE_THREAD_ID, not interactive)', () => {
   for (const thread of T3_THREADS) {
     test(`${thread}: both tools, the session tagged as the thread, the Inbox polled as host t3 and the thread, a reply in once as a turn`, async () => {
-      const { world } = await started(`t3-${thread.replace(/[^a-z0-9]+/gi, '-')}`, { CLAUDE_CODE_ENTRYPOINT: 't3-code', T3CODE_THREAD_ID: thread })
+      const { world } = await started(`t3-${thread.replace(/[^a-z0-9]+/gi, '-')}`, { CLAUDE_CODE_ENTRYPOINT: 't3-code', T3CODE_THREAD_ID: thread }, { listed: T3_OWN_TOOLS })
       expect(world.tools).toEqual(['plannotator_inbox', 'plannotator'])
       expect(world.env.get('PLANNOTATOR_SESSION_TAG')).toBe(`t3:${thread}`)
 
@@ -353,20 +402,20 @@ describe('a T3 Code thread (CLAUDE_CODE_ENTRYPOINT=t3-code beside T3CODE_THREAD_
   }
 
   test('a send files as host t3, the thread id and T3 Code, and says the wake will bring the reply', async () => {
-    const { hook, world } = await started('t3-send', T3)
+    const { hook, world } = await started('t3-send', T3, { listed: T3_OWN_TOOLS })
     const calls = await inboxCall(hook, world)
     expect(calls.args).toMatchObject({ agent_session: T3.T3CODE_THREAD_ID, agent_host: 't3', agent_name: 'T3 Code' })
     expect(calls.meta?.['ai.plannotator/inbox-wakes']).toBe(true)
   })
 
   test("ExitPlanMode passes on to T3's own Plan mode; Claude's Bash `plannotator review` is the mod's", async () => {
-    const { hook, world } = await started('t3-plan', T3)
+    const { hook, world } = await started('t3-plan', T3, { listed: T3_OWN_TOOLS })
     const below = (e: unknown) => ({ passed: e })
     expect(await hook('tool.call')(world.$, { tool: 'ExitPlanMode', tool_use_id: 'toolu_1', plan: '# Plan\n' }, below)).toMatchObject({ passed: { tool: 'ExitPlanMode' } })
   })
 
   test("the person's Enter in T3 (origin sdk) pulls the Inbox lease to this process, as in the terminal", async () => {
-    const { hook, world } = await started('t3-person', T3)
+    const { hook, world } = await started('t3-person', T3, { listed: T3_OWN_TOOLS })
     const lease = `${inboxSessionDirOf(DATA, T3.T3CODE_THREAD_ID)}/watcher.json`
     world.files.set(lease, JSON.stringify({ owner: 'other-process', at: world.now, touchedAt: world.now + 500 }))
     world.now += 1_000
@@ -376,7 +425,225 @@ describe('a T3 Code thread (CLAUDE_CODE_ENTRYPOINT=t3-code beside T3CODE_THREAD_
   })
 
   test("a module reload in the thread's own session (its tag already names the thread) runs the mod again", async () => {
-    const { world } = await started('t3-reload', { ...T3, PLANNOTATOR_SESSION_TAG: `t3:${T3.T3CODE_THREAD_ID}` })
+    const { world } = await started('t3-reload', { ...T3, PLANNOTATOR_SESSION_TAG: `t3:${T3.T3CODE_THREAD_ID}` }, { listed: T3_OWN_TOOLS })
     expect(world.tools).toEqual(['plannotator_inbox', 'plannotator'])
+  })
+})
+
+describe("which process is a T3 thread: the one with T3's t3-code tools", () => {
+  const THREAD = T3.T3CODE_THREAD_ID
+  const LEASE = `${inboxSessionDirOf(DATA, THREAD)}/watcher.json`
+  const lease = (shared: { files: Map<string, string> }) => JSON.parse(shared.files.get(LEASE) ?? 'null') as { owner: string | null; at: number } | null
+  const OTHER_SESSION = '0f8fad5b-d9cb-469f-a165-000000000000'
+  /** Processes on one machine, one clock: each tick moves every one a second, in turn. */
+  async function together(n: number, ...worlds: ReturnType<typeof engine>[]) {
+    for (let i = 0; i < n; i++) {
+      const now = Math.max(...worlds.map((w) => w.now))
+      for (const world of worlds) {
+        world.now = now
+        await world.ticks(1)
+      }
+    }
+  }
+
+  test("T3 started from another Claude Code session's shell (its tag and project inherited): the thread, filed as host t3 and the thread", async () => {
+    const { hook, world } = await started(
+      't3-inherited-tag',
+      { ...T3, PLANNOTATOR_SESSION_TAG: `claude-code:${OTHER_SESSION}`, PLANNOTATOR_SESSION_PROJECT: `claude-code:${OTHER_SESSION}:/elsewhere` },
+      { listed: T3_OWN_TOOLS },
+    )
+    expect(world.tools).toEqual(['plannotator_inbox', 'plannotator'])
+    expect(world.env.get('PLANNOTATOR_SESSION_TAG')).toBe(`t3:${THREAD}`)
+    const calls = await inboxCall(hook, world)
+    expect(calls.args).toMatchObject({ agent_session: THREAD, agent_host: 't3', agent_name: 'T3 Code' })
+    expect(calls.meta?.['ai.plannotator/inbox-wakes']).toBe(true)
+    await world.ticks(6)
+    expect(polls(world).length).toBeGreaterThan(0)
+    expect(polls(world).every((f) => f.body.session === THREAD && f.body.host === 't3')).toBe(true)
+    expect(world.submits.filter((text) => text.includes(REPLY.body))).toHaveLength(1)
+  })
+
+  test("T3's own short run with the thread's environment (no t3-code tools) never takes the lease; the thread gets the reply once", async () => {
+    const shared = machine()
+    shared.replyWaiting = false
+    const thread = await started('t3-owner-thread', T3, { shared, sessionId: 'sess-thread', listed: T3_OWN_TOOLS })
+    await together(3, thread.world)
+    const holder = lease(shared)?.owner
+    expect(holder).toBeTruthy()
+    // Made after the thread, and the SDK host's prompt (a title request) is origin sdk: neither moves the lease.
+    const helper = await started('t3-owner-helper', T3, { shared, sessionId: 'sess-helper' })
+    helper.world.now = thread.world.now
+    await helper.hook('prompt.submit')(helper.world.$, { text: 'Write a title.', origin: { kind: 'sdk' } }, async () => ({ text: 'Write a title.' }))
+    await settle()
+    shared.replyWaiting = true
+    await together(12, thread.world, helper.world)
+    expect(lease(shared)?.owner).toBe(holder)
+    expect(polls(helper.world)).toEqual([])
+    expect(helper.world.submits).toEqual([])
+    expect(thread.world.submits.filter((text) => text.includes(REPLY.body))).toHaveLength(1)
+    expect(shared.delivered).toEqual([REPLY.id])
+    // Its send files as the thread, marked as the thread's (it cannot tell itself apart), and moves nothing.
+    const calls = await inboxCall(helper.hook, helper.world)
+    expect(calls.args).toMatchObject({ agent_session: THREAD, agent_host: 't3' })
+    expect(calls.meta?.['ai.plannotator/inbox-wakes']).toBe(true)
+    expect(lease(shared)?.owner).toBe(holder)
+    await together(6, thread.world, helper.world)
+    expect(polls(helper.world)).toEqual([])
+  })
+
+  test('the tools never appear (a T3 that adds no t3-code server): no lease, no poll, past the wait and after it; asked again slowly', async () => {
+    const { hook, world } = await started('t3-owner-never', T3)
+    await world.ticks(4)
+    world.now += INBOX_OWNER_WAIT_MS
+    await world.ticks(4)
+    expect(world.files.has(LEASE)).toBe(false)
+    expect(polls(world)).toEqual([])
+    expect(world.submits).toEqual([])
+    const asked = world.toolLists
+    await world.ticks(60)
+    // Settled on no: asked every 30 s, not every 2 s.
+    expect(world.toolLists - asked).toBeGreaterThanOrEqual(1)
+    expect(world.toolLists - asked).toBeLessThanOrEqual(3)
+    const calls = await inboxCall(hook, world)
+    expect(calls.meta?.['ai.plannotator/inbox-wakes']).toBe(true)
+    await world.ticks(6)
+    expect(polls(world)).toEqual([])
+    expect(world.files.has(LEASE)).toBe(false)
+  })
+
+  test("the thread's first send before its tools show: the send waits for them, goes marked, and the reply goes in once", async () => {
+    const { hook, world } = await started('t3-send-first', T3)
+    // The tools show while the send waits (its third ask).
+    let asks = 0
+    const list = world.$.tool.list
+    world.$.tool.list = async () => {
+      if (++asks === 3) world.listed = [...T3_OWN_TOOLS]
+      return list()
+    }
+    const calls = await inboxCall(hook, world)
+    expect(calls.args).toMatchObject({ agent_session: THREAD, agent_host: 't3', agent_name: 'T3 Code' })
+    expect(calls.meta?.['ai.plannotator/inbox-wakes']).toBe(true)
+    expect(lease(world)?.owner).toBeTruthy()
+    await world.ticks(6)
+    expect(world.submits.filter((text) => text.includes(REPLY.body))).toHaveLength(1)
+    await world.ticks(10)
+    expect(world.submits.filter((text) => text.includes(REPLY.body))).toHaveLength(1)
+  })
+
+  test("the thread's first send while its tools never show within the wait: still marked, and the reply goes in once they do", async () => {
+    const { hook, world } = await started('t3-send-early', T3)
+    const calls = await inboxCall(hook, world)
+    expect(calls.meta?.['ai.plannotator/inbox-wakes']).toBe(true)
+    expect(polls(world)).toEqual([])
+    world.listed = [...T3_OWN_TOOLS]
+    await world.ticks(8)
+    expect(world.submits.filter((text) => text.includes(REPLY.body))).toHaveLength(1)
+  })
+
+  test('confirmed late, after the 3-minute wait settled on no: the next touch asks again at once, and so does the slow ask', async () => {
+    for (const how of ['touch', 'slow ask'] as const) {
+      const { hook, world } = await started(`t3-late-${how.replace(' ', '-')}`, T3)
+      await world.ticks(2)
+      world.now += INBOX_OWNER_WAIT_MS
+      await world.ticks(3)
+      expect(polls(world)).toEqual([])
+      world.listed = [...T3_OWN_TOOLS]
+      if (how === 'touch') {
+        await hook('prompt.submit')(world.$, { text: 'carry on', origin: { kind: 'sdk' } }, async () => ({ text: 'carry on' }))
+        await settle()
+        await world.ticks(6)
+      } else {
+        await world.ticks(36)
+      }
+      expect([how, world.submits.filter((text) => text.includes(REPLY.body)).length]).toEqual([how, 1])
+    }
+  })
+
+  test('tools behind ToolSearch (the list leaves them out): the context names the t3-code server, and that is the thread', async () => {
+    const { world } = await started('t3-deferred', T3)
+    world.servers = ['t3-code']
+    await world.ticks(6)
+    expect(polls(world).length).toBeGreaterThan(0)
+    expect(world.submits.filter((text) => text.includes(REPLY.body))).toHaveLength(1)
+  })
+
+  test('a Claude Code without $.tool.list: the thread runs as before the check (the lease at once, polled, delivered once)', async () => {
+    const { world } = await started('t3-no-tool-list', T3, { toolList: 'missing' })
+    expect(lease(world)?.owner).toBeTruthy()
+    await world.ticks(6)
+    expect(polls(world).length).toBeGreaterThan(0)
+    expect(world.submits.filter((text) => text.includes(REPLY.body))).toHaveLength(1)
+  })
+
+  test('a $.tool.list that never answers holds neither the tick nor a send', async () => {
+    const { hook, world } = await started('t3-tool-list-hangs', T3, { toolList: 'hangs' })
+    await world.ticks(6)
+    expect(world.toolLists).toBeGreaterThan(1)
+    const calls = await inboxCall(hook, world)
+    expect(calls.meta?.['ai.plannotator/inbox-wakes']).toBe(true)
+    expect(polls(world)).toEqual([])
+  })
+
+  test('the thread still starting (its tools a few seconds late): it polls once they appear, and delivers once', async () => {
+    const { world } = await started('t3-owner-late', T3)
+    await world.ticks(4)
+    expect(polls(world)).toEqual([])
+    world.listed = [...T3_OWN_TOOLS]
+    await world.ticks(8)
+    expect(polls(world).length).toBeGreaterThan(0)
+    expect(world.submits.filter((text) => text.includes(REPLY.body))).toHaveLength(1)
+  })
+
+  test('T3 restarts the thread under the same Claude session id: the new process takes the lease once the old one is gone and delivers the waiting reply once', async () => {
+    const shared = machine()
+    shared.replyWaiting = false
+    const before = await started('t3-restart-before', T3, { shared, sessionId: 'sess-thread', listed: T3_OWN_TOOLS })
+    await together(3, before.world)
+    const first = lease(shared)?.owner
+    expect(first).toBeTruthy()
+    // Gone without a session.end (T3 stopped it): its lease goes stale.
+    before.world.kill()
+    shared.replyWaiting = true
+    const after = await started('t3-restart-after', T3, { shared, sessionId: 'sess-thread' })
+    after.world.now = before.world.now
+    await after.world.ticks(3)
+    after.world.listed = [...T3_OWN_TOOLS]
+    // A live lease stands: nothing is delivered until it is stale.
+    await after.world.ticks(5)
+    expect(after.world.submits).toEqual([])
+    await after.world.ticks(25)
+    expect(lease(shared)?.owner).not.toBe(first)
+    expect(after.world.submits.filter((text) => text.includes(REPLY.body))).toHaveLength(1)
+    expect(before.world.submits).toEqual([])
+    expect(shared.delivered).toEqual([REPLY.id])
+    await after.world.ticks(10)
+    expect(after.world.submits.filter((text) => text.includes(REPLY.body))).toHaveLength(1)
+  })
+
+  test('the thread ends its session (session.end): the next process takes the lease at once', async () => {
+    const shared = machine()
+    shared.replyWaiting = false
+    const before = await started('t3-end-before', T3, { shared, sessionId: 'sess-thread', listed: T3_OWN_TOOLS })
+    await together(3, before.world)
+    await before.hook('session.end')(before.world.$, { sessionId: 'sess-thread', reason: 'other' }, pass)
+    await settle()
+    before.world.kill()
+    expect(lease(shared)?.owner).toBeNull()
+    shared.replyWaiting = true
+    const after = await started('t3-end-after', T3, { shared, sessionId: 'sess-thread', listed: T3_OWN_TOOLS })
+    after.world.now = before.world.now
+    await after.world.ticks(6)
+    expect(after.world.submits.filter((text) => text.includes(REPLY.body))).toHaveLength(1)
+  })
+
+  test("two live processes with the thread's tools: one polls, one delivers", async () => {
+    const shared = machine()
+    const one = await started('t3-two-one', T3, { shared, sessionId: 'sess-thread', listed: T3_OWN_TOOLS })
+    const two = await started('t3-two-two', T3, { shared, sessionId: 'sess-thread', listed: T3_OWN_TOOLS })
+    await together(15, one.world, two.world)
+    const all = [...one.world.submits, ...two.world.submits].filter((text) => text.includes(REPLY.body))
+    expect(all).toHaveLength(1)
+    expect(shared.delivered).toEqual([REPLY.id])
+    expect([polls(one.world).length > 0, polls(two.world).length > 0].filter(Boolean)).toHaveLength(1)
   })
 })

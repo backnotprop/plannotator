@@ -95,6 +95,11 @@ export interface Route {
    * `set=<message id>:<question key>` a question's picture choices the viewer steps through (optionSets.ts; absent: every file of the thread).
    */
   file?: { id: string; version: 'current' | 'sent'; focus: string | null; linked?: string | null; view?: 'full' | 'side' | null; set?: string | null } | null;
+  /**
+   * A file an agent's message names, beside the thread, read only until a comment attaches it (approval
+   * "inbox-file-refs-open-viewer"). `ref=` its path as written, `in=` the message, `line=` / `to=` its lines. Never with `file`.
+   */
+  ref?: { path: string; messageId: string; line?: number; lineEnd?: number } | null;
   /** The message whose guided review is open over the window (`#thread=…&guide=msg_…`). */
   guide?: string | null;
   /**
@@ -191,6 +196,7 @@ export function routeOf(fullHash: string): Route {
     agent: fromReviews ? null : params.get('agent'),
     tag: fromReviews ? null : params.get('tag'),
     thread,
+    ref: thread && !fileId && params.get('ref') && params.get('in') ? { path: params.get('ref')!, messageId: params.get('in')!, ...(Number(params.get('line')) > 0 ? { line: Number(params.get('line')) } : {}), ...(Number(params.get('to')) > 0 ? { lineEnd: Number(params.get('to')) } : {}) } : null,
     file: fileId ? { id: fileId, version: params.get('v') === 'sent' ? 'sent' : 'current', focus: params.get('at'), linked: params.get('linked'), view: parseFileView(params.get('view')), set: params.get('set') } : null,
     guide: thread ? params.get('guide') : null,
     guideAt: thread && params.get('guide') ? shapeReviewAtOf(params) : null,

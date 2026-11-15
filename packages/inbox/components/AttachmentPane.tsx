@@ -47,9 +47,10 @@ import {
   codeRangeOf,
   compareVideoTimes,
   inboxViewKind,
-  type InboxCodeRange,
+  relocateCodeRange,
 } from '../attachments';
 import { whenTime, formatBytes } from '../format';
+export { relocateCodeRange };
 import { useRefRepo } from '../links';
 import { inboxMarkdownImageBase } from '../images';
 import { useCommentPictures } from '../commentPictures';
@@ -334,24 +335,6 @@ let openPane: { unsaved: () => boolean } | null = null;
 /** Whether the file open now holds a comment not saved yet (saved words compared: an edit not changed is not unsaved). */
 export function openPaneUnsaved(): boolean {
   return openPane?.unsaved() ?? false;
-}
-
-/**
- * Where a kept line comment's lines are in the file now: where they were when they still read the same, else the
- * nearest place they do (the file was edited above them), else null (they changed: the words wait, on nothing).
- */
-export function relocateCodeRange(range: InboxCodeRange, text: string): { lineStart: number; lineEnd: number } | null {
-  const lines = text.split('\n');
-  const count = range.lineEnd - range.lineStart + 1;
-  const matchesAt = (start: number) => start >= 1 && start + count - 1 <= lines.length && codeRangeMatches(range, lines.slice(start - 1, start - 1 + count).join('\n'));
-  // Every start, nearest first: a file cut far shorter still finds lines that moved a long way up.
-  const reach = Math.max(range.lineStart, lines.length);
-  for (let distance = 0; distance <= reach; distance++) {
-    for (const start of distance === 0 ? [range.lineStart] : [range.lineStart - distance, range.lineStart + distance]) {
-      if (matchesAt(start)) return { lineStart: start, lineEnd: start + count - 1 };
-    }
-  }
-  return null;
 }
 
 /** The element that scrolls the open file (a document, code, or an image at its own size). */
@@ -2838,6 +2821,9 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
               <CodeFileView
                 key={`${attachment.id}:${view.version}:${view.attachment.current?.sha256 ?? ''}`}
                 filepath={attachment.name}
+                lineScroll="vertical"
+                commentCard="plain"
+                commentMarkers="bubble"
                 contents={view.text}
                 annotations={codeAnnotations}
                 selectedAnnotationId={selectedId}

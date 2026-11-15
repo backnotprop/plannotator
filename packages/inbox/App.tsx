@@ -241,7 +241,7 @@ import { type SheetLayout } from './prs/tableModel';
 import { inboxPullIsOpen, inboxPullStacks } from '@plannotator/core/inbox-types';
 import { repoLabels } from './pulls/labels';
 import { pullFilterOf, type PullFilter } from './pulls/model';
-import { reviewRowProject, reviewViewOf } from './pulls/reviewsModel';
+import { reviewRowProject, reviewsOnYou, reviewViewOf } from './pulls/reviewsModel';
 import { BoardOff } from './board/BoardOff';
 import { BoardIntro } from './board/BoardIntro';
 import { BroIntro } from './components/BroIntro';
@@ -5102,7 +5102,7 @@ function Inbox() {
   }, [settingsMissing, refreshSettings]);
 
   // A file beside the thread takes the list's and the sidebar's room (record 2.2).
-  const fileOpen = route.page === 'inbox' && !!route.thread && !!route.file;
+  const fileOpen = route.page === 'inbox' && !!route.thread && (!!route.file || !!route.ref);
   // A thread opened from a Board card (`#thread=…&card=crd_…`): it takes the list's place, led by
   // "‹ Board" and a chip naming the card; both go back to the opened card.
   const fromCard = route.page === 'inbox' && route.thread && route.card ? route.card : null;
@@ -6208,11 +6208,13 @@ function Inbox() {
             }}
             onClose={fromCard ? backToCard : () => close({ ...route, thread: null, file: null })}
             file={route.file ?? null}
+            namedFile={route.ref ?? null}
+            onOpenNamedFile={(ref) => (ref ? go({ ...routeRef.current, file: null, ref }) : close({ ...routeRef.current, ref: null }))}
             onOpenFile={(file, options) => {
               if (!file) return closeTo({ ...routeRef.current, file });
               // A call that names no view keeps the one in the address (the pane names it for a step, a version, a linked page).
               const keepView = file.view === undefined ? (routeRef.current.file?.view ?? null) : file.view;
-              const next = { ...routeRef.current, file: { ...file, view: keepView } };
+              const next = { ...routeRef.current, ref: null, file: { ...file, view: keepView } };
               /** Show `next` the way fullScreenOrigin.ts names (the history is the stack of frames). */
               const show = (request: { move?: FrameMove; replace?: boolean }) => {
                 const op = fileEntryOp({ hash: currentHash(), state: window.history.state }, hashOf(next), request);
@@ -7134,9 +7136,4 @@ export function InboxApp() {
       </ThemeProvider>
     </QueryClientProvider>
   );
-}
-
-/** The sidebar's Reviews count: the rows on the person in the last read. */
-function reviewsOnYou(answer: import('@plannotator/core/inbox-types').InboxReviewsAnswer): number {
-  return answer.rows.filter((row) => row.move === 'on_you').length;
 }

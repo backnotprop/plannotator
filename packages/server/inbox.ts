@@ -225,9 +225,10 @@ import { assertInboxUploadsPending, inboxBodyForAgent, inboxDiskFullError, inbox
 import { createInboxLiveSessions, takesOver, thereInThread } from "./inbox-sessions";
 import { inboxAgentsGroup, inboxFolderProject, inboxMergedAgents, inboxStartOfDay, type InboxAgentWait } from "./inbox-agents-list";
 import { createInboxCodexWake, type InboxCodexWake } from "./inbox-codex-wake";
+import { createT3Local, INBOX_T3_PROBE_MS, type T3Route } from "./inbox-t3-local";
 import { createInboxVoice } from "./inbox-voice";
 import { createInboxQwenWake, type InboxQwenWake } from "./inbox-qwen-wake";
-import { createInboxT3Wake, type InboxT3Wake, type T3Connect } from "./inbox-t3-wake";
+import { createInboxT3Wake, createT3ModOwner, type InboxT3Wake, type T3Connect } from "./inbox-t3-wake";
 import { CloudAgentError, createInboxCloudAgents, hasCloudWake } from "./inbox-cloud-agents";
 import { PERSONAL_AGENTS_BANNER_BASE } from "@plannotator/core/inbox-personal-agents";
 import { personalAgentConnectedHere } from "./inbox-personal-agents";
@@ -4171,7 +4172,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const t3Thread = bridgeHost(body) === INBOX_T3_HOST;
     const handedOut = () => {
       const t3Handed = t3Thread ? new Set(store.handover.handedTo(session)) : null;
-      return live.pendingOf(session, { tags }).filter((item) => !withdrawnTidy(item.message) && !t3Handed?.has(item.message.id));
+      // Nor anything the T3 wake works on now or holds a `t3 thread send` claim for (on disk: across restarts too).
+      return live.pendingOf(session, { tags }).filter((item) => !withdrawnTidy(item.message) && !t3Handed?.has(item.message.id) && !(t3Thread && t3Wake.holds(item.as, item.message)));
     };
     const commands = (items = handedOut()) => {
       const list = items.map((item) => replyCommand(item.message, sendNow, item.as));
@@ -4251,6 +4253,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       : null;
     const intoTurn = markedAt ? live.deliveredIntoTurn(session, markedAt) : undefined;
     const reply = store.recordDelivery(body.id, { host, session: acting, ...(intoTurn !== undefined ? { intoTurn } : {}) });
+    // The Claude Code mod in a T3 thread's Claude put it in.
+    if (host === INBOX_T3_HOST) noteT3Route({ route: "mod", agent: "claude", thread: reply.thread_id, reply: reply.id });
     return json({ ok: true, delivery: reply.delivery });
   };
 
@@ -4398,6 +4402,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   /** A Codex thread a launch of this Inbox started (not deleted): only its host takes the thread's items. */
   const launchedCodex = (session: string) =>
     store.launchedRoots().some((m) => m.launch?.agent === INBOX_CODEX_HOST && !m.launch.deleted_at && m.to?.host === INBOX_CODEX_HOST && m.to.session === session);
+  // T3 Code on this machine: both T3 wakes send through its `t3` command first, with no sign-in (inbox-t3-local.ts).
+  const t3Local = createT3Local({ environment: agentEnvironment });
+  // Which way each reply to a T3 thread went, one debug-log line each (`t3_route`); the log is made below.
+  const t3Routes: { note: ((route: T3Route) => void) | null } = { note: null };
+  const noteT3Route = (route: T3Route) => t3Routes.note?.(route);
   const codexWake = createInboxCodexWake({
     store,
     environment: agentEnvironment,
@@ -4409,6 +4418,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     launched: (session) => launchedCodex(session),
     // A steps-only Tidy wake with steps off is withdrawn, never handed (a switch turned off in config.json by hand).
     skip: (item) => withdrawnTidy(item),
+    // A Codex thread T3 Code runs: its items go into the T3 thread with T3's own `t3` command (inbox-t3-local.ts).
+    t3: t3Local,
+    route: noteT3Route,
     ...(options.codexWake?.extraClis ? { extraClis: options.codexWake.extraClis } : {}),
     ...(options.codexWake?.now ? { now: options.codexWake.now } : {}),
     ...(options.codexWake?.queueTimeoutMs ? { queueTimeoutMs: options.codexWake.queueTimeoutMs } : {}),
@@ -4426,36 +4438,36 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     ...options.qwenWake,
   });
 
-  // The T3 Code wake: the person's items for a T3 thread go in as a T3 turn through T3's MCP API, under the
-  // grant `plannotator t3 login` saved (inbox-t3-wake.ts).
-  /**
-   * One owner per reply to a T3 Code thread. Where the thread's Claude runs the Claude Code mod, the mod polls the
-   * bridge as the thread and puts the reply in as a turn of the running session itself: while it polls, and for an
-   * item its claim folder holds, the T3 wake leaves the item alone (a T3 send then would be a second turn). Once
-   * it stops polling (T3 released the idle Claude), the T3 wake sends what still waits, under a grant. The bridge
-   * poll, for its part, never hands the mod what the T3 wake handed for a send in flight.
-   */
-  let t3Resweep: ReturnType<typeof setTimeout> | null = null;
-  const t3ModDelivers = (item: InboxMessage, session: string): boolean => {
-    if (live.pollsNow(INBOX_T3_HOST, session)) {
-      // Looked at again once the poll would be stale: a Claude T3 stopped leaves its replies to the T3 wake.
-      if (!t3Resweep) {
-        t3Resweep = setTimeout(() => {
-          t3Resweep = null;
-          void t3Wake.sweep();
-        }, INBOX_SESSION_LIVE_MS + 1_000);
-        (t3Resweep as { unref?: () => void }).unref?.();
-      }
-      return true;
-    }
-    return inboxClaimDirs(store.dir, store.deliveryIdOf(item, session), session).some((dir) => existsSync(dir));
-  };
+  // The T3 Code wake: the person's items for a T3 thread go in as a T3 turn, through T3's `t3` command on this
+  // machine, else T3's MCP API under the grant `plannotator t3 login` saved (inbox-t3-wake.ts).
+  // One owner per reply to a T3 Code thread: the mod while it polls as the thread, else the T3 wake
+  // (`createT3ModOwner`). The bridge poll, for its part, never hands the mod what the T3 wake handed for a send in flight.
+  const t3Resweeps = new Map<number, ReturnType<typeof setTimeout>>();
+  const t3ModDelivers = createT3ModOwner({
+    local: t3Local,
+    holdsPoll: (session) => live.holdsPollNow(INBOX_T3_HOST, session),
+    polledLately: (session) => live.pollsNow(INBOX_T3_HOST, session),
+    claimed: (item, session) => inboxClaimDirs(store.dir, store.deliveryIdOf(item, session), session).some((dir) => existsSync(dir)),
+    resweep: (ms) => {
+      if (t3Resweeps.has(ms)) return;
+      const timer = setTimeout(() => {
+        t3Resweeps.delete(ms);
+        void t3Wake.sweep();
+      }, ms);
+      (timer as { unref?: () => void }).unref?.();
+      t3Resweeps.set(ms, timer);
+    },
+    liveMs: INBOX_SESSION_LIVE_MS,
+    probeMs: INBOX_T3_PROBE_MS,
+  });
   const t3Wake = createInboxT3Wake({
     store,
     dataDir,
     commandOf: (item, session) => replyCommand(item, false, session),
     // A steps-only Tidy wake with steps off is withdrawn, never handed (a switch turned off in config.json by hand).
     skip: (item, session) => withdrawnTidy(item) || t3ModDelivers(item, session),
+    local: t3Local,
+    route: noteT3Route,
     ...options.t3Wake,
   });
 
@@ -4899,6 +4911,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     localOnly,
     launcher: options.openInLauncher ?? systemOpenInLauncher(),
     home: options.openInHome,
+    doorOf: (req) => fromDeviceDoor.get(req) ?? null,
     codeReviewOn,
     shapeRoot: (id) => {
       const shape = shapeOn() ? shapes.store.get(id) : null;
@@ -5001,6 +5014,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
 
   /** The optional debug log (inbox-debug-log.ts): null, the default, changes nothing and writes nothing. */
   const debugLog = (options.debug ?? resolveInboxDebug(loadConfig(), process.env)) ? createInboxDebugLog(join(dataDir, "inbox")) : null;
+  if (debugLog) t3Routes.note = (route) => debugLog.note("t3_route", { ...route });
 
   /**
    * The window: its page, with its scripts packed behind it (build/pack-inbox.ts, #2593) and answered under
@@ -7369,6 +7383,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     codexWake.stop();
     qwenWake.stop();
     t3Wake.stop();
+    t3Local.stop();
     cloudWake.stop();
     voice.stop();
     codexAccount.stop();

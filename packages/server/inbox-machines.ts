@@ -349,6 +349,30 @@ const SNOOZE_ROUTE = /^threads\/[^/]+\/snooze$/;
 const REPLY_ROUTE = /^messages\/[^/]+\/reply$/;
 /** Another machine's folder names, for "Another folder on <machine>…" (remote launch), and where it would clone a URL. */
 const FOLDERS_ROUTES = new Set(["launch/folders", "launch/clone", "launch/clone-check"]);
+/** A file a message names, read on another machine (approval "inbox-file-refs-open-viewer"): its view, its bytes. */
+const FILE_READ_ROUTE = /^open-in\//;
+/** A forwarded file read that is not a press in this Inbox's window. */
+export const INBOX_MACHINE_FILE_WINDOW_ONLY_BODY = { error: "A file on another machine opens from the Inbox window only.", code: "window_only" } as const;
+
+/**
+ * Whether a forwarded read of a file on another machine is refused. That machine hands the read to its own route as
+ * its owner's, so only this Inbox's window asks: a browser's own request (`Sec-Fetch-Site: same-origin`, and an
+ * Origin, when sent, of this host). An agent's or a script's bare call sends neither, so it cannot read the other
+ * machine's files through this one (the remote launch rule; a tightening, not a secret).
+ */
+export function forwardedFileReadRefusal(route: string, req: Request): { status: 403; body: Record<string, string> } | null {
+  if (!FILE_READ_ROUTE.test(route)) return null;
+  const site = req.headers.get("sec-fetch-site")?.trim().toLowerCase();
+  const origin = req.headers.get("origin");
+  let originHost: string | null = null;
+  try {
+    originHost = origin ? new URL(origin).host : null;
+  } catch {
+    originHost = "";
+  }
+  const window = site === "same-origin" && (origin === null || originHost === (req.headers.get("host") ?? ""));
+  return window ? null : { status: 403, body: INBOX_MACHINE_FILE_WINDOW_ONLY_BODY };
+}
 /** A launched agent's buttons on another machine (remote launch): Stop, Try again, Trust folder, Delete. */
 const LAUNCH_ROUTE = /^launch\/[^/]+\/(stop|retry|trust|delete)$/;
 
@@ -802,6 +826,8 @@ export function createInboxMachines(context: InboxMachinesContext) {
     }
     const offline = () =>
       json({ error: `${links.get(machine)?.name ?? "That machine"} cannot be reached now.`, code: "machine_offline", machine: machinesView().find((m) => m.id === machine) }, 503);
+    const fileRead = forwardedFileReadRefusal(route, req);
+    if (fileRead) return json(fileRead.body, fileRead.status);
     if (req.method === "GET") {
       const search = url.search;
       const headers = pick(req.headers, PASS_REQUEST);
@@ -810,6 +836,8 @@ export function createInboxMachines(context: InboxMachinesContext) {
         if (req.headers.get("sec-fetch-site") !== "same-origin") return json({ error: "Folders are listed in the Inbox window only.", code: "window_only" }, 403);
         headers[MACHINE_WINDOW_HEADER] = "1";
       }
+      // A file a message names: only the window's read gets here (`forwardedFileReadRefusal`), said so to that machine.
+      if (FILE_READ_ROUTE.test(route)) headers[MACHINE_WINDOW_HEADER] = "1";
       try {
         return passAnswer(await peer.request(route, search, { method: "GET", headers, signal: req.signal }));
       } catch {
@@ -848,6 +876,17 @@ export function createInboxMachines(context: InboxMachinesContext) {
     // An agent's or a script's bare call is still the owner's for every other write, as before.
     const window = isWindowRequest(req, body, context.serverSession);
     if (!window && startsAgentThere(route, body)) return json(INBOX_MACHINE_WINDOW_ONLY_BODY, 403);
+    if (kind === "now") {
+      // A file a message names, attached there as the person comments on it: the window needs the attachment now.
+      if (!window) return json(INBOX_MACHINE_FILE_WINDOW_ONLY_BODY, 403);
+      if (peer.state !== "online") return offline();
+      delete body.serverSession;
+      try {
+        return passAnswer(await peer.request(route, "", { method: "POST", headers: { "Content-Type": "application/json", [MACHINE_WINDOW_HEADER]: "1" }, body: JSON.stringify(body), signal: req.signal }));
+      } catch {
+        return offline();
+      }
+    }
     if (kind === "forge") {
       // A PR's close, reopen or merge as that machine's gh / glab: a press in this window, sent now or not at all. A
       // close held for days would run when nobody is looking, and Undo's reopen is taken there only minutes after it.
