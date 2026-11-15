@@ -232,7 +232,8 @@ async function press(...keys: string[]) {
     await page.keyboard.press(key);
     await page.waitForTimeout(110);
     if (!landed) landed = await page.evaluate(() => !!document.activeElement && document.activeElement !== document.body);
-    else expect(await page.evaluate(() => !!document.activeElement && document.activeElement !== document.body && document.activeElement.isConnected), `focus held after ${key} (on ${await focusedText()})`).toBe(true);
+    // J unmounts the focused head; the next thread's head takes focus two frames after its messages draw (Thread.tsx), which a busy runner can put past the pause.
+    else await expect.poll(() => page.evaluate(() => !!document.activeElement && document.activeElement !== document.body && document.activeElement.isConnected), { message: `focus held after ${key}` }).toBe(true);
   }
 }
 
