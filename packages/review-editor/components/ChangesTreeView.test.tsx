@@ -2,6 +2,9 @@ import { afterEach, describe, expect, mock, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { FileTree } from './FileTree';
+import { markFirstCodePainted } from '../utils/firstCodePaint';
+
+markFirstCodePainted();
 import type { DiffFile } from '../types';
 import type { SinceBaseSections } from '@plannotator/shared/types';
 
