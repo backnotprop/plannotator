@@ -3695,8 +3695,6 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     if (tag.handed_away) return { tag, name, line: { state: 'queued' as const, text: `${name} is told to stop when its turn ends.` } };
     return { tag, name, line };
   });
-  // The T3 wake says why the reply cannot go in now: the line waits on T3, whatever the session's last poll says.
-  const lastWaitsOnT3 = last.author.kind === 'person' && !last.delivery && !last.taken_back_at && isInboxT3WaitReason(last.t3_wait);
   const deliveredNow: DeliveryLine | null =
     last.author.kind !== 'person'
       ? null
@@ -3712,7 +3710,6 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
             undelivered: undelivered ? { host: hostName(lastTo.host) } : null,
             stuck,
             handed: handedItem(recipientConnection, last.id),
-            waitsOnT3: lastWaitsOnT3,
             ...waitInputs(recipientConnection, last.id, { ...last, into_turn: last.delivery?.into_turn ?? null }),
           })
         : deliveryLine({
@@ -3727,7 +3724,6 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
             askerEnded: wordsEnded && wordsAsking ? { name: wordsAsking.name } : null,
             stuck,
             handed: handedItem(recipientConnection, last.id),
-            waitsOnT3: lastWaitsOnT3,
             ...waitInputs(recipientConnection, last.id, { ...last, into_turn: last.delivery?.into_turn ?? null }),
           });
   // A hand-off inside its Undo window (approval "inbox-tag-handoff") goes to nobody yet: its line says when.
