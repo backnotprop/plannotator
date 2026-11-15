@@ -1,11 +1,11 @@
 import { CodeViewMinimap } from './minimap/CodeViewMinimap';
 import type { MinimapNote } from './minimap/DiffMinimapSlot';
 import { COMPACT_FILE_HEADER_HEIGHT, COMPACT_HUNK_SEPARATOR_HEIGHT, FILE_HEADER_HEIGHT, HUNK_SEPARATOR_HEIGHT } from '../utils/diffChromeMetrics';
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { memo, startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ContextNoteAnchor } from '../utils/contextNoteAnchor';
 import { createPortal } from 'react-dom';
 import { revealFirstChange } from '../utils/revealFirstChange';
-import { DEFAULT_CODE_VIEW_FILE_METRICS, getSingularPatch, processFile } from '@pierre/diffs';
+import { DEFAULT_CODE_VIEW_FILE_METRICS, getSingularPatch, hydratePartialDiff, processFile } from '@pierre/diffs';
 import type {
   CodeViewItem,
   CodeViewLineSelection,
@@ -17,7 +17,7 @@ import type {
   SelectedLineRange,
   VirtualFileMetrics,
 } from '@pierre/diffs';
-import { CodeView, EditProvider, type CodeViewAnnotationArgs, type CodeViewHandle, useStableCallback } from '@pierre/diffs/react';
+import { CodeView, EditProvider, type CodeViewAnnotationArgs, type CodeViewHandle, useStableCallback, useWorkerPool } from '@pierre/diffs/react';
 import type { DiffTokenEventBaseProps } from '@pierre/diffs';
 import type {
   CodeAnnotation,
@@ -69,6 +69,9 @@ import { OversizedFileNotice } from './OversizedFileNotice';
 import { ToolbarHost, type ToolbarHostHandle } from './ToolbarHost';
 import type { DiffSelectionActions } from './SelectionChooser';
 import { FileHeader } from './FileHeader';
+import { createKeptWholeFiles, warmsUpAtRest, wholeFileLines, type WholeFileText } from '../utils/wholeFileText';
+import { collectHeaderHeightHints, headerHeightFor, type HeaderHeightHint } from '../utils/headerHeightHints';
+import { ReviewStateProvider, useReviewStateOptional, type ReviewState } from '../dock/ReviewStateContext';
 import { DiffBottomBar } from './DiffBottomBar';
 import { BinaryFileNotice } from './BinaryFileNotice';
 import { ChangeNotice } from './ChangeNotice';
@@ -144,28 +147,6 @@ export type AllFilesOrder = 'tree' | 'kind' | 'list';
  *    comes from `context.item.id`, and ToolbarHost is fed that file's patch so
  *    original-code extraction reads the correct file. Drafts-by-file/range and
  *    AI markers are preserved by ToolbarHost/useAnnotationToolbar unchanged.
- *
- * P5 (this phase) preserves lazy full-content hunk expansion through CodeView
- * item updates instead of LazyFileDiff's per-mount IntersectionObserver fetch:
- *
- *  - Initial items use `getSingularPatch` (raw-patch context only) — CodeView
- *    already virtualizes the visible window, so no full content is fetched up
- *    front.
- *  - When an item enters CodeView's rendered window (its `onPostRender` fires
- *    with phase 'mount'/'update', the direct analogue of LazyFileDiff's
- *    IntersectionObserver becoming visible), we fetch `/api/file-content` for
- *    that file (path/oldPath preserved — workspace prefixes intact — plus the
- *    review base), reparse with `processFile`, and swap `item.fileDiff` to the
- *    augmented `FileDiffMetadata`. The augmented diff gets a NEW `cacheKey`
- *    (contents changed!), `item.version++`, and `viewer.updateItem(item)`. This
- *    enables the gutter's expand-unchanged controls in place, without
- *    remounting the list.
- *  - CodeView's `updateItem` re-measures the grown item and resolves the
- *    captured scroll anchor, so the viewport stays put whether the augmented
- *    item is above OR below the fold.
- *  - Fetches are guarded (one per item per diff generation) and cancellable
- *    (AbortController per item, all aborted on unmount / diff switch), so there
- *    is no fetch storm and no double-fetch.
  *
  * P6 (this phase) makes search work over CodeView's recycled DOM:
  *
@@ -288,6 +269,7 @@ export interface AllFilesCodeViewProps {
    */
   renderPackageChanges?: (args: { file: DiffFile; onHeightChange: () => void }) => React.ReactNode;
   renderImageViewControl?: (args: { file: DiffFile; iconOnly: boolean; touch: boolean }) => React.ReactNode;
+  headerHeightHint?: HeaderHeightHint;
   /**
    * Rendered Markdown previews. A previewed Markdown file shows its card in
    * the header slot (measured like an image preview) and its item's diff is
@@ -734,6 +716,30 @@ function buildItemIdentity(
  * hunks, so Pierre draws nothing under the header slot that holds the
  * preview. A distinct cacheKey keeps highlight caches apart.
  */
+function reviewStateMatchesIgnoringFocus(previous: ReviewState | null, next: ReviewState | null): boolean {
+  if (previous === next) return true;
+  if (previous == null || next == null) return false;
+  const keys = Object.keys(next) as (keyof ReviewState)[];
+  if (keys.length !== Object.keys(previous).length) return false;
+  return keys.every((key) => key === 'focusedFileIndex' || previous[key] === next[key]);
+}
+
+interface FileHeaderSlotProps {
+  item: CodeViewItem<DiffAnnotationMetadata>;
+  version: number;
+  inputs: object;
+  render: (item: CodeViewItem<DiffAnnotationMetadata>, settled: boolean) => React.ReactNode;
+}
+
+const FileHeaderSlot = memo(
+  function FileHeaderSlot({ item, render }: FileHeaderSlotProps) {
+    const [settled, setSettled] = useState(false);
+    useEffect(() => startTransition(() => setSettled(true)), []);
+    return <>{render(item, settled)}</>;
+  },
+  (previous, next) => previous.item === next.item && previous.version === next.version && previous.inputs === next.inputs,
+);
+
 function markdownPreviewFileDiff(full: FileDiffMetadata): FileDiffMetadata {
   return {
     ...full,
@@ -782,10 +788,8 @@ const FLUSH_FILES_CSS = `
   :host([data-trailing-unread]) [data-separator][data-separator-last] { display: none; }
 `;
 
-// How long the scroller must be quiet before queued augmentation applies
-// (item growth + re-render) are allowed to land. Slightly above Pierre's own
-// post-interaction restore delay (120ms).
-const AUGMENT_APPLY_IDLE_MS = 150;
+const WARM_UP_REST_MS = 400;
+const WARM_UP_STEP_MS = 120;
 // How long revealing a comment on a closed line waits for its file's whole text.
 const REVEAL_WAIT_MS = 30_000;
 const LINE_TARGET_FLASH_MS = 1_600;
@@ -869,6 +873,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   renderImagePreview,
   renderImageViewControl,
   renderPackageChanges,
+  headerHeightHint,
   markdownPreview,
   compactTouchLayout,
   onLineSelection,
@@ -1234,12 +1239,18 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   }, [hostFileNotes]);
   const hostFileNotesByPathRef = useRef(hostFileNotesByPath);
   hostFileNotesByPathRef.current = hostFileNotesByPath;
+  const headerHeightHints = useMemo(
+    () => collectHeaderHeightHints([...itemIdToFile].map(([itemId, file]) => [itemId, file.path] as const), headerHeightHint),
+    [itemIdToFile, headerHeightHint],
+  );
+  const headerHeightHintsRef = useRef(headerHeightHints);
+  headerHeightHintsRef.current = headerHeightHints;
   const measuredHeaderItemIds = useMemo(() => {
-    if (previewItemIds.size === 0 && hostFileNotesByPath.size === 0) return imagePreviewItemIds;
-    const ids = new Set([...imagePreviewItemIds, ...previewItemIds]);
+    if (previewItemIds.size === 0 && hostFileNotesByPath.size === 0 && headerHeightHints.size === 0) return imagePreviewItemIds;
+    const ids = new Set([...imagePreviewItemIds, ...previewItemIds, ...headerHeightHints.keys()]);
     for (const path of hostFileNotesByPath.keys()) for (const id of filePathToItemIds.get(path) ?? []) ids.add(id);
     return ids;
-  }, [imagePreviewItemIds, previewItemIds, hostFileNotesByPath, filePathToItemIds]);
+  }, [imagePreviewItemIds, previewItemIds, hostFileNotesByPath, filePathToItemIds, headerHeightHints]);
   const imagePreviewItemIdsRef = useRef(measuredHeaderItemIds);
   imagePreviewItemIdsRef.current = measuredHeaderItemIds;
 
@@ -1285,9 +1296,11 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   // starts previewed files hunkless. An identity rebuilt without a remount
   // (an equal file set re-parsed) is never seen by CodeView, so it re-seeds
   // nothing. Idempotent per key (render may run twice).
+  const measuredHeaderOnceRef = useRef(new Set<string>());
   const seededPreviewKeyRef = useRef<string | null>(null);
   if (seededPreviewKeyRef.current !== fileSetKey) {
     seededPreviewKeyRef.current = fileSetKey;
+    measuredHeaderOnceRef.current = new Set();
     fullDiffsRef.current = new Map();
     previewAppliedRef.current = new Set();
     semStateRef.current = new Map();
@@ -1563,12 +1576,13 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     // Garbage-collect STALE-generation content fetches. Generation-aware on
     // purpose: this passive effect runs AFTER the remounted CodeView's seed
     // layout effect has already fired the new diff's first postRender wave —
-    // augmentItem has started the NEW generation's fetches by the time we get
+    // prefetchWholeFile has started the NEW generation's fetches by the time we get
     // here, and a blanket abort+clear would kill our own generation's work
     // (re-fetch storm at best; an unaugmented initial window if the rAF
     // second wave loses the race). Stale generations are already inert — the
     // dedup guard ignores them and isStale() blocks their writes — so this
     // sweep is pure cleanup.
+    keptWholeFilesRef.current.keepOnly(fileSetKey);
     for (const [itemId, entry] of augmentRef.current) {
       if (entry.generation === fileSetKey) continue;
       entry.controller.abort();
@@ -1748,6 +1762,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   const itemMetricsRef = useRef<Partial<VirtualFileMetrics>>({});
   /** Measured header-slot height per image-preview item id. */
   const measuredHeaderHeightsRef = useRef(new Map<string, number>());
+  const relayoutQueuedRef = useRef(false);
   /** The item's VirtualizedFileDiff, captured from onPostRender. */
   const headerMetricsInstancesRef = useRef(new Map<string, HeaderMetricsTarget>());
   /** What was last applied to each instance (header height + shared metrics). */
@@ -1761,7 +1776,12 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       if (instance == null) return;
       const base = itemMetricsRef.current;
       const baseHeight = base.diffHeaderHeight ?? DEFAULT_CODE_VIEW_FILE_METRICS?.diffHeaderHeight ?? 0;
-      const height = measuredHeaderHeightsRef.current.get(itemId) ?? baseHeight;
+      const height = headerHeightFor(itemId, {
+        measured: measuredHeaderHeightsRef.current,
+        measuredOnce: measuredHeaderOnceRef.current,
+        hints: headerHeightHintsRef.current,
+        baseHeight,
+      });
       const applied = appliedHeaderMetricsRef.current.get(instance);
       // Nothing to do when this exact height is already applied over the
       // current shared metrics, or when the item never had an override and
@@ -1774,6 +1794,12 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       // setMetrics only marks the instance dirty; the version bump makes
       // CodeView re-lay out from this item down.
       refreshItem(itemId);
+      if (relayoutQueuedRef.current) return;
+      relayoutQueuedRef.current = true;
+      queueMicrotask(() => {
+        relayoutQueuedRef.current = false;
+        viewerRef.current?.getInstance()?.render(true);
+      });
     },
     [refreshItem],
   );
@@ -1795,6 +1821,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
           // the last measurement instead of collapsing the card.
           if (height <= 0) return;
           const baseHeight = itemMetricsRef.current.diffHeaderHeight ?? 0;
+          measuredHeaderOnceRef.current.add(itemId);
           if (height === baseHeight) measuredHeaderHeightsRef.current.delete(itemId);
           else measuredHeaderHeightsRef.current.set(itemId, height);
           syncHeaderMetrics(itemId);
@@ -1847,6 +1874,19 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   contextExpansionAvailableRef.current = contextExpansionAvailable;
   const fetchFileContentRef = useRef(fetchFileContent);
   fetchFileContentRef.current = fetchFileContent;
+  const keptWholeFilesRef = useRef(createKeptWholeFiles());
+  const readWholeFileFromReview = useStableCallback((file: DiffFile, signal: AbortSignal): Promise<WholeFileText | null> => {
+    const params = new URLSearchParams({ path: file.path });
+    if (file.oldPath) params.set('oldPath', file.oldPath);
+    const base = reviewBaseRef.current;
+    if (base) params.set('base', base);
+    const snapshot = reviewSnapshotIdRef.current;
+    if (snapshot) params.set('snapshot', snapshot);
+    return fetch(`/api/file-content?${params}`, { signal }).then((res) => (res.ok ? res.json() : null));
+  });
+  const wholeFileReader = fetchFileContent ?? (!readOnly && contextExpansionAvailable ? readWholeFileFromReview : undefined);
+  const wholeFileReaderRef = useRef(wholeFileReader);
+  wholeFileReaderRef.current = wholeFileReader;
   const itemIdToFileRef = useRef(itemIdToFile);
   itemIdToFileRef.current = itemIdToFile;
   const fileSetKeyRef = useRef(fileSetKey);
@@ -1886,41 +1926,79 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     refreshEditSessionMarkers();
   }, [annotations, refreshEditSessionMarkers]);
 
-  // Augmentation APPLIES are deferred to scroll-idle. updateItem() mutates
-  // item layout — the full-content parse counts collapsed-context regions the
-  // raw-patch parse doesn't, so the item GROWS — and forces a re-render +
-  // re-tokenize. Landing that mid-gesture causes visible chop; worse, when
-  // the grown item sits ABOVE CodeView's scroll anchor, its corrective
-  // scrollTo() kills wheel momentum and pins the viewport ("scrolling but
-  // nothing changes"). Fetches still start as items enter the window — only
-  // the item mutation waits for the scroll to settle. Staleness is re-checked
-  // at apply time; the per-item map keeps only the newest apply per item.
+  const lastScrollTsRef = useRef(0);
+  const warmUpTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const warmedUpRef = useRef(new Map<string, string>());
+  const highlightPool = useWorkerPool();
+  const highlightPoolRef = useRef(highlightPool);
+  highlightPoolRef.current = highlightPool;
+  const scheduleWarmUp = useCallback((delay: number) => {
+    if (warmUpTimerRef.current != null) clearTimeout(warmUpTimerRef.current);
+    warmUpTimerRef.current = setTimeout(() => warmUpVisibleFile(), delay);
+  }, []);
+  const warmUpVisibleFile = useStableCallback(() => {
+    warmUpTimerRef.current = null;
+    const restingFor = Date.now() - lastScrollTsRef.current;
+    if (restingFor < WARM_UP_REST_MS) return scheduleWarmUp(WARM_UP_REST_MS - restingFor + 10);
+    const poolStats = highlightPoolRef.current?.getStats();
+    if (poolStats != null && poolStats.queuedTasks + poolStats.activeTasks > 0) return scheduleWarmUp(WARM_UP_STEP_MS);
+    const viewer = viewerRef.current?.getInstance();
+    const scroller = scrollRef.current;
+    if (viewer == null || scroller == null) return;
+    const port = scroller.getBoundingClientRect();
+    const viewTop = Math.max(port.top, 0);
+    const viewBottom = Math.min(port.bottom, window.innerHeight);
+    const generation = fileSetKeyRef.current;
+    const pool = highlightPoolRef.current;
+    if (pool == null || !pool.isWorkingPool()) return;
+    let next: { id: string; lines: number; fileDiff: FileDiffMetadata; text: WholeFileText } | null = null;
+    for (const rendered of viewer.getRenderedItems()) {
+      if (rendered.type !== 'diff' || rendered.item.fileDiff.isPartial !== true || rendered.item.fileDiff.cacheKey == null) continue;
+      if (warmedUpRef.current.get(rendered.id) === generation || previewAppliedRef.current.has(rendered.id)) continue;
+      const box = rendered.element?.getBoundingClientRect();
+      if (box == null || box.bottom <= viewTop || box.top >= viewBottom) continue;
+      const text = keptWholeFilesRef.current.peek(rendered.id, generation);
+      if (text == null || text.oldContent == null || text.newContent == null || !warmsUpAtRest(text)) continue;
+      const lines = wholeFileLines(text);
+      if (next == null || lines < next.lines) next = { id: rendered.id, lines, fileDiff: rendered.item.fileDiff, text };
+    }
+    if (next == null) return;
+    warmedUpRef.current.set(next.id, generation);
+    const file = itemIdToFileRef.current.get(next.id);
+    if (file == null) return scheduleWarmUp(WARM_UP_STEP_MS);
+    try {
+      const whole = hydratePartialDiff('clone', next.fileDiff, {
+        oldFile: { name: file.oldPath || file.path, contents: next.text.oldContent ?? '' },
+        newFile: { name: file.path, contents: next.text.newContent ?? '' },
+      });
+      pool.primeDiffHighlightCache(whole).catch(() => {});
+    } catch {
+      return scheduleWarmUp(WARM_UP_STEP_MS);
+    }
+    scheduleWarmUp(WARM_UP_STEP_MS);
+  });
+  useEffect(() => () => {
+    if (warmUpTimerRef.current != null) clearTimeout(warmUpTimerRef.current);
+  }, []);
+
+  const AUGMENT_APPLY_IDLE_MS = 150;
   const pendingAugmentAppliesRef = useRef(new Map<string, () => void>());
   const augmentFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastScrollTsRef = useRef(0);
-
   const flushAugmentApplies = useCallback(() => {
     augmentFlushTimerRef.current = null;
     const idleFor = Date.now() - lastScrollTsRef.current;
     if (idleFor < AUGMENT_APPLY_IDLE_MS) {
-      augmentFlushTimerRef.current = setTimeout(
-        flushAugmentApplies,
-        AUGMENT_APPLY_IDLE_MS - idleFor + 10,
-      );
+      augmentFlushTimerRef.current = setTimeout(flushAugmentApplies, AUGMENT_APPLY_IDLE_MS - idleFor + 10);
       return;
     }
     const applies = [...pendingAugmentAppliesRef.current.values()];
     pendingAugmentAppliesRef.current.clear();
     for (const apply of applies) apply();
   }, []);
-
   const queueAugmentApply = useCallback((itemId: string, apply: () => void) => {
     pendingAugmentAppliesRef.current.set(itemId, apply);
-    if (augmentFlushTimerRef.current == null) {
-      augmentFlushTimerRef.current = setTimeout(flushAugmentApplies, AUGMENT_APPLY_IDLE_MS);
-    }
+    if (augmentFlushTimerRef.current == null) augmentFlushTimerRef.current = setTimeout(flushAugmentApplies, AUGMENT_APPLY_IDLE_MS);
   }, [flushAugmentApplies]);
-
   useEffect(() => () => {
     if (augmentFlushTimerRef.current != null) clearTimeout(augmentFlushTimerRef.current);
   }, []);
@@ -2114,180 +2192,40 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rejectedKey, powerUpActive, powerUpRetry]);
 
-  // Fetch full file contents for one item, reparse with processFile, and swap
-  // the item's fileDiff in place so hunk expansion (expand-unchanged gutter
-  // controls) works against the COMPLETE file. Mirrors LazyFileDiff's per-mount
-  // fetch, but updates the existing CodeView item instead of mounting a fresh
-  // FileDiff — so CodeView's own virtualization + element pool stay in charge.
-  const augmentItem = useCallback((itemId: string) => {
-    // NOTE: deliberately no viewerRef check here. The FIRST onPostRender wave
-    // (every initially visible item) fires synchronously inside CodeView's seed
-    // layout effect, which runs BEFORE useImperativeHandle assigns the handle —
-    // so viewerRef.current is still null at that point. Bailing on a null
-    // handle would make the initial window depend entirely on CodeView's
-    // second (rAF `fitPerfectly`) render wave for augmentation — a library
-    // implementation detail we'd rather not lean on. The handle is only needed
-    // at fetch RESOLUTION, where it is re-read fresh from the ref.
-    // A host's reader is asked when an arrow opens (loadWholeFile).
+  const prefetchWholeFile = useCallback((itemId: string) => {
     if (fetchFileContentRef.current) return;
     const augmentState = augmentRef.current;
     const generation = fileSetKeyRef.current;
-    // One fetch per item PER DIFF: a same-generation entry ('pending' or
-    // resolved) means do nothing — an item re-entering the rendered window
-    // re-fires onPostRender, and this guard is what prevents the fetch storm.
-    // An entry from a PREVIOUS diff (stale generation) does not count: abort it
-    // and fetch fresh for the new diff's content.
     const existing = augmentState.get(itemId);
     if (existing) {
       if (existing.generation === generation) return;
       existing.controller.abort();
     }
-
-    // Resolve the file by item id (NOT path) so duplicate display paths each
-    // augment with their own DiffFile content.
     const file = itemIdToFileRef.current.get(itemId);
     if (file == null) return;
-
     const controller = new AbortController();
-
-    // Read-only hosts have no review server: leave the raw-patch context in
-    // place and mark the item done so it never re-fires (no dead requests,
-    // no console noise from a CSP that blocks connect-src).
-    if (readOnlyRef.current || !contextExpansionAvailableRef.current) {
+    if (readOnlyRef.current || !contextExpansionAvailableRef.current || (file.status !== 'modified' && file.status !== 'renamed')) {
       augmentState.set(itemId, { status: 'done', controller, generation });
       return;
     }
     augmentState.set(itemId, { status: 'pending', controller, generation });
-
-    // A resolution stage is stale when its fetch was aborted (unmount / diff
-    // switch) or the diff generation moved on while the response was in flight
-    // (abort() is a no-op on an already-settled fetch, and the remounted
-    // CodeView reuses path-derived item ids — without the generation check the
-    // OLD diff's content would be written into the NEW diff's item). Stale
-    // stages must not touch augmentState either: it now belongs to the new
-    // generation.
-    const isStale = () =>
-      controller.signal.aborted || fileSetKeyRef.current !== generation;
-
-    // Workspace-prefixed paths are passed through verbatim — /api/file-content
-    // resolves the prefix back to the owning repo (same contract LazyFileDiff /
-    // DiffViewer rely on).
-    const params = new URLSearchParams({ path: file.path });
-    if (file.oldPath) params.set('oldPath', file.oldPath);
-    const base = reviewBaseRef.current;
-    if (base) params.set('base', base);
-    const snapshot = reviewSnapshotIdRef.current;
-    if (snapshot) params.set('snapshot', snapshot);
-
-    fetch(`/api/file-content?${params}`, { signal: controller.signal })
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data: { oldContent: string | null; newContent: string | null } | null) => {
+    const isStale = () => controller.signal.aborted || fileSetKeyRef.current !== generation;
+    readWholeFileFromReview(file, controller.signal).then(
+      (data) => {
         if (isStale()) return;
-        if (!data || (data.oldContent == null && data.newContent == null)) {
-          // No content available (e.g. demo mode / binary): mark done so we do
-          // not retry on every subsequent render. The raw-patch context still
-          // shows; there is just nothing to expand.
-          augmentState.set(itemId, { status: 'done', controller, generation });
-          return;
-        }
-
-        // Stale-content guard: the file may have changed on disk since this
-        // diff was captured (an agent editing/committing mid-review is normal
-        // usage). Augmenting with contents that no longer reconcile with the
-        // patch produces an internally inconsistent FileDiffMetadata — Pierre's
-        // virtualization then fails layout estimation for the item ("trailing
-        // context mismatch", content disappearing while scrolling). Keep the
-        // raw-patch view for this file instead; a diff refresh re-augments.
-        if (!isContentConsistentWithPatch(file.patch, data.oldContent, data.newContent)) {
-          console.warn(
-            `AllFilesCodeView: skipping full-content expansion for ${file.path} — file changed since the diff was captured`,
-          );
-          augmentState.set(itemId, { status: 'done', controller, generation });
-          return;
-        }
-
-        let augmented: FileDiffMetadata;
-        try {
-          const result = processFile(file.patch, {
-            oldFile:
-              data.oldContent != null
-                ? { name: file.oldPath || file.path, contents: data.oldContent }
-                : undefined,
-            newFile:
-              data.newContent != null ? { name: file.path, contents: data.newContent } : undefined,
-          });
-          if (!result || result.isPartial) {
-            augmentState.set(itemId, { status: 'done', controller, generation });
-            return;
-          }
-          augmented = result;
-        } catch {
-          augmentState.set(itemId, { status: 'error', controller, generation });
-          return;
-        }
-
-        if (isStale()) return;
-
-        // Defer the item mutation to scroll-idle (see queueAugmentApply) —
-        // landing it mid-gesture chops scrolling and can kill momentum via
-        // CodeView's anchor-correcting scrollTo. All staleness checks re-run
-        // at apply time: the queue can hold entries across aborts and diff
-        // switches.
-        queueAugmentApply(itemId, () => {
-          if (isStale()) return;
-          const liveHandle = viewerRef.current;
-          const item = liveHandle?.getItem(itemId);
-          // The item may have been torn down between fetch start and apply;
-          // belt-and-suspenders on top of the staleness check above.
-          if (liveHandle == null || item == null || item.type !== 'diff') {
-            augmentState.set(itemId, { status: 'done', controller, generation });
-            return;
-          }
-          // Never clobber an active edit session's document: the editor is
-          // mutating item.fileDiff in place, and the session already ensured
-          // full content before starting. Mark done — the pristine restore at
-          // session end republishes whatever the session started from.
-          if (itemId === editSession.editingItemIdRef.current) {
-            augmentState.set(itemId, { status: 'done', controller, generation });
-            return;
-          }
-
-          // cacheKey MUST change when fileDiff contents change (types.ts warning):
-          // otherwise the worker / highlight caches would serve the stale partial
-          // AST. Derive a fresh key from the augmented (now full-content) diff,
-          // scoped by generation so the same item id across diff switches never
-          // collides in a (future) cross-mount worker cache.
-          augmented.cacheKey = `${generation}::${itemId}#full`;
-          if (previewAppliedRef.current.has(itemId)) {
-            // Previewed: keep the hunkless diff on screen; Source swaps this in.
-            fullDiffsRef.current.set(itemId, augmented);
-            augmentState.set(itemId, { status: 'done', controller, generation });
-            runSemantic(itemId, file, data.oldContent, data.newContent, generation, controller.signal);
-            return;
-          }
-          item.fileDiff = augmented;
-          item.version = (item.version ?? 0) + 1;
-          // updateItem re-measures the (now taller) item and resolves the captured
-          // scroll anchor, so the viewport stays put whether this item is above or
-          // below the fold — no manual scroll correction needed.
-          liveHandle.updateItem(item);
-          augmentState.set(itemId, { status: 'done', controller, generation });
+        if (data) keptWholeFilesRef.current.keep(itemId, generation, data);
+        augmentState.set(itemId, { status: 'done', controller, generation });
+        if (warmUpTimerRef.current == null) scheduleWarmUp(WARM_UP_REST_MS);
+        if (data?.oldContent != null && data.newContent != null && isContentConsistentWithPatch(file.patch, data.oldContent, data.newContent)) {
           runSemantic(itemId, file, data.oldContent, data.newContent, generation, controller.signal);
-        });
-      })
-      .catch((err) => {
-        if (isStale()) {
-          // Aborted (unmount / diff switch) or superseded: drop the entry only
-          // if it is still ours — a newer generation may already own this id.
-          if (augmentState.get(itemId)?.controller === controller) {
-            augmentState.delete(itemId);
-          }
-          return;
         }
-        augmentState.set(itemId, { status: 'error', controller, generation });
-        void err;
-      });
-  }, [queueAugmentApply, runSemantic]);
+      },
+      () => {
+        if (!isStale()) augmentState.set(itemId, { status: 'error', controller, generation });
+        else if (augmentState.get(itemId)?.controller === controller) augmentState.delete(itemId);
+      },
+    );
+  }, [readWholeFileFromReview, scheduleWarmUp, runSemantic]);
 
   // A host's reader, for the arrows: Pierre shows them on a partial diff once it has a loader, and calls it on the first
   // click. It parks the click's opening, swaps in the whole file and highlights that off the main thread.
@@ -2299,21 +2237,22 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   const loadWholeFile = useStableCallback((fileDiff: FileDiffMetadata): Promise<FileDiffLoadedFiles> => {
     const generation = fileSetKeyRef.current;
     const entry = [...itemIdToFileRef.current].find(([, candidate]) => candidate.path === fileDiff.name);
-    const read = fetchFileContentRef.current;
+    const read = wholeFileReaderRef.current;
     // No text to open: no arrows, and a promise that stays open, since Pierre logs a rejection and throws on an empty answer.
     const none = () => {
-      if (fileSetKeyRef.current === generation) setWholeFileGone(true);
+      if (fetchFileContentRef.current && fileSetKeyRef.current === generation) setWholeFileGone(true);
       return new Promise<never>(() => {});
     };
     if (!entry || !read) return none();
     const [itemId, file] = entry;
+    if (previewAppliedRef.current.has(itemId)) return new Promise<never>(() => {});
     const controller = new AbortController();
     augmentRef.current.get(itemId)?.controller.abort();
     augmentRef.current.set(itemId, { status: 'pending', controller, generation });
     // The arrows say a read is on its way (SCROLLS_WITH_PAGE_CSS): the click's rows arrive with it.
     const shown = viewerRef.current?.getInstance()?.getRenderedItems().find((candidate) => candidate.id === itemId)?.element;
     shown?.setAttribute('data-reading-whole-file', '');
-    return read(file, controller.signal).finally(() => shown?.removeAttribute('data-reading-whole-file')).then(
+    return keptWholeFilesRef.current.read(itemId, generation, () => read(file, controller.signal)).finally(() => shown?.removeAttribute('data-reading-whole-file')).then(
       (data) => {
         augmentRef.current.set(itemId, { status: 'done', controller, generation });
         if (data?.oldContent == null || data.newContent == null) return none();
@@ -2334,7 +2273,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     );
   });
   // Only a file with both sides has anything to open.
-  const opensWholeFiles = !!fetchFileContent && !wholeFileGone && files.some((file) => file.status === 'modified' || file.status === 'renamed');
+  const opensWholeFiles = !!wholeFileReader && !wholeFileGone && files.some((file) => file.status === 'modified' || file.status === 'renamed');
   // Flush, one file per viewer (the PR page): while its whole text is unread, Pierre would close the file with a
   // "More unchanged context may be available" row (a loader, a partial diff). It is hidden and its room given back.
   const flushesFiles = flushFiles && scrollsWithPage && files.length === 1;
@@ -2357,7 +2296,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   const revealClosedLines = useStableCallback((itemId: string, ann: CodeAnnotation | null, range: SelectedLineRange, onDone: () => void): (() => void) | null => {
     const file = itemIdToFileRef.current.get(itemId);
     const side = range.side === 'deletions' ? 'old' : 'new';
-    if (!file || !fetchFileContentRef.current || (ann && isFileScopedAnnotation(ann))) return null;
+    if (!file || !wholeFileReaderRef.current || (ann && isFileScopedAnnotation(ann))) return null;
     if (isLineRangeInPatch(file.patch, Math.min(range.start, range.end), Math.max(range.start, range.end), side)) return null;
     let frame = 0;
     let asked = false;
@@ -2413,6 +2352,31 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   const nodeToItemIdRef = useRef(new WeakMap<HTMLElement, string>());
   const firstChangeShownRef = useRef(new Set<string>());
 
+  useEffect(() => {
+    if (!scrollEl || !opensWholeFiles) return;
+    const readAheadOfExpand = (event: Event) => {
+      if (event.type === 'pointermove' && event instanceof PointerEvent && event.movementX === 0 && event.movementY === 0) return;
+      const path = event.composedPath();
+      if (!path.some((node) => node instanceof Element && node.hasAttribute('data-expand-button'))) return;
+      const host = path.find((node): node is HTMLElement => node instanceof HTMLElement && node.tagName === 'DIFFS-CONTAINER');
+      const itemId = host ? nodeToItemIdRef.current.get(host) : undefined;
+      if (itemId == null) return;
+      const rendered = viewerRef.current?.getInstance()?.getRenderedItems().find((candidate) => candidate.id === itemId);
+      if (rendered?.type !== 'diff' || rendered.item.fileDiff.isPartial !== true) return;
+      rendered.instance.expandHunk(0, 'up', 0);
+    };
+    scrollEl.addEventListener('pointermove', readAheadOfExpand, { passive: true });
+    scrollEl.addEventListener('pointerdown', readAheadOfExpand, { passive: true, capture: true });
+    scrollEl.addEventListener('touchstart', readAheadOfExpand, { passive: true, capture: true });
+    scrollEl.addEventListener('focusin', readAheadOfExpand);
+    return () => {
+      scrollEl.removeEventListener('pointermove', readAheadOfExpand);
+      scrollEl.removeEventListener('pointerdown', readAheadOfExpand, { capture: true });
+      scrollEl.removeEventListener('touchstart', readAheadOfExpand, { capture: true });
+      scrollEl.removeEventListener('focusin', readAheadOfExpand);
+    };
+  }, [scrollEl, opensWholeFiles]);
+
   const handlePostRender = useStableCallback(
     (
       node: HTMLElement,
@@ -2441,7 +2405,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       nodeToItemIdRef.current.set(node, context.id);
       if (flushesFiles) syncTrailingRow(node, context);
       if (powerUpStreamRef.current) keepPowerUpInStep(node);
-      augmentItem(context.id);
+      prefetchWholeFile(context.id);
       const itemId = context.id;
       requestAnimationFrame(() => applyItemHighlights(node, itemId));
       if (!firstChangeShownRef.current.has(itemId)) {
@@ -3234,6 +3198,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         scroller.style.removeProperty('--pu-content');
       }, POWER_UP_SCROLL_REST_MS);
     }
+    scheduleWarmUp(WARM_UP_REST_MS);
     hasScrolledRef.current = true;
     onScrollPositionChange?.(position);
     if (scrollReportRafRef.current != null) return;
@@ -3694,7 +3659,22 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
 
   // --- Custom header render slot (the full Plannotator FileHeader) -----------
 
-  const renderCustomHeader = useStableCallback((item: CodeViewItem<DiffAnnotationMetadata>) => {
+  const fileHeaderInputs = useMemo(
+    () => ({}),
+    [
+      itemIdToFilePath, itemIdToFile, markdownPreview, previewItemIds, fileCommentsByPath, renderImagePreview, editEnabled,
+      editSession.editingItemId, measuredHeaderItemIds, compactTouchLayout, headerKeepsFolder, readOnly, commentOnly, fileOpenIn,
+      viewedFiles, generatedFiles, onToggleViewed, showViewedControls, stagedFiles, stagingFile, onStage, canStagePath,
+      canStageFiles, showStageControls, stageError, onAddFileCommentForFile, hostFileNotesByPath, renderPackageChanges,
+      selectedAnnotationId, onSelectAnnotation, onEditAnnotation, onDeleteAnnotation, explainHandler, agentFindingSources,
+      isAILoading,
+    ],
+  );
+  const renderCustomHeader = useStableCallback((item: CodeViewItem<DiffAnnotationMetadata>) => (
+    <FileHeaderSlot item={item} version={item.version ?? 0} inputs={fileHeaderInputs} render={renderFileHeaderContent} />
+  ));
+
+  const renderFileHeaderContent = useStableCallback((item: CodeViewItem<DiffAnnotationMetadata>, settled: boolean) => {
     if (item.type !== 'diff') return null;
     const filePath = itemIdToFilePath.get(item.id);
     if (filePath == null) return null;
@@ -3742,7 +3722,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         <FileHeader
         compactTouchLayout={compactTouchLayout}
         keepsFolder={headerKeepsFolder}
-        readOnly={readOnly || commentOnly}
+        readOnly={readOnly || commentOnly || !settled}
         openIn={fileOpenIn?.(filePath)}
         filePath={filePath}
         patch={file.patch}
@@ -4071,6 +4051,11 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     return () => cancelAnimationFrame(frame);
   }, [itemMetrics, syncHeaderMetrics]);
 
+  const reviewState = useReviewStateOptional();
+  const steadyReviewStateRef = useRef(reviewState);
+  if (!reviewStateMatchesIgnoringFocus(steadyReviewStateRef.current, reviewState)) steadyReviewStateRef.current = reviewState;
+  const steadyReviewState = steadyReviewStateRef.current;
+
   // After all hooks: hold the surface until the worker pool can take the
   // first tokenization wave (≈100-300ms once per session; instant after).
   if (!workerPoolReady) {
@@ -4128,11 +4113,10 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       {/* EditProvider only mounts when the experimental flag is on; its
           factory declines attaches until the lazy editor chunk has loaded
           (the chunk loads on first Edit click, never before). */}
-      {editEnabled ? (
-        <EditProvider createEditor={editSession.createEditor}>{codeView}</EditProvider>
-      ) : (
-        codeView
-      )}
+      {(() => {
+        const viewer = editEnabled ? <EditProvider createEditor={editSession.createEditor}>{codeView}</EditProvider> : codeView;
+        return steadyReviewState ? <ReviewStateProvider value={steadyReviewState}>{viewer}</ReviewStateProvider> : viewer;
+      })()}
       {diffOverflow !== 'wrap' && <DiffBottomBar root={scrollEl} />}
       {minimapOn && (
         <CodeViewMinimap
