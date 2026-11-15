@@ -1,11 +1,13 @@
 /**
  * Tidy across machines (tidyAcross.ts): picked threads go to the machine that holds them, a machine away or too old
  * is named instead of asked, the parts' plans read as one, and each machine is sent only its own agents under its
- * own key (the outbox refuses one key on two machines).
+ * own key (the outbox refuses one key on two machines); a refused part gets a new key for the next press, and only it.
  */
 import { expect, test } from 'bun:test';
 import type { InboxListRow, InboxTidyPlan } from '@plannotator/core/inbox-types';
+import { InboxApiError } from './apiError';
 import type { MachinesModel } from './machines';
+import { PressKeys } from './pressKeys';
 import { mergePlans, pickTargets, startAcross, type TidyAcrossAgent } from './tidyAcross';
 
 const model = (marks: string[]): MachinesModel =>
@@ -65,4 +67,29 @@ test('each machine is sent its own agents under its own key; a refusal is said',
     if (machine) throw new Error('Mac mini is away.');
   });
   expect(failed).toBe('Mac mini is away.');
+});
+
+test('pressed again: only the part a machine refused gets a new key; one that went, or was lost on the way, keeps its own', async () => {
+  const agents = [
+    { session: 'ses_here', machine: null },
+    { session: 'ses_far', machine: 'm_mini' },
+    { session: 'ses_box', machine: 'm_box' },
+  ] as TidyAcrossAgent[];
+  const keys = new PressKeys('tidy', 'k');
+  const sent: Record<string, string>[] = [];
+  const press = (fail: Record<string, Error>) => {
+    const round: Record<string, string> = {};
+    sent.push(round);
+    return startAcross(agents, keys, async (machine, _sessions, key) => {
+      round[machine ?? 'here'] = key;
+      if (fail[machine ?? 'here']) throw fail[machine ?? 'here'];
+    });
+  };
+  expect(await press({ m_mini: new InboxApiError(409, 'session_not_live', 'That session ended.'), m_box: new TypeError('Failed to fetch') })).toBe('That session ended.');
+  expect(await press({})).toBeNull();
+  expect(sent[0]).toEqual({ here: 'k', m_mini: 'k-m_mini', m_box: 'k-m_box' });
+  expect(sent[1]!.here).toBe('k');
+  expect(sent[1]!.m_box).toBe('k-m_box');
+  expect(sent[1]!.m_mini).not.toBe('k-m_mini');
+  expect(sent[1]!.m_mini.endsWith('-m_mini')).toBe(true);
 });
