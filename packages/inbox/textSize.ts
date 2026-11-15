@@ -67,14 +67,37 @@ export function adoptSavedTextSize(size: unknown): void {
   if (!chosenHere && isInboxTextSize(size)) apply(size);
 }
 
+/** Picks on this page whose save has not answered yet, and every pick made here. */
+let saving = 0;
+let picks = 0;
+
+/** Taken before a settings read starts: a read that a pick here could have raced is not applied (`takeSavedTextSize`). */
+export function textSizeReadMark(): { picks: number; busy: boolean } {
+  return { picks, busy: saving > 0 };
+}
+
+/**
+ * A size saved after this page read its settings (another window, an agent; `event: prefs`): shown at once. Not when
+ * a pick here was being saved when the read started, or came since: the read may predate it, and that save's own
+ * event reads again.
+ */
+export function takeSavedTextSize(size: unknown, mark: { picks: number; busy: boolean }): void {
+  if (mark.busy || saving > 0 || mark.picks !== picks) return;
+  if (isInboxTextSize(size) && size !== current) apply(size);
+}
+
 /** The person's choice: shown at once, then saved to config.json. */
 export function chooseTextSize(size: InboxTextSize): Promise<void> {
   chosenHere = true;
   apply(size);
+  picks++;
+  saving++;
   return inboxApi.saveTextSize(size).then(
     () => {},
     () => {},
-  );
+  ).finally(() => {
+    saving--;
+  });
 }
 
 export function useInboxTextSize(): InboxTextSize {

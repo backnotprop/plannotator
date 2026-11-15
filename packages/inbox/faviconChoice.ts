@@ -10,8 +10,9 @@
  *
  * A pick here shows at once, without a reload: the tab icon becomes the
  * chosen icon's data URL, and the tab count (tabCount.ts) redraws its badge
- * over it. A choice made elsewhere (plan review, another Inbox window) shows
- * in this window at its next load.
+ * over it. A choice saved through the Inbox elsewhere (another window, an
+ * agent) shows at once (`event: prefs`); one made in plan review shows at
+ * this window's next load.
  */
 
 import { useSyncExternalStore } from 'react';
@@ -22,6 +23,11 @@ import { inboxApi } from './api';
 let current: FaviconStyle | null = null;
 /** The icon picked on this page: the tab shows it from then on. */
 let chosenHere: FaviconStyle | null = null;
+/** An icon saved elsewhere after this page loaded (`event: prefs`): the tab shows it until a pick here. */
+let taken: FaviconStyle | null = null;
+/** Picks on this page whose save has not answered yet, and every pick made here. */
+let saving = 0;
+let picks = 0;
 /** An icon tried on this tab only (the tab icon dialog's choices), never saved; null when none is. */
 let previewing: FaviconStyle | null = null;
 const listeners = new Set<() => void>();
@@ -46,12 +52,17 @@ export function adoptSavedFavicon(style: unknown): void {
 export function chooseFavicon(style: FaviconStyle): Promise<void> {
   current = style;
   chosenHere = style;
+  taken = null;
   previewing = null;
   notify();
+  picks++;
+  saving++;
   return inboxApi.saveFavicon(style).then(
     () => {},
     () => {},
-  );
+  ).finally(() => {
+    saving--;
+  });
 }
 
 /**
@@ -69,8 +80,23 @@ export function faviconPickedHere(): boolean {
   return chosenHere !== null;
 }
 
-/** What the tab shows: a try, else a pick made on this page; null for the icon it loaded with. */
-const onTab = (): FaviconStyle | null => previewing ?? chosenHere;
+/** A favicon saved after this page read its settings (another window, an agent): the tab shows it at once. */
+/** Taken before a settings read starts: a read that a pick here could have raced is not applied (`takeSavedFavicon`). */
+export function faviconReadMark(): { picks: number; busy: boolean } {
+  return { picks, busy: saving > 0 };
+}
+
+export function takeSavedFavicon(style: unknown, mark: { picks: number; busy: boolean }): void {
+  // A pick here being saved when the read started, or made since, is newer than the read; that save's own event reads again.
+  if (mark.busy || saving > 0 || mark.picks !== picks) return;
+  if (!isFaviconStyle(style) || style === (taken ?? chosenHere ?? current)) return;
+  current = style;
+  taken = style;
+  notify();
+}
+
+/** What the tab shows: a try, else the latest of a pick here and a save elsewhere; null for the icon it loaded with. */
+const onTab = (): FaviconStyle | null => previewing ?? taken ?? chosenHere;
 
 export function useInboxFavicon(): FaviconStyle | null {
   return useSyncExternalStore(subscribe, () => current, () => null);
@@ -104,6 +130,7 @@ export function useInboxFaviconBadgeHref(): string | null {
 export function resetInboxFaviconForTests(): void {
   current = null;
   chosenHere = null;
+  taken = null;
   previewing = null;
   notify();
 }

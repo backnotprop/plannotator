@@ -319,11 +319,11 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
     return context.dispatch(req);
   };
 
-  const openListener = (): number => {
+  const openListener = (port = 0): number => {
     if (listener) return listener.port as number;
     listener = Bun.serve({
       hostname: "127.0.0.1",
-      port: 0,
+      port,
       idleTimeout: 0,
       maxRequestBodySize: context.maxRequestBodySize,
       fetch: listenerFetch,
@@ -343,6 +343,31 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
     if (!closing) return;
     if (later) setTimeout(() => closing.stop(true), 250);
     else closing.stop(true);
+  };
+
+  /**
+   * config.json `inboxTailscaleAllow` was saved (POST /api/inbox/settings/tailscale-allow): while published, the gate
+   * takes the new list at once. A login no longer on it also loses what it holds open (an event stream): the listener
+   * closes every connection and opens again on the same port, which `tailscale serve` keeps pointing at, once the
+   * answer to the save (it may have come over this listener) is on its way.
+   */
+  const allowListChanged = () => {
+    if (!listener) return;
+    const before = state.allowed;
+    state.allowed = state.owner ? [state.owner] : resolveInboxTailscaleAllow(loadConfig());
+    if (!before.some((login) => !state.allowed.includes(login))) return;
+    const closing = listener;
+    const port = closing.port as number;
+    setTimeout(() => {
+      if (listener !== closing) return;
+      listener = null;
+      closing.stop(true);
+      try {
+        openListener(port);
+      } catch (error) {
+        state.error = `The tailnet listener could not open again on port ${port}: ${error instanceof Error ? error.message : String(error)}. Turn the window over your tailnet off and on.`;
+      }
+    }, 250);
   };
 
   // ── Process exit and terminal close while published ──
@@ -783,6 +808,7 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
     relayPort: () => (relayListener ? (relayListener.port as number) : null),
     enableForRun,
     noteServedRequest,
+    allowListChanged,
     state: snapshot,
     /** Published only because this run was started (or asked) with `--tailscale`: a restart must pass it on. */
     runOnly: () => runFlag && resolve().source === "flag",

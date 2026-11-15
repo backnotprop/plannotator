@@ -19,7 +19,7 @@ export interface InboxEventWindow {
   origin: string;
 }
 
-export const INBOX_EVENT_FRAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'ask', 'pins', 'priority', 'artifact-pins', 'tags', 'show', 'snoozes', 'thread-pulls', 'rows', 'sidebar', 'agent-faces', 'reactions', 'capabilities', 'tailscale', 'shapes', 'machine', 'machines', 'cards', 'outbox', 'heartbeat'] as const;
+export const INBOX_EVENT_FRAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'ask', 'pins', 'priority', 'artifact-pins', 'tags', 'show', 'snoozes', 'thread-pulls', 'rows', 'sidebar', 'agent-faces', 'reactions', 'prefs', 'capabilities', 'tailscale', 'shapes', 'machine', 'machines', 'cards', 'outbox', 'heartbeat'] as const;
 export type InboxEventFrameName = (typeof INBOX_EVENT_FRAMES)[number];
 export interface InboxEventFrame {
   name: InboxEventFrameName;
@@ -56,6 +56,9 @@ export interface InboxEventHandlers {
   onCatchUp?: () => void;
   onLive?: (live: boolean) => void;
 }
+
+/** Who hears `event: prefs` (saved keys; prefsLive.ts): every stream's frame goes to each. Never called by an older Inbox. */
+export const prefsFrameListeners = new Set<(keys: string[]) => void>();
 
 export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventHandlers): void {
   switch (frame.name) {
@@ -156,6 +159,14 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
       try {
         const data = JSON.parse(frame.data) as { reactions?: unknown; rev?: unknown };
         handlers.onReactions?.(data.reactions, data.rev);
+      } catch {
+      }
+      return;
+    case 'prefs':
+      try {
+        const data = JSON.parse(frame.data) as { keys?: unknown };
+        const keys = Array.isArray(data.keys) ? data.keys.filter((key): key is string => typeof key === 'string') : [];
+        if (keys.length > 0) for (const hear of prefsFrameListeners) hear(keys);
       } catch {
       }
       return;

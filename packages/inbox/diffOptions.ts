@@ -58,6 +58,16 @@ export function adoptSavedDiffOptions(saved: Partial<InboxDiffOptions> | null | 
   if (Object.keys(diffOptions).length > 0) configStore.init({ diffOptions });
 }
 
+/** Diff settings saved after this page read its settings (another window, an agent; `event: prefs`): drawn at once. */
+export function takeSavedDiffOptions(saved: Partial<InboxDiffOptions> | null | undefined): void {
+  const diffOptions: Record<string, unknown> = {};
+  for (const setting of SETTINGS) {
+    const value = saved?.[FIELDS[setting].wire];
+    if (value != null && value !== configStore.get(setting)) diffOptions[FIELDS[setting].config] = value;
+  }
+  if (Object.keys(diffOptions).length > 0) configStore.init({ diffOptions });
+}
+
 /** The person's choice: the cookie now, config.json a moment later. */
 export function chooseDiffOption<K extends InboxDiffSetting>(setting: K, value: SettingValue<K>): void {
   chosenHere.add(setting);
