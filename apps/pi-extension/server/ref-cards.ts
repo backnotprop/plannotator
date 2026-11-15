@@ -13,6 +13,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { createRefCards, handleRefCardRoute, REF_CARD_ROUTE, type RefCards, type RefRunner } from "../generated/ref-cards.ts";
 import { nodeRefCliRunner } from "../generated/ref-cards-node.ts";
 import { isRemoteSession } from "./network.ts";
+import { isSshTunnelRequest } from "./this-machine.ts";
 
 export type { RefRunner } from "../generated/ref-cards.ts";
 
@@ -41,7 +42,8 @@ export async function handleRefCards(
 			origin: header("origin"),
 			host: header("host") ?? "",
 			secFetchSite: header("sec-fetch-site"),
-			enabled: !isRemoteSession(),
+			// Remote mode: only an SSH session's own tunnel (isSshTunnelRequest) may drive gh / glab here.
+			enabled: !isRemoteSession() || isSshTunnelRequest(req),
 		},
 		cards,
 	);

@@ -75,7 +75,7 @@ test.skipIf(!process.env.T3_TEST_EXECUTABLE)("unchanged agent command through th
   // Workers started here exit 4 s after their last review settles (production: 10 min).
   const childEnv = { ...process.env, PLANNOTATOR_BROWSER: "/usr/bin/true", PLANNOTATOR_GLIMPSE: "0", PLANNOTATOR_T3_WORKER_IDLE_MS: "4000" };
   const runHook = async (entrypoint: string) => {
-    const hook = Bun.spawn([...cliCommand, "t3-hook"], { cwd: project, env: { ...childEnv, PLANNOTATOR_DATA_DIR: dataDir, CLAUDE_CODE_ENTRYPOINT: entrypoint },
+    const hook = Bun.spawn([...cliCommand, "t3-hook"], { cwd: project, env: { ...childEnv, PLANNOTATOR_RELAY_URL: "http://127.0.0.1:9", PLANNOTATOR_DATA_DIR: dataDir, CLAUDE_CODE_ENTRYPOINT: entrypoint },
       stdin: "pipe", stdout: "pipe", stderr: "pipe" });
     hook.stdin.write(JSON.stringify({ hook_event_name: "PreToolUse", tool_name: "Bash", tool_use_id: "toolu_OpeningReview", session_id: "native-session", cwd: project,
       tool_input: { command: "plannotator annotate notes.md --gate", description: "Open the review", timeout: 120_000 } }));

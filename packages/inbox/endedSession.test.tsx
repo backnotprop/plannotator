@@ -392,7 +392,7 @@ test.skipIf(!hasDom)('none live: the note says the reply will wait, Send sends a
   act(() => root?.unmount());
   host?.remove();
   const after = await render(threadOf(asking(), personReply()), { at: '2026-10-11T10:52:00.000Z', checked_at: null });
-  expect(after.querySelector('[data-delivery]')?.textContent).toBe(
+  expect(after.querySelector('[data-delivery] .ib-dl-text')?.textContent).toBe(
     "Saved for Claude Code. That session has ended; it gets this only if it's resumed.",
   );
   // The note is for before replying: once the reply is the last message, its own line says where it went.

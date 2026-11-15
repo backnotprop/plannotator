@@ -77,7 +77,7 @@ export function whichPath(cmd: string): string | null {
 		const bin = process.platform === "win32" ? "where" : "which";
 		// Pass the live env explicitly: under Bun, execFileSync without `env` looks
 		// the binary up on the STARTUP PATH, not the current process.env.PATH.
-		const out = execFileSync(bin, [cmd], { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"], env: process.env });
+		const out = execFileSync(bin, [cmd], { encoding: "utf-8", stdio: ["pipe", "pipe", "pipe"], env: process.env, windowsHide: true });
 		return out.split(/\r?\n/).map((line) => line.trim()).find(Boolean) ?? null;
 	} catch {
 		return null;
@@ -343,6 +343,7 @@ export function createAgentJobHandler(options: AgentJobHandlerOptions) {
 			proc = spawn(launch.command[0]!, launch.command.slice(1), {
 				cwd: spawnCwd,
 				windowsVerbatimArguments: launch.verbatim,
+				windowsHide: true,
 				stdio: [
 					hasStdinPrompt ? "pipe" : "ignore",
 					captureStdout ? "pipe" : "ignore",

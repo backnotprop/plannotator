@@ -65,6 +65,7 @@ export function createDriveList(options: { platform: string; env?: Readonly<Reco
     let drives: InboxDrive[] = [];
     if (stub?.drives) drives = stub.drives.map((d) => ({ path: d.path, name: nameOf(d.path), ...(d.network ? { network: true as const } : {}) }));
     else if (options.platform === "darwin") {
+      // windows-hide-guard: macOS only (/sbin/mount).
       const child = Bun.spawn(["/sbin/mount"], { stdin: "ignore", stdout: "pipe", stderr: "ignore", env: { PATH: "/usr/bin:/bin:/sbin" } });
       const timer = setTimeout(() => child.kill("SIGKILL"), MOUNT_TIMEOUT_MS);
       try {

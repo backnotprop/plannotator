@@ -5,6 +5,8 @@
  * "Ticks"), so a row and its thread never disagree. Pure, browser-safe.
  */
 
+import type { InboxT3WaitReason } from "./inbox-t3";
+
 /**
  * How long a reply (a message, a Re-ask note) waits on a busy session before it
  * goes into the running turn by itself, exactly as if the person pressed Send
@@ -59,7 +61,8 @@ export type InboxDeliveryReason =
   | "away"
   | "next_turn"
   | "ack_pending"
-  | "stopped";
+  | "stopped"
+  | "handed";
 
 /** How the session the item goes to is connected now: the fields the rule reads. */
 export interface InboxDeliveryConnection {
@@ -69,6 +72,7 @@ export interface InboxDeliveryConnection {
   send_now: boolean;
   /** Claude Code refused a reply and holds the session's replies until the person types there (`held`). Absent: no. */
   held?: boolean;
+  polls?: boolean;
 }
 
 export interface InboxDeliveryInput {
@@ -78,6 +82,12 @@ export interface InboxDeliveryInput {
   undelivered: boolean;
   /** Its session's connection took it and stopped while delivering it: that session never gets it. Absent: no. */
   stuck?: boolean;
+  handed?: boolean;
+  /**
+   * The T3 wake found no way in for it now and said why (`t3_wait`): it waits on T3, whatever the session's last
+   * poll says (a T3 that quit took its Claude with it while that poll still reads as live). Absent: no.
+   */
+  waitsOnT3?: boolean;
   /** The session that asked has ended (a reply). */
   askerEnded: boolean;
   /** The session it goes to is woken by its connection. */
@@ -139,8 +149,11 @@ export function inboxDeliveryState(input: InboxDeliveryInput): InboxDeliveryDeci
   if (input.delivered) return { state: "delivered", reason: "delivered", ...no, ...auto, ...(marked && input.intoTurn === false ? { turnEnded: true } : {}) };
   if (input.stuck) return { state: "undelivered", reason: "stuck", ...no };
   if (input.undelivered) return { state: "undelivered", reason: "undelivered", ...no };
+  if (input.handed) return { state: "queued", reason: "handed", ...no };
+  // Queued, never "Sending": the thread's line and the row then say it waits on T3 (approval "inbox-t3-reply-waiting-line").
+  if (input.waitsOnT3) return { state: "queued", reason: "next_turn", ...no };
   if (input.askerEnded) return { state: "saved", reason: "ended", ...no };
-  if (!input.wakes) return { state: "saved", reason: "reads", ...no };
+  if (!input.wakes || input.connection?.polls === true) return { state: "saved", reason: "reads", ...no };
   const connection = input.connection;
   // Its session does not poll now: it waits for the session to come back, whatever was pressed before.
   if (connection === null) return { state: "queued", reason: "away", ...no };
@@ -282,4 +295,6 @@ export interface InboxRowDelivery {
   auto_after_min?: number;
   /** Delivered after an automatic mark, but when the turn ended (the session's own Ask question held it). */
   turn_ended?: boolean;
+  /** It waits on T3 (`waitsOnT3`): why, as the thread's line words it (`inboxT3WaitLine`). Absent otherwise. Additive. */
+  t3_wait?: InboxT3WaitReason;
 }

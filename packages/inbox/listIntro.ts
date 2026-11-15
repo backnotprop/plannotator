@@ -47,8 +47,6 @@ export function listIntroPageClear(route: ListIntroRoute, over: { search: boolea
 export interface ListIntroLoad {
   /** The Inbox has it due (settings `list_intro.due`). */
   due: boolean;
-  /** The page is on this computer (a page through the tailnet never claims it). */
-  local: boolean;
   /** The list has loaded. */
   listLoaded: boolean;
   /** First run: no projects yet. */
@@ -72,7 +70,7 @@ export interface ListIntroLoad {
  * it). True: it is asked for as soon as `listIntroMayAsk` says so.
  */
 export function listIntroWanted(load: ListIntroLoad): boolean {
-  return load.due && load.local && load.listLoaded && !load.firstRun && load.rows >= LIST_INTRO_MIN_ROWS && !load.tourThisLoad && !load.otherDialogThisLoad;
+  return load.due && load.listLoaded && !load.firstRun && load.rows >= LIST_INTRO_MIN_ROWS && !load.tourThisLoad && !load.otherDialogThisLoad;
 }
 
 /**

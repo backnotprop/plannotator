@@ -9,8 +9,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { InboxMessage } from "@plannotator/core/inbox-types";
 import { doorRouteNames, doorWriteRoutes } from "./inbox-devices";
-import { forwardedReadSearch, outboxView, startsAgentThere } from "./inbox-machines";
-import { classifyAnswer, DOOR_WRITES, doorWriteKind, InboxOutbox, OUTBOX_KEEP_SETTLED_MS, OUTBOX_MAX_SERVER_ERRORS, replyIsStale, type OutboxAnswer, type OutboxEntry } from "./inbox-outbox";
+import { outboxView, startsAgentThere } from "./inbox-machines";
+import { classifyAnswer, DOOR_WRITES, doorRefusesBare, doorWriteKind, forwardsNow, InboxOutbox, OUTBOX_KEEP_SETTLED_MS, OUTBOX_MAX_SERVER_ERRORS, replyIsStale, type OutboxAnswer, type OutboxEntry } from "./inbox-outbox";
 
 const B = "ibx_01K00000000000000000000000";
 const C = "ibx_01K00000000000000000000001";
@@ -183,14 +183,6 @@ describe("remote launch: which forwarded writes start, stop or trust an agent", 
     expect(startsAgentThere("messages/m1/reply", { to: { launch: {} } })).toBe(false);
     expect(startsAgentThere("launch/lch_1/open", {})).toBe(false);
     expect(startsAgentThere("launch/settings", {})).toBe(false);
-  });
-
-  test("a tailnet guest's read through the forward never asks for the other machine's folder-trust facts; the owner's does", () => {
-    const asked = "?trust_agent=claude-code&trust_project=prj_1&thread=thr_1";
-    expect(forwardedReadSearch(asked, true)).toBe("?thread=thr_1");
-    expect(forwardedReadSearch("?trust_agent=claude-code&trust_project=prj_1", true)).toBe("");
-    expect(forwardedReadSearch(asked, false)).toBe(asked);
-    expect(forwardedReadSearch("?thread=thr_1", true)).toBe("?thread=thr_1");
   });
 });
 
@@ -454,9 +446,55 @@ describe("rule 8: every door write is classified, and only small JSON is held", 
     // On the door for a phone, in the table, and still never forwarded: a held one would answer no upload id.
     expect(DOOR_WRITES["POST uploads/reuse"]).toBe("local");
     expect(doorWriteKind("uploads/reuse")).toBeNull();
-    // A star is on the door for a phone and stays on the computer that holds it: never forwarded to a linked machine.
-    expect(doorWriteKind("threads/msg_1/pin")).toBeNull();
-    expect(doorWriteKind("pins")).toBeNull();
+    // A star and the person's Priority live on the thread's own machine (inbox-linked-marks): held and sent there like a snooze.
+    expect(doorWriteKind("threads/msg_1/pin")).toBe("set");
+    expect(doorWriteKind("pins")).toBe("set");
+    expect(doorWriteKind("threads/msg_1/priority")).toBe("set");
+    // An agent's face and given name live on the agent's own machine: held and sent there too.
+    expect(doorWriteKind("agent-faces")).toBe("set");
+    // A thread's tag lives on the thread's own machine, and a tag's rename, delete and Undo on each machine holding it.
+    expect(doorWriteKind("threads/msg_1/tags")).toBe("set");
+    expect(doorWriteKind("initiatives/ini_1")).toBe("set");
+    // A Board card lives on its project's machine: its writes are held and sent there. The lane marks run gh, and stay here.
+    expect(doorWriteKind("cards/crd_1")).toBe("set");
+    expect(doorWriteKind("cards/seen")).toBe("set");
+    expect(doorWriteKind("cards/dropped/seen")).toBe("set");
+    expect(doorWriteKind("cards/marks")).toBeNull();
+    expect(doorWriteKind("cards")).toBeNull();
+    // A linked machine's PR: closed, reopened or merged by that machine's gh / glab, never held. A thread's PRs are held.
+    // A review thread started there keeps its PRs there, never held either.
+    for (const verb of ["close", "reopen", "merge", "owner"]) expect(doorWriteKind(`pulls/${verb}`)).toBe("forge");
+    expect(doorWriteKind("pulls/review")).toBeNull();
+    expect(doorWriteKind("pulls/risk")).toBeNull();
+    expect(doorWriteKind("threads/msg_1/pulls")).toBe("set");
+    // A Combine, and a Tidy with the person's words, go now from the window or not at all: one held for days would
+    // archive or change threads nobody is looking at. A Tidy without words, a Combine's Stop and Undo are held.
+    expect(doorWriteKind("combine")).toBe("now");
+    expect(forwardsNow("combine", {})).toBe(true);
+    expect(forwardsNow("tidy", { words: "Close what shipped" })).toBe(true);
+    expect(forwardsNow("tidy", { words: "   " })).toBe(false);
+    expect(forwardsNow("tidy", {})).toBe(false);
+    expect(doorWriteKind("tidy")).toBe("append");
+    expect(forwardsNow("combine/cmb_01M7EQBR93W3RGJF4AA831AJ12/undo", {})).toBe(false);
+    expect(doorWriteKind("combine/cmb_01M7EQBR93W3RGJF4AA831AJ12/cancel")).toBe("set");
+    expect(forwardsNow("open-in/file/attach", {})).toBe(true);
+  });
+
+  test("the receiving door refuses a Combine or a worded Tidy without the window's mark, and nothing else", () => {
+    const bare = { window: false };
+    const pressed = { window: true };
+    expect(doorRefusesBare(bare, "combine", {})).toBe(true);
+    expect(doorRefusesBare(bare, "tidy", { words: "Close what shipped" })).toBe(true);
+    // A press in the other machine's window passes; so does any call not through the door (this Inbox's own window).
+    expect(doorRefusesBare(pressed, "combine", {})).toBe(false);
+    expect(doorRefusesBare(pressed, "tidy", { words: "Close what shipped" })).toBe(false);
+    expect(doorRefusesBare(null, "combine", {})).toBe(false);
+    // A Tidy without words is held and replayed without the mark: never refused.
+    expect(doorRefusesBare(bare, "tidy", { words: "   " })).toBe(false);
+    expect(doorRefusesBare(bare, "tidy", {})).toBe(false);
+    // A Combine's Stop and Undo are held too; the file attach has its own check (inbox-open-in.ts).
+    expect(doorRefusesBare(bare, "combine/cmb_01M7EQBR93W3RGJF4AA831AJ12/undo", {})).toBe(false);
+    expect(doorRefusesBare(bare, "open-in/file/attach", {})).toBe(false);
   });
 
   test("an Inbox that never holds a write keeps no outbox folder", () => {

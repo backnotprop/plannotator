@@ -14,7 +14,7 @@
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-debug-log.spec.ts`.
  */
 
-import { expect, test, devices, type Browser, type Page } from '@playwright/test';
+import { expect, HELD_DRIFT_OFF, test, devices, type Browser, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import net from 'node:net';
@@ -95,6 +95,7 @@ async function inbox(name: string, debug: boolean) {
   const env = {
     PATH: process.env.PATH ?? '',
     HOME: root,
+    PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9',
     PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_BROWSER: NO_BROWSER,
     PLANNOTATOR_INBOX_CONNECT: '0',
@@ -196,10 +197,12 @@ test('a healthy Send on this computer: press, the reply on both sides, clear, wi
   expect(lines.filter((l) => l.id === end.id && l.side === 'window').map((l) => l.ev)).toEqual(['req_start', 'req_head', 'req_end']);
   const order = [...lines].sort((a, b) => Number(a.seq ?? 0) - Number(b.seq ?? 0)).filter((l) => l.side === 'window' && l.id === end.id || l.ev === 'send_press' || l.ev === 'send_clear').map((l) => l.ev);
   expect(order).toEqual(['send_press', 'req_start', 'req_head', 'req_end', 'send_clear']);
-  expect(windowEv(lines, 'page_load').at(-1)?.protocol).toBeTruthy();
+  // The reload revalidates the cached page (304), so its HTTP version comes on the first answer over the network.
+  expect(windowEv(lines, 'page_load').at(-1)?.protocol ?? windowEv(lines, 'protocol').at(-1)?.protocol).toBeTruthy();
 });
 
 test('the reply never arrived: after a refresh the file shows the window started it and the server never saw it', async ({ browser }) => {
+  test.info().annotations.push({ type: HELD_DRIFT_OFF, description: 'the page reads through a link this test closes at its end' });
   const world = await inbox('never-arrived', true);
   const link = new Link(Number(new URL(world.url).port));
   await link.listen();
@@ -235,6 +238,7 @@ test('the reply never arrived: after a refresh the file shows the window started
 });
 
 test('the reply landed and its answer was lost: the server ended it, and the window has no end', async ({ browser }) => {
+  test.info().annotations.push({ type: HELD_DRIFT_OFF, description: 'the page reads through a link this test closes at its end' });
   const world = await inbox('answer-lost', true);
   const link = new Link(Number(new URL(world.url).port));
   await link.listen();
@@ -261,6 +265,7 @@ test('the reply landed and its answer was lost: the server ended it, and the win
 });
 
 test('a pick hung: the open request is the pick, and no reply was ever started', async ({ browser }) => {
+  test.info().annotations.push({ type: HELD_DRIFT_OFF, description: 'the page reads through a link this test closes at its end' });
   const world = await inbox('pick-hung', true);
   const link = new Link(Number(new URL(world.url).port));
   await link.listen();

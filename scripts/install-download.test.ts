@@ -22,6 +22,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, 
 import { createServer, type Server, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { gzipSync } from "node:zlib";
 import { NO_BROWSER } from "../tests/helpers/no-browser";
 
 const scriptsDir = import.meta.dir;
@@ -51,7 +52,10 @@ type Plan =
 interface SeenRequest {
   path: string;
   range: string | null;
+  head?: true;
 }
+
+const PACKED_NAME = /\.(tar\.xz|gz)$/;
 
 interface ReleaseServer {
   origin: string;
@@ -70,10 +74,10 @@ afterAll(async () => {
   for (const root of roots) rmSync(root, { recursive: true, force: true });
 });
 
-async function startReleaseServer(plans: Plan[]): Promise<ReleaseServer> {
+async function startReleaseServer(plans: Plan[], packed: Record<string, Buffer> = {}): Promise<ReleaseServer> {
   const requests: SeenRequest[] = [];
   const sockets = new Set<Socket>();
-  const issued = new Set<string>();
+  const issued = new Map<string, Buffer>();
   let nextSigned = 0;
   let port = 0;
 
@@ -84,35 +88,37 @@ async function startReleaseServer(plans: Plan[]): Promise<ReleaseServer> {
     if (end) sock.end();
   };
 
-  const serveSigned = (sock: Socket, path: string, start: number | null) => {
-    if (!issued.has(path)) {
+  const serveSigned = (sock: Socket, path: string, start: number | null, head: boolean) => {
+    const body = issued.get(path);
+    if (!body) {
       // An expired or reused signed URL: GitHub's is good for one hour.
       send(sock, "403 Forbidden", { "Content-Length": 0 });
       return;
     }
+    if (head) return send(sock, "200 OK", { "Content-Length": body.length });
     issued.delete(path);
     const plan = plans.shift() ?? { kind: "serve" };
-    const total = BINARY.length;
+    const total = body.length;
     const from = start ?? 0;
     if (plan.kind === "status") return send(sock, `${plan.code} Status`, { "Content-Length": 0 });
     if (plan.kind === "ignore-range" || start === null) {
-      if (plan.kind === "cut") return send(sock, "200 OK", { "Content-Length": total }, BINARY.subarray(0, plan.bytes));
-      if (plan.kind === "stall") return send(sock, "200 OK", { "Content-Length": total }, BINARY.subarray(0, plan.bytes), false);
+      if (plan.kind === "cut") return send(sock, "200 OK", { "Content-Length": total }, body.subarray(0, plan.bytes));
+      if (plan.kind === "stall") return send(sock, "200 OK", { "Content-Length": total }, body.subarray(0, plan.bytes), false);
       if (plan.kind === "garbage-cut") return send(sock, "200 OK", { "Content-Length": total }, Buffer.alloc(plan.bytes, 0x7a));
-      if (plan.kind === "short-promise") return send(sock, "200 OK", { "Content-Length": total + 1 }, BINARY);
+      if (plan.kind === "short-promise") return send(sock, "200 OK", { "Content-Length": total + 1 }, body);
       // No Content-Length: the body ends where the connection closes, so a
       // client cannot tell it is short.
-      if (plan.kind === "unsized-cut") return send(sock, "200 OK", {}, BINARY.subarray(0, plan.bytes));
-      return send(sock, "200 OK", { "Content-Length": total }, BINARY);
+      if (plan.kind === "unsized-cut") return send(sock, "200 OK", {}, body.subarray(0, plan.bytes));
+      return send(sock, "200 OK", { "Content-Length": total }, body);
     }
     if (from >= total) return send(sock, "416 Range Not Satisfiable", { "Content-Range": `bytes */${total}`, "Content-Length": 0 });
-    const rest = BINARY.subarray(from);
+    const rest = body.subarray(from);
     const range = { "Content-Range": `bytes ${from}-${total - 1}/${total}`, "Content-Length": rest.length };
     if (plan.kind === "cut") return send(sock, "206 Partial Content", range, rest.subarray(0, plan.bytes));
     if (plan.kind === "stall") return send(sock, "206 Partial Content", range, rest.subarray(0, plan.bytes), false);
     if (plan.kind === "garbage-cut") return send(sock, "206 Partial Content", range, Buffer.alloc(plan.bytes, 0x7a));
     if (plan.kind === "wrong-start") {
-      return send(sock, "206 Partial Content", { "Content-Range": `bytes 0-${total - 1}/${total}`, "Content-Length": total }, BINARY);
+      return send(sock, "206 Partial Content", { "Content-Range": `bytes 0-${total - 1}/${total}`, "Content-Length": total }, body);
     }
     return send(sock, "206 Partial Content", range, rest);
   };
@@ -126,9 +132,10 @@ async function startReleaseServer(plans: Plan[]): Promise<ReleaseServer> {
       if (head.includes("\r\n\r\n")) return;
       head += chunk.toString("latin1");
       if (!head.includes("\r\n\r\n")) return;
-      const path = head.split("\r\n")[0]!.split(" ")[1] ?? "";
+      const [method, path = ""] = head.split("\r\n")[0]!.split(" ");
+      const isHead = method === "HEAD";
       const rangeMatch = /^range:\s*bytes=(\d+)-\s*$/im.exec(head);
-      requests.push({ path, range: rangeMatch ? `bytes=${rangeMatch[1]}-` : null });
+      requests.push({ path, range: rangeMatch ? `bytes=${rangeMatch[1]}-` : null, ...(isHead ? { head: true as const } : {}) });
       const start = rangeMatch ? Number(rangeMatch[1]) : null;
       const pathname = path.split("?")[0]!;
       if (pathname.includes("/releases/download/") && pathname.endsWith(".sha256")) {
@@ -136,12 +143,15 @@ async function startReleaseServer(plans: Plan[]): Promise<ReleaseServer> {
         return send(sock, "200 OK", { "Content-Length": sum.length }, sum);
       }
       if (pathname.includes("/releases/download/")) {
+        const suffix = PACKED_NAME.exec(pathname)?.[0];
+        const body = suffix ? packed[suffix] : BINARY;
+        if (!body) return send(sock, "404 Not Found", { "Content-Length": 0 });
         nextSigned++;
         const signed = `/signed/${nextSigned}?sig=${nextSigned}`;
-        issued.add(signed);
+        issued.set(signed, body);
         return send(sock, "302 Found", { Location: `http://127.0.0.1:${port}${signed}`, "Content-Length": 0 });
       }
-      if (pathname.startsWith("/signed/")) return serveSigned(sock, path, start);
+      if (pathname.startsWith("/signed/")) return serveSigned(sock, path, start, isHead);
       send(sock, "404 Not Found", { "Content-Length": 0 });
     });
   });
@@ -150,8 +160,8 @@ async function startReleaseServer(plans: Plan[]): Promise<ReleaseServer> {
   const handle: ReleaseServer = {
     origin: `http://127.0.0.1:${port}`,
     requests,
-    attempts: () => requests.filter((r) => r.path.includes("/releases/download/") && !r.path.endsWith(".sha256")),
-    signed: () => requests.filter((r) => r.path.startsWith("/signed/")),
+    attempts: () => requests.filter((r) => r.path.includes("/releases/download/") && !r.path.endsWith(".sha256") && !PACKED_NAME.test(r.path)),
+    signed: () => requests.filter((r) => r.path.startsWith("/signed/") && !r.head),
     close: async () => {
       for (const sock of sockets) sock.destroy();
       await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -164,7 +174,7 @@ async function startReleaseServer(plans: Plan[]): Promise<ReleaseServer> {
 const REAL_CURL = Bun.which("curl");
 const BASH = Bun.which("bash");
 
-function sandbox() {
+function sandbox(setupStub?: (stub: string) => void) {
   const root = mkdtempSync(join(tmpdir(), "plannotator-download-test-"));
   roots.push(root);
   const home = join(root, "home");
@@ -192,11 +202,12 @@ exec "$REAL_CURL" "\${args[@]}"
   );
   writeFileSync(join(stub, "gh"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
   writeFileSync(join(stub, "git"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+  setupStub?.(stub);
   return { root, home, stub, data };
 }
 
-async function runInstallSh(server: ReleaseServer, env: Record<string, string> = {}) {
-  const s = sandbox();
+async function runInstallSh(server: ReleaseServer, env: Record<string, string> = {}, setupStub?: (stub: string) => void) {
+  const s = sandbox(setupStub);
   const log = join(s.home, "curl.log");
   const proc = Bun.spawn(
     [BASH!, join(scriptsDir, "install.sh"), "--version", "v99.9.9", "--non-interactive", "--minimal"],
@@ -339,10 +350,109 @@ describe.skipIf(process.platform === "win32" || !REAL_CURL || !BASH)("install.sh
   test("curl's own --retry is not used for the binary (it would throw the partial away)", async () => {
     const server = await startReleaseServer([]);
     const r = await runInstallSh(server);
-    const binaryCalls = r.curlCalls.filter((c) => c.includes("/releases/download/") && !c.endsWith(".sha256"));
+    const binaryCalls = r.curlCalls.filter((c) => c.includes("/releases/download/") && !c.endsWith(".sha256") && !PACKED_NAME.test(c));
     expect(binaryCalls).toHaveLength(1);
     expect(binaryCalls[0]).not.toContain("--retry");
     expect(binaryCalls[0]).toContain("--speed-limit 1 --speed-time 60");
+  }, 30_000);
+});
+
+describe.skipIf(process.platform === "win32" || !REAL_CURL || !BASH)("install.sh takes a compressed copy when the release has one (real curl, local server)", () => {
+  const machine = Bun.spawnSync(["uname", "-m"]).stdout.toString().trim();
+  const name = `plannotator-${process.platform === "darwin" ? "darwin" : "linux"}-${machine === "x86_64" || machine === "amd64" ? "x64" : "arm64"}`;
+  const tarXz = (content: Buffer) => {
+    const dir = mkdtempSync(join(tmpdir(), "plannotator-packed-"));
+    roots.push(dir);
+    writeFileSync(join(dir, name), content);
+    const made = Bun.spawnSync(["tar", "-cJf", join(dir, "out.tar.xz"), "-C", dir, name]);
+    if (made.exitCode !== 0) throw new Error(made.stderr.toString());
+    return readFileSync(join(dir, "out.tar.xz"));
+  };
+  const OTHER = Buffer.from("#!/bin/sh\necho not-the-release\n");
+  const packedGets = (server: ReleaseServer, suffix: string) =>
+    server.requests.filter((r) => !r.head && r.path.endsWith(`/${name}${suffix}`));
+
+  test("the .tar.xz is taken, a cut connection to it continues, and the unpacked file is checked against the binary's .sha256", async () => {
+    const server = await startReleaseServer([{ kind: "cut", bytes: 2_000 }], { ".tar.xz": tarXz(BINARY), ".gz": gzipSync(BINARY) });
+    const r = await runInstallSh(server);
+    expect(r.code).toBe(0);
+    expect(r.out).toContain(`Downloaded ${name}.tar.xz.`);
+    expect(r.out).toContain("SHA256 verified");
+    expect(r.installed.equals(BINARY)).toBe(true);
+    expect(server.signed().map((q) => q.range)).toEqual([null, "bytes=2000-"]);
+    expect(packedGets(server, ".gz")).toHaveLength(0);
+    expect(server.attempts()).toHaveLength(0);
+    expect(r.leftovers).toEqual([]);
+  }, 30_000);
+
+  test("a release with only the .gz: the .gz is taken", async () => {
+    const server = await startReleaseServer([], { ".gz": gzipSync(BINARY) });
+    const r = await runInstallSh(server);
+    expect(r.code).toBe(0);
+    expect(r.out).toContain(`Downloaded ${name}.gz.`);
+    expect(r.installed.equals(BINARY)).toBe(true);
+    expect(server.attempts()).toHaveLength(0);
+  }, 30_000);
+
+  test("a .tar.xz that never arrives, then a .gz that is not gzip: the binary itself is downloaded and installed", async () => {
+    const cut0 = Array.from({ length: 4 }, () => ({ kind: "cut", bytes: 0 }) as Plan);
+    const server = await startReleaseServer(cut0, { ".tar.xz": tarXz(BINARY), ".gz": Buffer.from("not gzip") });
+    const r = await runInstallSh(server);
+    expect(r.code).toBe(0);
+    expect(packedGets(server, ".tar.xz")).toHaveLength(4);
+    expect(packedGets(server, ".gz")).toHaveLength(1);
+    expect(r.out).toContain(`Downloaded ${name}.`);
+    expect(r.out).not.toContain("curl exit");
+    expect(r.installed.equals(BINARY)).toBe(true);
+    expect(server.attempts()).toHaveLength(1);
+    expect(r.leftovers).toEqual([]);
+  }, 30_000);
+
+  test("tar and gzip that fail: the binary itself is downloaded and installed", async () => {
+    const server = await startReleaseServer([], { ".tar.xz": tarXz(BINARY), ".gz": gzipSync(BINARY) });
+    const r = await runInstallSh(server, {}, (stub) => {
+      for (const tool of ["tar", "gzip"]) writeFileSync(join(stub, tool), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+    });
+    expect(r.code).toBe(0);
+    expect(r.out).toContain(`Downloaded ${name}.`);
+    expect(r.installed.equals(BINARY)).toBe(true);
+    expect(server.attempts()).toHaveLength(1);
+    expect(r.leftovers).toEqual([]);
+  }, 30_000);
+
+  test("compressed copies that unpack to other bytes are never installed: the binary itself is", async () => {
+    const server = await startReleaseServer([], { ".tar.xz": tarXz(OTHER), ".gz": gzipSync(OTHER) });
+    const r = await runInstallSh(server);
+    expect(r.code).toBe(0);
+    expect(packedGets(server, ".tar.xz")).toHaveLength(1);
+    expect(packedGets(server, ".gz")).toHaveLength(1);
+    expect(r.out).toContain(`Downloaded ${name}.`);
+    expect(r.installed.equals(BINARY)).toBe(true);
+  }, 30_000);
+
+  test("against the updater's pinned checksum, each link falls through and the binary's mismatch exits 113 with nothing replaced", async () => {
+    const markerDir = mkdtempSync(join(tmpdir(), "plannotator-mismatch-mark-"));
+    roots.push(markerDir);
+    const marker = join(markerDir, "checksum-mismatch");
+    const server = await startReleaseServer([], { ".tar.xz": tarXz(BINARY), ".gz": gzipSync(BINARY) });
+    const r = await runInstallSh(server, { PLANNOTATOR_EXPECTED_SHA256: `${name}=${"f".repeat(64)}`, PLANNOTATOR_UPDATE_MISMATCH_FILE: marker });
+    expect(r.code).toBe(113);
+    expect(r.out).toContain("Stopped: the v99.9.9 download doesn't match the checksum Plannotator fetched for it.");
+    expect(existsSync(marker)).toBe(true);
+    expect(packedGets(server, ".tar.xz")).toHaveLength(1);
+    expect(packedGets(server, ".gz")).toHaveLength(1);
+    expect(server.attempts()).toHaveLength(1);
+    expect(r.installed.toString()).toBe(OLD);
+    expect(r.leftovers).toEqual([]);
+  }, 30_000);
+
+  test("PLANNOTATOR_SKIP_COMPRESSED_DOWNLOAD=1 asks for no compressed copy", async () => {
+    const server = await startReleaseServer([], { ".tar.xz": tarXz(BINARY), ".gz": gzipSync(BINARY) });
+    const r = await runInstallSh(server, { PLANNOTATOR_SKIP_COMPRESSED_DOWNLOAD: "1" });
+    expect(r.code).toBe(0);
+    expect(r.out).toContain(`Downloaded ${name}.`);
+    expect(server.requests.some((q) => PACKED_NAME.test(q.path))).toBe(false);
+    expect(r.installed.equals(BINARY)).toBe(true);
   }, 30_000);
 });
 
@@ -509,6 +619,34 @@ describe.skipIf(PS_SHELLS.length === 0)("install.ps1 resumes a broken binary dow
       expect(failed.file).toBeNull();
     }, PS_TIMEOUT_MS);
 
+    test(`${name}: a .gz is taken, a cut connection to it continues, and the unpacked file is checked`, async () => {
+      const server = await startReleaseServer([{ kind: "cut", bytes: 2_000 }], { ".gz": gzipSync(BINARY) });
+      const r = await runPs1Download(shell, server);
+      expect(r.result).toBe("ok");
+      expect(r.out).toContain("Downloaded plannotator-windows-x64.exe.gz.");
+      expect(r.file?.equals(BINARY)).toBe(true);
+      expect(server.attempts()).toHaveLength(0);
+    }, PS_TIMEOUT_MS);
+
+    test(`${name}: a .gz that is not gzip, or unpacks to other bytes: the binary itself is downloaded`, async () => {
+      for (const gz of [Buffer.from("not gzip"), gzipSync(Buffer.from("other bytes"))]) {
+        const server = await startReleaseServer([], { ".gz": gz });
+        const r = await runPs1Download(shell, server);
+        expect(r.result).toBe("ok");
+        expect(r.out).toContain("Downloaded plannotator-windows-x64.exe.");
+        expect(r.file?.equals(BINARY)).toBe(true);
+        expect(server.attempts()).toHaveLength(1);
+      }
+    }, PS_TIMEOUT_MS);
+
+    test(`${name}: PLANNOTATOR_SKIP_COMPRESSED_DOWNLOAD=1 asks for no .gz`, async () => {
+      const server = await startReleaseServer([], { ".gz": gzipSync(BINARY) });
+      const r = await runPs1Download(shell, server, { PLANNOTATOR_SKIP_COMPRESSED_DOWNLOAD: "1" });
+      expect(r.result).toBe("ok");
+      expect(server.requests.some((q) => PACKED_NAME.test(q.path))).toBe(false);
+      expect(r.file?.equals(BINARY)).toBe(true);
+    }, PS_TIMEOUT_MS);
+
     test(`${name}: when both give up, the error stops the script and the partial file is removed`, async () => {
       const server = await startReleaseServer(Array.from({ length: 20 }, () => ({ kind: "cut", bytes: 0 }) as Plan));
       const r = await runPs1Download(shell, server);
@@ -579,6 +717,58 @@ async function runCmdDownload(server: ReleaseServer, env: Record<string, string>
   };
 }
 
+function extractCmdDownloadPacked(): string {
+  const cmd = readScript("install.cmd");
+  const start = cmd.indexOf("\n:DownloadPacked\n");
+  const end = cmd.indexOf("\ngoto :eof\n", start);
+  if (start < 0 || end < 0) throw new Error("could not locate :DownloadPacked in install.cmd");
+  return cmd.slice(start + 1, end + "\ngoto :eof\n".length);
+}
+
+async function runCmdDownloadPacked(server: ReleaseServer) {
+  const root = mkdtempSync(join(tmpdir(), "plannotator-cmd-packed-test-"));
+  roots.push(root);
+  const temp = join(root, "temp");
+  mkdirSync(temp);
+  const out = join(root, "download.exe");
+  const driver = join(root, "driver.cmd");
+  const lines = [
+    "@echo off",
+    "setlocal EnableDelayedExpansion",
+    'set "BINARY_URL=%DRV_URL%"',
+    'set "BINARY_NAME=plannotator-windows-x64.exe"',
+    'set "TEMP_FILE=%DRV_OUT%"',
+    `set "EXPECTED_CHECKSUM=${BINARY_SHA256.toUpperCase()}"`,
+    "set \"TAKEN=\"",
+    "call :DownloadPacked .gz",
+    "echo RESULT=[!TAKEN!]",
+    "exit /b 0",
+    extractCmdDownloadPacked(),
+    extractCmdDownloadBinary(),
+  ];
+  writeFileSync(driver, `${lines.join("\n")}\n`.replace(/\n/g, "\r\n"));
+  const proc = Bun.spawn([process.env.ComSpec ?? "cmd.exe", "/d", "/c", driver], {
+    env: {
+      ...process.env,
+      TEMP: temp,
+      TMP: temp,
+      DRV_URL: `${server.origin}/backnotprop/plannotator/releases/download/v99.9.9/plannotator-windows-x64.exe`,
+      DRV_OUT: out,
+      PLANNOTATOR_DOWNLOAD_RETRY_DELAY: "0",
+    },
+    cwd: root,
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  const [stdout, stderr] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
+  const text = stdout + stderr;
+  return {
+    taken: /RESULT=\[(.*)\]/.exec(text)?.[1] ?? `no result: ${text}`,
+    file: existsSync(out) ? readFileSync(out) : null,
+    leftovers: readdirSync(temp),
+  };
+}
+
 describe.skipIf(process.platform !== "win32")("install.cmd resumes a broken binary download (cmd.exe, curl.exe)", () => {
   test("a clean download is one request, with no Range", async () => {
     const server = await startReleaseServer([]);
@@ -623,5 +813,26 @@ describe.skipIf(process.platform !== "win32")("install.cmd resumes a broken bina
     expect(r.status).toBe("18");
     expect(server.attempts()).toHaveLength(4);
     expect(r.leftovers).toEqual([]);
+  }, PS_TIMEOUT_MS);
+});
+
+describe.skipIf(process.platform !== "win32")("install.cmd takes a .gz when the release has one (cmd.exe, curl.exe, powershell.exe)", () => {
+  test("a .gz is taken when it unpacks to the checksum, and a cut connection to it continues", async () => {
+    const server = await startReleaseServer([{ kind: "cut", bytes: 2_000 }], { ".gz": gzipSync(BINARY) });
+    const r = await runCmdDownloadPacked(server);
+    expect(r.taken).toBe("plannotator-windows-x64.exe.gz");
+    expect(r.file?.equals(BINARY)).toBe(true);
+    expect(server.signed().map((q) => q.range)).toEqual([null, "bytes=2000-"]);
+    expect(r.leftovers).toEqual([]);
+  }, PS_TIMEOUT_MS);
+
+  test("no .gz, one that is not gzip, or one that unpacks to other bytes: nothing is taken and nothing is left", async () => {
+    for (const packed of [{}, { ".gz": Buffer.from("not gzip") }, { ".gz": gzipSync(Buffer.from("other bytes")) }]) {
+      const server = await startReleaseServer([], packed);
+      const r = await runCmdDownloadPacked(server);
+      expect(r.taken).toBe("");
+      expect(r.file).toBeNull();
+      expect(r.leftovers).toEqual([]);
+    }
   }, PS_TIMEOUT_MS);
 });

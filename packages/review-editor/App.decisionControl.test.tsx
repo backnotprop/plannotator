@@ -550,6 +550,88 @@ describe.if(hasDom)("review decision control (agent mode)", () => {
     expect(submissions).toHaveLength(2);
   });
 
+  // #2913 gave plan review and annotate Mod+Shift+Enter for the note
+  // composer; code review answered the chord by POSTING the review instead,
+  // so a reviewer reaching for a note sent the decision with no note and no
+  // way back. Guards the open (nothing posted) and the send through it.
+  test("Mod+Shift+Enter opens the note composer instead of posting", async () => {
+    seededExternalAnnotations = [EXTERNAL_FINDING];
+    await mountReview();
+    await settle();
+    await settle();
+
+    expect(primaryButton()!.title).toContain("Send");
+    expect(noteInput()).toBeNull();
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", metaKey: true, shiftKey: true, bubbles: true, cancelable: true }));
+    });
+    await settle();
+
+    expect(noteInput()).not.toBeNull();
+    expect(submissions).toHaveLength(0);
+
+    await typeNote("one more pass on the retry path");
+    await pressNoteKey("Enter", { metaKey: true });
+
+    expect(submissions).toHaveLength(1);
+    expect(submissions[0]!.approved).toBe(false);
+    expect(submissions[0]!.feedback).toContain("one more pass on the retry path");
+  });
+
+  // The chord's request is a counter the header control reads. A control
+  // mounted after one press (the compact layout toggled away and back) must
+  // not take that old press as a new one and open the composer by itself.
+  test("a remounted header control does not reopen the composer for an old Mod+Shift+Enter", async () => {
+    let coarse = false;
+    const listeners = new Set<(event: MediaQueryListEvent) => void>();
+    // SAFETY: implements the MediaQueryList surface the shell hooks consume;
+    // `coarse` flips the compact touch layout, which drops the header control.
+    window.matchMedia = ((query: string) => ({
+      get matches() { return coarse && query.includes("pointer: coarse"); },
+      media: query,
+      onchange: null,
+      addListener: () => {},
+      removeListener: () => {},
+      addEventListener: (_type: string, listener: (event: MediaQueryListEvent) => void) => listeners.add(listener),
+      removeEventListener: (_type: string, listener: (event: MediaQueryListEvent) => void) => listeners.delete(listener),
+      dispatchEvent: () => true,
+    })) as unknown as typeof window.matchMedia;
+    const setCoarse = async (value: boolean) => {
+      coarse = value;
+      await act(async () => {
+        for (const listener of [...listeners]) listener({ matches: value } as MediaQueryListEvent);
+      });
+      await settle();
+    };
+
+    seededExternalAnnotations = [EXTERNAL_FINDING];
+    await mountReview();
+    await settle();
+    await settle();
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", metaKey: true, shiftKey: true, bubbles: true, cancelable: true }));
+    });
+    await settle();
+    expect(noteInput() !== null).toBe(true);
+    await pressNoteKey("Escape");
+    expect(noteInput() === null).toBe(true);
+
+    await setCoarse(true);
+    expect(caretButton() === null).toBe(true);
+    await setCoarse(false);
+    expect(caretButton() !== null).toBe(true);
+    expect(noteInput() === null).toBe(true);
+
+    // A new press still opens it.
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", metaKey: true, shiftKey: true, bubbles: true, cancelable: true }));
+    });
+    await settle();
+    expect(noteInput() !== null).toBe(true);
+    expect(submissions).toHaveLength(0);
+  });
+
   test("Mod+Enter fires the visible primary", async () => {
     await mountReview();
 

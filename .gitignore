@@ -119,3 +119,6 @@ packages/core/guide-viewer-manifest.ts
 # Playwright run results (local runs write them at the repo root)
 test-results/
 tests/helpers/.outside-scratch-*
+
+__pycache__/
+*.pyc

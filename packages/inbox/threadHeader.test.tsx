@@ -96,6 +96,8 @@ let host: HTMLElement | null = null;
 const restore: (() => void)[] = [];
 const snoozed: string[] = [];
 const calls: string[] = [];
+/** The ⋯ menu's Priority item for the next render; none, as from an older Inbox, unless a test sets it. */
+let priority: { on: boolean; onToggle: () => void } | undefined;
 
 afterEach(() => {
   if (!hasDom) return;
@@ -105,6 +107,7 @@ afterEach(() => {
   host = null;
   snoozed.length = 0;
   calls.length = 0;
+  priority = undefined;
   for (const undo of restore.splice(0).reverse()) undo();
 });
 
@@ -166,6 +169,7 @@ async function render(state: InboxListRow, phone = false, thread: InboxThread = 
         onSnooze={(until) => snoozed.push(until)}
         onUnsnooze={() => calls.push('unsnooze')}
         onPin={async () => {}}
+        priority={priority}
         onArtifacts={() => {}}
         onFull={() => {}}
         phone={phone}
@@ -260,6 +264,19 @@ for (const phone of [false, true]) {
     expect(menuItems(await openMore()).slice(0, 3)).toEqual(['Mark read', 'Snooze', '—']);
     await press(threadMenu()!.querySelector('[data-thread-read-item]')!);
     expect(calls).toEqual(['mark read']);
+  });
+
+  test.skipIf(!hasDom)(`${where} offers Add to Priority right after Star thread, and Remove from Priority for a thread in it`, async () => {
+    priority = { on: false, onToggle: () => calls.push('priority') };
+    await render(OPENED, phone);
+    expect(menuItems(await openMore()).slice(0, 6)).toEqual(['Mark unread', 'Snooze', '—', 'Star thread', 'Add to Priority', '—']);
+    await press(threadMenu()!.querySelector('[data-thread-priority-item]')!);
+    expect(calls).toEqual(['priority']);
+    act(() => root!.unmount());
+    host!.remove();
+    priority = { on: true, onToggle: () => {} };
+    await render(OPENED, phone);
+    expect(menuItems(await openMore()).slice(3, 5)).toEqual(['Star thread', 'Remove from Priority']);
   });
 
   test.skipIf(!hasDom)(`${where} offers every read action: Move back to the top when marked read, Mark read and Mark unread on a seen update held in New`, async () => {

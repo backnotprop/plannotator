@@ -345,7 +345,7 @@ async function setup(start: Folder): Promise<{ model: Model; real: Real; done: (
   mkdirSync(dataDir, { recursive: true })
   const server = await startInboxServer({ dataDir, version: 'test', binaryPath: null, phones: false, board: true, projectRootGit: quietGit })
   const session = { cwd: abs(start), root: abs(start) }
-  const host = realHost({ env: { PATH: `${bin}:/usr/bin:/bin`, HOME: process.env.HOME!, PLANNOTATOR_DATA_DIR: dataDir }, cwd: abs(start), store: new Map() })
+  const host = realHost({ env: { PATH: `${bin}:/usr/bin:/bin`, HOME: process.env.HOME!, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: dataDir }, cwd: abs(start), store: new Map() })
   const tools = await discoverInboxTools(host, dataDir)
   const link = new InboxLink({
     host,
