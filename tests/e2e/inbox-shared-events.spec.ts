@@ -269,6 +269,8 @@ async function handover(browser: Browser, how: 'close' | 'reload' | 'crash' | 'f
     // It is a follower now: what is written next reaches it too.
     await sendSome(w, 3);
   }
+  // Sampled to 2.5 s past the takeover, so a second stream still open 2 s after it is seen (and fails below).
+  if (how === 'close' || how === 'reload') while (Date.now() - at < takeover.value! + 2500) await new Promise((done) => setTimeout(done, 100));
   sampling = false;
   await sampler;
   // The tab in front never waited long for a record: its longest gap from the stall on.

@@ -90,9 +90,9 @@ export async function finger(page: Page, browserName: 'chromium' | 'webkit'): Pr
       async down(x, y, dx, dy, moves = 10) {
         at = { x, y };
         // The events carry their own times, 16 ms apart: the page reads a flick's speed from event.timeStamp, and a
-        // busy runner that delivers a move late would otherwise turn a flick into a slow drag. Never in the future:
-        // the i-th move is sent after at least i waits of 16 ms.
-        const t0 = Date.now() / 1000;
+        // busy runner that delivers a move late would otherwise turn a flick into a slow drag. The times start 16 ms
+        // back, so none is ahead of the clock: the i-th move, stamped 16 × (i - 1) ms after now, follows i - 1 waits.
+        const t0 = Date.now() / 1000 - 0.016;
         await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }], timestamp: t0 });
         for (let i = 1; i <= moves; i++) {
           at = { x: x + (dx * i) / moves, y: y + (dy * i) / moves };
