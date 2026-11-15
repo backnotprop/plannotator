@@ -6,7 +6,8 @@ import InboxShot from '../components/inbox/InboxShot.astro';
 import InboxPhone from '../components/inbox/InboxPhone.astro';
 import { INBOX_LAUNCHED, INBOX_POST_ID } from '../lib/inbox-launch';
 import { videoUrl } from '../lib/media';
-import installPrompt from '../lib/inbox-prompt.md?raw';
+import installPromptSource from '../lib/inbox-prompt.md?raw';
+import { buildInboxPrompt } from '../lib/llms';
 
 // /inbox/ is generated only once the Inbox launches: until then the deployed
 // site has no such page (src/lib/inbox-launch.ts).
@@ -29,7 +30,7 @@ const btn =
 // The hero's "Copy install prompt": the same file /inbox/prompt.md serves
 // ([inbox]/prompt.md.ts), inlined so the copy needs no fetch. Escaped for a
 // <script type="application/json"> body.
-const promptJson = JSON.stringify(installPrompt).replace(/</g, '\\u003c');
+const promptJson = JSON.stringify(buildInboxPrompt(installPromptSource)).replace(/</g, '\\u003c');
 const systems = [
   { id: 'unix', label: 'macOS / Linux / WSL', prompt: '$', command: install },
   { id: 'win', label: 'Windows', prompt: '>', command: 'irm https://plannotator.ai/install.ps1 | iex' },

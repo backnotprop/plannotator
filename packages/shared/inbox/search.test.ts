@@ -72,6 +72,14 @@ describe("text the index reads", () => {
     expect(text).not.toContain("Keep the budget");
   });
 
+  test("an author's coloured words (#3345) are read as words: no tag or style text", () => {
+    const body = ["Coverage fell to <span style=\"color: #d00000\">73.0%</span>.", "", "| Model | Rate |", "| --- | --- |", "| alpha | <font color=\"#b26a00\">93.5%</font> |"].join("\n");
+    const text = inboxSearchBodyText(body);
+    expect(text).toContain("Coverage fell to 73.0%.");
+    expect(text).toContain("93.5%");
+    expect(text).not.toMatch(/span|font|style|color|d00000/);
+  });
+
   test("a reply: the person's own words, not the generated first line and not the answers section", () => {
     const body = "Answered 2 questions, skipped 1.\n\nAdd jitter, please.\n\n## Answers to your questions\n\n1. Keep the budget? Yes";
     expect(inboxSearchReplyText(body)).toBe("Add jitter, please.");

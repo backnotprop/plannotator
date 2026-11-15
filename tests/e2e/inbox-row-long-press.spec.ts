@@ -24,7 +24,7 @@
  * PNGs land in PLANNOTATOR_ROW_LONG_PRESS_SHOTS (default /tmp/row-long-press-shots).
  */
 
-import { chromium, devices, expect, test, webkit, type Browser, type Page } from '@playwright/test';
+import { chromium, devices, expect, test, webkit, type Browser, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';

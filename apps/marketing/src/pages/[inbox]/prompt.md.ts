@@ -1,11 +1,12 @@
 import type { APIRoute } from 'astro';
 import { INBOX_LAUNCHED } from '../../lib/inbox-launch';
-// The Inbox install prompt, served at /inbox/prompt.md. One source file:
-// the /inbox/ page inlines the same ?raw import for its "Copy install prompt"
-// button, so the copied text and this file can never differ. (?raw, not a
-// runtime read: see llms.txt.ts for why.) Kept ASCII-only, because S3 serves
-// .md as text/markdown with no charset.
-import prompt from '../../lib/inbox-prompt.md?raw';
+import { buildInboxPrompt } from '../../lib/llms';
+// The Inbox install prompt, served at /inbox/prompt.md: inbox-prompt.md with the
+// per-agent steps from inbox-agents.ts in its slot. The /inbox/ page inlines the
+// same buildInboxPrompt() for its "Copy install prompt" button, so the copied
+// text and this file can never differ. (?raw, not a runtime read: see
+// llms/cli.md.ts for why.) Kept ASCII-only, as pasted text.
+import source from '../../lib/inbox-prompt.md?raw';
 
 // Generated with the page, behind the same launch switch.
 export function getStaticPaths() {
@@ -13,6 +14,6 @@ export function getStaticPaths() {
 }
 
 export const GET: APIRoute = () =>
-  new Response(prompt, {
+  new Response(buildInboxPrompt(source), {
     headers: { 'Content-Type': 'text/markdown; charset=utf-8' },
   });

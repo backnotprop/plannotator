@@ -242,6 +242,20 @@ test.skipIf(!hasDom)('a message that goes far from the view is disarmed, but nev
   expect(document.activeElement?.closest('[data-message-article]')?.getAttribute('data-message-article')).toBe(kept);
 });
 
+test.skipIf(!hasDom)('a thread hidden behind a full view keeps its controls: the same elements when it shows again', async () => {
+  await render();
+  const id = IDS[0]!;
+  expect(armed(id)).toBe(true);
+  const before = more(id);
+  const shown = Element.prototype.getBoundingClientRect;
+  Element.prototype.getBoundingClientRect = () => ({ top: 0, bottom: 0, left: 0, right: 0, width: 0, height: 0, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+  await report(id, false, false);
+  Element.prototype.getBoundingClientRect = shown;
+  await report(id, true, true);
+  expect(armed(id)).toBe(true);
+  expect(more(id) === before).toBe(true);
+});
+
 test.skipIf(!hasDom)('focus that lands in a far message stays on the same control once its controls are armed', async () => {
   await render();
   const id = IDS[5]!;
