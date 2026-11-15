@@ -588,6 +588,11 @@ const matchRecommendation = (
   plainBullets = false,
 ): number[] => {
   const match = (candidate: string): number => {
+    // The choice written exactly so first: `Recommended: Yes!` names `Yes!`, not a `Yes` before it.
+    const written = candidate.trim();
+    if (!written) return -1;
+    const exact = choices.findIndex((c, i) => c.label === written || raws[i]?.trim() === written || (names[i] ?? []).includes(written));
+    if (exact !== -1) return exact;
     const target = normalizeQuestionText(candidate);
     if (!target) return -1;
     return choices.findIndex(

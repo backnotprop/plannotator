@@ -2,9 +2,10 @@
  * A pick is stored, echoed and recorded as the very choice the person
  * picked, however close two choices' words are: two that share a long
  * start, one whose label begins another, ones that share the words before a
- * dash, with a picture. Two choices that read the same (case, spacing,
- * emphasis or end punctuation apart) are one answer for two choices: the send
- * is refused, in the body or in an attached file.
+ * dash, with a picture, or that differ only in case, end punctuation or an
+ * underscore (the recommendation names the one written exactly). Two choices
+ * that are the same once spaces are folded are one answer for two choices:
+ * the send is refused, in the body or in an attached file.
  *
  * What regresses if this fails: the reply tells the agent "Answer: <the
  * other choice>", or calls a pick the recommendation when the person took
@@ -45,6 +46,12 @@ const CLOSE: [string, string[]][] = [
   ["the same words before a dash", ["Yes — keep the flag", "Yes — drop the flag"]],
   ["a picture and an em dash", ["![A](a.png) Drawer A — closest", "![B](b.png) Drawer A — farthest"]],
   ["the same words before a dash, a picture after", ["Yes — keep it ![A](a.png)", "Yes — drop it ![B](b.png)"]],
+  ["end punctuation apart", ["Yes", "Yes!"]],
+  ["case apart", ["A", "a"]],
+  ["emphasis apart", ["**Ship it**", "Ship it"]],
+  ["a trailing dot apart", ["1.", "1"]],
+  ["an underscore apart", ["snake_case", "snakecase"]],
+  ["punctuation only", ["?", "!"]],
 ];
 
 describe("each pick names its own choice", () => {
@@ -69,7 +76,7 @@ describe("each pick names its own choice", () => {
   }
 });
 
-describe("two choices that read the same are refused at send", () => {
+describe("two choices that are the same once spaces are folded are refused at send", () => {
   const refused = (fn: () => unknown): InboxError => {
     try {
       fn();
@@ -80,19 +87,14 @@ describe("two choices that read the same are refused at send", () => {
     throw new Error("the send was taken");
   };
 
-  test("in the body: case, end punctuation, spacing or emphasis apart, and nothing is written", () => {
-    for (const pair of [["Ship it", "ship it."], ["Ship it", "Ship  it "], ["**Ship it**", "Ship it"]]) {
+  test("in the body: the same label, or the same once spaces are folded, and nothing is written", () => {
+    for (const pair of [["Ship it", "Ship it"], ["Ship it", "Ship  it\t"], ["Ship\tit", "Ship it"]]) {
       const { store, project } = open();
       const error = refused(() => store.sendMessage({ project_id: project.id, author: AGENT, body: block(pair) }));
       expect(error.code).toBe("validation_error");
-      expect(error.message).toStartWith('body: question "Which way?" has the ');
-      expect(error.message).toEndWith(", so a pick cannot tell them apart. Give each choice its own words.");
+      expect(error.message).toBe('body: question "Which way?" has the choice "Ship it" twice, so a pick cannot tell them apart. Give each choice its own words.');
       expect(store.listRows()).toEqual([]);
     }
-    const { store, project } = open();
-    expect(refused(() => store.sendMessage({ project_id: project.id, author: AGENT, body: block(["Ship it", "ship it."]) })).message).toBe(
-      'body: question "Which way?" has the choices "Ship it" and "ship it.", which differ only in case, spacing, emphasis or end punctuation, so a pick cannot tell them apart. Give each choice its own words.',
-    );
   });
 
   test("in an attached file: named by the file", () => {
@@ -104,10 +106,10 @@ describe("two choices that read the same are refused at send", () => {
         author: AGENT,
         body: "The plan is attached.",
         attachments: [plan],
-        attachment_questions: [{ attachment_id: plan.id, questions: parseInboxQuestionBlocks(block(["Keep it", "keep it!"])) }],
+        attachment_questions: [{ attachment_id: plan.id, questions: parseInboxQuestionBlocks(block(["Keep it", "Keep  it"])) }],
       }),
     );
-    expect(error.message).toStartWith('attachments: plan.md: question "Which way?" has the choices "Keep it" and "keep it!"');
+    expect(error.message).toStartWith('attachments: plan.md: question "Which way?" has the choice "Keep it" twice');
     expect(store.listRows()).toEqual([]);
   });
 });
