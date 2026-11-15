@@ -95,6 +95,7 @@
 .st-pick { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px 0 10px; border: 1px solid var(--border); border-radius: 7px; background: var(--background); color: var(--foreground); font: inherit; font-size: var(--ib-fs-13-5, 13.5px); line-height: 1; white-space: nowrap; cursor: pointer; }
 .st-pick svg.ib-ic { width: 12px; height: 12px; color: var(--muted-foreground); flex: none; }
 .st-pick[data-popup-open] { outline: 2px solid var(--ring); outline-offset: -1px; }
+:root:not(.light) .pn-inbox .st-pick { color-scheme: dark; }
 .st-time { padding: 0 6px 0 8px; }
 .st-cron { width: 13ch; cursor: text; }
 .st-w { color: var(--muted-foreground); }
