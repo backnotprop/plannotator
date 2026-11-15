@@ -248,6 +248,8 @@ export interface DeliveryLineInput {
   /** Its session's connection took it and stopped while delivering it (the sessions route's `asker.stuck`). */
   stuck?: boolean;
   handed?: boolean;
+  /** The T3 wake says why it cannot put it in now (`t3_wait`): queued, whatever the connection's last poll says. */
+  waitsOnT3?: boolean;
   /** When it began to wait on the busy session (the server's clock): the line says how long. */
   waitingSince?: string | null;
   /** When the clock toward going in by itself started (the server's); null: it does not go in by itself yet. */
@@ -271,6 +273,7 @@ export function deliveryLine(input: DeliveryLineInput): DeliveryLine {
     undelivered: !!input.undelivered,
     stuck: !!input.stuck,
     handed: !!input.handed,
+    waitsOnT3: !!input.waitsOnT3,
     askerEnded: !!input.askerEnded,
     wakes: input.wakes,
     sendingNow: input.sendingNow,
