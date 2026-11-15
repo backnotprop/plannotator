@@ -826,6 +826,8 @@ export function createInboxMachines(context: InboxMachinesContext) {
         if (req.headers.get("sec-fetch-site") !== "same-origin") return json({ error: "Folders are listed in the Inbox window only.", code: "window_only" }, 403);
         headers[MACHINE_WINDOW_HEADER] = "1";
       }
+      // A file a message names: only the window's read gets here (`forwardedFileReadRefusal`), said so to that machine.
+      if (FILE_READ_ROUTE.test(route)) headers[MACHINE_WINDOW_HEADER] = "1";
       try {
         return passAnswer(await peer.request(route, search, { method: "GET", headers, signal: req.signal }));
       } catch {

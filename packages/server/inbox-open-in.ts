@@ -54,7 +54,9 @@ import {
   inboxStatEtag,
   recordInboxAttachments,
   type InboxProjectFilePlace,
+  type InboxReadableFile,
 } from "@plannotator/shared/inbox/attachments";
+import { INBOX_MACHINE_FILE_WINDOW_ONLY_BODY } from "./inbox-machines";
 import { readFileCapped } from "@plannotator/shared/repo-file";
 import { sniffImageContentType } from "@plannotator/shared/review-image";
 import { sniffInboxVideo } from "@plannotator/shared/inbox/video";
@@ -137,6 +139,8 @@ export interface InboxOpenInRouteContext {
   pullFile: (pull: string, path: string) => Promise<InboxPullFile | null>;
   /** The person's home folder, by default this process's. */
   home?: string;
+  /** Who the device door handed this request in for: a linked machine (`window`: a press in a window there); else null. */
+  doorOf?: (req: Request) => { window: boolean } | null;
 }
 
 /**
@@ -387,6 +391,50 @@ export function createInboxOpenInRoute(context: InboxOpenInRouteContext) {
     return [...new Set(placesOf(scope, named).map((place) => join(place.root, place.relative)))];
   };
 
+  /**
+   * Whether the message names this path as the window sends it (as written; a link's own spelling, encoded or with
+   * backslashes): a whole word of its body, so `c/retry.ts` is not named by `src/retry.ts`.
+   */
+  const namedBy = (scope: FileScope, named: string): boolean => {
+    const message = typeof scope.message === "string" ? store.message(scope.message) : null;
+    if (!message || message.thread_id !== scope.thread || typeof named !== "string" || named === "") return false;
+    const body = message.body ?? "";
+    for (const form of new Set([named, encodeURI(named), named.replace(/\//g, "\\")])) {
+      for (let at = body.indexOf(form); at !== -1; at = body.indexOf(form, at + 1)) {
+        const before = at === 0 ? "" : body[at - 1]!;
+        const after = body[at + form.length] ?? "";
+        if (/^$|[\s(\[<`"']/.test(before) && /^$|[\s)\]>`"':#?,.;!]/.test(after)) return true;
+      }
+    }
+    return false;
+  };
+
+  /**
+   * How far a request reaches. This computer's window: any file but a secret (null). A linked machine's, through the
+   * device door: a path the message names, else only a file in the thread's folders (at their realpaths too), so its
+   * agent cannot read the rest of this computer through a thread.
+   */
+  const reachOf = (req: Request, scope: FileScope, named: string): string[] | null => {
+    if (!context.doorOf?.(req) || namedBy(scope, named)) return null;
+    const roots = placesOf({ thread: scope.thread, message: scope.message }, "x").map((place) => place.root);
+    return [...new Set(roots.flatMap((root) => [root, realpathOrNull(root) ?? root]))];
+  };
+  const within = (roots: string[] | null, path: string): boolean => roots === null || roots.some((root) => pathInside(root, path) !== null);
+
+  /** `checkInboxReadableFile` held to a reach: a candidate outside it, or one whose realpath leads out, is not here. */
+  const readableWithin = async (roots: string[] | null, scope: FileScope, named: string, keep: boolean): Promise<InboxReadableFile> => {
+    const file = await checkInboxReadableFile(candidatesOf(scope, named).filter((path) => within(roots, path)), refusedHere, { keep });
+    if (!file.ok || within(roots, file.path)) return file;
+    await file.handle?.close().catch(() => {});
+    return { ok: false, code: "missing" };
+  };
+
+  /** A linked machine's request that is not a press in a window there: refused, as its own Inbox refuses it. */
+  const notFromWindow = (req: Request): boolean => {
+    const door = context.doorOf?.(req);
+    return !!door && !door.window;
+  };
+
   /** The message's own attachment of that file (by its real path), when it carries one. */
   const attachedTo = (scope: FileScope, real: string): string | null => {
     const message = typeof scope.message === "string" ? store.message(scope.message) : null;
@@ -411,8 +459,8 @@ export function createInboxOpenInRoute(context: InboxOpenInRouteContext) {
   };
 
   /** The text of the file on this computer a message names, under the view's refusals and cap; null when there is none. */
-  const localText = async (scope: FileScope, named: string): Promise<string | null> => {
-    const file = await checkInboxReadableFile(candidatesOf(scope, named), refusedHere, { keep: true });
+  const localText = async (roots: string[] | null, scope: FileScope, named: string): Promise<string | null> => {
+    const file = await readableWithin(roots, scope, named, true);
     if (!file.ok) return null;
     try {
       if (!isInboxTextKind(file.kind)) return null;
@@ -433,19 +481,21 @@ export function createInboxOpenInRoute(context: InboxOpenInRouteContext) {
     if (req.method !== "GET") return json({ error: "Use GET." }, 405);
     const url = new URL(req.url);
     if (!isSameOriginOrNoOrigin(req.headers.get("origin"), url.host, req.headers.get("sec-fetch-site"))) return json(crossOriginRefusalBody(), 403);
+    if (notFromWindow(req)) return json(INBOX_MACHINE_FILE_WINDOW_ONLY_BODY, 403);
     const params = url.searchParams;
     const scope = scopeOf(params);
     const named = params.get("path") ?? "";
+    const roots = reachOf(req, scope, named);
     const clean = posix.normalize(named.replace(/\\/g, "/")).replace(/^\.\//, "");
     const name = clean.split("/").pop() || clean;
     const pulled = await pullVersion(scope, named);
     if (pulled) {
       // A comment attaches the file on this computer, so it is taken only where that file is the version shown.
-      const here = await localText(scope, named);
+      const here = await localText(roots, scope, named);
       const local_matches = here !== null && here === pulled.contents;
       return json({ found: true, name, path: clean, kind: kindOfName(name), contents: pulled.contents, local_matches, pull: { label: pulled.label, platform: pulled.platform, url: pulled.url } });
     }
-    const file = await checkInboxReadableFile(candidatesOf(scope, named), refusedHere, { keep: true });
+    const file = await readableWithin(roots, scope, named, true);
     if (!file.ok) return json({ found: false, name, path: clean, reason: file.code });
     const handle = file.handle!;
     try {
@@ -475,8 +525,11 @@ export function createInboxOpenInRoute(context: InboxOpenInRouteContext) {
     if (req.method !== "GET" && req.method !== "HEAD") return json({ error: "Use GET." }, 405);
     const url = new URL(req.url);
     if (!isSameOriginOrNoOrigin(req.headers.get("origin"), url.host, req.headers.get("sec-fetch-site"))) return json(crossOriginRefusalBody(), 403);
+    if (notFromWindow(req)) return json(INBOX_MACHINE_FILE_WINDOW_ONLY_BODY, 403);
     const params = url.searchParams;
-    const file = await checkInboxReadableFile(candidatesOf(scopeOf(params), params.get("path") ?? ""), refusedHere, { keep: true });
+    const scope = scopeOf(params);
+    const named = params.get("path") ?? "";
+    const file = await readableWithin(reachOf(req, scope, named), scope, named, true);
     if (!file.ok) return json({ found: false }, 404);
     // The handle that was checked serves the bytes: never the path again.
     const handle = file.handle!;
@@ -515,6 +568,7 @@ export function createInboxOpenInRoute(context: InboxOpenInRouteContext) {
    */
   const attachRoute = async (req: Request): Promise<Response> => {
     if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+    if (notFromWindow(req)) return json(INBOX_MACHINE_FILE_WINDOW_ONLY_BODY, 403);
     const body = await readBody(req);
     if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
     const scope = scopeOf(body);
@@ -525,11 +579,12 @@ export function createInboxOpenInRoute(context: InboxOpenInRouteContext) {
     // Refused before any bytes are copied, so a refusal leaves no blob behind.
     if (message.author.kind !== "agent") throw new InboxError("validation_error", "message_id: only an agent's message takes a file it names.", { field: "message_id" });
     if (!store.messageAnswerable(message.id)) throw new InboxError("thread_resolved", "This thread is resolved; reopen it to annotate.");
-    const file = await checkInboxReadableFile(candidatesOf(scope, body.path), refusedHere);
+    const roots = reachOf(req, scope, body.path);
+    const file = await readableWithin(roots, scope, body.path, false);
     if (!file.ok) throw new InboxError("attachment_missing", `${body.path} is not on this computer.`);
     // The pane showed the PR's version: a comment on it attaches this computer's file only when that is the same text.
     const pulled = await pullVersion(scope, body.path);
-    if (pulled && (await localText(scope, body.path)) !== pulled.contents) {
+    if (pulled && (await localText(roots, scope, body.path)) !== pulled.contents) {
       throw new InboxError("annotation_not_allowed", `${body.path} on this computer is not the pull request's version.`, { field: "path" });
     }
     const held = attachedTo(scope, file.path);
