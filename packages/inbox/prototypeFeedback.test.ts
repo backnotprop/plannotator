@@ -130,6 +130,10 @@ test("a file's query and fragment ride its page: options sharing one file at dif
   ]);
   expect(samePrototypePage(pages[0]!, pages[1]!)).toBe(false);
   expect(samePrototypePage(pages[0]!, { kind: 'file', attachmentId: FILE_A.id, name: 'a.html', start: '?variant=1' })).toBe(true);
+  // Public pages are the same page only when they are the same site.
+  const web = (siteId: string) => ({ kind: 'web' as const, siteId, url: `https://preview.example.com/${siteId}`, framed: true });
+  expect(samePrototypePage(web('liv_a'), web('liv_b'))).toBe(false);
+  expect(samePrototypePage(web('liv_a'), web('liv_a'))).toBe(true);
   // Three options' pages: the tab is plural.
   expect(prototypePageCount(variants.questions[0]!, variants, ROOT)).toBe(3);
   // Their comments are the file's, not one option's: the question names them.

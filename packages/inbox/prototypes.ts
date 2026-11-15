@@ -23,6 +23,7 @@ export const LIVE_FRAME_SANDBOX = 'allow-scripts allow-same-origin allow-forms a
 
 export type PrototypePage =
   | { kind: 'app'; siteId: string; url: string }
+  | { kind: 'web'; siteId: string; url: string; framed: boolean }
   /**
    * `start`: the query and fragment the line gave the file (`proto/a.html?variant=2#step-2` → `?variant=2#step-2`),
    * `""` for none. The page opens with them, as a tab would, so several options can show one file at different
@@ -39,7 +40,7 @@ export interface PrototypeQuestion {
 
 /** What they need from the message that asked it. */
 export interface PrototypeMessage {
-  live_sites?: readonly Pick<InboxLiveSiteRef, 'id' | 'url'>[];
+  live_sites?: readonly Pick<InboxLiveSiteRef, 'id' | 'url' | 'web' | 'framed'>[];
   attachments?: readonly Pick<InboxAttachment, 'id' | 'path' | 'named_path' | 'name' | 'kind'>[];
   base_path?: string | null;
 }
@@ -48,7 +49,7 @@ export interface PrototypeMessage {
 const SCHEME_RE = /^[a-z][a-z0-9+.-]*:/i;
 
 /** An app's address, matched to the message's checked sites (its fragment aside), or null. */
-export function prototypeSiteOf(target: string | undefined, sites: PrototypeMessage['live_sites']): { id: string; url: string } | null {
+export function prototypeSiteOf(target: string | undefined, sites: PrototypeMessage['live_sites']): NonNullable<PrototypeMessage['live_sites']>[number] | null {
   if (!target || !sites || sites.length === 0) return null;
   try {
     const url = new URL(target.trim());
@@ -64,7 +65,8 @@ export function prototypePageOf(target: string | undefined, message: PrototypeMe
   if (!target) return null;
   if (SCHEME_RE.test(target.trim())) {
     const site = prototypeSiteOf(target, message.live_sites);
-    return site ? { kind: 'app', siteId: site.id, url: site.url } : null;
+    if (!site) return null;
+    return site.web ? { kind: 'web', siteId: site.id, url: site.url, framed: site.framed !== false } : { kind: 'app', siteId: site.id, url: site.url };
   }
   const attachment = attachmentForLink(target, { attachments: message.attachments ?? [], root, base: message.base_path ?? null });
   return attachment && attachment.kind === 'html' ? { kind: 'file', attachmentId: attachment.id, name: attachment.name, start: prototypeStart(target) } : null;
@@ -76,10 +78,10 @@ export function prototypeStart(target: string): string {
   return `${search === '?' ? '' : search}${hash}`;
 }
 
-/** Two options show the same page: the same app, or the same file with the same query and fragment. */
+/** Two options show the same page: the same site, or the same file with the same query and fragment. */
 export function samePrototypePage(a: PrototypePage | null, b: PrototypePage | null): boolean {
   if (!a || !b || a.kind !== b.kind) return false;
-  if (a.kind === 'app') return a.siteId === (b as typeof a).siteId;
+  if (a.kind !== 'file') return a.siteId === (b as typeof a).siteId;
   return a.attachmentId === (b as typeof a).attachmentId && a.start === (b as typeof a).start;
 }
 
@@ -128,8 +130,8 @@ export function prototypeNames(
   const attachments = new Map<string, string>();
   const name = (page: PrototypePage | null, words: string) => {
     if (!page) return;
-    const map = page.kind === 'app' ? sites : attachments;
-    const id = page.kind === 'app' ? page.siteId : page.attachmentId;
+    const map = page.kind === 'file' ? attachments : sites;
+    const id = page.kind === 'file' ? page.attachmentId : page.siteId;
     if (!map.has(id)) map.set(id, words);
   };
   for (const message of messages) {
