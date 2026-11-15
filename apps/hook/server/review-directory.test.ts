@@ -52,7 +52,7 @@ function fixture() {
   return { root, caller, target, dataDir };
 }
 
-async function launch(cwd: string, args: string[], dataDir: string, bridge = false, invocationCwd = cwd) {
+async function launch(cwd: string, args: string[], dataDir: string, bridge = false, invocationCwd = cwd, extraEnv: Record<string, string> = {}) {
   const ready = join(dataDir, `ready-${crypto.randomUUID()}.json`);
   const proc = Bun.spawn([process.execPath, "run", entry, ...(bridge ? ["opencode-review-directory"] : ["review", ...args, "--json"])], {
     cwd,
@@ -69,6 +69,7 @@ async function launch(cwd: string, args: string[], dataDir: string, bridge = fal
       PLANNOTATOR_GIT_REMOTE_CHECK: "0",
       PLANNOTATOR_REVIEW_PROGRESS: "1",
       PLANNOTATOR_FEEDBACK_HISTORY: "1",
+      ...extraEnv,
     },
     stdin: bridge ? new TextEncoder().encode(JSON.stringify({ arguments: args.map(arg => `"${arg}"`).join(" ") })) : "ignore",
     stdout: "pipe",
@@ -187,6 +188,34 @@ for (const bridge of [false, true]) {
       session.stop();
     }
   }, 15_000);
+
+  test(`${bridge ? "OpenCode bridge" : "CLI"}: a named directory wins over the caller's exported GIT_DIR`, async () => {
+    const { caller, target, dataDir } = fixture();
+    // As from a git hook of the caller's repo, or a shell that exported them.
+    const callerGit = { GIT_DIR: join(caller, ".git"), GIT_WORK_TREE: caller };
+    for (const env of [{ GIT_DIR: callerGit.GIT_DIR }, callerGit]) {
+      const session = await launch(caller, ["--diff-type", "uncommitted", target], dataDir, bridge, caller, env);
+      try {
+        const diff = await session.api("/api/diff");
+        expect(diff.gitContext.cwd).toBe(target);
+        expect(diff.rawPatch).toContain("+export const selected = 2;");
+        expect(diff.rawPatch).not.toContain("caller");
+        await session.api("/api/exit", {});
+        await session.finish();
+      } finally {
+        session.stop();
+      }
+    }
+    // With no directory named, the exported repository is still the one reviewed.
+    const session = await launch(target, ["--diff-type", "uncommitted"], dataDir, bridge, target, callerGit);
+    try {
+      expect((await session.api("/api/diff")).rawPatch).toContain("+export const caller = 2;");
+      await session.api("/api/exit", {});
+      await session.finish();
+    } finally {
+      session.stop();
+    }
+  }, 45_000);
 }
 
 test("direct CLI honors PLANNOTATOR_CWD only for an explicit directory", async () => {

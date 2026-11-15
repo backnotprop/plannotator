@@ -146,8 +146,9 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   await page.locator('.ib-rbox textarea').first().fill(WORDS);
   await page.getByRole('button', { name: /^Send/ }).last().click();
   await expect(page.locator('[data-author="person"]')).toHaveCount(1);
-  const read = await agent.readThread(thread);
-  const reply = ((read.messages ?? []) as { id: string; author: { kind: string } }[]).find((m) => m.author.kind === 'person')!.id;
+  const stored = async () => (((await agent.readThread(thread)).messages ?? []) as { id: string; author: { kind: string } }[]).find((m) => m.author.kind === 'person')?.id;
+  await expect.poll(stored).toBeTruthy();
+  const reply = (await stored())!;
   const done = await agent.send({ project_path: billing, thread: 'retry', reply_to: reply, body: DONE });
   const last = await agent.send({ project_path: billing, thread: 'retry', reply_to: done.message_id as string, body: LAST });
   world = {
