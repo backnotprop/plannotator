@@ -159,8 +159,12 @@ const description =
               data-shot-pane={l.key}
               hidden={i !== 0}
             >
-              <img class="sd-shot-light" src={`/assets/semantic-labels/diff-${l.key}-light.webp`} alt={l.alt} width="2000" loading={i === 0 ? 'eager' : 'lazy'} />
-              <img class="sd-shot-dark" src={`/assets/semantic-labels/diff-${l.key}-dark.webp`} alt={l.alt} width="2000" loading={i === 0 ? 'eager' : 'lazy'} />
+              {['light', 'dark'].map((t) => (
+                <picture class={`sd-shot-${t}`}>
+                  <source media="(max-width: 640px)" srcset={`/assets/semantic-labels/diff-${l.key}-${t}-phone.webp`} />
+                  <img src={`/assets/semantic-labels/diff-${l.key}-${t}.webp`} alt={l.alt} width="2000" loading={i === 0 ? 'eager' : 'lazy'} />
+                </picture>
+              ))}
             </div>
           ))}
         </figure>
@@ -611,11 +615,6 @@ const description =
 
   .sd-shot-pane[hidden] { display: none; }
 
-  @media (max-width: 640px) {
-    .sd-shot { overflow-x: auto; }
-
-    .sd-shot img { width: 960px !important; max-width: none; }
-  }
 
   .sd-shot img {
     display: block;
