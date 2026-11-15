@@ -18,7 +18,7 @@
     "pierre-drift": "bun scripts/pierre-drift.ts"
   },
   "dependencies": {
-    "@tree-sitter-grammars/tree-sitter-kotlin": "1.1.0",
+    "@tree-sitter-grammars/tree-sitter-kotlin": "file:../../vendor/tree-sitter-kotlin",
     "@vscode/diff": "^0.0.2-133",
     "diff": "^8.0.4",
     "tree-sitter-c-sharp": "^0.23.5",
