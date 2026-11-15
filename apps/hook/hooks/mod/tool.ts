@@ -33,6 +33,7 @@ export interface PlannotatorToolInput {
    * `--tailscale`). Only from a host that parses with `{ tailscale: true }`.
    */
   tailscale?: boolean
+  cloudflareAccess?: boolean
   /** close: a session id (`pn-` + 6 hex, as the results name it) or "all". */
   session?: string
 }
@@ -91,10 +92,13 @@ export const PLANNOTATOR_TOOL_TAILSCALE_LINE =
  * The description for a host that accepts `tailscale` (the Claude Code mod):
  * the plain description with the tailscale line after the action lines.
  */
+export const PLANNOTATOR_TOOL_CLOUDFLARE_ACCESS_LINE =
+  '- `cloudflareAccess: true` (annotate, review, last): open the page at the user\'s own Cloudflare Access address instead, for another device; only once they set it up (`plannotator inbox cloudflare-access setup`) and ask for it. Not together with `tailscale`.'
+
 export const PLANNOTATOR_TOOL_TAILSCALE_DESCRIPTION = (() => {
   const lines = PLANNOTATOR_TOOL_DESCRIPTION.split('\n')
   const lastAction = lines.findIndex((line) => line.startsWith('- action "close"'))
-  return [...lines.slice(0, lastAction + 1), PLANNOTATOR_TOOL_TAILSCALE_LINE, ...lines.slice(lastAction + 1)].join('\n')
+  return [...lines.slice(0, lastAction + 1), PLANNOTATOR_TOOL_TAILSCALE_LINE, PLANNOTATOR_TOOL_CLOUDFLARE_ACCESS_LINE, ...lines.slice(lastAction + 1)].join('\n')
 })()
 
 /** The input schema for a host that accepts `tailscale`: the plain schema plus that one property. */
@@ -105,6 +109,10 @@ export const PLANNOTATOR_TOOL_TAILSCALE_INPUT_SCHEMA = {
     tailscale: {
       type: 'boolean',
       description: 'annotate, review, last: serve the page over the user\'s tailnet (HTTPS, never public), to open on another device. "Ask this session" works there for the computer owner\'s Tailscale login.',
+    },
+    cloudflareAccess: {
+      type: 'boolean',
+      description: 'annotate, review, last: open the page at the user\'s Cloudflare Access address (set up with `plannotator inbox cloudflare-access setup`), for their e-mail only, on another device. Not with tailscale.',
     },
   },
 } as const
@@ -124,6 +132,9 @@ export interface PlannotatorToolParseOptions {
 export const PLANNOTATOR_TOOL_TAILSCALE_UNAVAILABLE_TEXT =
   'Plannotator did not open: the installed Plannotator is too old to open a review over the tailnet from this tool. Ask the user to update Plannotator (`plannotator update`), or open it without `tailscale` for now.'
 
+export const PLANNOTATOR_TOOL_CLOUDFLARE_ACCESS_UNAVAILABLE_TEXT =
+  'Plannotator did not open: the installed Plannotator is too old to open a review through Cloudflare Access from this tool. Ask the user to update Plannotator (`plannotator update`), or open it without `cloudflareAccess` for now.'
+
 /**
  * Whether a CLI's startup error for a `tailscale` call is an OLDER CLI's
  * refusal of the flag itself (it read `--tailscale` as a file, an unknown
@@ -134,9 +145,9 @@ export const PLANNOTATOR_TOOL_TAILSCALE_UNAVAILABLE_TEXT =
 export function isOlderCliTailscaleRefusal(errorText: string): boolean {
   if (errorText.includes('--tailscale:')) return false
   return (
-    /File not found: [^\n]*--tailscale/.test(errorText) ||
+    /File not found: [^\n]*--(?:tailscale|cloudflare-access)/.test(errorText) ||
     errorText.includes('--tailscale is only supported with') ||
-    /(?:unknown|unrecognized|unexpected) (?:option|flag|argument)[^\n]*--tailscale/i.test(errorText)
+    /(?:unknown|unrecognized|unexpected) (?:option|flag|argument)[^\n]*--(?:tailscale|cloudflare-access)/i.test(errorText)
   )
 }
 
@@ -222,7 +233,7 @@ export function parsePlannotatorToolInput(value: unknown, parseOptions: Plannota
   const fail = (error: string): PlannotatorToolParse => ({ ok: false, error: `Invalid plannotator call: ${error}.` })
   if (!isRecord(value)) return fail('the input must be an object')
   for (const key of Object.keys(value)) {
-    if (!TOOL_KEYS.includes(key) && !(key === 'tailscale' && parseOptions.tailscale === true)) return fail(`unknown field "${key}"`)
+    if (!TOOL_KEYS.includes(key) && !((key === 'tailscale' || key === 'cloudflareAccess') && parseOptions.tailscale === true)) return fail(`unknown field "${key}"`)
   }
   const action = value.action
   if (typeof action !== 'string' || !ACTIONS.includes(action as PlannotatorToolAction)) {
@@ -271,6 +282,13 @@ export function parsePlannotatorToolInput(value: unknown, parseOptions: Plannota
     if (typeof fields.tailscale !== 'boolean') return fail('tailscale must be true or false')
     if (fields.tailscale && !opens) return fail('tailscale is for actions "annotate", "review" and "last" only')
     if (fields.tailscale) input.tailscale = true
+  }
+
+  if (fields.cloudflareAccess !== undefined) {
+    if (typeof fields.cloudflareAccess !== 'boolean') return fail('cloudflareAccess must be true or false')
+    if (fields.cloudflareAccess && !opens) return fail('cloudflareAccess is for actions "annotate", "review" and "last" only')
+    if (fields.cloudflareAccess && input.tailscale) return fail('use tailscale or cloudflareAccess, not both')
+    if (fields.cloudflareAccess) input.cloudflareAccess = true
   }
 
   if (fields.options !== undefined) {
@@ -335,6 +353,7 @@ export function plannotatorToolArgs(input: PlannotatorToolInput): string[] {
         ...(input.gate ? ['--gate'] : []),
         ...(input.options?.markdown ? ['--markdown'] : []),
         ...(input.tailscale ? ['--tailscale'] : []),
+        ...(input.cloudflareAccess ? ['--cloudflare-access'] : []),
       ]
     case 'review':
       // A review's `gate` is the host's alone (deliver a bare approval as a
@@ -343,10 +362,11 @@ export function plannotatorToolArgs(input: PlannotatorToolInput): string[] {
       return [
         ...(input.options?.base ? ['--base', input.options.base] : []),
         ...(input.tailscale ? ['--tailscale'] : []),
+        ...(input.cloudflareAccess ? ['--cloudflare-access'] : []),
         ...plannotatorToolTargets(input),
       ]
     case 'last':
-      return input.tailscale ? ['--tailscale'] : []
+      return input.tailscale ? ['--tailscale'] : input.cloudflareAccess ? ['--cloudflare-access'] : []
     case 'list':
     case 'close':
       return []
@@ -876,6 +896,7 @@ export function plannotatorCommandToToolInput(
     if (word === '--gate' && (action === 'annotate' || action === 'review')) call.gate = true
     else if (word === '--markdown' && action === 'annotate') options.markdown = true
     else if (word === '--tailscale' && parseOptions.tailscale === true) call.tailscale = true
+    else if (word === '--cloudflare-access' && parseOptions.tailscale === true) call.cloudflareAccess = true
     else if (word === '--base' && action === 'review') {
       const value = rest[index + 1]
       if (value === undefined || value.startsWith('-')) return null

@@ -518,6 +518,16 @@ export interface TailscaleSettings {
   exposed?: { https_port: number | null; target: string | null }[];
 }
 
+export interface CloudflareAccessSettings {
+  on: boolean;
+  configured: boolean;
+  url: string | null;
+  error: string | null;
+  port: number | null;
+  allowed: string[];
+  tunnel: { state: 'starting' | 'connected' | 'retrying' | 'missing' | 'stopped'; pid: number | null; connections: number; restarts: number; error: string | null } | null;
+}
+
 /** Split (old beside new) or Unified (one column): the diff layout code review and guided reviews share. */
 export type InboxDiffStyle = 'split' | 'unified';
 
@@ -548,6 +558,7 @@ export interface SettingsModel {
   serverSession: string;
   /** Absent from an Inbox that predates "Over your tailnet". */
   tailscale?: TailscaleSettings;
+  cloudflareAccess?: CloudflareAccessSettings | null;
   /** This page reached the Inbox through the tailnet (the switch cannot be turned on from there). */
   via?: 'local' | 'tailnet';
   version: string;

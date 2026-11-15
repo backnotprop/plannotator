@@ -1257,6 +1257,7 @@ export function SettingsPage(props: SettingsPageProps) {
           <DevicesSection
             phones={phonesOn ? phones : null}
             tailscale={settings.tailscale}
+            cloudflareAccess={settings.cloudflareAccess}
             via={via}
             tailscaleBusy={tailscaleBusy}
             onToggleTailscale={onToggleTailscale}

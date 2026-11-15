@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { inboxApi, type LanState, type PairedDevice, type TailnetState, type TailscaleSettings } from '../api';
+import { inboxApi, type CloudflareAccessSettings, type LanState, type PairedDevice, type TailnetState, type TailscaleSettings } from '../api';
 import { shortTime } from '../format';
 import { Icon, TailscaleMark } from '../icons';
 import { PairFlow } from './PairFlow';
 import { Tip } from './Tip';
+import { ThroughCloudflare } from './ThroughCloudflare';
 
 const PLATFORM: Record<string, string> = { ios: 'iPhone', android: 'Android' };
 
@@ -372,6 +373,7 @@ export interface DevicesSectionProps {
   /** Null: this Inbox does not serve phones (PLANNOTATOR_INBOX_PHONES off), so Devices shows Over your tailnet only. */
   phones: PhonesState | null;
   tailscale: TailscaleSettings | undefined;
+  cloudflareAccess?: CloudflareAccessSettings | null;
   via: 'local' | 'tailnet';
   tailscaleBusy: boolean;
   onToggleTailscale: (next: boolean, replaceExposed?: boolean) => void;
@@ -386,7 +388,7 @@ export interface DevicesSectionProps {
  * Over your tailnet for browsers on other devices, the difference written
  * out (owner, decision 2).
  */
-export function DevicesSection({ phones, tailscale, via, tailscaleBusy, onToggleTailscale, pairing, onPairing }: DevicesSectionProps) {
+export function DevicesSection({ phones, tailscale, cloudflareAccess, via, tailscaleBusy, onToggleTailscale, pairing, onPairing }: DevicesSectionProps) {
   // The owner pairs and switches from this computer or any of their own devices over the tailnet (owner ruling 2026-11-11).
   const pairButton = useRef<HTMLButtonElement>(null);
   const [justPaired, setJustPaired] = useState(false);
@@ -486,6 +488,7 @@ export function DevicesSection({ phones, tailscale, via, tailscaleBusy, onToggle
         </>
       )}
       {tailscale && <OverYourTailnet state={tailscale} via={via} busy={tailscaleBusy} onToggle={onToggleTailscale} />}
+      {cloudflareAccess?.configured && <ThroughCloudflare state={cloudflareAccess} />}
     </>
   );
 }

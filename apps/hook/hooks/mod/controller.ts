@@ -83,6 +83,7 @@ import {
   plannotatorUnknownSessionText,
   PLANNOTATOR_TOOL_BUNDLE_UNAVAILABLE_TEXT,
   PLANNOTATOR_TOOL_TAILSCALE_UNAVAILABLE_TEXT,
+  PLANNOTATOR_TOOL_CLOUDFLARE_ACCESS_UNAVAILABLE_TEXT,
   scriptOnlyAnnotateFlag,
   scriptOnlyAnnotateFlagText,
   type PlannotatorCloseOutcome,
@@ -1016,7 +1017,8 @@ export class PlannotatorMod {
     // A list of files is one review of all of them (a bundle), named as such.
     const bundle = Array.isArray(call.target)
     const subject = bundle ? plannotatorBundleSubject(targets) : subjectFor(action, targets)
-    const tailscale = call.tailscale === true
+    const tailscale = call.tailscale === true || call.cloudflareAccess === true
+    const unavailable = call.cloudflareAccess === true ? PLANNOTATOR_TOOL_CLOUDFLARE_ACCESS_UNAVAILABLE_TEXT : PLANNOTATOR_TOOL_TAILSCALE_UNAVAILABLE_TEXT
     const opened = await this.open(action, plannotatorToolArgs(call), subject, {
       ...(gate ? { deliverApproval: true } : {}),
       ...(tailscale ? { tailscaleAsked: true } : {}),
@@ -1028,7 +1030,7 @@ export class PlannotatorMod {
         // A CLI from before `--tailscale` refuses the word (an unknown flag or
         // file). A current CLI's publish failure (`--tailscale: Tailscale is
         // not running`, signed out, port routed) is shown as it is.
-        if (tailscale && isOlderCliTailscaleRefusal(opened.text)) return { deny: PLANNOTATOR_TOOL_TAILSCALE_UNAVAILABLE_TEXT }
+        if (tailscale && isOlderCliTailscaleRefusal(opened.text)) return { deny: unavailable }
         return { deny: opened.text }
       case 'starting':
         return { text: plannotatorToolOpenedText(opened.subject, undefined, gate, opened.sessionId, opened.target) }
@@ -1038,7 +1040,7 @@ export class PlannotatorMod {
           // predates #2166) or not on the tailnet at all (it ignored the
           // flag): say so and do not leave it open, never a silent downgrade.
           await this.abandonLaunch(opened.sessionId)
-          return { deny: PLANNOTATOR_TOOL_TAILSCALE_UNAVAILABLE_TEXT }
+          return { deny: unavailable }
         }
         return {
           text: plannotatorToolOpenedText(

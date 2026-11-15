@@ -200,6 +200,11 @@
     "./inbox/connection": "./inbox/connection.ts",
     "./inbox/claims": "./inbox/claims.ts",
     "./inbox/tailnet": "./inbox/tailnet.ts",
+    "./inbox/cf-access": "./inbox/cf-access.ts",
+    "./inbox/cf-access-verify": "./inbox/cf-access-verify.ts",
+    "./inbox/cf-access-door": "./inbox/cf-access-door.ts",
+    "./inbox/cf-access-api": "./inbox/cf-access-api.ts",
+    "./inbox/door-base-shim": "./inbox/door-base-shim.ts",
     "./inbox/tailnet-refusal": "./inbox/tailnet-refusal.ts",
     "./inbox/agent-link": "./inbox/agent-link.ts"
   },
