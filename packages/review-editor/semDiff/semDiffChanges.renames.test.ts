@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { semanticDiffFile, languageForPath, type SemanticDiffOperation } from '@plannotator/sem-diff';
+import { semanticDiffFile, languageForPath, type SemanticDiffOperation } from '@plannotator/sem-jiff';
 import { semDiffChanges } from './semDiffChanges';
 
 const lines = (...rows: string[]) => `${rows.join('\n')}\n`;
