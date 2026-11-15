@@ -51,9 +51,18 @@ export function inboxTidyWords(value: unknown): string {
   return flat.length > INBOX_TIDY_WORDS_MAX ? flat.slice(0, INBOX_TIDY_WORDS_MAX).trimEnd() : flat;
 }
 
+/**
+ * The person's words as they go between the note's own straight quotes: each `"` in them becomes a curly one (“ at the
+ * start or after a space or an opening bracket, else ”), so nothing they typed closes the quotation and reads as the
+ * note's own text. One character for one: the length and the one-line cap stand.
+ */
+export function inboxQuotedWords(words: string): string {
+  return words.replace(/"/g, (_, at: number) => (at === 0 || /[\s([{]/.test(words[at - 1]!) ? "“" : "”"));
+}
+
 /** The paragraph a Tidy's body gains right after its first, only when the person typed instructions. */
 export function inboxTidyWordsLine(words: string): string {
-  return `The person added, for this Tidy: "${words}". Where it differs from the rest of this note, their words win.`;
+  return `The person added, for this Tidy: "${inboxQuotedWords(words)}". Where it differs from the rest of this note, their words win.`;
 }
 
 /** A Combine's run id (`cmb_` + ULID): its wake is a Tidy note, so it travels as one, but it is no Tidy run. */

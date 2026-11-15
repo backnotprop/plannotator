@@ -6,8 +6,10 @@
  * archives nothing.
  *
  * The wake is a Tidy note whose run is the Combine's id (`cmb_`), so it travels as a Tidy's does. Browser-safe and
- * dependency-free; re-exported by `inbox-types`.
+ * dependency-free but for its sibling `inbox-tidy`; re-exported by `inbox-types`.
  */
+
+import { inboxQuotedWords } from "./inbox-tidy";
 
 /** Where a Combine stands. `asked`: waiting for the new thread; `done`: it arrived and the picked threads are archived. */
 export type InboxCombineState = "asked" | "done" | "failed" | "stopped" | "undone";
@@ -98,7 +100,7 @@ export function inboxCombineInstruction(key: string): string {
 
 /** The paragraph after the first, only when the person typed something. */
 export function inboxCombineWordsLine(words: string): string {
-  return `The person added: "${words}". Where it differs from the rest of this note, their words win.`;
+  return `The person added: "${inboxQuotedWords(words)}". Where it differs from the rest of this note, their words win.`;
 }
 
 /** The line for a session a command line can name (`inboxSessionRef`), as Tidy's. */
