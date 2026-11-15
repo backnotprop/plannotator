@@ -29,7 +29,7 @@ export const FileViewSwitch: React.FC<{
         disabled={disabled}
         title={disabled ? reason ?? undefined : LABELS[key].title}
         onClick={() => onSelect(key)}
-        className={`px-2 py-0.5 rounded-sm text-xs whitespace-nowrap transition-colors ${
+        className={`pn-hit-target px-2 py-0.5 rounded-sm text-xs whitespace-nowrap transition-colors ${
           view === key ? 'bg-background text-foreground font-medium' : 'text-muted-foreground hover:text-foreground'
         } disabled:opacity-40 disabled:cursor-not-allowed`}
       >

@@ -63,7 +63,7 @@ export const ImageViewMenu: React.FC<ImageViewMenuProps> = ({ filePath, comparab
   ) : (
     <button
       type="button"
-      className={`flex flex-none items-center gap-1 rounded-md border border-border/70 text-xs leading-none text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60 data-[popup-open]:bg-muted ${iconOnly ? 'px-1.5 py-[3px]' : 'px-2 py-[3px]'}`}
+      className={`pn-hit-target flex flex-none items-center gap-1 rounded-md border border-border/70 text-xs leading-none text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/60 data-[popup-open]:bg-muted ${iconOnly ? 'px-1.5 py-[3px]' : 'px-2 py-[3px]'}`}
     />
   );
 

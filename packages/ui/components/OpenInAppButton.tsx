@@ -176,7 +176,7 @@ export const OpenInAppButton: React.FC<OpenInAppButtonProps> = ({
   );
 
   const isDisabled = disabled || busy;
-  const triggerClass = `text-xs flex items-center py-1 transition-colors text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed ${
+  const triggerClass = `pn-hit-target text-xs flex items-center py-1 transition-colors text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed ${
     menuOnly ? 'px-1.5 rounded justify-center' : openable ? 'px-1 rounded-r border-l border-border/50' : 'px-1.5 rounded'
   }`;
   const triggerTitle = openable && !menuOnly ? 'Open in…' : 'File actions';
