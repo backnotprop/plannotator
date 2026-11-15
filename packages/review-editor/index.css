@@ -214,6 +214,7 @@ diffs-container {
   min-width: 0;
   white-space: nowrap;
   overflow: hidden;
+  font-variant-numeric: normal;
 }
 
 .semantic-diff-path-dir {
