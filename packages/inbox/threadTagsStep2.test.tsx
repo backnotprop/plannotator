@@ -23,7 +23,7 @@ import type { MachinesModel } from './machines';
 import type { ListTag, ThreadTagsHost } from './threadTags';
 
 const hasDom = typeof document !== 'undefined';
-const { ThreadTagsContext, canTagThread, rowTagsHere, tagHref, tagsOnOwnRows, tagWrite } = await import('./threadTags');
+const { ThreadTagsContext, canTagThread, rowTagsHere, tagHref, tagsOnOwnRows, tagWrite, threadTagsHere } = await import('./threadTags');
 const { ThreadTagLine } = (hasDom ? await import('./components/ThreadTagLine') : {}) as typeof import('./components/ThreadTagLine');
 const { InboxList } = (hasDom ? await import('./components/InboxList') : {}) as typeof import('./components/InboxList');
 const { SidebarProvider } = (hasDom ? await import('./shell/sidebar') : {}) as typeof import('./shell/sidebar');
@@ -240,6 +240,20 @@ test.skipIf(!hasDom)('header: `+` by keyboard puts focus in the field; it keeps 
   await typeIt('Billing');
   await act(async () => void field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })));
   expect(writes).toEqual(['create Billing msg_b']);
+});
+
+test.skipIf(!hasDom)("header: an archived thread (not in the list) shows its tags from its own read's row", () => {
+  const archived = row('msg_arc', 'web', 9, 'quiet', ['ini_windows']);
+  const value = hostOf(ROWS, [RELEASE, WINDOWS, DOCS], []);
+  // App's rule (useThreadTagsHost): the listed row, else the open thread's own read's row.
+  draw(
+    <ThreadTagsContext.Provider value={{ ...value, tagsOf: (id) => threadTagsHere(id, ROWS, archived, MACHINES, new Map()) }}>
+      <ThreadTagLine threadId="msg_arc" phone={false} />
+    </ThreadTagsContext.Provider>,
+  );
+  expect(texts('[data-thread-tag]')).toEqual(['Windows']);
+  expect(threadTagsHere('msg_b', ROWS, archived, MACHINES, new Map())).toEqual(['ini_release', 'ini_windows']);
+  expect(threadTagsHere('msg_gone', ROWS, archived, MACHINES, new Map())).toEqual([]);
 });
 
 test.skipIf(!hasDom)('header: no `+` where Add tag is not offered', () => {

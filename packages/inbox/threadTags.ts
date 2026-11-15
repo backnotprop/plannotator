@@ -65,6 +65,15 @@ export function rowTagsHere(row: Pick<InboxListRow, 'thread_id' | 'tags' | 'mach
 }
 
 /**
+ * A thread's tags in this window: its listed row's, else the open thread's own read's (an archived thread, which the
+ * list leaves out, keeps its header line), else what the window just set on it.
+ */
+export function threadTagsHere(threadId: string, rows: readonly InboxListRow[], openRow: InboxListRow | null, machines: Pick<MachinesModel, 'self' | 'linked'>, patches: ReadonlyMap<string, readonly string[]>): readonly string[] {
+  const row = rows.find((r) => r.thread_id === threadId) ?? (openRow?.thread_id === threadId ? openRow : undefined);
+  return row ? rowTagsHere(row, machines, patches) : (patches.get(threadId) ?? []);
+}
+
+/**
  * Whether Add tag is offered on a thread: one this Inbox owns, or a linked machine's (its id claimed by that machine,
  * `owner`, or its row named for it) when that machine takes tags, as Add to Priority is offered.
  */

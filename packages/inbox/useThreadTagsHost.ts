@@ -4,7 +4,7 @@ import { inboxApi } from './api';
 import type { MachinesModel } from './machines';
 import { machineOf } from './inboxUrl';
 import { setSidebarSectionOpen } from './sidebarSections';
-import { canTagThread, rowTagsHere, tagById, tagsOnOwnRows, tagsSectionShown, tagThreadCounts, tagWaitingCounts, tagWrite, type ListTag, type ThreadTagsHost } from './threadTags';
+import { canTagThread, rowTagsHere, tagById, tagsOnOwnRows, threadTagsHere, tagsSectionShown, tagThreadCounts, tagWaitingCounts, tagWrite, type ListTag, type ThreadTagsHost } from './threadTags';
 import { initiativeDeletedToast } from './board/model';
 import { showTagColoursAcross, type TagsAcross } from './tagsAcross';
 import { rowTint } from './tagColours';
@@ -25,6 +25,8 @@ interface TagsInputs {
   routeTag: string | null;
   machines: MachinesModel;
   windowRows: readonly InboxListRow[];
+  /** The open thread's own read's row: an archived thread's tags (the list leaves it out). */
+  openRow?: InboxListRow | null;
   latestSections: readonly InboxListSection[];
   rowOf: (threadId: string) => InboxListRow | undefined;
   showError: (cause: unknown) => void;
@@ -52,7 +54,7 @@ export interface TagColourControls {
 
 export type { ListTagColours };
 
-export function useThreadTagsHost({ listTags, across, routeTag, machines, windowRows, latestSections, rowOf, showError, showToast, dismissToast, refreshList, openTag, tagGone, tagColours }: TagsInputs) {
+export function useThreadTagsHost({ listTags, across, routeTag, machines, windowRows, openRow, latestSections, rowOf, showError, showToast, dismissToast, refreshList, openTag, tagGone, tagColours }: TagsInputs) {
 const [tagPatches, setTagPatches] = useState<ReadonlyMap<string, readonly string[]>>(() => new Map());
   const tagsOfRow = useCallback((row: Pick<InboxListRow, 'thread_id' | 'tags' | 'machine'>) => rowTagsHere(row, machines, tagPatches), [tagPatches, machines]);
   const filterTag = routeTag && listTags ? tagById(listTags, routeTag) : null;
@@ -62,7 +64,7 @@ const [tagPatches, setTagPatches] = useState<ReadonlyMap<string, readonly string
   const tagsHere = useMemo(() => (listTags ? tagsOnOwnRows(listTags, windowRows, machines.self, tagsOfRow) : []), [listTags, windowRows, machines.self, tagsOfRow]);
   const tagsShown = listTags !== null && tagsSectionShown(listTags, windowRows, tagsOfRow);
   const setThreadTag = async (threadId: string, tag: ListTag, on: boolean, undo = true) => {
-    const before = tagPatches.get(threadId) ?? rowOf(threadId)?.tags ?? [];
+    const before = tagPatches.get(threadId) ?? rowOf(threadId)?.tags ?? (openRow?.thread_id === threadId ? openRow.tags : undefined) ?? [];
     const next = on ? (before.includes(tag.id) ? before : [...before, tag.id]) : before.filter((id) => id !== tag.id);
     if (tag.id) setTagPatches((current) => withEntry<readonly string[]>(current, threadId, next));
     const unpatch = () => setTagPatches((current) => withEntry<readonly string[]>(current, threadId, undefined));
@@ -74,7 +76,10 @@ const [tagPatches, setTagPatches] = useState<ReadonlyMap<string, readonly string
       return;
     }
     if (on) setSidebarSectionOpen('tags', true);
-    await refreshList(false).finally(unpatch);
+    // A thread the list leaves out (archived) is not read again with it: its write stays drawn.
+    await refreshList(false).finally(() => {
+      if (rowOf(threadId)) unpatch();
+    });
     if (!undo) {
       dismissToast();
       return;
@@ -122,10 +127,7 @@ const [tagPatches, setTagPatches] = useState<ReadonlyMap<string, readonly string
         ? null
         : {
             tags: listTags,
-            tagsOf: (threadId) => {
-              const row = windowRows.find((r) => r.thread_id === threadId);
-              return row ? rowTagsHere(row, machines, tagPatches) : (tagPatches.get(threadId) ?? []);
-            },
+            tagsOf: (threadId) => threadTagsHere(threadId, windowRows, openRow ?? null, machines, tagPatches),
             counts: tagCounts,
             can: (threadId) => canTagThread(threadId, windowRows, machines, machineOf(threadId)),
             set: (threadId, tag, on) => void setThreadTagRef.current(threadId, tag, on),
@@ -141,7 +143,7 @@ const [tagPatches, setTagPatches] = useState<ReadonlyMap<string, readonly string
             rowTags: tagsOfRow,
             here: tagsHere,
           },
-    [listTags, tagPatches, windowRows, tagCounts, machines, filterTag, tagsOfRow, tagsHere],
+    [listTags, tagPatches, windowRows, openRow, tagCounts, machines, filterTag, tagsOfRow, tagsHere],
   );
   const setThreadTagRef = useRef(setThreadTag);
   setThreadTagRef.current = setThreadTag;

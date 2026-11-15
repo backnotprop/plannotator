@@ -84,6 +84,12 @@ describe("thread tags", () => {
     await tagThread(server, a.thread_id, windows.id, true);
     // Two tags made in the same millisecond list in id order (the Board's rule), so the order is not checked here.
     expect((await rowTags(server, a.thread_id))?.sort()).toEqual([release.id, windows.id].sort());
+    // The thread's own read carries them on its `row` too, archived or not (an archived thread's header line reads them).
+    const readTags = async () => (((await (await fetch(url(server, `/api/inbox/threads/${a.thread_id}`))).json()) as { row: InboxListRow }).row.tags ?? []).slice().sort();
+    expect(await readTags()).toEqual([release.id, windows.id].sort());
+    expect((await post(server, `/api/inbox/messages/${a.message_id}/resolve`, { resolved: true })).status).toBe(200);
+    expect(await readTags()).toEqual([release.id, windows.id].sort());
+    expect((await post(server, `/api/inbox/messages/${a.message_id}/resolve`, { resolved: false })).status).toBe(200);
     // A mark writes no store line: no cursor moves, no agent hears of it.
     expect(server.store.cursor()).toBe(cursor);
     expect(server.store.changesSince(cursor)).toEqual([]);
