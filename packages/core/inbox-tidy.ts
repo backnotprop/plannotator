@@ -39,7 +39,7 @@ export const INBOX_TIDY_INSTRUCTION =
  * INBOX_TIDY_INSTRUCTION: every picked thread the session owns is listed, flagged or not.
  */
 export const INBOX_TIDY_PICKED_INSTRUCTION =
-  "The person picked these threads of yours in the Plannotator Inbox and asked you to tidy them. Below is what the Inbox can see in each. Do only what still makes sense; where a thread is in order, leave it and send nothing.";
+  "The person picked these threads of yours in the Plannotator Inbox and asked you to tidy them. Read each one (read_thread with the id given), then do only what still makes sense; where a thread is in order, leave it and send nothing.";
 
 /** The most a Tidy's own instructions may hold: one line, cut to this many characters. */
 export const INBOX_TIDY_WORDS_MAX = 500;

@@ -119,6 +119,7 @@ export function createInboxCombine(deps: InboxCombineDeps) {
   const agentsFor = (threadIds: readonly string[]): InboxCombineAgent[] => {
     const reachOf = deps.reachFor();
     const found = new Map<string, InboxCombineAgent>();
+    const last = new Map<string, string>();
     for (const threadId of threadIds) {
       const seen = new Set<string>();
       for (const id of store.threadMessageIds(threadId)) {
@@ -130,10 +131,15 @@ export function createInboxCombine(deps: InboxCombineDeps) {
         agent.threads += 1;
         const title = deps.titleOf?.(session);
         if (title) agent.title = title;
+        const newest = [...store.threadMessageIds(threadId)].reverse().map((mid) => store.message(mid)).find((w) => w?.author.kind === "agent" && w.author.session === session);
+        if (newest && newest.created_at > (last.get(session) ?? "")) {
+          last.set(session, newest.created_at);
+          agent.thread = store.threadSubject(threadId) ?? undefined;
+        }
         found.set(session, agent);
       }
     }
-    return [...found.values()].sort((a, b) => b.threads - a.threads || (a.title ?? a.name).localeCompare(b.title ?? b.name));
+    return [...found.values()].sort((a, b) => b.threads - a.threads || (a.title ?? a.thread ?? a.name).localeCompare(b.title ?? b.thread ?? b.name));
   };
 
   const wakeThreads = (threadIds: readonly string[]): InboxCombineWakeThread[] =>
@@ -174,7 +180,7 @@ export function createInboxCombine(deps: InboxCombineDeps) {
       projects: threadIds.map((t) => store.message(t)!.project_id),
       session: agent.session,
       host: agent.host,
-      name: agent.title ?? agent.name,
+      name: agent.title ?? agent.thread ?? agent.name,
       ...(words ? { words } : {}),
       at: new Date(now()).toISOString(),
       state: "asked",

@@ -62,7 +62,7 @@ export function CombineDialog({ rows, machines = NO_MACHINES, onClose, onStarted
     };
   }, [ids, machine, blocked]);
   const chosen = agents?.find((a) => a.session === who) ?? null;
-  const nameOf = (agent: InboxCombineAgent) => agent.title ?? agent.name;
+  const nameOf = (agent: InboxCombineAgent) => agent.title ?? agent.thread ?? agent.name;
   const combine = async () => {
     if (!chosen || sending) return;
     setSending(true);
@@ -124,7 +124,7 @@ export function CombineDialog({ rows, machines = NO_MACHINES, onClose, onStarted
           </p>
         )}
         <div className="ib-cmb-btns">
-          <button type="button" className="ib-btn ib-ghost" onClick={onClose} data-combine-cancel="">
+          <button type="button" className="ib-btn" onClick={onClose} data-combine-cancel="">
             Cancel
           </button>
           <button type="button" className="ib-btn ib-pri" disabled={!chosen || sending || !!blocked} onClick={() => void combine()} data-combine-go="">

@@ -62,7 +62,7 @@ button.ib-pick-box:focus-visible { outline: 2px solid var(--ring); outline-offse
 
 /* Tidy's own instructions (components/TidyPanel.tsx): a two-line field, one muted line, Recent. */
 .ib-tidy:has(.ib-tidy-words) { width: 320px; }
-.ib-tidy-words { display: block; box-sizing: border-box; width: calc(100% - 4px); min-height: 56px; margin: 8px 2px 0; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--ib-rl-xs-s, 6px); background: var(--background); color: var(--foreground); font: inherit; font-size: var(--ib-fs-13, 13px); line-height: 1.4; resize: vertical; }
+.ib-tidy-words { display: block; box-sizing: border-box; width: calc(100% - 4px); min-height: 56px; margin: 8px 2px 0; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--ib-rl-xs-s, 6px); background: var(--card); color: var(--foreground); font: inherit; font-size: var(--ib-fs-13, 13px); line-height: 1.4; resize: vertical; }
 .ib-tidy-words::placeholder { color: var(--muted-foreground); }
 .ib-tidy-words:focus-visible { outline: 2px solid var(--ring); outline-offset: -1px; }
 .ib-tidy-line { margin: 6px 8px 0; color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); line-height: 1.45; }
@@ -88,7 +88,7 @@ dialog.ib-dlg.ib-cmb { width: min(560px, calc(100vw - 32px)); }
 .ib-cmb-nm b { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ib-cmb-nm small { color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); }
 .ib-cmb-lbl { display: block; margin: 16px 0 6px; font-weight: 600; font-size: var(--ib-fs-13, 13px); }
-.ib-cmb-words { display: block; box-sizing: border-box; width: 100%; min-height: 64px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); color: var(--foreground); font: inherit; line-height: 1.45; resize: vertical; }
+.ib-cmb-words { display: block; box-sizing: border-box; width: 100%; min-height: 64px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); color: var(--foreground); font: inherit; line-height: 1.45; resize: vertical; }
 .ib-cmb-words::placeholder { color: var(--muted-foreground); }
 .ib-cmb-words:focus-visible { outline: 2px solid var(--ring); outline-offset: -1px; }
 .ib-cmb-what { margin: 14px 0 0; color: var(--muted-foreground); line-height: 1.5; }

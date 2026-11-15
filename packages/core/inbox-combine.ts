@@ -39,6 +39,8 @@ export interface InboxCombineAgent {
   name: string;
   /** Its session's title, when the window knows one (the sidebar's Agents name). */
   title?: string;
+  /** The subject of the picked thread it wrote in last: its name where it has no title, as the sidebar's Agents name it. */
+  thread?: string;
   /** How many of the picked threads it wrote in. */
   threads: number;
 }
@@ -78,7 +80,7 @@ export function inboxCombineWordsLine(words: string): string {
 
 /** The line for a session a command line can name (`inboxSessionRef`), as Tidy's. */
 export function inboxCombineSessionLine(ref: string): string {
-  return `If you send it with \`plannotator inbox call send_message\`, pass \`--session ${ref}\`, so it writes as you.`;
+  return `If you send it from a shell, run \`plannotator inbox call --session ${ref} send_message …\` (\`--session\` before the action), so it writes as you.`;
 }
 
 /** The numbered list: each picked thread, then its open questions by id. */
