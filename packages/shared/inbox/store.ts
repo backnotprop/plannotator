@@ -8069,6 +8069,9 @@ export class InboxStore {
     const tag = this.liveInitiative(tagId);
     if (colour !== null && !isInboxTagColour(colour)) throw new InboxError("validation_error", "colour: accent, green, amber, red, grey, a #rrggbb, or null.", { field: "colour" });
     const when = this.colourStamp(at);
+    // A pick held on the way (an outbox, a machine asleep) can land after a newer one: the newer stays.
+    const kept = this.tagColourState.looks.get(tag.id);
+    if (kept?.by === "person" && Date.parse(kept.at) > Date.parse(when)) return kept;
     const look: InboxTagLook = { colour, by: "person", at: when };
     const looks = new Map(this.tagColourState.looks).set(tag.id, look);
     const recent = typeof colour === "string" && colour.startsWith("#") ? [{ colour, at: when }, ...this.tagColourState.recent.filter((r) => r.colour !== colour)].slice(0, INBOX_TAG_RECENT_MAX) : this.tagColourState.recent;
@@ -8079,14 +8082,19 @@ export class InboxStore {
   /** "Show tag colors" in the list's ⋮, on or off, as of `at`. Writes no store line. */
   setTagColoursShown(on: unknown, at: unknown): InboxTagColours {
     if (typeof on !== "boolean") throw new InboxError("validation_error", "show: true or false.", { field: "show" });
-    this.commitTagColours({ ...this.tagColourState, show: { on, at: this.colourStamp(at) } });
+    const when = this.colourStamp(at);
+    const kept = this.tagColourState.show;
+    if (kept && Date.parse(kept.at) > Date.parse(when)) return this.tagColours();
+    this.commitTagColours({ ...this.tagColourState, show: { on, at: when } });
     return this.tagColours();
   }
 
+  /** When the person chose, as an ISO time (so times compare as times); none given: now. */
   private colourStamp(at: unknown): string {
     if (at === undefined || at === null) return this.stamp();
-    if (typeof at !== "string" || Number.isNaN(Date.parse(at))) throw new InboxError("validation_error", "at: an ISO time.", { field: "at" });
-    return at;
+    const ms = typeof at === "string" ? Date.parse(at) : Number.NaN;
+    if (Number.isNaN(ms)) throw new InboxError("validation_error", "at: an ISO time.", { field: "at" });
+    return new Date(ms).toISOString();
   }
 
   private commitTagColours(state: InboxTagColoursFile): void {

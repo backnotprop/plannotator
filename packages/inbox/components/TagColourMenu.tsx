@@ -43,7 +43,9 @@ export function TagColourList({ tag, colours, onBack }: { tag: ListTag; colours:
   const [hue, setHue] = useState(() => (own ? (ownColour(own)?.hue ?? 30) : 30));
   // Focus starts on the colour that is on (else the first): the menu keeps the index of Highlight rows across the swap.
   useLayoutEffect(() => focusAfterSwap(() => body.current?.querySelector<HTMLElement>('[role="menuitemradio"][aria-checked="true"]') ?? body.current?.querySelector<HTMLElement>('[role="menuitemradio"]')), []);
-  // The strip moved by keys is kept once the keys rest, so each step is not its own colour among the recent ones.
+  // The strip moved by keys or a screen reader's swipe is kept once it rests, so each step is not its own colour
+  // among the recent ones; dragged, it is kept when let go.
+  const dragging = useRef(false);
   const stripKeep = useRef<{ timer: ReturnType<typeof setTimeout>; hex: string } | null>(null);
   const keepStrip = (hex: string, wait: number) => {
     if (stripKeep.current) clearTimeout(stripKeep.current.timer);
@@ -126,9 +128,21 @@ export function TagColourList({ tag, colours, onBack }: { tag: ListTag; colours:
               const hex = hueHex(next);
               setTyped(hex);
               colours.preview(tag, hex);
+              // Moved without a pointer (keys, a screen reader's swipe): kept once it rests.
+              if (!dragging.current) keepStrip(hex, 800);
             }}
             // The rows follow the strip while it moves; the colour is kept when it is let go.
-            onPointerUp={(event) => keepStrip(hueHex(Number(event.currentTarget.value)), 0)}
+            onPointerDown={() => (dragging.current = true)}
+            onPointerUp={(event) => {
+              dragging.current = false;
+              keepStrip(hueHex(Number(event.currentTarget.value)), 0);
+            }}
+            onPointerCancel={(event) => {
+              dragging.current = false;
+              keepStrip(hueHex(Number(event.currentTarget.value)), 0);
+            }}
+            // Leaving the strip keeps a move still resting.
+            onBlur={() => stripKeep.current && keepStrip(stripKeep.current.hex, 0)}
             onKeyUp={(event) => {
               if (['ArrowLeft', 'ArrowRight', 'Home', 'End', 'PageUp', 'PageDown'].includes(event.key)) keepStrip(hueHex(Number(event.currentTarget.value)), 800);
             }}

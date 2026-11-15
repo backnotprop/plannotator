@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { HueDot, LetterMark, ProjectMark, showsProjects, showsThreads, useRowMarks } from '../letterMarks';
 import { inboxListShortcuts } from '../shortcuts/list.shortcuts';
 import { shortcutAria, useShortcutAria, withShortcut } from '../shortcuts/hint';
@@ -10,15 +10,14 @@ import { inboxSnoozeWhen } from '@plannotator/core/inbox-snooze';
 import { agentName, formatCount, fullTime, shortTime, whenTime } from '../format';
 import { reaskRowLine, sentRowLine, undeliveredLabel } from '../deliveryLine';
 import { sentRecipientsWords } from '../tags';
-import { rowTintTitle, tintAttrs } from '../tagColours';
-import type { ListTagColours } from '../useThreadTagsHost';
+import { RowTagName, rowTintOf, sameTint, tintProps, type ListTagColours, type RowTintFields, type RowTintProps } from '../parts/RowTint';
 import { TagStack } from './TagPicker';
 import { RowAgents, RowAgentTiles } from './RowAgents';
 import { RowPullsMark } from '../threadPulls/ThreadPulls';
 import { isTextCut, ProjectTipText, Tip } from './Tip';
 import { LazyRowTips, opensTips, RowTip } from './RowTip';
 import { AuthorMark, Icon } from '../icons';
-import { starPopping } from '../starPop';
+import { PinMark, PinnedWords } from '../parts/RowPin';
 import { notePressPointer, pressRow } from '../starPress';
 import { ListColumnEdge } from '../shell/ListColumnEdge';
 import { SidebarTrigger, useSidebar } from '../shell/sidebar';
@@ -206,10 +205,7 @@ export interface InboxListProps {
   listFilter?: ListFilterSource;
   /** The ⋮ menu's "Customize rows…": Settings → Rows. Absent (the tour): no item. */
   onCustomizeRows?: () => void;
-  /**
-   * Tag row colours (tagColours.ts): each row's tint and tag name, and "Show tag colors" in the ⋮'s Rows group.
-   * Absent (an Inbox before tag colours, the tour): no row is tinted and no item.
-   */
+  /** Tag row colours (parts/RowTint.tsx) and "Show tag colors" in the ⋮. Absent (an older Inbox, the tour): neither. */
   tagColours?: ListTagColours;
 }
 
@@ -677,25 +673,6 @@ function TitleCell({ row, pill = false, noPreview = false }: { row: InboxListRow
 }
 
 /**
- * A pinned thread's small pin in its list row (approval "inbox-pinned-threads"): always on the right, beside the
- * counts (the owner, 2026-10-31: "just like the questions, just like the action items"), never right after a short
- * preview. A three-line or phone row has it on line 3 before the badge and the counts; a wide row in a column of its
- * own just left of the open counts' column. For the eye only: the row's name ends with ", pinned" (`PinnedWords`).
- */
-function PinMark({ threadId, press = false }: { threadId: string; press?: boolean }) {
-  return (
-    <span className="ib-pinmark" data-pin-mark="" data-star-press={press ? '' : undefined} data-pop={starPopping(threadId) ? '' : undefined} aria-hidden="true">
-      <Icon name="star" size={13} />
-    </span>
-  );
-}
-
-/** The end of a pinned row's accessible name. */
-function PinnedWords() {
-  return <span className="ib-sr">, starred</span>;
-}
-
-/**
  * Below this list width the wide row of every project leaves its title cell
  * too little room (the project and agents, words, badge, open counts and time
  * columns are fixed at 220px, 124px, 52px, 84px and 76px), so the list draws
@@ -758,12 +735,6 @@ interface RowLook {
   noPulls: boolean;
 }
 
-/** A row's tag colour (ListRow's `tint`) and the tag's name drawn for it. */
-interface RowTintProps {
-  tint?: string;
-  tagName: ReactNode;
-}
-
 function WideRow({ row, project, away, selected, filtered, lit, pinned, pinColumn, keys, full, pill, noPreview, relative, statusMark, noPulls, onOpen, onUnstar, tint, tagName }: RowTintProps & { onUnstar?: () => void; row: InboxListRow; project: string; away: boolean; selected: boolean; filtered: boolean; lit: boolean; pinned: boolean; pinColumn: boolean; keys?: string; full: boolean; pill: boolean; onOpen: () => void } & Omit<RowLook, 'titleFirst' | 'timeBelow' | 'noAgents'>) {
   const [kbd, focus] = useKeyboardFocus(rowHasBadge(row));
   const wordsId = useId();
@@ -795,8 +766,7 @@ function WideRow({ row, project, away, selected, filtered, lit, pinned, pinColum
         <TitleCell row={row} pill={pill} noPreview={noPreview} />
       </span>
       {/* Every column right of the words has a fixed width, so each lines up down the list. The words (a draft,
-          Undelivered, Read …) take the width they need, between the title cell and the badge. A tinted row's tag
-          name leads them, at the right of the row as the approved look C has it. */}
+          Undelivered, Read …) take the width they need, between the title cell and the badge (a tag's name first). */}
       <span className="ib-cw">
         {tagName}
         <EndedMark row={row} />
@@ -987,8 +957,7 @@ function NarrowRow({ row, project, away, selected, filtered, lit, pinned, keys, 
       <RowAvatar row={row} size={30} />
       {/* Three lines (approval "inbox-list-row-v2", 2026-10-30). Line 1: the agents' tiles and the project after
           them, on one line, then the ✓ and the time at the right. Compact rows (approval "inbox-list-options"): the
-          title joins line 1, before the time, cut with "…", and line 2 goes. A tinted row's tag name sits just
-          before the time, as on a phone. */}
+          title joins line 1, before the time, cut with "…", and line 2 goes. A tag's name sits before the time. */}
       {titleFirst ? (
         // Settings → Rows' First line "Thread name": the name (one line, cut with "…") and the time on line 1, the
         // agents and the project on line 2; compact rows keep one line, the name before the project.
@@ -1488,14 +1457,9 @@ export function InboxList(props: InboxListProps) {
   // A row's time reads "8:22 PM" today and "Oct 19" after midnight: a new day renders every row again.
   const day = new Date().toDateString();
   /** One row, the same in both views; `drawn` is the group the held list draws it in. */
-  const renderRow = (row: InboxListRow, drawn: InboxListGroupId) => {
-    // Strings only, so a row whose tint did not change is not drawn again (ListRow's comparison).
-    const tint = props.tagColours?.tintOf(row) ?? null;
-    return (
+  const renderRow = (row: InboxListRow, drawn: InboxListGroupId) => (
     <ListRow
-      tint={tint?.colour}
-      tintName={tint?.name}
-      tintAlso={tint && tint.also.length > 0 ? tint.also.join('\n') : undefined}
+      {...rowTintOf(props.tagColours, row)}
       key={row.thread_id}
       row={row}
       project={props.projectNames?.get(row.project.id) ?? row.project.name}
@@ -1527,8 +1491,7 @@ export function InboxList(props: InboxListProps) {
       noAgents={look.hideAgents}
       noPulls={look.hidePulls}
     />
-    );
-  };
+  );
   return (
     <section
       ref={listEl}
@@ -1760,7 +1723,7 @@ export function InboxList(props: InboxListProps) {
   );
 }
 
-interface ListRowProps {
+interface ListRowProps extends RowTintFields {
   row: InboxListRow;
   /** The row's project as the window names it (`windowProjectNames`; another machine's carries that machine's name). */
   project: string;
@@ -1807,30 +1770,6 @@ interface ListRowProps {
   noAgents?: boolean;
   /** Settings → Rows' Pull requests off (listLook.ts `hidePulls`): no PR mark at the row's end. */
   noPulls?: boolean;
-  /** Its tag colour (tagColours.ts `rowTint`): a preset or `#rrggbb`; absent, the row looks as usual. */
-  tint?: string;
-  /** The tag the colour comes from, named on the row. */
-  tintName?: string;
-  /** The row's other coloured tags, one per line (a tag's name holds no line break): "+1" on the row, named in the name's tooltip. */
-  tintAlso?: string;
-}
-
-/** A tinted row's attributes (threadTags.css), on the row's button. */
-function tintProps(tint: string | undefined): { 'data-tint'?: string; style?: CSSProperties } {
-  if (!tint) return {};
-  const attrs = tintAttrs(tint);
-  return { 'data-tint': attrs['data-tint'], style: attrs.style as CSSProperties | undefined };
-}
-
-/** The tag a tinted row names (approval "inbox-thread-tags", look C): quiet, cut with "…", "+1" for each other coloured tag. */
-function RowTagName({ tint, name, also }: { tint: string; name: string; also?: string }) {
-  const others = also ? also.split('\n') : [];
-  return (
-    <span className="ib-rtag" dir="auto" title={rowTintTitle({ colour: tint, name, also: others })} data-row-tag="">
-      <span className="ib-rtag-n">{name}</span>
-      {others.length > 0 && <span className="ib-rtag-more"> +{others.length}</span>}
-    </span>
-  );
 }
 
 /**
@@ -1843,7 +1782,7 @@ export const ListRow = memo(
     const open = () => onOpen(row);
     const unstarRow = onUnstar && pinned ? () => onUnstar(row) : undefined;
     const rowLook: RowLook = { noPreview, relative, titleFirst, timeBelow, statusMark, noAgents, noPulls };
-    const tagName = tint && tintName ? <RowTagName tint={tint} name={tintName} also={tintAlso} /> : null;
+    const tagName = <RowTagName tint={tint} tintName={tintName} tintAlso={tintAlso} />;
     if (shape === 'phone') return <PhoneRow row={row} project={project} away={away} filtered={filtered} lit={lit} menu={menu} pinned={pinned} keys={keys} pill={pill} compact={compact} {...rowLook} onOpen={open} onUnstar={unstarRow} tint={tint} tagName={tagName} />;
     return (
       <RowWithAction row={row} drawn={drawn} menu={menu} onMarkRead={onMarkRead} onMarkUnread={onMarkUnread} onSendNow={onSendNow}>
@@ -1878,9 +1817,7 @@ export const ListRow = memo(
     a.statusMark === b.statusMark &&
     a.noAgents === b.noAgents &&
     a.noPulls === b.noPulls &&
-    a.tint === b.tint &&
-    a.tintName === b.tintName &&
-    a.tintAlso === b.tintAlso &&
+    sameTint(a, b) &&
     a.onOpen === b.onOpen &&
     a.onMarkRead === b.onMarkRead &&
     a.onMarkUnread === b.onMarkUnread &&

@@ -22,11 +22,10 @@ import { learnPullMachines, pullMachine, pullUrl } from './pulls/pullMachines';
 import { learnProjects } from './projectPictures';
 import { learnDefaultRefHost } from './defaultRefHost';
 import type { ReplyViewing } from './replyViewing';
+import type { ListTagsFields } from './data/actions/tagColours';
 import type {
   InboxCardMark,
   InboxInitiative,
-  InboxTagColours,
-  InboxTagLook,
   InboxDecisionsModel,
   InboxGuideRef,
   InboxHealth,
@@ -277,7 +276,7 @@ export interface MachineOffer {
   tailnet_error: string | null;
 }
 
-export interface ListModel {
+export interface ListModel extends ListTagsFields {
   /**
    * The merged view (`machines=1`): this Inbox's id and every machine, linked ones with their state. Absent from
    * an Inbox that cannot link; with no machine linked, `machines` holds this Inbox alone.
@@ -313,14 +312,6 @@ export interface ListModel {
    * offers no pin.
    */
   pins?: InboxListRow[];
-  /**
-   * The live tags, oldest first (approval "inbox-thread-tags"): the sidebar's Tags and the Add tag list; each row's
-   * `tags` names them. Absent from an older Inbox: the window then draws no Tags section and offers no Add tag.
-   * Merged: one per name across the linked machines that take tags, `machines` its id on each (InboxMachineTag).
-   */
-  tags?: (InboxInitiative & { machines?: Record<string, string>; look?: InboxTagLook })[];
-  /** "Show tag colors" and the person's own colours (inbox-tag-colours.ts). Absent from an Inbox before tag colours. */
-  tag_colours?: InboxTagColours;
   /** The version of this list, named by the next read so only what changed comes back (listRead.ts). Absent from an older Inbox. */
   list_version?: string;
   /**
@@ -1131,7 +1122,7 @@ const KEEPALIVE_BODY_MAX = 60_000;
  * `keepalive`: the request outlives the page (a save made as the page hides or goes). The answer is read as ever when
  * the page stays. The fetch starts before this function first waits, so a caller in a `pagehide` handler gets it out.
  */
-async function post<T>(path: string, body: Record<string, unknown>, init: { keepalive?: boolean; gzip?: boolean } = {}): Promise<T> {
+export async function post<T>(path: string, body: Record<string, unknown>, init: { keepalive?: boolean; gzip?: boolean } = {}): Promise<T> {
   refuseContested(path);
   const machine = forwardedTo(path);
   // A write to another machine is keyed end to end (rule 1): the window's own key, or one made for it here.
@@ -2163,11 +2154,6 @@ export const inboxApi = {
    * own machine, by the tag's id there or by its name (`{ name }`: that machine makes the tag when it has none).
    */
   setThreadTag: (threadId: string, tag: { tag: string } | { name: string }, on: boolean) => post<{ tags: string[] }>(threadUrl(threadId, '/tags'), { ...tag, on }),
-  /** A tag's row colour (a preset, `#rrggbb`, or null: None), as of `at`; `machine`: that linked machine's tag of the name. */
-  setTagColour: (tag: string, colour: string | null, at: string, machine?: string | null) =>
-    post<{ look: InboxTagLook; tag_colours: InboxTagColours }>(inboxUrl('/tag-colours', undefined, machine), { tag, colour, at }),
-  /** "Show tag colors" in the list's ⋮, as of `at`, here or on a linked machine. */
-  setTagColoursShown: (show: boolean, at: string, machine?: string | null) => post<{ tag_colours: InboxTagColours }>(inboxUrl('/tag-colours', undefined, machine), { show, at }),
   /** Snooze the thread until a time, or end its snooze (`null`). `at`: an earlier snooze's own time, for an Undo. On the thread's own machine. */
   snooze: (threadId: string, until: string | null, at?: string) =>
     post<{ snoozed: { until: string; at: string } | null }>(threadUrl(threadId, '/snooze'), { until, ...(at ? { at } : {}) }),

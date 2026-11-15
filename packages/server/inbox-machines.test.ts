@@ -1984,6 +1984,10 @@ describe("a star or Priority on a linked machine's thread lives on that machine 
       expect((await post(b.port, "/api/inbox/tag-colours", { tag: bRelease.id, colour: "red", at: "2026-11-13T11:00:00.000Z" })).status).toBe(200);
       await waitFor("B's later pick on A", async () => (await colourOf(a.port, "release")) === "red", 30_000);
       expect(a.store.tagLook(release.id)?.colour).toBe("#ff6a00");
+      // A held write from before lands on B late (the outbox after a sleep): B keeps the later pick, so both stay red.
+      expect((await forward(a.port, bId, "tag-colours", { tag: bRelease.id, colour: "amber", at: "2026-11-13T10:30:00.000Z" })).status).toBe(200);
+      expect(b.store.tagLook(bRelease.id)?.colour).toBe("red");
+      expect(await colourOf(a.port, "release")).toBe("red");
 
       // Show tag colors: on until set; off from A (here and on B); on again in B's window, later, wins on A too.
       expect(await shownOn(a.port)).toBe(true);

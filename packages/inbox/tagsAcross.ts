@@ -9,6 +9,7 @@ import { InboxApiError, InboxHeldError, inboxApi } from './api';
 import { restoreInitiatives, type InitiativesRestored } from './board/initiativeUndo';
 import { machineTakes, type MachinesModel } from './machines';
 import { tagById, tagIdOn, tagNamed, type ListTag } from './threadTags';
+import { tagColoursApi } from './data/actions/tagColours';
 
 export type TagChange = { op: 'rename'; name: string } | { op: 'delete' } | { op: 'restore' };
 
@@ -41,14 +42,14 @@ export interface TagsAcross {
 export async function showTagColoursAcross(on: boolean, at: string, machines: MachinesModel): Promise<TagChanged> {
   let held: InboxHeldError | null = null;
   try {
-    await inboxApi.setTagColoursShown(on, at);
+    await tagColoursApi.shown(on, at);
   } catch (cause) {
     return { refused: cause, held };
   }
   for (const machine of machines.linked) {
     if (!(machine.marks ?? []).includes('tag-colours')) continue;
     try {
-      await inboxApi.setTagColoursShown(on, at, machine.id);
+      await tagColoursApi.shown(on, at, machine.id);
     } catch (cause) {
       if (cause instanceof InboxHeldError) held = cause;
     }
@@ -142,7 +143,7 @@ export function tagsAcross(tags: readonly ListTag[], machines: MachinesModel): T
       const own = tagIdOn(tag, null, machines.self);
       if (own) {
         try {
-          await inboxApi.setTagColour(own, colour, at);
+          await tagColoursApi.set(own, colour, at);
         } catch (cause) {
           return { refused: cause, held };
         }
@@ -150,7 +151,7 @@ export function tagsAcross(tags: readonly ListTag[], machines: MachinesModel): T
       for (const [machine, id] of Object.entries(tag.machines ?? {})) {
         if (machine === machines.self || !machineTakes({ machine }, machines, 'tag-colours')) continue;
         try {
-          await inboxApi.setTagColour(id, colour, at, machine);
+          await tagColoursApi.set(id, colour, at, machine);
         } catch (cause) {
           if (cause instanceof InboxHeldError) held = cause;
           else refused ??= cause;

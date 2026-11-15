@@ -3,7 +3,7 @@
  * catches: a new tag left without a colour (its rows would not tint at once, as the owner asked); tags made before
  * colours coloured differently on each load, or not written; a colour lost with a delete's Undo; a person's pick
  * replaced by an automatic one; the marks dropped by a colour write; a bad colour stored; the own colours growing past
- * three or repeating.
+ * three or repeating; a held write landing late over a newer pick.
  */
 import { afterEach, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -104,6 +104,25 @@ test("Show tag colors: on until set, then as set, kept across a restart", () => 
   store.setTagColoursShown(false, "2026-11-13T10:00:00.000Z");
   expect(reopen().tagColours()).toMatchObject({ show: false, show_at: "2026-11-13T10:00:00.000Z" });
   expect(() => store.setTagColoursShown("off", null)).toThrow();
+});
+
+test("a held write that lands late never undoes a newer pick: the later time stays, a colour and the switch alike", () => {
+  const { store, reopen } = world();
+  const release = store.createInitiative({ name: "Release", by: PERSON });
+  // Picked here at t2; another machine's pick from t1, held while this one slept, arrives after.
+  store.setTagColour(release.id, "amber", "2026-11-13T10:02:00.000Z");
+  expect(store.setTagColour(release.id, "#0b7285", "2026-11-13T10:01:00.000Z")).toEqual({ colour: "amber", by: "person", at: "2026-11-13T10:02:00.000Z" });
+  expect(reopen().tagLook(release.id)?.colour).toBe("amber");
+  expect(reopen().tagColours().recent).toEqual([]);
+  store.setTagColoursShown(false, "2026-11-13T10:02:00.000Z");
+  store.setTagColoursShown(true, "2026-11-13T10:01:00.000Z");
+  expect(reopen().tagColours().show).toBe(false);
+  // Any time form reads as a time, stored as ISO: "~" (after every digit) does not win by sorting last.
+  store.setTagColour(release.id, "red", "Fri, 13 Nov 2026 10:03:00 GMT");
+  expect(reopen().tagLook(release.id)?.at).toBe("2026-11-13T10:03:00.000Z");
+  expect(() => store.setTagColour(release.id, "green", "~")).toThrow();
+  expect(() => store.setTagColoursShown(true, "~")).toThrow();
+  expect(reopen().tagLook(release.id)?.colour).toBe("red");
 });
 
 test("a colour change tells the windows, as a mark does", () => {

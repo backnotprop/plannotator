@@ -372,6 +372,13 @@ test.skipIf(!hasDom)('a sidebar tag wears its colour; Highlight rows opens the c
     await new Promise((r) => setTimeout(r, 900));
   });
   expect(picks).toHaveLength(4);
+  // A screen reader's swipe moves the strip with no key and no pointer: kept once it rests too.
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(strip, '200');
+    strip.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await until(() => picks.length === 5, 'the swipe kept');
+  expect(picks.at(-1)).not.toBe(picks.at(-2));
   // Back: the menu again, focus on Highlight rows.
   await press(list.querySelector('[data-tag-colour-back]'));
   await until(() => document.activeElement === tagMenu()?.querySelector('[data-tag-action="colour"]'), 'focus back on Highlight rows');

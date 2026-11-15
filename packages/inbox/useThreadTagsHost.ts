@@ -7,7 +7,8 @@ import { setSidebarSectionOpen } from './sidebarSections';
 import { canTagThread, rowTagsHere, tagById, tagsSectionShown, tagThreadCounts, tagWaitingCounts, tagWrite, type ListTag, type ThreadTagsHost } from './threadTags';
 import { initiativeDeletedToast } from './board/model';
 import { showTagColoursAcross, type TagsAcross } from './tagsAcross';
-import { rowTint, type RowTint } from './tagColours';
+import { rowTint } from './tagColours';
+import type { ListTagColours } from './parts/RowTint';
 import type { InboxToastModel } from './components/Toast';
 
 function withEntry<V>(map: ReadonlyMap<string, V>, key: string, value: V | undefined): ReadonlyMap<string, V> {
@@ -48,12 +49,7 @@ export interface TagColourControls {
   preview: (tag: ListTag, colour: string | null | undefined) => void;
 }
 
-/** What the list needs for tag colours: the ⋮'s switch and each row's tint. */
-export interface ListTagColours {
-  show: boolean;
-  setShow: (on: boolean) => void;
-  tintOf: (row: Pick<InboxListRow, 'thread_id' | 'tags' | 'machine'>) => RowTint | null;
-}
+export type { ListTagColours };
 
 export function useThreadTagsHost({ listTags, across, routeTag, machines, windowRows, latestSections, rowOf, showError, showToast, dismissToast, refreshList, openTag, tagGone, tagColours }: TagsInputs) {
 const [tagPatches, setTagPatches] = useState<ReadonlyMap<string, readonly string[]>>(() => new Map());
@@ -228,16 +224,21 @@ const [tagPatches, setTagPatches] = useState<ReadonlyMap<string, readonly string
     },
     [machines, refreshList, showError],
   );
-  const listColours = useMemo<ListTagColours | null>(
-    () =>
-      coloursKept
-        ? {
-            show: showColours,
-            setShow: (on) => void setShow(on),
-            tintOf: (row) => (showColours && listTags ? rowTint(tagsOfRow(row), listTags, colourOf, shownTagId) : null),
-          }
-        : null,
-    [coloursKept, showColours, setShow, listTags, tagsOfRow, colourOf, shownTagId],
-  );
+  // Search's results find a thread's row by its id (App's `rowOf`, a new function each draw: read through a ref).
+  const rowOfRef = useRef(rowOf);
+  rowOfRef.current = rowOf;
+  const listColours = useMemo<ListTagColours | null>(() => {
+    if (!coloursKept) return null;
+    const tintOf: ListTagColours['tintOf'] = (row) => (showColours && listTags ? rowTint(tagsOfRow(row), listTags, colourOf, shownTagId) : null);
+    return {
+      show: showColours,
+      setShow: (on) => void setShow(on),
+      tintOf,
+      tintOfThread: (threadId) => {
+        const row = rowOfRef.current(threadId);
+        return row ? tintOf(row) : null;
+      },
+    };
+  }, [coloursKept, showColours, setShow, listTags, tagsOfRow, colourOf, shownTagId]);
   return { tagsOfRow, filterTag, shownTagId, threadTagsHost, sidebarTags: sidebarTags && { ...sidebarTags, colours: colourControls }, listColours };
 }

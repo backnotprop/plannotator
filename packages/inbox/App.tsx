@@ -36,6 +36,7 @@ import { useRowWrites, type RowDrawing } from './data/actions/rows';
 import { keepSavedQuestions } from './data/actions/picks';
 import { useSettingsSaves } from './data/actions/settings';
 import { useListShown } from './app/useListView';
+import { useListTags } from './app/useListTags';
 import { useDecideSitting, type DecideSitting } from './app/useDecideSitting';
 import { useSnoozeBack } from './app/useSnoozeBack';
 import { WarmWindowParts } from './lazyParts';
@@ -1568,13 +1569,7 @@ function Inbox() {
     if (Date.now() - cardsReadAt.current < 5_000) return;
     void refreshCards();
   }, [refreshCards]);
-  // With the Board off, the list's tags (approval "inbox-thread-tags"), the same array while their ids and names stay.
-  const listTagsKey = (latest?.tags ?? [])
-    .map((i) => `${i.id}\u0000${i.name}\u0000${JSON.stringify(i.machines ?? null)}\u0000${JSON.stringify(i.look ?? null)}`)
-    .join('\u0001');
-  const keepsTags = latest?.tags !== undefined;
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the ids and names, on purpose
-  const listTags = useMemo(() => latest?.tags ?? null, [listTagsKey, keepsTags]);
+  const listTags = useListTags(latest);
   const liveTags = useMemo(() => (boardEnabled === false && listTags ? { initiatives: listTags, href: tagHref } : { initiatives: tagInitiatives }), [boardEnabled, listTags, tagInitiatives]);
   const across = useMemo(() => (listTags ? tagsAcross(listTags, machines) : null), [listTags, machines]);
   const initiativeTags = useMemo<InitiativeTags>(() => {
@@ -4122,7 +4117,6 @@ function Inbox() {
       dismissToast,
       refreshList,
       openTag: (tagId) => leave({ page: 'inbox', project: null, machine: null, agent: null, tag: tagId, thread: null }),
-      tagColours: latest?.tag_colours ?? null,
       tagGone: (tag) => {
         if (routeRef.current.page === 'inbox' && routeRef.current.tag && tagById([tag], routeRef.current.tag)) writeRoute({ page: 'inbox', project: null, thread: null }, { replace: true });
       },
@@ -6983,10 +6977,7 @@ function Inbox() {
         mounted={searchMounted}
         open={searchOpen}
         phone={phone}
-        tintOf={listColours ? (threadId) => {
-          const row = rowOf(threadId);
-          return row ? listColours.tintOf(row) : null;
-        } : undefined}
+        tintOf={listColours?.tintOfThread}
         currentProject={route.page === 'inbox' ? route.project : null}
         projects={projects}
         onClose={closeSearch}

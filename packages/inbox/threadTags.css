@@ -50,7 +50,8 @@
 :root.light .pn-inbox [data-tint="custom"] { --ib-tint: var(--ib-tint-l); }
 
 /* Wide and three-line rows: the row's own pill, so hover, the open menu and the selection are stronger steps of the
-   same colour. !important as the pill's own fills are (they win over Show's light); the focus ring stays on top. */
+   same colour. !important because the pill's hover and selected fills are !important (inbox.css), and a tinted
+   row's steps must replace them; the focus ring stays on top. */
 .pn-inbox .ib-rw :is(.ib-row, .ib-nrow)[data-tint] { --ib-row-fill: color-mix(in oklab, var(--ib-tint) var(--ib-tint-a), var(--card)); }
 .pn-inbox .ib-rw :is(.ib-row, .ib-nrow)[data-tint]:hover,
 .pn-inbox .ib-rw[data-menu] :is(.ib-row, .ib-nrow)[data-tint] { --ib-row-fill: color-mix(in oklab, var(--ib-tint) var(--ib-tint-h), var(--card)); }
@@ -62,6 +63,10 @@
 .pn-inbox .ib-mrow[data-tint] { background: color-mix(in oklab, var(--ib-tint) var(--ib-tint-a), var(--card)) !important; }
 .pn-inbox .ib-mrow[data-tint]:active,
 .pn-inbox .ib-mrow[data-tint][data-menu] { background: color-mix(in oklab, var(--ib-tint) var(--ib-tint-h), var(--card)) !important; }
+/* A tinted row brought in by Show does not light up: the glow is a fill, and the tint is the row's fill. The row
+   still slides into place, as every new row does. */
+.pn-inbox .ib-rw :is(.ib-row, .ib-nrow)[data-tint][data-lit]::before,
+.pn-inbox .ib-mrow[data-tint][data-lit] { animation: none; }
 
 /* A thread in search's results, as its row in the list: the tint over the panel, the chosen result a stronger step. */
 .pn-inbox .ib-sp-row[data-tint] { background: color-mix(in oklab, var(--ib-tint) var(--ib-tint-a), var(--popover)); }
