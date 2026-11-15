@@ -143,9 +143,11 @@ export function SheetPage(props: SheetPageProps) {
   useEffect(() => clearTimers, []);
 
   const riskAnswer = usePullRisk(props.risk ? null : model).answer;
+  // A linked machine's PRs carry that machine's judgments (`far_risk`); this machine's own come from its risk read.
+  const judgments = useMemo(() => (props.risk ? undefined : { ...props.model?.far_risk, ...riskAnswer?.judgments }), [props.risk, props.model, riskAnswer]);
   const risk = useMemo<RiskLevels>(
-    () => props.risk ?? Object.fromEntries(Object.entries(riskAnswer?.judgments ?? {}).map(([key, judgment]) => [key, judgment.level])),
-    [props.risk, riskAnswer],
+    () => props.risk ?? Object.fromEntries(Object.entries(judgments ?? {}).map(([key, judgment]) => [key, judgment.level])),
+    [props.risk, judgments],
   );
   const layout: SheetLayout = phone || !props.onLayout ? 'grid' : (props.layout ?? 'grid');
   const [sort, setSort] = useState<TableSort | null>(null);
@@ -426,7 +428,7 @@ export function SheetPage(props: SheetPageProps) {
   /** Merge: one at a time through the popover's own route, which asks the forge again and pins the head the person saw. */
   const runMerge = (list: InboxPull[], skipped: MergePlan['skip']) =>
     queue(async () => {
-      const outcomes = await runEach('merge', list, (pull) => inboxApi.pullMerge(pull.key, pull.head_sha!), (pull) => setMergedHere((was) => new Map(was).set(pull.key, new Date().toISOString())));
+      const outcomes = await runEach('merge', list, (pull) => inboxApi.pullMerge(pull.key, pull.head_sha!, pull.machine ?? null), (pull) => setMergedHere((was) => new Map(was).set(pull.key, new Date().toISOString())));
       const merged = new Set(outcomes.filter((o) => o.ok).map((o) => o.pull.key));
       report('merge', outcomes, skipped, new Set([...chosen].filter((key) => !merged.has(key))));
     });
@@ -436,7 +438,7 @@ export function SheetPage(props: SheetPageProps) {
    */
   const runClose = (list: InboxPull[]) =>
     queue(async () => {
-      const outcomes = await runEach('close', list, (pull) => inboxApi.pullClose(pull.key), (pull) => {
+      const outcomes = await runEach('close', list, (pull) => inboxApi.pullClose(pull.key, pull.machine ?? null), (pull) => {
         setReopenedHere((was) => withoutKey(was, pull.key));
         setClosedHere((was) => new Map(was).set(pull.key, pull.state));
       });
@@ -448,7 +450,7 @@ export function SheetPage(props: SheetPageProps) {
   const undoClose = (closed: readonly InboxPull[]) =>
     queue(async () => {
       setSelecting(true);
-      const outcomes = await runEach('reopen', closed, (pull) => inboxApi.pullReopen(pull.key), (pull) => {
+      const outcomes = await runEach('reopen', closed, (pull) => inboxApi.pullReopen(pull.key, pull.machine ?? null), (pull) => {
         setClosedHere((was) => withoutKey(was, pull.key));
         setReopenedHere((was) => new Map(was).set(pull.key, pull.state));
       });
@@ -502,7 +504,7 @@ export function SheetPage(props: SheetPageProps) {
       query={q}
       now={now}
       risk={risk}
-      judgments={props.risk ? undefined : riskAnswer?.judgments}
+      judgments={judgments}
       sort={sort}
       onSort={(key) => setSort((was) => nextSort(was, key))}
       onRow={(pull, stack, event) => {
@@ -999,7 +1001,7 @@ function TilePopover(props: {
     if (merge.at !== 'confirm' || !pull.head_sha) return;
     setMerge({ at: 'merging' });
     props.onHold(true);
-    inboxApi.pullMerge(pull.key, pull.head_sha).then(
+    inboxApi.pullMerge(pull.key, pull.head_sha, pull.machine ?? null).then(
       () => {
         setMerge({ at: 'done' });
         // Long enough to read; the timer runs on if the popover is closed meanwhile, so the PR still leaves Open.
