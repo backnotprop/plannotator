@@ -155,8 +155,8 @@ export function replyIsStale(messages: readonly InboxMessage[], seenThroughSeq: 
  *   close, reopen or merge): never held, sent only while online, and only from
  *   a press in this Inbox's window. The forge is asked first there, so a second
  *   copy is refused in the forge's words ("It is already closed."). A review
- *   thread's PRs kept there (`pulls/owner`) go the same way: right after the
- *   thread's start, or not at all.
+ *   thread's PRs tied there (`pulls/owner`) go the same way; the window sends
+ *   it right after the thread's start.
  * - `local` is never forwarded: `doorWriteKind` has no kind for it, so the
  *   forward answers 404. A phone reaches it at this Inbox's own door. Reuse
  *   (`uploads/reuse`) is useful only as its answer, the new upload's id: a held

@@ -34,7 +34,8 @@ import { BoxMark, boxState, SelectBox } from './SelectBox';
 import { cantMergeLine, confirmWords, mergeHint, mergePlan, notMergedLine, refusedLine, type MergePlan } from './bulkMerge';
 import { CLOSE_UNDO_MS, doneLine, runningWords, toastLead, type BulkVerb, type RunOutcome } from './bulkClose';
 import { ALREADY_HEADING, ALREADY_LEAD, alreadyPart, groupPart, notStartedLine, reviewPlan, startButtonWords, startedHeading, startedLead, startedToast, startingWords, stoppedToast, untiedLine, type ReviewReport } from './bulkReview';
-import { startReview } from './startReviews';
+import { retryTies, startReview } from './startReviews';
+import { untiedStarts } from './reviewStarts';
 import type { InboxToastModel } from '../components/Toast';
 import { SheetTable, type TableSection } from './SheetTable';
 import { nextSort, pullWords, sortUnits, type SheetLayout, type TableSort } from './tableModel';
@@ -85,6 +86,8 @@ export interface SheetPageProps {
   layout?: SheetLayout;
   /** Without it there is no Grid | Table switch. */
   onLayout?: (layout: SheetLayout) => void;
+  /** A linked machine's name, for Start review thread's words about it. */
+  machineName?: (machine: string) => string | null;
   /** Open a review thread (Start review thread's report, a tile's Open review thread). Without it neither is offered. */
   onOpenThread?: (threadId: string) => void;
 }
@@ -130,8 +133,14 @@ export function SheetPage(props: SheetPageProps) {
   // Closed here (and the state each had), and reopened by Close's Undo.
   const [closedHere, setClosedHere] = useState<ReadonlyMap<string, InboxPull['state']>>(() => new Map());
   const [reopenedHere, setReopenedHere] = useState<ReadonlyMap<string, InboxPull['state']>>(() => new Map());
-  // The review threads started here, by PR key, until the list links them: a second press never starts another.
-  const [threadsHere, setThreadsHere] = useState<ReadonlyMap<string, string>>(() => new Map());
+  // The review threads started here, by PR key, until the list links them: a second press never starts another. A
+  // thread whose PRs could not be tied to it stays here across a reload (reviewStarts.ts) while its tie is tried again.
+  const [threadsHere, setThreadsHere] = useState<ReadonlyMap<string, string>>(() => new Map(untiedStarts().flatMap((s) => s.keys.map((k) => [k, s.thread!] as const))));
+  const onMerged = useRef(props.onMerged);
+  onMerged.current = props.onMerged;
+  useEffect(() => {
+    void retryTies().then((tied) => tied.length > 0 && onMerged.current());
+  }, []);
   const model = useMemo(() => withDoneHere(props.model, { merged: mergedHere, closed: closedHere, reopened: reopenedHere }), [props.model, mergedHere, closedHere, reopenedHere]);
   // A merge under way or just done holds its popover open: the pointer leaving or another tile doesn't close it.
   const held = useRef(false);
@@ -479,7 +488,7 @@ export function SheetPage(props: SheetPageProps) {
       const report: ReviewReport = { started: [], already, failed: [] };
       for (let i = 0; i < groups.length; i++) {
         setBulk({ at: 'running', verb: 'review', done: i + 1, total: groups.length });
-        const outcome = await startReview(groups[i]!);
+        const outcome = await startReview(groups[i]!, groups[i]!.machine ? (props.machineName?.(groups[i]!.machine!) ?? null) : null);
         if ('why' in outcome) report.failed.push({ pulls: outcome.group.pulls, why: outcome.why });
         else report.started.push(outcome);
       }

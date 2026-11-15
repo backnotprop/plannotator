@@ -44,7 +44,7 @@ export interface ReviewReport {
 /**
  * The picks, split: a PR with a live review thread (the list's link, or one started here before
  * the list says so) is linked to it; the others go one thread per repository and machine, in a repository that is an
- * Inbox project, lowest number first, and at most `INBOX_PULL_OWNER_KEYS_MAX` to a thread (the owner route's limit).
+ * Inbox project, lowest number first (the linked ones too), and at most `INBOX_PULL_OWNER_KEYS_MAX` to a thread (the owner route's limit).
  */
 export function reviewPlan(
   picks: readonly InboxPull[],
@@ -82,6 +82,7 @@ export function reviewPlan(
       failed.push({ pulls: group.pulls.slice(INBOX_PULL_OWNER_KEYS_MAX), why: `one review thread takes at most ${INBOX_PULL_OWNER_KEYS_MAX}.` });
     } else groups.push(group);
   }
+  already.sort((x, y) => x.pull.number - y.pull.number);
   return { groups, already, failed };
 }
 

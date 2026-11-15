@@ -7,7 +7,10 @@
  *  - a pick that could not start leaving the selection, or a report without its threads one click away;
  *  - a phone's report as one wrapped sentence of 44 px links instead of a row per thread;
  *  - one PR's hand-off changing: its message and name stay today's `pullHandoffMessage` and `pullHandoffThreadName`;
- *  - an agent that is working given the review instead of a new one.
+ *  - an agent that is working given the review instead of a new one;
+ *  - a second thread for PRs whose tie to theirs failed, after a reload; a press again after a Send that failed with a
+ *    new key (a machine that took the first late starts a second), or with the key of a hold that was cancelled;
+ *  - an older linked machine's door words ("Not a phone route.") said instead of the update it needs.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt. No gh and no agent: the window's fetch
  * is stubbed.
@@ -82,6 +85,8 @@ let toasts: { toast: Omit<InboxToastModel, 'id'>; ms: number }[] = [];
 let root: Root | null = null;
 let host: HTMLElement | null = null;
 let savedFetch: typeof fetch;
+/** A refusal for a request the test chooses; null lets the fake answer. */
+let refuse: (request: { url: string; body: Record<string, any> }) => Response | null = () => null;
 
 beforeEach(() => {
   if (!hasDom) return;
@@ -89,20 +94,25 @@ beforeEach(() => {
   threads = 0;
   toasts = [];
   sessions = { here: { projects: [], launch: launchOf(['prj_ledger', 'prj_web']) } };
+  refuse = () => null;
+  window.localStorage.clear();
   savedFetch = globalThis.fetch;
   globalThis.fetch = (async (input: string, init?: RequestInit) => {
     const url = String(input);
     const method = init?.method ?? 'GET';
     const body = init?.body ? JSON.parse(String(init.body)) : {};
     const machine = /\/api\/inbox\/m\/([^/]+)\//.exec(url)?.[1] ?? 'here';
-    if (!/\/(sessions|pulls\/owner|messages|launch\/[^/]+\/stop)(\?|$)/.test(url)) return Response.json({});
+    if (!/\/(sessions|pulls\/owner|messages|launch\/[^/]+\/stop|outbox\/[^/]+\/cancel)(\?|$)/.test(url)) return Response.json({});
     sent.push({ method, url, body });
+    const refused = refuse({ url, body });
+    if (refused) return refused;
     if (url.includes('/sessions')) {
       const answer = sessions[machine];
       return answer ? Response.json({ serverSession: 's', home: '/home', ...answer }) : Response.json({ error: 'Mac mini cannot be reached now.', code: 'machine_offline' }, { status: 503 });
     }
     if (url.includes('/pulls/owner')) return Response.json({ ok: true });
     if (url.includes('/stop')) return Response.json({ run: null });
+    if (url.includes('/cancel')) return Response.json({ entry: { key: 'held', state: 'cancelled' } });
     threads += 1;
     const launch = 'launch' in body.to ? { launch: { id: `lau_${threads}`, state: 'starting' } } : {};
     return Response.json({ thread_id: `msg_${machine === 'here' ? '' : 'mini_'}${threads}`, message: {}, replayed: false, ...launch });
@@ -151,6 +161,12 @@ function draw(over: Partial<SheetPageProps> = {}) {
 }
 
 const click = (el: HTMLElement) => act(() => el.click());
+/** The window loads again: a new board over the same list. */
+function reload(over: Partial<SheetPageProps> = {}) {
+  act(() => root?.unmount());
+  host?.remove();
+  return draw(over);
+}
 const tile = (k: string) => $(`[data-pr-tile="${k}"]`);
 const pickedTiles = () => $$('[data-pr-tile][aria-checked="true"]').map((t) => t.dataset.prTile).sort();
 const row = (kind: string) => $$(`[data-pr-review-row="${kind}"]`).map((r) => r.textContent);
@@ -229,6 +245,87 @@ test('a PR with a review thread is linked to it, never given a second; one start
   await start([key(7)], 'Start review thread');
   expect(messages()).toEqual([]);
   expect(row('already')).toEqual(['Already in review: #7.']);
+});
+
+test('PRs whose tie to their thread failed stay in review across a reload, never given a second thread; the tie is tried again until it holds', async () => {
+  if (!hasDom) return;
+  refuse = ({ url, body }) => (url.endsWith('/pulls/owner') && !body.validate_only ? Response.json({ error: 'The Inbox is busy.', code: 'busy' }, { status: 500 }) : null);
+  draw();
+  await start([key(7), key(9)], 'Start review thread');
+  expect(messages()).toHaveLength(1);
+  expect(row('untied')).toEqual(['#7, #9 Not tied to its thread: The Inbox is busy.']);
+
+  sent = [];
+  reload();
+  await settle();
+  expect(owners().map((s) => [s.body.keys, s.body.thread_id])).toEqual([[[key(7), key(9)], 'msg_1']]);
+  sent = [];
+  await start([key(7), key(9)], 'Start review thread');
+  expect(messages()).toEqual([]);
+  expect(row('already')).toEqual(['Already in review: #7, #9.']);
+
+  refuse = () => null;
+  sent = [];
+  const { refreshed } = reload();
+  await settle();
+  expect(owners()).toHaveLength(1);
+  expect(refreshed).toEqual([1]);
+  sent = [];
+  reload();
+  await settle();
+  expect(owners()).toEqual([]);
+});
+
+test('a press again after a Send that failed replays it with its key; after a hold that was cancelled it sends anew', async () => {
+  if (!hasDom) return;
+  sessions[MINI] = { projects: [], launch: launchOf(['prj_api']) };
+  let first = true;
+  refuse = ({ url }) => {
+    if (!url.endsWith(`/m/${MINI}/messages`) || !first) return null;
+    first = false;
+    return Response.json({ error: 'Mac mini did not answer in time.', code: 'machine_timeout' }, { status: 504 });
+  };
+  draw();
+  await start([key(30, API), key(31, API)], 'Start review thread');
+  expect(row('failed')).toEqual(['#30, #31 Not started: Mac mini did not answer in time.']);
+  click($('[data-pr-review]')!);
+  await settle();
+  const sends = messages().map((m) => m.body.idempotency_key as string);
+  expect(sends).toHaveLength(2);
+  expect(sends[1]).toBe(sends[0]!);
+  expect(row('started')).toEqual(['Started 1 review: api (2 PRs)']);
+
+  // Held for an asleep machine and cancelled: that key answers the cancelled hold, so the next press has its own.
+  sent = [];
+  first = true;
+  refuse = ({ url }) => {
+    if (!url.endsWith(`/m/${MINI}/messages`) || !first) return null;
+    first = false;
+    return Response.json({ outbox: { key: 'held', state: 'queued' }, machine: { id: MINI, name: 'Mac mini', state: 'offline' } }, { status: 202 });
+  };
+  window.localStorage.clear();
+  reload();
+  click($('[data-pr-select="select"]')!);
+  click(tile(key(30, API))!);
+  click($('[data-pr-review]')!);
+  await settle();
+  expect(row('failed')).toEqual(['#30 Not started: Mac mini cannot be reached now.']);
+  expect(sent.some((s) => s.url.endsWith('/outbox/held/cancel'))).toBe(true);
+  click($('[data-pr-review]')!);
+  await settle();
+  const again = messages().map((m) => m.body.idempotency_key as string);
+  expect(again).toHaveLength(2);
+  expect(again[1]).not.toBe(again[0]!);
+});
+
+test('a linked machine too old for the route says it needs updating, in the words used for its agents', async () => {
+  if (!hasDom) return;
+  sessions[MINI] = { projects: [], launch: launchOf(['prj_api']) };
+  refuse = ({ url }) => (url.includes(`/m/${MINI}/pulls/owner`) ? Response.json({ error: 'Not a phone route.', code: 'device_route_not_found' }, { status: 404 }) : null);
+  draw({ machineName: (id) => (id === MINI ? 'Mac mini' : null) });
+  await start([key(30, API)], 'Start review thread');
+  expect(row('failed')).toEqual(['#30 Not started: Update Plannotator on Mac mini to start agents there.']);
+  expect(messages()).toEqual([]);
 });
 
 test("a phone's report: a heading, then one row per thread, each its own link", async () => {
