@@ -1105,6 +1105,54 @@ export const AGENTS: Agent[] = [
     examples: ['Ask Claude in a T3 thread to run `plannotator review`. Your comments go back to that thread.'],
   },
   {
+    slug: 'antigravity',
+    name: 'Antigravity',
+    tier: 'mcp',
+    lede: 'Google Antigravity (the App, the IDE and the agy CLI) reaches the Inbox through MCP. Your reply starts a turn in the conversation that asked.',
+    diff: 'Reply wakes it · App, IDE and agy',
+    inbox: {
+      tool: mcpTool('`plannotator inbox` adds one `plannotator-inbox` key to `~/.gemini/config/mcp_config.json`, the file the App, the IDE and agy all read.', 'AG (antigravity); packages/server/inbox-agents.ts'),
+      reply: {
+        level: 'yes',
+        label: 'Wakes it',
+        detail: 'The Inbox sends your reply into the conversation with Antigravity’s own agent API. An idle conversation starts a turn with it; a busy one reads it at its next step. In agy the agent runs `plannotator inbox antigravity` once per launch first; the App and the IDE need nothing.',
+        src: 'packages/server/inbox-antigravity-wake.ts; apps/hook/server/inbox-antigravity-command.ts',
+      },
+      start: noStart,
+      permissions: noPermissions,
+    },
+    plannotator: {
+      plan: noPlan('No Antigravity plan hook in Plannotator'),
+      review: { level: 'part', label: 'From the terminal', detail: 'Ask the agent to run `plannotator review`.', src: 'apps/hook/server/index.ts (review command)' },
+      annotate: filesOnly('Ask the agent to run `plannotator annotate <file>`.', 'apps/hook/server/index.ts (annotate command)'),
+      ask: noAsk,
+    },
+    setup: [
+      { do: 'Install Plannotator.', code: INSTALL },
+      openInbox('The terminal says `Connected Antigravity … to the Inbox`.'),
+      { do: 'Restart the Antigravity App or IDE. A new agy session has it at once.' },
+    ],
+    other: [
+      { title: 'Connect the Inbox yourself', steps: [{ do: 'Merge this into `mcpServers`. The App, the IDE and agy read the same file.', file: '~/.gemini/config/mcp_config.json', code: MCP_JSON }] },
+      onWindows,
+    ],
+    check: wakeCheck('Antigravity'),
+    trouble: [
+      {
+        symptom: 'In agy, your reply never shows up on its own',
+        fix: 'The agent runs `plannotator inbox antigravity` once per agy launch; the Inbox tells it to when it asks. `agy -p` ends after its turn, so it reads the thread instead.',
+        src: 'apps/hook/server/inbox-antigravity-command.ts',
+      },
+      { symptom: 'The App doesn’t list the `plannotator-inbox` tools', fix: 'The App reads its MCP file when it starts. Restart it.', src: 'packages/server/inbox-agents.ts formatConnectReport' },
+      dockPath,
+      inboxLog,
+    ],
+    limits: [
+      { text: 'Tested with agy 1.5.9 and the App 2.32.1 on macOS. Windows and Linux are untested.', src: 'packages/server/inbox-antigravity-wake.ts (the versions in its header)' },
+    ],
+    examples: ['Ask the agent to send you a question in the Plannotator Inbox, then answer it there.'],
+  },
+  {
     slug: 'qwen-code',
     name: 'Qwen Code',
     tier: 'hooks',

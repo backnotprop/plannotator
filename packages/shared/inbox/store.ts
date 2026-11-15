@@ -38,6 +38,8 @@ import {
   type InboxAnswerRefusal,
   type ParsedInboxQuestion,
 } from "@plannotator/core/inbox-questions";
+import { inboxFileQuestionTwin } from "@plannotator/core/inbox-file-question-twin";
+import { inboxTwinChoicesRefusal } from "@plannotator/core/inbox-choice-twins";
 import { withoutInboxSkillsBlock } from "@plannotator/core/skill-reference-block";
 import type { InboxReviewAnchor, InboxReviewBatch, InboxReviewLive } from "@plannotator/core/review-threads";
 import { inboxRowPreview, inboxRowPreviewWords } from "@plannotator/core/inbox-folding";
@@ -224,6 +226,7 @@ import {
   type InboxTagLook,
 } from "@plannotator/core/inbox-types";
 import type { InboxReviewVerdictRecord } from "@plannotator/core/inbox-review";
+import type { InboxScheduledChange, InboxScheduledRun, InboxScheduledThread } from "@plannotator/core/inbox-scheduled-types";
 import { INBOX_ATTACHMENT_FEEDBACK_TITLE, INBOX_GUIDE_FEEDBACK_TITLE, INBOX_MESSAGE_FEEDBACK_TITLE, INBOX_OWN_MESSAGE_FEEDBACK_TITLE } from "@plannotator/core/inbox-review";
 import { codeFenceCloseIndex } from "@plannotator/core/markdown-structure";
 import { InboxError, inboxDir } from "./schema";
@@ -250,6 +253,8 @@ export interface InboxSendInput {
    * No agent's own call sets it.
    */
   turn_error?: boolean;
+  /** Server only (packages/server/inbox-scheduled.ts): an agent's routine change (`InboxMessage.scheduled_change`). */
+  scheduled_change?: InboxScheduledChange;
   body: string;
   subject?: string | null;
   reply_to?: string | null;
@@ -821,6 +826,14 @@ export class InboxStore {
   private readonly wakingSessions = new Set<string>();
   /** The ids of the thread roots an agent was launched for (`launch`): the launch sweep reads these, never every message. */
   private readonly launchedRootIds = new Set<string>();
+  /** Each routine's newest run divider that carries a launch and is not the thread's root (the root's is in launchedRootIds), by thread. */
+  private readonly scheduledRunByThread = new Map<string, string>();
+  /** Each routine's newest run divider (any) and the newest due time its clock wrote a line for, by routine. */
+  private readonly scheduledLinesOf = new Map<string, { run?: string; due?: string }>();
+  /** Scheduled lines by their run key. */
+  private readonly scheduledKeys = new Map<string, string>();
+  /** Routines, by id, deleted ones too (packages/server/inbox-scheduled.ts). */
+  private readonly scheduledById = new Map<string, InboxScheduledThread>();
   /** The seq of a message's first line: its place in the event log. */
   private readonly messageSeq = new Map<string, number>();
   /**
@@ -1116,12 +1129,27 @@ export class InboxStore {
     this.threadLines.set(record.thread_id, (this.threadLines.get(record.thread_id) ?? 0) + 1);
     if (record.wakes === true && record.author.kind === "agent" && record.author.session) this.wakingSessions.add(record.author.session);
     if (record.launch !== undefined && record.thread_id === record.id) this.launchedRootIds.add(record.id);
+    if (record.scheduled_run) this.placeScheduledLine(record);
     if (!first) return;
     this.messageSeq.set(record.id, firstSeq);
     this.noteAgentMessage(record, firstSeq);
     const members = this.threadMembers.get(record.thread_id);
     if (members) members.push(record.id);
     else this.threadMembers.set(record.thread_id, [record.id]);
+  }
+
+  /** A routine's divider or skip line: the indexes the clock and the launcher read, never the whole thread. */
+  private placeScheduledLine(record: InboxMessage): void {
+    const run = record.scheduled_run!;
+    const runOf = (id: string | undefined) => (id ? (this.messages.get(id)?.scheduled_run?.run ?? 0) : -1);
+    if (record.idempotency_key) this.scheduledKeys.set(record.idempotency_key, record.id);
+    const lines = this.scheduledLinesOf.get(run.scheduled_id) ?? {};
+    if (run.run !== undefined && run.run >= runOf(lines.run)) lines.run = record.id;
+    if (run.by === "schedule" && !(lines.due && lines.due >= run.due_at)) lines.due = run.due_at;
+    this.scheduledLinesOf.set(run.scheduled_id, lines);
+    if (record.launch !== undefined && run.run !== undefined && record.thread_id !== record.id && run.run >= runOf(this.scheduledRunByThread.get(record.thread_id))) {
+      this.scheduledRunByThread.set(record.thread_id, record.id);
+    }
   }
 
   /** A record whose latest line is all there is to it: a project, question, annotation, steps or initiative. */
@@ -1152,6 +1180,9 @@ export class InboxStore {
           if (!ids) this.stepsIdsByThread.set(line.record.thread_id, (ids = new Set()));
           ids.add(line.record.id);
         }
+        break;
+      case "scheduled":
+        this.scheduledById.set(line.record.id, line.record);
         break;
       case "initiative":
         // The Board's initiatives (approval "board-initiatives"): read by the Board only.
@@ -3581,7 +3612,8 @@ export class InboxStore {
     for (let index = messages.length - 1; index >= 0; index--) {
       const message = messages[index]!;
       // A permission prompt (launch, `perm:…`) is not its session's words, as in the window's `wordsMessage`.
-      if (message.author.kind === "agent" && message.author.session && !isInboxPermissionSession(message.author.session)) return { host: message.author.host ?? null, session: message.author.session };
+      // An agent's routine change line (`scheduled_change`) is a note, not its words: it takes no thread.
+      if (message.author.kind === "agent" && message.author.session && !isInboxPermissionSession(message.author.session) && !message.scheduled_change) return { host: message.author.host ?? null, session: message.author.session };
       if (message.took_over && message.to) return { host: message.to.host, session: message.to.session };
     }
     const root = messages[0];
@@ -4229,7 +4261,10 @@ export class InboxStore {
     const actions = parseInboxActionBlocks(body);
     // The questions inside attached Markdown files (issue #2828): after the body's, each with a key no
     // question of this message has (inboxFileQuestionKey), numbered within its file.
-    const fileQuestions = this.fileQuestionsOf(input.attachments ?? [], input.attachment_questions ?? [], [...parsed.map((q) => q.key), ...actions.map((a) => a.key)]);
+    const fileQuestions = this.fileQuestionsOf(input.attachments ?? [], input.attachment_questions ?? [], parsed, actions.map((a) => a.key));
+    // Two choices that read the same would be one answer for both (inbox-choice-twins.ts).
+    const twins = inboxTwinChoicesRefusal([...parsed, ...fileQuestions.map((f) => ({ ...f.question, file: f.attachment.name }))]);
+    if (twins) throw new InboxError("validation_error", twins.message, { field: twins.field });
     // Checked before anything is written: one id that names no open question
     // of this thread refuses the whole send.
     const superseding = this.planSupersede(threadId, id, supersedes, [...parsed, ...fileQuestions.map((f) => ({ key: f.key, replaces: f.question.replaces }))], actions);
@@ -4264,6 +4299,7 @@ export class InboxStore {
         : {}),
       ...(input.wakes === true ? { wakes: true } : {}),
       ...(input.turn_error === true ? { turn_error: true as const } : {}),
+      ...(input.scheduled_change ? { scheduled_change: input.scheduled_change } : {}),
       ...(replyThread !== null ? { reply_thread: replyThread } : {}),
       ...(naming ? { thread_naming: naming } : {}),
     };
@@ -4396,20 +4432,24 @@ export class InboxStore {
    * attachment order and each file's block order, with the record key each
    * takes (`inboxFileQuestionKey`: the file's key unless the body, an action
    * item or an earlier file has it). Only files this send attaches; an
-   * action block in a file is not read (only questions).
+   * action block in a file is not read (only questions), nor one that
+   * repeats a body question (`inboxFileQuestionTwin`).
    */
   private fileQuestionsOf(
     attachments: readonly InboxAttachment[],
     asked: NonNullable<InboxSendInput["attachment_questions"]>,
-    bodyKeys: readonly string[],
+    body: readonly ParsedInboxQuestion[],
+    actionKeys: readonly string[],
   ): { key: string; question: ParsedInboxQuestion; attachment: InboxAttachment }[] {
     if (asked.length === 0) return [];
-    const taken = new Set(bodyKeys);
+    const taken = new Set([...body.map((q) => q.key), ...actionKeys]);
+    const bodyShapes = body.map((q) => ({ key: q.key, choices: q.parsed.choices }));
     const out: { key: string; question: ParsedInboxQuestion; attachment: InboxAttachment }[] = [];
     for (const attachment of attachments) {
       const entry = asked.find((a) => a.attachment_id === attachment.id);
       if (!entry) continue;
       for (const question of entry.questions) {
+        if (inboxFileQuestionTwin({ key: question.key, choices: question.parsed.choices }, bodyShapes)) continue;
         const key = inboxFileQuestionKey(question.key, taken);
         if (key !== null) out.push({ key, question, attachment });
       }
@@ -6368,8 +6408,23 @@ export class InboxStore {
     const messageIds = new Set(this.threadMembers.get(threadId) ?? []);
     const markups = this.markupsOf((record) => record.thread_id === threadId);
     this.keepDecisionLines((question) => messageIds.has(question.message_id));
+    this.releaseScheduledThreads((id) => id === threadId);
     this.log.deleteThread(project, threadId, messageIds, this.seq);
     this.reload(markups);
+  }
+
+  /**
+   * A routine whose thread is deleted lets go of it: its next run or change line starts one new thread. Its runs count
+   * on from the deleted thread's last, and its clock keeps its place, so nothing it already ran is run again.
+   */
+  private releaseScheduledThreads(gone: (threadId: string) => boolean): void {
+    for (const record of [...this.scheduledById.values()]) {
+      if (!record.thread_id || !gone(record.thread_id)) continue;
+      const { run, due } = this.scheduledLines(record.id);
+      const handled = record.handled_through !== null && due && due > record.handled_through ? due : record.handled_through;
+      const runs = Math.max(run?.scheduled_run?.run ?? 0, record.runs_before ?? 0);
+      this.putScheduledThread({ ...record, thread_id: null, handled_through: handled, ...(runs > 0 ? { runs_before: runs } : {}), updated_at: this.now().toISOString() });
+    }
   }
 
   /** Delete a project: its whole folder, then every blob no other record uses. */
@@ -6378,6 +6433,7 @@ export class InboxStore {
     if (!project) throw new InboxError("project_not_found", `No project ${projectId}.`);
     const markups = this.markupsOf((record) => record.project_id === projectId);
     this.keepDecisionLines((question) => question.project_id === projectId);
+    this.releaseScheduledThreads((id) => this.messages.get(id)?.project_id === projectId);
     this.log.deleteProject(project, this.seq);
     this.reload(markups);
   }
@@ -6466,6 +6522,10 @@ export class InboxStore {
     this.projectGroups = null;
     this.messages.clear();
     this.launchedRootIds.clear();
+    this.scheduledRunByThread.clear();
+    this.scheduledLinesOf.clear();
+    this.scheduledKeys.clear();
+    this.scheduledById.clear();
     this.messageSeq.clear();
     this.resolvedSeq.clear();
     this.readdressed.clear();
@@ -6581,6 +6641,8 @@ export class InboxStore {
   private pendingFor(message: InboxMessage, session: string, options: { tags?: boolean }): boolean {
     // A hand-off inside its Undo window goes to nobody yet.
     if (handoffHeld(message) || message.taken_back_at) return false;
+    // A scheduled run's divider goes to its own run's session only; a skip line, or a run that didn't start, to none.
+    if (message.scheduled_run && message.to?.session !== session) return false;
     const owner = this.isOwner(message, session);
     const tag = owner ? null : tagOf(message, session);
     if (tag) return !tag.delivery && options.tags !== false;
@@ -7447,6 +7509,97 @@ export class InboxStore {
       const message = this.messages.get(id);
       return message ? [message] : [];
     });
+  }
+
+  /** Each routine's newest run that carries a launch, other than its root: the launcher's runs beside its roots. Earlier runs have ended. */
+  scheduledRunLaunches(): InboxMessage[] {
+    return [...this.scheduledRunByThread.values()].flatMap((id) => {
+      const message = this.messages.get(id);
+      return message ? [message] : [];
+    });
+  }
+
+  /** A thread's newest scheduled run that carries a launch, other than its root, or null. */
+  scheduledRunOf(threadId: string): InboxMessage | null {
+    const id = this.scheduledRunByThread.get(threadId);
+    return (id && this.messages.get(id)) || null;
+  }
+
+  /** A routine's newest run divider, and the newest due time its clock wrote a run or skip line for. */
+  scheduledLines(scheduledId: string): { run: InboxMessage | null; due: string | null } {
+    const lines = this.scheduledLinesOf.get(scheduledId);
+    return { run: (lines?.run && this.messages.get(lines.run)) || null, due: lines?.due ?? null };
+  }
+
+  /** The routines not deleted, oldest first. */
+  scheduledThreads(): InboxScheduledThread[] {
+    return [...this.scheduledById.values()].filter((record) => !record.deleted_at).sort((a, b) => a.created_at.localeCompare(b.created_at));
+  }
+
+  scheduledThread(id: string): InboxScheduledThread | null {
+    const record = this.scheduledById.get(id);
+    return record && !record.deleted_at ? record : null;
+  }
+
+  /** A deleted routine, which the window's Undo brings back. */
+  deletedScheduledThread(id: string): InboxScheduledThread | null {
+    const record = this.scheduledById.get(id);
+    return record?.deleted_at ? record : null;
+  }
+
+  /** One snapshot of a routine (its own file in the inbox folder, on the one seq). */
+  putScheduledThread(record: InboxScheduledThread): InboxScheduledThread {
+    this.write(null, { v: INBOX_RECORD_VERSION, seq: this.seq + 1, at: record.updated_at, kind: "scheduled", id: record.id, record });
+    return record;
+  }
+
+  /**
+   * A routine's run divider or skip line, written as the person's (the prompt is theirs), keyed by its run
+   * key: the same key again (a restart in the middle of a check) answers the message written before. The first one
+   * starts the thread, named after the routine. A divider with a launch is addressed to its run's
+   * placeholder and takes the thread over (`took_over`), so the person's plain reply goes to that run's session.
+   */
+  writeScheduledLine(input: {
+    project_id: string;
+    thread_id: string | null;
+    name: string;
+    body: string;
+    key: string;
+    scheduled_run: InboxScheduledRun;
+    to?: InboxAddressee;
+    launch?: InboxLaunchRecord;
+    attachments?: InboxAttachment[];
+  }): { message: InboxMessage; replayed: boolean } {
+    const written = this.scheduledKeys.get(input.key);
+    if (written && this.messages.get(written)) return { message: this.messages.get(written)!, replayed: true };
+    const root = input.thread_id ? this.messages.get(input.thread_id) : undefined;
+    if (input.thread_id && !root) throw new InboxError("thread_not_found", `No thread ${input.thread_id}.`);
+    const project_id = root?.project_id ?? input.project_id;
+    if (!this.projectsById.has(project_id)) throw new InboxError("project_not_found", `No project ${project_id}.`);
+    const at = this.stamp();
+    const id = inboxId("msg");
+    const checked = checkInboxThreadName(input.name);
+    const threadName = !root && checked.ok ? this.freeThreadName(project_id, checked.name, true, true) : null;
+    const message: InboxMessage = {
+      id,
+      project_id,
+      thread_id: root?.id ?? id,
+      reply_to: root ? (this.threadMessageIds(root.id).at(-1) ?? root.id) : null,
+      author: { kind: "person" },
+      subject: root ? root.subject : input.name,
+      subject_question: null,
+      body: input.body,
+      created_at: at,
+      resolved_at: null,
+      idempotency_key: input.key,
+      ...(input.to ? { to: { host: input.to.host, session: input.to.session }, ...(root ? { took_over: true } : { started_by_person: true }) } : {}),
+      ...(input.launch ? { launch: input.launch } : {}),
+      scheduled_run: input.scheduled_run,
+      ...(threadName ? { thread_name: threadName, named_by: { kind: "auto" as const, at } } : {}),
+      ...(input.attachments && input.attachments.length > 0 ? { attachments: input.attachments.map((attachment) => ({ ...attachment, sent_at: at })) } : {}),
+    };
+    this.appendMessage(message, at);
+    return { message, replayed: false };
   }
 
   /**

@@ -6,7 +6,7 @@
  * a closed group that reads or holds rows; more or fewer than 20 rows, "Show 20 more" not adding 20, the group going
  * past 100 without pointing to Search; a row drawn with its last message's time instead of when it was archived;
  * Unarchive that leaves the row on screen until the answer, has no Undo, or loses a row whose write was held (an
- * asleep machine); the group ignoring the selected project, the list's filters or the linked machines; a swipe on a
+ * asleep machine); the group ignoring the selected project, the list's filters (its Tag picks too) or the linked machines; a swipe on a
  * phone that takes a rightward or a short one; and the live list's rows drawn again when the group opens or reads.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
@@ -20,6 +20,8 @@ import type { TidyController } from './components/Tidy';
 import type { ArchivedModel } from './api';
 import type { BulkWrites } from './bulkWrites';
 import * as format from './format';
+import { filterListSections, NO_LIST_FILTER } from './listFilter';
+import { withLiveTagPicks } from './listFilterTags';
 
 const hasDom = typeof document !== 'undefined';
 const { InboxList } = (hasDom ? await import('./components/InboxList') : {}) as typeof import('./components/InboxList');
@@ -419,6 +421,26 @@ test.skipIf(!hasDom)("the group follows the selected project, and the list's fil
   expect(asks.at(-1)!.limit).toBe(101);
   expect(groupIds().length).toBe(20);
   expect(groupIds().every((id) => Number(id!.slice(4)) % 3 === 0)).toBe(true);
+});
+
+test.skipIf(!hasDom)("the list's Tag filter applies to the group: an untagged archived row drops out when a tag is picked", async () => {
+  // Thread tags step 2: App's filter for the group (App.tsx `archivedFilter`), the list's picks read against the live tags.
+  const release = { id: 'ini_release', name: 'Release', created_at: '', created_by: { kind: 'person' }, updated_at: '', deleted_at: null } as const;
+  store = Array.from({ length: 30 }, (_, i) => archivedRow(i, i % 2 ? { tags: ['ini_release'] } : {}));
+  const picks = withLiveTagPicks({ ...NO_LIST_FILTER, tags: ['ini_release'] }, [release]);
+  const byTag = (rows: readonly InboxListRow[]) => filterListSections([{ id: 'archived', label: 'Archived', threads: [...rows] } as InboxListSection], picks, Date.now(), undefined, (r) => r.tags ?? [])[0]?.threads ?? rows;
+  render({ filter: byTag });
+  await switchOn();
+  await openGroup();
+  await settle();
+  expect(groupIds().length).toBeGreaterThan(0);
+  expect(groupIds().every((id) => Number(id!.slice(4)) % 2 === 1)).toBe(true);
+  // No tag picked: every archived row, tagged or not.
+  act(() => band().click());
+  render({ filter: (rows) => filterListSections([{ id: 'archived', label: 'Archived', threads: [...rows] } as InboxListSection], NO_LIST_FILTER, Date.now(), undefined, (r) => r.tags ?? [])[0]?.threads ?? rows });
+  await openGroup();
+  await settle();
+  expect(groupIds().some((id) => Number(id!.slice(4)) % 2 === 0)).toBe(true);
 });
 
 test.skipIf(!hasDom)('on a phone a swipe to the left unarchives; rightward and short ones do nothing, and open nothing', async () => {

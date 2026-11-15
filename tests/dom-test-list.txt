@@ -186,6 +186,7 @@ packages/inbox/relativeTime.test.tsx
 packages/inbox/composeThread.test.tsx
 packages/inbox/sendNow.test.tsx
 packages/inbox/t3WaitLine.test.tsx
+packages/inbox/t3AgentGroup.test.tsx
 packages/inbox/takeBack.test.tsx
 packages/inbox/sendWaitsForComments.test.tsx
 packages/inbox/undelivered.test.tsx
@@ -520,6 +521,7 @@ packages/ui/hooks/useLinkedDoc.revealSidebar.test.tsx
 packages/ui/hooks/useLinkedDoc.reapplyFilter.test.tsx
 packages/ui/hooks/useLinkedDoc.scrollRestore.test.tsx
 packages/ui/components/html-viewer/htmlLinkProtocol.test.tsx
+packages/ui/components/html-viewer/bridgePageNavigation.test.ts
 packages/editor/hooks/useAnnotationJump.test.tsx
 packages/ui/components/TableOfContents.linkedDoc.test.tsx
 packages/ui/components/MarkdownContentsRail.test.tsx
@@ -722,6 +724,9 @@ packages/inbox/prs/sheetTable.test.tsx
 packages/inbox/prs/sheetSelect.test.tsx
 packages/inbox/prs/sheetMerge.test.tsx
 packages/inbox/prs/sheetClose.test.tsx
+packages/inbox/prs/sheetReview.test.tsx
+packages/inbox/prs/stackPage.test.tsx
+packages/inbox/pulls/pullReviewRange.test.tsx
 packages/inbox/fileQuestionCards.test.tsx
 packages/inbox/agents/agentsSection.test.tsx
 packages/inbox/agents/faceFan.test.tsx
@@ -776,9 +781,16 @@ packages/review-editor/components/authorColor.review.test.tsx
 packages/review-editor/components/BranchName.dom.test.tsx
 packages/inbox/settingsAtLoad.test.tsx
 packages/review-editor/components/nameFitting.dom.test.tsx
+packages/inbox/threadTagsStep2.test.tsx
 packages/inbox/listPicks.test.tsx
 packages/inbox/pickWork.test.tsx
 packages/inbox/combines.test.tsx
 packages/inbox/tagColours.test.tsx
 packages/inbox/pressKeys.test.tsx
 packages/review-editor/components/AllFilesCodeView.lineTarget.test.tsx
+packages/inbox/scheduled/scheduledSidebar.test.tsx
+packages/inbox/scheduled/scheduledTable.test.tsx
+packages/inbox/scheduled/scheduledEditor.test.tsx
+packages/inbox/scheduled/scheduledThread.test.tsx
+packages/inbox/scheduled/scheduledRows.test.tsx
+packages/inbox/scheduled/scheduledActions.test.tsx
