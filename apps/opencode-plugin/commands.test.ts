@@ -536,6 +536,24 @@ describe("handleAnnotateLastCommand", () => {
     expect(options.pasteApiUrl).toBe("https://paste.example.test");
     expect(options.markdown).toBe("Latest assistant message");
   });
+
+  test("opens the reply to the person's prompt, not a newer reply to an injected one", async () => {
+    const deps = makeDeps();
+    deps.client.session.messages = mock(async (_input: unknown) => ({
+      data: [
+        { info: { role: "user", id: "u1" }, parts: [{ type: "text", text: "Explain the fix" }] },
+        { info: { role: "assistant", id: "explanation", parentID: "u1" }, parts: [{ type: "text", text: "Here is the fix" }] },
+        { info: { role: "user", id: "s1" }, parts: [{ type: "text", text: "Wake", synthetic: true }] },
+        { info: { role: "assistant", id: "ack", parentID: "s1" }, parts: [{ type: "text", text: "Done" }] },
+      ],
+    }));
+
+    await handleAnnotateLastCommand({ properties: { sessionID: "session-123" } }, deps);
+
+    const options = startAnnotateServerMock.mock.calls[0]?.[0];
+    expect(options.markdown).toBe("Here is the fix");
+    expect(options.recentMessages.map((m: { messageId: string }) => m.messageId)).toEqual(["explanation", "ack"]);
+  });
 });
 
 // #1612, embedded runtime: feedback is answered by the agent that wrote the
