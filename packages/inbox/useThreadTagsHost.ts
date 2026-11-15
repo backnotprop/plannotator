@@ -1,13 +1,16 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
-import type { InboxInitiative, InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
+import type { InboxInitiative, InboxListRow, InboxListSection, InboxTagColours } from '@plannotator/core/inbox-types';
 import { inboxApi } from './api';
 import type { MachinesModel } from './machines';
 import { machineOf } from './inboxUrl';
 import { setSidebarSectionOpen } from './sidebarSections';
 import { canTagThread, rowTagsHere, tagById, tagsSectionShown, tagThreadCounts, tagWaitingCounts, tagWrite, type ListTag, type ThreadTagsHost } from './threadTags';
 import { initiativeDeletedToast } from './board/model';
-import type { TagsAcross } from './tagsAcross';
+import { showTagColoursAcross, type TagsAcross } from './tagsAcross';
+import { rowTint } from './tagColours';
+import type { ListTagColours } from './parts/RowTint';
 import type { InboxToastModel } from './components/Toast';
+import { eachRow, tagsToast } from './bulkWrites';
 
 function withEntry<V>(map: ReadonlyMap<string, V>, key: string, value: V | undefined): ReadonlyMap<string, V> {
   const next = new Map(map);
@@ -30,9 +33,26 @@ interface TagsInputs {
   refreshList: (adopt: boolean) => Promise<unknown>;
   openTag: (tagId: string) => void;
   tagGone: (tag: ListTag) => void;
+  /** The list's `tag_colours`; null from an Inbox before tag colours (then no row is tinted and the menus offer none). */
+  tagColours: InboxTagColours | null;
 }
 
-export function useThreadTagsHost({ listTags, across, routeTag, machines, windowRows, latestSections, rowOf, showError, showToast, dismissToast, refreshList, openTag, tagGone }: TagsInputs) {
+/** The colour menu of a sidebar tag (TagsSection): what it shows and what a pick does. */
+export interface TagColourControls {
+  /** "Show tag colors": off, no sidebar tag is tinted either. */
+  show: boolean;
+  colourOf: (tagId: string) => string | null;
+  /** The person's own colours, newest first (the menu's second line). */
+  recent: readonly string[];
+  /** Drawn at once and kept: written to every machine that holds the tag. */
+  set: (tag: ListTag, colour: string | null) => void;
+  /** Drawn at once, not written (the hue strip while it is dragged); `set` or `preview(tag, undefined)` ends it. */
+  preview: (tag: ListTag, colour: string | null | undefined) => void;
+}
+
+export type { ListTagColours };
+
+export function useThreadTagsHost({ listTags, across, routeTag, machines, windowRows, latestSections, rowOf, showError, showToast, dismissToast, refreshList, openTag, tagGone, tagColours }: TagsInputs) {
 const [tagPatches, setTagPatches] = useState<ReadonlyMap<string, readonly string[]>>(() => new Map());
   const tagsOfRow = useCallback((row: Pick<InboxListRow, 'thread_id' | 'tags' | 'machine'>) => rowTagsHere(row, machines, tagPatches), [tagPatches, machines]);
   const filterTag = routeTag && listTags ? tagById(listTags, routeTag) : null;
@@ -66,6 +86,27 @@ const [tagPatches, setTagPatches] = useState<ReadonlyMap<string, readonly string
       onUndo: () => void setThreadTag(threadId, tag, !on, false),
     });
   };
+  /** The picks' Add tag: each thread through its own machine (`tagWrite`), one toast and one Undo for them all. */
+  const setThreadsTag = async (threadIds: readonly string[], tag: ListTag, on: boolean, undo = true) => {
+    const rows = threadIds.map((id) => rowOf(id)).filter((row): row is InboxListRow => !!row);
+    const outcomes = await eachRow(rows, (row) => inboxApi.setThreadTag(row.thread_id, tagWrite(tag, machineOf(row.thread_id), machines.self), on));
+    const made = outcomes.filter((o) => o.ok).map((o) => o.row.thread_id);
+    if (on && made.length > 0) setSidebarSectionOpen('tags', true);
+    await refreshList(false);
+    if (!undo) {
+      const refused = outcomes.find((o) => !o.ok);
+      if (refused && !refused.ok) showError(refused.cause);
+      else dismissToast();
+      return;
+    }
+    const copy = tagsToast(outcomes, tag.name, on);
+    if (!copy) {
+      const refused = outcomes.find((o) => !o.ok);
+      if (refused && !refused.ok) showError(refused.cause);
+      return;
+    }
+    showToast({ ...copy, onUndo: () => void setThreadsTag(made, tag, !on, false) });
+  };
   const createTag = async (name: string): Promise<InboxInitiative | null> => {
     try {
       return (await inboxApi.createInitiative(name)).initiative;
@@ -87,6 +128,7 @@ const [tagPatches, setTagPatches] = useState<ReadonlyMap<string, readonly string
             counts: tagCounts,
             can: (threadId) => canTagThread(threadId, windowRows, machines, machineOf(threadId)),
             set: (threadId, tag, on) => void setThreadTagRef.current(threadId, tag, on),
+            setMany: (threadIds, tag, on) => void setThreadsTagRef.current(threadIds, tag, on),
             createAndSet: (threadId, name) =>
               machineOf(threadId)
                 ? void setThreadTagRef.current(threadId, { id: '', name, created_at: '', created_by: { kind: 'person' }, updated_at: '', deleted_at: null }, true)
@@ -99,6 +141,8 @@ const [tagPatches, setTagPatches] = useState<ReadonlyMap<string, readonly string
   );
   const setThreadTagRef = useRef(setThreadTag);
   setThreadTagRef.current = setThreadTag;
+  const setThreadsTagRef = useRef(setThreadsTag);
+  setThreadsTagRef.current = setThreadsTag;
   const createTagRef = useRef(createTag);
   createTagRef.current = createTag;
   const sidebarTags = listTags === null
@@ -151,5 +195,76 @@ const [tagPatches, setTagPatches] = useState<ReadonlyMap<string, readonly string
     else if (refused) showError(refused);
     await refreshList(false);
   };
-  return { tagsOfRow, filterTag, shownTagId, threadTagsHost, sidebarTags };
+  // Tag colours (tagColours.ts): what this window just picked shows at once, until the list read after the write has
+  // it; a colour being tried (the hue strip, a typed code) shows over it until it is kept or the menu closes.
+  const [colourPatches, setColourPatches] = useState<ReadonlyMap<string, string | null>>(() => new Map());
+  const [colourPreviews, setColourPreviews] = useState<ReadonlyMap<string, string | null>>(() => new Map());
+  const [showPatch, setShowPatch] = useState<boolean | null>(null);
+  const coloursKept = listTags !== null && tagColours !== null;
+  const showColours = showPatch ?? tagColours?.show ?? true;
+  const colourOf = useCallback(
+    (tagId: string): string | null => {
+      if (colourPreviews.has(tagId)) return colourPreviews.get(tagId)!;
+      if (colourPatches.has(tagId)) return colourPatches.get(tagId)!;
+      return (listTags ? tagById(listTags, tagId) : null)?.look?.colour ?? null;
+    },
+    [colourPreviews, colourPatches, listTags],
+  );
+  const recentKey = (tagColours?.recent ?? []).map((r) => r.colour).join(' ');
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the colours, so a list read with the same ones keeps it
+  const recent = useMemo(() => (recentKey ? recentKey.split(' ') : []), [recentKey]);
+  const setTagColour = async (tag: ListTag, colour: string | null) => {
+    if (!across) return;
+    setColourPreviews((current) => withEntry<string | null>(current, tag.id, undefined));
+    setColourPatches((current) => withEntry<string | null>(current, tag.id, colour));
+    const { refused, held } = await across.colour(tag, colour, new Date().toISOString());
+    await refreshList(false);
+    setColourPatches((current) => (current.get(tag.id) === colour ? withEntry<string | null>(current, tag.id, undefined) : current));
+    if (refused) showError(refused);
+    else if (held) showError(held);
+  };
+  const setTagColourRef = useRef(setTagColour);
+  setTagColourRef.current = setTagColour;
+  const colourControls = useMemo<TagColourControls | null>(
+    () =>
+      coloursKept
+        ? {
+            show: showColours,
+            colourOf,
+            recent,
+            set: (tag, colour) => void setTagColourRef.current(tag, colour),
+            preview: (tag, colour) => setColourPreviews((current) => withEntry<string | null>(current, tag.id, colour)),
+          }
+        : null,
+    [coloursKept, showColours, colourOf, recent],
+  );
+  const setShow = useCallback(
+    async (on: boolean) => {
+      setShowPatch(on);
+      const { refused, held } = await showTagColoursAcross(on, new Date().toISOString(), machines);
+      await refreshList(false);
+      setShowPatch(null);
+      if (refused) showError(refused);
+      else if (held) showError(held);
+    },
+    [machines, refreshList, showError],
+  );
+  // Search's results find a thread's row by its id (App's `rowOf`, a new function each draw: read through a ref).
+  const rowOfRef = useRef(rowOf);
+  rowOfRef.current = rowOf;
+  const listColours = useMemo<ListTagColours | null>(() => {
+    // A phone's list has no `tag_colours` (its keys are fixed): its rows still tint by each tag's `look`, with no switch.
+    if (listTags === null) return null;
+    const tintOf: ListTagColours['tintOf'] = (row) => (showColours && listTags ? rowTint(tagsOfRow(row), listTags, colourOf, shownTagId) : null);
+    return {
+      show: showColours,
+      setShow: coloursKept ? (on) => void setShow(on) : undefined,
+      tintOf,
+      tintOfThread: (threadId) => {
+        const row = rowOfRef.current(threadId);
+        return row ? tintOf(row) : null;
+      },
+    };
+  }, [coloursKept, showColours, setShow, listTags, tagsOfRow, colourOf, shownTagId]);
+  return { tagsOfRow, filterTag, shownTagId, threadTagsHost, sidebarTags: sidebarTags && { ...sidebarTags, colours: colourControls }, listColours };
 }

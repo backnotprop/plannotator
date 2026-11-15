@@ -197,7 +197,7 @@ test.skipIf(!hasDom)('Add to Priority moves the row into a Priority group drawn 
   const subject = (await serverRow(ids.waiting))!.subject;
   expect(groups()).not.toContain('priority');
   await openMenu(ids.waiting);
-  expect(items().slice(0, 2)).toEqual(['Star thread', 'Add to Priority']);
+  expect(items().slice(0, 3)).toEqual(['Select', 'Star thread', 'Add to Priority']);
   await choose('priority-add');
 
   await until(() => drawnIn(ids.waiting) === 'priority', 'the row in Priority');
@@ -223,7 +223,7 @@ test.skipIf(!hasDom)('Remove from Priority says where the row went back to; its 
   await renderApp();
   expect(drawnIn(ids.waiting)).toBe('priority');
   await openMenu(ids.waiting);
-  expect(items().slice(0, 2)).toEqual(['Star thread', 'Remove from Priority']);
+  expect(items().slice(0, 3)).toEqual(['Select', 'Star thread', 'Remove from Priority']);
   await choose('priority-remove');
 
   await until(() => drawnIn(ids.waiting) === 'waiting', 'the row back in Waiting');

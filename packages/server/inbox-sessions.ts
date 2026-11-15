@@ -1242,6 +1242,11 @@ export function createInboxLiveSessions(options: {
     const entry = sessions.get(session);
     return !!entry && entry.host === host && entry.wakeOnly === undefined && isLive(entry);
   };
+  /** Whether `session` of `host` holds a bridge poll open right now (`pollsNow` also counts one that just ended). */
+  const holdsPollNow = (host: string, session: string): boolean => {
+    const entry = sessions.get(session);
+    return !!entry && entry.host === host && entry.wakeOnly === undefined && entry.holding > 0;
+  };
 
   /** `{ host?, session }` naming a live session in any project, or null when it is not live (compose's Send). */
   const composeTarget = (to: unknown): { host: string; session: string; root: string | null } | null => {
@@ -1407,6 +1412,7 @@ export function createInboxLiveSessions(options: {
     isSessionLive,
     runStateOf,
     pollsNow,
+    holdsPollNow,
     composeTarget,
     connectionOf,
     askHostOf,

@@ -98,14 +98,64 @@ panel.
 
 **A T3 Code thread.** T3 Code (pingdotgg/t3code) runs a thread's Claude through
 the Agent SDK with no `settingSources`, so the user's plugins, this one
-included, load as in the terminal. Its environment carries
+included, load as in the terminal. From T3 0.1.7 its environment carries
 `CLAUDE_CODE_ENTRYPOINT=t3-code` (`mergeClaudeProcessEnvironment`, unless the
-person's settings override it) and, for a thread's Claude only,
-`T3CODE_THREAD_ID`; T3 deletes `CLAUDECODE` and `CLAUDE_CODE_CHILD_SESSION`
-from it, as the VS Code extension does. `t3ThreadOf` in `enabled.ts` reads a
-thread when the entrypoint is exactly `t3-code`, the thread id is one T3 gives
-(`isT3ThreadId`, core's rule), and no nested-run variable or other session's
-tag is set. The mod then works as the thread, not as the Claude session:
+person's settings override it) beside the thread's `T3CODE_THREAD_ID`, and T3
+deletes `CLAUDECODE` and `CLAUDE_CODE_CHILD_SESSION` from it, as the VS Code
+extension does. T3 0.1.5 and 0.1.6 do neither, so their threads are
+`headless` (sends without the wake mark, nothing polls): 0.1.7 is the floor.
+`t3ThreadOf` in `enabled.ts` reads a thread when the entrypoint is exactly
+`t3-code`, the thread id is one T3 gives (`isT3ThreadId`, core's rule), no
+nested-run variable is set, and no `t3:` tag names another thread. A tag of
+another host (`claude-code:<id>`, with its `PLANNOTATOR_SESSION_PROJECT`) is
+what T3 inherited from the shell it was started in, a terminal of a Claude
+Code session, and every Claude it runs inherits it: it never decides, and the
+shim (`inboxHostSessionFromEnv`) gives the thread precedence over it wherever
+the entrypoint is `t3-code` and `CLAUDE_CODE_CHILD_SESSION` is unset.
+
+*Which process is the thread.* T3's own short runs (a title, a capability
+probe) inherit the same environment, the thread id included when T3's own
+environment holds one, and so does a `claude -p` that drops `CLAUDECODE`. So a
+`t3` session is only a candidate until it shows T3's own MCP server: T3 adds
+`t3-code` through the Agent SDK options of a thread's run alone, it reaches
+the session a few seconds after the start, and no variable carries it.
+`t3ThreadOwnHere` (`register.ts`, `InboxLinkOptions.owner`) looks for an
+`mcp__t3-code__` tool in `$.tool.list()` (`isT3ThreadOwnTools`), else for a
+`t3-code` server among `$.session.usage({ breakdown: 'summary' })`'s
+`mcpTools`, which lists a tool behind ToolSearch that was not searched for
+yet too (the list's own docs do not say whether it holds those). The link asks
+at start, every 2 s, and at each touch and send, for 3 minutes from the first
+ask or the last touch (`INBOX_OWNER_WAIT_MS`), then every 30 s for as long as
+it lives; each ask is bounded at 2 s, so a hang holds neither a tick nor a
+call. A yes stays for the process. Where `$.tool.list` is missing or throws,
+the engine cannot tell, and the link runs as it did before the check (owner
+at once, its creation a touch), so on such an engine a title run may take the
+lease again. With `PLANNOTATOR_MOD_DEBUG` the debug log says
+`inbox: t3 thread confirmed after <ms> ms via <tools | mcp server | no $.tool.list here …>`
+or, at the end of the 3 minutes, `inbox: t3 thread not confirmed: <why>`
+(no id). Until a yes the link writes no lease, never polls the bridge, claims
+or delivers nothing, and a touch (the person's `sdk` prompt included) only
+notes its time. A `plannotator_inbox` send from it first asks again for up to
+8 s, waiting in `$.process.run` (the call takes that much longer at most),
+and goes with the wake mark either way, as the thread's: the agent reads the
+words a confirmed thread gets (`INBOX_REPLY_ARRIVES_TEXT` and
+`INBOX_REPLY_LOOK_TEXT`, or `INBOX_REPLY_T3_WHILE_RUNNING_TEXT` where no T3
+wake reaches the thread). A run that is not the thread is told too much
+there; a `claude -p` from the thread's Bash is headless and reads
+`INBOX_REPLY_READ_LATER_TEXT`. Once a yes, its creation is no touch: it takes the
+thread's lease (`claude-code-mod/<thread>/inbox/watcher.json`, renewed every
+5 s, stale after 20 s, released at `session.end`) only when it is free or
+stale, or when the person acts in it (a send confirmed while it waits is that
+touch). A T3 restart resumes the same Claude session under a new process,
+which shows `t3-code` again and takes the lease once the old one released it
+or went stale. While no process shows it (a T3 that adds no such server),
+nothing polls for the thread, so the person's reply waits in the Inbox under
+"Waiting for T3 Code. …" (`inboxT3WaitLine`) or goes in through the T3 wake;
+nothing says it was delivered. A server the person named `t3-code` in their
+own Claude Code settings would show in T3's title runs too and defeat the
+check.
+
+The mod then works as the thread, not as the Claude session:
 `plannotator_inbox` files as host `t3`, the thread id and "T3 Code"
 (`inboxT3Agent`), the tag is `t3:<thread id>` (so the shim and every
 `plannotator inbox call` the thread runs are the same agent,
@@ -137,7 +187,15 @@ poll as their session or thread and deliver once; each refusal is held and
 goes in once after the person's prompt; the `sdk` origin pulls the lease, a
 task notification does not; each headless session gets `plannotator_inbox`
 alone, filed as its session, without the wake mark, no poll, the classic
-flows; an Ask AI child and the knob off stay inert),
+flows; an Ask AI child and the knob off stay inert; a thread under an
+inherited `claude-code:` tag files as the thread; a run without the `t3-code`
+tools never takes the lease while the thread delivers once; tools that never
+show leave no lease and no poll, and are asked again every 30 s; a first send
+before the tools waits for them and goes marked; late tools, a confirmation
+after the 3 minutes (by a touch or the slow ask), a server behind ToolSearch,
+a restart, a `session.end` and two live processes each deliver once; an
+engine without `$.tool.list` runs as before; a hung list holds nothing; the
+panel and the headless sessions never ask for the tool list),
 `packages/server/inbox-t3-wake.test.ts` (one owner per reply) and engine-harness
 cases in `apps/hook/tests/register.test.ts`.
 

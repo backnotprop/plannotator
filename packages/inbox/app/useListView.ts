@@ -6,7 +6,7 @@
 
 import { useCallback, useMemo } from 'react';
 import type { InboxListRow, InboxListSection, InboxThread } from '@plannotator/core/inbox-types';
-import { patchedRow, withPinPatches } from '../rowActions';
+import { patchedRow, withCombining, withPinPatches } from '../rowActions';
 import { filterMachineRows, machineCounts, machineProjectNames } from '../machines';
 import { appliedFilter, filterListSections, localDay, pickCount, useListFilter } from '../listFilter';
 import { filterSections, heldNews as heldNewsOf, heldNotice, listGroups, lookedRow, markHeldRowLooked, showLandsIn, waitingCount, type OpenThread } from '../held';
@@ -28,6 +28,8 @@ export interface ListViewInputs {
   thread: InboxThread | null;
   threadRow: InboxListRow | null;
   rowPatches: RowWrites['patches'];
+  /** Threads in a Combine still waiting for its new thread (useCombines.ts): their rows say "Combining…". */
+  combining?: ReadonlyMap<string, string>;
   pinPatches: RowWrites['pins'];
   looking: ReadonlySet<string>;
   shown: InboxListSection[] | null;
@@ -36,10 +38,10 @@ export interface ListViewInputs {
   openedHere: { readonly current: Set<string> };
   heldOpen: () => OpenThread | null;
   heldRead: ReadonlySet<string>;
-  tags: Omit<Parameters<typeof useThreadTagsHost>[0], 'routeTag' | 'machines' | 'windowRows' | 'latestSections'>;
+  tags: Omit<Parameters<typeof useThreadTagsHost>[0], 'routeTag' | 'machines' | 'windowRows' | 'latestSections' | 'tagColours'>;
 }
 
-export function useListShown({ latest, projects, route, thread, threadRow, rowPatches, pinPatches, looking, shown, machines, hideAway, openedHere, heldOpen, heldRead, tags }: ListViewInputs) {
+export function useListShown({ latest, projects, route, thread, threadRow, rowPatches, pinPatches, looking, shown, machines, hideAway, openedHere, heldOpen, heldRead, tags, combining }: ListViewInputs) {
   const latestSections = latest?.sections ?? [];
   // Every row the list knows, the Snoozed band's too: only counts read `latestSections`, which has none of those.
   const latestGroups = useMemo(() => (latest ? listGroups(latest) : []), [latest]);
@@ -55,7 +57,7 @@ export function useListShown({ latest, projects, route, thread, threadRow, rowPa
   // Its opening look on its way: read as looked at, as its row on the list is (`listShown`).
   const openThreadRow = listedOpenRow && looking.has(listedOpenRow.thread_id) ? lookedRow(listedOpenRow) : listedOpenRow;
   /** The list on screen as drawn: the held list, the row whose look is on its way read as looked at. */
-  const listShown = useMemo(() => (shown && looking.size > 0 ? markHeldRowLooked(shown, looking) : shown), [shown, looking]);
+  const listShown = useMemo(() => withCombining(shown && looking.size > 0 ? markHeldRowLooked(shown, looking) : shown, combining), [shown, looking, combining]);
   // Snoozes: an older Inbox sends no `snoozed`, so no Snooze anywhere. Pins' rule for another machine does not apply:
   // a snooze lives on the thread's home machine and goes there through the forward and the outbox, so a linked
   // machine's row offers it only when that machine keeps snoozes too (`rowSnoozes`).
@@ -81,7 +83,7 @@ export function useListShown({ latest, projects, route, thread, threadRow, rowPa
   const threadAgentContext = useMemo(() => ({ rows: windowRows, machines }), [windowRows, machines]);
   // The Agents section's filter (`#agent=<id>`): one agent's threads, named by its row's name.
   const filterAgent = useAgentListFilter(route.page === 'inbox' ? (route.agent ?? null) : null, machines, windowRows);
-  const { tagsOfRow, filterTag, shownTagId, threadTagsHost, sidebarTags } = useThreadTagsHost({ ...tags, routeTag: route.page === 'inbox' ? (route.tag ?? null) : null, machines, windowRows, latestSections });
+  const { tagsOfRow, filterTag, shownTagId, threadTagsHost, sidebarTags, listColours } = useThreadTagsHost({ ...tags, routeTag: route.page === 'inbox' ? (route.tag ?? null) : null, machines, windowRows, latestSections, tagColours: latest?.tag_colours ?? null });
   const projectNames = useMemo(
     () => machineProjectNames({ projects, sidebar: shownProjects(projects, sidebarKeeps), sections: shown ?? [], pins: pinRows }, machines, !filterMachine),
     [projects, sidebarKeeps, shown, pinRows, machines, filterMachine],
@@ -135,5 +137,5 @@ export function useListShown({ latest, projects, route, thread, threadRow, rowPa
           news: heldNewsOf(filterShown(shown), filterShown(latestGroups), openedHere.current, heldOpen()),
         }
       : null;
-  return { latestSections, latestGroups, latestRows, pinsOn, pinRows, pinnedIds, listedOpenRow, openThreadRow, listShown, snoozeOn, projectsReadable, projectCounts, latestProjectActivity, filterProject, filterMachine, windowRows, threadAgentContext, filterAgent, projectNames, sidebarMachineCounts, filterList, listFilterPicks, setListFilter, listFilterScoped, filterShown, listFilterRows, listSections, listFilterEmpty, listTitle, notice, tagsOfRow, filterTag, threadTagsHost, sidebarTags };
+  return { latestSections, latestGroups, latestRows, pinsOn, pinRows, pinnedIds, listedOpenRow, openThreadRow, listShown, snoozeOn, projectsReadable, projectCounts, latestProjectActivity, filterProject, filterMachine, windowRows, threadAgentContext, filterAgent, projectNames, sidebarMachineCounts, filterList, listFilterPicks, setListFilter, listFilterScoped, filterShown, listFilterRows, listSections, listFilterEmpty, listTitle, notice, tagsOfRow, filterTag, threadTagsHost, sidebarTags, listColours };
 }

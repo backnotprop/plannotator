@@ -32,6 +32,7 @@ import { BoxMark, boxState, SelectBox } from './SelectBox';
 import { cantMergeLine, confirmWords, mergeHint, mergePlan, notMergedLine, refusedLine, type MergePlan } from './bulkMerge';
 import { CLOSE_UNDO_MS, doneLine, runningWords, toastLead, type BulkVerb, type RunOutcome } from './bulkClose';
 import type { InboxToastModel } from '../components/Toast';
+import { useToastAbove } from '../toastAbove';
 import { SheetTable, type TableSection } from './SheetTable';
 import { nextSort, pullWords, sortUnits, type SheetLayout, type TableSort } from './tableModel';
 import {
@@ -871,32 +872,6 @@ function joinOr(names: readonly string[]): string {
 }
 
 const MERGE_WORDS = ['Merge', 'Confirm merge', 'Merging…', 'Merged'] as const;
-
-/**
- * A phone's pick sheet is fixed to the bottom and grows with the report, so the window's toast (Close's Undo) would
- * cover its buttons: it marks the Inbox's root (`data-prs-sheet`, its height in `--ib-prs-sheet-h`) and prs.css lifts
- * the toast above it (a mark, not a `:has()` on the root: tests/inbox-page-marks.test.ts).
- */
-function useToastAbove(): (sheet: HTMLDivElement | null) => void {
-  const stop = useRef<(() => void) | null>(null);
-  useEffect(() => () => stop.current?.(), []);
-  return useCallback((sheet: HTMLDivElement | null) => {
-    stop.current?.();
-    stop.current = null;
-    const root = sheet?.closest<HTMLElement>('.pn-inbox');
-    if (!sheet || !root) return;
-    const say = () => root.style.setProperty('--ib-prs-sheet-h', `${Math.ceil(sheet.getBoundingClientRect().height)}px`);
-    root.setAttribute('data-prs-sheet', '');
-    say();
-    const watch = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(say);
-    watch?.observe(sheet);
-    stop.current = () => {
-      watch?.disconnect();
-      root.removeAttribute('data-prs-sheet');
-      root.style.removeProperty('--ib-prs-sheet-h');
-    };
-  }, []);
-}
 
 /** The bar's actions: idle, Merge's confirm (for the picks it was asked for), one PR after another, then the report. */
 type BulkPhase =
