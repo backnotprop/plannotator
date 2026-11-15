@@ -216,14 +216,18 @@ export function resolveInboxReminderRules(configText: string | null | undefined)
 
 /**
  * The entrypoint Claude Code's VS Code extension gives the sessions its chat
- * panel starts (`CLAUDE_CODE_ENTRYPOINT`, set in the environment it spawns
+ * panel starts, and Orca's corresponding entrypoint (`CLAUDE_CODE_ENTRYPOINT`, set in the environment it spawns
  * the CLI with; read in the 2.1.322 extension). Claude Desktop's is
  * `claude-desktop`, an Agent SDK app's `sdk-ts` / `sdk-py`, `claude -p`'s
  * `sdk-cli`, T3 Code's `t3-code`.
  */
-export const VSCODE_PANEL_ENTRYPOINT = 'claude-vscode'
+const PANEL_ENTRYPOINTS: ReadonlySet<string> = new Set(['claude-vscode', 'orca'])
 
-/** What `isVsCodePanelSession` reads, each variable as `$.env.get` answers it. */
+export function isPanelEntrypoint(value: unknown): boolean {
+  return typeof value === 'string' && PANEL_ENTRYPOINTS.has(value)
+}
+
+/** What `isPanelSession` reads, each variable as `$.env.get` answers it. */
 export type PanelSessionEnv = {
   /** `CLAUDE_CODE_ENTRYPOINT`. */
   entrypoint: unknown
@@ -255,8 +259,8 @@ const setIn = (value: unknown) => typeof value === 'string' && value !== ''
  * this session is this process's own (a module reload runs `session.start`
  * again after the mod set it).
  */
-export function isVsCodePanelSession(env: PanelSessionEnv, sessionId: string): boolean {
-  if (env.entrypoint !== VSCODE_PANEL_ENTRYPOINT) return false
+export function isPanelSession(env: PanelSessionEnv, sessionId: string): boolean {
+  if (!isPanelEntrypoint(env.entrypoint)) return false
   if (setIn(env.claudecode) || setIn(env.childSession)) return false
   if (setIn(env.sessionTag) && env.sessionTag !== `claude-code:${sessionId}`) return false
   return true
@@ -306,7 +310,7 @@ export function t3ThreadOf(env: T3SessionEnv): string | null {
  * Where the session runs, as the mod sorts it at `session.start`:
  *
  * - `terminal`: a person at Claude Code's own prompt (`isInteractive`);
- * - `panel`: the VS Code extension's chat panel (`isVsCodePanelSession`);
+ * - `panel`: the VS Code extension's chat panel (`isPanelSession`);
  * - `t3`: a T3 Code thread (`t3ThreadOf`);
  * - `headless`: any other session that is not interactive: `claude -p`,
  *   another Agent SDK app, Claude Desktop, an unknown or missing entrypoint.

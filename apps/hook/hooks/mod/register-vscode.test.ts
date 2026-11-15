@@ -164,8 +164,8 @@ async function inboxCall(hook: Awaited<ReturnType<typeof freshHooks>>, world: Re
 }
 
 describe("the VS Code extension's chat panel (CLAUDE_CODE_ENTRYPOINT=claude-vscode, not interactive)", () => {
-  test('the mod runs: both tools registered, the session tagged, the Inbox polled as this session, and a reply goes in once as a turn', async () => {
-    const { world } = await started('panel-wake', PANEL)
+  test.each([PANEL, { CLAUDE_CODE_ENTRYPOINT: 'orca' }])('the mod runs: both tools registered, the session tagged, the Inbox polled as this session, and a reply goes in once as a turn (%j)', async (env) => {
+    const { world } = await started(`panel-wake-${env.CLAUDE_CODE_ENTRYPOINT}`, env)
 
     expect(world.tools).toEqual(['plannotator_inbox', 'plannotator'])
     expect(world.env.get('PLANNOTATOR_SESSION_TAG')).toBe(`claude-code:${SESSION}`)
@@ -250,6 +250,8 @@ const HEADLESS: [string, Record<string, string>][] = [
   ['claude -p naming itself cli', { CLAUDE_CODE_ENTRYPOINT: 'cli' }],
   ['Claude Desktop (claude-desktop)', { CLAUDE_CODE_ENTRYPOINT: 'claude-desktop' }],
   ['no entrypoint', {}],
+  ['a child of an Orca panel', { CLAUDE_CODE_ENTRYPOINT: 'orca', CLAUDE_CODE_CHILD_SESSION: '1' }],
+  ['a different Orca session inherits a tag', { CLAUDE_CODE_ENTRYPOINT: 'orca', PLANNOTATOR_SESSION_TAG: 'claude-code:other' }],
   ['an entrypoint only near the panel one', { CLAUDE_CODE_ENTRYPOINT: 'claude-vscode-insiders' }],
   ['a Claude T3 runs for no thread (t3-code, no T3CODE_THREAD_ID)', { CLAUDE_CODE_ENTRYPOINT: 't3-code' }],
   // A `claude -p` started from inside a panel session or a T3 thread inherits its entrypoint (and the thread id).

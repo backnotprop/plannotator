@@ -66,7 +66,7 @@ extension hosts the CLI through the Agent SDK, so its sessions raise
 `session.start` with `isInteractive: false` and `surface: null`. The panel has
 a person reading it and shows a plugin's turn ("Prompt from the <plugin>
 plugin", Claude Code's VS Code docs), so it is its own kind
-(`isVsCodePanelSession` in `enabled.ts`; `panel` on `Allowed`):
+(`isPanelSession` in `enabled.ts`; `panel` on `Allowed`):
 `CLAUDE_CODE_ENTRYPOINT` is exactly `claude-vscode` (the extension sets it in
 the environment it spawns the CLI with; read in the 2.1.322 extension), and
 none of `CLAUDECODE`, `CLAUDE_CODE_CHILD_SESSION` or a `PLANNOTATOR_SESSION_TAG`
@@ -95,6 +95,10 @@ resolves `{ drop }` (after Stop, "the host has ended its input", a
 stays pending, no delivery is tried until the person's next prompt or a
 main-loop turn start, and the window says "Stopped". Not seen yet in a real
 panel.
+
+**Orca chat (#3325).** Orca uses the same panel path with
+`CLAUDE_CODE_ENTRYPOINT=orca`. The same child-process and inherited
+session-tag checks apply.
 
 **A T3 Code thread.** T3 Code (pingdotgg/t3code) runs a thread's Claude through
 the Agent SDK with no `settingSources`, so the user's plugins, this one

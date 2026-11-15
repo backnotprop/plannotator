@@ -90,7 +90,7 @@
 import { AUTO_RELOAD_ARGS, AUTO_RELOAD_COMMAND, hidesReloadOutput } from './auto-reload'
 import { PlannotatorMod } from './controller'
 import {
-  isVsCodePanelSession,
+  isPanelSession,
   promptOriginKind,
   sessionKindOf,
   SESSION_KIND_FEATURES,
@@ -104,7 +104,7 @@ import {
   resolveInboxReminderRules,
   resolveInboxToolEnabled,
   resolvePlanReviewEnabled,
-  VSCODE_PANEL_ENTRYPOINT,
+  isPanelEntrypoint,
 } from './enabled'
 import { submitOrThrow, type Host, type LoadedPluginInfo } from './host'
 import {
@@ -314,7 +314,7 @@ interface Allowed {
   /** The person's own reminder text (config.json `prompts.inbox`), or null: the built-in line. */
   inboxReminderCustom: string | null
   inboxReminderRules: string | null
-  /** A chat panel of Claude Code's VS Code extension (`isVsCodePanelSession`): not interactive, a person reading it. */
+  /** A chat panel of Claude Code's VS Code extension (`isPanelSession`): not interactive, a person reading it. */
   panel: boolean
   /** The T3 Code thread this session is (`t3ThreadOf`), or null. */
   t3Thread: string | null
@@ -729,21 +729,21 @@ async function pickShellOf($: Engine, dataDir: string): Promise<ModShell | null>
 
 /**
  * Which SDK host this non-interactive session is: a chat panel of Claude
- * Code's VS Code extension (`isVsCodePanelSession`) or a T3 Code thread
+ * Code's VS Code extension (`isPanelSession`) or a T3 Code thread
  * (`t3ThreadOf`), both in enabled.ts. Each variable is named as a literal
  * (env-get-literal.test.ts).
  */
 async function sdkHostOf($: Engine): Promise<{ panel: boolean; t3Thread: string | null }> {
   const entrypoint = await $.env.get('CLAUDE_CODE_ENTRYPOINT')
   // Read the rest only for the panel's or T3's entrypoint: every other session decides on the first read.
-  if (entrypoint !== VSCODE_PANEL_ENTRYPOINT && entrypoint !== T3_ENTRYPOINT) return { panel: false, t3Thread: null }
+  if (!isPanelEntrypoint(entrypoint) && entrypoint !== T3_ENTRYPOINT) return { panel: false, t3Thread: null }
   const env = {
     entrypoint,
     claudecode: await $.env.get('CLAUDECODE'),
     childSession: await $.env.get('CLAUDE_CODE_CHILD_SESSION'),
     sessionTag: await $.env.get('PLANNOTATOR_SESSION_TAG'),
   }
-  if (entrypoint === VSCODE_PANEL_ENTRYPOINT) return { panel: isVsCodePanelSession(env, String(await $.session.id())), t3Thread: null }
+  if (isPanelEntrypoint(entrypoint)) return { panel: isPanelSession(env, String(await $.session.id())), t3Thread: null }
   return { panel: false, t3Thread: t3ThreadOf({ ...env, thread: await $.env.get('T3CODE_THREAD_ID') }) }
 }
 
