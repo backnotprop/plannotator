@@ -47,6 +47,11 @@ test('on an iPhone-sized screen: the comment reaches its agent, the answer lands
     const page = await context.newPage();
     await page.goto(url);
     await expect(page.locator('[data-line-type]').first()).toBeVisible({ timeout: 30_000 });
+    const navigation = page.locator('[data-review-navigation-sheet]');
+    if (await navigation.isVisible()) {
+      await page.getByRole('button', { name: 'Close review navigation' }).tap();
+      await expect(navigation).toBeHidden();
+    }
 
     const sent = await page.evaluate(async () => {
       const res = await fetch('/api/live/send', {
