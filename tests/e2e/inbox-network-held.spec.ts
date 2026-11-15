@@ -121,14 +121,15 @@ test('every write held unanswered: typing, a pick, Send and Mark read still draw
   expect(pickMs).toBeGreaterThanOrEqual(0);
   expect(pickMs).toBeLessThan(250);
 
-  // Send: busy at once, the words kept while its saves wait.
+  // Send: busy at once; while its saves wait the words show once, in the thread, and the box is empty.
   await page.locator(`${pane(T[0]!)} .ib-pfoot`).getByRole('button', { name: /^(Reply|Edit)/ }).first().click();
   const box = page.locator(`${pane(T[0]!)} .ib-rbox textarea`);
   await box.fill('ok go');
   const sendMs = await paintMs(page, () => page.locator(`${pane(T[0]!)} .ib-rbox [data-reply-send]`).click(), `return !!document.querySelector('${pane(T[0]!)} .ib-rbox [data-reply-send]')?.disabled`);
   expect(sendMs).toBeGreaterThanOrEqual(0);
   expect(sendMs).toBeLessThan(250);
-  await expect(box).toHaveValue('ok go');
+  await expect(page.locator(`${pane(T[0]!)} [data-sending]`)).toContainText('ok go');
+  await expect(box).toHaveValue('');
   await expect(other).toHaveValue(words);
 
   // Mark read on another thread, from the ⋯ menu: read at once, its write still held.
