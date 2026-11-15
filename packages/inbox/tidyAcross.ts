@@ -6,6 +6,7 @@
  */
 import type { InboxListRow, InboxTidyAgent, InboxTidyPlan, InboxTidyRun } from '@plannotator/core/inbox-types';
 import { isAway, rowMachine, type MachinesModel } from './machines';
+import { PressKeys } from './pressKeys';
 
 /** A plan's agent, with the machine that asks it (null: this one) and that machine's name for the picker's row. */
 export interface TidyAcrossAgent extends InboxTidyAgent {
@@ -107,12 +108,16 @@ export async function readAcross(targets: readonly TidyTarget[], read: (target: 
 /** Asks the ticked agents, each machine its own part under its own key. Null when every part went, else the first refusal. */
 export async function startAcross(
   agents: readonly TidyAcrossAgent[],
-  key: string,
+  key: string | PressKeys,
   send: (machine: string | null, sessions: string[], key: string) => Promise<unknown>,
 ): Promise<string | null> {
+  const keys = typeof key === 'string' ? new PressKeys('tidy', key) : key;
   const by = new Map<string | null, string[]>();
   for (const agent of agents) by.set(agent.machine, [...(by.get(agent.machine) ?? []), agent.session]);
-  const results = await Promise.allSettled([...by.entries()].map(([machine, sessions]) => send(machine, sessions, machine ? `${key}-${machine}` : key)));
+  const results = await Promise.allSettled([...by.entries()].map(([machine, sessions]) => send(machine, sessions, keys.for(machine)).catch((cause: unknown) => {
+    keys.failed(machine, cause);
+    throw cause;
+  })));
   const failed = results.find((r): r is PromiseRejectedResult => r.status === 'rejected');
   if (!failed) return null;
   return failed.reason instanceof Error ? failed.reason.message : 'Tidy did not start.';

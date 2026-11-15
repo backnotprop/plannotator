@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import type { InboxTidyCombine, InboxTidyRun, InboxTidyRunAgent } from '@plannotator/core/inbox-types';
 import { inboxTidyWords } from '@plannotator/core/inbox-types';
 import { formatCount } from '../format';
 import { HostMark, Icon } from '../icons';
 import { shortProjectNames } from '../projectLabels';
+import { PressKeys } from '../pressKeys';
 import type { TidyAcrossAgent } from '../tidyAcross';
 import { Tip } from './Tip';
 import type { TidyController } from './Tidy';
@@ -56,8 +57,10 @@ function TidyPicker({ tidy, onDone, below }: { tidy: TidyController; onDone: () 
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [words, setWords] = useState('');
-  // One key per opening: a second press (or a retry) answers the same run.
-  const [key] = useState(() => (typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `tidy-${Date.now()}-${Math.random()}`));
+  // One key per opening and machine: a second press (or a retry) answers the same run; a refusal frees it.
+  const [key] = useState(() => new PressKeys('tidy'));
+  // Two presses before the button greys out: the second does nothing.
+  const pressed = useRef(false);
   if (!plan) return <div className="ib-tidy-top"><b>Tidy</b></div>;
   const combine = plan.combine ?? [];
   const picking = tidy.picked !== undefined;
@@ -188,6 +191,8 @@ function TidyPicker({ tidy, onDone, below }: { tidy: TidyController; onDone: () 
           disabled={(picked.length === 0 && pickedCombine.length === 0) || sending}
           data-tidy-go=""
           onClick={async () => {
+            if (pressed.current) return;
+            pressed.current = true;
             setSending(true);
             // The combines first: they are this window's, and an agent's prompt can wait for a retry.
             let failed: string | null = null;
@@ -198,6 +203,7 @@ function TidyPicker({ tidy, onDone, below }: { tidy: TidyController; onDone: () 
             if (!failed && picked.length > 0) {
               failed = await tidy.start(picked, key, inboxTidyWords(words) || undefined);
             }
+            pressed.current = false;
             setSending(false);
             if (failed) setError(failed);
             else onDone();
