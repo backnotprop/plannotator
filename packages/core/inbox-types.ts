@@ -72,7 +72,7 @@ export const INBOX_RECORD_VERSION = 1 as const;
 export { ulid } from "./ulid";
 import { ulid } from "./ulid";
 
-/** `upl`: a file the person uploaded for a message; `drf`: a draft of one (compose); `crd`: a Board card; `stp`: a session's steps in a thread; `ini`: a Board initiative; `lch`: a launch (an agent started from the Inbox); `sch`: a scheduled thread. */
+/** `upl`: a file the person uploaded for a message; `drf`: a draft of one (compose); `crd`: a Board card; `stp`: a session's steps in a thread; `ini`: a Board initiative; `lch`: a launch (an agent started from the Inbox); `sch`: a routine. */
 export type InboxIdPrefix = "msg" | "prj" | "ses" | "dec" | "dev" | "upl" | "drf" | "crd" | "tdy" | "lch" | "ibx" | "stp" | "ini" | "cmb" | "sch";
 
 export function inboxId(prefix: InboxIdPrefix, now?: number): string {
@@ -102,7 +102,7 @@ const ID_RE: Record<InboxIdPrefix, RegExp> = {
   cmb: /^cmb_[0-9A-HJKMNP-TV-Z]{26}$/,
   /** A Board initiative (packages/core/inbox-initiatives.ts). */
   ini: /^ini_[0-9A-HJKMNP-TV-Z]{26}$/,
-  /** A scheduled thread (packages/server/inbox-scheduled.ts). */
+  /** A routine (packages/server/inbox-scheduled.ts). */
   sch: /^sch_[0-9A-HJKMNP-TV-Z]{26}$/,
 };
 
@@ -311,7 +311,7 @@ export type InboxAuthor =
  * One of the Inbox's own notes to the asking agent: Mark read's set-aside
  * note (`set_aside`), a late Undo's reopened note (`reopened`), or the note
  * that carries a 👍 Looks good to the agent (`ack_of`), or a Tidy note
- * (`tidy`), or a scheduled thread's skip line (`scheduled_run` with no `run`). They are stored as
+ * (`tidy`), or a routine's skip line (`scheduled_run` with no `run`). They are stored as
  * the person's messages so they reach the agent like any reply, but they are
  * not the person's reply and not a look: the list's `sent`, `unseen`, the
  * look boundary and "came back" all read past them.
@@ -810,9 +810,9 @@ export interface InboxMessage {
    * "New Claude Code session"). Absent on every other message.
    */
   launch?: InboxLaunchRecord;
-  /** A scheduled thread's run divider or skip line (inbox-scheduled-types.ts). A divider also carries its run's `launch`. */
+  /** A routine's run divider or skip line (inbox-scheduled-types.ts). A divider also carries its run's `launch`. */
   scheduled_run?: InboxScheduledRun;
-  /** An agent's `scheduled_thread` change, posted as that agent in the thread it called from. */
+  /** An agent's `routine` change, posted as that agent in the thread it called from. */
   scheduled_change?: InboxScheduledChange;
   /**
    * On the root of a thread the person started: who gave it its name, the
@@ -2109,7 +2109,7 @@ export interface InboxThread {
  * `card`: a Board card (approval "inbox-board"); `steps`: one agent session's
  * steps in a thread (approval "inbox-thread-steps"); `initiative`: a Board
  * initiative (approval "board-initiatives"); `thread_pull`: one PR on one
- * thread (approval "inbox-pr-binding"); `scheduled`: a scheduled thread
+ * thread (approval "inbox-pr-binding"); `scheduled`: a routine
  * (inbox-scheduled-types.ts). A reader that does not know a kind
  * skips its lines.
  */

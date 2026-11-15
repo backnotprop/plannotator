@@ -1,5 +1,5 @@
 /**
- * One scheduled thread beside the list (CONTRACT.md section 2). It saves as you go, as the Board's card does: a name or
+ * One routine beside the list (CONTRACT.md section 2). It saves as you go, as the Board's card does: a name or
  * prompt when the field is left, a pick at once, a schedule once the preview takes it. A new one starts off, and is
  * made once it has a name and a prompt.
  */
@@ -65,7 +65,7 @@ function MoreMenu({ on, onTurn, onDelete }: { on: boolean | null; onTurn: () => 
       </Menu.Trigger>
       <Menu.Portal container={portal ?? undefined}>
         <Menu.Positioner className="ib-pm-pos" side="bottom" align="end" sideOffset={4}>
-          <Menu.Popup className="ib-pm" aria-label="Scheduled thread">
+          <Menu.Popup className="ib-pm" aria-label="Routine">
             {on !== null && (
               <Menu.Item className="ib-pmi" onClick={onTurn}>
                 <span className="ib-pmi-l">{on ? 'Turn off' : 'Turn on'}</span>
@@ -183,7 +183,7 @@ export function ScheduledEditor(props: EditorProps) {
   const act = (run: () => Promise<{ scheduled: InboxScheduledRow }>) =>
     run().then(
       (answer) => putScheduled(answer.scheduled),
-      (cause: Error) => (cause instanceof InboxApiError && cause.code === 'scheduled_running' ? void readScheduled() : setError(cause.message)),
+      (cause: Error) => (cause instanceof InboxApiError && cause.code === 'routine_running' ? void readScheduled() : setError(cause.message)),
     );
 
   const on = record ? record.state !== 'off' && record.state !== 'done' : false;
@@ -197,15 +197,15 @@ export function ScheduledEditor(props: EditorProps) {
   const threadName = record?.thread_id ? (record.thread_name ?? record.name) : null;
   const agentName = block?.launch?.agents.find((a) => a.agent === draft.agent)?.name ?? INBOX_HOST_NAMES[draft.agent] ?? draft.agent;
   const running = record?.state === 'running';
-  const name = draft.name || (isNew ? 'New scheduled thread' : '');
+  const name = draft.name || (isNew ? 'New routine' : '');
 
   return (
     <div className="ib-pane st-pane" data-scheduled-editor={id}>
       <div className="ib-phead">
         {props.narrow && (
-          <button type="button" className="ib-pback" onClick={props.onClose} aria-label="Back to scheduled threads">
+          <button type="button" className="ib-pback" onClick={props.onClose} aria-label="Back to routines">
             <Icon name="chevL" size={18} />
-            <span className="ib-pback-l">Scheduled threads</span>
+            <span className="ib-pback-l">Routines</span>
           </button>
         )}
         <span className="ib-phsubj" data-on="" aria-hidden="true">

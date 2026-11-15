@@ -1,7 +1,7 @@
 /**
- * Scheduled threads: a saved prompt with a name, a schedule, a folder and an on/off switch, whose runs all land in
+ * Routines: a saved prompt with a name, a schedule, a folder and an on/off switch, whose runs all land in
  * one Inbox thread. The records and the wire shapes the window reads; the routes are in
- * docs/agent-guides/inbox-scheduled.md. Browser-safe: types only.
+ * docs/agent-guides/inbox-routines.md. Browser-safe: types only.
  */
 
 /** A cron with its time zone, a one-time date and time with its zone, or null: it runs only when someone runs it. */
@@ -64,7 +64,7 @@ export type InboxScheduledSkipReason = "asleep" | "not_running" | "still_running
  */
 export interface InboxScheduledRun {
   scheduled_id: string;
-  /** The scheduled thread's name when this was written (the Inbox row's sender). */
+  /** The routine's name when this was written (the Inbox row's sender). */
   name: string;
   /** 1, 2, 3…: absent on a skip line. */
   run?: number;
@@ -83,7 +83,7 @@ export interface InboxScheduledRun {
 }
 
 /**
- * On a change message an agent's `scheduled_thread` call posts in the thread it called from ("Made the scheduled
+ * On a change message an agent's `routine` call posts in the thread it called from ("Made the scheduled
  * thread X…", "Changed…"): the editor link. The body names what changed, old and new.
  */
 export interface InboxScheduledChange {

@@ -1,5 +1,5 @@
 /**
- * Scheduled threads, the pure part: the next-run math (croner, which knows time zones), the 15-minute rule, a
+ * Routines, the pure part: the next-run math (croner, which knows time zones), the 15-minute rule, a
  * schedule in plain words, and the clock's one decision per check (run, skip or wait). Time always comes in as an
  * argument. Browser-safe, so the window can show the next run as the person edits.
  */
@@ -212,7 +212,7 @@ export type InboxScheduledDecision =
   | { kind: "skip"; count: number; from: string; to: string; reason: InboxScheduledSkipReason; handled_through: string };
 
 /**
- * One check for one scheduled thread that is on (spec appendix B): the due times since `handled_through`; none:
+ * One check for one routine that is on (spec appendix B): the due times since `handled_through`; none:
  * wait. The newest one under 2 minutes old: run it on time (earlier ones it folds in count as missed). Older: missed,
  * and `if_missed` decides; a late run never comes when the next on-time run is under 15 minutes away. A run still
  * going skips it. At most one run or one skip per check, never a burst. `why`: what kept it from running on time

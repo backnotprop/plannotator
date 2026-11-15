@@ -110,7 +110,7 @@ export function threadOfRecord(event: InboxEvent): string | null {
     case 'thread_pull':
       return id(event.thread_id);
     // A project (a rename, a combine, a label any thread's header reads), a Board card or initiative (the window
-    // hands those to the Board before this), a scheduled thread (a thread's foot): any thread.
+    // hands those to the Board before this), a routine (a thread's foot): any thread.
     case 'project':
     case 'card':
     case 'initiative':

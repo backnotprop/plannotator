@@ -2332,7 +2332,7 @@ export type InboxEvent =
   | { seq: number; kind: 'initiative'; id: string; initiative: InboxInitiative }
   /** A thread's PRs changed (approval "inbox-pr-binding"): silent; the window reads that thread's PRs and the list again. Absent from an older Inbox. */
   | { seq: number; kind: 'thread_pull'; id: string; thread_id: string }
-  /** A scheduled thread changed (scheduled/store.ts reads the list again): its id only. Absent from an older Inbox. */
+  /** A routine changed (scheduled/store.ts reads the list again): its id only. Absent from an older Inbox. */
   | { seq: number; kind: 'scheduled'; id: string };
 
 /** A thread's attachments as they are now, and the person's annotations waiting for a Send. */

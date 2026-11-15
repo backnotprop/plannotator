@@ -1,7 +1,7 @@
 /**
- * Scheduled threads in the window: the capability switch (Settings → Capabilities, config.json
+ * Routines in the window: the capability switch (Settings → Capabilities, config.json
  * `inboxScheduledThreads`) and the `/api/inbox/scheduled` routes. The contract is in
- * docs/agent-guides/inbox-scheduled.md. Off, every route answers `scheduled_threads_off` and nothing is read.
+ * docs/agent-guides/inbox-routines.md. Off, every route answers `routines_off` and nothing is read.
  */
 import { inboxScheduledPreview } from "@plannotator/core/inbox-scheduled";
 import type { InboxScheduledSchedule } from "@plannotator/core/inbox-scheduled-types";
@@ -41,7 +41,7 @@ export function scheduledSwitch(deps: {
         login = null;
       }
     } catch (error) {
-      deps.log?.(`Inbox scheduled threads: the login item failed (${(error as { code?: unknown })?.code ?? "error"})`);
+      deps.log?.(`Inbox routines: the login item failed (${(error as { code?: unknown })?.code ?? "error"})`);
       login = on() ? "unavailable" : null;
     }
   };
@@ -51,7 +51,7 @@ export function scheduledSwitch(deps: {
     syncLogin,
     check(body: { scheduled_threads?: unknown }): void {
       if (body.scheduled_threads === undefined) return;
-      if (!supported) throw new InboxError("validation_error", "Scheduled threads are not offered on this computer.", { field: "scheduled_threads" });
+      if (!supported) throw new InboxError("validation_error", "Routines are not offered on this computer.", { field: "scheduled_threads" });
       parse(body.scheduled_threads);
     },
     async answer(body: { scheduled_threads?: unknown }): Promise<ReturnType<typeof wire>> {
@@ -79,7 +79,7 @@ export async function scheduledRoute(
 ): Promise<Response | null> {
   if (path !== "/api/inbox/scheduled" && !path.startsWith("/api/inbox/scheduled/")) return null;
   const { scheduled, json } = deps;
-  if (!deps.on()) return json({ error: "Scheduled threads are off on this computer. Turn them on in Settings, Capabilities.", code: "scheduled_threads_off" }, 404);
+  if (!deps.on()) return json({ error: "Routines are off on this computer. Turn them on in Settings, Capabilities.", code: "routines_off" }, 404);
   const parts = path.slice("/api/inbox/scheduled".length).split("/").filter(Boolean);
   if (req.method === "GET") {
     if (parts.length === 0) return json({ scheduled: scheduled.list(), launch_on: deps.launchOn() });
@@ -90,8 +90,8 @@ export async function scheduledRoute(
   const body = await deps.readBody(req);
   if (checkServerSession(body, deps.serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
   if (parts[0] === "preview" && parts.length === 1) return json(inboxScheduledPreview((body.schedule ?? null) as InboxScheduledSchedule, new Date(deps.now?.() ?? Date.now())));
-  // Every write is the person's, from their window: an agent uses the scheduled_thread tool.
-  if (!isWindowRequest(req, body, deps.serverSession)) return json({ ...INBOX_WINDOW_ONLY_BODY, error: "A scheduled thread is changed in the Inbox window; an agent uses the scheduled_thread tool." }, 403);
+  // Every write is the person's, from their window: an agent uses the routine tool.
+  if (!isWindowRequest(req, body, deps.serverSession)) return json({ ...INBOX_WINDOW_ONLY_BODY, error: "A routine is changed in the Inbox window; an agent uses the routine tool." }, 403);
   const person = { kind: "person" } as const;
   if (parts.length === 0) return json({ scheduled: scheduled.rowOf((await scheduled.create(body, person)).record) }, 201);
   const [id, action] = parts as [string, string | undefined];

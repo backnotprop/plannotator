@@ -1,7 +1,7 @@
 import { Switch } from '../components/SoundRow';
 
 /**
- * Settings → Capabilities → Scheduled threads (CONTRACT.md section 3), after Checklist. Where the Inbox cannot start
+ * Settings → Capabilities → Routines (CONTRACT.md section 3), after Checklist. Where the Inbox cannot start
  * itself at login (`login: 'unavailable'`), one plain line says so.
  */
 export function ScheduledSettingsRow({ value, onToggle }: { value: { on: boolean; login?: 'added' | 'unavailable' }; onToggle: (next: boolean) => void }) {
@@ -9,7 +9,7 @@ export function ScheduledSettingsRow({ value, onToggle }: { value: { on: boolean
     <div className="ib-prow" data-settings-scheduled="">
       <span className="ib-txt">
         <span className="ib-l" id="ib-scheduled-label">
-          Scheduled threads
+          Routines
         </span>
         <span className="ib-desc">
           Runs saved prompts on a schedule, on this computer, while the Inbox is running.

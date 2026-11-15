@@ -1,4 +1,4 @@
-/** The words scheduled threads show: times, the list's order, and the lines in a thread. Pure. */
+/** The words routines show: times, the list's order, and the lines in a thread. Pure. */
 import type { InboxScheduledOutcome, InboxScheduledRow, InboxScheduledRun, InboxScheduledSchedule, InboxScheduledSkipReason } from '@plannotator/core/inbox-scheduled-types';
 import { plural } from '../format';
 

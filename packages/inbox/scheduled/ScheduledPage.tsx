@@ -1,5 +1,5 @@
 /**
- * The sidebar's Scheduled threads page (CONTRACT.md section 2): the table, and with one open, the narrow list beside
+ * The sidebar's Routines page (CONTRACT.md section 2): the table, and with one open, the narrow list beside
  * its editor. On a phone, or where the window stacks a list and a thread, the editor stands alone with a Back.
  */
 import { useState } from 'react';
@@ -83,7 +83,7 @@ export function ScheduledPage(props: ScheduledPageProps) {
       (answer) => putScheduled(answer.scheduled),
       (cause: Error) => {
         // A second Run press while the first starts is that run.
-        if (!(cause instanceof InboxApiError && cause.code === 'scheduled_running')) setActError(cause.message);
+        if (!(cause instanceof InboxApiError && cause.code === 'routine_running')) setActError(cause.message);
         void readScheduled();
       },
     );
@@ -103,7 +103,7 @@ export function ScheduledPage(props: ScheduledPageProps) {
         (answer) => putScheduled(answer.scheduled),
         (cause: unknown) => props.onToast?.({ icon: 'warn', wrap: true, lead: `${row.name} could not be brought back. ${errorText(cause, 'Try again.')}` }),
       );
-    props.onToast?.({ icon: 'check', lead: 'Scheduled thread deleted', phoneLead: 'Deleted', detail: row.name, onUndo: () => void undo() });
+    props.onToast?.({ icon: 'check', lead: 'Routine deleted', phoneLead: 'Deleted', detail: row.name, onUndo: () => void undo() });
   };
   const acts: RowActs = {
     open: (row) => props.onOpen(row.id),
@@ -137,24 +137,24 @@ export function ScheduledPage(props: ScheduledPageProps) {
   const short = !!openId || props.phone;
   return (
     <>
-      <section className={`ib-listcol st-list${openId ? ' st-list-split' : ''}`} aria-label="Scheduled threads" data-scheduled-page="">
+      <section className={`ib-listcol st-list${openId ? ' st-list-split' : ''}`} aria-label="Routines" data-scheduled-page="">
         <div className="ib-lhead">
           <SidebarTrigger />
-          <h1 tabIndex={-1}>Scheduled threads</h1>
+          <h1 tabIndex={-1}>Routines</h1>
           {on && (
-            <button type="button" className="ib-btn st-new" aria-label="New scheduled thread" onClick={() => props.onOpen('new')} data-scheduled-new="">
-              {props.phone ? 'New' : 'New scheduled thread'}
+            <button type="button" className="ib-btn st-new" aria-label="New routine" onClick={() => props.onOpen('new')} data-scheduled-new="">
+              {props.phone ? 'New' : 'New routine'}
             </button>
           )}
         </div>
         <div className="ib-lbody st-lbody" aria-busy={props.switch === 'loading' || undefined}>
           {props.switch === 'loading' ? null : props.switch === 'unsupported' ? (
             <p className="st-note" data-scheduled-off-note="">
-              Scheduled threads aren't available on Windows.
+              Routines aren't available on Windows.
             </p>
           ) : !on ? (
             <p className="st-note" data-scheduled-off-note="">
-              Scheduled threads are off on this computer.{' '}
+              Routines are off on this computer.{' '}
               <button type="button" className="st-link" onClick={() => props.onSettings('capabilities')}>
                 Turn them on in Settings
               </button>
@@ -174,7 +174,7 @@ export function ScheduledPage(props: ScheduledPageProps) {
                   {actError ?? snap.error}
                 </p>
               )}
-              {snap.rows && rows.length === 0 && <p className="st-note">No scheduled threads yet.</p>}
+              {snap.rows && rows.length === 0 && <p className="st-note">No routines yet.</p>}
               <ScheduledTable rows={rows} acts={acts} short={short} selected={openId} />
             </>
           )}

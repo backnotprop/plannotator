@@ -1,11 +1,11 @@
 /**
- * Start at login while scheduled threads are on (the owner, 2026-11-15): one login item that starts the Inbox in
+ * Start at login while routines are on (the owner, 2026-11-15): one login item that starts the Inbox in
  * the background with no window, removed when the switch goes off and by `plannotator uninstall`.
  *
  * macOS: `~/Library/LaunchAgents/ai.plannotator.inbox.plist`, loaded by launchd at the next login (writing it starts
  * nothing now). Linux: a systemd user unit, `~/.config/systemd/user/plannotator-inbox.service`, enabled for
  * `default.target`, only when `systemctl --user` answers; otherwise there is no login item and the Settings row says
- * so. Windows: none (scheduled threads are not offered there). Tests pass their own `home` and `run`.
+ * so. Windows: none (routines are not offered there). Tests pass their own `home` and `run`.
  */
 import { execFile } from "node:child_process";
 import { mkdirSync, renameSync, rmSync, writeFileSync, existsSync } from "node:fs";
@@ -61,7 +61,7 @@ export function inboxLoginPlist(o: { argv: readonly string[]; dataDir: string; l
 export function inboxLoginUnit(o: { argv: readonly string[]; dataDir: string }): string {
   return [
     "[Unit]",
-    "Description=Plannotator Inbox (scheduled threads)",
+    "Description=Plannotator Inbox",
     "",
     "[Service]",
     `ExecStart=${[...o.argv, "inbox", "--no-open"].map(unitArg).join(" ")}`,

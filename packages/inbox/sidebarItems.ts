@@ -31,7 +31,7 @@ export const SIDEBAR_ITEM_ICON: Record<Exclude<InboxSidebarItem, 'agents' | 'tag
 
 export interface SidebarFeatures {
   board: boolean;
-  /** Scheduled threads (Settings → Capabilities): absent in a sidebar drawn without them. */
+  /** Routines (Settings → Capabilities): absent in a sidebar drawn without them. */
   scheduled?: boolean;
   reviews: boolean;
   shape: boolean;

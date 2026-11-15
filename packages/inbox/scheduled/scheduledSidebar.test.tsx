@@ -1,5 +1,5 @@
 /**
- * The sidebar's "Scheduled threads" row shows only while the capability is on (App passes `onScheduled` only then),
+ * The sidebar's "Routines" row shows only while the capability is on (App passes `onScheduled` only then),
  * under Inbox beside Board, and opens the page. What regresses: the row shown while the switch is off, or a row
  * that does not open the page.
  *
@@ -36,7 +36,7 @@ function sidebar(onScheduled: (() => void) | undefined, page: 'inbox' | 'schedul
   return host;
 }
 
-test.skipIf(!hasDom)('off: no Scheduled threads row; on: the row under Board, and it opens the page', () => {
+test.skipIf(!hasDom)('off: no Routines row; on: the row under Board, and it opens the page', () => {
   let host = sidebar(undefined);
   expect(host.querySelector('[data-scheduled-nav]')).toBeNull();
   expect(host.querySelector('[data-board-nav]')).not.toBeNull();

@@ -358,7 +358,7 @@ describe("the optional T3 Code connection", () => {
   });
 });
 
-describe("scheduled threads' start at login", () => {
+describe("routines' start at login", () => {
   test("a plain uninstall removes the macOS login item (the file only) and the Linux unit (disabling it)", async () => {
     for (const platform of ["darwin", "linux"] as const) {
       const fixture = createFixture({ platform });

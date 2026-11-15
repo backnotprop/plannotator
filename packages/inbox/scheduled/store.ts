@@ -1,5 +1,5 @@
 /**
- * This machine's scheduled threads, read once and shared by the page, the list rows and a thread's foot. Read while
+ * This machine's routines, read once and shared by the page, the list rows and a thread's foot. Read while
  * the capability is on and something shows them; read again on a `scheduled` record, a run or skip line, and (while
  * the page is open) a launch's run line moving (CONTRACT.md section 4).
  */

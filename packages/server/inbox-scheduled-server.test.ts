@@ -1,8 +1,8 @@
 /**
- * Scheduled threads on a real Inbox (temp data dir, the fake agent, a stand-in login item): the switch and what it
- * hides, the window's routes, and the agents' `scheduled_thread` tool. What each test guards: off, agents get no tool
+ * Routines on a real Inbox (temp data dir, the fake agent, a stand-in login item): the switch and what it
+ * hides, the window's routes, and the agents' `routine` tool. What each test guards: off, agents get no tool
  * and a call writes nothing, the routes answer the plain off answer; on, the login item is added and removed with the
- * switch; an agent's scheduled thread arrives off and only the person turns it on the first time; a refused schedule
+ * switch; an agent's routine arrives off and only the person turns it on the first time; a refused schedule
  * writes nothing; an agent's edit says old and new in its thread, and a folder move turns it off again.
  */
 import { afterEach, describe, expect, test } from "bun:test";
@@ -62,7 +62,7 @@ async function world() {
   };
   const tools = async () => ((await rpc("tools/list", {})).result.tools as { name: string }[]).map((tool) => tool.name);
   const agent = { agent_session: "ses_maya", agent_host: "claude-code", agent_name: "Claude Code", project_path: folder };
-  const call = async (args: Record<string, unknown>) => (await rpc("tools/call", { name: "scheduled_thread", arguments: { ...agent, ...args } })).result as ToolResult;
+  const call = async (args: Record<string, unknown>) => (await rpc("tools/call", { name: "routine", arguments: { ...agent, ...args } })).result as ToolResult;
   const window = (path: string, body: Record<string, unknown> = {}) =>
     fetch(`${base}${path}`, { method: "POST", headers: { Origin: base, "Content-Type": "application/json" }, body: JSON.stringify({ serverSession: server.serverSession, ...body }) });
   const setOn = async (on: boolean) => (await window("/api/inbox/settings", { scheduled_threads: { on } })).json() as Promise<Record<string, any>>;
@@ -80,13 +80,13 @@ async function world() {
 describe("the switch", () => {
   test("off, the default: no tool, a call writes nothing, every route answers the off answer", async () => {
     const w = await world();
-    expect(await w.tools()).not.toContain("scheduled_thread");
+    expect(await w.tools()).not.toContain("routine");
     const refused = await w.call({ op: "create", name: "Morning triage", prompt: "Triage.", schedule: w.daily, agent: FAKE });
     expect(refused.isError).toBe(true);
-    expect(refused.content[0]!.text).toBe("scheduled_threads_off: Scheduled threads are off on this computer, so nothing was written. The person turns them on in Settings, Capabilities.");
+    expect(refused.content[0]!.text).toBe("routines_off: Routines are off on this computer, so nothing was written. The person turns them on in Settings, Capabilities.");
     const list = await fetch(`${w.base}/api/inbox/scheduled`);
     expect(list.status).toBe(404);
-    expect(((await list.json()) as { code: string }).code).toBe("scheduled_threads_off");
+    expect(((await list.json()) as { code: string }).code).toBe("routines_off");
     expect((await w.window("/api/inbox/scheduled", { name: "x", prompt: "y", schedule: null, folder: { scratch: true }, agent: FAKE })).status).toBe(404);
     expect(w.server.store.scheduledThreads()).toEqual([]);
     expect(w.login.calls).toEqual([]);
@@ -96,16 +96,16 @@ describe("the switch", () => {
   test("on adds the login item and the tool; off removes both", async () => {
     const w = await world();
     expect((await w.setOn(true)).scheduled_threads).toEqual({ on: true, login: "added" });
-    expect(await w.tools()).toContain("scheduled_thread");
+    expect(await w.tools()).toContain("routine");
     expect(w.login.calls).toEqual(["add"]);
     expect((await w.setOn(false)).scheduled_threads).toEqual({ on: false });
     expect(w.login.calls).toEqual(["add", "remove"]);
-    expect(await w.tools()).not.toContain("scheduled_thread");
+    expect(await w.tools()).not.toContain("routine");
   });
 });
 
 describe("agents", () => {
-  test("an agent's scheduled thread arrives off; the person turns it on the first time", async () => {
+  test("an agent's routine arrives off; the person turns it on the first time", async () => {
     const w = await world();
     await w.setOn(true);
     const made = await w.call({ op: "create", name: "Morning triage", prompt: "Triage the new issues.", schedule: w.daily, agent: FAKE, thread_id: w.thread });
@@ -113,13 +113,13 @@ describe("agents", () => {
     const id = made.structuredContent!.scheduled.id as string;
     expect(w.server.store.scheduledThread(id)).toMatchObject({ enabled: false, approved_at: null, made_by: { session: "ses_maya", thread_id: w.thread } });
     expect(w.lines().map((m) => m.body)).toEqual([
-      `Made the scheduled thread [Morning triage](#scheduled=${id}). It is off until you turn it on.`,
+      `Made the routine [Morning triage](#routine=${id}). It is off until you turn it on.`,
     ]);
     expect(w.lines()[0]!.author).toMatchObject({ kind: "agent", session: "ses_maya" });
 
     for (const op of ["on", "run"]) {
       const refused = await w.call({ op, id, thread_id: w.thread });
-      expect(refused.content[0]!.text).toStartWith("scheduled_not_approved: The person turns Morning triage on the first time, in the Inbox.");
+      expect(refused.content[0]!.text).toStartWith("routine_not_approved: The person turns Morning triage on the first time, in the Inbox.");
     }
     expect(w.server.store.scheduledThread(id)!.enabled).toBe(false);
     expect(w.lines()).toHaveLength(1);
@@ -132,8 +132,8 @@ describe("agents", () => {
     expect((await w.call({ op: "off", id, thread_id: w.thread })).content[0]!.text).toContain(": off,");
     expect((await w.call({ op: "on", id, thread_id: w.thread })).isError).toBeUndefined();
     expect(w.lines().map((m) => m.body).slice(1)).toEqual([
-      `Turned the scheduled thread [Morning triage](#scheduled=${id}) off.`,
-      `Turned the scheduled thread [Morning triage](#scheduled=${id}) on.`,
+      `Turned the routine [Morning triage](#routine=${id}) off.`,
+      `Turned the routine [Morning triage](#routine=${id}) on.`,
     ]);
   });
 
@@ -166,7 +166,7 @@ describe("agents", () => {
     const changed = w.lines().at(-1)!;
     expect(changed.body).toBe(
       [
-        `Changed the scheduled thread [Morning triage](#scheduled=${id}).`,
+        `Changed the routine [Morning triage](#routine=${id}).`,
         "It now runs every weekday at 10:00 AM (was every weekday at 9:00 AM).",
         "The prompt:\n\n```diff\n- Triage the new issues.\n+ Triage the new issues.\n+ Label each one.\n```",
       ].join("\n\n"),
@@ -179,6 +179,6 @@ describe("agents", () => {
     expect(moved.body).toEndWith("It now works in ~/acme-web (was ~/acme-api).\n\nIt is off until you turn it on again.");
     expect(moved.scheduled_change).toMatchObject({ fields: ["folder"], turned_off: true });
     expect(w.server.store.scheduledThread(id)).toMatchObject({ enabled: false, approved_at: null });
-    expect((await w.call({ op: "on", id })).content[0]!.text).toStartWith("scheduled_not_approved:");
+    expect((await w.call({ op: "on", id })).content[0]!.text).toStartWith("routine_not_approved:");
   });
 });

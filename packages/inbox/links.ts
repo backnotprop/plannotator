@@ -161,8 +161,8 @@ const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
 
 /** The pages `routeOf` (App.tsx) reads ahead of a thread or a project: not a route a link opens in place. */
 const OTHER_PAGES = ['whats-new', 'tour', 'drafts', 'board'];
-/** Pages a link opens in place besides a thread or a project: a scheduled thread's editor (`#scheduled=sch_…`). */
-const LINKED_PAGES = ['scheduled'];
+/** Pages a link opens in place besides a thread or a project: a routine's editor (`#routine=sch_…`). */
+const LINKED_PAGES = ['routine'];
 
 function urlOf(href: string, base?: string): URL | null {
   try {

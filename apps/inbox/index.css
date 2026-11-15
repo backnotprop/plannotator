@@ -28,7 +28,7 @@
 @source "../../packages/inbox/agents/**/*.tsx";
 @source "../../packages/inbox/cloud/**/*.tsx";
 @source "../../packages/inbox/cloud/how/**/*.tsx";
-/* Scheduled threads: the page, the editor, a thread's run lines (packages/inbox/scheduled/). */
+/* Routines: the page, the editor, a thread's run lines (packages/inbox/scheduled/). */
 @source "../../packages/inbox/scheduled/**/*.tsx";
 
 @import "../../packages/ui/theme.css";

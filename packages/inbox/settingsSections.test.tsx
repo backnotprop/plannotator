@@ -441,8 +441,8 @@ test.skipIf(!hasDom)('#settings/capabilities opens Capabilities; the Board switc
   }
 });
 
-/** Scheduled threads has its row everywhere but Windows. */
-const SCHEDULED_ROW = process.platform === 'win32' ? [] : ['Scheduled threads'];
+/** Routines has its row everywhere but Windows. */
+const SCHEDULED_ROW = process.platform === 'win32' ? [] : ['Routines'];
 
 // The checklist (approval "inbox-thread-steps"): off by default, under the Board, saving config.json `inboxSteps`.
 test.skipIf(!hasDom)('Capabilities: the Checklist switch, off by default under the Board, saves inboxSteps to config.json, both ways', async () => {

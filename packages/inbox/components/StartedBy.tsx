@@ -5,7 +5,7 @@ import { LaunchChoiceMeta } from './LaunchChoiceMeta';
 import { hostName } from './NewMessage';
 
 /**
- * A launched thread's meta line: "You started Claude Code in acme-api" ("Scheduled thread · Claude Code in acme-api"
+ * A launched thread's meta line: "You started Claude Code in acme-api" ("Routine · Claude Code in acme-api"
  * when a schedule started it), then Full permissions and what was asked at launch.
  */
 export function StartedBy({ launched, root, project }: { launched: InboxLaunchRecord; root: InboxMessageWire | undefined; project: string }) {

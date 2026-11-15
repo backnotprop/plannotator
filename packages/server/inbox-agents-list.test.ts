@@ -119,7 +119,7 @@ describe("who is listed, and how", () => {
     expect(group.agents[0]).toMatchObject({ session: "launch:lch_starting", launch: { started: false, run: "starting", scratch: "palette-helper" }, project: { id: "prj_ledger", name: "ledger" } });
   });
 
-  test("a scheduled thread is one agent, its newest run's; an earlier run's session only while it is live; other launches as before", () => {
+  test("a routine is one agent, its newest run's; an earlier run's session only while it is live; other launches as before", () => {
     const run = (id: string, day: number, session: string, thread = "msg_digest") => ({ launch_id: id, session, thread_id: thread, host: "claude-code", project_id: "prj_ledger", started_at: `2026-11-0${day}T07:16:00.000Z`, started: true, run: "stopped" as const, scratch: null, scheduled: true });
     const ended = (session: string, live = false) => ({ session, host: "claude-code", root: "/work/ledger", startedAt: 1, lastSeen: 2, live, busy: null, label: null });
     const group = inboxAgentsGroup(

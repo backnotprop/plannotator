@@ -492,7 +492,7 @@ export async function runPlannotatorUninstall(
     }
   }
 
-  // Scheduled threads' start at login (inbox-scheduled-login.ts): with the binary gone it would fail at every login.
+  // Routines' start at login (inbox-scheduled-login.ts): with the binary gone it would fail at every login.
   const login = inboxLoginItem({ platform: environment.platform, home: environment.homeDir, argv: [], dataDir: state.dataDir, run: async ([command, ...args]) => ({ code: (await environment.runCommand(command!, args)).exitCode }) });
   if (login.path && existsSync(login.path)) {
     if (request.dryRun) state.planned.push(`Remove the Inbox's start at login (${login.path})`);

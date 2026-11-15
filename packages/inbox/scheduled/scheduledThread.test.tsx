@@ -1,5 +1,5 @@
 /**
- * A scheduled thread's thread: each run opens with its divider ("Run 7"), a late one says when it was due and how
+ * A routine's thread: each run opens with its divider ("Run 7"), a late one says when it was due and how
  * many times were missed, a skip line stands in for a due time that did not run, and a run that ended with no reply
  * says "Didn't finish". All of it comes from the messages, so another machine's thread reads the same; its Reply-row
  * mark then names that machine and links nowhere. What regresses: a late run drawn as on time, a skip drawn as a
@@ -110,22 +110,22 @@ test.skipIf(!hasDom)('the Reply row mark: Edit on this computer, the machine\'s 
   const mark = host.querySelector<HTMLButtonElement>('button[data-scheduled-foot="sch_pr"]')!;
   expect(mark.textContent).toContain('Edit');
   act(() => mark.click());
-  expect(window.location.hash).toBe('#scheduled=sch_pr');
+  expect(window.location.hash).toBe('#routine=sch_pr');
   act(() => root?.unmount());
   document.body.innerHTML = '';
 
   host = foot({ name: 'Studio Mac' });
   expect(host.querySelector('button, a')).toBeNull();
-  expect(host.querySelector('[data-scheduled-foot-far]')?.textContent).toBe('Scheduled on Studio Mac. Manage it there.');
+  expect(host.querySelector('[data-scheduled-foot-far]')?.textContent).toBe('Routine on Studio Mac. Manage it there.');
 });
 
 test('an agent\'s change message in another machine\'s thread: the editor link becomes the name, and where to manage it', () => {
-  const change = message('msg_change', '2026-11-10T13:00:00.000Z', { author: AGENT, body: 'Made the scheduled thread [Weekday PR summary](#scheduled=sch_pr). It is off until you turn it on.', scheduled_change: { scheduled_id: 'sch_pr', name: 'Weekday PR summary', op: 'create' } });
+  const change = message('msg_change', '2026-11-10T13:00:00.000Z', { author: AGENT, body: 'Made the routine [Weekday PR summary](#routine=sch_pr). It is off until you turn it on.', scheduled_change: { scheduled_id: 'sch_pr', name: 'Weekday PR summary', op: 'create' } });
   expect(farChangeMessage(change, null)).toBe(change);
   const far = farChangeMessage(change, 'Studio Mac');
   expect(far.body).not.toContain('#scheduled');
-  expect(far.body).toContain('Made the scheduled thread Weekday PR summary.');
-  expect(far.body).toContain('Scheduled on Studio Mac. Manage it there.');
+  expect(far.body).toContain('Made the routine Weekday PR summary.');
+  expect(far.body).toContain('Routine on Studio Mac. Manage it there.');
   expect(farChangeMessage(change, 'Studio Mac')).toBe(far);
 });
 

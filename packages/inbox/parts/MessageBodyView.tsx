@@ -31,7 +31,7 @@ export type MessageBodyData = {
   openComment: string | null;
   revealedComment: string | null;
   side: boolean;
-  /** A thread from another linked machine: its name, so a scheduled thread's editor link reads as plain words. */
+  /** A thread from another linked machine: its name, so a routine's editor link reads as plain words. */
   farMachine?: string | null;
   /** A file the message names opens beside the thread (approval "inbox-file-refs-open-viewer"). */
   fileRefs: boolean;

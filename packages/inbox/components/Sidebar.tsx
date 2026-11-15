@@ -56,7 +56,7 @@ export interface SidebarProps {
    * Board's header ("N in flight · N on you").
    */
   onBoard?: () => void;
-  /** Scheduled threads: the row under Board, only while Settings → Capabilities → Scheduled threads is on. */
+  /** Routines: the row under Board, only while Settings → Capabilities → Routines is on. */
   onScheduled?: () => void;
   /**
    * Reviews (approvals "inbox-code-review-direction", item 4, and "inbox-reviews-page"): a row of its own (after Board when the Board is on; it needs none), shown only with

@@ -1,9 +1,9 @@
 /**
- * A scheduled thread's row in the Inbox list: the scheduled thread is the sender (the play mark in the agent tile, its
+ * A routine's row in the Inbox list: the routine is the sender (the play mark in the agent tile, its
  * name where the project sits), the run is the subject ("Run 9"). A running run shows the Running pill with the dots;
  * only a run that didn't finish (or didn't start) gets the warn mark.
  *
- * The list row carries nothing that says a thread is a scheduled thread's, so this reads this computer's own list and
+ * The list row carries nothing that says a thread is a routine's, so this reads this computer's own list and
  * matches by thread. A row from another linked machine stays an ordinary row (UI-NEEDS.md names the row field that
  * would let it look the same).
  */
@@ -23,7 +23,7 @@ const marks = new WeakMap<InboxListRow, RowScheduled>();
 const looks = new WeakMap<InboxListRow, { from: InboxScheduledRow; look: InboxListRow }>();
 const TIME = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' });
 
-/** The row as the list draws it: unchanged unless it is one of this computer's scheduled threads. */
+/** The row as the list draws it: unchanged unless it is one of this computer's routines. */
 export function scheduledLook(row: InboxListRow, scheduled: readonly InboxScheduledRow[] | null): InboxListRow {
   if (!scheduled || scheduled.length === 0 || (row.machine && row.machine !== selfMachineId())) return row;
   const from = scheduled.find((s) => s.thread_id === row.thread_id);
@@ -42,13 +42,13 @@ export function scheduledLook(row: InboxListRow, scheduled: readonly InboxSchedu
 }
 
 export const scheduledOf = (row: InboxListRow): RowScheduled | undefined => marks.get(row);
-/** The name a row's labels give it (Select, Mark read, Unarchive…): a scheduled thread's own name, never its run. */
+/** The name a row's labels give it (Select, Mark read, Unarchive…): a routine's own name, never its run. */
 export const rowLabel = (row: InboxListRow, title: string): string => marks.get(row)?.name ?? title;
 
 /** The sender's tile: the play mark in place of the agents' marks. */
 export function ScheduledTile() {
   return (
-    <span className="st-tile" role="img" aria-label="Scheduled thread" data-scheduled-tile="">
+    <span className="st-tile" role="img" aria-label="Routine" data-scheduled-tile="">
       <Icon name="scheduled" size={12} />
     </span>
   );

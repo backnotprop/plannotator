@@ -1,7 +1,7 @@
 /**
- * The Scheduled threads page's table: newest last run first (a running one at the top, by when it started), the
+ * The Routines page's table: newest last run first (a running one at the top, by when it started), the
  * turned-off ones apart in their own Off table, where Next run reads "Off" and Run still runs once; beside an open
- * one the list narrows to Scheduled thread, Runs and Last run. What regresses: the route's next-run order shown as
+ * one the list narrows to Routine, Runs and Last run. What regresses: the route's next-run order shown as
  * is, off rows mixed into the main table, or the split view keeping every column.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
@@ -74,7 +74,7 @@ test.skipIf(!hasDom)('wide: newest last run first, running on top, a never-run o
 test.skipIf(!hasDom)('split: three columns, Run beside the name, the same order, the open one marked', () => {
   const host = draw(true, 'sch_weekday');
   const heads = [...host.querySelectorAll('[role="columnheader"]')].map((el) => el.textContent || el.getAttribute('aria-label'));
-  expect(heads).toEqual(['Scheduled thread', 'Runs', 'Last run']);
+  expect(heads).toEqual(['Routine', 'Runs', 'Last run']);
   // Run sits right after the name, in the name's cell, not in a column of its own.
   const name = host.querySelector('[data-scheduled-row="sch_weekday"] .st-sname')!;
   expect(name.querySelector('.st-nline > .st-open + [data-scheduled-run]')).not.toBeNull();

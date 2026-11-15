@@ -1,5 +1,5 @@
 /**
- * Start at login for scheduled threads, on an injected home and command runner (never this computer's). What each
+ * Start at login for routines, on an injected home and command runner (never this computer's). What each
  * test guards: macOS writes a launchd item that starts the Inbox with no window for this data dir, and removing it
  * unloads it first; Linux writes and enables a systemd user unit only when `systemctl --user` answers, and says
  * unavailable otherwise with nothing left behind; Windows has none.

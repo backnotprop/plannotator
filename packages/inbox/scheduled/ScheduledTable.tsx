@@ -1,6 +1,6 @@
 /**
  * The list: one table (Name, Run, Runs, Last run, Next run, Created, ⋯), newest last run first, and the turned-off ones
- * in their own small "Off" table under it. Beside an open editor it narrows to Scheduled thread (its Run button right
+ * in their own small "Off" table under it. Beside an open editor it narrows to Routine (its Run button right
  * after the name), Runs and Last run.
  */
 import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react';
@@ -160,9 +160,9 @@ export function ScheduledTable({ rows, acts, short, selected }: { rows: readonly
   const now = useTick(rows.some((row) => row.state === 'running'));
   if (short) {
     return (
-      <div className="st-short" role="table" aria-label="Scheduled threads">
+      <div className="st-short" role="table" aria-label="Routines">
         <div className="st-shead st-scols" role="row">
-          <span role="columnheader">Scheduled thread</span>
+          <span role="columnheader">Routine</span>
           <span role="columnheader" className="st-num st-runs">Runs</span>
           <span role="columnheader" className="st-num" aria-sort="descending">Last run</span>
           <span />
@@ -180,7 +180,7 @@ export function ScheduledTable({ rows, acts, short, selected }: { rows: readonly
   return (
     <>
       {on.length > 0 && (
-        <div className="st-table" role="table" aria-label="Scheduled threads">
+        <div className="st-table" role="table" aria-label="Routines">
           <div className="st-head st-cols" role="row">
             <span role="columnheader">Name</span>
             <span role="columnheader" aria-label="Run" />

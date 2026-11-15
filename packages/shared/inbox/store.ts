@@ -250,7 +250,7 @@ export interface InboxSendInput {
    * No agent's own call sets it.
    */
   turn_error?: boolean;
-  /** Server only (packages/server/inbox-scheduled.ts): an agent's scheduled_thread change (`InboxMessage.scheduled_change`). */
+  /** Server only (packages/server/inbox-scheduled.ts): an agent's routine change (`InboxMessage.scheduled_change`). */
   scheduled_change?: InboxScheduledChange;
   body: string;
   subject?: string | null;
@@ -821,13 +821,13 @@ export class InboxStore {
   private readonly wakingSessions = new Set<string>();
   /** The ids of the thread roots an agent was launched for (`launch`): the launch sweep reads these, never every message. */
   private readonly launchedRootIds = new Set<string>();
-  /** Each scheduled thread's newest run divider that carries a launch and is not the thread's root (the root's is in launchedRootIds), by thread. */
+  /** Each routine's newest run divider that carries a launch and is not the thread's root (the root's is in launchedRootIds), by thread. */
   private readonly scheduledRunByThread = new Map<string, string>();
-  /** Each scheduled thread's newest run divider (any) and the newest due time its clock wrote a line for, by scheduled thread. */
+  /** Each routine's newest run divider (any) and the newest due time its clock wrote a line for, by routine. */
   private readonly scheduledLinesOf = new Map<string, { run?: string; due?: string }>();
   /** Scheduled lines by their run key. */
   private readonly scheduledKeys = new Map<string, string>();
-  /** Scheduled threads, by id, deleted ones too (packages/server/inbox-scheduled.ts). */
+  /** Routines, by id, deleted ones too (packages/server/inbox-scheduled.ts). */
   private readonly scheduledById = new Map<string, InboxScheduledThread>();
   /** The seq of a message's first line: its place in the event log. */
   private readonly messageSeq = new Map<string, number>();
@@ -1133,7 +1133,7 @@ export class InboxStore {
     else this.threadMembers.set(record.thread_id, [record.id]);
   }
 
-  /** A scheduled thread's divider or skip line: the indexes the clock and the launcher read, never the whole thread. */
+  /** A routine's divider or skip line: the indexes the clock and the launcher read, never the whole thread. */
   private placeScheduledLine(record: InboxMessage): void {
     const run = record.scheduled_run!;
     const runOf = (id: string | undefined) => (id ? (this.messages.get(id)?.scheduled_run?.run ?? 0) : -1);
@@ -7437,7 +7437,7 @@ export class InboxStore {
     });
   }
 
-  /** Each scheduled thread's newest run that carries a launch, other than its root: the launcher's runs beside its roots. Earlier runs have ended. */
+  /** Each routine's newest run that carries a launch, other than its root: the launcher's runs beside its roots. Earlier runs have ended. */
   scheduledRunLaunches(): InboxMessage[] {
     return [...this.scheduledRunByThread.values()].flatMap((id) => {
       const message = this.messages.get(id);
@@ -7451,13 +7451,13 @@ export class InboxStore {
     return (id && this.messages.get(id)) || null;
   }
 
-  /** A scheduled thread's newest run divider, and the newest due time its clock wrote a run or skip line for. */
+  /** A routine's newest run divider, and the newest due time its clock wrote a run or skip line for. */
   scheduledLines(scheduledId: string): { run: InboxMessage | null; due: string | null } {
     const lines = this.scheduledLinesOf.get(scheduledId);
     return { run: (lines?.run && this.messages.get(lines.run)) || null, due: lines?.due ?? null };
   }
 
-  /** The scheduled threads not deleted, oldest first. */
+  /** The routines not deleted, oldest first. */
   scheduledThreads(): InboxScheduledThread[] {
     return [...this.scheduledById.values()].filter((record) => !record.deleted_at).sort((a, b) => a.created_at.localeCompare(b.created_at));
   }
@@ -7467,22 +7467,22 @@ export class InboxStore {
     return record && !record.deleted_at ? record : null;
   }
 
-  /** A deleted scheduled thread, which the window's Undo brings back. */
+  /** A deleted routine, which the window's Undo brings back. */
   deletedScheduledThread(id: string): InboxScheduledThread | null {
     const record = this.scheduledById.get(id);
     return record?.deleted_at ? record : null;
   }
 
-  /** One snapshot of a scheduled thread (its own file in the inbox folder, on the one seq). */
+  /** One snapshot of a routine (its own file in the inbox folder, on the one seq). */
   putScheduledThread(record: InboxScheduledThread): InboxScheduledThread {
     this.write(null, { v: INBOX_RECORD_VERSION, seq: this.seq + 1, at: record.updated_at, kind: "scheduled", id: record.id, record });
     return record;
   }
 
   /**
-   * A scheduled thread's run divider or skip line, written as the person's (the prompt is theirs), keyed by its run
+   * A routine's run divider or skip line, written as the person's (the prompt is theirs), keyed by its run
    * key: the same key again (a restart in the middle of a check) answers the message written before. The first one
-   * starts the thread, named after the scheduled thread. A divider with a launch is addressed to its run's
+   * starts the thread, named after the routine. A divider with a launch is addressed to its run's
    * placeholder and takes the thread over (`took_over`), so the person's plain reply goes to that run's session.
    */
   writeScheduledLine(input: {

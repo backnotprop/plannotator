@@ -1,4 +1,4 @@
-/** Test fixtures: a scheduled thread's row as `GET /api/inbox/scheduled` answers it. Tests only. */
+/** Test fixtures: a routine's row as `GET /api/inbox/scheduled` answers it. Tests only. */
 import type { InboxScheduledRow } from '@plannotator/core/inbox-scheduled-types';
 
 export function scheduledRow(id: string, change: Partial<InboxScheduledRow> = {}): InboxScheduledRow {

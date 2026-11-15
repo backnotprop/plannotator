@@ -1,9 +1,9 @@
 /**
- * Scheduled threads on a real launch engine over a temp data dir, with the engine's fake agent and a hand-moved
+ * Routines on a real launch engine over a temp data dir, with the engine's fake agent and a hand-moved
  * clock. What each test guards: a run is a launch of its own inside the one thread, its divider carrying the prompt
  * (replied, then didn't finish); the previous idle run is let go of, the person's reply reaches the newest run, and a
  * reply to an earlier run is refused saying it ended; an ordinary launched thread keeps its one launch on its root;
- * the store read back from disk after a restart keeps every scheduled thread and never runs one twice; a skip line is
+ * the store read back from disk after a restart keeps every routine and never runs one twice; a skip line is
  * delivered to no session, so it never wakes or restarts a run; a sleep is one late run or one skip line, never a pile
  * of runs; two starts at once are one run; an agent can neither turn one on first nor run it before the person did,
  * and the clock never runs one the person has not turned on; a folder runs as it is; nothing runs while off.
@@ -269,7 +269,7 @@ describe("delete", () => {
       w.during.prepare = null;
       await w.scheduled.remove(record.id, { kind: "person" });
     };
-    await expect(w.scheduled.runNow(record.id, { kind: "person" })).rejects.toThrow(`No scheduled thread ${record.id}.`);
+    await expect(w.scheduled.runNow(record.id, { kind: "person" })).rejects.toThrow(`No routine ${record.id}.`);
     expect(w.fake.calls.filter((call) => call.startsWith("start "))).toEqual([]);
     expect(w.store.deletedScheduledThread(record.id)!.thread_id).toBeNull();
     const scratch = join(w.home, "..", "data", "scratch");
@@ -278,7 +278,7 @@ describe("delete", () => {
 });
 
 describe("the clock", () => {
-  test("a restart reads every scheduled thread back from disk and never runs one twice; a skip line wakes no run", async () => {
+  test("a restart reads every routine back from disk and never runs one twice; a skip line wakes no run", async () => {
     const w = world();
     const { record } = await w.make();
     const { record: skipper } = await w.make({ name: "Standup notes", if_missed: "skip" });
@@ -393,7 +393,7 @@ describe("one run at a time", () => {
     const { record } = await w.make({ schedule: null });
     const presses = await Promise.allSettled([w.scheduled.runNow(record.id, { kind: "person" }), w.scheduled.runNow(record.id, { kind: "person" })]);
     expect(presses.map((p) => p.status).sort()).toEqual(["fulfilled", "rejected"]);
-    expect((presses.find((p) => p.status === "rejected") as PromiseRejectedResult).reason.code).toBe("scheduled_running");
+    expect((presses.find((p) => p.status === "rejected") as PromiseRejectedResult).reason.code).toBe("routine_running");
 
     const { record: daily } = await w.make({ name: "Standup notes" });
     w.at("2026-11-16T14:00:10.000Z");
@@ -428,7 +428,7 @@ describe("the person turns it on first", () => {
     const { record } = await w.scheduled.create({ name: "Morning triage", prompt: "Triage.", schedule: { cron: "0 9 * * *", tz: NY }, folder: { project_id: w.project.id }, agent: FAKE }, agent());
     expect(record).toMatchObject({ enabled: false, approved_at: null });
     expect(() => w.scheduled.setOn(record.id, true, agent())).toThrow("The person turns Morning triage on the first time");
-    await expect(w.scheduled.runNow(record.id, agent())).rejects.toMatchObject({ code: "scheduled_not_approved" });
+    await expect(w.scheduled.runNow(record.id, agent())).rejects.toMatchObject({ code: "routine_not_approved" });
     expect(w.store.scheduledThread(record.id)).toEqual(record);
     // On, but never by the person (a record written by hand): the clock passes it by.
     w.store.putScheduledThread({ ...record, enabled: true, handled_through: "2026-11-16T13:00:00.000Z" });
@@ -448,7 +448,7 @@ describe("the person turns it on first", () => {
       w.scheduled.setOn(record.id, true, { kind: "person" });
       const { record: after } = await w.scheduled.update(record.id, change, agent());
       expect(after).toMatchObject({ enabled: false, approved_at: null });
-      await expect(w.scheduled.runNow(record.id, agent())).rejects.toMatchObject({ code: "scheduled_not_approved" });
+      await expect(w.scheduled.runNow(record.id, agent())).rejects.toMatchObject({ code: "routine_not_approved" });
     }
     // A prompt edit applies at once and leaves it on.
     w.scheduled.setOn(record.id, true, { kind: "person" });

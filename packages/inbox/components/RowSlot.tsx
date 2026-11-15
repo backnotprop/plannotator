@@ -21,7 +21,7 @@ export function RowSlot({ row, session, project, tip = true }: { row: InboxListR
   });
   const own = now ? namesOf(now) : {};
   const names = now && now !== session && !own.label && !own.title ? namesOf(session!) : own;
-  // A scheduled thread's row (scheduled/rowLook.tsx): its name is the sender, where the project sits.
+  // A routine's row (scheduled/rowLook.tsx): its name is the sender, where the project sits.
   const scheduled = scheduledOf(row);
   if (scheduled) {
     const name = (

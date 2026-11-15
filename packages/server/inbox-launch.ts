@@ -495,7 +495,7 @@ export function createInboxLaunch(options: {
   const hostOf = (launch: InboxLaunchRecord): LaunchHost | null => (Object.hasOwn(hosts, launch.agent) ? hosts[launch.agent]! : null);
   /** Every launch: each launched root, and each scheduled run's divider (one launch per run, many in that one thread). */
   const roots = () => [...store.launchedRoots(), ...store.scheduledRunLaunches()];
-  /** The launch a thread's run line, row and reply follow: a scheduled thread's newest run, else the thread's root. */
+  /** The launch a thread's run line, row and reply follow: a routine's newest run, else the thread's root. */
   const threadLaunch = (threadId: string): InboxMessage | undefined => store.scheduledRunOf(threadId) ?? store.message(threadId) ?? undefined;
   const states = new Map<LaunchHost, HostState>();
   const stateOf = (host: LaunchHost): HostState => states.get(host)!;
@@ -610,7 +610,7 @@ export function createInboxLaunch(options: {
     if (memo.busySeen) return false;
     const lastId = store.threadMessageIds(root.thread_id).at(-1);
     const last = lastId ? store.message(lastId) : null;
-    // The person's latest, unless it went to another session (re-addressed), or is a scheduled thread's skip line or a run that didn't start.
+    // The person's latest, unless it went to another session (re-addressed), or is a routine's skip line or a run that didn't start.
     return last?.author.kind === "person" && (!last.to || last.to.session === root.to?.session) && !(last.scheduled_run && !last.to);
   };
 
@@ -2019,7 +2019,7 @@ ${result.text}`);
       return Object.hasOwn(hosts, agent) ? available(hosts[agent]!) : null;
     },
 
-    /** A folder a scheduled thread runs in, by a typed folder's rules (home, `/` and hidden folders refused): its real path. */
+    /** A folder a routine runs in, by a typed folder's rules (home, `/` and hidden folders refused): its real path. */
     async startFolder(typed: string): Promise<string> {
       const read = await resolveFolderAnywhere(typed);
       if (!read.ok) throw new InboxError("folder_unavailable", `${read.slow} isn't responding.`, { field: "folder" });

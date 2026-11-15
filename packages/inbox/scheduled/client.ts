@@ -1,5 +1,5 @@
 /**
- * Scheduled threads' routes (Bun Inbox only, this machine's own: a scheduled thread is managed on the computer that
+ * Routines' routes (Bun Inbox only, this machine's own: a routine is managed on the computer that
  * made it). The contract is research CONTRACT.md section 2; every POST carries the page's `serverSession`.
  */
 import type { InboxScheduledFolder, InboxScheduledIfMissed, InboxScheduledPreview, InboxScheduledRow, InboxScheduledRunSummary, InboxScheduledSchedule } from '@plannotator/core/inbox-scheduled-types';
@@ -10,7 +10,7 @@ import { newUuid } from '../uuid';
 
 declare module '../api' {
   interface SettingsModel {
-    /** Settings → Capabilities → Scheduled threads. Absent where launch is not supported (Windows): no row. */
+    /** Settings → Capabilities → Routines. Absent where launch is not supported (Windows): no row. */
     scheduled_threads?: { on: boolean; login?: 'added' | 'unavailable' };
   }
 }
@@ -27,7 +27,7 @@ export interface ScheduledFields {
   attachments: string[];
 }
 
-/** This machine's own: a scheduled thread is managed on the computer that made it. */
+/** This machine's own: a routine is managed on the computer that made it. */
 const BASE = inboxUrl('/scheduled');
 
 async function get<T>(path: string): Promise<T> {

@@ -1,7 +1,7 @@
 /**
- * The `scheduled_thread` tool (docs/agent-guides/inbox-scheduled.md): an agent makes and keeps a scheduled thread
- * for the person. Served only while the person has scheduled threads on (the MCP context's `scheduledOn`): off, it
- * is not in tools/list, and a call from a session that listed it before answers `scheduled_threads_off` with
+ * The `routine` tool (docs/agent-guides/inbox-routines.md): an agent makes and keeps a routine
+ * for the person. Served only while the person has routines on (the MCP context's `scheduledOn`): off, it
+ * is not in tools/list, and a call from a session that listed it before answers `routines_off` with
  * nothing written. What an agent may do is in inbox-scheduled.ts: one it makes arrives off, and the person turns it
  * on the first time.
  */
@@ -16,10 +16,10 @@ import { guarded, okComplete, PROJECT_PATH_DESCRIPTION } from "./inbox-mcp-resul
 export const SCHEDULED_THREAD_OPS = ["create", "list", "get", "update", "on", "off", "run", "delete"] as const;
 
 export const SCHEDULED_THREAD_DESCRIPTION =
-  "Scheduled threads: a saved prompt an agent on this computer runs on a schedule, every run replying in one Inbox thread. Make one only when the person asks for work to run on its own, on a schedule. op: create, list, get, update, on, off, run, delete. One you create arrives off: the person turns it on the first time, in the Inbox; after that you may update, turn it on or off, run and delete it. Changing its folder or its agent turns it off again until the person turns it back on. A schedule's runs are at least 15 minutes apart. Pass thread_id: each change posts one line there for the person.";
+  "Routines in the Plannotator Inbox: a saved prompt an agent on this computer runs on a schedule, every run replying in one Inbox thread. Make one only when the person asks for work to run on its own, on a schedule. op: create, list, get, update, on, off, run, delete. One you create arrives off: the person turns it on the first time, in the Inbox; after that you may update, turn it on or off, run and delete it. Changing its folder or its agent turns it off again until the person turns it back on. A schedule's runs are at least 15 minutes apart. Pass thread_id: each change posts one line there for the person.";
 
 export interface InboxScheduledMcpContext {
-  /** Whether the person has scheduled threads on, read on every request. Absent: off. */
+  /** Whether the person has routines on, read on every request. Absent: off. */
   scheduledOn?: () => boolean;
   scheduled?: () => InboxScheduled | null;
 }
@@ -29,14 +29,14 @@ const rowLine = (row: InboxScheduledRow) =>
 
 export function registerInboxScheduledTool(server: McpServer, context: InboxScheduledMcpContext): void {
   server.registerTool(
-    "scheduled_thread",
+    "routine",
     {
-      title: "Make or change a scheduled thread",
+      title: "Make or change a routine",
       description: SCHEDULED_THREAD_DESCRIPTION,
       inputSchema: z
         .object({
           op: z.enum(SCHEDULED_THREAD_OPS),
-          id: z.string().optional().describe("The scheduled thread (sch_…); not for create or list."),
+          id: z.string().optional().describe("The routine (sch_…); not for create or list."),
           name: z.string().optional().describe("A few words the person knows it by, e.g. \"Morning triage\"."),
           prompt: z.string().optional().describe("What each run is asked, in the person's words, whole."),
           schedule: z
@@ -67,7 +67,7 @@ export function registerInboxScheduledTool(server: McpServer, context: InboxSche
     async (input) =>
       guarded(async () => {
         const scheduled = context.scheduledOn?.() ? context.scheduled?.() : null;
-        if (!scheduled) throw new InboxError("scheduled_threads_off", INBOX_SCHEDULED_OFF_TEXT.replace(/^scheduled_threads_off: /, ""));
+        if (!scheduled) throw new InboxError("routines_off", INBOX_SCHEDULED_OFF_TEXT.replace(/^routines_off: /, ""));
         const by: InboxScheduledBy = {
           kind: "agent",
           host: input.agent_host?.trim() || "agent",
@@ -77,7 +77,7 @@ export function registerInboxScheduledTool(server: McpServer, context: InboxSche
         };
         if (input.op === "list") {
           const rows = scheduled.list();
-          return okComplete(rows.length === 0 ? "No scheduled threads." : rows.map(rowLine).join("\n"), { scheduled: rows });
+          return okComplete(rows.length === 0 ? "No routines." : rows.map(rowLine).join("\n"), { scheduled: rows });
         }
         const told = (id: string | null) => (id ? ` The person sees it in thread ${input.thread_id}.` : "");
         if (input.op === "create") {

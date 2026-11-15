@@ -1,5 +1,5 @@
 /**
- * A scheduled thread's row in the Inbox list: the scheduled thread is the sender (the play mark, its name) and the
+ * A routine's row in the Inbox list: the routine is the sender (the play mark, its name) and the
  * run is the subject. Only a run that didn't finish carries the warn mark; a running one carries Running with the
  * dots; a replied one carries neither. A row from another linked machine stays an ordinary row (its row carries no
  * scheduled field yet, UI-NEEDS.md). What regresses: the warn mark on a replied or running run, or none on a run that
@@ -89,7 +89,7 @@ function render(shape: 'wide' | 'narrow' | 'phone'): HTMLElement {
 }
 
 test.skipIf(!hasDom)('the warn mark only on the run that didn\'t finish, Running on the running one, in every row shape', () => {
-  // The far thread matches nothing here (its scheduled thread lives on its own machine); give it a local match too,
+  // The far thread matches nothing here (its routine lives on its own machine); give it a local match too,
   // to prove the row stays ordinary because it is another machine's, not because nothing matched.
   resetScheduledForTests([...SCHEDULED, scheduledRow('sch_far', { name: 'Far one', thread_id: 'msg_far', runs: 2, last_run: lastRun(2, now, 'didnt_finish') })], true);
   for (const shape of ['wide', 'narrow', 'phone'] as const) {
@@ -104,7 +104,7 @@ test.skipIf(!hasDom)('the warn mark only on the run that didn\'t finish, Running
     expect(of('msg_unfinished').querySelector('[data-scheduled-tile]')).not.toBeNull();
     expect(of('msg_unfinished').querySelector('[data-scheduled-sender]')?.textContent).toBe('Weekday PR summary');
     expect(of('msg_unfinished').textContent).toContain('Run 9');
-    // Ordinary rows: one with no scheduled thread, and another machine's.
+    // Ordinary rows: one with no routine, and another machine's.
     for (const id of ['msg_plain', 'msg_far']) {
       expect(of(id).querySelector('[data-scheduled-tile], [data-scheduled-badge], [data-scheduled-sender]')).toBeNull();
     }
@@ -113,7 +113,7 @@ test.skipIf(!hasDom)('the warn mark only on the run that didn\'t finish, Running
   }
 });
 
-test.skipIf(!hasDom)("a scheduled thread's row labels (its pick box, Mark read) name the scheduled thread, never its run", () => {
+test.skipIf(!hasDom)("a routine's row labels (its pick box, Mark read) name the routine, never its run", () => {
   resetScheduledForTests(SCHEDULED, true);
   const el = render('wide');
   // A row's other labels name it the same way.

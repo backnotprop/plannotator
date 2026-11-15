@@ -1,6 +1,6 @@
 /**
- * Scheduled threads (docs/agent-guides/inbox-scheduled.md): the records, the clock and the runs. A run is a launch,
- * one per run inside the scheduled thread's one thread: its divider (`scheduled_run`) carries the prompt and that
+ * Routines (docs/agent-guides/inbox-routines.md): the records, the clock and the runs. A run is a launch,
+ * one per run inside the routine's one thread: its divider (`scheduled_run`) carries the prompt and that
  * run's own launch record, and the launcher keeps every other thread at one launch on its root.
  *
  * Nothing here runs, writes or sets a timer while the capability switch is off (`on()`).
@@ -37,7 +37,7 @@ import type { InboxAttachment } from "@plannotator/core/inbox-types";
 import type { InboxLaunch, InboxLaunchTarget } from "./inbox-launch";
 
 export const INBOX_SCHEDULED_OFF_TEXT =
-  "scheduled_threads_off: Scheduled threads are off on this computer, so nothing was written. The person turns them on in Settings, Capabilities.";
+  "routines_off: Routines are off on this computer, so nothing was written. The person turns them on in Settings, Capabilities.";
 
 /** Who asked: the person in the window, or an agent session (and the thread it asked from). */
 export type InboxScheduledBy = { kind: "person" } | { kind: "agent"; host: string; session: string; name: string; thread_id: string | null };
@@ -79,7 +79,7 @@ export function createInboxScheduled(deps: {
 
   const found = (id: string): InboxScheduledThread => {
     const record = store.scheduledThread(id);
-    if (!record) throw new InboxError("scheduled_not_found", `No scheduled thread ${id}.`);
+    if (!record) throw new InboxError("routine_not_found", `No routine ${id}.`);
     return record;
   };
   const save = (record: InboxScheduledThread, patch: Partial<InboxScheduledThread>): InboxScheduledThread => store.putScheduledThread({ ...record, ...patch, updated_at: iso() });
@@ -114,7 +114,7 @@ export function createInboxScheduled(deps: {
     const outcome = !divider.launch || divider.launch.error || run.failed ? "didnt_start" : line && RUNNING.has(line.state) ? "running" : replied ? "replied" : "didnt_finish";
     return { message_id: divider.id, run: run.run!, due_at: run.due_at, started_at: divider.created_at, late: run.late === true, outcome };
   };
-  /** Run starts under way here (the clock's and Run now's alike): one at a time per scheduled thread. */
+  /** Run starts under way here (the clock's and Run now's alike): one at a time per routine. */
   const starting = new Set<string>();
   const runningOf = (record: InboxScheduledThread): InboxScheduledRunSummary | null => {
     const last = lastDividerOf(record);
@@ -214,7 +214,7 @@ export function createInboxScheduled(deps: {
 
   // ── What an agent's change says in its thread ──
 
-  const linkOf = (record: InboxScheduledThread) => `[${record.name.replace(/[[\]]/g, "")}](#scheduled=${record.id})`;
+  const linkOf = (record: InboxScheduledThread) => `[${record.name.replace(/[[\]]/g, "")}](#routine=${record.id})`;
   const folderWords = (folder: InboxScheduledFolder) =>
     "scratch" in folder ? "a new scratch folder" : "path" in folder ? deps.displayFolder(folder.path) : (store.project(folder.project_id) && deps.displayFolder(store.project(folder.project_id)!.root)) || "a folder that is gone";
   const agentWords = (agent: string) => INBOX_HOST_NAMES[agent] ?? agent;
@@ -278,11 +278,11 @@ export function createInboxScheduled(deps: {
 
   /**
    * One run: its divider in the thread, then the launch. A run key answers the same divider again after a restart.
-   * One start at a time per scheduled thread (`starting`); its number, thread and prompt are read after the launch is
+   * One start at a time per routine (`starting`); its number, thread and prompt are read after the launch is
    * ready. A run that didn't start is a divider that says why, or, with no thread or project to put it in, the error.
    */
   const startRun = async (id: string, due: { due_at: string; late: boolean; missed_before: number; by: InboxScheduledRun["by"] }): Promise<InboxMessage> => {
-    if (starting.has(id)) throw new InboxError("scheduled_running", `${found(id).name} is running now.`);
+    if (starting.has(id)) throw new InboxError("routine_running", `${found(id).name} is running now.`);
     starting.add(id);
     try {
       const first = found(id);
@@ -322,7 +322,7 @@ export function createInboxScheduled(deps: {
         const record = store.scheduledThread(id);
         if (record) return record;
         launch.abandon(prepared.launch, prepared.project);
-        throw new InboxError("scheduled_not_found", `No scheduled thread ${id}.`);
+        throw new InboxError("routine_not_found", `No routine ${id}.`);
       };
       const record = live();
       let attachments: InboxAttachment[] = [];
@@ -383,7 +383,7 @@ export function createInboxScheduled(deps: {
   /** "Start agents" was off at a check: turning it on again starts from now, as the switch does (no catch-up). */
   let launchWasOff = false;
   /**
-   * One check: for each scheduled thread that is on and approved, at most one run or one skip line. The record is
+   * One check: for each routine that is on and approved, at most one run or one skip line. The record is
    * written only when no line says where the clock got to (a one-time one done, a run with nowhere to say it failed).
    */
   const check = async (): Promise<void> => {
@@ -472,7 +472,7 @@ export function createInboxScheduled(deps: {
         created_at: at,
         updated_at: at,
       });
-      const told = tell(by, record, `Made the scheduled thread ${linkOf(record)}. It is off until you turn it on.`, { op: "create" });
+      const told = tell(by, record, `Made the routine ${linkOf(record)}. It is off until you turn it on.`, { op: "create" });
       return { record, told };
     },
 
@@ -489,7 +489,7 @@ export function createInboxScheduled(deps: {
       if (changed.includes("schedule")) patch.done_at = undefined;
       const record = save(before, patch);
       const turnedOff = moved && (before.enabled || before.approved_at !== null);
-      const told = tell(by, record, `Changed the scheduled thread ${linkOf(record)}.\n\n${changeLines(before, record, changed, turnedOff)}`, {
+      const told = tell(by, record, `Changed the routine ${linkOf(record)}.\n\n${changeLines(before, record, changed, turnedOff)}`, {
         op: "update",
         fields: changed as InboxScheduledChange["fields"],
         ...(turnedOff ? { turned_off: true as const } : {}),
@@ -500,27 +500,27 @@ export function createInboxScheduled(deps: {
     setOn(id: string, on: boolean, by: InboxScheduledBy): { record: InboxScheduledThread; told: string | null } {
       const before = found(id);
       if (on && by.kind === "agent" && !before.approved_at) {
-        throw new InboxError("scheduled_not_approved", `The person turns ${before.name} on the first time, in the Inbox. Nothing was changed.`);
+        throw new InboxError("routine_not_approved", `The person turns ${before.name} on the first time, in the Inbox. Nothing was changed.`);
       }
       if (before.enabled === on) return { record: before, told: null };
       const at = iso();
       const record = save(before, on ? { enabled: true, handled_through: at, ...(by.kind === "person" ? { approved_at: at } : {}) } : { enabled: false });
-      const told = tell(by, record, `Turned the scheduled thread ${linkOf(record)} ${on ? "on" : "off"}.`, { op: on ? "on" : "off" });
+      const told = tell(by, record, `Turned the routine ${linkOf(record)} ${on ? "on" : "off"}.`, { op: on ? "on" : "off" });
       return { record, told };
     },
 
     /** Run now: the run's divider (its `scheduled_run.failed` says why when it didn't start). */
     async runNow(id: string, by: InboxScheduledBy): Promise<{ message: InboxMessage; told: string | null }> {
       const record = found(id);
-      if (by.kind === "agent" && !record.approved_at) throw new InboxError("scheduled_not_approved", `The person turns ${record.name} on the first time, in the Inbox. Nothing was run.`);
-      if (runningOf(record)) throw new InboxError("scheduled_running", `${record.name} is running now.`);
+      if (by.kind === "agent" && !record.approved_at) throw new InboxError("routine_not_approved", `The person turns ${record.name} on the first time, in the Inbox. Nothing was run.`);
+      if (runningOf(record)) throw new InboxError("routine_running", `${record.name} is running now.`);
       if (!deps.launchOn()) throw new InboxError("launch_off", "Starting agents from the Inbox is off. Turn it on in Settings → Agents.");
       const message = await startRun(id, { due_at: iso(), late: false, missed_before: 0, by: by.kind });
       const n = message.scheduled_run!.run;
       const after = found(id);
       const told = message.scheduled_run!.failed
-        ? tell(by, after, `Run ${n} of the scheduled thread ${linkOf(after)} didn't start. Its thread says why.`, { op: "run" })
-        : tell(by, after, `Started run ${n} of the scheduled thread ${linkOf(after)}.`, { op: "run" });
+        ? tell(by, after, `Run ${n} of the routine ${linkOf(after)} didn't start. Its thread says why.`, { op: "run" })
+        : tell(by, after, `Started run ${n} of the routine ${linkOf(after)}.`, { op: "run" });
       return { message, told };
     },
 
@@ -537,7 +537,7 @@ export function createInboxScheduled(deps: {
       const running = runningOf(record);
       if (running) await launch.stopMessage(running.message_id);
       save(found(id), { deleted_at: iso() });
-      return { told: tell(by, record, `Deleted the scheduled thread ${record.name}. Its thread and past runs stay.`, { op: "delete" }) };
+      return { told: tell(by, record, `Deleted the routine ${record.name}. Its thread and past runs stay.`, { op: "delete" }) };
     },
 
     /** The window's Undo of a delete: back as it was, counting from now (nothing due meanwhile is caught up). */
@@ -546,14 +546,14 @@ export function createInboxScheduled(deps: {
       return record.deleted_at ? save(record, { deleted_at: undefined, ...(record.enabled ? { handled_through: iso() } : {}) }) : record;
     },
 
-    /** Turning the capability switch on: every scheduled thread that is on starts from now, with no catch-up. */
+    /** Turning the capability switch on: every routine that is on starts from now, with no catch-up. */
     switchedOn(): void {
       launchWasOff = false;
       fromNow();
     },
 
     /**
-     * Before the person's reply is written: a reply to an earlier run of a scheduled thread (its divider or its
+     * Before the person's reply is written: a reply to an earlier run of a routine (its divider or its
      * session's message) is refused, plainly. Only the newest run takes replies; an earlier one has ended and is never
      * started again. `picked`: a session the person chose for the reply, which goes there as it would anywhere.
      */
@@ -570,7 +570,7 @@ export function createInboxScheduled(deps: {
       });
       if (!mine) return;
       throw new InboxError(
-        "scheduled_run_ended",
+        "routine_run_ended",
         `Run ${store.message(mine)!.scheduled_run!.run} has ended, so your reply was not sent. Reply to the latest run (Run ${newest.scheduled_run!.run}) instead.`,
       );
     },
@@ -599,11 +599,11 @@ export type InboxScheduled = ReturnType<typeof createInboxScheduled>;
 
 /** The HTTP status of each refusal here (inbox.ts `ERROR_STATUS`). */
 export const INBOX_SCHEDULED_ERROR_STATUS: Record<string, number> = {
-  scheduled_not_found: 404,
-  scheduled_threads_off: 404,
+  routine_not_found: 404,
+  routines_off: 404,
   schedule_too_frequent: 422,
   schedule_invalid: 422,
-  scheduled_running: 409,
-  scheduled_not_approved: 409,
-  scheduled_run_ended: 409,
+  routine_running: 409,
+  routine_not_approved: 409,
+  routine_run_ended: 409,
 };

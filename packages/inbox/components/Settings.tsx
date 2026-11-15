@@ -102,7 +102,7 @@ export interface SettingsPageProps {
   onToggleChapterDiagrams?: (next: boolean) => void;
   /** Settings → Capabilities → Checklist (thread steps, approval "inbox-thread-steps"). Absent (or an Inbox without it): no row. */
   onToggleSteps?: (next: boolean) => void;
-  /** Settings → Capabilities → Scheduled threads (after Checklist). Absent (or an Inbox without it, Windows among them): no row. */
+  /** Settings → Capabilities → Routines (after Checklist). Absent (or an Inbox without it, Windows among them): no row. */
   onToggleScheduled?: (next: boolean) => void;
   /** Settings → Capabilities → Bro mode (approval "bro-mode"). Absent (or an Inbox without it): no row. */
   onToggleBro?: (next: boolean) => void;
@@ -529,7 +529,7 @@ function CapabilitiesSection({
   /** The checklist (thread steps, approval "inbox-thread-steps"), null on an Inbox without it. */
   steps: { on: boolean } | null;
   onToggleSteps?: (next: boolean) => void;
-  /** Scheduled threads, null where the Inbox has no switch for them. */
+  /** Routines, null where the Inbox has no switch for them. */
   scheduled: { on: boolean; login?: 'added' | 'unavailable' } | null;
   onToggleScheduled?: (next: boolean) => void;
   /** Code review in the Inbox (approval "inbox-code-review-direction"), null on an Inbox without it. */

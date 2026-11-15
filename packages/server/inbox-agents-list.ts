@@ -45,7 +45,7 @@ export interface InboxAgentLaunch {
   run: InboxRunState | null;
   /** Its scratch folder's name; null in a project. */
   scratch: string | null;
-  /** A scheduled thread's run (its root is a run divider). */
+  /** A routine's run (its root is a run divider). */
   scheduled?: boolean;
 }
 
@@ -133,7 +133,7 @@ export function inboxAgentsGroup(evidence: InboxAgentsEvidence, cap = INBOX_AGEN
   // An old id whose conversation goes on is no agent of its own.
   for (const entry of evidence.sessions) if (!entry.live && nowAs(entry.session) !== entry.session) bySession.delete(entry.session);
 
-  // A scheduled thread is one agent however many runs it has: its newest run's. An earlier run's session is listed
+  // A routine is one agent however many runs it has: its newest run's. An earlier run's session is listed
   // only while it is live.
   const newestRun = new Map<string, InboxAgentLaunch>();
   for (const launch of evidence.launches) {

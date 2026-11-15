@@ -1,4 +1,4 @@
-/* Scheduled threads (packages/inbox/scheduled/): the page's table and narrow list, the editor, a thread's run lines and
+/* Routines (packages/inbox/scheduled/): the page's table and narrow list, the editor, a thread's run lines and
    foot mark, and a list row's tile and marks. Everything here is the Inbox's own tokens; no new colours. */
 
 /* The running mark: six dots in two columns that light in turn (the Inbox's ib-dots keyframes). Reduced motion holds
@@ -67,7 +67,7 @@
 .st-more:hover, .st-more[data-popup-open] { background: var(--muted); color: var(--foreground); }
 .st-more svg.ib-ic { width: 15px; height: 15px; }
 
-/* The narrow list beside an open one (and on a phone): Scheduled thread, Runs, Last run. */
+/* The narrow list beside an open one (and on a phone): Routine, Runs, Last run. */
 .st-short { padding: 2px 0 20px; }
 .st-scols { display: grid; grid-template-columns: minmax(0, 1fr) 40px 112px 28px; column-gap: 12px; align-items: start; }
 .st-shead > * { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -166,7 +166,7 @@ button.st-line:hover { color: var(--foreground); }
 .st-note.st-unfinished { margin: 0; padding: 12px 0 18px 34px; }
 .ib-pbody .st-run-at + .ib-message, .ib-pbody.ib-folding .st-run-at + .ib-message { border-top: 0; margin-top: 0; }
 
-/* The Reply row's mark: "Scheduled · next Mon 9:00 AM · Edit", or on another machine's thread, where to manage it. */
+/* The Reply row's mark: "Routine · next Mon 9:00 AM · Edit", or on another machine's thread, where to manage it. */
 .st-foot-mark { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 8px; margin-left: auto; margin-right: -8px; border: 0; border-radius: 7px; background: none; font: inherit; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); font-variant-numeric: tabular-nums; white-space: nowrap; flex: none; }
 button.st-foot-mark { cursor: pointer; }
 button.st-foot-mark:hover { background: var(--muted); }

@@ -251,7 +251,7 @@ import { INBOX_REVIEW_DRAW_GONE } from "@plannotator/core/inbox-review";
 import { runShapeOpen, runShapeServe } from "./shape-open";
 import { runShapeFrame } from "./shape-frame";
 import { isShapeAnimateHelp, SHAPE_ANIMATE_HELP } from "@plannotator/core/shape-animate";
-import { runInboxCallCommand } from "./inbox-call-command";
+import { routineCallArgs, runInboxCallCommand } from "./inbox-call-command";
 import { runInboxStepsCommand } from "./inbox-steps-command";
 import { runInboxPullsCommand } from "./inbox-pulls-command";
 import { runInboxExportDecisionsCommand } from "./inbox-export-decisions-command";
@@ -462,6 +462,23 @@ if (isReviewDrawCommand(rawArgs, () => {
       }),
     );
   }
+}
+// `plannotator routine <op> ['<json>']`: sugar over `inbox call routine` (inbox-call-command.ts).
+if (rawArgs[0] === "routine") {
+  const routineArgs = routineCallArgs(rawArgs.slice(1));
+  if (!Array.isArray(routineArgs)) {
+    process.stderr.write(`${routineArgs.code}: ${routineArgs.error}\n`);
+    process.exit(2);
+  }
+  const routineDataDir = getPlannotatorDataDir();
+  process.exit(
+    await runInboxCallCommand(routineArgs, {
+      cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
+      env: process.env,
+      askAiChild: isAskAiChild(process.env),
+      ensureRunning: () => ensureInboxRunning(routineDataDir),
+    }),
+  );
 }
 // `plannotator inbox pulls ls|add|rm <thread> [<ref>...]`: a thread's PRs, sugar over `inbox call thread_pulls` (inbox-pulls-command.ts).
 {

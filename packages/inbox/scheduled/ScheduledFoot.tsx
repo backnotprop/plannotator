@@ -1,7 +1,7 @@
 /**
- * The mark at the right of a scheduled thread's Reply row: "Scheduled · next Mon 9:00 AM · Edit", which opens its
- * editor. A scheduled thread is managed on the computer that made it, so on a thread from another linked machine it
- * reads "Scheduled on <machine>. Manage it there." with no link (no way into a page that has nothing to show).
+ * The mark at the right of a routine's Reply row: "Routine · next Mon 9:00 AM · Edit", which opens its
+ * editor. A routine is managed on the computer that made it, so on a thread from another linked machine it
+ * reads "Routine on <machine>. Manage it there." with no link (no way into a page that has nothing to show).
  */
 import type { InboxMessageWire } from '@plannotator/core/inbox-types';
 import { writeRoute } from '../app/writeRoute';
@@ -15,12 +15,12 @@ function LocalFoot({ id }: { id: string }) {
   // Not in this computer's list (deleted, or the switch is off): nothing to edit, no mark.
   if (!row) return null;
   const next = row.next_run ? nextWhenWords(row.next_run) : null;
-  const words = next ? `Scheduled · next ${next}` : 'Scheduled';
+  const words = next ? `Routine · next ${next}` : 'Routine';
   return (
     <button
       type="button"
       className="st-foot-mark"
-      aria-label={`${next ? `Scheduled, next run ${next}` : 'Scheduled'}. Edit the scheduled thread`}
+      aria-label={`${next ? `Routine, next run ${next}` : 'Routine'}. Edit the routine`}
       onClick={() => writeRoute({ page: 'scheduled', project: null, thread: null, scheduled: id })}
       data-scheduled-foot={id}
     >
@@ -40,7 +40,7 @@ export function ScheduledFoot({ messages, machine }: { messages: readonly InboxM
     return (
       <span className="st-foot-mark st-far" data-scheduled-foot-far="">
         <Icon name="scheduled" size={14} />
-        <span>Scheduled on {machine.name}. Manage it there.</span>
+        <span>Routine on {machine.name}. Manage it there.</span>
       </span>
     );
   return <LocalFoot id={latest.scheduled_run!.scheduled_id} />;

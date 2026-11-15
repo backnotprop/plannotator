@@ -551,7 +551,7 @@ export interface InboxServerOptions {
   tailscaleTimers?: InboxTailscaleTimers;
   /** Tests: more agents beside Claude Code (`createInboxLaunch`'s `hosts`), for a sandbox with no CLI to start. */
   launchHosts?: (context: LaunchHostContext) => LaunchHost[];
-  /** Tests: the scheduled threads' login item (inbox-scheduled-login.ts). Default: the real one, under the Inbox's own folder under a test. */
+  /** Tests: the routines' login item (inbox-scheduled-login.ts). Default: the real one, under the Inbox's own folder under a test. */
   scheduledLogin?: InboxLoginItem;
   /** Tests: how step 1 of Pair a phone reads this computer (packages/server/inbox-pairing-checks.ts). Default: its own tools. */
   pairingProbes?: Partial<PairingProbes>;
@@ -575,7 +575,7 @@ export interface InboxServerOptions {
   board?: boolean;
   /** Thread steps, decided here instead of config.json `inboxSteps` (tests). Absent: config.json decides on every request. */
   steps?: boolean;
-  /** Tests: scheduled threads on or off, over config.json `inboxScheduledThreads`. */
+  /** Tests: routines on or off, over config.json `inboxScheduledThreads`. */
   scheduled?: boolean;
   /** Code review, decided here instead of config.json `inboxCodeReview` (tests). Absent: config.json decides on every request. */
   codeReview?: boolean;
@@ -1569,7 +1569,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     boardOn: () => boardOn(),
     // Thread steps: the steps tool and field are listed and served only while the person has them on.
     stepsOn: () => stepsOn(),
-    // Scheduled threads: the scheduled_thread tool is listed and served only while the person has them on.
+    // Routines: the routine tool is listed and served only while the person has them on.
     scheduledOn: () => scheduledCap.on(),
     scheduled: () => scheduled,
     // A thread's PRs: the reader's live checks, and a read of the PRs an agent just added.
@@ -3653,7 +3653,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     experimental: experimentalState(),
     /** The Board (config.json `inboxBoard`): off unless the person turned it on. */
     board: { on: boardOn() },
-    /** Scheduled threads (config.json `inboxScheduledThreads`): off unless the person turned them on; absent on Windows. */
+    /** Routines (config.json `inboxScheduledThreads`): off unless the person turned them on; absent on Windows. */
     ...scheduledCap.wire(),
     /** Launch (config.json `inboxLaunch`, on unless `enabled` is false; off by default on Windows): Settings → Agents' "Start agents from New message" switch, and while on its full-permissions switch and scratch root. */
     launch: launch.settingsState(),
@@ -3749,7 +3749,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // window reads that thread's PRs again (and its row). A reader that does not know the kind skips it.
         return { seq: line.seq, kind: line.kind, id: line.id, thread_id: line.record.thread_id };
       case "scheduled":
-        // A scheduled thread changed: its id only, never its prompt or folder. A reader that does not know the kind skips it.
+        // A routine changed: its id only, never its prompt or folder. A reader that does not know the kind skips it.
         return { seq: line.seq, kind: line.kind, id: line.id };
     }
   };
@@ -3882,7 +3882,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           syncShapes();
           const floats = floatDraftsOn();
           const frame = { board: { on: boardOn() }, steps: { on: stepsOn() }, bro: { on: broOn() }, ...(floats || changed === "float_drafts" ? { float_drafts: { on: floats } } : {}), ...(changed === "mark_read_warning" ? { mark_read_warning: { on: markReadWarningOn() } } : {}), ...heldSwitch("code_review", codeReviewOn(), changed === "code_review"), ...heldSwitch("shape", shapeOn(), changed === "shape"), ...systemWire(), ...chapterDiagramsWire() };
-          // Scheduled threads: while on, and to the save that turned them off.
+          // Routines: while on, and to the save that turned them off.
           if (scheduledCap.on() || changed === "scheduled_threads") Object.assign(frame, scheduledCap.wire());
           send(`event: capabilities\ndata: ${JSON.stringify(frame)}\n\n`);
         };
@@ -4297,7 +4297,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           ? INBOX_BOARD_OFF_TEXT
           : call.params?.name === "steps" && !stepsOn()
             ? INBOX_STEPS_OFF_TEXT
-            : call.params?.name === "scheduled_thread" && !scheduledCap.on()
+            : call.params?.name === "routine" && !scheduledCap.on()
               ? INBOX_SCHEDULED_OFF_TEXT
               : null;
     return text ? json({ jsonrpc: "2.0", id: call.id, result: { content: [{ type: "text", text }], isError: true } }) : null;
@@ -4663,7 +4663,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     hosts: options.launchHosts,
   });
   launchReady = true;
-  // Scheduled threads (inbox-scheduled.ts): a run is a launch. The clock and the login item follow the switch.
+  // Routines (inbox-scheduled.ts): a run is a launch. The clock and the login item follow the switch.
   const underTest = !!process.env.PLANNOTATOR_TEST_SANDBOX || process.env.NODE_ENV === "test";
   const scheduledCap = scheduledSwitch({
     platform: process.platform,
@@ -6244,7 +6244,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const showArchivedNow = showArchivedOn === undefined ? showArchived.state() : saveShowArchived(showArchivedOn);
         return json({ show_archived: { on: showArchivedNow.on, rev: showArchivedNow.rev }, inbox_tool: inboxTool, notifications, sound, tailscale: tailnet, updates: updateState, theme, text_size: textSize, favicon, ...reactions, ...rows, ...sidebar, diff_style: diffOptions.diff_style, diff_options: diffOptions, experimental, tour, board, steps, bro, float_drafts: floatDrafts, mark_read_warning: markReadWarning, ...heldSwitch("code_review", codeReview.on, body.code_review !== undefined), ...heldSwitch("shape", shape.on, body.shape !== undefined), ...systemAnswer, ...scheduledAnswer, ...chapterDiagrams, voice: voice.settings(via), prompts: promptsState(), cookie_host: cookieHost ?? cookieHostWire() });
       }
-      // Scheduled threads (inbox-scheduled-routes.ts): the window's list, editor, Run now and Stop.
+      // Routines (inbox-scheduled-routes.ts): the window's list, editor, Run now and Stop.
       if (path === "/api/inbox/scheduled" || path.startsWith("/api/inbox/scheduled/")) {
         if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
           return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
@@ -7022,7 +7022,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
             // attachments on the reply, exactly as compose's become a thread's.
             // A replay answers the reply it wrote before anything is copied
             // (its uploads are gone by then); the rest checks the message first.
-            // A reply to an earlier run of a scheduled thread says that run ended (inbox-scheduled.ts); a replay answers as before.
+            // A reply to an earlier run of a routine says that run ended (inbox-scheduled.ts); a replay answers as before.
             if (!(tagKey && store.replyByKey(messageId, tagKey))) scheduled.checkReply(messageId, body.to);
             const uploads = body.uploads === undefined || body.uploads === null ? [] : body.uploads;
             if (!Array.isArray(uploads)) throw new InboxError("validation_error", "uploads: a list of upload ids.", { field: "uploads" });

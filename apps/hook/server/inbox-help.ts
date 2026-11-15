@@ -198,17 +198,17 @@ export const TOOL_GUIDE: Record<InboxMcpToolName, InboxToolGuide> = {
       "- The person turns steps on and off (Settings → Capabilities in the Inbox). Off, the Inbox lists no `steps`, and a call answers `steps_off` and writes nothing.",
     ],
   },
-  // Scheduled threads: shown only while the person has them on (formatInboxHelp's `scheduled`).
-  scheduled_thread: {
+  // Routines: shown only while the person has them on (formatInboxHelp's `scheduled`).
+  routine: {
     args: ["op", "id", "name", "prompt", "schedule", "if_missed", "folder", "agent", "model", "effort", "attachments", "thread_id"],
     lines: [
-      "A saved prompt that an agent on this computer runs on a schedule; every run replies in the scheduled thread's one Inbox thread, and the person replies there to that run. Make one only when the person asks for work to run on its own, on a schedule (\"every weekday at 9, triage new issues\").",
+      "A routine in the Plannotator Inbox: a saved prompt that an agent on this computer runs on a schedule; every run replies in the routine's one Inbox thread, and the person replies there to that run. Make one only when the person asks for work to run on its own, on a schedule (\"every weekday at 9, triage new issues\").",
       "- `op`: `create`, `list`, `get`, `update`, `on`, `off`, `run` or `delete`. Every op but create and list takes `id` (`sch_…`).",
       "- create: `name` (a few words), `prompt` (what each run is asked, whole), `schedule`, and optionally `if_missed`, `folder` (`{ \"path\": … }`, run in that folder itself, never home, `/` or a hidden folder; default: your project folder; `{ \"scratch\": true }` for a new one), `agent` (`claude-code`, `codex`, `opencode` or `pi`; default your own), `model`, `effort`, `attachments` (full paths). `schedule`: `{ \"cron\": \"0 9 * * 1-5\", \"tz\": \"America/New_York\" }` (5-field cron), `{ \"at\": \"2026-11-20T17:00\", \"tz\": \"America/New_York\" }` for once, or `null` (it runs only when someone runs it). A schedule's runs are at least 15 minutes apart; a closer schedule is refused with `schedule_too_frequent`. `if_missed`: `run_once` (default: one run when the computer wakes) or `skip`.",
-      "- One you create arrives off. The person turns it on the first time, in the Inbox; before that, `on` and `run` answer `scheduled_not_approved` and change nothing. After that you may `update`, turn it `on` or `off`, `run` it and `delete` it. Changing its folder or its agent turns it off again until the person turns it back on.",
-      "- Pass `thread_id`, the thread you are working in: every change posts one line there for the person, with a link to the scheduled thread and, for an edit, what it was and what it is now.",
+      "- One you create arrives off. The person turns it on the first time, in the Inbox; before that, `on` and `run` answer `routine_not_approved` and change nothing. After that you may `update`, turn it `on` or `off`, `run` it and `delete` it. Changing its folder or its agent turns it off again until the person turns it back on.",
+      "- Pass `thread_id`, the thread you are working in: every change posts one line there for the person, with a link to the routine and, for an edit, what it was and what it is now.",
       "- Each run starts the agent the way New message in the Inbox does, in the person's own permission mode. Starting agents from the Inbox must be on (Settings → Agents).",
-      "- The person turns scheduled threads on and off (Settings → Capabilities in the Inbox). Off, the Inbox lists no `scheduled_thread`, and a call answers `scheduled_threads_off` and writes nothing.",
+      "- The person turns routines on and off (Settings → Capabilities in the Inbox). Off, the Inbox lists no `routine`, and a call answers `routines_off` and writes nothing.",
     ],
   },
 };
@@ -284,7 +284,7 @@ export interface InboxHelpOptions {
    * Inbox serves none of it then (approval "inbox-thread-steps").
    */
   steps?: boolean;
-  /** The person turned scheduled threads on (config.json `inboxScheduledThreads`). Off (the default), the guide says nothing of them. */
+  /** The person turned routines on (config.json `inboxScheduledThreads`). Off (the default), the guide says nothing of them. */
   scheduled?: boolean;
   /**
    * The person turned code review on (config.json `inboxCodeReview`, read by
@@ -554,7 +554,7 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
     `${self} inbox call [--session <id>] <action> [<json> | -]`,
     "```",
     "",
-    `- Actions: ${INBOX_CALL_ACTIONS.filter((action) => (steps || action !== "steps") && (scheduled || action !== "scheduled_thread")).map(code).join(", ")}, with the arguments above as one JSON object. \`-\` reads the JSON from stdin, for PowerShell and for loops, where quoting JSON is painful. A stopped Inbox starts in the background.`,
+    `- Actions: ${INBOX_CALL_ACTIONS.filter((action) => (steps || action !== "steps") && (scheduled || action !== "routine")).map(code).join(", ")}, with the arguments above as one JSON object. \`-\` reads the JSON from stdin, for PowerShell and for loops, where quoting JSON is painful. A stopped Inbox starts in the background.`,
     "- stdout is the result as one JSON value (the tool's structured result), so `jq` and scripts can read it. On failure stdout is empty, stderr says `<code>: <message>`, and the exit code is 1 (refused, or no Inbox) or 2 (bad usage: an unknown action, bad JSON). Test the exit code before you use the output.",
     "- Pass an `idempotency_key` on each `send_message` and `card` create, so a rerun cannot post twice. Only those two take one; moving a card again changes nothing.",
     "- Who you are: a Tidy gives you the exact `--session` value; pass it on every call. Otherwise the call is the session this shell names, and the same as your tool: your threads and cards, your name, the person's reply reaches you. Claude Code, Pi, Codex, Qwen Code and DeepSeek Harness each name theirs. A DeepSeek Harness subagent's shell names the session the subagent works for only while Plannotator's plugin runs its Inbox connection in that DSH (the inbox tool on, and the Inbox run once; the shell then has `DSH_PLANNOTATOR_SESSION_ID`); otherwise it names the subagent's own session. With neither, it is nobody in particular: `read_thread` and `card list` show every thread and card in the project, and a reply cannot find you. In a Claude Code or Pi session, a call with no `project_path` files under your session's project, as your tool does, whatever folder the shell is in; name `project_path` only for another project. The JSON cannot name a session. `session_ambiguous` means this shell was started inside another agent and carries both: pass `--session` with your own. `session_mismatch` means your `--session` is not the session this shell names, and nothing was sent. Never drop `--session` to get past it, that writes as the session the shell names: if the value is from your own Tidy, this shell is older than your session, so use a new shell or unset the variable the error names.",

@@ -61,7 +61,7 @@ function inbox(start: InboxScheduledRow[], options: { failDelete?: boolean; hold
     if (action === undefined) return put(id, body as Partial<InboxScheduledRow>);
     if (action === 'on' || action === 'off') return put(id, { state: action, enabled: action === 'on' });
     if (action === 'run') {
-      if (row!.state === 'running') return json({ code: 'scheduled_running', error: `${row!.name} is running now.` }, 409);
+      if (row!.state === 'running') return json({ code: 'routine_running', error: `${row!.name} is running now.` }, 409);
       return put(id, { state: 'running', running_since: new Date().toISOString() });
     }
     if (action === 'stop') return put(id, { state: 'on', running_since: null });
@@ -163,7 +163,7 @@ test.skipIf(!hasDom)("Delete: the window's toast, whose Undo brings it back; a d
   expect(host.querySelector('[data-scheduled-row="sch_digest"]')).toBeNull();
   // The menu's click did not also open the row it was on.
   expect(opened).toEqual([]);
-  expect(toasts.at(-1)).toMatchObject({ lead: 'Scheduled thread deleted', detail: 'Morning PR digest' });
+  expect(toasts.at(-1)).toMatchObject({ lead: 'Routine deleted', detail: 'Morning PR digest' });
   await act(async () => toasts.at(-1)!.onUndo!());
   await settle();
   expect(posts(server.calls, '/api/inbox/scheduled/sch_digest/restore').length).toBe(1);

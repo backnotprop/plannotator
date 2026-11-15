@@ -1,5 +1,5 @@
 /**
- * A scheduled thread's lines in its thread (CONTRACT.md section 1), drawn from the messages alone so a thread that
+ * A routine's lines in its thread (CONTRACT.md section 1), drawn from the messages alone so a thread that
  * lives on another linked machine reads the same: the run divider ("Run 8 · due 9:00 AM, ran 11:14 AM · 1 earlier
  * time missed", a click shows its prompt), the quieter skip line, "The run didn't start" under a run that never started (its
  * `failed`, no launch), and "Didn't finish" under a run that ended with no reply.
@@ -25,8 +25,8 @@ export function runEnded(message: InboxMessageWire, messages: readonly InboxMess
   return { replied, didntFinish: !replied && !going };
 }
 
-/** The thread header's start: "You started Claude Code in acme-api", or "Scheduled thread · Claude Code in acme-api". */
-export const startedWords = (root: InboxMessageWire | undefined) => (root?.scheduled_run ? 'Scheduled thread · ' : 'You started ');
+/** The thread header's start: "You started Claude Code in acme-api", or "Routine · Claude Code in acme-api". */
+export const startedWords = (root: InboxMessageWire | undefined) => (root?.scheduled_run ? 'Routine · ' : 'You started ');
 
 /** The fold over earlier runs: "6 earlier runs, Nov 2 to Nov 9", or null when it hides no run. */
 export function earlierRunsLabel(ids: readonly string[], messages: readonly InboxMessageWire[]): string | null {
