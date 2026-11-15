@@ -62,6 +62,8 @@
     "./inbox-reply-quote": "./inbox-reply-quote.ts",
     "./inbox-delivery-line": "./inbox-delivery-line.ts",
     "./inbox-run-line": "./inbox-run-line.ts",
+    "./inbox-scheduled": "./inbox-scheduled.ts",
+    "./inbox-scheduled-types": "./inbox-scheduled-types.ts",
     "./inbox-launch-choice": "./inbox-launch-choice.ts",
     "./inbox-launch-ready": "./inbox-launch-ready.ts",
     "./inbox-scratch": "./inbox-scratch.ts",
@@ -107,7 +109,9 @@
   "scripts": {
     "prepack": "bun run --cwd ../.. build:viewer-pin"
   },
-  "dependencies": {},
+  "dependencies": {
+    "croner": "11.0.0"
+  },
   "devDependencies": {
     "typescript": "~5.8.2"
   }

@@ -4,6 +4,7 @@ import { inboxUrl, rememberLocal, rememberMachine } from './inboxUrl';
 import { browserSharedEventsEnv, sharedInboxEventsSupported, subscribeOwnInboxEvents, subscribeSharedInboxEvents } from './sharedEvents';
 import { parseRestartAgents } from './restartAgents';
 import { readHello, type RestartHello } from './sessionAdopt';
+import { scheduledFrame } from './scheduled/store';
 
 
 export interface MachineRecordFrame {
@@ -49,7 +50,7 @@ export interface InboxEventHandlers {
   onShowArchived?: (value: unknown) => void;
   onAgentFaces?: (data: unknown) => void;
   onReactions?: (reactions: unknown, rev: unknown) => void;
-  onCapabilities?: (capabilities: { board?: { on: boolean }; steps?: { on: boolean }; bro?: { on: boolean }; float_drafts?: { on: boolean }; mark_read_warning?: { on: boolean }; code_review?: { on: boolean }; shape?: { on: boolean }; system?: { on: boolean }; chapter_diagrams?: { on: boolean } }) => void;
+  onCapabilities?: (capabilities: { board?: { on: boolean }; steps?: { on: boolean }; bro?: { on: boolean }; float_drafts?: { on: boolean }; mark_read_warning?: { on: boolean }; code_review?: { on: boolean }; shape?: { on: boolean }; system?: { on: boolean }; chapter_diagrams?: { on: boolean }; scheduled_threads?: { on: boolean } }) => void;
   onTailscale?: (tailscale: TailscaleSettings) => void;
   onShapes?: (ids: string[]) => void;
   onMachine?: (frame: MachineRecordFrame) => void;
@@ -99,6 +100,7 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
       } catch {
       }
       handlers.onDeliveries?.({ labels, sessions, agents });
+      scheduledFrame(null);
       return;
     }
     case 'pins':
@@ -169,7 +171,7 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
       return;
     case 'capabilities':
       try {
-        const data = JSON.parse(frame.data) as { board?: { on?: unknown }; steps?: { on?: unknown }; bro?: { on?: unknown }; float_drafts?: { on?: unknown }; mark_read_warning?: { on?: unknown }; code_review?: { on?: unknown }; shape?: { on?: unknown }; system?: { on?: unknown }; chapter_diagrams?: { on?: unknown } };
+        const data = JSON.parse(frame.data) as { board?: { on?: unknown }; steps?: { on?: unknown }; bro?: { on?: unknown }; float_drafts?: { on?: unknown }; mark_read_warning?: { on?: unknown }; code_review?: { on?: unknown }; shape?: { on?: unknown }; system?: { on?: unknown }; chapter_diagrams?: { on?: unknown }; scheduled_threads?: { on?: unknown } };
         handlers.onCapabilities?.({
           ...(typeof data.board?.on === 'boolean' ? { board: { on: data.board.on } } : {}),
           ...(typeof data.steps?.on === 'boolean' ? { steps: { on: data.steps.on } } : {}),
@@ -180,6 +182,7 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
           ...(typeof data.shape?.on === 'boolean' ? { shape: { on: data.shape.on } } : {}),
           ...(typeof data.system?.on === 'boolean' ? { system: { on: data.system.on } } : {}),
           ...(typeof data.chapter_diagrams?.on === 'boolean' ? { chapter_diagrams: { on: data.chapter_diagrams.on } } : {}),
+          ...(typeof data.scheduled_threads?.on === 'boolean' ? { scheduled_threads: { on: data.scheduled_threads.on } } : {}),
         });
       } catch {
       }
@@ -233,6 +236,7 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
       }
       if (parsed) rememberLocal(localIdsIn(parsed));
       handlers.onRecord(parsed);
+      if (parsed) scheduledFrame(parsed);
       return;
     }
     case 'status':

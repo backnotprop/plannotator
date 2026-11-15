@@ -22,6 +22,7 @@ import type { InboxCloudWake } from "./inbox-cloud";
 import type { InboxSteps } from "./inbox-steps";
 import type { InboxThreadPull, InboxThreadPullsSummary } from "./inbox-thread-pulls";
 import type { InboxInitiative } from "./inbox-initiatives";
+import type { InboxScheduledChange, InboxScheduledRun, InboxScheduledThread } from "./inbox-scheduled-types";
 import type { InboxReviewVerdictRecord } from "./inbox-review";
 import type { InboxReviewSource } from "./inbox-reviews";
 import type { InboxTidyMark } from "./inbox-tidy";
@@ -29,7 +30,7 @@ import type { InboxLaunchChoices } from "./inbox-launch-choice";
 import type { InboxRowSnooze } from "./inbox-snooze";
 import { INBOX_CODEX_QUEUE_MIN_VERSION } from "./inbox-codex";
 import { INBOX_QWEN_WAKE_MIN_VERSION } from "./inbox-qwen";
-import { INBOX_T3_HOST, isT3ThreadId, type InboxT3WaitReason } from "./inbox-t3";
+import { INBOX_T3_HOST, isT3ThreadId, type InboxT3Status, type InboxT3WaitReason } from "./inbox-t3";
 
 // The attachment shapes and file rules (step 2) live in their own module and
 // reach the Inbox through this published entry, so core's export map is unchanged.
@@ -71,8 +72,8 @@ export const INBOX_RECORD_VERSION = 1 as const;
 export { ulid } from "./ulid";
 import { ulid } from "./ulid";
 
-/** `upl`: a file the person uploaded for a message; `drf`: a draft of one (compose); `crd`: a Board card; `stp`: a session's steps in a thread; `ini`: a Board initiative; `lch`: a launch (an agent started from the Inbox). */
-export type InboxIdPrefix = "msg" | "prj" | "ses" | "dec" | "dev" | "upl" | "drf" | "crd" | "tdy" | "lch" | "ibx" | "stp" | "ini" | "cmb";
+/** `upl`: a file the person uploaded for a message; `drf`: a draft of one (compose); `crd`: a Board card; `stp`: a session's steps in a thread; `ini`: a Board initiative; `lch`: a launch (an agent started from the Inbox); `sch`: a routine. */
+export type InboxIdPrefix = "msg" | "prj" | "ses" | "dec" | "dev" | "upl" | "drf" | "crd" | "tdy" | "lch" | "ibx" | "stp" | "ini" | "cmb" | "sch";
 
 export function inboxId(prefix: InboxIdPrefix, now?: number): string {
   return `${prefix}_${ulid(now)}`;
@@ -101,6 +102,8 @@ const ID_RE: Record<InboxIdPrefix, RegExp> = {
   cmb: /^cmb_[0-9A-HJKMNP-TV-Z]{26}$/,
   /** A Board initiative (packages/core/inbox-initiatives.ts). */
   ini: /^ini_[0-9A-HJKMNP-TV-Z]{26}$/,
+  /** A routine (packages/server/inbox-scheduled.ts). */
+  sch: /^sch_[0-9A-HJKMNP-TV-Z]{26}$/,
 };
 
 export function isInboxId(prefix: InboxIdPrefix, value: unknown): value is string {
@@ -308,7 +311,7 @@ export type InboxAuthor =
  * One of the Inbox's own notes to the asking agent: Mark read's set-aside
  * note (`set_aside`), a late Undo's reopened note (`reopened`), or the note
  * that carries a 👍 Looks good to the agent (`ack_of`), or a Tidy note
- * (`tidy`). They are stored as
+ * (`tidy`), or a routine's skip line (`scheduled_run` with no `run`). They are stored as
  * the person's messages so they reach the agent like any reply, but they are
  * not the person's reply and not a look: the list's `sent`, `unseen`, the
  * look boundary and "came back" all read past them.
@@ -319,10 +322,12 @@ export function isInboxNote(message: {
   reopened?: readonly string[] | null;
   ack_of?: string | null;
   tidy?: InboxTidyMark | null;
+  scheduled_run?: { run?: number } | null;
 }): boolean {
   return (
     message.author.kind === "person" &&
     ((message.set_aside?.length ?? 0) > 0 ||
+      (!!message.scheduled_run && message.scheduled_run.run === undefined) ||
       (message.reopened?.length ?? 0) > 0 ||
       (typeof message.ack_of === "string" && message.ack_of !== "") ||
       (typeof message.tidy === "object" && message.tidy !== null))
@@ -807,6 +812,10 @@ export interface InboxMessage {
    * Absent on every other message.
    */
   launch?: InboxLaunchRecord;
+  /** A routine's run divider or skip line (inbox-scheduled-types.ts). A divider also carries its run's `launch`. */
+  scheduled_run?: InboxScheduledRun;
+  /** An agent's `routine` change, posted as that agent in the thread it called from. */
+  scheduled_change?: InboxScheduledChange;
   /**
    * On the root of a thread the person started: who gave it its name, the
    * thread chip (approval "inbox-agent-names-own-thread"). The person may name
@@ -2102,10 +2111,11 @@ export interface InboxThread {
  * `card`: a Board card (approval "inbox-board"); `steps`: one agent session's
  * steps in a thread (approval "inbox-thread-steps"); `initiative`: a Board
  * initiative (approval "board-initiatives"); `thread_pull`: one PR on one
- * thread (approval "inbox-pr-binding"). A reader that does not know a kind
+ * thread (approval "inbox-pr-binding"); `scheduled`: a routine
+ * (inbox-scheduled-types.ts). A reader that does not know a kind
  * skips its lines.
  */
-export type InboxRecordKind = "project" | "message" | "question" | "annotation" | "card" | "steps" | "initiative" | "thread_pull";
+export type InboxRecordKind = "project" | "message" | "question" | "annotation" | "card" | "steps" | "initiative" | "thread_pull" | "scheduled";
 
 /** One line of the store: a full snapshot of one record. */
 export type InboxLine =
@@ -2116,7 +2126,8 @@ export type InboxLine =
   | { v: 1; seq: number; at: string; kind: "card"; id: string; record: InboxCard }
   | { v: 1; seq: number; at: string; kind: "steps"; id: string; record: InboxSteps }
   | { v: 1; seq: number; at: string; kind: "initiative"; id: string; record: InboxInitiative }
-  | { v: 1; seq: number; at: string; kind: "thread_pull"; id: string; record: InboxThreadPull };
+  | { v: 1; seq: number; at: string; kind: "thread_pull"; id: string; record: InboxThreadPull }
+  | { v: 1; seq: number; at: string; kind: "scheduled"; id: string; record: InboxScheduledThread };
 
 // ─────────────────────────────── Health ───────────────────────────────
 
@@ -2852,6 +2863,8 @@ export interface InboxAgentsModel {
    * row. Absent from an Inbox older than the field.
    */
   sessions?: Partial<Record<InboxToolHostId, InboxHostSessions>>;
+  /** T3 Code when it is on this computer, else null. Absent from an Inbox older than the field: no T3 Code group. */
+  t3?: InboxT3Status | null;
 }
 
 /** The hosts that connect through Plannotator's own plugin or extension. */
