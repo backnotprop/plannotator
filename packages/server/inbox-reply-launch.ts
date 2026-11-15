@@ -10,6 +10,7 @@
 import type { InboxLaunchFrom, InboxMessage, InboxProject } from "@plannotator/core/inbox-types";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxLaunch } from "./inbox-launch";
+import { replacesEndedAsker, thereInThread } from "./inbox-sessions";
 
 /** Whether a reply's `to` asks for a new session. */
 export function replyStartsSession(to: unknown): boolean {
@@ -20,7 +21,8 @@ type Prepared = Awaited<ReturnType<InboxLaunch["prepare"]>>;
 
 export function createInboxReplyLaunch(options: {
   store: { replyByKey(messageId: string, key: string): InboxMessage | null; message(id: string): InboxMessage | null | undefined };
-  launch: Pick<InboxLaunch, "target" | "prepare" | "abandon" | "begin">;
+  launch: Pick<InboxLaunch, "target" | "prepare" | "abandon" | "begin" | "resumes" | "gone">;
+  live: { askerLive(session: string): boolean };
   resolveProject: (path: string) => Promise<InboxProject>;
 }) {
   return {
@@ -31,7 +33,12 @@ export function createInboxReplyLaunch(options: {
     async prepare(messageId: string, body: Record<string, unknown>, from: InboxLaunchFrom | null): Promise<Prepared | null> {
       const key = typeof body.idempotency_key === "string" ? body.idempotency_key.trim() : "";
       if (key && options.store.replyByKey(messageId, key)) return null;
-      if (!options.store.message(messageId)) throw new InboxError("message_not_found", `No message ${messageId}.`);
+      const answered = options.store.message(messageId);
+      if (!answered) throw new InboxError("message_not_found", `No message ${messageId}.`);
+      // Only in place of a session that ended, as the window offers it: a session still there gets the reply itself.
+      if (!replacesEndedAsker(answered, thereInThread(options.live, options.launch, answered.thread_id))) {
+        throw new InboxError("session_still_live", "That session is still running, so it still gets this. Nothing was changed.");
+      }
       const asked = (body.to as { launch: unknown }).launch;
       const value = asked && typeof asked === "object" ? (asked as Record<string, unknown>) : {};
       // Only the agent, the project and the machine's model and effort: a reply never trusts a folder or makes one.

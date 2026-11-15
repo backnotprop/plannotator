@@ -4750,7 +4750,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     }
   };
   // A reply sent to a new session in place of the one that ended (packages/server/inbox-reply-launch.ts).
-  const replyLaunch = createInboxReplyLaunch({ store, launch, resolveProject });
+  const replyLaunch = createInboxReplyLaunch({ store, launch, live, resolveProject });
   const compose = createInboxCompose({
     store,
     serverSession,
@@ -7142,6 +7142,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
               }
               throw error;
             }
+            // Written: the new session starts before anything else this Send tidies, so nothing after can leave it unstarted.
+            replyLaunch.settle(launching, { message: result.reply, replayed: result.replayed });
             // The Send that carried the reply box's draft: its words go (a replay too, since the first one sent them)
             // while it is the draft those words were saved as (`updated_at`), with the files this Send carried (a file
             // it did not carry stays, as a draft of files only); or it goes whole while it holds exactly those words
@@ -7152,7 +7154,6 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
               const sentUploads = uploads.filter((id): id is string => typeof id === "string");
               if (threadId && store.clearSentReplyDraft(threadId, body.clear_draft, words, sentUploads)) for (const listener of draftListeners) listener(threadId);
             }
-            replyLaunch.settle(launching, { message: result.reply, replayed: result.replayed });
             // A hand-off waits out its Undo window, then goes to both sessions.
             if (!result.replayed && result.reply.handoff) scheduleHandoffSettle();
             if (result.replayed) removeInboxAttachmentFiles(store.dir, attachments);

@@ -65,7 +65,9 @@ function setup() {
     now: () => clock.now,
   });
   restore.push(() => launch.stop());
-  const replyLaunch = createInboxReplyLaunch({ store, launch, resolveProject: async () => project });
+  /** The sessions the Inbox hears from now: none, so the session that asked has ended. */
+  const liveSessions = new Set<string>();
+  const replyLaunch = createInboxReplyLaunch({ store, launch, live: { askerLive: (session) => liveSessions.has(session) }, resolveProject: async () => project });
   // The ended session's question: it came through a waking connection, so it can be known to have ended.
   const asked = store.sendMessage({
     project_id: project.id,
@@ -89,7 +91,7 @@ function setup() {
       `/api/inbox/launch/${id}/${action}`,
       "local",
     );
-  return { store, clock, project, fake, launch, asked, send, post, config, replyLaunch };
+  return { store, clock, project, fake, launch, asked, send, post, config, replyLaunch, liveSessions };
 }
 
 async function until(check: () => boolean) {
@@ -161,5 +163,17 @@ describe("a reply sent to a new session when the asking one ended", () => {
     config(false);
     await expect(replyLaunch.prepare(asked.id, { idempotency_key: "k1", words: "Go.", to: { launch: { agent: FAKE, project_id: project.id } } }, null)).rejects.toMatchObject({ code: "launch_off" });
     expect(store.threadMessageIds(asked.thread_id)).toHaveLength(1);
+  });
+
+  test("the session that asked is still there, or never wakes (MCP only): refused as still running, nothing written or started", async () => {
+    const { store, fake, asked, replyLaunch, project, liveSessions } = setup();
+    const body = { idempotency_key: "k1", words: "Go.", to: { launch: { agent: FAKE, project_id: project.id } } };
+    liveSessions.add("ses-asker");
+    await expect(replyLaunch.prepare(asked.id, body, null)).rejects.toMatchObject({ code: "session_still_live" });
+    const mcp = store.sendMessage({ project_id: project.id, author: { kind: "agent", host: "cursor", session: "ses-mcp", name: "Cursor" }, body: "Which bucket?", idempotency_key: "mcp" }).message;
+    await expect(replyLaunch.prepare(mcp.id, body, null)).rejects.toMatchObject({ code: "session_still_live" });
+    expect(store.threadMessageIds(asked.thread_id)).toHaveLength(1);
+    await Bun.sleep(20);
+    expect(fake.calls).toEqual([]);
   });
 });
