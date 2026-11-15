@@ -20,7 +20,7 @@
  * same id returns the first receipt and records no second turn.
  */
 import { Database } from "bun:sqlite";
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 export interface FakeT3 {
@@ -73,36 +73,63 @@ export function t3ScopeOf(access: T3Access): string {
 }
 
 /**
- * A T3 Code home on disk (`<home>/.t3`) as the Codex-in-T3 route reads it: T3's state database with one provider
- * thread row per Codex thread T3 runs (`orchestration_v2_projection_provider_threads`, as T3 v0.1.9 writes it), and
- * the `bin/t3` launcher T3's desktop app writes, faked: it logs its argv and answers `thread send` as T3's command
- * does. `state` "down" answers as T3's command does with no server running, "gone" as for a thread T3 deleted, "hang"
- * never answers. No T3 is ever run.
+ * A T3 Code home on disk (`<home>/.t3`) as the Inbox's `t3` route reads it (inbox-t3-local.ts):
+ *
+ * - T3's state database with one provider thread row per Codex thread T3 runs
+ *   (`orchestration_v2_projection_provider_threads`), in the shape T3 v0.1.9
+ *   writes (`schema` "0.1.9", seen on a real 0.1.9 server), or in one the
+ *   route does not know (`schema` "unknown": no `payload_json`);
+ * - `userdata/server-runtime.json`, the file T3 writes while its server runs,
+ *   naming this test's own process (alive) unless `state` is "down";
+ * - the `bin/t3` launcher T3's desktop app writes, faked: it logs its argv and
+ *   answers `thread send` and `thread show` with T3 0.1.9's own words
+ *   (REAL-T3-PROOF). `state` "down" answers as T3's command does with no
+ *   server running, "stale" as with a runtime file whose server does not
+ *   answer, "gone" as for a thread T3 deleted, "fail" with another failure,
+ *   "hang" never answers.
+ *
+ * `threads` maps a Codex thread to the T3 thread that runs it; `t3Threads`
+ * are T3's other threads (a Claude one's id is T3's own). No T3 is ever run.
  */
+export type FakeT3HomeState = "up" | "down" | "stale" | "hang" | "gone" | "fail";
+
 export interface FakeT3Home {
   dir: string;
   launcher: string;
   /** Every `t3` call's argv after the command. */
   calls(): string[][];
-  setState(state: "up" | "down" | "hang" | "gone"): void;
+  /** The `t3 thread send` calls' argv. */
+  sends(): string[][];
+  setState(state: FakeT3HomeState): void;
 }
 
-export function makeFakeT3Home(home: string, threads: Record<string, string>): FakeT3Home {
+export function makeFakeT3Home(home: string, threads: Record<string, string>, options: { t3Threads?: string[]; schema?: "0.1.9" | "unknown" } = {}): FakeT3Home {
   const dir = join(home, ".t3");
   mkdirSync(join(dir, "userdata"), { recursive: true });
   mkdirSync(join(dir, "bin"), { recursive: true });
   const db = new Database(join(dir, "userdata", "statev2.sqlite"));
-  db.run(`CREATE TABLE orchestration_v2_projection_provider_threads (provider_thread_id TEXT PRIMARY KEY, thread_id TEXT, owner_node_id TEXT, provider TEXT NOT NULL, driver TEXT, provider_instance_id TEXT, provider_session_id TEXT, status TEXT NOT NULL, first_run_ordinal INTEGER, last_run_ordinal INTEGER, updated_at TEXT NOT NULL, payload_json TEXT NOT NULL)`);
-  for (const [codexThread, t3Thread] of Object.entries(threads)) {
-    const id = `provider-thread:${t3Thread}`;
-    const payload = { id, driver: "codex", providerInstanceId: "codex", providerSessionId: null, appThreadId: t3Thread, ownerNodeId: null, nativeThreadRef: { driver: "codex", nativeId: codexThread, strength: "strong" }, status: "idle", updatedAt: "2026-11-14T00:00:00.000Z" };
-    db.query(`INSERT INTO orchestration_v2_projection_provider_threads VALUES (?, ?, NULL, 'codex', 'codex', 'codex', NULL, 'idle', 1, 1, ?, ?)`).run(id, t3Thread, payload.updatedAt, JSON.stringify(payload));
+  if (options.schema === "unknown") {
+    db.run(`CREATE TABLE orchestration_v2_projection_provider_threads (provider_thread_id TEXT PRIMARY KEY, thread_id TEXT, driver TEXT, native_id TEXT)`);
+    for (const [codexThread, t3Thread] of Object.entries(threads)) db.query(`INSERT INTO orchestration_v2_projection_provider_threads VALUES (?, ?, 'codex', ?)`).run(`provider-thread:${t3Thread}`, t3Thread, codexThread);
+  } else {
+    db.run(`CREATE TABLE orchestration_v2_projection_provider_threads (provider_thread_id TEXT PRIMARY KEY, thread_id TEXT, owner_node_id TEXT, provider TEXT NOT NULL, driver TEXT, provider_instance_id TEXT, provider_session_id TEXT, status TEXT NOT NULL, first_run_ordinal INTEGER, last_run_ordinal INTEGER, updated_at TEXT NOT NULL, payload_json TEXT NOT NULL)`);
+    for (const [codexThread, t3Thread] of Object.entries(threads)) {
+      const id = `provider-thread:${t3Thread}`;
+      const payload = { id, driver: "codex", providerInstanceId: "codex", providerSessionId: null, appThreadId: t3Thread, ownerNodeId: null, nativeThreadRef: { driver: "codex", nativeId: codexThread, strength: "strong" }, status: "idle", updatedAt: "2026-11-14T00:00:00.000Z" };
+      db.query(`INSERT INTO orchestration_v2_projection_provider_threads VALUES (?, ?, NULL, 'codex', 'codex', 'codex', NULL, 'idle', 1, 1, ?, ?)`).run(id, t3Thread, payload.updatedAt, JSON.stringify(payload));
+    }
   }
   db.close();
   const log = join(dir, "calls.log");
   const stateFile = join(dir, "fake-state");
+  const runtimeFile = join(dir, "userdata", "server-runtime.json");
   writeFileSync(log, "");
-  writeFileSync(stateFile, "up");
+  const setState = (state: FakeT3HomeState) => {
+    writeFileSync(stateFile, state);
+    if (state === "down") rmSync(runtimeFile, { force: true });
+    else writeFileSync(runtimeFile, `${JSON.stringify({ version: 1, pid: process.pid, port: 9, origin: "http://127.0.0.1:9", startedAt: "2026-11-14T00:00:00.000Z", serverVersion: "0.1.9" })}\n`);
+  };
+  setState("up");
   const script = join(dir, "fake-t3.js");
   writeFileSync(
     script,
@@ -110,25 +137,32 @@ export function makeFakeT3Home(home: string, threads: Record<string, string>): F
 const args = process.argv.slice(2);
 fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify(args) + "\\n");
 const state = fs.readFileSync(${JSON.stringify(stateFile)}, "utf8").trim();
-const known = ${JSON.stringify(Object.values(threads))};
+const known = ${JSON.stringify([...Object.values(threads), ...(options.t3Threads ?? [])])};
+const say = (line, code) => { process.stderr.write(line + "\\n"); process.exit(code); };
+const thread = args.filter((a) => !a.startsWith("--"))[2];
 if (state === "hang") setTimeout(() => {}, 60000);
-else if (state === "gone") { process.stderr.write("The thread was not found.\\n"); process.exit(1); }
-else if (state === "down") { process.stderr.write("No running T3 Code server uses ${dir}. Start T3 Code, then retry.\\n"); process.exit(1); }
+else if (state === "down") say("No running T3 Code server uses ${dir}. Start T3 Code, then retry.", 1);
+else if (state === "stale") say("Could not reach the T3 Code server at http://127.0.0.1:9. connect ECONNREFUSED", 1);
+else if (state === "fail") say("Something went wrong.", 1);
 else if (args[0] === "thread" && args[1] === "send") {
-  const thread = args.filter((a) => !a.startsWith("--"))[2];
-  if (!known.includes(thread)) { process.stderr.write("The thread was not found.\\n"); process.exit(1); }
-  process.stdout.write(JSON.stringify({ threadId: thread, messageId: "message-1", runId: "run-1", status: "queued", delivery: "started" }) + "\\n");
-} else { process.stderr.write("unknown command\\n"); process.exit(2); }
+  if (state === "gone" || !known.includes(thread)) say("Thread " + thread + " was not found.", 1);
+  process.stdout.write(JSON.stringify({ threadId: thread, messageId: "message-1", runId: "run-1", status: "starting", delivery: "started" }) + "\\n");
+} else if (args[0] === "thread" && args[1] === "show") {
+  if (state === "gone" || !known.includes(thread)) say("Thread " + thread + " is no longer available.", 1);
+  process.stdout.write(JSON.stringify({ thread: { threadId: thread, status: "completed" }, messages: [] }) + "\\n");
+} else say("unknown command", 2);
 `,
   );
   const launcher = join(dir, "bin", "t3");
   writeFileSync(launcher, `#!/bin/sh\nexec '${process.execPath}' '${script}' "$@"\n`);
   chmodSync(launcher, 0o755);
+  const calls = () => (existsSync(log) ? readFileSync(log, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line) as string[]) : []);
   return {
     dir,
     launcher,
-    calls: () => (existsSync(log) ? readFileSync(log, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line) as string[]) : []),
-    setState: (state) => writeFileSync(stateFile, state),
+    calls,
+    sends: () => calls().filter((args) => args[0] === "thread" && args[1] === "send"),
+    setState,
   };
 }
 

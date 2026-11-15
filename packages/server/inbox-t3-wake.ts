@@ -1,16 +1,29 @@
 /**
  * The T3 Code wake: the person's reply, message or tag for an agent in a T3
- * Code thread goes into that thread as a new turn, through T3's own MCP API
- * (`t3_thread_send`, queued, never steered). T3 shows it like anything the
- * person typed and runs it with whatever provider the thread uses.
+ * Code thread goes into that thread as a new turn. T3 shows it like anything
+ * the person typed and runs it with whatever provider the thread uses. One
+ * owner per reply, tried in this order:
  *
- * T3 runs Claude through the Agent SDK, where the Claude Code mod stands down,
- * so no Plannotator plugin polls. T3 sets T3CODE_THREAD_ID in every process its
- * Claude starts, its MCP servers included (a Codex thread in T3 is the Codex
- * wake's: inbox-codex-t3.ts), and the stdio shim sends as
+ *  1. the Claude Code mod, while it polls as the thread (`skip`, inbox.ts
+ *     `t3ModDelivers`): it puts the reply in as a turn of the running session;
+ *  2. T3 on this machine (`local`, inbox-t3-local.ts): `t3 thread send`, no
+ *     sign-in. Its claim folder (`inbox/t3-send/`) is made before the call: a
+ *     call that ran out of time keeps it, and the reply is saved for the
+ *     agent's next read, never sent again by any way. A call T3 refused
+ *     outright (closed, no such thread, another failure) gives it up;
+ *  3. a saved grant, through T3's MCP API (`t3_thread_send`, queued, never
+ *     steered): a T3 on another machine, or one this machine's command does
+ *     not reach;
+ *  4. none: the reply waits and says why (`t3_wait`). A closed T3 here is
+ *     looked for every few seconds and the reply goes in once it runs.
+ *
+ * T3 sets T3CODE_THREAD_ID in every process its Claude starts, its MCP
+ * servers included (a Codex thread in T3 is the Codex wake's, through the same
+ * `t3` command: inbox-codex-wake.ts), and the stdio shim sends as
  * `agent_host: "t3"` with that id (apps/hook/server/inbox-mcp-shim.ts). A
- * message wakes when this Inbox holds a T3 grant (`plannotator t3 login`,
- * packages/t3-code) whose environment has that thread.
+ * message wakes when T3 here has that thread (`t3 thread show`), or when this
+ * Inbox holds a T3 grant (`plannotator t3 login`, packages/t3-code) whose
+ * environment has it. With a grant:
  *
  *  - T3 takes a send idempotently (`clientRequestId`, kept on disk by
  *    T3Delivery), so an item is delivered as soon as T3 accepted it: T3 owns
@@ -42,14 +55,15 @@
  *    thread write nothing: no sign-in here fixes that.
  */
 
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { INBOX_T3_HOST, isT3ThreadId, type InboxMessage, type InboxT3WaitReason } from "@plannotator/core/inbox-types";
-import type { InboxReplyCommand } from "@plannotator/shared/inbox/connection";
+import { inboxClaimName, type InboxReplyCommand } from "@plannotator/shared/inbox/connection";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import type { T3Credentials } from "@plannotator/t3-code/auth";
 import type { T3Rpc } from "@plannotator/t3-code/t3-client";
 import { codexQueueMessage } from "./inbox-codex-wake";
+import type { T3Local } from "./inbox-t3-local";
 
 /** The T3 client loads only once a grant exists: every other CLI start skips the MCP client. */
 let t3Modules: Promise<[typeof import("@plannotator/t3-code/auth"), typeof import("@plannotator/t3-code/delivery"), typeof import("@plannotator/t3-code/t3-client")]> | null = null;
@@ -144,6 +158,8 @@ export function createInboxT3Wake(options: {
   skip?: (item: InboxMessage, session: string) => boolean;
   /** How the wake reaches T3 (tests pass a scripted one). Default: T3's MCP over HTTP. */
   connect?: T3Connect;
+  /** T3 on this machine, tried before any grant (inbox-t3-local.ts). */
+  local?: T3Local;
   now?: () => number;
   log?: (line: string) => void;
   /** How long an agent's send_message waits on T3 (default 3 s). */
@@ -155,7 +171,9 @@ export function createInboxT3Wake(options: {
   const now = options.now ?? Date.now;
   const log = options.log ?? ((line: string) => void process.stderr.write(`Inbox: ${line}\n`));
   const connect: T3Connect = options.connect ?? (async (endpoint, token) => (await loadT3())[2].T3Client.connect(endpoint, token));
+  const { local } = options;
   let stopped = false;
+  const stopping = new AbortController();
 
   // ── The grants, and which one reaches a thread ──
   const grants = async (): Promise<T3Credentials[]> => {
@@ -294,6 +312,54 @@ export function createInboxT3Wake(options: {
   /** Whether a reply to the thread can go in under this grant. */
   const sendsInto = (session: string, link: Link): boolean => !deniedNow(session, link) && covers(link, session);
 
+  // ── T3 on this machine ──
+  /** Threads `t3 thread show` or a send found here. */
+  const localHas = new Set<string>();
+  const sendDir = join(store.dir, "t3-send");
+  /** Each `t3 thread send` claim folder, by item key: one that outlives its call (no answer, an Inbox restart) is never sent again. */
+  let localClaims: Map<string, string> | null = null;
+  const localClaimsOf = (): Map<string, string> => {
+    if (localClaims) return localClaims;
+    localClaims = new Map();
+    let names: string[] = [];
+    try {
+      names = readdirSync(sendDir);
+    } catch {
+      return localClaims;
+    }
+    for (const name of names) {
+      try {
+        const claim = JSON.parse(readFileSync(join(sendDir, name, "claim.json"), "utf8")) as { item?: unknown; session?: unknown };
+        if (typeof claim.item === "string" && typeof claim.session === "string") localClaims.set(`${claim.item}.${claim.session}`, join(sendDir, name));
+      } catch {
+        // Made by a call that stopped before it wrote its claim: it names no item.
+      }
+    }
+    return localClaims;
+  };
+  const dropLocalClaim = (key: string) => {
+    const dir = localClaimsOf().get(key);
+    localClaimsOf().delete(key);
+    if (!dir) return;
+    try {
+      rmSync(dir, { recursive: true, force: true });
+    } catch {
+      // Left behind: a later sweep tries again.
+    }
+  };
+  /** Whether a closed T3 here is looked for (`T3Local.onceRunning`). */
+  let localAwaited = false;
+  const awaitLocal = () => {
+    if (!local || localAwaited) return;
+    localAwaited = true;
+    local.onceRunning(() => {
+      localAwaited = false;
+      // Back: what waited on a retry goes now too.
+      retryAt.clear();
+      void sweep();
+    });
+  };
+
   const wakesItem = (item: InboxMessage, session: string): boolean => {
     if (!store.isOwner(item, session)) return item.tags?.some((tag) => tag.session === session && tag.host === INBOX_T3_HOST && tag.wakes) ?? false;
     if (item.to) return item.to.host === INBOX_T3_HOST;
@@ -343,6 +409,58 @@ export function createInboxT3Wake(options: {
   // An item id has no dot; a T3 thread id may, and may end in another thread's id (a native id that does).
   const itemOfKey = (key: string) => key.slice(0, key.indexOf("."));
   const sessionOfKey = (key: string) => key.slice(key.indexOf(".") + 1);
+
+  /**
+   * One item through `t3 thread send`. "sent" and "unsure" end it; "closed", "gone" and "failed" sent nothing and
+   * leave it to a grant; "held" means another way has it.
+   */
+  const sendLocal = async (item: InboxMessage, session: string): Promise<"sent" | "unsure" | "held" | "closed" | "gone" | "failed"> => {
+    const id = store.deliveryIdOf(item, session);
+    const key = `${id}.${session}`;
+    if (id === item.id && !store.handover.hand(item, session, "t3")) return "held";
+    const dir = join(sendDir, inboxClaimName(id, session));
+    try {
+      mkdirSync(sendDir, { recursive: true });
+      mkdirSync(dir);
+    } catch {
+      // Already claimed: a call before this one may have sent it.
+      localClaimsOf().set(key, dir);
+      refused.set(key, null);
+      return "unsure";
+    }
+    localClaimsOf().set(key, dir);
+    try {
+      writeFileSync(join(dir, "claim.json"), `${JSON.stringify({ item: id, session, at: new Date(now()).toISOString() })}\n`);
+    } catch {
+      // The folder alone holds the claim for this run.
+    }
+    const sent = await local!.send(session, codexQueueMessage(options.commandOf(item, session)), stopping.signal);
+    if ("sent" in sent) {
+      retryAt.delete(key);
+      localHas.add(session);
+      try {
+        store.recordDelivery(id, { host: INBOX_T3_HOST, session });
+      } catch {
+        // Gone, or no longer this session's.
+      }
+      return "sent";
+    }
+    if ("uncertain" in sent) {
+      // T3 may have taken it: kept claimed (no way sends it again) and saved for the agent's next read.
+      retryAt.delete(key);
+      refused.set(key, null);
+      log(`T3 may have taken ${item.id} for thread ${session} (${sent.uncertain}); it is not sent again: the agent sees it when it reads the thread.`);
+      return "unsure";
+    }
+    // T3 took nothing: the claim goes, and a grant may send it.
+    dropLocalClaim(key);
+    store.handover.giveBack(id, session);
+    if ("closed" in sent) return "closed";
+    localHas.delete(session);
+    if ("gone" in sent) return "gone";
+    sayOnce(`t3 thread send failed for thread ${session}: ${sent.failed}. Trying again later.`);
+    return "failed";
+  };
 
   /** What the item's wait reads after a try: a reason, null (nothing holds it), undefined (as it was). */
   const deliverOne = async (link: Link, item: InboxMessage, session: string): Promise<InboxT3WaitReason | null | undefined> => {
@@ -438,10 +556,20 @@ export function createInboxT3Wake(options: {
         }
       }
     };
+    const claims = localClaimsOf();
     for (const [session, items] of pending) {
-      const work = items.filter((item) => wakesItem(item, session) && !options.skip?.(item, session));
+      // What `t3 thread send` may have put in stays this wake's, saved for the agent's next read: no other way sends it.
+      const unsure = items.filter((item) => wakesItem(item, session) && claims.has(keyOf(item, session)));
+      for (const item of unsure) {
+        const key = keyOf(item, session);
+        pendingKeys.add(key);
+        refused.set(key, null);
+        if (store.deliveryIdOf(item, session) === item.id) store.handover.hand(item, session, "t3");
+        waitOf(item, session, null);
+      }
+      const work = items.filter((item) => !unsure.includes(item) && wakesItem(item, session) && !options.skip?.(item, session));
       // Not the wake's to send (its connection delivers it, or it is withdrawn): nothing here holds it.
-      for (const item of items) if (!work.includes(item)) waitOf(item, session, null);
+      for (const item of items) if (!work.includes(item) && !unsure.includes(item)) waitOf(item, session, null);
       for (const item of work) pendingKeys.add(keyOf(item, session));
       if (dead.has(session)) {
         for (const item of work) waitOf(item, session, null);
@@ -451,16 +579,50 @@ export function createInboxT3Wake(options: {
         const key = keyOf(item, session);
         if (refused.has(key)) waitOf(item, session, refused.get(key) ? "access" : null);
       }
-      const todo = work.filter((item) => !refused.has(keyOf(item, session)));
+      let todo = work.filter((item) => !refused.has(keyOf(item, session)));
       if (todo.length === 0) continue;
+      // T3 here, closed: nothing to try on it until it runs again, looked for every few seconds.
+      const localClosed = local?.installed() === true && !local.running();
+      if (localClosed) awaitLocal();
       // Every item still inside its backoff: kept, and T3 is not asked until one comes due.
       if (todo.every((item) => (retryAt.get(keyOf(item, session))?.at ?? 0) > now())) {
         for (const item of todo) sendable.add(keyOf(item, session));
         continue;
       }
+      // What T3 here said of the items it did not take: none of them sent, so a grant may.
+      let localSaid: "closed" | "gone" | "failed" | null = localClosed ? "closed" : null;
+      if (local?.installed() && !localClosed) {
+        const rest: InboxMessage[] = [];
+        for (const item of todo) {
+          if (stopped) return recordWaits();
+          const key = keyOf(item, session);
+          if ((retryAt.get(key)?.at ?? 0) > now()) {
+            sendable.add(key);
+            continue;
+          }
+          const sent = await sendLocal(item, session);
+          if (sent === "sent" || sent === "unsure") {
+            waitOf(item, session, null);
+            continue;
+          }
+          if (sent === "held") continue;
+          sendable.add(key);
+          localSaid = sent;
+          rest.push(item);
+        }
+        todo = rest;
+        if (todo.length === 0) continue;
+      }
       const link = await homeOf(session);
-      if (link === "unreachable") {
-        // T3 could not be asked: kept, and tried again on the send's backoff.
+      if (link === "unreachable" || (!link && localSaid === "closed")) {
+        // T3 could not be asked: kept, and tried again on the send's backoff, or as soon as T3 here runs.
+        if (!link && localClosed) {
+          for (const item of todo) {
+            sendable.add(keyOf(item, session));
+            waitOf(item, session, "closed");
+          }
+          continue;
+        }
         for (const item of todo) {
           const key = keyOf(item, session);
           sendable.add(key);
@@ -468,6 +630,23 @@ export function createInboxT3Wake(options: {
           waitOf(item, session, "closed");
         }
         sayOnce(`T3 could not be reached for thread ${session}. Trying again later.`);
+        continue;
+      }
+      if (!link && localSaid === "gone") {
+        // T3 here does not have the thread, and no grant reaches one that does.
+        dead.add(session);
+        homes.delete(session);
+        for (const item of todo) waitOf(item, session, null);
+        sayOnce(`T3 no longer has thread ${session}; the reply waits in the Inbox for the next agent.`);
+        continue;
+      }
+      if (!link && localSaid === "failed") {
+        // T3 here answered with another failure, and no grant reaches the thread: tried again on the backoff.
+        for (const item of todo) {
+          sendable.add(keyOf(item, session));
+          backOff(keyOf(item, session));
+          waitOf(item, session, null);
+        }
         continue;
       }
       if (!link) {
@@ -496,6 +675,8 @@ export function createInboxT3Wake(options: {
     recordWaits();
     for (const key of [...retryAt.keys()]) if (!sendable.has(key)) retryAt.delete(key);
     for (const key of [...refused.keys()]) if (!pendingKeys.has(key)) refused.delete(key);
+    // A claim whose item no longer waits (delivered, read, deleted) is done with.
+    for (const key of [...claims.keys()]) if (!pendingKeys.has(key)) dropLocalClaim(key);
     scheduleRetry();
     watchGrants(noGrant || [...refused.values()].some((under) => under !== null) ? mark : null);
   };
@@ -550,6 +731,14 @@ export function createInboxT3Wake(options: {
       const late = new Promise<"unreachable">((resolve) => {
         timer = setTimeout(() => resolve("unreachable"), options.lookupTimeoutMs ?? LOOKUP_TIMEOUT_MS);
       });
+      if (local?.running()) {
+        const shown = local.has(session).then((has) => (has && localHas.add(session), has));
+        shown.catch(() => {});
+        if ((await Promise.race([shown, late])) === true) {
+          clearTimeout(timer);
+          return true;
+        }
+      }
       const looked = homeOf(session);
       looked.catch(() => {});
       const home = await Promise.race([looked, late]).finally(() => clearTimeout(timer));
@@ -562,7 +751,9 @@ export function createInboxT3Wake(options: {
     },
     // No grant reaches the thread (logged out, a lapsed grant) or can send into it: nothing wakes it, so the MCP presence rules apply.
     status: (session) => {
-      if (!knownSessions().has(session) || misses.has(session) || denied.has(session)) return null;
+      if (!knownSessions().has(session)) return null;
+      if (localHas.has(session)) return dead.has(session) ? "dead" : "alive";
+      if (misses.has(session) || denied.has(session)) return null;
       const home = homes.get(session);
       if (home && (!home.credentials.token() || !sendsInto(session, home))) return null;
       return dead.has(session) ? "dead" : "alive";
@@ -579,6 +770,7 @@ export function createInboxT3Wake(options: {
     sweep,
     stop: () => {
       stopped = true;
+      stopping.abort();
       if (retryTimer) clearTimeout(retryTimer);
       if (grantTimer) clearTimeout(grantTimer);
       unsubscribe();

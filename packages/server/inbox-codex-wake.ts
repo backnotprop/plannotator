@@ -45,7 +45,10 @@
  *
  * A thread T3 Code runs (its rollout's originator) is never queued: T3 runs a
  * turn Codex starts by itself out of the person's sight. Its items go into
- * the T3 thread through T3's own `t3` command (packages/server/inbox-codex-t3.ts).
+ * the T3 thread through T3's own `t3` command (packages/server/inbox-t3-local.ts).
+ * While T3 is closed they wait (`t3_wait`), and go in within seconds of T3
+ * starting again; a send T3 may have taken (the command ran out of time) is
+ * never sent again.
  *
  * A session the Inbox launched (packages/server/inbox-launch-codex.ts) is
  * asked first (`deliver`): its host puts the text in as a turn over the
@@ -75,7 +78,7 @@ import { INBOX_BOARD_REQUEST_CLOSE, INBOX_BOARD_REQUEST_OPEN, INBOX_DECISION_ASK
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { agentHomeAllowed, codexHome, type AgentEnvironment } from "./inbox-agents";
 import type { LaunchDelivery } from "./inbox-launch-host";
-import type { CodexT3Route } from "./inbox-codex-t3";
+import type { T3Local } from "./inbox-t3-local";
 
 /** The ChatGPT desktop app's own Codex CLI (macOS), used when no `codex` is on PATH. */
 export const INBOX_CODEX_DESKTOP_CLI = "/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex";
@@ -373,8 +376,8 @@ export function createInboxCodexWake(options: {
   launched?: (session: string) => boolean;
   /** An item not to hand at all (a steps-only Tidy wake once steps are off: the server withdraws it). */
   skip?: (item: InboxMessage, session: string) => boolean;
-  /** A thread T3 Code runs: how its items go into the T3 thread (inbox-codex-t3.ts). Without it they wait in the Inbox. */
-  t3?: CodexT3Route;
+  /** A thread T3 Code runs: how its items go into the T3 thread (inbox-t3-local.ts). Without it they wait in the Inbox. */
+  t3?: T3Local;
   /** Where to look for a Codex CLI besides PATH. Default: the ChatGPT and Codex apps' own (macOS), never under the test sandbox. */
   extraClis?: readonly string[];
   now?: () => number;
@@ -654,11 +657,11 @@ export function createInboxCodexWake(options: {
    * An item for a thread T3 Code runs goes into the T3 thread (`options.t3`), never `codex queue`. While it
    * cannot go, the reply says why (`t3_wait`), as a T3 thread's does.
    */
+  /** Whether a sweep waits on T3 starting again (`T3Local.onceRunning`). */
+  let t3Awaited = false;
   const sendToT3 = async (item: InboxMessage, session: string): Promise<void> => {
     const id = store.deliveryIdOf(item, session);
     const key = `${id}.${session}`;
-    const retry = retryAt.get(key);
-    if (retry && retry.at > now()) return;
     const waits = (reason: "closed" | null) => {
       if (id !== item.id || !store.isOwner(item, session)) return;
       try {
@@ -667,6 +670,23 @@ export function createInboxCodexWake(options: {
         // Gone meanwhile.
       }
     };
+    const t3 = options.t3;
+    if (t3?.installed() && !t3.running()) {
+      // T3 is closed: nothing to try until it runs again, looked for every few seconds. The backoff is only
+      // for a T3 that runs and does not answer.
+      retryAt.delete(key);
+      waits("closed");
+      if (!t3Awaited) {
+        t3Awaited = true;
+        t3.onceRunning(() => {
+          t3Awaited = false;
+          void sweep();
+        });
+      }
+      return;
+    }
+    const retry = retryAt.get(key);
+    if (retry && retry.at > now()) return;
     const later = (line: string) => {
       const wait = Math.min((retry?.wait ?? RETRY_FIRST_MS / 2) * 2, RETRY_MAX_MS);
       retryAt.set(key, { at: now() + wait, wait });
@@ -675,8 +695,8 @@ export function createInboxCodexWake(options: {
         log(`${line}. Trying again later.`);
       }
     };
-    const thread = options.t3 ? await options.t3.threadOf(session) : null;
-    if (!options.t3 || !thread) {
+    const thread = t3 ? await t3.threadOfCodexThread(session) : null;
+    if (!t3 || !thread) {
       waits("closed");
       return later(`T3 Code runs Codex thread ${session}, and its T3 thread could not be found`);
     }
@@ -691,7 +711,7 @@ export function createInboxCodexWake(options: {
     claimed.add(key);
     const at = now();
     inFlight.set(key, { at, session, itemId: id, taken: false });
-    const sent = await options.t3.send(thread, codexQueueMessage(options.commandOf(item, session)), stopping.signal);
+    const sent = await t3.send(thread, codexQueueMessage(options.commandOf(item, session)), stopping.signal);
     inFlight.delete(key);
     if ("sent" in sent) {
       retryAt.delete(key);
@@ -857,7 +877,7 @@ export function createInboxCodexWake(options: {
     wakes: async (host, session, meta) => {
       if (host !== INBOX_CODEX_HOST || !isCodexThreadId(session)) return false;
       // A thread T3 Code runs wakes through its T3 thread, never `codex queue`.
-      const throughT3 = async () => (await options.t3?.reaches(session)) === true;
+      const throughT3 = async () => options.t3?.installed() === true && (await options.t3.threadOfCodexThread(session)) !== null;
       if (codexCallWakes(meta, session)) return (await ownedByT3(session)) ? throughT3() : (await cli()) !== null;
       // A command its shell runs (`plannotator inbox call`): a thread that woke before, or one its rollout says keeps running.
       if (codexThreadOfCall(meta) !== null || dead.has(session) || unproven.has(session)) return false;
