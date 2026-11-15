@@ -32,6 +32,7 @@ import { parseInboxQuestionBlocks } from "@plannotator/core/inbox-questions";
 import { inboxPullUrlsIn, inboxThreadPullText, parseInboxThreadPullRef, type InboxThreadPullRef } from "@plannotator/core/inbox-types";
 import { blankCode } from "@plannotator/shared/inbox/message-images";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
+import { LOOKUPS_PER_SEND } from "./inbox-pull-lookups";
 
 export type InboxHintKind = "attach_pull" | "question_options";
 
@@ -136,25 +137,43 @@ function ownWords(body: string): string {
     .join("\n");
 }
 
+/** The most distinct refs of each form one body is read for: a body listing thousands of numbers costs no more. */
+const BODY_REFS_MAX = 50;
+/** GitHub numbers are 32-bit: a larger one is never a PR, so it is never named or looked up. */
+const GITHUB_NUMBER_MAX = 2 ** 31 - 1;
+
 /**
- * The GitHub numbers the text names, as PR refs in text order: `owner/repo#12`
- * (github.com, or the project's host when it is the project's repository) and
- * a bare `#12` (the project's repository). `own` marks the project's.
+ * The GitHub numbers the text names, as PR refs in text order, read lazily so
+ * a caller can stop: `owner/repo#12` (github.com, or the project's host when
+ * it is the project's repository) and a bare `#12` (the project's
+ * repository). `own` marks the project's.
  */
-function githubNumbersIn(text: string, repo: InboxKnownPulls["repo"]): { index: number; ref: ForgeRef; own: boolean }[] {
-  const out: { index: number; ref: ForgeRef; own: boolean }[] = [];
+function* githubNumbersIn(text: string, repo: InboxKnownPulls["repo"]): Generator<{ index: number; ref: ForgeRef; own: boolean }> {
   const at = repo ? repo.repo.lastIndexOf("/") : -1;
   const project = repo && at > 0 ? { host: repo.host, owner: repo.repo.slice(0, at), name: repo.repo.slice(at + 1) } : null;
-  const add = (index: number, host: string, owner: string, name: string, number: number, own: boolean) => {
-    if ([owner, name].some((part) => part === "." || part === "..")) return;
-    out.push({ index, ref: { platform: "github", host, owner, repo: name, number, kind: "pull" }, own });
-  };
-  for (const match of text.matchAll(SHORT_GITHUB_REF)) {
-    const own = !!project && `${match[1]}/${match[2]}`.toLowerCase() === `${project.owner}/${project.name}`.toLowerCase();
-    add(match.index ?? 0, own ? project!.host : "github.com", match[1]!, match[2]!, Number(match[3]), own);
+  const entry = (index: number, host: string, owner: string, name: string, number: number, own: boolean) =>
+    number > GITHUB_NUMBER_MAX || [owner, name].some((part) => part === "." || part === "..")
+      ? null
+      : { index, ref: { platform: "github" as const, host, owner, repo: name, number, kind: "pull" as const }, own };
+  const short = text.matchAll(SHORT_GITHUB_REF);
+  const bare = project ? text.matchAll(BARE_NUMBER) : null;
+  // Each scan is in text order; merged by position, so the stream is too.
+  let a = short.next();
+  let b = bare?.next();
+  while (!a.done || (b && !b.done)) {
+    if (!a.done && (!b || b.done || (a.value.index ?? 0) <= (b.value.index ?? 0))) {
+      const match = a.value;
+      a = short.next();
+      const own = !!project && `${match[1]}/${match[2]}`.toLowerCase() === `${project.owner}/${project.name}`.toLowerCase();
+      const found = entry(match.index ?? 0, own ? project!.host : "github.com", match[1]!, match[2]!, Number(match[3]), own);
+      if (found) yield found;
+    } else {
+      const match = b!.value as RegExpExecArray;
+      b = bare!.next();
+      const found = entry(match.index ?? 0, project!.host, project!.owner, project!.name, Number(match[1]), true);
+      if (found) yield found;
+    }
   }
-  if (project) for (const match of text.matchAll(BARE_NUMBER)) add(match.index ?? 0, project.host, project.owner, project.name, Number(match[1]), true);
-  return out;
 }
 
 /** A GitHub number as a thread-PR ref. */
@@ -174,16 +193,33 @@ export function pullsNamedInBody(body: string, projectHost?: string | null, know
   if (typeof body !== "string" || (!body.includes("https://") && !body.includes("!") && !body.includes("#"))) return [];
   const text = ownWords(body);
   const found: { index: number; ref: InboxThreadPullRef }[] = [];
+  const keys = new Set<string>();
   const add = (index: number, ref: InboxThreadPullRef | { error: string } | null) => {
-    if (ref && !("error" in ref) && !found.some((other) => other.ref.key === ref.key)) found.push({ index, ref });
+    if (ref && !("error" in ref) && !keys.has(ref.key)) {
+      keys.add(ref.key);
+      found.push({ index, ref });
+    }
   };
   const take = (index: number, value: string) => add(index, parseInboxThreadPullRef(value, projectHost));
-  for (const url of inboxPullUrlsIn(text)) take(text.indexOf(url), url);
-  for (const match of text.matchAll(SHORT_MERGE_REQUEST)) take(match.index ?? 0, match[0]);
-  for (const match of text.matchAll(BITBUCKET_PULL_URL)) take(match.index ?? 0, match[0]);
+  let from = 0;
+  for (const url of inboxPullUrlsIn(text).slice(0, BODY_REFS_MAX)) {
+    const after = text.indexOf(url, from);
+    const index = after < 0 ? text.indexOf(url) : after;
+    if (after >= 0) from = after + url.length;
+    take(index, url);
+  }
+  let seen = 0;
+  for (const match of text.matchAll(SHORT_MERGE_REQUEST)) if (seen++ < BODY_REFS_MAX) take(match.index ?? 0, match[0]); else break;
+  seen = 0;
+  for (const match of text.matchAll(BITBUCKET_PULL_URL)) if (seen++ < BODY_REFS_MAX) take(match.index ?? 0, match[0]); else break;
   if (known && text.includes("#")) {
+    const considered = new Set<string>();
     for (const { index, ref } of githubNumbersIn(text, known.repo)) {
       const pull = pullRefOf(ref);
+      if (!considered.has(pull.key)) {
+        if (considered.size >= BODY_REFS_MAX) break;
+        considered.add(pull.key);
+      }
       if (known.isPull(pull.key)) add(index, pull);
     }
   }
@@ -239,7 +275,8 @@ export function notePullFoundLater(store: InboxStore, threadId: string, session:
  * The numbers this send names in the project's GitHub repository (a bare
  * `#12`, or its own `owner/repo#12`) that the Inbox does not know yet, to look
  * up after the send: not a PR it knows, not one whose kind it already holds,
- * and not one that would be quiet anyway. Pure but for the store reads.
+ * and not one that would be quiet anyway. At most `LOOKUPS_PER_SEND`, from the
+ * first `BODY_REFS_MAX` distinct numbers. Pure but for the store reads.
  */
 export function pullsToLookUp(
   store: InboxStore,
@@ -247,16 +284,22 @@ export function pullsToLookUp(
 ): ForgeRef[] {
   const known = sent.known;
   if (!known?.lookUp || !known.repo || typeof sent.body !== "string" || !sent.body.includes("#")) return [];
-  const candidates = githubNumbersIn(ownWords(sent.body), known.repo).filter((entry) => entry.own);
-  if (candidates.length === 0) return [];
-  const quiet = quietPulls(store, sent.threadId, sent.passed ?? []);
-  const fromStore = sent.projectId ? storePullKeys(store, sent.projectId) : new Set<string>();
+  let quiet: Set<string> | null = null;
+  let fromStore: ReadonlySet<string> | null = null;
+  const considered = new Set<string>();
   const out: ForgeRef[] = [];
-  for (const { ref } of candidates.sort((a, b) => a.index - b.index)) {
+  // Stops at LOOKUPS_PER_SEND to look up, or after BODY_REFS_MAX distinct numbers: never the whole of a huge body.
+  for (const { ref, own } of githubNumbersIn(ownWords(sent.body), known.repo)) {
+    if (!own) continue;
     const key = forgeRefKey(ref);
-    if (out.some((other) => forgeRefKey(other) === key)) continue;
+    if (considered.has(key)) continue;
+    if (considered.size >= BODY_REFS_MAX) break;
+    considered.add(key);
+    quiet ??= quietPulls(store, sent.threadId, sent.passed ?? []);
+    fromStore ??= sent.projectId ? storePullKeys(store, sent.projectId) : new Set<string>();
     if (quiet.has(key) || fromStore.has(key) || known.isPull(key) || known.settled?.(key) || said(store, pullSaidKey(sent.threadId, key))) continue;
     out.push(ref);
+    if (out.length >= LOOKUPS_PER_SEND) break;
   }
   return out;
 }
@@ -327,9 +370,10 @@ export function quietHint(
     const later = waiting?.get(laterKey);
     if (later) {
       const quiet = quietPulls(store, sent.threadId, sent.passed ?? []);
+      const namedKeys = new Set(named.map((ref) => ref.key));
       for (const [key, ref] of later) {
         if (quiet.has(key)) later.delete(key);
-        else if (!named.some((other) => other.key === key)) named.push(ref);
+        else if (!namedKeys.has(key)) named.push(ref);
       }
     }
     const refs = named.filter((ref) => !said(store, pullSaidKey(sent.threadId, ref.key))).slice(0, HINT_PULLS_MAX);

@@ -20,7 +20,7 @@ import { INBOX_THREAD_PULLS_MAX, parseInboxThreadPullRefs } from "@plannotator/c
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { createInboxMcpServer, type InboxMcpContext } from "./inbox-mcp";
 import { createInboxPullLookups } from "./inbox-pull-lookups";
-import { attachPullText, pullsNamedInBody, QUESTION_OPTIONS_HINT, questionWithBareOptions, quietHint, type InboxKnownPulls } from "./inbox-mcp-hints";
+import { attachPullText, pullsNamedInBody, pullsToLookUp, QUESTION_OPTIONS_HINT, questionWithBareOptions, quietHint, type InboxKnownPulls } from "./inbox-mcp-hints";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -290,4 +290,30 @@ test("a message listing forty numbers asks the forge about three", async () => {
   await w.send("ses_a", { body: Array.from({ length: 40 }, (_, i) => `#${i + 1}`).join(" "), thread: "one" });
   await forge.settled();
   expect(forge.reads).toEqual([1, 2, 3]);
+});
+
+test("a body naming 50,000 numbers: the send's lines and the lookup's pick stay fast, and three are queued", async () => {
+  const body = Array.from({ length: 50_000 }, (_, i) => `#${i + 1}`).join(" ");
+  const forge = lookingUp({});
+  const w = world({ known: forge.known });
+  const started = performance.now();
+  const sent = await w.send("ses_a", { body, thread: "one" });
+  const scan = performance.now();
+  const picked = pullsToLookUp(w.store, { threadId: sent.thread, body, known: forge.known });
+  const done = performance.now();
+  expect(scan - started).toBeLessThan(200);
+  expect(done - scan).toBeLessThan(200);
+  expect(picked.map((ref) => ref.number)).toEqual([1, 2, 3]);
+  await forge.settled();
+  expect(forge.reads).toEqual([1, 2, 3]);
+});
+
+test("a number past GitHub's 32 bits is never a PR: never named, never looked up", async () => {
+  const forge = lookingUp({});
+  const w = world({ known: { ...forge.known, isPull: () => true } });
+  const sent = await w.send("ses_a", { body: "See #2147483648 and #9999999999.", thread: "one" });
+  expect(sent.result.content[0]!.text).not.toContain("You named");
+  expect(pullsToLookUp(w.store, { threadId: sent.thread, body: "#2147483648 #2147483647", known: forge.known }).map((ref) => ref.number)).toEqual([2147483647]);
+  await forge.settled();
+  expect(forge.reads).toEqual([]);
 });
