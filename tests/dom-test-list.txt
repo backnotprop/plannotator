@@ -755,3 +755,4 @@ packages/review-editor/components/authorColor.review.test.tsx
 packages/inbox/listPicks.test.tsx
 packages/inbox/pickWork.test.tsx
 packages/inbox/combines.test.tsx
+packages/inbox/settingsAtLoad.test.tsx
