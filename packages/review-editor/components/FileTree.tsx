@@ -10,6 +10,7 @@ import { buildFileKindBlocks, type FileKindBlock } from '../utils/fileKindTree';
 import { buildFileStatusBlocks, FILE_STATUS_COVERS, FILE_STATUS_LABELS } from '../utils/fileStatusTree';
 import { FileKindIcon, FILE_KIND_LABELS } from '@plannotator/guide-viewer/FileKindIcon';
 import { ChangesTreeView, type ChangesTreeHandle } from './ChangesTreeView';
+import { useAfterFirstCode } from '../utils/firstCodePaint';
 import { EvoLogPicker } from './EvoLogPicker';
 import { WorktreePicker } from './WorktreePicker';
 import { getReviewSearchSideLabel, type ReviewSearchFileGroup, type ReviewSearchMatch } from '../utils/reviewSearch';
@@ -335,6 +336,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
   }, [annotations]);
 
   const changesTreeRef = useRef<ChangesTreeHandle>(null);
+  const treeMounts = useAfterFirstCode();
   const [foldersExpanded, setFoldersExpanded] = useState(true);
   const allFolderPaths = useMemo(() => getAllFolderPaths(tree), [tree]);
   const handleToggleAllFolders = useCallback(() => {
@@ -568,7 +570,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
           inert={!showChangesTree}
           data-changes-tree-wrap=""
         >
-          <ChangesTreeView
+          {treeMounts && <ChangesTreeView
             handleRef={changesTreeRef}
             grouping={blocks ? effectiveGroupBy : 'none'}
             tree={plainTree}
@@ -590,7 +592,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
             repoRoot={repoRoot}
             onSelectFile={onSelectFile}
             onDoubleClickFile={onDoubleClickFile}
-          />
+          />}
         </div>
         {repoReady && (showRepoTree || repoVisited) && (
           <div

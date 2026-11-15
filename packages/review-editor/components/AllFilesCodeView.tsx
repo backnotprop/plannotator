@@ -64,6 +64,7 @@ import { createKeptWholeFiles, warmsUpAtRest, wholeFileLines, type WholeFileText
 import { collectHeaderHeightHints, headerHeightFor, type HeaderHeightHint } from '../utils/headerHeightHints';
 import { ReviewStateProvider, useReviewStateOptional, type ReviewState } from '../dock/ReviewStateContext';
 import { DiffBottomBar } from './DiffBottomBar';
+import { hasFirstCodePainted, markFirstCodePainted } from '../utils/firstCodePaint';
 import { BinaryFileNotice } from './BinaryFileNotice';
 import { GeneratedFileNotice } from './GeneratedFileNotice';
 import { EditSessionHud } from './EditSessionHud';
@@ -2074,6 +2075,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       context: CodeViewItem<DiffAnnotationMetadata>,
     ) => {
       if (context.type !== 'diff') return;
+      if (!hasFirstCodePainted()) requestAnimationFrame(() => setTimeout(markFirstCodePainted, 0));
       if (phase === 'unmount') {
         clearItemSearchHighlights(node);
         nodeToItemIdRef.current.delete(node);
