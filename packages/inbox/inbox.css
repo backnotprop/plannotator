@@ -1362,7 +1362,7 @@ button.ib-band:hover { background: var(--ib-band-hover-s, var(--ib-band)); }
 .pn-inbox .ib-arcg-more { display: block; margin: 2px 0 4px; padding: 10px 12px; border-radius: 8px; font-size: var(--ib-fs-13, 13px); font-weight: 600; color: var(--foreground); text-align: left; }
 .pn-inbox .ib-arcg-more:hover { background: var(--ib-band-hover-s, var(--ib-band)); }
 .pn-inbox .ib-arcg-search { font: inherit; color: var(--foreground); text-decoration: underline; text-underline-offset: 2px; }
-.ib-arcswipe { position: relative; overflow: hidden; touch-action: pan-y; }
+.ib-arcswipe { position: relative; overflow: hidden; touch-action: pan-y pinch-zoom; }
 .ib-arcswipe-under { position: absolute; inset: 0; display: flex; align-items: center; justify-content: flex-end; gap: 6px; padding-right: 20px; background: var(--muted); color: var(--muted-foreground); font-size: var(--ib-fs-14, 14px); font-weight: 600; visibility: hidden; }
 .ib-arcswipe[data-swiping] .ib-arcswipe-under { visibility: visible; }
 .ib-arcswipe[data-armed] .ib-arcswipe-under { background: var(--primary); color: var(--primary-foreground); }

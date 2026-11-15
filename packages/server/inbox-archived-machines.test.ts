@@ -5,8 +5,9 @@
  * What this catches: a linked machine's archived threads missing from the group's read or carrying no machine (so
  * Unarchive would go to the wrong store); the plain read (Settings → Archived) taking far rows; Unarchive from here
  * not landing on the machine that holds the thread; an asleep machine's rows dropped from the group, or its
- * Unarchive lost instead of held and sent when it is back; and the "Show archived" switch not reaching the other
- * machine.
+ * Unarchive lost instead of held and sent when it is back; an archived row without its tags (so no tag colour), or a
+ * far one with that machine's tag ids instead of the merged ones; and the "Show archived" switch not reaching the
+ * other machine.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
@@ -94,6 +95,16 @@ describe("the Archived group across linked machines", () => {
       await waitFor("B's archived on A", async () => (await group(a.port)).rows.length === 2);
       expect(await group(a.port)).toEqual({ rows: [[newer, bId], [older, bId]], machines: { [bId]: { away: false } } });
       expect((await get(a.port, "/api/inbox/threads/archived?limit=21")).threads).toEqual([]);
+
+      // A tagged archived thread carries its tag, on B's own read and as A's merged tag on A's: its row takes the tag's colour.
+      const tagged = (await (await post(b.port, `/api/inbox/threads/${older}/tags`, { name: "payments", on: true })).json()) as Json;
+      expect(((await get(b.port, "/api/inbox/threads/archived?limit=21")).threads as Json[]).find((row) => row.thread_id === older)?.tags).toEqual(tagged.tags);
+      const mergedTag = async () => ((await get(a.port, "/api/inbox/threads?machines=1")).tags as Json[]).find((tag) => tag.name === "payments")?.id as string | undefined;
+      const olderTags = async () => ((await get(a.port, "/api/inbox/threads/archived?machines=1&limit=21")).threads as Json[]).find((row) => row.thread_id === older)?.tags;
+      await waitFor("the tag on A's archived row", async () => {
+        const id = await mergedTag();
+        return id !== undefined && JSON.stringify(await olderTags()) === JSON.stringify([id]);
+      }, 15_000);
 
       // Unarchive from A goes to B, through the forward.
       expect((await forward(a.port, bId, `messages/${newer}/resolve`, { resolved: false })).status).toBe(200);

@@ -326,7 +326,7 @@ import { createInboxStepsRoute, inboxStepsStale, inboxStepsWaitOnPerson as steps
 import { createInboxDebugLog } from "./inbox-debug-log";
 import { createInboxDevices, DOOR_PREFIX, MACHINE_PLATFORM, type InboxDoorCaller } from "./inbox-devices";
 import { createInboxMachines, type InboxMachines, type MachineFrame, type MachineLinkTimings } from "./inbox-machines";
-import { mergeArchived } from "./inbox-archived-merged";
+import { archivedAskOf, farRowTags, mergeArchived } from "./inbox-archived-merged";
 import { createShowArchived, type InboxShowArchived } from "./inbox-show-archived";
 import { mergePullBoards } from "./inbox-machine-pulls";
 import { replyIsStale } from "./inbox-outbox";
@@ -2096,6 +2096,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     }
     const shownProject = projectFilter && store.project(projectFilter) ? store.canonicalProjectId(projectFilter) : projectFilter;
     const scoped = shownProject ? archived.filter((row) => row.project.id === shownProject) : archived;
+    // Each row's live tags, as the list's rows carry them: the Archived group's rows take their tag's colour.
+    const tagsOf = store.allThreadTags();
     return {
       serverSession,
       cursor: store.cursor(),
@@ -2104,16 +2106,25 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       total: scoped.length,
       offset,
       limit,
-      threads: scoped.slice(head ? 0 : offset, offset + limit),
+      threads: scoped.slice(head ? 0 : offset, offset + limit).map((row): InboxListRow => {
+        const tags = tagsOf.get(row.thread_id);
+        return tags ? { ...row, tags } : row;
+      }),
     };
   };
 
   /** The Archived group's read across linked machines (inbox-archived-merged.ts): only the machine a project lives on. */
   const mergedArchivedModel = async (url: URL) => {
     const own = archivedModel(url, true);
-    const owner = own.project && !store.project(own.project) ? machines.projectOwner(own.project) : null;
-    const far = own.project && !owner ? [] : await machines.archivedPages(own.offset + own.limit, own.project, owner);
-    return mergeArchived(own, far, (id) => store.message(id) !== null);
+    const ask = archivedAskOf(own.project || null, !!own.project && !!store.project(own.project), machines.projectOwner);
+    const far = ask ? await machines.archivedPages(own.offset + own.limit, own.project, ask.owner) : [];
+    const page = mergeArchived(own, far, (id) => store.message(id) !== null);
+    if (!page.threads.some((row) => row.machine)) return page;
+    // A far row's tags read as the merged list's, as listModel's far rows do.
+    const farTagLists = machines.tagLists();
+    const { idOn } = inboxMachineTags(machines.selfId, store.initiatives().filter((tag) => tag.deleted_at === null), farTagLists);
+    const taken = new Set(farTagLists.map((list) => list.machine));
+    return { ...page, threads: page.threads.map((row) => (row.machine ? farRowTags({ ...row, machine: row.machine }, taken, idOn) : row)) };
   };
 
   const selfCommand = options.selfCommand?.length

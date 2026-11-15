@@ -5,7 +5,7 @@
  * newer written over this one, a broken config.json read as on, and a failed save the windows hear as done.
  */
 import { describe, expect, test } from "bun:test";
-import { createShowArchived, readShowArchived, showArchivedNewer, type InboxShowArchived } from "./inbox-show-archived";
+import { createShowArchived, readShowArchived, SHOW_ARCHIVED_REV_MAX, showArchivedNewer, type InboxShowArchived } from "./inbox-show-archived";
 
 const A = "ibx_01K0000000000000000000000A";
 const B = "ibx_01K0000000000000000000000B";
@@ -56,6 +56,14 @@ describe("Show archived", () => {
     // An older copy never comes back.
     expect(a.pref.adopt({ on: true, rev: 0, by: B })).toBe(false);
     expect(showArchivedNewer({ on: true, rev: 1, by: null }, { on: false, rev: 1, by: A })).toBe(false);
+  });
+
+  test("a far copy with an absurd revision is not taken, and a save past one still saves", () => {
+    expect(readShowArchived({ on: true, rev: Number.MAX_SAFE_INTEGER, by: B })).toEqual({ on: false, rev: 0, by: null });
+    const { pref } = machine(A, [{ on: true, rev: Number.MAX_SAFE_INTEGER, by: B }]);
+    expect(pref.set(true)).toEqual({ on: true, rev: SHOW_ARCHIVED_REV_MAX, by: A });
+    expect(pref.set(false).on).toBe(false);
+    expect(pref.state().on).toBe(false);
   });
 
   test("a save that could not be written throws config_not_saved and tells no window", () => {

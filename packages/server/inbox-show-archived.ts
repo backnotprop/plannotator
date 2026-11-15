@@ -14,12 +14,14 @@ export interface InboxShowArchived {
 }
 
 export const SHOW_ARCHIVED_OFF: InboxShowArchived = { on: false, rev: 0, by: null };
+/** The highest revision kept: no person flips the switch this often, and a save past a far copy above it stays here. */
+export const SHOW_ARCHIVED_REV_MAX = 2 ** 31;
 
-/** A saved or far copy, picked by name; anything else reads as never saved. */
+/** A saved or far copy, picked by name; anything else (a revision past the highest too) reads as never saved. */
 export function readShowArchived(value: unknown): InboxShowArchived {
   if (!value || typeof value !== "object" || Array.isArray(value)) return SHOW_ARCHIVED_OFF;
   const v = value as Record<string, unknown>;
-  if (typeof v.on !== "boolean" || typeof v.rev !== "number" || !Number.isSafeInteger(v.rev) || v.rev < 0) return SHOW_ARCHIVED_OFF;
+  if (typeof v.on !== "boolean" || typeof v.rev !== "number" || !Number.isInteger(v.rev) || v.rev < 0 || v.rev > SHOW_ARCHIVED_REV_MAX) return SHOW_ARCHIVED_OFF;
   return { on: v.on, rev: v.rev, by: typeof v.by === "string" && /^ibx_[0-9A-HJKMNP-TV-Z]{26}$/.test(v.by) ? v.by : null };
 }
 
@@ -52,7 +54,7 @@ export function createShowArchived(host: ShowArchivedHost) {
     state,
     /** The person's switch: saved here past every revision any machine holds; the linked machines read it from this list. */
     set(on: boolean): InboxShowArchived {
-      const rev = Math.max(state().rev, ...host.far().map((far) => far.rev)) + 1;
+      const rev = Math.min(SHOW_ARCHIVED_REV_MAX, Math.max(state().rev, ...host.far().map((far) => far.rev)) + 1);
       return write({ on, rev, by: host.self() });
     },
     /** A linked machine's copy: taken when it is newer than this one. */

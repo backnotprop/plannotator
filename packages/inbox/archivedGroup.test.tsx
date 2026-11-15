@@ -321,6 +321,59 @@ test.skipIf(!hasDom)('Unarchive from the row takes it out at once, and the toast
   expect(events).toContain('archive:arc_0');
 });
 
+test.skipIf(!hasDom)('after Unarchive, keyboard focus goes to the next row, and to the header after the last one', async () => {
+  spies.push(spyOn(inboxApi, 'resolve').mockImplementation(async () => ({ ok: true }) as never));
+  store = store.slice(0, 2);
+  render();
+  await switchOn();
+  await openGroup();
+  const unarchive = (id: string) => {
+    const button = group()!.querySelector<HTMLElement>(`[data-row="${id}"] [data-row-unarchive]`)!;
+    act(() => button.focus());
+    act(() => button.click());
+  };
+  unarchive('arc_0');
+  await settle();
+  expect(document.activeElement?.getAttribute('data-thread-id')).toBe('arc_1');
+  unarchive('arc_1');
+  await settle();
+  expect(document.activeElement).toBe(band());
+});
+
+test.skipIf(!hasDom)("with machines linked, this Inbox's rows draw before a slow machine answers", async () => {
+  const far = archivedRow(-1, { thread_id: 'far_1', machine: MINI } as Partial<InboxListRow>);
+  let answer: (() => void) | null = null;
+  spies.push(spyOn(inboxApi, 'archived').mockImplementation((input = {}) => {
+    const page = (threads: InboxListRow[]) => ({ serverSession: 's', cursor: 1, project: null, projects: [], total: threads.length, offset: 0, limit: 21, threads }) as ArchivedModel;
+    if (!input.machines) return Promise.resolve(page(store.slice(0, 3)));
+    return new Promise((resolve) => (answer = () => resolve(page([far, ...store.slice(0, 3)]))));
+  }));
+  store = store.slice(0, 3);
+  render({ merged: true });
+  await switchOn();
+  await openGroup();
+  expect(groupIds()).toEqual(['arc_0', 'arc_1', 'arc_2']);
+  await act(async () => answer!());
+  await settle();
+  expect(groupIds()).toEqual(['far_1', 'arc_0', 'arc_1', 'arc_2']);
+});
+
+test.skipIf(!hasDom)('a project on a slow machine: no "Nothing archived." before that machine answers', async () => {
+  let answer: (() => void) | null = null;
+  spies.push(spyOn(inboxApi, 'archived').mockImplementation((input = {}) => {
+    const page = (threads: InboxListRow[]) => ({ serverSession: 's', cursor: 1, project: 'prj_far', projects: [], total: threads.length, offset: 0, limit: 21, threads }) as ArchivedModel;
+    if (!input.machines) return Promise.resolve(page([]));
+    return new Promise((resolve) => (answer = () => resolve(page([archivedRow(0, { machine: MINI } as Partial<InboxListRow>)]))));
+  }));
+  render({ merged: true, project: 'prj_far' });
+  await switchOn();
+  await openGroup();
+  expect(group()!.querySelector('[data-archived-none]')).toBeNull();
+  await act(async () => answer!());
+  await settle();
+  expect(groupIds()).toEqual(['arc_0']);
+});
+
 test.skipIf(!hasDom)("an archived row's menu offers Unarchive (and no Mark read); a held write (machine asleep) puts the row back and says why", async () => {
   spies.push(spyOn(inboxApi, 'resolve').mockImplementation(async () => {
     throw new Error('Waiting for Mini: this applies when Mini is back.');
@@ -329,7 +382,7 @@ test.skipIf(!hasDom)("an archived row's menu offers Unarchive (and no Mark read)
   render({ merged: true });
   await switchOn();
   await openGroup();
-  expect(asks).toEqual([{ project: null, limit: 21, machines: true }]);
+  expect(asks).toContainEqual({ project: null, limit: 21, machines: true });
   const target = group()!.querySelector<HTMLElement>('[data-thread-id="arc_0"]')!;
   await act(async () => {
     target.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: 100, clientY: 100 }));

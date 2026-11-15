@@ -25,6 +25,27 @@ export interface FarArchived {
   away: boolean;
 }
 
+/**
+ * Which linked machines the merged read asks: every one for no project; for a project, only the machine it lives
+ * on, and none when it lives here (or on no machine this Inbox knows). `{ owner: null }`: every machine; null: none.
+ */
+export function archivedAskOf(project: string | null, local: boolean, ownerOf: (project: string) => string | null): { owner: string | null } | null {
+  if (project === null) return { owner: null };
+  if (local) return null;
+  const owner = ownerOf(project);
+  return owner ? { owner } : null;
+}
+
+/**
+ * A far row's tags as the merged list's (`idOn`, inboxMachineTags), so it takes its tag's colour as the list's rows do;
+ * none from a machine that takes no tags from here (`taken`), as on the list.
+ */
+export function farRowTags(row: InboxListRow & { machine: string }, taken: ReadonlySet<string>, idOn: (machine: string, id: string) => string | null): InboxListRow {
+  const { tags: farTags, ...rest } = row;
+  const tags = taken.has(row.machine) ? [...new Set((farTags ?? []).flatMap((id) => idOn(row.machine, id) ?? []))] : [];
+  return tags.length > 0 ? { ...rest, tags } : rest;
+}
+
 /** A far door's answer, picked by name: its rows with their machine, never one this Inbox holds. */
 export function farArchivedPage(machine: string, body: unknown): FarArchived["page"] {
   if (!body || typeof body !== "object") return null;

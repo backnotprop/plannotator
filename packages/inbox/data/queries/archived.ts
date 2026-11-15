@@ -1,8 +1,8 @@
 /**
  * The list's Archived group (approval "inbox-archived-group"): its rows, read only while the group is open. Closed, it
  * holds nothing: no read, and the rows a read brought are dropped from the cache. Open, it reads the newest archived
- * first, `limit` at a time (every linked machine's too when one is linked), and again when the list it sits under
- * gains or loses a thread (an archive or an Unarchive anywhere).
+ * first, `limit` at a time (every linked machine's too when one is linked, this Inbox's own drawn before they answer),
+ * and again when the list it sits under gains or loses a thread (an archive or an Unarchive anywhere).
  */
 import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { useEffect } from 'react';
@@ -23,6 +23,8 @@ export interface ArchivedAsk {
 
 export interface ArchivedRead {
   page: ArchivedModel | null;
+  /** This Inbox's rows alone, drawn while the linked machines' answer is on its way: "Nothing archived." waits. */
+  partial: boolean;
   failed: unknown;
 }
 
@@ -36,6 +38,14 @@ export function useArchivedPage(ask: ArchivedAsk): ArchivedRead {
     // "Show 20 more" keeps the rows on screen while the longer page is read.
     placeholderData: (previous) => previous,
   });
+  // Machines linked: this Inbox's own rows first, so a slow machine (its wait is up to 2 s) does not hold them back.
+  const own = useQuery({
+    queryKey: inboxKeys.archived(ask.project, false, ask.limit),
+    queryFn: () => inboxApi.archived({ project: ask.project, limit: ask.limit, machines: false }),
+    gcTime: 0,
+    enabled: ask.merged && query.data === undefined,
+  });
+  const early = ask.merged && query.data === undefined ? (own.data ?? null) : null;
   useEffect(() => {
     const stop = followList(client);
     return () => {
@@ -43,7 +53,7 @@ export function useArchivedPage(ask: ArchivedAsk): ArchivedRead {
       client.removeQueries({ queryKey: inboxKeys.archivedAll() });
     };
   }, [client]);
-  return { page: query.data ?? null, failed: query.isError ? query.error : null };
+  return { page: query.data ?? early, partial: early !== null, failed: query.isError ? query.error : null };
 }
 
 /** The threads a list read holds (every section and the snoozed). */
