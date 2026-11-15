@@ -1,8 +1,9 @@
 /**
  * Combine (approval "inbox-multi-select", 4A "One agent writes a new thread"): the person picks two or more threads
- * and an agent; the agent reads them and starts one new thread that says where everything stands, asking again the
- * open questions that still matter. Once that thread arrives, the Inbox archives the picked ones; until then they and
- * their questions stay as they were. An agent that ends or stops without writing it archives nothing.
+ * and an agent; the agent reads them and starts one new thread that says where everything stands, asking again each
+ * open question or saying in one line why it no longer applies. Once that thread arrives, the Inbox archives the
+ * picked ones; until then they and their questions stay as they were. An agent that ends or stops without writing it
+ * archives nothing.
  *
  * The wake is a Tidy note whose run is the Combine's id (`cmb_`), so it travels as a Tidy's does. Browser-safe and
  * dependency-free; re-exported by `inbox-types`.
@@ -70,7 +71,7 @@ export interface InboxCombineWakeThread {
  * knows it arrived (a second send with it answers the first, so it cannot make two threads).
  */
 export function inboxCombineInstruction(key: string): string {
-  return `The person picked these threads in the Plannotator Inbox and asked you to combine them into one new thread. Read each one (read_thread with the id given), then start one new thread with send_message: no reply_to, a subject that names the work, and idempotency_key "${key}". In it, say where each part stands, and ask again, as questions, the open questions listed below that still matter. Send nothing in the old threads: once your thread arrives, the Inbox archives them, and their open questions close.`;
+  return `The person picked these threads in the Plannotator Inbox and asked you to combine them into one new thread. Read each one (read_thread with the id given), then start one new thread with send_message: no reply_to, a subject that names the work, and idempotency_key "${key}". In it, say where each part stands, and ask again, as questions, the open questions listed below; for one that no longer applies, say so in one line instead, so none is lost without a word. Send nothing in the old threads: once your thread arrives, the Inbox archives them, and their open questions close.`;
 }
 
 /** The paragraph after the first, only when the person typed something. */
