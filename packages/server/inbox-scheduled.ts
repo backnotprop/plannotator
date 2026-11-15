@@ -261,6 +261,23 @@ export function createInboxScheduled(deps: {
   };
 
   /**
+   * Where a first run that didn't start files its line, so the person sees why, on the clock's run as on Run now: a
+   * folder by its path in that folder's project; with it gone, the project of the thread an agent made it from, else
+   * one made for that folder, as a run there makes. A new scratch folder, or a project that is gone, goes where a
+   * scratch thread goes: the scratch folders' own folder.
+   */
+  const firstProject = async (record: InboxScheduledThread): Promise<string | null> => {
+    const path = "path" in record.folder ? record.folder.path : null;
+    const resolved = path ? await deps.resolveProject(path).catch(() => null) : null;
+    if (resolved) return resolved.id;
+    const madeIn = record.made_by?.thread_id ? store.message(record.made_by.thread_id)?.project_id : null;
+    if (madeIn && store.project(madeIn)) return madeIn;
+    const scratch = launch.settingsState().scratch_dir;
+    const root = path ?? (typeof scratch === "string" ? scratch : null);
+    return root ? store.ensureProject({ name: basename(root) || root, root }).id : null;
+  };
+
+  /**
    * One run: its divider in the thread, then the launch. A run key answers the same divider again after a restart.
    * One start at a time per scheduled thread (`starting`); its number, thread and prompt are read after the launch is
    * ready. A run that didn't start is a divider that says why, or, with no thread or project to put it in, the error.
@@ -291,12 +308,7 @@ export function createInboxScheduled(deps: {
         prepared = await launch.prepare(target, { name: first.name, body: bodyOf(first), resolveProject: deps.resolveProject });
       } catch (error) {
         const record = found(id);
-        // A folder by its path that never ran yet: its thread goes in that folder's project, so the person sees why. With
-        // the folder gone: the project of the thread an agent made it from, else one for that folder, as a run there makes.
-        const madeIn = record.made_by?.thread_id ? (store.message(record.made_by.thread_id)?.project_id ?? null) : null;
-        const ofPath = async (path: string): Promise<string> =>
-          (await deps.resolveProject(path).catch(() => null))?.id ?? (madeIn && store.project(madeIn) ? madeIn : store.ensureProject({ name: basename(path) || path, root: path }).id);
-        const project = projectOf(record) ?? ("path" in record.folder ? await ofPath(record.folder.path) : null);
+        const project = projectOf(record) ?? (await firstProject(record));
         const run = runOf(record);
         log(`Inbox scheduled ${id}: run ${run.run} did not start (${error instanceof InboxError ? error.code : "error"})`);
         if (!project) throw error;
@@ -344,7 +356,7 @@ export function createInboxScheduled(deps: {
     const project = projectOf(record);
     if (!project || !record.schedule) return false;
     const tz = record.schedule.tz;
-    const reason = { asleep: "this computer was asleep", not_running: "the Inbox wasn't running", still_running: "the last run was still going", missed: "the next run was less than 15 minutes away" }[skipped.reason];
+    const reason = { asleep: "this computer was asleep", not_running: "the Inbox wasn't running", still_running: "the last run was still going", missed: "the next run was less than 15 minutes away", late: "it couldn't start on time" }[skipped.reason];
     const when = skipped.count === 1 ? inboxScheduledWhen(new Date(skipped.to), tz) : `${inboxScheduledTimes(skipped.count)}, ${inboxScheduledWhen(new Date(skipped.from), tz)} to ${inboxScheduledWhen(new Date(skipped.to), tz)}`;
     const { message } = store.writeScheduledLine({
       project_id: project,
@@ -513,10 +525,19 @@ export function createInboxScheduled(deps: {
       return record;
     },
 
-    remove(id: string, by: InboxScheduledBy): { told: string | null } {
+    /** Delete: a run under way is stopped first. The record keeps its switch, so the window's Undo brings it back as it was. */
+    async remove(id: string, by: InboxScheduledBy): Promise<{ told: string | null }> {
       const record = found(id);
-      save(record, { deleted_at: iso(), enabled: false });
+      const running = runningOf(record);
+      if (running) await launch.stopMessage(running.message_id);
+      save(found(id), { deleted_at: iso() });
       return { told: tell(by, record, `Deleted the scheduled thread ${record.name}. Its thread and past runs stay.`, { op: "delete" }) };
+    },
+
+    /** The window's Undo of a delete: back as it was, counting from now (nothing due meanwhile is caught up). */
+    restore(id: string): InboxScheduledThread {
+      const record = store.deletedScheduledThread(id) ?? found(id);
+      return record.deleted_at ? save(record, { deleted_at: undefined, ...(record.enabled ? { handled_through: iso() } : {}) }) : record;
     },
 
     /** Turning the capability switch on: every scheduled thread that is on starts from now, with no catch-up. */

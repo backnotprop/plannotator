@@ -7458,6 +7458,12 @@ export class InboxStore {
     return record && !record.deleted_at ? record : null;
   }
 
+  /** A deleted scheduled thread, which the window's Undo brings back. */
+  deletedScheduledThread(id: string): InboxScheduledThread | null {
+    const record = this.scheduledById.get(id);
+    return record?.deleted_at ? record : null;
+  }
+
   /** One snapshot of a scheduled thread (its own file in the inbox folder, on the one seq). */
   putScheduledThread(record: InboxScheduledThread): InboxScheduledThread {
     this.write(null, { v: INBOX_RECORD_VERSION, seq: this.seq + 1, at: record.updated_at, kind: "scheduled", id: record.id, record });

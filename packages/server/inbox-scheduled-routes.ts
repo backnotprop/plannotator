@@ -91,7 +91,7 @@ export async function scheduledRoute(
   if (checkServerSession(body, deps.serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
   if (parts[0] === "preview" && parts.length === 1) return json(inboxScheduledPreview((body.schedule ?? null) as InboxScheduledSchedule, new Date(deps.now?.() ?? Date.now())));
   // Every write is the person's, from their window: an agent uses the scheduled_thread tool.
-  if (!isWindowRequest(req, body, deps.serverSession)) return json(INBOX_WINDOW_ONLY_BODY, 403);
+  if (!isWindowRequest(req, body, deps.serverSession)) return json({ ...INBOX_WINDOW_ONLY_BODY, error: "A scheduled thread is changed in the Inbox window; an agent uses the scheduled_thread tool." }, 403);
   const person = { kind: "person" } as const;
   if (parts.length === 0) return json({ scheduled: scheduled.rowOf((await scheduled.create(body, person)).record) }, 201);
   const [id, action] = parts as [string, string | undefined];
@@ -108,8 +108,10 @@ export async function scheduledRoute(
     case "stop":
       return json({ scheduled: scheduled.rowOf(await scheduled.stopRun(id)) });
     case "delete":
-      scheduled.remove(id, person);
+      await scheduled.remove(id, person);
       return json({ deleted: true });
+    case "restore":
+      return json({ scheduled: scheduled.rowOf(scheduled.restore(id)) });
     default:
       return json({ error: "Not found.", code: "not_found" }, 404);
   }

@@ -217,6 +217,29 @@ describe("a run is a launch of its own in the one thread", () => {
   });
 });
 
+describe("delete", () => {
+  test("a run under way is stopped first; Undo brings it back as it was, catching up nothing due meanwhile", async () => {
+    const w = world();
+    const { record } = await w.make();
+    const { message } = await w.scheduled.runNow(record.id, { kind: "person" });
+    await until(() => !!w.store.message(message.id)!.launch!.session_ref);
+    w.fake.poll(w.store.message(message.id)!.to!.session, true, w.clock.now);
+    expect(w.scheduled.rowOf(record).state).toBe("running");
+    await w.scheduled.remove(record.id, { kind: "person" });
+    expect(w.store.scheduledThread(record.id)).toBeNull();
+    expect(w.fake.calls.some((call) => call.startsWith("stop "))).toBe(true);
+    // Deleted over a due time: nothing runs, and Undo starts from now.
+    w.at("2026-11-16T14:00:10.000Z");
+    await w.scheduled.check();
+    expect(w.dividers(w.store.deletedScheduledThread(record.id)!.thread_id)).toHaveLength(1);
+    const back = w.scheduled.restore(record.id);
+    expect(back).toMatchObject({ enabled: true, handled_through: "2026-11-16T14:00:10.000Z" });
+    expect(w.scheduled.rowOf(back).state).not.toBe("running");
+    await w.scheduled.check();
+    expect(w.dividers(back.thread_id)).toHaveLength(1);
+  });
+});
+
 describe("the clock", () => {
   test("a restart reads every scheduled thread back from disk and never runs one twice; a skip line wakes no run", async () => {
     const w = world();
@@ -421,6 +444,21 @@ describe("the folder", () => {
     const [line] = w.dividers(row.thread_id);
     expect(line!.scheduled_run!.failed).toMatch(/acme-web isn't there\. Pick another folder\.$/);
     expect(w.store.project(line!.project_id)).toMatchObject({ name: "acme-web", root: (record.folder as { path: string }).path });
+  });
+
+  test("a new scratch folder that can't be made on the first run: the clock's line goes under the scratch folders' own folder", async () => {
+    const w = world();
+    const repo = join(w.home, "..", "repo");
+    mkdirSync(join(repo, ".git"), { recursive: true });
+    writeFileSync(join(w.home, "..", "data", "config.json"), JSON.stringify({ inboxLaunch: { enabled: true, scratchDir: join(repo, "scratch") } }));
+    const { record } = await w.make({ folder: { scratch: true } });
+    w.at("2026-11-16T14:00:10.000Z");
+    await w.scheduled.check();
+    const row = w.scheduled.rowOf(w.store.scheduledThread(record.id)!);
+    expect(row.last_run).toMatchObject({ run: 1, outcome: "didnt_start" });
+    const [line] = w.dividers(row.thread_id);
+    expect(line!.scheduled_run!.failed).toContain("is inside the git repository");
+    expect(w.store.project(line!.project_id)).toMatchObject({ name: "scratch", root: join(repo, "scratch") });
   });
 
   test("a folder by its path gone before its first run: a thread whose first line says the run didn't start, and why", async () => {
