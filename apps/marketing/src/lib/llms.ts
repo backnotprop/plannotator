@@ -356,3 +356,71 @@ export function buildLlmsAgent(agent: Agent): string {
 
 /** Every agent the site lists, with its page. An unlisted agent gets none. */
 export const LLMS_AGENT_PAGES = LISTED_AGENTS.map((agent) => ({ slug: agent.slug, agent }));
+
+// ── /inbox/prompt.md ──
+
+/** The line in inbox-prompt.md that the per-agent list replaces. */
+export const INBOX_PROMPT_AGENTS_SLOT = '{{AGENT_STEPS}}';
+
+/** The prompt is served and copied as plain ASCII, so the agent entries' typography folds to it. */
+const ascii = (text: string) =>
+  text
+    .replace(/[‘’]/g, "'")
+    .replace(/[“”]/g, '"')
+    .replace(/→/g, '>')
+    .replace(/…/g, '...')
+    .replace(/[–—]/g, '-');
+
+/** The words of a step before `plannotator inbox`: its code, which is the install line. */
+function beforeStep(step: Step): string {
+  if (!step.code) return sentence(step.do);
+  return `${step.file ? `In ${code(step.file)}: ` : ''}${step.code.split('\n').map(code).join(' then ')}.`;
+}
+
+/** The words of a step after `plannotator inbox`, less a sentence about what that command did, and its code unless they quote it. */
+function afterStep(step: Step): string {
+  const words = step.do
+    .split(/(?<=\.) (?=[A-Z`])/)
+    .filter((s) => !s.startsWith('`plannotator inbox`'))
+    .join(' ');
+  const shown = (step.code?.split('\n') ?? []).filter((line) => !words.includes(code(line)));
+  return shown.length ? `${sentence(words)} ${shown.map(code).join(' then ')}.` : sentence(words);
+}
+
+/** The by-hand MCP step: `plannotator inbox` has no way to connect the agent. */
+const isByHandMcp = (step: Step) => step.prompt === 'after' && step.code === 'plannotator inbox mcp';
+
+const agentLink = (agent: Agent) => `[${agent.name}](${url(llmsAgentPath(agent.slug))})`;
+
+/** What each agent does around `plannotator inbox` in the install prompt, from the steps marked `prompt`. */
+export function buildInboxPromptAgents(): string {
+  const marked = (agent: Agent) => agent.setup.filter((step) => step.prompt);
+  const lines: string[] = [];
+  const nothing: Agent[] = [];
+  const byHand: Agent[] = [];
+  for (const agent of LISTED_AGENTS.filter((a) => a.tier !== 'cloud')) {
+    const steps = marked(agent);
+    if (steps.length === 0) nothing.push(agent);
+    else if (steps.every(isByHandMcp)) byHand.push(agent);
+    else {
+      const before = steps.filter((s) => s.prompt === 'before').map(beforeStep);
+      const after = steps.filter((s) => s.prompt === 'after').map(afterStep);
+      const parts = [...(before.length ? [`Before step 2: ${before.join(' ')}`] : []), ...(after.length ? [`After step 2: ${after.join(' ')}`] : [])];
+      lines.push(`- ${agentLink(agent)}. ${parts.join(' ')}`);
+    }
+  }
+  if (byHand.length > 0) {
+    lines.push(`- ${list(byHand.map(agentLink))}: step 2 does not connect them. In step 3 add a stdio MCP server \`plannotator-inbox\` that runs \`plannotator inbox mcp\`.`);
+  }
+  if (nothing.length > 0) lines.push(`- ${list(nothing.map(agentLink))}: nothing more. Step 2 connects them.`);
+  const cloud = LISTED_AGENTS.filter((a) => a.tier === 'cloud');
+  if (cloud.length > 0) {
+    lines.push(`- ${list(cloud.map(agentLink))}: not this setup. Follow the pairing message the person copies from the Inbox's Settings > Cloud agents.`);
+  }
+  return ascii(lines.join('\n'));
+}
+
+/** The install prompt: inbox-prompt.md (passed in, a ?raw import) with the per-agent list in its slot. */
+export function buildInboxPrompt(source: string): string {
+  return source.replace(INBOX_PROMPT_AGENTS_SLOT, buildInboxPromptAgents());
+}

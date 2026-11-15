@@ -550,6 +550,34 @@ describe.if(hasDom)("review decision control (agent mode)", () => {
     expect(submissions).toHaveLength(2);
   });
 
+  // #2913 gave plan review and annotate Mod+Shift+Enter for the note
+  // composer; code review answered the chord by POSTING the review instead,
+  // so a reviewer reaching for a note sent the decision with no note and no
+  // way back. Guards the open (nothing posted) and the send through it.
+  test("Mod+Shift+Enter opens the note composer instead of posting", async () => {
+    seededExternalAnnotations = [EXTERNAL_FINDING];
+    await mountReview();
+    await settle();
+    await settle();
+
+    expect(primaryButton()!.title).toContain("Send");
+    expect(noteInput()).toBeNull();
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", metaKey: true, shiftKey: true, bubbles: true, cancelable: true }));
+    });
+    await settle();
+
+    expect(noteInput()).not.toBeNull();
+    expect(submissions).toHaveLength(0);
+
+    await typeNote("one more pass on the retry path");
+    await pressNoteKey("Enter", { metaKey: true });
+
+    expect(submissions).toHaveLength(1);
+    expect(submissions[0]!.approved).toBe(false);
+    expect(submissions[0]!.feedback).toContain("one more pass on the retry path");
+  });
+
   test("Mod+Enter fires the visible primary", async () => {
     await mountReview();
 

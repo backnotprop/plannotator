@@ -18,7 +18,7 @@
  * The cases one by one are DOM tests: packages/inbox/replyFootPhone.test.tsx. Build the binary first (see inbox.spec.ts).
  */
 
-import { expect, test, type Browser, type Page } from '@playwright/test';
+import { expect, test, type Browser, type Page } from './inbox-test';
 import { FILE_WORDS, MESSAGE_WORDS, pane, startWorld, stopWorld, type ListWorld } from './inbox-comments-list-world';
 
 const LONG_NAME = 'Codex (northwind-industries-holdings platform reviewer)';

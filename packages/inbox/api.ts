@@ -18,6 +18,7 @@ import type { InboxArtifactPin, InboxArtifactsPage, InboxArtifactType } from '@p
 import { isActionRecord, questionsOnly, splitThreadActions } from './actions';
 import { createListReader, type ListReadAnswer } from './listRead';
 import { inboxUrl, isContested, localRoute, machineOf, rememberLocal, rememberMachine, selfMachineId, setSelfMachine } from './inboxUrl';
+import { learnPullMachines, pullMachine, pullUrl } from './pulls/pullMachines';
 import { learnProjects } from './projectPictures';
 import { learnDefaultRefHost } from './defaultRefHost';
 import type { ReplyViewing } from './replyViewing';
@@ -72,6 +73,8 @@ export { dispatchInboxFrame, INBOX_EVENT_FRAMES, openInboxEventFrames, subscribe
 import type { PatchBlobIds } from '@plannotator/core/diff-files';
 import type { InboxFileContents, InboxPullDetailsAnswer, InboxPullDiffAnswer, InboxPullDiffScope, InboxPullRiskAnswer, InboxPullRiskModels, InboxPullsAnswer, InboxReviewChanges, InboxReviewChangesAnswer, InboxReviewLinkAnswer, InboxReviewsAnswer, InboxRestartAgents, InboxTidyPlan, InboxTidyRun, InboxActivityModel } from '@plannotator/core/inbox-types';
 import { InboxApiError, readJson } from './apiError';
+import { cardUrl, learnCards, type CardsModel } from './cardsWire';
+export type { CardsModel } from './cardsWire';
 import { gzipped, wholeBody } from './apiBody';
 export { InboxApiError };
 import type { InboxSearchAnswer, InboxSearchFrom, InboxSearchGroupId, InboxSearchSort, InboxSearchStatus } from '@plannotator/core/inbox-search';
@@ -173,27 +176,6 @@ export interface ProjectBatchAnswer<B> {
   replayed: boolean;
   /** The batch stopped partway: `batch` names what it changed (Undo covers those); the rest did not change. */
   error?: { code: string; message: string };
-}
-
-/** `GET /api/inbox/cards`: the Board. `seen_seq` (the person's last look, a store seq) is absent from an Inbox before step 2. */
-export interface CardsModel {
-  serverSession: string;
-  cursor: number;
-  cards: InboxCardWire[];
-  dropped_unseen: number;
-  seen_seq?: number | null;
-  /** Each linked thread's list row (archived ones too), for the opened card. Absent from an older Inbox. */
-  threads?: Record<string, InboxListRow | null>;
-  /** While the person's checklist switch is on: each linked thread's lists with steps (approval "inbox-thread-steps"). Absent: off, or an older Inbox. */
-  steps?: Record<string, InboxStepsWire[]>;
-  /** The Board's initiatives, deleted ones too (approval "board-initiatives"). Absent from an older Inbox: none. */
-  initiatives?: InboxInitiative[];
-  /**
-   * Approval "board-hashtags": per live initiative that a message tags, the latest-tagged threads no card of it
-   * links (at most 4, newest first; their rows are in `threads`) and `total`, how many such threads in all.
-   * Absent from an older Inbox: the preview lists no threads.
-   */
-  initiative_threads?: Record<string, { threads: string[]; total: number }>;
 }
 
 /** A draft's file as a save names it: an upload id, or the id with where a long paste goes back. */
@@ -930,7 +912,7 @@ export function localIdsIn(value: unknown): Set<string> {
 /** Two linked machines claim the thread, message, file or project a path names: it goes to neither (inboxUrl.ts). */
 export const CONFLICT_TEXT = 'Two linked machines both claim this thread, so it opens on neither. Unlink the one that should not have it.';
 function refuseContested(path: string): void {
-  const named = /^\/api\/inbox\/(?:threads|messages|attachments|projects)\/([^/?]+)/.exec(path)?.[1];
+  const named = /^\/api\/inbox\/(?:threads|messages|attachments|projects|cards)\/([^/?]+)/.exec(path)?.[1];
   if (named && isContested(decodeURIComponent(named))) throw new InboxApiError(409, 'machine_conflict', CONFLICT_TEXT);
 }
 
@@ -1206,7 +1188,6 @@ const messageUrl = (messageId: string, rest = '', query?: string) => inboxUrl(`/
 const attachmentUrl = (attachmentId: string, rest = '', query?: string) => inboxUrl(`/attachments/${encodeURIComponent(attachmentId)}${rest}`, query, machineOf(attachmentId));
 /** `/projects/<id><rest>` on the machine that owns the project. */
 const projectUrl = (projectId: string, rest = '') => inboxUrl(`/projects/${encodeURIComponent(projectId)}${rest}`, undefined, machineOf(projectId));
-
 /** The merged list names each row's and project's machine: their routes go there from now on (inboxUrl.ts). */
 function learnMachines(model: ListModel): void {
   setSelfMachine(model.self);
@@ -1598,16 +1579,15 @@ export const inboxApi = {
   },
   /**
    * A thread's PRs (approval "inbox-pr-binding"): the live list with stack groups and state, and what was removed
-   * lately. A linked machine's thread has none here (its read is not forwarded), and an Inbox older than PRs on
-   * threads answers 404: both read as none.
+   * lately, read on the thread's own machine. An Inbox older than PRs on threads, or a linked machine older than
+   * reading them through its door, answers 404: both read as none.
    */
   threadPulls: async (threadId: string, signal?: AbortSignal): Promise<InboxThreadPullsAnswer> => {
-    if (machineOf(threadId)) return { pulls: [], groups: [], removed: [] };
     // Aborted when the card closes or a newer read starts, and given up after THREAD_PULLS_READ_MS: an unanswered
     // read never holds one of the browser's few connections to this Inbox.
     const within = signalWithin(THREAD_PULLS_READ_MS, signal);
     try {
-      return threadPullsOf(await get<unknown>(inboxUrl(`/threads/${encodeURIComponent(threadId)}/pulls`), within.signal));
+      return threadPullsOf(await get<unknown>(threadUrl(threadId, '/pulls'), within.signal));
     } catch (cause) {
       if (cause instanceof InboxApiError && cause.status === 404) return { pulls: [], groups: [], removed: [] };
       throw cause;
@@ -1617,7 +1597,7 @@ export const inboxApi = {
   },
   /** The person adds or removes a thread's PRs (the popover). `remove: ['all']` takes off every one. */
   changeThreadPulls: async (threadId: string, change: { add?: string[]; remove?: string[] }): Promise<InboxThreadPullsAnswer> =>
-    threadPullsOf(await post<unknown>(inboxUrl(`/threads/${encodeURIComponent(threadId)}/pulls`), change)),
+    threadPullsOf(await post<unknown>(threadUrl(threadId, '/pulls'), change)),
   /**
    * Post decisions (Export decisions › Post on a pull request, and the PR card's row): the thread's decisions as one
    * comment on one of its PRs, edited in place on a later post. `pull`: the PR as the thread writes it (`ref`).
@@ -1974,7 +1954,7 @@ export const inboxApi = {
   // Pins (approval "inbox-pinned-threads"): the sidebar's pinned threads.
   /** Pin a thread (at the bottom of Pinned) or unpin it. */
   /** The Board's cards (approval "inbox-board", step 2): every card, the agents' unseen drops, the person's last look. */
-  cards: () => get<CardsModel>(inboxUrl('/cards')),
+  cards: () => get<CardsModel>(inboxUrl('/cards', 'machines=1')).then((model) => learnCards(model, localIdsIn(model))),
   /**
    * The person's New card: a title, notes and links, in Backlog (or Todo); or sent: `thread_id` is
    * the thread compose's Send just started for it (the card lands in Todo, in that thread's project).
@@ -1990,9 +1970,9 @@ export const inboxApi = {
     /** The initiative the Board is filtered to: the new card starts in it. */
     initiative?: string | null;
   }) => post<{ card: InboxCardWire; replayed: boolean }>(inboxUrl('/cards'), { ...input }),
-  /** The card's initiative (an `ini_` id), or none (null). */
-  setCardInitiative: (id: string, initiative: string | null) =>
-    post<{ card: InboxCardWire }>(inboxUrl(`/cards/${encodeURIComponent(id)}`), { op: 'initiative', initiative }),
+  /** The card's initiative (an `ini_` id), or none (null); on a linked machine's card, `{ name }` when that machine has no tag of the name yet. */
+  setCardInitiative: (id: string, initiative: string | null | { name: string }) =>
+    post<{ card: InboxCardWire }>(cardUrl(id), initiative !== null && typeof initiative === 'object' ? { op: 'initiative', name: initiative.name } : { op: 'initiative', initiative }),
   /** A new initiative, named. */
   createInitiative: (name: string) => post<{ initiative: InboxInitiative }>(inboxUrl('/initiatives'), { name }),
   /** An initiative renamed, or deleted (its cards read as in none). `machine`: a linked machine's tag, changed there. */
@@ -2000,23 +1980,23 @@ export const inboxApi = {
     post<{ initiative: InboxInitiative }>(inboxUrl(`/initiatives/${encodeURIComponent(id)}`, undefined, machine), change),
   /** The person's move: `move` to a column, `drop` (Cancel, reason optional), `restore`. */
   moveCard: (id: string, change: { op: 'move'; column: InboxCardColumn } | { op: 'drop'; reason?: string | null } | { op: 'restore' }) =>
-    post<{ card: InboxCardWire }>(inboxUrl(`/cards/${encodeURIComponent(id)}`), change),
+    post<{ card: InboxCardWire }>(cardUrl(id), change),
   /** The opened card's edits: title, notes; a link (a thread, an issue or PR); sent to an agent (the thread just started). */
   editCard: (id: string, change: { op: 'edit'; title?: string; notes?: string | null } | { op: 'link'; thread_id?: string; ref?: string } | { op: 'send'; thread_id: string }) =>
-    post<{ card: InboxCardWire }>(inboxUrl(`/cards/${encodeURIComponent(id)}`), change),
+    post<{ card: InboxCardWire }>(cardUrl(id), change),
   /** The opened card: the card and its history, newest first, and its project's repo (absent from an older Inbox). */
-  card: (id: string) => get<{ card: InboxCardWire; history: InboxCardHistoryEntry[]; repo?: InboxProjectRepo | null }>(inboxUrl(`/cards/${encodeURIComponent(id)}`)),
+  card: (id: string) => get<{ card: InboxCardWire; history: InboxCardHistoryEntry[]; repo?: InboxProjectRepo | null }>(cardUrl(id)),
   /** The opened card's links, resolved now (read only). */
-  cardRefs: (id: string) => get<{ refs: { ref: InboxCardRef; result: ForgeRefCardResult }[] }>(inboxUrl(`/cards/${encodeURIComponent(id)}/refs`)),
+  cardRefs: (id: string) => get<{ refs: { ref: InboxCardRef; result: ForgeRefCardResult }[] }>(cardUrl(id, '/refs')),
   /** The person opened the Board: the look runs through the cursor of the read it showed (the server clamps it). */
   /** The lane cards' marks (their one linked PR or issue's state), for the cards on screen; `refresh` when the window got its focus back. */
   cardMarks: (ids: readonly string[], refresh = false) => post<{ marks: Record<string, InboxCardMark> }>(inboxUrl('/cards/marks'), { cards: [...ids], refresh }),
   /** Pull requests (Code review on only): the PRs of the projects' repositories and their agents' threads; `refresh` reads the forges again. */
   /** `others`: the Others view is open, so the server reads Others as often as the list (else every 5 min at most). */
-  /** `everywhere`: the Pull requests page, the person's own PRs in any repository (approval "inbox-pr-dashboard"). */
+  /** `everywhere`: the Pull requests page, the person's own PRs in any repository, with each linked machine's (pullMachines.ts). */
   pulls: (refresh = false, signal?: AbortSignal, others = false, everywhere = false) => {
-    const query = [refresh ? 'refresh=1' : '', others ? 'others=1' : '', everywhere ? 'everywhere=1' : ''].filter(Boolean).join('&');
-    return get<InboxPullsAnswer>(inboxUrl(`/pulls${query ? `?${query}` : ''}`), signal);
+    const query = [refresh ? 'refresh=1' : '', others ? 'others=1' : '', everywhere ? 'everywhere=1&machines=1' : ''].filter(Boolean).join('&');
+    return get<InboxPullsAnswer>(inboxUrl(`/pulls${query ? `?${query}` : ''}`), signal).then((answer) => (everywhere ? learnPullMachines(answer) : answer));
   },
   /** The Reviews rows (Code review on only). `others`: the Others view is open, as `pulls` asks. */
   reviews: (options: { others?: boolean } = {}, signal?: AbortSignal) => {
@@ -2029,18 +2009,18 @@ export const inboxApi = {
   pullRisk: (signal?: AbortSignal) => get<InboxPullRiskAnswer>(inboxUrl('/pulls/risk'), signal),
   savePullRisk: (input: { rules: string; provider: string | null; model: string | null }) => post<InboxPullRiskAnswer>(inboxUrl('/pulls/risk'), input),
   pullRiskModels: (provider: string, signal?: AbortSignal) => get<InboxPullRiskModels>(inboxUrl(`/pulls/risk/models?provider=${encodeURIComponent(provider)}`), signal),
-  pullDetails: (key: string, signal?: AbortSignal) => get<InboxPullDetailsAnswer>(inboxUrl(`/pulls/details?key=${encodeURIComponent(key)}`), signal),
-  pullMediaSizes: (key: string, signal?: AbortSignal) => get<{ sizes: Record<string, { width: number; height: number }> }>(inboxUrl(`/pulls/media/sizes?key=${encodeURIComponent(key)}`), signal),
+  pullDetails: (key: string, signal?: AbortSignal) => get<InboxPullDetailsAnswer>(pullUrl('/pulls/details', key), signal),
+  pullMediaSizes: (key: string, signal?: AbortSignal) => get<{ sizes: Record<string, { width: number; height: number }> }>(pullUrl('/pulls/media/sizes', key), signal),
   /** One layer's diff, or the stack's from its base up to that layer (a PR the last list named). */
   pullDiff: (key: string, scope: InboxPullDiffScope, signal?: AbortSignal) =>
-    get<InboxPullDiffAnswer>(inboxUrl(`/pulls/diff?key=${encodeURIComponent(key)}&scope=${scope}`), signal),
+    get<InboxPullDiffAnswer>(pullUrl('/pulls/diff', key, `scope=${scope}`), signal),
   /** New review's Pull request link: what the pasted link is. */
   reviewLink: (ref: string, signal?: AbortSignal) => get<InboxReviewLinkAnswer>(inboxUrl(`/reviews/link?ref=${encodeURIComponent(ref)}`), signal),
   /** New review's change summary for a project's local changes. */
   reviewChanges: (project: string, changes: InboxReviewChanges, signal?: AbortSignal) => get<InboxReviewChangesAnswer>(inboxUrl(`/reviews/changes?project=${encodeURIComponent(project)}&changes=${changes}`), signal),
   /** One changed file's whole text at both ends of that diff, for its expand arrows, while it is the blobs (`old`, `new`) the patch on screen names. */
   pullFile: (key: string, scope: InboxPullDiffScope, path: string, pin: PatchBlobIds | { head: string }, signal?: AbortSignal) =>
-    get<InboxFileContents>(inboxUrl(`/pulls/file?key=${encodeURIComponent(key)}&scope=${scope}&path=${encodeURIComponent(path)}&${'head' in pin ? `head=${pin.head}` : `old=${pin.oldId}&new=${pin.newId}`}`), signal),
+    get<InboxFileContents>(pullUrl('/pulls/file', key, `scope=${scope}&path=${encodeURIComponent(path)}&${'head' in pin ? `head=${pin.head}` : `old=${pin.oldId}&new=${pin.newId}`}`), signal),
   /** The person started a PR's (a stack's open layers') review thread with an agent: `threadId` is the thread the review picker (or compose's New thread) just started for it. */
   pullOwner: (keys: readonly string[], threadId: string, ask?: 'guide' | 'custom') => post<{ ok: true }>(inboxUrl('/pulls/owner'), { keys: [...keys], thread_id: threadId, ...(ask ? { ask } : {}) }),
   /** Before a hand-off is sent: may these PRs go to an agent in `projectId`? (404 `pull_unknown`, 422 another project's.) */
@@ -2058,13 +2038,14 @@ export const inboxApi = {
     });
   },
   /** Merge a PR the person confirmed (the popover's second click), at the head they saw. The server asks the forge first. */
-  pullMerge: (key: string, headSha: string) => post<{ ok: true; key: string; method: 'merge' | 'squash' | 'rebase' | null; url: string }>(inboxUrl('/pulls/merge'), { key, head_sha: headSha, confirmed: true }),
-  /** The board's Close (approval "inbox-pr-board-bulk"): the host is asked first; a refusal throws its words. */
-  pullClose: (key: string) => post<{ ok: true; key: string; url: string }>(inboxUrl('/pulls/close'), { key }),
-  /** Close's Undo: taken only for a PR this Inbox closed in the last few minutes. */
-  pullReopen: (key: string) => post<{ ok: true; key: string; url: string }>(inboxUrl('/pulls/reopen'), { key }),
+  pullMerge: (key: string, headSha: string, machine = pullMachine(key)) => post<{ ok: true; key: string; method: 'merge' | 'squash' | 'rebase' | null; url: string }>(inboxUrl('/pulls/merge', undefined, machine), { key, head_sha: headSha, confirmed: true }),
+  /** The board's Close (approval "inbox-pr-board-bulk"): the host is asked first; a refusal throws its words. `machine`: the one whose list has it. */
+  pullClose: (key: string, machine = pullMachine(key)) => post<{ ok: true; key: string; url: string }>(inboxUrl('/pulls/close', undefined, machine), { key }),
+  /** Close's Undo: taken only on the machine that closed it, in the last few minutes, so it goes to the same `machine`. */
+  pullReopen: (key: string, machine = pullMachine(key)) => post<{ ok: true; key: string; url: string }>(inboxUrl('/pulls/reopen', undefined, machine), { key }),
   pullOwnerCheck: (keys: readonly string[], projectId: string) => post<{ ok: true }>(inboxUrl('/pulls/owner'), { keys: [...keys], project_id: projectId, validate_only: true }),
-  seeBoard: (throughSeq: number) => post<{ seen_seq: number }>(inboxUrl('/cards/seen'), { through_seq: throughSeq }),
+  /** `machine`: a linked machine's look, through the cursor of its cards as read. */
+  seeBoard: (throughSeq: number, machine?: string | null) => post<{ seen_seq: number }>(inboxUrl('/cards/seen', undefined, machine), { through_seq: throughSeq }),
   /** The Board's first-visit dialog: the first page on this computer to ask gets `show: true`, once per machine. */
   claimBoardIntro: () => post<{ show: boolean }>(inboxUrl('/board/intro'), {}),
   /** The one-time list options dialog: only the first claim ever gets `show: true` (once per machine). */
@@ -2124,7 +2105,7 @@ export const inboxApi = {
     return { code, engine: body.engine, reason: body.reason };
   },
   /** The person looked at Dropped: an agent's drops there are seen. */
-  seeDrops: (ids: readonly string[]) => post<{ cards: InboxCardWire[] }>(inboxUrl('/cards/dropped/seen'), { cards: [...ids] }),
+  seeDrops: (ids: readonly string[], machine?: string | null) => post<{ cards: InboxCardWire[] }>(inboxUrl('/cards/dropped/seen', undefined, machine), { cards: [...ids] }),
   /** Every pinned artifact (approval "inbox-artifact-stars"; not the sidebar's thread pins), in pin order. This machine's threads only. */
   artifactPins: () => get<{ pins: InboxArtifactPin[] }>(inboxUrl('/artifact-pins')),
   /** The face each agent's icon shows (inbox/agent-faces.json, agents/agentFaces.ts). This window's Inbox only. */

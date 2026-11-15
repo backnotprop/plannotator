@@ -58,8 +58,10 @@ import {
   inboxCardShipPrs,
   inboxCardMarkRef,
   isInboxCardDropUnseen,
+  inboxCardColumnIndex,
   INBOX_CARD_MARKS_MAX,
   type InboxCardColumn,
+  type InboxCardWire,
   type InboxCardMark,
   type InboxCardRef,
   INBOX_SOUND_DEFAULT_VOLUME,
@@ -242,7 +244,7 @@ import {
   piSessionOutdated,
 } from "./inbox-restart";
 import { createInboxCompose, INBOX_UPLOAD_SWEEP_MS } from "./inbox-compose";
-import { INBOX_CROSS_SITE_BODY, isCrossSiteRequest, isWindowRequest } from "./inbox-cross-site";
+import { INBOX_CROSS_SITE_BODY, INBOX_MACHINE_PULL_WINDOW_ONLY_BODY, isCrossSiteRequest, isWindowRequest } from "./inbox-cross-site";
 import { createInboxLaunch } from "./inbox-launch";
 import { createInboxCodexAccount } from "./inbox-codex-account";
 import type { LaunchHost, LaunchHostContext } from "./inbox-launch-host";
@@ -323,6 +325,7 @@ import { createInboxStepsRoute, inboxStepsStale, inboxStepsWaitOnPerson as steps
 import { createInboxDebugLog } from "./inbox-debug-log";
 import { createInboxDevices, DOOR_PREFIX, MACHINE_PLATFORM, type InboxDoorCaller } from "./inbox-devices";
 import { createInboxMachines, type InboxMachines, type MachineFrame, type MachineLinkTimings } from "./inbox-machines";
+import { mergePullBoards } from "./inbox-machine-pulls";
 import { replyIsStale } from "./inbox-outbox";
 import type { PairingProbes } from "./inbox-pairing-checks";
 import { createInboxRelay, readRelayFile, relayUrl as defaultRelayUrl } from "./inbox-relay";
@@ -1133,6 +1136,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // `toWindow`), with the device that asked: a paired phone answers a permission prompt as a window does; a linked
   // machine does for a press in a window there (`window`), and may start, stop or trust for one (remote launch).
   const fromDeviceDoor = new WeakMap<Request, InboxDoorCaller>();
+  // A PR's close, reopen or merge through the door: only a linked machine's, for a press in its window (mark `pulls`).
+  const pullWriteFromWindow = (req: Request): boolean => {
+    const door = fromDeviceDoor.get(req);
+    return !door || (door.platform === MACHINE_PLATFORM && door.window);
+  };
   // Search (packages/server/inbox-search.ts): the index is built on the first search, not here.
   const search = createInboxSearchRoutes({ store, serverSession, index: options.searchIndex });
   // Mark read: the note to the asking agents goes once the Undo window has passed.
@@ -1336,8 +1344,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const pullRepoRead = new Set<string>();
   const pullRepoReading = new Map<string, Promise<InboxProjectRepo | null>>();
   const pulls = createInboxPulls(options.refRunner ? { run: options.refRunner } : {});
-  /** PRs this Inbox closed (the board's Close), by key: when. A reopen is taken only for these (`reopenAllowed`). */
-  const closedByInbox = new Map<string, number>();
+  /**
+   * PRs this Inbox closed (the board's Close), by key: when, and the PR as it was. A reopen is taken only for these
+   * (`reopenAllowed`), and finds the PR here once a fresh list no longer holds it (an open-only search drops it).
+   */
+  const closedByInbox = new Map<string, { at: number; pull: InboxPull }>();
   // The PR authors' pictures (inbox-pull-avatars.ts): only for logins the last list showed, served from this origin.
   const pullAvatars = createPullAvatars({ ...options.pullAvatars, dir: options.pullAvatars?.dir ?? join(inboxDir(dataDir), "pull-avatars") });
   // The projects' letter-mark pictures (inbox-project-pictures.ts; Settings → Rows, all off by default).
@@ -1888,18 +1899,20 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * `?column=in_progress,in_review` filter; every card otherwise, in the
    * Board's column order, the latest move first.
    */
+  const cardColumnsOf = (url: URL): Set<InboxCardColumn> | null => {
+    const raw = url.searchParams.get("column");
+    if (raw === null || raw === "") return null;
+    const columns = new Set<InboxCardColumn>();
+    for (const value of raw.split(",")) {
+      const column = inboxCardColumnOf(value);
+      if (column === null) throw new InboxError("validation_error", `column: one or more of ${INBOX_CARD_COLUMNS.join(", ")}, comma-separated.`, { field: "column" });
+      columns.add(column);
+    }
+    return columns;
+  };
   const cardsModel = (url: URL) => {
     const project = projectFilterOf(url);
-    const raw = url.searchParams.get("column");
-    let columns: Set<InboxCardColumn> | null = null;
-    if (raw !== null && raw !== "") {
-      columns = new Set();
-      for (const value of raw.split(",")) {
-        const column = inboxCardColumnOf(value);
-        if (column === null) throw new InboxError("validation_error", `column: one or more of ${INBOX_CARD_COLUMNS.join(", ")}, comma-separated.`, { field: "column" });
-        columns.add(column);
-      }
-    }
+    const columns = cardColumnsOf(url);
     const cards = store.listCards({ projectIds: project ? new Set([project]) : null, columns }).map((card) => store.cardWire(card));
     // An agent's drops the person has not seen, in the project (or everywhere): the Board's "N dropped by an agent".
     const droppedUnseen = store.listCards({ projectIds: project ? new Set([project]) : null, columns: new Set(["dropped"]) }).filter(isInboxCardDropUnseen).length;
@@ -1948,6 +1961,45 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   };
 
   /**
+   * The merged Board (`GET /api/inbox/cards?machines=1`, mark `cards`): this Inbox's cards, and every linked machine's
+   * that takes `cards`, each with `machine`. A far card's tag reads as the merged tag of its name (the list's `tags`), its
+   * threads' rows come with it, and `machines` holds each linked machine's look and cursor, for its cards' bold and the
+   * look the window records there. A linked machine never lists a card, thread or project this store holds.
+   */
+  const mergedCardsModel = async (url: URL) => {
+    const own = cardsModel(url);
+    const self = machines.selfId;
+    const project = projectFilterOf(url);
+    const columns = cardColumnsOf(url);
+    const far = await machines.cardLists();
+    const ownTags = store.initiatives().filter((tag) => tag.deleted_at === null);
+    const merged = inboxMachineTags(self, ownTags, machines.tagLists());
+    const cards: InboxCardWire[] = [...own.cards];
+    const threads: Record<string, unknown> = { ...own.threads };
+    const seen: Record<string, { cursor: number; seen_seq: number | null }> = {};
+    let droppedUnseen = own.dropped_unseen;
+    const initiatives = [...own.initiatives];
+    const listed = new Set(cards.map((card) => card.id));
+    for (const { machine, cards: board } of far) {
+      seen[machine] = { cursor: board.cursor, seen_seq: board.seen_seq };
+      // Its live tags are the list's merged ones; a deleted one (or one no merged tag names) stays for its cards' history.
+      for (const tag of board.initiatives) if (tag.deleted_at !== null || !merged.idOn(machine, tag.id)) initiatives.push(tag);
+      for (const card of board.cards) {
+        if (listed.has(card.id) || store.card(card.id) || store.project(card.project_id)) continue;
+        if (project && card.project_id !== project) continue;
+        if (isInboxCardDropUnseen(card)) droppedUnseen += 1;
+        if (columns && !columns.has(card.column)) continue;
+        listed.add(card.id);
+        const initiative = card.initiative ? (merged.idOn(machine, card.initiative) ?? card.initiative) : null;
+        cards.push({ ...card, initiative, machine });
+        for (const id of card.threads) if (!(id in threads) && !store.message(id)) threads[id] = board.threads[id] ?? null;
+      }
+    }
+    cards.sort((a, b) => inboxCardColumnIndex(a.column) - inboxCardColumnIndex(b.column) || b.moved_at.localeCompare(a.moved_at) || a.id.localeCompare(b.id));
+    return { ...own, cards, threads, initiatives, dropped_unseen: droppedUnseen, self, machines: seen };
+  };
+
+  /**
    * The person's moves on a card (`POST /api/inbox/cards/:id`): `op` move
    * (`column`, any; a move to dropped may carry `reason`), icebox (a window
    * from before v2: Backlog, where the Icebox folded in), drop (`reason`
@@ -1977,7 +2029,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // Sent to an agent: `thread_id` is the thread the window just started for it (compose's Send).
         return store.sendCard(id, { thread_id: body.thread_id });
       case "initiative":
-        // The card's initiative (approval "board-initiatives"): an `ini_` id, or null for none.
+        // The card's initiative (approval "board-initiatives"): an `ini_` id, or null for none. A linked machine's
+        // window names it by `name` instead: the live tag of that name here, made when none is.
+        if (body.initiative === undefined && body.name !== undefined) return store.setCardInitiativeNamed(id, body.name, by);
         if (body.initiative === undefined) throw new InboxError("validation_error", "initiative: an ini_ id, or null for none.", { field: "initiative" });
         return store.setCardInitiative(id, body.initiative, by);
       default:
@@ -5359,9 +5413,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         }
         const { projectsByRepo, wanted } = await pullProjects();
         // `others=1`: the person has the Others view open, so Others is read as often as the list. `everywhere=1`: the
-        // Pull requests page, the person's own PRs in any repository (approval "inbox-pr-dashboard").
+        // Pull requests page, the person's own PRs in any repository (approval "inbox-pr-dashboard"). `machines=1` with
+        // it: the linked machines' boards too, read beside this one (a machine's door never passes `machines`).
         const everywhere = url.searchParams.get("everywhere") === "1";
-        const listed = await pulls.list(wanted, { refresh: url.searchParams.get("refresh") === "1", others: url.searchParams.get("others") === "1", everywhere });
+        const refresh = url.searchParams.get("refresh") === "1";
+        const far = everywhere && url.searchParams.get("machines") === "1" ? machines.pullLists(refresh) : null;
+        const listed = await pulls.list(wanted, { refresh, others: url.searchParams.get("others") === "1", everywhere });
         // Risk is judged for the projects' PRs only, as before: the page never starts an agent on a repository it doesn't work in.
         pullRisk.assess(everywhere ? listed.pulls.filter((pull) => projectsByRepo.has(`${pull.host}/${pull.repo}`.toLowerCase())) : listed.pulls);
         // Only this list's authors: a host it did not list (project removed, CLI signed out) keeps no login.
@@ -5369,7 +5426,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const links = linkInboxPulls(listed.pulls, pullLinkStore, projectsByRepo, pullOwnersNow());
         // The Board is optional: a card that links a PR is a quiet extra, only while the Board is on.
         const cards = boardOn() ? pullCards(listed.pulls, store.listCards()) : {};
-        return json({ serverSession, ...listed, links, projects: Object.fromEntries(projectsByRepo), cards });
+        const own = { ...listed, links, projects: Object.fromEntries(projectsByRepo), cards };
+        const farBoards = far ? await far : [];
+        return json({ serverSession, ...(farBoards.length > 0 ? mergePullBoards(own, farBoards) : own) });
       }
       // Reviews (approval "inbox-reviews-page"; inbox-reviews.ts and core's inbox-reviews.ts): one row per thread with
       // a review card (the same thread the Inbox lists, never a copy), with the PRs it owns, plus the listed PRs no
@@ -5607,6 +5666,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
         }
         if (!codeReviewOn()) return json({ error: "Code review is off.", code: "code_review_off" }, 409);
+        if (!pullWriteFromWindow(req)) return json(INBOX_MACHINE_PULL_WINDOW_ONLY_BODY, 403);
         const body = await readBody(req);
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
         const key = typeof body.key === "string" && body.key.length > 0 && body.key.length <= 600 ? body.key : null;
@@ -5636,16 +5696,18 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
         }
         if (!codeReviewOn()) return json({ error: "Code review is off.", code: "code_review_off" }, 409);
+        if (!pullWriteFromWindow(req)) return json(INBOX_MACHINE_PULL_WINDOW_ONLY_BODY, 403);
         const body = await readBody(req);
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
         const key = typeof body.key === "string" && body.key.length > 0 && body.key.length <= 600 ? body.key : null;
         if (!key) throw new InboxError("validation_error", "key: a pull request key from the list.", { field: "key" });
         const reopen = path === "/api/inbox/pulls/reopen";
-        if (reopen && !reopenAllowed(closedByInbox.get(key), Date.now())) {
+        const closedHere = closedByInbox.get(key);
+        if (reopen && !reopenAllowed(closedHere?.at, Date.now())) {
           return json({ error: `Only a pull request closed here in the last ${PULL_REOPEN_WINDOW_MS / 60_000} minutes can be reopened here.`, code: "reopen_not_closed_here" }, 409);
         }
-        if (!pulls.find(key)) await findPulls([key], (await pullProjects()).wanted);
-        const pull = pulls.find(key);
+        if (!reopen && !pulls.find(key)) await findPulls([key], (await pullProjects()).wanted);
+        const pull = reopen ? (pulls.find(key) ?? closedHere?.pull) : pulls.find(key);
         if (!pull) return json({ error: "That pull request is not in the list. Refresh the list and try again.", code: "pull_unknown" }, 404);
         if (!reopen && !inboxPullIsOpen(pull)) return json({ error: pull.state === "merged" ? "It is already merged." : "It is already closed.", code: pull.state === "merged" ? "pull_merged" : "pull_closed" }, 409);
         const result = reopen ? await reopenPull(options.refRunner ?? refCliRunner, pull) : await closePull(options.refRunner ?? refCliRunner, pull);
@@ -5654,7 +5716,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           closedByInbox.delete(key);
           pulls.markReopened(key);
         } else {
-          closedByInbox.set(key, Date.now());
+          closedByInbox.set(key, { at: Date.now(), pull });
           pulls.markClosed(key);
         }
         return json({ serverSession, ok: true, key, url: pull.url });
@@ -6238,7 +6300,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // The Board's cards (approval "inbox-board", step 1): the person's read and moves.
       if (path === "/api/inbox/cards") {
         // Cards carry the person's notes: another site's read is refused, as on the other read routes.
-        if (req.method === "GET") return crossSiteCardRead(req) ?? json(cardsModel(url));
+        if (req.method === "GET") return crossSiteCardRead(req) ?? json(url.searchParams.get("machines") === "1" ? await mergedCardsModel(url) : cardsModel(url));
         if (req.method !== "POST") return json({ error: "Use GET or POST." }, 405);
         // The person's New card (step 2): a title, notes and links, in Backlog (sent to no agent; a window
         // from before v2 says icebox, which folded into it); or sent to an agent: `thread_id` is the thread
@@ -6343,7 +6405,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const shipping: { id: string; refs: InboxCardRef[] }[] = [];
         for (const id of new Set(ids as string[])) {
           const card = store.card(id);
-          const ref = card ? inboxCardMarkRef(card) : null;
+          // A linked machine's card (its Board as last read) gets its mark from here; only its own machine ships it.
+          const shown = card ?? machines.farCard(id);
+          const ref = shown ? inboxCardMarkRef(shown) : null;
           if (ref) wanted.push({ id, ref });
           if (card && INBOX_CARD_AUTO_SHIP_COLUMNS.includes(card.column)) {
             const own = new Set(inboxCardShipPrs(card));
@@ -6378,7 +6442,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const refused = crossSiteCardRead(req);
         if (refused) return refused;
         if (!boardOn()) return json({ error: "The Board is off.", code: "board_off" }, 409);
-        const card = store.card(faviconMatch[1]!);
+        const card = store.card(faviconMatch[1]!) ?? machines.farCard(faviconMatch[1]!);
         if (!card) throw new InboxError("card_not_found", `No card ${faviconMatch[1]}.`);
         const href = url.searchParams.get("url") ?? "";
         const ref = inboxCardRefsOf(card).find((r) => r.url === href && r.source === "web");
@@ -7120,7 +7184,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       readBody,
       json,
       holds: (kind, id) =>
-        kind === "projects" ? store.project(id) !== null : kind === "attachments" ? store.attachment(id) !== null : kind === "annotations" ? store.annotation(id) !== null : store.message(id) !== null,
+        kind === "projects" ? store.project(id) !== null : kind === "attachments" ? store.attachment(id) !== null : kind === "annotations" ? store.annotation(id) !== null : kind === "cards" ? store.card(id) !== null : store.message(id) !== null,
       ownVersions: () => ({ current: version, latest: updates.knownLatest() }),
       timings: options.machineLinkTimings,
     });

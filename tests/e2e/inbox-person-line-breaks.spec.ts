@@ -6,7 +6,7 @@
  *
  * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
  */
-import { expect, test } from '@playwright/test';
+import { expect, test } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
