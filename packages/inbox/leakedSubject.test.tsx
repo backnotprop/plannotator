@@ -30,6 +30,8 @@ let leaked = '';
 let listHeld: Promise<void> | null = null;
 let looks = 0;
 let threadReads = 0;
+let failFirstList = false;
+let releaseList = () => {};
 let dir: string | null = null;
 let root: Root | null = null;
 let host: HTMLElement | null = null;
@@ -74,6 +76,11 @@ beforeAll(async () => {
   savedFetch = globalThis.fetch;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input).split('?')[0]!;
+    if (failFirstList && path === '/api/inbox/threads') {
+      failFirstList = false;
+      listHeld = new Promise<void>((done) => (releaseList = done));
+      throw new TypeError('Failed to fetch');
+    }
     if (listHeld && path === '/api/inbox/threads') await listHeld;
     if ((init?.method ?? 'GET') === 'POST' && path.endsWith('/seen')) looks += 1;
     const answer = await loopback(String(input), init?.method ?? 'GET', init?.body ? String(init.body) : undefined);
@@ -142,4 +149,25 @@ test.skipIf(!hasDom)('an old leaked subject shows as its first line in the list 
   expect(everything).not.toContain('</subject>');
   expect(everything).not.toContain('<parameter');
   expect(everything).not.toContain('ws-rollup-2026-10-20-a');
+}, 30_000);
+
+test.skipIf(!hasDom)('when the first list read fails, the thread opened from its link is still looked at, once, without waiting for a list', async () => {
+  looks = 0;
+  failFirstList = true;
+  window.location.hash = `#thread=${leaked}`;
+  host = document.createElement('div');
+  document.body.appendChild(host);
+  act(() => {
+    root = createRoot(host!);
+    root.render(<InboxApp />);
+  });
+  await until(() => looks > 0, 'the look');
+  await act(async () => {
+    await new Promise((r) => setTimeout(r, 300));
+  });
+  expect(looks).toBe(1);
+  releaseList();
+  listHeld = null;
+  await until(() => host!.querySelector('.ib-subject') !== null, 'the thread');
+  expect(looks).toBe(1);
 }, 30_000);

@@ -569,11 +569,12 @@ function Inbox() {
    * another machine's thread (`#thread=` after a reload, in a new tab) first reads it here and gets a 404. That 404
    * waits for this list and, when the list names another machine as the owner, reads the thread there.
    */
-  const firstList = useRef<{ done: boolean; promise: Promise<void>; resolve: () => void } | null>(null);
+  const firstList = useRef<{ done: boolean; promise: Promise<void>; resolve: () => void; tried: Promise<void>; settle: () => void } | null>(null);
   if (!firstList.current) {
     let resolve = () => {};
+    let settle = () => {};
     const promise = new Promise<void>((r) => (resolve = r));
-    firstList.current = { done: false, promise, resolve };
+    firstList.current = { done: false, promise, resolve, tried: new Promise<void>((r) => (settle = r)), settle: () => settle() };
   }
   const threadReadApplied = useRef(0);
   /**
@@ -1854,7 +1855,7 @@ function Inbox() {
       // A first read that fails is read again until it lands (firstListRead.ts): the page listens only from then on.
       const first = await readFirstList({
         read: async () => {
-          const next = await refreshList(true);
+          const next = await refreshList(true).finally(() => firstList.current!.settle());
           if (!settingsAsked) void refreshSettings();
           settingsAsked = true;
           return next;
@@ -2224,11 +2225,10 @@ function Inbox() {
       // settles nothing when every message is seen, left it there with its
       // questions open.
       if (listCovered() && COVERED_LIST_SETTLES === 'while-covered') settleList('own', false, { threadId });
-      // Until it lands and the list is read again, the row and the header read it as looked at (`looking`).
       setLooking((current) => (current.has(threadId) ? current : new Set(current).add(threadId)));
       const look = (async () => {
         try {
-          if (!firstList.current!.done) await firstList.current!.promise;
+          await firstList.current!.tried;
           await inboxApi.seen(threadId, latestAgentSeq(opened)).catch(() => {});
           // Read the list even when another thread opened meanwhile: this row leaves `looking` next, and must
           // then show the server's row (read), not the one from before the look (bold).
