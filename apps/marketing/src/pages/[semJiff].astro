@@ -89,6 +89,34 @@ const wrongClaims = [
   },
 ];
 
+const torrentWords = ['MOVED', 'RENAMED', 'REFORMATTED', 'EXTRACTED', 'INLINED', 'EDITED'];
+const tileTones = ['t0', 't1', 't2', 't3', 't4'];
+
+const makeTorrent = (rows: number, seed: number, minTiles: number, growth: number) => {
+  let a = seed;
+  const rand = () => {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  return Array.from({ length: rows }, (_, r) => {
+    const count = minTiles + Math.floor(r * growth);
+    return Array.from({ length: count }, () => {
+      const roll = rand();
+      if (roll < 0.1) return { kind: 'plus', text: '+' };
+      if (roll < 0.13) return { kind: 'minus', text: '−' };
+      if (roll < 0.17) return { kind: 'led', text: '+' };
+      if (roll < 0.195) return { kind: 'ask', text: '?' };
+      if (roll < 0.215) return { kind: 'ok', text: '✓' };
+      return { kind: tileTones[Math.floor(rand() * tileTones.length)], text: torrentWords[Math.floor(rand() * torrentWords.length)] };
+    });
+  });
+};
+
+const heroTorrent = makeTorrent(15, 1123, 1, 0.75);
+const dividerTorrent = makeTorrent(2, 4419, 26, 0);
+
 const pctOf = (n: number, total: number) => `${((n / total) * 100).toFixed(2)}%`;
 
 const title = `${SEM_JIFF_NAME} · Plannotator`;
@@ -97,11 +125,13 @@ const description =
 ---
 
 <Base title={title} description={description}>
-  <link slot="head" rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500;600&display=swap" />
+  <link slot="head" rel="preload" href="/fonts/paper-mono/PaperMono-Variable.woff2" as="font" type="font/woff2" crossorigin />
+  <link slot="head" rel="preload" href="/fonts/geist/Geist-Variable.woff2" as="font" type="font/woff2" crossorigin />
   <div class="sd-static min-h-screen bg-background text-foreground">
     <Nav />
 
     <main class="max-w-6xl mx-auto px-6 md:px-8">
+      <div class="sd-hero-wrap">
       <header class="sd-hero">
         <div class="sd-cmd-row">
           <button type="button" class="sd-cmd" data-copy={installCmd} aria-label="Copy the install command">
@@ -122,7 +152,11 @@ const description =
           </a>
         </div>
 
-        <h1 class="font-display sd-heading">see what a diff<br />really changed</h1>
+        <h1 class="sd-heading">see what a diff<br />really changed</h1>
+        <p class="sd-line">
+          <span class="sd-line-engine">the engine labels the noise.</span>
+          <span class="sd-line-you">you read the real edits.</span>
+        </p>
         <p class="sd-overview">
           {SEM_JIFF_NAME} reads both sides of a code diff with tree-sitter and labels what actually
           happened, so reviewers skip the noise and read the real edits. It powers the Sem
@@ -136,6 +170,14 @@ const description =
           ))}
         </ul>
       </header>
+      <div class="sd-torrent" aria-hidden="true">
+        {heroTorrent.map((row) => (
+          <div class="sd-torrent-row">
+            {row.map((t) => <span class={`sd-tile sd-tile-${t.kind}`}>{t.text}</span>)}
+          </div>
+        ))}
+      </div>
+      </div>
 
       <section class="sd-gallery" aria-label="What it labels">
         <div class="sd-labels" role="tablist" aria-label="Change types">
@@ -168,10 +210,17 @@ const description =
             </div>
           ))}
         </figure>
+        <div class="sd-torrent sd-torrent-divider" aria-hidden="true">
+          {dividerTorrent.map((row) => (
+            <div class="sd-torrent-row">
+              {row.map((t) => <span class={`sd-tile sd-tile-${t.kind}`}>{t.text}</span>)}
+            </div>
+          ))}
+        </div>
       </section>
 
       <section id="power-up" class="sd-section">
-        <h2 class="font-display sd-title">power up with Jev and Clef</h2>
+        <h2 class="sd-title">power up with Jev and Clef</h2>
         <p class="sd-body">
           Add your own Jev key and the engine asks a model about the candidates its strict rules
           aren't sure of. Add Clef and it breaks the ties.
@@ -259,7 +308,7 @@ const description =
       </section>
 
       <section id="compare" class="sd-section">
-        <h2 class="font-display sd-title">more found, far fewer wrong</h2>
+        <h2 class="sd-title">more found, far fewer wrong</h2>
         <p class="sd-body">
           Extracted and inlined functions on the same commits, next to RefactoringMiner.
         </p>
@@ -314,7 +363,7 @@ const description =
       </section>
 
       <section id="tools" class="sd-section">
-        <h2 class="font-display sd-title">{hasLinesLeft ? 'less to read, fewer wrong claims' : 'fewer wrong claims'}</h2>
+        <h2 class="sd-title">{hasLinesLeft ? 'less to read, fewer wrong claims' : 'fewer wrong claims'}</h2>
         <p class="sd-body">{hasLinesLeft ? 'Next to plain git, git --color-moved, difftastic, GumTree and sem.' : 'Next to difftastic and sem, on projects it was never tuned on.'}</p>
 
         {hasLinesLeft && (
@@ -378,7 +427,7 @@ const description =
       </section>
 
       <section class="sd-cta">
-        <h2 class="font-display sd-title">try it in your next review</h2>
+        <h2 class="sd-title">try it in your next review</h2>
         <p class="sd-body">
           It's already in <a href="/code-review/">Plannotator code review</a>. Or use the engine on its own:
         </p>
@@ -452,6 +501,7 @@ const description =
 
 <style>
   .sd-static {
+    color-scheme: dark;
     --background: #0b0a11;
     --foreground: #ece7dc;
     --card: #000000;
@@ -462,7 +512,10 @@ const description =
     --primary: #a79aec;
     --destructive: #f2443b;
     --sd-you: #f01ef0;
-    --font-mono: 'Geist Mono', 'JetBrains Mono', ui-monospace, monospace;
+    --font-mono: 'Paper Mono', 'Geist Mono', ui-monospace, monospace;
+    --sd-display: 'Geist', 'Instrument Sans', system-ui, sans-serif;
+    --sd-led: #86f51f;
+    --sd-plus: #2fd872;
     --sd-dim: #b9b4c4;
     --sd-subtle: #8f8aa3;
     --sd-grid: color-mix(in oklab, var(--foreground) 9%, transparent);
@@ -475,27 +528,6 @@ const description =
     --sd-diff-bg: #1e1e1e;
   }
 
-  :global(.light) .sd-static {
-    --background: #efebe3;
-    --foreground: #0b0a11;
-    --card: #faf8f3;
-    --popover: #faf8f3;
-    --muted: #e4dfd4;
-    --muted-foreground: #58546a;
-    --border: #d8d2c6;
-    --primary: #4a37c4;
-    --destructive: #c4271f;
-    --sd-you: #b0129f;
-    --sd-dim: #46424f;
-    --sd-subtle: #625e70;
-    --sd-c-engine: #aaa4be;
-    --sd-c-jev: #7466cf;
-    --sd-c-clef: #4a37c4;
-    --sd-c-n1: #b3aec0;
-    --sd-c-n2: #7d7890;
-    --sd-c-lead: #4a37c4;
-    --sd-diff-bg: #ffffff;
-  }
 
   .sd-static :global(::selection) {
     background: color-mix(in oklab, var(--sd-you) 40%, transparent);
@@ -504,13 +536,89 @@ const description =
 
   .sd-static :global(:focus-visible) { outline-color: var(--sd-you); }
 
+  .sd-hero-wrap {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    align-items: center;
+    gap: 2rem;
+    padding: 5rem 0 2.5rem;
+  }
+
+  @media (min-width: 1024px) {
+    .sd-hero-wrap { grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); }
+  }
+
   .sd-hero {
     display: flex;
     flex-direction: column;
     align-items: flex-start;
     gap: 1.25rem;
-    padding: 5rem 0 2.5rem;
-    max-width: 46rem;
+    min-width: 0;
+  }
+
+  .sd-line {
+    display: flex;
+    flex-direction: column;
+    font-family: var(--font-mono);
+    font-weight: 500;
+    font-size: clamp(1.0625rem, 1.8vw, 1.375rem);
+    line-height: 1.35;
+  }
+
+  .sd-line-engine { color: #a79aec; }
+  .sd-line-you { color: var(--sd-you); }
+
+  .sd-torrent {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    overflow: hidden;
+    min-width: 0;
+  }
+
+  .sd-torrent-row {
+    display: flex;
+    justify-content: flex-end;
+    gap: 3px;
+    min-width: 0;
+  }
+
+  .sd-tile {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 20px;
+    min-width: 20px;
+    padding: 0 5px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 500;
+    line-height: 1;
+    letter-spacing: 0.02em;
+    border-radius: 1px;
+    user-select: none;
+  }
+
+  .sd-tile-t0 { background: #16131f; color: #615c78; }
+  .sd-tile-t1 { background: #2a2262; color: #a79aec; }
+  .sd-tile-t2 { background: #5038b0; color: #ece7dc; }
+  .sd-tile-t3 { background: #a79aec; color: #0b0a11; }
+  .sd-tile-t4 { background: #615c78; color: #0b0a11; }
+  .sd-tile-plus { background: var(--sd-plus); color: #0b0a11; font-weight: 700; padding: 0; }
+  .sd-tile-minus { background: var(--destructive); color: #0b0a11; font-weight: 700; padding: 0; }
+  .sd-tile-led { background: #1a1c18; color: var(--sd-led); font-weight: 700; padding: 0; }
+  .sd-tile-ask,
+  .sd-tile-ok { background: var(--sd-you); color: #0b0a11; font-weight: 700; padding: 0; }
+
+  .sd-torrent-divider {
+    margin-top: 1rem;
+  }
+
+  .sd-torrent-divider .sd-torrent-row { justify-content: flex-start; }
+
+  @media (max-width: 1023px) {
+    .sd-hero-wrap > .sd-torrent .sd-torrent-row:nth-child(-n + 9) { display: none; }
   }
 
   .sd-cmd-row {
@@ -575,10 +683,12 @@ const description =
 
 
   .sd-heading {
-    font-size: clamp(2rem, 5vw, 3rem);
-    line-height: 1.08;
-    font-weight: 700;
-    letter-spacing: -0.02em;
+    font-family: var(--sd-display);
+    font-size: clamp(2.5rem, 6.4vw, 4.5rem);
+    line-height: 0.98;
+    font-weight: 900;
+    letter-spacing: -0.035em;
+    color: #ece7dc;
     text-wrap: balance;
   }
 
@@ -599,29 +709,30 @@ const description =
   .sd-labels {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.5rem;
+    gap: 3px;
   }
 
   .sd-label {
     font-family: var(--font-mono);
     font-size: 0.75rem;
-    font-weight: 700;
+    font-weight: 500;
     line-height: 1;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
     padding: 0.5rem 0.75rem;
-    border-radius: 4px;
+    border-radius: 1px;
+    border: none;
     cursor: pointer;
-    color: var(--sd-dim);
-    border: 1px solid var(--border);
-    background: transparent;
-    transition: color 0.15s, border-color 0.15s, background-color 0.15s;
+    color: #a79aec;
+    background: #2a2262;
+    transition: background-color 0.15s, color 0.15s;
   }
 
-  .sd-label:hover { color: var(--foreground); }
+  .sd-label:hover { background: #5038b0; color: #ece7dc; }
 
   .sd-label[aria-selected='true'] {
-    color: var(--primary);
-    border-color: color-mix(in oklab, var(--primary) 45%, var(--border));
-    background: color-mix(in oklab, var(--primary) 10%, transparent);
+    background: #a79aec;
+    color: #0b0a11;
   }
 
   .sd-label:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
@@ -670,10 +781,12 @@ const description =
 
 
   .sd-title {
-    font-size: clamp(1.625rem, 3.2vw, 2.25rem);
-    line-height: 1.12;
-    font-weight: 600;
-    letter-spacing: -0.02em;
+    font-family: var(--sd-display);
+    font-size: clamp(1.75rem, 3.4vw, 2.5rem);
+    line-height: 1.05;
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    color: #ece7dc;
     text-wrap: balance;
   }
 
@@ -1041,4 +1154,20 @@ const description =
     border-color: var(--border);
   }
 
+</style>
+
+<style is:global>
+  @font-face {
+    font-family: 'Paper Mono';
+    src: url('/fonts/paper-mono/PaperMono-Variable.woff2') format('woff2');
+    font-weight: 100 800;
+    font-display: swap;
+  }
+
+  @font-face {
+    font-family: 'Geist';
+    src: url('/fonts/geist/Geist-Variable.woff2') format('woff2');
+    font-weight: 100 900;
+    font-display: swap;
+  }
 </style>
