@@ -308,6 +308,7 @@ import { DEFAULT_FAVICON_STYLE, isFaviconStyle, type FaviconStyle } from "@plann
 import { themeChooserLook, themeChooserOpen } from "@plannotator/shared/inbox/theme-chooser";
 import { createCardMarks } from "./inbox-card-marks";
 import { validateFilePath } from "@plannotator/shared/review-core";
+import { createInboxPullLookups, refCardsKindReader } from "./inbox-pull-lookups";
 import { createInboxPulls, InboxPullsError, linkInboxPulls, pullCards, threadAgent, type InboxPullLinkStore, type InboxPullRepo } from "./inbox-pulls";
 import { parseFileLevelComments, parsePRReviewAction, submitPRReview as submitForgeReview, type PRRef, type PRReviewFileComment, type PRRuntime } from "@plannotator/shared/pr-provider";
 import { prCommandRuntime } from "./pr";
@@ -1327,7 +1328,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // Until the startup read of every project's origin has begun, an empty cache says nothing yet about Tidy's suggestions.
   let repoReadsBegun = false;
 
-  // Hover cards for issue, PR and MR links (ref-cards.ts): nothing runs until a card is asked for.
+  // Hover cards for issue, PR and MR links (ref-cards.ts): nothing runs until a card is asked for (or the attach line looks a number up after a send, `pullLookups` below).
   // github.com, gitlab.com and the hosts this computer's own gh / glab is signed in to; nothing else.
   // Bitbucket Cloud PRs through the review app's credentials; a test that runs its own CLIs passes its own reader.
   const refCards = createRefCards(
@@ -1355,6 +1356,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const pullRepoRead = new Set<string>();
   const pullRepoReading = new Map<string, Promise<InboxProjectRepo | null>>();
   const pulls = createInboxPulls(options.refRunner ? { run: options.refRunner } : {});
+  // The attach line's lookups (inbox-pull-lookups.ts): a number an agent named, after its send, through the hover
+  // cards' read; only while Code review is on and this computer's gh is signed in to the host.
+  const pullLookups = createInboxPullLookups({
+    usable: async (ref) => codeReviewOn() && (await pulls.signedInTo("gh", ref.host)),
+    read: refCardsKindReader(refCards),
+  });
   /**
    * PRs this Inbox closed (the board's Close), by key: when, and the PR as it was. A reopen is taken only for these
    * (`reopenAllowed`), and finds the PR here once a fresh list no longer holds it (an open-only search drops it).
@@ -1569,6 +1576,18 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // A thread's PRs: the reader's live checks, and a read of the PRs an agent just added.
     pulls: threadPullStates,
     projectHost: projectRepoHost,
+    // The attach hint's `#12`: the project's cached origin, and a PR the Pull requests list, a hover card or a lookup
+    // already read. Never a git or forge call on the send's path: a number not known yet is looked up after it.
+    knownPulls: (projectId) => {
+      const project = store.project(projectId);
+      const origin = project ? repos.peek(project.root) : null;
+      return {
+        repo: origin?.host ? { host: origin.host.toLowerCase(), repo: origin.display } : null,
+        isPull: (key) => !!pulls.find(key) || refCards.cached(key)?.kind === "pull" || pullLookups.answer(key)?.kind === "pull",
+        settled: (key) => !!refCards.cached(key) || !!pullLookups.answer(key),
+        lookUp: (refs, found) => pullLookups.lookUp(refs, found),
+      };
+    },
     // Bro mode: send_message's `body` field carries the line only while the person has it on.
     broOn: () => broOn(),
     // Code review: submit_guide's `review` field is listed and served only while the person has it on.
