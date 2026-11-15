@@ -22,6 +22,7 @@ import { WarmCodeHighlight } from './components/WarmCodeHighlight';
 import { threadDrawReady } from './threadDrawReady';
 import { QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import { probedInboxQueryClient } from './data/heldProbe';
+import { useMachineViews } from './data/machineViews';
 import { dropThread, heldThread, isThreadStale, pruneThreads, putThread, readThread, showableThread, staleThreads, useHeldThread } from './data/queries/thread';
 import { sameThreadFiles } from './data/queries/files';
 import { putList, readListTaking, useListModel } from './data/queries/list';
@@ -59,7 +60,6 @@ import {
   inboxAskOn,
   type InboxEvent,
   type ListModel,
-  type MachineView,
   type OutboxView,
   type SettingsModel,
   type UpdateDetails,
@@ -316,16 +316,8 @@ function Inbox() {
   const queryClient = useQueryClient();
   /** The list as the cache holds it (data/queries/list.ts): its last read, with what records said since. */
   const latest = useListModel(queryClient);
-  /**
-   * Linked machines (docs/agent-guides/inbox-machines.md): every machine and its state, from the merged list and
-   * the stream's `machines` frames. Nothing draws from it while no machine is linked (machines.ts).
-   */
-  const [machineViews, setMachineViewsNow] = useState<MachineView[] | null>(null);
-  // Every list read carries the machines; the same ones keep the same model, so a list read rebuilds nothing.
-  const setMachineViews = useCallback(
-    (next: MachineView[]) => setMachineViewsNow((current) => (current && JSON.stringify(current) === JSON.stringify(next) ? current : next)),
-    [],
-  );
+  // Linked machines: a read that began before the latest `machines` frame keeps the frame's state (data/machineViews.ts).
+  const [machineViews, machineViewsGate] = useMachineViews();
   const machines = useMemo(() => machinesModel(machineViews), [machineViews]);
   const machinesRef = useRef(machines);
   machinesRef.current = machines;
@@ -1052,6 +1044,7 @@ function Inbox() {
   );
   const refreshList = useCallback(async (adopt: boolean, slide = false, refresh?: { light?: boolean; keepOpen?: boolean }) => {
     try {
+      const machinesMark = machineViewsGate.mark();
       const { next, held, taken } = await readListTaking(() => latestRef.current, () => listCursor.current, { firstDone: firstList.current!.done, adopt, settings: routeRef.current.page === 'settings' });
       const failedBefore = listReadFailure.current !== null;
       listReadFailure.current = null;
@@ -1090,7 +1083,7 @@ function Inbox() {
         perfFirstList(next.sections);
       }
       // Linked machines: the merged list names every machine and its state (an older Inbox names none).
-      if (next.machines) setMachineViews(next.machines);
+      if (next.machines) machineViewsGate.read(machinesMark, next.machines);
       retryMissingThread();
       if (adopt && slide) armSlide();
       // Show's light for a refresh (clicking Inbox): the rows it brings in, against the list on screen now.
@@ -2011,7 +2004,7 @@ function Inbox() {
           machineThreadTimer = setTimeout(() => void refreshThread(open), 80);
         },
         onMachines: (next) => {
-          setMachineViews(next);
+          machineViewsGate.frame(next);
           // A machine's state or its list moved: read the merged list. Only while a machine is (or just was) linked,
           // so an Inbox that never links reads nothing more than before.
           const linked = next.some((m) => !m.self);
@@ -5545,7 +5538,8 @@ function Inbox() {
         machines={machineViews ?? undefined}
         onMachineUpdate={pageOffersUpdates(settings) ? (id) => setMachineUpdateOpen({ id, snooze: false }) : undefined}
         onMachinesChanged={() => {
-          inboxApi.machines().then((next) => setMachineViews(next.machines), () => {});
+          const mark = machineViewsGate.mark();
+          inboxApi.machines().then((next) => machineViewsGate.read(mark, next.machines), () => {});
           void refreshList(false);
         }}
         onToggleTailscale={(next, replaceExposed) => void toggleTailscale(next, replaceExposed)}
