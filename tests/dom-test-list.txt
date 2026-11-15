@@ -756,3 +756,6 @@ packages/ui/components/agentFace/PowerUpGuy.test.tsx
 packages/review-editor/components/CompactPrimaryAction.test.tsx
 packages/ui/components/agents/LaunchSummaryLine.test.tsx
 packages/review-editor/App.phoneLayout.test.tsx
+packages/ui/components/CommentPopover.phoneKeyboard.test.tsx
+packages/ui/components/Viewer.authorColor.test.tsx
+packages/review-editor/components/authorColor.review.test.tsx

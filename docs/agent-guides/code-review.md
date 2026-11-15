@@ -73,7 +73,12 @@ directory candidate (path-shaped typos and files error), every other word is
 ignored with a notice and the invoking cwd is reviewed. Hosts pass the resolved cwd
 through existing VCS/workspace discovery and project detection; never use
 `process.chdir()` in a plugin host. Explicit targets inside a repository normalize
-to its detected VCS root. OpenCode uses the internal `opencode-review-directory`
+to its detected VCS root. A named directory also removes `GIT_DIR` and its kin
+(`GIT_REPO_ENV`, `@plannotator/shared/child-env`) from the CLI's env, so a value
+the calling shell exported (a git hook, a script) cannot point the session's git
+at another repository; with no directory named they still decide (Pi's
+`/plannotator-review` runs in Pi's own process and does not change its env).
+OpenCode uses the internal `opencode-review-directory`
 command for these targets so an older CLI rejects them rather than silently
 reviewing the caller's repo; ordinary reviews keep `opencode-review`.
 Feedback still goes to the invoking agent
