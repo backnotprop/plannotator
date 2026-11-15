@@ -89,8 +89,8 @@ dialog.ib-dlg.ib-cmb { width: min(560px, calc(100vw - 32px)); }
 .ib-cmb-nm b { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ib-cmb-nm small { color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); }
 /* Past four agents, "Show N more"; then all of them scroll in a box short enough that the field and the buttons stay
-   on screen, a phone's too. */
-.ib-cmb-list[data-all] { max-height: min(264px, max(156px, calc(100dvh - 560px))); overflow-y: auto; overscroll-behavior: contain; }
+   on screen, a phone's too, and cut through a row so it reads as more below. */
+.ib-cmb-list[data-all] { max-height: min(286px, max(182px, calc(100dvh - 560px))); overflow-y: auto; overscroll-behavior: contain; }
 .ib-cmb-more { display: block; width: 100%; height: 36px; padding: 0 10px 0 64px; border: 0; border-radius: 8px; background: none; color: var(--muted-foreground); font: inherit; font-size: var(--ib-fs-13, 13px); text-align: left; cursor: pointer; }
 @media (hover: hover) { .ib-cmb-more:hover { background: var(--ib-hover); color: var(--foreground); } }
 .ib-cmb-more:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
