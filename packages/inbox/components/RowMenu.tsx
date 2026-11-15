@@ -63,6 +63,7 @@ const LABELS: Record<RowMenuAction, { label: string; icon: IconName; iconClass?:
   'mark-unread': { label: 'Mark unread', icon: 'envelope' },
   unread: { label: 'Move back', icon: 'inbox' },
   archive: { label: 'Archive', icon: 'archive' },
+  unarchive: { label: 'Unarchive', icon: 'archive' },
 };
 
 /** The row a `contextmenu` event names: a wide or three-line row (its wrapper, `data-row`), or a phone's row. */
@@ -117,7 +118,7 @@ export const ThreadRowMenu = forwardRef<HTMLDivElement, ThreadRowMenuProps>(func
   const snoozeBlocked = target ? (props.snoozeBlockedOf?.(target) ?? null) : null;
   const pinning = actions.filter((a) => a === 'pin' || a === 'unpin' || a === 'priority-add' || a === 'priority-remove');
   const copies = actions.filter((a) => a === 'copy-thread' || a === 'copy-link' || a === 'copy-id');
-  const writes = actions.filter((a) => a === 'snooze' || a === 'unsnooze' || a === 'read' || a === 'mark-unread' || a === 'unread' || a === 'archive');
+  const writes = actions.filter((a) => a === 'snooze' || a === 'unsnooze' || a === 'read' || a === 'mark-unread' || a === 'unread' || a === 'archive' || a === 'unarchive');
   // Snooze swaps the menu in place for its times (approval "inbox-snooze"), and Add tag for its tags; the next menu
   // opens as the menu again.
   const [snoozeView, setSnoozeView] = useState<SnoozeView | null>(null);

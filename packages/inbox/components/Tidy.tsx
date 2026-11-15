@@ -218,6 +218,7 @@ export function TidyMenu({
   onCustomize,
   view,
   starredAbove,
+  showArchived,
 }: {
   tidy: TidyController;
   phone: boolean;
@@ -238,6 +239,8 @@ export function TidyMenu({
    * pills above the list and not a sidebar section. Absent (the Board, the tour, an Inbox that keeps no stars): no item.
    */
   starredAbove?: { on: boolean; onChange: (on: boolean) => void };
+  /** "Show archived" (approval "inbox-archived-group"), after it: the Archived group under the list. Absent: no item. */
+  showArchived?: { on: boolean; onChange: (on: boolean) => void };
 }) {
   const trigger = useRef<HTMLButtonElement>(null);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -307,6 +310,7 @@ export function TidyMenu({
                   <Menu.Separator className="ib-pm-sep" />
                   <MenuViewChoice view={view.value} onChange={view.onChange} />
                   {starredAbove && <MenuCheckbox label={STARRED_ABOVE_LABEL} checked={starredAbove.on} onChange={starredAbove.onChange} data-starred-above-option="" />}
+                  {showArchived && <MenuCheckbox label="Show archived" checked={showArchived.on} onChange={showArchived.onChange} data-show-archived-option="" />}
                 </>
               )}
               {look && onLook && (

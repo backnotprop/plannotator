@@ -38,6 +38,11 @@ import { farVersion, MACHINE_LINKS_PROTOCOL, parseFarUpdate, PEER_LINK_TIMINGS, 
 import { installCommandFor, isNewerStableVersion, normalizeStableVersion } from "@plannotator/shared/update-check";
 import { openTransport, type InboxTransportSpec } from "./inbox-transport";
 import { checkTailnetAddress } from "./inbox-transport-tailnet";
+import type { FarArchived } from "./inbox-archived-merged";
+import type { InboxShowArchived } from "./inbox-show-archived";
+
+/** The most rows a linked machine's door gives in one archived page (its `INBOX_ARCHIVED_PAGE_MAX`). */
+const FAR_ARCHIVED_LIMIT_MAX = 200;
 
 /** How long a write to a machine that is online waits for its answer before the window is told "Sending…" (rule 12). */
 export const MACHINE_WRITE_WAIT_MS = 4_000;
@@ -114,6 +119,8 @@ export interface InboxMachinesContext {
   holds: (kind: HeldKind, id: string) => boolean;
   /** This Inbox's own version and the newest release it knows of: the fallback when a machine knows of no update itself. */
   ownVersions?: () => { current: string; latest: string | null };
+  /** A linked machine's list was read: this Inbox takes its "Show archived" switch when that one is newer. */
+  showArchivedSaid?: (value: InboxShowArchived) => void;
   /** Tests: the links' clocks. */
   timings?: MachineLinkTimings;
   now?: () => Date;
@@ -509,7 +516,10 @@ export function createInboxMachines(context: InboxMachinesContext) {
       outbox,
       timings: context.timings,
       onRecord: (record) => emit({ event: "machine", data: record }),
-      onChange: machinesChanged,
+      onChange: () => {
+        if (peer.list?.show_archived) context.showArchivedSaid?.(peer.list.show_archived);
+        machinesChanged();
+      },
       // A snooze or a star moves no cursor, so nothing in the machines block changes: the windows are told in a frame of its own.
       onReread: (event) => emit({ event, data: {} }),
       onCards: () => emit({ event: "cards", data: {} }),
@@ -1145,6 +1155,16 @@ export function createInboxMachines(context: InboxMachinesContext) {
     clearTimeout(timer);
     return [...peers.values()].flatMap((peer) => (peer.cards && peer.list?.marks.includes("cards") ? [{ machine: peer.id, cards: peer.cards }] : []));
   };
+  /**
+   * Each linked machine's archived page for the list's Archived group (inbox-archived-merged.ts): its first `count`
+   * rows, of `project` only from `owner`, the machine that project lives on. Read when a window asks, never before.
+   */
+  const archivedPages = (count: number, project: string | null, owner: string | null): Promise<FarArchived[]> => {
+    const search = `?limit=${Math.min(count, FAR_ARCHIVED_LIMIT_MAX)}${project ? `&project=${encodeURIComponent(project)}` : ""}`;
+    return Promise.all([...peers.values()].filter((peer) => !owner || peer.id === owner).map((peer) => peer.archivedPage(search)));
+  };
+  /** Each linked machine's "Show archived" switch as its list last said: a save here goes past the newest. */
+  const showArchivedCopies = (): InboxShowArchived[] => [...peers.values()].flatMap((peer) => (peer.list?.show_archived ? [peer.list.show_archived] : []));
   /** A linked machine's card, as its Board last said: the lane marks and a link's site icon are read here for it. */
   const farCard = (id: string): InboxCardWire | null => {
     for (const peer of peers.values()) {
@@ -1191,6 +1211,8 @@ export function createInboxMachines(context: InboxMachinesContext) {
     pinnedIds,
     tagLists,
     cardLists,
+    archivedPages,
+    showArchivedCopies,
     farCard,
     snoozeThread,
     /** The linked machine a device on this Inbox's door belongs to (a launch it starts here records it), or null. */
