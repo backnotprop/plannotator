@@ -434,6 +434,36 @@ describe.skipIf(!hasDom)("the thread's button and its card", () => {
     expect(host!.querySelector('[data-pr-button] .ib-cnt')!.textContent).toBe('2');
   });
 
+  test('PRs added while the thread is open, with the read after the change failing: the button shows from the row and reads again', async () => {
+    render(<ThreadPullsButton threadId={THREAD} summary={undefined} />);
+    await settle();
+    expect(host!.querySelector('[data-pr-button]')).toBeNull();
+    readAnswer = async () => {
+      throw new TypeError('Failed to fetch');
+    };
+    await act(async () => threadPullsBus.emit(THREAD));
+    await settle();
+    expect(reads).toHaveLength(2);
+    const twenty = [
+      ...Array.from({ length: 10 }, (_, i) => pull(`acme/api#${i + 1}`, 'open', i === 0 ? 'main' : `a${i}`, `a${i + 1}`)),
+      ...Array.from({ length: 5 }, (_, i) => pull(`acme/web#${i + 1}`, 'open', i === 0 ? 'main' : `w${i}`, `w${i + 1}`)),
+      ...Array.from({ length: 5 }, (_, i) => pull(`slow/repo#${i + 1}`, 'unknown', '', '')),
+    ];
+    render(<ThreadPullsButton threadId={THREAD} summary={{ count: 20, headline: { key: twenty[0]!.pull, state: 'open' } }} />);
+    await settle();
+    const button = host!.querySelector('[data-pr-button]')!;
+    expect(button).not.toBeNull();
+    expect(button.getAttribute('data-pr-n')).toBe('20');
+    expect(button.querySelector('.ib-cnt')!.textContent).toBe('9+');
+    expect(reads).toHaveLength(3);
+    answer = answerOf(twenty);
+    readAnswer = async () => Response.json(answer);
+    await act(async () => threadPullsBus.emit(THREAD));
+    await settle();
+    await click(host!.querySelector('[data-pr-button]'));
+    expect(popover()!.querySelectorAll('[data-pr-row]')).toHaveLength(20);
+  });
+
   test("one PR with no forge answer shows what the Inbox knows, never a made-up card; the forge's answer shows the hover card", async () => {
     answer = answerOf([pull('o/r#7', 'open', 'main', 'a', { checks: 'running' })]);
     render(<ThreadPullsButton threadId={THREAD} summary={undefined} />);
