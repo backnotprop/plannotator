@@ -9,6 +9,7 @@ export const CF_ACCESS_ENV = "PLANNOTATOR_INBOX_CF_ACCESS";
 export interface CfAccessStored {
   on?: boolean;
   host?: string;
+  sessionHost?: string;
   team?: string;
   aud?: string;
   allow?: string[];
@@ -18,6 +19,7 @@ export interface CfAccessStored {
   tunnel?: string;
   app?: string;
   dnsRecord?: string;
+  sessionDnsRecord?: string;
 }
 
 export interface CfAccessSettings {
@@ -26,6 +28,7 @@ export interface CfAccessSettings {
   aud: string;
   allow: string[];
   host: string;
+  sessionHost: string;
   port: number;
 }
 
@@ -82,10 +85,12 @@ export function parseCfAccessSettings(stored: CfAccessStored, forbiddenPort: (po
   if (allow.length === 0 || !allow.every(isEmailAddress)) return { error: "The allowlist must name at least one e-mail address." };
   const host = typeof stored.host === "string" ? stored.host.trim().toLowerCase().replace(/\.$/, "") : "";
   if (!isPublicDnsName(host)) return { error: "The hostname must be a public name like inbox.example.com." };
+  const sessionHost = typeof stored.sessionHost === "string" ? stored.sessionHost.trim().toLowerCase().replace(/\.$/, "") : "";
+  if (!isPublicDnsName(sessionHost) || sessionHost === host) return { error: "The sessions' hostname must be a public name of its own; run setup again." };
   const port = typeof stored.port === "number" ? stored.port : NaN;
   if (!Number.isInteger(port) || port < 1024 || port > 65535) return { error: "The listener port must be from 1024 to 65535." };
   if (forbiddenPort(port)) return { error: `Port ${port} is kept for the Inbox's own use.` };
-  return { team, issuer: `https://${team}`, aud, allow, host, port };
+  return { team, issuer: `https://${team}`, aud, allow, host, sessionHost, port };
 }
 
 export function resolveCfAccess(
@@ -118,8 +123,10 @@ export function hasCfEdgeHeaders(headers: Headers): boolean {
 export const DOOR_SESSION_PREFIX = "/s/";
 const SESSION_ENTRY = /^\/s\/[A-Za-z0-9_-]{16,64}\/?$/;
 
-export function cfAccessFetchSiteAllowed(method: string, path: string, headers: Headers): boolean {
-  if (tailnetFetchSiteAllowed(method, path, headers)) return true;
+export function cfAccessFetchSiteAllowed(method: string, path: string, headers: Headers, sessions = false): boolean {
+  if (!sessions) return tailnetFetchSiteAllowed(method, path, headers);
+  const site = headers.get("sec-fetch-site")?.trim().toLowerCase();
+  if (site !== "cross-site" && site !== "same-site") return true;
   const read = method === "GET" || method === "HEAD";
   return read && headers.get("sec-fetch-mode")?.trim().toLowerCase() === "navigate" && SESSION_ENTRY.test(path);
 }

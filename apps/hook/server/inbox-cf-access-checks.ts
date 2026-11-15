@@ -1,11 +1,12 @@
 import { readFileSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { hasPlannotatorServerHeader } from "@plannotator/shared/plannotator-server-marker";
+import { tunnelEnv } from "@plannotator/server/cf-tunnel";
 
 export type EdgeFetch = (url: string, init: RequestInit) => Promise<Response>;
 
 export interface OutsideCheckInput {
-  host: string;
+  hosts: string[];
   team: string;
   port: number;
   binary: string;
@@ -43,7 +44,7 @@ async function waitConnected(child: ReturnType<typeof Bun.spawn>, timeoutMs: num
       const text = decoder.decode(chunk, { stream: true });
       for (const line of text.split("\n")) {
         if (/Registered tunnel connection/.test(line)) return null;
-        if (/\bERR\b|error/i.test(line)) last = line.replace(/\b[A-Za-z0-9_-]{60,}\b/g, "[redacted]").slice(0, 200);
+        if (/\bERR\b|error/i.test(line)) last = line.replace(/[A-Za-z0-9_+/=-]{40,}/g, "[redacted]").slice(0, 200);
       }
     }
     return last || "cloudflared exited";
@@ -70,7 +71,7 @@ export async function runOutsideChecks(input: OutsideCheckInput): Promise<Outsid
     return { ok: false, failure: `port ${input.port} is in use; stop what holds it or pass --port.` };
   }
   const child = Bun.spawn([input.binary, "tunnel", "--no-autoupdate", "run"], {
-    env: { ...process.env, TUNNEL_TOKEN: readFileSync(input.tokenFile, "utf8").trim(), NO_AUTOUPDATE: "true" },
+    env: tunnelEnv(readFileSync(input.tokenFile, "utf8").trim()),
     stdin: "ignore",
     stdout: "ignore",
     stderr: "pipe",
@@ -78,21 +79,24 @@ export async function runOutsideChecks(input: OutsideCheckInput): Promise<Outsid
   try {
     const notConnected = await waitConnected(child, input.connectTimeoutMs ?? 60_000);
     if (notConnected) return { ok: false, failure: `the tunnel did not connect: ${notConnected}` };
-    const url = `https://${input.host}/`;
-    const probes: { name: string; init: RequestInit; needsLogin: boolean }[] = [
-      { name: "a visit without a login", init: {}, needsLogin: true },
-      { name: "a forged Access token", init: { headers: { "Cf-Access-Jwt-Assertion": forgedToken(input.team) } }, needsLogin: false },
-      { name: "a forged Access cookie", init: { headers: { Cookie: `CF_Authorization=${forgedToken(input.team)}` } }, needsLogin: false },
-      { name: "a wrong hostname", init: { headers: { Host: `wrong-${randomBytes(4).toString("hex")}.${input.host}` } }, needsLogin: false },
-    ];
+    type Probe = { name: string; url: string; init: RequestInit; needsLogin: boolean };
+    const probes: Probe[] = input.hosts.flatMap((host): Probe[] => {
+      const url = `https://${host}/`;
+      return [
+        { name: `a visit to ${host} without a login`, url, init: {}, needsLogin: true },
+        { name: `a forged Access token at ${host}`, url, init: { headers: { "Cf-Access-Jwt-Assertion": forgedToken(input.team) } }, needsLogin: false },
+        { name: `a forged Access cookie at ${host}`, url, init: { headers: { Cookie: `CF_Authorization=${forgedToken(input.team)}` } }, needsLogin: false },
+        { name: `a wrong hostname at ${host}`, url, init: { headers: { Host: `wrong-${randomBytes(4).toString("hex")}.${host}` } }, needsLogin: false },
+      ];
+    });
     for (;;) {
       let pending: string | null = null;
       for (const probe of probes) {
         let response: Response;
         try {
-          response = await edge(url, { ...probe.init, redirect: "manual", signal: AbortSignal.timeout(15_000) });
+          response = await edge(probe.url, { ...probe.init, redirect: "manual", signal: AbortSignal.timeout(15_000) });
         } catch {
-          pending = `${url} does not answer yet`;
+          pending = `${probe.url} does not answer yet`;
           break;
         }
         if (hasPlannotatorServerHeader(response.headers)) return { ok: false, failure: `${probe.name} reached Plannotator.` };

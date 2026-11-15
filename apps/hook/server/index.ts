@@ -737,8 +737,8 @@ async function handleCloudflareAccessReady(port: number): Promise<void> {
   } catch (error) {
     return failStartup(`Cloudflare Access is served by the Inbox, and it could not start: ${error instanceof Error ? error.message : String(error)}`);
   }
-  if (entry.cloudflare_access?.error) return failStartup(`Cloudflare Access: ${entry.cloudflare_access.error}`);
-  const { url } = openSessionDoor(dataDir, port, resolved.settings.host);
+  if (!entry.cloudflare_access?.url) return failStartup(`Cloudflare Access is not open in the running Inbox${entry.cloudflare_access?.error ? `: ${entry.cloudflare_access.error}` : "; restart it with plannotator inbox restart"}.`);
+  const { url } = openSessionDoor(dataDir, port, resolved.settings.sessionHost);
   setServerReadyTailnet({ ask: resolveAIEnabled() && takeEnvPullSessionBridgeConfig() !== undefined });
   await announceTailscaleSession(url, port, CF_ACCESS_SESSION_LINE);
 }

@@ -414,14 +414,14 @@ Then run:
 plannotator inbox cloudflare-access setup --email you@example.com
 ```
 
-It asks for the token (or reads `CLOUDFLARE_API_TOKEN`). It creates a sign-in by one-time code sent to that e-mail, a tunnel, an Access application that lets in only that e-mail, and, last, the DNS record. It then checks from outside that a visit without your sign-in, a forged token, a forged cookie and a wrong name all stay out. Only then does it turn on and print the address with a QR code. Use `--zone` when the token sees several domains, and `--hostname` to choose the name (one level under your domain, for example `plannotator.example.com`).
+It asks for the token (or reads `CLOUDFLARE_API_TOKEN`). It creates a sign-in by one-time code sent to that e-mail, a tunnel, an Access application that lets in only that e-mail, and, last, two DNS records: one name for the Inbox and a sibling name (the same name with `-s` added) for sessions. It then checks from outside that a visit without your sign-in, a forged token, a forged cookie and a wrong name all stay out. Only then does it turn on and print the address with a QR code. Use `--zone` when the token sees several domains, and `--hostname` to choose the name (one level under your domain, for example `plannotator.example.com`).
 
 - **Only you can open it.** Cloudflare asks for your e-mail and a one-time code, and the Inbox checks Cloudflare's signed token on every request itself: the e-mail must be the one you typed. A mistake in the Access policy alone is not enough to let anyone in.
 - **It is on the internet.** Unlike the tailnet, the address is public, behind that sign-in. Treat a signed-in phone like your computer: what you send becomes a turn in an agent session here. The sign-in lasts 24 hours.
-- **Sessions:** add `--cloudflare-access` to `plannotator review`, `annotate` or `last`, and the session opens at the same address under `/s/…`, with the same sign-in. If the Inbox is not running, it starts in the background.
+- **Sessions:** add `--cloudflare-access` to `plannotator review`, `annotate` or `last`, and the session opens under `/s/…` at the sibling name, with the same sign-in (you sign in once). The Inbox and sessions are kept on separate names, so a page in a review cannot act as the Inbox. Open sessions share the sibling name with each other. If the Inbox is not running, it starts in the background.
 - **When this computer sleeps** or the Inbox is stopped, the address shows Cloudflare's own error page. `cloudflared` runs as part of the Inbox and stops with it.
 
-`plannotator inbox cloudflare-access status` shows the address and whether the tunnel is connected; so does **Settings → Devices**. `plannotator inbox cloudflare-access teardown` turns it off and deletes the DNS record, the Access application and the tunnel, in that order (it asks for a token again). `PLANNOTATOR_INBOX_CF_ACCESS=0` keeps it off for one run.
+`plannotator inbox cloudflare-access status` shows the address and whether the tunnel is connected; so does **Settings → Devices**. `plannotator inbox cloudflare-access teardown` turns it off and deletes the DNS records, the Access application and the tunnel, in that order (it asks for a token again). `PLANNOTATOR_INBOX_CF_ACCESS=0` keeps it off for one run.
 
 ## Inside another app on this computer
 

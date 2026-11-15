@@ -13,7 +13,8 @@ export interface DoorSession {
 export type DoorRoute =
   | { kind: "session"; key: string; path: string; via: "prefix" | "referer" }
   | { kind: "inbox" }
-  | { kind: "ended" };
+  | { kind: "ended" }
+  | { kind: "wrong_origin" };
 
 const KEY = /^[A-Za-z0-9_-]{16,64}$/;
 
@@ -48,7 +49,7 @@ function pidAlive(pid: number): boolean {
     process.kill(pid, 0);
     return true;
   } catch (error) {
-    return (error as NodeJS.ErrnoException).code === "EPERM";
+    return false;
   }
 }
 
@@ -110,22 +111,32 @@ export function doorSessionUrl(host: string, key: string): string {
   return `https://${host}${DOOR_SESSION_PREFIX}${key}/`;
 }
 
-export function pickDoorRoute(path: string, referer: string | null, host: string, live: (key: string) => boolean): DoorRoute {
+export type DoorWorld = "inbox" | "sessions";
+
+export function pickDoorRoute(
+  world: DoorWorld,
+  path: string,
+  referer: string | null,
+  sessionHost: string,
+  live: (key: string) => boolean,
+  navigate = false,
+): DoorRoute {
+  if (world === "inbox") return path.startsWith(DOOR_SESSION_PREFIX) ? { kind: "wrong_origin" } : { kind: "inbox" };
   if (path.startsWith(DOOR_SESSION_PREFIX)) {
     const own = sessionKeyOf(path);
     return own && live(own.key) ? { kind: "session", key: own.key, path: own.rest, via: "prefix" } : { kind: "ended" };
   }
-  if (referer) {
+  if (referer && !navigate) {
     let from: URL | null = null;
     try {
       from = new URL(referer);
     } catch {
       from = null;
     }
-    const sameOrigin = from !== null && from.protocol === "https:" && from.host.toLowerCase() === host;
+    const sameOrigin = from !== null && from.protocol === "https:" && from.host.toLowerCase() === sessionHost;
     const own = sameOrigin ? sessionKeyOf(from!.pathname) : null;
     if (own && live(own.key)) return { kind: "session", key: own.key, path, via: "referer" };
     if (own) return { kind: "ended" };
   }
-  return isInboxRoute(path) ? { kind: "inbox" } : { kind: "ended" };
+  return isInboxRoute(path) ? { kind: "wrong_origin" } : { kind: "ended" };
 }

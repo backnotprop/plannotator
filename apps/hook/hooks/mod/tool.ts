@@ -92,13 +92,10 @@ export const PLANNOTATOR_TOOL_TAILSCALE_LINE =
  * The description for a host that accepts `tailscale` (the Claude Code mod):
  * the plain description with the tailscale line after the action lines.
  */
-export const PLANNOTATOR_TOOL_CLOUDFLARE_ACCESS_LINE =
-  '- `cloudflareAccess: true` (annotate, review, last): open the page at the user\'s own Cloudflare Access address instead, for another device; only once they set it up (`plannotator inbox cloudflare-access setup`) and ask for it. Not together with `tailscale`.'
-
 export const PLANNOTATOR_TOOL_TAILSCALE_DESCRIPTION = (() => {
   const lines = PLANNOTATOR_TOOL_DESCRIPTION.split('\n')
   const lastAction = lines.findIndex((line) => line.startsWith('- action "close"'))
-  return [...lines.slice(0, lastAction + 1), PLANNOTATOR_TOOL_TAILSCALE_LINE, PLANNOTATOR_TOOL_CLOUDFLARE_ACCESS_LINE, ...lines.slice(lastAction + 1)].join('\n')
+  return [...lines.slice(0, lastAction + 1), PLANNOTATOR_TOOL_TAILSCALE_LINE, ...lines.slice(lastAction + 1)].join('\n')
 })()
 
 /** The input schema for a host that accepts `tailscale`: the plain schema plus that one property. */
@@ -112,7 +109,7 @@ export const PLANNOTATOR_TOOL_TAILSCALE_INPUT_SCHEMA = {
     },
     cloudflareAccess: {
       type: 'boolean',
-      description: 'annotate, review, last: open the page at the user\'s Cloudflare Access address (set up with `plannotator inbox cloudflare-access setup`), for their e-mail only, on another device. Not with tailscale.',
+      description: 'annotate, review, last: open the page at the user\'s own Cloudflare Access address instead, to open on another device, for their e-mail only. Only when they ask for it and have run `plannotator inbox cloudflare-access setup`. Not together with tailscale.',
     },
   },
 } as const

@@ -1,9 +1,9 @@
 import { beforeAll, describe, expect, test } from "bun:test";
-import { makeTestKeys, ownerClaims, TEST_AUD, TEST_HOST, TEST_OWNER, TEST_TEAM, type TestKeys } from "../../../tests/helpers/cf-access-keys";
+import { makeTestKeys, ownerClaims, TEST_AUD, TEST_HOST, TEST_OWNER, TEST_SESSION_HOST, TEST_TEAM, type TestKeys } from "../../../tests/helpers/cf-access-keys";
 import { parseCfAccessSettings, resolveCfAccess, type CfAccessSettings } from "./cf-access";
 import { CF_ACCESS_KEYS_REFETCH_MS, CF_ACCESS_KEYS_TTL_MS, createCfAccessVerifier } from "./cf-access-verify";
 
-const settings = parseCfAccessSettings({ team: TEST_TEAM, aud: TEST_AUD, allow: [TEST_OWNER], host: TEST_HOST, port: 41234 }) as CfAccessSettings;
+const settings = parseCfAccessSettings({ team: TEST_TEAM, aud: TEST_AUD, allow: [TEST_OWNER], host: TEST_HOST, sessionHost: TEST_SESSION_HOST, port: 41234 }) as CfAccessSettings;
 const NOW = 1_800_000_000_000;
 const nowS = NOW / 1000;
 
@@ -36,7 +36,7 @@ describe("the Access check chain", () => {
   test("an owner's token through the public host passes", async () => {
     const { v, fetched } = verifier();
     const result = await v.check("GET", "/", headers(await keys.sign(ownerClaims(nowS, { email: "Owner@Example.com" }))));
-    expect(result).toEqual({ ok: true, email: TEST_OWNER });
+    expect(result).toEqual({ ok: true, email: TEST_OWNER, world: "inbox" });
     expect(fetched).toEqual([`https://${TEST_TEAM}/cdn-cgi/access/certs`]);
   });
 
@@ -78,11 +78,19 @@ describe("the Access check chain", () => {
     });
   }
 
-  test("a cross-site top-level navigation to a session's entry is let in", async () => {
+  test("Host decides the world; the two names are other sites to each other", async () => {
     const { v } = verifier();
-    const h = headers(await keys.sign(ownerClaims(nowS)), { "sec-fetch-site": "cross-site", "sec-fetch-mode": "navigate" });
-    expect((await v.check("GET", "/s/abcdefghijklmnopqrstuv/", h)).ok).toBe(true);
-    expect((await v.check("GET", "/s/abcdefghijklmnopqrstuv/api/diff", h)).ok).toBe(false);
+    const token = await keys.sign(ownerClaims(nowS));
+    const sessions = headers(token, { host: TEST_SESSION_HOST });
+    const inSessions = await v.check("GET", "/s/abcdefghijklmnopqrstuv/api/diff", sessions);
+    expect(inSessions.ok && inSessions.world).toBe("sessions");
+    const fromSessionPage = headers(token, { "sec-fetch-site": "same-site", "sec-fetch-mode": "cors" });
+    expect((await v.check("GET", "/api/inbox/threads", fromSessionPage)).ok).toBe(false);
+    const fromInboxPage = headers(token, { host: TEST_SESSION_HOST, "sec-fetch-site": "same-site", "sec-fetch-mode": "cors" });
+    expect((await v.check("GET", "/s/abcdefghijklmnopqrstuv/api/diff", fromInboxPage)).ok).toBe(false);
+    const linkIn = headers(token, { host: TEST_SESSION_HOST, "sec-fetch-site": "cross-site", "sec-fetch-mode": "navigate" });
+    expect((await v.check("GET", "/s/abcdefghijklmnopqrstuv/", linkIn)).ok).toBe(true);
+    expect((await v.check("GET", "/s/abcdefghijklmnopqrstuv/api/diff", linkIn)).ok).toBe(false);
   });
 });
 
@@ -129,13 +137,13 @@ describe("the team's keys", () => {
 
 describe("settings", () => {
   test("nothing opens without a complete, valid setup", () => {
-    const full = { on: true, team: TEST_TEAM, aud: TEST_AUD, allow: [TEST_OWNER], host: TEST_HOST, port: 41234 };
+    const full = { on: true, team: TEST_TEAM, aud: TEST_AUD, allow: [TEST_OWNER], host: TEST_HOST, sessionHost: TEST_SESSION_HOST, port: 41234 };
     expect(resolveCfAccess({}, {}).on).toBe(false);
     expect(resolveCfAccess({ inboxCloudflareAccess: { ...full, on: false } }, {}).on).toBe(false);
     expect(resolveCfAccess({ inboxCloudflareAccess: full }, { PLANNOTATOR_INBOX_CF_ACCESS: "0" }).on).toBe(false);
     expect(resolveCfAccess({ inboxCloudflareAccess: { ...full, on: false } }, { PLANNOTATOR_INBOX_CF_ACCESS: "1" }).on).toBe(false);
     expect(resolveCfAccess({ inboxCloudflareAccess: full }, {}).settings?.host).toBe(TEST_HOST);
-    for (const broken of [{ allow: [] }, { allow: ["not-an-email"] }, { aud: "" }, { team: "evil.example.com" }, { host: "127.0.0.1" }, { host: "localhost" }, { port: 80 }]) {
+    for (const broken of [{ allow: [] }, { allow: ["not-an-email"] }, { aud: "" }, { team: "evil.example.com" }, { host: "127.0.0.1" }, { host: "localhost" }, { port: 80 }, { sessionHost: TEST_HOST }, { sessionHost: undefined }]) {
       const resolved = resolveCfAccess({ inboxCloudflareAccess: { ...full, ...broken } }, {});
       expect(resolved.on && resolved.settings === null && typeof resolved.error).toBe("string");
     }

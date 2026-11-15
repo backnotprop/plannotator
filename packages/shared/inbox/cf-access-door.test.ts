@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { doorSecretMatches, pickDoorRoute, readDoorSession, removeDoorSession, writeDoorSession } from "./cf-access-door";
 
-const HOST = "inbox.example.test";
+const SESSIONS = "inbox-s.example.test";
 const A = "aaaaaaaaaaaaaaaaaaaaaa";
 const B = "bbbbbbbbbbbbbbbbbbbbbb";
 const live = (key: string) => key === A || key === B;
@@ -15,26 +15,32 @@ afterEach(() => {
 
 describe("which live session a request through the door belongs to", () => {
   test("the path prefix names it, and is stripped", () => {
-    expect(pickDoorRoute(`/s/${A}/api/diff`, null, HOST, live)).toEqual({ kind: "session", key: A, path: "/api/diff", via: "prefix" });
-    expect(pickDoorRoute(`/s/${B}`, null, HOST, live)).toEqual({ kind: "session", key: B, path: "/", via: "prefix" });
+    expect(pickDoorRoute("sessions", `/s/${A}/api/diff`, null, SESSIONS, live)).toEqual({ kind: "session", key: A, path: "/api/diff", via: "prefix" });
+    expect(pickDoorRoute("sessions", `/s/${B}`, null, SESSIONS, live)).toEqual({ kind: "session", key: B, path: "/", via: "prefix" });
   });
 
   test("a same-origin Referer from a session page is the fallback", () => {
-    expect(pickDoorRoute("/api/diff", `https://${HOST}/s/${B}/`, HOST, live)).toEqual({ kind: "session", key: B, path: "/api/diff", via: "referer" });
-    expect(pickDoorRoute("/api/diff", `https://evil.example.test/s/${B}/`, HOST, live)).toEqual({ kind: "ended" });
+    expect(pickDoorRoute("sessions", "/api/diff", `https://${SESSIONS}/s/${B}/`, SESSIONS, live)).toEqual({ kind: "session", key: B, path: "/api/diff", via: "referer" });
+    expect(pickDoorRoute("sessions", "/api/diff", `https://evil.example.test/s/${B}/`, SESSIONS, live)).toEqual({ kind: "ended" });
   });
 
-  test("with two sessions open, a request with neither prefix nor Referer reaches the Inbox only on an Inbox route", () => {
-    expect(pickDoorRoute("/api/diff", null, HOST, live)).toEqual({ kind: "ended" });
-    expect(pickDoorRoute("/api/plan", null, HOST, live)).toEqual({ kind: "ended" });
-    expect(pickDoorRoute("/api/inbox/threads", null, HOST, live)).toEqual({ kind: "inbox" });
-    expect(pickDoorRoute("/", null, HOST, live)).toEqual({ kind: "inbox" });
+  test("with two sessions open, a request with neither prefix nor Referer reaches neither, and never the Inbox", () => {
+    expect(pickDoorRoute("sessions", "/api/diff", null, SESSIONS, live)).toEqual({ kind: "ended" });
+    expect(pickDoorRoute("sessions", "/api/plan", null, SESSIONS, live)).toEqual({ kind: "ended" });
+    expect(pickDoorRoute("sessions", "/api/inbox/threads", null, SESSIONS, live)).toEqual({ kind: "wrong_origin" });
+    expect(pickDoorRoute("sessions", "/", null, SESSIONS, live)).toEqual({ kind: "wrong_origin" });
+  });
+
+  test("the Inbox's name never reaches a session, and a navigation ignores the Referer", () => {
+    expect(pickDoorRoute("inbox", `/s/${A}/api/diff`, null, SESSIONS, live)).toEqual({ kind: "wrong_origin" });
+    expect(pickDoorRoute("inbox", "/api/diff", `https://${SESSIONS}/s/${A}/`, SESSIONS, live)).toEqual({ kind: "inbox" });
+    expect(pickDoorRoute("sessions", "/other", `https://${SESSIONS}/s/${A}/`, SESSIONS, live, true)).toEqual({ kind: "ended" });
   });
 
   test("an ended session's key never falls through to another session or the Inbox", () => {
     const gone = "cccccccccccccccccccccc";
-    expect(pickDoorRoute(`/s/${gone}/`, null, HOST, live)).toEqual({ kind: "ended" });
-    expect(pickDoorRoute("/api/inbox/threads", `https://${HOST}/s/${gone}/`, HOST, live)).toEqual({ kind: "ended" });
+    expect(pickDoorRoute("sessions", `/s/${gone}/`, null, SESSIONS, live)).toEqual({ kind: "ended" });
+    expect(pickDoorRoute("sessions", "/api/diff", `https://${SESSIONS}/s/${gone}/`, SESSIONS, live)).toEqual({ kind: "ended" });
   });
 });
 

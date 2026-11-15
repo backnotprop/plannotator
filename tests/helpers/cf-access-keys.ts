@@ -30,6 +30,7 @@ export async function makeTestKeys(kid = "test-kid-1"): Promise<TestKeys> {
 export const TEST_TEAM = "plannotator-test.cloudflareaccess.com";
 export const TEST_AUD = "a1b2c3d4e5f6a7b8c9d0a1b2c3d4e5f6";
 export const TEST_HOST = "inbox.example.test";
+export const TEST_SESSION_HOST = "inbox-s.example.test";
 export const TEST_OWNER = "owner@example.com";
 
 export function ownerClaims(nowS: number, extra: Record<string, unknown> = {}): Record<string, unknown> {

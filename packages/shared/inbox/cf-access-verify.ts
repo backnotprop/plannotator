@@ -2,7 +2,7 @@ import { CF_ACCESS_JWT_HEADER, cfAccessFetchSiteAllowed, isCfAccessHost, normali
 
 export const CF_ACCESS_CLOCK_SKEW_S = 60;
 export const CF_ACCESS_KEYS_TTL_MS = 60 * 60 * 1000;
-export const CF_ACCESS_KEYS_REFETCH_MS = 60 * 1000;
+export const CF_ACCESS_KEYS_REFETCH_MS = 10 * 1000;
 export const CF_ACCESS_KEYS_RETRY_MS = 5 * 1000;
 export const CF_ACCESS_MAX_TOKEN_CHARS = 16 * 1024;
 
@@ -14,7 +14,8 @@ export type CfAccessRefusalCode =
   | "access_identity_refused"
   | "cross_site";
 
-export type CfAccessCheck = { ok: true; email: string } | { ok: false; status: number; code: CfAccessRefusalCode; message: string };
+export type CfAccessCheck = { ok: true; email: string; world: "inbox" | "sessions" } | { ok: false; status: number; code: CfAccessRefusalCode; message: string };
+type TokenCheck = { ok: true; email: string } | Extract<CfAccessCheck, { ok: false }>;
 
 export type CfAccessKeysFetch = (url: string) => Promise<unknown>;
 
@@ -23,7 +24,7 @@ export interface CfAccessVerifierOptions {
   now?: () => number;
 }
 
-const refuse = (code: CfAccessRefusalCode, message: string, status = 403): CfAccessCheck => ({ ok: false, status, code, message });
+const refuse = (code: CfAccessRefusalCode, message: string, status = 403): Extract<CfAccessCheck, { ok: false }> => ({ ok: false, status, code, message });
 const invalid = () => refuse("access_token_invalid", "The Cloudflare Access token is not valid here.");
 const notAPerson = () => refuse("access_identity_refused", "This address opens only for its owner's e-mail.");
 
@@ -109,7 +110,7 @@ export function createCfAccessVerifier(settings: CfAccessSettings, options: CfAc
     return keys!.get(kid) ?? "unknown";
   };
 
-  const verifyToken = async (token: string): Promise<CfAccessCheck> => {
+  const verifyToken = async (token: string): Promise<TokenCheck> => {
     if (token.length > CF_ACCESS_MAX_TOKEN_CHARS) return invalid();
     const parts = token.split(".");
     if (parts.length !== 3) return invalid();
@@ -144,13 +145,15 @@ export function createCfAccessVerifier(settings: CfAccessSettings, options: CfAc
   };
 
   const check = async (method: string, path: string, headers: Headers): Promise<CfAccessCheck> => {
-    if (!isCfAccessHost(headers.get("host"), settings.host)) return refuse("forbidden_host", "This address answers only its public hostname.");
+    const host = headers.get("host");
+    const world = isCfAccessHost(host, settings.host) ? "inbox" : isCfAccessHost(host, settings.sessionHost) ? "sessions" : null;
+    if (!world) return refuse("forbidden_host", "This address answers only its public hostname.");
     const token = headers.get(CF_ACCESS_JWT_HEADER)?.trim();
     if (!token) return refuse("access_token_required", "This address answers only requests through Cloudflare Access.");
     const verified = await verifyToken(token);
     if (!verified.ok) return verified;
-    if (!cfAccessFetchSiteAllowed(method, path, headers)) return refuse("cross_site", "Requests from other sites are not accepted.");
-    return verified;
+    if (!cfAccessFetchSiteAllowed(method, path, headers, world === "sessions")) return refuse("cross_site", "Requests from other sites are not accepted.");
+    return { ...verified, world };
   };
 
   return { check, verifyToken, certsUrl };

@@ -34,6 +34,8 @@ function standIn(options: Partial<Pick<Stand, "dnsExisting" | "appsExisting">> &
       const ingress = JSON.parse(String(init.body)).config.ingress;
       expect(ingress[0].originRequest.httpHostHeader).toBe(ingress[0].hostname);
       expect(ingress[0].service).toBe("http://127.0.0.1:41234");
+      const sibling = `${ingress[0].hostname.split(".")[0]}-s.example.test`;
+      expect(ingress[1]).toEqual({ hostname: sibling, service: "http://127.0.0.1:41234", originRequest: { httpHostHeader: sibling } });
       expect(ingress.at(-1)).toEqual({ service: "http_status:404" });
       return ok({});
     }
@@ -42,13 +44,14 @@ function standIn(options: Partial<Pick<Stand, "dnsExisting" | "appsExisting">> &
       const body = JSON.parse(String(init.body));
       expect(body.policies).toEqual([{ name: "owner only", decision: "allow", precedence: 1, include: [{ email: { email: "me@example.com" } }] }]);
       expect(body.allowed_idps).toEqual(["idp-1"]);
+      expect(body.self_hosted_domains).toEqual([body.domain, `${body.domain.split(".")[0]}-s.example.test`]);
       return ok({ id: "app-1", aud: "aud0123456789abcdef" });
     }
     if (key === `GET /zones/${ZONE}/dns_records`) return ok(options.dnsExisting ?? []);
     if (key === `POST /zones/${ZONE}/dns_records`) {
       const body = JSON.parse(String(init.body));
       expect(body).toMatchObject({ type: "CNAME", content: `${TUNNEL}.cfargotunnel.com`, proxied: true });
-      return ok({ id: "dns-1" });
+      return ok({ id: `dns-${body.name.split(".")[0]}` });
     }
     if (init.method === "DELETE") return ok({});
     throw new Error(`unexpected ${key}`);
@@ -69,9 +72,10 @@ describe("setup against a stand-in Cloudflare API", () => {
       `PUT /accounts/${ACCOUNT}/cfd_tunnel/${TUNNEL}/configurations`,
       `POST /accounts/${ACCOUNT}/access/apps`,
       `POST /zones/${ZONE}/dns_records`,
+      `POST /zones/${ZONE}/dns_records`,
     ]);
     expect(stand.calls.at(-1)).toBe(`POST /zones/${ZONE}/dns_records`);
-    expect(result).toMatchObject({ host: "plannotator.example.test", team: "myteam.cloudflareaccess.com", aud: "aud0123456789abcdef", tunnelToken: "tunnel-run-token", dnsRecord: "dns-1" });
+    expect(result).toMatchObject({ host: "plannotator.example.test", team: "myteam.cloudflareaccess.com", aud: "aud0123456789abcdef", tunnelToken: "tunnel-run-token", sessionHost: "plannotator-s.example.test", dnsRecord: "dns-plannotator", sessionDnsRecord: "dns-plannotator-s" });
   });
 
   test("a failure before DNS leaves no DNS record behind", async () => {
@@ -99,9 +103,10 @@ describe("setup against a stand-in Cloudflare API", () => {
 describe("teardown against a stand-in Cloudflare API", () => {
   test("deletes DNS, then the Access app, then the tunnel", async () => {
     const stand = standIn();
-    await runCfTeardown(api(stand), { account: ACCOUNT, zone: ZONE, tunnel: TUNNEL, app: "app-1", dnsRecord: "dns-1" });
+    await runCfTeardown(api(stand), { account: ACCOUNT, zone: ZONE, tunnel: TUNNEL, app: "app-1", dnsRecord: "dns-1", sessionDnsRecord: "dns-2" });
     expect(stand.calls).toEqual([
       `DELETE /zones/${ZONE}/dns_records/dns-1`,
+      `DELETE /zones/${ZONE}/dns_records/dns-2`,
       `DELETE /accounts/${ACCOUNT}/access/apps/app-1`,
       `DELETE /accounts/${ACCOUNT}/cfd_tunnel/${TUNNEL}/connections`,
       `DELETE /accounts/${ACCOUNT}/cfd_tunnel/${TUNNEL}`,

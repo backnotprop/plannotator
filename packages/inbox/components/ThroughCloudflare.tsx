@@ -33,6 +33,7 @@ export function ThroughCloudflare({ state }: { state: CloudflareAccessSettings }
                     {state.url}
                   </a>{' '}
                   · only {state.allowed.join(', ')} can open it{state.tunnel ? ` · ${tunnelLine(state.tunnel)}` : ''}
+                  {state.sessionsUrl && <> · sessions open at {state.sessionsUrl}s/…</>}
                 </>
               ) : state.on ? (
                 'On · not open'

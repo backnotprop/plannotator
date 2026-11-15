@@ -60,6 +60,7 @@ export interface CfSetupInput {
 
 export interface CfSetupResult {
   host: string;
+  sessionHost: string;
   team: string;
   aud: string;
   account: string;
@@ -67,6 +68,7 @@ export interface CfSetupResult {
   tunnel: string;
   app: string;
   dnsRecord: string;
+  sessionDnsRecord: string;
   tunnelToken: string;
 }
 
@@ -111,6 +113,7 @@ export async function runCfSetup(api: CfApi, input: CfSetupInput, onStep: (step:
     (!wanted && !fromHost && zones.length === 1 ? zones[0] : undefined);
   if (!zone || !zone.name) throw new CfApiError(zones.length === 0 ? "The token sees no zone: a domain on Cloudflare is needed." : "Pass --zone <your domain> (the token sees several).");
   const host = pickHost(input, zone.name);
+  const sessionHost = `${host.split(".")[0]!.slice(0, 61)}-s.${zone.name}`;
   onStep("zone", zone.name);
 
   const org = await api.call<{ auth_domain?: string }>("GET", `${A}/access/organizations`).catch(() => null);
@@ -134,19 +137,23 @@ export async function runCfSetup(api: CfApi, input: CfSetupInput, onStep: (step:
     config: {
       ingress: [
         { hostname: host, service: `http://127.0.0.1:${input.port}`, originRequest: { httpHostHeader: host } },
+        { hostname: sessionHost, service: `http://127.0.0.1:${input.port}`, originRequest: { httpHostHeader: sessionHost } },
         { service: "http_status:404" },
       ],
     },
   });
   onStep("ingress");
 
-  const apps = await api.call<(Named & { domain?: string; aud?: string })[]>("GET", `${A}/access/apps`);
-  const existing = apps.find((a) => a.domain === host);
-  if (existing && existing.name !== CF_APP_NAME) throw new CfApiError(`An Access application named "${existing.name}" already covers ${host}; pick another hostname.`);
+  const apps = await api.call<(Named & { domain?: string; aud?: string; self_hosted_domains?: string[] })[]>("GET", `${A}/access/apps`);
+  const covers = (a: { domain?: string; self_hosted_domains?: string[] }) => [a.domain, ...(a.self_hosted_domains ?? [])].some((d) => d === host || d === sessionHost);
+  const others = apps.filter((a) => covers(a) && a.name !== CF_APP_NAME);
+  if (others.length > 0) throw new CfApiError(`An Access application named "${others[0]!.name}" already covers ${host} or ${sessionHost}; pick another hostname.`);
+  const existing = apps.find((a) => covers(a) && a.name === CF_APP_NAME);
   const appBody = {
     name: CF_APP_NAME,
     type: "self_hosted",
     domain: host,
+    self_hosted_domains: [host, sessionHost],
     session_duration: "24h",
     allowed_idps: [otp.id],
     auto_redirect_to_identity: true,
@@ -163,16 +170,24 @@ export async function runCfSetup(api: CfApi, input: CfSetupInput, onStep: (step:
   onStep("app");
 
   const target = `${tunnel.id}.cfargotunnel.com`;
-  const records = await api.call<(Named & { type?: string; content?: string })[]>("GET", `/zones/${zone.id}/dns_records?name=${enc(host)}`);
-  const own = records.find((r) => r.type === "CNAME" && r.content === target);
-  if (!own && records.length > 0) throw new CfApiError(`${host} already has a DNS record; pick another hostname.`);
-  const record = { type: "CNAME", name: host, content: target, proxied: true, comment: CF_DNS_COMMENT };
-  const dns = own
-    ? await api.call<Named>("PUT", `/zones/${zone.id}/dns_records/${own.id}`, record)
-    : await api.call<Named>("POST", `/zones/${zone.id}/dns_records`, record);
+  const planned: { name: string; own?: Named }[] = [];
+  for (const name of [host, sessionHost]) {
+    const records = await api.call<(Named & { type?: string; content?: string })[]>("GET", `/zones/${zone.id}/dns_records?name=${enc(name)}`);
+    const own = records.find((r) => r.type === "CNAME" && r.content === target);
+    if (!own && records.length > 0) throw new CfApiError(`${name} already has a DNS record; pick another hostname.`);
+    planned.push({ name, own });
+  }
+  const made: string[] = [];
+  for (const { name, own } of planned) {
+    const record = { type: "CNAME", name, content: target, proxied: true, comment: CF_DNS_COMMENT };
+    const dns = own
+      ? await api.call<Named>("PUT", `/zones/${zone.id}/dns_records/${own.id}`, record)
+      : await api.call<Named>("POST", `/zones/${zone.id}/dns_records`, record);
+    made.push(dns.id);
+  }
   onStep("dns", host);
 
-  return { host, team, aud: app.aud, account: account.id, zone: zone.id, tunnel: tunnel.id, app: app.id, dnsRecord: dns.id, tunnelToken };
+  return { host, sessionHost, team, aud: app.aud, account: account.id, zone: zone.id, tunnel: tunnel.id, app: app.id, dnsRecord: made[0]!, sessionDnsRecord: made[1]!, tunnelToken };
 }
 
 export interface CfTeardownIds {
@@ -181,6 +196,7 @@ export interface CfTeardownIds {
   tunnel?: string;
   app?: string;
   dnsRecord?: string;
+  sessionDnsRecord?: string;
 }
 
 export type CfTeardownStep = "dns" | "app" | "connections" | "tunnel";
@@ -193,8 +209,9 @@ export async function runCfTeardown(api: CfApi, ids: CfTeardownIds, onStep: (ste
       if (!(error instanceof CfApiError) || !/\b(?:404|not found|1003|7003|81044)\b/i.test(error.message)) throw error;
     }
   };
-  if (ids.zone && ids.dnsRecord) {
-    await gone(() => api.call("DELETE", `/zones/${ids.zone}/dns_records/${ids.dnsRecord}`));
+  for (const record of [ids.dnsRecord, ids.sessionDnsRecord]) {
+    if (!ids.zone || !record) continue;
+    await gone(() => api.call("DELETE", `/zones/${ids.zone}/dns_records/${record}`));
     onStep("dns");
   }
   if (ids.account && ids.app) {

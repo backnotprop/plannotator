@@ -61,7 +61,14 @@ const UNREGISTERED = /(?:Unregistered tunnel connection|Connection terminated|Lo
 const ERROR_LINE = /\b(?:ERR|error)\b/;
 
 function clean(line: string): string {
-  return line.replace(/\b[A-Za-z0-9_-]{60,}\b/g, "[redacted]").slice(0, 300);
+  return line.replace(/[A-Za-z0-9_+/=-]{40,}/g, "[redacted]").slice(0, 300);
+}
+
+export function tunnelEnv(token: string, env: NodeJS.ProcessEnv = process.env): Record<string, string> {
+  const keep = ["PATH", "HOME", "USER", "LOGNAME", "TMPDIR", "TEMP", "TMP", "SYSTEMROOT", "LANG", "HTTPS_PROXY", "HTTP_PROXY", "NO_PROXY", "https_proxy", "http_proxy", "no_proxy"];
+  const out: Record<string, string> = { TUNNEL_TOKEN: token, NO_AUTOUPDATE: "true" };
+  for (const name of keep) if (env[name] !== undefined) out[name] = env[name]!;
+  return out;
 }
 
 export function createCfTunnel(partial: Partial<CfTunnelOptions> & { dataDir: string; log: (line: string) => void; onChange: () => void }) {
@@ -121,7 +128,7 @@ export function createCfTunnel(partial: Partial<CfTunnelOptions> & { dataDir: st
     connected.clear();
     startedAt = options.now();
     const own = Bun.spawn([options.binary, "tunnel", "--no-autoupdate", "run"], {
-      env: { ...process.env, TUNNEL_TOKEN: token, NO_AUTOUPDATE: "true" },
+      env: tunnelEnv(token),
       stdin: "ignore",
       stdout: "pipe",
       stderr: "pipe",

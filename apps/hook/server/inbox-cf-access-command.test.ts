@@ -51,7 +51,7 @@ function standIn() {
     if (key.endsWith("/access/apps") && init.method === "GET") return ok([]);
     if (key.endsWith("/access/apps")) return ok({ id: "app-1", aud: "aud0123456789abcdef" });
     if (key.endsWith("/dns_records") && init.method === "GET") return ok([]);
-    if (key.endsWith("/dns_records")) return ok({ id: "dns-1" });
+    if (key.endsWith("/dns_records")) return ok({ id: `dns-${JSON.parse(String(init.body)).name.split(".")[0]}` });
     return ok({});
   };
   return { calls, api: (token: string) => createCfApi(token, { base: "http://stand-in.test", fetch }) };
@@ -86,7 +86,7 @@ describe("plannotator inbox cloudflare-access setup", () => {
     const port = 40000 + Math.floor(Math.random() * 20000);
     const run = deps({ api: stand.api, binary: fakeCloudflared(), edgeFetch: loginRedirect, pickPort: () => port });
     expect(await runCfAccessCommand(["setup", "--email", "Me@Example.com", "--hostname", "plannotator.example.test"], run.deps)).toBe(0);
-    expect(config()).toMatchObject({ on: true, host: "plannotator.example.test", team: TEAM, aud: "aud0123456789abcdef", allow: ["me@example.com"], port, dnsRecord: "dns-1" });
+    expect(config()).toMatchObject({ on: true, host: "plannotator.example.test", team: TEAM, aud: "aud0123456789abcdef", allow: ["me@example.com"], port, sessionHost: "plannotator-s.example.test", dnsRecord: "dns-plannotator", sessionDnsRecord: "dns-plannotator-s" });
     expect(readFileSync(tunnelTokenPath(dataDir), "utf8")).toBe("run-token-from-stand-in");
     expect(statSync(tunnelTokenPath(dataDir)).mode & 0o777).toBe(0o600);
     expect(readFileSync(join(dataDir, "config.json"), "utf8")).not.toContain("test-token");
@@ -122,7 +122,7 @@ describe("plannotator inbox cloudflare-access setup", () => {
 
 describe("plannotator inbox cloudflare-access teardown", () => {
   test("turns off, deletes DNS, app and tunnel in order, then forgets everything here", async () => {
-    writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxCloudflareAccess: { on: true, host: "plannotator.example.test", account: ACCOUNT, zone: ZONE, tunnel: TUNNEL, app: "app-1", dnsRecord: "dns-1" } }));
+    writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxCloudflareAccess: { on: true, host: "plannotator.example.test", account: ACCOUNT, zone: ZONE, tunnel: TUNNEL, app: "app-1", dnsRecord: "dns-1", sessionDnsRecord: "dns-2" } }));
     mkdirSync(join(dataDir, "cloudflare-access"), { recursive: true });
     writeFileSync(tunnelTokenPath(dataDir), "x", { mode: 0o600 });
     const stand = standIn();
@@ -130,6 +130,7 @@ describe("plannotator inbox cloudflare-access teardown", () => {
     expect(await runCfAccessCommand(["teardown"], run.deps)).toBe(0);
     expect(stand.calls).toEqual([
       `DELETE /zones/${ZONE}/dns_records/dns-1`,
+      `DELETE /zones/${ZONE}/dns_records/dns-2`,
       `DELETE /accounts/${ACCOUNT}/access/apps/app-1`,
       `DELETE /accounts/${ACCOUNT}/cfd_tunnel/${TUNNEL}/connections`,
       `DELETE /accounts/${ACCOUNT}/cfd_tunnel/${TUNNEL}`,

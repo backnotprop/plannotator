@@ -522,6 +522,7 @@ export interface CloudflareAccessSettings {
   on: boolean;
   configured: boolean;
   url: string | null;
+  sessionsUrl?: string | null;
   error: string | null;
   port: number | null;
   allowed: string[];

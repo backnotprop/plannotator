@@ -117,7 +117,7 @@ const SETUP_LINES: Record<CfSetupStep, string> = {
   tunnel: "Tunnel",
   ingress: "Tunnel route: this hostname only, everything else 404",
   app: "Access application: your e-mail only, 24 h sign-in",
-  dns: "DNS record (created last)",
+  dns: "DNS records (created last)",
 };
 
 const TEARDOWN_LINES: Record<CfTeardownStep, string> = {
@@ -168,6 +168,11 @@ export async function runCfAccessCommand(args: readonly string[], deps: CfAccess
       return 2;
     }
     const before = storedCfAccess(loadConfig());
+    const wantedHost = flag(args, "--hostname")?.trim().toLowerCase().replace(/\.$/, "");
+    if (before?.host && (before.tunnel || before.app || before.dnsRecord) && wantedHost && wantedHost !== before.host) {
+      err(`Already set up for ${before.host}. Run plannotator inbox cloudflare-access teardown first, then set up ${wantedHost}.`);
+      return 2;
+    }
     const portArg = flag(args, "--port");
     const port = portArg ? Number(portArg) : (before?.port ?? (deps.pickPort ?? freePort)());
     if (!Number.isInteger(port) || port < 1024 || port > 65535) {
@@ -180,7 +185,7 @@ export async function runCfAccessCommand(args: readonly string[], deps: CfAccess
     }
     let result;
     try {
-      result = await runCfSetup(makeApi(token), { email, port, account: flag(args, "--account") || undefined, zone: flag(args, "--zone") || undefined, hostname: flag(args, "--hostname") || undefined }, (step, detail) =>
+      result = await runCfSetup(makeApi(token), { email, port, account: flag(args, "--account") || undefined, zone: flag(args, "--zone") || undefined, hostname: flag(args, "--hostname") || before?.host || undefined }, (step, detail) =>
         err(`  ${SETUP_LINES[step]}${detail ? `: ${detail}` : ""}`),
       );
     } catch (error) {
@@ -194,6 +199,7 @@ export async function runCfAccessCommand(args: readonly string[], deps: CfAccess
     const stored: CfAccessStored = {
       on: false,
       host: result.host,
+      sessionHost: result.sessionHost,
       team: result.team,
       aud: result.aud,
       allow: [email.trim().toLowerCase()],
@@ -203,10 +209,11 @@ export async function runCfAccessCommand(args: readonly string[], deps: CfAccess
       tunnel: result.tunnel,
       app: result.app,
       dnsRecord: result.dnsRecord,
+      sessionDnsRecord: result.sessionDnsRecord,
     };
     saveConfig({ inboxCloudflareAccess: stored });
     err("  Checking from outside that nothing gets in without your login…");
-    const checked = await runOutsideChecks({ host: result.host, team: result.team, port, binary, tokenFile, edgeFetch: deps.edgeFetch, timeoutMs: deps.checkTimeoutMs });
+    const checked = await runOutsideChecks({ hosts: [result.host, result.sessionHost], team: result.team, port, binary, tokenFile, edgeFetch: deps.edgeFetch, timeoutMs: deps.checkTimeoutMs });
     if (!checked.ok) {
       err(`Not turned on: ${checked.failure}`);
       err("To remove what setup made: plannotator inbox cloudflare-access teardown");
@@ -218,7 +225,7 @@ export async function runCfAccessCommand(args: readonly string[], deps: CfAccess
     out(url);
     writeUrlQr(url);
     if (after?.error) err(`The Inbox could not open it yet: ${after.error}`);
-    err(`On. Open it on your device and sign in with ${email.trim().toLowerCase()}. Sessions: add --cloudflare-access to review, annotate or last.`);
+    err(`On. Open it on your device and sign in with ${email.trim().toLowerCase()}. Sessions: add --cloudflare-access to review, annotate or last; they open at https://${result.sessionHost}/s/…`);
     return 0;
   }
 
@@ -234,6 +241,7 @@ export async function runCfAccessCommand(args: readonly string[], deps: CfAccess
       rmSync(tunnelTokenPath(deps.dataDir), { force: true });
       err("Off here. Left in Cloudflare (delete them in the dashboard, in this order):");
       if (stored.dnsRecord) err(`  DNS record for ${stored.host}`);
+      if (stored.sessionDnsRecord) err(`  DNS record for ${stored.sessionHost}`);
       if (stored.app) err(`  Access application ${stored.app}`);
       if (stored.tunnel) err(`  Tunnel ${stored.tunnel}`);
       return 0;
