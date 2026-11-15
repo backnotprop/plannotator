@@ -15,14 +15,17 @@ export function useFittedText(ref: RefObject<HTMLElement | null>, text: string, 
       const next = fitText(kind, text, width, font);
       return (before: { text: string; natural?: number }) => (before.text === next && before.natural === natural ? before : { text: next, natural });
     };
-    if (available.current > 0) setState(compute(available.current));
-    else setState((before) => (before.text === text ? before : { text }));
+    const whole = () => {
+      const natural = naturalWidth(text, fontOf(element, fontKey));
+      return (before: { text: string; natural?: number }) => (before.text === text && before.natural === natural ? before : { text, natural });
+    };
+    setState(available.current > 0 ? compute(available.current) : whole());
     const stop = observeWidth(element, (width) => {
       const update = compute(width);
       flushSync(() => setState(update));
     });
     const off = onFontsChanged(() => {
-      if (available.current > 0) setState(compute(available.current));
+      setState(available.current > 0 ? compute(available.current) : whole());
     });
     return () => {
       stop();
