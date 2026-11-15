@@ -25,6 +25,8 @@ interface Tracked {
 }
 
 // This browser's own list (never a cookie: it would ride every request).
+const TOLD_WITHIN_MS = 24 * 60 * 60 * 1000;
+const fresh = (record: InboxCombineRecord) => Date.now() - Date.parse(record.settled_at ?? record.at) < TOLD_WITHIN_MS;
 const told = (): string[] => {
   try {
     const value = JSON.parse(localStorage.getItem(TOLD_KEY) ?? '[]') as unknown;
@@ -111,8 +113,9 @@ export function useCombines(bulk: BulkWrites | undefined, machines: MachinesMode
             else {
               const t: Tracked = { record, machine };
               tracked.current.set(record.id, t);
-              // First seen settled: told on this load only when no window told it yet.
-              if ((record.state === 'done' || record.state === 'failed') && !told().includes(record.id)) settle({ ...t, record: { ...record, state: 'asked' } }, record);
+              // First seen settled: told on this load only when no window told it yet, and within a day (a browser
+              // opening this Inbox for the first time is not told of old ones).
+              if ((record.state === 'done' || record.state === 'failed') && !told().includes(record.id) && fresh(record)) settle({ ...t, record: { ...record, state: 'asked' } }, record);
             }
           }
         }),

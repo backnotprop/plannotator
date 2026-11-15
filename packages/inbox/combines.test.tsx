@@ -45,10 +45,12 @@ afterEach(() => {
   host = null;
 });
 
-const AT = '2026-10-10T10:00:00.000Z';
+const AT = new Date(Date.now() - 60_000).toISOString();
+const DAYS_AGO = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
 const base = { threads: [{ id: 'a', subject: 'A' }, { id: 'b', subject: 'B' }], session: 'ses_a', host: 'claude-code', name: 'Billing work', at: AT };
 const DONE: InboxCombineRecord = { ...base, id: 'cmb_done', state: 'done', thread: { id: 'n', subject: 'Billing retries and refunds' }, settled_at: AT };
 const FAILED: InboxCombineRecord = { ...base, id: 'cmb_fail', state: 'failed', reason: 'ended', settled_at: AT };
+const OLD: InboxCombineRecord = { ...base, id: 'cmb_old', state: 'done', thread: { id: 'o', subject: 'Old' }, at: DAYS_AGO, settled_at: DAYS_AGO };
 const WAITING: InboxCombineRecord = { ...base, id: 'cmb_wait', state: 'asked', threads: [{ id: 'c', subject: 'C' }] };
 
 const toasts: Omit<InboxToastModel, 'id'>[] = [];
@@ -83,11 +85,13 @@ async function load() {
 
 test.skipIf(!hasDom)('a Combine that arrived is told once, with Undo and Open; one that failed says nothing was archived', async () => {
   toasts.length = 0;
-  lists = { here: [DONE], m_mini: [FAILED, WAITING] };
+  lists = { here: [DONE, OLD], m_mini: [FAILED, WAITING] };
   await load();
   // This machine's and the linked one's, through its door.
   expect(requests.filter((r) => r.method === 'GET').map((r) => r.url).sort()).toEqual(['/api/inbox/combine', '/api/inbox/m/m_mini/combine']);
   expect([...seen.entries()]).toEqual([['c', 'cmb_wait']]);
+  // One that settled days ago is not told to a browser seeing it for the first time.
+  expect(toasts).toHaveLength(2);
   const done = toasts.find((t) => t.lead === 'Combined 2 threads')!;
   expect(done.detail).toBe('into “Billing retries and refunds”');
   const failed = toasts.find((t) => t.icon === 'warn')!;
