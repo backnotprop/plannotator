@@ -579,6 +579,7 @@ const kotlin: LanguageConfig = {
   identifierTypes: new Set(['identifier']),
   harmlessMissing: new Set(['_class_member_semi']),
   contextRuns: true,
+  holdBack: new Set(['movedWithEdit']),
   declarationsIn: (container) => {
     const out: Declaration[] = [];
     for (const child of container.namedChildren) {

@@ -64,3 +64,11 @@ test('a parameter or enum list wrapped onto lines is reformatted: positions cons
   assert.deepEqual(await ops(`data class P(val x: Int, val y: Int) {\n    fun f() = x\n}\n`, `data class P(\n    val x: Int,\n    val y: Int,\n) {\n    fun f() = x\n}\n`), ['reformatted']);
   assert.deepEqual(await ops(`enum class E { A, B, C }\n`, `enum class E {\n    A,\n    B,\n    C,\n}\n`), ['reformatted']);
 });
+
+test('moved-with-edits is held back for Kotlin in v1: the lines read as edits', async () => {
+  const f = (op: string) => `fun total(items: List<Int>): Int {\n    val positive = items.filter { it > 0 }\n    val sum = positive.sum()\n    return sum ${op} 1\n}\n`;
+  const pad = Array.from({ length: 3 }, (_, i) => `fun pad${i}(x: Int): Int {\n    val y = x + ${i}\n    return y * 2\n}\n`).join('\n');
+  const t = await ops(`${f('+')}\n${pad}`, `${pad}\n${f('-')}`);
+  assert.ok(!t.includes('movedWithEdit') && !t.includes('moved'), t.join());
+  assert.ok(t.includes('edited') || t.includes('added'), t.join());
+});
