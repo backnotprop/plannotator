@@ -5113,7 +5113,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // `run` (additive, launch only): the launched thread's run line; null while the agent rests.
     // `attach_command` (with `run`): the host's attach command, there while the agent rests too.
     const run = await launch.runOf(thread.thread_id, true);
-    const row = store.listRow(thread.thread_id);
+    const listed = store.listRow(thread.thread_id);
+    // Its `tags` too, as the list's rows have them: an archived thread's header line reads them (approval "inbox-thread-tags").
+    const tags = listed ? store.allThreadTags().get(thread.thread_id) : undefined;
+    const row = listed && tags ? { ...listed, tags } : listed;
     // `row` (additive): the thread's list row, also for an archived thread, which the window's list leaves out.
     return { serverSession, cursor, thread: withRepo, row: row ? withSnooze(launch.rowDecorator()(row)) : row, ...(run === undefined ? {} : { run, attach_command: launch.attachOf(thread.thread_id) }) };
   };

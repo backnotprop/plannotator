@@ -6051,7 +6051,7 @@ function Inbox() {
           reconnecting={streamDead}
           empty={
             listFilterEmpty ? (
-              <ListFilterEmpty onClear={() => setListFilter(clearedFrom(listFilterPicks, listFilterScoped))} />
+              <ListFilterEmpty onClear={() => setListFilter(clearedFrom(listFilterPicks, listFilterScoped, filterTag !== null))} />
             ) : filterTag ? (
               <div className="ib-empty-list" data-tag-empty="">
                 <b dir="auto">Nothing tagged {filterTag.name} yet</b>

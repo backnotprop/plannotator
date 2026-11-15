@@ -11,16 +11,16 @@ import { noteReviews } from '../contextNotes/model';
 import { INBOX_PERMISSION_FULL, isInboxPermissionSession } from '@plannotator/core/inbox-permission';
 import { inboxLaunchedSession } from '@plannotator/core/inbox-run-line';
 import { LaunchChoiceMeta } from './LaunchChoiceMeta';
-import { INBOX_UPLOAD_MAX_BYTES, inboxActionInDraft, inboxActionPersonMark, type InboxDraftFile, type InboxMessageWire, type InboxQuestion, type InboxReplyDraft, type InboxThread, type InboxUpload } from '@plannotator/core/inbox-types';
+import { ThreadTagLine } from './ThreadTagLine';
+import { INBOX_UPLOAD_MAX_BYTES, inboxActionInDraft, inboxActionPersonMark, inboxLaunchStops, inboxPersonAnsweredSince, isInboxNote, isInboxT3WaitReason, type InboxAnnotationRecord, type InboxAttachmentState, type InboxDraftFile, type InboxInlineImage, type InboxMessageWire, type InboxQuestion, type InboxReplyDraft, type InboxThread, type InboxUpload } from '@plannotator/core/inbox-types';
 import { isQuestionAnswerEmpty, type QuestionAnswer } from '@plannotator/core/question-block';
-import { inboxLaunchStops, inboxPersonAnsweredSince, isInboxNote, isInboxT3WaitReason, type InboxAnnotationRecord, type InboxAttachmentState, type InboxInlineImage } from '@plannotator/core/inbox-types';
 import { useRefRepo } from '../links';
 import { InboxApiError, InboxHeldError, inboxApi, type OutboxView, type TagMode, type ThreadModel } from '../api';
 import { awayLine, outboxLine } from '../machines';
 import { ThreadSessions } from './ThreadSessions';
 import { snoozeBackAbove } from '../snoozeBack';
 import { HeldWrites } from './HeldWrites';
-import { annotationOf, attachmentFeedback, isFileComment, OWN_MESSAGE_COMMENT_ROW } from '../attachments';
+import { annotationOf, attachmentFeedback, attachmentImageUrl, isFileComment, OWN_MESSAGE_COMMENT_ROW, readableVersion } from '../attachments';
 import { withPictures } from '../commentPictureFiles';
 import { CommentPictures } from '../commentPictures';
 import { fileQuestionRecords, type FileQuestions } from '../fileQuestions';
@@ -86,7 +86,6 @@ import { SendToAnotherSession } from '../compose/SendToAnotherSession';
 import { COMPOSE_CLONE_EVENT, type ComposeCloneRequest } from '../compose/model';
 import { authorWithLabel, labelOf, useSessionLabels } from '../sessionLabels';
 import { givenName, useAgentNames } from '../agents/agentNames';
-import { attachmentImageUrl, readableVersion } from '../attachments';
 import { usePickSave } from '../data/actions/picks';
 import { sameThreadFiles, useThreadAttachments } from '../data/queries/files';
 import { MessageView } from '../parts/MessageView';
@@ -4968,6 +4967,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         )}
         <HeadMark thread={thread} where="body" />
         <h2 className="ib-subject" dir="auto" tabIndex={-1}>{reviewView?.title ?? (thread.pull_keys?.length || thread.review_started ? thread.thread_name : null) ?? thread.subject ?? '(no subject)'}</h2>
+        <ThreadTagLine threadId={thread.thread_id} phone={phone} />
         {reviewView?.fromThread && (
           <p className="ib-rvfrom" data-review-from="">
             Review from thread{' '}
