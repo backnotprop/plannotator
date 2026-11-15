@@ -293,6 +293,8 @@ describe('Tag picks (approval "inbox-thread-tags", step 2)', () => {
     expect(withLiveTagPicks(filter, live).tags).toEqual(['ini_here']);
     expect(pickCount(withLiveTagPicks(filter, live))).toBe(1);
     expect(withLiveTagPicks(filter, null).tags).toEqual([]);
+    // The list not read yet: the picks hold as they are, so the rows never show unfiltered for a moment.
+    expect(withLiveTagPicks(filter, undefined)).toBe(filter);
     const none = { ...NO_LIST_FILTER };
     expect(withLiveTagPicks(none, live)).toBe(none);
     // Unticking takes every pick that names it; ticking adds the list's id.

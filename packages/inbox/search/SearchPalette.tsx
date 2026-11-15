@@ -487,8 +487,8 @@ export default function SearchPalette(props: SearchPaletteProps) {
   const sort = useSearchSort();
   const [fades, setFades] = useState({ top: false, bottom: false });
 
-  // The window's tags (approval "inbox-thread-tags", step 2): the Tag chip shows once there is one.
-  const tagList = useThreadTags()?.tags ?? NO_TAGS;
+  // The tags this Inbox's own threads carry (approval "inbox-thread-tags", step 2): the Tag chip shows once there is one.
+  const tagList = useThreadTags()?.here ?? NO_TAGS;
   const tagListRef = useRef(tagList);
   tagListRef.current = tagList;
   const tagWords = (picks: readonly string[], tags: typeof tagList) => (picks.length > 0 ? tagChipText(tags, picks) : null);

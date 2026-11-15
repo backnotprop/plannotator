@@ -547,9 +547,12 @@ describe("filters", () => {
     const w = await world();
     const release = w.store.createInitiative({ name: "Release", by: { kind: "person" } });
     const windows = w.store.createInitiative({ name: "Windows", by: { kind: "person" } });
+    const untagged = [search(w.index, "deploy", {}), search(w.index, "api", {}), search(w.index, "", {})].map((answer) => answer.groups ?? answer.recent);
     w.store.setThreadTag(w.waiting.id, release.id, true);
     w.store.setThreadTag(w.sent.id, windows.id, true);
     w.store.setThreadTag(w.fresh.id, release.id, true);
+    // No tag picked: tagging changes no answer (tags are never results; the owner: "a filter but nothing more").
+    expect([search(w.index, "deploy", {}), search(w.index, "api", {}), search(w.index, "", { tags: [] })].map((answer) => answer.groups ?? answer.recent)).toEqual(untagged);
     expect(threadIds(search(w.index, "deploy", { tags: [release.id] })).sort()).toEqual([w.waiting.id, w.fresh.id].sort());
     expect(threadIds(search(w.index, "deploy", { tags: [release.id, windows.id] })).sort()).toEqual([w.waiting.id, w.sent.id, w.fresh.id].sort());
     expect(messageIds(search(w.index, "deploy", { tags: [windows.id] })).sort()).toEqual([w.sent.id, w.sentReply.id].sort());

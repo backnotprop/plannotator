@@ -6,8 +6,9 @@
  * - the list's Filter: a Tag group, each name with the `#` mark, once a tag holds a listed thread (none for a person
  *   with no tags, none on a tag's own list), several tags widening, combined with the other groups, the badge counting;
  * - Search: tags are never results (the owner: "It can be a filter but nothing more"): with tags the results for
- *   `#rel` and `rel` are what they are without; the Tag chip after From picks several (every machine's id of each
- *   sent as `tag`), reads "Tagged Release or Windows", narrows with the other chips, and is absent with no tags;
+ *   `#rel` and `rel` are what they are without; the Tag chip after From offers the tags this Inbox's threads carry (not
+ *   one only a linked machine holds), picks several (one id each, sent as `tag`), reads "Tagged Release or Windows",
+ *   narrows with the other chips, and is absent with no tags;
  * - the Board-off preview of a sent `#name`: its threads (the one it sits in left out), "Show threads" to its list,
  *   a first tap previews and a second goes, a tag only a linked machine holds previews too.
  *
@@ -22,7 +23,7 @@ import type { MachinesModel } from './machines';
 import type { ListTag, ThreadTagsHost } from './threadTags';
 
 const hasDom = typeof document !== 'undefined';
-const { ThreadTagsContext, canTagThread, rowTagsHere, tagHref, tagWrite } = await import('./threadTags');
+const { ThreadTagsContext, canTagThread, rowTagsHere, tagHref, tagsOnOwnRows, tagWrite } = await import('./threadTags');
 const { ThreadTagLine } = (hasDom ? await import('./components/ThreadTagLine') : {}) as typeof import('./components/ThreadTagLine');
 const { InboxList } = (hasDom ? await import('./components/InboxList') : {}) as typeof import('./components/InboxList');
 const { SidebarProvider } = (hasDom ? await import('./shell/sidebar') : {}) as typeof import('./shell/sidebar');
@@ -91,6 +92,7 @@ function hostOf(rows: InboxListRow[], tags: ListTag[], writes: string[], listed:
     listed,
     rows,
     rowTags,
+    here: tagsOnOwnRows(tags, rows, 'self', rowTags),
   };
 }
 
@@ -206,6 +208,38 @@ test.skipIf(!hasDom)("header: a linked machine's thread shows its tags and write
   line('msg_old');
   // Its `row.tags` are that machine's own ids: never read here, and it takes no tag from here.
   expect($('[data-thread-tags]')).toBeNull();
+});
+
+test.skipIf(!hasDom)('header: `+` by keyboard puts focus in the field; it keeps it when typing moves the row under a resting mouse (#3393), so Enter makes the tag', async () => {
+  const writes: string[] = [];
+  line('msg_b', ROWS, writes);
+  const add = $('[data-thread-tags-add]')!;
+  add.focus();
+  // Enter opens it as a click does: focus in the field, not on the first tag (letters would go to the menu's type-ahead).
+  await act(async () => void add.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })));
+  await settle();
+  const menu = () => $('[data-thread-tags-menu]');
+  const field = menu()!.querySelector<HTMLInputElement>('[data-tag-find]')!;
+  const focusIs = () => [document.activeElement === field, document.activeElement?.tagName, document.activeElement?.getAttribute('role')];
+  expect(focusIs()).toEqual([true, 'INPUT', null]);
+  const typeIt = (value: string) =>
+    act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(field, value);
+      field.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+  // The first letter adds a line above New tag "B" and moves it; a pointer resting there reads as leaving it for the
+  // line, and the menu focuses its popup. The field takes focus back.
+  await typeIt('B');
+  const item = menu()!.querySelector('[data-tag-new]')!;
+  const above = item.previousElementSibling!;
+  await act(async () => {
+    item.dispatchEvent(new PointerEvent('pointerout', { bubbles: true, pointerType: 'mouse', relatedTarget: above }));
+    above.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse', relatedTarget: item }));
+  });
+  expect(focusIs()).toEqual([true, 'INPUT', null]);
+  await typeIt('Billing');
+  await act(async () => void field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })));
+  expect(writes).toEqual(['create Billing msg_b']);
 });
 
 test.skipIf(!hasDom)('header: no `+` where Add tag is not offered', () => {
@@ -368,7 +402,7 @@ test.skipIf(!hasDom)('search: tags are never results: `#rel` and `rel` draw the 
   expect(drawn['true:#rel']).toHaveLength(2);
 });
 
-test.skipIf(!hasDom)('search: the Tag chip after From picks several (the menu stays open), sends every id of each, narrows with the other chips; none with no tags', async () => {
+test.skipIf(!hasDom)('search: the Tag chip after From offers this Inbox\'s tags, picks several (the menu stays open), sends one id each, narrows with the other chips; none with no tags', async () => {
   palette(hostOf(ROWS, [RELEASE, WINDOWS, DOCS], []));
   await typeIn('notes');
   expect(chips()).toEqual(['type', 'project', 'status', 'from', 'tag']);
@@ -380,19 +414,19 @@ test.skipIf(!hasDom)('search: the Tag chip after From picks several (the menu st
     ['Any tag', 'menuitemradio', 'true'],
     ['Release', 'menuitemcheckbox', 'false'],
     ['Windows', 'menuitemcheckbox', 'false'],
-    ['Docs move', 'menuitemcheckbox', 'false'],
   ]);
+  // "Docs move" is only on the Mac mini's threads, which search does not read: it is not offered (it could only find nothing).
   await click(menu().querySelectorAll('.ib-sp-mi')[1]!);
   await settle();
   expect(menu()).not.toBeNull();
-  // Release is held here and on the Mac mini: both ids go, so the server finds its own whichever it holds.
-  expect(lastAsked().getAll('tag')).toEqual(['ini_release', 'ini_mini_release']);
+  // Release is held here and on the Mac mini: this Inbox's id goes, once.
+  expect(lastAsked().getAll('tag')).toEqual(['ini_release']);
   await click(menu().querySelectorAll('.ib-sp-mi')[2]!);
   await settle();
-  expect(lastAsked().getAll('tag')).toEqual(['ini_release', 'ini_mini_release', 'ini_windows']);
+  expect(lastAsked().getAll('tag')).toEqual(['ini_release', 'ini_windows']);
   expect(chip().textContent).toBe('Tagged Release or Windows');
   expect(menu().querySelectorAll('[aria-checked="true"]')).toHaveLength(2);
-  // Unticking takes every id of it.
+  // Unticking takes it out.
   await click(menu().querySelectorAll('.ib-sp-mi')[1]!);
   await settle();
   expect(lastAsked().getAll('tag')).toEqual(['ini_windows']);

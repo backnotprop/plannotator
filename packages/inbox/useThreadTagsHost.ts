@@ -4,7 +4,7 @@ import { inboxApi } from './api';
 import type { MachinesModel } from './machines';
 import { machineOf } from './inboxUrl';
 import { setSidebarSectionOpen } from './sidebarSections';
-import { canTagThread, rowTagsHere, tagById, tagsSectionShown, tagThreadCounts, tagWaitingCounts, tagWrite, type ListTag, type ThreadTagsHost } from './threadTags';
+import { canTagThread, rowTagsHere, tagById, tagsOnOwnRows, tagsSectionShown, tagThreadCounts, tagWaitingCounts, tagWrite, type ListTag, type ThreadTagsHost } from './threadTags';
 import { initiativeDeletedToast } from './board/model';
 import { showTagColoursAcross, type TagsAcross } from './tagsAcross';
 import { rowTint } from './tagColours';
@@ -58,6 +58,7 @@ const [tagPatches, setTagPatches] = useState<ReadonlyMap<string, readonly string
   const shownTagId = filterTag?.id ?? routeTag;
   const tagCounts = useMemo(() => tagThreadCounts(windowRows, tagsOfRow), [windowRows, tagsOfRow]);
   const tagWaiting = useMemo(() => tagWaitingCounts(latestSections, tagsOfRow), [latestSections, tagsOfRow]);
+  const tagsHere = useMemo(() => (listTags ? tagsOnOwnRows(listTags, windowRows, machines.self, tagsOfRow) : []), [listTags, windowRows, machines.self, tagsOfRow]);
   const tagsShown = listTags !== null && tagsSectionShown(listTags, windowRows, tagsOfRow);
   const setThreadTag = async (threadId: string, tag: ListTag, on: boolean, undo = true) => {
     const before = tagPatches.get(threadId) ?? rowOf(threadId)?.tags ?? [];
@@ -115,8 +116,9 @@ const [tagPatches, setTagPatches] = useState<ReadonlyMap<string, readonly string
             listed: filterTag,
             rows: windowRows,
             rowTags: tagsOfRow,
+            here: tagsHere,
           },
-    [listTags, tagPatches, windowRows, tagCounts, machines, filterTag, tagsOfRow],
+    [listTags, tagPatches, windowRows, tagCounts, machines, filterTag, tagsOfRow, tagsHere],
   );
   const setThreadTagRef = useRef(setThreadTag);
   setThreadTagRef.current = setThreadTag;

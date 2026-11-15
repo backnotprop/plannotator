@@ -7,9 +7,12 @@
 import type { ListFilter } from './listFilter';
 import { tagById, type ListTag } from './threadTags';
 
-/** The filter with its Tag picks as the live tags' ids, those that name no live tag left out. */
-export function withLiveTagPicks(filter: ListFilter, tags: readonly ListTag[] | null): ListFilter {
-  if (filter.tags.length === 0) return filter;
+/**
+ * The filter with its Tag picks as the live tags' ids, those that name no live tag left out. `undefined`: the list is
+ * not read yet, so the picks hold as they are (no moment of unfiltered rows); `null`: this Inbox keeps no tags.
+ */
+export function withLiveTagPicks(filter: ListFilter, tags: readonly ListTag[] | null | undefined): ListFilter {
+  if (filter.tags.length === 0 || tags === undefined) return filter;
   const live = [...new Set(filter.tags.flatMap((id) => (tags ? (tagById(tags, id)?.id ?? []) : [])))];
   return live.length === filter.tags.length && live.every((id, i) => id === filter.tags[i]) ? filter : { ...filter, tags: live };
 }

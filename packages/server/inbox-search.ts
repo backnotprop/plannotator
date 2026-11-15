@@ -45,7 +45,8 @@ import {
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 
 export const INBOX_SEARCH_PATH = "/api/inbox/search";
-const INBOX_SEARCH_TAGS_MAX = 50;
+/** More tags than a person keeps; the window sends one id per picked tag. */
+const INBOX_SEARCH_TAGS_MAX = 200;
 export const INBOX_SEARCH_RECENT_PATH = "/api/inbox/search/recent";
 /** Recent searches kept. */
 export const INBOX_RECENT_SEARCHES_MAX = 6;
@@ -129,7 +130,7 @@ export function createInboxSearchRoutes(input: { store: InboxStore; serverSessio
     const offset = count(url, "offset", 0, 1_000_000) ?? 0;
     const limit = count(url, "limit", 1, INBOX_SEARCH_LIMIT_MAX);
     const sort = oneOf<InboxSearchSort>(url, "sort", INBOX_SEARCH_SORTS);
-    const tags = url.searchParams.getAll("tag").filter(Boolean);
+    const tags = [...new Set(url.searchParams.getAll("tag").filter(Boolean))];
     if (tags.length > INBOX_SEARCH_TAGS_MAX || tags.some((tag) => !isInboxId("ini", tag))) throw new InboxError("validation_error", `tag: ini_ ids, at most ${INBOX_SEARCH_TAGS_MAX}.`, { field: "tag" });
     const recentSearches = (answer: InboxSearchAnswer) => (answer.recent ? { recent_searches: readRecentSearches(store.dir) } : {});
     if (!index.ready()) {

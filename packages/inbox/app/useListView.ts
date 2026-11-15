@@ -99,7 +99,8 @@ export function useListShown({ latest, projects, route, thread, threadRow, rowPa
   const [listFilterPicks, setListFilter] = useListFilter();
   const listFilterScoped = route.project !== null;
   const listFilterDay = localDay(Date.now());
-  const listTags = tags.listTags;
+  // Until the list is read its tags are not known: the Tag picks hold (no moment of unfiltered rows).
+  const listTags = latest ? tags.listTags : undefined;
   const listFilterApplied = useMemo(() => withLiveTagPicks(appliedFilter(listFilterPicks, listFilterScoped, filterTag !== null), listTags), [listFilterPicks, listFilterScoped, filterTag, listTags]);
   /** The list as the person reads it: `filterList`, then the filter. "N new" and the rows read this. */
   const filterShown = useCallback(

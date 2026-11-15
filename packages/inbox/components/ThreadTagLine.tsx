@@ -5,7 +5,7 @@
  * right-click menu. A linked machine's thread reads and writes its tags through the host, as Add tag does there.
  * Reads `ThreadTagsContext` itself, so a list read redraws this line and never the thread.
  */
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { Menu } from '@base-ui/react/menu';
 import { Icon } from '../icons';
 import { tagById, tagHref, useThreadTags } from '../threadTags';
@@ -22,6 +22,14 @@ export function ThreadTagLine({ threadId, phone }: { threadId: string; phone: bo
     const root = add.current?.closest<HTMLElement>('.pn-inbox');
     if (root && root !== portal) setPortal(root);
   });
+  // Opened by keyboard, the menu would put focus on the first tag and take letters for its type-ahead: Enter, Space and
+  // Down open it as a click does, and the field takes focus (AddTagList), so a name can be typed at once.
+  const openByKey = (event: KeyboardEvent<HTMLButtonElement> & { preventBaseUIHandler?: () => void }) => {
+    if (open || (event.key !== 'Enter' && event.key !== ' ' && event.key !== 'ArrowDown')) return;
+    event.preventDefault();
+    event.preventBaseUIHandler?.();
+    setOpen(true);
+  };
   if (!host) return null;
   const tags = host.tagsOf(threadId).flatMap((id) => tagById(host.tags, id) ?? []);
   if (tags.length === 0) return null;
@@ -42,7 +50,7 @@ export function ThreadTagLine({ threadId, phone }: { threadId: string; phone: bo
       {host.can(threadId) && (
         <Menu.Root open={open} onOpenChange={setOpen} modal={phone}>
           <Tip content="Add tag">
-            <Menu.Trigger ref={add} className="ib-ttags-add" aria-label="Add tag" data-thread-tags-add="">
+            <Menu.Trigger ref={add} className="ib-ttags-add" aria-label="Add tag" onKeyDown={openByKey} data-thread-tags-add="">
               <Icon name="plus" size={15} />
             </Menu.Trigger>
           </Tip>
