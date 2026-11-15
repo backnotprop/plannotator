@@ -7850,9 +7850,13 @@ export class InboxStore {
   // named (createCard). After that whoever sets it last wins, the person or an
   // agent (no write is refused for the other's earlier pick), as any card field.
 
-  /** Every initiative, deleted ones too (a card's history still names them), oldest first. */
+  /**
+   * Every initiative, deleted ones too (a card's history still names them), oldest first. Two made in one
+   * millisecond keep the order they were made in (the map's: the log's seq order on load), never their ids', whose
+   * random part sorts them either way.
+   */
   initiatives(): InboxInitiative[] {
-    return [...this.initiativesById.values()].sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id));
+    return [...this.initiativesById.values()].sort((a, b) => a.created_at.localeCompare(b.created_at));
   }
 
   initiative(id: string): InboxInitiative | null {
@@ -8191,6 +8195,19 @@ export class InboxStore {
     const written: InboxCard = { ...card, initiative: next, heard_at: at, heard_by: by };
     this.appendCard(written, at);
     return this.cards.get(id) ?? written;
+  }
+
+  /**
+   * The same by the tag's name (`inboxInitiativeNameKey`), as a linked machine names a tag: the live tag of that name,
+   * made first (the person's) when none is. The card is checked before anything is made.
+   */
+  setCardInitiativeNamed(id: string, name: unknown, by: InboxAuthor): InboxCard {
+    if (by.kind !== "person") throw new InboxError("initiative_person_only", "Only the person puts a card in an initiative.");
+    if (!this.cards.has(id)) throw new InboxError("card_not_found", `No card ${id}.`);
+    const text = this.cardText(name, "name", INBOX_INITIATIVE_NAME_MAX);
+    const key = inboxInitiativeNameKey(text);
+    const found = [...this.initiativesById.values()].find((tag) => tag.deleted_at === null && inboxInitiativeNameKey(tag.name) === key);
+    return this.setCardInitiative(id, (found ?? this.appendNewInitiative(text, by)).id, by);
   }
 
   /**

@@ -30,8 +30,10 @@ repositories together. The target selects the review workspace, not a file filte
 Feedback returns to the invoking session and names the directory active at submission,
 including after switching worktrees.
 
-Supply one directory or PR URL. A sole word is a directory target: a file, or a
-missing path-shaped word (containing `/`, or starting with `.` or `~`), is an error.
+Supply one directory or PR URL. A sole word is a directory target: if no such
+folder exists, or it is a file, the command stops and opens nothing. The error
+names the folder it looked in, suggests a close folder name when there is one
+("Did you mean src/components?"), and shows the command to run instead.
 Inside a sentence, a path-shaped word that names an existing directory is the target;
 one that names nothing or a file is prose. Two directories, or a directory combined
 with `--patch-file`, is an error. Other words are ignored as prose with a notice, so

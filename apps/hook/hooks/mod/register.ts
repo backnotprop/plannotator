@@ -865,11 +865,13 @@ export function register(on: On) {
     const result = await next(e)
     if (allowed) return result
     try {
-      allowed = await resolveAllowed($, e)
+      const decided = await resolveAllowed($, e)
+      // Before `allowed` is set: a turn.start that beats this hook (a
+      // --reply-on-resume launch) would build the instance without the Inbox link.
+      if (decided?.inboxTool) await registerInboxTool($, decided)
+      allowed = decided
       modDecided = true
       if (!allowed) return result
-      // Before the instance exists: it owns the Inbox link when the tool is registered.
-      if (allowed.inboxTool) await registerInboxTool($, allowed)
       // The reminder for the plugin's SessionStart `compact` command hook
       // (hooks.json), which prints it after a compaction: the conversation then
       // holds it again after the summary replaced the first prompt's copy. Unset
