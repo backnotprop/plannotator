@@ -347,6 +347,7 @@
         "@plannotator/review-editor": "workspace:*",
         "@plannotator/system": "workspace:*",
         "@plannotator/ui": "workspace:*",
+        "@plannotator/vendor-pierre-layouts": "workspace:*",
         "@tanstack/react-query": "^5.105.3",
         "motion": "^14.4.0",
         "react": "^19.3.1",
@@ -526,6 +527,16 @@
         "react": "^19.2.3",
         "react-dom": "^19.2.3",
         "tailwindcss": "^4.1.18",
+      },
+    },
+    "packages/vendor-pierre-layouts": {
+      "name": "@plannotator/vendor-pierre-layouts",
+      "version": "0.0.0",
+      "dependencies": {
+        "react": "^19.3.1",
+      },
+      "devDependencies": {
+        "@types/react": "^19.3.0",
       },
     },
   },
@@ -1215,6 +1226,8 @@
     "@plannotator/telemetry": ["@plannotator/telemetry@workspace:apps/telemetry"],
 
     "@plannotator/ui": ["@plannotator/ui@workspace:packages/ui"],
+
+    "@plannotator/vendor-pierre-layouts": ["@plannotator/vendor-pierre-layouts@workspace:packages/vendor-pierre-layouts"],
 
     "@plannotator/waitlist-service": ["@plannotator/waitlist-service@workspace:apps/waitlist-service"],
 

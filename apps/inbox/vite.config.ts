@@ -21,6 +21,8 @@ export const sharedConfig = defineConfig({
   },
   define: {
     __APP_VERSION__: JSON.stringify(pkg.version),
+    // The free-layout spike (packages/inbox/spike): only a build run with INBOX_LAYOUT_SPIKE=1 has it.
+    __INBOX_LAYOUT_SPIKE__: JSON.stringify(process.env.INBOX_LAYOUT_SPIKE === '1'),
   },
   plugins: [react(), tailwindcss(), katexWoff2Only()],
   resolve: {

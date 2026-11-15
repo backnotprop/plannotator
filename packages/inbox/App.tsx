@@ -16,7 +16,7 @@ import { perfFirstList, perfStart, perfThreadOpenDropped, perfThreadOpenStart, p
 import { machineOf, selfMachineId } from './inboxUrl';
 import type { ActionMark } from './components/ActionChecklist';
 import { isMootNoteRefusal } from './actionSaves';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type ReactNode } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type ReactNode } from 'react';
 import { ThemeProvider, useTheme } from '@plannotator/ui/components/ThemeProvider';
 import { WarmCodeHighlight } from './components/WarmCodeHighlight';
 import { threadDrawReady } from './threadDrawReady';
@@ -109,6 +109,11 @@ import { SidebarShell } from './shell/SidebarShell';
 import { InboxList } from './components/InboxList';
 import { useTidy } from './components/Tidy';
 import { ThreadPane } from './components/Thread';
+import { LAYOUT_SPIKE, layoutSpikeOn } from './spike/gate';
+import { SpikeMainThread, useSpikeWide } from './spike/slot';
+// SPIKE (never merged): the free layout; a build without INBOX_LAYOUT_SPIKE=1 drops both (spike/gate.ts).
+const LayoutSpike = LAYOUT_SPIKE ? lazy(() => import('./spike/LayoutSpike')) : null;
+const MainThreadPane = layoutSpikeOn ? SpikeMainThread : ThreadPane;
 import { openPaneUnsaved } from './components/AttachmentPane';
 import { isNewTabClick } from '@plannotator/ui/components/LocalLinkContext';
 import { inboxLinkHash } from './links';
@@ -2725,6 +2730,7 @@ function Inbox() {
 
   // A phone shows one screen at a time (phone.ts, inbox.css), and its keyboard shrinks the window.
   const phone = usePhone();
+  const spikeWide = layoutSpikeOn ? useSpikeWide() : false;
   const { read: readAccounts } = useAccounts();
   /** The Usage row the peek hangs from; null is closed. */
   const [usageRow, setUsageRow] = useState<HTMLElement | null>(null);
@@ -6013,7 +6019,7 @@ function Inbox() {
           />
         )}
         {route.thread && thread && threadReady && (
-          <ThreadPane
+          <MainThreadPane
             notice={
               <>
                 {/* No list beside the thread (a phone, a stacked window, full screen, a card's thread, beside a file):
@@ -6238,6 +6244,11 @@ function Inbox() {
               closeTo({ ...routeRef.current, file: null });
             }}
           />
+        )}
+        {LayoutSpike && spikeWide && !phone && (
+          <Suspense fallback={null}>
+            <LayoutSpike />
+          </Suspense>
         )}
       </>
     );
