@@ -96,9 +96,10 @@ function bunCompiled(execPath: string): boolean {
  * can't be read). Bun is checked first: it reports a Node-compatible
  * `process.versions.node` but brings its own TLS and root store. A Bun below
  * 1.4.4 whose bundled roots already dropped emSign G3 has the fix ported.
- * Electron is judged by its bundled roots alone, and its warning directs users
- * to update the host app. `roots` defaults to this runtime's bundled roots,
- * read only for such a Bun and for Electron.
+ * Electron is judged by its bundled roots, and by its Node version only when
+ * the store is empty or unreadable; its warning directs users to update the
+ * host app. `roots` defaults to this runtime's bundled roots, read only for
+ * such a Bun and for Electron.
  */
 export function runtimeTlsWarning(
 	versions: Partial<Record<string, string>> = process.versions,
@@ -116,7 +117,9 @@ export function runtimeTlsWarning(
 	const node = parse(versions.node);
 	if (!node) return null;
 	if (versions.electron) {
-		if (rootsFixed(roots ?? bundledRoots())) return null;
+		const store = roots ?? bundledRoots();
+		if (rootsFixed(store)) return null;
+		if (store.length === 0 && nodeFixed(node)) return null;
 		return `Plannotator: this app runs on Electron v${versions.electron} (Node v${versions.node}), which is missing the October 2026 TLS fixes (a compromised certificate authority); update the host app to a build that includes the fixes.`;
 	}
 	if (nodeFixed(node)) return null;
