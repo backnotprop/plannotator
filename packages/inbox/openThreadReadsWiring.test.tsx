@@ -4,9 +4,8 @@
  * process, tests/helpers/inbox-dom-server.ts). The open thread is listed and
  * its repo is known (the scratch projects have no git `origin`, so the test's
  * fetch adds one to the thread read): the case where another thread's record
- * skips the thread read. Failures to catch: the skip that no longer reads the
- * open thread's files again (a file edited on disk, an image captured later);
- * a thread deleted elsewhere (no record says so) left on screen because the
+ * skips the thread read. Failures to catch: a record that cannot change the
+ * open thread's files reading them again; a thread deleted elsewhere (no record says so) left on screen because the
  * list read that no longer has it does not read it; and the open thread's
  * own record (an agent's message in it) not drawn in place from the record,
  * or read the whole thread again (data/apply/stream.ts).
@@ -191,7 +190,7 @@ function openAt(threadId: string): HTMLElement {
 const pane = (el: HTMLElement, id: string) => el.querySelector(`section.ib-pane[data-thread-id="${id}"]`);
 const listReads = () => reads.filter((p) => p === '/api/inbox/threads').length;
 
-test("another thread's record reads the open thread's files, not the thread; its own record draws in place, with no read", async () => {
+test("another thread's record reads nothing of the open thread; its own record (no file) draws in place, with no read", async () => {
   if (!hasDom) return;
   const el = openAt(world.waiting);
   await until(() => pane(el, world.waiting) !== null && sendRecord !== null && filesReads(world.waiting) > 0, 'the open thread and its files');
@@ -201,10 +200,10 @@ test("another thread's record reads the open thread's files, not the thread; its
   const lists = listReads();
 
   await agentWrites(world.stopped);
-  await until(() => listReads() > lists && filesReads(world.waiting) > files, 'the list read and the files read');
+  await until(() => listReads() > lists, 'the list read');
   await wait(300);
   expect(threadReads(world.waiting)).toBe(thread);
-  expect(filesReads(world.waiting)).toBe(files + 1);
+  expect(filesReads(world.waiting)).toBe(files);
 
   const drawn = () => pane(el, world.waiting)?.querySelectorAll('[data-message-article]').length ?? 0;
   const before = drawn();
@@ -212,6 +211,8 @@ test("another thread's record reads the open thread's files, not the thread; its
   await until(() => drawn() > before, "the open thread's own record drawn");
   await wait(300);
   expect(threadReads(world.waiting)).toBe(thread);
+  // A message with no file moves no file: its files are not read again.
+  expect(filesReads(world.waiting)).toBe(files);
 }, 15000);
 
 test('a thread deleted elsewhere: the next record of another thread reads it once the list lacks it, and the pane says it is gone', async () => {

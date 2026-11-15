@@ -48,6 +48,7 @@ let savedFetch: typeof fetch;
 let posted: { path: string; body: Record<string, unknown> }[] = [];
 let connection: RecipientConnection | null | undefined;
 let takeBackAnswer: () => Response = () => Response.json({});
+let replyHeld: Promise<void> | null = null;
 
 beforeEach(() => {
   if (!hasDom) return;
@@ -59,6 +60,10 @@ beforeEach(() => {
     if (init?.method === 'POST') {
       posted.push({ path, body: JSON.parse(String(init.body)) });
       if (path.endsWith('/take-back')) return takeBackAnswer();
+      if (path.endsWith('/reply') && replyHeld) {
+        await replyHeld;
+        return Response.json({ error: 'Not taken for the test.', code: 'refused' }, { status: 409 });
+      }
       return Response.json({ message: {} });
     }
     if (path.includes('/attachments')) return Response.json({ serverSession: 's', attachments: [], annotations: [] });
@@ -153,4 +158,30 @@ test.skipIf(!hasDom)('not offered once the agent has it: delivered, or handed to
   connection = working();
   el = await render(thread({ reply: { delivery: { state: 'delivered', host: 'claude-code', session: 'ses_a', at: '2026-10-16T17:07:00.000Z' } } }), { at: '2026-10-16T17:05:00.000Z', checked_at: '2026-10-16T17:07:00.000Z' });
   expect(el.querySelector('[data-take-back]')).toBeNull();
+});
+
+test.skipIf(!hasDom)('no Take back while a Send of this thread is on its way: what it drew is not a message yet', async () => {
+  connection = working();
+  const el = await render(thread());
+  expect(el.querySelector('[data-take-back]')).not.toBeNull();
+  let release = () => {};
+  replyHeld = new Promise<void>((done) => (release = done));
+  const reply = [...el.querySelectorAll('.ib-pfoot button')].find((b) => /^(Reply|Edit draft)$/.test(b.textContent?.trim() ?? '')) as HTMLButtonElement;
+  await act(async () => reply.click());
+  await settle();
+  const box = el.querySelector('textarea:not([data-question-other])') as HTMLTextAreaElement;
+  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
+  act(() => {
+    setter.call(box, 'One more thing.');
+    box.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await settle();
+  await act(async () => (el.querySelector('[data-reply-send]') as HTMLButtonElement).click());
+  for (let i = 0; i < 40 && !posted.some((p) => p.path.endsWith('/reply')); i++) await settle();
+  expect(posted.some((p) => p.path.endsWith('/reply'))).toBe(true);
+  expect(el.querySelector('[data-take-back]')).toBeNull();
+  release();
+  replyHeld = null;
+  for (let i = 0; i < 40 && el.querySelector('[data-take-back]') === null; i++) await settle();
+  expect(el.querySelector('[data-take-back]')).not.toBeNull();
 });

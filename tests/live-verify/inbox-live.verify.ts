@@ -113,7 +113,30 @@ async function landed(page: Page, key: string, t0: number, timeout = 22_000): Pr
 /** Requests (not the event stream) each page made, with their sizes once finished. */
 class Traffic {
   private reqs: { page: string; t: number; url: string; bytes: number }[] = [];
+  /** API requests out now, on every page (the event stream left out). */
+  private out = new Set<Request>();
+  /**
+   * Until no page has an API request out for `quietMs` (at most `maxMs`): a check starts on windows that finished
+   * what the last one set off, so one build's faster check does not leave its reads to count in the next.
+   */
+  async settled(quietMs = 250, maxMs = 10_000): Promise<void> {
+    const end = Date.now() + maxMs;
+    let quietSince = this.out.size === 0 ? Date.now() : 0;
+    while (Date.now() < end) {
+      if (this.out.size > 0) quietSince = 0;
+      else if (quietSince === 0) quietSince = Date.now();
+      else if (Date.now() - quietSince >= quietMs) return;
+      await pause(25);
+    }
+  }
   attach(page: Page, name: string) {
+    const api = (r: Request) => {
+      const url = r.url().replace(/^https?:\/\/[^/]+/, '');
+      return url.startsWith('/api/') && !(url.startsWith('/api/inbox/events') && !url.includes('once=1'));
+    };
+    page.on('request', (r: Request) => void (api(r) && this.out.add(r)));
+    page.on('requestfailed', (r: Request) => void this.out.delete(r));
+    page.on('requestfinished', (r: Request) => void this.out.delete(r));
     page.on('requestfinished', async (r: Request) => {
       const url = r.url().replace(/^https?:\/\/[^/]+/, '');
       if (!url.startsWith('/api/') || (url.startsWith('/api/inbox/events') && !url.includes('once=1'))) return;
@@ -128,7 +151,11 @@ class Traffic {
   }
   between(t0: number, t1: number, pages?: string[]) {
     const list = this.reqs.filter((r) => r.t >= t0 && r.t <= t1 && (!pages || pages.includes(r.page)));
-    return { count: list.length, bytes: list.reduce((n, r) => n + r.bytes, 0), urls: [...new Set(list.map((r) => r.url.replace(/\?.*$/, '').replace(/msg_[A-Z0-9]+/g, ':id')))] };
+    const path = (url: string) => url.replace(/\?.*$/, '').replace(/msg_[A-Z0-9]+/g, ':id');
+    // Which window made which request, and how many of each (`A /api/inbox/threads: 2`): where an event's cost goes.
+    const byPage: Record<string, number> = {};
+    for (const r of list) byPage[`${r.page} ${path(r.url)}`] = (byPage[`${r.page} ${path(r.url)}`] ?? 0) + 1;
+    return { count: list.length, bytes: list.reduce((n, r) => n + r.bytes, 0), urls: [...new Set(list.map((r) => path(r.url)))], byPage };
   }
 }
 
@@ -171,8 +198,11 @@ test(`inbox live behaviour: ${SIZE} store, ${PROFILE} link`, async () => {
     if (process.env.LIVE_LOG) appendFileSync(process.env.LIVE_LOG, line);
   };
   /** One check: its own timeout, an exception is a failure with the reason. */
+  let settleWindows: (() => Promise<void>) | null = null;
   const check = async (id: string, title: string, fn: () => Promise<{ pass: boolean; ms?: number | null; detail?: unknown }>) => {
     log(`${id} ${title}`);
+    // Every window done with what the last check set off (see Traffic.settled).
+    await settleWindows?.();
     try {
       const r = await Promise.race([fn(), pause(90_000).then(() => ({ pass: false, detail: 'check timed out (90 s)' }))]);
       rules[id] = { id, title, ...r };
@@ -276,6 +306,7 @@ test(`inbox live behaviour: ${SIZE} store, ${PROFILE} link`, async () => {
     const pages = { A, B, C, P };
     const dropping = PROFILE === 'hotel' ? A : C;
     const traffic = new Traffic();
+    settleWindows = () => traffic.settled();
     const errors: string[] = [];
     for (const [n, p] of Object.entries(pages)) {
       p.setDefaultTimeout(15_000);
@@ -505,7 +536,7 @@ test(`inbox live behaviour: ${SIZE} store, ${PROFILE} link`, async () => {
 
       await check('LV-06', 'Words typed in "Other" in one tab reach the other tab and never go backwards there', async () => {
         const id = T.pick0!;
-        const sel = `${paneSel(id)} [data-lv-card="1"] input[aria-label^="Other answer"]`;
+        const sel = `${paneSel(id)} [data-lv-card="1"] [aria-label^="Other answer"]`;
         await openThread(A, id);
         await openThread(B, id);
         await markCards(A, id);
@@ -880,7 +911,7 @@ test(`inbox live behaviour: ${SIZE} store, ${PROFILE} link`, async () => {
             await pause(150);
           }
           const pick = picks.includes(-1) ? -1 : [...picks].sort((x, y) => x - y)[1]!;
-          const sel = `${paneSel(id)} [data-lv-card="1"] input[aria-label^="Other answer"]`;
+          const sel = `${paneSel(id)} [data-lv-card="1"] [aria-label^="Other answer"]`;
           let key = -1;
           if (await A.$(sel)) {
             await A.click(sel);
