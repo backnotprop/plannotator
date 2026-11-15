@@ -1,0 +1,1029 @@
+---
+import Base from '../layouts/Base.astro';
+import Nav from '../components/Nav.astro';
+import Footer from '../components/Footer.astro';
+import GitHubStars from '../components/landing/GitHubStars';
+import { SEM_JIFF_NAME, SEM_JIFF_PACKAGE, SEM_JIFF_REPO } from '../lib/sem-jiff';
+
+export function getStaticPaths() {
+  return [{ params: { semJiff: SEM_JIFF_NAME } }];
+}
+
+const installCmd = `npm install ${SEM_JIFF_PACKAGE}`;
+
+const languages = ['TypeScript', 'TSX', 'JavaScript', 'Python', 'Go', 'Rust', 'Java', 'C#', 'PHP', 'Ruby', 'Kotlin', 'Swift'];
+
+const labels = [
+  { key: 'extracted', name: 'Extracted function', alt: 'A loop pulled out of checkout into a new sumLineItems function, drawn as one block moving across the diff' },
+  { key: 'inlined', name: 'Inlined function', alt: 'A helper removed and its body pasted where it was called, drawn as one block moving across the diff' },
+  { key: 'moved', name: 'Moved', alt: 'A function moved further down the file, drawn as one block instead of a deletion and an addition' },
+  { key: 'renamed', name: 'Renamed', alt: 'MAX_RETRIES renamed to MAX_ATTEMPTS everywhere, each use marked as a rename' },
+  { key: 'reformatted', name: 'Reformatted', alt: 'An object literal split across lines, marked as reformatted, next to a real edit' },
+];
+
+const finalSet = {
+  total: 193,
+  rows: [
+    { key: 'engine', name: 'Engine alone', found: 127, pct: 66, wrong: 1, claims: 133 },
+    { key: 'jev', name: '+ Jev', found: 168, pct: 87, wrong: 5, claims: 181 },
+    { key: 'clef', name: '+ Jev, Clef as tie-breaker', found: 171, pct: 89, wrong: 5, claims: 186 },
+  ],
+};
+
+const heldOut = {
+  total: 454,
+  rows: [
+    { key: 'engine', name: 'Engine alone', found: 263, wrong: 8 },
+    { key: 'jev', name: '+ Jev', found: 371, wrong: 12 },
+    { key: 'clef', name: '+ Jev, Clef as tie-breaker', found: 388, wrong: 13 },
+  ],
+};
+
+const compare = [
+  {
+    name: 'TypeScript',
+    total: 187,
+    rows: [
+      { key: 'rm', name: 'RefactoringMiner', found: 73, wrong: 14 },
+      { key: 'engine', name: SEM_JIFF_NAME, found: 105, wrong: 1 },
+      { key: 'jev', name: `${SEM_JIFF_NAME} + Jev`, found: 148, wrong: 1 },
+    ],
+  },
+  {
+    name: 'Java',
+    total: 91,
+    rows: [
+      { key: 'rm', name: 'RefactoringMiner', found: 70, wrong: 16 },
+      { key: 'engine', name: SEM_JIFF_NAME, found: 52, wrong: 1 },
+      { key: 'jev', name: `${SEM_JIFF_NAME} + Jev`, found: 62, wrong: 1 },
+    ],
+  },
+];
+
+type LinesLeftRow = { key: 'engine' | 'other'; tool: string; linesLeft: number };
+
+const linesLeftToReview: { subtitle: string; rows: LinesLeftRow[] } = { subtitle: '', rows: [] };
+
+const hasLinesLeft = linesLeftToReview.rows.length > 0;
+const linesLeftMax = Math.max(1, ...linesLeftToReview.rows.map((r) => r.linesLeft));
+
+const wrongClaims = [
+  {
+    name: 'Kotlin',
+    projects: 'ktor, Exposed',
+    rows: [
+      { key: 'engine', name: SEM_JIFF_NAME, wrong: 0, of: 46, unit: 'claims' },
+      { key: 'other', name: 'difftastic', wrong: 51, of: 70, unit: 'claims' },
+      { key: 'other', name: 'sem 0.8.0', wrong: 40, of: 164, unit: 'audited' },
+    ],
+  },
+  {
+    name: 'Swift',
+    projects: 'swift-nio, TCA',
+    rows: [
+      { key: 'engine', name: SEM_JIFF_NAME, wrong: 0, of: 158, unit: 'claims' },
+      { key: 'other', name: 'difftastic', wrong: 13, of: 88, unit: 'audited' },
+      { key: 'other', name: 'sem', wrong: 4, of: 95, unit: 'audited' },
+    ],
+  },
+];
+
+const pctOf = (n: number, total: number) => `${((n / total) * 100).toFixed(2)}%`;
+
+const title = `${SEM_JIFF_NAME} · Plannotator`;
+const description =
+  'A tree-sitter engine that reads a code diff and labels what really happened: moved, renamed, reformatted, extracted and inlined functions. Power Up with Jev and Clef to find more. Powers the Sem tab in Plannotator code review.';
+---
+
+<Base title={title} description={description}>
+  <div class="min-h-screen bg-background text-foreground">
+    <Nav />
+
+    <main class="max-w-6xl mx-auto px-6 md:px-8">
+      <header class="sd-hero">
+        <div class="sd-cmd-row">
+          <button type="button" class="sd-cmd" data-copy={installCmd} aria-label="Copy the install command">
+            <span class="sd-cmd-prompt" aria-hidden="true">$</span>
+            <span>{installCmd}</span>
+            <span class="sd-cmd-copied" data-copied hidden>copied</span>
+          </button>
+          <a
+            href="https://github.com/backnotprop/plannotator"
+            target="_blank"
+            rel="noopener noreferrer"
+            class="sd-gh"
+            aria-label="Plannotator on GitHub"
+          >
+            <svg class="w-3.5 h-3.5" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" clip-rule="evenodd" d="M8 0C3.58 0 0 3.58 0 8C0 11.54 2.29 14.53 5.47 15.59C5.87 15.66 6.02 15.42 6.02 15.21C6.02 15.02 6.01 14.39 6.01 13.72C4 14.09 3.48 13.23 3.32 12.78C3.23 12.55 2.84 11.84 2.5 11.65C2.22 11.5 1.82 11.13 2.49 11.12C3.12 11.11 3.57 11.7 3.72 11.94C4.44 13.15 5.59 12.81 6.05 12.6C6.12 12.08 6.33 11.73 6.56 11.53C4.78 11.33 2.92 10.64 2.92 7.58C2.92 6.71 3.23 5.99 3.74 5.43C3.66 5.23 3.38 4.41 3.82 3.31C3.82 3.31 4.49 3.1 6.02 4.13C6.66 3.95 7.34 3.86 8.02 3.86C8.7 3.86 9.38 3.95 10.02 4.13C11.55 3.09 12.22 3.31 12.22 3.31C12.66 4.41 12.38 5.23 12.3 5.43C12.81 5.99 13.12 6.7 13.12 7.58C13.12 10.65 11.25 11.33 9.47 11.53C9.76 11.78 10.01 12.26 10.01 13.01C10.01 14.08 10 14.94 10 15.21C10 15.42 10.15 15.67 10.55 15.59C13.71 14.53 16 11.53 16 8C16 3.58 12.42 0 8 0Z"/></svg>
+            <GitHubStars client:load />
+          </a>
+        </div>
+
+        <p class="sd-pkg">{SEM_JIFF_PACKAGE}</p>
+        <h1 class="font-display sd-heading">See what a diff<br />really changed.</h1>
+        <p class="sd-overview">
+          {SEM_JIFF_NAME} reads both sides of a code diff with tree-sitter and labels what actually
+          happened, so reviewers skip the noise and read the real edits. It powers the Sem
+          tab in Plannotator's code review.
+        </p>
+
+
+        <ul class="sd-langs" aria-label="Languages">
+          {languages.map((l) => (
+            <li>{l}</li>
+          ))}
+        </ul>
+      </header>
+
+      <section class="sd-gallery" aria-label="What it labels">
+        <div class="sd-labels" role="tablist" aria-label="Change types">
+          {labels.map((l, i) => (
+            <button
+              type="button"
+              role="tab"
+              class="sd-label"
+              id={`sd-tab-${l.key}`}
+              aria-controls={`sd-shot-${l.key}`}
+              aria-selected={i === 0 ? 'true' : 'false'}
+              data-shot-tab={l.key}
+            >{l.name}</button>
+          ))}
+        </div>
+        <figure class="sd-shot">
+          {labels.map((l, i) => (
+            <div
+              class="sd-shot-pane"
+              role="tabpanel"
+              id={`sd-shot-${l.key}`}
+              aria-labelledby={`sd-tab-${l.key}`}
+              data-shot-pane={l.key}
+              hidden={i !== 0}
+            >
+              <img class="sd-shot-light" src={`/assets/semantic-labels/diff-${l.key}-light.webp`} alt={l.alt} width="2000" loading={i === 0 ? 'eager' : 'lazy'} />
+              <img class="sd-shot-dark" src={`/assets/semantic-labels/diff-${l.key}-dark.webp`} alt={l.alt} width="2000" loading={i === 0 ? 'eager' : 'lazy'} />
+            </div>
+          ))}
+        </figure>
+      </section>
+
+      <section id="power-up" class="sd-section">
+        <p class="sd-eyebrow"><span class="sd-bolt" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M13 2 4 14h7l-1 8 9-12h-7l1-8z" /></svg>
+        </span>power up</p>
+        <h2 class="font-display sd-title">Power Up with Jev and Clef</h2>
+        <p class="sd-body">
+          Add your own Jev key and the engine asks a model about the candidates its strict rules
+          aren't sure of. Add Clef and it breaks the ties.
+        </p>
+
+        <div class="sd-card sd-viz" data-viz>
+          <div class="sd-card-head">
+            <h3 class="sd-card-title">Extracted and inlined functions found</h3>
+            <p class="sd-card-sub">{finalSet.total} real cases across TypeScript, Go, Rust, Python, Java and C#</p>
+          </div>
+
+          <div class="sd-bars sd-bars-hero" role="list">
+            <div class="sd-bars-colhead" aria-hidden="true">
+              <span></span><span></span><span class="sd-colhead-wrong">wrong claims</span>
+            </div>
+            {finalSet.rows.map((r) => (
+              <div
+                class="sd-row"
+                role="listitem"
+                tabindex="0"
+                data-tip={`${r.name}: ${r.found} of ${finalSet.total} found (${r.pct}%), ${r.wrong} wrong of ${r.claims} claims`}
+                aria-label={`${r.name}: ${r.found} of ${finalSet.total} found, ${r.pct} percent. ${r.wrong} wrong of ${r.claims} claims.`}
+              >
+                <span class="sd-row-name">{r.name}</span>
+                <span class="sd-track">
+                  <span class:list={['sd-bar', `sd-c-${r.key}`]} style={`--p: ${pctOf(r.found, finalSet.total)}`}></span>
+                  <span class="sd-bar-val"><strong>{r.pct}%</strong><span class="sd-bar-count">{r.found}</span></span>
+                </span>
+                <span class="sd-row-wrong"><strong>{r.wrong}</strong> of {r.claims}</span>
+              </div>
+            ))}
+          </div>
+
+          <details class="sd-table">
+            <summary>View as table</summary>
+            <table>
+              <thead><tr><th scope="col"></th><th scope="col">Found</th><th scope="col">Wrong claims</th></tr></thead>
+              <tbody>
+                {finalSet.rows.map((r) => (
+                  <tr><th scope="row">{r.name}</th><td>{r.found} ({r.pct}%)</td><td>{r.wrong} of {r.claims}</td></tr>
+                ))}
+              </tbody>
+            </table>
+          </details>
+        </div>
+
+        <div class="sd-grid-2">
+          <div class="sd-card sd-viz" data-viz>
+            <div class="sd-card-head">
+              <h3 class="sd-card-title">Held-out sets</h3>
+              <p class="sd-card-sub">{heldOut.total} more real cases, found and wrong claims</p>
+            </div>
+            <div class="sd-bars sd-bars-compact" role="list">
+              {heldOut.rows.map((r) => (
+                <div
+                  class="sd-row"
+                  role="listitem"
+                  tabindex="0"
+                  data-tip={`${r.name}: ${r.found} of ${heldOut.total} found, ${r.wrong} wrong`}
+                  aria-label={`${r.name}: ${r.found} of ${heldOut.total} found, ${r.wrong} wrong claims.`}
+                >
+                  <span class="sd-row-name">{r.name}</span>
+                  <span class="sd-track">
+                    <span class:list={['sd-bar', `sd-c-${r.key}`]} style={`--p: ${pctOf(r.found, heldOut.total)}`}></span>
+                    <span class="sd-bar-val"><strong>{r.found}</strong></span>
+                  </span>
+                  <span class="sd-row-wrong"><strong>{r.wrong}</strong> wrong</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <dl class="sd-stats">
+            <div class="sd-stat">
+              <dt>per 500-line change with Jev</dt>
+              <dd class="sd-stat-val">$0.0004</dd>
+            </div>
+            <div class="sd-stat">
+              <dt>to reopen a diff</dt>
+              <dd class="sd-stat-val">$0</dd>
+              <dd class="sd-stat-note">Answers are remembered.</dd>
+            </div>
+          </dl>
+        </div>
+      </section>
+
+      <section id="compare" class="sd-section">
+        <p class="sd-eyebrow">against other tools</p>
+        <h2 class="font-display sd-title">More found, far fewer wrong</h2>
+        <p class="sd-body">
+          Extracted and inlined functions on the same commits, next to RefactoringMiner.
+        </p>
+
+        <div class="sd-card sd-viz" data-viz>
+          <div class="sd-legend" aria-hidden="true">
+            {compare[0].rows.map((r) => (
+              <span class="sd-legend-item"><span class:list={['sd-swatch', `sd-c-${r.key}`]}></span>{r.name}</span>
+            ))}
+          </div>
+
+          <div class="sd-compare">
+            {compare.map((g) => (
+              <div class="sd-group">
+                <p class="sd-group-name">{g.name} <span>{g.total} real cases</span></p>
+                <div class="sd-bars sd-bars-compact" role="list">
+                  {g.rows.map((r) => (
+                    <div
+                      class="sd-row"
+                      role="listitem"
+                      tabindex="0"
+                      data-tip={`${g.name}, ${r.name}: ${r.found} of ${g.total} found, ${r.wrong} wrong`}
+                      aria-label={`${g.name}, ${r.name}: ${r.found} of ${g.total} found, ${r.wrong} wrong claims.`}
+                    >
+                      <span class="sd-row-name">{r.name}</span>
+                      <span class="sd-track">
+                        <span class:list={['sd-bar', `sd-c-${r.key}`]} style={`--p: ${pctOf(r.found, g.total)}`}></span>
+                        <span class="sd-bar-val"><strong>{r.found}</strong></span>
+                      </span>
+                      <span class:list={['sd-row-wrong', r.wrong > 5 && 'sd-row-wrong-hi']}><strong>{r.wrong}</strong> wrong</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <details class="sd-table">
+            <summary>View as table</summary>
+            <table>
+              <thead><tr><th scope="col"></th><th scope="col">Found</th><th scope="col">Wrong claims</th></tr></thead>
+              <tbody>
+                {compare.flatMap((g) =>
+                  g.rows.map((r) => (
+                    <tr><th scope="row">{g.name} ({g.total}), {r.name}</th><td>{r.found}</td><td>{r.wrong}</td></tr>
+                  )),
+                )}
+              </tbody>
+            </table>
+          </details>
+        </div>
+      </section>
+
+      <section id="tools" class="sd-section">
+        <p class="sd-eyebrow">structural diff tools</p>
+        <h2 class="font-display sd-title">{hasLinesLeft ? 'Less to read. Fewer wrong claims.' : 'Fewer wrong claims'}</h2>
+        <p class="sd-body">{hasLinesLeft ? 'Next to plain git, git --color-moved, difftastic, GumTree and sem.' : 'Next to difftastic and sem, on projects it was never tuned on.'}</p>
+
+        {hasLinesLeft && (
+          <div class="sd-card sd-viz" id="lines-left">
+            <div class="sd-card-head">
+              <h3 class="sd-card-title">Lines left to review</h3>
+              <p class="sd-card-sub">{linesLeftToReview.subtitle}</p>
+            </div>
+            <div class="sd-bars sd-bars-compact sd-bars-lines" role="list">
+              {linesLeftToReview.rows.map((r) => (
+                <div
+                  class="sd-row"
+                  role="listitem"
+                  tabindex="0"
+                  data-tip={`${r.tool}: ${r.linesLeft.toLocaleString('en-US')} lines left to review`}
+                  aria-label={`${r.tool}: ${r.linesLeft} lines left to review.`}
+                >
+                  <span class="sd-row-name">{r.tool}</span>
+                  <span class="sd-track">
+                    <span class:list={['sd-bar', r.key === 'engine' ? 'sd-c-jev' : 'sd-c-rm']} style={`--p: ${pctOf(r.linesLeft, linesLeftMax)}`}></span>
+                    <span class="sd-bar-val"><strong>{r.linesLeft.toLocaleString('en-US')}</strong></span>
+                  </span>
+                  <span class="sd-row-wrong"></span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div class="sd-card sd-viz">
+          <div class="sd-card-head">
+            <h3 class="sd-card-title">Wrong claims on real commits</h3>
+            <p class="sd-card-sub">Held-out projects, blind audit: ktor and Exposed (Kotlin), swift-nio and TCA (Swift)</p>
+          </div>
+          <div class="sd-compare">
+            {wrongClaims.map((g) => (
+              <div class="sd-group">
+                <p class="sd-group-name">{g.name} <span>{g.projects}</span></p>
+                <div class="sd-bars sd-bars-compact sd-bars-wrong" role="list">
+                  {g.rows.map((r) => (
+                    <div
+                      class="sd-row"
+                      role="listitem"
+                      tabindex="0"
+                      data-tip={`${g.name}, ${r.name}: ${r.wrong} wrong of ${r.of} ${r.unit}`}
+                      aria-label={`${g.name}, ${r.name}: ${r.wrong} wrong of ${r.of} ${r.unit}.`}
+                    >
+                      <span class="sd-row-name">{r.name}</span>
+                      <span class="sd-track">
+                        {r.wrong > 0 && <span class:list={['sd-bar', r.key === 'engine' ? 'sd-c-engine' : 'sd-c-rm']} style={`--p: ${pctOf(r.wrong, r.of)}`}></span>}
+                        <span class="sd-bar-val"><strong>{r.wrong}</strong> wrong</span>
+                      </span>
+                      <span class="sd-row-wrong">of {r.of} {r.unit}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section class="sd-cta">
+        <h2 class="font-display sd-title">Try it in your next review</h2>
+        <p class="sd-body">
+          It's already in <a href="/code-review/">Plannotator code review</a>. Or use the engine on its own:
+        </p>
+        <pre class="sd-code"><code>{installCmd}</code></pre>
+        <div class="sd-cta-actions">
+          <a href="/code-review/" class="sd-btn">
+            Plannotator code review
+            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" aria-hidden="true">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M13 7l5 5m0 0l-5 5m5-5H6" />
+            </svg>
+          </a>
+          <a href={SEM_JIFF_REPO} target="_blank" rel="noopener noreferrer" class="sd-btn sd-btn-outline">GitHub</a>
+        </div>
+      </section>
+    </main>
+
+    <div class="sd-tip" data-tip-el role="tooltip" hidden></div>
+
+    <script is:inline>
+      (() => {
+        const copyBtn = document.querySelector('[data-copy]');
+        const copied = copyBtn?.querySelector('[data-copied]');
+        copyBtn?.addEventListener('click', () => {
+          navigator.clipboard?.writeText(copyBtn.getAttribute('data-copy') || '').then(() => {
+            if (!copied) return;
+            copied.hidden = false;
+            setTimeout(() => { copied.hidden = true; }, 1400);
+          }).catch(() => {});
+        });
+
+        const tip = document.querySelector('[data-tip-el]');
+        const showTip = (el) => {
+          if (!tip) return;
+          tip.textContent = el.getAttribute('data-tip') || '';
+          tip.hidden = false;
+          const r = el.querySelector('.sd-bar')?.getBoundingClientRect() || el.getBoundingClientRect();
+          const t = tip.getBoundingClientRect();
+          const left = Math.min(Math.max(8, r.right - t.width / 2), window.innerWidth - t.width - 8);
+          tip.style.left = `${left}px`;
+          tip.style.top = `${r.top - t.height - 8}px`;
+        };
+        const hideTip = () => { if (tip) tip.hidden = true; };
+        document.querySelectorAll('[data-tip]').forEach((el) => {
+          el.addEventListener('pointerenter', () => showTip(el));
+          el.addEventListener('pointerleave', hideTip);
+          el.addEventListener('focus', () => showTip(el));
+          el.addEventListener('blur', hideTip);
+        });
+        window.addEventListener('scroll', hideTip, { passive: true });
+
+        const tabs = [...document.querySelectorAll('[data-shot-tab]')];
+        const select = (key) => {
+          tabs.forEach((t) => t.setAttribute('aria-selected', t.getAttribute('data-shot-tab') === key ? 'true' : 'false'));
+          document.querySelectorAll('[data-shot-pane]').forEach((p) => { p.hidden = p.getAttribute('data-shot-pane') !== key; });
+        };
+        tabs.forEach((t, i) => {
+          t.addEventListener('click', () => select(t.getAttribute('data-shot-tab')));
+          t.addEventListener('keydown', (e) => {
+            if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+            const next = tabs[(i + (e.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length];
+            next.focus();
+            select(next.getAttribute('data-shot-tab'));
+          });
+        });
+      })();
+    </script>
+
+    <Footer />
+  </div>
+</Base>
+
+<style>
+  main {
+    --sd-dim: color-mix(in oklab, var(--foreground) 62%, transparent);
+    --sd-subtle: color-mix(in oklab, var(--foreground) 42%, transparent);
+    --sd-grid: color-mix(in oklab, var(--foreground) 8%, transparent);
+    --sd-c-rm: #535861;
+    --sd-c-engine: #6265b3;
+    --sd-c-jev: #7a7cf0;
+    --sd-c-clef: #9fa5ff;
+  }
+
+  :global(.light) main {
+    --sd-c-rm: #b0b6bf;
+    --sd-c-engine: #8889e0;
+    --sd-c-jev: #6861f1;
+    --sd-c-clef: #4a1fd9;
+  }
+
+  .sd-hero {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1.25rem;
+    padding: 5rem 0 2.5rem;
+    max-width: 46rem;
+  }
+
+  .sd-cmd-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    width: 100%;
+  }
+
+  .sd-cmd {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--primary);
+    letter-spacing: 0.01em;
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: copy;
+  }
+
+  .sd-cmd-prompt { color: var(--sd-subtle); font-weight: 400; }
+
+  .sd-cmd-copied {
+    font-size: 0.6875rem;
+    font-weight: 500;
+    color: var(--sd-dim);
+  }
+
+  .sd-gh {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.75rem;
+    line-height: 1;
+    padding: 0.5rem 0.875rem;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    color: var(--sd-dim);
+    text-decoration: none;
+    transition: color 0.15s, border-color 0.15s;
+  }
+
+  .sd-gh:hover,
+  .sd-gh:focus-visible {
+    color: var(--foreground);
+    border-color: var(--sd-subtle);
+  }
+
+  .sd-pkg {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--sd-subtle);
+    margin-bottom: -0.5rem;
+  }
+
+  .sd-heading {
+    font-size: clamp(2rem, 5vw, 3rem);
+    line-height: 1.08;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    text-wrap: balance;
+  }
+
+  .sd-overview {
+    font-size: 1rem;
+    line-height: 1.7;
+    color: var(--sd-dim);
+    max-width: 40rem;
+  }
+
+  .sd-gallery {
+    display: flex;
+    flex-direction: column;
+    gap: 0.875rem;
+    margin-bottom: 1rem;
+  }
+
+  .sd-labels {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .sd-label {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    font-weight: 700;
+    line-height: 1;
+    padding: 0.5rem 0.75rem;
+    border-radius: 999px;
+    cursor: pointer;
+    color: var(--sd-dim);
+    border: 1px solid var(--border);
+    background: transparent;
+    transition: color 0.15s, border-color 0.15s, background-color 0.15s;
+  }
+
+  .sd-label:hover { color: var(--foreground); }
+
+  .sd-label[aria-selected='true'] {
+    color: var(--primary);
+    border-color: color-mix(in oklab, var(--primary) 45%, var(--border));
+    background: color-mix(in oklab, var(--primary) 10%, transparent);
+  }
+
+  .sd-label:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+
+  .sd-langs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem 0.875rem;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--sd-subtle);
+  }
+
+  .sd-shot {
+    margin: 0;
+    border-radius: 12px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    background: #1e1e1e;
+    box-shadow: 0 24px 60px color-mix(in oklab, var(--foreground) 10%, transparent);
+  }
+
+  :global(.light) .sd-shot { background: #fff; }
+
+  .sd-shot-pane[hidden] { display: none; }
+
+  @media (max-width: 640px) {
+    .sd-shot { overflow-x: auto; }
+
+    .sd-shot img { width: 960px !important; max-width: none; }
+  }
+
+  .sd-shot img {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+
+  .sd-shot-light { display: none !important; }
+  :global(.light) .sd-shot-light { display: block !important; }
+  :global(.light) .sd-shot-dark { display: none !important; }
+
+  .sd-section {
+    display: flex;
+    flex-direction: column;
+    gap: 0.875rem;
+    padding: 4.5rem 0 1rem;
+    scroll-margin-top: 4rem;
+  }
+
+  .sd-section + .sd-section {
+    border-top: 1px solid color-mix(in oklab, var(--border) 55%, transparent);
+    margin-top: 3.5rem;
+  }
+
+  .sd-eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--primary);
+  }
+
+  .sd-bolt svg { width: 0.95rem; height: 0.95rem; display: block; }
+
+  .sd-title {
+    font-size: clamp(1.625rem, 3.2vw, 2.25rem);
+    line-height: 1.12;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    text-wrap: balance;
+  }
+
+  .sd-body {
+    font-size: 0.9375rem;
+    line-height: 1.7;
+    color: var(--sd-dim);
+    max-width: 40rem;
+  }
+
+  .sd-body a {
+    color: var(--primary);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+
+  .sd-card {
+    min-width: 0;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    background: var(--card);
+    padding: 1.5rem 1.5rem 1.25rem;
+  }
+
+  .sd-viz { margin-top: 1rem; }
+
+  .sd-card-head { margin-bottom: 1rem; }
+
+  .sd-card-title {
+    font-size: 1rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+
+  .sd-card-sub {
+    font-size: 0.8125rem;
+    line-height: 1.5;
+    color: var(--sd-dim);
+    margin-top: 0.2rem;
+  }
+
+  .sd-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1.125rem;
+    margin-bottom: 1.25rem;
+    font-size: 0.75rem;
+    color: var(--sd-dim);
+  }
+
+  .sd-legend-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+
+  .sd-swatch {
+    width: 10px;
+    height: 10px;
+    border-radius: 3px;
+    display: inline-block;
+  }
+
+  .sd-c-rm { background: var(--sd-c-rm); }
+  .sd-c-engine { background: var(--sd-c-engine); }
+  .sd-c-jev { background: var(--sd-c-jev); }
+  .sd-c-clef { background: var(--sd-c-clef); }
+
+  .sd-bars {
+    display: grid;
+    grid-template-columns: minmax(7rem, 13rem) minmax(0, 1fr) 5.5rem;
+    column-gap: 1rem;
+  }
+
+  .sd-bars-colhead,
+  .sd-row {
+    display: grid;
+    grid-column: 1 / -1;
+    grid-template-columns: subgrid;
+    align-items: center;
+  }
+
+  .sd-colhead-wrong {
+    font-family: var(--font-mono);
+    font-size: 0.625rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--sd-subtle);
+    text-align: right;
+    padding-bottom: 0.25rem;
+  }
+
+  .sd-row {
+    padding: 0.5rem 0;
+    border-radius: 6px;
+    outline: none;
+  }
+
+  .sd-row:focus-visible { box-shadow: 0 0 0 2px var(--primary); }
+
+  .sd-row-name {
+    font-size: 0.8125rem;
+    color: var(--foreground);
+    line-height: 1.3;
+  }
+
+  .sd-track {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+    min-height: 24px;
+    border-left: 1px solid var(--sd-grid);
+  }
+
+  .sd-bar {
+    display: block;
+    width: calc(var(--p) * var(--sd-scale, 1));
+    height: 24px;
+    border-radius: 0 4px 4px 0;
+    flex: none;
+    transition: opacity 0.15s;
+  }
+
+  .sd-bars-compact .sd-bar { height: 16px; }
+  .sd-bars-compact .sd-track { min-height: 16px; }
+
+  .sd-row:hover .sd-bar,
+  .sd-row:focus-visible .sd-bar { opacity: 0.85; }
+
+  .sd-bar-val {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.4rem;
+    white-space: nowrap;
+    font-size: 0.8125rem;
+    color: var(--sd-dim);
+  }
+
+  .sd-bar-val strong {
+    color: var(--foreground);
+    font-weight: 650;
+  }
+
+  .sd-bars-hero .sd-bar-val strong { font-size: 1.25rem; letter-spacing: -0.01em; }
+
+  .sd-bar-count {
+    font-size: 0.75rem;
+    color: var(--sd-subtle);
+  }
+
+  .sd-bar-count::after { content: ' found'; }
+
+  .sd-row-wrong {
+    text-align: right;
+    font-size: 0.75rem;
+    color: var(--sd-subtle);
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .sd-row-wrong strong {
+    color: var(--foreground);
+    font-weight: 600;
+    font-size: 0.875rem;
+  }
+
+  .sd-row-wrong-hi strong { color: var(--destructive); }
+
+  .sd-table {
+    margin-top: 1rem;
+    font-size: 0.75rem;
+    color: var(--sd-dim);
+  }
+
+  .sd-table summary {
+    cursor: pointer;
+    width: fit-content;
+    color: var(--sd-subtle);
+  }
+
+  .sd-table summary:hover { color: var(--foreground); }
+
+  .sd-table table {
+    margin-top: 0.75rem;
+    border-collapse: collapse;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .sd-table th,
+  .sd-table td {
+    text-align: left;
+    padding: 0.35rem 1.25rem 0.35rem 0;
+    border-bottom: 1px solid var(--sd-grid);
+    font-weight: 400;
+  }
+
+  .sd-table thead th { color: var(--sd-subtle); }
+  .sd-table tbody th { color: var(--foreground); }
+
+  .sd-grid-2 {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1rem;
+  }
+
+  @media (min-width: 860px) {
+    .sd-grid-2 { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); }
+  }
+
+  .sd-stats {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+    margin: 1rem 0 0;
+  }
+
+  @media (min-width: 860px) {
+    .sd-stats { grid-template-columns: 1fr; }
+  }
+
+  .sd-stat {
+    display: flex;
+    flex-direction: column-reverse;
+    justify-content: flex-end;
+    gap: 0.25rem;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    background: var(--card);
+    padding: 1.25rem 1.5rem;
+  }
+
+  .sd-stat dt {
+    font-size: 0.8125rem;
+    color: var(--sd-dim);
+  }
+
+  .sd-stat-val {
+    font-size: 2.25rem;
+    font-weight: 650;
+    letter-spacing: -0.02em;
+    line-height: 1.1;
+    margin: 0;
+  }
+
+  .sd-stat-note {
+    order: -1;
+    font-size: 0.75rem;
+    color: var(--sd-subtle);
+    margin: 0.25rem 0 0;
+  }
+
+  .sd-compare {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1.75rem;
+  }
+
+  @media (min-width: 860px) {
+    .sd-compare { grid-template-columns: 1fr 1fr; gap: 2.5rem; }
+  }
+
+  .sd-compare .sd-bars { grid-template-columns: minmax(6.5rem, 9rem) minmax(0, 1fr) 4.5rem; }
+
+  .sd-group-name {
+    font-size: 0.875rem;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+  }
+
+  .sd-group-name span {
+    font-weight: 400;
+    color: var(--sd-subtle);
+    margin-left: 0.35rem;
+    font-size: 0.8125rem;
+  }
+
+  @media (max-width: 560px) {
+    .sd-card { padding: 1.25rem 1rem 1rem; }
+    .sd-bars,
+    .sd-compare .sd-bars { grid-template-columns: minmax(0, 1fr) 5rem; }
+    .sd-track { --sd-scale: 0.66; }
+    .sd-bar-count { display: none; }
+    .sd-bars-colhead > span:first-child { display: none; }
+    .sd-row-name {
+      grid-column: 1 / -1;
+      margin-bottom: 0.35rem;
+    }
+    .sd-bars-hero .sd-bar-val strong { font-size: 1.0625rem; }
+  }
+
+  .sd-bars-wrong .sd-bar-val strong { font-size: 0.9375rem; }
+
+  .sd-compare .sd-bars-wrong { grid-template-columns: minmax(5.5rem, 7rem) minmax(0, 1fr) 6.75rem; }
+
+  @media (max-width: 560px) {
+    .sd-compare .sd-bars-wrong { grid-template-columns: minmax(0, 1fr) 6.75rem; }
+  }
+
+  .sd-tip {
+    position: fixed;
+    z-index: 60;
+    max-width: 18rem;
+    padding: 0.45rem 0.65rem;
+    border-radius: 8px;
+    font-size: 0.75rem;
+    line-height: 1.4;
+    color: var(--foreground);
+    background: var(--popover, var(--card));
+    border: 1px solid var(--border);
+    box-shadow: var(--float-shadow);
+    pointer-events: none;
+  }
+
+  .sd-tip[hidden] { display: none; }
+
+  .sd-cta {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.875rem;
+    padding: 3.5rem 0 5.5rem;
+    margin-top: 3.5rem;
+    border-top: 1px solid color-mix(in oklab, var(--border) 55%, transparent);
+  }
+
+  .sd-code {
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    padding: 0.75rem 1rem;
+    border-radius: 8px;
+    background: var(--muted);
+    max-width: 100%;
+    overflow-x: auto;
+  }
+
+  .sd-cta-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.625rem;
+    margin-top: 0.375rem;
+  }
+
+  .sd-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    padding: 0.625rem 1.125rem;
+    border-radius: 8px;
+    background: var(--foreground);
+    color: var(--background);
+    text-decoration: none;
+    border: 1px solid var(--foreground);
+    transition: opacity 0.15s;
+  }
+
+  .sd-btn:hover,
+  .sd-btn:focus-visible { opacity: 0.88; }
+
+  .sd-btn-outline {
+    background: transparent;
+    color: var(--foreground);
+    border-color: var(--border);
+  }
+
+</style>
