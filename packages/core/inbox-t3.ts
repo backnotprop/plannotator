@@ -67,6 +67,21 @@ export const INBOX_T3_LOGIN_COMMAND = "plannotator t3 login --url <T3 MCP URL>";
 /** In T3, where the URL the sign-in command takes is. */
 export const INBOX_T3_URL_WHERE = "In T3: Settings → Environments, the environment's menu, Copy MCP URL.";
 
+/** The sign-in fix in words, before its command: the waiting line's and Settings → Agents' T3 Code row's. */
+export const INBOX_T3_SIGN_IN_TEXT = "Sign in to T3 once and replies go in by themselves:";
+
+/**
+ * T3 Code on this machine, for Settings → Agents (`InboxAgentsModel.t3`):
+ * `local`, its `t3` command can send a reply here (not on Windows); `open`, a
+ * T3 server runs now; `sign_in`, the saved sign-ins as the T3 wake knows them
+ * (`ran_out`: T3 refused one). Never a token, URL or epoch.
+ */
+export interface InboxT3Status {
+  local: boolean;
+  open: boolean;
+  sign_in: "none" | "ok" | "read_only" | "ran_out";
+}
+
 /**
  * The line under a reply that waits on T3, and the command to copy beside it.
  * Proposed words: the owner approves them word for word before release.
@@ -74,7 +89,7 @@ export const INBOX_T3_URL_WHERE = "In T3: Settings → Environments, the environ
 export function inboxT3WaitLine(reason: InboxT3WaitReason): { text: string; command: string | null } {
   switch (reason) {
     case "sign_in":
-      return { text: "Waiting for T3 Code. Sign in to T3 once and replies go in by themselves:", command: INBOX_T3_LOGIN_COMMAND };
+      return { text: `Waiting for T3 Code. ${INBOX_T3_SIGN_IN_TEXT}`, command: INBOX_T3_LOGIN_COMMAND };
     case "sign_in_again":
       return { text: "Waiting for T3 Code. Your T3 sign-in ran out. Sign in again and this goes in by itself:", command: INBOX_T3_LOGIN_COMMAND };
     case "access":

@@ -227,6 +227,7 @@ import { createInboxLiveSessions, takesOver, thereInThread } from "./inbox-sessi
 import { inboxAgentsGroup, inboxFolderProject, inboxMergedAgents, inboxStartOfDay, type InboxAgentWait } from "./inbox-agents-list";
 import { createInboxCodexWake, type InboxCodexWake } from "./inbox-codex-wake";
 import { createT3Local, INBOX_T3_PROBE_MS, type T3Route } from "./inbox-t3-local";
+import { t3SettingsStatus } from "./inbox-t3-settings";
 import { createInboxVoice } from "./inbox-voice";
 import { createInboxQwenWake, type InboxQwenWake } from "./inbox-qwen-wake";
 import { createInboxT3Wake, createT3ModOwner, type InboxT3Wake, type T3Connect } from "./inbox-t3-wake";
@@ -2251,6 +2252,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           update_command: claudePluginBehindInbox(install, version) ? CLAUDE_PLUGIN_UPDATE_COMMAND : null,
         };
       }),
+      t3: await t3SettingsStatus(agentEnvironment, t3Local, t3Wake),
     };
   };
 
