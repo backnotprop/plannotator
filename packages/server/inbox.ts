@@ -5777,6 +5777,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
         }
         if (!codeReviewOn()) return json({ error: "Code review is off.", code: "code_review_off" }, 409);
+        if (!pullWriteFromWindow(req)) return json(INBOX_MACHINE_PULL_WINDOW_ONLY_BODY, 403);
         const body = await readBody(req);
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
         const keys = Array.isArray(body.keys) ? body.keys : null;
