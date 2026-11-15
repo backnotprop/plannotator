@@ -9454,6 +9454,8 @@ dialog.ib-pqi .ib-listcol.ib-pqi-list { position: relative; inset: auto; visibil
 .pn-inbox .ib-rto-ghost { visibility: hidden; pointer-events: none; }
 /* The list: the `@` list's box and tiles, over the pill's right end. */
 .ib-tg-menu.ib-rpick { left: auto; right: 0; bottom: calc(100% + 6px); margin: 0; width: 300px; max-width: calc(100vw - 24px); padding: 6px; }
+/* Room for the start row's "+", mark, "New Claude Code session" and "in ledger" on one line. */
+.ib-tg-menu.ib-rpick:has([data-recipient-start]) { width: 360px; }
 .ib-rpick-row { display: flex; align-items: center; min-width: 0; border-radius: 8px; }
 @media (hover: hover) { .ib-rpick-row:hover { background: color-mix(in oklch, var(--muted) 55%, transparent); } }
 .pn-inbox .ib-rpick-name { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; height: 36px; padding: 0 4px 0 8px; border: 0; border-radius: 8px; background: none; color: var(--foreground); font: inherit; text-align: left; cursor: pointer; }

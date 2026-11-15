@@ -56,6 +56,15 @@ test('an ended agent, or one on an older Plannotator, cannot be added as a secon
   expect(canAddRecipient(row('ended'), ['a', 'x'])).toBe(true);
 });
 
+test('a new session (the start row) takes the reply alone: never ticked as a second recipient, and nothing joins it', () => {
+  const start = { session: 'new:claude-code', host: 'claude-code', label: 'New Claude Code session', short: 'New Claude Code session', state: 'live' as const, start: { project: 'ledger', asleep: false } };
+  const other = { session: 'x', host: null, label: 'X', short: 'X', state: 'live' as const };
+  const rows = [other, start];
+  expect(canAddRecipient(start, ['a'], rows)).toBe(false);
+  expect(canAddRecipient(other, [start.session], rows)).toBe(false);
+  expect(canAddRecipient(other, ['a'], rows)).toBe(true);
+});
+
 test('any number of recipients: a twentieth circle can still be ticked, and one already in stays removable', () => {
   const row = { session: 'x', host: null, label: 'X', short: 'X', state: 'live' as const };
   const many = Array.from({ length: 19 }, (_, i) => `s${i}`);

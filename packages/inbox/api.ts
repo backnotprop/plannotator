@@ -1669,8 +1669,8 @@ export const inboxApi = {
       annotation_ids?: string[];
       /** The file on screen, on the reply a Send from full screen's floating box writes its words on. */
       viewing?: ReplyViewing;
-      /** Another live session takes the reply: the session that asked has ended. */
-      to?: { host?: string; session: string };
+      /** Another live session takes the reply, or a new one starts for it (`launch`): the session that asked has ended. */
+      to?: { host?: string; session: string } | { launch: { agent: string; project_id: string; model?: string; effort?: string } };
       /**
        * The open questions the person chose to skip ("Skip them"), on this message or (with
        * `message_id`) another of the same session. A Send never skips anything else.
