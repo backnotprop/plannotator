@@ -154,13 +154,13 @@ export function githubMergeMethodOf(stdout: string): PullMergeMethod | null {
   return null;
 }
 
-function splitRepo(repo: string): { owner: string; name: string } | null {
+export function splitRepo(repo: string): { owner: string; name: string } | null {
   const at = repo.lastIndexOf("/");
   if (at <= 0 || at === repo.length - 1) return null;
   return { owner: repo.slice(0, at), name: repo.slice(at + 1) };
 }
 
-function forgeMessage(result: RefCommandResult): string {
+export function forgeMessage(result: RefCommandResult): string {
   const text = `${result.stderr}\n${result.stdout}`.trim();
   // `gh api` prints the forge's JSON `message` on stdout and "gh: <message> (HTTP 405)" on stderr.
   try {

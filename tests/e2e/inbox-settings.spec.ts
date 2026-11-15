@@ -19,7 +19,7 @@
  * PNGs, light and dark, land in .local/proof/settings/.
  */
 
-import { devices, expect, test, webkit, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { devices, expect, test, webkit, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -111,11 +111,11 @@ test('desktop: a focused page with a section nav; addresses, keyboard, focus, Ba
   await page.keyboard.press('Tab');
   await expect(nav.getByRole('link', { name: 'Rows' })).toBeFocused();
   await page.keyboard.press('Tab');
-  await expect(nav.getByRole('link', { name: 'Agents' })).toBeFocused();
+  await expect(nav.getByRole('link', { name: 'Agents', exact: true })).toBeFocused();
   await page.keyboard.press('Enter');
   await expect(page).toHaveURL(/#settings\/agents$/);
   await expect(page.getByRole('heading', { name: 'Agents', level: 1 })).toBeFocused();
-  await expect(nav.getByRole('link', { name: 'Agents' })).toHaveAttribute('aria-current', 'page');
+  await expect(nav.getByRole('link', { name: 'Agents', exact: true })).toHaveAttribute('aria-current', 'page');
   await shot(page, 'agents');
 
   for (const [name, check] of [

@@ -19,9 +19,7 @@ name = "plannotator-relay"
 main = "src/index.ts"
 compatibility_date = "2026-09-01"
 
-# Custom domain (top-level: must precede any [table] in TOML). Pending before
-# release: the relay.plannotator.ai custom domain is recommended but not yet
-# deployed.
+# Custom domain (top-level: must precede any [table] in TOML).
 routes = [
   { pattern = "relay.plannotator.ai", custom_domain = true }
 ]
@@ -31,15 +29,29 @@ routes = [
 name = "MAILBOX"
 class_name = "Mailbox"
 
+# The hard brake on mailbox creation: one object per client address, counting
+# its creations in a fixed 60 s window (src/create-brake.ts), on SQLite
+# storage. Missing off loopback: creation answers 503.
+[[durable_objects.bindings]]
+name = "CREATE_BRAKE"
+class_name = "CreateBrake"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["Mailbox"]
 
-# The brake on anonymous mailbox creation (POST /v1/mailboxes only), the same
-# rule guides.show puts on its create route (apps/guides-show/wrangler.toml:
-# 20 per minute per IP, period 60), in its own namespace so the two services
-# do not share a count. Over it the Worker answers 429 with Retry-After: 60.
-# Optional in the Env type: without this block nothing is braked.
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["CreateBrake"]
+
+# The cheap first filter on anonymous mailbox creation (POST /v1/mailboxes
+# only), the same rule guides.show puts on its create route
+# (apps/guides-show/wrangler.toml: 20 per minute per IP, period 60), in its own
+# namespace so the two services do not share a count. Over it the Worker
+# answers 429 with Retry-After: 60. Its counts are approximate and cached per
+# machine (Cloudflare's docs), so requests on separate connections pass it well
+# over 20; the CreateBrake object above is the hard limit. Missing off
+# loopback: creation answers 503.
 [[ratelimits]]
 name = "MAILBOX_CREATE_LIMITER"
 namespace_id = "1002"

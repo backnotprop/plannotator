@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type FocusEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
+import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { HueDot, LetterMark, ProjectMark, showsProjects, showsThreads, useRowMarks } from '../letterMarks';
 import { inboxListShortcuts } from '../shortcuts/list.shortcuts';
 import { shortcutAria, useShortcutAria, withShortcut } from '../shortcuts/hint';
@@ -32,11 +32,11 @@ import { TimeWithTick } from './DeliveryTick';
 import { ActionBadge, QuestionMark, WIDE_ROW_WAIT_WORDS, WaitCard, WaitWords, badgeDescription, rowHasBadge, rowMarks, type RowMarks } from './RowBadge';
 import { StatusMark, rowStatus } from './RowStatus';
 import { attachPullToRefresh } from '../pullRefresh';
-import { attachRowSwipe, rowSwipeActions } from '../rowSwipe';
-import { RowSwipeLayer } from './RowSwipeLayer';
+import { RowSwipeLayer, useRowSwipe } from './RowSwipeLayer';
+import { sameValue } from '../sameValue';
 import { TidyMenu, type TidyController } from './Tidy';
 import { ListFilterButton, type ListFilterSource } from './ListFilter';
-import { awayLine, type MachinesModel } from '../machines';
+import { awayLine, machineTakes, type MachinesModel } from '../machines';
 import { listLookClasses, useListLook } from '../listLook';
 import { flatRows, useListView, type ListPlaces, type ListSort } from '../listView';
 import { useStarredAbove } from '../starredPills';
@@ -49,14 +49,23 @@ import { ListNewPill } from './ListNewPill';
 import { useInboxTextSize } from '../textSize';
 import { useTheme } from '@plannotator/ui/components/ThemeProvider';
 import { relativeTime, relativeWords, useRelativeClock } from '../relativeTime';
+import { RowSlot } from './RowSlot';
 import { useShortcutScope } from '@plannotator/ui/shortcuts';
 import { bareKeyAllowed, isComposingKey, keyboardFocused, keyTarget, modalOpen } from '../shortcuts/guards';
 import { listKeyTarget, LIST_STOPS, type ListMove } from '../listKeys';
+import { fitCountsColumn, useDevicePixelRatio } from './listFit';
+import { useKeyboardFocus } from './useKeyboardFocus';
 
 export interface InboxListProps {
   /** Beside an open thread, a click on the list's edge hides the list (the thread in full screen); drag still resizes. Absent: the edge only resizes. */
   onHide?: () => void;
   title: string;
+  /**
+   * A tag's list (approval "inbox-thread-tags"): the tag's `#` before the title, and "5 threads · 2 projects" after it,
+   * quiet. Absent: neither.
+   */
+  titleMark?: ReactNode;
+  titleNote?: string | null;
   /** The project's folder, `~/src/billing-svc`, when one project is shown: in the title's tooltip, never drawn in the header. */
   path: string | null;
   sections: readonly InboxListSection[];
@@ -208,6 +217,11 @@ export function rowAgent(row: InboxListRow): InboxListRow['author'] {
   return row.addressee ? { kind: 'agent', host: row.addressee.host, session: row.addressee.session, name: null } : row.author;
 }
 
+function slotSession(row: InboxListRow): string | null {
+  const agent = rowAgent(row);
+  return agent.kind === 'agent' ? (agent.session ?? null) : null;
+}
+
 /**
  * The badge card's footer mark: the agent's, or, when several agents are in the thread, their marks overlapping
  * (Lines). The row itself draws its agents before the project, on tiles: `RowAgents` on a wide row, `RowAgentTiles`
@@ -219,41 +233,6 @@ function RowMark({ row }: { row: InboxListRow }) {
   if (hideAgents) return null;
   if ((row.participants?.length ?? 0) > 1) return <TagStack participants={row.participants!} />;
   return <AuthorMark author={rowAgent(row)} />;
-}
-
-/**
- * The row has keyboard focus (`:focus-visible`): its badge's card shows, as it
- * does on hover (approval "inbox-row-badges"). A click's focus does not count.
- * Escape closes the card and keeps focus on the row; that Escape is used up
- * (default prevented), so the window's Escape does not also close the thread.
- * The card comes back the next time the row takes keyboard focus.
- */
-function useKeyboardFocus(enabled: boolean): [
-  boolean,
-  { onFocus: (e: FocusEvent<HTMLElement>) => void; onBlur: () => void; onKeyDown: (e: ReactKeyboardEvent<HTMLElement>) => void },
-] {
-  const [on, setOn] = useState(false);
-  return [
-    on,
-    {
-      onKeyDown: (e) => {
-        if (!on || e.key !== 'Escape' || e.target !== e.currentTarget || e.defaultPrevented) return;
-        e.preventDefault();
-        setOn(false);
-      },
-      onFocus: (e) => {
-        if (!enabled || e.target !== e.currentTarget) return;
-        let visible = false;
-        try {
-          visible = e.currentTarget.matches(':focus-visible');
-        } catch {
-          visible = false;
-        }
-        setOn(visible);
-      },
-      onBlur: () => setOn(false),
-    },
-  ];
 }
 
 /** A blocked row's hover card (wide and three-line rows), or undefined: its filled marks' tooltip. */
@@ -428,7 +407,7 @@ function FromLine({ row, project, filtered }: { row: InboxListRow; project: stri
     <span className="ib-from">
       <RowAvatar row={row} size={24} />
       {!filtered && <RowProjectMark row={row} />}
-      {!filtered && <ClipText className="ib-p" text={project} />}
+      {!filtered && <RowSlot row={row} session={slotSession(row)} project={project} />}
       <RowAgents participants={row.participants} agent={rowAgent(row)} />
     </span>
   );
@@ -449,14 +428,7 @@ function LeadLine({ row, project, filtered, tip = true }: { row: InboxListRow; p
   return (
     <span className="ib-from ib-lead">
       {withProject && <RowProjectMark row={row} />}
-      {withProject &&
-        (tip ? (
-          <ClipText className="ib-p" text={project} />
-        ) : (
-          <span className="ib-p" dir="auto">
-            {project}
-          </span>
-        ))}
+      {withProject && <RowSlot row={row} session={slotSession(row)} project={project} tip={tip} />}
       <RowAgentTiles participants={row.participants} agent={rowAgent(row)} tip={tip} />
     </span>
   );
@@ -740,69 +712,6 @@ export const ONE_PROJECT_WIDE_ROWS_MIN_LIST_WIDTH = 496;
  * keep approval "inbox-row-byline", option A (the short forms, the marks alone), so the subject keeps its room.
  */
 export const FULL_WORDS_MIN_LIST_WIDTH = 1150;
-
-/** The wide rows' open counts column, as inbox.css draws it (`.ib-row`'s grid). */
-const COUNTS_COLUMN_PX = 84;
-
-/**
- * In a list with the pin's column (`.ib-pincol`), widen the open counts' column for the whole list to the widest
- * counts drawn ("[□ 12] ?12", "[□ 99+] ?99+" pass its 84px), so every pin stays in one column 8px before its row's
- * counts and none runs under a pin. The counts sit at their column's right edge, so their width is the column's right
- * edge less their leftmost part, whatever the column's width: a second pass gives the same answer. Without pins, or
- * with counts that fit, the column keeps its 84px (`--ib-cq-w` unset).
- *
- * Cells with the same parts and text draw the same counts at the same width (no row state restyles them), so only
- * one cell of each is read. A read lays out its row (rows are `content-visibility: auto`), and a list has far fewer
- * different counts than rows: reading every row cost about 25 ms at 700 rows, on every open of a thread and every
- * return to the list. False when the list is not drawn (nothing in it has a box), so the caller fits it again later.
- */
-function fitCountsColumn(list: HTMLElement, pinColumn: boolean): boolean {
-  let widest = 0;
-  let drawn = true;
-  if (pinColumn) {
-    const alike = new Map<string, HTMLElement[]>();
-    for (const cell of list.querySelectorAll<HTMLElement>('.ib-row > .ib-cq')) {
-      if (!cell.firstElementChild) continue;
-      // What the cell draws: each part's classes and text (its tooltip's id differs on every row).
-      const key = [...cell.children].map((part) => `${part.getAttribute('class')}\t${part.textContent}`).join('\n');
-      const cells = alike.get(key);
-      if (cells) cells.push(cell);
-      else alike.set(key, [cell]);
-    }
-    groups: for (const cells of alike.values()) {
-      for (const cell of cells) {
-        const lefts = [...cell.children].map((part) => part.getBoundingClientRect()).filter((box) => box.width > 1).map((box) => box.left);
-        if (lefts.length) {
-          widest = Math.max(widest, cell.getBoundingClientRect().right - Math.min(...lefts));
-          break;
-        }
-        // Nothing of this cell drawn: try the next alike cell, unless the whole list is undrawn (then none is).
-        if (list.getClientRects().length === 0) {
-          drawn = false;
-          widest = 0;
-          break groups;
-        }
-      }
-    }
-  }
-  const width = widest > COUNTS_COLUMN_PX ? `${Math.ceil(widest)}px` : '';
-  if (list.style.getPropertyValue('--ib-cq-w') !== width) {
-    if (width) list.style.setProperty('--ib-cq-w', width);
-    else list.style.removeProperty('--ib-cq-w');
-  }
-  return drawn;
-}
-
-/** The page's zoom (device pixels per CSS pixel), read again on each resize: a zoom changes it, and text widths with it. */
-function useDevicePixelRatio(): number {
-  const [ratio, setRatio] = useState(() => (typeof window === 'undefined' ? 1 : window.devicePixelRatio));
-  useEffect(() => {
-    const read = () => setRatio(window.devicePixelRatio);
-    window.addEventListener('resize', read);
-    return () => window.removeEventListener('resize', read);
-  }, []);
-  return ratio;
-}
 
 /**
  * One row of the wide list, on one line (approval "inbox-row-byline", the
@@ -1550,35 +1459,7 @@ export function InboxList(props: InboxListProps) {
   useLayoutEffect(() => {
     latest.current = props;
   });
-  // Swipe a row on a touch screen (rowSwipe.ts): right is the row's hover action (Quiet, or Mark unread), left Archive,
-  // both through the row menu's action. One set of listeners on the list's scroll box, for every row shape.
-  const swipeLayerRef = useRef<HTMLDivElement>(null);
-  const swipes = onRowAction !== undefined;
-  useEffect(() => {
-    const body = bodyRef.current;
-    const layer = swipeLayerRef.current;
-    if (!swipes || !body || !layer) return;
-    const find = (threadId: string) => {
-      for (const section of latest.current.sections) {
-        const row = section.threads.find((r) => r.thread_id === threadId);
-        if (row) return { row, drawn: section.id };
-      }
-      return null;
-    };
-    return attachRowSwipe(body, layer, {
-      actionsOf: (threadId) => {
-        const found = find(threadId);
-        if (!found) return null;
-        const can = { markRead: latest.current.onMarkRead !== undefined, markUnread: latest.current.onMarkUnread !== undefined };
-        return { ...rowSwipeActions(found.row, found.drawn, can), title: titleOf(found.row) };
-      },
-      onAction: (threadId, action) => {
-        const found = find(threadId);
-        return found ? latest.current.onRowAction?.(found.row, action) : undefined;
-      },
-      reduced: () => typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches,
-    });
-  }, [swipes]);
+  const swipeLayerRef = useRowSwipe(bodyRef, latest, onRowAction !== undefined, titleOf);
   const openRow = useCallback((row: InboxListRow) => latest.current.onOpen(row), []);
   const markRead = useCallback((row: InboxListRow) => latest.current.onMarkRead?.(row), []);
   const markUnread = useCallback((row: InboxListRow) => latest.current.onMarkUnread?.(row), []);
@@ -1604,8 +1485,7 @@ export function InboxList(props: InboxListProps) {
       onMarkRead={props.onMarkRead ? markRead : undefined}
       onMarkUnread={props.onMarkUnread ? markUnread : undefined}
       onSendNow={props.onSendNow ? sendNow : undefined}
-      // Pins are this Inbox's own: another machine's thread has no star to press here.
-      onUnstar={props.onUnstar && !(row.machine && props.machines?.names.has(row.machine)) ? unstar : undefined}
+      onUnstar={props.onUnstar ? unstar : undefined}
       day={day}
       menu={menuRow === row.thread_id}
       pinned={props.pinned?.has(row.thread_id) === true}
@@ -1647,6 +1527,7 @@ export function InboxList(props: InboxListProps) {
               data-list-refresh=""
               data-refreshing={props.refreshSpin != null ? '' : undefined}
             >
+              {props.titleMark && <span className="ib-lhead-mark">{props.titleMark}</span>}
               {props.path ? (
                 <Tip content={<ProjectTipText name={props.title} root={props.path} />}>
                   <span className="ib-lhead-tt">{props.title}</span>
@@ -1665,8 +1546,16 @@ export function InboxList(props: InboxListProps) {
           </h1>
         ) : (
           <Tip content={props.path ? <ProjectTipText name={props.title} root={props.path} /> : props.title} cut={!props.path}>
-            <h1 dir="auto">{props.title}</h1>
+            <h1 dir="auto">
+              {props.titleMark && <span className="ib-lhead-mark">{props.titleMark}</span>}
+              {props.title}
+            </h1>
           </Tip>
+        )}
+        {props.titleNote && (
+          <span className="ib-lhead-note" data-list-title-note="">
+            {props.titleNote}
+          </span>
         )}
         {/* The button's description, outside the h1 so the heading reads only the name. */}
         {props.onRefresh && (
@@ -1768,14 +1657,15 @@ export function InboxList(props: InboxListProps) {
           snoozeRequest={snoozeRequest}
           snoozeBlockedOf={props.snoozeBlockedOf}
           onSnoozeBlocked={props.onSnoozeBlocked}
-          pinnedOf={props.pinned ? (threadId) => props.pinned!.has(threadId) : undefined}
+          pinnedOf={props.pinned ? (row) => (!props.machines || machineTakes(row, props.machines, 'star') ? props.pinned!.has(row.thread_id) : null) : undefined}
+          prioritizesOf={props.machines ? (row) => machineTakes(row, props.machines!, 'priority') : undefined}
           onTarget={setMenuRow}
           onAction={(row, action) => onRowAction?.(row, action)}
           disabled={!onRowAction}
           held={props.selectedThreadId !== null}
           phone={props.phone === true}
         >
-          {swipes && <RowSwipeLayer ref={swipeLayerRef} />}
+          {onRowAction && <RowSwipeLayer ref={swipeLayerRef} />}
           {props.stale}
           {props.ask}
           {awayLines.map((line) => (
@@ -1943,22 +1833,6 @@ export const ListRow = memo(
     a.onUnstar === b.onUnstar &&
     sameValue(a.row, b.row),
 );
-
-/** Deep equality over JSON-shaped values (a list row). */
-function sameValue(a: unknown, b: unknown): boolean {
-  if (a === b) return true;
-  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false;
-  if (Array.isArray(a)) {
-    if (!Array.isArray(b) || a.length !== b.length) return false;
-    for (let i = 0; i < a.length; i++) if (!sameValue(a[i], b[i])) return false;
-    return true;
-  }
-  if (Array.isArray(b)) return false;
-  const ka = Object.keys(a);
-  if (ka.length !== Object.keys(b).length) return false;
-  for (const k of ka) if (!sameValue((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k])) return false;
-  return true;
-}
 
 /** The guided review mark drops its label to its icon when the row is short of room: only then does it need a tooltip. */
 function guideLabelHidden(trigger: Element): boolean {

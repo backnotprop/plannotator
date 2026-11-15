@@ -32,7 +32,7 @@
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-live-reconnect.spec.ts`.
  */
 
-import { expect, test, type Browser, type Page } from '@playwright/test';
+import { expect, test, type Browser, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
 import http from 'node:http';
@@ -165,6 +165,7 @@ test.beforeAll(async () => {
   const env = {
     PATH: process.env.PATH ?? '',
     HOME: root,
+    PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9',
     PLANNOTATOR_DATA_DIR: join(root, 'data'),
     PLANNOTATOR_BROWSER: NO_BROWSER,
     NO_BROWSER,

@@ -32,7 +32,7 @@ import {
 import { INBOX_STEPS_FIELD_DESCRIPTION, INBOX_STEPS_LEAD } from "@plannotator/shared/inbox/connection";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
-import { shortTime } from "./inbox-mcp-read";
+import { sessionWho, shortTime, type SessionNameOf } from "./inbox-mcp-read";
 import { guarded, okComplete } from "./inbox-mcp-result";
 
 /** What a `steps` call gets while the person has steps off: nothing is written. */
@@ -85,11 +85,11 @@ export function checkStepsInput(steps: unknown, agent: InboxAuthor): void {
  * head line per list, then one line per step. Empty while steps are off or
  * the thread has none.
  */
-export function threadStepsText(store: InboxStore, threadId: string, reader: string | null): string[] {
+export function threadStepsText(store: InboxStore, threadId: string, reader: string | null, names?: SessionNameOf): string[] {
   const lists = store.threadSteps(threadId).sort((a, b) => Number(b.agent.session === reader) - Number(a.agent.session === reader));
   const out: string[] = [];
   for (const list of lists) {
-    const whose = list.agent.session === reader ? "Your steps" : `Steps of ${inboxAgentName(list.agent)} (${list.agent.session})`;
+    const whose = list.agent.session === reader ? "Your steps" : `Steps of ${list.agent.session ? sessionWho(inboxAgentName(list.agent), list.agent.session, names?.(list.agent.session)) : `${inboxAgentName(list.agent)} (${list.agent.session})`}`;
     out.push(`${whose} (${stepsProgressText(list)}; updated ${shortTime(list.updated_at)}):`);
     for (const step of list.steps) {
       const when = step.status === "done" ? ` (${shortTime(step.at)})` : "";

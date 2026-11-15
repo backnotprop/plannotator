@@ -10,7 +10,7 @@ import { sideQuote } from './askWords';
 import { sideButtonFor, type SideButton } from './sideButton';
 
 export interface InboxAskOptions {
-  /** The settings are read, this is not a tailnet guest's page, and not the tour: while false nothing is read and nothing shows. */
+  /** The settings are read, and not the tour: while false nothing is read and nothing shows. */
   on: boolean;
   /** Settings → Capabilities → Code review: a code span in an answer shows its code, as in a message. */
   codeReview: boolean;

@@ -27,7 +27,8 @@ export interface SendTarget {
  * wrote) rides the last reply with the words, the file and the guide
  * comments; any other rides a reply to its own message, which joins the
  * targets in thread order when it is not one already (a comment never goes
- * to two replies). Returns the targets and the annotations each carries,
+ * to two replies). A note on the person's own message (approval "inbox-annotate-own-and-questions") rides
+ * the last reply, with the words: it is about what they said, not an agent's message. Returns the targets and the annotations each carries,
  * keyed by the message the reply answers.
  */
 export function routeSendAnnotations(
@@ -42,7 +43,7 @@ export function routeSendAnnotations(
   const extra: SendTarget[] = [];
   for (const record of records) {
     const message = record.message ? thread.messages.find((m) => m.id === record.message_id) : undefined;
-    if (!message || message.id === last.message.id || sameSession(message, last.message)) {
+    if (!message || message.author.kind !== 'agent' || message.id === last.message.id || sameSession(message, last.message)) {
       put(last.message.id, record);
       continue;
     }

@@ -22,6 +22,7 @@ import { buildGuideSnapshot } from '@plannotator/core/guide-format';
 import type { InboxMessageWire, InboxProject, InboxThread } from '@plannotator/core/inbox-types';
 import type { ShapeHost } from '@plannotator/ui/components/shape';
 import type { InboxShapes } from './shape/useInboxShapes';
+import { inboxApi } from './api';
 
 const NO_BOARDS: InboxShapes = { shapes: null, byThread: new Map(), changed: 0, rowShown: false, subscribe: () => () => {}, refresh: () => {} };
 
@@ -482,6 +483,36 @@ test.skipIf(!hasDom)('a global comment flips the decision to Send feedback and r
   expect(posted).toHaveLength(1);
   expect(posted[0]!.annotation_ids).toEqual(['ann-guide-global']);
   expect(String(posted[0]!.feedback)).toContain(`## Global comments\n\n${text}`);
+});
+
+// A comment whose save has not answered yet when the verdict is pressed (a slow link): the verdict waits for it and
+// carries it, never going with the comments confirmed at the press alone.
+test.skipIf(!hasDom)('a verdict pressed while a comment is still saving waits for it and carries every comment', async () => {
+  others = [];
+  const record = (id: string, text: string) => ({
+    id, project_id: PROJECT.id, thread_id: REVIEW, message_id: REVIEW, attachment_id: '', path: '', version: 'a',
+    guide: { title: 'Token refresh', file: '', side: 'new', line_start: 0, line_end: 0, scope: 'general' },
+    annotation: { id, type: 'comment', scope: 'general', filePath: '', lineStart: 0, lineEnd: 0, side: 'new', text, createdAt: 1 },
+    created_at: '2026-10-11T10:45:00.000Z', updated_at: '2026-10-11T10:45:00.000Z', removed_at: null, sent_reply_id: null,
+  });
+  annotations = [record('ann-first', 'Split the guard and the retry.')];
+  let answer: () => void = () => {};
+  globalThis.fetch = ((inner) => (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (!String(input).endsWith('/guide/annotations') || init?.method !== 'POST') return inner(input, init);
+    await new Promise<void>((resolve) => (answer = resolve));
+    return Response.json({ annotation: record('ann-second', 'Name the retry budget.') });
+  }) as typeof fetch)(globalThis.fetch);
+  await render();
+  // The reader's save, as its composer makes it: on its way when the verdict is pressed.
+  const saving = inboxApi.saveGuideAnnotation(REVIEW, record('ann-second', 'Name the retry budget.').annotation);
+  await click('[data-review-decision] [data-decision-primary]');
+  await settle();
+  expect(posted).toHaveLength(0);
+  answer();
+  await saving;
+  await settle();
+  expect(posted).toHaveLength(1);
+  expect(posted[0]!.annotation_ids).toEqual(['ann-first', 'ann-second']);
 });
 
 // The PR page's Details in the full review (approval "inbox-review-details-panel"), and the PR title as its way in.

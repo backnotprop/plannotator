@@ -1,12 +1,12 @@
 import React, { createContext, useContext, useState, useMemo, useSyncExternalStore } from "react";
 import { isCodeFilePath, isCodeFilePathStrict, CODE_PATH_BARE_REGEX, parseCodePath } from "@plannotator/core/code-file";
-import { findCrossRepoRef, forgeRefLinks, matchCrossRepoRef, type CrossRepoRef } from "@plannotator/core/forge-refs";
+import { findCrossRepoRef, forgeRefLinks, gitlabHostsSnapshot, matchCrossRepoRef, subscribeGitlabHosts, type CrossRepoRef } from "@plannotator/core/forge-refs";
 import { CodeSnippetPreview } from "./CodeSnippetPreview";
 import { useHoverPreview } from "../hooks/useHoverPreview";
 import { transformPlainText } from "../utils/inlineTransforms";
 import { hasLinkedDocExtension } from "../utils/markdownExtensions";
 import { getImageSrc } from "./ImageThumbnail";
-import { UNAVAILABLE_IMAGE_CLASS, useImageResolver } from "./ImageResolverContext";
+import { InlineImageTagsContext, UNAVAILABLE_IMAGE_CLASS, useImageResolver } from "./ImageResolverContext";
 import { useCodePathValidation, type CodePathValidationContextValue } from "./CodePathValidationContext";
 import { CodeSpan, isLocalLinkTarget, isNewTabClick, useLocalLinkResolver } from "./LocalLinkContext";
 import type { ValidationEntry } from "../hooks/useValidatedCodePaths";
@@ -14,6 +14,8 @@ import { CodeFilePicker } from "./CodeFilePicker";
 import { normalizeMathTex, renderMathToHtml } from "../utils/math";
 import { useMathRenderer } from "../hooks/useMathRenderer";
 import { HostTitle } from "./HostTitle";
+import { AuthorColorText } from "./AuthorColorText";
+import { matchAuthorColor } from "../utils/authorColor";
 
 export interface DocPreviewResult {
   contents?: string;
@@ -402,15 +404,29 @@ function emitPlainTextWithBareUrls(
  * restored comment starting right after the image), `insertBefore` throws
  * and the whole document unmounts. A loaded image's DOM is unchanged.
  */
+function imgTagAttributes(tag: string): { src: string; alt: string; width?: number; height?: number } {
+  const read = (name: string): string | undefined => {
+    const found = new RegExp(`\\s${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>"']+))`, 'i').exec(tag);
+    const raw = found ? (found[1] ?? found[2] ?? found[3]) : undefined;
+    return raw?.replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+  };
+  const size = (name: string): number | undefined => {
+    const value = read(name);
+    return value && /^\d{1,5}$/.test(value) && Number(value) > 0 ? Number(value) : undefined;
+  };
+  return { src: read('src')?.trim() ?? '', alt: read('alt') ?? '', width: size('width'), height: size('height') };
+}
+
 const HostResolvedImage: React.FC<{
   src: string;
   alt: string;
   /** The original's width when `src` is a smaller copy (`ImageResolution.width`). */
   width?: number;
+  height?: number;
   /** The src as written in the markdown (`data-image-src`, read by the image viewer's region comments). */
   writtenSrc?: string;
   onImageClick?: (src: string, alt: string) => void;
-}> = ({ src, alt, width, writtenSrc, onImageClick }) => {
+}> = ({ src, alt, width, height, writtenSrc, onImageClick }) => {
   const [failedSrc, setFailedSrc] = useState<string | null>(null);
   const failed = failedSrc === src;
   return (
@@ -425,6 +441,7 @@ const HostResolvedImage: React.FC<{
         src={src}
         alt={failed ? '' : alt}
         width={width}
+        height={height}
         data-image-src={writtenSrc}
         data-image-failed={failed ? '' : undefined}
         hidden={failed || undefined}
@@ -555,6 +572,8 @@ export const InlineMarkdown: React.FC<{
   const resolveLocalLink = useLocalLinkResolver();
   const softLineBreaks = useContext(SoftLineBreaksContext);
   const resolveImage = useImageResolver();
+  const inlineImageTags = useContext(InlineImageTagsContext);
+  useSyncExternalStore(subscribeGitlabHosts, gitlabHostsSnapshot, gitlabHostsSnapshot);
   const refLinks = forgeRefLinks({ display: githubRepo, host: repoHost });
   // Cross-repo `owner/repo#123` refs: for a caller that names its project's
   // repo (it knows the forge); otherwise they stay plain text, unless the
@@ -578,6 +597,30 @@ export const InlineMarkdown: React.FC<{
     let match = remaining.match(/^<!--[\s\S]*?-->/);
     if (match) {
       remaining = remaining.slice(match[0].length);
+      previousChar = ">";
+      continue;
+    }
+
+    // An author's text colour: `<span style="color: …">` / `<font color="…">`
+    // (utils/authorColor). A refused colour still renders the words, uncoloured.
+    const colored = remaining[0] === '<' ? matchAuthorColor(remaining) : null;
+    if (colored) {
+      const inner = (
+        <InlineMarkdown
+          text={colored.inner}
+          onOpenLinkedDoc={onOpenLinkedDoc}
+          resolveLinkedDoc={resolveLinkedDoc}
+          onOpenCodeFile={onOpenCodeFile}
+          onNavigateAnchor={onNavigateAnchor}
+          imageBaseDir={imageBaseDir}
+          onImageClick={onImageClick}
+          githubRepo={githubRepo}
+          repoHost={repoHost}
+          linkLabel={linkLabel}
+        />
+      );
+      parts.push(colored.color ? <AuthorColorText key={key++} color={colored.color}>{inner}</AuthorColorText> : <React.Fragment key={key++}>{inner}</React.Fragment>);
+      remaining = remaining.slice(colored.length);
       previousChar = ">";
       continue;
     }
@@ -1058,6 +1101,25 @@ export const InlineMarkdown: React.FC<{
       }
       remaining = remaining.slice(match[0].length);
       previousChar = match[0][match[0].length - 1] || previousChar;
+      continue;
+    }
+
+    match = inlineImageTags && resolveImage ? remaining.match(/^<img\b(?:[^>"']|"[^"]*"|'[^']*')*>/i) : null;
+    if (match) {
+      const tag = imgTagAttributes(match[0]);
+      const resolved = tag.src ? resolveImage!(tag.src) : null;
+      const shown = resolved?.kind === 'src' ? resolved.src : !resolved && /^https?:\/\//i.test(tag.src) ? tag.src : null;
+      if (shown) {
+        parts.push(<HostResolvedImage key={key++} src={shown} alt={tag.alt} width={tag.width ?? (resolved?.kind === 'src' ? resolved.width : undefined)} height={tag.height} writtenSrc={tag.src} onImageClick={onImageClick} />);
+      } else if (tag.src) {
+        parts.push(
+          <span key={key++} className={UNAVAILABLE_IMAGE_CLASS} title={resolved?.kind === 'unavailable' ? resolved.title : undefined} data-image-unavailable="">
+            {tag.alt || 'Image'}
+          </span>,
+        );
+      }
+      remaining = remaining.slice(match[0].length);
+      previousChar = '>';
       continue;
     }
 

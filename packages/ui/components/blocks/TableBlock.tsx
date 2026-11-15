@@ -1,6 +1,7 @@
 import React, { useRef } from 'react';
 import type { Block } from '../../types';
 import { InlineMarkdown } from '../InlineMarkdown';
+import { stripAuthorColor } from '../../utils/authorColor';
 
 interface TableBlockProps {
   block: Block;
@@ -49,9 +50,10 @@ const csvEscape = (value: string): string => {
 };
 
 // Build RFC 4180 CSV from pre-parsed headers + rows. The popout uses this
-// directly with TanStack's visible (filter + sort applied) rows.
+// directly with TanStack's visible (filter + sort applied) rows. A coloured
+// cell copies as its words (utils/authorColor).
 export const buildCsvFromRows = (headers: string[], rows: string[][]): string => {
-  const lines = [headers, ...rows].map((row) => row.map(csvEscape).join(','));
+  const lines = [headers, ...rows].map((row) => row.map((cell) => csvEscape(stripAuthorColor(cell))).join(','));
   return lines.join('\n');
 };
 
@@ -62,7 +64,7 @@ export const buildCsvFromRows = (headers: string[], rows: string[][]): string =>
 // parseTableContent unescapes `\|` → `|`, so cells may hold literal pipes.
 // Re-escape on the way out — otherwise the serialized table sprouts extra
 // columns wherever a cell had a pipe.
-const mdCellEscape = (value: string): string => value.replace(/\|/g, '\\|');
+const mdCellEscape = (value: string): string => stripAuthorColor(value).replace(/\|/g, '\\|');
 
 export const buildMarkdownTable = (headers: string[], rows: string[][]): string => {
   const headerLine = `| ${headers.map(mdCellEscape).join(' | ')} |`;

@@ -21,7 +21,7 @@
  * PLANNOTATOR_UNDELIVERED_SHOTS, else .local/proof/undelivered/.
  */
 
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -164,7 +164,8 @@ async function replyInWindow(page: Page, words: string): Promise<void> {
   await pane.locator('.ib-pfoot').getByRole('button', { name: 'Reply', exact: true }).click();
   await pane.getByRole('textbox', { name: 'Reply to Claude Code' }).fill(words);
   await page.keyboard.press('ControlOrMeta+Enter');
-  await expect(pane.locator('article.ib-message[data-author="person"]').last()).toContainText(words);
+  // The reply landed (not the words drawn while the Send is on its way, `data-sending`): the server has it.
+  await expect(pane.locator('article.ib-message[data-author="person"]:not([data-sending])').last()).toContainText(words);
 }
 
 async function shot(page: Page, name: string, clip?: () => Promise<{ x: number; y: number; width: number; height: number }>): Promise<void> {
@@ -206,6 +207,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const env = {
     PATH: process.env.PATH ?? '',
     HOME: root,
+    PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9',
     PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_BROWSER: NO_BROWSER,
     PLANNOTATOR_INBOX_CONNECT: '0',
@@ -403,7 +405,7 @@ test('it goes into the running turn by itself after the wait, counted again from
   await page.clock.setFixedTime(new Date());
   await page.goto(`${world.url}#thread=${hero.thread}`);
   const pane = page.locator('section.ib-pane');
-  await expect(pane.locator('[data-delivery]')).toHaveText('Sending to Claude Code now…');
+  await expect(pane.locator('[data-delivery]').locator('.ib-dl-text')).toHaveText('Sending to Claude Code now…');
   // The connection put it into the running turn.
   await hero.connection.deliver(hero.reply);
   expect((await message(hero.thread, hero.reply)).delivery).toMatchObject({ into_turn: true });

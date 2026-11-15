@@ -7,6 +7,9 @@
 /** The path as the field starts: the home folder, ready for a name. */
 export const HOME_FOLDER_START = '~/';
 
+/** A Windows full path as the window keeps it once read (`homeRelative`): a drive letter, a colon, then `/` or nothing. */
+const WINDOWS_DRIVE_PATH = /^[A-Za-z]:(\/|$)/;
+
 /**
  * A typed path as the server reads it (`~`, `~/…`, or a full path): a bare name ("code/x") is under home. Spaces at
  * either end are dropped; slashes inside are kept as typed (the server skips doubled ones).
@@ -14,8 +17,13 @@ export const HOME_FOLDER_START = '~/';
 export function normalizeFolderPath(typed: string): string {
   const text = typed.trim();
   if (text === '' || text === '~') return HOME_FOLDER_START;
-  if (text.startsWith('~/') || text.startsWith('/')) return text;
+  if (text.startsWith('~/') || text.startsWith('/') || WINDOWS_DRIVE_PATH.test(text)) return text;
   return `~/${text}`;
+}
+
+/** A Windows home (`C:\Users\me`): the machine's paths take `\` or `/`, either drive-letter case. */
+export function isWindowsHome(home: string | null): boolean {
+  return !!home && /^[A-Za-z]:[\\/]/.test(home);
 }
 
 /**
@@ -26,6 +34,8 @@ export function splitFolderPath(typed: string): { parent: string; tail: string }
   const path = normalizeFolderPath(typed);
   const at = path.lastIndexOf('/');
   const parent = path.slice(0, at).replace(/\/+$/, '');
+  // A Windows drive's root keeps its slash (`D:/`): `D:` alone is no full path.
+  if (/^[A-Za-z]:$/.test(parent)) return { parent: `${parent}/`, tail: path.slice(at + 1) };
   return { parent: parent === '' ? (path.startsWith('~') ? '~' : '/') : parent, tail: path.slice(at + 1) };
 }
 
@@ -103,14 +113,30 @@ export function cleanPastedPath(text: string, home: string | null = null, { unes
     } catch {
       path = path.slice('file://'.length);
     }
+    // `file:///C:/Users/me`: a Windows path, no slash before its drive.
+    if (/^\/[A-Za-z]:\//.test(path)) path = path.slice(1);
   }
-  if (unescape) path = path.replace(/\\(.)/g, '$1');
+  // Terminal's escapes are a Mac's and Linux's: in a Windows path (its home, `C:\…`, `~\…`) a backslash is the path's own.
+  if (unescape && !isWindowsHome(home) && !/^([A-Za-z]:\\|~\\)/.test(path)) path = path.replace(/\\(.)/g, '$1');
   return homeRelative(path, home);
 }
 
-/** A full path in `home` as `~/…` (home itself as `~/`); anything else as it is. */
+/**
+ * A full path in `home` as `~/…` (home itself as `~/`); anything else as it is. On Windows (a `C:\…` home) a path is
+ * read as Windows reads it: `\` or `/`, either case, so `C:\Users\me\code`, `c:/users/me/code` and `~\code` are all
+ * `~/code`; another drive's path keeps its letter with `/` (`D:/x`), for that machine to answer.
+ */
 export function homeRelative(path: string, home: string | null): string {
   if (!home) return path;
+  if (isWindowsHome(home)) {
+    // A Windows name can't hold a backslash: every one is a separator.
+    const typed = path.replace(/\\/g, '/');
+    if (!WINDOWS_DRIVE_PATH.test(typed)) return typed;
+    const base = home.replace(/\\/g, '/').replace(/\/+$/, '');
+    const lower = typed.toLowerCase();
+    if (lower === base.toLowerCase() || lower === `${base.toLowerCase()}/`) return HOME_FOLDER_START;
+    return lower.startsWith(`${base.toLowerCase()}/`) ? `~${typed.slice(base.length)}` : typed;
+  }
   const base = home.replace(/\/+$/, '');
   if (path === base || path === `${base}/`) return HOME_FOLDER_START;
   return path.startsWith(`${base}/`) ? `~${path.slice(base.length)}` : path;
@@ -118,7 +144,8 @@ export function homeRelative(path: string, home: string | null): string {
 
 /** Text that reads as a path, not words to find a project by (B4): `~/…`, `/…`, a quoted path, or a `file://` URL. */
 export function looksLikePath(text: string): boolean {
-  return /^(~\/|~$|\/|'\/|"\/|'~\/|"~\/|file:\/\/)/.test(text.trim());
+  // Windows's too: `C:\…`, `c:/…`, `~\…`, quoted or not.
+  return /^(~\/|~$|\/|'\/|"\/|'~\/|"~\/|file:\/\/)/.test(text.trim()) || /^['"]?([A-Za-z]:[\\/]|~\\)/.test(text.trim());
 }
 
 /** What the folder listing answered for one path (`GET /api/inbox/launch/folders`), as the browser keeps it. */
@@ -244,6 +271,8 @@ export function folderBrowserView(input: {
   typed: string;
   read: FolderRead | null;
   nameRead: FolderRead | null;
+  /** The full path's read was refused as hidden or system (`folderRefusalWords`): said in the note line. */
+  nameRefused?: string | null;
   error?: string | null;
   /**
    * Clone into another folder (C14-C15c): the repo's name, and where a clone into the folder that is there (`cloneAt`)
@@ -305,6 +334,12 @@ export function folderBrowserView(input: {
     }
     if (named === 'locked') {
       view.note = `Can't open ${typedPath}: no permission.`;
+      return view;
+    }
+    if (named === null && input.nameRefused) {
+      // A folder there but not offered (Windows marks AppData hidden; no dot to see): said, and nothing to create.
+      view.note = input.nameRefused;
+      view.rows.push(...names.map(row));
       return view;
     }
     if (named === 'file') {

@@ -130,12 +130,12 @@ describe("CLI target resolution", () => {
     if (!py.ok) expect(py.message).toContain("File type not supported: .py");
   });
 
-  test("a .env is still not annotatable even though it is plain text", async () => {
+  test("a .env named explicitly is annotatable (annotate-env-file.test.ts covers what it keeps)", async () => {
     writeFileSync(join(dir, ".env"), "SECRET=1\n");
     const result = await resolveAnnotateTarget({
       rawFilePath: ".env", projectRoot: dir, noJina: true, renderMarkdown: false, log: () => {},
     });
-    expect(result.ok).toBe(false);
+    expect(result.ok).toBe(true);
   });
 
   test("the 2MB annotatable cap applies to a diagram source", async () => {

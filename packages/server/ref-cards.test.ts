@@ -8,7 +8,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { forgeRefKey, forgeRefLabel, parseForgeRefUrl } from "@plannotator/core/forge-ref-card";
+import { forgeRefKey, forgeRefLabel, parseForgeRefUrl, type ForgeRefCardData } from "@plannotator/core/forge-ref-card";
 import { forgeRefLinks } from "@plannotator/core/forge-refs";
 import {
   createRefCards,
@@ -485,6 +485,100 @@ describe("fetching", () => {
     expect(r.queries()[0].args).toContain("repo=2048");
     expect(r.queries()[1].args).toContain("owner=true");
     expect(r.queries()[1].args).toContain("repo=null");
+  });
+});
+
+describe("Bitbucket Cloud", () => {
+  const BB_URL = "https://bitbucket.org/acme/widgets/pull-requests/3";
+
+  function bitbucketCard(): ForgeRefCardData {
+    return {
+      platform: "bitbucket",
+      kind: "pull",
+      repo: "acme/widgets",
+      number: 3,
+      url: BB_URL,
+      title: "Ship it",
+      state: "open",
+      author: { login: "Ada", avatarUrl: "https://secure.gravatar.com/avatar/0" },
+      createdAt: "2026-10-01T00:00:00Z",
+      updatedAt: "2026-10-02T00:00:00Z",
+      closedAt: null,
+      labels: [],
+      assignees: [],
+      comments: 0,
+      body: "",
+      bodyCut: false,
+      lastComment: null,
+      linked: [],
+      pull: { base: "main", head: "feat", additions: 1, deletions: 0, files: 1, review: null, checks: null },
+    };
+  }
+
+  test("links parse: pull requests and issues numbered apart, a look-alike host is no forge", () => {
+    expect(parseForgeRefUrl(`${BB_URL}/diff`)).toMatchObject({ platform: "bitbucket", host: "bitbucket.org", owner: "acme", repo: "widgets", number: 3, kind: "pull" });
+    const issue = parseForgeRefUrl("https://bitbucket.org/acme/widgets/issues/3")!;
+    expect(issue).toMatchObject({ platform: "bitbucket", kind: "issue" });
+    expect(forgeRefKey(issue)).not.toBe(forgeRefKey(parseForgeRefUrl(BB_URL)!));
+    expect(forgeRefLabel(parseForgeRefUrl(BB_URL)!)).toBe("#3");
+    for (const bad of ["https://bitbucket.org-evil.example/a/b/pull-requests/1", "https://bitbucket.org.evil.example/a/b/pull-requests/1", "https://bitbucket.org/a/b/pull/1"]) {
+      expect(parseForgeRefUrl(bad)).toBeNull();
+    }
+  });
+
+  test("a pull request is read once through the reader, no CLI runs, and its avatar is inlined", async () => {
+    const r = runner(() => ok(githubPR()));
+    const reads: unknown[] = [];
+    const cards = createRefCards({
+      run: r.run,
+      avatar: async () => "data:image/png;base64,AA==",
+      bitbucket: async (ref) => {
+        reads.push(ref);
+        return bitbucketCard();
+      },
+    });
+    const [a, b] = await Promise.all([cards.get(BB_URL), cards.get(`${BB_URL}/commits`)]);
+    expect(a).toEqual(b);
+    if (!a?.ok) throw new Error("expected data");
+    expect(a.data.author?.avatarUrl).toBe("data:image/png;base64,AA==");
+    expect(reads).toEqual([{ workspace: "acme", repo: "widgets", number: 3 }]);
+    expect(r.calls).toHaveLength(0);
+  });
+
+  test("without a reader, and for an issue, the answer is unsupported and nothing runs", async () => {
+    const r = runner(() => ok(githubPR()));
+    let reads = 0;
+    const withReader = createRefCards({ run: r.run, avatar: async () => null, bitbucket: async () => (reads++, bitbucketCard()) });
+    expect(await withReader.get("https://bitbucket.org/acme/widgets/issues/3")).toMatchObject({ ok: false, error: "unsupported" });
+    expect(reads).toBe(0);
+    const without = createRefCards({ run: r.run, avatar: async () => null });
+    expect(await without.get(BB_URL)).toMatchObject({ ok: false, error: "unsupported" });
+    expect(r.calls).toHaveLength(0);
+  });
+
+  test("failures read quietly: no token or a rejected one is signed out, a hidden PR is not found, a 429 pauses the host", async () => {
+    let now = 1_000;
+    let status = 401;
+    let reads = 0;
+    const cards = createRefCards({
+      run: runner(() => ok(githubPR())).run,
+      now: () => now,
+      avatar: async () => null,
+      bitbucket: async () => {
+        reads++;
+        throw Object.assign(new Error("no"), { status });
+      },
+    });
+    expect(await cards.get(BB_URL)).toMatchObject({ error: "signed_out" });
+    status = 404;
+    now += REF_FAILURE_MS + 1;
+    expect(await cards.get(BB_URL)).toMatchObject({ error: "not_found" });
+    status = 429;
+    now += REF_FAILURE_MS + 1;
+    expect(await cards.get(BB_URL)).toMatchObject({ error: "rate_limited" });
+    const before = reads;
+    expect(await cards.get("https://bitbucket.org/acme/widgets/pull-requests/4")).toMatchObject({ error: "rate_limited" });
+    expect(reads).toBe(before);
   });
 });
 

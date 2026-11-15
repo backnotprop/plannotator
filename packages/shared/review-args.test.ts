@@ -286,6 +286,8 @@ describe("review directory targets", () => {
     try {
       mkdirSync(join(root, "repo with spaces"));
       mkdirSync(join(root, "backend"));
+      mkdirSync(join(root, "myproject"));
+      mkdirSync(join(root, "src", "components"), { recursive: true });
       writeFileSync(join(root, "file"), "not a directory");
       symlinkSync(join(root, "repo with spaces"), join(root, "link"), "dir");
       run(root);
@@ -304,16 +306,55 @@ describe("review directory targets", () => {
       expect(target("backend", root).directory).toBe(join(root, "backend"));
       expect(target("~", root).directory).toBe(homedir());
       expect(target("", root)).toEqual({ ignored: [] });
-      expect(() => target("file", root)).toThrow("not a directory");
+      expect(() => target("file", root)).toThrow(
+        `${join(root, "file")} is a file, not a folder; nothing was opened.\n` +
+          "To comment on the file, run: plannotator annotate file\n" +
+          "To review the current project instead, run: plannotator review",
+      );
     });
   });
 
   test("a sole path-shaped typo fails loudly instead of reviewing the caller's repo", () => {
     withTree((root) => {
-      for (const input of ["./missing", "../missing", "missing/sub", "~/plannotator-missing-dir-xyz"]) {
-        expect(() => target(input, root)).toThrow("does not exist");
+      for (const input of ["./missing", "../missing", "missing/sub"]) {
+        expect(() => target(input, root)).toThrow(`No folder "${input}" in ${root}; nothing was opened.`);
       }
-      expect(() => target("./file", root)).toThrow("not a directory");
+      const home = join(homedir(), "plannotator-missing-dir-xyz");
+      expect(() => target("~/plannotator-missing-dir-xyz", root)).toThrow(`No folder at ${home}; nothing was opened.`);
+      expect(() => target("./file", root)).toThrow("is a file, not a folder");
+    });
+  });
+
+  test("a sole bare word that names no folder stops with commands that recover in one step", () => {
+    withTree((root) => {
+      // The reported case: a folder name that is not there must not review the caller's repo.
+      expect(() => target("myproj", root)).toThrow(
+        `No folder "myproj" in ${root}; nothing was opened.\n` +
+          "Did you mean myproject? Run: plannotator review myproject\n" +
+          "To review the current project instead, run: plannotator review",
+      );
+      expect(() => target("please", root)).toThrow(
+        `No folder "please" in ${root}; nothing was opened.\n` +
+          "To review another folder, run: plannotator review <path to an existing folder>\n" +
+          "To review the current project instead, run: plannotator review",
+      );
+      // Flags are not words: the folder is still the sole word.
+      expect(() => target("--diff-type uncommitted myproj", root)).toThrow("Did you mean myproject?");
+      expect(() => target("staged", root)).toThrow("run: plannotator review --diff-type staged");
+      expect(() => target("1483", root)).toThrow("pass its URL: plannotator review https://github.com/<owner>/<repo>/pull/1483");
+    });
+  });
+
+  test("did you mean: a typo'd segment is matched against its parent's folders, as typed", () => {
+    withTree((root) => {
+      expect(() => target("src/componnets", root)).toThrow("Did you mean src/components? Run: plannotator review src/components");
+      expect(() => target("./src/compnents/", root)).toThrow("Did you mean ./src/components?");
+      expect(() => target("srx/components", root)).toThrow("Did you mean src/components?");
+      expect(() => target(join(root, "backnd"), root)).toThrow(`Did you mean ${join(root, "backend")}?`);
+      expect(() => target('"repo with spacs/"', root)).toThrow('Run: plannotator review "repo with spaces"');
+      // A file is not offered as a folder, and a far name is not offered at all.
+      expect(() => target("fil/", root)).toThrow("To review another folder");
+      expect(() => target("zzzzzz", root)).toThrow("To review another folder");
     });
   });
 
@@ -341,7 +382,9 @@ describe("review directory targets", () => {
   test("prose that names no directory falls back to the invoking cwd (#1483)", () => {
     withTree((root) => {
       expect(target("please review my changes", root)).toEqual({ ignored: ["please", "review", "my", "changes"] });
-      expect(target("focus", root)).toEqual({ ignored: ["focus"] });
+      // A quoted sentence is one word, still prose; a sole bare word is a target.
+      expect(target('"please review my changes"', root)).toEqual({ ignored: ["please review my changes"] });
+      expect(() => target("focus", root)).toThrow('No folder "focus"');
       // In prose a bare word that happens to match a directory never hijacks
       // the review; a path-shaped word is the target.
       expect(target("please review backend", root)).toEqual({ ignored: ["please", "review", "backend"] });

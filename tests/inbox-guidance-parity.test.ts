@@ -35,9 +35,11 @@ import { join, resolve } from "node:path";
 import {
   INBOX_AGENT_RULES,
   INBOX_ATTACHMENTS_PICTURES_LINE,
+  INBOX_ATTACHMENTS_PROTOTYPE_CLAUSE,
   INBOX_BRIEFING_FROM_NOW_ON,
   INBOX_CHANNEL_RULE,
   INBOX_COMMAND_BRIEFING,
+  INBOX_DELEGATED_OPTIONS_RULE,
   INBOX_FOLLOW_THROUGH_RULE,
   INBOX_PICTURES_RULE,
   INBOX_REMINDER_TEXT,
@@ -281,7 +283,14 @@ describe("Inbox guidance parity across harnesses", () => {
     for (const [surface, { body, attachments }] of Object.entries(fields)) {
       expect([surface, body.includes(INBOX_PICTURES_RULE)]).toEqual([surface, true]);
       expect([surface, attachments.includes(INBOX_ATTACHMENTS_PICTURES_LINE)]).toEqual([surface, true]);
+      // 2026-11-11 (the eval of picture choices): options another agent designs, and where an option's HTML mock goes.
+      expect([surface, body.includes(INBOX_DELEGATED_OPTIONS_RULE)]).toEqual([surface, true]);
+      expect([surface, attachments.includes(INBOX_ATTACHMENTS_PROTOTYPE_CLAUSE)]).toEqual([surface, true]);
     }
+    // The skill has no body field: it carries the rule's sentence on looks (the rule's second) and the delegation line.
+    const looks = INBOX_PICTURES_RULE.slice(INBOX_PICTURES_RULE.indexOf("When the person picks between looks"), INBOX_PICTURES_RULE.indexOf(" Above the question"));
+    expect(looks).toStartWith("When the person picks between looks");
+    expect(SURFACES["plannotator skill"]).toContain(`${looks} ${INBOX_DELEGATED_OPTIONS_RULE}`);
     for (const [surface, text] of Object.entries(SURFACES)) {
       expect([surface, /screenshot or image usually reads fastest|short summary, files in `attachments`|put the files to read in `attachments`/.test(text)]).toEqual([surface, false]);
     }

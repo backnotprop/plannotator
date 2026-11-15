@@ -49,6 +49,8 @@ import type { VoiceLate } from '../voiceSession';
 import { AttachFilesButton, ComposeFileTiles, useFileDrop, type ComposeFile } from '../compose/ComposeFiles';
 import { Icon } from '../icons';
 import { Tip } from './Tip';
+import { ReplyQuoteLine } from './ReplyQuote';
+import type { InboxMessageWire } from '@plannotator/core/inbox-types';
 import { useComposerState, type ComposerMode } from '../fullScreenComposer';
 import { CORNERS, useComposerDrag } from '../composerDrag';
 import { openItemsLabel } from '../openQuestions';
@@ -109,6 +111,8 @@ export interface FullScreenReply {
   tags?: InboxComposerTags;
   /** The thread's skill rule (skills.ts `inboxSkillFilter`), as the reply box's. */
   skillFilter?: (entry: SkillCatalogEntry) => boolean;
+  /** The message the reply quotes (approval "inbox-reply-quote"), drawn over the words as in the reply box; × drops it. Absent: none. */
+  quote?: { message: InboxMessageWire; words?: string; onRemove: () => void } | null;
 }
 
 export interface FullScreenComposerValue {
@@ -638,6 +642,11 @@ export function FullScreenComposer({
             }}
             onPutBack={(key) => reply.onPutBack(key, replyRef.current)}
           />
+        </div>
+      )}
+      {mode === 'reply' && reply.quote && (
+        <div className="ib-fcomp-quote" data-fcomp-quote="">
+          <ReplyQuoteLine message={reply.quote.message} words={reply.quote.words} phone={phone} onRemove={reply.quote.onRemove} />
         </div>
       )}
       <div className="ib-fcomp-body" data-fcomp-body="">

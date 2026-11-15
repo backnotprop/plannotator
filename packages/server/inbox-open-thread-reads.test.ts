@@ -47,6 +47,16 @@ async function setup() {
   const open = store.sendMessage({ project_id: web.id, author: agent("ses_open"), body: ASKS, subject: "The open thread" }).message;
   const other = store.sendMessage({ project_id: web.id, author: agent("ses_other"), body: ASKS, subject: "Another thread" }).message;
   const elsewhere = store.sendMessage({ project_id: api.id, author: agent("ses_api"), body: "Built.", subject: "In another project" }).message;
+  // The state the window skips in: the open thread's repo known (here, known to be none: a folder with no git origin).
+  // Until the server's background resolve lands the read says neither, and the window reads the thread on every record.
+  for (let i = 0; i < 200; i++) {
+    const project = ((await (await fetch(`http://127.0.0.1:${server.port}/api/inbox/threads/${open.thread_id}`)).json()) as { thread: { project: { repo?: unknown; repo_known?: true } } }).thread.project;
+    if (project.repo_known) break;
+    await Bun.sleep(25);
+  }
+  const known = ((await (await fetch(`http://127.0.0.1:${server.port}/api/inbox/threads/${open.thread_id}`)).json()) as { thread: { project: { repo?: unknown; repo_known?: true } } }).thread.project;
+  expect(known.repo_known).toBe(true);
+  expect(known.repo ?? null).toBeNull();
   return { root, server, store, web, api, open, other, elsewhere };
 }
 
@@ -92,11 +102,15 @@ async function recordsSince(server: InboxServer, cursor: number): Promise<InboxE
   return out;
 }
 
-/** What the window decides for these records, with the open thread read, listed and its repo known (the case it skips in). */
+/**
+ * What the window decides for these records, with the open thread read, listed and its repo known to be none (as the
+ * server says once resolved: the case it skips in). `none` for a record that has to leave the thread's read as it was
+ * (`write` checks that): another thread's records change neither the open thread nor its files, which are its own.
+ */
 function decide(records: InboxEvent[], threadId: string): OpenThreadRead {
   const batch = newRecordBatch();
   for (const record of records) noteRecord(batch, record);
-  return openThreadRead(batch, { threadId, remote: false, loaded: { thread_id: threadId, project: { repo: { display: "acme/web", host: "github.com" } } }, loadedAt: 0, now: 0, settled: true, listed: true });
+  return openThreadRead(batch, { threadId, remote: false, loaded: { thread_id: threadId, project: { repo: null, repo_known: true } }, loadedAt: 0, now: 0, settled: true, listed: true });
 }
 
 type Setup = Awaited<ReturnType<typeof setup>>;
@@ -128,26 +142,26 @@ async function write(s: Setup, act: () => unknown, expected: OpenThreadRead | "n
 describe("every write that changes the open thread reads it; another thread's writes do not", () => {
   test("messages: an agent's reply to the open thread from another session, a person's reply from another window; the same in another thread", async () => {
     const s = await setup();
-    expect((await write(s, () => s.store.sendMessage({ project_id: s.web.id, author: agent("ses_third"), body: "Here is more.", reply_to: s.other.id }), "files")).changed).toBe(false);
+    expect((await write(s, () => s.store.sendMessage({ project_id: s.web.id, author: agent("ses_third"), body: "Here is more.", reply_to: s.other.id }), "none")).changed).toBe(false);
     expect((await write(s, () => s.store.sendMessage({ project_id: s.api.id, author: agent("ses_third"), body: "Answering here.", reply_to: s.open.id }), "thread")).changed).toBe(true);
     expect((await write(s, () => s.store.sendReply(s.open.id, { words: "Thanks.", idempotency_key: "k-open" }), "thread")).changed).toBe(true);
-    expect((await write(s, () => s.store.sendReply(s.other.id, { words: "Thanks.", idempotency_key: "k-other" }), "files")).changed).toBe(false);
+    expect((await write(s, () => s.store.sendReply(s.other.id, { words: "Thanks.", idempotency_key: "k-other" }), "none")).changed).toBe(false);
   });
 
   test("questions and comments: picks and a comment saved in another window, on the open thread and on another", async () => {
     const s = await setup();
     const q = (messageId: string) => s.store.questionsOf(messageId)[0]!;
-    await write(s, () => s.store.savePicks(s.other.id, [{ key: q(s.other.id).key, revision: 0, answer: pickFor(q(s.other.id), "Cards") }]), "files");
+    await write(s, () => s.store.savePicks(s.other.id, [{ key: q(s.other.id).key, revision: 0, answer: pickFor(q(s.other.id), "Cards") }]), "none");
     expect((await write(s, () => s.store.savePicks(s.open.id, [{ key: q(s.open.id).key, revision: 0, answer: pickFor(q(s.open.id), "Table") }]), "thread")).changed).toBe(true);
     const comment = (id: string) => ({ id, type: "COMMENT", originalText: "Which layout", text: "Cards, please." });
-    await write(s, () => s.store.saveMessageAnnotation(s.other.id, comment("c-other")), "files");
+    await write(s, () => s.store.saveMessageAnnotation(s.other.id, comment("c-other")), "none");
     // The thread read counts a comment only once a reply carries it; its record still reads the thread (the pane's files and comments).
     await write(s, () => s.store.saveMessageAnnotation(s.open.id, comment("c-open")), "thread");
   });
 
   test("read state synced from another window: a look, Mark read, Mark unread and a 👍 on the open thread; Mark read on another", async () => {
     const s = await setup();
-    await write(s, () => s.store.markRead(s.other.id, true), "files");
+    await write(s, () => s.store.markRead(s.other.id, true), "none");
     await write(s, () => s.store.markSeen(s.open.thread_id), "thread");
     expect((await write(s, () => s.store.markRead(s.open.thread_id, true), "thread")).changed).toBe(true);
     await write(s, () => s.store.markUnread(s.open.thread_id), "thread");
@@ -169,7 +183,7 @@ describe("every write that changes the open thread reads it; another thread's wr
 
   test("archive: another thread's archive does not read it; its own does", async () => {
     const s = await setup();
-    await write(s, () => s.store.resolveThread(s.other.id, true, "person"), "files");
+    await write(s, () => s.store.resolveThread(s.other.id, true, "person"), "none");
     expect((await write(s, () => s.store.resolveThread(s.open.id, true, "person"), "thread")).changed).toBe(true);
   });
 

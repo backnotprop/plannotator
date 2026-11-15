@@ -1,0 +1,235 @@
+---
+import Base from '../../../layouts/Base.astro';
+import Nav from '../../../components/Nav.astro';
+import Footer from '../../../components/Footer.astro';
+import AgentMark from '../../../components/inbox/AgentMark.astro';
+import '../../../components/inbox/agents.css';
+import { INBOX_LAUNCHED } from '../../../lib/inbox-launch';
+import { TIERS, agentHref, agentsOfTier } from '../../../lib/inbox-agents';
+
+// /inbox/agents/: pick your agent, then what works with each one. Generated
+// with /inbox/, behind the same launch switch. Every fact about an agent comes
+// from src/lib/inbox-agents.ts.
+export function getStaticPaths() {
+  return INBOX_LAUNCHED ? [{ params: { inbox: 'inbox' } }] : [];
+}
+
+const title = 'Set up your agent with the Plannotator Inbox';
+const description = 'Setup and troubleshooting for every agent the Plannotator Inbox works with, and what works with each one.';
+---
+
+<Base title={title} description={description} ogImage="https://plannotator.ai/assets/inbox/inbox-og.jpg">
+  <div class="min-h-screen bg-background text-foreground">
+    <Nav />
+
+    <main class="ag-main max-w-6xl mx-auto px-6 md:px-8">
+      <header class="ag-pick-head">
+        <h1 class="font-display ag-display">Pick your agent</h1>
+        <p class="ag-lede">Every agent here writes to your <a class="ag-link" href="/inbox/">Inbox</a>. Pick yours for setup and troubleshooting.</p>
+      </header>
+
+      <div class="ag-pick">
+        {TIERS.map((tier) => (
+          <section class="ag-pick-tier" aria-labelledby={`ag-t-${tier.id}`}>
+            <h2 class="ag-pick-label" id={`ag-t-${tier.id}`}>{tier.name}</h2>
+            <ul class="ag-tiles">
+              {agentsOfTier(tier.id).map((a) => (
+                <li>
+                  <a class="ag-tile" href={agentHref(a.slug)}>
+                    <AgentMark slug={a.slug} size={28} />
+                    <span>{a.name}</span>
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ))}
+      </div>
+
+      <section class="ag-works" aria-labelledby="ag-works-h">
+        <h2 class="font-display ag-h2" id="ag-works-h">What works</h2>
+        <div class="ag-tiers">
+          {TIERS.map((tier) => (
+            <section class:list={['ag-tier', `ag-tier-${tier.id}`]} aria-labelledby={`ag-w-${tier.id}`}>
+              <div class="ag-tier-head">
+                <h3 id={`ag-w-${tier.id}`}>{tier.name}</h3>
+                <p class="ag-tier-base">{tier.baseline}</p>
+                {tier.note && <p class="ag-tier-note">{tier.note}</p>}
+              </div>
+              <ul class="ag-tier-list">
+                {agentsOfTier(tier.id).map((a) => (
+                  <li class="ag-row">
+                    <a href={agentHref(a.slug)}><AgentMark slug={a.slug} size={18} /><span>{a.name}</span></a>
+                    <p>{a.diff}</p>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ))}
+        </div>
+      </section>
+    </main>
+
+    <Footer />
+  </div>
+</Base>
+
+<style>
+  /* ── Pick your agent ── */
+  .ag-pick-head {
+    padding: 6.5rem 0 2.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  .ag-pick {
+    display: flex;
+    flex-direction: column;
+    border-top: 1px solid var(--border);
+  }
+
+  .ag-pick-tier {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1rem;
+    padding: 1.5rem 0;
+    border-bottom: 1px solid var(--border);
+  }
+
+  @media (min-width: 900px) {
+    .ag-pick-tier { grid-template-columns: 15rem minmax(0, 1fr); gap: 2rem; padding: 1.75rem 0; }
+    .ag-pick-label { line-height: 3rem; }
+  }
+
+  .ag-pick-label {
+    font-size: 1.125rem;
+    font-weight: 650;
+    letter-spacing: -0.01em;
+  }
+
+  .ag-tiles {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .ag-tile {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.625rem;
+    min-height: 3rem;
+    padding: 0.5rem 1rem 0.5rem 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--card);
+    font-size: 0.9375rem;
+    font-weight: 550;
+    color: var(--foreground);
+    transition: border-color 150ms ease-out, background-color 150ms ease-out, transform 120ms ease-out;
+  }
+
+  .ag-tile:hover {
+    border-color: color-mix(in oklab, var(--primary) 55%, var(--border));
+    background: color-mix(in oklab, var(--primary) 6%, var(--card));
+  }
+
+  .ag-tile:active { transform: scale(0.98); }
+
+  @media (prefers-reduced-motion: reduce) {
+    .ag-tile { transition: none; }
+    .ag-tile:active { transform: none; }
+  }
+
+  /* ── What works: each tier says once what all its agents have, then each
+     agent's difference. The long middle tier runs in two sub-columns. ── */
+  .ag-works { padding: 4.5rem 0 6rem; }
+
+  .ag-tiers {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 3rem;
+    margin-top: 2rem;
+  }
+
+  @media (min-width: 1024px) {
+    /* Subgrid rows: the first three heads share one height, so every list
+       starts on one line. Cloud agents sits under MCP only in the third
+       column; its flexible row takes what the long first lists leave. */
+    .ag-tiers { grid-template-columns: minmax(0, 1fr) minmax(0, 2fr) minmax(0, 1fr); grid-template-rows: auto auto 1fr; gap: 0 2.5rem; }
+    .ag-tier { display: grid; grid-template-rows: subgrid; }
+    .ag-tier-plugin { grid-column: 1; grid-row: 1 / span 3; }
+    .ag-tier-hooks { grid-column: 2; grid-row: 1 / span 3; }
+    .ag-tier-plugin .ag-tier-list, .ag-tier-hooks .ag-tier-list { grid-row: span 2; }
+    .ag-tier-mcp { grid-column: 3; grid-row: 1 / span 2; }
+    .ag-tier-cloud { display: block; grid-column: 3; grid-row: 3; align-self: start; margin-top: 3rem; }
+  }
+
+  .ag-tier-head {
+    padding-bottom: 1rem;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .ag-tier-head h3 {
+    font-size: 1.125rem;
+    font-weight: 650;
+    letter-spacing: -0.01em;
+  }
+
+  .ag-tier-base {
+    margin-top: 0.375rem;
+    font-size: 0.9375rem;
+    line-height: 1.5;
+    color: var(--foreground);
+    text-wrap: pretty;
+  }
+
+  .ag-tier-note {
+    margin-top: 0.125rem;
+    font-size: 0.875rem;
+    line-height: 1.5;
+    color: var(--muted-foreground);
+  }
+
+  .ag-tier-list { display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; column-gap: 2.5rem; }
+
+  @media (min-width: 640px) {
+    .ag-tier-hooks .ag-tier-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+
+  .ag-row {
+    padding: 0.875rem 0;
+    border-bottom: 1px solid color-mix(in oklab, var(--border) 60%, transparent);
+  }
+
+  .ag-row a {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.9375rem;
+    font-weight: 600;
+    color: var(--foreground);
+  }
+
+  .ag-row a span {
+    text-decoration: underline;
+    text-decoration-color: color-mix(in oklab, var(--foreground) 22%, transparent);
+    text-underline-offset: 3px;
+  }
+
+  .ag-row a:hover span { text-decoration-color: var(--primary); }
+
+  .ag-row p {
+    margin-top: 0.25rem;
+    padding-left: 1.625rem;
+    font-size: 0.875rem;
+    line-height: 1.5;
+    color: var(--ag-dim);
+  }
+
+  @media (max-width: 639px) {
+    .ag-pick-head { padding: 4.5rem 0 1.75rem; }
+    .ag-tile { min-height: 2.75rem; font-size: 0.875rem; padding-right: 0.875rem; }
+    .ag-works { padding-top: 3rem; }
+  }
+</style>

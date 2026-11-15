@@ -158,6 +158,27 @@ describe('the list', () => {
     expect(others[0]!.platform).toBeNull();
   });
 
+  test('Bitbucket Cloud: a pull request and its diff are one row named #N; its own pages and a look-alike are plain sites', () => {
+    const { repos, others } = one(
+      [
+        '[Retry invoices](https://bitbucket.org/acme/billing/pull-requests/7)',
+        'https://bitbucket.org/acme/billing/pull-requests/7/diff',
+        'https://bitbucket.org/acme/billing/commits/3f2a1bc9d8e7f6a5b4c3d2e1f0a9b8c7d6e5f4a3',
+        'https://bitbucket.org/account/settings',
+        'https://bitbucket.org.evil.example/acme/billing/pull-requests/8',
+      ].join(' '),
+    );
+    expect(repos.map((r) => [r.host, r.path, r.platform])).toEqual([['bitbucket.org', 'acme/billing', 'bitbucket']]);
+    expect(repos[0]!.links.map((l) => [l.kind, l.lead, l.text])).toEqual([
+      ['pull', '#7', 'Retry invoices'],
+      ['commit', null, '3f2a1bc'],
+    ]);
+    expect(others.map((l) => [l.tail, l.platform])).toEqual([
+      ['bitbucket.org', 'bitbucket'],
+      ['bitbucket.org.evil.example', null],
+    ]);
+  });
+
   test("a site's name is its real host, whatever the words say", () => {
     const { repos, others } = one('[github.com/acme/web](https://evil.example/login)');
     expect(repos).toEqual([]);
