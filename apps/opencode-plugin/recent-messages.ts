@@ -19,7 +19,8 @@
  * An injected row stored after a step or a compaction of the person's running
  * turn stays part of it: Plannotator's session-URL notice (posted while its
  * tool call is open) and OpenCode's continuation rows. Right after the prompt
- * only OpenCode 2's Plan-mode reminder does (matched by its text): any other
+ * only OpenCode 2's Plan-mode reminders do (entry, or exit after a revert
+ * across a Plan→Build switch; matched by their text): any other
  * injected row there means the prompt got no reply. Compaction rows and their
  * summary do not change the turn; a summary opens only when nothing else can.
  * One injected row counts as the person's: OpenCode 2's result of a background
@@ -29,7 +30,7 @@
  */
 
 import { readMessageAgent } from "./message-agent";
-import { isOpenCode2PlanReminder } from "./plan-reminder";
+import { isOpenCode2PlanExitReminder, isOpenCode2PlanReminder } from "./plan-reminder";
 
 export interface RecentAssistantMessage {
   messageId: string;
@@ -88,7 +89,8 @@ function subagentResultChild(parts: HostPart[]): string | undefined {
 }
 
 function isPlanReminder(parts: HostPart[]): boolean {
-  return parts.some((part) => typeof part?.text === "string" && isOpenCode2PlanReminder(part.text));
+  return parts.some((part) => typeof part?.text === "string"
+    && (isOpenCode2PlanReminder(part.text) || isOpenCode2PlanExitReminder(part.text)));
 }
 
 /**

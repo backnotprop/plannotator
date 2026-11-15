@@ -54,6 +54,13 @@ describe("pickRecentAssistantMessages on OpenCode 2", () => {
 
     expect(pickV2([
       ...earlier,
+      user("u1", "Now build it"),
+      synthetic("leave", "<system-reminder>\nYou are NO LONGER in Plan mode. The previous Plan restrictions no longer apply.\n</system-reminder>"),
+      assistant("answer", [text("Built it.")]),
+    ])).toEqual(["answer", "earlier"]);
+
+    expect(pickV2([
+      ...earlier,
       user("u1", "Plan the migration"),
       assistant("step", [tool("read")]),
       compaction("c1"),

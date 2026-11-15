@@ -176,10 +176,13 @@ the turn, and an assistant step ends it unless it called a tool the host runs
 (not a provider-hosted one, as OpenCode's own `needsContinuation` decides) or
 stopped at the output limit (`finish: "length"`); a failed step always ends
 it. An injected row stored after a step or a compaction of a running turn, or
-OpenCode 2's Plan-mode reminder right after the prompt (matched with
-`isOpenCode2PlanReminder`), stays in that turn: Plannotator's session-URL
+OpenCode 2's Plan-mode reminder right after the prompt (entry, or exit after
+a revert across a Plan→Build switch; `isOpenCode2PlanReminder`,
+`isOpenCode2PlanExitReminder`), stays in that turn: Plannotator's session-URL
 notice, OpenCode's continuation rows. Any other injected row right after a
-prompt starts its own turn (that prompt got no reply). Compaction rows do not
+prompt starts its own turn (that prompt got no reply). Known limit: another
+plugin that stores a row from a context hook, before the first step as the
+Plan plugin does, demotes the person's answer. Compaction rows do not
 change the turn, and a compaction summary (`summary: true`) is listed but
 opens only when nothing else can. One injected row counts as the person's: an
 OpenCode 2 background subagent result (`<subagent sessionID="…">`, from
