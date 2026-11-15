@@ -11,7 +11,7 @@ async function read(module: Promise<{ default: unknown }>): Promise<Uint8Array> 
 export function loadEmbeddedSemDiff(): Promise<SemDiffSources | null> {
   pending ??= (async () => {
     try {
-      const [runtime, typescript, tsx, python, go, rust, java, csharp, php] = await Promise.all([
+      const [runtime, typescript, tsx, python, go, rust, java, csharp, php, kotlin] = await Promise.all([
         // @ts-ignore - Bun import attribute for an embedded file
         read(import("../dist/sem-diff/web-tree-sitter.wasm", { with: { type: "file" } })),
         // @ts-ignore - Bun import attribute for an embedded file
@@ -30,6 +30,8 @@ export function loadEmbeddedSemDiff(): Promise<SemDiffSources | null> {
         read(import("../dist/sem-diff/tree-sitter-c_sharp.wasm", { with: { type: "file" } })),
         // @ts-ignore - Bun import attribute for an embedded file
         read(import("../dist/sem-diff/tree-sitter-php.wasm", { with: { type: "file" } })),
+        // @ts-ignore - Bun import attribute for an embedded file
+        read(import("../dist/sem-diff/tree-sitter-kotlin.wasm", { with: { type: "file" } })),
       ]);
       return {
         "web-tree-sitter.wasm": runtime,
@@ -41,6 +43,7 @@ export function loadEmbeddedSemDiff(): Promise<SemDiffSources | null> {
         "tree-sitter-java.wasm": java,
         "tree-sitter-c_sharp.wasm": csharp,
         "tree-sitter-php.wasm": php,
+        "tree-sitter-kotlin.wasm": kotlin,
       };
     } catch {
       return null;

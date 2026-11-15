@@ -257,14 +257,19 @@ function alike(op: SemanticDiffOperation, oldLines: string[], newLines: string[]
 
 function contextChanged(op: SemanticDiffOperation, cfg: LanguageConfig, oldRoot: Node, newRoot: Node, oldLines: string[], newLines: string[]): boolean {
   if (!cfg.contextAt) return false;
-  const contexts = (root: Node, lines: string[], ranges: SemanticDiffLineRange[]) => {
-    const out = new Set<string>();
-    for (const r of ranges) for (let l = r.start; l <= r.end; l++) if ((lines[l - 1] ?? '').trim()) out.add(cfg.contextAt!(root, l));
-    return out;
-  };
+  const contexts = (root: Node, lines: string[], ranges: SemanticDiffLineRange[]) =>
+    ranges.map((r) => {
+      const out: string[] = [];
+      for (let l = r.start; l <= r.end; l++) {
+        if (!(lines[l - 1] ?? '').trim()) continue;
+        const c = cfg.contextAt!(root, l);
+        if (out.at(-1) !== c) out.push(c);
+      }
+      return out.join('\u0000');
+    });
   const before = contexts(oldRoot, oldLines, op.lines.old);
   const after = contexts(newRoot, newLines, op.lines.new);
-  return before.size !== 1 || after.size !== 1 || [...before][0] !== [...after][0];
+  return before.length !== after.length || before.some((c, i) => c !== after[i]);
 }
 
 export async function semanticDiffFile(language: LanguageId, oldText: string, newText: string, name = 'file', options: DiffOptions = {}): Promise<SemanticFileDiff> {
