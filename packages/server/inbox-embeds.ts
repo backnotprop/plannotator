@@ -26,15 +26,16 @@
 
 import { createHash } from "node:crypto";
 import { buildEmbedDocument, EMBED_ID, EMBED_MAX_BYTES, EMBED_RESPONSE_CSP } from "@plannotator/core/html-embed";
+import { NO_FRAME_ANCESTORS, withFrameAncestors } from "./inbox-framing";
 
 export const INBOX_EMBEDS_PATH = "/api/inbox/embeds";
 const EMBED_PATH = /^\/api\/inbox\/embeds\/([^/]+)$/;
 
-/** An embed document's headers. */
-export function inboxEmbedHeaders(): Record<string, string> {
+/** An embed document's headers; `framers`: the app origins that may frame the window (inbox-framing.ts). */
+export function inboxEmbedHeaders(framers: readonly string[] = NO_FRAME_ANCESTORS): Record<string, string> {
   return {
     "Content-Type": "text/html; charset=utf-8",
-    "Content-Security-Policy": EMBED_RESPONSE_CSP,
+    "Content-Security-Policy": withFrameAncestors(EMBED_RESPONSE_CSP, framers),
     "X-Content-Type-Options": "nosniff",
     // No Referer on the page's requests.
     "Referrer-Policy": "no-referrer",
@@ -81,7 +82,7 @@ export function createInboxEmbeds(options: {
     return id;
   };
 
-  const route = async (req: Request, url: URL): Promise<Response | null> => {
+  const route = async (req: Request, url: URL, framers: readonly string[] = NO_FRAME_ANCESTORS): Promise<Response | null> => {
     if (url.pathname === INBOX_EMBEDS_PATH) {
       if (req.method !== "POST") return json({ error: "Use POST.", code: "method_not_allowed" }, 405);
       const body = await options.readBody(req);
@@ -100,7 +101,7 @@ export function createInboxEmbeds(options: {
     const id = match[1]!;
     const page = EMBED_ID.test(id) ? pages.get(id) : undefined;
     if (page === undefined) return json({ error: "No such embed.", code: "not_found" }, 404);
-    return new Response(req.method === "HEAD" ? null : page, { headers: inboxEmbedHeaders() });
+    return new Response(req.method === "HEAD" ? null : page, { headers: inboxEmbedHeaders(framers) });
   };
 
   return { route, size: () => pages.size };
