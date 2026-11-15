@@ -5829,7 +5829,7 @@ function Inbox() {
         repoLabel={stack ? (repoLabels(stacks).get(`${stack.host}/${stack.repo}`.toLowerCase()) ?? stack.repo) : null}
         phone={phone}
         onBack={() => close(prsHome(route))}
-        onOpenLayer={(pull) => go({ ...route, layer: pull.key, scope: 'layer', prsFrom: 'stack' })}
+        onOpenLayer={(pull, scope) => go({ ...route, layer: pull.key, scope: scope ?? 'layer', prsFrom: 'stack' })}
       />
     );
   } else if (route.page === 'prs' && pullsShown) {

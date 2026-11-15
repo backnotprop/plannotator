@@ -309,6 +309,7 @@ import { themeChooserLook, themeChooserOpen } from "@plannotator/shared/inbox/th
 import { createCardMarks } from "./inbox-card-marks";
 import { validateFilePath } from "@plannotator/shared/review-core";
 import { createInboxPulls, InboxPullsError, linkInboxPulls, pullCards, threadAgent, type InboxPullLinkStore, type InboxPullRepo } from "./inbox-pulls";
+import { pullDiffScopeOf } from "./inbox-pull-diff-scope";
 import { parseFileLevelComments, parsePRReviewAction, submitPRReview as submitForgeReview, type PRRef, type PRReviewFileComment, type PRRuntime } from "@plannotator/shared/pr-provider";
 import { prCommandRuntime } from "./pr";
 import { createInboxPullLinks } from "./inbox-pull-links";
@@ -5472,11 +5473,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         }
         if (path === "/api/inbox/pulls/diff") {
           const key = url.searchParams.get("key") ?? "";
-          const scope = url.searchParams.get("scope") ?? "layer";
-          if (scope !== "layer" && scope !== "stack") throw new InboxError("validation_error", "scope: layer or stack.", { field: "scope" });
+          const scoped = pullDiffScopeOf(url.searchParams);
+          if (!scoped) throw new InboxError("validation_error", "scope: layer, stack, range with from (a layer's key) or since with from (a commit).", { field: "scope" });
           if (key.length === 0 || key.length > 600) throw new InboxError("validation_error", "key: a pull request's key from the list.", { field: "key" });
           try {
-            return json({ serverSession, ...(await pulls.diff(key, scope)) });
+            return json({ serverSession, ...(await pulls.diff(key, scoped.scope, scoped.from)) });
           } catch (cause) {
             if (cause instanceof InboxPullsError) return json({ error: cause.message, code: cause.code }, cause.code === "pull_unknown" ? 404 : cause.code === "pull_diff_fork" ? 409 : 502);
             throw cause;
@@ -5484,8 +5485,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         }
         if (path === "/api/inbox/pulls/file") {
           const key = url.searchParams.get("key") ?? "";
-          const scope = url.searchParams.get("scope") ?? "layer";
-          if (scope !== "layer" && scope !== "stack") throw new InboxError("validation_error", "scope: layer or stack.", { field: "scope" });
+          const scoped = pullDiffScopeOf(url.searchParams);
+          if (!scoped) throw new InboxError("validation_error", "scope: layer, stack, range with from (a layer's key) or since with from (a commit).", { field: "scope" });
+          const { scope, from } = scoped;
           if (key.length === 0 || key.length > 600) throw new InboxError("validation_error", "key: a pull request's key from the list.", { field: "key" });
           const filePath = changedFilePath(url.searchParams.get("path"));
           try {
@@ -5495,13 +5497,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
             // Parsed once per diff (`changedFileOf`): the PR page asks for every changed file as it nears the viewport.
             const head = ids ? null : url.searchParams.get("head");
             const pinned = head && /^[0-9a-f]{40,64}$/.test(head) ? head : null;
-            const answer = ids || pinned ? await pulls.diff(key, scope) : null;
+            const answer = ids || pinned ? await pulls.diff(key, scope, from) : null;
             const changed = answer ? changedFileOf(answer, filePath) : null;
             if (answer && (!changed || (pinned && (answer.head_sha !== pinned || (changed.status !== "modified" && changed.status !== "renamed"))))) {
               return json({ serverSession, oldContent: null, newContent: null });
             }
             const check = ids ?? (pinned && changed ? { patch: changed.patch } : null);
-            return json({ serverSession, ...(await pulls.fileContents(key, scope, filePath, check ? await pullRoots(key) : [], check, changed?.oldPath)) });
+            return json({ serverSession, ...(await pulls.fileContents(key, scope, filePath, check ? await pullRoots(key) : [], check, changed?.oldPath, from)) });
           } catch (cause) {
             if (cause instanceof InboxPullsError) return json({ error: cause.message, code: cause.code }, 404);
             throw cause;

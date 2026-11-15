@@ -255,7 +255,12 @@ export interface InboxPullDiffAnswer {
   description?: string | null;
 }
 
-export type InboxPullDiffScope = "layer" | "stack";
+/**
+ * `layer`: the PR's own diff. `stack`: from the branch the lowest open layer is based on to this layer's head.
+ * `range` (with `from`, the range's lowest layer's key): from the branch that layer is based on to this layer's head,
+ * "Layers i–j" as one diff. `since` (with `from`, the head the person last opened): from that commit to this layer's head.
+ */
+export type InboxPullDiffScope = "layer" | "stack" | "range" | "since";
 
 /**
  * One changed file's whole text at both ends of its diff, so the viewer's gaps can open. Both null when there is

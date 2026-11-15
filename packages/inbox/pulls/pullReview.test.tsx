@@ -195,7 +195,7 @@ function mount(node: React.ReactNode) {
 
 /** The review, with its layer and scope in state as the route keeps them. */
 function Review({ stackId, from, answer }: { stackId: string; from: string; answer: InboxPullsAnswer }) {
-  const [at, setAt] = useState<{ key: string; scope: 'layer' | 'stack' }>({ key: from, scope: 'layer' });
+  const [at, setAt] = useState<{ key: string; scope: import('./PullReview').PullReviewProps['scope'] }>({ key: from, scope: 'layer' });
   return <PullReview model={answer} modelError={null} stackId={stackId} layerKey={at.key} scope={at.scope} onLayer={(key, scope) => setAt({ key, scope })} onBack={() => {}} onSent={() => {}} />;
 }
 
