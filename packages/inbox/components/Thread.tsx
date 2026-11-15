@@ -31,7 +31,7 @@ import { INBOX_UPLOAD_MAX_BYTES, inboxActionInDraft, inboxActionPersonMark, type
 import { withoutInboxActionsSection } from '@plannotator/core/inbox-actions';
 import { withoutInboxReplyQuoteLead } from '@plannotator/core/inbox-reply-quote';
 import { capQuestionPrompt, emptyQuestionAnswer, indexQuestionBlocks, isQuestionAnswerEmpty, type IndexedQuestion, type QuestionAnswer, type QuestionStatus } from '@plannotator/core/question-block';
-import { INBOX_AUTO_SEND_ACK_NOTES, inboxAskingMessage, inboxLaunchStops, inboxPersonAnsweredSince, wholeMinutes, isInboxNote, isInboxTextKind, readInboxAttachmentKind, type InboxAnnotationRecord, type InboxAttachment, type InboxAttachmentState, type InboxInlineImage, type InboxQuestionState } from '@plannotator/core/inbox-types';
+import { INBOX_AUTO_SEND_ACK_NOTES, inboxAskingMessage, inboxLaunchStops, inboxPersonAnsweredSince, wholeMinutes, isInboxNote, isInboxT3WaitReason, isInboxTextKind, readInboxAttachmentKind, type InboxAnnotationRecord, type InboxAttachment, type InboxAttachmentState, type InboxInlineImage, type InboxQuestionState } from '@plannotator/core/inbox-types';
 import type { LocalLinkResolver } from '@plannotator/ui/components/LocalLinkContext';
 import { NOT_ATTACHED_TITLE, attachmentDeepLink, attachmentDisplayPath, attachmentForLink, openAttachmentTitle, projectFileOfLink, useRefRepo } from '../links';
 import { InboxApiError, InboxHeldError, inboxApi, type AttachmentsModel, type MachineView, type OutboxView, type TagMode, type ThreadModel } from '../api';
@@ -100,6 +100,7 @@ import { NewMessageButton, NewMessageComposer, NewMessagePopover, hostName, useL
 import { debugNote } from '../debugLog';
 import { autoAfterText, deliveryLine, handedItem, restartNote, TURN_ENDED_TEXT, uncertainItem, waitInputs, type DeliveryLine, type RecipientConnection } from '../deliveryLine';
 import { RestartLine } from './RestartNote';
+import { T3WaitLine } from './T3WaitLine';
 import { TakeBackButton, UndeliveredBand, UndeliveredText, useMinuteClock } from './Undelivered';
 import { takeBackOffered, useTakeBack } from '../takeBack';
 import { SendToAnotherSession } from '../compose/SendToAnotherSession';
@@ -1524,11 +1525,6 @@ export interface ThreadPaneProps {
    */
   remote?: boolean | null;
   /**
-   * A tailnet guest's page (`tailnetGuest(settings)`): no thread PRs (they run this computer's `gh`), and the
-   * run line offers no Try again (starting an agent is the owner's).
-   */
-  guest?: boolean;
-  /**
    * A file open beside the thread on a desktop hides the list and the
    * sidebar: the header then leads with `‹ Inbox` (`backLabel`), which closes
    * the file (through the pane's leave, as the file's × does: a typed
@@ -1830,7 +1826,7 @@ function labelledAuthorName({ agent, label, open = false, hidden, onFold }: { ag
   );
 }
 
-export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, notice, thread: threadRead, threadSteps = null, codeReview = false, pullReview, machine = null, onMachineUpdate, onNewMessageWith, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onSentRead, readPending = false, onPickSaves, onChanged, onTakenBack, draftChanged = 0, filesChanged = 0, draftSignal = null, filesSignal = null, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, priority, onSnooze, onUnsnooze, snoozeBlocked, replyRequest, onReplyOpened, shapeButton = null, onSide, onSideWords, replyWords = null, onReplyWordsTaken, replyPart = null, onReplyPartTaken, onToastGone, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, guest = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, links: linksRoute = false, onLinks, decide = null, threadAlone = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null, snoozeBack = null, agentContext = null, agentFilter = null, onAgentFilter }: ThreadPaneProps) {
+export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, notice, thread: threadRead, threadSteps = null, codeReview = false, pullReview, machine = null, onMachineUpdate, onNewMessageWith, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onSentRead, readPending = false, onPickSaves, onChanged, onTakenBack, draftChanged = 0, filesChanged = 0, draftSignal = null, filesSignal = null, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, priority, onSnooze, onUnsnooze, snoozeBlocked, replyRequest, onReplyOpened, shapeButton = null, onSide, onSideWords, replyWords = null, onReplyWordsTaken, replyPart = null, onReplyPartTaken, onToastGone, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, links: linksRoute = false, onLinks, decide = null, threadAlone = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null, snoozeBack = null, agentContext = null, agentFilter = null, onAgentFilter }: ThreadPaneProps) {
   /**
    * The questions this pane's own saves brought back (by `<message id>/<key>`), and how many saves landed. The thread
    * drawn is the one read, its questions never older than these: a read that left before the last keys were saved
@@ -5504,6 +5500,11 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     : heldHandoff && deliveredNow
       ? { state: 'queued', text: `Goes to ${handoffName(last)} once the Undo window ends.` }
       : deliveredNow;
+  // A reply the T3 wake cannot put in (its thread's machine says why): one line with the fix, until it is delivered.
+  const t3Wait =
+    delivered && !last.delivery && !last.taken_back_at && isInboxT3WaitReason(last.t3_wait) && (delivered.state === 'saved' || delivered.state === 'queued') && !handedItem(recipientConnection, last.id)
+      ? last.t3_wait
+      : null;
   // No Send now because that session runs an older plugin than a restart loads (the "Steps" line,
   // owner approval "restart-warning"): only while the reply waits for a working session.
   const restart = delivered?.state === 'queued' && !last.deliver_now_at ? restartNote(recipientConnection) : null;
@@ -5547,7 +5548,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     changed: onChanged,
   });
   useEffect(() => takeBack.clear(), [thread.thread_id]);
-  const takesBack = !guest && (!machine || (machine.marks ?? []).includes('take-back'));
+  const takesBack = !machine || (machine.marks ?? []).includes('take-back');
   const nameOf = (message: InboxMessageWire) => (message.to ? toName(message, message.to) : recipientName(askedBy(message)));
   const takeBackOf = (message: InboxMessageWire) =>
     takesBack && takeBackOffered(message, thread.messages.length === 1) && !(message === last && (delivered?.state === 'delivered' || delivered?.state === 'undelivered' || handedItem(recipientConnection, last.id)))
@@ -6500,8 +6501,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   // top on a thread marked read, and Mark unread (`markUnreadInMenu`).
   const menuMarkRead = markReadOffered && readAt === null && markReadEnabled ? () => onMarkRead!(true) : undefined;
   const menuMoveBack = markReadOffered && readAt !== null ? () => onMarkRead!(false) : undefined;
-  // A thread's PRs: on this machine's own threads, for the person (a linked machine's and a tailnet guest's have none).
-  const pullsOffered = !machine && !guest;
+  // A thread's PRs: on this machine's own threads, for the person (a linked machine's have none).
+  const pullsOffered = !machine;
   const [addingPull, setAddingPull] = useState(false);
   // Export decisions › Post on a pull request › Add a pull request…: the PR the person adds next gets the post.
   const [postAfterAdd, setPostAfterAdd] = useState(false);
@@ -7056,7 +7057,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
             if (message === last && shownRun && !runInCard) {
               before.push(
                 <div className="ib-msg" key="perm-run">
-                  <RunLine run={shownRun} canOpen={!!openTerminal} canReaddress={waitingCanMove && anotherCanTake} guest={guest} machine={machine?.id ?? null} machineName={machine?.name ?? null} onChanged={() => onRunChanged?.()} onChangeUrl={changeCloneUrl} />
+                  <RunLine run={shownRun} canOpen={!!openTerminal} canReaddress={waitingCanMove && anotherCanTake} machine={machine?.id ?? null} machineName={machine?.name ?? null} onChanged={() => onRunChanged?.()} onChangeUrl={changeCloneUrl} />
                 </div>,
               );
             }
@@ -7417,7 +7418,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                     ))}
                   </ul>
                 )}
-                {message === last && shownRun && !runInCard && <RunLine run={shownRun} canOpen={!!openTerminal} canReaddress={waitingCanMove && anotherCanTake} guest={guest} machine={machine?.id ?? null} machineName={machine?.name ?? null} onChanged={() => onRunChanged?.()} onChangeUrl={changeCloneUrl} />}
+                {message === last && shownRun && !runInCard && <RunLine run={shownRun} canOpen={!!openTerminal} canReaddress={waitingCanMove && anotherCanTake} machine={machine?.id ?? null} machineName={machine?.name ?? null} onChanged={() => onRunChanged?.()} onChangeUrl={changeCloneUrl} />}
                 {message === last && !shownRun && delivered && tagLines.length > 0 && (
                   // Lines (approval "inbox-tag-agents"): the owner first, then each tagged session, each with its own state.
                   <ul className="ib-tg-dl" data-tag-lines="" tabIndex={-1}>
@@ -7478,7 +7479,10 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                   </div>
                 )}
                 {message === last && cloudLast && <CloudWakeLine wake={cloudLast.cloud_wake} fallbackName={addresseeName(lastTo?.host ?? 'cloud')} time={whenTime} />}
-                {message === last && !shownRun && delivered && !delivered.wait && tagLines.length === 0 && (
+                {message === last && !shownRun && t3Wait && !delivered?.wait && tagLines.length === 0 && (
+                  <T3WaitLine reason={t3Wait}>{takeBackLast && <TakeBackButton busy={takingBack} onPress={takeBackLast} />}</T3WaitLine>
+                )}
+                {message === last && !shownRun && delivered && !t3Wait && !delivered.wait && tagLines.length === 0 && (
                   // tabIndex -1: Send to another session puts focus here once it moved the message.
                   <div className="ib-delivered" data-delivery={delivered.state} data-auto={delivered.autoAfterMin !== undefined ? '' : undefined} tabIndex={-1}>
                     <span className="ib-dl-main">

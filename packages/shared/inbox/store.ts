@@ -118,7 +118,9 @@ import { inboxWakeQuote } from "./wake-quote";
 import { inboxReplyQuoteExcerpt, inboxReplyQuoteLead, inboxReplyQuoteTime, type InboxReplyQuote, type InboxReplyQuoteWhose } from "@plannotator/core/inbox-reply-quote";
 import { whenTime } from "@plannotator/core/inbox-format";
 import type { QuestionAnswer } from "@plannotator/core/question-block";
-import type { InboxCloudWake } from "@plannotator/core/inbox-cloud";
+import { isInboxCloudHost, isInboxCloudSession, type InboxCloudWake } from "@plannotator/core/inbox-cloud";
+import type { InboxT3WaitReason } from "@plannotator/core/inbox-types";
+import { INBOX_T3_HOST, isT3ThreadId } from "@plannotator/core/inbox-types";
 import { INBOX_PERMISSION_FULL, INBOX_PERMISSION_SESSION_PREFIX, isInboxPermissionSession } from "@plannotator/core/inbox-permission";
 import { inboxProjectKey } from "./project-key";
 import { parseDiagramAnchor } from "@plannotator/core/diagram-anchor";
@@ -333,8 +335,6 @@ export interface InboxAnswerEntry {
 
 export interface InboxReplyInput {
   words?: string;
-  /** Written by a tailnet guest (`InboxMessage.by_guest`): the server's `isGuest`, never the window's word. */
-  by_guest?: boolean;
   questions?: InboxAnswerEntry[];
   idempotency_key: string;
   /** `to` takes the place of a session the server read as ended (`InboxMessage.took_over`). */
@@ -423,8 +423,6 @@ export interface InboxReplyInput {
 /** The person's Re-ask (approval "inbox-reask"): ask the agent for its open questions again, in one message. */
 export interface InboxReaskInput {
   idempotency_key: string;
-  /** Written by a tailnet guest (`InboxMessage.by_guest`). */
-  by_guest?: boolean;
   /**
    * Another live session takes the note, because the one that asked has
    * ended (the window's choice, as for a reply). Null: a session was asked
@@ -573,6 +571,15 @@ function hasTags(message: InboxMessage): boolean {
 }
 
 /**
+ * An author the Inbox's own wake sends a reply to whether or not its message promised one: a T3 thread (the T3
+ * wake, once a grant reaches it and covers its mode; its `wakesItem`) or a paired cloud agent (the cloud wake, once
+ * it has a wake address). The door and T3 give the id, so it never changes between a send and a read.
+ */
+function wakesLater(author: Extract<InboxAuthor, { kind: "agent" }>): author is Extract<InboxAuthor, { kind: "agent" }> & { session: string } {
+  return (author.host === INBOX_T3_HOST && isT3ThreadId(author.session)) || (isInboxCloudHost(author.host) && isInboxCloudSession(author.session));
+}
+
+/**
  * A delivery's `into_turn`, written only for an item the Inbox marked to go
  * in by itself (the connection's report, decided by the server).
  */
@@ -698,6 +705,11 @@ export interface InboxDeliveryPresence {
    * no clock runs. Absent: never known.
    */
   waitOf?(session: string, itemId: string): { since: string; autoSince: string | null } | null;
+  /**
+   * Whether the Inbox's own wake for this session found it gone (a T3 thread T3 no longer has, a cloud agent no
+   * longer paired): nothing will send it a reply later (`owedToAnother`). Absent: never.
+   */
+  wakeGone?(session: string): boolean;
 }
 
 /** The review app's comment types a guided-review line comment can be. */
@@ -3764,7 +3776,7 @@ export class InboxStore {
    * still owed to another session, or to no session when a session reads:
    * only a reply's recipient settles it (a second agent in the thread must
    * not swallow it). A reader new to the thread counts as the recipient of a
-   * reply no connection wakes (`owedToAnother`). Undefined: every reply, for
+   * reply nothing wakes (`owedToAnother`). Undefined: every reply, for
    * a caller that is not a read.
    */
   markAgentChecked(threadId: string, upToSeq = Number.POSITIVE_INFINITY, at = this.stamp(), reader?: string | null): void {
@@ -3822,8 +3834,8 @@ export class InboxStore {
    * to its wake. A 👍's note is not a reply: any agent's read sees it, as
    * `markAcksSeen` does.
    *
-   * Not owed to another when no connection wakes its recipient and `reader`
-   * is new to the thread (`newcomerTo`): a raw MCP client's shim takes a new
+   * Not owed to another when nothing wakes its recipient and `reader` is
+   * new to the thread (`newcomerTo`): a raw MCP client's shim takes a new
    * `ses_` id each time the client restarts, and a script may name a session
    * on send but none on read, so that read is the recipient's own as far as
    * the Inbox can tell. Without it the reply would wait for a session that
@@ -3831,6 +3843,10 @@ export class InboxStore {
    * waking recipient stays strict (its connection takes the reply, and the
    * route choice opens when it ended), and so does any reader that wrote,
    * owns a message or was tagged in the thread.
+   *
+   * So does a session the Inbox's own wake reaches whatever its message
+   * promised (`wakesLater`), until that wake finds it gone: its id is the
+   * same on every read, so a reader new to the thread is another agent.
    */
   private owedToAnother(message: InboxMessage, reader: string | null, isNewcomer = () => this.newcomerTo(message.thread_id, reader)): boolean {
     if (message.to || hasTags(message) || message.delivery || isAckNote(message) || message.taken_back_at) return false;
@@ -3838,7 +3854,9 @@ export class InboxStore {
     const asked = message.reply_to ? this.messages.get(message.reply_to) : undefined;
     if (asked?.author.kind !== "agent") return false;
     if ((asked.author.session ?? null) === reader) return false;
-    return asked.wakes === true || !isNewcomer();
+    if (asked.wakes === true) return true;
+    if (wakesLater(asked.author) && this.deliveryPresence?.wakeGone?.(asked.author.session) !== true) return true;
+    return !isNewcomer();
   }
 
   /**
@@ -5061,7 +5079,6 @@ export class InboxStore {
       created_at: at,
       resolved_at: null,
       idempotency_key: key,
-      ...(input.by_guest ? { by_guest: true as const } : {}),
       ...(to ? { to: { host: to.host, session: to.session } } : {}),
       ...(to && input.took_over ? { took_over: true } : {}),
       ...(attachments.length > 0 ? { attachments: attachments.map((attachment) => ({ ...attachment, sent_at: at })) } : {}),
@@ -5295,7 +5312,6 @@ export class InboxStore {
       resolved_at: null,
       idempotency_key: key,
       reask: open.map((r) => r.id),
-      ...(input.by_guest ? { by_guest: true as const } : {}),
       ...(to ? { to: { host: to.host, session: to.session } } : {}),
     };
     try {
@@ -6572,6 +6588,22 @@ export class InboxStore {
     return next;
   }
 
+  /**
+   * Why the T3 wake cannot put the person's reply or message into its T3
+   * thread now (null: nothing known holds it). One line per change; nothing
+   * once it is delivered.
+   */
+  recordT3Wait(messageId: string, wait: InboxT3WaitReason | null): InboxMessage | null {
+    const message = this.messages.get(messageId);
+    if (!message || message.author.kind !== "person" || message.delivery) return null;
+    if ((message.t3_wait ?? null) === wait) return message;
+    const at = this.stamp();
+    const { t3_wait: _before, ...rest } = message;
+    const next: InboxMessage = wait ? { ...rest, t3_wait: wait } : rest;
+    this.appendMessage(next, at);
+    return next;
+  }
+
   /** What a delivery of this message to `session` goes by: the message's id, or a former owner's stop notice's own. */
   deliveryIdOf(message: InboxMessage, session: string): string {
     return tagOf(message, session)?.handed_away ? inboxStopNoticeId(message.id) : message.id;
@@ -6609,7 +6641,8 @@ export class InboxStore {
     }
     if (reply.delivery) return reply;
     const at = this.stamp();
-    const delivered: InboxMessage = { ...reply, delivery: { state: "delivered", host: by.host, session: by.session, at, ...intoTurnOf(reply.deliver_now_by, by.intoTurn) } };
+    const { t3_wait: _t3Wait, ...kept } = reply;
+    const delivered: InboxMessage = { ...kept, delivery: { state: "delivered", host: by.host, session: by.session, at, ...intoTurnOf(reply.deliver_now_by, by.intoTurn) } };
     this.appendMessage(delivered, at);
     // Up to it, but never past a reply still owed to another session.
     this.markAgentChecked(reply.thread_id, this.messageSeq.get(reply.id) ?? 0, at, by.session);
@@ -6958,7 +6991,7 @@ export class InboxStore {
    * message it wrote, and writes nothing. Whether the session is live is the
    * server's check: `to` null means it is not, and only a replay answers.
    */
-  sendNewMessage(threadId: string, input: { body: unknown; to: InboxAddressee | null; idempotency_key: unknown; by_guest?: boolean }): { message: InboxMessage; replayed: boolean } {
+  sendNewMessage(threadId: string, input: { body: unknown; to: InboxAddressee | null; idempotency_key: unknown }): { message: InboxMessage; replayed: boolean } {
     const key = typeof input.idempotency_key === "string" ? input.idempotency_key.trim() : "";
     if (!key) throw new InboxError("validation_error", "idempotency_key: required on a Send.", { field: "idempotency_key" });
     const root = this.messages.get(threadId);
@@ -6985,7 +7018,6 @@ export class InboxStore {
       resolved_at: null,
       idempotency_key: key,
       to: { host: input.to.host, session: input.to.session },
-      ...(input.by_guest ? { by_guest: true as const } : {}),
     };
     this.appendMessage(message, at);
     this.endSnooze(threadId);
@@ -7058,8 +7090,6 @@ export class InboxStore {
     body: unknown;
     to: InboxAddressee | null;
     idempotency_key: unknown;
-    /** Written by a tailnet guest (`InboxMessage.by_guest`). */
-    by_guest?: boolean;
     attachments?: InboxAttachment[];
     /** The thread's name (its chip), when the person gave one: checked by the thread-name rules; an agent never replaces it. */
     thread_name?: unknown;
@@ -7128,7 +7158,6 @@ export class InboxStore {
       idempotency_key: key,
       to: { host: input.to.host, session: input.to.session },
       started_by_person: true,
-      ...(input.by_guest ? { by_guest: true as const } : {}),
       ...(input.board_request === true ? { board_request: true as const } : {}),
       ...(input.decision_ask === true ? { decision_ask: true as const } : {}),
       ...(input.rows_ask === true ? { rows_ask: true as const } : {}),

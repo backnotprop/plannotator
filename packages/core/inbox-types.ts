@@ -29,7 +29,7 @@ import type { InboxLaunchChoices } from "./inbox-launch-choice";
 import type { InboxRowSnooze } from "./inbox-snooze";
 import { INBOX_CODEX_QUEUE_MIN_VERSION } from "./inbox-codex";
 import { INBOX_QWEN_WAKE_MIN_VERSION } from "./inbox-qwen";
-import { INBOX_T3_HOST, isT3ThreadId } from "./inbox-t3";
+import { INBOX_T3_HOST, isT3ThreadId, type InboxT3WaitReason } from "./inbox-t3";
 
 // The attachment shapes and file rules (step 2) live in their own module and
 // reach the Inbox through this published entry, so core's export map is unchanged.
@@ -625,6 +625,12 @@ export interface InboxMessage {
   read_by_agent?: { session: string | null; at: string } | null;
   cloud_wake?: InboxCloudWake | null;
   /**
+   * On a person's reply or message for a T3 Code thread: why the T3 wake
+   * cannot put it in now (packages/server/inbox-t3-wake.ts). Absent while
+   * nothing known holds it, and dropped when it is delivered.
+   */
+  t3_wait?: InboxT3WaitReason | null;
+  /**
    * On a person's reply or message not yet delivered: the person pressed
    * Send now in the Inbox, and when. The session's connection then delivers
    * it at once, into the running turn when one runs, instead of waiting for
@@ -768,14 +774,6 @@ export interface InboxMessage {
    * agent's answer lands in it by `reply_to`. Absent on every other message.
    */
   started_by_person?: true;
-  /**
-   * On a person message a tailnet guest wrote (a login `inboxTailscaleAllow`
-   * let in that is not this computer's owner): a reply, a re-ask, a new
-   * message or a thread started in compose. It is kept and delivered as any,
-   * but never starts a stopped launched session again. Set once, when the
-   * message is written; absent on the owner's and on every other message.
-   */
-  by_guest?: true;
   /**
    * On the root of a thread the person started with compose's Board chip on
    * (approval "inbox-compose-board-chip", 2026-10-27): the person asked the
@@ -3632,8 +3630,6 @@ export interface InboxPromptsSettings {
      * next text in line): its length, else null. Absent from an older Inbox.
      */
     over?: { shared: number | null; runtimes: Record<InboxPromptHost, number | null> };
-    /** Whether this page may change it: false for a tailnet guest (it reaches every agent on this computer). */
-    editable: boolean;
   };
   /** The plan, review and annotate prompts, in the order the page lists them. */
   others: InboxPromptItem[];
@@ -3683,8 +3679,6 @@ export interface InboxVoiceSettings {
   computer: string | null;
   /** The one-time announcement may still show here (`POST /api/inbox/voice/intro` claims it). */
   intro_due: boolean;
-  /** A tailnet login other than the owner's: `on` is false and voice's routes answer `owner_only`, as Feedback's does. */
-  guest: boolean;
 }
 
 /**

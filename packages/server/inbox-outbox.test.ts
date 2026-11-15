@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { InboxMessage } from "@plannotator/core/inbox-types";
 import { doorRouteNames, doorWriteRoutes } from "./inbox-devices";
-import { forwardedReadSearch, outboxView, startsAgentThere } from "./inbox-machines";
+import { outboxView, startsAgentThere } from "./inbox-machines";
 import { classifyAnswer, DOOR_WRITES, doorWriteKind, InboxOutbox, OUTBOX_KEEP_SETTLED_MS, OUTBOX_MAX_SERVER_ERRORS, replyIsStale, type OutboxAnswer, type OutboxEntry } from "./inbox-outbox";
 
 const B = "ibx_01K00000000000000000000000";
@@ -183,14 +183,6 @@ describe("remote launch: which forwarded writes start, stop or trust an agent", 
     expect(startsAgentThere("messages/m1/reply", { to: { launch: {} } })).toBe(false);
     expect(startsAgentThere("launch/lch_1/open", {})).toBe(false);
     expect(startsAgentThere("launch/settings", {})).toBe(false);
-  });
-
-  test("a tailnet guest's read through the forward never asks for the other machine's folder-trust facts; the owner's does", () => {
-    const asked = "?trust_agent=claude-code&trust_project=prj_1&thread=thr_1";
-    expect(forwardedReadSearch(asked, true)).toBe("?thread=thr_1");
-    expect(forwardedReadSearch("?trust_agent=claude-code&trust_project=prj_1", true)).toBe("");
-    expect(forwardedReadSearch(asked, false)).toBe(asked);
-    expect(forwardedReadSearch("?thread=thr_1", true)).toBe("?thread=thr_1");
   });
 });
 

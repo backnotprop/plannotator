@@ -49,7 +49,7 @@ export interface ProjectRowProps {
   /**
    * "+" beside ⋯ (approval "launch-create-clone", F1-F7): opens New message with a new session in this project. `tip`
    * is its tip and name ("New session in billing-svc", with the machine, and "starts when it's back" while asleep).
-   * Absent: no "+" (launch is off, or a guest's page).
+   * Absent: no "+" (launch is off).
    */
   newSession?: { tip: string; onPress: () => void };
 }

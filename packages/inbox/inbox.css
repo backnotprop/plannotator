@@ -5937,8 +5937,8 @@ svg.ib-ic.ib-openin-check { width: 14px; height: 14px; stroke: currentColor; fil
 /* The pinned card's Copy, right after the value it copies. */
 .ib-rl-inline-copy { display: inline-flex; vertical-align: middle; font-weight: 400; }
 /* A long OpenCode command or spec breaks rather than overflow a phone. */
-.ib-rl-line code.ib-rl-wrap, .pn-inbox .ib-undl .ib-m-why code.ib-rl-wrap { white-space: normal; overflow-wrap: anywhere; }
-.ib-rl-line code { font-family: var(--font-mono); font-size: 0.93em; font-weight: 600; padding: 1px 5px; border-radius: 5px; background: color-mix(in oklch, var(--foreground) 8%, transparent); white-space: nowrap; }
+.ib-rl-line code.ib-rl-wrap, .pn-inbox .ib-undl .ib-m-why code.ib-rl-wrap, .ib-delivered[data-t3-wait] code.ib-rl-wrap { white-space: normal; overflow-wrap: anywhere; }
+.ib-rl-line code, .ib-delivered[data-t3-wait] code { font-family: var(--font-mono); font-size: 0.93em; font-weight: 600; padding: 1px 5px; border-radius: 5px; background: color-mix(in oklch, var(--foreground) 8%, transparent); white-space: nowrap; }
 ol.ib-rl-two { padding: 0 0 0 20px; list-style: decimal; display: flex; flex-direction: column; gap: 8px; width: 100%; box-sizing: border-box; }
 ol.ib-rl-two > li { min-width: 0; }
 ol.ib-rl-two > li::marker { color: var(--muted-foreground); }

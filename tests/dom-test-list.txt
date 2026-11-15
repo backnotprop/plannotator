@@ -102,7 +102,7 @@ packages/inbox/threadFolding.test.tsx
 packages/inbox/threadNameMeta.test.tsx
 packages/inbox/threadHeader.test.tsx
 packages/inbox/snoozeBackLine.test.tsx
-packages/inbox/launchMenuGuest.test.tsx
+packages/inbox/launchMenuTailnet.test.tsx
 packages/inbox/remoteLaunchThread.test.tsx
 packages/inbox/composeLaunchPulls.test.tsx
 packages/inbox/choiceLabels.test.tsx
@@ -181,6 +181,7 @@ packages/inbox/rowsNotesLook.test.tsx
 packages/inbox/relativeTime.test.tsx
 packages/inbox/composeThread.test.tsx
 packages/inbox/sendNow.test.tsx
+packages/inbox/t3WaitLine.test.tsx
 packages/inbox/takeBack.test.tsx
 packages/inbox/sendWaitsForComments.test.tsx
 packages/inbox/undelivered.test.tsx
@@ -743,3 +744,6 @@ packages/ui/components/Viewer.blockRedraws.test.tsx
 packages/editor/hooks/useCheckboxOverrides.viewer.test.tsx
 packages/ui/components/TaterSpriteSlots.test.tsx
 packages/inbox/sidebarRedraws.test.tsx
+packages/inbox/agents/faceSources.test.tsx
+packages/ui/components/Viewer.authorColor.test.tsx
+packages/review-editor/components/authorColor.review.test.tsx

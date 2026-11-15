@@ -73,7 +73,12 @@ directory candidate (path-shaped typos and files error), every other word is
 ignored with a notice and the invoking cwd is reviewed. Hosts pass the resolved cwd
 through existing VCS/workspace discovery and project detection; never use
 `process.chdir()` in a plugin host. Explicit targets inside a repository normalize
-to its detected VCS root. OpenCode uses the internal `opencode-review-directory`
+to its detected VCS root. A named directory also removes `GIT_DIR` and its kin
+(`GIT_REPO_ENV`, `@plannotator/shared/child-env`) from the CLI's env, so a value
+the calling shell exported (a git hook, a script) cannot point the session's git
+at another repository; with no directory named they still decide (Pi's
+`/plannotator-review` runs in Pi's own process and does not change its env).
+OpenCode uses the internal `opencode-review-directory`
 command for these targets so an older CLI rejects them rather than silently
 reviewing the caller's repo; ordinary reviews keep `opencode-review`.
 Feedback still goes to the invoking agent
@@ -683,7 +688,7 @@ A comment from a review agent this session launched (its `source` is a job sourc
 
 ### Inbox: the Pull requests page (the Sheet)
 
-The board lives inside Reviews (the owner's pick, take C): there is no sidebar row of its own, and the Reviews row has the pull-request icon. On a desktop the board fills Reviews' right pane while no review, stack or System drawing is open there (`PullsPage`'s `prBoard`, `SheetPage` `mode="pane"`; its Open | Merged kept in memory). A phone has no right pane: a "Pull requests · N open · N need you" row at the top of the Reviews list opens the board's own page (`#prs`, with a back arrow to Reviews; Code review off sends the route to `#reviews`, a guest to the Inbox). A PR opened from the pane is `&from=reviews` and its Back returns to Reviews; on a desktop a stack page's Back and a PR opened from `#prs` also go back to Reviews (`prsHome` / `prsBack` in `App.tsx`). Code in `packages/inbox/prs/`, styles in `prs.css` (its `@source` in `apps/inbox/index.css`); tests in `prsInReviews.test.tsx`.
+The board lives inside Reviews (the owner's pick, take C): there is no sidebar row of its own, and the Reviews row has the pull-request icon. On a desktop the board fills Reviews' right pane while no review, stack or System drawing is open there (`PullsPage`'s `prBoard`, `SheetPage` `mode="pane"`; its Open | Merged kept in memory). A phone has no right pane: a "Pull requests · N open · N need you" row at the top of the Reviews list opens the board's own page (`#prs`, with a back arrow to Reviews; Code review off sends the route to `#reviews`). A PR opened from the pane is `&from=reviews` and its Back returns to Reviews; on a desktop a stack page's Back and a PR opened from `#prs` also go back to Reviews (`prsHome` / `prsBack` in `App.tsx`). Code in `packages/inbox/prs/`, styles in `prs.css` (its `@source` in `apps/inbox/index.css`); tests in `prsInReviews.test.tsx`.
 
 - **Scope, "everywhere, mine":** PRs in any repository that ask for the person's review, are theirs or are assigned to them, plus every open PR of the Inbox projects' repositories: `GET /api/inbox/pulls?everywhere=1` (see the Server API table in `server-and-storage.md`), on the Reviews page's clock (`useSheetPulls`), no extra polling. The server answers it and Reviews' list from one read per host. A repository that is not a project says "not a project".
 - **The Sheet:** a header line ("N open, N need you, N with failing checks, N landed this week"), a bar (filter by title, author, repository or number; Open | Merged, Merged the last 14 days; "Closed on GitHub" a link to the forge's search), then one section per repository, each PR a number tile with its checks mark. A stack shows as joined tiles, folded to one strip (a mark per layer, its counts, a link to the stack page) only over 8 PRs (`FOLD_OVER`). The filter dims misses and hides repositories with no match. Hidden while nothing is listed, the header's counts would repeat the empty words.

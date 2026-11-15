@@ -429,7 +429,7 @@ describe('register', () => {
     expect(w.logs.filter((line) => line.includes('classic review'))).toHaveLength(1)
   })
 
-  test('a -p session keeps the classic flow: ExitPlanMode is not touched', async ($: any, on: any) => {
+  test('a -p session keeps the classic flow: ExitPlanMode is not touched; it gets the Inbox tool alone', async ($: any, on: any) => {
     const w = world(on)
     on('tool.call', () => ({ result: 'the classic flow ran' }))
     await $.session.start({ ...SESSION, surface: null, isInteractive: false })
@@ -437,8 +437,22 @@ describe('register', () => {
     const answer = await $.tool.call({ tool: 'ExitPlanMode', plan: '# Plan\n' })
 
     expect(answer.result).toBe('the classic flow ran')
-    // No plannotator tool either: a later plugin turn would have nowhere to land.
-    expect(w.tools).toEqual([])
+    // No plannotator tool: a one-shot run may end before a decision comes back; the CLI waits for it inside the run.
+    expect(w.tools.map((t) => t.name)).toEqual(['plannotator_inbox'])
+  })
+
+  // T3 Code hosts Claude Code through the Agent SDK too: CLAUDE_CODE_ENTRYPOINT=t3-code, and T3CODE_THREAD_ID for a
+  // thread's Claude. The mod runs there as the thread; T3 owns Plan mode.
+  test('a T3 Code thread runs the mod as the thread: both tools, the session tagged t3:<thread>, ExitPlanMode left to T3', async ($: any, on: any) => {
+    const w = world(on, { env: { CLAUDE_CODE_ENTRYPOINT: 't3-code', T3CODE_THREAD_ID: 'a1b2c3d4-0000-4000-8000-000000000001' } })
+    on('tool.call', () => ({ result: 'the classic flow ran' }))
+    await $.session.start({ ...SESSION, surface: null, isInteractive: false })
+
+    const answer = await $.tool.call({ tool: 'ExitPlanMode', plan: '# Plan\n' })
+
+    expect(answer.result).toBe('the classic flow ran')
+    expect(w.tools.map((t) => t.name)).toEqual(['plannotator_inbox', 'plannotator'])
+    expect(w.env.get('PLANNOTATOR_SESSION_TAG')).toBe('t3:a1b2c3d4-0000-4000-8000-000000000001')
   })
 
   // The VS Code extension hosts Claude Code through the Agent SDK (not interactive, no surface at start) and
@@ -463,7 +477,7 @@ describe('register', () => {
     const answer = await $.tool.call({ tool: 'ExitPlanMode', plan: '# Plan\n' })
 
     expect(answer.result).toBe('the classic flow ran')
-    expect(w.tools).toEqual([])
+    expect(w.tools.map((t) => t.name)).toEqual(['plannotator_inbox'])
   })
 
   test('Claude running the CLI through Bash gets the tool: answered at once, the command never runs', async ($: any, on: any) => {
@@ -937,13 +951,13 @@ describe('register', () => {
     expect(w.env.has('PLANNOTATOR_INBOX_REMINDER')).toBe(false)
   })
 
-  test('a -p session: no tool, no context and nothing set', { plugins: [GUARD] }, async ($: any, on: any) => {
+  test('a -p session: the Inbox tool, and no reminder (nothing wakes a run that may end with its turn)', { plugins: [GUARD] }, async ($: any, on: any) => {
     const w = world(on, { files: withRegistry(), fetch: inbox(TOOLS, []) })
     await $.session.start({ ...SESSION, surface: null, isInteractive: false })
     await $.prompt.submit({ text: 'Refactor the handler.' })
-    expect(w.tools).toEqual([])
+    expect(w.tools.map((t: any) => t.name)).toEqual(['plannotator_inbox'])
     expect(w.contexts).toEqual([null])
-    expect(w.env.has('PLANNOTATOR_INBOX_REMINDER')).toBe(false)
+    expect(w.env.get('PLANNOTATOR_INBOX_REMINDER')).toBeUndefined()
   })
 
   // --- The session's open threads after a compaction and on a resume (the misfiled-thread AAR) ---

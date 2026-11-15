@@ -29,8 +29,7 @@
  *   POST /api/inbox/ask/:session/api/ai/bridge/{poll,event}   the agent's client (inbox-ask-live.ts)
  *
  * Conversations are the person's alone, so every route but the client's two
- * answers only the person's own window: a tailnet guest gets `403 owner_only`
- * and anything but the window's page (an agent's curl, another site) gets
+ * answers only the person's own window: anything but the window's page (an agent's curl, another site) gets
  * `403 window_only`, reads included. The client's routes sit behind the
  * connection routes' gate. `Sec-Fetch-Site: same-origin` is the browser's own mark,
  * which page script cannot set. Nothing here is on the phone's door. A change
@@ -98,8 +97,6 @@ export function createInboxAsk(options: {
   serverSession: string;
   readBody: (req: Request) => Promise<Record<string, unknown>>;
   json: (body: unknown, status?: number) => Response;
-  /** A tailnet request from someone other than this computer's owner. */
-  isGuest: (req: Request, via: "local" | "tailnet") => boolean;
   /** A conversation changed: the windows' streams say so. */
   onChange: (threadId: string) => void;
   /** The Inbox's token, and the host of a session that can answer live: inbox-ask-live.ts. */
@@ -121,10 +118,9 @@ export function createInboxAsk(options: {
   const fromWindow = (req: Request): boolean => req.headers.get("sec-fetch-site")?.trim().toLowerCase() === "same-origin";
 
   /** Whether this request may ask or read: the owner's own window. */
-  const allowed = (req: Request, via: "local" | "tailnet"): boolean => fromWindow(req) && !options.isGuest(req, via);
+  const allowed = (req: Request, _via?: "local" | "tailnet"): boolean => fromWindow(req);
 
-  const refuse = (req: Request, via: "local" | "tailnet"): void => {
-    if (options.isGuest(req, via)) throw new InboxError("owner_only", "Only this computer's owner can use Ask AI from this Inbox.");
+  const refuse = (req: Request, _via?: "local" | "tailnet"): void => {
     if (!fromWindow(req)) throw new InboxError("window_only", "Ask AI answers only the Inbox window.");
   };
 

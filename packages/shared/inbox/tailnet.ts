@@ -26,7 +26,8 @@ export type TailnetRefusalCode =
   | "forbidden_host"
   | "cross_site";
 
-export type TailnetCheck = { ok: true; login: string } | { ok: false; status: number; code: TailnetRefusalCode; message: string };
+/** A refusal names the login Tailscale gave (`login`) when there was one, for the refusal page. */
+export type TailnetCheck = { ok: true; login: string } | { ok: false; status: number; code: TailnetRefusalCode; message: string; login?: string };
 
 /** Logins compare case-insensitively (Tailscale logins are e-mail-like). */
 export function normalizeTailnetLogin(login: string): string {
@@ -35,8 +36,9 @@ export function normalizeTailnetLogin(login: string): string {
 
 /**
  * Who sent a request through serve, and whether they may use the Inbox:
- * only a login in `allowed` (the machine's owner plus config.json
- * `inboxTailscaleAllow`, already normalized). No login means a tagged peer
+ * only a login in `allowed` (the machine's owner; on a tagged machine, which
+ * has none, the logins config.json `inboxTailscaleAllow` names as its owner;
+ * already normalized). No login means a tagged peer
  * (or a request that did not come through serve): refused. A funnel request
  * is refused whatever it carries, since the Inbox never publishes publicly.
  */
@@ -60,7 +62,8 @@ export function checkTailnetIdentity(headers: Headers, allowed: readonly string[
       ok: false,
       status: 403,
       code: "tailnet_identity_refused",
-      message: `This Inbox answers only its owner's Tailscale login; ${decoded.trim()} is not allowed. Add it to inboxTailscaleAllow in config.json to let it in.`,
+      login: decoded.trim(),
+      message: `This Inbox opens only for the Tailscale account that owns this computer; ${decoded.trim()} is not that account.`,
     };
   }
   return { ok: true, login };

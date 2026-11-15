@@ -103,7 +103,7 @@ async function world() {
     return { status: response.status, code: json.code, result: json.result, error: json.result?.isError ? json.result.content[0]!.text : null };
   };
   const thread = async (id: string) => (await call(`/api/inbox/threads/${id}`)).json.thread as InboxThread;
-  return { server, base, dataDir, project, logs, answers, call, pair, door, thread, local: local.structuredContent! as { message_id: string; thread_id: string } };
+  return { server, base, dataDir, project, logs, answers, call, pair, door, thread, mcp, local: local.structuredContent! as { message_id: string; thread_id: string } };
 }
 
 const until = async (check: () => boolean | Promise<boolean>, ms = 5_000) => {
@@ -363,5 +363,24 @@ describe("the agent door", () => {
     const wokenConnection = (await w.call(`/api/inbox/threads/${toWoken.json.thread_id}/sessions?asker=${encodeURIComponent(woken.agent.session)}`)).json.asker?.connection;
     expect(wokenConnection?.polls).toBeUndefined();
     expect(["queued/next_turn", "queued/handed", "delivered/delivered"]).toContain((await line(toWoken.json.thread_id))!);
+  });
+
+  test("a reply to an agent paired without a wake address is not taken by another agent's read; a wake address set later sends it (#3339)", async () => {
+    const w = await world();
+    const paired = await w.call("/api/inbox/cloud-agents", { name: "Nightly fixer", preset: "grok-bot" });
+    expect(paired.status).toBe(200);
+    const agent = paired.json.agent as InboxCloudAgentView;
+    const token = decodeInboxAgentPairing(paired.json.pairing)!.token;
+    const sent = await w.door(token, "send_message", { body: "Found the flaky test. Fix it now?", idempotency_key: "s1" });
+    const threadId = sent.result!.structuredContent!.thread_id as string;
+    const posted = (await w.thread(threadId)).messages[0]!;
+    expect(posted.wakes).not.toBe(true);
+    await w.call(`/api/inbox/messages/${posted.id}/reply`, { words: "Yes, fix it.", idempotency_key: "r1" });
+    await w.mcp.callTool({ name: "read_thread", arguments: { thread_id: threadId, agent_session: "ses_another_reader" } });
+
+    const hook = stubRoutine();
+    expect((await w.call(`/api/inbox/cloud-agents/${agent.session}/wake`, { url: hook.url, key: KEY })).status).toBe(200);
+    await until(() => hook.seen.length === 1);
+    expect(String(hook.seen[0]!.text)).toContain("Yes, fix it.");
   });
 });
