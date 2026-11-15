@@ -9,7 +9,7 @@
  * the layout between the two, a frame at a time (rows 1.5k px shorter, the page moved to keep its place, the note out of
  * the rows, the rows long again). The note takes the width the column has and is cut there.
  */
-import { expect, test } from '@playwright/test';
+import { expect, test } from './inbox-test';
 import { openReview, SHORT_FILE, startWorld, stopWorld, windowAt, type PhoneWorld } from './inbox-review-comments-phone-world';
 
 /** Far longer than a phone's width on one line (about 6 px a character at the note's size). */
