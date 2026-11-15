@@ -12,15 +12,24 @@
  * agent", types a real `@`. The list is the `@` list's box and tiles, not its
  * code (that one follows the caret and only adds).
  *
- * The rules are replyRecipients.ts; ThreadPane owns the choice and Send.
+ * The rules are replyRecipients.ts; ThreadPane owns the choice and Send. The
+ * rows are named as a phone's sheet names them (thread/recipientNames.ts).
  */
 import { useEffect, useRef, type ReactNode } from 'react';
+import { graphemesOf } from '@plannotator/core/inbox-format';
 import { HostMark, Icon } from '../icons';
 import { canAddRecipient, type RecipientRow } from '../replyRecipients';
+import type { SessionLabels } from '../sessionLabels';
 import { namesList } from '../tags';
+import { recipientNames } from '../thread/recipientNames';
 import { TagStack } from './TagPicker';
 import { Tip } from './Tip';
 import { markRecipientList } from '../pageMarks';
+
+/** The longest title the pill shows; a longer one leaves the pill its fallback name, and the title goes to its hover. */
+const PILL_TITLE_MAX = 26;
+const NO_LABELS: SessionLabels = {};
+const NO_FOLDER = () => '';
 
 function Face({ tile, full, short, ended }: { tile: ReactNode; full: string; short: string; ended: boolean }) {
   return (
@@ -53,6 +62,8 @@ export function ReplyRecipient({
   onOnly,
   onToggle,
   onTagAnother,
+  labels = NO_LABELS,
+  folderOf = NO_FOLDER,
 }: {
   /** Every agent the list offers, live first, ended last. */
   rows: readonly RecipientRow[];
@@ -63,11 +74,22 @@ export function ReplyRecipient({
   onOnly: (row: RecipientRow) => void;
   onToggle: (row: RecipientRow) => void;
   onTagAnother: () => void;
+  /** Each session's title, where it has one: the pill and the list show it over the fallback name. */
+  labels?: SessionLabels;
+  /** The folder a session works in, as the thread knows it. */
+  folderOf?: (session: string) => string;
 }) {
   const listId = useRef(`ib-rpick-${Math.random().toString(36).slice(2)}`).current;
   const chosenIds = chosen.map((r) => r.session);
   const one = chosen.length === 1 ? chosen[0]! : null;
-  const names = namesList(chosen.map((r) => r.label));
+  const named = recipientNames(rows, labels, folderOf);
+  const nameOf = (row: RecipientRow) => named.get(row.session)?.name ?? row.label;
+  /** The pill's wide name: the row's name while it is short enough to fit, else the fallback name. */
+  const pillOf = (row: RecipientRow) => {
+    const name = nameOf(row);
+    return graphemesOf(name).length <= PILL_TITLE_MAX ? name : row.label;
+  };
+  const names = namesList(chosen.map(nameOf));
   const ended = one?.state === 'ended';
 
   // A press outside the pill and its list closes the list; so does Escape, before anything else hears it.
@@ -98,7 +120,7 @@ export function ReplyRecipient({
   ) : (
     <TagStack participants={chosen} />
   );
-  const words = one ? one.label : `${chosen.length} agents`;
+  const words = one ? pillOf(one) : `${chosen.length} agents`;
   const button = (
     <button
       type="button"
@@ -120,6 +142,7 @@ export function ReplyRecipient({
     <div ref={markRecipientList} className="ib-tg-menu ib-rpick" id={listId} data-recipient-list="" role="group" aria-label="Who gets this reply" onMouseDown={(event) => event.preventDefault()}>
       {rows.map((row) => {
         const on = chosenIds.includes(row.session);
+        const { title, agent } = named.get(row.session)!;
         const quiet = QUIET[row.state];
         return (
           <div key={row.session} className="ib-rpick-row" data-recipient-row={row.session} data-on={on ? '' : undefined}>
@@ -127,16 +150,21 @@ export function ReplyRecipient({
               <span className="ib-atile">
                 <HostMark host={row.host} agent={row.session} />
               </span>
-              <span className="ib-rpick-l" dir="auto">
-                {row.label}
+              <span className="ib-rpick-ol">
+                <span className="ib-rpick-l" dir="auto" title={title ? nameOf(row) : undefined}>
+                  {nameOf(row)}
+                </span>
+                <span className="ib-rpick-d" dir="auto">
+                  {agent && `${agent} · `}
+                  {quiet ? <span className="ib-rpick-q">{quiet}</span> : folderOf(row.session)}
+                </span>
               </span>
-              {quiet && <span className="ib-rpick-q">{quiet}</span>}
             </button>
             <button
               type="button"
               role="checkbox"
               aria-checked={on}
-              aria-label={`Also send to ${row.label}`}
+              aria-label={`Also send to ${nameOf(row)}`}
               className="ib-rpick-tick"
               data-recipient-tick={row.session}
               disabled={!canAddRecipient(row, chosenIds)}
@@ -157,7 +185,7 @@ export function ReplyRecipient({
 
   const pill = (
     <span className="ib-rto-wrap">
-      {chosen.length > 1 && !open ? <Tip content={names}>{button}</Tip> : button}
+      {!open && (chosen.length > 1 || (one && words !== nameOf(one))) ? <Tip content={names}>{button}</Tip> : button}
       {list}
     </span>
   );
@@ -166,7 +194,7 @@ export function ReplyRecipient({
     <span className="ib-rto-slot">
       {rows.map((row) => (
         <span key={row.session} className="ib-rto ib-rto-ghost" aria-hidden="true">
-          <Face tile={<span className="ib-atile" />} full={row.label} short={row.short} ended={row.state === 'ended'} />
+          <Face tile={<span className="ib-atile" />} full={pillOf(row)} short={row.short} ended={row.state === 'ended'} />
         </span>
       ))}
       {pill}
