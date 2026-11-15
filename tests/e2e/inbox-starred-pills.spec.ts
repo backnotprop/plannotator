@@ -212,6 +212,8 @@ test("the right-click menu: Move right and Move left change the stars' one order
   await menu.locator('[data-pill-action="left"]').click();
   const again = [threads.postings, threads.apns, threads.nightly, threads.diff];
   await expect.poll(() => serverPins(page)).toEqual(again);
+  // Unstar's Undo goes back to the place the window holds: wait for the window to hold the move too.
+  await expect.poll(() => pillOrder(page)).toEqual(again);
 
   // The keyboard: Shift+F10 on a focused pill, Unstar first.
   await pill(page, threads.nightly).focus();

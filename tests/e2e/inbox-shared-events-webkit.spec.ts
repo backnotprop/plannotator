@@ -157,6 +157,22 @@ test('WebKit: a long script in an attached page stalls the leader (no freeze); t
     location.hash = `thread=${thread}&file=${file}`;
   }, [threadId, attachment] as const);
   const streamSamples: number[] = [];
+  // The page takes seconds to load on a busy runner: the takeover is waited for from when the leader stops answering
+  // (an evaluate that does not come back while the script holds its thread), never from the click.
+  const answers = () =>
+    Promise.race([
+      leader!.evaluate(() => true).catch(() => true),
+      new Promise<boolean>((done) => setTimeout(() => done(false), 1000)),
+    ]);
+  await waitFor(
+    async () => {
+      streamSamples.push(await streams(w));
+      return answers();
+    },
+    (answered) => !answered,
+    30_000,
+  );
+  const stalledAt = Date.now() - 1000;
   const takeover = await waitFor(
     async () => {
       streamSamples.push(await streams(w));
@@ -167,10 +183,10 @@ test('WebKit: a long script in an attached page stalls the leader (no freeze); t
       return null;
     },
     (v) => v !== null,
-    // Up to about four seconds for the page to load, five for the check, and room.
-    15_000,
+    // The check within 3 s and no answer in 2 s, inside the script's eight seconds.
+    10_000,
   );
-  while (Date.now() - at < 9000) {
+  while (Date.now() - stalledAt < 9000) {
     streamSamples.push(await streams(w));
     await new Promise((done) => setTimeout(done, 100));
   }
