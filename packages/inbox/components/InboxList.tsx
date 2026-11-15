@@ -24,6 +24,8 @@ import { SidebarTrigger, useSidebar } from '../shell/sidebar';
 import { canMarkUnread, offersRowMarkRead } from '../markRead';
 import { useNarrowerThan } from '../narrower';
 import { inboxHasUnsent, inboxRowArchived } from '@plannotator/core/inbox-types';
+import { rowLabel, ScheduledBadge, scheduledLook, scheduledOf, ScheduledTile, useScheduled } from '../scheduled/rowLook';
+import { HeldNoticeLine } from './HeldNoticeLine';
 import { DraftLabel, rowUnsent, unsentWords } from './DraftLabel';
 import { ThreadRowMenu } from './RowMenu';
 import type { RowMenuAction } from '../rowMenu';
@@ -422,8 +424,8 @@ function FromLine({ row, project, filtered }: { row: InboxListRow; project: stri
     <span className="ib-from">
       <RowAvatar row={row} size={24} />
       {!filtered && <RowProjectMark row={row} />}
-      {!filtered && <RowSlot row={row} session={slotSession(row)} project={project} />}
-      <RowAgents participants={row.participants} agent={rowAgent(row)} />
+      {(!filtered || !!scheduledOf(row)) && <RowSlot row={row} session={slotSession(row)} project={project} />}
+      {scheduledOf(row) ? <ScheduledTile /> : <RowAgents participants={row.participants} agent={rowAgent(row)} />}
     </span>
   );
 }
@@ -443,8 +445,8 @@ function LeadLine({ row, project, filtered, tip = true }: { row: InboxListRow; p
   return (
     <span className="ib-from ib-lead">
       {withProject && <RowProjectMark row={row} />}
-      {withProject && <RowSlot row={row} session={slotSession(row)} project={project} tip={tip} />}
-      <RowAgentTiles participants={row.participants} agent={rowAgent(row)} tip={tip} />
+      {(withProject || !!scheduledOf(row)) && <RowSlot row={row} session={slotSession(row)} project={project} tip={tip} />}
+      {scheduledOf(row) ? <ScheduledTile /> : <RowAgentTiles participants={row.participants} agent={rowAgent(row)} tip={tip} />}
     </span>
   );
 }
@@ -487,33 +489,6 @@ function liveCount(rows: readonly InboxListRow[]): number {
 }
 
 /**
- * The held list's "N new" line: one line at every width (the owner, 2026-11-02: "1 new in appnotes · Users/ramos/…"
- * wrapped onto two). "N new in" and Show never shrink; the project's name takes the rest and is cut with "…", and
- * while it is cut the whole line is the tooltip.
- */
-function HeldNoticeLine({ count, project, onShow }: { count: number; project: string | null; onShow: () => void }) {
-  const full = project ? `${count} new in ${project}` : `${count} new`;
-  return (
-    <Tip content={full} when={(button) => isTextCut(button.querySelector('.ib-notice-proj'))}>
-      <button type="button" className="ib-notice" onClick={onShow} data-inbox-notice="">
-        <Icon name="inbox" size={15} />
-        <span className="ib-notice-text">
-          <span className="ib-notice-n">{project ? `${count} new in` : `${count} new`}</span>
-          {/* A space for the line's text and accessible name; the flex gap draws it. */}
-          {project && ' '}
-          {project && (
-            <bdi className="ib-notice-proj" data-notice-project={project}>
-              {project}
-            </bdi>
-          )}
-        </span>
-        <b>Show</b>
-      </button>
-    </Tip>
-  );
-}
-
-/**
  * The count in words (`countWords`), nothing when the count is `?N` or there is none. A three-line or phone row draws
  * the short form, its full words for a screen reader and, with `tip`, in the tooltip. A wide row (`wide`) draws the
  * full words in its words column; cut there, they are the tooltip too.
@@ -545,7 +520,7 @@ function CountWords({ row, tip = false, wide = false, status = false }: { row: I
 
 /** "Session ended": the session this row's thread would reach has ended (the server's `session_ended`; only a host that can tell). */
 function EndedMark({ row }: { row: InboxListRow }) {
-  if (!row.session_ended) return null;
+  if (!row.session_ended) return <ScheduledBadge row={row} />;
   return (
     <span className="ib-gone ib-rended" data-row-ended="">
       Session ended
@@ -863,14 +838,14 @@ function RowWithAction({
       }}
     >
       {children}
-      {onUnarchive && <UnarchiveAction row={row} label={`Unarchive: ${titleOf(row)}`} onUnarchive={onUnarchive} />}
+      {onUnarchive && <UnarchiveAction row={row} label={`Unarchive: ${rowLabel(row, titleOf(row))}`} onUnarchive={onUnarchive} />}
       {sendNow && (
         <RowTip armed={actionTip} content={`Send now: put your reply into ${agentName(rowAgent(row))}'s running turn without waiting for it to end`}>
           <button
             type="button"
             className="ib-ract"
             data-row-send-now=""
-            aria-label={`Send now: ${titleOf(row)}`}
+            aria-label={`Send now: ${rowLabel(row, titleOf(row))}`}
             onClick={(event) => {
               event.stopPropagation();
               onSendNow(row);
@@ -887,7 +862,7 @@ function RowWithAction({
             type="button"
             className="ib-ract"
             data-row-mark-read=""
-            aria-label={`Mark read: ${titleOf(row)}`}
+            aria-label={`Mark read: ${rowLabel(row, titleOf(row))}`}
             onClick={(event) => {
               event.stopPropagation();
               onMarkRead(row);
@@ -904,7 +879,7 @@ function RowWithAction({
             type="button"
             className="ib-ract"
             data-row-mark-unread=""
-            aria-label={`Mark unread: ${titleOf(row)}`}
+            aria-label={`Mark unread: ${rowLabel(row, titleOf(row))}`}
             onClick={(event) => {
               event.stopPropagation();
               onMarkUnread(row);
@@ -1432,12 +1407,13 @@ export function InboxList(props: InboxListProps) {
   const unarchive = useCallback((row: InboxListRow) => latest.current.archived?.unarchive(row), []);
   // A row's time reads "8:22 PM" today and "Oct 19" after midnight: a new day renders every row again.
   const day = new Date().toDateString();
+  const scheduledRows = useScheduled().rows;
   /** One row, the same in both views; `drawn` is the group the held list draws it in. */
   const renderRow = (row: InboxListRow, drawn: InboxListGroupId) => (
     <ListRow
       {...rowTintOf(props.tagColours, row)}
       key={row.thread_id}
-      row={row}
+      row={scheduledLook(row, scheduledRows)}
       project={props.projectNames?.get(row.project.id) ?? row.project.name}
       away={!!row.machine && (props.machines?.away.has(row.machine) ?? false)}
       drawn={drawn}
@@ -1728,7 +1704,7 @@ export const ListRow = memo(
     if (shape === 'phone') return <PhoneRow row={row} project={project} away={away} filtered={filtered} lit={lit} menu={menu} pinned={pinned} keys={keys} pill={pill} compact={compact} {...rowLook} {...pickState} onOpen={open} onUnstar={unstarRow} tint={tint} tagName={tagName} />;
     return (
       <RowWithAction row={row} drawn={drawn} menu={menu} onMarkRead={picking ? undefined : onMarkRead} onMarkUnread={picking ? undefined : onMarkUnread} onSendNow={picking ? undefined : onSendNow} onUnarchive={picking ? undefined : onUnarchive}>
-        {picking && onPick && <PickBox row state={picked ? 'all' : 'none'} label={`Select ${titleOf(row)}`} onPick={(event) => onPick(row, event)} />}
+        {picking && onPick && <PickBox row state={picked ? 'all' : 'none'} label={`Select ${rowLabel(row, titleOf(row))}`} onPick={(event) => onPick(row, event)} />}
         {shape === 'narrow' ? (
           <NarrowRow row={row} project={project} away={away} filtered={filtered} lit={lit} pinned={pinned} keys={keys} selected={selected} pill={pill} compact={compact} {...rowLook} {...pickState} onOpen={open} onUnstar={unstarRow} tint={tint} tagName={tagName} />
         ) : (
