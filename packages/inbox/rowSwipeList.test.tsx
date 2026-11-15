@@ -178,6 +178,25 @@ test.skipIf(!hasDom)('a short slow swipe left rests open on Archive, a real name
   expect(layer().dataset.side).toBeUndefined();
 });
 
+// A card or a row that comes above an open row moves the row down; its Archive stays under it, not where it was.
+test.skipIf(!hasDom)('a row open on Archive keeps its button under it when the list moves', async () => {
+  draw();
+  const el = rowEl('msg_2');
+  await swipe(el, -90);
+  await settled(el);
+  expect(layer().dataset.side).toBe('trail');
+  const top = Number.parseFloat(layer().style.top || '0');
+  const at = el.getBoundingClientRect();
+  el.getBoundingClientRect = () => ({ ...at.toJSON(), top: at.top + 130, bottom: at.bottom + 130, y: at.y + 130 }) as DOMRect;
+  const card = document.createElement('div');
+  await act(async () => {
+    host!.querySelector('.ib-lbody')!.prepend(card);
+    await sleep(0);
+  });
+  expect(Number.parseFloat(layer().style.top)).toBe(top + 130);
+  expect(layer().dataset.side).toBe('trail');
+});
+
 test.skipIf(!hasDom)('a short slow swipe right rests open on Quiet (Mark read); its tap marks the row read', async () => {
   draw();
   const el = rowEl('msg_3');

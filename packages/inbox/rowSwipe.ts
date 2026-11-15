@@ -39,6 +39,7 @@
  */
 
 import { canMarkUnread, offersRowMarkRead } from './markRead';
+import { watchListShift } from './rowSwipeShift';
 import type { InboxListGroupId, InboxListRow } from '@plannotator/core/inbox-types';
 
 /** The right swipe's label (the owner: "Call it 'Quiet': that's where a read thread goes in the list"). */
@@ -371,7 +372,11 @@ export function attachRowSwipe(body: HTMLElement, layer: HTMLElement, options: R
     }
   };
 
-  const place = (c: Current, title: string) => {
+  /**
+   * The layer's top and height: the row's, in the scroll box's own coordinates. Only the row's swipe moves it
+   * sideways, so this holds while the row is open, and places the layer again when the list moves under it.
+   */
+  const putTop = (c: Current) => {
     const box = c.face.getBoundingClientRect();
     const frame = body.getBoundingClientRect();
     // Inside the row's whole pixels and above its bottom hairline: a row at a fractional height, moved on its own
@@ -379,9 +384,15 @@ export function attachRowSwipe(body: HTMLElement, layer: HTMLElement, options: R
     const top = box.top - frame.top - body.clientTop + body.scrollTop;
     const snapped = Math.ceil(top);
     layer.style.top = `${snapped}px`;
+    layer.style.height = `${Math.max(0, Math.floor(top + box.height) - snapped - 1)}px`;
+  };
+
+  const place = (c: Current, title: string) => {
+    const box = c.face.getBoundingClientRect();
+    const frame = body.getBoundingClientRect();
+    putTop(c);
     layer.style.left = `${box.left - frame.left - body.clientLeft + body.scrollLeft}px`;
     layer.style.width = `${box.width}px`;
-    layer.style.height = `${Math.max(0, Math.floor(top + box.height) - snapped - 1)}px`;
     if (c.actions.lead) layer.dataset.lead = c.actions.lead;
     else delete layer.dataset.lead;
     lead?.setAttribute('aria-label', `${c.actions.lead === 'mark-unread' ? SWIPE_UNREAD_LABEL : SWIPE_QUIET_NAME}: ${title}`);
@@ -628,6 +639,10 @@ export function attachRowSwipe(body: HTMLElement, layer: HTMLElement, options: R
     if (current) runTrail(current, 0, true);
   };
 
+  // The list moved under a row holding the layer (a card came, a row arrived): the layer follows the row.
+  const unwatch = watchListShift(body, layer, () => {
+    if (current?.face.isConnected) putTop(current);
+  });
   body.addEventListener('touchstart', onStart, { passive: true });
   body.addEventListener('scroll', onScroll, { passive: true });
   body.addEventListener('click', onClick, true);
@@ -635,6 +650,7 @@ export function attachRowSwipe(body: HTMLElement, layer: HTMLElement, options: R
   trail?.addEventListener('click', onTrailClick);
   return () => {
     disposed = true;
+    unwatch();
     body.removeEventListener('touchstart', onStart);
     body.removeEventListener('scroll', onScroll);
     body.removeEventListener('click', onClick, true);
