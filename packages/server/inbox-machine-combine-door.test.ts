@@ -65,11 +65,12 @@ describe("Combine and a worded Tidy at a linked machine's door", () => {
       // Spaces only are no words: the plain Tidy, held and replayed like any append.
       expect((await door("tidy", { ...worded, words: "   ", idempotency_key: "door-tidy-2" }, false))[1]).not.toBe("window_only");
 
-      // A press in A's window: past the door, to B's own checks (nobody to ask in this empty Inbox).
-      const pressed = await door("combine", combine, true);
+      // A press in A's window: past the door, to B's own checks (nobody to ask in this empty Inbox). Its own key: the
+      // door answers a device's key once and replays that answer, the refusal too.
+      const pressed = await door("combine", { ...combine, idempotency_key: "door-combine-2" }, true);
       expect(pressed[0]).not.toBe(403);
       expect(pressed[1]).not.toBe("window_only");
-      const tidied = await door("tidy", worded, true);
+      const tidied = await door("tidy", { ...worded, idempotency_key: "door-tidy-3" }, true);
       expect(tidied[0]).not.toBe(403);
       expect(tidied[1]).not.toBe("window_only");
     } finally {

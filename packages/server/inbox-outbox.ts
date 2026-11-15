@@ -271,6 +271,14 @@ export function forwardsNow(route: string, body: Record<string, unknown>): boole
   return doorWriteKind(route) === "now" || (route === "tidy" && inboxTidyWords(body.words) !== "");
 }
 
+/**
+ * The receiving side of `forwardsNow`: a Combine or a Tidy with words that came through this Inbox's door from
+ * another machine without the mark of a press in its window. `door` null: not through the door.
+ */
+export function doorRefusesBare(door: { window: boolean } | null | undefined, route: string, body: Record<string, unknown>): boolean {
+  return !!door && !door.window && (route === "combine" || route === "tidy") && forwardsNow(route, body);
+}
+
 /** Statuses a proxy in front of the owner answers when the owner itself never got the request (`tailscale serve` with the Inbox down). */
 const GATEWAY_STATUSES = new Set([502, 503, 504]);
 

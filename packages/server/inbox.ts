@@ -329,7 +329,7 @@ import { createInboxDebugLog } from "./inbox-debug-log";
 import { createInboxDevices, DOOR_PREFIX, MACHINE_PLATFORM, type InboxDoorCaller } from "./inbox-devices";
 import { createInboxMachines, type InboxMachines, type MachineFrame, type MachineLinkTimings } from "./inbox-machines";
 import { mergePullBoards } from "./inbox-machine-pulls";
-import { forwardsNow, replyIsStale } from "./inbox-outbox";
+import { doorRefusesBare, replyIsStale } from "./inbox-outbox";
 import type { PairingProbes } from "./inbox-pairing-checks";
 import { createInboxRelay, readRelayFile, relayUrl as defaultRelayUrl } from "./inbox-relay";
 import { createInboxCloudGate } from "./inbox-cloud-gate";
@@ -5312,7 +5312,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const door = fromDeviceDoor.get(req);
         if (door && !door.window) {
           const body = path === "/api/inbox/tidy" ? ((await req.clone().json().catch(() => null)) as Record<string, unknown> | null) : null;
-          if (forwardsNow(path.slice("/api/inbox/".length), body ?? {})) return json(INBOX_MACHINE_WINDOW_ONLY_BODY, 403);
+          if (doorRefusesBare(door, path.slice("/api/inbox/".length), body ?? {})) return json(INBOX_MACHINE_WINDOW_ONLY_BODY, 403);
         }
       }
       // Tidy: who it would ask (GET) and asking them (POST).
