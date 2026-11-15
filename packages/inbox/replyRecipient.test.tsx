@@ -336,6 +336,23 @@ test.skipIf(!hasDom)('two sessions titled alike carry their names after it, on a
   });
 });
 
+test.skipIf(!hasDom)('rows are named as the sidebar names their agents: a session with no title of its own by the thread its agent got first; a title over that; alike names still carry their fallback names', async () => {
+  const { setInboxAgents } = await import('./agentsList');
+  const agent = (session: string, host: string, name: string) => ({ id: session, session, host, project: { id: PROJECT.id, name: PROJECT.name }, state: 'idle' as const, waiting: 0, live: true, started_at: null, last_seen_at: null, first_thread: { id: M1, name } });
+  taggable.push(tagged('ses_claude2', 'claude-code'));
+  act(() => setInboxAgents([{ agents: [agent('ses_claude', 'claude-code', 'Invoice retries'), agent('ses_claude2', 'claude-code', 'Invoice retries'), agent('ses_pi', 'pi', 'Queue timeouts')], total: 3, ended_today: 0 }]));
+  try {
+    await withLabels({ ses_pi: 'Pi tidy' }, async () => {
+      const el = await render(threadOf(agentMessage(M1, CLAUDE, 41), agentMessage(M2, CLAUDE2, 43), agentMessage(M3, PI, 45)));
+      await write(el, 'Use the old totals.');
+      await openList(el);
+      expect(named(el).map((r) => r[0])).toEqual(['Invoice retries (Claude Code)', 'Invoice retries (Claude Code 2)', 'Pi tidy']);
+    });
+  } finally {
+    act(() => setInboxAgents(null));
+  }
+});
+
 test.skipIf(!hasDom)('a long title: the row holds it whole for its hover, and the pill keeps the fallback name with the title in its spoken name', async () => {
   const long = 'Migrate the ledger export from the nightly cron job to the new queue worker';
   await withLabels({ ses_claude: long }, async () => {

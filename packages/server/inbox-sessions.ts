@@ -38,12 +38,13 @@ import { homedir } from "node:os";
 import { basename } from "node:path";
 import { INBOX_AUTO_SEND_AFTER_MS, type InboxHostSessions, type InboxMessage, type InboxOpenSession, type InboxProject, type InboxRestartAgents, type InboxSessionOutdated, type InboxTag, type InboxToolHostId } from "@plannotator/core/inbox-types";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
-import { INBOX_ASK_POLL_FIELD, INBOX_AUTO_RELOAD_POLL_FIELD, INBOX_CONTINUES_POLL_FIELD, INBOX_HELD_POLL_FIELD, INBOX_RELOAD_FIELD, INBOX_SEND_NOW_POLL_FIELD, INBOX_SESSION_LABEL_INPUT_MAX, INBOX_SESSION_LIVE_MS, INBOX_TAGS_POLL_FIELD, INBOX_TITLE_POLL_FIELD } from "@plannotator/shared/inbox/connection";
+import { INBOX_ASK_POLL_FIELD, INBOX_AUTO_RELOAD_POLL_FIELD, INBOX_CONTINUES_POLL_FIELD, INBOX_FIRST_STARTED_POLL_FIELD, INBOX_HELD_POLL_FIELD, INBOX_RELOAD_FIELD, INBOX_SEND_NOW_POLL_FIELD, INBOX_SESSION_LABEL_INPUT_MAX, INBOX_SESSION_LIVE_MS, INBOX_TAGS_POLL_FIELD, INBOX_TITLE_POLL_FIELD } from "@plannotator/shared/inbox/connection";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { graphemesOf, inboxStoredAgentName } from "@plannotator/core/inbox-format";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { isInboxPermissionSession } from "@plannotator/core/inbox-permission";
 import { createInboxContinuations, parseInboxContinues } from "./inbox-continuations";
+import { createInboxFirstSeen, type InboxFirstSeen } from "./inbox-first-seen";
 import { inboxClaimAbandoned } from "./inbox-stuck-delivery";
 import { parseEngine, parseLoadedPlugin, parseSessionFolder, runtimeOf, tagUpdateFix, type LoadedPlugin } from "./inbox-restart";
 
@@ -72,12 +73,16 @@ export interface InboxAgentSession {
   /** The project root its `project_path` resolved to; null when it sent none. */
   root: string | null;
   startedAt: number;
+  /** The earliest start this Inbox heard for it (`startedAt` moves when its connection starts again; this never does). */
+  firstSeen: number;
   /** The last poll, state change or Inbox tool call. */
   lastSeen: number;
   live: boolean;
   /** A turn runs now (live only); null when the connection does not say, or it is not live. */
   busy: boolean | null;
   label: string | null;
+  /** The title its host generated (INBOX_TITLE_POLL_FIELD); null when it sent none. */
+  title: string | null;
 }
 
 /**
@@ -143,6 +148,8 @@ interface SeenSession {
   /** The project root its `project_path` resolved to; null when it sent none. */
   root: string | null;
   startedAt: number;
+  /** The earliest `startedAt` it had (a plugin reload starts its connection again, later); absent: `startedAt`. */
+  firstSeen?: number;
   /** The `started_at` its last poll said (when its wake started); absent when the poll said none. */
   wakeStartedAt?: number | null;
   lastSeen: number;
@@ -361,12 +368,15 @@ export function createInboxLiveSessions(options: {
   uncertainItemsOf?: (session: string) => string[];
   /** Each poll, with the sessions its conversation continues (nearest first): the agent icons' faces link it (inbox-agent-faces.ts). */
   onPoll?: (session: string, continues: readonly string[]) => void;
+  /** Where each session's first-seen time is kept across restarts (inbox-first-seen.ts); absent: in memory only. */
+  firstSeen?: InboxFirstSeen;
 }) {
   const { store, serverSession } = options;
   const now = options.now ?? Date.now;
   const autoSendAfterMs = options.autoSendAfterMs ?? INBOX_AUTO_SEND_AFTER_MS;
   const startedAt = now();
   const sessions = new Map<string, SeenSession>();
+  const firstSeen = options.firstSeen ?? createInboxFirstSeen(null);
   /**
    * MCP activity per agent session: when a tool call last named it. Presence
    * only (a session that asked is not "ended" while it talks to the Inbox); it
@@ -564,7 +574,11 @@ export function createInboxLiveSessions(options: {
     const folder = parseSessionFolder(body.session_folder);
     if (folder) entry.folder = folder;
     if (root !== null) entry.root = root;
-    entry.startedAt = finiteMs(body.started_at) ?? entry.startedAt;
+    const started = finiteMs(body.started_at) ?? entry.startedAt;
+    // The earliest of: what this Inbox kept (on disk too), this start, and the first start its connection kept.
+    const first = Math.min(entry.firstSeen ?? entry.startedAt, started, firstSeen.get(session)?.first ?? started, finiteMs(body[INBOX_FIRST_STARTED_POLL_FIELD]) ?? started);
+    entry.firstSeen = firstSeen.note(session, Math.min(first, at), at).first;
+    entry.startedAt = started;
     entry.wakeStartedAt = finiteMs(body.started_at);
     entry.lastSeen = at;
     entry.holding += 1;
@@ -860,7 +874,8 @@ export function createInboxLiveSessions(options: {
         idleSince: entry.busy === false ? entry.idleSince : null,
         tags: entry.tags,
         sendNow: entry.sendNow,
-        label: entry.label ?? null,
+        // Its name where it has one: the name given in its host, else the title its host generated.
+        label: entry.label ?? entry.title ?? null,
       });
     }
     return out;
@@ -882,10 +897,12 @@ export function createInboxLiveSessions(options: {
         host: entry.host,
         root: entry.root,
         startedAt: entry.startedAt,
+        firstSeen: Math.min(entry.firstSeen ?? entry.startedAt, entry.startedAt),
         lastSeen: heard,
         live,
         busy: live ? entry.busy : null,
         label: entry.label ?? null,
+        title: entry.title ?? null,
       });
     }
     return out;
@@ -1277,7 +1294,7 @@ export function createInboxLiveSessions(options: {
       const live = {
         ...found,
         sessions: found.sessions.map((session) => {
-          const label = labelOf(session.session);
+          const label = labelOf(session.session) ?? titleOf(session.session);
           return label ? { ...session, label } : session;
         }),
       };
