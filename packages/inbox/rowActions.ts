@@ -41,6 +41,16 @@ export function patchShownRow(shown: readonly InboxListSection[], threadId: stri
   );
 }
 
+/** The list with each row in a Combine still waiting (useCombines.ts `waiting`) saying "Combining…". */
+export function withCombining(shown: InboxListSection[] | null, waiting: ReadonlyMap<string, string> | undefined): InboxListSection[] | null {
+  if (!shown || !waiting || waiting.size === 0) return shown;
+  return shown.map((section) =>
+    section.threads.some((row) => waiting.has(row.thread_id))
+      ? { ...section, threads: section.threads.map((row) => (waiting.has(row.thread_id) ? { ...row, combining: true as const } : row)) }
+      : section,
+  );
+}
+
 /** The row as the list on screen draws it, to put back if the write fails. */
 export function shownRowOf(shown: readonly InboxListSection[] | null, threadId: string): InboxListRow | null {
   for (const section of shown ?? []) for (const row of section.threads) if (row.thread_id === threadId) return row;

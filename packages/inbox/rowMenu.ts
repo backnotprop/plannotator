@@ -8,7 +8,7 @@ import { inboxRowArchived, type InboxListGroupId, type InboxListRow } from '@pla
 import { canMarkUnread, canToggleRead, offersRowMarkRead } from './markRead';
 import { priorityAction } from './priority';
 
-export type RowMenuAction = 'pin' | 'unpin' | 'priority-add' | 'priority-remove' | 'copy-thread' | 'copy-link' | 'copy-id' | 'snooze' | 'unsnooze' | 'read' | 'mark-unread' | 'unread' | 'archive';
+export type RowMenuAction = 'pin' | 'unpin' | 'priority-add' | 'priority-remove' | 'copy-thread' | 'copy-link' | 'copy-id' | 'snooze' | 'unsnooze' | 'read' | 'mark-unread' | 'unread' | 'archive' | 'unarchive';
 
 /**
  * The thread's address: the Inbox's one address on this computer
@@ -42,7 +42,8 @@ export function threadLink(threadId: string, base: { url?: string | null; via?: 
  * Add to Priority (Remove from Priority on a row in it) follows the star, in
  * its group, on a row whose Inbox keeps priority (`priority` absent: none)
  * and whose machine takes it from this one (`canPrioritize`); an archived row
- * offers only Remove.
+ * offers only Remove. A row of the Archived group (`drawn` "archived", approval "inbox-archived-group") offers
+ * Unarchive where Archive goes, and none of the read actions.
  */
 export function rowMenuActions(row: InboxListRow, canMarkRead: boolean, pinned: boolean | null = null, drawn: InboxListGroupId | null = null, canSnooze = false, canPrioritize = true): RowMenuAction[] {
   const actions: RowMenuAction[] = [];
@@ -51,12 +52,13 @@ export function rowMenuActions(row: InboxListRow, canMarkRead: boolean, pinned: 
   if (priority) actions.push(priority);
   actions.push('copy-thread', 'copy-link', 'copy-id');
   if (canSnooze && !inboxRowArchived(row)) actions.push(...(row.snoozed ? (['snooze', 'unsnooze'] as const) : (['snooze'] as const)));
-  if (canMarkRead) {
+  if (canMarkRead && drawn !== 'archived') {
     if (offersRowMarkRead(row, drawn)) actions.push('read');
     // A seen update the list still holds in New takes both: Mark read moves it to Quiet, Mark unread bolds it again.
     if (canMarkUnread(row)) actions.push('mark-unread');
     if ((row.read_at ?? null) !== null && canToggleRead(row)) actions.push('unread');
   }
   if (row.resolved_at === null) actions.push('archive');
+  else if (drawn === 'archived') actions.push('unarchive');
   return actions;
 }

@@ -5,6 +5,7 @@ import type { InboxAttachmentState, InboxInlineImage, InboxMessageWire } from '@
 import type { QuestionAnswer } from '@plannotator/core/question-block';
 import type { JumpTarget } from '../components/ReplacedQuestion';
 import type { ActionMark } from '../components/ActionChecklist';
+import type { FileRef } from '../fileRefs';
 
 export interface MessageActs {
   openFromReply: (attachment: InboxAttachmentState, version: 'current' | 'sent') => void;
@@ -26,6 +27,8 @@ export interface MessageActs {
   closeHeaderOnEscape: (id: string) => (event: KeyboardEvent) => void;
   tryPrototype: (messageId: string, key: string) => void;
   takeBackOf: (message: InboxMessageWire) => (() => void) | null;
+  /** A file an agent's message names opens beside the thread, read only (approval "inbox-file-refs-open-viewer"). */
+  openFileRef: (messageId: string, ref: FileRef) => void;
 }
 
 export type MessageActsRef = { readonly current: MessageActs };

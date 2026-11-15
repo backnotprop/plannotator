@@ -26,6 +26,7 @@ import { INBOX_SEARCH_GROUPS, middleCutInboxName, type InboxSearchGroupId, type 
 import { inboxApi, saveRecentSearch, searchInbox, type SearchModel } from '../api';
 
 import { HostMark, Icon } from '../icons';
+import { rowTintTitle, tintAttrs, type RowTint } from '../tagColours';
 import { ShapeThumb } from '@plannotator/ui/components/shape/ShapeGrid';
 import { KeyCaps } from '../shortcuts/hint';
 import { isTextCut, ProjectTipText, Tip } from '../components/Tip';
@@ -93,6 +94,8 @@ export interface SearchPaletteProps {
   onAction?: (action: ComposeAction) => void;
   /** Shape's boards the words find (the "Shape" group, under the results). Absent: none (Shape off). */
   shapes?: (q: string) => SearchShape[];
+  /** A thread result's tag colour (tagColours.ts), as its row in the list has: tinted, the tag named. Absent or null: as usual. */
+  tintOf?: (threadId: string) => RowTint | null;
 }
 
 type FilterKind = keyof SearchFilters;
@@ -294,16 +297,27 @@ function KeyFooter() {
 
 /** A result's mark and lines. Memoized: moving the highlight re-renders the option elements, not what they hold
  *  (the row is the answer's own object, so it stays the same until a new answer lands). */
-const ResultContent = memo(function ResultContent({ row, phone, projectName, terms }: { row: InboxSearchRow; phone: boolean; projectName: string; terms: readonly string[] }) {
+const ResultContent = memo(function ResultContent({ row, phone, projectName, terms, tag }: { row: InboxSearchRow; phone: boolean; projectName: string; terms: readonly string[]; tag?: string }) {
   return (
     <>
       <RowMark row={row} />
-      <RowBody row={row} phone={phone} projectName={projectName} terms={terms} />
+      <RowBody row={row} phone={phone} projectName={projectName} terms={terms} tag={tag} />
     </>
   );
 });
 
-function RowBody({ row, phone, projectName, terms }: { row: InboxSearchRow; phone: boolean; projectName: string; terms: readonly string[] }) {
+/** A tinted thread result's tag, as a list row names it (threadTags.css `.ib-rtag`). */
+function ResultTag({ json }: { json: string }) {
+  const tag = JSON.parse(json) as RowTint;
+  return (
+    <span className="ib-rtag" dir="auto" title={rowTintTitle(tag)} data-row-tag="">
+      <span className="ib-rtag-n">{tag.name}</span>
+      {tag.also.length > 0 && <span className="ib-rtag-more"> +{tag.also.length}</span>}
+    </span>
+  );
+}
+
+function RowBody({ row, phone, projectName, terms, tag }: { row: InboxSearchRow; phone: boolean; projectName: string; terms: readonly string[]; tag?: string }) {
   const chip = rowThreadChip(row);
   // The time: in its own column on a desktop, at the end of the meta line on a phone (a column would take the title's width).
   const time = row.type === 'project' ? null : searchTime(row.at);
@@ -321,6 +335,7 @@ function RowBody({ row, phone, projectName, terms }: { row: InboxSearchRow; phon
             <MetaLine chip={chip} chipTerms={terms} project={projectName} projectMarks={projectMarks(projectName, row.project.name, terms)} section={label} at={metaAt} />
           </span>
           {row.archived ? <span className="ib-sp-chip">Archived</span> : row.section === 'stopped' ? <span className="ib-sp-chip ib-sp-warn">Stopped</span> : null}
+          {tag && <ResultTag json={tag} />}
           {!phone && <TimeColumn at={time} />}
         </>
       );
@@ -1073,9 +1088,12 @@ export default function SearchPalette(props: SearchPaletteProps) {
               );
             }
             const row = option.row;
+            const tint = row.type === 'thread' ? (props.tintOf?.(row.thread_id) ?? null) : null;
+            const tinted = tint ? tintAttrs(tint.colour) : null;
             return (
-              <div key={`${row.type}-${row.id}`} className="ib-sp-row" {...common} data-result={row.type} data-result-id={row.id}>
-                <ResultContent row={row} phone={phone} projectName={projectName(row.project.id)} terms={answered?.model.terms ?? NO_TERMS} />
+              <div key={`${row.type}-${row.id}`} className="ib-sp-row" {...common} data-result={row.type} data-result-id={row.id} data-tint={tinted?.['data-tint']} style={tinted?.style}>
+                {/* The tag as a string, so the memo holds while the answer and the colour stay. */}
+                <ResultContent row={row} phone={phone} projectName={projectName(row.project.id)} terms={answered?.model.terms ?? NO_TERMS} tag={tint ? JSON.stringify(tint) : undefined} />
               </div>
             );
           })}
