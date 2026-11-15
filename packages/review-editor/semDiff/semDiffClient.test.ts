@@ -90,6 +90,24 @@ describe('semantic diff client', () => {
     expect(log.created).toBe(0);
   });
 
+  test('Java and C# files are supported when the server ships their grammars', () => {
+    const log = { created: 0, terminated: 0 };
+    const shipped = {
+      ...advert,
+      grammars: {
+        ...advert.grammars,
+        'tree-sitter-java.wasm': '/assets/sem-diff/tree-sitter-java-0.wasm',
+        'tree-sitter-c_sharp.wasm': '/assets/sem-diff/tree-sitter-c_sharp-0.wasm',
+      },
+    };
+    expect(createSemDiffClient({ advert, origin: 'http://127.0.0.1:1', createWorker: fakeWorker('engine', log) }).supports('src/Users.java')).toBe(false);
+    const client = createSemDiffClient({ advert: shipped, origin: 'http://127.0.0.1:1', createWorker: fakeWorker('engine', log) });
+    expect(client.supports('src/Users.java')).toBe(true);
+    expect(client.supports('src/Users.cs')).toBe(true);
+    expect(log.created).toBe(0);
+    client.dispose();
+  });
+
   test('PHP files are supported when the server ships the PHP grammar; Blade templates never are', () => {
     const log = { created: 0, terminated: 0 };
     const shipped = { ...advert, grammars: { ...advert.grammars, 'tree-sitter-php.wasm': '/assets/sem-diff/tree-sitter-php-0.wasm' } };
