@@ -119,6 +119,28 @@ describe("who is listed, and how", () => {
     expect(group.agents[0]).toMatchObject({ session: "launch:lch_starting", launch: { started: false, run: "starting", scratch: "palette-helper" }, project: { id: "prj_ledger", name: "ledger" } });
   });
 
+  test("a scheduled thread is one agent, its newest run's; an earlier run's session only while it is live; other launches as before", () => {
+    const run = (id: string, day: number, session: string, thread = "msg_digest") => ({ launch_id: id, session, thread_id: thread, host: "claude-code", project_id: "prj_ledger", started_at: `2026-11-0${day}T07:16:00.000Z`, started: true, run: "stopped" as const, scratch: null, scheduled: true });
+    const ended = (session: string, live = false) => ({ session, host: "claude-code", root: "/work/ledger", startedAt: 1, lastSeen: 2, live, busy: null, label: null });
+    const group = inboxAgentsGroup(
+      evidence({
+        sessions: [ended("ses-day1"), ended("ses-day2"), ended("ses-day3", true), ended("ses-plain")],
+        launches: [
+          run("lch_day1", 1, "ses-day1"),
+          run("lch_day3", 3, "ses-day3", "msg_other"),
+          run("lch_day2", 2, "ses-day2"),
+          run("lch_day4", 4, "ses-day4"),
+          { ...run("lch_plain_a", 1, "ses-plain", "msg_plain"), scheduled: false },
+          { ...run("lch_plain_b", 2, "ses-plain-b", "msg_plain"), scheduled: false },
+        ],
+      }),
+    );
+    expect(group.agents.map((agent) => agent.id).sort()).toEqual(["lch_day3", "lch_day4", "lch_plain_a", "lch_plain_b"]);
+    // An earlier run still going is listed by its session, with no launch row of its own.
+    const still = inboxAgentsGroup(evidence({ sessions: [ended("ses-day1", true)], launches: [run("lch_day1", 1, "ses-day1"), run("lch_day2", 2, "ses-day2")] }));
+    expect(still.agents.map((agent) => agent.id).sort()).toEqual(["lch_day2", "ses-day1"]);
+  });
+
   test("labels only when asked", () => {
     const sessions = [{ session: "ses-a", host: "pi", root: null, startedAt: 1, lastSeen: 2, live: true, busy: false, label: "Secret plan" }];
     expect(inboxAgentsGroup(evidence({ sessions, labels: false })).agents[0]!.label).toBeUndefined();
