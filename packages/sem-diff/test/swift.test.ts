@@ -18,10 +18,22 @@ test('the grammar is the tree-sitter-swift 0.7.3 release file, unchanged', () =>
   assert.match(fs.readFileSync(path.join(dir, 'SHA256SUMS'), 'utf8'), new RegExp(`^${sum}  tree-sitter-swift.wasm$`, 'm'));
 });
 
-const types = async (a: string, b: string) => (await semanticDiffFile('swift', a, b, 'x.swift')).semanticOperations.map((o) => o.type);
+import { LANGUAGES } from '../src/parse.ts';
+
+const rules = async (a: string, b: string) => {
+  const held = LANGUAGES.swift.holdBack;
+  LANGUAGES.swift.holdBack = undefined;
+  try {
+    return (await semanticDiffFile('swift', a, b, 'x.swift')).semanticOperations;
+  } finally {
+    LANGUAGES.swift.holdBack = held;
+  }
+};
+const types = async (a: string, b: string) => (await rules(a, b)).map((o) => o.type);
+const shipped = async (a: string, b: string) => (await semanticDiffFile('swift', a, b, 'x.swift')).semanticOperations.map((o) => o.type);
 const fn = `    func label() -> String {\n        let r = radius\n        return "r=\\(r)"\n    }\n`;
 const other = `    func area() -> Double {\n        Double.pi * radius * radius\n    }\n`;
-const ops = async (a: string, b: string) => (await semanticDiffFile('swift', a, b, 'x.swift')).semanticOperations;
+const ops = rules;
 
 test('a function moved out of an #if DEBUG block is an edit; the whole block moved is a move', async () => {
   const big = `    func summary() -> String {\n        let a = area()\n        let d = radius * 2\n        let c = Double.pi * d\n        return "\\(a) \\(d) \\(c)"\n    }\n`;
@@ -65,4 +77,12 @@ test('a body re-indented into an #if branch or a constrained extension is not re
   const ext = `struct Circle<Unit> {\n    var radius: Double\n}\n\nextension Circle where Unit == Double {\n${body}}\n`;
   const before = `struct Circle<Unit> {\n    var radius: Double\n}\n\n${body.replace(/^    /gm, '')}`;
   assert.ok(!(await types(before, ext)).includes('reformatted'));
+});
+
+test('Swift v1 makes only reformatted claims: moves, renames, extracts and inlines are held back as plain edits', async () => {
+  assert.deepEqual([...(LANGUAGES.swift.holdBack ?? [])].sort(), ['extractedFunction', 'inlinedFunction', 'moved', 'movedWithEdit', 'renamed']);
+  const before = `struct Box {\n    var size: Int\n\n    func twice() -> Int {\n        self.size * 2\n    }\n\n    func plus(_ n: Int) -> Int {\n        size + n\n    }\n}\n`;
+  const t = await shipped(before, before.replaceAll('size', 'width'));
+  assert.ok(!t.includes('renamed') && t.length > 0 && t.every((x) => x === 'edited' || x === 'added' || x === 'deleted'), t.join());
+  assert.deepEqual(await shipped(before, before.replace('        size + n', '            size + n')), ['reformatted']);
 });
