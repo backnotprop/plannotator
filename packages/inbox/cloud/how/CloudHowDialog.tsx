@@ -41,9 +41,9 @@ const PANELS: Panel[] = [
   {
     id: 'limits',
     picture: <HowLimits />,
-    seen: 'The agent sees the threads it started, was sent or was tagged in, not your other threads. It cannot answer your questions, approve anything, run anything on your computer or open your files.',
-    title: 'It sees only its own threads',
-    line: 'Threads it started, you sent it, or tagged it in. It reads and posts there, always under its own name.',
+    seen: 'The agent sees every thread: its own, other agents’ and those in other projects. It cannot answer your questions, approve anything, run anything on your computer or open your files.',
+    title: 'It works across your whole Inbox',
+    line: 'Any thread in any project: it reads, searches and posts there, always under its own name.',
   },
   {
     id: 'replies',
