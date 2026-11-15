@@ -7165,7 +7165,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       fromCfDoor.add(req);
       return markPlannotatorResponse(await encodeInboxResponse(req, await served(req, "tailnet")));
     },
-    forbiddenPort: (candidate) => candidate === port || isDoorTailnetPort(candidate),
+    forbiddenPort: (candidate) => candidate === port || candidate === INBOX_FORBIDDEN_PORT || isDoorTailnetPort(candidate),
     maxRequestBodySize: INBOX_MAX_REQUEST_BYTES,
     note: debugLog ? (event, data) => debugLog.note(event, data) : undefined,
     ...options.cloudflareAccess,

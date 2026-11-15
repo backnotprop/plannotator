@@ -28,7 +28,7 @@ export interface CfAccessSettings {
   aud: string;
   allow: string[];
   host: string;
-  sessionHost: string;
+  sessionHost: string | null;
   port: number;
 }
 
@@ -85,8 +85,8 @@ export function parseCfAccessSettings(stored: CfAccessStored, forbiddenPort: (po
   if (allow.length === 0 || !allow.every(isEmailAddress)) return { error: "The allowlist must name at least one e-mail address." };
   const host = typeof stored.host === "string" ? stored.host.trim().toLowerCase().replace(/\.$/, "") : "";
   if (!isPublicDnsName(host)) return { error: "The hostname must be a public name like inbox.example.com." };
-  const sessionHost = typeof stored.sessionHost === "string" ? stored.sessionHost.trim().toLowerCase().replace(/\.$/, "") : "";
-  if (!isPublicDnsName(sessionHost) || sessionHost === host) return { error: "The sessions' hostname must be a public name of its own; run setup again." };
+  const sessionHost = typeof stored.sessionHost === "string" && stored.sessionHost.trim() !== "" ? stored.sessionHost.trim().toLowerCase().replace(/\.$/, "") : null;
+  if (sessionHost !== null && (!isPublicDnsName(sessionHost) || sessionHost === host)) return { error: "The sessions' hostname must be a public name of its own; run setup again." };
   const port = typeof stored.port === "number" ? stored.port : NaN;
   if (!Number.isInteger(port) || port < 1024 || port > 65535) return { error: "The listener port must be from 1024 to 65535." };
   if (forbiddenPort(port)) return { error: `Port ${port} is kept for the Inbox's own use.` };

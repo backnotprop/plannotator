@@ -137,7 +137,7 @@ export function createCfAccessVerifier(settings: CfAccessSettings, options: CfAc
     if (!isTime(claims.exp) || claims.exp <= seconds - CF_ACCESS_CLOCK_SKEW_S) return invalid();
     if (claims.nbf !== undefined && (!isTime(claims.nbf) || claims.nbf > seconds + CF_ACCESS_CLOCK_SKEW_S)) return invalid();
     if (claims.iat !== undefined && (!isTime(claims.iat) || claims.iat > seconds + CF_ACCESS_CLOCK_SKEW_S)) return invalid();
-    if (claims.common_name !== undefined && claims.common_name !== "") return notAPerson();
+    if (typeof claims.common_name === "string" && claims.common_name !== "") return notAPerson();
     if (typeof claims.email !== "string" || claims.email.trim() === "") return notAPerson();
     const email = normalizeCfAccessEmail(claims.email);
     if (!settings.allow.includes(email)) return notAPerson();
@@ -146,7 +146,7 @@ export function createCfAccessVerifier(settings: CfAccessSettings, options: CfAc
 
   const check = async (method: string, path: string, headers: Headers): Promise<CfAccessCheck> => {
     const host = headers.get("host");
-    const world = isCfAccessHost(host, settings.host) ? "inbox" : isCfAccessHost(host, settings.sessionHost) ? "sessions" : null;
+    const world = isCfAccessHost(host, settings.host) ? "inbox" : settings.sessionHost && isCfAccessHost(host, settings.sessionHost) ? "sessions" : null;
     if (!world) return refuse("forbidden_host", "This address answers only its public hostname.");
     const token = headers.get(CF_ACCESS_JWT_HEADER)?.trim();
     if (!token) return refuse("access_token_required", "This address answers only requests through Cloudflare Access.");

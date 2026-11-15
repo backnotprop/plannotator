@@ -32,7 +32,7 @@ export interface InboxCfAccessContext {
 }
 
 const HEADERS = { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" };
-const HOP_BY_HOP = new Set(["connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailer", "transfer-encoding", "upgrade", "content-length"]);
+const HOP_BY_HOP = new Set(["connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailer", "transfer-encoding", "upgrade"]);
 
 function refusal(path: string, status: number, code: string, message: string): Response {
   if (path.includes("/api/") || path === "/mcp") {
@@ -101,7 +101,7 @@ async function proxyToSession(req: Request, session: DoorSession, path: string, 
   if (req.headers.get("upgrade")) return refusal(path, 501, "upgrade_unsupported", "Live connections are not relayed through Cloudflare Access.");
   const base = `/s/${session.key}`;
   const headers = scrubDoorHeaders(req.headers);
-  headers.set("host", settings.sessionHost);
+  headers.set("host", settings.sessionHost!);
   headers.set(DOOR_SECRET_HEADER, session.secret);
   const document = wantsDocument(req, path);
   if (document) headers.set("accept-encoding", "identity");
@@ -116,11 +116,12 @@ async function proxyToSession(req: Request, session: DoorSession, path: string, 
     if (!HOP_BY_HOP.has(name.toLowerCase())) out.append(name, value);
   });
   const location = out.get("location");
-  if (location) out.set("location", doorLocation(location, session.port, base, settings.sessionHost));
+  if (location) out.set("location", doorLocation(location, session.port, base, settings.sessionHost!));
   const type = out.get("content-type") ?? "";
   if (document && /^text\/html/i.test(type) && !out.get("content-encoding") && req.method !== "HEAD") {
     const html = injectDoorBase(await upstream.text(), base);
     out.delete("etag");
+    out.delete("content-length");
     return new Response(html, { status: upstream.status, headers: out });
   }
   return new Response(req.method === "HEAD" ? null : upstream.body, { status: upstream.status, headers: out });
@@ -170,7 +171,7 @@ export function createInboxCfAccess(context: InboxCfAccessContext) {
     if (!checked.ok) return refusal(path, checked.status, checked.code, checked.message);
     const sessions = new Map<string, DoorSession>();
     const navigate = req.headers.get("sec-fetch-mode")?.toLowerCase() === "navigate";
-    const route = pickDoorRoute(checked.world, path, req.headers.get("referer"), active.sessionHost, (key) => {
+    const route = pickDoorRoute(checked.world, path, req.headers.get("referer"), active.sessionHost ?? "", (key) => {
       const found = live(key);
       if (found) sessions.set(key, found);
       return found !== null;
@@ -241,7 +242,7 @@ export function createInboxCfAccess(context: InboxCfAccessContext) {
     on: state.on,
     configured: state.configured,
     url: state.url,
-    sessionsUrl: settings && state.url ? `https://${settings.sessionHost}/` : null,
+    sessionsUrl: settings?.sessionHost && state.url ? `https://${settings.sessionHost}/` : null,
     error: state.error,
     port: listener ? (listener.port as number) : null,
     allowed: settings ? [...settings.allow] : [],

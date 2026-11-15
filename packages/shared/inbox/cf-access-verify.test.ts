@@ -78,6 +78,14 @@ describe("the Access check chain", () => {
     });
   }
 
+  test("last week's one-name setup: the Inbox's name passes, no other name does", async () => {
+    const v = createCfAccessVerifier({ ...settings, sessionHost: null }, { now: () => NOW, fetchKeys: async () => keys.jwks });
+    const token = await keys.sign(ownerClaims(nowS, { common_name: null }));
+    expect((await v.check("GET", "/", headers(token))).ok).toBe(true);
+    const sibling = await v.check("GET", "/s/abcdefghijklmnopqrstuv/", headers(token, { host: TEST_SESSION_HOST }));
+    expect(sibling.ok === false && sibling.code).toBe("forbidden_host");
+  });
+
   test("Host decides the world; the two names are other sites to each other", async () => {
     const { v } = verifier();
     const token = await keys.sign(ownerClaims(nowS));
@@ -143,10 +151,11 @@ describe("settings", () => {
     expect(resolveCfAccess({ inboxCloudflareAccess: full }, { PLANNOTATOR_INBOX_CF_ACCESS: "0" }).on).toBe(false);
     expect(resolveCfAccess({ inboxCloudflareAccess: { ...full, on: false } }, { PLANNOTATOR_INBOX_CF_ACCESS: "1" }).on).toBe(false);
     expect(resolveCfAccess({ inboxCloudflareAccess: full }, {}).settings?.host).toBe(TEST_HOST);
-    for (const broken of [{ allow: [] }, { allow: ["not-an-email"] }, { aud: "" }, { team: "evil.example.com" }, { host: "127.0.0.1" }, { host: "localhost" }, { port: 80 }, { sessionHost: TEST_HOST }, { sessionHost: undefined }]) {
+    for (const broken of [{ allow: [] }, { allow: ["not-an-email"] }, { aud: "" }, { team: "evil.example.com" }, { host: "127.0.0.1" }, { host: "localhost" }, { port: 80 }, { sessionHost: TEST_HOST }]) {
       const resolved = resolveCfAccess({ inboxCloudflareAccess: { ...full, ...broken } }, {});
       expect(resolved.on && resolved.settings === null && typeof resolved.error).toBe("string");
     }
     expect(resolveCfAccess({ inboxCloudflareAccess: full }, {}, (p) => p === 41234).error).toContain("41234");
+    expect(resolveCfAccess({ inboxCloudflareAccess: { ...full, sessionHost: undefined } }, {}).settings).toMatchObject({ host: TEST_HOST, sessionHost: null });
   });
 });

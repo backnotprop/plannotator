@@ -730,6 +730,8 @@ async function handleCloudflareAccessReady(port: number): Promise<void> {
   if (!resolved.configured) return failStartup("Cloudflare Access is not set up: run plannotator inbox cloudflare-access setup.");
   if (!resolved.on) return failStartup("Cloudflare Access is turned off (PLANNOTATOR_INBOX_CF_ACCESS).");
   if (!resolved.settings) return failStartup(`Cloudflare Access: ${resolved.error}`);
+  if (!resolved.settings.sessionHost) return failStartup("Cloudflare Access is set up for the Inbox only: sessions need the sessions' address that plannotator inbox cloudflare-access setup creates.");
+  const sessionHost = resolved.settings.sessionHost;
   const dataDir = getPlannotatorDataDir();
   let entry: Awaited<ReturnType<typeof ensureInboxRunning>>;
   try {
@@ -738,7 +740,7 @@ async function handleCloudflareAccessReady(port: number): Promise<void> {
     return failStartup(`Cloudflare Access is served by the Inbox, and it could not start: ${error instanceof Error ? error.message : String(error)}`);
   }
   if (!entry.cloudflare_access?.url) return failStartup(`Cloudflare Access is not open in the running Inbox${entry.cloudflare_access?.error ? `: ${entry.cloudflare_access.error}` : "; restart it with plannotator inbox restart"}.`);
-  const { url } = openSessionDoor(dataDir, port, resolved.settings.sessionHost);
+  const { url } = openSessionDoor(dataDir, port, sessionHost);
   setServerReadyTailnet({ ask: resolveAIEnabled() && takeEnvPullSessionBridgeConfig() !== undefined });
   await announceTailscaleSession(url, port, CF_ACCESS_SESSION_LINE);
 }
