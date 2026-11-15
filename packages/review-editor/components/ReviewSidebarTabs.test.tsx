@@ -75,4 +75,23 @@ describe.skipIf(!hasDom)('Comments, AI and Agents as tabs in the right panel', (
     expect(tab(el, 'annotations').textContent).toBe('Comments3');
     expect(tab(el, 'ai').querySelector('[aria-label="New activity"]')).not.toBeNull();
   });
+
+  test('a row with tabs hidden past its edge fades that edge, and every tab keeps a 24 px hit area', async () => {
+    const realScroll = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollWidth');
+    const realClient = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth');
+    Object.defineProperty(HTMLElement.prototype, 'scrollWidth', { configurable: true, get() { return this.getAttribute?.('role') === 'tablist' ? 400 : 0; } });
+    Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get() { return this.getAttribute?.('role') === 'tablist' ? 240 : 0; } });
+    try {
+      const el = await mount(<Harness />);
+      const list = el.querySelector<HTMLElement>('[role="tablist"]')!;
+      expect(list.hasAttribute('data-hidden-end')).toBe(true);
+      expect(list.hasAttribute('data-hidden-start')).toBe(false);
+      expect(list.style.maskImage || list.style.getPropertyValue('mask-image')).toContain('transparent');
+      expect(tab(el, 'ai').className).toContain('min-w-6');
+    } finally {
+      if (realScroll) Object.defineProperty(HTMLElement.prototype, 'scrollWidth', realScroll);
+      if (realClient) Object.defineProperty(HTMLElement.prototype, 'clientWidth', realClient);
+    }
+  });
 });
+

@@ -1,4 +1,4 @@
-import React, { useLayoutEffect, useRef } from 'react';
+import React, { useLayoutEffect, useRef, useState } from 'react';
 import type { ReviewSidebarTab } from './ReviewSidebar';
 
 export interface ReviewSidebarTabItem {
@@ -12,12 +12,39 @@ export interface ReviewSidebarTabItem {
 const TAB_ID = (id: ReviewSidebarTab) => `review-sidebar-tab-${id}`;
 export const REVIEW_SIDEBAR_BODY_ID = 'review-sidebar-body';
 
+const FADE = '24px';
+
+function fadeMask({ start, end }: { start: boolean; end: boolean }): React.CSSProperties | undefined {
+  if (!start && !end) return undefined;
+  const mask = `linear-gradient(to right, ${start ? `transparent, #000 ${FADE}` : '#000, #000'}, ${end ? `#000 calc(100% - ${FADE}), transparent` : '#000'})`;
+  return { maskImage: mask, WebkitMaskImage: mask };
+}
+
 export const ReviewSidebarTabs: React.FC<{
   tabs: ReviewSidebarTabItem[];
   active: ReviewSidebarTab;
   onSelect: (tab: ReviewSidebarTab) => void;
 }> = ({ tabs, active, onSelect }) => {
   const listRef = useRef<HTMLDivElement>(null);
+  const [hidden, setHidden] = useState({ start: false, end: false });
+
+  useLayoutEffect(() => {
+    const list = listRef.current;
+    if (!list) return;
+    const update = () => {
+      const start = list.scrollLeft > 1;
+      const end = list.scrollLeft + list.clientWidth < list.scrollWidth - 1;
+      setHidden((before) => (before.start === start && before.end === end ? before : { start, end }));
+    };
+    update();
+    list.addEventListener('scroll', update, { passive: true });
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(update);
+    observer?.observe(list);
+    return () => {
+      list.removeEventListener('scroll', update);
+      observer?.disconnect();
+    };
+  }, [tabs.length]);
 
   useLayoutEffect(() => {
     const list = listRef.current;
@@ -41,7 +68,7 @@ export const ReviewSidebarTabs: React.FC<{
   };
 
   return (
-    <div ref={listRef} role="tablist" aria-label="Review panel" className="flex h-full min-w-0 flex-1 items-stretch gap-4 overflow-x-auto overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" onKeyDown={onKeyDown} data-review-sidebar-tablist="">
+    <div ref={listRef} role="tablist" aria-label="Review panel" className="flex h-full min-w-0 flex-1 items-stretch gap-2 overflow-x-auto overflow-y-hidden [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" style={fadeMask(hidden)} onKeyDown={onKeyDown} data-review-sidebar-tablist="" data-hidden-start={hidden.start || undefined} data-hidden-end={hidden.end || undefined}>
       {tabs.map((tab) => {
         const selected = tab.id === active;
         return (
@@ -57,7 +84,7 @@ export const ReviewSidebarTabs: React.FC<{
             title={tab.title}
             aria-label={tab.title ? (tab.count ? `${tab.title}, ${tab.count}` : tab.title) : undefined}
             onClick={() => onSelect(tab.id)}
-            className={`relative flex flex-none items-center gap-1.5 text-[13px] font-medium whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 rounded-sm ${
+            className={`relative flex min-w-6 flex-none items-center justify-center gap-1.5 px-1 text-[13px] font-medium whitespace-nowrap transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 rounded-sm ${
               selected ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'
             }`}
           >

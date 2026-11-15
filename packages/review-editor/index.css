@@ -2524,3 +2524,7 @@ html:has([data-pn-compact-touch-layout='true']) [data-menu-version] a {
   display: inline-flex;
   align-items: center;
 }
+
+html:has([data-pn-compact-touch-layout='true']) [data-review-sidebar-tab] {
+  min-width: var(--pn-touch-target);
+}
