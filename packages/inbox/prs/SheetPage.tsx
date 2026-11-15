@@ -33,7 +33,7 @@ import { ChecksMark, checksLabel } from './ChecksMark';
 import { BoxMark, boxState, SelectBox } from './SelectBox';
 import { cantMergeLine, confirmWords, mergeHint, mergePlan, notMergedLine, refusedLine, type MergePlan } from './bulkMerge';
 import { CLOSE_UNDO_MS, doneLine, runningWords, toastLead, type BulkVerb, type RunOutcome } from './bulkClose';
-import { ALREADY_LEAD, alreadyPart, groupPart, notStartedLine, reviewPlan, startButtonWords, startedLead, startedToast, startingWords, stoppedToast, untiedLine, type ReviewReport } from './bulkReview';
+import { ALREADY_HEADING, ALREADY_LEAD, alreadyPart, groupPart, notStartedLine, reviewPlan, startButtonWords, startedHeading, startedLead, startedToast, startingWords, stoppedToast, untiedLine, type ReviewReport } from './bulkReview';
 import { startReview } from './startReviews';
 import type { InboxToastModel } from '../components/Toast';
 import { SheetTable, type TableSection } from './SheetTable';
@@ -735,6 +735,20 @@ export function SheetPage(props: SheetPageProps) {
       <span key={key}>{words}</span>
     );
   const commas = (parts: ReactNode[]) => parts.flatMap((part, i) => (i > 0 ? [', ', part] : [part]));
+  // A phone gives each thread its own 44 px row under its heading: links in a wrapped sentence leave ragged gaps.
+  const reportLinks = (kind: 'started' | 'already', heading: string, lead: string, links: { id: string; words: string; key: string }[], end = '') =>
+    phone
+      ? [
+          <li key={kind} data-pr-review-row={kind}>{heading}</li>,
+          ...links.map((l) => <li key={l.key} data-pr-review-row={`${kind}-thread`}>{threadLink(l.id, l.words, l.key)}</li>),
+        ]
+      : (
+          <li key={kind} data-pr-review-row={kind}>
+            {lead}
+            {commas(links.map((l) => threadLink(l.id, l.words, l.key)))}
+            {end}
+          </li>
+        );
   const hint = live.at === 'confirm' ? confirmWords(plan.merge.length, phone) : live.at === 'idle' ? mergeHint(plan) : null;
   const mergeNote = hint && (
     <span className="ib-prs-mnote" id={live.at === 'confirm' ? confirmId : undefined} data-pr-merge-hint="">
@@ -760,19 +774,22 @@ export function SheetPage(props: SheetPageProps) {
         ))}
       </ul>
     ) : live.at === 'reviewed' ? (
-      <ul className="ib-prs-mlist" role="status" data-pr-review-report="">
-        {live.report.started.length > 0 && (
-          <li data-pr-review-row="started">
-            {startedLead(live.report.started.length)}
-            {commas(live.report.started.map(({ group, threadId }) => threadLink(threadId, groupPart(group), group.key)))}
-          </li>
-        )}
-        {live.report.already.length > 0 && (
-          <li data-pr-review-row="already">
-            {ALREADY_LEAD}
-            {commas(live.report.already.map((a) => threadLink(a.threadId, alreadyPart(a), a.pull.key)))}.
-          </li>
-        )}
+      <ul className="ib-prs-mlist" role="status" data-pr-review-report={phone ? 'rows' : ''}>
+        {live.report.started.length > 0 &&
+          reportLinks(
+            'started',
+            startedHeading(live.report.started.length),
+            startedLead(live.report.started.length),
+            live.report.started.map(({ group, threadId }) => ({ id: threadId, words: groupPart(group), key: group.key })),
+          )}
+        {live.report.already.length > 0 &&
+          reportLinks(
+            'already',
+            ALREADY_HEADING,
+            ALREADY_LEAD,
+            live.report.already.map((a) => ({ id: a.threadId, words: alreadyPart(a), key: a.pull.key })),
+            '.',
+          )}
         {live.report.started.map(({ group, untied }) =>
           untied ? (
             <li key={group.key} className="ib-prs-mbad" data-pr-review-row="untied">

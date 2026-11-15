@@ -95,9 +95,14 @@ export function startingWords(done: number, total: number): string {
   return `Starting ${done} of ${total}…`;
 }
 
+/** "Started 2 reviews": a phone's heading row over its threads' rows. */
+export function startedHeading(count: number): string {
+  return `Started ${count} ${count === 1 ? 'review' : 'reviews'}`;
+}
+
 /** "Started 2 reviews: " before each thread's part. */
 export function startedLead(count: number): string {
-  return `Started ${count} ${count === 1 ? 'review' : 'reviews'}: `;
+  return `${startedHeading(count)}: `;
 }
 
 /** A started thread's part, its link: "ledger (3 PRs)", GitLab's "web (1 MR)". */
@@ -107,7 +112,8 @@ export function groupPart(group: Pick<ReviewGroup, 'label' | 'pulls'>): string {
   return `${group.label} (${n} ${noun}${n === 1 ? '' : 's'})`;
 }
 
-export const ALREADY_LEAD = 'Already in review: ';
+export const ALREADY_HEADING = 'Already in review';
+export const ALREADY_LEAD = `${ALREADY_HEADING}: `;
 
 /** A pick that has its thread already, its link: "#1198 with Codex", or "#1198" when the thread's agent isn't known. */
 export function alreadyPart(already: ReviewAlready): string {
@@ -128,9 +134,7 @@ export function untiedLine(pulls: readonly InboxPull[], why: string): string {
 export const noAgentWhy = (label: string) => `no agent can start in ${label}.`;
 
 /** The toast after a run that started only new agents ("Started 2 reviews", with Stop), and after its Stop. */
-export function startedToast(count: number): string {
-  return `Started ${count} ${count === 1 ? 'review' : 'reviews'}`;
-}
+export const startedToast = startedHeading;
 export function stoppedToast(count: number): string {
   return `Stopped ${count}`;
 }

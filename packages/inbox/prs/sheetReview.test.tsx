@@ -5,6 +5,7 @@
  *  - a second review thread for a PR that has one, or for one started a moment ago before the list says so;
  *  - a linked machine's PRs started on this machine (its agents, its checkout), or held for an asleep machine;
  *  - a pick that could not start leaving the selection, or a report without its threads one click away;
+ *  - a phone's report as one wrapped sentence of 44 px links instead of a row per thread;
  *  - one PR's hand-off changing: its message and name stay today's `pullHandoffMessage` and `pullHandoffThreadName`;
  *  - an agent that is working given the review instead of a new one.
  *
@@ -228,6 +229,20 @@ test('a PR with a review thread is linked to it, never given a second; one start
   await start([key(7)], 'Start review thread');
   expect(messages()).toEqual([]);
   expect(row('already')).toEqual(['Already in review: #7.']);
+});
+
+test("a phone's report: a heading, then one row per thread, each its own link", async () => {
+  if (!hasDom) return;
+  const link: InboxPullLink = { via: 'owner', thread_id: 'msg_codex', thread_subject: null, project_id: 'prj_ledger', agent: { host: 'codex', session: 'ses_c', name: null }, last: null, guide: null };
+  const { opened } = draw({ phone: true, model: { ...MODEL, links: { [key(8)]: link } } });
+  await start([key(7), key(8), key(9), key(20, 'northwind/web')], 'Start 2 review threads');
+  expect(row('started')).toEqual(['Started 2 reviews']);
+  expect(row('started-thread')).toEqual(['ledger (2 PRs)', 'web (1 PR)']);
+  expect(row('already')).toEqual(['Already in review']);
+  expect(row('already-thread')).toEqual(['#8 with Codex']);
+  expect($$('[data-pr-review-row$="-thread"]').map((r) => r.querySelectorAll('[data-pr-thread-link]').length)).toEqual([1, 1, 1]);
+  click($('[data-pr-review-row="already-thread"] [data-pr-thread-link]')!);
+  expect(opened).toEqual(['msg_codex']);
 });
 
 test("two repositories on two machines: the Mac mini's PRs start there, to its free agent, never to one that is working", async () => {
