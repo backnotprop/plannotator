@@ -3,8 +3,8 @@
  * swipe"; the mock is not in this repo). A touch tablet is a touch screen (phone.ts `TOUCH_QUERY`: a coarse pointer
  * without hover) that does not have the phone layout: an iPad in either orientation. There the stepper under the open
  * file has finger-sized ‹ › at its two ends (touchStepBar.css), beside the thread and in full screen, and the phone's
- * swipe steps on the file (fileSwipe.ts) with the window's left edge left to the browser's Back. A mouse and a phone
- * keep what they had.
+ * swipe steps on the file (fileSwipe.ts) with the window's left and right edges left to Safari's Back and Forward. A
+ * mouse and a phone keep what they had.
  *
  * The bar hides while the on-screen keyboard is up (it would sit under it), and comes back when it goes down.
  */

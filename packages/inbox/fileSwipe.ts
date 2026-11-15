@@ -39,7 +39,7 @@
 import { useEffect, useRef } from 'react';
 import type { InboxAttachmentKind } from '@plannotator/core/inbox-types';
 import { usePhone } from './phone';
-import { SWIPE_ROW_EDGE_PX } from './rowSwipe';
+import { startsAtEdge } from './rowSwipe';
 import { useTouchTablet } from './touchStepBar';
 import { sidewaysOwner as uiSidewaysOwner, useSwipeStep, type SwipeDir, type SwipeStep, type SwipeStepOptions } from '@plannotator/ui/hooks/useSwipeStep';
 
@@ -111,9 +111,9 @@ export function sidewaysOwner(path: readonly EventTarget[], dir: SwipeDir): 'own
 
 /**
  * The pane's swipe on its `.ib-docarea` (ui's `useSwipeStep`, the diagram canvas keeping its touches). On a touch
- * tablet (touchStepBar.ts) a touch that starts within `SWIPE_ROW_EDGE_PX` of the window's left side is the browser's
- * Back (the owner's condition, approval "inbox-touch-file-stepping"): the swipe never moves or cancels it. The right
- * side steps. A phone's swipe has no edge (approval "mobile-file-stepping").
+ * tablet (touchStepBar.ts) a touch that starts at the window's left or right side (rowSwipe.ts `startsAtEdge`, 24 px)
+ * is Safari's Back or Forward (the owner's condition, approval "inbox-touch-file-stepping"): the swipe never moves or
+ * cancels it. A phone's swipe has no edge (approval "mobile-file-stepping").
  */
 export function useFileSwipe(area: Parameters<typeof useSwipeStep>[0], options: FileSwipeOptions): FileSwipe {
   const backEdge = useTouchTablet(usePhone());
@@ -123,7 +123,7 @@ export function useFileSwipe(area: Parameters<typeof useSwipeStep>[0], options: 
     if (!el || !backEdge || !options.enabled) return;
     const onStart = (event: TouchEvent) => {
       const touch = event.touches[0];
-      fromEdge.current = event.touches.length === 1 && !!touch && touch.clientX < SWIPE_ROW_EDGE_PX;
+      fromEdge.current = event.touches.length === 1 && !!touch && startsAtEdge(touch.clientX, window.innerWidth);
     };
     el.addEventListener('touchstart', onStart, { passive: true, capture: true });
     return () => {

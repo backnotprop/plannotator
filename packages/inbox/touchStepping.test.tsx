@@ -14,13 +14,15 @@
 import { afterEach, beforeAll, expect, test } from 'bun:test';
 import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import type { InboxAttachmentState, InboxMessageWire } from '@plannotator/core/inbox-types';
+import type { InboxAttachmentState, InboxMessageWire, InboxProject, InboxThread } from '@plannotator/core/inbox-types';
+import { fileEntryOp } from './fullScreenOrigin';
 import { attachmentSequence, LAST_NOTE, FIRST_NOTE, type AttachmentStep } from './stepping';
 import { PHONE_QUERY, TOUCH_QUERY } from './phone';
 import { keyboardCovers } from './touchStepBar';
 
 const hasDom = typeof document !== 'undefined';
 const { AttachmentPane } = (hasDom ? await import('./components/AttachmentPane') : {}) as typeof import('./components/AttachmentPane');
+const { ThreadPane } = (hasDom ? await import('./components/Thread') : {}) as typeof import('./components/Thread');
 
 let root: Root | null = null;
 let host: HTMLElement | null = null;
@@ -256,7 +258,7 @@ test.skipIf(!hasDom)('‹ › step in the thread\'s order and stop at the ends w
   expect(opened).toEqual([plan.id, page.id, spec.id, page.id]);
 });
 
-test.skipIf(!hasDom)('a swipe that starts within the left edge is the browser\'s: never moved, never cancelled, no step; from the middle or the right edge it steps', async () => {
+test.skipIf(!hasDom)('a swipe that starts within either side edge is Safari\'s Back or Forward: never moved, never cancelled, no step; from the middle it steps', async () => {
   stubViews();
   const opened = await render(plan);
   sized(area());
@@ -264,12 +266,15 @@ test.skipIf(!hasDom)('a swipe that starts within the left edge is the browser\'s
   expect(await swipe(area(), 10, 300)).toBe(false);
   expect(opened).toEqual([]);
   expect(area().style.transform).toBe('');
-  // The same swipe from the middle steps back.
+  // Toward the next file (the finger moves left), from 10 px inside the right side: Safari's Forward.
+  expect(await swipe(area(), window.innerWidth - 10, -300)).toBe(false);
+  expect(opened).toEqual([]);
+  expect(area().style.transform).toBe('');
+  // The same swipes from the middle step.
   expect(await swipe(area(), 300, 300)).toBe(true);
   expect(opened).toEqual([notes.id]);
-  // From the right edge, toward the next file: it steps.
   sized(area());
-  await swipe(area(), 815, -300);
+  expect(await swipe(area(), 500, -300)).toBe(true);
   expect(opened).toEqual([notes.id, plan.id]);
 });
 
@@ -332,4 +337,49 @@ test.skipIf(!hasDom)('the bar hides while the on-screen keyboard is up and comes
   } finally {
     delete (document.documentElement as { clientHeight?: number }).clientHeight;
   }
+});
+
+test.skipIf(!hasDom)('a step from the touch bar replaces the history entry (never pushes one), so Back after any number of steps closes the file', async () => {
+  device('tablet');
+  const PROJECT: InboxProject = { id: 'prj_01M4H6G73M9H3Z32T859E72DPZ', key: 'shop-abcdef', name: 'shop', root: '/work/shop', created_at: '2026-10-10T10:00:00.000Z' };
+  const files = [notes, plan, spec].map((f) => ({ ...f, message_id: M1, media_type: 'text/markdown' }));
+  const thread: InboxThread = {
+    thread_id: M1,
+    project: PROJECT,
+    subject: 'Shop notes',
+    thread_name: null,
+    resolved_at: null,
+    messages: [
+      { ...message(M1, '2026-10-10T10:42:00.000Z'), project_id: PROJECT.id, thread_id: M1, reply_to: null, subject: 'Shop notes', body: 'Three files.', resolved_at: null, idempotency_key: null, attachments: files } as InboxMessageWire,
+    ],
+  };
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const path = String(input);
+    if (path.includes('/attachments') && !path.includes('/attachments/')) return Response.json({ serverSession: 's', attachments: files, annotations: [] });
+    if (path.includes('/artifact-pins')) return Response.json({ pins: [] });
+    if (path.includes('/sessions')) return Response.json({ serverSession: 's', home: '/home/me', project: PROJECT, sessions: [] });
+    const att = files.find((a) => path.includes(a.id));
+    if (att && path.includes('/view')) return Response.json({ attachment: att, version: 'current', text: `# ${att.name}\n`, html: null });
+    return Response.json({});
+  }) as typeof fetch;
+  const calls: { id: string | undefined; options: { move?: string; replace?: boolean; back?: boolean } | undefined }[] = [];
+  host = document.createElement('div');
+  host.className = 'pn-inbox';
+  document.body.appendChild(host);
+  const at = { id: files[0]!.id, version: 'current' as const, focus: null, view: 'full' as const };
+  await act(async () => {
+    root = createRoot(host!);
+    root.render(
+      <ThreadPane thread={thread} sent={null} onQuestions={() => {}} onChanged={async () => {}} onClose={() => {}} file={at} onOpenFile={(file, options) => calls.push({ id: file?.id, options })} onOpenGuide={() => {}} />,
+    );
+  });
+  await settle(120);
+  expect(bar()!.getAttribute('data-touch-bar')).toBe('shown');
+  await act(async () => next().click());
+  await settle();
+  expect(calls.at(-1)!.id).toBe(files[1]!.id);
+  expect(calls.at(-1)!.options).toEqual({ replace: true });
+  // What the window does with that request (App.tsx `onOpenFile`): it swaps the entry on screen, keeping its full-screen mark.
+  const now = { hash: `#thread=${M1}&file=${files[0]!.id}&view=full`, state: null };
+  expect(fileEntryOp(now, `#thread=${M1}&file=${files[1]!.id}&view=full`, calls.at(-1)!.options as { replace?: boolean }).kind).toBe('replace');
 });
