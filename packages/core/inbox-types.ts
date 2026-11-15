@@ -3306,9 +3306,10 @@ export const INBOX_DRAFT_PASTED_LEAD_MAX = 2;
  * (approval "inbox-linked-marks"). The list says them (`marks`), so a linked machine offers a mark on this Inbox's
  * rows only once this Inbox takes it; an older Inbox says none. `cards`: its Board's cards are read through its door
  * and changed there, so a linked machine's Board lists them. `pulls`: its PR board is read through its door, and a
- * PR it lists is closed, reopened or merged there, with its own gh / glab.
+ * PR it lists is closed, reopened or merged there, with its own gh / glab. `file-refs`: a file its agents' messages
+ * name is read through its door, and attached to that message there when the person comments on it.
  */
-export const INBOX_LINKED_MARKS = ["star", "priority", "agent-face", "agent-name", "take-back", "tags", "cards", "pulls", "tag-colours"] as const;
+export const INBOX_LINKED_MARKS = ["star", "priority", "agent-face", "agent-name", "take-back", "tags", "cards", "pulls", "tag-colours", "file-refs"] as const;
 export type InboxLinkedMark = (typeof INBOX_LINKED_MARKS)[number];
 
 /**

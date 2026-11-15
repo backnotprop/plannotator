@@ -10,6 +10,9 @@ import { isCodeFilePath } from "@plannotator/core/code-file";
  *   click (Cmd/Ctrl/Shift, middle button), drag and copy use it: a host's
  *   own address for the same thing. Without it, a modified click also calls
  *   `open` and the middle button does nothing.
+ *   `wrap`, when given (opt-in), draws the link inside it, without the
+ *   tooltip: a host's own hover for that path (its code, say). The link
+ *   still opens on a click; absent, the link is drawn exactly as before.
  * - `unavailable`: draw the link text as inert text with `title` as its
  *   tooltip: no href, so nothing is fetched or navigated. `wrap`, when given,
  *   draws that text instead, without the tooltip (a host's own hover for that
@@ -18,7 +21,7 @@ import { isCodeFilePath } from "@plannotator/core/code-file";
  * - `null` from the resolver: the renderer's default for that link.
  */
 export type LocalLinkResolution =
-  | { kind: "open"; open: () => void; title?: string; href?: string }
+  | { kind: "open"; open: () => void; title?: string; href?: string; wrap?: (link: ReactNode) => ReactNode }
   | {
       kind: "unavailable";
       title: string;
@@ -43,10 +46,28 @@ export const LocalLinkContext = createContext<LocalLinkResolver | null>(null);
 export type CodeSpanRenderer = (text: string, code: ReactNode) => ReactNode;
 export const CodeSpanContext = createContext<CodeSpanRenderer | null>(null);
 
-/** An inline code span as drawn (`children`), through the host's wrap when it names a code file. */
+/**
+ * Opt-in: which code spans a host's wrap is asked about. Absent, a span that names a code file (`isCodeFilePath`), as
+ * always; a host that opens any file (a picture, a page, a document) gives its own test.
+ */
+export const CodeSpanMatchContext = createContext<((text: string) => boolean) | null>(null);
+
+/**
+ * Opt-in: file paths written as plain words (outside code spans, links and code), as a host finds them. `find` gives
+ * each path's start and end in a run of words; `wrap` draws one (a focusable control, say). Absent, plain words stay
+ * plain words, exactly as always.
+ */
+export interface BarePathWrap {
+  find: (text: string) => readonly { start: number; end: number }[];
+  wrap: (text: string) => ReactNode;
+}
+export const BarePathContext = createContext<BarePathWrap | null>(null);
+
+/** An inline code span as drawn (`children`), through the host's wrap when it names a code file (or what the host's test takes). */
 export function CodeSpan({ text, children }: { text: string; children: ReactNode }) {
   const wrap = useContext(CodeSpanContext);
-  return <>{wrap && isCodeFilePath(text) ? wrap(text, children) : children}</>;
+  const match = useContext(CodeSpanMatchContext) ?? isCodeFilePath;
+  return <>{wrap && match(text) ? wrap(text, children) : children}</>;
 }
 
 export function useLocalLinkResolver(): LocalLinkResolver | null {

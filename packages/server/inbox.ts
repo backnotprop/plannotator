@@ -4857,6 +4857,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     localOnly,
     launcher: options.openInLauncher ?? systemOpenInLauncher(),
     home: options.openInHome,
+    doorOf: (req) => fromDeviceDoor.get(req) ?? null,
     codeReviewOn,
     shapeRoot: (id) => {
       const shape = shapeOn() ? shapes.store.get(id) : null;
