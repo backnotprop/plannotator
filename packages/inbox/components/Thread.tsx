@@ -1677,7 +1677,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   screenRef.current = onScreenChange;
   const paneCovered = covered || fileCovers || artifactsOn;
   showingRef.current = !paneCovered;
-  // The status and Cancel go under the cover with the box (the pane stays mounted): no mic goes on unseen, and what was said still lands.
+  // The status and Cancel go under the cover with the box (the pane stays mounted): a recording goes, nothing posted; a take being transcribed lands.
   useEffect(() => {
     if (paneCovered) coverVoice(voice.session);
   }, [paneCovered, voice.session]);
