@@ -1,7 +1,7 @@
 import { COMPACT_FILE_HEADER_HEIGHT } from '../utils/diffChromeMetrics';
 import { EllipsisName } from './EllipsisName';
 import { usePaneTabsInHeader } from '../workspace/paneContext';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useRef } from 'react';
 import { SemanticFileBadge } from './SemanticFileBadge';
 import { CallFlowFileBadge } from './CallFlowFileBadge';
 import { OpenInAppButton } from '@plannotator/ui/components/OpenInAppButton';
@@ -116,9 +116,15 @@ function countChanges(patch: string): { additions: number; deletions: number } {
 }
 
 /** Sticky file header with file path, Viewed toggle, Git Add, and Copy Diff button */
-const NARROW_ACTIONS_WIDTH = 360;
+const NARROW_HEADER_WIDTH = 560;
+const TIGHT_LABEL = '@max-[479px]/file-header:hidden';
+const NARROW_LABEL = '@max-[559px]/file-header:hidden';
+const TIGHT_PAD = 'gap-1 px-2 py-1 @max-[479px]/file-header:px-1.5';
+const ACTIONS_ROW = '@max-[359px]/file-header:hidden';
+const ACTIONS_MENU = 'hidden @max-[359px]/file-header:contents';
+const NARROW_PAD = 'gap-1 px-2 py-1 @max-[559px]/file-header:px-1.5';
 
-export const FileHeader: React.FC<FileHeaderProps> = ({
+const FileHeaderView: React.FC<FileHeaderProps> = ({
   filePath,
   patch,
   status,
@@ -150,7 +156,6 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
   openIn,
   keepsFolder = false,
 }) => {
-  const [headerWidth, setHeaderWidth] = useState<number>(0);
   const state = useReviewStateOptional();
   const isCompactTouchLayout = compactTouchLayout ?? state?.isCompactTouchLayout ?? false;
   const headerRef = useRef<HTMLDivElement>(null);
@@ -158,26 +163,11 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
   useRovingToolbar(headerRef, viewedKeyHint);
   const { directory, name } = splitFilePath(filePath);
   const paneTabs = usePaneTabsInHeader();
-  const isVeryTight = headerWidth > 0 && headerWidth < 480;
-  const menuActions = isCompactTouchLayout || (!readOnly && headerWidth > 0 && headerWidth < NARROW_ACTIONS_WIDTH);
-  const narrow = headerWidth > 0 && headerWidth < 560;
-
-  useEffect(() => {
-    if (!headerRef.current || typeof ResizeObserver === 'undefined') return;
-
-    const node = headerRef.current;
-    const observer = new ResizeObserver(([entry]) => {
-      setHeaderWidth(entry.contentRect.width);
-    });
-
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, []);
-
   const stageLabel = '';
   const commentLabel = '';
-  const foldActions = !!paneTabs && narrow && !readOnly;
-  const viewedLabel = isVeryTight || (paneTabs && narrow) ? '' : 'Viewed';
+  const foldsActions = !!paneTabs && !readOnly;
+  const foldedNow = () => foldsActions && (headerRef.current?.clientWidth ?? Infinity) < NARROW_HEADER_WIDTH;
+  const tightLabel = paneTabs ? NARROW_LABEL : TIGHT_LABEL;
   const { additions, deletions } = React.useMemo(() => countChanges(patch), [patch]);
 
   return (
@@ -193,8 +183,8 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
       {paneTabs ? (
         <div className="min-w-0 flex flex-1 self-stretch items-stretch gap-2" data-file-header-tabs="" data-roving-skip="">
           {paneTabs}
-          {status === 'renamed' && oldPath && !narrow && (
-            <span className="min-w-0 shrink-[1000] self-center max-w-[40%] truncate text-xs text-muted-foreground [font-variant-ligatures:no-contextual]" title={`Renamed from ${oldPath}`} data-file-header-renamed-from="">
+          {status === 'renamed' && oldPath && (
+            <span className="@max-[559px]/file-header:hidden min-w-0 shrink-[1000] self-center max-w-[40%] truncate text-xs text-muted-foreground [font-variant-ligatures:no-contextual]" title={`Renamed from ${oldPath}`} data-file-header-renamed-from="">
               from {splitFilePath(oldPath).name}
             </span>
           )}
@@ -208,13 +198,13 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
           >
             {/* Rename: dimmed old path → new path (diffshub treatment). Dropped
                 under tight widths — the icon + tooltip still carry it. */}
-            {status === 'renamed' && oldPath && !narrow && !isCompactTouchLayout && (
+            {status === 'renamed' && oldPath && !isCompactTouchLayout && (
               <>
-                <span className="min-w-0 overflow-hidden text-ellipsis text-muted-foreground/60">
+                <span className="@max-[559px]/file-header:hidden min-w-0 overflow-hidden text-ellipsis text-muted-foreground/60">
                   {oldPath}
                 </span>
                 <svg
-                  className="w-3 h-3 mx-1 flex-none text-muted-foreground/60"
+                  className="@max-[559px]/file-header:hidden w-3 h-3 mx-1 flex-none text-muted-foreground/60"
                   fill="none"
                   viewBox="0 0 24 24"
                   stroke="currentColor"
@@ -236,8 +226,8 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
               </span>
             ) : (
               <>
-                {directory && (!narrow || keepsFolder) && (
-                  <span data-file-header-folder={keepsFolder ? '' : undefined} className="min-w-0 shrink-[1000] overflow-hidden text-ellipsis whitespace-nowrap font-normal text-muted-foreground [direction:rtl]">
+                {directory && (
+                  <span data-file-header-folder={keepsFolder ? '' : undefined} className={`${keepsFolder ? '' : '@max-[559px]/file-header:hidden '}min-w-0 shrink-[1000] overflow-hidden text-ellipsis whitespace-nowrap font-normal text-muted-foreground [direction:rtl]`}>
                     <bdi>{directory}</bdi>
                   </span>
                 )}
@@ -264,13 +254,13 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
           )}
         </div>
       )}
-      {!menuActions && <div className={`flex flex-shrink-0 items-center pl-2 gap-1`}>
+      {!isCompactTouchLayout && <div className={`flex flex-shrink-0 items-center pl-2 gap-1 ${readOnly ? '' : ACTIONS_ROW}`}>
         {accessory}
-        {renderMarkdownView?.({ iconOnly: isVeryTight, touch: false })}
+        {renderMarkdownView?.({ iconOnly: false, touch: false })}
         {showViewedControl && onToggleViewed && (
           <button
             onClick={onToggleViewed}
-            className={`text-xs rounded transition-colors flex items-center ${viewedLabel ? 'gap-1 px-2 py-1' : 'px-1.5 py-1'} ${
+            className={`text-xs rounded transition-colors flex items-center ${paneTabs ? NARROW_PAD : TIGHT_PAD} ${
               isViewed
                 ? 'text-foreground hover:bg-muted'
                 : 'text-muted-foreground hover:text-foreground hover:bg-muted'
@@ -288,14 +278,14 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
                 <circle cx="12" cy="12" r="9" />
               </svg>
             )}
-            {viewedLabel && <span>{viewedLabel}</span>}
+            <span className={tightLabel}>Viewed</span>
           </button>
         )}
-        {showStageControl && canStage && onStage && !foldActions && (
+        {showStageControl && canStage && onStage && (
           <button
             onClick={onStage}
             disabled={isStaging}
-            className={`text-xs rounded transition-colors flex items-center ${stageLabel ? 'gap-1 px-2 py-1' : 'px-1.5 py-1'} ${
+            className={`${foldsActions ? NARROW_LABEL : ''} text-xs rounded transition-colors flex items-center ${stageLabel ? 'gap-1 px-2 py-1' : 'px-1.5 py-1'} ${
               isStaging
                 ? 'opacity-50 cursor-not-allowed text-muted-foreground'
                 : isStaged
@@ -327,14 +317,14 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
             {stageError}
           </span>
         )}
-        {onFileComment && !foldActions && (
+        {onFileComment && (
           <button
             ref={(el) => {
               fileCommentRef.current = el;
               fileCommentButtonRef?.(el);
             }}
             onClick={() => fileCommentRef.current && onFileComment(fileCommentRef.current)}
-            className={`text-xs rounded transition-colors flex items-center text-muted-foreground hover:text-foreground hover:bg-muted ${commentLabel ? 'gap-1 px-2 py-1' : 'px-1.5 py-1'}`}
+            className={`${foldsActions ? NARROW_LABEL : ''} text-xs rounded transition-colors flex items-center text-muted-foreground hover:text-foreground hover:bg-muted ${commentLabel ? 'gap-1 px-2 py-1' : 'px-1.5 py-1'}`}
             title="Add file-scoped comment"
             aria-label="Comment on this file"
           >
@@ -345,7 +335,7 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
           </button>
         )}
         <CallFlowFileBadge filePath={filePath} oldPath={oldPath} />
-        {!isVeryTight && semanticNote}
+        {semanticNote && <span className={`contents ${TIGHT_LABEL}`}>{semanticNote}</span>}
         <SemanticFileBadge filePath={filePath} />
         {/* Edit entry lives at the far right of the row, next to the file
             actions dropdown, so the experimental affordance stays out of the
@@ -357,7 +347,7 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
               if (!editDisabledReason) onEditFile();
             }}
             disabled={!!editDisabledReason}
-            className={`text-xs rounded transition-colors flex items-center ${isVeryTight ? 'px-1.5 py-1' : 'gap-1 px-2 py-1'} ${
+            className={`text-xs rounded transition-colors flex items-center ${TIGHT_PAD} ${
               editDisabledReason
                 ? 'opacity-50 cursor-not-allowed text-muted-foreground'
                 : 'text-muted-foreground hover:text-foreground hover:bg-muted'
@@ -368,7 +358,7 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
             </svg>
-            {!isVeryTight && <span>Edit</span>}
+            <span className={TIGHT_LABEL}>Edit</span>
           </button>
         )}
         {/* File actions: open in app (when the live checkout matches this
@@ -379,9 +369,9 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
         {openIn}
         {!readOnly && <OpenInAppButton
           quiet
-          extraItems={[
-            ...(foldActions && showStageControl && canStage && onStage ? [{ label: isStaged ? 'Unstage this file' : 'Stage this file', onSelect: onStage }] : []),
-            ...(foldActions && onFileComment ? [{ label: 'Comment on this file', onSelect: () => headerRef.current && onFileComment(headerRef.current) }] : []),
+          extraItems={() => [
+            ...(foldedNow() && showStageControl && canStage && onStage ? [{ label: isStaged ? 'Unstage this file' : 'Stage this file', onSelect: onStage }] : []),
+            ...(foldedNow() && onFileComment ? [{ label: 'Comment on this file', onSelect: () => headerRef.current && onFileComment(headerRef.current) }] : []),
             ...(state?.onOpenToSide ? [{ label: 'Open to the side', onSelect: () => state.onOpenToSide!(filePath), icon: <OpenToSideIcon /> }] : []),
           ]}
           filePath={filePath}
@@ -394,7 +384,9 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
           }
         />}
       </div>}
-      {menuActions && (readOnly ? renderMarkdownView?.({ iconOnly: false, touch: true }) : (
+      {isCompactTouchLayout && readOnly && renderMarkdownView?.({ iconOnly: false, touch: true })}
+      {!readOnly && (
+        <div className={isCompactTouchLayout ? 'contents' : ACTIONS_MENU}>
         <CompactFileActions
           filePath={filePath}
           patch={patch}
@@ -407,7 +399,8 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
           stage={showStageControl && canStage && onStage ? { isStaged, isStaging, onStage } : null}
           onEdit={onEditFile && !isEditing && !editDisabledReason ? onEditFile : undefined}
         />
-      ))}
+        </div>
+      )}
     </div>
   );
 };
@@ -418,3 +411,5 @@ const OpenToSideIcon: React.FC = () => (
     <path d="M12 4v16" />
   </svg>
 );
+
+export const FileHeader = React.memo(FileHeaderView);

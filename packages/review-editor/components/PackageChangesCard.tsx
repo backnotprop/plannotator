@@ -5,7 +5,7 @@ import {
   type PackageChange,
   type PackageMetadata,
 } from '@plannotator/core/package-changes';
-import { Tooltip } from '@plannotator/ui/components/Tooltip';
+import { LazyTooltip as Tooltip } from './LazyTooltip';
 import { usePackageChangesSetting } from '@plannotator/ui/hooks/usePackageChangesSetting';
 import {
   packageKey,
