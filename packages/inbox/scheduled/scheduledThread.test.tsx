@@ -23,6 +23,7 @@ let root: Root | null = null;
 afterEach(() => {
   act(() => root?.unmount());
   root = null;
+  if (!hasDom) return;
   document.body.innerHTML = '';
   resetScheduledForTests(null, false);
 });
