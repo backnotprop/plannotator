@@ -78,7 +78,7 @@ import { INBOX_BOARD_REQUEST_CLOSE, INBOX_BOARD_REQUEST_OPEN, INBOX_DECISION_ASK
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { agentHomeAllowed, codexHome, type AgentEnvironment } from "./inbox-agents";
 import type { LaunchDelivery } from "./inbox-launch-host";
-import { createT3Claims, INBOX_T3_READ_BACK_AFTER_MS, type T3Local, tryThroughT3 } from "./inbox-t3-local";
+import { createT3Claims, INBOX_T3_READ_BACK_AFTER_MS, type T3Local, type T3Route, tryThroughT3 } from "./inbox-t3-local";
 
 /** The ChatGPT desktop app's own Codex CLI (macOS), used when no `codex` is on PATH. */
 export const INBOX_CODEX_DESKTOP_CLI = "/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex";
@@ -384,6 +384,8 @@ export function createInboxCodexWake(options: {
   /** How long one `codex queue` may take. Default INBOX_CODEX_QUEUE_TIMEOUT_MS; tests shorten it. */
   queueTimeoutMs?: number;
   log?: (line: string) => void;
+  /** Each reply that went into a T3 thread, and each that starts to wait on T3 (the debug log's `t3_route` line). */
+  route?: (route: T3Route) => void;
 }): InboxCodexWake {
   const { store, environment } = options;
   const now = options.now ?? Date.now;
@@ -670,8 +672,11 @@ export function createInboxCodexWake(options: {
   const sendToT3 = async (item: InboxMessage, session: string): Promise<boolean> => {
     const id = store.deliveryIdOf(item, session);
     const key = `${id}.${session}`;
+    const routed = (route: T3Route["route"], reason?: string) =>
+      options.route?.({ route, agent: "codex", thread: item.thread_id, reply: item.id, ...(reason ? { reason } : {}) });
     const waits = (reason: "closed" | null) => {
       if (id !== item.id || !store.isOwner(item, session)) return;
+      if (reason && store.message(item.id)?.t3_wait !== reason) routed("waiting", reason);
       try {
         store.recordT3Wait(item.id, reason);
       } catch {
@@ -734,6 +739,7 @@ export function createInboxCodexWake(options: {
       retryAt.delete(key);
       waits(null);
       delivered(id, session);
+      routed("t3_send");
       return true;
     }
     if (tried === "checking") {

@@ -14,7 +14,7 @@
  * no Codex and no T3 run.
  */
 import { Database } from "bun:sqlite";
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { InboxAuthor, InboxMessage } from "@plannotator/core/inbox-types";
@@ -26,8 +26,8 @@ import { createFakeAgents, type FakeAgents } from "../../tests/helpers/fake-agen
 import { type FakeT3, makeFakeT3Home, startFakeT3 } from "../../tests/helpers/fake-t3";
 import { createAgentEnvironmentFor } from "./inbox-agents";
 import { codexQueueMessage, createInboxCodexWake, type InboxCodexWake } from "./inbox-codex-wake";
-import { createT3Claims, createT3Local, t3ReadBackOf, t3ThreadOfCodexThread, type T3Local } from "./inbox-t3-local";
-import { createInboxT3Wake, type InboxT3Wake } from "./inbox-t3-wake";
+import { createT3Claims, createT3Local, t3ReadBackOf, t3ThreadOfCodexThread, type T3Local, type T3Route } from "./inbox-t3-local";
+import { createInboxT3Wake, createT3ModOwner, type InboxT3Wake } from "./inbox-t3-wake";
 
 const IN_T3 = "019a7c00-0000-7000-8000-0000000000a1";
 const PLAIN = "019a7c00-0000-7000-8000-0000000000b2";
@@ -35,6 +35,9 @@ const PLAIN = "019a7c00-0000-7000-8000-0000000000b2";
 const T3_THREAD = "thread:project:5b1d2c3e-0f1a-4b2c-8d3e-4f5a6b7c8d9e:7c6d5e4f-3a2b-4c1d-9e0f-1a2b3c4d5e6f";
 const CLAUDE_T3 = "mcp:9843db4f-69c2-4891-9a2b-de6f0afaed58";
 const SEND = ["thread", "send"];
+
+// A send that hangs waits out the command's time limit (`sendTimeoutMs` below), once or twice in a test.
+setDefaultTimeout(20_000);
 
 const cleanup: (() => void)[] = [];
 afterEach(() => {
@@ -68,22 +71,26 @@ function world(options: { t3Home?: boolean; schema?: "0.1.9" | "unknown"; codexT
   const project = store.ensureProject({ name: "ledger", root: "/work/ledger" });
   const environment = createAgentEnvironmentFor({ platform: options.platform ?? process.platform, homeDir: agents.home, env: { ...agents.env, ...options.env } });
   const clock = { now: Date.now() };
+  /** What each wake told the debug log (`t3_route`). */
+  const routes: T3Route[] = [];
+  const route = (one: T3Route) => void routes.push(one);
   const stops: { stop(): void }[] = [];
   cleanup.push(() => {
     for (const one of stops) one.stop();
   });
   const local = (): T3Local => {
-    const made = createT3Local({ environment, now: () => clock.now, sendTimeoutMs: 1_500, probeMs: 25 });
+    // Long enough for a loaded machine to start the fake command; the hanging states wait it out.
+    const made = createT3Local({ environment, now: () => clock.now, sendTimeoutMs: 3_000, probeMs: 25 });
     stops.push(made);
     return made;
   };
   const startCodex = (): InboxCodexWake => {
-    const wake = createInboxCodexWake({ store, environment, commandOf, t3: local(), extraClis: [], now: () => clock.now, log: () => {} });
+    const wake = createInboxCodexWake({ store, environment, commandOf, t3: local(), extraClis: [], now: () => clock.now, log: () => {}, route });
     stops.push(wake);
     return wake;
   };
   const startT3 = (o: { skip?: (item: InboxMessage, session: string) => boolean; local?: T3Local } = {}): InboxT3Wake => {
-    const wake = createInboxT3Wake({ store, dataDir, commandOf, local: o.local ?? local(), now: () => clock.now, log: () => {}, ...(o.skip ? { skip: o.skip } : {}) });
+    const wake = createInboxT3Wake({ store, dataDir, commandOf, local: o.local ?? local(), now: () => clock.now, log: () => {}, route, ...(o.skip ? { skip: o.skip } : {}) });
     stops.push(wake);
     return wake;
   };
@@ -103,7 +110,7 @@ function world(options: { t3Home?: boolean; schema?: "0.1.9" | "unknown"; codexT
   /** The replies T3 holds as turns, by reply id, in order. */
   const turnsOf = (thread: string) => (t3?.turns() ?? []).filter(([at]) => at === thread).map(([, text]) => /\((msg_[^)]+)\)$/.exec(text.split("\n", 1)[0]!)?.[1] ?? text);
   const claimsIn = (folder: string) => (existsSync(join(store.dir, folder)) ? readdirSync(join(store.dir, folder)) : []);
-  return { agents, t3, store, dataDir, environment, clock, local, startCodex, startT3, grant, ask, reply, queues, textOf, sends, turnsOf, claimsIn };
+  return { agents, t3, store, dataDir, environment, clock, routes, local, startCodex, startT3, grant, ask, reply, queues, textOf, sends, turnsOf, claimsIn };
 }
 
 const meta = (thread: string) => ({ threadId: thread, "x-codex-turn-metadata": { thread_id: thread, turn_trigger: "user", turn_started_at_unix_ms: Date.now() } });
@@ -165,6 +172,20 @@ describe("a Codex thread T3 Code runs", () => {
     expect(await until(() => w.store.message(reply.id)?.delivery?.state === "delivered")).toBe(true);
     expect("t3_wait" in w.store.message(reply.id)!).toBe(false);
     expect(w.sends()).toHaveLength(1);
+  });
+
+  test("the debug log gets one line when a reply starts to wait on T3 and one when it goes, by id, never its words", async () => {
+    const w = world();
+    w.t3!.setState("down");
+    const wake = w.startCodex();
+    const reply = w.reply(w.ask(IN_T3, "Codex from T3"), "Yes, ship it.", "k1");
+    await wake.sweep();
+    await wake.sweep();
+    w.t3!.setState("up");
+    expect(await until(() => w.store.message(reply.id)?.delivery?.state === "delivered")).toBe(true);
+    const ids = { agent: "codex", thread: reply.thread_id, reply: reply.id };
+    expect(w.routes).toEqual([{ route: "waiting", ...ids, reason: "closed" }, { route: "t3_send", ...ids }]);
+    expect(JSON.stringify(w.routes)).not.toContain("ship it");
   });
 
   test("T3 open but its thread not found yet: never 'Open T3'; saved, looked up again, and sent once the row is there", async () => {
@@ -442,6 +463,7 @@ describe("a Claude thread in T3 Code", () => {
     expect(mcp.turns.map((turn) => turn.clientRequestId)).toEqual([`plannotator-inbox-${reply.id}`]);
     expect(w.store.message(reply.id)?.delivery).toMatchObject({ host: "t3", session: CLAUDE_T3 });
     expect(w.claimsIn("t3-send")).toEqual([]);
+    expect(w.routes).toEqual([{ route: "grant", agent: "claude", thread: reply.thread_id, reply: reply.id }]);
   });
 
   test("a T3 still starting that says 'not found' does not end the thread: it goes in once T3 has settled", async () => {
@@ -467,12 +489,77 @@ describe("a Claude thread in T3 Code", () => {
     expect(await wake.wakes("t3", CLAUDE_T3)).toBe(false);
     const reply = w.reply(w.ask(CLAUDE_T3, "Claude", "t3"), "Yes, ship it.", "k1");
     await wake.sweep();
+    await wake.sweep();
     expect(w.store.message(reply.id)?.t3_wait).toBe("closed");
     expect(w.store.handover.holder(w.store.message(reply.id)!)).toBeNull();
     expect(w.t3!.calls()).toEqual([]);
     w.t3!.setState("up");
     expect(await until(() => w.store.message(reply.id)?.delivery?.state === "delivered")).toBe(true);
     expect(w.sends()).toHaveLength(1);
+    // The debug log: one line when it starts to wait, one when it goes, by id only.
+    const ids = { agent: "claude", thread: reply.thread_id, reply: reply.id };
+    expect(w.routes).toEqual([{ route: "waiting", ...ids, reason: "closed" }, { route: "t3_send", ...ids }]);
+  });
+
+  describe("T3 quits, taking the thread's Claude (and its mod) with it", () => {
+    /** The mod, as the bridge sees it: a poll held open now, or one that ended within the live window. */
+    const modOf = (w: ReturnType<typeof world>, local: T3Local) => {
+      const mod = { holding: false, lately: false, resweeps: [] as number[] };
+      const skip = createT3ModOwner({ local, holdsPoll: () => mod.holding, polledLately: () => mod.lately, claimed: () => false, resweep: (ms) => void mod.resweeps.push(ms), liveMs: 30_000, probeMs: 2_000 });
+      return { mod, skip };
+    };
+
+    test("a reply the mod had reads as waiting on T3 within seconds, and goes in once T3 runs again", async () => {
+      const w = world();
+      const local = w.local();
+      const { mod, skip } = modOf(w, local);
+      mod.holding = true;
+      mod.lately = true;
+      const wake = w.startT3({ local, skip });
+      const reply = w.reply(w.ask(CLAUDE_T3, "Claude", "t3"), "Yes, ship it.", "k1");
+      await wake.sweep();
+      // The mod's to deliver while it polls: nothing sent, no wait line.
+      expect(w.sends()).toEqual([]);
+      expect(w.store.message(reply.id)?.t3_wait).toBeUndefined();
+      // T3 quits: the mod's poll ends with it, its last poll still inside the live window. No clock moves.
+      mod.holding = false;
+      w.t3!.setState("down");
+      expect(await until(() => w.store.message(reply.id)?.t3_wait === "closed")).toBe(true);
+      expect(w.t3!.calls()).toEqual([]);
+      // T3 back, inside the same window: its Claude starts only with a turn, so the reply goes in as one, once.
+      w.t3!.setState("up");
+      expect(await until(() => w.store.message(reply.id)?.delivery?.state === "delivered")).toBe(true);
+      expect(w.turnsOf(CLAUDE_T3)).toEqual([reply.id]);
+      expect("t3_wait" in w.store.message(reply.id)!).toBe(false);
+    });
+
+    test("a reply sent just after T3 quit waits on T3 at the first look, though the mod polled moments ago", async () => {
+      const w = world();
+      const local = w.local();
+      const { mod, skip } = modOf(w, local);
+      mod.lately = true;
+      w.t3!.setState("down");
+      const wake = w.startT3({ local, skip });
+      const reply = w.reply(w.ask(CLAUDE_T3, "Claude", "t3"), "Yes, ship it.", "k1");
+      await wake.sweep();
+      expect(w.store.message(reply.id)?.t3_wait).toBe("closed");
+      expect(w.t3!.calls()).toEqual([]);
+    });
+
+    test("a poll held open keeps the mod the owner though T3 here reads as closed, and is looked at again in seconds", async () => {
+      const w = world();
+      const local = w.local();
+      const { mod, skip } = modOf(w, local);
+      mod.holding = true;
+      mod.lately = true;
+      w.t3!.setState("down");
+      const wake = w.startT3({ local, skip });
+      const reply = w.reply(w.ask(CLAUDE_T3, "Claude", "t3"), "Yes, ship it.", "k1");
+      await wake.sweep();
+      expect(w.store.message(reply.id)?.t3_wait).toBeUndefined();
+      expect(w.store.handover.holder(w.store.message(reply.id)!)).toBeNull();
+      expect(mod.resweeps).toContain(2_000);
+    });
   });
 
   test("T3 here gone and no grant: the thread is ended, the reply waits for the next agent, nothing is retried", async () => {

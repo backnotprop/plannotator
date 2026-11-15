@@ -4,8 +4,10 @@
  * the person typed and runs it with whatever provider the thread uses. One
  * owner per reply, tried in this order:
  *
- *  1. the Claude Code mod, while it polls as the thread (`skip`, inbox.ts
- *     `t3ModDelivers`): it puts the reply in as a turn of the running session;
+ *  1. the Claude Code mod, while it polls as the thread (`skip`,
+ *     `createT3ModOwner`): it puts the reply in as a turn of the running
+ *     session. A T3 here that stops takes that Claude with it: the wake looks
+ *     again within seconds (`T3Local.onceStopped`);
  *  2. T3 on this machine (`local`, inbox-t3-local.ts): `t3 thread send`, no
  *     sign-in. Its claim folder (`inbox/t3-send/`) is made before the call: a
  *     call that ran out of time keeps it, and the reply is saved for the
@@ -64,7 +66,7 @@ import type { InboxStore } from "@plannotator/shared/inbox/store";
 import type { T3Credentials } from "@plannotator/t3-code/auth";
 import type { T3Rpc } from "@plannotator/t3-code/t3-client";
 import { codexQueueMessage } from "./inbox-codex-wake";
-import { createT3Claims, INBOX_T3_READ_BACK_AFTER_MS, type T3Local, type T3Try, tryThroughT3 } from "./inbox-t3-local";
+import { createT3Claims, INBOX_T3_READ_BACK_AFTER_MS, type T3Local, type T3Route, type T3Try, tryThroughT3 } from "./inbox-t3-local";
 
 /** The T3 client loads only once a grant exists: every other CLI start skips the MCP client. */
 let t3Modules: Promise<[typeof import("@plannotator/t3-code/auth"), typeof import("@plannotator/t3-code/delivery"), typeof import("@plannotator/t3-code/t3-client")]> | null = null;
@@ -148,6 +150,41 @@ export function t3NotCoveredLine(thread: string, grantMode: string, threadMode: 
   return `The saved T3 grant (${grantMode === "below-full-access" ? "below Full access" : grantMode}) cannot send into thread ${thread}${threadMode ? ` (it runs ${threadMode})` : ""}, so the Inbox does not wake it: its replies wait for the agent's next read. To wake it, run \`plannotator t3 login --url ${endpoint}\` and choose a mode that covers the thread.`;
 }
 
+/**
+ * Whether the Claude Code mod is the one to deliver a reply to a T3 thread (the T3 wake's `skip`, inbox.ts): while
+ * it polls as the thread, and for an item its claim folder holds. A T3 here that is not running took its Claude
+ * with it, so then only a poll held open right now counts, not one that ended within the live window: the reply
+ * reads as waiting for T3 at once. Nor does that ended poll count once T3 runs again: the mod is back only with a
+ * poll held open, so a T3 reopened within the window gets the reply at once. `resweep` asks for the wake to look
+ * again after that many ms.
+ */
+export function createT3ModOwner(options: {
+  local?: T3Local;
+  holdsPoll: (session: string) => boolean;
+  polledLately: (session: string) => boolean;
+  claimed: (item: InboxMessage, session: string) => boolean;
+  resweep: (ms: number) => void;
+  liveMs: number;
+  probeMs: number;
+}): (item: InboxMessage, session: string) => boolean {
+  /** Threads whose mod was seen gone with T3: their last poll no longer counts, until one is held open again. */
+  const lost = new Set<string>();
+  return (item, session) => {
+    const closed = options.local?.installed() === true && !options.local.running();
+    const held = options.holdsPoll(session);
+    const lately = options.polledLately(session);
+    if (held || !lately) lost.delete(session);
+    else if (closed) lost.add(session);
+    if (held || (lately && !lost.has(session))) {
+      // Looked at again once the poll would be stale: a Claude T3 stopped leaves its replies to the T3 wake. With T3
+      // here closed, a poll still open is one whose end is on its way: looked at again in a moment.
+      options.resweep(closed ? options.probeMs : options.liveMs + 1_000);
+      return true;
+    }
+    return options.claimed(item, session);
+  };
+}
+
 interface Link {
   credentials: T3Credentials;
   rpc: T3Rpc;
@@ -165,6 +202,8 @@ export function createInboxT3Wake(options: {
   local?: T3Local;
   now?: () => number;
   log?: (line: string) => void;
+  /** Each reply that went into a T3 thread, and each that starts to wait (the debug log's `t3_route` line). */
+  route?: (route: T3Route) => void;
   /** How long an agent's send_message waits on T3 (default 3 s). */
   lookupTimeoutMs?: number;
   /** How often a new login is looked for while a reply waits on one (default 15 s). */
@@ -175,6 +214,8 @@ export function createInboxT3Wake(options: {
   const log = options.log ?? ((line: string) => void process.stderr.write(`Inbox: ${line}\n`));
   const connect: T3Connect = options.connect ?? (async (endpoint, token) => (await loadT3())[2].T3Client.connect(endpoint, token));
   const { local } = options;
+  const routed = (route: T3Route["route"], item: InboxMessage, reason?: string) =>
+    options.route?.({ route, agent: "claude", thread: item.thread_id, reply: item.id, ...(reason ? { reason } : {}) });
   let stopped = false;
   const stopping = new AbortController();
 
@@ -338,6 +379,19 @@ export function createInboxT3Wake(options: {
       void sweep();
     });
   };
+  /**
+   * Whether a running T3 here is watched for stopping (`T3Local.onceStopped`): while the mod has a reply, a T3 that
+   * quits takes that Claude with it, and the reply should say it waits for T3 within seconds, not once the poll is stale.
+   */
+  let stopAwaited = false;
+  const awaitStopped = () => {
+    if (!local || stopAwaited) return;
+    stopAwaited = true;
+    local.onceStopped(() => {
+      stopAwaited = false;
+      void sweep();
+    });
+  };
 
   const wakesItem = (item: InboxMessage, session: string): boolean => {
     if (!store.isOwner(item, session)) return item.tags?.some((tag) => tag.session === session && tag.host === INBOX_T3_HOST && tag.wakes) ?? false;
@@ -420,6 +474,7 @@ export function createInboxT3Wake(options: {
       } catch {
         // Gone, or no longer this session's.
       }
+      routed("t3_send", item);
     } else if (tried === "checking") {
       checking.add(key);
       checkSoon(key);
@@ -455,6 +510,7 @@ export function createInboxT3Wake(options: {
       } catch {
         // Gone, or no longer this session's.
       }
+      routed("grant", item);
       return null;
     } catch (error) {
       const said = (error instanceof Error ? error.message : String(error)).split("\n")[0]!.slice(0, 300);
@@ -521,6 +577,8 @@ export function createInboxT3Wake(options: {
     };
     const recordWaits = () => {
       for (const [id, wait] of waits) {
+        const before = store.message(id);
+        if (wait && before && before.t3_wait !== wait) routed("waiting", before, wait);
         try {
           store.recordT3Wait(id, wait);
         } catch {
@@ -530,9 +588,12 @@ export function createInboxT3Wake(options: {
     };
     for (const [session, items] of pending) {
       const held = items.filter((item) => wakesItem(item, session) && claims.has(store.deliveryIdOf(item, session), session));
-      const work = items.filter((item) => !held.includes(item) && wakesItem(item, session) && !options.skip?.(item, session));
+      const skipped = items.filter((item) => !held.includes(item) && wakesItem(item, session) && options.skip?.(item, session));
+      const work = items.filter((item) => !held.includes(item) && !skipped.includes(item) && wakesItem(item, session));
       // Not the wake's to send (its connection delivers it, or it is withdrawn): nothing here holds it.
       for (const item of items) if (!work.includes(item) && !held.includes(item)) waitOf(item, session, null);
+      // The mod's to deliver while T3 here runs: looked at again as soon as T3 stops.
+      if (skipped.length > 0 && local?.installed() && local.running()) awaitStopped();
       for (const item of [...held, ...work]) pendingKeys.add(keyOf(item, session));
       for (const item of held) {
         // A send that may have gone: this wake's alone, saved in the window until the thread is read back.

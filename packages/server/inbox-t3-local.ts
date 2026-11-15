@@ -78,6 +78,20 @@ export type T3LocalSend =
   /** Anything else: it may have gone. */
   | { unknown: string };
 
+/**
+ * Which way a reply to a T3 thread went, or that it waits: `mod` (the Claude Code mod in the thread's Claude),
+ * `t3_send` (`t3 thread send` here), `grant` (a saved grant over T3's MCP), `waiting` (with the `t3_wait` reason).
+ * The Inbox's debug log writes one line for each (`t3_route`): ids and these words only, never the reply's text.
+ */
+export interface T3Route {
+  route: "mod" | "t3_send" | "grant" | "waiting";
+  agent: "claude" | "codex";
+  /** The Inbox's thread and the reply's id. */
+  thread: string;
+  reply: string;
+  reason?: string;
+}
+
 /** What the thread's latest messages say of a reply: `present` (T3 took it), `absent`, `gone` (no such thread), or `unknown`. */
 export type T3ReadBack = "present" | "absent" | "gone" | "unknown";
 
@@ -90,6 +104,8 @@ export interface T3Local {
   settled(): boolean;
   /** Calls `fn` once, as soon as `running()` says yes (looked at every INBOX_T3_PROBE_MS). */
   onceRunning(fn: () => void): void;
+  /** Calls `fn` once, as soon as `running()` says no (looked at every INBOX_T3_PROBE_MS). */
+  onceStopped(fn: () => void): void;
   /** Whether T3 here has the thread (`t3 thread show`); false when it cannot say. */
   has(t3Thread: string): Promise<boolean>;
   send(t3Thread: string, text: string, signal?: AbortSignal): Promise<T3LocalSend>;
@@ -238,15 +254,24 @@ export function createT3Local(options: {
     return env;
   };
 
+  /** What waits for T3 to run, and for it to stop: one probe looks for both. */
   const waiting = new Set<() => void>();
+  const leaving = new Set<() => void>();
   let probe: ReturnType<typeof setInterval> | null = null;
   const look = () => {
-    if (!running()) return;
-    if (probe) clearInterval(probe);
-    probe = null;
-    const due = [...waiting];
-    waiting.clear();
+    const side = running() ? waiting : leaving;
+    const due = [...side];
+    side.clear();
+    if (waiting.size === 0 && leaving.size === 0 && probe) {
+      clearInterval(probe);
+      probe = null;
+    }
     for (const fn of due) fn();
+  };
+  const probeSoon = () => {
+    if (probe) return;
+    probe = setInterval(look, options.probeMs ?? INBOX_T3_PROBE_MS);
+    (probe as { unref?: () => void }).unref?.();
   };
 
   const run = async (args: string[], extra: { signal?: AbortSignal; stdin?: string; outputCap?: number } = {}) => {
@@ -271,9 +296,11 @@ export function createT3Local(options: {
     settled,
     onceRunning: (fn) => {
       waiting.add(fn);
-      if (probe) return;
-      probe = setInterval(look, options.probeMs ?? INBOX_T3_PROBE_MS);
-      (probe as { unref?: () => void }).unref?.();
+      probeSoon();
+    },
+    onceStopped: (fn) => {
+      leaving.add(fn);
+      probeSoon();
     },
     has: async (t3Thread) => {
       const at = shown.get(t3Thread);
@@ -322,6 +349,7 @@ export function createT3Local(options: {
       if (probe) clearInterval(probe);
       probe = null;
       waiting.clear();
+      leaving.clear();
     },
   };
 }
