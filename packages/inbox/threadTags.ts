@@ -25,6 +25,8 @@ export interface ThreadTagsHost {
   can: (threadId: string) => boolean;
   /** Put the thread in the tag or take it out; the toast says so, with Undo. */
   set: (threadId: string, tag: InboxInitiative, on: boolean) => void;
+  /** Put several threads in the tag or take them out (the picks' bar): one toast, one Undo. */
+  setMany?: (threadIds: readonly string[], tag: InboxInitiative, on: boolean) => void;
   /** Make a tag and put the thread in it (`New tag "Billing"`). */
   createAndSet: (threadId: string, name: string) => void;
   /** The tag whose list the window shows: its rows' menu offers Remove from <tag>. */

@@ -8,6 +8,11 @@ import { rowMenuActions, type RowMenuAction } from '../rowMenu';
 import { useThreadTags } from '../threadTags';
 import { AddTagItem, AddTagList } from './AddTagMenu';
 import { useContextMenuTrigger } from './useContextMenuTrigger';
+import { BulkItems, runBulk } from './PickBar';
+import { BulkTagList } from './BulkTags';
+import type { MenuPicks } from './useListPicks';
+import { bulkTargets } from '../rowPicks';
+import { formatCount } from '@plannotator/core/inbox-format';
 
 export interface ThreadRowMenuProps {
   className: string;
@@ -46,6 +51,11 @@ export interface ThreadRowMenuProps {
   held: boolean;
   /** A phone: the menu (a held row's, or a right-click's) is a sheet from the bottom edge, the thread's name over it. */
   phone?: boolean;
+  /**
+   * Picking rows (rowPicks.ts): Select leads every row's menu, and a picked row's menu is the picks' own (Archive,
+   * Snooze, then the bar's ⋯ items), acting on every picked row. Absent: neither.
+   */
+  picks?: MenuPicks;
   children: ReactNode;
 }
 
@@ -115,6 +125,8 @@ export const ThreadRowMenu = forwardRef<HTMLDivElement, ThreadRowMenuProps>(func
   const target = menu.targetId ? props.rowOf(menu.targetId) : null;
   const actions = target ? rowMenuActions(target, props.canMarkRead, props.pinnedOf ? props.pinnedOf(target) : null, props.sectionOf?.(target.thread_id) ?? null, props.onSnooze !== undefined && ((props.snoozesOf?.(target) ?? true) || !!props.snoozeBlockedOf?.(target)), props.prioritizesOf?.(target) ?? true) : [];
   const snoozeBlocked = target ? (props.snoozeBlockedOf?.(target) ?? null) : null;
+  // A picked row: the menu is the picks' (acting on every picked row).
+  const picked = target && props.picks?.has(target.thread_id) ? props.picks : null;
   const pinning = actions.filter((a) => a === 'pin' || a === 'unpin' || a === 'priority-add' || a === 'priority-remove');
   const copies = actions.filter((a) => a === 'copy-thread' || a === 'copy-link' || a === 'copy-id');
   const writes = actions.filter((a) => a === 'snooze' || a === 'unsnooze' || a === 'read' || a === 'mark-unread' || a === 'unread' || a === 'archive');
@@ -199,14 +211,40 @@ export const ThreadRowMenu = forwardRef<HTMLDivElement, ThreadRowMenuProps>(func
       <ContextMenu.Portal container={portal ?? undefined}>
         {props.phone && <ContextMenu.Backdrop className="ib-pm-scrim" />}
         <ContextMenu.Positioner className="ib-pm-pos" data-phone={props.phone ? '' : undefined}>
-          <ContextMenu.Popup className="ib-pm" aria-label={target?.subject ?? 'Thread'} data-row-menu={target?.thread_id} {...menu.popup}>
+          <ContextMenu.Popup className="ib-pm" aria-label={picked ? pickedTitle(picked.act.rows.length) : (target?.subject ?? 'Thread')} data-row-menu={target?.thread_id} data-picked-menu={picked ? '' : undefined} {...menu.popup}>
             {/* The popup is named already (aria-label): the title is for the eye only, on a phone's sheet (the thread's ⋯ sheet's). */}
             {target && (
               <div className="ib-pm-title" dir="auto" aria-hidden="true">
-                {target.subject ?? '(no subject)'}
+                {picked ? pickedTitle(picked.act.rows.length) : (target.subject ?? '(no subject)')}
               </div>
             )}
-            {shownView && target ? (
+            {picked ? (
+              shownView ? (
+                <SnoozeTimes view={shownView} onView={setSnoozeView} onBack={() => setSnoozeView(null)} onPick={(until) => runBulk(picked.act, 'snooze', until)} onClose={menu.close} />
+              ) : shownTags ? (
+                <BulkTagList threadIds={picked.act.rows.map((row) => row.thread_id)} onBack={() => setTagView(false)} />
+              ) : (
+                <>
+                  {bulkTargets(picked.act.rows, 'archive', picked.act.rules).length > 0 && (
+                    <Menu.Item className="ib-pmi" label="Archive" data-bulk-action="archive" onClick={() => runBulk(picked.act, 'archive')}>
+                      <Icon name="archive" size={15} />
+                      Archive
+                    </Menu.Item>
+                  )}
+                  {picked.act.snoozes && bulkTargets(picked.act.rows, 'snooze', picked.act.rules).length > 0 && (
+                    <Menu.Item className="ib-pmi" label="Snooze" closeOnClick={false} data-bulk-action="snooze" onClick={() => setSnoozeView('times')}>
+                      <Icon name="clock" size={15} />
+                      Snooze
+                      <span className="ib-zsub">
+                        <Icon name="chevR" size={13} />
+                      </span>
+                    </Menu.Item>
+                  )}
+                  <Menu.Separator className="ib-pm-sep" />
+                  <BulkItems act={picked.act} onTags={() => setTagView(true)} />
+                </>
+              )
+            ) : shownView && target ? (
               <SnoozeTimes
                 view={shownView}
                 onView={setSnoozeView}
@@ -231,6 +269,16 @@ export const ThreadRowMenu = forwardRef<HTMLDivElement, ThreadRowMenuProps>(func
               />
             ) : (
               <>
+                {/* Select first, alone (approval "inbox-multi-select", 1B): picking starts with this row picked. */}
+                {target && props.picks && (
+                  <>
+                    <Menu.Item className="ib-pmi" label="Select" data-row-action="select" onClick={() => props.picks!.start(target.thread_id)}>
+                      <Icon name="check" size={15} />
+                      Select
+                    </Menu.Item>
+                    <Menu.Separator className="ib-pm-sep" />
+                  </>
+                )}
                 {/* Pin thread first, then Add to Priority, then Add tag (and Remove from, in a tag's list), in their own group. */}
                 {pinning.map(item)}
                 {target && <AddTagItem threadId={target.thread_id} onOpen={() => setTagView(true)} />}
@@ -258,3 +306,6 @@ export const ThreadRowMenu = forwardRef<HTMLDivElement, ThreadRowMenuProps>(func
     </ContextMenu.Root>
   );
 });
+
+/** A picked row's menu title: "3 selected threads". */
+const pickedTitle = (n: number) => `${formatCount(n)} selected ${n === 1 ? 'thread' : 'threads'}`;

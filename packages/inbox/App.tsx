@@ -188,6 +188,7 @@ import { joinThreadRead, useStaleOpenRead, type ThreadFlight } from './threadFli
 import { openTakenBack } from './takenBackCompose';
 import { restartInbox } from './restartInbox';
 import { errorToast } from './toastError';
+import { bulkWrites } from './bulkWrites';
 import { canToggleRead, confirmSetAside, MARK_READ_LOOK_WAIT_MS, MARK_READ_UNDO_MS, MARK_UNREAD_RETRY_WAIT_MS, markReadToast, markUnreadToast, offersRowMarkRead, seenHeldInNew, setAsideCount, setAsideOf, type SetAsideAnswer, type SetAsideCount, warnsBeforeRead } from './markRead';
 import { MarkReadWarning } from './components/MarkReadWarning';
 import { AgentDeleteDialog } from './agents/AgentDeleteDialog';
@@ -2536,7 +2537,6 @@ function Inbox() {
   // never decided on that load).
   const askLinesFree = soundSettled && agentNoteSettled && soundDialog === 'none' && !agentNoteOpen;
 
-
   // The list on screen catches up as the route changes (the layout effect above), not here.
   const go = (next: Route) => writeRoute(next);
   /** Back to the screen under this one (closeTo): a thread's list, a file's thread. */
@@ -3475,10 +3475,10 @@ function Inbox() {
     }
   };
 
-
   const { snooze, unsnooze, restoreSnooze } = snoozeWrites({ rowOf, threadRow: () => threadRow, showError, showToast, dismissToast, afterWrite, say, armSlide, setShown, shownRef, routeRef, latestRef, listCovered, snoozeMoved, snoozedThisLoad });
 
   const { setPriority, restorePriority } = priorityWrites({ rowOf, threadRow: () => threadRow, showError, showToast, dismissToast, afterWrite, say, armSlide, setShown, shownRef, routeRef, latestRef, listCovered });
+  const bulk = bulkWrites({ rowOf, rowWrites, setShown, shownRef, latestRef, routeRef, listCovered, armSlide, afterWrite, showToast, dismissToast, say, warnSetAside, restoreSnooze, restorePriority, closeThread: () => (fromCard ? backToCard() : close({ ...routeRef.current, thread: null, file: null })) });
 
   /**
    * Pin a thread to the sidebar, or unpin it (approval "inbox-pinned-threads"),
@@ -3705,7 +3705,6 @@ function Inbox() {
     setAgentDelete(null);
     return deleteAgentNow(agentDelete, archive);
   };
-
 
   /**
    * Settings' Unarchive: the thread goes back to the list, in whatever
@@ -6042,6 +6041,7 @@ function Inbox() {
           onMarkUnread={(row) => void markUnread(row.thread_id)}
           onSendNow={(row) => void sendNowFromRow(row)}
           onRowAction={rowAction}
+          bulk={bulk}
           onSnooze={snoozeOn ? (row, until) => void snooze(row, until) : undefined}
           snoozesOf={(row) => rowSnoozes(row, machines)}
           snoozeBlockedOf={(row) => (pageOffersUpdates(settings) ? snoozeBlockedBy(row, machines) : null)}

@@ -1,0 +1,61 @@
+/* Picking thread rows (approval "inbox-multi-select", 1B + 2A; rowPicks.ts, components/PickBar.tsx). While picking
+   (`.ib-listcol[data-picking]`) every row has a box at its left and the header is the picks' bar; a picked row is
+   filled with the open row's fill, never outlined, and the open row drops its fill so only picks read as picked. */
+.ib-pick-box { flex: none; display: inline-grid; place-items: center; width: 16px; height: 16px; padding: 0; border: 0; border-radius: 4px; background: var(--card); box-shadow: inset 0 0 0 1.5px color-mix(in oklch, var(--muted-foreground) 60%, transparent); color: transparent; cursor: pointer; }
+.ib-pick-box svg { stroke-width: 2.6; }
+.ib-pick-box[data-on] { background: var(--primary); box-shadow: none; color: var(--primary-foreground); }
+button.ib-pick-box:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+
+/* A row's box sits in its wrapper (`.ib-rw`, beside the row's button), over the room the row leaves at its left. */
+.ib-rw > .ib-pick-box { position: absolute; left: 14px; z-index: 2; }
+.ib-rw:has(> .ib-row) > .ib-pick-box { top: 17px; }
+.ib-rw:has(> .ib-nrow) > .ib-pick-box { top: 13px; }
+.ib-listcol[data-picking] :is(.ib-row, .ib-nrow) { padding-left: 42px; }
+.ib-listcol[data-picking] .ib-mrow { position: relative; padding-left: 48px; }
+.ib-mrow > .ib-pick-mark { position: absolute; left: 16px; top: 14px; cursor: default; }
+.ib-listcol[data-picking] :is(.ib-row, .ib-nrow, .ib-mrow) { user-select: none; }
+
+/* A group's box, over its header's left (the header is the group's toggle, so the box is its sibling). */
+.ib-listcol[data-picking] .ib-group { position: relative; }
+.ib-group > .ib-pick-box { position: absolute; left: 14px; top: 9px; z-index: 2; }
+.ib-listcol[data-picking] .ib-band { padding-left: 42px; }
+
+/* The fills: a picked row is filled; the open row keeps only the hover's. */
+.ib-listcol[data-picking] :is(.ib-row, .ib-nrow).ib-sel:not(.ib-picked)::before { background: transparent !important; }
+.ib-listcol[data-picking] :is(.ib-row, .ib-nrow).ib-sel:not(.ib-picked):hover::before { background: var(--ib-hover) !important; }
+.ib-listcol[data-picking] :is(.ib-row, .ib-nrow).ib-picked::before { background: var(--ib-sel) !important; }
+.ib-listcol[data-picking] :is(.ib-row, .ib-nrow).ib-picked:hover::before { background: var(--ib-sel-hover) !important; }
+.ib-listcol[data-picking] .ib-row.ib-sel:not(.ib-picked) { --ib-row-fill: transparent; }
+.ib-listcol[data-picking] .ib-row.ib-picked { --ib-row-fill: var(--ib-sel); }
+.ib-listcol[data-picking] .ib-mrow.ib-picked { background: var(--ib-sel); }
+
+/* The bar (2A): the list header's place and height. "3 selected", Archive, Snooze, ⋯, then Done at the right. */
+.ib-pickbar { gap: 8px; }
+.ib-pickbar[hidden], .ib-lhead[hidden] { display: none; }
+.ib-pick-n { min-width: 0; margin: 0 6px 0 2px; font-size: var(--ib-fs-15, 15px); font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ib-pick-hint { display: block; overflow: hidden; text-overflow: ellipsis; font-weight: 400; font-size: var(--ib-fs-13-5, 13.5px); color: var(--muted-foreground); }
+.ib-pick-btn { display: inline-flex; flex: none; align-items: center; justify-content: center; gap: 6px; height: 30px; padding: 0 12px; border: 0; border-radius: 7px; background: color-mix(in oklch, var(--foreground) 6%, transparent); color: var(--foreground); font: inherit; font-size: var(--ib-fs-13, 13px); white-space: nowrap; cursor: pointer; }
+.ib-pick-btn:hover, .ib-pick-btn[data-popup-open] { background: color-mix(in oklch, var(--foreground) 11%, transparent); }
+.ib-pick-btn:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.ib-pick-btn.ib-pick-ico { width: 30px; padding: 0; }
+.ib-pick-end { margin-left: auto; }
+.ib-pick-btn .ib-pick-i { display: none; }
+/* Beside an open thread the column is 380 px: the bar keeps one line. Past 99 picks the count is wider, so Archive
+   and Snooze are their icons (each keeps its name for a screen reader, `aria-label`). */
+.ib-listcol.ib-narrow .ib-pickbar { gap: 6px; padding: 0 12px 0 max(16px, var(--ib-controls-left, 0px)); }
+.ib-listcol.ib-narrow .ib-pick-n { margin: 0 8px 0 2px; font-size: var(--ib-fs-14, 14px); }
+.ib-listcol.ib-narrow .ib-pick-btn:not(.ib-pick-ico) { padding: 0 10px; }
+.ib-listcol.ib-narrow .ib-pickbar[data-long] .ib-pick-btn:not(.ib-pick-end) { width: 30px; padding: 0; }
+.ib-listcol.ib-narrow .ib-pickbar[data-long] .ib-pick-l { display: none; }
+.ib-listcol.ib-narrow .ib-pickbar[data-long] .ib-pick-i { display: inline; }
+
+/* A phone (6b): the header is the count and Done; the actions are a sheet at the bottom edge, 52 px tall each. */
+@media (max-width: 767px) {
+  .ib-pickbar .ib-pick-btn { height: 36px; padding: 0 14px; font-size: var(--ib-fs-15, 15px); }
+  .ib-pickbar .ib-pick-box { margin-left: 12px; }
+  .ib-listcol[data-picking] .ib-lbody { padding-bottom: 96px; }
+}
+.ib-picksheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; display: flex; gap: 6px; padding: 8px 8px calc(8px + var(--pn-safe-bottom, 0px)); border-radius: 14px 14px 0 0; background: var(--popover); color: var(--popover-foreground); box-shadow: var(--ib-float-s, 0 0 0 1px var(--border), 0 -12px 30px -12px oklch(0 0 0 / 0.45)); }
+.ib-pick-tool { flex: 1 1 0; display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; min-width: 0; height: 52px; padding: 0 4px; border: 0; border-radius: 10px; background: color-mix(in oklch, var(--foreground) 6%, transparent); color: var(--foreground); font: inherit; font-size: var(--ib-fs-12-5, 12.5px); white-space: nowrap; }
+.ib-pick-tool:disabled { opacity: 0.45; }
+.ib-pick-tool:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }

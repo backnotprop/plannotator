@@ -218,6 +218,7 @@ export function TidyMenu({
   onCustomize,
   view,
   starredAbove,
+  onSelect,
 }: {
   tidy: TidyController;
   phone: boolean;
@@ -238,6 +239,8 @@ export function TidyMenu({
    * pills above the list and not a sidebar section. Absent (the Board, the tour, an Inbox that keeps no stars): no item.
    */
   starredAbove?: { on: boolean; onChange: (on: boolean) => void };
+  /** "Select threads", after Tidy: the list starts picking rows (rowPicks.ts). Absent (the Board, the tour): no item. */
+  onSelect?: () => void;
 }) {
   const trigger = useRef<HTMLButtonElement>(null);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -297,6 +300,12 @@ export function TidyMenu({
                 {count > 0 || !run ? 'Tidy' : runLabel(run)}
                 {count > 0 && <span className="ib-pmi-n">{formatCount(count)}</span>}
               </Menu.Item>
+              {onSelect && (
+                <Menu.Item className="ib-pmi" label="Select threads" data-select-threads="" onClick={onSelect}>
+                  <Icon name="check" size={15} />
+                  Select threads
+                </Menu.Item>
+              )}
               <Menu.Item className="ib-pmi" label="Refresh" data-tidy-refresh="" onClick={onRefresh} aria-keyshortcuts={refreshKeys}>
                 <Icon name="refresh" size={15} />
                 Refresh
