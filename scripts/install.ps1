@@ -708,21 +708,6 @@ function Invoke-ResumableDownload {
     }
 }
 
-$binaryDownloadTotal = [long]-1
-try {
-    Invoke-ResumableDownload -Uri $binaryUrl -OutFile $tmpFile
-} catch {
-    # The download that came before the resumable one gets the last word, in
-    # case something in the one above does not work on this machine.
-    Write-Host "Download failed ($($_.Exception.Message)); trying again..."
-    try {
-        Invoke-ReleaseDownload -Uri $binaryUrl -OutFile $tmpFile -ExpectedLength $binaryDownloadTotal
-    } catch {
-        Remove-Item -Force -LiteralPath $tmpFile -ErrorAction SilentlyContinue
-        throw
-    }
-}
-
 # Verify checksum
 # Note: In Windows PowerShell 5.1, Invoke-WebRequest returns .Content as byte[] for non-HTML responses.
 # We must handle both byte[] (PS 5.1) and string (PS 7+) for cross-version compatibility.
@@ -740,6 +725,54 @@ if ($expectedChecksum -notmatch '^[0-9a-f]{64}$') {
     [Console]::Error.WriteLine("The checksum file for $binaryName $latestTag is not a SHA-256 checksum. Nothing was changed; try again later.")
     exit 1
 }
+$packedSuffixes = @('.gz')
+if ($env:PLANNOTATOR_SKIP_COMPRESSED_DOWNLOAD -match '^(1|true|yes)$') { $packedSuffixes = @() }
+$taken = $null
+foreach ($packedSuffix in $packedSuffixes) {
+    $packedFile = [System.IO.Path]::GetTempFileName()
+    try {
+        $probe = [System.Net.WebRequest]::Create("$binaryUrl$packedSuffix")
+        $probe.Method = "HEAD"
+        $probe.UserAgent = "plannotator-install"
+        $probe.Timeout = 30000
+        $probe.GetResponse().Close()
+        Invoke-ResumableDownload -Uri "$binaryUrl$packedSuffix" -OutFile $packedFile 6>$null
+        $source = [System.IO.File]::OpenRead($packedFile)
+        try {
+            $gzip = New-Object System.IO.Compression.GZipStream -ArgumentList $source, ([System.IO.Compression.CompressionMode]::Decompress)
+            $target = [System.IO.File]::Create($tmpFile)
+            try { $gzip.CopyTo($target) } finally { $target.Dispose(); $gzip.Dispose() }
+        } finally {
+            $source.Dispose()
+        }
+        if ((Get-FileHash -Path $tmpFile -Algorithm SHA256).Hash.ToLower() -eq $expectedChecksum) { $taken = "$binaryName$packedSuffix" }
+    } catch {
+    } finally {
+        Remove-Item -Force -LiteralPath $packedFile -ErrorAction SilentlyContinue
+    }
+    if ($taken) { break }
+    [System.IO.File]::WriteAllBytes($tmpFile, [byte[]]@())
+}
+
+if (-not $taken) {
+    $binaryDownloadTotal = [long]-1
+    try {
+        Invoke-ResumableDownload -Uri $binaryUrl -OutFile $tmpFile
+    } catch {
+        # The download that came before the resumable one gets the last word, in
+        # case something in the one above does not work on this machine.
+        Write-Host "Download failed ($($_.Exception.Message)); trying again..."
+        try {
+            Invoke-ReleaseDownload -Uri $binaryUrl -OutFile $tmpFile -ExpectedLength $binaryDownloadTotal
+        } catch {
+            Remove-Item -Force -LiteralPath $tmpFile -ErrorAction SilentlyContinue
+            throw
+        }
+    }
+    $taken = $binaryName
+}
+Write-Host "Downloaded $taken."
+
 $actualChecksum = (Get-FileHash -Path $tmpFile -Algorithm SHA256).Hash.ToLower()
 
 if ($actualChecksum -ne $expectedChecksum) {

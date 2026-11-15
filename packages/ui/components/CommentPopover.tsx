@@ -1,7 +1,9 @@
-import React, { useState, useEffect, useMemo, useRef, useCallback, useId } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback, useId, useContext } from 'react';
 import { createPortal } from 'react-dom';
 import type { ImageAttachment } from '../types';
 import { AttachmentsButton } from './AttachmentsButton';
+import { CommentCardToolsContext } from './CommentCardTools';
+import { useHostCommentDraft } from '../hooks/useHostCommentDraft';
 import { useDraggable } from '../hooks/useDraggable';
 import { SparklesIcon } from './SparklesIcon';
 import { Icon } from './inbox-thread/icons';
@@ -17,6 +19,7 @@ import { MentionAutocompleteMenu, mentionActiveOptionId } from './MentionAutocom
 import type { MentionSource } from '../utils/mentions';
 import {
   hasPrimaryCoarsePointer,
+  layoutViewportHeight,
   shouldUseExpandedComposer,
   useVisibleViewportBounds,
   type VisibleViewportBounds,
@@ -178,8 +181,8 @@ const draftStore = new Map<string, { text: string; images: ImageAttachment[] }>(
  * popover clears the draft on submit), so the next open of that composer
  * shows them. A draft typed since is newer and is kept.
  */
-export function restoreCommentDraft(draftKey: string, text: string): void {
-  if (!draftStore.has(draftKey) && text.trim() !== '') draftStore.set(draftKey, { text, images: [] });
+export function restoreCommentDraft(draftKey: string, text: string, images: ImageAttachment[] = []): void {
+  if (!draftStore.has(draftKey) && (text.trim() !== '' || images.length > 0)) draftStore.set(draftKey, { text, images });
 }
 
 /** Whether words (or images) wait as the `draftKey` draft: a closed composer that kept them. */
@@ -269,6 +272,7 @@ export function computeCommentCardGeometry(
     phone: boolean;
     expanded: boolean;
     pane: Pick<DOMRect, 'left' | 'right' | 'bottom' | 'width'> | null;
+    /** The layout viewport's height (`layoutViewportHeight`), which a docked card's `bottom` is measured from. */
     viewportHeight: number;
     footTop?: number | null;
     aimX?: number | null;
@@ -281,7 +285,7 @@ export function computeCommentCardGeometry(
   }
   const dock = (): CommentCardGeometry => {
     if (opts.phone) {
-      return { docked: true, above: false, style: { left: bounds.left + 8, width: bounds.width - 16, bottom: opts.viewportHeight - bounds.bottom + 8, maxHeight: Math.max(160, bounds.height * 0.6) } };
+      return { docked: true, above: false, style: { left: bounds.left + 8, width: bounds.width - 16, bottom: opts.viewportHeight - bounds.bottom + 8, maxHeight: Math.min(bounds.height, Math.max(160, bounds.height * 0.6)) } };
     }
     const pane = opts.pane ?? { left: bounds.left, right: bounds.right, bottom: bounds.bottom, width: bounds.width };
     const width = Math.min(pane.width - 24, opts.expanded ? 760 : 680);
@@ -380,6 +384,8 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
   });
   // The comment card (opt-in, `configurePlannotatorUI({ commentCard })`): read once, so a box never changes look open.
   const [card] = useState(() => allowCard && getCommentCardEnabled());
+  const CardTools = useContext(CommentCardToolsContext);
+  const [toolsBusy, setToolsBusy] = useState(false);
   const [mode, setMode] = useState<'popover' | 'dialog'>(() =>
     prefersExpandedComposer && !card ? 'dialog' : 'popover'
   );
@@ -394,6 +400,11 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
   const initialDraft = draftKey ? draftStore.get(draftKey) : undefined;
   const [text, setText] = useState(initialDraft?.text ?? initialText);
   const [images, setImages] = useState<ImageAttachment[]>(allowImages ? initialDraft?.images ?? [] : []);
+  const [picturesPending, setPicturesPending] = useState(false);
+  const hostDraft = useHostCommentDraft(isGlobal ? draftKey : undefined, text, allowImages ? images : [], (draft) => {
+    setText(draft.text);
+    if (allowImages) setImages(draft.images);
+  });
   const [position, setPosition] = useState<CommentPopoverPosition | null>(null);
   // Direction of an open popover that has scrolled out of view, or null when on-screen.
   const [offscreen, setOffscreen] = useState<'above' | 'below' | null>(null);
@@ -439,7 +450,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
         : [];
       const footTop = feet.length ? Math.min(...feet.map((r) => r.top)) - 4 : null;
       setCardGeo(computeCommentCardGeometry(rect, visibleBounds, {
-        phone: cardPhone, expanded: cardExpanded, pane, viewportHeight: window.innerHeight, footTop, aimX: cardAim.current, placement,
+        phone: cardPhone, expanded: cardExpanded, pane, viewportHeight: layoutViewportHeight(window), footTop, aimX: cardAim.current, placement,
       }));
     };
     update();
@@ -732,21 +743,26 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
   );
 
   const runExtraAction = (action: NonNullable<CommentPopoverProps['extraActions']>[number]) => {
-    if (action.spends && draftKey) draftStore.delete(draftKey);
+    if (action.spends && draftKey) {
+      draftStore.delete(draftKey);
+      hostDraft.clear();
+    }
     action.onSelect(text.trim());
   };
 
   const handleSubmit = useCallback(() => {
     const canSubmitEmpty = allowEmptySubmit && initialText.trim().length > 0;
+    if (picturesPending || toolsBusy) return;
     if (hasUnsavedContent || canSubmitEmpty) {
       if (draftKey) draftStore.delete(draftKey);
+      hostDraft.clear();
       const submitImages = allowImages && images.length > 0 ? images : undefined;
       // Without a mentionSource this is the two-argument call it always was.
       if (mentionSource) onSubmit(text, submitImages, mentionAc.mentionIds);
       else onSubmit(text, submitImages);
       restoreOpeningFocus();
     }
-  }, [text, images, onSubmit, draftKey, allowImages, allowEmptySubmit, initialText, hasUnsavedContent, restoreOpeningFocus, mentionSource, mentionAc.mentionIds]);
+  }, [text, images, onSubmit, draftKey, allowImages, allowEmptySubmit, initialText, hasUnsavedContent, restoreOpeningFocus, mentionSource, mentionAc.mentionIds, picturesPending, toolsBusy, hostDraft]);
 
   const handleAskAI = useCallback(async () => {
     const question = text.trim();
@@ -770,17 +786,19 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
       return;
     }
     if (draftKey) draftStore.delete(draftKey);
+    hostDraft.clear();
     onDraftChange?.('', allowImages ? [] : undefined);
     onClose();
-  }, [allowImages, askAIContext, contextText, draftKey, isGlobal, onAskAI, onClose, onDraftChange, text]);
+  }, [allowImages, askAIContext, contextText, draftKey, hostDraft, isGlobal, onAskAI, onClose, onDraftChange, text]);
 
   const handleExtra = useCallback(() => {
     if (!extraAction) return;
     extraAction.onAction(text.trim());
     if (draftKey) draftStore.delete(draftKey);
+    hostDraft.clear();
     onDraftChange?.('', allowImages ? [] : undefined);
     onClose();
-  }, [allowImages, draftKey, extraAction, onClose, onDraftChange, text]);
+  }, [allowImages, draftKey, extraAction, hostDraft, onClose, onDraftChange, text]);
 
   // After the primary action in the DOM, so Tab reaches it second; `order` keeps it at the footer's end on screen,
   // and Tab goes the way the eye reads the two: the primary, then this.
@@ -864,9 +882,19 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
     </p>
   ) : null;
 
+  const draftConflictRow = hostDraft.conflict !== undefined ? (
+    <p role="status" data-comment-draft-conflict="" className="pn-cbox-conflict px-3 pt-2 text-xs text-muted-foreground">
+      <span>This comment changed in another window.</span>
+      <button type="button" className="font-medium text-foreground underline" onClick={hostDraft.takeTheirs}>Use that one</button>
+      <button type="button" className="font-medium text-foreground underline" onClick={hostDraft.keepMine}>Keep mine</button>
+    </p>
+  ) : null;
+
   const canSubmit =
-    hasUnsavedContent ||
-    (allowEmptySubmit && initialText.trim().length > 0);
+    !picturesPending &&
+    !toolsBusy &&
+    (hasUnsavedContent ||
+    (allowEmptySubmit && initialText.trim().length > 0));
   const canAskAI = !!onAskAI && !askAIDisabled && text.trim().length > 0;
   const showsSkillMenu = skillAc.menu !== null;
 
@@ -916,6 +944,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
       : {};
     const discard = () => {
       if (draftKey) draftStore.delete(draftKey);
+      hostDraft.clear();
       setText('');
       setImages([]);
       onDraftChange?.('', allowImages ? [] : undefined);
@@ -992,6 +1021,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
             {isGlobal ? 'Global comment' : on ?? 'Comment'}
           </div>
           {errorRow}
+          {draftConflictRow}
           {chipsRow}
           <div className="pn-cbox-field">
             <ComposerTokenTextarea
@@ -1013,6 +1043,19 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
             {mentionSource?.renderNotice?.(mentionChipPeople)}
             <MentionAutocompleteMenu id={mentionListboxId} menu={mentionAc.menu} onSelect={mentionAc.select} />
           </div>
+          {images.some((image) => image.kind === 'file') && (
+            <ul className="pn-cbox-files" aria-label="Attached files">
+              {images.filter((image) => image.kind === 'file').map((file) => (
+                <li key={file.path} className="pn-cbox-file" title={file.name}>
+                  <Icon name="doc" size={13} />
+                  <span className="pn-cbox-file-name">{file.name}</span>
+                  <button type="button" aria-label={`Remove ${file.name}`} onClick={() => setImages((prev) => prev.filter((i) => i.path !== file.path))}>
+                    <Icon name="x" size={12} />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
           {/* Screen order is Tab order: the tools, the bin, then Comment at the right end. */}
           <div className="pn-cbox-row">
             {quickLookGoodButton}
@@ -1021,9 +1064,11 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
                 images={images}
                 onAdd={(img) => setImages((prev) => [...prev, img])}
                 onRemove={(path) => setImages((prev) => prev.filter((i) => i.path !== path))}
+                onPendingChange={setPicturesPending}
                 variant="inline"
               />
             )}
+            {CardTools && <CardTools textareaRef={textareaRef} phone={cardPhone} onBusyChange={setToolsBusy} />}
             {onAskAI && (
               <button type="button" className="pn-cbox-tool pn-cbox-word" onClick={handleAskAI} disabled={!canAskAI} title={canAskAI ? 'Ask AI this question' : 'Type a question to ask AI'}>
                 <SparklesIcon className="w-3.5 h-3.5" />
@@ -1141,6 +1186,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
           </div>
 
           {errorRow}
+          {draftConflictRow}
           {chipsRow}
 
           {/* Textarea */}
@@ -1219,6 +1265,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
                   images={images}
                   onAdd={(img) => setImages((prev) => [...prev, img])}
                   onRemove={(path) => setImages((prev) => prev.filter((i) => i.path !== path))}
+                  onPendingChange={setPicturesPending}
                   variant="inline"
                 />
               )}
@@ -1311,6 +1358,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
       </div>
 
       {errorRow}
+          {draftConflictRow}
       {chipsRow}
 
       {/* Textarea */}
@@ -1388,6 +1436,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
               images={images}
               onAdd={(img) => setImages((prev) => [...prev, img])}
               onRemove={(path) => setImages((prev) => prev.filter((i) => i.path !== path))}
+              onPendingChange={setPicturesPending}
               variant="inline"
             />
           )}

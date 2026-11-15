@@ -66,7 +66,7 @@ function world() {
   /** The thread window's read of the session a reply waits on (`?asker=`). */
   const asker = async (threadId: string, session: string) => {
     const path = `/api/inbox/threads/${threadId}/sessions`;
-    const response = await live.route(new Request(`http://127.0.0.1${path}?asker=${session}`), path, true);
+    const response = await live.route(new Request(`http://127.0.0.1${path}?asker=${session}`), path);
     return ((await response!.json()) as { asker: { live: boolean; stuck?: string[] } }).asker;
   };
   /** A Pi wake's claim on a reply (`InboxWake`): named for the session, or an older version's by the reply id alone. */

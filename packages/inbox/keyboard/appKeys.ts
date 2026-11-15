@@ -71,7 +71,7 @@ export interface RefreshView {
   tourOn: boolean;
   /** The Board is on (`boardEnabled === true`). */
   boardOn: boolean;
-  /** Reviews shows (Code review on, not a tailnet guest's page). */
+  /** Reviews shows (Code review on). */
   pullsShown: boolean;
   /** The Inbox's list or thread is drawn: read, and neither the first-run nor the tour's entry screen. */
   listReady: boolean;

@@ -91,6 +91,7 @@ describe.skipIf(!ompBin || process.platform === "win32")("Oh My Pi: Ask this ses
 			PATH: process.env.PATH ?? "/usr/bin:/bin",
 			HOME: home,
 			PI_CODING_AGENT_DIR: agentDir,
+			PLANNOTATOR_RELAY_URL: "http://127.0.0.1:9",
 			PLANNOTATOR_DATA_DIR: join(home, ".plannotator"),
 			XDG_CONFIG_HOME: join(home, ".config"),
 			XDG_CACHE_HOME: join(home, ".cache"),

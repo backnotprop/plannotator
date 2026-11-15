@@ -26,6 +26,7 @@ import { Tip } from './Tip';
 
 const TYPES: { id: InboxArtifactType; name: string }[] = [
   { id: 'images', name: 'Images' },
+  { id: 'videos', name: 'Videos' },
   { id: 'pages', name: 'Pages' },
   { id: 'documents', name: 'Documents' },
   { id: 'other', name: 'Other files' },

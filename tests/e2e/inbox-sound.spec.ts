@@ -22,7 +22,7 @@
  * .local/proof/sound/).
  */
 
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
@@ -132,6 +132,7 @@ async function newWorld(browser: Browser, options: { updatedFrom?: string } = {}
     PATH: `${trapDir}:${process.env.PATH ?? ''}`,
     HOME: home,
     TMPDIR: tmpdir(),
+    PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9',
     PLANNOTATOR_DATA_DIR: dataDir,
     // A release version: never the live daily ping (packages/shared/daily-ping.ts).
     NO_ANON_PING: '1',

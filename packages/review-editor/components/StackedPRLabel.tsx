@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Popover } from '@base-ui/react/popover';
-import { getPlatformLabel } from '@plannotator/shared/pr-types';
+import { getPlatformLabel, getPRPlatformCapabilities } from '@plannotator/shared/pr-types';
 import { buildMinimalStackTree } from '@plannotator/shared/pr-stack';
 import { getItem, setItem } from '@plannotator/ui/utils/storage';
 import type { PRMetadata } from '@plannotator/shared/pr-types';
@@ -18,16 +18,16 @@ interface StackedPRLabelProps {
   onNavigatePR?: (url: string) => void;
 }
 
-function nodeLabel(node: PRStackNode): string {
+function nodeLabel(node: PRStackNode, prefix: string): string {
   if (node.isDefaultBranch) return node.branch;
-  if (node.number != null && node.title) return `#${node.number} ${node.title}`;
-  if (node.number != null) return `#${node.number}`;
+  if (node.number != null && node.title) return `${prefix}${node.number} ${node.title}`;
+  if (node.number != null) return `${prefix}${node.number}`;
   return node.branch;
 }
 
-function shortNodeLabel(node: PRStackNode): string {
+function shortNodeLabel(node: PRStackNode, prefix: string): string {
   if (node.isDefaultBranch) return node.branch;
-  if (node.number != null) return `#${node.number}`;
+  if (node.number != null) return `${prefix}${node.number}`;
   return node.branch;
 }
 
@@ -58,6 +58,7 @@ export function StackedPRLabel({
   onNavigatePR,
 }: StackedPRLabelProps) {
   const [open, setOpen] = useState(false);
+  const { numberPrefix, changeLabel } = getPRPlatformCapabilities(metadata);
 
   const [hideMerged, setHideMerged] = useState(() => getItem(HIDE_MERGED_KEY) === 'true');
   function toggleHideMerged() {
@@ -88,7 +89,7 @@ export function StackedPRLabel({
     return !node.isCurrent && !node.isDefaultBranch && node.state === 'merged';
   }
 
-  const layerTarget = parentNode ? shortNodeLabel(parentNode) : (stackInfo?.baseBranch ?? 'base');
+  const layerTarget = parentNode ? shortNodeLabel(parentNode, numberPrefix) : (stackInfo?.baseBranch ?? 'base');
   const fullStackTarget = rootNode?.isDefaultBranch ? rootNode.branch : (stackInfo?.defaultBranch ?? 'main');
   const scopeTarget = scope === 'full-stack' ? fullStackTarget : layerTarget;
   const hasScopeOptions = scopeOptions.length > 0;
@@ -122,7 +123,7 @@ export function StackedPRLabel({
         return fullStackOption?.enabled
           ? 'Switch to full-stack diff'
           : 'Full-stack diff requires local checkout';
-      case 'navigate': return action.url ? `Review ${shortNodeLabel(node)}` : undefined;
+      case 'navigate': return action.url ? `Review ${shortNodeLabel(node, numberPrefix)}` : undefined;
     }
   }
 
@@ -180,7 +181,7 @@ export function StackedPRLabel({
           <div className="px-3 pt-3 pb-2">
             <div className="flex items-center justify-between mb-2">
               <span className="text-[11px] font-medium text-muted-foreground">
-                Stack ({prNodes.length} {prNodes.length === 1 ? 'PR' : 'PRs'})
+                Stack ({prNodes.length} {prNodes.length === 1 ? changeLabel : `${changeLabel}s`})
                 {hideMerged && showToggle && (
                   <span className="ml-1 text-[10px] text-muted-foreground/50">
                     · {mergedCount} merged hidden
@@ -244,7 +245,7 @@ export function StackedPRLabel({
                                 : 'text-muted-foreground hover:text-annotation-comment hover:bg-muted/30 cursor-pointer'
                       }`}
                     >
-                      <span className={`truncate ${merged ? 'line-through' : ''}`}>{nodeLabel(node)}</span>
+                      <span className={`truncate ${merged ? 'line-through' : ''}`}>{nodeLabel(node, numberPrefix)}</span>
                       {node.isCurrent && (
                         <span className="text-[9px] text-annotation-comment/60 whitespace-nowrap">reviewing</span>
                       )}
@@ -291,7 +292,7 @@ export function StackedPRLabel({
                 </span>
                 <span className="min-w-0">
                   <span className="block text-xs font-medium truncate">
-                    {parentNode ? nodeLabel(parentNode) : (stackInfo?.baseBranch ?? 'base')}
+                    {parentNode ? nodeLabel(parentNode, numberPrefix) : (stackInfo?.baseBranch ?? 'base')}
                   </span>
                   <span className="block text-[11px] leading-snug text-muted-foreground">
                     Only changes in this PR

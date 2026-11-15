@@ -212,6 +212,18 @@ describe("folders on other drives", () => {
     expect(listHomeFolders(me, disk, places)).toMatchObject({ folders: ["Users", "Volumes"], nostart: ["Users", "Volumes"], start: false });
   });
 
+  test("the folders never started in come in the folders' order, whatever order the disk reads them in", () => {
+    const top = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-nostart-")));
+    afterAll(() => rmSync(top, { recursive: true, force: true }));
+    const drives = ["zulu", "alpha", "mike", "bravo", "yankee", "charlie"];
+    for (const name of [...drives, "delta", "xray", "kilo/me"]) mkdirSync(join(top, name), { recursive: true });
+    const spread: FolderPlaces = { system: [], open: [], containers: drives.map((name) => join(top, name)) };
+    expect(listHomeFolders(join(top, "kilo", "me"), top, spread)).toMatchObject({
+      folders: ["alpha", "bravo", "charlie", "delta", "kilo", "mike", "xray", "yankee", "zulu"],
+      nostart: ["alpha", "bravo", "charlie", "kilo", "mike", "yankee", "zulu"],
+    });
+  });
+
   test("a path that isn't there on a drive offers the nearest folder that is; a missing drive offers the drives", () => {
     expect(listHomeFolders(me, `${ssd}/footge/x`, places)).toMatchObject({ exists: false, state: "missing", nearest: { path: ssd, folders: ["footage", "renders"] } });
     expect(listHomeFolders(me, `${volumes}/Archive/old-site`, places)).toMatchObject({ exists: false, state: "missing", nearest: { path: volumes, folders: ["Backup", "Studio SSD"] } });

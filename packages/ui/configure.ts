@@ -25,7 +25,7 @@ import { setTouchSelectionToolbar } from './utils/touchToolbarPlacement';
 import { setPageMarks } from './utils/pageMarks';
 import { setClickAWord } from './utils/clickAWordPolicy';
 import { setCrossRepoRefsWithoutRepo, setDigitHexIssueRefs, type CrossRepoRefsWithoutRepo } from './components/InlineMarkdown';
-import { setRefCardTransport, type RefCardTransport } from './utils/refCard';
+import { setRefCardBitbucket, setRefCardTransport, type RefCardTransport } from './utils/refCard';
 
 // One-stop type barrel: every seam contract a host implements is importable
 // from this module, next to configurePlannotatorUI itself.
@@ -220,6 +220,11 @@ export interface PlannotatorUIConfig {
    */
   refCardTransport?: RefCardTransport;
   /**
+   * Bitbucket Cloud pull request links get a hover card too. Default: off, so
+   * they stay plain links. The Inbox turns it on: its server reads them.
+   */
+  refCardBitbucket?: boolean;
+  /**
    * Highlight a code fence only when it comes near the screen (a screen
    * above or below it), and the rest in idle time, nearest first
    * (`utils/codeHighlight`). A fence on screen is still highlighted before
@@ -272,6 +277,7 @@ export function configurePlannotatorUI(config: PlannotatorUIConfig): void {
   if (config.pageMarks !== undefined) setPageMarks(config.pageMarks);
   if (config.clickAWord !== undefined) setClickAWord(config.clickAWord);
   if (config.refCardTransport) setRefCardTransport(config.refCardTransport);
+  if (config.refCardBitbucket !== undefined) setRefCardBitbucket(config.refCardBitbucket);
   if (config.deferOffscreenCodeHighlight !== undefined) setDeferOffscreenCodeHighlight(config.deferOffscreenCodeHighlight);
   if (config.codeHighlightWorker) setCodeHighlightWorker(config.codeHighlightWorker);
   // Re-hydrate AFTER storageBackend is installed (load-bearing order — gated last).

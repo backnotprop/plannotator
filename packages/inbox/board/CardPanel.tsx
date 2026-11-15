@@ -3,8 +3,6 @@ import { Menu } from '@base-ui/react/menu';
 import {
   INBOX_CARD_COLUMN_LABELS,
   INBOX_CARD_LIVE_COLUMNS,
-  INBOX_CARD_NOTES_MAX,
-  INBOX_CARD_REASON_MAX,
   INBOX_SECTIONS,
   inboxAgentName,
   inboxCardLinkLabel,
@@ -344,7 +342,6 @@ export function CardPanel(props: CardPanelProps) {
             type="text"
             placeholder="Why (optional)"
             value={reason}
-            maxLength={INBOX_CARD_REASON_MAX}
             onChange={(event) => setReason(event.target.value)}
             ref={reasonField}
             // eslint-disable-next-line jsx-a11y/no-autofocus
@@ -574,7 +571,6 @@ function Notes({ card, onSave, text: render }: { card: InboxCardWire; onSave: (n
           ref={area}
           value={text}
           rows={5}
-          maxLength={INBOX_CARD_NOTES_MAX}
           onChange={(event) => setText(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === 'Escape') {

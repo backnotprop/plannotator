@@ -190,6 +190,22 @@ test.skipIf(!hasDom)("a recorded card takes a pick, sent under the record's key;
   expect(picks[0]!.answer?.selected).toEqual(['Yes']);
 });
 
+test.skipIf(!hasDom)("a card that repeats a body question answers through the body's record; one with other choices stays read-only", async () => {
+  const picks: { key: string; answer: QuestionAnswer | null }[] = [];
+  const { attachment: _a, ...bodyFlag } = record(flagKey, flagKey, 0, 'Ship the retry behind a flag?', ['Yes', 'No']);
+  const records = [record(dbKey, dbKey, 0, 'Which database should invoices live in?', ['Postgres', 'SQLite']), bodyFlag];
+  const [, flag] = await mount(questionsWith(records, picks));
+  expect(radiosLive(flag!)).toBe(true);
+  await act(async () => buttonIn(flag!, 'Accept recommended')!.click());
+  expect(picks.map((p) => [p.key, p.answer?.selected])).toEqual([[flagKey, ['Yes']]]);
+  act(() => root?.unmount());
+  host?.remove();
+
+  const { attachment: _b, ...otherFlag } = record(flagKey, flagKey, 0, 'Ship the retry behind a flag?', ['Yes', 'No', 'Later']);
+  const [, other] = await mount(questionsWith([records[0]!, otherFlag], []));
+  expect(radiosLive(other!)).toBe(false);
+});
+
 test.skipIf(!hasDom)('a pick not sent reads Draft with its footer; a locked message locks every card', async () => {
   const records = [record(dbKey, dbKey, 0, 'Which database should invoices live in?', ['Postgres', 'SQLite'], 'picked'), record(flagKey, flagKey, 1, 'Ship the retry behind a flag?', ['Yes', 'No'])];
   const [db] = await mount(questionsWith(records, []));

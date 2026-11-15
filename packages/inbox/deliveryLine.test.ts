@@ -27,6 +27,13 @@ describe('the line under a sent reply', () => {
     expect(deliveryLine({ ...base, connection: { busy: true, idle_since: null, send_now: false } }).sendNow).toBe(false);
   });
 
+  test('waiting on T3 (a T3 that quit took its Claude, whose last poll still reads idle): queued, never Sending; delivered: unchanged', () => {
+    const idle = { busy: false, idle_since: '2026-10-16T17:00:00.000Z', send_now: false };
+    expect(deliveryLine({ ...base, name: 'T3 Code', connection: idle, waitsOnT3: true }).state).toBe('queued');
+    expect(deliveryLine({ ...base, name: 'T3 Code', connection: idle, waitsOnT3: true, handed: true }).text).toBe('Handed to T3 Code; it takes this at its next step.');
+    expect(deliveryLine({ ...base, name: 'T3 Code', connection: idle, waitsOnT3: true, deliveredAt: '2026-10-16T17:12:00.000Z' }).state).toBe('delivered');
+  });
+
   test('idle: sending; after Send now: sending now; delivered: unchanged', () => {
     expect(deliveryLine({ ...base, connection: { busy: false, idle_since: '2026-10-16T17:00:00.000Z', send_now: true } })).toEqual({ state: 'sending', text: 'Sending to Claude Code…' });
     expect(deliveryLine({ ...base, sendingNow: true, connection: { busy: true, idle_since: null, send_now: true } })).toEqual({ state: 'sending', text: 'Sending to Claude Code now…' });
@@ -67,6 +74,13 @@ describe('the line under a sent reply', () => {
     expect(deliveryLine({ ...base, connection: { ...idle, held: false } }).text).toBe('Sending to Claude Code…');
     expect(deliveryLine({ ...base, connection: { busy: true, idle_since: null, send_now: false } }).text).toBe('Queued · Claude Code is working; it gets this when its turn ends.');
     expect(deliveryLine({ ...base, connection: null }).text).toBe('Queued for Claude Code; it gets this when its session is back.');
+  });
+
+  test('a cloud agent with no wake address (its connection polls): saved, then delivered, never queued for a turn', () => {
+    const polls = { busy: null, idle_since: null, send_now: false, polls: true };
+    expect(deliveryLine({ ...base, name: 'Muse by Meta', connection: polls })).toEqual({ state: 'saved', text: 'Saved for Muse by Meta. It sees it when it next reads this thread.' });
+    expect(deliveryLine({ ...base, name: 'Muse by Meta', sendingNow: true, connection: polls }).state).toBe('saved');
+    expect(deliveryLine({ ...base, name: 'Muse by Meta', deliveredAt: '2026-10-16T17:12:00.000Z', connection: polls }).text).toBe('Delivered to Muse by Meta, 5:12 PM');
   });
 
   test('an agent that only reads the thread keeps the truthful wording and never offers Send now', () => {

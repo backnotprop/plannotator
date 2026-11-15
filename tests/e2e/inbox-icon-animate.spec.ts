@@ -13,7 +13,7 @@
  * draws its own otherwise. PLANNOTATOR_ANIMATE_POOR_LINK=1: the window on a poor link (300 ms, 1 Mbit/s each way) and
  * the step's time printed. Build the binary first (see inbox.spec.ts).
  */
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -168,14 +168,16 @@ test('Animate it: a filled-in New message, the hand-back changes the icon by its
   const chooser = page.waitForEvent('filechooser');
   await dialog(page).locator('.am-own-up').click();
   await (await chooser).setFiles(world.picture);
+  await dialog(page).locator('[data-use-icon]').click();
   await expect(mark(page, agentId)).toHaveAttribute('data-face', /^own:[0-9a-f]{64}$/);
   const original = (await mark(page, agentId).getAttribute('data-face'))!;
 
-  // Under it: the button and its one line.
+  // "Your own…" opens on the picture's page: the button and its one line, under "Optional".
   await openYourOwn(page, agentId);
   const row = dialog(page).locator('[data-animate-it]');
   await expect(row.getByRole('button', { name: 'Animate it' })).toBeVisible();
   await expect(row).toContainText('Asks an agent, in a new thread, to animate this picture.');
+  await expect(dialog(page).locator('.ib-agi-sel-opt')).toHaveText('Optional');
   await shot(page, '1-animate-it');
 
   // One press: New message, filled in, To open on the agents.

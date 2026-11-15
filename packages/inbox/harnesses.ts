@@ -7,6 +7,8 @@
  * see the shell PATH still find it. Pure.
  */
 
+import { HERMES_APPLIES, HERMES_PLUGIN_INSTALL, HERMES_WAKE_GRANT_LINE } from '@plannotator/core/inbox-hermes';
+
 export type HarnessId =
   | 'claude-code'
   | 'claude-app'
@@ -15,6 +17,7 @@ export type HarnessId =
   | 'vscode'
   | 'windsurf'
   | 'gemini'
+  | 'antigravity'
   | 'qwen'
   | 'goose'
   | 'amp'
@@ -22,8 +25,11 @@ export type HarnessId =
   | 'pi'
   | 'opencode'
   | 'dsh'
+  | 'openclaw'
+  | 'hermes'
   | 'zed'
   | 'kiro'
+  | 'muse'
   | 'jetbrains'
   | 'other';
 
@@ -41,6 +47,7 @@ export const HARNESSES: readonly Harness[] = [
   { id: 'vscode', label: 'VS Code' },
   { id: 'windsurf', label: 'Windsurf / Devin' },
   { id: 'gemini', label: 'Gemini CLI' },
+  { id: 'antigravity', label: 'Antigravity' },
   { id: 'qwen', label: 'Qwen Code' },
   { id: 'goose', label: 'Goose' },
   { id: 'amp', label: 'Amp' },
@@ -48,8 +55,11 @@ export const HARNESSES: readonly Harness[] = [
   { id: 'pi', label: 'Pi' },
   { id: 'opencode', label: 'OpenCode' },
   { id: 'dsh', label: 'DeepSeek Harness' },
+  { id: 'openclaw', label: 'OpenClaw' },
+  { id: 'hermes', label: 'Hermes Agent' },
   { id: 'zed', label: 'Zed' },
   { id: 'kiro', label: 'Kiro' },
+  { id: 'muse', label: 'Muse Code' },
   { id: 'jetbrains', label: 'JetBrains' },
   { id: 'other', label: 'Other MCP client' },
 ];
@@ -84,12 +94,15 @@ const SERVER = 'plannotator-inbox';
 const CLINE_PLUGIN = '@plannotator/cline';
 /** Plannotator's DeepSeek Harness plugin package (apps/dsh-plugin). */
 const DSH_PLUGIN = '@plannotator/dsh';
+const OPENCLAW_PLUGIN = '@plannotator/openclaw';
 
 /** When a DSH tool switch takes effect: the plugin decides once, when DSH starts, never per session. */
 export const DSH_APPLIES = 'It applies when DeepSeek Harness next starts.';
 
 /** When Cline's tool switch takes effect: the plugin decides at each session's setup, never in a running one. */
 export const CLINE_APPLIES = 'It applies to Cline sessions started from now on.';
+
+export const OPENCLAW_APPLIES = 'It applies from the next message in each OpenClaw chat.';
 
 /** POSIX single-quoting where a word needs it; plain words stay bare. */
 export function shellWord(word: string): string {
@@ -208,6 +221,11 @@ export function harnessPanel(id: HarnessId, ctx: ConnectContext): HarnessPanel {
         artefacts: [{ kind: 'code', text: `gemini mcp add -s user ${SERVER} ${cmd}` }],
         note: 'Adds it to Gemini CLI in every project.',
       };
+    case 'antigravity':
+      return {
+        artefacts: [{ kind: 'code', label: '~/.gemini/config/mcp_config.json', text: mcpServersSnippet(ctx) }],
+        note: 'Merge it into mcpServers. The Antigravity App, the IDE and agy all read this file; restart the App or the IDE.',
+      };
     case 'qwen':
       // After NonoElRobot's fork (c6a02a0): the settings.json entry. Not `qwen mcp add`: it writes the
       // other servers back with their ${VAR} values filled in, so a token kept in the environment lands in the file.
@@ -268,6 +286,19 @@ export function harnessPanel(id: HarnessId, ctx: ConnectContext): HarnessPanel {
           body: { kind: 'code', text: `dsh plugin --profile desktop add ${DSH_PLUGIN}` },
         },
       };
+    case 'openclaw':
+      return {
+        artefacts: [{ kind: 'code', text: `openclaw plugins install ${OPENCLAW_PLUGIN}` }],
+        note: `Plannotator's OpenClaw plugin. Its Inbox tool starts off: turn it on for OpenClaw in Settings > Agents. ${OPENCLAW_APPLIES} Only your own chats get it: OpenClaw on this computer and your direct messages, never a group. Your replies then come back into the same chat by themselves.`,
+      };
+    case 'hermes':
+      return {
+        artefacts: [
+          { kind: 'code', text: HERMES_PLUGIN_INSTALL },
+          { kind: 'code', text: HERMES_WAKE_GRANT_LINE },
+        ],
+        note: `Plannotator's Hermes Agent plugin, and Hermes's permission for it to start a turn with your reply. Its Inbox tool starts off: turn it on for Hermes Agent in Settings > Agents. ${HERMES_APPLIES} Your replies then come back into the Hermes session that asked: the terminal, the TUI, the Desktop app or your own direct messages.`,
+      };
     case 'zed':
       return {
         artefacts: [{ kind: 'code', label: '~/.config/zed/settings.json', text: json({ context_servers: { [SERVER]: { ...stdio(ctx), env: {} } } }) }],
@@ -278,6 +309,11 @@ export function harnessPanel(id: HarnessId, ctx: ConnectContext): HarnessPanel {
       return {
         artefacts: [{ kind: 'code', label: '~/.kiro/settings/mcp.json', text: mcpServersSnippet(ctx) }],
         note: 'Kiro picks it up without a restart.',
+      };
+    case 'muse':
+      return {
+        artefacts: [{ kind: 'code', text: `muse mcp add ${SERVER} -- ${cmd}` }],
+        note: "Run it in a terminal, then start a new Muse Code session in a folder Muse trusts: it starts MCP servers only there. Replies don't wake Muse Code: it reads them when it next checks the Inbox.",
       };
     case 'jetbrains':
       return {

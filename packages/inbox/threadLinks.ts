@@ -13,8 +13,8 @@
  * Pure: no DOM, no fetch.
  */
 
-import { forgeRefKey, forgeRefLabel, webForgeHost } from '@plannotator/core/forge-ref-card';
-import { classifyForgeHost, forgeRefLinks, matchCrossRepoRef, type ForgePlatform } from '@plannotator/core/forge-refs';
+import { forgeOfUrl, forgeRefKey, forgeRefLabel } from '@plannotator/core/forge-ref-card';
+import { forgeRefLinks, matchCrossRepoRef, type ForgePlatform } from '@plannotator/core/forge-refs';
 import type { InboxMessageWire, InboxProjectRepo } from '@plannotator/core/inbox-types';
 import { parseTableContent } from '@plannotator/ui/components/blocks/TableBlock';
 import { trimUrlTail } from '@plannotator/ui/components/InlineMarkdown';
@@ -258,6 +258,7 @@ const NUMBER = /^[1-9]\d{0,9}$/;
 const NOT_OWNERS: Record<ForgePlatform, ReadonlySet<string>> = {
   github: new Set(['about', 'apps', 'codespaces', 'collections', 'contact', 'customer-stories', 'enterprise', 'explore', 'features', 'issues', 'join', 'login', 'marketplace', 'new', 'notifications', 'orgs', 'pricing', 'pulls', 'readme', 'search', 'security', 'settings', 'sponsors', 'stars', 'topics', 'trending', 'users', 'watching']),
   gitlab: new Set(['admin', 'dashboard', 'explore', 'groups', 'help', 'projects', 'search', 'users']),
+  bitbucket: new Set(['account', 'blog', 'dashboard', 'product', 'repo', 'site', 'snippets', 'socialauth', 'support', 'workspace']),
 };
 
 /** Readable, and never a way to turn text around (a bidi override written into a url). */
@@ -283,14 +284,16 @@ interface Repository {
 
 /** The repository a url is in; a forge's own page (`github.com/settings`) is only its platform. */
 function readForge(url: URL): Repository | ForgePlatform | null {
-  const host = webForgeHost(url.hostname);
-  const platform = host ? classifyForgeHost(host) : null;
-  if (!host || !platform) return null;
+  const forge = forgeOfUrl(url);
+  if (!forge) return null;
+  const { host, platform } = forge;
   const parts = url.pathname.split('/').filter(Boolean);
+  // GitHub and Bitbucket: `owner/repo/...`; GitLab: `group/sub/project/-/...`.
+  const twoPart = platform !== 'gitlab';
   const dash = platform === 'gitlab' ? parts.indexOf('-') : -1;
-  const owned = platform === 'github' ? parts.slice(0, 2) : dash >= 0 ? parts.slice(0, dash) : parts;
+  const owned = twoPart ? parts.slice(0, 2) : dash >= 0 ? parts.slice(0, dash) : parts;
   if (owned.length < 2 || NOT_OWNERS[platform].has(owned[0]!.toLowerCase()) || !owned.every((p) => NAME.test(p))) return platform;
-  const rest = platform === 'github' ? parts.slice(2) : dash >= 0 ? parts.slice(dash + 1) : [];
+  const rest = twoPart ? parts.slice(2) : dash >= 0 ? parts.slice(dash + 1) : [];
   return { platform, host, path: owned.join('/').replace(/\.git$/i, ''), section: rest[0] ?? null, rest: rest.slice(1) };
 }
 
@@ -309,7 +312,7 @@ interface RepoRow {
 
 function repoRow({ platform, host, path, section, rest }: Repository, url: URL): RepoRow | null {
   if (!section) return null;
-  const refKind = section === 'issues' || section === 'work_items' ? 'issue' : section === 'pull' || section === 'pulls' || section === 'merge_requests' ? 'pull' : null;
+  const refKind = section === 'issues' || section === 'work_items' ? 'issue' : section === 'pull' || section === 'pulls' || section === 'merge_requests' || section === 'pull-requests' ? 'pull' : null;
   if (refKind && rest[0] && NUMBER.test(rest[0])) {
     const number = Number(rest[0]);
     const cut = path.lastIndexOf('/');

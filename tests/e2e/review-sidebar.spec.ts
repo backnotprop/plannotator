@@ -70,6 +70,7 @@ function reviewEnv(root: string, readyFile: string): NodeJS.ProcessEnv {
     PATH: ownPath(root),
     HOME: root,
     PLANNOTATOR_TEST_SANDBOX: root,
+    PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9',
     PLANNOTATOR_DATA_DIR: join(root, 'data'),
     PLANNOTATOR_READY_FILE: readyFile,
     PLANNOTATOR_BROWSER: NO_BROWSER,

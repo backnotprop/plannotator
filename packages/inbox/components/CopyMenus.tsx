@@ -14,10 +14,13 @@ import { Icon } from '../icons';
 import { DECISIONS_POST_TO_WORDS, decisionExportUrl, threadHasQuestionCards } from '../decisionExport';
 import { inboxApi, type DecisionsPostTo } from '../api';
 import { RefMarkIcon } from '../board/RefMark';
-import { useThreadPulls } from '../threadPulls/ThreadPulls';
+import { canPostDecisionsOn, useThreadPulls } from '../threadPulls/ThreadPulls';
 import { Tip } from './Tip';
+import { useThreadTags } from '../threadTags';
+import { AddTagItem, AddTagList } from './AddTagMenu';
 import { useMessageArm } from '../messageArming';
 import type { InboxToastModel } from './Toast';
+import { TAKE_BACK_LABEL } from '../takeBack';
 
 /**
  * Copy a message, copy a thread (design record "inbox-copy-message", option
@@ -46,17 +49,20 @@ function who(message: InboxMessageWire, short = false): string {
   return `${short ? shortAgentName(name) : name}, ${whenTime(message.created_at)}`;
 }
 
-function useCopies({ thread, linkOf, onToast }: CopyMenuHost) {
+function useCopies(host: () => CopyMenuHost) {
   const say = (ok: boolean, lead: string, detail: string, speech?: string) =>
-    onToast?.(ok ? { icon: 'check', lead, detail, ...(speech && speech !== `${lead}. ${detail}` ? { speech } : {}) } : { icon: 'warn', lead: "Couldn't copy" });
+    host().onToast?.(ok ? { icon: 'check', lead, detail, ...(speech && speech !== `${lead}. ${detail}` ? { speech } : {}) } : { icon: 'warn', lead: "Couldn't copy" });
   const named = (lead: string, message: InboxMessageWire) => say(true, lead, who(message, true), `${lead}. ${who(message)}`);
-  const subject = `“${thread.subject ?? '(no subject)'}”`;
+  const subject = () => `“${host().thread.subject ?? '(no subject)'}”`;
   return {
     message: (message: InboxMessageWire) => void copyMarkdown(messageMarkdown(message)).then((ok) => (ok ? named('Message copied', message) : say(false, '', ''))),
-    messageLink: (message: InboxMessageWire) => void copyTextToClipboard(linkOf(message.id)).then((ok) => (ok ? named('Link copied', message) : say(false, '', ''))),
-    thread: () => void copyMarkdown(threadMarkdown(thread)).then((ok) => say(ok, 'Thread copied', plural(thread.messages.length, 'message'))),
-    threadLink: () => void copyTextToClipboard(linkOf()).then((ok) => say(ok, 'Link copied', subject)),
-    threadId: () => void copyTextToClipboard(thread.thread_id).then((ok) => say(ok, 'Thread ID copied', subject)),
+    messageLink: (message: InboxMessageWire) => void copyTextToClipboard(host().linkOf(message.id)).then((ok) => (ok ? named('Link copied', message) : say(false, '', ''))),
+    thread: () => {
+      const { thread } = host();
+      void copyMarkdown(threadMarkdown(thread)).then((ok) => say(ok, 'Thread copied', plural(thread.messages.length, 'message')));
+    },
+    threadLink: () => void copyTextToClipboard(host().linkOf()).then((ok) => say(ok, 'Link copied', subject())),
+    threadId: () => void copyTextToClipboard(host().thread.thread_id).then((ok) => say(ok, 'Thread ID copied', subject())),
   };
 }
 
@@ -79,12 +85,13 @@ function usePortal<T extends HTMLElement>() {
  * One open message's menu: its ⋯ (handed to `head` to place after Reply) and,
  * off a phone, a right-click on the head line `head` draws.
  */
-export function MessageMenu(props: CopyMenuHost & { message: InboxMessageWire; head: (more: ReactElement) => ReactElement }) {
-  const { message, phone } = props;
-  const copies = useCopies(props);
+export function MessageMenu(props: { phone: boolean; newest: { readonly current: CopyMenuHost }; message: InboxMessageWire; head: (more: ReactElement) => ReactElement; takeBackOf?: () => (() => void) | null }) {
+  const { message, phone, newest } = props;
+  const copies = useCopies(() => newest.current);
   const { ref: more, portal } = usePortal<HTMLButtonElement>();
   const [open, setOpen] = useState(false);
   const [contextOpen, setContextOpen] = useState(false);
+  const onTakeBack = open || contextOpen ? (props.takeBackOf?.() ?? null) : null;
   const arm = useMessageArm();
   const named = who(message);
   // Shift+F10 or the context-menu key on the message's head (approval "inbox-keyboard-keys-2026-11-07", item 6): its
@@ -127,6 +134,15 @@ export function MessageMenu(props: CopyMenuHost & { message: InboxMessageWire; h
       <div className="ib-pm-title" aria-hidden="true">
         {copyAuthor(message)} · {whenTime(message.created_at)}
       </div>
+      {onTakeBack && (
+        <>
+          <Menu.Item className="ib-pmi" label={TAKE_BACK_LABEL} onClick={onTakeBack} data-take-back-item="">
+            <Icon name="reply" size={15} />
+            {TAKE_BACK_LABEL}
+          </Menu.Item>
+          <Menu.Separator className="ib-pm-sep" />
+        </>
+      )}
       <Menu.Item className="ib-pmi" label="Copy message" onClick={() => copies.message(message)} data-copy-item="message">
         <Icon name="copy" size={15} />
         Copy message
@@ -244,13 +260,15 @@ export interface ThreadMoreLaunch {
  * its room), with every read action (`markRead`, `moveBack` on a thread marked read, `markUnread`; markRead.ts
  * `canMarkUnread`), then Snooze, which swaps the menu in place for "‹ Snooze until" and its times (H opens it there:
  * `snoozeRequest`), and Unsnooze; then a divider, Pin thread in its own group (only when the Inbox keeps pins: `pin`
- * is absent on an older one). Then Copy thread, then Copy link and Copy thread ID, then, in its own group, Archive thread (Unarchive thread on an
+ * is absent on an older one), with Add to Priority (Remove from Priority on a thread in it) after it, then Add tag (its tags swap in place; only when the Inbox keeps tags, approval "inbox-thread-tags"). Then Copy thread, then Copy link and Copy thread ID, then, in its own group, Archive thread (Unarchive thread on an
  * archived one; the owner, 2026-11-01: move it into the ⋯). None has a key. Request guided review (`requestGuide`)
  * has its own group above Archive, on desktop and in the phone sheet alike, only where the thread offers it.
  */
 export function ThreadMore(
   props: CopyMenuHost & {
     pin?: { pinned: boolean; onToggle: () => void };
+    /** Add to Priority (`on` false) or Remove from Priority; absent where the thread's row offers neither. */
+    priority?: { on: boolean; onToggle: () => void };
     /** Mark read (E), offered while something here waits on the person. */
     markRead?: () => void;
     /** Move back to the top, on a thread marked read. */
@@ -267,19 +285,23 @@ export function ThreadMore(
     /**
      * Post decisions (step 2): Export decisions' "Post on a pull request" group, one row per PR on the thread; with
      * none, its Add a pull request… opens the PRs card and posts on the PR once it is added (`addPullThenPost`).
-     * Absent where the thread's PRs can't be changed (a guest, another machine's thread).
+     * Absent where the thread's PRs can't be changed (another machine's thread).
      */
     postDecisions?: { post: (ref: string) => void; addPullThenPost: () => void };
     launch?: ThreadMoreLaunch | null;
   },
 ) {
-  const { thread, phone, pin, markRead, moveBack, markUnread, archive, snooze, snoozeRequest = 0, requestGuide, addPull, postDecisions, launch } = props;
+  const { thread, phone, pin, priority, markRead, moveBack, markUnread, archive, snooze, snoozeRequest = 0, requestGuide, addPull, postDecisions, launch } = props;
   const markReadKeys = useShortcutAria({ scope: inboxThreadShortcuts, action: 'markRead' });
   const snoozeKeys = useShortcutAria({ scope: inboxThreadShortcuts, action: 'snooze' });
-  const copies = useCopies(props);
+  const copies = useCopies(() => props);
   const { ref, portal } = usePortal<HTMLButtonElement>();
   const [open, setOpen] = useState(false);
   const [view, setView] = useState<SnoozeView | null>(null);
+  // Add tag's list, swapped in as Snooze's times are (approval "inbox-thread-tags").
+  const [tagView, setTagView] = useState(false);
+  const tags = useThreadTags();
+  const tagging = !!tags?.can(thread.thread_id);
   // Only a new request opens it: the menu mounting again (J/K into a thread) keeps it shut.
   const seenRequest = useRef(snoozeRequest);
   useEffect(() => {
@@ -295,7 +317,8 @@ export function ThreadMore(
   const exportBack = useRef(false);
   // The thread's PRs for the Post group: read while the menu is open (the PR button keeps them current otherwise).
   const { answer: pullsAnswer } = useThreadPulls(thread.thread_id, open && exportOffered && !!postDecisions);
-  const linked = pullsAnswer?.pulls ?? [];
+  // Only the PRs decisions can post on (a Bitbucket PR is refused by the server, so it gets no row).
+  const linked = (pullsAnswer?.pulls ?? []).filter(canPostDecisionsOn);
   // Where to post (config.json `inboxDecisionsPostTo`): read when the menu opens, saved on a pick.
   const [postTo, setPostTo] = useState<DecisionsPostTo | null>(null);
   const postOffered = open && exportOffered && !!postDecisions;
@@ -314,14 +337,16 @@ export function ThreadMore(
   }, [postOffered]);
   // Back from the times: focus goes to Snooze again, not to the item now at its old index.
   const backed = useRef(false);
+  const tagBack = useRef(false);
   const popup = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
-    if (view !== null || exportView || !backed.current) return;
+    if (view !== null || exportView || tagView || !backed.current) return;
     backed.current = false;
-    const item = exportBack.current ? '[data-thread-export-item]' : '[data-thread-snooze-item]';
+    const item = exportBack.current ? '[data-thread-export-item]' : tagBack.current ? '[data-add-tag-item]' : '[data-thread-snooze-item]';
     exportBack.current = false;
+    tagBack.current = false;
     return focusAfterSwap(() => popup.current?.querySelector<HTMLElement>(item));
-  }, [view, exportView]);
+  }, [view, exportView, tagView]);
   useLayoutEffect(() => {
     if (!exportView) return;
     return focusAfterSwap(() => popup.current?.querySelector<HTMLElement>('[data-decision-export]'));
@@ -449,6 +474,12 @@ export function ThreadMore(
       {pin.pinned ? 'Unstar thread' : 'Star thread'}
     </Menu.Item>
   );
+  const priorityItem = priority && (
+    <Menu.Item className="ib-pmi" label={priority.on ? 'Remove from Priority' : 'Add to Priority'} onClick={priority.onToggle} data-thread-priority-item="">
+      <Icon name={priority.on ? 'toBottom' : 'toTop'} size={15} />
+      {priority.on ? 'Remove from Priority' : 'Add to Priority'}
+    </Menu.Item>
+  );
   const leadItems = !!(markRead || moveBack || markUnread || snooze);
   const lead = (
     <>
@@ -470,12 +501,14 @@ export function ThreadMore(
         </Menu.Item>
       )}
       {unsnoozeItem}
-      {leadItems && pin && <Menu.Separator className="ib-pm-sep" />}
+      {leadItems && (pin || priority || tagging) && <Menu.Separator className="ib-pm-sep" />}
       {pinItem}
+      {priorityItem}
+      <AddTagItem threadId={thread.thread_id} onOpen={() => setTagView(true)} />
     </>
   );
   // Whether anything leads the menu (the divider before Copy thread).
-  const leads = leadItems || !!pin;
+  const leads = leadItems || !!pin || !!priority || tagging;
   return (
     <Menu.Root
       modal={false}
@@ -485,6 +518,7 @@ export function ThreadMore(
         if (!next) {
           setView(null);
           setExportView(false);
+          setTagView(false);
         }
       }}
     >
@@ -514,6 +548,22 @@ export function ThreadMore(
                   }}
                   onPick={snooze.onPick}
                   onClose={() => setOpen(false)}
+                />
+              </>
+            ) : tagView && tagging ? (
+              <>
+                {phone && (
+                  <div className="ib-pm-title" dir="auto" aria-hidden="true">
+                    {thread.subject ?? '(no subject)'}
+                  </div>
+                )}
+                <AddTagList
+                  threadId={thread.thread_id}
+                  onBack={() => {
+                    backed.current = true;
+                    tagBack.current = true;
+                    setTagView(false);
+                  }}
                 />
               </>
             ) : exportView && exportOffered ? (
