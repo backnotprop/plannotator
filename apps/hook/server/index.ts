@@ -463,6 +463,14 @@ if (isReviewDrawCommand(rawArgs, () => {
     );
   }
 }
+// `plannotator inbox antigravity`: an Antigravity CLI conversation hands its agent API to the Inbox (inbox-antigravity-command.ts).
+{
+  const args = rawArgs;
+  if (args[0] === "inbox" && args[1] === "antigravity") {
+    const { runInboxAntigravityCommand } = await import("./inbox-antigravity-command");
+    process.exit(await runInboxAntigravityCommand(args.slice(2), { env: process.env, dataDir: getPlannotatorDataDir() }));
+  }
+}
 // `plannotator inbox pulls ls|add|rm <thread> [<ref>...]`: a thread's PRs, sugar over `inbox call thread_pulls` (inbox-pulls-command.ts).
 {
   const args = rawArgs;

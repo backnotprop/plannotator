@@ -22,7 +22,7 @@ import { checkSendPrototypes } from "./inbox-prototypes";
 import { questionsToCheckText } from "@plannotator/shared/inbox/questions-to-check";
 import { INBOX_ACTION_EXAMPLE, INBOX_ACTION_GUIDE, INBOX_DONE_DESCRIPTION } from "@plannotator/core/inbox-actions";
 import { INBOX_NOTE_BLOCK_LINE } from "@plannotator/core/inbox-review";
-import { checkInboxSubject, INBOX_CARD_ACTION_ON, INBOX_MCP_WAKING_HOSTS, INBOX_T3_HOST, inboxTidyMcpLine, INBOX_NAME_THIS_THREAD_HINT, INBOX_SECTIONS, isInboxNote, INBOX_THREAD_NAME_MAX, type InboxGuideRef, type InboxSectionId, type InboxMessage, type InboxProject } from "@plannotator/core/inbox-types";
+import { antigravityConversationOfCall, checkInboxSubject, INBOX_ANTIGRAVITY_HOST, INBOX_CARD_ACTION_ON, INBOX_MCP_WAKING_HOSTS, INBOX_T3_HOST, inboxTidyMcpLine, INBOX_NAME_THIS_THREAD_HINT, INBOX_SECTIONS, isInboxNote, INBOX_THREAD_NAME_MAX, type InboxGuideRef, type InboxSectionId, type InboxMessage, type InboxProject } from "@plannotator/core/inbox-types";
 import { inboxBodyWithBro, inboxStopNoticeReply, INBOX_AGENT_RULES, INBOX_OPTION_LINES_RULE, INBOX_ATTACHMENTS_PICTURES_LINE, INBOX_ATTACHMENTS_PROTOTYPE_CLAUSE, INBOX_DELEGATED_OPTIONS_RULE, INBOX_PEEK_META_KEY, INBOX_PICTURES_RULE, INBOX_REF_LINK_RULE, INBOX_REPLY_TO_CHECK, INBOX_WAKES_META_KEY, INBOX_WORKING_FOLDER_META_KEY } from "@plannotator/shared/inbox/connection";
 import { inboxSectionOf } from "@plannotator/shared/inbox/list";
 import { bodyShowsLocalImages, captureInboxInlineImages, type InlineImageFailure } from "@plannotator/shared/inbox/inline-images";
@@ -467,9 +467,26 @@ export const INBOX_REPLY_READ_LATER_TEXT =
 export const INBOX_REPLY_T3_WHILE_RUNNING_TEXT =
   "The person's reply arrives in this session by itself while T3 Code keeps it running: end your turn, or go on with other work. If T3 stops this session first, the reply waits in the Inbox until the person connects T3 (`plannotator t3 --help`); when you next work, call read_thread with this thread_id.";
 
-/** What a send tool's result ends with, for this caller. `t3WhileRunning`: woken only while T3 keeps the session. */
-export function replyNextStepText(wakes: boolean, host: string | undefined, t3WhileRunning = false): string {
-  if (!wakes) return INBOX_REPLY_READ_LATER_TEXT;
+/**
+ * An Antigravity CLI conversation the Inbox has no live hand-over for: the agy CLI publishes its agent API only to
+ * the commands its agent runs, so the agent hands it over once. Proposed words: the owner approves them word for word.
+ */
+export const INBOX_REPLY_ANTIGRAVITY_HANDOVER_TEXT =
+  "The person's reply won't arrive in this session by itself yet. To have it start a turn here, run `plannotator inbox antigravity` in your terminal now (once per agy launch); otherwise call read_thread with this thread_id later.";
+
+/** Whether a send's result asks an Antigravity CLI conversation that nothing wakes yet to hand its agent API over. */
+export function antigravityHandsOver(ctx: unknown, wakes: boolean, input: { agent_host?: string; agent_session?: string }): boolean {
+  if (wakes || input.agent_host?.trim() !== INBOX_ANTIGRAVITY_HOST) return false;
+  const call = antigravityConversationOfCall((ctx as { mcpReq?: { _meta?: unknown } } | undefined)?.mcpReq?._meta);
+  return call !== null && call.conversation === input.agent_session?.trim() && call.product === "cli";
+}
+
+/**
+ * What a send tool's result ends with, for this caller. `t3WhileRunning`: woken only while T3 keeps the session.
+ * `antigravityHandover`: an Antigravity CLI conversation that would be woken once it hands its agent API over.
+ */
+export function replyNextStepText(wakes: boolean, host: string | undefined, t3WhileRunning = false, antigravityHandover = false): string {
+  if (!wakes) return antigravityHandover ? INBOX_REPLY_ANTIGRAVITY_HANDOVER_TEXT : INBOX_REPLY_READ_LATER_TEXT;
   if (t3WhileRunning) return INBOX_REPLY_T3_WHILE_RUNNING_TEXT;
   return INBOX_MCP_WAKING_HOSTS.includes(host?.trim() ?? "") ? `${INBOX_REPLY_ARRIVES_TEXT} ${INBOX_REPLY_LOOK_TEXT}` : INBOX_REPLY_ARRIVES_TEXT;
 }
@@ -1253,7 +1270,7 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
           sent.structured.hint = quiet.line;
         }
         return ok(
-          `${sent.replayed ? "Already sent" : "Sent"} to the Plannotator Inbox${asked} (thread ${sent.structured.thread_id}, ${sent.structured.url}).${stepsLine}${pullsLine}${priorityLine(sent.priority)}${namingLine(sent.naming)} ${replyNextStepText(wakes, input.agent_host, await t3WokenOnlyWhileRunning(context, wakes, input))}${hints.join("")}`,
+          `${sent.replayed ? "Already sent" : "Sent"} to the Plannotator Inbox${asked} (thread ${sent.structured.thread_id}, ${sent.structured.url}).${stepsLine}${pullsLine}${priorityLine(sent.priority)}${namingLine(sent.naming)} ${replyNextStepText(wakes, input.agent_host, await t3WokenOnlyWhileRunning(context, wakes, input), antigravityHandsOver(ctx, wakes, input))}${hints.join("")}`,
           stale ? { ...sent.structured, not_read_since: lastContactOf(stale) } : sent.structured,
         );
       }),
