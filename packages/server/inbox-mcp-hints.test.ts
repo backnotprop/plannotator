@@ -1,11 +1,13 @@
 /**
- * send_message's quiet hints (approval "inbox-quiet-hints"): one extra line
- * when the body names a PR that is not on the thread, or asks a question
- * with options that carry no pros, cons or prototype. The failures these
- * guard: a hint on a message that is right (the PR is on the thread, the
- * link is an issue or sits in code, the question has trade-offs), a session
- * told twice, two hints on one send, and a hint on a refused send. The
- * picture-choices advice is not a quiet hint: it is said every time.
+ * send_message's quiet hints (approval "inbox-quiet-hints"; the PR lines in
+ * the owner's words of 2026-11-15): a line per PR the body names that is on
+ * no thread's row, or one line when it asks a question with options that
+ * carry no pros, cons or prototype. The failures these guard: a line on a
+ * message that is right (the PR is on a row, was passed in `pulls`, the
+ * number is an issue's or unknown, the link sits in code), a thread told
+ * twice about one PR, a thread not told because another thread was, more
+ * than three PR lines, two kinds on one send, and a hint on a refused send.
+ * The picture-choices advice is not a quiet hint: it is said every time.
  *
  * A real store in a temp dir and send_message's own handler; no Inbox
  * server, no network.
@@ -14,10 +16,10 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { parseInboxThreadPullRefs } from "@plannotator/core/inbox-types";
+import { INBOX_THREAD_PULLS_MAX, parseInboxThreadPullRefs } from "@plannotator/core/inbox-types";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { createInboxMcpServer, type InboxMcpContext } from "./inbox-mcp";
-import { attachPullText, pullsNamedInBody, QUESTION_OPTIONS_HINT, questionWithBareOptions, quietHint } from "./inbox-mcp-hints";
+import { attachPullText, pullsNamedInBody, QUESTION_OPTIONS_HINT, questionWithBareOptions, quietHint, type InboxKnownPulls } from "./inbox-mcp-hints";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -27,34 +29,51 @@ afterEach(() => {
 const PR = "https://github.com/acme/api/pull/12";
 const ask = (kind: string, ...lines: string[]) => [`:::${kind}`, "Which retry policy?", "", ...lines, ":::"].join("\n");
 const BARE = ask("question", "- [ ] Fixed delay", "- [ ] Backoff");
-const keys = (body: string) => pullsNamedInBody(body).map((ref) => ref.key);
+const keys = (body: string, known?: InboxKnownPulls) => pullsNamedInBody(body, null, known).map((ref) => ref.key);
+/** The approved line, word for word. */
+const nudge = (label: string, add: string) => `You named ${label}, which is on no thread's row. If it is this work's PR, attach it: thread_pulls with add ["${add}"].`;
+/** What the Inbox knows: the project is acme/api on github.com, and these keys are PRs (any other number is an issue or unknown). */
+const knowing = (...pulls: string[]): InboxKnownPulls => ({ repo: { host: "github.com", repo: "acme/api" }, isPull: (key) => pulls.includes(key) });
 
 type Result = { content: { text: string }[]; isError?: boolean; structuredContent?: Record<string, unknown> };
 
-function world(projectHost?: InboxMcpContext["projectHost"]) {
+function world(options: { projectHost?: InboxMcpContext["projectHost"]; known?: InboxKnownPulls } = {}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-hints-")));
   roots.push(root);
   const store = InboxStore.open(join(root, "data"));
   const project = store.ensureProject({ name: "api", root: join(root, "api") });
-  const context = { store, baseUrl: () => "http://localhost:1/", resolveProject: async () => project, projectHost } as unknown as InboxMcpContext;
+  const context = {
+    store,
+    baseUrl: () => "http://localhost:1/",
+    resolveProject: async () => project,
+    projectHost: options.projectHost,
+    knownPulls: options.known ? (projectId: string) => (projectId === project.id ? options.known! : null) : undefined,
+  } as unknown as InboxMcpContext;
   const server = createInboxMcpServer(context) as unknown as { _registeredTools: Record<string, { handler: (input: Record<string, unknown>, ctx: unknown) => Promise<Result> }> };
   const send = async (session: string, input: Record<string, unknown>) => {
     const result = await server._registeredTools.send_message!.handler({ project_path: project.root, agent_session: session, agent_host: "claude-code", ...input }, {});
     const lines = result.content[0]!.text.split("\n");
-    return { result, lines, last: lines.at(-1)! };
+    return { result, lines, last: lines.at(-1)!, id: result.structuredContent?.message_id as string, thread: String(result.structuredContent?.thread_id) };
   };
   return { store, project, send };
 }
 
-test("a PR's URL or a GitLab short ref in the agent's words is read; code, quotes, issues and ambiguous refs are not", () => {
+test("a PR's URL or a GitLab short ref in the agent's words is read; code, quotes, issues and unknown numbers are not", () => {
   expect(keys(`Opened ${PR} for this.`)).toEqual(["github.com/acme/api#12"]);
   expect(keys(`See [the PR](${PR}/files) and acme/web!7.`)).toEqual(["github.com/acme/api#12", "gitlab.com/acme/web#7:pull"]);
   expect(keys(["```sh", `gh pr view ${PR}`, "```", `and \`${PR}\``].join("\n"))).toEqual([]);
   expect(keys(`> you said ${PR}\nYes.`)).toEqual([]);
   expect(keys("Tracked in https://github.com/acme/api/issues/12.")).toEqual([]);
   expect(keys("Opened https://bitbucket.org/acme/api/pull-requests/3/diff and https://bitbucket.org/acme/api/issues/4.")).toEqual(["bitbucket.org/acme/api#3:pull"]);
-  // `owner/repo#12` and a bare `#12` may each be an issue.
+  // `owner/repo#12` and a bare `#12` may each be an issue: only a number the Inbox knows as a PR counts.
   expect(keys("Follows acme/api#12 and #13. Done!")).toEqual([]);
+  expect(keys("Follows acme/web#12, #13 and #14 (an issue).", { ...knowing("github.com/acme/web#12", "github.com/acme/api#13"), repo: { host: "github.com", repo: "acme/api" } })).toEqual([
+    "github.com/acme/web#12",
+    "github.com/acme/api#13",
+  ]);
+  // Not a number the agent named: code, a quote, an HTML entity, a link's fragment.
+  expect(keys(["`#13`", "> #13", "&#13;", "see page#13", "```", "#13", "```"].join("\n"), knowing("github.com/acme/api#13"))).toEqual([]);
+  expect(keys("PR#13 is up.", knowing("github.com/acme/api#13"))).toEqual(["github.com/acme/api#13"]);
 });
 
 test("a question counts with two or more choices and no pros, cons or prototype anywhere", () => {
@@ -69,66 +88,92 @@ test("a question counts with two or more choices and no pros, cons or prototype 
   expect(questionWithBareOptions([":::action", "Rotate the key", "- [ ] In the console", "- [ ] With the CLI", ":::"].join("\n"))).toBe(false);
 });
 
-test("the PR line is the answer's last line, names the ref, and is said once to a session; another session hears it once too", async () => {
-  const w = world();
-  const first = await w.send("ses_a", { body: `Opened ${PR}.` });
+test("a bare #N the Inbox knows as the project's PR is named once per thread; the same thread again is quiet, another thread hears it; an issue's number never", async () => {
+  const w = world({ known: knowing("github.com/acme/api#3405") });
+  const first = await w.send("ses_a", { body: "Opened #3405; it is like issue #7.", thread: "one" });
   expect(first.result.isError).toBeUndefined();
   expect(first.lines[0]).toStartWith("Sent to the Plannotator Inbox");
-  expect(first.last).toBe(attachPullText(parseInboxThreadPullRefs([PR], "pulls").refs!));
-  expect(first.last).toContain('add ["acme/api#12"]');
+  expect(first.lines).toHaveLength(2);
+  expect(first.last).toBe(nudge("#3405", "acme/api#3405"));
   expect(first.result.structuredContent!.hint).toBe(first.last);
-  // The same fact again, in a new thread: quiet.
-  const again = await w.send("ses_a", { body: `Also https://github.com/acme/api/pull/13.`, thread: "other" });
-  expect(again.lines).toHaveLength(1);
-  expect(again.result.structuredContent!.hint).toBeUndefined();
-  const other = await w.send("ses_b", { body: `Opened ${PR}.`, thread: "b" });
-  expect(other.last).toStartWith("You can attach that PR");
+  // The same thread, any session: told already.
+  expect((await w.send("ses_a", { body: "#3405 is green.", reply_to: first.id })).lines).toHaveLength(1);
+  // (Its one extra line is the "not read this thread" one.)
+  expect((await w.send("ses_b", { body: "Reviewing #3405.", reply_to: first.id })).result.content[0]!.text).not.toContain("You named");
+  // Another thread, the same session: still on no row, so said there too.
+  expect((await w.send("ses_a", { body: "Follow-up to #3405.", thread: "two" })).last).toBe(nudge("#3405", "acme/api#3405"));
+  // An issue's number (not a PR the Inbox knows): nothing.
+  expect((await w.send("ses_a", { body: "Fixes #7.", thread: "three" })).lines).toHaveLength(1);
 });
 
-test("no PR line when the PR is passed in pulls now, is already on the thread, or was taken off it", async () => {
-  const w = world();
-  const now = await w.send("ses_a", { body: `Opened ${PR}.`, pulls: [PR] });
+test("owner/repo#N and a URL count; the line names the ref an agent passes back", async () => {
+  const w = world({ known: knowing("github.com/acme/web#12") });
+  const sent = await w.send("ses_a", { body: "Opened acme/web#12 and https://github.com/acme/api/pull/13; #99 is unknown here." });
+  expect(sent.lines.slice(1)).toEqual([nudge("#12", "acme/web#12"), nudge("#13", "acme/api#13")]);
+});
+
+test("no PR line when the PR is on any thread's row, passed in this send's pulls (even refused), or taken off this thread", async () => {
+  const w = world({ known: knowing("github.com/acme/api#3405", "github.com/acme/api#3406") });
+  const now = await w.send("ses_a", { body: "Opened #3405.", pulls: ["acme/api#3405"], thread: "one" });
   expect(now.lines).toHaveLength(1);
-  expect(now.lines[0]).toContain("PRs: Added acme/api#12.");
-  const later = await w.send("ses_a", { body: `${PR} is green.`, reply_to: now.result.structuredContent!.message_id });
-  expect(later.lines).toHaveLength(1);
-  // The person took it off: never asked back.
-  const threadId = String(now.result.structuredContent!.thread_id);
-  w.store.changeThreadPulls({ thread_id: threadId, add: [], remove: parseInboxThreadPullRefs([PR], "remove").refs!, by: { kind: "person" } });
-  expect(quietHint(w.store, { session: "ses_a", threadId, body: `${PR} again`, replayed: false, now: Date.now() })).toBeNull();
-  // Still unsaid for this session: a PR on no thread gets it.
-  expect((await w.send("ses_a", { body: "And https://github.com/acme/api/pull/99.", thread: "new" })).last).toContain("acme/api#99");
+  expect(now.lines[0]).toContain("PRs: Added acme/api#3405.");
+  // On another thread's row: a roll-up that lists it is quiet.
+  expect((await w.send("ses_b", { body: "Release notes: #3405.", thread: "release" })).lines).toHaveLength(1);
+  // This send's own `pulls`, refused because the thread holds its 20: no line telling it to add what it just tried.
+  const full = await w.send("ses_a", { body: "Busy thread.", thread: "full" });
+  const twenty = parseInboxThreadPullRefs(Array.from({ length: INBOX_THREAD_PULLS_MAX }, (_, i) => `acme/other#${i + 1}`), "add").refs!;
+  w.store.changeThreadPulls({ thread_id: full.thread, add: twenty, by: { kind: "person" } });
+  const refused = await w.send("ses_a", { body: "Opened #3406.", pulls: ["acme/api#3406"], reply_to: full.id });
+  expect(refused.result.content[0]!.text).toContain("PRs not added");
+  expect(refused.result.content[0]!.text).not.toContain("You named");
+  // The person took it off this thread: never asked back here.
+  const threadId = now.thread;
+  w.store.changeThreadPulls({ thread_id: threadId, add: [], remove: parseInboxThreadPullRefs(["acme/api#3405"], "remove").refs!, by: { kind: "person" } });
+  const known = knowing("github.com/acme/api#3405");
+  expect(quietHint(w.store, { session: "ses_a", threadId, body: "#3405 again", replayed: false, now: Date.now(), known })).toBeNull();
+  // Off this thread is not off every thread: another thread naming it hears the line.
+  expect(quietHint(w.store, { session: "ses_a", threadId: refused.thread, body: "#3405 again", replayed: false, now: Date.now(), known })?.line).toBe(nudge("#3405", "acme/api#3405"));
+});
+
+test("five PRs in one message: three lines in text order and nothing more; a later message there names the other two", async () => {
+  const numbers = [3401, 3402, 3403, 3404, 3405];
+  const w = world({ known: knowing(...numbers.map((n) => `github.com/acme/api#${n}`)) });
+  const body = `Merged ${numbers.map((n) => `#${n}`).join(", ")}.`;
+  const sent = await w.send("ses_a", { body, thread: "roll-up" });
+  expect(sent.lines.slice(1)).toEqual(numbers.slice(0, 3).map((n) => nudge(`#${n}`, `acme/api#${n}`)));
+  const again = await w.send("ses_a", { body, reply_to: sent.id });
+  expect(again.lines.slice(1)).toEqual(numbers.slice(3).map((n) => nudge(`#${n}`, `acme/api#${n}`)));
+  expect(attachPullText(parseInboxThreadPullRefs(numbers.map((n) => `acme/api#${n}`), "pulls").refs!).split("\n")).toHaveLength(3);
 });
 
 test("in a project on a self-hosted GitLab, send_message's short group/project!n lands on that host, and the same words in the body ask nothing", async () => {
-  const w = world(async (projectId) => (projectId === w.project.id ? "gitlab.acme.dev" : null));
+  const w = world({ projectHost: async (projectId) => (projectId === w.project.id ? "gitlab.acme.dev" : null) });
   const sent = await w.send("ses_a", { body: "Opened acme/web!7.", pulls: ["acme/web!7"] });
   expect(sent.lines).toHaveLength(1);
   expect(sent.lines[0]).toContain("PRs: Added https://gitlab.acme.dev/acme/web/-/merge_requests/7.");
-  const threadId = String(sent.result.structuredContent!.thread_id);
-  expect(w.store.threadPulls(threadId).map((p) => p.url)).toEqual(["https://gitlab.acme.dev/acme/web/-/merge_requests/7"]);
+  expect(w.store.threadPulls(sent.thread).map((p) => p.url)).toEqual(["https://gitlab.acme.dev/acme/web/-/merge_requests/7"]);
   expect(keys("acme/web!7")).toEqual(["gitlab.com/acme/web#7:pull"]);
   expect(pullsNamedInBody("acme/web!7", "gitlab.acme.dev").map((ref) => ref.key)).toEqual(["gitlab.acme.dev/acme/web#7:pull"]);
 });
 
-test("one hint a send: the PR line first, the question line on a later send that still qualifies, each once", async () => {
+test("one kind a send: the PR line first, the question line on a later send that still qualifies, once a session", async () => {
   const w = world();
   const both = await w.send("ses_a", { body: `Opened ${PR}.\n\n${BARE}` });
-  expect(both.last).toStartWith("You can attach that PR");
+  expect(both.last).toBe(nudge("#12", "acme/api#12"));
   expect(both.result.content[0]!.text).not.toContain(QUESTION_OPTIONS_HINT);
-  const next = await w.send("ses_a", { body: `${PR}\n\n${BARE.replace("Which", "And which")}`, thread: "two" });
+  const next = await w.send("ses_a", { body: `${PR}\n\n${BARE.replace("Which", "And which")}`, reply_to: both.id });
   expect(next.last).toBe(QUESTION_OPTIONS_HINT);
-  const third = await w.send("ses_a", { body: `${PR}\n\n${BARE.replace("Which", "Then which")}`, thread: "three" });
+  const third = await w.send("ses_a", { body: `${PR}\n\n${BARE.replace("Which", "Then which")}`, reply_to: next.id });
   expect(third.lines).toHaveLength(1);
 });
 
-test("no hint on a refused send, a replay, or a send with no session; a refused send does not use the session's one time", async () => {
+test("no hint on a refused send or a replay; a refused send does not use up the thread's line", async () => {
   const w = world();
   const refused = await w.send("ses_a", { body: `Opened ${PR}.`, pulls: ["#12"] });
   expect(refused.result.isError).toBe(true);
-  expect(refused.result.content[0]!.text).not.toContain("You can attach");
+  expect(refused.result.content[0]!.text).not.toContain("You named");
   const sent = await w.send("ses_a", { body: `Opened ${PR}.`, idempotency_key: "k1" });
-  expect(sent.last).toStartWith("You can attach that PR");
+  expect(sent.last).toBe(nudge("#12", "acme/api#12"));
   const replay = await w.send("ses_c", { body: `Opened ${PR}.`, idempotency_key: "k1" });
   expect(replay.lines[0]).toStartWith("Already sent");
   expect(replay.lines).toHaveLength(1);

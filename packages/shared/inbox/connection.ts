@@ -369,7 +369,7 @@ export const INBOX_FOLLOW_THROUGH_RULE =
   "Be proactive about Inbox updates and about replying to the person through the Inbox when you think they would want you to. Don't withhold important updates or decisions, and don't batch updates to send later: proactivity is better than procrastination."
 
 /** A subagent's results go to the agent that started it, not to the person. Fixed text. */
-export const INBOX_SUBAGENT_RULE = "If another agent started you, report to it instead."
+export const INBOX_SUBAGENT_RULE = "If another agent started you, report to it instead, with the number of any PR you opened (owner/repo#123)."
 
 /**
  * The rules every agent gets with the tool or the MCP server, in one string:
@@ -447,9 +447,9 @@ export function inboxStepsWakeLine(steps: { done: number; total: number; doing: 
  * MCP server's field, every connection's `plannotator_inbox` tool carries it.
  */
 export const INBOX_PULLS_FIELD_DESCRIPTION =
-  "Pull/merge requests this thread is responsible for: added to the thread, so the person sees their live state on its row. You own your thread's list. Full refs, any repo: `owner/repo#123` (GitHub), `group/sub/project!45` (GitLab), or the URL (Bitbucket: the URL only). Pass it when you open or take on one for this work, not on later messages. Merged ones stay. To remove one that is no longer part of the work, or add without a message: action thread_pulls."
+  "Pull/merge requests this thread is responsible for: added to the thread, so the person sees their live state on its row. You own your thread's list. Full refs, any repo: `owner/repo#123` (GitHub), `group/sub/project!45` (GitLab), or the URL (Bitbucket: the URL only). Pass it as soon as you know the number of a PR for this work: one you opened, took on, or a subagent opened for you. Missed one? Add it any time with action thread_pulls. Merged ones stay. To remove one that is no longer part of the work, or add without a message: action thread_pulls."
 
-/** The `thread_pulls` tool's description (approved text). The agent tool lists the name only (INBOX_AGENT_ACTIONS_NO_LINE). */
+/** The `thread_pulls` tool's description (approved text). The agent tool gives it its own line (INBOX_AGENT_ACTION_LEADS). */
 export const INBOX_THREAD_PULLS_DESCRIPTION =
   "A thread's pull/merge requests: `add`, `remove`, or neither to list them with live state and who added each. The thread's agent owns the list; the person can change it too."
 
@@ -526,7 +526,7 @@ function wakeSteps(value: unknown): { done: number; total: number; doing: string
  * and its field's description say what they do, and a field description does
  * not count toward the 2,048 (the owner: do not grow the main description).
  */
-export const INBOX_AGENT_ACTIONS_NO_LINE: readonly string[] = ['snooze_thread', 'thread_pulls']
+export const INBOX_AGENT_ACTIONS_NO_LINE: readonly string[] = ['snooze_thread']
 
 /**
  * The agent tool's own line for an action whose Inbox lead is long (the
@@ -542,6 +542,7 @@ export const INBOX_AGENT_ACTION_LEADS: Readonly<Record<string, string>> = {
   get_guide_brief: "How to write a guided review, with a worked submit_guide call.",
   card: "A Board card for work that outlasts this reply: create it, then move it and say where it is as the work moves.",
   steps: INBOX_STEPS_ACTION_LINE,
+  thread_pulls: "Put a thread's PRs on its row (add, remove), any time.",
 }
 
 /**

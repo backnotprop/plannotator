@@ -223,6 +223,29 @@ describe("Inbox guidance parity across harnesses", () => {
     }
   });
 
+  test("the PR words (the owner, 2026-11-15) reach every surface that carries them, word for word", () => {
+    const anyTime = "Pass it as soon as you know the number of a PR for this work: one you opened, took on, or a subagent opened for you. Missed one? Add it any time with action thread_pulls.";
+    const send = INBOX_DEFAULT_TOOLS.find((tool) => tool.name === "send_message")!;
+    const pullsOf = (properties: unknown) => (properties as Record<string, { description?: string }>).pulls!.description!;
+    const fields = {
+      "MCP send_message pulls": pullsOf(send.inputSchema.properties),
+      "tool: Claude Code, Pi, OpenCode pulls": pullsOf(inboxAgentTool(INBOX_DEFAULT_TOOLS)!.inputSchema.properties),
+      "plannotator inbox --help": SURFACES["plannotator inbox --help"]!,
+    };
+    for (const [surface, text] of Object.entries(fields)) {
+      expect([surface, text.includes(anyTime), text.includes("not on later messages")]).toEqual([surface, true, false]);
+    }
+    const tools = {
+      "tool: Claude Code (mod copy, bundled list)": modAgentTool(INBOX_DEFAULT_TOOLS)!.description,
+      "tool: Pi, OpenCode 2 (wake)": inboxAgentTool(INBOX_DEFAULT_TOOLS)!.description,
+      "tool: OpenCode 1 (no wake)": inboxAgentTool(INBOX_DEFAULT_TOOLS, { wakes: false })!.description,
+    };
+    for (const [surface, text] of Object.entries(tools)) {
+      expect([surface, text.includes("\n- thread_pulls: Put a thread's PRs on its row (add, remove), any time.\n")]).toEqual([surface, true]);
+    }
+    expect(INBOX_SUBAGENT_RULE).toBe("If another agent started you, report to it instead, with the number of any PR you opened (owner/repo#123).");
+  });
+
   test("snooze_thread adds no word to the tool's description: its name in `action` and its field carry it", () => {
     const tool = inboxAgentTool(INBOX_DEFAULT_TOOLS)!;
     expect(tool.description).not.toMatch(/snooz/i);

@@ -1569,6 +1569,16 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // A thread's PRs: the reader's live checks, and a read of the PRs an agent just added.
     pulls: threadPullStates,
     projectHost: projectRepoHost,
+    // The attach hint's `#12`: the project's cached origin, and a PR the Pull requests list or a hover card already
+    // read. Never a git or forge call, so a send never waits on one.
+    knownPulls: (projectId) => {
+      const project = store.project(projectId);
+      const origin = project ? repos.get(project.root) : null;
+      return {
+        repo: origin?.host ? { host: origin.host.toLowerCase(), repo: origin.display } : null,
+        isPull: (key) => !!pulls.find(key) || refCards.cached(key)?.kind === "pull",
+      };
+    },
     // Bro mode: send_message's `body` field carries the line only while the person has it on.
     broOn: () => broOn(),
     // Code review: submit_guide's `review` field is listed and served only while the person has it on.

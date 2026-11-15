@@ -3134,9 +3134,14 @@ export type InboxToolCostHost = "pi" | "opencode" | "dsh" | "cline" | "openclaw"
  * 13,009, the field removed and kept), Board on the same +348. Tokens scaled at the entry's bytes per token (3.7),
  * +94, not counted on Pi.
  */
-const INBOX_TOOL_COST_NOW = { bytes: 13009, tokens: 3517 };
+/*
+ * The PR words (the owner, 2026-11-15: `pulls` names a late add and subagents, `thread_pulls` gets its line, the
+ * subagent rule asks for the PR's number): +223 bytes on the entry as the tool builds it from the default tool list
+ * (13,009 → 13,232), Board on the same +223. Tokens scaled at 3.7 bytes per token, +60, not counted on Pi.
+ */
+const INBOX_TOOL_COST_NOW = { bytes: 13232, tokens: 3577 };
 /** The entry with the Board on (the `card` action listed): for the switch's words, measured on Pi. */
-export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 14681, tokens: 4014 } as const;
+export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 14904, tokens: 4074 } as const;
 /**
  * What thread steps add to the entry when the person turns them on (the
  * `steps` action and send_message's `steps` field; approval

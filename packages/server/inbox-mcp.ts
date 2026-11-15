@@ -52,7 +52,7 @@ export { fail, guarded, ok, okComplete, PROJECT_PATH_DESCRIPTION, type ToolResul
 import type { InboxSearchIndex } from "@plannotator/shared/inbox/search";
 import { isInsideFolder, type InboxProjectRoot } from "./inbox-project-root";
 import { registerInboxSnoozeTool, type InboxSnoozeMcpContext } from "./inbox-mcp-snooze";
-import { quietHint } from "./inbox-mcp-hints";
+import { quietHint, type InboxKnownPulls } from "./inbox-mcp-hints";
 import type { ProjectHostOf } from "./inbox-thread-pulls";
 import { applyAgentPriority, priorityLine, PRIORITY_FIELD } from "./inbox-mcp-priority";
 import { changePullsAsAgent, checkProjectPullRefs, checkPullRefs, pullsActor, pullsChangeText, PULLS_FIELD, registerInboxThreadPullsTool, threadPullsText, type InboxPullsMcpLive } from "./inbox-mcp-pulls";
@@ -337,6 +337,11 @@ export interface InboxMcpContext extends InboxSnoozeMcpContext {
   pulls?: InboxPullsMcpLive;
   /** The host of a project's git remote, for a short `group/project!45` (inbox-thread-pulls.ts `parseProjectPullRefs`). Absent: gitlab.com. */
   projectHost?: ProjectHostOf;
+  /**
+   * What this Inbox already knows of a project's PRs, read with no forge call (inbox-mcp-hints.ts): for the attach
+   * hint's `owner/repo#12` and bare `#12`. Absent: only a PR's URL and a short `group/project!45` count.
+   */
+  knownPulls?: (projectId: string) => InboxKnownPulls | null;
   /**
    * Whether Bro mode is on (config.json `inboxBro`, read on every request; approval "bro-mode"). On: send_message's
    * `body` field carries the line (`INBOX_BRO_LINE`). Off or absent: the field is `SEND_BODY_DESCRIPTION`, unchanged.
@@ -1250,10 +1255,26 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
           questionOpenersWithTextText(sent.questionOpenersWithText),
         ];
         if (stale) hints.push(`\n${staleThreadText(stale, shortTime)}`);
-        // The quiet hints (inbox-mcp-hints.ts): at most one, once per session, last and on a line of its own.
-        // The project's host only for a body that may name a short `group/project!45`.
+        // The quiet hints (inbox-mcp-hints.ts): one kind at most, last and on lines of their own.
+        // The project's host only for a body that may name a short `group/project!45`; what the Inbox knows of
+        // the project's PRs (cached, no forge call) only for one that may name `#12`.
         const projectHost = /![1-9]/.test(input.body) ? await context.projectHost?.(project.id).catch(() => null) : null;
-        const quiet = quietHint(store, { session: input.agent_session, threadId: String(sent.structured.thread_id), body: input.body, replayed: sent.replayed, now: clock(), projectHost });
+        let known: InboxKnownPulls | undefined;
+        try {
+          known = /#[1-9]/.test(input.body) ? (context.knownPulls?.(project.id) ?? undefined) : undefined;
+        } catch {
+          known = undefined;
+        }
+        const quiet = quietHint(store, {
+          session: input.agent_session,
+          threadId: String(sent.structured.thread_id),
+          body: input.body,
+          replayed: sent.replayed,
+          now: clock(),
+          projectHost,
+          known,
+          passed: pullRefs.map((ref) => ref.key),
+        });
         if (quiet) {
           hints.push(`\n${quiet.line}`);
           sent.structured.hint = quiet.line;
