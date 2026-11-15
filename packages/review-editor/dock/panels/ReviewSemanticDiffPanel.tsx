@@ -215,12 +215,12 @@ export function ReviewSemanticDiffPanel() {
             {data.unreadFiles?.length ? 'No moved, renamed, reformatted, extracted or inlined code in the files that could be read.' : 'No moved, renamed, reformatted, extracted or inlined code.'}
           </div>
         )}
+        {loadState.status !== 'empty' && <div className="semantic-diff-summary">{formatSummary(data)}</div>}
         {unread && (
           <div className="semantic-diff-unread" title={unread.detail} data-semantic-unread={data.unreadFiles!.length}>
             {unread.text}
           </div>
         )}
-        <div className="semantic-diff-summary">{formatSummary(data)}</div>
       </div>
     </div>
   );
