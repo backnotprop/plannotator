@@ -1573,7 +1573,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // read. Never a git or forge call, so a send never waits on one.
     knownPulls: (projectId) => {
       const project = store.project(projectId);
-      const origin = project ? repos.get(project.root) : null;
+      const origin = project ? repos.peek(project.root) : null;
       return {
         repo: origin?.host ? { host: origin.host.toLowerCase(), repo: origin.display } : null,
         isPull: (key) => !!pulls.find(key) || refCards.cached(key)?.kind === "pull",
