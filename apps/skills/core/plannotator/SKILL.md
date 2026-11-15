@@ -1,6 +1,6 @@
 ---
 name: plannotator
-description: "Reference for using Plannotator (its `plannotator` tool when you have one, otherwise the CLI): plan review, code review, annotating files, URLs, folders, and running local apps, annotating the last assistant message, browsing archived plan decisions, exporting or sharing Guided Reviews, and the Plannotator Inbox (messages and questions the person answers later, without blocking you). Invoke when asked to use Plannotator for anything not covered by a more specific plannotator-* skill, and before you leave the person a decision, a question or finished work in the Plannotator Inbox (if another agent started you, report to it instead, with the number of any PR you opened (owner/repo#123))."
+description: "Reference for using Plannotator (its `plannotator` tool when you have one, otherwise the CLI): plan review, code review, annotating files, URLs, folders, and running local apps, annotating the last assistant message, browsing archived plan decisions, exporting or sharing Guided Reviews, and the Plannotator Inbox (messages and questions the person answers later, without blocking you). Invoke when asked to use Plannotator for anything not covered by a more specific plannotator-* skill, and before you leave the person a decision, a question or finished work in the Plannotator Inbox (if another agent started you, report to it instead)."
 ---
 
 # Plannotator CLI Reference
