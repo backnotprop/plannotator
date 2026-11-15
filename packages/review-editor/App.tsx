@@ -5619,7 +5619,7 @@ const ReviewApp: React.FC = () => {
                 <div className="w-px h-5 bg-border mx-1 hidden lg:block" />
               </>
             )}
-            <div className={isCompactTouchLayout ? 'min-w-0 flex items-center gap-1' : 'contents'} data-header-middle="">
+            <div className={isCompactTouchLayout ? 'min-w-0 flex items-center gap-2' : 'contents'} data-header-middle="">
             <div className={isCompactTouchLayout ? 'min-w-0 flex-1 flex justify-center' : 'contents'}>
             {prMetadata ? (
               <div className={isCompactTouchLayout
