@@ -1051,6 +1051,7 @@ export function replyDraftSaveBody(
     files_add: files.add,
     files_remove: files.remove,
     files_place: files.place,
+    ...(files.order ? { files_order: files.order } : {}),
     ...(recipients !== undefined ? { recipients } : {}),
     // The message the reply quotes (approval "inbox-reply-quote"): null takes it away; absent, the draft keeps its own.
     ...(quote !== undefined ? { quote } : {}),
