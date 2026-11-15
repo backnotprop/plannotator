@@ -1,5 +1,4 @@
 
-import { homedir } from "node:os";
 import {
   INBOX_CLOUD_WAKE_GAP_MS,
   inboxCloudAnswer,
@@ -57,8 +56,7 @@ export function createInboxCloudWake(options: {
     const seen = new Set<string>();
     for (const agent of list) {
       seen.add(agent.session);
-      const project = agent.project_id ? store.project(store.canonicalProjectId(agent.project_id)) : null;
-      options.pin(agent.session, project?.root ?? homedir(), agent.name, inboxCloudHostOf(agent.preset));
+      options.pin(agent.session, agents.homeRoot(agent), agent.name, inboxCloudHostOf(agent.preset));
       pinned.set(agent.session, agent.name);
     }
     for (const session of [...pinned.keys()]) {
