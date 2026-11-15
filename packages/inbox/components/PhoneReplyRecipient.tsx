@@ -9,14 +9,15 @@
  *   (`AgentMark`).
  * - The sheet: each agent by its session's title (issue #2450) with "<agent> · <folder>" under it. A tap on a row sends
  *   to that agent only and closes; the circle at a row's end adds it and the sheet stays; the last row types a real `@`.
+ *   A start row (thread/replyStart.ts), "+ [mark] New Claude Code session" with "in ledger" under it, takes it alone.
  *
  * The rules stay replyRecipients.ts and ThreadPane's (the choice, the most one reply goes to, Send).
  */
-import { Icon } from '../icons';
+import { HostMark, Icon } from '../icons';
 import { canAddRecipient, type RecipientRow } from '../replyRecipients';
 import { labelOf, type SessionLabels } from '../sessionLabels';
 import { agentName, namesList } from '../tags';
-import { recipientNames } from '../thread/recipientNames';
+import { recipientNames, useRecipientLabels } from '../thread/recipientNames';
 import { AgentMark, AgentPill } from './AgentPill';
 import { BottomSheet } from './BottomSheet';
 import { SheetLine, SheetRow } from './SheetRow';
@@ -57,8 +58,9 @@ export function PhoneReplyRecipient({
   /** The folder a session works in, as the thread knows it. */
   folderOf: (session: string) => string;
 }) {
-  const titleOf = (row: RecipientRow) => labelOf(labels, row.session);
-  const names = recipientNames(rows, labels, folderOf);
+  const titles = useRecipientLabels(labels);
+  const titleOf = (row: RecipientRow) => labelOf(titles, row.session);
+  const names = recipientNames(rows, titles, folderOf);
   const chosenIds = chosen.map((r) => r.session);
   const first = chosen[0];
   const ended = chosen.length === 1 && first!.state === 'ended';
@@ -76,7 +78,7 @@ export function PhoneReplyRecipient({
       {!first ? (
         <AgentPill {...control} label="Choose an agent" ask />
       ) : chosen.length === 1 ? (
-        <AgentPill {...control} host={first.host} agent={first.session} label={null} detail={ended ? 'ended' : null} />
+        <AgentPill {...control} host={first.host} agent={first.start ? null : first.session} start={!!first.start} label={null} detail={ended ? 'ended' : null} />
       ) : (
         <AgentMark {...control} host={first.host} agent={first.session} count={chosen.length} />
       )}
@@ -84,6 +86,34 @@ export function PhoneReplyRecipient({
         <div className="ib-sheet-list" role="listbox" aria-label={TITLE} aria-multiselectable>
           {rows.map((row) => {
             const on = chosenIds.includes(row.session);
+            if (row.start) {
+              return (
+                <SheetRow
+                  key={row.session}
+                  lead={
+                    <>
+                      <span className="ib-cp-plus" aria-hidden="true">
+                        <Icon name="plus" size={12} />
+                      </span>
+                      <span className="ib-sheet-mark">
+                        <HostMark host={row.host} />
+                      </span>
+                    </>
+                  }
+                  title={row.label}
+                  detail={[`in ${row.start.project}`, row.start.asleep ? "starts when it's back" : null].filter(Boolean).join(' · ')}
+                  ariaLabel={`${row.label} in ${row.start.project}`}
+                  selected={on}
+                  attrs={{ 'data-recipient-row': row.session, 'data-recipient-start': row.host ?? '' }}
+                  onClick={() => onOnly(row)}
+                  end={
+                    <span role="checkbox" aria-checked={on} aria-hidden="true" className="ib-sheet-tick">
+                      <Icon name="check" size={13} />
+                    </span>
+                  }
+                />
+              );
+            }
             const title = titleOf(row);
             const named = names.get(row.session) ?? { name: title ?? row.label, detail: undefined };
             return (
@@ -105,7 +135,7 @@ export function PhoneReplyRecipient({
                     aria-label={`Also send to ${named.name}`}
                     className="ib-sheet-tick"
                     data-recipient-tick={row.session}
-                    disabled={!canAddRecipient(row, chosenIds)}
+                    disabled={!canAddRecipient(row, chosenIds, rows)}
                     onClick={(event) => {
                       event.stopPropagation();
                       onToggle(row);

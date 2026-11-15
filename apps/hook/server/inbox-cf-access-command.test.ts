@@ -78,12 +78,20 @@ function deps(extra: Partial<CfAccessCommandDeps>): { deps: CfAccessCommandDeps;
   };
 }
 
+/** A port free now, as the OS says. A random one from 40000-60000 sits in Linux's ephemeral range, where any open connection can hold it ("port … is in use"). */
+function freePort(): number {
+  const server = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response(null) });
+  const port = server.port as number;
+  server.stop(true);
+  return port;
+}
+
 const config = () => JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")).inboxCloudflareAccess;
 
 describe("plannotator inbox cloudflare-access setup", () => {
   test("turns on only after the outside checks, keeps only the tunnel token (0600), never the API token", async () => {
     const stand = standIn();
-    const port = 40000 + Math.floor(Math.random() * 20000);
+    const port = freePort();
     const run = deps({ api: stand.api, binary: fakeCloudflared(), edgeFetch: loginRedirect, pickPort: () => port });
     expect(await runCfAccessCommand(["setup", "--email", "Me@Example.com", "--hostname", "plannotator.example.test"], run.deps)).toBe(0);
     expect(config()).toMatchObject({ on: true, host: "plannotator.example.test", team: TEAM, aud: "aud0123456789abcdef", allow: ["me@example.com"], port, sessionHost: "plannotator-s.example.test", dnsRecord: "dns-plannotator", sessionDnsRecord: "dns-plannotator-s" });
@@ -94,7 +102,7 @@ describe("plannotator inbox cloudflare-access setup", () => {
   });
 
   test("stays off when anything without a login gets through", async () => {
-    const port = 40000 + Math.floor(Math.random() * 20000);
+    const port = freePort();
     const leaky = async () => {
       await fetch(`http://127.0.0.1:${port}/`);
       return loginRedirect();
@@ -113,7 +121,7 @@ describe("plannotator inbox cloudflare-access setup", () => {
   });
 
   test("a failed outside check says what was seen and what to check", async () => {
-    const port = 40000 + Math.floor(Math.random() * 20000);
+    const port = freePort();
     const refused = deps({ api: standIn().api, binary: fakeCloudflared(), edgeFetch: async () => new Response("no", { status: 403 }), pickPort: () => port });
     expect(await runCfAccessCommand(["setup", "--email", "me@example.com"], refused.deps)).toBe(1);
     const said = refused.err.join("\n");

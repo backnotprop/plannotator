@@ -204,7 +204,7 @@ export function TagPicker({
                     <HostMark host={option?.host ?? null} big agent={person.id} />
                     <span className="ib-tg-ol">
                       <span className="ib-tg-on" title={option?.full ?? undefined}>
-                        {person.label}
+                        {option?.name ?? person.label}
                       </span>
                       <span className="ib-tg-od">{blocked ? TAG_UPDATE_WORDS : person.detail}</span>
                     </span>

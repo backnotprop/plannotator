@@ -598,8 +598,12 @@ export function ThreadPullsButton({ threadId, summary, adding = false, onAddingD
   const { open, setOpen, hover, cardHover, close } = usePopover();
   const button = useRef<HTMLButtonElement>(null);
   // The thread is open: its PRs are read now (states older than 30 s again), and on every change.
-  const { answer, failed, setAnswer } = useThreadPulls(threadId, true);
-  const shown = answer ? pullsSummaryOf(answer) : summary;
+  const { answer, failed, setAnswer, reload } = useThreadPulls(threadId, true);
+  const shown = (answer && pullsSummaryOf(answer)) ?? summary;
+  const known = answer?.pulls.length;
+  useEffect(() => {
+    if (summary && known !== undefined && summary.count !== known) reload();
+  }, [summary?.count, known]);
   useEffect(() => {
     if (adding && button.current) setOpen({ anchor: button.current, sheet: isPhone(), pinned: true });
   }, [adding, setOpen]);
