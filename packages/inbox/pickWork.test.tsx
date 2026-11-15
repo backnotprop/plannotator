@@ -136,8 +136,10 @@ test.skipIf(!hasDom)('the wide bar has Tidy… and Combine…; Combine… is gre
   expect(requests.some((r) => r.method === 'GET' && r.url.includes('/api/inbox/combine?threads=a,b'))).toBe(true);
   const option = dialog.querySelector('[data-combine-agent="ses_a"]')!;
   expect(option.querySelector('input')!.checked).toBe(true);
-  expect(option.textContent).toContain('Claude Code · 2 of these');
-  expect(dialog.querySelector('.ib-cmb-what')?.textContent).toBe('Billing work gets one prompt with the 2 threads. Open questions are asked again in the new thread. Undo brings the 2 back.');
+  // Named by host and title, the count under it.
+  expect(option.querySelector('b')?.textContent).toBe('Claude Code · Billing work');
+  expect(option.querySelector('small')?.textContent).toBe('2 of these');
+  expect(dialog.querySelector('.ib-cmb-what')?.textContent).toBe('Claude Code · Billing work gets one prompt with the 2 threads. Open questions are asked again in the new thread. Undo brings the 2 back.');
   type(dialog.querySelector<HTMLTextAreaElement>('[data-combine-words]')!, '  just   the billing work ');
   answers = () => ({ combine: RECORD });
   click(dialog.querySelector('[data-combine-go]'));

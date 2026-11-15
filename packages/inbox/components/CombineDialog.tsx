@@ -9,7 +9,7 @@
  */
 import { useEffect, useId, useState } from 'react';
 import type { InboxCombineAgent, InboxCombineRecord, InboxListRow } from '@plannotator/core/inbox-types';
-import { INBOX_COMBINE_WORDS_MAX, INBOX_HOST_NAMES, inboxTidyWords } from '@plannotator/core/inbox-types';
+import { INBOX_COMBINE_WORDS_MAX, inboxCombineAgentLabel, inboxTidyWords } from '@plannotator/core/inbox-types';
 import { formatCount, plural } from '@plannotator/core/inbox-format';
 import { combineApi } from '../combineApi';
 import { HostMark } from '../icons';
@@ -62,7 +62,7 @@ export function CombineDialog({ rows, machines = NO_MACHINES, onClose, onStarted
     };
   }, [ids, machine, blocked]);
   const chosen = agents?.find((a) => a.session === who) ?? null;
-  const nameOf = (agent: InboxCombineAgent) => agent.title ?? agent.thread ?? agent.name;
+  const nameOf = (agent: InboxCombineAgent) => inboxCombineAgentLabel(agent, agents ?? []);
   const combine = async () => {
     if (!chosen || sending) return;
     setSending(true);
@@ -102,7 +102,7 @@ export function CombineDialog({ rows, machines = NO_MACHINES, onClose, onStarted
                   <span className="ib-cmb-nm">
                     <b dir="auto">{nameOf(agent)}</b>
                     <small>
-                      {agent.host ? (INBOX_HOST_NAMES[agent.host] ?? agent.host) : 'An agent'} · {agent.threads} of these{machineName ? ` · ${machineName}` : ''}
+                      {agent.threads} of these{machineName ? ` · ${machineName}` : ''}
                     </small>
                   </span>
                 </label>

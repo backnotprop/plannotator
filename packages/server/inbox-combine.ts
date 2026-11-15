@@ -21,6 +21,7 @@ import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionM
 import {
   INBOX_COMBINE_WORDS_MAX,
   INBOX_HOST_NAMES,
+  inboxCombineAgentLabel,
   inboxCombineInstruction,
   inboxCombineSessionLine,
   inboxCombineThreadLines,
@@ -135,11 +136,13 @@ export function createInboxCombine(deps: InboxCombineDeps) {
         if (newest && newest.created_at > (last.get(session) ?? "")) {
           last.set(session, newest.created_at);
           agent.thread = store.threadSubject(threadId) ?? undefined;
+          agent.project = store.project(store.message(threadId)?.project_id ?? "")?.name ?? undefined;
         }
         found.set(session, agent);
       }
     }
-    return [...found.values()].sort((a, b) => b.threads - a.threads || (a.title ?? a.thread ?? a.name).localeCompare(b.title ?? b.thread ?? b.name));
+    const agents = [...found.values()];
+    return agents.sort((a, b) => b.threads - a.threads || inboxCombineAgentLabel(a, agents).localeCompare(inboxCombineAgentLabel(b, agents)));
   };
 
   const wakeThreads = (threadIds: readonly string[]): InboxCombineWakeThread[] =>
@@ -162,7 +165,8 @@ export function createInboxCombine(deps: InboxCombineDeps) {
     if (replay) return wire(replay);
     const threadIds = pickedOf(body.thread_ids, 2);
     const session = typeof body.session === "string" ? body.session : "";
-    const agent = agentsFor(threadIds).find((a) => a.session === session);
+    const agents = agentsFor(threadIds);
+    const agent = agents.find((a) => a.session === session);
     if (!agent) throw new InboxError("session_not_live", "That agent cannot be asked now: it ended, or it never wrote in these threads.", { field: "session" });
     const words = inboxTidyWords(body.words).slice(0, INBOX_COMBINE_WORDS_MAX);
     // Once a thread is in a Combine still waiting, it is not asked about in another.
@@ -180,7 +184,7 @@ export function createInboxCombine(deps: InboxCombineDeps) {
       projects: threadIds.map((t) => store.message(t)!.project_id),
       session: agent.session,
       host: agent.host,
-      name: agent.title ?? agent.thread ?? agent.name,
+      name: inboxCombineAgentLabel(agent, agents),
       ...(words ? { words } : {}),
       at: new Date(now()).toISOString(),
       state: "asked",

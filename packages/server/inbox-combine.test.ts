@@ -9,6 +9,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { InboxAuthor, InboxCombinePlan, InboxCombineRecord, InboxTidyReach } from "@plannotator/core/inbox-types";
+import { inboxCombineAgentLabel } from "@plannotator/core/inbox-types";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { createInboxCombine } from "./inbox-combine";
 
@@ -58,13 +59,20 @@ function setup() {
   return { store, live, idle, clock, combine, route, start, send, a1, a2, b1, archived };
 }
 
-test("who can be asked: running sessions that wrote in a picked thread, most threads first, by their titles", async () => {
-  const { route, live, a1, a2, b1 } = setup();
+test("who can be asked: running sessions that wrote in a picked thread, most threads first, named by host and title or project", async () => {
+  const { route, live, send, start, a1, a2, b1 } = setup();
   const plan = (await route("GET", `/api/inbox/combine?threads=${a1.id},${a2.id},${b1.id}`)) as unknown as InboxCombinePlan;
-  expect(plan.agents!.map((a) => [a.session, a.threads, a.title ?? a.name])).toEqual([
-    ["ses_a", 2, "Invoice retries"],
-    ["ses_b", 1, "Claude Code"],
+  expect(plan.agents!.map((a) => [a.session, a.threads, inboxCombineAgentLabel(a, plan.agents)])).toEqual([
+    ["ses_a", 2, "Claude Code · Invoice retries"],
+    ["ses_b", 1, "Claude Code · billing-svc"],
   ]);
+  // Two untitled sessions of one host in one project would read the same: each is named by its thread instead.
+  live.set("ses_c", "wakes");
+  const c1 = send("ses_c", "Webhook docs", "Every event type is listed.");
+  const twins = (await route("GET", `/api/inbox/combine?threads=${a1.id},${b1.id},${c1.id}`)) as unknown as InboxCombinePlan;
+  expect(twins.agents!.map((a) => inboxCombineAgentLabel(a, twins.agents))).toEqual(["Claude Code · Invoice retries", "Claude Code · Retry worker backoff", "Claude Code · Webhook docs"]);
+  // The toasts name it the same way.
+  expect((await start("ses_b")).name).toBe("Claude Code · billing-svc");
   live.delete("ses_b");
   const after = (await route("GET", `/api/inbox/combine?threads=${a1.id},${a2.id},${b1.id}`)) as unknown as InboxCombinePlan;
   expect(after.agents!.map((a) => a.session)).toEqual(["ses_a"]);

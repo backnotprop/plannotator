@@ -42,8 +42,22 @@ export interface InboxCombineAgent {
   title?: string;
   /** The subject of the picked thread it wrote in last: its name where it has no title, as the sidebar's Agents name it. */
   thread?: string;
+  /** The project of the picked thread it wrote in last. */
+  project?: string;
   /** How many of the picked threads it wrote in. */
   threads: number;
+}
+
+/**
+ * How the dialog and the toasts name an agent: its host, then its session's title or its project ("Claude Code ·
+ * billing-svc"); the thread it wrote in last instead where two of the agents would read the same.
+ */
+export function inboxCombineAgentLabel(agent: InboxCombineAgent, all: readonly InboxCombineAgent[] = [agent]): string {
+  const of = (a: InboxCombineAgent) => a.title ?? a.project ?? a.thread;
+  const part = of(agent);
+  if (!part) return agent.name;
+  const twin = all.some((a) => a.session !== agent.session && a.name === agent.name && of(a) === part);
+  return `${agent.name} · ${twin && !agent.title && agent.thread ? agent.thread : part}`;
 }
 
 /** What `GET /api/inbox/combine` answers. With `threads=`: who can be asked; always the Combines worth showing. */
