@@ -116,7 +116,7 @@ export function createInboxCombine(deps: InboxCombineDeps) {
     return out;
   };
 
-  /** Running sessions that wrote in a picked thread, most threads first. */
+  /** Running sessions that wrote in a picked thread. */
   const agentsFor = (threadIds: readonly string[]): InboxCombineAgent[] => {
     const reachOf = deps.reachFor();
     const found = new Map<string, InboxCombineAgent>();
@@ -141,8 +141,10 @@ export function createInboxCombine(deps: InboxCombineDeps) {
         found.set(session, agent);
       }
     }
+    // Most picked threads first; between equals, the one that wrote last.
     const agents = [...found.values()];
-    return agents.sort((a, b) => b.threads - a.threads || inboxCombineAgentLabel(a, agents).localeCompare(inboxCombineAgentLabel(b, agents)));
+    const lastOf = (a: InboxCombineAgent) => last.get(a.session) ?? "";
+    return agents.sort((a, b) => b.threads - a.threads || lastOf(b).localeCompare(lastOf(a)) || inboxCombineAgentLabel(a, agents).localeCompare(inboxCombineAgentLabel(b, agents)));
   };
 
   const wakeThreads = (threadIds: readonly string[]): InboxCombineWakeThread[] =>

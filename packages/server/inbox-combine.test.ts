@@ -70,7 +70,8 @@ test("who can be asked: running sessions that wrote in a picked thread, most thr
   live.set("ses_c", "wakes");
   const c1 = send("ses_c", "Webhook docs", "Every event type is listed.");
   const twins = (await route("GET", `/api/inbox/combine?threads=${a1.id},${b1.id},${c1.id}`)) as unknown as InboxCombinePlan;
-  expect(twins.agents!.map((a) => inboxCombineAgentLabel(a, twins.agents))).toEqual(["Claude Code · Invoice retries", "Claude Code · Retry worker backoff", "Claude Code · Webhook docs"]);
+  // One picked thread each: the one that wrote last comes first.
+  expect(twins.agents!.map((a) => inboxCombineAgentLabel(a, twins.agents))).toEqual(["Claude Code · Webhook docs", "Claude Code · Retry worker backoff", "Claude Code · Invoice retries"]);
   // The toasts name it the same way.
   expect((await start("ses_b")).name).toBe("Claude Code · billing-svc");
   live.delete("ses_b");

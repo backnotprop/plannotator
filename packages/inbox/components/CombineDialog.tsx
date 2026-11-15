@@ -7,7 +7,7 @@
  * reads only its own machine's threads. Threads on two machines, or on a machine that cannot be asked now, are said so
  * and nobody is offered.
  */
-import { useEffect, useId, useState } from 'react';
+import { useEffect, useId, useState, type KeyboardEvent } from 'react';
 import type { InboxCombineAgent, InboxCombineRecord, InboxListRow } from '@plannotator/core/inbox-types';
 import { INBOX_COMBINE_WORDS_MAX, inboxCombineAgentLabel, inboxTidyWords } from '@plannotator/core/inbox-types';
 import { formatCount, plural } from '@plannotator/core/inbox-format';
@@ -16,6 +16,8 @@ import { HostMark } from '../icons';
 import { isAway, rowMachine, type MachinesModel } from '../machines';
 import { Modal } from './Updates';
 
+/** Agents listed before "Show N more": the top writers, and room for the field and buttons on a phone. */
+const FIRST = 4;
 const NO_MACHINES: MachinesModel = { self: null, all: [], linked: [], names: new Map(), away: new Set() };
 
 /** Why nobody can be asked about these threads, or null when their machine can be. */
@@ -61,7 +63,19 @@ export function CombineDialog({ rows, machines = NO_MACHINES, onClose, onStarted
       live = false;
     };
   }, [ids, machine, blocked]);
+  const [shown, setShown] = useState(FIRST);
   const chosen = agents?.find((a) => a.session === who) ?? null;
+  // Down from the last row shown shows them all and moves on, so the arrows reach every agent.
+  const focusAgent = (session: string) => requestAnimationFrame(() => document.querySelector<HTMLInputElement>(`[data-combine-agent="${CSS.escape(session)}"] input`)?.focus());
+  const onArrow = (event: KeyboardEvent) => {
+    if (!agents || shown >= agents.length || (event.key !== 'ArrowDown' && event.key !== 'ArrowRight')) return;
+    if (agents.findIndex((a) => a.session === who) !== shown - 1) return;
+    event.preventDefault();
+    const next = agents[shown]!.session;
+    setShown(agents.length);
+    setWho(next);
+    focusAgent(next);
+  };
   const nameOf = (agent: InboxCombineAgent) => inboxCombineAgentLabel(agent, agents ?? []);
   const combine = async () => {
     if (!chosen || sending) return;
@@ -95,7 +109,8 @@ export function CombineDialog({ rows, machines = NO_MACHINES, onClose, onStarted
               <legend>Who writes it</legend>
               {agents === null && <p className="ib-cmb-why">Finding the agents of these threads…</p>}
               {agents?.length === 0 && !error && <p className="ib-cmb-why">No agent that wrote in these threads is running. Combine needs one to read them and write the new thread.</p>}
-              {agents?.map((agent) => (
+              <div className="ib-cmb-list" data-all={shown === agents?.length && (agents?.length ?? 0) > FIRST ? '' : undefined} onKeyDown={onArrow}>
+              {agents?.slice(0, shown).map((agent) => (
                 <label key={agent.session} className="ib-cmb-opt" data-on={agent.session === who ? '' : undefined} data-combine-agent={agent.session}>
                   <input type="radio" name={`${id}-who`} checked={agent.session === who} onChange={() => setWho(agent.session)} />
                   <HostMark host={agent.host} agent={agent.session} />
@@ -107,6 +122,16 @@ export function CombineDialog({ rows, machines = NO_MACHINES, onClose, onStarted
                   </span>
                 </label>
               ))}
+              </div>
+              {agents && shown < agents.length && (
+                <button type="button" className="ib-cmb-more" onClick={() => {
+                    // The button goes: the focus moves to the first agent it showed.
+                    focusAgent(agents[shown]!.session);
+                    setShown(agents.length);
+                  }} data-combine-more="">
+                  Show {formatCount(agents.length - shown)} more
+                </button>
+              )}
             </fieldset>
             <label className="ib-cmb-lbl" htmlFor={`${id}-words`}>
               What should it be about? (optional)

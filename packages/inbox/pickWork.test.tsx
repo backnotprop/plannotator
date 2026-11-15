@@ -8,6 +8,8 @@
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxCombineRecord, InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
@@ -220,6 +222,50 @@ test.skipIf(!hasDom)('threads on two machines: the dialog says so, offers nobody
   expect(dialog.querySelector('[data-combine-agent]')).toBeNull();
   expect(dialog.querySelector<HTMLButtonElement>('[data-combine-go]')!.disabled).toBe(true);
   expect(requests).toHaveLength(0);
+});
+
+for (const many of [10, 25])
+  test.skipIf(!hasDom)(`${many} agents: the top writer is picked, four show, "Show ${many - 4} more" and the arrows reach the rest in a bounded box`, async () => {
+    // As the server orders them: most picked threads first.
+    const agents = Array.from({ length: many }, (_, i) => ({ session: `ses_${i}`, host: 'claude-code', name: 'Claude Code', title: `Session ${i}`, threads: i === 0 ? 3 : 1 }));
+    answers = (url) => (url.includes('/combine') ? { serverSession: 's', agents, combines: [] } : {});
+    const style = document.head.appendChild(document.createElement('style'));
+    style.textContent = readFileSync(join(import.meta.dir, 'picks.css'), 'utf8');
+    host = document.body.appendChild(document.createElement('div'));
+    root = createRoot(host);
+    act(() => root!.render(<div className="pn-inbox"><CombineDialog rows={[row('a'), row('b'), row('c')]} onClose={() => {}} onStarted={() => {}} /></div>));
+    await settle();
+    const dialog = document.querySelector('[data-dialog="combine"]')!;
+    const shown = () => [...dialog.querySelectorAll('[data-combine-agent]')].map((el) => el.getAttribute('data-combine-agent'));
+    expect(shown()).toEqual(['ses_0', 'ses_1', 'ses_2', 'ses_3']);
+    expect(dialog.querySelector<HTMLInputElement>('[data-combine-agent="ses_0"] input')!.checked).toBe(true);
+    const more = dialog.querySelector<HTMLButtonElement>('[data-combine-more]')!;
+    expect(more.textContent).toBe(`Show ${many - 4} more`);
+    // Down from the fourth shows them all and moves to the fifth.
+    click(dialog.querySelector('[data-combine-agent="ses_3"] input'));
+    act(() => void dialog.querySelector('.ib-cmb-list')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })));
+    await settle();
+    expect(shown()).toHaveLength(many);
+    expect(dialog.querySelector<HTMLInputElement>('[data-combine-agent="ses_4"] input')!.checked).toBe(true);
+    expect(dialog.querySelector('[data-combine-more]')).toBeNull();
+    // All of them scroll inside a box with a ceiling, so the dialog does not grow with them.
+    const list = getComputedStyle(dialog.querySelector('.ib-cmb-list')!);
+    expect(list.overflowY).toBe('auto');
+    expect(list.maxHeight).not.toBe('none');
+    style.remove();
+  });
+
+test.skipIf(!hasDom)('"Show N more" shows every agent and gives the focus to the first it showed', async () => {
+  const agents = Array.from({ length: 10 }, (_, i) => ({ session: `ses_${i}`, host: 'claude-code', name: 'Claude Code', title: `Session ${i}`, threads: 1 }));
+  answers = (url) => (url.includes('/combine') ? { serverSession: 's', agents, combines: [] } : {});
+  host = document.body.appendChild(document.createElement('div'));
+  root = createRoot(host);
+  act(() => root!.render(<div className="pn-inbox"><CombineDialog rows={[row('a'), row('b')]} onClose={() => {}} onStarted={() => {}} /></div>));
+  await settle();
+  click(document.querySelector('[data-combine-more]'));
+  await settle();
+  expect(document.querySelectorAll('[data-combine-agent]')).toHaveLength(10);
+  expect(document.activeElement?.closest('[data-combine-agent]')?.getAttribute('data-combine-agent')).toBe('ses_4');
 });
 
 test.skipIf(!hasDom)('a row in a Combine still waiting says “Combining…”, and draws again when it settles', () => {
