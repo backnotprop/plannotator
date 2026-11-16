@@ -47,7 +47,7 @@ export function detectProjectName(cwd = process.cwd()): string {
 
 /** Repo info from git alone: null when `cwd` is not inside a git repo. */
 function getGitRepoInfo(cwd: string): RepoInfo | null {
-	const branch = git("rev-parse --abbrev-ref HEAD", cwd);
+	const branch = git("symbolic-ref --quiet --short HEAD", cwd);
 	const safeBranch = branch && branch !== "HEAD" ? branch : undefined;
 
 	const originUrl = git("remote get-url origin", cwd);

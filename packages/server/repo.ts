@@ -14,7 +14,7 @@ import { gitStdout } from "./project";
  */
 async function getCurrentBranch(cwd: string): Promise<string | undefined> {
 	try {
-		const head = await gitStdout(["rev-parse", "--abbrev-ref", "HEAD"], cwd);
+		const head = await gitStdout(["symbolic-ref", "--quiet", "--short", "HEAD"], cwd);
 		if (head !== null) {
 			const branch = head.trim();
 			return branch && branch !== "HEAD" ? branch : undefined;
