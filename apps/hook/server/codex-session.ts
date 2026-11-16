@@ -76,7 +76,7 @@ export interface CodexStopPlanLookup {
 }
 
 const TURN_START_TYPES = new Set(["task_started", "turn_started"]);
-const TURN_COMPLETE_TYPES = new Set(["task_complete", "turn_completed"]);
+const TURN_END_TYPES = new Set(["task_complete", "turn_completed", "turn_aborted"]);
 const PROPOSED_PLAN_RE = /<proposed_plan>([\s\S]*?)<\/proposed_plan>/gi;
 
 // --- Rollout File Discovery ---
@@ -289,13 +289,15 @@ function findActiveTurnStartIndex(entries: RolloutEntry[]): number {
   );
   if (latestTurnStart === -1) return -1;
 
-  const latestTurnComplete = findLastIndex(
-    entries,
-    (entry) =>
-      entry.type === "event_msg" &&
-      TURN_COMPLETE_TYPES.has(entry.payload?.type || "")
-  );
-  return latestTurnStart > latestTurnComplete ? latestTurnStart : -1;
+  const activeTurnId = getTurnId(entries[latestTurnStart]);
+  for (let i = latestTurnStart + 1; i < entries.length; i++) {
+    const entry = entries[i];
+    if (entry.type !== "event_msg" || !TURN_END_TYPES.has(entry.payload?.type || "")) continue;
+
+    const endedTurnId = getTurnId(entry);
+    if (!activeTurnId || !endedTurnId || activeTurnId === endedTurnId) return -1;
+  }
+  return latestTurnStart;
 }
 
 function isHookPromptMessage(entry: RolloutEntry): boolean {

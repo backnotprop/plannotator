@@ -118,6 +118,14 @@ function turnCompleted(turnId: string): string {
   });
 }
 
+function turnAborted(turnId: string): string {
+  return rolloutLine("event_msg", {
+    type: "turn_aborted",
+    turn_id: turnId,
+    reason: "interrupted",
+  });
+}
+
 function completedPlanItem(text: string, turnId: string): string {
   return JSON.stringify({
     timestamp: new Date().toISOString(),
@@ -645,6 +653,34 @@ describe("getLastCodexMessage", () => {
     const result = getLastCodexMessage(path, { beforeActiveTurn: true });
     expect(result).not.toBeNull();
     expect(result!.text).toBe("Substantive final answer");
+  });
+
+  test("annotate-last can use visible output once its Codex turn is interrupted", () => {
+    const path = writeTempRollout(buildRollout(
+      turnStarted("previous"),
+      assistantMessage("Previous answer"),
+      turnCompleted("previous"),
+      turnStarted("interrupted"),
+      assistantMessage("Visible output before the interrupt"),
+      turnAborted("interrupted"),
+    ));
+
+    expect(getRecentCodexMessages(path, 5, { beforeActiveTurn: true }).map(({ text }) => text)).toEqual([
+      "Visible output before the interrupt",
+      "Previous answer",
+    ]);
+  });
+
+  test("a terminal event for another turn does not end the active Codex turn", () => {
+    const path = writeTempRollout(buildRollout(
+      turnStarted("previous"),
+      assistantMessage("Previous answer"),
+      turnStarted("active"),
+      assistantMessage("Active output"),
+      turnCompleted("previous"),
+    ));
+
+    expect(getRecentCodexMessages(path, 5, { beforeActiveTurn: true }).map(({ text }) => text)).toEqual(["Previous answer"]);
   });
 
   test("keeps default latest-message behavior inside an active turn", () => {
