@@ -12,7 +12,9 @@ export type VersionAuthor =
       readonly line: string;
     }
   | { readonly kind: "unnamed" }
-  | { readonly kind: "pending" };
+  | { readonly kind: "pending" }
+  /** No author line at all, for a host whose versions mostly have no person's name. */
+  | { readonly kind: "none" };
 
 export interface FrameVersionEntry {
   readonly key: string;
@@ -50,7 +52,7 @@ export function authorWords(author: VersionAuthor): string {
   if (author.kind === "agent") {
     return author.line === "" ? author.name : `${author.name} ${author.line}`;
   }
-  if (author.kind === "pending") return "";
+  if (author.kind === "pending" || author.kind === "none") return "";
   return NO_NAME_RECORDED;
 }
 

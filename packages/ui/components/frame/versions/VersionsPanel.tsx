@@ -151,11 +151,12 @@ function Decision({ decision }: { readonly decision: VersionDecision }) {
   );
 }
 
-function rowName(entry: FrameVersionEntry, who: string): string {
+function rowName(entry: FrameVersionEntry, who: string, compared = false): string {
   return [
     versionTitle(entry),
     entry.current ? "newest" : null,
     entry.viewing ? "on screen" : null,
+    compared && !entry.viewing ? "compared" : null,
     who === "" ? null : who,
     whenWords(entry.createdAt),
     entry.sameAsOlder ? "no change to the text" : null,
@@ -221,7 +222,7 @@ function RowLines({
           </span>
         )}
       </span>
-      {(detail !== "" || (!nested && authors)) && (
+      {(detail !== "" || (!nested && authors && entry.author.kind !== "none")) && (
         <Who author={entry.author} detail={detail} explainAgent={explainAgent} />
       )}
       {entry.approval !== null && (
@@ -254,7 +255,7 @@ function VersionRow({
   const compared = useContext(ComparedKeys).has(entry.key);
   const marked = entry.viewing || compared;
   const authors = place.authors !== false;
-  const name = rowName(entry, nested || !authors ? "" : authorWords(entry.author));
+  const name = rowName(entry, nested || !authors ? "" : authorWords(entry.author), compared);
   const note = place.note?.(entry);
   const link = entry.linked
     ? place.rowLink(entry, { phone: isMobile, exact: place.exactMatch ?? true })

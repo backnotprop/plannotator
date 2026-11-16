@@ -120,6 +120,23 @@ describe.skipIf(!hasDom)('VersionsPanel folds', () => {
     expect(frame.querySelector('[data-version-fold]')!.hasAttribute('data-version-fold-open')).toBe(true);
     expect(frame.querySelector('[data-version="v3"] a')!.className).toBe(selectedBefore);
     expect(frame.querySelectorAll('[aria-current="true"]').length).toBe(1);
+    expect(frame.querySelector('[data-version="v3"] a')!.getAttribute('aria-label')).toContain('Version 3, compared');
+    expect(frame.querySelector('[data-version="v5"] a')!.getAttribute('aria-label')).not.toContain('compared');
+  });
+
+  test('an author of kind "none" draws no author line and is not named; "unnamed" still says so', () => {
+    const { VersionsPanel } = versionsModule!;
+    const place = { rowLink: (row: FrameVersionEntry) => <a href={`#${row.version}`} /> };
+    const none = { ...entry(2, 60 * 26, 'Maya Chen', false), author: { kind: 'none' } as const };
+    const unnamed = { ...entry(1, 60 * 30, 'Maya Chen', false), author: { kind: 'unnamed' } as const };
+    const frame = mount(
+      <VersionsPanel status="success" entries={[entry(5, 4, 'Maya Chen', true), none, unnamed]} place={place} onRetry={() => {}} />,
+    );
+    const row = frame.querySelector('[data-version="v2"]')!;
+    expect(row.querySelector('[data-version-author]')).toBeNull();
+    expect(row.querySelector('a')!.getAttribute('aria-label')).not.toMatch(/name|Maya/);
+    expect(row.querySelector('a')!.children.length).toBe(1);
+    expect(frame.querySelector('[data-version="v1"] [data-version-unnamed]')!.textContent).toBe('No name recorded');
   });
 
   test('an opened fold stays open when "Show older versions" adds an older save to it', () => {
@@ -541,7 +558,7 @@ describe.skipIf(!hasDom)('ReadingLine', () => {
     const toggle = frame.querySelector('[data-reading-versions]')!;
     expect(toggle.querySelector('[data-reading-comparing]')!.textContent).toBe('Comparing v2 with v6');
     expect(toggle.querySelector('[data-reading-versions-count]')!.textContent).toBe('6');
-    expect(toggle.getAttribute('aria-label')).toBe('Comparing v2 with v6. 6 versions. Versions');
+    expect(toggle.getAttribute('aria-label')).toBe('Comparing v2 with v6. 6 versions');
   });
 
   test('start placement: the version first, the approval after it', () => {
