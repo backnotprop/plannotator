@@ -9,6 +9,9 @@
  * click on the tag still goes to the Board filtered to it (Thread's
  * `openHashtag`). On a touch screen the first tap opens the preview, a second
  * tap on the tag (or its "Open on Board") goes. No keyboard shortcut.
+ *
+ * With the Board off a sent tag links to its list (`#tag=`, approval "inbox-thread-tags", step 2) and previews the
+ * tag's threads instead (tagPeek.ts): its name, "Tag · <projects> · N threads", its latest threads, "Show threads".
  */
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import type React from 'react';
@@ -16,10 +19,13 @@ import { createPortal } from 'react-dom';
 import { REF_CARD_CLOSE_MS, REF_CARD_DELAY_MS } from '@plannotator/ui/components/RefHoverCard';
 import { AuthorMark } from '../icons';
 import { cardAge } from '../board/model';
+import { plural } from '@plannotator/core/inbox-format';
 import { initiativePeekModel, type InitiativePeekModel, type PeekItem } from '../initiativePeek';
 import { initiativeHref, useInitiativeTags } from '../hashtags';
+import { tagById, tagHref, useThreadTags } from '../threadTags';
+import { tagPeekModel, type TagPeekModel } from '../tagPeek';
 
-const TAG = 'a[href^="#board&initiative="]';
+const TAG = 'a[href^="#board&initiative="], a[href^="#tag="]';
 /** RefHoverCard's width. */
 const WIDTH = 400;
 const EDGE = 12;
@@ -34,7 +40,8 @@ interface Open {
 }
 
 function initiativeOf(a: HTMLAnchorElement): string | null {
-  return new URLSearchParams(a.getAttribute('href')!.slice(1)).get('initiative');
+  const params = new URLSearchParams(a.getAttribute('href')!.slice(1));
+  return params.get('initiative') ?? params.get('tag');
 }
 
 /** The previews for the tags inside `rootRef`, and the tag click's question: did a tap open it instead (then stop)? */
@@ -243,6 +250,7 @@ function PeekCard({
   onEnter: () => void;
 }) {
   const tags = useInitiativeTags();
+  const threadTags = useThreadTags();
   // An opened preview reads the cards again: a tag written meanwhile in a thread no card links moves no card,
   // so nothing else would bring its thread into the list.
   const refresh = useRef(tags.refresh);
@@ -251,11 +259,14 @@ function PeekCard({
   useEffect(() => {
     refresh.current?.();
   }, [openId]);
-  const initiative = tags.initiatives.find((i) => i.id === open.id);
+  // The Board off (`href`): the tag of the merged list, which a linked machine's thread links too.
+  const boardOff = !!tags.href;
+  const initiative = (boardOff && threadTags ? tagById(threadTags.tags, open.id) : null) ?? tags.initiatives.find((i) => i.id === open.id);
   if (!initiative) return null;
   // The thread the tag sits in is not listed under Threads: the person is already in it.
   const here = new URLSearchParams(window.location.hash.slice(1)).get('thread');
-  const model = initiativePeekModel(initiative.id, tags.cards, tags.rows, tags.projects, tags.mentions.get(initiative.id), here);
+  const offModel = boardOff ? tagPeekModel(initiative.id, threadTags?.rows ?? [...tags.rows.values()], threadTags?.rowTags ?? ((row) => row.tags ?? []), tags.projects, here) : null;
+  const model = offModel ? null : initiativePeekModel(initiative.id, tags.cards, tags.rows, tags.projects, tags.mentions.get(initiative.id), here);
   const container = open.anchor.closest<HTMLElement>('dialog[open], .pn-inbox') ?? document.body;
   const board = initiativeHref(initiative.id);
   return createPortal(
@@ -280,7 +291,7 @@ function PeekCard({
         }
       }}
     >
-      <PeekView name={initiative.name} board={board} model={model} onGo={onGo} />
+      {offModel ? <TagPeekView name={initiative.name} list={tagHref(initiative.id)} model={offModel} onGo={onGo} /> : <PeekView name={initiative.name} board={board} model={model!} onGo={onGo} />}
     </div>,
     container,
   );
@@ -319,6 +330,53 @@ const ROW = 'ib-tagpeek-row -mx-2 flex items-center gap-2.5 rounded-md px-2 py-1
 const GROUP = 'mb-1 text-[12px] font-medium leading-4';
 /** The Inbox's neutral badge, a size down for the preview. */
 const BADGE = 'ib-badge ib-b-mut ib-tagpeek-badge';
+
+/** The Board off: the tag's threads and "Show threads", its list. */
+function TagPeekView({ name, list, model, onGo }: { name: string; list: string; model: TagPeekModel; onGo: () => void }) {
+  const meta = ['Tag', model.projects.length ? model.projects.join(', ') : null, plural(model.total, 'thread')].filter(Boolean);
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex-none px-4 pb-4 pt-3.5" data-tag-peek-head="">
+        <div className="flex items-center gap-1.5">
+          <TagIcon className="text-muted-foreground" />
+          <div className="min-w-0 flex-1 truncate text-[14px] font-semibold leading-5 text-foreground" data-tag-peek-title="">
+            {name}
+          </div>
+        </div>
+        <div className="mt-0.5 truncate pl-[22px] text-[12px] leading-4 text-muted-foreground" data-tag-peek-meta="">
+          {meta.join(' · ')}
+        </div>
+      </div>
+      {model.threads.length > 0 && (
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-3" data-tag-peek-body="">
+          <section aria-label="Threads" data-tag-peek-threads="">
+            <h3 className={`${GROUP} text-muted-foreground`}>Threads</h3>
+            <ul>
+              {model.threads.map((thread) => (
+                <li key={thread.id}>
+                  <a className={ROW} href={`#thread=${encodeURIComponent(thread.id)}`} onClick={onGo}>
+                    <span className="ib-tagpeek-agent flex h-5 w-4 flex-none items-center justify-center">
+                      <AuthorMark author={thread.agent} />
+                    </span>
+                    <span className="min-w-0 flex-1 truncate text-[13px] leading-5 text-muted-foreground">{thread.title}</span>
+                  </a>
+                </li>
+              ))}
+            </ul>
+            {model.more > 0 ? <div className="pl-[26px] pt-1 text-[12px] leading-4 text-muted-foreground">+{model.more} more</div> : null}
+          </section>
+        </div>
+      )}
+      <div className="flex flex-none items-center gap-2 border-t border-border px-4 py-2" data-tag-peek-foot="">
+        <span className="min-w-0 flex-1" />
+        <a href={list} onClick={onGo} className="inline-flex h-7 items-center gap-1.5 rounded-md bg-primary/10 px-2.5 text-[12px] font-medium text-primary no-underline hover:bg-primary/15" data-tag-peek-list="">
+          Show threads
+          <ArrowIcon />
+        </a>
+      </div>
+    </div>
+  );
+}
 
 function PeekView({ name, board, model, onGo }: { name: string; board: string; model: InitiativePeekModel; onGo: () => void }) {
   const cardHref = (item: PeekItem) => `${board}&card=${encodeURIComponent(item.id)}`;

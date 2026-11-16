@@ -1,6 +1,7 @@
 import { useState, type Dispatch, type SetStateAction } from 'react';
 import { reloadSkillCatalog } from '@plannotator/ui/utils/skillCatalog';
 import { inboxApi, type AgentToolHost, type InboxStorageModel, type SettingsModel } from '../../api';
+import { scheduledApi } from '../../scheduled/client';
 
 export interface SettingsHost {
   setSettings: Dispatch<SetStateAction<SettingsModel | null>>;
@@ -64,6 +65,9 @@ export function useSettingsSaves(
 
   const toggleShape = (next: boolean) => saveSetting((s) => ({ ...s, shape: { on: next } }), () => inboxApi.saveShape(next), (s, saved) => ({ ...s, shape: saved.shape }), reloadSkillCatalog);
 
+  const toggleScheduled = (next: boolean) =>
+    saveSetting((s) => ({ ...s, scheduled_threads: { ...s.scheduled_threads, on: next } }), () => scheduledApi.saveSwitch(next), (s, saved) => ({ ...s, scheduled_threads: saved.scheduled_threads ?? { on: next } }));
+
   const toggleExperimental = (next: boolean) =>
     saveSetting(
       (s) => ({ ...s, experimental: { decision_mode: { on: next, env: s.experimental?.decision_mode.env ?? null } } }),
@@ -106,5 +110,5 @@ export function useSettingsSaves(
     }
     await refreshList(true);
   };
-  return { toggleTool, toggleCookieHost, toggleBoard, toggleBro, toggleFloatDrafts, toggleMarkReadWarning, toggleSteps, toggleCodeReview, toggleSystem, toggleChapterDiagrams, toggleShape, toggleExperimental, tailscaleBusy, toggleTailscale, deleteThread, deleteProject };
+  return { toggleTool, toggleCookieHost, toggleBoard, toggleBro, toggleFloatDrafts, toggleMarkReadWarning, toggleSteps, toggleCodeReview, toggleSystem, toggleChapterDiagrams, toggleShape, toggleScheduled, toggleExperimental, tailscaleBusy, toggleTailscale, deleteThread, deleteProject };
 }

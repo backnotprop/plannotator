@@ -542,6 +542,29 @@ describe("filters", () => {
     expect(messageIds(search(w.index, "deploy", { ...filtered, sort: "newest" }))).toEqual([w.archived.id, w.quiet.id, w.waiting.id]);
     expect(messageIds(search(w.index, "deploy", { status: "new", sort: "newest" }))).toEqual([w.fresh.id]);
   });
+
+  test("tags (Search's Tag chip): threads in any picked tag and what is in them, with the other filters; no projects; an unknown id matches nothing", async () => {
+    const w = await world();
+    const release = w.store.createInitiative({ name: "Release", by: { kind: "person" } });
+    const windows = w.store.createInitiative({ name: "Windows", by: { kind: "person" } });
+    const untagged = [search(w.index, "deploy", {}), search(w.index, "api", {}), search(w.index, "", {})].map((answer) => answer.groups ?? answer.recent);
+    w.store.setThreadTag(w.waiting.id, release.id, true);
+    w.store.setThreadTag(w.sent.id, windows.id, true);
+    w.store.setThreadTag(w.fresh.id, release.id, true);
+    // No tag picked: tagging changes no answer (tags are never results; the owner: "a filter but nothing more").
+    expect([search(w.index, "deploy", {}), search(w.index, "api", {}), search(w.index, "", { tags: [] })].map((answer) => answer.groups ?? answer.recent)).toEqual(untagged);
+    expect(threadIds(search(w.index, "deploy", { tags: [release.id] })).sort()).toEqual([w.waiting.id, w.fresh.id].sort());
+    expect(threadIds(search(w.index, "deploy", { tags: [release.id, windows.id] })).sort()).toEqual([w.waiting.id, w.sent.id, w.fresh.id].sort());
+    expect(messageIds(search(w.index, "deploy", { tags: [windows.id] })).sort()).toEqual([w.sent.id, w.sentReply.id].sort());
+    expect(threadIds(search(w.index, "deploy", { tags: [release.id], project: w.web.id }))).toEqual([w.fresh.id]);
+    expect(search(w.index, "api", { tags: [release.id] }).groups!.projects).toEqual([]);
+    expect(search(w.index, "deploy", { tags: ["ini_01ZZZZZZZZZZZZZZZZZZZZZZZZ"] }).totals).toEqual({ threads: 0, messages: 0, files: 0, projects: 0 });
+    // No words: the threads in the tag.
+    expect(threadIds(search(w.index, "", { tags: [windows.id] }))).toEqual([w.sent.id]);
+    // An untag leaves the next answer at once.
+    w.store.setThreadTag(w.fresh.id, release.id, false);
+    expect(threadIds(search(w.index, "deploy", { tags: [release.id] }))).toEqual([w.waiting.id]);
+  });
 });
 
 describe("text in every script", () => {

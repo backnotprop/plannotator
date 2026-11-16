@@ -64,6 +64,7 @@ import {
   INBOX_AUTO_RELOAD_POLL_FIELD,
   INBOX_CONTINUES_POLL_FIELD,
   INBOX_TITLE_POLL_FIELD,
+  INBOX_FIRST_STARTED_POLL_FIELD,
   INBOX_BRIDGE_EVENT_PATH,
   INBOX_BRIDGE_POLL_PATH,
   inboxAskBridgeBase,
@@ -363,6 +364,27 @@ const NOT_DELIVERING_LOG_EVERY_MS = 60_000
 const LEASE_EVERY_MS = 5_000
 /** A lease not renewed for this long belongs to a process that exited, slept or hung. */
 export const INBOX_LEASE_STALE_MS = 20_000
+/** How often a link that waits to know whether it is its session's own process asks again (`InboxLinkOptions.owner`). */
+export const INBOX_OWNER_PROBE_EVERY_MS = 2_000
+/** How long such a link asks that often before it settles on "not the session's own" (each touch starts this again). */
+export const INBOX_OWNER_WAIT_MS = 180_000
+/** How often it still asks once settled on no, for as long as it lives. */
+export const INBOX_OWNER_REASK_EVERY_MS = 30_000
+/** One ask's bound: a hang reads as no answer yet, never holding a tick or a tool call. */
+export const INBOX_OWNER_ASK_TIMEOUT_MS = 2_000
+/** How long a send from a process not yet known as its session's own keeps asking before it goes (`callTool`). */
+export const INBOX_OWNER_SEND_WAIT_MS = 8_000
+const INBOX_OWNER_SEND_WAIT_STEP_MS = 500
+
+/**
+ * What `InboxLinkOptions.owner` answers: `yes` true with the signal that said
+ * so, false with why not, or null when this engine cannot tell (the link is
+ * then the session's own, as without the option).
+ */
+export interface InboxOwnerAnswer {
+  yes: boolean | null
+  via: string
+}
 /** A claimed reply whose claimant stopped saying it is alive for this long is reported as undelivered (shared with the Inbox). */
 export { INBOX_UNDELIVERED_AFTER_MS }
 /**
@@ -746,6 +768,69 @@ export class TranscriptContinuedIn {
   }
 }
 
+/**
+ * `$.store` key: the last titles read from each session's transcript (`TranscriptTitle`), so a module reload, a
+ * transcript not found yet or a first read whose region holds no title line never clears a known name. Only a title
+ * line the transcript holds replaces one. Kept to the newest INBOX_SESSION_NAMES_MAX.
+ */
+export const STORE_INBOX_SESSION_TITLES = 'inboxSessionTitles'
+
+/** What a session's transcript last said: its title (`custom-title`; `''` when it said none) and Claude Code's own (`ai-title`). */
+export interface KnownTranscriptTitles {
+  title: string | null
+  generated: string | null
+}
+
+export type InboxSessionTitles = Record<string, KnownTranscriptTitles & { at: number }>
+
+const titleOrNull = (value: unknown) => (typeof value === 'string' ? value : null)
+
+/** The stored record: session id → its known titles and when they were kept, anything else dropped. */
+export function readSessionTitles(value: unknown): InboxSessionTitles {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  const out: InboxSessionTitles = {}
+  for (const [id, entry] of Object.entries(value as Record<string, unknown>)) {
+    const { title, generated, at } = (entry ?? {}) as Record<string, unknown>
+    if (id && typeof at === 'number' && Number.isFinite(at) && (titleOrNull(title) !== null || titleOrNull(generated) !== null)) out[id] = { title: titleOrNull(title), generated: titleOrNull(generated), at }
+  }
+  return out
+}
+
+/** The record with `sessionId`'s titles as `known` (both null: dropped), the newest INBOX_SESSION_NAMES_MAX kept. */
+export function withSessionTitles(record: InboxSessionTitles, sessionId: string, known: KnownTranscriptTitles, now: number): InboxSessionTitles {
+  const was = record[sessionId]
+  if ((was?.title ?? null) === known.title && (was?.generated ?? null) === known.generated) return record
+  const { [sessionId]: _old, ...rest } = record
+  const entries = Object.entries(known.title === null && known.generated === null ? rest : { ...rest, [sessionId]: { ...known, at: now } }).sort((a, b) => b[1].at - a[1].at)
+  return Object.fromEntries(entries.slice(0, INBOX_SESSION_NAMES_MAX))
+}
+
+/**
+ * `$.store` key: each session's first start (epoch ms), so the link a module reload makes still tells the Inbox when
+ * the session started (`InboxLinkOptions.firstStart`). Kept to the newest INBOX_SESSION_NAMES_MAX.
+ */
+export const STORE_INBOX_SESSION_STARTS = 'inboxSessionStarts'
+
+/** The stored record: session id → its first start, anything else dropped. */
+export function readSessionStarts(value: unknown): Record<string, number> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>).filter((e): e is [string, number] => !!e[0] && typeof e[1] === 'number' && Number.isFinite(e[1]) && e[1] > 0))
+}
+
+/** The record with `sessionId` started at `startedAt` unless it started earlier, the newest INBOX_SESSION_NAMES_MAX kept. */
+export function withSessionStart(record: Record<string, number>, sessionId: string, startedAt: number): Record<string, number> {
+  const was = record[sessionId]
+  if (was !== undefined && was <= startedAt) return record
+  const entries = Object.entries({ ...record, [sessionId]: startedAt }).sort((a, b) => b[1] - a[1])
+  return Object.fromEntries(entries.slice(0, INBOX_SESSION_NAMES_MAX))
+}
+
+/** Where a `TranscriptTitle` keeps what it read across module reloads (`STORE_INBOX_SESSION_TITLES`); a failure is nothing kept. */
+export interface TranscriptTitleMemory {
+  load(): Promise<KnownTranscriptTitles | null>
+  save(known: KnownTranscriptTitles): Promise<void>
+}
+
 export class TranscriptTitle {
   private path: string | null = null
   private lookedAt = Number.NEGATIVE_INFINITY
@@ -764,11 +849,15 @@ export class TranscriptTitle {
   private title: string | null = null
   private generated: string | null = null
 
+  /** What `memory` held, read once before the first read. */
+  private recalled: Promise<void> | null = null
+
   constructor(
     private readonly host: Pick<Host, 'fileSize' | 'run' | 'now'>,
     private readonly sessionId: string,
     /** Where the transcript may be (`claudeTranscriptPaths`), asked only while it is not found. */
     private readonly candidates: () => Promise<readonly string[]>,
+    private readonly memory?: TranscriptTitleMemory,
   ) {}
 
   generatedTitle(): string | null {
@@ -777,6 +866,22 @@ export class TranscriptTitle {
 
   /** The latest title (`''`: the transcript says none), or null when the transcript says nothing or cannot be read. */
   async read(): Promise<string | null> {
+    await (this.recalled ??= this.recall())
+    const before = { title: this.title, generated: this.generated }
+    const title = await this.readNow()
+    if (this.memory && (this.title !== before.title || this.generated !== before.generated)) await this.memory.save({ title: this.title, generated: this.generated }).catch(() => undefined)
+    return title
+  }
+
+  /** The titles a reader before this one kept (a module reload): known until the transcript says otherwise. */
+  private async recall(): Promise<void> {
+    const known = await this.memory?.load().catch(() => null)
+    if (!known) return
+    this.title ??= known.title
+    this.generated ??= known.generated
+  }
+
+  private async readNow(): Promise<string | null> {
     const path = await this.locate()
     if (!path) return this.title
     const size = await this.host.fileSize(path).catch(() => null)
@@ -1022,6 +1127,12 @@ export interface InboxLinkOptions {
   /** Set by the host, never by the model. */
   title?: () => string | Promise<string>
   /**
+   * The session's first start, given this link's (`STORE_INBOX_SESSION_STARTS`): earlier when an earlier link of the
+   * same session kept one (a module reload makes a new link). Sent as INBOX_FIRST_STARTED_POLL_FIELD, so the Agents
+   * list keeps the session's place. A rejection: this link's start.
+   */
+  firstStart?: (startedAt: number) => Promise<number>
+  /**
    * The session ids this conversation continues (`TranscriptForkedFrom`), read
    * for every poll and sent as INBOX_CONTINUES_POLL_FIELD when there is one.
    * Set by the host, never by the model. Absent, empty or a rejection: nothing sent.
@@ -1031,6 +1142,17 @@ export interface InboxLinkOptions {
   instanceId: string
   /** Who the session is in the Inbox (a T3 Code thread); absent: the Claude Code session `sessionId`. */
   agent?: InboxAgentIdentity
+  /**
+   * Whether this process is the session's own (a T3 Code thread: its
+   * `t3-code` tools or server, which reach it a few seconds after the start),
+   * asked every INBOX_OWNER_PROBE_EVERY_MS for INBOX_OWNER_WAIT_MS from the
+   * first ask or the last touch, then every INBOX_OWNER_REASK_EVERY_MS. Until
+   * it says yes the link takes no lease, polls nothing and delivers nothing;
+   * then a live lease another process holds stands until the person acts
+   * here. A null answer (the engine cannot tell) makes it the session's own
+   * at once. Absent: the session's own from the start.
+   */
+  owner?: () => Promise<InboxOwnerAnswer>
   /**
    * False: the tool sends and reads, and nothing polls (no reply wake, no
    * Inbox Ask): a session that may end with its turn (`SESSION_KIND_FEATURES`).
@@ -1045,6 +1167,20 @@ export interface InboxLinkOptions {
    * poll never asks, and the Inbox keeps the manual notice.
    */
   reload?: InboxLinkReload
+  /**
+   * The Inbox reminder for a launched session's first wake (`launched` on the command; approval
+   * "inbox-launched-agent-note"): that turn is a prompt this plugin submits, and Claude Code raises no plugin
+   * hook for it, so the first prompt's `prompt.submit` context never reaches it. Answers the reminder and what
+   * to call once the turn was taken, or null when none is due (the reminder off, or this conversation had it).
+   * Absent: no launched wake carries it.
+   */
+  launchReminder?: () => Promise<InboxLaunchReminder | null>
+}
+
+/** The reminder a launched session's first wake carries, and its record once the turn was taken. */
+export interface InboxLaunchReminder {
+  text: string
+  entered: () => Promise<void>
 }
 
 /** What the link drives of auto-reload.ts's AutoReload. */
@@ -1099,6 +1235,8 @@ export class InboxLink {
   private heldForInput = false
   /** When this link started (the session, near enough), and the turn state last told the Inbox (step 8). */
   private startedAt = 0
+  /** The session's first start (`InboxLinkOptions.firstStart`), asked once; 0 until known. */
+  private firstStartedAt = 0
   /** The last title that was known; what a poll repeats when it is not. */
   private lastLabel = ''
   private busy: boolean | null = null
@@ -1132,10 +1270,17 @@ export class InboxLink {
   private firesSeenAt: number | null = null
   /** When each reason a reply was not submitted was last logged (`notDelivering`). */
   private notDeliveringLogged = new Map<string, number>()
+  /** Whether this process is the session's own (`InboxLinkOptions.owner`); null while that is not known yet. */
+  private owns: boolean | null
+  private ownerAskedSince: number | null = null
+  private ownerAskedAt = Number.NEGATIVE_INFINITY
+  /** `start` asked for the touch that being made is, held while the owner is not known. */
+  private startTouch = false
 
   constructor(private readonly options: InboxLinkOptions) {
     this.host = options.host
     this.tools = options.tools
+    this.owns = options.owner ? null : true
     this.agent = options.agent ?? { host: INBOX_HOST, session: options.sessionId, name: INBOX_AGENT_NAME }
     this.dir = inboxSessionDirOf(options.dataDir, inboxSessionDirName(this.agent.session))
   }
@@ -1145,6 +1290,11 @@ export class InboxLink {
 
   get isDisposed(): boolean {
     return this.disposed
+  }
+
+  /** The reminder a launched session's first wake carries (`launchReminder`), or null; a failure is none. */
+  private async launchReminderOf(): Promise<InboxLaunchReminder | null> {
+    return (await this.options.launchReminder?.().catch(() => null)) ?? null
   }
 
   /**
@@ -1168,7 +1318,12 @@ export class InboxLink {
       this.startedAt ||= now
       this.idleSince ||= now
     })
-    if (options.touch !== false) void this.touch()
+    // Being made is no touch where the session's own process is still to be found: that one takes a live lease
+    // only when the person acts in it.
+    this.startTouch = options.touch !== false
+    if (this.startTouch && !this.options.owner) void this.touch()
+    // Asked at once: an engine that cannot tell makes this the touch it is everywhere else.
+    else if (this.options.owner) void this.ownsSession(true)
     this.arm()
   }
 
@@ -1220,7 +1375,12 @@ export class InboxLink {
   /** The person acted in this process: replies should land here, from now on. */
   async touch(): Promise<void> {
     this.touchedAt = await this.host.now()
-    if (this.disposed) return
+    // The person typed or the agent sent: a "no" is asked again, with a whole wait of its own.
+    if (this.owns === false) {
+      this.owns = null
+      this.ownerAskedSince = this.touchedAt
+    }
+    if (this.disposed || !(await this.ownsSession(true))) return
     // No Inbox has ever run here: nothing to deliver, so nothing is written;
     // the lease is taken on the first tick after a call starts the Inbox.
     if (!(await this.host.exists(this.registryPath))) this.leaseCheckedAt = Number.NEGATIVE_INFINITY
@@ -1256,6 +1416,14 @@ export class InboxLink {
    */
   async callTool(input: unknown, cwd: string): Promise<{ text: string } | { deny: string }> {
     await this.touch()
+    // A thread's first send can come before its own signal does: asked a little longer, so the poll starts
+    // before the message lands. The send says the reply arrives either way, as a confirmed one does.
+    // Waited in `$.process.run`, which a hook's budget does not count.
+    for (let waited = 0; this.owns !== true && waited < INBOX_OWNER_SEND_WAIT_MS; waited += INBOX_OWNER_SEND_WAIT_STEP_MS) {
+      await this.host.waitForAny([], INBOX_OWNER_SEND_WAIT_STEP_MS)
+      // Confirmed while it waited: the send is the touch that takes the lease.
+      if (await this.ownsSession(true)) await this.touch()
+    }
     const project = (await this.projectFolder()) ?? cwd
     const call = inboxToolCall(input, this.tools, {
       project_path: project,
@@ -1354,7 +1522,40 @@ export class InboxLink {
     return `${this.dir}/claims/${replyId}`
   }
 
+  /**
+   * Whether this process is the session's own (`InboxLinkOptions.owner`),
+   * asked at most every INBOX_OWNER_PROBE_EVERY_MS, or INBOX_OWNER_REASK_EVERY_MS
+   * once settled on no (`force` asks at once), each ask bounded by
+   * INBOX_OWNER_ASK_TIMEOUT_MS. A yes stays. The debug lines carry no id.
+   */
+  private async ownsSession(force = false): Promise<boolean> {
+    if (this.owns === true) return true
+    const now = await this.host.now()
+    this.ownerAskedSince ??= now
+    const every = this.owns === false ? INBOX_OWNER_REASK_EVERY_MS : INBOX_OWNER_PROBE_EVERY_MS
+    if (!force && now - this.ownerAskedAt < every) return false
+    this.ownerAskedAt = now
+    const asked = this.options.owner!().catch((error: unknown): InboxOwnerAnswer => ({ yes: false, via: error instanceof Error ? error.message : String(error) }))
+    const answer = (await within(this.host, INBOX_OWNER_ASK_TIMEOUT_MS, asked)) ?? { yes: false, via: `no answer in ${INBOX_OWNER_ASK_TIMEOUT_MS} ms` }
+    // Another ask may have settled it meanwhile (the tick and a send ask side by side).
+    const meanwhile = this.owns as boolean | null
+    if (meanwhile === true || this.disposed) return meanwhile === true
+    const after = (await this.host.now()) - this.ownerAskedSince
+    if (answer.yes !== false) {
+      this.owns = true
+      this.leaseCheckedAt = Number.NEGATIVE_INFINITY
+      this.host.debug(`inbox: ${this.agent.host} thread confirmed after ${after} ms via ${answer.via}`)
+      // The engine cannot tell: the link is what it is without the option, made with a touch.
+      if (answer.yes === null && this.startTouch) void this.touch()
+    } else if (this.owns === null && now - this.ownerAskedSince >= INBOX_OWNER_WAIT_MS) {
+      this.owns = false
+      this.host.debug(`inbox: ${this.agent.host} thread not confirmed: ${answer.via}`)
+    }
+    return this.owns === true
+  }
+
   private async tick(): Promise<void> {
+    if (this.disposed || !(await this.ownsSession())) return
     // Silent until an Inbox exists (the first plannotator_inbox call starts one): no HTTP, no files.
     if (this.disposed || !(await this.host.exists(this.registryPath)) || !(await this.ensureDir())) return
     const busy = this.options.isBusy()
@@ -1531,6 +1732,10 @@ export class InboxLink {
     const label = await this.labelNow()
     const title = this.options.title ? await Promise.resolve().then(this.options.title).catch(() => '') : null
     const continues = this.options.continues ? await this.options.continues().catch(() => [] as readonly string[]) : []
+    if (this.startedAt && !this.firstStartedAt && this.options.firstStart) {
+      const started = this.startedAt
+      this.firstStartedAt = await this.options.firstStart(started).catch(() => started)
+    }
     const response = await this.bridge(INBOX_BRIDGE_POLL_PATH, {
       waitMs,
       // The session this conversation was branched from: the Inbox hands this one what waits for it once it is gone.
@@ -1540,6 +1745,7 @@ export class InboxLink {
       ...(label === null ? {} : { label }),
       ...(title === null ? {} : { [INBOX_TITLE_POLL_FIELD]: title }),
       ...(this.startedAt ? { started_at: this.startedAt } : {}),
+      ...(this.firstStartedAt ? { [INBOX_FIRST_STARTED_POLL_FIELD]: this.firstStartedAt } : {}),
       ...(this.busy === null ? {} : { busy: this.busy, idle_since: this.idleSince }),
       // Send now: this engine can put a reply into a running turn (`$.session.append`).
       ...((await this.sendNowNow()) ? { [INBOX_SEND_NOW_POLL_FIELD]: true } : {}),
@@ -1690,6 +1896,9 @@ export class InboxLink {
     this.submitting = command.id
     this.held.add(command.id)
     await this.host.writeFile(`${dir}/alive`, String(await this.host.now())).catch(() => undefined)
+    // A launched session's first wake: the reminder rides in the turn's own words (no hook adds it here).
+    const reminder = command.launched ? await this.launchReminderOf() : null
+    const wake = reminder ? `${inboxWakeText(command)}\n\n${reminder.text}` : inboxWakeText(command)
     // Decided HERE, after every await above: the turn may have ended (or one started) meanwhile. Into the
     // running turn only when the person asked, one runs that may take it, and the engine can; else as a
     // turn when idle; else (this session's own Ask question holds it) it waits, its claim given back.
@@ -1706,7 +1915,7 @@ export class InboxLink {
       if (turn) {
         // Send now while Claude works: a user row in the running turn, read at its next model request.
         try {
-          await this.host.appendUserRow!(inboxWakeText(command))
+          await this.host.appendUserRow!(wake)
         } catch (error) {
           // Refused: nothing entered, so the claim is given back and it is delivered when the session is idle
           // (here or in the process the person moves to), the window reads it as queued again, and Send now
@@ -1728,8 +1937,9 @@ export class InboxLink {
           .catch(() => undefined)
       } else {
         // Resolves once Claude is idle and took the turn.
-        await this.host.submit(inboxWakeText(command))
+        await this.host.submit(wake)
       }
+      await reminder?.entered().catch(() => undefined)
     } catch (error) {
       this.submitting = null
       if (error instanceof PromptDropped) {

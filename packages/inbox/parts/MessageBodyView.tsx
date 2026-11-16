@@ -8,6 +8,7 @@ import type { ActionRow } from '../components/ReplyAnswers';
 import type { SentAnswerGroup } from '../sentReply';
 import { MessageBody } from './MessageBody/MessageBody';
 import type { MessageActsRef } from './messageActs';
+import { farChangeMessage } from '../scheduled/farLinks';
 
 export type MessageBodyData = {
   message: InboxMessageWire;
@@ -30,11 +31,16 @@ export type MessageBodyData = {
   openComment: string | null;
   revealedComment: string | null;
   side: boolean;
+  /** A thread from another linked machine: its name, so a routine's editor link reads as plain words. */
+  farMachine?: string | null;
+  /** A file the message names opens beside the thread (approval "inbox-file-refs-open-viewer"). */
+  fileRefs: boolean;
   acts: MessageActsRef;
 };
 
 export function drawMessageBody(d: MessageBodyData) {
-  const { message, acts } = d;
+  const { acts } = d;
+  const message = farChangeMessage(d.message, d.farMachine);
   const id = message.id;
   const isAgent = message.author.kind === 'agent';
   const questions = message.questions ?? [];
@@ -50,7 +56,8 @@ export function drawMessageBody(d: MessageBodyData) {
       openInFiles={d.codeReview}
       {...(d.notes === null ? {} : { contextNotes: d.notes ? { onOpen: (note) => acts.current.noteChips(id).onOpen?.(note) } : {} })}
       repo={d.repo}
-      onOpenAttachment={(attachment) => acts.current.openFromMessage(attachment)}
+      onOpenAttachment={(attachment, start) => acts.current.openFromMessage(attachment, null, start ? () => acts.current.setPageStart({ id: attachment.id, start }) : undefined)}
+      onOpenFileRef={d.fileRefs ? (ref) => acts.current.openFileRef(id, ref) : undefined}
       onOpenInlineImage={(image) => acts.current.openFromMessage(image)}
       onOpenOptionSet={(key, image, choice) => acts.current.openOptionSet(id, key, image, choice)}
       onTryPrototype={isAgent ? (key) => acts.current.tryPrototype(id, key) : undefined}

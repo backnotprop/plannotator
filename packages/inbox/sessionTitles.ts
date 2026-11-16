@@ -1,4 +1,7 @@
-/** Kept apart from `session_labels`: only list rows show a generated title. */
+/**
+ * The titles each session's host generated (`session_titles`; Claude Code's own session title). A session with no
+ * label of its own is named by its title everywhere (sessionLabels.ts reads it under the labels).
+ */
 import { useSyncExternalStore } from 'react';
 import type { SessionLabels } from './sessionLabels';
 
@@ -15,6 +18,17 @@ export function setSessionTitles(next: unknown): void {
   if (keys.length === Object.keys(current).length && keys.every((key) => Object.hasOwn(current, key) && current[key] === clean[key])) return;
   current = keys.length === 0 ? EMPTY : Object.freeze(clean);
   for (const listener of listeners) listener();
+}
+
+/** The titles now, outside React. */
+export function sessionTitlesNow(): SessionLabels {
+  return current;
+}
+
+/** Hear each change (sessionLabels.ts). */
+export function onSessionTitles(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
 }
 
 function subscribe(listener: () => void): () => void {

@@ -22,17 +22,14 @@ function KindPicker({ value, disabled, onChange }: { value: InboxCloudPreset; di
 }
 
 export function CloudPairForm({
-  projects,
   onCancel,
   onPaired,
 }: {
-  projects: CloudAgentsModel['projects'];
   onCancel: () => void;
   onPaired: (model: CloudAgentsModel, session: string, setup: InboxCloudSetup | null) => void;
 }) {
   const [preset, setPreset] = useState<InboxCloudPreset>('claude-routine');
   const [name, setName] = useState('');
-  const [project, setProject] = useState<string | null>(projects[0]?.id ?? null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const first = useRef<HTMLInputElement>(null);
@@ -44,7 +41,7 @@ export function CloudPairForm({
     setBusy(true);
     setError(null);
     try {
-      const answer = await inboxApi.pairCloudAgent({ name: name.trim(), preset, project_id: project });
+      const answer = await inboxApi.pairCloudAgent({ name: name.trim(), preset });
       onPaired(answer, answer.agent.session, answer.setup);
     } catch (cause) {
       setError(errorText(cause));
@@ -60,18 +57,9 @@ export function CloudPairForm({
         <span className="ib-l">Name</span>
         <input ref={first} type="text" className="ib-fbk-contact" placeholder="Nightly fixer" maxLength={60} autoComplete="off" value={name} readOnly={busy} onChange={(event) => setName(event.target.value)} onKeyDown={noEnter} data-cloud-name="" />
       </label>
-      {projects.length > 1 && (
-        <label className="ib-mfield">
-          <span className="ib-l">Its threads go in</span>
-          <select className="ib-fbk-contact" value={project ?? ''} disabled={busy} onChange={(event) => setProject(event.target.value || null)} data-cloud-project="">
-            {projects.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
-        </label>
-      )}
+      <span className="ib-cl-note">
+        It can read and write across this Inbox, under its own name.
+      </span>
       {error && (
         <div className="ib-callout ib-err" role="alert" data-cloud-pair-error="">
           <Icon name="xCircle" />

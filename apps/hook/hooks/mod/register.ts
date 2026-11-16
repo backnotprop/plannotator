@@ -95,7 +95,9 @@ import {
   sessionKindOf,
   SESSION_KIND_FEATURES,
   t3ThreadOf,
+  isT3ThreadOwnTools,
   T3_ENTRYPOINT,
+  T3_THREAD_SERVER,
   type SessionKind,
   resolveAgentToolEnabled,
   resolveClaudeModEnabled,
@@ -115,20 +117,28 @@ import {
   inboxFirstPromptContext,
   inboxRegistryPathOf,
   inboxT3Agent,
+  type InboxOwnerAnswer,
   inboxReminderEnvValue,
   inboxReminderWithThreads,
   INBOX_SESSION_NAME_COMMANDS,
   pluginVersionOf,
   readReminderSessions,
   readSessionNames,
+  readSessionStarts,
+  readSessionTitles,
   sessionNamesAfterCommand,
   readSessionThreads,
   STORE_INBOX_REMINDER_SESSIONS,
   STORE_INBOX_SESSION_NAMES,
+  STORE_INBOX_SESSION_STARTS,
+  STORE_INBOX_SESSION_TITLES,
   TranscriptContinuedIn,
   TranscriptForkedFrom,
   TranscriptTitle,
+  type InboxLaunchReminder,
   withReminderSession,
+  withSessionStart,
+  withSessionTitles,
 } from './inbox'
 import { inboxAgentTool, inboxReminderFor, type InboxToolInfo } from './inbox-contract'
 import { INBOX_DEFAULT_TOOLS } from './inbox-default-tools'
@@ -502,6 +512,33 @@ async function recordReminder($: Engine, sessionId: string): Promise<void> {
   await $.store.set(STORE_INBOX_REMINDER_SESSIONS, withReminderSession(readReminderSessions(stored), sessionId, now))
 }
 
+/** The longest a launched session's first wake waits to learn whether it carries the reminder. */
+const LAUNCH_REMINDER_MS = 1_500
+
+/**
+ * The reminder a launched session's first wake carries (approval "inbox-launched-agent-note"): that turn is the
+ * plugin's own prompt, which Claude Code never raises this module's `prompt.submit` for, so it carries the same
+ * text a typed first prompt would, under the same gate (`reminderOn`, decided at the first session.start), once
+ * per conversation: none when this conversation's first prompt had it (here or, by the store's record, in
+ * another process). Taken, it counts as that first prompt's, so a prompt the person types later carries none.
+ */
+async function launchReminderFor($: Engine, sessionId: string): Promise<InboxLaunchReminder | null> {
+  const settings = allowed
+  const toolName = inboxToolName
+  if (!settings || !toolName || reminderGateValue !== true) return null
+  const state = reminderConversation(sessionId)
+  if (state.delivered) return null
+  const recorded = await withinMs($, LAUNCH_REMINDER_MS, () => reminderRecorded($, sessionId))
+  if (recorded !== false) return null
+  return {
+    text: inboxReminderFor(settings.inboxReminderCustom, toolName),
+    entered: async () => {
+      state.delivered = true
+      await recordReminder($, sessionId).catch(() => undefined)
+    },
+  }
+}
+
 /**
  * The folder this session files under in the Inbox, for its thread lists
  * after a compaction or a resume: the session's own link's project folder
@@ -550,10 +587,27 @@ async function sessionNameOf($: Engine, sessionId: string): Promise<string> {
  * `<CLAUDE_CONFIG_DIR or ~/.claude>/projects/<folder>/<session id>.jsonl`,
  * for the folder the session started in (its first root), its root now, or its
  * working folder. Its null (no transcript, no title in it, no `/bin/sh`) leaves
- * the label to the `/rename` store.
+ * the label to the `/rename` store. What it read is kept in `$.store`
+ * (STORE_INBOX_SESSION_TITLES), so the instance a module reload makes starts
+ * from the last titles instead of none.
  */
 function sessionTitleOf($: Engine, host: Host, sessionId: string): TranscriptTitle {
-  return new TranscriptTitle(host, sessionId, transcriptCandidatesOf($, sessionId))
+  return new TranscriptTitle(host, sessionId, transcriptCandidatesOf($, sessionId), {
+    load: async () => readSessionTitles(await $.store.get(STORE_INBOX_SESSION_TITLES))[sessionId] ?? null,
+    save: async (known) => {
+      const stored = readSessionTitles(await $.store.get(STORE_INBOX_SESSION_TITLES))
+      const updated = withSessionTitles(stored, sessionId, known, await $.clock.now())
+      if (updated !== stored) await $.store.set(STORE_INBOX_SESSION_TITLES, updated)
+    },
+  })
+}
+
+/** `sessionId`'s first start: the one kept in `$.store` (STORE_INBOX_SESSION_STARTS), else `startedAt`, which is kept. */
+async function sessionFirstStartOf($: Engine, sessionId: string, startedAt: number): Promise<number> {
+  const stored = readSessionStarts(await $.store.get(STORE_INBOX_SESSION_STARTS))
+  const updated = withSessionStart(stored, sessionId, startedAt)
+  if (updated !== stored) await $.store.set(STORE_INBOX_SESSION_STARTS, updated)
+  return Math.min(stored[sessionId] ?? startedAt, startedAt)
 }
 
 /** Where `sessionId`'s transcript may be, asked when needed: the folder it started in (its first root), its root now, its working folder. */
@@ -605,10 +659,12 @@ async function currentMod($: Engine, options: { healed?: boolean } = {}): Promis
       root: async () => String(await $.session.root()),
       label: async () => (await title.read().catch(() => null)) ?? sessionNameOf($, String(sessionId)),
       title: () => title.generatedTitle() ?? '',
+      firstStart: (startedAt) => sessionFirstStartOf($, String(sessionId), startedAt),
       continues: async () => [...new Set([...(await forkedFrom.read()), ...(await continuedIn.read())])],
       ...(inboxTools ? { inboxTools } : {}),
-      ...(settings.t3Thread ? { inboxAs: inboxT3Agent(settings.t3Thread) } : {}),
+      ...(settings.t3Thread ? { inboxAs: inboxT3Agent(settings.t3Thread), inboxOwner: () => t3ThreadOwnHere($) } : {}),
       ...(settings.wake ? {} : { inboxWake: false }),
+      launchReminder: () => launchReminderFor($, String(sessionId)),
       ...(options.healed ? { healed: true } : {}),
     })
     // A question queued behind the old session's turn still enters as a turn of the new one: the new instance drops it.
@@ -625,6 +681,35 @@ async function currentMod($: Engine, options: { healed?: boolean } = {}): Promis
   } finally {
     switching = null
   }
+}
+
+/** Once yes, for the process: T3's `t3-code` server stays for the thread's Claude while it runs. */
+let t3ThreadOwn: InboxOwnerAnswer | null = null
+
+/**
+ * Whether this process is its T3 thread's own Claude: its tools include T3's
+ * `t3-code` ones (`isT3ThreadOwnTools`), or, where tool schemas load on demand
+ * and the list may leave them out, its context names a `t3-code` server
+ * (`$.session.usage`'s `mcpTools`, which lists a tool not searched for yet
+ * too). A Claude Code whose `$.tool.list` is missing or throws cannot tell:
+ * null, and the link runs as it did before the check.
+ */
+async function t3ThreadOwnHere($: Engine): Promise<InboxOwnerAnswer> {
+  if (t3ThreadOwn) return t3ThreadOwn
+  let tools: unknown
+  try {
+    tools = await $.tool.list()
+  } catch (error) {
+    return { yes: null, via: `no $.tool.list here (${error instanceof Error ? error.message : String(error)})` }
+  }
+  if (!Array.isArray(tools)) return { yes: null, via: 'no $.tool.list here' }
+  if (isT3ThreadOwnTools(tools.map((tool: { name?: unknown }) => tool?.name))) return (t3ThreadOwn = { yes: true, via: 'tools' })
+  const usage = await Promise.resolve()
+    .then(() => $.session.usage({ breakdown: 'summary' }))
+    .catch(() => null)
+  const servers = usage?.context?.breakdown?.mcpTools
+  if (Array.isArray(servers) && servers.some((tool: { serverName?: unknown }) => tool?.serverName === T3_THREAD_SERVER)) return (t3ThreadOwn = { yes: true, via: 'mcp server' })
+  return { yes: false, via: `no t3-code tools or server among ${tools.length} tools` }
 }
 
 /**

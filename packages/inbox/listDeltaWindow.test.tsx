@@ -48,6 +48,8 @@ let savedMatchMedia: typeof window.matchMedia;
 let reads: string[] = [];
 let listAnswers: ('delta' | 'whole')[] = [];
 let sendRecord: ((record: unknown) => void) | null = null;
+/** The relayed stream's hello came: the Inbox sends it with the window's drafts listener added, so a save after it is heard. */
+let draftsStreamOpen = false;
 let seq = 1_000_000;
 
 function loopback(path: string, method = 'GET', body?: string): Promise<{ status: number; text: string }> {
@@ -100,6 +102,7 @@ function relayDrafts(path: string, listener: (event: MessageEvent<string>) => vo
       const frames = buffer.split('\n\n');
       buffer = frames.pop() ?? '';
       for (const frame of frames) {
+        if (!closed && /^event: hello$/m.test(frame)) draftsStreamOpen = true;
         if (closed || !/^event: drafts$/m.test(frame)) continue;
         const data = /^data: (.*)$/m.exec(frame)?.[1] ?? '';
         act(() => listener({ data } as MessageEvent<string>));
@@ -170,6 +173,7 @@ beforeEach(() => {
   world = worlds.shift()!;
   reads = [];
   listAnswers = [];
+  draftsStreamOpen = false;
   resetListReads();
   savedFetch = globalThis.fetch;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -321,7 +325,7 @@ test('a message in a thread holding unsent work reads the drafts; Tidy is read w
 test('a thread holding unsent work deleted (no record or drafts frame says it): the next agent message elsewhere brings the Drafts count to a fresh read\'s', async () => {
   if (!hasDom) return;
   const el = mount();
-  await until(() => listShown(el) && sendRecord !== null, 'the list and the stream');
+  await until(() => listShown(el) && sendRecord !== null && draftsStreamOpen, 'the list and the stream');
   // A reply draft in a second thread: its save tells the window (the Inbox's own drafts frame).
   await post(`/api/inbox/threads/${world.waiting}/draft`, { body: 'Half a reply', base: null, files_add: [], files_remove: [], files_place: [] });
   const before = await draftsOnServer();
@@ -351,7 +355,7 @@ test('compose drafts saved and deleted in another window, with no reply draft he
   for (const row of held.replies) await post(`/api/inbox/threads/${row.thread_id}/delete`);
   expect(await draftsOnServer()).toBeNull();
   await agentWrites(world.stopped);
-  await until(() => draftsBadge(el) === null, 'no Drafts row');
+  await until(() => draftsBadge(el) === null && draftsStreamOpen, 'no Drafts row');
   const records = seq;
 
   const first = inboxId('drf');

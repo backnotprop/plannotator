@@ -3,6 +3,7 @@ import { GUIDE_CLI_USAGE } from "@plannotator/server/guide-cli";
 import { T3_CLI_USAGE } from "@plannotator/t3-code/usage";
 import { INBOX_CARD_COLUMNS, INBOX_CARD_INITIATIVE_CLEAR_OUT, INBOX_CARD_INITIATIVE_FIELD, INBOX_CARD_INITIATIVE_RULE } from "@plannotator/core/inbox-types";
 import { INBOX_REF_LINK_RULE, INBOX_TOOL_ACTIONS } from "@plannotator/shared/inbox/connection";
+import { INBOX_AGENT_CALL_ACTIONS } from "@plannotator/shared/inbox/agent-pairing";
 import { FEEDBACK_HEREDOC_END } from "@plannotator/core/product-feedback";
 import { SHAPE_GUIDE, SHAPE_HELP_INTRO } from "@plannotator/core/shape-skill";
 import { INBOX_LINK_USAGE } from "./inbox-link-command";
@@ -201,9 +202,9 @@ export function formatTopLevelHelp(options: { board?: boolean } = {}): string {
     "  plannotator --help",
     "  plannotator --version, -v",
     "  plannotator [--browser <name>]",
-    "  plannotator review [--git | --gitbutler] [--base <ref>] [--diff-type <type>] [--patch-file <path | ->] [--title <text>] [--tailscale] [--gate] [DIRECTORY | PR_URL]",
-    "  plannotator annotate <file.md | file.txt | file.html | https://... | folder/>  [--markdown] [--no-jina] [--title <text>] [--tailscale] [--gate] [--json] [--hook] [--require-approval] [--result-file <path>]",
-    "  plannotator annotate-last [--stdin] [--title <text>] [--tailscale] [--gate] [--json] [--hook]",
+    "  plannotator review [--git | --gitbutler] [--base <ref>] [--diff-type <type>] [--patch-file <path | ->] [--title <text>] [--tailscale | --cloudflare-access] [--gate] [DIRECTORY | PR_URL]",
+    "  plannotator annotate <file.md | file.txt | file.html | https://... | folder/>  [--markdown] [--no-jina] [--title <text>] [--tailscale | --cloudflare-access] [--gate] [--json] [--hook] [--require-approval] [--result-file <path>]",
+    "  plannotator annotate-last [--stdin] [--title <text>] [--tailscale | --cloudflare-access] [--gate] [--json] [--hook]",
     "  plannotator copilot-last [--gate] [--json] [--hook]",
     "  plannotator setup-goal <interview|facts> <bundle.json | -> [--json]",
     "  plannotator last",
@@ -520,22 +521,31 @@ export const INBOX_PROJECTS_USAGE = [
 /** What `plannotator inbox call` runs: the Inbox tool's actions. */
 export const INBOX_CALL_ACTIONS: readonly string[] = INBOX_TOOL_ACTIONS;
 
+const INBOX_PAIRED_CALL_ACTIONS = INBOX_AGENT_CALL_ACTIONS.filter((action) => action !== "steps" && action !== "routine");
+
 export const INBOX_PAIRED_CALL_USAGE = [
   "Usage, as a paired cloud agent (PLANNOTATOR_PAIRING is set):",
   "  plannotator inbox call <action> [<json> | -]",
   "",
   "Talks to the person's Plannotator Inbox as the cloud agent the pairing string names, through",
-  "the Inbox's relay, sealed end to end. You see only the threads you started, were sent or were",
-  "tagged in; you post under your own name. Actions: whoami, read_thread, send_message, search, resolve_message.",
+  "the Inbox's relay, sealed end to end. You can read, search and write in every thread of every",
+  "project; you post under your own name.",
+  `Actions: ${INBOX_PAIRED_CALL_ACTIONS.join(", ")}. The JSON holds the action's fields, as in`,
+  "'plannotator inbox --help', except that you name a project by its name (\"project\": \"api\"), never",
+  "by a folder. With no project, read_thread and search cover every project, and a new thread",
+  "goes in the project whoami names.",
   "",
   "  plannotator inbox call whoami        check the setup: who you are, or exactly what is wrong",
   "  plannotator inbox call read_thread '{\"thread_id\":\"thr_1\"}'",
+  "  plannotator inbox call send_message '{\"project\":\"api\",\"subject\":\"Release\",\"body\":\"Ready to tag?\"}'",
   "  plannotator inbox call send_message '{\"reply_to\":\"msg_2\",\"body\":\"Done: the tests pass.\"}'",
   "  plannotator inbox call send_message '{\"reply_to\":\"msg_2\",\"body\":\"The screenshot is below.\",\"attachments\":[\"shot.png\"]}'",
   "",
-  "A path in attachments is read from this machine and sent as bytes; the Inbox opens no path for you.",
-  "When the person's computer is asleep, a read fails and says so, and send_message waits at the",
-  "relay and is posted once when it is back (stdout then says queued: true; do not send it again).",
+  "A path in attachments is read from this machine and sent as bytes, a big file in pieces on its own",
+  "(up to 100 MB a file); the Inbox opens no path for you.",
+  "When the person's computer is asleep, a read fails and says so, and an action that changes",
+  "something (send_message, resolve_message and the like) waits at the relay and is applied once",
+  "when it is back (stdout then says queued: true; do not send it again).",
   "whoami also prints signal_url: an address whose value changes when the person writes in one",
   "of your threads, for a routine that can only poll.",
   "stdout: the result as one JSON value. A failure: <code>: <message> on stderr, exit 1.",
@@ -547,8 +557,8 @@ export const INBOX_CALL_USAGE = [
   "  plannotator inbox call [--session <id>] <action> [<json> | -]",
   "",
   "Runs one Inbox action from a shell, so a script can make many fixes in one go.",
-  // `steps` is left out: it is served only while the person has thread steps on, and the guide names it then.
-  `Actions: ${INBOX_CALL_ACTIONS.filter((action) => action !== "steps").join(", ")}. The JSON holds the action's fields, as in`,
+  // `steps` and `routine` are left out: each is served only while the person has it on, and the guide names it then.
+  `Actions: ${INBOX_CALL_ACTIONS.filter((action) => action !== "steps" && action !== "routine").join(", ")}. The JSON holds the action's fields, as in`,
   "'plannotator inbox --help'; - reads it from stdin (for PowerShell and for loops, where",
   "quoting JSON is painful). A stopped Inbox starts in the background.",
   "",
@@ -580,6 +590,7 @@ export const INBOX_COMMAND_USAGE = [
   "  plannotator inbox status [--json]",
   "  plannotator inbox stop",
   "  plannotator inbox restart [--tailscale]",
+  "  plannotator inbox cloudflare-access setup --email <addr> | teardown | status",
   "  plannotator inbox projects [--json]",
   "  plannotator inbox projects combine <project id> --into <project id> [--json]",
   "  plannotator inbox projects undo <project id> [--json]",
@@ -607,6 +618,11 @@ export const INBOX_COMMAND_USAGE = [
   "                                  run (tailscale serve, HTTPS, never funnel), for the",
   "                                  Tailscale login that owns this machine only. With",
   "                                  an Inbox already running, asks it to publish.",
+  "  plannotator inbox cloudflare-access setup | teardown | status",
+  "                                  Reach the Inbox from other devices through the",
+  "                                  person's own Cloudflare account (Tunnel + Access),",
+  "                                  for their e-mail only. The person's choice: never",
+  "                                  run setup or teardown unless they ask. --help for more.",
   "  plannotator inbox mcp           The stdio MCP server for agents. Starts a stopped",
   "                                  Inbox in the background (no browser tab).",
   "                                  --t3: for T3 Code (plannotator t3 --help); lists",
@@ -708,7 +724,7 @@ export const UPDATE_COMMAND_USAGE = [
 export const SUBCOMMAND_HELP: Record<string, string> = {
   review: [
     "Usage:",
-    "  plannotator review [--git | --gitbutler] [--base <ref>] [--diff-type <type>] [--local | --no-local] [--patch-file <path | ->] [--no-git-remote-check] [--title <text>] [--tailscale] [--gate] [--json] [DIRECTORY | PR_URL]",
+    "  plannotator review [--git | --gitbutler] [--base <ref>] [--diff-type <type>] [--local | --no-local] [--patch-file <path | ->] [--no-git-remote-check] [--title <text>] [--tailscale | --cloudflare-access] [--gate] [--json] [DIRECTORY | PR_URL]",
     "",
     "Review local VCS changes or a GitHub, GitLab or Bitbucket Cloud pull request in the browser.",
     "",
@@ -733,6 +749,9 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
     "  --title <text>",
     "                Name the browser tab this, in place of \"<repo> · Code Review\"",
     "  --tailscale   Publish the loopback session over your tailnet via tailscale serve (HTTPS)",
+    "  --cloudflare-access",
+    "                Open the session at your Cloudflare Access address (set up with plannotator",
+    "                inbox cloudflare-access setup), for your e-mail only; starts the Inbox if needed",
     "  --gate        You wait for the sign-off: a bare Approve reaches you too. The approval",
     "                is printed either way; an agent host that only logs a bare Approve",
     "                (the Claude Code mod) delivers it as a message.",
@@ -766,7 +785,7 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
   ].join("\n"),
   annotate: [
     "Usage:",
-    "  plannotator annotate <file.md | file.txt | file.html | https://... | folder/> [--markdown] [--no-jina] [--title <text>] [--tailscale] [--gate] [--json] [--hook] [--require-approval] [--result-file <path>]",
+    "  plannotator annotate <file.md | file.txt | file.html | https://... | folder/> [--markdown] [--no-jina] [--title <text>] [--tailscale | --cloudflare-access] [--gate] [--json] [--hook] [--require-approval] [--result-file <path>]",
     "",
     "Open a markdown/text/HTML file, a URL, or a folder of documents in the annotation UI.",
     "Several existing file paths (plannotator annotate spec.md mock.html notes.md) open",
@@ -779,6 +798,9 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
     "                Name the browser tab and the header this, in place of the file",
     "                or folder name, whichever document is open",
     "  --tailscale   Publish the loopback session over your tailnet via tailscale serve (HTTPS)",
+    "  --cloudflare-access",
+    "                Open the session at your Cloudflare Access address (set up with plannotator",
+    "                inbox cloudflare-access setup), for your e-mail only; starts the Inbox if needed",
     "  --gate        Add an Approve button (review-gate UX)",
     "  --json        Emit a structured decision JSON on stdout",
     "  --hook        Emit hook-native JSON (block/pass) for PostToolUse/Stop hooks",
@@ -790,8 +812,8 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
   ].join("\n"),
   "annotate-last": [
     "Usage:",
-    "  plannotator annotate-last [--stdin] [--title <text>] [--tailscale] [--gate] [--json] [--hook]",
-    "  plannotator last [--stdin] [--title <text>] [--tailscale] [--gate] [--json] [--hook]",
+    "  plannotator annotate-last [--stdin] [--title <text>] [--tailscale | --cloudflare-access] [--gate] [--json] [--hook]",
+    "  plannotator last [--stdin] [--title <text>] [--tailscale | --cloudflare-access] [--gate] [--json] [--hook]",
     "",
     "Annotate the last assistant message from the current agent session.",
     "",
@@ -800,6 +822,9 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
     "  --title <text>",
     "                Name the browser tab and the header this, in place of \"Last message\"",
     "  --tailscale   Publish the loopback session over your tailnet via tailscale serve (HTTPS)",
+    "  --cloudflare-access",
+    "                Open the session at your Cloudflare Access address (set up with plannotator",
+    "                inbox cloudflare-access setup), for your e-mail only; starts the Inbox if needed",
     "  --gate        Add an Approve button (review-gate UX)",
     "  --json        Emit a structured decision JSON on stdout",
     "  --hook        Emit hook-native JSON (block/pass) for PostToolUse/Stop hooks",

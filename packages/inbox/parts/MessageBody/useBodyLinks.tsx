@@ -9,7 +9,9 @@ import { paintSkillReferences } from '../../skillHighlight';
 import { paintTagReferences, type TagMarkPlace } from '../../tagHighlight';
 import { splitInboxSkillsBlock } from '@plannotator/core/skill-reference-block';
 import type { RefObject } from 'react';
+import { prototypeStart } from '../../prototypes';
 import type { MessageBodyProps } from './types';
+import type { OpenFileRefRef } from './useFileRefs';
 
 /** The skills and agents a reply names, painted in its words, and where each link in the body goes. */
 export function useBodyLinks({
@@ -22,7 +24,11 @@ export function useBodyLinks({
   openInFiles,
   onOpenAttachment,
   setFallback,
+  refsOn,
+  openFileRefRef,
 }: Pick<MessageBodyProps, 'message' | 'replyFiles' | 'projectRoot' | 'onOpenAttachment'> & {
+  refsOn: boolean;
+  openFileRefRef: OpenFileRefRef;
   openInFiles: boolean;
   bodyRef: RefObject<HTMLDivElement | null>;
   skills: ReturnType<typeof splitInboxSkillsBlock> | null;
@@ -76,6 +82,24 @@ export function useBodyLinks({
         return { kind: 'open', title: 'Show the drawing', href: src, open: () => setFallback({ src, alt: 'Your drawing' }) };
       }
       const attachment = attachmentForLink(href, { attachments: message.attachments ?? [], root: projectRoot, base: message.base_path ?? null });
+      const named = !attachment && refsOn ? projectFileOfLink(href) : null;
+      if (named) {
+        // A click opens it beside the thread; with Code review on, its code still shows on hover, with Open in.
+        return {
+          kind: 'open',
+          title: openAttachmentTitle(named.path),
+          open: () => openFileRefRef.current?.(named),
+          ...(openInFiles
+            ? {
+                wrap: (link: ReactNode) => (
+                  <OpenInCodeHover scope={{ thread: message.thread_id, message: message.id }} path={named.path} line={named.line} lineEnd={named.lineEnd}>
+                    {link}
+                  </OpenInCodeHover>
+                ),
+              }
+            : {}),
+        };
+      }
       if (!attachment) {
         // Not attached, but a file of the project: its code on hover, with Open in (nothing when there is no such file).
         const projectFile = openInFiles ? projectFileOfLink(href) : null;
@@ -97,10 +121,10 @@ export function useBodyLinks({
         kind: 'open',
         title: openAttachmentTitle(attachmentDisplayPath(attachment, projectRoot)),
         href: attachmentDeepLink(message.thread_id, attachment.id),
-        open: () => openRef.current(attachment),
+        open: () => openRef.current(attachment, attachment.kind === 'html' ? prototypeStart(href) || undefined : undefined),
       };
     },
-    [message.attachments, message.base_path, message.thread_id, message.id, projectRoot, replyFileList, openInFiles],
+    [message.attachments, message.base_path, message.thread_id, message.id, projectRoot, replyFileList, openInFiles, refsOn],
   );
   return { tagLabels, tagHosts, tagLayerRef, tagMarks, resolveLocalLink };
 }

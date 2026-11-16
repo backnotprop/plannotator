@@ -272,7 +272,7 @@ const pairStep = (kind: string): Step => ({
 const cloudTool = (name: string): Cell => ({
   level: 'yes',
   label: 'Through the relay',
-  detail: `${name} runs \`plannotator inbox call\` on its own computer to read and answer the threads you give it. Each call goes through the relay, sealed end to end.`,
+  detail: `${name} runs \`plannotator inbox call\` on its own computer to read and write across your Inbox. Each call goes through the relay, sealed end to end.`,
   src: 'CA:3,21,35,74-82; MU:3,40,104-116',
 });
 const cloudNo = (what: string): Cell => ({ level: 'no', label: 'No', detail: `A cloud agent has no ${what}: it can do what \`plannotator inbox call --help\` lists.`, src: 'CA:96; MU:134; NA:311' });
@@ -1105,6 +1105,54 @@ export const AGENTS: Agent[] = [
     examples: ['Ask Claude in a T3 thread to run `plannotator review`. Your comments go back to that thread.'],
   },
   {
+    slug: 'antigravity',
+    name: 'Antigravity',
+    tier: 'mcp',
+    lede: 'Google Antigravity (the App, the IDE and the agy CLI) reaches the Inbox through MCP. Your reply starts a turn in the conversation that asked.',
+    diff: 'Reply wakes it · App, IDE and agy',
+    inbox: {
+      tool: mcpTool('`plannotator inbox` adds one `plannotator-inbox` key to `~/.gemini/config/mcp_config.json`, the file the App, the IDE and agy all read.', 'AG (antigravity); packages/server/inbox-agents.ts'),
+      reply: {
+        level: 'yes',
+        label: 'Wakes it',
+        detail: 'The Inbox sends your reply into the conversation with Antigravity’s own agent API. An idle conversation starts a turn with it; a busy one reads it at its next step. In agy the agent runs `plannotator inbox antigravity` once per launch first; the App and the IDE need nothing.',
+        src: 'packages/server/inbox-antigravity-wake.ts; apps/hook/server/inbox-antigravity-command.ts',
+      },
+      start: noStart,
+      permissions: noPermissions,
+    },
+    plannotator: {
+      plan: noPlan('No Antigravity plan hook in Plannotator'),
+      review: { level: 'part', label: 'From the terminal', detail: 'Ask the agent to run `plannotator review`.', src: 'apps/hook/server/index.ts (review command)' },
+      annotate: filesOnly('Ask the agent to run `plannotator annotate <file>`.', 'apps/hook/server/index.ts (annotate command)'),
+      ask: noAsk,
+    },
+    setup: [
+      { do: 'Install Plannotator.', code: INSTALL },
+      openInbox('The terminal says `Connected Antigravity … to the Inbox`.'),
+      { do: 'Restart the Antigravity App or IDE. A new agy session has it at once.' },
+    ],
+    other: [
+      { title: 'Connect the Inbox yourself', steps: [{ do: 'Merge this into `mcpServers`. The App, the IDE and agy read the same file.', file: '~/.gemini/config/mcp_config.json', code: MCP_JSON }] },
+      onWindows,
+    ],
+    check: wakeCheck('Antigravity'),
+    trouble: [
+      {
+        symptom: 'In agy, your reply never shows up on its own',
+        fix: 'The agent runs `plannotator inbox antigravity` once per agy launch; the Inbox tells it to when it asks. `agy -p` ends after its turn, so it reads the thread instead.',
+        src: 'apps/hook/server/inbox-antigravity-command.ts',
+      },
+      { symptom: 'The App doesn’t list the `plannotator-inbox` tools', fix: 'The App reads its MCP file when it starts. Restart it.', src: 'packages/server/inbox-agents.ts formatConnectReport' },
+      dockPath,
+      inboxLog,
+    ],
+    limits: [
+      { text: 'Tested with agy 1.5.9 and the App 2.32.1 on macOS. The IDE, Windows and Linux are untested.', src: 'packages/server/inbox-antigravity-wake.ts (the versions in its header)' },
+    ],
+    examples: ['Ask the agent to send you a question in the Plannotator Inbox, then answer it there.'],
+  },
+  {
     slug: 'qwen-code',
     name: 'Qwen Code',
     tier: 'hooks',
@@ -1542,7 +1590,6 @@ export const AGENTS: Agent[] = [
     limits: [
       { text: 'A thread wakes Grok Bot at most once a minute. Replies inside that minute go together, oldest first.', src: 'CL:17; NA:306' },
       { text: 'Files you attach in the Inbox don’t reach Grok Bot. A wake says how many there are.', src: 'CL:126; NA:305,311' },
-      { text: 'Grok Bot reads only the threads you give it.', src: 'CA:3' },
       { text: 'Your computer must be awake for Grok Bot to read. What it sends while the computer sleeps is posted when it is back, within 30 days.', src: 'CA:49,94' },
     ],
     examples: [
@@ -1602,7 +1649,7 @@ export const AGENTS: Agent[] = [
       { text: 'The 10-second check uses hooks in Muse’s runtime, which Meta doesn’t document and can change or remove at any time.', src: 'MU:69' },
       { text: 'Without the hook every check is one of Muse’s runs, about 288 a day.', src: 'MU:91' },
       { text: 'Files you attach in the Inbox don’t reach Muse.', src: 'NA:311' },
-      { text: 'Muse reads only the threads you give it. It can’t answer your own questions or approve anything for you.', src: 'MU:133' },
+      { text: 'Muse can’t answer your own questions or approve anything for you.', src: 'MU:133' },
       { text: 'Your computer must be awake for Muse to read. What Muse sends while it sleeps is posted when the computer is back.', src: 'MU:51,130' },
     ],
     examples: [
