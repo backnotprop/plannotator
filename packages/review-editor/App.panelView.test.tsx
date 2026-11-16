@@ -172,6 +172,14 @@ async function mount(seed: () => void = () => {}): Promise<void> {
   if (!selectedPanelSegment()) throw new Error("panel view toggle did not render");
 }
 
+async function treeMounted(): Promise<void> {
+  for (let attempt = 0; attempt < 50 && !document.querySelector("[data-tree-grouping]"); attempt += 1) {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+  }
+}
+
 afterEach(async () => {
   if (root) await act(async () => root?.unmount());
   root = null;
@@ -211,6 +219,7 @@ describe.if(hasDom)("opening panel view", () => {
     });
 
     expect(selectedPanelSegment()).toBe("Tree");
+    await treeMounted();
     expect(document.querySelector('[data-tree-grouping="status"]')).not.toBeNull();
   });
 
@@ -223,6 +232,7 @@ describe.if(hasDom)("opening panel view", () => {
     });
 
     expect(selectedPanelSegment()).toBe("Tree");
+    await treeMounted();
     expect(document.querySelector('[data-tree-grouping="status"]')).not.toBeNull();
   });
 });
