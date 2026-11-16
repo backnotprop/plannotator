@@ -10,8 +10,6 @@
 @source "../ui/hooks/**/*.ts";
 /* The shared chat window has no host in this app, so its classes stay out of this stylesheet. */
 @source not "../ui/components/chat/**";
-/* The shared page frame (components/frame) has no host in this app: frame.css brings its own @source where it is used. */
-@source not "../ui/components/frame/**";
 @source "./*.tsx";
 @source "./components/**/*.tsx";
 @source "../guide-viewer/**/*.tsx";

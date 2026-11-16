@@ -6,8 +6,6 @@
 @plugin "../../../packages/review-editor/node_modules/tailwindcss-animate";
 
 @source "../../../packages/ui/components/**/*.tsx";
-/* The shared page frame (components/frame) has no host in this app: frame.css brings its own @source where it is used. */
-@source not "../../../packages/ui/components/frame/**";
 @source "../../../packages/ui/hooks/**/*.ts";
 @source "../../../packages/guide-viewer/**/*.tsx";
 @source "../../../packages/review-editor/components/TokenHoverCard.tsx";
