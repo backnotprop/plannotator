@@ -361,35 +361,41 @@ export class DshReviews {
     const waits = this.options.readyWaitMs ?? READY_WAIT_MS;
     const deadline = this.now() + (request.kind === "review" ? waits.review : waits.other);
     const pollMs = this.options.pollMs ?? 100;
-    for (;;) {
-      this.readReady(review);
-      if (review.exited || review.startError) {
-        review.answered = true;
-        this.reviews.delete(id);
-        if (!review.exited) rmSync(dir, { recursive: true, force: true });
-        // Gone already: a page that came up and went with a decision was answered by that decision;
-        // one that went without a decision did not open for the agent (`settle` sent nothing, since this call had not answered).
-        if (review.decided && review.url) return this.readyStart(review, review.url);
-        return { state: "failed", message: this.failureOf(review) };
+    const onAbort = () => {
+      review.closedByAgent = true;
+      this.stop(review);
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+    try {
+      for (;;) {
+        if (signal?.aborted) {
+          // DSH's tool contract: the cancelled call settles once its child is gone.
+          await review.gone;
+          throw abortReason(signal);
+        }
+        this.readReady(review);
+        if (review.exited || review.startError) {
+          review.answered = true;
+          this.reviews.delete(id);
+          if (!review.exited) rmSync(dir, { recursive: true, force: true });
+          // Gone already: a page that came up and went with a decision was answered by that decision;
+          // one that went without a decision did not open for the agent (`settle` sent nothing, since this call had not answered).
+          if (review.decided && review.url) return this.readyStart(review, review.url);
+          return { state: "failed", message: this.failureOf(review) };
+        }
+        if (review.url) {
+          review.answered = true;
+          return this.readyStart(review, review.url);
+        }
+        if (this.now() >= deadline) {
+          review.answered = true;
+          review.answeredStarting = true;
+          return { state: "starting", id, subject: review.subject };
+        }
+        await new Promise((resolve) => setTimeout(resolve, pollMs));
       }
-      if (review.url) {
-        review.answered = true;
-        return this.readyStart(review, review.url);
-      }
-      if (signal?.aborted) {
-        review.answered = true;
-        review.closedByAgent = true;
-        this.stop(review);
-        // Settled only once the child is gone (DSH's tool contract: a tool settles after its own work is quiet).
-        await review.gone;
-        throw abortReason(signal);
-      }
-      if (this.now() >= deadline) {
-        review.answered = true;
-        review.answeredStarting = true;
-        return { state: "starting", id, subject: review.subject };
-      }
-      await new Promise((resolve) => setTimeout(resolve, pollMs));
+    } finally {
+      signal?.removeEventListener("abort", onAbort);
     }
   }
 

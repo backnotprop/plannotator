@@ -297,6 +297,33 @@ describe("stopping a review", () => {
     expect(main.followups).toEqual([]);
   }, 15_000);
 
+  test("cancelling as the ready file arrives still stops the review child", async () => {
+    const dsh = loadPlugin({ config: { agentTool: true }, mode: "hang", ignoreTerm: true });
+    const main = dsh.add(new FakeAgent("session-main", dsh.project));
+    const cancel = new AbortController();
+    const call = dsh.tool("plannotator")!.execute({ action: "annotate", target: "notes.md" }, { agent: main, signal: cancel.signal });
+    await until(() => dsh.calls().length === 1);
+    // Make the two signals visible in the same tick, before the next ready-file read.
+    writeFileSync(join(dsh.dataDir, "dsh", dsh.folders()[0]!, "ready.jsonl"), '{"url":"http://localhost:9/","port":9}\n');
+    cancel.abort(new Error("turn cancelled as the review opened"));
+    await expect(call).rejects.toThrow("turn cancelled as the review opened");
+    expect(alive(dsh.calls()[0]!.pid)).toBe(false);
+    expect(main.followups).toEqual([]);
+  }, 15_000);
+
+  test("an abort after the launch reply leaves the review open for its owner", async () => {
+    const dsh = loadPlugin({ config: { agentTool: true } });
+    const main = dsh.add(new FakeAgent("session-main", dsh.project));
+    const cancel = new AbortController();
+    const opened = ((await dsh.tool("plannotator")!.execute({ action: "annotate", target: "notes.md" }, { agent: main, signal: cancel.signal })) as { text: string }).text;
+    const id = sessionOf(opened);
+    expect(id).toBeDefined();
+    cancel.abort();
+    dsh.decide(id, { decision: "annotated", message: "Keep the first paragraph.", noop: false });
+    await until(() => main.followups.length > 0);
+    expect(main.followups[0]).toContain("Keep the first paragraph.");
+  }, 15_000);
+
   // The failure: a plugin reload or DSH quitting leaves review servers running with nothing to deliver to.
   test("unloading the plugin stops an open review (SIGKILL when SIGTERM is ignored) and sends nothing", async () => {
     const dsh = loadPlugin({ config: { agentTool: true }, ignoreTerm: true });
