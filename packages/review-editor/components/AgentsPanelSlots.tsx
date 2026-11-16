@@ -63,7 +63,7 @@ export function useAgentsPanelSlots({
     [saved.guides, saved.rename, saved.remove, prMode, onOpenGuide],
   );
   return useMemo(
-    () => ({ agentsGuides: renderGuides, onOpenFinding, savedGuides: saved.guides }),
-    [renderGuides, onOpenFinding, saved.guides],
+    () => ({ agentsGuides: renderGuides, onOpenFinding }),
+    [renderGuides, onOpenFinding],
   );
 }

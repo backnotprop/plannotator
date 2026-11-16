@@ -258,7 +258,6 @@ import { altKey, isMac } from '@plannotator/ui/utils/platform';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 import { GuideScreen } from './components/guide/GuideScreen';
 import { useAgentsPanelSlots, reviewScopeText } from './components/AgentsPanelSlots';
-import { newestGuideForThisDiff } from './utils/guidesListModel';
 import { DEMO_GUIDE_ID } from './demoGuide';
 import { buildPRArtifacts } from './utils/prArtifacts';
 import { useMarkdownPreview, useMarkdownPreviewKeys } from './hooks/useMarkdownPreview';
@@ -2262,14 +2261,9 @@ const ReviewApp: React.FC = () => {
     [prMetadata, activeWorktreePath],
   );
   const guideHasContent = activeGuideJobId !== null || agentJobs.jobs.some((j) => j.provider === 'guide' && jobMatchesCurrentContext(j));
-  const newestDiffGuideRef = useRef<string | null>(null);
   const toggleGuide = useCallback(() => {
-    if (!guideOpen && !guideHasContent && newestDiffGuideRef.current) {
-      handleOpenGuide(newestDiffGuideRef.current);
-      return;
-    }
     setGuideOpen((prev) => !prev);
-  }, [guideOpen, guideHasContent, handleOpenGuide]);
+  }, []);
 
   // A `saved:{id}` guide has no AgentJobInfo, so GuideScreen's context match
   // passes trivially (unknown ids are tolerated by design, for the demo path).
@@ -4429,7 +4423,6 @@ const ReviewApp: React.FC = () => {
     openDiffFile,
     navigateToAnnotation: handleNavigateToAnnotation,
   });
-  newestDiffGuideRef.current = newestGuideForThisDiff(agentsPanel.savedGuides);
 
   // Diff context bundled into local-mode feedback headers so the receiving
   // agent knows which diff the annotations are anchored to. Uses committedBase
@@ -6069,10 +6062,6 @@ const ReviewApp: React.FC = () => {
                 }
                 setIsCompactNavigatorOpen(false);
                 reviewSidebar.close();
-                if (!guideHasContent && newestDiffGuideRef.current) {
-                  handleOpenGuide(newestDiffGuideRef.current);
-                  return;
-                }
                 setGuideOpen(true);
               } : undefined}
               onOpenAnnotations={isCompactTouchLayout ? () => reviewSidebar.open('annotations') : undefined}

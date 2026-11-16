@@ -373,18 +373,25 @@ describe.if(hasDom)("the Guide button with a guide written for this diff", () =>
     expect(document.querySelector("[data-launch-pad]")).toBeNull();
   });
 
-  test("opens that guide in one click instead of the launch panel", async () => {
+  test("shows the launch panel with that guide listed, and the guide opens from the list", async () => {
     guidesWhere = "diff";
     try {
       await mount(false);
       const guideButton = Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find((b) => b.title === "Open guided review");
       if (!guideButton) throw new Error("Guide button did not render");
       await act(async () => guideButton.click());
+      await waitFor(() => !!Array.from(document.querySelectorAll("h1")).find((h) => h.textContent === "Start a guided review?"), "the launch panel");
+      let entry: HTMLButtonElement | undefined;
+      await waitFor(() => {
+        entry = Array.from(document.querySelectorAll<HTMLButtonElement>("button"))
+          .find((b) => b.textContent?.includes("PR #7") && b.textContent?.includes("Parser rework"));
+        return !!entry;
+      }, "the saved guide entry");
+      expect(tickButtons()).toHaveLength(0);
+      await act(async () => entry!.click());
       await waitFor(() => tickButtons().length === 2, "the guide's sections");
-      expect(document.querySelector("[data-launch-pad]")).toBeNull();
     } finally {
       guidesWhere = undefined;
     }
   });
 });
-
