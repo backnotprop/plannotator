@@ -16,7 +16,7 @@
  *     (the workflow rows).
  */
 import { afterAll, describe, expect, test } from 'bun:test';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
+import { chmodSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 
@@ -34,8 +34,11 @@ const NEVER_GATED: Record<string, string[]> = {
   '.github/workflows/security.yml': ['gitleaks', 'trivy', 'zizmor'],
 };
 
-const classify = (paths: string[]) =>
-  Bun.spawnSync(['bash', SCRIPT, 'classify'], { stdin: new TextEncoder().encode(paths.join('\n')) }).stdout.toString().trim();
+const classifyRaw = (lines: string[]) =>
+  Bun.spawnSync(['bash', SCRIPT, 'classify'], { stdin: new TextEncoder().encode(lines.join('\n')) }).stdout.toString().trim();
+/** A `git diff --raw` line: a plain file (100644) changed, unless other modes are given. */
+const raw = (file: string, oldMode = '100644', newMode = '100644') => `:${oldMode} ${newMode} 1111111 2222222 M\t${file}`;
+const classify = (paths: string[]) => classifyRaw(paths.map((f) => raw(f)));
 
 const EVERYTHING = 'everything';
 const CHEAP = 'cheap lanes only';
@@ -44,8 +47,8 @@ const lanes = (paths: string[]) => (classify(paths) === 'docs' ? CHEAP : EVERYTH
 describe('which lanes a change runs', () => {
   const rows: [string, string[], string][] = [
     ['README only', ['README.md'], CHEAP],
-    ['root docs, licenses, README images', ['CONTRIBUTING.md', 'SECURITY.md', 'LICENSE-MIT', 'LICENSE-APACHE', '.github/assets/inbox-dark.webp'], CHEAP],
-    ['adr and docs/ pages', ['adr/0001-record-architecture-decisions.md', 'adr/research/x.svg', 'docs/vim-controls.md', 'docs/releases/0.28.31/first-run.png'], CHEAP],
+    ['root docs, licenses, README images', ['CONTRIBUTING.md', 'SECURITY.md', 'LICENSE-MIT', 'LICENSE-APACHE', '.github/assets/inbox-dark.webp', '.github/assets/icons/pi-dark.svg'], CHEAP],
+    ['adr and docs/ pages and pictures', ['adr/0001-record-architecture-decisions.md', 'adr/research/x.svg', 'docs/vim-controls.md', 'docs/releases/0.28.31/first-run.png', 'docs/releases/0.29/shot.jpeg'], CHEAP],
     ['README plus one .ts file', ['README.md', 'packages/ui/utils/x.ts'], EVERYTHING],
     ['an empty diff', [], EVERYTHING],
     // tests/agents-md-size.test.ts, tests/inbox-guidance-parity.test.ts, scripts/install.test.ts and others read these.
@@ -64,11 +67,50 @@ describe('which lanes a change runs', () => {
     ['the gate itself', ['scripts/ci-docs-only.sh'], EVERYTHING],
     ['the lockfile and manifest', ['bun.lock', 'package.json'], EVERYTHING],
     ['a nested docs folder', ['docs/sub/page.md'], EVERYTHING],
+    ['a folder named like a doc', ['docs/x.md/evil.ts'], EVERYTHING],
     ['a look-alike name', ['README.md.ts', 'LICENSE-MIT.js', 'xREADME.md'], EVERYTHING],
+    ['another case', ['readme.md', 'Docs/x.md', 'ADR/x.md', '.github/assets/x.PNG'], EVERYTHING],
     // git C-quotes unusual names: never matches, so it runs (the safe direction).
     ['a quoted path', ['"docs/caf\\303\\251.md"'], EVERYTHING],
+    // Code in the allowlisted folders: `bun test` discovers *.test.ts anywhere, tests/helpers/published-packages.ts
+    // walks the tree for package.json, Semgrep scans every JS/TS and shell file. None of them names a path.
+    ['a test file under docs/releases', ['docs/releases/0.30/notes.test.ts'], EVERYTHING],
+    ['a package.json under adr/', ['adr/spike/package.json'], EVERYTHING],
+    ['a package.json under docs/releases', ['docs/releases/x/package.json'], EVERYTHING],
+    ['a .ts under .github/assets', ['.github/assets/x.ts'], EVERYTHING],
+    ['a .js under .github/assets', ['.github/assets/x.js'], EVERYTHING],
+    ['a shell script under adr/', ['adr/x.sh'], EVERYTHING],
+    ['a .ts under adr/', ['adr/research/x.ts'], EVERYTHING],
   ];
   for (const [name, paths, expected] of rows) test(name, () => expect(lanes(paths)).toBe(expected));
+
+  test('an added or deleted doc is still docs', () => {
+    expect(classifyRaw([raw('README.md', '000000', '100644'), raw('docs/old.md', '100644', '000000')])).toBe('docs');
+  });
+  test('only plain files: an executable doc, a symlink or a gitlink runs everything', () => {
+    expect(classifyRaw([raw('README.md', '100644', '100755')]), 'made executable').toBe('code');
+    expect(classifyRaw([raw('adr/run.md', '000000', '100755')]), 'added executable').toBe('code');
+    expect(classifyRaw([raw('README.md', '100755', '100644')]), 'was executable').toBe('code');
+    expect(classifyRaw([raw('adr/research', '000000', '120000')]), 'symlink').toBe('code');
+    expect(classifyRaw([raw('README.md', '100644', '120000')]), 'file to symlink').toBe('code');
+    expect(classifyRaw([raw('adr/vendor', '000000', '160000')]), 'gitlink').toBe('code');
+  });
+  test('a line it cannot parse runs everything', () => {
+    expect(classifyRaw(['README.md'])).toBe('code');
+    expect(classifyRaw([raw('README.md'), 'garbage'])).toBe('code');
+  });
+  test('a pattern the shell cannot compile runs everything (a match error is never a pass)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ci-docs-only-pattern-'));
+    try {
+      const broken = join(dir, 'gate.sh');
+      writeFileSync(broken, readFileSync(SCRIPT, 'utf8').replace(/^DOCS_ONLY='\^\(/m, "DOCS_ONLY='^(("));
+      expect(readFileSync(broken, 'utf8')).toContain("DOCS_ONLY='^((");
+      const r = Bun.spawnSync(['bash', broken, 'classify'], { stdin: new TextEncoder().encode(raw('README.md')) });
+      expect(r.stdout.toString().trim()).toBe('code');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('the gate in a job', () => {
@@ -100,6 +142,7 @@ describe('the gate in a job', () => {
     };
     git('init', '-q', '-b', 'main');
     write('README.md');
+    write('docs/guide.md');
     write('packages/x.ts');
     git('add', '-A');
     git('commit', '-q', '-m', 'base');
@@ -118,10 +161,10 @@ describe('the gate in a job', () => {
     return repo;
   }
 
-  function gate(repo: string, event = 'pull_request'): string {
+  function gate(repo: string, event = 'pull_request', PATH = env.PATH): string {
     const output = join(repo, '.gh-output');
     writeFileSync(output, '');
-    const r = Bun.spawnSync(['bash', SCRIPT], { cwd: repo, env: { ...env, GITHUB_EVENT_NAME: event, GITHUB_OUTPUT: output } });
+    const r = Bun.spawnSync(['bash', SCRIPT], { cwd: repo, env: { ...env, PATH, GITHUB_EVENT_NAME: event, GITHUB_OUTPUT: output } });
     expect(r.exitCode).toBe(0);
     return readFileSync(output, 'utf8').trim();
   }
@@ -130,7 +173,7 @@ describe('the gate in a job', () => {
   test('README plus a .ts file runs', () =>
     expect(gate(prRepo((_, write) => { write('README.md'); write('packages/x.ts'); }))).toBe('skip=false'));
   test('a file moved from packages/ into docs/ runs (no rename detection: the old path counts)', () =>
-    expect(gate(prRepo((git, _, repo) => { mkdirSync(join(repo, 'docs')); git('mv', 'packages/x.ts', 'docs/x.md'); }))).toBe('skip=false'));
+    expect(gate(prRepo((git) => git('mv', 'packages/x.ts', 'docs/x.md')))).toBe('skip=false'));
   test('an empty diff runs', () => expect(gate(prRepo(() => {}))).toBe('skip=false'));
   test('a push, a merge queue or a manual run runs, whatever changed', () => {
     const repo = prRepo((_, write) => write('README.md'));
@@ -138,6 +181,24 @@ describe('the gate in a job', () => {
   });
   test('a checkout that is not the PR merge commit runs', () =>
     expect(gate(prRepo((_, write) => write('README.md'), false))).toBe('skip=false'));
+  test('a doc moved into packages/ runs', () =>
+    expect(gate(prRepo((git) => git('mv', 'docs/guide.md', 'packages/guide.ts')))).toBe('skip=false'));
+  test('a symlink under adr/ runs', () =>
+    expect(gate(prRepo((_, __, repo) => { mkdirSync(join(repo, 'adr')); symlinkSync('../packages', join(repo, 'adr/research')); }))).toBe('skip=false'));
+  test('a gitlink under adr/ runs', () =>
+    expect(gate(prRepo((git) => git('update-index', '--add', '--cacheinfo', `160000,${'1'.repeat(40)},adr/vendor`)))).toBe('skip=false'));
+  test('a doc made executable runs (a mode-only change)', () =>
+    expect(gate(prRepo((_, __, repo) => chmodSync(join(repo, 'README.md'), 0o755)))).toBe('skip=false'));
+  test('a failing git diff runs, even when it printed docs-only lines first', () => {
+    const repo = prRepo((_, write) => write('README.md'));
+    expect(gate(repo), 'the honest run').toBe('skip=true');
+    const bin = join(dir, 'failing-git');
+    mkdirSync(bin, { recursive: true });
+    const git = Bun.which('git')!;
+    writeFileSync(join(bin, 'git'), `#!/bin/sh\nif [ "$1" = diff ]; then printf ':100644 100644 1111111 2222222 M\\tREADME.md\\n'; exit 2; fi\nexec '${git}' "$@"\n`);
+    chmodSync(join(bin, 'git'), 0o755);
+    expect(gate(repo, 'pull_request', `${bin}:${env.PATH}`)).toBe('skip=false');
+  });
 });
 
 type Step = { id?: string; if?: string; run?: string; uses?: string; with?: Record<string, unknown>; 'continue-on-error'?: boolean };
@@ -156,6 +217,10 @@ describe('the gated jobs', () => {
         expect(at, 'gate step').toBeGreaterThan(0);
         expect(steps.slice(0, at).every((s) => s.uses?.startsWith('actions/checkout@'))).toBe(true);
         expect(steps[at - 1]!.with?.['fetch-depth'], 'the merge commit and both parents').toBe(2);
+        // The gate reads HEAD^1 as the base, true only of the default pull_request checkout (refs/pull/N/merge).
+        // A `ref: head.sha` makes HEAD^1 the branch's previous commit, so a "merge main" head would diff only main's changes.
+        expect(steps[at - 1]!.with?.ref, 'checkout ref override').toBeUndefined();
+        expect(steps[at - 1]!.with?.repository, 'checkout repository override').toBeUndefined();
         expect(steps[at]!.run?.trim()).toBe('bash scripts/ci-docs-only.sh');
         // A failed gate leaves no output, which must read as "run".
         expect(steps[at]!['continue-on-error']).toBe(true);
@@ -196,6 +261,9 @@ describe('no code reads an allowlisted file', () => {
   test('the allowlist covers real files', () => {
     expect(docs).toContain('README.md');
     expect(docs.some((f) => f.startsWith('.github/assets/'))).toBe(true);
+    // Narrowing to document and image types left out nothing that is there today.
+    const folders = tracked.filter((f) => /^(adr|docs\/releases|\.github\/assets)\//.test(f));
+    expect(folders.filter((f) => !allowlist.test(f))).toEqual([]);
   });
 
   test('a path under docs/, adr/ or .github/assets appears in no code', () => {

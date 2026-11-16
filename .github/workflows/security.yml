@@ -194,10 +194,12 @@ jobs:
           fetch-depth: 2
 
       # Docs-only gate (scripts/ci-docs-only.sh), as in test.yml. Semgrep's
-      # rules read only JS/TS and shell, PowerShell, batch and Dockerfiles, none
-      # of which is on the gate's allowlist, so a docs-only PR has nothing for
-      # it to scan: the steps below skip and the job passes under its usual
-      # name. Anything else, this step failing included, scans as before.
+      # rules read only JS/TS, shell, PowerShell, batch and Dockerfiles; the
+      # gate allows only named root docs and licenses and .md or image files
+      # (png, jpg, gif, webp, avif, svg), never one of those, so a docs-only PR
+      # has nothing for it to scan: the steps below skip and the job passes
+      # under its usual name. Anything else, this step failing included, scans
+      # as before.
       - name: Is this a docs-only change?
         id: docs
         continue-on-error: true

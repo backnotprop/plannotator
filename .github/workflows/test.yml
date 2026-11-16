@@ -25,8 +25,9 @@ permissions:
 #
 # Docs-only PRs: the checks, unit, dom, opencode-v2 and claude-code-mod jobs
 # start with a gate step (scripts/ci-docs-only.sh). On a PR whose every changed
-# path is on its allowlist (the root README and other root docs, LICENSE-*,
-# .github/assets, adr/, docs/ outside docs/agent-guides), every later step
+# path is a plain file on its allowlist (the root README and other root docs,
+# LICENSE-*, docs/*.md, and .md or image files under .github/assets, adr/ and
+# docs/releases), every later step
 # skips, so the job passes in seconds under its usual name: the merge script
 # wants each fast check by name with SUCCESS, which a job-level `if` would not
 # give (a skipped matrix job reports one check with an unexpanded name). Any

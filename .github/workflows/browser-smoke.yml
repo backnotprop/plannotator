@@ -42,8 +42,9 @@ jobs:
           fetch-depth: 2
 
       # Docs-only gate (scripts/ci-docs-only.sh), as in test.yml: on a PR
-      # that changes only files on its allowlist (root docs, LICENSE-*,
-      # .github/assets, adr/, docs/ outside docs/agent-guides), every later
+      # that changes only plain files on its allowlist (root docs, LICENSE-*,
+      # docs/*.md, .md and image files under .github/assets, adr/ and
+      # docs/releases), every later
       # step skips and the job passes under its usual name. Anything else,
       # this step failing included, runs them.
       - name: Is this a docs-only change?
