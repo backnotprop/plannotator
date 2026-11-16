@@ -157,15 +157,12 @@ export function createPlanReviewListener(ctx: DshContext, config: ResolvedConfig
         cwd: sessionCwd(ctx, request.agent),
         signal: anySignal(request.signal, deps.unloadSignal),
         // Remote sessions open no browser: the URL the CLI prints is the way in.
-        onStderr: (chunk) => {
-          for (const line of chunk.split(/\r?\n/)) {
-            if (URL_RE.test(line)) {
-              try {
-                ctx.logger?.info?.("plannotator: %s", line.trim());
-              } catch {
-                // Logging is best-effort.
-              }
-            }
+        onStderrLine: (line) => {
+          if (!URL_RE.test(line)) return;
+          try {
+            ctx.logger?.info?.("plannotator: %s", line.trim());
+          } catch {
+            // Logging is best-effort.
           }
         },
       });

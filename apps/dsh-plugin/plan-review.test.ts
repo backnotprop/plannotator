@@ -52,6 +52,7 @@ const printJson = (value: unknown) => `printf '%s\\n' '${JSON.stringify(value)}'
 /** A fake Cordis context: captures the listener apply() registers. */
 function fakeContext(workingDirectory?: string) {
   const warnings: string[] = [];
+  const infos: string[] = [];
   let listener: ((request: DshQuestionRequest, next: () => Promise<DshAnswer>) => Promise<DshAnswer>) | undefined;
   let prepended = false;
   const disposers: (() => void)[] = [];
@@ -63,11 +64,12 @@ function fakeContext(workingDirectory?: string) {
     },
     get: (name) => (name === "workingDirectory" && workingDirectory ? { get: () => workingDirectory } : undefined),
     effect: (execute) => void disposers.push(execute()),
-    logger: { warn: (format) => void warnings.push(format), info: () => {} },
+    logger: { warn: (format) => void warnings.push(format), info: (_format, line) => void infos.push(String(line)) },
   };
   return {
     ctx,
     warnings,
+    infos,
     get prepended() {
       return prepended;
     },
@@ -133,6 +135,30 @@ describe("plan-review listener", () => {
     expect(origin).toBe("dsh");
     expect(envCwd).toBe(cwd);
     expect(processCwd).toBe(realpathSync(cwd));
+  });
+
+  posixOnly("logs a split remote review URL in full before the decision", async () => {
+    const { binary, dir } = stubCli([
+      "printf 'Review: https://' >&2",
+      "sleep 0.2",
+      "printf 'example.test:8765/review\\r\\n' >&2",
+      'while [ ! -e "$(dirname "$0")/approve" ]; do sleep 0.05; done',
+      printJson({ approved: true }),
+    ].join("\n"));
+    const fake = fakeContext();
+    apply(fake.ctx, { binary });
+    const controller = new AbortController();
+    const pending = fake.listen(planReviewRequest({ signal: controller.signal }).request);
+    try {
+      const deadline = Date.now() + 2_000;
+      while (fake.infos.length === 0 && Date.now() < deadline) await Bun.sleep(20);
+      expect(fake.infos).toEqual(["Review: https://example.test:8765/review"]);
+      writeFileSync(join(dir, "approve"), "");
+      expect(await pending).toEqual({ answers: [{ id: "plan-review", selected: ["Approve"] }] });
+    } finally {
+      controller.abort();
+      await pending.catch(() => {});
+    }
   });
 
   // Catches: approval notes being dropped (DSH's answer has no field for them).

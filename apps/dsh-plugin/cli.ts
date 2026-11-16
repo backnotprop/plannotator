@@ -98,8 +98,8 @@ export function runDshPlan(options: {
   cwd?: string;
   signal?: AbortSignal;
   env?: NodeJS.ProcessEnv;
-  /** Each stderr chunk as it arrives (the CLI prints its URL there). */
-  onStderr?: (chunk: string) => void;
+  /** Each complete stderr line as it arrives (the CLI prints its URL there). */
+  onStderrLine?: (line: string) => void;
 }): Promise<DshPlanResult> {
   return new Promise((resolve, reject) => {
     const { signal } = options;
@@ -122,6 +122,7 @@ export function runDshPlan(options: {
 
     let stdout = "";
     let stderr = "";
+    let partialStderrLine = "";
     let startError: Error | undefined;
     let forceKill: ReturnType<typeof setTimeout> | undefined;
     const onAbort = () => {
@@ -137,7 +138,10 @@ export function runDshPlan(options: {
     child.stderr.setEncoding("utf8");
     child.stderr.on("data", (chunk: string) => {
       stderr += chunk;
-      options.onStderr?.(chunk);
+      if (!options.onStderrLine) return;
+      const lines = (partialStderrLine + chunk).split(/\r?\n/);
+      partialStderrLine = lines.pop() ?? "";
+      for (const line of lines) options.onStderrLine(line);
     });
     // A child that exits before reading stdin (a missing binary, an old CLI)
     // breaks the pipe; the close handler reports the real failure.
@@ -150,6 +154,7 @@ export function runDshPlan(options: {
     child.once("close", (code) => {
       signal?.removeEventListener("abort", onAbort);
       if (forceKill !== undefined) clearTimeout(forceKill);
+      if (partialStderrLine) options.onStderrLine?.(partialStderrLine);
       if (signal?.aborted) {
         reject(abortReason(signal));
         return;
