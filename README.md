@@ -251,6 +251,9 @@ Use `--purge` for a full removal of known local Plannotator data as well:
 plannotator uninstall --purge
 ```
 
+<details>
+<summary>What uninstall removes, what it keeps, and when it stops</summary>
+
 Purge requires typing `purge` at the prompt and explains that the data is
 local-only: it is not stored on a Plannotator server and cannot be recovered.
 For automation, pass `--yes` (or `-y`); non-interactive removal refuses to run
@@ -290,6 +293,8 @@ commands, immediately before the synchronous data-removal block; a replaced
 data directory is refused without touching either the old or replacement data.
 If your dedicated data directory is symlinked, point `PLANNOTATOR_DATA_DIR` at
 its resolved target and retry.
+
+</details>
 
 If you installed only the standalone Pi extension and do not have the
 `plannotator` CLI, use `pi remove npm:@plannotator/pi-extension`.
