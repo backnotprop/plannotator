@@ -74,11 +74,19 @@ export function agentOwnName(agent: InboxAgent): string | null {
 }
 
 /**
- * An agent's name on its row: its own name (`agentOwnName`), else the name of the thread it got first (frozen: never
- * the newest or the waiting one), else its project, else its host. Never its session id.
+ * Where an agent is named. `list`: the sidebar's Agents list (its rows, hover card and the list's agent filter),
+ * where nothing else says which agent it is. `thread`: inside a thread (the reply picker and its pill, a thread's
+ * sessions), where the thread's own name would only repeat the title the person is reading.
  */
-export function agentRowName(agent: InboxAgent): string {
-  return agentOwnName(agent) || agent.first_thread?.name.trim() || agent.project?.name || agentHostName(agent.host);
+export type AgentNameContext = 'list' | 'thread';
+
+/**
+ * An agent's name: its own name (`agentOwnName`), else in the `list` the name of the thread it got first (frozen:
+ * never the newest or the waiting one) and then its project, else its agent's name. Never its session id.
+ */
+export function agentRowName(agent: InboxAgent, context: AgentNameContext = 'list'): string {
+  const fallback = context === 'list' ? agent.first_thread?.name.trim() || agent.project?.name : null;
+  return agentOwnName(agent) || fallback || agentHostName(agent.host);
 }
 
 /**
