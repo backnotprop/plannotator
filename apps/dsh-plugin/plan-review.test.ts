@@ -8,9 +8,9 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { apply } from "./index";
-import { parseDshPlanOutput, resolvePlannotatorBinary } from "./cli";
+import { parseDshPlanOutput, resolvePlannotatorBinary, runDshPlan } from "./cli";
 import {
   resolveConfig,
   type DshAnswer,
@@ -266,6 +266,15 @@ describe("resolvePlannotatorBinary", () => {
     expect(resolvePlannotatorBinary({ env: { PATH: "/definitely/not/here" }, home })).toBe(installed);
     expect(resolvePlannotatorBinary({ env: { PATH: "" }, home: tempDir() })).toBeUndefined();
   });
+  posixOnly("finds the same CLI after switching to the review's project directory", async () => {
+    const { binary: expectedBinary, dir } = stubCli(printJson({ approved: true }));
+    const cwd = tempDir();
+    const env = { ...process.env, PATH: [relative(process.cwd(), dirname(expectedBinary)), "/usr/bin", "/bin"].join(":") };
+    const binary = resolvePlannotatorBinary({ env })!;
+    expect(await runDshPlan({ binary, plan: "# Plan", cwd, env })).toEqual({ approved: true });
+    expect(readFileSync(join(dir, "call.txt"), "utf8")).toContain(realpathSync(cwd));
+  });
+
 });
 
 describe("parseDshPlanOutput", () => {

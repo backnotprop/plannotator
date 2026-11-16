@@ -9,7 +9,7 @@
 import { spawn } from "node:child_process";
 import { accessSync, constants as fsConstants, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 /** One `dsh-plan` decision, as the CLI prints it on stdout. */
 export interface DshPlanResult {
@@ -54,7 +54,8 @@ export function resolvePlannotatorBinary(options: {
   const name = platform === "win32" ? "plannotator.exe" : "plannotator";
   for (const dir of (env.PATH ?? "").split(platform === "win32" ? ";" : ":")) {
     if (!dir) continue;
-    const candidate = join(dir, name);
+    // The spawned CLI runs from the review project, not the plugin process cwd.
+    const candidate = resolve(dir, name);
     if (isExecutableFile(candidate, platform)) return candidate;
   }
 
