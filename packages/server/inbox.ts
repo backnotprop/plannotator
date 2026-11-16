@@ -433,8 +433,11 @@ import {
  */
 const BRIDGE_WAKING_HOSTS: ReadonlySet<string> = new Set(INBOX_WAKING_HOSTS.filter((host) => !INBOX_MCP_WAKING_HOSTS.includes(host)));
 
-/** A host whose session's bridge may poll: T3 Code's too, for a thread whose Claude runs the Claude Code mod. */
-const pollingWakeHost = (host: string): boolean => BRIDGE_WAKING_HOSTS.has(host) || host === INBOX_T3_HOST;
+/**
+ * A host whose session's bridge may poll: T3 Code's too, for a thread whose Claude runs the Claude Code mod, and
+ * Orca's, for a chat whose plugin polls as it. Only a session that polls now is woken (`live.pollsNow`).
+ */
+const pollingWakeHost = (host: string): boolean => BRIDGE_WAKING_HOSTS.has(host) || host === INBOX_T3_HOST || host === "orca";
 
 /** Where a request came in: the window's loopback port, or the tailnet-only listener `tailscale serve` points at. */
 type RequestVia = "local" | "tailnet";
