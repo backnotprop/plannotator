@@ -4,7 +4,7 @@
  * hides, never the boot disk) and which read as a network drive (it may be slow to answer).
  */
 import { expect, test } from "bun:test";
-import { parseDarwinMounts, parseLinuxMounts } from "./inbox-drives";
+import { createDriveList, parseDarwinMounts, parseLinuxMounts } from "./inbox-drives";
 
 test("macOS: drives under /Volumes; a network one has no local flag; system and hidden volumes are left out", () => {
   const table = [
@@ -36,4 +36,30 @@ test("Linux: drives under /mnt, /media and /run/media, spaces unescaped; NFS, SM
     { path: "/mnt/backup", name: "backup", network: true },
     { path: "/run/media/me/remote", name: "remote", network: true },
   ]);
+});
+
+for (const marker of ["WSL_DISTRO_NAME", "WSL_INTEROP"]) {
+  test(`WSL (${marker}): automatic mounts keep their metadata without folder shortcuts`, async () => {
+    const paths = ["/mnt/c", "/mnt/D", "/mnt/wsl", "/mnt/wslg", "/mnt/wslg/distro", "/mnt/host"];
+    const other = ["/mnt/data", "/mnt/c/backup", "/mnt/wsl-projects", "/media/me/USB", "/run/media/me/remote"];
+    const env = {
+      [marker]: "wsl",
+      PLANNOTATOR_TEST_SANDBOX: "1",
+      PLANNOTATOR_TEST_DRIVES: JSON.stringify({ drives: [...paths, ...other].map((path) => ({ path, network: true })) }),
+    };
+    const list = createDriveList({ platform: "linux", env });
+    const drives = await list.list();
+    expect(drives).toHaveLength(paths.length + other.length);
+    for (const path of paths) expect(drives.find((drive) => drive.path === path)).toMatchObject({ shortcut: false, network: true });
+    for (const path of other) expect(drives.find((drive) => drive.path === path)?.shortcut).toBeUndefined();
+    expect(list.known()).toBe(drives);
+  });
+}
+
+test("Linux outside WSL keeps drive-letter mount shortcuts", async () => {
+  const list = createDriveList({
+    platform: "linux",
+    env: { PLANNOTATOR_TEST_SANDBOX: "1", PLANNOTATOR_TEST_DRIVES: JSON.stringify({ drives: [{ path: "/mnt/c" }] }) },
+  });
+  expect(await list.list()).toEqual([{ path: "/mnt/c", name: "c" }]);
 });

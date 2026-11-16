@@ -14,6 +14,8 @@ export interface InboxDrive {
   name: string;
   /** A network drive (SMB, NFS, AFP, WebDAV, sshfs): it may be slow to answer. */
   network?: true;
+  /** Keep mount metadata without offering an automatic folder shortcut. */
+  shortcut?: false;
 }
 
 /** How long one read of the mount table is kept: the sessions read asks every few seconds while New message is open. */
@@ -24,6 +26,8 @@ const MOUNT_TIMEOUT_MS = 2000;
 const LINUX_NETWORK = new Set(["nfs", "nfs4", "cifs", "smb3", "smbfs", "fuse.sshfs", "sshfs", "9p", "davfs", "fuse.rclone", "ceph", "glusterfs", "fuse.glusterfs"]);
 
 const nameOf = (path: string) => path.split("/").filter(Boolean).pop() ?? path;
+/** WSL's drive roots and system mounts, rather than user-mounted folders. */
+const WSL_AUTOMATIC_MOUNT = /^\/mnt\/(?:[a-z]\/?$|(?:wsl|wslg|host)(?:\/|$))/i;
 /** A folder name nobody picks: hidden, or one of macOS's own (`com.apple.TimeMachine.localsnapshots`). */
 const quietName = (path: string) => path.split("/").some((segment) => segment.startsWith(".") || segment.startsWith("com.apple."));
 
@@ -82,6 +86,9 @@ export function createDriveList(options: { platform: string; env?: Readonly<Reco
       }
     }
     if (stub) drives = drives.map((d) => (stub.network.includes(d.path) ? { ...d, network: true as const } : d));
+    if (options.platform === "linux" && (env.WSL_DISTRO_NAME || env.WSL_INTEROP)) {
+      drives = drives.map((drive) => (WSL_AUTOMATIC_MOUNT.test(drive.path) ? { ...drive, shortcut: false as const } : drive));
+    }
     return drives.sort((a, b) => a.name.localeCompare(b.name));
   };
 
