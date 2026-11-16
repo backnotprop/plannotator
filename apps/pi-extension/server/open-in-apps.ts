@@ -9,15 +9,17 @@
  */
 
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { dirname, join } from "node:path";
-import os from "node:os";
+import { dirname } from "node:path";
 
 import { resolveOpenInTarget } from "../generated/html-assets-node.ts";
+import { locateOpenInApp } from "../generated/open-in-locate.ts";
 import {
 	OPEN_IN_APPS,
 	checkOpenInAppId,
+	openInFileArgv,
+	openInMacArgv,
+	parseOpenInLine,
 	resolveRevealIcon,
 	resolveRevealLabel,
 	type OpenInApp,
@@ -39,49 +41,39 @@ function currentPlatform(): OpenInPlatform {
 	}
 }
 
-/** which()-equivalent: returns true if a binary resolves on PATH. */
-function whichBin(bin: string): boolean {
+/** which()-equivalent: the path a binary resolves to on PATH, or null. */
+function whichPath(bin: string): string | null {
 	try {
 		const finder = process.platform === "win32" ? "where" : "which";
-		execFileSync(finder, [bin], {
+		const out = execFileSync(finder, [bin], {
 			env: process.env,
+			windowsHide: true,
 			encoding: "utf-8",
 			stdio: ["pipe", "pipe", "pipe"],
 		});
-		return true;
+		// `where` lists every match, one per line: the first is what runs.
+		const first = out.split(/\r?\n/).map((l) => l.trim()).find(Boolean);
+		return first || null;
 	} catch {
-		return false;
+		return null;
 	}
 }
 
-/** macOS: does an application bundle exist in any standard Applications dir? */
-function macAppExists(appName: string): boolean {
-	const candidates = [
-		`/Applications/${appName}.app`,
-		join(os.homedir(), "Applications", `${appName}.app`),
-		`/System/Applications/${appName}.app`,
-		// Terminal.app and other built-ins live in the Utilities subfolder.
-		`/System/Applications/Utilities/${appName}.app`,
-	];
-	return candidates.some((p) => existsSync(p));
+/** Where `app` is installed here (shared with Bun): see locateOpenInApp. */
+function locateApp(app: OpenInApp): string | null {
+	return locateOpenInApp(app, { platform: currentPlatform(), which: whichPath });
 }
 
-/** Is the given catalog app launchable on THIS host? */
+/**
+ * Is the given catalog app launchable on THIS host? mac: one of its `.app`
+ * bundles exists (we launch via `open -a`); win/linux: one of its bins is on
+ * PATH (an `exeOnly` app: a real `.exe`, on PATH or in an install folder).
+ * Matches the Bun runtime.
+ */
 function isAppAvailable(app: OpenInApp): boolean {
 	// reveal is always available.
 	if (app.id === "reveal") return true;
-
-	const platform = currentPlatform();
-	if (platform === "mac") {
-		// We launch via `open -a "<appName>"`, so availability must mean the .app
-		// bundle exists — matching the Bun runtime.
-		return !!app.mac?.appName && macAppExists(app.mac.appName);
-	}
-	if (platform === "win") {
-		return app.win?.bin ? whichBin(app.win.bin) : false;
-	}
-	// linux
-	return app.linux?.bin ? whichBin(app.linux.bin) : false;
+	return locateApp(app) !== null;
 }
 
 /**
@@ -143,6 +135,7 @@ function run(
 
 		let child: ReturnType<typeof spawn>;
 		try {
+			// windows-hide-guard: starts the app window the person asked for, which windowsHide would start hidden.
 			child = spawn(cmd, args, {
 				detached: true,
 				stdio: ["ignore", "ignore", "pipe"],
@@ -229,6 +222,7 @@ function spawnDetached(
 	args: string[],
 ): Promise<{ ok: true } | { ok: false; error: string }> {
 	try {
+		// windows-hide-guard: starts the app window the person asked for, which windowsHide would start hidden.
 		const child = spawn(cmd, args, { detached: true, stdio: "ignore" });
 		child.on("error", () => {}); // fire-and-forget; ignore async spawn failure
 		child.unref();
@@ -247,6 +241,7 @@ function spawnDetached(
 export function openFileInApp(
 	absPath: string,
 	appId: string,
+	line?: number,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
 	const platform = currentPlatform();
 	const checked = checkOpenInAppId(appId);
@@ -283,20 +278,27 @@ export function openFileInApp(
 		return run(app.linux.bin, [dir], app.label);
 	}
 
-	// editor -> open the file itself.
+	// editor -> open the file itself, at `line` when its launcher can.
 	if (platform === "mac") {
 		if (!app.mac?.appName)
 			return Promise.resolve({ ok: false, error: `${app.label} is not available on this platform.` });
-		return run("open", ["-a", app.mac.appName, absPath], app.label);
+		// The installed bundle's name; a line rides a URL scheme or the launcher's `--line`.
+		const appName = locateApp(app) ?? app.mac.appName;
+		return run("open", openInMacArgv(app, appName, absPath, line), app.label);
 	}
 	if (platform === "win") {
 		if (!app.win?.bin)
 			return Promise.resolve({ ok: false, error: `${app.label} is not available on this platform.` });
-		return run(app.win.bin, [absPath], app.label);
+		// An `exeOnly` app runs only its own .exe, by absolute path: never a
+		// .cmd/.bat, which cmd.exe would run with the file path on its command line.
+		const winBin = app.win.exeOnly ? locateApp(app) : app.win.bin;
+		if (!winBin) return Promise.resolve({ ok: false, error: `${app.label} was not found on this system.` });
+		return run(winBin, openInFileArgv(app, absPath, line), app.label);
 	}
 	if (!app.linux?.bin)
 		return Promise.resolve({ ok: false, error: `${app.label} is not available on this platform.` });
-	return run(app.linux.bin, [absPath], app.label);
+	// The first of its names on PATH (a snap command, say); else its catalog bin.
+	return run(locateApp(app) ?? app.linux.bin, openInFileArgv(app, absPath, line), app.label);
 }
 
 /**
@@ -336,7 +338,7 @@ export async function handleOpenInRequest(
 			json(res, serverSessionMismatchBody(), 409);
 			return;
 		}
-		const { filePath, appId } = body as { filePath?: unknown; appId?: unknown };
+		const { filePath, appId, line } = body as { filePath?: unknown; appId?: unknown; line?: unknown };
 		if (typeof filePath !== "string" || !filePath) {
 			json(res, { ok: false, error: "Missing filePath" }, 400);
 			return;
@@ -353,7 +355,7 @@ export async function handleOpenInRequest(
 			json(res, { ok: false, error: "Path is outside the allowed directory" }, 403);
 			return;
 		}
-		json(res, await openFileInApp(abs, app.app.id), 200);
+		json(res, await openFileInApp(abs, app.app.id, parseOpenInLine(line)), 200);
 	} catch (err) {
 		json(res, { ok: false, error: err instanceof Error ? err.message : "Failed to open file" }, 500);
 	}

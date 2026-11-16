@@ -99,6 +99,15 @@ export function isRemoteSession(): boolean {
 }
 
 /**
+ * Remote mode that only SSH turned on (`PLANNOTATOR_REMOTE` unset): mirrors
+ * packages/server/remote.ts. A loopback request is answered as in a local
+ * session (`isSshTunnelRequest` in this-machine.ts).
+ */
+export function isSshDetectedRemote(): boolean {
+	return getRemoteOverride() === null && Boolean(process.env.SSH_TTY || process.env.SSH_CONNECTION);
+}
+
+/**
  * Get the server ports to try, in order.
  * - PLANNOTATOR_PORT accepts a fixed port or inclusive range
  * - Remote sessions default to 19432 (for port forwarding)
@@ -297,6 +306,7 @@ async function openGlimpse(url: string): Promise<boolean> {
 			resolve(opened);
 		};
 
+		// windows-hide-guard: starts the app window the person asked for, which windowsHide would start hidden.
 		const child = spawn(glimpseCli, args, {
 			detached: true,
 			stdio: ["pipe", "ignore", "ignore"],
@@ -384,6 +394,7 @@ export async function openBrowser(url: string): Promise<{
 			args = [url];
 		}
 
+		// windows-hide-guard: starts the app window the person asked for, which windowsHide would start hidden.
 		const child = spawn(cmd, args, { detached: true, stdio: "ignore" });
 		// A failed launch exists only as an async "error" event; reporting
 		// opened: true unconditionally hides it (#1472).

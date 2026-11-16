@@ -1,8 +1,19 @@
 import { useState, type FormEvent } from 'react';
 import type { InboxLinearKeyState } from '@plannotator/core/inbox-types';
-import { inboxApi } from '../api';
+import { post } from '../api';
 import { Icon } from '../icons';
+import { inboxUrl } from '../inboxUrl';
 import { refreshLinearCards } from '../linearCards';
+
+declare module '../api' {
+  interface SettingsModel {
+    /** Settings → Accounts → Linear: never the key, only its source and, for a saved one, its last 4. */
+    linear_key?: InboxLinearKeyState;
+  }
+}
+
+/** Only from this window's own Inbox; the answer never holds the key. Null removes it. */
+const saveLinearKey = (key: string | null) => post<{ key: InboxLinearKeyState }>(inboxUrl('/linear/key'), { key });
 
 const HINT = 'Shows Linear issues when you hover their links.';
 
@@ -16,7 +27,7 @@ export function LinearKeySettings({ initial, where }: { initial: InboxLinearKeyS
     setSaving(true);
     setError(null);
     try {
-      setKey((await inboxApi.saveLinearKey(next)).key);
+      setKey((await saveLinearKey(next)).key);
       setReplacing(false);
       setTyped('');
       void refreshLinearCards();

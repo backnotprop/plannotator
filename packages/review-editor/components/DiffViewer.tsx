@@ -9,7 +9,7 @@ import { useFileContents } from '../hooks/useFileContents';
 import { useWorkerPoolThemeSync } from '../workerPool';
 import { CommentPopover } from '@plannotator/ui/components/CommentPopover';
 import { storage } from '@plannotator/ui/utils/storage';
-import { detectLanguage } from '../utils/detectLanguage';
+import { applyFileLanguageFixes } from '../utils/highlightLanguage';
 import { buildCodeNavRequest } from '../utils/buildCodeNavRequest';
 import { ToolbarHost, type ToolbarHostHandle } from './ToolbarHost';
 import { OverlayScrollArea } from '@plannotator/ui/components/OverlayScrollArea';
@@ -53,6 +53,7 @@ import {
   resolveLineSelectionBehavior,
   type LineSelectionSource,
 } from '../utils/lineSelectionBehavior';
+import { openInLineForDiff } from '../utils/openInLine';
 import {
   changeJumpDirection,
   findChangeElement,
@@ -62,6 +63,9 @@ import {
   resolveChangeJump,
   type ChangePlacement,
 } from '../utils/changeNavigation';
+
+// Pierre picks each file's grammar from its name when the file renders.
+applyFileLanguageFixes();
 
 interface PierreDiffContentProps {
   filePath: string;
@@ -856,7 +860,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
     return (
       <InlineAnnotation
         metadata={annotation.metadata}
-        language={detectLanguage(filePath)}
+        filePath={filePath}
         isSelected={annotation.metadata.annotationId === selectedAnnotationId}
         onSelect={onSelectAnnotation}
         onEdit={handleEdit}
@@ -1090,11 +1094,21 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
     return lineRangeForAnnotation(ann);
   }, [selectedAnnotationId, annotations]);
 
+  // "Open in" reads these at the click: the live selection, else the picked
+  // comment's lines, else the file's first change.
+  const openInLineRef = useRef({ patch, range: pendingSelection ?? selectedAnnotationRange });
+  openInLineRef.current = { patch, range: pendingSelection ?? selectedAnnotationRange };
+  const openInLine = useCallback(
+    () => openInLineForDiff(openInLineRef.current.patch, openInLineRef.current.range),
+    [],
+  );
+
   return (
     <div className="h-full flex flex-col">
       <FileHeader
         filePath={filePath}
         patch={patch}
+        openInLine={openInLine}
         status={status}
         oldPath={oldPath}
         isViewed={isViewed}

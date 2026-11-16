@@ -92,7 +92,7 @@ jobs:
              && base=$(git rev-parse --verify --quiet 'HEAD^1') \
              && git rev-parse --verify --quiet 'HEAD^2' >/dev/null; then
             changed=$(git diff --name-only "$base" HEAD)
-            if grep -Eq '^(scripts/install\.(ps1|cmd)$|scripts/install\.test\.ts$|apps/qwen-code/|packages/shared/t3-hook-command\.ts$|tests/setup/|bunfig\.toml$|package\.json$|bun\.lock$|\.github/workflows/windows\.yml$)' <<< "$changed"; then
+            if grep -Eq '^(scripts/install\.(ps1|cmd)$|scripts/install\.test\.ts$|apps/qwen-code/|packages/shared/(plannotator-tool|t3-hook-command)\.ts$|tests/setup/|bunfig\.toml$|package\.json$|bun\.lock$|\.github/workflows/windows\.yml$)' <<< "$changed"; then
               run=true
             else
               run=false
@@ -145,9 +145,10 @@ jobs:
         run: bun test scripts/install.test.ts --test-name-pattern $env:PATTERN
 
   # Path gate for the diagram engine build below. Only these files can change
-  # what that build does: the engine's build script and sources, the contract
-  # it is built against, the review app's and the root's dependencies, and this
-  # workflow. Anything this cannot resolve runs the job, as in qwen-gate.
+  # what that build does: the engine's build script and sources, the UI and
+  # core packages it bundles, the contract it is built against, the review
+  # app's and the root's dependencies, and this workflow. Anything this cannot
+  # resolve runs the job, as in qwen-gate.
   diagram-engine-gate:
     name: Diagram engine build (path gate)
     if: github.event_name != 'pull_request' || (contains(github.event.pull_request.labels.*.name, 'ci:full') && (github.event.action != 'labeled' || github.event.label.name == 'ci:full'))
@@ -171,7 +172,7 @@ jobs:
              && base=$(git rev-parse --verify --quiet 'HEAD^1') \
              && git rev-parse --verify --quiet 'HEAD^2' >/dev/null; then
             changed=$(git diff --name-only "$base" HEAD)
-            if grep -Eq '^(apps/review/diagram-engine/|packages/review-editor/utils/diagramEngineContract\.ts$|apps/review/package\.json$|package\.json$|bun\.lock$|\.github/workflows/windows\.yml$)' <<< "$changed"; then
+            if grep -Eq '^(apps/review/diagram-engine/|packages/(core|ui)/|packages/review-editor/utils/diagramEngineContract\.ts$|apps/review/package\.json$|package\.json$|bun\.lock$|\.github/workflows/windows\.yml$)' <<< "$changed"; then
               run=true
             else
               run=false

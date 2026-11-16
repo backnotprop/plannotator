@@ -16,6 +16,7 @@
  * (not the author, no write access) or a description that would pass the forge's limit posts the comment instead,
  * and the answer's `fallback` says why.
  */
+import { forgeHostTrusted } from "@plannotator/core/forge-ref-card";
 import { inboxThreadPullRefOfKey, inboxThreadPullText, parseInboxThreadPullRef } from "@plannotator/core/inbox-types";
 import { DECISION_POST_COMMENT_MARKER, DECISION_POST_SECTION_END, DECISION_POST_SECTION_START, decisionExportForPost, decisionPostDestinationOf, renderDecisionComment, renderDecisionSection, renderDecisionSummary, type DecisionPostPlatform } from "@plannotator/shared/inbox/decision-post";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
@@ -62,9 +63,14 @@ export function decisionPostFailure(platform: DecisionPostPlatform, ref: string,
 function prRefOf(key: string, url: string): PRRef | null {
   const ref = inboxThreadPullRefOfKey(key, url);
   if (!ref) return null;
-  return ref.platform === "github"
-    ? { platform: "github", host: ref.host, owner: ref.owner, repo: ref.repo, number: ref.number }
-    : { platform: "gitlab", host: ref.host, projectPath: `${ref.owner}/${ref.repo}`, iid: ref.number };
+  switch (ref.platform) {
+    case "github":
+      return { platform: "github", host: ref.host, owner: ref.owner, repo: ref.repo, number: ref.number };
+    case "gitlab":
+      return { platform: "gitlab", host: ref.host, projectPath: `${ref.owner}/${ref.repo}`, iid: ref.number };
+    case "bitbucket":
+      return { platform: "bitbucket", host: ref.host, workspace: ref.owner, repo: ref.repo, number: ref.number };
+  }
 }
 
 /** Post (or update) a thread's decisions on one of its pull requests. */
@@ -72,7 +78,7 @@ export async function postThreadDecisions(
   store: InboxStore,
   threadId: string,
   input: { pull: unknown; tz?: unknown },
-  deps: { runtime: PRRuntime; version: string; now?: () => Date; destination?: unknown },
+  deps: { runtime: PRRuntime; version: string; now?: () => Date; destination?: unknown; signedIn?: (cli: "gh" | "glab") => Promise<ReadonlySet<string>> },
 ): Promise<InboxDecisionPostResult> {
   const built = threadDecisionExport(store, threadId, { tz: typeof input.tz === "string" ? input.tz : "UTC", version: deps.version, now: deps.now });
   if (!built) return refused(404, "thread_not_found", "No such thread.");
@@ -86,6 +92,10 @@ export async function postThreadDecisions(
   if (!ref || ref.platform === "bitbucket" || !canPostMarkedText(ref)) return refused(422, "forge_unsupported", "Posting decisions works on GitHub and GitLab only.");
   const platform: DecisionPostPlatform = ref.platform;
   const refText = inboxThreadPullText(linked);
+  const host = { platform, host: ref.host };
+  if (!forgeHostTrusted(host, new Set()) && !forgeHostTrusted(host, (await deps.signedIn?.(FORGE[platform].cli).catch(() => null)) ?? new Set())) {
+    return refused(502, "post_failed", decisionPostFailure(platform, refText, "not logged in", "comment"));
+  }
   const destination = decisionPostDestinationOf(deps.destination);
   const comment = () =>
     upsertPRMarkedComment(deps.runtime, ref, { marker: DECISION_POST_COMMENT_MARKER(doc.thread.id), body: (room) => renderDecisionComment(doc, { platform, room }) });

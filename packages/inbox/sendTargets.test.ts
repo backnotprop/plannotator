@@ -201,6 +201,14 @@ describe('wordsMessage: who the next reply goes to after a session ended', () =>
     expect(wordsMessage(thread([ended, moved, next, again])).id).toBe('msg_5');
   });
 
+  test("another agent's routine change line is a note: the words stay with the run that took over, and with the latest run's reply", () => {
+    const moved = reply('msg_2', { to, took_over: true });
+    const change = { ...message('msg_3', 'ses_alex', []), scheduled_change: { scheduled_id: 'sch_a', name: 'Docs link sweep', op: 'update' } } as InboxMessageWire;
+    expect(wordsMessage(thread([ended, moved, change])).id).toBe('msg_2');
+    const answer = message('msg_4', 'ses_new', []);
+    expect(wordsMessage(thread([ended, moved, answer, { ...change, id: 'msg_5' } as InboxMessageWire])).id).toBe('msg_4');
+  });
+
   test('a permission prompt after the take over is not an agent writing: the words stay', () => {
     const moved = reply('msg_2', { to, took_over: true });
     const prompt = message('msg_3', 'perm:ses_new', []);

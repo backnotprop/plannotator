@@ -358,6 +358,30 @@ describe("the optional T3 Code connection", () => {
   });
 });
 
+describe("routines' start at login", () => {
+  test("a plain uninstall removes the macOS login item (the file only) and the Linux unit (disabling it)", async () => {
+    for (const platform of ["darwin", "linux"] as const) {
+      const fixture = createFixture({ platform });
+      const path = platform === "darwin" ? join(fixture.homeDir, "Library", "LaunchAgents", "ai.plannotator.inbox.plist") : join(fixture.homeDir, ".config", "systemd", "user", "plannotator-inbox.service");
+      writeText(path);
+      const planned = await runPlannotatorUninstall({ purge: false, dryRun: true }, fixture.environment);
+      expect(planned.planned).toContain(`Remove the Inbox's start at login (${path})`);
+      expect(existsSync(path)).toBe(true);
+      const result = await runPlannotatorUninstall({ purge: false, dryRun: false }, fixture.environment);
+      expect(result.removed).toContain(`Removed the Inbox's start at login (${path})`);
+      expect(existsSync(path)).toBe(false);
+      expect(fixture.commandCalls.some((call) => call.command === "launchctl")).toBe(false);
+      if (platform === "linux") expect(fixture.commandCalls.find((call) => call.command === "systemctl")?.args.at(-1)).toBe("plannotator-inbox.service");
+    }
+  });
+
+  test("with none, uninstall says nothing of it", async () => {
+    const fixture = createFixture({ platform: "darwin" });
+    const result = await runPlannotatorUninstall({ purge: false, dryRun: false }, fixture.environment);
+    expect([...result.removed, ...result.planned].some((line) => line.includes("start at login"))).toBe(false);
+  });
+});
+
 describe("default uninstall", () => {
   test("removes the optional T3 hook only for the installed binary, preserving other Bash hooks", async () => {
     const fixture = createFixture();
@@ -1345,6 +1369,7 @@ describe("purge uninstall", () => {
     // and it must not be reported as an unrecognized custom entry.
     writeText(join(fixture.dataDir, "feedback", "repo", "index.jsonl"));
     writeJson(join(fixture.dataDir, "config.json"), { theme: "dark" });
+    writeJson(join(fixture.dataDir, "state.json"), { inboxTour: { version: 2 } });
     writeText(join(fixture.dataDir, "vendor", "sem", "v0.8.0", "sem"));
     const customVendorPath = join(
       fixture.dataDir,
@@ -1366,6 +1391,7 @@ describe("purge uninstall", () => {
     expect(existsSync(join(fixture.dataDir, "history"))).toBe(false);
     expect(existsSync(join(fixture.dataDir, "feedback"))).toBe(false);
     expect(existsSync(join(fixture.dataDir, "config.json"))).toBe(false);
+    expect(existsSync(join(fixture.dataDir, "state.json"))).toBe(false);
     expect(result.preserved).not.toContain(
       `${join(fixture.dataDir, "feedback")} (unrecognized custom entry)`,
     );
@@ -2447,6 +2473,19 @@ describe("the Inbox's agent connections (inbox-agents.ts)", () => {
     const result = await runPlannotatorUninstall({ purge: true, dryRun: false }, environment);
     expect(result.removed).toContain(describe);
     expect(fixture.commandCalls.filter((call) => call.command === "/fake/qwen").map((call) => call.args)).toEqual([["sessions", "controllers", "remove", "c_0a1b2c3d"]]);
+  });
+
+  test("a connected Hermes Agent plugin is left to Hermes and uninstall names the one command that removes it and its switch, without running hermes", async () => {
+    const fixture = createFixture();
+    const hermesConfig = join(fixture.homeDir, ".hermes", "config.yaml");
+    writeText(hermesConfig, "plugins:\n  entries:\n    plannotator:\n      allow_gateway_injection: true\n");
+    writeText(join(fixture.homeDir, ".hermes", "plugins", "plannotator", "plugin.yaml"), "name: plannotator\nhomepage: https://github.com/backnotprop/plannotator/tree/main/apps/hermes-plugin\n");
+    const environment = { ...fixture.environment, which: (command: string) => (command === "hermes" ? "/fake/hermes" : null) };
+
+    const result = await runPlannotatorUninstall({ purge: false, dryRun: false }, environment);
+    expect(result.warnings.filter((line) => line.includes("`hermes plugins remove plannotator`"))).toHaveLength(1);
+    expect(fixture.commandCalls.filter((call) => call.command === "/fake/hermes")).toEqual([]);
+    expect(readFileSync(hermesConfig, "utf8")).toContain("allow_gateway_injection: true");
   });
 
   test.skipIf(process.getuid?.() === 0)("a grant Qwen will not revoke while the data folder can't be written: the uninstall still removes the binary, and says so", async () => {

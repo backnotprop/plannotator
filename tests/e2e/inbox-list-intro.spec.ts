@@ -26,13 +26,14 @@
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-list-intro.spec.ts`. PNGs and a video of the demo
  * land in PLANNOTATOR_E2E_PROOF_DIR/list-intro, or .local/proof/list-intro/.
  */
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { E2E_LAUNCH_OFF, inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
 import { NO_BROWSER } from '../helpers/no-browser';
+import { savedConfig as savedConfigOf } from '../helpers/saved-config';
 
 const repo = resolve(__dirname, '../..');
 const proofDir = join(resolve(process.env.PLANNOTATOR_E2E_PROOF_DIR ?? join(repo, '.local/proof')), 'list-intro');
@@ -106,7 +107,7 @@ async function world(options: { earlier: boolean; soundDue?: boolean; attachment
       }),
     );
   }
-  const env = { PATH: process.env.PATH ?? '', HOME: home, PLANNOTATOR_DATA_DIR: dataDir, NO_ANON_PING: '1', PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0', PLANNOTATOR_UPDATE_CHECK: '0', PLANNOTATOR_INBOX_PHONES: '0' };
+  const env = { PATH: process.env.PATH ?? '', HOME: home, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: dataDir, NO_ANON_PING: '1', PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0', PLANNOTATOR_UPDATE_CHECK: '0', PLANNOTATOR_INBOX_PHONES: '0' };
   const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
   expect(started.status, started.stderr).toBe(0);
   const url = started.stdout.trim();
@@ -144,10 +145,7 @@ interface SavedIntro {
   before?: { dueAt?: string; shownAt?: string };
 }
 
-function savedConfig(w: World): Record<string, unknown> {
-  const path = join(w.dataDir, 'config.json');
-  return existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : {};
-}
+const savedConfig = (w: World): Record<string, unknown> => savedConfigOf(w.dataDir);
 const saved = (w: World) => savedConfig(w).inboxListIntro as SavedIntro | undefined;
 const savedRows = (w: World) => savedConfig(w).inboxRows as string[] | undefined;
 

@@ -270,8 +270,7 @@ if (decisionsMode) {
 }
 // The Bro mode offer (approval "bro-mode"; its place in the line, approval "inbox-one-time-dialogs"): first use 3 days
 // ago, Snooze, the switches and the update-day dialogs behind the person, so only it can be next; heavy use (10 threads
-// read, on 2 days), seeded before the Inbox opens the store; one thread whose last agent message is long (its moment);
-// and one login beside the owner's, for a guest's calls over the tailnet.
+// read, on 2 days), seeded before the Inbox opens the store; and one thread whose last agent message is long (its moment).
 const broOfferMode = extra === "bro-offer";
 let broThread: string | null = null;
 if (broOfferMode) {
@@ -285,13 +284,16 @@ if (broOfferMode) {
       inboxBoard: false,
       inboxSteps: false,
       inboxCodeReview: false,
-      inboxTailscaleAllow: ["guest@example.com"],
       inboxSnoozeIntro: { firstUseAt: settled, snoozedAt: settled },
       inboxSound: { dialogShownFor: "0.30.0" },
       inboxListIntro: { shownAt: settled, version: 2 },
       inboxVoiceIntro: { shownAt: settled },
       // The tab icon dialog (an update-day dialog): settled by a favicon already chosen.
       favicon: "glass",
+      // Personal agents (after Snooze in the line): settled by OpenClaw's Inbox tool turned on.
+      inboxTool: { openclaw: true },
+      // Priority (after Snooze in the line): settled by a thread once added to Priority.
+      inboxPriorityIntro: { usedAt: settled },
     }),
   );
   let clock = new Date();

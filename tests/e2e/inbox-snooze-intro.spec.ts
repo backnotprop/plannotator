@@ -23,12 +23,13 @@
  * apps/review build && bun run build:hook), then `bunx playwright test -c tests/e2e/playwright.config.ts
  * inbox-snooze-intro.spec.ts`. PNGs land in PLANNOTATOR_E2E_PROOF_DIR/snooze-intro, or .local/proof/snooze-intro/.
  */
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
 import { NO_BROWSER } from '../helpers/no-browser';
+import { savedConfig } from '../helpers/saved-config';
 
 const repo = resolve(__dirname, '../..');
 const proofDir = join(resolve(process.env.PLANNOTATOR_E2E_PROOF_DIR ?? join(repo, '.local/proof')), 'snooze-intro');
@@ -69,7 +70,7 @@ async function world(): Promise<World> {
   const dataDir = join(root, 'data');
   const src = join(root, 'src');
   for (const dir of [dataDir, src, join(root, 'claude'), join(root, 'codex'), join(root, 'xdg-config'), join(root, 'xdg-data')]) mkdirSync(dir, { recursive: true });
-  const seeded = spawnSync('bun', [join(repo, 'tests/e2e/inbox-snooze-intro-seed.ts'), dataDir, src, '3'], { cwd: repo, encoding: 'utf8', env: { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_DATA_DIR: dataDir } });
+  const seeded = spawnSync('bun', [join(repo, 'tests/e2e/inbox-snooze-intro-seed.ts'), dataDir, src, '3'], { cwd: repo, encoding: 'utf8', env: { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: dataDir } });
   expect(seeded.status, seeded.stderr).toBe(0);
   const ids = JSON.parse(seeded.stdout.trim()) as Record<string, string>;
   const past = '2026-10-01T10:00:00.000Z';
@@ -95,6 +96,7 @@ async function world(): Promise<World> {
   const env = {
     PATH: process.env.PATH ?? '',
     HOME: root,
+    PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9',
     PLANNOTATOR_DATA_DIR: dataDir,
     // A release version: never the live daily ping (packages/shared/daily-ping.ts).
     NO_ANON_PING: '1',
@@ -118,7 +120,7 @@ async function world(): Promise<World> {
 }
 
 function saved(w: World): { firstUseAt?: string; snoozedAt?: string; shownAt?: string } | undefined {
-  return JSON.parse(readFileSync(join(w.dataDir, 'config.json'), 'utf8')).inboxSnoozeIntro;
+  return savedConfig(w.dataDir).inboxSnoozeIntro;
 }
 
 async function context(browser: Browser, options: { phone?: boolean; dark?: boolean } = {}): Promise<BrowserContext> {

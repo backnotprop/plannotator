@@ -2,10 +2,12 @@ import React, { useRef, useEffect, useContext } from "react";
 import { isCodeFilePath } from "@plannotator/core/code-file";
 import type { Block } from "../../types";
 import { sanitizeBlockHtml } from "../../utils/sanitizeHtml";
+import { paintAuthorColors } from "../../utils/authorColorContrast";
 import { parseSrcset, serializeSrcset, type SrcsetCandidate } from "../../utils/srcset";
 import { getImageSrc } from "../ImageThumbnail";
 import { UNAVAILABLE_IMAGE_CLASS, PreserveResolvedVideosContext, ResolvedResponsiveImagesContext, useImageResolver, type ImageResolver } from "../ImageResolverContext";
 import { isLocalLinkTarget, isNewTabClick, useLocalLinkResolver, type LocalLinkResolver } from "../LocalLinkContext";
+import { sourceLineAttrs } from "../../utils/sourceLineAttrs";
 
 interface HtmlBlockProps {
   block: Block;
@@ -269,15 +271,21 @@ const HtmlBlockImpl: React.FC<HtmlBlockProps> = ({ block, imageBaseDir, onOpenLi
       ref.current.innerHTML = sanitized;
     }
     const cleanup = rewriteRelativeRefs(ref.current, imageBaseDir, onOpenLinkedDoc, onOpenCodeFile, onNavigateAnchor, resolveLocalLink, resolveImage);
-    return cleanup;
+    const stopColors = paintAuthorColors(ref.current);
+    return () => {
+      cleanup();
+      stopColors();
+    };
   }, [sanitized, imageBaseDir, onOpenLinkedDoc, onOpenCodeFile, onNavigateAnchor, resolveLocalLink, resolveImage, preserveVideos, responsiveImages]);
   return (
-    <div
-      ref={ref}
-      data-block-id={block.id}
-      data-block-type="html"
-      className="html-block my-4 text-[15px] leading-relaxed text-foreground/90"
-    />
+    <div className="relative my-4" {...sourceLineAttrs(block)}>
+      <div
+        ref={ref}
+        data-block-id={block.id}
+        data-block-type="html"
+        className="html-block text-[15px] leading-relaxed text-foreground/90"
+      />
+    </div>
   );
 };
 export const HtmlBlock = React.memo(

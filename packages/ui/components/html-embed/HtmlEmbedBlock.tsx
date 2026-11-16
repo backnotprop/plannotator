@@ -35,6 +35,7 @@ import { HostTitle } from '../HostTitle';
 import { PopoutDialog } from '../PopoutDialog';
 import { useTheme } from '../ThemeProvider';
 import { acquireEmbedLoad, claimEmbedLive, onEmbedLiveFreed, releaseEmbedLive, useNearViewport } from './loadGate';
+import { sourceLineAttrs } from '../../utils/sourceLineAttrs';
 
 /** A host that can serve embed documents (the Inbox: POST /api/inbox/embeds). */
 export interface HtmlEmbedHost {
@@ -143,6 +144,7 @@ function EmbedFrame({
   return (
     <iframe
       ref={ref}
+      allowFullScreen
       src={src}
       sandbox={EMBED_SANDBOX}
       referrerPolicy="no-referrer"
@@ -281,7 +283,7 @@ export function HtmlEmbedBlock({ block, host }: { block: Block; host: HtmlEmbedH
   }, [showCode, phase, block, height]);
 
   return (
-    <figure ref={figureRef} data-block-id={block.id} data-html-embed="" data-html-embed-phase={showCode ? 'code' : phase} className="my-4">
+    <figure ref={figureRef} data-block-id={block.id} data-html-embed="" data-html-embed-phase={showCode ? 'code' : phase} className="relative my-4" {...(showCode || phase === 'failed' ? undefined : sourceLineAttrs(block))}>
       {body ?? (
         <div className="relative">
           <div

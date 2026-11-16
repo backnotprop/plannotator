@@ -231,6 +231,29 @@ test.skipIf(!hasDom)("Agents takes Machines' place above Projects: each machine 
   expect(surface()!.querySelector(`[data-machine="${MAC}"]`)!.getAttribute('aria-current')).toBe('page');
 });
 
+test.skipIf(!hasDom)('a list whose agent has a name that is not text (another machine, another version) still draws that row, by the next name', () => {
+  const bad = { ...agent('ses_bad'), label: 7, title: { x: 1 }, first_thread: { id: 'thr_1', name: null } } as unknown as InboxAgent;
+  setInboxAgents([group([bad, agent('ses_ok', { title: 'Ledger sync' })])]);
+  mount(<Sidebar {...sidebarProps({ machines: machinesModel(null) })} />);
+  const names = [...surface()!.querySelectorAll<HTMLElement>('[data-sidebar-agent]')].map((r) => [r.getAttribute('data-sidebar-agent'), r.querySelector('.ib-proj .ib-name')!.textContent]);
+  expect(names).toEqual([
+    ['ses_bad', 'billing-svc'],
+    ['ses_ok', 'Ledger sync'],
+  ]);
+});
+
+test.skipIf(!hasDom)('an agent waiting on the person keeps its place, and its row looks and reads like any other (no mark: the owner, 2026-11-15)', () => {
+  const listed = (waits: boolean) => [group([agent('ses_a'), agent('ses_b', waits ? { state: 'waiting', waiting: 2 } : { state: 'working' }), agent('ses_c')])];
+  const rows = () => [...surface()!.querySelectorAll<HTMLElement>('[data-sidebar-agent]')];
+  const drawn = () => rows().map((r) => [r.getAttribute('data-sidebar-agent'), r.querySelector('.ib-proj')!.innerHTML.replace(/ses_[abc]/g, 'ID')]);
+  setInboxAgents(listed(false));
+  mount(<Sidebar {...sidebarProps({ machines: machinesModel(null) })} />);
+  const before = drawn();
+  act(() => setInboxAgents(listed(true)));
+  expect(drawn()).toEqual(before);
+  expect(rows()[1]!.querySelector('.ib-proj .ib-sr')!.textContent).toBe(', Claude Code');
+});
+
 test.skipIf(!hasDom)('with no machine linked the agents are one flat list; an Inbox with no agents field and no link has no section', () => {
   const alone = machinesModel([view(SELF, 'Studio')]);
   mount(<Sidebar {...sidebarProps({ machines: alone })} />);
@@ -244,8 +267,8 @@ test.skipIf(!hasDom)('with no machine linked the agents are one flat list; an In
   expect(surface()!.textContent).toContain('Agents show here while they run.');
 });
 
-test.skipIf(!hasDom)('Add agent and Add machine are always-shown buttons with their own routes; an agent row filters the list, or messages a live agent with no thread', () => {
-  setInboxAgents([group([agent('ses_s1'), agent('ses_s2')], SELF)]);
+test.skipIf(!hasDom)('Add machine and Add agent are the heading\'s buttons, each with its own route; an agent row filters the list, or messages a live agent with no thread', () => {
+  setInboxAgents([group([agent('ses_s1', { first_thread: { id: 'thr_1', name: 'Invoice retries' } }), agent('ses_s2')], SELF)]);
   const calls: string[] = [];
   let opener: HTMLElement | null = null;
   const rows = [threadRow('thr_1', 'ses_s1', 'Invoice retries')];
@@ -284,7 +307,7 @@ test.skipIf(!hasDom)('Add agent and Add machine are always-shown buttons with th
 test.skipIf(!hasDom)("a starred thread that is also an agent's thread shows under Starred and under Agents: the star opens it, the agent filters to it", () => {
   // The phone sheet's mock listed such a thread under Starred only; the owner did not approve that (approval
   // "inbox-phone-sidebar-sheet", NOT approved): Agents stays a list of every agent.
-  setInboxAgents([group([agent('ses_s1'), agent('ses_s2')])]);
+  setInboxAgents([group([agent('ses_s1', { first_thread: { id: 'thr_star', name: 'Starred and running' } }), agent('ses_s2', { first_thread: { id: 'thr_other', name: 'Only running' } })])]);
   const starred = { ...threadRow('thr_star', 'ses_s1', 'Starred and running'), project: { id: 'prj_bill', name: 'billing-svc' }, section: 'waiting', unread: false, unseen: 0, read_at: null, resolved_at: null, questions: { open: 2, holds_up: [] } } as unknown as InboxListRow;
   const opened: string[] = [];
   mount(<Sidebar {...sidebarProps({ pins: [starred], agentRows: [starred, threadRow('thr_other', 'ses_s2', 'Only running')], onOpenPin: (row) => opened.push(`pin:${row.thread_id}`), onAgentFilter: (id) => opened.push(`agent:${id}`) })} />);
@@ -341,7 +364,7 @@ test.skipIf(!hasDom)('a click on an agent filters the list to it and opens no th
   expect(calls.some((c) => c.startsWith('open:'))).toBe(false);
 });
 
-test.skipIf(!hasDom)('closed, Agents is its heading alone, whatever is open: no row for the open thread, no machine name, no Add buttons; only a press on the heading opens it', async () => {
+test.skipIf(!hasDom)('closed, Agents is its heading alone, whatever is open: no row for the open thread, no machine name, its Add buttons kept for the heading\'s hover; only a press on the heading opens it', async () => {
   // Which sections are closed is kept through Plannotator's storage (cookies in the app); a map stands in for them.
   const { setStorageBackend, resetStorageBackend } = await import('@plannotator/ui/utils/storage');
   const stored = new Map<string, string>();
@@ -367,8 +390,8 @@ async function closedAgents() {
     captions: surface()!.querySelectorAll('[data-machine]').length,
     under: surface()!.querySelector('[data-agents-section]')!.childElementCount,
   });
-  const shut = { open: 'false', buttons: [], rows: [], captions: 0, under: 0 };
-  expect(state()).toEqual({ open: 'true', buttons: ['agent', 'machine'], rows: ['ses_s1', 'ses_s2', 'ses_m1'], captions: 2, under: 2 });
+  const shut = { open: 'false', buttons: ['machine', 'agent'], rows: [], captions: 0, under: 0 };
+  expect(state()).toEqual({ open: 'true', buttons: ['machine', 'agent'], rows: ['ses_s1', 'ses_s2', 'ses_m1'], captions: 2, under: 2 });
   act(() => header().click());
   expect(state()).toEqual(shut);
   expect(surface()!.querySelector('[data-sidebar-section="agents"] .ib-agents-mk')).not.toBeNull();
@@ -391,7 +414,7 @@ async function closedAgents() {
   expect(state()).toEqual(shut);
   // The person presses the heading: everything is back; an open thread marks no agent, the agent filtered to does.
   act(() => header().click());
-  expect(state()).toEqual({ open: 'true', buttons: ['agent', 'machine'], rows: ['ses_s1', 'ses_s2', 'ses_m1'], captions: 2, under: 2 });
+  expect(state()).toEqual({ open: 'true', buttons: ['machine', 'agent'], rows: ['ses_s1', 'ses_s2', 'ses_m1'], captions: 2, under: 2 });
   expect(surface()!.querySelector('[data-sidebar-agent="ses_s1"] .ib-proj')!.getAttribute('aria-pressed')).toBe('false');
   mount(<Sidebar {...props({ openThreadId: 'thr_1', agentFilter: { id: 'ses_s1', name: 'Invoice retries' } })} />);
   expect(surface()!.querySelector('[data-sidebar-agent="ses_s1"] .ib-proj')!.getAttribute('aria-pressed')).toBe('true');
@@ -465,19 +488,26 @@ test.skipIf(!hasDom)('Add agent opens New message with "New … session" chosen:
 
 const ART = Object.fromEntries((motion.AGENT_FACES ?? []).filter((face) => face !== 'agent').map((face) => [face, `<i data-art="${face}"></i>`])) as Parameters<typeof motion.setAgentFaceArt>[0];
 
-test.skipIf(!hasDom)('a click on a mark shows the next face (agent, Glass, Yellow, Transparent, Face, agent), never opens the row, and the face is kept until the next click', async () => {
+// A pointer's click (detail 1).
+const press = (el: Element) => act(() => void el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, detail: 1 })));
+const fanChoice = (face: string) => document.querySelector<HTMLButtonElement>(`[data-face-choice="${face}"]`);
+
+test.skipIf(!hasDom)('a click on a mark opens its picker and changes no face, never opens the row; a face chosen there is kept for a new draw', async () => {
   motion.setAgentFaceArt(ART);
   setInboxAgents([group([agent('ses_s1')], SELF)]);
   const opened: string[] = [];
   const props = sidebarProps({ machines: three(), agentRows: [threadRow('thr_1', 'ses_s1', 'Invoice retries')], onAgentFilter: (id) => opened.push(String(id)) });
   mount(<Sidebar {...props} />);
   expect(mark('ses_s1').dataset.face).toBe('agent');
-  const seen: string[] = [];
-  for (let i = 0; i < 2; i++) {
-    act(() => mark('ses_s1').click());
-    await wait(20);
-    seen.push(mark('ses_s1').dataset.face!);
-  }
+  press(mark('ses_s1'));
+  await wait(20);
+  expect(mark('ses_s1').closest('button')!.getAttribute('aria-expanded')).toBe('true');
+  expect(fanChoice('yellow')).not.toBeNull();
+  expect(mark('ses_s1').dataset.face).toBe('agent');
+  expect(opened).toEqual([]);
+  act(() => fanChoice('yellow')!.click());
+  await wait(20);
+  expect(mark('ses_s1').dataset.face).toBe('yellow');
   expect(opened).toEqual([]);
   // Kept: a new draw (a reload's) shows the same face, with no click.
   unmountAll();
@@ -485,14 +515,6 @@ test.skipIf(!hasDom)('a click on a mark shows the next face (agent, Glass, Yello
   mount(<Sidebar {...props} />);
   await wait(20);
   expect(mark('ses_s1').dataset.face).toBe('yellow');
-  for (let i = 0; i < 3; i++) {
-    act(() => mark('ses_s1').click());
-    await wait(20);
-    seen.push(mark('ses_s1').dataset.face!);
-  }
-  expect(seen).toEqual(['glass', 'yellow', 'transparent', 'totman', 'agent']);
-  expect(JSON.parse(window.localStorage.getItem(faces.AGENT_FACES_PAINT_KEY)!).faces).toEqual({});
-  expect(opened).toEqual([]);
 });
 
 test.skipIf(!hasDom)('reduced motion: every mark holds still (no loop, no spin, no fidget), and a face swap is a plain fade', async () => {
@@ -510,8 +532,11 @@ test.skipIf(!hasDom)('reduced motion: every mark holds still (no loop, no spin, 
   const before = made.length;
   await wait(120);
   expect(made.length).toBe(before);
-  act(() => mark('ses_c').click());
+  press(mark('ses_c'));
   await wait(20);
+  act(() => fanChoice('glass')!.click());
+  await wait(20);
+  expect(mark('ses_c').dataset.face).toBe('glass');
   const swap = made.slice(before);
   expect(swap.length).toBeGreaterThan(0);
   expect(swap.every((an) => an.frames.every((f) => !('transform' in f)))).toBe(true);
@@ -542,7 +567,7 @@ test.skipIf(!hasDom)('perf: off screen a mark pauses everything and starts no fi
   expect(motion.agentMarkActivity(el)!.playing).toBeGreaterThan(0);
   // To Glass: once the swap is done, the agent's face runs nothing.
   motion.agentMotionOptions.clock = 1;
-  act(() => el.click());
+  act(() => faces.keepAgentFace('ses_c', 'glass'));
   await wait(60);
   const agentFace = el.querySelector('.am-f-agent')!;
   expect((agentFace as HTMLElement).hidden).toBe(true);

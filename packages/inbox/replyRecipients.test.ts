@@ -5,9 +5,8 @@
  * makes two Claude Codes look the same, and the reply goes to the wrong one.
  */
 import { expect, test } from 'bun:test';
-import { INBOX_TAGS_MAX } from '@plannotator/core/inbox-types';
 import { raceWhat } from './components/ReplyRoute';
-import { aimable, canAddRecipient, canTakeAlone, knownRecipients, RECIPIENTS_MAX, recipientRows, recipientState, toggleRecipient, type RecipientState } from './replyRecipients';
+import { aimable, canAddRecipient, canTakeAlone, knownRecipients, recipientRows, recipientState, toggleRecipient, type RecipientState } from './replyRecipients';
 import type { TaggableModel } from './api';
 
 const rowsOf = (people: { host: string; session: string }[], folders: Record<string, string | null>, states: Record<string, RecipientState> = {}) =>
@@ -57,15 +56,21 @@ test('an ended agent, or one on an older Plannotator, cannot be added as a secon
   expect(canAddRecipient(row('ended'), ['a', 'x'])).toBe(true);
 });
 
-test('nine recipients at most: no circle can be ticked past them (typed tags counted), so a Send never goes past its eight tags', () => {
+test('a new session (the start row) takes the reply alone: never ticked as a second recipient, and nothing joins it', () => {
+  const start = { session: 'new:claude-code', host: 'claude-code', label: 'New Claude Code session', short: 'New Claude Code session', state: 'live' as const, start: { project: 'ledger', asleep: false } };
+  const other = { session: 'x', host: null, label: 'X', short: 'X', state: 'live' as const };
+  const rows = [other, start];
+  expect(canAddRecipient(start, ['a'], rows)).toBe(false);
+  expect(canAddRecipient(other, [start.session], rows)).toBe(false);
+  expect(canAddRecipient(other, ['a'], rows)).toBe(true);
+});
+
+test('any number of recipients: a twentieth circle can still be ticked, and one already in stays removable', () => {
   const row = { session: 'x', host: null, label: 'X', short: 'X', state: 'live' as const };
-  const nine = Array.from({ length: RECIPIENTS_MAX }, (_, i) => `s${i}`);
-  expect(RECIPIENTS_MAX).toBe(INBOX_TAGS_MAX + 1);
-  expect(canAddRecipient(row, nine.slice(0, -1))).toBe(true);
-  expect(canAddRecipient(row, nine)).toBe(false);
-  // One already in stays removable at the most.
-  expect(canAddRecipient({ ...row, session: 's0' }, nine)).toBe(true);
-  expect(toggleRecipient(nine, 'x')).toEqual(nine);
+  const many = Array.from({ length: 19 }, (_, i) => `s${i}`);
+  expect(canAddRecipient(row, many)).toBe(true);
+  expect(toggleRecipient(many, 'x')).toEqual([...many, 'x']);
+  expect(canAddRecipient({ ...row, session: 's0' }, many)).toBe(true);
   expect(toggleRecipient(['a'], 'b', 1)).toEqual(['a']);
 });
 

@@ -12,6 +12,8 @@
 import { defineConfig } from '@playwright/test';
 import { quarantineFilter } from './quarantine';
 
+process.env.PLANNOTATOR_RELAY_URL ??= 'http://127.0.0.1:9';
+
 /** Specs that their own config runs, never this one: the thread parity harness (inbox-thread-parity.config.ts). */
 const OWN_CONFIG = ['inbox-thread-parity.spec.ts'];
 /** Specs that run in the `webkit` project only. */
@@ -36,6 +38,8 @@ export default defineConfig({
     browserName: 'chromium',
     headless: true,
     viewport: { width: 1440, height: 900 },
+    // A failed test's screenshot, beside its error-context.md: CI keeps both (inbox-e2e.yml). No trace: it would record every test, passing ones too.
+    screenshot: 'only-on-failure',
     launchOptions: { args: ['--use-mock-keychain', '--password-store=basic'] },
   },
   projects: [

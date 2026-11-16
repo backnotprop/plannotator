@@ -18,6 +18,7 @@ import type { InboxAnnotationRecord } from '@plannotator/core/inbox-types';
 import { inboxReviewVerdictWords, type InboxReviewVerdict } from '@plannotator/core/inbox-review';
 import type { DecisionActionId } from '@plannotator/ui/utils/decisionSpec';
 import { guideFeedback } from './attachments';
+import { commentPictureUploads } from './commentPictureFiles';
 import { newUuid } from './uuid';
 
 export interface VerdictPlan {
@@ -45,16 +46,23 @@ export function verdictOf(id: DecisionActionId, hasComments: boolean): VerdictPl
   }
 }
 
-/** The verdict reply's parts: its words and, with comments, the feedback and the annotations it marks sent. */
+/**
+ * The verdict reply's parts: its words and, with comments, the feedback and the annotations it marks sent. `skills`
+ * (`verdictRecheckBlock`) goes last in the feedback, after the comments.
+ */
 export function verdictReply(
   plan: VerdictPlan,
   title: string,
   records: readonly InboxAnnotationRecord[],
   note?: string,
-): { words: string; feedback?: string; annotation_ids?: string[] } {
+  skills = '',
+): { words: string; feedback?: string; annotation_ids?: string[]; uploads?: string[] } {
   const carried = plan.withComments ? records : [];
   const words = [inboxReviewVerdictWords(plan.verdict, title, carried.length), note?.trim() ?? ''].filter((part) => part !== '').join('\n\n');
-  return carried.length > 0 ? { words, feedback: guideFeedback(carried), annotation_ids: carried.map((r) => r.id) } : { words };
+  const uploads = commentPictureUploads(carried);
+  if (carried.length === 0) return skills ? { words, feedback: skills } : { words };
+  const feedback = guideFeedback(carried);
+  return { words, feedback: skills ? `${feedback.trim()}\n\n${skills}` : feedback, annotation_ids: carried.map((r) => r.id), ...(uploads.length > 0 ? { uploads } : {}) };
 }
 
 /**

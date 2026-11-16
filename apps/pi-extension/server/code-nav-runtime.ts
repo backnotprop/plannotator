@@ -13,6 +13,7 @@ export const piCodeNavRuntime: CodeNavRuntime = {
 			const proc = spawn(command, args, {
 				cwd: options?.cwd,
 				stdio: ["ignore", "pipe", "pipe"],
+				windowsHide: true,
 			});
 			let timer: ReturnType<typeof setTimeout> | undefined;
 			if (options?.timeoutMs) {

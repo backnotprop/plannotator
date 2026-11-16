@@ -80,6 +80,7 @@ class PiProcess {
 				stdin: "pipe",
 				stdout: "pipe",
 				stderr: "ignore",
+				windowsHide: true,
 			});
 		} catch (err) {
 			const error = err instanceof Error ? err : new Error(String(err));

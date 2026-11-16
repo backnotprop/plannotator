@@ -37,11 +37,11 @@
 
 # Plannotator
 
-**⭐️ NEW:** [Plannotator Inbox](https://plannotator.ai/inbox/) is the missing layer between you and managing multi-agent work.
+**⭐️ NEW:** [Plannotator Inbox](https://plannotator.ai/inbox/) is the missing review layer between you and multi-agent work. It surfaces decisions, prototypes, variations, plans, and everything you need to stay in the loop. Works with all coding agents and personal assistants.
 
-Plannotator is a local, browser-based review surface for AI coding agents: Claude Code, Codex, Copilot CLI, Gemini CLI, OpenCode, Kiro, Droid, Amp, DeepSeek Harness, and Pi. 
+Plannotator is a local, browser-based review surface for AI coding agents: Claude Code, Codex, Copilot CLI, Gemini CLI, OpenCode, Kiro, Droid, Amp, DeepSeek Harness, and Pi. Plannotator Inbox also works with personal assistants (Grok Bot, Muse, Hermes, OpenClaw).
 
-**It plugs directly into your agent** through its hooks and commands. When the agent proposes a plan, html, or finishes writing code, the work opens in your browser and you mark it up, comment, and send feedback directly to the agent for it to act on it.
+**It plugs directly into your agent** through plugins, hooks and commands. When the agent proposes a decision, plan, html, or finishes working, the app opens in your browser and you mark it up, comment, and send feedback directly to the agent for it to act on it.
 
 <table>
 <tr>
@@ -92,7 +92,7 @@ Review local changes or remote PRs. Comment on diffs, suggest code. Your comment
   <a href="https://plannotator.ai/inbox/">
     <picture>
       <source media="(prefers-color-scheme: dark)" srcset=".github/assets/inbox-dark.webp" />
-      <img src=".github/assets/inbox-light.webp" alt="Plannotator Inbox: threads from several agents grouped by what each needs, with a question and an attached screenshot open beside the list" width="720" />
+      <img src=".github/assets/inbox-light.webp" alt="Plannotator Inbox on a desktop and a phone: threads from several agents grouped by what each needs, a question with picture choices open beside the list, and a question with an attached chart on the phone" width="720" />
     </picture>
   </a>
 </p>
