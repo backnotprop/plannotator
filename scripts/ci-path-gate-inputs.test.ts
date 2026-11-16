@@ -1,7 +1,7 @@
 /**
- * Guard for the three CI path gates: `guides-show` in
- * .github/workflows/test.yml, `qwen-gate` and `diagram-engine-gate` in
- * .github/workflows/windows.yml.
+ * Guard for three CI path gates: `guides-show` in .github/workflows/test.yml,
+ * and the Qwen Code installer and diagram engine rules of windows.yml's gate
+ * (GATES['windows.yml'] and HEAVY_FAIL_SAFE in scripts/ci-affected.ts).
  *
  * Each diffs a PR against its base and skips its job when nothing in a fixed
  * pattern changed, and each pattern claims to name every input of its job —
@@ -29,13 +29,14 @@
 import { describe, expect, test } from 'bun:test';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
+import { GATES as WINDOWS_RULES, HEAVY_FAIL_SAFE } from './ci-affected';
 
 const repoRoot = resolve(import.meta.dir, '..');
 
 interface Gate {
   /** The workflow holding the gate job. */
   workflow: string;
-  /** The job id whose `gate` step runs the `grep -Eq`. */
+  /** The job id whose `gate` step runs the `grep -Eq`, or `windows:<key>` for a rule of windows.yml's gate. */
   job: string;
   /** The files its job builds or tests. */
   entries: string[];
@@ -52,13 +53,13 @@ const GATES: Gate[] = [
   },
   {
     workflow: '.github/workflows/windows.yml',
-    job: 'qwen-gate',
+    job: 'windows:qwen',
     entries: ['scripts/install.test.ts'],
     known: 'packages/shared/plannotator-tool.ts',
   },
   {
     workflow: '.github/workflows/windows.yml',
-    job: 'diagram-engine-gate',
+    job: 'windows:diagram_engine',
     entries: [
       'apps/review/diagram-engine/build.ts',
       'apps/review/diagram-engine/engine.tsx',
@@ -71,8 +72,14 @@ const GATES: Gate[] = [
 
 type Job = { steps?: { id?: string; run?: string }[] };
 
-/** The extended regex a gate job's `gate` step passes to `grep -Eq`. */
-function gatePattern({ workflow, job }: Gate): RegExp {
+/** What a gate runs for: the `grep -Eq` pattern of a gate step, or a windows.yml rule's globs with the heavy fail-safe. */
+function gatePattern({ workflow, job }: Gate): { test: (path: string) => boolean } {
+  if (job.startsWith('windows:')) {
+    const rule = WINDOWS_RULES['windows.yml']!.find((g) => g.key === job.slice('windows:'.length));
+    if (!rule) throw new Error(`windows.yml: no gate rule ${job}`);
+    const globs = [...rule.paths, ...HEAVY_FAIL_SAFE].map((g) => new Bun.Glob(g));
+    return { test: (path) => globs.some((g) => g.match(path)) };
+  }
   const parsed = Bun.YAML.parse(readFileSync(join(repoRoot, workflow), 'utf8')) as { jobs: Record<string, Job> };
   const step = parsed.jobs[job]?.steps?.find((s) => s.id === 'gate');
   const match = /grep -Eq '([^']+)'/.exec(step?.run ?? '');
