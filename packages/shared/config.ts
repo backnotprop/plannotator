@@ -689,6 +689,7 @@ export interface PlannotatorConfig {
     /** The Sidebar tip (packages/shared/inbox/sidebar-tip.ts): stamped once when shown, outside the line. */
     sidebar_tip?: { shownAt?: string; key?: string };
   };
+  /** `enabled` / `volume` are settings (config.json); `dialogDueFor` / `dialogShownFor` are machine state (state.json). */
   inboxSound?: {
     enabled?: boolean;
     volume?: number;
@@ -977,6 +978,49 @@ function getConfigDir(): string {
 function getConfigPath(): string {
   return join(getConfigDir(), "config.json");
 }
+function getStatePath(): string {
+  return join(getConfigDir(), "state.json");
+}
+
+/**
+ * Machine state (#2852): records the server writes by itself (one-time dialogs, their claims and version
+ * stamps), kept in `state.json` beside config.json so config.json changes only when the person changes a
+ * setting and can live in a dotfiles repo. loadConfig returns both files as one; saveConfig sends these keys
+ * to state.json and drops them from config.json the first time each is saved. A key still in config.json
+ * (written by an older version, or a test seed) is read until then; state.json wins when both have it.
+ */
+const MACHINE_STATE_KEYS = [
+  "inboxAgentNotes", "inboxTour", "inboxBoardIntro", "inboxListIntro", "inboxVoiceIntro", "inboxSnoozeIntro",
+  "inboxReveals", "starAsk", "inboxThemeChooser", "inboxPriorityIntro",
+] as const;
+/** Machine-state fields inside a key whose other fields are settings (`inboxSound.enabled` / `volume`). */
+const MACHINE_STATE_FIELDS: Readonly<Record<string, readonly string[]>> = { inboxSound: ["dialogDueFor", "dialogShownFor"] };
+
+function pickFields(value: Record<string, unknown>, fields: readonly string[], keep: boolean): Record<string, unknown> | undefined {
+  return withoutUndefined(Object.fromEntries(Object.entries(value).filter(([field]) => fields.includes(field) === keep)));
+}
+
+/** state.json as text and object: missing, empty, unreadable or not a JSON object reads as no state. */
+function readState(): { raw: string | null; state: Record<string, unknown> } {
+  let raw: string | null = null;
+  try {
+    raw = readFileSync(getStatePath(), "utf-8");
+    return { raw, state: plainRecord(JSON.parse(raw.replace(/^﻿/, ""))) ?? {} };
+  } catch {
+    return { raw, state: {} };
+  }
+}
+
+/** config.json's settings with state.json's machine state over them. */
+function withMachineState(config: Record<string, unknown>, state: Record<string, unknown>): PlannotatorConfig {
+  const merged: Record<string, unknown> = { ...config };
+  for (const key of MACHINE_STATE_KEYS) if (state[key] !== undefined) merged[key] = state[key];
+  for (const [key, fields] of Object.entries(MACHINE_STATE_FIELDS)) {
+    const saved = plainRecord(state[key]);
+    if (saved) merged[key] = { ...plainRecord(config[key]), ...pickFields(saved, fields, true) };
+  }
+  return merged as PlannotatorConfig;
+}
 
 /** Chapter diagrams (config.json `inboxChapterDiagrams`): on unless the person turned it off. */
 export function inboxChapterDiagramsOn(config: Pick<PlannotatorConfig, "inboxChapterDiagrams">): boolean {
@@ -984,19 +1028,23 @@ export function inboxChapterDiagramsOn(config: Pick<PlannotatorConfig, "inboxCha
 }
 
 /**
- * Load config from ~/.plannotator/config.json.
+ * Load config from ~/.plannotator/config.json, with the machine state in
+ * state.json beside it (MACHINE_STATE_KEYS).
  * Returns {} on missing file or malformed JSON. `quiet`: no warning for a
  * malformed file (a read that must not add a line to what a command printed
  * before it existed: a later read in the same command still warns).
  */
 export function loadConfig(options: { quiet?: boolean } = {}): PlannotatorConfig {
+  return withMachineState(loadSettings(options), readState().state);
+}
+
+function loadSettings(options: { quiet?: boolean }): Record<string, unknown> {
   try {
     const configPath = getConfigPath();
     if (!existsSync(configPath)) return {};
     // A UTF-8 BOM (Notepad's "UTF-8 with BOM") is not part of the JSON.
     const raw = readFileSync(configPath, "utf-8").replace(/^\uFEFF/, "");
-    const parsed = JSON.parse(raw);
-    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) ? parsed : {};
+    return plainRecord(JSON.parse(raw)) ?? {};
   } catch (e) {
     if (!options.quiet) process.stderr.write(`[plannotator] Warning: failed to read config.json: ${e}\n`);
     return {};
@@ -1193,7 +1241,9 @@ function writeConfigAtomic(configPath: string, contents: string): void {
  * A config.json that exists but cannot be read or is not a JSON object is
  * never written over (readConfigForSave): the save is refused with a warning
  * and the file is left in place, so fixing it brings every setting back.
- * Returns whether the file was written; callers that report a save check it
+ * Machine state goes to state.json instead (MACHINE_STATE_KEYS), and
+ * config.json is rewritten only when its settings change.
+ * Returns whether the save landed; callers that report a save check it
  * (or read the value back).
  */
 export function saveConfig(partial: Partial<PlannotatorConfig>): boolean {
@@ -1242,7 +1292,30 @@ export function saveConfig(partial: Partial<PlannotatorConfig>): boolean {
       merged[key] = key === "prompts" ? mergePromptConfig(cur as PromptConfig, par as PromptConfig) : { ...cur, ...par };
     };
     for (const key of ["experimental", "diffOptions", "reviewDefaults", "theme", "reviewAnalysis", "prompts", "packageChanges", "inboxLaunch"] as const) nested(key);
-    writeConfigAtomic(getConfigPath(), JSON.stringify(merged, null, 2) + "\n");
+    // Machine state named by the save goes to state.json and leaves config.json (MACHINE_STATE_KEYS). A corrupt
+    // state.json reads as empty and is replaced: it holds no setting.
+    const stateRead = readState();
+    const state = { ...stateRead.state };
+    let stateNamed = false;
+    for (const key of MACHINE_STATE_KEYS) {
+      if (!(key in partial)) continue;
+      stateNamed = true;
+      state[key] = (partial as Record<string, unknown>)[key];
+      delete merged[key];
+    }
+    for (const [key, fields] of Object.entries(MACHINE_STATE_FIELDS)) {
+      if (!(key in partial)) continue;
+      stateNamed = true;
+      const par = plainRecord((partial as Record<string, unknown>)[key]);
+      state[key] = par && pickFields(par, fields, true);
+      if (par) merged[key] = pickFields(par, fields, false);
+    }
+    // State first: a key is never gone from both files. config.json is written only when its settings change.
+    if (stateNamed) {
+      const stateText = JSON.stringify(state, null, 2) + "\n";
+      if (stateText !== stateRead.raw) writeConfigAtomic(getStatePath(), stateText);
+    }
+    if (JSON.stringify(merged) !== JSON.stringify(current)) writeConfigAtomic(getConfigPath(), JSON.stringify(merged, null, 2) + "\n");
     saved = true;
   } catch (e) {
     process.stderr.write(`[plannotator] Warning: failed to write config.json: ${e}\n`);

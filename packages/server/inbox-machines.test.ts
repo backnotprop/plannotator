@@ -39,6 +39,7 @@ import { startInboxServer } from "./inbox";
 import { machineHeldWords } from "./inbox-machines";
 import { createInboxDevices, takeDownInboxTailnet, UNLINKED_REFUSAL_KEPT_MS } from "./inbox-devices";
 import { readTailnetDoorRecord, writeTailnetDoorRecord } from "./inbox-tailnet-door";
+import { savedConfig } from "../../tests/helpers/saved-config";
 import {
   createInboxWorld,
   destroyInboxWorld,
@@ -1393,7 +1394,7 @@ describe("an agent's snooze_thread of a linked machine's thread", () => {
     const was = process.env.PLANNOTATOR_DATA_DIR;
     const configDir = scratch("plannotator-snooze-agent-config-");
     process.env.PLANNOTATOR_DATA_DIR = configDir;
-    const mark = () => (existsSync(join(configDir, "config.json")) ? JSON.parse(readFileSync(join(configDir, "config.json"), "utf8")).inboxSnoozeIntro?.snoozedAt : undefined);
+    const mark = () => savedConfig(configDir).inboxSnoozeIntro?.snoozedAt;
     try {
       let answer = () => Response.json({ error: "A newer Plannotator wrote these.", code: "snoozes_newer" }, { status: 409 });
       await withDoor("plannotator-snooze-agent-refused-", "msg_01K00000000000000000000006", true, { snooze: () => answer() }, async (_inbox, client) => {

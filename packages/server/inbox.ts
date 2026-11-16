@@ -2513,7 +2513,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     }
     if (validateOnly) return soundState();
     saveConfig({ inboxSound: next });
-    if (JSON.stringify(loadConfig().inboxSound) !== JSON.stringify(next)) {
+    if (loadConfig().inboxSound?.enabled !== next.enabled || loadConfig().inboxSound?.volume !== next.volume) {
       throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
     }
     return soundState();

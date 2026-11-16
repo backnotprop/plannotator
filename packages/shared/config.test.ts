@@ -10,6 +10,8 @@ import {
   readFileSync,
   readdirSync,
   chmodSync,
+  symlinkSync,
+  lstatSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -1192,5 +1194,145 @@ describe("experimental features", () => {
       warn.mockRestore();
     }
     expect(JSON.parse(readFileSync(join(dir, "config.json"), "utf-8"))).toMatchObject({ usageCounts: false, usageCountsNotice: { decisionMode: 1 }, inboxTextSize: 13 });
+  });
+});
+
+describe("machine state lives in state.json, not config.json (#2852)", () => {
+  const originalDataDir = process.env.PLANNOTATOR_DATA_DIR;
+  let tempDir: string;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), "plannotator-config-state-"));
+    process.env.PLANNOTATOR_DATA_DIR = tempDir;
+  });
+
+  afterEach(() => {
+    if (originalDataDir !== undefined) process.env.PLANNOTATOR_DATA_DIR = originalDataDir;
+    else delete process.env.PLANNOTATOR_DATA_DIR;
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  const configPath = () => join(tempDir, "config.json");
+  const statePath = () => join(tempDir, "state.json");
+  const json = (file: string) => JSON.parse(readFileSync(file, "utf-8"));
+
+  test("a dialog record lands in state.json and config.json keeps only settings", () => {
+    writeFileSync(configPath(), JSON.stringify({ displayName: "Ada" }, null, 2) + "\n");
+    expect(saveConfig({ inboxListIntro: { dueAt: "2026-11-05T00:00:00.000Z" }, inboxReveals: { lastShownAt: "2026-11-06T00:00:00.000Z" } })).toBe(true);
+    expect(saveConfig({ inboxSound: { enabled: false, dialogShownFor: "0.28.35" } })).toBe(true);
+    expect(json(configPath())).toEqual({ displayName: "Ada", inboxSound: { enabled: false } });
+    expect(json(statePath())).toEqual({
+      inboxListIntro: { dueAt: "2026-11-05T00:00:00.000Z" },
+      inboxReveals: { lastShownAt: "2026-11-06T00:00:00.000Z" },
+      inboxSound: { dialogShownFor: "0.28.35" },
+    });
+    expect(loadConfig()).toMatchObject({
+      displayName: "Ada",
+      inboxListIntro: { dueAt: "2026-11-05T00:00:00.000Z" },
+      inboxSound: { enabled: false, dialogShownFor: "0.28.35" },
+    });
+  });
+
+  test("a fresh machine gets no config.json from a dialog record alone", () => {
+    expect(saveConfig({ starAsk: { shownAt: "2026-11-06T00:00:00.000Z" } })).toBe(true);
+    expect(existsSync(configPath())).toBe(false);
+    expect(loadConfig().starAsk).toEqual({ shownAt: "2026-11-06T00:00:00.000Z" });
+  });
+
+  test("records an older version left in config.json are still read, and move out on their first save", () => {
+    writeFileSync(configPath(), JSON.stringify({
+      theme: { mode: "dark" },
+      inboxSnoozeIntro: { firstUseAt: "2026-10-29T00:00:00.000Z" },
+      inboxTour: { version: 2, seen_at: "2026-10-01T00:00:00.000Z" },
+      inboxSound: { volume: 30, dialogShownFor: "0.28.20" },
+    }));
+    expect(loadConfig()).toMatchObject({
+      inboxSnoozeIntro: { firstUseAt: "2026-10-29T00:00:00.000Z" },
+      inboxTour: { version: 2 },
+      inboxSound: { volume: 30, dialogShownFor: "0.28.20" },
+    });
+
+    // The callers save the whole record they read back, so nothing in it is lost on the move.
+    expect(saveConfig({ inboxSnoozeIntro: { ...loadConfig().inboxSnoozeIntro, shownAt: "2026-11-07T00:00:00.000Z" } })).toBe(true);
+    expect(json(configPath())).toEqual({
+      theme: { mode: "dark" },
+      inboxTour: { version: 2, seen_at: "2026-10-01T00:00:00.000Z" },
+      inboxSound: { volume: 30, dialogShownFor: "0.28.20" },
+    });
+    expect(json(statePath())).toEqual({ inboxSnoozeIntro: { firstUseAt: "2026-10-29T00:00:00.000Z", shownAt: "2026-11-07T00:00:00.000Z" } });
+
+    expect(saveConfig({ inboxSound: { ...loadConfig().inboxSound, dialogShownFor: "0.29.0" } })).toBe(true);
+    expect(json(configPath()).inboxSound).toEqual({ volume: 30 });
+    expect(json(statePath()).inboxSound).toEqual({ dialogShownFor: "0.29.0" });
+    expect(loadConfig().inboxSound).toEqual({ volume: 30, dialogShownFor: "0.29.0" });
+  });
+
+  test("state.json wins over a copy of the same record left in config.json", () => {
+    writeFileSync(configPath(), JSON.stringify({ inboxBoardIntro: { shownAt: "old" }, inboxSound: { dialogDueFor: "0.28.10", enabled: false } }));
+    writeFileSync(statePath(), JSON.stringify({ inboxBoardIntro: { shownAt: "new" }, inboxSound: { dialogShownFor: "0.28.10" } }));
+    expect(loadConfig().inboxBoardIntro).toEqual({ shownAt: "new" });
+    expect(loadConfig().inboxSound).toMatchObject({ enabled: false, dialogShownFor: "0.28.10" });
+  });
+
+  test("a save with no settings change leaves config.json byte for byte, hand formatting included", () => {
+    const bytes = '{\n    "displayName": "Ada",\n    "theme": {"mode": "dark"}\n}\n';
+    writeFileSync(configPath(), bytes);
+    const before = lstatSync(configPath()).mtimeMs;
+    expect(saveConfig({ inboxReveals: { lastShownAt: "2026-11-06T00:00:00.000Z" } })).toBe(true);
+    expect(saveConfig({ inboxSound: { dialogShownFor: "0.29.0" } })).toBe(true);
+    expect(saveConfig({ displayName: "Ada" })).toBe(true);
+    expect(readFileSync(configPath(), "utf-8")).toBe(bytes);
+    expect(lstatSync(configPath()).mtimeMs).toBe(before);
+    expect(loadConfig().inboxReveals).toEqual({ lastShownAt: "2026-11-06T00:00:00.000Z" });
+  });
+
+  test("a missing, empty or corrupt state.json never costs a setting, and a state save replaces the corrupt one", () => {
+    writeFileSync(configPath(), JSON.stringify({ displayName: "Ada", inboxTour: { version: 2 } }));
+    for (const bytes of ["", "  \n", "{not json", "[1,2]", "null"]) {
+      writeFileSync(statePath(), bytes);
+      expect(loadConfig()).toMatchObject({ displayName: "Ada", inboxTour: { version: 2 } });
+      expect(saveConfig({ favicon: "yellow" })).toBe(true);
+      expect(loadConfig().favicon).toBe("yellow");
+      expect(readFileSync(statePath(), "utf-8")).toBe(bytes);
+    }
+    expect(saveConfig({ inboxTour: { version: 3 } })).toBe(true);
+    expect(json(statePath())).toEqual({ inboxTour: { version: 3 } });
+    expect(json(configPath())).toEqual({ displayName: "Ada", favicon: "yellow" });
+  });
+
+  test("a symlinked config.json (a dotfiles repo) is written through, and state never lands in it", () => {
+    const dotfiles = join(tempDir, "dotfiles");
+    mkdirSync(dotfiles);
+    const target = join(dotfiles, "plannotator-config.json");
+    writeFileSync(target, JSON.stringify({ displayName: "Ada", inboxListIntro: { shownAt: "old" } }));
+    symlinkSync(target, configPath());
+    expect(saveConfig({ inboxListIntro: { shownAt: "2026-11-06T00:00:00.000Z" } })).toBe(true);
+    expect(saveConfig({ favicon: "yellow" })).toBe(true);
+    expect(lstatSync(configPath()).isSymbolicLink()).toBe(true);
+    expect(json(target)).toEqual({ displayName: "Ada", favicon: "yellow" });
+    expect(json(statePath())).toEqual({ inboxListIntro: { shownAt: "2026-11-06T00:00:00.000Z" } });
+  });
+
+  test("a state save runs under the config lock and is refused with config.json when that file is unreadable", () => {
+    let lockHeld = false;
+    __setConfigSaveMergeWindowHookForTest(() => {
+      lockHeld = existsSync(join(tempDir, "config.json.lock"));
+    });
+    try {
+      expect(saveConfig({ inboxPriorityIntro: { usedAt: "2026-11-06T00:00:00.000Z" } })).toBe(true);
+    } finally {
+      __setConfigSaveMergeWindowHookForTest(null);
+    }
+    expect(lockHeld).toBe(true);
+
+    writeFileSync(configPath(), "{ broken");
+    const warn = spyOn(process.stderr, "write").mockImplementation((() => true) as typeof process.stderr.write);
+    try {
+      expect(saveConfig({ inboxPriorityIntro: { usedAt: "later" } })).toBe(false);
+    } finally {
+      warn.mockRestore();
+    }
+    expect(readFileSync(configPath(), "utf-8")).toBe("{ broken");
+    expect(json(statePath())).toEqual({ inboxPriorityIntro: { usedAt: "2026-11-06T00:00:00.000Z" } });
   });
 });
