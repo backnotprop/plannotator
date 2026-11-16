@@ -1,4 +1,5 @@
 import { describe, it, expect } from "bun:test";
+import { findGuideLinks } from "@plannotator/core/guide-links";
 import { renderInlineMarkdown } from "./renderInlineMarkdown";
 
 const isElement = (node: unknown): node is { type: string; props: { children?: unknown } } =>
@@ -41,6 +42,25 @@ describe("renderInlineMarkdown", () => {
     const linkNodes = renderInlineMarkdown("[link](https://example.com)_italic_");
     expect(types(linkNodes)).toEqual(["a", "em"]);
     expect((linkNodes[1] as { type: string; props: { children?: unknown } }).props.children).toBe("italic");
+  });
+
+  it("hands guide links with mixed-case schemes and destination padding to the host", () => {
+    const prose = "See [the code]( CODE:app/(shop)/page.tsx#L4 ) and [the chapter](ChApTeR:2).";
+    const rendered: string[] = [];
+    renderInlineMarkdown(prose, {
+      renderLink(href) {
+        rendered.push(href);
+        return null;
+      },
+    });
+    expect(rendered).toEqual(["CODE:app/(shop)/page.tsx#L4", "ChApTeR:2"]);
+    expect(rendered).toEqual(findGuideLinks(prose, "markdown").map(({ href }) => href));
+  });
+
+  it("keeps mixed-case bare HTTP schemes clickable", () => {
+    const nodes = renderInlineMarkdown("See HTTPS://example.com/docs now.");
+    expect(types(nodes)).toEqual(["string", "a", "string"]);
+    expect((nodes[1] as { props: { href?: string } }).props.href).toBe("HTTPS://example.com/docs");
   });
 
   it("keeps a balanced closing paren inside a link destination", () => {

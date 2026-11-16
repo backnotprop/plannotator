@@ -72,8 +72,8 @@ function renderInline(text: string, startKey: number, opts?: InlineMarkdownOptio
   // The last alternative is a guide link: [label](code:…|symbol:…|chapter:…),
   // its target read as guide-links reads it (balanced parentheses allowed).
   const regex = new RegExp(
-    String.raw`(\[([^\]]+)\]\(${URL_DESTINATION}\)|` + '`[^`]+`' + String.raw`|\*\*[^*]+\*\*|(?<!\w)_([^_\s](?:[\s\S]*?[^_\s])?)_(?!\w)|\*[^*]+\*|https?:\/\/[^\s<)\]]+|\[([^\]]+)\]\((${GUIDE_LINK_TARGET_SOURCE})\))`,
-    'g',
+    String.raw`(\[([^\]]+)\]\(${URL_DESTINATION}\)|` + '`[^`]+`' + String.raw`|\*\*[^*]+\*\*|(?<!\w)_([^_\s](?:[\s\S]*?[^_\s])?)_(?!\w)|\*[^*]+\*|https?:\/\/[^\s<)\]]+|\[([^\]]+)\]\(\s*(${GUIDE_LINK_TARGET_SOURCE})\s*\))`,
+    'gi',
   );
   let lastIndex = 0;
   let match: RegExpExecArray | null;
@@ -127,7 +127,7 @@ function renderInline(text: string, startKey: number, opts?: InlineMarkdownOptio
       nodes.push(<em key={key++}>{italicText}</em>);
     } else if (token.startsWith('*')) {
       nodes.push(<em key={key++}>{token.slice(1, -1)}</em>);
-    } else if (token.startsWith('http')) {
+    } else if (/^https?:\/\//i.test(token)) {
       // Bare URL
       nodes.push(
         <a key={key++} href={token} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline break-all">
