@@ -65,7 +65,9 @@ import {
   buildSrcdocInjection,
   buildThemeTokenPayload,
   hasHostThemeOptIn,
+  hasNoNetworkMarker,
   injectIntoHead,
+  injectNoNetworkCsp,
   injectPrintDefaults,
   injectSandboxShim,
   resolveBridgeScriptUrl,
@@ -760,7 +762,9 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       const page = injectIntoHead(injectPrintDefaults(rawHtml, { sectionBreaks: hostTheme }), injection);
       // Inline path: history and storage are safe before the page's own head
       // scripts run. The URL path gets the same shim from the bridge.
-      return bridgeUrl ? page : injectSandboxShim(page);
+      const framed = bridgeUrl ? page : injectSandboxShim(page);
+      // A page its server opened outside the session's roots gets no network.
+      return hasNoNetworkMarker(rawHtml) ? injectNoNetworkCsp(framed) : framed;
     }, [liveMode, rawHtml, hostTheme, diffActive, bridgeUrl]);
 
     useLayoutEffect(() => {

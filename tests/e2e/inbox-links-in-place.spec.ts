@@ -670,8 +670,8 @@ test.describe('still a new tab', () => {
 });
 
 test.describe('an attached HTML page', () => {
-  // Known gap: a page's own script can still move the window to another thread; the activation and frame-focus gates don't stop it in Chromium or WebKit.
-  test.fixme('its own script, with no click, does not move the window', async ({ browser }) => {
+  // The viewer takes a link only on the private port it handed the bridge, never from a window message the page can post.
+  test('its own script, with no click, does not move the window', async ({ browser }) => {
     await scene(browser, 'desktop', async (s) => {
       const { page } = s;
       await openFile(page, world.script);

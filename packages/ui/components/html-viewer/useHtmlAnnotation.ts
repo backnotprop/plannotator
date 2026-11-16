@@ -251,7 +251,8 @@ export interface UseHtmlAnnotationOptions {
    *  href, already bounded and screened; the host resolves it (see
    *  `resolveHtmlLinkIntent`). Delivered in readOnly mode too — navigating is
    *  a read action — and never fired in live sessions, which navigate the
-   *  proxied app for real. */
+   *  proxied app for real. Arrives only on the private port handed to the
+   *  bridge after each ready, never from a window message. */
   onLinkClick?: (href: string) => void;
   /** scrollIntoView behavior for scroll-to (selecting an annotation).
    *  Absent: smooth, as before; pass 'auto' to honor reduced motion. */
@@ -698,6 +699,12 @@ export function useHtmlAnnotation({
   onPageChangeRef.current = onPageChange;
   const onLinkClickRef = useRef(onLinkClick);
   onLinkClickRef.current = onLinkClick;
+  // The parent end of the private link channel (see `handOverLinkPort`).
+  const linkPortRef = useRef<MessagePort | null>(null);
+  useEffect(() => () => {
+    linkPortRef.current?.close();
+    linkPortRef.current = null;
+  }, []);
   const onHostDraftRef = useRef(onHostDraft);
   const frameScaleRef = useRef(resolveFrameScale(frameScale));
   frameScaleRef.current = resolveFrameScale(frameScale);
@@ -817,6 +824,25 @@ export function useHtmlAnnotation({
   // A layout effect, like HtmlViewer's own listener: listening from the
   // commit that inserts the iframe, before its document can post anything.
   useLayoutEffect(() => {
+    // A link the person followed moves the host, so it never comes over the
+    // window, where the page's own script can post the same message. After
+    // each ready (a srcdoc or served document's, or a forged one: either way
+    // a fresh port), the bridge gets one end of a new channel; it takes the
+    // port before any body script can listen, and link-clicks arrive on this
+    // end only. Live sessions never report links (they navigate for real).
+    function handOverLinkPort() {
+      const win = iframeRef.current?.contentWindow;
+      if (!win || typeof MessageChannel === "undefined") return;
+      linkPortRef.current?.close();
+      const channel = new MessageChannel();
+      channel.port1.onmessage = (event: MessageEvent<unknown>) => {
+        const message = parseBridgeMessage(event.data);
+        if (message?.type === `${PREFIX}link-click`) onLinkClickRef.current?.(message.href);
+      };
+      linkPortRef.current = channel.port1;
+      win.postMessage({ type: `${PREFIX}link-port` }, "*", [channel.port2]);
+    }
+
     function handler(e: MessageEvent<unknown>) {
       if (!e.source || e.source !== bridgeWindowOf(iframeRef.current, liveRef.current)) return;
       // Live sessions verify origin + session token BEFORE parsing. The
@@ -824,10 +850,16 @@ export function useHtmlAnnotation({
       // but the trust boundary does not relax.
       const liveSession = liveRef.current;
       if (liveSession && rejectsLiveMessage(liveSession, e.origin, e.data)) return;
+      if (!liveSession && isRecord(e.data) && e.data.type === `${PREFIX}ready`) {
+        handOverLinkPort();
+        return;
+      }
       const message = parseBridgeMessage(e.data);
       if (!message) return;
 
       const type = message.type;
+      // Taken from the private port only (above): on the window it is forgeable.
+      if (type === `${PREFIX}link-click`) return;
 
       if (
         !enabledRef.current
@@ -840,8 +872,6 @@ export function useHtmlAnnotation({
         && type !== `${PREFIX}page-tap`
         // Page identity is navigation state, not an annotation mutation.
         && type !== `${PREFIX}page-change`
-        // Following a link is a read action; a read-only document still navigates.
-        && type !== `${PREFIX}link-click`
       ) {
         return;
       }
@@ -1145,10 +1175,6 @@ export function useHtmlAnnotation({
 
       if (type === `${PREFIX}page-change`) {
         onPageChangeRef.current?.(message.pageUrl);
-      }
-
-      if (type === `${PREFIX}link-click`) {
-        onLinkClickRef.current?.(message.href);
       }
     }
 
