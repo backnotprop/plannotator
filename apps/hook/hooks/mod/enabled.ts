@@ -215,15 +215,81 @@ export function resolveInboxReminderRules(configText: string | null | undefined)
 }
 
 /**
- * The entrypoint Claude Code's VS Code extension gives the sessions its chat
- * panel starts (`CLAUDE_CODE_ENTRYPOINT`, set in the environment it spawns
- * the CLI with; read in the 2.1.322 extension). Claude Desktop's is
- * `claude-desktop`, an Agent SDK app's `sdk-ts` / `sdk-py`, `claude -p`'s
- * `sdk-cli`, T3 Code's `t3-code`.
+ * The entrypoints (`CLAUDE_CODE_ENTRYPOINT`, set in the environment the host
+ * spawns the CLI with) of the SDK hosts whose chat a person reads, each with
+ * whether the mod reviews ExitPlanMode there (`planReview`: false where the
+ * host draws its own plan card):
+ *
+ * - `claude-vscode`: Claude Code's VS Code extension's chat panel (read in the 2.1.322 extension);
+ * - `orca`: Orca's chat (#3325), which shows its own "Review proposed plan" card.
+ *
+ * Others: Claude Desktop's `claude-desktop`, an Agent SDK app's `sdk-ts` /
+ * `sdk-py`, `claude -p`'s `sdk-cli`, T3 Code's `t3-code`.
  */
-export const VSCODE_PANEL_ENTRYPOINT = 'claude-vscode'
+const PANEL_HOSTS: ReadonlyMap<string, { planReview: boolean }> = new Map([
+  ['claude-vscode', { planReview: true }],
+  ['orca', { planReview: false }],
+])
 
-/** What `isVsCodePanelSession` reads, each variable as `$.env.get` answers it. */
+export function isPanelEntrypoint(value: unknown): boolean {
+  return typeof value === 'string' && PANEL_HOSTS.has(value)
+}
+
+/** Whether the panel host of this entrypoint draws its own plan card for ExitPlanMode (Orca). */
+export function panelHostOwnsPlanMode(value: unknown): boolean {
+  return typeof value === 'string' && PANEL_HOSTS.get(value)?.planReview === false
+}
+
+/**
+ * What the mod sets in the environment of a process whose host draws its own
+ * plan card (`panelHostOwnsPlanMode`: any process with Orca's entrypoint, a
+ * session sorted `headless` by an inherited tag included; Orca's children
+ * inherit the value anyway). When the mod passes ExitPlanMode on, Claude Code
+ * runs the plugin's classic PermissionRequest command hook (`plannotator`,
+ * hooks.json), as it does when a guard plugin (`cc-plugin-sec-default`) sends
+ * `classic.*` past the mod; that process inherits the session's environment,
+ * and with plan review off it exits 0 with no decision (`resolvePlanReview`
+ * in packages/shared/config.ts; binaries 0.28.52 and later, #2299), so the
+ * host's own card decides. An older binary opens its blocking review beside
+ * the card, as before this change.
+ */
+export const HOST_PLAN_CARD_ENV = { name: 'PLANNOTATOR_PLAN_REVIEW', value: '0' } as const
+
+/**
+ * Set beside that `0`: the session that set it (`claude-code:<session id>`).
+ * Everything the session starts inherits both (a review server, the Inbox, an
+ * "Open in" terminal, a tmux server), so a later session that is not a host
+ * plan card and finds a `0` whose marker names another session treats the
+ * switch as unset and clears both (`planSwitchAction`); a binary that knows
+ * the marker honors the `0` only in the hook of the session that set it, and
+ * drops both before it starts anything (`scrubModSessionEnv` in
+ * apps/hook/server/mod-session-env.ts, which keeps this name equal). A
+ * person's own `0` has no marker and is always honored.
+ */
+export const HOST_PLAN_CARD_MARKER = 'PLANNOTATOR_PLAN_REVIEW_SET_BY'
+
+/**
+ * What the mod does with the plan review switch at `session.start`:
+ * - `set`: a host plan card: `PLANNOTATOR_PLAN_REVIEW=0` and the marker
+ *   naming this session. Never over the person's own explicit on value, and
+ *   never marking their own unmarked off value;
+ * - `clear`: not a host plan card, and the `0` was set by another session
+ *   (its marker names it): the switch counts as unset here, and both go;
+ * - `keep`: anything else, the person's own value included.
+ */
+export function planSwitchAction(s: { hostPlanCard: boolean; value: unknown; setBy: unknown; sessionId: string }): 'set' | 'clear' | 'keep' {
+  const marked = setIn(s.setBy)
+  if (s.hostPlanCard) {
+    const explicit = typeof s.value === 'string' ? parseClaudeModEnv(s.value) : undefined
+    if (explicit === true) return 'keep'
+    if (explicit === false && !marked) return 'keep'
+    return 'set'
+  }
+  if (s.value === HOST_PLAN_CARD_ENV.value && marked && s.setBy !== `claude-code:${s.sessionId}`) return 'clear'
+  return 'keep'
+}
+
+/** What `isPanelSession` reads, each variable as `$.env.get` answers it. */
 export type PanelSessionEnv = {
   /** `CLAUDE_CODE_ENTRYPOINT`. */
   entrypoint: unknown
@@ -239,24 +305,25 @@ const setIn = (value: unknown) => typeof value === 'string' && value !== ''
 
 /**
  * Whether a session that is not interactive (`session.start`'s
- * `isInteractive` false) is a chat panel of the VS Code extension, where the
- * mod runs as in the terminal (#3111). The extension hosts Claude Code
- * through the Agent SDK, so its sessions are not interactive, but a person
- * reads the panel and a plugin's turn shows there ("Prompt from the
- * <plugin> plugin").
+ * `isInteractive` false) is the chat of a panel host (`PANEL_HOSTS`: the VS
+ * Code extension, Orca), where the mod runs
+ * as in the terminal (#3111). These hosts run Claude Code through the Agent
+ * SDK, so their sessions are not interactive, but a person reads the chat and
+ * a plugin's turn shows there ("Prompt from the <plugin> plugin" in VS Code).
  *
  * The entrypoint is inherited: a `claude -p` started from inside a panel
  * session (Claude's Bash, or an agent job of a Plannotator CLI the mod
- * started) keeps `claude-vscode` (Claude Code changes only `cli`). Such a
+ * started) keeps the host's entrypoint (Claude Code changes only `cli`). Such a
  * process is told apart by what its parent put in its environment, which the
- * extension removes from the panel's own (it deletes `CLAUDECODE` and
- * `CLAUDE_CODE_CHILD_SESSION` before it spawns the CLI): either Claude Code
+ * host removes from the session's own (the VS Code extension deletes
+ * `CLAUDECODE` and `CLAUDE_CODE_CHILD_SESSION` before it spawns the CLI):
+ * either Claude Code
  * variable, or the mod's session tag naming another session. The tag naming
  * this session is this process's own (a module reload runs `session.start`
  * again after the mod set it).
  */
-export function isVsCodePanelSession(env: PanelSessionEnv, sessionId: string): boolean {
-  if (env.entrypoint !== VSCODE_PANEL_ENTRYPOINT) return false
+export function isPanelSession(env: PanelSessionEnv, sessionId: string): boolean {
+  if (!isPanelEntrypoint(env.entrypoint)) return false
   if (setIn(env.claudecode) || setIn(env.childSession)) return false
   if (setIn(env.sessionTag) && env.sessionTag !== `claude-code:${sessionId}`) return false
   return true
@@ -324,7 +391,9 @@ export function isT3ThreadOwnTools(names: readonly unknown[]): boolean {
  * Where the session runs, as the mod sorts it at `session.start`:
  *
  * - `terminal`: a person at Claude Code's own prompt (`isInteractive`);
- * - `panel`: the VS Code extension's chat panel (`isVsCodePanelSession`);
+ * - `panel`: a panel host's chat: the VS Code extension, Orca
+ *   (`isPanelSession`; where the host draws its own
+ *   plan card, ExitPlanMode is left to it: `panelHostOwnsPlanMode`);
  * - `t3`: a T3 Code thread (`t3ThreadOf`);
  * - `headless`: any other session that is not interactive: `claude -p`,
  *   another Agent SDK app, Claude Desktop, an unknown or missing entrypoint.
@@ -361,8 +430,8 @@ export const SESSION_KIND_FEATURES: Readonly<Record<SessionKind, { reviews: bool
 }
 
 /**
- * A prompt's `origin.kind` as the mod reads it. In a VS Code panel session
- * or a T3 Code thread the person's Enter reaches Claude Code as the SDK
+ * A prompt's `origin.kind` as the mod reads it. In a panel session (VS Code,
+ * Orca) or a T3 Code thread the person's Enter reaches Claude Code as the SDK
  * host's own turn (`sdk`: the host sends what the person typed), so there it
  * reads as `composer`, the person's Enter in the terminal: a prompt they type
  * takes over the turn answering an "Ask this session" question and pulls the
