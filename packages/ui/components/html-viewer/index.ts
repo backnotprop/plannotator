@@ -3,6 +3,8 @@ export {
   HTML_VIEWER_FRAME_GONE,
   HtmlViewer,
   formatBridgeUnavailableMessage,
+  servedFrameReloadUrl, servedFrameStartUrl,
+  type HtmlViewerFrame,
   type BridgeUnavailableInfo,
   type HtmlViewerProps,
 } from "./HtmlViewer";

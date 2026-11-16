@@ -203,7 +203,7 @@ test.skipIf(!hasDom)('#settings opens General; the nav moves between sections by
   await until(() => navLink(el, 'machines') !== null, 'the Machines row');
   const links = [...el.querySelectorAll<HTMLAnchorElement>('.ib-snav a')];
   // Machines right after Devices, then Capabilities (the owner, 2026-10-27), with Voice between them (inbox-voice); Experimental is a group inside it, not a row of its own.
-  expect(links.map((a) => a.textContent?.trim())).toEqual(['General', 'Rows', 'Agents', 'Prompts', 'Devices', 'Machines', 'Accounts', 'Voice', 'Capabilities', 'Activity', 'Archived', 'Storage', 'About']);
+  expect(links.map((a) => a.textContent?.trim())).toEqual(['General', 'Rows', 'Agents', 'Prompts', 'Remote devices', 'Machines', 'Accounts', 'Voice', 'Capabilities', 'Activity', 'Archived', 'Storage', 'About']);
   expect(links.map((a) => a.getAttribute('href'))).toEqual([
     '#settings/general',
     '#settings/rows',
@@ -441,6 +441,9 @@ test.skipIf(!hasDom)('#settings/capabilities opens Capabilities; the Board switc
   }
 });
 
+/** Routines has its row everywhere but Windows. */
+const SCHEDULED_ROW = process.platform === 'win32' ? [] : ['Routines'];
+
 // The checklist (approval "inbox-thread-steps"): off by default, under the Board, saving config.json `inboxSteps`.
 test.skipIf(!hasDom)('Capabilities: the Checklist switch, off by default under the Board, saves inboxSteps to config.json, both ways', async () => {
   const config = () => {
@@ -455,7 +458,7 @@ test.skipIf(!hasDom)('Capabilities: the Checklist switch, off by default under t
   const group = el.querySelector('[data-settings-capabilities]')!;
   const rows = [...group.querySelectorAll('.ib-prow')].map((row) => row.querySelector('.ib-l')?.textContent);
   // Code review and Shape are held until the next big release: off, and without PLANNOTATOR_INBOX_PREVIEW, they have no row.
-  expect(rows).toEqual(['Board', 'Checklist']);
+  expect(rows).toEqual(['Board', 'Checklist', ...SCHEDULED_ROW]);
   // Peers: each switch has its own element, so the Board's selector finds one switch (e2e inbox-board, inbox-tailnet-owner).
   expect(el.querySelectorAll('[data-settings-board] [role="switch"]').length).toBe(1);
   expect(el.querySelector('[data-settings-steps]')?.contains(switchNamed(el, 'Checklist'))).toBe(true);
@@ -571,7 +574,7 @@ test.skipIf(!hasDom)(
       const el = await renderApp('#settings/capabilities');
       await until(() => switchNamed(el, 'Shape') !== null, 'the Shape switch');
       const rows = [...el.querySelectorAll('[data-settings-capabilities] .ib-prow')].map((row) => row.querySelector('.ib-l')?.textContent);
-      expect(rows).toEqual(['Board', 'Checklist', 'Code review', 'Shape']);
+      expect(rows).toEqual(['Board', 'Checklist', ...SCHEDULED_ROW, 'Code review', 'Shape']);
       for (const held of HELD) {
         expect(el.querySelector(held.selector)?.contains(switchNamed(el, held.name))).toBe(true);
         expect(switchNamed(el, held.name)!.getAttribute('aria-checked')).toBe('false');
@@ -806,15 +809,15 @@ test.skipIf(!hasDom)('a code another window replaced reads as replaced, not as t
   expect(el.querySelector('[data-pair-trouble]')).toBeNull();
 });
 
-test.skipIf(!hasDom)('phones off (the released default): Devices is Over your tailnet only, and #settings/devices/pair opens no flow', async () => {
+test.skipIf(!hasDom)('phones off (the released default): Devices is Over your tailnet, Cloud agents stay hidden while the relay never answered, and #settings/devices/pair opens no flow', async () => {
   current = plainServer;
   const el = await renderApp('#settings/devices/pair');
   await until(() => el.querySelector('[data-settings-tailscale]') !== null, 'Over your tailnet');
+  await new Promise((done) => setTimeout(done, 300));
   expect(el.querySelector('[data-settings-phones]')).toBeNull();
   expect(el.querySelector('[data-pair-flow]')).toBeNull();
   expect(buttonText(el, 'Pair a phone')).toBeNull();
-  // Over your tailnet is the section's only group.
-  expect([...el.querySelectorAll('.ib-spg .ib-sgroup')].map((g) => g.hasAttribute('data-settings-tailscale'))).toEqual([true]);
+  expect([...el.querySelectorAll('.ib-spg .ib-sgroup')].map((g) => (g.hasAttribute('data-settings-tailscale') ? 'tailnet' : g.hasAttribute('data-settings-cloudflare') ? 'cloudflare' : g.hasAttribute('data-settings-cloud') ? 'cloud' : 'other'))).toEqual(['tailnet', 'cloudflare']);
 });
 
 test.skipIf(!hasDom)('on a phone: #settings is the list of sections; a section opens with ‹ Settings, which goes back to the list', async () => {
@@ -842,7 +845,7 @@ test.skipIf(!hasDom)('on a phone: #settings is the list of sections; a section o
   act(() => (el.querySelector('.ib-sphead .ib-pback') as HTMLAnchorElement).click());
   await until(() => document.activeElement === el.querySelector('[data-settings-list] [data-settings-link="capabilities"]'), 'focus on the Capabilities row');
   act(() => el.querySelector<HTMLAnchorElement>('[data-settings-list] [data-settings-link="devices"]')!.click());
-  await until(() => heading(el) === 'Devices', 'Devices');
+  await until(() => heading(el) === 'Remote devices', 'Remote devices');
   expect(window.location.hash).toBe('#settings/devices');
   const back = el.querySelector('.ib-sphead .ib-pback') as HTMLAnchorElement;
   expect(back.textContent).toContain('Settings');

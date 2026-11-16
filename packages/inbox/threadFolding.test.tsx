@@ -690,6 +690,16 @@ async function renderWithSent(thread: InboxThread, sent: { at: string; checked_a
   return host;
 }
 
+test.skipIf(!hasDom)('an earlier reply the agent read, opened from its line, says "Delivered to" like its folded line; the latest message keeps no line of its own', async () => {
+  const el = await render(seven());
+  act(() => (el.querySelector('[data-middle-fold] button') as HTMLButtonElement).click());
+  expect(holdings(el, 'msg_P3')).toEqual(['delivered=Delivered']);
+  act(() => article(el, 'msg_P3')!.querySelector<HTMLButtonElement>('[data-fold-head]')!.click());
+  await settle();
+  expect(article(el, 'msg_P3')!.querySelector('[data-delivery]')?.textContent).toBe('Delivered to Claude Code');
+  expect(article(el, 'msg_A4')!.querySelector('[data-delivery]')).toBeNull();
+});
+
 test.skipIf(!hasDom)("a reply, then the Inbox's set-aside note: the Saved for / Delivered to line sits on the reply, never on the note", async () => {
   const [q] = questionsOf(ROOT, ONE_OPEN);
   const thread: InboxThread = {

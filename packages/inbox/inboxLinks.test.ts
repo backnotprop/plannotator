@@ -5,6 +5,7 @@
  * thread never opens as an empty one here.
  */
 import { describe, expect, test } from 'bun:test';
+import { routeOf } from './app/route';
 import { inboxLinkHash, type InboxHere } from './links';
 
 const LOCAL = 'http://localhost:19432';
@@ -77,6 +78,11 @@ describe('the route', () => {
     expect(inboxLinkHash(`${LOCAL}/#project=prj_A`, onThisComputer)).toBe('#project=prj_A');
     expect(inboxLinkHash(`${LOCAL}/#settings`, onThisComputer)).toBe('#settings');
     expect(inboxLinkHash(`${LOCAL}/#settings/agents`, onThisComputer)).toBe('#settings/agents');
+  });
+
+  test("a routine's editor opens in place, and the window reads it as that routine", () => {
+    expect(inboxLinkHash(`${LOCAL}/#routine=sch_A`, onThisComputer)).toBe('#routine=sch_A');
+    expect(routeOf('#routine=sch_A')).toMatchObject({ page: 'scheduled', scheduled: 'sch_A' });
   });
 
   test('no route in the hash leaves the link alone', () => {

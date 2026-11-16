@@ -18,6 +18,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { parseInboxQuestionBlocks } from '@plannotator/core/inbox-questions';
 import type { InboxMessageWire, InboxProject, InboxQuestion, InboxThread } from '@plannotator/core/inbox-types';
 import type { TaggableSession } from './api';
+import { setSessionLabels } from './sessionLabels';
 
 const hasDom = typeof document !== 'undefined';
 // Viewer pulls in web-highlighter, which reads `window` at module-eval time.
@@ -29,6 +30,7 @@ const CLAUDE = { kind: 'agent' as const, host: 'claude-code', session: 'ses_clau
 const PI = { kind: 'agent' as const, host: 'pi', session: 'ses_pi', name: null };
 const GONE = { kind: 'agent' as const, host: 'codex', session: 'ses_gone', name: null };
 const FARCLAUDE = { kind: 'agent' as const, host: 'claude-code', session: 'ses_far', name: null };
+const CLAUDE2 = { kind: 'agent' as const, host: 'claude-code', session: 'ses_claude2', name: null };
 const M1 = 'msg_01M4H6G73M9H3Z32T859E72DPY';
 const M2 = 'msg_01M4H7AAAAAAAAAAAAAAAAAAAA';
 const M3 = 'msg_01M4H7BBBBBBBBBBBBBBBBBBBB';
@@ -265,6 +267,105 @@ test.skipIf(!hasDom)('two agents: the pill names the last writer; a name picked,
   expect(replies()[0]!.body).toMatchObject({ words: 'Use the old totals.' });
   expect(replies()[0]!.body.to).toBeUndefined();
   expect(replies()[0]!.body.tags).toBeUndefined();
+});
+
+test.skipIf(!hasDom)('a computer, sessions with titles: the pill and its list name the sessions by title, and the reply still goes to the session it names', async () => {
+  try {
+    setSessionLabels({ ses_claude: 'Fix login redirect', ses_pi: 'Invoice PDF fonts' });
+    const el = await render(threadOf(agentMessage(M1, CLAUDE, 41), agentMessage(M2, PI, 45)));
+    await write(el, 'Use the old totals.');
+    expect(pillName(el)).toBe('Invoice PDF fonts');
+    await openList(el);
+    expect(rows(el)).toEqual([
+      ['Fix login redirect', null],
+      ['Invoice PDF fonts', null],
+    ]);
+    await only(el, 'ses_claude');
+    expect(pillName(el)).toBe('Fix login redirect');
+    await send(el);
+    expect(replies().map((r) => r.path)).toEqual([`/api/inbox/messages/${M1}/reply`]);
+    expect(replies()[0]!.body.to).toBeUndefined();
+  } finally {
+    // The labels are global: clear them inside act, while the pane is still mounted, so no other test reads them.
+    act(() => setSessionLabels({}));
+  }
+});
+
+/** Each row of the list: its name, the line under it, and the name's hover. */
+const named = (el: HTMLElement) =>
+  [...el.querySelectorAll('[data-recipient-row]')].map((r) => [r.querySelector('.ib-rpick-l')?.textContent, r.querySelector('.ib-rpick-d')?.textContent, r.querySelector('.ib-rpick-l')?.getAttribute('title') ?? null]);
+
+async function withLabels(labels: Record<string, string>, run: () => Promise<void>) {
+  try {
+    setSessionLabels(labels);
+    await run();
+  } finally {
+    act(() => setSessionLabels({}));
+  }
+}
+
+test.skipIf(!hasDom)('two Claude Code sessions in one folder: each row says its own title over "Claude Code · superfans"; an untitled one keeps its name', async () => {
+  taggable.push(tagged('ses_claude2', 'claude-code'));
+  await withLabels({ ses_claude: 'Fix login redirect', ses_claude2: 'Invoice PDF fonts' }, async () => {
+    const el = await render(threadOf(agentMessage(M1, CLAUDE, 41), agentMessage(M2, CLAUDE2, 43), agentMessage(M3, PI, 45)));
+    await write(el, 'Use the old totals.');
+    await openList(el);
+    expect(named(el)).toEqual([
+      ['Fix login redirect', 'Claude Code · superfans', 'Fix login redirect'],
+      ['Invoice PDF fonts', 'Claude Code · superfans', 'Invoice PDF fonts'],
+      ['Pi', 'superfans', null],
+    ]);
+  });
+});
+
+test.skipIf(!hasDom)('two sessions titled alike carry their names after it, on a computer and on a phone alike', async () => {
+  taggable.push(tagged('ses_claude2', 'claude-code'));
+  const thread = threadOf(agentMessage(M1, CLAUDE, 41), agentMessage(M2, CLAUDE2, 43), agentMessage(M3, PI, 45));
+  await withLabels({ ses_claude: 'Review', ses_claude2: 'Review', ses_pi: 'Pi tidy' }, async () => {
+    const el = await render(thread);
+    await write(el, 'Use the old totals.');
+    await openList(el);
+    expect(named(el).map((r) => r[0])).toEqual(['Review (Claude Code)', 'Review (Claude Code 2)', 'Pi tidy']);
+    act(() => root?.unmount());
+    host?.remove();
+    const phone = await render(thread, true);
+    await write(phone, 'Use the old totals.');
+    act(() => (phone.querySelector('[data-recipient]') as HTMLButtonElement).click());
+    await settle();
+    expect([...document.querySelectorAll('[data-recipient-row] .ib-sheet-t')].map((t) => t.textContent)).toEqual(['Review (Claude Code)', 'Review (Claude Code 2)', 'Pi tidy']);
+  });
+});
+
+test.skipIf(!hasDom)('rows are named by the thread context of the name ladder: a session\'s own name, else its agent\'s (numbered), never the thread its agent got first', async () => {
+  const { setInboxAgents } = await import('./agentsList');
+  const agent = (session: string, host: string, name: string) => ({ id: session, session, host, project: { id: PROJECT.id, name: PROJECT.name }, state: 'idle' as const, waiting: 0, live: true, started_at: null, last_seen_at: null, first_thread: { id: M1, name } });
+  taggable.push(tagged('ses_claude2', 'claude-code'));
+  act(() => setInboxAgents([{ agents: [agent('ses_claude', 'claude-code', 'Invoice retries'), agent('ses_claude2', 'claude-code', 'Invoice retries'), agent('ses_pi', 'pi', 'Queue timeouts')], total: 3, ended_today: 0 }]));
+  try {
+    await withLabels({ ses_pi: 'Pi tidy' }, async () => {
+      const el = await render(threadOf(agentMessage(M1, CLAUDE, 41), agentMessage(M2, CLAUDE2, 43), agentMessage(M3, PI, 45)));
+      await write(el, 'Use the old totals.');
+      await openList(el);
+      expect(named(el).map((r) => r[0])).toEqual(['Claude Code', 'Claude Code 2', 'Pi tidy']);
+    });
+  } finally {
+    act(() => setInboxAgents(null));
+  }
+});
+
+test.skipIf(!hasDom)('a long title: the row holds it whole for its hover, and the pill keeps the fallback name with the title in its spoken name', async () => {
+  const long = 'Migrate the ledger export from the nightly cron job to the new queue worker';
+  await withLabels({ ses_claude: long }, async () => {
+    const el = await render(threadOf(agentMessage(M1, PI, 41), agentMessage(M2, CLAUDE, 45)));
+    await write(el, 'Use the old totals.');
+    expect(pillName(el)).toBe('Claude Code');
+    expect(pill(el)!.getAttribute('aria-label')).toBe(`To ${long}. Change who gets this reply`);
+    await openList(el);
+    expect(named(el)).toEqual([
+      ['Pi', 'superfans', null],
+      [long, 'Claude Code · superfans', long],
+    ]);
+  });
 });
 
 test.skipIf(!hasDom)('a circle adds a second agent: "2 agents", and the reply to the first carries the second as a tag; an ended agent\'s circle is off', async () => {
@@ -511,7 +612,7 @@ async function tagWith(text: HTMLTextAreaElement, typed: string) {
   await typeBox(text, `${text.value} `);
 }
 
-test.skipIf(!hasDom)('agents tagged with `@` count toward the nine: with two typed, the seventh circle is off and a Send carries eight tags at most', async () => {
+test.skipIf(!hasDom)('any number of agents: with two typed with `@` and every circle ticked, one Send carries all nine tags', async () => {
   const writers = Array.from({ length: 8 }, (_, i) => `ses_c${i + 1}`);
   taggable = [...writers.map((s) => tagged(s, 'claude-code')), tagged('ses_pi', 'pi'), tagged('ses_codex', 'codex')];
   const ids = [M1, M2, M3, M4, 'msg_01M4H7DDDDDDDDDDDDDDDDDDDD', 'msg_01M4H7EEEEEEEEEEEEEEEEEEEE', 'msg_01M4H7FFFFFFFFFFFFFFFFFFFF', 'msg_01M4H7GGGGGGGGGGGGGGGGGGGG'];
@@ -522,14 +623,12 @@ test.skipIf(!hasDom)('agents tagged with `@` count toward the nine: with two typ
   // The last writer and the two typed.
   expect(pillName(el)).toBe('3 agents');
   await openList(el);
-  for (const s of writers.slice(0, 6)) await tap(tick(el, s));
-  expect(pillName(el)).toBe('9 agents');
-  expect(tick(el, 'ses_c7').disabled).toBe(true);
+  for (const s of writers.slice(0, 7)) await tap(tick(el, s));
+  expect(pillName(el)).toBe('10 agents');
   await send(el);
   expect(replies()).toHaveLength(1);
   const tags = (replies()[0]!.body.tags as { session: string }[]).map((t) => t.session);
-  expect(tags.length).toBe(8);
-  expect(new Set(tags)).toEqual(new Set([...writers.slice(0, 6), 'ses_pi', 'ses_codex']));
+  expect(new Set(tags)).toEqual(new Set([...writers.slice(0, 7), 'ses_pi', 'ses_codex']));
 });
 
 // A computer's list is `.ib-rpick`, and holds the page mark `data-ib-rpick` on its .pn-inbox (pageMarks.ts,

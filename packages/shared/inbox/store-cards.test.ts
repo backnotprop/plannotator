@@ -420,12 +420,12 @@ describe("parseInboxCardPr", () => {
 });
 
 describe("cards: the Board page's fields (step 2)", () => {
-  test("notes: the person's, line breaks kept, capped; cleared with an empty value", () => {
+  test("notes: the person's, line breaks kept, any length; cleared with an empty value", () => {
     const { store, project } = world();
     const { card } = store.createCard({ project_id: project.id, by: PERSON, title: "Roadmap page", notes: "  One page.\n\nWhat is next.  " });
     expect(card.notes).toBe("One page.\n\nWhat is next.");
     expect(store.updateCard(card.id, { by: PERSON, notes: "" }).notes).toBeNull();
-    expect(refusal(() => store.updateCard(card.id, { by: PERSON, notes: "x".repeat(4001) }))).toBe("validation_error");
+    expect(store.updateCard(card.id, { by: PERSON, notes: "x".repeat(4001) }).notes).toBe("x".repeat(4001));
   });
 
   test("links: an issue and a PR as refs, the PRs still written as prs for an older Inbox; a stored prs-only card reads its refs", () => {

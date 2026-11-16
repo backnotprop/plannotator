@@ -67,9 +67,10 @@ export function ArtifactPinButton({
 /**
  * Pin / Unpin as an item of full screen's ⋯ (OpenIn.tsx `FullScreenMore`): a phone's HTML page, whose toolbar
  * shares its row with the reply and has no room for one more 44 px button at 320 px. The same pin as the bar's,
- * then a separator before the menu's other items. Nothing for a thread that cannot pin (the tour).
+ * then a separator before the menu's other items (`separator={false}`: beside Download in a tile's menu, none).
+ * Nothing for a thread that cannot pin (the tour).
  */
-export function ArtifactPinMenuItem({ threadId, artifactKey, name }: { threadId: string; artifactKey: string; name: string }) {
+export function ArtifactPinMenuItem({ threadId, artifactKey, name, separator = true }: { threadId: string; artifactKey: string; name: string; separator?: boolean }) {
   const { byKey } = useArtifactPins();
   if (!artifactPinnable(threadId)) return null;
   const pinned = byKey.has(artifactKey);
@@ -86,7 +87,7 @@ export function ArtifactPinMenuItem({ threadId, artifactKey, name }: { threadId:
         <Icon name="pin" size={15} className="ib-appi ib-glyph" />
         <span className="flex-1">{verb}</span>
       </DropdownMenuItem>
-      <DropdownMenuSeparator />
+      {separator && <DropdownMenuSeparator />}
     </>
   );
 }

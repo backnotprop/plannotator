@@ -316,6 +316,19 @@ function buildSources(metadata: PRMetadata, context: PRContext) {
   ];
 }
 
+/** Same key as the list's dedupe, so a re-signed copy of an upload still matches. */
+export function findPRArtifactByUrl(
+  artifacts: readonly PRArtifact[],
+  metadata: PRMetadata | null,
+  rawUrl: string,
+): PRArtifact | null {
+  if (metadata === null || artifacts.length === 0) return null;
+  const url = resolveArtifactUrl(rawUrl, metadata.url);
+  if (url === null) return null;
+  const id = `pr-artifact-${fnv1aHex(artifactDedupeKey(url, metadata))}`;
+  return artifacts.find((artifact) => artifact.id === id) ?? null;
+}
+
 /**
  * Harvest viewable attachments from a hosted PR/MR's normalized live context.
  * Relative upload URLs are resolved against the change request's host URL.

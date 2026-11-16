@@ -42,6 +42,7 @@ import { join } from "node:path";
 import { JsonLines } from "@plannotator/shared/inbox/devices";
 import { InboxError, inboxDir } from "@plannotator/shared/inbox/schema";
 import type { InboxMessage } from "@plannotator/core/inbox-types";
+import { inboxTidyWords } from "@plannotator/core/inbox-types";
 
 export const INBOX_OUTBOX_DIR = "outbox";
 /** The header a linked machine's Inbox sends with a write the person made in its window (`OutboxEntry.window`). */
@@ -146,15 +147,27 @@ export function replyIsStale(messages: readonly InboxMessage[], seenThroughSeq: 
  *   (reply: `replyByKey`; reask, a thread's new message and compose: the
  *   key on the line they write).
  * - `set` puts a state (read, archived, a pick under its revision, an
- *   annotation under its own id), so a second copy changes nothing more.
+ *   annotation under its own id, a star, an agent's face), so a second copy changes nothing more.
  *   A snooze whose time has passed is the exception: it brings back a snooze
  *   still running there (`setHeldSnooze`), so a copy after a newer snooze would
  *   end that one. The owner's door answers a key it has seen without running it.
  * - `file` is an upload or a drawing: never held, sent only while online.
+ * - `forge` writes to GitHub or GitLab as that machine's own gh / glab (a PR's
+ *   close, reopen or merge): never held, sent only while online, and only from
+ *   a press in this Inbox's window. The forge is asked first there, so a second
+ *   copy is refused in the forge's words ("It is already closed."). A review
+ *   thread's PRs tied there (`pulls/owner`) go the same way; the window sends
+ *   it right after the thread's start.
+ * - `now` is a write sent only while online, never held, and only from a press
+ *   in this Inbox's window (`forwardsNow`; the other machine refuses it at its
+ *   door without the window's mark). Two uses: a file a message names,
+ *   attached to that message when the person comments on it (the window needs
+ *   the attachment at once; the owner adds a file to its message once, so a
+ *   second copy answers the same attachment); and a Combine, or a Tidy with the
+ *   person's words, which asks an agent there to act on the person's threads
+ *   (one held for days would archive threads nobody is looking at).
  * - `local` is never forwarded: `doorWriteKind` has no kind for it, so the
- *   forward answers 404. A phone reaches it at this Inbox's own door. A star
- *   (`threads/:id/pin`, `pins`) is window furniture of the computer that
- *   holds it, never another machine's. Reuse
+ *   forward answers 404. A phone reaches it at this Inbox's own door. Reuse
  *   (`uploads/reuse`) is useful only as its answer, the new upload's id: a held
  *   one answers 202 with no id, so the file never reaches the reply, and is
  *   later run for nobody, perhaps on bytes the person never saw. A second copy
@@ -163,22 +176,47 @@ export function replyIsStale(messages: readonly InboxMessage[], seenThroughSeq: 
  *
  * inbox-outbox.test.ts fails when a door write has no entry here.
  */
-export const DOOR_WRITES: Readonly<Record<string, "append" | "set" | "file" | "local">> = {
+export const DOOR_WRITES: Readonly<Record<string, "append" | "set" | "file" | "forge" | "now" | "local">> = {
   "POST threads/:id/seen": "set",
   "POST threads/:id/read": "set",
   "POST threads/:id/unread": "set",
   "POST threads/:id/mark-unread": "set",
   "POST threads/:id/snooze": "set",
-  // Stars stay on the computer whose window shows them (inbox-machines.md): a phone writes them at this Inbox's own
-  // door, and they are never forwarded to a linked machine.
-  "POST threads/:id/pin": "local",
-  "POST pins": "local",
+  // A star and the person's Priority live on the thread's own machine (approval "inbox-linked-marks"), like a snooze.
+  "POST threads/:id/pin": "set",
+  "POST pins": "set",
+  "POST threads/:id/priority": "set",
+  // An agent's face or given name lives on the agent's own machine (approval "inbox-linked-marks"), keyed by its id.
+  "POST agent-faces": "set",
+  // A thread's tag lives on the thread's own machine, named by the tag's name, and a tag's rename, delete and
+  // Undo go to each machine that holds it (approval "inbox-thread-tags").
+  "POST threads/:id/tags": "set",
+  "POST initiatives/:id": "set",
+  // A tag's colour and "Show tag colors" carry the time the person chose, so a held one lands as of then.
+  "POST tag-colours": "set",
+  // A Board card lives on its project's machine (mark `cards`): a move, an edit, a link or a tag puts a state there,
+  // and a link already on the card is kept once. The look never moves back; a drop seen stays seen.
+  "POST cards/(crd_[^/]+)": "set",
+  "POST cards/seen": "set",
+  "POST cards/dropped/seen": "set",
+  // A linked machine's PR (mark `pulls`): closed, reopened or merged by the gh / glab of the machine that lists it.
+  "POST pulls/close": "forge",
+  "POST pulls/reopen": "forge",
+  "POST pulls/merge": "forge",
+  "POST pulls/owner": "forge",
+  // The PR page's look at a linked machine's PR (approval "inbox-pr-dashboard"): kept there; the newer look wins.
+  "POST pulls/looked": "set",
+  // A file a linked machine's agent message names, attached there when the person comments on it (approval "inbox-file-refs-open-viewer").
+  "POST open-in/file/attach": "now",
+  // A thread's PRs live on the thread's machine: an add of one it holds, or a remove of one it does not, changes nothing.
+  "POST threads/:id/pulls": "set",
   "POST messages/:id/picks": "set",
   "POST messages/:id/reply": "append",
   "POST messages/:id/resolve": "set",
   "POST messages/:id/to": "set",
   "POST messages/:id/ack": "set",
   "POST messages/:id/send-now": "set",
+  "POST messages/:id/take-back": "set",
   "POST messages/:id/reask": "append",
   "POST messages/:id/handoff/undo": "set",
   "POST messages/:id/actions/(a-[0-9a-f]{8}(?:-\\d{1,3})?)": "set",
@@ -196,6 +234,12 @@ export const DOOR_WRITES: Readonly<Record<string, "append" | "set" | "file" | "l
   "POST uploads/reuse": "local",
   "POST uploads": "file",
   "POST markups": "file",
+  // Tidy and Combine (approval "inbox-multi-select"): a Tidy's notes and a Combine's wake are written under the
+  // body's key, so a second copy answers the first; a Combine's Stop and Undo put a state.
+  "POST tidy": "append",
+  "POST combine": "now",
+  "POST combine/(cmb_[^/]+)/cancel": "set",
+  "POST combine/(cmb_[^/]+)/undo": "set",
   // A launched agent's buttons from another machine (remote launch). Stop, Trust folder and Delete put a state; Try
   // again is refused while a start runs and does nothing for a launch that is not failed or stopped.
   "POST launch/:id/stop": "set",
@@ -213,14 +257,31 @@ const DOOR_WRITE_ROUTES = Object.entries(DOOR_WRITES).flatMap(([name, kind]) =>
 );
 
 /**
- * The forward's one decision, by route and never by Content-Type: a `file`
- * goes straight through while the machine is online; every other write is
+ * The forward's one decision, by route and never by Content-Type: a `file`,
+ * a `forge` or a `now` write goes straight through while the machine is online; every other write is
  * held in the outbox. Null: no forwarded door write has that route, so it is
  * never forwarded (a write rule 8 has not classified, or calls `local`, cannot
  * reach another machine).
  */
-export function doorWriteKind(route: string): "append" | "set" | "file" | null {
+export function doorWriteKind(route: string): "append" | "set" | "file" | "forge" | "now" | null {
   return DOOR_WRITE_ROUTES.find((entry) => entry.route.test(route))?.kind ?? null;
+}
+
+/**
+ * A write the forward sends now, from a press in the window, or not at all: rule 8's `now` (a Combine), and a Tidy
+ * with the person's words, which a later run would apply to threads nobody looked at since. A Tidy without words is
+ * held like any append.
+ */
+export function forwardsNow(route: string, body: Record<string, unknown>): boolean {
+  return doorWriteKind(route) === "now" || (route === "tidy" && inboxTidyWords(body.words) !== "");
+}
+
+/**
+ * The receiving side of `forwardsNow`: a Combine or a Tidy with words that came through this Inbox's door from
+ * another machine without the mark of a press in its window. `door` null: not through the door.
+ */
+export function doorRefusesBare(door: { window: boolean } | null | undefined, route: string, body: Record<string, unknown>): boolean {
+  return !!door && !door.window && (route === "combine" || route === "tidy") && forwardsNow(route, body);
 }
 
 /** Statuses a proxy in front of the owner answers when the owner itself never got the request (`tailscale serve` with the Inbox down). */

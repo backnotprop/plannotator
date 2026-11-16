@@ -8,12 +8,14 @@ import {
   claudeTranscriptPaths,
   inboxRegistryPathOf,
   STORE_INBOX_SESSION_NAMES,
+  STORE_INBOX_SESSION_TITLES,
   TRANSCRIPT_TITLE_FIRST_READ_BYTES,
   TRANSCRIPT_TITLE_FAILURES_MAX,
   TRANSCRIPT_TITLE_LOCATE_RETRY_MS,
   TRANSCRIPT_TITLE_RETRY_MAX_MS,
   TRANSCRIPT_TITLE_RETRY_MS,
   TranscriptTitle,
+  type KnownTranscriptTitles,
 } from './inbox'
 
 // Session labels from the transcript (#2450, the reporter's second comment): a
@@ -33,6 +35,8 @@ afterAll(() => rmSync(scratch, { recursive: true, force: true }))
 const SESSION = '3f6c2a1e-6b1d-4c55-9a3e-0d1c2b3a4f5e'
 const line = (record: unknown) => `${JSON.stringify(record)}\n`
 const title = (customTitle: string, sessionId = SESSION) => line({ type: 'custom-title', customTitle, sessionId })
+/** Claude Code's generated title for a session, as its transcripts carry it (`{"type":"ai-title","aiTitle":…}`). */
+const aiTitle = (text: string, sessionId = SESSION) => line({ type: 'ai-title', aiTitle: text, sessionId })
 const chatter = (text: string) => line({ type: 'user', sessionId: SESSION, message: { role: 'user', content: text } })
 
 let fileCount = 0
@@ -126,6 +130,27 @@ describe('the title in the transcript', () => {
     expect(await titles.read()).toBe('Half written')
   })
 
+  // Catches: the generated title taken as the person's name, the name hidden behind it, a later title not
+  // followed, another session's taken.
+  test("the generated title is kept apart from the name: read() keeps the person's name, a later one follows", async () => {
+    const path = transcript(chatter('hello') + aiTitle('Plannotator usage reference') + aiTitle('Not mine', 'another-session'))
+    const { host } = realHost()
+    const titles = new TranscriptTitle(host, SESSION, async () => [path])
+    expect(await titles.read()).toBeNull()
+    expect(titles.generatedTitle()).toBe('Plannotator usage reference')
+
+    appendFileSync(path, title('release 0.28.61') + aiTitle('Release notes draft'))
+    expect(await titles.read()).toBe('release 0.28.61')
+    expect(titles.generatedTitle()).toBe('Release notes draft')
+
+    // Many name lines after it in one read (the script keeps the last 20 lines): neither is lost to the other.
+    let text = chatter('hello') + aiTitle('Early title')
+    for (let i = 0; i < 25; i += 1) text += title(`name ${i}`)
+    const many = new TranscriptTitle(host, SESSION, async () => [transcript(text)])
+    expect(await many.read()).toBe('name 24')
+    expect(many.generatedTitle()).toBe('Early title')
+  })
+
   test('an empty title says the session has none', async () => {
     const path = transcript(title('Named') + title(''))
     const { host } = realHost()
@@ -139,6 +164,29 @@ describe('the title in the transcript', () => {
     expect(await new TranscriptTitle(host, SESSION, async () => [path]).read()).toBe('Near the end')
     const size = statSync(path).size
     expect(reads).toEqual([{ start: size - TRANSCRIPT_TITLE_FIRST_READ_BYTES, length: TRANSCRIPT_TITLE_FIRST_READ_BYTES }])
+  })
+
+  test("a reader made after a module reload starts from the titles the last one kept: a transcript not found yet, or whose end holds no title, never clears them", async () => {
+    let kept: KnownTranscriptTitles | null = null
+    const memory = { load: async () => kept, save: async (known: KnownTranscriptTitles) => void (kept = known) }
+    const path = transcript(chatter('hello') + title('Named with --name') + aiTitle('Invoice retry backoff'))
+    const { host } = realHost()
+    const before = new TranscriptTitle(host, SESSION, async () => [path], memory)
+    expect(await before.read()).toBe('Named with --name')
+    expect(kept).toEqual({ title: 'Named with --name', generated: 'Invoice retry backoff' })
+    // A long session: the titles fall out of the first read's region.
+    appendFileSync(path, chatter('x'.repeat(1024)).repeat(Math.ceil((TRANSCRIPT_TITLE_FIRST_READ_BYTES + 512 * 1024) / 1024)))
+    const reloaded = new TranscriptTitle(host, SESSION, async () => [path], memory)
+    expect(await reloaded.read()).toBe('Named with --name')
+    expect(reloaded.generatedTitle()).toBe('Invoice retry backoff')
+    const notFound = new TranscriptTitle(host, SESSION, async () => [], memory)
+    expect(await notFound.read()).toBe('Named with --name')
+    expect(notFound.generatedTitle()).toBe('Invoice retry backoff')
+    // Only the runtime changes them: a new title line in the transcript.
+    appendFileSync(path, aiTitle('Retry backoff, take two') + title('Renamed'))
+    expect(await reloaded.read()).toBe('Renamed')
+    expect(reloaded.generatedTitle()).toBe('Retry backoff, take two')
+    expect(kept).toEqual({ title: 'Renamed', generated: 'Retry backoff, take two' })
   })
 
   test('no transcript: null and no process, looked for again only after the wait', async () => {
@@ -332,10 +380,14 @@ function engineOn(configDir: string, folder: string) {
   const store = new Map<string, unknown>()
   const timers = new Set<() => void>()
   const polls: unknown[] = []
+  const titles: unknown[] = []
+  const starts: { started: unknown; first: unknown }[] = []
   let clock = 1_000_000
-  const env: Record<string, string> = { HOME: '/home/me', PLANNOTATOR_DATA_DIR: DATA, CLAUDE_CONFIG_DIR: configDir }
+  const env: Record<string, string> = { HOME: '/home/me', PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: DATA, CLAUDE_CONFIG_DIR: configDir }
   return {
     polls,
+    titles,
+    starts,
     store,
     tick: async (n: number) => {
       for (let i = 0; i < n; i += 1) {
@@ -388,7 +440,12 @@ function engineOn(configDir: string, folder: string) {
       },
       http: {
         fetch: async (url: string, init: { body?: string }) => {
-          if (url.endsWith('/api/inbox/bridge/poll')) polls.push((JSON.parse(init.body ?? '{}') as { label?: unknown }).label)
+          if (url.endsWith('/api/inbox/bridge/poll')) {
+            const body = JSON.parse(init.body ?? '{}') as { label?: unknown; title?: unknown; started_at?: unknown; first_started_at?: unknown }
+            polls.push(body.label)
+            titles.push(body.title)
+            starts.push({ started: body.started_at, first: body.first_started_at })
+          }
           return { status: 200, ok: true, text: JSON.stringify({ commands: [] }) }
         },
       },
@@ -422,6 +479,57 @@ describe('from the transcript to a poll body', () => {
     await world.tick(3)
     expect(world.polls.at(-1)).toBe('Renamed in Claude Code')
     await on.only('session.end')(world.$, {}, (e: unknown) => e)
+  })
+
+  test('an unnamed session sends no name and its generated title apart; a rename then takes the name', async () => {
+    const configDir = join(scratch, 'claude-config-ai')
+    const folder = '/home/me/src/ai-title'
+    const projectDir = join(configDir, 'projects', claudeProjectSlug(folder)!)
+    mkdirSync(projectDir, { recursive: true })
+    const path = join(projectDir, `${SESSION}.jsonl`)
+    writeFileSync(path, chatter('hello') + aiTitle('Plannotator usage reference'))
+
+    const on = await freshHooks('ai-title-wired')
+    const world = engineOn(configDir, folder)
+    await on.only('session.start')(world.$, { isInteractive: true }, async () => ({ cwd: folder }))
+    await world.tick(3)
+    expect(world.polls.at(-1)).toBe('')
+    expect(world.titles.at(-1)).toBe('Plannotator usage reference')
+
+    appendFileSync(path, title('release 0.28.61'))
+    await world.tick(3)
+    expect(world.polls.at(-1)).toBe('release 0.28.61')
+    expect(world.titles.at(-1)).toBe('Plannotator usage reference')
+    await on.only('session.end')(world.$, {}, (e: unknown) => e)
+  })
+
+  test('a module reload keeps the name, the generated title and the first start of a long session whose transcript end holds no title', async () => {
+    const configDir = join(scratch, 'claude-config-reload')
+    const folder = '/home/me/src/long-session'
+    const projectDir = join(configDir, 'projects', claudeProjectSlug(folder)!)
+    mkdirSync(projectDir, { recursive: true })
+    const path = join(projectDir, `${SESSION}.jsonl`)
+    writeFileSync(path, chatter('hello') + title('Named with --name') + aiTitle('Invoice retry backoff'))
+
+    const world = engineOn(configDir, folder)
+    const first = await freshHooks('reload-before')
+    await first.only('session.start')(world.$, { isInteractive: true }, async () => ({ cwd: folder }))
+    await world.tick(3)
+    expect([world.polls.at(-1), world.titles.at(-1)]).toEqual(['Named with --name', 'Invoice retry backoff'])
+    expect(world.store.get(STORE_INBOX_SESSION_TITLES)).toMatchObject({ [SESSION]: { title: 'Named with --name', generated: 'Invoice retry backoff' } })
+    const firstStart = world.starts.at(-1)!.started as number
+    expect(world.starts.at(-1)).toEqual({ started: firstStart, first: firstStart })
+    await first.only('session.end')(world.$, {}, (e: unknown) => e)
+
+    appendFileSync(path, chatter('x'.repeat(1024)).repeat(Math.ceil((TRANSCRIPT_TITLE_FIRST_READ_BYTES + 512 * 1024) / 1024)))
+    const reloaded = await freshHooks('reload-after')
+    await reloaded.only('session.start')(world.$, { isInteractive: true }, async () => ({ cwd: folder }))
+    await world.tick(3)
+    expect([world.polls.at(-1), world.titles.at(-1)]).toEqual(['Named with --name', 'Invoice retry backoff'])
+    // The new link started later; it still tells the Inbox when the session first started (the Agents list's place).
+    expect(world.starts.at(-1)!.started as number).toBeGreaterThan(firstStart)
+    expect(world.starts.at(-1)!.first).toBe(firstStart)
+    await reloaded.only('session.end')(world.$, {}, (e: unknown) => e)
   })
 
   test('with no transcript the /rename store still names the session', async () => {

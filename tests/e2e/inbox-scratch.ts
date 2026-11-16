@@ -80,12 +80,12 @@ export const E2E_LAUNCH_OFF = { inboxLaunch: { enabled: false }, inboxThemeChoos
  * either way it must be a scratch folder. tests/e2e-spawn-home.test.ts fails on
  * an e2e env that sets a data dir with neither a scratch HOME nor this.
  */
-export function scratchEnv(root: string, options: { home?: string } = {}): { HOME: string; PLANNOTATOR_DATA_DIR: string; PLANNOTATOR_BROWSER: string; NO_ANON_PING: string } {
+export function scratchEnv(root: string, options: { home?: string } = {}): { HOME: string; PLANNOTATOR_RELAY_URL: string; PLANNOTATOR_DATA_DIR: string; PLANNOTATOR_BROWSER: string; NO_ANON_PING: string } {
   const HOME = refuseRealHome(options.home ?? join(root, 'home'), 'tests/e2e/inbox-scratch.ts scratchEnv');
   mkdirSync(HOME, { recursive: true });
   const PLANNOTATOR_DATA_DIR = join(root, 'data');
   refuseRealDataDir(PLANNOTATOR_DATA_DIR, 'tests/e2e/inbox-scratch.ts scratchEnv');
-  return { HOME, PLANNOTATOR_DATA_DIR, PLANNOTATOR_BROWSER: NO_BROWSER, NO_ANON_PING: '1' };
+  return { HOME, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR, PLANNOTATOR_BROWSER: NO_BROWSER, NO_ANON_PING: '1' };
 }
 
 const inside = (path: string, root: string) => path === root || path.startsWith(`${root}${sep}`);

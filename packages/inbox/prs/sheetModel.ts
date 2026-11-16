@@ -24,6 +24,17 @@ import {
 import { repoLabels } from '../pulls/labels';
 import { person, wordsText, type Words } from '../pulls/words';
 
+/**
+ * A tile's click (the owner, 2026-11-11: "the launchpad everywhere a single PR is clicked"): a single open PR opens its
+ * launchpad in Reviews (`launchpad`, the stack's id), once Reviews' own list (`reviews`, the scoped read) has it, since
+ * the launchpad is drawn from that list. Else the PR view as before (`pull`): a layer of a stack of several, a merged
+ * PR, or a PR in a repository that is no project (the board reads everywhere; Reviews only the projects' ones).
+ */
+export function tileOpens(pull: Pick<InboxPull, 'key' | 'state'>, stack: Pick<InboxPullStack, 'id' | 'layers'>, reviews: Pick<InboxPullsAnswer, 'pulls'> | null): { launchpad: string } | 'pull' {
+  if (stack.layers.length !== 1 || !inboxPullIsOpen(pull)) return 'pull';
+  return reviews?.pulls.some((p) => p.key === pull.key) ? { launchpad: stack.id } : 'pull';
+}
+
 /** A stack folds to one strip on the Sheet past this many PRs (the owner's answer, q-f1451f8d). */
 export const FOLD_OVER = 8;
 /** "Landed this week". */

@@ -1,12 +1,13 @@
 {
   "name": "@plannotator/core",
-  "version": "0.25.23",
+  "version": "0.25.31",
   "license": "Apache-2.0",
   "type": "module",
   "exports": {
     "./agents": "./agents.ts",
     "./product-feedback": "./product-feedback.ts",
     "./diff-paths": "./diff-paths.ts",
+    "./pr-attachment-url": "./pr-attachment-url.ts",
     "./diff-files": "./diff-files.ts",
     "./call-tree": "./call-tree.ts",
     "./stack-layers": "./stack-layers.ts",
@@ -48,13 +49,22 @@
     "./markdown-structure": "./markdown-structure.ts",
     "./html-anchor": "./html-anchor.ts",
     "./inbox-types": "./inbox-types.ts",
+    "./inbox-cloud": "./inbox-cloud.ts",
+    "./inbox-personal-agents": "./inbox-personal-agents.ts",
+    "./inbox-hermes": "./inbox-hermes.ts",
     "./inbox-project-labels": "./inbox-project-labels.ts",
     "./inbox-questions": "./inbox-questions.ts",
+    "./inbox-file-question-twin": "./inbox-file-question-twin.ts",
+    "./inbox-choice-twins": "./inbox-choice-twins.ts",
     "./inbox-actions": "./inbox-actions.ts",
     "./inbox-search": "./inbox-search.ts",
     "./inbox-folding": "./inbox-folding.ts",
+    "./inbox-reply-quote": "./inbox-reply-quote.ts",
     "./inbox-delivery-line": "./inbox-delivery-line.ts",
     "./inbox-run-line": "./inbox-run-line.ts",
+    "./inbox-scheduled": "./inbox-scheduled.ts",
+    "./inbox-scheduled-types": "./inbox-scheduled-types.ts",
+    "./inbox-launch-choice": "./inbox-launch-choice.ts",
     "./inbox-launch-ready": "./inbox-launch-ready.ts",
     "./inbox-scratch": "./inbox-scratch.ts",
     "./inbox-git-url": "./inbox-git-url.ts",
@@ -99,7 +109,9 @@
   "scripts": {
     "prepack": "bun run --cwd ../.. build:viewer-pin"
   },
-  "dependencies": {},
+  "dependencies": {
+    "croner": "11.0.0"
+  },
   "devDependencies": {
     "typescript": "~5.8.2"
   }

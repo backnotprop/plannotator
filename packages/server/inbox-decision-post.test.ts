@@ -264,6 +264,15 @@ test("several linked PRs: the post goes to the one chosen only; a PR the thread 
   expect(idle.calls).toHaveLength(0);
 });
 
+test("a thread's Bitbucket Cloud PR is refused as unsupported: it never reaches glab or gh", async () => {
+  const url = "https://bitbucket.org/acme/notes/pull-requests/12";
+  const world = seed([url]);
+  const forge = fakeForge("gitlab");
+  const result = await postThreadDecisions(world.store, world.thread, { pull: url }, { runtime: forge.runtime, version: "test", destination: "comment" });
+  expect(result).toMatchObject({ status: 422, body: { code: "forge_unsupported" } });
+  expect(forge.calls).toHaveLength(0);
+});
+
 test("GitLab: a note on the merge request, edited in place with PUT; the banner is its words as a link (no <picture> there)", async () => {
   const world = seed(["group/sub/app!45"]);
   const forge = fakeForge("gitlab");
@@ -415,4 +424,22 @@ test("the route posts where the setting says (the description until changed); th
     if (before === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
     else process.env.PLANNOTATOR_DATA_DIR = before;
   }
+});
+
+test("a self-managed GitLab's MR is posted to only when glab is signed in there; an agent's look-alike link reaches no forge", async () => {
+  const known = "https://git.acme.com/acme/notes/-/merge_requests/12";
+  const lookalike = "https://gitlab.evil.example/acme/notes/-/merge_requests/12";
+  const world = seed([known, lookalike]);
+  const signedIn = async (cli: "gh" | "glab") => new Set(cli === "glab" ? ["git.acme.com"] : []);
+  const idle = fakeForge("gitlab");
+  const refused = await postThreadDecisions(world.store, world.thread, { pull: lookalike }, { runtime: idle.runtime, version: "test", destination: "comment", signedIn });
+  expect(refused).toMatchObject({ status: 502, body: { code: "post_failed", error: `Couldn't post on ${lookalike}: glab isn't signed in. Run \`glab auth login\`, then try again.` } });
+  expect(idle.calls).toHaveLength(0);
+  const noAnswer = await postThreadDecisions(world.store, world.thread, { pull: known }, { runtime: idle.runtime, version: "test", destination: "comment" });
+  expect(noAnswer).toMatchObject({ status: 502, body: { code: "post_failed" } });
+  expect(idle.calls).toHaveLength(0);
+  const forge = fakeForge("gitlab");
+  await postThreadDecisions(world.store, world.thread, { pull: known }, { runtime: forge.runtime, version: "test", destination: "comment", signedIn });
+  expect(forge.calls.length).toBeGreaterThan(0);
+  expect(forge.calls.every((call) => call.args.includes("git.acme.com"))).toBe(true);
 });

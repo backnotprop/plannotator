@@ -5,19 +5,18 @@
  * Priority: org/repo from remote → repo name → directory name
  */
 
-import { $ } from "bun";
-
 import type { RepoInfo } from "@plannotator/shared/repo";
 import { parseRemoteUrl, parseRemoteHost, getDirName } from "@plannotator/shared/repo";
+import { gitStdout } from "./project";
 
 /**
  * Get current git branch
  */
 async function getCurrentBranch(cwd: string): Promise<string | undefined> {
 	try {
-		const result = await $`git rev-parse --abbrev-ref HEAD`.cwd(cwd).quiet().nothrow();
-		if (result.exitCode === 0) {
-			const branch = result.stdout.toString().trim();
+		const head = await gitStdout(["rev-parse", "--abbrev-ref", "HEAD"], cwd);
+		if (head !== null) {
+			const branch = head.trim();
 			return branch && branch !== "HEAD" ? branch : undefined;
 		}
 	} catch {
@@ -35,9 +34,9 @@ async function getGitRepoInfo(cwd: string): Promise<RepoInfo | null> {
 
 	// Try git remote URL first
 	try {
-		const result = await $`git remote get-url origin`.cwd(cwd).quiet().nothrow();
-		if (result.exitCode === 0) {
-			const remoteUrl = result.stdout.toString().trim();
+		const remote = await gitStdout(["remote", "get-url", "origin"], cwd);
+		if (remote !== null) {
+			const remoteUrl = remote.trim();
 			const orgRepo = parseRemoteUrl(remoteUrl);
 			if (orgRepo) {
 				branch = await getCurrentBranch(cwd);
@@ -51,9 +50,9 @@ async function getGitRepoInfo(cwd: string): Promise<RepoInfo | null> {
 
 	// Fallback: git repo root name
 	try {
-		const result = await $`git rev-parse --show-toplevel`.cwd(cwd).quiet().nothrow();
-		if (result.exitCode === 0) {
-			const repoName = getDirName(result.stdout.toString());
+		const toplevel = await gitStdout(["rev-parse", "--show-toplevel"], cwd);
+		if (toplevel !== null) {
+			const repoName = getDirName(toplevel);
 			if (repoName) {
 				branch = await getCurrentBranch(cwd);
 				return { display: repoName, branch };

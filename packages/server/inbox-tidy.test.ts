@@ -14,6 +14,7 @@ import type { InboxListRow, InboxQuestion, InboxThread, InboxTidyPlan, InboxTidy
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { inboxTidyBody, inboxTidyBodyStepsOff, inboxTidyIsStepsOnly, inboxTidyRun } from "@plannotator/shared/inbox/tidy";
 import { INBOX_TIDY_HOW, INBOX_TIDY_INSTRUCTION, parseInboxSessionRef } from "@plannotator/core/inbox-types";
+import { T3_THREAD_ID_FORMS } from "../../tests/helpers/fake-t3";
 import { INBOX_BRIDGE_EVENT_PATH, INBOX_BRIDGE_POLL_PATH, inboxWakeText, parseInboxBridgeCommands } from "@plannotator/shared/inbox/connection";
 import { startInboxServer, type InboxServer } from "./inbox";
 
@@ -593,6 +594,10 @@ describe("Tidy: asking", () => {
       ["opencode", "ses_0abcDEF", "opencode:ses_0abcDEF"],
       ["cursor", "ses_01abc", "cursor:ses_01abc"],
       [null, "ses_01abc", "ses_01abc"],
+      // T3 Code's own thread ids: `:` and `%` carry as they are, under t3 only.
+      ["t3", T3_THREAD_ID_FORMS.launched, `t3:${T3_THREAD_ID_FORMS.launched}`],
+      ["t3", T3_THREAD_ID_FORMS.scheduled, `t3:${T3_THREAD_ID_FORMS.scheduled}`],
+      ["t3", T3_THREAD_ID_FORMS.provider, `t3:${T3_THREAD_ID_FORMS.provider}`],
     ] as const) {
       expect(/`--session ([^`]+)`/.exec(body(host, session))?.[1]).toBe(value);
       expect(parseInboxSessionRef(value)).toEqual({ host: host, session });
@@ -602,6 +607,11 @@ describe("Tidy: asking", () => {
     expect(odd).not.toContain("--session");
     expect(odd).not.toContain("rm -rf");
     expect(odd).toContain(INBOX_TIDY_HOW);
+    // A T3 thread whose id a shell would read (a delegated task's parentheses): no value, the wake stands.
+    expect(body("t3", T3_THREAD_ID_FORMS.delegated)).not.toContain("--session");
+    // A T3 id under another host, or none, is no session a command line takes.
+    expect(parseInboxSessionRef(`cursor:${T3_THREAD_ID_FORMS.launched}`)).toBeNull();
+    expect(body("cursor", T3_THREAD_ID_FORMS.launched)).not.toContain("--session");
   });
 
   test("guards: another site's read and write, a stale tab", async () => {

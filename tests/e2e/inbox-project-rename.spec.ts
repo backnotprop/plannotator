@@ -20,7 +20,7 @@
  * PNGs land in .local/proof/project-rename/ (1440×900 @2x, a phone 390×844 @3x).
  */
 
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, realpathSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -103,7 +103,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   rmSync(proofDir, { recursive: true, force: true });
   mkdirSync(proofDir, { recursive: true });
   const root = inboxScratch('plannotator-inbox-rename-e2e-');
-  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_DATA_DIR: join(root, 'data'), PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0' };
+  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: join(root, 'data'), PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0' };
   // acme/main holds the repository; its two worktrees sit beside it.
   const main = join(root, 'code', 'acme', 'main');
   mkdirSync(main, { recursive: true });

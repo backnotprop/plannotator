@@ -52,6 +52,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { flushSync } from 'react-dom';
 import { GuideReaderPart, ReaderPart } from '../lazyParts';
+import { CommentPictures } from '../commentPictures';
 import { inboxPullIsOpen, inboxPullUrlOfKey, type InboxMessageWire, type InboxPull, type InboxThread } from '@plannotator/core/inbox-types';
 import { parseDiffToFiles, type DiffFile } from '@plannotator/core/diff-files';
 import type { CodeAnnotation } from '@plannotator/ui/types';
@@ -88,6 +89,7 @@ import { useNarrowerThan } from '../narrower';
 import { usePhone } from '../phone';
 import { holdBarAfterClose, usePhoneCommentsSheet } from './phoneCommentsSheet';
 import { clearReviewNotes, readReviewNotes, saveReviewNotes, VerdictKeys, verdictOf, verdictReply } from '../reviewVerdict';
+import { verdictRecheckBlock } from '../skills';
 import { useGuideState } from './useGuideState';
 import { PostEnding, reviewEnding, useReviewDestination } from '../pulls/PostEnding';
 import { onPullDiff, postedSignature, postedWords } from '../pulls/postRules';
@@ -115,14 +117,13 @@ import { Tip } from './Tip';
 import { RailTree } from '../pulls/RailTree';
 import { reviewFiles } from '../pulls/reviewFiles';
 import { FileTreeMark } from '../pulls/fileTreeMark';
+import { failedCommentWrite, watchCommentWrites, withCommentWrites } from '../commentSaves';
 
 // `#guide-reader` is packages/inbox/guide/GuideReader.tsx (package.json `imports`).
 const GuideReader = GuideReaderPart.Part;
 
 export interface ReviewPaneProps {
   thread: InboxThread;
-  /** A tailnet guest's page: the routes behind the arrows refuse it, so no reader. */
-  guest?: boolean;
   message: InboxMessageWire;
   /** Back to the thread. */
   onBack: () => void;
@@ -177,7 +178,7 @@ const NO_VIEWED: ReadonlySet<string> = new Set();
 
 type RailMode = 'walkthrough' | 'files';
 
-export function ReviewPane({ thread, message, guest = false, onBack, onClose, onSent, onPosted, onAsk, codeReview, shape = false, chapterDiagrams = true, onWriteReply, shapeHost, shapes, board: boardIn, onBoard, boardShrunk = false, boardPlace = null, onBoardNavigate, at = null, onLanded, onSay }: ReviewPaneProps) {
+export function ReviewPane({ thread, message, onBack, onClose, onSent, onPosted, onAsk, codeReview, shape = false, chapterDiagrams = true, onWriteReply, shapeHost, shapes, board: boardIn, onBoard, boardShrunk = false, boardPlace = null, onBoardNavigate, at = null, onLanded, onSay }: ReviewPaneProps) {
   const state = useGuideState(thread, message);
   const { snapshot, error, reviewed, saveError, setSaveError, records, setRecords, commentsRead, comments, selectedId, setSelectedId, readOnly, changeReviewed, remove, edit, showComment, readerComments: stateComments, fileContents } = state;
   // Code review's own review: the agent sent it as one (`review: true`) while Code review is on. A guide, or a review
@@ -865,13 +866,27 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
       const plan = verdictOf(id, records.length > 0);
       setSending(true);
       setSendError(null);
+      const commentWrites = watchCommentWrites();
       try {
+        // As a reply's Send does (Thread.tsx): a verdict that carries the comments carries one still saving too, and
+        // one that failed stops it. The verdict itself stays the one the person pressed.
+        const writes = await commentWrites.settled();
+        const failed = failedCommentWrite(writes, new Set([message.id, ...records.map((r) => r.id)]));
+        if (failed) {
+          if (!mounted.current) return;
+          setSendError(failed.remove ? 'The comment was not removed.' : 'The comment was not saved.');
+          setSending(false);
+          return;
+        }
+        const carried = withCommentWrites(records, writes, thread.thread_id).filter((r) => r.guide && r.message_id === message.id);
         if (plan.discard) {
-          for (const record of records) await inboxApi.removeAnnotation(record.id);
+          for (const record of carried) await inboxApi.removeAnnotation(record.id);
           setRecords([]);
         }
-        const parts = verdictReply(plan, message.guide?.title ?? snapshot.guide.title, plan.discard ? [] : records, note);
-        const input = { words: parts.words, questions: [], ...(parts.feedback ? { feedback: parts.feedback, annotation_ids: parts.annotation_ids } : {}), review_verdict: plan.verdict, ...(to ? { to } : {}) };
+        // Only the session that wrote this review is asked for just what changed since it: no other one saw it.
+        const toReviewer = asking !== null && !to && !askerEnded;
+        const parts = verdictReply(plan, message.guide?.title ?? snapshot.guide.title, plan.discard ? [] : carried, note, verdictRecheckBlock(plan.verdict, toReviewer));
+        const input = { words: parts.words, questions: [], ...(parts.feedback ? { feedback: parts.feedback, annotation_ids: parts.annotation_ids } : {}), ...(parts.uploads ? { uploads: parts.uploads } : {}), review_verdict: plan.verdict, ...(to ? { to } : {}) };
         await inboxApi.reply(message.id, { idempotency_key: keys.current.keyFor(input), ...input });
         keys.current.done();
         clearReviewNotes(message.id);
@@ -889,9 +904,11 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
           setSendError(cause instanceof InboxApiError || cause instanceof Error ? cause.message : 'Your verdict was not sent.');
         }
         setSending(false);
+      } finally {
+        commentWrites.stop();
       }
     },
-    [sending, snapshot, records, setRecords, message.id, message.guide?.title, onSent, onBack, askerEnded, anyOtherLive, asking, live],
+    [sending, snapshot, records, setRecords, message.id, message.guide?.title, thread.thread_id, onSent, onBack, askerEnded, anyOtherLive, asking, live],
   );
   const spec = useMemo(
     () => buildDecisionSpec({ app: 'review', gate: true, count: comments.length, hasFeedback: comments.length > 0, approvalNotesSupported: true }),
@@ -953,6 +970,7 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
   );
 
   return (
+    <CommentPictures thread={thread.thread_id} records={records}>
     <section
       ref={paneRef}
       className={`ib-viewer ib-wlayer ib-review ib-rv-walk${folded ? ' ib-fold' : ''}${folded && sheet ? ' ib-panel-open' : ''}${!folded && !panelOpen ? ' ib-rv-shut' : ''}${showTree ? ' ib-rv-tree' : ''}${filesSheet ? ' ib-files-open' : ''}`}
@@ -1258,7 +1276,7 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
                 mode={mode}
                 reveal={reveal}
                 viewed={viewedProp}
-                {...(guest ? {} : { fileContents })}
+                fileContents={fileContents}
                 {...(codeReview ? { fileOpenIn } : {})}
                 {...(selectionActions ? { selectionActions } : {})}
                 renderOverviewDiagram={renderOverviewDiagram}
@@ -1344,5 +1362,6 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
         <ShowMeCorner shape={board} title={boardSummary?.title ?? 'Shape'} picture={boardSummary?.preview?.picture ?? null} part={landed.part} resolveSrc={(src) => shapeHost.assetUrl?.(board, src) ?? src} onGrow={() => setLanded(null)} onClose={() => onBoard(null)} {...(showMeOn ? { onAgain: () => { onBoard(null); showMe.again(board); } } : {})} />
       )}
     </section>
+    </CommentPictures>
   );
 }

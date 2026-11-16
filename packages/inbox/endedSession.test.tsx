@@ -120,6 +120,8 @@ let moveRefusal: string | null = null;
  * `held[i]` is called; null: none waits.
  */
 let holdAsker: { session: string; held: (() => void)[] } | null = null;
+/** The machine's launch block on New message's read (`GET /api/inbox/sessions`): what the reply's start row offers. */
+let launchBlock: Record<string, unknown> | null = null;
 
 beforeEach(() => {
   if (!hasDom) return;
@@ -129,6 +131,7 @@ beforeEach(() => {
   liveness = null;
   moveRefusal = null;
   holdAsker = null;
+  launchBlock = null;
   annotations = [];
   replyAnswer = () => Response.json({ reply: {}, questions: [], replayed: false });
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -148,7 +151,8 @@ beforeEach(() => {
         await new Promise<void>((resolve) => held.push(resolve));
       }
       const asker = liveness && asked ? { session: asked, live: liveness[asked] ?? false } : sessions.asker;
-      return Response.json({ serverSession: 's', home: '/home/me', project: PROJECT, ...sessions, ...(asker ? { asker } : {}) });
+      const launch = launchBlock && path.startsWith('/api/inbox/sessions') ? { launch: launchBlock } : {};
+      return Response.json({ serverSession: 's', home: '/home/me', project: PROJECT, ...sessions, ...(asker ? { asker } : {}), ...launch });
     }
     return Response.json({});
   }) as typeof fetch;
@@ -238,6 +242,31 @@ test.skipIf(!hasDom)('ended, live sessions exist: "session ended" on the asking 
   expect(el.querySelector('[data-asker-ended]')).toBeNull();
   expect(pill(el)?.hasAttribute('data-ended')).toBe(true);
   expect(pill(el)?.getAttribute('aria-label')).toBe('To Claude Code, ended. Change who gets this reply');
+});
+
+test.skipIf(!hasDom)('an unnamed ended Pi asker: the pill names the agent, never the thread its agent got first (this thread, the one being read)', async () => {
+  const { setInboxAgents } = await import('./agentsList');
+  const piAsker = { ...ASKER, host: 'pi' };
+  act(() =>
+    setInboxAgents([
+      {
+        agents: [
+          { id: 'ses_asker', session: 'ses_asker', host: 'pi', project: { id: PROJECT.id, name: PROJECT.name }, state: 'ended', waiting: 0, live: false, started_at: null, last_seen_at: null, first_thread: { id: M1, name: 'Retry policy for the nightly ledger sync' } },
+          { id: 'ses_other', session: 'ses_other', host: 'pi', project: { id: PROJECT.id, name: PROJECT.name }, state: 'idle', waiting: 0, live: true, started_at: null, last_seen_at: null, first_thread: { id: 'msg_other', name: 'Queue timeouts' } },
+        ],
+        total: 2,
+        ended_today: 1,
+      },
+    ]),
+  );
+  try {
+    sessions = { sessions: [live('ses_other', 'pi')], asker: { session: 'ses_asker', live: false } };
+    const el = await render(threadOf({ ...asking(), author: piAsker }));
+    await writeReply(el);
+    expect(pill(el)?.getAttribute('aria-label')).toBe('To Pi, ended. Change who gets this reply');
+  } finally {
+    act(() => setInboxAgents(null));
+  }
 });
 
 test.skipIf(!hasDom)('a session with no evidence it wakes (MCP-only, OpenCode 1) is never "ended": no mark, no note, Send sends to it with no choice', async () => {
@@ -392,7 +421,7 @@ test.skipIf(!hasDom)('none live: the note says the reply will wait, Send sends a
   act(() => root?.unmount());
   host?.remove();
   const after = await render(threadOf(asking(), personReply()), { at: '2026-10-11T10:52:00.000Z', checked_at: null });
-  expect(after.querySelector('[data-delivery]')?.textContent).toBe(
+  expect(after.querySelector('[data-delivery] .ib-dl-text')?.textContent).toBe(
     "Saved for Claude Code. That session has ended; it gets this only if it's resumed.",
   );
   // The note is for before replying: once the reply is the last message, its own line says where it went.
@@ -1095,4 +1124,145 @@ test.skipIf(!hasDom)('a reply no connection wakes, settled by another agent\'s r
   host?.remove();
   const old = await render(noWake, { at: '2026-10-11T10:52:00.000Z', checked_at: at });
   expect(old.querySelector('[data-delivery]')?.textContent).toBe(`Delivered to Cursor, ${whenTime(at)}`);
+});
+
+// A brand-new session for the reply (approval "reply to a brand-new session", option A "A row in the list"): when the
+// session asked has ended and its machine can start an agent, the list gets one start row. The failures this catches: an
+// agent started without the person picking it (the ended session must stay the default), a row offered where nothing
+// can start, a Send that starts two, and the new session not taking the next reply.
+const CAN_START = {
+  agents: [
+    { agent: 'pi', name: 'Pi' },
+    { agent: 'claude-code', name: 'Claude Code', choices: { models: ['opus'], efforts: ['high'], effort_word: 'Effort', last: { model: 'opus' } } },
+  ],
+  projects: [{ id: PROJECT.id, name: 'ledger', root: PROJECT.root, exists: true }],
+};
+const startRow = (el: HTMLElement) => el.querySelector('[data-recipient-start]');
+
+test.skipIf(!hasDom)('nothing live, the machine can start Claude Code: the list offers "New Claude Code session in ledger" last, the ended session stays the default, and nothing starts unpicked', async () => {
+  sessions = { sessions: [], asker: { session: 'ses_asker', live: false } };
+  launchBlock = CAN_START;
+  const el = await render(threadOf(asking()));
+  // Before replying: the note's "send it to another session" words, and the foot's Send to another session.
+  expect(el.querySelector('[data-asker-ended]')?.getAttribute('data-asker-ended')).toBe('live');
+  expect(inFoot(el, 'Send to another session')).toBe(true);
+  await writeReply(el);
+  expect(pill(el)?.getAttribute('aria-label')).toBe('To Claude Code, ended. Change who gets this reply');
+  // Send stops once to show the list: the start row last, the ended session ticked.
+  act(() => button(el, 'Send').click());
+  await settle();
+  expect(replies()).toHaveLength(0);
+  expect(pillRows(el)).toEqual([
+    ['ses_asker', 'Claude Code', 'ended'],
+    ['new:claude-code', 'New Claude Code session', null],
+  ]);
+  const start = startRow(el)!;
+  expect(start.querySelector('.ib-rpick-name')?.getAttribute('aria-label')).toBe('New Claude Code session in ledger');
+  expect(start.querySelector('.ib-cp-stin')?.textContent).toBe('in ledger');
+  expect(start.hasAttribute('data-on')).toBe(false);
+  // Pressed again, unpicked: the reply waits for the ended session, as before; nothing starts.
+  act(() => button(el, 'Send').click());
+  await settle();
+  expect(replies()).toHaveLength(1);
+  expect(replies()[0]!.body.to).toBeUndefined();
+});
+
+test.skipIf(!hasDom)('picked: the pill reads "to New Claude Code session", and Send posts one reply that starts it, with the folder and the machine\'s last model; a second press sends nothing more', async () => {
+  sessions = { sessions: [], asker: { session: 'ses_asker', live: false } };
+  launchBlock = CAN_START;
+  let answer: () => void = () => {};
+  const el = await render(threadOf(asking()));
+  await writeReply(el);
+  act(() => pill(el)!.click());
+  pickOnly(el, 'new:claude-code');
+  await settle();
+  expect(pill(el)?.getAttribute('aria-label')).toBe('To New Claude Code session. Change who gets this reply');
+  expect(pill(el)?.querySelector('.ib-rto-full')?.textContent).toBe('New Claude Code session');
+  // The first Send's post waits: a second press meanwhile sends nothing more.
+  const held = new Promise<void>((resolve) => (answer = resolve));
+  const slow = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input).endsWith('/reply')) await held;
+    return slow(input, init);
+  }) as typeof fetch;
+  act(() => button(el, 'Send').click());
+  act(() => button(el, 'Send').click());
+  answer();
+  await settle();
+  await settle();
+  expect(replies()).toHaveLength(1);
+  expect(replies()[0]!.path).toEndWith(`/messages/${M1}/reply`);
+  expect(replies()[0]!.body.to).toEqual({ launch: { agent: 'claude-code', project_id: PROJECT.id, model: 'opus' } });
+});
+
+test.skipIf(!hasDom)('the asking agent cannot be started there: the first agent that can; none can, or starting is off: no row, and Send saves at once as before', async () => {
+  sessions = { sessions: [], asker: { session: 'ses_asker', live: false } };
+  launchBlock = { ...CAN_START, agents: [{ agent: 'pi', name: 'Pi' }] };
+  const el = await render(threadOf(asking()));
+  await writeReply(el);
+  act(() => button(el, 'Send').click());
+  await settle();
+  expect(pillRows(el).at(-1)).toEqual(['new:pi', 'New Pi session', null]);
+
+  for (const block of [{ ...CAN_START, agents: [] }, null]) {
+    act(() => root?.unmount());
+    host?.remove();
+    posted = [];
+    launchBlock = block;
+    const none = await render(threadOf(asking()));
+    expect(inFoot(none, 'Send to another session')).toBe(false);
+    await writeReply(none);
+    expect(pill(none)).toBeNull();
+    act(() => button(none, 'Send').click());
+    await settle();
+    expect(replies()).toHaveLength(1);
+    expect(replies()[0]!.body.to).toBeUndefined();
+  }
+});
+
+test.skipIf(!hasDom)('after the Send: the reply reads "to Claude Code (another session)" with the starting line under it, and the next reply goes to the new session with no ended note', async () => {
+  sessions = { sessions: [] };
+  liveness = { ses_asker: false };
+  launchBlock = CAN_START;
+  const launch = { id: 'lch_r', agent: 'claude-code', session_ref: null, folder: '/work/ledger', scratch: false, started_at: '2026-10-11T10:52:00.000Z' };
+  const started = personReply({ to: { host: 'claude-code', session: 'launch:lch_r' }, took_over: true, launch } as Partial<InboxMessageWire>);
+  const run = { state: 'starting', launch_id: 'lch_r', agent: 'claude-code', project: 'ledger', folder: '/work/ledger', since: '2026-10-11T10:52:00.000Z', again: false, stopped_by_person: false, cause: null, untrusted: false, attach_command: null } as InboxRun;
+  const el = await render(threadOf(asking(), started), { at: '2026-10-11T10:52:00.000Z', checked_at: null }, run);
+  expect(el.querySelector(`[data-message-article="${R1}"] .ib-to`)?.textContent).toBe('to Claude Code (another session)');
+  expect(el.querySelector('[data-run]')?.textContent).toContain('Starting Claude Code in ledger');
+  expect(el.querySelector('[data-asker-ended]')).toBeNull();
+  await writeReply(el, 'And alert after the third try.');
+  act(() => button(el, 'Send').click());
+  await settle();
+  expect(replies()).toHaveLength(1);
+  expect(replies()[0]!.path).toEndWith(`/messages/${R1}/reply`);
+  expect(replies()[0]!.body.to).toBeUndefined();
+});
+
+test.skipIf(!hasDom)('on a phone: the sheet ends with the start row, "in ledger" on the line under; picked, the control shows the "+" with the mark and Send starts it', async () => {
+  sessions = { sessions: [], asker: { session: 'ses_asker', live: false } };
+  launchBlock = CAN_START;
+  const el = await render(threadOf(asking()), null, undefined, { phone: true });
+  act(() => button(el, 'Send to another session').click());
+  await settle();
+  await settle();
+  const sheet = pillList(el) as HTMLElement;
+  const rows = [...sheet.querySelectorAll('[data-recipient-row]')];
+  expect(rows.map((r) => [r.getAttribute('data-recipient-row'), r.querySelector('.ib-sheet-t')?.textContent, r.querySelector('.ib-sheet-d')?.textContent ?? null])).toEqual([
+    ['ses_asker', 'Claude Code', 'ended'],
+    ['new:claude-code', 'New Claude Code session', 'in ledger'],
+  ]);
+  expect(rows[1]!.getAttribute('aria-label')).toBe('New Claude Code session in ledger');
+  await act(async () => (rows[1] as HTMLElement).click());
+  await settle();
+  expect(pill(el)?.querySelector('.ib-cp-plus')).not.toBeNull();
+  const text = el.querySelector('textarea:not([data-question-other])') as HTMLTextAreaElement;
+  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
+  act(() => {
+    setter.call(text, WORDS);
+    text.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  act(() => button(el, 'Send').click());
+  await settle();
+  expect(replies().map((r) => r.body.to)).toEqual([{ launch: { agent: 'claude-code', project_id: PROJECT.id, model: 'opus' } }]);
 });

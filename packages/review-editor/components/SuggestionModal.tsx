@@ -3,6 +3,7 @@ import { HighlightedCode } from './HighlightedCode';
 import { ToolbarState } from '../hooks/useAnnotationToolbar';
 import { useTabIndent } from '../hooks/useTabIndent';
 import { detectLanguage } from '../utils/detectLanguage';
+import { fileHighlightLanguage } from '../utils/highlightLanguage';
 
 interface SuggestionModalProps {
   filePath: string;
@@ -86,7 +87,7 @@ export const SuggestionModal: React.FC<SuggestionModalProps> = ({
               <span className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Original</span>
             </div>
             <pre className="flex-1 overflow-auto p-3 m-0 text-xs leading-relaxed suggestion-modal-original">
-              <HighlightedCode code={selectedOriginalCode || '(no lines selected)'} language={language} />
+              <HighlightedCode code={selectedOriginalCode || '(no lines selected)'} language={fileHighlightLanguage(filePath)} />
             </pre>
           </div>
 
