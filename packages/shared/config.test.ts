@@ -12,6 +12,7 @@ import {
   chmodSync,
   symlinkSync,
   lstatSync,
+  renameSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -48,6 +49,7 @@ import {
   DEFAULT_GUIDE_SHARE_URL,
   __setConfigLockTimingsForTest,
   __setConfigSaveMergeWindowHookForTest,
+  __setConfigRenameForTest,
 } from "./config";
 import type { PlannotatorConfig } from "./config";
 
@@ -804,10 +806,96 @@ describe("saveConfig never writes over a config.json it could not read", () => {
     expect(warnings).toEqual([]);
   });
 
-  test("an empty config.json holds nothing to lose and is written", () => {
-    writeFileSync(configPath(), "  \n");
+  test("an empty config.json (what a write that stopped partway leaves) reads as defaults, and a save leaves it as it is", () => {
+    for (const bytes of ["", "  \n"]) {
+      writeFileSync(configPath(), bytes);
+      warnings = [];
+      expect(loadConfig()).toEqual({});
+      expect(saveConfig({ displayName: "x" })).toBe(false);
+      expect(raw()).toBe(bytes);
+      expect(warnings.join("")).toContain("not saving config.json because it is empty");
+      expect(warnings.join("")).toContain("Fix or remove");
+    }
+    // Removing it is the way back, as the warning says: the save then creates it.
+    rmSync(configPath());
     expect(saveConfig({ displayName: "x" })).toBe(true);
-    expect(loadConfig().displayName).toBe("x");
+    expect(JSON.parse(raw())).toEqual({ displayName: "x" });
+  });
+
+  test("a save whose rename fails leaves config.json byte for byte, says so, and leaves no temp file", () => {
+    const bytes = JSON.stringify({ displayName: "Ada", theme: { mode: "dark" }, favicon: "yellow" }, null, 2) + "\n";
+    writeFileSync(configPath(), bytes);
+    // ENOSPC stands in for a disk that filled up; EPERM for a lock that never lets go.
+    for (const code of ["ENOSPC", "EPERM"]) {
+      let calls = 0;
+      __setConfigRenameForTest(() => {
+        calls++;
+        throw Object.assign(new Error(`${code}: simulated`), { code });
+      });
+      try {
+        warnings = [];
+        expect(saveConfig({ displayName: "Grace" })).toBe(false);
+      } finally {
+        __setConfigRenameForTest(null);
+      }
+      expect(raw()).toBe(bytes);
+      expect(warnings.join("")).toContain("failed to write config.json");
+      expect(readdirSync(tempDir).filter((n) => n.endsWith(".tmp"))).toEqual([]);
+      // A disk error is not retried; a Windows lock error is, a few times.
+      expect(calls).toBe(code === "EPERM" ? 5 : 1);
+    }
+    expect(loadConfig()).toMatchObject({ displayName: "Ada", theme: { mode: "dark" }, favicon: "yellow" });
+  });
+
+  test("a rename held for a moment by another program (Windows) is retried and lands", () => {
+    writeFileSync(configPath(), JSON.stringify({ displayName: "Ada" }));
+    let calls = 0;
+    __setConfigRenameForTest((from, to) => {
+      if (++calls <= 2) throw Object.assign(new Error("EBUSY: simulated"), { code: "EBUSY" });
+      renameSync(from, to);
+    });
+    try {
+      expect(saveConfig({ favicon: "yellow" })).toBe(true);
+    } finally {
+      __setConfigRenameForTest(null);
+    }
+    expect(JSON.parse(raw())).toEqual({ displayName: "Ada", favicon: "yellow" });
+    expect(warnings).toEqual([]);
+  });
+
+  test("a folder that is not writable: the save fails and config.json keeps its bytes (never written in place)", () => {
+    if (process.platform === "win32" || process.getuid?.() === 0) return;
+    const bytes = JSON.stringify({ displayName: "Ada", theme: { mode: "dark" } });
+    writeFileSync(configPath(), bytes);
+    chmodSync(tempDir, 0o555);
+    try {
+      expect(saveConfig({ displayName: "Grace" })).toBe(false);
+    } finally {
+      chmodSync(tempDir, 0o700);
+    }
+    expect(raw()).toBe(bytes);
+    expect(warnings.join("")).toContain("failed to write config.json");
+  });
+
+  test("a symlinked config.json in a folder that is not writable still saves: the temp file goes beside the link's target", () => {
+    if (process.platform === "win32" || process.getuid?.() === 0) return;
+    const dotfiles = mkdtempSync(join(tmpdir(), "plannotator-config-dotfiles-"));
+    try {
+      const target = join(dotfiles, "config.json");
+      writeFileSync(target, JSON.stringify({ displayName: "Ada" }));
+      symlinkSync(target, configPath());
+      chmodSync(tempDir, 0o555);
+      try {
+        expect(saveConfig({ favicon: "yellow" })).toBe(true);
+      } finally {
+        chmodSync(tempDir, 0o700);
+      }
+      expect(lstatSync(configPath()).isSymbolicLink()).toBe(true);
+      expect(JSON.parse(readFileSync(target, "utf-8"))).toEqual({ displayName: "Ada", favicon: "yellow" });
+      expect(readdirSync(dotfiles)).toEqual(["config.json"]);
+    } finally {
+      rmSync(dotfiles, { recursive: true, force: true });
+    }
   });
 
   test("config.json that is not valid JSON is kept byte for byte, and the save says so", () => {

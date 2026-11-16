@@ -16,6 +16,7 @@ import {
   openSync,
   writeSync,
   closeSync,
+  fsyncSync,
   statSync,
   unlinkSync,
   renameSync,
@@ -1206,11 +1207,11 @@ function loadSettings(options: { quiet?: boolean }): Record<string, unknown> {
 }
 
 /**
- * config.json as saveConfig reads it before a merge. A missing file (or one
- * holding only whitespace) is an empty config, so a first save creates it as
- * before. A file that exists but cannot be read, or is not a JSON object, is
- * refused: merging onto loadConfig's `{}` and writing would replace every
- * setting in it with the one key being saved.
+ * config.json as saveConfig reads it before a merge. A missing file is an
+ * empty config, so a first save creates it as before. A file that exists but
+ * cannot be read, is empty (what a write that stopped partway leaves), or is
+ * not a JSON object, is refused: merging onto loadConfig's `{}` and writing
+ * would replace every setting it held with the one key being saved.
  */
 function readConfigForSave(configPath: string): { ok: true; config: PlannotatorConfig } | { ok: false; reason: string } {
   let raw: string;
@@ -1221,7 +1222,7 @@ function readConfigForSave(configPath: string): { ok: true; config: PlannotatorC
     if (code === "ENOENT") return { ok: true, config: {} };
     return { ok: false, reason: `it could not be read (${code ?? String(e)})` };
   }
-  if (raw.trim() === "") return { ok: true, config: {} };
+  if (raw.trim() === "") return { ok: false, reason: "it is empty" };
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
@@ -1351,12 +1352,28 @@ function releaseConfigLock(lockPath: string): void {
   } catch { /* already gone (stale takeover by another writer): nothing to do */ }
 }
 
+/** Rename errors Windows gives while another program (antivirus, a sync client, an indexer) holds the file for a moment. */
+const RENAME_RETRY_CODES = new Set(["EPERM", "EACCES", "EBUSY"]);
+const RENAME_RETRY_DELAYS_MS = [10, 30, 60, 100];
+
+let renameForWrite: (from: string, to: string) => void = renameSync;
+/** Test-only seam: replaces the rename writeConfigAtomic uses, so a test can make it fail without a broken disk. Null restores it. */
+export function __setConfigRenameForTest(rename: ((from: string, to: string) => void) | null): void {
+  renameForWrite = rename ?? renameSync;
+}
+
 /**
- * Write config.json in one step so a concurrent reader never observes a
- * half-written file: readers deliberately take no lock, and loadConfig treats
- * malformed JSON as an empty config, which would silently present as "all
- * settings reset". Writes through an existing symlink rather than replacing
- * it, so a dotfile-managed config.json keeps its link.
+ * Write config.json (or state.json) in one step so a concurrent reader never observes a half-written file: readers
+ * deliberately take no lock, and loadConfig treats malformed JSON as an empty config, which would silently present
+ * as "all settings reset". Writes through an existing symlink rather than replacing it, so a dotfile-managed
+ * config.json keeps its link: the temp file goes beside the link's target, in the target's folder, so the rename
+ * never crosses a device.
+ *
+ * The file itself is never written in place. A plain write empties it first, so one that stopped partway (disk full,
+ * an I/O error, the process killed) left config.json empty, and the next save then wrote only its own keys. A rename
+ * that fails with a Windows lock error is retried for a moment; when the temp file cannot be written or renamed (a
+ * folder that is not writable, a file still held after the retries), this throws and the file keeps its old bytes,
+ * and the caller reports the save as failed.
  */
 function writeConfigAtomic(configPath: string, contents: string): void {
   let targetPath = configPath;
@@ -1370,16 +1387,36 @@ function writeConfigAtomic(configPath: string, contents: string): void {
     if (existsSync(targetPath)) mode = statSync(targetPath).mode & 0o777;
   } catch { /* new file: keep the private default */ }
   const tempPath = `${targetPath}.${process.pid}.${Math.random().toString(36).slice(2, 10)}.tmp`;
+  let handle: number | null = null;
   try {
-    writeFileSync(tempPath, contents, { encoding: "utf-8", mode });
-    renameSync(tempPath, targetPath);
-  } catch {
+    handle = openSync(tempPath, "wx", mode);
+    writeFileSync(handle, contents, "utf-8");
+    // On disk before the rename, so a crash right after it cannot leave a renamed but empty file.
+    try {
+      fsyncSync(handle);
+    } catch { /* a filesystem without fsync: the rename still replaces the file whole */ }
+    closeSync(handle);
+    handle = null;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        renameForWrite(tempPath, targetPath);
+        break;
+      } catch (e) {
+        const code = (e as NodeJS.ErrnoException)?.code;
+        if (attempt >= RENAME_RETRY_DELAYS_MS.length || !code || !RENAME_RETRY_CODES.has(code)) throw e;
+        sleepSync(RENAME_RETRY_DELAYS_MS[attempt]);
+      }
+    }
+  } catch (e) {
+    if (handle !== null) {
+      try {
+        closeSync(handle);
+      } catch { /* already closed */ }
+    }
     try {
       unlinkSync(tempPath);
     } catch { /* nothing to clean up */ }
-    // Same-directory rename should not fail, but a write that lands is better
-    // than a settings change that is lost to an exotic filesystem.
-    writeFileSync(targetPath, contents, "utf-8");
+    throw e;
   }
 }
 
@@ -1392,8 +1429,8 @@ function writeConfigAtomic(configPath: string, contents: string): void {
  * other's keys. See the lock notes above for the failure mode: it degrades to
  * the old unlocked behavior with a warning, never to a hang.
  *
- * A config.json that exists but cannot be read or is not a JSON object is
- * never written over (readConfigForSave): the save is refused with a warning
+ * A config.json that exists but cannot be read, is empty, or is not a JSON
+ * object is never written over (readConfigForSave): the save is refused with a warning
  * and the file is left in place, so fixing it brings every setting back.
  * Machine state goes to state.json instead (MACHINE_STATE_KEYS), and
  * config.json is rewritten only when its settings change.

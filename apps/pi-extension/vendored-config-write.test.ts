@@ -9,7 +9,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -19,6 +19,7 @@ import {
   isAgentTerminalSide,
   __setConfigSaveMergeWindowHookForTest,
   __setConfigLockTimingsForTest,
+  __setConfigRenameForTest,
 } from "./generated/config.ts";
 
 describe("vendored config write path", () => {
@@ -33,6 +34,7 @@ describe("vendored config write path", () => {
   afterEach(() => {
     __setConfigSaveMergeWindowHookForTest(null);
     __setConfigLockTimingsForTest(null);
+    __setConfigRenameForTest(null);
     if (originalDataDir !== undefined) {
       process.env.PLANNOTATOR_DATA_DIR = originalDataDir;
     } else {
@@ -68,6 +70,29 @@ describe("vendored config write path", () => {
       starAsk: { shownAt: "2026-02-01T00:00:00.000Z", answer: "starred" },
     });
     expect(loadConfig()).toMatchObject({ displayName: "me", starAsk: { answer: "starred" } });
+  });
+
+  // A failed write must never empty the file: the Pi server's settings saves go through this copy too.
+  test("a failed write leaves config.json byte for byte, and an empty config.json is never saved over", () => {
+    const configPath = join(tempDir, "config.json");
+    const bytes = JSON.stringify({ displayName: "me", agentTerminalSide: "left" }, null, 2) + "\n";
+    writeFileSync(configPath, bytes);
+    __setConfigRenameForTest(() => {
+      throw Object.assign(new Error("ENOSPC: simulated"), { code: "ENOSPC" });
+    });
+    const write = process.stderr.write;
+    process.stderr.write = (() => true) as typeof process.stderr.write;
+    try {
+      expect(saveConfig({ agentTerminalSide: "right" })).toBe(false);
+      expect(readFileSync(configPath, "utf-8")).toBe(bytes);
+      expect(readdirSync(tempDir).filter((name) => name.endsWith(".tmp"))).toEqual([]);
+      __setConfigRenameForTest(null);
+      writeFileSync(configPath, "");
+      expect(saveConfig({ agentTerminalSide: "right" })).toBe(false);
+      expect(readFileSync(configPath, "utf-8")).toBe("");
+    } finally {
+      process.stderr.write = write;
+    }
   });
 
   test("the side guard the annotate endpoint uses accepts exactly the core sides", () => {
