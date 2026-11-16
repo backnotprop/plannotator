@@ -1,7 +1,7 @@
 /**
  * Optional source-line gutter on the REAL Viewer (DOM-gated, DOM_TESTS=1).
  *
- * Failures to catch: labels appear while the setting is off; a multi-line
+ * Failures to catch: a label's number entering the document text; a multi-line
  * paragraph is not `start–end`; a one-line block is not `start`; a code fence
  * or table grows a number per visual line; the label joins copied HTML or a
  * new annotation's quote.
@@ -113,10 +113,12 @@ async function selectPhrase(scope: HTMLElement, phrase: string): Promise<string>
 }
 
 describe.if(hasDom)('Viewer source line numbers', () => {
-  test('off by default: no gutter labels', async () => {
-    configStore.set('documentSourceLineNumbers', false);
+  test('labels are empty: no number in the document text, whatever the setting', async () => {
+    configStore.set('documentSourceLineNumbers', true);
     const article = await mount();
-    expect(article.querySelector('[data-doc-source-line]')).toBeNull();
+    const labels = [...article.querySelectorAll('[data-doc-source-line]')];
+    expect(labels.length).toBeGreaterThan(0);
+    for (const label of labels) expect(label.textContent).toBe('');
   });
 
   test('on: a span is start–end, a single line is start, code and tables get one label', async () => {
@@ -152,8 +154,6 @@ describe.if(hasDom)('Viewer source line numbers', () => {
     const gutter = labelOf(article, multi.id)!;
     expect(gutter.className).toContain('annotation-exclude');
     expect(gutter.className).toContain('select-none');
-    expect(gutter.className).toContain('hidden');
-    expect(gutter.className).toContain('md:block');
     expect(gutter.getAttribute('aria-hidden')).toBe('true');
   });
 

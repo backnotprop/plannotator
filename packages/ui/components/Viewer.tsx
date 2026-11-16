@@ -1951,6 +1951,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
         ref={containerRef}
         data-print-region="article"
         data-doc-text-root=""
+        data-doc-source-root={gridEnabled ? 'grid' : 'clean'}
         data-vim-mode={vimModeActive ? 'enabled' : undefined}
         data-vim-phase={vimModeActive ? vim.state.phase : undefined}
         data-vim-focused={vimModeActive ? String(vim.focused) : undefined}

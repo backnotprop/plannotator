@@ -814,15 +814,6 @@ export function formatBlockSourceLineLabel(block: Pick<Block, 'id' | 'startLine'
   return end <= block.startLine ? String(block.startLine) : `${block.startLine}–${end}`;
 }
 
-/** Gutter label for the YAML frontmatter card: lines 1 through the last
- *  line before document content. Null when the file has no frontmatter. */
-export function formatFrontmatterSourceLineLabel(markdown: string): string | null {
-  const { frontmatter, contentStartLine } = extractFrontmatter(markdown);
-  if (!frontmatter || Object.keys(frontmatter).length === 0) return null;
-  const end = Math.max(1, contentStartLine - 1);
-  return end <= 1 ? '1' : `1–${end}`;
-}
-
 /** Resolve the source-line label for a single annotation.
  *  Returns null for global comments, diff-view annotations, or missing blocks. */
 /** Defense in depth for page-controlled strings in agent-read feedback:

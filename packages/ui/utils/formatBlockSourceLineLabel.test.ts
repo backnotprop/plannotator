@@ -6,7 +6,6 @@ import { describe, expect, test } from 'bun:test';
 import type { Block } from '../types';
 import {
   formatBlockSourceLineLabel,
-  formatFrontmatterSourceLineLabel,
   parseMarkdownToBlocks,
 } from './parser';
 
@@ -60,16 +59,5 @@ describe('formatBlockSourceLineLabel', () => {
     expect(formatBlockSourceLineLabel(multi)).toMatch(/^\d+–\d+$/);
     expect(formatBlockSourceLineLabel(single)).toMatch(/^\d+$/);
     expect(formatBlockSourceLineLabel(single)).not.toContain('–');
-  });
-});
-
-describe('formatFrontmatterSourceLineLabel', () => {
-  test('a YAML card spans line 1 through the last line before content', () => {
-    expect(formatFrontmatterSourceLineLabel('---\ntitle: Ship\n---\n\n# Title\n')).toBe('1–4');
-  });
-
-  test('no frontmatter, or an empty one, yields no label', () => {
-    expect(formatFrontmatterSourceLineLabel('# Title\n')).toBeNull();
-    expect(formatFrontmatterSourceLineLabel('---\n---\n\n# Title\n')).toBeNull();
   });
 });

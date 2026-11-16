@@ -1997,6 +1997,33 @@ body:has([data-popout="true"]) [data-sidebar-tabs="true"] {
   }
 }
 
+/* Source line numbers (Settings → Display → Source line numbers, #1650; see
+   components/SourceLineGutter). Every block carries an empty, hidden label;
+   it shows only when the host opted in (hooks/useDocumentSourceLineNumbers
+   sets data-doc-source-lines on the document element) and only inside the
+   Viewer's article (data-doc-source-root), never in the plan diff, the
+   Inbox or code review. Not on phones or in print. The article's left side
+   grows to hold a span label such as 128–135 (about 3.6rem with its gap):
+   the Clean look has only the plan area's 2.5rem beside it and the scroll
+   area clips sideways; the Grid card's own padding is 2–3rem. */
+pn-source-line {
+  display: none;
+}
+@media screen and (min-width: 48rem) {
+  [data-doc-source-lines] [data-doc-source-root] pn-source-line[data-doc-source-line] {
+    display: block;
+  }
+  [data-doc-source-lines] [data-doc-source-root] pn-source-line[data-doc-source-line]::before {
+    content: attr(data-doc-source-line);
+  }
+  [data-doc-source-lines] [data-doc-source-root="clean"] {
+    padding-left: 1.5rem;
+  }
+  [data-doc-source-lines] [data-doc-source-root="grid"] {
+    padding-left: 4rem;
+  }
+}
+
 /* Reduced motion: Base UI popups (dialogs, menus, popovers, tooltips) animate
    via [data-starting-style]/[data-ending-style] transitions — those attributes
    only exist during the enter/exit phases, so zeroing transitions here makes

@@ -516,6 +516,7 @@ packages/ui/components/Viewer.questionContract.test.tsx
 packages/ui/components/Viewer.alertDraftRestore.test.tsx
 packages/ui/components/Viewer.belowTitle.test.tsx
 packages/ui/components/Viewer.sourceLineNumbers.test.tsx
+packages/ui/components/Viewer.sourceLineNumbers.toggle.test.tsx
 packages/ui/utils/belowTitleSlot.test.ts
 packages/ui/components/AnnotationPanel.allFiles.test.tsx
 packages/ui/components/AnnotationPanel.sectionRefs.test.tsx
