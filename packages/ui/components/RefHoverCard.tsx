@@ -40,7 +40,9 @@ import {
   type ForgeRefPerson,
 } from '@plannotator/core/forge-ref-card';
 import { FORGE_SPECS } from '@plannotator/core/forge-refs';
+import { cardProblem, refUnsupportedLine } from '@plannotator/core/problem-words';
 import { loadRefCard, refCardTarget } from '../utils/refCard';
+import { ProblemNotice } from './ProblemNotice';
 import { providedRefCardLabel, providedRefCardView } from '../utils/refCardProviders';
 import { RenderedMarkdown } from './RenderedMarkdown';
 import { tooltipContainerOf } from './HostTitle';
@@ -82,26 +84,15 @@ export function refKindName(ref: Pick<ForgeRef, 'platform' | 'kind'>): string {
   return ref.kind === 'issue' ? 'Issue' : FORGE_SPECS[ref.platform].pullName;
 }
 
-const FAILURE_TEXT: Record<ForgeRefCardError, (forge: string, cli: string) => string> = {
-  unsupported: (_forge, cli) => `Details show for hosts your ${cli} is signed in to. This one isn't, so nothing was fetched.`,
-  cli_missing: (forge, cli) => `Install the ${forge} CLI (${cli}) on this computer to see details here.`,
-  signed_out: (_forge, cli) => `Sign in with ${cli} auth login to see details here.`,
-  not_found: (forge) => `None of your signed-in ${forge} accounts can see this one, or it doesn't exist.`,
-  rate_limited: (forge) => `${forge} asked for a short break. Details come back in a minute.`,
-  unavailable: () => "Details couldn't load right now.",
-};
-
-/** Bitbucket has no CLI: Plannotator reads it with an API token, so its failures say so. */
-const BITBUCKET_FAILURE_TEXT: Partial<Record<ForgeRefCardError, string>> = {
+/** Bitbucket has no CLI: Plannotator reads it with an API token, so its failures keep their own lines (`unavailable` also: no answer at all). */
+const BITBUCKET_FAILURE_TEXT: Record<ForgeRefCardError, string> = {
   unsupported: 'Details show for Bitbucket Cloud pull requests in the Inbox.',
+  cli_missing: "Details couldn't load right now.",
   signed_out: "Plannotator couldn't sign in to Bitbucket. Check its API token setup to see details here.",
   not_found: "Your Bitbucket API token can't see this one, or it doesn't exist.",
+  rate_limited: 'Bitbucket asked for a short break. Details come back in a minute.',
+  unavailable: "Details couldn't load right now.",
 };
-
-function failureText(error: ForgeRefCardError, platform: ForgeRef['platform']): string {
-  if (platform === 'bitbucket') return BITBUCKET_FAILURE_TEXT[error] ?? FAILURE_TEXT[error]('Bitbucket', 'Bitbucket');
-  return FAILURE_TEXT[error](forgeName(platform), platform === 'gitlab' ? 'glab' : 'gh');
-}
 
 type Tone = 'open' | 'merged' | 'closed' | 'neutral';
 
@@ -423,17 +414,26 @@ export function RefCardView({ target, href, result, pinned, onClose, sheet, tigh
 
   if (!result || !result.ok) {
     const error = result && 'error' in result ? result.error : 'unavailable';
+    // The tool's state in the one table's words (problem-words.ts): the same lines the Inbox's PR card and Pull
+    // requests page say. No answer at all (the route failed) claims nothing about the tool: a neutral line.
+    const problem = result ? cardProblem(result, target) : null;
     return (
       <div>
-        <div className="px-3.5 pb-3 pt-3">
+        <div className="px-3.5 pt-3">
           <div className="text-[11.5px] text-muted-foreground">{repoName}</div>
           <div className="mt-1 text-[13.5px] font-semibold text-foreground">
             {refKindName(target)} {forgeRefLabel(target)}
           </div>
-          <p className="mt-1.5 text-[12px] leading-relaxed text-muted-foreground" data-ref-card-error={error}>
-            {failureText(error, target.platform)}
-          </p>
         </div>
+        {problem ? (
+          <div className="-mt-1" data-ref-card-error={error}>
+            <ProblemNotice problem={problem} touch={sheet} linked={href} />
+          </div>
+        ) : (
+          <p className="px-3.5 pb-3 pt-1.5 text-[12px] leading-relaxed text-muted-foreground" data-ref-card-error={error}>
+            {!result || target.platform === 'bitbucket' ? BITBUCKET_FAILURE_TEXT[error] : refUnsupportedLine(target.platform === 'gitlab' ? 'glab' : 'gh')}
+          </p>
+        )}
         {footer()}
       </div>
     );

@@ -1378,6 +1378,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     refCards,
     ...(options.refRunner ? { run: options.refRunner } : {}),
     fixture: options.threadPullFixture ?? threadPullFixtureFromEnv(),
+    // A project's own origin host: a host a sign-in command may name (problem-words.ts commandHostTrusted).
+    projectHostOf: (projectId) => {
+      const project = store.project(projectId);
+      return project ? (repos.get(project.root)?.host ?? null) : null;
+    },
     onLiveChange: (threadIds) => {
       for (const listener of threadPullLiveListeners) listener(threadIds);
     },
