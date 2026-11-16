@@ -50,7 +50,7 @@ const fetchStub = (async (input: RequestInfo | URL) => {
       origin: "claude-code",
       diffType: "uncommitted",
       gitContext: { vcsType: "git", defaultBranch: "main", currentBranch: "feature", diffOptions: [{ id: "uncommitted", label: "Uncommitted" }] },
-      semDiff: { runtime: "/assets/sem-diff/runtime.wasm", grammars: { typescript: "/assets/sem-diff/typescript.wasm" } },
+      semDiff: { runtime: "/assets/sem-diff/runtime.wasm", grammars: { "tree-sitter-typescript.wasm": "/assets/sem-diff/tree-sitter-typescript.wasm" } },
       serverConfig: {},
     });
   }
