@@ -34,14 +34,33 @@ interface SessionsRow {
  * for an agent the Agents list no longer names. The latest read's rows win.
  */
 const sessionProjects = new Map<string, { id: string; name: string }>();
+// Its own listeners: a new session redraws the agents' tiles, never every letter mark.
+let sessionsVersion = 0;
+const sessionListeners = new Set<() => void>();
 
 export function sessionProjectOf(session: string): { id: string; name: string } | null {
   return sessionProjects.get(session) ?? null;
 }
 
+export function useSessionProjects(): number {
+  return useSyncExternalStore(
+    (listener) => {
+      sessionListeners.add(listener);
+      return () => sessionListeners.delete(listener);
+    },
+    () => sessionsVersion,
+    () => sessionsVersion,
+  );
+}
+
+function notifySessions(): void {
+  sessionsVersion++;
+  for (const listener of [...sessionListeners]) listener();
+}
+
 /** The Inbox's projects as a list read brought them: their names and when each one's picture was set; `rows`: its sessions' projects. */
 export function learnProjects(list: readonly { id: string; name: string; picture?: number }[], rows: readonly SessionsRow[] = []): void {
-  let changed = false;
+  let sessionsChanged = false;
   for (const row of rows) {
     const sessions = [row.author.kind === 'agent' ? row.author.session : null, row.addressee?.session, ...(row.participants ?? []).map((p) => p.session)];
     for (const session of sessions) {
@@ -49,9 +68,11 @@ export function learnProjects(list: readonly { id: string; name: string; picture
       const before = sessionProjects.get(session);
       if (before?.id === row.project.id && before.name === row.project.name) continue;
       sessionProjects.set(session, row.project);
-      changed = true;
+      sessionsChanged = true;
     }
   }
+  if (sessionsChanged) notifySessions();
+  let changed = false;
   for (const project of list) {
     const before = projects.get(project.id);
     const picture = typeof project.picture === 'number' ? project.picture : undefined;
@@ -102,6 +123,7 @@ export function resetKnownProjectsForTests(): void {
   projects.clear();
   sessionProjects.clear();
   notifyProjects();
+  notifySessions();
 }
 
 /** The most Set picture… sends: the Inbox refuses more (PROJECT_PICTURE_MAX_BYTES on the server). */

@@ -21,7 +21,7 @@ import { HostMark as UiHostMark } from '@plannotator/ui/components/inbox-thread/
 import type { AgentFace } from './faceChoices';
 import { HUES, LetterMark, hueOf, projectLetters, type Letters } from '../letterMarks';
 import { inboxAgentsFlat, inboxAgentsNow, onInboxAgentsSet } from '../agentsList';
-import { sessionProjectOf, useKnownProjects } from '../projectPictures';
+import { sessionProjectOf, useSessionProjects } from '../projectPictures';
 
 /** The picker's words for the face (its accessible name and tooltip). */
 export const PROJECT_FACE_LABEL = 'From the project name';
@@ -59,8 +59,10 @@ function changed(): void {
 /** The window's one name per project (app/useListView.ts `projectNames`): the tiles' labels and the projects on screen. */
 export function setWindowProjectNames(names: ReadonlyMap<string, string>): void {
   if (names === windowNames) return;
+  const same = names.size === windowNames.size && [...names].every(([id, name]) => windowNames.get(id) === name);
   windowNames = names;
-  changed();
+  // The list draws a new map at every change; only a different name redraws the tiles.
+  if (!same) changed();
 }
 
 function watch(): void {
@@ -137,7 +139,7 @@ function subscribe(listener: () => void): () => void {
 /** The tile an agent would draw: its label and letters, or null (no project known, or a name with nothing to draw). */
 export function useAgentProjectTile(agent: string | null | undefined): { label: string; letters: Letters; hue: number } | null {
   useSyncExternalStore(subscribe, () => version, () => version);
-  useKnownProjects();
+  useSessionProjects();
   const label = agentProjectLabel(agent);
   if (!label) return null;
   const letters = projectLetters(label);
