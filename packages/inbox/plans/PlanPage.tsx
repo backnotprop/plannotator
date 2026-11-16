@@ -383,7 +383,8 @@ function DocLoaded({
               start={decision}
               older={older}
               comparing={compare ? `Comparing v${compare.from} with v${compare.to}` : null}
-              count={versions.length}
+              // On an older version "v2 of 4" already says how many: a count beside it would read "of 4 4".
+              count={older ? null : versions.length}
             />
           </div>
         }

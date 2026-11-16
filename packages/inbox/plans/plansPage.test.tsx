@@ -676,6 +676,8 @@ test.skipIf(!hasDom)('a plan opens on its newest version, versions newest first,
   await settle();
   expect(window.location.hash).toBe(`#plans=${id}&v=2`);
   expect(readingWords(host)).toBe('v2 of 3');
+  // "of 3" says how many; no count beside it.
+  expect(host.querySelector('[data-plan-reading] [data-reading-versions-count]')).toBeNull();
   expect(host.querySelector('[data-plan-reading] [data-plan-newest]')?.getAttribute('href')).toBe(`#plans=${id}`);
   expect(text(host.querySelector('[data-plan-document]'))).toContain('second pass');
   expect(host.querySelector('[data-plan-version="2"]')?.getAttribute('aria-current')).toBe('true');
