@@ -162,15 +162,14 @@ const text = (el: Element | null) => (el?.textContent ?? '').replace(/\s+/g, ' '
 /** A file row's name in the frame's rail (`FileRow`: the name, then our Main mark). */
 const fileNames = (scope: Element, sel = '') => [...scope.querySelectorAll(`${sel} [data-plan-file] span.truncate`)].map(text);
 /**
- * The reading line's version words, without the count on its toggle (the frame's `count`) and the leading "Reading"
- * (the frame is dropping that word): "v2 · newest", "v2 of 3".
+ * The reading line's version words, without the count on its toggle (the frame's `count`): "v2 · newest", "v2 of 3".
  */
 function readingWords(host: Element) {
   const toggle = host.querySelector('[data-plan-reading] [data-reading-versions]');
   if (!toggle) return '';
   const copy = toggle.cloneNode(true) as Element;
   copy.querySelector('[data-reading-versions-count]')?.remove();
-  return text(copy).replace(/^Reading /, '');
+  return text(copy);
 }
 /** Plannotator's storage in memory for one test (happy-dom keeps no cookie here); put back in afterEach. */
 function keptStorage(entries: [string, string][] = []) {
@@ -538,7 +537,7 @@ test.skipIf(!hasDom)('the versions panel closes, stays closed after a remount, a
     const toggle = host.querySelector('[data-reading-versions]') as HTMLButtonElement;
     expect(toggle.getAttribute('aria-expanded')).toBe('false');
     // Its name is a full sentence: which version is on screen, and how many there are (the frame's words).
-    expect(toggle.getAttribute('aria-label')).toMatch(/^Versions\. .*version 2, the newest\. 2 versions$/);
+    expect(toggle.getAttribute('aria-label')).toBe('v2 · newest, version 2, the newest. 2 versions');
     await act(async () => toggle.click());
     await settle();
     expect(host.querySelector('[data-versions-panel] [data-plan-version="2"]')).not.toBeNull();
