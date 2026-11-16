@@ -11,13 +11,18 @@
  * ("Too narrow: opens below"); where neither fits it says "No room to split here" and the drop changes nothing. The
  * ghost's word says where it lands before the release. A row over a pane's foot (`.ib-pfoot`) with no reply box open
  * does nothing.
+ *
+ * The thin strip along the whole pane area's outer rim is its own place (outerEdge.ts), for a row and a pane alike: it
+ * opens (moves) the pane at the root of the layout on that side, the full height or width, and wins over a pane's own
+ * edge there. With no room it says so and changes nothing; it never takes another side.
  */
 import { useEffect, useRef } from 'react';
 import { registerThreadDropTarget, sayThreadDrag, THREAD_DROP_LAYER } from '../threadDrag';
 import { announce, registerDropTarget, type DragPayload, type DropHit } from './paneDrag';
 import { mainWidthOf } from '../stack';
 import * as L from './layoutModel';
-import { steppedAside, type PaneRect, type Room } from './layoutRoom';
+import { hiddenForRoom, steppedAside, type PaneRect, type Room } from './layoutRoom';
+import { outerEdgeAt, outerPlace, outerRect, outerWords, type AreaBox } from './outerEdge';
 import type { WindowPanes } from './useRoutePanes';
 
 /** Where a drop lands; `none`: an edge with no room on either axis, which the drop zone says and the drop leaves alone. */
@@ -27,7 +32,9 @@ export type Place = L.DropPlace | 'none';
 type Carried = DragPayload | { kind: 'thread'; threadId: string; label: string };
 
 interface PaneDropHit {
+  /** A pane, or `L.WHOLE`: the whole layout's `outer` edge. */
   target: L.PaneId;
+  outer?: L.Edge;
   place: Place;
   /** The layout after the drop. */
   next: L.FreeLayout;
@@ -69,6 +76,13 @@ export function paneRects(): PaneRect[] {
 /** The panes on screen and their boxes: the engine's hosts (one pane is in the layout too). */
 function paneBoxes(): { id: L.PaneId; el: HTMLElement }[] {
   return [...document.querySelectorAll<HTMLElement>('.ib-layout > [data-layout-pane]:not([data-pane-hidden="true"])')].map((el) => ({ id: el.dataset.layoutPane!, el }));
+}
+
+/** The box around every pane on screen: the area the outer edges belong to. */
+function areaOf(boxes: readonly { el: HTMLElement }[]): AreaBox | null {
+  if (!boxes.length) return null;
+  const rects = boxes.map(({ el }) => el.getBoundingClientRect());
+  return { left: Math.min(...rects.map((r) => r.left)), top: Math.min(...rects.map((r) => r.top)), right: Math.max(...rects.map((r) => r.right)), bottom: Math.max(...rects.map((r) => r.bottom)) };
 }
 
 function nearestEdge(x: number, y: number, box: DOMRect): { edge: L.Edge; depth: number } {
@@ -119,15 +133,33 @@ export function usePaneDrop(options: PaneDropOptions): void {
     const hit = (x: number, y: number, carried: Carried): DropHit | null => {
       const { windowPanes } = live.current;
       const layout = windowPanes.layout;
-      const box = paneBoxes().find(({ el }) => {
+      const boxes = paneBoxes();
+      const box = boxes.find(({ el }) => {
         const r = el.getBoundingClientRect();
         return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
       });
+      // A pane still over its own box (its header pressed and nudged) goes nowhere, the rim included: it has to leave
+      // its own pane before any place counts.
+      if (carried.kind === 'pane' && box?.id === carried.paneId) return null;
+      // An open reply box (and the foot around it) is the reply's, rim strip included: a drop never lands in or
+      // disturbs a draft, and the box's own target (a mention, layer `reply`) takes a thread there. A closed foot
+      // (Reply, Looks good) is the pane's bottom edge like the rest of it.
+      const over = box ? document.elementFromPoint(x, y) : null;
+      const foot = over && box!.el.contains(over) ? over.closest('.ib-pfoot') : null;
+      if (carried.kind === 'thread' && over && box!.el.contains(over) && (over.closest('.ib-rbox') || foot?.querySelector('.ib-rbox'))) return null;
+      // The whole area's rim next: there it is the whole side, never one pane's edge.
+      const area = areaOf(boxes);
+      const rim = area ? outerEdgeAt(x, y, area) : null;
+      if (area && rim) {
+        const measured = measureRoom(true);
+        if (!measured) return null;
+        const outer = outerPlace(layout, carried.kind === 'pane' ? { kind: 'pane', paneId: carried.paneId } : { kind: 'thread', threadId: carried.threadId }, rim, measured.room, measured.gap);
+        if (!outer) return null;
+        const data: PaneDropHit = { target: L.WHOLE, outer: rim, place: outer.fits ? rim : 'none', next: outer.fits ? outer.next : layout, rect: outerRect(area, rim, outer.next, measured.gap, hiddenForRoom(outer.next, measured.room, measured.gap)) };
+        return { action: outerWords(rim, outer.fits, carried.kind), data };
+      }
       if (!box) return null;
       const target = box.id;
-      if (carried.kind === 'pane' && carried.paneId === target) return null;
-      const over = document.elementFromPoint(x, y);
-      if (carried.kind === 'thread' && over && box.el.contains(over) && over.closest('.ib-pfoot, .ib-rbox')) return null;
       const r = box.el.getBoundingClientRect();
       const { edge, depth } = nearestEdge(x, y, r);
       const measured = measureRoom(true);
@@ -185,13 +217,26 @@ export function usePaneDrop(options: PaneDropOptions): void {
       }
       Object.assign(preview.style, { left: `${rect.left}px`, top: `${rect.top}px`, width: `${rect.width}px`, height: `${rect.height}px` });
     };
-    const drop = (found: DropHit, carried: Carried, say: (words: string) => void) => {
+    /** False when it changed nothing (no room, said). */
+    const drop = (found: DropHit, carried: Carried, say: (words: string) => void): boolean => {
       const { windowPanes, title, holdSidebar } = live.current;
-      const { target: on, place, next } = found.data as PaneDropHit;
+      const { target: on, place, next, outer } = found.data as PaneDropHit;
+      if (outer) {
+        const words = outerWords(outer, place !== 'none', carried.kind);
+        if (place === 'none') {
+          say(`${words}. Nothing changed.`);
+          return false;
+        }
+        holdSidebar(L.columns(next.root));
+        if (carried.kind === 'pane') windowPanes.movePane(carried.paneId, L.WHOLE, outer);
+        else windowPanes.openAt(carried.threadId, L.WHOLE, outer);
+        say(`${carried.label} ${words.replace(/^Open /, 'opened ').replace(/^Move /, 'moved ')}.`);
+        return true;
+      }
       const name = title(on);
       if (place === 'none') {
         say(`No room beside ${name}. Nothing changed.`);
-        return;
+        return false;
       }
       holdSidebar(L.columns(next.root));
       if (carried.kind === 'pane') {
@@ -209,6 +254,7 @@ export function usePaneDrop(options: PaneDropOptions): void {
         windowPanes.openAt(carried.threadId, on, place);
         say(`${carried.label} opened ${SIDE_WORDS[place]} ${name}.`);
       }
+      return true;
     };
     // A pane by its header (paneDrag.ts), while several show.
     const offPanes = registerDropTarget({
@@ -216,7 +262,7 @@ export function usePaneDrop(options: PaneDropOptions): void {
       accepts: () => live.current.multi,
       hit,
       over: draw,
-      drop: (found, carried) => drop(found, carried, announce),
+      drop: (found, carried) => void drop(found, carried, announce),
     });
     // A list row's thread (../threadDrag.ts): one thread at a time; several picked rows are no place's here.
     let carried: string | null = null;
@@ -246,8 +292,9 @@ export function usePaneDrop(options: PaneDropOptions): void {
         const threadId = ids[0]!;
         const thread: Carried = { kind: 'thread', threadId, label: rowTitle(threadId) };
         const at = hit(point.x, point.y, thread);
-        if (at) drop(at, thread, (words) => sayThreadDrag(words));
-        else sayThreadDrag('Nothing changed.');
+        if (at) return drop(at, thread, (words) => sayThreadDrag(words));
+        sayThreadDrag('Nothing changed.');
+        return false;
       },
     });
     return () => {

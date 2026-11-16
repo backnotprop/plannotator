@@ -11,8 +11,8 @@
  *   thread, as iPad Mail does, and an iPad upright (810 px) stacks.
  * - An open file covers its thread when the thread's 440 px column and a
  *   480 px file do not fit the window.
- * - Two threads side by side ("Open to the side", panes/beside.ts) cover the list
- *   when the list and two 440 px threads do not fit.
+ * - Several threads side by side (the free layout, panes/) step aside by their
+ *   own room rule (panes/layoutRoom.ts, 400 px panes); this file is called for one thread.
  *
  * Wide windows never stack, so a desktop at 1280 px and over is drawn
  * exactly as before.

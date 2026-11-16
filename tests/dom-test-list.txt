@@ -154,6 +154,7 @@ packages/inbox/sideBySide.test.tsx
 packages/inbox/fileCloseKeepsDraft.test.tsx
 packages/inbox/htmlPageComment.test.tsx
 packages/inbox/listColumn.test.tsx
+packages/inbox/shell/edgeTip.test.tsx
 packages/inbox/fitCountsColumn.test.tsx
 packages/inbox/endedSession.test.tsx
 packages/inbox/listRowEnded.test.tsx
@@ -794,8 +795,12 @@ packages/inbox/scheduled/scheduledEditor.test.tsx
 packages/inbox/scheduled/scheduledThread.test.tsx
 packages/inbox/scheduled/scheduledRows.test.tsx
 packages/inbox/scheduled/scheduledActions.test.tsx
+packages/inbox/scheduled/routineAutosave.test.tsx
 packages/ui/components/OpenInAppButton.line.test.tsx
 packages/ui/utils/openInLine.test.ts
 packages/editor/App.annotateView.test.tsx
 packages/inbox/replyMentionsField.test.tsx
+packages/inbox/components/listDrops.test.tsx
 packages/inbox/agents/projectFaceMarks.test.tsx
+packages/ui/components/frame/frame.dom.test.tsx
+packages/ui/hooks/useResizablePanel.resizeTo.dom.test.tsx

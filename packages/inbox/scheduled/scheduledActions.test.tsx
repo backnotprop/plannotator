@@ -177,7 +177,7 @@ test.skipIf(!hasDom)("Delete: the window's toast, whose Undo brings it back; a d
   expect(host.querySelector('[data-scheduled-row="sch_digest"]')).not.toBeNull();
 });
 
-test.skipIf(!hasDom)('a new one is made once; a pick made while it is being made is saved to it before it opens', async () => {
+test.skipIf(!hasDom)('a new one is made once; a pick made while it is being made is saved to it', async () => {
   const server = inbox([], { hold: '/api/inbox/scheduled' });
   const { host, opened } = page('new', []);
   await settle();
