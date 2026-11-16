@@ -848,7 +848,9 @@ async function sdkHostOf($: Engine): Promise<{ panel: boolean; hostPlanMode: boo
     // panel (an inherited tag, a nested run) still sits under Orca's card.
     return { ...none, panel, hostPlanMode: panelHostOwnsPlanMode(entrypoint) }
   }
-  return { ...none, t3Thread: t3ThreadOf({ ...env, thread: await $.env.get('T3CODE_THREAD_ID') }) }
+  // T3 owns Plan mode and draws its own plan card (SESSION_KIND_FEATURES): the same switch as Orca's.
+  const t3Thread = t3ThreadOf({ ...env, thread: await $.env.get('T3CODE_THREAD_ID') })
+  return { ...none, t3Thread, hostPlanMode: t3Thread !== null }
 }
 
 /** Why the mod passes an ExitPlanMode on, for the debug log. */

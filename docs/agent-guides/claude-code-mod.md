@@ -49,7 +49,7 @@ and each kind gets what works there:
 | `terminal` (interactive) | yes | yes | yes | the mod's |
 | `panel` (VS Code chat panel) | yes | yes | yes | the mod's |
 | `panel` (Orca chat) | yes | yes | yes | Orca's own plan card |
-| `t3` (a T3 Code thread) | yes, as the thread | yes, as the thread | yes | T3's own Plan mode |
+| `t3` (a T3 Code thread) | yes, as the thread | yes, as the thread | yes | T3's own Plan mode (the classic hook is switched off) |
 | `headless` (`claude -p`, any other SDK app) | yes | no | no: the classic CLI | the classic hook |
 
 The one real barrier is that a run without a person (`claude -p`, an SDK
@@ -227,9 +227,12 @@ claim folder holds, the T3 wake leaves the reply alone; once the poll is stale
 (T3 releases an idle Claude after 30 minutes, later while it has background
 work), the T3 wake sends what still waits, under a grant, and the bridge poll
 never hands the mod what the T3 wake handed for a send in flight. ExitPlanMode
-passes on to T3's own Plan mode (the mod passes it on, so the plugin's
-classic command hook runs there too; Orca's switch is not set for T3).
-Commands and the Bash take-over are the mod's,
+passes on to T3's own Plan mode. Once the mod passes it on, Claude Code runs
+the plugin's classic command hook too, which would open Plannotator's blocking
+review beside T3's card, so a thread gets Orca's switch (`PLANNOTATOR_PLAN_REVIEW=0`
+with its marker, never over the person's explicit on value; see "Orca chat"):
+the hook gives no decision and T3's card decides. Not seen yet in a real T3,
+neither before (the classic review in a thread) nor after. Commands and the Bash take-over are the mod's,
 and the opt-in T3 Bash hook (`prepareT3Hook`, `claudeModServesThread`) stands
 aside in a thread whose tag the mod set. Not seen yet in a real T3: how T3
 draws a plugin-started turn. A review decision after T3 released the Claude is
@@ -243,12 +246,12 @@ registered hooks on a fake `$`: every panel host and a T3 thread register both t
 poll as their session or thread and deliver once; each refusal is held and
 goes in once after the person's prompt; the mod's plan review opens in VS Code,
 and in Orca it does not, while Orca's code review
-stays the mod's; every process with Orca's entrypoint leaves a marked
-`PLANNOTATOR_PLAN_REVIEW=0` in its environment and no other session does,
+stays the mod's; every process with Orca's entrypoint and a T3 thread leave a marked
+`PLANNOTATOR_PLAN_REVIEW=0` in their environment and no other session does,
 the person's own value is never overwritten, and a terminal or panel
 session that inherited another session's marked `0` reviews plans and
 clears it; the real classic plan hook, run as a process in the environment
-the mod left, exits 0 with no decision for Orca, opens a review in another
+the mod left, exits 0 with no decision for Orca and a T3 thread, opens a review in another
 session's hook with that environment, and opens one for the VS Code panel;
 `mod-session-env.test.ts` (the CLI drops the marked `0` and keeps it for its
 own session's hook only); the `sdk` origin pulls the lease, a

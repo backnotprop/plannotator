@@ -309,7 +309,7 @@ describe('ExitPlanMode in a panel host', () => {
     // Sorted headless (an inherited tag, a nested run), still under Orca's card.
     ['Orca started from a Claude Code shell (another session\'s tag)', { ...ORCA, PLANNOTATOR_SESSION_TAG: 'claude-code:other' }, '0', OWN_MARK, {}, false],
     ['claude -p from Claude\'s Bash in an Orca session', { ...ORCA, CLAUDECODE: '1', CLAUDE_CODE_CHILD_SESSION: '1' }, '0', OWN_MARK, {}, false],
-    ['a T3 thread', T3, undefined, undefined, { listed: T3_OWN_TOOLS }, false],
+    ['a T3 thread', T3, '0', OWN_MARK, { listed: T3_OWN_TOOLS }, false],
     ['the VS Code panel', PANEL, undefined, undefined, {}, false],
     ['claude -p', { CLAUDE_CODE_ENTRYPOINT: 'sdk-cli' }, undefined, undefined, {}, false],
     ['no entrypoint', {}, undefined, undefined, {}, false],
@@ -795,8 +795,11 @@ describe("the plugin's classic plan hook, in the environment the mod leaves the 
     return { stdout, stderr, code, sessions: existsSync(sessions) ? readdirSync(sessions) : [] }
   }
 
-  test("Orca: it opens nothing and exits 0 with no decision, so Orca's own plan card decides", async () => {
-    const { world } = await started('classic-plan-orca', ORCA)
+  test.each<[string, Record<string, string>, { listed?: string[] }]>([
+    ['Orca', ORCA, {}],
+    ['a T3 thread', T3, { listed: T3_OWN_TOOLS }],
+  ])("%s: it opens nothing and exits 0 with no decision, so the host's own plan card decides", async (name, sessionEnv, options) => {
+    const { world } = await started(`classic-plan-${name.replace(/[^a-z0-9]+/gi, '-')}`, sessionEnv, options)
     const run = await classicPlanHook(world.env, 20_000)
     expect(run.code).toBe(0)
     expect(run.stdout).toBe('')
