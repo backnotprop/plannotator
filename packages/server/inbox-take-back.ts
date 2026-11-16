@@ -1,4 +1,5 @@
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
+import { inboxThreadMentionsTakenBack } from "@plannotator/core/inbox-thread-mention";
 import { inboxId, type InboxDraft, type InboxMessage, type InboxReplyDraft, type InboxUpload } from "@plannotator/core/inbox-types";
 import { saveInboxDraft } from "@plannotator/shared/inbox/drafts";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
@@ -34,10 +35,14 @@ export function createInboxTakeBack(options: {
   const replyDraft = (message: InboxMessage, uploads: readonly InboxUpload[]): InboxReplyDraft | null => {
     const kept = store.replyDraft(message.thread_id);
     const recipients = [store.recipientOf(message)?.session, ...(message.tags ?? []).map((t) => t.session)].filter((s): s is string => !!s);
+    // The words as the person wrote them: each thread mention its title again, kept as a mention (the list goes).
+    const taken = inboxThreadMentionsTakenBack(message.body);
+    const shift = kept?.body.trim() ? taken.body.length + 2 : 0;
     return store.saveReplyDraft(message.thread_id, {
       base: kept?.updated_at ?? null,
-      body: joined(message.body, kept),
-      files: filesOf(message.body, uploads, kept),
+      body: joined(taken.body, kept),
+      files: filesOf(taken.body, uploads, kept),
+      mentions: [...taken.mentions, ...(kept?.mentions ?? []).map((m) => ({ ...m, at: m.at + shift }))],
       all_files: true,
       ...(kept ? {} : { recipients, ...(message.quote ? { quote: message.quote } : {}) }),
     });
@@ -46,15 +51,16 @@ export function createInboxTakeBack(options: {
   const composeDraft = (message: InboxMessage, uploads: readonly InboxUpload[]): InboxDraft => {
     const kept = store.replyDraft(message.thread_id);
     const project = store.project(message.project_id);
+    const taken = inboxThreadMentionsTakenBack(message.body).body;
     const where = project ? { id: project.id, root: project.root, name: project.name } : null;
     const draft = saveInboxDraft(
       store.dir,
       inboxId("drf"),
       {
-        body: joined(message.body, kept),
+        body: joined(taken, kept),
         to: message.to ? { host: message.to.host, session: message.to.session, project_root: where?.root ?? null, project_name: where?.name ?? null, started_at: null } : null,
         project: where,
-        files: filesOf(message.body, uploads, kept),
+        files: filesOf(taken, uploads, kept),
         ...(message.thread_name ? { thread_name: message.thread_name } : {}),
       },
       now().toISOString(),

@@ -14,6 +14,8 @@ import { BulkTagList } from './BulkTags';
 import type { MenuPicks } from './useListPicks';
 import { bulkTargets } from '../rowPicks';
 import { formatCount } from '@plannotator/core/inbox-format';
+import { MentionMenuItem } from './MentionMenuItem';
+import { useThreadRowDrag } from './useThreadRowDrag';
 
 export interface ThreadRowMenuProps {
   className: string;
@@ -125,6 +127,8 @@ export const ThreadRowMenu = forwardRef<HTMLDivElement, ThreadRowMenuProps>(func
     longPress: true,
   });
   const target = menu.targetId ? props.rowOf(menu.targetId) : null;
+  // A row pressed with a mouse and moved is dragged (threadDrag.ts): into the reply box, a mention.
+  const pressRow = useThreadRowDrag({ body, rowOf: props.rowOf, picks: props.picks, off: props.disabled === true || props.phone === true });
   const actions = target ? rowMenuActions(target, props.canMarkRead, props.pinnedOf ? props.pinnedOf(target) : null, props.sectionOf?.(target.thread_id) ?? null, props.onSnooze !== undefined && ((props.snoozesOf?.(target) ?? true) || !!props.snoozeBlockedOf?.(target)), props.prioritizesOf?.(target) ?? true) : [];
   const snoozeBlocked = target ? (props.snoozeBlockedOf?.(target) ?? null) : null;
   // A picked row: the menu is the picks' (acting on every picked row).
@@ -207,7 +211,10 @@ export const ThreadRowMenu = forwardRef<HTMLDivElement, ThreadRowMenuProps>(func
   return (
     <ContextMenu.Root {...menu.root}>
       {/* Buttons and the empty list's link keep the platform's own long-press callout (the hook's `style`). */}
-      <ContextMenu.Trigger ref={body} className={props.className} {...menu.trigger}>
+      <ContextMenu.Trigger ref={body} className={props.className} {...menu.trigger} onPointerDown={(event) => {
+          menu.trigger.onPointerDown?.(event);
+          pressRow(event);
+        }}>
         {props.children}
       </ContextMenu.Trigger>
       <ContextMenu.Portal container={portal ?? undefined}>
@@ -308,7 +315,10 @@ export const ThreadRowMenu = forwardRef<HTMLDivElement, ThreadRowMenuProps>(func
                   </Menu.Item>
                 )}
                 {(pinning.length > 0 || (target && tags?.can(target.thread_id))) && <Menu.Separator className="ib-pm-sep" />}
+                {/* Mention in reply (approval "inbox-drag-threads"): first in the group on a phone's sheet, last on a computer. */}
+                {props.phone && target && <MentionMenuItem rows={[target]} phone />}
                 {copies.map(item)}
+                {!props.phone && target && <MentionMenuItem rows={[target]} phone={false} />}
                 {writes.length > 0 && <Menu.Separator className="ib-pm-sep" />}
                 {writes.map(item)}
               </>
