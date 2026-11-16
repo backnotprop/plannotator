@@ -16,6 +16,7 @@ import type { PaneOnScreen } from '../panes/onScreen';
 import { PaneScopeContext } from '../panes/scope';
 import { priorityAction } from '../priority';
 import { threadLink } from '../rowMenu';
+import { focusBoardTitle } from '../shape/boardFocus';
 import { ShapePebbleButton } from '../shape/ShapeParts';
 import { threadBoardCard } from '../steps/model';
 import { openTakenBack } from '../takenBackCompose';
@@ -85,6 +86,9 @@ export function ThreadSlot({ paneId, threadId, active, shown: onPage = true, hel
     reportScreen();
   });
   const onClose = fromCard ? host.backToCard : () => close({ ...route, thread: null, file: null });
+  // The address's board, in this pane while it shows that thread: only one the window draws (none with Shape off, or
+  // while a review draws its own). On a phone it is a screen of its own, as the Artifacts view is: back is the thread.
+  const boardNode = route.shape && host.board && thread && thread.thread_id === route.thread ? host.board(true, stack.thread) || null : null;
   return (
     <PaneScopeContext.Provider value={scope}>
       {/* Beside the list, the thread's place says it is opening (or why not) until its read lands; a phone
@@ -204,8 +208,11 @@ export function ThreadSlot({ paneId, threadId, active, shown: onPage = true, hel
             const board = host.boardsOn && thread ? host.shapes.byThread.get(thread.thread_id) : undefined;
             if (!board) return null;
             const open = !!route.shape;
-            return <ShapePebbleButton shape={board} open={open} onToggle={() => (open ? close({ ...route, shape: null }) : go({ ...route, shape: board.id }))} />;
+            // In the Artifacts view's place (one view at a time); opened by this press, its title takes the focus.
+            const show = () => (go({ ...route, shape: board.id, artifacts: false, links: false }), focusBoardTitle(board.id));
+            return <ShapePebbleButton shape={board} open={open} onToggle={() => (open ? close({ ...route, shape: null }) : show())} />;
           })()}
+          board={boardNode}
           onSide={host.ask.side}
           onSideWords={host.ask.sideWords}
           replyWords={host.askReply?.threadId === thread.thread_id ? host.askReply.words : null}
@@ -224,7 +231,7 @@ export function ThreadSlot({ paneId, threadId, active, shown: onPage = true, hel
             void host.refreshList(false);
             return true;
           }}
-          onClose={onClose}
+          onClose={phone && boardNode ? () => close({ ...routeRef.current, shape: null }) : onClose}
           file={route.file ?? null}
           namedFile={route.ref ?? null}
           onOpenNamedFile={(ref) => (ref ? go({ ...routeRef.current, file: null, ref }) : close({ ...routeRef.current, ref: null }))}
@@ -232,9 +239,9 @@ export function ThreadSlot({ paneId, threadId, active, shown: onPage = true, hel
           fullFromSide={fullFromSide(window.history.state)}
           fullExitFile={fullExitFile(window.history.state)}
           onOpenGuide={(messageId, at) => go({ ...route, guide: messageId, ...(at ? { guideAt: at } : {}) })}
-          artifacts={route.artifacts === true}
-          onArtifacts={(open) => (open ? go({ ...routeRef.current, artifacts: true, links: false, msg: null }) : close({ ...routeRef.current, artifacts: false, links: false }))}
-          links={route.artifacts === true && route.links === true}
+          artifacts={route.artifacts === true && !boardNode}
+          onArtifacts={(open) => (open ? go({ ...routeRef.current, artifacts: true, links: false, msg: null, shape: null }) : close({ ...routeRef.current, artifacts: false, links: false }))}
+          links={route.artifacts === true && route.links === true && !boardNode}
           // Between the view's two sides: the same screen, so Back still returns to the thread.
           onLinks={(on) => writeRoute({ ...routeRef.current, links: on }, { replace: true })}
           // Decision mode's one way in (thread only): from two of this thread's decisions up, and not while a
@@ -262,7 +269,7 @@ export function ThreadSlot({ paneId, threadId, active, shown: onPage = true, hel
             screen.current = state;
             reportScreen();
           }}
-          backLabel={fromCard ? 'Board' : route.reviews ? 'Reviews' : listTitle}
+          backLabel={phone && boardNode ? 'Thread' : fromCard ? 'Board' : route.reviews ? 'Reviews' : listTitle}
           cardChip={fromCard ? <CardChip card={host.cards?.cards.find((c) => c.id === fromCard) ?? null} onOpen={host.backToCard} /> : undefined}
           phone={phone}
           stacked={stack.thread || !!fromCard}
