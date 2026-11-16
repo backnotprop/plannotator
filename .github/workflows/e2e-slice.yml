@@ -91,7 +91,8 @@ jobs:
   slice:
     name: Browser slice (${{ matrix.shard }}/${{ needs.plan.outputs.count }})
     needs: [plan]
-    if: ${{ needs.plan.outputs.count != '0' && !github.event.pull_request.draft }}
+    # TEMPORARY, reverted in the next commit: run on this draft PR once to prove the changed shard job.
+    if: ${{ needs.plan.outputs.count != '0' && (!github.event.pull_request.draft || github.event.pull_request.draft) }}
     runs-on: ubuntu-24.04
     # From the plan (shardTimeout in scripts/e2e-slice.ts): 5 minutes of setup
     # and build, 3 for the update specs' release pass, and 2.5 x the longest
