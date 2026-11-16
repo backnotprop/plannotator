@@ -98,18 +98,53 @@ export type PlanDelivery = 'replied' | 'composing' | 'held' | 'no-agent';
 
 type SentBody = Parameters<typeof plansApi.sent>[1];
 
-/** The records of Sends that went but could not be recorded yet, in this browser, tried again when a plan page opens. */
+/**
+ * The records of Sends that went but could not be recorded yet, in this browser's localStorage (the Inbox's origin is
+ * fixed), at most 50, tried again when a plan page opens. Not Plannotator's `storage`: that is cookies, which hold
+ * about ten entries and ride on every request. A queue an older build kept there is moved once.
+ */
 export const PLAN_SENT_QUEUE_KEY = 'plannotator-inbox-plan-sent-queue';
+const QUEUE_MAX = 50;
 type QueuedSent = { id: string; body: SentBody };
-const readQueue = (): QueuedSent[] => {
+const local = (): Storage | null => {
   try {
-    const value = JSON.parse(storage.getItem(PLAN_SENT_QUEUE_KEY) ?? '[]') as unknown;
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+};
+const parseQueue = (raw: string | null): QueuedSent[] => {
+  try {
+    const value = JSON.parse(raw ?? '[]') as unknown;
     return Array.isArray(value) ? (value as QueuedSent[]) : [];
   } catch {
     return [];
   }
 };
-const writeQueue = (queue: readonly QueuedSent[]) => (queue.length ? storage.setItem(PLAN_SENT_QUEUE_KEY, JSON.stringify(queue.slice(-50))) : storage.removeItem(PLAN_SENT_QUEUE_KEY));
+const writeQueue = (queue: readonly QueuedSent[]) => {
+  try {
+    if (queue.length) local()?.setItem(PLAN_SENT_QUEUE_KEY, JSON.stringify(queue.slice(-QUEUE_MAX)));
+    else local()?.removeItem(PLAN_SENT_QUEUE_KEY);
+  } catch {
+    // No room or no storage: the record is lost, as it would be with no queue (the words went).
+  }
+};
+const readQueue = (): QueuedSent[] => {
+  let queue: QueuedSent[] = [];
+  try {
+    queue = parseQueue(local()?.getItem(PLAN_SENT_QUEUE_KEY) ?? null);
+  } catch {
+    // Unreadable: nothing queued here.
+  }
+  // An older build's queue, in the cookie: moved here once, the cookie cleared.
+  const old = storage.getItem(PLAN_SENT_QUEUE_KEY);
+  if (old !== null && local()) {
+    queue = [...parseQueue(old), ...queue].slice(-QUEUE_MAX);
+    writeQueue(queue);
+    storage.removeItem(PLAN_SENT_QUEUE_KEY);
+  }
+  return queue;
+};
 
 /** How long the quiet record waits between tries (the last try's failure queues it). */
 let sentRetryWaits: readonly number[] = [0, 1_000, 4_000, 15_000];
@@ -149,9 +184,10 @@ export async function flushQueuedPlanSent(): Promise<number> {
       await plansApi.sent(entry.id, entry.body);
       landed++;
     } catch (error) {
-      // A plan or comment that is gone (4xx) is dropped; anything else waits for the next page.
+      // A record refused for good (400: no longer a valid record; 404: the plan or version is gone) is dropped;
+      // anything else waits for the next page, a 409 too (the Inbox restarted under this tab: the next page has it).
       const status = (error as { status?: unknown }).status;
-      if (!(typeof status === 'number' && status >= 400 && status < 500)) left.push(entry);
+      if (status !== 400 && status !== 404) left.push(entry);
     }
   }
   if (left.length) writeQueue([...left, ...readQueue()]);

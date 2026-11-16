@@ -1054,32 +1054,42 @@ test.skipIf(!hasDom)('a reply that went is never said to have failed when record
   await deliver!.deliverToPlanAgent({ plan: store.get(id)!, agent: thread, words: '# Direct Edits\n\nx', comments: [], told: null, onSent: () => {} });
   expect(new Set(replies.map((r) => r.body.idempotency_key)).size).toBe(3);
 
-  // Every try failed (the Inbox down for the whole wait): the record waits in storage, and the next plan page records it.
+  // Every try failed (the Inbox down for the whole wait): the record waits in localStorage (never the cookie), and the
+  // next plan page records it.
   deliver!.setPlanSentRetryWaitsForTests([0, 5]);
-  let down = true;
+  const KEY = deliver!.PLAN_SENT_QUEUE_KEY;
+  let refuse: number | null = 503;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    if (String(input).endsWith('/sent') && down) return Response.json({ error: 'busy' }, { status: 503 });
+    if (String(input).endsWith('/sent') && refuse !== null) return Response.json({ error: 'refused', code: refuse === 409 ? 'server_session_mismatch' : 'busy' }, { status: refuse });
     return inner(input, init);
   }) as typeof fetch;
+  const queued = () => (JSON.parse(localStorage.getItem(KEY) ?? '[]') as { id: string }[]).map((q) => q.id);
   try {
     const other = plan('Rate limits', 'harbor-api', ['# Rate limits\n\nA bucket.\n', '# Rate limits\n\nTwo.\n']);
     store.updatePlan(other, { thread_id: 'msg_01M7JKWTSFEGR2XJQEJ1R2GHCZ' });
     const otherDoc = store.get(other)!.primary_doc_id;
     await deliver!.deliverToPlanAgent({ plan: store.get(other)!, agent: { ...thread, thread: 'msg_01M7JKWTSFEGR2XJQEJ1R2GHCZ' }, words: '# Direct Edits\n\ny', comments: [], told: { doc: otherDoc, version: 2 }, onSent: () => {} });
-    for (let i = 0; i < 20 && !kept.get(deliver!.PLAN_SENT_QUEUE_KEY); i++) await new Promise((r) => setTimeout(r, 10));
-    expect(JSON.parse(kept.get(deliver!.PLAN_SENT_QUEUE_KEY)!).map((q: { id: string }) => q.id)).toEqual([other]);
+    for (let i = 0; i < 20 && !localStorage.getItem(KEY); i++) await new Promise((r) => setTimeout(r, 10));
+    expect(queued()).toEqual([other]);
+    expect(kept.has(KEY)).toBe(false);
     expect(store.get(other)!.agent_told).toBeUndefined();
-    // Still down when a page opens: it stays queued.
+    // The Inbox restarted under the tab (409, another server session): it stays queued.
+    refuse = 409;
     expect(await deliver!.flushQueuedPlanSent()).toBe(0);
-    expect(kept.has(deliver!.PLAN_SENT_QUEUE_KEY)).toBe(true);
-    // Back: the plan page that opens records it, and the queue is empty.
-    down = false;
+    expect(queued()).toEqual([other]);
+    // An older build kept its queue in the cookie: moved once, the cookie cleared. A record refused for good (400: not
+    // a record; 404: its plan is gone) is dropped; the rest lands when a plan page opens.
+    kept.set(KEY, JSON.stringify([{ id: other, body: { bogus: true } }, { id: 'pln_01M7JKWTSFEGR2XJQEJ1R2GHZZ', body: { thread_id: null, message_id: 'msg_x', to: null, comments: [], told: null } }]));
+    refuse = null;
     window.location.hash = `#plans=${other}`;
     draw();
     for (let i = 0; i < 20 && !store.get(other)!.agent_told; i++) await settle();
-    expect(kept.has(deliver!.PLAN_SENT_QUEUE_KEY)).toBe(false);
     expect(store.get(other)!.agent_told).toEqual({ [otherDoc]: 2 });
+    for (let i = 0; i < 20 && localStorage.getItem(KEY); i++) await settle();
+    expect(localStorage.getItem(KEY)).toBeNull();
+    expect(kept.has(KEY)).toBe(false);
   } finally {
+    localStorage.removeItem(KEY);
     deliver!.setPlanSentRetryWaitsForTests(null);
   }
 
