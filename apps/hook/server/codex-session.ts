@@ -185,7 +185,9 @@ function parseRolloutEntries(rolloutPath: string): RolloutEntry[] {
     .filter(Boolean)
     .flatMap((line) => {
       try {
-        return [JSON.parse(line) as RolloutEntry];
+        const entry: unknown = JSON.parse(line);
+        if (!entry || typeof entry !== "object" || !("type" in entry) || typeof entry.type !== "string") return [];
+        return [entry as RolloutEntry];
       } catch {
         return [];
       }
@@ -203,7 +205,7 @@ function getMessageText(
   if (!Array.isArray(contentBlocks)) return null;
 
   const textParts = contentBlocks
-    .filter((block) => allowedContentTypes.includes(block.type))
+    .filter((block) => block && allowedContentTypes.includes(block.type))
     .map((block) => (typeof block.text === "string" ? block.text.trim() : ""))
     .filter(Boolean);
 

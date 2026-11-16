@@ -626,6 +626,28 @@ describe("getLastCodexMessage", () => {
     expect(result!.text).toBe("Valid message");
   });
 
+  test("keeps readable assistant text around malformed JSON values", () => {
+    const path = writeTempRollout(
+      buildRollout(
+        turnStarted("turn-readable"),
+        "null",
+        JSON.stringify({
+          type: "response_item",
+          payload: {
+            type: "message",
+            role: "assistant",
+            content: [null, { type: "output_text", text: "Readable answer" }, { type: "output_text", text: 4 }],
+          },
+        }),
+        turnCompleted("turn-readable"),
+        "null",
+      ),
+    );
+
+    expect(getLastCodexMessage(path, { beforeActiveTurn: true })?.text).toBe("Readable answer");
+    expect(getRecentCodexMessages(path, 5, { beforeActiveTurn: true }).map(({ text }) => text)).toEqual(["Readable answer"]);
+  });
+
   test("can ignore assistant messages from the active Codex turn", () => {
     const previousTurnId = "turn-previous";
     const activeTurnId = "turn-active";
