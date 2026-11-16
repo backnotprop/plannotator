@@ -780,3 +780,5 @@ packages/inbox/scheduled/scheduledEditor.test.tsx
 packages/inbox/scheduled/scheduledThread.test.tsx
 packages/inbox/scheduled/scheduledRows.test.tsx
 packages/inbox/scheduled/scheduledActions.test.tsx
+packages/ui/components/OpenInAppButton.line.test.tsx
+packages/ui/utils/openInLine.test.ts
