@@ -257,3 +257,8 @@
 .pn-inbox .am[hidden] { display: none; }
 /* Its three long choices with their pictures keep one line in the Rows page's control column (438 px at 1440). */
 .ib-rws-ctl [data-rows-control="agents"] .ib-seg-o { padding: 0 8px; gap: 5px; }
+/* A phone's column is too narrow for the three in a line: one under another, each the control's full width. */
+@media (max-width: 480px) {
+  .ib-rws-ctl [data-rows-control="agents"] .ib-seg { display: flex; flex-direction: column; align-items: stretch; flex-wrap: nowrap; width: 100%; }
+  .ib-rws-ctl [data-rows-control="agents"] .ib-seg-o { justify-content: flex-start; height: 36px; padding: 0 10px; gap: 8px; }
+}
