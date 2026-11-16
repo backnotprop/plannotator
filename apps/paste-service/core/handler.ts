@@ -38,7 +38,7 @@ function generateId(): string {
 }
 
 export async function createPaste(
-  data: string,
+  data: unknown,
   store: PasteStore,
   options: Partial<PasteOptions> = {}
 ): Promise<{ id: string }> {
@@ -48,7 +48,7 @@ export async function createPaste(
     throw new PasteError('Missing or invalid "data" field', 400);
   }
 
-  if (data.length > opts.maxSize) {
+  if (data.length > opts.maxSize || new TextEncoder().encode(data).byteLength > opts.maxSize) {
     throw new PasteError(
       `Payload too large (max ${formatByteLimit(opts.maxSize)} encrypted)`,
       413
@@ -100,9 +100,9 @@ export async function handleRequest(
   }
 
   if (url.pathname === "/api/paste" && request.method === "POST") {
-    let body: { data?: unknown };
+    let body: { data?: unknown } | null;
     try {
-      body = (await request.json()) as { data?: unknown };
+      body = (await request.json()) as { data?: unknown } | null;
     } catch {
       return Response.json(
         { error: "Invalid JSON body" },
@@ -110,7 +110,7 @@ export async function handleRequest(
       );
     }
     try {
-      const result = await createPaste(body.data as string, store, options);
+      const result = await createPaste(body?.data, store, options);
       return Response.json(result, { status: 201, headers: cors });
     } catch (e) {
       if (e instanceof PasteError) {
