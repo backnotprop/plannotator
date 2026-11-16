@@ -5854,7 +5854,8 @@ const ReviewApp: React.FC = () => {
                 touch
                 isOpen={reviewSidebar.isOpen}
                 commentCount={totalAnnotationCount}
-                attention={(aiMessages.length > 0 && !(reviewSidebar.isOpen && reviewSidebar.activeTab === 'ai')) || agentJobs.jobs.some(j => j.status === 'running' || j.status === 'starting')}
+                agentRunning={agentJobs.jobs.some(j => j.status === 'running' || j.status === 'starting')}
+                aiUnread={aiMessages.length > 0 && !(reviewSidebar.isOpen && reviewSidebar.activeTab === 'ai')}
                 onToggle={() => reviewSidebar.isOpen ? reviewSidebar.close() : reviewSidebar.open()}
               />
             )}
@@ -6045,7 +6046,8 @@ const ReviewApp: React.FC = () => {
               <ReviewPanelToggle
                 isOpen={reviewSidebar.isOpen}
                 commentCount={totalAnnotationCount}
-                attention={(aiMessages.length > 0 && !(reviewSidebar.isOpen && reviewSidebar.activeTab === 'ai')) || agentJobs.jobs.some(j => j.status === 'running' || j.status === 'starting')}
+                agentRunning={agentJobs.jobs.some(j => j.status === 'running' || j.status === 'starting')}
+                aiUnread={aiMessages.length > 0 && !(reviewSidebar.isOpen && reviewSidebar.activeTab === 'ai')}
                 onToggle={() => reviewSidebar.isOpen ? reviewSidebar.close() : reviewSidebar.open()}
               />
             )}
