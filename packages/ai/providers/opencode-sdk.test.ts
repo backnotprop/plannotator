@@ -204,6 +204,34 @@ describe("OpenCodeProvider server lifecycle", () => {
 		expect(spawned[1]!.closed).toBe(true);
 	});
 
+	test("an old rejected startup does not clear the next startup", async () => {
+		const provider = makeProvider();
+		let releaseOld = () => {};
+		let releaseCurrent = () => {};
+		try {
+			spawnGate = new Promise<void>((resolve) => { releaseOld = resolve; });
+			const old = provider.ensureServer().catch((error: unknown) => error);
+			await Bun.sleep(0);
+			provider.dispose();
+
+			spawnGate = new Promise<void>((resolve) => { releaseCurrent = resolve; });
+			const current = provider.ensureServer();
+			await Bun.sleep(0);
+			releaseOld();
+			expect(await old).toBeInstanceOf(Error);
+			expect(spawned[0]?.closed).toBe(true);
+
+			const concurrent = provider.ensureServer();
+			releaseCurrent();
+			await Promise.all([current, concurrent]);
+			expect(spawned).toHaveLength(2);
+		} finally {
+			releaseOld();
+			releaseCurrent();
+			provider.dispose();
+		}
+	});
+
 	test("surfaces a friendly error when opencode is not on PATH (ENOENT)", async () => {
 		const provider = makeProvider();
 		const listenersBefore = process.listeners("exit").length;
