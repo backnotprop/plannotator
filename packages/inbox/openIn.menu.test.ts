@@ -89,19 +89,22 @@ describe("openInMenu and newTabUrl for a file on another machine", () => {
     expect(newTabUrl(plan, "current")).toBeNull();
   });
 
-  test("another machine's file: no editors, no Default app, no Finder, no page tab; an image keeps its new tab (Copy path ends every list)", () => {
+  test("another machine's file: no editors, no Default app, no Finder; a page and an image open in a new tab through the forward (Copy path ends every list)", () => {
     setSelfMachine(SELF);
     rememberMachine([page.id, plan.id, shot.id], OTHER);
-    // The editors, Default app and Finder would launch on this computer, which does not have the file; that machine's
-    // door has no page route. Pinned item by item: an empty list still shows Copy path (OpenInMenuItems adds it).
-    expect(openInMenu(page, detected, "mac", null, "current")).toEqual({ items: [], primary: null, missing: false });
+    // The editors, Default app and Finder would launch on this computer, which does not have the file. Pinned item by
+    // item: an empty list still shows Copy path (OpenInMenuItems adds it).
+    const pageTab = { kind: "browser" as const, id: "browser" as const, label: "Browser", href: `/api/inbox/m/${OTHER}/attachments/${page.id}/page` };
+    expect(openInMenu(page, detected, "mac", null, "current")).toEqual({ items: [pageTab], primary: pageTab, missing: false });
+    const sentTab = { ...pageTab, href: `${pageTab.href}?version=sent` };
+    expect(openInMenu(page, detected, "mac", null, "sent")).toEqual({ items: [sentTab], primary: sentTab, missing: false });
     expect(openInMenu(plan, detected, "mac", null, "current")).toEqual({ items: [], primary: null, missing: false });
-    const tab = { kind: "browser" as const, id: "browser" as const, label: "Browser", href: `/api/inbox/m/${OTHER}/attachments/${shot.id}/image` };
-    expect(openInMenu(shot, detected, "mac", null, "current")).toEqual({ items: [tab], primary: tab, missing: false });
-    // From the tailnet's icon too: no page tab, the image's through the forward.
-    expect(newTabUrl(page, "current")).toBeNull();
-    expect(newTabUrl(page, "sent")).toBeNull();
-    expect(newTabUrl(shot, "current")).toBe(`/api/inbox/m/${OTHER}/attachments/${shot.id}/image`);
+    const shotTab = { kind: "browser" as const, id: "browser" as const, label: "Browser", href: `/api/inbox/m/${OTHER}/attachments/${shot.id}/image` };
+    expect(openInMenu(shot, detected, "mac", null, "current")).toEqual({ items: [shotTab], primary: shotTab, missing: false });
+    // From the tailnet's icon too.
+    expect(newTabUrl(page, "current")).toBe(pageTab.href);
+    expect(newTabUrl(page, "sent")).toBe(sentTab.href);
+    expect(newTabUrl(shot, "current")).toBe(shotTab.href);
     expect(newTabUrl(plan, "current")).toBeNull();
   });
 });

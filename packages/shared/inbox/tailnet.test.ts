@@ -99,6 +99,30 @@ describe("tailnetFetchSiteAllowed", () => {
       expect(tailnetFetchSiteAllowed("POST", "/api/html-assets/tok/x", h({ "Sec-Fetch-Site": site }))).toBe(false);
     }
   });
+  test("a linked machine's attached page loads its folder through the forward; nothing else under the forward opens cross-site", () => {
+    const machine = "ibx_01K7MMMMMMMMMMMMMMMMMMMMMM";
+    for (const site of ["cross-site", "same-site"]) {
+      for (const mode of ["no-cors", "cors", "navigate"]) {
+        expect(tailnetFetchSiteAllowed("GET", `/api/inbox/m/${machine}/html-assets/tok/style.css`, h({ "Sec-Fetch-Site": site, "Sec-Fetch-Mode": mode }))).toBe(true);
+      }
+      expect(tailnetFetchSiteAllowed("HEAD", `/api/inbox/m/${machine}/html-assets/tok/img.png`, h({ "Sec-Fetch-Site": site }))).toBe(true);
+      // Still refused: a write, the page route itself, any other forwarded route, a malformed machine id, a look-alike.
+      for (const [method, path] of [
+        ["POST", `/api/inbox/m/${machine}/html-assets/tok/x`],
+        ["GET", `/api/inbox/m/${machine}/attachments/att_x/page`],
+        ["GET", `/api/inbox/m/${machine}/attachments/att_x/view`],
+        ["GET", `/api/inbox/m/${machine}/threads`],
+        ["GET", `/api/inbox/m/${machine}/html-assets`],
+        ["GET", "/api/inbox/m/ibx_short/html-assets/tok/x.css"],
+        ["GET", `/api/inbox/m/${machine.toLowerCase()}/html-assets/tok/x.css`],
+        ["GET", `/api/inbox/m/${machine}/x/html-assets/tok/x.css`],
+        ["GET", `/x/api/inbox/m/${machine}/html-assets/tok/x.css`],
+        ["GET", "/api/inbox/machines"],
+      ] as const) {
+        expect([method, path, tailnetFetchSiteAllowed(method, path, h({ "Sec-Fetch-Site": site, "Sec-Fetch-Mode": "no-cors" }))]).toEqual([method, path, false]);
+      }
+    }
+  });
 });
 
 describe("serve routes that land on the window's port", () => {

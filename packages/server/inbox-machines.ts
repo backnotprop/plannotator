@@ -30,11 +30,13 @@ import { InboxError } from "@plannotator/shared/inbox/schema";
 import { inboxSnoozeRefusal, inboxSnoozeRunning } from "@plannotator/core/inbox-snooze";
 import { refuseInboxSnoozeUntil } from "@plannotator/shared/inbox/snoozes";
 import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
+import { isForwardedHtmlAssetPath } from "@plannotator/shared/inbox/tailnet";
 import { decodePathSegment } from "@plannotator/shared/path-segment";
 import { INBOX_MACHINE_PULL_WINDOW_ONLY_BODY, INBOX_MACHINE_WINDOW_ONLY_BODY, isWindowRequest } from "./inbox-cross-site";
 import { INBOX_MACHINE_ACCOUNTS_MAX_BYTES, INBOX_MACHINE_ACCOUNTS_WAIT_MS, parsePeerAccounts } from "./inbox-accounts";
 import { buildLinkOffer, InboxLinks, parseLinkOffer, type InboxLinkRecord } from "./inbox-links";
 import { createMachinePulls } from "./inbox-machine-pulls";
+import { MACHINE_ASSET_ROUTE, MACHINE_PAGE_ROUTE, MACHINE_VIEW_ROUTE, machineAssetAnswer, machinePageAnswer, machineViewAnswer } from "./inbox-machine-page";
 import { createMachineLaunchReads, MACHINE_SESSIONS_ROUTE } from "./inbox-machine-launch-reads";
 import { doorWriteKind, forwardsNow, InboxOutbox, MACHINE_WINDOW_HEADER, type OutboxEntry } from "./inbox-outbox";
 import { farVersion, MACHINE_LINKS_PROTOCOL, parseFarUpdate, PEER_LINK_TIMINGS, PeerLink, readCapped, type PeerCards, type PeerLinkTimings, type PeerRecord, type PeerRereadEvent } from "./inbox-peer-link";
@@ -417,8 +419,8 @@ const PASS_RESPONSE = [
  * SVG, an HTML asset, an older, buggy or hostile Inbox's answer with a
  * permissive CSP) can run script here.
  */
-function passAnswer(response: Response): Response {
-  const headers = pick(response.headers, PASS_RESPONSE);
+function passAnswer(response: Response, also: readonly string[] = []): Response {
+  const headers = pick(response.headers, also.length ? [...PASS_RESPONSE, ...also] : PASS_RESPONSE);
   const csp = headers["content-security-policy"]?.trim() ?? "";
   const directives = csp.split(";").map((d) => d.trim().split(/\s+/)[0]!.toLowerCase());
   if (!directives.includes("sandbox")) headers["content-security-policy"] = csp ? `${csp.replace(/;\s*$/, "")}; sandbox` : "sandbox";
@@ -848,9 +850,15 @@ export function createInboxMachines(context: InboxMachinesContext) {
       // Its launch block and home are kept for a window opened while it sleeps (`launch_reads` on the machines read),
       // numbered as the read starts so an older answer that ends later never replaces a newer one.
       const sessionsRead = route === MACHINE_SESSIONS_ROUTE ? launchReads.begin() : null;
+      // An attached page's own tab is made here from its door's `view` (inbox-machine-page.ts): no page route there.
+      const page = MACHINE_PAGE_ROUTE.exec(route);
       try {
-        const answer = await peer.request(route, search, { method: "GET", headers, signal: req.signal });
+        const answer = await peer.request(page ? `attachments/${page[1]}/view` : route, search, { method: "GET", headers, signal: req.signal });
         if (sessionsRead !== null && answer.ok) void launchReads.keep(machine, sessionsRead, answer.clone(), () => peers.has(machine));
+        if (page) return await machinePageAnswer(answer, machine, search, (far) => passAnswer(far));
+        if (MACHINE_VIEW_ROUTE.test(route)) return passAnswer(await machineViewAnswer(answer, machine));
+        // Its folder, read from an opaque origin as a local page's is: CORS reads (fonts, module scripts) as here.
+        if (MACHINE_ASSET_ROUTE.test(route)) return passAnswer(await machineAssetAnswer(answer, machine), ["access-control-allow-origin"]);
         return passAnswer(answer);
       } catch {
         return offline();
@@ -1063,7 +1071,8 @@ export function createInboxMachines(context: InboxMachinesContext) {
   const route = async (req: Request, url: URL, via: "local" | "tailnet"): Promise<Response | null> => {
     const path = url.pathname;
     // Another site's page must not read (or time) other machines' threads or the links: refused like the window's other reads.
-    if (req.method === "GET" && !isSameOriginOrNoOrigin(req.headers.get("origin"), req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
+    // Except a linked machine's HTML asset route: its attached page is an opaque origin, as `/api/html-assets/` here.
+    if (req.method === "GET" && !isForwardedHtmlAssetPath(path) && !isSameOriginOrNoOrigin(req.headers.get("origin"), req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
       return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
     }
     const forwarded = FORWARD.exec(path);

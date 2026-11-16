@@ -359,6 +359,42 @@ test("3. answering MacBook's thread from Studio reaches MacBook's agent", async 
   expect(macMessage).not.toBe('');
 });
 
+test("3b. an HTML page on MacBook opens from Studio with its folder: in the viewer beside the thread, and in a new tab", async () => {
+  const onMac = await agentOn(macbook);
+  const project = scratchProject(macbook.code, 'pricing-site');
+  mkdirSync(join(project, 'site'), { recursive: true });
+  writeFileSync(join(project, 'site', 'pricing.html'), '<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="style.css"><title>Pricing</title></head><body><h1 id="title">Pricing</h1></body></html>');
+  writeFileSync(join(project, 'site', 'style.css'), '#title { color: rgb(102, 51, 153); }');
+  const sent = await onMac.send({ project_path: project, subject: 'Pricing page draft', body: 'The pricing page, with its stylesheet.', attachments: ['site/pricing.html'] });
+  const threadId = sent.thread_id as string;
+  const read = await json<{ thread: { messages: { id: string; attachments: { id: string }[] }[] } }>(studio, `/api/inbox/m/${macbook.id}/threads/${threadId}`);
+  const file = read.thread.messages.find((m) => m.id === sent.message_id)!.attachments[0]!;
+
+  // The viewer beside the thread: the page's stylesheet is read through Studio's forward to MacBook.
+  const forwarded = (r: { url(): string; status(): number }) => r.url().includes(`/api/inbox/m/${macbook.id}/html-assets/`) && r.url().endsWith('/style.css');
+  const styleInViewer = page.waitForResponse(forwarded);
+  await page.goto(`${studio.url}#thread=${threadId}`);
+  await expect(page.locator('section.ib-pane .ib-subject')).toHaveText('Pricing page draft');
+  await page.locator(`[data-attachment-id="${file.id}"]`).first().click();
+  expect((await styleInViewer).status()).toBe(200);
+
+  // "Open in" → Browser: the page in a tab of its own on Studio, through the forward, its stylesheet applied.
+  const primary = page.locator(`[data-open-in="${file.id}"] a[data-open-in-primary="browser"]`);
+  await expect(primary).toHaveAttribute('href', `/api/inbox/m/${macbook.id}/attachments/${file.id}/page`);
+  const [tab] = await Promise.all([context.waitForEvent('page'), primary.click()]);
+  try {
+    await tab.waitForLoadState();
+    expect(new URL(tab.url()).pathname).toMatch(new RegExp(`^/api/inbox/m/${macbook.id}/html-assets/[A-Za-z0-9_-]+/pricing\\.html$`));
+    await expect(tab.locator('#title')).toHaveText('Pricing');
+    await expect.poll(() => tab.locator('#title').evaluate((el) => getComputedStyle(el).color)).toBe('rgb(102, 51, 153)');
+    // The same sandbox as a page of this machine's own: an opaque origin with no network.
+    const again = await tab.reload();
+    expect(again!.headers()['content-security-policy']).toBe("sandbox allow-scripts allow-modals; connect-src 'none'");
+  } finally {
+    await tab.close();
+  }
+});
+
 test('4. MacBook asleep: greyed rows under "MacBook asleep since"; an answer waits to send, then lands once when it is back', async () => {
   await page.goto(`${studio.url}#thread=${macHeldThread}`);
   const pane = page.locator('section.ib-pane');
