@@ -1,4 +1,5 @@
 import { createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react';
+import { createPortal } from 'react-dom';
 import type { Edge, PaneNode } from '@plannotator/vendor-pierre-layouts';
 import type { HeldThread } from '../data/apply/record';
 import { useHeldThread } from '../data/queries/thread';
@@ -10,6 +11,7 @@ import * as L from './layoutModel';
 import { drawnTree, fits, hiddenForRoom, neighbor } from './layoutRoom';
 import { measureRoom, usePaneDrop } from './paneDrop';
 import { liveHost, quietDigest, quietHost, sameDigest, withPaneClose, type ThreadPanesHost } from './paneHosts';
+import { createPaneKeeper, PaneDock, PaneKeeperContext } from './paneKeeper';
 import { PaneMenuContext, type PaneMenu } from './PaneMenu';
 import type { WindowPanes } from './useRoutePanes';
 
@@ -41,29 +43,43 @@ function titleOf(host: ThreadPanesHost, thread: string | undefined): string {
 }
 
 /**
- * The thread panes after the list. Without the switch, and on a phone, in a stacked window, with a card or Reviews'
- * thread open or a file full screen, the active pane draws exactly today's slot. Otherwise the panes draw in the free
- * layout (FreeLayout.tsx), even one, so a pane never mounts again when another opens, moves or closes: it keeps its
- * scroll and its reply box. A file open beside the active pane takes the others' room (they step aside, in place).
- * Only the active pane draws with every change of the window; the others draw when what they show changes
- * (paneHosts.ts).
+ * The thread panes after the list. Without the switch, the window's one thread draws exactly today's slot.
+ *
+ * With it, every pane in the layout stays mounted, each in a node of its own (paneKeeper.tsx), and the layout only
+ * says where each node shows. Beside the list the panes draw in the free layout (FreeLayout.tsx), even one. On a
+ * phone, in a stacked window, with a card's or Reviews' thread open or a file full screen, the active pane shows in
+ * today's slot and the others wait off the page. A file open beside the active pane takes the others' room, and a
+ * narrow window the least recent's: they wait off the page too, and come back as they were, scroll, folds, reply box
+ * and a recording in progress included. Only the active pane draws with every change of the window; the others draw
+ * when what they show changes (paneHosts.ts).
  */
 export function ThreadPanes({ windowPanes, held, host }: ThreadPanesProps) {
   const { panes, layout } = windowPanes;
   const { route } = host;
   const engine = windowPanes.allowed && !host.phone && !host.stack.thread && !host.fromCard && route.page === 'inbox' && !route.reviews && !route.full && !!layout.root;
   const roomHidden = useRoomHidden(layout, engine && !host.fileOpen);
-  const hidden = useMemo(() => (engine && host.fileOpen ? new Set(L.panesOf(layout.root).map((pane) => pane.id).filter((id) => id !== layout.active)) : roomHidden), [engine, host.fileOpen, layout, roomHidden]);
-  const multi = engine && L.panesOf(layout.root).length - hidden.size > 1;
+  const ids = useMemo(() => L.panesOf(layout.root).map((pane) => pane.id), [layout.root]);
+  const shownAlone = (panes.panes.find((entry) => entry.id === panes.active) ?? panes.panes[0]!).id;
+  // Off the page: beside a file every pane but the active one; in today's one slot, every pane but the one it shows.
+  const hidden = useMemo(
+    () => (!engine ? new Set(ids.filter((id) => id !== shownAlone)) : host.fileOpen ? new Set(ids.filter((id) => id !== layout.active)) : roomHidden),
+    [engine, host.fileOpen, ids, layout.active, roomHidden, shownAlone],
+  );
+  const multi = engine && ids.length - hidden.size > 1;
   const title = useCallback((id: L.PaneId) => titleOf(host, windowPanes.layout.threads[id]), [host, windowPanes]);
   usePaneDrop({ enabled: engine && !host.fileOpen, multi, windowPanes, hidden, title, holdSidebar: (columns) => host.holdSidebarIfTight(columns) });
+  const [keeper] = useState(createPaneKeeper);
+  keeper.live.current = { active: layout.active, onFocus: windowPanes.focus, engine, title };
+  const idsKey = ids.join('\u0000');
+  useLayoutEffect(() => keeper.keep(new Set(ids)), [keeper, idsKey]);
   const gone = useCallback((thread: string) => windowPanes.closeThreads([thread]), [windowPanes]);
   const watch = L.paneCount(layout) > 1 && host.route.page === 'inbox';
-  const watches = watch ? panes.panes.map((pane) => pane.thread && <GoneWatch key={pane.id} paneId={pane.id} threadId={pane.thread} restored={windowPanes.restored.has(pane.id)} host={host} onGone={gone} />) : null;
+  const watches = watch
+    ? panes.panes.map((pane) => pane.thread && <GoneWatch key={pane.id} paneId={pane.id} threadId={pane.thread} restored={windowPanes.restored.has(pane.id)} host={host} recording={keeper.recording} onGone={gone} />)
+    : null;
   const view = { windowPanes, held, host, hidden, multi, first: L.firstPane(layout.root) };
-  const renderPane = useCallback((pane: PaneNode) => <PaneSlot paneId={pane.id} />, []);
   const tree = useMemoTree(layout.root, hidden);
-  if (!engine) {
+  if (!windowPanes.allowed) {
     const pane = panes.panes.find((entry) => entry.id === panes.active) ?? panes.panes[0]!;
     return (
       <>
@@ -72,21 +88,27 @@ export function ThreadPanes({ windowPanes, held, host }: ThreadPanesProps) {
       </>
     );
   }
-  const gap = measureRoom()?.gap ?? 1;
   return (
-    <PanesViewContext.Provider value={view}>
-      {watches}
-      <FreeLayout
-        tree={tree!}
-        active={layout.active!}
-        gap={gap}
-        title={title}
-        renderPane={renderPane}
-        onFocus={windowPanes.focus}
-        onResize={windowPanes.resized}
-      />
-    </PanesViewContext.Provider>
+    <PaneKeeperContext.Provider value={keeper}>
+      <PanesViewContext.Provider value={view}>
+        {watches}
+        {ids.map((id) => createPortal(<PaneSlot paneId={id} />, keeper.nodeOf(id), id))}
+        {engine ? (
+          <FreeLayout tree={tree!} active={layout.active!} gap={measureRoom()?.gap ?? 1} title={title} renderPane={renderDock} onFocus={windowPanes.focus} onResize={windowPanes.resized} />
+        ) : (
+          <PaneDock paneId={shownAlone} />
+        )}
+      </PanesViewContext.Provider>
+    </PaneKeeperContext.Provider>
   );
+}
+
+/** A pane's place in the free layout: its node shows there unless it stepped aside. */
+const renderDock = (pane: PaneNode) => <LayoutDock paneId={pane.id} />;
+
+function LayoutDock({ paneId }: { paneId: L.PaneId }) {
+  const { hidden } = useContext(PanesViewContext)!;
+  return hidden.has(paneId) ? null : <PaneDock paneId={paneId} />;
 }
 
 /** The drawn tree, the same object while the layout and what stepped aside are the same (the engine is pushed only on change). */
@@ -124,7 +146,7 @@ function useRoomHidden(layout: L.FreeLayout, on: boolean): ReadonlySet<L.PaneId>
   return useMemo(() => new Set(key ? key.split('\u0000') : []), [key]);
 }
 
-/** One pane in the free layout: the active one draws with the window; any other draws when what it shows changes. */
+/** One pane, on the page or off it: the active one draws with the window; any other draws when what it shows changes. */
 function PaneSlot({ paneId }: { paneId: L.PaneId }) {
   const view = useContext(PanesViewContext)!;
   const { windowPanes, host, held, hidden, multi, first } = view;
@@ -145,10 +167,10 @@ function PaneSlot({ paneId }: { paneId: L.PaneId }) {
   const own = multi ? withPaneClose(base, paneId, windowPanes.closePane, isFirst) : base;
   const ref = useRef<ThreadSlotHost>(own);
   ref.current = own;
-  if (hidden.has(paneId) || thread === null) return null;
+  if (thread === null) return null;
   return (
     <PaneMenuContext.Provider value={multi ? menu : null}>
-      <PaneBody paneId={paneId} threadId={thread} active={active} held={held} hostRef={ref} digest={active ? null : quietDigest(own, paneId, thread)} />
+      <PaneBody paneId={paneId} threadId={thread} active={active} shown={!hidden.has(paneId)} held={held} hostRef={ref} digest={active ? null : quietDigest(own, paneId, thread)} />
     </PaneMenuContext.Provider>
   );
 }
@@ -157,6 +179,8 @@ interface PaneBodyProps {
   paneId: L.PaneId;
   threadId: string;
   active: boolean;
+  /** On the page (not waiting off it). */
+  shown: boolean;
   /** The active pane's thread as App holds it; any other pane reads its own. */
   held: HeldThread | null;
   hostRef: RefObject<ThreadSlotHost>;
@@ -166,13 +190,13 @@ interface PaneBodyProps {
 
 /** A pane's slot, the same component whether it is the active pane or not, so it never mounts again when that changes. */
 const PaneBody = memo(
-  function PaneBody({ paneId, threadId, active, held, hostRef }: PaneBodyProps) {
+  function PaneBody({ paneId, threadId, active, shown, held, hostRef }: PaneBodyProps) {
     const live = useMemo(() => liveHost(hostRef), [hostRef]);
     // A pane that is not the active one showed its thread already: what the cache holds stays drawn while it re-reads.
     const own = useHeldThread(active ? null : threadId, true);
-    return <ThreadSlot paneId={paneId} threadId={threadId} active={active} held={active ? held : own} host={active ? hostRef.current! : live} />;
+    return <ThreadSlot paneId={paneId} threadId={threadId} active={active} shown={shown} held={active ? held : own} host={active ? hostRef.current! : live} />;
   },
-  (a, b) => !a.active && !b.active && a.paneId === b.paneId && a.threadId === b.threadId && !!a.digest && !!b.digest && sameDigest(a.digest, b.digest),
+  (a, b) => !a.active && !b.active && a.paneId === b.paneId && a.threadId === b.threadId && a.shown === b.shown && !!a.digest && !!b.digest && sameDigest(a.digest, b.digest),
 );
 
 /** The panes' boxes on screen, for the ⋯ menu's moves. */
@@ -209,20 +233,32 @@ function moveBeside(windowPanes: WindowPanes, id: L.PaneId, edge: Edge): void {
 /**
  * A pane's thread that goes beside other panes closes its pane: one deleted (its read is a 404), one archived while
  * shown (by the person or an agent), or one already archived when a kept layout comes back. A thread opened archived
- * on purpose (from Archived) stays.
+ * on purpose (from Archived) stays. A pane with a recording in progress stays until the recording ends: closing it
+ * would cut the person off mid-sentence.
  */
-function GoneWatch({ paneId, threadId, restored, host, onGone }: { paneId: L.PaneId; threadId: string; restored: boolean; host: ThreadSlotHost; onGone: (thread: string) => void }) {
-  const held = useHeldThread(threadId, true);  const load = host.paneReads.view(paneId).load;
+function GoneWatch({ paneId, threadId, restored, host, recording, onGone }: { paneId: L.PaneId; threadId: string; restored: boolean; host: ThreadSlotHost; recording: (id: L.PaneId) => boolean; onGone: (thread: string) => void }) {
+  const held = useHeldThread(threadId, true);
+  const load = host.paneReads.view(paneId).load;
   const thread = held?.thread && held.thread.thread_id === threadId ? held.thread : null;
   const archived = !!thread && thread.resolved_at != null;
   const firstSeen = useRef<boolean | null>(null);
+  const [, recheck] = useState(0);
   useEffect(() => {
-    if (load?.threadId === threadId && load.state === 'missing') return onGone(threadId);
-    if (!thread) return;
-    if (firstSeen.current === null) {
-      firstSeen.current = archived;
-      if (archived && restored) onGone(threadId);
-    } else if (archived && !firstSeen.current) onGone(threadId);
+    let gone = false;
+    if (load?.threadId === threadId && load.state === 'missing') gone = true;
+    else if (thread) {
+      if (firstSeen.current === null) {
+        firstSeen.current = archived;
+        gone = archived && restored;
+      } else gone = archived && !firstSeen.current;
+    }
+    if (!gone) return;
+    if (!recording(paneId)) return onGone(threadId);
+    const timer = setTimeout(() => recheck((n) => n + 1), GONE_RECHECK_MS);
+    return () => clearTimeout(timer);
   });
   return null;
 }
+
+/** How often a gone thread's pane looks again whether its recording ended. */
+const GONE_RECHECK_MS = 500;

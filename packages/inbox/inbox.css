@@ -1025,14 +1025,14 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
 /* main list */
 .ib-main { background: var(--ib-main-bg); display: flex; flex: 1; min-width: 0; height: 100%; padding: var(--ib-gutter); gap: var(--ib-gutter); }
 /* Each pane is a card on the ground: the list, a thread, a file beside its thread, Settings, Drafts, What's new. */
-.ib-main > :is(.ib-listcol, .ib-pane, .ib-view, .ib-spage, .ib-dpage, .ib-wn, .ib-bpage, .ib-prreview) { border-radius: var(--ib-pane-r); box-shadow: var(--ib-pane-shadow); min-height: 0; }
+.ib-main > :is(.ib-listcol, .ib-pane, .ib-view, .ib-spage, .ib-dpage, .ib-wn, .ib-bpage, .ib-prreview), :where(.ib-main > .ib-panehost) > .ib-panedock > :is(.ib-pane, .ib-view) { border-radius: var(--ib-pane-r); box-shadow: var(--ib-pane-shadow); min-height: 0; }
 /* Each takes the card's colour under the panes switch. Off, today's: the thread pane its own card, a file the
    window's background, and the rest none of their own (an opaque scroller draws its text differently). */
 .ib-main > :is(.ib-listcol, .ib-spage, .ib-dpage, .ib-wn, .ib-bpage) { background: var(--ib-pane-bg-s, transparent); }
-.ib-main > .ib-view { background: var(--ib-pane-bg-s, var(--background)); }
+.ib-main > .ib-view, :where(.ib-main > .ib-panehost) > .ib-panedock > .ib-view { background: var(--ib-pane-bg-s, var(--background)); }
 /* The list keeps its resize edge in the gutter beside it (never clipped); its scroll box follows the card's corners instead.
    Settings, Drafts and What's new scroll themselves, which clips them to their corners already. */
-.ib-main > :is(.ib-pane, .ib-view:not(.ib-full), .ib-prreview) { overflow: var(--ib-clip-s, visible); }
+.ib-main > :is(.ib-pane, .ib-view:not(.ib-full), .ib-prreview), :where(.ib-main > .ib-panehost) > .ib-panedock > :is(.ib-pane, .ib-view:not(.ib-full)) { overflow: var(--ib-clip-s, visible); }
 .ib-main > .ib-listcol > .ib-lbody { border-radius: 0 0 var(--ib-pane-r) var(--ib-pane-r); }
 .ib-listcol { flex: 1; min-width: 0; display: flex; flex-direction: column; position: relative; }
 .ib-listcol.ib-narrow { flex: none; width: 380px; border-right: 1px solid var(--ib-pane-line); }
@@ -1478,7 +1478,7 @@ button.ib-band:hover { background: var(--ib-band-hover-s, var(--ib-band)); }
 /* Answers held for an asleep machine, under the line, as the thread draws them. */
 .ib-pwait-held { width: 100%; max-width: 640px; margin-top: 20px; text-align: left; }
 /* A full-screen file covers the window: no card of its own. */
-.ib-main > .ib-view.ib-full { border-radius: 0; box-shadow: none; }
+.ib-main > .ib-view.ib-full, :where(.ib-main > .ib-panehost) > .ib-panedock > .ib-view.ib-full { border-radius: 0; box-shadow: none; }
 .ib-phead { height: 46px; flex: none; display: flex; align-items: center; gap: 2px; padding: 0 14px 0 max(14px, var(--ib-controls-left, 0px)); border-bottom: 1px solid var(--ib-hair); }
 .ib-phead .ib-sp { flex: 1; }
 .ib-pbody { flex: 1; min-height: 0; overflow-y: auto; padding: 18px 30px 18px; container: ib-thread / inline-size; }
@@ -3646,7 +3646,7 @@ body:has([data-shape-layer] .shp-pill) .ib-toast:not(.ib-toast-phone) { bottom: 
   :root[data-ib-keyboard-pin]:has(.pn-inbox) { height: var(--ib-vvh, 100%); overflow: hidden; overscroll-behavior: none; }
   .ib-main { padding: 0 env(safe-area-inset-right) 0 env(safe-area-inset-left); gap: 0; position: relative; overflow: hidden; }
   /* One screen at a time: the pane is the screen, edge to edge, with no card around it. */
-  .ib-main > :is(.ib-listcol, .ib-pane, .ib-view, .ib-spage, .ib-dpage, .ib-wn, .ib-bpage, .ib-prreview) { border-radius: 0; box-shadow: none; }
+  .ib-main > :is(.ib-listcol, .ib-pane, .ib-view, .ib-spage, .ib-dpage, .ib-wn, .ib-bpage, .ib-prreview), :where(.ib-main > .ib-panehost) > .ib-panedock > :is(.ib-pane, .ib-view) { border-radius: 0; box-shadow: none; }
   .ib-main > .ib-listcol > .ib-lbody { border-radius: 0; }
   body:has(.pn-inbox) :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), textarea, select) { font-size: 16px !important; }
   .ib-lbody, .ib-pbody, .ib-spage, .ib-dpage, .ib-docscroll, .ib-gbody, .ib-wn { overscroll-behavior: contain; }

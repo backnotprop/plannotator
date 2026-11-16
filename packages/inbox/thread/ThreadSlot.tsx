@@ -12,6 +12,7 @@ import { drawnSection } from '../held';
 import { machineOf } from '../inboxUrl';
 import { machineTakes, rowSnoozes, snoozeBlockedBy, threadAwayLine, threadOutbox } from '../machines';
 import { MAIN_PANE, type PaneId } from '../panes/model';
+import type { PaneOnScreen } from '../panes/onScreen';
 import { PaneScopeContext } from '../panes/scope';
 import { priorityAction } from '../priority';
 import { threadLink } from '../rowMenu';
@@ -28,6 +29,8 @@ export interface ThreadSlotProps {
   threadId: string | null;
   /** Only the active pane takes the thread keys and counts messages as seen. */
   active: boolean;
+  /** On the page; false: mounted off it (panes/paneKeeper.tsx), so its thread is not on screen. Default true. */
+  shown?: boolean;
   /** The thread as the window holds it for this pane; absent, the slot reads it from the cache itself. */
   held?: HeldThread | null;
   host: ThreadSlotHost;
@@ -37,7 +40,7 @@ export interface ThreadSlotProps {
  * One thread pane: the "opening…" place until the thread's read lands, then the thread. Its keys, its seen-on-sight
  * and its place on screen are its own, keyed by `paneId`; what it reads from the window it reads by thread id.
  */
-export function ThreadSlot({ paneId, threadId, active, held: given, host }: ThreadSlotProps) {
+export function ThreadSlot({ paneId, threadId, active, shown: onPage = true, held: given, host }: ThreadSlotProps) {
   const { route, routeRef, phone, stack, full, fromCard, fileOpen, settings, machines, go, leave, close, listTitle } = host;
   // A pane that stops being the active one reads its thread itself and keeps showing what it showed.
   const shown = useRef<string | null>(null);
@@ -68,6 +71,19 @@ export function ThreadSlot({ paneId, threadId, active, held: given, host }: Thre
     focusSubject.current = false;
     document.querySelector<HTMLElement>(`section.ib-pane[data-thread-id="${CSS.escape(thread.thread_id)}"] .ib-subject`)?.focus();
   }, [thread, threadId]);
+  // What the thread says of itself on screen, held back while the pane waits off the page.
+  const screen = useRef<PaneOnScreen | null>(null);
+  const reportScreen = () => {
+    const state = onPage ? screen.current : null;
+    host.panesOnScreen.set(paneId, state);
+    if (paneId === MAIN_PANE) host.setOpenThreadCovered(state?.covered ?? false);
+  };
+  const pageRef = useRef(onPage);
+  useEffect(() => {
+    if (pageRef.current === onPage) return;
+    pageRef.current = onPage;
+    reportScreen();
+  });
   const onClose = fromCard ? host.backToCard : () => close({ ...route, thread: null, file: null });
   return (
     <PaneScopeContext.Provider value={scope}>
@@ -242,8 +258,8 @@ export function ThreadSlot({ paneId, threadId, active, held: given, host }: Thre
           onSeen={(through) => activeRef.current && host.seenOnSight(thread.thread_id, through)}
           covered={host.covered}
           onScreenChange={(state) => {
-            host.panesOnScreen.set(paneId, state);
-            if (paneId === MAIN_PANE) host.setOpenThreadCovered(state?.covered ?? false);
+            screen.current = state;
+            reportScreen();
           }}
           backLabel={fromCard ? 'Board' : route.reviews ? 'Reviews' : listTitle}
           cardChip={fromCard ? <CardChip card={host.cards?.cards.find((c) => c.id === fromCard) ?? null} onOpen={host.backToCard} /> : undefined}

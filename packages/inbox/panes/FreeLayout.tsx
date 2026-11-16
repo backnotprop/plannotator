@@ -1,7 +1,6 @@
-import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { LayoutStore, naryTree, type ChildSize, type LayoutNode, type PaneNode } from '@plannotator/vendor-pierre-layouts';
 import { Layout } from '@plannotator/vendor-pierre-layouts/react';
-import { pressToDrag } from '../drag/threadDrag';
 import type { PaneId } from './layoutModel';
 
 export interface FreeLayoutProps {
@@ -19,15 +18,14 @@ export interface FreeLayoutProps {
 
 const NO_ACTIONS = [] as const;
 const noHeader = () => null;
-/** What a press on a pane's header can start a drag from: its empty part and its title, never a control. */
-const CONTROL = 'button, a, input, textarea, select, [role="menuitem"], [role="button"], [contenteditable="true"]';
 
 /**
  * Several thread panes, placed by @pierre/layouts (packages/vendor-pierre-layouts). The layout's tree is the truth:
- * it is pushed into the engine's store on every change, and what the engine does on its own (a divider dragged, a
- * pane pressed into) comes back through `onResize` and `onFocus`. The engine draws no header and no actions of its
- * own: each pane's header is the thread's, and a press on it (not on a control) that moves 5 px picks the pane up
- * (drag/threadDrag.ts); where it lands is the drop target ThreadPanes registers.
+ * it is pushed into the engine's store on every change, and what the engine does on its own (a divider dragged)
+ * comes back through `onResize` and `onFocus`. The engine draws no header and no actions of its own: each pane's
+ * header is the thread's. A pane's content is a node the pane keeper puts in its place (paneKeeper.tsx), which hears
+ * the presses and focus in it: one makes the pane active, and a press on its header (not on a control) that moves
+ * 5 px picks it up (drag/threadDrag.ts); where it lands is the drop target ThreadPanes registers.
  */
 export default function FreeLayout({ tree, active, gap, title, renderPane, onFocus, onResize }: FreeLayoutProps) {
   const [store] = useState(() => new LayoutStore(tree, { model: naryTree }));
@@ -57,34 +55,18 @@ export default function FreeLayout({ tree, active, gap, title, renderPane, onFoc
       }),
     [store],
   );
-  const pressHeader = (event: ReactPointerEvent<HTMLDivElement>) => {
-    const target = event.target instanceof Element ? event.target : null;
-    const head = target?.closest('.ib-phead');
-    const host = head?.closest<HTMLElement>('[data-layout-pane]');
-    if (!head || !host || target!.closest(CONTROL)) return;
-    const paneId = host.dataset.layoutPane!;
-    pressToDrag({
-      event: event.nativeEvent,
-      payload: { kind: 'pane', paneId, label: live.current.title(paneId) },
-      onBegin: () => host.setAttribute('data-pane-dragging', ''),
-      onEnd: () => host.removeAttribute('data-pane-dragging'),
-    });
-  };
   return (
-    // `display: contents`: the engine's root is the flex item beside the list; this only hears presses.
-    <div style={{ display: 'contents' }} onPointerDown={pressHeader}>
-      <Layout
-        store={store}
-        className="ib-layout"
-        gap={gap}
-        label="Threads"
-        renderPane={renderPane}
-        renderHeader={noHeader}
-        paneActions={NO_ACTIONS}
-        getPaneTitle={(pane) => live.current.title(pane.id)}
-        getPaneProps={(pane) => ({ tabIndex: -1, 'data-pane-quiet': pane.id === active ? undefined : '' })}
-        onResize={onResize}
-      />
-    </div>
+    <Layout
+      store={store}
+      className="ib-layout"
+      gap={gap}
+      label="Threads"
+      renderPane={renderPane}
+      renderHeader={noHeader}
+      paneActions={NO_ACTIONS}
+      getPaneTitle={(pane) => live.current.title(pane.id)}
+      getPaneProps={(pane) => ({ tabIndex: -1, 'data-pane-quiet': pane.id === active ? undefined : '' })}
+      onResize={onResize}
+    />
   );
 }

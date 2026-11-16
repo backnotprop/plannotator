@@ -8,10 +8,13 @@
 .ib-layout .pierre-layout-pane-inner { transform: none; }
 .ib-layout .pierre-layout-content { display: flex; gap: var(--ib-gutter); overflow: visible; }
 .ib-layout :is(.pierre-layout-focus, .pierre-layout-sr, .pierre-layout-drop, .pierre-layout-corner) { display: none; }
+/* A pane's content is a node the pane keeper moves (paneKeeper.tsx) inside the place it shows: neither box is drawn,
+   so the thread's card and a file beside it lay out as children of that place (inbox.css reaches them through both). */
+.ib-panehost, .ib-panedock { display: contents; }
 /* What `.ib-main > …` gives a thread's card and a file beside it (inbox.css), inside a pane. */
-.ib-layout .pierre-layout-content > :is(.ib-pane, .ib-view) { border-radius: var(--ib-pane-r); box-shadow: var(--ib-pane-shadow); min-height: 0; overflow: var(--ib-clip-s, visible); }
-.ib-layout .pierre-layout-content > .ib-pane { flex: 1; min-width: 0; }
-.ib-layout .pierre-layout-content > .ib-view { background: var(--ib-pane-bg-s, var(--background)); }
+.ib-layout .pierre-layout-content > .ib-panehost > .ib-panedock > :is(.ib-pane, .ib-view) { border-radius: var(--ib-pane-r); box-shadow: var(--ib-pane-shadow); min-height: 0; overflow: var(--ib-clip-s, visible); }
+.ib-layout .pierre-layout-content > .ib-panehost > .ib-panedock > .ib-pane { flex: 1; min-width: 0; }
+.ib-layout .pierre-layout-content > .ib-panehost > .ib-panedock > .ib-view { background: var(--ib-pane-bg-s, var(--background)); }
 /* Only a pane against the window's left edge clears the window's buttons (inbox.css `--ib-controls-left`). */
 .ib-layout > .pierre-layout-pane:not([data-layout-edges~="left"]) { --ib-controls-left: 0px; }
 /* The divider: nothing until hovered or dragged, then a hairline in the gutter. */

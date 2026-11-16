@@ -9,7 +9,10 @@
  * (config.json `inboxSplitView`): the window without the switch changing at all; a pane dragged onto another's half
  * not going there; a list row dropped on an edge or a centre not opening there, or a drop over a reply box going to the
  * pane; a pane mounting again when another opens or the active one changes; an archived thread's pane staying; text
- * typed in one pane's reply box showing in another's; a narrow window losing the panes it cannot show.
+ * typed in one pane's reply box showing in another's; a narrow window losing the panes it cannot show. And any change
+ * of layout (a narrow window, a file beside the active pane, one pane on a phone, a stacked window, a card's or
+ * Reviews' thread, a file full screen, one pane and back) losing a pane's reply box, a picked answer, an unfolded
+ * message, its scroll place or a recording in progress; a deleted thread's pane closing under a recording.
  *
  * happy-dom has no layout: the threads' bodies and messages get their boxes from the test, as in seenOnSight.test.tsx,
  * and time runs on fake timers that `wait` advances.
@@ -34,6 +37,7 @@ import { singlePane, type PaneSet } from './model';
 import * as L from './layoutModel';
 import { LAYER, registerDropTarget } from '../drag/threadDrag';
 import { changeThread, putThread, staleThread } from '../data/queries/thread';
+import { parseInboxQuestionBlocks } from '@plannotator/core/inbox-questions';
 import type { HeldThread } from '../data/apply/record';
 
 const hasDom = typeof document !== 'undefined';
@@ -103,9 +107,12 @@ beforeEach(() => {
   savedFetch = globalThis.fetch;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input);
+    // A pick still saving: picked on screen, its save not answered (the state a remount would lose).
+    if (init?.method === 'POST' && path.endsWith('/picks')) return new Promise<Response>(() => {});
     if (init?.method === 'POST') return Response.json({ questions: [] });
     if (path.includes('/attachments')) return Response.json({ serverSession: 's', attachments: [], annotations: [] });
     if (path.includes('/sessions')) return Response.json({ home: null, project: PROJECT, sessions: [] });
+    if (path.includes('/voice/status')) return Response.json({ state: 'ready', plan: null });
     return Response.json({});
   }) as typeof fetch;
   stub(HTMLElement.prototype, 'getBoundingClientRect', {
@@ -132,6 +139,9 @@ afterEach(() => {
   try {
     act(() => root?.unmount());
     el?.remove();
+    // A drag's swallow of the click after it (drag/threadDrag.ts) ends at the next press, or a timer this file's
+    // fake clock may never run: the next test's first click is its own.
+    window.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
   } finally {
     root = null;
     el = null;
@@ -538,6 +548,7 @@ describe.skipIf(!hasDom)('two thread slots: only the active pane takes keys and 
   });
 
   test('a window too narrow for both shows the active pane alone, and both come back in place when it widens', async () => {
+    putThread(queries, A, heldOf(A, false));
     putThread(queries, B, heldOf(B, false));
     mainWidth = 860;
     drawPanes(windowOf(pair('p1')), hostFor(B, noop), heldOf(B, false));
@@ -585,5 +596,218 @@ describe.skipIf(!hasDom)('two thread slots: only the active pane takes keys and 
     // One pane opening another thread: its stale copy waits for the read, as before.
     render({ panes: [{ id: 'main', thread: C }], active: 'main' });
     expect(got.at(-1)).toBeNull();
+  });
+});
+
+// ── A pane through every change of layout (paneKeeper.tsx) ──
+// The person's work in a pane: an open reply box with words in it, an answer picked, a message unfolded, the place
+// they scrolled to and a recording in progress. None of it may go when the layout changes and comes back.
+
+const K = 'msg_K1';
+const ASK = ['Where should the retry live?', '', ':::question', 'Where should the retry live?', '', '- [ ] Pin it', '- [ ] Loosen it', ':::'].join('\n');
+/** A thread with a question, two read messages before it and one new: the read ones fold. */
+function keptThread(): InboxThread {
+  const questions = parseInboxQuestionBlocks(ASK).map((q) => ({
+    key: q.key, position: q.position, kind: q.kind, prompt: q.prompt, context: q.parsed.context, choices: q.parsed.choices,
+    recommendation: null, suggested_text: null, stopped: q.stopped, holds_up: q.holds_up, asked_by_agent_id: 'ses_a', orphaned: false, state: 'open', answer: null,
+    revision: 3, sent_revision: 0, picked_by: null, picked_at: null, sent_reply_id: null, message_id: `${K}_4`, superseded_by: null,
+  }));
+  return {
+    thread_id: K,
+    project: PROJECT,
+    subject: `Subject ${K}`,
+    thread_name: null,
+    resolved_at: null,
+    messages: [
+      message(K, K, 1, 'The worker retries on a 409.', { person_seen_seq: 3 }),
+      message(K, `${K}_2`, 2, 'The budget is five tries.'),
+      message(K, `${K}_3`, 3, 'Each try waits longer.'),
+      message(K, `${K}_4`, 4, ASK, { questions } as unknown as Partial<InboxMessageWire>),
+    ],
+  };
+}
+const heldK = () => ({ serverSession: 's', cursor: 0, thread: keptThread() });
+const lookAt = (host: ThreadSlotHost, threadId: string, seq: number): ThreadSlotHost => ({
+  ...host,
+  paneReads: { view: () => ({ ...NO_OPEN, look: { threadId, seq, through: seq } }), retry: noop } as unknown as PaneReads,
+});
+
+/** Each change of layout: what it changes in the window, from two panes beside each other. */
+const REFLOWS: [string, (host: ThreadSlotHost) => ThreadSlotHost, boolean][] = [
+  ['a window too narrow for both', (host) => host, true],
+  ['a file open beside the active pane', (host) => ({ ...host, fileOpen: true }), false],
+  ['a stacked window', (host) => ({ ...host, stack: { thread: true, file: false } }), false],
+  ['a phone', (host) => ({ ...host, phone: true }), false],
+  ["a card's thread", (host) => ({ ...host, fromCard: 'crd_1' }), false],
+  ["Reviews' thread", (host) => ({ ...host, route: { ...host.route, reviews: { project: null, view: 'all' } } as Route }), false],
+  ['a file full screen', (host) => ({ ...host, route: { ...host.route, full: true } as Route }), false],
+];
+
+describe.skipIf(!hasDom)("a pane keeps the person's work through every change of layout", () => {
+  // Scroll offsets as a browser keeps them: a box put in another place on the page (or taken off it) has forgotten
+  // its own, and no scroll event says so; only the person's scrolls (set, then a scroll event) are heard.
+  const tops = new WeakMap<Element, { top: number; place: Element | null }>();
+  const placeOf = (el: Element) => el.closest('.ib-panehost');
+  const mic: string[] = [];
+  let tick: (() => void) | null = null;
+  let clock = 1000;
+
+  beforeEach(async () => {
+    if (!hasDom) return;
+    mic.length = 0;
+    tick = null;
+    stub(HTMLElement.prototype, 'scrollTop', {
+      get(this: HTMLElement) {
+        const kept = tops.get(this);
+        return kept && kept.place === placeOf(this) ? kept.top : 0;
+      },
+      set(this: HTMLElement, top: number) {
+        tops.set(this, { top, place: placeOf(this) });
+      },
+    });
+    // No microphone and no transcription service: the window's own seam (voice.ts `browserDeps`), as voiceKeptWords.test.tsx.
+    const { adoptVoiceSettings, browserDeps } = await import('../voice');
+    const had = { ...browserDeps };
+    Object.assign(browserDeps, {
+      open: async () => ({ rate: 24_000, db: () => -20, stop: async () => (mic.push('stopped'), [new Float32Array(2400).fill(0.2)]), abort: () => mic.push('aborted'), onEnded: noop }),
+      prompts: async () => false,
+      transcribe: () => (mic.push('transcribing'), new Promise(() => {})),
+      now: () => clock,
+      every: (_ms: number, run: () => void) => ((tick = run), () => (tick = null)),
+      after: () => noop,
+    });
+    stub(window, 'isSecureContext', { value: true });
+    stub(navigator, 'mediaDevices', { value: { getUserMedia: async () => ({}) } });
+    stub(globalThis, 'AudioWorkletNode', { value: class {} });
+    adoptVoiceSettings({ on: true, phones_only: false, engine: 'codex', key: { source: null, last4: null }, computer: null, intro_due: false });
+    restore.push(() => {
+      Object.assign(browserDeps, had);
+      adoptVoiceSettings(null);
+    });
+  });
+
+  /** A on the left (pane `main`), K right of it (pane `p1`). */
+  const withK = (active: 'main' | 'p1') => L.focus(L.openAt(L.follow(L.EMPTY_LAYOUT, A), K, 'main', 'right'), active);
+  const hostIn = (active: 'main' | 'p1') => (active === 'p1' ? lookAt(hostFor(K, noop), K, 3) : hostFor(A, noop));
+  const heldIn = (active: 'main' | 'p1') => (active === 'p1' ? heldK() : heldOf(A, false));
+  const replyBox = () => paneOf(K)?.querySelector<HTMLTextAreaElement>('textarea:not([data-question-other])') ?? null;
+  const option = (words: string) => [...paneOf(K).querySelectorAll<HTMLElement>('[data-question-option]')].find((row) => row.textContent?.includes(words))!.querySelector<HTMLInputElement>('input')!;
+  const body = () => paneOf(K).querySelector<HTMLElement>('.ib-pbody')!;
+  const live = () => paneOf(K)?.querySelector('[data-voice-mic]')?.getAttribute('data-state') ?? null;
+
+  /** K's pane with the person's work in it, K the active pane. */
+  async function work() {
+    putThread(queries, A, heldOf(A, false));
+    putThread(queries, K, heldK());
+    drawPanes(windowOf(withK('p1')), hostIn('p1'), heldIn('p1'));
+    await wait(0);
+    pressR();
+    await wait(0);
+    act(() => {
+      const area = replyBox()!;
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(area, 'Words for K');
+      area.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await act(async () => option('Pin it').click());
+    await wait(0);
+    expect(option('Pin it').checked).toBe(true);
+    const folded = paneOf(K).querySelector<HTMLElement>('[data-message-article][data-folded]');
+    expect(folded).not.toBeNull();
+    const unfolded = folded!.getAttribute('data-message-article')!;
+    act(() => folded!.querySelector<HTMLElement>('[data-fold-head]')!.click());
+    await wait(0);
+    act(() => {
+      body().scrollTop = 300;
+      body().dispatchEvent(new Event('scroll'));
+    });
+    act(() => void paneOf(K).querySelector('[data-voice-mic]')!.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, button: 0, pointerId: 7 })));
+    await wait(0);
+    for (let i = 0; i < 12; i++) {
+      clock += 40;
+      act(() => tick?.());
+    }
+    expect(live()).toBe('live');
+    return { section: paneOf(K), box: replyBox()!, pick: option('Pin it'), unfolded };
+  }
+
+  /**
+   * Everything `work` left in K's pane is still there, in the same elements. `folds` false: the thread itself moved
+   * between Reviews' view of it and the Inbox's, where Thread.tsx decides its folds again on purpose (one thread, today).
+   */
+  function kept(before: Awaited<ReturnType<typeof work>>, folds = true) {
+    expect(paneOf(K)).toBe(before.section);
+    expect(replyBox()).toBe(before.box);
+    expect(before.box.value).toBe('Words for K');
+    expect(option('Pin it')).toBe(before.pick);
+    expect(before.pick.checked).toBe(true);
+    if (folds) expect(paneOf(K).querySelector(`[data-message-article="${before.unfolded}"]`)?.hasAttribute('data-folded')).toBe(false);
+    expect(body().scrollTop).toBe(300);
+    expect(live()).toBe('live');
+    expect(mic).toEqual([]);
+  }
+
+  for (const role of ['active', 'beside'] as const) {
+    const active = role === 'active' ? 'p1' : 'main';
+    for (const [name, change, narrow] of REFLOWS) {
+      test(`${name}, and back, with the pane ${role === 'active' ? 'the active one' : 'beside the active one'}`, async () => {
+        const before = await work();
+        if (role === 'beside') {
+          drawPanes(windowOf(withK('main')), hostIn('main'), heldIn('main'));
+          await wait(0);
+          kept(before);
+        }
+        if (narrow) mainWidth = 860;
+        drawPanes(windowOf(withK(active)), change(hostIn(active)), heldIn(active));
+        if (narrow) act(() => void window.dispatchEvent(new Event('resize')));
+        await wait(0);
+        // The active pane shows; the other waits off the page, still mounted.
+        expect(paneOf(role === 'active' ? K : A)).not.toBeNull();
+        expect(paneOf(role === 'active' ? A : K)).toBeNull();
+        expect(mic).toEqual([]);
+        mainWidth = 1600;
+        drawPanes(windowOf(withK(active)), hostIn(active), heldIn(active));
+        if (narrow) act(() => void window.dispatchEvent(new Event('resize')));
+        await wait(0);
+        expect(paneOf(A)).not.toBeNull();
+        kept(before, !(role === 'active' && name.startsWith('Reviews')));
+      });
+    }
+  }
+
+  test('one pane, then another beside it, then one again', async () => {
+    const before = await work();
+    // K alone: A's pane closed.
+    const alone = L.close(withK('p1'), 'main');
+    drawPanes(windowOf(alone), hostIn('p1'), heldIn('p1'));
+    await wait(0);
+    expect(paneOf(A)).toBeNull();
+    kept(before);
+    // A opened beside it again, then closed again.
+    drawPanes(windowOf(L.focus(L.openAt(alone, A, 'p1', 'left'), 'p1')), hostIn('p1'), heldIn('p1'));
+    await wait(0);
+    expect(paneOf(A)).not.toBeNull();
+    kept(before);
+    drawPanes(windowOf(alone), hostIn('p1'), heldIn('p1'));
+    await wait(0);
+    kept(before);
+  });
+
+  test('a thread deleted under a recording keeps its pane until the recording ends', async () => {
+    const calls: string[] = [];
+    await work();
+    drawPanes(windowOf(withK('main'), calls), hostIn('main'), heldIn('main'));
+    await wait(0);
+    // Its read says it is gone (a 404): the pane would close, but the person is still speaking into it.
+    const gone = hostIn('main');
+    const deleted = { ...gone, paneReads: { ...gone.paneReads, view: (pane: string) => (pane === 'p1' ? { ...NO_OPEN, load: { threadId: K, state: 'missing', error: 'Not found', waiting: null } } : gone.paneReads.view(pane)) } as unknown as PaneReads };
+    drawPanes(windowOf(withK('main'), calls), deleted, heldIn('main'));
+    await wait(2000);
+    expect(live()).toBe('live');
+    expect(calls).not.toContain(`gone:${K}`);
+    // The person lets go of the mic: the take goes to be written down, and the pane closes.
+    act(() => void paneOf(K).querySelector('[data-voice-mic]')!.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, button: 0, pointerId: 7 })));
+    await wait(1000);
+    expect(mic[0]).toBe('stopped');
+    expect(calls).toContain(`gone:${K}`);
   });
 });
