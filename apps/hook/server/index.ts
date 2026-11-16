@@ -140,7 +140,7 @@ import { readTailnetOwners, setSessionTailnetOwners, setSessionTailnetServedUrl 
 import { CF_ACCESS_SESSION_LINE, openSessionDoor } from "@plannotator/server/session-cf-access";
 import { resolveCfAccess } from "@plannotator/shared/inbox/cf-access";
 import { allowIgnoredLine } from "@plannotator/shared/inbox/tailnet-refusal";
-import { scrubModSessionEnv } from "./mod-session-env";
+import { planReviewEnvFor, scrubModSessionEnv } from "./mod-session-env";
 import { resolveAnnotateTarget } from "./annotate-resolution";
 import { annotateDecisionTarget, reviewDecisionTarget, takeHostReviewId, targetText } from "./decision-target";
 import { formatSessionsJson, formatSessionsTable } from "./sessions-output";
@@ -335,9 +335,10 @@ takeHostResultPath();
 takeHostMessagesPath();
 // The `pn-` id a host gave this review, for the `sessions/` registry.
 const hostReviewId = takeHostReviewId();
-// What the Claude Code mod sets for its plugin's own hooks (the Inbox reminder):
-// nothing this process starts, Claude agent jobs included, may inherit it.
-scrubModSessionEnv();
+// What the Claude Code mod sets for its plugin's own hooks (the Inbox reminder,
+// its marked plan review switch): nothing this process starts, Claude agent
+// jobs included, may inherit it. The switch is kept for this process's own plan hook.
+const modPlanReviewSwitch = scrubModSessionEnv();
 
 const rawArgs = process.argv.slice(2);
 // The Board's cards from a shell (unreleased, HIDDEN_SUBCOMMANDS): a thin
@@ -3505,11 +3506,13 @@ if (args[0] === "sessions") {
     process.exit(0);
   }
 
-  // Plan review turned off for Claude Code: no decision, so Claude Code shows its own dialog.
+  // Plan review turned off for Claude Code: no decision, so Claude Code shows
+  // its own dialog (or, where the host draws its own plan card, the mod's
+  // marked `0` for this session: the host's card decides).
   if (
     event.hook_event_name === "PermissionRequest" &&
     event.tool_name === "ExitPlanMode" &&
-    !resolvePlanReview(loadConfig(), process.env)
+    !resolvePlanReview(loadConfig(), planReviewEnvFor(modPlanReviewSwitch, event.session_id))
   ) {
     process.exit(0);
   }
