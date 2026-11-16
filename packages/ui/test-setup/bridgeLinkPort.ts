@@ -48,13 +48,16 @@ export async function offerLinkPort(frame: HTMLIFrameElement, key: string | null
 export async function bridgeLinkPort(frame: HTMLIFrameElement): Promise<MessagePort> {
   // A served frame (`frameUrl`) gets its address, and so its key, once the host has kept the page.
   let key = frameLinkKey(frame);
-  for (let i = 0; !key && i < 100; i++) {
+  for (let i = 0; !key && i < 40; i++) {
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 50));
     });
     key = frameLinkKey(frame);
   }
-  if (!key) throw new Error('the frame carries no link key');
+  if (!key) {
+    const srcdoc = frame.getAttribute('srcdoc');
+    throw new Error(`the frame carries no link key (src: ${JSON.stringify(frame.getAttribute('src'))}, srcdoc: ${srcdoc === null ? 'none' : `${srcdoc.length} chars`}, at ${window.location.href})`);
+  }
   const had = offered.get(frame);
   if (had && had.key === key) return had.port;
   const port = await offerLinkPort(frame, key);

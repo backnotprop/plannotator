@@ -54,16 +54,14 @@ export function newLinkKey(): string {
  * are, so the page reads the same `location.search` once the guard removes it.
  */
 export function withLinkKey(url: string, key: string, base: string): string {
+  // A path on the host's own server stays a path (the address the host gave),
+  // whatever the base is (a host document at about:blank included).
+  const rootPath = isRootPath(url);
   let next: URL;
-  let rootPath = false;
   try {
-    next = new URL(url, base);
+    next = new URL(url, rootPath ? "http://root-path.invalid/" : base);
   } catch {
-    // A root-relative path under a base that is not a web address (a host
-    // document at about:blank): it stays a path, with its key.
-    if (!isRootPath(url)) return url;
-    next = new URL(url, "http://root-path.invalid/");
-    rootPath = true;
+    return url;
   }
   const kept = next.search.slice(1).split("&").filter((part) => part !== "" && !part.startsWith(`${LINK_KEY_PARAM}=`));
   kept.push(`${LINK_KEY_PARAM}=${key}`);

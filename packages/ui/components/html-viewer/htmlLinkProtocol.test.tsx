@@ -253,6 +253,24 @@ describe.if(hasDom)('HtmlViewer link delivery', () => {
     await onPort(port, { type: LINK_CLICK, href: '?variant=2' });
     expect(seen).toEqual(['?variant=2']);
   });
+
+  test("a served path (the Inbox's /api/inbox/pages/<id>) carries its own key: the document's is refused", async () => {
+    let served = '';
+    const seen: string[] = [];
+    const { iframe, offer, onPort, key } = await mountViewer({
+      frameUrl: async (doc: string) => {
+        served = doc;
+        return '/api/inbox/pages/abc';
+      },
+      onOpenLink: (href: string) => seen.push(href),
+    });
+    const documentKey = /\)\('([0-9a-f]{32})'\);<\/script>/.exec(served)?.[1];
+    expect(iframe.getAttribute('src')).toMatch(/^(http:\/\/[^/]+)?\/api\/inbox\/pages\/abc\?__pnk=[0-9a-f]{32}$/);
+    expect(key()).not.toBe(documentKey);
+    await onPort(await offer(documentKey ?? null), { type: LINK_CLICK, href: 'document-key.html' });
+    await onPort(await offer(key()), { type: LINK_CLICK, href: 'next.html' });
+    expect(seen).toEqual(['next.html']);
+  });
 });
 
 describe.if(hasDom)('reloading a served frame with a query', () => {

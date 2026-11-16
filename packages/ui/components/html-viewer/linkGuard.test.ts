@@ -27,18 +27,18 @@ type Offer = { data: Record<string, unknown>; origin: string; transfer: Transfer
 describe('withLinkKey', () => {
   const base = 'http://localhost:4000/#thread=t1';
   test('the key goes last in the query; the page query and fragment stay as they were', () => {
-    expect(withLinkKey('/api/inbox/pages/abc', KEY, base)).toBe(`http://localhost:4000/api/inbox/pages/abc?__pnk=${KEY}`);
-    expect(withLinkKey('/api/inbox/pages/abc?variant=2&n=3#top', KEY, base)).toBe(`http://localhost:4000/api/inbox/pages/abc?variant=2&n=3&__pnk=${KEY}#top`);
+    expect(withLinkKey('http://localhost:4000/api/inbox/pages/abc', KEY, base)).toBe(`http://localhost:4000/api/inbox/pages/abc?__pnk=${KEY}`);
+    expect(withLinkKey('/api/inbox/pages/abc?variant=2&n=3#top', KEY, base)).toBe(`/api/inbox/pages/abc?variant=2&n=3&__pnk=${KEY}#top`);
   });
 
-  test('a path on the host server keeps its key when the host document is not at a web address', () => {
+  test('a path on the host server stays a path, whatever the host document is at', () => {
     expect(withLinkKey('/api/inbox/pages/abc?variant=2#top', KEY, 'about:blank')).toBe(`/api/inbox/pages/abc?variant=2&__pnk=${KEY}#top`);
     expect(withLinkKey('//elsewhere.example/p', KEY, 'about:blank')).toBe('//elsewhere.example/p');
   });
 
   test("a key the page's own query carried is dropped, so the guard reads only the host's", () => {
     const other = 'b'.repeat(32);
-    expect(withLinkKey(`/p?__pnk=${other}&v=1`, KEY, base)).toBe(`http://localhost:4000/p?v=1&__pnk=${KEY}`);
+    expect(withLinkKey(`/p?__pnk=${other}&v=1`, KEY, base)).toBe(`/p?v=1&__pnk=${KEY}`);
   });
 
   test('a new key every time, 32 hex characters; the inline tag refuses anything else', () => {
@@ -55,13 +55,14 @@ describe.if(hasDom)('the link guard in a frame', () => {
   const sent: Array<Record<string, unknown>> = [];
   let guard: Guard;
   let hostPort: MessagePort | null = null;
-  const realParent = Object.getOwnPropertyDescriptor(window, 'parent');
+  let realParent: PropertyDescriptor | undefined;
   const pageListener = (event: MessageEvent) => pageMessages.push(event.data);
   /** What the bridge does from its click handler: hand the click to the guard. */
   let bridgeCall: ((event: MouseEvent) => void) | null = null;
   const bridge = (event: Event) => bridgeCall?.(event as MouseEvent);
 
   beforeAll(async () => {
+    realParent = Object.getOwnPropertyDescriptor(window, 'parent');
     const fakeHost = {
       postMessage(data: Record<string, unknown>, origin: string, transfer?: Transferable[]) {
         offers.push({ data, origin, transfer });
