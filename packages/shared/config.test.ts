@@ -49,7 +49,7 @@ import {
   DEFAULT_GUIDE_SHARE_URL,
   __setConfigLockTimingsForTest,
   __setConfigSaveMergeWindowHookForTest,
-  __setConfigRenameForTest,
+  __setConfigWriteForTest,
 } from "./config";
 import type { PlannotatorConfig } from "./config";
 
@@ -791,6 +791,7 @@ describe("saveConfig never writes over a config.json it could not read", () => {
   });
 
   afterEach(() => {
+    __setConfigWriteForTest(null);
     process.stderr.write = savedWrite;
     if (originalDataDir !== undefined) process.env.PLANNOTATOR_DATA_DIR = originalDataDir;
     else delete process.env.PLANNOTATOR_DATA_DIR;
@@ -806,20 +807,15 @@ describe("saveConfig never writes over a config.json it could not read", () => {
     expect(warnings).toEqual([]);
   });
 
-  test("an empty config.json (what a write that stopped partway leaves) reads as defaults, and a save leaves it as it is", () => {
+  test("an empty config.json (zero bytes or only whitespace) holds nothing to lose: it reads as defaults and a save writes it", () => {
     for (const bytes of ["", "  \n"]) {
       writeFileSync(configPath(), bytes);
-      warnings = [];
       expect(loadConfig()).toEqual({});
-      expect(saveConfig({ displayName: "x" })).toBe(false);
-      expect(raw()).toBe(bytes);
-      expect(warnings.join("")).toContain("not saving config.json because it is empty");
-      expect(warnings.join("")).toContain("Fix or remove");
+      warnings = [];
+      expect(saveConfig({ displayName: "x" })).toBe(true);
+      expect(JSON.parse(raw())).toEqual({ displayName: "x" });
+      expect(warnings).toEqual([]);
     }
-    // Removing it is the way back, as the warning says: the save then creates it.
-    rmSync(configPath());
-    expect(saveConfig({ displayName: "x" })).toBe(true);
-    expect(JSON.parse(raw())).toEqual({ displayName: "x" });
   });
 
   test("a save whose rename fails leaves config.json byte for byte, says so, and leaves no temp file", () => {
@@ -828,39 +824,101 @@ describe("saveConfig never writes over a config.json it could not read", () => {
     // ENOSPC stands in for a disk that filled up; EPERM for a lock that never lets go.
     for (const code of ["ENOSPC", "EPERM"]) {
       let calls = 0;
-      __setConfigRenameForTest(() => {
-        calls++;
-        throw Object.assign(new Error(`${code}: simulated`), { code });
+      const waits: number[] = [];
+      let lockHeldWhileWaiting = true;
+      __setConfigWriteForTest({
+        rename: () => {
+          calls++;
+          throw Object.assign(new Error(`${code}: simulated`), { code });
+        },
+        sleep: (ms) => {
+          waits.push(ms);
+          lockHeldWhileWaiting &&= existsSync(join(tempDir, "config.json.lock"));
+        },
       });
       try {
         warnings = [];
         expect(saveConfig({ displayName: "Grace" })).toBe(false);
       } finally {
-        __setConfigRenameForTest(null);
+        __setConfigWriteForTest(null);
       }
       expect(raw()).toBe(bytes);
       expect(warnings.join("")).toContain("failed to write config.json");
       expect(readdirSync(tempDir).filter((n) => n.endsWith(".tmp"))).toEqual([]);
-      // A disk error is not retried; a Windows lock error is, a few times.
-      expect(calls).toBe(code === "EPERM" ? 5 : 1);
+      // A disk error is not retried; a Windows lock error is, with backoff, for about 2 s, under the config lock.
+      const waited = waits.reduce((a, b) => a + b, 0);
+      if (code === "ENOSPC") {
+        expect(calls).toBe(1);
+        expect(waits).toEqual([]);
+      } else {
+        expect(calls).toBe(waits.length + 1);
+        expect(waited).toBeGreaterThanOrEqual(1800);
+        expect(waited).toBeLessThanOrEqual(2500);
+        expect(waits[0]).toBeLessThan(waits[waits.length - 1]);
+        expect(lockHeldWhileWaiting).toBe(true);
+      }
     }
     expect(loadConfig()).toMatchObject({ displayName: "Ada", theme: { mode: "dark" }, favicon: "yellow" });
   });
 
-  test("a rename held for a moment by another program (Windows) is retried and lands", () => {
+  test("a rename held for a while by another program (Windows) is retried and lands", () => {
     writeFileSync(configPath(), JSON.stringify({ displayName: "Ada" }));
     let calls = 0;
-    __setConfigRenameForTest((from, to) => {
-      if (++calls <= 2) throw Object.assign(new Error("EBUSY: simulated"), { code: "EBUSY" });
-      renameSync(from, to);
+    __setConfigWriteForTest({
+      rename: (from, to) => {
+        if (++calls <= 6) throw Object.assign(new Error("EBUSY: simulated"), { code: "EBUSY" });
+        renameSync(from, to);
+      },
+      sleep: () => {},
     });
     try {
       expect(saveConfig({ favicon: "yellow" })).toBe(true);
     } finally {
-      __setConfigRenameForTest(null);
+      __setConfigWriteForTest(null);
     }
     expect(JSON.parse(raw())).toEqual({ displayName: "Ada", favicon: "yellow" });
     expect(warnings).toEqual([]);
+  });
+
+  test("an fsync error (a full disk or quota that shows up only there) stops the write before the rename; only 'no fsync here' is ignored", () => {
+    const bytes = JSON.stringify({ displayName: "Ada", theme: { mode: "dark" } });
+    writeFileSync(configPath(), bytes);
+    for (const code of ["ENOSPC", "EDQUOT", "EIO"]) {
+      let renamed = false;
+      __setConfigWriteForTest({
+        fsync: () => {
+          throw Object.assign(new Error(`${code}: simulated`), { code });
+        },
+        rename: (from, to) => {
+          renamed = true;
+          renameSync(from, to);
+        },
+      });
+      try {
+        warnings = [];
+        expect(saveConfig({ displayName: "Grace" })).toBe(false);
+      } finally {
+        __setConfigWriteForTest(null);
+      }
+      expect(renamed).toBe(false);
+      expect(raw()).toBe(bytes);
+      expect(warnings.join("")).toContain(code);
+      expect(readdirSync(tempDir).filter((n) => n.endsWith(".tmp"))).toEqual([]);
+    }
+    for (const [code, favicon] of [["EINVAL", "yellow"], ["ENOTSUP", "blue"]]) {
+      __setConfigWriteForTest({
+        fsync: () => {
+          throw Object.assign(new Error(`${code}: simulated`), { code });
+        },
+      });
+      try {
+        expect(saveConfig({ favicon } as Partial<PlannotatorConfig>)).toBe(true);
+      } finally {
+        __setConfigWriteForTest(null);
+      }
+      expect(JSON.parse(raw()).favicon).toBe(favicon);
+    }
+    expect(JSON.parse(raw())).toEqual({ displayName: "Ada", theme: { mode: "dark" }, favicon: "blue" });
   });
 
   test("a folder that is not writable: the save fails and config.json keeps its bytes (never written in place)", () => {

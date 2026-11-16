@@ -17,6 +17,7 @@ import {
   writeSync,
   closeSync,
   fsyncSync,
+  utimesSync,
   statSync,
   unlinkSync,
   renameSync,
@@ -1207,11 +1208,12 @@ function loadSettings(options: { quiet?: boolean }): Record<string, unknown> {
 }
 
 /**
- * config.json as saveConfig reads it before a merge. A missing file is an
- * empty config, so a first save creates it as before. A file that exists but
- * cannot be read, is empty (what a write that stopped partway leaves), or is
- * not a JSON object, is refused: merging onto loadConfig's `{}` and writing
- * would replace every setting it held with the one key being saved.
+ * config.json as saveConfig reads it before a merge. A missing file, or one
+ * holding only whitespace, is an empty config: there is nothing in it to lose,
+ * so a save writes it (writeConfigAtomic never leaves one empty). A file that
+ * exists but cannot be read, or whose content is not a JSON object, is
+ * refused: merging onto loadConfig's `{}` and writing would replace every
+ * setting in it with the one key being saved.
  */
 function readConfigForSave(configPath: string): { ok: true; config: PlannotatorConfig } | { ok: false; reason: string } {
   let raw: string;
@@ -1222,7 +1224,7 @@ function readConfigForSave(configPath: string): { ok: true; config: PlannotatorC
     if (code === "ENOENT") return { ok: true, config: {} };
     return { ok: false, reason: `it could not be read (${code ?? String(e)})` };
   }
-  if (raw.trim() === "") return { ok: false, reason: "it is empty" };
+  if (raw.trim() === "") return { ok: true, config: {} };
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
@@ -1354,12 +1356,24 @@ function releaseConfigLock(lockPath: string): void {
 
 /** Rename errors Windows gives while another program (antivirus, a sync client, an indexer) holds the file for a moment. */
 const RENAME_RETRY_CODES = new Set(["EPERM", "EACCES", "EBUSY"]);
-const RENAME_RETRY_DELAYS_MS = [10, 30, 60, 100];
+/** Backoff between rename tries: about 2 s in all. The config lock is touched before each wait so it never looks stale meanwhile. */
+const RENAME_RETRY_DELAYS_MS = [10, 20, 40, 80, 160, 320, 500, 500, 500];
+/** fsync errors that mean "this filesystem has no fsync", not "the data did not reach the disk". */
+const FSYNC_UNSUPPORTED_CODES = new Set(["EINVAL", "ENOTSUP", "EOPNOTSUPP"]);
 
 let renameForWrite: (from: string, to: string) => void = renameSync;
-/** Test-only seam: replaces the rename writeConfigAtomic uses, so a test can make it fail without a broken disk. Null restores it. */
-export function __setConfigRenameForTest(rename: ((from: string, to: string) => void) | null): void {
-  renameForWrite = rename ?? renameSync;
+let fsyncForWrite: (handle: number) => void = fsyncSync;
+let sleepForRetry: (ms: number) => void = sleepSync;
+/**
+ * Test-only seam: replaces the rename, fsync and retry wait writeConfigAtomic uses, so a test can make them fail
+ * (or skip the real waits) without a broken disk. Null, or a field left out, restores the real one.
+ */
+export function __setConfigWriteForTest(
+  seams: { rename?: (from: string, to: string) => void; fsync?: (handle: number) => void; sleep?: (ms: number) => void } | null,
+): void {
+  renameForWrite = seams?.rename ?? renameSync;
+  fsyncForWrite = seams?.fsync ?? fsyncSync;
+  sleepForRetry = seams?.sleep ?? sleepSync;
 }
 
 /**
@@ -1370,10 +1384,12 @@ export function __setConfigRenameForTest(rename: ((from: string, to: string) => 
  * never crosses a device.
  *
  * The file itself is never written in place. A plain write empties it first, so one that stopped partway (disk full,
- * an I/O error, the process killed) left config.json empty, and the next save then wrote only its own keys. A rename
- * that fails with a Windows lock error is retried for a moment; when the temp file cannot be written or renamed (a
- * folder that is not writable, a file still held after the retries), this throws and the file keeps its old bytes,
- * and the caller reports the save as failed.
+ * an I/O error, the process killed) left config.json empty, and the next save then wrote only its own keys. The temp
+ * file is fsynced before the rename, and an fsync error (a full disk or quota on a network home can show up only
+ * there) stops the write before the rename, unless it only says the filesystem has no fsync. A rename that fails
+ * with a Windows lock error is retried for about 2 s; when the temp file cannot be written, synced or renamed (a
+ * folder that is not writable, a full disk, a file still held after the retries), this throws and the file keeps
+ * its old bytes, and the caller reports the save as failed.
  */
 function writeConfigAtomic(configPath: string, contents: string): void {
   let targetPath = configPath;
@@ -1391,10 +1407,14 @@ function writeConfigAtomic(configPath: string, contents: string): void {
   try {
     handle = openSync(tempPath, "wx", mode);
     writeFileSync(handle, contents, "utf-8");
-    // On disk before the rename, so a crash right after it cannot leave a renamed but empty file.
+    // On disk before the rename, so a crash right after it cannot leave a renamed but empty file, and a write-back
+    // error (ENOSPC, EDQUOT, EIO) that only fsync reports never renames a short temp file over config.json.
     try {
-      fsyncSync(handle);
-    } catch { /* a filesystem without fsync: the rename still replaces the file whole */ }
+      fsyncForWrite(handle);
+    } catch (e) {
+      const code = (e as NodeJS.ErrnoException)?.code;
+      if (!code || !FSYNC_UNSUPPORTED_CODES.has(code)) throw e;
+    }
     closeSync(handle);
     handle = null;
     for (let attempt = 0; ; attempt++) {
@@ -1404,7 +1424,12 @@ function writeConfigAtomic(configPath: string, contents: string): void {
       } catch (e) {
         const code = (e as NodeJS.ErrnoException)?.code;
         if (attempt >= RENAME_RETRY_DELAYS_MS.length || !code || !RENAME_RETRY_CODES.has(code)) throw e;
-        sleepSync(RENAME_RETRY_DELAYS_MS[attempt]);
+        // The wait runs under saveConfig's lock: keep it fresh so no other writer takes it over as stale.
+        try {
+          const now = new Date();
+          utimesSync(getConfigLockPath(), now, now);
+        } catch { /* no lock held (writing unlocked): nothing to refresh */ }
+        sleepForRetry(RENAME_RETRY_DELAYS_MS[attempt]);
       }
     }
   } catch (e) {
@@ -1429,8 +1454,8 @@ function writeConfigAtomic(configPath: string, contents: string): void {
  * other's keys. See the lock notes above for the failure mode: it degrades to
  * the old unlocked behavior with a warning, never to a hang.
  *
- * A config.json that exists but cannot be read, is empty, or is not a JSON
- * object is never written over (readConfigForSave): the save is refused with a warning
+ * A config.json that exists but cannot be read or is not a JSON object is
+ * never written over (readConfigForSave): the save is refused with a warning
  * and the file is left in place, so fixing it brings every setting back.
  * Machine state goes to state.json instead (MACHINE_STATE_KEYS), and
  * config.json is rewritten only when its settings change.
