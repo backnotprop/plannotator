@@ -234,12 +234,30 @@ export function defineOpenInScenarios(runtime: string, start: StartOpenInScenari
         const lines = launches();
         expect(lines.length).toBe(1);
         if (process.platform === "darwin") {
-          // `open -a` takes no line and JetBrains has no matching URL scheme.
-          expect(lines[0].startsWith("open -a WebStorm ")).toBe(true);
+          // The app's own launcher takes the line: `open -na <app> --args --line n path`.
+          expect(lines[0].startsWith("open -na WebStorm --args --line 42 ")).toBe(true);
           expect(lines[0].endsWith("/notes.md")).toBe(true);
         } else {
           expect(lines[0].startsWith("webstorm --line 42 ")).toBe(true);
           expect(lines[0].endsWith("/notes.md")).toBe(true);
+        }
+      });
+
+      test("a line that is not a whole number above zero is dropped: the file opens at its top", async () => {
+        await setUp();
+        for (const line of [0, -3, 1.5, "42", null, 2 ** 60]) {
+          const answer = await send(
+            { origin: `http://${host}`, "sec-fetch-site": "same-origin" },
+            { filePath: docPath, appId: "webstorm", line, serverSession },
+          );
+          expect(answer.status).toBe(200);
+          expect(answer.body).toEqual({ ok: true });
+        }
+        const lines = launches();
+        expect(lines.length).toBe(6);
+        for (const launched of lines) {
+          expect(launched).not.toContain("--line");
+          expect(launched.endsWith("/notes.md")).toBe(true);
         }
       });
     });

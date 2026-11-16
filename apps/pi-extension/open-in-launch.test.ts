@@ -176,7 +176,7 @@ describe("openFileInApp launch semantics (Pi mirror)", () => {
 		15000,
 	);
 
-	launchTest("WebStorm opens at --line n path (or at the top on macOS)", async () => {
+	launchTest("WebStorm opens at --line n path (on macOS through open -na … --args)", async () => {
 		const shimDir = makeDir();
 		const log = join(shimDir, "launches.log");
 		for (const name of ["open", "webstorm"]) {
@@ -197,10 +197,10 @@ describe("openFileInApp launch semantics (Pi mirror)", () => {
 		}
 		const lines = readFileSync(log, "utf-8").trim().split("\n");
 		if (process.platform === "darwin") {
-			expect(lines).toEqual(["open|-a", "open|WebStorm", `open|${file}`]);
+			expect(lines).toEqual(["open|-na", "open|WebStorm", "open|--args", "open|--line", "open|42", `open|${file}`]);
 		} else {
 			expect(lines).toEqual([`webstorm|--line`, `webstorm|42`, `webstorm|${file}`]);
 		}
-		expect(getOpenInApp("webstorm")?.line).toEqual({ cli: "line-flag" });
+		expect(getOpenInApp("webstorm")?.line).toEqual({ macArgs: "line-flag", cli: "line-flag" });
 	});
 });

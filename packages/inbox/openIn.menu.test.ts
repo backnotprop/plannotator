@@ -6,8 +6,8 @@ describe("openInMenuFor", () => {
     const detected = [
       { id: "reveal", label: "Files", kind: "file-manager" as const, icon: "finder" },
       { id: "vscode", label: "VS Code", kind: "editor" as const, icon: "vscode" },
-      { id: "webstorm", label: "WebStorm", kind: "editor" as const, icon: "jetbrains" },
-      { id: "rider", label: "Rider", kind: "editor" as const, icon: "jetbrains" },
+      { id: "webstorm", label: "WebStorm", kind: "editor" as const, icon: "jetbrains-ws" },
+      { id: "rider", label: "Rider", kind: "editor" as const, icon: "jetbrains-rd" },
     ];
     const menu = openInMenuFor(
       { kind: "code", path: "src/retry.ts" },
@@ -18,7 +18,7 @@ describe("openInMenuFor", () => {
       false,
     );
     expect(menu.items.map((item) => item.id)).toEqual(["vscode", "webstorm", "rider", "reveal"]);
-    expect(menu.items.filter((item) => item.kind === "app" && item.icon === "jetbrains").map((item) => item.label)).toEqual([
+    expect(menu.items.filter((item) => item.kind === "app" && item.icon.startsWith("jetbrains-")).map((item) => item.label)).toEqual([
       "WebStorm",
       "Rider",
     ]);

@@ -333,7 +333,7 @@ describe("JetBrains Open in", () => {
     }
     const lines = readFileSync(log, "utf-8").trim().split("\n");
     if (process.platform === "darwin") {
-      expect(lines).toEqual(["open|-a", "open|WebStorm", `open|${file}`]);
+      expect(lines).toEqual(["open|-na", "open|WebStorm", "open|--args", "open|--line", "open|42", `open|${file}`]);
     } else {
       expect(lines).toEqual([`webstorm|--line`, `webstorm|42`, `webstorm|${file}`]);
     }

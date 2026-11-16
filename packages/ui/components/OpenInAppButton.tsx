@@ -40,8 +40,12 @@ interface OpenInAppButtonProps {
   /** When true, render the primary label text alongside the icon. */
   showLabel?: boolean;
   disabled?: boolean;
-  /** 1-based line to open at, when the catalog app's launcher takes one. */
-  line?: number;
+  /**
+   * 1-based line to open at, when the catalog app's launcher takes one. A
+   * function is read at the moment of the click (the selection or the comment
+   * picked then), and may answer undefined: the file opens at its top.
+   */
+  line?: number | (() => number | undefined);
 }
 
 // The host app catalog is static for the session, but the all-files view
@@ -105,6 +109,7 @@ export const OpenInAppButton: React.FC<OpenInAppButtonProps> = ({
     if (!filePath || busy) return;
     setBusy(true);
     setError(null);
+    const at = typeof line === 'function' ? line() : line;
     try {
       const res = await fetch('/api/open-in', {
         method: 'POST',
@@ -114,7 +119,7 @@ export const OpenInAppButton: React.FC<OpenInAppButtonProps> = ({
           filePath,
           base: base ?? null,
           appId,
-          ...(typeof line === 'number' && Number.isSafeInteger(line) && line > 0 ? { line } : {}),
+          ...(typeof at === 'number' && Number.isSafeInteger(at) && at > 0 ? { line: at } : {}),
         })),
       });
       if (await noteServerSessionMismatch(res)) {

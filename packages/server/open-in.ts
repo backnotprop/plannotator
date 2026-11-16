@@ -19,14 +19,12 @@
 
 import { childEnv, childPath } from "@plannotator/shared/child-env";
 import path from "node:path";
-import fs from "node:fs";
-import os from "node:os";
 import { spawn } from "node:child_process";
 import {
   OPEN_IN_APPS,
   checkOpenInAppId,
   openInFileArgv,
-  openInMacOpened,
+  openInMacArgv,
   parseOpenInLine,
   resolveRevealLabel,
   resolveRevealIcon,
@@ -35,6 +33,7 @@ import {
   type OpenInPlatform,
 } from "@plannotator/shared/open-in-apps";
 import { resolveOpenInTarget } from "@plannotator/shared/html-assets-node";
+import { locateOpenInApp } from "@plannotator/shared/open-in-locate";
 import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
 import { checkServerSession, serverSessionMismatchBody } from "@plannotator/shared/server-session";
 import { isRemoteSession } from "./remote";
@@ -223,15 +222,16 @@ export function openWithApp(
   const target = app.kind === "terminal" ? path.dirname(absPath) : absPath;
 
   if (platform === "mac") {
-    const appName = app.mac?.appName;
-    if (!appName) {
+    if (!app.mac?.appName) {
       return Promise.resolve({
         ok: false,
         error: `${app.label} is not available on macOS`,
       });
     }
-    // `open -a` takes no line: an app with a URL scheme takes it in the URL.
-    return runArgv("open", ["-a", appName, openInMacOpened(app, target, line)], app.label);
+    // The installed bundle's name (an app may install under more than one).
+    const appName = locateApp(app, platform) ?? app.mac.appName;
+    // A line rides a URL scheme, or the app launcher's own `--line` (openInMacArgv).
+    return runArgv("open", openInMacArgv(app, appName, target, line), app.label);
   }
 
   if (platform === "win") {
@@ -248,7 +248,13 @@ export function openWithApp(
       // parser; `start` inherits that cwd. bin is a trusted catalog value.
       return runArgv("cmd", ["/c", "start", "", bin], app.label, { cwd: target });
     }
-    return runArgv(bin, fileArgv(app, target, line), app.label);
+    // An `exeOnly` app runs only its own .exe, by absolute path: never a
+    // .cmd/.bat, which cmd.exe would run with the file path on its command line.
+    const winBin = app.win?.exeOnly ? locateApp(app, platform) : bin;
+    if (!winBin) {
+      return Promise.resolve({ ok: false, error: `${app.label} not found` });
+    }
+    return runArgv(winBin, fileArgv(app, target, line), app.label);
   }
 
   const bin = app.linux?.bin;
@@ -258,7 +264,8 @@ export function openWithApp(
       error: `${app.label} is not available on Linux`,
     });
   }
-  return runArgv(bin, fileArgv(app, target, line), app.label);
+  // The first of its names on PATH (a snap command, say); else its catalog bin.
+  return runArgv(locateApp(app, platform) ?? bin, fileArgv(app, target, line), app.label);
 }
 
 /**
@@ -302,55 +309,27 @@ export async function openFileInApp(
   return openWithApp(app, absPath, line);
 }
 
-/**
- * Whether a macOS app bundle named `<appName>.app` exists in one of the
- * standard application directories.
- */
-function macAppBundleExists(appName: string): boolean {
-  const bundle = `${appName}.app`;
-  const candidates = [
-    path.join("/Applications", bundle),
-    path.join(os.homedir(), "Applications", bundle),
-    path.join("/System/Applications", bundle),
-    // Terminal.app and other built-ins live in the Utilities subfolder.
-    path.join("/System/Applications/Utilities", bundle),
-  ];
-  return candidates.some((p) => {
-    try {
-      return fs.existsSync(p);
-    } catch {
-      return false;
-    }
+/** Where `app` is installed here (shared with Pi): see locateOpenInApp. */
+function locateApp(app: OpenInApp, platform: OpenInPlatform): string | null {
+  return locateOpenInApp(app, {
+    platform,
+    which: (bin) => Bun.which(bin, { PATH: childPath() }),
   });
 }
 
 /**
  * Whether the given catalog app is launchable on this host.
  *   - 'reveal' is always available.
- *   - mac: the `.app` bundle exists (we launch via `open -a "<appName>"`).
- *   - win/linux: its bin resolves on PATH.
+ *   - mac: one of its `.app` bundles exists (we launch via `open -a "<appName>"`;
+ *     a CLI shim on PATH without the bundle would show and then fail to launch).
+ *   - win/linux: one of its bins resolves on PATH (an `exeOnly` app: a real
+ *     `.exe`, on PATH or in an install folder).
  */
 function isAppAvailable(app: OpenInApp, platform: OpenInPlatform): boolean {
   if (app.id === "reveal") {
     return true;
   }
-
-  if (platform === "mac") {
-    // We launch via `open -a "<appName>"`, so availability must mean the .app
-    // bundle is present — a CLI shim on PATH without the bundle would show the
-    // app in the menu and then fail to launch.
-    const appName = app.mac?.appName;
-    return !!appName && macAppBundleExists(appName);
-  }
-
-  if (platform === "win") {
-    const bin = app.win?.bin;
-    return !!bin && !!Bun.which(bin, { PATH: childPath() });
-  }
-
-  // linux
-  const bin = app.linux?.bin;
-  return !!bin && !!Bun.which(bin, { PATH: childPath() });
+  return locateApp(app, platform) !== null;
 }
 
 export interface AvailableOpenInApp {
