@@ -638,11 +638,15 @@ describe("review-core", () => {
     git(superproject, ["-C", "deps/module", "-c", "core.hooksPath=/dev/null", "checkout", second]);
     git(superproject, ["add", "deps/module"]);
 
-    const runtime = makeRuntime(superproject);
-    const staged = await runGitDiff(runtime, "staged", "main");
-    expect(staged.patch).toContain(`-Subproject commit ${first}`);
-    expect(staged.patch).toContain(`+Subproject commit ${second}`);
-    expect(staged.patch).not.toContain("Binary files");
+    const runtime = makeConfigForwardingRuntime(superproject);
+    for (const format of ["short", "log", "diff"]) {
+      git(superproject, ["config", "diff.submodule", format]);
+      const staged = await runGitDiff(runtime, "staged", "main");
+      expect(staged.patch).toContain(`-Subproject commit ${first}`);
+      expect(staged.patch).toContain(`+Subproject commit ${second}`);
+      expect(staged.patch).not.toContain("module.txt");
+      expect(listPatchFiles(staged.patch).map((file) => file.path)).toEqual(["deps/module"]);
+    }
     const firstFingerprint = await getGitDiffFingerprint(runtime, "staged", "main");
 
     writeFileSync(join(submoduleSource, "module.txt"), "third\n", "utf-8");
@@ -870,7 +874,7 @@ describe("review-core", () => {
     );
     expect(rendered.length).toBeGreaterThan(0);
     for (const { args, options } of rendered) {
-      expect(options?.config).toEqual({
+      expect(options?.config).toMatchObject({
         "core.bigFileThreshold": String(MAX_REVIEW_FILE_CONTENT_BYTES),
       });
       expect(args.some((arg) => arg.includes("bigFileThreshold"))).toBe(false);
