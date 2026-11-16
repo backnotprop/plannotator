@@ -1,7 +1,8 @@
 /**
  * The frame's behaviours a host relies on: versions fold by author and open
  * the fold that holds the version on screen, and the reserved rail column
- * reads the open flag from the storage the host passes.
+ * reads the open flag from the storage the host passes, and the ground
+ * opts into theme colours only when asked.
  * Requires DOM (DOM_TESTS=1).
  */
 import { afterEach, describe, expect, test } from 'bun:test';
@@ -13,6 +14,7 @@ import type { RailStorage } from './railGeometry';
 const hasDom = typeof document !== 'undefined';
 const versionsModule = hasDom ? await import('./versions/VersionsPanel') : null;
 const slotModule = hasDom ? await import('./RailSlot') : null;
+const boxModule = hasDom ? await import('./FrameBox') : null;
 
 let root: Root | null = null;
 let host: HTMLDivElement | null = null;
@@ -110,5 +112,16 @@ describe.skipIf(!hasDom)('ReservedRailColumn storage', () => {
     );
     const column = frame.querySelector<HTMLElement>('[data-rail-reserved]');
     expect(column?.style.width).toBe('306px');
+  });
+});
+
+describe.skipIf(!hasDom)('FrameGround colors', () => {
+  test('fixed colours unless the host asks for theme colours', () => {
+    const { FrameGround } = boxModule!;
+    const ground = () => document.querySelector('[data-frame-ground]')!.getAttribute('data-frame-colors');
+    mount(<FrameGround>page</FrameGround>);
+    expect(ground()).toBe('fixed');
+    act(() => root!.render(<FrameGround colors="theme">page</FrameGround>));
+    expect(ground()).toBe('theme');
   });
 });

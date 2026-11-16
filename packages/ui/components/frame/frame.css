@@ -58,7 +58,7 @@
   --frame-r-dialog: 12px;
   --frame-ground: var(--background);
   --frame-surface-0: color-mix(in oklch, var(--muted) 40%, var(--background));
-  /* Selected, hover and subtle border are fixed colours: they do not follow the package's other themes. */
+  /* Selected, hover and subtle border are fixed by default; FrameGround colors="theme" derives them from the theme. */
   --frame-surface-hover: oklch(0.90 0.01 260 / 0.07);
   --frame-selected: oklch(0.72 0.15 280 / 0.13);
   --frame-selected-fg: var(--primary);
@@ -98,6 +98,25 @@
     --frame-shadow-ink: var(--foreground);
     --frame-quiet-fg: var(--muted-foreground);
   }
+}
+
+/*
+ * FrameGround's `colors="theme"`: selected, hover and subtle border follow the
+ * host theme's --primary and --foreground. The amounts match the fixed colours
+ * above when the theme's primary is the frame's violet (README.md). Put the
+ * attribute on the root instead to reach the phone sheets, which portal out.
+ */
+[data-frame-colors="theme"] {
+  --frame-selected: color-mix(in oklch, var(--primary) 13%, transparent);
+  --frame-surface-hover: color-mix(in oklch, var(--foreground) 7%, transparent);
+  --frame-border-subtle: color-mix(in oklch, var(--foreground) 5.5%, transparent);
+}
+
+.light[data-frame-colors="theme"],
+.light [data-frame-colors="theme"] {
+  --frame-selected: color-mix(in oklch, var(--primary) 7.5%, transparent);
+  --frame-surface-hover: color-mix(in oklch, var(--foreground) 5.5%, transparent);
+  --frame-border-subtle: color-mix(in oklch, var(--foreground) 7.5%, transparent);
 }
 
 /* FrameGround's `tone`: the host picks a plain or tinted ground behind the cards. */
