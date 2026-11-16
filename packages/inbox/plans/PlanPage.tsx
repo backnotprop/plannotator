@@ -372,7 +372,7 @@ function DocLoaded({
           {compare ? (
             <PlanDiffView id={id} from={compare.from} to={compare.to} doc={docRef} kind={document.kind} />
           ) : (
-            <PlanDocument id={id} version={shown} doc={docRef} kind={document.kind} title={document.title} />
+            <PlanDocument id={id} version={shown} doc={docRef} kind={document.kind} title={document.title} phone={place.mode === 'phone'} />
           )}
         </div>
       </div>

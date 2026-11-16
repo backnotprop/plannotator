@@ -185,6 +185,11 @@
 .ib-plan-banner p { margin: 0; flex: 1; min-width: 0; }
 .ib-plan-doc { flex: 1; min-height: 0; display: flex; margin-top: 8px; }
 .ib-plan-docscroll { flex: 1; min-width: 0; overflow-y: auto; padding: 8px 0 40px; overscroll-behavior: contain; }
+/* A Markdown or diagram page: the Inbox's reader frame (.ib-docscroll, the Clean look, AttachmentPane), its column
+   and contents rail, filling the document area; the reader's top room for its toolstrip is not needed here. */
+.ib-plan-docarea { position: relative; flex: 1; min-width: 0; min-height: 0; overflow: hidden; isolation: isolate; margin: 0 -24px; }
+.ib-plan-docarea > .ib-plan-reader { padding-top: 12px; }
+.pn-inbox .ib-plan-docarea .ib-contents-open { top: 8px; right: 16px; }
 .ib-plan-docstate { margin: 40px auto; text-align: center; color: var(--muted-foreground); font-size: var(--ib-fs-14, 14px); }
 .ib-plan-docstate p { margin: 0 0 12px; }
 

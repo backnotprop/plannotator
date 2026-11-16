@@ -42,6 +42,8 @@ const { SidebarProvider } = (hasDom ? await import('../shell/sidebar') : {}) as 
 const mermaid = hasDom ? await import('@plannotator/ui/utils/mermaid') : null;
 const diagramSvg = hasDom ? await import('@plannotator/ui/test-setup/diagramSvg') : null;
 const { acceptPlanDiagramSvg } = (hasDom ? await import('./planContent') : {}) as typeof import('./planContent');
+// Loaded here so the page's lazy contents rail resolves at once.
+if (hasDom) await import('@plannotator/ui/components/MarkdownContentsRail');
 
 let root: Root | null = null;
 let unlisten = () => {};
@@ -381,6 +383,39 @@ test.skipIf(!hasDom)('a kept panel width wider than the room is drawn narrower, 
   } finally {
     if (own) Object.defineProperty(HTMLElement.prototype, 'clientWidth', own);
     else delete (HTMLElement.prototype as { clientWidth?: number }).clientWidth;
+  }
+});
+
+test.skipIf(!hasDom)('a plan reads in the Inbox reader: the file pane frame, its 640 px column, and the contents rail in the gutter', async () => {
+  const headings = ['Rotate refresh tokens', 'Context', 'Design', 'Rollout'];
+  const id = plan('Rotate refresh tokens', 'harbor-api', [`# ${headings[0]}\n\n## ${headings[1]}\n\nWhy.\n\n## ${headings[2]}\n\nHow.\n\n## ${headings[3]}\n\nWhen.\n`], { seen: 1 });
+  const kept = new Map<string, string>();
+  storageModule!.setStorageBackend({ getItem: (k) => kept.get(k) ?? null, setItem: (k, v) => void kept.set(k, v), removeItem: (k) => void kept.delete(k) });
+  // A page wide enough for the rail (happy-dom lays nothing out): the page 900 px, its column 640 px.
+  const real = HTMLElement.prototype.getBoundingClientRect;
+  HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement) {
+    if (this.hasAttribute('data-plan-document')) return new DOMRect(0, 0, 900, 800);
+    if (this.hasAttribute('data-doc-text-root')) return new DOMRect(130, 0, 640, 2000);
+    return real.call(this);
+  };
+  try {
+    window.location.hash = `#plans=${id}`;
+    const host = draw();
+    await settle();
+    // The reader's own frame (components/AttachmentPane.tsx): `.ib-docscroll`, the Clean look on the card colour.
+    const page = host.querySelector<HTMLElement>('[data-plan-document]')!;
+    expect(page.matches('.ib-docscroll.bg-card[data-look="clean"]')).toBe(true);
+    for (let i = 0; i < 4; i++) {
+      await act(async () => {
+        window.dispatchEvent(new Event('resize'));
+        await new Promise((r) => setTimeout(r, 60));
+      });
+    }
+    // The column keeps the rail's gutter, and the rail lists the headings.
+    expect(page.hasAttribute('data-contents-gutter')).toBe(true);
+    expect([...host.querySelectorAll('.pn-contents-rail .pn-contents-rail-label')].map(text)).toEqual(headings);
+  } finally {
+    HTMLElement.prototype.getBoundingClientRect = real;
   }
 });
 
