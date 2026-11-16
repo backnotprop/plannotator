@@ -179,8 +179,15 @@ Small shares live in the link itself. Large ones are encrypted before upload and
 
 <p align="center">
   <a href="https://plannotator.ai/workspaces">
-    <img src=".github/assets/workspaces-cta.svg" alt="For teams: Workspaces. Join the waitlist." height="44" />
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset=".github/assets/workspaces-dark.png" />
+      <img src=".github/assets/workspaces-light.png" alt="Plannotator Workspaces: several cursors working in one shared space" width="720" />
+    </picture>
   </a>
+</p>
+
+<p align="center">
+  For teams: <a href="https://plannotator.ai/workspaces"><strong>join the Workspaces waitlist</strong></a>
 </p>
 
 ---
