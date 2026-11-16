@@ -3,7 +3,7 @@ import type { FileTreeRowDecorationContext, FileTreeRowParts, FileTreeSortEntry,
 import { FileTree as PierreFileTree, useFileTree } from '@pierre/trees/react';
 import type { FileTreeNode } from '../utils/buildFileTree';
 import type { DiffFile } from '../types';
-import { GROUP_ICONS, ROW_ICONS, TreeRowMenu, ancestorsOf, countParts, fileRowParts, gitStatusFor, observeTreeName, tightRow, type SectionEntry } from './pierreRows';
+import { GROUP_ICONS, ROW_ICONS, TREE_ROW_HEIGHT, TreeRowMenu, ancestorsOf, countParts, fileRowParts, gitStatusFor, leadColumnsFor, observeTreeName, tightRow, type SectionEntry } from './pierreRows';
 
 export interface ChangesTreeGroup {
   key: string;
@@ -107,9 +107,6 @@ function layoutTree(tree: FileTreeNode[], groups: ChangesTreeGroup[] | null, hid
   return out;
 }
 
-const ROW_HEIGHT = 24;
-const TOUCH_ROW_HEIGHT = 44;
-
 export const ChangesTreeView: React.FC<ChangesTreeViewProps> = (props) => {
   const {
     tree,
@@ -187,7 +184,7 @@ export const ChangesTreeView: React.FC<ChangesTreeViewProps> = (props) => {
     initialExpansion: 'closed',
     flattenEmptyDirectories: false,
     initialExpandedPaths: initialExpanded,
-    itemHeight: props.touch ? TOUCH_ROW_HEIGHT : ROW_HEIGHT,
+    itemHeight: props.touch ? 44 : TREE_ROW_HEIGHT,
     icons: { set: 'minimal', colored: false, spriteSheet: ROW_ICONS },
     gitStatus,
     composition: { contextMenu: { triggerMode: 'right-click' } },
@@ -202,7 +199,7 @@ export const ChangesTreeView: React.FC<ChangesTreeViewProps> = (props) => {
       queueMicrotask(() => syncSelection());
     },
     rows: {
-      gitStatusPlacement: 'start',
+      gitStatusPlacement: 'end',
       nameTruncation: 'keep-tail',
       observeName: observeTreeName,
       renderParts,
@@ -324,7 +321,7 @@ export const ChangesTreeView: React.FC<ChangesTreeViewProps> = (props) => {
     },
   }), [model, gitStatus, syncSelection]);
 
-  const leadColumns = [showViewedControls ? '14px' : null, stageColumn ? '14px' : null].filter(Boolean).join(' ') || 'none';
+  const leadColumns = leadColumnsFor(showViewedControls);
 
   return (
     <PierreFileTree

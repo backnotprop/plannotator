@@ -6,7 +6,7 @@ import type { DiffFile } from '../types';
 import type { RepoFilesState } from '../hooks/useRepoFiles';
 import { initialRepoExpansion } from '../utils/repoTree';
 import { prefetchRepoFile } from '../hooks/useRepoFileText';
-import { ROW_ICONS, TreeRowMenu, ancestorsOf, fileRowParts, gitStatusFor, hasBadge, observeTreeName, stageColumnShown, tightRow, type FileRowState } from './pierreRows';
+import { ROW_ICONS, TREE_ROW_HEIGHT, TreeRowMenu, leadColumnsFor, ancestorsOf, fileRowParts, gitStatusFor, hasBadge, observeTreeName, stageColumnShown, tightRow, type FileRowState } from './pierreRows';
 
 type ReadyRepoFiles = Extract<RepoFilesState, { status: 'ready' }>;
 
@@ -108,7 +108,7 @@ export const RepoTreeView: React.FC<RepoTreeViewProps> = (props) => {
       return parts;
     }
     const notes = p.annotationCounts.get(row.path) ?? 0;
-    const lead = [p.showViewedControls ? null : undefined, withStage ? null : undefined].filter((cell) => cell !== undefined) as null[];
+    const lead = p.showViewedControls ? [null] : [];
     return {
       tone: 'repo',
       title: row.path,
@@ -143,7 +143,7 @@ export const RepoTreeView: React.FC<RepoTreeViewProps> = (props) => {
     initialExpansion: 'closed',
     flattenEmptyDirectories: false,
     initialExpandedPaths: initialExpanded,
-    itemHeight: props.touch ? 44 : 24,
+    itemHeight: props.touch ? 44 : TREE_ROW_HEIGHT,
     icons: { set: 'minimal', colored: false, spriteSheet: ROW_ICONS },
     gitStatus,
     composition: { contextMenu: { triggerMode: 'right-click' } },
@@ -163,7 +163,7 @@ export const RepoTreeView: React.FC<RepoTreeViewProps> = (props) => {
       }
     },
     rows: {
-      gitStatusPlacement: 'start',
+      gitStatusPlacement: 'end',
       nameTruncation: 'keep-tail',
       observeName: observeTreeName,
       renderParts,
@@ -275,7 +275,7 @@ export const RepoTreeView: React.FC<RepoTreeViewProps> = (props) => {
     },
   }), [model, gitStatus, ensureLoaded]);
 
-  const leadColumns = [props.showViewedControls ? '14px' : null, stageColumn ? '14px' : null].filter(Boolean).join(' ') || 'none';
+  const leadColumns = leadColumnsFor(props.showViewedControls);
 
   return (
     <PierreFileTree

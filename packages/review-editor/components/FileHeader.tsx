@@ -257,6 +257,24 @@ const FileHeaderView: React.FC<FileHeaderProps> = ({
         </div>
       )}
       {!isCompactTouchLayout && <div className={`flex flex-shrink-0 items-center pl-2 gap-1`}>
+        {openIn}
+        {!readOnly && <OpenInAppButton
+          quiet
+          extraItems={() => [
+            ...(foldedNow() && showStageControl && canStage && onStage ? [{ label: isStaged ? 'Unstage this file' : 'Stage this file', onSelect: onStage }] : []),
+            ...(foldedNow() && onFileComment ? [{ label: 'Comment on this file', onSelect: () => headerRef.current && onFileComment(headerRef.current) }] : []),
+            ...(tinyNow() && onEditFile && !isEditing && !editDisabledReason ? [{ label: 'Edit to suggest a change', onSelect: onEditFile }] : []),
+            ...(state?.onOpenToSide ? [{ label: 'Open to the side', onSelect: () => state.onOpenToSide!(filePath), icon: <OpenToSideIcon /> }] : []),
+          ]}
+          filePath={filePath}
+          base={state?.agentCwd ?? null}
+          diffText={patch}
+          canOpen={
+            state?.canUseLiveWorkspaceActions !== false &&
+            !(state?.prMetadata && !state?.agentCwd) &&
+            status !== 'deleted'
+          }
+        />}
         {accessory}
         {renderMarkdownView?.({ iconOnly: false, touch: false })}
         {showViewedControl && onToggleViewed && (
@@ -362,29 +380,6 @@ const FileHeaderView: React.FC<FileHeaderProps> = ({
             <span className={TIGHT_LABEL}>Edit</span>
           </button>
         )}
-        {/* File actions: open in app (when the live checkout matches this
-            snapshot), copy path, copy file diff. Copy actions remain when a
-            PR has no checkout or a committed GitButler layer is selected. */}
-        {/* Icon-only in the header (the picked app's name shows in the dropdown),
-            matching the plan/annotate side. */}
-        {openIn}
-        {!readOnly && <OpenInAppButton
-          quiet
-          extraItems={() => [
-            ...(foldedNow() && showStageControl && canStage && onStage ? [{ label: isStaged ? 'Unstage this file' : 'Stage this file', onSelect: onStage }] : []),
-            ...(foldedNow() && onFileComment ? [{ label: 'Comment on this file', onSelect: () => headerRef.current && onFileComment(headerRef.current) }] : []),
-            ...(tinyNow() && onEditFile && !isEditing && !editDisabledReason ? [{ label: 'Edit to suggest a change', onSelect: onEditFile }] : []),
-            ...(state?.onOpenToSide ? [{ label: 'Open to the side', onSelect: () => state.onOpenToSide!(filePath), icon: <OpenToSideIcon /> }] : []),
-          ]}
-          filePath={filePath}
-          base={state?.agentCwd ?? null}
-          diffText={patch}
-          canOpen={
-            state?.canUseLiveWorkspaceActions !== false &&
-            !(state?.prMetadata && !state?.agentCwd) &&
-            status !== 'deleted'
-          }
-        />}
       </div>}
       {isCompactTouchLayout && readOnly && renderMarkdownView?.({ iconOnly: false, touch: true })}
       {isCompactTouchLayout && !readOnly && (

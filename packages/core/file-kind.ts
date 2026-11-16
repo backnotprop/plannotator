@@ -19,8 +19,8 @@
 
 export type FileKind = 'code' | 'test' | 'docs' | 'generated';
 
-/** Display order of the kinds: code first, then tests, docs, generated. */
-export const FILE_KINDS: readonly FileKind[] = ['code', 'test', 'docs', 'generated'];
+/** Display order of the kinds: code first, then docs, tests, generated. */
+export const FILE_KINDS: readonly FileKind[] = ['code', 'docs', 'test', 'generated'];
 
 /**
  * Built-in name-based generated defaults: files GitHub's linguist collapses

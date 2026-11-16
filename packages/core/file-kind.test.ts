@@ -120,12 +120,12 @@ describe('fileKind', () => {
 });
 
 describe('groupByFileKind', () => {
-  test('code, tests, docs, generated; items keep their order inside a kind; empty kinds left out', () => {
+  test('code, docs, tests, generated; items keep their order inside a kind; empty kinds left out', () => {
     const paths = ['bun.lock', 'README.md', 'src/b.test.ts', 'src/z.ts', 'src/a.test.ts', 'src/a.ts'];
     const groups = groupByFileKind(paths, (p) => p);
-    expect(groups.map((g) => g.kind)).toEqual(['code', 'test', 'docs', 'generated']);
+    expect(groups.map((g) => g.kind)).toEqual(['code', 'docs', 'test', 'generated']);
     expect(groups[0].items).toEqual(['src/z.ts', 'src/a.ts']);
-    expect(groups[1].items).toEqual(['src/b.test.ts', 'src/a.test.ts']);
+    expect(groups[2].items).toEqual(['src/b.test.ts', 'src/a.test.ts']);
     expect(groupByFileKind(['a.ts', 'b.ts'], (p) => p).map((g) => g.kind)).toEqual(['code']);
   });
 });

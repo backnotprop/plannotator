@@ -1671,12 +1671,26 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     return viewerRef.current?.getItem(itemId)?.collapsed === true;
   }, []);
 
-  // Collapse or expand every file at once — driven by the floating bottom-left
-  // toggle. Pins scroll to the first file when collapsing so the view doesn't
-  // jump into empty space.
+  const readerItemId = useStableCallback((): string | null => {
+    const viewer = viewerRef.current?.getInstance();
+    if (viewer == null) return null;
+    const scrollTop = viewer.getScrollTop();
+    let best: string | null = null;
+    for (const rendered of viewer.getRenderedItems()) {
+      const top = viewer.getTopForItem(rendered.id);
+      if (top != null && top <= scrollTop + 1) best = rendered.id;
+    }
+    return best ?? viewer.getRenderedItems()[0]?.id ?? null;
+  });
+
+  const foldAnchorRef = useRef<{ id: string; scrollTop: number } | null>(null);
   const setAllItemsCollapsed = useStableCallback((collapsed: boolean) => {
     const handle = viewerRef.current;
     if (handle == null) return;
+    const kept = foldAnchorRef.current;
+    foldAnchorRef.current = null;
+    const viewer = handle.getInstance();
+    const anchor = !collapsed && kept && viewer?.getScrollTop() === kept.scrollTop ? kept.id : readerItemId();
     for (const { id } of identity.items) {
       const item = handle.getItem(id);
       if (item == null || (item.collapsed === true) === collapsed) continue;
@@ -1686,10 +1700,15 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       handle.updateItem(item);
       reportFileCollapsed(id, collapsed);
     }
-    if (collapsed) {
-      const first = identity.items[0]?.id;
-      if (first) handle.getInstance()?.scrollTo({ type: 'item', id: first, align: 'start' });
-    }
+    const target = anchor ?? identity.items[0]?.id;
+    if (!target || viewer == null) return;
+    viewer.scrollTo({ type: 'item', id: target, align: 'start' });
+    if (!collapsed) return;
+    const settled = { id: target, scrollTop: -1 };
+    foldAnchorRef.current = settled;
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (foldAnchorRef.current === settled) settled.scrollTop = viewer.getScrollTop();
+    }));
   });
 
   const pendingAllCollapsedRef = useRef<boolean | null>(null);
