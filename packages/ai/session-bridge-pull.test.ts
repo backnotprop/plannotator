@@ -397,6 +397,34 @@ describe("pull session bridge", () => {
     expect(res.status).toBe(404);
   });
 
+  test("a poll cancelled while reading its body leaves a queued question for the next poll", async () => {
+    const { call, pull } = setup();
+    const auth = { authorization: `Bearer ${TOKEN}` };
+    const controller = new AbortController();
+    const body = new TransformStream<Uint8Array>();
+    const request = call(SESSION_BRIDGE_POLL_PATH, {
+      method: "POST",
+      body: body.readable,
+      signal: controller.signal,
+      ...{ duplex: "half" },
+    }, auth);
+    pull.bridge.ask(
+      { askId: "question", mode: "turn", text: "keep this question" },
+      { delta() {}, done() {}, error() {} },
+      new AbortController().signal,
+    );
+    controller.abort();
+    const writer = body.writable.getWriter();
+    await writer.write(new TextEncoder().encode(JSON.stringify({ waitMs: 0 })));
+    await writer.close();
+
+    expect(await (await request).json()).toMatchObject({ commands: [] });
+    const live = await call(SESSION_BRIDGE_POLL_PATH, { method: "POST", body: JSON.stringify({ waitMs: 0 }) }, auth);
+    expect(await live.json()).toMatchObject({
+      commands: [{ type: "ask", askId: "question", mode: "turn", text: "keep this question" }],
+    });
+  });
+
   test("a newer poll supersedes an open one, and dispose answers the open poll with closing", async () => {
     const { call, pull } = setup();
     const auth = { authorization: `Bearer ${TOKEN}` };

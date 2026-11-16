@@ -430,6 +430,9 @@ export function createPullSessionBridge(options: PullSessionBridgeOptions): Pull
 		} catch {
 			return json({ error: "Invalid JSON body." }, 400);
 		}
+		// A disconnected request can finish reading its body after aborting.
+		// Do not mark commands sent or supersede a live poll with that request.
+		if (req.signal?.aborted) return pollReply({ commands: [] });
 		noteContact();
 		polled = true;
 		if (isRecord(body)) {
