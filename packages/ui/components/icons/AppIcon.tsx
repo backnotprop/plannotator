@@ -61,14 +61,14 @@ const MarkIcon: React.FC<{ code: string; className?: string }> = ({ code, classN
     focusable="false"
     data-app-mark={code}
   >
-    <rect x="1" y="1" width="14" height="14" rx="3.2" style={{ fill: 'var(--foreground, #1f1f1f)' }} />
+    <rect x="0.5" y="0.5" width="15" height="15" rx="3.4" style={{ fill: 'var(--foreground, #1f1f1f)' }} />
     <text
       x="8"
-      y="10.6"
+      y="11.1"
       textAnchor="middle"
-      fontSize="7.4"
+      fontSize="8.2"
       fontWeight="700"
-      letterSpacing="-0.2"
+      letterSpacing="-0.5"
       style={{ fill: 'var(--background, #ffffff)', fontFamily: 'ui-sans-serif, system-ui, -apple-system, sans-serif' }}
     >
       {code}
