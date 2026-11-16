@@ -12,7 +12,7 @@ import type { PaneReads } from './paneReads';
 export const MACHINE_THREAD_WAIT_MS = 80;
 
 export interface ShownReadsDeps {
-  reads: Pick<PaneReads, 'shown' | 'readOf' | 'refreshThread'>;
+  reads: Pick<PaneReads, 'shown' | 'readOf' | 'refreshThread' | 'parkedThreads' | 'owe'>;
   latest: () => ListModel | null;
   filesSignals: KeyedSignal;
   /** Several panes can show (useRoutePanes `allowed`). Without, every read below is main's for the one open thread. */
@@ -28,6 +28,9 @@ export interface ShownReadsDeps {
  * Without the switch the window has one pane, and each read here is main's for the address's thread, call for call:
  * the same thread, the same requests in the same order, the same promise awaited (none when no thread is open), and
  * a linked machine's frames on one timer.
+ *
+ * A pane kept off the page (ThreadPanes.tsx) is not on screen: its thread is not read, only owed the read (paneReads.ts
+ * `owe`), which it gets once when it is back.
  */
 export function createShownReads({ reads, latest, filesSignals, split, open }: ShownReadsDeps) {
   const machineTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -36,6 +39,15 @@ export function createShownReads({ reads, latest, filesSignals, split, open }: S
     if (split()) return reads.shown();
     const thread = open();
     return thread ? [thread] : [];
+  };
+  /** The threads off the page these reads would have read (`which`): each is owed one. */
+  const owe = (which: (threadId: string) => boolean) => {
+    if (split()) for (const threadId of reads.parkedThreads()) if (which(threadId)) reads.owe(threadId);
+  };
+  const isLaunched = (id: string) => reads.readOf(id).loaded?.thread_id === id && !!reads.readOf(id).loaded?.messages[0]?.launch;
+  const onMachine = (machines: ReadonlySet<string>) => (id: string) => {
+    const owner = machineOf(id);
+    return owner !== null && machines.has(owner);
   };
   /** Each thread read again; none, nothing to wait for; one, its own read, as main awaited it. */
   const readAll = (threads: readonly string[]): Promise<unknown> | null =>
@@ -49,16 +61,19 @@ export function createShownReads({ reads, latest, filesSignals, split, open }: S
     /** The thread a run of the person's pick saves on `saved` reads for: that pane's, or without the switch the address's (main's). */
     ownOpen: (saved: string | null): string | null => (split() ? saved : open()),
     /** Each thread on screen, read again: a catch-up, a refresh, after the person's own write. Null: none on screen. */
-    all: () => readAll(shown()),
+    all: () => {
+      owe(() => true);
+      return readAll(shown());
+    },
     /**
      * The records of a pause (openThreadReads.ts): each thread on screen reads what they owe it. One they owe nothing
      * is read anyway when the list read that came with them no longer lists it (deleted elsewhere, which no record says).
      */
     afterRecords: (records: RecordBatch, listRead: Promise<ListModel | null>): Promise<unknown> => {
       const owed: string[] = [];
-      for (const threadId of shown()) {
+      const readFor = (threadId: string) => {
         const { load, loaded, loadedAt } = reads.readOf(threadId);
-        const read = openThreadRead(records, {
+        return openThreadRead(records, {
           threadId,
           remote: machineOf(threadId) !== null,
           loaded,
@@ -67,6 +82,10 @@ export function createShownReads({ reads, latest, filesSignals, split, open }: S
           settled: load === null || load.threadId !== threadId,
           listed: listsThread(latest(), threadId),
         });
+      };
+      owe((threadId) => readFor(threadId) !== 'none');
+      for (const threadId of shown()) {
+        const read = readFor(threadId);
         if (read === 'thread') {
           owed.push(threadId);
           continue;
@@ -88,6 +107,7 @@ export function createShownReads({ reads, latest, filesSignals, split, open }: S
         oneTimer = setTimeout(() => void reads.refreshThread(thread), MACHINE_THREAD_WAIT_MS);
         return;
       }
+      owe((threadId) => machineOf(threadId) === machine);
       for (const threadId of shown()) {
         if (machineOf(threadId) !== machine) continue;
         const timer = machineTimers.get(threadId);
@@ -102,15 +122,15 @@ export function createShownReads({ reads, latest, filesSignals, split, open }: S
       }
     },
     /** Held writes settled (or one was delivered) on these machines: their threads on screen show them now. */
-    onMachines: (machines: ReadonlySet<string>) =>
-      readAll(
-        shown().filter((id) => {
-          const owner = machineOf(id);
-          return owner !== null && machines.has(owner);
-        }),
-      ),
+    onMachines: (machines: ReadonlySet<string>) => {
+      owe(onMachine(machines));
+      return readAll(shown().filter(onMachine(machines)));
+    },
     /** The live sessions moved: a launched thread on screen reads its run line again. */
-    launched: () => readAll(shown().filter((id) => reads.readOf(id).loaded?.thread_id === id && !!reads.readOf(id).loaded?.messages[0]?.launch)),
+    launched: () => {
+      owe(isLaunched);
+      return readAll(shown().filter(isLaunched));
+    },
     stop: () => {
       for (const timer of machineTimers.values()) clearTimeout(timer);
       machineTimers.clear();

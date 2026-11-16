@@ -49,8 +49,9 @@ function titleOf(host: ThreadPanesHost, thread: string | undefined): string {
  * says where each node shows. Beside the list the panes draw in the free layout (FreeLayout.tsx), even one. On a
  * phone, in a stacked window, with a card's or Reviews' thread open or a file full screen, the active pane shows in
  * today's slot and the others wait off the page. A file open beside the active pane takes the others' room, and a
- * narrow window the least recent's: they wait off the page too, and come back as they were, scroll, folds, reply box
- * and a recording in progress included. Only the active pane draws with every change of the window; the others draw
+ * narrow window the least recent's: they wait off the page too, and come back as they were, scroll, folds and reply box
+ * included (a recording in one stops as it goes: no mic runs unseen). They read nothing there, and once back read what
+ * changed meanwhile (paneReads.ts `park`). Only the active pane draws with every change of the window; the others draw
  * when what they show changes (paneHosts.ts).
  */
 export function ThreadPanes({ windowPanes, held, host }: ThreadPanesProps) {
@@ -65,6 +66,8 @@ export function ThreadPanes({ windowPanes, held, host }: ThreadPanesProps) {
     () => (!engine ? new Set(ids.filter((id) => id !== shownAlone)) : host.fileOpen ? new Set(ids.filter((id) => id !== layout.active)) : roomHidden),
     [engine, host.fileOpen, ids, layout.active, roomHidden, shownAlone],
   );
+  // A pane off the page reads nothing until it is back (paneReads.ts `park`). Without the switch none is.
+  useEffect(() => host.paneReads.park(windowPanes.allowed ? hidden : new Set()), [host.paneReads, hidden, windowPanes.allowed]);
   const multi = engine && ids.length - hidden.size > 1;
   const title = useCallback((id: L.PaneId) => titleOf(host, windowPanes.layout.threads[id]), [host, windowPanes]);
   usePaneDrop({ enabled: engine && !host.fileOpen, multi, windowPanes, hidden, title, holdSidebar: (columns) => host.holdSidebarIfTight(columns) });

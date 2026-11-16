@@ -590,11 +590,11 @@ for (const phone of [
       await expect(sheet).toHaveCount(0);
       // The pin lives in ⋯ More's menu (a phone's way to pin), not the header.
       await expect(pane.locator('[data-pin-toggle]')).toHaveCount(0);
-      // Every header control is a 44 px target and none overlaps another (the title, a button when cut, is not one of them).
+      // Every header control is a 44 px target and none overlaps another (the title too, a button when cut).
       // Measured against the header itself (the thread may still be sliding in).
       const boxes = await pane.locator('.ib-phead').evaluate((head) => {
         const h = head.getBoundingClientRect();
-        return [...head.querySelectorAll('button:not([data-header-title])')].map((b) => {
+        return [...head.querySelectorAll('button')].map((b) => {
           const r = b.getBoundingClientRect();
           return { name: b.getAttribute('aria-label') ?? b.textContent?.trim() ?? '', x: r.x - h.x, w: r.width, h: r.height, right: r.right - h.x, head: h.width };
         });

@@ -6,7 +6,8 @@
  *
  * What regresses: a record, frame or stale copy of the other pane's thread leaving it unread; a read of a thread
  * the records owe nothing; a read of a thread no pane shows; without the switch, any read other than main's for the
- * address's thread (another thread, a second read, a promise to wait on where main had none).
+ * address's thread (another thread, a second read, a promise to wait on where main had none); a pane kept off the
+ * page read on every write, or left unread once back after a read passed it by.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -161,6 +162,35 @@ describe.skipIf(!hasDom)('reads that follow every thread on screen', () => {
     staleThread(w.client, 'thr_a');
     await settle(() => jest.advanceTimersByTime(STALE_OPEN_MS));
     expect(w.asked.sort()).toEqual(['thr_a', 'thr_b']);
+  });
+
+  // Review of #3528 (finding 5): every write read every pane kept off the page again.
+  test('a pane kept off the page reads nothing; back on the page it reads once, only when something passed it by', async () => {
+    const w = await mountTwo('thr_a', 'thr_b', listOf('thr_a', 'thr_b'));
+    const off = new Set(['p2'] as PaneSet['active'][]);
+    // Nothing passed it by: back without a read.
+    await settle(() => w.reads().park(off));
+    await settle(() => w.reads().park(new Set()));
+    expect(w.asked).toEqual([]);
+    await settle(() => w.reads().park(off));
+    expect(w.shown().shown()).toEqual(['thr_a']);
+    await settle(() => w.shown().afterRecords({ ...newRecordBatch(), threads: new Set(['thr_b']) }, Promise.resolve(listOf('thr_a', 'thr_b'))));
+    await settle(() => w.shown().all());
+    await settle(() => w.shown().launched());
+    expect(w.asked).toEqual(['thr_a']);
+    w.asked.length = 0;
+    jest.useFakeTimers();
+    staleThread(w.client, 'thr_b');
+    await settle(() => jest.advanceTimersByTime(STALE_OPEN_MS));
+    expect(w.asked).toEqual([]);
+    // Back: one read, however many passed it by.
+    await settle(() => w.reads().park(new Set()));
+    expect(w.asked).toEqual(['thr_b']);
+    w.asked.length = 0;
+    // Off and back again with nothing new: none.
+    await settle(() => w.reads().park(off));
+    await settle(() => w.reads().park(new Set()));
+    expect(w.asked).toEqual([]);
   });
 });
 

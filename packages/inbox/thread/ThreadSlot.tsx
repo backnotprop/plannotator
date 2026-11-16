@@ -257,6 +257,7 @@ export function ThreadSlot({ paneId, threadId, active, shown: onPage = true, hel
           // Only the active pane counts what it shows as seen (panes/model.ts).
           onSeen={(through) => activeRef.current && host.seenOnSight(thread.thread_id, through)}
           covered={host.covered}
+          parked={!onPage}
           onScreenChange={(state) => {
             screen.current = state;
             reportScreen();

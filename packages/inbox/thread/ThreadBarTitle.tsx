@@ -58,11 +58,27 @@ export function ThreadBarTitle({ thread, name, heading }: { thread: TitleThread;
     </>
   );
   const tip = open ? null : name === null ? heading : (after ?? subject);
+  // Said once: the h2's name, or the button's when cut (the heading then takes its name from the button).
+  const label = name !== null ? `${name}: ${after ?? subject}` : undefined;
+  // A press into a pane beside the active one only makes that pane active (paneKeeper.tsx); a click after opens the title.
+  const quiet = useRef(false);
   return (
-    <h2 ref={box} className="ib-phsubj ib-subject" dir="auto" tabIndex={-1} data-header-subject="" data-header-name={name !== null ? '' : undefined} data-open={open ? '' : undefined} aria-label={name !== null ? `${name}: ${after ?? subject}` : undefined}>
+    <h2 ref={box} className="ib-phsubj ib-subject" dir="auto" tabIndex={-1} data-header-subject="" data-header-name={name !== null ? '' : undefined} data-open={open ? '' : undefined} aria-label={toggles ? undefined : label}>
       <Tip content={tip} cut={name === null || after !== null}>
         {toggles ? (
-          <button type="button" className="ib-phsubj-t" data-header-title="" aria-expanded={open} onClick={() => setOpen((was) => !was)}>
+          <button
+            type="button"
+            className="ib-phsubj-t"
+            data-header-title=""
+            aria-label={label}
+            aria-expanded={open}
+            onPointerDownCapture={(event) => void (quiet.current = event.currentTarget.closest('[data-pane-quiet]') !== null)}
+            onClick={(event) => {
+              const skip = quiet.current && event.detail > 0;
+              quiet.current = false;
+              if (!skip) setOpen((was) => !was);
+            }}
+          >
             {inner}
           </button>
         ) : (

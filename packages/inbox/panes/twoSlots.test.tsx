@@ -13,7 +13,8 @@
  * in one pane's reply box showing in another's; a narrow window losing the panes it cannot show. And any change
  * of layout (a narrow window, a file beside the active pane, one pane on a phone, a stacked window, a card's or
  * Reviews' thread, a file full screen, one pane and back) losing a pane's reply box, a picked answer, an unfolded
- * message, its scroll place or a recording in progress; a deleted thread's pane closing under a recording.
+ * message or its scroll place; a recording going on in a pane off the page (it stops, its words kept); a deleted
+ * thread's pane closing under a recording.
  *
  * happy-dom has no layout: the threads' bodies and messages get their boxes from the test, as in seenOnSight.test.tsx,
  * and time runs on fake timers that `wait` advances.
@@ -163,11 +164,14 @@ const noop = () => {};
 /** Each pane's pick-save calls, with the thread the pane named. */
 const pickSaves: [string | null, boolean | undefined][] = [];
 const none = async () => null;
+/** The panes the window last said were off the page (paneReads.ts `park`): they read nothing there. */
+let parked: string[] = [];
+const park = (ids: ReadonlySet<string>) => void (parked = [...ids]);
 
 /** The window's side of one slot: its look at the open, and where its seen-on-sight goes. */
 function hostFor(threadId: string, seen: (threadId: string, through: number) => void): ThreadSlotHost {
   const route: Route = { page: 'inbox', project: null, thread: threadId };
-  const paneReads = { view: () => ({ ...NO_OPEN, look: { threadId, seq: 2, through: 2 } }), retry: noop } as unknown as PaneReads;
+  const paneReads = { view: () => ({ ...NO_OPEN, look: { threadId, seq: 2, through: 2 } }), retry: noop, park } as unknown as PaneReads;
   return {
     route, routeRef: { current: route }, rowsPending: false, paneReads,
     outbox: new Map(), dismissOutbox: noop, phone: false, stack: { thread: false, file: false }, full: false, fromCard: null,
@@ -669,7 +673,7 @@ function keptThread(): InboxThread {
 const heldK = () => ({ serverSession: 's', cursor: 0, thread: keptThread() });
 const lookAt = (host: ThreadSlotHost, threadId: string, seq: number): ThreadSlotHost => ({
   ...host,
-  paneReads: { view: () => ({ ...NO_OPEN, look: { threadId, seq, through: seq } }), retry: noop } as unknown as PaneReads,
+  paneReads: { view: () => ({ ...NO_OPEN, look: { threadId, seq, through: seq } }), retry: noop, park } as unknown as PaneReads,
 });
 
 /** Each change of layout: what it changes in the window, from two panes beside each other. */
@@ -774,7 +778,7 @@ describe.skipIf(!hasDom)("a pane keeps the person's work through every change of
    * Everything `work` left in K's pane is still there, in the same elements. `folds` false: the thread itself moved
    * between Reviews' view of it and the Inbox's, where Thread.tsx decides its folds again on purpose (one thread, today).
    */
-  function kept(before: Awaited<ReturnType<typeof work>>, folds = true) {
+  function kept(before: Awaited<ReturnType<typeof work>>, folds = true, stopped = false) {
     expect(paneOf(K)).toBe(before.section);
     expect(replyBox()).toBe(before.box);
     expect(before.box.value).toBe('Words for K');
@@ -782,8 +786,9 @@ describe.skipIf(!hasDom)("a pane keeps the person's work through every change of
     expect(before.pick.checked).toBe(true);
     if (folds) expect(paneOf(K).querySelector(`[data-message-article="${before.unfolded}"]`)?.hasAttribute('data-folded')).toBe(false);
     expect(body().scrollTop).toBe(300);
-    expect(live()).toBe('live');
-    expect(mic).toEqual([]);
+    // A pane parked off the page runs no mic unseen: its take stopped and went to be written down (useThreadVoice.ts).
+    expect(live()).toBe(stopped ? 'sending' : 'live');
+    expect(mic).toEqual(stopped ? ['stopped', 'transcribing'] : []);
   }
 
   for (const role of ['active', 'beside'] as const) {
@@ -800,16 +805,18 @@ describe.skipIf(!hasDom)("a pane keeps the person's work through every change of
         drawPanes(windowOf(withK(active)), change(hostIn(active)), heldIn(active));
         if (narrow) act(() => void window.dispatchEvent(new Event('resize')));
         await wait(0);
-        // The active pane shows; the other waits off the page, still mounted.
+        // The active pane shows; the other waits off the page, still mounted. A recording in it stops, and what was said is kept.
         expect(paneOf(role === 'active' ? K : A)).not.toBeNull();
         expect(paneOf(role === 'active' ? A : K)).toBeNull();
-        expect(mic).toEqual([]);
+        expect(parked).toEqual([role === 'active' ? 'main' : 'p1']);
+        expect(mic).toEqual(role === 'active' ? [] : ['stopped', 'transcribing']);
         mainWidth = 1600;
         drawPanes(windowOf(withK(active)), hostIn(active), heldIn(active));
         if (narrow) act(() => void window.dispatchEvent(new Event('resize')));
         await wait(0);
         expect(paneOf(A)).not.toBeNull();
-        kept(before, !(role === 'active' && name.startsWith('Reviews')));
+        expect(parked).toEqual([]);
+        kept(before, !(role === 'active' && name.startsWith('Reviews')), role === 'beside');
       });
     }
   }

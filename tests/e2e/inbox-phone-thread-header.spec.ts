@@ -116,8 +116,8 @@ for (const size of [14, 15]) {
           const m = await head.evaluate((el) => {
             const h = el.getBoundingClientRect();
             const end = h.right - parseFloat(getComputedStyle(el).paddingRight);
-            // The controls: the title, a button when cut (a tap opens it whole), is measured as the title below.
-            const buttons = [...el.querySelectorAll('button:not([data-header-title])')]
+            // The controls, the title too when cut (a button: a tap opens it whole).
+            const buttons = [...el.querySelectorAll('button')]
               .map((b) => ({ name: b.getAttribute('aria-label') ?? b.textContent?.trim() ?? '', r: b.getBoundingClientRect() }))
               .filter((b) => b.r.width > 0)
               .sort((a, b) => a.r.x - b.r.x)
@@ -206,6 +206,15 @@ test('a cut title opens whole on a tap, wrapped in a taller bar, and a second ta
     await expect(title).not.toHaveAttribute('data-open');
     const closed = await title.evaluate((h) => h.getBoundingClientRect().height);
     expect((await head.boundingBox())!.height).toBeLessThanOrEqual(48.5);
+    // A 44 px target, its words still in the middle of the bar.
+    expect((await words.boundingBox())!.height, 'the cut title is a 44 px target').toBeGreaterThanOrEqual(43.9);
+    const middle = await head.evaluate((h) => {
+      const r = h.getBoundingClientRect();
+      const top = r.top + parseFloat(getComputedStyle(h).paddingTop);
+      const a = h.querySelector('[data-header-after]')!.getBoundingClientRect();
+      return Math.abs((a.top + a.bottom) / 2 - (top + r.bottom) / 2);
+    });
+    expect(middle, 'the words sit in the middle of the bar').toBeLessThanOrEqual(3);
 
     await words.tap();
     await expect(title).toHaveAttribute('data-open', '');

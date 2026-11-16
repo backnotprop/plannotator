@@ -200,7 +200,13 @@ function cutTo(cut: boolean) {
   act(() => void window.dispatchEvent(new Event('resize')));
 }
 afterEach(() => {
-  for (const [i, key] of widths.entries()) if (savedWidths[i]) Object.defineProperty(HTMLElement.prototype, key, savedWidths[i]!);
+  if (!hasDom) return;
+  cutNow = false;
+  // Put back what was there: the prototype's own measure, or none (the DOM keeps it further up the chain).
+  for (const [i, key] of widths.entries()) {
+    if (savedWidths[i]) Object.defineProperty(HTMLElement.prototype, key, savedWidths[i]!);
+    else delete (HTMLElement.prototype as unknown as Record<string, unknown>)[key];
+  }
 });
 
 // Review of #3528: a phone has no hover, so a cut title must open by a tap. No key of its own: it is a button.
@@ -214,6 +220,9 @@ test.skipIf(!hasDom)('a cut title is a button: a click opens it whole, wrapped, 
     expect(button.tagName).toBe('BUTTON');
     expect(button.getAttribute('aria-expanded')).toBe('false');
     expect(bar()!.hasAttribute('data-open')).toBe(false);
+    // Said once: the heading takes its name from the button, not a label of its own as well.
+    expect(bar()!.hasAttribute('aria-label')).toBe(false);
+    expect(button.getAttribute('aria-label')).toBe(name === null ? null : `${name}: ${SUBJECT}`);
     act(() => button.click());
     expect(bar()!.hasAttribute('data-open')).toBe(true);
     expect(barWords()).toBe(button);
@@ -235,6 +244,31 @@ test.skipIf(!hasDom)('a cut title is a button: a click opens it whole, wrapped, 
     if (savedFetch) globalThis.fetch = savedFetch;
     savedFetch = null;
   }
+});
+
+// Review of #3528: a press into a pane beside the active one makes it active (paneKeeper.tsx); it must not also open the title.
+test.skipIf(!hasDom)('in a pane beside the active one, a click on a cut title only makes the pane active; the next opens it', async () => {
+  await render(thread('session-refresh', 2));
+  cutTo(true);
+  const button = barWords()!;
+  const press = () =>
+    act(() => {
+      button.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, button: 0 }));
+      button.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, detail: 1 }));
+    });
+  host!.setAttribute('data-pane-quiet', '');
+  press();
+  expect(bar()!.hasAttribute('data-open')).toBe(false);
+  // The pane is the active one now.
+  host!.removeAttribute('data-pane-quiet');
+  press();
+  expect(bar()!.hasAttribute('data-open')).toBe(true);
+  press();
+  expect(bar()!.hasAttribute('data-open')).toBe(false);
+  // Enter or Space on it (a click with no press) opens it wherever it is.
+  host!.setAttribute('data-pane-quiet', '');
+  act(() => void button.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, detail: 0 })));
+  expect(bar()!.hasAttribute('data-open')).toBe(true);
 });
 
 test.skipIf(!hasDom)('another thread opens with its title closed', async () => {

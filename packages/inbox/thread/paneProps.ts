@@ -55,6 +55,8 @@ export interface ThreadPaneProps {
   seenThrough?: number | null;
   onSeen?: (throughSeq: number) => void;
   covered?: boolean;
+  /** Kept off the page by a free layout (ThreadPanes): a recording in its reply box stops. */
+  parked?: boolean;
   onScreenChange?: (state: { threadId: string; covered: boolean } | null) => void;
   row?: InboxListRow | null;
   drawn?: InboxListGroupId | null;
