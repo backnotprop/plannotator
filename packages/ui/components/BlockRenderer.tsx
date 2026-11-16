@@ -10,6 +10,7 @@ import { BlockquoteBlock } from "./blocks/BlockquoteBlock";
 import { TableBlock } from "./blocks/TableBlock";
 import { MathBlock } from "./blocks/MathBlock";
 import { QuestionBlock, type QuestionBlockProps } from "./blocks/QuestionBlock";
+import { sourceLineAttrs } from "../utils/sourceLineAttrs";
 import {
   indexQuestionBlocks,
   isQuestionDirectiveKind,
@@ -87,16 +88,17 @@ const BlockRendererBody: React.FC<{
     case 'heading': {
       const Tag = `h${block.level || 1}` as React.ElementType;
       const styles = {
-        1: 'text-2xl font-bold mb-4 mt-6 first:mt-0 tracking-tight',
-        2: 'text-xl font-semibold mb-3 mt-8 text-foreground/90',
-        3: 'text-base font-semibold mb-2 mt-6 text-foreground/80',
-      }[block.level || 1] || 'text-base font-semibold mb-2 mt-4';
+        1: 'relative text-2xl font-bold mb-4 mt-6 first:mt-0 tracking-tight',
+        2: 'relative text-xl font-semibold mb-3 mt-8 text-foreground/90',
+        3: 'relative text-base font-semibold mb-2 mt-6 text-foreground/80',
+      }[block.level || 1] || 'relative text-base font-semibold mb-2 mt-4';
       return (
         <Tag
           id={headingAnchorId}
           className={styles}
           data-block-id={block.id}
           data-block-type="heading"
+          {...sourceLineAttrs(block)}
         >
           <InlineMarkdown imageBaseDir={imageBaseDir} onImageClick={onImageClick} text={block.content} onOpenLinkedDoc={onOpenLinkedDoc} onOpenCodeFile={onOpenCodeFile} githubRepo={githubRepo} repoHost={repoHost} onNavigateAnchor={onNavigateAnchor} />
         </Tag>
@@ -108,6 +110,7 @@ const BlockRendererBody: React.FC<{
         return (
           <AlertBlock
             blockId={block.id}
+            sourceBlock={block}
             kind={block.alertKind}
             body={block.content}
             onOpenLinkedDoc={onOpenLinkedDoc}
@@ -147,13 +150,14 @@ const BlockRendererBody: React.FC<{
       const inlineProps = { imageBaseDir, onImageClick, onOpenLinkedDoc, onOpenCodeFile, githubRepo, repoHost, onNavigateAnchor };
       return (
         <div
-          className="flex items-start gap-3 my-1.5"
+          className="relative flex items-start gap-3 my-1.5"
           data-block-id={block.id}
           data-rich-list-level={block.level || 0}
           data-rich-list-kind={block.ordered ? 'ol' : 'ul'}
           data-rich-list-index={orderedIndex ?? undefined}
           data-rich-list-checked={isCheckbox ? String(isChecked) : undefined}
           style={{ marginLeft: `${indent}rem` }}
+          {...sourceLineAttrs(block)}
         >
           <ListItemBody
             level={block.level || 0}
@@ -191,7 +195,11 @@ const BlockRendererBody: React.FC<{
       return <MathBlock block={block} />;
 
     case 'hr':
-      return <hr className="border-border/30 my-8" data-block-id={block.id} />;
+      return (
+        <div className="relative my-8" data-block-id={block.id} {...sourceLineAttrs(block)}>
+          <hr className="border-border/30" />
+        </div>
+      );
 
     case 'html':
       return <HtmlBlock block={block} imageBaseDir={imageBaseDir} onOpenLinkedDoc={onOpenLinkedDoc} onOpenCodeFile={onOpenCodeFile} onNavigateAnchor={onNavigateAnchor} />;
@@ -205,6 +213,7 @@ const BlockRendererBody: React.FC<{
           return (
             <QuestionBlock
               blockId={block.id}
+              sourceBlock={block}
               indexed={indexed}
               total={questionTotal ?? 0}
               answer={questionAnswer}
@@ -239,6 +248,7 @@ const BlockRendererBody: React.FC<{
       return (
         <Callout
           blockId={block.id}
+          sourceBlock={block}
           kind={kind}
           body={block.content}
           containerClassName={`directive directive-${kind} my-4 px-4 py-3 rounded-md border`}
@@ -258,12 +268,13 @@ const BlockRendererBody: React.FC<{
     default:
       return (
         <p
-          className="mb-4 leading-relaxed text-foreground/90 text-[15px]"
+          className="relative mb-4 leading-relaxed text-foreground/90 text-[15px]"
           data-block-id={block.id}
           // Blank lines the person typed (parse option keepBlankLines): N lines in all. This margin collapses with the
           // previous block's bottom margin (mb-4), so the gap is max(the two), i.e. N lines, not N lines plus 1rem.
           style={block.blankLinesBefore ? { marginTop: `${block.blankLinesBefore}lh` } : undefined}
           data-blank-lines={block.blankLinesBefore}
+          {...sourceLineAttrs(block)}
         >
           <InlineMarkdown imageBaseDir={imageBaseDir} onImageClick={onImageClick} text={block.content} onOpenLinkedDoc={onOpenLinkedDoc} onOpenCodeFile={onOpenCodeFile} githubRepo={githubRepo} repoHost={repoHost} onNavigateAnchor={onNavigateAnchor} />
         </p>

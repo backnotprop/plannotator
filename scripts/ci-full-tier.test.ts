@@ -27,7 +27,7 @@ const repoRoot = resolve(import.meta.dir, '..');
 const GATE = 'Full CI (all green)';
 const LABEL_CHECK = "contains(github.event.pull_request.labels.*.name, 'ci:full')";
 const HEAVY = ['windows.yml', 'release.yml', 'inbox-pi.yml', 'inbox-claude-code.yml', 'relay.yml'];
-const FAST = ['test.yml', 'security.yml', 'browser-smoke.yml'];
+const FAST = ['test.yml', 'security.yml', 'browser-smoke.yml', 'e2e-slice.yml'];
 /** The full browser suite: on main every two hours, on a PR only with one of these labels. */
 const E2E = 'inbox-e2e.yml';
 const E2E_LABELS = ['ci:e2e', 'ci:e2e-all'];

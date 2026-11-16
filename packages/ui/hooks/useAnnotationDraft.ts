@@ -363,6 +363,10 @@ interface UseAnnotationDraftResult {
       that ends WITHOUT a decision body (the agent closed it): the comment
       typed just before must still reach the kept draft. */
   flushPendingSave: () => void;
+  /** True once the saved draft has been looked up (found or not), so a
+      caller can wait for `draftBanner` to be final. Stays false outside API
+      mode and in a shared session, where no draft is looked up. */
+  draftChecked: boolean;
 }
 
 export function useAnnotationDraft({
@@ -377,6 +381,7 @@ export function useAnnotationDraft({
   submitted,
 }: UseAnnotationDraftOptions): UseAnnotationDraftResult {
   const [draftBanner, setDraftBanner] = useState<DraftBanner | null>(null);
+  const [draftChecked, setDraftChecked] = useState(false);
   const draftDataRef = useRef<RestoredDraft | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasMountedRef = useRef(false);
@@ -478,7 +483,8 @@ export function useAnnotationDraft({
       })
       .catch(() => {
         hasMountedRef.current = true;
-      });
+      })
+      .finally(() => setDraftChecked(true));
   }, [isApiMode, isSharedSession]);
 
   const persistNow = useCallback((keepalive: boolean, retried = false) => {
@@ -630,5 +636,5 @@ export function useAnnotationDraft({
     return offeredDocuments;
   }, []);
 
-  return { draftBanner, restoreDraft, scheduleDraftSave, scheduleDraftSaveAfterSubmitFailure, getDraftGeneration, dismissDraft, flushPendingSave };
+  return { draftBanner, restoreDraft, scheduleDraftSave, scheduleDraftSaveAfterSubmitFailure, getDraftGeneration, dismissDraft, flushPendingSave, draftChecked };
 }
