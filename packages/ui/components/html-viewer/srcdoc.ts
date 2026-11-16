@@ -18,6 +18,7 @@
  */
 import { ANNOTATION_HIGHLIGHT_CSS, BRIDGE_SCRIPT } from "./bridge-script";
 import { SANDBOX_SHIM_SCRIPT } from "./sandboxShim";
+import { LINK_KEY_RE, linkGuardScriptTag } from "./linkGuard";
 
 export const THEME_TOKENS = [
   "--background",
@@ -100,6 +101,13 @@ export interface SrcdocInjectionOptions {
   /** The version-diff view is showing (rawHtml is htmlDiff output). */
   diffActive: boolean;
   /**
+   * The key of this load's link guard (`linkGuard.ts`). On the URL path the
+   * bridge asset installs the guard itself and reads the key from its tag
+   * (`data-plannotator-link-key`); the inline path injects the guard first in
+   * the document instead ({@link injectLinkGuard}) and ignores this.
+   */
+  linkKey?: string;
+  /**
    * Load the bridge through a classic `<script src>` from this URL instead of
    * inlining `BRIDGE_SCRIPT`. Absent or empty: inline, exactly as before. The
    * tag takes the inline script's place, so placement is identical on both
@@ -146,9 +154,10 @@ function escapeAttribute(value: string): string {
  * paths. Inline is the default and Plannotator's only path; the URL form is
  * the opt-in for hosts that serve the generated `bridge-script.asset.js`.
  */
-export function buildBridgeScriptTag(bridgeScriptUrl?: string): string {
+export function buildBridgeScriptTag(bridgeScriptUrl?: string, linkKey?: string): string {
   if (bridgeScriptUrl) {
-    return `<script src="${escapeAttribute(bridgeScriptUrl)}"></script>`;
+    const key = linkKey && LINK_KEY_RE.test(linkKey) ? ` data-plannotator-link-key="${linkKey}"` : "";
+    return `<script src="${escapeAttribute(bridgeScriptUrl)}"${key}></script>`;
   }
   if (!BRIDGE_SCRIPT) {
     // Only reachable when a host aliased `./bridge-script` to the generated
@@ -257,6 +266,7 @@ export function buildSrcdocInjection({
   hostTheme,
   diffActive,
   bridgeScriptUrl,
+  linkKey,
 }: SrcdocInjectionOptions): string {
   const payload = buildThemeTokenPayload(tokens, hostTheme);
   let themeCSS = ":root {\n";
@@ -270,7 +280,7 @@ export function buildSrcdocInjection({
     themeCSS += `:root { color-scheme: ${isLight ? "light" : "dark"}; }\n`;
   }
   const diffCSS = diffActive ? DIFF_HIGHLIGHT_CSS : "";
-  return `<style>${themeCSS}${ANNOTATION_HIGHLIGHT_CSS}${diffCSS}</style>${buildBridgeScriptTag(bridgeScriptUrl)}`;
+  return `<style>${themeCSS}${ANNOTATION_HIGHLIGHT_CSS}${diffCSS}</style>${buildBridgeScriptTag(bridgeScriptUrl, linkKey)}`;
 }
 
 /**
@@ -346,6 +356,19 @@ export function injectSandboxShim(html: string): string {
   const { position, firstScript } = headStart(html);
   const at = firstScript ?? position;
   return `${html.slice(0, at)}<script>${SANDBOX_SHIM_SCRIPT}</script>${html.slice(at)}`;
+}
+
+/**
+ * The link guard (`linkGuard.ts`) for this load, ahead of every script in the
+ * document, the sandbox shim and the page's own head scripts included: at the
+ * start of `<head>` (or after the doctype when there is none), or just before
+ * a script that comes ahead of `<head>`. Run it on the finished srcdoc, after
+ * {@link injectSandboxShim}, so it lands before the shim too.
+ */
+export function injectLinkGuard(html: string, key: string): string {
+  const { position, firstScript } = headStart(html);
+  const at = firstScript ?? position;
+  return `${html.slice(0, at)}${linkGuardScriptTag(key)}${html.slice(at)}`;
 }
 
 /** Splice the injection just before `</head>`, or prepend when there is none. */

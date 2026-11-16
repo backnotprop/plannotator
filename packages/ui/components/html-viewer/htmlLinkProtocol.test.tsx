@@ -12,13 +12,14 @@ import React from 'react';
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BRIDGE_PROTOCOL_VERSION, BRIDGE_SCRIPT } from './bridge-script';
+import { frameLinkKey } from '../../test-setup/bridgeLinkPort';
 
 const hasDom = typeof document !== 'undefined';
 const hookModule = hasDom ? await import('./useHtmlAnnotation') : null;
 const htmlViewerModule = hasDom ? await import('./HtmlViewer') : null;
 
 const LINK_CLICK = 'plannotator-bridge-link-click';
-const LINK_PORT = 'plannotator-bridge-link-port';
+const LINK_OFFER = 'plannotator-bridge-link-offer';
 
 const mountedRoots: Array<{ unmount: () => void }> = [];
 
@@ -59,93 +60,144 @@ describe.if(hasDom)('link-click at the trust boundary', () => {
 });
 
 describe.if(hasDom)('HtmlViewer link delivery', () => {
+  const RAW = '<html><head><script>var headScript = 1;</script></head><body><a href="a.html">A</a></body></html>';
+
   async function mountViewer(props: Record<string, unknown>) {
     const HtmlViewer = htmlViewerModule!.HtmlViewer;
     const host = document.createElement('div');
     document.body.appendChild(host);
     const root = createRoot(host);
     mountedRoots.push(root);
-    await act(async () => {
-      root.render(
-        <HtmlViewer
-          rawHtml='<html><body><a href="a.html">A</a></body></html>'
-          annotations={[]}
-          onAddAnnotation={() => {}}
-          onSelectAnnotation={() => {}}
-          selectedAnnotationId={null}
-          mode="selection"
-          inputMethod="pinpoint"
-          {...props}
-        />,
-      );
-    });
-    // A served frame (`frameUrl`) gets its address a task after the first render.
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
+    const render = async (next: Record<string, unknown>) => {
+      await act(async () => {
+        root.render(
+          <HtmlViewer
+            rawHtml={RAW}
+            annotations={[]}
+            onAddAnnotation={() => {}}
+            onSelectAnnotation={() => {}}
+            selectedAnnotationId={null}
+            mode="selection"
+            inputMethod="pinpoint"
+            {...next}
+          />,
+        );
+      });
+      // A served frame (`frameUrl`) gets its address a task after the first render.
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+    };
+    await render(props);
     const iframe = host.querySelector<HTMLIFrameElement>('iframe');
     if (!iframe?.contentWindow) throw new Error('HTML iframe missing');
     const frame = iframe.contentWindow;
     /** What the page's own script can do: post on the window, as the frame. */
-    const postFromFrame = async (data: Record<string, unknown>) => {
+    const postFromFrame = async (data: Record<string, unknown>, ports: MessagePort[] = []) => {
       await act(async () => {
-        window.dispatchEvent(new MessageEvent('message', { source: frame, data }));
+        // The frame's window now: a new srcdoc gives it a new one.
+        window.dispatchEvent(new MessageEvent('message', { source: iframe.contentWindow, data, ports }));
       });
     };
-    // The ports the host hands the frame (happy-dom's window.postMessage drops transfers, so read them here).
-    const handed: MessagePort[] = [];
+    // Anything the host transfers to the frame (it must never hand out a port).
+    const handed: Transferable[] = [];
     const deliver = frame.postMessage.bind(frame);
     frame.postMessage = ((data: unknown, origin: string, transfer?: Transferable[]) => {
-      if ((data as { type?: string } | null)?.type === LINK_PORT && transfer?.[0]) handed.push(transfer[0] as MessagePort);
+      if (transfer?.length) handed.push(...transfer);
       deliver(data, origin);
     }) as typeof frame.postMessage;
-    /** The bridge's side of setup: post ready, take the port the host hands the frame. */
-    const ready = async (): Promise<MessagePort> => {
-      const before = handed.length;
-      await postFromFrame({ type: 'plannotator-bridge-ready', protocolVersion: BRIDGE_PROTOCOL_VERSION });
-      if (handed.length !== before + 1) throw new Error('the host handed the frame no port on ready');
-      return handed[handed.length - 1]!;
+    /** A link offer as the frame: a channel's end and a key; returns the end the offerer keeps. */
+    const offer = async (key: string | null): Promise<MessagePort> => {
+      const channel = new MessageChannel();
+      await postFromFrame({ type: LINK_OFFER, key }, [channel.port2]);
+      return channel.port1;
     };
-    /** A message on the port, delivered (port delivery is a task away). */
+    /** A message on a port, delivered (port delivery is a task away). */
     const onPort = async (port: MessagePort, data: Record<string, unknown>) => {
       await act(async () => {
         port.postMessage(data);
         await new Promise((resolve) => setTimeout(resolve, 20));
       });
     };
-    return { postFromFrame, ready, onPort };
+    const key = () => frameLinkKey(iframe);
+    return { iframe, postFromFrame, offer, onPort, key, handed, render };
   }
 
-  test('a link-click on the port handed over at ready reaches the host', async () => {
+  test('the link guard runs first in the document, before the shim and the page head script, with a 32-hex key', async () => {
+    const { iframe, key } = await mountViewer({});
+    const srcdoc = iframe.getAttribute('srcdoc')!;
+    expect(key()).toMatch(/^[0-9a-f]{32}$/);
+    const guardAt = srcdoc.indexOf('__plannotatorLinkGuard');
+    const scripts = [...srcdoc.matchAll(/<script>/g)].map((m) => m.index!);
+    expect(guardAt).toBeGreaterThan(-1);
+    expect(guardAt).toBeLessThan(scripts[1]!);
+    expect(srcdoc.indexOf('var headScript')).toBeGreaterThan(guardAt);
+  });
+
+  test("the offer with this load's key is taken: a link on its port reaches the host", async () => {
     const seen: string[] = [];
-    const { ready, onPort } = await mountViewer({ onOpenLink: (href: string) => seen.push(href) });
-    await onPort(await ready(), { type: LINK_CLICK, href: '../index.html' });
+    const { offer, onPort, key } = await mountViewer({ onOpenLink: (href: string) => seen.push(href) });
+    await onPort(await offer(key()), { type: LINK_CLICK, href: '../index.html' });
     expect(seen).toEqual(['../index.html']);
   });
 
-  test('a link-click posted on the window, as the page\'s own script can, never reaches the host', async () => {
+  test("a link-click posted on the window, as the page's own script can, never reaches the host", async () => {
     const seen: string[] = [];
-    const { postFromFrame, ready } = await mountViewer({ onOpenLink: (href: string) => seen.push(href) });
-    await postFromFrame({ type: LINK_CLICK, href: '../before-ready.html' });
-    await ready();
-    await postFromFrame({ type: LINK_CLICK, href: '../after-ready.html' });
+    const { postFromFrame, offer, key } = await mountViewer({ onOpenLink: (href: string) => seen.push(href) });
+    await postFromFrame({ type: LINK_CLICK, href: '../before-offer.html' });
+    await offer(key());
+    await postFromFrame({ type: LINK_CLICK, href: '../after-offer.html' });
     expect(seen).toEqual([]);
   });
 
-  test('each ready hands over a fresh port and retires the one before it', async () => {
+  test('a forged ready gets nothing: the host hands the frame no port', async () => {
     const seen: string[] = [];
-    const { ready, onPort } = await mountViewer({ onOpenLink: (href: string) => seen.push(href) });
-    const first = await ready();
-    const second = await ready();
-    await onPort(first, { type: LINK_CLICK, href: 'old.html' });
-    await onPort(second, { type: LINK_CLICK, href: 'new.html' });
+    const { postFromFrame, handed } = await mountViewer({ onOpenLink: (href: string) => seen.push(href) });
+    await postFromFrame({ type: 'plannotator-bridge-ready', protocolVersion: BRIDGE_PROTOCOL_VERSION });
+    await postFromFrame({ type: 'plannotator-bridge-ready', protocolVersion: BRIDGE_PROTOCOL_VERSION });
+    expect(handed).toEqual([]);
+    expect(seen).toEqual([]);
+  });
+
+  // A page that rewrote itself (document.open) or navigated its own frame to the asset route's copy, which has no
+  // guard, then offers a port of its own: even with the key it read from the page, it is a second offer.
+  test('a second offer for the same load is refused, key or not; the first port keeps working', async () => {
+    const seen: string[] = [];
+    const { offer, onPort, key } = await mountViewer({ onOpenLink: (href: string) => seen.push(href) });
+    const honest = await offer(key());
+    const forged = await offer(key());
+    await onPort(forged, { type: LINK_CLICK, href: '/#thread=T2' });
+    await onPort(honest, { type: LINK_CLICK, href: 'next.html' });
+    expect(seen).toEqual(['next.html']);
+  });
+
+  test('an offer with another key, or none, is refused and does not use up the load', async () => {
+    const seen: string[] = [];
+    const { offer, onPort, key } = await mountViewer({ onOpenLink: (href: string) => seen.push(href) });
+    await onPort(await offer('f'.repeat(32)), { type: LINK_CLICK, href: '/#thread=T2' });
+    await onPort(await offer(null), { type: LINK_CLICK, href: '/#thread=T3' });
+    await onPort(await offer(key()), { type: LINK_CLICK, href: 'next.html' });
+    expect(seen).toEqual(['next.html']);
+  });
+
+  test('a new document from the host has a new key: the old port is dropped and the old key refused', async () => {
+    const seen: string[] = [];
+    const onOpenLink = (href: string) => seen.push(href);
+    const { offer, onPort, key, render } = await mountViewer({ onOpenLink });
+    const oldKey = key()!;
+    const oldPort = await offer(oldKey);
+    await render({ onOpenLink, rawHtml: '<html><body><a href="b.html">B</a></body></html>' });
+    expect(key()).not.toBe(oldKey);
+    await onPort(oldPort, { type: LINK_CLICK, href: 'old-port.html' });
+    await onPort(await offer(oldKey), { type: LINK_CLICK, href: 'old-key.html' });
+    await onPort(await offer(key()), { type: LINK_CLICK, href: 'new.html' });
     expect(seen).toEqual(['new.html']);
   });
 
   test('a rejected href never reaches the host', async () => {
     const seen: string[] = [];
-    const { ready, onPort } = await mountViewer({ onOpenLink: (href: string) => seen.push(href) });
-    const port = await ready();
+    const { offer, onPort, key } = await mountViewer({ onOpenLink: (href: string) => seen.push(href) });
+    const port = await offer(key());
     await onPort(port, { type: LINK_CLICK, href: 'a\u0000b.html' });
     await onPort(port, { type: LINK_CLICK, href: `${'a'.repeat(4096)}.html` });
     await onPort(port, { type: LINK_CLICK });
@@ -154,41 +206,50 @@ describe.if(hasDom)('HtmlViewer link delivery', () => {
 
   test('an armed (Annotate) document follows a link too: the host gets it whatever the mode', async () => {
     const seen: string[] = [];
-    const { ready, onPort } = await mountViewer({
+    const { offer, onPort, key } = await mountViewer({
       annotateModeActive: true,
       onOpenLink: (href: string) => seen.push(href),
     });
-    await onPort(await ready(), { type: LINK_CLICK, href: 'c.html#top' });
+    await onPort(await offer(key()), { type: LINK_CLICK, href: 'c.html#top' });
     expect(seen).toEqual(['c.html#top']);
   });
 
   test('the host gets the frame too; a srcdoc frame has no URL to carry a query, so reload does nothing', async () => {
     const seen: Array<{ href: string; reloaded: boolean | undefined }> = [];
-    const { ready, onPort } = await mountViewer({
+    const { offer, onPort, key } = await mountViewer({
       onOpenLink: (href: string, frame?: { reload(search: string, hash?: string): boolean }) => seen.push({ href, reloaded: frame?.reload('?variant=2') }),
     });
-    await onPort(await ready(), { type: LINK_CLICK, href: '?variant=2' });
+    await onPort(await offer(key()), { type: LINK_CLICK, href: '?variant=2' });
     expect(seen).toEqual([{ href: '?variant=2', reloaded: false }]);
   });
 
   test('read-only documents still navigate — following a link is a read action', async () => {
     const seen: string[] = [];
-    const { ready, onPort } = await mountViewer({
+    const { offer, onPort, key } = await mountViewer({
       readOnly: true,
       onOpenLink: (href: string) => seen.push(href),
     });
-    await onPort(await ready(), { type: LINK_CLICK, href: 'b.html' });
+    await onPort(await offer(key()), { type: LINK_CLICK, href: 'b.html' });
     expect(seen).toEqual(['b.html']);
   });
-  // The Inbox serves its attached pages (`frameUrl`): the same bridge, the same rule.
-  test('a served frame takes links on the port too, never from the window', async () => {
+
+  // The Inbox serves its attached pages (`frameUrl`): the same guard, the same rule. A served web address carries
+  // its own key (`__pnk`, see linkGuard.test.ts); one that is not a web address keeps the document's.
+  test('a served frame takes one offer too, never a window link-click', async () => {
+    let served = '';
     const seen: string[] = [];
-    const { postFromFrame, ready, onPort } = await mountViewer({
-      frameUrl: async () => 'about:blank#served',
+    const { offer, onPort, postFromFrame } = await mountViewer({
+      frameUrl: async (doc: string) => {
+        served = doc;
+        return 'about:blank#served';
+      },
       onOpenLink: (href: string) => seen.push(href),
     });
-    const port = await ready();
+    const key = /\)\('([0-9a-f]{32})'\);<\/script>/.exec(served)?.[1] ?? null;
+    expect(key).toMatch(/^[0-9a-f]{32}$/);
+    const port = await offer(key);
     await postFromFrame({ type: LINK_CLICK, href: 'forged.html' });
+    await onPort(await offer(key), { type: LINK_CLICK, href: 'second.html' });
     await onPort(port, { type: LINK_CLICK, href: '?variant=2' });
     expect(seen).toEqual(['?variant=2']);
   });

@@ -3,7 +3,7 @@ import {
   HTML_ASSET_ERROR_CSP,
   HTML_ASSET_DOCUMENT_CSP,
   HTML_ASSET_ROUTE_PREFIX,
-  HTML_NO_NETWORK_MARKER,
+  prependNoNetworkMarker,
   buildHtmlAssetErrorDocument,
   encodeHtmlAssetPath,
   htmlAssetBaseHref,
@@ -229,7 +229,7 @@ export function createHtmlAssetRegistry(options: HtmlAssetRegistryOptions = {}) 
         },
       );
     } catch {
-      return outside ? HTML_NO_NETWORK_MARKER + html : html;
+      return outside ? prependNoNetworkMarker(html) : html;
     }
   }
 

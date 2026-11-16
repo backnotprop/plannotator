@@ -1,47 +1,54 @@
 /**
- * Plays the HTML viewer's bridge following a link in a DOM test. The host takes
- * a link-click only on the private port it hands the bridge after a ready
- * (bridge-script.ts, "Private link channel"), never from a window message. The
- * bridge does not run in happy-dom's frame, and happy-dom's window.postMessage
- * drops transferred ports, so this posts the ready as the frame, reads the
- * port the host hands over from the frame's postMessage, and sends on it.
+ * Plays the HTML viewer's link guard following a link in a DOM test. The host
+ * takes a link-click only on the port the guard offers once per load, with
+ * that load's key (linkGuard.ts), never from a window message. The guard does
+ * not run in happy-dom's frame, so this reads the load's key where the viewer
+ * put it (a served frame's `__pnk`, else the srcdoc's guard), offers a port
+ * as the frame once per key, and sends on it.
  */
 import { act } from 'react';
-import { BRIDGE_PROTOCOL_VERSION } from '../components/html-viewer/bridge-script';
 
-const LINK_PORT = 'plannotator-bridge-link-port';
-const handed = new WeakMap<Window, MessagePort[]>();
+const LINK_OFFER = 'plannotator-bridge-link-offer';
+const offered = new WeakMap<HTMLIFrameElement, { key: string; port: MessagePort }>();
 
-function portsOf(win: Window): MessagePort[] {
-  let ports = handed.get(win);
-  if (ports) return ports;
-  ports = [];
-  handed.set(win, ports);
-  const list = ports;
-  const deliver = win.postMessage.bind(win) as (data: unknown, origin: string) => void;
-  win.postMessage = ((data: unknown, origin: string, transfer?: Transferable[]) => {
-    if ((data as { type?: unknown } | null)?.type === LINK_PORT && transfer?.[0]) list.push(transfer[0] as MessagePort);
-    deliver(data, origin);
-  }) as typeof win.postMessage;
-  return ports;
+/** The key of the load in this frame: the served address's, else the srcdoc guard's. */
+export function frameLinkKey(frame: HTMLIFrameElement): string | null {
+  const src = frame.getAttribute('src');
+  if (src) {
+    try {
+      const keys = new URL(src, window.location.href).searchParams.getAll('__pnk');
+      const fromUrl = keys[keys.length - 1];
+      if (fromUrl) return fromUrl;
+    } catch {
+      // Not an address: fall through to the document's own key.
+    }
+  }
+  return /\)\('([0-9a-f]{32})'\);<\/script>/.exec(frame.getAttribute('srcdoc') ?? '')?.[1] ?? null;
 }
 
-/** The port the host handed this frame's bridge: after a ready posted as the frame, the first time. */
-export async function bridgeLinkPort(frame: HTMLIFrameElement): Promise<MessagePort> {
+/** Offer a port as the frame's guard would, with `key`; returns the end the guard keeps. */
+export async function offerLinkPort(frame: HTMLIFrameElement, key: string | null): Promise<MessagePort> {
   const win = frame.contentWindow;
   if (!win) throw new Error('the frame has no window');
-  const ports = portsOf(win);
-  if (ports.length === 0) {
-    await act(async () => {
-      window.dispatchEvent(new MessageEvent('message', { source: win, data: { type: 'plannotator-bridge-ready', protocolVersion: BRIDGE_PROTOCOL_VERSION } }));
-    });
-  }
-  const port = ports[ports.length - 1];
-  if (!port) throw new Error('the host handed the frame no link port on ready');
+  const channel = new MessageChannel();
+  await act(async () => {
+    window.dispatchEvent(new MessageEvent('message', { source: win, data: { type: LINK_OFFER, key }, ports: [channel.port2] }));
+  });
+  return channel.port1;
+}
+
+/** The guard's port for this frame's current load: offered the first time a load is seen. */
+export async function bridgeLinkPort(frame: HTMLIFrameElement): Promise<MessagePort> {
+  const key = frameLinkKey(frame);
+  if (!key) throw new Error('the frame carries no link key');
+  const had = offered.get(frame);
+  if (had && had.key === key) return had.port;
+  const port = await offerLinkPort(frame, key);
+  offered.set(frame, { key, port });
   return port;
 }
 
-/** A person's click on a link in the frame, as the bridge reports it: on the host's port. */
+/** A person's click on a link in the frame, as the guard reports it: on its port. */
 export async function followLinkInFrame(frame: HTMLIFrameElement, href: string): Promise<void> {
   const port = await bridgeLinkPort(frame);
   await act(async () => {

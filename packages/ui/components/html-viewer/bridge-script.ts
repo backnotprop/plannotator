@@ -10,6 +10,7 @@
  * the Pi extension vendors both files (apps/pi-extension/vendor.sh).
  */
 import { SANDBOX_SHIM_SCRIPT } from "./sandboxShim";
+import { LINK_GUARD_FUNCTION } from "./linkGuard";
 
 /**
  * Reads only viewer-namespaced \`--pn-*\` variables (with fallbacks): arbitrary
@@ -279,8 +280,9 @@ body[data-plannotator-vim-focus-owner]:focus {
  * generated `bridge-script.asset.js` separately (`bridgeScriptUrl`), where a
  * cached asset from a previous package version can outlive the parent code.
  *
- * 2: link-clicks travel on a MessagePort the parent hands over in a
- * `link-port` message after each ready, never on the window.
+ * 2: link-clicks travel only on the link guard's MessagePort (linkGuard.ts),
+ * offered once per load in a `link-offer` message with that load's key,
+ * never on the window.
  */
 export const BRIDGE_PROTOCOL_VERSION = 2;
 
@@ -329,59 +331,26 @@ ${SANDBOX_SHIM_SCRIPT}
     parent.postMessage(msg, '*');
   }
 
-  // --- Private link channel (srcdoc and served frames, never live) ---
+  // --- Links go out through the link guard (linkGuard.ts; never live) ---
   // A link the person followed moves the host (in the Inbox: to another
   // thread), so it never rides the window-wide postMessage the page's own
-  // script can forge. The host hands this bridge a MessagePort after every
-  // ready, and link-clicks (a link, or a GET form's address) go out on that
-  // port only. The listener is registered now, at the end of <head>, before
-  // any body script exists, and in the capture phase, so it runs first and
-  // stops the event: a page listener added later never sees the port.
-  // Everything it touches is read now too (the parent, the event getters, the
-  // port's methods), so a body script that later replaces window.parent or a
-  // prototype method cannot reach the port either. A script placed before the
-  // bridge in <head> runs first and owns the realm; nothing in the frame can
-  // stop that.
-  var linkPort = null;
-  var sendOnLinkPort = function() {};
-  if (!LIVE) {
-    var bridgeParent = window.parent;
-    var callOf = Function.prototype.bind.bind(Function.prototype.call);
-    var getterOf = function(proto, name) {
-      var d = proto && Object.getOwnPropertyDescriptor(proto, name);
-      return d && typeof d.get === 'function' ? callOf(d.get) : function(target) { return target[name]; };
-    };
-    var eventSource = getterOf(window.MessageEvent && MessageEvent.prototype, 'source');
-    var eventData = getterOf(window.MessageEvent && MessageEvent.prototype, 'data');
-    var eventPorts = getterOf(window.MessageEvent && MessageEvent.prototype, 'ports');
-    var stopImmediate = callOf(Event.prototype.stopImmediatePropagation);
-    // The prototype of the ports a channel really makes (not whatever the
-    // global MessagePort names), so the methods below are the ones a handed
-    // port answers to.
-    var portProto = null;
-    try {
-      var probeChannel = new MessageChannel();
-      portProto = Object.getPrototypeOf(probeChannel.port1);
-      probeChannel.port1.close();
-      probeChannel.port2.close();
-    } catch (ex) {}
-    var portPost = portProto && portProto.postMessage ? callOf(portProto.postMessage) : null;
-    var portClose = portProto && portProto.close ? callOf(portProto.close) : null;
-    sendOnLinkPort = function(msg) {
-      if (!linkPort || !portPost) return;
-      try { portPost(linkPort, msg); } catch (ex) {}
-    };
-    window.addEventListener('message', function(e) {
-      if (eventSource(e) !== bridgeParent) return;
-      var data = eventData(e);
-      if (!data || data.type !== PREFIX + 'link-port') return;
-      stopImmediate(e);
-      var ports = eventPorts(e);
-      var port = ports && ports[0];
-      if (!port) return;
-      if (linkPort && portClose) { try { portClose(linkPort); } catch (ex) {} }
-      linkPort = port;
-    }, true);
+  // script can forge. The guard runs first in the document (the inline path
+  // injects it before any page script), holds the only port the host takes
+  // links on, and sends on it only while a person's click is being dispatched,
+  // for the link that click is on. The bridge only decides WHETHER a click
+  // follows (Interact, Annotate's pin rules, forms) and hands it to the guard.
+  // On the URL path (bridgeScriptUrl) the guard is installed here, from the
+  // key on this script's tag; there a script the page put before the bridge
+  // in <head> runs first and is not covered.
+  if (!LIVE && !window.__plannotatorLinkGuard) {
+    var guardKey = null;
+    try { guardKey = document.currentScript && document.currentScript.getAttribute('data-plannotator-link-key'); } catch (ex) {}
+    if (guardKey) ${LINK_GUARD_FUNCTION}(guardKey);
+  }
+  var linkGuard = LIVE ? null : window.__plannotatorLinkGuard || null;
+  function sendOnLinkPort(msg, kind) {
+    if (!linkGuard || typeof linkGuard.follow !== 'function') return;
+    try { linkGuard.follow(kind, msg); } catch (ex) {}
   }
   // Page identity for multi-page live sessions: annotations are stamped with
   // the page they were made on, and restore filters to the current page.
@@ -4838,9 +4807,9 @@ ${SANDBOX_SHIM_SCRIPT}
         try { window.open(target && target.href ? target.href : raw, '_blank', 'noopener'); } catch (ex) {}
         return;
       }
-      // On the host's private port only (see "Private link channel"): the
-      // host takes a link from nowhere else.
-      sendOnLinkPort({ type: PREFIX + 'link-click', href: raw.slice(0, 2048) });
+      // Through the link guard only (see "Links go out through the link
+      // guard"): the host takes a link from nowhere else.
+      sendOnLinkPort({ type: PREFIX + 'link-click', href: raw.slice(0, 2048) }, 'link');
     }, true);
   }
 
@@ -4887,8 +4856,8 @@ ${SANDBOX_SHIM_SCRIPT}
     var query = new URLSearchParams();
     data.forEach(function(value, key) { if (typeof value === 'string') query.append(key, value); });
     var path = action.split('#')[0].split('?')[0];
-    // On the host's private port, as a link (see "Private link channel").
-    sendOnLinkPort({ type: PREFIX + 'link-click', href: (path + '?' + query.toString()).slice(0, 2048) });
+    // Through the link guard, as a form's address (see "Links go out through the link guard").
+    sendOnLinkPort({ type: PREFIX + 'link-click', href: (path + '?' + query.toString()).slice(0, 2048) }, 'form');
   }
   if (!LIVE) window.addEventListener('click', submitPageForm, false);
 

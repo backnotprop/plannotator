@@ -24,9 +24,12 @@ import {
   hasHostThemeOptIn,
   hasNoNetworkMarker,
   injectIntoHead,
+  injectLinkGuard,
   injectNoNetworkCsp,
   injectPrintDefaults,
+  injectSandboxShim,
 } from "./srcdoc";
+import { linkGuardScriptTag } from "./linkGuard";
 
 const HOST_TOKENS = {
   "--background": "oklch(0.15 0.02 260)",
@@ -130,6 +133,39 @@ describe("hasHostThemeOptIn", () => {
   });
 });
 
+// The link guard (linkGuard.ts) must run before every script in the document,
+// a page's own head script included: it owns the only port the host takes
+// links on, and a script before it could take that port.
+describe("link guard placement", () => {
+  const KEY = "0123456789abcdef0123456789abcdef";
+  const GUARD = linkGuardScriptTag(KEY);
+  const INJECTION = "<style></style><script>bridge()</script>";
+
+  test("first in <head>: before the sandbox shim, the page's head script and the bridge", () => {
+    const page = `<!DOCTYPE html><html><head><script>window.headScript = 1</script></head><body></body></html>`;
+    const out = injectLinkGuard(injectSandboxShim(injectIntoHead(page, INJECTION)), KEY);
+    const at = out.indexOf(GUARD);
+    expect(out.startsWith(`<!DOCTYPE html><html><head>${GUARD}`)).toBe(true);
+    expect(at).toBeLessThan(out.indexOf("plannotatorSandboxShim"));
+    expect(at).toBeLessThan(out.indexOf("window.headScript"));
+    expect(at).toBeLessThan(out.indexOf("bridge()"));
+  });
+
+  test("a script ahead of <head>, or no <head> at all: still first", () => {
+    const early = injectLinkGuard(`<!doctype html><script>window.early = 1</script><html><head></head></html>`, KEY);
+    expect(early.indexOf(GUARD)).toBe("<!doctype html>".length);
+    const bare = injectLinkGuard(`<p>hi</p><script>window.late = 1</script>`, KEY);
+    expect(bare.startsWith(GUARD)).toBe(true);
+  });
+
+  test("a marked page keeps its policy first, then the guard", () => {
+    const out = injectNoNetworkCsp(injectLinkGuard(`<!DOCTYPE html><html><head><script>fetch("/x")</script></head></html>`, KEY));
+    expect(out.indexOf(NO_NETWORK_CSP_META)).toBe("<!DOCTYPE html>".length);
+    expect(out.indexOf(NO_NETWORK_CSP_META)).toBeLessThan(out.indexOf(GUARD));
+    expect(out.indexOf(GUARD)).toBeLessThan(out.indexOf('fetch("/x")'));
+  });
+});
+
 // A document its server opened outside the session's roots carries the
 // no-network marker (packages/shared HTML_NO_NETWORK_MARKER); the srcdoc then
 // starts with `connect-src 'none'`, ahead of every page script.
@@ -198,6 +234,13 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
    * the overlay host holds an SVG marker button (environment bug — see
    * bumpDomGeneration), so observer-scope tests assert the observed target
    * and drive the captured callback with synthetic records directly. */
+  /**
+   * The link guard the bridge hands a followed click to (linkGuard.ts; tested
+   * in linkGuard.test.ts). Here a recorder stands in for it, installed before
+   * the bridge runs as the inline guard is: what the bridge decides to follow.
+   */
+  const guardFollows: Array<Record<string, unknown>> = [];
+  const guardKinds: string[] = [];
   const capturedObservers: Array<{
     callback: (mutations: MutationRecord[], observer: MutationObserver) => void;
     targets: Node[];
@@ -218,6 +261,16 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
           super.observe(target, options);
         }
       };
+    Object.defineProperty(window, "__plannotatorLinkGuard", {
+      configurable: true,
+      value: {
+        follow: (kind: string, msg: Record<string, unknown>) => {
+          guardKinds.push(kind);
+          guardFollows.push({ ...msg });
+          return true;
+        },
+      },
+    });
     try {
       new Function(BRIDGE_SCRIPT)();
     } finally {
@@ -4619,35 +4672,27 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
   // app itself: the whole editor rendered inside the annotated document.
   // The bridge must therefore never let this frame navigate.
   describe("link navigation", () => {
-    /** Link-clicks the bridge sent on the host's private port. */
-    let capturedLinkPosts: Array<Record<string, unknown>> = [];
-    /** Link-clicks posted on the window, where the host no longer takes them. */
+    /** Link-clicks the bridge handed to the link guard. */
+    let capturedLinkPosts: Array<Record<string, unknown>> = guardFollows;
+    /** Link-clicks posted on the window, where the host never takes them. */
     let windowLinkPosts: Array<Record<string, unknown>> = [];
     let stopCapture: (() => void) | null = null;
 
-    /** The host's side of setup: hand the bridge a port (as after its ready), listen on the other end. */
     function startCapture() {
-      capturedLinkPosts = [];
+      guardFollows.length = 0;
+      guardKinds.length = 0;
+      capturedLinkPosts = guardFollows;
       windowLinkPosts = [];
-      const channel = new MessageChannel();
-      channel.port1.onmessage = (event) => {
-        const data = bridgeMessageData(event);
-        if (data && data.type === "plannotator-bridge-link-click") capturedLinkPosts.push(data);
-      };
-      window.dispatchEvent(new MessageEvent("message", { data: { type: "plannotator-bridge-link-port" }, source: window, ports: [channel.port2] }));
       const capture = (event: MessageEvent) => {
         const data = bridgeMessageData(event);
         if (data && data.type === "plannotator-bridge-link-click") windowLinkPosts.push(data);
       };
       window.addEventListener("message", capture);
-      stopCapture = () => {
-        window.removeEventListener("message", capture);
-        channel.port1.close();
-      };
+      stopCapture = () => window.removeEventListener("message", capture);
     }
 
-    /** postMessage and port delivery are queued; a short macrotask wait settles both. */
-    const flushPosts = () => new Promise<void>((resolve) => setTimeout(resolve, 15));
+    /** postMessage delivery is queued; one macrotask turn settles it. */
+    const flushPosts = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
     /** A person's click: `isTrusted`, which only the browser sets (a page script's a.click() is untrusted). */
     function trusted<T extends Event>(event: T): T {
@@ -4687,43 +4732,13 @@ describe.if(hasDom)("bridge theme handler (DOM)", () => {
       expect(capturedLinkPosts.map((p) => p.href)).toEqual(["01-entry-point.html"]);
     });
 
-    test("a person's click goes out on the host's port, never on the window a page script shares", async () => {
+    test("a person's click goes to the link guard as a link, never on the window a page script shares", async () => {
       setUp('<a id="rel" href="next.html">Next</a>', false);
       clickLink("#rel");
       await flushPosts();
       expect(capturedLinkPosts.map((p) => p.href)).toEqual(["next.html"]);
+      expect(guardKinds).toEqual(["link"]);
       expect(windowLinkPosts).toEqual([]);
-    });
-
-    test("the port message stops at the bridge: a page listener added after it never sees the port", () => {
-      setUp('<a id="rel" href="next.html">Next</a>', false);
-      const seen: unknown[] = [];
-      const listen = (event: MessageEvent) => seen.push(event.data);
-      window.addEventListener("message", listen, true);
-      window.addEventListener("message", listen);
-      const stolen = new MessageChannel();
-      try {
-        window.dispatchEvent(new MessageEvent("message", { data: { type: "plannotator-bridge-link-port" }, source: window, ports: [stolen.port2] }));
-        expect(seen).toEqual([]);
-      } finally {
-        window.removeEventListener("message", listen, true);
-        window.removeEventListener("message", listen);
-        stolen.port1.close();
-      }
-    });
-
-    test("a port posted by anything but the parent is not taken", async () => {
-      setUp('<a id="rel" href="next.html">Next</a>', false);
-      const forged = new MessageChannel();
-      const forgedPosts: unknown[] = [];
-      forged.port1.onmessage = (event) => forgedPosts.push(event.data);
-      // The page posting to its own window: the event's source is not the parent.
-      window.dispatchEvent(new MessageEvent("message", { data: { type: "plannotator-bridge-link-port" }, source: null, ports: [forged.port2] }));
-      clickLink("#rel");
-      await flushPosts();
-      forged.port1.close();
-      expect(forgedPosts).toEqual([]);
-      expect(capturedLinkPosts.map((p) => p.href)).toEqual(["next.html"]);
     });
 
     test("Interact: the RAW href travels — resolution belongs to the parent", async () => {

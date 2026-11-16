@@ -96,7 +96,7 @@ import {
 	HTML_ASSET_DOCUMENT_CSP,
 	HTML_ASSET_ERROR_CSP,
 	HTML_ASSET_ROUTE_PREFIX,
-	HTML_NO_NETWORK_MARKER,
+	prependNoNetworkMarker,
 	buildHtmlAssetErrorDocument,
 	encodeHtmlAssetPath,
 	htmlAssetBaseHref,
@@ -212,7 +212,7 @@ function createHtmlAssetRegistry(
 				{ baseHref: htmlAssetBaseHref(token) + (basePath ? `${encodeHtmlAssetPath(basePath)}/` : ""), assetBasePath: basePath, noNetwork: outside },
 			);
 		} catch {
-			return outside ? HTML_NO_NETWORK_MARKER + htmlContent : htmlContent;
+			return outside ? prependNoNetworkMarker(htmlContent) : htmlContent;
 		}
 	}
 

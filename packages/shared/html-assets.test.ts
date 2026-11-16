@@ -15,10 +15,11 @@ import {
   HTML_ASSET_DOCUMENT_CSP,
   HTML_NO_NETWORK_MARKER,
   INERT_HTML_BASE_HREF,
+  prependNoNetworkMarker,
   MAX_HTML_ASSET_DOCUMENT_BYTES,
 } from "./html-assets";
 // The viewer that reads the marker (the server writes it, the frame obeys it).
-import { hasNoNetworkMarker } from "../ui/components/html-viewer/srcdoc";
+import { hasNoNetworkMarker, injectNoNetworkCsp, NO_NETWORK_CSP_META } from "../ui/components/html-viewer/srcdoc";
 
 describe("rewriteHtmlAssetReferences", () => {
   const rewrite = (html: string) =>
@@ -167,6 +168,16 @@ describe("embedded local documents", () => {
     expect(hasNoNetworkMarker(out)).toBe(true);
     // A fragment has no head: the marker still lands in it.
     expect(hasNoNetworkMarker(rewriteHtmlAssetReferences("<p>hi</p>", () => null, { noNetwork: true }))).toBe(true);
+  });
+
+  // A document the rewrite could not read still gets the marker, after its
+  // doctype: first, it would put the page in quirks mode.
+  test("the unparsed fallback keeps the doctype first, so the page stays in standards mode", () => {
+    const out = prependNoNetworkMarker('\uFEFF<!-- built --><!DOCTYPE html><html><head><script>fetch("/x")</script></head></html>');
+    expect(out).toBe(`\uFEFF<!-- built --><!DOCTYPE html>${HTML_NO_NETWORK_MARKER}<html><head><script>fetch("/x")</script></head></html>`);
+    expect(injectNoNetworkCsp(out).startsWith(`\uFEFF<!-- built --><!DOCTYPE html>${NO_NETWORK_CSP_META}`)).toBe(true);
+    expect(prependNoNetworkMarker("<p>no doctype</p>")).toBe(`${HTML_NO_NETWORK_MARKER}<p>no doctype</p>`);
+    expect(hasNoNetworkMarker(prependNoNetworkMarker("<p>x</p>"))).toBe(true);
   });
 
   test("without noNetwork the document carries no marker", () => {

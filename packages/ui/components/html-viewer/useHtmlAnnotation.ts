@@ -251,8 +251,9 @@ export interface UseHtmlAnnotationOptions {
    *  href, already bounded and screened; the host resolves it (see
    *  `resolveHtmlLinkIntent`). Delivered in readOnly mode too — navigating is
    *  a read action — and never fired in live sessions, which navigate the
-   *  proxied app for real. Arrives only on the private port handed to the
-   *  bridge after each ready, never from a window message. */
+   *  proxied app for real. Arrives only on the link guard's port, taken
+   *  once per load the host started (`armLinkOffer`), never from a window
+   *  message. */
   onLinkClick?: (href: string) => void;
   /** scrollIntoView behavior for scroll-to (selecting an annotation).
    *  Absent: smooth, as before; pass 'auto' to honor reduced motion. */
@@ -636,6 +637,9 @@ export function useHtmlAnnotation({
   prepareReopen: (annotation: Annotation, onMissing?: () => void) => Record<string, unknown> | null;
   /** Give up on a restore-draft not answered yet: its `onMissing` runs. */
   expireReopen: (id: string) => void;
+  /** The host is loading a new document whose link guard carries this key
+   *  (null: none): take exactly one link offer with it (linkGuard.ts). */
+  armLinkOffer: (key: string | null) => void;
 } {
   const [toolbarState, setToolbarState] = useState<ToolbarState | null>(null);
   const [commentPopover, setCommentPopover] = useState<CommentPopoverState | null>(null);
@@ -699,11 +703,25 @@ export function useHtmlAnnotation({
   onPageChangeRef.current = onPageChange;
   const onLinkClickRef = useRef(onLinkClick);
   onLinkClickRef.current = onLinkClick;
-  // The parent end of the private link channel (see `handOverLinkPort`).
+  // The link guard's port (linkGuard.ts) for the document the host loaded
+  // last, and the key that load's one offer must carry.
   const linkPortRef = useRef<MessagePort | null>(null);
+  const linkOfferRef = useRef<{ key: string | null; taken: boolean }>({ key: null, taken: true });
   useEffect(() => () => {
     linkPortRef.current?.close();
     linkPortRef.current = null;
+    linkOfferRef.current = { key: null, taken: true };
+  }, []);
+  /**
+   * The host is loading a new document into the frame (a srcdoc, an address,
+   * a reload) whose link guard carries `key`: the port of the document before
+   * it is dropped, and exactly one offer with this key is taken. Null: none
+   * (live mode, a blank frame).
+   */
+  const armLinkOffer = useCallback((key: string | null) => {
+    linkPortRef.current?.close();
+    linkPortRef.current = null;
+    linkOfferRef.current = { key, taken: false };
   }, []);
   const onHostDraftRef = useRef(onHostDraft);
   const frameScaleRef = useRef(resolveFrameScale(frameScale));
@@ -825,22 +843,28 @@ export function useHtmlAnnotation({
   // commit that inserts the iframe, before its document can post anything.
   useLayoutEffect(() => {
     // A link the person followed moves the host, so it never comes over the
-    // window, where the page's own script can post the same message. After
-    // each ready (a srcdoc or served document's, or a forged one: either way
-    // a fresh port), the bridge gets one end of a new channel; it takes the
-    // port before any body script can listen, and link-clicks arrive on this
-    // end only. Live sessions never report links (they navigate for real).
-    function handOverLinkPort() {
-      const win = iframeRef.current?.contentWindow;
-      if (!win || typeof MessageChannel === "undefined") return;
-      linkPortRef.current?.close();
-      const channel = new MessageChannel();
-      channel.port1.onmessage = (event: MessageEvent<unknown>) => {
+    // window, where the page's own script can post the same message. It comes
+    // on the link guard's port (linkGuard.ts): the guard runs first in the
+    // document and offers its port with the key of the load the host started.
+    // One offer per load is taken; a second one (a page that rewrote itself
+    // with document.open, or navigated its own frame to a copy with no guard),
+    // a wrong key or a forged ready gets nothing. Live sessions never report
+    // links (they navigate for real).
+    function takeLinkOffer(e: MessageEvent<unknown>) {
+      const offer = linkOfferRef.current;
+      const port = e.ports?.[0];
+      const key = isRecord(e.data) ? e.data.key : undefined;
+      if (!port) return;
+      if (offer.taken || offer.key === null || key !== offer.key) {
+        port.close();
+        return;
+      }
+      offer.taken = true;
+      port.onmessage = (event: MessageEvent<unknown>) => {
         const message = parseBridgeMessage(event.data);
         if (message?.type === `${PREFIX}link-click`) onLinkClickRef.current?.(message.href);
       };
-      linkPortRef.current = channel.port1;
-      win.postMessage({ type: `${PREFIX}link-port` }, "*", [channel.port2]);
+      linkPortRef.current = port;
     }
 
     function handler(e: MessageEvent<unknown>) {
@@ -850,15 +874,16 @@ export function useHtmlAnnotation({
       // but the trust boundary does not relax.
       const liveSession = liveRef.current;
       if (liveSession && rejectsLiveMessage(liveSession, e.origin, e.data)) return;
-      if (!liveSession && isRecord(e.data) && e.data.type === `${PREFIX}ready`) {
-        handOverLinkPort();
+      if (isRecord(e.data) && e.data.type === `${PREFIX}link-offer`) {
+        if (liveSession) e.ports?.[0]?.close();
+        else takeLinkOffer(e);
         return;
       }
       const message = parseBridgeMessage(e.data);
       if (!message) return;
 
       const type = message.type;
-      // Taken from the private port only (above): on the window it is forgeable.
+      // Taken from the link guard's port only (above): on the window it is forgeable.
       if (type === `${PREFIX}link-click`) return;
 
       if (
@@ -1562,5 +1587,6 @@ export function useHtmlAnnotation({
     prepareReopen,
     expireReopen,
     peekComment,
+    armLinkOffer,
   };
 }

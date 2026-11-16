@@ -67,11 +67,13 @@ import {
   hasHostThemeOptIn,
   hasNoNetworkMarker,
   injectIntoHead,
+  injectLinkGuard,
   injectNoNetworkCsp,
   injectPrintDefaults,
   injectSandboxShim,
   resolveBridgeScriptUrl,
 } from "./srcdoc";
+import { newLinkKey, withLinkKey } from "./linkGuard";
 
 const PREFIX = "plannotator-bridge-";
 
@@ -585,6 +587,15 @@ export function servedFrameReloadUrl(servedUrl: string | undefined, base: string
   return next.origin === own.origin && next.pathname === own.pathname ? next.href : null;
 }
 
+/** An http(s) address, resolved against `base`. */
+function isWebAddress(url: string, base: string): boolean {
+  try {
+    return /^https?:$/i.test(new URL(url, base).protocol);
+  } catch {
+    return false;
+  }
+}
+
 /**
  * The served frame's first address (`frameStart`): its own URL with the query
  * and fragment `start` names (`?variant=2`, `#step-2`, both), or the served URL
@@ -750,22 +761,30 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
     const bridgeUrlRef = useRef(bridgeUrl);
     bridgeUrlRef.current = bridgeUrl;
 
-    const srcdoc = useMemo(() => {
+    // The frame's document and the key of its link guard (linkGuard.ts), new
+    // for every document built: the host takes links only on the port the
+    // guard offers with this key, once.
+    const framedDocument = useMemo(() => {
       if (liveMode) return undefined; // src mode: the proxy injects the bridge
+      const linkKey = newLinkKey();
       const injection = buildSrcdocInjection({
         tokens: readThemeTokens(),
         isLight: isLightTheme(),
         hostTheme,
         diffActive: !!diffActive,
         bridgeScriptUrl: bridgeUrl,
+        linkKey,
       });
       const page = injectIntoHead(injectPrintDefaults(rawHtml, { sectionBreaks: hostTheme }), injection);
       // Inline path: history and storage are safe before the page's own head
-      // scripts run. The URL path gets the same shim from the bridge.
-      const framed = bridgeUrl ? page : injectSandboxShim(page);
+      // scripts run, and the link guard runs before every script (the shim
+      // too). The URL path gets both from the bridge asset.
+      const framed = bridgeUrl ? page : injectLinkGuard(injectSandboxShim(page), linkKey);
       // A page its server opened outside the session's roots gets no network.
-      return hasNoNetworkMarker(rawHtml) ? injectNoNetworkCsp(framed) : framed;
+      const html = hasNoNetworkMarker(rawHtml) ? injectNoNetworkCsp(framed) : framed;
+      return { html, linkKey };
     }, [liveMode, rawHtml, hostTheme, diffActive, bridgeUrl]);
+    const srcdoc = framedDocument?.html;
 
     useLayoutEffect(() => {
       setPrintReady(false);
@@ -806,11 +825,32 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
     }, [servesFrame, srcdoc, frameAsk]);
     const servesFrameRef = useRef(servesFrame);
     servesFrameRef.current = servesFrame;
-    // The frame's address: the served document, with the query and fragment it starts at (`frameStart`).
-    const frameSrc = useMemo(
-      () => (servedUrl && frameStart && typeof window !== "undefined" ? servedFrameStartUrl(servedUrl, window.location.href, frameStart) : servedUrl),
-      [servedUrl, frameStart],
-    );
+    // The frame's address: the served document, with the query and fragment
+    // it starts at (`frameStart`), and a new link key for this load (`__pnk`,
+    // which the guard reads and removes before the page's scripts run).
+    const framedSrc = useMemo(() => {
+      const start = servedUrl && frameStart && typeof window !== "undefined" ? servedFrameStartUrl(servedUrl, window.location.href, frameStart) : servedUrl;
+      if (start === undefined) return undefined;
+      if (start === "about:blank") return { src: start, linkKey: null };
+      // Only a web address carries a key; anything else keeps the document's own.
+      if (typeof window === "undefined" || !isWebAddress(start, window.location.href)) return { src: start, linkKey: undefined };
+      const linkKey = newLinkKey();
+      return { src: withLinkKey(start, linkKey, window.location.href), linkKey };
+    }, [servedUrl, frameStart]);
+    const frameSrc = framedSrc?.src;
+    // The key the frame's next link offer must carry: the srcdoc's, or the
+    // served address's. Armed when it changes, which is every load the host
+    // starts (a reload arms its own, below).
+    const armLinkOfferRef = useRef<(key: string | null) => void>(() => {});
+    const documentLinkKey = framedDocument?.linkKey ?? null;
+    const expectedLinkKey = liveMode
+      ? null
+      : servesFrame
+        ? framedSrc === undefined ? null : framedSrc.linkKey === undefined ? documentLinkKey : framedSrc.linkKey
+        : documentLinkKey;
+    useLayoutEffect(() => {
+      armLinkOfferRef.current(expectedLinkKey);
+    }, [expectedLinkKey]);
 
     // Error state for the bridgeScriptUrl path only: the inline path never
     // sets it (no timer, and a version mismatch there can only be a forged
@@ -967,8 +1007,12 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
           const target = servesFrameRef.current ? servedFrameReloadUrl(servedUrlRef.current, window.location.href, search, hash) : null;
           const win = iframeRef.current?.contentWindow;
           if (!target || !win) return false;
+          // A new load: its own link key, so the document being replaced can
+          // never offer a port for the next one.
+          const linkKey = newLinkKey();
           try {
-            win.location.replace(target);
+            armLinkOfferRef.current(linkKey);
+            win.location.replace(withLinkKey(target, linkKey, window.location.href));
             return true;
           } catch {
             return false;
@@ -1002,6 +1046,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       onPageTap,
     });
     createdIdsRef.current = hook.createdAnnotationIds;
+    armLinkOfferRef.current = hook.armLinkOffer;
 
     useEffect(() => {
       if (!bridgeReportedRef.current) return;

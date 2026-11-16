@@ -421,6 +421,18 @@ export interface RewriteHtmlAssetOptions {
  */
 export const HTML_NO_NETWORK_MARKER = '<meta name="plannotator-network" content="none">';
 
+/**
+ * `html` with {@link HTML_NO_NETWORK_MARKER} added without parsing it: right
+ * after a leading doctype (only a BOM, whitespace and comments before it), so
+ * the page keeps standards mode, else first. For a document the rewrite could
+ * not read.
+ */
+export function prependNoNetworkMarker(html: string): string {
+  const doctype = /^\uFEFF?(?:\s|<!--[\s\S]*?-->)*<!doctype\b[^>]*>/i.exec(html);
+  const at = doctype ? doctype[0].length : 0;
+  return html.slice(0, at) + HTML_NO_NETWORK_MARKER + html.slice(at);
+}
+
 /** A base URL that no relative reference can resolve against. */
 export const INERT_HTML_BASE_HREF = "about:blank";
 
