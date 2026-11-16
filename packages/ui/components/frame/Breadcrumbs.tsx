@@ -84,7 +84,7 @@ export function Breadcrumbs({
             {cloneElement(root.link, {
               "data-breadcrumb-root": "",
               className: cn(
-                "shrink-0 whitespace-nowrap rounded-frame-structure font-sans text-frame-sm text-frame-muted-fg hover:text-foreground hover:underline",
+                "shrink-0 whitespace-nowrap rounded-frame-structure font-sans text-frame-sm text-frame-muted-fg hover:text-foreground [&[href]]:hover:underline",
                 FOCUS_RING,
               ),
               children: root.label,
@@ -100,7 +100,7 @@ export function Breadcrumbs({
               "aria-label": collectionName,
               "aria-current": filename === null ? "page" : undefined,
               className: cn(
-                "whitespace-nowrap rounded-frame-structure font-sans text-frame-sm font-medium hover:underline",
+                "whitespace-nowrap rounded-frame-structure font-sans text-frame-sm font-medium [&[href]]:hover:underline",
                 collapsed === "parents"
                   ? "min-w-0 max-w-[45%] shrink-0 truncate"
                   : "shrink-0",

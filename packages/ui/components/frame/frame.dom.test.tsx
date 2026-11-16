@@ -104,6 +104,24 @@ describe.skipIf(!hasDom)('VersionsPanel folds', () => {
     const onScreen = frame.querySelector('[data-version-row][data-version="v3"] a');
     expect(onScreen?.getAttribute('aria-current')).toBe('true');
   });
+  test('a comparing pair marks both rows and opens the fold holding the "from" row; without it only the viewed row is marked', () => {
+    const { VersionsPanel } = versionsModule!;
+    const place = { rowLink: (row: FrameVersionEntry) => <a href={`#${row.version}`} /> };
+    const entries = versions(5);
+    const panel = (comparing: { from: string; to: string } | null) => (
+      <VersionsPanel status="success" entries={entries} place={place} onRetry={() => {}} comparing={comparing} />
+    );
+    const frame = mount(panel(null));
+    expect(frame.querySelectorAll('[data-version-compared]').length).toBe(0);
+    const selectedBefore = frame.querySelector('[data-version="v5"] a')!.className;
+    act(() => root!.render(panel({ from: 'v3', to: 'v5' })));
+    const compared = [...frame.querySelectorAll('[data-version-compared]')].map((row) => row.getAttribute('data-version'));
+    expect(compared.sort()).toEqual(['v3', 'v5']);
+    expect(frame.querySelector('[data-version-fold]')!.hasAttribute('data-version-fold-open')).toBe(true);
+    expect(frame.querySelector('[data-version="v3"] a')!.className).toBe(selectedBefore);
+    expect(frame.querySelectorAll('[aria-current="true"]').length).toBe(1);
+  });
+
   test('an opened fold stays open when "Show older versions" adds an older save to it', () => {
     const { VersionsPanel } = versionsModule!;
     const place = { rowLink: (row: FrameVersionEntry) => <a href={`#${row.version}`} /> };
@@ -279,6 +297,70 @@ describe.skipIf(!hasDom)('DocumentRailShell', () => {
       expect(document.activeElement?.textContent).toBe('Filter');
     }));
 
+  test('a controlled host that ignores the open request leaves focus alone when it opens the rail later', () =>
+    withReducedMotion(async () => {
+      const { DocumentRailShell } = shellModule!;
+      const rail = (open: boolean) => (
+        <DocumentRailShell head={<button type="button">Filter</button>} defaults={{ open: false }} open={open} onOpenChange={() => {}} storage={memoryStorage()}>
+          rows
+        </DocumentRailShell>
+      );
+      const frame = mount(rail(false));
+      const tab = frame.querySelector<HTMLButtonElement>('[aria-label="Show files"]')!;
+      act(() => tab.focus());
+      act(() => tab.click());
+      await act(async () => {});
+      expect(document.activeElement).toBe(tab);
+      const elsewhere = document.createElement('button');
+      document.body.appendChild(elsewhere);
+      act(() => elsewhere.focus());
+      act(() => root!.render(rail(true)));
+      await act(async () => {});
+      expect(frame.querySelector('[data-document-rail]')).not.toBeNull();
+      expect(document.activeElement).toBe(elsewhere);
+      elsewhere.remove();
+    }));
+
+  test('narrowRail="tab" (the default): a rail that does not fit keeps its tab; pressing it opens the rail anyway and focus moves into it', () =>
+    withReducedMotion(async () => {
+      const { DocumentRailShell } = shellModule!;
+      const frame = mount(
+        <DocumentRailShell head={<button type="button">Filter</button>} defaults={{ open: true }} fitsForWidth={() => false} storage={memoryStorage()}>
+          rows
+        </DocumentRailShell>,
+      );
+      expect(frame.querySelector('[data-document-rail]')).toBeNull();
+      const tab = frame.querySelector<HTMLButtonElement>('[aria-label="Show files"]')!;
+      expect(tab).not.toBeNull();
+      act(() => tab.focus());
+      act(() => tab.click());
+      await act(async () => {});
+      expect(frame.querySelector('[data-document-rail]')).not.toBeNull();
+      expect(document.activeElement?.textContent).toBe('Filter');
+      const edge = frame.querySelector<HTMLElement>('[role="separator"]')!;
+      act(() => edge.focus());
+      press(edge, 'Enter');
+      await act(async () => {});
+      expect(frame.querySelector('[data-document-rail]')).toBeNull();
+      expect(document.activeElement).toBe(frame.querySelector('[aria-label="Show files"]'));
+    }));
+
+  test('narrowRail="host": no tab while the rail does not fit, and none for focus to land on; the tab returns when it fits', () =>
+    withReducedMotion(async () => {
+      const { DocumentRailShell } = shellModule!;
+      const shell = (fit: boolean) => (
+        <DocumentRailShell head={head} defaults={{ open: false }} fitsForWidth={() => fit} narrowRail="host" storage={memoryStorage()}>
+          rows
+        </DocumentRailShell>
+      );
+      const frame = mount(shell(false));
+      expect(frame.querySelector('[aria-label="Show files"]')).toBeNull();
+      expect(frame.querySelector('[data-document-rail]')).toBeNull();
+      act(() => root!.render(shell(true)));
+      expect(frame.querySelector('[aria-label="Show files"]')).not.toBeNull();
+      expect(document.activeElement).not.toBe(frame.querySelector('[aria-label="Show files"]'));
+    }));
+
   test('a rail that does not fit says so, and the rail sheet is then offered at a desktop width', () => {
     const { DocumentRailShell } = shellModule!;
     const { RailSheet } = sheetModule!;
@@ -391,7 +473,7 @@ describe.skipIf(!hasDom)('ReadingLine', () => {
     const frame = mount(<ReadingLine shownNumber={6} currentNumber={6} versionsOpen={false} onToggleVersions={() => {}} />);
     const toggle = frame.querySelector('[data-reading-versions]')!;
     expect(toggle.textContent).toBe('v6 · newest');
-    expect(toggle.getAttribute('aria-label')).toBe('v6 · newest, version 6, the newest');
+    expect(toggle.getAttribute('aria-label')).toBe('v6 · newest, version 6, the newest. Versions');
     expect(toggle.getAttribute('aria-label')!.startsWith(toggle.textContent!)).toBe(true);
   });
 
@@ -408,10 +490,47 @@ describe.skipIf(!hasDom)('ReadingLine', () => {
       />,
     );
     const toggle = frame.querySelector('[data-reading-versions]')!;
-    expect(toggle.getAttribute('aria-label')).toBe('v1 of 6, version 1 of 6, an older version');
+    expect(toggle.getAttribute('aria-label')).toBe('v1 of 6, version 1 of 6, an older version. Versions');
     expect(toggle.getAttribute('aria-label')!.startsWith(toggle.textContent!)).toBe(true);
     expect(toggle.parentElement!.textContent).toBe('v1 of 6·You are looking at an older version.');
     expect(frame.textContent).not.toContain('Reading');
+  });
+
+  test('an older version whose words carry the total shows no count beside them', () => {
+    const { ReadingLine } = readingModule!;
+    const frame = mount(
+      <ReadingLine
+        shownNumber={2}
+        currentNumber={4}
+        versionsOpen={false}
+        onToggleVersions={() => {}}
+        older={{ back: <a href="#v4" />, restore: null }}
+        count={4}
+      />,
+    );
+    const toggle = frame.querySelector('[data-reading-versions]')!;
+    expect(toggle.textContent).toBe('v2 of 4');
+    expect(toggle.querySelector('[data-reading-versions-count]')).toBeNull();
+    expect(toggle.getAttribute('aria-label')).toBe('v2 of 4, version 2 of 4, an older version. Versions');
+  });
+
+  test('an older version with no number says it is older once, and its toggle reads "Versions"', () => {
+    const { ReadingLine } = readingModule!;
+    const frame = mount(
+      <ReadingLine
+        shownNumber={null}
+        currentNumber={6}
+        versionsOpen={false}
+        onToggleVersions={() => {}}
+        older={{ back: <a href="#v6" />, restore: null }}
+        versionAt="start"
+      />,
+    );
+    const toggle = frame.querySelector('[data-reading-versions]')!;
+    expect(toggle.textContent).toBe('Versions');
+    expect(toggle.getAttribute('aria-label')).toBe('Versions');
+    expect(toggle.parentElement!.textContent).toBe('Versions·You are looking at an older version.');
+    expect(frame.textContent!.match(/older version/g)!.length).toBe(1);
   });
 
   test('comparing words and a count replace and join the version words on the toggle', () => {
@@ -422,7 +541,7 @@ describe.skipIf(!hasDom)('ReadingLine', () => {
     const toggle = frame.querySelector('[data-reading-versions]')!;
     expect(toggle.querySelector('[data-reading-comparing]')!.textContent).toBe('Comparing v2 with v6');
     expect(toggle.querySelector('[data-reading-versions-count]')!.textContent).toBe('6');
-    expect(toggle.getAttribute('aria-label')).toBe('Comparing v2 with v6. 6 versions');
+    expect(toggle.getAttribute('aria-label')).toBe('Comparing v2 with v6. 6 versions. Versions');
   });
 
   test('start placement: the version first, the approval after it', () => {
@@ -456,6 +575,27 @@ describe.skipIf(!hasDom)('Breadcrumbs without a file', () => {
     expect(current[0]!.tagName).toBe('A');
     expect([...frame.querySelectorAll('span')].some((span) => span.textContent === '/')).toBe(false);
   });
+  test('only a link crumb underlines on hover; a plain-text crumb does not', async () => {
+    const { Breadcrumbs } = crumbsModule!;
+    const { compile } = await import('tailwindcss');
+    const frame = mount(
+      <>
+        <Breadcrumbs collectionName="Linked" collectionLink={<a href="#linked" />} />
+        <Breadcrumbs collectionName="Plain" collectionLink={<span />} />
+      </>,
+    );
+    const linked = frame.querySelector<HTMLElement>('a[aria-label="Linked"]')!;
+    const plain = frame.querySelector<HTMLElement>('span[aria-label="Plain"]')!;
+    const underline = linked.className.split(' ').find((name) => name.endsWith('underline'))!;
+    expect(underline).toBe('[&[href]]:hover:underline');
+    expect(plain.className).toBe(linked.className);
+    const css = (await compile('@tailwind utilities;')).build([underline]);
+    expect(css).toContain('[href]');
+    expect(css).toContain(':hover');
+    expect(linked.matches('[href]')).toBe(true);
+    expect(plain.matches('[href]')).toBe(false);
+  });
+
   test('with a file, the file crumb is the current page and not a tab stop, since it does nothing', () => {
     const { Breadcrumbs } = crumbsModule!;
     const frame = mount(<Breadcrumbs collectionName="Porto launch plan" collectionLink={<a href="#porto" />} path="plans/brief.md" />);
@@ -484,28 +624,31 @@ describe.skipIf(!hasDom)('PagesRailHead meta', () => {
 });
 
 describe.skipIf(!hasDom)('useCombinedMotionValue', () => {
-  test('subscribes once across renders and reads the latest combine', () => {
+  test('subscribes once across renders, again only when the values change, and reads the latest combine', () => {
     const { useCombinedMotionValue } = motionModule!;
     const a = motionValues!.motionValue(2);
     const b = motionValues!.motionValue(3);
+    const c = motionValues!.motionValue(5);
     let subscriptions = 0;
-    for (const value of [a, b]) {
+    for (const value of [a, b, c]) {
       const on = value.on.bind(value);
       value.on = ((event: Parameters<typeof on>[0], callback: Parameters<typeof on>[1]) => {
         subscriptions += 1;
         return on(event, callback);
       }) as typeof value.on;
     }
-    const seen: number[] = [];
-    function Harness({ scale }: { scale: number }) {
-      const combined = useCombinedMotionValue([a, b], ([x, y]) => (x! + y!) * scale);
-      seen.push(combined.get());
+    let combined: { get: () => number } | null = null;
+    function Harness({ scale, values }: { scale: number; values: (typeof a)[] }) {
+      combined = useCombinedMotionValue(values, (latest) => latest.reduce((sum, next) => sum + next, 0) * scale);
       return null;
     }
-    mount(<Harness scale={1} />);
-    act(() => root!.render(<Harness scale={2} />));
-    act(() => root!.render(<Harness scale={3} />));
+    mount(<Harness scale={1} values={[a, b]} />);
+    act(() => root!.render(<Harness scale={2} values={[a, b]} />));
+    act(() => root!.render(<Harness scale={3} values={[a, b]} />));
     expect(subscriptions).toBe(2);
-    expect(seen.at(-1)).toBe(15);
+    expect(combined!.get()).toBe(15);
+    act(() => root!.render(<Harness scale={1} values={[a, b, c]} />));
+    expect(subscriptions).toBe(5);
+    expect(combined!.get()).toBe(10);
   });
 });

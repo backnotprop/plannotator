@@ -21,7 +21,7 @@ function readingWords(
       : { tag: `v${shownNumber}`, rest: " · newest", spoken: `Version ${shownNumber}, the newest` };
   }
   if (shownNumber === null) {
-    return { tag: null, rest: "An older version", spoken: "An older version" };
+    return { tag: null, rest: "Versions", spoken: "Versions" };
   }
   if (currentNumber === null) {
     return { tag: `v${shownNumber}`, rest: "", spoken: `Version ${shownNumber}, an older version` };
@@ -66,10 +66,12 @@ export function ReadingLine({
   const words = readingWords(shownNumber, currentNumber, older !== null);
   if (older === null && words.tag === null && approved === null && comparing === null && start === null) return null;
   const end = versionAt === "end";
+  const totalShown = comparing === null && older !== null && shownNumber !== null && currentNumber !== null;
+  const shownCount = totalShown ? null : count;
   const counted =
-    count === null || onToggleVersions === null ? null : (
+    shownCount === null || onToggleVersions === null ? null : (
       <span data-reading-versions-count="" className="ml-1.5 tabular-nums text-frame-tertiary">
-        {count}
+        {shownCount}
       </span>
     );
   const inner =
@@ -96,9 +98,11 @@ export function ReadingLine({
     shown === "" || shown === words.spoken
       ? words.spoken
       : `${shown}, ${words.spoken.charAt(0).toLowerCase()}${words.spoken.slice(1)}`;
+  const main = comparing ?? named;
   const spoken = [
-    comparing === null ? named : typeof comparing === "string" ? comparing : "Versions",
-    count === null ? null : `${count} ${count === 1 ? "version" : "versions"}`,
+    main,
+    shownCount === null ? null : `${shownCount} ${shownCount === 1 ? "version" : "versions"}`,
+    main === "Versions" ? null : "Versions",
   ]
     .filter((part): part is string => part !== null)
     .join(". ");

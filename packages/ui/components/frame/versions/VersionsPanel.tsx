@@ -1,5 +1,5 @@
 import { ChevronDown, Circle, CircleAlert, CircleCheck, X } from "lucide-react";
-import { cloneElement, useId, useMemo, useState, type ReactElement, type ReactNode } from "react";
+import { cloneElement, createContext, useContext, useId, useMemo, useState, type ReactElement, type ReactNode } from "react";
 
 import { Button } from "../primitives/button";
 import { Skeleton } from "../primitives/skeleton";
@@ -238,6 +238,9 @@ function RowLines({
   );
 }
 
+const NOTHING_COMPARED: ReadonlySet<string> = new Set();
+const ComparedKeys = createContext<ReadonlySet<string>>(NOTHING_COMPARED);
+
 function VersionRow({
   place,
   entry,
@@ -248,6 +251,8 @@ function VersionRow({
   readonly nested: boolean;
 }) {
   const isMobile = useIsMobile();
+  const compared = useContext(ComparedKeys).has(entry.key);
+  const marked = entry.viewing || compared;
   const authors = place.authors !== false;
   const name = rowName(entry, nested || !authors ? "" : authorWords(entry.author));
   const note = place.note?.(entry);
@@ -261,6 +266,7 @@ function VersionRow({
       data-version={entry.version}
       data-version-current={entry.current ? "" : undefined}
       data-version-viewing={entry.viewing ? "" : undefined}
+      data-version-compared={compared ? "" : undefined}
     >
       {link !== null ? (
         cloneElement(link, {
@@ -273,13 +279,13 @@ function VersionRow({
                 },
           "aria-current": entry.viewing ? "true" : undefined,
           "aria-label": name,
-          className: cn(ROW, entry.viewing ? SELECTED : HOVER_QUIET, FOCUS_RING),
+          className: cn(ROW, marked ? SELECTED : HOVER_QUIET, FOCUS_RING),
           children: (
             <RowLines entry={entry} nested={nested} explainAgent={place.explainAgent} authors={authors} />
           ),
         } as Record<string, unknown>)
       ) : (
-        <div role="group" aria-label={name} className={cn(ROW, entry.viewing && SELECTED)}>
+        <div role="group" aria-label={name} className={cn(ROW, marked && SELECTED)}>
           <RowLines entry={entry} nested={nested} explainAgent={place.explainAgent} authors={authors} />
         </div>
       )}
@@ -379,6 +385,7 @@ export function VersionsPanel({
   onScreenActions,
   onClose,
   footer,
+  comparing = null,
 }: {
   status: "pending" | "error" | "success";
   entries: readonly FrameVersionEntry[];
@@ -391,6 +398,8 @@ export function VersionsPanel({
   onClose?: () => void;
   /** Under the list, after "Show older versions". */
   footer?: ReactNode;
+  /** During a compare, the two versions' `key`s; both rows are marked, and a fold holding either opens. */
+  comparing?: { readonly from: string; readonly to: string } | null;
 }) {
   const [opened, setOpened] = useState<ReadonlySet<string>>(() => new Set());
   const items = useMemo(() => versionItems(entries, opened), [entries, opened]);
@@ -400,6 +409,25 @@ export function VersionsPanel({
   if (holding !== null && viewingKey !== null && openedFor !== viewingKey) {
     setOpenedFor(viewingKey);
     setOpened((previous) => new Set(previous).add(holding));
+  }
+  const comparedKeys = useMemo(
+    () => (comparing === null ? NOTHING_COMPARED : new Set([comparing.from, comparing.to])),
+    [comparing?.from, comparing?.to],
+  );
+  const comparedFor = comparing === null ? null : `${comparing.from}\n${comparing.to}`;
+  const [foldsOpenedFor, setFoldsOpenedFor] = useState<string | null>(null);
+  if (comparedFor !== null && foldsOpenedFor !== comparedFor) {
+    const holdingCompared = items.flatMap((item) =>
+      item.kind === "fold" && !item.open && item.entries.some((entry) => comparedKeys.has(entry.key)) ? [item.key] : [],
+    );
+    setFoldsOpenedFor(comparedFor);
+    if (holdingCompared.length > 0) {
+      setOpened((previous) => {
+        const next = new Set(previous);
+        for (const key of holdingCompared) next.add(key);
+        return next;
+      });
+    }
   }
   const onScreen =
     status === "success" ? (entries.find((entry) => entry.viewing) ?? null) : null;
@@ -412,93 +440,95 @@ export function VersionsPanel({
       return next;
     });
   return (
-    <aside
-      data-versions-panel=""
-      aria-label="Versions"
-      className="flex w-full shrink-0 flex-col overflow-hidden bg-card md:w-72 md:border-l md:border-border"
-    >
-      <div className="flex h-11 shrink-0 items-center gap-2 px-4">
-        <h2 className="min-w-0 flex-1 truncate text-frame-sm font-medium">Versions</h2>
-        {onClose !== undefined && (
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label="Close versions"
-            className="-mr-1.5"
-            onClick={onClose}
-          >
-            <X className="size-3.5" aria-hidden="true" />
-          </Button>
-        )}
-      </div>
-      <div className="flex-1 overflow-y-auto px-1 pb-3">
-        {status === "pending" && (
-          <div className="flex flex-col gap-3 px-3 py-2" aria-label="Loading versions">
-            <Skeleton className="h-9 w-full" />
-            <Skeleton className="h-9 w-4/5" />
-            <Skeleton className="h-9 w-full" />
-          </div>
-        )}
-        {status === "error" && (
-          <div className="flex flex-col items-start gap-2 px-3 py-2 text-frame-sm text-frame-muted-fg">
-            <span>Couldn't load the versions.</span>
-            <button type="button" className={TEXT_ACTION} onClick={onRetry}>
-              Try again
+    <ComparedKeys.Provider value={comparedKeys}>
+      <aside
+        data-versions-panel=""
+        aria-label="Versions"
+        className="flex w-full shrink-0 flex-col overflow-hidden bg-card md:w-72 md:border-l md:border-border"
+      >
+        <div className="flex h-11 shrink-0 items-center gap-2 px-4">
+          <h2 className="min-w-0 flex-1 truncate text-frame-sm font-medium">Versions</h2>
+          {onClose !== undefined && (
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label="Close versions"
+              className="-mr-1.5"
+              onClick={onClose}
+            >
+              <X className="size-3.5" aria-hidden="true" />
+            </Button>
+          )}
+        </div>
+        <div className="flex-1 overflow-y-auto px-1 pb-3">
+          {status === "pending" && (
+            <div className="flex flex-col gap-3 px-3 py-2" aria-label="Loading versions">
+              <Skeleton className="h-9 w-full" />
+              <Skeleton className="h-9 w-4/5" />
+              <Skeleton className="h-9 w-full" />
+            </div>
+          )}
+          {status === "error" && (
+            <div className="flex flex-col items-start gap-2 px-3 py-2 text-frame-sm text-frame-muted-fg">
+              <span>Couldn't load the versions.</span>
+              <button type="button" className={TEXT_ACTION} onClick={onRetry}>
+                Try again
+              </button>
+            </div>
+          )}
+          {status === "success" && entries.length === 0 && (
+            <p data-versions-empty="" className="px-3 py-2 text-frame-sm text-frame-muted-fg">
+              No versions yet. Each save of this page shows here.
+            </p>
+          )}
+          {status === "success" && entries.length > 0 && (
+            <ol aria-label="Versions, newest first" className="flex flex-col gap-0.5">
+              {items.map((item) =>
+                item.kind === "one" ? (
+                  <VersionRow
+                    key={item.entry.key}
+                    place={place}
+                    entry={item.entry}
+                    nested={false}
+                  />
+                ) : (
+                  <FoldRow
+                    key={item.key}
+                    place={place}
+                    entries={item.entries}
+                    open={item.open}
+                    holdsViewing={item.holdsViewing}
+                    onToggle={() => toggle(item)}
+                  />
+                ),
+              )}
+            </ol>
+          )}
+          {onScreen !== null && onScreenActions !== undefined && (
+            <div className="mt-3 px-3">{onScreenActions(onScreen, compared)}</div>
+          )}
+          {status === "success" && entries.length === 1 && !hasMore && (
+            <p data-versions-one="" className="px-3 pt-3 text-frame-xs text-frame-muted-fg">
+              Later saves show here, newest first.
+            </p>
+          )}
+          {hasMore && (
+            <button
+              type="button"
+              disabled={loadingMore}
+              onClick={onLoadMore}
+              className={cn("mx-3 mt-3", TEXT_ACTION)}
+            >
+              {loadingMore ? "Loading older versions" : "Show older versions"}
             </button>
-          </div>
-        )}
-        {status === "success" && entries.length === 0 && (
-          <p data-versions-empty="" className="px-3 py-2 text-frame-sm text-frame-muted-fg">
-            No versions yet. Each save of this page shows here.
-          </p>
-        )}
-        {status === "success" && entries.length > 0 && (
-          <ol aria-label="Versions, newest first" className="flex flex-col gap-0.5">
-            {items.map((item) =>
-              item.kind === "one" ? (
-                <VersionRow
-                  key={item.entry.key}
-                  place={place}
-                  entry={item.entry}
-                  nested={false}
-                />
-              ) : (
-                <FoldRow
-                  key={item.key}
-                  place={place}
-                  entries={item.entries}
-                  open={item.open}
-                  holdsViewing={item.holdsViewing}
-                  onToggle={() => toggle(item)}
-                />
-              ),
-            )}
-          </ol>
-        )}
-        {onScreen !== null && onScreenActions !== undefined && (
-          <div className="mt-3 px-3">{onScreenActions(onScreen, compared)}</div>
-        )}
-        {status === "success" && entries.length === 1 && !hasMore && (
-          <p data-versions-one="" className="px-3 pt-3 text-frame-xs text-frame-muted-fg">
-            Later saves show here, newest first.
-          </p>
-        )}
-        {hasMore && (
-          <button
-            type="button"
-            disabled={loadingMore}
-            onClick={onLoadMore}
-            className={cn("mx-3 mt-3", TEXT_ACTION)}
-          >
-            {loadingMore ? "Loading older versions" : "Show older versions"}
-          </button>
-        )}
-        {footer !== undefined && footer !== null && (
-          <div data-versions-footer="" className="mt-3 px-3">
-            {footer}
-          </div>
-        )}
-      </div>
-    </aside>
+          )}
+          {footer !== undefined && footer !== null && (
+            <div data-versions-footer="" className="mt-3 px-3">
+              {footer}
+            </div>
+          )}
+        </div>
+      </aside>
+    </ComparedKeys.Provider>
   );
 }
