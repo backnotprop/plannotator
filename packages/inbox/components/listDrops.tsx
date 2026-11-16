@@ -90,6 +90,8 @@ const PLACES: { place: EdgePlace; edge: 'top' | 'bottom'; label: string; icon: I
 /** How long a row is held before it takes a Combine, and the middle of it that counts (approval: 500 ms, 60%). */
 export const COMBINE_DWELL_MS = 500;
 const COMBINE_MIDDLE = 0.2;
+/** The room "Combine with this thread" needs on a one-line row, in px. */
+const COMBINE_LABEL_MIN = 190;
 
 export interface ListDropsProps {
   /** The list's body (`.ib-lbody`): the edges float over its ends, its rows take Combine. */
@@ -170,7 +172,7 @@ export function ListDrops(props: ListDropsProps) {
 
   if (props.off || !shown) return null;
   const combineLabel = combineAt && (
-    <div className="ib-tcomb" aria-hidden="true" style={combineAt}>
+    <div className="ib-tcomb" data-end={combineAt.end ? '' : undefined} aria-hidden="true" style={{ left: combineAt.left, top: combineAt.top, width: combineAt.width, height: combineAt.height }}>
       <Icon name="swap" size={14} />
       Combine with this thread
     </div>
@@ -217,7 +219,7 @@ export function ListDrops(props: ListDropsProps) {
 }
 
 /** Where the Combine words sit over a held row, in the list column. */
-type LabelBox = { left: number; top: number; width: number; height: number };
+type LabelBox = { left: number; top: number; width: number; height: number; end?: boolean };
 
 /**
  * The list's rows as one Combine target: a row held over its middle for COMBINE_DWELL_MS fills, says "Combine with this
@@ -263,12 +265,15 @@ function registerCombine(live: { current: ListDropsProps }, setLabel: (box: Labe
     if (!column) return;
     const at = el.getBoundingClientRect();
     const from = column.getBoundingClientRect();
-    const line = el.querySelector<HTMLElement>(':scope > .ib-l3, :scope > .ib-cw')?.getBoundingClientRect();
-    setLabel(
-      line && line.height > 0
-        ? { left: line.left - from.left, top: line.top - from.top, width: Math.max(0, at.right - line.left - 12), height: line.height }
-        : { left: at.left - from.left + 12, top: at.top - from.top, width: Math.max(0, at.width - 24), height: at.height },
-    );
+    // A three-line row: over line 3 (the preview). A one-line row: at its right end, over the counts and the time
+    // (hidden while it takes the drop), clear of the ghost at the pointer.
+    const line = el.querySelector<HTMLElement>(':scope > .ib-l3')?.getBoundingClientRect();
+    if (line && line.height > 0) {
+      setLabel({ left: line.left - from.left, top: line.top - from.top, width: Math.max(0, at.right - line.left - 12), height: line.height });
+      return;
+    }
+    const left = Math.max(at.left + 12, at.right - 12 - COMBINE_LABEL_MIN);
+    setLabel({ left: left - from.left, top: at.top - from.top, width: Math.max(0, at.right - 12 - left), height: at.height, end: true });
   };
   return registerThreadDropTarget({
     element: () => live.current.body.current,

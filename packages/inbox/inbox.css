@@ -12453,7 +12453,11 @@ button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(-
 .ib-lbody :is(.ib-row, .ib-nrow)[data-thread-combine="on"]::before { background: color-mix(in oklch, var(--primary) 16%, transparent) !important; }
 @media (prefers-reduced-motion: no-preference) { .ib-lbody :is(.ib-row, .ib-nrow)[data-thread-combine="arming"]::before { transition: background-color 500ms linear; } }
 .ib-lbody .ib-nrow[data-thread-combine="on"] > .ib-l3 > *, .ib-lbody .ib-row[data-thread-combine="on"] > :is(.ib-cw, .ib-bcol, .ib-cpin, .ib-cq, .ib-t) { visibility: hidden; }
+/* While a thread is carried a row under the pointer shows no hover action (Mark read, Send now): its time and counts stay. */
+:root[data-thread-drag] .ib-rw > .ib-ract { display: none !important; }
+:root[data-thread-drag] .ib-rw:hover .ib-row:not([data-thread-combine="on"]) :is(.ib-t, .ib-cq), :root[data-thread-drag] .ib-rw:hover .ib-nrow .ib-l1 .ib-t { visibility: visible; }
 .ib-tcomb { position: absolute; z-index: 15; display: flex; align-items: center; gap: 6px; pointer-events: none; color: var(--primary); font-size: var(--ib-fs-12-5, 12.5px); font-weight: 550; white-space: nowrap; overflow: hidden; }
+.ib-tcomb[data-end] { justify-content: flex-end; }
 /* The empty thread panel while a row is carried (EmptyThreadPanel.tsx): the pane drop zone's tint, stronger under the
    pointer, and "Open here" in the reply box's drop label. */
 .ib-pempty[data-thread-drop="target"] { background-image: linear-gradient(color-mix(in oklch, var(--primary) 6%, transparent), color-mix(in oklch, var(--primary) 6%, transparent)); }
