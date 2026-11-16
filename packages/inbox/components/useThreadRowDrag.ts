@@ -45,6 +45,7 @@ export function useThreadRowDrag({ body, rowOf, picks, off }: { body: RefObject<
           },
           label: (ids) => (ids.length > 1 ? `${formatCount(ids.length)} threads` : mentionTitleOf(rowOf(ids[0]!) ?? { thread_name: null, subject: null })),
           rows: (ids) => ids.flatMap((one) => [...list.querySelectorAll<HTMLElement>(`[data-thread-id="${CSS.escape(one)}"]`)]),
+          scroller: () => list,
           spoken: (ids) => (ids.length > 1 ? `Picked up ${formatCount(ids.length)} threads.` : `Picked up ${mentionTitleOf(rowOf(ids[0]!) ?? { thread_name: null, subject: null })}.`),
         },
         root,

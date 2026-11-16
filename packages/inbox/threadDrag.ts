@@ -12,6 +12,11 @@
  *
  * Pointer events only: nothing here fires or listens to native drag events, so a file dragged onto the reply box and
  * words dragged inside it work as before.
+ *
+ * The list scrolls while a thread is held near its top or bottom (`scroller`, AUTO_SCROLL_BAND), faster nearer the
+ * edge. A drop target under the pointer always wins over scrolling: the list's own edge places (Priority on top,
+ * Quiet and Archive at the bottom, the next piece) register as targets over those bands and stop the scroll while
+ * the pointer is on them; the band stays the strip just inside them.
  */
 
 /** What a target answers for the threads being dragged: takes them, refuses them (shown, but a drop does nothing), or is no place for them (hidden). */
@@ -39,7 +44,13 @@ export interface ThreadDragSource {
   rows: (ids: readonly string[]) => HTMLElement[];
   /** Words for the live region: what was picked up. */
   spoken: (ids: readonly string[]) => string;
+  /** The list that scrolls while a thread is held near its top or bottom edge. Absent: none scrolls. */
+  scroller?: () => HTMLElement | null;
 }
+
+/** How near the list's top or bottom edge (px) a held thread scrolls it, and the fastest step (px a frame). */
+export const AUTO_SCROLL_BAND = 48;
+const AUTO_SCROLL_MAX = 14;
 
 const THRESHOLD = 5;
 const targets = new Set<ThreadDropTarget>();
@@ -62,6 +73,9 @@ interface Drag {
   over: ThreadDropTarget | null;
   rows: HTMLElement[];
   root: HTMLElement;
+  scroller: HTMLElement | null;
+  /** The scroll step now (px a frame, negative is up) and its frame. */
+  scroll: { step: number; frame: number | null };
 }
 
 let drag: Drag | null = null;
@@ -175,26 +189,26 @@ function start(event: PointerEvent): void {
   // A drag never leaves a half-made text selection behind.
   window.getSelection()?.removeAllRanges();
   const ghost = document.createElement('div');
-  ghost.className = `ib-tghost${ids.length > 1 ? ' ib-tghost-stack' : ''}${reduced() ? '' : ' ib-tghost-lift'}`;
+  ghost.className = `ib-tdrag${ids.length > 1 ? ' ib-tdrag-stack' : ''}${reduced() ? '' : ' ib-tdrag-lift'}`;
   ghost.setAttribute('aria-hidden', 'true');
   ghost.setAttribute('data-thread-ghost', '');
   const title = document.createElement('span');
-  title.className = 'ib-tghost-t';
+  title.className = 'ib-tdrag-t';
   title.textContent = source.label(ids);
   ghost.appendChild(title);
   if (ids.length > 1) {
     const count = document.createElement('span');
-    count.className = 'ib-tghost-n';
+    count.className = 'ib-tdrag-n';
     count.textContent = String(ids.length);
     ghost.appendChild(count);
   }
   const what = document.createElement('span');
-  what.className = 'ib-tghost-w';
+  what.className = 'ib-tdrag-w';
   ghost.appendChild(what);
   root.appendChild(ghost);
   const rows = source.rows(ids);
   for (const row of rows) row.setAttribute('data-thread-lifted', '');
-  drag = { ids, ghost, what, origin: { x: press.x, y: press.y }, over: null, rows, root };
+  drag = { ids, ghost, what, origin: { x: press.x, y: press.y }, over: null, rows, root, scroller: source.scroller?.() ?? null, scroll: { step: 0, frame: null } };
   document.documentElement.setAttribute('data-thread-drag', '');
   for (const target of targets) target.show(target.accepts(ids), ids);
   window.addEventListener('keydown', onKey, true);
@@ -232,12 +246,38 @@ function move(x: number, y: number): void {
   drag.what.textContent = answer === 'take' && target ? target.what : '';
   drag.ghost.toggleAttribute('data-refused', answer === 'refuse');
   if (target && answer === 'take') target.over({ x, y });
+  autoScroll(drag, target ? 0 : scrollStep(drag.scroller, x, y));
+}
+
+/** The scroll a held thread at (x, y) asks of the list: 0 outside its edge bands, more the nearer the edge. */
+export function scrollStep(list: HTMLElement | null, x: number, y: number): number {
+  if (!list || list.scrollHeight <= list.clientHeight) return 0;
+  const box = list.getBoundingClientRect();
+  if (x < box.left || x > box.right || y < box.top || y > box.bottom) return 0;
+  const depth = (into: number) => Math.ceil(AUTO_SCROLL_MAX * (1 - into / AUTO_SCROLL_BAND));
+  if (y < box.top + AUTO_SCROLL_BAND && list.scrollTop > 0) return -depth(y - box.top);
+  if (y > box.bottom - AUTO_SCROLL_BAND && list.scrollTop + list.clientHeight < list.scrollHeight) return depth(box.bottom - y);
+  return 0;
+}
+
+function autoScroll(d: Drag, step: number): void {
+  d.scroll.step = step;
+  if (step === 0 || d.scroll.frame !== null || typeof requestAnimationFrame !== 'function') return;
+  const tick = () => {
+    d.scroll.frame = null;
+    if (drag !== d || d.scroll.step === 0 || !d.scroller) return;
+    d.scroller.scrollTop += d.scroll.step;
+    d.scroll.frame = requestAnimationFrame(tick);
+  };
+  d.scroll.frame = requestAnimationFrame(tick);
 }
 
 function finish(accepted: boolean): Drag | null {
   const d = drag;
   if (!d) return null;
   drag = null;
+  if (d.scroll.frame !== null) cancelAnimationFrame(d.scroll.frame);
+  d.scroll = { step: 0, frame: null };
   stopListening();
   d.over?.over(null);
   for (const target of targets) target.show(null, d.ids);
@@ -247,8 +287,8 @@ function finish(accepted: boolean): Drag | null {
   if (accepted || reduced()) d.ghost.remove();
   else {
     // Back to where it was picked up: nothing happened.
-    d.ghost.classList.remove('ib-tghost-lift');
-    d.ghost.classList.add('ib-tghost-back');
+    d.ghost.classList.remove('ib-tdrag-lift');
+    d.ghost.classList.add('ib-tdrag-back');
     place(d.ghost, d.origin.x, d.origin.y);
     setTimeout(() => d.ghost.remove(), 220);
   }

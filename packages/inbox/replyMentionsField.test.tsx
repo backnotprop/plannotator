@@ -17,7 +17,7 @@ import type { InboxThreadMentionRef } from '@plannotator/core/inbox-thread-menti
 
 const hasDom = typeof document !== 'undefined';
 const { InboxComposerField } = (hasDom ? await import('./components/ComposerField') : {}) as typeof import('./components/ComposerField');
-const { pressThreadRow, setThreadDragHitTestForTests } = (hasDom ? await import('./threadDrag') : {}) as typeof import('./threadDrag');
+const { pressThreadRow, scrollStep, setThreadDragHitTestForTests } = (hasDom ? await import('./threadDrag') : {}) as typeof import('./threadDrag');
 const { requestMention, resetReplyMentionsForTests } = (hasDom ? await import('./threadMentions') : {}) as typeof import('./threadMentions');
 const { noteMentionRefs } = (hasDom ? await import('./data/threadMentionRefs') : {}) as typeof import('./data/threadMentionRefs');
 const { replyWordsWithMentions } = (hasDom ? await import('./threadMentions') : {}) as typeof import('./threadMentions');
@@ -312,6 +312,53 @@ describe.skipIf(!hasDom)('what else the box takes', () => {
     act(() => void box().dispatchEvent(event));
     expect(dropped).toBe(1);
     expect(words).toBe('Here is the trace');
+  });
+});
+
+/** A list 300 px tall at y 100..400 holding 1000 px of rows, scrolled to `top` (happy-dom lays nothing out). */
+function list(top: number) {
+  const el = document.createElement('div');
+  Object.defineProperty(el, 'scrollHeight', { value: 1000 });
+  Object.defineProperty(el, 'clientHeight', { value: 300 });
+  el.scrollTop = top;
+  el.getBoundingClientRect = () => ({ left: 0, right: 300, top: 100, bottom: 400, width: 300, height: 300, x: 0, y: 100, toJSON: () => null }) as DOMRect;
+  document.body.appendChild(el);
+  return el;
+}
+
+describe.skipIf(!hasDom)('the list scrolls while a thread is held near its edge', () => {
+  test('up near the top, down near the bottom, faster nearer the edge; not in the middle, outside it or past its end', () => {
+    const el = list(200);
+    expect(scrollStep(el, 150, 102)).toBeLessThan(scrollStep(el, 150, 140));
+    expect(scrollStep(el, 150, 140)).toBeLessThan(0);
+    expect(scrollStep(el, 150, 398)).toBeGreaterThan(scrollStep(el, 150, 360));
+    expect(scrollStep(el, 150, 360)).toBeGreaterThan(0);
+    expect(scrollStep(el, 150, 250)).toBe(0);
+    expect(scrollStep(el, 320, 102)).toBe(0);
+    expect(scrollStep(list(0), 150, 102)).toBe(0);
+    expect(scrollStep(list(700), 150, 398)).toBe(0);
+  });
+
+  test('a held thread scrolls the list, but not while a drop target is under the pointer', async () => {
+    draw(<Box />);
+    const el = list(200);
+    const row = document.createElement('button');
+    el.appendChild(row);
+    const at = (x: number, y: number) => ({ clientX: x, clientY: y, button: 0, pointerType: 'mouse', pointerId: 1, bubbles: true });
+    act(() => pressThreadRow(new PointerEvent('pointerdown', at(150, 250)), { ids: () => [FLAKY.id], label: () => 'thread', rows: () => [row], spoken: () => 'Picked up.', scroller: () => el }, document.querySelector('.pn-inbox')!));
+    setThreadDragHitTestForTests(() => field());
+    act(() => void window.dispatchEvent(new PointerEvent('pointermove', at(150, 104))));
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(el.scrollTop).toBe(200);
+    setThreadDragHitTestForTests(() => el);
+    act(() => void window.dispatchEvent(new PointerEvent('pointermove', at(150, 104))));
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(el.scrollTop).toBeLessThan(200);
+    act(() => void window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
+    const stopped = el.scrollTop;
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(el.scrollTop).toBe(stopped);
+    el.remove();
   });
 });
 
