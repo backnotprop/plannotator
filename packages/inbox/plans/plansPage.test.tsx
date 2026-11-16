@@ -316,6 +316,8 @@ test.skipIf(!hasDom)('the drawn-diagram check: what loads from another host or d
     '<rect style="fill: url(https://tracker.example/f.svg#g)"/>',
     '<rect fill="url(https://tracker.example/f.svg#g)"/>',
     '<rect style="background: u\\72l(x)"/>',
+    '<rect fill="u\\72l(https://tracker.example/f.svg#g)"/>',
+    '<rect mask="u\\72l(https://tracker.example/m.svg#m)"/>',
     '<style>#r .n { background: url("https://tracker.example/b.png") }</style>',
     '<style>@import "x.css";</style>',
     '<foreignObject><div xmlns="http://www.w3.org/1999/xhtml"><img src="https://tracker.example/i.png"/></div></foreignObject>',

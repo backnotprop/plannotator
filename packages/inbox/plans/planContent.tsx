@@ -126,7 +126,7 @@ export function acceptPlanDiagramSvg(svg: SVGSVGElement): boolean {
           if (anotherOrigin(target)) return false;
           if (LOADING_ELEMENTS.has(tag) && !inDocument(target)) return false;
         }
-      } else if ((name === 'style' || /url\s*\(/i.test(value)) && cssLoads(value)) {
+      } else if ((name === 'style' || /url\s*\(|\\/i.test(value)) && cssLoads(value)) {
         return false;
       }
     }
