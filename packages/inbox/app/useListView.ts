@@ -4,7 +4,7 @@
  * project names and counts, the list's title, and the held "N new" line. Reads only; App holds the state.
  */
 
-import { useCallback, useMemo } from 'react';
+import { useCallback, useLayoutEffect, useMemo } from 'react';
 import type { InboxListRow, InboxListSection, InboxThread } from '@plannotator/core/inbox-types';
 import { patchedRow, withCombining, withPinPatches } from '../rowActions';
 import { filterMachineRows, machineCounts, machineProjectNames } from '../machines';
@@ -12,6 +12,7 @@ import { appliedFilter, filterListSections, localDay, pickCount, useListFilter }
 import { filterSections, heldNews as heldNewsOf, heldNotice, listGroups, lookedRow, markHeldRowLooked, showLandsIn, waitingCount, type OpenThread } from '../held';
 import { useAgentListFilter } from '../agentsList';
 import { filterAgentRows } from '../agents/model';
+import { setWindowProjectNames } from '../agents/projectFace';
 import { filterTagRows } from '../threadTags';
 import { withLiveTagPicks } from '../listFilterTags';
 import { useThreadTagsHost } from '../useThreadTagsHost';
@@ -89,6 +90,8 @@ export function useListShown({ latest, projects, route, thread, threadRow, rowPa
     () => machineProjectNames({ projects, sidebar: shownProjects(projects, sidebarKeeps), sections: shown ?? [], pins: pinRows }, machines, !filterMachine),
     [projects, sidebarKeeps, shown, pinRows, machines, filterMachine],
   );
+  // The same names label the agents' project tiles (agents/projectFace.tsx), before the window paints.
+  useLayoutEffect(() => setWindowProjectNames(projectNames), [projectNames]);
   /** The sidebar's Machines counts: rows waiting on the person per machine, as Projects counts them. */
   const sidebarMachineCounts = useMemo(() => machineCounts(latestSections, machines), [latestSections, machines]);
   const filterList = useCallback(

@@ -21,9 +21,37 @@ function notifyProjects(): void {
   for (const listener of projectListeners) listener();
 }
 
-/** The Inbox's projects as a list read brought them: their names and when each one's picture was set. */
-export function learnProjects(list: readonly { id: string; name: string; picture?: number }[]): void {
+/** A row as `learnProjects` reads it: its project and the agent sessions in it. */
+interface SessionsRow {
+  project: { id: string; name: string };
+  author: { kind: string; session?: string | null };
+  addressee?: { session?: string | null } | null;
+  participants?: readonly { session?: string | null }[];
+}
+
+/**
+ * The project each agent session wrote in, by the rows a read brought: an agent's project tile (agents/projectFace.tsx)
+ * for an agent the Agents list no longer names. The latest read's rows win.
+ */
+const sessionProjects = new Map<string, { id: string; name: string }>();
+
+export function sessionProjectOf(session: string): { id: string; name: string } | null {
+  return sessionProjects.get(session) ?? null;
+}
+
+/** The Inbox's projects as a list read brought them: their names and when each one's picture was set; `rows`: its sessions' projects. */
+export function learnProjects(list: readonly { id: string; name: string; picture?: number }[], rows: readonly SessionsRow[] = []): void {
   let changed = false;
+  for (const row of rows) {
+    const sessions = [row.author.kind === 'agent' ? row.author.session : null, row.addressee?.session, ...(row.participants ?? []).map((p) => p.session)];
+    for (const session of sessions) {
+      if (!session) continue;
+      const before = sessionProjects.get(session);
+      if (before?.id === row.project.id && before.name === row.project.name) continue;
+      sessionProjects.set(session, row.project);
+      changed = true;
+    }
+  }
   for (const project of list) {
     const before = projects.get(project.id);
     const picture = typeof project.picture === 'number' ? project.picture : undefined;
@@ -72,6 +100,7 @@ export function projectPictureUrl(projectId: string, marks: MarksChoice): string
 /** Tests only. */
 export function resetKnownProjectsForTests(): void {
   projects.clear();
+  sessionProjects.clear();
   notifyProjects();
 }
 

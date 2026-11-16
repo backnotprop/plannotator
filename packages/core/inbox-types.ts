@@ -2474,12 +2474,19 @@ export const INBOX_ROWS_OPTIONS = [
   // PRs"), off by default, so a look saved before it shows them as ever: no PR mark at any row's end. The thread's
   // own PR button stays. No rival.
   "hidePulls",
+  // Agent icons "From the project name" (approval "inbox-generated-agent-icons", 2026-11-15), off by default: an agent
+  // with no face picked for it shows its project's tile (its letters, its own mark on the corner) in rows, the Agents
+  // list, threads and pickers. A face picked for one agent stays. Agent icons is one three-way choice: each agent's
+  // own (neither), from the project name (this), or hidden (`hideAgents`, which wins).
+  "agentProjectIcons",
 ] as const;
 export type InboxRowsOption = (typeof INBOX_ROWS_OPTIONS)[number];
 
 /**
  * The options' rivals, never on together: Compact wins over Roomy, no preview over two lines, and Dot is Bold with
  * a dot (`unreadDot` brings `smallNames`). A look in any other shape is read as this one.
+ *
+ * Agent icons: hidden (`hideAgents`) wins over from the project name (`agentProjectIcons`).
  *
  * Letter marks: Inline wins over Dot. A mark style counts only while some marks show, and the picture switches only
  * while project marks show, so with marks off the look holds none of them (turned on again, marks start as Avatar).
@@ -2490,6 +2497,7 @@ export function inboxRowsCanonical(rows: readonly InboxRowsOption[]): InboxRowsO
   if (on.has("hidePreview")) on.delete("previewTwo");
   if (on.has("unreadDot")) on.add("smallNames");
   if (on.has("markInline")) on.delete("markDot");
+  if (on.has("hideAgents")) on.delete("agentProjectIcons");
   if (!on.has("marksThreads") && !on.has("marksProjects")) {
     on.delete("markInline");
     on.delete("markDot");
@@ -3852,7 +3860,17 @@ export type InboxOwnFace = `own:${string}`;
  * Plannotator drops these entries when it reads the file, as it does `own:` ones, and the file stays `v: 1`.
  */
 export type InboxSetFace = `set:${string}/${string}`;
-export type InboxAgentFace = InboxBuiltInFace | InboxOwnFace | InboxSetFace;
+/**
+ * Faces drawn from what the window knows of the agent (approval "inbox-generated-agent-icons"): `project`, a solid
+ * tile with its project's letters and the agent's own mark on its corner ("From the project name" in the picker), and
+ * `mark`, the agent's own mark picked by hand. `mark` is kept only while Settings → Rows' Agent icons is "From the
+ * project name" (`agentProjectIcons`), so an agent can keep its own mark there; with the setting at its default
+ * `agent` is the own mark, never kept, as before. An older Plannotator drops both when it reads the file, as it does
+ * `own:` and `set:` ones (the agent then shows its own mark), and the file stays `v: 1`.
+ */
+export type InboxProjectFace = "project" | "mark";
+export const INBOX_PROJECT_FACES: readonly InboxProjectFace[] = ["project", "mark"];
+export type InboxAgentFace = InboxBuiltInFace | InboxOwnFace | InboxSetFace | InboxProjectFace;
 
 /** Every built-in face, in the picker's order. */
 export const INBOX_AGENT_FACES: readonly InboxBuiltInFace[] = ["agent", ...INBOX_GLASS_FACES, "transparent", "totman"];
@@ -3873,7 +3891,7 @@ export function inboxSetFaceParts(face: InboxSetFace): { set: string; icon: stri
 }
 
 export const isInboxAgentFace = (value: unknown): value is InboxAgentFace =>
-  typeof value === "string" && ((INBOX_AGENT_FACES as readonly string[]).includes(value) || INBOX_OWN_FACE.test(value) || INBOX_SET_FACE.test(value));
+  typeof value === "string" && ((INBOX_AGENT_FACES as readonly string[]).includes(value) || (INBOX_PROJECT_FACES as readonly string[]).includes(value) || INBOX_OWN_FACE.test(value) || INBOX_SET_FACE.test(value));
 
 /**
  * A set of icons for agents ("Sets" in the face picker), as `GET /api/inbox/icon-sets` lists it: a built-in one

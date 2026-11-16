@@ -170,8 +170,8 @@ function rebuild(): void {
   setAgentNames(names);
   const was = resolved;
   resolved = next;
-  // Our faces' pictures load only when one is shown (an uploaded picture or a set icon needs none of them).
-  if ([...next.values()].some((face) => !face.startsWith('own:') && !face.startsWith('set:'))) void loadAgentFaceArt().catch(() => {});
+  // Our faces' pictures load only when one is shown (an uploaded picture, a set icon or a project's tile needs none of them).
+  if ([...next.values()].some((face) => !face.startsWith('own:') && !face.startsWith('set:') && face !== 'mark' && face !== 'project')) void loadAgentFaceArt().catch(() => {});
   const changed = new Set<string>();
   for (const [id, face] of next) if (was.get(id) !== face) changed.add(id);
   for (const id of was.keys()) if (!next.has(id)) changed.add(id);
@@ -199,7 +199,11 @@ function hear(wire: unknown, force: boolean): boolean {
   return true;
 }
 
-/** The face kept for an agent, by any id it has (a session id, an `InboxAgent.id`); its own mark when none is. */
+/**
+ * The face kept for an agent, by any id it has (a session id, an `InboxAgent.id`); its own mark when none is. `mark`
+ * (its own mark picked under "From the project name") and `project` come back as kept: projectFace.tsx
+ * `shownAgentFace` says what an icon draws.
+ */
 export function agentFaceOf(id: string | null | undefined): AgentFace {
   boot();
   return (id && resolved.get(id)) || 'agent';

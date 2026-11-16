@@ -1179,8 +1179,8 @@ function learnMachines(model: ListModel): void {
   rememberLocal(localIdsIn(model));
   for (const row of rows) rememberMachine([row.thread_id], row.machine);
   for (const project of model.projects) rememberMachine([project.id], project.machine);
-  // Letter marks (letterMarks.tsx): the projects' names (a Board card names only an id) and their pictures' keys.
-  learnProjects(model.projects);
+  // Letter marks (letterMarks.tsx): the projects' names, their pictures' keys, and each agent session's project.
+  learnProjects(model.projects, rows);
   // The host an owner/repo#123 links on in a thread with no repo: the one most projects use (defaultRefHost.ts).
   learnDefaultRefHost(model.projects);
 }
