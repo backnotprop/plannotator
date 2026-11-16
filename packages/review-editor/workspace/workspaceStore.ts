@@ -31,6 +31,7 @@ export interface WorkspacePanelApi {
   readonly id: string;
   readonly title: string | undefined;
   readonly isActive: boolean;
+  readonly isVisible: boolean;
   setActive(): void;
   close(): void;
   setTitle(title: string): void;
@@ -158,6 +159,7 @@ export class WorkspaceStore {
       id,
       get title() { return store.tab(id)?.title; },
       get isActive() { return activeTabId(store.layout) === id; },
+      get isVisible() { return store.layout.panes.some((pane) => pane.activeId === id); },
       setActive: () => store.commit(activateTab(store.layout, id)),
       close: () => store.commit(closeTab(store.layout, id)),
       setTitle: (title) => {

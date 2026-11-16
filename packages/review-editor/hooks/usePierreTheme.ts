@@ -245,11 +245,13 @@ export function usePierreTheme(options?: {
   fontSize?: string;
   showFileHeader?: boolean;
   compactTouchLayout?: boolean;
+  flushCodeTop?: boolean;
 }): PierreTheme {
   const { colorTheme, resolvedMode } = useTheme();
   const fontFamily = options?.fontFamily;
   const fontSize = options?.fontSize;
   const showFileHeader = options?.showFileHeader ?? false;
+  const flushCodeTop = options?.flushCodeTop === true;
   const compactTouchLayout = options?.compactTouchLayout === true;
   const compactTouchCSS = compactTouchLayout ? COMPACT_TOUCH_GUTTER_UTILITY_CSS : '';
   const separatorPx = compactTouchLayout ? COMPACT_HUNK_SEPARATOR_HEIGHT : HUNK_SEPARATOR_HEIGHT;
@@ -285,6 +287,7 @@ export function usePierreTheme(options?: {
           :is([data-line-annotation], [data-gutter-buffer='annotation']) { background-color: ${bg} !important; background-image: none !important; }
           [data-gutter-buffer='annotation']::before, [data-gutter-buffer='annotation']::after { content: none !important; }
           ${showFileHeader ? '' : '[data-diffs-header] [data-title] { display: none !important; }'}
+          ${flushCodeTop ? '[data-code] { padding-top: 0 !important; }' : ''}
           [data-diff-type='split'][data-overflow='scroll'] {
             grid-template-columns:
               minmax(0, var(--split-left, 1fr))
@@ -399,7 +402,7 @@ export function usePierreTheme(options?: {
       extendThemeSwitch();
       setPierreTheme(buildTheme());
     });
-  }, [resolvedMode, colorTheme, fontFamily, fontSize, showFileHeader, lineBgIntensity, compactTouchCSS, separatorPx]);
+  }, [resolvedMode, colorTheme, fontFamily, fontSize, showFileHeader, flushCodeTop, lineBgIntensity, compactTouchCSS, separatorPx]);
 
   return pierreTheme;
 }

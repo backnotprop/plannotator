@@ -1,6 +1,6 @@
 import React, { useLayoutEffect, useRef } from "react";
 import { Menu } from "@base-ui/react/menu";
-import { Check, ChevronsDownUp, ChevronsUpDown, Copy, Ellipsis, Eye, EyeOff, FoldVertical, TextSearch, UnfoldVertical, X } from "lucide-react";
+import { Check, ChevronsDownUp, ChevronsUpDown, Copy, Ellipsis, Eye, EyeOff, FoldVertical, TextSearch, X } from "lucide-react";
 import { Tooltip } from "@plannotator/ui/components/Tooltip";
 
 /**
@@ -11,7 +11,7 @@ import { Tooltip } from "@plannotator/ui/components/Tooltip";
  * the files scroll beneath them:
  *
  *  - the tools row: Changes N / All files (the caller's `scope`), then Search
- *    in diff and Collapse all as one-click icons, and a "…" menu with Copy all
+ *    in diff as a one-click icon, and a "…" menu with Copy all
  *    diffs, Auto-mark viewed, Group by kind, the Viewed button and the Git add
  *    button;
  *  - the progress row: "0 of 12 viewed · 1 staged" in words ("All 12 viewed"
@@ -23,7 +23,7 @@ import { Tooltip } from "@plannotator/ui/components/Tooltip";
  */
 /** From this panel width the scope pills take their short labels so they and
  *  the tools share one line at the default 256 px; whenever they don't fit
- *  (narrower, or a long count beside Collapse all files) the tools wrap under
+ *  (narrower, or a long count) the tools wrap under
  *  the scope instead of drawing over it. */
 export const TOOLS_ONE_ROW_WIDTH = 256;
 
@@ -324,9 +324,15 @@ export function PanelControlsRow(props: PanelControlsProps) {
         {scope ?? <span className="px-2 text-[13px] font-medium text-muted-foreground">Files</span>}
         <div className="ml-auto flex flex-shrink-0 items-center">
           {onToggleFilesCollapsed && (
-            <ToolButton label={filesCollapsed ? "Expand all files" : "Collapse all files"} onClick={onToggleFilesCollapsed}>
-              {filesCollapsed ? <UnfoldVertical className="w-3.5 h-3.5" aria-hidden="true" /> : <FoldVertical className="w-3.5 h-3.5" aria-hidden="true" />}
-            </ToolButton>
+            <button
+              type="button"
+              onClick={onToggleFilesCollapsed}
+              aria-label={filesCollapsed ? "Expand all files" : "Collapse all files"}
+              data-tree-collapse-all-files={filesCollapsed ? "collapsed" : "open"}
+              className={TOOL}
+            >
+              {filesCollapsed ? <FoldVertical className="w-3.5 h-3.5" aria-hidden="true" /> : <ChevronsUpDown className="w-3.5 h-3.5" aria-hidden="true" />}
+            </button>
           )}
           {showViewedControls && onToggleHideViewed && (
             <ToolButton label="Hide viewed files" onClick={onToggleHideViewed} pressed={hideViewedFiles}>

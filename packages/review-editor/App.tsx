@@ -82,8 +82,7 @@ import { readPowerUpRejected, writePowerUpRejected, type PowerUpConfig, type Pow
 import { PowerUpStatusSlot } from './semDiff/PowerUpStatusSlot';
 import { POWER_UP_CHANGED_EVENT } from '@plannotator/ui/components/settings/SemanticDiffsTab';
 import { computeReviewSemanticDiff, loadReviewSemanticDiff, setSemanticDiffSource, type ReadFileContents } from './semDiff/semanticDiffSource';
-import { ReviewSemanticDiffPanel } from './dock/panels/ReviewSemanticDiffPanel';
-import type { SemanticDiffResponse } from '@plannotator/shared/semantic-diff-types';
+import type { SemanticDiffChange, SemanticDiffResponse } from '@plannotator/shared/semantic-diff-types';
 
 import type { SemDiffAdvert } from '@plannotator/shared/sem-diff-assets';
 import type { DiagramEngineUrls } from './utils/diagramEngineContract';
@@ -162,7 +161,7 @@ import {
   type CompactReviewDestination,
 } from './components/ReviewHeaderMenu';
 import { ReviewSidebar } from './components/ReviewSidebar';
-import type { ReviewSidebarExtraTab, ReviewSidebarTab } from './components/ReviewSidebar';
+import type { ReviewSidebarTab } from './components/ReviewSidebar';
 import { useSidebar } from '@plannotator/ui/hooks/useSidebar';
 import { useViewportEnvironment } from '@plannotator/ui/hooks/useViewportEnvironment';
 import { opensNavigatorOnLoad, phoneDiffStyle } from './utils/phoneLayout';
@@ -1103,6 +1102,7 @@ const ReviewApp: React.FC = () => {
   // Dockview center panel API for the review workspace.
   const [dockApi, setDockApi] = useState<DockviewApi | null>(null);
   const [dockActivePanelId, setDockActivePanelId] = useState<string | null>(null);
+  const [allChangesShown, setAllChangesShown] = useState(false);
   const treeScopeRef = useRef<string>('changes');
   const [allChangesOpen, setAllChangesOpen] = useState(false);
   const filesRef = useRef(files);
@@ -1799,7 +1799,11 @@ const ReviewApp: React.FC = () => {
     needsInitialDiffPanel.current = true;
 
     // Sync activeFileIndex when user switches between dock tabs
+    const syncAllChangesShown = () => setAllChangesShown(!!event.api.getPanel(REVIEW_ALL_FILES_PANEL_ID)?.api.isVisible);
+    event.api.onDidAddPanel(syncAllChangesShown);
+    event.api.onDidRemovePanel(syncAllChangesShown);
     event.api.onDidActivePanelChange((panel) => {
+      syncAllChangesShown();
       setDockActivePanelId(panel?.id ?? null);
       if (!panel) {
         setIsAllFilesActive(false);
@@ -2393,33 +2397,38 @@ const ReviewApp: React.FC = () => {
       openAllFilesPanel();
       return;
     }
-    reviewSidebar.open('changes');
-  }, [openAllFilesPanel, semanticDiffUsable, reviewSidebar.open]);
+    if (!dockApi) return;
+    const existing = dockApi.getPanel(REVIEW_SEMANTIC_DIFF_PANEL_ID);
+    if (existing) {
+      existing.api.setActive();
+      return;
+    }
+    dockApi.addPanel({
+      id: REVIEW_SEMANTIC_DIFF_PANEL_ID,
+      component: REVIEW_PANEL_TYPES.SEMANTIC_DIFF,
+      title: 'Semantic diff',
+    });
+  }, [dockApi, openAllFilesPanel, semanticDiffUsable]);
 
-  const [semanticChangeCount, setSemanticChangeCount] = useState<number | undefined>(undefined);
+  const [semanticChanges, setSemanticChanges] = useState<readonly SemanticDiffChange[] | undefined>(undefined);
   useEffect(() => {
-    setSemanticChangeCount(undefined);
+    setSemanticChanges(undefined);
     if (!semanticDiffUsable || !diffData?.rawPatch) return;
     let cancelled = false;
     loadReviewSemanticDiff()
       .then((data) => {
-        if (!cancelled) setSemanticChangeCount(data.changes.length);
+        if (!cancelled) setSemanticChanges(data.changes);
       })
       .catch(() => {});
     return () => {
       cancelled = true;
     };
   }, [semanticDiffUsable, diffData?.rawPatch, semDiffClient, powerUp]);
-  const semanticTabActive = reviewSidebar.isOpen && reviewSidebar.activeTab === 'changes';
   const [allFilesLineTarget, setAllFilesLineTarget] = useState<AllFilesLineTarget | null>(null);
   const revealInAllChanges = useCallback((path: string, range: SelectedLineRange) => {
     openAllFilesPanel();
     setAllFilesLineTarget((previous) => ({ path, range, token: (previous?.token ?? 0) + 1 }));
   }, [openAllFilesPanel]);
-  const reviewSidebarExtraTabs = useMemo<ReviewSidebarExtraTab[]>(
-    () => (semanticDiffUsable ? [{ id: 'changes', label: 'Sem', title: 'Semantic changes', count: semanticChangeCount, render: () => <ReviewSemanticDiffPanel /> }] : []),
-    [semanticDiffUsable, semanticChangeCount],
-  );
 
   const openCallFlowPanel = useCallback(() => {
     if (!dockApi || !callFlowEnabled) return;
@@ -3248,8 +3257,8 @@ const ReviewApp: React.FC = () => {
   const restoreTakenComments = useCallback((back: CodeAnnotation[]) => setAnnotations((current) => [...current, ...back.filter((c) => !current.some((a) => a.id === c.id))]), []);
   const liveReview = useLiveReview({ files, annotations, dropAnnotations: prMetadata ? null : dropSentComments, restoreAnnotations: restoreTakenComments, revealLines: revealLiveLines, openTab: reviewSidebar.open, pr: livePR });
   const sidebarExtraTabs = useMemo(
-    () => [...reviewSidebarExtraTabs, ...(liveReview.tab ? [liveReview.tab] : []), ...(referencesTab ? [referencesTab] : [])],
-    [reviewSidebarExtraTabs, liveReview.tab, referencesTab],
+    () => [...(liveReview.tab ? [liveReview.tab] : []), ...(referencesTab ? [referencesTab] : [])],
+    [liveReview.tab, referencesTab],
   );
   const hostNotes = useMemo(() => (liveReview.notes.length > 0 ? [...callTreeHunkNotes, ...liveReview.notes] : callTreeHunkNotes), [callTreeHunkNotes, liveReview.notes]);
 
@@ -4509,6 +4518,7 @@ const ReviewApp: React.FC = () => {
     diagramEngine,
     semDiffClient,
     revealInAllChanges: semDiffClient ? revealInAllChanges : undefined,
+    semanticChanges,
     powerUp,
     onPowerUpStatus: setPowerUpStatus,
     rejectPowerUpLink,
@@ -4647,7 +4657,7 @@ const ReviewApp: React.FC = () => {
   }), [
     files, diffData?.rawPatch, activeFileIndex, guideOpen, isDiffPanelActive, effectiveDiffStyle, handleDiffStyleChange, isCompactTouchLayout, diffOverflow, diffIndicators,
     diffLineDiffType, diffShowLineNumbers, diffShowBackground,
-    diffExpandUnchanged, diffFontFamily, diffFontSize, activeDiffBase, committedBase, feedbackDiffContext, prReviewScopeLabel, prDiffScope, agentCwd, canUseLiveWorkspaceActions, isStaticPatch, imagePreviewSupported, snapshotId, markdownPreview, diagramEngine, semDiffClient, revealInAllChanges, allFilesLineTarget, jumpTo, powerUp, rejectPowerUpLink, handleAddMarkdownPreviewComment, handleAskAIForMarkdownPreview,
+    diffExpandUnchanged, diffFontFamily, diffFontSize, activeDiffBase, committedBase, feedbackDiffContext, prReviewScopeLabel, prDiffScope, agentCwd, canUseLiveWorkspaceActions, isStaticPatch, imagePreviewSupported, snapshotId, markdownPreview, diagramEngine, semDiffClient, revealInAllChanges, semanticChanges, allFilesLineTarget, jumpTo, powerUp, rejectPowerUpLink, handleAddMarkdownPreviewComment, handleAskAIForMarkdownPreview,
     diffAnnotations, externalAnnotations,
     visibleDescriptionAnnotations, selectedDescriptionAnnotationId, handleAddDescriptionAnnotation,
     handleSelectDescriptionAnnotation, handleDeleteDescriptionAnnotation, handleAskAIForDescription,
@@ -6035,7 +6045,7 @@ const ReviewApp: React.FC = () => {
             {guideVisible && !isCompactTouchLayout && <div ref={setGuideBarSlot} className="contents" />}
             {!guideVisible && !isCompactTouchLayout && files.length > 0 && (
               <>
-                <ReviewDockRightActions activePanel={dockActivePanelId ? { id: dockActivePanelId } : null} />
+                <ReviewDockRightActions activePanel={dockActivePanelId ? { id: dockActivePanelId } : null} allChangesShown={allChangesShown} />
                 <div className="w-px h-5 bg-border mx-1 hidden lg:block" />
               </>
             )}
@@ -6181,8 +6191,9 @@ const ReviewApp: React.FC = () => {
                 isPRArtifactsActive={isPRArtifactsActive}
                 prArtifactCount={prCapabilities?.artifacts ? prArtifacts.length : undefined}
                 onSelectSemanticDiff={() => completeNavigatorSelection(openSemanticDiffPanel)}
-                isSemanticDiffActive={semanticTabActive}
+                isSemanticDiffActive={isSemanticDiffActive}
                 semanticDiffAvailable={semanticDiffUsable}
+                semanticDiffCount={semanticChanges?.length}
                 onSelectCallFlow={() => completeNavigatorSelection(openCallFlowPanel)}
                 isCallFlowActive={isCallFlowActive}
                 callFlowEnabled={callFlowEnabled}

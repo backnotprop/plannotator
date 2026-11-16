@@ -24,7 +24,7 @@ const settle = () => act(async () => {
   await new Promise((resolve) => setTimeout(resolve, 20));
 });
 
-describe.skipIf(!hasDom)('the Sem tab file path', () => {
+describe.skipIf(!hasDom)('the Semantic diff panel file path', () => {
   test('a long path keeps its file name whole; the folders are what give way', async () => {
     host = document.createElement('div');
     document.body.appendChild(host);

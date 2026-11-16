@@ -1,4 +1,5 @@
 import React from 'react';
+import { ChevronsUpDown, FoldVertical } from 'lucide-react';
 import { configStore, useConfigValue } from '@plannotator/ui/config';
 import { DiffDisplayOptionsPopover } from '@plannotator/ui/components/DiffDisplayOptions';
 import { DiffLayoutToggle } from '@plannotator/ui/components/DiffLayoutToggle';
@@ -15,6 +16,7 @@ const ICON_BUTTON = 'h-7 w-7 flex items-center justify-center rounded-md text-mu
 
 export interface ReviewDiffControlsProps {
   activePanel?: { id: string } | null;
+  allChangesShown?: boolean;
 }
 
 export const ReviewDockRightActions: React.FC<ReviewDiffControlsProps> = (props) => {
@@ -27,17 +29,19 @@ export const ReviewDockRightActions: React.FC<ReviewDiffControlsProps> = (props)
   const setDiffStyle = state?.onDiffStyleChange ?? ((style: 'split' | 'unified') => {
     configStore.set('diffStyle', style);
   });
-  const showCollapseAll = !!state && props.activePanel?.id === REVIEW_ALL_FILES_PANEL_ID;
+  const showCollapseAll = !!state && (props.activePanel?.id === REVIEW_ALL_FILES_PANEL_ID || !!props.allChangesShown);
 
-  const navigation = state?.navigation && props.activePanel?.id !== REVIEW_CODE_NAV_PANEL_ID ? state.navigation : null;
+  const navigation = state?.navigation ?? null;
+  const navHidden = props.activePanel?.id === REVIEW_CODE_NAV_PANEL_ID;
   const navButton = (direction: 'back' | 'forward') => {
-    const enabled = direction === 'back' ? navigation!.canBack : navigation!.canForward;
+    const enabled = !navHidden && (direction === 'back' ? navigation!.canBack : navigation!.canForward);
     const label = direction === 'back' ? `Go back${keyHint('navigateBack')}` : `Go forward${keyHint('navigateForward')}`;
     return (
       <button
         type="button"
         onClick={direction === 'back' ? navigation!.back : navigation!.forward}
         disabled={!enabled}
+        tabIndex={navHidden ? -1 : undefined}
         className={ICON_BUTTON}
         title={label}
         aria-label={direction === 'back' ? 'Go back' : 'Go forward'}
@@ -77,10 +81,31 @@ export const ReviewDockRightActions: React.FC<ReviewDiffControlsProps> = (props)
   return (
     <div className="flex items-center gap-0.5" data-review-diff-controls="">
       {navigation && (
-        <div className="flex items-center gap-0.5" role="group" aria-label="Jump history" data-jump-history="">
+        <div
+          className={`flex items-center gap-0.5${navHidden ? ' invisible' : ''}`}
+          role="group"
+          aria-label="Jump history"
+          aria-hidden={navHidden || undefined}
+          data-jump-history=""
+        >
           {navButton('back')}
           {navButton('forward')}
         </div>
+      )}
+      {state && (
+        <button
+          type="button"
+          onClick={state.onToggleAllFilesCollapsed}
+          className={showCollapseAll ? ICON_BUTTON : `${ICON_BUTTON} invisible`}
+          disabled={!showCollapseAll}
+          aria-hidden={!showCollapseAll || undefined}
+          tabIndex={showCollapseAll ? undefined : -1}
+          title={state.allFilesAllCollapsed ? 'Expand all files' : 'Collapse all files'}
+          aria-label={state.allFilesAllCollapsed ? 'Expand all files' : 'Collapse all files'}
+          data-header-collapse-all-files={state.allFilesAllCollapsed ? 'collapsed' : 'open'}
+        >
+          {state.allFilesAllCollapsed ? <FoldVertical className="w-3.5 h-3.5" aria-hidden="true" /> : <ChevronsUpDown className="w-3.5 h-3.5" aria-hidden="true" />}
+        </button>
       )}
       <DiffLayoutToggle value={diffStyle} onChange={setDiffStyle} className={ICON_BUTTON} />
       <DiffDisplayOptionsPopover

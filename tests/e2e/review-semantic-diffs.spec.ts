@@ -1,6 +1,7 @@
 /**
  * Code review draws semantic diffs: moved, renamed and reformatted code is
- * labelled in the diff and listed in the Sem tab, with the engine's
+ * labelled in the diff, listed in the Semantic diff tab and in each file
+ * header's sem menu, with the engine's
  * parsers served by the review server and loaded only for the languages the
  * diff holds. Proved in a real Chromium against the compiled binary, on a
  * scratch git repository under a temp PLANNOTATOR_DATA_DIR and HOME.
@@ -208,13 +209,15 @@ test('moved and renamed code is labelled in plain words, and only the TypeScript
   }
 });
 
-test('the Sem tab lists what the diff labels, previews it on hover, and a click lands in the diff', async () => {
+test('the Semantic diff row opens its own tab that lists what the diff labels, previews it on hover, and a click lands in the diff', async () => {
   const session = await review();
   try {
     const { context, page } = await open(browser, session.url);
     await expect(note(page, 'semantic')).toHaveCount(2, { timeout: 30_000 });
     await page.getByText('Semantic diff', { exact: true }).first().click();
-    const tab = page.locator('.semantic-diff-panel');
+    await expect(page.locator('[data-pane-tab="review-semantic-diff"]')).toHaveAttribute('aria-selected', 'true');
+    await expect(page.locator('[data-review-sidebar-tab="changes"]')).toHaveCount(0);
+    const tab = page.locator('[data-pane] .semantic-diff-panel');
     await expect(tab.getByText('rate -> taxRate')).toBeVisible({ timeout: 15_000 });
     const entry = tab.locator('.semantic-diff-row').filter({ hasText: 'saveUser' }).first();
     await entry.hover();
@@ -224,7 +227,29 @@ test('the Sem tab lists what the diff labels, previews it on hover, and a click 
     await shot(page, 'changes-hover');
     await preview.locator('[data-snippet-line="4"]').click();
     await expect(preview).toHaveCount(0);
+    await expect(page.locator('[data-pane-tab="review-all-files"]')).toHaveAttribute('aria-selected', 'true');
     await expect(page.locator('[data-file-header]').filter({ hasText: 'users.ts' }).first()).toBeInViewport({ timeout: 10_000 });
+    await context.close();
+  } finally {
+    await session.close();
+  }
+});
+
+test("a file header's sem menu lists that file's changes on hover, and a row lands on the change", async () => {
+  const session = await review();
+  try {
+    const { context, page } = await open(browser, session.url);
+    await expect(note(page, 'semantic')).toHaveCount(2, { timeout: 30_000 });
+    const header = page.locator('[data-file-header]').filter({ hasText: 'users.ts' }).first();
+    const badge = header.locator('[data-semantic-file-badge]');
+    await expect(badge).toBeVisible({ timeout: 15_000 });
+    await badge.hover();
+    const menu = page.locator('[data-semantic-file-popover]');
+    await expect(menu.locator('.semantic-diff-row').filter({ hasText: 'saveUser' })).toBeVisible();
+    await shot(page, 'file-menu');
+    await menu.locator('.semantic-diff-row').filter({ hasText: 'saveUser' }).first().click();
+    await expect(menu).toHaveCount(0);
+    await expect(page.locator('[data-line][data-selected-line]').filter({ hasText: 'saveUser' }).first()).toBeInViewport({ timeout: 10_000 });
     await context.close();
   } finally {
     await session.close();
@@ -252,7 +277,7 @@ test('the diff display switch and a file header note each bring back the plain d
   }
 });
 
-test('on a 390 px phone nothing semantic runs past the window, and the tab still lists the changes', async () => {
+test('on a 390 px phone nothing semantic runs past the window, and the Semantic diff tab still lists the changes', async () => {
   const session = await review();
   try {
     const { context, page } = await open(browser, session.url, { width: 390, height: 844 });
@@ -263,6 +288,13 @@ test('on a 390 px phone nothing semantic runs past the window, and the tab still
     }).length);
     expect(overflow).toBe(0);
     await shot(page, 'phone');
+    const openNavigator = page.getByRole('button', { name: 'Open review navigation' });
+    if (await openNavigator.count()) await openNavigator.click();
+    await page.locator('[data-review-sidebar]').getByText('Semantic diff', { exact: true }).first().click();
+    await expect(page.locator('[data-pane-tab="review-semantic-diff"]')).toHaveAttribute('aria-selected', 'true');
+    const tab = page.locator('[data-pane] .semantic-diff-panel');
+    await expect(tab.locator('.semantic-diff-row').filter({ hasText: 'saveUser' }).first()).toBeVisible({ timeout: 15_000 });
+    await expect(tab.getByText('rate -> taxRate')).toBeVisible();
     await context.close();
   } finally {
     await session.close();

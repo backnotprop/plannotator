@@ -9,6 +9,7 @@ import type { ReviewSearchMatch } from '../utils/reviewSearch';
 import type { PRMetadata, PRContext } from '@plannotator/shared/pr-types';
 import type { PRArtifact } from '../utils/prArtifacts';
 import type { PRDiffScope } from '@plannotator/shared/pr-stack';
+import type { SemanticDiffChange } from '@plannotator/shared/semantic-diff-types';
 import type { FeedbackDiffContext } from '../utils/exportFeedback';
 import type { SuggestionHunk } from '../edit/deriveSuggestions';
 import type { EditSelectionComment } from '../edit/useEditSession';
@@ -110,6 +111,7 @@ export interface ReviewState {
   onPowerUpStatus?: (status: PowerUpStatus) => void;
   rejectPowerUpLink?: (candidateId: string) => void;
   revealInAllChanges?: (path: string, range: SelectedLineRange) => void;
+  semanticChanges?: readonly SemanticDiffChange[];
   allFilesLineTarget?: AllFilesLineTarget | null;
   openRepoFileAt?: (path: string, line: number) => void;
   /** Commit a comment made by selecting text in a previewed Markdown file

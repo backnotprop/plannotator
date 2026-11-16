@@ -2426,7 +2426,7 @@ html:has([data-pn-compact-touch-layout='true']) :is([data-panel-view], [data-tre
   min-block-size: var(--pn-touch-target);
   touch-action: manipulation;
 }
-html:has([data-pn-compact-touch-layout='true']) [data-go-to-file-button] {
+html:has([data-pn-compact-touch-layout='true']) :is([data-go-to-file-button], [data-tree-collapse-all-files]) {
   min-block-size: var(--pn-touch-target);
   min-inline-size: var(--pn-touch-target);
 }

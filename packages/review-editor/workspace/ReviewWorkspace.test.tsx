@@ -1,16 +1,13 @@
 import { afterEach, describe, expect, mock, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { usePaneTabsInHeader } from './paneContext';
 
 const hasDom = typeof document !== 'undefined';
 
 function Probe(props: { params: Record<string, unknown>; api: { id: string } }) {
   const [text, setText] = React.useState('');
-  const tabs = usePaneTabsInHeader();
   return (
     <div data-probe={props.api.id}>
-      {tabs && <div data-probe-header="">{tabs}</div>}
       <input data-probe-input={props.api.id} value={text} onChange={(event) => setText(event.target.value)} />
       <span data-probe-path="">{String(props.params.filePath ?? '')}</span>
     </div>
@@ -57,21 +54,17 @@ async function mount(singlePane = false, extra: { reviewKey?: string } = {}) {
   return host;
 }
 
-const tabRow = (el: HTMLElement, pane = 0) => el.querySelector(`[data-pane="${pane}"] [data-pane-tabs]`);
 const tabButton = (el: HTMLElement, id: string) => el.querySelector<HTMLButtonElement>(`[data-pane-tab="${id}"]`)!;
 
 describe.skipIf(!hasDom)('the review panes', () => {
-  test('one tab draws no tab row; a second tab brings it; a click switches; a middle click closes', async () => {
+  test('a click switches tabs and a middle click closes one', async () => {
     const el = await mount();
-    expect(tabRow(el)).toBeNull();
     await act(async () => { api!.addPanel({ id: 'review-file:a.ts', component: 'review-file', title: 'a.ts', params: { filePath: 'a.ts' } }); });
-    expect(tabRow(el)).not.toBeNull();
     expect(tabButton(el, 'review-file:a.ts').getAttribute('aria-selected')).toBe('true');
     await act(async () => tabButton(el, 'review-all-files').click());
     expect(api!.activePanel?.id).toBe('review-all-files');
     await act(async () => { tabButton(el, 'review-file:a.ts').dispatchEvent(new MouseEvent('auxclick', { bubbles: true, button: 1 })); });
     expect(api!.getPanel('review-file:a.ts')).toBeUndefined();
-    expect(tabRow(el)).toBeNull();
   });
 
   test('All changes is the fixed home tab: no close button and a middle click leaves it; other tabs close', async () => {
@@ -125,15 +118,16 @@ describe.skipIf(!hasDom)('the review panes', () => {
     expect(input().value).toBe('kept');
   });
 
-  test('only All changes: no tab row; All changes with others: one slim row; a file tab: its own header row carries the tabs', async () => {
+  test('one tab row from the start, the same element whichever tab shows, so opening or switching moves nothing', async () => {
     const el = await mount();
-    expect(el.querySelector('[data-pane-tab-row]')).toBeNull();
+    const row = el.querySelector('[data-pane="0"] [data-pane-tab-row]');
+    expect(row?.querySelector('[data-pane-tab="review-all-files"]')).not.toBeNull();
     await act(async () => { api!.addPanel({ id: 'review-file:a.ts', component: 'review-file', title: 'a.ts', params: { filePath: 'src/a.ts' } }); });
-    expect(el.querySelector('[data-pane-tab-row="slim"]')).toBeNull();
-    expect(el.querySelector('[data-probe="review-file:a.ts"] [data-probe-header] [data-pane-tab="review-file:a.ts"]')).not.toBeNull();
+    expect(el.querySelector('[data-pane="0"] [data-pane-tab-row]')).toBe(row);
+    expect(row?.querySelector('[data-pane-tab="review-file:a.ts"]')).not.toBeNull();
     expect(el.querySelector('[data-pane-tab-directory]')?.textContent).toBe('src/');
     await act(async () => tabButton(el, 'review-all-files').click());
-    expect(el.querySelector('[data-pane-tab-row="slim"] [data-pane-tab="review-file:a.ts"]')).not.toBeNull();
+    expect(el.querySelector('[data-pane="0"] [data-pane-tab-row]')).toBe(row);
     expect(el.querySelectorAll('[data-pane-tab="review-all-files"]').length).toBe(1);
   });
 

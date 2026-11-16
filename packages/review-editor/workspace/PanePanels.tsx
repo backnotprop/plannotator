@@ -3,8 +3,7 @@ import { createPortal } from 'react-dom';
 import type { Pane, PaneTab } from './paneLayout';
 import type { WorkspaceStore } from './workspaceStore';
 import { reviewPanelComponents } from '../dock/reviewPanelComponents';
-import { REVIEW_ALL_FILES_PANEL_ID } from '../dock/reviewPanelTypes';
-import { PaneSlotContext, hostsTabRow } from './paneContext';
+import { PaneSlotContext } from './paneContext';
 import { PaneTabRow } from './PaneTabRow';
 
 type PanelComponent = React.ComponentType<{ api: unknown; params: Record<string, unknown>; containerApi: unknown }>;
@@ -77,14 +76,7 @@ const PanelSlot = React.memo<{ tab: PaneTab; store: WorkspaceStore; paneIndex: n
   );
 });
 
-export function showsSlimRow(pane: Pane, activeHostsRow: boolean): boolean {
-  if (activeHostsRow) return false;
-  return !(pane.tabs.length === 1 && pane.tabs[0]!.id === REVIEW_ALL_FILES_PANEL_ID);
-}
-
 export const PanePanels: React.FC<{ pane: Pane; paneIndex: number; store: WorkspaceStore; deferFirstMount?: boolean }> = ({ pane, paneIndex, store, deferFirstMount = false }) => {
-  const active = pane.tabs.find((tab) => tab.id === pane.activeId);
-  const slim = showsSlimRow(pane, !!active && hostsTabRow(active.component));
   const frameRef = useRef<HTMLDivElement>(null);
   const scrolls = useRef(new Map<string, ScrollMemory>());
   const ready = useAfterFirstPaint(deferFirstMount);
@@ -124,7 +116,7 @@ export const PanePanels: React.FC<{ pane: Pane; paneIndex: number; store: Worksp
 
   return (
     <>
-      {slim && <PaneTabRow store={store} paneIndex={paneIndex} variant="slim" />}
+      <PaneTabRow store={store} paneIndex={paneIndex} />
       <div ref={frameRef} className="relative flex-1 min-h-0" data-pane-frame="">
         {ready && pane.tabs.map((tab) => shown(tab.id) && <PanelSlot key={tab.id} tab={tab} store={store} paneIndex={paneIndex} />)}
       </div>

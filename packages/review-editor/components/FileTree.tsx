@@ -124,6 +124,7 @@ interface FileTreeProps {
   onSelectSemanticDiff?: () => void;
   isSemanticDiffActive?: boolean;
   semanticDiffAvailable?: boolean;
+  semanticDiffCount?: number;
   onSelectCallFlow?: () => void;
   isCallFlowActive?: boolean;
   callFlowEnabled?: boolean;
@@ -212,6 +213,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
   onSelectSemanticDiff,
   isSemanticDiffActive = false,
   semanticDiffAvailable = false,
+  semanticDiffCount,
   onSelectCallFlow,
   isCallFlowActive = false,
   callFlowEnabled = false,
@@ -369,6 +371,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
   const scrollAreaRef = useRef<OverlayScrollAreaHandle>(null);
 
   const reviewState = useReviewStateOptional();
+  const phoneFolds = !!reviewState?.isCompactTouchLayout && !!isAllFilesActive;
   const panelWidth = width ?? 256;
   const totalAdditions = files.reduce((sum, file) => sum + file.additions, 0);
   const totalDeletions = files.reduce((sum, file) => sum + file.deletions, 0);
@@ -386,7 +389,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
       collapseDisabled={showAllFiles ? !repoReady : allFolderPaths.length === 0}
       onToggleHideViewed={onToggleHideViewed}
       hideViewedFiles={hideViewedFiles}
-      onToggleFilesCollapsed={isAllFilesActive && reviewState ? reviewState.onToggleAllFilesCollapsed : undefined}
+      onToggleFilesCollapsed={phoneFolds ? reviewState!.onToggleAllFilesCollapsed : undefined}
       filesCollapsed={reviewState?.allFilesAllCollapsed}
       viewedCount={viewedFiles.size}
       totalCount={files.length}
@@ -541,7 +544,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
             </SidebarActionRow>
           )}
           {semanticDiffAvailable && onSelectSemanticDiff && (
-            <SemanticDiffRow active={isSemanticDiffActive} onClick={onSelectSemanticDiff} />
+            <SemanticDiffRow active={isSemanticDiffActive} onClick={onSelectSemanticDiff} count={semanticDiffCount} />
           )}
           {callFlowEnabled && onSelectCallFlow && (
             <CallFlowRow

@@ -162,24 +162,35 @@ const headerShape = (page: Page) =>
       .join(' '),
   );
 
-test('tabs live in the panes: the header never changes, a file header row carries them, All changes gets one slim row', async ({ browser }) => {
+const fileHeaderTop = (page: Page) =>
+  page.evaluate(() => Math.round(document.querySelector('[data-pane="0"] [data-pane-panel] [data-file-header]')!.getBoundingClientRect().top));
+
+test('tabs live in the panes: the header never changes, and one tab row from the start keeps the file header and the code still when a file opens or tabs switch', async ({ browser }) => {
   await withReview(browser, 900, async (page) => {
     await expect.poll(() => firstCodeTop(page)).not.toBeNull();
     const header = await headerShape(page);
     const top = await paneTop(page);
-    await expect(page.locator('[data-pane-tab-row]')).toHaveCount(0);
+    const tabRow = page.locator('[data-pane="0"] [data-pane-tab-row]');
+    await expect(tabRow.locator('[data-pane-tab]')).toHaveCount(1);
+    const rowBox = (await tabRow.boundingBox())!;
+    expect(Math.round(rowBox.height)).toBe(32);
+    const below = Math.round(rowBox.y + rowBox.height);
+    await expect.poll(() => fileHeaderTop(page)).toBe(below);
+
     await row(page, 'routes.ts').click();
-    await expect(page.locator('[data-pane="0"] [data-file-header] [data-pane-tab]')).toHaveCount(2);
+    await expect(tabRow.locator('[data-pane-tab]')).toHaveCount(2);
     expect(await headerShape(page)).toBe(header);
     expect(await paneTop(page)).toBe(top);
+    expect(await tabRow.boundingBox()).toEqual(rowBox);
+    await expect.poll(() => fileHeaderTop(page)).toBe(below);
+    await expect.poll(() => firstCodeTop(page)).toBe(below + 32);
 
     await page.locator('[data-pane-tab][aria-selected="true"]').focus();
     await page.keyboard.press('ArrowLeft');
     await expect(page.locator('[data-pane-tab="review-all-files"]')).toHaveAttribute('aria-selected', 'true');
     await expect(page.locator('[data-pane-tab="review-all-files"]')).toBeFocused();
-    const slim = page.locator('[data-pane-tab-row="slim"]');
-    await expect(slim).toHaveCount(1);
-    expect(Math.round((await slim.boundingBox())!.height)).toBe(28);
+    expect(await tabRow.boundingBox()).toEqual(rowBox);
+    await expect.poll(() => fileHeaderTop(page)).toBe(below);
     expect(await headerShape(page)).toBe(header);
 
     await row(page, 'routes.ts').click({ button: 'right' });
@@ -189,7 +200,7 @@ test('tabs live in the panes: the header never changes, a file header row carrie
   });
 });
 
-test('a phone keeps one pane, its tabs in the pane, and the header never changes', async ({ browser }) => {
+test('a phone keeps one pane, its tabs in the pane, folds every file from the navigator, and the header never changes', async ({ browser }) => {
   test.skip(!existsSync(binary), `compile the binary first: ${binary}`);
   const root = mkdtempSync(join(tmpdir(), 'plannotator-review-layout-phone-'));
   const repo = buildRepo(root);
@@ -207,6 +218,14 @@ test('a phone keeps one pane, its tabs in the pane, and the header never changes
     const top = await paneTop(page);
     const header = await headerShape(page);
     await expect(page.locator('[data-review-navigation-sheet]')).toBeVisible();
+    const fold = page.locator('[data-review-navigation-sheet] [data-tree-collapse-all-files]');
+    const foldBox = (await fold.boundingBox())!;
+    expect(Math.min(foldBox.width, foldBox.height)).toBeGreaterThanOrEqual(44);
+    await fold.tap();
+    await expect(fold).toHaveAttribute('data-tree-collapse-all-files', 'collapsed');
+    await expect(fold).toHaveAccessibleName('Expand all files');
+    await fold.tap();
+    await expect(fold).toHaveAttribute('data-tree-collapse-all-files', 'open');
     await page.locator('[data-changes-tree] [data-type="item"][data-item-path$="routes.ts"]').first().tap();
     await expect(page.locator('[data-review-navigation-sheet]')).toHaveCount(0);
     await expect(page.locator('[data-pane="0"] [data-pane-tab][aria-selected="true"]')).toBeVisible();
