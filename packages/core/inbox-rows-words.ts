@@ -117,7 +117,19 @@ export const INBOX_ROWS_SETTINGS: readonly InboxRowsSetting[] = [
     get: (on) => (on.has("statusMark") ? "mark" : "count"),
     set: (value) => ({ statusMark: value === "mark" }),
   },
-  showSetting("agent-icons", "hideAgents", "Agent icons", "The agents' icons on each row."),
+  {
+    // `on` and `off` are the values from when this was a switch, kept so a command written then still works.
+    name: "agent-icons",
+    label: "Agent icons",
+    values: [
+      { value: "on", label: "Each agent's own" },
+      { value: "project", label: "From the project name" },
+      { value: "off", label: "Hidden" },
+    ],
+    changes: "The agents' icons. on: each agent's own mark. project: a tile from the project's name (also the Agents list and threads; an icon picked for one agent stays). off: none on rows.",
+    get: (on) => (on.has("hideAgents") ? "off" : on.has("agentProjectIcons") ? "project" : "on"),
+    set: (value) => ({ hideAgents: value === "off", agentProjectIcons: value === "project" }),
+  },
   showSetting("project-name", "hideProject", "Project name", "The project's name on each row."),
   showSetting("pull-requests", "hidePulls", "Pull requests", "A pull request's state at the end of the row."),
   {
@@ -201,6 +213,7 @@ export function inboxRowsWithChange(rows: readonly InboxRowsOption[], change: Ch
   if (change.smallNames === false) on.delete("unreadDot");
   if (change.markInline) on.delete("markDot");
   if (change.markDot) on.delete("markInline");
+  if (change.agentProjectIcons) on.delete("hideAgents");
   if (change.repoLogo || change.githubPictures) on.add("marksProjects");
   return inboxRowsCanonical([...on]);
 }
@@ -307,7 +320,7 @@ export const INBOX_ROWS_USAGE = [
   "'rows' prints every option, what it changes and its value now.",
   "'rows set' changes options in one save; every open window shows it at once.",
   "'rows undo' puts the last change back.",
-  "It changes row options only: no other setting.",
+  "It changes row options only, except agent-icons=project, which also shows in the Agents list and threads.",
 ].join("\n");
 
 /** The line in `plannotator inbox --help`'s usage. */

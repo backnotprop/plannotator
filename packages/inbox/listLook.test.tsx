@@ -673,7 +673,10 @@ describe.if(hasDom)('the rows in each mode', () => {
     expect([...stop.querySelector('.ib-l2 > .ib-lend')!.children].map((c) => c.className.split(' ')[0])).toEqual(['ib-att', 'ib-pinmark', 'ib-zwhen', 'ib-badge']);
     // The pin's and the badge's words still reach a screen reader.
     expect(stop.querySelector(':scope > .ib-sr')!.textContent).toBe(', starred');
-    expect(document.getElementById(stop.getAttribute('aria-describedby')!)!.textContent).toBeTruthy();
+    // Its description: the badge's words, then the drag help every row has (listDrops.tsx `THREAD_DRAG_HELP_ID`).
+    const [words, help] = stop.getAttribute('aria-describedby')!.split(' ');
+    expect(document.getElementById(words!)!.textContent).toBeTruthy();
+    expect(help).toBe('ib-thread-drag-help');
 
     const phone = remount('phone', opts);
     expect(phoneLines(phone, 'msg_unread')).toEqual({ m1: ['title(Name of msg_unread)', 'time'], rest: ['ib-m1 ib-m1-lead'] });

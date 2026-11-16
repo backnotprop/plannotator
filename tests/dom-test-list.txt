@@ -296,6 +296,7 @@ packages/inbox/searchShortcut.test.tsx
 packages/inbox/openIn.test.tsx
 packages/inbox/openInCheck.test.tsx
 packages/inbox/openInFile.test.tsx
+packages/inbox/openInRemote.test.tsx
 packages/inbox/htmlLinks.test.tsx
 packages/inbox/markdownLinks.test.tsx
 packages/inbox/videoAttachment.test.tsx
@@ -796,3 +797,4 @@ packages/ui/utils/openInLine.test.ts
 packages/editor/App.annotateView.test.tsx
 packages/inbox/replyMentionsField.test.tsx
 packages/inbox/components/listDrops.test.tsx
+packages/inbox/agents/projectFaceMarks.test.tsx
