@@ -80,6 +80,10 @@ export function createPaneReads(deps: PaneReadsDeps) {
   const failures = new Map<string, number>();
   /** The reads of shown threads on their way: given up when no pane shows their thread any more. */
   const out = new Set<{ threadId: string; controller: AbortController }>();
+  /** Panes kept off the page (ThreadPanes.tsx): their threads are not read while there. */
+  let parked: ReadonlySet<PaneId> = new Set();
+  /** Threads off the page that a read passed by (shownReads.ts): read once their pane is back. */
+  const owed = new Set<string>();
   let seq = 0;
 
   const record = (paneId: PaneId): PaneRecord => {
@@ -118,6 +122,7 @@ export function createPaneReads(deps: PaneReadsDeps) {
     try {
       const next = given ?? (await deps.read(threadId, THREAD_READ_TIMEOUT_MS * 2 ** Math.min(failures.get(threadId) ?? 0, 3), reading?.controller.signal));
       failures.delete(threadId);
+      owed.delete(threadId);
       await deps.drawReady(next.thread);
       const pane = shownIn(threadId);
       if (pane !== null && record(pane).unlisted?.threadId === threadId) record(pane).unlisted = null;
@@ -190,8 +195,12 @@ export function createPaneReads(deps: PaneReadsDeps) {
           const attempt = r.live?.threadId === threadId ? r.live.attempt : 0;
           stopLive(pane);
           const timer = setTimeout(() => {
-            if (paneThread(deps.panes(), pane) === threadId) void refreshThread(threadId);
-            else stopLive(pane);
+            if (paneThread(deps.panes(), pane) !== threadId) stopLive(pane);
+            else if (parked.has(pane)) {
+              // Off the page: tried again once it is back.
+              owed.add(threadId);
+              stopLive(pane);
+            } else void refreshThread(threadId);
           }, THREAD_READ_RETRY_MS[Math.min(attempt, THREAD_READ_RETRY_MS.length - 1)]!);
           r.live = { threadId, attempt: attempt + 1, timer };
         }
@@ -311,6 +320,27 @@ export function createPaneReads(deps: PaneReadsDeps) {
     close,
     remove,
     retry,
+    /** The threads on screen, one per pane that shows one; none of a pane kept off the page. */
+    shown: (): string[] => deps.panes().panes.flatMap((pane) => (pane.thread && !parked.has(pane.id) ? [pane.thread] : [])),
+    /** The threads of the panes kept off the page. */
+    parkedThreads: (): string[] => deps.panes().panes.flatMap((pane) => (pane.thread && parked.has(pane.id) ? [pane.thread] : [])),
+    /** A read passed `threadId` by while its pane was off the page. */
+    owe: (threadId: string) => void owed.add(threadId),
+    /**
+     * The panes now off the page (ThreadPanes.tsx). A pane back on it reads its thread once, when something changed
+     * meanwhile: a read passed it by, or the thread was marked stale.
+     */
+    park: (next: ReadonlySet<PaneId>) => {
+      const back = [...parked].filter((id) => !next.has(id));
+      parked = next;
+      for (const pane of back) {
+        const thread = paneThread(deps.panes(), pane);
+        if (!thread || record(pane).loaded?.thread_id !== thread) continue;
+        const due = owed.has(thread) || isThreadStale(client, thread);
+        owed.delete(thread);
+        if (due) void refreshThread(thread);
+      }
+    },
     /** The thread was missing here, and the list now names the machine that holds it: its pane reads it there. */
     retryMissing: (threadId: string) => {
       const pane = shownIn(threadId);

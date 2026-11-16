@@ -35,7 +35,7 @@ export interface TagsAcross {
    * A tag's row colour, as of `at`, on this Inbox's copy and each linked machine's that takes tag colours, so every
    * machine shows the same one (inbox-tag-colours.ts `inboxTagLookOf`). An older machine keeps its own.
    */
-  colour: (tag: ListTag, colour: string | null, at: string) => Promise<TagChanged>;
+  colour: (tag: ListTag, colour: string | null, at: string, kept?: string | null) => Promise<TagChanged>;
 }
 
 /** "Show tag colors" on this Inbox and every linked machine that takes tag colours, as of `at`. */
@@ -137,13 +137,13 @@ export function tagsAcross(tags: readonly ListTag[], machines: MachinesModel): T
       if (!tag) return id;
       return tagIdOn(tag, machine, machines.self) ?? { name: tag.name };
     },
-    colour: async (tag, colour, at) => {
+    colour: async (tag, colour, at, kept) => {
       let refused: unknown = null;
       let held: InboxHeldError | null = null;
       const own = tagIdOn(tag, null, machines.self);
       if (own) {
         try {
-          await tagColoursApi.set(own, colour, at);
+          await tagColoursApi.set(own, colour, at, null, kept);
         } catch (cause) {
           return { refused: cause, held };
         }
@@ -151,7 +151,7 @@ export function tagsAcross(tags: readonly ListTag[], machines: MachinesModel): T
       for (const [machine, id] of Object.entries(tag.machines ?? {})) {
         if (machine === machines.self || !machineTakes({ machine }, machines, 'tag-colours')) continue;
         try {
-          await tagColoursApi.set(id, colour, at, machine);
+          await tagColoursApi.set(id, colour, at, machine, kept);
         } catch (cause) {
           if (cause instanceof InboxHeldError) held = cause;
           else refused ??= cause;

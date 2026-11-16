@@ -222,6 +222,9 @@ import {
   type InboxInitiative,
   inboxNextTagColour,
   isInboxTagColour,
+  inboxTagOwnColour,
+  inboxTagLook,
+  inboxTagLookColour,
   INBOX_TAG_RECENT_MAX,
   type InboxTagColours,
   type InboxTagLook,
@@ -8255,7 +8258,7 @@ export class InboxStore {
     if (missing.length === 0) return false;
     const next = new Map(looks);
     for (const tag of missing) {
-      const used = live.flatMap((t) => (next.has(t.id) ? [next.get(t.id)!.colour] : []));
+      const used = live.flatMap((t) => (next.has(t.id) ? [inboxTagLookColour(next.get(t.id))] : []));
       next.set(tag.id, { colour: inboxNextTagColour(used), by: "auto", at: tag.created_at });
     }
     const state = { ...this.tagColourState, looks: next };
@@ -8281,20 +8284,22 @@ export class InboxStore {
   }
 
   /**
-   * The person picked a tag's colour (a preset, their own `#rrggbb`, or null for None). `at` is when they picked it,
-   * the same on every machine the window writes it to, so the merged tag's colour agrees everywhere. An own colour
-   * goes first in the recent ones. Writes no store line.
+   * The person picked a tag's colour (a preset or their own `#rrggbb`), or turned Highlight rows off (null), keeping
+   * `kept` (the colour it had) so turning it on brings it back; an older Inbox's None sends no `kept`. `at` is when
+   * they chose, the same on every machine the window writes it to, so the merged tag's colour agrees everywhere. An own
+   * colour (not a quick swatch) goes first in the recent ones. Writes no store line.
    */
-  setTagColour(tagId: unknown, colour: unknown, at: unknown): InboxTagLook {
+  setTagColour(tagId: unknown, colour: unknown, at: unknown, kept?: unknown): InboxTagLook {
     const tag = this.liveInitiative(tagId);
     if (colour !== null && !isInboxTagColour(colour)) throw new InboxError("validation_error", "colour: accent, green, amber, red, grey, a #rrggbb, or null.", { field: "colour" });
+    if (kept !== undefined && kept !== null && !isInboxTagColour(kept)) throw new InboxError("validation_error", "kept_colour: a preset or a #rrggbb.", { field: "kept_colour" });
     const when = this.colourStamp(at);
     // A pick held on the way (an outbox, a machine asleep) can land after a newer one: the newer stays.
-    const kept = this.tagColourState.looks.get(tag.id);
-    if (kept?.by === "person" && this.colourKeptAt(kept.at) > Date.parse(when)) return kept;
-    const look: InboxTagLook = { colour, by: "person", at: when };
+    const had = this.tagColourState.looks.get(tag.id);
+    if (had?.by === "person" && this.colourKeptAt(had.at) > Date.parse(when)) return had;
+    const look = inboxTagLook(colour, "person", when, kept as string | null | undefined);
     const looks = new Map(this.tagColourState.looks).set(tag.id, look);
-    const recent = typeof colour === "string" && colour.startsWith("#") ? [{ colour, at: when }, ...this.tagColourState.recent.filter((r) => r.colour !== colour)].slice(0, INBOX_TAG_RECENT_MAX) : this.tagColourState.recent;
+    const recent = inboxTagOwnColour(colour) ? [{ colour, at: when }, ...this.tagColourState.recent.filter((r) => r.colour !== colour)].slice(0, INBOX_TAG_RECENT_MAX) : this.tagColourState.recent;
     this.commitTagColours({ ...this.tagColourState, looks, recent });
     return look;
   }

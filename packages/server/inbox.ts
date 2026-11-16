@@ -3743,6 +3743,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     ...systemWire(),
     /** Chapter diagrams (config.json `inboxChapterDiagrams`, on unless false): present only while Code review is on, as System's. */
     ...chapterDiagramsWire(),
+    /** The second thread pane's preview (config.json `inboxSplitView`): present only while on, so a window off draws nothing new. */
+    ...(loadConfig().inboxSplitView === true ? { split_view: { on: true } } : {}),
     /** The onboarding tour: started, finished or skipped, and whether the first real thread offers notifications once more. */
     tour: tourState(),
     /** Settings → Prompts: the Inbox reminder and the plan, review and annotate prompts. */
