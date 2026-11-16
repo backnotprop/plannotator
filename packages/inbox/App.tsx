@@ -23,7 +23,7 @@ import { threadDrawReady } from './threadDrawReady';
 import { QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import { probedInboxQueryClient } from './data/heldProbe';
 import { useMachineViews } from './data/machineViews';
-import { pruneThreads, readThread, staleThreads, useHeldThread } from './data/queries/thread';
+import { pruneThreads, readThread, staleThreads } from './data/queries/thread';
 import { putList, readListTaking, useListModel } from './data/queries/list';
 import { changeDrafts, heldReplyDrafts, readDrafts, useDrafts } from './data/queries/drafts';
 import { applyListRecord } from './data/apply/list';
@@ -107,7 +107,6 @@ import { InitiativeTagsContext, LiveInitiativesContext, type InitiativeTags } fr
 import { SidebarShell } from './shell/SidebarShell';
 import { InboxList } from './components/InboxList';
 import { useTidy } from './components/Tidy';
-import { ThreadSlot } from './thread/ThreadSlot';
 import { openPaneUnsaved } from './components/AttachmentPane';
 import { isNewTabClick } from '@plannotator/ui/components/LocalLinkContext';
 import { inboxLinkHash } from './links';
@@ -125,10 +124,12 @@ import { TourBar, TourCoach, TourLoading, TourMain, TourNavigation, loadTour, to
 import { TourEntry, tourEntryModel } from './tour/TourEntry';
 import { TOUR_FIT_LINES, TOUR_FIT_TITLE, TourIntro } from './tour/Fit';
 import { TOUR_COMPOSE_STEP, TOUR_FIRST_QUESTION_PROMPT, TOUR_PROJECT_ID, TOUR_SETTINGS_STEP, TOUR_START, TOUR_STEPS, TOUR_THREAD, tourCanBack, tourCanForward, tourCoach, tourCoachSpeech, tourReducer, type TourAction, type TourDegraded, type TourUi } from './tour/model';
-import { addressThread, MAIN_PANE, paneThread } from './panes/model';
+import { paneThread } from './panes/model';
+import { PaneRow, paneRoute } from './panes/PaneRow';
+import { BesideContext, besideOf, splitViewOn } from './panes/beside';
 import { createPanesOnScreen } from './panes/onScreen';
 import { usePaneOpening, usePaneReads, useShownReads } from './panes/usePaneOpens';
-import { useRoutePanes } from './panes/useRoutePanes';
+import { useActiveHeld, useRoutePanes } from './panes/useRoutePanes';
 import { EmptyThreadPanel } from './components/EmptyThreadPanel';
 import { AgentNoteDialog } from './components/AgentNoteDialog';
 import { ConnectLine } from './components/ConnectLine';
@@ -458,14 +459,16 @@ function Inbox() {
       return next;
     });
   }, []);
-  /** The thread panes (panes/model.ts): the address names the active pane's thread. */
-  const panes = useRoutePanes(route.thread ?? null);
+  const [settings, setSettings] = useState<SettingsModel | null>(null);
+  /** The thread panes (panes/model.ts): the address names the active pane's thread. A second opens beside (panes/beside.ts). */
+  const windowPanes = useRoutePanes(route.thread ?? null, route.page === 'inbox', splitViewOn(settings), (thread, replace) => writeRoute(paneRoute(routeRef.current, thread), { replace }));
+  const { panes } = windowPanes;
   /**
    * The open thread as the cache holds it (data/queries/thread.ts): its read, with the stream's records applied in
    * place since. Its own list row (an archived thread has none in the list) and a launched thread's run line (null
    * while the agent rests) come with it.
    */
-  const openHeld = useHeldThread(addressThread(panes));
+  const openHeld = useActiveHeld(panes);
   const thread = openHeld?.thread ?? null;
   const threadRow = openHeld?.row ?? null;
   /**
@@ -488,7 +491,6 @@ function Inbox() {
   const rowWrites = useRowWrites();
   const rowPatches = rowWrites.patches;
   const pinPatches = rowWrites.pins;
-  const [settings, setSettings] = useState<SettingsModel | null>(null);
   /** The agents on this computer (GET /api/inbox/agents): the agent-note dialog and Settings → Agents. Null on an older Inbox. */
   const [agents, setAgentsState] = useState<InboxAgentsModel | null>(null);
   // Every read and every save of the agents takes a number; a read answered after a newer read or save
@@ -944,11 +946,8 @@ function Inbox() {
   const loadedVersion = useRef<string | null>(null);
   /** The list header's Tidy hears a list read that brought nothing new (useTidy's `listRead`). */
   const listTidyRead = useRef<(() => void) | null>(null);
-  /** The open thread was not here, and the list names the machine that holds it: open it there. */
-  const retryMissingThread = () => {
-    const open = routeRef.current.thread;
-    if (open) paneReads.retryMissing(open);
-  };
+  /** A thread on screen was not here, and the list names the machine that holds it: its pane opens it there. */
+  const retryMissingThread = () => paneReads.shown().forEach(paneReads.retryMissing);
   /**
    * Read the list; `adopt` puts it on screen (an action, Show, or nothing on
    * screen yet), sliding the rows to their places when `slide` says so.
@@ -4759,7 +4758,7 @@ function Inbox() {
   // "‹ Board" and a chip naming the card; both go back to the opened card.
   const fromCard = route.page === 'inbox' && route.thread && route.card ? route.card : null;
   // The thread in full screen: only on a desktop thread beside the list (not a phone, a stacked window or a card's).
-  const full = threadFull && route.page === 'inbox' && !!route.thread && !phone && !fromCard && !stack.thread;
+  const full = (threadFull || panes.panes.length > 1) && route.page === 'inbox' && !!route.thread && !phone && !fromCard && !stack.thread;
   // The Sidebar tip (sidebarTip.ts): once, beside the docked sidebar, at the reveals' calm moment. A desktop only.
   // Outside the line, and behind it: never on a load where the star ask is armed or another reveal showed, is
   // claiming or is open (it lets one that shares its moment go first, and stands down unclaimed).
@@ -4783,7 +4782,7 @@ function Inbox() {
   // The tip claimed or up: the load arms nothing else meanwhile and reads the line again (`lineBusy`), as a dialog's claim does.
   const sidebarTipBusy = sidebarTip.stage === 'claimed' || sidebarTip.stage === 'open';
   useEffect(() => setLineTipBusy(sidebarTipBusy), [sidebarTipBusy]);
-  threadFullRef.current = full;
+  threadFullRef.current = full && threadFull;
   // The list coming back beside the thread (‹ Inbox beside a file, leaving full screen) in a window with room for the
   // list and the thread but not for the sidebar too: the sidebar stays closed on screen (`sidebarHeld`), so the thread
   // does not stack over the list it was asked to show.
@@ -5720,11 +5719,9 @@ function Inbox() {
             <EmptyThreadPanel />
           </div>
         )}
-        <ThreadSlot
-          paneId={MAIN_PANE}
-          threadId={paneThread(panes, MAIN_PANE)}
-          active={panes.active === MAIN_PANE}
-          held={panes.active === MAIN_PANE ? openHeld : undefined}
+        <PaneRow
+          windowPanes={windowPanes}
+          held={openHeld}
           host={{
             route, routeRef, rowsPending: reviewRowsPending, paneReads, outbox, dismissOutbox,
             phone, stack, full, fromCard, fileOpen, staleNotice, notifyAgainIn: notifyAgain ? notifyAgainThread : null, notifications,
@@ -5771,6 +5768,7 @@ function Inbox() {
     <LiveInitiativesContext.Provider value={liveTags}>
     <ThreadTagsContext.Provider value={threadTagsHost}>
     <SideButtonContext.Provider value={ask.sideButton}>
+    <BesideContext.Provider value={besideOf(windowPanes, route.page === 'inbox' && !phone && !fileOpen && !fromCard ? route.thread : null)}>
     <div
       ref={rootRef}
       className="pn-inbox"
@@ -6537,6 +6535,7 @@ function Inbox() {
         />
       )}
     </div>
+    </BesideContext.Provider>
     </SideButtonContext.Provider>
     </ThreadTagsContext.Provider>
     </LiveInitiativesContext.Provider>

@@ -1,0 +1,16 @@
+/* Two thread panes side by side (panes/PaneRow.tsx, "Open beside"): each half the room until the divider is dragged
+   (`--ib-pane-split` on .ib-main, the left pane's share). The divider takes no room of its own: it sits in the gutter
+   between the two cards, a hairline on the flat look, and its grab area is wider than what it draws. */
+.ib-main > .ib-pane:has(+ .ib-panesplit) { flex: 0 0 calc(var(--ib-pane-split, 50%) - var(--ib-gutter) / 2); }
+.ib-panesplit { position: relative; flex: none; width: 0; margin-inline: calc(var(--ib-gutter) / -2); z-index: 5; cursor: col-resize; touch-action: none; }
+.ib-panesplit::before { content: ""; position: absolute; inset: 0 -5px; }
+/* The floating panes (--ib-soft-panes) have no rules between them: their line shows only while grabbed. */
+.ib-panesplit { --ib-panesplit-soft: var(--ib-soft-panes) 0; }
+.ib-panesplit::after { content: ""; position: absolute; top: 0; bottom: 0; left: -0.5px; width: 1px; background: var(--ib-pane-line); opacity: var(--ib-panesplit-soft, 1); transition: background-color 120ms ease-out, opacity 120ms ease-out; }
+.ib-panesplit:hover::after, .ib-main[data-pane-dragging] .ib-panesplit::after { opacity: 1; background: var(--ring); }
+.ib-main[data-pane-dragging] { cursor: col-resize; user-select: none; }
+/* The pane the person is not in: its header quieter, so the active one reads as the one keys and typing go to. */
+.ib-pane[data-pane-quiet] .ib-phead { background: color-mix(in oklch, var(--muted) 55%, var(--card)); }
+/* Dark themes put --muted barely above --card: the quiet header sinks toward the window's background instead. */
+.dark .ib-pane[data-pane-quiet] .ib-phead { background: color-mix(in oklch, var(--background) 70%, var(--card)); }
+.ib-pane[data-pane-quiet] .ib-phead :is(.ib-subject, .ib-phsubj) { color: var(--muted-foreground); }

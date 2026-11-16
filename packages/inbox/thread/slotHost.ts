@@ -32,6 +32,8 @@ export interface ThreadSlotHost {
   phone: boolean;
   stack: Stack;
   full: boolean;
+  /** Beside another pane (panes/PaneRow.tsx): the pair has the window, so no full screen of its own. */
+  paired?: boolean;
   fromCard: string | null;
   fileOpen: boolean;
   staleNotice: ReactNode;

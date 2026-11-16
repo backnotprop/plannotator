@@ -1,11 +1,11 @@
 /**
- * Two thread slots mounted side by side (thread/ThreadSlot.tsx), as a second pane will mount them: only the active
- * pane receives the thread's keys and counts what it shows as seen. The window mounts one slot today; this harness
- * is the only place two exist.
+ * Two thread slots mounted side by side (thread/ThreadSlot.tsx, and panes/PaneRow.tsx as "Open beside" mounts them):
+ * only the active pane receives the thread's keys and counts what it shows as seen.
  *
  * What regresses: R opening the reply box in both panes (two boxes, one keystroke typed into either), a pane beside
- * the one the person is in marking its thread read by being on screen, and either rule not following the active
- * pane when it changes.
+ * the one the person is in marking its thread read by being on screen, either rule not following the active pane
+ * when it changes, and a thread already on screen going back to "Opening the thread…" when the person moves to the
+ * other pane (its cached copy is one an opening would not draw: stale, or a launched thread's).
  *
  * happy-dom has no layout: the threads' bodies and messages get their boxes from the test, as in seenOnSight.test.tsx,
  * and time runs on fake timers that `wait` advances.
@@ -25,10 +25,15 @@ import { SEEN_DWELL_MS } from '../seenOnSight';
 import type { ThreadSlotHost } from '../thread/slotHost';
 import { createPanesOnScreen } from './onScreen';
 import { NO_OPEN, type PaneReads } from './paneReads';
+import { useActiveHeld, type WindowPanes } from './useRoutePanes';
+import type { PaneSet } from './model';
+import { putThread, staleThread } from '../data/queries/thread';
+import type { HeldThread } from '../data/apply/record';
 
 const hasDom = typeof document !== 'undefined';
 // The thread pane pulls in web-highlighter, which reads `window` at module-eval time.
 const { ThreadSlot } = (hasDom ? await import('../thread/ThreadSlot') : {}) as typeof import('../thread/ThreadSlot');
+const { PaneRow } = (hasDom ? await import('./PaneRow') : {}) as typeof import('./PaneRow');
 
 const PROJECT: InboxProject = { id: 'prj_1', key: 'billing-svc-abcdef', name: 'billing-svc', root: '/work/billing-svc', created_at: '2026-10-12T09:00:00.000Z' };
 const AGENT: InboxAuthor = { kind: 'agent', host: 'claude-code', session: 'ses_a', name: 'Claude Code' };
@@ -246,5 +251,130 @@ describe.skipIf(!hasDom)('two thread slots: only the active pane takes keys and 
       [A, true],
       [B, true],
     ]);
+  });
+
+  test('beside each other (PaneRow): the other pane is the quieter, a press in it makes it active, each ✕ closes its own pane', async () => {
+    const calls: string[] = [];
+    const windowPanes: WindowPanes = {
+      panes: { panes: [{ id: 'main', thread: A }, { id: 'beside-1', thread: B }], active: 'main' },
+      openBeside: noop,
+      closePane: (id) => void calls.push(`close:${id}`),
+      focus: (id) => void calls.push(`focus:${id}`),
+      allowed: true,
+    };
+    // The other pane reads its thread from the cache (App holds only the active one's).
+    putThread(queries, B, heldOf(B, false));
+    el = document.createElement('div');
+    document.body.appendChild(el);
+    root = createRoot(el);
+    act(() =>
+      root!.render(
+        <QueryClientProvider client={queries}>
+          <div className="pn-inbox">
+            <main className="ib-main">
+              <PaneRow windowPanes={windowPanes} held={heldOf(A, false)} host={hostFor(A, noop)} />
+            </main>
+          </div>
+        </QueryClientProvider>,
+      ),
+    );
+    await wait(0);
+    expect(paneOf(A).hasAttribute('data-pane-quiet')).toBe(false);
+    expect(paneOf(B).hasAttribute('data-pane-quiet')).toBe(true);
+    expect(el.querySelector('.ib-main > [data-pane-split]')).not.toBeNull();
+    act(() => void paneOf(B).querySelector('.ib-pbody')!.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })));
+    expect(calls).toEqual(['focus:beside-1']);
+    act(() => paneOf(B).querySelector<HTMLElement>('button[aria-label="Close the thread"]')!.click());
+    act(() => paneOf(A).querySelector<HTMLElement>('button[aria-label="Close the thread"]')!.click());
+    expect(calls).toEqual(['focus:beside-1', 'close:beside-1', 'close:main']);
+  });
+
+  test('one pane (PaneRow) draws the slot alone, as before: no divider, no quiet header, its ✕ closes the thread', async () => {
+    const closed: (string | null)[] = [];
+    const windowPanes: WindowPanes = { panes: { panes: [{ id: 'main', thread: A }], active: 'main' }, openBeside: noop, closePane: noop, focus: noop, allowed: true };
+    const host = { ...hostFor(A, noop), close: (next: Route) => void closed.push(next.thread) };
+    el = document.createElement('div');
+    document.body.appendChild(el);
+    root = createRoot(el);
+    act(() =>
+      root!.render(
+        <QueryClientProvider client={queries}>
+          <div className="pn-inbox">
+            <main className="ib-main">
+              <PaneRow windowPanes={windowPanes} held={heldOf(A, false)} host={host} />
+            </main>
+          </div>
+        </QueryClientProvider>,
+      ),
+    );
+    await wait(0);
+    expect([...el.querySelector('.ib-main')!.children].map((child) => child.tagName.toLowerCase())).toEqual(['section']);
+    expect(paneOf(A).hasAttribute('data-pane-quiet')).toBe(false);
+    act(() => paneOf(A).querySelector<HTMLElement>('button[aria-label="Close the thread"]')!.click());
+    expect(closed).toEqual([null]);
+  });
+  test('the pane the person leaves keeps its thread on screen, its cached copy stale: no "Opening the thread…"', async () => {
+    const one: WindowPanes = { panes: { panes: [{ id: 'main', thread: A }], active: 'main' }, openBeside: noop, closePane: noop, focus: noop, allowed: true };
+    const two: WindowPanes = { ...one, panes: { panes: [{ id: 'main', thread: A }, { id: 'beside-1', thread: B }], active: 'beside-1' } };
+    putThread(queries, A, heldOf(A, false));
+    putThread(queries, B, heldOf(B, false));
+    el = document.createElement('div');
+    document.body.appendChild(el);
+    root = createRoot(el);
+    const render = (windowPanes: WindowPanes, held: HeldThread) =>
+      act(() =>
+        root!.render(
+          <QueryClientProvider client={queries}>
+            <div className="pn-inbox">
+              <main className="ib-main">
+                <PaneRow windowPanes={windowPanes} held={held} host={hostFor(A, noop)} />
+              </main>
+            </div>
+          </QueryClientProvider>,
+        ),
+      );
+    render(one, heldOf(A, false));
+    await wait(0);
+    expect(paneOf(A).querySelector('h2.ib-subject')).not.toBeNull();
+    // A record the stream missed: A's copy is stale, which an opening would not draw.
+    act(() => staleThread(queries, A));
+    render(two, heldOf(B, false));
+    await wait(0);
+    expect(paneOf(A)?.querySelector('h2.ib-subject')).not.toBeNull();
+    expect(el.textContent).not.toContain('Opening the thread');
+  });
+
+  test("the window's open thread (useActiveHeld): moving into a pane already on screen keeps its copy; opening one not on screen waits", async () => {
+    const C = 'msg_C1';
+    for (const id of [A, B, C]) {
+      putThread(queries, id, heldOf(id, false));
+      act(() => staleThread(queries, id));
+    }
+    const got: (string | null)[] = [];
+    function Probe({ panes }: { panes: PaneSet }) {
+      got.push(useActiveHeld(panes)?.thread.thread_id ?? null);
+      return null;
+    }
+    el = document.createElement('div');
+    document.body.appendChild(el);
+    root = createRoot(el);
+    const render = (panes: PaneSet) =>
+      act(() =>
+        root!.render(
+          <QueryClientProvider client={queries}>
+            <Probe panes={panes} />
+          </QueryClientProvider>,
+        ),
+      );
+    const pair = (active: string): PaneSet => ({ panes: [{ id: 'main', thread: A }, { id: 'beside-1', thread: B }], active });
+    render(pair('main'));
+    render(pair('beside-1'));
+    expect(got.at(-1)).toBe(B);
+    // The pane beside closes: A was on screen.
+    render({ panes: [{ id: 'main', thread: A }], active: 'main' });
+    expect(got.at(-1)).toBe(A);
+    // One pane opening another thread: its stale copy waits for the read, as before.
+    render({ panes: [{ id: 'main', thread: C }], active: 'main' });
+    expect(got.at(-1)).toBeNull();
   });
 });

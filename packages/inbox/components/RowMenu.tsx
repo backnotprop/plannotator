@@ -8,6 +8,7 @@ import { rowMenuActions, type RowMenuAction } from '../rowMenu';
 import { useThreadTags } from '../threadTags';
 import { AddTagItem, AddTagList } from './AddTagMenu';
 import { useContextMenuTrigger } from './useContextMenuTrigger';
+import { OpenBesideItem } from '../panes/OpenBesideItem';
 import { BulkItems, WorkItems, runBulk } from './PickBar';
 import { BulkTagList } from './BulkTags';
 import type { MenuPicks } from './useListPicks';
@@ -271,6 +272,7 @@ export const ThreadRowMenu = forwardRef<HTMLDivElement, ThreadRowMenuProps>(func
               />
             ) : (
               <>
+                {target && <OpenBesideItem threadId={target.thread_id} />}
                 {/* Select first, alone (approval "inbox-multi-select", 1B): picking starts with this row picked. */}
                 {target && props.picks?.takes(target.thread_id) && (
                   <>

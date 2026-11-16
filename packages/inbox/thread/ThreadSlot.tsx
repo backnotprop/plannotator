@@ -39,7 +39,9 @@ export interface ThreadSlotProps {
  */
 export function ThreadSlot({ paneId, threadId, active, held: given, host }: ThreadSlotProps) {
   const { route, routeRef, phone, stack, full, fromCard, fileOpen, settings, machines, go, leave, close, listTitle } = host;
-  const own = useHeldThread(given === undefined ? threadId : null);
+  // A pane that stops being the active one reads its thread itself and keeps showing what it showed.
+  const shown = useRef<string | null>(null);
+  const own = useHeldThread(given === undefined ? threadId : null, shown.current === threadId);
   const held = given === undefined ? own : given;
   const thread = held?.thread ?? null;
   const open = host.paneReads.view(paneId);
@@ -49,6 +51,9 @@ export function ThreadSlot({ paneId, threadId, active, held: given, host }: Thre
   const away = owner ? threadAwayLine(owner) : null;
   const awayWait = !!load && !(thread && thread.thread_id === threadId) && (((!!away || !!load.waiting) && load.state === 'failed') || load.state === 'refused');
   const ready = !!threadId && !!thread && thread.thread_id === threadId && !host.rowsPending;
+  useEffect(() => {
+    if (ready) shown.current = threadId;
+  });
   const scope = useMemo(() => ({ paneId, active }), [paneId, active]);
   const activeRef = useRef(active);
   activeRef.current = active;
@@ -90,7 +95,7 @@ export function ThreadSlot({ paneId, threadId, active, held: given, host }: Thre
             <>
               {/* No list beside the thread (a phone, a stacked window, full screen, a card's thread, beside a file):
                   the stale page notice is here instead. */}
-              {(phone || stack.thread || full || fromCard || fileOpen) && host.staleNotice}
+              {(phone || stack.thread || full || fromCard || fileOpen || (host.paired && active)) && host.staleNotice}
               {host.notifyAgainIn === thread.thread_id ? (
               <div className="ib-tour-notify-again" data-tour-notify-again="">
                 <NotificationAsk
@@ -246,7 +251,7 @@ export function ThreadSlot({ paneId, threadId, active, held: given, host }: Thre
           stacked={stack.thread || !!fromCard}
           threadAlone={full}
           fullSidebar={host.fullSidebar}
-          onFull={fromCard ? undefined : (on) => (on ? host.setThreadFull(true) : host.leaveFull())}
+          onFull={fromCard || host.paired ? undefined : (on) => (on ? host.setThreadFull(true) : host.leaveFull())}
           fileStacked={stack.file}
           remote={settings ? (settings.via ?? 'local') === 'tailnet' : null}
           onToast={(t) => host.showToast(t)}
