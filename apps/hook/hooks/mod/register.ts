@@ -108,6 +108,7 @@ import {
   resolvePlanReviewEnabled,
   isPanelEntrypoint,
   panelHostOwnsPlanMode,
+  HOST_PLAN_CARD_ENV,
 } from './enabled'
 import { submitOrThrow, type Host, type LoadedPluginInfo } from './host'
 import {
@@ -327,7 +328,10 @@ interface Allowed {
   inboxReminderRules: string | null
   /** A panel host's chat (`isPanelSession`: VS Code, Orca, the desktop Code tab): not interactive, a person reading it. */
   panel: boolean
-  /** The panel host draws its own plan card (`panelHostOwnsPlanMode`: Orca): ExitPlanMode is left to it, the classic hook included. */
+  /**
+   * The host draws its own plan card (Orca: `panelHostOwnsPlanMode`; a T3 thread): ExitPlanMode is left to it, and
+   * the session's hooks get `HOST_PLAN_CARD_ENV`, so the plugin's classic hook gives no decision either.
+   */
   hostPlanMode: boolean
   /** The T3 Code thread this session is (`t3ThreadOf`), or null. */
   t3Thread: string | null
@@ -819,7 +823,7 @@ async function pickShellOf($: Engine, dataDir: string): Promise<ModShell | null>
  * Which SDK host this non-interactive session is: a panel host's chat (VS
  * Code, Orca, the desktop Code tab: `isPanelSession`, and whether that host
  * draws its own plan card: `panelHostOwnsPlanMode`) or a T3 Code thread
- * (`t3ThreadOf`), all in enabled.ts. Each variable is named as a literal
+ * (`t3ThreadOf`; T3 draws its own plan card too), all in enabled.ts. Each variable is named as a literal
  * (env-get-literal.test.ts).
  */
 async function sdkHostOf($: Engine): Promise<{ panel: boolean; hostPlanMode: boolean; t3Thread: string | null }> {
@@ -837,7 +841,18 @@ async function sdkHostOf($: Engine): Promise<{ panel: boolean; hostPlanMode: boo
     const panel = isPanelSession(env, String(await $.session.id()))
     return { ...none, panel, hostPlanMode: panel && panelHostOwnsPlanMode(entrypoint) }
   }
-  return { ...none, t3Thread: t3ThreadOf({ ...env, thread: await $.env.get('T3CODE_THREAD_ID') }) }
+  // T3 owns Plan mode: its own plan card stays (SESSION_KIND_FEATURES).
+  const t3Thread = t3ThreadOf({ ...env, thread: await $.env.get('T3CODE_THREAD_ID') })
+  return { ...none, t3Thread, hostPlanMode: t3Thread !== null }
+}
+
+/** Why the mod passes an ExitPlanMode on, for the debug log. */
+function planPassReason(settings: Allowed | null): string {
+  if (!settings) return 'the mod is not running here'
+  if (settings.hostPlanMode) return `the host draws its own plan card (${settings.kind}); the classic hook gives no decision`
+  if (!SESSION_KIND_FEATURES[settings.kind].planReview) return `a ${settings.kind} session keeps the classic hook`
+  if (!settings.planReview) return 'plan review is turned off'
+  return 'a subagent keeps the classic hook'
 }
 
 /** Whether the mod runs here (on unless the user turned it off), in which kind of session, and where its data dir is; null: stay inert. */
@@ -972,6 +987,15 @@ export function register(on: On) {
       // when the reminder is off (a value inherited from a parent Claude Code
       // must not speak for this session).
       await Promise.resolve($.env.set('PLANNOTATOR_INBOX_REMINDER', inboxReminderEnvValue(reminderOn(), inboxToolName, allowed.inboxReminderCustom, allowed.inboxReminderRules))).catch(() => undefined)
+      // A host that draws its own plan card (Orca, a T3 thread): Claude Code runs
+      // the plugin's classic PermissionRequest command hook (hooks.json) for
+      // ExitPlanMode whatever this module answers, so the plan review switch goes
+      // off in the session's environment: every hook process inherits it, and the
+      // `plannotator` hook exits with no decision, leaving the host's card to decide.
+      if (allowed.hostPlanMode) {
+        await Promise.resolve($.env.set(HOST_PLAN_CARD_ENV.name, HOST_PLAN_CARD_ENV.value)).catch(() => undefined)
+        if (allowed.debugPath) hostOf($, allowed.debugPath).debug(`plan review: the host draws its own plan card (${allowed.kind}); ${HOST_PLAN_CARD_ENV.name}=${HOST_PLAN_CARD_ENV.value} set for the session's hooks`)
+      }
     } finally {
       // Decided (or inert): a first prompt the engine may already be raising
       // gets its context now, without waiting for the commands and tools below.
@@ -1153,10 +1177,14 @@ export function register(on: On) {
       return answerShellCall(instance, input)
     }
     // Only the main loop's ExitPlanMode: a subagent's keeps the classic flow.
-    if (!allowed?.planReview || e.tool !== PLAN_TOOL || e.agentId) return next(e)
+    if (!allowed?.planReview || e.tool !== PLAN_TOOL || e.agentId) {
+      if (allowed?.debugPath && e.tool === PLAN_TOOL) hostOf($, allowed.debugPath).debug(`ExitPlanMode (${e.agentId ? 'subagent' : 'main'}): passed on (${planPassReason(allowed)})`)
+      return next(e)
+    }
     const instance = await currentMod($)
     if (!instance) return next(e)
     const answer = await instance.onPlanCall({ tool_use_id: e.tool_use_id, plan: e.plan, planFilePath: e.planFilePath })
+    if (allowed.debugPath) hostOf($, allowed.debugPath).debug(`ExitPlanMode (main): ${'deny' in answer ? "the mod's review (denied while it waits)" : 'an approved plan; passed on'}`)
     if ('deny' in answer) return { deny: answer.deny }
     try {
       return await next(e)
@@ -1172,14 +1200,14 @@ export function register(on: On) {
   // of every tool. Matched, the engine never selects it for another tool, and
   // a skip during a plan approval is answered by the record plan.ts writes.
   on('classic.PermissionRequest', { tool_name: PLAN_TOOL }, async ($: Engine, e: any, next: Next) => {
-    // A panel host that draws its own plan card (Orca): no decision, and not
-    // next(e), so the plugin's classic command hook opens no blocking review
-    // either; the host's own permission handling (its card) decides.
-    if (allowed?.hostPlanMode && e.tool_name === PLAN_TOOL && !e.agent_id) return {}
     const instance = mod
     // A subagent's ExitPlanMode keeps the classic hook (its tool.call was not ours).
-    if (!instance || instance.isDisposed || !allowed?.planReview || e.tool_name !== PLAN_TOOL || e.agent_id) return next(e)
+    if (!instance || instance.isDisposed || !allowed?.planReview || e.tool_name !== PLAN_TOOL || e.agent_id) {
+      if (allowed?.debugPath && e.tool_name === PLAN_TOOL) hostOf($, allowed.debugPath).debug(`ExitPlanMode permission request (${e.agent_id ? 'subagent' : 'main'}): passed on (${planPassReason(allowed)})`)
+      return next(e)
+    }
     const decision = instance.onPlanPermission(typeof e.tool_use_id === 'string' ? e.tool_use_id : undefined, e.tool_input)
+    if (allowed.debugPath) hostOf($, allowed.debugPath).debug(`ExitPlanMode permission request (main): ${decision ? `${String(decision.behavior)}, the approved plan` : 'no approved plan; passed on'}`)
     // Answered here, without next(e): the plugin's own classic command hook
     // below never runs for this call, so it cannot open a second review.
     return decision ? { decision } : next(e)

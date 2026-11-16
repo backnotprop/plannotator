@@ -246,6 +246,19 @@ export function panelHostOwnsPlanMode(value: unknown): boolean {
   return typeof value === 'string' && PANEL_HOSTS.get(value)?.planReview === false
 }
 
+/**
+ * What the mod sets in the environment of a session whose host draws its own
+ * plan card (Orca, a T3 thread). Claude Code runs the plugin's classic
+ * PermissionRequest command hook (`plannotator`, hooks.json) for ExitPlanMode
+ * whatever a module answers (seen in a real Orca run), and that process
+ * inherits the session's environment: with plan review off it exits 0 with no
+ * decision (`resolvePlanReview` in packages/shared/config.ts, honored by every
+ * binary since #2299), so the host's own card decides. The mod decides, not
+ * the binary: only the session itself can tell its own entrypoint from one a
+ * nested `claude -p` inherited (`isPanelSession`, `t3ThreadOf`).
+ */
+export const HOST_PLAN_CARD_ENV = { name: 'PLANNOTATOR_PLAN_REVIEW', value: '0' } as const
+
 /** What `isPanelSession` reads, each variable as `$.env.get` answers it. */
 export type PanelSessionEnv = {
   /** `CLAUDE_CODE_ENTRYPOINT`. */

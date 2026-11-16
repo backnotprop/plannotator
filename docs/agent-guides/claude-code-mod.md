@@ -108,14 +108,20 @@ review (`panelHostOwnsPlanMode`, `hostPlanMode` on `Allowed`).
 `CLAUDE_CODE_ENTRYPOINT=orca`, but draws its own "Review proposed plan" card
 (Approve plan / Keep planning) for ExitPlanMode: with the mod's plan review on
 as well, a real run opened both, and approving Orca's card left Plannotator's
-plan server running with its tab open. So in Orca the mod passes ExitPlanMode's
-`tool.call` on, and its `classic.PermissionRequest` hook answers the main
-loop's ExitPlanMode with no decision and without `next(e)`, so the plugin's
-classic command hook (the blocking review) never runs either; Claude Code goes
-on to the host's own permission handling, Orca's card. A subagent's
-ExitPlanMode keeps the classic flow. This differs from T3, whose kind turns
-plan review off but still calls `next(e)`. The tools, the wake and the
-non-blocking reviews stay on.
+plan server running with its tab open. So in Orca the mod reviews no plan: its
+`tool.call` and `classic.PermissionRequest` hooks pass ExitPlanMode on. That
+alone is not enough: a second real run (Orca 1.4.259) showed Claude Code
+running the plugin's classic PermissionRequest command hook (`plannotator`,
+started by the session's `claude` itself) whatever the module answers. So at
+`session.start` the mod also sets `PLANNOTATOR_PLAN_REVIEW=0` in the session's
+environment (`HOST_PLAN_CARD_ENV`, the existing switch, #2299): the hook
+process inherits it and exits 0 with no decision, and Orca's card decides.
+Every released binary honors that switch, so no binary change is needed. The
+mod decides, not the binary: only the session can tell its own entrypoint from
+one a nested `claude -p` inherited. Side effect: a `claude -p` started from
+inside the session inherits the switch too, so its ExitPlanMode gets no
+Plannotator review. The tools, the wake and the non-blocking reviews stay on.
+T3 threads get the same switch (below).
 
 **The Claude desktop app's Code tab (#3239).** The desktop app runs a Code
 tab session's CLI through the Agent SDK with `CLAUDE_CODE_ENTRYPOINT` set to
@@ -205,7 +211,9 @@ claim folder holds, the T3 wake leaves the reply alone; once the poll is stale
 (T3 releases an idle Claude after 30 minutes, later while it has background
 work), the T3 wake sends what still waits, under a grant, and the bridge poll
 never hands the mod what the T3 wake handed for a send in flight. ExitPlanMode
-passes on to T3's own Plan mode. Commands and the Bash take-over are the mod's,
+passes on to T3's own Plan mode, and the mod sets `PLANNOTATOR_PLAN_REVIEW=0`
+in the thread's environment so the plugin's classic command hook gives no
+decision either (as in Orca, above; not seen yet in a real T3). Commands and the Bash take-over are the mod's,
 and the opt-in T3 Bash hook (`prepareT3Hook`, `claudeModServesThread`) stands
 aside in a thread whose tag the mod set. Not seen yet in a real T3: how T3
 draws a plugin-started turn. A review decision after T3 released the Claude is
@@ -218,8 +226,11 @@ its own plan card), `register-vscode.test.ts` (the real
 registered hooks on a fake `$`: every panel host and a T3 thread register both tools,
 poll as their session or thread and deliver once; each refusal is held and
 goes in once after the person's prompt; the mod's plan review opens in VS Code
-and the desktop Code tab, and in Orca neither it nor the classic hook does,
-while Orca's code review stays the mod's; the `sdk` origin pulls the lease, a
+and the desktop Code tab, and in Orca it does not, while Orca's code review
+stays the mod's; Orca and a T3 thread leave `PLANNOTATOR_PLAN_REVIEW=0` in the
+session's environment and no other session does; the real classic plan hook,
+run as a process in the environment the mod left, exits 0 with no decision for
+Orca and a T3 thread and opens a review for the VS Code panel; the `sdk` origin pulls the lease, a
 task notification does not; each headless session gets `plannotator_inbox`
 alone, filed as its session, without the wake mark, no poll, the classic
 flows; an Ask AI child and the knob off stay inert; a thread under an
