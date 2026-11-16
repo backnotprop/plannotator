@@ -22,7 +22,7 @@ const { ShapeSurface } = (hasDom ? await import('./ShapeSurface') : {}) as typeo
 
 const ID = 'shp_panel_test';
 const AT = '2026-11-16T10:00:00.000Z';
-const PICTURE = { html: '<p data-mark="whistle">One whistle</p><p data-mark="lid">The lid</p><span data-ref="1"></span>' };
+const PICTURE = { html: '<p data-mark="whistle">One whistle</p><p data-mark="lid" data-code="src/lid.ts#L3">The lid</p><span data-ref="1"></span>' };
 const HOW = { html: '<p data-mark="steam">Steam</p>' };
 const REFS: ShapeRef[] = [{ n: 1, kind: 'link', title: 'Kettle notes', target: 'https://example.com/kettle' }];
 
@@ -35,13 +35,13 @@ interface Rig {
   emit: (event: ShapeEvent) => void;
 }
 
-function rig(session: ShapeLoaded['session'] = { state: 'live', agent: 'Claude Code' }, finished: { notes: ShapeNote[] } | null = null): Rig {
+function rig(session: ShapeLoaded['session'] = { state: 'live', agent: 'Claude Code' }, stored: { notes: ShapeNote[]; finished?: boolean } | null = null): Rig {
   const board: ShapeBoard = { title: 'Kettle', claim: 'Built.', views: { picture: PICTURE, how: HOW }, refs: REFS };
   const data: ShapeLoaded = {
-    shape: { v: 1, id: ID, title: 'Kettle', project: { name: 'app', root: '/work/app' }, session: null, thread: null, state: finished ? 'finished' : 'active', created: AT, updated: AT, latest: 1, drawing: null },
+    shape: { v: 1, id: ID, title: 'Kettle', project: { name: 'app', root: '/work/app' }, session: null, thread: null, state: stored?.finished ? 'finished' : 'active', created: AT, updated: AT, latest: 1, drawing: null },
     version: { ...board, n: 1, at: AT, base: null, through: null, by: null, parts: shapeParts(board) },
     seen: 1,
-    notes: finished?.notes ?? [],
+    notes: stored?.notes ?? [],
     session,
   };
   const asked: ShapeNoteInput[] = [];
@@ -139,6 +139,38 @@ async function type(words: string) {
     box().dispatchEvent(new Event('input', { bubbles: true }));
   });
 }
+/** A finished board's stored talk: an Ask on the whistle with its answer, and a Change it on the whole board. */
+function finishedNotes(): ShapeNote[] {
+  return [
+    { id: 'shn_q', kind: 'ask', v: 1, view: 'picture', part: 'whistle', quote: 'One whistle', text: 'Why one whistle?', from: 'you', re: null, delivered: null, at: AT },
+    { id: 'shn_a', kind: 'answer', v: 1, view: 'picture', part: 'whistle', quote: null, text: 'Because the lid holds the steam.', from: 'agent', re: 'shn_q', delivered: null, at: AT },
+    { id: 'shn_c', kind: 'change', v: 1, view: null, part: null, quote: null, text: 'Make it red', from: 'you', re: null, delivered: AT, at: AT },
+  ] as unknown as ShapeNote[];
+}
+function inDrawingAll<T extends Element = HTMLElement>(selector: string): T[] {
+  for (const el of document.querySelectorAll('*')) {
+    const found = el.shadowRoot?.querySelectorAll<T>(selector);
+    if (found?.length) return [...found];
+  }
+  return [];
+}
+const esc = () => act(async () => { document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })); });
+/** A laid-out drawing (this DOM lays nothing out): every part has a box, so its bubble has a corner. */
+async function laidOut(run: () => Promise<void>) {
+  const real = Element.prototype.getBoundingClientRect;
+  Element.prototype.getBoundingClientRect = function (this: Element) {
+    if (this.hasAttribute('data-mark')) {
+      const top = this.getAttribute('data-mark') === 'lid' ? 160 : 100;
+      return { left: 100, top, right: 300, bottom: top + 30, width: 200, height: 30, x: 100, y: top, toJSON: () => ({}) } as DOMRect;
+    }
+    return real.call(this);
+  };
+  try {
+    await run();
+  } finally {
+    Element.prototype.getBoundingClientRect = real;
+  }
+}
 async function closeBox() {
   await act(async () => box().dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
   await until(() => !popover(), 'the box closed');
@@ -168,6 +200,8 @@ describe.if(hasDom)('the side panel and the answers', () => {
     const root = document.querySelector<HTMLElement>('.shp-root')!;
     // This DOM measures the board 1400 wide (beforeAll); the window is happy-dom's own.
     expect(root.style.getPropertyValue('--shp-w')).toBe('1400px');
+    // The References panel's width comes from the same measure: 31% of the board, between 360 and 440.
+    expect(root.style.getPropertyValue('--pw')).toBe('434px');
     const css = await Bun.file(new URL('./shape.css', import.meta.url)).text();
     // No other size on the board reads the window directly (a board in a thread's pane is narrower than it). The
     // comment box's talk is the window's: the box opens over everything, where the window is its room.
@@ -248,12 +282,9 @@ describe.if(hasDom)('the side panel and the answers', () => {
     expect(talk()!.textContent).toContain('Change: Make it red');
     expect(talk()!.textContent).toContain('Sent to Claude Code');
   });
-  test('a finished board: Global comment and a part that was asked about open to read, with no words to type', async () => {
-    const asked = { id: 'shn_q', kind: 'ask', v: 1, view: 'picture', part: 'whistle', quote: 'One whistle', text: 'Why one whistle?', from: 'you', re: null, delivered: null, at: AT } as unknown as ShapeNote;
-    const answer = { id: 'shn_a', kind: 'answer', v: 1, view: 'picture', part: 'whistle', quote: null, text: 'Because the lid holds the steam.', from: 'agent', re: 'shn_q', delivered: null, at: AT } as unknown as ShapeNote;
-    const change = { id: 'shn_c', kind: 'change', v: 1, view: null, part: null, quote: null, text: 'Make it red', from: 'you', re: null, delivered: AT, at: AT } as unknown as ShapeNote;
-    const { host } = rig({ state: 'gone', agent: 'Claude Code' }, { notes: [asked, answer, change] });
-    await mount(host);
+  test('a finished board: Global comment and a part\'s comment bubble open what was asked to read, with no words to type', async () => {
+    const { host } = rig({ state: 'gone', agent: 'Claude Code' }, { notes: finishedNotes(), finished: true });
+    await laidOut(() => mount(host));
     const readBox = () => document.querySelector<HTMLElement>('[data-shape-talkbox]');
     const noWords = (box: HTMLElement) => {
       expect(box.querySelector('textarea')).toBeNull();
@@ -268,25 +299,102 @@ describe.if(hasDom)('the side panel and the answers', () => {
     expect(readBox()!.textContent).toContain('Because the lid holds the steam.');
     expect(readBox()!.textContent).toContain('Change: Make it red');
     noWords(readBox()!);
-    // Esc closes it, and only it.
-    await act(async () => { document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })); });
+    // Esc closes it, and only it; the focus goes back to Global comment.
+    await esc();
     await until(() => !readBox(), 'the box closed');
     expect(document.querySelector('.shp-root')).not.toBeNull();
-    // The part asked about opens its own, to read; a part nothing was asked about opens nothing.
-    await click(inDrawing('[data-mark="whistle"]')!);
+    expect(document.activeElement).toBe(general);
+    // The part asked about has a bubble; it opens the part's own talk, to read.
+    const bubble = inDrawing<HTMLButtonElement>('[data-shp-talk-bubble]')!;
+    expect(bubble.getAttribute('aria-label')).toBe('Comments on Shape · “One whistle”');
+    await click(bubble);
     await until(() => !!readBox(), "the part's box");
     expect(readBox()!.textContent).toContain('Because the lid holds the steam.');
     expect(readBox()!.textContent).not.toContain('Make it red');
     noWords(readBox()!);
     await click(readBox()!.querySelector('button[aria-label="Close"]')!);
-    await click(inDrawing('[data-mark="lid"]')!);
-    await wait();
     expect(readBox()).toBeNull();
-    expect(popover()).toBeNull();
+    expect(inDrawing('[data-shp-talk-bubble]')).toBe(bubble);
+  });
+
+  test("a finished board's parts keep their own click: a part with code opens its code, and nothing points", async () => {
+    const opened: string[] = [];
+    const { host } = rig({ state: 'gone', agent: 'Claude Code' }, { notes: finishedNotes(), finished: true });
+    await laidOut(() => mount(host, { onCode: (at) => (opened.push(`${at.path}:${at.line}`), true) }));
+    expect(inDrawing('.board')!.classList.contains('pinpointing')).toBe(false);
+    await click(inDrawing('[data-mark="lid"]')!);
+    expect(opened).toEqual(['src/lid.ts:3']);
+    // The part that was asked about does not open its talk on a plain click: its bubble does.
+    await click(inDrawing('[data-mark="whistle"]')!);
+    await wait();
+    expect(document.querySelector('[data-shape-talkbox]')).toBeNull();
+  });
+
+  test('a comment bubble: after an Ask and a Change it, from the stored talk again, at a box over no part, with a dot for a new answer', async () => {
+    const r = rig();
+    await laidOut(async () => {
+      await mount(r.host);
+      expect(inDrawing('[data-shp-talk-bubble]')).toBeNull();
+      await pick('whistle');
+      await type('Why one whistle?');
+      await click(button(popover()!, 'Ask')!);
+      await until(() => r.asked.length === 1, 'the ask');
+      await until(() => !!inDrawing('[data-shp-talk-bubble]'), 'the bubble after an Ask');
+      r.release(null);
+      await wait();
+      await closeBox();
+      await pick('lid');
+      await type('Make it red');
+      await click(button(popover()!, 'Change it')!);
+      await until(() => inDrawingAll('[data-shp-talk-bubble]').length === 2, 'a bubble after a Change it too');
+      // A later answer: its part's bubble gets a dot, and says so.
+      r.emit({ type: 'note', note: { id: 'shn_answer', kind: 'answer', v: 1, view: 'picture', part: 'whistle', quote: null, text: 'The agent boils it.', from: 'agent', re: 'shn_1', delivered: null, at: AT } as unknown as ShapeNote });
+      const whistle = () => inDrawingAll<HTMLButtonElement>('[data-shp-talk-bubble]').find((b) => b.getAttribute('data-shp-talk-bubble')!.endsWith('whistle'))!;
+      await until(() => !!whistle()?.querySelector('[data-dot]'), 'the dot');
+      expect(whistle().getAttribute('aria-label')).toContain('new answer');
+      // Opened: the part's comment box (the board is not finished), with the answer; the dot goes.
+      await click(whistle());
+      await until(() => !!talk()?.textContent?.includes('The agent boils it.'), "the part's box from its bubble");
+      expect(box()).not.toBeNull();
+      await wait();
+      expect(whistle().querySelector('[data-dot]')).toBeNull();
+      // Closed, the focus is back on the bubble it was opened from.
+      let focused = 0;
+      whistle().addEventListener('focus', () => focused++);
+      await closeBox();
+      expect(focused).toBe(1);
+    });
+    act(() => root?.unmount());
+    document.body.innerHTML = '';
+    // Again from what the board stores: a part's bubble, and a box over no part's at the box's corner.
+    const boxNote = { id: 'shn_box', kind: 'ask', v: 1, view: 'picture', part: null, quote: null, text: 'What is this gap?', from: 'you', re: null, delivered: null, at: AT, box: { x: 0.5, y: 0.5, w: 0.2, h: 0.1 } } as unknown as ShapeNote;
+    const again = rig(undefined, { notes: [...finishedNotes(), boxNote] });
+    await laidOut(() => mount(again.host));
+    const keys = inDrawingAll('[data-shp-talk-bubble]').map((b) => b.getAttribute('data-shp-talk-bubble'));
+    expect(keys).toEqual(['p:picture\u0000whistle', 'b:picture|0.5,0.5,0.2,0.1']);
+    // The box's bubble opens its own question to read.
+    await click(inDrawingAll('[data-shp-talk-bubble]')[1]!);
+    await until(() => !!document.querySelector('[data-shape-talkbox]'), "the box's talk");
+    expect(document.querySelector('[data-shape-talkbox]')!.textContent).toContain('What is this gap?');
+    expect(document.querySelector('[data-shape-talkbox]')!.textContent).not.toContain('Why one whistle?');
+  });
+
+  test('one Esc closes one thing: with References open, the Global comment read box first, then the panel', async () => {
+    const { host } = rig({ state: 'gone', agent: 'Claude Code' }, { notes: finishedNotes(), finished: true });
+    await mount(host);
+    await click(document.querySelector('.shp-dock button[title="References"]')!);
+    expect(document.querySelector('.shp-sidep.open')).not.toBeNull();
+    await click(document.querySelector('.shp-general')!);
+    await until(() => !!document.querySelector('[data-shape-talkbox]'), 'the read box');
+    await esc();
+    expect(document.querySelector('[data-shape-talkbox]')).toBeNull();
+    expect(document.querySelector('.shp-sidep.open')).not.toBeNull();
+    await esc();
+    expect(document.querySelector('.shp-sidep.open')).toBeNull();
   });
 
   test('a finished board with nothing asked: Global comment stays off', async () => {
-    const { host } = rig({ state: 'gone', agent: 'Claude Code' }, { notes: [] });
+    const { host } = rig({ state: 'gone', agent: 'Claude Code' }, { notes: [], finished: true });
     await mount(host);
     expect(document.querySelector<HTMLButtonElement>('.shp-general')!.disabled).toBe(true);
   });

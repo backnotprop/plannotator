@@ -25,6 +25,7 @@ import {
   shapeViewNow,
   type ShapeCodeTarget,
   type ShapeNote,
+  type ShapeNoteBox,
   type ShapeNoteInput,
   type ShapeRef,
   type ShapeVersion,
@@ -48,6 +49,7 @@ import { useShapeStack } from './ShapeStack';
 import { CodeSpanContext } from '../LocalLinkContext';
 import { ShapeInline } from './inline';
 import { boxKey, ShapeTalk, ShapeTalkBox, talkOn, type ShapeTalkEntry } from './talk';
+import type { TalkBubble } from './talkBubbles';
 import { boxNoteInput, captureBox, pictureRect, placeBox, readBox, useBoxDrag, type KeptBox, type ShapeBoxSelection } from './boxSelect';
 import type { ShapeEvent, ShapeHost, ShapeLoaded, ShapePanelTab, ShapeSessionStatus, ShapeShowMeInput, ShapeSurfaceProps, ShapeSurfaceReview } from './types';
 
@@ -71,6 +73,7 @@ function usePhone(el: HTMLElement | null) {
     const measure = () => {
       el.style.setProperty('--shp-w', `${el.clientWidth}px`);
       el.style.setProperty('--shp-h', `${el.clientHeight}px`);
+      el.style.setProperty('--pw', `${panelWidth(el.clientWidth)}px`);
       setPhone(el.clientWidth <= PHONE_MAX);
     };
     measure();
@@ -82,7 +85,7 @@ function usePhone(el: HTMLElement | null) {
   return phone;
 }
 
-/** The References panel's width, as shape.css's `--pw` gives it for a board `w` wide. */
+/** The References panel's width for a board `w` wide: `--pw` on the board's root (`usePhone` sets it; shape.css reads it). */
 const panelWidth = (w: number) => Math.min(440, Math.max(360, w * 0.31));
 
 /**
@@ -290,7 +293,11 @@ export function ShapeSurface({ host, id, onClose, onCode, CodeGuide, CodeHoverCa
   const [panel, setPanel] = useState<ShapePanelTab | null>(initialPanel === 'refs' ? 'refs' : null);
   /** An answer came while no comment box showed it: the pill says so, and Show opens the whole board's box. */
   const [answerReady, setAnswerReady] = useState(false);
-  const [streams, setStreams] = useState<Record<string, { prompt: string; label: string; view: string | null; part: string | null; box: string | null; text: string; at: number; failed?: boolean }>>({});
+  /** The questions whose answer came while no box showed it: their comment bubble has a dot until a box shows them. */
+  const [newAnswers, setNewAnswers] = useState<ReadonlySet<string>>(() => new Set());
+  /** A box to read is open (a bubble's, or Global comment's): Esc is its own first. */
+  const readingRef = useRef(false);
+  const [streams, setStreams] = useState<Record<string, { prompt: string; label: string; view: string | null; part: string | null; box: string | null; boxAt: ShapeNoteBox | null; text: string; at: number; failed?: boolean }>>({});
   /** The questions the open comment box shows (its `ShapeTalk`): their answers need no pill. */
   const talkShown = useRef<ReadonlySet<string>>(new Set());
   const panelRef = useRef(panel);
@@ -408,7 +415,11 @@ export function ShapeSurface({ host, id, onClose, onCode, CodeGuide, CodeHoverCa
         upsertNote(event.note);
         if (event.note.kind === 'answer') {
           setInFlight((f) => f.filter((x) => x !== event.note.re));
-          if (event.note.re && !talkShown.current.has(event.note.re)) setAnswerReady(true);
+          const re = event.note.re;
+          if (re && !talkShown.current.has(re)) {
+            setAnswerReady(true);
+            setNewAnswers((s) => new Set(s).add(re));
+          }
           setMarks((m) => ({ ...m, noted: new Set() }));
         }
       } else if (event.type === 'state') {
@@ -525,7 +536,7 @@ export function ShapeSurface({ host, id, onClose, onCode, CodeGuide, CodeHoverCa
   const stopFollowRef = useRef<(() => void) | null>(null);
   useEffect(() => {
     const on = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape' || e.defaultPrevented || target || viewer || boxDragging.current || stackOpen.current) return;
+      if (e.key !== 'Escape' || e.defaultPrevented || target || viewer || readingRef.current || boxDragging.current || stackOpen.current) return;
       // A board the host covers (inert, such as the Inbox's review open over it) leaves Esc to what covers it.
       if (rootRef.current?.closest('[inert]')) return;
       // An open menu (a host's fileAction) closes alone. By what is open, not by the key's target: focus may not be in it yet.
@@ -593,7 +604,7 @@ export function ShapeSurface({ host, id, onClose, onCode, CodeGuide, CodeHoverCa
     const v = versionRef.current;
     if (!v || finished) return;
     const temp = `pending-${Date.now()}`;
-    setStreams((s) => ({ ...s, [temp]: { prompt: input.text, label, view: input.view ?? null, part: input.part ?? null, box: boxKey(input.view ?? null, input.box), text: '', at: Date.now() } }));
+    setStreams((s) => ({ ...s, [temp]: { prompt: input.text, label, view: input.view ?? null, part: input.part ?? null, box: boxKey(input.view ?? null, input.box), boxAt: input.box ?? null, text: '', at: Date.now() } }));
     let failed = false;
     let asked = temp;
     let answered = false;
@@ -614,7 +625,10 @@ export function ShapeSurface({ host, id, onClose, onCode, CodeGuide, CodeHoverCa
           return rest;
         });
       }
-      if (answered && !talkShown.current.has(temp) && !talkShown.current.has(asked)) setAnswerReady(true);
+      if (answered && !talkShown.current.has(temp) && !talkShown.current.has(asked)) {
+        setAnswerReady(true);
+        setNewAnswers((s) => new Set(s).add(asked));
+      }
     }
   }, [host, id, finished, upsertNote]);
 
@@ -743,13 +757,11 @@ export function ShapeSurface({ host, id, onClose, onCode, CodeGuide, CodeHoverCa
       : undefined;
 
   // ── pointing at the board ──
-  // The parts something was asked or changed on (`${view}\0${mark}`): on a finished board only these open, to read.
-  const talkedParts = useRef<Set<string>>(new Set());
   const pickMark = useCallback((el: HTMLElement, v: ShapeViewId, text?: string) => {
-    if (finished && !talkedParts.current.has(`${v}\u0000${el.getAttribute('data-mark')}`)) return;
+    bubbleOpener.current = null;
     setTarget({ el, view: v, id: el.getAttribute('data-mark'), text: (text ?? partWords(el)).replace(/\s+/g, ' ').trim() });
     clearHover();
-  }, [clearHover, finished]);
+  }, [clearHover]);
   // Only when the part under the pointer changes: not a new render per pointer move.
   const hoverMark = useCallback((el: HTMLElement | null) => {
     // With the box (a Mac screenshot's cross) nothing lights under the pointer: a click still marks the part.
@@ -785,6 +797,13 @@ export function ShapeSurface({ host, id, onClose, onCode, CodeGuide, CodeHoverCa
   // ── global comments: the whole board, or the whole Code view ──
   // The words, globe and look of Plannotator's other "Global comment" buttons.
   const [general, setGeneral] = useState<{ el: HTMLElement; view: ShapeViewId | null; retry?: Target['retry'] } | null>(null);
+  /** A comment bubble's talk, open to read (a box's; a part's once the board is finished). */
+  const [reading, setReading] = useState<{ el: HTMLElement; label: string; on: { view: string | null; part: string | null; box: string | null } } | null>(null);
+  readingRef.current = !!reading || !!general;
+  // One box at a time: a comment box or Global comment takes the place of a bubble's.
+  useEffect(() => {
+    if (target || general) setReading(null);
+  }, [target, general]);
   // An Ask keeps its box open on what it asked about, its words cleared (a new box, `talkKey`): the answer comes in above.
   const askedOn = useRef<Target | null>(null);
   const askedGeneral = useRef<typeof general>(null);
@@ -793,6 +812,12 @@ export function ShapeSurface({ host, id, onClose, onCode, CodeGuide, CodeHoverCa
   useEffect(() => {
     if (general) setAnswerReady(false);
   }, [general]);
+  // A box that shows an answer has said it: that answer's bubble loses its dot.
+  useEffect(() => {
+    const shown = talkShown.current;
+    if (!shown.size) return;
+    setNewAnswers((s) => ([...s].some((q) => shown.has(q)) ? new Set([...s].filter((q) => !shown.has(q))) : s));
+  });
   const generalButton = (forView: ShapeViewId | null) => (
     <button
       type="button"
@@ -896,10 +921,10 @@ export function ShapeSurface({ host, id, onClose, onCode, CodeGuide, CodeHoverCa
         const where = q.view ? tabLabel(q.view) : 'The whole board';
         const label = q.part || (boxSelect && q.box) ? (q.quote ? `${where} · “${q.quote.slice(0, 46)}”` : where) : q.view ? `${where} · general` : where;
         const status = a ? undefined : shapeNoteWaits(q) && session.state === 'gone' ? 'Waits for the agent' : q.delivered ? `${agent} has it` : `Sent to ${agent}`;
-        return { id: q.id, label, words: q.text, change: q.kind === 'change', answer: a?.text ?? '', streaming: false, ...(status ? { status } : {}), view: q.view ?? null, part: q.part ?? null, box: boxKey(q.view ?? null, q.box) };
+        return { id: q.id, label, words: q.text, change: q.kind === 'change', answer: a?.text ?? '', streaming: false, ...(status ? { status } : {}), view: q.view ?? null, part: q.part ?? null, box: boxKey(q.view ?? null, q.box), boxAt: q.box ?? null };
       });
     for (const [tid, st] of Object.entries(streams)) {
-      out.push({ id: tid, label: st.label, words: st.prompt, change: false, answer: st.text, streaming: !st.failed, ...(st.failed ? { error: SHAPE_ASK_NOT_SENT } : {}), view: st.view, part: st.part, box: st.box });
+      out.push({ id: tid, label: st.label, words: st.prompt, change: false, answer: st.text, streaming: !st.failed, ...(st.failed ? { error: SHAPE_ASK_NOT_SENT } : {}), view: st.view, part: st.part, box: st.box, boxAt: st.boxAt });
     }
     return out;
   }, [notes, streams, session.state, agent, boxSelect]);
@@ -912,9 +937,50 @@ export function ShapeSurface({ host, id, onClose, onCode, CodeGuide, CodeHoverCa
   };
   /** A part's or a box's own (`talkOn`'s place). */
   const placeOf = (t: Target) => ({ view: t.view, part: t.id, box: t.box ? boxKey(t.box.view, t.box.box) : null });
-  // A finished board takes no new words, but what was asked and changed stays readable: Global comment opens it all,
-  // and a part with questions opens its own, read-only (`ShapeTalkBox`).
-  talkedParts.current = new Set(talk.filter((e) => e.part !== null).map((e) => `${e.view}\u0000${e.part}`));
+
+  // ── comment bubbles (talkBubbles.ts): one at the corner of each part or box something was asked or changed on ──
+  // A part (one mark) has its bubble on the part, and opens the part's comment box (read-only once finished). A box over
+  // no single part has it at the box's corner, and opens its talk to read. A finished board's parts keep their own click
+  // (their code): the bubble is the way in.
+  const bubbles = useMemo(() => {
+    const by = new Map<string, { bubble: TalkBubble; view: string | null; on: { view: string | null; part: string | null; box: string | null } }>();
+    for (const e of talk) {
+      const single = e.part !== null && !e.part.includes(',');
+      const key = single ? `p:${e.view}\u0000${e.part}` : e.box ? `b:${e.box}` : null;
+      if (!key) continue;
+      const had = by.get(key);
+      const dot = newAnswers.has(e.id);
+      if (had) {
+        if (dot) had.bubble = { ...had.bubble, dot: true };
+        continue;
+      }
+      by.set(key, { bubble: { key, part: single ? e.part : null, box: single ? null : e.boxAt ?? null, label: e.label, dot }, view: e.view, on: { view: e.view, part: e.part, box: e.box } });
+    }
+    return [...by.values()];
+  }, [talk, newAnswers]);
+  const bubblesOn = useMemo(() => {
+    const of = (v: ShapeViewId, onMore: boolean) => bubbles.filter((b) => b.view === v && (!b.bubble.box || !!b.bubble.box.more === onMore)).map((b) => b.bubble);
+    const main = { picture: of('picture', false), how: of('how', false) };
+    const onMore = of('picture', true);
+    return (v: 'picture' | 'how', showMore: boolean) => (showMore ? onMore : main[v]);
+  }, [bubbles]);
+  /** The bubble a part's comment box was opened from, to give the focus back to when it closes. */
+  const bubbleOpener = useRef<HTMLElement | null>(null);
+  const openBubble = (pressed: TalkBubble, el: HTMLElement) => {
+    const found = bubbles.find((b) => b.bubble.key === pressed.key);
+    if (!found) return;
+    setGeneral(null);
+    const scope = el.parentElement;
+    const mark = pressed.part !== null ? scope?.querySelector<HTMLElement>(`[data-mark="${CSS.escape(pressed.part)}"]`) : null;
+    if (mark && !finished && found.view && (found.view === 'picture' || found.view === 'how')) {
+      setReading(null);
+      pickMark(mark, found.view);
+      bubbleOpener.current = el;
+      return;
+    }
+    setTarget(null);
+    setReading({ el, label: pressed.label, on: found.on });
+  };
 
   const waiting = notes.filter(shapeNoteWaits).length;
   const bringUpToDate = async () => {
@@ -965,11 +1031,13 @@ export function ShapeSurface({ host, id, onClose, onCode, CodeGuide, CodeHoverCa
           phase={phase}
           skip={skip}
           reduce={reduce}
-          pinpoint={((annotating && inputMethod === 'pinpoint') || (finished && talkedParts.current.size > 0)) && phase !== 'leaving' && !target}
+          pinpoint={annotating && inputMethod === 'pinpoint' && phase !== 'leaving' && !target}
           boxable={boxing && phase !== 'leaving'}
           boxes={phase === 'leaving' || !boxSelect ? undefined : boxesOn(v, v === 'picture' && showMore)}
           select={annotating && inputMethod === 'drag'}
           marks={vm}
+          talk={phase === 'leaving' ? undefined : bubblesOn(v, v === 'picture' && showMore)}
+          onTalk={openBubble}
           refs={refs}
           refHover={refHover}
           refFlash={refFlash}
@@ -1223,9 +1291,9 @@ export function ShapeSurface({ host, id, onClose, onCode, CodeGuide, CodeHoverCa
 
           {hoverRect && <div className="shp-pin-hover" style={{ left: hoverRect.left - 4, top: hoverRect.top - 3, width: hoverRect.width + 8, height: hoverRect.height + 6 }} />}
 
-          {target && finished && (
-            <ShapeTalkBox anchor={target.el} within={rootEl} label={quoteLabel(target)} onClose={() => setTarget(null)}>
-              {talkFor(placeOf(target))}
+          {reading && !target && !general && (
+            <ShapeTalkBox anchor={reading.el} within={rootEl} label={reading.label} onClose={() => setReading(null)}>
+              {talkFor(reading.on)}
             </ShapeTalkBox>
           )}
           {general && finished && (
@@ -1291,6 +1359,11 @@ export function ShapeSurface({ host, id, onClose, onCode, CodeGuide, CodeHoverCa
                 askedOn.current = null;
                 if (again) setTalkKey((k) => k + 1);
                 setTarget(again ? { ...again, retry: undefined } : null);
+                // Opened from a comment bubble: the focus goes back to it.
+                const opener = bubbleOpener.current;
+                bubbleOpener.current = null;
+                if (!again && opener?.isConnected) opener.focus({ preventScroll: true });
+                else if (again) bubbleOpener.current = opener;
               }}
             />
           )}

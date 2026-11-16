@@ -241,7 +241,7 @@ export async function captureBox(scope: HTMLElement, box: Rect, read?: ShapeRead
     const paper = cs.getPropertyValue('--shp-paper') || cs.getPropertyValue('--background');
 
     const clone = scope.cloneNode(true) as HTMLElement;
-    for (const el of clone.querySelectorAll('[data-shp-box]')) el.remove();
+    for (const el of clone.querySelectorAll('[data-shp-box], [data-shp-talk-bubble]')) el.remove();
     clone.classList.remove('entering');
     clone.classList.add('skip');
     // What a person picked on the drawing (a `pick` radio) is state, not an attribute: the copy needs it spelled out.

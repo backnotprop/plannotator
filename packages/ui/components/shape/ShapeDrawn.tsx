@@ -30,6 +30,7 @@ import { parseCssColor } from '../../utils/cssColor';
 import { readThemeTokenValues } from '../../utils/themeTokens';
 import { SHAPE_COLOR_NAMES, shapeContrastFixes, shapeLogoFill, type ShapeColors } from './shapeContrast';
 import { syncKeptBoxes, type KeptBox } from './boxSelect';
+import { syncTalkBubbles, TALK_BUBBLE_CSS, type TalkBubble } from './talkBubbles';
 import { SHAPE_SHARP_COLOR_NAMES, shapeSharpFixes, type ShapeSharpColors } from './sharpContrast';
 import { holdDarkBoard, releaseDarkBoard } from './darkContrast';
 import { ScenePlayers } from './scene/ScenePlayers';
@@ -458,6 +459,10 @@ export interface ShapeDrawnProps {
   boxable?: boolean;
   /** Kept boxes with their comments, on this view. Board only. */
   boxes?: readonly KeptBox[];
+  /** Comment bubbles on the parts and boxes something was asked or changed on, on this view (talkBubbles.ts). Board only. */
+  talk?: readonly TalkBubble[];
+  /** A comment bubble was pressed. */
+  onTalk?: (bubble: TalkBubble, el: HTMLElement) => void;
   onHoverMark?: (el: HTMLElement | null) => void;
   /** A marked part was chosen; `text` is the selected words in Select mode. */
   onPickMark?: (el: HTMLElement, text?: string) => void;
@@ -533,7 +538,7 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
     const root = rootRef.current ?? host.attachShadow({ mode: 'open' });
     rootRef.current = root;
     const safeCss = shapeCssProblems(css).length ? '' : css;
-    root.innerHTML = `<style>${SHAPE_FRAME_CSS}\n${safeCss}</style><div class="board${scaled ? ' canvas' : ''}${handlers.current.onRefPeek ? ' peek' : ''}" data-shp-style="sharp">${resolveFiles(sanitizeShapeHtml(html), handlers.current.resolveSrc, !!handlers.current.darkContrast)}</div>`;
+    root.innerHTML = `<style>${SHAPE_FRAME_CSS}\n${TALK_BUBBLE_CSS}\n${safeCss}</style><div class="board${scaled ? ' canvas' : ''}${handlers.current.onRefPeek ? ' peek' : ''}" data-shp-style="sharp">${resolveFiles(sanitizeShapeHtml(html), handlers.current.resolveSrc, !!handlers.current.darkContrast)}</div>`;
     const board = root.querySelector<HTMLElement>('.board')!;
     // Steps: the agent's numbers, in order, become 0, 1, 2… however sparse.
     const steps = [...board.querySelectorAll<HTMLElement | SVGElement>('[data-step]')];
@@ -687,6 +692,19 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
     const board = rootRef.current?.querySelector<HTMLElement>('.board');
     if (board && boxes) syncKeptBoxes(board, boxes.filter((b) => !!b.box.tall === useTall), scaled ? k : 1);
   }, [boxes, useTall, scaled, k, contentKey]);
+
+  // Comment bubbles: inside the drawing too, placed again when it lays out again (a reflowing page, a new scale).
+  const talk = props.talk;
+  useLayoutEffect(() => {
+    const board = rootRef.current?.querySelector<HTMLElement>('.board');
+    if (!board || !talk) return;
+    const place = () => syncTalkBubbles(board, talk.filter((b) => !b.box || !!b.box.tall === useTall), (b, el) => handlers.current.onTalk?.(b, el));
+    place();
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => place());
+    ro.observe(board);
+    return () => ro.disconnect();
+  }, [talk, useTall, scaled, k, contentKey, phase]);
 
   // Marks, and a host's tags on them.
   const stale = props.stale;

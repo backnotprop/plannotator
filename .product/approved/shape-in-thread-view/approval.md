@@ -14,3 +14,10 @@
 - **Out of scope here:**
   - How Shape is hidden (`inboxShape`, `heldSwitch`, `PLANNOTATOR_INBOX_PREVIEW=1`): unchanged.
   - Handing a board to the window's existing Ask AI ("It should be integrated into the existing Ask AI"): pending the owner's answer; nothing built for it.
+
+## Comment bubble on a part (2026-11-16)
+- **Given:** 2026-11-16 by the owner, answering the coordinating agent's question (PR #3556). The question offered "a speech-bubble mark at the corner of a part you commented on, different from the numbered References bubbles; click it to open that part's questions and answers; it shows a dot when an answer is new."
+- **Owner's words:** "Yes, a small comment bubble on the part". Their note: "For reference, this is very similar to how Plannotator works when annotating HTML."
+- **Reading:**
+  - A part that something was asked or changed on has a small speech bubble at its corner. It has the look of the HTML annotation's placed marker (`html-viewer/bridge-script.ts`). A dragged box over no single part has its bubble at the box's corner.
+  - The bubble opens that part's questions and answers: its comment box, or a box to read on a finished board. On a finished board a plain click on a part opens its code, as before. The bubble shows a dot while an answer in it is new; opening a box that shows the answer clears the dot.

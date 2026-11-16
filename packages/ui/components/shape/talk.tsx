@@ -30,6 +30,8 @@ export interface ShapeTalkEntry {
   part: string | null;
   /** A dragged box's place (`boxKey`), so a box over no part shows its own; null: none. */
   box: string | null;
+  /** The dragged box itself (its comment bubble sits at its corner). */
+  boxAt?: ShapeNoteBox | null;
 }
 
 /** Where a dragged box sits on its view: the same box asked from again has the same key. */
@@ -81,9 +83,10 @@ export function ShapeTalk({ entries, who, whoAlways = false, onCode }: { entries
 }
 
 /**
- * A finished board's box, to read what was asked and changed (the board takes no new words): the talk with its
- * place, and a close. It stays inside the board (`within`), by the part or button it was opened from, as the comment
- * box does; Esc, the × or a press outside closes it.
+ * A box to read what was asked and changed, with no words to type (a finished board; a comment bubble on a box): the
+ * talk with its place, and a close. It stays inside the board (`within`), by what opened it, as the comment box does.
+ * Esc or the × closes it and gives the focus back to what opened it; a press outside closes it where the press went.
+ * One Esc closes one thing: an Esc something else already used (the board's References panel) leaves it open.
  */
 export function ShapeTalkBox({ anchor, within, label, onClose, children }: { anchor: HTMLElement; within: HTMLElement | null; label: string; onClose: () => void; children: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -91,6 +94,11 @@ export function ShapeTalkBox({ anchor, within, label, onClose, children }: { anc
   const [at, setAt] = useState<ReturnType<typeof sheetWithin> | null>(null);
   const close = useRef(onClose);
   close.current = onClose;
+  const closeBack = () => {
+    close.current();
+    // What opened it, if it is still there and takes the focus (a part, a bubble, Global comment).
+    if (anchor.isConnected) anchor.focus({ preventScroll: true });
+  };
   useLayoutEffect(() => {
     const place = () => {
       const bounds = boundsWithin(window_, within);
@@ -104,10 +112,10 @@ export function ShapeTalkBox({ anchor, within, label, onClose, children }: { anc
   useEffect(() => {
     ref.current?.focus({ preventScroll: true });
     const key = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape') return;
+      if (e.key !== 'Escape' || e.defaultPrevented) return;
       e.preventDefault();
       e.stopPropagation();
-      close.current();
+      closeBack();
     };
     const away = (e: PointerEvent) => {
       if (!e.composedPath().some((t) => t === ref.current || t === anchor)) close.current();
@@ -132,7 +140,7 @@ export function ShapeTalkBox({ anchor, within, label, onClose, children }: { anc
     >
       <div className="shp-talkbox-head">
         <span>{label}</span>
-        <button type="button" className="shp-icon-btn" onClick={onClose} aria-label="Close">×</button>
+        <button type="button" className="shp-icon-btn" onClick={closeBack} aria-label="Close">×</button>
       </div>
       {children}
     </div>,

@@ -11,8 +11,8 @@
 
 .shp-root {
   --shp-paper: color-mix(in oklab, var(--background) 92%, var(--muted));
-  /* The board's own size (ShapeSurface's usePhone sets them), the window's until measured: a board in a pane lays out by the pane. */
-  --pw: clamp(360px, calc(var(--shp-w, 100vw) * .31), 440px);
+  /* The board's own size and its References panel's width (--shp-w, --shp-h, --pw) are set on this root by ShapeSurface's
+     usePhone, before the first paint: a board in a pane lays out by the pane. */
   position: relative;
   height: 100%;
   min-height: 0;
