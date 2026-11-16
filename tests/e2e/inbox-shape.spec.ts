@@ -270,9 +270,15 @@ test('phone: the Pebble in the thread header, the board in the thread under its 
   await expect(page.locator(`[data-shape-layer="${w.boards.snooze}"]`)).toBeVisible();
   const pane = page.locator(`section.ib-pane[data-thread-id="${w.threads.snooze}"]`);
   await expect(pane.locator(':scope > [data-shape-layer]')).toHaveCount(1);
-  await expect(pane.locator(':scope > .ib-phead [data-phone-back]')).toBeVisible();
+  // The board is a screen of its own, as Artifacts is on a phone: the header's way back is to the thread.
+  const back = pane.locator(':scope > .ib-phead [data-phone-back]');
+  await expect(back).toHaveText(/Thread/);
   await page.waitForTimeout(2500);
   await shot(page, 'phone-board-in-thread');
+  await back.click();
+  await expect(page.locator('[data-shape-layer]')).toHaveCount(0);
+  await expect(pane.locator(':scope > .ib-pbody')).toBeVisible();
+  await expect(back).not.toHaveText(/Thread/);
   await page.goto(`${w.url}#shapes`);
   await expect(page.locator('[data-shape-page] .shp-gcard')).toHaveCount(4);
   await page.waitForTimeout(800);

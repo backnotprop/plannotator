@@ -13,7 +13,12 @@
  *  - the focus: the Pebble's press takes it to the board's title, and a close from the board (its ×) gives it back to
  *    the Pebble, as leaving the Artifacts view gives it to its button;
  *  - the board losing a control in a 400 px pane (the narrowest pane a thread gets): its views, Comment, References,
- *    Chat, Global comment and its ×.
+ *    Chat, Global comment and its ×;
+ *  - the thread's keys acting under the board (R opening the hidden reply box, O a file beside the board);
+ *  - the thread's scroll lost when the board closes (WebKit forgets a hidden scroller's, so the pane puts it back);
+ *  - with Shape off, an old address naming a board keeping the Artifacts view shut, with no board in its place;
+ *  - a one-message thread with no name losing its subject from the bar while the board hides its heading;
+ *  - on a phone, the header's way back leaving the thread instead of the board (it reads ‹ Thread, as Artifacts' does).
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -144,7 +149,7 @@ interface Drawn {
 }
 
 /** The window's side of the slot, as App.tsx builds it: `board` draws the real ShapeLayer in the thread's pane. */
-function mount(options: { phone?: boolean; stacked?: boolean; full?: boolean; width?: number; route?: Partial<Route> } = {}): Drawn & { id: string } {
+function mount(options: { phone?: boolean; stacked?: boolean; full?: boolean; width?: number; route?: Partial<Route>; shapeOff?: boolean; thread?: InboxThread } = {}): Drawn & { id: string } {
   windowIs(options.phone ?? false);
   // happy-dom lays nothing out: the board reads the pane's width from here (its phone layout is ≤ 640 px).
   stub(HTMLElement.prototype, 'clientWidth', { get: () => options.width ?? 1000 });
@@ -171,6 +176,8 @@ function mount(options: { phone?: boolean; stacked?: boolean; full?: boolean; wi
   const summary: InboxShapeSummary = { id, title: 'Two ways a refund arrives', project: { name: 'billing-svc', root: '/work/billing-svc' }, thread: T, state: 'active', updated: new Date().toISOString(), latest: 1, seen: 1, changed: false, drawing: false, waiting: 0, session: null };
   const routes: Drawn['routes'] = [];
   const queries = new QueryClient();
+  const thread = options.thread ?? THREAD;
+  const on = !options.shapeOff;
   const draw = (route: Route) => {
     const go = (next: Route) => routes.push({ kind: 'go', route: next });
     const close = (next: Route) => routes.push({ kind: 'close', route: next });
@@ -180,16 +187,14 @@ function mount(options: { phone?: boolean; stacked?: boolean; full?: boolean; wi
       outbox: new Map(), dismissOutbox: noop, phone: options.phone ?? false, stack: { thread: options.stacked ?? false, file: false }, full: options.full ?? false, fromCard: null,
       fileOpen: false, staleNotice: null, notifyAgainIn: null, notifications: {} as ThreadSlotHost['notifications'], soundOn: false, settings: null,
       saveTour: noop, go, leave: noop, close, openCompose: noop, pullReviewOf: null, reviewView: null, pullsShown: false,
-      stepsBus: createStepsBus(), boardEnabled: null, boardsOn: true, cards: null, backToCard: noop, openThreadRow: null, snoozeBack: null,
+      stepsBus: createStepsBus(), boardEnabled: null, boardsOn: on, cards: null, backToCard: noop, openThreadRow: null, snoozeBack: null,
       refreshThread: none, refreshList: none, shown: null, markRead: none, markUnread: none, acknowledge: none,
       markAction: none, archive: none, pinnedIds: new Set(), pinsOn: false, machines: machinesModel([]), setPin: none, setPriority: noop,
       snoozeOn: false, snooze: noop, unsnooze: noop, setMachineUpdateOpen: noop, threadAgentContext: null, replyFor: null, setReplyFor: noop,
       draftSignals: createKeyedSignal(), filesSignals: createKeyedSignal(), shapes: { byThread: new Map([[T, summary]]) } as unknown as ThreadSlotHost['shapes'],
-      board: route.shape
-        ? (inThread: boolean, sidebarToggle: boolean) => (
-            <ShapeLayer host={shapeHost} id={route.shape!} thread={THREAD} inThread={inThread} sidebarToggle={sidebarToggle} onClose={() => close({ ...route, shape: null })} />
-          )
-        : null,
+      // As App.tsx: always a function on the Inbox page; nothing drawn with no board open, or with Shape off.
+      board: (inThread: boolean, sidebarToggle: boolean) =>
+        on && route.shape ? <ShapeLayer host={shapeHost} id={route.shape} thread={thread} inThread={inThread} sidebarToggle={sidebarToggle} onClose={() => close({ ...route, shape: null })} /> : null,
       ask: { side: undefined, sideWords: undefined }, askReply: null, setAskReply: noop, shapeReply: null, setShapeReply: noop,
       patchQuestions: noop, onPickSaves: noop, afterWrite: async () => {}, rowPatches: new Map(), decideInThread: () => null,
       searchLanding: { current: null }, decideLanding: { current: null }, landed: noop,
@@ -201,7 +206,7 @@ function mount(options: { phone?: boolean; stacked?: boolean; full?: boolean; wi
       <QueryClientProvider client={queries}>
         <SidebarProvider open onOpenChange={noop}>
           <main className="ib-main">
-            <ThreadSlot paneId="main" threadId={T} active held={{ serverSession: 's', cursor: 0, thread: THREAD }} host={host} />
+            <ThreadSlot paneId="main" threadId={T} active held={{ serverSession: 's', cursor: 0, thread }} host={host} />
           </main>
         </SidebarProvider>
       </QueryClientProvider>
@@ -350,4 +355,100 @@ test.skipIf(!hasDom)('a 400 px pane: the board takes its narrow layout and keeps
   // Chat opens the panel (a sheet here) with the board's tabs.
   await act(async () => dock.querySelector<HTMLButtonElement>('button[title="Chat"]')!.click());
   expect(board.querySelector('.shp-sidep.sheet.open')).not.toBeNull();
+});
+
+const press = (target: Element, key: 'r' | 'o') =>
+  act(() => {
+    target.dispatchEvent(new KeyboardEvent('keydown', { key, code: key === 'r' ? 'KeyR' : 'KeyO', bubbles: true, cancelable: true }));
+  });
+const replyBox = () => pane().querySelector('.ib-pfoot textarea');
+
+/** The address as the test found it, put back after: O writes a file into it. */
+function keepAddress() {
+  const was = window.location.href;
+  restore.push(() => window.history.replaceState(null, '', was));
+}
+
+test.skipIf(!hasDom)('the thread’s keys never act under the board: R and O from the board do nothing (and do, with it closed)', async () => {
+  keepAddress();
+  const { id, draw } = mount({});
+  await ready();
+  draw({ page: 'inbox', project: null, thread: T, shape: id });
+  await boardDrawn();
+  const title = layer()!.querySelector<HTMLElement>('.shp-head h1')!;
+  title.focus();
+  const address = window.location.hash;
+  await press(title, 'r');
+  await press(title, 'o');
+  await act(() => new Promise((r) => setTimeout(r, 30)));
+  expect(replyBox()).toBeNull();
+  expect(window.location.hash).toBe(address);
+  // The same keys with the board closed: R opens the reply box, O the newest file.
+  draw({ page: 'inbox', project: null, thread: T, shape: null });
+  const subject = pane().querySelector<HTMLElement>('.ib-subject')!;
+  subject.focus();
+  await press(subject, 'r');
+  await until(() => replyBox() !== null, 'the reply box');
+  await press(document.body, 'o');
+  await until(() => window.location.hash.includes('file='), 'the newest file in the address');
+});
+
+test.skipIf(!hasDom)('the thread’s scroll is back where it was once the board closes', async () => {
+  const { id, draw } = mount({});
+  await ready();
+  const body = pane().querySelector<HTMLElement>(':scope > .ib-pbody')!;
+  body.scrollTop = 300;
+  body.dispatchEvent(new Event('scroll'));
+  draw({ page: 'inbox', project: null, thread: T, shape: id });
+  await boardDrawn();
+  // Hidden, WebKit forgets it.
+  body.scrollTop = 0;
+  draw({ page: 'inbox', project: null, thread: T, shape: null });
+  expect(body.hidden).toBe(false);
+  expect(body.scrollTop).toBe(300);
+});
+
+test.skipIf(!hasDom)('Shape off: an old address naming a board and the Artifacts view opens the Artifacts view, no board', async () => {
+  const { id } = mount({ shapeOff: true, route: { artifacts: true, shape: 'shp_old' } });
+  expect(id).not.toBe('shp_old');
+  await until(() => !!pane()?.querySelector('[data-artifacts-button]'), 'the Artifacts button');
+  expect(pane().querySelector('[data-artifacts-button]')!.getAttribute('aria-pressed')).toBe('true');
+  expect(pane().querySelector('.ib-artbody')).not.toBeNull();
+  expect(layer()).toBeNull();
+  expect(pane().querySelector('[data-shape-pebble]')).toBeNull();
+});
+
+test.skipIf(!hasDom)('a one-message thread with no name: its subject is in the bar while the board hides its heading', async () => {
+  const one: InboxThread = { ...THREAD, messages: [THREAD.messages[0]!] };
+  const { id, draw } = mount({ thread: one });
+  await ready();
+  // The heading shows in the messages: the bar has room, no subject.
+  expect(head().querySelector('[data-header-subject]')).toBeNull();
+  draw({ page: 'inbox', project: null, thread: T, shape: id });
+  await boardDrawn();
+  const subject = head().querySelector<HTMLElement>('[data-header-subject]');
+  expect(subject?.textContent).toContain('Refund events: webhook or polling?');
+});
+
+test.skipIf(!hasDom)('a phone: with the board open the header’s way back reads ‹ Thread and closes the board, not the thread', async () => {
+  const { id, routes, draw } = mount({ phone: true });
+  await ready();
+  expect(head().querySelector('[data-phone-back]')!.textContent).toContain('Inbox');
+  draw({ page: 'inbox', project: null, thread: T, shape: id });
+  await boardDrawn();
+  const back = head().querySelector<HTMLButtonElement>('[data-phone-back]')!;
+  expect(back.textContent).toContain('Thread');
+  await act(async () => back.click());
+  expect(routes.at(-1)).toEqual({ kind: 'close', route: { page: 'inbox', project: null, thread: T, shape: null } });
+});
+
+test.skipIf(!hasDom)('the board in its thread counts as open over the page for the idle clock, and only while drawn', async () => {
+  const { id, draw } = mount({});
+  await ready();
+  expect(document.querySelector('[data-shape-open]')).toBeNull();
+  draw({ page: 'inbox', project: null, thread: T, shape: id });
+  await boardDrawn();
+  expect(document.querySelector('[data-shape-open]')).toBe(layer());
+  draw({ page: 'inbox', project: null, thread: T, shape: null });
+  expect(document.querySelector('[data-shape-open]')).toBeNull();
 });

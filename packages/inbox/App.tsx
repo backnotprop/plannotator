@@ -5578,7 +5578,7 @@ function Inbox() {
   } else if (route.page === 'reviews') {
     main = <div className="ib-listcol" aria-busy="true" />;
   } else if (route.page === 'shapes') {
-    // The grid (the sidebar's Shape row). A board with a thread opens over its thread; one with none, over the grid.
+    // The grid (the sidebar's Shape row). A board with a thread opens in its thread; one with none, over the grid.
     main = (
       <ShapeGridPage
         shapes={shapeOn ? shapes.shapes : null}
@@ -6003,7 +6003,7 @@ function Inbox() {
           )
         }
       >
-        <main className="ib-main" data-shape-open={shapeLayerId ? '' : undefined}>
+        <main className="ib-main" data-shape-open={route.page === 'shapes' && shapeLayerId && !reviewPaneOpen ? '' : undefined}>
           {main}
           {route.page === 'shapes' && boardLayer(false, true)}
           {!reviewPaneOpen && <ThreadShowMeBox threadShowMe={threadShowMe} />}

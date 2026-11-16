@@ -73,10 +73,9 @@ export function ShapePebbleButton({ shape, open, onToggle }: { shape: InboxShape
  * toggle, is beside the thread.
  *
  * `onOpenReview`: a place in code on the board (a drawn part's `data-code`) opens the thread's review there; with Code
- * review on the board rides along as its corner card (ReviewPane). `covered`: a review (the guide pane) is open over
- * it. The board is inert meanwhile, so Esc and Tab go to the review, not to the board's panel, bubble or Show more
- * under it. `place` and `onNavigate`: where it starts (the place a link left it, back from the review) and where the
- * person goes on it. `back` and `headSide`: the way back to the board it came from, at the title's left, and the
+ * review on the board rides along as its corner card (ReviewPane), and the review open draws its own board, never this
+ * one. `place` and `onNavigate`: where it starts (the place a link left it, back from the review) and where the person
+ * goes on it. `back` and `headSide`: the way back to the board it came from, at the title's left, and the
  * thread's other boards at its right (Show me from a board, `ThreadShapeLayer`).
  */
 export function ShapeLayer({
@@ -85,7 +84,6 @@ export function ShapeLayer({
   onClose,
   thread,
   onOpenReview,
-  covered = false,
   onAddToReply,
   place = null,
   onNavigate,
@@ -99,7 +97,6 @@ export function ShapeLayer({
   onClose: () => void;
   thread: InboxThread | null;
   onOpenReview?: (messageId: string, at: ShapeReviewAt | null) => void;
-  covered?: boolean;
   onAddToReply?: ShapeBoardProps['onAddToReply'];
   place?: ShapeBoardPlace | null;
   onNavigate?: ShapeBoardProps['onNavigate'];
@@ -127,7 +124,6 @@ export function ShapeLayer({
       onClose={onClose}
       thread={thread}
       review={review}
-      covered={covered}
       onAddToReply={onAddToReply}
       place={place}
       onNavigate={onNavigate}
@@ -156,7 +152,6 @@ export function ShapeBoardLayer({
   hidden,
   onCode,
   review = null,
-  covered = false,
   onAddToReply,
   headStart,
   headSide,
@@ -172,7 +167,6 @@ export function ShapeBoardLayer({
   hidden?: boolean;
   onCode?: ShapeBoardProps['onCode'];
   review?: ShapeBoardProps['review'];
-  covered?: boolean;
   onAddToReply?: ShapeBoardProps['onAddToReply'];
   headStart?: ReactNode;
   headSide?: ReactNode;
@@ -199,9 +193,10 @@ export function ShapeBoardLayer({
       className={`ib-shape-layer pn-shape ${inThread ? 'ib-shape-inthread' : 'ib-wlayer'}`}
       data-shape-layer={id}
       data-shape-in-thread={inThread ? '' : undefined}
+      // Open over the page, for the idle clock (idleClock.ts); over the grid `main` says so. Only once it is drawn.
+      data-shape-open={inThread ? '' : undefined}
       aria-label="Shape"
       hidden={hidden}
-      inert={covered || undefined}
     >
       <PanePart key={attempt} loading={<div className="ib-shape-loading" aria-busy="true" />} onFailed={failed}>
         <ShapeBoard

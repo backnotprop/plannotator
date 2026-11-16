@@ -65,8 +65,11 @@ export function ThreadSlot({ paneId, threadId, active, held: given, host }: Thre
     document.querySelector<HTMLElement>(`section.ib-pane[data-thread-id="${CSS.escape(thread.thread_id)}"] .ib-subject`)?.focus();
   }, [thread, threadId]);
   const onClose = fromCard ? host.backToCard : () => close({ ...route, thread: null, file: null });
-  // The board named in the address, in this pane while it shows that thread (the window's one board).
-  const boardHere = !!route.shape && !!host.board && !!thread && thread.thread_id === route.thread;
+  // The board named in the address, in this pane while it shows that thread (the window's one board). Only one the
+  // window draws takes the messages' place (none with Shape off, or while a review draws its own).
+  const boardNode = route.shape && host.board && thread && thread.thread_id === route.thread ? host.board(true, stack.thread) || null : null;
+  // On a phone the board is a screen of its own, as the Artifacts view is: its way back is to the thread.
+  const closeBoard = () => close({ ...routeRef.current, shape: null });
   return (
     <PaneScopeContext.Provider value={scope}>
       {/* Beside the list, the thread's place says it is opening (or why not) until its read lands; a phone
@@ -194,7 +197,7 @@ export function ThreadSlot({ paneId, threadId, active, held: given, host }: Thre
             };
             return <ShapePebbleButton shape={board} open={open} onToggle={() => (open ? close({ ...route, shape: null }) : show())} />;
           })()}
-          board={boardHere ? host.board!(true, stack.thread) : null}
+          board={boardNode}
           onSide={host.ask.side}
           onSideWords={host.ask.sideWords}
           replyWords={host.askReply?.threadId === thread.thread_id ? host.askReply.words : null}
@@ -213,7 +216,7 @@ export function ThreadSlot({ paneId, threadId, active, held: given, host }: Thre
             void host.refreshList(false);
             return true;
           }}
-          onClose={onClose}
+          onClose={phone && boardNode ? closeBoard : onClose}
           file={route.file ?? null}
           namedFile={route.ref ?? null}
           onOpenNamedFile={(ref) => (ref ? go({ ...routeRef.current, file: null, ref }) : close({ ...routeRef.current, ref: null }))}
@@ -221,9 +224,9 @@ export function ThreadSlot({ paneId, threadId, active, held: given, host }: Thre
           fullFromSide={fullFromSide(window.history.state)}
           fullExitFile={fullExitFile(window.history.state)}
           onOpenGuide={(messageId, at) => go({ ...route, guide: messageId, ...(at ? { guideAt: at } : {}) })}
-          artifacts={route.artifacts === true && !boardHere}
+          artifacts={route.artifacts === true && !boardNode}
           onArtifacts={(open) => (open ? go({ ...routeRef.current, artifacts: true, links: false, msg: null, shape: null }) : close({ ...routeRef.current, artifacts: false, links: false }))}
-          links={route.artifacts === true && route.links === true && !boardHere}
+          links={route.artifacts === true && route.links === true && !boardNode}
           // Between the view's two sides: the same screen, so Back still returns to the thread.
           onLinks={(on) => writeRoute({ ...routeRef.current, links: on }, { replace: true })}
           // Decision mode's one way in (thread only): from two of this thread's decisions up, and not while a
@@ -250,7 +253,7 @@ export function ThreadSlot({ paneId, threadId, active, held: given, host }: Thre
             host.panesOnScreen.set(paneId, state);
             if (paneId === MAIN_PANE) host.setOpenThreadCovered(state?.covered ?? false);
           }}
-          backLabel={fromCard ? 'Board' : route.reviews ? 'Reviews' : listTitle}
+          backLabel={phone && boardNode ? 'Thread' : fromCard ? 'Board' : route.reviews ? 'Reviews' : listTitle}
           cardChip={fromCard ? <CardChip card={host.cards?.cards.find((c) => c.id === fromCard) ?? null} onOpen={host.backToCard} /> : undefined}
           phone={phone}
           stacked={stack.thread || !!fromCard}

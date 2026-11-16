@@ -187,6 +187,7 @@ import { StepsButton } from '../steps/StepsButton';
 import { stepsButtonSig, stepsWaitTarget } from '../steps/model';
 import { useThreadSteps } from '../steps/useThreadSteps';
 import { keepEqualByKey } from '../thread/keepEqual';
+import { useKeptScroll } from '../thread/keptScroll';
 import { sentActionsOf } from '../thread/sentActions';
 import { leftoverWords } from '../thread/leftover';
 import { replyWordsCount, withFreeName, withoutReplyWords } from '../shape/addToReply';
@@ -1657,11 +1658,12 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     [onSeen, thread.thread_id],
   );
   // On a phone the pill sits in the foot and covers none of the thread.
-  useSeenOnSight({ bodyRef, candidates, covered: covered || fileCovers || artifactsOn, pill: chrome.pill && !phone, onSeen: sawOne });
+  useSeenOnSight({ bodyRef, candidates, covered: covered || fileCovers || artifactsOn || !!board, pill: chrome.pill && !phone, onSeen: sawOne });
   // The thread on screen, for notifications: a question in it raises nothing while it is visible.
   const screenRef = useRef(onScreenChange);
   screenRef.current = onScreenChange;
-  const paneCovered = covered || fileCovers || artifactsOn;
+  // The board in the messages' place covers them as the Artifacts view does: none of the thread's keys act under it.
+  const paneCovered = covered || fileCovers || artifactsOn || !!board;
   showingRef.current = !paneCovered;
   // The status and Cancel go under the cover with the box (the pane stays mounted): a recording goes, nothing posted; a take being transcribed lands.
   useEffect(() => {
@@ -1673,10 +1675,10 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   useEffect(() => () => screenRef.current?.(null), []);
 
   // The Artifacts view: opening it moves focus to its heading, leaving it returns focus to the Artifacts
-  // button (the messages keep the scroll they had). Only on a change in this pane, never on the first draw
-  // (a reload or a link lands where the window puts focus).
+  // button (the messages keep the scroll they had, as under the board: keptScroll.ts). Only on a change in this
+  // pane, never on the first draw (a reload or a link lands where the window puts focus).
+  useKeptScroll(bodyRef, artifactsOn || !!board);
   const artifactsWas = useRef(artifactsOn);
-  const threadScroll = useRef(0);
   useLayoutEffect(() => {
     if (artifactsWas.current === artifactsOn) return;
     artifactsWas.current = artifactsOn;
@@ -1684,20 +1686,9 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       (linksOn ? linksHeadingRef : artifactsHeadingRef).current?.focus({ preventScroll: true });
       return;
     }
-    if (bodyRef.current) bodyRef.current.scrollTop = threadScroll.current;
     const button = artifactsButtonRef.current;
     if (button) button.focus();
     else bodyRef.current?.querySelector<HTMLElement>('.ib-subject')?.focus({ preventScroll: true });
-  }, [artifactsOn]);
-  // The thread's scroll, kept while the grid is shown over it.
-  useEffect(() => {
-    const body = bodyRef.current;
-    if (!body || artifactsOn) return;
-    const keep = () => {
-      threadScroll.current = body.scrollTop;
-    };
-    body.addEventListener('scroll', keep, { passive: true });
-    return () => body.removeEventListener('scroll', keep);
   }, [artifactsOn]);
   // ── Your place in the thread, around a file (threadPlace.ts) ──
   // Beside a file the thread is a narrow column, under a full-screen file it is covered, and on a phone or a
@@ -2037,7 +2028,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const [openItemsRequest, setOpenItemsRequest] = useState(0);
   // H (approval "inbox-keyboard-keys-2026-11-07", item 3): opens the header ⋯ menu at Snooze's times; it never snoozes by itself.
   const [snoozeRequest, setSnoozeRequest] = useState(0);
-  const readKeysOn = !one && !artifactsOn;
+  const readKeysOn = !one && !artifactsOn && !board;
   const readKeyAllowed = (event: KeyboardEvent) => {
     if (!readKeysOn || !bareKeyAllowed(event)) return false;
     const origin = keyOrigin(event);
@@ -2107,7 +2098,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       reply: {
         when: (event) => {
           // Only where the Reply button is (or the box is already open): never where the foot shows something else.
-          if (!bareKeyAllowed(event) || !(box.open || sectionRef.current?.querySelector('[data-reply-button]'))) return false;
+          if (!bareKeyAllowed(event) || board || !(box.open || sectionRef.current?.querySelector('[data-reply-button]'))) return false;
           const origin = keyOrigin(event);
           return origin === 'thread' || origin === 'row' || origin === 'file';
         },
@@ -2115,7 +2106,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       },
       openNewest: {
         when: (event) => {
-          if (!bareKeyAllowed(event) || artifactsOn) return false;
+          if (!bareKeyAllowed(event) || artifactsOn || board) return false;
           const origin = keyOrigin(event);
           return origin === 'thread' || origin === 'row';
         },
@@ -2209,7 +2200,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       fullScreen: {
         when: (event) => {
           // A phone or a stacked window shows files full screen only: there is nothing to switch.
-          if (!bareKeyAllowed(event) || artifactsOn || phone || fileStacked) return false;
+          if (!bareKeyAllowed(event) || artifactsOn || board || phone || fileStacked) return false;
           const origin = keyOrigin(event);
           return origin === 'thread' || origin === 'row' || origin === 'file';
         },
@@ -4774,7 +4765,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
             Artifacts, the owner 2026-11-16), Artifacts, Expand / Fold all, ⋯ More (read actions, Snooze, Archive), the close. */}
         {phone && artifactsOn ? null : (
           <>
-            {one && !artifactsOn && !barName ? (
+            {one && !artifactsOn && !board && !barName ? (
               <span className="ib-sp" />
             ) : (
               // The bar's title, as on main: the thread's name (the list's rule, `threadChipName`; in Reviews, `barName`), always; with no name,
