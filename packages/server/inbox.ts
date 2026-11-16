@@ -215,6 +215,8 @@ import { scheduledRoute, scheduledSwitch } from "./inbox-scheduled-routes";
 import { execLoginCommand, inboxLoginItem, type InboxLoginItem } from "./inbox-scheduled-login";
 import { bitbucketRefReader, createRefCards, readSignedInHosts, refCliRunner, type BitbucketRefReader, type RefRunner } from "./ref-cards";
 import { closePull, reopenAllowed, reopenPull, PULL_REOPEN_WINDOW_MS } from "@plannotator/shared/inbox-pull-close";
+import { createLinearCards, linearRefsRoute, withLinearCards } from "./inbox-linear-cards";
+import { createLinearKey } from "./inbox-linear-key";
 import { mergePull } from "@plannotator/shared/inbox-pull-merge";
 import { createInboxProjectRoots, folderHoldsOtherWork, guessableProjects, isHomeOrRootFolder, nearestProjectHolding, type InboxGitRunner } from "./inbox-project-root";
 import { handleFavicon } from "./shared-handlers";
@@ -1356,8 +1358,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // Hover cards for issue, PR and MR links (ref-cards.ts): nothing runs until a card is asked for (or the attach line looks a number up after a send, `pullLookups` below).
   // github.com, gitlab.com and the hosts this computer's own gh / glab is signed in to; nothing else.
   // Bitbucket Cloud PRs through the review app's credentials; a test that runs its own CLIs passes its own reader.
-  const refCards = createRefCards(
-    options.refRunner ? { run: options.refRunner, bitbucket: options.bitbucketRefReader } : { bitbucket: options.bitbucketRefReader ?? bitbucketRefReader },
+  // Linear issue links answer from Linear (inbox-linear-cards.ts); a test's own runner gets no real Linear.
+  const linearKey = createLinearKey({ dataDir, serverSession, json, readBody: (req) => readBody(req), changed: () => linearCards?.forget() });
+  const linearCards = options.refRunner ? null : createLinearCards({ apiKey: () => linearKey.apiKey() });
+  const refCards = withLinearCards(
+    createRefCards(options.refRunner ? { run: options.refRunner, bitbucket: options.bitbucketRefReader } : { bitbucket: options.bitbucketRefReader ?? bitbucketRefReader }),
+    linearCards,
   );
   // The Board's links, one resolver per source (inbox-card-refs.ts): GitHub and GitLab through the hover cards' lookup.
   const cardRefResolvers = [forgeCardRefResolver(refCards)];
@@ -1372,6 +1378,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     refCards,
     ...(options.refRunner ? { run: options.refRunner } : {}),
     fixture: options.threadPullFixture ?? threadPullFixtureFromEnv(),
+    // A project's own origin host: a host a sign-in command may name (problem-words.ts commandHostTrusted).
+    projectHostOf: (projectId) => {
+      const project = store.project(projectId);
+      return project ? (repos.get(project.root)?.host ?? null) : null;
+    },
     onLiveChange: (threadIds) => {
       for (const listener of threadPullLiveListeners) listener(threadIds);
     },
@@ -3688,6 +3699,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     reveal: line,
     /** Settings → Voice: off unless turned on. Never a key: its source and, for a saved one, its last 4. */
     voice: voice.settings(via),
+    /** Settings → Accounts → Linear: never the key, only its source and, for a saved one, its last 4. */
+    linear_key: linearKey.state(),
     /** Settings → About: update notices and automatic updates. */
     updates: updatesState(),
     /** Settings → General: "Open Plannotator at plannotator.localhost" (#2184). */
@@ -5532,6 +5545,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       if (tidied) return tidied;
       const combined = await combine.route(req, url);
       if (combined) return combined;
+      const linearRefs = await linearRefsRoute(req, path, linearCards, serverSession, json);
+      if (linearRefs) return linearRefs;
       // A hover card's data for an issue, PR or MR link (ref-cards.ts). Read only, the window's own
       // read guard; the owner over the tailnet gets it too. Never on the device door (not in its
       // allowlist), so nothing of it reaches a phone or the relay.
@@ -6375,6 +6390,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
         }
         const answer = await voice.route(req, url, via);
+        if (answer) return answer;
+      }
+      if (path === "/api/inbox/linear/key") {
+        if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
+          return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
+        }
+        const answer = await linearKey.route(req, path, via);
         if (answer) return answer;
       }
       // Settings → Accounts: the owner's logins and usage, and a read that goes to the Keychain and to Anthropic,

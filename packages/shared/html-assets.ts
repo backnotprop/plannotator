@@ -402,6 +402,43 @@ export interface RewriteHtmlAssetOptions {
   inertBase?: boolean;
   /** References outside the root: see `HtmlOutsideAssetUrlMapper`. Absent: left as written. */
   outsideAssetUrlFor?: HtmlOutsideAssetUrlMapper;
+  /**
+   * The document was opened outside the session's roots: mark it with
+   * {@link HTML_NO_NETWORK_MARKER}, which the HTML viewer turns into
+   * `connect-src 'none'` for its srcdoc frame (the asset route's own
+   * OUTSIDE_ROOT_HTML_DOCUMENT_CSP covers only a document loaded by URL).
+   */
+  noNetwork?: boolean;
+}
+
+/**
+ * Marks a document a server opened outside the session's roots. A srcdoc
+ * document gets no response header, and the viewer removes every CSP `<meta>`
+ * a page carries, so the server cannot hand it a policy directly: the viewer
+ * (`hasNoNetworkMarker` in `packages/ui/components/html-viewer/srcdoc.ts`)
+ * reads this tag and puts `connect-src 'none'` at the top of the frame's
+ * document. A page that carries the tag itself only restricts itself.
+ */
+export const HTML_NO_NETWORK_MARKER = '<meta name="plannotator-network" content="none">';
+
+/**
+ * `html` with {@link HTML_NO_NETWORK_MARKER} added without parsing it: right
+ * after a leading doctype (only a BOM, ASCII whitespace, comments and `<?...>`
+ * prologs before it), so the page keeps standards mode, else first. For a
+ * document the rewrite could not read. Comments end as the HTML tokenizer ends
+ * them (`<!-->`, `<!--->`, the first `-->` or `--!>`), the same reading as
+ * `documentStart` in packages/ui/components/html-viewer/srcdoc.ts, which puts
+ * the viewer's policy at the same place.
+ */
+const LEADING_DOCTYPE_RE = new RegExp(
+  "^\\uFEFF?(?:[\\t\\n\\f\\r ]|<!--(?:>|->|(?!-?>)(?:(?!--!?>)[\\s\\S])*--!?>)|<\\?[^>]*>)*<!doctype[^>]*>",
+  "i",
+);
+
+export function prependNoNetworkMarker(html: string): string {
+  const doctype = LEADING_DOCTYPE_RE.exec(html);
+  const at = doctype ? doctype[0].length : 0;
+  return html.slice(0, at) + HTML_NO_NETWORK_MARKER + html.slice(at);
 }
 
 /** A base URL that no relative reference can resolve against. */
@@ -421,6 +458,14 @@ export function rewriteHtmlAssetReferences(
     rewriteNodeAssetReferences(node, assetUrlFor, options.assetBasePath ?? "", options.outsideAssetUrlFor);
     const tagName = node.tagName?.toLowerCase();
     if (tagName && tagName in FRAME_URL_ATTRS) hasFrame = true;
+  });
+  // Before the base goes in, so the base stays first in <head>.
+  if (options.noNetwork) prependToHead(root, {
+    nodeName: "meta",
+    tagName: "meta",
+    attrs: [{ name: "name", value: "plannotator-network" }, { name: "content", value: "none" }],
+    namespaceURI: "http://www.w3.org/1999/xhtml",
+    childNodes: [],
   });
   const baseHref = options.baseHref ?? (options.inertBase && hasFrame ? INERT_HTML_BASE_HREF : null);
   if (baseHref) applyDocumentBase(root, baseHref);
@@ -456,15 +501,19 @@ function applyDocumentBase(root: HtmlNode, baseHref: string): void {
     return;
   }
 
-  const head = findElement(root, "head") ?? root;
-  const node: HtmlNode = {
+  prependToHead(root, {
     nodeName: "base",
     tagName: "base",
     attrs: [{ name: "href", value: baseHref }],
     namespaceURI: "http://www.w3.org/1999/xhtml",
     childNodes: [],
-    parentNode: head,
-  };
+  });
+}
+
+/** Insert an element first in `<head>` (first in a fragment, which has none). */
+function prependToHead(root: HtmlNode, node: HtmlNode): void {
+  const head = findElement(root, "head") ?? root;
+  node.parentNode = head;
   if (!head.childNodes) head.childNodes = [];
   head.childNodes.unshift(node);
 }
