@@ -21,6 +21,7 @@ import { newUuid } from '../uuid';
 import { scheduledApi, type ScheduledFields } from './client';
 import { forgetKeptRoutine, keepEdits, keepRoutine, readKeptEdits, readKeptRoutine } from './routineDraft';
 import { putScheduled } from './store';
+import { routineOn } from './EditorFoot';
 
 export const TYPING_PAUSE_MS = 600;
 export const RETRY_MS = [1000, 2000, 4000, 8000, 15000, 30000];
@@ -88,7 +89,10 @@ export function useAutosave(opts: {
   const busy = useRef<Promise<void> | null>(null);
   /** The writes on their way, by what they send: the same one is never sent twice at once. */
   const inflight = useRef(new Map<string, Promise<unknown>>());
-  const again = useRef(false);
+  /** A save asked for while one is on its way: 'auto' on its own, 'asked' when a field was left or an action waits. */
+  const again = useRef<false | 'auto' | 'asked'>(false);
+  /** It is on, by the newest row this window has (a new one can come back on before its record is read). */
+  const rowOn = useRef(routineOn(opts.record));
   const pause = useRef<ReturnType<typeof setTimeout> | null>(null);
   const retry = useRef<ReturnType<typeof setTimeout> | null>(null);
   const tries = useRef(0);
@@ -104,8 +108,10 @@ export function useAutosave(opts: {
 
   const missing = (fields: ScheduledFields) => !fields.name.trim() || !fields.prompt.trim();
   const heldAny = (fields: ScheduledFields) => keysOf(fields).some((k) => live.current.held(k, fields));
-  /** What differs from the server's, less an emptied name or prompt and anything held. */
-  const changes = (): Partial<ScheduledFields> => {
+  /** An on routine's typed name and prompt wait for the field to be left. */
+  const holding = () => !!made.current && (live.current.holdTyping || rowOn.current);
+  /** What differs from the server's, less an emptied name or prompt and anything held (`auto`: an on one's typing). */
+  const changes = (auto = false): Partial<ScheduledFields> => {
     const d = typed.current;
     const b = base.current;
     const out: Partial<ScheduledFields> = {};
@@ -114,6 +120,7 @@ export function useAutosave(opts: {
       if (norm(k, d[k]) === norm(k, b[k])) continue;
       if ((k === 'name' || k === 'prompt') && !d[k].trim()) continue;
       if (live.current.held(k, d)) continue;
+      if (auto && TYPED.includes(k) && holding()) continue;
       Object.assign(out, { [k]: d[k] });
     }
     return out;
@@ -122,8 +129,7 @@ export function useAutosave(opts: {
   const work = (auto = false) => {
     if (dropped.current) return false;
     if (!made.current) return !missing(typed.current) && !heldAny(typed.current);
-    const keys = Object.keys(changes()) as Key[];
-    return (auto && live.current.holdTyping ? keys.filter((k) => !TYPED.includes(k)) : keys).length > 0 || wantOn.current;
+    return Object.keys(changes(auto)).length > 0 || wantOn.current;
   };
   /** The tab keeps what is not saved yet: a new one whole, a saved one's edits with what the server had. */
   const keepNow = () => {
@@ -144,6 +150,7 @@ export function useAutosave(opts: {
   const accept = (row: InboxScheduledRow, sent: Partial<ScheduledFields>) => {
     if (row.updated_at < lastAt.current) return;
     lastAt.current = row.updated_at;
+    rowOn.current = routineOn(row);
     const theirs = fieldsOf(row);
     base.current = theirs;
     // What the server keeps for what was sent (a folder by its path, say) is shown while the field is as it was sent.
@@ -175,7 +182,7 @@ export function useAutosave(opts: {
     }
   };
 
-  const send = async (keepalive: boolean): Promise<void> => {
+  const send = async (keepalive: boolean, auto = false): Promise<void> => {
     if (dropped.current) return;
     const d = typed.current;
     if (!made.current) {
@@ -199,29 +206,32 @@ export function useAutosave(opts: {
       return;
     }
     const id = made.current;
-    const change = changes();
+    const change = changes(auto);
     if (Object.keys(change).length > 0) {
       const answer = await once(`${id} ${json(change)}`, keepalive, () => scheduledApi.update(id, change, keepalive));
       if (answer) accept(answer.scheduled, change);
     }
     if (wantOn.current) {
       wantOn.current = false;
-      putScheduled((await scheduledApi.turn(id, true)).scheduled);
+      const { scheduled } = await scheduledApi.turn(id, true);
+      rowOn.current = routineOn(scheduled);
+      putScheduled(scheduled);
     }
   };
 
-  const flush = () => {
+  /** Save what waits. `auto` (the typing pause, the preview, a retry of one, on mount): an on one's typing stays. */
+  const save = (auto: boolean) => {
     if (pause.current) clearTimeout(pause.current);
     pause.current = null;
     if (busy.current) {
-      again.current = true;
+      if (again.current !== 'asked') again.current = auto ? 'auto' : 'asked';
       return;
     }
-    if (!work()) return void redraw();
+    if (!work(auto)) return void redraw();
     if (retry.current) clearTimeout(retry.current);
     retry.current = null;
     let fell = false;
-    const run = send(false).then(
+    const run = send(false, auto).then(
       () => {
         tries.current = 0;
         if (failed.current) setFailure(null);
@@ -230,7 +240,7 @@ export function useAutosave(opts: {
         fell = true;
         if (gone.current) return;
         if (retryable(cause)) {
-          retry.current = setTimeout(flush, RETRY_MS[Math.min(tries.current++, RETRY_MS.length - 1)]);
+          retry.current = setTimeout(() => latest.current.save(auto), RETRY_MS[Math.min(tries.current++, RETRY_MS.length - 1)]);
           setFailure({ retrying: true, message: '' });
         } else setFailure({ retrying: false, message: cause instanceof Error ? cause.message : String(cause) });
       },
@@ -241,10 +251,11 @@ export function useAutosave(opts: {
       busy.current = null;
       const more = again.current;
       again.current = false;
-      if (!gone.current && !fell && (more || work(true))) flush();
+      if (!gone.current && !fell && (more || work(true))) save(more !== 'asked');
       else redraw();
     });
   };
+  const flush = () => save(false);
   /** The page hides or goes: what waits is sent now and outlives the page. */
   const leave = () => {
     if (pause.current) clearTimeout(pause.current);
@@ -253,16 +264,18 @@ export function useAutosave(opts: {
     void send(true).then(redraw, () => !gone.current && flush());
   };
 
-  const latest = useRef({ flush, leave });
-  latest.current = { flush, leave };
+  const latest = useRef({ save, leave });
+  latest.current = { save, leave };
   useEffect(() => {
     gone.current = false;
     const onHide = () => latest.current.leave();
     const onVisible = () => document.visibilityState === 'hidden' && latest.current.leave();
     window.addEventListener('pagehide', onHide);
     document.addEventListener('visibilitychange', onVisible);
+    // Kept edits that no longer apply (changed elsewhere since) are forgotten, so a later reload cannot bring them back.
+    if (made.current && base.current) keepNow();
     // Kept words that can be saved (the page went mid-pause or mid-create) are saved now; an on one's wait for leaving.
-    if (work(true)) latest.current.flush();
+    if (work(true)) latest.current.save(true);
     return () => {
       window.removeEventListener('pagehide', onHide);
       document.removeEventListener('visibilitychange', onVisible);
@@ -283,7 +296,10 @@ export function useAutosave(opts: {
     const before = seen.current;
     seen.current = record;
     if (!record || before === record) return;
-    if (record.updated_at > lastAt.current) lastAt.current = record.updated_at;
+    if (record.updated_at >= lastAt.current) {
+      lastAt.current = record.updated_at;
+      rowOn.current = routineOn(record);
+    }
     if (!before) {
       base.current = fieldsOf(record);
       // Opened by its link before the list was read: the record fills the fields. One made here keeps its words.
@@ -324,17 +340,19 @@ export function useAutosave(opts: {
     /** Typed into a field: saved after the typing pause (an on routine's name and prompt: when the field is left). */
     type: (change: Partial<ScheduledFields>) => {
       setDraft({ ...typed.current, ...change });
-      if (live.current.holdTyping && made.current && (Object.keys(change) as Key[]).every((k) => TYPED.includes(k))) return;
+      if (holding() && (Object.keys(change) as Key[]).every((k) => TYPED.includes(k))) return;
       if (pause.current) clearTimeout(pause.current);
-      pause.current = setTimeout(() => latest.current.flush(), TYPING_PAUSE_MS);
+      pause.current = setTimeout(() => latest.current.save(true), TYPING_PAUSE_MS);
     },
     /** A pick, or a change shown without a pause (a schedule step): saved at once. */
     pick: (change: Partial<ScheduledFields>) => {
       setDraft({ ...typed.current, ...change });
-      flush();
+      save(true);
     },
-    /** A field left, or a held field let go: what waits is saved now. */
+    /** A field left: what waits is saved now, an on one's typing too. */
     flush,
+    /** A held field let go (the schedule preview answered): saved now, an on one's typing still waits. */
+    release: () => save(true),
     /** Before an action that reads the saved routine (Run once now, a turn): what waits is saved. False when it is not. */
     settle: async (): Promise<boolean> => {
       flush();

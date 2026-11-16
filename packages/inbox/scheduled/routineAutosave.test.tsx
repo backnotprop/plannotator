@@ -6,7 +6,8 @@
  * on the typing pause, which main did not have; at this code each also pins its own rule (the same box and focus, no
  * reopen, one create). Then: an on routine's typed words wait for the field to be left (its next run reads them), the
  * header's status, the foot's Turn on and Run once now (each saves first, and is not taken when the save failed), a
- * refusal, Delete while it is being made, and a saved one's edits kept through a reload. Timers are real: the waits
+ * refusal, Delete while it is being made, a saved one's edits kept through a reload (and forgotten once they no longer
+ * apply), and Turn off taken at once. Timers are real: the waits
  * are a little over the 600 ms pause and the 1 s first retry. What regresses: words lost, a status that lies, a half
  * prompt saved to an on routine, the filled button back on Run, or a run or turn on with text that did not save.
  *
@@ -354,6 +355,69 @@ test.skipIf(!hasDom)("an on routine's typed prompt is not saved on the typing pa
   expect(status()?.textContent).toBe('Saved');
 });
 
+test.skipIf(!hasDom)("an on routine's schedule saves by itself, without the prompt being typed beside it", async () => {
+  const server = inbox([digest()], { hold: '/api/inbox/scheduled/preview' });
+  page('sch_digest', [digest()]);
+  await settle();
+  await typeInto(document.querySelector<HTMLInputElement>('[data-scheduled-editor] input[aria-label="Time"]')!, '10:30');
+  await typeInto(promptBox(), 'Summarize');
+  // The schedule's typing pause goes by while its preview has not answered, then the preview answers and it saves.
+  await wait(PAUSE + 300);
+  server.release();
+  await settle();
+  // Neither save takes the half prompt to the routine its next run reads.
+  const sent = writes(server.calls, '/api/inbox/scheduled/sch_digest').map((c) => c.body);
+  expect(sent.length).toBeGreaterThan(0);
+  for (const body of sent) expect(Object.keys(body ?? {})).toEqual(['schedule']);
+  expect(server.rows.get('sch_digest')?.prompt).toBe('Summarize the open pull requests.');
+  expect(status()?.textContent).toBe('Not saved yet');
+  await act(async () => promptBox().blur());
+  await settle();
+  expect(server.rows.get('sch_digest')?.prompt).toBe('Summarize');
+  expect(status()?.textContent).toBe('Saved');
+});
+
+test.skipIf(!hasDom)('a new one turned on: words typed while it is being made wait for the field to be left', async () => {
+  const server = inbox([], { hold: '/api/inbox/scheduled' });
+  const { draw } = page('new', []);
+  await settle();
+  await typeInto(nameBox(), 'Feedback digest');
+  await typeInto(promptBox(), 'Read the feedback threads.');
+  await act(async () => document.querySelector<HTMLButtonElement>('[data-scheduled-turn-on]')!.click());
+  await settle();
+  await typeInto(promptBox(), 'Read the feedback threads. Post');
+  await wait(PAUSE);
+  server.release();
+  await settle();
+  draw('sch_made');
+  await settle();
+  await wait(PAUSE);
+  // Made on: it can run now, so the half sentence is not sent on its own.
+  expect(server.rows.get('sch_made')?.state).toBe('on');
+  expect(writes(server.calls, '/api/inbox/scheduled/sch_made')).toEqual([]);
+  expect(status()?.textContent).toBe('Not saved yet');
+  await act(async () => promptBox().blur());
+  await settle();
+  expect(writes(server.calls, '/api/inbox/scheduled/sch_made').map((c) => c.body)).toEqual([{ prompt: 'Read the feedback threads. Post' }]);
+});
+
+test.skipIf(!hasDom)('Turn off stops an on routine at once, while a save is still on its way', async () => {
+  const server = inbox([digest()], { hold: '/api/inbox/scheduled/sch_digest' });
+  page('sch_digest', [digest()]);
+  await settle();
+  await typeInto(promptBox(), 'Summarize the open pull requests by team.');
+  await act(async () => promptBox().blur());
+  await settle();
+  await act(async () => document.querySelector<HTMLButtonElement>('[data-scheduled-editor] [role="switch"]')!.click());
+  await settle();
+  // The save has not answered: the routine is off already.
+  expect(writes(server.calls, '/api/inbox/scheduled/sch_digest/off').length).toBe(1);
+  expect(server.rows.get('sch_digest')?.state).toBe('off');
+  server.release();
+  await settle();
+  expect(server.rows.get('sch_digest')?.prompt).toBe('Summarize the open pull requests by team.');
+});
+
 test.skipIf(!hasDom)('Run once now saves what waits first, then runs it', async () => {
   const server = inbox([draft()]);
   page('sch_digest', [draft()]);
@@ -452,4 +516,23 @@ test.skipIf(!hasDom)("a saved routine's words that did not save come back after 
   await settle();
   expect(server.rows.get('sch_digest')?.prompt).toBe('Summarize the open pull requests and who is waiting on whom.');
   expect(sessionStorage.getItem('plannotator-routine-edits:sch_digest')).toBeNull();
+});
+
+test.skipIf(!hasDom)("a kept edit over a field changed elsewhere since is forgotten on open, and never comes back", async () => {
+  sessionStorage.setItem('plannotator-routine-edits:sch_digest', JSON.stringify({ fields: { prompt: 'An old edit.' }, was: { prompt: 'Summarize the pull requests.' } }));
+  const server = inbox([digest()]);
+  const { draw } = page('sch_digest', [digest()]);
+  await settle();
+  expect(promptBox().value).toBe('Summarize the open pull requests.');
+  expect(sessionStorage.getItem('plannotator-routine-edits:sch_digest')).toBeNull();
+  // The prompt goes back to what it was when the edit was kept, then the page reloads: the old edit stays gone.
+  draw(null);
+  await settle();
+  const back = { ...server.rows.get('sch_digest')!, prompt: 'Summarize the pull requests.', updated_at: '2026-11-16T13:00:00.000Z' };
+  server.rows.set('sch_digest', back);
+  await act(async () => putScheduled(back));
+  draw('sch_digest');
+  await settle();
+  expect(promptBox().value).toBe('Summarize the pull requests.');
+  expect(writes(server.calls, '/api/inbox/scheduled/sch_digest')).toEqual([]);
 });

@@ -147,12 +147,16 @@ export function ScheduledEditor(props: EditorProps) {
   // One rule for the switch, the ⋯ menu and the foot: a one-off run of an off routine leaves it off.
   const on = routineOn(record);
   const ready = !!draft.name.trim() && !!draft.prompt.trim();
-  // A turn and a run read the saved routine: what waits is saved first, and one that did not save is said, not run.
+  // Turning on and a run read the saved routine: what waits is saved first, and one that did not save is said, not
+  // run. Turning off stops it at once; what waits is sent alongside.
   const turn = async (next: boolean) => {
     if (!record) return autosave.turnOn();
-    const saved = await autosave.settle();
-    if (!saved && next) return setError("Not turned on: your last change isn't saved yet.");
-    return act(() => scheduledApi.turn(record.id, next));
+    if (!next) {
+      autosave.flush();
+      return act(() => scheduledApi.turn(record.id, false));
+    }
+    if (!(await autosave.settle())) return setError("Not turned on: your last change isn't saved yet.");
+    return act(() => scheduledApi.turn(record.id, true));
   };
   const runOnce = async () => {
     if (!record) return;
@@ -243,7 +247,7 @@ export function ScheduledEditor(props: EditorProps) {
             preview={preview}
             onChange={(schedule) => {
               autosave.type({ schedule });
-              void checkSchedule(schedule).then((ok) => ok && autosave.flush());
+              void checkSchedule(schedule).then((ok) => ok && autosave.release());
             }}
           />
           <div className="st-miss">
