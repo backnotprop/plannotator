@@ -46,7 +46,7 @@ export function ReadingLine({
   older = null,
   comparing = null,
   count = null,
-  versionAt = "start",
+  versionAt = "end",
   start = null,
 }: {
   readonly shownNumber: number | null;
@@ -60,8 +60,8 @@ export function ReadingLine({
   /** How many versions there are, shown on the versions toggle. */
   readonly count?: number | null;
   /**
-   * Where the version words and toggle sit: "start" (default) or "end", at the right next to the
-   * panel they open. In "end", `approved` moves to the start side.
+   * Where the version words and toggle sit: "end" (default), at the right next to the panel
+   * they open, with `approved` on the start side; or "start", with `approved` at the right.
    */
   readonly versionAt?: "start" | "end";
   /** Content at the start of the line, before everything else (a project name, a decision mark). */

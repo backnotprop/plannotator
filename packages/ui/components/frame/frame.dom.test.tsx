@@ -328,19 +328,19 @@ describe.skipIf(!hasDom)('ReadingLine', () => {
     expect(toggle.getAttribute('aria-label')).toBe('Versions. Comparing v2 with v6. 6 versions');
   });
 
-  test('start placement: the version first, the approval after it (as before)', () => {
+  test('start placement: the version first, the approval after it', () => {
     const { ReadingLine } = readingModule!;
     const frame = mount(
-      <ReadingLine shownNumber={5} currentNumber={5} versionsOpen={false} onToggleVersions={() => {}} approved={<span data-test-approved="">Approved</span>} start={<span>Porto launch plan</span>} />,
+      <ReadingLine shownNumber={5} currentNumber={5} versionsOpen={false} onToggleVersions={() => {}} approved={<span data-test-approved="">Approved</span>} start={<span>Porto launch plan</span>} versionAt="start" />,
     );
     expect(order(frame)).toEqual(['start', 'version', 'approved']);
     expect(frame.querySelector('[data-reading-version-end]')).toBeNull();
   });
 
-  test('end placement: the start slot and the approval on the start side, the version at the end', () => {
+  test('end placement, the default: the start slot and the approval on the start side, the version at the end', () => {
     const { ReadingLine } = readingModule!;
     const frame = mount(
-      <ReadingLine shownNumber={5} currentNumber={5} versionsOpen={false} onToggleVersions={() => {}} approved={<span data-test-approved="">Approved</span>} start={<span>Porto launch plan</span>} versionAt="end" />,
+      <ReadingLine shownNumber={5} currentNumber={5} versionsOpen={false} onToggleVersions={() => {}} approved={<span data-test-approved="">Approved</span>} start={<span>Porto launch plan</span>} />,
     );
     expect(order(frame)).toEqual(['start', 'approved', 'version']);
     const end = frame.querySelector('[data-reading-version-end]')!;
