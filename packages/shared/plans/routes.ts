@@ -16,10 +16,20 @@
  *   POST /api/plans/:id/comments             { doc?, version, annotation }: the person's comment on a version (new, or
  *                                            an edit of one not sent), kept as the Inbox keeps a file's comment
  *   POST /api/plans/:id/comments/:annotation/remove   take that comment away
+ *   POST /api/plans/:id/versions             { doc?, base, text } or { doc?, base, restore }: a new newest version the
+ *                                            person made (`source: "person"`); 409 `moved_on` when `base` is not the
+ *                                            newest any more, 409 `unchanged` when it holds what the newest holds.
+ *                                            Answers the version and the Direct Edits section for the agent.
+ *   POST /api/plans/:id/approve              { doc?, version }: the person approves the version on screen; 409
+ *                                            `moved_on` when a newer one came
+ *   POST /api/plans/:id/sent                 { thread_id, message_id, to?, comments }: a Send went out: its comments
+ *                                            are sent, and the plan has that Inbox thread
  *
- * `GET /api/plans/:id` carries the kept comments (`comments`).
+ * `GET /api/plans/:id` carries the kept comments (`comments`). Approvals follow approval "plans-editing" (the store's
+ * `addVersion` clears or moves them in the same call).
  */
-import { checkPlanCommentInput, checkPlanLookInput, isPlanAnnotationId, isPlanId, isPlanPictureType, isPlanVersionNumber, planMediaType, type PlanVersion } from "@plannotator/core/plans";
+import { checkPlanApproveInput, checkPlanCommentInput, checkPlanLookInput, checkPlanSentInput, checkPlanVersionInput, isPlanAnnotationId, isPlanId, isPlanPictureType, isPlanVersionNumber, planApprovalsOn, planMediaType, PLAN_PERSON, type PlanVersion } from "@plannotator/core/plans";
+import { buildDirectEditsSection } from "../direct-edits";
 import type { PlanStore } from "./store";
 
 export const PLANS_ROUTE_PREFIX = "/api/plans";
@@ -70,6 +80,18 @@ export function artifactServedType(contentType: string): string {
 
 const bad = (message: string, status = 400): PlanRouteResult => ({ status, body: { error: message } });
 
+/** A write that names a version no longer the newest: refused, with the newest, so the window shows it. */
+const movedOn = (head: PlanVersion) => ({ status: 409, body: { error: `The plan moved on: v${head.version_number} is newer than the version you had.`, code: "moved_on", head } });
+
+/** The JSON body of a POST, or null when it is not JSON. */
+async function bodyOf(req: PlanRouteRequest): Promise<{ value: unknown } | null> {
+  try {
+    return { value: await req.json() };
+  } catch {
+    return null;
+  }
+}
+
 /** True for `/api/plans` and every path under it. */
 export function isPlansPath(pathname: string): boolean {
   return pathname === PLANS_ROUTE_PREFIX || pathname.startsWith(`${PLANS_ROUTE_PREFIX}/`);
@@ -117,9 +139,97 @@ export async function handlePlanRoute(req: PlanRouteRequest, deps: PlanRouteDeps
     return { status: 200, file: { path, contentType: artifactServedType(artifact.content_type) } };
   }
 
+  if (sub === "versions" && parts.length === 2 && method === "POST") {
+    const body = await bodyOf(req);
+    if (!body) return bad("the body must be JSON");
+    const input = checkPlanVersionInput(body.value);
+    if (!input.ok) return bad(input.error);
+    const doc = read.documents.find((d) => d.id === (input.doc ?? read.plan.primary_doc_id));
+    if (!doc) return bad(`${id} has no document ${input.doc}.`, 404);
+    // Never an edit of a diagram or an HTML page this round: only a Markdown page's words; a Restore takes any kind.
+    if (input.text !== null && doc.kind !== "markdown") return bad("Only a Markdown page can be edited.");
+    const versions = read.versions.filter((v) => v.document_id === doc.id);
+    const head = versions[versions.length - 1];
+    if (!head) return bad(`${doc.id} has no version yet.`, 404);
+    if (input.base !== head.version_number) return versions.some((v) => v.version_number === input.base) ? movedOn(head) : bad(`${doc.id} has no version ${input.base}.`, 404);
+    const headBytes = store.versionBytes(id, doc.id, head.version_number);
+    if (!headBytes) return bad(`${id} could not read version ${head.version_number}.`, 500);
+    let bytes: Uint8Array;
+    if (input.restore !== null) {
+      if (input.restore === head.version_number) return { status: 409, body: { error: `v${head.version_number} is already the newest.`, code: "unchanged" } };
+      const restored = store.versionBytes(id, doc.id, input.restore);
+      if (!restored) return bad(`${doc.id} has no version ${input.restore}.`, 404);
+      bytes = restored;
+    } else {
+      bytes = new TextEncoder().encode(input.text!);
+    }
+    const before = new TextDecoder().decode(headBytes);
+    const after = new TextDecoder().decode(bytes);
+    if (after === before) return { status: 409, body: { error: input.restore !== null ? `v${input.restore} holds what v${head.version_number} holds: nothing to restore.` : "Nothing changed: no new version.", code: "unchanged" } };
+    const version = store.addVersion(id, doc.id, {
+      bytes,
+      committed_at: new Date().toISOString(),
+      source: "person",
+      author_via: "person",
+      ...(input.restore !== null ? { restored_from: input.restore } : {}),
+    });
+    deps.changed?.(id);
+    const plan = store.get(id)!;
+    const cleared = plan.last_approval_cleared?.version_number === version.version_number && plan.last_approval_cleared.document_id === doc.id ? plan.last_approval_cleared : null;
+    const moved = plan.last_approval_moved?.version_number === version.version_number && plan.last_approval_moved.document_id === doc.id ? plan.last_approval_moved : null;
+    return { status: 200, body: { version, direct_edits: buildDirectEditsSection(before, after, false), cleared, moved } };
+  }
+
   if (sub === "versions" && parts.length === 2) {
     if (method !== "GET") return bad("method not allowed", 405);
     return { status: 200, body: { document_id: docId, versions: read.versions.filter((v) => v.document_id === docId) } };
+  }
+
+  if (sub === "approve" && parts.length === 2) {
+    if (method !== "POST") return bad("method not allowed", 405);
+    const body = await bodyOf(req);
+    if (!body) return bad("the body must be JSON");
+    const input = checkPlanApproveInput(body.value);
+    if (!input.ok) return bad(input.error);
+    const doc = read.documents.find((d) => d.id === (input.doc ?? read.plan.primary_doc_id));
+    if (!doc) return bad(`${id} has no document ${input.doc}.`, 404);
+    const versions = read.versions.filter((v) => v.document_id === doc.id);
+    const head = versions[versions.length - 1];
+    const shown = versions.find((v) => v.version_number === input.version);
+    if (!head || !shown) return bad(`${doc.id} has no version ${input.version}.`, 404);
+    // An approval is of the version the person looked at, and only while it is the newest.
+    if (shown.version_number !== head.version_number) return movedOn(head);
+    const already = planApprovalsOn(read.events, doc.id, head.version_number).find((a) => a.name === PLAN_PERSON);
+    if (already) return { status: 200, body: { decision: already.event.decision } };
+    const at = new Date().toISOString();
+    const event = store.addEvent(id, {
+      kind: "decision",
+      at,
+      subject: { document_id: doc.id, version_number: head.version_number },
+      decision: { document_id: doc.id, version: head.version, version_number: head.version_number, decision: "approved", at, feedback: null, feedback_record: null, snapshot: null },
+      legacy: null,
+      author_label: null,
+      author_via: "person",
+      agent_host: null,
+      agent_session: null,
+      agent_name: null,
+    });
+    deps.changed?.(id);
+    return { status: 200, body: { decision: event.decision } };
+  }
+
+  if (sub === "sent" && parts.length === 2) {
+    if (method !== "POST") return bad("method not allowed", 405);
+    const body = await bodyOf(req);
+    if (!body) return bad("the body must be JSON");
+    const input = checkPlanSentInput(body.value);
+    if (!input.ok) return bad(input.error);
+    const at = new Date().toISOString();
+    const comments = store.markCommentsSent(id, input.comments, { at, message_id: input.message_id, to: input.to ?? { host: "", session: "" } });
+    // The plan's thread is the first one a Send made; a later Send replies in it.
+    const plan = read.plan.thread_id ? read.plan : store.updatePlan(id, { thread_id: input.thread_id }, at);
+    deps.changed?.(id);
+    return { status: 200, body: { plan, comments } };
   }
 
   if (sub === "versions" && parts.length === 3) {

@@ -155,10 +155,9 @@ export interface ComposeRequest {
   files?: readonly File[];
   /** To opens on its own list at once: the person picks a running agent or a new session (compose/openComposer.ts). */
   pickTo?: boolean;
+  /** Told once this message is sent, after the window's own `onSent` (compose/openComposer.ts: a plan's Send). */
+  onSent?: (sent: ComposeSent) => void;
 }
-
-
-
 
 export interface ComposeTransport {
   sessions: ComposeSessionsLoader;
@@ -862,7 +861,8 @@ export function ComposeDialog(props: ComposeDialogProps) {
           }
         : { session: target!.session, host: target!.host, projectName: targetMachineName ? `${target!.project.name} · ${targetMachineName}` : target!.project.name };
       if (box) forgetUnsentReview();
-      props.onSent({ threadId: result.thread_id, session: sentTo.session, host: sentTo.host, projectName: machine ? sentTo.projectName : (result.project?.name ?? sentTo.projectName), draftId: draft?.id ?? null, cardId: card?.id ?? null, pullKeys: pulls?.keys ?? null, pullAsk: boxPull ? (body.trim() ? 'custom' : 'guide') : pulls ? pullLaunchAsk(body, pulls.ask_line) : null, ...(start ? { launched: true } : {}), ...(machine ? { machine } : {}) });
+      const sent: ComposeSent = { threadId: result.thread_id, session: sentTo.session, host: sentTo.host, projectName: machine ? sentTo.projectName : (result.project?.name ?? sentTo.projectName), draftId: draft?.id ?? null, cardId: card?.id ?? null, pullKeys: pulls?.keys ?? null, pullAsk: boxPull ? (body.trim() ? 'custom' : 'guide') : pulls ? pullLaunchAsk(body, pulls.ask_line) : null, ...(start ? { launched: true } : {}), ...(machine ? { machine } : {}) };
+      for (const tell of [props.onSent, request.onSent]) tell?.(sent);
     } catch (cause) {
       if (cause instanceof InboxHeldError && (start?.machine || targetOn) && props.onHeld) {
         // That machine's Inbox could not take it now (asleep, or slow): it waits in this Inbox's outbox and starts there

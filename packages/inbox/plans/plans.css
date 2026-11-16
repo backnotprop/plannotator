@@ -130,6 +130,17 @@
 .ib-plan-banner { display: flex; align-items: center; gap: 12px; margin: 4px 16px 4px; padding: 8px 12px 8px 14px; border-radius: 10px; background: color-mix(in oklch, var(--primary) 9%, transparent); font-size: 13px; }
 .ib-plan-banner > .ib-ic { width: 16px; height: 16px; flex: none; color: var(--primary); }
 .ib-plan-banner p { margin: 0; flex: 1; min-width: 0; }
+/* Approval "plans-editing": a refusal or a stale edit reads as a warning; the line about the newest version's approval */
+.ib-plan-banner[role="alert"] { background: color-mix(in oklch, var(--warning, oklch(0.75 0.15 75)) 14%, transparent); }
+.ib-plan-banner[role="alert"] > .ib-ic { color: var(--warning-foreground, var(--foreground)); }
+.ib-plan-approval { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.ib-plan-approval[data-plan-approval="approved"], .ib-plan-approval[data-plan-approval="moved"] { color: var(--success, var(--foreground)); }
+.ib-plan-approval > span { min-width: 0; }
+.ib-plan-approval > svg.ib-ic { width: 13px; height: 13px; flex: none; }
+.ib-plan-approval-x { height: 24px; width: 24px; padding: 0; justify-content: center; background: transparent; }
+.ib-plan-approval-x .ib-ic { width: 13px; height: 13px; }
+/* The editor fills the page card, as the file viewer does */
+.ib-plan-editor { flex: 1; min-width: 0; min-height: 0; overflow: auto; }
 /* The rail head's quiet line: the plan's project, then its current decision; the project gives way first */
 .ib-plan-railmeta { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .ib-plan-railproj { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 0 2 auto; }

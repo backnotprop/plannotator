@@ -8,13 +8,17 @@
  *   taken away comes back;
  * - a path that is not a plan id, or a malformed one, crashes instead of answering 4xx;
  * - an artifact is served as something that could run on the Inbox's origin (HTML, SVG), or a path that is not a
- *   recorded artifact (one reaching outside the plan's `files/`) is served at all.
+ *   recorded artifact (one reaching outside the plan's `files/`) is served at all;
+ * - approval "plans-editing": the person's edit is not a new person version with plan review's Direct Edits diff for
+ *   the agent, a stale base or a save that changes nothing writes a version, a diagram is edited, a Restore does not
+ *   make a new newest version of the older text, an approval is given on a version the plan moved past, or a Send
+ *   does not mark its comments sent and record the plan's thread.
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { PLAN_PICTURE_TYPES, planId } from "@plannotator/core/plans";
+import { PLAN_PERSON, PLAN_PICTURE_TYPES, planApprovalState, planId } from "@plannotator/core/plans";
 import { createPlanStore } from "./store";
 import { artifactServedType, handlePlanRoute, isPlansPath, type PlanRouteResult } from "./routes";
 
@@ -131,6 +135,78 @@ describe("Plans' routes", () => {
     expect((await call("POST", `/api/plans/${plan.id}/comments/ann-1/remove`, {}))?.status).toBe(200);
     expect(store.comments(plan.id)).toEqual([]);
     expect((await call("POST", `/api/plans/${plan.id}/comments/ann-1/remove`, {}))?.status).toBe(404);
+  });
+
+  test("Done: the person's edit of the newest is a new person version, with plan review's Direct Edits for the agent", async () => {
+    const { store, plan, doc, call, changes } = world();
+    const saved = await call("POST", `/api/plans/${plan.id}/versions`, { base: 3, text: "# Auth refactor\n\nv3, edited by hand\n", serverSession: "s" });
+    expect(saved?.status).toBe(200);
+    expect(body(saved)!.version).toMatchObject({ version_number: 4, source: "person", author_via: "person", agent_session: null });
+    expect(new TextDecoder().decode(store.versionBytes(plan.id, doc, 4)!)).toBe("# Auth refactor\n\nv3, edited by hand\n");
+    const edits: string = body(saved)!.direct_edits;
+    expect(edits.startsWith("# Direct Edits\n\nThe user edited the document directly.")).toBe(true);
+    expect(edits).toContain("-v3\n+v3, edited by hand");
+    expect(changes()).toEqual([plan.id]);
+  });
+
+  test("a stale base is refused with the newest (nothing written), and so is a save that changes nothing", async () => {
+    const { store, plan, call } = world();
+    const stale = await call("POST", `/api/plans/${plan.id}/versions`, { base: 2, text: "# Mine\n" });
+    expect(stale?.status).toBe(409);
+    expect(body(stale)).toMatchObject({ code: "moved_on", head: { version_number: 3 } });
+    const same = await call("POST", `/api/plans/${plan.id}/versions`, { base: 3, text: "# Auth refactor\n\nv3\n" });
+    expect(same?.status).toBe(409);
+    expect(body(same)!.code).toBe("unchanged");
+    expect((await call("POST", `/api/plans/${plan.id}/versions`, { base: 3, restore: 3 }))?.status).toBe(409);
+    expect(store.versions(plan.id).length).toBe(3);
+    // A bad body, an unknown base, both a text and a restore: refused.
+    expect((await call("POST", `/api/plans/${plan.id}/versions`, { base: 9, text: "x" }))?.status).toBe(404);
+    expect((await call("POST", `/api/plans/${plan.id}/versions`, { base: 3, text: "x", restore: 1 }))?.status).toBe(400);
+    expect((await call("POST", `/api/plans/${plan.id}/versions`, { text: "x" }))?.status).toBe(400);
+    expect(store.versions(plan.id).length).toBe(3);
+  });
+
+  test("never an edit of a diagram; a Restore makes a new newest version of the older text", async () => {
+    const { store, plan, doc, call } = world();
+    const flow = store.addDocument(plan.id, { title: "Flow", kind: "mermaid", created_at: "2026-11-05T09:00:00.000Z" });
+    store.addVersion(plan.id, flow.id, { bytes: new TextEncoder().encode("flowchart LR\n  A --> B\n"), committed_at: "2026-11-05T09:00:00.000Z", source: "agent-tool" });
+    expect((await call("POST", `/api/plans/${plan.id}/versions`, { doc: flow.id, base: 1, text: "flowchart LR\n  A --> C\n" }))?.status).toBe(400);
+    const restored = await call("POST", `/api/plans/${plan.id}/versions`, { base: 3, restore: 1 });
+    expect(restored?.status).toBe(200);
+    expect(body(restored)!.version).toMatchObject({ version_number: 4, source: "person", restored_from: 1 });
+    expect(new TextDecoder().decode(store.versionBytes(plan.id, doc, 4)!)).toBe("# Auth refactor\n\nv1\n");
+  });
+
+  test("approve names the version on screen: refused once the plan moved on; the approval is that version's only", async () => {
+    const { store, plan, doc, call } = world();
+    const refused = await call("POST", `/api/plans/${plan.id}/approve`, { version: 2 });
+    expect(refused?.status).toBe(409);
+    expect(body(refused)).toMatchObject({ code: "moved_on", head: { version_number: 3 } });
+    expect(store.events(plan.id).filter((e) => e.kind === "decision")).toEqual([]);
+    const approved = await call("POST", `/api/plans/${plan.id}/approve`, { version: 3 });
+    expect(approved?.status).toBe(200);
+    expect(body(approved)!.decision).toMatchObject({ decision: "approved", version_number: 3, document_id: doc });
+    // Again: the same approval, not a second one.
+    await call("POST", `/api/plans/${plan.id}/approve`, { version: 3 });
+    expect(store.events(plan.id).filter((e) => e.kind === "decision").length).toBe(1);
+    expect(planApprovalState(store.events(plan.id), doc, 3)).toMatchObject({ kind: "approved", names: [PLAN_PERSON] });
+    expect(store.list()[0]!.approval).toMatchObject({ kind: "approved", version_number: 3 });
+  });
+
+  test("a Send that went marks its comments sent and gives the plan its thread (the first one stays)", async () => {
+    const { store, plan, call } = world();
+    for (const id of ["ann-1", "ann-2"]) await call("POST", `/api/plans/${plan.id}/comments`, { version: 3, annotation: { id, type: "COMMENT", text: id } });
+    const sent = await call("POST", `/api/plans/${plan.id}/sent`, { thread_id: "msg_01M7JKWTSFEGR2XJQEJ1R2GHCQ", message_id: "msg_01M7JKWTSFEGR2XJQEJ1R2GHCQ", to: { host: "claude-code", session: "s-1" }, comments: ["ann-1"] });
+    expect(sent?.status).toBe(200);
+    expect(store.get(plan.id)!.thread_id).toBe("msg_01M7JKWTSFEGR2XJQEJ1R2GHCQ");
+    const byId = new Map(store.comments(plan.id).map((c) => [(c.anchor as { id: string }).id, c]));
+    expect(byId.get("ann-1")!.sent).toMatchObject({ message_id: "msg_01M7JKWTSFEGR2XJQEJ1R2GHCQ", to: { host: "claude-code", session: "s-1" } });
+    expect(byId.get("ann-2")!.sent).toBeNull();
+    // A sent comment is no longer edited or taken away; a later Send keeps the plan's first thread.
+    expect((await call("POST", `/api/plans/${plan.id}/comments`, { version: 3, annotation: { id: "ann-1", text: "again" } }))?.status).toBe(409);
+    await call("POST", `/api/plans/${plan.id}/sent`, { thread_id: "msg_01M7JKWTSFEGR2XJQEJ1R2GHCZ", message_id: "msg_01M7JKWTSFEGR2XJQEJ1R2GHCZ", comments: ["ann-2"] });
+    expect(store.get(plan.id)!.thread_id).toBe("msg_01M7JKWTSFEGR2XJQEJ1R2GHCQ");
+    expect((await call("POST", `/api/plans/${plan.id}/sent`, { thread_id: "x y", message_id: "m", comments: [] }))?.status).toBe(400);
   });
 
   test("not a plan, an unknown plan, an unknown path or bad encoding answer 4xx", async () => {

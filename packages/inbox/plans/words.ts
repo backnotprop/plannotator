@@ -3,7 +3,7 @@
  * A decision reads from the plan's decision record: "Approved" (with or without notes), "Changes asked" (denied, or
  * feedback sent; both local to this computer), or "No decision".
  */
-import { isPlanPictureType, planMediaType, type PlanDecisionKind, type PlanSummary, type PlanVersion } from '@plannotator/core/plans';
+import { isPlanApproval, isPlanPictureType, planMediaType, PLAN_PERSON, type PlanApprovalMoved, type PlanApprovalState, type PlanDecisionKind, type PlanSummary, type PlanVersion } from '@plannotator/core/plans';
 
 export type PlanDecisionTone = 'approved' | 'changes' | 'none';
 
@@ -19,18 +19,67 @@ export function decisionLabel(decision: PlanDecisionKind | null | undefined): st
   return tone === 'approved' ? 'Approved' : tone === 'changes' ? 'Changes asked' : 'No decision';
 }
 
-/**
- * " · changed since" when newer versions came after the one a decision was on, so a decision on v4 never reads as
- * current once v5 exists; "" when it is on the newest version (or names no version, when it cannot tell).
- */
-export function changedSinceDecision(decision: { version_number: number | null } | null | undefined, head: number): string {
-  return decision?.version_number && decision.version_number < head ? ' · changed since' : '';
+// Approval "plans-editing": an approval belongs to the current version only. A new version holds none (unless the
+// person's own edit carried theirs), and the page says so in one line; history keeps the past approval on its row.
+
+/** "You" for the person on this computer, else the recorded name. */
+export const approverName = (name: string) => (name === PLAN_PERSON ? 'You' : name);
+
+/** "You", "You and Dana", "You, Dana and Lee". */
+export function approverList(names: readonly string[]): string {
+  const shown = names.map(approverName);
+  return shown.length <= 1 ? (shown[0] ?? 'You') : `${shown.slice(0, -1).join(', ')} and ${shown[shown.length - 1]}`;
 }
 
-/** A plan's decision as a list shows it: "Approved", or "Approved on v2 · changed since" once newer versions exist. */
-export function planDecisionWords(plan: Pick<PlanSummary, 'decision' | 'head_version_number'>): string {
-  const since = changedSinceDecision(plan.decision, plan.head_version_number);
-  return `${decisionLabel(plan.decision?.decision)}${since ? ` on v${plan.decision!.version_number}${since}` : ''}`;
+/** The newest version holds no approval: "v4 is new and not approved. You approved v3, and that does not carry over." */
+export function approvalClearedLine(state: { version_number: number; from_version_number: number; names: readonly string[] }): string {
+  return `v${state.version_number} is new and not approved. ${approverList(state.names)} approved v${state.from_version_number}, and that does not carry over.`;
+}
+
+/** The person's own edit carried their approval: "Your approval moved to v4." */
+export function approvalMovedLine(moved: Pick<PlanApprovalMoved, 'name' | 'version_number'>): string {
+  return moved.name === PLAN_PERSON ? `Your approval moved to v${moved.version_number}.` : `${moved.name}’s approval moved to v${moved.version_number}.`;
+}
+
+/** Where a plan's approval stands, in a few words (a list row, the rail head). Never an old approval as current. */
+export function approvalWords(state: PlanApprovalState): string {
+  switch (state.kind) {
+    case 'approved':
+      return state.notes ? 'Approved with notes' : 'Approved';
+    case 'changes':
+      return 'Changes asked';
+    case 'cleared':
+      return `v${state.version_number} is new and not approved`;
+    case 'undecided':
+      return `No decision on v${state.version_number}`;
+    default:
+      return 'No decision';
+  }
+}
+
+export function approvalTone(state: PlanApprovalState): PlanDecisionTone {
+  return state.kind === 'approved' ? 'approved' : state.kind === 'changes' ? 'changes' : 'none';
+}
+
+/**
+ * A listed plan's approval: its index line's (`approval`), else, for a line written before approvals were kept, what
+ * its newest decision says of the newest version.
+ */
+export function summaryApproval(plan: Pick<PlanSummary, 'approval' | 'decision' | 'head_version_number'>): PlanApprovalState {
+  if (plan.approval) return plan.approval;
+  const d = plan.decision;
+  const head = plan.head_version_number;
+  if (!d) return { kind: 'none' };
+  const approves = isPlanApproval(d.decision);
+  if (!d.version_number || d.version_number >= head) {
+    return approves ? { kind: 'approved', version_number: head, names: [PLAN_PERSON], notes: d.decision === 'approved-with-notes', moved: null } : { kind: 'changes', version_number: head };
+  }
+  return approves ? { kind: 'cleared', version_number: head, from_version_number: d.version_number, names: [PLAN_PERSON] } : { kind: 'undecided', version_number: head, from_version_number: d.version_number };
+}
+
+/** A plan's decision as a list shows it: "Approved" on the newest version, else "v4 is new and not approved". */
+export function planDecisionWords(plan: Pick<PlanSummary, 'approval' | 'decision' | 'head_version_number'>): string {
+  return approvalWords(summaryApproval(plan));
 }
 
 const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`;

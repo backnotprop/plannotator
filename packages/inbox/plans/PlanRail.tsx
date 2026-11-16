@@ -1,9 +1,10 @@
 /**
  * The plan page's versions, in the shared frame's versions panel (@plannotator/ui/components/frame `VersionsPanel`,
  * the Space page screen's): the versions of the file on screen, newest first, consecutive saves by one author within
- * 30 minutes folded; who saved each (a display name only; no author line at all while no version has one) and when;
- * the decision on its version (an approval, or "Changes asked"); "You saw this" under the version the person had
- * seen. Under the version on screen: the frame's Compare and Copy link (`VersionActions`), with our Compare of the
+ * 30 minutes folded; who saved each (a display name only, "You" for the person's own edit or Restore; no author line
+ * at all while no version has one) and when; the decision on its version (an approval, or "Changes asked"): history,
+ * kept on the row of the version it was given on (approval "plans-editing"); "You saw this" under the version the
+ * person had seen, "Restored v2" under a Restore. Under the version on screen: the frame's Compare and Copy link (`VersionActions`), with our Compare of the
  * version you saw with the newest between them when the newest is on screen. Under the list (its footer): that
  * file's own activity (its versions saved, the decisions on it; nothing plan-wide). An artifact has no versions: the
  * page's line says so (`ArtifactLine`).
@@ -46,6 +47,7 @@ export function comparePair(shown: number, seen: number | null): { from: number;
 }
 
 function author(v: PlanVersion): VersionAuthor {
+  if (v.source === 'person' && !authorOf(v)) return { kind: 'person', name: 'You', key: 'person' };
   const name = authorOf(v);
   return name ? { kind: 'person', name, key: `name:${name}` } : { kind: 'unnamed' };
 }
@@ -96,13 +98,27 @@ export function PlanVersions(props: PlanVersionsProps) {
         rowLink: (entry) => rowLink(entry.number!),
         onRowOpen: () => onPicked(),
         authors,
-        note: (entry) =>
-          seen !== null && entry.number === seen && seen !== head ? (
-            <span className="ib-plan-seen" data-plan-seen="">
-              <Icon name="eye" />
-              You saw this
-            </span>
-          ) : null,
+        note: (entry) => {
+          const restored = versions.find((v) => v.version_number === entry.number)?.restored_from;
+          const saw = seen !== null && entry.number === seen && seen !== head;
+          if (!saw && !restored) return null;
+          return (
+            <>
+              {saw && (
+                <span className="ib-plan-seen" data-plan-seen="">
+                  <Icon name="eye" />
+                  You saw this
+                </span>
+              )}
+              {restored ? (
+                <span className="ib-plan-seen" data-plan-restored="">
+                  <Icon name="restart" />
+                  Restored v{restored}
+                </span>
+              ) : null}
+            </>
+          );
+        },
       }}
       onRetry={() => {}}
       onClose={onClose}
@@ -149,10 +165,16 @@ export function ArtifactLine({ artifact }: { artifact: PlanArtifact }) {
 /** One document's history: when each of its versions was saved and the decisions on it. */
 function Activity({ versions, decisions }: { versions: readonly PlanVersion[]; decisions: readonly PlanDecision[] }) {
   const items = [
-    ...versions.map((v) => ({ at: v.committed_at, key: `v${v.version_number}`, line: `v${v.version_number} saved`, tone: null })),
+    ...versions.map((v) => ({
+      at: v.committed_at,
+      key: `v${v.version_number}`,
+      line: v.source !== 'person' ? `v${v.version_number} saved` : v.restored_from ? `You restored v${v.restored_from} as v${v.version_number}` : `You saved v${v.version_number}`,
+      tone: null,
+    })),
     ...decisions.map((d, i) => {
       const tone = decisionTone(d.decision);
       const on = d.version_number ? ` v${d.version_number}` : '';
+      if (d.moved_from && d.version_number) return { at: d.at, key: `d${i}`, line: `Your approval moved to v${d.version_number}`, tone };
       return { at: d.at, key: `d${i}`, line: tone === 'approved' ? `You approved${on}` : tone === 'changes' ? `You asked for changes${on ? ` on${on}` : ''}` : decisionLabel(d.decision), tone };
     }),
   ]

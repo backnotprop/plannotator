@@ -17,7 +17,7 @@ import { writeRoute } from '../app/writeRoute';
 import { PlansGetStarted } from './PlansGetStarted';
 import { PlansCompact } from './PlansCompact';
 import { readPlans, usePlansPage } from './store';
-import { decisionTone, filterPlans, holdsLine, newSince, newsLine, planDecisionWords, planGroups, planProjects, PLANS_VIEWS, type PlansView } from './words';
+import { approvalTone, filterPlans, holdsLine, newSince, newsLine, planDecisionWords, summaryApproval, planGroups, planProjects, PLANS_VIEWS, type PlansView } from './words';
 import { DecisionMark, ImportErrorNote, PlansMessage } from './parts';
 
 const openPlan = (id: string) => writeRoute({ page: 'plans', project: null, thread: null, plan: id });
@@ -185,7 +185,8 @@ function PlansList({ plans, importing, error, importError }: { plans: readonly P
 
 function PlanRow({ plan }: { plan: PlanSummary }) {
   const fresh = newSince(plan);
-  const tone = decisionTone(plan.decision?.decision);
+  // The newest version's approval only: an approval of an older one is not this plan's (approval "plans-editing").
+  const tone = approvalTone(summaryApproval(plan));
   return (
     <li>
       <button type="button" className="ib-plans-row" onClick={() => openPlan(plan.id)} data-plan-row={plan.id} data-changed={plan.changed ? '' : undefined}>
@@ -197,7 +198,7 @@ function PlanRow({ plan }: { plan: PlanSummary }) {
           <span className="ib-plans-row-news">{newsLine(plan)}</span>
           <span className="ib-plans-row-holds">
             <DecisionMark tone={tone} />
-            {/* A decision on an older version says so: "Approved on v2 · changed since". */}
+            {/* A new version holds no approval: "v4 is new and not approved". */}
             <span data-plan-decision={tone}>{planDecisionWords(plan)}</span>
             <span aria-hidden="true">·</span>
             <span>{holdsLine(plan)}</span>

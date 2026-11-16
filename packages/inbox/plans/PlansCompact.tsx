@@ -10,7 +10,7 @@ import type { MouseEvent } from 'react';
 import type { PlanSummary } from '@plannotator/core/plans';
 import { formatCount, fullTime, shortTime } from '@plannotator/core/inbox-format';
 import { hashOf, writeRoute } from '../app/writeRoute';
-import { compactGroups, decisionTone, newSince, planDecisionWords, PLANS_COMPACT_COLUMNS } from './words';
+import { compactGroups, approvalTone, newSince, planDecisionWords, summaryApproval, PLANS_COMPACT_COLUMNS } from './words';
 import { DecisionMark } from './parts';
 
 const planRoute = (id: string) => ({ page: 'plans' as const, project: null, thread: null, plan: id });
@@ -64,7 +64,8 @@ export function PlansCompact({ plans, labelledBy }: { plans: readonly PlanSummar
 
 function CompactRow({ plan }: { plan: PlanSummary }) {
   const fresh = newSince(plan);
-  const tone = decisionTone(plan.decision?.decision);
+  // The newest version's approval only: an approval of an older one is not this plan's (approval "plans-editing").
+  const tone = approvalTone(summaryApproval(plan));
   const version = `v${plan.head_version_number}`;
   return (
     <tr className="ib-plans-c-row" data-plan-row={plan.id} data-changed={plan.changed ? '' : undefined}>

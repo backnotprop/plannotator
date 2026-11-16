@@ -72,7 +72,7 @@ function routeClick(go: () => void) {
   };
 }
 
-/** The plan's current decision for the rail head: its words ("Approved with notes on v2 · changed since") and tone. */
+/** The plan's current approval for the rail head: its words ("Approved", "v4 is new and not approved") and tone. */
 export interface PlanRailDecision {
   words: string;
   tone: PlanDecisionTone;

@@ -5,16 +5,18 @@
  * draft), taking one version of the plan as its file through the file-source seam (fileSource.tsx):
  * - the text is the version's, read from the plan library; Download is that version's bytes;
  * - a comment is kept in the plan library (`POST /api/plans/:id/comments`, `comments.jsonl`), as the Inbox keeps a
- *   file's comment until a Send carries it, and taken away the same way;
+ *   file's comment until a Send carries it, and taken away the same way; one a Send carried is an earlier comment;
  * - the rules for a plan's own words hold (planContent.tsx): no picture but one written into it, no link but a web
  *   one does anything, a Mermaid fence that could load is shown as its source, a drawn diagram that loads is refused.
  *
- * Send: a plan has no Inbox thread yet (nothing writes `thread_id`), so Send opens New message (compose/openComposer.ts,
- * the Inbox's own "ask an agent about this") to the agent session that wrote the plan, with the comments on the version
- * on screen as plan feedback; the person reads it and presses Send there. With no session known, Send is disabled and
- * says why in the Inbox's words for a project with no live agent.
+ * The plan page is not a file beside a thread: an Escape never leaves it for the Plans list (the pane's "Escape
+ * closes the file" is for a thread's file). × still goes back to Plans, as the Plans crumb and the rail's back do.
+ *
+ * Send (deliver.ts): the comments on the version on screen as plan feedback, into the plan's thread once it has one,
+ * else New message to the agent session that wrote the plan; once it went, they are sent and the plan has the thread.
+ * With neither, Send is disabled and says why in the Inbox's words for a project with no live agent.
  */
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { InboxAnnotationRecord, InboxAttachmentState } from '@plannotator/core/inbox-types';
 import { planCommentAnnotationId, type PlanComment, type PlanDocument, type PlanVersion } from '@plannotator/core/plans';
 import { exportAnnotations, parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
@@ -22,10 +24,9 @@ import { pageServerSession } from '../api';
 import { attachmentBlocks } from '../attachments';
 import { AttachmentPane } from '../components/AttachmentPane';
 import { INBOX_FILE_SOURCE, InboxFileSourceProvider, type InboxFileSource } from '../fileSource';
-import { openComposer } from '../compose/openComposer';
-import { hostLabel } from '../compose/model';
 import { Icon } from '../icons';
 import { plansApi, type PlanRead } from './client';
+import { deliverToPlanAgent, noAgentWords, planAgentLabel, planSession } from './deliver';
 import { PlanContentRules, planBlocks, resolvePlanImage, resolvePlanLink } from './planContent';
 
 const noop = () => {};
@@ -50,7 +51,7 @@ export function planAttachment(planId: string, document: PlanDocument, version: 
   };
 }
 
-/** A kept comment as the pane's record (its annotation's id is the record's id, as the Inbox's). */
+/** A kept comment as the pane's record (its annotation's id is the record's id, as the Inbox's); a sent one names its message. */
 export function planRecord(plan: PlanRead['plan'], comment: PlanComment, attachment: InboxAttachmentState): InboxAnnotationRecord {
   return {
     id: planCommentAnnotationId(comment)!,
@@ -62,36 +63,61 @@ export function planRecord(plan: PlanRead['plan'], comment: PlanComment, attachm
     version: 'current',
     annotation: comment.anchor as Record<string, unknown>,
     created_at: comment.created_at,
-    updated_at: comment.created_at,
+    updated_at: comment.sent?.at ?? comment.created_at,
     removed_at: null,
-    sent_reply_id: null,
+    sent_reply_id: comment.sent?.message_id ?? null,
   };
 }
 
-/** The agent session that wrote the plan: the newest version that names one. */
-export function planSession(versions: readonly PlanVersion[]): { session: string; host: string | null; name: string | null } | null {
-  for (let i = versions.length - 1; i >= 0; i--) {
-    const v = versions[i]!;
-    if (v.agent_session) return { session: v.agent_session, host: v.agent_host, name: v.agent_name };
-  }
-  return null;
+/**
+ * The pane's close, which an Escape never reaches: its "Escape closes the file" calls the same close as ×, so an
+ * Escape seen on its way down (the window's capture phase, before any handler) holds the close until it is over.
+ */
+function useCloseNotOnEscape(onClose: () => void): () => void {
+  const escaping = useRef(false);
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const down = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      escaping.current = true;
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        escaping.current = false;
+      }, 0);
+    };
+    window.addEventListener('keydown', down, true);
+    return () => {
+      window.removeEventListener('keydown', down, true);
+      if (timer) clearTimeout(timer);
+    };
+  }, []);
+  return useCallback(() => {
+    if (!escaping.current) onClose();
+  }, [onClose]);
 }
 
-export function PlanAnnotate({ read, document, docRef, versions, shown, phone, onClose }: { read: PlanRead; document: PlanDocument; docRef: string | null; versions: readonly PlanVersion[]; shown: number; phone: boolean; onClose: () => void }) {
+export function PlanAnnotate({ read, document, docRef, versions, shown, phone, onClose, onChanged }: { read: PlanRead; document: PlanDocument; docRef: string | null; versions: readonly PlanVersion[]; shown: number; phone: boolean; onClose: () => void; onChanged: () => void }) {
   const planId = read.plan.id;
   const byAttachment = useMemo(() => new Map(versions.map((v) => [planAttachment(planId, document, v).id, v])), [planId, document, versions]);
   const attachmentOf = useCallback((v: PlanVersion) => planAttachment(planId, document, v), [planId, document]);
   const version = versions.find((v) => v.version_number === shown) ?? versions[versions.length - 1]!;
   const attachment = useMemo(() => attachmentOf(version), [attachmentOf, version]);
-  // This document's kept comments, each on its version's file.
-  const [records, setRecords] = useState<InboxAnnotationRecord[]>(() =>
-    (read.comments ?? []).flatMap((c) => {
-      if (c.target.kind !== 'document' || c.target.document_id !== document.id) return [];
-      const v = versions.find((x) => x.version === (c.target as { document_version: string }).document_version);
-      return v ? [planRecord(read.plan, c, attachmentOf(v))] : [];
-    }),
+  // This document's kept comments, each on its version's file, as the plan library holds them (read again after a Send).
+  const kept = useMemo(
+    () =>
+      (read.comments ?? []).flatMap((c) => {
+        if (c.target.kind !== 'document' || c.target.document_id !== document.id) return [];
+        const v = versions.find((x) => x.version === (c.target as { document_version: string }).document_version);
+        return v ? [planRecord(read.plan, c, attachmentOf(v))] : [];
+      }),
+    [read.comments, read.plan, document.id, versions, attachmentOf],
   );
+  const [records, setRecords] = useState<InboxAnnotationRecord[]>(kept);
+  useEffect(() => setRecords(kept), [kept]);
+  const waiting = useMemo(() => records.filter((r) => r.sent_reply_id === null), [records]);
+  const earlier = useMemo(() => records.filter((r) => r.sent_reply_id !== null), [records]);
   const [full, setFull] = useState(false);
+  const close = useCloseNotOnEscape(onClose);
   const source = useMemo<InboxFileSource>(() => {
     const numberOf = (a: InboxAttachmentState) => byAttachment.get(a.id)?.version_number ?? shown;
     return {
@@ -120,18 +146,28 @@ export function PlanAnnotate({ read, document, docRef, versions, shown, phone, o
   }, [byAttachment, planId, docRef, read.plan, shown]);
 
   const session = planSession(versions);
-  const agent = session?.name || (session?.host ? hostLabel(session.host) : null) || 'the agent';
+  const agent = planAgentLabel(session);
   const project = read.plan.project_name;
-  const onScreen = records.filter((r) => r.path === attachment.path);
-  const canSend = session !== null && onScreen.length > 0;
+  const onScreen = waiting.filter((r) => r.path === attachment.path);
+  const reachable = !!read.plan.thread_id || session !== null;
+  const canSend = reachable && onScreen.length > 0;
+  const [sending, setSending] = useState(false);
+  const [failed, setFailed] = useState<string | null>(null);
   const send = async () => {
-    if (!session || onScreen.length === 0) return;
-    const text = await plansApi.version(planId, version.version_number, docRef);
-    const blocks = planBlocks(parseMarkdownToBlocks(text));
-    const body = exportAnnotations(blocks, onScreen.map((r) => r.annotation), [], 'Plan Feedback', 'plan');
-    openComposer({ subject: read.plan.name, body, to: { session: session.session } });
+    if (!canSend || sending) return;
+    setSending(true);
+    setFailed(null);
+    try {
+      const text = await plansApi.version(planId, version.version_number, docRef);
+      const blocks = planBlocks(parseMarkdownToBlocks(text));
+      const body = exportAnnotations(blocks, onScreen.map((r) => r.annotation), [], 'Plan Feedback', 'plan');
+      await deliverToPlanAgent({ plan: read.plan, session, words: body, comments: onScreen.map((r) => r.id), onSent: onChanged });
+    } catch (error) {
+      setFailed(error instanceof Error ? error.message : String(error));
+    } finally {
+      setSending(false);
+    }
   };
-  const noSession = project ? `No agent is running in ${project}` : 'No live session';
   return (
     <div className="ib-plan-annotate" data-plan-document={version.version_number} data-plan-annotate="">
       <PlanContentRules>
@@ -140,7 +176,8 @@ export function PlanAnnotate({ read, document, docRef, versions, shown, phone, o
             key={attachment.id}
             attachment={attachment}
             attachments={[attachment]}
-            records={records}
+            records={waiting}
+            earlierRecords={earlier}
             agent={agent}
             projectName={project ?? 'Plans'}
             projectRoot={read.plan.project_root ?? ''}
@@ -157,17 +194,17 @@ export function PlanAnnotate({ read, document, docRef, versions, shown, phone, o
             onSaved={(record) => setRecords((all) => [...all.filter((r) => r.id !== record.id), record])}
             onRemoved={(id) => setRecords((all) => all.filter((r) => r.id !== id))}
             onOpenAt={noop}
-            onClose={onClose}
+            onClose={close}
             strip={{ picks: 0, annotations: onScreen.length, onWriteReply: () => (canSend ? void send() : setFull(false)) }}
           />
         </InboxFileSourceProvider>
       </PlanContentRules>
       <div className="ib-plan-send" data-plan-send="">
-        <p className="ib-plan-send-t" id={`plan-send-${attachment.id}`}>
+        <p className="ib-plan-send-t" id={`plan-send-${attachment.id}`} role={failed ? 'alert' : undefined}>
           {/* The pane's own chip words (its full screen foot), or the Inbox's for a project with no live agent. */}
-          {session === null ? noSession : `${onScreen.length} annotation${onScreen.length === 1 ? '' : 's'} ${onScreen.length === 1 ? 'rides' : 'ride'} your next Send to ${agent}.`}
+          {failed ?? (!reachable ? noAgentWords(project) : `${onScreen.length} annotation${onScreen.length === 1 ? '' : 's'} ${onScreen.length === 1 ? 'rides' : 'ride'} your next Send to ${agent}.`)}
         </p>
-        <button type="button" className="ib-btn ib-sm ib-pri" disabled={!canSend} aria-describedby={`plan-send-${attachment.id}`} onClick={() => void send()} data-plan-send-button="">
+        <button type="button" className="ib-btn ib-sm ib-pri" disabled={!canSend || sending} aria-describedby={`plan-send-${attachment.id}`} onClick={() => void send()} data-plan-send-button="">
           <Icon name="send" size={14} />
           Send
         </button>

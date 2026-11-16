@@ -89,6 +89,10 @@ export interface PlanRecord {
   updated_at: string;
   created_by: PlanActor;
   legacy: PlanLegacy | null;
+  /** The last time a new version cleared approvals (approval "plans-editing"); absent before the first. */
+  last_approval_cleared?: PlanApprovalCleared | null;
+  /** The last time the person's own edit carried their approval to the new version; absent before the first. */
+  last_approval_moved?: PlanApprovalMoved | null;
 }
 
 export interface PlanDocument {
@@ -118,6 +122,8 @@ export interface PlanVersion extends PlanActor {
   source: PlanVersionSource;
   /** The file it was imported from, relative to the data dir (`history/p/s/003.md`); null for a new one. */
   legacy: string | null;
+  /** A Restore: the version whose bytes this one took again (present only on a restore). */
+  restored_from?: number;
 }
 
 /**
@@ -172,6 +178,8 @@ export interface PlanDecision {
   feedback_record: { file: string; line_sha: string; record_file: string | null } | null;
   /** The decision snapshot it came from (`plans/…-approved.md`), when one. */
   snapshot: string | null;
+  /** An approval the person's own edit carried here from that version (present only then). */
+  moved_from?: number;
 }
 
 export interface PlanEvent extends PlanActor {
@@ -213,6 +221,8 @@ export interface PlanIndexLine {
   head_version_number: number;
   /** The newest decision (by time), or null. */
   decision: { decision: PlanDecisionKind; version_number: number | null; at: string } | null;
+  /** Where the main page's approval stands on its newest version (`planApprovalState`); absent from an older line. */
+  approval?: PlanApprovalState;
   counts: { documents: number; versions: number; comments: number; artifacts: number; events: number };
 }
 
@@ -428,6 +438,127 @@ export function checkPlanCommentInput(input: unknown): { ok: true; doc: string |
   if (!isPlanAnnotationId(input.annotation.id)) return { ok: false, error: "annotation.id: a short id" };
   if (JSON.stringify(input.annotation).length > PLAN_COMMENT_MAX) return { ok: false, error: `annotation: at most ${PLAN_COMMENT_MAX / 1024} KB` };
   return { ok: true, doc: (input.doc as string | undefined) ?? null, version: input.version, annotation: input.annotation };
+}
+
+/** The most a version the person writes may hold (its text, in bytes): what a plan review's editor ever sends. */
+export const PLAN_TEXT_MAX = 2 * 1024 * 1024;
+
+/**
+ * The body of `POST /api/plans/:id/versions`: a new newest version the person made, either their edit of the newest
+ * (`text`) or a Restore of an older one (`restore`, its number). `base` is the version number on screen when they
+ * started: the Inbox refuses it once a newer version came (the plan moved on), so nothing is written over unseen.
+ */
+export function checkPlanVersionInput(input: unknown): { ok: true; doc: string | null; base: number; text: string | null; restore: number | null } | { ok: false; error: string } {
+  if (!isObject(input)) return { ok: false, error: "the body is { doc?, base, text } or { doc?, base, restore }" };
+  const unknown = Object.keys(input).find((key) => !["doc", "base", "text", "restore", "serverSession"].includes(key));
+  if (unknown) return { ok: false, error: `unknown field ${unknown}` };
+  if (input.doc !== undefined && !isPlanId("doc", input.doc)) return { ok: false, error: "doc is a document id (doc_…)" };
+  if (!isPlanVersionNumber(input.base)) return { ok: false, error: "base is the version number the edit started from" };
+  const hasText = input.text !== undefined;
+  const hasRestore = input.restore !== undefined;
+  if (hasText === hasRestore) return { ok: false, error: "send text or restore, one of them" };
+  if (hasText && typeof input.text !== "string") return { ok: false, error: "text: the document's words" };
+  if (hasText && new TextEncoder().encode(input.text as string).length > PLAN_TEXT_MAX) return { ok: false, error: `text: at most ${PLAN_TEXT_MAX / 1024 / 1024} MB` };
+  if (hasRestore && !isPlanVersionNumber(input.restore)) return { ok: false, error: "restore is a version number" };
+  return { ok: true, doc: (input.doc as string | undefined) ?? null, base: input.base, text: hasText ? (input.text as string) : null, restore: hasRestore ? (input.restore as number) : null };
+}
+
+/** The body of `POST /api/plans/:id/approve`: the version the person is looking at (`doc` absent: the primary one). */
+export function checkPlanApproveInput(input: unknown): { ok: true; doc: string | null; version: number } | { ok: false; error: string } {
+  if (!isObject(input)) return { ok: false, error: "the body is { doc?, version }" };
+  const unknown = Object.keys(input).find((key) => !["doc", "version", "serverSession"].includes(key));
+  if (unknown) return { ok: false, error: `unknown field ${unknown}` };
+  if (input.doc !== undefined && !isPlanId("doc", input.doc)) return { ok: false, error: "doc is a document id (doc_…)" };
+  if (!isPlanVersionNumber(input.version)) return { ok: false, error: "version is the version number on screen" };
+  return { ok: true, doc: (input.doc as string | undefined) ?? null, version: input.version };
+}
+
+/**
+ * The body of `POST /api/plans/:id/sent`: a Send from the plan page went out (New message's first thread, or a reply
+ * in the plan's thread), so its comments are sent and the plan has that thread.
+ */
+export function checkPlanSentInput(input: unknown): { ok: true; thread_id: string; message_id: string; to: { host: string; session: string } | null; comments: string[] } | { ok: false; error: string } {
+  if (!isObject(input)) return { ok: false, error: "the body is { thread_id, message_id, to?, comments }" };
+  const unknown = Object.keys(input).find((key) => !["thread_id", "message_id", "to", "comments", "serverSession"].includes(key));
+  if (unknown) return { ok: false, error: `unknown field ${unknown}` };
+  const id = (value: unknown) => typeof value === "string" && /^[A-Za-z0-9_:-]{1,128}$/.test(value);
+  if (!id(input.thread_id)) return { ok: false, error: "thread_id: the Inbox thread's id" };
+  if (!id(input.message_id)) return { ok: false, error: "message_id: the message that carried it" };
+  const to = input.to;
+  if (to !== undefined && to !== null && !(isObject(to) && typeof to.host === "string" && typeof to.session === "string")) return { ok: false, error: "to: { host, session }" };
+  if (!Array.isArray(input.comments) || input.comments.length > 1000 || !input.comments.every(isPlanAnnotationId)) return { ok: false, error: "comments: the annotation ids sent" };
+  return { ok: true, thread_id: input.thread_id as string, message_id: input.message_id as string, to: to ? { host: (to as { host: string }).host, session: (to as { session: string }).session } : null, comments: input.comments as string[] };
+}
+
+// ─────────────────────────────── Approvals ───────────────────────────────
+//
+// Approval "plans-editing": an approval belongs to the version it was given on, the current one only. A new version
+// clears it (the plan record keeps `last_approval_cleared`), except the person's own edit, as its only author, of the
+// version they approved: their approval moves to the new version (`last_approval_moved`, and a decision on the new
+// version with `moved_from`). Decided by the store from the version's authors; a Restore or an agent's version clears.
+
+/** The person on this computer, as an approval names them: the Inbox keeps no person's name ("You" on screen). */
+export const PLAN_PERSON = "person";
+
+export interface PlanApprovalCleared {
+  document_id: string;
+  cleared_at: string;
+  /** The new version, which holds no approval. */
+  version_number: number;
+  /** The version the approvals were on. */
+  from_version_number: number;
+  /** Who had approved it (`PLAN_PERSON`: the person on this computer). */
+  approver_names: string[];
+}
+
+export interface PlanApprovalMoved {
+  document_id: string;
+  moved_at: string;
+  version_number: number;
+  from_version_number: number;
+  /** Whose approval moved (`PLAN_PERSON`: the person on this computer). */
+  name: string;
+}
+
+export const isPlanApproval = (decision: PlanDecisionKind | null | undefined) => decision === "approved" || decision === "approved-with-notes";
+
+/** Who a decision is by: its recorded name, else the person on this computer. */
+export const planApproverName = (actor: Pick<PlanActor, "author_label">) => actor.author_label?.trim() || PLAN_PERSON;
+
+/** The approvals version `n` of a document holds: each approver's newest decision on it, when that one approves. */
+export function planApprovalsOn(events: readonly PlanEvent[], docId: string, n: number): { name: string; event: PlanEvent }[] {
+  const newest = new Map<string, PlanEvent>();
+  const ordered = events.filter((e) => e.kind === "decision" && e.decision?.document_id === docId && e.decision.version_number === n).sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id));
+  for (const event of ordered) newest.set(planApproverName(event), event);
+  return [...newest].filter(([, event]) => isPlanApproval(event.decision!.decision)).map(([name, event]) => ({ name, event }));
+}
+
+/** Where a document's approval stands on its newest version (`head`), for every place that shows it. */
+export type PlanApprovalState =
+  | { kind: "approved"; version_number: number; names: string[]; notes: boolean; moved: PlanApprovalMoved | null }
+  | { kind: "changes"; version_number: number }
+  | { kind: "cleared"; version_number: number; from_version_number: number; names: string[] }
+  | { kind: "undecided"; version_number: number; from_version_number: number }
+  | { kind: "none" };
+
+export function planApprovalState(events: readonly PlanEvent[], docId: string, head: number, facts: { cleared?: PlanApprovalCleared | null; moved?: PlanApprovalMoved | null } = {}): PlanApprovalState {
+  if (head < 1) return { kind: "none" };
+  const approvals = planApprovalsOn(events, docId, head);
+  if (approvals.length > 0) {
+    const moved = facts.moved && facts.moved.document_id === docId && facts.moved.version_number === head ? facts.moved : null;
+    return { kind: "approved", version_number: head, names: approvals.map((a) => a.name), notes: approvals.some((a) => a.event.decision!.decision === "approved-with-notes"), moved };
+  }
+  const decided = events.filter((e) => e.kind === "decision" && e.decision?.document_id === docId && e.decision.version_number);
+  if (decided.some((e) => e.decision!.version_number === head)) return { kind: "changes", version_number: head };
+  const cleared = facts.cleared;
+  if (cleared && cleared.document_id === docId && cleared.version_number === head && cleared.approver_names.length > 0) {
+    return { kind: "cleared", version_number: head, from_version_number: cleared.from_version_number, names: cleared.approver_names };
+  }
+  // No fact (history imported before facts were kept, or versions since): the newest older version with a decision.
+  const older = Math.max(0, ...decided.map((e) => e.decision!.version_number!).filter((n) => n < head));
+  if (older === 0) return { kind: "none" };
+  const held = planApprovalsOn(events, docId, older);
+  return held.length > 0 ? { kind: "cleared", version_number: head, from_version_number: older, names: held.map((a) => a.name) } : { kind: "undecided", version_number: head, from_version_number: older };
 }
 
 /** The first `# heading` of a markdown document, trimmed; null when it has none. */

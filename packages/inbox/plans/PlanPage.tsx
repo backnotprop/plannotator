@@ -5,15 +5,16 @@
  * 768 px three cards: the frame's left rail with the plan's files (PlanFiles.tsx; its head's quiet line carries the
  * project and the plan's current decision), the frame's page card whose reading line says which version is on screen
  * (or which two are compared) and how many there are, holding the file (a Markdown page in the Inbox's own file viewer with its toolbars and comments, PlanAnnotate.tsx; a diagram or HTML page in PlanDocument.tsx; an artifact
- * by what it is, PlanArtifactView.tsx), and the frame's versions panel (PlanRail.tsx), open until the person closes
+ * by what it is, PlanArtifactView.tsx), with Edit, Approve and Restore and the approval's line in the reading line
+ * (PlanEditing.tsx, approval "plans-editing"), and the frame's versions panel (PlanRail.tsx), open until the person closes
  * it (kept), reopened from the reading line. "Changed since you looked" compares with the version the person had
  * seen of that document when the page opened, and Show changes opens the diff from it to the newest. The address
  * carries the file (`&doc=`, `&file=`); the main page keeps the plan's own address. Short of room the rail gives way
  * first (the frame's sheet, `RailSheet docked={false}`), then the versions open as the frame's sheet; on a phone the
- * frame's sheets carry both. The plan's own Inbox thread comes later.
+ * frame's sheets carry both. A write of the page's own (a version, an approval, a Send) reads the plan again in place.
  */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useState, type MouseEvent, type ReactElement } from 'react';
-import type { PlanDecision, PlanDocument as PlanDocumentRecord, PlanVersion } from '@plannotator/core/plans';
+import { planApprovalState, type PlanDecision, type PlanDocument as PlanDocumentRecord, type PlanVersion } from '@plannotator/core/plans';
 import { storage } from '@plannotator/ui/utils/storage';
 import {
   AppRail,
@@ -34,7 +35,8 @@ import { Icon } from '../icons';
 import { hashOf, writeRoute } from '../app/writeRoute';
 import type { PlanRead } from './client';
 import { recordPlanLook, useDocVersions, usePlan } from './store';
-import { changedSinceDecision, decisionLabel, decisionTone, PLAN_FILES_WORDS } from './words';
+import { approvalTone, approvalWords, PLAN_FILES_WORDS } from './words';
+import { usePlanEditing } from './PlanEditing';
 import { PlansMessage } from './parts';
 import { PlanDocument } from './PlanDocument';
 import { PlanAnnotate } from './PlanAnnotate';
@@ -69,12 +71,14 @@ export interface PlanPageProps {
 
 export function PlanPage(props: PlanPageProps) {
   const [retry, setRetry] = useState(0);
-  const state = usePlan(props.id, retry);
+  const [fresh, setFresh] = useState(0);
+  const onChanged = useCallback(() => setFresh((n) => n + 1), []);
+  const state = usePlan(props.id, retry, fresh);
   if (state.missing) return <PlansMessage title="This plan is not here" body="It may have been removed, or Plans was turned off." onBack={toList} />;
   if (state.error) return <PlansMessage title="This plan could not be read" body={state.error} onRetry={() => setRetry((n) => n + 1)} onBack={toList} />;
   if (!state.read || !state.versions) return <PlansMessage busy title="Plan" body="Loading the plan…" onBack={toList} />;
   if (state.versions.length === 0) return <PlansMessage title={state.read.plan.name} body="This plan has no version yet." onBack={toList} />;
-  return <PlanLoaded {...props} read={state.read} versions={state.versions} />;
+  return <PlanLoaded {...props} read={state.read} versions={state.versions} fresh={fresh} onChanged={onChanged} />;
 }
 
 /** The newest decision on each version of one document, and the newest of all. */
@@ -137,7 +141,7 @@ interface VersionsPlace {
   setOpen: (open: boolean) => void;
 }
 
-function PlanLoaded({ id, version, diff, phone, doc, file, read, versions }: PlanPageProps & { read: PlanRead; versions: readonly PlanVersion[] }) {
+function PlanLoaded({ id, version, diff, phone, doc, file, read, versions, fresh, onChanged }: PlanPageProps & { read: PlanRead; versions: readonly PlanVersion[]; fresh: number; onChanged: () => void }) {
   const primary = read.plan.primary_doc_id;
   const artifacts = read.artifacts ?? [];
   const artifact = file ? (artifacts.find((a) => a.asset_path === file) ?? null) : null;
@@ -171,16 +175,11 @@ function PlanLoaded({ id, version, diff, phone, doc, file, read, versions }: Pla
   // for one project); Plans / the plan / the file on another (its path when it has one).
   const onMain = !artifact && document.id === primary;
   const fileName = artifact ? artifact.asset_path : document.doc_path || document.title || read.plan.name;
-  // The plan's current decision (its main page's newest), in the rail head so it shows with the versions closed; a
-  // decision on an older version says so ("… on v2 · changed since"), never reading as current.
+  // The plan's approval on its main page's newest version, in the rail head so it shows with the versions closed. An
+  // approval of an older version is never current (approval "plans-editing"): "v4 is new and not approved".
   const mainHead = versions[versions.length - 1]!.version_number;
-  const planDecision = decisionsOf(read.decisions, primary).newest;
-  const railDecision: PlanRailDecision | null = planDecision
-    ? {
-        words: `${decisionLabel(planDecision.decision)}${planDecision.version_number && planDecision.version_number < mainHead ? ` on v${planDecision.version_number}${changedSinceDecision(planDecision, mainHead)}` : ''}`,
-        tone: decisionTone(planDecision.decision),
-      }
-    : null;
+  const planApproval = planApprovalState(read.events, primary, mainHead, { cleared: read.plan.last_approval_cleared, moved: read.plan.last_approval_moved });
+  const railDecision: PlanRailDecision | null = planApproval.kind === 'none' ? null : { words: approvalWords(planApproval), tone: approvalTone(planApproval) };
   const head = <PlanRailHead name={read.plan.name} project={project} decision={railDecision} />;
   const band = (
     <AppRail
@@ -233,7 +232,7 @@ function PlanLoaded({ id, version, diff, phone, doc, file, read, versions }: Pla
               </div>
             </PageCard>
           ) : (
-            <DocPane key={document.id} id={id} document={document} primary={primary} read={read} mainVersions={versions} version={version} diff={diff} place={place} phone={phone} />
+            <DocPane key={document.id} id={id} document={document} primary={primary} read={read} mainVersions={versions} version={version} diff={diff} place={place} phone={phone} fresh={fresh} onChanged={onChanged} />
           )}
         </FrameBox>
       </section>
@@ -252,6 +251,8 @@ function DocPane({
   diff,
   place,
   phone,
+  fresh,
+  onChanged,
 }: {
   id: string;
   document: PlanDocumentRecord;
@@ -262,10 +263,12 @@ function DocPane({
   diff: { from: number; to: number } | null;
   place: VersionsPlace;
   phone: boolean;
+  fresh: number;
+  onChanged: () => void;
 }) {
   const isMain = document.id === primary;
   const [retry, setRetry] = useState(0);
-  const other = useDocVersions(id, isMain ? null : document.id, retry);
+  const other = useDocVersions(id, isMain ? null : document.id, retry, fresh);
   const versions = isMain ? mainVersions : other.versions;
   const state = (body: ReactElement) => (
     <PageCard>
@@ -298,7 +301,7 @@ function DocPane({
       </div>,
     );
   }
-  return <DocLoaded id={id} document={document} isMain={isMain} read={read} versions={versions} version={version} diff={diff} place={place} phone={phone} />;
+  return <DocLoaded id={id} document={document} isMain={isMain} read={read} versions={versions} version={version} diff={diff} place={place} phone={phone} onChanged={onChanged} />;
 }
 
 function DocLoaded({
@@ -311,6 +314,7 @@ function DocLoaded({
   diff,
   place,
   phone,
+  onChanged,
 }: {
   id: string;
   document: PlanDocumentRecord;
@@ -321,6 +325,7 @@ function DocLoaded({
   diff: { from: number; to: number } | null;
   place: VersionsPlace;
   phone: boolean;
+  onChanged: () => void;
 }) {
   const head = versions[versions.length - 1]!.version_number;
   // What the person had seen of this document when the page opened: the look recorded below must not move it.
@@ -367,7 +372,9 @@ function DocLoaded({
       onClose={() => place.setOpen(false)}
     />
   );
-  const older = !compare && shown !== head ? { back: routeLink(routeOf({ version: null }), { 'data-plan-newest': '' }, { replace: true }), restore: null } : null;
+  const editing = usePlanEditing({ read, document, docRef, versions, head, shown, comparing: !!compare, onChanged, toNewest: () => go({ version: null }) });
+  // An older version is read, compared or restored (approval "plans-editing"): never edited.
+  const older = !compare && shown !== head ? { back: routeLink(routeOf({ version: null }), { 'data-plan-newest': '' }, { replace: true }), restore: editing.restore } : null;
   return (
     <>
       <PageCard
@@ -381,11 +388,14 @@ function DocLoaded({
               older={older}
               comparing={compare ? `Comparing v${compare.from} with v${compare.to}` : null}
               count={versions.length}
+              start={editing.start}
+              approved={editing.approved}
             />
           </div>
         }
       >
         <div className="ib-plan-cardbody">
+          {editing.banner}
           {compare ? (
             <div className="ib-plan-banner" data-plan-banner="diff">
               <Icon name="sideBySide" />
@@ -397,7 +407,7 @@ function DocLoaded({
                 Show v{compare.to} only
               </button>
             </div>
-          ) : changedSince ? (
+          ) : changedSince && !editing.editing ? (
             <div className="ib-plan-banner" data-plan-banner="changed">
               <Icon name="eye" />
               <p>
@@ -411,10 +421,12 @@ function DocLoaded({
           <div className="ib-plan-doc">
             {compare ? (
               <PlanDiffView id={id} from={compare.from} to={compare.to} doc={docRef} kind={document.kind} />
+            ) : editing.editing ? (
+              editing.editor
             ) : (
               document.kind === 'markdown' ? (
                 // A Markdown page in the Inbox's own file viewer, with its toolbars and comments (PlanAnnotate.tsx); × goes back to Plans.
-                <PlanAnnotate read={read} document={document} docRef={docRef} versions={versions} shown={shown} phone={phone} onClose={toList} />
+                <PlanAnnotate read={read} document={document} docRef={docRef} versions={versions} shown={shown} phone={phone} onClose={toList} onChanged={onChanged} />
               ) : (
                 <PlanDocument id={id} version={shown} doc={docRef} kind={document.kind} title={document.title} phone={phone} />
               )

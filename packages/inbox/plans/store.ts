@@ -5,7 +5,7 @@
  * view, and every 2 s while the Inbox is still bringing in plan history (`importing`); each read also has the Inbox
  * pick up what plan review wrote since (packages/server/plans-capability.ts).
  */
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { PlanSummary, PlanVersion } from '@plannotator/core/plans';
 import type { SettingsModel } from '../api';
 import { InboxApiError } from '../apiError';
@@ -119,12 +119,17 @@ export interface PlanState {
   missing: boolean;
 }
 
-/** One plan and its primary document's versions, read when it opens (and on `retry`). */
-export function usePlan(id: string, retry: number): PlanState {
+/**
+ * One plan and its primary document's versions, read when it opens (and on `retry`). `fresh`: read again after a
+ * write of the page's own (a version, an approval, a Send), keeping what is on screen until the answer comes.
+ */
+export function usePlan(id: string, retry: number, fresh = 0): PlanState {
   const [state, setState] = useState<PlanState>({ read: null, versions: null, error: null, missing: false });
+  const readFor = useRef('');
   useEffect(() => {
     let live = true;
-    setState({ read: null, versions: null, error: null, missing: false });
+    if (readFor.current !== `${id}:${retry}`) setState({ read: null, versions: null, error: null, missing: false });
+    readFor.current = `${id}:${retry}`;
     Promise.all([plansApi.read(id), plansApi.versions(id)]).then(
       ([read, list]) => live && setState({ read, versions: list.versions, error: null, missing: false }),
       (error: unknown) => live && setState({ read: null, versions: null, error: messageOf(error), missing: isOff(error) }),
@@ -132,12 +137,12 @@ export function usePlan(id: string, retry: number): PlanState {
     return () => {
       live = false;
     };
-  }, [id, retry]);
+  }, [id, retry, fresh]);
   return state;
 }
 
 /** Another document's versions (`doc` null: none read, the plan's own come with `usePlan`). */
-export function useDocVersions(id: string, doc: string | null, retry: number): { versions: readonly PlanVersion[] | null; error: string | null } {
+export function useDocVersions(id: string, doc: string | null, retry: number, fresh = 0): { versions: readonly PlanVersion[] | null; error: string | null } {
   const [state, setState] = useState<{ key: string; versions: readonly PlanVersion[] | null; error: string | null }>({ key: '', versions: null, error: null });
   const key = doc ? `${id}:${doc}` : '';
   useEffect(() => {
@@ -150,7 +155,7 @@ export function useDocVersions(id: string, doc: string | null, retry: number): {
     return () => {
       live = false;
     };
-  }, [id, doc, key, retry]);
+  }, [id, doc, key, retry, fresh]);
   return state.key === key ? { versions: state.versions, error: state.error } : { versions: null, error: null };
 }
 

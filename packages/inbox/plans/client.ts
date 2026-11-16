@@ -4,7 +4,7 @@
  * route, so a phone's door or a linked machine gets the unknown-route 404. Every write (a look, a comment kept or
  * taken away) carries the page's `serverSession`.
  */
-import type { PlanArtifact, PlanComment, PlanDecision, PlanDocument, PlanEvent, PlanLook, PlanRecord, PlanSummary, PlanVersion } from '@plannotator/core/plans';
+import type { PlanApprovalCleared, PlanApprovalMoved, PlanArtifact, PlanComment, PlanDecision, PlanDocument, PlanEvent, PlanLook, PlanRecord, PlanSummary, PlanVersion } from '@plannotator/core/plans';
 import { pageServerSession } from '../api';
 import { readJson } from '../apiError';
 
@@ -96,4 +96,21 @@ export const plansApi = {
   fileText: (id: string, assetPath: string) => text(one(id, `/files/${assetPath.split('/').map(encodeURIComponent).join('/')}`)),
   /** The person read version `seen` of a document (`doc` null: the primary one). */
   look: (id: string, seen: number, doc: string | null = null) => post<{ look: PlanLook }>(one(id, '/look'), doc ? { doc, seen } : { seen }),
+  /**
+   * A new newest version the person made from version `base`: their edit (`text`) or a Restore (`restore`). Refused
+   * (409, `moved_on` with the newest as `head`) when a newer version came, or (`unchanged`) when nothing changed.
+   */
+  saveVersion: (id: string, base: number, change: { text: string } | { restore: number }, doc: string | null = null) => post<PlanVersionSaved>(one(id, '/versions'), { ...(doc ? { doc } : {}), base, ...change }),
+  /** Approve the version on screen; refused (409, `moved_on`) when a newer one came. */
+  approve: (id: string, version: number, doc: string | null = null) => post<{ decision: PlanDecision }>(one(id, '/approve'), doc ? { doc, version } : { version }),
+  /** A Send went out (`thread_id`, the message that carried it): its comments are sent, and the plan has that thread. */
+  sent: (id: string, sent: { thread_id: string; message_id: string; to: { host: string; session: string } | null; comments: string[] }) => post<{ plan: PlanRecord; comments: PlanComment[] }>(one(id, '/sent'), sent),
 };
+
+export interface PlanVersionSaved {
+  version: PlanVersion;
+  /** Plan review's "# Direct Edits" section: the unified diff from the version before to this one. */
+  direct_edits: string;
+  cleared: PlanApprovalCleared | null;
+  moved: PlanApprovalMoved | null;
+}

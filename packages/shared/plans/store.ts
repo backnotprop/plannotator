@@ -39,8 +39,11 @@ import {
   isPlanRecord,
   isPlanVersion,
   NO_ACTOR,
+  planApprovalsOn,
+  planApproverName,
   planCommentAnnotationId,
   planId,
+  planApprovalState,
   type PlanActor,
   type PlanArtifact,
   type PlanComment,
@@ -129,6 +132,8 @@ export interface NewVersionInput extends Partial<PlanActor> {
   committed_at: string;
   source: PlanVersionSource;
   legacy?: string | null;
+  /** A Restore: the version whose bytes these are. */
+  restored_from?: number;
 }
 
 export interface PlanRead {
@@ -195,6 +200,8 @@ export interface PlanStore {
   saveComment(id: string, input: NewCommentInput): PlanComment;
   /** Take a comment away by its annotation's id: one line. The comment it was, or null when there is none. */
   removeComment(id: string, annotationId: string, at: string): PlanComment | null;
+  /** A Send carried these comments (by annotation id): each one not sent yet gets `sent`, one line each. The ones marked. */
+  markCommentsSent(id: string, annotationIds: readonly string[], sent: NonNullable<PlanComment["sent"]>): PlanComment[];
   /** The plan record changed (its name): one more snapshot line. */
   updatePlan(id: string, change: Partial<Pick<PlanRecord, "name" | "note" | "status" | "thread_id" | "legacy">>, at?: string): PlanRecord;
   /** Append an index line for every plan whose last one is missing or behind its files (a crash between writes); how many. */
@@ -354,6 +361,7 @@ export function createPlanStore(options: { dataDir: string; now?: () => number }
     const primary = documents.find((doc) => doc.id === plan.primary_doc_id);
     const decisions = events.filter((event) => event.kind === "decision" && event.decision);
     const latest = decisions[decisions.length - 1]?.decision;
+    const head = primary?.head_version ?? 0;
     const times = [plan.updated_at, ...versions.map((v) => v.committed_at), ...events.map((e) => e.at)].sort();
     return {
       id,
@@ -364,8 +372,9 @@ export function createPlanStore(options: { dataDir: string; now?: () => number }
       created_at: plan.created_at,
       updated_at: times[times.length - 1] ?? plan.updated_at,
       primary_doc_id: plan.primary_doc_id,
-      head_version_number: primary?.head_version ?? 0,
+      head_version_number: head,
       decision: latest ? { decision: latest.decision, version_number: latest.version_number, at: latest.at } : null,
+      approval: planApprovalState(events, plan.primary_doc_id, head, { cleared: plan.last_approval_cleared, moved: plan.last_approval_moved }),
       counts: { documents: documents.length, versions: versions.length, comments: 0, artifacts: artifactsOf(id).length, events: events.length },
     };
   };
@@ -494,6 +503,13 @@ export function createPlanStore(options: { dataDir: string; now?: () => number }
       if (!doc) throw new Error(`Plan ${id} has no document ${docId}.`);
       const n = doc.head_version + 1;
       const file = versionFile(docId, n, doc.kind);
+      // Approval "plans-editing": the approvals the version before holds end with it. The person's own edit (a person's
+      // version, no Restore, no agent in it) carries their own approval to the new version; any other approval clears.
+      const held = doc.head_version > 0 ? planApprovalsOn(eventsOf(id), docId, doc.head_version) : [];
+      const ownEdit = input.source === "person" && input.author_via === "person" && !input.restored_from && !input.agent_host && !input.agent_session && !input.agent_name;
+      const mover = ownEdit ? planApproverName({ author_label: input.author_label ?? null }) : null;
+      const moving = held.filter((h) => h.name === mover);
+      const clearing = held.filter((h) => h.name !== mover);
       ensureDir(join(folder(id), "docs", docId));
       // The bytes first: a line never names a file that is not there.
       writeWhole(join(folder(id), file), input.bytes);
@@ -512,11 +528,29 @@ export function createPlanStore(options: { dataDir: string; now?: () => number }
         agent_host: input.agent_host ?? null,
         agent_session: input.agent_session ?? null,
         agent_name: input.agent_name ?? null,
+        ...(input.restored_from ? { restored_from: input.restored_from } : {}),
       };
       appendLine(join(folder(id), DOCS_FILE), { kind: "version", record: version });
       appendLine(join(folder(id), DOCS_FILE), { kind: "document", record: { ...doc, head_version: n } });
+      // The moved approval: the same decision, on the new version, after the version line (a decision never names a
+      // version that is not there yet).
+      for (const { event } of moving) {
+        const moved: PlanEvent = {
+          ...event,
+          id: planId("actev", Date.parse(input.committed_at) || undefined),
+          at: input.committed_at,
+          subject: { document_id: docId, version_number: n },
+          decision: { ...event.decision!, version: version.version, version_number: n, at: input.committed_at, feedback: null, feedback_record: null, snapshot: null, moved_from: doc.head_version },
+          legacy: null,
+        };
+        appendLine(join(folder(id), EVENTS_FILE), moved);
+      }
       const updated = input.committed_at > plan.updated_at ? input.committed_at : plan.updated_at;
-      if (updated !== plan.updated_at) appendLine(join(folder(id), PLAN_FILE), { ...plan, updated_at: updated });
+      const facts: Partial<PlanRecord> = {
+        ...(clearing.length ? { last_approval_cleared: { document_id: docId, cleared_at: input.committed_at, version_number: n, from_version_number: doc.head_version, approver_names: clearing.map((h) => h.name) } } : {}),
+        ...(moving.length ? { last_approval_moved: { document_id: docId, moved_at: input.committed_at, version_number: n, from_version_number: doc.head_version, name: moving[0]!.name } } : {}),
+      };
+      if (updated !== plan.updated_at || Object.keys(facts).length) appendLine(join(folder(id), PLAN_FILE), { ...plan, ...facts, updated_at: updated });
       appendIndex(id);
       return version;
     },
@@ -636,6 +670,19 @@ export function createPlanStore(options: { dataDir: string; now?: () => number }
       if (existing.sent) throw new Error("That comment was already sent.");
       appendLine(join(folder(id), COMMENTS_FILE), { kind: "removed", annotation_id: annotationId, at });
       return existing;
+    },
+
+    markCommentsSent(id, annotationIds, sent) {
+      if (!planOf(id)) throw new Error(`No plan ${id}.`);
+      const wanted = new Set(annotationIds);
+      const marked: PlanComment[] = [];
+      for (const comment of commentsOf(id)) {
+        if (comment.sent || !wanted.has(planCommentAnnotationId(comment)!)) continue;
+        const next = { ...comment, sent };
+        appendLine(join(folder(id), COMMENTS_FILE), { kind: "comment", record: next });
+        marked.push(next);
+      }
+      return marked;
     },
 
     updatePlan(id, change, when) {

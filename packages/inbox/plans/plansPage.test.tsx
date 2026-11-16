@@ -11,8 +11,16 @@
  *   view switch, the annotation toolstrip, Copy file and Global comment, the comments panel, the contents rail);
  * - a comment made there is not kept in the plan library, not back after the page opens again, or not taken away;
  * - Send opens New message with anything but the plan's own agent session and the comments as plan feedback, or is
- *   not disabled, in the Inbox's words, when no session is known;
- * - a decision on an older version reads as current in the list or the rail head (it must say "changed since");
+ *   not disabled, in the Inbox's words, when no session is known; once sent, its comments are not marked sent or the
+ *   plan does not get the thread, or a later Send does not go into that thread as a reply;
+ * - an Escape leaves the plan page for the Plans list (the plan page is not a file beside a thread);
+ * - approval "plans-editing": an older version or a diagram page offers Edit; Done does not make a new version of the
+ *   person's words, does not send the agent what changed (or say it was not told), or a stale base loses the
+ *   person's text; Restore does not make a new newest version; Approve approves a version the plan moved past; the
+ *   moved approval's line is not shown, or comes back after its Dismiss;
+ * - an approval of an older version reads as current in the list, the rail head or the reading line (approval
+ *   "plans-editing": "v4 is new and not approved. You approved v2, and that does not carry over."), or a version
+ *   row loses its own past approval; a sent-back older version reads as changes asked on the newest;
  * - the page leaves the shared frame (its ground, top bar, rail, page card and versions panel), the reading line's
  *   version words leave its end, or the plan's decision comes back into the reading line or leaves the rail head
  *   (where it shows with the versions panel closed);
@@ -56,6 +64,7 @@ const { SidebarProvider } = (hasDom ? await import('../shell/sidebar') : {}) as 
 const mermaid = hasDom ? await import('@plannotator/ui/utils/mermaid') : null;
 const diagramSvg = hasDom ? await import('@plannotator/ui/test-setup/diagramSvg') : null;
 const { acceptPlanDiagramSvg } = (hasDom ? await import('./planContent') : {}) as typeof import('./planContent');
+const { ThemeProvider } = (hasDom ? await import('@plannotator/ui/components/ThemeProvider') : {}) as typeof import('@plannotator/ui/components/ThemeProvider');
 // Loaded here so the page's lazy contents rail resolves at once.
 if (hasDom) await import('@plannotator/ui/components/MarkdownContentsRail');
 
@@ -154,9 +163,11 @@ function draw(on = true) {
   document.body.appendChild(host);
   root = createRoot(host);
   const render = () => act(() => root!.render(
-      <SidebarProvider>
-        <PlansRoute route={readRoute()} on={on} settingsKnown phone={false} />
-      </SidebarProvider>,
+      <ThemeProvider>
+        <SidebarProvider>
+          <PlansRoute route={readRoute()} on={on} settingsKnown phone={false} />
+        </SidebarProvider>
+      </ThemeProvider>,
     ));
   window.addEventListener('hashchange', render);
   unlisten = () => window.removeEventListener('hashchange', render);
@@ -218,27 +229,31 @@ test.skipIf(!hasDom)('the list is the library: changed since you looked first, w
   expect(rows.sort()).toEqual([changed, approved, never].sort());
   expect(host.querySelector(`[data-plan-row="${approved}"] [data-plan-changed]`)).toBeNull();
   expect(host.querySelector(`[data-plan-row="${never}"] [data-plan-changed]`)).toBeNull();
-  // The decision is the record's: approved on v2, changes asked on v1, none.
+  // The decision is the record's, on the newest version: approved on v2 (the newest); changes asked on v1 is not v3's.
   expect(host.querySelector(`[data-plan-row="${approved}"] [data-plan-decision]`)?.getAttribute('data-plan-decision')).toBe('approved');
-  expect(host.querySelector(`[data-plan-row="${changed}"] [data-plan-decision]`)?.getAttribute('data-plan-decision')).toBe('changes');
+  expect(host.querySelector(`[data-plan-row="${changed}"] [data-plan-decision]`)?.getAttribute('data-plan-decision')).toBe('none');
+  expect(text(host.querySelector(`[data-plan-row="${changed}"] [data-plan-decision]`))).toBe('No decision on v3');
   expect(host.querySelector(`[data-plan-row="${never}"] [data-plan-decision]`)?.getAttribute('data-plan-decision')).toBe('none');
   // The project groups follow.
   expect(host.querySelector('[data-plans-group="p:field-notes"]')).not.toBeNull();
 });
 
-test.skipIf(!hasDom)('a decision on an older version never reads as current: the list and the rail head say it changed since', async () => {
+test.skipIf(!hasDom)('an approval of an older version never reads as current: the list, the rail head and the reading line say the newest is not approved', async () => {
   const older = plan('Rotate refresh tokens', 'harbor-api', ['# Rotate\n\nv1\n', '# Rotate\n\nv2\n', '# Rotate\n\nv3\n', '# Rotate\n\nv4\n'], { seen: 4, approvedOn: 2 });
   const current = plan('Offline drafts', 'field-notes', ['# Offline drafts\n\nv1\n', '# Offline drafts\n\nv2\n'], { seen: 2, approvedOn: 2 });
   window.location.hash = '#plans';
   const host = draw();
   await settle();
-  expect(text(host.querySelector(`[data-plan-row="${older}"] [data-plan-decision]`))).toBe('Approved on v2 · changed since');
+  expect(text(host.querySelector(`[data-plan-row="${older}"] [data-plan-decision]`))).toBe('v4 is new and not approved');
+  expect(host.querySelector(`[data-plan-row="${older}"] [data-plan-decision]`)?.getAttribute('data-plan-decision')).toBe('none');
   expect(text(host.querySelector(`[data-plan-row="${current}"] [data-plan-decision]`))).toBe('Approved');
 
   window.location.hash = `#plans=${older}`;
   await settle();
-  expect(text(host.querySelector('[data-pages-rail-meta] [data-plan-rail-decision]'))).toBe('Approved on v2 · changed since');
+  expect(text(host.querySelector('[data-pages-rail-meta] [data-plan-rail-decision]'))).toBe('v4 is new and not approved');
   expect(host.querySelector('[data-plan-reading] [data-plan-decision]')).toBeNull();
+  // The reading line of the newest version says why, in one line (history imported before the stored fact).
+  expect(text(host.querySelector('[data-plan-reading] [data-plan-approval="cleared"]'))).toBe('v4 is new and not approved. You approved v2, and that does not carry over.');
   // The version row keeps its own approval (the frame's), without the note.
   expect(text(host.querySelector('[data-plan-version="2"] [data-version-approval]'))).toBe('Approved by you');
 
@@ -273,7 +288,7 @@ test.skipIf(!hasDom)('the compact list: the switch shows the same plans one line
   const line = table.querySelector(`[data-plan-row="${older}"]`)!;
   expect(text(line.querySelector('.ib-plans-c-project'))).toBe('field-notes');
   expect(text(line.querySelector('.ib-plans-c-version'))).toBe('v3');
-  expect(text(line.querySelector('[data-plan-decision]'))).toBe('Approved on v1 · changed since');
+  expect(text(line.querySelector('[data-plan-decision]'))).toBe('v3 is new and not approved');
   expect(text(table.querySelector(`[data-plan-row="${newer}"] [data-plan-decision]`))).toBe('No decision');
   expect(text(table.querySelector(`[data-plan-row="${changed}"] [data-plan-changed]`))).toContain('2 new');
   // Each line is a link to its plan.
@@ -359,10 +374,11 @@ test.skipIf(!hasDom)('the frame: top bar, files rail, page card and versions pan
   expect(railDecision.getAttribute('data-plan-decision')).toBe('approved');
   expect(meta.querySelector('[data-plan-rail-project]')!.compareDocumentPosition(railDecision) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(meta.querySelector('[title]')?.getAttribute('title')).toBe('harbor-api · Approved');
-  // The reading line: only the version words and the versions toggle (with their count), at its end; no project, no
-  // decision (an older version's line would read "Approved on v4  You are looking at an older version").
+  // The reading line: Edit at its start (approved already: no Approve), the approval of this newest version, then the
+  // version words and the versions toggle (with their count) at its end; no project, no decision mark.
   const reading = host.querySelector('[data-plan-reading]')!;
-  expect(reading.querySelector('[data-reading-start]')).toBeNull();
+  expect([...reading.querySelectorAll('[data-reading-start] button')].map(text)).toEqual(['Edit']);
+  expect(text(reading.querySelector('[data-plan-approval="approved"]'))).toBe('Approved by you');
   expect(reading.querySelector('[data-plan-decision]')).toBeNull();
   const end = reading.querySelector('[data-reading-version-end] [data-reading-versions]')!;
   expect(readingWords(host)).toBe('v1 · newest');
@@ -693,9 +709,207 @@ test.skipIf(!hasDom)('Send opens New message to the plan’s own agent session w
     expect(prefill.subject).toBe('Rate limits');
     expect(prefill.body).toContain('# Plan Feedback');
     expect(prefill.body).toContain('Name the limit per tenant.');
+
+    // New message went: the comment is sent (an earlier comment now) and the plan has the thread it started.
+    const thread = 'msg_01M7JKWTSFEGR2XJQEJ1R2GHCQ';
+    await act(async () => (prefill as unknown as { onSent: (sent: object) => void }).onSent({ threadId: thread, session: 'sess-42', host: 'claude-code', projectName: 'harbor-api', draftId: null }));
+    await settle();
+    expect(store.get(record.id)!.thread_id).toBe(thread);
+    expect(store.comments(record.id).map((c) => c.sent?.message_id)).toEqual([thread]);
+    expect(button().disabled).toBe(true);
+    expect(text(host.querySelector(`#${button().getAttribute('aria-describedby')}`))).toBe('0 annotations ride your next Send to Claude Code.');
+
+    // The next Send is a reply in that thread, at once; its comment is sent with that reply.
+    const replies = interceptInbox();
+    await globalComment(host, 'And per route.');
+    await act(async () => button().click());
+    await settle();
+    expect(opened).toHaveLength(1);
+    expect(replies.map((r) => r.path)).toEqual([`/api/inbox/messages/${thread}/reply`]);
+    expect(String(replies[0]!.body.words)).toContain('And per route.');
+    expect(store.comments(record.id).map((c) => c.sent?.message_id)).toEqual([thread, 'msg_reply_1']);
   } finally {
     window.removeEventListener('plannotator-inbox:open-composer', listen);
   }
+});
+
+/** The Inbox's own routes for one test: replies are taken (`msg_reply_<n>`), the rest still go to Plans' routes. */
+function interceptInbox() {
+  const seen: { path: string; body: Record<string, unknown> }[] = [];
+  const plans = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(String(input), 'http://127.0.0.1');
+    if (!url.pathname.startsWith('/api/inbox/')) return plans(input, init);
+    seen.push({ path: url.pathname, body: JSON.parse(String(init?.body ?? '{}')) });
+    return Response.json({ reply: { id: `msg_reply_${seen.length}` }, questions: [], replayed: false });
+  }) as typeof fetch;
+  return seen;
+}
+
+/** CodeMirror's EditorView, by the DOM back-reference EditorView.findFromDOM reads (the editor tests' way). */
+function editorView(): { state: { doc: { toString(): string; length: number } }; dispatch(spec: unknown): void } {
+  const content = document.querySelector<HTMLElement>('[data-plan-editor] .cm-editor .cm-content');
+  if (!content) throw new Error('The plan editor did not open');
+  const backRef = content as unknown as { cmTile?: { view?: ReturnType<typeof editorView> }; cmView?: { view?: ReturnType<typeof editorView> } };
+  const view = backRef.cmTile?.view ?? backRef.cmView?.view;
+  if (!view) throw new Error('EditorView not found from CodeMirror DOM back-reference');
+  return view;
+}
+
+/** Open Edit, put `words` in place of the whole text, then press Done. */
+async function editAndDone(host: Element, words: string) {
+  await act(async () => host.querySelector<HTMLButtonElement>('[data-plan-edit]')!.click());
+  for (let i = 0; i < 40 && !document.querySelector('[data-plan-editor] .cm-content'); i++) await settle();
+  const view = editorView();
+  await act(async () => view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: words } }));
+  await act(async () => host.querySelector<HTMLButtonElement>('[data-plan-edit-done]')!.click());
+  await settle();
+}
+
+test.skipIf(!hasDom)('an Escape never leaves the plan page for the Plans list; × still goes back to Plans', async () => {
+  const id = plan('Rotate refresh tokens', 'harbor-api', ['# Rotate refresh tokens\n\nRetire keys after 14 days.\n']);
+  keptStorage();
+  window.location.hash = `#plans=${id}`;
+  const host = draw();
+  await settle();
+  expect(host.querySelector('[data-plan-annotate]')).not.toBeNull();
+  for (const target of [document.body, host.querySelector<HTMLElement>('.ib-docscroll')!]) {
+    await act(async () => target.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
+    await settle();
+    expect(window.location.hash).toBe(`#plans=${id}`);
+    expect(host.querySelector(`[data-plan-page="${id}"]`)).not.toBeNull();
+  }
+  await act(async () => host.querySelector<HTMLButtonElement>('[data-plan-annotate] button[aria-label^="Close"]')!.click());
+  await settle();
+  expect(window.location.hash).toBe('#plans');
+});
+
+test.skipIf(!hasDom)('Edit is on the newest version of a Markdown page only: an older version offers Restore, a diagram page no Edit', async () => {
+  const id = plan('Rotate refresh tokens', 'harbor-api', ['# Rotate\n\nv1\n', '# Rotate\n\nv2\n']);
+  const flow = store.addDocument(id, { title: 'Flow', kind: 'mermaid', created_at: at(3) });
+  store.addVersion(id, flow.id, { bytes: bytes('flowchart LR\n  A --> B\n'), committed_at: at(3), source: 'agent-tool' });
+  keptStorage();
+  window.location.hash = `#plans=${id}`;
+  const host = draw();
+  await settle();
+  expect(host.querySelector('[data-plan-reading] [data-plan-edit]')).not.toBeNull();
+  window.location.hash = `#plans=${id}&v=1`;
+  await settle();
+  expect(readingWords(host)).toBe('v1 of 2');
+  expect(host.querySelector('[data-plan-edit]')).toBeNull();
+  expect(host.querySelector('[data-plan-approve]')).toBeNull();
+  expect(text(host.querySelector('[data-older-version-bar] [data-plan-restore]'))).toBe('Restore v1');
+  // Restore: a new newest version holding v1's words; no agent known, so the page says the agent was not told.
+  await act(async () => host.querySelector<HTMLButtonElement>('[data-plan-restore]')!.click());
+  await settle();
+  expect(store.versions(id).map((v) => [v.version_number, v.source, v.restored_from ?? null])).toEqual([[1, 'plan-review', null], [2, 'plan-review', null], [3, 'person', 1]]);
+  expect(readingWords(host)).toBe('v3 · newest');
+  expect(text(host.querySelector('[data-plan-banner="saved"] p'))).toBe('Restored v1 as v3. No agent is running in harbor-api, so the agent was not told.');
+  window.location.hash = `#plans=${id}&doc=${flow.id}`;
+  await settle();
+  expect(readingWords(host)).toBe('v1 · newest');
+  expect(host.querySelector('[data-plan-edit]')).toBeNull();
+});
+
+test.skipIf(!hasDom)('Done makes a new version of the person’s words and sends the agent what changed into the plan’s thread; with no agent the page says it was not told', async () => {
+  const id = plan('Rotate refresh tokens', 'harbor-api', ['# Rotate refresh tokens\n\nRetire keys after 14 days.\n']);
+  keptStorage();
+  window.location.hash = `#plans=${id}`;
+  let host = draw();
+  await settle();
+  await editAndDone(host, '# Rotate refresh tokens\n\nRetire keys after 7 days.\n');
+  expect(store.versions(id).map((v) => [v.version_number, v.source, v.author_via])).toEqual([[1, 'plan-review', 'plan-review'], [2, 'person', 'person']]);
+  expect(new TextDecoder().decode(store.versionBytes(id, store.get(id)!.primary_doc_id, 2)!)).toBe('# Rotate refresh tokens\n\nRetire keys after 7 days.\n');
+  expect(readingWords(host)).toBe('v2 · newest');
+  expect(text(host.querySelector('[data-plan-document]'))).toContain('Retire keys after 7 days.');
+  expect(text(host.querySelector('[data-plan-banner="saved"] p'))).toBe('Saved as v2. No agent is running in harbor-api, so the agent was not told.');
+  // The version panel names the person.
+  expect(text(host.querySelector('[data-plan-version="2"]'))).toContain('You');
+  // Nothing changed: no version, said so.
+  await act(async () => host.querySelector<HTMLButtonElement>('[data-plan-edit]')!.click());
+  for (let i = 0; i < 40 && !document.querySelector('[data-plan-editor] .cm-content'); i++) await settle();
+  await act(async () => host.querySelector<HTMLButtonElement>('[data-plan-edit-done]')!.click());
+  await settle();
+  expect(store.versions(id).length).toBe(2);
+  expect(text(host.querySelector('[data-plan-banner="unchanged"] p'))).toBe('Nothing changed, so no new version was made.');
+
+  // With the plan's thread: Done replies in it with plan review's Direct Edits.
+  store.updatePlan(id, { thread_id: 'msg_01M7JKWTSFEGR2XJQEJ1R2GHCQ' });
+  act(() => root!.unmount());
+  unlisten();
+  document.body.innerHTML = '';
+  const replies = interceptInbox();
+  host = draw();
+  await settle();
+  await editAndDone(host, '# Rotate refresh tokens\n\nRetire keys after 3 days.\n');
+  expect(store.versions(id).length).toBe(3);
+  expect(replies.map((r) => r.path)).toEqual(['/api/inbox/messages/msg_01M7JKWTSFEGR2XJQEJ1R2GHCQ/reply']);
+  const words = String(replies[0]!.body.words);
+  expect(words.startsWith('# Direct Edits')).toBe(true);
+  expect(words).toContain('-Retire keys after 7 days.\n+Retire keys after 3 days.');
+  expect(text(host.querySelector('[data-plan-banner="saved"] p'))).toBe('Saved as v3. The agent was sent what changed.');
+});
+
+test.skipIf(!hasDom)('a newer version that came while editing: nothing is saved, the newest shows, and the person’s text is kept to edit again', async () => {
+  const id = plan('Rotate refresh tokens', 'harbor-api', ['# Rotate refresh tokens\n\nv1\n']);
+  keptStorage();
+  window.location.hash = `#plans=${id}`;
+  const host = draw();
+  await settle();
+  await act(async () => host.querySelector<HTMLButtonElement>('[data-plan-edit]')!.click());
+  for (let i = 0; i < 40 && !document.querySelector('[data-plan-editor] .cm-content'); i++) await settle();
+  const view = editorView();
+  await act(async () => view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: '# Mine\n\nMy words.\n' } }));
+  // The agent writes v2 meanwhile.
+  store.addVersion(id, store.get(id)!.primary_doc_id, { bytes: bytes('# Rotate refresh tokens\n\nv2 by the agent\n'), committed_at: at(9), source: 'plan-review' });
+  await act(async () => host.querySelector<HTMLButtonElement>('[data-plan-edit-done]')!.click());
+  await settle();
+  expect(store.versions(id).length).toBe(2);
+  expect(readingWords(host)).toBe('v2 · newest');
+  expect(text(host.querySelector('[data-plan-document]'))).toContain('v2 by the agent');
+  expect(text(host.querySelector('[data-plan-banner="stale"] p'))).toBe('v2 came while you were editing, so your edit was not saved. Your text is kept here.');
+  // Edit v2 with your text: the editor opens on the person's words, on the newest.
+  await act(async () => host.querySelector<HTMLButtonElement>('[data-plan-kept-edit]')!.click());
+  for (let i = 0; i < 40 && !document.querySelector('[data-plan-editor] .cm-content'); i++) await settle();
+  expect(editorView().state.doc.toString()).toBe('# Mine\n\nMy words.\n');
+  await act(async () => host.querySelector<HTMLButtonElement>('[data-plan-edit-done]')!.click());
+  await settle();
+  expect(store.versions(id).map((v) => v.version_number)).toEqual([1, 2, 3]);
+  expect(new TextDecoder().decode(store.versionBytes(id, store.get(id)!.primary_doc_id, 3)!)).toBe('# Mine\n\nMy words.\n');
+});
+
+test.skipIf(!hasDom)('approving names the version on screen: refused once the plan moved on (the newest shows); the person’s own edit moves the approval, said once', async () => {
+  const id = plan('Rotate refresh tokens', 'harbor-api', ['# Rotate refresh tokens\n\nv1\n']);
+  const kept = keptStorage();
+  window.location.hash = `#plans=${id}`;
+  const host = draw();
+  await settle();
+  // The agent writes v2 behind the page's back: Approve of v1 is refused, and v2 shows.
+  store.addVersion(id, store.get(id)!.primary_doc_id, { bytes: bytes('# Rotate refresh tokens\n\nv2\n'), committed_at: at(9), source: 'plan-review' });
+  await act(async () => host.querySelector<HTMLButtonElement>('[data-plan-approve]')!.click());
+  await settle();
+  expect(store.events(id).filter((e) => e.kind === 'decision')).toEqual([]);
+  expect(text(host.querySelector('[data-plan-banner="refused"] p'))).toBe('The plan moved on: v2 is newer than the version you had.');
+  expect(readingWords(host)).toBe('v2 · newest');
+  await act(async () => host.querySelector<HTMLButtonElement>('[data-plan-approve]')!.click());
+  await settle();
+  expect(text(host.querySelector('[data-plan-reading] [data-plan-approval="approved"]'))).toBe('Approved by you');
+  expect(host.querySelector('[data-plan-approve]')).toBeNull();
+  expect(text(host.querySelector('[data-pages-rail-meta] [data-plan-rail-decision]'))).toBe('Approved');
+  // The person's own edit: the approval moves, and the line says so until its Dismiss.
+  await editAndDone(host, '# Rotate refresh tokens\n\nv2, tightened\n');
+  expect(text(host.querySelector('[data-plan-reading] [data-plan-approval="moved"]'))).toBe('Your approval moved to v3.');
+  await act(async () => host.querySelector<HTMLButtonElement>('[data-plan-approval-dismiss]')!.click());
+  expect(text(host.querySelector('[data-plan-reading] [data-plan-approval="approved"]'))).toBe('Approved by you');
+  expect([...kept.values()]).toContain('3');
+  // An agent's version clears it, in the stored fact's words.
+  store.addVersion(id, store.get(id)!.primary_doc_id, { bytes: bytes('# Rotate refresh tokens\n\nv4\n'), committed_at: at(10), source: 'plan-review', agent_session: 's-1' });
+  window.location.hash = '#plans';
+  await settle();
+  window.location.hash = `#plans=${id}`;
+  await settle();
+  expect(text(host.querySelector('[data-plan-reading] [data-plan-approval="cleared"]'))).toBe('v4 is new and not approved. You approved v3, and that does not carry over.');
+  expect(text(host.querySelector('[data-plan-version="3"] [data-version-approval]'))).toBe('Approved by you');
 });
 
 test.skipIf(!hasDom)('only the main page counts as looking: a link to another page of a never-opened plan marks nothing new', async () => {

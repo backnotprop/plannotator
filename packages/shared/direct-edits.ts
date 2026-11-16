@@ -1,3 +1,8 @@
+/**
+ * Plan review's "Direct Edits": the unified diff of the person's edit of a document, with the words the agent reads
+ * before it, and the feedback that carries it. Here in shared (moved from packages/editor/) so the Inbox's Plans
+ * route sends the agent the same section after the person's edit on a plan page (approval "plans-editing").
+ */
 import { createTwoFilesPatch, structuredPatch } from 'diff';
 
 const EMPTY_FEEDBACK_SENTINELS = new Set([
