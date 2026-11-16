@@ -92,7 +92,7 @@ Review local changes or remote PRs. Comment on diffs, suggest code. Your comment
   <a href="https://plannotator.ai/inbox/">
     <picture>
       <source media="(prefers-color-scheme: dark)" srcset=".github/assets/inbox-dark.webp" />
-      <img src=".github/assets/inbox-light.webp" alt="Plannotator Inbox: threads from several agents grouped by what each needs, with a question and an attached screenshot open beside the list" width="720" />
+      <img src=".github/assets/inbox-light.webp" alt="Plannotator Inbox on a desktop and a phone: threads from several agents grouped by what each needs, a question with picture choices open beside the list, and a question with an attached chart on the phone" width="720" />
     </picture>
   </a>
 </p>

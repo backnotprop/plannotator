@@ -20,7 +20,7 @@
  */
 
 import { forwardRef, useEffect, useRef, useState } from 'react';
-import { useShortcutScope } from '@plannotator/ui/shortcuts';
+import { useShortcutScope } from '../panes/scope';
 import {
   formatInboxVideoTime,
   inboxAttachmentKindLabel,
@@ -465,6 +465,7 @@ function Tile({
         attachment={artifact.attachment}
         surface={openIn}
         onOpenAs={onOpenAs && !downloads ? (view) => onOpenAs(artifact, view) : undefined}
+        pin={threadId ? { threadId, key } : undefined}
         render={(more, status) => (
           <div className={`ib-art-w${more ? ' ib-art-w-more' : ''}`}>
             {tile}

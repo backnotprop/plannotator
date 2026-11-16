@@ -29,6 +29,13 @@ export const reviewEditorShortcuts = defineShortcutScope({
       hint: 'Fires the adaptive header primary: Approve with no annotations, Send Feedback otherwise.',
       displayOrder: 10,
     },
+    openDecisionNote: {
+      description: 'Send with a note',
+      bindings: ['Mod+Shift+Enter'],
+      section: 'Actions',
+      hint: 'Opens the note composer of the send menu; Mod+Enter then sends the review and note together.',
+      displayOrder: 15,
+    },
     copyFeedback: {
       description: 'Copy feedback to clipboard',
       bindings: ['Mod+Shift+Y'],

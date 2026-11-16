@@ -22,13 +22,14 @@
  * .local/proof/sound/).
  */
 
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { E2E_LAUNCH_OFF, inboxScratch, launchOff, removeInboxScratch } from './inbox-scratch';
+import { savedConfig } from '../helpers/saved-config';
 
 const repo = resolve(__dirname, '../..');
 const shots = resolve(process.env.PLANNOTATOR_SOUND_SHOTS ?? join(resolve(process.env.PLANNOTATOR_E2E_PROOF_DIR ?? join(repo, '.local/proof')), 'sound'));
@@ -172,10 +173,8 @@ async function agent(world: World, name = 'Claude Code', host = 'claude-code'): 
   return sim;
 }
 
-function config(world: World): { inboxSound?: Record<string, unknown> } {
-  const path = join(world.dataDir, 'config.json');
-  return existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : {};
-}
+/** config.json with state.json, where the dialog's marks live (#2852). */
+const config = (world: World): { inboxSound?: Record<string, unknown> } => savedConfig(world.dataDir);
 
 const rings = (page: Page) => page.evaluate(() => window.__sound.oscillators / 4);
 

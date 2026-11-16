@@ -38,6 +38,8 @@ import {
   type InboxAnswerRefusal,
   type ParsedInboxQuestion,
 } from "@plannotator/core/inbox-questions";
+import { inboxFileQuestionTwin } from "@plannotator/core/inbox-file-question-twin";
+import { inboxTwinChoicesRefusal } from "@plannotator/core/inbox-choice-twins";
 import { withoutInboxSkillsBlock } from "@plannotator/core/skill-reference-block";
 import { inboxRowPreview, inboxRowPreviewWords } from "@plannotator/core/inbox-folding";
 import {
@@ -118,7 +120,9 @@ import { inboxWakeQuote } from "./wake-quote";
 import { inboxReplyQuoteExcerpt, inboxReplyQuoteLead, inboxReplyQuoteTime, type InboxReplyQuote, type InboxReplyQuoteWhose } from "@plannotator/core/inbox-reply-quote";
 import { whenTime } from "@plannotator/core/inbox-format";
 import type { QuestionAnswer } from "@plannotator/core/question-block";
-import type { InboxCloudWake } from "@plannotator/core/inbox-cloud";
+import { isInboxCloudHost, isInboxCloudSession, type InboxCloudWake } from "@plannotator/core/inbox-cloud";
+import type { InboxT3WaitReason } from "@plannotator/core/inbox-types";
+import { INBOX_T3_HOST, isInboxT3WaitReason, isT3ThreadId } from "@plannotator/core/inbox-types";
 import { INBOX_PERMISSION_FULL, INBOX_PERMISSION_SESSION_PREFIX, isInboxPermissionSession } from "@plannotator/core/inbox-permission";
 import { inboxProjectKey } from "./project-key";
 import { parseDiagramAnchor } from "@plannotator/core/diagram-anchor";
@@ -159,7 +163,7 @@ import { isInboxArtifactKey, readInboxArtifactPins, writeInboxArtifactPins } fro
 import { inboxThreadArtifactRefs, type InboxArtifactPin, type InboxArtifactRef } from "@plannotator/core/inbox-artifact-pins";
 import { readInboxSnoozes, refuseInboxSnoozeUntil, writeInboxSnoozes } from "./snoozes";
 import { checkInboxPriorityRestore, readInboxPriority, writeInboxPriority, type InboxPriorityState } from "./priority";
-import { readInboxThreadTags, writeInboxThreadTags, type InboxThreadTagMark } from "./thread-tags";
+import { readInboxTagColours, readInboxThreadTags, writeInboxTagColours, writeInboxThreadTags, type InboxTagColoursFile, type InboxThreadTagMark } from "./thread-tags";
 import { inboxSnoozeRefusal, inboxSnoozeRunning, type InboxSnooze } from "@plannotator/core/inbox-snooze";
 import { INBOX_CARD_PR_HINT } from "./cards";
 import { INBOX_CARD_REF_HINT, parseInboxCardRef } from "./card-refs";
@@ -214,8 +218,14 @@ import {
   isInboxInitiativeId,
   isInboxInitiativeRecord,
   type InboxInitiative,
+  inboxNextTagColour,
+  isInboxTagColour,
+  INBOX_TAG_RECENT_MAX,
+  type InboxTagColours,
+  type InboxTagLook,
 } from "@plannotator/core/inbox-types";
 import type { InboxReviewVerdictRecord } from "@plannotator/core/inbox-review";
+import type { InboxScheduledChange, InboxScheduledRun, InboxScheduledThread } from "@plannotator/core/inbox-scheduled-types";
 import { INBOX_ATTACHMENT_FEEDBACK_TITLE, INBOX_GUIDE_FEEDBACK_TITLE, INBOX_MESSAGE_FEEDBACK_TITLE, INBOX_OWN_MESSAGE_FEEDBACK_TITLE } from "@plannotator/core/inbox-review";
 import { codeFenceCloseIndex } from "@plannotator/core/markdown-structure";
 import { InboxError, inboxDir } from "./schema";
@@ -242,6 +252,8 @@ export interface InboxSendInput {
    * No agent's own call sets it.
    */
   turn_error?: boolean;
+  /** Server only (packages/server/inbox-scheduled.ts): an agent's routine change (`InboxMessage.scheduled_change`). */
+  scheduled_change?: InboxScheduledChange;
   body: string;
   subject?: string | null;
   reply_to?: string | null;
@@ -333,12 +345,12 @@ export interface InboxAnswerEntry {
 
 export interface InboxReplyInput {
   words?: string;
-  /** Written by a tailnet guest (`InboxMessage.by_guest`): the server's `isGuest`, never the window's word. */
-  by_guest?: boolean;
   questions?: InboxAnswerEntry[];
   idempotency_key: string;
   /** `to` takes the place of a session the server read as ended (`InboxMessage.took_over`). */
   took_over?: boolean;
+  /** The new session this reply starts (`to` is its placeholder, `{ agent, launch:<id> }`); the server's `prepare` made it. */
+  launch?: InboxLaunchRecord;
   /**
    * The person's annotations on the thread's attachments, as Plannotator's
    * feedback text (the window exports them), appended after the answers.
@@ -423,8 +435,6 @@ export interface InboxReplyInput {
 /** The person's Re-ask (approval "inbox-reask"): ask the agent for its open questions again, in one message. */
 export interface InboxReaskInput {
   idempotency_key: string;
-  /** Written by a tailnet guest (`InboxMessage.by_guest`). */
-  by_guest?: boolean;
   /**
    * Another live session takes the note, because the one that asked has
    * ended (the window's choice, as for a reply). Null: a session was asked
@@ -513,6 +523,9 @@ function isLivePagePath(value: unknown): value is string {
 /** Why an action item the person marked through the timed path (decision mode, the phone door) is refused: it goes in seconds. */
 const PERSON_MARKED_WORDS = "the person already marked it; their answer reaches you in a few seconds";
 
+/** How far ahead of this machine's clock a tag colour or switch time may be: ordinary skew between NTP-synced devices. */
+const COLOUR_AT_SLACK_MS = 5 * 60_000;
+
 function actionNotQuestion(field: string, key: string): InboxError {
   return new InboxError("validation_error", `${field}: ${key} is an action item, not a question; mark it Done or Can't do it on its card.`, { field, key });
 }
@@ -570,6 +583,15 @@ function otherSessionThan(message: InboxMessage | undefined, than: { host?: stri
 /** A person's reply that tags agents (`tags`, approval "inbox-tag-agents"). */
 function hasTags(message: InboxMessage): boolean {
   return (message.tags?.length ?? 0) > 0;
+}
+
+/**
+ * An author the Inbox's own wake sends a reply to whether or not its message promised one: a T3 thread (the T3
+ * wake, once a grant reaches it and covers its mode; its `wakesItem`) or a paired cloud agent (the cloud wake, once
+ * it has a wake address). The door and T3 give the id, so it never changes between a send and a read.
+ */
+function wakesLater(author: Extract<InboxAuthor, { kind: "agent" }>): author is Extract<InboxAuthor, { kind: "agent" }> & { session: string } {
+  return (author.host === INBOX_T3_HOST && isT3ThreadId(author.session)) || (isInboxCloudHost(author.host) && isInboxCloudSession(author.session));
 }
 
 /**
@@ -698,6 +720,11 @@ export interface InboxDeliveryPresence {
    * no clock runs. Absent: never known.
    */
   waitOf?(session: string, itemId: string): { since: string; autoSince: string | null } | null;
+  /**
+   * Whether the Inbox's own wake for this session found it gone (a T3 thread T3 no longer has, a cloud agent no
+   * longer paired): nothing will send it a reply later (`owedToAnother`). Absent: never.
+   */
+  wakeGone?(session: string): boolean;
 }
 
 /** The review app's comment types a guided-review line comment can be. */
@@ -796,8 +823,19 @@ export class InboxStore {
   private readonly messages = new Map<string, InboxMessage>();
   /** The agent sessions with a message through a waking connection (`hasWakingMessage`, read every second). */
   private readonly wakingSessions = new Set<string>();
-  /** The ids of the thread roots an agent was launched for (`launch`): the launch sweep reads these, never every message. */
+  /**
+   * The ids of the messages an agent was launched for (`launch`: a thread's root, or a reply that started a new session),
+   * in log order: the launch sweep reads these, never every message.
+   */
   private readonly launchedRootIds = new Set<string>();
+  /** Each routine's newest run divider that carries a launch and is not the thread's root (the root's is in launchedRootIds), by thread. */
+  private readonly scheduledRunByThread = new Map<string, string>();
+  /** Each routine's newest run divider (any) and the newest due time its clock wrote a line for, by routine. */
+  private readonly scheduledLinesOf = new Map<string, { run?: string; due?: string }>();
+  /** Scheduled lines by their run key. */
+  private readonly scheduledKeys = new Map<string, string>();
+  /** Routines, by id, deleted ones too (packages/server/inbox-scheduled.ts). */
+  private readonly scheduledById = new Map<string, InboxScheduledThread>();
   /** The seq of a message's first line: its place in the event log. */
   private readonly messageSeq = new Map<string, number>();
   /**
@@ -921,6 +959,8 @@ export class InboxStore {
   private threadTagMarks = new Map<string, Map<string, InboxThreadTagMark>>();
   /** Told when the marks change (no store line is written for them). */
   private readonly threadTagListeners = new Set<() => void>();
+  /** The tags' colours, the "Show tag colors" switch and the person's own colours (tags.json, thread-tags.ts). */
+  private tagColourState: InboxTagColoursFile = { looks: new Map(), show: null, recent: [] };
   /** A guided review's files by its snapshot's sha256 (a blob never changes). */
   private readonly guideFileSets = new Map<string, ReadonlyMap<string, DiffFile>>();
   private readonly listeners = new Set<InboxListener>();
@@ -946,6 +986,8 @@ export class InboxStore {
    * message. A re-read builds it again.
    */
   private readonly latestAgentIds = new Map<string, string>();
+  /** Each session's first message id (by its first line's seq): one it wrote, or a person's addressed to it. `firstThreadsBySession`. */
+  private readonly firstSessionIds = new Map<string, string>();
   /** Per thread, how many message lines were applied to it: `threadVersion`. */
   private readonly threadLines = new Map<string, number>();
   /**
@@ -1090,13 +1132,30 @@ export class InboxStore {
     if (record.author.kind === "person") this.indexPersonTags(record);
     this.threadLines.set(record.thread_id, (this.threadLines.get(record.thread_id) ?? 0) + 1);
     if (record.wakes === true && record.author.kind === "agent" && record.author.session) this.wakingSessions.add(record.author.session);
-    if (record.launch !== undefined && record.thread_id === record.id) this.launchedRootIds.add(record.id);
+    // A scheduled run's divider is indexed by its routine (`placeScheduledLine`), only its newest run.
+    if (record.launch !== undefined && (record.thread_id === record.id || !record.scheduled_run)) this.launchedRootIds.add(record.id);
+    if (record.scheduled_run) this.placeScheduledLine(record);
     if (!first) return;
     this.messageSeq.set(record.id, firstSeq);
     this.noteAgentMessage(record, firstSeq);
+    this.noteFirstSessionMessage(record, firstSeq);
     const members = this.threadMembers.get(record.thread_id);
     if (members) members.push(record.id);
     else this.threadMembers.set(record.thread_id, [record.id]);
+  }
+
+  /** A routine's divider or skip line: the indexes the clock and the launcher read, never the whole thread. */
+  private placeScheduledLine(record: InboxMessage): void {
+    const run = record.scheduled_run!;
+    const runOf = (id: string | undefined) => (id ? (this.messages.get(id)?.scheduled_run?.run ?? 0) : -1);
+    if (record.idempotency_key) this.scheduledKeys.set(record.idempotency_key, record.id);
+    const lines = this.scheduledLinesOf.get(run.scheduled_id) ?? {};
+    if (run.run !== undefined && run.run >= runOf(lines.run)) lines.run = record.id;
+    if (run.by === "schedule" && !(lines.due && lines.due >= run.due_at)) lines.due = run.due_at;
+    this.scheduledLinesOf.set(run.scheduled_id, lines);
+    if (record.launch !== undefined && run.run !== undefined && record.thread_id !== record.id && run.run >= runOf(this.scheduledRunByThread.get(record.thread_id))) {
+      this.scheduledRunByThread.set(record.thread_id, record.id);
+    }
   }
 
   /** A record whose latest line is all there is to it: a project, question, annotation, steps or initiative. */
@@ -1127,6 +1186,9 @@ export class InboxStore {
           if (!ids) this.stepsIdsByThread.set(line.record.thread_id, (ids = new Set()));
           ids.add(line.record.id);
         }
+        break;
+      case "scheduled":
+        this.scheduledById.set(line.record.id, line.record);
         break;
       case "initiative":
         // The Board's initiatives (approval "board-initiatives"): read by the Board only.
@@ -2582,6 +2644,8 @@ export class InboxStore {
       const replyWaiting = !!replySession && !last.delivery && !(lastTo === null && sent?.checked_at);
       const connection = replyWaiting ? connectionOf(replySession!) : undefined;
       const kind = last.reply_to ? "reply" : "message";
+      // The T3 wake says why it cannot go in now: the row waits on T3, as the thread's line does.
+      const t3Wait = !last.delivery && !last.taken_back_at && isInboxT3WaitReason(last.t3_wait) ? last.t3_wait : null;
       if (lastTo) {
         const to = last.delivery ?? last.to ?? lastTo;
         // "Claude Code (another session)": a reply sent to another session of the asker's own host.
@@ -2596,6 +2660,7 @@ export class InboxStore {
           delivered: !!last.delivery,
           stuck: !last.delivery && stuck(lastTo.session, last.id),
           handed: !last.delivery && handed(lastTo.session, last.id) && !uncertain(lastTo.session, last.id),
+          waitsOnT3: t3Wait !== null,
           undelivered: !last.delivery && !askerLive(lastTo.session),
           askerEnded: false,
           wakes: !uncertain(lastTo.session, last.id),
@@ -2614,6 +2679,7 @@ export class InboxStore {
           name: null,
           ...(another ? { another_session: true } : {}),
           ...waitWire(decision),
+          ...(t3Wait && decision.state === "queued" && decision.reason !== "handed" ? { t3_wait: t3Wait } : {}),
         };
       }
       // A reply that tags agents: the owner's own delivery, never another recipient's.
@@ -2628,6 +2694,7 @@ export class InboxStore {
         delivered: !!deliveredAt,
         stuck: replyWaiting && stuck(replySession, last.id),
         handed: replyWaiting && handed(replySession, last.id) && !uncertain(replySession, last.id),
+        waitsOnT3: t3Wait !== null,
         undelivered: false,
         askerEnded,
         wakes: (wakingSession !== null || (askedSession !== null && connection != null)) && !uncertain(replySession, last.id),
@@ -2650,6 +2717,7 @@ export class InboxStore {
         ...(decision.state === "delivered" && sent?.read_by ? { read_by: sent.read_by } : {}),
         ...(decision.reason === "ended" && askingAuthor ? { asking: { host: askingAuthor.host ?? null, name: askingAuthor.name ?? null } } : {}),
         ...waitWire(decision),
+        ...(t3Wait && decision.state === "queued" && decision.reason !== "handed" ? { t3_wait: t3Wait } : {}),
       };
     }
 
@@ -3550,7 +3618,8 @@ export class InboxStore {
     for (let index = messages.length - 1; index >= 0; index--) {
       const message = messages[index]!;
       // A permission prompt (launch, `perm:…`) is not its session's words, as in the window's `wordsMessage`.
-      if (message.author.kind === "agent" && message.author.session && !isInboxPermissionSession(message.author.session)) return { host: message.author.host ?? null, session: message.author.session };
+      // An agent's routine change line (`scheduled_change`) is a note, not its words: it takes no thread.
+      if (message.author.kind === "agent" && message.author.session && !isInboxPermissionSession(message.author.session) && !message.scheduled_change) return { host: message.author.host ?? null, session: message.author.session };
       if (message.took_over && message.to) return { host: message.to.host, session: message.to.session };
     }
     const root = messages[0];
@@ -3764,7 +3833,7 @@ export class InboxStore {
    * still owed to another session, or to no session when a session reads:
    * only a reply's recipient settles it (a second agent in the thread must
    * not swallow it). A reader new to the thread counts as the recipient of a
-   * reply no connection wakes (`owedToAnother`). Undefined: every reply, for
+   * reply nothing wakes (`owedToAnother`). Undefined: every reply, for
    * a caller that is not a read.
    */
   markAgentChecked(threadId: string, upToSeq = Number.POSITIVE_INFINITY, at = this.stamp(), reader?: string | null): void {
@@ -3822,8 +3891,8 @@ export class InboxStore {
    * to its wake. A 👍's note is not a reply: any agent's read sees it, as
    * `markAcksSeen` does.
    *
-   * Not owed to another when no connection wakes its recipient and `reader`
-   * is new to the thread (`newcomerTo`): a raw MCP client's shim takes a new
+   * Not owed to another when nothing wakes its recipient and `reader` is
+   * new to the thread (`newcomerTo`): a raw MCP client's shim takes a new
    * `ses_` id each time the client restarts, and a script may name a session
    * on send but none on read, so that read is the recipient's own as far as
    * the Inbox can tell. Without it the reply would wait for a session that
@@ -3831,6 +3900,10 @@ export class InboxStore {
    * waking recipient stays strict (its connection takes the reply, and the
    * route choice opens when it ended), and so does any reader that wrote,
    * owns a message or was tagged in the thread.
+   *
+   * So does a session the Inbox's own wake reaches whatever its message
+   * promised (`wakesLater`), until that wake finds it gone: its id is the
+   * same on every read, so a reader new to the thread is another agent.
    */
   private owedToAnother(message: InboxMessage, reader: string | null, isNewcomer = () => this.newcomerTo(message.thread_id, reader)): boolean {
     if (message.to || hasTags(message) || message.delivery || isAckNote(message) || message.taken_back_at) return false;
@@ -3838,7 +3911,9 @@ export class InboxStore {
     const asked = message.reply_to ? this.messages.get(message.reply_to) : undefined;
     if (asked?.author.kind !== "agent") return false;
     if ((asked.author.session ?? null) === reader) return false;
-    return asked.wakes === true || !isNewcomer();
+    if (asked.wakes === true) return true;
+    if (wakesLater(asked.author) && this.deliveryPresence?.wakeGone?.(asked.author.session) !== true) return true;
+    return !isNewcomer();
   }
 
   /**
@@ -4192,7 +4267,10 @@ export class InboxStore {
     const actions = parseInboxActionBlocks(body);
     // The questions inside attached Markdown files (issue #2828): after the body's, each with a key no
     // question of this message has (inboxFileQuestionKey), numbered within its file.
-    const fileQuestions = this.fileQuestionsOf(input.attachments ?? [], input.attachment_questions ?? [], [...parsed.map((q) => q.key), ...actions.map((a) => a.key)]);
+    const fileQuestions = this.fileQuestionsOf(input.attachments ?? [], input.attachment_questions ?? [], parsed, actions.map((a) => a.key));
+    // Two choices that read the same would be one answer for both (inbox-choice-twins.ts).
+    const twins = inboxTwinChoicesRefusal([...parsed, ...fileQuestions.map((f) => ({ ...f.question, file: f.attachment.name }))]);
+    if (twins) throw new InboxError("validation_error", twins.message, { field: twins.field });
     // Checked before anything is written: one id that names no open question
     // of this thread refuses the whole send.
     const superseding = this.planSupersede(threadId, id, supersedes, [...parsed, ...fileQuestions.map((f) => ({ key: f.key, replaces: f.question.replaces }))], actions);
@@ -4227,6 +4305,7 @@ export class InboxStore {
         : {}),
       ...(input.wakes === true ? { wakes: true } : {}),
       ...(input.turn_error === true ? { turn_error: true as const } : {}),
+      ...(input.scheduled_change ? { scheduled_change: input.scheduled_change } : {}),
       ...(replyThread !== null ? { reply_thread: replyThread } : {}),
       ...(naming ? { thread_naming: naming } : {}),
     };
@@ -4359,20 +4438,24 @@ export class InboxStore {
    * attachment order and each file's block order, with the record key each
    * takes (`inboxFileQuestionKey`: the file's key unless the body, an action
    * item or an earlier file has it). Only files this send attaches; an
-   * action block in a file is not read (only questions).
+   * action block in a file is not read (only questions), nor one that
+   * repeats a body question (`inboxFileQuestionTwin`).
    */
   private fileQuestionsOf(
     attachments: readonly InboxAttachment[],
     asked: NonNullable<InboxSendInput["attachment_questions"]>,
-    bodyKeys: readonly string[],
+    body: readonly ParsedInboxQuestion[],
+    actionKeys: readonly string[],
   ): { key: string; question: ParsedInboxQuestion; attachment: InboxAttachment }[] {
     if (asked.length === 0) return [];
-    const taken = new Set(bodyKeys);
+    const taken = new Set([...body.map((q) => q.key), ...actionKeys]);
+    const bodyShapes = body.map((q) => ({ key: q.key, choices: q.parsed.choices }));
     const out: { key: string; question: ParsedInboxQuestion; attachment: InboxAttachment }[] = [];
     for (const attachment of attachments) {
       const entry = asked.find((a) => a.attachment_id === attachment.id);
       if (!entry) continue;
       for (const question of entry.questions) {
+        if (inboxFileQuestionTwin({ key: question.key, choices: question.parsed.choices }, bodyShapes)) continue;
         const key = inboxFileQuestionKey(question.key, taken);
         if (key !== null) out.push({ key, question, attachment });
       }
@@ -5061,9 +5144,9 @@ export class InboxStore {
       created_at: at,
       resolved_at: null,
       idempotency_key: key,
-      ...(input.by_guest ? { by_guest: true as const } : {}),
       ...(to ? { to: { host: to.host, session: to.session } } : {}),
       ...(to && input.took_over ? { took_over: true } : {}),
+      ...(input.to && input.launch ? { launch: input.launch } : {}),
       ...(attachments.length > 0 ? { attachments: attachments.map((attachment) => ({ ...attachment, sent_at: at })) } : {}),
       ...(tags.length > 0 ? { tags } : {}),
       ...(handoff
@@ -5295,7 +5378,6 @@ export class InboxStore {
       resolved_at: null,
       idempotency_key: key,
       reask: open.map((r) => r.id),
-      ...(input.by_guest ? { by_guest: true as const } : {}),
       ...(to ? { to: { host: to.host, session: to.session } } : {}),
     };
     try {
@@ -5565,6 +5647,23 @@ export class InboxStore {
     const next: InboxMessage = { ...message, inline_images: merged };
     this.appendMessage(next, this.stamp());
     return next;
+  }
+
+  /**
+   * A file an agent's message names, made one of its attachments because the person commented on it (approval
+   * "inbox-file-refs-open-viewer"): one more line for the message, its latest snapshot with `attachment` after the ones
+   * it has. A file the message already carries (by its real path) is never added twice: that attachment is returned.
+   * Only an agent's message, and not in a resolved thread (as a comment would be refused there).
+   */
+  attachReferencedFile(messageId: string, attachment: InboxAttachment): InboxAttachment {
+    const message = this.messages.get(messageId);
+    if (!message) throw new InboxError("message_not_found", `No message ${messageId}.`);
+    if (message.author.kind !== "agent") throw new InboxError("validation_error", "message_id: only an agent's message takes a file it names.", { field: "message_id" });
+    if (this.closedByArchive(message)) throw new InboxError("thread_resolved", "This thread is resolved; reopen it to annotate.");
+    const held = (message.attachments ?? []).find((file) => file.path === attachment.path);
+    if (held) return held;
+    this.appendMessage({ ...message, attachments: [...(message.attachments ?? []), attachment] }, this.stamp());
+    return attachment;
   }
 
   /** The person's annotations in a thread still waiting for a Send (not removed, not sent). */
@@ -6314,8 +6413,23 @@ export class InboxStore {
     const messageIds = new Set(this.threadMembers.get(threadId) ?? []);
     const markups = this.markupsOf((record) => record.thread_id === threadId);
     this.keepDecisionLines((question) => messageIds.has(question.message_id));
+    this.releaseScheduledThreads((id) => id === threadId);
     this.log.deleteThread(project, threadId, messageIds, this.seq);
     this.reload(markups);
+  }
+
+  /**
+   * A routine whose thread is deleted lets go of it: its next run or change line starts one new thread. Its runs count
+   * on from the deleted thread's last, and its clock keeps its place, so nothing it already ran is run again.
+   */
+  private releaseScheduledThreads(gone: (threadId: string) => boolean): void {
+    for (const record of [...this.scheduledById.values()]) {
+      if (!record.thread_id || !gone(record.thread_id)) continue;
+      const { run, due } = this.scheduledLines(record.id);
+      const handled = record.handled_through !== null && due && due > record.handled_through ? due : record.handled_through;
+      const runs = Math.max(run?.scheduled_run?.run ?? 0, record.runs_before ?? 0);
+      this.putScheduledThread({ ...record, thread_id: null, handled_through: handled, ...(runs > 0 ? { runs_before: runs } : {}), updated_at: this.now().toISOString() });
+    }
   }
 
   /** Delete a project: its whole folder, then every blob no other record uses. */
@@ -6324,6 +6438,7 @@ export class InboxStore {
     if (!project) throw new InboxError("project_not_found", `No project ${projectId}.`);
     const markups = this.markupsOf((record) => record.project_id === projectId);
     this.keepDecisionLines((question) => question.project_id === projectId);
+    this.releaseScheduledThreads((id) => this.messages.get(id)?.project_id === projectId);
     this.log.deleteProject(project, this.seq);
     this.reload(markups);
   }
@@ -6404,6 +6519,7 @@ export class InboxStore {
     this.reloads += 1;
     this.changes += 1;
     this.latestAgentIds.clear();
+    this.firstSessionIds.clear();
     this.threadLines.clear();
     this.latest.clear();
     this.projectsById.clear();
@@ -6412,6 +6528,10 @@ export class InboxStore {
     this.projectGroups = null;
     this.messages.clear();
     this.launchedRootIds.clear();
+    this.scheduledRunByThread.clear();
+    this.scheduledLinesOf.clear();
+    this.scheduledKeys.clear();
+    this.scheduledById.clear();
     this.messageSeq.clear();
     this.resolvedSeq.clear();
     this.readdressed.clear();
@@ -6527,6 +6647,8 @@ export class InboxStore {
   private pendingFor(message: InboxMessage, session: string, options: { tags?: boolean }): boolean {
     // A hand-off inside its Undo window goes to nobody yet.
     if (handoffHeld(message) || message.taken_back_at) return false;
+    // A scheduled run's divider goes to its own run's session only; a skip line, or a run that didn't start, to none.
+    if (message.scheduled_run && message.to?.session !== session) return false;
     const owner = this.isOwner(message, session);
     const tag = owner ? null : tagOf(message, session);
     if (tag) return !tag.delivery && options.tags !== false;
@@ -6572,6 +6694,22 @@ export class InboxStore {
     return next;
   }
 
+  /**
+   * Why the T3 wake cannot put the person's reply or message into its T3
+   * thread now (null: nothing known holds it). One line per change; nothing
+   * once it is delivered.
+   */
+  recordT3Wait(messageId: string, wait: InboxT3WaitReason | null): InboxMessage | null {
+    const message = this.messages.get(messageId);
+    if (!message || message.author.kind !== "person" || message.delivery) return null;
+    if ((message.t3_wait ?? null) === wait) return message;
+    const at = this.stamp();
+    const { t3_wait: _before, ...rest } = message;
+    const next: InboxMessage = wait ? { ...rest, t3_wait: wait } : rest;
+    this.appendMessage(next, at);
+    return next;
+  }
+
   /** What a delivery of this message to `session` goes by: the message's id, or a former owner's stop notice's own. */
   deliveryIdOf(message: InboxMessage, session: string): string {
     return tagOf(message, session)?.handed_away ? inboxStopNoticeId(message.id) : message.id;
@@ -6609,7 +6747,8 @@ export class InboxStore {
     }
     if (reply.delivery) return reply;
     const at = this.stamp();
-    const delivered: InboxMessage = { ...reply, delivery: { state: "delivered", host: by.host, session: by.session, at, ...intoTurnOf(reply.deliver_now_by, by.intoTurn) } };
+    const { t3_wait: _t3Wait, ...kept } = reply;
+    const delivered: InboxMessage = { ...kept, delivery: { state: "delivered", host: by.host, session: by.session, at, ...intoTurnOf(reply.deliver_now_by, by.intoTurn) } };
     this.appendMessage(delivered, at);
     // Up to it, but never past a reply still owed to another session.
     this.markAgentChecked(reply.thread_id, this.messageSeq.get(reply.id) ?? 0, at, by.session);
@@ -6958,7 +7097,7 @@ export class InboxStore {
    * message it wrote, and writes nothing. Whether the session is live is the
    * server's check: `to` null means it is not, and only a replay answers.
    */
-  sendNewMessage(threadId: string, input: { body: unknown; to: InboxAddressee | null; idempotency_key: unknown; by_guest?: boolean }): { message: InboxMessage; replayed: boolean } {
+  sendNewMessage(threadId: string, input: { body: unknown; to: InboxAddressee | null; idempotency_key: unknown }): { message: InboxMessage; replayed: boolean } {
     const key = typeof input.idempotency_key === "string" ? input.idempotency_key.trim() : "";
     if (!key) throw new InboxError("validation_error", "idempotency_key: required on a Send.", { field: "idempotency_key" });
     const root = this.messages.get(threadId);
@@ -6985,7 +7124,6 @@ export class InboxStore {
       resolved_at: null,
       idempotency_key: key,
       to: { host: input.to.host, session: input.to.session },
-      ...(input.by_guest ? { by_guest: true as const } : {}),
     };
     this.appendMessage(message, at);
     this.endSnooze(threadId);
@@ -7058,8 +7196,6 @@ export class InboxStore {
     body: unknown;
     to: InboxAddressee | null;
     idempotency_key: unknown;
-    /** Written by a tailnet guest (`InboxMessage.by_guest`). */
-    by_guest?: boolean;
     attachments?: InboxAttachment[];
     /** The thread's name (its chip), when the person gave one: checked by the thread-name rules; an agent never replaces it. */
     thread_name?: unknown;
@@ -7128,7 +7264,6 @@ export class InboxStore {
       idempotency_key: key,
       to: { host: input.to.host, session: input.to.session },
       started_by_person: true,
-      ...(input.by_guest ? { by_guest: true as const } : {}),
       ...(input.board_request === true ? { board_request: true as const } : {}),
       ...(input.decision_ask === true ? { decision_ask: true as const } : {}),
       ...(input.rows_ask === true ? { rows_ask: true as const } : {}),
@@ -7331,12 +7466,103 @@ export class InboxStore {
     return next;
   }
 
-  /** The launched threads' roots (any project, archived included). */
+  /** The launched messages, in log order (any project, archived included): threads' roots, and replies that started a new session. */
   launchedRoots(): InboxMessage[] {
     return [...this.launchedRootIds].flatMap((id) => {
       const message = this.messages.get(id);
       return message ? [message] : [];
     });
+  }
+
+  /** Each routine's newest run that carries a launch, other than its root: the launcher's runs beside its roots. Earlier runs have ended. */
+  scheduledRunLaunches(): InboxMessage[] {
+    return [...this.scheduledRunByThread.values()].flatMap((id) => {
+      const message = this.messages.get(id);
+      return message ? [message] : [];
+    });
+  }
+
+  /** A thread's newest scheduled run that carries a launch, other than its root, or null. */
+  scheduledRunOf(threadId: string): InboxMessage | null {
+    const id = this.scheduledRunByThread.get(threadId);
+    return (id && this.messages.get(id)) || null;
+  }
+
+  /** A routine's newest run divider, and the newest due time its clock wrote a run or skip line for. */
+  scheduledLines(scheduledId: string): { run: InboxMessage | null; due: string | null } {
+    const lines = this.scheduledLinesOf.get(scheduledId);
+    return { run: (lines?.run && this.messages.get(lines.run)) || null, due: lines?.due ?? null };
+  }
+
+  /** The routines not deleted, oldest first. */
+  scheduledThreads(): InboxScheduledThread[] {
+    return [...this.scheduledById.values()].filter((record) => !record.deleted_at).sort((a, b) => a.created_at.localeCompare(b.created_at));
+  }
+
+  scheduledThread(id: string): InboxScheduledThread | null {
+    const record = this.scheduledById.get(id);
+    return record && !record.deleted_at ? record : null;
+  }
+
+  /** A deleted routine, which the window's Undo brings back. */
+  deletedScheduledThread(id: string): InboxScheduledThread | null {
+    const record = this.scheduledById.get(id);
+    return record?.deleted_at ? record : null;
+  }
+
+  /** One snapshot of a routine (its own file in the inbox folder, on the one seq). */
+  putScheduledThread(record: InboxScheduledThread): InboxScheduledThread {
+    this.write(null, { v: INBOX_RECORD_VERSION, seq: this.seq + 1, at: record.updated_at, kind: "scheduled", id: record.id, record });
+    return record;
+  }
+
+  /**
+   * A routine's run divider or skip line, written as the person's (the prompt is theirs), keyed by its run
+   * key: the same key again (a restart in the middle of a check) answers the message written before. The first one
+   * starts the thread, named after the routine. A divider with a launch is addressed to its run's
+   * placeholder and takes the thread over (`took_over`), so the person's plain reply goes to that run's session.
+   */
+  writeScheduledLine(input: {
+    project_id: string;
+    thread_id: string | null;
+    name: string;
+    body: string;
+    key: string;
+    scheduled_run: InboxScheduledRun;
+    to?: InboxAddressee;
+    launch?: InboxLaunchRecord;
+    attachments?: InboxAttachment[];
+  }): { message: InboxMessage; replayed: boolean } {
+    const written = this.scheduledKeys.get(input.key);
+    if (written && this.messages.get(written)) return { message: this.messages.get(written)!, replayed: true };
+    const root = input.thread_id ? this.messages.get(input.thread_id) : undefined;
+    if (input.thread_id && !root) throw new InboxError("thread_not_found", `No thread ${input.thread_id}.`);
+    const project_id = root?.project_id ?? input.project_id;
+    if (!this.projectsById.has(project_id)) throw new InboxError("project_not_found", `No project ${project_id}.`);
+    const at = this.stamp();
+    const id = inboxId("msg");
+    const checked = checkInboxThreadName(input.name);
+    const threadName = !root && checked.ok ? this.freeThreadName(project_id, checked.name, true, true) : null;
+    const message: InboxMessage = {
+      id,
+      project_id,
+      thread_id: root?.id ?? id,
+      reply_to: root ? (this.threadMessageIds(root.id).at(-1) ?? root.id) : null,
+      author: { kind: "person" },
+      subject: root ? root.subject : input.name,
+      subject_question: null,
+      body: input.body,
+      created_at: at,
+      resolved_at: null,
+      idempotency_key: input.key,
+      ...(input.to ? { to: { host: input.to.host, session: input.to.session }, ...(root ? { took_over: true } : { started_by_person: true }) } : {}),
+      ...(input.launch ? { launch: input.launch } : {}),
+      scheduled_run: input.scheduled_run,
+      ...(threadName ? { thread_name: threadName, named_by: { kind: "auto" as const, at } } : {}),
+      ...(input.attachments && input.attachments.length > 0 ? { attachments: input.attachments.map((attachment) => ({ ...attachment, sent_at: at })) } : {}),
+    };
+    this.appendMessage(message, at);
+    return { message, replayed: false };
   }
 
   /**
@@ -7373,6 +7599,29 @@ export class InboxStore {
     const session = message.author.session;
     const known = this.latestAgentIds.get(session);
     if (known === undefined || (this.messageSeq.get(known) ?? 0) < seq) this.latestAgentIds.set(session, message.id);
+  }
+
+  /** A message first applied at `seq`: the first of its session's (its author's, or the session a person addressed). */
+  private noteFirstSessionMessage(message: InboxMessage, seq: number): void {
+    const session = message.author.kind === "agent" ? message.author.session : message.to?.session;
+    if (!session) return;
+    const known = this.firstSessionIds.get(session);
+    if (known === undefined || (this.messageSeq.get(known) ?? Number.POSITIVE_INFINITY) > seq) this.firstSessionIds.set(session, message.id);
+  }
+
+  /**
+   * The thread each session got first (the first message it wrote, or a person's addressed to it) with that message's
+   * time and the thread's name as the list shows it (its short name, else its subject). The thread is the same for as
+   * long as the message stands, whatever the session writes later: the Agents section's last-resort name.
+   */
+  firstThreadsBySession(): Map<string, { id: string; name: string | null; at: string }> {
+    const out = new Map<string, { id: string; name: string | null; at: string }>();
+    for (const [session, id] of this.firstSessionIds) {
+      const message = this.messages.get(id);
+      if (!message) continue;
+      out.set(session, { id: message.thread_id, name: this.threadShortName(message.thread_id) ?? this.threadSubject(message.thread_id), at: message.created_at });
+    }
+    return out;
   }
 
   /**
@@ -7773,9 +8022,13 @@ export class InboxStore {
   // named (createCard). After that whoever sets it last wins, the person or an
   // agent (no write is refused for the other's earlier pick), as any card field.
 
-  /** Every initiative, deleted ones too (a card's history still names them), oldest first. */
+  /**
+   * Every initiative, deleted ones too (a card's history still names them), oldest first. Two made in one
+   * millisecond keep the order they were made in (the map's: the log's seq order on load), never their ids', whose
+   * random part sorts them either way.
+   */
   initiatives(): InboxInitiative[] {
-    return [...this.initiativesById.values()].sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id));
+    return [...this.initiativesById.values()].sort((a, b) => a.created_at.localeCompare(b.created_at));
   }
 
   initiative(id: string): InboxInitiative | null {
@@ -7815,6 +8068,7 @@ export class InboxStore {
     const at = this.stamp();
     const record: InboxInitiative = { id: inboxId("ini"), name, created_at: at, created_by: by, updated_at: at, deleted_at: null };
     this.appendInitiative(record, at);
+    this.giveTagColours();
     return record;
   }
 
@@ -7977,7 +8231,102 @@ export class InboxStore {
         // Best effort: the next load prunes it again.
       }
     }
-    if (had || kept.length > 0) this.threadTagsChanged();
+    this.tagColourState = readInboxTagColours(this.dir);
+    const gave = this.giveTagColours(false);
+    if (had || kept.length > 0 || gave) this.threadTagsChanged();
+  }
+
+  /**
+   * Each live tag without a colour gets one, oldest first (inbox-tag-colours.ts `inboxNextTagColour`): a new tag, and
+   * at load every tag made before colours. Written once; a file that cannot be written leaves them to the next load.
+   * Answers whether any was given.
+   */
+  private giveTagColours(tell = true): boolean {
+    const live = this.initiatives().filter((tag) => tag.deleted_at === null);
+    const looks = this.tagColourState.looks;
+    const missing = live.filter((tag) => !looks.has(tag.id));
+    if (missing.length === 0) return false;
+    const next = new Map(looks);
+    for (const tag of missing) {
+      const used = live.flatMap((t) => (next.has(t.id) ? [next.get(t.id)!.colour] : []));
+      next.set(tag.id, { colour: inboxNextTagColour(used), by: "auto", at: tag.created_at });
+    }
+    const state = { ...this.tagColourState, looks: next };
+    try {
+      writeInboxTagColours(this.dir, state);
+    } catch {
+      return false;
+    }
+    this.tagColourState = state;
+    if (tell) this.threadTagsChanged();
+    return true;
+  }
+
+  /** A tag's colour (deleted tags keep theirs for an Undo), or undefined before it has one. */
+  tagLook(id: string): InboxTagLook | undefined {
+    return this.tagColourState.looks.get(id);
+  }
+
+  /** The "Show tag colors" switch and the person's own colours, as the list model carries them. */
+  tagColours(): InboxTagColours {
+    const { show, recent } = this.tagColourState;
+    return { show: show?.on ?? true, show_at: show?.at ?? null, recent: recent.map((r) => ({ ...r })) };
+  }
+
+  /**
+   * The person picked a tag's colour (a preset, their own `#rrggbb`, or null for None). `at` is when they picked it,
+   * the same on every machine the window writes it to, so the merged tag's colour agrees everywhere. An own colour
+   * goes first in the recent ones. Writes no store line.
+   */
+  setTagColour(tagId: unknown, colour: unknown, at: unknown): InboxTagLook {
+    const tag = this.liveInitiative(tagId);
+    if (colour !== null && !isInboxTagColour(colour)) throw new InboxError("validation_error", "colour: accent, green, amber, red, grey, a #rrggbb, or null.", { field: "colour" });
+    const when = this.colourStamp(at);
+    // A pick held on the way (an outbox, a machine asleep) can land after a newer one: the newer stays.
+    const kept = this.tagColourState.looks.get(tag.id);
+    if (kept?.by === "person" && this.colourKeptAt(kept.at) > Date.parse(when)) return kept;
+    const look: InboxTagLook = { colour, by: "person", at: when };
+    const looks = new Map(this.tagColourState.looks).set(tag.id, look);
+    const recent = typeof colour === "string" && colour.startsWith("#") ? [{ colour, at: when }, ...this.tagColourState.recent.filter((r) => r.colour !== colour)].slice(0, INBOX_TAG_RECENT_MAX) : this.tagColourState.recent;
+    this.commitTagColours({ ...this.tagColourState, looks, recent });
+    return look;
+  }
+
+  /** "Show tag colors" in the list's ⋮, on or off, as of `at`. Writes no store line. */
+  setTagColoursShown(on: unknown, at: unknown): InboxTagColours {
+    if (typeof on !== "boolean") throw new InboxError("validation_error", "show: true or false.", { field: "show" });
+    const when = this.colourStamp(at);
+    const kept = this.tagColourState.show;
+    if (kept && this.colourKeptAt(kept.at) > Date.parse(when)) return this.tagColours();
+    this.commitTagColours({ ...this.tagColourState, show: { on, at: when } });
+    return this.tagColours();
+  }
+
+  /**
+   * When the person chose, as an ISO time (so times compare as times); none given: now. A window or machine whose clock
+   * runs ahead is held to this machine's now plus a few minutes, so its pick cannot outrank every later one.
+   */
+  private colourStamp(at: unknown): string {
+    if (at === undefined || at === null) return this.stamp();
+    const ms = typeof at === "string" ? Date.parse(at) : Number.NaN;
+    if (Number.isNaN(ms)) throw new InboxError("validation_error", "at: an ISO time.", { field: "at" });
+    return new Date(Math.min(ms, this.now().getTime() + COLOUR_AT_SLACK_MS)).toISOString();
+  }
+
+  /**
+   * A kept colour time as it compares with a new pick. One already ahead of this clock (a fast machine, or written
+   * before the cap) counts as the start of the allowance, so a pick from a window up to that far behind still wins.
+   */
+  private colourKeptAt(at: string): number {
+    const ms = Date.parse(at);
+    const now = this.now().getTime();
+    return ms > now ? now - COLOUR_AT_SLACK_MS : ms;
+  }
+
+  private commitTagColours(state: InboxTagColoursFile): void {
+    writeInboxTagColours(this.dir, state);
+    this.tagColourState = state;
+    this.threadTagsChanged();
   }
 
   private placeThreadTagMark(mark: InboxThreadTagMark): void {
@@ -8114,6 +8463,19 @@ export class InboxStore {
     const written: InboxCard = { ...card, initiative: next, heard_at: at, heard_by: by };
     this.appendCard(written, at);
     return this.cards.get(id) ?? written;
+  }
+
+  /**
+   * The same by the tag's name (`inboxInitiativeNameKey`), as a linked machine names a tag: the live tag of that name,
+   * made first (the person's) when none is. The card is checked before anything is made.
+   */
+  setCardInitiativeNamed(id: string, name: unknown, by: InboxAuthor): InboxCard {
+    if (by.kind !== "person") throw new InboxError("initiative_person_only", "Only the person puts a card in an initiative.");
+    if (!this.cards.has(id)) throw new InboxError("card_not_found", `No card ${id}.`);
+    const text = this.cardText(name, "name", INBOX_INITIATIVE_NAME_MAX);
+    const key = inboxInitiativeNameKey(text);
+    const found = [...this.initiativesById.values()].find((tag) => tag.deleted_at === null && inboxInitiativeNameKey(tag.name) === key);
+    return this.setCardInitiative(id, (found ?? this.appendNewInitiative(text, by)).id, by);
   }
 
   /**

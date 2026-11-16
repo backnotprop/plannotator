@@ -13,7 +13,7 @@
 
 import { INBOX_ROWS_DEFAULT, inboxRowsRead, type InboxRowsOption } from "@plannotator/core/inbox-types";
 import { INBOX_ROWS_USAGE, INBOX_ROWS_WORDS, inboxRowsApply, inboxRowsChangeLines, inboxRowsListing, inboxRowsListingJson, type InboxRowsBy } from "@plannotator/core/inbox-types";
-import type { InboxRegistryEntry } from "@plannotator/shared/inbox/registry";
+import { inboxEnsureFailedWords, type InboxRegistryEntry } from "@plannotator/shared/inbox/registry";
 import { hasHelpFlag } from "./cli";
 import { writeWholeToStdout } from "./write-whole-stdout";
 
@@ -62,7 +62,7 @@ export async function runInboxRowsCommand(argv: readonly string[], deps: RowsCom
   try {
     entry = await deps.ensureRunning();
   } catch (error) {
-    err(`Plannotator Inbox is not running: ${error instanceof Error ? error.message : String(error)}\n`);
+    err(`${inboxEnsureFailedWords(error)}\n`);
     return 1;
   }
   const request = async (post?: Record<string, unknown>) => {

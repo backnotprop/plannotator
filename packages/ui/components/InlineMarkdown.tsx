@@ -8,12 +8,14 @@ import { hasLinkedDocExtension } from "../utils/markdownExtensions";
 import { getImageSrc } from "./ImageThumbnail";
 import { InlineImageTagsContext, UNAVAILABLE_IMAGE_CLASS, useImageResolver } from "./ImageResolverContext";
 import { useCodePathValidation, type CodePathValidationContextValue } from "./CodePathValidationContext";
-import { CodeSpan, isLocalLinkTarget, isNewTabClick, useLocalLinkResolver } from "./LocalLinkContext";
+import { BarePathContext, CodeSpan, isLocalLinkTarget, isNewTabClick, useLocalLinkResolver, type BarePathWrap } from "./LocalLinkContext";
 import type { ValidationEntry } from "../hooks/useValidatedCodePaths";
 import { CodeFilePicker } from "./CodeFilePicker";
 import { normalizeMathTex, renderMathToHtml } from "../utils/math";
 import { useMathRenderer } from "../hooks/useMathRenderer";
 import { HostTitle } from "./HostTitle";
+import { AuthorColorText } from "./AuthorColorText";
+import { matchAuthorColor } from "../utils/authorColor";
 
 export interface DocPreviewResult {
   contents?: string;
@@ -297,6 +299,20 @@ function bareUrlRunningPast(text: string, end: number): number {
   return -1;
 }
 
+// Index of the first host-found bare path (BarePathContext) that starts after
+// index 0 and before `end` AND runs past `end`, or -1: `_`, `@` and `#` end a
+// plain-text chunk, so a path holding one (`src/file_refs.ts`) would be cut
+// there. Stop the chunk where the path starts instead, so the loop's own
+// bare-path check takes it whole. Reads to the next white space only.
+function barePathRunningPast(text: string, end: number, barePaths: BarePathWrap): number {
+  const rest = text.slice(end).search(/\s/);
+  const window = rest === -1 ? text : text.slice(0, end + rest);
+  for (const span of barePaths.find(window)) {
+    if (span.start > 0 && span.start < end && span.end > end && !/\w/.test(window[span.start - 1]!)) return span.start;
+  }
+  return -1;
+}
+
 // Scan a plain-text chunk for bare https?:// URLs and bare code file paths
 // at word boundaries, emitting them as interactive nodes. Surrounding text
 // passes through transformPlainText for emoji shortcodes + smart punctuation.
@@ -308,11 +324,13 @@ function emitPlainTextWithBareUrls(
   onOpenCodeFile?: (path: string) => void,
   validation?: CodePathValidationContextValue | null,
   baseDir?: string,
+  barePaths?: BarePathWrap | null,
 ): void {
   if (text.length === 0) return;
 
   type Span = { start: number; end: number; kind: 'url'; value: string }
-    | { start: number; end: number; kind: 'path'; value: string };
+    | { start: number; end: number; kind: 'path'; value: string }
+    | { start: number; end: number; kind: 'host'; value: string };
   const spans: Span[] = [];
 
   // Collect bare URLs
@@ -342,6 +360,17 @@ function emitPlainTextWithBareUrls(
     }
   }
 
+  // Paths the host finds (BarePathContext, opt-in), where nothing above took them.
+  if (barePaths) {
+    for (const found of barePaths.find(text)) {
+      if (found.end <= found.start || found.start < 0 || found.end > text.length) continue;
+      const before = found.start === 0 ? previousChar : text[found.start - 1];
+      if (/\w/.test(before)) continue;
+      if (spans.some(s => found.start < s.end && found.end > s.start)) continue;
+      spans.push({ start: found.start, end: found.end, kind: 'host', value: text.slice(found.start, found.end) });
+    }
+  }
+
   if (spans.length === 0) {
     parts.push(transformPlainText(text));
     return;
@@ -354,7 +383,9 @@ function emitPlainTextWithBareUrls(
     if (span.start > last) {
       parts.push(transformPlainText(text.slice(last, span.start)));
     }
-    if (span.kind === 'url') {
+    if (span.kind === 'host') {
+      parts.push(<React.Fragment key={nextKey()}>{barePaths!.wrap(span.value)}</React.Fragment>);
+    } else if (span.kind === 'url') {
       parts.push(
         <a
           key={nextKey()}
@@ -568,6 +599,7 @@ export const InlineMarkdown: React.FC<{
 }> = ({ text, onOpenLinkedDoc, resolveLinkedDoc, onOpenCodeFile, onNavigateAnchor, imageBaseDir, onImageClick, githubRepo, repoHost, linkLabel = false }) => {
   const validation = useCodePathValidation();
   const resolveLocalLink = useLocalLinkResolver();
+  const barePaths = useContext(BarePathContext);
   const softLineBreaks = useContext(SoftLineBreaksContext);
   const resolveImage = useImageResolver();
   const inlineImageTags = useContext(InlineImageTagsContext);
@@ -595,6 +627,30 @@ export const InlineMarkdown: React.FC<{
     let match = remaining.match(/^<!--[\s\S]*?-->/);
     if (match) {
       remaining = remaining.slice(match[0].length);
+      previousChar = ">";
+      continue;
+    }
+
+    // An author's text colour: `<span style="color: …">` / `<font color="…">`
+    // (utils/authorColor). A refused colour still renders the words, uncoloured.
+    const colored = remaining[0] === '<' ? matchAuthorColor(remaining) : null;
+    if (colored) {
+      const inner = (
+        <InlineMarkdown
+          text={colored.inner}
+          onOpenLinkedDoc={onOpenLinkedDoc}
+          resolveLinkedDoc={resolveLinkedDoc}
+          onOpenCodeFile={onOpenCodeFile}
+          onNavigateAnchor={onNavigateAnchor}
+          imageBaseDir={imageBaseDir}
+          onImageClick={onImageClick}
+          githubRepo={githubRepo}
+          repoHost={repoHost}
+          linkLabel={linkLabel}
+        />
+      );
+      parts.push(colored.color ? <AuthorColorText key={key++} color={colored.color}>{inner}</AuthorColorText> : <React.Fragment key={key++}>{inner}</React.Fragment>);
+      remaining = remaining.slice(colored.length);
       previousChar = ">";
       continue;
     }
@@ -713,6 +769,24 @@ export const InlineMarkdown: React.FC<{
       remaining = remaining.slice(crossRepoRef.label.length);
       previousChar = crossRepoRef.label[crossRepoRef.label.length - 1];
       continue;
+    }
+
+    // A file path the host finds (BarePathContext, opt-in) starting here, after
+    // cross-repo refs (`vercel/next.js#123` stays a ref),
+    // whole: a chunk was stopped where it starts (barePathRunningPast), so a
+    // `_` or `@` inside it does not cut it. Never where markdown starts (`*`,
+    // `_`, `[`, a backtick), and a code path ui links itself stays ui's.
+    if (barePaths && !linkLabel && !/\w/.test(previousChar) && /^[A-Za-z0-9./~]/.test(remaining)) {
+      const space = remaining.search(/\s/);
+      const word = space === -1 ? remaining : remaining.slice(0, space);
+      const found = barePaths.find(word).find((span) => span.start === 0 && span.end > 0 && span.end <= word.length);
+      if (found && !(onOpenCodeFile && isCodeFilePathStrict(word.slice(0, found.end)))) {
+        const value = word.slice(0, found.end);
+        parts.push(<React.Fragment key={key++}>{barePaths.wrap(value)}</React.Fragment>);
+        remaining = remaining.slice(found.end);
+        previousChar = value[value.length - 1]!;
+        continue;
+      }
     }
 
     // Autolinks: <https://url> or <email@domain.com>
@@ -1215,8 +1289,7 @@ export const InlineMarkdown: React.FC<{
       if (localLink?.kind === 'open') {
         const openLink = localLink.open;
         const hostHref = localLink.href;
-        parts.push(
-          <HostTitle key={key++} title={localLink.title}>
+        const link = (
           <a
             href={hostHref ?? safeLinkUrl}
             onClick={(e) => {
@@ -1247,7 +1320,11 @@ export const InlineMarkdown: React.FC<{
               />
             </svg>
           </a>
-          </HostTitle>,
+        );
+        parts.push(
+          localLink.wrap
+            ? <React.Fragment key={key++}>{localLink.wrap(link)}</React.Fragment>
+            : <HostTitle key={key++} title={localLink.title}>{link}</HostTitle>,
         );
       } else if (localLink?.kind === 'unavailable') {
         const inert = (
@@ -1399,18 +1476,21 @@ export const InlineMarkdown: React.FC<{
     // A ref inside a URL never splits it: the URL starts first and wins.
     const urlAt = linkLabel ? -1 : bareUrlRunningPast(remaining, chunkEnd);
     const refAt = crossRepoProject && !linkLabel ? findCrossRepoRef(remaining, urlAt === -1 ? chunkEnd : urlAt, crossRepoProject, crossRepoAccept) : -1;
-    const splitAt = refAt !== -1 ? refAt : urlAt;
+    let splitAt = refAt !== -1 ? refAt : urlAt;
+    // A host-found path running past the chunk (BarePathContext): split where it starts. Never inside a link's label.
+    const pathAt = barePaths && !linkLabel ? barePathRunningPast(remaining, chunkEnd, barePaths) : -1;
+    if (pathAt > 0 && (splitAt === -1 || pathAt < splitAt)) splitAt = pathAt;
     if (splitAt !== -1) {
       const before = remaining.slice(0, splitAt);
       if (linkLabel) parts.push(transformPlainText(before));
-      else emitPlainTextWithBareUrls(before, previousChar, parts, () => key++, onOpenCodeFile, validation, imageBaseDir);
+      else emitPlainTextWithBareUrls(before, previousChar, parts, () => key++, onOpenCodeFile, validation, imageBaseDir, barePaths);
       previousChar = before[before.length - 1] || previousChar;
       remaining = remaining.slice(splitAt);
       continue;
     }
     const plainText = nextSpecial === -1 ? remaining : remaining.slice(0, nextSpecial + 1);
     if (linkLabel) parts.push(transformPlainText(plainText));
-    else emitPlainTextWithBareUrls(plainText, previousChar, parts, () => key++, onOpenCodeFile, validation, imageBaseDir);
+    else emitPlainTextWithBareUrls(plainText, previousChar, parts, () => key++, onOpenCodeFile, validation, imageBaseDir, barePaths);
     previousChar = plainText[plainText.length - 1] || previousChar;
     if (nextSpecial === -1) {
       break;

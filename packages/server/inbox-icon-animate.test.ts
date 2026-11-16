@@ -37,7 +37,6 @@ function world() {
     icons,
     faces,
     serverSession: "srv",
-    localOnly: () => json({ code: "local_only" }, 403),
     readBody: async (req) => (await req.json()) as Record<string, unknown>,
     json,
     touch: () => {},
@@ -46,7 +45,7 @@ function world() {
   const call = async (method: "GET" | "POST", body?: Record<string, unknown>) => {
     const url = new URL("http://127.0.0.1/api/inbox/icon-animate");
     try {
-      const res = await animate.route(new Request(url, { method, ...(body ? { body: JSON.stringify(body) } : {}) }), url, true);
+      const res = await animate.route(new Request(url, { method, ...(body ? { body: JSON.stringify(body) } : {}) }), url);
       return { status: res!.status, body: (await res!.json()) as Record<string, unknown> };
     } catch (err) {
       if (err instanceof InboxError) return { status: 400, body: { code: err.code } };

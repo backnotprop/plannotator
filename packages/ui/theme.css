@@ -1997,6 +1997,47 @@ body:has([data-popout="true"]) [data-sidebar-tabs="true"] {
   }
 }
 
+/* Source line numbers (Settings → Display → Source line numbers, #1650; see
+   utils/sourceLineAttrs). Each block carries data-doc-source-line and draws
+   it as its own ::before: no element, so nothing that walks a block's
+   children or text meets it and the switch never adds a node. It shows only
+   when the host opted in (hooks/useDocumentSourceLineNumbers sets
+   data-doc-source-lines on the document element) and only inside the
+   Viewer's article (data-doc-source-root), never in the plan diff, the Inbox
+   or code review. Not on phones or in print. The article's left side grows
+   to hold a span label such as 128–135 (about 3.6rem with its gap): the
+   Clean look has only the plan area's 2.5rem beside it and the scroll area
+   clips sideways; the Grid card's own padding is 2–3rem. */
+@media screen and (min-width: 48rem) {
+  [data-doc-source-lines] [data-doc-source-root] [data-doc-source-line]::before {
+    content: attr(data-doc-source-line);
+    position: absolute;
+    right: 100%;
+    top: 0;
+    z-index: 1;
+    margin-right: 0.75rem;
+    font-family: var(--font-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11px;
+    font-style: normal;
+    font-weight: 400;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: normal;
+    line-height: 1rem;
+    text-decoration: none;
+    text-transform: none;
+    white-space: nowrap;
+    color: color-mix(in oklab, var(--muted-foreground) 70%, transparent);
+    pointer-events: none;
+    user-select: none;
+  }
+  [data-doc-source-lines] [data-doc-source-root="clean"] {
+    padding-left: 1.5rem;
+  }
+  [data-doc-source-lines] [data-doc-source-root="grid"] {
+    padding-left: 4rem;
+  }
+}
+
 /* Reduced motion: Base UI popups (dialogs, menus, popovers, tooltips) animate
    via [data-starting-style]/[data-ending-style] transitions — those attributes
    only exist during the enter/exit phases, so zeroing transitions here makes

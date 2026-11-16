@@ -59,7 +59,7 @@ import { agentVersionRun, createAgentEnvironmentFor } from "./inbox-agents";
 import { launchChoiceArgs, parsePiChoices } from "@plannotator/core/inbox-launch-choice";
 import { LAUNCH_CHOICES_RUN_MS, launchChoiceCache } from "./inbox-launch-choice";
 import { shellQuote, versionAtLeast } from "./inbox-launch-claude";
-import { launchSpawnEnv, type LaunchEnv } from "./inbox-launch-env";
+import { launchShellSwitches, launchSpawnEnv, type LaunchEnv } from "./inbox-launch-env";
 import { launchNoteText, launchTurnErrorNote, writeLaunchNote, type LaunchAvailability, type LaunchHost, type LaunchHostContext, type LaunchHostResult, type LaunchLive, type LaunchPermissionContext } from "./inbox-launch-host";
 
 export const PI = "pi" as const;
@@ -132,9 +132,12 @@ export function piArgv(pi: string, session: string, name: string, choice: readon
   return [pi, "--mode", "rpc", "--session-id", session, "--name", name.trim() || "Inbox", ...choice];
 }
 
-/** The process's env: the login env through the launch filter, the Inbox tool on, and this Inbox's data dir when not the default. */
+/**
+ * The process's env: the login env through the launch filter, the person's own Plannotator switches
+ * (`LAUNCH_SHELL_SWITCHES`), the Inbox tool on, and this Inbox's data dir when not the default.
+ */
 export function piSpawnEnv(login: Readonly<LaunchEnv>, dataDir: string | null): LaunchEnv {
-  return { ...launchSpawnEnv(login), PLANNOTATOR_INBOX_TOOL: "1", ...(dataDir ? { PLANNOTATOR_DATA_DIR: dataDir } : {}) };
+  return { ...launchSpawnEnv(login), ...launchShellSwitches(login), PLANNOTATOR_INBOX_TOOL: "1", ...(dataDir ? { PLANNOTATOR_DATA_DIR: dataDir } : {}) };
 }
 
 /**
@@ -661,7 +664,9 @@ export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?
 
   const nameOf = (launch: InboxLaunchRecord) => {
     const root = threads?.rootOf(launch.id);
-    return root?.thread_name ?? root?.subject ?? "Inbox";
+    // A reply's launch takes its thread's name.
+    const head = root ? (threads!.store.message(root.thread_id) ?? root) : null;
+    return head?.thread_name ?? head?.subject ?? "Inbox";
   };
 
   type ResumeResult = LaunchHostResult & { failure: { code: "untrusted" | "failed"; text: string } | null };

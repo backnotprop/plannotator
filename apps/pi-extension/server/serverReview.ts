@@ -3,6 +3,7 @@ import { schedulePiDailyPing } from "./daily-ping.ts";
 import { createPackageChangesService, MAX_PACKAGE_FILE_BYTES, PACKAGE_CHECKOUT_WAIT_MS, prSettingsSource, REMOTE_PACKAGE_READS, waitAtMost } from "../generated/package-changes-service.ts";
 import { parseDiffToFiles } from "../generated/diff-files.ts";
 import { isSameOriginOrNoOrigin } from "../generated/request-origin.ts";
+import { decodePathSegment, MALFORMED_PATH_ERROR } from "../generated/path-segment.ts";
 import { likelyAppHtmlEncoding, prewarmAppHtml } from "../generated/app-html.ts";
 import { openPackedApp } from "../generated/packed-app.ts";
 import {
@@ -2326,7 +2327,11 @@ export async function startReviewServer(options: {
 		// API: Get guide result — live job ids, or `saved:{id}` for a
 		// persisted guide loaded from the on-disk store (#1112).
 		if (url.pathname.match(/^\/api\/guide\/[^/]+$/) && req.method === "GET") {
-			const jobId = decodeURIComponent(url.pathname.slice("/api/guide/".length));
+			const jobId = decodePathSegment(url.pathname.slice("/api/guide/".length));
+			if (jobId === null) {
+				json(res, { error: MALFORMED_PATH_ERROR }, 400);
+				return;
+			}
 			if (jobId.startsWith(SAVED_GUIDE_ID_PREFIX)) {
 				const saved = await guideStore.getSavedGuideData(jobId.slice(SAVED_GUIDE_ID_PREFIX.length));
 				if (!saved) {
@@ -2349,7 +2354,11 @@ export async function startReviewServer(options: {
 		// the job's autosaved file; `saved:{id}` ids persist directly.
 		const reviewedMatch = url.pathname.match(/^\/api\/guide\/([^/]+)\/reviewed$/);
 		if (reviewedMatch && req.method === "PUT") {
-			const jobId = decodeURIComponent(reviewedMatch[1]);
+			const jobId = decodePathSegment(reviewedMatch[1]);
+			if (jobId === null) {
+				json(res, { error: MALFORMED_PATH_ERROR }, 400);
+				return;
+			}
 			try {
 				const body = await parseBody(req) as { reviewed: boolean[] };
 				if (Array.isArray(body.reviewed)) {
@@ -2374,7 +2383,11 @@ export async function startReviewServer(options: {
 		// API: Portable export of a guide (decision record D1/D9). Mirrors packages/server/review.ts.
 		const guideExportMatch = url.pathname.match(/^\/api\/guide\/([^/]+)\/(export|export-info)$/);
 		if (guideExportMatch && req.method === "GET") {
-			const jobId = decodeURIComponent(guideExportMatch[1]);
+			const jobId = decodePathSegment(guideExportMatch[1]);
+			if (jobId === null) {
+				json(res, { error: MALFORMED_PATH_ERROR }, 400);
+				return;
+			}
 			// Unlike Bun.serve, node:http does not turn a thrown error into a
 			// 500 — an unguarded throw here would take the extension host down.
 			let snapshot: GuideSnapshot | null;
@@ -2416,7 +2429,11 @@ export async function startReviewServer(options: {
 		// any existing link. Mutating verbs carry the cross-origin guard.
 		const guideShareMatch = url.pathname.match(/^\/api\/guide\/([^/]+)\/(share|share-info)$/);
 		if (guideShareMatch && guideShareMatch[2] === "share-info" && req.method === "GET") {
-			const jobId = decodeURIComponent(guideShareMatch[1]);
+			const jobId = decodePathSegment(guideShareMatch[1]);
+			if (jobId === null) {
+				json(res, { error: MALFORMED_PATH_ERROR }, 400);
+				return;
+			}
 			const config = loadConfig();
 			const existing = (await guideStore.locateEnvelope(jobId))?.envelope.share;
 			json(res, {
@@ -2431,7 +2448,11 @@ export async function startReviewServer(options: {
 				json(res, { error: "Cross-origin share requests are not allowed" }, 403);
 				return;
 			}
-			const jobId = decodeURIComponent(guideShareMatch[1]);
+			const jobId = decodePathSegment(guideShareMatch[1]);
+			if (jobId === null) {
+				json(res, { error: MALFORMED_PATH_ERROR }, 400);
+				return;
+			}
 			const config = loadConfig();
 			const serviceUrl = resolveGuideShareUrl(config);
 			if (req.method === "POST") {
@@ -2537,7 +2558,11 @@ export async function startReviewServer(options: {
 		// effort: the envelope is the only copy of the delete token.
 		const savedGuideDeleteMatch = url.pathname.match(/^\/api\/guides\/([^/]+)$/);
 		if (savedGuideDeleteMatch && req.method === "DELETE") {
-			const savedId = decodeURIComponent(savedGuideDeleteMatch[1]);
+			const savedId = decodePathSegment(savedGuideDeleteMatch[1]);
+			if (savedId === null) {
+				json(res, { error: MALFORMED_PATH_ERROR }, 400);
+				return;
+			}
 			await unshareBeforeDelete((await guideStore.locateEnvelope(`${SAVED_GUIDE_ID_PREFIX}${savedId}`))?.envelope.share);
 			const ok = await guideStore.deleteSaved(savedId);
 			if (!ok) {

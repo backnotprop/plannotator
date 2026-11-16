@@ -20,13 +20,13 @@ import type { LocalLinkResolver } from '@plannotator/ui/components/LocalLinkCont
 import { AnnotationPanel } from '@plannotator/ui/components/AnnotationPanel';
 import { AnnotationToolstrip } from '@plannotator/ui/components/AnnotationToolstrip';
 import { HtmlSurfaceControls } from '@plannotator/ui/components/HtmlSurfaceControls';
-import { HtmlViewer } from '@plannotator/ui/components/html-viewer';
+import { HtmlViewer, type HtmlViewerFrame } from '@plannotator/ui/components/html-viewer';
 import { Viewer, type ViewerHandle } from '@plannotator/ui/components/Viewer';
 import { ScrollViewportProvider } from '@plannotator/ui/hooks/useScrollViewport';
 import type { Annotation, EditorMode, InputMethod } from '@plannotator/ui/types';
 import { annotationOwnsHighlight } from '@plannotator/ui/utils/annotationOwnsHighlight';
 import { groupAnnotationsByDocument, type AnnotationScope } from '@plannotator/ui/utils/annotationScope';
-import { InboxApiError, type AttachmentView, type LinkedPageView } from '../api';
+import { InboxApiError, type AttachmentView } from '../api';
 import { attachmentDrawReady } from '../threadDrawReady';
 import { selectionOnPhrase, useInboxFileSource } from '../fileSource';
 import { folderOf, resolveInboxHtmlLink } from '../htmlLinks';
@@ -47,9 +47,10 @@ import {
   codeRangeOf,
   compareVideoTimes,
   inboxViewKind,
-  type InboxCodeRange,
+  relocateCodeRange,
 } from '../attachments';
 import { whenTime, formatBytes } from '../format';
+export { relocateCodeRange };
 import { useRefRepo } from '../links';
 import { inboxMarkdownImageBase } from '../images';
 import { useCommentPictures } from '../commentPictures';
@@ -79,6 +80,7 @@ import { CommentCount, EarlierSection, commentsLabel } from './EarlierSection';
 import { earlierCommentsOn } from '../earlierComments';
 import { FullScreenMore } from './OpenIn';
 import { fileSwipeMode, prefersReducedMotion, useFileSwipe } from '../fileSwipe';
+import { useTouchStepBar } from '../touchStepBar';
 import { FileSwipeCard } from './FileSwipeCard';
 import { ImageSwipePeek, isImageStep } from './ImageSwipePeek';
 import { OptionCaption } from './OptionCaption';
@@ -87,7 +89,7 @@ import { createPortal } from 'react-dom';
 import type { Notice } from './Markup';
 import { MarkupPicture } from './Markup';
 import { isWordlessMarkup, MARKUP_ONLY_TEXT } from '../markup';
-import { useShortcutScope } from '@plannotator/ui/shortcuts';
+import { useShortcutScope } from '../panes/scope';
 import { inboxFileViewerShortcuts } from '../shortcuts/fileViewer.shortcuts';
 import { ShortcutHint, withShortcut } from '../shortcuts/hint';
 import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
@@ -99,6 +101,10 @@ import { LinkedMarkdown } from './LinkedMarkdown';
 import { PAGE_DESKTOP_WIDTH, desktopFitScale, pageIsWide, readPageSize, shownPageSize, writePageSize, type PageSize } from '../pageSize';
 import { tapNearSizeIcon, useSizeIconFade } from '../sizeIconFade';
 import { useFileQuestionViewerProps, type FileQuestions } from '../fileQuestions';
+import { whenStill } from '../whenStill';
+import { unsavedComposer, unsavedComposers } from './unsavedComposers';
+import { linkedValue, pageStartAt, splitLinked, usePageClear, usePageStart, type LinkedPage, type PageStart } from './htmlPageFrame';
+export { unsavedComposer, unsavedComposers };
 
 /**
  * The pane width below which the 300 px comments panel beside the thread
@@ -111,19 +117,6 @@ export const FOLD_PANEL_BELOW = 780;
 
 /** How long the note says why a link in an attached page opened nothing. */
 export const LINK_NOTE_MS = 5000;
-
-/** A page an attached HTML page links to, shown read-only over it: its path in the page's folder and the fragment its link named. */
-type LinkedPage = LinkedPageView & { relative: string; hash: string; attachmentId: string };
-
-/** The route's `linked=` value: the page's path in the folder, then `#fragment`. */
-export function linkedValue(relative: string, hash: string): string {
-  return hash ? `${relative}#${hash}` : relative;
-}
-
-export function splitLinked(value: string): { relative: string; hash: string } {
-  const at = value.indexOf('#');
-  return at < 0 ? { relative: value, hash: '' } : { relative: value.slice(0, at), hash: value.slice(at + 1) };
-}
 
 /** The space between full screen's changed note and the code's top row, which grows under the note (Copy file stays clear of it). */
 export const CODE_ROW_BELOW_NOTE = 8;
@@ -282,6 +275,8 @@ export interface AttachmentPaneProps {
    * frame it is in now. Absent: `onStep`.
    */
   onOpenLinked?: (attachmentId: string) => void;
+  /** The `?…#…` an HTML page opens with, from a message's link (`mock.html?variant=2`): attachment `id` only; a new object applies again. */
+  pageStart?: PageStart | null;
   /**
    * How a link to this Inbox opens in this window, or null when it does not (App.tsx's `inboxLink`). Absent (the
    * tour): every link is another site's.
@@ -325,93 +320,12 @@ export interface AttachmentPaneHandle {
   exitFull: () => void;
 }
 
-/** The pane on screen (one at a time), as whether it holds a comment not saved yet. */
-let openPane: { unsaved: () => boolean } | null = null;
+/** The panes on screen (one per thread pane), each as whether it holds a comment not saved yet. */
+const openPanes = new Set<{ unsaved: () => boolean }>();
 
-/** Whether the file open now holds a comment not saved yet (saved words compared: an edit not changed is not unsaved). */
+/** Whether a file open now holds a comment not saved yet (saved words compared: an edit not changed is not unsaved). */
 export function openPaneUnsaved(): boolean {
-  return openPane?.unsaved() ?? false;
-}
-
-/** The first of `unsavedComposers`, or null. `savedText` answers an annotation's saved words by id. */
-export function unsavedComposer(pane: HTMLElement | null, savedText: (id: string) => string | undefined = () => undefined): HTMLTextAreaElement | null {
-  return unsavedComposers(pane, savedText)[0] ?? null;
-}
-
-/**
- * Every composer of the open file with words (or a drawing) not yet saved, or
- * an existing comment being edited whose words differ from the saved ones,
- * in this order: comment popovers, a diagram's composer, the file's own row
- * (`data-image-composer`), edit boxes. Their textareas.
- */
-export function unsavedComposers(
-  pane: HTMLElement | null,
-  savedText: (id: string) => string | undefined = () => undefined,
-  owns: (area: HTMLTextAreaElement) => boolean = () => true,
-): HTMLTextAreaElement[] {
-  const found: HTMLTextAreaElement[] = [];
-  const typed = (area: HTMLTextAreaElement) => area.value.trim() !== '';
-  // Plannotator's comment popover (text, HTML pinpoint, code lines) draws in a portal on the page: only the pane's own.
-  for (const area of document.querySelectorAll<HTMLTextAreaElement>('[data-comment-popover] textarea')) {
-    if (typed(area) && owns(area)) found.push(area);
-  }
-  if (!pane) return found;
-  for (const area of pane.querySelectorAll<HTMLTextAreaElement>('[data-diagram-composer] textarea, [data-image-composer] textarea')) {
-    if (typed(area)) found.push(area);
-  }
-  // An image drawn on but not yet commented.
-  const drawn = pane.querySelector<HTMLElement>('[data-image-composer] .ib-markup');
-  const row = drawn ? pane.querySelector<HTMLTextAreaElement>('[data-image-composer] textarea') : null;
-  if (row && !found.includes(row)) found.push(row);
-  // A comment being edited (the annotation panel's card, a code line's inline comment, which Pierre may draw in its shadow root).
-  const roots: ParentNode[] = [pane];
-  for (const container of pane.querySelectorAll('diffs-container')) if (container.shadowRoot) roots.push(container.shadowRoot);
-  for (const scope of roots) {
-    for (const area of scope.querySelectorAll<HTMLTextAreaElement>('[data-annotation-id] textarea, [data-code-annotation-id] textarea')) {
-      const owner = area.closest('[data-annotation-id], [data-code-annotation-id]');
-      const id = owner?.getAttribute('data-annotation-id') ?? owner?.getAttribute('data-code-annotation-id') ?? '';
-      if (area.value.trim() !== (savedText(id) ?? '').trim()) found.push(area);
-    }
-  }
-  return found;
-}
-
-/**
- * Run `then` once `el` stops moving: the same box three frames running (or after about a second). A file opening
- * beside the thread slides in as the list and sidebar fold away; a comment box placed before that would stay where
- * its words were mid-slide, so one put back waits, as a person's click always does.
- */
-function whenStill(el: () => HTMLElement | null, then: () => void): () => void {
-  let last = '';
-  let still = 0;
-  let frames = 0;
-  let id = requestAnimationFrame(function tick() {
-    const box = el()?.getBoundingClientRect();
-    const now = box ? `${box.left},${box.top},${box.width},${box.height}` : '';
-    still = now === last ? still + 1 : 0;
-    last = now;
-    if (still >= 3 || ++frames >= 60) then();
-    else id = requestAnimationFrame(tick);
-  });
-  return () => cancelAnimationFrame(id);
-}
-
-/**
- * Where a kept line comment's lines are in the file now: where they were when they still read the same, else the
- * nearest place they do (the file was edited above them), else null (they changed: the words wait, on nothing).
- */
-export function relocateCodeRange(range: InboxCodeRange, text: string): { lineStart: number; lineEnd: number } | null {
-  const lines = text.split('\n');
-  const count = range.lineEnd - range.lineStart + 1;
-  const matchesAt = (start: number) => start >= 1 && start + count - 1 <= lines.length && codeRangeMatches(range, lines.slice(start - 1, start - 1 + count).join('\n'));
-  // Every start, nearest first: a file cut far shorter still finds lines that moved a long way up.
-  const reach = Math.max(range.lineStart, lines.length);
-  for (let distance = 0; distance <= reach; distance++) {
-    for (const start of distance === 0 ? [range.lineStart] : [range.lineStart - distance, range.lineStart + distance]) {
-      if (matchesAt(start)) return { lineStart: start, lineEnd: start + count - 1 };
-    }
-  }
-  return null;
+  return [...openPanes].some((pane) => pane.unsaved());
 }
 
 /** The element that scrolls the open file (a document, code, or an image at its own size). */
@@ -552,6 +466,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   const [menuOpen, setMenuOpen] = useState(false);
   /** Full screen (approval "inbox-one-fullscreen"): the file fills the window under one floating toolbar. */
   const full = props.full;
+  const touch = useTouchStepBar(phone, multi && !(full && optionSet));
   /** Full screen's composer: an image, a film, a recording and an HTML page draw it (the comment row of the first three goes inside it). */
   const hasComposer = full && !!props.composer && (kind === 'image' || kind === 'video' || kind === 'audio' || kind === 'html');
   /**
@@ -781,10 +696,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   // Whether the file holds a comment not saved yet, for the window's link listener (App.tsx): an edit not changed is not unsaved.
   useEffect(() => {
     const entry = { unsaved: () => !readOnlyRef.current && unsavedComposer(sectionRef.current, savedTextRef.current) !== null };
-    openPane = entry;
-    return () => {
-      if (openPane === entry) openPane = null;
-    };
+    openPanes.add(entry);
+    return () => void openPanes.delete(entry);
   }, []);
   const exitFullRef = useRef<() => void>(() => {});
   useImperativeHandle(ref, () => ({ leave: (to, go) => leaveRef.current(to, go), exitFull: () => exitFullRef.current() }), []);
@@ -993,7 +906,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   // peeks in beside it, and a drag down closes, even with one file.
   const imageEdges = useRef<ImageSwipeEdges | null>(null);
   const isImageFile = kind === 'image';
-  const swipeOn = full && phone && (multi || isImageFile) && swipeMode === 'follow' && !blocked && !sheet;
+  const swipeOn = (full && phone ? multi || isImageFile : touch.tablet && multi) && swipeMode === 'follow' && !blocked && !sheet;
   /** The neighbour that way is an image drawn whole beside this one (ImageSwipePeek), not the "Next · name" card. */
   const peeks = (dir: 1 | -1) => {
     const neighbour = steps[index + dir];
@@ -1025,7 +938,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     // One image alone has nowhere to step: a sideways drag is the image's own.
     keeps: isImageFile ? (dir) => !multi || (imageEdges.current?.keeps(dir) ?? false) : undefined,
     peek: peeks,
-    dismiss: isImageFile
+    dismiss: isImageFile && phone
       ? {
           can: () => imageEdges.current?.canDismiss() ?? false,
           onDismiss: () => closeRef.current(),
@@ -1297,6 +1210,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   const [linkImage, setLinkImage] = useState<{ src: string; alt: string } | null>(null);
   /** The fragment a link named on an attached page it opened (`SHEET.html#pr1`): cleared once used. */
   const [linkFragment, setLinkFragment] = useState<{ id: string; hash: string } | null>(null);
+  const [pageStart, setPageStart] = usePageStart(props.pageStart, attachment.id);
   useEffect(() => {
     setLinkNote(null);
     setLinkImage(null);
@@ -1416,8 +1330,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     props.onLinked?.(before ? linkedValue(before.relative, before.hash) : null, { back: true });
     requestAnimationFrame(() => sectionRef.current?.focus({ preventScroll: true }));
   };
-  /** A link the page's bridge handed over (a plain click, armed or not; ⌘/Ctrl-click while armed pins it instead). `baseDir`: the folder of the page it is in. */
-  const followLink = (href: string, baseDir: string) => {
+  /** A link the page's bridge handed over (a plain click, armed or not; ⌘/Ctrl-click while armed pins it instead). `baseDir`: the folder of the page it is in; `page`: its path and frame, for a link to itself (a query). */
+  const followLink = (href: string, baseDir: string, page?: { path: string; frame?: HtmlViewerFrame }) => {
     // Ahead of the page's own rules, which read the window's own origin as the page's folder, not as 'external'. Only
     // a full address: `/#thread=…` and `./#thread=…` are the page's folder, as those rules say. And only after a
     // person's click: the page's own script can post this message too, and must not move the window
@@ -1438,9 +1352,13 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
       assetRoute: pageAssetRoute,
       serverOrigin: window.location.origin,
       markdown: kind === 'markdown',
+      selfPath: page?.path,
     });
     switch (link.kind) {
       case 'ignored':
+        return;
+      case 'self': // The page again with that query, in its own frame (as a tab loads `?variant=2`).
+        page?.frame?.reload(link.search, link.hash);
         return;
       case 'external':
         window.open(link.url, '_blank', 'noopener,noreferrer');
@@ -1461,6 +1379,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
         }
         leave(link.name, () => {
           if (link.hash) setLinkFragment({ id: link.id, hash: link.hash });
+          setPageStart(linkables.find((a) => a.id === link.id)?.kind === 'html' ? pageStartAt(link.id, link.search, link.hash) : null);
           pendingStep.current = 'key';
           if (props.onOpenLinked) props.onOpenLinked(link.id);
           else props.onStep?.(link.id, 'current');
@@ -1789,6 +1708,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     setCommentWaits(full && shownToolbar === 'tucked' && !props.readOnly && unsavedComposer(sectionRef.current, savedTextRef.current) !== null);
   }, [full, shownToolbar, props.readOnly]);
   shownToolbarRef.current = shownToolbar;
+  usePageClear(sectionRef, full && kind === 'html', phone ? 'bar' : shownToolbar === 'tucked' ? 'handle' : null);
   // Every way back to showing (the corner control, ⌘⇧X, leaving full screen, a pinch let go) forgets
   // what gathered the tools, once the corner control's press has put focus back: the next » brings focus back to ».
   useEffect(() => {
@@ -2643,7 +2563,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
         <div
           ref={docAreaRef}
           className={`ib-docarea${isHtml ? ' ib-html' : ''}`}
-          data-file-swipe={full && phone && multi ? swipeMode : undefined}
+          data-file-swipe={((full && phone) || touch.tablet) && multi ? swipeMode : undefined}
           data-image-peek={swipeOn && isImage && multi ? '' : undefined}
         >
           {error && (
@@ -2702,7 +2622,9 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
               onStep={multi ? (dir) => !blockedRef.current && stepRef.current(dir, 'key') : undefined}
               stepInInteract
               // A link the page's bridge handed over: another file of the thread, a page or image beside it, another site (htmlLinks.ts).
-              onOpenLink={(href) => followLinkRef.current(href, pageFolder)}
+              onOpenLink={(href, frame) => followLinkRef.current(href, pageFolder, { path: attachment.path, frame })}
+              pageNavigation
+              frameStart={pageStart?.id === attachment.id ? pageStart.start : undefined}
               initialFragment={linkFragment?.id === attachment.id ? linkFragment.hash : undefined}
               onUnanchoredChange={(ids) => setUnanchored(new Set(ids))}
               fullViewport
@@ -2771,7 +2693,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
                   annotateModeActive={false}
                   // An Escape the page did not use: one page back (full screen: the ladder, whose next rung is that).
                   onPageEscape={() => void escapeFromPage()}
-                  onOpenLink={(href) => followLinkRef.current(href, folderOf(linkedTop.path))}
+                  onOpenLink={(href, frame) => followLinkRef.current(href, folderOf(linkedTop.path), { path: linkedTop.path, frame })}
+                  pageNavigation
                   initialFragment={linkedTop.hash || undefined}
                   fullViewport
                   hideControls
@@ -2825,8 +2748,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
               onError={setError}
               initialFit={memory.current.get(attachment.id)?.fit}
               onFitChange={(fit) => remember(attachment.id, { fit })}
-              // A phone in full screen: the pane's follow swipe (above); elsewhere a touch screen's swipe at Fit.
-              onSwipe={multi && !(full && phone) ? (dir) => step(dir, 'key') : undefined}
+              // A phone in full screen and a touch tablet: the pane's follow swipe (above); elsewhere a touch screen's swipe at Fit.
+              onSwipe={multi && !(full && phone) && !touch.tablet ? (dir) => step(dir, 'key') : undefined}
               edgesRef={imageEdges}
               onShown={swipe.settle}
               wheelHint={wheelHint}
@@ -2898,6 +2821,9 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
               <CodeFileView
                 key={`${attachment.id}:${view.version}:${view.attachment.current?.sha256 ?? ''}`}
                 filepath={attachment.name}
+                lineScroll="vertical"
+                commentCard="plain"
+                commentMarkers="bubble"
                 contents={view.text}
                 annotations={codeAnnotations}
                 selectedAnnotationId={selectedId}
@@ -3192,9 +3118,9 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
         />
       )}
       {full ? null : <div />}
-      {!full && multi ? (
-        // Beside the thread: the stepper in the bar under the file.
-        <div className="ib-vfoot" data-view-foot="">
+      {multi && (!full || touch.bar) ? (
+        // Beside the thread, and full screen on a touch tablet (touchStepBar.ts): the stepper in the bar under the file.
+        <div className="ib-vfoot" data-view-foot="" data-touch-bar={touch.bar ?? undefined}>
           <AttachmentStepper
             steps={steps}
             index={index}
@@ -3207,9 +3133,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
             annotationCounts={annotationCounts}
           />
         </div>
-      ) : full ? null : (
-        <div />
-      )}
+      ) : full ? null : <div />}
       {full && optionSet && (
         // A question's picture choices: the caption names the choice on screen for as long as the set is open (in place of the chip).
         <OptionCaption set={optionSet} index={index} phone={phone} onStep={(dir) => {
@@ -3218,8 +3142,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
         }}
         />
       )}
-      {full && !optionSet && (
-        // The step chip (full screen only): names the new file for a moment, the end note at the ends (a one-file thread: its name once, as full screen starts). The live region says it.
+      {full && !optionSet && !touch.bar && (
+        // The step chip (full screen without a touch bar): names the new file for a moment, the end note at the ends (a one-file thread: its name once, as full screen starts). The live region says it.
         <div className={`ib-fvchip${chip ? ' ib-on' : ''}`} aria-hidden="true" data-full-view-chip={chip ? 'shown' : 'hidden'}>
           {multi && (
             <span className="ib-stepn">
@@ -3238,7 +3162,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
           )}
         </div>
       )}
-      {full && phone && multi && <FileSwipeCard swipe={swipe} steps={steps} index={index} skip={peeks} />}
+      {((full && phone) || touch.tablet) && multi && <FileSwipeCard swipe={swipe} steps={steps} index={index} skip={peeks} />}
       {full && phone && menuOpen && phonePeekHost
         ? createPortal(
             <div className="pn-inbox-peek">

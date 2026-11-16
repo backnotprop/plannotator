@@ -11,7 +11,7 @@
 
 import { readFileSync, statSync } from "node:fs";
 import { resolve } from "node:path";
-import type { InboxRegistryEntry } from "@plannotator/shared/inbox/registry";
+import { inboxEnsureFailedWords, type InboxRegistryEntry } from "@plannotator/shared/inbox/registry";
 import { hasHelpFlag } from "./cli";
 import { writeWholeToStdout } from "./write-whole-stdout";
 
@@ -92,7 +92,7 @@ export async function runInboxIconCommand(argv: readonly string[], deps: IconCom
   try {
     entry = await deps.ensureRunning();
   } catch (error) {
-    return refused("not_running", `Plannotator Inbox is not running: ${error instanceof Error ? error.message : String(error)}`);
+    return refused("not_running", inboxEnsureFailedWords(error));
   }
   // The type named here is only a label: the Inbox sniffs the bytes.
   const type = TYPES[path.split(".").pop()?.toLowerCase() ?? ""] ?? "application/octet-stream";

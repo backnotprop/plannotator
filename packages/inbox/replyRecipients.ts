@@ -28,6 +28,8 @@ export interface RecipientRow {
    * thread that the reply route's `to` cannot reach (it ended, or it only reads the Inbox). Absent: it can.
    */
   alone?: boolean;
+  /** A start row (thread/replyStart.ts): a new session of this agent, in `project`; `asleep`, its machine is away. */
+  start?: { project: string; asleep: boolean };
 }
 
 /** Whether a session can take the reply alone: it wrote here (the reply answers its message), or `to` reaches it (live). */
@@ -133,10 +135,13 @@ export function aimable(pick: readonly string[], alone: (session: string) => boo
 
 /**
  * Whether a circle can be ticked: an ended agent, or one on an older Plannotator, can't be a second recipient,
- * and none can once the reply goes to the most it takes (`chosen`: everyone it goes to, typed tags too).
+ * and none can once the reply goes to the most it takes (`chosen`: everyone it goes to, typed tags too). `rows`: the
+ * list, for its start row.
  */
-export function canAddRecipient(row: RecipientRow, chosen: readonly string[]): boolean {
+export function canAddRecipient(row: RecipientRow, chosen: readonly string[], rows: readonly RecipientRow[] = []): boolean {
   if (chosen.includes(row.session)) return true;
+  // A new session takes the reply alone: it is never a second recipient, nor joined by one.
+  if (row.start || rows.some((r) => r.start && chosen.includes(r.session))) return false;
   return row.state !== 'ended' && row.state !== 'old' && chosen.length < RECIPIENTS_MAX;
 }
 

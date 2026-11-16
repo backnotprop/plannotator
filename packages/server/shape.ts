@@ -11,8 +11,7 @@
  *    every `/api/shapes` path answers 404, as in the Inbox;
  *  - this computer only: it binds loopback, and the Host check refuses any
  *    other name (a DNS-rebinding page). There is no tailnet listener, so every
- *    request that passes is the person's own (the Inbox's "local" reach;
- *    nobody is a guest here, and the owner is never refused);
+ *    request that passes is the person's own (the Inbox's "local" reach);
  *  - the page's own origin: another site is refused, reads included (a board
  *    names files and folders);
  *  - the page of THIS server: a write carrying another server's

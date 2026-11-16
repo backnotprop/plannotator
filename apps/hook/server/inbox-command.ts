@@ -58,16 +58,20 @@ import {
   INBOX_START_LOCK,
   INBOX_START_LOCK_STALE_MS,
   inboxRegistryPath,
+  inboxOutOfReach,
   inboxStatus,
+  InboxUnreachableError,
   readInboxRegistry,
   stopInbox,
   waitForInbox,
   type InboxRegistryEntry,
+  type InboxStatus,
   type InboxStopResult,
 } from "@plannotator/shared/inbox/registry";
 import { handleInboxServerReady, startInboxServer } from "@plannotator/server/inbox";
 import { INBOX_DB_FILE, InboxReturnError, inboxReturnFailedWords } from "@plannotator/shared/inbox/store-log/sqlite-return/return";
 import { exposureWarning, type InboxTailscaleState } from "@plannotator/server/inbox-tailscale";
+import { describeCfAccessRecord, runCfAccessCommand } from "./inbox-cf-access-command";
 import { openBrowser, openBrowserDetached } from "@plannotator/server/browser";
 import { isRemoteSession } from "@plannotator/server/remote";
 import { assertTestHome } from "@plannotator/server/test-home-guard";
@@ -83,6 +87,7 @@ import { runInboxLinkCommand } from "./inbox-link-command";
 import { INBOX_CONNECTION_USAGE, runInboxConnectionCommand, stdinLines } from "./inbox-connection-command";
 import { runInboxProjectsCommand } from "./inbox-projects-command";
 import { writeWholeToStdout } from "./write-whole-stdout";
+import { inboxStartTrace } from "./inbox-start-trace";
 
 export const INBOX_LOG_FILE = "inbox.log";
 /** Set by a starter that holds the start lock for the detached Inbox it spawns. */
@@ -110,8 +115,8 @@ export function selfCommand(): string[] {
   return [process.execPath];
 }
 
-/** Spawn `plannotator inbox --no-open` in its own session, output to inbox/inbox.log. */
-function spawnDetachedInbox(dataDir: string, tailscale: boolean): void {
+/** Spawn `plannotator inbox --no-open` in its own session, output to inbox/inbox.log. Answers its pid. */
+function spawnDetachedInbox(dataDir: string, tailscale: boolean): number | undefined {
   const dir = inboxDir(dataDir);
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   const log = openSync(join(dir, INBOX_LOG_FILE), "a", 0o600);
@@ -128,6 +133,7 @@ function spawnDetachedInbox(dataDir: string, tailscale: boolean): void {
   });
   child.unref();
   closeSync(log);
+  return child.pid;
 }
 
 /**
@@ -191,10 +197,26 @@ async function waitForBusyInbox(dataDir: string, pid: number): Promise<InboxRegi
  * needed. Never opens a browser. Throws when it cannot be started.
  */
 export async function ensureInboxRunning(dataDir: string, options: { tailscale?: boolean } = {}): Promise<InboxRegistryEntry> {
+  const trace = inboxStartTrace(dataDir, "starter");
   const status = await inboxStatus(dataDir);
   if (status.state === "running") return status.entry;
-  if (status.state === "busy") return waitForBusyInbox(dataDir, status.entry.pid);
+  if (status.state === "busy") {
+    trace.step("busy_wait", { inbox: status.entry.pid });
+    return waitForBusyInbox(dataDir, status.entry.pid);
+  }
+  const unreachable = await outOfReach(status);
+  if (unreachable) {
+    trace.step("out_of_reach", { inbox: unreachable.pid });
+    throw unreachable.error;
+  }
   return startDetachedInbox(dataDir, acquireInboxStartLock(dataDir), options.tailscale === true);
+}
+
+/** The running Inbox this process cannot reach (`inboxOutOfReach`): its pid and the error a start gives. Null when there is none. */
+async function outOfReach(status: InboxStatus): Promise<{ pid: number; error: InboxUnreachableError } | null> {
+  if (status.state !== "stopped" || status.reason !== "no_answer") return null;
+  const detail = await inboxOutOfReach(status.entry);
+  return detail === null ? null : { pid: status.entry.pid, error: new InboxUnreachableError(detail) };
 }
 
 /**
@@ -203,9 +225,11 @@ export async function ensureInboxRunning(dataDir: string, options: { tailscale?:
  * holds it) only wait for what that starter starts.
  */
 async function startDetachedInbox(dataDir: string, release: (() => void) | null, tailscale: boolean): Promise<InboxRegistryEntry> {
+  const trace = inboxStartTrace(dataDir, "starter");
+  trace.step(release ? "lock_taken" : "lock_wait");
   if (release) {
     try {
-      spawnDetachedInbox(dataDir, tailscale);
+      trace.step("spawned", { child: spawnDetachedInbox(dataDir, tailscale) });
     } catch (error) {
       release();
       throw error;
@@ -362,9 +386,11 @@ async function serveInbox(dataDir: string, open: boolean, htmlContent: string | 
   // two people (or a person and an agent) never start two writers on one store.
   const lockHeldByStarter = process.env[LOCK_HELD_ENV] === "1";
   delete process.env[LOCK_HELD_ENV];
+  const trace = inboxStartTrace(dataDir, lockHeldByStarter ? "detached" : "direct");
   // Held for this start now too: a starter that exits early never makes it look abandoned.
   if (lockHeldByStarter) joinInboxStartLock(dataDir);
   const release = lockHeldByStarter ? null : acquireInboxStartLock(dataDir);
+  trace.step(lockHeldByStarter ? "lock_joined" : release ? "lock_taken" : "lock_wait");
   if (!lockHeldByStarter && !release) {
     const running = await waitUntilRunning(dataDir);
     if (!running) {
@@ -381,12 +407,21 @@ async function serveInbox(dataDir: string, open: boolean, htmlContent: string | 
   try {
     const status = await inboxStatus(dataDir);
     if (status.state === "running" || status.state === "busy") {
+      trace.step(status.state === "running" ? "already_running" : "busy_wait", { inbox: status.entry.pid });
       const entry = status.state === "running" ? status.entry : await waitForBusyInbox(dataDir, status.entry.pid);
       process.stderr.write(`Plannotator Inbox: ${entry.url}\n`);
       if (tailscale) await publishRunningInbox(entry);
       if (open) await openBrowser(entry.url);
       if (connect) await connectRunningInbox(entry);
       process.exit(0);
+    }
+    // A detached Inbox's starter has decided already (the window's Restart runs inside the Inbox it replaces).
+    const unreachable = lockHeldByStarter ? null : await outOfReach(status);
+    if (unreachable) {
+      trace.step("out_of_reach", { inbox: unreachable.pid });
+      release?.();
+      process.stderr.write(`${unreachable.error.message}\n`);
+      process.exit(1);
     }
     inbox = await startInboxServer({
       dataDir,
@@ -409,6 +444,7 @@ async function serveInbox(dataDir: string, open: boolean, htmlContent: string | 
       // start lock, the last port first) and end this process. A run
       // published only by --tailscale passes it on.
       onRestartRequested: () => {
+        trace.step("restart");
         ensureInboxRunning(dataDir, { tailscale: inbox.tailscale.runOnly() })
           .catch((error) => process.stderr.write(`Restart failed: ${error instanceof Error ? error.message : String(error)}\n`))
           .finally(() => process.exit(0));
@@ -422,6 +458,7 @@ async function serveInbox(dataDir: string, open: boolean, htmlContent: string | 
   } finally {
     release?.();
   }
+  trace.step("serving", { port: inbox.port });
   const shutdown = (code: number) => {
     inbox.stop();
     process.exit(code);
@@ -524,6 +561,7 @@ async function statusCommand(dataDir: string, asJson: boolean): Promise<number> 
       version: status.state === "running" ? status.health.version : (entry?.version ?? null),
       started_at: entry?.startedAt ?? null,
       tailnet_url: status.state === "running" ? (entry?.tailscale?.url ?? null) : null,
+      ...(status.state === "running" && entry?.cloudflare_access ? { cloudflare_access: entry.cloudflare_access } : {}),
       data_dir: dataDir,
       record: inboxRegistryPath(dataDir),
       cli_version: cliVersion,
@@ -544,6 +582,7 @@ async function statusCommand(dataDir: string, asJson: boolean): Promise<number> 
     out(status.state === "running" ? "Plannotator Inbox: running" : `Plannotator Inbox: not answering (pid ${live.pid} holds port ${live.port} but did not answer)`);
     out(`  URL:      ${live.url}`);
     if (status.state === "running" && live.tailscale?.url) out(`  tailnet:  ${live.tailscale.url}`);
+    if (status.state === "running" && live.cloudflare_access) out(`  cloudflare: ${describeCfAccessRecord(live.cloudflare_access)}`);
     out(`  pid:      ${live.pid}`);
     out(`  version:  ${status.state === "running" ? status.health.version : live.version}`);
     out(`  started:  ${live.startedAt}`);
@@ -649,6 +688,11 @@ async function stopCommand(dataDir: string): Promise<number> {
  * in between waits for this start instead of racing it.
  */
 async function restartCommand(dataDir: string, tailscale: boolean): Promise<number> {
+  const unreachable = await outOfReach(await inboxStatus(dataDir));
+  if (unreachable) {
+    process.stderr.write(`${unreachable.error.message}\n`);
+    return 1;
+  }
   const release = await takeStartLock(dataDir);
   if (!release) {
     process.stderr.write("Another Plannotator Inbox start holds the start lock and did not finish; try again.\n");
@@ -780,6 +824,10 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
 
   if (args[0] === "icon") {
     process.exit(await runInboxIconCommand(args.slice(1), { json: assets.json === true, ensureRunning: () => ensureInboxRunning(dataDir) }));
+  }
+
+  if (args[0] === "cloudflare-access") {
+    process.exit(await runCfAccessCommand(args.slice(1), { dataDir, json: assets.json === true, ensureRunning: () => ensureInboxRunning(dataDir) }));
   }
 
   if (args[0] === "link" || args[0] === "unlink") {

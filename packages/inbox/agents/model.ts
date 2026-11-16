@@ -12,7 +12,7 @@ export interface AgentEntry {
   agent: InboxAgent;
   /** The machine it runs on; null when no machine is linked (one flat list). */
   machine: string | null;
-  /** Its name on the row: its title, else its thread's name, else its project, else its host. */
+  /** Its name on the row (`agentRowName`). */
   name: string;
   /** The thread its row opens: its launch's, else its newest thread (one waiting on the person first). */
   thread: { id: string; subject: string } | null;
@@ -64,9 +64,29 @@ function agentSessions(agent: InboxAgent, others?: ReadonlySet<string>): string[
   return [agent.session, ...(agent.continues ?? []).filter((old) => !others?.has(old))];
 }
 
-/** An agent's name on its row: its title, else its thread's name, else its project, else its host. */
-export function agentRowName(agent: InboxAgent, thread: AgentEntry['thread']): string {
-  return agent.label?.trim() || thread?.subject || agent.project?.name || agentHostName(agent.host);
+/**
+ * A session's own name, one ladder on every device (owner, 2026-11-15): the name the person gave it in the Inbox
+ * (put on as `label`, agentsList.ts), else the name given in its host (`label`: Claude Code's /rename or --name,
+ * Pi's, OpenCode's), else the title its host generated (`title`). Null when it has none of them.
+ */
+export function agentOwnName(agent: InboxAgent): string | null {
+  return agent.label?.trim() || agent.title?.trim() || null;
+}
+
+/**
+ * Where an agent is named. `list`: the sidebar's Agents list (its rows, hover card and the list's agent filter),
+ * where nothing else says which agent it is. `thread`: inside a thread (the reply picker and its pill, a thread's
+ * sessions), where the thread's own name would only repeat the title the person is reading.
+ */
+export type AgentNameContext = 'list' | 'thread';
+
+/**
+ * An agent's name: its own name (`agentOwnName`), else in the `list` the name of the thread it got first (frozen:
+ * never the newest or the waiting one) and then its project, else its agent's name. Never its session id.
+ */
+export function agentRowName(agent: InboxAgent, context: AgentNameContext = 'list'): string {
+  const fallback = context === 'list' ? agent.first_thread?.name.trim() || agent.project?.name : null;
+  return agentOwnName(agent) || fallback || agentHostName(agent.host);
 }
 
 /**
@@ -101,7 +121,7 @@ function groupEntries(group: InboxAgentsGroup | undefined, machine: string | nul
   const others = new Set(listed.map((agent) => agent.session));
   const all = listed.map((agent) => {
     const thread = agentThread(agent, machine, self, rows, others);
-    return { agent, machine, name: agentRowName(agent, thread), thread };
+    return { agent, machine, name: agentRowName(agent), thread };
   });
   return { all, shown: all.filter((entry) => !all.some((later) => drawnAs(entry, later))), others };
 }
@@ -132,8 +152,7 @@ export function agentListFilter(id: string, groups: readonly InboxAgentsGroup[] 
     if (!entry) {
       // Ended (not listed), or an older session drawn as another row: its own sessions.
       const agent = group.agents.find((a) => a.id === id)!;
-      const thread = agentThread(agent, machine, self, rows, others);
-      return { id, name: agentRowName(agent, thread), machine, sessions: agentSessions(agent, others), launches: agent.launch ? [agent.launch.thread_id] : [] };
+      return { id, name: agentRowName(agent), machine, sessions: agentSessions(agent, others), launches: agent.launch ? [agent.launch.thread_id] : [] };
     }
     const one = [entry, ...all.filter((older) => drawnAs(older, entry))];
     return {
@@ -240,10 +259,10 @@ export function threadSessions(
     } else {
       agent = group?.agents.find((a) => a.session === p.session || (a.continues ?? []).includes(p.session)) ?? null;
     }
-    // Only a name the session has itself: its title, else its label, else its agent. Never the sidebar's fallbacks
-    // (a thread's subject, a project), which inside a thread read as the thread's own title.
+    // Only a name the session has itself (`agentOwnName`, else the labels' same ladder), else its agent. Never the
+    // sidebar's fallbacks (a thread's name, a project), which inside a thread read as the thread's own title.
     const own = Object.hasOwn(labels, p.session) ? labels[p.session]?.trim() : '';
-    const name = agent?.label?.trim() || own || p.name || agentHostName(p.host);
+    const name = (agent && agentOwnName(agent)) || own || p.name || agentHostName(p.host);
     const same = agent ? out.find((s) => s.agentId === agent!.id) : undefined;
     if (same) {
       if (!same.sessions.includes(p.session)) same.sessions.push(p.session);

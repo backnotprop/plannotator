@@ -8,12 +8,13 @@
  * snoozed thread, a project batch ending one, and a past time accepted.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import type { InboxListRow, InboxListSection } from "@plannotator/core/inbox-types";
 import { startInboxServer, type InboxServer } from "./inbox";
+import { savedConfig } from "../../tests/helpers/saved-config";
 
 const roots: string[] = [];
 const servers: InboxServer[] = [];
@@ -141,7 +142,7 @@ describe("snooze_thread, the agent's call", () => {
     try {
       const { client, send } = await setup();
       const a = await send(ASK, "ses_a");
-      const mark = () => (existsSync(join(configDir, "config.json")) ? JSON.parse(readFileSync(join(configDir, "config.json"), "utf8")).inboxSnoozeIntro?.snoozedAt : undefined);
+      const mark = () => savedConfig(configDir).inboxSnoozeIntro?.snoozedAt;
       await call(client, { thread_id: a.thread_id, until: null });
       await call(client, { thread_id: a.thread_id, until: later(-60_000) });
       expect(mark()).toBeUndefined();

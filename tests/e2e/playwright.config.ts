@@ -38,6 +38,8 @@ export default defineConfig({
     browserName: 'chromium',
     headless: true,
     viewport: { width: 1440, height: 900 },
+    // A failed test's screenshot, beside its error-context.md: CI keeps both (inbox-e2e.yml). No trace: it would record every test, passing ones too.
+    screenshot: 'only-on-failure',
     launchOptions: { args: ['--use-mock-keychain', '--password-store=basic'] },
   },
   projects: [

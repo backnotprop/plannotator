@@ -554,6 +554,28 @@ describe("close and reopen (the board's Close and its Undo)", () => {
     expect(writes(w)).toHaveLength(2);
   });
 
+  test("Undo still reopens after a fresh list no longer holds the closed PR (the forge lists open ones only)", async () => {
+    const answer = structuredClone(GH_ANSWER);
+    const w = await world({ codeReview: true, answer });
+    await w.send("Working.", "retries");
+    await w.pulls();
+    await w.pulls("?everywhere=1");
+    hostSays(w, "open");
+    expect((await call(w.base, "close", { key: KEY })).status).toBe(200);
+    answer.data.authored.nodes = answer.data.authored.nodes.filter((n) => n.number !== 412);
+    setSystemTime(new Date(Date.now() + INBOX_PULLS_FRESH_MS + 1_000));
+    try {
+      await w.pulls();
+      await w.pulls("?everywhere=1");
+      expect(await stateOf(w)).toBeUndefined();
+      const reopened = await call(w.base, "reopen", { key: KEY });
+      expect(reopened.status).toBe(200);
+      expect(writes(w).map((c) => c.args.at(-1))).toEqual(["state=closed", "state=open"]);
+    } finally {
+      setSystemTime();
+    }
+  });
+
   test("a reopen of a PR this Inbox did not close is refused before the host is asked; another site and an unknown PR too", async () => {
     const w = await world({ codeReview: true });
     await w.send("Working.", "retries");
@@ -1500,6 +1522,25 @@ describe("the worst case (break-ui on #2590)", () => {
     expect(links["github.com/northwind/billing-svc#2"]!.agent!.ended).toBeUndefined();
     expect(links["github.com/northwind/billing-svc#3"]!.agent!.ended).toBeUndefined();
   });
+
+  test("the thread's latest review names the session that sent it, so a PR verdict to another agent asks it for the whole change", () => {
+    const pull = parseGithubPulls(JSON.stringify(answerOf([ghPull(1)])), "github.com")!.pulls;
+    const guide = { sha256: "a", input_sha256: "b", bytes: 1, title: "Retries", sections: 2, files: 1, additions: 1, deletions: 0, review: true };
+    const messages = new Map([
+      ["m1", { id: "m1", thread_id: "t1", project_id: "prj_1", created_at: "2026-11-03T10:00:00.000Z", author: { kind: "agent", host: "claude-code", session: "ses_review", name: null }, body: "Up: https://github.com/northwind/billing-svc/pull/1", guide }],
+      ["m2", { id: "m2", thread_id: "t1", project_id: "prj_1", created_at: "2026-11-03T11:00:00.000Z", author: { kind: "agent", host: "codex", session: "ses_next", name: null }, body: "I took this over." }],
+    ]);
+    const store = {
+      threadsOf: () => [{ thread_id: "t1", last_at: "2026-11-03T11:00:00.000Z" }],
+      threadMessageIds: () => ["m1", "m2"],
+      message: (id: string) => (messages.get(id) as never) ?? null,
+      threadSubject: () => "Subject",
+      threadProject: () => "prj_1",
+    };
+    const link = linkInboxPulls(pull, store, new Map([["github.com/northwind/billing-svc", ["prj_1"]]]))["github.com/northwind/billing-svc#1"]!;
+    expect(link.guide).toMatchObject({ message_id: "m1", review: true, session: "ses_review" });
+    expect(link.agent?.session).toBe("ses_next");
+  });
 });
 
 describe("the searches (scoped to the projects' repositories)", () => {
@@ -2143,19 +2184,18 @@ describe("Post to GitHub/GitLab (the owner's answer C: the person chooses at the
 });
 
 describe("who may read it", () => {
-  test("a tailnet guest is refused and runs nothing; the owner over the tailnet reads", async () => {
+  test("the owner over the tailnet reads", async () => {
     const MAGIC = "macbook-pro.tail0000.ts.net";
     const OWNER = "ramos@example.com";
-    const GUEST = "guest@example.com";
     const savedTailscale = process.env.PLANNOTATOR_INBOX_TAILSCALE;
     delete process.env.PLANNOTATOR_INBOX_TAILSCALE;
     try {
-      const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-pulls-guest-")));
+      const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-pulls-owner-")));
       roots.push(root);
       const dataDir = join(root, "data");
       mkdirSync(dataDir, { recursive: true });
       process.env.PLANNOTATOR_DATA_DIR = dataDir;
-      writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxTailscale: true, inboxTailscaleAllow: [GUEST], inboxCodeReview: true }));
+      writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxTailscale: true, inboxCodeReview: true }));
       const f = forge();
       const serve = new Map<number, string>();
       const tailscale: TailscaleRunner = (args) => {
@@ -2177,49 +2217,6 @@ describe("who may read it", () => {
       expect(listener).not.toBeNull();
       const through = (login: string) =>
         fetch(`http://127.0.0.1:${listener}/api/inbox/pulls`, { headers: { Host: `${MAGIC}:${server.port}`, "Tailscale-User-Login": login } });
-      const guest = await through(GUEST);
-      expect(guest.status).toBe(403);
-      expect(((await guest.json()) as { code: string }).code).toBe("local_only");
-      // Nor may a guest read the risk rules, change them, or ask for an agent's models.
-      for (const [path, init] of [
-        ["/api/inbox/pulls/risk", {}],
-        ["/api/inbox/pulls/risk/models?provider=pi-sdk", {}],
-        ["/api/inbox/pulls/risk", { method: "POST", body: JSON.stringify({ rules: "x", provider: null, model: null }) }],
-      ] as const) {
-        const answer = await fetch(`http://127.0.0.1:${listener}${path}`, { ...init, headers: { Host: `${MAGIC}:${server.port}`, "Tailscale-User-Login": GUEST, "Content-Type": "application/json" } });
-        expect(((await answer.json()) as { code: string }).code).toBe("local_only");
-      }
-      // Nor read a project's files through a guide's expand arrows.
-      const guestFile = await fetch(`http://127.0.0.1:${listener}/api/inbox/messages/msg_any/guide/file?path=a.ts`, { headers: { Host: `${MAGIC}:${server.port}`, "Tailscale-User-Login": GUEST } });
-      expect(guestFile.status).toBe(403);
-      expect(((await guestFile.json()) as { code: string }).code).toBe("local_only");
-      // Nor may a guest hand a PR to an agent.
-      const handGuest = await fetch(`http://127.0.0.1:${listener}/api/inbox/pulls/owner`, {
-        method: "POST",
-        headers: { Host: `${MAGIC}:${server.port}`, "Tailscale-User-Login": GUEST, "Content-Type": "application/json" },
-        body: JSON.stringify({ keys: ["github.com/northwind/billing-svc#412"], thread_id: "msg_01M4H6G73M9H3Z32T859E72NOP" }),
-      });
-      expect(handGuest.status).toBe(403);
-      // Nor post a review with the owner's gh account: the Inbox's one forge write is the owner's alone.
-      const postGuest = await fetch(`http://127.0.0.1:${listener}/api/inbox/pulls/review`, {
-        method: "POST",
-        headers: { Host: `${MAGIC}:${server.port}`, "Tailscale-User-Login": GUEST, "Content-Type": "application/json" },
-        body: JSON.stringify({ key: "github.com/northwind/billing-svc#412", head_sha: "412".padStart(40, "a"), action: "approve", body: "" }),
-      });
-      expect(postGuest.status).toBe(403);
-      expect(((await postGuest.json()) as { code: string }).code).toBe("local_only");
-      // Nor close or reopen one with the owner's gh account.
-      for (const route of ["close", "reopen"]) {
-        const asGuest = await fetch(`http://127.0.0.1:${listener}/api/inbox/pulls/${route}`, {
-          method: "POST",
-          headers: { Host: `${MAGIC}:${server.port}`, "Tailscale-User-Login": GUEST, "Content-Type": "application/json" },
-          body: JSON.stringify({ key: "github.com/northwind/billing-svc#412" }),
-        });
-        expect(asGuest.status).toBe(403);
-        expect(((await asGuest.json()) as { code: string }).code).toBe("local_only");
-      }
-      expect(f.calls).toEqual([]);
-      expect(post.calls).toEqual([]);
       expect((await through(OWNER)).status).toBe(200);
       // The owner over the tailnet may hand a PR over: past the guards, the route answers on the request itself.
       const handOwner = await fetch(`http://127.0.0.1:${listener}/api/inbox/pulls/owner`, {
