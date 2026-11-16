@@ -6,13 +6,13 @@
  * Uses path.relative for cross-platform support (Windows backslashes)
  * and normalizes to forward slashes for git diff path matching.
  */
-import { relative } from "node:path";
+import { isAbsolute, relative, sep } from "node:path";
 
 export function toRelativePath(absolutePath: string, cwd?: string): string {
   if (!cwd) return absolutePath;
   const rel = relative(cwd, absolutePath);
-  // Don't relativize if the result goes outside cwd (different drive, symlink escape)
-  if (rel.startsWith("..")) return absolutePath;
+  // A different Windows drive stays absolute. Only a full parent component escapes cwd.
+  if (isAbsolute(rel) || rel === ".." || rel.startsWith(`..${sep}`)) return absolutePath;
   // Normalize to forward slashes for diff path matching
-  return rel.replace(/\\/g, "/");
+  return rel.split(sep).join("/");
 }
