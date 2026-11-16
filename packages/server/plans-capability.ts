@@ -39,13 +39,22 @@ export function createPlansCapability(options: PlansCapabilityOptions): PlansCap
   const storeOf = () => (store ??= (options.openStore ?? ((dataDir) => createPlanStore({ dataDir })))(options.dataDir));
   let running: Promise<PlanImportReport> | null = null;
   let lastPickUp = 0;
+  // A whole import finished since the Inbox started or Plans was turned on. Until then the list says `importing`;
+  // after it, the quick pickups a request starts say nothing, or a window polling while `importing` would start one
+  // on every poll and be told `importing` for good.
+  let caughtUp = false;
   const on = () => options.fixed ?? plansOn();
 
   const sync = (repair = false): Promise<PlanImportReport> => {
     if (running) return running;
-    running = importPlanLibraryInSteps(storeOf(), { dataDir: options.dataDir, repair }).finally(() => {
-      running = null;
-    });
+    running = importPlanLibraryInSteps(storeOf(), { dataDir: options.dataDir, repair })
+      .then((report) => {
+        caughtUp = true;
+        return report;
+      })
+      .finally(() => {
+        running = null;
+      });
     return running;
   };
   const background = (repair: boolean) => {
@@ -62,7 +71,10 @@ export function createPlansCapability(options: PlansCapabilityOptions): PlansCap
       const was = on();
       const saved = setPlansSwitch(next);
       if (!saved) return false;
-      if (next && !was) background(true);
+      if (next && !was) {
+        caughtUp = false;
+        background(true);
+      }
       if (was !== on()) options.changed();
       return true;
     },
@@ -73,7 +85,7 @@ export function createPlansCapability(options: PlansCapabilityOptions): PlansCap
       }
       const answer = await handlePlanRoute(
         { method: req.method, pathname: url.pathname, params: url.searchParams, json: () => req.json() },
-        { store: storeOf(), importing: () => running !== null },
+        { store: storeOf(), importing: () => running !== null && !caughtUp },
       );
       if (!answer) return null;
       if ("file" in answer) {

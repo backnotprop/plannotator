@@ -118,7 +118,7 @@ describe("Plans off costs nothing", () => {
     expect(INBOX_MCP_INSTRUCTIONS).not.toMatch(/\bPlans\b|pln_|plan-library|plan library/);
   });
 
-  test("only the capability seam and the plans command reach Plans' modules: not plan review, the Inbox tool, the mod or Pi", () => {
+  test("only the capability seam, the plans command and the window's Plans page reach Plans' modules: not plan review, the Inbox tool, the mod or Pi", () => {
     const root = resolve(import.meta.dir, "../..");
     const allowed = new Set([
       "packages/core/plans.ts",
@@ -141,7 +141,8 @@ describe("Plans off costs nothing", () => {
         if (entry.isDirectory()) walk(path);
         else if (/\.(ts|tsx|mjs)$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name)) {
           const rel = relative(root, path).split("\\").join("/");
-          if (!allowed.has(rel) && reaches.test(readFileSync(path, "utf8"))) found.push(rel);
+          // The Inbox window's Plans page reads the routes' records (types and pure checks only: core is browser-safe).
+          if (!allowed.has(rel) && !rel.startsWith("packages/inbox/plans/") && reaches.test(readFileSync(path, "utf8"))) found.push(rel);
         }
       }
     };
@@ -190,8 +191,12 @@ describe("Plans on", () => {
     expect(running).not.toBeNull();
     expect(capability.sync()).toBe(running!);
     await running;
-    const second = (await (await route(list, "GET", "/api/plans"))!.json()) as { plans: unknown[] };
+    // Caught up: the pickup this request starts is not "importing", or a window polling while importing never stops.
+    const second = (await (await route(list, "GET", "/api/plans"))!.json()) as { plans: unknown[]; importing: boolean };
     expect(second.plans).toHaveLength(1);
+    expect(capability.importing()).not.toBeNull();
+    expect(second.importing).toBe(false);
+    await capability.importing();
   });
 });
 

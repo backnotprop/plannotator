@@ -13,7 +13,16 @@ import { shapeReviewAtOf, type ReviewAt } from '../shape/review';
 import { viewScopeOf, type PullViewScope } from '../pulls/viewScope';
 
 export interface Route {
-  page: 'inbox' | 'settings' | 'whats-new' | 'drafts' | 'tour' | 'board' | 'reviews' | 'shapes' | 'prs' | 'artifacts' | 'scheduled';
+  page: 'inbox' | 'settings' | 'whats-new' | 'drafts' | 'tour' | 'board' | 'reviews' | 'shapes' | 'prs' | 'artifacts' | 'scheduled' | 'plans';
+  /**
+   * Plans (`#plans`, only while config.json `inboxPlans` is on; approval "inbox-plans"): the plan open (`#plans=pln_…`),
+   * the version read (`&v=3`; absent: the newest), the two versions compared (`&from=3&to=5`), and `#plans&new` for
+   * the get-started screen once there are plans.
+   */
+  plan?: string | null;
+  planVersion?: number | null;
+  planDiff?: { from: number; to: number } | null;
+  planNew?: boolean;
   /** Routines (`#routines`): the one open beside the list (`#routine=sch_…`, `#routine=new` for a new one). */
   scheduled?: string | null;
   /**
@@ -147,6 +156,7 @@ export function routeOf(fullHash: string): Route {
   // The Artifacts wall (the sidebar's Artifacts row). `#thread=…&artifacts` is a thread's own grid, below.
   if (params.has('artifacts') && !params.get('thread')) return { page: 'artifacts', project: null, thread: null, pinned: params.get('artifacts') === 'pinned' };
   if (params.has('routine') || params.has('routines')) return { page: 'scheduled', project: null, thread: null, scheduled: params.get('routine') || null };
+  if (params.has('plans')) return plansRouteOf(params);
   if (params.has('shapes')) return { page: 'shapes', project: null, thread: null, shape: params.get('shape') };
   if (params.has('prs')) {
     const stack = params.get('stack') || null;
@@ -213,5 +223,22 @@ export function routeOf(fullHash: string): Route {
     board: thread && params.get('card') ? boardViewOf(params.get('from')) : undefined,
     boardProject: thread && params.get('card') ? params.get('board-project') || null : null,
     boardInitiative: thread && params.get('card') ? boardInitiativeOf(params.get('board-initiative'), null) : null,
+  };
+}
+
+const versionOf = (raw: string | null): number | null => (raw && /^[1-9][0-9]{0,8}$/.test(raw) ? Number(raw) : null);
+
+function plansRouteOf(params: URLSearchParams): Route {
+  const plan = params.get('plans') || null;
+  const from = versionOf(params.get('from'));
+  const to = versionOf(params.get('to'));
+  return {
+    page: 'plans',
+    project: null,
+    thread: null,
+    plan,
+    planVersion: plan ? versionOf(params.get('v')) : null,
+    planDiff: plan && from !== null && to !== null && from !== to ? { from, to } : null,
+    planNew: !plan && params.has('new'),
   };
 }

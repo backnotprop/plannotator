@@ -242,6 +242,31 @@ describe("plan import", () => {
     expect(importPlanLibrary(store, { dataDir, now: () => t + 9000 })).toMatchObject({ versions_added: 0 });
   });
 
+  test("an empty version file never marks its chain read: written in place long after, it is still picked up", () => {
+    const dataDir = scratch();
+    const t = day(10).getTime();
+    version(dataDir, "api", "stall-2026-11-10", 1, "# Stall\n\n1\n", day(9));
+    const second = join(dataDir, "history", "api", "stall-2026-11-10", "002.md");
+    const store = createPlanStore({ dataDir });
+
+    // Plan review truncated 002.md, then stalled (a laptop asleep mid-write) for well past the settle time.
+    put(second, "", new Date(t));
+    let report = importPlanLibrary(store, { dataDir, now: () => t + 60_000 });
+    expect(report).toMatchObject({ versions_added: 1, empty_files: ["history/api/stall-2026-11-10/002.md"] });
+    expect(store.list()[0]!.head_version_number).toBe(1);
+
+    // The write finishes in place: the folder's time does not move. The next run still reads it.
+    const folder = join(dataDir, "history", "api", "stall-2026-11-10");
+    const folderTime = statSync(folder).mtime;
+    put(second, "# Stall\n\n2, written after the stall\n", new Date(t + 120_000));
+    utimesSync(folder, folderTime, folderTime);
+    report = importPlanLibrary(store, { dataDir, now: () => t + 200_000 });
+    expect(report).toMatchObject({ versions_added: 1, empty_files: [] });
+    const [plan] = store.list();
+    expect(plan!.head_version_number).toBe(2);
+    expect(new TextDecoder().decode(store.versionBytes(plan!.id, plan!.primary_doc_id, 2)!)).toBe("# Stall\n\n2, written after the stall\n");
+  });
+
   test("a decision snapshot caught mid-write makes no plan of its own; written whole, it lands on its version", () => {
     const dataDir = scratch();
     const t = day(10).getTime();

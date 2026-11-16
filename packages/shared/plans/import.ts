@@ -336,7 +336,10 @@ function* importChain(
       break;
     }
     if (read.kind === "empty") {
+      // No version, and the chain is not marked read: a write that truncated it and stalled (a laptop asleep mid-write)
+      // fills it in place later, which does not change the folder's time, so a mark here would skip it for good.
       report.empty_files.push(legacy);
+      complete = false;
       continue;
     }
     const at = read.at.toISOString();

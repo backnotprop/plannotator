@@ -115,7 +115,6 @@ export const PlanCleanDiffView: React.FC<PlanCleanDiffViewProps> = ({
   blocks,
   annotations = [],
   onAddAnnotation,
-  onSelectAnnotation,
   selectedAnnotationId = null,
   mode = "selection",
   wordLevel = true,

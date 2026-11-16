@@ -30,6 +30,8 @@
 @source "../../packages/inbox/cloud/how/**/*.tsx";
 /* Routines: the page, the editor, a thread's run lines (packages/inbox/scheduled/). */
 @source "../../packages/inbox/scheduled/**/*.tsx";
+/* Plans: the home list, the get-started screen and a plan's page (packages/inbox/plans/). */
+@source "../../packages/inbox/plans/**/*.tsx";
 
 @import "../../packages/ui/theme.css";
 /* The board's own sheet (shp- classes). */
@@ -49,6 +51,8 @@
 @import "../../packages/inbox/floaters/floaters.css";
 /* The Pull requests page and a stack's page (packages/inbox/prs/). */
 @import "../../packages/inbox/prs/prs.css";
+/* Plans (packages/inbox/plans/). */
+@import "../../packages/inbox/plans/plans.css";
 /* A launched session's permission prompt (components/PermissionCard.tsx). */
 @import "../../packages/inbox/permissionCard.css";
 /* The sidebar's Agents section and the animated agent marks (packages/inbox/agents/). */
