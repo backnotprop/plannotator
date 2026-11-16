@@ -19,12 +19,12 @@
  * that takes none of the carried threads still shows, greyed, its second line saying why, and a drop there changes
  * nothing. Never on a phone: the row's sheet and its swipe do the same there.
  */
-import { createContext, useContext, useEffect, useRef, useState, type RefObject } from 'react';
+import { createContext, useContext, useEffect, useRef, useState, useSyncExternalStore, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import { inboxRowArchived, type InboxListGroupId, type InboxListRow } from '@plannotator/core/inbox-types';
 import { formatCount } from '@plannotator/core/inbox-format';
 import { Icon, type IconName } from '../icons';
-import { offersRowMarkRead } from '../markRead';
+import { offersRowMarkRead, setAsideCount } from '../markRead';
 import { priorityAction } from '../priority';
 import type { RowMenuAction } from '../rowMenu';
 import { refreshThreadDrag, registerThreadDropTarget, sayThreadDrag, scrollStep, threadDragging, threadDragHit, THREAD_DROP_LAYER, type DropAnswer } from '../threadDrag';
@@ -96,9 +96,25 @@ export function dragHelp(canMarkRead: boolean, combines: boolean): string {
   return `Drag ${ways.slice(0, -1).join(', ')}, or ${ways.at(-1)}. Or open the menu with Shift F10.`;
 }
 
-/** A touch screen with no mouse, trackpad or fine pen: touch never drags a row (threadDrag.ts), so nothing says it does. */
-export function touchOnly(): boolean {
-  return typeof matchMedia === 'function' && matchMedia('(any-pointer: coarse)').matches && !matchMedia('(any-pointer: fine)').matches;
+/**
+ * Whether a pointer here can drag a row (threadDrag.ts): a main pointer that is fine, or a fine one that hovers (a mouse
+ * or trackpad on a touch screen). Touch never drags, nor a pen where the main pointer is not fine (an iPad's Pencil),
+ * so a touch screen with only those says nothing of a drag.
+ */
+function rowsDraggable(): boolean {
+  if (typeof matchMedia !== 'function') return true;
+  return matchMedia('(pointer: fine)').matches || (matchMedia('(any-pointer: fine)').matches && matchMedia('(any-hover: hover)').matches);
+}
+const DRAG_MEDIA = ['(pointer: fine)', '(any-pointer: fine)', '(any-hover: hover)'];
+function onDragMedia(changed: () => void): () => void {
+  if (typeof matchMedia !== 'function') return () => {};
+  const lists = DRAG_MEDIA.map((query) => matchMedia(query));
+  lists.forEach((list) => list.addEventListener?.('change', changed));
+  return () => lists.forEach((list) => list.removeEventListener?.('change', changed));
+}
+/** `rowsDraggable`, kept current: a trackpad connected (or gone) mid-session changes it without another render. */
+export function useRowsDraggable(): boolean {
+  return useSyncExternalStore(onDragMedia, rowsDraggable, () => true);
 }
 
 /** The drag help's id while the list's rows can be dragged (RowMenu.tsx provides it); null where they cannot. */
@@ -124,8 +140,9 @@ export interface ListDropsProps {
   sectionOf?: (threadId: string) => InboxListGroupId | null;
   canMarkRead: boolean;
   prioritizesOf?: (row: InboxListRow) => boolean;
-  /** The row menu's actions (App.tsx `rowAction`): one row's drop runs exactly what its menu item runs. */
-  onAction: (row: InboxListRow, action: RowMenuAction) => void;
+  /** The row menu's actions (App.tsx `rowAction`): one row's drop runs exactly what its menu item runs. Mark read
+   *  resolves false when its set-aside warning was cancelled. */
+  onAction: (row: InboxListRow, action: RowMenuAction) => unknown;
   picks?: MenuPicks;
   /** The row menu's focus rule after a write (useContextMenuTrigger.ts `follow`): a dropped row's focus goes where its menu item's would. */
   follow?: (threadId: string, moves?: boolean) => void;
@@ -196,11 +213,17 @@ export function ListDrops(props: ListDropsProps) {
           // Several picked rows: the picks' own action (each row it takes, one toast, one Undo), and picking ends
           // (threadDrag.ts `dropped`), focus going where the pick bar's Done puts it. One row: its menu item, and
           // focus follows the row as after that item (Priority moves it; Archive and Mark read may take it away).
-          if (ids.length > 1 && picks) runBulk(picks.act, action === 'read' || action === 'archive' ? action : 'priority-add');
+          let ran: unknown;
+          if (ids.length > 1 && picks) ran = runBulk(picks.act, action === 'read' || action === 'archive' ? action : 'priority-add');
           else if (taken[0]) {
             follow?.(taken[0].thread_id, action === 'priority-add');
-            onAction(taken[0], action);
+            ran = onAction(taken[0], action);
           } else return false;
+          // Mark read may ask first (its set-aside warning) and a Cancel there writes nothing: picking stays until it
+          // went on, then ends as any drop's does.
+          if (action !== 'read' || setAsideCount(taken).threads === 0) return;
+          void Promise.resolve(ran).then((went) => went !== false && live.current.picks?.dropped?.());
+          return false;
         },
       }),
     );
@@ -365,7 +388,7 @@ function registerCombine(live: { current: ListDropsProps }, setLabel: (box: Labe
       const onto = landed;
       landed = null;
       const combine = live.current.picks?.combineWith;
-      if (!onto || !combine) return;
+      if (!onto || !combine) return false;
       combine([...ids, onto]);
       sayThreadDrag(`Combine ${formatCount(ids.length + 1)} threads: choose who writes it, or Cancel.`);
     },
