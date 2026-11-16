@@ -86,7 +86,8 @@ jobs:
   slice:
     name: Browser slice (${{ matrix.shard }}/${{ needs.plan.outputs.count }})
     needs: [plan]
-    if: ${{ needs.plan.outputs.count != '0' && !github.event.pull_request.draft }}
+    # TEMPORARY, reverted in the next commit: run on this draft PR once to prove the shards end to end.
+    if: ${{ needs.plan.outputs.count != '0' && (!github.event.pull_request.draft || github.event.pull_request.draft) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     strategy:
