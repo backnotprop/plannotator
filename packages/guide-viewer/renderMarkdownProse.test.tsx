@@ -53,6 +53,39 @@ describe("renderMarkdownProse", () => {
     expect(textOf(nodes[0])).toBe("Just a paragraph.");
   });
 
+  it("keeps sample Markdown fences inside a longer outer fence", () => {
+    const nodes = renderMarkdownProse([
+      "Example:",
+      "````markdown",
+      "```sh",
+      "echo hi",
+      "```",
+      "```js",
+      "console.log(1)",
+      "```",
+      "````",
+      "After the example.",
+    ].join("\n"));
+    expect(nodes.map((node) => isElement(node) && node.type)).toEqual(["p", "pre", "p"]);
+    expect(textOf(nodes[1])).toBe("```sh\necho hi\n```\n```js\nconsole.log(1)\n```");
+    expect(textOf(nodes[2])).toBe("After the example.");
+  });
+
+  it("keeps content inside a tilde fence until a valid closing line", () => {
+    const nodes = renderMarkdownProse([
+      "Example:",
+      "~~~text",
+      "```",
+      "~~~ this belongs to the sample",
+      "# still a sample",
+      "~~~~",
+      "After the sample.",
+    ].join("\n"));
+    expect(nodes.map((node) => isElement(node) && node.type)).toEqual(["p", "pre", "p"]);
+    expect(textOf(nodes[1])).toBe("```\n~~~ this belongs to the sample\n# still a sample");
+    expect(textOf(nodes[2])).toBe("After the sample.");
+  });
+
   it("applies inline markdown inside ### headings (regression: rendered raw tokens)", () => {
     const nodes = renderMarkdownProse("### The `useGuideData` hook");
     expect(nodes).toHaveLength(1);

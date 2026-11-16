@@ -2,6 +2,14 @@ import React from 'react';
 import { renderInlineMarkdown, type GuideLinkRenderer } from './renderInlineMarkdown';
 
 const HEADING = /^#{1,6} (.*)$/;
+const FENCE_OPEN = /^[ \t]*(`{3,}|~{3,})([^\r]*)\r?$/;
+const FENCE_CLOSE = /^[ \t]*(`{3,}|~{3,})[ \t]*\r?$/;
+
+function openingFence(line: string): string | undefined {
+  const match = FENCE_OPEN.exec(line);
+  if (!match || (match[1][0] === '`' && match[2].includes('`'))) return undefined;
+  return match[1];
+}
 
 /**
  * Renders a block of markdown-ish prose (paragraphs, `#` to `######` headings, `- `/`* `
@@ -41,10 +49,13 @@ export function renderMarkdownProse(
 
     // Fenced code block: ``` ... ``` — must be handled at block level, before
     // paragraph collection joins lines with spaces and destroys the newlines.
-    if (line.trimStart().startsWith('```')) {
+    const fence = openingFence(line);
+    if (fence) {
       const codeLines: string[] = [];
       let j = i + 1;
-      while (j < lines.length && !lines[j].trimStart().startsWith('```')) {
+      while (j < lines.length) {
+        const close = FENCE_CLOSE.exec(lines[j])?.[1];
+        if (close && close[0] === fence[0] && close.length >= fence.length) break;
         codeLines.push(lines[j]);
         j++;
       }
@@ -137,7 +148,7 @@ export function renderMarkdownProse(
       !HEADING.test(lines[j]) &&
       !lines[j].match(/^[-*] /) &&
       !lines[j].match(/^>\s*\[!/) &&
-      !lines[j].trimStart().startsWith('```')
+      !openingFence(lines[j])
     ) {
       paraLines.push(lines[j]);
       j++;
