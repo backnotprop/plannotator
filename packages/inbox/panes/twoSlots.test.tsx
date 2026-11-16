@@ -644,6 +644,20 @@ describe.skipIf(!hasDom)('two thread slots: only the active pane takes keys and 
     expect(hostOf(A).hasAttribute('data-pane-quiet')).toBe(true);
   });
 
+  test('closing the pane shown alone in a narrow window (an Undo, a ✕) draws the one that stepped aside, without a throw', async () => {
+    putThread(queries, A, heldOf(A, false));
+    putThread(queries, B, heldOf(B, false));
+    mainWidth = 860;
+    drawPanes(windowOf(pair('p1')), hostFor(B, noop), heldOf(B, false));
+    await wait(0);
+    expect(paneOf(A)).toBeNull();
+    // B's pane closes: A is alone and active, while the last measure still has it stepped aside.
+    drawPanes(windowOf(L.close(pair('p1'), 'p1')), hostFor(A, noop));
+    await wait(0);
+    expect(paneOf(A)).not.toBeNull();
+    expect(paneOf(B)).toBeNull();
+  });
+
   test("the window's open thread (useActiveHeld): moving into a pane already on screen keeps its copy; opening one not on screen waits", async () => {
     const C = 'msg_C1';
     for (const id of [A, B, C]) {

@@ -63,7 +63,7 @@ export function ThreadPanes({ windowPanes, held, host }: ThreadPanesProps) {
   const shownAlone = (panes.panes.find((entry) => entry.id === panes.active) ?? panes.panes[0]!).id;
   // Off the page: beside a file every pane but the active one; in today's one slot, every pane but the one it shows.
   const hidden = useMemo(
-    () => (!engine ? new Set(ids.filter((id) => id !== shownAlone)) : host.fileOpen ? new Set(ids.filter((id) => id !== layout.active)) : roomHidden),
+    () => (!engine ? new Set(ids.filter((id) => id !== shownAlone)) : host.fileOpen ? new Set(ids.filter((id) => id !== layout.active)) : stillAside(roomHidden, ids, layout.active)),
     [engine, host.fileOpen, ids, layout.active, roomHidden, shownAlone],
   );
   // A pane off the page reads nothing until it is back (paneReads.ts `park`). Without the switch none is.
@@ -104,6 +104,16 @@ export function ThreadPanes({ windowPanes, held, host }: ThreadPanesProps) {
       </PanesViewContext.Provider>
     </PaneKeeperContext.Provider>
   );
+}
+
+/**
+ * What stepped aside as of the last measure, less the active pane and panes no longer in the layout. The measure runs
+ * after the draw, so for one draw after a close (an Undo, a ✕) the set can still name the pane that is now active and
+ * alone: drawn hidden, the engine would have no visible pane. The same set while nothing is taken out.
+ */
+function stillAside(hidden: ReadonlySet<L.PaneId>, ids: readonly L.PaneId[], active: L.PaneId | null): ReadonlySet<L.PaneId> {
+  const kept = [...hidden].filter((id) => id !== active && ids.includes(id));
+  return kept.length === hidden.size ? hidden : new Set(kept);
 }
 
 /** A pane's place in the free layout: its node shows there unless it stepped aside. */
