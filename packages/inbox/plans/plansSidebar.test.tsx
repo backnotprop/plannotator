@@ -2,12 +2,15 @@
  * The sidebar's "Plans" row shows only while Plans is on (App passes `onPlans` only then), second under Inbox, with
  * the number of plans changed since you looked; off, it is in neither the sidebar nor its menu and Customize panel.
  * What regresses: a trace of Plans while it is off (the owner: nothing of it shows), a row in the wrong place, a
- * count that is not "changed since you looked", or a row that does not open the page.
+ * count that is not "changed since you looked", or a row that does not open the page; and a window already open when
+ * Plans is turned on or off (`plannotator plans` in a terminal, saved through the Inbox) that does not follow until a
+ * reload: the row must come with `event: capabilities` naming Plans on, and go with the frame naming it off, taking a
+ * window on `#plans` back to the Inbox.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, expect, test } from 'bun:test';
-import { act } from 'react';
+import { act, useEffect, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { PlanSummary } from '@plannotator/core/plans';
 
@@ -15,10 +18,16 @@ const hasDom = typeof document !== 'undefined';
 const { Sidebar } = (hasDom ? await import('../components/Sidebar') : {}) as typeof import('../components/Sidebar');
 const { SidebarProvider } = (hasDom ? await import('../shell/sidebar') : {}) as typeof import('../shell/sidebar');
 const { drawnSidebarItems } = (hasDom ? await import('../sidebarItems') : {}) as typeof import('../sidebarItems');
-const { resetPlansForTests } = (hasDom ? await import('./store') : {}) as typeof import('./store');
+const { resetPlansForTests, usePlansOn } = (hasDom ? await import('./store') : {}) as typeof import('./store');
+const { PlansRoute } = (hasDom ? await import('./PlansPage') : {}) as typeof import('./PlansPage');
+const { readRoute } = (hasDom ? await import('../app/route') : {}) as typeof import('../app/route');
+const { dispatchInboxFrame } = (hasDom ? await import('../api') : {}) as typeof import('../api');
+const { namesCapability, withCapabilities } = (hasDom ? await import('../capabilities') : {}) as typeof import('../capabilities');
 
 let root: Root | null = null;
+const realFetch = globalThis.fetch;
 afterEach(() => {
+  globalThis.fetch = realFetch;
   act(() => root?.unmount());
   root = null;
   document.body.innerHTML = '';
@@ -87,4 +96,79 @@ test.skipIf(!hasDom)('its number is the plans changed since you looked; on its p
   expect(row.querySelector('.ib-n')?.getAttribute('aria-label')).toBe('2 changed since you looked');
   expect(row.getAttribute('aria-current')).toBe('page');
   expect(host.querySelector('[data-inbox-nav]')?.getAttribute('aria-current')).toBeNull();
+});
+
+test.skipIf(!hasDom)('a window already open follows `plannotator plans` live: on, the row comes; off, it goes and #plans goes back to the Inbox', async () => {
+  resetPlansForTests(null, false);
+  window.history.replaceState(null, '', '/');
+  globalThis.fetch = (async () => Response.json({ plans: [summary('pln_a', true)], importing: false })) as unknown as typeof fetch;
+  type Held = { serverSession: string; board: { on: boolean }; plans?: { on: boolean } };
+  let hearFrame: (data: string) => void = () => {};
+  // What App does: settings held in state, `event: capabilities` merged into them, the row and the page from them.
+  function Window() {
+    const [settings, setSettings] = useState<Held>({ serverSession: 's', board: { on: false } });
+    const [route, setRoute] = useState(readRoute());
+    useEffect(() => {
+      const moved = () => setRoute(readRoute());
+      window.addEventListener('hashchange', moved);
+      return () => window.removeEventListener('hashchange', moved);
+    }, []);
+    hearFrame = (data) =>
+      dispatchInboxFrame({ name: 'capabilities', id: null, data }, {
+        onRecord: () => {},
+        onStatus: () => {},
+        onCapabilities: (capabilities) => {
+          if (namesCapability(capabilities)) setSettings((current) => withCapabilities(current, capabilities));
+        },
+      });
+    const plansOn = usePlansOn(settings);
+    const noop = () => {};
+    return (
+      <SidebarProvider>
+        <Sidebar page={route.page === 'plans' ? 'plans' : 'inbox'} projectId={null} inboxCount={0} projects={[]} projectCounts={new Map()} update={null} restarting={false} updated={null} onInbox={noop} onProject={noop} onSettings={noop} onUpdate={noop} onWhatsNew={noop} onBoard={noop} onPlans={plansOn ? () => (window.location.hash = '#plans') : undefined} />
+        {route.page === 'plans' && <PlansRoute route={route} on={plansOn} settingsKnown phone={false} />}
+      </SidebarProvider>
+    );
+  }
+  const host = document.createElement('div');
+  host.className = 'pn-inbox';
+  document.body.appendChild(host);
+  root = createRoot(host);
+  act(() => root!.render(<Window />));
+  const settle = async () => {
+    for (let i = 0; i < 6; i++) await act(async () => await new Promise((r) => setTimeout(r, 5)));
+  };
+  expect(host.querySelector('[data-plans-nav]')).toBeNull();
+
+  // `plannotator plans`: the Inbox saved it and told every window (the frame as inbox.ts sends it).
+  act(() => hearFrame(JSON.stringify({ board: { on: false }, steps: { on: true }, plans: { on: true } })));
+  await settle();
+  const row = host.querySelector<HTMLButtonElement>('[data-plans-nav]');
+  expect(row).not.toBeNull();
+  expect(row!.querySelector('.ib-n')?.textContent).toBe('1');
+  act(() => row!.click());
+  await settle();
+  expect(window.location.hash).toBe('#plans');
+  expect(host.querySelector('[data-plans-nav]')?.getAttribute('aria-current')).toBe('page');
+
+  // A frame for another switch leaves Plans as it is.
+  act(() => hearFrame(JSON.stringify({ board: { on: true }, steps: { on: true }, plans: { on: true } })));
+  await settle();
+  expect(host.querySelector('[data-plans-nav]')).not.toBeNull();
+
+  // `plannotator plans off`: the row goes, and the window on #plans goes back to the Inbox.
+  act(() => hearFrame(JSON.stringify({ board: { on: true }, steps: { on: true }, plans: { on: false } })));
+  await settle();
+  expect(host.querySelector('[data-plans-nav]')).toBeNull();
+  expect(window.location.hash).toBe('');
+  expect(host.textContent).not.toContain('Plans');
+});
+
+test.skipIf(!hasDom)('`plannotator plans` with a window open: the show frame names the Plans page for that window, never a thread', () => {
+  const heard: [string, string, string | undefined][] = [];
+  const handlers = { onRecord: () => {}, onStatus: () => {}, onShow: (thread: string, target: string, page?: 'plans') => void heard.push([thread, target, page]) };
+  dispatchInboxFrame({ name: 'show', id: null, data: JSON.stringify({ page: 'plans', window: 'w1' }) }, handlers);
+  dispatchInboxFrame({ name: 'show', id: null, data: JSON.stringify({ page: 'elsewhere', window: 'w1' }) }, handlers);
+  dispatchInboxFrame({ name: 'show', id: null, data: JSON.stringify({ thread_id: 'thr_1', window: 'w1' }) }, handlers);
+  expect(heard).toEqual([['', 'w1', 'plans'], ['thr_1', 'w1', undefined]]);
 });

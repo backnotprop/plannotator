@@ -80,6 +80,15 @@ export function capabilitiesWire(list: readonly InboxCapability[]): Record<strin
   return Object.assign({}, ...list.map((c) => c.settingsWire?.() ?? {}));
 }
 
+/**
+ * Every capability's part of `event: capabilities`: its settings wire while on, and `{ [key]: { on: false } }` to
+ * the frame of the change that turned it off (`changed`: a switch on this seam changed), so a window drops it at
+ * once and a frame names nothing of it otherwise.
+ */
+export function capabilitiesFrame(list: readonly InboxCapability[], changed: boolean): Record<string, unknown> {
+  return Object.assign({}, ...list.map((c) => (c.on() ? (c.settingsWire?.() ?? {}) : changed ? { [c.key]: { on: false } } : {})));
+}
+
 /** The settings POST names a capability's switch. */
 export function namesInboxCapability(list: readonly InboxCapability[], body: Record<string, unknown>): boolean {
   return list.some((c) => body[c.key] !== undefined);

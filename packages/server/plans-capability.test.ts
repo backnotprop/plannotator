@@ -7,13 +7,16 @@
  * - on, a route is reachable from anywhere but the owner's window on this computer, another site reads a plan, or a
  *   POST from a stale page (another server session) records a look;
  * - the settings switch takes a malformed value, does not stick, or answers what it did not save;
- * - turning it on does not import the library, and two imports run at once.
+ * - turning it on does not import the library, and two imports run at once;
+ * - a window open when it is turned on or off (from `plannotator plans`, saved through the Inbox) does not hear it:
+ *   `event: capabilities` must name `plans: { on: true }` while on and `{ on: false }` on the change that turned it
+ *   off, and nothing of Plans otherwise.
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
-import { answerInboxCapabilities, capabilitiesWire, checkInboxCapabilities, namesInboxCapability, routeInboxCapabilities, startInboxCapabilities, type InboxCapabilityGuard } from "./inbox-capability";
+import { answerInboxCapabilities, capabilitiesFrame, capabilitiesWire, checkInboxCapabilities, namesInboxCapability, routeInboxCapabilities, startInboxCapabilities, type InboxCapabilityGuard } from "./inbox-capability";
 import { createPlansCapability } from "./plans-capability";
 import { createPlanStore, type PlanStore } from "@plannotator/shared/plans/store";
 import { saveFinalSnapshot, saveToHistory } from "@plannotator/shared/storage";
@@ -224,6 +227,24 @@ describe("Plans' settings switch", () => {
     expect(changed()).toBe(2);
     expect(statSync(join(dataDir, "plan-library")).isDirectory()).toBe(true);
     expect((await route(list, "GET", "/api/plans"))?.status).toBe(404);
+  });
+
+  test("every open window hears it: the capabilities frame names Plans while on, and off only on the change", async () => {
+    historyFixture();
+    const { list, capability, changed } = capabilityWorld();
+    // Off and unchanged: a frame for another switch names nothing of Plans.
+    expect(capabilitiesFrame(list, false)).toEqual({});
+    // Saved on (what `plannotator plans` posts to a running Inbox): the windows are told, and the frame says so.
+    answerInboxCapabilities(list, { plans: { on: true } });
+    expect(changed()).toBe(1);
+    expect(capabilitiesFrame(list, true)).toEqual({ plans: { on: true } });
+    expect(capabilitiesFrame(list, false)).toEqual({ plans: { on: true } });
+    await capability.importing();
+    // Saved off (`plannotator plans off`): told again; that frame says off, a later frame for another switch nothing.
+    answerInboxCapabilities(list, { plans: { on: false } });
+    expect(changed()).toBe(2);
+    expect(capabilitiesFrame(list, true)).toEqual({ plans: { on: false } });
+    expect(capabilitiesFrame(list, false)).toEqual({});
   });
 
   test("started while on: the import runs once the Inbox is up", async () => {
