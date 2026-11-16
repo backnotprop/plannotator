@@ -283,6 +283,22 @@ async function settledArea(page: Page): Promise<{ left: number; top: number; rig
   throw new Error('the panes never settled');
 }
 
+/** Each locator's box, once two reads a moment apart agree for all of them: the panes FLIP into place (200 ms), a new
+ * one already where it ends while the others still shrink from their old boxes, so a single read can overlap them. */
+async function settledBoxes(locators: Locator[]): Promise<{ x: number; y: number; width: number; height: number }[]> {
+  const read = async () => Promise.all(locators.map((locator) => locator.boundingBox()));
+  const same = (one: Awaited<ReturnType<typeof read>>, two: Awaited<ReturnType<typeof read>>) =>
+    one.every((box, i) => box && two[i] && box.x === two[i]!.x && box.y === two[i]!.y && box.width === two[i]!.width && box.height === two[i]!.height);
+  let last = await read();
+  for (let i = 0; i < 60; i++) {
+    await locators[0]!.page().waitForTimeout(60);
+    const now = await read();
+    if (same(last, now)) return now.map((box) => box!);
+    last = now;
+  }
+  throw new Error('the boxes never settled');
+}
+
 const paneHost = (page: Page, id: string) => page.locator(`.ib-layout > [data-layout-pane]:has(section.ib-pane[data-thread-id="${id}"])`);
 
 /** Opens `first` (a click), then carries `second` to pane `first`'s `side` edge: two panes. */
@@ -324,7 +340,7 @@ test("the pane area's right rim (switch on, 1920 x 1080): a row opens a column t
   await page.mouse.up();
   await expect(paneHost(page, c)).toBeVisible();
   const after = await settledArea(page);
-  const [boxA, boxB, boxC] = [(await paneHost(page, a).boundingBox())!, (await paneHost(page, b).boundingBox())!, (await paneHost(page, c).boundingBox())!];
+  const [boxA, boxB, boxC] = await settledBoxes([paneHost(page, a), paneHost(page, b), paneHost(page, c)]);
   // c: the whole height, at the right end, beside both.
   expect(Math.abs(boxC.y - after.top)).toBeLessThanOrEqual(1);
   expect(Math.abs(boxC.y + boxC.height - after.bottom)).toBeLessThanOrEqual(1);
