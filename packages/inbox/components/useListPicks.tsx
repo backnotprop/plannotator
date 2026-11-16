@@ -43,6 +43,8 @@ export interface MenuPicks {
   act: PickActions;
   /** Stop the Combine a row waits in (its menu's Stop combining). */
   stopCombine?: (threadId: string) => void;
+  /** A row dropped on another (listDrops.tsx): today's Combine dialog with exactly these threads picked. Absent: no Combine here. */
+  combineWith?: (threadIds: readonly string[]) => void;
 }
 
 export function useListPicks(input: ListPicksInput) {
@@ -85,6 +87,8 @@ export function useListPicks(input: ListPicksInput) {
   };
   const [tidyAt, setTidyAt] = useState<HTMLElement | null>(null);
   const [combining, setCombining] = useState(false);
+  // Picking was off when a drop opened the dialog: its Cancel leaves picking too, so the drop left nothing behind.
+  const dropOpened = useRef(false);
   const combines = bulk?.combines;
   const act: PickActions | null = bulk
     ? {
@@ -144,11 +148,31 @@ export function useListPicks(input: ListPicksInput) {
       <>
         <PickBar act={act} all={boxState(drawnIds, picks.picked)} onAll={() => picks.all(drawnIds)} onDone={leave} phone={phone} />
         <PickTidy rows={rows} machines={machines} anchor={tidyAt} phone={phone} onClose={() => setTidyAt(null)} />
-        {combining && combines && <CombineDialog rows={rows} machines={machines} onClose={() => setCombining(false)} onStarted={(record, machine) => (combines.begin(record, machine, rows), leave())} />}
+        {combining && combines && (
+          <CombineDialog
+            rows={rows}
+            machines={machines}
+            onClose={() => {
+              setCombining(false);
+              if (dropOpened.current) leave();
+              dropOpened.current = false;
+            }}
+            onStarted={(record, machine) => (combines.begin(record, machine, rows), leave())}
+          />
+        )}
       </>
     ) : null;
   const sheet = picks.on && act && phone ? <PickSheet act={act} /> : null;
   const stopCombine = combines ? (id: string) => combines.waiting.has(id) && void combines.stop(combines.waiting.get(id)!) : undefined;
-  const menu: MenuPicks | undefined = act ? { has: (id) => picks.on && picks.picked.has(id), takes: (id) => listed.has(id), start: picks.start, act, stopCombine } : undefined;
+  const combineWith = combines
+    ? (ids: readonly string[]) => {
+        dropOpened.current = !picks.on;
+        picks.leave();
+        picks.start();
+        picks.all(ids.filter((id) => listed.has(id)));
+        setCombining(true);
+      }
+    : undefined;
+  const menu: MenuPicks | undefined = act ? { has: (id) => picks.on && picks.picked.has(id), takes: (id) => listed.has(id), start: picks.start, act, stopCombine, combineWith } : undefined;
   return { on: picks.on && !!act, has: (id: string) => picks.picked.has(id), start: act ? () => picks.start() : undefined, onClickCapture, onRowBox, groupBox, bar, sheet, menu };
 }

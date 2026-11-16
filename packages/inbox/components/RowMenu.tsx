@@ -16,6 +16,7 @@ import { bulkTargets } from '../rowPicks';
 import { formatCount } from '@plannotator/core/inbox-format';
 import { MentionMenuItem } from './MentionMenuItem';
 import { useThreadRowDrag } from './useThreadRowDrag';
+import { ListDrops } from './listDrops';
 
 export interface ThreadRowMenuProps {
   className: string;
@@ -127,8 +128,10 @@ export const ThreadRowMenu = forwardRef<HTMLDivElement, ThreadRowMenuProps>(func
     longPress: true,
   });
   const target = menu.targetId ? props.rowOf(menu.targetId) : null;
-  // A row pressed with a mouse and moved is dragged (threadDrag.ts): into the reply box, a mention.
-  const pressRow = useThreadRowDrag({ body, rowOf: props.rowOf, picks: props.picks, off: props.disabled === true || props.phone === true });
+  // A row pressed with a mouse and moved is dragged (threadDrag.ts): into the reply box, a mention; to the list's top or
+  // bottom edge or held on another row, the places ListDrops draws while it is carried.
+  const dragOff = props.disabled === true || props.phone === true;
+  const pressRow = useThreadRowDrag({ body, rowOf: props.rowOf, picks: props.picks, off: dragOff });
   const actions = target ? rowMenuActions(target, props.canMarkRead, props.pinnedOf ? props.pinnedOf(target) : null, props.sectionOf?.(target.thread_id) ?? null, props.onSnooze !== undefined && ((props.snoozesOf?.(target) ?? true) || !!props.snoozeBlockedOf?.(target)), props.prioritizesOf?.(target) ?? true) : [];
   const snoozeBlocked = target ? (props.snoozeBlockedOf?.(target) ?? null) : null;
   // A picked row: the menu is the picks' (acting on every picked row).
@@ -217,6 +220,7 @@ export const ThreadRowMenu = forwardRef<HTMLDivElement, ThreadRowMenuProps>(func
         }}>
         {props.children}
       </ContextMenu.Trigger>
+      <ListDrops body={body} rowOf={props.rowOf} sectionOf={props.sectionOf} canMarkRead={props.canMarkRead} prioritizesOf={props.prioritizesOf} onAction={props.onAction} picks={props.picks} off={dragOff} />
       <ContextMenu.Portal container={portal ?? undefined}>
         {props.phone && <ContextMenu.Backdrop className="ib-pm-scrim" />}
         <ContextMenu.Positioner className="ib-pm-pos" data-phone={props.phone ? '' : undefined}>

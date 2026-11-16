@@ -1,0 +1,317 @@
+/**
+ * The list's own places for a dragged thread (approval "inbox-drag-threads", drag-system.html): Priority docked on the
+ * list's top edge, Archive and Quiet on its bottom edge, and another row held for a moment (Combine). They show only
+ * while a thread is carried (threadDrag.ts, the window's one thread drag), float over the list so nothing moves under
+ * the pointer, and each drop runs what the row menu already runs, with its toast and Undo:
+ *
+ *  - Priority: Add to Priority. Its second line says why it does not take a thread (already in Priority, archived).
+ *  - Quiet: Mark read ("Quiet" is not a flag; Mark read is what makes a row quiet). Its second line says when Mark read
+ *    would set questions aside; the warning Mark read asks first still asks.
+ *  - Archive: Archive. Red only while the pointer is over it.
+ *  - A row held 500 ms over its middle (60%) opens today's Combine dialog with the carried threads and that one picked
+ *    (useListPicks.ts `combineWith`); it never combines by itself. Passing over rows on the way to an edge never arms it,
+ *    nor does a row in the list's scroll band.
+ *
+ * Several picked rows move together: the picks' own actions (PickBar.tsx `runBulk`), one toast and one Undo. A place
+ * that takes none of the carried threads still shows, greyed, its second line saying why, and a drop there changes
+ * nothing. Never on a phone: the row's sheet and its swipe do the same there.
+ */
+import { useEffect, useRef, useState, type RefObject } from 'react';
+import { inboxRowArchived, type InboxListGroupId, type InboxListRow } from '@plannotator/core/inbox-types';
+import { formatCount, plural } from '@plannotator/core/inbox-format';
+import { Icon, type IconName } from '../icons';
+import { offersRowMarkRead, setAsideCount } from '../markRead';
+import { priorityAction } from '../priority';
+import type { RowMenuAction } from '../rowMenu';
+import { refreshThreadDrag, registerThreadDropTarget, sayThreadDrag, scrollStep, threadDragging, threadDragHit, THREAD_DROP_LAYER, type DropAnswer } from '../threadDrag';
+import { runBulk } from './PickBar';
+import type { MenuPicks } from './useListPicks';
+
+export type EdgePlace = 'priority' | 'archive' | 'quiet';
+
+export interface PlaceAnswer {
+  answer: DropAnswer;
+  /** The place's second line: what a drop does, or why it does nothing. */
+  sub: string;
+  /** The carried rows the drop takes. */
+  rows: InboxListRow[];
+}
+
+export interface DropRules {
+  /** The group a row is drawn in ("archived": the Archived group's, which takes no read action). */
+  drawn: (row: InboxListRow) => InboxListGroupId | null;
+  /** The list offers Mark read (the host has it). */
+  canMarkRead: boolean;
+  /** Its machine takes Priority from this one. */
+  prioritizes: (row: InboxListRow) => boolean;
+}
+
+/** What each edge place answers for the carried rows: the row menu's rules (rowMenu.ts) and the picks' (rowPicks.ts). */
+export function edgePlaces(rows: readonly InboxListRow[], rules: DropRules): Record<EdgePlace, PlaceAnswer> {
+  const many = rows.length > 1;
+  const first = rows[0];
+  const priority = rows.filter((row) => rules.prioritizes(row) && priorityAction(row) === 'priority-add');
+  const read = rules.canMarkRead ? rows.filter((row) => rules.drawn(row) !== 'archived' && offersRowMarkRead(row, rules.drawn(row))) : [];
+  const archive = rows.filter((row) => row.resolved_at === null);
+  const aside = setAsideCount(read);
+  const what =
+    aside.actions === 0
+      ? plural(aside.questions, 'question')
+      : aside.questions === 0
+        ? plural(aside.actions, 'action item')
+        : `${plural(aside.questions, 'question')} and ${plural(aside.actions, 'action item')}`;
+  return {
+    priority: priority.length
+      ? { answer: 'take', sub: many ? 'Put them first in your list' : 'Put it first in your list', rows: priority }
+      : {
+          answer: rows.length ? 'refuse' : null,
+          sub: !first ? '' : first.priority ? 'Already in Priority' : inboxRowArchived(first) ? (many ? 'Unarchive them first' : 'Unarchive it first') : 'Its Inbox keeps no Priority',
+          rows: [],
+        },
+    quiet: !rules.canMarkRead
+      ? { answer: null, sub: '', rows: [] }
+      : read.length
+        ? { answer: 'take', sub: aside.questions + aside.actions > 0 ? `Mark read · sets aside ${what}` : 'Mark read', rows: read }
+        : {
+            answer: rows.length ? 'refuse' : null,
+            sub: !first ? '' : rules.drawn(first) === 'archived' || inboxRowArchived(first) ? 'Archived: nothing to mark read' : first.section === 'quiet' ? 'Already in Quiet' : (first.read_at ?? null) !== null ? 'Already read' : 'Nothing waits on you here',
+            rows: [],
+          },
+    archive: archive.length ? { answer: 'take', sub: 'Out of the list', rows: archive } : { answer: rows.length ? 'refuse' : null, sub: 'Already archived', rows: [] },
+  };
+}
+
+const PLACES: { place: EdgePlace; edge: 'top' | 'bottom'; label: string; icon: IconName; what: string; action: RowMenuAction }[] = [
+  { place: 'priority', edge: 'top', label: 'Priority', icon: 'toTop', what: 'Priority', action: 'priority-add' },
+  { place: 'archive', edge: 'bottom', label: 'Archive', icon: 'archive', what: 'Archive', action: 'archive' },
+  { place: 'quiet', edge: 'bottom', label: 'Quiet', icon: 'checkCircle', what: 'Quiet', action: 'read' },
+];
+
+/** How long a row is held before it takes a Combine, and the middle of it that counts (approval: 500 ms, 60%). */
+export const COMBINE_DWELL_MS = 500;
+const COMBINE_MIDDLE = 0.2;
+
+export interface ListDropsProps {
+  /** The list's body (`.ib-lbody`): the edges float over its ends, its rows take Combine. */
+  body: RefObject<HTMLElement | null>;
+  rowOf: (threadId: string) => InboxListRow | null;
+  sectionOf?: (threadId: string) => InboxListGroupId | null;
+  canMarkRead: boolean;
+  prioritizesOf?: (row: InboxListRow) => boolean;
+  /** The row menu's actions (App.tsx `rowAction`): one row's drop runs exactly what its menu item runs. */
+  onAction: (row: InboxListRow, action: RowMenuAction) => void;
+  picks?: MenuPicks;
+  /** No drag here: a phone, or a list with no actions. */
+  off: boolean;
+}
+
+interface Shown {
+  places: Record<EdgePlace, PlaceAnswer>;
+  /** The body's top in the list column, where the top edge docks. */
+  top: number;
+}
+
+/** The row button a hit lands in (a wide row's wrapper holds it). */
+function rowAt(list: HTMLElement, hit: Element | null): HTMLElement | null {
+  const own = hit?.closest<HTMLElement>('[data-thread-id]') ?? hit?.closest<HTMLElement>('[data-row]')?.querySelector<HTMLElement>('[data-thread-id]') ?? null;
+  return own && list.contains(own) ? own : null;
+}
+
+/** The list's edge places and its rows as drop targets, while a thread is carried. */
+export function ListDrops(props: ListDropsProps) {
+  const live = useRef(props);
+  live.current = props;
+  const [shown, setShown] = useState<Shown | null>(null);
+  const [hot, setHot] = useState<EdgePlace | null>(null);
+  const [combineAt, setCombineAt] = useState<LabelBox | null>(null);
+  const slots = useRef<Record<EdgePlace, HTMLDivElement | null>>({ priority: null, archive: null, quiet: null });
+
+  useEffect(() => {
+    if (props.off) return;
+    const rules = (): DropRules => {
+      const { sectionOf, canMarkRead, prioritizesOf } = live.current;
+      return { drawn: (row) => sectionOf?.(row.thread_id) ?? null, canMarkRead, prioritizes: (row) => prioritizesOf?.(row) ?? true };
+    };
+    const rowsOf = (ids: readonly string[]) => ids.flatMap((id) => live.current.rowOf(id) ?? []);
+    // One answer per drag: the carried ids are the same array from pick-up to drop.
+    let asked: { ids: readonly string[]; places: Record<EdgePlace, PlaceAnswer> } | null = null;
+    const placesFor = (ids: readonly string[]) => {
+      if (asked?.ids !== ids) asked = { ids, places: edgePlaces(rowsOf(ids), rules()) };
+      return asked.places;
+    };
+    const offs = PLACES.map(({ place, edge, what, action }) =>
+      registerThreadDropTarget({
+        element: () => slots.current[place],
+        layer: THREAD_DROP_LAYER.list,
+        edge,
+        what,
+        accepts: (ids) => placesFor(ids)[place].answer,
+        // One state for the three places: Priority's `show` sets it, at the drag's start (whatever it answers) and end.
+        show: (_answer, ids) => {
+          if (place !== 'priority') return;
+          setHot(null);
+          asked = null;
+          const list = live.current.body.current;
+          setShown(threadDragging() && list ? { places: placesFor(ids), top: list.offsetTop } : null);
+        },
+        over: (point) => setHot((was) => (point ? place : was === place ? null : was)),
+        drop: (ids) => {
+          const taken = placesFor(ids)[place].rows;
+          const { picks, onAction } = live.current;
+          // Several picked rows: the picks' own action (each row it takes, one toast, one Undo); one row: its menu item.
+          if (ids.length > 1 && picks) runBulk(picks.act, action === 'read' || action === 'archive' ? action : 'priority-add');
+          else if (taken[0]) onAction(taken[0], action);
+        },
+      }),
+    );
+    offs.push(registerCombine(live, setCombineAt));
+    return () => offs.forEach((off) => off());
+  }, [props.off]);
+
+  if (props.off || !shown) return null;
+  const combineLabel = combineAt && (
+    <div className="ib-tcomb" aria-hidden="true" style={combineAt}>
+      <Icon name="swap" size={14} />
+      Combine with this thread
+    </div>
+  );
+  const slot = (place: EdgePlace) => {
+    const meta = PLACES.find((entry) => entry.place === place)!;
+    const answer = shown.places[place];
+    if (!answer.answer) return null;
+    return (
+      <div
+        key={place}
+        ref={(el) => void (slots.current[place] = el)}
+        className="ib-tslot"
+        data-thread-place={place}
+        data-hot={hot === place && answer.answer === 'take' ? '' : undefined}
+        data-refused={answer.answer === 'refuse' ? '' : undefined}
+      >
+        <span className="ib-tslot-ic">
+          <Icon name={meta.icon} size={16} />
+        </span>
+        <span className="ib-tslot-txt">
+          {meta.label}
+          <span className="ib-tslot-sub">{answer.sub}</span>
+        </span>
+      </div>
+    );
+  };
+  const bottom = (['archive', 'quiet'] as const).filter((place) => shown.places[place].answer);
+  return (
+    <>
+      {shown.places.priority.answer && (
+        <div className="ib-tedge ib-tedge-top" style={{ top: shown.top + 6 }} aria-hidden="true" data-thread-edge="top">
+          {slot('priority')}
+        </div>
+      )}
+      {bottom.length > 0 && (
+        <div className="ib-tedge ib-tedge-bottom" aria-hidden="true" data-thread-edge="bottom">
+          {bottom.map(slot)}
+        </div>
+      )}
+      {combineLabel}
+    </>
+  );
+}
+
+/** Where the Combine words sit over a held row, in the list column. */
+type LabelBox = { left: number; top: number; width: number; height: number };
+
+/**
+ * The list's rows as one Combine target: a row held over its middle for COMBINE_DWELL_MS fills, says "Combine with this
+ * thread", and takes the drop, which opens the Combine dialog. Moving off it, into the scroll band or to another row
+ * starts again.
+ */
+function registerCombine(live: { current: ListDropsProps }, setLabel: (box: LabelBox | null) => void): () => void {
+  let carried: readonly string[] | null = null;
+  let row: HTMLElement | null = null;
+  let armed = false;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let last: { x: number; y: number } | null = null;
+  /** The row a drop at the pointer lands on (`takesAt`'s answer), kept past the drag's end: the engine ends it (`over`
+   * null, `show` null) before it hands over the drop. */
+  let landed: string | null = null;
+  const clear = () => {
+    if (timer) clearTimeout(timer);
+    timer = null;
+    row?.removeAttribute('data-thread-combine');
+    row = null;
+    armed = false;
+    setLabel(null);
+  };
+  const combinable = (id: string) => live.current.picks?.takes(id) === true && !!live.current.rowOf(id);
+  /** The row under a point that may take a Combine of the carried threads, or null. */
+  const candidate = (point: { x: number; y: number }): HTMLElement | null => {
+    const list = live.current.body.current;
+    if (!list || !carried) return null;
+    const el = rowAt(list, threadDragHit(point.x, point.y));
+    const id = el?.getAttribute('data-thread-id');
+    if (!el || !id || carried.includes(id) || !combinable(id)) return null;
+    const box = el.getBoundingClientRect();
+    const at = box.height > 0 ? (point.y - box.top) / box.height : 0.5;
+    if (at <= COMBINE_MIDDLE || at >= 1 - COMBINE_MIDDLE) return null;
+    // A row in the list's scroll band is passing by, not held.
+    if (scrollStep(list, point.x, point.y) !== 0) return null;
+    return el;
+  };
+  /** The words go over the row's end: its preview line on a three-line row, its right columns on a wide one. */
+  const showLabel = (el: HTMLElement) => {
+    // The list column: the edges' and these words' box (the body's parent, where ListDrops draws).
+    const column = live.current.body.current?.parentElement;
+    if (!column) return;
+    const at = el.getBoundingClientRect();
+    const from = column.getBoundingClientRect();
+    const line = el.querySelector<HTMLElement>(':scope > .ib-l3, :scope > .ib-cw')?.getBoundingClientRect();
+    setLabel(
+      line && line.height > 0
+        ? { left: line.left - from.left, top: line.top - from.top, width: Math.max(0, at.right - line.left - 12), height: line.height }
+        : { left: at.left - from.left + 12, top: at.top - from.top, width: Math.max(0, at.width - 24), height: at.height },
+    );
+  };
+  return registerThreadDropTarget({
+    element: () => live.current.body.current,
+    layer: THREAD_DROP_LAYER.list,
+    what: 'Combine',
+    accepts: (ids) => (live.current.picks?.combineWith && ids.every(combinable) ? 'take' : null),
+    show: (answer, ids) => {
+      if (answer) landed = null;
+      clear();
+      carried = answer ? ids : null;
+    },
+    over: (point) => {
+      last = point;
+      const next = point ? candidate(point) : null;
+      if (next === row) return;
+      clear();
+      if (!next) return;
+      row = next;
+      row.setAttribute('data-thread-combine', 'arming');
+      const held = next;
+      timer = setTimeout(() => {
+        timer = null;
+        // Still the row under the pointer (the list may have moved under a still pointer).
+        if (row !== held || !last || candidate(last) !== held) return clear();
+        armed = true;
+        held.setAttribute('data-thread-combine', 'on');
+        showLabel(held);
+        const title = (held.querySelector('.ib-title') ?? held.querySelector('.ib-subj'))?.textContent?.trim() || 'this thread';
+        sayThreadDrag(`Let go to combine with ${title}.`);
+        refreshThreadDrag();
+      }, COMBINE_DWELL_MS);
+    },
+    takesAt: (point) => {
+      landed = armed && row && candidate(point) === row ? row.getAttribute('data-thread-id') : null;
+      return landed !== null;
+    },
+    drop: (ids) => {
+      const onto = landed;
+      landed = null;
+      const combine = live.current.picks?.combineWith;
+      if (!onto || !combine) return;
+      combine([...ids, onto]);
+      sayThreadDrag(`Combine ${formatCount(ids.length + 1)} threads: choose who writes it, or Cancel.`);
+    },
+  });
+}

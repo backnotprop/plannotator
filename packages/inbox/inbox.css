@@ -12426,3 +12426,37 @@ button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(-
 .pn-inbox .ib-body a[href^="#thread="][href$="&mention"]:hover { background: color-mix(in oklch, var(--primary) 20%, transparent); }
 .pn-inbox { --ib-thread-mark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M14 9a2 2 0 0 1-2 2H6l-4 4V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2z'/%3E%3Cpath d='M18 9h2a2 2 0 0 1 2 2v11l-4-4h-6a2 2 0 0 1-2-2v-1'/%3E%3C/svg%3E"); }
 .ib-pmi-hint { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted-foreground); font-size: var(--ib-fs-12, 12px); }
+/* The list's places for a carried thread (components/listDrops.tsx, drag-system.html): docked over the list's top
+   (Priority) and bottom (Archive, Quiet), floating, so nothing moves under the pointer. A place that takes none of the
+   carried threads is greyed, its second line saying why. Archive goes red only under the pointer. */
+.ib-tedge { position: absolute; left: 8px; right: 8px; z-index: 20; display: flex; gap: 4px; padding: 4px; border-radius: 12px; background: var(--popover); color: var(--popover-foreground); box-shadow: var(--ib-float-shadow); }
+.ib-tedge-bottom { bottom: 8px; }
+.ib-tslot { flex: 1 1 0; min-width: 0; min-height: 44px; border-radius: 9px; display: flex; align-items: center; gap: 10px; padding: 0 10px; font-size: var(--ib-fs-13, 13px); font-weight: 600; transition: background-color 120ms ease-out; }
+.ib-tslot-ic { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; flex: none; background: color-mix(in oklch, var(--foreground) 7%, transparent); color: var(--muted-foreground); transition: background-color 120ms ease-out, color 120ms ease-out; }
+.ib-tslot-txt { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
+.ib-tslot-sub { font-weight: 400; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ib-tslot[data-hot] { background: color-mix(in srgb, var(--primary) 18%, var(--popover)); }
+.ib-tslot[data-hot] .ib-tslot-ic { background: var(--primary); color: var(--primary-foreground); }
+.ib-tslot[data-thread-place="archive"][data-hot] { background: color-mix(in srgb, var(--destructive) 15%, var(--popover)); }
+.ib-tslot[data-thread-place="archive"][data-hot] .ib-tslot-ic { background: var(--destructive); color: oklch(0.98 0 0); }
+.ib-tslot[data-refused] { color: var(--muted-foreground); }
+.ib-tslot[data-refused] .ib-tslot-ic { opacity: 0.55; }
+@media (prefers-reduced-motion: no-preference) {
+  .ib-tedge { animation: ib-tedge-in 200ms cubic-bezier(0.23, 1, 0.32, 1); }
+  .ib-tedge-top { --ib-tedge-from: -8px; }
+  .ib-tedge-bottom { --ib-tedge-from: 10px; }
+  @keyframes ib-tedge-in { from { opacity: 0; translate: 0 var(--ib-tedge-from); } }
+}
+/* A row held for Combine: its pill fills (never an outline), deepening over the hold; once it takes the drop its end
+   says "Combine with this thread" in place of the preview and the counts. */
+.ib-lbody :is(.ib-row, .ib-nrow)[data-thread-combine="arming"]::before { background: color-mix(in oklch, var(--primary) 7%, transparent) !important; }
+.ib-lbody :is(.ib-row, .ib-nrow)[data-thread-combine="on"]::before { background: color-mix(in oklch, var(--primary) 16%, transparent) !important; }
+@media (prefers-reduced-motion: no-preference) { .ib-lbody :is(.ib-row, .ib-nrow)[data-thread-combine="arming"]::before { transition: background-color 500ms linear; } }
+.ib-lbody .ib-nrow[data-thread-combine="on"] > .ib-l3 > *, .ib-lbody .ib-row[data-thread-combine="on"] > :is(.ib-cw, .ib-bcol, .ib-cpin, .ib-cq, .ib-t) { visibility: hidden; }
+.ib-tcomb { position: absolute; z-index: 15; display: flex; align-items: center; gap: 6px; pointer-events: none; color: var(--primary); font-size: var(--ib-fs-12-5, 12.5px); font-weight: 550; white-space: nowrap; overflow: hidden; }
+/* The empty thread panel while a row is carried (EmptyThreadPanel.tsx): the pane drop zone's tint, stronger under the
+   pointer, and "Open here" in the reply box's drop label. */
+.ib-pempty[data-thread-drop="target"] { background-image: linear-gradient(color-mix(in oklch, var(--primary) 6%, transparent), color-mix(in oklch, var(--primary) 6%, transparent)); }
+.ib-pempty[data-thread-drop="over"] { background-image: linear-gradient(color-mix(in oklch, var(--primary) 14%, transparent), color-mix(in oklch, var(--primary) 14%, transparent)); }
+.ib-topen { display: inline-flex; align-items: center; height: 30px; padding: 0 12px; border-radius: 999px; background: var(--popover); box-shadow: var(--ib-float-shadow); color: var(--primary); font-weight: 600; font-size: var(--ib-fs-13, 13px); white-space: nowrap; }
+.ib-topen[data-thread-drop-label="refuse"] { color: var(--muted-foreground); }
