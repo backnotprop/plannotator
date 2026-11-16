@@ -99,12 +99,6 @@ plannotator inbox
 
 Claude Code, Pi, and OpenCode connect through Plannotator's plugins, and your replies arrive as their next turn. Any other agent reaches it over MCP with `plannotator inbox mcp`, and `plannotator inbox --help` is the guide an agent reads. [Watch the demo](https://plannotator.ai/assets/inbox-film.mp4) · [More on the Inbox](https://plannotator.ai/inbox/) · [Docs](https://plannotator.ai/docs/reference/inbox/)
 
-## Annotate HTML Artifacts
-
-<p align="center">
-  <img src=".github/assets/html.webp" alt="Annotating a rendered HTML artifact" width="720" />
-</p>
-
 ## Herdr Annotate: Plannotator in the Terminal
 
 <p align="center">
@@ -124,6 +118,12 @@ herdr plugin install plannotator/herdr-annotate
 Prefer it standalone? [Plannotator TUI](https://github.com/plannotator/plannotator-tui) powers the document review and runs without Herdr: `brew install plannotator/tap/plannotator-tui`.
 
 ---
+
+## Annotate HTML Artifacts
+
+<p align="center">
+  <img src=".github/assets/html.webp" alt="Annotating a rendered HTML artifact" width="720" />
+</p>
 
 ## Commands
 
