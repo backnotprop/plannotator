@@ -545,8 +545,9 @@ export function PullsCard({
       setBusy(false);
     }
   };
+  // By the row's URL, which keeps its host: its short text (`group/project!45`) can name another row of the thread.
   const remove = async (pull: InboxThreadPullWire) => {
-    if (await change({ remove: [pull.ref] })) setRemoved(pull);
+    if (await change({ remove: [pull.url] })) setRemoved(pull);
   };
   const add = async () => {
     const refs = text.split(/[\s,]+/).filter(Boolean);
@@ -602,7 +603,7 @@ export function PullsCard({
               className="ib-prpop-tbtn"
               disabled={busy}
               onClick={() =>
-                void change({ add: [removed.ref] }).then((ok) => {
+                void change({ add: [removed.url] }).then((ok) => {
                   if (ok) setRemoved(null);
                 })
               }

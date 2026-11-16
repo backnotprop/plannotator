@@ -79,6 +79,7 @@
     "./inbox-artifact-pins": "./inbox-artifact-pins.ts",
     "./inbox-list-delta": "./inbox-list-delta.ts",
     "./shape": "./shape.ts",
+    "./plans": "./plans.ts",
     "./shape-scene": "./shape-scene.ts",
     "./shape-animate": "./shape-animate.ts",
     "./shape-skill": "./shape-skill.ts",

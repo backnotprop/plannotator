@@ -312,6 +312,20 @@ describe.skipIf(!hasDom)("the thread's button and its card", () => {
     }
   });
 
+  test('a row of a pair with the same short text is removed by its own URL, never the other row', async () => {
+    // An older Inbox stored `acme/api!3` on gitlab.com; added again, it is on the project's own host.
+    const stale = pull('https://gitlab.com/acme/api/-/merge_requests/3', 'open', 'main', 'a');
+    const mine = pull('https://code.corp.example/acme/api/-/merge_requests/3', 'open', 'main', 'b');
+    expect([stale.ref, mine.ref]).toEqual(['acme/api!3', 'https://code.corp.example/acme/api/-/merge_requests/3']);
+    answer = answerOf([stale, mine]);
+    postAnswer = () => Response.json((answer = answerOf([mine])));
+    render(<ThreadPullsButton threadId={THREAD} summary={undefined} />);
+    await settle();
+    await click(host!.querySelector('[data-pr-button]'));
+    await click(popover()!.querySelector('[data-pr-remove="acme/api!3"]'));
+    expect(posts).toEqual([{ path: `/api/inbox/threads/${THREAD}/pulls`, body: { remove: ['https://gitlab.com/acme/api/-/merge_requests/3'] } }]);
+  });
+
   test('remove sends that ref, says so with Undo, and Undo adds it back', async () => {
     const a = pull('o/r#1', 'open', 'main', 'a');
     const b = pull('o/web#2', 'open', 'main', 'b');
@@ -325,12 +339,12 @@ describe.skipIf(!hasDom)("the thread's button and its card", () => {
     await settle();
     await click(host!.querySelector('[data-pr-button]'));
     await click(popover()!.querySelector('[data-pr-remove="o/web#2"]'));
-    expect(posts).toEqual([{ path: `/api/inbox/threads/${THREAD}/pulls`, body: { remove: ['o/web#2'] } }]);
+    expect(posts).toEqual([{ path: `/api/inbox/threads/${THREAD}/pulls`, body: { remove: ['https://github.com/o/web/pull/2'] } }]);
     expect(popover()!.querySelector('[data-pr-removed]')!.textContent).toContain('Removed o/web#2');
     // One PR left: the button's count goes.
     expect(host!.querySelector('[data-pr-button] .ib-cnt')).toBeNull();
     await click(popover()!.querySelector('[data-pr-undo]'));
-    expect(posts.at(-1)!.body).toEqual({ add: ['o/web#2'] });
+    expect(posts.at(-1)!.body).toEqual({ add: ['https://github.com/o/web/pull/2'] });
     expect(popover()!.querySelector('[data-pr-removed]')).toBeNull();
     expect(host!.querySelector('[data-pr-button] .ib-cnt')!.textContent).toBe('2');
   });

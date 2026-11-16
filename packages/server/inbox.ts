@@ -369,6 +369,7 @@ import { shapeCodeRoot } from "@plannotator/shared/shape/store";
 import { shapeEventFrame } from "@plannotator/shared/shape/routes";
 import { shapeAgentName, unlocked as unlockedShape } from "@plannotator/shared/shape/routes";
 import { SHAPE_SWITCH_NOT_SAVED, setShapeSwitch, shapeSwitchOn } from "@plannotator/shared/shape/switch";
+import { answerInboxCapabilities, capabilitiesWire, checkInboxCapabilities, inboxCapabilities, namesInboxCapability, routeInboxCapabilities, startInboxCapabilities } from "./inbox-capability";
 import {
   agentSpec,
   claudeCodeModOn,
@@ -3272,6 +3273,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     if (was !== shapeOn()) for (const listener of capabilityListeners) listener("shape");
     return { on: shapeOn() };
   };
+  /** Capabilities on the seam (inbox-capability.ts; Plans): routed, answered in the settings and started through the list only. */
+  const capabilities = inboxCapabilities({ dataDir, changed: () => capabilityListeners.forEach((listener) => listener()) });
 
   /**
    * The line of one-time dialogs (approval "inbox-feature-reveal", and its schedule, "inbox-one-time-dialogs"; the queue
@@ -3734,6 +3737,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     /** Code review (config.json `inboxCodeReview`) and Shape (`inboxShape`): off unless the person turned them on. Held until the next big release: absent while off. */
     ...heldSwitch("code_review", codeReviewOn()),
     ...heldSwitch("shape", shapeOn()),
+    /** Capabilities on the seam (inbox-capability.ts): Plans' `plans: { on: true }`, present only while on. */
+    ...capabilitiesWire(capabilities),
     /** System (config.json `inboxSystem`): its switch, present only while Code review is on (Settings shows the row only then). */
     ...systemWire(),
     /** Chapter diagrams (config.json `inboxChapterDiagrams`, on unless false): present only while Code review is on, as System's. */
@@ -6266,16 +6271,18 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           body.system === undefined &&
           body.scheduled_threads === undefined &&
           body.chapter_diagrams === undefined &&
+          !namesInboxCapability(capabilities, body) &&
           body.cookie_host === undefined &&
           body.voice === undefined &&
           body.show_archived === undefined &&
           !updateSwitches
         ) {
-          throw new InboxError("validation_error", "body: inbox_tool, notifications, sound, tailscale, theme, text_size, favicon, reactions, reaction_change, rows, sidebar, diff_style, diff_options, experimental, tour, prompts, board, steps, bro, float_drafts, mark_read_warning, code_review, shape, system, scheduled_threads, chapter_diagrams, voice, update_check, auto_update, show_archived or cookie_host is required.");
+          throw new InboxError("validation_error", "body: inbox_tool, notifications, sound, tailscale, theme, text_size, favicon, reactions, reaction_change, rows, sidebar, diff_style, diff_options, experimental, tour, prompts, board, steps, bro, float_drafts, mark_read_warning, code_review, shape, plans, system, scheduled_threads, chapter_diagrams, voice, update_check, auto_update, show_archived or cookie_host is required.");
         }
         // System: a malformed value throws here.
         system.check(body);
         scheduledCap.check(body);
+        checkInboxCapabilities(capabilities, body);
         const promptsChange = body.prompts === undefined ? undefined : parseInboxPromptsChange(body.prompts);
         const rulesMisfit = promptsChange ? inboxRulesFitError(promptsChange, loadConfig(), promptWakes()) : null;
         if (rulesMisfit) throw new InboxError("validation_error", rulesMisfit.message, { field: rulesMisfit.field });
@@ -6352,7 +6359,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const markReadWarning = body.mark_read_warning === undefined ? { on: markReadWarningOn() } : saveMarkReadWarning(body.mark_read_warning);
         const codeReview = body.code_review === undefined ? { on: codeReviewOn() } : saveCodeReview(body.code_review);
         const shape = body.shape === undefined ? { on: shapeOn() } : saveShape(body.shape);
-        const systemAnswer = system.answer(body);
+        const systemAnswer = { ...system.answer(body), ...answerInboxCapabilities(capabilities, body) };
         const scheduledAnswer = await scheduledCap.answer(body);
         // Present while Code review is on, and always to the save that set it.
         const chapterDiagrams = body.chapter_diagrams === undefined ? chapterDiagramsWire() : { chapter_diagrams: saveChapterDiagrams(body.chapter_diagrams) };
@@ -6519,6 +6526,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         return json({ error: "Not found", code: "not_found" }, 404);
       }
 
+      // Capabilities on the seam (Plans, inbox-capability.ts): off, or not the owner's window on this computer, its paths are 404 as if absent.
+      const capable = await routeInboxCapabilities(capabilities, req, url, { local: via === "local" && !fromDeviceDoor.has(req), crossSite: () => crossSiteCardRead(req), serverSession });
+      if (capable) return capable;
       // Search: a read route (and the recent searches the window writes on opening a result).
       const searched = await search.handle(req, url);
       if (searched) return searched;
@@ -7575,6 +7585,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     if (stopped) return;
     for (const project of store.allProjects()) void repos.refresh(project.root).then(learnGitlabRemote);
     repoReadsBegun = true;
+    startInboxCapabilities(capabilities);
     // Once: an earlier Inbox's folder project for a checkouts folder goes into its repository's project, by
     // Combine projects' own write (inbox-checkout-folders.ts). One debug line per fold.
     void foldCheckoutFolderProjects({

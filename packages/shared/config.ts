@@ -626,6 +626,13 @@ export interface PlannotatorConfig {
    */
   inboxShape?: boolean;
   /**
+   * Plans in the Inbox (packages/shared/plans/switch.ts): the plan library of every plan plan review handled. Off
+   * unless the person turns it on (`plannotator plans`, or `POST /api/inbox/settings` `{ plans: { on } }` from the
+   * window); `plannotator plans off` turns it off and keeps the library. Off: no `/api/plans` route, no import and
+   * no read of the library. Read on every request.
+   */
+  inboxPlans?: boolean;
+  /**
    * System in the Inbox (approval "system-inbox"): a drawing of each project's code, kept current by an agent.
    * Shown only while Code review is on. Off unless turned on; config only until Settings → Capabilities' switch
    * lands. Read on every request.
