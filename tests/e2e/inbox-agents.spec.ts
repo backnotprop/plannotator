@@ -41,6 +41,7 @@ import { join, resolve } from 'node:path';
 import { createFakeAgents, type FakeAgents } from '../helpers/fake-agents';
 import { E2E_LAUNCH_OFF, inboxScratch, removeInboxScratch } from './inbox-scratch';
 import { NO_BROWSER } from '../helpers/no-browser';
+import { savedConfig } from '../helpers/saved-config';
 
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -97,7 +98,7 @@ const dialogOf = (page: Page) => page.locator('dialog[data-dialog="agent-note"]'
 const rowsOf = (page: Page) => dialogOf(page).locator('.ib-anote-table > li');
 const lineOf = (page: Page) => page.locator('[data-connect-line]');
 const lineRows = (page: Page) => lineOf(page).locator('.ib-cline-lines > p');
-const config = (root: string) => JSON.parse(readFileSync(join(root, 'data', 'config.json'), 'utf8'));
+const config = (root: string) => savedConfig(join(root, 'data'));
 const isPath = (path: string, method: string) => (request: Request) => request.method() === method && new URL(request.url()).pathname === path;
 
 /**

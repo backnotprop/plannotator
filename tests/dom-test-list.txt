@@ -111,6 +111,7 @@ packages/inbox/choiceLabels.test.tsx
 packages/inbox/pasteTarget.test.ts
 packages/inbox/seenOnSight.test.tsx
 packages/inbox/panes/twoSlots.test.tsx
+packages/inbox/panes/usePaneOpens.test.tsx
 packages/inbox/projectList.test.tsx
 packages/inbox/rowBadges.test.tsx
 packages/inbox/readWaitingRow.test.tsx
@@ -515,6 +516,8 @@ packages/ui/components/Viewer.restoreMovedAnchors.test.tsx
 packages/ui/components/Viewer.questionContract.test.tsx
 packages/ui/components/Viewer.alertDraftRestore.test.tsx
 packages/ui/components/Viewer.belowTitle.test.tsx
+packages/ui/components/Viewer.sourceLineNumbers.test.tsx
+packages/ui/components/Viewer.sourceLineNumbers.toggle.test.tsx
 packages/ui/utils/belowTitleSlot.test.ts
 packages/ui/components/AnnotationPanel.allFiles.test.tsx
 packages/ui/components/AnnotationPanel.sectionRefs.test.tsx
@@ -539,6 +542,7 @@ packages/ui/components/Settings.annotateParity.test.tsx
 packages/ui/components/Settings.compactDisplay.test.tsx
 packages/ui/components/Settings.customFont.test.tsx
 packages/ui/components/Settings.documentTextSize.test.tsx
+packages/ui/components/Settings.documentSourceLineNumbers.test.tsx
 packages/ui/components/Settings.repoOwner.test.tsx
 packages/ui/components/Settings.experimental.test.tsx
 packages/ui/components/Settings.reviewDefaults.test.tsx
@@ -640,6 +644,7 @@ packages/inbox/guideGlobalComment.test.tsx
 packages/inbox/guideChapterDiagram.test.tsx
 packages/inbox/guideOverviewMermaid.test.tsx
 packages/inbox/guideExpandContext.test.tsx
+packages/inbox/guideCollapseAllAfterSwitch.test.tsx
 packages/inbox/guideScrollsWithPage.test.tsx
 packages/inbox/pulls/pullReview.test.tsx
 packages/inbox/pulls/pullAllFiles.test.tsx
@@ -798,3 +803,4 @@ packages/inbox/scheduled/scheduledRows.test.tsx
 packages/inbox/scheduled/scheduledActions.test.tsx
 packages/ui/components/OpenInAppButton.line.test.tsx
 packages/ui/utils/openInLine.test.ts
+packages/editor/App.annotateView.test.tsx

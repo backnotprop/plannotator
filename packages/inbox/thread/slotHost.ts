@@ -1,14 +1,14 @@
 import type { ReactNode, RefObject } from 'react';
 import type { InboxListRow, InboxListSection, InboxReaction, InboxThread, InboxTourChange } from '@plannotator/core/inbox-types';
-import type { CardsModel, MachineView, OutboxView, SettingsModel, ThreadModel } from '../api';
+import type { CardsModel, OutboxView, SettingsModel, ThreadModel } from '../api';
 import type { Route } from '../app/route';
-import type { ThreadLoad } from '../app/constants';
 import type { SearchLanding } from '../components/SearchHost';
 import type { InboxToastModel } from '../components/Toast';
 import type { ComposeRequest } from '../compose/ComposeDialog';
 import type { MachinesModel } from '../machines';
 import type { useInboxNotifications } from '../notify';
 import type { PanesOnScreen } from '../panes/onScreen';
+import type { PaneReads } from '../panes/paneReads';
 import type { useInboxShapes } from '../shape/useInboxShapes';
 import type { ShapeReplyPart } from '../shape/addToReply';
 import type { KeyedSignal } from '../signal';
@@ -23,17 +23,12 @@ import type { ThreadPaneProps } from './paneProps';
 export interface ThreadSlotHost {
   route: Route;
   routeRef: RefObject<Route>;
-  /** The thread the window read for the address (App's `useHeldThread`). */
-  thread: InboxThread | null;
   /** The window's own wait before drawing a thread (a link into Reviews waits for its rows). */
   rowsPending: boolean;
-  awayWait: boolean;
-  threadLoad: ThreadLoad | null;
-  threadAway: string | null;
-  openOwner: MachineView | undefined;
   outbox: ReadonlyMap<string, OutboxView>;
   dismissOutbox: (key: string) => void;
-  onRetry: () => void;
+  /** Each pane's reads, its load, what it opened with and its look (panes/paneReads.ts). */
+  paneReads: PaneReads;
   phone: boolean;
   stack: Stack;
   full: boolean;
@@ -60,10 +55,8 @@ export interface ThreadSlotHost {
   backToCard: () => void;
   openThreadRow: InboxListRow | null;
   snoozeBack: { until: string } | null;
-  threadRun: { threadId: string; run: ThreadPaneProps['run']; attach: string | null } | null;
   refreshThread: (threadId: string, given?: ThreadModel) => Promise<InboxThread | null>;
   refreshList: (adopt: boolean) => Promise<unknown>;
-  openedWith: { threadId: string; ids: ReadonlySet<string> } | null;
   shown: InboxListSection[] | null;
   markRead: (threadId: string, read: boolean) => Promise<unknown>;
   markUnread: (threadId: string) => Promise<unknown>;
@@ -98,7 +91,6 @@ export interface ThreadSlotHost {
   searchLanding: RefObject<SearchLanding | null>;
   decideLanding: RefObject<{ messageId: string; questionKey: string } | null>;
   landed: () => void;
-  look: { threadId: string; seq: number | null; through: number | null } | null;
   seenOnSight: (threadId: string, through: number) => void;
   /** A dialog, a guide or New message is over the window. */
   covered: boolean;
