@@ -6,7 +6,7 @@ import type { ThreadSlotHost } from '../thread/slotHost';
 import { paneOf, type PaneId } from './model';
 import type { WindowPanes } from './useRoutePanes';
 
-/** Each pane's narrowest share of the two while the divider is dragged (the rest of the window is the other's). */
+/** Each pane's narrowest share of the two while the divider is dragged (the rest of their room is the other's). */
 const SPLIT_MIN = 0.3;
 
 /** The address a pane's own links start from: the window's list and filters, with that pane's thread and nothing open in it. */
@@ -22,9 +22,9 @@ export interface PaneRowProps {
 }
 
 /**
- * The thread panes, left to right: one ThreadSlot per pane, keyed by pane id, so the open pane keeps its scroll and
- * reply box when a second opens beside it. One pane draws exactly today's slot. Two draw side by side with a divider
- * between them; a click or focus in a pane makes it the active one, whose header is the brighter.
+ * The thread panes, left to right after the list: one ThreadSlot per pane, keyed by pane id, so the open pane keeps
+ * its scroll and reply box when a second opens beside it. One pane draws exactly today's slot. Two draw side by side
+ * with a divider between them; a click or focus in a pane makes it the active one, whose header is the brighter.
  */
 export function PaneRow({ windowPanes, held, host }: PaneRowProps) {
   const { panes } = windowPanes;
@@ -56,10 +56,16 @@ export function PaneRow({ windowPanes, held, host }: PaneRowProps) {
   }, [two, panes, windowPanes]);
   const drag = (event: ReactPointerEvent<HTMLDivElement>) => {
     const main = divider.current?.parentElement;
-    if (!main || event.button !== 0) return;
+    const [left, right] = [divider.current?.previousElementSibling, divider.current?.nextElementSibling];
+    if (!main || !left || !right || event.button !== 0) return;
     event.preventDefault();
-    const box = main.getBoundingClientRect();
-    const to = (x: number) => main.style.setProperty('--ib-pane-split', `${Math.min(1 - SPLIT_MIN, Math.max(SPLIT_MIN, (x - box.left) / box.width)) * 100}%`);
+    // The two panes' room, the list's beside them left out; the split is the left pane's flex-grow against the right's 1.
+    const from = left.getBoundingClientRect().left;
+    const width = right.getBoundingClientRect().right - from;
+    const to = (x: number) => {
+      const share = Math.min(1 - SPLIT_MIN, Math.max(SPLIT_MIN, (x - from) / width));
+      main.style.setProperty('--ib-pane-split', String(share / (1 - share)));
+    };
     const moved = (e: PointerEvent) => to(e.clientX);
     const done = () => {
       window.removeEventListener('pointermove', moved);
@@ -79,6 +85,7 @@ export function PaneRow({ windowPanes, held, host }: PaneRowProps) {
       {panes.panes.map((pane, i) => {
         const active = pane.id === panes.active;
         const own = active ? host : paneHost(host, paneRoute(host.route, pane.thread));
+        const paired = two ? withPaneClose(own, pane.id, windowPanes.closePane, i === 0) : own;
         return (
           <Fragment key={pane.id}>
             {i > 0 && <div ref={divider} className="ib-panesplit" role="separator" aria-orientation="vertical" data-pane-split="" onPointerDown={drag} />}
@@ -87,7 +94,7 @@ export function PaneRow({ windowPanes, held, host }: PaneRowProps) {
               threadId={pane.thread}
               active={active}
               held={active ? held : undefined}
-              host={two ? withPaneClose(own, pane.id, windowPanes.closePane) : own}
+              host={paired}
             />
           </Fragment>
         );
@@ -102,9 +109,10 @@ function paneHost(host: ThreadSlotHost, route: Route): ThreadSlotHost {
 }
 
 /**
- * Beside another pane: the pane's ✕ closes this pane, not the thread under both, and the pair has the window (App
- * draws it as full screen), so neither pane offers full screen of its own.
+ * Beside another pane: the pane's ✕ closes this pane, not the thread under both. The way back to the list when it is
+ * hidden (full screen's ‹ Inbox) or covered (a stacked window's) leads the first pane only, where the list was.
  */
-function withPaneClose(host: ThreadSlotHost, id: PaneId, closePane: (id: PaneId) => void): ThreadSlotHost {
-  return { ...host, full: false, paired: true, close: (next) => (next.page === 'inbox' && next.thread === null ? closePane(id) : host.close(next)) };
+function withPaneClose(host: ThreadSlotHost, id: PaneId, closePane: (id: PaneId) => void, first: boolean): ThreadSlotHost {
+  const close = (next: Route) => (next.page === 'inbox' && next.thread === null ? closePane(id) : host.close(next));
+  return first ? { ...host, paired: true, close } : { ...host, full: false, stack: { ...host.stack, thread: false }, paired: true, close };
 }

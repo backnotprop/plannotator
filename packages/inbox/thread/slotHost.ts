@@ -32,7 +32,7 @@ export interface ThreadSlotHost {
   phone: boolean;
   stack: Stack;
   full: boolean;
-  /** Beside another pane (panes/PaneRow.tsx): the pair has the window, so no full screen of its own. */
+  /** Beside another pane (panes/PaneRow.tsx): its ✕ stays with full screen's or a stacked window's ‹ Inbox. */
   paired?: boolean;
   fromCard: string | null;
   fileOpen: boolean;

@@ -2472,8 +2472,8 @@ function Inbox() {
     if (!route.thread) setThreadFull(false);
   }, [route.thread]);
   sidebarHeldNow.current = sidebarHeld;
-  // Full screen changes the sidebar's and the list's room without a route change: measured again too.
-  const stack = useStack(rootRef, phone, [hashOf(route), sidebarOpen, sidebarHeld, threadFull]);
+  // Full screen changes the sidebar's and the list's room without a route change: measured again too. Two threads beside the list need room for both.
+  const stack = useStack(rootRef, phone, [hashOf(route), sidebarOpen, sidebarHeld, threadFull], threadFull ? 1 : panes.panes.length);
   // The thread panel view (threadPanel.ts): the list stays at its short width and the thread's pane stays drawn with
   // no thread open. Off by default, and never on a phone or in a window that stacks.
   const [threadPanelOn, setThreadPanelOn] = useThreadPanel();
@@ -2489,12 +2489,12 @@ function Inbox() {
       const root = rootRef.current;
       if (!root) return;
       const sidebar = root.querySelector('.ib-sb-inner')?.getBoundingClientRect().width ?? 0;
-      if (root.getBoundingClientRect().width - sidebar >= LIST_MIN_WIDTH + THREAD_BESIDE_FILE_WIDTH + paneGutters(root)) setSidebarHeld(false);
+      if (root.getBoundingClientRect().width - sidebar >= LIST_MIN_WIDTH + panes.panes.length * THREAD_BESIDE_FILE_WIDTH + paneGutters(root, panes.panes.length)) setSidebarHeld(false);
     };
     check();
     window.addEventListener('resize', check);
     return () => window.removeEventListener('resize', check);
-  }, [sidebarHeld, route]);
+  }, [sidebarHeld, route, panes.panes.length]);
   useLayoutEffect(() => {
     covering.thread = stack.thread;
   }, [stack.thread]);
@@ -4758,7 +4758,7 @@ function Inbox() {
   // "‹ Board" and a chip naming the card; both go back to the opened card.
   const fromCard = route.page === 'inbox' && route.thread && route.card ? route.card : null;
   // The thread in full screen: only on a desktop thread beside the list (not a phone, a stacked window or a card's).
-  const full = (threadFull || panes.panes.length > 1) && route.page === 'inbox' && !!route.thread && !phone && !fromCard && !stack.thread;
+  const full = threadFull && route.page === 'inbox' && !!route.thread && !phone && !fromCard && !stack.thread;
   // The Sidebar tip (sidebarTip.ts): once, beside the docked sidebar, at the reveals' calm moment. A desktop only.
   // Outside the line, and behind it: never on a load where the star ask is armed or another reveal showed, is
   // claiming or is open (it lets one that shares its moment go first, and stands down unclaimed).
@@ -4782,7 +4782,7 @@ function Inbox() {
   // The tip claimed or up: the load arms nothing else meanwhile and reads the line again (`lineBusy`), as a dialog's claim does.
   const sidebarTipBusy = sidebarTip.stage === 'claimed' || sidebarTip.stage === 'open';
   useEffect(() => setLineTipBusy(sidebarTipBusy), [sidebarTipBusy]);
-  threadFullRef.current = full && threadFull;
+  threadFullRef.current = full;
   // The list coming back beside the thread (‹ Inbox beside a file, leaving full screen) in a window with room for the
   // list and the thread but not for the sidebar too: the sidebar stays closed on screen (`sidebarHeld`), so the thread
   // does not stack over the list it was asked to show.
@@ -4791,7 +4791,7 @@ function Inbox() {
     if (!root || !sidebarOpen) return;
     const width = root.getBoundingClientRect().width;
     const sidebar = root.querySelector('.ib-sb-inner')?.getBoundingClientRect().width ?? 0;
-    const room = LIST_MIN_WIDTH + THREAD_BESIDE_FILE_WIDTH + paneGutters();
+    const room = LIST_MIN_WIDTH + panes.panes.length * THREAD_BESIDE_FILE_WIDTH + paneGutters(null, panes.panes.length);
     if (width >= room && width - sidebar < room) setSidebarHeld(true);
   };
   // Every way out of full screen (‹ Inbox, Escape, ⌘B): the sidebar and the list come back as the window has room.

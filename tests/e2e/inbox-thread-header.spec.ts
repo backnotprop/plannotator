@@ -165,13 +165,12 @@ test('desktop beside the list: the subject leads, ⋯ More (Mark read and Snooze
   await expect(page.locator('.ib-listcol')).toBeVisible();
   await shot(page, '1-desktop', ['light', 'dark']);
   expect(await headerOrder(pane)).toEqual(['artifacts', 'expand', 'more', 'close']);
-  // The title leads the bar, up to Artifacts. A named thread shows its name at once (the list's rule, the owner's
-  // 2026-11-02 call); its tooltip shows the whole subject, the body's heading stays the subject, and the meta line has
-  // no pill repeating the name.
+  // The title leads the bar, up to Artifacts. A named thread shows its name (the list's rule, the owner's 2026-11-02
+  // call), the thread's only heading (2026-11-15: none in the body); its tooltip shows the whole subject, and the meta
+  // line has no pill repeating the name.
   const subject = pane.locator('.ib-phead [data-header-subject]');
   await expect(subject).toHaveText('invoices');
-  await expect(subject).toHaveAttribute('data-on', '');
-  await expect(pane.locator('.ib-pbody > h2.ib-subject')).toHaveText('Invoice list: cards or a table?');
+  await expect(pane.locator('.ib-pbody h2')).toHaveCount(0);
   await expect(pane.locator('[data-thread-meta] .ib-key')).toHaveCount(0);
   // The tooltip hangs on the words, not on the title's box (which takes the bar's free room): it opens over "invoices",
   // not far to the right over the empty room (the owner, 2026-11-08).
@@ -563,7 +562,7 @@ for (const phone of [
       await shot(page, `7-phone-${phone.name.replace(/\W+/g, '-').toLowerCase()}`, ['light', 'dark']);
       expect(await headerOrder(pane)).toEqual(['back', 'artifacts', 'expand', 'more']);
       // The title (this named thread's name) is drawn with room to read (approval "inbox-thread-header").
-      const title = pane.locator('.ib-phead [data-header-subject][data-on]');
+      const title = pane.locator('.ib-phead [data-header-subject]');
       await expect(title).toHaveText('invoices');
       expect(await title.evaluate((h) => h.getBoundingClientRect().width)).toBeGreaterThanOrEqual(88);
       // The read button and Snooze moved into the ⋯ sheet, where they lead.

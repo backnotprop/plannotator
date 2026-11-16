@@ -95,7 +95,7 @@ export function ThreadSlot({ paneId, threadId, active, held: given, host }: Thre
             <>
               {/* No list beside the thread (a phone, a stacked window, full screen, a card's thread, beside a file):
                   the stale page notice is here instead. */}
-              {(phone || stack.thread || full || fromCard || fileOpen || (host.paired && active)) && host.staleNotice}
+              {(phone || stack.thread || full || fromCard || fileOpen) && host.staleNotice}
               {host.notifyAgainIn === thread.thread_id ? (
               <div className="ib-tour-notify-again" data-tour-notify-again="">
                 <NotificationAsk
@@ -250,8 +250,9 @@ export function ThreadSlot({ paneId, threadId, active, held: given, host }: Thre
           phone={phone}
           stacked={stack.thread || !!fromCard}
           threadAlone={full}
+          paired={host.paired}
           fullSidebar={host.fullSidebar}
-          onFull={fromCard || host.paired ? undefined : (on) => (on ? host.setThreadFull(true) : host.leaveFull())}
+          onFull={fromCard ? undefined : (on) => (on ? host.setThreadFull(true) : host.leaveFull())}
           fileStacked={stack.file}
           remote={settings ? (settings.via ?? 'local') === 'tailnet' : null}
           onToast={(t) => host.showToast(t)}

@@ -107,7 +107,7 @@ for (const size of [14, 15]) {
           await expect(pane.locator('[data-artifacts-button]')).toBeVisible();
           await expect.poll(() => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--inbox-text-size').trim())).toBe(size === 14 ? '' : '15');
           // A named thread's title is in the header from the start, scrolled or not.
-          await expect(pane.locator('.ib-phead [data-header-subject][data-on]')).toHaveCount(1);
+          await expect(pane.locator('.ib-phead [data-header-subject]')).toHaveCount(1);
           await pane.locator('.ib-pbody').evaluate((body) => body.scrollBy(0, 900));
           await page.waitForTimeout(200);
           await page.screenshot({ path: join(proofDir, `${width}-text${size}-${from}.png`), clip: { x: 0, y: 0, width, height: 140 } });
@@ -123,7 +123,7 @@ for (const size of [14, 15]) {
             const label = el.querySelector<HTMLElement>('.ib-pback-l');
             const labelDrawn = label !== null && label.getBoundingClientRect().width > 1;
             const subject = el.querySelector<HTMLElement>('[data-header-subject]');
-            const subjectDrawn = subject !== null && getComputedStyle(subject).visibility !== 'hidden' && subject.hasAttribute('data-on');
+            const subjectDrawn = subject !== null && getComputedStyle(subject).visibility !== 'hidden';
             const kbds = [...el.querySelectorAll('kbd')].filter((k) => k.getBoundingClientRect().width > 0).length;
             return {
               end,
@@ -173,11 +173,12 @@ test('the widest phone keeps every word: "‹ Inbox", the title and the count', 
     const pane = page.locator(`section.ib-pane[data-thread-id="${world.thread}"]`);
     await expect(pane.locator('[data-artifacts-button]')).toBeVisible();
     await expect(pane.locator('[data-phone-back] .ib-pback-l')).toBeVisible();
-    // A named thread: the bar shows its name (the list's rule); the body's heading stays the subject.
+    // A named thread: the bar shows its name (the list's rule), the thread's only heading; the subject is its label's rest.
     const title = pane.locator('.ib-phead [data-header-subject]');
     await expect(title).toHaveAttribute('data-header-name', '');
     await expect(title).toHaveText('qa');
-    await expect(pane.locator('.ib-pbody > h2.ib-subject')).toHaveText('Visual QA for the checkout drawer redesign');
+    await expect(title).toHaveAttribute('aria-label', 'qa: Visual QA for the checkout drawer redesign');
+    await expect(pane.locator('.ib-pbody h2')).toHaveCount(0);
     await expect(pane.locator('.ib-phead')).not.toHaveAttribute('data-fit', /./);
     await expect(pane.locator('[data-artifacts-button] .ib-artbtn-n')).toBeVisible();
   } finally {

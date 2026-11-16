@@ -313,6 +313,41 @@ describe.skipIf(!hasDom)('two thread slots: only the active pane takes keys and 
     act(() => paneOf(A).querySelector<HTMLElement>('button[aria-label="Close the thread"]')!.click());
     expect(closed).toEqual([null]);
   });
+  test('the list hidden (full screen) or covered (stacked): its way back leads the first pane only, and each pane keeps its ✕', async () => {
+    const windowPanes: WindowPanes = { panes: { panes: [{ id: 'main', thread: A }, { id: 'beside-1', thread: B }], active: 'main' }, openBeside: noop, closePane: noop, focus: noop, allowed: true };
+    putThread(queries, B, heldOf(B, false));
+    const fulls: boolean[] = [];
+    el = document.createElement('div');
+    document.body.appendChild(el);
+    root = createRoot(el);
+    const render = (host: ThreadSlotHost) =>
+      act(() =>
+        root!.render(
+          <QueryClientProvider client={queries}>
+            <div className="pn-inbox">
+              <main className="ib-main">
+                <PaneRow windowPanes={windowPanes} held={heldOf(A, false)} host={host} />
+              </main>
+            </div>
+          </QueryClientProvider>,
+        ),
+      );
+    const closes = (thread: string) => paneOf(thread).querySelector('button[aria-label="Close the thread"]') !== null;
+    render({ ...hostFor(A, noop), full: true, leaveFull: () => void fulls.push(false) });
+    await wait(0);
+    expect(paneOf(A).querySelector('[data-full-back]')).not.toBeNull();
+    expect(paneOf(B).querySelector('[data-full-back]')).toBeNull();
+    expect([closes(A), closes(B)]).toEqual([true, true]);
+    // ‹ Inbox brings the list back: full screen ends, as with one pane.
+    act(() => paneOf(A).querySelector<HTMLElement>('[data-full-back]')!.click());
+    expect(fulls).toEqual([false]);
+    render({ ...hostFor(A, noop), stack: { thread: true, file: false } });
+    await wait(0);
+    expect(paneOf(A).querySelector('[data-stack-back]')).not.toBeNull();
+    expect(paneOf(B).querySelector('[data-stack-back]')).toBeNull();
+    expect([closes(A), closes(B)]).toEqual([true, true]);
+  });
+
   test('the pane the person leaves keeps its thread on screen, its cached copy stale: no "Opening the thread…"', async () => {
     const one: WindowPanes = { panes: { panes: [{ id: 'main', thread: A }], active: 'main' }, openBeside: noop, closePane: noop, focus: noop, allowed: true };
     const two: WindowPanes = { ...one, panes: { panes: [{ id: 'main', thread: A }, { id: 'beside-1', thread: B }], active: 'beside-1' } };

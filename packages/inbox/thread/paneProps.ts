@@ -19,6 +19,8 @@ export interface ThreadPaneProps {
   reviewView?: ReviewView | null;
   onInReviews?: () => void;
   threadAlone?: boolean;
+  /** Beside another thread pane: its ✕ closes this pane, so it stays beside ‹ Inbox (full screen, a stacked window). */
+  paired?: boolean;
   fullSidebar?: boolean;
   onFull?: (on: boolean) => void;
   notice?: ReactNode;

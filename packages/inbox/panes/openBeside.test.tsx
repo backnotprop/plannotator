@@ -2,7 +2,8 @@
  * "Open beside" (panes/beside.ts, useRoutePanes.ts) as the window mounts it: the rows' real menu (RowMenu.tsx) under
  * the panes' context, and an address the test keeps as the window's route.
  *
- * What regresses: the item showing with the switch off, or on the thread already open, or in a window too narrow for
+ * What regresses: the item showing with the switch off, or on the thread already open, or without room for the list and
+ * two threads beside the docked sidebar, or in a window too narrow for
  * two panes; choosing it not opening the second pane beside the first, or not putting the person in it; closing
  * either pane not coming back to today's one pane; Escape (the address closed) closing both panes.
  *
@@ -12,6 +13,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxListRow } from '@plannotator/core/inbox-types';
+import { LIST_MIN_WIDTH, THREAD_BESIDE_FILE_WIDTH } from '../stack';
 import { BesideContext, besideOf, besideRoom } from './beside';
 import type { PaneSet } from './model';
 import { useRoutePanes, type WindowPanes } from './useRoutePanes';
@@ -100,6 +102,7 @@ describe.skipIf(!hasDom)('Open beside', () => {
   });
 
   test('on, it opens the row beside the open thread, the person in the new pane', async () => {
+    setWidth(1440);
     const w = draw(true);
     await openMenu('thr_b');
     expect(besideItem()?.textContent).toBe('Open beside');
@@ -129,6 +132,33 @@ describe.skipIf(!hasDom)('Open beside', () => {
     act(() => w.go(null));
     expect(shape(w.panes!.panes)).toEqual({ threads: ['thr_b'], active: 0 });
     expect(w.thread).toBe('thr_b');
+  });
+
+  test('offered only while the list and two 440 px threads fit beside the docked sidebar as it is', async () => {
+    const room = LIST_MIN_WIDTH + 2 * THREAD_BESIDE_FILE_WIDTH;
+    setWidth(room - 1);
+    draw(true);
+    await openMenu('thr_b');
+    expect(besideItem()).toBeNull();
+    act(() => root!.unmount());
+    host!.remove();
+    setWidth(room + 300);
+    draw(true);
+    // A docked sidebar 301 px wide: the list and two threads no longer fit beside it.
+    const sidebar = document.createElement('div');
+    sidebar.className = 'ib-sb';
+    sidebar.dataset.state = 'expanded';
+    const inner = document.createElement('div');
+    inner.className = 'ib-sb-inner';
+    inner.getBoundingClientRect = () => DOMRect.fromRect({ x: 0, y: 0, width: 301, height: 800 });
+    sidebar.appendChild(inner);
+    host!.querySelector('.pn-inbox')!.prepend(sidebar);
+    await openMenu('thr_b');
+    expect(besideItem()).toBeNull();
+    act(() => void document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    sidebar.dataset.state = 'collapsed';
+    await openMenu('thr_b');
+    expect(besideItem()?.textContent).toBe('Open beside');
   });
 
   test('a window too narrow for two panes offers none, and narrowing to it leaves the active pane alone', async () => {
