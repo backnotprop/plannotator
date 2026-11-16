@@ -203,8 +203,8 @@ function everywhere(id: string, other: string, fromProject: boolean): HTMLElemen
       </div>
       <icons.HostMark host="claude-code" agent={id} />
       <icons.HostMark host="claude-code" agent={id} big />
-      <pill.AgentPill host="claude-code" agent={id} label="Refactor sync engine" />
-      <pill.AgentMark host="claude-code" agent={id} count={2} />
+      <pill.AgentPill host="claude-code" agent={id} label="Refactor sync engine" open={false} onClick={() => {}} ariaLabel="Reply to" />
+      <pill.AgentMark host="claude-code" agent={id} count={2} open={false} onClick={() => {}} ariaLabel="Reply to" />
       <header.ThreadSessions sessions={sessions} />
     </marks.RowMarksScope>,
   );

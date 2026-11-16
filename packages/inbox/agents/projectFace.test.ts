@@ -64,6 +64,7 @@ describe('the hue', () => {
     expect(projectSeed('u\u0308ber-cli')).toBe(projectSeed('über-cli'));
     for (const name of ['orchard', 'tidepool-web', '@acme/ui-kit', '東京メモ', 'web3']) expect(projectTileOf(name)!.hue).toBe(hueOf(projectSeed(name)));
     expect(projectTileOf('Orchard')!.hue).toBe(projectTileOf('orchard')!.hue);
+    expect(projectSeed('kestrel  ·  Work')).toBe('kestrel');
   });
 
   test("an agent's tile keeps its colour when a second folder of that name or a linked machine shows it with a suffix, or another project appears", () => {
@@ -73,13 +74,15 @@ describe('the hue', () => {
     };
     learnProjects([], [{ project: { id: 'prj_api_work', name: 'api' }, author: { kind: 'agent', session: 'ses_work' } }]);
     const before = tile('ses_work')!;
-    // The window labels these "api · work", "api · home" and "api · MacBook"; the tile reads the project's own name.
+    // A second folder named "api": the Inbox renames both "api · work" and "api · home" (shared/inbox/project-name.ts);
+    // a linked machine's reads "api · MacBook". The tile keys on the name before " · ".
     learnProjects([], [
-      { project: { id: 'prj_api_home', name: 'api' }, author: { kind: 'agent', session: 'ses_home' } },
-      { project: { id: 'ibx_mac:prj_api', name: 'api' }, author: { kind: 'agent', session: 'ses_mac' } },
+      { project: { id: 'prj_api_work', name: 'api · work' }, author: { kind: 'agent', session: 'ses_work' } },
+      { project: { id: 'prj_api_home', name: 'api · home' }, author: { kind: 'agent', session: 'ses_home' } },
+      { project: { id: 'ibx_mac:prj_api', name: 'api · MacBook' }, author: { kind: 'agent', session: 'ses_mac' } },
       { project: { id: 'prj_apex', name: 'apex-ui' }, author: { kind: 'agent', session: 'ses_apex' } },
     ]);
-    expect(tile('ses_work')).toEqual(before);
+    expect([tile('ses_work')!.hue, tile('ses_work')!.letters]).toEqual([before.hue, before.letters]);
     expect(tile('ses_home')!.hue).toBe(before.hue);
     expect(tile('ses_mac')!.hue).toBe(before.hue);
     // A project with the same letters never moves another's colour: each keeps its own name's hue.

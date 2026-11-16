@@ -95,11 +95,7 @@ function agentProjects(): Map<string, Project> {
   return byAgent;
 }
 
-/**
- * The project's own name for an agent, by any id it has; null when nothing says where it works. The name the Inbox
- * keeps for the project (its folder's or repository's), the same on every machine: never the window's label for it,
- * which adds " · work" while two folders share a name and " · <machine>" for a linked machine's.
- */
+/** The project's name for an agent, as the list names it, by any id it has; null when nothing says where it works. */
 export function agentProjectLabel(agent: string | null | undefined): string | null {
   if (!agent) return null;
   return (agentProjects().get(agent) ?? sessionProjectOf(agent))?.name ?? null;
@@ -107,8 +103,13 @@ export function agentProjectLabel(agent: string | null | undefined): string | nu
 
 // ── the hue ──
 
-/** The hue's key: the project's name, spaces folded, NFC, lowercased the same way everywhere. */
-export const projectSeed = (name: string) => name.normalize('NFC').trim().replace(/\s+/g, ' ').toLocaleLowerCase('en-US');
+/**
+ * The hue's key: the project's own name (its folder's or repository's), spaces folded, NFC, lowercased the same way
+ * everywhere. Never what is added after " · " to tell it apart: the Inbox names a project "api · work" only while
+ * another folder is also named "api" (shared/inbox/project-name.ts), and a window adds " · <machine>" for a linked
+ * machine's; so the colour is the same on every machine, whatever else is there.
+ */
+export const projectSeed = (name: string) => name.normalize('NFC').trim().replace(/\s+/g, ' ').split(' · ')[0]!.trim().toLocaleLowerCase('en-US');
 
 const tiles = new Map<string, ProjectTileLook | null>();
 
@@ -119,6 +120,7 @@ const tiles = new Map<string, ProjectTileLook | null>();
  * to draw.
  */
 export function projectTileOf(name: string): ProjectTileLook | null {
+  // Letters take the name before " · " too (letterMarks.tsx `projectLetters`).
   const held = tiles.get(name);
   if (held !== undefined) return held;
   const letters = projectLetters(name);
