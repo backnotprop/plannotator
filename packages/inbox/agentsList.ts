@@ -42,6 +42,8 @@ export function setInboxAgents(next: unknown): void {
             ended_today: typeof group.ended_today === 'number' && group.ended_today >= 0 ? group.ended_today : 0,
             // A linked machine's faces and given names, kept there (agents/agentFaces.ts draws them).
             ...(typeof group.machine === 'string' && group.faces !== undefined ? { faces: readInboxAgentFaces(group.faces), faces_rev: typeof group.faces_rev === 'number' ? group.faces_rev : 0 } : {}),
+            // And whether it keeps a tile choice (agents/projectFace.tsx): only when it says so.
+            ...(typeof group.machine === 'string' && group.faces !== undefined && group.face_tiles === true ? { face_tiles: true as const } : {}),
           };
         })
     : null;
