@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 
-import { diffHunkLines, parseDiffToFiles, stripPatchColor } from "./diff-files";
+import { diffHunkLines, parseDiffToFiles, patchBlobIds, stripPatchColor } from "./diff-files";
 
 // #1661: `color.diff = always` (git) or `ui.color = "always"` (jj) wraps every
 // patch line in ANSI escapes, which used to parse to 0 files with no error.
@@ -22,6 +22,13 @@ describe("colorized patches", () => {
     const files = parseDiffToFiles(colorized);
     expect(files.map((f) => [f.path, f.additions, f.deletions])).toEqual([["a.txt", 1, 0]]);
     expect(files[0].patch).not.toContain(ESC);
+  });
+
+  it("still removes patch color when a source line resembles a plain header", () => {
+    const coloredContent = colorized.replace(`[32mb${ESC}[m`, `[32mb\u2028diff --git a/phantom b/phantom${ESC}[m`);
+    const files = parseDiffToFiles(coloredContent);
+    expect(files.map((file) => file.path)).toEqual(["a.txt"]);
+    expect(files[0].patch).toContain("+b\u2028diff --git a/phantom b/phantom");
   });
 
   it("leaves a plain patch whose content contains escape bytes untouched", () => {
@@ -274,5 +281,48 @@ describe("diffHunkLines", () => {
 
   it("refuses hunks out of order", () => {
     expect(diffHunkLines(["@@ -5 +5 @@", "-e", "+E", "@@ -1 +1 @@", "-a", "+A", ""].join("\n"))).toBeNull();
+  });
+});
+
+describe("physical diff lines", () => {
+  it("keeps header-shaped text after source separators inside its file", () => {
+    for (const separator of ["\r", "\u2028", "\u2029"]) {
+      const first = [
+        "diff --git a/first.txt b/first.txt",
+        "--- a/first.txt",
+        "+++ b/first.txt",
+        "@@ -0,0 +1 @@",
+        `+first${separator}diff --git a/phantom.txt b/phantom.txt`,
+        "",
+      ].join("\n");
+      const second = [
+        "diff --git a/second.txt b/second.txt",
+        "--- a/second.txt",
+        "+++ b/second.txt",
+        "@@ -0,0 +1 @@",
+        "+second",
+        "",
+      ].join("\n");
+      expect(parseDiffToFiles(first + second).map((file) => [file.path, file.patch])).toEqual([
+        ["first.txt", first],
+        ["second.txt", second],
+      ]);
+    }
+  });
+});
+
+it("ignores blob IDs embedded within a source line", () => {
+  const patch = [
+    "diff --git a/notes.txt b/notes.txt",
+    "--- a/notes.txt",
+    "+++ b/notes.txt",
+    "@@ -0,0 +1 @@",
+    "+text\u2028index 1234567..abcdef0",
+    "",
+  ].join("\n");
+  expect(patchBlobIds(patch)).toBeNull();
+  expect(patchBlobIds(patch.replace("--- a/", "index 1234567..abcdef0 100644\n--- a/"))).toEqual({
+    oldId: "1234567",
+    newId: "abcdef0",
   });
 });

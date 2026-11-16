@@ -29,7 +29,7 @@ export interface DiffFile {
 /** ANSI CSI sequences (SGR color/bold `\x1b[1;31m`, the bare reset `\x1b[m`, …). */
 const ANSI_CSI = /\x1b\[[0-9;:?]*[A-Za-z]/g;
 /** A file header line that a terminal color code was wrapped around. */
-const COLORED_DIFF_HEADER = /^(?:\x1b\[[0-9;:?]*[A-Za-z])+diff --git /m;
+const COLORED_DIFF_HEADER = /(?:^|\n)(?:\x1b\[[0-9;:?]*[A-Za-z])+diff --git /;
 
 /**
  * True when the patch's own headers carry ANSI color codes, the shape a VCS
@@ -39,7 +39,7 @@ const COLORED_DIFF_HEADER = /^(?:\x1b\[[0-9;:?]*[A-Za-z])+diff --git /m;
  * content sit after a `+`/`-`/space prefix, never at the start of a header.
  */
 export function isColorizedPatch(rawPatch: string): boolean {
-  return rawPatch.includes("\x1b[") && !/^diff --git /m.test(rawPatch) && COLORED_DIFF_HEADER.test(rawPatch);
+  return rawPatch.includes("\x1b[") && !/(?:^|\n)diff --git /.test(rawPatch) && COLORED_DIFF_HEADER.test(rawPatch);
 }
 
 /**
@@ -52,12 +52,12 @@ export function stripPatchColor(rawPatch: string): string {
 }
 
 function splitDiffChunks(rawPatch: string): string[] {
-  const matches = [...rawPatch.matchAll(/^diff --git /gm)];
-  return matches.map((match, index) => {
-    const start = match.index ?? 0;
-    const end = matches[index + 1]?.index ?? rawPatch.length;
-    return rawPatch.slice(start, end);
-  });
+  // Git splits patch rows on LF. A CR or Unicode separator in a file's
+  // contents must not turn the rest of that row into a new file header.
+  const starts = [...rawPatch.matchAll(/(?:^|\n)(?=diff --git )/g)].map(
+    (match) => match.index + match[0].length,
+  );
+  return starts.map((start, index) => rawPatch.slice(start, starts[index + 1] ?? rawPatch.length));
 }
 
 /**
@@ -120,7 +120,7 @@ export interface PatchBlobIds {
 
 /** A file's `index` blob ids; null when there is no such line (GitLab's rebuilt patches) or a side does not exist (all zeros). */
 export function patchBlobIds(patch: string): PatchBlobIds | null {
-  const ids = /^index ([0-9a-f]{7,64})\.\.([0-9a-f]{7,64})/m.exec(patch);
+  const ids = /(?:^|\n)index ([0-9a-f]{7,64})\.\.([0-9a-f]{7,64})/.exec(patch);
   if (!ids || /^0+$/.test(ids[1]!) || /^0+$/.test(ids[2]!)) return null;
   return { oldId: ids[1]!, newId: ids[2]! };
 }
