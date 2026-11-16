@@ -33,6 +33,6 @@ export const SourceLineGutter: React.FC<{
     'data-doc-source-line': label,
     'aria-hidden': 'true',
     className:
-      'annotation-exclude pointer-events-none absolute right-full top-0 z-[1] mr-3 select-none whitespace-nowrap font-mono text-[11px] leading-4 tabular-nums text-muted-foreground/70',
+      'annotation-exclude pointer-events-none absolute right-full top-0 z-[1] mr-3 select-none whitespace-nowrap font-mono text-[11px] font-normal not-italic leading-4 tabular-nums text-muted-foreground/70',
   });
 };
