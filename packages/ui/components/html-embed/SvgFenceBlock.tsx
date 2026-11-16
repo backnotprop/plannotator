@@ -8,6 +8,7 @@ import { Code } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import type { Block } from '../../types';
 import { CodeBlock } from '../blocks/CodeBlock';
+import { sourceLineAttrs } from '../../utils/sourceLineAttrs';
 
 /** Larger than this, the drawing stays code. */
 const SVG_MAX_CHARS = 512 * 1024;
@@ -19,7 +20,7 @@ export function SvgFenceBlock({ block }: { block: Block }) {
   const drawable = block.content.length <= SVG_MAX_CHARS && /<svg[\s>]/i.test(block.content);
   if (!drawable) return <CodeBlock block={block} isHovered={false} />;
   return (
-    <figure data-block-id={block.id} data-svg-fence="" className="my-4">
+    <figure data-block-id={block.id} data-svg-fence="" className="relative my-4" {...(showCode || broken ? undefined : sourceLineAttrs(block))}>
       {showCode || broken ? (
         <CodeBlock block={block} isHovered={false} />
       ) : (

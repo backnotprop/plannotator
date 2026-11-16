@@ -101,6 +101,7 @@ import type { SessionAskAction } from '@plannotator/ui/components/ai/SessionAskN
 import { useAIProviderConfig } from '@plannotator/ui/hooks/useAIProviderConfig';
 import { useDocumentTextSize } from '@plannotator/ui/hooks/useDocumentTextSize';
 import { useDocumentFont } from '@plannotator/ui/hooks/useDocumentFont';
+import { useDocumentSourceLineNumbers } from '@plannotator/ui/hooks/useDocumentSourceLineNumbers';
 import { useAIProviderActivation } from '@plannotator/ui/hooks/useAIProviderActivation';
 import { usePlanLookDialog } from '@plannotator/ui/hooks/usePlanLookDialog';
 import { TerminalToolsAnnouncementDialog } from '@plannotator/ui/components/TerminalToolsAnnouncementDialog';
@@ -635,6 +636,7 @@ const App: React.FC = () => {
   // Settings → Display → Text size and Document font: the document's blocks only.
   useDocumentTextSize();
   useDocumentFont();
+  useDocumentSourceLineNumbers();
   const vimModeEnabled = useConfigValue('vimModeEnabled');
   const vimHudEnabled = useConfigValue('vimHudEnabled');
   const vimHudKeyPanelEnabled = useConfigValue('vimHudKeyPanelEnabled');

@@ -16,5 +16,7 @@ export function useConfigValue<K extends SettingName>(key: K): SettingValue<K> {
     [],
   );
   const getSnapshot = useCallback(() => configStore.get(key), [key]);
-  return useSyncExternalStore(subscribe, getSnapshot);
+  // Same snapshot on the server: MathBlock (and other document chrome) can
+  // renderToStaticMarkup in tests without a getServerSnapshot throw.
+  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }
