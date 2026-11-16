@@ -14,7 +14,7 @@ import { writeRoute } from '../app/writeRoute';
 import { BottomSheet } from '../components/BottomSheet';
 import type { PlanRead } from './client';
 import { recordPlanLook, usePlan } from './store';
-import { decisionLabel, decisionTone } from './words';
+import { changedSinceDecision, decisionLabel, decisionTone } from './words';
 import { DecisionMark, PlansMessage } from './parts';
 import { PlanDocument } from './PlanDocument';
 import { PlanDiffView } from './PlanDiffView';
@@ -114,7 +114,13 @@ function PlanLoaded({ id, version, diff, phone, read, versions }: PlanPageProps 
             <span className="ib-plan-decision" data-plan-decision={decisionTone(newest?.decision)}>
               <DecisionMark tone={decisionTone(newest?.decision)} />
               {decisionLabel(newest?.decision)}
-              {newest?.version_number ? <span className="ib-plan-on"> on v{newest.version_number}</span> : null}
+              {newest?.version_number ? (
+                <span className="ib-plan-on">
+                  {' '}
+                  on v{newest.version_number}
+                  {changedSinceDecision(newest, head)}
+                </span>
+              ) : null}
             </span>
           </div>
           {compare ? (

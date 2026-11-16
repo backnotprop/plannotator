@@ -19,6 +19,14 @@ export function decisionLabel(decision: PlanDecisionKind | null | undefined): st
   return tone === 'approved' ? 'Approved' : tone === 'changes' ? 'Changes asked' : 'No decision';
 }
 
+/**
+ * " · changed since" when newer versions came after the one a decision was on, so a decision on v4 never reads as
+ * current once v5 exists; "" when it is on the newest version (or names no version, when it cannot tell).
+ */
+export function changedSinceDecision(decision: { version_number: number | null } | null | undefined, head: number): string {
+  return decision?.version_number && decision.version_number < head ? ' · changed since' : '';
+}
+
 const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`;
 
 /** "5 versions · 2 artifacts": what a plan holds. */

@@ -12,7 +12,7 @@ import { Icon } from '../icons';
 import { writeRoute } from '../app/writeRoute';
 import { PlansGetStarted } from './PlansGetStarted';
 import { readPlans, usePlansPage } from './store';
-import { decisionLabel, decisionTone, filterPlans, holdsLine, newSince, newsLine, planGroups, planProjects } from './words';
+import { changedSinceDecision, decisionLabel, decisionTone, filterPlans, holdsLine, newSince, newsLine, planGroups, planProjects } from './words';
 import { DecisionMark, ImportErrorNote, PlansMessage } from './parts';
 
 const openPlan = (id: string) => writeRoute({ page: 'plans', project: null, thread: null, plan: id });
@@ -128,6 +128,8 @@ function PlansList({ plans, importing, error, importError }: { plans: readonly P
 function PlanRow({ plan }: { plan: PlanSummary }) {
   const fresh = newSince(plan);
   const tone = decisionTone(plan.decision?.decision);
+  // A decision on an older version says so: "Approved on v2 · changed since".
+  const since = changedSinceDecision(plan.decision, plan.head_version_number);
   return (
     <li>
       <button type="button" className="ib-plans-row" onClick={() => openPlan(plan.id)} data-plan-row={plan.id} data-changed={plan.changed ? '' : undefined}>
@@ -139,7 +141,10 @@ function PlanRow({ plan }: { plan: PlanSummary }) {
           <span className="ib-plans-row-news">{newsLine(plan)}</span>
           <span className="ib-plans-row-holds">
             <DecisionMark tone={tone} />
-            <span data-plan-decision={tone}>{decisionLabel(plan.decision?.decision)}</span>
+            <span data-plan-decision={tone}>
+              {decisionLabel(plan.decision?.decision)}
+              {since && ` on v${plan.decision!.version_number}${since}`}
+            </span>
             <span aria-hidden="true">·</span>
             <span>{holdsLine(plan)}</span>
             {plan.project_name && <span className="ib-plans-row-project"> · {plan.project_name}</span>}

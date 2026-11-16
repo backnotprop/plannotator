@@ -7,6 +7,7 @@
  * - an empty library does not show the get-started screen, or its action does not say how a plan arrives;
  * - a plan's page does not show the newest version's text, the versions newest first, the version you saw, or the
  *   "changed since you looked" banner; opening it does not record the look;
+ * - a decision on an older version reads as current in the list or the page line (it must say "changed since");
  * - picking a version in the rail does not show that version;
  * - the diff does not compare the two versions with the plan diff engine;
  * - with Plans off, the page draws nothing and a `#plans` link goes to the Inbox.
@@ -148,6 +149,26 @@ test.skipIf(!hasDom)('the list is the library: changed since you looked first, w
   expect(host.querySelector(`[data-plan-row="${never}"] [data-plan-decision]`)?.getAttribute('data-plan-decision')).toBe('none');
   // The project groups follow.
   expect(host.querySelector('[data-plans-group="p:field-notes"]')).not.toBeNull();
+});
+
+test.skipIf(!hasDom)('a decision on an older version never reads as current: the list and the page line say it changed since', async () => {
+  const older = plan('Rotate refresh tokens', 'harbor-api', ['# Rotate\n\nv1\n', '# Rotate\n\nv2\n', '# Rotate\n\nv3\n', '# Rotate\n\nv4\n'], { seen: 4, approvedOn: 2 });
+  const current = plan('Offline drafts', 'field-notes', ['# Offline drafts\n\nv1\n', '# Offline drafts\n\nv2\n'], { seen: 2, approvedOn: 2 });
+  window.location.hash = '#plans';
+  const host = draw();
+  await settle();
+  expect(text(host.querySelector(`[data-plan-row="${older}"] [data-plan-decision]`))).toBe('Approved on v2 · changed since');
+  expect(text(host.querySelector(`[data-plan-row="${current}"] [data-plan-decision]`))).toBe('Approved');
+
+  window.location.hash = `#plans=${older}`;
+  await settle();
+  expect(text(host.querySelector('.ib-plan-line [data-plan-decision]'))).toBe('Approved on v2 · changed since');
+  // The version row keeps its own mark, without the note.
+  expect(text(host.querySelector('[data-plan-version="2"] .ib-plan-vdec'))).toBe('Approved');
+
+  window.location.hash = `#plans=${current}`;
+  await settle();
+  expect(text(host.querySelector('.ib-plan-line [data-plan-decision]'))).toBe('Approved on v2');
 });
 
 test.skipIf(!hasDom)('an import that failed is a quiet note in the list and on the get-started screen; Try again reads again with ?retry=1', async () => {
