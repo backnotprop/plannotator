@@ -25,6 +25,9 @@ beforeAll(() => {
 	mkdirSync(join(root, "packages/editor"), { recursive: true });
 	mkdirSync(join(root, "packages/review-editor"), { recursive: true });
 	mkdirSync(join(root, "packages/ui/components"), { recursive: true });
+	mkdirSync(join(root, "Button.tsx"));
+	mkdirSync(join(root, "README.md"));
+	writeFileSync(join(root, "packages/ui/README.md"), "# UI");
 	mkdirSync(join(root, "node_modules/junk"), { recursive: true });
 	writeFileSync(join(root, "packages/editor/App.tsx"), "// editor");
 	writeFileSync(join(root, "packages/review-editor/App.tsx"), "// review");
@@ -44,6 +47,13 @@ describe("resolveCodeFile", () => {
 		if (r.kind === "found") {
 			expect(r.path).toBe(join(root, "packages/editor/App.tsx"));
 		}
+	});
+
+	test("does not let a same-named directory hide a matching code file", async () => {
+		expect(await resolveCodeFile("Button.tsx", root)).toEqual({
+			kind: "found",
+			path: join(root, "packages/ui/components/Button.tsx"),
+		});
 	});
 
 	test("resolves an abbreviated path via suffix match", async () => {
@@ -123,6 +133,13 @@ describe("resolveCodeFile", () => {
 		if (r.kind === "found") {
 			expect(r.path).toBe(join(root, "packages/ui/components/Button.tsx"));
 		}
+	});
+});
+
+test("does not let a same-named directory hide a matching Markdown file", () => {
+	expect(resolveMarkdownFile("README.md", root, NO_EXTRAS)).toEqual({
+		kind: "found",
+		path: join(root, "packages/ui/README.md"),
 	});
 });
 

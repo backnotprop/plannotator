@@ -11,7 +11,7 @@
 
 import { homedir } from "os";
 import { isAbsolute, join, resolve, win32 } from "path";
-import { existsSync, readdirSync, type Dirent } from "fs";
+import { readdirSync, statSync, type Dirent } from "fs";
 import { readdir } from "node:fs/promises";
 
 import { buildAnnotatableTextRegex, isSecretEnvPath } from "./annotatable";
@@ -226,10 +226,10 @@ function hasWindowsDriveLetter(input: string): boolean {
 	return /^[a-zA-Z]:[/\\]/.test(input);
 }
 
-/** Cross-platform file existence check using Node fs (more reliable than Bun.file in compiled exes) */
-function fileExists(filePath: string): boolean {
+/** Check the target is a regular file, following symlinks. */
+function isExistingFile(filePath: string): boolean {
 	try {
-		return existsSync(filePath);
+		return statSync(filePath).isFile();
 	} catch {
 		return false;
 	}
@@ -411,20 +411,20 @@ export async function resolveCodeFile(
 
 	if (isAbsoluteNormalizedUserPath(normalizedInput)) {
 		const absolutePath = resolveAbsolutePath(normalizedInput);
-		if (fileExists(absolutePath)) {
+		if (isExistingFile(absolutePath)) {
 			return { kind: "found", path: absolutePath };
 		}
 		return { kind: "not_found", input: originalInput };
 	}
 
 	const fromRoot = resolve(projectRoot, searchInput);
-	if (isWithinProjectRoot(fromRoot, projectRoot) && fileExists(fromRoot)) {
+	if (isWithinProjectRoot(fromRoot, projectRoot) && isExistingFile(fromRoot)) {
 		return { kind: "found", path: fromRoot };
 	}
 
 	if (baseDir) {
 		const fromBase = resolve(baseDir, searchInput);
-		if (fileExists(fromBase)) {
+		if (isExistingFile(fromBase)) {
 			return { kind: "found", path: fromBase };
 		}
 	}
@@ -495,7 +495,7 @@ function resolveMarkdownFileCore(
 	//    the user explicitly typed the full path)
 	if (isAbsoluteNormalizedUserPath(normalizedInput)) {
 		const absolutePath = resolveAbsolutePath(normalizedInput);
-		if (fileExists(absolutePath)) {
+		if (isExistingFile(absolutePath)) {
 			return { kind: "found", path: absolutePath };
 		}
 		return { kind: "not_found", input };
@@ -508,7 +508,7 @@ function resolveMarkdownFileCore(
 	//    in-root search below so a stray `notes.md` can't resolve to a parent.
 	const fromRoot = resolve(projectRoot, searchInput);
 	if (
-		fileExists(fromRoot) &&
+		isExistingFile(fromRoot) &&
 		(isWithinProjectRoot(fromRoot, projectRoot) || searchInput.includes("/"))
 	) {
 		return { kind: "found", path: fromRoot };
