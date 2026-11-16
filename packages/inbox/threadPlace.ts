@@ -53,19 +53,6 @@ const PLACE_CANDIDATES = [
 
 const laidOut = (el: Element): boolean => el.getClientRects().length > 0;
 
-// TEMPORARY (#3528 CI evidence, to be removed): pushed only when a spec put `window.__ibDiag` there.
-export function ibDiag(entry: Record<string, unknown>): void {
-  const log = (globalThis as { __ibDiag?: unknown[] }).__ibDiag;
-  if (log) log.push({ t: Math.round(performance.now()), ...entry });
-}
-const ibDesc = (el: HTMLElement | null | undefined): string | null =>
-  el ? `${el.tagName.toLowerCase()}.${String(el.className).slice(0, 30)}${el.getAttribute('data-attachment-id') ? `[att=${el.getAttribute('data-attachment-id')!.slice(0, 6)}]` : ''}${el.closest('.ib-hatts-tiles') ? '(band)' : ''}` : null;
-const ibRect = (el: HTMLElement): number[] => {
-  const r = el.getBoundingClientRect();
-  return [Math.round(r.top), Math.round(r.bottom)];
-};
-const ibStack = (): string => (new Error().stack ?? '').split('\n').slice(3, 7).map((l) => l.trim().replace(/^at /, '').replace(/https?:\/\/[^/]+/, '')).join(' < ');
-
 /** A selector that finds a tile, an image in a message's text or a message again after a render. */
 export function placeSelector(el: HTMLElement): string | null {
   const message = el.closest<HTMLElement>('[data-message-article]')?.getAttribute('data-message-article');
@@ -117,11 +104,7 @@ export function capturePlace(body: HTMLElement, preferred: HTMLElement | null): 
     }
     el ??= straddling;
   }
-  if (!el) {
-    ibDiag({ diag: 'capture', el: null, preferred: ibDesc(preferred), st: body.scrollTop });
-    return { el: body, selector: null, offset: 0, scrollTop: body.scrollTop };
-  }
-  ibDiag({ diag: 'capture', el: ibDesc(el), preferred: ibDesc(preferred), usedPreferred: el === preferred, rect: ibRect(el), viewTop: Math.round(view.top), viewBottom: Math.round(view.bottom), st: body.scrollTop, w: Math.round(view.width) });
+  if (!el) return { el: body, selector: null, offset: 0, scrollTop: body.scrollTop };
   return { el, selector: placeSelector(el), offset: el.getBoundingClientRect().top - view.top, scrollTop: body.scrollTop };
 }
 
@@ -143,19 +126,6 @@ export function restorePlace(body: HTMLElement, place: ThreadPlace): boolean {
   return true;
 }
 
-/**
- * A file opening beside the thread: the view goes back to where the person had it (the browser's scroll anchoring can
- * move it in the frame the column narrows, by the rows that grew above what it anchored on: #3528's CI, the sender
- * row pushed out of view), and true when the place is still wholly in view there, so nothing needs to move.
- */
-export function stayBeside(body: HTMLElement, place: ThreadPlace): boolean {
-  const from = body.scrollTop;
-  if (body.scrollTop !== place.scrollTop) body.scrollTop = place.scrollTop;
-  const inView = placeInView(body, place);
-  ibDiag({ diag: 'stayBeside', from, to: body.scrollTop, inView, rect: place.el === body ? null : ibRect(place.el), view: ibRect(body), w: Math.round(body.getBoundingClientRect().width) });
-  return inView;
-}
-
 /** How long a place is held after the last change of the thread's size (the sidebar's spring, a thumbnail loading). */
 export const PLACE_HOLD_MS = 1200;
 
@@ -171,10 +141,8 @@ export const PLACE_HOLD_MS = 1200;
  * dragged) or the app (a search result landing, a jump to a card, `n`, an
  * arrival followed; those also stop it before they scroll). Returns a
  * function that stops it. `onPlaced` hears each time it puts the place back.
- * `stay` (a file opened beside, the place still in view): the view stays where it is while the place is in
- * view, and the place is put back only once it would leave the view.
  */
-export function holdPlace(body: HTMLElement, place: ThreadPlace, onPlaced?: () => void, holdMs = PLACE_HOLD_MS, inputRoot: HTMLElement = body, stay = false): () => void {
+export function holdPlace(body: HTMLElement, place: ThreadPlace, onPlaced?: () => void, holdMs = PLACE_HOLD_MS, inputRoot: HTMLElement = body): () => void {
   if (typeof ResizeObserver !== 'function') return () => {};
   let timer: ReturnType<typeof setTimeout> | null = null;
   /** The scrollTop the hold last left the view at; a scroll that finds the view elsewhere is not the hold's. */
@@ -185,28 +153,17 @@ export function holdPlace(body: HTMLElement, place: ThreadPlace, onPlaced?: () =
   // the place back instead.
   const anchoring = body.style.overflowAnchor;
   body.style.overflowAnchor = 'none';
-  ibDiag({ diag: 'hold-start', stay, st: body.scrollTop, holdMs, anchoringWas: anchoring, place: ibDesc(place.el === body ? null : place.el), offset: Math.round(place.offset) });
   const onScroll = () => {
-    if (Math.abs(body.scrollTop - heldAt) > 1) stop(`scroll ${body.scrollTop} vs heldAt ${heldAt}`);
+    if (Math.abs(body.scrollTop - heldAt) > 1) stop();
   };
   const observer = new ResizeObserver(() => {
-    const from = body.scrollTop;
-    const inView = stay && placeInView(body, place);
-    if (stay && placeInView(body, place)) {
-      if (body.scrollTop !== heldAt) body.scrollTop = heldAt;
-      heldAt = body.scrollTop;
-      onPlaced?.();
-    } else if (restorePlace(body, place)) {
+    if (restorePlace(body, place)) {
       heldAt = body.scrollTop;
       onPlaced?.();
     }
-    ibDiag({ diag: 'hold-resize', stay, inView, from, to: body.scrollTop, rect: place.el === body || !place.el.isConnected ? null : ibRect(place.el), view: ibRect(body), w: Math.round(body.getBoundingClientRect().width) });
     arm();
   });
-  let stopped = false;
-  function stop(why?: unknown) {
-    if (!stopped) ibDiag({ diag: 'hold-stop', why: typeof why === 'string' ? why : why instanceof Event ? `input ${why.type}` : `external ${ibStack()}`, st: body.scrollTop, heldAt });
-    stopped = true;
+  function stop() {
     observer.disconnect();
     body.style.overflowAnchor = anchoring;
     if (timer) clearTimeout(timer);
@@ -216,7 +173,7 @@ export function holdPlace(body: HTMLElement, place: ThreadPlace, onPlaced?: () =
   }
   function arm() {
     if (timer) clearTimeout(timer);
-    timer = setTimeout(() => stop('timer'), holdMs);
+    timer = setTimeout(stop, holdMs);
   }
   observer.observe(body);
   for (const child of body.children) observer.observe(child);

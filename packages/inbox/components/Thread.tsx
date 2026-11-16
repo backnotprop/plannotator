@@ -4,7 +4,7 @@ import { postDecisions, threadHasQuestionCards } from '../decisionExport';
 import { ThreadPullsButton } from '../threadPulls/ThreadPulls';
 import { machineOf } from '../inboxUrl';
 import { startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { capturePlace, holdPlace, ibDiag, openerOf, opensFile, parsePlaceLayout, placeLayoutKey, placeSelector, placeShown, restorePlace, stayBeside, type ThreadPlace } from '../threadPlace';
+import { capturePlace, holdPlace, openerOf, opensFile, parsePlaceLayout, placeInView, placeLayoutKey, placeSelector, placeShown, restorePlace, type ThreadPlace } from '../threadPlace';
 import { AnnotationType, type Annotation } from '@plannotator/ui/types';
 import type { InboxNoteBlock } from '@plannotator/core/inbox-context-notes';
 import { noteReviews } from '../contextNotes/model';
@@ -1736,7 +1736,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     // A file opening from the messages on screen: remember what opened it by keyboard, for focus on the way back.
     if (sameThread && was.file === 'none' && file && placeShown(was)) returnFocus.current = opener?.keyboard ? { el: opener.el, selector: placeSelector(opener.el) } : null;
     // A file opened from its tile or image is no longer O's: focus goes back to that opener instead.
-    if (opener) keyOpener.current = null; ibDiag({ diag: 'render-key', was: place.current.committed, now: placeKey, opener: !!opener, recent: !!recent, untouched, saved: !!place.current.saved, st: body?.scrollTop, w: body ? Math.round(body.getBoundingClientRect().width) : null }); // TEMPORARY (#3528)
+    if (opener) keyOpener.current = null;
   }
   useLayoutEffect(() => {
     const was = parsePlaceLayout(place.current.committed);
@@ -1748,18 +1748,18 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     // The file closed: whatever focus it is owed is settled here (the Artifacts grid gives focus back itself).
     const focusBack = now.file === 'none' && was.file !== 'none' ? returnFocus.current : null;
     if (now.file === 'none') returnFocus.current = null;
-    if (!body || !placeShown(now)) return void ibDiag({ diag: 'layout-effect-skip', was: placeLayoutKey(was), now: placeKey, body: !!body }); // TEMPORARY (#3528)
+    if (!body || !placeShown(now)) return;
     const saved = place.current.saved;
     const placed = () => {
       place.current.placedTop = body.scrollTop;
     };
-    // A file opening beside the thread moves the thread only when what was opened would leave the view (`stayBeside`);
-    // held either way, so the browser's scroll anchoring moves nothing as the narrower column settles, frames later at times.
-    const stays = !!saved && now.file === 'side' && was.file === 'none' && stayBeside(body, saved); ibDiag({ diag: 'layout-effect', was: placeLayoutKey(was), now: placeKey, saved: !!saved, stays, st: body.scrollTop, w: Math.round(body.getBoundingClientRect().width) }); // TEMPORARY (#3528)
-    if (saved && (stays || restorePlace(body, saved))) {
+    // A file opening beside the thread moves the thread only when what was opened would leave the view: the
+    // narrower column keeps what the person sees above it (the message's head row) where it can.
+    if (saved && now.file === 'side' && was.file === 'none' && placeInView(body, saved)) placed();
+    else if (saved && restorePlace(body, saved)) {
       placed();
       stopHold();
-      holdRef.current = holdPlace(body, saved, placed, undefined, sectionRef.current ?? body, stays);
+      holdRef.current = holdPlace(body, saved, placed, undefined, sectionRef.current ?? body);
     }
     const lost = () => {
       const active = document.activeElement;
