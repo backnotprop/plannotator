@@ -71,9 +71,12 @@ export function farCsp(csp: string | null | undefined): string {
   return kept.join("; ");
 }
 
+/** An HTML comment, to the end of the text when unclosed. A RegExp constructor: Semgrep's TS parser fails on `<!--` in a regex literal. */
+const HTML_COMMENT = new RegExp("<!--[\\s\\S]*?(?:-->|$)", "g");
+
 /** The token of the page's own folder, from the first `<base href>` its window wrote (comments skipped). */
 function folderToken(html: string): string | null {
-  const base = /<base\b[^>]*>/i.exec(html.replace(/<!--[\s\S]*?(?:-->|$)/g, ""));
+  const base = /<base\b[^>]*>/i.exec(html.replace(HTML_COMMENT, ""));
   return base ? (/\bhref\s*=\s*["']?\/api\/html-assets\/([A-Za-z0-9_-]+)\//i.exec(base[0])?.[1] ?? null) : null;
 }
 

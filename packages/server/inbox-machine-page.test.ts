@@ -42,6 +42,11 @@ describe("machinePageAnswer", () => {
     const answer = await machinePageAnswer(view(page, html), B, "", pass);
     expect(answer.status).toBe(303);
     expect(Object.fromEntries(answer.headers)).toEqual({ location: `${FORWARD}tok123/pricing.html`, "cache-control": "no-store", "referrer-policy": "no-referrer" });
+    // A base inside a comment (closed, or open to the end) never names the folder.
+    const commented = await machinePageAnswer(view(page, `<!-- <base href="/api/html-assets/other/"> -->${html}`), B, "", pass);
+    expect(commented.headers.get("location")).toBe(`${FORWARD}tok123/pricing.html`);
+    const unclosed = await machinePageAnswer(view(page, `<!-- ${html}`), B, "", pass);
+    expect([unclosed.status, unclosed.headers.get("location")]).toEqual([200, null]);
   });
 
   test("the sent version: the page itself, rebased onto the forward, under exactly a local page's headers", async () => {
