@@ -295,6 +295,31 @@ describe.if(hasDom)('the side panel and the answers', () => {
     });
   });
 
+  test('with the box tool on, a press that travels from a comment bubble draws no box', async () => {
+    const r = rig(undefined, { notes: finishedNotes() });
+    await laidOut(async () => {
+      await mount(r.host, { boxSelect: {} });
+      await click(document.querySelector('.shp-tstrip button[aria-label="Comment"]')!);
+      await wait();
+      const press = (el: EventTarget, type: string, x: number) =>
+        el.dispatchEvent(Object.assign(new MouseEvent(type, { bubbles: true, composed: true, button: 0, clientX: x, clientY: 10 }), { pointerType: 'mouse', pointerId: 1 }));
+      const dragFrom = (el: EventTarget) => act(async () => {
+        press(el, 'pointerdown', 10);
+        press(window, 'pointermove', 90);
+      });
+      const band = () => document.querySelector('.shp-box-band');
+      await dragFrom(inDrawing('[data-shp-talk-bubble]')!);
+      expect(band()).toBeNull();
+      press(window, 'pointerup', 90);
+      // From the board itself it does.
+      await dragFrom(document.querySelector('.shp-stage')!);
+      expect(band()).not.toBeNull();
+      // Ended: the drag eats the click that follows it for 60 ms; let that pass before the next test clicks.
+      press(window, 'pointerup', 90);
+      await act(() => new Promise((done) => setTimeout(done, 80)));
+    });
+  });
+
   test("a Change it says where it stands in the part's box", async () => {
     const r = rig();
     await mount(r.host);

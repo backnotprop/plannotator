@@ -356,6 +356,8 @@ export function useBoxDrag({ stageRef, enabled, onStart, onEnd }: BoxDragOptions
     const onDown = (down: PointerEvent) => {
       endDrag?.();
       if (down.pointerType !== 'mouse' || down.button !== 0 || down.ctrlKey) return;
+      // A press on a comment bubble is the bubble's: it opens its talk, and never starts a box.
+      if (down.composedPath().some((n) => n instanceof Element && n.hasAttribute('data-shp-talk-bubble'))) return;
       // A press on a scrollbar scrolls.
       for (const s of stage.querySelectorAll<HTMLElement>('.shp-view:not(.leaving), .shp-drawn.pan')) {
         const r = s.getBoundingClientRect();

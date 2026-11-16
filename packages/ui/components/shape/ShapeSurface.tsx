@@ -775,7 +775,7 @@ export function ShapeSurface({ host, id, onClose, onCode, CodeGuide, CodeHoverCa
   const onShapeClickCapture = (e: React.MouseEvent) => {
     if (!panel) return;
     const t = (e.nativeEvent.composedPath()[0] ?? e.target) as Element;
-    if (t instanceof Element && t.closest('.shp-dock, .shp-rb, .shp-pill, .shp-general, .shp-ex-card')) return;
+    if (t instanceof Element && t.closest('.shp-dock, .shp-rb, [data-shp-talk-bubble], .shp-pill, .shp-general, .shp-ex-card')) return;
     // With the box: a composer is drawn in a portal, and its clicks reach here through React, but they are not on the
     // board (a box dragged beside an open panel opens one). `e.target`: a click in the drawing's shadow root is its host.
     if (boxSelect && (!(e.target instanceof Node) || !e.currentTarget.contains(e.target))) return;

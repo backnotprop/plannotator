@@ -291,6 +291,39 @@ test('a click still marks one part; a tiny drag is a click; Esc cancels a drag a
   await context.close();
 });
 
+test("a part's comment bubble takes its own press: one click opens it beside References, and it never starts a box", async ({ browser }) => {
+  const id = store('bubble-press');
+  const { context, page, problems } = await openBoard(browser, id, { viewport: { width: 1800, height: 900 } });
+  await crosshair(page).click();
+  const s = await at(page, 'save', 0.5, 0.5);
+  await drag(page, s, { x: s.x + 2, y: s.y + 1 }, 2);
+  await composer(page).locator('textarea').fill('Make it green.');
+  await composer(page).getByRole('button', { name: 'Change it' }).click();
+  await expect(composer(page)).toHaveCount(0);
+  const bubble = page.locator('.shp-view:not(.leaving) [data-shp-talk-bubble]');
+  await expect(bubble).toHaveCount(1);
+
+  // References open beside the board: a click on the board only closes it, but one click on the bubble opens its box.
+  await page.locator('.shp-dock').getByRole('button', { name: /References/ }).click();
+  await expect(page.locator('.shp-sidep.open:not(.sheet)')).toBeVisible();
+  await bubble.click();
+  await expect(composer(page)).toContainText('Make it green.');
+  await page.keyboard.press('Escape');
+  await expect(composer(page)).toHaveCount(0);
+
+  // With the crosshair on, a press that travels from the bubble draws no box and opens no box's composer.
+  if ((await crosshair(page).getAttribute('aria-pressed')) !== 'true') await crosshair(page).click();
+  const b = (await bubble.boundingBox())!;
+  const from = { x: b.x + b.width / 2, y: b.y + b.height / 2 };
+  await press(page, from, { x: from.x - 60, y: from.y + 80 });
+  await expect(page.locator('.shp-box-band')).toHaveCount(0);
+  await page.mouse.up();
+  await page.waitForTimeout(150);
+  await expect(box(page)).toHaveCount(0);
+  expect(problems).toEqual([]);
+  await context.close();
+});
+
 test('How it works: a lazy drag over a diagram', async ({ browser }) => {
   const id = store('views');
   const { context, page, problems } = await openBoard(browser, id);
