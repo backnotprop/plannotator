@@ -41,7 +41,7 @@ function Flag({
 
 export function ShellTabFlags({ onOpenFiles }: { onOpenFiles: () => void }) {
   return (
-    <div className="absolute left-0 top-0 z-20 hidden flex-col gap-1 pl-0.5 pt-3 md:flex">
+    <div data-rail-flags="" className="relative z-20 hidden w-7 shrink-0 flex-col gap-1 pt-3 md:flex">
       <Flag title="Files" ariaLabel="Show files" onClick={onOpenFiles}>
         <path
           strokeLinecap="round"

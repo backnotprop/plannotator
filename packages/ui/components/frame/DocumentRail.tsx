@@ -14,20 +14,29 @@ export interface DocumentRailDefaults {
   open: boolean;
 }
 
+/**
+ * The rail's open state. Uncontrolled by default (remembered in `storage`); pass
+ * `control.open` to own it, and `control.onOpenChange` to hear every request.
+ */
 export function useDocumentRailState(
   defaults: DocumentRailDefaults = { open: true },
   storage: RailStorage = DEFAULT_RAIL_STORAGE,
   openKey: string = RAIL_STORAGE_KEYS.open,
+  control: { open?: boolean; onOpenChange?: (open: boolean) => void } = {},
 ): {
   railOpen: boolean;
   setRailOpen: (open: boolean) => void;
   openFiles: () => void;
 } {
   const [storedOpen, setStoredOpen] = useState<boolean | null>(() => readStoredRailOpen(storage, openKey));
-  const railOpen = storedOpen ?? defaults.open;
+  const controlled = control.open !== undefined;
+  const railOpen = controlled ? control.open! : (storedOpen ?? defaults.open);
   const setRailOpen = (next: boolean) => {
-    setStoredOpen(next);
-    writeStoredRailOpen(next, storage, openKey);
+    if (!controlled) {
+      setStoredOpen(next);
+      writeStoredRailOpen(next, storage, openKey);
+    }
+    control.onOpenChange?.(next);
   };
   return {
     railOpen,

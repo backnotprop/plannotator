@@ -103,11 +103,14 @@
 /*
  * FrameGround's `colors="theme"`: selected, hover and subtle border follow the
  * host theme's --primary and --foreground. The amounts match the fixed colours
- * above when the theme's primary is the frame's violet (README.md). Put the
- * attribute on the root instead to reach the phone sheets, which portal out.
+ * above when the theme's primary is the frame's violet (README.md). The
+ * selected text is the foreground, so only the fill carries the accent and
+ * the text keeps its contrast on any theme. Put the attribute on the root
+ * as well to reach the phone sheets, which portal out.
  */
 [data-frame-colors="theme"] {
   --frame-selected: color-mix(in oklch, var(--primary) 13%, transparent);
+  --frame-selected-fg: var(--foreground);
   --frame-surface-hover: color-mix(in oklch, var(--foreground) 7%, transparent);
   --frame-border-subtle: color-mix(in oklch, var(--foreground) 5.5%, transparent);
 }
@@ -115,6 +118,7 @@
 .light[data-frame-colors="theme"],
 .light [data-frame-colors="theme"] {
   --frame-selected: color-mix(in oklch, var(--primary) 7.5%, transparent);
+  --frame-selected-fg: var(--foreground);
   --frame-surface-hover: color-mix(in oklch, var(--foreground) 5.5%, transparent);
   --frame-border-subtle: color-mix(in oklch, var(--foreground) 7.5%, transparent);
 }
@@ -133,7 +137,7 @@
   [data-frame-ground] {
     background: var(--frame-ground);
   }
-  [data-frame-ground] > main:has([data-frame]) {
+  [data-frame-ground] > [data-frame-pane]:has([data-frame]) {
     margin: 0;
     border-radius: 0;
     background: transparent;
@@ -160,7 +164,7 @@
   [data-frame-row] [data-document-rail] + .collapsible-edge {
     margin-inline: -4px;
   }
-  [data-frame-row] > :not([data-document-rail], [data-rail-reserved]) {
+  [data-frame-row] > :not([data-document-rail], [data-rail-reserved], [data-rail-flags]) {
     overflow: hidden;
     border-radius: var(--frame-r-pane);
     background-color: var(--card);

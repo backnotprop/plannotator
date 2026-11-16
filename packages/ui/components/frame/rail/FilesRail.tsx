@@ -10,15 +10,19 @@ import { ROW, pad } from "./rowStyle";
 export function FilesRailHeading({
   label = "Pages",
   count,
-  filterVisible,
+  countTitle = (n) => `${n} page${n === 1 ? "" : "s"}`,
+  filterVisible = false,
   onToggleFilter,
   actions,
   menu,
 }: {
   label?: string;
   count: number | null;
-  filterVisible: boolean;
-  onToggleFilter: () => void;
+  /** The count's hover text. Default: "3 pages". */
+  countTitle?: (count: number) => string;
+  filterVisible?: boolean;
+  /** Without it the heading has no Filter button (a second heading, for example "Artifacts"). */
+  onToggleFilter?: () => void;
   actions?: ReactNode;
   menu?: ReactNode;
 }) {
@@ -29,28 +33,30 @@ export function FilesRailHeading({
         {count !== null && (
           <span
             className="text-frame-2xs tabular-nums text-frame-tertiary"
-            title={`${count} page${count === 1 ? "" : "s"}`}
+            title={countTitle(count)}
           >
             {count}
           </span>
         )}
       </span>
       <span className="flex shrink-0 items-center gap-1">
-        <button
-          type="button"
-          aria-label="Filter files"
-          aria-expanded={filterVisible}
-          title="Filter files"
-          onClick={onToggleFilter}
-          className={cn(
-            "inline-flex size-7 items-center justify-center rounded-frame-control text-frame-tertiary transition-colors hover:text-foreground",
-            HOVER_QUIET,
-            FOCUS_RING,
-            filterVisible && "bg-muted text-foreground",
-          )}
-        >
-          <Search className="size-3.5" />
-        </button>
+        {onToggleFilter !== undefined && (
+          <button
+            type="button"
+            aria-label="Filter files"
+            aria-expanded={filterVisible}
+            title="Filter files"
+            onClick={onToggleFilter}
+            className={cn(
+              "inline-flex size-7 items-center justify-center rounded-frame-control text-frame-tertiary transition-colors hover:text-foreground",
+              HOVER_QUIET,
+              FOCUS_RING,
+              filterVisible === true && "bg-muted text-foreground",
+            )}
+          >
+            <Search className="size-3.5" />
+          </button>
+        )}
         {actions}
         {menu}
       </span>
@@ -121,6 +127,7 @@ export function FileRow({
   icon: Icon,
   link,
   presence,
+  trailing,
   moving = false,
   openCommentCount = 0,
   error = null,
@@ -137,6 +144,8 @@ export function FileRow({
   icon: FileGlyph;
   link: ReactElement;
   presence?: ReactNode;
+  /** At the right end of the row, after the comment count: a mark such as "Main". */
+  trailing?: ReactNode;
   moving?: boolean;
   openCommentCount?: number;
   error?: string | null;
@@ -182,6 +191,11 @@ export function FileRow({
             {openCommentCount}
           </span>
         ) : null}
+        {trailing !== undefined && trailing !== null && (
+          <span data-file-row-trailing="" className="flex shrink-0 items-center">
+            {trailing}
+          </span>
+        )}
       </>
     ),
   } as Record<string, unknown>);

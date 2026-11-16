@@ -1,4 +1,4 @@
-import { cloneElement, type ReactElement } from "react";
+import { cloneElement, type ReactElement, type ReactNode } from "react";
 import { ArrowLeft } from "lucide-react";
 
 import { Skeleton } from "../primitives/skeleton";
@@ -7,9 +7,12 @@ import { RAIL_ROW } from "./railRow";
 export function PagesRailHead({
   label,
   backLink,
+  meta = null,
 }: {
   readonly label: string | null;
   readonly backLink: ReactElement;
+  /** A quiet second line under the back link, aligned with its label (a glyph and words; bring a title for long ones). */
+  readonly meta?: ReactNode;
 }) {
   return (
     <div className="mx-2 border-b border-frame-border-subtle py-1" data-pages-rail-head="">
@@ -27,6 +30,11 @@ export function PagesRailHead({
             </>
           ),
         } as Record<string, unknown>)
+      )}
+      {label !== null && meta !== null && (
+        <div data-pages-rail-meta="" className="truncate pb-1 pl-7 pr-2 text-frame-xs text-muted-foreground">
+          {meta}
+        </div>
       )}
     </div>
   );
