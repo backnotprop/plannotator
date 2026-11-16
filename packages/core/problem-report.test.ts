@@ -121,7 +121,7 @@ describe("problemReport, one message per tool state", () => {
   test("an Inbox that did not answer: the message still opens, saying less", () => {
     const problem = toolProblem("missing", { cli: "gh", host: "github.com" }, AT);
     const { body } = problemReport(problem, { surface: "pulls_page", clis: ["gh"], hosts: [] });
-    expect(body).toContain("**gh isn't installed on this computer**");
+    expect(body).toContain(`**${problem.title}**`);
     expect(body).toContain("gh (version not known)");
     expect(body).toContain("no run of the tool is on record");
     expect(body).not.toContain("```text");

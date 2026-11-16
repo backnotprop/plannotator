@@ -8,8 +8,6 @@
 import type { InboxCloudAgentView, InboxCloudPreset, InboxCloudSetup } from '@plannotator/core/inbox-cloud';
 import type { InboxSidebarLayout } from '@plannotator/core/inbox-sidebar';
 import type { DecisionDataSummary, InboxAgentsGroup, InboxAgentFaceChange, InboxPriorityBefore } from '@plannotator/core/inbox-types';
-import { problemOf } from '@plannotator/core/problem';
-import type { ProblemFacts } from '@plannotator/core/problem-report';
 import type { FaviconStyle } from '@plannotator/core/favicon';
 import type { InboxShowMeTarget } from '@plannotator/core/inbox-review';
 import type { SystemSetup, SystemSetupAnswer, SystemSetupInput } from '@plannotator/core/inbox-system-setup';
@@ -21,6 +19,8 @@ import type { CloudflareAccessSettings, TailscaleSettings } from './data/reach';
 import { isActionRecord, questionsOnly, splitThreadActions } from './actions';
 import { createListReader, type ListReadAnswer } from './listRead';
 import { inboxUrl, isContested, localRoute, machineOf, rememberLocal, rememberMachine, selfMachineId, setSelfMachine } from './inboxUrl';
+import { PROBLEM_FACTS_READ_MS, problemFactsQuery, type InboxProblemFacts } from './problems/wire';
+import { threadPullsOf } from './threadPulls/model';
 import { learnPullMachines, pullMachine, pullUrl } from './pulls/pullMachines';
 import { learnProjects } from './projectPictures';
 import { learnDefaultRefHost } from './defaultRefHost';
@@ -100,7 +100,6 @@ import type {
   InboxCardWire,
   InboxStepsWire,
   InboxThreadPullsAnswer,
-  InboxThreadPullWire,
   InboxAttachmentState,
   InboxMessageWire,
   InboxNoteAgentId,
@@ -984,12 +983,6 @@ export function signalWithin(ms: number, outer?: AbortSignal): { signal: AbortSi
   };
 }
 
-/** "Ask your agent to look" waits at most this long for the Inbox's facts, then opens the message with what it has. */
-export const PROBLEM_FACTS_READ_MS = 4_000;
-
-/** The Inbox's answer for a problem's report (packages/server/inbox-problem-facts.ts). */
-export type InboxProblemFacts = ProblemFacts & { thread?: { session: string | null; link: string } };
-
 /** A thread's PRs: the Inbox answers at once from what it knows, so a read with no answer by then is a held connection. */
 export const THREAD_PULLS_READ_MS = 10_000;
 /** A hover card's data: the Inbox ends a forge CLI at 8 s, so a read with no answer by then is a held connection. */
@@ -1097,24 +1090,6 @@ export function pageServerSession(): string | null {
  * it takes the thread over.
  */
 export type TagMode = 'ask' | 'add' | 'handoff';
-
-function withProblemChecked(pull: InboxThreadPullWire): InboxThreadPullWire {
-  if (!pull || typeof pull !== 'object' || !('problem' in pull)) return pull;
-  const { problem, ...rest } = pull;
-  const checked = problemOf(problem);
-  return checked ? { ...rest, problem: checked } : rest;
-}
-
-/** A thread's PRs answer as the window uses it: anything missing reads as none. */
-function threadPullsOf(answer: unknown): InboxThreadPullsAnswer {
-  const value = (answer && typeof answer === 'object' ? answer : {}) as Partial<InboxThreadPullsAnswer>;
-  return {
-    // A PR's problem (newer servers) is kept only when it reads as one; an older server sends none.
-    pulls: Array.isArray(value.pulls) ? value.pulls.map(withProblemChecked) : [],
-    groups: Array.isArray(value.groups) ? value.groups : [],
-    removed: Array.isArray(value.removed) ? value.removed : [],
-  };
-}
 
 /** A browser takes at most 64 KiB of keepalive bodies in flight: a larger one goes as an ordinary request. */
 const KEEPALIVE_BODY_MAX = 60_000;
@@ -1570,22 +1545,8 @@ export const inboxApi = {
       throw cause;
     }
   },
-  /**
-   * "Ask your agent to look": what only the Inbox knows for the report (versions, the tool's recent failed runs,
-   * redacted there, and the thread's agent). Given up after PROBLEM_FACTS_READ_MS: the message then opens with less.
-   */
-  problemFacts: async (query: { clis: readonly string[]; host?: string | null; thread?: string | null }, signal?: AbortSignal): Promise<InboxProblemFacts> => {
-    const params = new URLSearchParams();
-    for (const cli of query.clis) params.append('cli', cli);
-    if (query.host) params.set('host', query.host);
-    if (query.thread && !machineOf(query.thread)) params.set('thread', query.thread);
-    const within = signalWithin(PROBLEM_FACTS_READ_MS, signal);
-    try {
-      return await get<InboxProblemFacts>(inboxUrl(`/problem-facts?${params}`), within.signal);
-    } finally {
-      within.done();
-    }
-  },
+  /** "Ask your agent to look": versions, the tool's recent failed runs (redacted there) and the thread's agent. */
+  problemFacts: (query: Parameters<typeof problemFactsQuery>[0]) => getWithin<InboxProblemFacts>(inboxUrl('/problem-facts', problemFactsQuery(query)), PROBLEM_FACTS_READ_MS),
   /**
    * A thread's PRs (approval "inbox-pr-binding"): the live list with stack groups and state, and what was removed
    * lately, read on the thread's own machine. An Inbox older than PRs on threads, or a linked machine older than

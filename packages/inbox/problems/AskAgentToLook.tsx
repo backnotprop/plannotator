@@ -11,7 +11,8 @@
 import { useState } from 'react';
 import type { Problem } from '@plannotator/core/problem';
 import { problemReport, type ProblemPlace } from '@plannotator/core/problem-report';
-import { inboxApi, type InboxProblemFacts } from '../api';
+import { inboxApi } from '../api';
+import type { InboxProblemFacts } from './wire';
 import { openComposer } from '../compose/openComposer';
 import { noticeProblem, type PullsNotice } from '../pulls/notices';
 

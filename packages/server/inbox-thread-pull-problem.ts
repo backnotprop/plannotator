@@ -20,14 +20,14 @@ export interface ThreadPullFailure {
 
 const STATES = new Set<string>(["missing", "signed_out", "timed_out", "refused", "rate_limited", "failed"]);
 
-function failure(state: ToolState, cli: ToolCli, host: string, url: string, at: number, diag: ProblemDiag | null): ThreadPullFailure {
-  const problem = toolProblem(state, { cli, host, kind: "pull", url, envToken: state === "signed_out" ? tokenEnvFor(cli, host) : null, seconds: Math.round(REF_TIMEOUT_MS / 1000) }, new Date(at));
+function failure(state: ToolState, cli: ToolCli, host: string, url: string, at: number, diag: ProblemDiag | null, ran = true): ThreadPullFailure {
+  const problem = toolProblem(state, { cli, host, kind: "pull", url, envToken: ran && state === "signed_out" ? tokenEnvFor(cli, host) : null, seconds: Math.round(REF_TIMEOUT_MS / 1000) }, new Date(at));
   return { problem, diag };
 }
 
 /**
- * A GitHub batch that got no answer: from the run when there was one, else (a host gh lists no login for, or held for
- * a rate limit) from the status check alone.
+ * A GitHub batch that got no answer: from the run, made precise by the status check. Nothing ran: held for a rate
+ * limit, or a host gh lists no login for, which is signed out and is never named in a command (not even the check).
  */
 export async function githubPullFailure(options: {
   tools: Pick<ToolStatus, "check">;
@@ -40,8 +40,9 @@ export async function githubPullFailure(options: {
 }): Promise<ThreadPullFailure> {
   const { tools, host, url, run } = options;
   if (options.rateLimited) return failure("rate_limited", "gh", host, url, options.at(), null);
-  const state = await refineToolState(tools, "gh", host, run ? toolStateOfRun("gh", run.result) : null);
-  return failure(state, "gh", host, url, options.at(), run ? toolDiagOf(run.result, run.ms) : null);
+  if (!run) return failure("signed_out", "gh", host, url, options.at(), null, false);
+  const state = await refineToolState(tools, "gh", host, toolStateOfRun("gh", run.result));
+  return failure(state, "gh", host, url, options.at(), toolDiagOf(run.result, run.ms));
 }
 
 /** A GitLab card that came back failed (or not at all): its problem, made precise by the status check. */
@@ -54,9 +55,11 @@ export async function gitlabPullFailure(options: {
   result: ForgeRefCardResult | null;
 }): Promise<ThreadPullFailure> {
   const { tools, host, url, result } = options;
+  // `unsupported`: glab lists no login for that host. Signed out, and the host is never named in a command.
+  if (result && !result.ok && result.error === "unsupported") return failure("signed_out", "glab", host, url, options.at(), null, false);
   const code = result && !result.ok ? result.problem?.code.replace(/^tool\./, "") : undefined;
   const fromCard = code && STATES.has(code) ? (code as ToolState) : null;
-  // `unsupported` (no login for that host listed) or no card at all: nothing ran, the status check decides.
-  const state = await refineToolState(tools, "glab", host, result && !result.ok && result.error === "unsupported" ? null : (fromCard ?? (result ? "failed" : null)));
+  // No card at all: nothing ran, the status check decides.
+  const state = await refineToolState(tools, "glab", host, fromCard ?? (result ? "failed" : null));
   return failure(state, "glab", host, url, options.at(), (result && options.refCards?.diagOf?.(result)) ?? null);
 }

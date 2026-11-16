@@ -49,44 +49,38 @@ function nounOf(ctx: ToolProblemContext): string {
 
 type Words = { title: string; detail: string; action?: ProblemAction };
 
-/** The table: one entry per state. */
+/** The table: one entry per state. A short bold line, at most one short muted line, one next step. */
 export const TOOL_WORDS: Record<ToolState, (ctx: ToolProblemContext) => Words> = {
   missing: ({ cli }) => ({
-    title: `${cli} isn't installed on this computer`,
+    title: `${cli} isn't installed`,
     detail: `Install the ${forgeOf(cli)} CLI to see details here.`,
     action: { kind: "open_url", value: TOOL_INSTALL_URL[cli], label: `Install ${cli}` },
   }),
   signed_out: ({ cli, host, envToken }) =>
     envToken
-      ? {
-          title: `${cli} isn't signed in to ${host}`,
-          detail: `${forgeOf(cli)} refused the token in ${envToken}. Set a new one where Plannotator starts, or remove it and sign in.`,
-        }
+      ? { title: `${cli} isn't signed in to ${host}`, detail: `${forgeOf(cli)} refused the token in ${envToken}. Replace it, or remove it and sign in.` }
       : {
           title: `${cli} isn't signed in to ${host}`,
-          detail: `Nothing from ${host} can be read until it is. Sign in once in a terminal.`,
+          detail: "Run this once in a terminal to sign in.",
           action: { kind: "copy_command", value: `${cli} auth login --hostname ${host}` },
         },
   timed_out: ({ cli, seconds = 8 }) => ({
     title: `${cli} didn't answer in ${seconds} seconds`,
-    detail: `It was stopped, and is asked again in a minute. If this keeps happening, check that ${cli} works in a terminal.`,
+    detail: "It may be slow or stuck. Try again in a moment.",
     action: { kind: "retry" },
   }),
   refused: (ctx) => ({
     title: `${ctx.cli} can't see this ${nounOf(ctx)}`,
-    detail:
-      ctx.cli === "glab"
-        ? `Your GitLab account on ${ctx.host} can't see it, or it doesn't exist.`
-        : `None of your signed-in GitHub accounts can see it, or it doesn't exist.`,
+    detail: ctx.cli === "glab" ? `Your GitLab account on ${ctx.host} can't see it, or it doesn't exist.` : "No signed-in GitHub account can see it, or it doesn't exist.",
     ...(ctx.url && /^https:\/\//.test(ctx.url) ? { action: { kind: "open_url" as const, value: ctx.url, label: `Open on ${forgeOf(ctx.cli)}` } } : {}),
   }),
   rate_limited: ({ cli }) => ({
     title: `${forgeOf(cli)} asked for a short break`,
-    detail: "Details come back in a minute, by themselves.",
+    detail: "Try again in a minute.",
   }),
   failed: (ctx) => ({
     title: `${ctx.cli} couldn't read this ${nounOf(ctx)}`,
-    detail: "It stopped with an error. Try again in a moment.",
+    detail: `If it keeps failing, check that ${ctx.cli} works in a terminal.`,
     action: { kind: "retry" },
   }),
 };

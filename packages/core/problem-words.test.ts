@@ -56,6 +56,8 @@ describe("older and newer answers", () => {
     expect(cardProblem({ ok: false, error: "unavailable", fetchedAt: 1 }, ref)?.code).toBe("tool.failed");
     // A host this computer does not read is not a tool state.
     expect(cardProblem({ ok: false, error: "unsupported", fetchedAt: 1 }, ref)).toBeNull();
+    // Bitbucket has no CLI: its bare errors never read as a gh or glab state (the card keeps its own line).
+    expect(cardProblem({ ok: false, error: "signed_out", fetchedAt: 1 }, { platform: "bitbucket", host: "bitbucket.org", kind: "pull" })).toBeNull();
   });
 
   test("a problem off the wire: anything unreadable is dropped; a page that is not https is never offered", () => {
