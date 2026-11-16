@@ -96,6 +96,17 @@ describe("diff path parsing", () => {
     expect(unquoteGitPath("plain space.txt")).toBe("plain space.txt");
   });
 
+  test("keeps U+FEFF in C-quoted filenames", () => {
+    expect(parseDiffFilePathLines([
+      '--- "a/a\\357\\273\\277b.txt"',
+      '+++ "b/a\\357\\273\\277b.txt"',
+      "@@ -1 +1 @@",
+    ])).toEqual({
+      oldPath: "a\uFEFFb.txt",
+      newPath: "a\uFEFFb.txt",
+    });
+  });
+
   test("strips tab metadata from unquoted file path lines", () => {
     expect(parseDiffFilePathLines([
       "--- a/my file\t",

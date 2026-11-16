@@ -26,7 +26,8 @@ const C_ESCAPES: Record<string, number> = {
 export function unquoteGitPath(value: string): string {
   if (!value.startsWith('"') || !value.endsWith('"')) return value;
   const inner = value.slice(1, -1);
-  const decoder = new TextDecoder();
+  // U+FEFF is part of the filename, even at the start of an octal byte run.
+  const decoder = new TextDecoder("utf-8", { ignoreBOM: true });
   let out = "";
   let pendingBytes: number[] = [];
   const flush = (): void => {
