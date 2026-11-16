@@ -215,16 +215,35 @@ export function resolveInboxReminderRules(configText: string | null | undefined)
 }
 
 /**
- * The entrypoint Claude Code's VS Code extension gives the sessions its chat
- * panel starts, and Orca's corresponding entrypoint (`CLAUDE_CODE_ENTRYPOINT`, set in the environment it spawns
- * the CLI with; read in the 2.1.322 extension). Claude Desktop's is
- * `claude-desktop`, an Agent SDK app's `sdk-ts` / `sdk-py`, `claude -p`'s
- * `sdk-cli`, T3 Code's `t3-code`.
+ * The entrypoints (`CLAUDE_CODE_ENTRYPOINT`, set in the environment the host
+ * spawns the CLI with) of the SDK hosts whose chat a person reads, each with
+ * whether the mod reviews ExitPlanMode there (`planReview`: false where the
+ * host draws its own plan card):
+ *
+ * - `claude-vscode`: Claude Code's VS Code extension's chat panel (read in the 2.1.322 extension);
+ * - `orca`: Orca's chat (#3325), which shows its own "Review proposed plan" card;
+ * - `claude-desktop`, `claude-desktop-3p`: the Claude desktop app's Code tab
+ *   (#3239; `-3p` with a third-party inference provider; read in the 4.23118
+ *   app, which also deletes `CLAUDECODE` and `CLAUDE_CODE_CHILD_SESSION`).
+ *   Whether it draws its own plan card is not known yet.
+ *
+ * Others: an Agent SDK app's `sdk-ts` / `sdk-py`, `claude -p`'s `sdk-cli`,
+ * T3 Code's `t3-code`, the desktop app's Cowork `local-agent`.
  */
-const PANEL_ENTRYPOINTS: ReadonlySet<string> = new Set(['claude-vscode', 'orca'])
+const PANEL_HOSTS: ReadonlyMap<string, { planReview: boolean }> = new Map([
+  ['claude-vscode', { planReview: true }],
+  ['orca', { planReview: false }],
+  ['claude-desktop', { planReview: true }],
+  ['claude-desktop-3p', { planReview: true }],
+])
 
 export function isPanelEntrypoint(value: unknown): boolean {
-  return typeof value === 'string' && PANEL_ENTRYPOINTS.has(value)
+  return typeof value === 'string' && PANEL_HOSTS.has(value)
+}
+
+/** Whether the panel host of this entrypoint draws its own plan card for ExitPlanMode (Orca). */
+export function panelHostOwnsPlanMode(value: unknown): boolean {
+  return typeof value === 'string' && PANEL_HOSTS.get(value)?.planReview === false
 }
 
 /** What `isPanelSession` reads, each variable as `$.env.get` answers it. */
@@ -243,18 +262,19 @@ const setIn = (value: unknown) => typeof value === 'string' && value !== ''
 
 /**
  * Whether a session that is not interactive (`session.start`'s
- * `isInteractive` false) is a chat panel of the VS Code extension, where the
- * mod runs as in the terminal (#3111). The extension hosts Claude Code
- * through the Agent SDK, so its sessions are not interactive, but a person
- * reads the panel and a plugin's turn shows there ("Prompt from the
- * <plugin> plugin").
+ * `isInteractive` false) is the chat of a panel host (`PANEL_HOSTS`: the VS
+ * Code extension, Orca, the Claude desktop app's Code tab), where the mod runs
+ * as in the terminal (#3111). These hosts run Claude Code through the Agent
+ * SDK, so their sessions are not interactive, but a person reads the chat and
+ * a plugin's turn shows there ("Prompt from the <plugin> plugin" in VS Code).
  *
  * The entrypoint is inherited: a `claude -p` started from inside a panel
  * session (Claude's Bash, or an agent job of a Plannotator CLI the mod
- * started) keeps `claude-vscode` (Claude Code changes only `cli`). Such a
+ * started) keeps the host's entrypoint (Claude Code changes only `cli`). Such a
  * process is told apart by what its parent put in its environment, which the
- * extension removes from the panel's own (it deletes `CLAUDECODE` and
- * `CLAUDE_CODE_CHILD_SESSION` before it spawns the CLI): either Claude Code
+ * host removes from the session's own (the VS Code extension and the desktop
+ * app delete `CLAUDECODE` and `CLAUDE_CODE_CHILD_SESSION` before they spawn
+ * the CLI): either Claude Code
  * variable, or the mod's session tag naming another session. The tag naming
  * this session is this process's own (a module reload runs `session.start`
  * again after the mod set it).
@@ -328,10 +348,12 @@ export function isT3ThreadOwnTools(names: readonly unknown[]): boolean {
  * Where the session runs, as the mod sorts it at `session.start`:
  *
  * - `terminal`: a person at Claude Code's own prompt (`isInteractive`);
- * - `panel`: the VS Code extension's chat panel (`isPanelSession`);
+ * - `panel`: a panel host's chat: the VS Code extension, Orca, the Claude
+ *   desktop app's Code tab (`isPanelSession`; where the host draws its own
+ *   plan card, ExitPlanMode is left to it: `panelHostOwnsPlanMode`);
  * - `t3`: a T3 Code thread (`t3ThreadOf`);
  * - `headless`: any other session that is not interactive: `claude -p`,
- *   another Agent SDK app, Claude Desktop, an unknown or missing entrypoint.
+ *   another Agent SDK app, an unknown or missing entrypoint.
  *
  * The first three take a later turn from a plugin while the process lives
  * (the panel and T3 show it as a turn of the thread), so the mod runs there
@@ -365,8 +387,8 @@ export const SESSION_KIND_FEATURES: Readonly<Record<SessionKind, { reviews: bool
 }
 
 /**
- * A prompt's `origin.kind` as the mod reads it. In a VS Code panel session
- * or a T3 Code thread the person's Enter reaches Claude Code as the SDK
+ * A prompt's `origin.kind` as the mod reads it. In a panel session (VS Code,
+ * Orca, the desktop Code tab) or a T3 Code thread the person's Enter reaches Claude Code as the SDK
  * host's own turn (`sdk`: the host sends what the person typed), so there it
  * reads as `composer`, the person's Enter in the terminal: a prompt they type
  * takes over the turn answering an "Ask this session" question and pulls the

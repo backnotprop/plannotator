@@ -47,9 +47,10 @@ and each kind gets what works there:
 | Session | `plannotator_inbox` | Reply wake | `plannotator` tool, commands, Bash take-over | Plan review |
 | --- | --- | --- | --- | --- |
 | `terminal` (interactive) | yes | yes | yes | the mod's |
-| `panel` (VS Code chat panel) | yes | yes | yes | the mod's |
+| `panel` (VS Code chat panel, the Claude desktop app's Code tab) | yes | yes | yes | the mod's |
+| `panel` (Orca chat) | yes | yes | yes | Orca's own plan card |
 | `t3` (a T3 Code thread) | yes, as the thread | yes, as the thread | yes | T3's own Plan mode |
-| `headless` (`claude -p`, any other SDK app) | yes | no | no: the classic CLI | the classic hook |
+| `headless` (`claude -p`, any other SDK app, the desktop app's Cowork) | yes | no | no: the classic CLI | the classic hook |
 
 The one real barrier is that a run without a person (`claude -p`, an SDK
 script) ends when its turn ends, and at `session.start` the mod cannot tell a
@@ -96,9 +97,36 @@ stays pending, no delivery is tried until the person's next prompt or a
 main-loop turn start, and the window says "Stopped". Not seen yet in a real
 panel.
 
+**The panel hosts.** `isPanelEntrypoint` reads one table, `PANEL_HOSTS` in
+`enabled.ts`: each entrypoint a panel host gives its sessions, with whether
+the mod reviews ExitPlanMode there. Every panel host gets the same checks
+(the nested-run variables, a tag naming another session) and everything
+above except, where its flag says the host draws its own plan card, plan
+review (`panelHostOwnsPlanMode`, `hostPlanMode` on `Allowed`).
+
 **Orca chat (#3325).** Orca uses the same panel path with
-`CLAUDE_CODE_ENTRYPOINT=orca`. The same child-process and inherited
-session-tag checks apply.
+`CLAUDE_CODE_ENTRYPOINT=orca`, but draws its own "Review proposed plan" card
+(Approve plan / Keep planning) for ExitPlanMode: with the mod's plan review on
+as well, a real run opened both, and approving Orca's card left Plannotator's
+plan server running with its tab open. So in Orca the mod passes ExitPlanMode's
+`tool.call` on, and its `classic.PermissionRequest` hook answers the main
+loop's ExitPlanMode with no decision and without `next(e)`, so the plugin's
+classic command hook (the blocking review) never runs either; Claude Code goes
+on to the host's own permission handling, Orca's card. A subagent's
+ExitPlanMode keeps the classic flow. This differs from T3, whose kind turns
+plan review off but still calls `next(e)`. The tools, the wake and the
+non-blocking reviews stay on.
+
+**The Claude desktop app's Code tab (#3239).** The desktop app runs a Code
+tab session's CLI through the Agent SDK with `CLAUDE_CODE_ENTRYPOINT` set to
+`claude-desktop` (`claude-desktop-3p` with a third-party inference provider),
+and deletes `CLAUDECODE` and `CLAUDE_CODE_CHILD_SESSION` from that
+environment as its last step (both read in the 4.23118 app's bundle, in the
+function that builds a "Code session" environment). So it is a panel host
+with plan review on. Cowork's sessions (`local-agent`) stay `headless`. Not
+seen yet in a real session: whether the process stays alive between turns,
+whether the app shows a plugin's submitted turn, and whether the app draws
+its own plan card (then its flag turns plan review off, as Orca's does).
 
 **A T3 Code thread.** T3 Code (pingdotgg/t3code) runs a thread's Claude through
 the Agent SDK with no `settingSources`, so the user's plugins, this one
@@ -185,10 +213,13 @@ restored by the Claude session id, which T3 resumes under the same thread.
 
 Tests: `session-kind.test.ts` (the thread rule against core's for every id
 form, the allow/deny table, the identity against the shim's, the claim folder
-against the Inbox's, the feature table), `register-vscode.test.ts` (the real
-registered hooks on a fake `$`: the panel and a T3 thread register both tools,
+against the Inbox's, the feature table, the panel hosts and which one draws
+its own plan card), `register-vscode.test.ts` (the real
+registered hooks on a fake `$`: every panel host and a T3 thread register both tools,
 poll as their session or thread and deliver once; each refusal is held and
-goes in once after the person's prompt; the `sdk` origin pulls the lease, a
+goes in once after the person's prompt; the mod's plan review opens in VS Code
+and the desktop Code tab, and in Orca neither it nor the classic hook does,
+while Orca's code review stays the mod's; the `sdk` origin pulls the lease, a
 task notification does not; each headless session gets `plannotator_inbox`
 alone, filed as its session, without the wake mark, no poll, the classic
 flows; an Ask AI child and the knob off stay inert; a thread under an

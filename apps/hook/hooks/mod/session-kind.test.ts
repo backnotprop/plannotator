@@ -9,7 +9,7 @@ import { describe, expect, test } from 'bun:test'
 import { INBOX_T3_HOST, INBOX_T3_NAME, isT3ThreadId as coreIsT3ThreadId } from '@plannotator/core/inbox-types'
 import { inboxModClaimDir } from '@plannotator/shared/inbox/claims'
 import { inboxHostSessionFromEnv, inboxSessionProjectFromEnv } from '../../server/inbox-mcp-shim'
-import { isT3ThreadId, isT3ThreadOwnTools, sessionKindOf, SESSION_KIND_FEATURES, t3ThreadOf, type T3SessionEnv } from './enabled'
+import { isPanelEntrypoint, isT3ThreadId, isT3ThreadOwnTools, panelHostOwnsPlanMode, sessionKindOf, SESSION_KIND_FEATURES, t3ThreadOf, type T3SessionEnv } from './enabled'
 import { inboxAgentProjectEnvValue, inboxSessionDirName, inboxSessionDirOf, inboxT3Agent } from './inbox'
 
 /** Every id form T3 gives a thread (packages/core/inbox-t3.ts), and look-alikes it never gives. */
@@ -102,6 +102,14 @@ describe('a T3 Code thread', () => {
 })
 
 describe('what the mod does in each kind of session', () => {
+  test('the panel hosts, and which of them draws its own plan card (Orca only, for now)', () => {
+    for (const entrypoint of ['claude-vscode', 'orca', 'claude-desktop', 'claude-desktop-3p']) expect([entrypoint, isPanelEntrypoint(entrypoint)]).toEqual([entrypoint, true])
+    for (const entrypoint of ['local-agent', 'sdk-ts', 'sdk-cli', 'cli', 't3-code', 'claude-vscode-insiders', 'Claude-Desktop', 'constructor', 'toString', '', undefined, 1]) {
+      expect([entrypoint, isPanelEntrypoint(entrypoint), panelHostOwnsPlanMode(entrypoint)]).toEqual([entrypoint, false, false])
+    }
+    expect(['claude-vscode', 'orca', 'claude-desktop', 'claude-desktop-3p'].filter(panelHostOwnsPlanMode)).toEqual(['orca'])
+  })
+
   test('sorted: the terminal first, then the VS Code panel, then a T3 thread, else headless', () => {
     expect(sessionKindOf({ isInteractive: true, panel: false, t3Thread: null })).toBe('terminal')
     expect(sessionKindOf({ isInteractive: false, panel: true, t3Thread: null })).toBe('panel')
