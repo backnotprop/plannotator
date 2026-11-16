@@ -13,7 +13,7 @@
  * woken). Plain text, linked to the field by `aria-describedby`; they never
  * block Send.
  */
-import { useCallback, useEffect, useLayoutEffect, useState, type CSSProperties, type RefObject } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import type { MentionMenuState } from '@plannotator/ui/hooks/useMentionAutocomplete';
 import { inboxApi, type TaggableModel } from '../api';
 import type { RecipientConnection } from '../deliveryLine';
@@ -71,84 +71,57 @@ import { mentionGroups } from '@plannotator/ui/components/MentionPicker';
 import { HostMark, Icon } from '../icons';
 import { TAG_READERS_GROUP, TAG_UPDATE_WORDS, tagHeadsUp, tagModeLine, type TagOption } from '../tags';
 import type { TagMode } from '../api';
+import { seenBox, type VerticalBox } from '../caretMenu';
+
+/** One whole row and the list's padding: the least list ever shown (a sliver of a row is never shown). */
+const TAG_LIST_LEAST = 56;
 
 /**
- * Where the menu sits: fixed to the viewport from the textarea's measured
- * rect (`menu.anchor`, which `useMentionAutocomplete` follows on scroll and
- * resize), never inside the field's own boxes. A menu drawn inside the reply
- * box's scroll region (`.ib-rscroll`, `overflow: auto`) is clipped at the
- * region's edge and nothing shows (#3427); the skills menu portals out the
- * same way, and this one follows it. Above the field by default; below it
- * when the field sits too close to the top of the window for one whole row
- * above it.
+ * Where the menu sits (#3427): ComposerField draws it in FloatingSkillMenu's box, laid over the part of the field the
+ * person sees and portaled out of the reply box's scroll region, so nothing cuts it and it hides while the field is out
+ * of sight. It hangs above that box (inbox.css), or below it when the list fits only there or there is more room
+ * there, and `--ib-tg-room` caps it to that room (`boundary`, the visual viewport under the thread's header) under
+ * inbox.css's own caps. Without `boundary` it keeps inbox.css's place.
  *
  * An iPhone with the keyboard up (`data-ib-keyboard-pin`): the thread's foot is a short box that scrolls, and the
  * picker drawn above the field opened behind the header, cut off (approval "inbox-reply-recipient", "fix with it").
  * There it is placed on the screen instead: as wide as the field, above it up to the header, never past it; with no
  * room above the field, over the box from its row (Send's) up.
  */
-function useMenuSpot(menu: MentionMenuState, field: HTMLTextAreaElement | null): CSSProperties | undefined {
+function useMenuSpot(field: HTMLTextAreaElement | null, boundary?: () => VerticalBox | null) {
+  const ref = useRef<HTMLDivElement | null>(null);
   const [style, setStyle] = useState<CSSProperties | undefined>(undefined);
-  // Every commit (the field grows as the person types); the equality guard converges.
+  // Every commit (the field grows as the person types, the list filters); the equality guard converges.
   useLayoutEffect(() => {
-    const anchor = menu.anchor;
-    if (!anchor) {
-      setStyle((current) => (current === undefined ? current : undefined));
-      return;
-    }
-    const view = field?.ownerDocument.defaultView ?? window;
-    const gap = 8;
-    // One whole row and the list's padding: the least list ever shown (a sliver of a row is never shown).
-    const least = 56;
-    let next: CSSProperties;
-    if (view.document.documentElement.hasAttribute('data-ib-keyboard-pin') && field) {
-      const foot = field.closest('.ib-pfoot');
-      const headBottom = foot?.closest('.ib-pane')?.querySelector('.ib-phead')?.getBoundingClientRect().bottom ?? 0;
+    const menu = ref.current;
+    const box = menu?.parentElement?.getBoundingClientRect();
+    const foot = field?.closest('.ib-pfoot');
+    const wrap = field?.closest('.ib-cfield')?.getBoundingClientRect();
+    let next: CSSProperties | undefined;
+    if (menu && foot && wrap && document.documentElement.hasAttribute('data-ib-keyboard-pin')) {
+      const headBottom = foot.closest('.ib-pane')?.querySelector('.ib-phead')?.getBoundingClientRect().bottom ?? 0;
       // Room above the field: there. With the keyboard leaving ~257 px the field starts under the header, so the list
       // covers the box instead, from just above the box's row (Send's) up to the header (as the recipient list does).
-      const above = Math.round(anchor.top - 10);
-      const row = foot?.querySelector('[data-reply-row]')?.getBoundingClientRect();
+      const above = Math.round(wrap.top - 10);
+      const row = foot.querySelector('[data-reply-row]')?.getBoundingClientRect();
       const top = above - headBottom - 8 >= 120 || !row ? above : Math.round(row.top - 6);
-      const left = Math.round(anchor.left);
       const room = Math.max(88, top - headBottom - 8);
-      next = { position: 'fixed', top, left, width: Math.round(anchor.width), right: 'auto', bottom: 'auto', margin: 0, transform: 'translateY(-100%)', maxHeight: room };
-    } else if (anchor.top - gap >= least) {
-      next = {
-        position: 'fixed',
-        left: Math.round(anchor.left),
-        width: Math.round(anchor.width),
-        right: 'auto',
-        bottom: view.innerHeight - Math.round(anchor.top) + gap,
-        top: 'auto',
-        margin: 0,
-        maxHeight: Math.max(least, Math.round(anchor.top) - gap - 8),
-      };
-    } else {
-      next = {
-        position: 'fixed',
-        left: Math.round(anchor.left),
-        width: Math.round(anchor.width),
-        right: 'auto',
-        top: Math.round(anchor.bottom) + gap,
-        bottom: 'auto',
-        margin: 0,
-        maxHeight: Math.max(least, view.innerHeight - Math.round(anchor.bottom) - gap - 8),
-      };
+      next = { position: 'fixed', top, left: Math.round(wrap.left), width: Math.round(wrap.width), right: 'auto', bottom: 'auto', margin: 0, transform: 'translateY(-100%)', maxHeight: room };
+    } else if (menu && box && boundary) {
+      const room = boundary() ?? seenBox(menu.ownerDocument.defaultView ?? window);
+      // Each side less the list's 6 px gap, 8 px from the room's edge and its border (FloatingSkillMenu's SIDE_CHROME).
+      const above = box.top - room.top - 16;
+      const below = room.bottom - box.bottom - 16;
+      // The list's own height, under the cap inbox.css gives it now.
+      const cap = parseFloat(getComputedStyle(menu).maxHeight);
+      const need = Math.min(menu.scrollHeight + 2, Number.isFinite(cap) ? cap : Infinity);
+      const down = need > above && (need <= below || below > above);
+      const space = Math.round(Math.max(TAG_LIST_LEAST, down ? below : above));
+      if (Number.isFinite(space)) next = { '--ib-tg-room': `${space}px`, ...(down ? { top: '100%', bottom: 'auto', margin: '6px 0 0' } : {}) } as CSSProperties;
     }
-    setStyle((current) =>
-      current &&
-      current.position === next.position &&
-      current.top === next.top &&
-      current.bottom === next.bottom &&
-      current.left === next.left &&
-      current.width === next.width &&
-      current.maxHeight === next.maxHeight &&
-      current.transform === next.transform
-        ? current
-        : next,
-    );
+    setStyle((current) => (JSON.stringify(current) === JSON.stringify(next) ? current : next));
   });
-  return style;
+  return { ref, style };
 }
 
 export function TagPicker({
@@ -156,21 +129,22 @@ export function TagPicker({
   menu,
   options,
   onSelect,
-  fieldRef,
+  field = null,
+  boundary,
 }: {
   id: string;
   menu: MentionMenuState;
   options: readonly TagOption[];
   onSelect: (index: number) => void;
-  /** The field the menu hangs off (the keyboard-up placement reads its foot); absent, it hangs off the anchor alone. */
-  fieldRef?: RefObject<HTMLTextAreaElement | null>;
+  /** The field the menu belongs to (the keyboard-up placement reads its foot). */
+  field?: HTMLTextAreaElement | null;
+  /** The room the menu stays inside, in viewport coordinates (FloatingSkillMenu's). */
+  boundary?: () => VerticalBox | null;
 }) {
   const byId = new Map(options.map((o) => [o.id, o]));
-  const spot = useMenuSpot(menu, fieldRef?.current ?? null);
-  // Nothing until the anchor is measured (the hook measures on open): a frame later the menu is placed from it.
-  if (!menu.anchor || !spot) return null;
+  const spot = useMenuSpot(field, boundary);
   return (
-    <div className="ib-tg-menu" data-tag-picker="" id={id} role="listbox" aria-label="Tag an agent" style={spot}>
+    <div ref={spot.ref} className="ib-tg-menu" data-tag-picker="" id={id} role="listbox" aria-label="Tag an agent" style={spot.style}>
       {menu.items.length === 0 ? (
         <p className="ib-tg-empty">{menu.emptyNotice ?? 'No agent matches.'}</p>
       ) : (

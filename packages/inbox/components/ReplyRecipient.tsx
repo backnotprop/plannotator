@@ -25,6 +25,7 @@ import { canAddRecipient, type RecipientRow } from '../replyRecipients';
 import type { SessionLabels } from '../sessionLabels';
 import { namesList } from '../tags';
 import { skillMenuHost } from './ComposerField';
+import { skillListRoom } from '../caretMenu';
 import { recipientNames, useRecipientLabels } from '../thread/recipientNames';
 import { TagStack } from './TagPicker';
 import { Tip } from './Tip';
@@ -79,9 +80,9 @@ const RPICK_LEAST = 56;
  * Where the list sits: fixed to the viewport from the pill's measured rect, never inside the reply box's own
  * boxes. The list hangs above the pill; drawn inside the foot it is cut at the pane's top edge (`.ib-pane`
  * clips) and in a short window not every agent shows (#3427). Above the pill by default; below it when the
- * pill sits too close to the top of the window for one whole row above it.
+ * pill sits too close to the thread's header for one whole row above it.
  */
-function useListSpot(pillRef: RefObject<HTMLButtonElement | null>, open: boolean): CSSProperties | undefined {
+function useListSpot(pillRef: RefObject<HTMLButtonElement | null>, open: boolean, wide: boolean): CSSProperties | undefined {
   const [style, setStyle] = useState<CSSProperties | undefined>(undefined);
   const measure = useCallback(() => {
     const pill = pillRef.current;
@@ -91,44 +92,24 @@ function useListSpot(pillRef: RefObject<HTMLButtonElement | null>, open: boolean
     }
     const view = pill.ownerDocument.defaultView ?? window;
     const rect = pill.getBoundingClientRect();
-    const width = Math.min(300, view.innerWidth - 24);
+    // inbox.css's widths: 300, or 360 with a "start a new session" row (`.ib-rpick:has([data-recipient-start])`).
+    const width = Math.min(wide ? 360 : 300, view.innerWidth - 24);
     const left = Math.max(12, Math.min(rect.right - width, view.innerWidth - width - 12));
-    let next: CSSProperties;
-    if (rect.top - RPICK_GAP >= RPICK_LEAST) {
-      next = {
-        position: 'fixed',
-        left,
-        width,
-        right: 'auto',
-        bottom: view.innerHeight - rect.top + RPICK_GAP,
-        top: 'auto',
-        margin: 0,
-        maxHeight: Math.max(RPICK_LEAST, rect.top - RPICK_GAP - 8),
-      };
-    } else {
-      next = {
-        position: 'fixed',
-        left,
-        width,
-        right: 'auto',
-        top: rect.bottom + RPICK_GAP,
-        bottom: 'auto',
-        margin: 0,
-        maxHeight: Math.max(RPICK_LEAST, view.innerHeight - rect.bottom - RPICK_GAP - 8),
-      };
-    }
-    setStyle((current) =>
-      current &&
-      current.position === next.position &&
-      current.top === next.top &&
-      current.bottom === next.bottom &&
-      current.left === next.left &&
-      current.width === next.width &&
-      current.maxHeight === next.maxHeight
-        ? current
-        : next,
-    );
-  }, [open, pillRef]);
+    // The room under the thread's header; `--ib-tg-room` caps the list to it, under inbox.css's own cap.
+    const room = skillListRoom(pill);
+    const above = rect.top - RPICK_GAP - room.top - 8;
+    const next: CSSProperties = {
+      position: 'fixed',
+      left,
+      width,
+      right: 'auto',
+      margin: 0,
+      ...(above >= RPICK_LEAST
+        ? { bottom: view.innerHeight - rect.top + RPICK_GAP, top: 'auto', '--ib-tg-room': `${Math.round(above)}px` }
+        : { top: rect.bottom + RPICK_GAP, bottom: 'auto', '--ib-tg-room': `${Math.round(Math.max(RPICK_LEAST, room.bottom - rect.bottom - RPICK_GAP - 8))}px` }),
+    } as CSSProperties;
+    setStyle((current) => (JSON.stringify(current) === JSON.stringify(next) ? current : next));
+  }, [open, pillRef, wide]);
   // Every commit (the box grows as the person types); the equality guard converges.
   useLayoutEffect(() => {
     measure();
@@ -180,7 +161,7 @@ export function ReplyRecipient({
 }) {
   const listId = useRef(`ib-rpick-${Math.random().toString(36).slice(2)}`).current;
   const pillRef = useRef<HTMLButtonElement | null>(null);
-  const spot = useListSpot(pillRef, open);
+  const spot = useListSpot(pillRef, open, rows.some((row) => row.start));
   const host = pillRef.current ? skillMenuHost(pillRef.current) : null;
   const chosenIds = chosen.map((r) => r.session);
   const one = chosen.length === 1 ? chosen[0]! : null;
