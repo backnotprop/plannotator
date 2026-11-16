@@ -8,8 +8,7 @@ import type { AgentFace } from './faceChoices';
 import { FAN_DWELL_MS, FAN_PRESS_MS, FaceFan, type FaceSources, type FanOpenedBy } from './FaceFan';
 import { AgentIconDialog, type AgentIconPlace } from './AgentIconDialog';
 import { agentFaceArtReady, agentRigOf, mountAgentMark, showAgentFace, unmountAgentMark } from './motion';
-import { ProjectTile, keptAgentFace, shownAgentFace, useAgentProjectTile } from './projectFace';
-import { useRowMarks } from '../letterMarks';
+import { ProjectTile, keptAgentFace, shownAgentFace, useAgentProjectTile, useProjectDefault } from './projectFace';
 
 export { loadAgentFaceArt } from './faceArtLoad';
 
@@ -35,12 +34,12 @@ export function AgentMark({ id, host, name, agent, picks = 'all' }: { id: string
   const [plain, setPlain] = useState<HTMLElement | null>(null);
   const kept = useAgentFace(id);
   // Agent icons "From the project name" (Settings → Rows): no face picked draws the project's tile (projectFace.tsx).
-  const { projectIcons } = useRowMarks();
-  const face = shownAgentFace(kept, projectIcons);
+  const projectDefault = useProjectDefault(id);
+  const face = shownAgentFace(kept, projectDefault);
   // The project's tile is a still in the mark's place; with nothing to draw, the agent's own mark, alive as ever.
-  const project = useAgentProjectTile(id);
+  const project = useAgentProjectTile(face === 'project' ? id : null);
   const tiled = face === 'project' && project !== null;
-  const moving = face === 'project' ? 'agent' : face;
+  const moving = face === 'project' || face === 'mark' ? 'agent' : face;
   const rig = agentRigOf(host);
   const clicked = useRef(false);
   useLayoutEffect(() => {
@@ -122,7 +121,7 @@ export function AgentMark({ id, host, name, agent, picks = 'all' }: { id: string
   };
   const choose = (next: AgentFace) => {
     clicked.current = true;
-    keepAgentFace(agent ?? id, keptAgentFace(next, projectIcons));
+    keepAgentFace(agent ?? id, keptAgentFace(next, projectDefault));
     closeFan();
   };
   const endPress = () => {

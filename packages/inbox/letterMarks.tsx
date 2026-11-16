@@ -88,8 +88,8 @@ function noLetters(parts: readonly string[], none: string): Letters {
 
 /** Two letters as one mark: both when both read as a pair, else the first alone. */
 function pairOf(first: string, second: string | null | undefined): Letters {
-  if (!second || !PAIRS.test(first) || !PAIRS.test(second)) return { text: first.toLocaleUpperCase(), kind: 'letters', count: 1 };
-  return { text: (first + second).toLocaleUpperCase(), kind: 'letters', count: 2 };
+  if (!second || !PAIRS.test(first) || !PAIRS.test(second)) return { text: first.toLocaleUpperCase('en-US'), kind: 'letters', count: 1 };
+  return { text: (first + second).toLocaleUpperCase('en-US'), kind: 'letters', count: 2 };
 }
 
 /** First and last letter of the name (the owner's rule), letters and digits only: emoji and punctuation are skipped. */
@@ -154,7 +154,7 @@ export type MarkSize = 12 | 14 | 16 | 20 | 24 | 30;
  * `letters` and `hue`: these in place of the name's and the seed's (an agent's project tile, agents/projectFace.tsx,
  * which sizes itself: no `size`).
  */
-export function LetterMark({ name, seed, size, solid = false, className, picture, letters: given, hue }: { name: string; seed: string; size?: MarkSize; solid?: boolean; className?: string; picture?: string | null; letters?: Letters; hue?: number }) {
+export function LetterMark({ name, seed, size, solid = false, className, picture, letters: given, hue, split = false }: { name: string; seed: string; size?: MarkSize; solid?: boolean; className?: string; picture?: string | null; letters?: Letters; hue?: number; split?: boolean }) {
   const letters = given ?? markLetters(name);
   // The picture covers the letters once it has loaded; until then, and when there is none (a 404), the letters show.
   const [loaded, setLoaded] = useState<string | null>(null);
@@ -170,9 +170,23 @@ export function LetterMark({ name, seed, size, solid = false, className, picture
       data-pic={shown ? '' : undefined}
       aria-hidden="true"
     >
-      {letters.text}
+      {split && letters.count === 2 ? <SplitLetters text={letters.text} /> : letters.text}
       {picture && <img src={picture} alt="" decoding="async" onLoad={() => setLoaded(picture)} onError={() => setLoaded(null)} />}
     </span>
+  );
+}
+
+/**
+ * Two letters, the second in its own span (`.ib-lm-2`): a box too small for two (an agent's project tile under 20 px,
+ * agents.css) hides it and shows the first alone.
+ */
+function SplitLetters({ text }: { text: string }) {
+  const [first, ...rest] = graphemesOf(text);
+  return (
+    <>
+      {first}
+      <span className="ib-lm-2">{rest.join('')}</span>
+    </>
   );
 }
 

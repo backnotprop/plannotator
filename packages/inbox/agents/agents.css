@@ -233,9 +233,14 @@
    agent's own mark rides on the corner from 20 px up: a container query on the tile, so a 16 px mark is the tile
    alone. The badge is a disc on the page colour with a thin ring of it, so it reads on any tile hue. */
 .ib-mk.ib-pf { position: relative; container-type: size; background: none; }
-.ib-mk.ib-pf > .ib-pf-t { width: 100%; height: 100%; border-radius: 28%; font-size: 44cqw; letter-spacing: -0.03em; }
-.ib-mk.ib-pf > .ib-pf-t[data-n="1"] { font-size: 54cqw; }
+/* Under 20 px one letter (the first), at the one-letter size: two would be 7 px on a 16 px tile. Two from 20 px up. */
+.ib-mk.ib-pf > .ib-pf-t { width: 100%; height: 100%; border-radius: 28%; font-size: 54cqw; letter-spacing: -0.03em; }
+.ib-mk.ib-pf > .ib-pf-t .ib-lm-2 { display: none; }
 .ib-mk.ib-pf > .ib-pf-t[data-kind="emoji"] { font-size: 60cqw; letter-spacing: 0; }
+@container (min-width: 19.5px) {
+  .ib-mk.ib-pf > .ib-pf-t[data-n="2"] { font-size: 44cqw; }
+  .ib-mk.ib-pf > .ib-pf-t .ib-lm-2 { display: inline; }
+}
 .ib-pf-b { display: none; position: absolute; right: -11cqw; bottom: -11cqw; width: 50cqw; height: 50cqw; border-radius: 50%; background: var(--background); box-shadow: 0 0 0 1.5px var(--background); align-items: center; justify-content: center; }
 .ib-pf-b > .ib-mk, .ib-pf-b > .ib-mk > :is(svg, img) { width: 78%; height: 78%; }
 .ib-pf-b > .ib-mk > :is(svg, img) { width: 100%; height: 100%; }

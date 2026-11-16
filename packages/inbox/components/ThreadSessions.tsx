@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FocusEvent, type KeyboardEvent, type PointerEvent } from 'react';
-import { useAgentFacesKey } from '../agents/agentFaces';
+import { agentTakesTiles, useAgentFacesKey } from '../agents/agentFaces';
 import type { AgentFace } from '../agents/faceChoices';
 import { shownAgentFace } from '../agents/projectFace';
 import { useRowMarks } from '../letterMarks';
@@ -71,7 +71,7 @@ export function ThreadSessions({ sessions, phone = false, agentFilter = null, on
   const live = new Map(inboxAgentsFlat(groups).map((a) => [`${a.machine ?? ''}\n${a.id}`, a.state] as const));
   // As each mark draws it (icons.tsx `HostMark`): Settings → Rows' "From the project name" decides what none shows.
   const { projectIcons } = useRowMarks();
-  const faces = useAgentFacesKey(sessions.map((s) => s.session)).split('\n').map((face) => shownAgentFace(face as AgentFace, projectIcons));
+  const faces = useAgentFacesKey(sessions.map((s) => s.session)).split('\n').map((face, i) => shownAgentFace(face as AgentFace, projectIcons && agentTakesTiles(sessions[i]?.session)));
   const looks = sessionLooks(sessions, faces);
   // How it was opened: a mouse resting on it closes when it leaves; a click, a tap or focus keeps it until it is
   // closed (Escape, a click or tap outside, focus leaving it, a second click on its marks).

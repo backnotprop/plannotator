@@ -11,15 +11,16 @@
  * it stays; with the setting at its default nothing changes: `agent` is the own mark, never kept, as before.
  *
  * The project: the Agents list's (an agent and every session it was), else the rows' (the project each session wrote
- * in, projectPictures.ts `sessionProjectOf`). Named as the window names it (`setWindowProjectNames`, app/useListView.ts:
- * "api · work" where two folders share a name), the letters from the name before " · ". The hue is keyed on the
- * lowercased label, so it is the same on every machine; projects on screen that would draw the same letters in the
- * same hue are sorted by that key and each next one steps three hues round the wheel until it is free.
+ * in, projectPictures.ts `sessionProjectOf`). Its letters and its hue come from the project's own name alone (lowercased,
+ * NFC), so a tile is the same colour on every machine and never changes because another project appeared, a filter
+ * changed or the list reordered (review of #3503, 2026-11-16: stability won over stepping the hue of same-letter
+ * projects apart). A linked machine from before tiles keeps its agents' own marks (`useProjectDefault`).
  */
 import { useEffect, useState } from 'react';
 import { HostMark as UiHostMark } from '@plannotator/ui/components/inbox-thread/icons';
 import type { AgentFace } from './faceChoices';
-import { HUES, LetterMark, hueOf, projectLetters, type Letters } from '../letterMarks';
+import { LetterMark, hueOf, projectLetters, useRowMarks, type Letters } from '../letterMarks';
+import { useAgentFace, useAgentTakesTiles } from './agentFaces';
 import { inboxAgentsFlat, inboxAgentsNow, onInboxAgentsSet } from '../agentsList';
 import { onSessionProjects, sessionProjectOf } from '../projectPictures';
 
@@ -40,29 +41,36 @@ export function keptAgentFace(chosen: AgentFace, projectDefault: boolean): Agent
   return chosen;
 }
 
+/**
+ * Whether "From the project name" draws this agent when it has no face picked: the Rows setting is on and the machine
+ * the agent is on keeps a tile choice (agentFaces.ts `useAgentTakesTiles`). A linked machine from before tiles could not
+ * keep the own mark picked back, so its agents keep their own marks there and are offered no tile.
+ */
+export function useProjectDefault(agent: string | null | undefined): boolean {
+  const { projectIcons } = useRowMarks();
+  const takes = useAgentTakesTiles(agent);
+  return projectIcons && takes;
+}
+
+/** The face an agent's icon draws now: its kept face, with the Rows setting deciding what none shows. */
+export function useShownAgentFace(agent: string | null | undefined): AgentFace {
+  const kept = useAgentFace(agent);
+  const projectDefault = useProjectDefault(agent);
+  return agent ? shownAgentFace(kept, projectDefault) : kept;
+}
+
 // ── the projects the window knows, and who listens ──
 
 type Project = { id: string | null; name: string };
-let windowNames: ReadonlyMap<string, string> = new Map();
+export type ProjectTileLook = { label: string; letters: Letters; hue: number };
 let byAgent: Map<string, Project> | null = null;
-let hues: Map<string, number> | null = null;
 let version = 0;
 let watching = false;
 const listeners = new Set<() => void>();
 
 function changed(): void {
-  hues = null;
   version++;
   for (const listener of [...listeners]) listener();
-}
-
-/** The window's one name per project (app/useListView.ts `projectNames`): the tiles' labels and the projects on screen. */
-export function setWindowProjectNames(names: ReadonlyMap<string, string>): void {
-  if (names === windowNames) return;
-  const same = names.size === windowNames.size && [...names].every(([id, name]) => windowNames.get(id) === name);
-  windowNames = names;
-  // The list draws a new map at every change; only a different name redraws the tiles.
-  if (!same) changed();
 }
 
 function watch(): void {
@@ -87,48 +95,37 @@ function agentProjects(): Map<string, Project> {
   return byAgent;
 }
 
-const labelOf = (project: Project) => (project.id ? windowNames.get(project.id) : undefined) || project.name;
-
-/** The project label of an agent, by any id it has; null when nothing says where it works. */
+/**
+ * The project's own name for an agent, by any id it has; null when nothing says where it works. The name the Inbox
+ * keeps for the project (its folder's or repository's), the same on every machine: never the window's label for it,
+ * which adds " · work" while two folders share a name and " · <machine>" for a linked machine's.
+ */
 export function agentProjectLabel(agent: string | null | undefined): string | null {
   if (!agent) return null;
-  const project = agentProjects().get(agent) ?? sessionProjectOf(agent);
-  return project ? labelOf(project) : null;
+  return (agentProjects().get(agent) ?? sessionProjectOf(agent))?.name ?? null;
 }
 
 // ── the hue ──
 
-/** The hue's key: the whole label, spaces folded, lowercased the same way everywhere. */
-export const projectSeed = (label: string) => label.normalize('NFC').trim().replace(/\s+/g, ' ').toLocaleLowerCase('en-US');
+/** The hue's key: the project's name, spaces folded, NFC, lowercased the same way everywhere. */
+export const projectSeed = (name: string) => name.normalize('NFC').trim().replace(/\s+/g, ' ').toLocaleLowerCase('en-US');
+
+const tiles = new Map<string, ProjectTileLook | null>();
 
 /**
- * Each label's hue (0 to 7) among `labels`: its own (`hueOf` of its key), but when labels with the same letters share
- * a hue, sorted by key, the first keeps it and each next one steps three hues until it is free.
+ * A project's tile: its letters and its hue, both from its name alone (`projectSeed`), so a tile never changes colour
+ * because another project appeared, two folders came to share a name, the list was filtered by machine or reordered.
+ * Two projects whose names hash alike share a hue; the name beside the tile tells them apart. Null: a name with nothing
+ * to draw.
  */
-export function projectHues(labels: Iterable<string>): Map<string, number> {
-  const out = new Map<string, number>();
-  const groups = new Map<string, string[]>();
-  for (const label of new Set(labels)) {
-    const key = projectLetters(label).text;
-    groups.set(key, [...(groups.get(key) ?? []), label]);
-  }
-  for (const group of groups.values()) {
-    group.sort((a, b) => (projectSeed(a) < projectSeed(b) ? -1 : projectSeed(a) > projectSeed(b) ? 1 : 0));
-    const taken = new Set<number>();
-    for (const label of group) {
-      let hue = hueOf(projectSeed(label));
-      for (let step = 0; step < HUES && taken.has(hue); step++) hue = (hue + 3) % HUES;
-      taken.add(hue);
-      out.set(label, hue);
-    }
-  }
-  return out;
-}
-
-/** A label's hue among the projects on screen (the window's names and the Agents list's). */
-function hueFor(label: string): number {
-  hues ??= projectHues([...windowNames.values(), ...[...agentProjects().values()].map(labelOf)]);
-  return hues.get(label) ?? hueOf(projectSeed(label));
+export function projectTileOf(name: string): ProjectTileLook | null {
+  const held = tiles.get(name);
+  if (held !== undefined) return held;
+  const letters = projectLetters(name);
+  const tile = letters.kind === 'none' ? null : { label: name, letters, hue: hueOf(projectSeed(name)) };
+  if (tiles.size > 500) tiles.clear();
+  tiles.set(name, tile);
+  return tile;
 }
 
 function subscribe(listener: () => void): () => void {
@@ -138,34 +135,35 @@ function subscribe(listener: () => void): () => void {
 }
 
 /**
- * The tile an agent would draw: its label and letters, or null (no project known, or a name with nothing to draw).
+ * The tile an agent would draw, or null (no project known, or a name with nothing to draw). Null `agent`: none, and
+ * nothing heard (an icon that shows no tile asks for none).
  *
  * Plain state, never `useSyncExternalStore` (as agentsList.ts `useInboxAgents`): a list read sets the agents and the
  * sessions' projects mid-read, and a store would draw at once, before the read moves a snoozed row to its band; the
  * row menu would then see its write land with the row still on screen and drop focus to the page (rowMenu.test.tsx).
  */
-export function useAgentProjectTile(agent: string | null | undefined): { label: string; letters: Letters; hue: number } | null {
+export function useAgentProjectTile(agent: string | null | undefined): ProjectTileLook | null {
   const [, setSeen] = useState(version);
+  const on = !!agent;
   useEffect(() => {
+    if (!on) return;
     const read = () => setSeen(version);
     // A change between the first draw and this subscription.
     read();
     return subscribe(read);
-  }, []);
-  const label = agentProjectLabel(agent);
-  if (!label) return null;
-  const letters = projectLetters(label);
-  return letters.kind === 'none' ? null : { label, letters, hue: hueFor(label) };
+  }, [on]);
+  const name = agentProjectLabel(agent);
+  return name ? projectTileOf(name) : null;
 }
 
 /**
  * The tile in a mark's box (icons.tsx `.ib-mk`, its sizes): the project's letters, and `host`'s own mark on the
  * corner where the box is 20 px or more. Decorative, as every mark: the agent's name is in words beside it.
  */
-export function ProjectTile({ tile, host, big, badge = true }: { tile: { label: string; letters: Letters; hue: number }; host: string | null | undefined; big?: boolean; badge?: boolean }) {
+export function ProjectTile({ tile, host, big, badge = true }: { tile: ProjectTileLook; host: string | null | undefined; big?: boolean; badge?: boolean }) {
   return (
     <span className={`ib-mk${big ? ' ib-big' : ''} ib-face ib-pf`} data-agent-face="project">
-      <LetterMark name={tile.label} seed={projectSeed(tile.label)} letters={tile.letters} hue={tile.hue} solid className="ib-pf-t" />
+      <LetterMark name={tile.label} seed={projectSeed(tile.label)} letters={tile.letters} hue={tile.hue} solid split className="ib-pf-t" />
       {badge && (
         <span className="ib-pf-b" aria-hidden="true">
           <UiHostMark host={host} />
@@ -181,9 +179,9 @@ export function ProjectFaceMark({ agent, host, big, badge = true }: { agent: str
   return tile ? <ProjectTile tile={tile} host={host} big={big} badge={badge} /> : <UiHostMark host={host} big={big} />;
 }
 
-/** Tests: forget the window's names and the Agents list's projects. */
+/** Tests: forget the Agents list's projects. */
 export function resetProjectFaces(): void {
-  windowNames = new Map();
   byAgent = null;
+  tiles.clear();
   changed();
 }

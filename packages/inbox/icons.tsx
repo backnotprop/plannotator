@@ -11,9 +11,7 @@
 import type { InboxAuthor } from '@plannotator/core/inbox-types';
 import { HostMark as UiHostMark } from '@plannotator/ui/components/inbox-thread/icons';
 import type { CSSProperties } from 'react';
-import { useAgentFace } from './agents/agentFaces';
-import { ProjectFaceMark, shownAgentFace } from './agents/projectFace';
-import { useRowMarks } from './letterMarks';
+import { ProjectFaceMark, useShownAgentFace } from './agents/projectFace';
 import { useAgentFaceSources } from './agents/faceArtLoad';
 import { isOwnFace, type AgentFace, type OurFace, type OwnFace } from './agents/faceChoices';
 import { ownIconSrc } from './agents/ownIcons';
@@ -27,9 +25,7 @@ export * from '@plannotator/ui/components/inbox-thread/icons';
  * icons "From the project name", its project's tile (agents/projectFace.tsx).
  */
 export function HostMark({ host, big, agent }: { host: string | null | undefined; big?: boolean; agent?: string | null }) {
-  const kept = useAgentFace(agent);
-  const { projectIcons } = useRowMarks();
-  return <FaceOfMark host={host} big={big} face={agent ? shownAgentFace(kept, projectIcons) : kept} agent={agent} />;
+  return <FaceOfMark host={host} big={big} face={useShownAgentFace(agent)} agent={agent} />;
 }
 
 /** A given face in a mark's box (HostMark draws the agent's own; a preview draws one not kept yet). `agent`: whose project a `project` face draws. */

@@ -5,7 +5,11 @@
  * the agent icons"); the setting drawing over a face someone picked, or over the own mark picked under it; a tile with
  * the wrong letters, no corner badge, or one for an agent whose project has nothing to draw; an agent the Agents list
  * no longer names losing its project (the rows say it); the picker lacking the choice, offering it second but for
- * nothing, or the keys not reaching it; a choice there not kept, or the own mark under the setting kept as nothing.
+ * nothing, or the keys not reaching it; a choice there not kept, or the own mark under the setting kept as nothing;
+ * a tile choice sent as a face (an older Plannotator drops the whole entry); knowing an agent's project changing
+ * anything with the setting untouched in any place its icon is drawn (the sidebar, rows, the reply box's pill and
+ * mark, the thread header's pile, the picker's checked face); a linked machine from before tiles drawn a tile it
+ * could not keep the own mark back over, offered one, or sent one (it refuses it with 422).
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt. No server: fetch answers here.
  */
@@ -31,6 +35,9 @@ const { setInboxAgents } = await import('../agentsList');
 const { learnProjects, resetKnownProjectsForTests } = await import('../projectPictures');
 const { LIST_LOOK_DEFAULT, adoptSavedRows, resetListLookForTests } = await import('../listLook');
 const { setStorageBackend, resetStorageBackend } = await import('@plannotator/ui/utils/storage');
+const pill = (hasDom ? await import('../components/AgentPill') : {}) as typeof import('../components/AgentPill');
+const header = (hasDom ? await import('../components/ThreadSessions') : {}) as typeof import('../components/ThreadSessions');
+const { setSelfMachine } = await import('../inboxUrl');
 
 const realFetch = globalThis.fetch;
 const sent: unknown[] = [];
@@ -57,7 +64,7 @@ beforeEach(() => {
   faces.resetAgentFaces();
   setInboxAgents([{ agents: [agent('ses_o', 'orchard'), agent('ses_p', 'glass-picked'), agent('ses_m', 'mark-picked'), agent('ses_n', '___'), agent('ses_x', null)], total: 5, ended_today: 0 }]);
   // Faces people picked: Red glass for one, the own mark (kept under the setting) for another.
-  faces.hearAgentFacesEvent({ faces: { ses_p: { face: 'glass-red', sessions: [] }, ses_m: { face: 'mark', sessions: [] } }, rev: 1 });
+  faces.hearAgentFacesEvent({ faces: { ses_p: { face: 'glass-red', sessions: [] }, ses_m: { face: 'agent', tile: 'mark', sessions: [] } }, rev: 1 });
 });
 
 afterEach(() => {
@@ -103,6 +110,9 @@ test.skipIf(!hasDom)('"From the project name": the project\'s letters on its hue
   expect(tile.getAttribute('data-agent-face')).toBe('project');
   const letters = tile.querySelector('.ib-lm')!;
   expect([letters.textContent, letters.getAttribute('data-hue'), letters.hasAttribute('data-solid'), letters.getAttribute('aria-hidden')]).toEqual(['OD', String(marks.hueOf('orchard')), true, 'true']);
+  // The second letter in its own span: a tile under 20 px shows the first alone (agents.css; projectFace.test.ts reads the rule).
+  expect(letters.querySelector('.ib-lm-2')!.textContent).toBe('D');
+  expect(markOf('ses_n', true).querySelector('.ib-lm-2')).toBeNull();
   // The badge is the agent's own mark, the same drawing as its plain mark.
   expect(tile.querySelector('.ib-pf-b')!.innerHTML).toBe(plain());
 });
@@ -157,6 +167,7 @@ test.skipIf(!hasDom)('the picker offers "From the project name" second, by the k
   key(choice, 'Enter');
   act(() => choice.click());
   await until(() => faces.agentFaceOf('ses_o') === 'project', 'the face kept');
+  expect(sent).toContainEqual({ agent: 'ses_o', sessions: [], face: 'agent', tile: 'project' });
   await until(() => !!document.querySelector('[data-agent-tile="ses_o"] .ib-pf'), 'the tile on the mark');
   // An agent whose project has nothing to draw is offered no tile.
   act(() => root?.unmount());
@@ -176,6 +187,84 @@ test.skipIf(!hasDom)('under the setting the tile is checked for an agent with no
   expect(radios().filter((r) => r.getAttribute('aria-checked') === 'true').map((r) => r.getAttribute('data-face-choice'))).toEqual(['project']);
   act(() => radios()[0]!.click());
   await until(() => faces.agentFaceOf('ses_o') === 'mark', 'the own mark kept');
-  expect(sent.some((body) => (body as { agent?: string; face?: string }).agent === 'ses_o' && (body as { face?: string }).face === 'mark')).toBe(true);
+  // Kept beside the own mark, which a Plannotator from before tiles reads as the own mark (it keeps the entry's name).
+  expect(sent).toContainEqual({ agent: 'ses_o', sessions: [], face: 'agent', tile: 'mark' });
   await until(() => !document.querySelector('[data-agent-tile="ses_o"] .ib-pf'), 'the own mark back');
+});
+
+/** Every place an agent's icon is drawn, for one agent: the sidebar's mark, a row's (and an author's) mark, the reply
+ *  box's pill and mark, the thread header's pile. */
+function everywhere(id: string, other: string, fromProject: boolean): HTMLElement {
+  const sessions = [id, other].map((session) => ({ session, sessions: [session], host: 'claude-code', machine: null, agentId: session, name: session, state: 'idle' as const }));
+  return draw(
+    <marks.RowMarksScope look={{ ...LIST_LOOK_DEFAULT, agentProjectIcons: fromProject }}>
+      <div className="ib-sbagent">
+        <AgentMark id={id} host="claude-code" name="Refactor sync engine" />
+      </div>
+      <icons.HostMark host="claude-code" agent={id} />
+      <icons.HostMark host="claude-code" agent={id} big />
+      <pill.AgentPill host="claude-code" agent={id} label="Refactor sync engine" />
+      <pill.AgentMark host="claude-code" agent={id} count={2} />
+      <header.ThreadSessions sessions={sessions} />
+    </marks.RowMarksScope>,
+  );
+}
+
+test.skipIf(!hasDom)('with the setting untouched, knowing an agent\'s project changes nothing anywhere its icon is drawn', async () => {
+  const known = everywhere('ses_o', 'ses_q', false).innerHTML;
+  expect(known).not.toMatch(/ib-pf|data-agent-tile|hidden=""|data-agent-face="project"/);
+  // The same agents with no project anywhere (neither the Agents list nor the rows say one).
+  act(() => setInboxAgents([{ agents: [agent('ses_o', null), agent('ses_q', null)], total: 2, ended_today: 0 }]));
+  resetKnownProjectsForTests();
+  expect(everywhere('ses_o', 'ses_q', false).innerHTML).toBe(known);
+  // The picker shows the own mark as the agent's face (the tile is offered, not shown).
+  act(() => setInboxAgents([{ agents: [agent('ses_o', 'orchard'), agent('ses_q', 'orchard')], total: 2, ended_today: 0 }]));
+  key(sidebarMark('ses_o'), 'Enter');
+  await until(() => radios().length > 0, 'the picker');
+  expect(radios().filter((r) => r.getAttribute('aria-checked') === 'true').map((r) => r.getAttribute('data-face-choice'))).toEqual(['agent']);
+  // And the same places do draw the tile under the setting: the comparison above can see one.
+  act(() => root?.unmount());
+  root = null;
+  document.body.innerHTML = '';
+  const on = everywhere('ses_o', 'ses_q', true);
+  expect(on.querySelectorAll('.ib-pf').length).toBeGreaterThanOrEqual(5);
+});
+
+test.skipIf(!hasDom)('an agent on a linked machine from before tiles keeps its own mark under the setting, is offered no tile, and is sent none', async () => {
+  const SELF = `ibx_01K${'0'.repeat(22)}S`;
+  const OLD = `ibx_01K${'0'.repeat(22)}O`;
+  const NEW = `ibx_01K${'0'.repeat(22)}N`;
+  setSelfMachine(SELF);
+  act(() =>
+    setInboxAgents([
+      { machine: SELF, agents: [agent('ses_o', 'orchard')], total: 1, ended_today: 0 },
+      // 0.28.66: faces, and no `face_tiles`.
+      { machine: OLD, agents: [agent('ses_far', 'kestrel')], total: 1, ended_today: 0, faces: {}, faces_rev: 1 },
+      { machine: NEW, agents: [agent('ses_new', 'tidepool-web')], total: 1, ended_today: 0, faces: {}, faces_rev: 1, face_tiles: true },
+    ]),
+  );
+  await wait(0);
+  expect(markOf('ses_far', true).innerHTML).toBe(plain());
+  expect(markOf('ses_new', true).querySelector('.ib-pf .ib-lm')!.textContent).toBe('TW');
+  expect(markOf('ses_o', true).querySelector('.ib-pf .ib-lm')!.textContent).toBe('OD');
+  key(sidebarMark('ses_far'), 'Enter');
+  await until(() => radios().length > 0, 'the picker');
+  const choices = radios().map((r) => r.getAttribute('data-face-choice'));
+  expect(choices).not.toContain('project');
+  expect(radios().filter((r) => r.getAttribute('aria-checked') === 'true').map((r) => r.getAttribute('data-face-choice'))).toEqual(['agent']);
+  // Even asked to, the store sends that machine only what it keeps: the own mark as `agent`, never a tile.
+  sent.length = 0;
+  faces.keepAgentFace('ses_far', 'mark');
+  faces.keepAgentFace('ses_far', 'project');
+  await wait(0);
+  // (A forward to a linked machine carries its own idempotency key: not part of the change.)
+  const changes = () => sent.map((body) => Object.fromEntries(Object.entries(body as Record<string, unknown>).filter(([k]) => k !== 'idempotency_key')));
+  expect(changes().filter((body) => body.agent === 'ses_far')).toEqual([
+    { agent: 'ses_far', sessions: [], face: 'agent' },
+    { agent: 'ses_far', sessions: [], face: 'agent' },
+  ]);
+  // A machine that keeps tiles is sent the tile.
+  faces.keepAgentFace('ses_new', 'project');
+  await wait(0);
+  expect(changes()).toContainEqual({ agent: 'ses_new', sessions: [], face: 'agent', tile: 'project' });
 });

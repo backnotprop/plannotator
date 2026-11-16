@@ -9,6 +9,7 @@ import { isSetFace, setArtStyle, setFaceDrawing } from './iconSets';
 import { FAN_OPTIONS, fanLayout, type FanOptions, type FanSpot } from './fanLayout';
 import { focusBackTo } from './focusBack';
 import { PROJECT_FACE_LABEL, ProjectFaceMark, useAgentProjectTile } from './projectFace';
+import { useAgentTakesTiles } from './agentFaces';
 
 /**
  * The face picker: a half-circle fan of an agent mark's faces round the mark, like a sundial's upper half laid on its
@@ -109,7 +110,9 @@ export function FaceFan({ anchor, open, openedBy, host, agent, name, face, sourc
   }, [open, anchor]);
   const touch = openedBy === 'touch';
   const own = onOwn !== undefined;
-  const project = useAgentProjectTile(agent) !== null;
+  // Offered for an agent with a project, on a machine that keeps a tile (a linked one from before tiles keeps none).
+  const takesTiles = useAgentTakesTiles(agent);
+  const project = useAgentProjectTile(agent) !== null && takesTiles;
   const arcs = useMemo(() => (place ? fanArcs(place.rect.left + place.rect.width / 2, place.rect.top + place.rect.height / 2, place.w, place.h, touch, own, project) : null), [place, touch, own, project]);
   const order = useMemo<FanChoice[]>(() => arcs?.faces.flat() ?? [], [arcs]);
   // The dial's plate: a half disc out past the farthest choice, turned the way the fan opens.
