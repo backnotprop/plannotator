@@ -18,6 +18,7 @@ import { DRAWING_SCREEN, KeptMarkup, markupAddedToast, OverWindow, type Notice }
 import { useRowDraft } from '../fileCommentDrafts';
 import { markImageComposer } from '../pageMarks';
 import { AudioScrub, useAudioPeaks } from './AudioPlayer';
+import { PlaybackSpeed, readPlaybackRate, writePlaybackRate } from './PlaybackSpeed';
 
 /** A fresh annotation id. */
 function newId(): string {
@@ -125,6 +126,8 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
   const [failed, setFailed] = useState(false);
   const [focused, setFocused] = useState(false);
   const [playing, setPlaying] = useState(false);
+  /** The speed it plays at: the one picked earlier in this tab, else 1x. */
+  const [rate, setRate] = useState(readPlaybackRate);
   // Words, the pinned moment, its frame and a drawing the row held when this file last closed: back in it, and
   // read again as it closes.
   const waiting = useRowDraft(() => (readOnly || sentWords.current === text ? null : { kind: 'row', text, markup, time: pinned, frame: frameRef.current?.blob ?? null }));
@@ -176,6 +179,18 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
       return next;
     });
   }, []);
+
+  // The speed holds through a new source too (the default is what a load resets to).
+  useEffect(() => {
+    const media = videoRef.current;
+    if (!media) return;
+    media.defaultPlaybackRate = rate;
+    media.playbackRate = rate;
+  }, [rate, failed]);
+  const pickRate = (next: number) => {
+    setRate(next);
+    writePlaybackRate(next);
+  };
 
   const sorted = useMemo(() => [...annotations].filter((a) => readInboxVideoTime(a) !== null).sort(compareVideoTimes), [annotations]);
   const span = duration && Number.isFinite(duration) && duration > 0 ? duration : null;
@@ -496,6 +511,11 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
       void pin();
     },
     onEnded: () => setPlaying(false),
+    // A speed picked in the browser's own player menu shows on the button, and holds for the next file.
+    onRateChange: (event: SyntheticEvent<HTMLMediaElement>) => {
+      const next = event.currentTarget.playbackRate;
+      if (next !== rate && Number.isFinite(next) && next > 0) pickRate(next);
+    },
     onSeeked: (event: SyntheticEvent<HTMLMediaElement>) => setCurrent(event.currentTarget.currentTime),
     onError: (event: SyntheticEvent<HTMLMediaElement>) => {
       const code = event.currentTarget.error?.code;
@@ -586,6 +606,7 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
           {formatInboxVideoTime(current)}
           {span !== null && <span className="ib-mut"> / {formatInboxVideoTime(span)}</span>}
         </span>
+        <PlaybackSpeed rate={rate} onRate={pickRate} className="ib-speed-aud" />
       </div>
       {phoneMeta}
     </div>
@@ -601,6 +622,7 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}
       />
+      <PlaybackSpeed rate={rate} onRate={pickRate} className="ib-speed-vid" />
       {phoneMeta}
       {rail}
     </div>

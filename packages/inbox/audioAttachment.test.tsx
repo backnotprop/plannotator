@@ -16,6 +16,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import type { InboxAnnotationRecord, InboxAttachmentState } from '@plannotator/core/inbox-types';
 import { attachmentFeedback, videoCommentAnnotation } from './attachments';
 import { AUDIO_PEAK_BARS, audioPeaksOf } from './components/AudioPlayer';
+import { PLAYBACK_RATE_KEY } from './components/PlaybackSpeed';
 
 const hasDom = typeof document !== 'undefined';
 const { AttachmentPane } = (hasDom ? await import('./components/AttachmentPane') : {}) as typeof import('./components/AttachmentPane');
@@ -301,6 +302,20 @@ test.skipIf(!hasDom)('the waveform is drawn from the decoded peaks of a small fi
   expect(host!.querySelector('[data-audio-scrub]')!.hasAttribute('data-waveform')).toBe(false);
   expect(host!.querySelector('[data-audio-scrub] .ib-audline')).not.toBeNull();
   expect(fetched.filter((url) => url.endsWith('/audio'))).toEqual([]);
+});
+
+test.skipIf(!hasDom)('a recording has the same speed button after its time; a pick plays it at that speed', async () => {
+  globalThis.fetch = notFound;
+  restores.push(() => window.sessionStorage.removeItem(PLAYBACK_RATE_KEY));
+  window.sessionStorage.removeItem(PLAYBACK_RATE_KEY);
+  await render(pane([]));
+  const button = () => host!.querySelector<HTMLButtonElement>('.ib-audrow [data-playback-speed]')!;
+  expect(button().textContent).toBe('1x');
+  act(() => button().click());
+  await act(async () => new Promise((resolve) => setTimeout(resolve, 20)));
+  await act(async () => document.querySelector<HTMLElement>('[data-playback-speed-menu] [data-playback-rate="1.7"]')!.click());
+  expect(host!.querySelector<HTMLAudioElement>('audio')!.playbackRate).toBe(1.7);
+  expect(button().textContent).toBe('1.7x');
 });
 
 test.skipIf(!hasDom)('a recording the browser cannot play shows the Download card', async () => {
