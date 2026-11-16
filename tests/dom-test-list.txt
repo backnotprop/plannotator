@@ -102,6 +102,7 @@ packages/inbox/decisionMode.test.tsx
 packages/inbox/decisionCardContract.test.tsx
 packages/inbox/threadFolding.test.tsx
 packages/inbox/threadNameMeta.test.tsx
+packages/inbox/components/stalePageNotice.test.tsx
 packages/inbox/threadHeader.test.tsx
 packages/inbox/snoozeBackLine.test.tsx
 packages/inbox/launchMenuTailnet.test.tsx

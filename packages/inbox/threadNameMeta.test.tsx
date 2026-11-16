@@ -100,14 +100,20 @@ const pill = () => meta()?.querySelector<HTMLElement>('.ib-key') ?? null;
 const bar = () => host!.querySelector<HTMLElement>('[data-header-subject]');
 /** The bar title's words: its tooltip hangs on them, not on the box that takes the bar's free room. */
 const barWords = () => bar()!.querySelector<HTMLElement>('[data-header-title]');
+/** The name the title leads with, and the subject after it in the same line (muted). */
+const nameWords = () => bar()!.querySelector<HTMLElement>('[data-header-name-words]');
+const after = () => bar()!.querySelector<HTMLElement>('[data-header-after]');
 /** A heading in the body: none any more. */
 const heading = () => host!.querySelector<HTMLElement>('.ib-pbody h2');
 
 // The owner's call on approval "inbox-thread-header" (2026-11-02): the top bar shows the thread's name by the list's rule
-// (`threadChipName`), so the meta line no longer repeats it as a pill.
-test.skipIf(!hasDom)('a named thread: the bar shows its name, no heading in the body, and the meta line no pill', async () => {
+// (`threadChipName`), so the meta line no longer repeats it as a pill. The subject follows the name in the same line,
+// so it is on screen, not only in a tooltip (review of #3528).
+test.skipIf(!hasDom)('a named thread: the bar shows its name and then its subject, no heading in the body, and the meta line no pill', async () => {
   await render(thread('session-refresh', 3));
-  expect(bar()!.querySelector('[data-header-title]')!.textContent).toBe('session-refresh');
+  expect(nameWords()!.textContent).toBe('session-refresh');
+  expect(after()!.textContent).toBe(SUBJECT);
+  expect(barWords()!.textContent).toBe(`session-refresh ${SUBJECT}`);
   expect(heading()).toBeNull();
   expect(pill()).toBeNull();
   expect([...meta()!.children].map((el) => el.hasAttribute('data-thread-meta-rest'))).toEqual([true]);
@@ -126,15 +132,15 @@ test.skipIf(!hasDom)("no name, or a subject that already starts with the name: n
   // The list's rule: a name that only starts a longer word of the subject still shows.
   draw(thread('the refresh', 3, 'The refreshed guard is in.'));
   await settle();
-  expect(barWords()!.textContent).toBe('the refresh');
+  expect(nameWords()!.textContent).toBe('the refresh');
 });
 
 test.skipIf(!hasDom)('a rename while the thread is open shows the new name; a name taken away puts the subject back', async () => {
   await render(thread('session-refresh', 2));
-  expect(barWords()!.textContent).toBe('session-refresh');
+  expect(nameWords()!.textContent).toBe('session-refresh');
   draw(thread('auth: token refresh', 2));
   await settle();
-  expect(barWords()!.textContent).toBe('auth: token refresh');
+  expect(nameWords()!.textContent).toBe('auth: token refresh');
   expect(pill()).toBeNull();
   draw(thread(null, 2));
   await settle();
@@ -145,7 +151,7 @@ test.skipIf(!hasDom)('a rename while the thread is open shows the new name; a na
 test.skipIf(!hasDom)('a one-message thread has no meta line, and its title is in the bar either way, never a heading in the body', async () => {
   await render(thread('session-refresh', 1));
   expect(meta()).toBeNull();
-  expect(barWords()!.textContent).toBe('session-refresh');
+  expect(nameWords()!.textContent).toBe('session-refresh');
   draw(thread(null, 1));
   await settle();
   expect(meta()).toBeNull();
@@ -153,9 +159,12 @@ test.skipIf(!hasDom)('a one-message thread has no meta line, and its title is in
   expect(heading()).toBeNull();
 });
 
-test.skipIf(!hasDom)('the bar shows the title at the top, scrolled or not; its tooltip the whole subject under a name, else only when cut', async () => {
+test.skipIf(!hasDom)('the bar shows the title at the top, scrolled or not; its tooltip the subject only when the line is cut, named or not', async () => {
   await render(thread('session-refresh', 1));
   expect(bar()!.hasAttribute('title')).toBe(false);
+  expect(await tooltipOf(barWords()!)).toBeNull();
+  unhover(barWords()!);
+  sized(barWords()!, 900, 120);
   expect(await tooltipOf(barWords()!)).toBe(SUBJECT);
   unhover(barWords()!);
   draw(thread(null, 3));
@@ -166,6 +175,76 @@ test.skipIf(!hasDom)('the bar shows the title at the top, scrolled or not; its t
   unhover(barWords()!);
   sized(barWords()!, 900, 120);
   expect(await tooltipOf(barWords()!)).toBe(SUBJECT);
+});
+
+/**
+ * The title's words cut (`cut`) or not, as the browser would measure them (whichever element holds them, the span or
+ * the button), and measured again. Open, they wrap and measure uncut.
+ */
+let cutNow = false;
+const widths = ['scrollWidth', 'clientWidth'] as const;
+const savedWidths = widths.map((key) => Object.getOwnPropertyDescriptor(HTMLElement.prototype, key));
+function cutTo(cut: boolean) {
+  cutNow = cut;
+  for (const key of widths) {
+    const saved = savedWidths[widths.indexOf(key)];
+    Object.defineProperty(HTMLElement.prototype, key, {
+      configurable: true,
+      get(this: HTMLElement) {
+        if (this.hasAttribute('data-header-title')) return key === 'clientWidth' ? 120 : cutNow && !this.closest('[data-open]') ? 900 : 120;
+        return saved?.get?.call(this) ?? 0;
+      },
+    });
+  }
+  act(() => void window.dispatchEvent(new Event('resize')));
+}
+afterEach(() => {
+  for (const [i, key] of widths.entries()) if (savedWidths[i]) Object.defineProperty(HTMLElement.prototype, key, savedWidths[i]!);
+});
+
+// Review of #3528: a phone has no hover, so a cut title must open by a tap. No key of its own: it is a button.
+test.skipIf(!hasDom)('a cut title is a button: a click opens it whole, wrapped, and another closes it; one that fits is no button', async () => {
+  for (const name of ['session-refresh', null]) {
+    await render(thread(name, 2));
+    expect(barWords()!.tagName).toBe('SPAN');
+    expect(bar()!.querySelector('button')).toBeNull();
+    cutTo(true);
+    const button = barWords()!;
+    expect(button.tagName).toBe('BUTTON');
+    expect(button.getAttribute('aria-expanded')).toBe('false');
+    expect(bar()!.hasAttribute('data-open')).toBe(false);
+    act(() => button.click());
+    expect(bar()!.hasAttribute('data-open')).toBe(true);
+    expect(barWords()).toBe(button);
+    expect(button.getAttribute('aria-expanded')).toBe('true');
+    // Open, the words wrap and cut nothing: still the same button, which closes it, focus kept.
+    button.focus();
+    act(() => void window.dispatchEvent(new Event('resize')));
+    expect(barWords()).toBe(button);
+    act(() => button.click());
+    expect(bar()!.hasAttribute('data-open')).toBe(false);
+    expect(barWords()).toBe(button);
+    expect(document.activeElement).toBe(button);
+    // Room again: plain words.
+    cutTo(false);
+    expect(barWords()!.tagName).toBe('SPAN');
+    act(() => root?.unmount());
+    host?.remove();
+    root = null;
+    if (savedFetch) globalThis.fetch = savedFetch;
+    savedFetch = null;
+  }
+});
+
+test.skipIf(!hasDom)('another thread opens with its title closed', async () => {
+  await render(thread('session-refresh', 2));
+  cutTo(true);
+  act(() => barWords()!.click());
+  expect(bar()!.hasAttribute('data-open')).toBe(true);
+  draw({ ...thread('other-name', 2), thread_id: 'msg_O1' });
+  await settle();
+  expect(nameWords()!.textContent).toBe('other-name');
+  expect(bar()!.hasAttribute('data-open')).toBe(false);
 });
 
 // The bar's title is the thread's heading: under a name, a screen reader hears the subject too (the tooltip is a pointer's).

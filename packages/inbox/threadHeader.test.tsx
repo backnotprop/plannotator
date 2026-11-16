@@ -417,7 +417,7 @@ function layOutPhoneBar(width: number) {
 
 for (const width of [320, 390]) {
   test.skipIf(!hasDom)(`a phone at ${width} px: the title has room to read it, "Inbox" whole and the count kept`, async () => {
-    for (const [thread, shown] of [[THREAD, 'customize row look'], [{ ...THREAD, thread_name: null }, SUBJECT]] as const) {
+    for (const [thread, shown] of [[THREAD, `customize row look ${SUBJECT}`], [{ ...THREAD, thread_name: null }, SUBJECT]] as const) {
       await render(OPENED, true, thread);
       layOutPhoneBar(width);
       expect(fitPhoneHead(head())).toEqual([]);
@@ -464,18 +464,22 @@ test.skipIf(!hasDom)("the title's tooltip opens over its words, not centred on t
   restore.push(() => {
     HTMLElement.prototype.getBoundingClientRect = saved;
   });
+  // A short name whose subject after it is cut (the tooltip opens only on a cut title).
+  sized(tipped, 900, 40);
   expect(await tooltipOf(tipped)).toBe(SUBJECT);
   const popup = [...document.querySelectorAll<HTMLElement>('[data-pn-tooltip]')].at(-1)!;
   // Base UI's positioner names its anchor's size: the words' 40 px, not the box's 800.
   expect(popup.parentElement!.style.getPropertyValue('--anchor-width')).toBe('40px');
 });
 
-test.skipIf(!hasDom)('a named thread: the bar shows the name, the thread\'s heading, its tooltip the whole subject; no heading in the body; no name pill', async () => {
+test.skipIf(!hasDom)('a named thread: the bar shows the name and its subject after it, the thread\'s heading; the tooltip the subject when cut; no heading in the body; no name pill', async () => {
   await render(OPENED);
-  expect(words()!.textContent).toBe('customize row look');
+  expect(words()!.querySelector('[data-header-name-words]')!.textContent).toBe('customize row look');
+  expect(words()!.querySelector('[data-header-after]')!.textContent).toBe(SUBJECT);
   expect(title()!.tagName).toBe('H2');
   expect(title()!.hasAttribute('aria-hidden')).toBe(false);
   expect(heading()).toBeNull();
+  sized(words()!, 900, 120);
   expect(await tooltipOf(words()!)).toBe(SUBJECT);
   expect(namePill()).toBeNull();
   expect(host!.textContent!.split('customize row look').length - 1).toBe(1);

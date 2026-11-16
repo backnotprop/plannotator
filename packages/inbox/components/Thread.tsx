@@ -194,7 +194,7 @@ import { replyKeysToRenew, routeSendAnnotations, sendTargetAnswerIds, sendTarget
 import { FOLD_STEP, isSuperseded, NO_ANNOTATIONS, NO_QUESTIONS, NO_IDS, NO_OUTBOX, NO_SENT_ANSWERS, NO_UPLOADS, askingSessionOf, commentTags, emptyAnswerFor, isOtherAgent, newBelow, otherSendSessions, reducedMotion, replyKeyOf, reviewOutcomesOf, spanWords, stillHidden, type FoldState } from '../thread/helpers';
 import { NO_SKILLS_HINT_MS, REPLY_FILES_SUMMARY_FROM, SHOW_NEW_MESSAGE_BUTTON, SIDE_COMMAND_DESCRIPTION, SIDE_COMMAND_NAME, THREAD_GONE_TEXT, focusReplyFromBox } from '../thread/replyBox';
 import { AckPill } from '../parts/AckPill';
-import { HeadMark } from '../parts/HeadMark';
+import { ThreadBarTitle } from '../thread/ThreadBarTitle';
 import { SkipChip } from '../parts/SkipChip';
 import { namedTagOptions, useThreadSessions } from '../thread/useThreadSessions';
 import { measureOpenPlaces } from '../thread/openPlaces';
@@ -4771,18 +4771,9 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         {phone && artifactsOn ? null : (
           <>
             {/* The thread's title, always in the bar and nowhere in the body (the owner, 2026-11-15): its name (the list's
-                rule, `threadChipName`; in Reviews, `barName`), else its heading. It is the pane's h2 (a name's label adds
-                the subject for a screen reader), the focus target when focus has nowhere else to go. Its tooltip is the
-                whole subject: always under a name (the owner, 2026-11-02), else only when the title is cut. The tooltip
-                hangs on the words (`.ib-phsubj-t`, cut with "…"), not on the empty room the box takes after them. */}
-            <h2 className="ib-phsubj ib-subject" dir="auto" tabIndex={-1} data-header-subject="" data-header-name={barName ? '' : undefined} aria-label={barName ? `${barName}: ${thread.subject ?? '(no subject)'}` : undefined}>
-              <Tip content={barName ? (thread.subject ?? '(no subject)') : heading} cut={!barName}>
-                <span className="ib-phsubj-t" data-header-title="">
-                  <HeadMark thread={thread} />
-                  {barName ?? heading}
-                </span>
-              </Tip>
-            </h2>
+                rule, `threadChipName`; in Reviews, `barName`) with its heading after it, muted, else its heading; cut, a
+                tap opens it whole (thread/ThreadBarTitle.tsx). The pane's h2, the focus target when focus has nowhere else to go. */}
+            <ThreadBarTitle key={thread.thread_id} thread={thread} name={barName} heading={heading} />
             {/* The thread's PRs (approval "inbox-pr-binding"): left of Artifacts, at its icon's size; none, no button
                 (the ⋯ menu's Add a pull request shows it with its card open on the Add field). */}
             {!artifactsOn && pullsOffered && (
