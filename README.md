@@ -117,13 +117,13 @@ herdr plugin install plannotator/herdr-annotate
 
 Prefer it standalone? [Plannotator TUI](https://github.com/plannotator/plannotator-tui) powers the document review and runs without Herdr: `brew install plannotator/tap/plannotator-tui`.
 
----
-
 ## Annotate HTML Artifacts
 
 <p align="center">
   <img src=".github/assets/html.webp" alt="Annotating a rendered HTML artifact" width="720" />
 </p>
+
+---
 
 ## Commands
 
