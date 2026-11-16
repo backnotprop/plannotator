@@ -175,6 +175,18 @@ describe('theme colours opt-in', () => {
   });
 });
 
+describe('the versions sheet', () => {
+  test('a panel inside it fills the sheet at every width: the sheet rule outranks the panel\'s md:w-72', async () => {
+    const sheet = readFileSync(join(folder, 'sheets', 'VersionsSheet.tsx'), 'utf8');
+    expect(sheet).toContain('[&_[data-versions-panel]]:w-full');
+    expect(sheet).toContain('[&_[data-versions-panel]]:border-l-0');
+    const { build } = await compileHost();
+    const css = build(['[&_[data-versions-panel]]:w-full', 'md:w-72']);
+    const fill = css.match(/\.\\\[\\&_\\\[data-versions-panel\\\]\\\]\\:w-full \[data-versions-panel\] \{\s*width: 100%;/);
+    expect(fill).not.toBeNull();
+  });
+});
+
 describe('host tokens', () => {
   test('frame.css sets only --frame-* properties and frame-* theme names, never a host token', () => {
     const names = [...frameCss.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/(--[\w-]+)\s*:/g)].map(([, name]) => name);

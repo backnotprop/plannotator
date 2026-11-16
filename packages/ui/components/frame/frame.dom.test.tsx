@@ -104,6 +104,24 @@ describe.skipIf(!hasDom)('VersionsPanel folds', () => {
     const onScreen = frame.querySelector('[data-version-row][data-version="v3"] a');
     expect(onScreen?.getAttribute('aria-current')).toBe('true');
   });
+  test('a comparing pair marks both rows and opens the fold holding the "from" row; without it only the viewed row is marked', () => {
+    const { VersionsPanel } = versionsModule!;
+    const place = { rowLink: (row: FrameVersionEntry) => <a href={`#${row.version}`} /> };
+    const entries = versions(5);
+    const panel = (comparing: { from: string; to: string } | null) => (
+      <VersionsPanel status="success" entries={entries} place={place} onRetry={() => {}} comparing={comparing} />
+    );
+    const frame = mount(panel(null));
+    expect(frame.querySelectorAll('[data-version-compared]').length).toBe(0);
+    const selectedBefore = frame.querySelector('[data-version="v5"] a')!.className;
+    act(() => root!.render(panel({ from: 'v3', to: 'v5' })));
+    const compared = [...frame.querySelectorAll('[data-version-compared]')].map((row) => row.getAttribute('data-version'));
+    expect(compared.sort()).toEqual(['v3', 'v5']);
+    expect(frame.querySelector('[data-version-fold]')!.hasAttribute('data-version-fold-open')).toBe(true);
+    expect(frame.querySelector('[data-version="v3"] a')!.className).toBe(selectedBefore);
+    expect(frame.querySelectorAll('[aria-current="true"]').length).toBe(1);
+  });
+
   test('an opened fold stays open when "Show older versions" adds an older save to it', () => {
     const { VersionsPanel } = versionsModule!;
     const place = { rowLink: (row: FrameVersionEntry) => <a href={`#${row.version}`} /> };

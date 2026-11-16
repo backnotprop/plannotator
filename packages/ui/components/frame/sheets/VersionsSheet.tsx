@@ -31,7 +31,7 @@ export function VersionsSheet({
         aria-label="Versions"
         data-versions-sheet=""
         initialFocus={firstFocus}
-        className="h-[70dvh] gap-0 overflow-hidden p-0 [&_[data-versions-panel]]:min-h-0 [&_[data-versions-panel]]:flex-1"
+        className="h-[70dvh] gap-0 overflow-hidden p-0 [&_[data-versions-panel]]:min-h-0 [&_[data-versions-panel]]:w-full [&_[data-versions-panel]]:flex-1 [&_[data-versions-panel]]:border-l-0"
       >
         {children}
       </SheetContent>
