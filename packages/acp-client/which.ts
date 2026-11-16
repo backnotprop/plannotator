@@ -4,7 +4,7 @@
  * own `find` instead.
  */
 
-import { existsSync, statSync } from "node:fs";
+import { accessSync, constants, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { delimiter, isAbsolute, join } from "node:path";
 
@@ -31,7 +31,9 @@ export function findExecutable(name: string, env: Record<string, string | undefi
 
 function isExecutableFile(path: string): boolean {
   try {
-    return existsSync(path) && statSync(path).isFile();
+    if (!statSync(path).isFile()) return false;
+    if (process.platform !== "win32") accessSync(path, constants.X_OK);
+    return true;
   } catch {
     return false;
   }
